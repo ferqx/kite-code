@@ -1,11 +1,11 @@
 /**
  * tool-runner 单元测试 — 覆盖 runApprovedTool 各工具分发分支
  */
-import { describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PendingToolRequest } from '../src/core/harness/tool-requests';
+import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
 
@@ -513,5 +513,85 @@ describe('runApprovedTool 鈥?search_content', () => {
       truncated: false,
       rawResultDigest: expect.any(String),
     });
+  });
+});
+
+// ── ADR-0025 §4：写入前文件原像捕获 / file pre-image capture ──
+
+describe('runApprovedTool — file pre-image capture (ADR-0025 §4)', () => {
+  let workspace: string;
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), 'kite-code-preimage-capture-'));
+  });
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function requestOf(name: string, args: Record<string, unknown>): PendingToolRequest {
+    const request = toolRequestFromCall({ id: 'capture-call', name, args }, workspace);
+    expect(request).not.toBeNull();
+    return request!;
+  }
+
+  it('captures the pre-image before write_file overwrites an existing file', async () => {
+    writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
+    const captured: Array<[string, string | null, boolean]> = [];
+    const result = await runApprovedTool({
+      workspace,
+      request: requestOf('write_file', { path: 'notes.md', content: 'v2\n' }),
+      recordFilePreimage: (path, content, existed) => {
+        captured.push([path, content, existed]);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(captured).toEqual([['notes.md', 'v1\n', true]]);
+  });
+
+  it('records existed=false when write_file creates a new file', async () => {
+    const captured: Array<[string, string | null, boolean]> = [];
+    const result = await runApprovedTool({
+      workspace,
+      request: requestOf('write_file', { path: 'fresh.md', content: 'hi\n' }),
+      recordFilePreimage: (path, content, existed) => {
+        captured.push([path, content, existed]);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(captured).toEqual([['fresh.md', null, false]]);
+  });
+
+  it('captures the pre-image before edit_file replaces content', async () => {
+    writeFileSync(join(workspace, 'code.ts'), 'const a = 1;\n', 'utf8');
+    // ADR-0025 §1：先读后改——先经 read_file 登记读取状态，edit 才能通过校验。
+    await runApprovedTool({
+      workspace,
+      request: requestOf('read_file', { path: 'code.ts' }),
+    });
+    const captured: Array<[string, string | null, boolean]> = [];
+    const result = await runApprovedTool({
+      workspace,
+      request: requestOf('edit_file', {
+        path: 'code.ts',
+        old_string: 'const a = 1;',
+        new_string: 'const a = 2;',
+      }),
+      recordFilePreimage: (path, content, existed) => {
+        captured.push([path, content, existed]);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(captured).toEqual([['code.ts', 'const a = 1;\n', true]]);
+  });
+
+  it('a throwing recorder never fails the tool', async () => {
+    writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
+    const result = await runApprovedTool({
+      workspace,
+      request: requestOf('write_file', { path: 'notes.md', content: 'v2\n' }),
+      recordFilePreimage: () => {
+        throw new Error('recorder down');
+      },
+    });
+    expect(result.ok).toBe(true);
   });
 });

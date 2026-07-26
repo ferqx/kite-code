@@ -16,6 +16,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.
 
+
 上下文压缩的 flag 术语（功能开关）真值如下：
 
 | 开关 | 默认值 | 职责 |

@@ -235,6 +235,7 @@ export async function* runRuntimeAgent(
       model,
       shellExecutor: input.shellExecutor,
       mcpManager: input.mcpManager,
+      runtimeStore: kernel.runtimeStore,
       skills: input.skills,
       skillOptions: input.skillOptions,
       signal: input.signal,

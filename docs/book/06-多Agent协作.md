@@ -29,6 +29,8 @@ Subagent 默认不读取主 Agent 的完整消息历史，只接收任务、角�
 
 SubAgentRunner 只通过父 Runtime 传入的 `McpRuntimeProvider` 访问 MCP，不依赖 Supervisor 或 Manager control API。执行动态 MCP 工具前先由 Runtime binding 找回 descriptor，并把其中的 effective effects 与 minimum approval 一并交给共享 Tool Runner。这样只读 MCP 不会在二次策略检查中被误判为未知能力，写入或不确定能力也不能借子 Agent 路径降低审批等级。
 
+`task` capability 的 schema、契约、role-based effects 与结果投影由 ToolSpec Registry 的 `task` spec 统一定义。实际 `SubAgentRunner` 作为受治理的执行适配器由父 Runtime 注入，避免 Registry 依赖子 Agent 装配细节；旧的 `createTaskTool()` 模型工具执行器已删除。子 Agent 的 shell 只读分类与主 Runtime 共用命令形态分类器，不接受模型提供的 `intent` 等治理字段。
+
 ## 6.3 审批暂停与恢复
 
 子 Agent 遇到需要用户审批的操作时不能自行批准。Runner 产生 blocked tool 与可序列化 continuation，主 Runtime 请求用户决策；批准后恢复同一个调用身份和执行上下文，拒绝则把结构化拒绝结果反馈给子 Agent。

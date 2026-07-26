@@ -6,6 +6,7 @@
       "sources": ["src/core/runtime/**"],
       "documents": [
         "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/plan-mode-implementation.md",
         "docs/book/04-Agent引擎.md",
         "docs/book/10-持久化与会话管理.md",
         "docs/adr/0025-model-requested-live-emission.md"
@@ -21,8 +22,10 @@
       ],
       "documents": [
         "docs/active/capability-progressive-disclosure.md",
+        "docs/active/tool-gated-autonomy.md",
         "docs/active/six-concept-runtime-architecture.md",
-        "docs/adr/0025-model-requested-live-emission.md"
+        "docs/adr/0025-model-requested-live-emission.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -36,7 +39,8 @@
       "documents": [
         "docs/active/mcp-runtime-governance.md",
         "docs/active/mcp-authentication.md",
-        "docs/book/11-MCP与Skills扩展.md"
+        "docs/book/11-MCP与Skills扩展.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -88,12 +92,15 @@
         "src/core/controllers/tool-controller.ts",
         "src/core/execution/**",
         "src/core/harness/tool-policy.ts",
-        "src/core/harness/tool-runner.ts"
+        "src/core/harness/tool-runner.ts",
+        "src/core/harness/tool-requests.ts"
       ],
       "documents": [
         "docs/active/tool-gated-autonomy.md",
         "docs/active/authorization.md",
         "docs/active/mcp-runtime-governance.md",
+        "docs/adr/0025-file-tool-semantics-and-write-safety.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md"
       ]
@@ -112,6 +119,7 @@
       ],
       "documents": [
         "docs/active/model-provider-boundary.md",
+        "docs/active/tool-gated-autonomy.md",
         "docs/active/plan-state-reminder.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/04-Agent引擎.md",
@@ -120,7 +128,9 @@
         "docs/adr/0023-model-capabilities-no-builtin-catalog.md",
         "docs/adr/0024-context-compaction-manual-auto-only.md",
         "docs/adr/0025-model-requested-live-emission.md",
-        "docs/space/plans/2026-07-21-context-compaction-production-rollout.md"
+        "docs/space/plans/2026-07-21-context-compaction-production-rollout.md",
+        "docs/space/plans/2026-07-26-tool-spec-registry.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
@@ -154,6 +164,8 @@
         "docs/active/tool-gated-autonomy.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/active/capability-progressive-disclosure.md",
+        "docs/adr/0025-file-tool-semantics-and-write-safety.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/11-MCP与Skills扩展.md"
@@ -167,14 +179,16 @@
         "docs/active/mcp-control-plane.md",
         "docs/active/thought-pre-consolidation.md",
         "docs/active/tui-run-status-bar.md",
+        "docs/active/thought-pre-consolidation.md",
         "docs/book/07-TUI结构.md",
-        "docs/book/08-TUI交互全景.md"
+        "docs/book/08-TUI交互全景.md",
+        "docs/adr/0026-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {
       "id": "cli-and-config",
       "sources": ["src/app/cli/**", "src/core/config/**"],
-      "documents": ["README.md", "docs/book/09-CLI模式与配置.md"]
+      "documents": ["README.md", "docs/book/09-CLI模式与配置.md", "docs/active/feature-flags.md"]
     },
     {
       "id": "protocol",

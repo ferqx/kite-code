@@ -146,7 +146,7 @@ describe('recordEvent — 全量映射', () => {
     expect(r.events![0]!.attributes['tool.failure_reason']).toBe('shell_command_not_found');
   });
 
-  test('need_approval — 记录 reason / expectedEffects / modelJustification / objective', () => {
+  test('need_approval — records runtime-derived reason and expectedEffects', () => {
     const r = recordEvent(
       {
         type: 'need_approval',
@@ -163,8 +163,6 @@ describe('recordEvent — 全量映射', () => {
           expectedEffects: ['Runs test suite', 'Generates coverage report'],
           grantOptions: ['approve_once'],
           recommendedGrant: 'approve_once',
-          modelJustification: 'Tests must pass before proceeding',
-          objective: 'Verify code correctness',
         },
       },
       TRACE,
@@ -176,10 +174,8 @@ describe('recordEvent — 全量映射', () => {
     expect(r.attributes['kite_code.approval.command']).toContain('npm test');
     expect(r.attributes['kite_code.approval.reason']).toBe('Need to verify changes');
     expect(r.attributes['kite_code.approval.expected_effects']).toContain('Runs test suite');
-    expect(r.attributes['kite_code.approval.model_justification']).toBe(
-      'Tests must pass before proceeding',
-    );
-    expect(r.attributes['kite_code.approval.objective']).toBe('Verify code correctness');
+    expect(r.attributes['kite_code.approval.model_justification']).toBeUndefined();
+    expect(r.attributes['kite_code.approval.objective']).toBeUndefined();
   });
 
   test('need_input — 记录 options 和 context', () => {

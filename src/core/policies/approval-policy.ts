@@ -446,17 +446,6 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // Skill — 只读指令加载到对话上下文
-  // Skill — loads read-only instructions into conversation context
-  if (toolName === 'Skill') {
-    return allow({
-      risk: 'read',
-      reason: 'Skill invocation loads read-only instructions into conversation context.',
-      userVisibleSummary: `Load skill: ${String(toolArgs.skill ?? '?')}`,
-      expectedEffects: ['Loads skill instructions into conversation context', 'No side effects'],
-    });
-  }
-
   // shell_execute — 按命令内容分类
   // shell_execute — classify by command content
   if (toolName === 'shell_execute') {

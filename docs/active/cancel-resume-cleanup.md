@@ -16,6 +16,14 @@
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
 
+## Rewind 文件恢复（ADR-0025 §4）
+
+`/rewind` 回退命名恢复点时必须先按文件原像表恢复工作区文件（检查点时刻存在的文件写回原像，不存在的文件删除），再截断事件日志与恢复点。约束：
+
+1. 顺序不可颠倒：`restoreNamedSnapshot` 截断检查点之后的原像行，文件恢复必须先执行。
+2. 单个文件恢复失败不阻断会话回退，但必须逐个显式提示失败路径。
+3. Fork 生成新 thread 并复制 fork 点之前的原像行；共享工作区文件不被 fork 改动。
+
 ## 消息工具对清理
 
 发送给模型的 transcript 必须保持 tool call/result 配对。取消或恢复后发现孤立 tool call 时，context sanitizer 生成明确的 cancelled/failed tool result，使模型知道该调用没有成功；不得删除调用伪装成从未发生。

@@ -68,7 +68,7 @@ src/core/runtime/
 ├── reducer.ts     State × Event → State；approval.rejected 和 tool.rejected 均写入 transcript ToolMessage
 ├── executor.ts    Effect 执行适配
 ├── runner.ts      驱动 Kernel
-├── store.ts       event、snapshot 与恢复持久化
+├── store.ts       event、snapshot、恢复与文件原像持久化
 └── invariants.ts  Runtime 不变量
 ```
 

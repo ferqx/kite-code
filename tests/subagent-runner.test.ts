@@ -152,7 +152,6 @@ describe('SubAgentRunner integration', () => {
                   args: {
                     command: 'bun run typecheck',
                     description: 'Run typecheck',
-                    intent: 'verify',
                   },
                 },
               ],
@@ -209,7 +208,6 @@ describe('SubAgentRunner integration', () => {
                   args: {
                     command: 'bun run typecheck',
                     description: 'Run typecheck',
-                    intent: 'verify',
                   },
                 },
               ],
@@ -282,7 +280,6 @@ describe('SubAgentRunner integration', () => {
                   args: {
                     command: 'bun run typecheck',
                     description: 'Run typecheck',
-                    intent: 'verify',
                   },
                 },
               ],

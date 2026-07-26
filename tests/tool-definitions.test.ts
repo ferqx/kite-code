@@ -3,11 +3,13 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exposedMcpToolName } from '../src/core/mcp';
-import {
-  clearToolCache,
-  createAgentTools,
-  isReadOnlyShellCommand,
-} from '../src/core/tools/definitions';
+import { isReadOnlyShellCommand } from '../src/core/policies/shell-classification';
+import { clearToolCache, createAgentTools } from '../src/core/tools/definitions';
+import { builtinToolRegistry } from '../src/core/tools/registry/builtins';
+import { searchContentSpec } from '../src/core/tools/registry/builtins/search-content';
+import { searchFilesSpec } from '../src/core/tools/registry/builtins/search-files';
+import { writePlanSpec } from '../src/core/tools/registry/builtins/write-plan';
+import { dispatchRegisteredTool } from '../src/core/tools/registry/dispatch';
 import { TOOL_CONTRACTS } from '../src/core/tools/tool-contracts';
 import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/capabilities';
 
@@ -113,11 +115,11 @@ describe('code agent tool definitions', () => {
     expect(String(tools.update_plan!.description)).toContain('progress');
   });
 
-  test('invokes write_plan and returns plan JSON', async () => {
+  test('write_plan is schema-only and Registry preserves parsed arguments', () => {
     const tools = createAgentTools({ workspace: '/tmp' });
     const wp = tools.write_plan!;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() return type
-    const raw = (await (wp as any).execute({
+    expect((wp as { execute?: unknown }).execute).toBeUndefined();
+    const input = {
       title: 'Refactor',
       body_markdown: 'Split large module into smaller pieces for maintainability.',
       steps: [
@@ -125,12 +127,13 @@ describe('code agent tool definitions', () => {
         { id: 'update-imports', title: 'Update imports' },
         { id: 'remove-old', title: 'Remove old code' },
       ],
-    })) as string;
-    const result = JSON.parse(raw);
-    expect(result.ok).toBe(true);
-    expect(result._params.title).toBe('Refactor');
-    expect(result._params.steps).toHaveLength(3);
-    expect(result._params.action).toBe('save');
+    };
+    const parsed = builtinToolRegistry.parseToolCall(
+      { name: 'write_plan', args: input },
+      { workspace: '/tmp' },
+    );
+    expect(parsed?.ok).toBe(true);
+    if (parsed?.ok) expect(parsed.args).toEqual(writePlanSpec.inputSchema.parse(input));
   });
 
   test('write_plan schema requires a complete save document', async () => {
@@ -202,27 +205,29 @@ describe('code agent tool definitions', () => {
     writeFileSync(join(workspace, 'package.json'), '{}\n');
     writeFileSync(join(workspace, 'src', 'alpha.ts'), 'const marker = "needle";\n');
 
-    const tools = createAgentTools({
-      workspace,
-      shellExecutor: async () => {
-        throw new Error('search tools must not invoke shell');
-      },
-    });
-    const searchFiles = tools.search_files!;
-    const searchContent = tools.search_content!;
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- execute() return type
-    const filesResult = JSON.parse(
-      (await (searchFiles as any).execute({ pattern: 'package.json' })) as string,
+    // 迁移后（ADR-0026 S1.2）搜索工具的模型条目为 schema-only，
+    // 执行经 Registry dispatch 验证（原生搜索，不触碰 shell）。
+    const filesOutcome = await dispatchRegisteredTool(
+      searchFilesSpec,
+      { pattern: 'package.json' },
+      { workspace },
     );
-    const contentResult = JSON.parse(
-      (await (searchContent as any).execute({ pattern: 'needle' })) as string,
+    const contentOutcome = await dispatchRegisteredTool(
+      searchContentSpec,
+      { pattern: 'needle' },
+      { workspace },
     );
 
-    expect(filesResult.ok).toBe(true);
-    expect(filesResult.stdout).toContain('package.json');
-    expect(contentResult.ok).toBe(true);
-    expect(contentResult.stdout).toContain('src/alpha.ts:1:const marker = "needle";');
+    expect(filesOutcome.dispatched).toBe(true);
+    expect(contentOutcome.dispatched).toBe(true);
+    if (filesOutcome.dispatched) {
+      expect(filesOutcome.output.ok).toBe(true);
+      expect(filesOutcome.output.stdout).toContain('package.json');
+    }
+    if (contentOutcome.dispatched) {
+      expect(contentOutcome.output.ok).toBe(true);
+      expect(contentOutcome.output.stdout).toContain('src/alpha.ts:1:const marker = "needle";');
+    }
   });
 
   // 验证常见只读 shell 命令（ls, cat, rg, git status 等）被正确分类为只读 / Common read-only shell commands (ls, cat, rg, git status, etc.) are correctly classified as read-only
@@ -500,13 +505,11 @@ describe('tool contracts (ACI)', () => {
   });
 
   // shell_execute 的特殊契约要求 / shell_execute-specific contract requirements
-  test('shell_execute contract covers intent enumeration and approval rejection', () => {
+  test('shell_execute contract covers command-shaped approval rejection', () => {
     const contract = TOOL_CONTRACTS.get('shell_execute')!;
-    expect(contract.sections.whenToUse).toMatch(
-      /intent=inspect|intent=verify|intent=test|intent=build|intent=git/,
-    );
-    expect(contract.sections.commonMistakes).toMatch(/reject/);
-    expect(contract.sections.failureHandling).toMatch(/rejected by policy|denied|plan mode/);
+    expect(contract.sections.whenToUse).not.toMatch(/intent=|grant_request|prefix_rule/);
+    expect(contract.sections.commonMistakes).toMatch(/denied|reject/);
+    expect(contract.sections.failureHandling).toMatch(/rejected by policy|approval flow|denied/);
   });
 
   // MCP resource tools form one discover/read client-side chain.
@@ -520,14 +523,6 @@ describe('tool contracts (ACI)', () => {
     expect(String(tools.read_mcp_resource?.description)).not.toContain(
       'mcp__<server>__list_resources',
     );
-  });
-
-  // apply_patch 契约标记为 @reserved，待需求确认后启用 / apply_patch contract is reserved for future enablement
-  test('apply_patch contract is reserved, not wired to agent tools', () => {
-    const contract = TOOL_CONTRACTS.get('apply_patch');
-    expect(contract).toBeUndefined();
-    const tools = createAgentTools({ workspace: '/tmp' });
-    expect(tools.apply_patch).toBeUndefined();
   });
 
   // ── Cache key stabilization ──

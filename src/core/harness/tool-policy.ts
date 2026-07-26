@@ -19,7 +19,6 @@ export interface ToolApprovalPayload {
   summary: string;
   reason: string;
   expectedEffects: string[];
-  suggestedPrefixRule?: string[];
   grantOptions: ShellApprovalGrant[];
   recommendedGrant: ShellApprovalGrant;
   subagentId?: string;
@@ -160,12 +159,10 @@ export function buildToolApproval(input: {
     effectiveEffects: unknown;
   };
 }): ToolApprovalPayload {
-  const shellAction = input.request.name === 'shell_execute' ? input.request.args : null;
   const grantOptions: ShellApprovalGrant[] =
     input.request.name === 'shell_execute'
       ? ['approve_once', 'same_command', 'full_access']
       : ['approve_once'];
-  const requestedGrant = shellAction?.grant_request;
   return {
     scope: 'once',
     ...(input.request.id ? { callId: input.request.id } : {}),
@@ -178,10 +175,8 @@ export function buildToolApproval(input: {
     summary: input.decision.userVisibleSummary,
     reason: input.decision.reason,
     expectedEffects: input.decision.expectedEffects,
-    suggestedPrefixRule: shellAction?.prefix_rule,
     grantOptions,
-    recommendedGrant:
-      requestedGrant && grantOptions.includes(requestedGrant) ? requestedGrant : 'approve_once',
+    recommendedGrant: 'approve_once',
     ...(input.capability
       ? {
           capabilityId: input.capability.capabilityId,

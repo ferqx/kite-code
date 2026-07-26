@@ -1,5 +1,3 @@
-import { APPLY_PATCH_DESCRIPTION } from './apply-patch';
-
 export interface ToolContractSection {
   /** When to use this tool, AND when to use an alternative tool instead */
   whenToUse: string;
@@ -17,7 +15,7 @@ export interface ToolContract {
   sections: ToolContractSection;
 }
 
-function buildDescription(sections: ToolContractSection): string {
+export function buildDescription(sections: ToolContractSection): string {
   return [
     sections.whenToUse,
     `\nCommon mistakes: ${sections.commonMistakes}`,
@@ -33,7 +31,7 @@ export const READ_FILE_CONTRACT: ToolContract = {
       'Read a file from the workspace with line numbers. ' +
       'Use this to inspect file contents, verify changes, or understand code structure. ' +
       'Use offset/limit for long files. ' +
-      'Do NOT use this to list directories or search across files — use shell_execute intent=inspect for that.',
+      'Do NOT use this to list directories or search across files — use search_files or search_content for that.',
     commonMistakes:
       "Editing a file without reading it first — edit_file will fail because old_string won't match. " +
       'Assuming file content without verifying — always read first. ' +
@@ -43,11 +41,10 @@ export const READ_FILE_CONTRACT: ToolContract = {
       "JSON: ok (boolean), content (line-numbered text: '  1|line content'), error (empty on success). " +
       'File not found: ok: false with error message.',
     failureHandling:
-      'If file not found: use shell_execute intent=inspect to locate the correct path, then retry. ' +
+      'If file not found: use search_files to locate the correct path, then retry. ' +
       'If offset is beyond file length: reduce or remove offset. ' +
       'If path is unknown: explore the workspace with shell_execute first, then retry read_file. ' +
-      'If binary file detected (NUL byte): the file is rejected. Use shell_execute with file(1) or xxd for inspection. ' +
-      'Use force: true only as a last resort to read binary content as text.',
+      'If binary file detected (NUL byte): the file cannot be read as text. Tell the user the file appears binary and ask how they want to proceed; shell_execute with file(1) or xxd can inspect it after approval.',
   },
   description: '',
 };
@@ -98,10 +95,9 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
       'JSON: ok (boolean), replacements (count), fromLine/toLine (line range), error (empty on success). ' +
       "Success: 'Replaced N occurrence(s) at line L1-L2'.",
     failureHandling:
-      'If old_string not found: the tool auto-retries with 3 progressive fallback levels. ' +
-      'Level 1: trimEnd (trailing whitespace mismatch). Level 2: per-line trim (leading/trailing whitespace mismatch). ' +
-      'Only if all levels fail: re-read the file with read_file, then retry with exact content. ' +
-      "For intentional whitespace-insensitive matching, set match_mode: 'trimmed' to skip straight to per-line matching. " +
+      'If old_string not found: matching is exact including whitespace — re-read the file with read_file and retry with the exact current content. ' +
+      'If the file has not been read in this session: read_file is required before edit_file. ' +
+      'If the file changed since your last read: it was modified externally — re-read it and retry. ' +
       'If duplicate match: add more surrounding context to old_string (preferred) or set replace_all: true. ' +
       'Always verify the edit with read_file afterward.',
   },
@@ -113,10 +109,10 @@ export const WRITE_FILE_CONTRACT: ToolContract = {
   name: 'write_file',
   sections: {
     whenToUse:
-      "Create a new file, completely overwrite an existing file, or append to a file (mode: 'append'). " +
+      'Create a new file or completely rewrite an existing file. ' +
+      'Before rewriting an existing file, call read_file first to verify its current content — every omitted line is lost. ' +
       'Do NOT use for small targeted edits — use read_file + edit_file instead. ' +
-      'In overwrite mode (default), replaces ALL content; omitted lines are lost. ' +
-      'In append mode, content is added at the end of the file.',
+      'To append content, use edit_file matching the file tail (old_string = trailing content, new_string = trailing content + the addition) or a shell redirect.',
     commonMistakes:
       'Using write_file for small changes instead of edit_file — wasteful and loses precision. ' +
       'Overwriting an existing file without first calling read_file to verify its current content. ' +
@@ -143,8 +139,7 @@ export const SEARCH_CONTENT_CONTRACT: ToolContract = {
       'Use this to find references, patterns, or specific code in the workspace. ' +
       'Use `path` to scope the search to a directory or file. ' +
       'Use `glob` to filter by file extension (e.g. "*.ts", "*.{ts,tsx}"). ' +
-      'NEVER use shell_execute with grep/rg/ag — use search_content instead. ' +
-      'NEVER use shell_execute with find/ls — use search_files instead.',
+      'Prefer search_content over shell_execute with grep/rg/ag: it applies .gitignore rules and returns structured, truncated results.',
     commonMistakes:
       'Using shell_execute(grep/rg) instead of search_content. ' +
       'Using shell_execute(find/ls) instead of search_files. ' +
@@ -172,8 +167,7 @@ export const SEARCH_FILES_CONTRACT: ToolContract = {
       'Use this to locate specific files by glob pattern (e.g. "*.test.ts", "**/config.*"). ' +
       'Pattern MUST include a file extension or name fragment — do NOT use bare "*" to dump the entire file tree. ' +
       'Use `path` to scope the search to a directory. ' +
-      'NEVER use shell_execute with find/ls for file discovery — use search_files instead. ' +
-      'NEVER use shell_execute with grep/rg for content search — use search_content instead.',
+      'Prefer search_files over shell_execute with find/ls: it applies .gitignore rules and returns structured, truncated results.',
     commonMistakes:
       'Using bare "*" pattern — too broad, returns every file. Use "*.ts" or "*.test.*" instead. ' +
       'Using shell_execute(find/ls) instead of search_files. ' +
@@ -199,19 +193,15 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'Execute a shell command in the workspace. ' +
       'On Windows the shell is bash (Git Bash / MSYS2), NOT PowerShell or cmd.exe — always use Unix/shell syntax, never PowerShell cmdlets. ' +
       'Use forward-slashed POSIX paths (e.g. /d/app/src, not D:\\app\\src) — backslashes are bash escape characters and will break paths. ' +
-      '**VERY IMPORTANT: You MUST avoid using search commands like `find` and `grep`. Instead use search_content, search_files, or task to search.** ' +
-      '**ALWAYS use search_content for search tasks. NEVER invoke `grep` or `rg` as a shell_execute command.** ' +
+      'Prefer search_content and search_files over `grep`, `rg`, `find`, and `ls` — they apply .gitignore rules and return structured results; shell_execute remains available when you need shell-specific behavior. ' +
       'Do NOT use shell_execute for: searching file contents (use search_content), finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file). ' +
       'Use shell_execute ONLY for: tests, typecheck, builds, installs, git operations, and other terminal-only tasks. ' +
-      'Set intent=inspect for read-only checks, intent=verify for tests/typecheck/lint, intent=test for test runs, intent=build for compilation, intent=git for git operations. ' +
       'For commands that start a TUI, dev server, watcher, or other long-running process, set timeout_ms (for example 10000) so the command returns after collecting startup output. ' +
       'Do not set timeout_ms for finite commands such as builds, installs, or test suites unless the user explicitly asks for a bounded smoke check. ' +
-      'Write a short human-readable description so the user understands what the command does. ' +
-      'For commands needing approval, include grant_request (approve_once | same_command | full_access).',
+      'Write a short human-readable description so the user understands what the command does.',
     commonMistakes:
-      'Using shell_execute with grep/rg/find — use search_content/search_files instead. ' +
+      'Reaching for shell_execute with grep/rg/find when search_content/search_files would give structured, .gitignore-aware results. ' +
       'Missing description field — always provide a short human-readable summary. ' +
-      'Using intent=inspect for mutating commands — the harness will reject these. ' +
       'Running interactive or long-running commands like `npm run tui`, `bun run dev`, or watch mode without timeout_ms — the tool will keep running until the process exits. ' +
       'Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default.',
     outputFormat:
@@ -222,8 +212,8 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'If exitCode nonzero: read stderr, adjust command, retry. ' +
       'rg (ripgrep) exit code 1 means NO matches found — this is NOT an error, do not retry. ' +
       'grep exit code 1 likewise means no matches. ' +
-      'If tests fail (intent=verify): read failure output, fix code, re-run. ' +
-      'If rejected by policy: check intent matches command type; add grant_request for approval. ' +
+      'If tests fail: read failure output, fix code, re-run. ' +
+      'If rejected by policy: explain why the command is needed and wait for the user approval flow. ' +
       'If output empty but exitCode 0: try different flags or path.',
   },
   description: '',
@@ -425,34 +415,6 @@ export const TOOL_SEARCH_CONTRACT: ToolContract = {
 };
 TOOL_SEARCH_CONTRACT.description = buildDescription(TOOL_SEARCH_CONTRACT.sections);
 
-/** @reserved — apply_patch 暂未注册为 Agent 工具，待需求确认后启用 / not yet registered as an agent tool */
-export const APPLY_PATCH_CONTRACT: ToolContract = {
-  name: 'apply_patch',
-  sections: {
-    whenToUse:
-      'Apply structured file edits using the Codex-style patch format. ' +
-      'Use apply_patch for making multiple coordinated file changes in one operation — add, update, delete, and move files in a single patch. ' +
-      'Do NOT use apply_patch for single-file simple edits — use read_file + edit_file instead. ' +
-      'Do NOT use apply_patch when a single edit_file call is sufficient; the patch format adds overhead for simple changes. ' +
-      'Prefer apply_patch when you need to create new files, delete files, or restructure the project alongside code changes.',
-    commonMistakes:
-      'Not providing enough context lines (2-3 lines minimum around each change) for reliable matching — patches with no context fail on whitespace or formatting differences. ' +
-      "Creating patches with wrong old lines that don't match actual file content — always use read_file first to verify exact content. " +
-      'Forgetting to wrap patches in *** Begin Patch / *** End Patch markers. ' +
-      'Using absolute paths in file operations — all paths must be relative to the workspace. ' +
-      'Including only changed lines without surrounding context lines (marked with space prefix).',
-    outputFormat:
-      'JSON with fields: ok (boolean), path (primary affected file path), message (status message), summary (git-style list: D deleted, A added, M modified files). ' +
-      'On parse error, returns ok: false with the error line number and description.',
-    failureHandling:
-      "If the patch fails because context lines don't match, re-read the target files with read_file, then reconstruct the patch with verified context. " +
-      'If a specific file operation fails (file not found, path outside workspace), check the path is correct and relative. ' +
-      'If the patch parse is invalid (missing *** Begin Patch, malformed operations), check the patch format against the specification in the description. ' +
-      'For context-matching failures, try adding more context lines or simplifying the hunk to match only old_lines without context.',
-  },
-  description: APPLY_PATCH_DESCRIPTION,
-};
-
 export const TASK_CONTRACT: ToolContract = {
   name: 'task',
   sections: {
@@ -532,6 +494,9 @@ export const KNOWN_TOOL_NAMES = [
   'search_content',
   'search_files',
   'tool_search',
+  'activate_skill',
+  'complete_skill',
+  'read_skill_reference',
   'list_mcp_resources',
   'list_mcp_tools',
   'read_mcp_resource',

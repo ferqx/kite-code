@@ -1,11 +1,4 @@
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { readFile as readFileBufferAsync } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { msys2ToWindowsPath } from './path-utils';
@@ -15,7 +8,7 @@ import { msys2ToWindowsPath } from './path-utils';
 // ============================================================================
 
 /** Windows (\r\n) / 老 Mac (\r) → Unix (\n) */
-function normalizeEOL(content: string): string {
+export function normalizeEOL(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
@@ -190,7 +183,7 @@ function decodeTextBuffer(
     if (nonText > sampleLen * 0.3) {
       return {
         ok: false,
-        error: `Binary file detected: ${filePath}. Use force: true to read anyway.`,
+        error: `Binary file detected: ${filePath}. It cannot be read as text. Tell the user the file appears binary and ask how they want to proceed.`,
         totalLines: 0,
       };
     }
@@ -274,6 +267,9 @@ export interface ReadFileResult {
   fromLine?: number;
   toLine?: number;
   error?: string;
+  /** 内部字段：换行正规化后的原始文本（读取状态指纹输入，不作模型输出）。
+   *  Internal: raw normalized text (read-state fingerprint input, not model output). */
+  rawContent?: string;
 }
 
 export function readFile(input: ReadFileInput): ReadFileResult {
@@ -309,6 +305,7 @@ export function readFile(input: ReadFileInput): ReadFileResult {
       totalLines: result.totalLines,
       fromLine,
       toLine,
+      rawContent: result.content,
     };
   } catch (e) {
     return {
@@ -387,10 +384,12 @@ export function editFile(input: EditFileInput): EditFileResult {
   }
 }
 
-/** Try exact match → fallback to trimEnd → fallback to per-line trimming.
- *  Auto-retry layer: when exact match fails, try progressively looser matching
- *  before reporting failure to the model, saving a model round-trip for
- *  common whitespace mismatches (trailing spaces, inconsistent line endings). */
+/** 严格精确匹配（ADR-0026 §3）：包含空白；失败即报错并引导重读。
+ *  模糊匹配降级为 matchMode='trimmed' 的内部显式 opt-in，不再无条件兜底——
+ *  无条件降级会让 Receipt 无法表达"模型意图 vs 实际匹配"的差异。
+ *  Strict exact matching: whitespace-sensitive; failures report an error that
+ *  instructs the model to re-read. Fuzzy matching is an internal opt-in via
+ *  matchMode='trimmed' only — unconditional fallbacks are removed. */
 function tryExactMatch(
   target: string,
   path: string,
@@ -399,7 +398,6 @@ function tryExactMatch(
   newStr: string,
   replaceAll?: boolean,
 ): EditFileResult {
-  // 1st attempt: exact match
   const index = content.indexOf(oldStr);
   if (index !== -1) {
     const secondIndex = content.indexOf(oldStr, index + 1);
@@ -413,145 +411,11 @@ function tryExactMatch(
     return performReplace(path, target, content, oldStr, newStr, replaceAll, index);
   }
 
-  // 2nd attempt: trim trailing whitespace from old_string (handles trailing-space mismatch)
-  const trimmedOld = oldStr.trimEnd();
-  if (trimmedOld !== oldStr) {
-    const trimmedIndex = content.indexOf(trimmedOld);
-    if (trimmedIndex !== -1) {
-      return performReplace(path, target, content, trimmedOld, newStr, replaceAll, trimmedIndex);
-    }
-  }
-
-  // 3rd attempt: per-line trim (handles mixed leading/trailing whitespace)
-  const multiLineAttempt = tryMultiLineTrimmedMatch(
-    target,
-    path,
-    content,
-    oldStr,
-    newStr,
-    replaceAll,
-  );
-  if (multiLineAttempt) return multiLineAttempt;
-
   const snippet = oldStr.slice(0, 100).replace(/\n/g, '\\n');
   return {
     ok: false,
     path,
-    error: `old_string not found in ${path}: "${snippet}..."`,
-  };
-}
-
-/** Per-line trimmed match: both old_str and file content lines are trimmed before
- *  comparison. Only succeeds when there is exactly one match (or replaceAll is set). */
-function tryMultiLineTrimmedMatch(
-  target: string,
-  path: string,
-  content: string,
-  oldStr: string,
-  newStr: string,
-  replaceAll?: boolean,
-): EditFileResult | null {
-  const oldLines = oldStr.split('\n');
-  if (oldLines.length < 2) return null; // single-line → trimEnd already covered; skip
-
-  const trimmedOldLines = oldLines.map((l) => l.trim());
-  const contentLines = content.split('\n');
-  const trimmedContentLines = contentLines.map((l) => l.trim());
-
-  let matchLine = -1;
-  for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
-    let mismatch = false;
-    for (let j = 0; j < oldLines.length; j++) {
-      if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
-        mismatch = true;
-        break;
-      }
-    }
-    if (!mismatch) {
-      matchLine = i;
-      break;
-    }
-  }
-
-  if (matchLine === -1) return null;
-
-  // Count matches for non-replaceAll
-  if (!replaceAll) {
-    let matchCount = 0;
-    for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
-      let mismatch = false;
-      for (let j = 0; j < oldLines.length; j++) {
-        if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
-          mismatch = true;
-          break;
-        }
-      }
-      if (!mismatch) matchCount++;
-    }
-    if (matchCount > 1) return null; // ambiguous
-  }
-
-  // Compute exact char offset from matched line position
-  let charOffset = 0;
-  for (let k = 0; k < matchLine; k++) {
-    charOffset += contentLines[k]!.length + 1; // +1 for \n
-  }
-  // Find the exact old_string span starting at charOffset (preserves original spacing)
-  const exactOld = content.slice(charOffset, charOffset + oldStr.length);
-
-  const result: EditFileResult = replaceAll
-    ? performReplaceAllTrimmed(path, target, contentLines, oldLines.length, newStr, trimmedOldLines)
-    : performReplace(path, target, content, exactOld, newStr, false, charOffset);
-
-  return result;
-}
-
-/** Replace all trimmed-matched occurrences in the file, preserving original line text. */
-function performReplaceAllTrimmed(
-  path: string,
-  target: string,
-  contentLines: string[],
-  oldLineCount: number,
-  newStr: string,
-  trimmedOldLines: string[],
-): EditFileResult {
-  const trimmedContentLines = contentLines.map((l) => l.trim());
-  const parts: string[] = [];
-  const matchLines: number[] = [];
-  let i = 0;
-  while (i <= contentLines.length - oldLineCount) {
-    let match = true;
-    for (let j = 0; j < oldLineCount; j++) {
-      if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) {
-      matchLines.push(i + 1); // 1-based
-      parts.push(newStr);
-      i += oldLineCount;
-    } else {
-      parts.push(contentLines[i]!);
-      i++;
-    }
-  }
-  for (; i < contentLines.length; i++) {
-    parts.push(contentLines[i]!);
-  }
-  const newContent = parts.join('\n');
-
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, newContent, 'utf8');
-
-  return {
-    ok: true,
-    path,
-    content: newContent,
-    fromLine: matchLines[0] ?? 1,
-    toLine: matchLines[0] ?? 1,
-    replacements: matchLines.length,
-    ...(matchLines.length > 1 ? { matchLines } : {}),
+    error: `old_string not found in ${path}: "${snippet}..." Matching is exact (including whitespace). Re-read the file with read_file, then retry with the exact current content.`,
   };
 }
 
@@ -767,7 +631,6 @@ export interface WriteFileInput {
   workspace: string;
   path: string;
   content: string;
-  mode?: 'overwrite' | 'append';
   allowExternal?: boolean;
 }
 
@@ -784,11 +647,7 @@ export function writeFile(input: WriteFileInput): WriteFileResult {
     const target = resolvePath(input.workspace, input.path, { allowExternal: input.allowExternal });
     mkdirSync(dirname(target), { recursive: true });
 
-    if (input.mode === 'append') {
-      appendFileSync(target, input.content, 'utf8');
-    } else {
-      writeFileSync(target, input.content, 'utf8');
-    }
+    writeFileSync(target, input.content, 'utf8');
 
     const lineCount = input.content.split('\n').length - (input.content.endsWith('\n') ? 1 : 0);
 

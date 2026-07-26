@@ -133,6 +133,11 @@ export function formatContentOutput(content: string, header: string): string {
  *
  * Format multi-hunk diff (replaceAll) as stdout.
  * Adjacent hunks (gap ≤ 3 lines) are merged; non-contiguous hunks separated by ...
+ *
+ * @param oldStr  被替换的文本（old_string）
+ * @param newStr  替换后的文本（new_string）
+ * @param matchLines  每处命中的起始行号（1-based），长度即替换次数
+ * @param replacements  替换次数，必须等于 matchLines.length
  */
 export function formatMultiHunkDiff(
   oldStr: string,
@@ -142,28 +147,28 @@ export function formatMultiHunkDiff(
 ): string {
   const parts: string[] = [];
 
-  // 变更统计 / Change stats
-  const oldLines = oldStr.split('\n');
-  const addedCount = newStr.split('\n').length - oldLines.length;
-  const removedCount = oldLines.length - newStr.split('\n').length;
+  // 变更统计 — 累计增删行数（单次 × 替换次数）
+  // Cumulative change stats (per-occurrence × replacements)
+  const perOccurrence = computeLineDiff(oldStr, newStr, 1);
+  const addedCount = perOccurrence.addedLines * replacements;
+  const removedCount = perOccurrence.removedLines * replacements;
+  const oldLinesCount = oldStr.split('\n').length;
   const addedLabel = addedCount === 1 ? '1 line' : `${addedCount} lines`;
   const removedLabel = removedCount === 1 ? '1 line' : `${removedCount} lines`;
   parts.push(
     `Added ${addedLabel}, removed ${removedLabel} (replaced ${replacements} time${replacements > 1 ? 's' : ''})`,
   );
 
-  // 计算每处命中行被 oldStr 占用的行数 / Compute how many lines each match occupies
-  const oldLineCount = oldLines.length;
-
-  // 行号 padding / Line number padding
-  const maxLineNum = Math.max(...matchLines) + oldLineCount;
+  // 行号 padding — reduce 替代 Math.max(...) 避免超大数组栈溢出
+  // Line number padding — reduce instead of Math.max(...) avoids stack overflow on huge match-lists
+  const maxLineNum = matchLines.reduce((max, ml) => Math.max(max, ml), 0) + oldLinesCount;
   const pad = Math.max(2, String(maxLineNum).length);
 
   // 分组相邻 hunk（间距 ≤ 3 行则合并）/ Group adjacent hunks (gap ≤ 3 lines → merge)
   const hunkGroups: number[][] = [];
   for (const ml of matchLines) {
     const lastGroup = hunkGroups.at(-1);
-    if (lastGroup && ml - (lastGroup.at(-1)! + oldLineCount) <= 3) {
+    if (lastGroup && ml - (lastGroup.at(-1)! + oldLinesCount) <= 3) {
       lastGroup.push(ml);
     } else {
       hunkGroups.push([ml]);

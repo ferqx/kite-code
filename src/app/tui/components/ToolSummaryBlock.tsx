@@ -4,7 +4,12 @@ import stringWidth from 'string-width';
 import { useTheme } from '../theme';
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
-import { actionName, formatElapsed, formatReadFileRange } from './render-utils';
+import {
+  actionName,
+  formatElapsed,
+  formatReadFileRange,
+  writeFileActionName,
+} from './render-utils';
 import { wrapDisplayLines } from './soft-wrap';
 
 // ══════════════════════════════════════════════════════════════════
@@ -136,6 +141,15 @@ function failureSummary(step: { status: string; summary: string }, maxWidth: num
   return truncateToFit(step.summary.replace(/\s+/g, ' ').trim(), maxWidth);
 }
 
+/** 步骤动词：write_file 按结果区分新建/覆写/追加，其余走静态映射
+ *  Step verb: write_file distinguishes create/overwrite/append by result;
+ *  other tools use the static ACTION_NAMES map */
+function stepActionName(step: ConsolidatedToolEntry): string {
+  return step.name === 'write_file'
+    ? writeFileActionName(step.summary, step.args)
+    : actionName(step.name);
+}
+
 function latestActivityLabel(
   block: Extract<OutputBlock, { kind: 'tool_summary' }>,
   maxWidth: number,
@@ -148,7 +162,7 @@ function latestActivityLabel(
   const step = block.tools.find((t) => t.callId === activity.callId);
   if (!step) return '';
   const args = toolArgsLabel(step.name, step.args, step.totalLines);
-  const label = args ? `${actionName(step.name)} ${args}` : actionName(step.name);
+  const label = args ? `${stepActionName(step)} ${args}` : stepActionName(step);
   return truncateToFit(label, maxWidth);
 }
 
@@ -181,7 +195,7 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
   const isError = step.status === 'error' || step.status === 'exhausted';
   const lineColor = isError ? dt.error : dt.dim;
   const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
-  const stepPreW = stringWidth(`${connector}${actionName(step.name)}`);
+  const stepPreW = stringWidth(`${connector}${stepActionName(step)}`);
   const errSummary = failureSummary(step, 32);
   const stepSufW = isError ? stringWidth(errSummary) + 1 : 0;
   const fitLabel = rawLabel
@@ -191,7 +205,7 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
   return (
     <Box paddingLeft={3}>
       <Text color={lineColor}>{connector}</Text>
-      <Text>{actionName(step.name)}</Text>
+      <Text>{stepActionName(step)}</Text>
       {fitLabel && <Text color={lineColor}> {fitLabel}</Text>}
       {step.status === 'queued' && <Text color={dt.muted}> queued</Text>}
       {step.status === 'running' && <Text color={dt.warning}> …</Text>}

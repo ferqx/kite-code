@@ -1,4 +1,5 @@
 import { Box, Text } from 'ink';
+import SyntaxHighlight from 'ink-syntax-highlight';
 import React, { useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import type { UserInputResult } from '@/protocol/events';
@@ -13,6 +14,7 @@ import {
   SPINNER_INTERVAL_MS,
   spinnerIndexForElapsed,
   toolColor,
+  writeFileActionName,
 } from './render-utils';
 
 export const MAX_TOOL_LINES = 5;
@@ -349,17 +351,85 @@ function renderToolSummary(summary: string, isError: boolean, dt: { error: strin
   );
 }
 
+/** 根据文件扩展名推断 highlight.js 语言标识 / Map file extension → highlight.js language */
+function detectLanguage(path: string): string | undefined {
+  const ext = path.split('.').pop()?.toLowerCase();
+  if (!ext) return undefined;
+  const map: Record<string, string> = {
+    ts: 'typescript',
+    tsx: 'typescript',
+    js: 'javascript',
+    jsx: 'javascript',
+    json: 'json',
+    jsonc: 'jsonc',
+    yaml: 'yaml',
+    yml: 'yaml',
+    toml: 'ini',
+    md: 'markdown',
+    mdx: 'markdown',
+    html: 'xml',
+    htm: 'xml',
+    xml: 'xml',
+    svg: 'xml',
+    css: 'css',
+    scss: 'scss',
+    less: 'less',
+    py: 'python',
+    rb: 'ruby',
+    rs: 'rust',
+    go: 'go',
+    java: 'java',
+    c: 'c',
+    h: 'c',
+    cpp: 'cpp',
+    cc: 'cpp',
+    cxx: 'cpp',
+    hpp: 'cpp',
+    cs: 'csharp',
+    swift: 'swift',
+    kt: 'kotlin',
+    scala: 'scala',
+    sh: 'bash',
+    bash: 'bash',
+    zsh: 'bash',
+    ps1: 'powershell',
+    bat: 'dos',
+    cmd: 'dos',
+    sql: 'sql',
+    graphql: 'graphql',
+    gql: 'graphql',
+    dockerfile: 'dockerfile',
+    lua: 'lua',
+  };
+  return map[ext];
+}
+
+/** 拆分 diff/内容行：前缀（行号+标记）和代码正文 / Split line into prefix (line#+marker) and code body */
+const LINE_RE = /^(\s*\d+\s[-+ ])(.*)$/;
+
 /** 文件工具的摘要渲染 — 自动区分 diff 格式（红底/绿底）和纯文本格式（无背景）
  *  Summary renderer for file tools — auto-detects diff format (red/green bg)
- *  vs plain content format (no background) */
-function renderFileSummary(summary: string, dt: Theme) {
+ *  vs plain content format (no background)
+ *  导出供测试直接断言染色分类（exported for coloring classification tests） */
+export function renderFileSummary(summary: string, dt: Theme, language?: string) {
   const lines = summary.trimEnd().split('\n');
   const statsLine = lines[0]!;
   const diffLines = lines.slice(1);
 
-  // 检测是否为 diff 格式：任意内容行以 "行号 +" 或 "行号 -" 开头
-  // Detect diff format: any content line starts with "lineNum +" or "lineNum -"
-  const isDiff = diffLines.length > 0 && diffLines.some((line) => /^\s*\d+\s+[-+]/.test(line));
+  // 检测是否为 diff 格式：任意内容行以 "行号 + 单个空格 + +/- 标记" 开头。
+  // core 的 diff 格式中删除/新增行为 `num + 一个空格 + 标记`（标记紧贴正文），
+  // 而上下文行与纯内容格式为 `num + 两个空格 + 正文`；因此必须要求恰好一个空格，
+  // 否则以 "- " / "+ " 开头的正文（如 Markdown 列表项）会被误判为删除/新增行。
+  // Detect diff format: "lineNum + exactly one space + +/- marker". Removed/added
+  // lines use one space before the marker; context and plain-content lines use two
+  // spaces before the text, so requiring exactly one space avoids misclassifying
+  // body text starting with "- " / "+ " (e.g. Markdown list items) as diff markers.
+  const isDiff = diffLines.length > 0 && diffLines.some((line) => /^\s*\d+ [-+]/.test(line));
+
+  // write_file 新建：所有内容行视为新增，全绿底。内容未变则保留 dim。
+  // write_file create: treat all lines as added (green). Unchanged → dim.
+  const isWriteFileContent =
+    !isDiff && statsLine.startsWith('Wrote ') && !statsLine.includes('(content unchanged)');
 
   // 文件变更需要完整展示，避免用户只看到删除部分而看不到新增内容。
   // File changes are user-facing output and should be shown in full.
@@ -371,26 +441,40 @@ function renderFileSummary(summary: string, dt: Theme) {
       {diffLines.length > 0 && isDiff ? (
         <Box paddingLeft={3} flexDirection="column">
           {displayLines.map((line, i) => {
-            const isRemoved = /^\s*\d+\s+-/.test(line);
-            const isAdded = /^\s*\d+\s+\+/.test(line);
-            // 背景色走 ANSI 调色板（diffAddedBg=slot4, diffRemovedBg=slot5），OSC 4 切换主题即时更新
-            // Background colors via ANSI palette (diffAddedBg=slot4, diffRemovedBg=slot5), OSC 4 instant update on theme switch
+            const isRemoved = /^\s*\d+ -/.test(line);
+            const isAdded = /^\s*\d+ \+/.test(line);
             const bg = isRemoved ? dt.diffRemovedBg : isAdded ? dt.diffAddedBg : undefined;
             const fg = isRemoved || isAdded ? 'white' : dt.dim;
+            const m = line.match(LINE_RE);
             return (
               <Box key={i} width="100%" backgroundColor={bg}>
-                <Text color={fg}>{line}</Text>
+                <Text color={fg}>{m ? m[1] : line}</Text>
+                {m && language ? (
+                  <SyntaxHighlight code={m[2]!} language={language} />
+                ) : m ? (
+                  <Text color={fg}>{m[2]}</Text>
+                ) : null}
               </Box>
             );
           })}
         </Box>
       ) : diffLines.length > 0 ? (
         <Box paddingLeft={3} flexDirection="column">
-          {displayLines.map((line, i) => (
-            <Text key={i} color={dt.dim}>
-              {line}
-            </Text>
-          ))}
+          {displayLines.map((line, i) => {
+            const activeBg = isWriteFileContent ? dt.diffAddedBg : undefined;
+            const activeFg = isWriteFileContent ? 'white' : dt.dim;
+            const m = line.match(LINE_RE);
+            return (
+              <Box key={i} width="100%" backgroundColor={activeBg}>
+                <Text color={activeFg}>{m ? m[1] : line}</Text>
+                {m && language ? (
+                  <SyntaxHighlight code={m[2]!} language={language} />
+                ) : m ? (
+                  <Text color={activeFg}>{m[2]}</Text>
+                ) : null}
+              </Box>
+            );
+          })}
         </Box>
       ) : null}
     </React.Fragment>
@@ -465,7 +549,9 @@ export default function ToolCardBlock({
         ? 'Searching for tools…'
         : block.name === 'list_mcp_resources'
           ? 'Listing MCP resources…'
-          : mcpToolDisplayName(block.name);
+          : block.name === 'write_file'
+            ? writeFileActionName(block.summary, block.args)
+            : mcpToolDisplayName(block.name);
     return (
       <Box>
         <Text color={dt.muted}>○ </Text>
@@ -487,7 +573,9 @@ export default function ToolCardBlock({
           ? 'Listing MCP resources…'
           : block.name === 'list_mcp_tools'
             ? 'Listing MCP tools…'
-            : mcpToolDisplayName(block.name);
+            : block.name === 'write_file'
+              ? writeFileActionName(block.summary, block.args)
+              : mcpToolDisplayName(block.name);
     // isAskUserRunning 已移除：running 状态的问题由 Footer InputBlock 渲染，scrollback 不重复
     return (
       <Box flexDirection="column">
@@ -523,6 +611,8 @@ export default function ToolCardBlock({
 
   // done or error
   const isFileTool = block.name === 'edit_file' || block.name === 'write_file';
+  const fileLanguage =
+    isFileTool && typeof block.args.path === 'string' ? detectLanguage(block.args.path) : undefined;
   const isPlan = block.name === 'write_plan' || block.name === 'update_plan';
   const isAskUser = block.name === 'ask_user';
   const isExpanded =
@@ -561,7 +651,9 @@ export default function ToolCardBlock({
           ? block.status === 'done'
             ? 'Listed MCP tools'
             : 'MCP tool listing failed'
-          : mcpToolDisplayName(block.name);
+          : block.name === 'write_file'
+            ? writeFileActionName(block.summary, block.args)
+            : mcpToolDisplayName(block.name);
   return (
     <Box flexDirection="column">
       <Box>
@@ -678,7 +770,7 @@ export default function ToolCardBlock({
           {block.status === 'exhausted' ? (
             <Text color={dt.warning}>⎿ blocked (too many repeated failures)</Text>
           ) : hasSummary ? (
-            renderFileSummary(block.summary!, dt)
+            renderFileSummary(block.summary!, dt, fileLanguage)
           ) : (
             <Text color={dt.dim}>⎿ {pathLabel(block.args)} (no result)</Text>
           )}

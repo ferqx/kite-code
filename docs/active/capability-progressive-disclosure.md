@@ -4,7 +4,7 @@
 
 读取时机：修改 MCP/Skill catalog、模型工具披露、`tool_search`、Runtime binding、Skill activation 或模型上下文预算策略时。
 
-验证：`bun test tests/runtime/capability-search.test.ts tests/runtime/tool-controller.test.ts tests/mcp-supervisor.test.ts tests/tool-definitions.test.ts`、`bun run typecheck`。
+验证：`bun run test tests/runtime/capability-search.test.ts`、`bun run test tests/runtime/tool-controller.test.ts`、`bun run test tests/mcp-supervisor.test.ts`、`bun run test tests/tool-definitions.test.ts`、`bun run typecheck`。
 
 `capabilityCatalogV1`、`mcpRuntimeBindingV1` 与 `toolSearchV1` 已完成迁移并默认开启。MCP Tool ≤20 且 token budget 充足时直接绑定，跳过 `tool_search` 往返；Skill 使用扣除 MCP 后的剩余预算独立判断，防止各自不超预算的小目录合计撑爆上下文窗口。显式关闭任一 MCP flag 只用于 fail-closed 诊断，不恢复旧 adapter。
 
@@ -15,6 +15,8 @@ Per-tool 名称注入（`## Available MCP Tool Names` 段落）已移除。模�
 `list_mcp_tools` 是确定性的纯只读盘点工具，不触发网络连接或等待 Provider discovery。基于 CapabilitySnapshot 和 ProviderDirectorySnapshot 构建脱敏清单。列出每个 Provider 的状态、next_action、可用 Tool 名称，支持 provider 过滤和 cursor 分页；输出不含 capabilityId、revision、schema 或 binding。mcpManager 不存在时返回合法空清单。`configured_provider_count` 和 `available_tool_count` 为全量去重值，不受 provider 过滤影响；过滤时额外返回 `matched_provider_count` 和 `matched_tool_count`。Provider 名和 Tool 名通过 `safeCapabilityMetadata`（`src/core/capabilities/public-metadata.ts`）统一清理：过滤控制字符和 surrogates、压缩空白、以 code point 安全截断至 96 字符。
 
 `tool_search` 只负责按意图发现能力（"哪个 Capability 可以完成这个动作"），不再承担全量 Tool inventory。包含 MCP 清单意图的查询（中英文均支持，中文不依赖空格分词）会被重定向为 `inventory_query` + `next_tool: list_mcp_tools`，提醒模型使用正确的盘点工具。这是错误恢复机制，不作为 inventory 的主要实现。包含业务关键词的 query 继续使用相关性排序。
+
+`tool_search`、`list_mcp_tools`、`list_mcp_resources` 与 `read_mcp_resource` 的 schema、契约和执行已由 ToolSpec Registry 统一提供。搜索 spec 负责 feature gate、inventory redirect、Provider readiness 重试、候选投影以及 `capability.search_completed` 事件；controller 仅保留 disclosure、binding、policy 等执行前治理并追加 spec 投影事件，不得重算搜索结果。
 
 零匹配搜索结果（`candidates.length === 0`）总是附带 `catalog_summary`（available_mcp_tool_count、available_skill_count、configured_provider_count、unavailable_provider_count）和显式说明消息，避免模型把 "zero matches" 解释为 "empty catalog"。`unavailable_provider_count` 排除 `ready` 和 `degraded`（后者被视为 callable）；当存在非 ready Provider 时额外返回 `non_healthy_provider_count`。
 

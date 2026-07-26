@@ -16,9 +16,10 @@ import { humanMessage, systemMessage, toolMessage } from '@/core/messages';
 import { createChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
+import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
-import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
+import { createAgentTools } from '@/core/tools/definitions';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { getRoleConfig } from './roles';
@@ -564,6 +565,7 @@ async function runSubAgentLoop(
             phase: input.phase ?? 'building',
             authorization: input.authorization,
             threadId: input.threadId ?? '',
+            recordFilePreimage: input.recordFilePreimage,
             mcpManager: input.mcpManager,
             ...(boundMcpDescriptor
               ? {

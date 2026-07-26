@@ -40,7 +40,7 @@
 
 16. **层边界**：`consolidateTools.ts` 中的合并逻辑属于 app 层，不允许导入 core 层模块。
 
-17. **工具名映射**：所有 TUI 展示使用 `ACTION_NAMES` 映射的友好名称，不允许硬编码英文工具名。
+17. **工具名映射**：所有 TUI 展示使用 `ACTION_NAMES` 映射的友好名称，不允许硬编码英文工具名。`write_file` 例外：其卡片动词由 `writeFileActionName(summary, args)` 从结果动态推导——覆写已有文件（diff 统计摘要）显示 Write，新建显示 Create，运行/排队态无 summary 时用中性 Write；append 已由 ADR-0025 §2 移除，历史会话残留的 "Appended …" summary 归入中性 Write。
 
 18. **审批无关**：探索工具永远不需要审批，`ToolSummaryBlock` 不接受 `awaitingApproval` prop。
 
@@ -64,6 +64,8 @@
 
 28. **结构块内部增量（ADR-0039）**：表格、围栏代码、连续列表和连续引用不仅保持外层身份，内部也按稳定子行 memoize。表格保持单一父级 `Text` 以维持连续边框；新增数据行且列宽未变时复用已有行，新单元格扩大列宽时允许全部行重新布局。代码、列表和引用追加尾行时只创建新子行，不重新渲染既有子行。
 
+29. **文件工具渲染**：`renderFileSummary` 自动区分 diff 格式（删除行红底 `diffRemovedBg`、新增行绿底 `diffAddedBg`、上下文行无背景）和纯内容格式。write_file 新建/追加时所有内容行视为新增全绿底，内容未变覆写保持 dim。文件内容行自动语法高亮：行号前缀（`LINE_RE`）走普通 `<Text>`，代码正文走 `<SyntaxHighlight code=... language=.../>`，语言由 `detectLanguage(path)` 从扩展名推断。`...` 分隔符不做高亮。
+
 ## 设计文档
 
 - `docs/space/understanding/2026-06-28-thought-pre-consolidation-design.md` — Thought 预整合设计详情
@@ -77,6 +79,7 @@
 ## 修改时必读
 
 修改以下文件时，必须先阅读上述设计文档：
+- `src/app/tui/components/ToolCardBlock.tsx` — 文件工具卡片渲染（diff 染色、语法高亮）
 - `src/app/tui/reducers/consolidateTools.ts` — 工具判断 + 合并逻辑
 - `src/app/tui/reducers/handleEvent.ts` — tool_call/tool_done 事件处理
 - `src/app/tui/components/ToolSummaryBlock.tsx` — Thought 块渲染

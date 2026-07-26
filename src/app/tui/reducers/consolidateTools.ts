@@ -60,18 +60,13 @@ export function isExplorationToolEvent(data: {
   return false;
 }
 
-/** 从工具名判断是否为探索工具（用于 tool_done 事件）。
- *  shell_execute 无条件返回 true——若未被预整合（非 inspect 或非搜索命令），
- *  其 tool_done 在 handleEvent 中会因找不到对应的 tool_summary 而 fall through
- *  到标准 tool_card 更新路径。 */
+/** 从工具名判断是否为探索工具（用于 tool_done 事件）。 */
 export function isExplorationToolByName(name: string): boolean {
   return EXPLORATION_TOOLS.has(name);
 }
 
-/**
- * 判断一个 tool_card 是否为可合并的探索工具。
- * shell_execute 需要额外检查 intent + 命令前缀。
- */
+/** 判断一个 tool_card 是否为可合并的探索工具。
+ * shell_execute 需要额外检查 intent + 命令前缀。 */
 export function isExplorationTool(block: OutputBlock): boolean {
   if (block.kind !== 'tool_card') return false;
   if (!EXPLORATION_TOOLS.has(block.name)) return false;

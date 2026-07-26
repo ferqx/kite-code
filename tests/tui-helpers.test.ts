@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { parseInline } from '../src/app/tui/components/MarkdownBlock';
+import { writeFileActionName } from '../src/app/tui/components/render-utils';
 import { changePrefix, toolColor } from '../src/app/tui/OutputArea';
 import { formatDuration } from '../src/app/tui/StatusBar';
 import type { Theme } from '../src/app/tui/theme';
@@ -173,5 +174,26 @@ describe('toolColor', () => {
     expect(toolColor('running', t)).toBe(darkTheme.primary);
     expect(toolColor('pending', t)).toBe(darkTheme.muted);
     expect(toolColor('unknown', t)).toBe(darkTheme.muted);
+  });
+});
+
+describe('writeFileActionName', () => {
+  test('overwrite (diff stats summary) → Write', () => {
+    expect(writeFileActionName('Added 1 line, removed 1 line\n 1 -a\n 1 +b', {})).toBe('Write');
+  });
+
+  test('create (Wrote header) → Create', () => {
+    expect(writeFileActionName('Wrote 3 lines to fresh.md\n 1  a', {})).toBe('Create');
+  });
+
+  test('content-unchanged overwrite → Write', () => {
+    expect(writeFileActionName('Wrote 2 lines to notes.md (content unchanged)\n 1  a', {})).toBe(
+      'Write',
+    );
+  });
+
+  test('no summary (running/queued caller) → neutral Write', () => {
+    expect(writeFileActionName(undefined, {})).toBe('Write');
+    expect(writeFileActionName('', {})).toBe('Write');
   });
 });

@@ -962,7 +962,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const { [event.data.call_id]: _, ...nextTimes } = state.toolStartTimes ?? {};
 
       // ── Exploration tool: update entry in tool_summary (only if it was pre-consolidated) ──
-      // shell_execute without intent=inspect creates tool_card → won't be found here → falls through
+      // shell_execute with inspect intent + search/ls prefix enters Thought; others fall through to tool_card
       if (isExplorationToolByName(event.data.name)) {
         const blockId = state.explorationSummaryIds[event.data.call_id];
         const location = findToolSummaryLocation(state, event.data.call_id, blockId);
