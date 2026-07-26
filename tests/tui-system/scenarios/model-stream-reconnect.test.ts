@@ -46,6 +46,10 @@ describe('TUI PTY System — model stream reconnect', () => {
         chunk_delay: 100,
       },
       { message: { content: 'RECONNECT_DONE' } },
+      // Spares — absorb generateSessionName and other background calls
+      // without wrapping back to the disconnect response.
+      { message: { content: 'spare 1' } },
+      { message: { content: 'spare 2' } },
     ]);
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
     await waitForText(() => tui.output(), '❯', 15_000);
@@ -78,7 +82,7 @@ describe('TUI PTY System — model stream reconnect', () => {
       await waitForText(() => tui.output(), 'RECOVERED', 10_000);
       await waitForText(() => tui.output(), 'RECONNECT_DONE', 10_000);
 
-      expect(server.getRequestCount()).toBe(3);
+      expect(server.getRequestCount()).toBeGreaterThanOrEqual(3);
       expect(screenContains(tui.output(), 'RECONNECT_PARTIAL')).toBe(true);
       expect(screenContains(tui.output(), 'RECOVERED')).toBe(true);
       expect(screenContains(tui.output(), 'Read README.md')).toBe(true);
