@@ -22,6 +22,8 @@ export interface BuildRunTaskParams {
   mcpManager: McpRuntimeProvider | null;
   shellContext: string;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
+  authorizationMode?: import('@/protocol/events').AuthorizationMode;
+  authorizationSource?: import('@/core/types').AuthorizationSource;
   phase?: 'planning' | 'building';
   sandboxBackend?: SandboxBackend | 'unknown';
   model?: SupportedChatModel;
@@ -47,6 +49,8 @@ export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
     skillOptions: p.skillOptions ?? undefined,
     initialSkillActivations: p.initialSkillActivations,
     interactionMode: p.interactionMode,
+    authorizationMode: p.authorizationMode,
+    authorizationSource: p.authorizationSource,
     phase: p.phase,
     thinkingLevel: p.thinkingLevel,
     sandboxBackend: p.sandboxBackend,

@@ -58,8 +58,6 @@
         "src/app/tui/hooks/useMcpController.ts",
         "src/app/tui/hooks/useSlashCommand.ts",
         "src/app/tui/hooks/useSlashSuggestions.ts",
-        "src/app/tui/run-agent.ts",
-        "src/app/tui/session-manager.ts",
         "src/app/tui/mcp/**"
       ],
       "documents": [
