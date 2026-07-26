@@ -64,7 +64,7 @@ src/core/runtime/
 ├── state.ts       RuntimeState 及 capability/skill/verification 投影
 ├── events.ts      已发生的事实
 ├── effects.ts     下一步准备执行的动作
-├── scheduler.ts   State → Effect 的确定性决策；同一轮次所有工具均被拒绝/取消时返回 stop 而非 call_model
+├── scheduler.ts   State → Effect 的确定性决策；轮次内所有工具均被拒绝/取消且无后续用户消息时返回 stop，否则继续 call_model
 ├── reducer.ts     State × Event → State；approval.rejected 和 tool.rejected 均写入 transcript ToolMessage
 ├── executor.ts    Effect 执行适配
 ├── runner.ts      驱动 Kernel
@@ -164,7 +164,7 @@ RuntimeEffectExecutor
 
 Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`CapabilityInvocationRecord` 保存调用身份、状态、参数摘要、观察到的副作用、外部引用、artifact、重试安全性和 reconciliation 结果。
 
-工具被策略拒绝（`tool.rejected`）或被用户拒绝（`approval.rejected`）时，reducer 同时写入 `ToolCallRecord`（status: `rejected`，含 failure classification）和 transcript ToolMessage（`ok: false, rejected: true`），保证模型上下文能看到拒绝结果。当同一轮次最近一条 assistant 消息的全部工具调用均为 rejected 或 cancelled 时，scheduler 返回 `stop` 而非 `call_model`，不再调用模型。
+工具被策略拒绝（`tool.rejected`）或被用户拒绝（`approval.rejected`）时，reducer 同时写入 `ToolCallRecord`（status: `rejected`，含 failure classification）和 transcript ToolMessage（`ok: false, rejected: true`），保证模型上下文能看到拒绝结果。当最近一条 assistant 消息的全部工具调用均为 rejected 或 cancelled，且其后没有新用户消息时，scheduler 返回 `stop` 而非 `call_model`，不再调用模型。若拒绝后已有新用户消息到来（新轮次），scheduler 正常返回 `call_model`，由模型处理该新消息。
 
 外部写入遵循“先记录 intent，再发生副作用”。对无法证明是否成功的调用，Runtime 记录 `unknown` 并禁止盲目自动重放；恢复时先 reconciliation。
 
