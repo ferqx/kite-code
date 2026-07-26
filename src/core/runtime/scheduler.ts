@@ -173,20 +173,30 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
 
   // When every tool from the latest model response was rejected or cancelled
   // (user actively denied approval or a sibling interaction cancelled them),
-  // stop the turn instead of calling the model.
-  const latestAssistantMsg = [...state.transcript.messages]
-    .reverse()
-    .find(
-      (m): m is Extract<(typeof state.transcript.messages)[number], { kind: 'assistant' }> =>
-        m.kind === 'assistant' && m.toolCalls.length > 0,
-    );
-  if (latestAssistantMsg) {
+  // stop the turn instead of calling the model — unless a new user message
+  // arrived after the rejection, which starts a new turn that must be processed.
+  const assistantEntries = state.transcript.messages.map((m, idx) => ({ m, idx })).reverse();
+  const latestAssistantEntry = assistantEntries.find(
+    (
+      entry,
+    ): entry is {
+      m: Extract<(typeof state.transcript.messages)[number], { kind: 'assistant' }>;
+      idx: number;
+    } => entry.m.kind === 'assistant' && entry.m.toolCalls.length > 0,
+  );
+  if (latestAssistantEntry) {
+    const { m: latestAssistantMsg, idx: latestAssistantIdx } = latestAssistantEntry;
     const allToolCallsRejected = latestAssistantMsg.toolCalls.every((tc) => {
       const call = state.tools.calls[tc.id];
       return call?.status === 'rejected' || call?.status === 'cancelled';
     });
     if (allToolCallsRejected && latestAssistantMsg.toolCalls.length > 0) {
-      return { type: 'stop' };
+      const hasNewUserMessageAfter = state.transcript.messages
+        .slice(latestAssistantIdx + 1)
+        .some((m) => m.kind === 'user');
+      if (!hasNewUserMessageAfter) {
+        return { type: 'stop' };
+      }
     }
   }
 
