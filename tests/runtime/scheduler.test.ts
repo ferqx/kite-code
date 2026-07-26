@@ -244,12 +244,22 @@ describe('decideNextEffect', () => {
         { id: 'shell-2', name: 'shell_execute', args: { command: 'ls' } },
       ],
     });
+    const apprFailure = {
+      kind: 'approval_rejected' as const,
+      message: 'Rejected',
+      retryable: false,
+      modelFixable: false,
+      needsUserIntervention: false,
+      terminatesTurn: false,
+      journal: true,
+    };
     state.tools.calls['shell-1'] = {
       toolCallId: 'shell-1',
       modelMessageId,
       name: 'shell_execute',
       args: { command: 'pwd' },
       status: 'rejected',
+      failure: apprFailure,
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.calls['shell-2'] = {
@@ -258,6 +268,7 @@ describe('decideNextEffect', () => {
       name: 'shell_execute',
       args: { command: 'ls' },
       status: 'rejected',
+      failure: apprFailure,
       createdAtTurnId: state.turn.turnId,
     };
     expect(decideNextEffect(state)).toEqual({ type: 'stop' });
@@ -304,12 +315,22 @@ describe('decideNextEffect', () => {
         { id: 'shell-2', name: 'shell_execute', args: { command: 'ls' } },
       ],
     });
+    const cancFailure = {
+      kind: 'approval_rejected' as const,
+      message: 'Cancelled',
+      retryable: false,
+      modelFixable: false,
+      needsUserIntervention: false,
+      terminatesTurn: false,
+      journal: true,
+    };
     state.tools.calls['shell-1'] = {
       toolCallId: 'shell-1',
       modelMessageId,
       name: 'shell_execute',
       args: { command: 'pwd' },
       status: 'cancelled',
+      failure: cancFailure,
       createdAtTurnId: state.turn.turnId,
     };
     state.tools.calls['shell-2'] = {
@@ -318,6 +339,7 @@ describe('decideNextEffect', () => {
       name: 'shell_execute',
       args: { command: 'ls' },
       status: 'cancelled',
+      failure: cancFailure,
       createdAtTurnId: state.turn.turnId,
     };
     expect(decideNextEffect(state)).toEqual({ type: 'stop' });
@@ -337,6 +359,15 @@ describe('decideNextEffect', () => {
       name: 'shell_execute',
       args: { command: 'rm -rf /' },
       status: 'rejected',
+      failure: {
+        kind: 'approval_rejected' as const,
+        message: 'Rejected',
+        retryable: false,
+        modelFixable: false,
+        needsUserIntervention: false,
+        terminatesTurn: false,
+        journal: true,
+      },
       createdAtTurnId: state.turn.turnId,
     };
     expect(decideNextEffect(state)).toEqual({ type: 'stop' });
