@@ -61,7 +61,6 @@
         "src/core/mcp/supervisor.ts",
         "src/app/tui/App.tsx",
         "src/app/tui/components/HelpPanel.tsx",
-        "src/app/tui/index.tsx",
         "src/app/tui/hooks/useMcpController.ts",
         "src/app/tui/hooks/useSlashCommand.ts",
         "src/app/tui/hooks/useSlashSuggestions.ts",
@@ -139,7 +138,6 @@
     {
       "id": "live-e2e-boundary",
       "sources": [
-        "package.json",
         "tests/e2e/live/**",
         "tests/test-discovery.test.ts",
         ".github/workflows/mcp-langchain-live-smoke.yml"

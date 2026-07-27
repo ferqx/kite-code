@@ -2,11 +2,12 @@ import { render } from 'ink';
 import React from 'react';
 import {
   type AgentConfig,
+  type ConfigProbeResult,
   loadAgentConfig,
   loadColorPreset,
   loadTheme,
+  probeAgentConfig,
   saveColorPreset,
-  tryLoadAgentConfig,
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
 import { shouldPromptWorkspaceTrust } from '@/core/config/workspace-trust';
@@ -18,8 +19,9 @@ import { deleteSession, listSessions, loadSession } from '../../core/persistence
 import type { AgentPhase } from '../../protocol/events.js';
 import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
+import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
+import FirstRunFlow from './components/first-run/FirstRunFlow';
 import InputLine, { type SlashSuggestionData } from './components/InputLine';
-import SetupWizard from './components/SetupWizard';
 import WorkspaceTrustGate from './components/WorkspaceTrustGate';
 import { useMcpController } from './hooks/useMcpController';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
@@ -51,41 +53,65 @@ interface TuiAppProps {
 }
 
 export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
-  // Load config synchronously on first render — avoids a flash of SetupWizard
-  // that would consume keystrokes before TuiApp mounts.
-  const [config, setConfig] = React.useState<AgentConfig | null>(() => tryLoadAgentConfig());
-  // Workspace trust is evaluated synchronously for the same reason: the gate
-  // must mount before anything that consumes keystrokes or starts side effects
-  // (sessions, MCP, skills, model calls). Mirrors VS Code's "trust the authors
-  // of the files in this folder" prompt shown when opening a new project.
   const workspace = process.cwd();
+  // Workspace trust is checked first — no project-level config is read before trust.
   const [workspaceTrusted, setWorkspaceTrusted] = React.useState<boolean>(
     () => !shouldPromptWorkspaceTrust(workspace),
   );
+  // Config is probed after trust is established.
+  const [probeResult, setProbeResult] = React.useState<ConfigProbeResult | null>(() =>
+    workspaceTrusted ? probeAgentConfig() : null,
+  );
+
+  const handleTrusted = React.useCallback(() => {
+    setWorkspaceTrusted(true);
+    setProbeResult(probeAgentConfig());
+  }, []);
 
   const handleSetupComplete = React.useCallback(({ modelName }: { modelName: string }) => {
-    // SetupWizard saved everything (provider + models + effort) to config.
     const cfg = loadAgentConfig({ modelName });
-    setConfig(cfg);
+    // Convert to a ready probe result so TuiApp mounts
+    setProbeResult({ status: 'ready', config: cfg });
+  }, []);
+
+  const handleConfigRetry = React.useCallback(() => {
+    setProbeResult(probeAgentConfig());
   }, []);
 
   if (!workspaceTrusted) {
     return (
       <ThemeContext.Provider value={getDarkTheme('blue')}>
-        <WorkspaceTrustGate workspace={workspace} onTrusted={() => setWorkspaceTrusted(true)} />
+        <WorkspaceTrustGate workspace={workspace} onTrusted={handleTrusted} />
       </ThemeContext.Provider>
     );
   }
 
-  if (!config) {
+  if (!probeResult) {
+    // Trusted but config not yet probed (should not normally happen)
+    return null;
+  }
+
+  if (probeResult.status === 'not-configured') {
     return (
       <ThemeContext.Provider value={getDarkTheme('blue')}>
-        <SetupWizard onComplete={handleSetupComplete} />
+        <FirstRunFlow onComplete={handleSetupComplete} />
       </ThemeContext.Provider>
     );
   }
 
-  return <TuiApp config={config} injectModel={injectModel} />;
+  if (probeResult.status === 'invalid') {
+    return (
+      <ThemeContext.Provider value={getDarkTheme('blue')}>
+        <ConfigErrorScreen
+          configPath={probeResult.path}
+          message={probeResult.message}
+          onRetry={handleConfigRetry}
+        />
+      </ThemeContext.Provider>
+    );
+  }
+
+  return <TuiApp config={probeResult.config} injectModel={injectModel} />;
 }
 
 function TuiApp({ config, injectModel }: TuiAppProps) {

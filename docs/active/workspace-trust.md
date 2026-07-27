@@ -6,7 +6,7 @@
 
 ## 概述
 
-TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 VS Code 打开新项目时的 "Do you trust the authors of the files in this folder?"。门禁在 `TuiBootstrap` 中同步求值，并先于 SetupWizard 与 `TuiApp` 挂载：未通过门禁时不会创建会话、连接 MCP、扫描 skill 或发起模型调用。CLI `run` 命令执行同一门禁（见下文 CLI 入口），共享同一用户级信任存储。
+TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 VS Code 打开新项目时的 "Do you trust the authors of the files in this folder?"。门禁在 `TuiBootstrap` 中同步求值，并先于 FirstRunFlow 与 `TuiApp` 挂载：未通过门禁时不会创建会话、连接 MCP、扫描 skill 或发起模型调用。CLI `run` 命令执行同一门禁（见下文 CLI 入口），共享同一用户级信任存储。
 
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 
@@ -18,8 +18,9 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 ## 确认界面（`src/app/tui/components/WorkspaceTrustGate.tsx`）
 
 - 展示目录绝对路径与信任后果说明（加载项目配置/skills/MCP、agent 可执行 shell 与修改文件）。
-- 选项："Yes, I trust the authors" / "No, exit"；↑↓ 选择，Enter 确认，Esc 与 Ctrl+C 退出。
-- 选择信任 → `trustWorkspace()` 写入记录后挂载主界面；写入失败时在界面内显示错误（`store_corrupt` / `store_unavailable`），用户可重试或退出。
+- 选项："Trust this workspace and continue" / "Exit Kite Code"；↑↓ 选择，Enter 确认，Esc 与 Ctrl+C 退出。
+- **默认焦点在 "Exit Kite Code"**，防止用户习惯性按 Enter 直接授权。
+- 选择信任 → 显示 "Saving workspace trust…" 后调用 `trustWorkspace()` 写入记录并挂载主界面；写入失败时在界面内显示错误（`store_corrupt` / `store_unavailable`），用户可重试或退出。
 - 选择拒绝或按 Esc → 进程退出，不写入任何状态。
 
 ## CLI 入口（`src/app/cli/index.ts`）

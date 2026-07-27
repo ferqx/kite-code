@@ -1,105 +1,124 @@
 import { Box, Text, useApp, useInput } from 'ink';
 import { useState } from 'react';
+import { workspaceTrustPath } from '@/core/config/paths';
 import { trustWorkspace } from '@/core/config/workspace-trust';
 import { useTheme } from '../theme';
 
 interface WorkspaceTrustGateProps {
-  /** Absolute workspace path shown to the user / 展示给用户的绝对路径 */
   workspace: string;
-  /** Called after the trust record is persisted / 信任记录持久化后调用 */
   onTrusted: () => void;
 }
 
 type TrustChoice = 'trust' | 'decline';
+type TrustStatus = 'idle' | 'saving' | 'error';
 
-/**
- * Workspace authorization prompt shown when opening an untrusted folder for the
- * first time — the VS Code "Do you trust the authors…" gate. Mounted by
- * TuiBootstrap before SetupWizard/TuiApp, so no session, MCP, skill or model
- * side effect happens until the user decides.
- *
- * 首次打开未信任目录时的 workspace 授权确认（类似 VS Code 打开新项目的确认逻辑）。
- * 由 TuiBootstrap 在 SetupWizard/TuiApp 之前挂载，用户决定前不产生任何副作用。
- */
 export default function WorkspaceTrustGate({ workspace, onTrusted }: WorkspaceTrustGateProps) {
   const t = useTheme();
   const { exit } = useApp();
-  const [choice, setChoice] = useState<TrustChoice>('trust');
-  const [error, setError] = useState<string | null>(null);
+  // Default focus on "Exit Kite Code" — prevents accidental Enter → trust
+  const [choice, setChoice] = useState<TrustChoice>('decline');
+  const [status, setStatus] = useState<TrustStatus>('idle');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useInput((input, key) => {
-    if (key.ctrl && input === 'c') {
-      // Ink's exit() unmounts first, restoring cursor/keyboard terminal state.
-      exit();
-      return;
-    }
-    if (key.escape) {
-      // Declining leaves no persisted state — same as choosing "No, exit".
+    if (key.escape || (key.ctrl && input === 'c')) {
       exit();
       return;
     }
     if (key.upArrow || key.downArrow) {
       setChoice((current) => (current === 'trust' ? 'decline' : 'trust'));
+      setErrorMessage(null);
+      if (status === 'error') setStatus('idle');
       return;
     }
     if (key.return) {
-      if (choice === 'decline') {
-        exit();
+      if (choice === 'decline' || status === 'saving') {
+        if (choice === 'decline') exit();
         return;
       }
+      setStatus('saving');
+      setErrorMessage(null);
       const result = trustWorkspace({ workspace, source: 'user' });
       if (result.status === 'recorded') {
         onTrusted();
       } else {
-        // Persisting failed — stay on the gate so the user can retry or exit.
-        setError(result.message);
+        const store = workspaceTrustPath();
+        if (result.status === 'store_unavailable') {
+          setErrorMessage(`The trust store is unavailable:\n${store}`);
+        } else {
+          setErrorMessage(
+            `The following file is malformed:\n${store}\nFix or remove the file, then try again.`,
+          );
+        }
+        setStatus('error');
       }
+      return;
     }
   });
 
-  const item = (id: TrustChoice, label: string) => (
-    <Box>
-      <Text color={choice === id ? t.primary : t.muted}>
-        {choice === id ? '❯' : ' '} {label}
-      </Text>
-    </Box>
-  );
+  if (status === 'saving') {
+    return (
+      <Box flexDirection="column" paddingX={2} paddingY={1}>
+        <Text color={t.primary}>Kite Code</Text>
+        <Box marginTop={1}>
+          <Text color={t.muted}>Saving workspace trust…</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color={t.dim}>{workspace}</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  const isError = status === 'error';
 
   return (
-    <Box flexDirection="column" padding={1}>
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor={t.primary}
-        paddingX={2}
-        paddingY={1}
-      >
-        <Text bold color={t.primary}>
-          Do you trust the authors of the files in this folder?
-        </Text>
+    <Box flexDirection="column" paddingX={2} paddingY={1}>
+      <Box flexDirection="column">
+        <Text color={t.primary}>Kite Code</Text>
         <Box marginTop={1}>
-          <Text bold>{workspace}</Text>
+          <Text color={t.muted}>Open this workspace?</Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color={t.dim}>{workspace}</Text>
         </Box>
         <Box marginTop={1} flexDirection="column">
-          <Text color={t.muted}>
-            Kite Code will load this project&apos;s configuration, skills and MCP servers,
-          </Text>
-          <Text color={t.muted}>
-            and the agent may execute shell commands and modify files inside it.
-          </Text>
-          <Text color={t.muted}>Only trust folders you have reviewed yourself.</Text>
+          <Text color={t.muted}>This workspace may provide local configuration, skills,</Text>
+          <Text color={t.muted}>and MCP servers.</Text>
         </Box>
-        {error ? (
+        <Box marginTop={1}>
+          <Text color={t.muted}>Kite Code may run commands and modify files according to</Text>
+        </Box>
+        <Box>
+          <Text color={t.muted}>your current approval settings.</Text>
+        </Box>
+        {isError && errorMessage ? (
+          <Box marginTop={1} flexDirection="column">
+            <Text color={t.error}>Workspace trust could not be saved</Text>
+            <Box marginTop={1}>
+              <Text color={t.muted}>{errorMessage}</Text>
+            </Box>
+          </Box>
+        ) : null}
+        {isError && !errorMessage ? (
           <Box marginTop={1}>
-            <Text color={t.error}>{error}</Text>
+            <Text color={t.error}>Workspace trust needs attention</Text>
           </Box>
         ) : null}
         <Box marginTop={1} flexDirection="column">
-          {item('trust', 'Yes, I trust the authors')}
-          {item('decline', 'No, exit')}
+          <Box>
+            <Text color={choice === 'trust' ? t.primary : t.muted}>
+              {choice === 'trust' ? '\u203A' : ' '} Trust this workspace and continue
+            </Text>
+          </Box>
+          <Box>
+            <Text color={choice === 'decline' ? t.primary : t.muted}>
+              {choice === 'decline' ? '\u203A' : ' '} Exit Kite Code
+            </Text>
+          </Box>
         </Box>
         <Box marginTop={1}>
-          <Text color={t.dim}>↑↓ select Enter confirm Esc exit</Text>
+          <Text color={t.dim}>{'\u2191\u2193'} Navigate Enter Confirm</Text>
         </Box>
       </Box>
     </Box>

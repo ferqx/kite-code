@@ -25,6 +25,8 @@ export interface PtyProcessOptions {
   mockServer?: MockModelServer;
   /** Test workspace (creates config pointing to mock server) */
   workspace?: TestWorkspace;
+  /** Skip writing mock config — use for first-run/setup tests */
+  noPreConfig?: boolean;
 }
 
 export interface PtyProcess {
@@ -136,7 +138,8 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // Config is written to BOTH the home-level (~/.kite-code/) AND the
   // workspace-level (.kite-code/) paths since the TUI merges both.
   // We set KITE_CODE_HOME env var so defaultConfigPath() resolves correctly.
-  if (opts.mockServer && opts.workspace) {
+  // Skip when noPreConfig is set — used for first-run/setup tests.
+  if (opts.mockServer && opts.workspace && !opts.noPreConfig) {
     const baseMockConfig = {
       provider: {
         mock: {
@@ -197,7 +200,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   if (opts.workspace?.env) {
     Object.assign(childEnv, opts.workspace.env);
   }
-  childEnv['TERM'] = 'xterm-256color';
+  childEnv.TERM = 'xterm-256color';
 
   const proc = Bun.spawn({
     cmd: [process.execPath, 'run', entryPath],

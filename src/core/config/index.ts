@@ -59,7 +59,7 @@ const modelEntrySchema = z.union([
 
 const providerSchema = z.object({
   type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
-  apiKey: z.string().min(1).optional(),
+  apiKey: z.string().optional(),
   baseURL: z.string().url().optional(),
   /** Default model name */
   model: z.string().optional(),
@@ -399,6 +399,65 @@ export function tryLoadAgentConfig(options: LoadAgentConfigOptions = {}): AgentC
   }
 }
 
+export type ConfigProbeResult =
+  | {
+      status: 'ready';
+      config: AgentConfig;
+    }
+  | {
+      status: 'not-configured';
+    }
+  | {
+      status: 'invalid';
+      path: string;
+      message: string;
+    };
+
+/**
+ * Probe the agent configuration, distinguishing between:
+ * - ready: valid config with an API key
+ * - not-configured: no config file or no API key
+ * - invalid: config file exists but is malformed / fails schema validation
+ *
+ * Does NOT auto-enter setup; callers decide how to handle each case.
+ */
+export function probeAgentConfig(options: LoadAgentConfigOptions = {}): ConfigProbeResult {
+  const configPath = options.configPath ?? defaultConfigPath();
+  try {
+    const config = loadAgentConfig(options);
+    return { status: 'ready', config };
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      // If the only issue is an empty/missing apiKey, treat as not-configured
+      // rather than "configuration corrupt". The Zod schema uses .min(1) which
+      // rejects empty strings before resolveProviderApiKey can throw "requires apiKey".
+      const isApiKeyOnly = err.issues.every(
+        (issue) => issue.path.includes('apiKey') && issue.code === 'too_small',
+      );
+      if (isApiKeyOnly) {
+        return { status: 'not-configured' };
+      }
+      const firstIssue = err.issues[0];
+      const message = firstIssue
+        ? `${firstIssue.path.join('.')}: ${firstIssue.message}`
+        : 'Configuration schema validation failed.';
+      return { status: 'invalid', path: configPath, message };
+    }
+    if (err instanceof Error && err.message.includes('requires apiKey')) {
+      // Config file exists but has no API key — treat as not yet configured
+      return { status: 'not-configured' };
+    }
+    if (err instanceof Error && err.message.includes('config file not found')) {
+      return { status: 'not-configured' };
+    }
+    // Parsing errors from jsonc-parser, or other unexpected failures during load
+    if (err instanceof Error) {
+      return { status: 'invalid', path: configPath, message: err.message };
+    }
+    return { status: 'not-configured' };
+  }
+}
+
 function inferProviderType(providerName: string): ModelProviderType {
   if (providerName === 'deepseek') return 'deepseek';
   if (providerName === 'ollama') return 'ollama';
@@ -443,12 +502,18 @@ function modelEntryObject(entry: unknown): {
 
 /**
  * Find the default model from config.
- * Priority: provider.model > legacy default:true > first model > null
+ * Priority:
+ * 1. Provider with apiKey + model set (first found)
+ * 2. Provider with apiKey + default:true model
+ * 3. Provider with apiKey + first model
+ * 4. Provider with model + apiKey from env var
+ * 5. Fall through all providers regardless of apiKey
  */
 function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string } | null {
+  // Pass 1: providers with an explicit apiKey
   for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (!prov.apiKey) continue;
     if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
-    // Legacy: model entry with default:true
     if (prov.models) {
       for (const m of prov.models) {
         if (modelEntryObject(m)?.default) {
@@ -458,6 +523,19 @@ function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string
       }
     }
   }
+  // Pass 2: providers with models (apiKey may come from env var)
+  for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
+    if (prov.models) {
+      for (const m of prov.models) {
+        if (modelEntryObject(m)?.default) {
+          const name = modelEntryName(m);
+          if (name) return { provider: provName, name };
+        }
+      }
+    }
+  }
+  // Fallback: first model of any provider with models
   // Fallback: first model of first provider with models
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (prov.models?.length) {
