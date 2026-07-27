@@ -16,7 +16,7 @@ export interface SearchContentInput {
 }
 
 export const searchContentSpec: ToolSpec<SearchContentInput, ShellResult> = {
-  name: 'search_content',
+  name: 'search_content' as const,
   kind: 'computer',
   contract: SEARCH_CONTENT_CONTRACT.sections,
   // 与原模型 Schema 逐字节一致（含 describe 文本），不产生 prompt 漂移。

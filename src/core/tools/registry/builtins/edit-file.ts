@@ -19,7 +19,7 @@ export interface EditFileToolInput {
 }
 
 export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
-  name: 'edit_file',
+  name: 'edit_file' as const,
   kind: 'computer',
   contract: EDIT_FILE_CONTRACT.sections,
   inputSchema: z.object({

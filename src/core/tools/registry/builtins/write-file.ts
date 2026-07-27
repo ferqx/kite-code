@@ -16,7 +16,7 @@ export interface WriteFileToolInput {
 }
 
 export const writeFileSpec: ToolSpec<WriteFileToolInput, WriteFileResult> = {
-  name: 'write_file',
+  name: 'write_file' as const,
   kind: 'computer',
   contract: WRITE_FILE_CONTRACT.sections,
   // ADR-0042 §2：mode 参数已移除，创建/覆写统一语义。

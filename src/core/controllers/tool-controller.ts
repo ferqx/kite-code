@@ -1454,7 +1454,7 @@ export async function executeRuntimeTools(params: {
       // 文件变更事件 — write_file / edit_file 的结果通知 TUI
       // File change event — notify TUI of write_file / edit_file results
       if (result.ok !== false && (request.name === 'write_file' || request.name === 'edit_file')) {
-        const filePath = String((request.args as Record<string, unknown>).path ?? '');
+        const filePath = String(request.args.path ?? '');
         if (filePath) {
           events.push({
             type: 'tool.file_change',

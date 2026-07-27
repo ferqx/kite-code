@@ -63,7 +63,7 @@ const effects = () => ({
 });
 
 export const activateSkillSpec: ToolSpec<z.infer<typeof activateSkillInputSchema>, SkillOutput> = {
-  name: 'activate_skill',
+  name: 'activate_skill' as const,
   kind: 'coordination',
   contract: activateContract,
   inputSchema: activateSkillInputSchema,
@@ -97,7 +97,7 @@ export const readSkillReferenceSpec: ToolSpec<
   z.infer<typeof readSkillReferenceInputSchema>,
   SkillOutput
 > = {
-  name: 'read_skill_reference',
+  name: 'read_skill_reference' as const,
   kind: 'coordination',
   contract: readContract,
   inputSchema: readSkillReferenceInputSchema,
@@ -120,7 +120,7 @@ export const readSkillReferenceSpec: ToolSpec<
 };
 
 export const completeSkillSpec: ToolSpec<z.infer<typeof completeSkillInputSchema>, SkillOutput> = {
-  name: 'complete_skill',
+  name: 'complete_skill' as const,
   kind: 'coordination',
   contract: completeContract,
   inputSchema: completeSkillInputSchema,

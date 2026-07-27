@@ -45,7 +45,7 @@ export const listMcpResourcesSpec: ToolSpec<
   z.infer<typeof listMcpResourcesInputSchema>,
   McpSpecOutput
 > = {
-  name: 'list_mcp_resources',
+  name: 'list_mcp_resources' as const,
   kind: 'coordination',
   contract: LIST_MCP_RESOURCES_CONTRACT.sections,
   inputSchema: listMcpResourcesInputSchema,
@@ -119,7 +119,7 @@ export const listMcpResourcesSpec: ToolSpec<
 };
 
 export const listMcpToolsSpec: ToolSpec<z.infer<typeof listMcpToolsInputSchema>, McpSpecOutput> = {
-  name: 'list_mcp_tools',
+  name: 'list_mcp_tools' as const,
   kind: 'coordination',
   contract: LIST_MCP_TOOLS_CONTRACT.sections,
   inputSchema: listMcpToolsInputSchema,
@@ -164,7 +164,7 @@ export const readMcpResourceSpec: ToolSpec<
   z.infer<typeof readMcpResourceInputSchema>,
   McpSpecOutput
 > = {
-  name: 'read_mcp_resource',
+  name: 'read_mcp_resource' as const,
   kind: 'coordination',
   contract: READ_MCP_RESOURCE_CONTRACT.sections,
   inputSchema: readMcpResourceInputSchema,

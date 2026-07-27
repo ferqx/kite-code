@@ -18,35 +18,28 @@ import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { fileContentHash, sessionReadTracker } from '@/core/tools/read-state';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
-import { type EditFileToolInput, editFileSpec } from '@/core/tools/registry/builtins/edit-file';
+import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import {
   listMcpResourcesSpec,
   listMcpToolsSpec,
   readMcpResourceSpec,
 } from '@/core/tools/registry/builtins/mcp-inventory';
-import { type ReadFileInput, readFileSpec } from '@/core/tools/registry/builtins/read-file';
-import {
-  type SearchContentInput,
-  searchContentSpec,
-} from '@/core/tools/registry/builtins/search-content';
-import {
-  type SearchFilesInput,
-  searchFilesSpec,
-} from '@/core/tools/registry/builtins/search-files';
+import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
+import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
+import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
 import {
   projectedShellIntent,
   shellExecuteSpec,
 } from '@/core/tools/registry/builtins/shell-execute';
 import { taskSpec } from '@/core/tools/registry/builtins/task';
 import { webFetchSpec } from '@/core/tools/registry/builtins/web-fetch';
-import { type WriteFileToolInput, writeFileSpec } from '@/core/tools/registry/builtins/write-file';
+import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type {
   AuthorizationOverride,
-  ShellActionEnvelope,
   ShellNetworkMode,
   ThreadAuthorizationState,
 } from '@/core/types';
@@ -333,15 +326,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'read_file') {
-    const input = request.args as ReadFileInput;
-    const filePath = input.path;
+    const filePath = request.args.path;
     const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
     const dispatched = await dispatchRegisteredTool(
       readFileSpec,
-      { path: filePath, offset: input.offset, limit: input.limit },
+      { path: filePath, offset: request.args.offset, limit: request.args.limit },
       { workspace, threadId, signal, allowExternalPaths: allowExternal },
     );
     const output = dispatched.dispatched
@@ -382,7 +374,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'edit_file') {
-    const editInput = request.args as EditFileToolInput;
+    const editInput = request.args;
     if (!editInput.old_string) {
       return withFailureGuidance(request, {
         ok: false,
@@ -455,7 +447,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'write_file') {
-    const writeInput = request.args as WriteFileToolInput;
+    const writeInput = request.args;
     const filePath = writeInput.path;
     const content = writeInput.content;
     const isExternal = isExternalPathArg(filePath);
@@ -560,7 +552,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'search_content') {
-    const searchInput = request.args as SearchContentInput;
+    const searchInput = request.args;
     const searchPath = searchInput.path ?? '.';
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
@@ -592,7 +584,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'search_files') {
-    const searchInput = request.args as SearchFilesInput;
+    const searchInput = request.args;
     const searchPath = searchInput.path ?? '.';
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
@@ -803,7 +795,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
         ok: false,
-        command: (request.args as ShellActionEnvelope).command,
+        command: request.args.command,
         exitCode: -1,
         stdout: '',
         stderr: dispatched.rejection.error,

@@ -13,7 +13,7 @@ export const readPlanInputSchema = z.object({
 export type ReadPlanInput = z.infer<typeof readPlanInputSchema>;
 
 export const readPlanSpec: ToolSpec<z.infer<typeof readPlanInputSchema>, RuntimeActionEmission> = {
-  name: 'read_plan',
+  name: 'read_plan' as const,
   kind: 'runtime_action',
   contract: READ_PLAN_CONTRACT.sections,
   inputSchema: readPlanInputSchema,

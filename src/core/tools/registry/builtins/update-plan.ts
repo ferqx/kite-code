@@ -25,7 +25,7 @@ export const updatePlanSpec: ToolSpec<
   z.infer<typeof updatePlanInputSchema>,
   RuntimeActionEmission
 > = {
-  name: 'update_plan',
+  name: 'update_plan' as const,
   kind: 'runtime_action',
   contract: UPDATE_PLAN_CONTRACT.sections,
   inputSchema: updatePlanInputSchema,

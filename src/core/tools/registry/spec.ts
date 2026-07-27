@@ -197,3 +197,17 @@ export interface InterruptToolSpec<Input = unknown> extends BaseToolSpec<Input> 
 export type ToolSpec<Input = unknown, Output = never> = [Output] extends [never]
   ? InterruptToolSpec<Input>
   : ExecutableToolSpec<Input, Output>;
+
+/** const tuple 类型推导用 — 保持 ToolSpec 签名不变，同时加持 `name` 为字面量类型。 */
+export function declareToolSpec<Input, Output>(
+  spec: ToolSpec<Input, Output>,
+): ToolSpec<Input, Output> {
+  return spec;
+}
+
+/** const tuple 类型推导用 — Interrupt 变体。 */
+export function declareInterruptTool<Input>(
+  spec: InterruptToolSpec<Input>,
+): InterruptToolSpec<Input> {
+  return spec;
+}

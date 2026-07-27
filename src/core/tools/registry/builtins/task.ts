@@ -19,7 +19,7 @@ export type TaskInput = z.infer<typeof taskInputSchema>;
 type TaskOutput = { available: true; result: SubAgentResult } | { available: false; error: string };
 
 export const taskSpec: ToolSpec<TaskInput, TaskOutput> = {
-  name: 'task',
+  name: 'task' as const,
   kind: 'coordination',
   contract: TASK_CONTRACT.sections,
   inputSchema: taskInputSchema,

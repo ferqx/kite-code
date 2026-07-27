@@ -1,23 +1,27 @@
 import { type AIMessage, aiMessage } from '@/core/messages';
-import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import {
+  builtinToolRegistry,
+  type PendingBuiltinToolRequest,
+} from '@/core/tools/registry/builtins';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellApprovalGrant } from '@/protocol/events';
 
-/** 工具名枚举——从 Registry 派生，保持编译期完备性。 */
-export type BuiltinToolName = string;
-
-/** 待处理的工具请求 / Pending tool request.
- *
- * args 由 Registry inputSchema 解析后透传（一致性不变量 i1），类型不再手工
- * 重复声明。需要编译期工具名收窄时从 Registry spec 导出类型，而非在此维护
- * 第二份手写参数声明。 */
-export interface PendingToolRequest {
+/** 动态 MCP 工具请求 — args 无法编译期验证，Record<string,unknown> 是合理上限。 */
+export interface PendingMcpToolRequest {
   id?: string;
-  name: string;
-  args: unknown;
+  name: `mcp__${string}`;
+  args: Record<string, unknown>;
   reason: string;
   protectedCommand: string;
 }
+
+/**
+ * 待处理的工具请求 / Pending tool request.
+ *
+ * Builtin 部分从 const tuple 自动推导可辨识联合（name → args 关联由 Registry
+ * inputSchema 保证），MCP 部分保持 Record<string,unknown>。
+ */
+export type PendingToolRequest = PendingBuiltinToolRequest | PendingMcpToolRequest;
 
 /** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
 export function toolRequestFromCall(

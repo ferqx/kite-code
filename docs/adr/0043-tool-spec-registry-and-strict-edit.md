@@ -113,3 +113,5 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 - 将 22 成员的可辨识联合类型（手写每工具参数声明）替换为简单接口 `{ id?, name, args: unknown, reason, protectedCommand }`。`args` 经 Registry `inputSchema` 解析后透传（i1），消费者在需要字段级访问时使用显式 `Record<string,unknown>` 转换。删除 229 行重复 Schema 声明。
 
 - 所有 19 个 builtin spec 导出 `z.infer` 的 Input 类型。tool-runner 与 tool-controller 在每个工具分支入口用一行 `as XxxInput` 收窄 args，替代散落的逐字段 cast。
+
+- `PendingToolRequest` 拆分为 `PendingBuiltinToolRequest | PendingMcpToolRequest`。Builtin 侧通过 `MakeRequest<'name', InputType>` 手工维护可辨识联合（19 行），TypeScript 在 `request.name === '...'` 守卫后自动收窄 `request.args` 到对应 Input 类型——不再需要 `as XxxInput` 手动 cast。MCP 侧保持 `Record<string,unknown>`。

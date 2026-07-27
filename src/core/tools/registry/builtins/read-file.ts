@@ -27,7 +27,7 @@ export interface ReadFileOutput {
 }
 
 export const readFileSpec: ToolSpec<ReadFileInput, ReadFileOutput> = {
-  name: 'read_file',
+  name: 'read_file' as const,
   kind: 'computer',
   contract: READ_FILE_CONTRACT.sections,
   // 与原模型 Schema 逐字节一致（含 describe 文本），不产生 prompt 漂移。

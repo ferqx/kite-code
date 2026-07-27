@@ -60,7 +60,7 @@ export const writePlanSpec: ToolSpec<
   z.infer<typeof writePlanInputSchema>,
   RuntimeActionEmission
 > = {
-  name: 'write_plan',
+  name: 'write_plan' as const,
   kind: 'runtime_action',
   contract: WRITE_PLAN_CONTRACT.sections,
   inputSchema: writePlanInputSchema,

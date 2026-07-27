@@ -29,7 +29,7 @@ export type WebFetchInput = z.infer<typeof webFetchInputSchema>;
 type WebFetchOutput = WebFetchResult & { aborted?: boolean; timedOut?: boolean };
 
 export const webFetchSpec: ToolSpec<WebFetchInput, WebFetchOutput> = {
-  name: 'web_fetch',
+  name: 'web_fetch' as const,
   kind: 'computer',
   contract: WEB_FETCH_CONTRACT.sections,
   inputSchema: webFetchInputSchema,

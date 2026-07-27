@@ -77,7 +77,7 @@ export function projectedShellIntent(meta: { intent?: string }): ShellIntent {
 }
 
 export const shellExecuteSpec: ToolSpec<ShellActionEnvelope, ShellResult> = {
-  name: 'shell_execute',
+  name: 'shell_execute' as const,
   kind: 'computer',
   contract: SHELL_EXECUTE_CONTRACT.sections,
   inputSchema: shellActionEnvelopeSchema,

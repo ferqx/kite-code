@@ -54,7 +54,7 @@ export const askUserInputSchema = z
   );
 
 export const askUserSpec: ToolSpec<UserInputRequest> = {
-  name: 'ask_user',
+  name: 'ask_user' as const,
   kind: 'interrupt',
   contract: ASK_USER_CONTRACT.sections,
   inputSchema: askUserInputSchema,

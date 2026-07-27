@@ -27,7 +27,7 @@ type ToolSearchOutput = {
 };
 
 export const toolSearchSpec: ToolSpec<ToolSearchInput, ToolSearchOutput> = {
-  name: 'tool_search',
+  name: 'tool_search' as const,
   kind: 'coordination',
   contract: TOOL_SEARCH_CONTRACT.sections,
   inputSchema: toolSearchInputSchema,
