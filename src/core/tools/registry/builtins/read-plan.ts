@@ -1,8 +1,7 @@
 import { z } from 'zod';
-import type { RuntimeActionEmission } from '@/core/runtime/action-emission';
-import { type ReadPlanCommand, readPlanAction } from '@/core/runtime/plan-facade';
+import { readPlanAction } from '@/core/runtime/plan-facade';
 import { READ_PLAN_CONTRACT } from '@/core/tools/tool-contracts';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 export const readPlanInputSchema = z.object({
   plan_id: z.string().min(1),
@@ -12,8 +11,8 @@ export const readPlanInputSchema = z.object({
 
 export type ReadPlanInput = z.infer<typeof readPlanInputSchema>;
 
-export const readPlanSpec: ToolSpec<z.infer<typeof readPlanInputSchema>, RuntimeActionEmission> = {
-  name: 'read_plan' as const,
+export const readPlanSpec = defineExecutableTool({
+  name: 'read_plan',
   kind: 'runtime_action',
   contract: READ_PLAN_CONTRACT.sections,
   inputSchema: readPlanInputSchema,
@@ -28,7 +27,7 @@ export const readPlanSpec: ToolSpec<z.infer<typeof readPlanInputSchema>, Runtime
     if (!context.planRuntime) {
       return { ok: false, stdout: '', stderr: 'Plan Runtime is unavailable.' };
     }
-    return readPlanAction(context.planRuntime, input as ReadPlanCommand);
+    return readPlanAction(context.planRuntime, input);
   },
   projectResult: (output) => ({
     ok: output.ok,
@@ -36,4 +35,4 @@ export const readPlanSpec: ToolSpec<z.infer<typeof readPlanInputSchema>, Runtime
     resultMeta: {},
     display: { verb: 'Read', preview: 'Plan' },
   }),
-};
+});

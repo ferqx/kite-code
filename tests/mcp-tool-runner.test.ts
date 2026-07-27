@@ -9,8 +9,8 @@ function request(name = 'mcp__docs__search_docs') {
     { id: 'mcp-call', name, args: { query: 'runtime' } },
     process.cwd(),
   );
-  if (!parsed) throw new Error('Failed to construct MCP request.');
-  return parsed;
+  if (!parsed?.ok) throw new Error('Failed to construct MCP request.');
+  return parsed.request;
 }
 
 function provider(

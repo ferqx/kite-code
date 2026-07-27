@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { toolRequestFromCall } from '@/core/harness/tool-requests';
+import { type PendingToolRequest, toolRequestFromCall } from '@/core/harness/tool-requests';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import type { AIMessage } from '@/core/messages';
 import { aiMessage } from '@/core/messages';
@@ -14,6 +14,15 @@ import {
 } from '@/core/subagent/continuation-codec';
 import { getRoleConfig } from '@/core/subagent/roles';
 import type { SubAgentContinuation } from '@/core/subagent/types';
+
+function parseRequest(
+  call: { id: string; name: string; args: Record<string, unknown> },
+  workspace: string,
+): PendingToolRequest {
+  const result = toolRequestFromCall(call, workspace);
+  if (!result?.ok) throw new Error('Failed to build request');
+  return result.request;
+}
 
 describe('sub-agent external write approval chain', () => {
   // ── Policy layer: verify externalWrite effect ──
@@ -148,7 +157,7 @@ describe('sub-agent external write approval chain', () => {
   test('runApprovedTool rejects external write without approval grant', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-runApprovedTool-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-ext-write',
           name: 'write_file',
@@ -156,7 +165,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       // Same parameters the sub-agent loop passes to runApprovedTool
       const result = await runApprovedTool({
@@ -181,7 +189,7 @@ describe('sub-agent external write approval chain', () => {
   test('runApprovedTool allows internal relative write without approval', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-runApprovedTool-internal-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-int-write',
           name: 'write_file',
@@ -189,7 +197,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -211,10 +218,12 @@ describe('sub-agent external write approval chain', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-read-after-write-'));
     try {
       // Step 1: write_file (internal, no approval needed)
-      const writeReq = toolRequestFromCall(
+      const parsedWrite = toolRequestFromCall(
         { id: 'call-w', name: 'write_file', args: { path: 'test.txt', content: 'hello' } },
         workspace,
       );
+      if (!parsedWrite?.ok) throw new Error('Failed to build write request');
+      const writeReq = parsedWrite.request;
       const writeResult = await runApprovedTool({
         workspace,
         request: writeReq!,
@@ -225,13 +234,13 @@ describe('sub-agent external write approval chain', () => {
       expect(writeResult.ok).toBe(true);
 
       // Step 2: read_file — must succeed (read is always allowed)
-      const readReq = toolRequestFromCall(
+      const readReq = parseRequest(
         { id: 'call-r', name: 'read_file', args: { path: 'test.txt' } },
         workspace,
       );
       const readResult = await runApprovedTool({
         workspace,
-        request: readReq!,
+        request: readReq,
         workspaceAccess: 'write',
         phase: 'building',
         authorization: null,
@@ -247,7 +256,7 @@ describe('sub-agent external write approval chain', () => {
   test('runApprovedTool external write with approved grant succeeds', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-runApprovedTool-granted-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-granted-write',
           name: 'write_file',
@@ -255,7 +264,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -278,7 +286,7 @@ describe('sub-agent external write approval chain', () => {
   test('auto mode routes external write to auto-review, not manual approval', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-auto-extwrite-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-auto-ext',
           name: 'write_file',
@@ -286,7 +294,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       // In auto mode without circuit breaker, the mode policy replaces need_tool_approval
       // with need_auto_review. runApprovedTool's defense-in-depth check sees need_auto_review
@@ -312,7 +319,7 @@ describe('sub-agent external write approval chain', () => {
   test('auto mode internal write bypasses all reviews', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-auto-intwrite-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-auto-int',
           name: 'write_file',
@@ -320,7 +327,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -343,7 +349,7 @@ describe('sub-agent external write approval chain', () => {
   test('full_access mode auto-allows external write', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-full-extwrite-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-full-ext',
           name: 'write_file',
@@ -351,7 +357,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -372,7 +377,7 @@ describe('sub-agent external write approval chain', () => {
   test('full mode without full_access still triggers need_tool_approval for external write', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-full-noauth-extwrite-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-full-noauth',
           name: 'write_file',
@@ -380,7 +385,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -484,7 +488,7 @@ describe('sub-agent external write approval chain', () => {
       writeFileSync(join(workspace, 'existing.txt'), 'hello inside');
 
       // Read with absolute path inside workspace
-      const readReq = toolRequestFromCall(
+      const parsedRead = toolRequestFromCall(
         {
           id: 'call-absins-read',
           name: 'read_file',
@@ -492,9 +496,11 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
+      if (!parsedRead?.ok) throw new Error('Failed to build read request');
+      const readReq = parsedRead.request;
       const readResult = await runApprovedTool({
         workspace,
-        request: readReq!,
+        request: readReq,
         workspaceAccess: 'write',
         phase: 'building',
         authorization: null,
@@ -503,7 +509,7 @@ describe('sub-agent external write approval chain', () => {
       expect(readResult.totalLines).toBe(1);
 
       // Write with absolute path inside workspace
-      const writeReq = toolRequestFromCall(
+      const parsedWrite = toolRequestFromCall(
         {
           id: 'call-absins-write',
           name: 'write_file',
@@ -511,6 +517,8 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
+      if (!parsedWrite?.ok) throw new Error('Failed to build write request');
+      const writeReq = parsedWrite.request;
       const writeResult = await runApprovedTool({
         workspace,
         request: writeReq!,
@@ -529,7 +537,7 @@ describe('sub-agent external write approval chain', () => {
   test('read_file rejects external path without approval grant', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-read-ext-reject-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-read-ext',
           name: 'read_file',
@@ -537,7 +545,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -563,11 +570,10 @@ describe('sub-agent external write approval chain', () => {
       // First create the external file
       writeFileSync(extPath, 'external content for read test');
 
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         { id: 'call-read-ext-granted', name: 'read_file', args: { path: extPath } },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -598,7 +604,7 @@ describe('sub-agent external write approval chain', () => {
     const extPath = join(tmpdir(), 'openpx-consistency-test.txt');
     try {
       // Step 1: write_file with approval → should succeed
-      const writeReq = toolRequestFromCall(
+      const writeReq = parseRequest(
         {
           id: 'call-cons-write',
           name: 'write_file',
@@ -606,7 +612,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!writeReq) throw new Error('Failed to build write request');
 
       const writeResult = await runApprovedTool({
         workspace,
@@ -619,11 +624,10 @@ describe('sub-agent external write approval chain', () => {
       expect(writeResult.ok).toBe(true);
 
       // Step 2: read_file with same approval → should also succeed
-      const readReq = toolRequestFromCall(
+      const readReq = parseRequest(
         { id: 'call-cons-read', name: 'read_file', args: { path: extPath } },
         workspace,
       );
-      if (!readReq) throw new Error('Failed to build read request');
 
       const readResult = await runApprovedTool({
         workspace,
@@ -651,11 +655,10 @@ describe('sub-agent external write approval chain', () => {
   test('search_files rejects external path without approval grant', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-search-ext-reject-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         { id: 'call-search-ext', name: 'search_files', args: { path: '/tmp', pattern: '*.txt' } },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -680,7 +683,7 @@ describe('sub-agent external write approval chain', () => {
     try {
       writeFileSync(join(extDir, 'test.txt'), 'hello search');
 
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-search-ext-granted',
           name: 'search_files',
@@ -688,7 +691,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -715,11 +717,10 @@ describe('sub-agent external write approval chain', () => {
   test('search_content rejects external path without approval grant', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-searchcontent-reject-'));
     try {
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         { id: 'call-sc-ext', name: 'search_content', args: { path: '/tmp', pattern: 'test' } },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,
@@ -743,7 +744,7 @@ describe('sub-agent external write approval chain', () => {
     try {
       writeFileSync(join(extDir, 'match.txt'), 'hello world test line');
 
-      const request = toolRequestFromCall(
+      const request = parseRequest(
         {
           id: 'call-sc-ext-granted',
           name: 'search_content',
@@ -751,7 +752,6 @@ describe('sub-agent external write approval chain', () => {
         },
         workspace,
       );
-      if (!request) throw new Error('Failed to build request');
 
       const result = await runApprovedTool({
         workspace,

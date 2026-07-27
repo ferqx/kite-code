@@ -6,35 +6,32 @@
  */
 import { z } from 'zod';
 import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '@/core/tools/diff';
-import { type EditFileResult, editFile } from '@/core/tools/file';
+import { editFile } from '@/core/tools/file';
 import { EDIT_FILE_CONTRACT } from '@/core/tools/tool-contracts';
 import { projectionDigest, truncateProjectedLines } from '../projection';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
-export interface EditFileToolInput {
-  path: string;
-  old_string: string;
-  new_string: string;
-  replace_all?: boolean;
-}
+export const editFileInputSchema = z.object({
+  path: z.string().describe('Path to the file to edit, relative to workspace'),
+  old_string: z
+    .string()
+    .describe(
+      'The exact text to replace. Must match the file content exactly, including whitespace.',
+    ),
+  new_string: z.string().describe('The new text to replace old_string with'),
+  replace_all: z
+    .boolean()
+    .optional()
+    .describe('Replace all occurrences (default: false, fails if multiple matches found)'),
+});
 
-export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
-  name: 'edit_file' as const,
+export type EditFileToolInput = z.infer<typeof editFileInputSchema>;
+
+export const editFileSpec = defineExecutableTool({
+  name: 'edit_file',
   kind: 'computer',
   contract: EDIT_FILE_CONTRACT.sections,
-  inputSchema: z.object({
-    path: z.string().describe('Path to the file to edit, relative to workspace'),
-    old_string: z
-      .string()
-      .describe(
-        'The exact text to replace. Must match the file content exactly, including whitespace.',
-      ),
-    new_string: z.string().describe('The new text to replace old_string with'),
-    replace_all: z
-      .boolean()
-      .optional()
-      .describe('Replace all occurrences (default: false, fails if multiple matches found)'),
-  }),
+  inputSchema: editFileInputSchema,
   declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
   effects: () => ({
@@ -43,8 +40,6 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
     classificationReason: 'edit_file modifies workspace files.',
   }),
   approvalSummary: (input) => `edit_file ${input.path}`,
-  // ADR-0042 §1：先读后改 + 过期拒绝（fail-closed）。
-  // 缺少 writeTarget、路径不匹配，或 readState 不是 fresh 时一律拒绝。
   preExecute: (input, context) => {
     const target = context.writeTarget;
     if (!target) {
@@ -106,7 +101,6 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
       allowExternal: context.allowExternalPaths === true,
     }),
   projectResult: (output, context) => {
-    // invocationInput 由 Registry dispatch 注入且类型化（i1），无需强转。
     const input = context.invocationInput;
     if (!output.ok) {
       return {
@@ -153,4 +147,4 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
       display: { verb: 'Update', preview: input.path },
     };
   },
-};
+});

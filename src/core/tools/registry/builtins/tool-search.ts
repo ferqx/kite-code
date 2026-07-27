@@ -11,7 +11,7 @@ import {
 } from '@/core/capabilities/search';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { TOOL_SEARCH_CONTRACT } from '@/core/tools/tool-contracts';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 export const toolSearchInputSchema = z.object({
   query: z.string().trim().min(2).max(512).describe('Capability intent to search for'),
@@ -19,15 +19,9 @@ export const toolSearchInputSchema = z.object({
 });
 
 export type ToolSearchInput = z.infer<typeof toolSearchInputSchema>;
-type ToolSearchOutput = {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  runtimeEvents?: RuntimeEvent[];
-};
 
-export const toolSearchSpec: ToolSpec<ToolSearchInput, ToolSearchOutput> = {
-  name: 'tool_search' as const,
+export const toolSearchSpec = defineExecutableTool({
+  name: 'tool_search',
   kind: 'coordination',
   contract: TOOL_SEARCH_CONTRACT.sections,
   inputSchema: toolSearchInputSchema,
@@ -151,8 +145,9 @@ export const toolSearchSpec: ToolSpec<ToolSearchInput, ToolSearchOutput> = {
                   providerDirectoryAfter?.entries.filter((entry) =>
                     isProviderUnavailable(entry.status),
                   ).length ?? 0,
-                ...(providerDirectoryAfter &&
-                providerDirectoryAfter.entries.some((entry) => !isProviderHealthy(entry.status))
+                ...(providerDirectoryAfter?.entries.some(
+                  (entry) => !isProviderHealthy(entry.status),
+                )
                   ? {
                       non_healthy_provider_count: providerDirectoryAfter.entries.filter(
                         (entry) => !isProviderHealthy(entry.status),
@@ -171,7 +166,7 @@ export const toolSearchSpec: ToolSpec<ToolSearchInput, ToolSearchOutput> = {
               : 'No matching capability or known unavailable provider was found.',
       }),
       stderr: '',
-      runtimeEvents: [runtimeEvent],
+      runtimeEvents: [runtimeEvent] as RuntimeEvent[],
     };
   },
   projectResult: (output) => ({
@@ -181,4 +176,4 @@ export const toolSearchSpec: ToolSpec<ToolSearchInput, ToolSearchOutput> = {
     display: { verb: 'Search', preview: 'capabilities' },
     runtimeEvents: output.runtimeEvents,
   }),
-};
+});

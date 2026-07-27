@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ASK_USER_CONTRACT } from '@/core/tools/tool-contracts';
 import type { UserInputRequest } from '@/protocol/events';
-import type { ToolSpec } from '../spec';
+import { defineInterruptTool } from '../spec';
 
 const optionSchema = z.object({
   id: z.string(),
@@ -53,8 +53,8 @@ export const askUserInputSchema = z
     }),
   );
 
-export const askUserSpec: ToolSpec<UserInputRequest> = {
-  name: 'ask_user' as const,
+export const askUserSpec = defineInterruptTool({
+  name: 'ask_user',
   kind: 'interrupt',
   contract: ASK_USER_CONTRACT.sections,
   inputSchema: askUserInputSchema,
@@ -66,4 +66,4 @@ export const askUserSpec: ToolSpec<UserInputRequest> = {
     classificationReason: 'Pauses execution for explicit user input.',
   }),
   createInterrupt: (input) => input,
-};
+});

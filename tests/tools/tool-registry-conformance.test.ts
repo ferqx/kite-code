@@ -7,22 +7,36 @@ import { runApprovedTool } from '@/core/harness/tool-runner';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { sessionReadTracker } from '@/core/tools/read-state';
-import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import {
+  builtinToolRegistry,
+  type builtinToolSpecs,
+  type PendingBuiltinToolRequest,
+} from '@/core/tools/registry/builtins';
 import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
-import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
-import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
-import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
-import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
+import { type editFileInputSchema, editFileSpec } from '@/core/tools/registry/builtins/edit-file';
+import { type readFileInputSchema, readFileSpec } from '@/core/tools/registry/builtins/read-file';
+import {
+  type searchContentInputSchema,
+  searchContentSpec,
+} from '@/core/tools/registry/builtins/search-content';
+import {
+  type searchFilesInputSchema,
+  searchFilesSpec,
+} from '@/core/tools/registry/builtins/search-files';
 import {
   classifyShellActionIntent,
   projectedShellIntent,
   shellActionEnvelopeSchema,
   shellExecuteSpec,
 } from '@/core/tools/registry/builtins/shell-execute';
-import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
+import {
+  type writeFileInputSchema,
+  writeFileSpec,
+} from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { createToolRegistry } from '@/core/tools/registry/registry';
-import type { ToolContext, ToolSpec } from '@/core/tools/registry/spec';
+import type { ToolContext } from '@/core/tools/registry/spec';
+import { defineExecutableTool } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { buildDescription, KNOWN_TOOL_NAMES } from '@/core/tools/tool-contracts';
 
@@ -39,11 +53,7 @@ const CTX: ToolContext = { workspace: '/tmp/sample' };
 
 // ── 测试本地样例 spec（名称带 registry_sample_ 前缀，永不进入生产 Registry） ──
 
-interface SampleReadOutput {
-  lines: string[];
-}
-
-const sampleReadSpec: ToolSpec<{ path: string; limit?: number }, SampleReadOutput> = {
+const sampleReadSpec = defineExecutableTool({
   name: 'registry_sample_read',
   kind: 'computer',
   contract: {
@@ -64,21 +74,16 @@ const sampleReadSpec: ToolSpec<{ path: string; limit?: number }, SampleReadOutpu
     sideEffect: false,
     classificationReason: 'Sample read-only spec.',
   }),
-  execute: async (input) => ({ lines: [input.path, String(input.limit ?? 'all')] }),
+  execute: async (input) => ({ lines: [input.path, String(input.limit ?? 'all')] as string[] }),
   projectResult: (output) => ({
     ok: true,
     modelContent: output.lines.join('\n'),
     resultMeta: {},
     display: { verb: 'Read' },
   }),
-};
+});
 
-interface SampleWriteOutput {
-  path: string;
-  bytes: number;
-}
-
-const sampleWriteSpec: ToolSpec<{ path: string; content: string }, SampleWriteOutput> = {
+const sampleWriteSpec = defineExecutableTool({
   name: 'registry_sample_write',
   kind: 'computer',
   contract: {
@@ -106,7 +111,7 @@ const sampleWriteSpec: ToolSpec<{ path: string; content: string }, SampleWriteOu
     resultMeta: { workspaceMutationScope: [output.path] },
     display: { verb: 'Write' },
   }),
-};
+});
 
 function sampleRegistry() {
   return createToolRegistry().register(sampleReadSpec).register(sampleWriteSpec);
@@ -119,10 +124,7 @@ describe('ToolSpec Registry — registration behavior', () => {
 
   test('rejects names that are not stable snake_case', () => {
     for (const bad of ['Read', 'read-file', 'read_file ', '1read', '']) {
-      const spec: typeof sampleReadSpec = {
-        ...sampleReadSpec,
-        name: bad,
-      };
+      const spec = { ...sampleReadSpec, name: bad };
       expect(() => createToolRegistry().register(spec)).toThrow('snake_case');
     }
   });
@@ -149,11 +151,11 @@ describe('ToolSpec Registry — registration behavior', () => {
   });
 
   test('availability gates toolset, parsing and listing', () => {
-    const gated: ToolSpec<{ path: string }, SampleReadOutput> = {
+    const gated = defineExecutableTool({
       ...sampleReadSpec,
       name: 'registry_sample_gated',
-      availability: (context) => context.workspace === '/allowed',
-    };
+      availability: (context: ToolContext) => context.workspace === '/allowed',
+    });
     const registry = createToolRegistry().register(gated);
 
     expect(registry.availableIn({ workspace: '/allowed' })).toHaveLength(1);
@@ -711,9 +713,9 @@ describe('dispatch — spec execution sequence', () => {
   });
 
   test('preExecute rejection fails fast without executing', async () => {
-    const guarded: ToolSpec<{ path: string; content: string }, SampleWriteOutput> = {
+    const guarded = defineExecutableTool({
       ...sampleWriteSpec,
-      preExecute: (input) =>
+      preExecute: (input: { path: string; content: string }) =>
         input.path.endsWith('protected.ts')
           ? {
               proceed: false,
@@ -721,10 +723,10 @@ describe('dispatch — spec execution sequence', () => {
                 ok: false,
                 error: 'File has not been read yet.',
                 guidance: 'Read the file first, then retry the edit.',
-              },
+              } as const,
             }
           : { proceed: true },
-    };
+    });
     const rejected = await dispatchRegisteredTool(
       guarded,
       { path: 'x/protected.ts', content: '' },
@@ -737,5 +739,82 @@ describe('dispatch — spec execution sequence', () => {
 
     const allowed = await dispatchRegisteredTool(guarded, { path: 'x/open.ts', content: 'y' }, CTX);
     expect(allowed.dispatched).toBe(true);
+  });
+});
+
+// ── 编译期 name → args 关联测试（ADR-0043 §5 不变量 i1） ──
+// Compile-time name→args association tests (ADR-0043 §5 invariant i1).
+
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+
+type Expect<T extends true> = T;
+
+// --- i1.1 name === 'read_file' ⇒ args 类型匹配 Schema ---
+type ReadRequest = Extract<PendingBuiltinToolRequest, { name: 'read_file' }>;
+type ReadArgsMatchSchema = Expect<Equal<ReadRequest['args'], z.infer<typeof readFileInputSchema>>>;
+
+// --- i1.2 name === 'write_file' ⇒ args 类型匹配 Schema ---
+type WriteRequest = Extract<PendingBuiltinToolRequest, { name: 'write_file' }>;
+type WriteArgsMatchSchema = Expect<
+  Equal<WriteRequest['args'], z.infer<typeof writeFileInputSchema>>
+>;
+
+// --- i1.3 name === 'edit_file' ⇒ args 类型匹配 Schema ---
+type EditRequest = Extract<PendingBuiltinToolRequest, { name: 'edit_file' }>;
+type EditArgsMatchSchema = Expect<Equal<EditRequest['args'], z.infer<typeof editFileInputSchema>>>;
+
+// --- i1.4 name === 'search_content' ⇒ args 类型匹配 Schema ---
+type SearchContentRequest = Extract<PendingBuiltinToolRequest, { name: 'search_content' }>;
+type SearchContentArgsMatchSchema = Expect<
+  Equal<SearchContentRequest['args'], z.infer<typeof searchContentInputSchema>>
+>;
+
+// --- i1.5 name === 'search_files' ⇒ args 类型匹配 Schema ---
+type SearchFilesRequest = Extract<PendingBuiltinToolRequest, { name: 'search_files' }>;
+type SearchFilesArgsMatchSchema = Expect<
+  Equal<SearchFilesRequest['args'], z.infer<typeof searchFilesInputSchema>>
+>;
+
+// --- 编译期覆盖检查：每个 const tuple 元素必须在 PendingBuiltinToolRequest 中可找到 ---
+// Compile-time coverage check: every spec in the const tuple must have
+// a matching member in PendingBuiltinToolRequest.
+
+type BuiltinSpec = (typeof builtinToolSpecs)[number];
+type BuiltinName = BuiltinSpec['name'];
+
+type NamesFromUnion = PendingBuiltinToolRequest['name'];
+type AllBuiltinNamesCovered = Expect<Equal<BuiltinName, NamesFromUnion>>;
+
+// 运行时占位符，消耗编译期类型变量以通过 noUnusedLocals
+describe('compile-time name → args invariants', () => {
+  test('read_file args match schema', () => {
+    const _assert: ReadArgsMatchSchema = true;
+    expect(_assert).toBe(true);
+  });
+
+  test('write_file args match schema', () => {
+    const _assert: WriteArgsMatchSchema = true;
+    expect(_assert).toBe(true);
+  });
+
+  test('edit_file args match schema', () => {
+    const _assert: EditArgsMatchSchema = true;
+    expect(_assert).toBe(true);
+  });
+
+  test('search_content args match schema', () => {
+    const _assert: SearchContentArgsMatchSchema = true;
+    expect(_assert).toBe(true);
+  });
+
+  test('search_files args match schema', () => {
+    const _assert: SearchFilesArgsMatchSchema = true;
+    expect(_assert).toBe(true);
+  });
+
+  test('all builtin names covered in PendingBuiltinToolRequest', () => {
+    const _assert: AllBuiltinNamesCovered = true;
+    expect(_assert).toBe(true);
   });
 });

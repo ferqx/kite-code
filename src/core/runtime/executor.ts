@@ -242,11 +242,11 @@ async function executeAutoReview(
   const call = state.tools.calls[effect.toolCallId];
   if (!call || state.interactions.kind !== 'awaiting_auto_review') return [];
 
-  const request = toolRequestFromCall(
+  const parsed = toolRequestFromCall(
     { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
     { workspace: state.session.workspace, threadId: state.session.threadId },
   );
-  if (!request) {
+  if (!parsed?.ok) {
     return [
       {
         type: 'auto_review.completed',
@@ -255,13 +255,14 @@ async function executeAutoReview(
         result: {
           ok: false,
           approved: false,
-          reason: 'Unsupported tool',
+          reason: 'Unsupported or invalid tool',
           reviewerModelName: '',
           durationMs: 0,
         },
       },
     ];
   }
+  const request = parsed.request;
 
   const startTime = Date.now();
   try {

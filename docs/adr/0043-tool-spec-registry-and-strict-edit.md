@@ -115,3 +115,14 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 - 所有 19 个 builtin spec 导出 `z.infer` 的 Input 类型。tool-runner 与 tool-controller 在每个工具分支入口用一行 `as XxxInput` 收窄 args，替代散落的逐字段 cast。
 
 - `PendingToolRequest` 拆分为 `PendingBuiltinToolRequest | PendingMcpToolRequest`。Builtin 侧通过 `MakeRequest<'name', InputType>` 手工维护可辨识联合（19 行），TypeScript 在 `request.name === '...'` 守卫后自动收窄 `request.args` 到对应 Input 类型——不再需要 `as XxxInput` 手动 cast。MCP 侧保持 `Record<string,unknown>`。
+
+### 2026-07-27：类型单一事实源（消除手写联合与类型擦除）
+
+- **`ToolSpec<Name, Input, Output>` 泛型化**：`BaseToolSpec` 新增 `Name extends string` 参数，`name` 字段类型从 `string` 收紧为字面量。`defineExecutableTool` / `defineInterruptTool` 使用 `const` type parameter 保留字面量推导，替代旧的 `const spec: ToolSpec<Input, Output> = { name: '...' as const }` 模式（外部类型标注会擦除 `as const`）。
+- **所有 Input 从 Schema 派生**：5 个手写 interface（`ReadFileInput`、`WriteFileToolInput`、`EditFileToolInput`、`SearchContentInput`、`SearchFilesInput`）替换为 `z.infer<typeof xxxInputSchema>`。每个 spec 文件导出命名 Schema const，消除 interface 与 Schema 的漂移风险。
+- **Registry 从 const tuple 构建**：`builtinToolRegistry = createToolRegistry(builtinToolSpecs)`，删除 19 行 `.register()` 链。`createToolRegistry` 接受 `readonly AnyToolSpec[]` 并返回 `ToolRegistry<Specs[number]>`。
+- **`PendingBuiltinToolRequest` 自动推导**：删除 19 行手写 `MakeRequest` 联合，替换为分布式条件类型 `RequestOf<BuiltinSpec>`（从 `builtinToolSpecs` tuple 推导）。新增工具只需在 tuple 追加一行。
+- **`parseToolCall` 类型化返回**：`ToolRegistry<Spec>` 泛型化，`parseToolCall` 返回 `ParseResultOf<Spec> | ParseFailure | null`。唯一允许的异构类型断言位于 Registry 内部紧跟 `safeParse` 之后；Registry 外部不再恢复参数类型。
+- **无效调用分离**：`InvalidToolRequest`（`source: 'invalid'`）独立建模，不混入 `PendingToolRequest` 联合。`toolRequestFromCall` 返回 `ToolRequestParseResult | null`，调用方在 `!parsed.ok` 时生成错误事件，`runApprovedTool` 不再处理 `_raw_invalid_args`。
+- **`isMcpRequest` type guard**：替代 `request.name.startsWith('mcp__')` 的不可缩窄模式，使 MCP 分支内 `request.args` 自动收窄为 `Record<string, unknown>`。
+- **编译期不变量测试**：`Equal` / `Expect` 类型断言验证 `name === 'read_file' ⇒ args ≡ z.infer<typeof readFileInputSchema>`，以及 `BuiltinName ≡ PendingBuiltinToolRequest['name']` 覆盖检查。

@@ -528,9 +528,9 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
   });
 
   function requestOf(name: string, args: Record<string, unknown>): PendingToolRequest {
-    const request = toolRequestFromCall({ id: 'capture-call', name, args }, workspace);
-    expect(request).not.toBeNull();
-    return request!;
+    const result = toolRequestFromCall({ id: 'capture-call', name, args }, workspace);
+    if (!result?.ok) throw new Error(`Failed to build request for ${name}`);
+    return result.request;
   }
 
   it('captures the pre-image before write_file overwrites an existing file', async () => {

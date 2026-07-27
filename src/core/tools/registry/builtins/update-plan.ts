@@ -1,8 +1,7 @@
 import { z } from 'zod';
-import type { RuntimeActionEmission } from '@/core/runtime/action-emission';
 import { updatePlanAction } from '@/core/runtime/plan-facade';
 import { UPDATE_PLAN_CONTRACT } from '@/core/tools/tool-contracts';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 export const updatePlanInputSchema = z.object({
   plan_id: z.string().min(1).describe('Plan ID from the approved plan'),
@@ -21,11 +20,8 @@ export const updatePlanInputSchema = z.object({
 
 export type UpdatePlanInput = z.infer<typeof updatePlanInputSchema>;
 
-export const updatePlanSpec: ToolSpec<
-  z.infer<typeof updatePlanInputSchema>,
-  RuntimeActionEmission
-> = {
-  name: 'update_plan' as const,
+export const updatePlanSpec = defineExecutableTool({
+  name: 'update_plan',
   kind: 'runtime_action',
   contract: UPDATE_PLAN_CONTRACT.sections,
   inputSchema: updatePlanInputSchema,
@@ -38,7 +34,12 @@ export const updatePlanSpec: ToolSpec<
   }),
   execute: async (input, context) => {
     if (!context.planRuntime) {
-      return { ok: false, stdout: '', stderr: 'Plan Runtime is unavailable.' };
+      return {
+        ok: false,
+        stdout: '',
+        stderr: 'Plan Runtime is unavailable.',
+        runtimeEvents: undefined,
+      };
     }
     return updatePlanAction(context.planRuntime, context.toolCallId ?? '', input);
   },
@@ -49,4 +50,4 @@ export const updatePlanSpec: ToolSpec<
     display: { verb: 'Update', preview: 'Plan' },
     runtimeEvents: output.runtimeEvents,
   }),
-};
+});

@@ -4,7 +4,7 @@ import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { buildToolApproval } from '@/core/harness/tool-policy';
-import { toolRequestFromCall } from '@/core/harness/tool-requests';
+import { isMcpRequest, toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import {
@@ -51,7 +51,6 @@ import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import type { ReadMcpResourceInput } from '@/core/tools/registry/builtins/mcp-inventory';
 import { readPlanSpec } from '@/core/tools/registry/builtins/read-plan';
 import {
-  type ActivateSkillInput,
   activateSkillSpec,
   completeSkillSpec,
   readSkillReferenceSpec,
@@ -330,7 +329,7 @@ async function handleSubAgentResume(params: {
     ),
     phase: getAgentPhase(getActivePlanning(params.state)),
   });
-  const blockedRequest = toolRequestFromCall(
+  const blockedParsed = toolRequestFromCall(
     {
       id: params.toolCallId,
       name: blockedToolName,
@@ -340,7 +339,8 @@ async function handleSubAgentResume(params: {
   );
 
   let toolResult: ToolExecutionResult;
-  if (blockedRequest) {
+  if (blockedParsed?.ok) {
+    const blockedRequest = blockedParsed.request;
     const resumedBinding = call?.bindingId
       ? params.state.capabilities.bindings[call.bindingId]
       : undefined;
@@ -539,19 +539,11 @@ export async function executeRuntimeTools(params: {
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
-    const request = toolRequestFromCall(
+    const parsed = toolRequestFromCall(
       { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
       availCtx,
     );
-    if (!request) {
-      if (builtinToolRegistry.get(call.name)) {
-        events.push({
-          type: 'tool.failed',
-          toolCallId,
-          failure: classifyFailure('tool_invalid_args', `Invalid arguments for '${call.name}'.`),
-        });
-        continue;
-      }
+    if (!parsed) {
       events.push({
         type: 'tool.failed',
         toolCallId,
@@ -559,12 +551,21 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
+    if (!parsed.ok) {
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure('tool_invalid_args', parsed.request.parseError),
+      });
+      continue;
+    }
+    const request = parsed.request;
     const ceilingViolation = skillCapabilityCeilingViolation(params.state, call, request);
     if (ceilingViolation) {
       events.push({ type: 'tool.rejected', toolCallId, reason: ceilingViolation });
       continue;
     }
-    if (request.name.startsWith('mcp__')) {
+    if (isMcpRequest(request)) {
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
       const binding = call.bindingId
         ? params.state.capabilities.bindings[call.bindingId]
@@ -605,7 +606,7 @@ export async function executeRuntimeTools(params: {
                   : (() => {
                       const reason = validateCapabilityArguments(
                         descriptor.inputSchema,
-                        request.args as Record<string, unknown>,
+                        request.args,
                       );
                       return reason ? classifyFailure('tool_invalid_args', reason) : undefined;
                     })();
@@ -667,7 +668,7 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'activate_skill') {
-      const skillInput = request.args as ActivateSkillInput;
+      const skillInput = request.args;
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
       const descriptor = params.skillCatalog?.capabilities.descriptors.find(
         (candidate) => candidate.capabilityId === skillInput.skill_id,
@@ -694,7 +695,7 @@ export async function executeRuntimeTools(params: {
         };
         const activationDecision = evaluateToolApproval({
           toolName: 'mcp__skill__activation',
-          toolArgs: request.args as Record<string, unknown>,
+          toolArgs: request.args,
           phase: getAgentPhase(getActivePlanning(params.state)),
           workspace: params.state.session.workspace,
           threadId: params.state.session.threadId,

@@ -6,7 +6,7 @@ import {
   READ_MCP_RESOURCE_CONTRACT,
 } from '@/core/tools/tool-contracts';
 import { projectionDigest } from '../projection';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;
 
@@ -27,25 +27,14 @@ export type ListMcpResourcesInput = z.infer<typeof listMcpResourcesInputSchema>;
 export type ListMcpToolsInput = z.infer<typeof listMcpToolsInputSchema>;
 export type ReadMcpResourceInput = z.infer<typeof readMcpResourceInputSchema>;
 
-type McpSpecOutput = {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  rawContent?: string;
-  truncated?: boolean;
-};
-
 const readOnlyEffects = () => ({
   effectClass: 'read_only' as const,
   sideEffect: false,
   classificationReason: 'Reads governed MCP inventory or static resource content.',
 });
 
-export const listMcpResourcesSpec: ToolSpec<
-  z.infer<typeof listMcpResourcesInputSchema>,
-  McpSpecOutput
-> = {
-  name: 'list_mcp_resources' as const,
+export const listMcpResourcesSpec = defineExecutableTool({
+  name: 'list_mcp_resources',
   kind: 'coordination',
   contract: LIST_MCP_RESOURCES_CONTRACT.sections,
   inputSchema: listMcpResourcesInputSchema,
@@ -111,15 +100,14 @@ export const listMcpResourcesSpec: ToolSpec<
   projectResult: (output) => ({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
-    // execute 产出的已是模型就绪文本：逐流透传，Runner 不得按 ok 重新分流。
     streams: { stdout: output.stdout, stderr: output.stderr },
     resultMeta: {},
     display: { verb: 'List', preview: 'MCP resources' },
   }),
-};
+});
 
-export const listMcpToolsSpec: ToolSpec<z.infer<typeof listMcpToolsInputSchema>, McpSpecOutput> = {
-  name: 'list_mcp_tools' as const,
+export const listMcpToolsSpec = defineExecutableTool({
+  name: 'list_mcp_tools',
   kind: 'coordination',
   contract: LIST_MCP_TOOLS_CONTRACT.sections,
   inputSchema: listMcpToolsInputSchema,
@@ -152,19 +140,14 @@ export const listMcpToolsSpec: ToolSpec<z.infer<typeof listMcpToolsInputSchema>,
   projectResult: (output) => ({
     ok: output.ok,
     modelContent: output.stdout,
-    // 契约要求结构化拒绝（如 stale_cursor）与成功页同为 stdout JSON：
-    // 逐流透传，失败时模型仍从 stdout 读到机器可读载荷。
     streams: { stdout: output.stdout, stderr: output.stderr },
     resultMeta: {},
     display: { verb: 'List', preview: 'MCP tools' },
   }),
-};
+});
 
-export const readMcpResourceSpec: ToolSpec<
-  z.infer<typeof readMcpResourceInputSchema>,
-  McpSpecOutput
-> = {
-  name: 'read_mcp_resource' as const,
+export const readMcpResourceSpec = defineExecutableTool({
+  name: 'read_mcp_resource',
   kind: 'coordination',
   contract: READ_MCP_RESOURCE_CONTRACT.sections,
   inputSchema: readMcpResourceInputSchema,
@@ -218,7 +201,6 @@ export const readMcpResourceSpec: ToolSpec<
   projectResult: (output) => ({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
-    // execute 产出的已是模型就绪文本：逐流透传，Runner 不得按 ok 重新分流。
     streams: { stdout: output.stdout, stderr: output.stderr },
     resultMeta: {
       ...(output.rawContent ? { rawResultDigest: projectionDigest(output.rawContent, '', 0) } : {}),
@@ -226,4 +208,4 @@ export const readMcpResourceSpec: ToolSpec<
     },
     display: { verb: 'Read', preview: 'MCP resource' },
   }),
-};
+});

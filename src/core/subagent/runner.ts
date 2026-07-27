@@ -540,7 +540,7 @@ async function runSubAgentLoop(
         let ok = true;
         let totalLines: number | undefined;
         try {
-          const pendingRequest = toolRequestFromCall(
+          const parsed = toolRequestFromCall(
             {
               id: tc.id ?? `subagent-${toolCallCount}`,
               name: tc.name,
@@ -548,9 +548,12 @@ async function runSubAgentLoop(
             },
             { workspace: input.workspace },
           );
-          if (!pendingRequest) {
-            throw new Error(`Unknown tool requested by sub-agent: ${tc.name}`);
+          if (!parsed?.ok) {
+            throw new Error(
+              `Unknown or invalid tool requested by sub-agent: ${tc.name}${parsed ? ` — ${parsed.request.parseError}` : ''}`,
+            );
           }
+          const pendingRequest = parsed.request;
           const boundMcpDescriptor = tc.name.startsWith('mcp__')
             ? (() => {
                 const binding = mcpBindings.get(tc.name)?.binding;

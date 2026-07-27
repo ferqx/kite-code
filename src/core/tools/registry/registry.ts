@@ -12,10 +12,12 @@ import { descriptorRevision } from '@/core/capabilities/catalog';
 import type { ToolCapability } from '@/core/policies/tool-capabilities';
 import { buildDescription } from '@/core/tools/tool-contracts';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
-import type { ExecutableToolSpec, InterruptToolSpec, ToolContext } from './spec';
+import type { BaseToolSpec, ExecutableToolSpec, InterruptToolSpec, ToolContext } from './spec';
 
 // biome-ignore lint/suspicious/noExplicitAny: 异构 spec 存储需要双变参数位置
-type AnyToolSpec = ExecutableToolSpec<any, any> | InterruptToolSpec<any>;
+type AnyToolSpec = ExecutableToolSpec<string, any, any> | InterruptToolSpec<string, any>;
+// biome-ignore lint/suspicious/noExplicitAny: 同上，BaseToolSpec 层级的存在类型
+type AnyBaseSpec = BaseToolSpec<string, any>;
 
 /** schema-only 模型工具条目。execute 必须不存在（一致性不变量 i2）。 */
 export interface SchemaOnlyModelTool {
@@ -23,29 +25,34 @@ export interface SchemaOnlyModelTool {
   execute?: undefined;
 }
 
-export interface ParsedToolCallSuccess {
+export interface ParseSuccess<Name extends string, Args> {
   ok: true;
   id?: string;
-  name: string;
+  name: Name;
   /** 恒等于 inputSchema 解析结果（一致性不变量 i1）；禁止逐字段重映射。 */
-  args: unknown;
+  args: Args;
   reason: string;
   protectedCommand: string;
 }
 
-export interface ParsedToolCallFailure {
+export interface ParseFailure {
   ok: false;
   id?: string;
   name: string;
   error: string;
 }
 
-export type ParsedToolCall = ParsedToolCallSuccess | ParsedToolCallFailure;
+type ParseResultOf<Spec> = Spec extends {
+  name: infer N extends string;
+  inputSchema: z.ZodType<infer A>;
+}
+  ? ParseSuccess<N, A>
+  : never;
 
 /** 模型可见名保持 snake_case（ADR-0043 §4）。 */
 const MODEL_TOOL_NAME_PATTERN = /^[a-z][a-z0-9_]*$/;
 
-export class ToolRegistry {
+export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
   readonly #specs = new Map<string, AnyToolSpec>();
 
   /** 注册 spec。重名与非法名 fail-fast，防止静默覆盖。 */
@@ -91,11 +98,14 @@ export class ToolRegistry {
   /**
    * 泛型调用解析：lookup → availability → inputSchema 校验 → 构造请求。
    * 未注册或不可用名称返回 null，交由现有统一未知工具拒绝路径处理。
+   *
+   * Registry 成功路径使用 `safeParse` 验证 args 形态，返回值是唯一允许的
+   * 异构类型断言点 —— 紧跟 safeParse 之后，Registry 外部不得再恢复参数类型。
    */
   parseToolCall(
     call: { id?: string; name: string; args: unknown },
     context: ToolContext,
-  ): ParsedToolCall | null {
+  ): (ParseResultOf<Spec> | ParseFailure) | null {
     const spec = this.#specs.get(call.name);
     if (!spec || spec.availability?.(context) === false) {
       return null;
@@ -107,15 +117,17 @@ export class ToolRegistry {
       const message = issue ? `${path}${issue.message}` : 'invalid arguments';
       return { ok: false, id: call.id, name: call.name, error: message };
     }
-    // args 透传：恒等于 schema 解析结果（i1），不做任何逐字段重映射。
+    // 唯一允许的异构类型断言 — Registry 内部紧跟 safeParse。
+    // The single allowed heterogeneous type assertion — inside the Registry,
+    // immediately after safeParse.
     return {
-      ok: true,
+      ok: true as const,
       id: call.id,
       name: call.name,
       args: parsed.data,
       reason: `Model requested ${call.name}`,
       protectedCommand: spec.approvalSummary?.(parsed.data, context) ?? call.name,
-    };
+    } as unknown as ParseResultOf<Spec>;
   }
 
   /** 从 Registry spec 计算审批唯一输入；未知、不可用或参数无效时返回 undefined。 */
@@ -153,6 +165,18 @@ export class ToolRegistry {
   }
 }
 
-export function createToolRegistry(): ToolRegistry {
-  return new ToolRegistry();
+/** 工厂：从 const tuple 构建类型化 Registry。tuple 的 const 断言保留 name 字面量与 Input 类型。 */
+export function createToolRegistry<const Specs extends readonly AnyToolSpec[]>(
+  specs: Specs,
+): ToolRegistry<Specs[number]>;
+/** 无参重载：向后兼容测试与手动 register 链。 */
+export function createToolRegistry(): ToolRegistry;
+export function createToolRegistry(specs?: readonly AnyToolSpec[]): ToolRegistry<AnyToolSpec> {
+  const reg = new ToolRegistry();
+  if (specs) {
+    for (const spec of specs) {
+      reg.register(spec);
+    }
+  }
+  return reg as ToolRegistry<AnyToolSpec>;
 }

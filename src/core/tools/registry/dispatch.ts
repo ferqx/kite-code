@@ -18,7 +18,7 @@ export type DispatchOutcome<Output> =
   | { dispatched: false; rejection: { ok: false; error: string; guidance?: string } };
 
 export async function dispatchRegisteredTool<Input, Output>(
-  spec: ExecutableToolSpec<Input, Output>,
+  spec: ExecutableToolSpec<string, Input, Output>,
   input: Input,
   context: ToolExecutionContext,
 ): Promise<DispatchOutcome<Output>> {

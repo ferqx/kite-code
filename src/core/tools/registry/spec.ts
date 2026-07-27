@@ -6,7 +6,7 @@
  * descriptor 投影都从同一份 spec 派生，消除"一个工具定义在六处手工同步"
  * 造成的漂移。见 `docs/design/2026-07-26-tool-spec-registry-rfc.md`。
  */
-import type { ZodType } from 'zod';
+import type { z } from 'zod';
 import type { FeatureFlags } from '@/core/config/features';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
@@ -142,9 +142,9 @@ export type PreExecuteOutcome =
   | { proceed: true }
   | { proceed: false; rejection: { ok: false; error: string; guidance?: string } };
 
-interface BaseToolSpec<Input = unknown> {
+export interface BaseToolSpec<Name extends string = string, Input = unknown> {
   /** 模型可见名；稳定 snake_case（ADR-0043 §4 决定不改名）。 */
-  readonly name: string;
+  readonly name: Name;
   readonly kind: ToolKind;
   /** 契约文本唯一来源；description 由 buildDescription(sections) 派生，不存在第二份手写描述。 */
   readonly contract: ToolContractSection;
@@ -152,7 +152,7 @@ interface BaseToolSpec<Input = unknown> {
    * 模型参数 Schema。execute 接收的对象恒等于该 Schema 的解析结果
    * （一致性不变量 i1），请求解析层不得逐字段重映射。
    */
-  readonly inputSchema: ZodType<Input>;
+  readonly inputSchema: z.ZodType<Input>;
   /** 静态声明效果 — CapabilityDescriptor 投影输入。 */
   readonly declaredEffects: EffectProfile;
   /** 静态最低审批 — CapabilityDescriptor 投影输入。 */
@@ -172,7 +172,8 @@ interface BaseToolSpec<Input = unknown> {
   ): PreExecuteOutcome | Promise<PreExecuteOutcome>;
 }
 
-export interface ExecutableToolSpec<Input = unknown, Output = unknown> extends BaseToolSpec<Input> {
+export interface ExecutableToolSpec<Name extends string = string, Input = unknown, Output = unknown>
+  extends BaseToolSpec<Name, Input> {
   readonly kind: Exclude<ToolKind, 'interrupt'>;
   /** 唯一执行器。只有 Registry dispatch 可以调用它。 */
   execute(input: Input, context: ToolExecutionContext): Promise<Output>;
@@ -188,26 +189,43 @@ export interface ExecutableToolSpec<Input = unknown, Output = unknown> extends B
   ): ProjectedToolResult;
 }
 
-export interface InterruptToolSpec<Input = unknown> extends BaseToolSpec<Input> {
+export interface InterruptToolSpec<Name extends string = string, Input = unknown>
+  extends BaseToolSpec<Name, Input> {
   readonly kind: 'interrupt';
   /** 构造中断协议；interrupt 不存在 execute/projectResult。 */
   createInterrupt(input: Input, context: ToolContext): Input;
 }
 
-export type ToolSpec<Input = unknown, Output = never> = [Output] extends [never]
-  ? InterruptToolSpec<Input>
-  : ExecutableToolSpec<Input, Output>;
+export type ToolSpec<Name extends string = string, Input = unknown, Output = never> = [
+  Output,
+] extends [never]
+  ? InterruptToolSpec<Name, Input>
+  : ExecutableToolSpec<Name, Input, Output>;
 
-/** const tuple 类型推导用 — 保持 ToolSpec 签名不变，同时加持 `name` 为字面量类型。 */
-export function declareToolSpec<Input, Output>(
-  spec: ToolSpec<Input, Output>,
-): ToolSpec<Input, Output> {
+/** const tuple 类型推导用 — 保持 literal name 类型，同时加持 const Input/Output 推导。 */
+export function defineExecutableTool<const Name extends string, const Input, const Output>(
+  spec: ExecutableToolSpec<Name, Input, Output>,
+): ExecutableToolSpec<Name, Input, Output> {
   return spec;
 }
 
 /** const tuple 类型推导用 — Interrupt 变体。 */
+export function defineInterruptTool<const Name extends string, const Input>(
+  spec: InterruptToolSpec<Name, Input>,
+): InterruptToolSpec<Name, Input> {
+  return spec;
+}
+
+/** @deprecated 使用 defineExecutableTool / defineInterruptTool 以保留 name 字面量类型。 */
+export function declareToolSpec<Input, Output>(
+  spec: ToolSpec<string, Input, Output>,
+): ToolSpec<string, Input, Output> {
+  return spec;
+}
+
+/** @deprecated 使用 defineInterruptTool 以保留 name 字面量类型。 */
 export function declareInterruptTool<Input>(
-  spec: InterruptToolSpec<Input>,
-): InterruptToolSpec<Input> {
+  spec: InterruptToolSpec<string, Input>,
+): InterruptToolSpec<string, Input> {
   return spec;
 }

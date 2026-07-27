@@ -11,7 +11,8 @@
         "docs/book/04-Agent引擎.md",
         "docs/book/10-持久化与会话管理.md",
         "docs/adr/0025-model-requested-live-emission.md",
-        "docs/adr/0042-file-tool-semantics-and-write-safety.md"
+        "docs/adr/0042-file-tool-semantics-and-write-safety.md",
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {

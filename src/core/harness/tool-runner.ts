@@ -37,7 +37,6 @@ import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
-import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type {
   AuthorizationOverride,
   ShellNetworkMode,
@@ -50,7 +49,7 @@ import type {
   WorkspaceAccess,
 } from '@/protocol/events';
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
-import type { PendingToolRequest } from './tool-requests';
+import { isMcpRequest, type PendingToolRequest } from './tool-requests';
 import type { ToolExecutionResult } from './tool-result';
 
 function resultContentDigest(stdout: string, stderr: string, exitCode: number): string {
@@ -158,25 +157,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     subagentEventSink,
     availabilityContext,
   } = input;
-  // 合成调用：parseToolCall 失败后由 invokeModel 注入 _raw_invalid_args 标记。
-  // 跳过正常执行，直接生成工具特定的错误反馈让模型重试。
-  // Synthetic call: injected by invokeModel after parseToolCall failure.
-  // Skip normal execution, generate tool-specific error so model can retry.
-  const args = (request.args ?? {}) as Record<string, unknown>;
-  if (typeof args._raw_invalid_args === 'string') {
-    const errDetail = formatToolParseError(
-      request.name,
-      args._raw_invalid_args,
-      (args._parse_error as string) ?? 'invalid JSON arguments',
-    );
-    return {
-      ok: false,
-      command: request.name,
-      exitCode: -1,
-      stdout: '',
-      stderr: errDetail,
-    };
-  }
 
   const policy = evaluateToolApproval({
     toolName: request.name,
@@ -689,7 +669,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
-    const command = `read_mcp_resource ${args.server ?? ''}`;
+    const command = `read_mcp_resource ${request.args.server ?? ''}`;
     const projected = dispatched.projected;
     return withFailureGuidance(request, {
       ok: projected.ok,
@@ -702,7 +682,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
   }
 
-  if (request.name.startsWith('mcp__')) {
+  if (isMcpRequest(request)) {
     if (!mcpManager) {
       return withFailureGuidance(request, {
         ok: false,
@@ -726,7 +706,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       const raw = await mcpManager.callCapability({
         capabilityId: mcpInvocation.capabilityId,
         expectedRevision: mcpInvocation.expectedRevision,
-        arguments: request.args as unknown as Record<string, unknown>,
+        arguments: request.args,
         signal,
       });
       const rawContent = JSON.stringify(raw);

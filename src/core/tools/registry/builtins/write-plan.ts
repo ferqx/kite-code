@@ -1,8 +1,7 @@
 import { z } from 'zod';
-import type { RuntimeActionEmission } from '@/core/runtime/action-emission';
 import { writePlanAction } from '@/core/runtime/plan-facade';
 import { WRITE_PLAN_CONTRACT } from '@/core/tools/tool-contracts';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 const documentFields = {
   title: z.string().trim().min(1).max(200),
@@ -56,11 +55,8 @@ export const writePlanInputSchema = z
 
 export type WritePlanInput = z.infer<typeof writePlanInputSchema>;
 
-export const writePlanSpec: ToolSpec<
-  z.infer<typeof writePlanInputSchema>,
-  RuntimeActionEmission
-> = {
-  name: 'write_plan' as const,
+export const writePlanSpec = defineExecutableTool({
+  name: 'write_plan',
   kind: 'runtime_action',
   contract: WRITE_PLAN_CONTRACT.sections,
   inputSchema: writePlanInputSchema,
@@ -73,7 +69,12 @@ export const writePlanSpec: ToolSpec<
   }),
   execute: async (input, context) => {
     if (!context.planRuntime) {
-      return { ok: false, stdout: '', stderr: 'Plan Runtime is unavailable.' };
+      return {
+        ok: false,
+        stdout: '',
+        stderr: 'Plan Runtime is unavailable.',
+        runtimeEvents: undefined,
+      };
     }
     return writePlanAction(context.planRuntime, context.toolCallId ?? '', input);
   },
@@ -84,4 +85,4 @@ export const writePlanSpec: ToolSpec<
     display: { verb: 'Write', preview: 'Plan' },
     runtimeEvents: output.runtimeEvents,
   }),
-};
+});

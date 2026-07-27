@@ -7,13 +7,20 @@
 import { z } from 'zod';
 import { readFile } from '@/core/tools/file';
 import { READ_FILE_CONTRACT } from '@/core/tools/tool-contracts';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
-export interface ReadFileInput {
-  path: string;
-  offset?: number;
-  limit?: number;
-}
+export const readFileInputSchema = z.object({
+  path: z.string().describe('Path to the file, relative to workspace'),
+  offset: z
+    .number()
+    .int()
+    .min(1)
+    .optional()
+    .describe('Starting line number (1-indexed, default 1)'),
+  limit: z.number().int().min(1).optional().describe('Maximum number of lines to read'),
+});
+
+export type ReadFileInput = z.infer<typeof readFileInputSchema>;
 
 /** 保留 readFile() 返回字段与 path，供调用方组装既有结果形状（迁移期）。 */
 export interface ReadFileOutput {
@@ -26,21 +33,11 @@ export interface ReadFileOutput {
   rawContent?: string;
 }
 
-export const readFileSpec: ToolSpec<ReadFileInput, ReadFileOutput> = {
-  name: 'read_file' as const,
+export const readFileSpec = defineExecutableTool({
+  name: 'read_file',
   kind: 'computer',
   contract: READ_FILE_CONTRACT.sections,
-  // 与原模型 Schema 逐字节一致（含 describe 文本），不产生 prompt 漂移。
-  inputSchema: z.object({
-    path: z.string().describe('Path to the file, relative to workspace'),
-    offset: z
-      .number()
-      .int()
-      .min(1)
-      .optional()
-      .describe('Starting line number (1-indexed, default 1)'),
-    limit: z.number().int().min(1).optional().describe('Maximum number of lines to read'),
-  }),
+  inputSchema: readFileInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
   effects: () => ({
@@ -72,4 +69,4 @@ export const readFileSpec: ToolSpec<ReadFileInput, ReadFileOutput> = {
     resultMeta: { path: output.path, totalLines: output.totalLines },
     display: { verb: 'Read', preview: output.path },
   }),
-};
+});

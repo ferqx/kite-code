@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import type { SubAgentResult } from '@/core/subagent/types';
 import { TASK_CONTRACT } from '@/core/tools/tool-contracts';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 export const taskInputSchema = z.object({
   subagent_type: z
@@ -16,10 +15,9 @@ export const taskInputSchema = z.object({
 });
 
 export type TaskInput = z.infer<typeof taskInputSchema>;
-type TaskOutput = { available: true; result: SubAgentResult } | { available: false; error: string };
 
-export const taskSpec: ToolSpec<TaskInput, TaskOutput> = {
-  name: 'task' as const,
+export const taskSpec = defineExecutableTool({
+  name: 'task',
   kind: 'coordination',
   contract: TASK_CONTRACT.sections,
   inputSchema: taskInputSchema,
@@ -54,4 +52,4 @@ export const taskSpec: ToolSpec<TaskInput, TaskOutput> = {
       display: { verb: 'Task' },
     };
   },
-};
+});

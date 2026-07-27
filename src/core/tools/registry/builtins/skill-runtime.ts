@@ -1,8 +1,7 @@
 import { z } from 'zod';
-import type { RuntimeEvent } from '@/core/runtime/events';
 import { activateSkillLifecycle, completeSkillLifecycle, readSkillReference } from '@/core/skills';
 import type { ToolContractSection } from '@/core/tools/tool-contracts';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 const readContract: ToolContractSection = {
   whenToUse:
@@ -49,21 +48,14 @@ export type ReadSkillReferenceInput = z.infer<typeof readSkillReferenceInputSche
 export type CompleteSkillInput = z.infer<typeof completeSkillInputSchema>;
 export type ActivateSkillInput = z.infer<typeof activateSkillInputSchema>;
 
-type SkillOutput = {
-  ok: boolean;
-  stdout: string;
-  stderr: string;
-  runtimeEvents?: RuntimeEvent[];
-};
-
 const effects = () => ({
   effectClass: 'read_only' as const,
   sideEffect: false,
   classificationReason: 'Operates on the active governed Skill frame.',
 });
 
-export const activateSkillSpec: ToolSpec<z.infer<typeof activateSkillInputSchema>, SkillOutput> = {
-  name: 'activate_skill' as const,
+export const activateSkillSpec = defineExecutableTool({
+  name: 'activate_skill',
   kind: 'coordination',
   contract: activateContract,
   inputSchema: activateSkillInputSchema,
@@ -80,7 +72,12 @@ export const activateSkillSpec: ToolSpec<z.infer<typeof activateSkillInputSchema
   }),
   execute: async (input, context) => {
     if (!context.skillRuntime) {
-      return { ok: false, stdout: '', stderr: 'Skill catalog is unavailable.' };
+      return {
+        ok: false,
+        stdout: '',
+        stderr: 'Skill catalog is unavailable.',
+        runtimeEvents: undefined,
+      };
     }
     return activateSkillLifecycle(context.skillRuntime, input);
   },
@@ -91,13 +88,10 @@ export const activateSkillSpec: ToolSpec<z.infer<typeof activateSkillInputSchema
     display: { verb: 'Activate', preview: 'Skill' },
     runtimeEvents: output.runtimeEvents,
   }),
-};
+});
 
-export const readSkillReferenceSpec: ToolSpec<
-  z.infer<typeof readSkillReferenceInputSchema>,
-  SkillOutput
-> = {
-  name: 'read_skill_reference' as const,
+export const readSkillReferenceSpec = defineExecutableTool({
+  name: 'read_skill_reference',
   kind: 'coordination',
   contract: readContract,
   inputSchema: readSkillReferenceInputSchema,
@@ -107,7 +101,12 @@ export const readSkillReferenceSpec: ToolSpec<
   effects,
   execute: async (input, context) => {
     if (!context.skillRuntime) {
-      return { ok: false, stdout: '', stderr: 'Skill frame is unavailable or changed.' };
+      return {
+        ok: false,
+        stdout: '',
+        stderr: 'Skill frame is unavailable or changed.',
+        runtimeEvents: undefined,
+      };
     }
     return readSkillReference(context.skillRuntime, input);
   },
@@ -117,10 +116,10 @@ export const readSkillReferenceSpec: ToolSpec<
     resultMeta: {},
     display: { verb: 'Read', preview: 'Skill reference' },
   }),
-};
+});
 
-export const completeSkillSpec: ToolSpec<z.infer<typeof completeSkillInputSchema>, SkillOutput> = {
-  name: 'complete_skill' as const,
+export const completeSkillSpec = defineExecutableTool({
+  name: 'complete_skill',
   kind: 'coordination',
   contract: completeContract,
   inputSchema: completeSkillInputSchema,
@@ -130,7 +129,12 @@ export const completeSkillSpec: ToolSpec<z.infer<typeof completeSkillInputSchema
   effects,
   execute: async (input, context) => {
     if (!context.skillRuntime) {
-      return { ok: false, stdout: '', stderr: 'Skill frame is unavailable or changed.' };
+      return {
+        ok: false,
+        stdout: '',
+        stderr: 'Skill frame is unavailable or changed.',
+        runtimeEvents: undefined,
+      };
     }
     return completeSkillLifecycle(context.skillRuntime, input);
   },
@@ -141,4 +145,4 @@ export const completeSkillSpec: ToolSpec<z.infer<typeof completeSkillInputSchema
     display: { verb: 'Complete', preview: 'Skill' },
     runtimeEvents: output.runtimeEvents,
   }),
-};
+});

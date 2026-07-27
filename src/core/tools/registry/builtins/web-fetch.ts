@@ -3,7 +3,7 @@ import { WEB_FETCH_CONTRACT } from '@/core/tools/tool-contracts';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { WebFetchResult } from '@/core/web/types';
 import { projectionDigest, truncateProjectedOutput } from '../projection';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 export const webFetchInputSchema = z.object({
   url: z.string().min(1).max(8192).describe('Public http/https URL to fetch (max 8192 chars)'),
@@ -26,10 +26,9 @@ export const webFetchInputSchema = z.object({
 });
 
 export type WebFetchInput = z.infer<typeof webFetchInputSchema>;
-type WebFetchOutput = WebFetchResult & { aborted?: boolean; timedOut?: boolean };
 
-export const webFetchSpec: ToolSpec<WebFetchInput, WebFetchOutput> = {
-  name: 'web_fetch' as const,
+export const webFetchSpec = defineExecutableTool({
+  name: 'web_fetch',
   kind: 'computer',
   contract: WEB_FETCH_CONTRACT.sections,
   inputSchema: webFetchInputSchema,
@@ -41,7 +40,10 @@ export const webFetchSpec: ToolSpec<WebFetchInput, WebFetchOutput> = {
     classificationReason: 'Fetches public web content without external mutation.',
   }),
   approvalSummary: (input) => `web_fetch ${input.url}`,
-  execute: async (input, context) => {
+  execute: async (
+    input,
+    context,
+  ): Promise<WebFetchResult & { aborted?: boolean; timedOut?: boolean }> => {
     try {
       return await fetchAndExtract(input.url, {
         signal: context.signal,
@@ -68,7 +70,6 @@ export const webFetchSpec: ToolSpec<WebFetchInput, WebFetchOutput> = {
     }
   },
   projectResult: (output, context) => {
-    // invocationInput 由 Registry dispatch 注入且类型化（i1），无需强转。
     const input = context.invocationInput;
     const rawContent = output.ok
       ? [
@@ -97,4 +98,4 @@ export const webFetchSpec: ToolSpec<WebFetchInput, WebFetchOutput> = {
       display: { verb: 'Fetch' },
     };
   },
-};
+});

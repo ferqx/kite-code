@@ -2,9 +2,9 @@
  * 生产静态工具 Registry（ADR-0043）。
  * Production registry for static builtin tools (ADR-0043).
  *
- * 阶段 1.2 逐工具迁移：每个工具的 Schema、契约、解析、分类与执行器
- * 收敛到 spec；未迁移工具继续走 definitions.ts + tool-runner 旧路径。
- * 六个计算原语已完成 Registry 切换；旧执行路径和迁移 flag 已退役。
+ * 每个工具的 Schema、契约、解析、分类与执行器收敛到 spec；const tuple
+ * `builtinToolSpecs` 是所有类型的单一事实源 —— PendingBuiltinToolRequest
+ * 从 tuple 自动推导，新增工具只需在 tuple 中追加一行，无需同步手写联合。
  */
 
 import { askUserSpec } from './builtins/ask-user';
@@ -30,12 +30,12 @@ import { updatePlanSpec } from './builtins/update-plan';
 import { webFetchSpec } from './builtins/web-fetch';
 import { writeFileSpec } from './builtins/write-file';
 import { writePlanSpec } from './builtins/write-plan';
-import { createToolRegistry } from './registry';
+import { createToolRegistry, type ToolRegistry } from './registry';
 
 /**
  * Const tuple of all builtin tool specs — preserves literal `name` types
- * for deriving `BuiltinToolName` and `PendingBuiltinToolRequest`.
- * The Registry (.register()) still operates via the class for runtime lookup.
+ * via `defineExecutableTool` / `defineInterruptTool`. This is the single source
+ * of truth from which `PendingBuiltinToolRequest` and the registry are derived.
  */
 export const builtinToolSpecs = [
   askUserSpec,
@@ -59,57 +59,22 @@ export const builtinToolSpecs = [
   writePlanSpec,
 ] as const;
 
-export const builtinToolRegistry = createToolRegistry()
-  .register(askUserSpec)
-  .register(readFileSpec)
-  .register(readPlanSpec)
-  .register(searchContentSpec)
-  .register(searchFilesSpec)
-  .register(shellExecuteSpec)
-  .register(writeFileSpec)
-  .register(editFileSpec)
-  .register(webFetchSpec)
-  .register(listMcpResourcesSpec)
-  .register(listMcpToolsSpec)
-  .register(readMcpResourceSpec)
-  .register(taskSpec)
-  .register(toolSearchSpec)
-  .register(readSkillReferenceSpec)
-  .register(completeSkillSpec)
-  .register(activateSkillSpec)
-  .register(updatePlanSpec)
-  .register(writePlanSpec);
+/** Registry instance built directly from the const tuple. */
+export const builtinToolRegistry: ToolRegistry<(typeof builtinToolSpecs)[number]> =
+  createToolRegistry(builtinToolSpecs);
+
+type BuiltinSpec = (typeof builtinToolSpecs)[number];
+
+type RequestOf<Spec> = Spec extends {
+  name: infer N extends string;
+  inputSchema: import('zod').ZodType<infer A>;
+}
+  ? { id?: string; name: N; args: A; reason: string; protectedCommand: string }
+  : never;
 
 /**
- * 可辨识工具请求联合 — name→args 关联由对应 spec 的 Input 类型保证。
- * 从 const tuple 元素推导，每个 spec 的 Zod Input 类型是 args 的单一来源。
- * 新增工具时在此加一行即可，编译期自动校验 args 类型与 spec 一致。
+ * 可辨识工具请求联合 — name→args 关联由对应 spec 的 Input 类型自动保证。
+ * 从 const tuple 推导，每项 spec 的 Zod Input 类型是 args 的单一来源。
+ * 新增工具：只需在 builtinToolSpecs 中追加一行即可。
  */
-export type PendingBuiltinToolRequest =
-  | MakeRequest<'ask_user', import('@/protocol/events').UserInputRequest>
-  | MakeRequest<'read_file', import('./builtins/read-file').ReadFileInput>
-  | MakeRequest<'read_plan', import('./builtins/read-plan').ReadPlanInput>
-  | MakeRequest<'search_content', import('./builtins/search-content').SearchContentInput>
-  | MakeRequest<'search_files', import('./builtins/search-files').SearchFilesInput>
-  | MakeRequest<'shell_execute', import('@/core/types').ShellActionEnvelope>
-  | MakeRequest<'write_file', import('./builtins/write-file').WriteFileToolInput>
-  | MakeRequest<'edit_file', import('./builtins/edit-file').EditFileToolInput>
-  | MakeRequest<'web_fetch', import('./builtins/web-fetch').WebFetchInput>
-  | MakeRequest<'list_mcp_resources', import('./builtins/mcp-inventory').ListMcpResourcesInput>
-  | MakeRequest<'list_mcp_tools', import('./builtins/mcp-inventory').ListMcpToolsInput>
-  | MakeRequest<'read_mcp_resource', import('./builtins/mcp-inventory').ReadMcpResourceInput>
-  | MakeRequest<'task', import('./builtins/task').TaskInput>
-  | MakeRequest<'tool_search', import('./builtins/tool-search').ToolSearchInput>
-  | MakeRequest<'read_skill_reference', import('./builtins/skill-runtime').ReadSkillReferenceInput>
-  | MakeRequest<'complete_skill', import('./builtins/skill-runtime').CompleteSkillInput>
-  | MakeRequest<'activate_skill', import('./builtins/skill-runtime').ActivateSkillInput>
-  | MakeRequest<'update_plan', import('./builtins/update-plan').UpdatePlanInput>
-  | MakeRequest<'write_plan', import('./builtins/write-plan').WritePlanInput>;
-
-type MakeRequest<Name extends string, Args> = {
-  id?: string;
-  name: Name;
-  args: Args;
-  reason: string;
-  protectedCommand: string;
-};
+export type PendingBuiltinToolRequest = RequestOf<BuiltinSpec>;

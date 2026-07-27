@@ -9,9 +9,9 @@ import {
 } from '@/core/policies/shell-classification';
 import { shellTool } from '@/core/tools/shell';
 import { SHELL_EXECUTE_CONTRACT } from '@/core/tools/tool-contracts';
-import type { ShellActionEnvelope, ShellIntent, ShellResult } from '@/core/types';
+import type { ShellIntent } from '@/core/types';
 import { projectionDigest, truncateProjectedStreams } from '../projection';
-import type { ToolSpec } from '../spec';
+import { defineExecutableTool } from '../spec';
 
 export const shellActionEnvelopeSchema = z.object({
   command: z.string().describe('Shell command to execute in the workspace'),
@@ -76,8 +76,8 @@ export function projectedShellIntent(meta: { intent?: string }): ShellIntent {
     : 'other';
 }
 
-export const shellExecuteSpec: ToolSpec<ShellActionEnvelope, ShellResult> = {
-  name: 'shell_execute' as const,
+export const shellExecuteSpec = defineExecutableTool({
+  name: 'shell_execute',
   kind: 'computer',
   contract: SHELL_EXECUTE_CONTRACT.sections,
   inputSchema: shellActionEnvelopeSchema,
@@ -144,11 +144,6 @@ export const shellExecuteSpec: ToolSpec<ShellActionEnvelope, ShellResult> = {
     }
   },
   projectResult: (output) => {
-    // 双输出流逐流截断并两路保留：失败命令的 stdout（测试输出、部分结果）
-    // 与成功命令的 stderr 警告都是模型需要的信息。
-    // Truncate each stream independently and keep both: a failing command's
-    // stdout (test output, partial results) and a successful command's stderr
-    // warnings are both information the model needs.
     const streams = truncateProjectedStreams(output.stdout, output.stderr);
     return {
       ok: output.ok,
@@ -163,4 +158,4 @@ export const shellExecuteSpec: ToolSpec<ShellActionEnvelope, ShellResult> = {
       display: { verb: 'Run', preview: output.command },
     };
   },
-};
+});
