@@ -1,5 +1,5 @@
 /**
- * PTY System Test — /rewind restores workspace files (ADR-0025 §4)
+ * PTY System Test — /rewind restores workspace files (ADR-0042 §4)
  *
  * 端到端验证文件原像 + 回退链路：
  * End-to-end coverage of the file pre-image + rewind pipeline:

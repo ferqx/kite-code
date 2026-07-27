@@ -5,6 +5,7 @@ import {
   LIST_MCP_TOOLS_CONTRACT,
   READ_MCP_RESOURCE_CONTRACT,
 } from '@/core/tools/tool-contracts';
+import { projectionDigest } from '../projection';
 import type { ToolSpec } from '../spec';
 
 const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;
@@ -106,6 +107,8 @@ export const listMcpResourcesSpec: ToolSpec<
   projectResult: (output) => ({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
+    // execute 产出的已是模型就绪文本：逐流透传，Runner 不得按 ok 重新分流。
+    streams: { stdout: output.stdout, stderr: output.stderr },
     resultMeta: {},
     display: { verb: 'List', preview: 'MCP resources' },
   }),
@@ -145,6 +148,9 @@ export const listMcpToolsSpec: ToolSpec<z.infer<typeof listMcpToolsInputSchema>,
   projectResult: (output) => ({
     ok: output.ok,
     modelContent: output.stdout,
+    // 契约要求结构化拒绝（如 stale_cursor）与成功页同为 stdout JSON：
+    // 逐流透传，失败时模型仍从 stdout 读到机器可读载荷。
+    streams: { stdout: output.stdout, stderr: output.stderr },
     resultMeta: {},
     display: { verb: 'List', preview: 'MCP tools' },
   }),
@@ -208,7 +214,12 @@ export const readMcpResourceSpec: ToolSpec<
   projectResult: (output) => ({
     ok: output.ok,
     modelContent: output.ok ? output.stdout : output.stderr,
-    resultMeta: { truncated: output.truncated },
+    // execute 产出的已是模型就绪文本：逐流透传，Runner 不得按 ok 重新分流。
+    streams: { stdout: output.stdout, stderr: output.stderr },
+    resultMeta: {
+      ...(output.rawContent ? { rawResultDigest: projectionDigest(output.rawContent, '', 0) } : {}),
+      truncated: output.truncated,
+    },
     display: { verb: 'Read', preview: 'MCP resource' },
   }),
 };

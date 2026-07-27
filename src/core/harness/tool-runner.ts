@@ -14,15 +14,10 @@ import { createModePolicy } from '@/core/policies/mode-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
-import {
-  computeLineDiff,
-  formatContentOutput,
-  formatDiffOutput,
-  formatMultiHunkDiff,
-} from '@/core/tools/diff';
 import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { fileContentHash, sessionReadTracker } from '@/core/tools/read-state';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import {
   listMcpResourcesSpec,
@@ -33,7 +28,7 @@ import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
 import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
 import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
 import {
-  classifyShellActionIntent,
+  projectedShellIntent,
   shellExecuteSpec,
 } from '@/core/tools/registry/builtins/shell-execute';
 import { taskSpec } from '@/core/tools/registry/builtins/task';
@@ -45,7 +40,6 @@ import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type {
   AuthorizationOverride,
   ShellNetworkMode,
-  ShellResult,
   ThreadAuthorizationState,
 } from '@/core/types';
 import type {
@@ -63,7 +57,7 @@ function resultContentDigest(stdout: string, stderr: string, exitCode: number): 
 }
 
 /**
- * ADR-0025 §4：best-effort 原像捕获 —— 记录器抛错绝不允许中断工具执行。
+ * ADR-0042 §4：best-effort 原像捕获 —— 记录器抛错绝不允许中断工具执行。
  * Best-effort pre-image capture: a throwing recorder must never fail the tool.
  */
 function safeRecordPreimage(
@@ -128,9 +122,9 @@ export interface RunApprovedToolInput {
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /**
-   * 写入前文件原像记录器（ADR-0025 §4），供 /rewind 恢复工作区文件。
+   * 写入前文件原像记录器（ADR-0042 §4），供 /rewind 恢复工作区文件。
    * best-effort：实现自身吞错，工具层直接调用即可。
-   * File pre-image recorder invoked before workspace writes (ADR-0025 §4),
+   * File pre-image recorder invoked before workspace writes (ADR-0042 §4),
    * enabling /rewind to restore files. Best-effort by contract.
    */
   recordFilePreimage?: (path: string, content: string | null, existed: boolean) => void;
@@ -189,6 +183,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     authorization: normalizeAuthorizationState(authorization),
     override,
     mcpPolicy,
+    capability: builtinToolRegistry.effectsOf(request.name, request.args, {
+      workspace,
+      threadId,
+    }),
   });
   if (!policy.allowed) {
     return withFailureGuidance(request, {
@@ -300,15 +298,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         });
       }
       const result = dispatched.output.result;
-      const output = JSON.stringify(result);
-      const ok = result.ok !== false;
       return withFailureGuidance(request, {
-        ok,
+        ok: dispatched.projected.ok,
         command: 'task',
-        exitCode: ok ? 0 : -1,
-        stdout: output,
-        stderr: ok ? '' : output,
-        status: ok ? 'success' : 'error',
+        exitCode: dispatched.projected.ok ? 0 : -1,
+        stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+        stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
+        status: dispatched.projected.ok ? 'success' : 'error',
+        resultMeta: dispatched.projected.resultMeta,
         subagentResult: result,
       });
     } catch (error) {
@@ -327,7 +324,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const filePath = (request.args.path ?? '') as string;
     const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
     const dispatched = await dispatchRegisteredTool(
       readFileSpec,
@@ -344,7 +341,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           path: filePath,
         };
     if (output.ok && output.rawContent !== undefined) {
-      // ADR-0025 §1 读取状态记录：指纹取原始文本（output.content 是带行号的
+      // ADR-0042 §1 读取状态记录：指纹取原始文本（output.content 是带行号的
       // 模型表面格式，与 edit 侧 preEditRead 指纹口径不一致，不可用于校验）。
       sessionReadTracker(threadId || workspace).record(
         canonicalFilePath(workspace, filePath, allowExternal),
@@ -352,14 +349,22 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       );
     }
     return withFailureGuidance(request, {
-      ok: output.ok,
+      ok: dispatched.dispatched && dispatched.projected.ok,
       command: `read_file ${filePath}`,
-      exitCode: output.ok ? 0 : -1,
-      stdout: output.content,
-      stderr: output.error ?? '',
+      exitCode: dispatched.dispatched && dispatched.projected.ok ? 0 : -1,
+      stdout:
+        dispatched.dispatched && dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr:
+        dispatched.dispatched && !dispatched.projected.ok
+          ? dispatched.projected.modelContent
+          : dispatched.dispatched
+            ? ''
+            : dispatched.rejection.error,
       path: filePath,
       totalLines: output.totalLines,
-      resultMeta: { path: filePath, totalLines: output.totalLines },
+      resultMeta: dispatched.dispatched
+        ? dispatched.projected.resultMeta
+        : { path: filePath, totalLines: output.totalLines },
     });
   }
 
@@ -376,7 +381,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const editPath = (request.args.path ?? '') as string;
     const isExternal = isExternalPathArg(editPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // ADR-0025 §4：改动前捕获原像，供 /rewind 恢复（best-effort）
+    // ADR-0042 §4：改动前捕获原像，供 /rewind 恢复（best-effort）
     // Capture pre-image before mutating, for /rewind restore (best-effort).
     const preEditRead = readTextContent(workspace, editPath, { allowExternal });
     safeRecordPreimage(
@@ -385,8 +390,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       preEditRead.ok ? preEditRead.content : null,
       preEditRead.ok,
     );
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 §3 严格精确匹配）：
-    // 执行经 dispatchRegisteredTool；ADR-0025 §1 先读后改校验由 spec.preExecute
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2，含 §3 严格精确匹配）：
+    // 执行经 dispatchRegisteredTool；ADR-0042 §1 先读后改校验由 spec.preExecute
     // 基于会话读取状态执行（not_read / stale → 硬失败，引导重读）。
     const tracker = sessionReadTracker(threadId || workspace);
     const canonicalPath = canonicalFilePath(workspace, editPath, allowExternal);
@@ -423,72 +428,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     if (result.ok && result.content !== undefined) {
       tracker.record(canonicalPath, fileContentHash(result.content));
     }
-    let stdout = '';
-    if (result.ok) {
-      const parts: string[] = [];
-      if (request.args.replace_all && result.matchLines && result.matchLines.length > 1) {
-        parts.push(
-          formatMultiHunkDiff(
-            request.args.old_string as string,
-            (request.args.new_string ?? '') as string,
-            result.matchLines,
-            result.replacements ?? 1,
-          ),
-        );
-      } else {
-        const diff = computeLineDiff(
-          request.args.old_string,
-          request.args.new_string ?? '',
-          result.fromLine ?? 1,
-        );
-        if (request.args.replace_all) {
-          const count = result.replacements ?? 1;
-          parts.push(`(replaced ${count} time${count > 1 ? 's' : ''})`);
-        }
-        parts.push(formatDiffOutput(diff));
-      }
-      if (request.args.old_string === (request.args.new_string ?? '')) {
-        parts.push('(no effective change)');
-      }
-      stdout = parts.join('\n');
-      const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
-      // 保护 LLM 上下文：diff 超长时在最后一个完整行后截断，避免拆散行号
-      // Cap for LLM context: truncate at last complete line to avoid splitting line numbers
-      if (stdout.length > 2000) {
-        const totalLines = stdout.split('\n').length;
-        const cut = stdout.lastIndexOf('\n', 2000);
-        const kept = stdout.slice(0, cut > 0 ? cut : 2000);
-        const keptLines = kept.split('\n').length;
-        const omitted = totalLines - keptLines;
-        stdout = `${kept}\n... (${omitted} more line${omitted !== 1 ? 's' : ''} omitted)`;
-      }
-      return withFailureGuidance(request, {
-        ok: result.ok,
-        command: `edit_file ${request.args.path ?? ''}`,
-        exitCode: 0,
-        stdout,
-        stderr: '',
-        path: request.args.path,
-        resultMeta: {
-          path: editPath,
-          truncated: stdout.includes('. more line'),
-          workspaceMutationScope: editPath ? [editPath] : [],
-          rawResultDigest,
-        },
-      });
-    }
     return withFailureGuidance(request, {
-      ok: result.ok,
+      ok: dispatched.projected.ok,
       command: `edit_file ${request.args.path ?? ''}`,
-      exitCode: result.ok ? 0 : -1,
-      stdout,
-      stderr: result.error ?? '',
+      exitCode: dispatched.projected.ok ? 0 : -1,
+      stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
       path: request.args.path,
-      resultMeta: {
-        path: editPath,
-        truncated: false,
-        workspaceMutationScope: editPath ? [editPath] : [],
-      },
+      resultMeta: dispatched.projected.resultMeta,
     });
   }
 
@@ -502,7 +449,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const oldRead = readTextContent(workspace, filePath, { allowExternal });
     const oldExisted = oldRead.ok;
 
-    // ADR-0025 §4：覆写前捕获原像（复用上面已读取的旧内容，零额外 I/O）
+    // ADR-0042 §4：覆写前捕获原像（复用上面已读取的旧内容，零额外 I/O）
     // Capture pre-image before overwrite (reuses oldRead, zero extra I/O).
     safeRecordPreimage(
       input.recordFilePreimage,
@@ -511,12 +458,22 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       oldRead.ok,
     );
 
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2，含 ADR-0025 §2 append 移除）：
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2，含 ADR-0042 §2 append 移除）：
     // 执行经 dispatchRegisteredTool；mode 不再存在，创建/覆写统一语义。
     const dispatched = await dispatchRegisteredTool(
       writeFileSpec,
       { path: filePath, content },
-      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        writeTarget: {
+          path: filePath,
+          previousContent: oldRead.ok ? oldRead.content : undefined,
+          existed: oldExisted,
+        },
+      },
     );
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -529,7 +486,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     const result = dispatched.output;
     if (result.ok) {
-      // ADR-0025 §1 读取状态记录：写入成功后模型持有全部内容，等价于一次读取。
+      // ADR-0042 §1 读取状态记录：写入成功后模型持有全部内容，等价于一次读取。
       // 哈希取换行正规化后的文本，与后续 read_file 回读指纹一致。
       sessionReadTracker(threadId || workspace).record(
         canonicalFilePath(workspace, filePath, allowExternal),
@@ -537,67 +494,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       );
     }
 
-    let stdout = '';
-    if (result.ok) {
-      if (oldExisted) {
-        // 覆写已有文件：diff 旧内容 → 新内容
-        // Overwrite existing file: diff old → new
-        const diff = computeLineDiff(oldRead.content, content, 1);
-        if (diff.addedLines === 0 && diff.removedLines === 0) {
-          // 内容未变更 — 展示实际行数而非无意义的 0 diff
-          // Content unchanged — show actual line count instead of meaningless 0 diff
-          const actualLines = result.lines ?? 0;
-          const linesWord = actualLines === 1 ? 'line' : 'lines';
-          const header = `Wrote ${actualLines} ${linesWord} to ${filePath} (content unchanged)`;
-          stdout = formatContentOutput(content, header);
-        } else {
-          stdout = formatDiffOutput(diff);
-        }
-      } else {
-        // 新建文件：展示带行号的纯文本内容，无需 diff 样式
-        // New file: show plain content with line numbers, no diff markers
-        const header = `Wrote ${result.lines ?? 0} lines to ${filePath}`;
-        stdout = formatContentOutput(content, header);
-      }
-      const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
-      // 保护 LLM 上下文：超长时在最后一个完整行后截断，并提示省略行数
-      // Cap at last complete line and report how many lines were omitted
-      if (stdout.length > 2000) {
-        const totalLines = stdout.split('\n').length;
-        const cut = stdout.lastIndexOf('\n', 2000);
-        const kept = stdout.slice(0, cut > 0 ? cut : 2000);
-        const keptLines = kept.split('\n').length;
-        const omitted = totalLines - keptLines;
-        stdout = `${kept}\n... (${omitted} more line${omitted !== 1 ? 's' : ''} omitted)`;
-      }
-      return withFailureGuidance(request, {
-        ok: result.ok,
-        command: `write_file ${filePath}`,
-        exitCode: 0,
-        stdout,
-        stderr: '',
-        path: filePath,
-        resultMeta: {
-          path: filePath,
-          truncated: stdout.includes('. more line'),
-          workspaceMutationScope: filePath ? [filePath] : [],
-          rawResultDigest,
-        },
-      });
-    }
-
     return withFailureGuidance(request, {
-      ok: result.ok,
+      ok: dispatched.projected.ok,
       command: `write_file ${filePath}`,
-      exitCode: -1,
-      stdout,
-      stderr: result.error ?? '',
+      exitCode: dispatched.projected.ok ? 0 : -1,
+      stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
       path: filePath,
-      resultMeta: {
-        path: filePath,
-        truncated: false,
-        workspaceMutationScope: filePath ? [filePath] : [],
-      },
+      resultMeta: dispatched.projected.resultMeta,
     });
   }
 
@@ -643,7 +547,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const searchPath = (request.args.path ?? '.') as string;
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
     const dispatched = await dispatchRegisteredTool(
       searchContentSpec,
@@ -659,20 +563,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
-    const result = dispatched.output;
-    const stdout = truncateToolOutput(result.stdout);
-    const stderr = truncateToolOutput(result.stderr);
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
-      ...result,
-      stdout,
-      stderr,
+      ...dispatched.output,
+      // 双输出流工具消费逐流投影：失败时 stdout/stderr 两路保留（迁移前语义）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
       command: `search_content ${request.args.pattern ?? ''}`,
-      resultMeta: {
-        path: searchPath,
-        matchCount: result.stdout.split('\n').filter(Boolean).length,
-        truncated: stdout.length < result.stdout.length,
-        rawResultDigest: resultContentDigest(result.stdout, result.stderr, result.exitCode),
-      },
+      resultMeta: projected.resultMeta,
     });
   }
 
@@ -680,7 +578,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const searchPath = (request.args.path ?? '.') as string;
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // 已迁入 ToolSpec Registry（ADR-0026 S1.2）：执行经 dispatchRegisteredTool，
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
     const dispatched = await dispatchRegisteredTool(
       searchFilesSpec,
@@ -696,20 +594,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
-    const result = dispatched.output;
-    const stdout = truncateToolOutput(result.stdout);
-    const stderr = truncateToolOutput(result.stderr);
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
-      ...result,
-      stdout,
-      stderr,
+      ...dispatched.output,
+      // 双输出流工具消费逐流投影：失败时 stdout/stderr 两路保留（迁移前语义）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
       command: `search_files ${request.args.pattern ?? ''}`,
-      resultMeta: {
-        path: searchPath,
-        matchCount: result.stdout.split('\n').filter(Boolean).length,
-        truncated: stdout.length < result.stdout.length,
-        rawResultDigest: resultContentDigest(result.stdout, result.stderr, result.exitCode),
-      },
+      resultMeta: projected.resultMeta,
     });
   }
 
@@ -729,13 +621,16 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
-    const result = dispatched.output;
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
-      ok: result.ok,
+      ok: projected.ok,
       command: request.protectedCommand,
-      exitCode: result.ok ? 0 : -1,
-      stdout: result.stdout,
-      stderr: result.stderr,
+      exitCode: projected.ok ? 0 : -1,
+      // 消费逐流投影：MCP 清单 spec 产出模型就绪文本，
+      // 失败时结构化载荷保留在原流（如 list_mcp_tools 的 stale_cursor JSON）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      resultMeta: projected.resultMeta,
     });
   }
 
@@ -755,13 +650,16 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
-    const result = dispatched.output;
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
-      ok: result.ok,
+      ok: projected.ok,
       command: request.protectedCommand,
-      exitCode: result.ok ? 0 : -1,
-      stdout: result.stdout,
-      stderr: result.stderr,
+      exitCode: projected.ok ? 0 : -1,
+      // 消费逐流投影：MCP 清单 spec 产出模型就绪文本，
+      // 失败时结构化载荷保留在原流（如 list_mcp_tools 的 stale_cursor JSON）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      resultMeta: projected.resultMeta,
     });
   }
 
@@ -781,20 +679,16 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
-    const result = dispatched.output;
     const command = `read_mcp_resource ${request.args.server ?? ''}`;
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
-      ok: result.ok,
+      ok: projected.ok,
       command,
-      exitCode: result.ok ? 0 : -1,
-      stdout: result.stdout,
-      stderr: result.stderr,
-      resultMeta: result.rawContent
-        ? {
-            rawResultDigest: resultContentDigest(result.rawContent, '', 0),
-            truncated: result.truncated,
-          }
-        : undefined,
+      exitCode: projected.ok ? 0 : -1,
+      // 消费逐流投影：资源内容/错误保留在 execute 产出的原流。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      resultMeta: projected.resultMeta,
     });
   }
 
@@ -869,33 +763,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     const result = dispatched.output;
-    const stdout = result.ok
-      ? [
-          `Fetched: ${result.title ?? result.finalUrl ?? request.args.url}`,
-          result.contentType ? `Type: ${result.contentType}` : '',
-          result.truncated ? '(content truncated)' : '',
-          '',
-          result.content ?? '',
-        ]
-          .filter(Boolean)
-          .join('\n')
-      : `Failed to fetch ${request.args.url}: ${result.error ?? 'unknown error'}`;
-    const contentLimit = Math.max(8000, (request.args.max_chars ?? 8000) + 500);
-    const projectedStdout = truncateToolOutput(stdout, contentLimit);
     return withFailureGuidance(request, {
       ok: result.ok,
       command: request.protectedCommand,
       exitCode: result.ok ? 0 : result.timedOut ? 124 : result.aborted ? 130 : -1,
-      stdout: projectedStdout,
-      stderr: result.ok ? '' : (result.error ?? 'unknown error'),
-      resultMeta: {
-        ...(result.ok && !result.truncated
-          ? {
-              rawResultDigest: resultContentDigest(stdout, '', 0),
-            }
-          : {}),
-        truncated: projectedStdout !== stdout || (result.ok && result.truncated),
-      },
+      stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
+      resultMeta: dispatched.projected.resultMeta,
     });
   }
 
@@ -917,20 +791,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
-    const raw = dispatched.output;
-    const result: ShellResult = {
-      ...raw,
-      stdout: truncateToolOutput(raw.stdout),
-      stderr: truncateToolOutput(raw.stderr),
-    };
+    const result = dispatched.output;
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
       ...result,
-      resultMeta: {
-        rawResultDigest: resultContentDigest(raw.stdout, raw.stderr, raw.exitCode),
-        truncated: result.stdout !== raw.stdout || result.stderr !== raw.stderr,
-      },
+      // 双输出流工具消费逐流投影：失败命令的 stdout 与成功命令的 stderr
+      // 警告都保留（迁移前 Runner 对两路分别截断，现由 spec 投影承接）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      resultMeta: projected.resultMeta,
       action: {
-        intent: classifyShellActionIntent(request.args.command),
+        intent: projectedShellIntent(projected.resultMeta),
         grantUsed: approvedGrant === 'none' ? policy.grantUsed : approvedGrant,
       },
     });
@@ -968,18 +839,6 @@ function serializeMcpResultForModel(result: import('@/core/capabilities/result')
     }),
     truncated: true,
   };
-}
-
-/** 共享截断函数：保留头部 + 尾部，中间标注省略行数。
- *  Shared truncation: keep head + tail with omitted-line marker in between.
- *  Zero hallucination risk — preserves verbatim content, just drops the middle. */
-export function truncateToolOutput(output: string, maxLen = 4000): string {
-  if (output.length <= maxLen) return output;
-  const keep = Math.floor(maxLen / 2);
-  const head = output.slice(0, keep);
-  const tail = output.slice(-keep);
-  const omittedLines = output.slice(keep, -keep).split('\n').filter(Boolean).length;
-  return `${head}\n... [${omittedLines} lines omitted, ${output.length - 2 * keep} total chars truncated]\n${tail}`;
 }
 
 function resolveShellNetworkMode(

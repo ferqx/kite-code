@@ -1,11 +1,12 @@
 /**
- * search_files spec — 迁入 Registry（ADR-0026 S1.2）。
+ * search_files spec — 迁入 Registry（ADR-0043 S1.2）。
  * 契约暂引用 SEARCH_FILES_CONTRACT.sections 保持 description 逐字节稳定。
  */
 import { z } from 'zod';
 import { searchFiles } from '@/core/tools/search';
 import { SEARCH_FILES_CONTRACT } from '@/core/tools/tool-contracts';
 import type { ShellResult } from '@/core/types';
+import { projectionDigest, truncateProjectedStreams } from '../projection';
 import type { ToolSpec } from '../spec';
 
 export interface SearchFilesInput {
@@ -37,12 +38,22 @@ export const searchFilesSpec: ToolSpec<SearchFilesInput, ShellResult> = {
       path: input.path ?? '.',
       allowExternal: context.allowExternalPaths === true,
     }),
-  // 迁移期 runner 仍组装截断与 resultMeta（与旧路径字节一致）；
-  // projectResult 供未来统一管线消费。
-  projectResult: (output) => ({
-    ok: output.ok,
-    modelContent: output.stdout,
-    resultMeta: {},
-    display: { verb: 'Find' },
-  }),
+  projectResult: (output, context) => {
+    // invocationInput 由 Registry dispatch 注入且类型化（i1），无需强转。
+    const input = context.invocationInput;
+    // 与 shell_execute/search_content 统一的逐流投影契约（见 search-content 注释）。
+    const streams = truncateProjectedStreams(output.stdout, output.stderr);
+    return {
+      ok: output.ok,
+      modelContent: output.ok ? streams.stdout : streams.stderr || streams.stdout,
+      streams,
+      resultMeta: {
+        path: input.path ?? '.',
+        matchCount: output.stdout.split('\n').filter(Boolean).length,
+        truncated: streams.truncated,
+        rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
+      },
+      display: { verb: 'Find' },
+    };
+  },
 };

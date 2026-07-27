@@ -1,5 +1,5 @@
 /**
- * read_file spec — 首个迁入 Registry 的工具（ADR-0026 S1.2）。
+ * read_file spec — 首个迁入 Registry 的工具（ADR-0043 S1.2）。
  *
  * 契约文本暂引用 READ_FILE_CONTRACT.sections（迁移期保持 description 逐字节
  * 稳定）；全部工具迁移完成后契约整体移入 spec、tool-contracts.ts 退役。
@@ -61,12 +61,10 @@ export const readFileSpec: ToolSpec<ReadFileInput, ReadFileOutput> = {
       rawContent: result.rawContent,
     };
   },
-  // 结果投影供未来统一管线消费；迁移期 runner 仍从 output 组装与旧路径
-  // 字节一致的 ToolExecutionResult（见 tool-runner.ts read_file 分支）。
   projectResult: (output) => ({
     ok: output.ok,
     modelContent: output.ok ? (output.content ?? '') : (output.error ?? ''),
-    resultMeta: {},
+    resultMeta: { path: output.path, totalLines: output.totalLines },
     display: { verb: 'Read', preview: output.path },
   }),
 };

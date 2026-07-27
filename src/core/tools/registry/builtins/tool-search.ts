@@ -33,6 +33,7 @@ export const toolSearchSpec: ToolSpec<ToolSearchInput, ToolSearchOutput> = {
   inputSchema: toolSearchInputSchema,
   declaredEffects: { filesystem: 'none', network: 'read', externalState: 'none' },
   minimumApproval: 'none',
+  availability: (context) => context.toolSearchEnabled === true,
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,

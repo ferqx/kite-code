@@ -1,10 +1,10 @@
 # 工具单一事实源（ToolSpec Registry）RFC
 
-**状态：** Proposed
+**状态：** Implemented（由 ADR-0043 接受，单路径切换由 ADR-0044 补充）
 **日期：** 2026-07-26
 **主要模块：** `src/core/tools/`、`src/core/harness/`、`src/core/policies/`、`src/core/controllers/tool-controller.ts`、`src/core/capabilities/`
-**前置决策：** ADR-0007（Capability Binding）、ADR-0020（MCP 按需加载）、ADR-0025（文件工具语义与写入安全）
-**批准要求：** 本 RFC 批准后、实施前必须新增 ADR-0026（工具单一事实源与严格 Edit 语义），并在 `docs/space/plans/` 形成可验证的实施计划。
+**前置决策：** ADR-0007（Capability Binding）、ADR-0020（MCP 按需加载）、ADR-0042（文件工具语义与写入安全）
+**批准记录：** ADR-0043 接受本 RFC 的单一事实源与严格 Edit 方向；ADR-0044 接受单路径切换。实施计划与完成证据位于 `docs/space/`。
 
 ---
 
@@ -43,7 +43,7 @@
 
 ### 1.3 与既有决策的关系
 
-- **ADR-0025（已接受，2026-07-25）** 决定 `edit_file` 先读后改 + 过期拒绝（§1）、移除 `write_file` 的 `append`（§2）、写入前持久化 preimage（§4）。核实结果：§4 的 preimage 基建已落地（`tool-runner.ts:325-331,415-425`，`runtime/file-checkpoints.ts:27`，`executor.ts:161` 注入），**§1/§2 尚未实现**——当前仅有模型面向的软引导文本（`tool-runner.ts:1029`），Schema 仍保留 `mode: 'overwrite' | 'append'`（`definitions.ts:165-170`）。本 RFC 的 Registry 为 §1/§2 提供唯一落点（pre-hook 与 Schema 收敛），实施次序沿用 ADR-0025 的 §4 → §1 → §2。
+- **ADR-0042（已接受，2026-07-25）** 决定 `edit_file` 先读后改 + 过期拒绝（§1）、移除 `write_file` 的 `append`（§2）、写入前持久化 preimage（§4）。核实结果：§4 的 preimage 基建已落地（`tool-runner.ts:325-331,415-425`，`runtime/file-checkpoints.ts:27`，`executor.ts:161` 注入），**§1/§2 尚未实现**——当前仅有模型面向的软引导文本（`tool-runner.ts:1029`），Schema 仍保留 `mode: 'overwrite' | 'append'`（`definitions.ts:165-170`）。本 RFC 的 Registry 为 §1/§2 提供唯一落点（pre-hook 与 Schema 收敛），实施次序沿用 ADR-0042 的 §4 → §1 → §2。
 - **ADR-0007 / ADR-0020** 建立的 Capability Binding（turn-scoped、revision-pinned）与按需加载机制保持不变，本 RFC 只统一静态内建工具的注册与执行路径。
 - **ADR-0023** 规范的是 **LLM 模型能力目录**（context window、tokenizer 等不得按模型名内置），与工具注册正交，无冲突。`CapabilityDescriptor` 的 `builtin_tool` kind 已是协议既有类型（`src/protocol/capabilities.ts:3-9`）。
 
@@ -140,8 +140,8 @@ export interface ToolSpec<Input, Output> {
 
   /**
    * 执行前置钩子（可选，按序执行，fail-fast）：
-   * - ADR-0025 §1：edit 的会话级读取状态校验（未读拒绝 / 过期拒绝）；
-   * - ADR-0025 §4：写工具 preimage 持久化（现 safeRecordPreimage 逻辑）；
+   * - ADR-0042 §1：edit 的会话级读取状态校验（未读拒绝 / 过期拒绝）；
+   * - ADR-0042 §4：写工具 preimage 持久化（现 safeRecordPreimage 逻辑）；
    * - read_file 读取状态登记。
    * 钩子是 Registry 层统一机制，不再是 runner 每个分支里的内联代码。
    */
@@ -199,7 +199,7 @@ model tool call
   → effects 解析（spec.effects，纯函数）
   → evaluateToolApproval + mode policy（消费 effects，不消费模型声明）
   → 审批 / 自动复核 interrupt（approval.requested / auto_review.requested，现状保持）
-  → preExecute 钩子（ADR-0025 §1/§4、读取登记）
+  → preExecute 钩子（ADR-0042 §1/§4、读取登记）
   → spec.execute
   → projectResult（模型内容 + resultMeta + display）
   → tool.finished + digest（computeToolResultDigest，现状保持）
@@ -232,12 +232,12 @@ model tool call
 
 **`ask_user` 契约去泄漏：** 删除 "returns ok: false (the harness intercepts it)" 类句子（`tool-contracts.ts:309,314`），替换为行为描述（"暂停当前轮次，等待用户回答后继续"）。`kind: 'interrupt'` 使拦截成为 Registry 层机制而非契约文字。
 
-### 4.5 Edit 严格化（与 ADR-0025 协同）
+### 4.5 Edit 严格化（与 ADR-0042 协同）
 
-分两步，第二步需要 ADR-0026：
+分两步，第二步需要 ADR-0043：
 
 1. **阶段 0（零行为变化）：** 从 Schema、契约、请求类型中删除 `match_mode`。该参数今天就被丢弃，删除不改变任何执行行为，只消除"契约指导模型使用一个被丢弃的参数"的欺骗性表面。
-2. **阶段 1（行为变化，ADR-0026 批准后）：** `findMatch()` 的无条件降级链（exact → trimEnd `file.ts:417-421` → 逐行 trimming `file.ts:444+`）改为**默认仅 exact**，模糊匹配降为内部显式 opt-in（或直接移除）。对齐 Claude Code 的严格 Edit：匹配失败即失败，模型重新 `Read` 提交准确文本。理由：无条件降级使 Receipt 无法表达"模型意图 vs 实际匹配"的差异，且空白在代码中可能具有语义。同期落地 ADR-0025 §1（先读后改 / 过期拒绝，作为 edit spec 的 `preExecute` 钩子）与 §2（删除 `write_file` 的 `mode` 参数与 append 分支）。
+2. **阶段 1（行为变化，ADR-0043 批准后）：** `findMatch()` 的无条件降级链（exact → trimEnd `file.ts:417-421` → 逐行 trimming `file.ts:444+`）改为**默认仅 exact**，模糊匹配降为内部显式 opt-in（或直接移除）。对齐 Claude Code 的严格 Edit：匹配失败即失败，模型重新 `Read` 提交准确文本。理由：无条件降级使 Receipt 无法表达"模型意图 vs 实际匹配"的差异，且空白在代码中可能具有语义。同期落地 ADR-0042 §1（先读后改 / 过期拒绝，作为 edit spec 的 `preExecute` 钩子）与 §2（删除 `write_file` 的 `mode` 参数与 append 分支）。
 
 `read_file` 的 `force`：**不暴露模型表面**。重写二进制检测错误文本（`file.ts:193`）为"该文件为二进制，无法作为文本读取；如确需查看，请向用户确认"，底层 `opts.force` 保留供内部与测试使用。
 
@@ -292,7 +292,7 @@ model tool call
 ### 阶段 1：Registry 骨架 + 六个计算原语
 
 1. 新增 `src/core/tools/registry/`（`spec.ts` / `registry.ts` / `dispatch.ts`）与 §5 一致性测试骨架。
-2. 新增 feature flag `toolSpecRegistryV1`（遵循 `docs/active/feature-flags.md`：默认 `false`，双值测试，旧路径保留 ≥2 周；ADR-0026 接受且生产 TUI 路径有 e2e 覆盖后方可默认 `true`）。
+2. 新增 feature flag `toolSpecRegistryV1`（遵循 `docs/active/feature-flags.md`：默认 `false`，双值测试，旧路径保留 ≥2 周；ADR-0043 接受且生产 TUI 路径有 e2e 覆盖后方可默认 `true`）。
 3. 按 **read_file → search_files → search_content → write_file → edit_file → shell_execute** 顺序逐工具迁移，每个工具一个 PR：
    - 执行器从 runner 分支移入 `spec.execute`（逻辑搬运，不改语义）；
    - 删除 `definitions.ts` 对应 `tool({...execute})`，改为 Registry 生成的 schema-only 条目；
@@ -302,7 +302,7 @@ model tool call
    - 测试从直调 `.execute()` 改为经 `dispatch()`。
 4. flag 全量且经过 golden 期后，单独清理 PR 删除旧分支。
 
-**`edit_file` / `write_file` 的迁移与 ADR-0025 §1/§2 同批**（先读后改钩子、`mode` 删除），次序仍为 §4（已落地）→ §1 → §2，由 ADR-0026 承载严格 Edit 语义决策。
+**`edit_file` / `write_file` 的迁移与 ADR-0042 §1/§2 同批**（先读后改钩子、`mode` 删除），次序仍为 §4（已落地）→ §1 → §2，由 ADR-0043 承载严格 Edit 语义决策。
 
 ### 阶段 2：协调类工具
 
@@ -321,7 +321,7 @@ plan 门面 / Runtime Action 化、skill 生命周期事件化。
 ### 7.5 Prompt cache 约束
 
 - 迁移期间每个工具的 description 保持**逐字节稳定**（契约文本原样移入 spec，`buildDescription` 输出不变），由 `tests/golden/` 守护。
-- Schema 变更（`match_mode`、`mode`、shell 治理参数删除）集中在阶段 0 与 ADR-0025 §2 批次，各触发一次性 cache miss，可接受；不得在逐工具迁移 PR 中夹带 Schema 文本变化。
+- Schema 变更（`match_mode`、`mode`、shell 治理参数删除）集中在阶段 0 与 ADR-0042 §2 批次，各触发一次性 cache miss，可接受；不得在逐工具迁移 PR 中夹带 Schema 文本变化。
 
 ---
 
@@ -341,8 +341,8 @@ plan 门面 / Runtime Action 化、skill 生命周期事件化。
 
 ### 7.2 ADR
 
-- **ADR-0026（待提案）**：工具单一事实源 + 严格 Edit 语义（findMatch 默认 exact）+ shell 模型参数收敛。本 RFC 批准是提案的前置输入，不替代 ADR 决策。
-- 不改写 ADR-0025；§1/§2 的实施在其既有次序内完成。
+- **ADR-0043（待提案）**：工具单一事实源 + 严格 Edit 语义（findMatch 默认 exact）+ shell 模型参数收敛。本 RFC 批准是提案的前置输入，不替代 ADR 决策。
+- 不改写 ADR-0042；§1/§2 的实施在其既有次序内完成。
 
 ### 7.3 不变量保持
 
@@ -374,7 +374,7 @@ CLAUDE.md 八条不变量全部保持：Core 不依赖 App（i7）；RuntimeStat
 
 - **阶段 0**：全部为删除与文本改动，直接 revert。
 - **阶段 1/2**：`toolSpecRegistryV1=false` 回退旧路径（旧分支在 golden 期内保留）；flag 默认 `true` 后的清理 PR 如暴露问题，revert 清理 PR 即恢复双路径可切换状态。
-- **严格 Edit（ADR-0026）**：findMatch 降级链的 opt-in 开关即回退点（禁用后退回当前无条件降级行为）。
+- **严格 Edit（ADR-0043）**：findMatch 降级链的 opt-in 开关即回退点（禁用后退回当前无条件降级行为）。
 - **Registry 基建本身为附加代码**，删除不影响任何旧路径。
 
 ---
@@ -384,10 +384,10 @@ CLAUDE.md 八条不变量全部保持：Core 不依赖 App（i7）；RuntimeStat
 | 风险 | 控制 |
 | --- | --- |
 | 迁移期双路径不一致 | flag 在入口按工具名单路由，任一时刻单路径生效；一致性测试 i2/i3 持续运行 |
-| 严格 Edit 抬升模型 edit 失败率 | ADR-0025 已预期初期失败率上升为设计意图（错误信息引导自纠）；golden/e2e 观察，失败引导文本提供重读指引 |
+| 严格 Edit 抬升模型 edit 失败率 | ADR-0042 已预期初期失败率上升为设计意图（错误信息引导自纠）；golden/e2e 观察，失败引导文本提供重读指引 |
 | shell 治理参数移除后审批摩擦变化 | 命令形态快车道已存在（`isReadOnlyShellCommand`），迁移前后对比只读命令免审命中率；`git status` 类命令不应新增审批 |
 | prompt cache 抖动 | description 字节稳定 + golden 守护；Schema 变更集中在两个明确批次 |
-| preExecute 钩子失败语义改变工具行为 | 钩子 fail-fast 语义与 ADR-0025 §1 一致（拒绝并引导），preimage 钩子沿用 safeRecordPreimage 的"永不使工具失败"包装 |
+| preExecute 钩子失败语义改变工具行为 | 钩子 fail-fast 语义与 ADR-0042 §1 一致（拒绝并引导），preimage 钩子沿用 safeRecordPreimage 的"永不使工具失败"包装 |
 | plan 工具迁入引入状态机回归 | 本阶段只搬运不改语义；现有 plan 测试（含 e2e）全绿为迁移完成条件 |
 
 ---
@@ -400,7 +400,7 @@ CLAUDE.md 八条不变量全部保持：Core 不依赖 App（i7）；RuntimeStat
 - [ ] `match_mode`、`force`（模型表面）、`Skill`、`list_files`、`toolRequestFromMessage` 全部消失（全仓 grep 为零）
 - [ ] `shell_execute` 模型表面仅 `command / description / timeout_ms / run_in_background`；inspect 快车道纯命令形态驱动（i10）
 - [ ] §5 一致性测试 i1-i10 全部存在并通过
-- [ ] ADR-0025 §1/§2 以 preExecute 钩子与 Schema 收敛落地（由 ADR-0026 承载）
+- [ ] ADR-0042 §1/§2 以 preExecute 钩子与 Schema 收敛落地（由 ADR-0043 承载）
 - [ ] golden prompt 测试证明迁移期 description 字节稳定
 - [ ] 受影响 `docs/active/` 与实现同批更新；`documentation-map.json` 映射准确
 - [ ] 验证命令全绿：

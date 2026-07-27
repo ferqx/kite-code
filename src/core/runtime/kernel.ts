@@ -419,7 +419,7 @@ export class AgentKernel {
   // ── 生命周期 / Lifecycle ──
 
   /**
-   * 暴露运行时存储，供辅助持久化（如文件写入前原像，ADR-0025 §4）。
+   * 暴露运行时存储，供辅助持久化（如文件写入前原像，ADR-0042 §4）。
    * Expose the runtime store for auxiliary persistence (e.g. file pre-images).
    */
   get runtimeStore(): RuntimeStore {

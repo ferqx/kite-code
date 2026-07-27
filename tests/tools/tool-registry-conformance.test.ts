@@ -5,22 +5,29 @@ import { join } from 'node:path';
 import { z } from 'zod';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
+import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { sessionReadTracker } from '@/core/tools/read-state';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
+import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
+import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
 import {
   classifyShellActionIntent,
+  projectedShellIntent,
   shellActionEnvelopeSchema,
   shellExecuteSpec,
 } from '@/core/tools/registry/builtins/shell-execute';
+import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { createToolRegistry } from '@/core/tools/registry/registry';
 import type { ToolContext, ToolSpec } from '@/core/tools/registry/spec';
+import type { ShellExecutor } from '@/core/tools/shell';
 import { buildDescription, KNOWN_TOOL_NAMES } from '@/core/tools/tool-contracts';
 
 /**
- * ToolSpec Registry 一致性测试（ADR-0026 §5 / RFC §5）。
+ * ToolSpec Registry 一致性测试（ADR-0043 §5 / RFC §5）。
  *
  * 不变量编号与 RFC §5 表格一致：i1 args 透传恒等、i2 schema-only、
  * i3 Policy 名集闭合、i4 KNOWN_TOOL_NAMES 棘轮、i5 写工具 mutation scope、
@@ -182,6 +189,24 @@ describe('ToolSpec Registry — Runtime Action ownership', () => {
   });
 });
 
+describe('ToolSpec kind union', () => {
+  test('interrupt specs cannot expose an execute or projectResult function', () => {
+    expect(askUserSpec.kind).toBe('interrupt');
+    expect('execute' in askUserSpec).toBe(false);
+    expect('projectResult' in askUserSpec).toBe(false);
+    expect(
+      askUserSpec.createInterrupt(
+        { question: 'Continue?', options: [], allow_free_text: true },
+        CTX,
+      ),
+    ).toEqual({
+      question: 'Continue?',
+      options: [],
+      allow_free_text: true,
+    });
+  });
+});
+
 describe('invariant i1 — parsed args are identical to the schema parse (no field remapping)', () => {
   test('full input with optionals passes through unchanged', () => {
     const registry = sampleRegistry();
@@ -233,6 +258,24 @@ describe('invariant i2 — model ToolSet is schema-only', () => {
       expect(entry.execute).toBeUndefined();
     }
   });
+
+  test('production model surface exactly equals Registry availability', () => {
+    const input = {
+      workspace: '/tmp/sample',
+      toolSearch: true,
+    };
+    const context = toolAvailabilityContext(input);
+    const toolset = createAgentTools(input);
+    expect(Object.keys(toolset).sort()).toEqual(
+      builtinToolRegistry
+        .availableIn(context)
+        .map((spec) => spec.name)
+        .sort(),
+    );
+    for (const entry of Object.values(toolset)) {
+      expect(entry.execute).toBeUndefined();
+    }
+  });
 });
 
 describe('invariant i3 — policy-classified names form a closed set (anti-ghost-name)', () => {
@@ -245,33 +288,8 @@ describe('invariant i3 — policy-classified names form a closed set (anti-ghost
 });
 
 describe('invariant i4 — KNOWN_TOOL_NAMES migration ratchet', () => {
-  /**
-   * 尚未迁入 Registry 的静态工具名 = 已知名单 − 生产 Registry 已注册名。
-   * 阶段 1.2 每迁移一个工具，它自动从待迁移集合移入 Registry；
-   * 阶段 1.3 清理完成后本集合应为空（届时改为全量断言）。
-   */
-  const PENDING_MIGRATION = new Set<string>(
-    [...KNOWN_TOOL_NAMES].filter((name) => !builtinToolRegistry.get(name)),
-  );
-
-  test('migrated names never remain pending (single source of truth)', () => {
-    for (const name of builtinToolRegistry.names()) {
-      expect(PENDING_MIGRATION.has(name)).toBe(false);
-    }
-  });
-
-  test('pending migration set never hides unknown names', () => {
-    const known = new Set<string>(KNOWN_TOOL_NAMES);
-    for (const name of PENDING_MIGRATION) {
-      expect(known.has(name)).toBe(true);
-    }
-  });
-
-  test('known names are covered by production registry or pending migration', () => {
-    const covered = new Set<string>([...builtinToolRegistry.names(), ...PENDING_MIGRATION]);
-    for (const name of KNOWN_TOOL_NAMES) {
-      expect(covered.has(name)).toBe(true);
-    }
+  test('migration is closed: known names exactly equal production Registry names', () => {
+    expect(builtinToolRegistry.names()).toEqual([...KNOWN_TOOL_NAMES].sort());
   });
 
   test('production registry names must be known tool names', () => {
@@ -329,7 +347,7 @@ describe('read_file output passthrough', () => {
   });
 });
 
-describe('session read tracker (ADR-0025 §1)', () => {
+describe('session read tracker (ADR-0042 §1)', () => {
   test('record/check lifecycle: not_read → fresh → stale', () => {
     const tracker = sessionReadTracker('conformance-test-thread');
     expect(tracker.check('/w/a.ts', 'h1')).toBe('not_read');
@@ -340,7 +358,7 @@ describe('session read tracker (ADR-0025 §1)', () => {
   });
 });
 
-describe('edit_file read-before-write enforcement (ADR-0025 §1)', () => {
+describe('edit_file read-before-write enforcement (ADR-0042 §1)', () => {
   const EDIT_INPUT = { path: 'x.ts', old_string: 'a', new_string: 'b' };
 
   test('not_read rejects before execute', async () => {
@@ -379,11 +397,154 @@ describe('edit_file read-before-write enforcement (ADR-0025 §1)', () => {
 
 describe('invariant i5 — write tools declare mutation scope', () => {
   test('write sample projects workspaceMutationScope; read sample does not', () => {
-    const written = sampleWriteSpec.projectResult({ path: 'a.ts', bytes: 3 }, CTX);
+    const written = sampleWriteSpec.projectResult(
+      { path: 'a.ts', bytes: 3 },
+      { ...CTX, invocationInput: { path: 'a.ts', content: 'abc' } },
+    );
     expect(written.resultMeta.workspaceMutationScope).toEqual(['a.ts']);
 
-    const read = sampleReadSpec.projectResult({ lines: ['x'] }, CTX);
+    const read = sampleReadSpec.projectResult(
+      { lines: ['x'] },
+      { ...CTX, invocationInput: { path: 'a.ts' } },
+    );
     expect(read.resultMeta.workspaceMutationScope).toBeUndefined();
+  });
+});
+
+describe('projectResult production closure', () => {
+  test('write_file runner result is the spec projection used by the final tool result', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-projection-'));
+    try {
+      const request = {
+        id: 'write-projection',
+        name: 'write_file' as const,
+        args: { path: 'a.txt', content: 'hello\n' },
+        reason: 'test',
+        protectedCommand: 'write_file a.txt',
+      };
+      const actual = await runApprovedTool({
+        workspace,
+        request,
+        phase: 'building',
+        interactionMode: 'accept_edits',
+      });
+      const expected = writeFileSpec.projectResult(
+        { ok: true, path: 'a.txt', lines: 1 },
+        {
+          workspace,
+          invocationInput: request.args,
+          writeTarget: { path: 'a.txt', existed: false },
+        },
+      );
+      expect(actual.stdout).toBe(expected.modelContent);
+      expect(actual.resultMeta).toEqual(expected.resultMeta);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('dual output streams survive projection (regression)', () => {
+  const SHELL_REQUEST = {
+    id: 'shell-dual',
+    name: 'shell_execute' as const,
+    args: { command: 'make ci' },
+    reason: 'test',
+    protectedCommand: 'make ci',
+  };
+
+  test('shell_execute failure preserves stdout and stderr independently', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-dual-stream-'));
+    try {
+      const raw = {
+        ok: false,
+        command: 'make ci',
+        exitCode: 1,
+        stdout: 'partial output before failure',
+        stderr: 'make: *** [ci] Error 1',
+      };
+      const shellExecutor: ShellExecutor = async () => raw;
+      const actual = await runApprovedTool({
+        workspace,
+        request: SHELL_REQUEST,
+        shellExecutor,
+        phase: 'building',
+        interactionMode: 'full',
+        authorization: { mode: 'full_access', commandGrants: {} },
+      });
+      const expected = shellExecuteSpec.projectResult(raw, {
+        workspace,
+        invocationInput: { command: 'make ci' },
+      });
+      expect(actual.ok).toBe(false);
+      // 回归断言：失败命令的 stdout（测试输出、部分匹配）不得被投影丢弃。
+      expect(actual.stdout).toBe('partial output before failure');
+      expect(actual.stderr).toBe('make: *** [ci] Error 1');
+      expect(actual.resultMeta).toEqual(expected.resultMeta);
+      expect(actual.action?.intent).toBe('other');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('shell_execute success preserves stderr warnings', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-dual-stream-'));
+    try {
+      const raw = {
+        ok: true,
+        command: 'make ci',
+        exitCode: 0,
+        stdout: 'all tests passed',
+        stderr: 'npm warn deprecated',
+      };
+      const shellExecutor: ShellExecutor = async () => raw;
+      const actual = await runApprovedTool({
+        workspace,
+        request: SHELL_REQUEST,
+        shellExecutor,
+        phase: 'building',
+        interactionMode: 'full',
+        authorization: { mode: 'full_access', commandGrants: {} },
+      });
+      expect(actual.ok).toBe(true);
+      expect(actual.stdout).toBe('all tests passed');
+      // 回归断言：成功命令的 stderr 警告不得被投影丢弃。
+      expect(actual.stderr).toBe('npm warn deprecated');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('search projections keep both streams on failure and truncate per stream', () => {
+    const longOut = 'match-line\n'.repeat(800);
+    const raw = {
+      ok: false,
+      command: 'rg x',
+      exitCode: 2,
+      stdout: longOut,
+      stderr: 'rg: regex parse error',
+    };
+    const content = searchContentSpec.projectResult(raw, {
+      workspace: '/w',
+      invocationInput: { pattern: 'x', path: 'src' },
+    });
+    expect(content.streams?.stderr).toBe('rg: regex parse error');
+    expect(content.streams?.stdout).toContain('lines omitted');
+    expect(content.resultMeta.truncated).toBe(true);
+    expect(content.resultMeta.matchCount).toBe(800);
+
+    const files = searchFilesSpec.projectResult(raw, {
+      workspace: '/w',
+      invocationInput: { pattern: 'x' },
+    });
+    expect(files.streams?.stderr).toBe('rg: regex parse error');
+    expect(files.streams?.stdout).toContain('lines omitted');
+  });
+
+  test('projectedShellIntent validates resultMeta instead of blind casting', () => {
+    expect(projectedShellIntent({ intent: 'git' })).toBe('git');
+    expect(projectedShellIntent({ intent: 'not-an-intent' })).toBe('other');
+    expect(projectedShellIntent({})).toBe('other');
   });
 });
 
@@ -415,6 +576,20 @@ describe('invariant i9 — descriptor projection is deterministic', () => {
         whenToUse: `${sampleReadSpec.contract.whenToUse} (edited)`,
       },
     };
+    expect(registry.descriptorOf(mutated).revision).not.toBe(first.revision);
+  });
+
+  test('schema changes alter descriptor revision', () => {
+    const registry = createToolRegistry();
+    const first = registry.descriptorOf(sampleReadSpec);
+    const mutated: typeof sampleReadSpec = {
+      ...sampleReadSpec,
+      inputSchema: z.object({
+        path: z.string(),
+        limit: z.number().int().min(1).optional(),
+      }),
+    };
+    expect(registry.descriptorOf(mutated).inputSchema).toBeDefined();
     expect(registry.descriptorOf(mutated).revision).not.toBe(first.revision);
   });
 });

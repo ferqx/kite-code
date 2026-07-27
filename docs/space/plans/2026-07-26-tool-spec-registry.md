@@ -3,13 +3,13 @@
 状态：archived
 创建：2026-07-26
 优先级：P0
-依赖：ADR-0026、ADR-0027（已接受）
+依赖：ADR-0043、ADR-0044（已接受）
 替代：无
 设计依据：[`docs/design/2026-07-26-tool-spec-registry-rfc.md`](../../design/2026-07-26-tool-spec-registry-rfc.md)
 
 ## 目标
 
-落实 ADR-0026：把模型工具层收口为单一事实源（ToolSpec Registry），消除八点已核实漂移；模型 ToolSet 全部 schema-only；副作用与审批输入不再信任模型自我声明。本计划覆盖阶段 0（漂移止血）与阶段 1（Registry 骨架 + 六个计算原语）；阶段 2/3 见 RFC §6，另行细化。
+落实 ADR-0043：把模型工具层收口为单一事实源（ToolSpec Registry），消除八点已核实漂移；模型 ToolSet 全部 schema-only；副作用与审批输入不再信任模型自我声明。本计划覆盖阶段 0（漂移止血）与阶段 1（Registry 骨架 + 六个计算原语）；阶段 2/3 见 RFC §6，另行细化。
 
 ## 范围
 
@@ -20,7 +20,7 @@
 - `src/core/skills/catalog.ts`
 - `src/app/tui/components/render-utils.ts`（仅删除死映射）
 - 相关测试（approval-policy.test.ts、tool-policy.test.ts、tool-definitions.test.ts、新增一致性测试）
-- 文档（ADR-0026、active 记录随实施更新）
+- 文档（ADR-0043、active 记录随实施更新）
 
 ## 阶段 0：漂移止血（无行为变化 / 仅文本变化）
 
@@ -65,25 +65,25 @@
 - [x] **S1.2 逐工具迁移**（每工具一个 PR，flag 在 `executeRuntimeTools` 入口按工具名单路由，任一时刻单路径生效）
   - 已迁移：`read_file`（2026-07-26：spec + Registry 泛型解析委托 + runner dispatch 收敛 + schema-only 模型条目）。
   - 已迁移：`search_content`、`search_files`（2026-07-26：同模式；直调 execute 的测试改为经 dispatch 验证）。
-  - 已迁移：`write_file`（2026-07-26：同批落地 ADR-0025 §2 —— `mode` 参数与 append 分支移除、契约重写、TUI Append 动词分支退役、file.ts appendFileSync 移除、tui-system 场景删除 append 轮）。
-  - 已迁移：`edit_file`（2026-07-26 A：spec + dispatch + ADR-0026 §3 严格精确匹配（无条件降级链与 tryMultiLineTrimmedMatch 移除，matchMode='trimmed' 内部 opt-in 保留）+ ADR-0025 §1 读取状态记录（read-state.ts，三类工具成功后记录指纹；强制校验在下一提交启用）。
+  - 已迁移：`write_file`（2026-07-26：同批落地 ADR-0042 §2 —— `mode` 参数与 append 分支移除、契约重写、TUI Append 动词分支退役、file.ts appendFileSync 移除、tui-system 场景删除 append 轮）。
+  - 已迁移：`edit_file`（2026-07-26 A：spec + dispatch + ADR-0043 §3 严格精确匹配（无条件降级链与 tryMultiLineTrimmedMatch 移除，matchMode='trimmed' 内部 opt-in 保留）+ ADR-0042 §1 读取状态记录（read-state.ts，三类工具成功后记录指纹；强制校验在下一提交启用）。
   - edit_file 先读后改强制校验启用（2026-07-26 B）：`editFileSpec.preExecute` 消费 `writeTarget.readState`，not_read / stale 硬失败；tool-controller 既有 edit 测试补充前置 read_file；契约 failureHandling 增加两条失败模式。
   - 已迁移：`shell_execute`（2026-07-26：spec + Registry 泛型解析委托 + schema-only 模型条目 + runner dispatch；`ShellActionEnvelope` 收敛为 `command` / `description` / `timeout_ms`，审批 payload 不再读取模型建议授权；只读快车道与 action intent 均由命令形态派生，i10 以只读命令语料守护）。
   - 顺序：`read_file` → `search_files` → `search_content` → `write_file` → `edit_file` → `shell_execute`。
   - 每个工具：执行器从 runner 分支搬入 `spec.execute`（不改语义）→ 删除 definitions.ts 的带 execute 条目与 tool-requests/tool-contracts/tool-capabilities 对应分支 → description 逐字节稳定（golden 守护）→ 直调 execute 的测试改为经 dispatch。
-  - `shell_execute` 迁移**含** ADR-0026 §2 参数收敛：`ShellActionEnvelope` 删七个治理字段；inspect 快车道纯命令形态化（审计 approval-policy 对 intent 的依赖）；`action` 元数据改为分类派生。
-  - `edit_file` 迁移**含** ADR-0026 §3 与 ADR-0025 §1/§2：findMatch 默认 exact（降级链 opt-in）、先读后改/过期拒绝 preExecute 钩子、write_file 删除 `mode` 与 append 分支。
+  - `shell_execute` 迁移**含** ADR-0043 §2 参数收敛：`ShellActionEnvelope` 删七个治理字段；inspect 快车道纯命令形态化（审计 approval-policy 对 intent 的依赖）；`action` 元数据改为分类派生。
+  - `edit_file` 迁移**含** ADR-0043 §3 与 ADR-0042 §1/§2：findMatch 默认 exact（降级链 opt-in）、先读后改/过期拒绝 preExecute 钩子、write_file 删除 `mode` 与 append 分支。
   - 验证：每 PR 跑 `bun run test`、`bun run typecheck`、golden、`bun run test:e2e` 相关子集。
 
 - [x] **S1.3 单路径收尾与旧路径清理**
-  - ADR-0027 核实：`toolSpecRegistryV1` 从未接入运行时分支，六个原语已经无条件走 Registry；不重建旧执行器制造双路径。
+  - ADR-0044 核实：`toolSpecRegistryV1` 从未接入运行时分支，六个原语已经无条件走 Registry；不重建旧执行器制造双路径。
   - 改动：删除死 flag；shell effects 由 spec 唯一定义，Policy 共享其投影；只读分类移出 `definitions.ts` 依赖环；补齐真实 Approval Policy 语料、模型 Schema 精确字段集、dispatch 上下文传播和派生 action 元数据覆盖。
   - 验证：Registry、Policy、controller、Prompt、Golden、Subagent 与 shell TUI 独立卡片场景通过；`bun run test:e2e` 7/7 通过；`bun run test` 中 1766 通过、2 跳过，另有 5 个与本迁移无关的既有 Windows/TUI/ACL/延迟取消失败，详见完成记录；类型、边界与文档门禁通过。
 
 ## 风险
 
-- **单路径回滚**：迁移 flag 从未接线并已删除；按 ADR-0027 回滚完整代码版本，不恢复虚假配置开关。
-- **严格 Edit 抬高失败率**：ADR-0025 已预期为设计意图；失败引导文本提供重读指引；e2e 观察。
+- **单路径回滚**：迁移 flag 从未接线并已删除；按 ADR-0044 回滚完整代码版本，不恢复虚假配置开关。
+- **严格 Edit 抬高失败率**：ADR-0042 已预期为设计意图；失败引导文本提供重读指引；e2e 观察。
 - **shell 快车道命中率回归**：迁移前后对比只读命令免审命中率；`git status` 类命令不得新增审批。
 - **prompt cache 抖动**：description 字节稳定由 golden 守护；Schema 变更集中在 S0 与 S1.2 的 edit/write/shell 批次。
 - **回放兼容**：`PendingToolRequest` 序列化形状与模型名不变；`getPendingToolRequest` 悬空调用恢复路径改由 `registry.parseToolCall` 驱动，行为等价。

@@ -1,12 +1,14 @@
 /**
- * edit_file spec — 迁入 Registry（ADR-0026 S1.2，含 §3 严格精确匹配）。
+ * edit_file spec — 迁入 Registry（ADR-0043 S1.2，含 §3 严格精确匹配）。
  * 契约暂引用 EDIT_FILE_CONTRACT.sections；failureHandling 已按严格语义重写
  * （匹配失败即失败，引导重读；match_mode 已在阶段 0 从模型表面删除，
  * matchMode='trimmed' 仅为内部 opt-in）。
  */
 import { z } from 'zod';
+import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '@/core/tools/diff';
 import { type EditFileResult, editFile } from '@/core/tools/file';
 import { EDIT_FILE_CONTRACT } from '@/core/tools/tool-contracts';
+import { projectionDigest, truncateProjectedLines } from '../projection';
 import type { ToolSpec } from '../spec';
 
 export interface EditFileToolInput {
@@ -41,7 +43,7 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
     classificationReason: 'edit_file modifies workspace files.',
   }),
   approvalSummary: (input) => `edit_file ${input.path}`,
-  // ADR-0025 §1：先读后改 + 过期拒绝。读取状态由调用方（tool-runner）
+  // ADR-0042 §1：先读后改 + 过期拒绝。读取状态由调用方（tool-runner）
   // 基于会话指纹跟踪注入；对齐 Claude Code 的两条工具层硬失败。
   preExecute: (input, context) => {
     const readState = context.writeTarget?.readState;
@@ -77,14 +79,53 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
       replaceAll: input.replace_all,
       allowExternal: context.allowExternalPaths === true,
     }),
-  // 迁移期 runner 仍组装 diff 展示、截断与 resultMeta（与旧路径字节一致）；
-  // projectResult 供未来统一管线消费。
-  projectResult: (output) => ({
-    ok: output.ok,
-    modelContent: output.ok
-      ? `Replaced ${output.replacements ?? 1} occurrence(s) in ${output.path}`
-      : (output.error ?? ''),
-    resultMeta: { workspaceMutationScope: output.path ? [output.path] : [] },
-    display: { verb: 'Update', preview: output.path },
-  }),
+  projectResult: (output, context) => {
+    // invocationInput 由 Registry dispatch 注入且类型化（i1），无需强转。
+    const input = context.invocationInput;
+    if (!output.ok) {
+      return {
+        ok: false,
+        modelContent: output.error ?? '',
+        resultMeta: {
+          path: input.path,
+          truncated: false,
+          workspaceMutationScope: input.path ? [input.path] : [],
+        },
+        display: { verb: 'Update', preview: input.path },
+      };
+    }
+    const parts: string[] = [];
+    if (input.replace_all && output.matchLines && output.matchLines.length > 1) {
+      parts.push(
+        formatMultiHunkDiff(
+          input.old_string,
+          input.new_string,
+          output.matchLines,
+          output.replacements ?? 1,
+        ),
+      );
+    } else {
+      if (input.replace_all) {
+        const count = output.replacements ?? 1;
+        parts.push(`(replaced ${count} time${count > 1 ? 's' : ''})`);
+      }
+      parts.push(
+        formatDiffOutput(computeLineDiff(input.old_string, input.new_string, output.fromLine ?? 1)),
+      );
+    }
+    if (input.old_string === input.new_string) parts.push('(no effective change)');
+    const rawContent = parts.join('\n');
+    const projected = truncateProjectedLines(rawContent);
+    return {
+      ok: true,
+      modelContent: projected.content,
+      resultMeta: {
+        path: input.path,
+        truncated: projected.truncated,
+        workspaceMutationScope: input.path ? [input.path] : [],
+        rawResultDigest: projectionDigest(rawContent, '', 0),
+      },
+      display: { verb: 'Update', preview: input.path },
+    };
+  },
 };

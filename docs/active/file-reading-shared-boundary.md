@@ -43,9 +43,9 @@ Workspace: /d/work/my-project
 
 `readFile` 和 `editFile` 均通过 `readTextContent` 读取文件，禁止各自独立调用 `readFileSync`。
 
-`read_file` / `search_content` / `search_files` 工具调用的编排已迁入 ToolSpec Registry dispatch（`dispatchRegisteredTool`，ADR-0026 S1.2）：各 spec 的 `execute` 仍调用 `readFile` / 原生搜索，字节级单入口 `readTextContent` 与本边界全部规则不变；外部路径 grant 检查经 `ToolExecutionContext.allowExternalPaths` 注入。
+`read_file` / `search_content` / `search_files` 工具调用的编排已迁入 ToolSpec Registry dispatch（`dispatchRegisteredTool`，ADR-0043 S1.2）：各 spec 的 `execute` 仍调用 `readFile` / 原生搜索，字节级单入口 `readTextContent` 与本边界全部规则不变；外部路径 grant 检查经 `ToolExecutionContext.allowExternalPaths` 注入。
 
-会话级读取状态跟踪（`src/core/tools/read-state.ts`，ADR-0025 §1）：`read_file` / `write_file` / `edit_file` 成功后按规范化路径记录内容指纹（sha256，换行正规化后文本），tracker 以 threadId 为键（主会话与 subagent fork 共享）。`edit_file` 执行前经 `editFileSpec.preExecute` 强制校验：未读（not_read）或指纹与磁盘不一致（stale，即外部修改）时硬失败并引导重读，对齐 Claude Code 的 "File has not been read yet" / "File has been modified since you last read it" 两条工具层拒绝。跟踪 best-effort——不得因跟踪失败中断工具执行；回滚方式为还原强制校验提交（退回 old_string 自然校验）。
+会话级读取状态跟踪（`src/core/tools/read-state.ts`，ADR-0042 §1）：`read_file` / `write_file` / `edit_file` 成功后按规范化路径记录内容指纹（sha256，换行正规化后文本），tracker 以 threadId 为键（主会话与 subagent fork 共享）。`edit_file` 执行前经 `editFileSpec.preExecute` 强制校验：未读（not_read）或指纹与磁盘不一致（stale，即外部修改）时硬失败并引导重读，对齐 Claude Code 的 "File has not been read yet" / "File has been modified since you last read it" 两条工具层拒绝。跟踪 best-effort——不得因跟踪失败中断工具执行；回滚方式为还原强制校验提交（退回 old_string 自然校验）。
 
 边界提供两个入口，共享同一个 `decodeTextBuffer` 解码核心（编码检测、二进制检测、换行正规化行为完全一致）：
 
@@ -117,9 +117,9 @@ Workspace: /d/work/my-project
 
 模型不再需要显式 `matchMode: 'trimmed'` 来处理常见空白不匹配。仅在多行且多命中时返回模糊错误。
 
-### shell_execute 输出截断（`tool-runner.ts:353-363`，2026-06-23）
+### 工具输出截断（`src/core/tools/registry/projection.ts`）
 
-`truncateToolOutput` 对超过 4000 字符的 stdout/stderr 做 head+tail 截断，中间标注省略行数。仅截断不改写（零幻觉），保留首尾信息。
+`truncateProjectedOutput` 对单路超过 4000 字符的输出做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。仅截断不改写（零幻觉），保留首尾信息。失败时两路输出都保留，Runner 只消费投影，不再自带第二份截断实现。
 
 ### rg exit code 1 ≠ error（`tool-contracts.ts`、`system-prompt.txt`）
 

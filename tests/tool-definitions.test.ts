@@ -205,7 +205,7 @@ describe('code agent tool definitions', () => {
     writeFileSync(join(workspace, 'package.json'), '{}\n');
     writeFileSync(join(workspace, 'src', 'alpha.ts'), 'const marker = "needle";\n');
 
-    // 迁移后（ADR-0026 S1.2）搜索工具的模型条目为 schema-only，
+    // 迁移后（ADR-0043 S1.2）搜索工具的模型条目为 schema-only，
     // 执行经 Registry dispatch 验证（原生搜索，不触碰 shell）。
     const filesOutcome = await dispatchRegisteredTool(
       searchFilesSpec,
@@ -525,9 +525,9 @@ describe('tool contracts (ACI)', () => {
     );
   });
 
-  // ── Cache key stabilization ──
+  // ── Stateless tool projection ──
 
-  test('returns same tool instances on cache hit (same state)', () => {
+  test('reprojects an equivalent schema-only surface without retaining session objects', () => {
     clearToolCache();
     const a = createAgentTools({
       workspace: '/tmp',
@@ -543,11 +543,12 @@ describe('tool contracts (ACI)', () => {
       workspaceAccess: 'write',
       interactionMode: 'auto',
     });
-    // Same state → cache hit → same object reference returned
-    expect(a).toBe(b);
+    expect(a).not.toBe(b);
+    expect(toolNames(a)).toEqual(toolNames(b));
+    expect(Object.values(a).every((entry) => entry.execute === undefined)).toBe(true);
   });
 
-  test('keeps MCP tool cache identity stable across turns but invalidates revision or schema drift', () => {
+  test('reprojects equivalent MCP bindings without retaining turn-scoped objects', () => {
     clearToolCache();
     const descriptor: CapabilityDescriptor = {
       capabilityId: 'mcp:fixture/read',
@@ -607,7 +608,8 @@ describe('tool contracts (ACI)', () => {
       ],
     });
 
-    expect(nextTurn).toBe(first);
+    expect(nextTurn).not.toBe(first);
+    expect(toolNames(nextTurn)).toEqual(toolNames(first));
     expect(revisionChanged).not.toBe(first);
     expect(schemaChanged).not.toBe(first);
   });

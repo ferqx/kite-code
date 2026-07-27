@@ -16,7 +16,7 @@
  * 3. 内容未变的覆写 / No-op overwrite (changelog.md, identical content):
  *    卡片动词 Write（非 Create）；摘要含 "(content unchanged)" 标记。
  *
- * append 轮已由 ADR-0025 §2 移除（追加改由 edit_file 尾部匹配或 shell 表达）。
+ * append 轮已由 ADR-0042 §2 移除（追加改由 edit_file 尾部匹配或 shell 表达）。
  *
  * NOTE: 默认交互模式为 accept-edits，工作区写入自动放行，无审批浮层。
  * Default interaction mode is accept-edits: workspace writes auto-approve.

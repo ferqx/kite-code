@@ -3,7 +3,7 @@
 状态：archived
 创建：2026-07-26
 优先级：P0
-依赖：ADR-0026、ADR-0027
+依赖：ADR-0043、ADR-0044
 设计依据：[`docs/design/2026-07-26-tool-spec-registry-rfc.md`](../../design/2026-07-26-tool-spec-registry-rfc.md)
 
 ## 目标

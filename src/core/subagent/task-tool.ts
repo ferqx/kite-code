@@ -27,7 +27,7 @@ export interface TaskToolDeps {
   signal?: AbortSignal;
   model?: SupportedChatModel;
   maxDepth?: number;
-  /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0025 §4）。 */
+  /** 写入前文件原像记录器，透传给子 agent 的工具执行（ADR-0042 §4）。 */
   recordFilePreimage?: import('@/core/runtime/file-checkpoints').FilePreimageRecorder;
 }
 

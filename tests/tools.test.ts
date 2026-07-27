@@ -148,7 +148,7 @@ describe('tool safety', () => {
     // File content has no trailing spaces
     writeFile({ workspace, path: 'cfg.ts', content: '  debug: true,\n  env: prod,\n' });
 
-    // ADR-0026 §3: oldString has trailing spaces — matching is exact, no fallback
+    // ADR-0043 §3: oldString has trailing spaces — matching is exact, no fallback
     const result = editFile({
       workspace,
       path: 'cfg.ts',
@@ -170,7 +170,7 @@ describe('tool safety', () => {
 
     writeFile({ workspace, path: 'f.ts', content: '  const x = 1;\n  const y = 2;\n' });
 
-    // ADR-0026 §3: oldString stripped of indent — exact match fails, no per-line fallback
+    // ADR-0043 §3: oldString stripped of indent — exact match fails, no per-line fallback
     const result = editFile({
       workspace,
       path: 'f.ts',

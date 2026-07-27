@@ -3,7 +3,7 @@
 状态：completed
 日期：2026-07-26
 计划：[`2026-07-26-tool-spec-registry.md`](../../plans/2026-07-26-tool-spec-registry.md)
-决策：ADR-0026、ADR-0027
+决策：ADR-0043、ADR-0044
 
 ## 已完成
 
@@ -15,7 +15,7 @@
 - shell_execute 参数收敛为 `command`、`description`、`timeout_ms`，审批和 action 元数据由命令形态与授权状态派生；
 - 审批 payload、协议事件与 session recorder 不再保留模型提供的 intent、grant、objective、expected observation、failure strategy 或 suggested prefix 元数据；
 - shell effects 由 spec 唯一定义，Approval Policy 复用该投影；只读命令分类移出 definitions 依赖环；
-- 删除从未接入运行时的 `toolSpecRegistryV1`，按 ADR-0027 以单路径完成收尾。
+- 删除从未接入运行时的 `toolSpecRegistryV1`，按 ADR-0044 以单路径完成收尾。
 
 ## 验证证据
 

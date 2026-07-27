@@ -16,7 +16,7 @@
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
 
-## Rewind 文件恢复（ADR-0025 §4）
+## Rewind 文件恢复（ADR-0042 §4）
 
 `/rewind` 回退命名恢复点时必须先按文件原像表恢复工作区文件（检查点时刻存在的文件写回原像，不存在的文件删除），再截断事件日志与恢复点。约束：
 

@@ -2,7 +2,7 @@
 
 状态：accepted
 日期：2026-07-26
-补充：ADR-0002、ADR-0008、ADR-0026、ADR-0027
+补充：ADR-0002、ADR-0008、ADR-0043、ADR-0044
 关联：`docs/space/plans/2026-07-26-tool-spec-registry-phase-3.md`、`docs/active/plan-mode-implementation.md`、`docs/active/tool-gated-autonomy.md`
 
 ## 背景

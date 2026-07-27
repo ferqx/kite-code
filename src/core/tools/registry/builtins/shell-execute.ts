@@ -10,6 +10,7 @@ import {
 import { shellTool } from '@/core/tools/shell';
 import { SHELL_EXECUTE_CONTRACT } from '@/core/tools/tool-contracts';
 import type { ShellActionEnvelope, ShellIntent, ShellResult } from '@/core/types';
+import { projectionDigest, truncateProjectedStreams } from '../projection';
 import type { ToolSpec } from '../spec';
 
 export const shellActionEnvelopeSchema = z.object({
@@ -49,6 +50,30 @@ export function classifyShellActionIntent(command: string): ShellIntent {
   if (classifyShellRisk(trimmed) === 'read') return 'inspect';
   if (/\b(typecheck|lint|check)\b/i.test(trimmed)) return 'verify';
   return 'other';
+}
+
+// `satisfies` 校验每个取值都是合法 ShellIntent；ShellIntent 联合新增成员时
+// 必须同步加入本表，否则 projectedShellIntent 会将其降级为 'other'。
+// `satisfies` validates every entry against ShellIntent; new union members
+// must be added here or projectedShellIntent downgrades them to 'other'.
+const SHELL_INTENT_VALUES = [
+  'inspect',
+  'verify',
+  'build',
+  'test',
+  'git',
+  'other',
+] as const satisfies readonly ShellIntent[];
+
+/**
+ * 从投影 resultMeta 收回 ShellIntent：运行时校验取代调用方盲 cast。
+ * Recover a ShellIntent from projected resultMeta with runtime validation
+ * instead of a blind cast at the call site.
+ */
+export function projectedShellIntent(meta: { intent?: string }): ShellIntent {
+  return (SHELL_INTENT_VALUES as readonly string[]).includes(meta.intent ?? '')
+    ? (meta.intent as ShellIntent)
+    : 'other';
 }
 
 export const shellExecuteSpec: ToolSpec<ShellActionEnvelope, ShellResult> = {
@@ -117,10 +142,24 @@ export const shellExecuteSpec: ToolSpec<ShellActionEnvelope, ShellResult> = {
       };
     }
   },
-  projectResult: (output) => ({
-    ok: output.ok,
-    modelContent: output.ok ? output.stdout : output.stderr,
-    resultMeta: {},
-    display: { verb: 'Run', preview: output.command },
-  }),
+  projectResult: (output) => {
+    // 双输出流逐流截断并两路保留：失败命令的 stdout（测试输出、部分结果）
+    // 与成功命令的 stderr 警告都是模型需要的信息。
+    // Truncate each stream independently and keep both: a failing command's
+    // stdout (test output, partial results) and a successful command's stderr
+    // warnings are both information the model needs.
+    const streams = truncateProjectedStreams(output.stdout, output.stderr);
+    return {
+      ok: output.ok,
+      modelContent: output.ok ? streams.stdout : streams.stderr || streams.stdout,
+      streams,
+      resultMeta: {
+        command: output.command,
+        intent: classifyShellActionIntent(output.command),
+        truncated: streams.truncated,
+        rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
+      },
+      display: { verb: 'Run', preview: output.command },
+    };
+  },
 };

@@ -53,7 +53,7 @@ export interface RuntimeExecutorDependencies {
   /** Owned and flushed by the application composition root. */
   compactionReporter?: CompactionReporter;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
-  /** 用于记录文件写入前原像（ADR-0025 §4），缺省时工具写入不留原像。 */
+  /** 用于记录文件写入前原像（ADR-0042 §4），缺省时工具写入不留原像。 */
   runtimeStore?: RuntimeStore;
 }
 
