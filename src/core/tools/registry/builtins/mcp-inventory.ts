@@ -23,6 +23,10 @@ export const readMcpResourceInputSchema = z.object({
   uri: z.string().describe('Resource URI to read (e.g. file:///docs/api.md)'),
 });
 
+export type ListMcpResourcesInput = z.infer<typeof listMcpResourcesInputSchema>;
+export type ListMcpToolsInput = z.infer<typeof listMcpToolsInputSchema>;
+export type ReadMcpResourceInput = z.infer<typeof readMcpResourceInputSchema>;
+
 type McpSpecOutput = {
   ok: boolean;
   stdout: string;

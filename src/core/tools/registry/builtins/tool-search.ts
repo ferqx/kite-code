@@ -18,7 +18,7 @@ export const toolSearchInputSchema = z.object({
   limit: z.number().int().min(1).max(12).optional().describe('Maximum candidates'),
 });
 
-type ToolSearchInput = z.infer<typeof toolSearchInputSchema>;
+export type ToolSearchInput = z.infer<typeof toolSearchInputSchema>;
 type ToolSearchOutput = {
   ok: boolean;
   stdout: string;

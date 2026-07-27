@@ -45,6 +45,10 @@ export const activateSkillInputSchema = z.object({
   input: z.record(z.string(), z.unknown()),
 });
 
+export type ReadSkillReferenceInput = z.infer<typeof readSkillReferenceInputSchema>;
+export type CompleteSkillInput = z.infer<typeof completeSkillInputSchema>;
+export type ActivateSkillInput = z.infer<typeof activateSkillInputSchema>;
+
 type SkillOutput = {
   ok: boolean;
   stdout: string;

@@ -54,6 +54,8 @@ export const writePlanInputSchema = z
     }
   });
 
+export type WritePlanInput = z.infer<typeof writePlanInputSchema>;
+
 export const writePlanSpec: ToolSpec<
   z.infer<typeof writePlanInputSchema>,
   RuntimeActionEmission

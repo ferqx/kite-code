@@ -111,3 +111,5 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 ### 2026-07-27：PendingToolRequest 简化
 
 - 将 22 成员的可辨识联合类型（手写每工具参数声明）替换为简单接口 `{ id?, name, args: unknown, reason, protectedCommand }`。`args` 经 Registry `inputSchema` 解析后透传（i1），消费者在需要字段级访问时使用显式 `Record<string,unknown>` 转换。删除 229 行重复 Schema 声明。
+
+- 所有 19 个 builtin spec 导出 `z.infer` 的 Input 类型。tool-runner 与 tool-controller 在每个工具分支入口用一行 `as XxxInput` 收窄 args，替代散落的逐字段 cast。

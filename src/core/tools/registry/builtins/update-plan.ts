@@ -19,6 +19,8 @@ export const updatePlanInputSchema = z.object({
   complete_plan: z.boolean().optional(),
 });
 
+export type UpdatePlanInput = z.infer<typeof updatePlanInputSchema>;
+
 export const updatePlanSpec: ToolSpec<
   z.infer<typeof updatePlanInputSchema>,
   RuntimeActionEmission

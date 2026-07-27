@@ -25,7 +25,7 @@ export const webFetchInputSchema = z.object({
     ),
 });
 
-type WebFetchInput = z.infer<typeof webFetchInputSchema>;
+export type WebFetchInput = z.infer<typeof webFetchInputSchema>;
 type WebFetchOutput = WebFetchResult & { aborted?: boolean; timedOut?: boolean };
 
 export const webFetchSpec: ToolSpec<WebFetchInput, WebFetchOutput> = {

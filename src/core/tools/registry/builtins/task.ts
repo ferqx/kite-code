@@ -15,7 +15,7 @@ export const taskInputSchema = z.object({
     ),
 });
 
-type TaskInput = z.infer<typeof taskInputSchema>;
+export type TaskInput = z.infer<typeof taskInputSchema>;
 type TaskOutput = { available: true; result: SubAgentResult } | { available: false; error: string };
 
 export const taskSpec: ToolSpec<TaskInput, TaskOutput> = {

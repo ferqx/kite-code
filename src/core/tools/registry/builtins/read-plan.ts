@@ -10,6 +10,8 @@ export const readPlanInputSchema = z.object({
   structural_digest: z.string().min(1).optional(),
 });
 
+export type ReadPlanInput = z.infer<typeof readPlanInputSchema>;
+
 export const readPlanSpec: ToolSpec<z.infer<typeof readPlanInputSchema>, RuntimeActionEmission> = {
   name: 'read_plan',
   kind: 'runtime_action',

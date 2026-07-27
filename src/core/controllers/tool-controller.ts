@@ -48,8 +48,10 @@ import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/sub
 import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
+import type { ReadMcpResourceInput } from '@/core/tools/registry/builtins/mcp-inventory';
 import { readPlanSpec } from '@/core/tools/registry/builtins/read-plan';
 import {
+  type ActivateSkillInput,
   activateSkillSpec,
   completeSkillSpec,
   readSkillReferenceSpec,
@@ -665,15 +667,12 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'activate_skill') {
+      const skillInput = request.args as ActivateSkillInput;
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
       const descriptor = params.skillCatalog?.capabilities.descriptors.find(
-        (candidate) =>
-          candidate.capabilityId === ((request.args as Record<string, unknown>).skill_id as string),
+        (candidate) => candidate.capabilityId === skillInput.skill_id,
       );
-      const disclosure =
-        params.state.capabilities.disclosures[
-          (request.args as Record<string, unknown>).skill_id as string
-        ];
+      const disclosure = params.state.capabilities.disclosures[skillInput.skill_id];
       if (
         flags.toolSearchV1 &&
         (!descriptor ||
@@ -905,11 +904,9 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'ask_user') {
-      const hasQuestion =
-        (((request.args as Record<string, unknown>).question as string) ?? '').trim().length > 0;
-      const hasBatchQuestions =
-        (((request.args as Record<string, unknown>).questions as Array<unknown> | undefined)
-          ?.length ?? 0) > 0;
+      const askInput = request.args as import('@/protocol/events').UserInputRequest;
+      const hasQuestion = (askInput.question ?? '').trim().length > 0;
+      const hasBatchQuestions = (askInput.questions?.length ?? 0) > 0;
       if (!hasQuestion && !hasBatchQuestions) {
         events.push({
           type: 'tool.failed',
@@ -1359,7 +1356,7 @@ export async function executeRuntimeTools(params: {
     try {
       if (request.name === 'read_mcp_resource') {
         await params.mcpManager?.ensureProviderReady?.(
-          (request.args as Record<string, unknown>).server as string,
+          (request.args as ReadMcpResourceInput).server,
           30_000,
           params.signal,
         );
