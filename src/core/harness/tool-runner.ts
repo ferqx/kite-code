@@ -813,6 +813,46 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
   }
 
+  // Generic Registry dispatch for registered tools without a dedicated
+  // branch.  Each spec is the sole source for availability, schema,
+  // execution, and result projection (ADR-0043).
+  const spec = builtinToolRegistry.get(request.name);
+  if (spec && 'execute' in spec) {
+    const dispatched = await dispatchRegisteredTool(spec, request.args, {
+      workspace,
+      threadId,
+      signal,
+      allowExternalPaths: isExternalPathArg(
+        String((request.args as Record<string, unknown>).path ?? ''),
+      )
+        ? hasExecutionGrant
+        : undefined,
+    });
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    return {
+      ok: dispatched.projected.ok,
+      command: request.protectedCommand,
+      exitCode: dispatched.projected.ok ? 0 : -1,
+      stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
+      resultMeta: dispatched.projected.resultMeta,
+      ...(dispatched.projected.streams
+        ? {
+            stdout: dispatched.projected.streams.stdout,
+            stderr: dispatched.projected.streams.stderr,
+          }
+        : {}),
+    };
+  }
+
   return {
     ok: false,
     command: 'unsupported_tool',

@@ -103,3 +103,7 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 - **governanceRevision**：ToolSpec 新增可选 `governanceRevision` 字段，纳入 descriptor revision 哈希，使 effects 分类逻辑变化（如 shell 只读命令白名单修改）能触发缓存失效。
 - **string 重载收紧**：`toolRequestFromCall` 的 string 重载仅提供 `workspace`，移除伪造的 `hasTaskAdapter`/`activeSkillFrameIds`/feature flags。
 - **read_file Schema**：`offset` 和 `limit` 增加 `int().min(1)` 校验。
+
+### 2026-07-27：Runner 通用 Registry 分发
+
+- `runApprovedTool` 新增通用 Registry 回退路径：工具未命中任何子分支时，通过 `builtinToolRegistry.get()` 查找 spec 并调用 `dispatchRegisteredTool`，新增注册工具不再需要手工添加 Runner 分支。
