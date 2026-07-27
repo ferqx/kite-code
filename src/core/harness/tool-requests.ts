@@ -1,10 +1,4 @@
-import {
-  type AIMessage,
-  aiMessage,
-  type BaseMessage,
-  isAIMessage,
-  isToolMessage,
-} from '@/core/messages';
+import { type AIMessage, aiMessage } from '@/core/messages';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellActionEnvelope } from '@/core/types';
@@ -203,100 +197,15 @@ export type PendingToolRequest =
       protectedCommand: string;
     };
 
-/** 从消息列表中获取待处理的工具请求 / Get pending tool request from message list
-
- 向后搜索最新的含有 tool_calls 的 AIMessage，检查其 tool_call_id 是否已被后方
- ToolMessage 应答，避免 checkpoint 恢复时遗漏悬空工具调用。
-*/
-export function getPendingToolRequest(
-  messages: BaseMessage[],
-  workspace: string,
-): PendingToolRequest | null {
-  // Collect resolved tool_call_ids from ToolMessages
-  const resolvedIds = new Set<string>();
-  for (const msg of messages) {
-    if (isToolMessageInstance(msg)) {
-      const tcId = (msg as unknown as Record<string, string>).tool_call_id;
-      if (tcId) resolvedIds.add(tcId);
-    }
-  }
-
-  // Search backwards for the last AIMessage with an unresolved tool_call.
-  // Use isAIMessage() instead of instanceof to handle deserialized
-  // messages from checkpoint — isInstance falls back to checking the `type`
-  // field when the prototype chain is unavailable (e.g. after JSON round-trip).
-  // Iterate ALL tool_calls (not just [0]) to handle multi-tool-call AIMessages
-  // where the first call is resolved but later ones are not.
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (!isAIMessage(msg)) continue;
-    if (!msg.tool_calls || msg.tool_calls.length === 0) continue;
-    for (const call of msg.tool_calls) {
-      if (!call.id || resolvedIds.has(call.id)) continue;
-      return toolRequestFromCall(call, workspace);
-    }
-  }
-
-  return null;
-}
-
-/** 从消息列表中获取最后一个 AIMessage 的所有待处理工具请求 / Get all pending tool requests from the last AIMessage
-
- 与 getPendingToolRequest 相同的搜索逻辑，但返回所有未解决的 tool_calls，
- 用于在 tools 节点中批量处理（如并行派发多个子 agent）。
-*/
-export function getAllPendingToolRequests(
-  messages: BaseMessage[],
-  workspace: string,
-): PendingToolRequest[] {
-  const resolvedIds = new Set<string>();
-  for (const msg of messages) {
-    if (isToolMessageInstance(msg)) {
-      const tcId = (msg as unknown as Record<string, string>).tool_call_id;
-      if (tcId) resolvedIds.add(tcId);
-    }
-  }
-
-  // Find the last AIMessage with tool_calls
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (!isAIMessage(msg)) continue;
-    if (!msg.tool_calls || msg.tool_calls.length === 0) continue;
-
-    // Parse all unresolved tool_calls from this AIMessage
-    const requests: PendingToolRequest[] = [];
-    for (const call of msg.tool_calls) {
-      if (!call.id || resolvedIds.has(call.id)) continue;
-      const req = toolRequestFromCall(call, workspace);
-      if (req) requests.push(req);
-    }
-    return requests;
-  }
-
-  return [];
-}
-
 /** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
 export function toolRequestFromCall(
   call: { id?: string; name: string; args: Record<string, unknown> },
-  context: string | ToolAvailabilityContext,
+  availabilityContext: string | ToolAvailabilityContext,
 ): PendingToolRequest | null {
-  const availabilityContext: ToolAvailabilityContext =
-    typeof context === 'string'
-      ? {
-          workspace: context,
-          // Compatibility for direct/legacy callers. Production model and execution
-          // controllers pass the immutable turn snapshot instead.
-          hasTaskAdapter: true,
-          toolSearchEnabled: true,
-          activeSkillFrameIds: ['legacy'],
-          availableSkillIds: ['legacy'],
-          featureFlags: {
-            skillWorkflowV1: true,
-            skillActivationV2: true,
-          } as ToolAvailabilityContext['featureFlags'],
-        }
-      : context;
+  const context: ToolAvailabilityContext =
+    typeof availabilityContext === 'string'
+      ? { workspace: availabilityContext }
+      : availabilityContext;
   // 合成调用：invokeModel 在 parseToolCall 失败后注入 _raw_invalid_args 标记。
   // 跳过工具特定的 args 规范化，保留标记字段直通 runApprovedTool 生成错误反馈。
   // Synthetic call: injected by invokeModel after parseToolCall failure.
@@ -313,7 +222,7 @@ export function toolRequestFromCall(
 
   // 已迁移到 Registry 的工具走泛型解析（ADR-0043）：args 恒等于 schema 解析结果，
   // 不存在逐字段重映射。schema 无效返回 null，走调用方既有的 tool_not_found 路径。
-  const viaRegistry = builtinToolRegistry.parseToolCall(call, availabilityContext);
+  const viaRegistry = builtinToolRegistry.parseToolCall(call, context);
   if (viaRegistry) {
     if (!viaRegistry.ok) return null;
     return {
@@ -336,18 +245,6 @@ export function toolRequestFromCall(
   }
 
   return null;
-}
-
-/**
- * 检测消息是否为 ToolMessage。
- * 通过 type 字段（'tool'）判别，对 checkpoint 反序列化后的 plain object 同样生效。
- *
- * Detect whether a message is a ToolMessage instance.
- * Uses the `type` field ('tool') — works for both factory-created objects
- * and checkpoint-deserialized plain objects.
- */
-function isToolMessageInstance(msg: unknown): boolean {
-  return isToolMessage(msg);
 }
 
 /** 从 AIMessage 中提取并保留单个工具调用 / Extract and keep a single tool call from AIMessage */

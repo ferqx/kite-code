@@ -43,28 +43,54 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
     classificationReason: 'edit_file modifies workspace files.',
   }),
   approvalSummary: (input) => `edit_file ${input.path}`,
-  // ADR-0042 §1：先读后改 + 过期拒绝。读取状态由调用方（tool-runner）
-  // 基于会话指纹跟踪注入；对齐 Claude Code 的两条工具层硬失败。
+  // ADR-0042 §1：先读后改 + 过期拒绝（fail-closed）。
+  // 缺少 writeTarget、路径不匹配，或 readState 不是 fresh 时一律拒绝。
   preExecute: (input, context) => {
-    const readState = context.writeTarget?.readState;
-    if (readState === 'not_read') {
+    const target = context.writeTarget;
+    if (!target) {
       return {
         proceed: false,
         rejection: {
           ok: false,
-          error: `File has not been read yet: ${input.path}. Read it with read_file first, then retry edit_file.`,
-          guidance:
-            'edit_file requires the target to have been read in this session so old_string comes from verified content.',
+          error: `Missing verified read state for: ${input.path}`,
+          guidance: 'Read the exact target file before editing it.',
         },
       };
     }
-    if (readState === 'stale') {
+    if (target.path !== input.path) {
       return {
         proceed: false,
         rejection: {
           ok: false,
-          error: `File has been modified since you last read it: ${input.path}. Re-read it with read_file, then retry with the exact current content.`,
-          guidance: 'The recorded content fingerprint no longer matches the file on disk.',
+          error: `Read state path "${target.path}" does not match edit target "${input.path}".`,
+          guidance: 'Read the exact target file before editing it.',
+        },
+      };
+    }
+    if (target.readState !== 'fresh') {
+      if (target.readState === 'not_read') {
+        return {
+          proceed: false,
+          rejection: {
+            ok: false,
+            error: `File has not been read yet: ${input.path}. Read it with read_file first, then retry edit_file.`,
+            guidance:
+              'edit_file requires the target to have been read in this session so old_string comes from verified content.',
+          },
+        };
+      }
+      return {
+        proceed: false,
+        rejection: {
+          ok: false,
+          error:
+            target.readState === 'stale'
+              ? `File has been modified since you last read it: ${input.path}. Re-read it with read_file, then retry with the exact current content.`
+              : `Missing or invalid read state for: ${input.path}. Read the exact target file before editing it.`,
+          guidance:
+            target.readState === 'stale'
+              ? 'The recorded content fingerprint no longer matches the file on disk.'
+              : 'Read the exact target file before editing it.',
         },
       };
     }
@@ -89,7 +115,6 @@ export const editFileSpec: ToolSpec<EditFileToolInput, EditFileResult> = {
         resultMeta: {
           path: input.path,
           truncated: false,
-          workspaceMutationScope: input.path ? [input.path] : [],
         },
         display: { verb: 'Update', preview: input.path },
       };

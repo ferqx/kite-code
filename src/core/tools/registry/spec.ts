@@ -163,6 +163,8 @@ interface BaseToolSpec<Input = unknown> {
   effects(input: Input, context: ToolContext): ToolEffects;
   /** 审批展示命令（可选）。默认使用工具名，替代逐分支的 protectedCommand。 */
   approvalSummary?(input: Input, context: ToolContext): string;
+  /** 治理版本标签（可选），effects/分类逻辑变化时递增，纳入 descriptor revision 以保证缓存失效。 */
+  readonly governanceRevision?: string;
   /** 执行前置钩子（fail-fast）：ADR-0042 §1/§4 与读取登记的统一落点。 */
   preExecute?(
     input: Input,

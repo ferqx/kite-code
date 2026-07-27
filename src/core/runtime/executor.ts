@@ -244,7 +244,7 @@ async function executeAutoReview(
 
   const request = toolRequestFromCall(
     { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
-    state.session.workspace,
+    { workspace: state.session.workspace, threadId: state.session.threadId },
   );
   if (!request) {
     return [

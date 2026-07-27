@@ -144,6 +144,7 @@ export class ToolRegistry {
       policy: {
         workspaceTrustRequired: false,
         minimumApproval: spec.minimumApproval,
+        ...(spec.governanceRevision ? { governanceRevision: spec.governanceRevision } : {}),
       },
       availability: 'available' as const,
       diagnostics: [] as string[],

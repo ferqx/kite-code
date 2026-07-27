@@ -77,10 +77,12 @@ export function toolAvailabilityContext(input: CreateAgentToolsInput): ToolAvail
 }
 
 /** 创建 Agent 工具集（跨工作区访问权限保持 schema 稳定，由工具执行层强制边界） */
-export function createAgentTools(input: CreateAgentToolsInput): ToolSet {
-  const builtinTools = builtinToolRegistry.toSchemaOnlyToolSet(
-    toolAvailabilityContext(input),
-  ) as ToolSet;
+export function createAgentTools(
+  input: CreateAgentToolsInput,
+  context?: ToolAvailabilityContext,
+): ToolSet {
+  const ctx = context ?? toolAvailabilityContext(input);
+  const builtinTools = builtinToolRegistry.toSchemaOnlyToolSet(ctx) as ToolSet;
 
   const mcpTools: ToolSet = {};
   for (const { binding, descriptor } of input.mcpBindings ?? []) {

@@ -58,7 +58,9 @@ function toolResultMeta(
   const effect = call.effectClass ?? classifyToolCapability(call.name, call.args).effectClass;
   const workspaceMutationScope =
     supplied.workspaceMutationScope ??
-    ((effect === 'workspace_write' || (effect === 'unknown' && call.sideEffect)) && path
+    (event.result.ok &&
+    (effect === 'workspace_write' || (effect === 'unknown' && call.sideEffect)) &&
+    path
       ? [path]
       : undefined);
   const fallbackModelDigest = createHash('sha256')

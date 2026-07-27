@@ -316,24 +316,25 @@ async function handleSubAgentResume(params: {
 
   // Execute the previously-blocked tool with the approval grant
   const call = params.state.tools.calls[params.toolCallId];
+  const availCtx = toolAvailabilityContext({
+    workspace: params.state.session.workspace,
+    threadId: params.state.session.threadId,
+    config: params.taskConfig,
+    subagentEventSink: params.emitSubagentEvent,
+    toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
+    skillCatalog: params.skillCatalog,
+    activeSkillFrames: Object.values(params.state.skills.frames).filter(
+      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    ),
+    phase: getAgentPhase(getActivePlanning(params.state)),
+  });
   const blockedRequest = toolRequestFromCall(
     {
       id: params.toolCallId,
       name: blockedToolName,
       args: blockedToolArgs,
     },
-    toolAvailabilityContext({
-      workspace: params.state.session.workspace,
-      threadId: params.state.session.threadId,
-      config: params.taskConfig,
-      subagentEventSink: params.emitSubagentEvent,
-      toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
-      skillCatalog: params.skillCatalog,
-      activeSkillFrames: Object.values(params.state.skills.frames).filter(
-        (frame) => frame.status === 'active' && frame.contextMode === 'inline',
-      ),
-      phase: getAgentPhase(getActivePlanning(params.state)),
-    }),
+    availCtx,
   );
 
   let toolResult: ToolExecutionResult;
@@ -366,6 +367,7 @@ async function handleSubAgentResume(params: {
       taskConfig: params.taskConfig,
       taskModel: params.taskModel,
       subagentEventSink: params.emitSubagentEvent,
+      availabilityContext: availCtx,
     });
   } else {
     toolResult = {
@@ -429,10 +431,7 @@ async function handleSubAgentResume(params: {
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
-      capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-      }),
+      capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, availCtx),
     });
     const blockedApproval = buildToolApproval({
       workspace: params.state.session.workspace,
@@ -523,23 +522,24 @@ export async function executeRuntimeTools(params: {
     events.push(toRuntimeSubagentEvent(event));
     params.subagentEventSink?.(event);
   };
+  const availCtx = toolAvailabilityContext({
+    workspace: params.state.session.workspace,
+    threadId: params.state.session.threadId,
+    config: params.taskConfig,
+    subagentEventSink: params.subagentEventSink,
+    toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
+    skillCatalog: params.skillCatalog,
+    activeSkillFrames: Object.values(params.state.skills.frames).filter(
+      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    ),
+    phase: getAgentPhase(getActivePlanning(params.state)),
+  });
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
     const request = toolRequestFromCall(
       { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
-      toolAvailabilityContext({
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-        config: params.taskConfig,
-        subagentEventSink: params.subagentEventSink,
-        toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
-        skillCatalog: params.skillCatalog,
-        activeSkillFrames: Object.values(params.state.skills.frames).filter(
-          (frame) => frame.status === 'active' && frame.contextMode === 'inline',
-        ),
-        phase: getAgentPhase(getActivePlanning(params.state)),
-      }),
+      availCtx,
     );
     if (!request) {
       if (builtinToolRegistry.get(call.name)) {
@@ -1043,10 +1043,7 @@ export async function executeRuntimeTools(params: {
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
       ...(mcpPolicy ? { mcpPolicy } : {}),
-      capability: builtinToolRegistry.effectsOf(request.name, request.args, {
-        workspace: params.state.session.workspace,
-        threadId: params.state.session.threadId,
-      }),
+      capability: builtinToolRegistry.effectsOf(request.name, request.args, availCtx),
     });
     if (!decision.allowed) {
       events.push({
@@ -1223,6 +1220,7 @@ export async function executeRuntimeTools(params: {
           taskConfig: params.taskConfig,
           taskModel: params.taskModel,
           subagentEventSink: emitSubagentEvent,
+          availabilityContext: availCtx,
           onShellProgress: (chunk, stream) =>
             progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
         });
@@ -1252,10 +1250,7 @@ export async function executeRuntimeTools(params: {
             workspace: params.state.session.workspace,
             threadId: params.state.session.threadId,
             authorization: params.state.authorization,
-            capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, {
-              workspace: params.state.session.workspace,
-              threadId: params.state.session.threadId,
-            }),
+            capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, availCtx),
           });
           const blockedApproval = buildToolApproval({
             workspace: params.state.session.workspace,
@@ -1405,6 +1400,7 @@ export async function executeRuntimeTools(params: {
             taskConfig: params.taskConfig,
             taskModel: params.taskModel,
             subagentEventSink: emitSubagentEvent,
+            availabilityContext: availCtx,
             onShellProgress: (chunk, stream) =>
               progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
           });

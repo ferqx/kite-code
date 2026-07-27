@@ -41,7 +41,7 @@ import { skillFrameInvalidationReason } from '@/core/skills/activation';
 import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
-import { createAgentTools } from '@/core/tools/definitions';
+import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ShellExecutor } from '@/core/tools/shell';
 
@@ -408,7 +408,7 @@ export async function invokeRuntimeModel(params: {
         ...(searchToConsume ? { searchId: searchToConsume.searchId } : {}),
       });
     }
-    const tools = createAgentTools({
+    const toolInput = {
       workspace: state.session.workspace,
       shellExecutor: params.shellExecutor,
       mcpManager: params.mcpManager,
@@ -430,7 +430,9 @@ export async function invokeRuntimeModel(params: {
       workspaceAccess: state.workspaceAccess,
       phase: getAgentPhase(getActivePlanning(state)),
       interactionMode: getEffectiveInteractionMode(state),
-    });
+    };
+    const toolAvailCtx = toolAvailabilityContext(toolInput);
+    const tools = createAgentTools(toolInput, toolAvailCtx);
     const projectionEnvironment = resolveContextProjectionEnvironment({
       state,
       config: params.config,
@@ -613,10 +615,8 @@ export async function invokeRuntimeModel(params: {
     let ordinal = 0;
     for (const call of toolCalls) {
       const capability =
-        builtinToolRegistry.effectsOf(call.name, call.args, {
-          workspace: params.state.session.workspace,
-          threadId: params.state.session.threadId,
-        }) ?? classifyToolCapability(call.name, call.args);
+        builtinToolRegistry.effectsOf(call.name, call.args, toolAvailCtx) ??
+        classifyToolCapability(call.name, call.args);
       const binding = mcpBindings.find(
         ({ binding: candidate }) => candidate.exposedToolName === call.name,
       )?.binding;

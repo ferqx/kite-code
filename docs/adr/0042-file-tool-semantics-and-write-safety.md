@@ -74,3 +74,12 @@ MultiEdit 风格的一次调用多段替换，解决"同一 turn 对同一文件
 ## 回滚
 
 各规则可独立回退：edit 侧两条校验为工具层开关，禁用后退回当前 old_string 自然校验；append 可按旧 schema 恢复；checkpoint 预像为存储附加项，禁用不影响主流程（但 §2 的无拒绝写入失去兜底，应视为组合回退）；展示层可随时退回静态 `ACTION_NAMES`。
+
+## 实施记录
+
+### 2026-07-27：安全加固
+
+- **preExecute fail-closed**：`edit_file` 的 `preExecute` 增加 `writeTarget` 缺失、路径不匹配、`readState` 未定义时的拒绝逻辑，避免直接调用 `dispatchRegisteredTool` 绕过先读后改。
+- **mutation scope 清理**：失败的写工具不再声明 `workspaceMutationScope`；Reducer 自动推断仅对 `event.result.ok` 生效。
+- **preimage 时机修正**：Edit preimage 记录延迟到 `preExecute` 通过之后，避免未通过的编辑浪费 checkpoint 存储。
+

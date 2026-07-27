@@ -83,6 +83,7 @@ export const shellExecuteSpec: ToolSpec<ShellActionEnvelope, ShellResult> = {
   inputSchema: shellActionEnvelopeSchema,
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
   minimumApproval: 'user',
+  governanceRevision: 'shell-effects-v1',
   effects: (input) => {
     const command = input.command;
     if (isReadOnlyShellCommand(command)) {

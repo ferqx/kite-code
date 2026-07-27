@@ -33,8 +33,13 @@ export const readFileSpec: ToolSpec<ReadFileInput, ReadFileOutput> = {
   // 与原模型 Schema 逐字节一致（含 describe 文本），不产生 prompt 漂移。
   inputSchema: z.object({
     path: z.string().describe('Path to the file, relative to workspace'),
-    offset: z.number().optional().describe('Starting line number (1-indexed, default 1)'),
-    limit: z.number().optional().describe('Maximum number of lines to read'),
+    offset: z
+      .number()
+      .int()
+      .min(1)
+      .optional()
+      .describe('Starting line number (1-indexed, default 1)'),
+    limit: z.number().int().min(1).optional().describe('Maximum number of lines to read'),
   }),
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',

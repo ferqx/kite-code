@@ -94,3 +94,12 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 - 严格 Edit 以 `findMatch` 降级链的 opt-in 开关为回退点。
 - Registry 基建为附加代码，删除不影响旧路径。
 - 阶段 0 止血改动（删除被丢弃参数、死代码、幽灵名、措辞收敛）均为独立可 revert 的小改动。
+
+## 实施记录
+
+### 2026-07-27：Registry 不变量加固
+
+- **ToolAvailabilityContext 复用**：模型表面生成与模型返回后的 effects 分类使用同一份不可变快照，修复 `complete_skill` 等条件性工具在 effects 分类时被误判为有副作用。
+- **governanceRevision**：ToolSpec 新增可选 `governanceRevision` 字段，纳入 descriptor revision 哈希，使 effects 分类逻辑变化（如 shell 只读命令白名单修改）能触发缓存失效。
+- **string 重载收紧**：`toolRequestFromCall` 的 string 重载仅提供 `workspace`，移除伪造的 `hasTaskAdapter`/`activeSkillFrameIds`/feature flags。
+- **read_file Schema**：`offset` 和 `limit` 增加 `int().min(1)` 校验。

@@ -35,6 +35,7 @@ import { taskSpec } from '@/core/tools/registry/builtins/task';
 import { webFetchSpec } from '@/core/tools/registry/builtins/web-fetch';
 import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
+import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { formatToolParseError } from '@/core/tools/tool-parse-error';
 import type {
@@ -128,6 +129,8 @@ export interface RunApprovedToolInput {
    * enabling /rewind to restore files. Best-effort by contract.
    */
   recordFilePreimage?: (path: string, content: string | null, existed: boolean) => void;
+  /** 当前模型轮次的工具可用性快照，用于 Registry effects 分类。省略时回退到仅 workspace/threadId。 */
+  availabilityContext?: ToolAvailabilityContext;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -153,6 +156,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     taskConfig,
     taskModel,
     subagentEventSink,
+    availabilityContext,
   } = input;
   // 合成调用：parseToolCall 失败后由 invokeModel 注入 _raw_invalid_args 标记。
   // 跳过正常执行，直接生成工具特定的错误反馈让模型重试。
@@ -183,10 +187,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     authorization: normalizeAuthorizationState(authorization),
     override,
     mcpPolicy,
-    capability: builtinToolRegistry.effectsOf(request.name, request.args, {
-      workspace,
-      threadId,
-    }),
+    capability: builtinToolRegistry.effectsOf(
+      request.name,
+      request.args,
+      availabilityContext ?? { workspace, threadId },
+    ),
   });
   if (!policy.allowed) {
     return withFailureGuidance(request, {
@@ -381,15 +386,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const editPath = (request.args.path ?? '') as string;
     const isExternal = isExternalPathArg(editPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    // ADR-0042 §4：改动前捕获原像，供 /rewind 恢复（best-effort）
-    // Capture pre-image before mutating, for /rewind restore (best-effort).
+    // ADR-0042 §4：改动前读取文件内容用于 readState 计算；
+    // 原像记录延迟到 preExecute 通过之后（只在实际写入前记录）。
     const preEditRead = readTextContent(workspace, editPath, { allowExternal });
-    safeRecordPreimage(
-      input.recordFilePreimage,
-      editPath,
-      preEditRead.ok ? preEditRead.content : null,
-      preEditRead.ok,
-    );
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2，含 §3 严格精确匹配）：
     // 执行经 dispatchRegisteredTool；ADR-0042 §1 先读后改校验由 spec.preExecute
     // 基于会话读取状态执行（not_read / stale → 硬失败，引导重读）。
@@ -424,6 +423,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
+    // preExecute 已通过，在工作区变更前记录原像供 /rewind 恢复
+    safeRecordPreimage(
+      input.recordFilePreimage,
+      editPath,
+      preEditRead.ok ? preEditRead.content : null,
+      preEditRead.ok,
+    );
     const result = dispatched.output;
     if (result.ok && result.content !== undefined) {
       tracker.record(canonicalPath, fileContentHash(result.content));

@@ -155,7 +155,8 @@
       "documents": [
         "docs/active/cancel-resume-cleanup.md",
         "docs/active/mcp-runtime-governance.md",
-        "docs/book/06-多Agent协作.md"
+        "docs/book/06-多Agent协作.md",
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
       ]
     },
     {

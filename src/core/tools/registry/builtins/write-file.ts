@@ -49,7 +49,6 @@ export const writeFileSpec: ToolSpec<WriteFileToolInput, WriteFileResult> = {
         resultMeta: {
           path: input.path,
           truncated: false,
-          workspaceMutationScope: input.path ? [input.path] : [],
         },
         display: { verb: 'Write', preview: input.path },
       };

@@ -386,11 +386,43 @@ describe('edit_file read-before-write enforcement (ADR-0042 §1)', () => {
   test('fresh passes the preExecute gate (filesystem errors surface as output, not rejection)', async () => {
     const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
       workspace: '/tmp',
-      writeTarget: { path: 'definitely-missing.ts', readState: 'fresh' },
+      writeTarget: { path: 'x.ts', readState: 'fresh' },
     });
     expect(outcome.dispatched).toBe(true);
     if (outcome.dispatched) {
       expect(outcome.output.ok).toBe(false); // File not found — but the gate passed
+    }
+  });
+
+  test('missing writeTarget rejects before execute', async () => {
+    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
+      workspace: '/tmp',
+    });
+    expect(outcome.dispatched).toBe(false);
+    if (!outcome.dispatched) {
+      expect(outcome.rejection.error).toContain('Missing verified read state');
+    }
+  });
+
+  test('mismatched writeTarget.path rejects before execute', async () => {
+    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
+      workspace: '/tmp',
+      writeTarget: { path: 'other.ts', readState: 'fresh' },
+    });
+    expect(outcome.dispatched).toBe(false);
+    if (!outcome.dispatched) {
+      expect(outcome.rejection.error).toContain('does not match');
+    }
+  });
+
+  test('writeTarget with undefined readState rejects before execute', async () => {
+    const outcome = await dispatchRegisteredTool(editFileSpec, EDIT_INPUT, {
+      workspace: '/tmp',
+      writeTarget: { path: 'x.ts' },
+    });
+    expect(outcome.dispatched).toBe(false);
+    if (!outcome.dispatched) {
+      expect(outcome.rejection.error).toContain('read state');
     }
   });
 });

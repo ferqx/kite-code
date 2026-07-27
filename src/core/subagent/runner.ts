@@ -546,7 +546,7 @@ async function runSubAgentLoop(
               name: tc.name,
               args: toolArgs,
             },
-            input.workspace,
+            { workspace: input.workspace },
           );
           if (!pendingRequest) {
             throw new Error(`Unknown tool requested by sub-agent: ${tc.name}`);
