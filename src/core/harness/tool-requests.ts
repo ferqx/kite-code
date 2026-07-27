@@ -1,201 +1,23 @@
 import { type AIMessage, aiMessage } from '@/core/messages';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
-import type { ShellActionEnvelope } from '@/core/types';
-import type { ShellApprovalGrant, UserInputRequest } from '@/protocol/events';
+import type { ShellApprovalGrant } from '@/protocol/events';
 
-/** 待处理的工具请求（可辨识联合类型） / Pending tool request (discriminated union) */
-export type PendingToolRequest =
-  | {
-      /** Provider-neutral metadata discovery; never an invocation request. */
-      id?: string;
-      name: 'tool_search';
-      args: { query: string; limit?: number };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      /** Reads a declared non-prompt Skill file through an active Runtime frame. */
-      id?: string;
-      name: 'read_skill_reference';
-      args: { activation_id: string; path: string };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      id?: string;
-      name: 'complete_skill';
-      args: { activation_id: string; output: Record<string, unknown> };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      /** Runtime-mediated Workflow Contract activation request. */
-      id?: string;
-      name: 'activate_skill';
-      args: { skill_id: string; input: Record<string, unknown> };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'search_content';
-      args: { pattern: string; path?: string; glob?: string };
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'search_files';
-      args: { pattern: string; path?: string };
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
-      protectedCommand: string;
-    }
-  | {
-      id?: string;
-      name: 'read_file';
-      args: { path: string; offset?: number; limit?: number };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      id?: string;
-      name: 'read_plan';
-      args: { plan_id: string; version?: number; structural_digest?: string };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      id?: string;
-      name: 'edit_file';
-      args: {
-        path: string;
-        old_string: string;
-        new_string: string;
-        replace_all?: boolean;
-      };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      id?: string;
-      name: 'write_file';
-      args: { path: string; content: string };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'shell_execute';
-      args: ShellActionEnvelope;
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'update_plan';
-      /** 进度更新参数 / Progress update params */
-      args: {
-        plan_id: string;
-        updates: Array<{ step_id: string; status: string; note?: string }>;
-        complete_plan?: boolean;
-      };
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'write_plan';
-      /** write_plan 参数 / write_plan params */
-      args: {
-        title?: string;
-        body_markdown?: string;
-        steps?: Array<{ id: string; title: string }>;
-        expected_version?: number;
-        action: 'save' | 'submit';
-        replan_reason?: string;
-        plan_id?: string;
-        version?: number;
-        structural_digest?: string;
-      };
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'ask_user';
-      /** 用户澄清请求 / User clarification request */
-      args: UserInputRequest;
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于事件展示的命令 / Command displayed in events */
-      protectedCommand: string;
-    }
-  | {
-      id?: string;
-      name: 'list_mcp_resources';
-      args: { server?: string };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      id?: string;
-      name: 'list_mcp_tools';
-      args: { provider?: string; limit?: number; cursor?: string };
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'read_mcp_resource';
-      args: { server: string; uri: string };
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
-      protectedCommand: string;
-    }
-  | {
-      /** Dynamic MCP calls are accepted only when the Runtime resolves a binding. */
-      id?: string;
-      name: `mcp__${string}`;
-      args: Record<string, unknown>;
-      reason: string;
-      protectedCommand: string;
-    }
-  | {
-      /** 工具调用 ID / Tool call ID */
-      id?: string;
-      name: 'task';
-      args: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string };
-      /** 调用原因 / Call reason */
-      reason: string;
-      /** 用于审批展示的命令 / Command displayed for approval */
-      protectedCommand: string;
-    }
-  | {
-      id?: string;
-      name: 'web_fetch';
-      args: { url: string; max_chars?: number; timeout_ms?: number };
-      reason: string;
-      protectedCommand: string;
-    };
+/** 工具名枚举——从 Registry 派生，保持编译期完备性。 */
+export type BuiltinToolName = string;
+
+/** 待处理的工具请求 / Pending tool request.
+ *
+ * args 由 Registry inputSchema 解析后透传（一致性不变量 i1），类型不再手工
+ * 重复声明。需要编译期工具名收窄时从 Registry spec 导出类型，而非在此维护
+ * 第二份手写参数声明。 */
+export interface PendingToolRequest {
+  id?: string;
+  name: string;
+  args: unknown;
+  reason: string;
+  protectedCommand: string;
+}
 
 /** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
 export function toolRequestFromCall(

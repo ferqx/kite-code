@@ -667,9 +667,13 @@ export async function executeRuntimeTools(params: {
     if (request.name === 'activate_skill') {
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
       const descriptor = params.skillCatalog?.capabilities.descriptors.find(
-        (candidate) => candidate.capabilityId === request.args.skill_id,
+        (candidate) =>
+          candidate.capabilityId === ((request.args as Record<string, unknown>).skill_id as string),
       );
-      const disclosure = params.state.capabilities.disclosures[request.args.skill_id];
+      const disclosure =
+        params.state.capabilities.disclosures[
+          (request.args as Record<string, unknown>).skill_id as string
+        ];
       if (
         flags.toolSearchV1 &&
         (!descriptor ||
@@ -901,8 +905,11 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'ask_user') {
-      const hasQuestion = request.args.question.trim().length > 0;
-      const hasBatchQuestions = (request.args.questions?.length ?? 0) > 0;
+      const hasQuestion =
+        (((request.args as Record<string, unknown>).question as string) ?? '').trim().length > 0;
+      const hasBatchQuestions =
+        (((request.args as Record<string, unknown>).questions as Array<unknown> | undefined)
+          ?.length ?? 0) > 0;
       if (!hasQuestion && !hasBatchQuestions) {
         events.push({
           type: 'tool.failed',
@@ -923,11 +930,14 @@ export async function executeRuntimeTools(params: {
         type: 'user_input.requested',
         interactionId: genInteractionId(),
         toolCallId,
-        request: askUserSpec.createInterrupt(request.args, {
-          workspace: params.state.session.workspace,
-          threadId: params.state.session.threadId,
-          phase: getAgentPhase(getActivePlanning(params.state)),
-        }),
+        request: askUserSpec.createInterrupt(
+          request.args as import('@/protocol/events').UserInputRequest,
+          {
+            workspace: params.state.session.workspace,
+            threadId: params.state.session.threadId,
+            phase: getAgentPhase(getActivePlanning(params.state)),
+          },
+        ),
       });
       continue;
     }
@@ -1331,7 +1341,7 @@ export async function executeRuntimeTools(params: {
         ? ({
             ...request,
             args: {
-              ...request.args,
+              ...(request.args as Record<string, unknown>),
               [invocation.idempotencyKeyArgument]: invocation.idempotencyKey,
             },
           } as typeof request)
@@ -1348,7 +1358,11 @@ export async function executeRuntimeTools(params: {
     const progress: RuntimeEvent[] = [];
     try {
       if (request.name === 'read_mcp_resource') {
-        await params.mcpManager?.ensureProviderReady?.(request.args.server, 30_000, params.signal);
+        await params.mcpManager?.ensureProviderReady?.(
+          (request.args as Record<string, unknown>).server as string,
+          30_000,
+          params.signal,
+        );
       }
       if (mcpDescriptor) {
         await params.mcpManager?.ensureProviderReady?.(

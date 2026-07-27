@@ -326,14 +326,18 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'read_file') {
-    const filePath = (request.args.path ?? '') as string;
+    const filePath = (args.path ?? '') as string;
     const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
     const dispatched = await dispatchRegisteredTool(
       readFileSpec,
-      { path: filePath, offset: request.args.offset, limit: request.args.limit },
+      {
+        path: filePath,
+        offset: args.offset as number | undefined,
+        limit: args.limit as number | undefined,
+      },
       { workspace, threadId, signal, allowExternalPaths: allowExternal },
     );
     const output = dispatched.dispatched
@@ -374,16 +378,16 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'edit_file') {
-    if (!request.args.old_string) {
+    if (!args.old_string) {
       return withFailureGuidance(request, {
         ok: false,
-        command: `edit_file ${request.args.path ?? ''}`,
+        command: `edit_file ${args.path ?? ''}`,
         exitCode: -1,
         stdout: '',
         stderr: 'edit_file requires old_string to locate the text to replace.',
       });
     }
-    const editPath = (request.args.path ?? '') as string;
+    const editPath = (args.path ?? '') as string;
     const isExternal = isExternalPathArg(editPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // ADR-0042 §4：改动前读取文件内容用于 readState 计算；
@@ -402,9 +406,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       editFileSpec,
       {
         path: editPath,
-        old_string: request.args.old_string as string,
-        new_string: (request.args.new_string ?? '') as string,
-        replace_all: request.args.replace_all as boolean | undefined,
+        old_string: args.old_string as string,
+        new_string: (args.new_string ?? '') as string,
+        replace_all: args.replace_all as boolean | undefined,
       },
       {
         workspace,
@@ -436,18 +440,18 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     return withFailureGuidance(request, {
       ok: dispatched.projected.ok,
-      command: `edit_file ${request.args.path ?? ''}`,
+      command: `edit_file ${args.path ?? ''}`,
       exitCode: dispatched.projected.ok ? 0 : -1,
       stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
       stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
-      path: request.args.path,
+      path: args.path as string | undefined,
       resultMeta: dispatched.projected.resultMeta,
     });
   }
 
   if (request.name === 'write_file') {
-    const filePath = (request.args.path ?? '') as string;
-    const content = (request.args.content ?? '') as string;
+    const filePath = (args.path ?? '') as string;
+    const content = (args.content ?? '') as string;
     const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
 
@@ -550,20 +554,20 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'search_content') {
-    const searchPath = (request.args.path ?? '.') as string;
+    const searchPath = (args.path ?? '.') as string;
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
     const dispatched = await dispatchRegisteredTool(
       searchContentSpec,
-      { pattern: request.args.pattern, path: searchPath, glob: request.args.glob },
+      { pattern: args.pattern as string, path: searchPath, glob: args.glob as string | undefined },
       { workspace, threadId, signal, allowExternalPaths: allowExternal },
     );
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
         ok: false,
-        command: `search_content ${request.args.pattern ?? ''}`,
+        command: `search_content ${args.pattern ?? ''}`,
         exitCode: -1,
         stdout: '',
         stderr: dispatched.rejection.error,
@@ -575,26 +579,26 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       // 双输出流工具消费逐流投影：失败时 stdout/stderr 两路保留（迁移前语义）。
       stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
       stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
-      command: `search_content ${request.args.pattern ?? ''}`,
+      command: `search_content ${args.pattern ?? ''}`,
       resultMeta: projected.resultMeta,
     });
   }
 
   if (request.name === 'search_files') {
-    const searchPath = (request.args.path ?? '.') as string;
+    const searchPath = (args.path ?? '.') as string;
     const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
     const dispatched = await dispatchRegisteredTool(
       searchFilesSpec,
-      { pattern: request.args.pattern, path: searchPath },
+      { pattern: args.pattern as string, path: searchPath },
       { workspace, threadId, signal, allowExternalPaths: allowExternal },
     );
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
         ok: false,
-        command: `search_files ${request.args.pattern ?? ''}`,
+        command: `search_files ${args.pattern ?? ''}`,
         exitCode: -1,
         stdout: '',
         stderr: dispatched.rejection.error,
@@ -606,7 +610,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       // 双输出流工具消费逐流投影：失败时 stdout/stderr 两路保留（迁移前语义）。
       stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
       stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
-      command: `search_files ${request.args.pattern ?? ''}`,
+      command: `search_files ${args.pattern ?? ''}`,
       resultMeta: projected.resultMeta,
     });
   }
@@ -685,7 +689,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: dispatched.rejection.error,
       });
     }
-    const command = `read_mcp_resource ${request.args.server ?? ''}`;
+    const command = `read_mcp_resource ${args.server ?? ''}`;
     const projected = dispatched.projected;
     return withFailureGuidance(request, {
       ok: projected.ok,
@@ -791,7 +795,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
         ok: false,
-        command: request.args.command,
+        command: args.command as string,
         exitCode: -1,
         stdout: '',
         stderr: dispatched.rejection.error,

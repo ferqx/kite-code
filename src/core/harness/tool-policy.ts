@@ -12,7 +12,7 @@ export interface ToolApprovalPayload {
   callId?: string;
   cwd: string;
   threadId: string;
-  tool: PendingToolRequest['name'];
+  tool: string;
   command: string;
   risk: ToolRisk;
   approvalHash: string;
@@ -135,7 +135,7 @@ export function applyApprovalGrant(input: {
     return grantSameCommand(authorization, {
       workspace: input.workspace,
       threadId: input.threadId,
-      command: input.request.args.command,
+      command: (input.request.args as Record<string, unknown>).command as string,
       source: input.source,
     });
   }
@@ -237,7 +237,7 @@ export function replaceApprovalCommand(
   if (request.name === 'shell_execute') {
     return {
       ...request,
-      args: { ...request.args, command },
+      args: { ...(request.args as Record<string, unknown>), command },
       protectedCommand: command,
     };
   }
@@ -249,7 +249,7 @@ export { classifyShellRisk } from '@/core/policies/shell-classification';
 
 function approvalCommand(request: PendingToolRequest): string {
   if (request.name === 'shell_execute') {
-    return request.args.command;
+    return (request.args as Record<string, unknown>).command as string;
   }
   return request.protectedCommand;
 }

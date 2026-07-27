@@ -440,7 +440,9 @@ describe('tool policy', () => {
     if (replaced.name !== 'shell_execute') {
       throw new Error('expected shell_execute');
     }
-    expect(replaced.args.command).toBe('bun test tests/tool-policy.test.ts');
+    expect((replaced.args as Record<string, unknown>).command).toBe(
+      'bun test tests/tool-policy.test.ts',
+    );
     expect(replaced.protectedCommand).toBe('bun test tests/tool-policy.test.ts');
   });
 });

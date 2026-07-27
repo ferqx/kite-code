@@ -107,3 +107,7 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 ### 2026-07-27：Runner 通用 Registry 分发
 
 - `runApprovedTool` 新增通用 Registry 回退路径：工具未命中任何子分支时，通过 `builtinToolRegistry.get()` 查找 spec 并调用 `dispatchRegisteredTool`，新增注册工具不再需要手工添加 Runner 分支。
+
+### 2026-07-27：PendingToolRequest 简化
+
+- 将 22 成员的可辨识联合类型（手写每工具参数声明）替换为简单接口 `{ id?, name, args: unknown, reason, protectedCommand }`。`args` 经 Registry `inputSchema` 解析后透传（i1），消费者在需要字段级访问时使用显式 `Record<string,unknown>` 转换。删除 229 行重复 Schema 声明。

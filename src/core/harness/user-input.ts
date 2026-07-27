@@ -49,7 +49,7 @@ export function normalizeUserInputResume(resume: AgentResumeValue): {
 
 /** 为 ask_user 恢复值创建工具消息 / Create ToolMessage for ask_user resume value */
 export function userInputToolMessage(
-  request: Extract<PendingToolRequest, { name: 'ask_user' }>,
+  request: PendingToolRequest,
   resume: AgentResumeValue,
 ): ToolMessage {
   const normalized = normalizeUserInputResume(resume);
