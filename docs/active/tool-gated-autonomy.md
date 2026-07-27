@@ -94,6 +94,7 @@ Capability search 只负责发现。搜索候选不能作为调用句柄，也�
 - 不得让 Skill manifest 自行授予权限。
 - 不得把 approval 与 sandbox 合并为一个开关。
 - 不得从 UI summary、模型 final 或 ToolMessage 文本推断任务完成。
+- 新的已注册工具自动获得与其 Registry `effectClass` 对应的审批默认策略（`read_only`→放行、`plan_only`→放行、`workspace_write`→模式策略、`external_side_effect`→审批），不再需要逐工具手工维护审批矩阵。仅存在明确安全边界（URL 校验、外部路径、命令分类、MCP binding）的工具才需要专用分支。
 
 ## 工具结果结构化元数据
 

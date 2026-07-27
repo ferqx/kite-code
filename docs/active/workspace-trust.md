@@ -64,3 +64,4 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - TUI 与 CLI `run` 均执行门禁；web 前端当前不做 workspace 信任检查。
 - workspace 信任是目录级一次性决定，不是逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
 - 门禁求值前只读取惰性配置（JSONC 解析，不执行项目代码）；skill 扫描、MCP 连接与 shell 执行全部发生在门禁通过之后。
+- 信任存储写入使用 lock 文件防并发：`trustWorkspace()` 在读取-合并-写入前获取 `.lock` 文件（排他创建 + 指数退避重试，5s 过期清理残留锁），消除多进程并发写入覆盖风险。

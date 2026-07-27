@@ -207,7 +207,12 @@
     {
       "id": "cli-and-config",
       "sources": ["src/app/cli/**", "src/core/config/**"],
-      "documents": ["README.md", "docs/book/09-CLI模式与配置.md", "docs/active/feature-flags.md"]
+      "documents": [
+        "README.md",
+        "docs/book/09-CLI模式与配置.md",
+        "docs/active/feature-flags.md",
+        "docs/active/workspace-trust.md"
+      ]
     },
     {
       "id": "protocol",

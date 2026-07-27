@@ -618,12 +618,73 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // 未知工具 — 拒绝
-  // Unknown tool — deny
-  return deny({
-    risk: 'unknown',
-    reason: `Unknown tool: ${toolName}`,
-    userVisibleSummary: `Rejected unknown tool: ${toolName}`,
-    expectedEffects: ['No tool will be executed'],
-  });
+  // Generic fallback — derive policy from Registry-sourced effectClass instead
+  // of a hand-written tool-name matrix.  Only tools with explicit security
+  // boundaries (web_fetch URL checks, shell command classifiers, file external-path
+  // guards, MCP binding validation) need dedicated branches above.
+  switch (capability.effectClass) {
+    case 'read_only':
+      return allow({
+        risk: 'read',
+        reason: `Registry classifies ${toolName} as read-only.`,
+        userVisibleSummary: `Run ${toolName}`,
+        expectedEffects: ['Reads data without mutating workspace or external state'],
+      });
+    case 'plan_only':
+      return allow({
+        risk: 'plan',
+        reason: `Registry classifies ${toolName} as plan-only.`,
+        userVisibleSummary: `Run ${toolName}`,
+        expectedEffects: ['Updates runtime state only'],
+      });
+    case 'workspace_write':
+      if (phase === 'planning') {
+        return deny({
+          risk: 'write_file',
+          reason: `planning phase rejects workspace writes (${toolName}).`,
+          userVisibleSummary: `Rejected ${toolName} during planning phase.`,
+          expectedEffects: ['No workspace files will be modified'],
+          phaseConstraint: 'planning',
+        });
+      }
+      if (effectiveMode === 'full_access') {
+        return allow({
+          risk: 'write_file',
+          reason: 'full_access is enabled for this thread.',
+          userVisibleSummary: `Modify workspace via ${toolName}`,
+          expectedEffects: ['Modifies workspace files'],
+          grantUsed: 'full_access',
+        });
+      }
+      return requireApproval({
+        risk: 'write_file',
+        reason: `${toolName} modifies workspace files.`,
+        userVisibleSummary: `Modify workspace via ${toolName}`,
+        expectedEffects: ['Modifies workspace files'],
+      });
+    case 'external_side_effect':
+      if (phase === 'planning') {
+        return deny({
+          risk: 'unknown',
+          reason: `planning phase rejects external side effects (${toolName}).`,
+          userVisibleSummary: `Rejected ${toolName} during planning phase.`,
+          expectedEffects: ['No external side effects from planning'],
+          phaseConstraint: 'planning',
+        });
+      }
+      return requireApproval({
+        risk: 'unknown',
+        effects: { uncertainEffects: true },
+        reason: `${toolName} may have external side effects.`,
+        userVisibleSummary: `Run ${toolName}`,
+        expectedEffects: ['May have external side effects'],
+      });
+    default:
+      return deny({
+        risk: 'unknown',
+        reason: `Unknown tool: ${toolName}`,
+        userVisibleSummary: `Rejected unknown tool: ${toolName}`,
+        expectedEffects: ['No tool will be executed'],
+      });
+  }
 }

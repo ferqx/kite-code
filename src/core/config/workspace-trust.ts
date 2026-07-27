@@ -8,6 +8,7 @@ import {
   openSync,
   readFileSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -15,6 +16,54 @@ import { dirname, resolve } from 'node:path';
 import { type ParseError, parse } from 'jsonc-parser';
 import { canonicalWorkspaceKey } from './mcp-project-approvals';
 import { workspaceTrustPath } from './paths';
+
+const LOCK_RETRY_MS = 50;
+const LOCK_MAX_RETRIES = 20;
+const LOCK_STALE_MS = 5000;
+
+function lockPath(storePath: string) {
+  return `${storePath}.lock`;
+}
+
+function acquireLock(path: string): () => void {
+  const lock = lockPath(path);
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  for (let attempt = 0; attempt < LOCK_MAX_RETRIES; attempt++) {
+    if (attempt > 0) {
+      const delay = LOCK_RETRY_MS * 2 ** Math.min(attempt - 1, 4);
+      Bun.sleepSync(delay);
+    }
+    try {
+      const fd = openSync(lock, 'wx', 0o600);
+      writeFileSync(fd, String(process.pid), 'utf8');
+      fsyncSync(fd);
+      closeSync(fd);
+      return () => {
+        try {
+          if (existsSync(lock)) unlinkSync(lock);
+        } catch {
+          /* best-effort */
+        }
+      };
+    } catch {
+      if (existsSync(lock)) {
+        try {
+          const age = Date.now() - statSync(lock).mtimeMs;
+          if (age > LOCK_STALE_MS) {
+            try {
+              unlinkSync(lock);
+            } catch {
+              /* another process grabbed it */
+            }
+          }
+        } catch {
+          /* lock disappeared */
+        }
+      }
+    }
+  }
+  throw new Error('Could not acquire workspace trust store lock after retries.');
+}
 
 /**
  * Who recorded the trust decision: 'user' = TUI confirmation dialog,
@@ -161,20 +210,28 @@ export function trustWorkspace(input: {
   } catch {
     return { status: 'store_unavailable', message: 'Workspace identity is unavailable.' };
   }
-  const store = readWorkspaceTrustStore(path);
-  if (store.status === 'corrupt') return { status: 'store_corrupt', message: store.message };
-  if (store.status === 'unavailable')
-    return { status: 'store_unavailable', message: store.message };
   const record: WorkspaceTrustRecord = {
     workspaceKey,
     workspacePath: resolve(input.workspace),
     trustedAt: new Date().toISOString(),
     source: input.source ?? 'user',
   };
+  let releaseLock: (() => void) | undefined;
   try {
-    writeStore(path, { version: 1, records: { ...store.records, [workspaceKey]: record } });
-  } catch {
+    releaseLock = acquireLock(path);
+    // Re-read after acquiring the lock to avoid TOCTOU.
+    const locked = readWorkspaceTrustStore(path);
+    if (locked.status === 'corrupt') return { status: 'store_corrupt', message: locked.message };
+    if (locked.status === 'unavailable')
+      return { status: 'store_unavailable', message: locked.message };
+    writeStore(path, { version: 1, records: { ...locked.records, [workspaceKey]: record } });
+  } catch (err) {
+    if (err instanceof Error && err.message.startsWith('Could not acquire')) {
+      return { status: 'store_unavailable', message: err.message };
+    }
     return { status: 'store_unavailable', message: 'Workspace trust store could not be written.' };
+  } finally {
+    if (releaseLock) releaseLock();
   }
   return { status: 'recorded', record };
 }
