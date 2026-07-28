@@ -55,7 +55,8 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 | 职责 | 机制 | 触发条件 |
 |------|------|---------|
 | elapsed 基线同步 | useRef (startedAtRef) | 每次 App 渲染，仅写 ref |
-| 动画推进 | 单一 setInterval @ 100ms | 仅依赖 [running] |
+| elapsed 推进 | setInterval @ 200ms | 仅依赖 [running] |
+| spinner 推进 | recursive setTimeout | 每帧独立时长 |
 
 // elapsed 同步——不触发重渲染，不影响 timer
 useEffect(() => {
@@ -64,21 +65,28 @@ useEffect(() => {
   }
 });
 
-// 动画 timer——只跟 running 走
-useEffect(() => {
-  timer = setInterval(/* 驱动 spinner + elapsed + color */, 100);
-  return () => clearInterval(timer);
-}, [running]);
-```
+// elapsed timer——只跟 running 走
+const elapsedTimer = setInterval(() => {
+  setLiveElapsedMs(Date.now() - startedAtRef.current);
+}, 200);
 
-React 18 批处理将同一次 callback 中的多个 setState 合并为单次渲染。每 100ms 仅产生 1 次渲染。
+// spinner——每帧独立时长的 recursive setTimeout
+const scheduleNext = (idx) => {
+  const [, ms] = SPINNER[idx];
+  spinnerTimer = setTimeout(() => {
+    setSpinnerIdx((idx + 1) % SPINNER.length);
+    scheduleNext((idx + 1) % SPINNER.length);
+  }, ms);
+};
+```
 
 ## Spinner 设计
 
-弧线旋转 `◜ ◝ ◞ ◟`（4 帧，100ms/frame，400ms 一圈）。
+StatusBar 和工具卡片统一使用 `● ` 闪烁（1s 显、1s 隐，周期 2s），通过 `useBlinkDot` hook 集中管理。
 
-- 与 shell/subagent 的 Braille 点阵（`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`，10 帧，80ms/frame）完全区分——弧线 vs 点阵、4 帧 vs 10 帧、400ms vs 800ms 周期。
-- Unicode 仅定义了这 4 个象限弧线字符（U+25DC–U+25DF），无法增加中间帧。
+StatusBar 额外使用宇宙符号呼吸动画（`· ⋆ ✦ ✧ ★ ✧ ✦ ⋆`，每帧变速，★ 处最慢 240ms，边缘最快 120ms，一圈约 1.5s），通过 recursive setTimeout 实现。
+
+工具卡片（ToolCardBlock、SubAgentBlock、CompactionProgress、ToolSummaryBlock 的 BlinkDot）统一使用 `useBlinkDot` hook，不再各自维护 timer。
 
 ## 渐变动画
 

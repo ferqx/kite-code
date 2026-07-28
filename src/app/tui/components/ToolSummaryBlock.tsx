@@ -1,5 +1,5 @@
 import { Box, Text } from 'ink';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useMemo } from 'react';
 import stringWidth from 'string-width';
 import { useTheme } from '../theme';
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
@@ -11,11 +11,12 @@ import {
   writeFileActionName,
 } from './render-utils';
 import { wrapDisplayLines } from './soft-wrap';
+import { useBlinkDot } from './use-blink-dot';
 
 // ══════════════════════════════════════════════════════════════════
 // BlinkDot — 独立组件，隔离闪烁圆点状态更新
 //
-// 进行中圆点为主题暗（dim，不抢眼）实心 ● 显隐闪烁（500ms 切换）：
+// 进行中圆点为主题暗（dim，不抢眼）实心 ● 显隐闪烁：
 // 隐藏帧渲染为两个空格，符号位置、宽度（2 字符）不变，无行位移。
 // settle 后变为纯思考白点（muted）——"运行中暗灰闪烁、完成后白色静止"。
 // 思考链与非思考链聚合共用此组件。
@@ -31,29 +32,10 @@ import { wrapDisplayLines } from './soft-wrap';
 // single changed dot glyph, not the full Thought tree.
 // ══════════════════════════════════════════════════════════════════
 
-/** 闪烁间隔：500ms 显/隐切换（1s 周期）/ Blink toggle interval (1s cycle) */
-const DOT_BLINK_INTERVAL_MS = 500;
-
 function BlinkDot({ active }: { active: boolean }) {
   const dt = useTheme();
-  const [visible, setVisible] = useState(true);
-  const activeRef = useRef(active);
-
-  useEffect(() => {
-    activeRef.current = active;
-    if (active) setVisible(true);
-  }, [active]);
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (activeRef.current) setVisible((v) => !v);
-    }, DOT_BLINK_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
-
-  // 隐藏帧渲染为两个空格，与 "● " 同宽，无行位移
-  // Hidden frame renders two spaces — same width as "● ", no layout shift
-  return <Text color={dt.dim}>{visible ? '● ' : '  '}</Text>;
+  const frame = useBlinkDot(active);
+  return <Text color={dt.dim}>{frame}</Text>;
 }
 
 /** 工具步骤折叠阈值：超过此行数的 Thought 只展示最后 N 步，其余折叠。

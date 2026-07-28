@@ -7,15 +7,8 @@ import type { Theme } from '../theme';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
-import {
-  ACTION_NAMES,
-  formatElapsed,
-  SPINNER,
-  SPINNER_INTERVAL_MS,
-  spinnerIndexForElapsed,
-  toolColor,
-  writeFileActionName,
-} from './render-utils';
+import { ACTION_NAMES, formatElapsed, toolColor, writeFileActionName } from './render-utils';
+import { useBlinkDot } from './use-blink-dot';
 
 export const MAX_TOOL_LINES = 5;
 const SHELL_PREFIX = '⎿   ';
@@ -501,44 +494,25 @@ export default function ToolCardBlock({
   const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
   const isWebFetch = block.name === 'web_fetch';
 
+  // ── 闪烁圆点：统一 hook ──
+  const spinnerActive =
+    block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
+  const spinnerFrame = useBlinkDot(spinnerActive);
+
   // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(() =>
     block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
   );
   const startedAtRef = useRef(block.startedAt);
   startedAtRef.current = block.startedAt;
 
-  // Spinner timing via ref — immune to effect re-runs from parent re-renders
-  const spinnerStartRef = useRef(Date.now());
-  const spinnerRunningRef = useRef(false);
-
   useEffect(() => {
-    const shouldRun = block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
-    spinnerRunningRef.current = shouldRun;
-    if (shouldRun) spinnerStartRef.current = Date.now();
-    else setSpinnerIdx(0);
-  }, [block.status, awaitingApproval, block.name]);
-
-  // Single persistent timer — never restarts. Reads running state from ref.
-  useEffect(() => {
-    const tick = () => {
-      if (!spinnerRunningRef.current) return;
-      const idx = spinnerIndexForElapsed(Date.now() - spinnerStartRef.current);
-      setSpinnerIdx(idx);
-    };
-    const spinnerTimer = setInterval(tick, SPINNER_INTERVAL_MS);
-    if (showElapsed) {
-      const elapsedTimer = setInterval(() => {
-        const at = startedAtRef.current;
-        if (at != null) setLiveElapsed(Date.now() - at);
-      }, 200);
-      return () => {
-        clearInterval(spinnerTimer);
-        clearInterval(elapsedTimer);
-      };
-    }
-    return () => clearInterval(spinnerTimer);
+    if (!showElapsed) return;
+    const timer = setInterval(() => {
+      const at = startedAtRef.current;
+      if (at != null) setLiveElapsed(Date.now() - at);
+    }, 200);
+    return () => clearInterval(timer);
   }, [showElapsed]);
 
   const isShell = block.name === 'shell_execute';
@@ -565,7 +539,7 @@ export default function ToolCardBlock({
   if (block.status === 'running') {
     // 等待审批/输入时用静态 ○ 代替轮播 spinner / Static dot for tools awaiting approval or input
     const isWaiting = awaitingApproval || block.name === 'ask_user';
-    const spinner = isWaiting ? '○' : SPINNER[spinnerIdx];
+    const spinner = isWaiting ? '○ ' : spinnerFrame;
     const displayName =
       block.name === 'tool_search'
         ? 'Searching for tools…'
@@ -580,7 +554,7 @@ export default function ToolCardBlock({
     return (
       <Box flexDirection="column">
         <Box>
-          <Text>{spinner} </Text>
+          <Text>{spinner}</Text>
           <Text>{displayName}</Text>
           {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
           {awaitingApproval ? (

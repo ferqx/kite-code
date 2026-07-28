@@ -71,8 +71,8 @@ describe('StatusBar', () => {
     );
     const output = lastFrame();
     expect(output).toContain('Running');
-    // Flowing dot spinner appears when running
-    expect(output).toMatch(/[●·]{4}/);
+    // Cosmic dot spinner appears when running
+    expect(output).toMatch(/[·⋆✦✧★]/);
   });
 
   test('does not show cumulative metrics in StatusBar', () => {
@@ -143,6 +143,6 @@ describe('CompactionProgress', () => {
     const output = lastFrame();
     expect(output).toContain('⎿');
     expect(output).toContain('Summarizing context');
-    expect(output).toMatch(/[●·]{4}/);
+    expect(output).toMatch(/●/);
   });
 });

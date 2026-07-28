@@ -74,9 +74,9 @@ function fakeRunStatus(overrides: Partial<RunStatusSnapshot> = {}): RunStatusSna
 
 describe('spinner timing', () => {
   test('derives frames deterministically from elapsed time', () => {
-    expect(SPINNER[spinnerIndexForElapsed(0)]).toBe('⠋');
-    expect(SPINNER[spinnerIndexForElapsed(120)]).toBe('⠙');
-    expect(SPINNER[spinnerIndexForElapsed(SPINNER.length * 80)]).toBe('⠋');
+    expect(SPINNER[spinnerIndexForElapsed(0)]).toBe('● ');
+    expect(SPINNER[spinnerIndexForElapsed(120)]).toBe('● ');
+    expect(SPINNER[spinnerIndexForElapsed(SPINNER.length * 1000)]).toBe('● ');
   });
 });
 
@@ -1228,7 +1228,7 @@ describe('BlockRenderer', () => {
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
 
-    expect(lastFrame()).toContain('⠋');
+    expect(lastFrame()).toContain('●');
   });
 
   test('running shell tool_card renders liveOutput', () => {
@@ -1681,7 +1681,7 @@ describe('BlockRenderer', () => {
       render(<BlockRenderer columns={18} block={wide} isFocused={false} index={0} />).lastFrame() ??
       '';
     expect(tinyFrame).toContain('Thought for 2s');
-    expect(tinyFrame).not.toContain('·');
+    expect(tinyFrame).not.toContain('●');
   });
 
   test('renders running tool_summary tree without duplicating latest tool preview', () => {
@@ -1942,8 +1942,8 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).not.toContain('├─ Thinking');
     expect(lastFrame()).not.toContain('运行中');
 
-    // 显隐闪烁：约 500ms 后圆点隐藏（渲染为两个空格，行宽不变）
-    await new Promise((resolve) => setTimeout(resolve, 700));
+    // 显隐闪烁：约 1000ms 后圆点隐藏（渲染为两个空格，行宽不变）
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     expect(lastFrame()).not.toContain('●');
     expect(lastFrame()).toContain('Thought for 1s');
   });
@@ -3193,7 +3193,7 @@ describe('SubAgentBlock rendering', () => {
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
 
-    expect(lastFrame()).toContain('⠋');
+    expect(lastFrame()).toContain('●');
   });
 
   test('renders done subagent block', () => {

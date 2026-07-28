@@ -1,5 +1,5 @@
-export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-export const SPINNER_INTERVAL_MS = 80;
+export const SPINNER = ['● ', '  '];
+export const SPINNER_INTERVAL_MS = 1000;
 
 export function spinnerIndexForElapsed(elapsedMs: number): number {
   return Math.floor(Math.max(0, elapsedMs) / SPINNER_INTERVAL_MS) % SPINNER.length;
