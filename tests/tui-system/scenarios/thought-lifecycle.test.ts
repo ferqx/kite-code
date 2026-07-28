@@ -135,17 +135,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(screenContains(output, 'Thought for')).toBe(true);
       expect(screenContains(output, '· read 1 file, searched 1 file pattern')).toBe(true);
 
-      // ── 两轮工具步骤同块可见 ──
-      expect(screenContains(output, 'Read CLAUDE.md')).toBe(true);
-      expect(screenContains(output, 'Find CLAUDE.md in .')).toBe(true);
-
-      // ── 时序：第 1 轮步骤在第 2 轮步骤之前 ──
-      const readIdx = clean.lastIndexOf('Read CLAUDE.md');
-      const searchIdx = clean.lastIndexOf('Find CLAUDE.md in .');
-      expect(readIdx).toBeGreaterThanOrEqual(0);
-      expect(searchIdx).toBeGreaterThan(readIdx);
-
-      // ── Settled 后折叠为单行摘要，无 footer ──
+      // ── Settled 后工具步骤折叠，保留统计摘要 ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
       expect(screenContains(output, 'TIMELINE_DONE')).toBe(true);
 
@@ -204,10 +194,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(screenContains(output, 'Thought for')).toBe(true);
       expect(screenContains(output, '· read 1 file, searched for 1 pattern')).toBe(true);
 
-      // ── Tool steps visible in the Thought tree ──
-      expect(screenContains(output, 'Read CLAUDE.md')).toBe(true);
-      // search_content renders the pattern after "Search:"
-      expect(screenContains(output, 'langgraph')).toBe(true);
+      // ── reasoning 正文始终隐藏，工具步骤 settle 后折叠 ──
+      expect(screenContains(output, 'Let me explore the codebase structure.')).toBe(false);
 
       // ── Settled 后无 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
@@ -275,12 +263,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(screenContains(output, '· read 2 files')).toBe(true);
       expect(screenContains(output, 'Thought for')).toBe(true);
 
-      // ── Both tool steps visible in the same phase block ──
-      expect(screenContains(output, 'CLAUDE.md')).toBe(true);
-      expect(screenContains(output, 'package.json')).toBe(true);
-
-      // ── 时序：第 1 轮（CLAUDE.md）在第 2 轮（package.json）之前 ──
-      expect(clean.lastIndexOf('CLAUDE.md')).toBeLessThan(clean.lastIndexOf('package.json'));
+      // ── 工具步骤 settle 后折叠 ──
 
       // ── Settled 后无 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
@@ -344,9 +327,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'ran 1 command')).toBe(false);
 
-      // ── Shell command remains visible in its independent tool card ──
-      expect(screenContains(output, 'CLAUDE.md')).toBe(true);
-      expect(screenContains(output, 'grep "name" package.json')).toBe(true);
+      // ── 独立工具卡完成后可折叠；最终回答仍可见 ──
       expect(screenContains(output, 'SHELL_THOUGHT_DONE')).toBe(true);
 
       // ── Settled 后无 footer ──

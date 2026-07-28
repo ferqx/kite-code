@@ -1504,7 +1504,7 @@ describe('BlockRenderer', () => {
     expect(captionIdx).toBeLessThan(stepsIdx);
   });
 
-  test('Thinking phase: shows thinking preview, no tool steps', () => {
+  test('Thinking phase shows the active reasoning preview', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1521,15 +1521,39 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
-    // 思考模式完整展示内容，不使用单行 Thinking 摘要。
     expect(frame).toContain('Thought for 1s');
     expect(frame).toContain('checking current Thought boundaries');
-    expect(frame).not.toContain('├─ Thinking');
-    expect(frame).toContain('└─ checking current Thought boundaries');
     expect(frame).not.toContain('├─ Read');
   });
 
-  test('Thought activity window shows only the latest five wrapped reasoning lines', () => {
+  test('awaiting-terminal Thought shows complete reasoning once without an active dot', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      responsePending: true,
+      latestActivity: {
+        kind: 'thinking',
+        text: 'the complete reasoning stream appears atomically',
+      },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      tools: [],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Thought for 1s');
+    expect(frame).toContain('the complete reasoning stream appears atomically');
+    expect(frame).not.toContain('●');
+  });
+
+  test('Thought activity window shows only the latest five reasoning lines', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1551,7 +1575,6 @@ describe('BlockRenderer', () => {
       ).lastFrame() ?? '';
 
     expect(frame).not.toContain('reason one');
-    expect(frame).toContain('└─ reason two');
     for (const line of ['two', 'three', 'four', 'five', 'six']) {
       expect(frame).toContain(`reason ${line}`);
     }
@@ -1632,7 +1655,6 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 最新活动为 reasoning：思考窗口覆盖工具步骤。
     expect(frame).toContain('reviewing the project conventions');
     expect(frame).not.toContain('Read README.md');
     // 思考块标题 = "Thought for Xs · <工具统计>"（· 分隔，规则 22）
@@ -1746,12 +1768,11 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('this is a very long thinking');
-    expect(frame).not.toContain('├─ Thinking');
     expect(frame).not.toContain('运行中');
     expect(frame).not.toContain('Read App.tsx');
   });
 
-  test('shows thinking preview even when all tools are done (same thought cycle continues)', () => {
+  test('shows active reasoning while the cycle continues', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1778,14 +1799,11 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 运行中 Thought 的思考预览始终展示——工具完成不代表思考周期终止，
-    // 下一个 tool_call 很可能紧随其后，预览不应被隐藏又重现。
-    // Running Thought always shows thinking preview — completed tools
-    // don't mean the thinking cycle ended; another tool_call often follows.
     expect(frame).toContain('still thinking after tools done');
+    expect(frame).not.toContain('Read App.tsx');
   });
 
-  test('collapses the reasoning window after a tool_summary settles', () => {
+  test('keeps only the Thought summary after a tool_summary settles', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1849,7 +1867,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).not.toContain('●');
   });
 
-  test('settled pure-thinking Thought renders a single dot-less line, no tree/footer/thinking text', () => {
+  test('settled pure-thinking Thought hides reasoning and has no status dot', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1872,10 +1890,8 @@ describe('BlockRenderer', () => {
     // 单行形态：只有 "Thought for 3s"，无圆点、无步骤树、无 footer
     expect(frame).toContain('Thought for 3s');
     expect(frame).not.toContain('●');
-    expect(frame).not.toContain('└─');
-    expect(frame).not.toContain('完成');
-    // thinking 文本 settle 后不渲染
     expect(frame).not.toContain('hidden after settle');
+    expect(frame).not.toContain('完成');
     // ● 保留给有状态的行；纯思考 settle 后无状态，不渲染圆点，
     // 但保留两个空格列位，文字起始列与工具块名字列对齐
     expect(frame).toContain('  Thought for 3s');
@@ -1888,6 +1904,7 @@ describe('BlockRenderer', () => {
       kind: 'text',
       content: '── TUI 模块全面解析 ──',
       thoughtElapsedMs: 24_000,
+      thoughtContent: 'internal reasoning must stay hidden',
     } as Extract<OutputBlock, { kind: 'text' }>;
     const { lastFrame } = render(
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
@@ -1898,6 +1915,7 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('Thought for 24s');
     expect(frame).toContain('── TUI 模块全面解析 ──');
     expect(frame).not.toContain('●');
+    expect(frame).not.toContain('internal reasoning must stay hidden');
     const lines = frame.split('\n');
     const headerIndex = lines.findIndex((line) => line.includes('Thought for 24s'));
     const contentIndex = lines.findIndex((line) => line.includes('TUI 模块全面解析'));
@@ -2243,6 +2261,71 @@ describe('Block spacing', () => {
     expect(i3).toBeGreaterThan(-1);
     expect(i4).toBeGreaterThan(-1);
     expect(i4 - i3).toBe(1); // consecutive, no blank line
+  });
+
+  test('separately committed list item blocks have no block gap', () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: 'user', content: 'list' },
+      { id: 2, kind: 'text', content: '1. first item\n' },
+      { id: 3, kind: 'text', content: '2. second item\n' },
+      { id: 4, kind: 'text', content: '3. third item' },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const first = lines.findIndex((line) => line.includes('first item'));
+    const second = lines.findIndex((line) => line.includes('second item'));
+    const third = lines.findIndex((line) => line.includes('third item'));
+
+    expect(second - first).toBe(1);
+    expect(third - second).toBe(1);
+  });
+
+  test('keeps a normal block gap around a progressively rendered list', () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: 'text', content: 'Introduction.' },
+      { id: 2, kind: 'text', content: '- first item\n' },
+      { id: 3, kind: 'text', content: '- second item\n' },
+      { id: 4, kind: 'text', content: 'Conclusion.' },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const intro = lines.findIndex((line) => line.includes('Introduction.'));
+    const first = lines.findIndex((line) => line.includes('first item'));
+    const second = lines.findIndex((line) => line.includes('second item'));
+    const conclusion = lines.findIndex((line) => line.includes('Conclusion.'));
+
+    expect(first - intro).toBe(2);
+    expect(second - first).toBe(1);
+    expect(conclusion - second).toBe(2);
+  });
+
+  test('joins a streamed item after a mixed block whose final component is a list', () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1,
+        kind: 'text',
+        content: '应用层在 src/app/：\n\n- tui/ — React Ink TUI 主界面\n',
+      },
+      { id: 2, kind: 'text', content: '- cli/ — Headless CLI\n' },
+      { id: 3, kind: 'text', content: '- web-server/ — Hono Web 服务' },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const tui = lines.findIndex((line) => line.includes('tui/'));
+    const cli = lines.findIndex((line) => line.includes('cli/'));
+    const web = lines.findIndex((line) => line.includes('web-server/'));
+
+    expect(cli - tui).toBe(1);
+    expect(web - cli).toBe(1);
   });
 
   test('slash command user block has 0 gap to result', () => {

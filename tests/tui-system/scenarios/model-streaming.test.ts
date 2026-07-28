@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
+import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 import { warmupInputPipeline } from '../harness/warmup';
 
@@ -32,8 +32,8 @@ describe('TUI PTY System — model streaming', () => {
     server.setResponses([
       {
         message: {
-          reasoning_chunks: ['STREAM_THINKING'],
-          content_chunks: ['STREAM_FIRST', ' STREAM_FINAL'],
+          reasoning_chunks: ['STREAM_THINKING\n\n', 'STREAM_PRIVATE_TAIL'],
+          content_chunks: ['STREAM_FIRST\n\n', 'STREAM_MIDDLE\n\n', 'STREAM_FINAL'],
         },
         chunk_delay: 300,
       },
@@ -58,19 +58,43 @@ describe('TUI PTY System — model streaming', () => {
   );
 
   test(
-    'renders an early text delta before the streamed response completes',
+    'shows the complete reasoning stream atomically before committing answer components',
     async () => {
       await typeText(tui, 'Stream an answer');
       tui.write('\r');
       await waitForRequestMessage(server, 'Stream an answer', 15_000);
-      await waitForText(() => tui.output(), 'STREAM_FIRST', 10_000);
+      await sleep(400);
+      expect(screenContains(tui.output(), 'STREAM_THINKING')).toBe(false);
+      expect(screenContains(tui.output(), 'STREAM_PRIVATE_TAIL')).toBe(false);
+
+      await waitForText(() => tui.output(), 'STREAM_THINKING', 10_000);
 
       const partialOutput = tui.output();
-      expect(screenContains(partialOutput, 'STREAM_FIRST')).toBe(true);
+      expect(screenContains(partialOutput, 'STREAM_THINKING')).toBe(true);
+      expect(screenContains(partialOutput, 'STREAM_PRIVATE_TAIL')).toBe(true);
+      expect(screenContains(partialOutput, 'STREAM_FIRST')).toBe(false);
       expect(screenContains(partialOutput, 'STREAM_FINAL')).toBe(false);
 
+      await waitForText(() => tui.output(), 'STREAM_FIRST', 10_000);
+      const firstAnswerFrameHistory = stripAnsi(tui.output());
+      expect(firstAnswerFrameHistory.lastIndexOf('STREAM_THINKING')).toBeLessThan(
+        firstAnswerFrameHistory.lastIndexOf('STREAM_FIRST'),
+      );
+      expect(firstAnswerFrameHistory.lastIndexOf('STREAM_PRIVATE_TAIL')).toBeLessThan(
+        firstAnswerFrameHistory.lastIndexOf('STREAM_FIRST'),
+      );
+      expect(screenContains(tui.output(), 'STREAM_FINAL')).toBe(false);
+
       await waitForText(() => tui.output(), 'STREAM_FINAL', 10_000);
-      expect(screenContains(tui.output(), 'STREAM_FIRST STREAM_FINAL')).toBe(true);
+      await sleep(800);
+      expect(screenContains(tui.output(), 'STREAM_MIDDLE')).toBe(true);
+      const clean = stripAnsi(tui.output());
+      // Raw PTY capture retains overwritten frames; ensure reasoning was only
+      // printed in the earlier active frame, never again after final output.
+      expect(clean.lastIndexOf('STREAM_THINKING')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
+      expect(clean.lastIndexOf('Thought for')).toBeLessThan(clean.lastIndexOf('STREAM_FIRST'));
+      expect(clean.lastIndexOf('STREAM_FIRST')).toBeLessThan(clean.lastIndexOf('STREAM_MIDDLE'));
+      expect(clean.lastIndexOf('STREAM_MIDDLE')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
       expect(server.getRequests()[0]?.body.stream).toBe(true);
     },
     TIMEOUT,

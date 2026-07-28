@@ -1466,6 +1466,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // Informational — managed by TranscriptState (future).
     case 'model.requested':
     case 'model.reasoning_delta':
+    case 'model.reasoning_completed':
     case 'model.text_delta':
       return state;
 

@@ -65,6 +65,7 @@ const DISPOSABLE_EVENT_TYPES = new Set([
   'reason',
   'model.text_delta',
   'model.reasoning_delta',
+  'model.reasoning_completed',
 ]);
 
 /** 工厂依赖：注入到每个 SessionRuntime */

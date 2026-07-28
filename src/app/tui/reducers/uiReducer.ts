@@ -106,8 +106,10 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         toolStartTimes: undefined,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
+        thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
         currentModelReasoningStreamed: false,
+        currentModelReasoningText: undefined,
       };
     case 'ESCAPE': {
       if (state.showHelp) return { ...state, showHelp: false };

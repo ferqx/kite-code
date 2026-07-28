@@ -21,7 +21,7 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 |------|---------|---------|--------|
 | Thinking | 启动后尚未调用任何工具 | Thinking / Planning | primary（蓝）静态 |
 | Working | 第一个 tool_card / tool_summary / subagent / file_change 出现 | Working · Inspecting / Locating / Running / Changing / Delegating / Asking | 渐变动画（蓝→青→绿→金，5s 一轮） |
-| Finishing | 流式文本 block 出现 | Finishing | success（绿）静态 |
+| Finishing | 兼容路径的 streaming text block 出现 | Finishing | success（绿）静态 |
 
 **叠加态（覆盖阶段动词，但不改变阶段本身）：**
 - Retry: `Retrying` + warning 色
@@ -41,7 +41,7 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 1. 计算 `elapsedMs`（从 `runStartTime`）和 `runTokenDelta`（从 `runTokenBaseline`）
 2. 如有 retryState → 返回 Retrying
 3. 如有 interrupt → 返回 Waiting/Asking
-4. `derivePhase()`：finishing（有 streaming text）→ working（有 tool 活动）→ thinking
+4. `derivePhase()`：finishing（兼容路径仍有 streaming text）→ working（有 tool 活动）→ thinking。Runtime `model.text_delta` 的未闭合 Markdown 尾部不进入 block 树；完整块一旦提交即由 `shouldShowRunStatus` 按可见正常文本隐藏状态行。
 5. 在 phase 内用 `currentVerb()` 推导具体动词
 6. `formatRunStatusLine(snapshot, columns)` 做宽度自适配格式化
 

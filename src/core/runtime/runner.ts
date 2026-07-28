@@ -15,8 +15,15 @@ type EffectExecutionOutcome = { applied: boolean; emitted: boolean };
 
 function isEphemeralModelDelta(
   event: RuntimeEvent,
-): event is Extract<RuntimeEvent, { type: 'model.reasoning_delta' | 'model.text_delta' }> {
-  return event.type === 'model.reasoning_delta' || event.type === 'model.text_delta';
+): event is Extract<
+  RuntimeEvent,
+  { type: 'model.reasoning_delta' | 'model.reasoning_completed' | 'model.text_delta' }
+> {
+  return (
+    event.type === 'model.reasoning_delta' ||
+    event.type === 'model.reasoning_completed' ||
+    event.type === 'model.text_delta'
+  );
 }
 
 /** Execute an effect while forwarding events produced during the effect. */

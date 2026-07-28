@@ -33,7 +33,8 @@ export async function invokeBoundModel(params: {
   maxOutputTokens?: number;
   streaming?: boolean;
   onTextDelta?: (text: string) => void;
-  onReasoningDelta?: (text: string) => void;
+  onReasoningDelta?: (text: string, segmentId: string) => void;
+  onReasoningCompleted?: (text: string, segmentId: string) => void;
   onRetry?: ModelRetryListener;
   /** Test seam for deterministic retry timing; production uses the bounded defaults. */
   streamRetryOptions?: Omit<TransientModelRetryOptions, 'onRetry'>;
@@ -91,10 +92,33 @@ export async function invokeBoundModel(params: {
         });
         let text = '';
         let reasoning = '';
+        let reasoningSegment = '';
+        let reasoningSegmentId: string | undefined;
+        let reasoningSegmentOrdinal = 0;
+        let emittedReasoningLength = 0;
+        const ensureReasoningSegment = (providerId?: string) => {
+          if (!reasoningSegmentId) {
+            reasoningSegmentOrdinal++;
+            reasoningSegmentId =
+              providerId || `reasoning-${attemptNumber}-${reasoningSegmentOrdinal}`;
+            reasoningSegment = '';
+          }
+          return reasoningSegmentId;
+        };
+        const completeReasoningSegment = () => {
+          if (!reasoningSegmentId) return;
+          if (reasoningSegment) {
+            params.onReasoningCompleted?.(reasoningSegment, reasoningSegmentId);
+          }
+          reasoningSegmentId = undefined;
+          reasoningSegment = '';
+        };
         lastAttemptText = '';
         lastAttemptReasoning = '';
         for await (const part of result.fullStream) {
+          if (part.type.startsWith('tool-')) completeReasoningSegment();
           if (part.type === 'text-delta') {
+            completeReasoningSegment();
             text += part.text;
             lastAttemptText = text;
             const visibleText =
@@ -107,6 +131,9 @@ export async function invokeBoundModel(params: {
                     : text;
             if (visibleText) params.onTextDelta?.(visibleText);
           } else if (part.type === 'reasoning-delta') {
+            const segmentId = ensureReasoningSegment(
+              'id' in part && typeof part.id === 'string' ? part.id : undefined,
+            );
             reasoning += part.text;
             lastAttemptReasoning = reasoning;
             const visibleReasoning =
@@ -117,13 +144,24 @@ export async function invokeBoundModel(params: {
                   : reasoning.startsWith(retryBaselineReasoning)
                     ? reasoning.slice(retryBaselineReasoning.length)
                     : reasoning;
-            if (visibleReasoning) params.onReasoningDelta?.(visibleReasoning);
+            const visibleDelta = visibleReasoning.slice(emittedReasoningLength);
+            emittedReasoningLength = visibleReasoning.length;
+            if (visibleDelta) {
+              reasoningSegment += visibleDelta;
+              params.onReasoningDelta?.(reasoningSegment, segmentId);
+            }
+          } else if (part.type === 'reasoning-start') {
+            completeReasoningSegment();
+            ensureReasoningSegment(typeof part.id === 'string' ? part.id : undefined);
+          } else if (part.type === 'reasoning-end') {
+            completeReasoningSegment();
           } else if (part.type === 'error') {
             throw part.error;
           } else if (part.type === 'abort') {
             throw new DOMException(part.reason ?? 'Model stream aborted', 'AbortError');
           }
         }
+        completeReasoningSegment();
         if (streamError) throw streamError;
         return toAIMessage(await result.finalStep);
       },

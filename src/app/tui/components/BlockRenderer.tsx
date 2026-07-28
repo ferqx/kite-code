@@ -43,10 +43,27 @@ const TEXT_INDENT = 2;
  *
  *  斜杠命令是唯一的例外 — 命令结果应紧跟命令本身，0 间距。
  *  Slash commands are the only exception — results should directly follow the command. */
-function gapFrom(prevBlock?: OutputBlock) {
+function listBlockIdentity(
+  block: OutputBlock | undefined,
+  edge: 'first' | 'last',
+): string | undefined {
+  if (block?.kind !== 'text') return undefined;
+  const visibleLines = block.content.split('\n').filter((line) => line.trim().length > 0);
+  const edgeLine = edge === 'first' ? visibleLines[0] : visibleLines.at(-1);
+  const match = edgeLine?.match(/^(\s*)(?:(?:[-+*])\s+|(?:\d+)[.)]\s+)/);
+  if (!match) return undefined;
+  const ordered = /^\s*\d+[.)]\s+/.test(edgeLine ?? '');
+  return `${match[1]!.length}:${ordered ? 'ordered' : 'unordered'}`;
+}
+
+function gapFrom(prevBlock?: OutputBlock, block?: OutputBlock) {
   if (!prevBlock) return { marginTop: 0, marginBottom: 0 } as const;
   // 斜杠命令结果紧跟命令，无间距 / Slash command results follow commands directly, no gap
   if (prevBlock.kind === 'user' && prevBlock.content.startsWith('/')) {
+    return { marginTop: 0, marginBottom: 0 } as const;
+  }
+  const previousList = listBlockIdentity(prevBlock, 'last');
+  if (previousList && previousList === listBlockIdentity(block, 'first')) {
     return { marginTop: 0, marginBottom: 0 } as const;
   }
   return { marginTop: BLOCK_GAP, marginBottom: 0 } as const;
@@ -111,7 +128,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
         <Box
           flexDirection="column"
           paddingLeft={TEXT_INDENT}
-          marginTop={gapFrom(prevBlock).marginTop}
+          marginTop={gapFrom(prevBlock, block).marginTop}
           marginBottom={0}
         >
           {/* ADR-0026：并入的纯思考题头——暗色、与正文间隔一行、无圆点

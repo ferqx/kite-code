@@ -55,15 +55,23 @@ export type OutputBlock =
       kind: 'text';
       content: string;
       streaming?: boolean;
+      /** Compatibility marker for mutable text that cannot enter Static yet. */
+      responsePending?: boolean;
       isError?: boolean;
       /** Model invocation that owns this live/reconnected response segment. */
       modelRequestId?: string;
+      /** Recognized structural component whose shell is visible while complete
+       * child rows are appended. The hidden source retains the unfinished row. */
+      streamingComponent?: 'code' | 'table';
+      streamingSource?: string;
       /** 被文本关闭的纯思考块并入的时长（ms，ADR-0026）。存在时在文本块顶部
        *  渲染暗色 "Thought for Xs" 题头行；独立思考块已删除，时长全量转移。
        *  Elapsed (ms) of a pure-thinking block merged in when text closed it
        *  (ADR-0026). Renders a dim "Thought for Xs" header above the content;
        *  the standalone block was removed with its elapsed fully transferred. */
       thoughtElapsedMs?: number;
+      /** Complete reasoning revealed only after model.responded, merged with the Thought header. */
+      thoughtContent?: string;
     }
   | { id: number; kind: 'reason'; content: string; folded: boolean }
   | {
@@ -106,6 +114,9 @@ export type OutputBlock =
       modelMs?: number;
       summaryLine: string;
       active: boolean;
+      /** Keep a just-closed streamed Thought dynamic until model.responded
+       *  removes its transient reasoning preview. */
+      responsePending?: boolean;
       /** Model invocation that most recently contributed reasoning to this phase. */
       modelRequestId?: string;
       /** 是否有过 reason 思考块 — 用于三态顶行：Thought + tools / 仅 Thought / 仅 tools */
@@ -223,10 +234,15 @@ export interface TuiState {
   explorationSummaryIds: Record<string, number>;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
+  /** Explicit Thought lifecycle. `awaiting_terminal` is visually settled but
+   *  still owns the current model invocation's terminal duration. */
+  thoughtPhaseStatus?: 'running' | 'awaiting_terminal';
   /** Current model invocation, used to scope streamed terminal reconciliation. */
   currentModelRequestId?: string;
   /** Whether the current model invocation has emitted at least one reasoning delta. */
   currentModelReasoningStreamed?: boolean;
+  /** Latest cumulative reasoning segment, cached off-screen between boundaries. */
+  currentModelReasoningText?: string;
   /** 思考延续上下文（ADR-0027 / 规则 23）：Thought 块被非探索工具或人机
    *  等待关闭时记录，同一响应批次内后续探索工具聚合继承 hasThinking /
    *  modelMs。由文本（ADR-0026）、model.requested、reason 事件清除。

@@ -549,8 +549,10 @@ export async function invokeRuntimeModel(params: {
         modelCapabilities.maxOutputTokens,
       streaming: modelCapabilities.streaming,
       onTextDelta: (text) => params.emitRuntimeEvent?.({ type: 'model.text_delta', text }),
-      onReasoningDelta: (text) =>
-        params.emitRuntimeEvent?.({ type: 'model.reasoning_delta', text }),
+      onReasoningDelta: (text, segmentId) =>
+        params.emitRuntimeEvent?.({ type: 'model.reasoning_delta', segmentId, text }),
+      onReasoningCompleted: (text, segmentId) =>
+        params.emitRuntimeEvent?.({ type: 'model.reasoning_completed', segmentId, text }),
       onRetry: (attempt, maxAttempts, error, delayMs) => {
         params.emitRuntimeEvent?.({
           type: 'model.retry',

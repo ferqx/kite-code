@@ -251,6 +251,45 @@ describe('invokeBoundModel streaming', () => {
     ]);
   });
 
+  test('does not repeat a replayed reasoning prefix in completed retry segments', async () => {
+    const { server, model } = setup();
+    server.setResponses([
+      {
+        message: {
+          reasoning_chunks: ['inspect'],
+          content_chunks: ['partial'],
+        },
+        disconnect_after_content: true,
+      },
+      {
+        message: {
+          reasoning_chunks: ['inspect', ' more'],
+          content_chunks: ['partial', ' answer'],
+        },
+      },
+    ]);
+    const reasoningDeltas: string[] = [];
+    const completedReasoning: string[] = [];
+
+    await invokeBoundModel({
+      model,
+      tools: {} as ToolSet,
+      messages: [humanMessage('inspect')],
+      streaming: true,
+      onReasoningDelta: (text) => reasoningDeltas.push(text),
+      onReasoningCompleted: (text) => completedReasoning.push(text),
+      streamRetryOptions: {
+        initialDelayMs: 0,
+        maxDelayMs: 0,
+        jitterMs: 0,
+        sleep: async () => {},
+      },
+    });
+
+    expect(reasoningDeltas).toEqual(['inspect', ' more']);
+    expect(completedReasoning).toEqual(['inspect', ' more']);
+  });
+
   test('emits divergent regenerated text as a separate segment', async () => {
     const { server, model } = setup('openai-compatible');
     server.setResponses([

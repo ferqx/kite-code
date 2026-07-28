@@ -1265,6 +1265,26 @@ describe('SessionRuntime', () => {
     ]);
   });
 
+  test('flushes a reasoning delta before its explicit segment completion event', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    const dispatch = (action: any) => events.push(action.event);
+
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.reasoning_delta', segmentId: 'r1', text: 'complete reasoning' },
+      dispatch,
+    );
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.reasoning_completed', segmentId: 'r1', text: 'complete reasoning' },
+      dispatch,
+    );
+
+    expect(events).toEqual([
+      { type: 'model.reasoning_delta', segmentId: 'r1', text: 'complete reasoning' },
+      { type: 'model.reasoning_completed', segmentId: 'r1', text: 'complete reasoning' },
+    ]);
+  });
+
   test('clearBuffer cancels a pending delta frame', async () => {
     const rt = makeRuntime();
     const actions: any[] = [];

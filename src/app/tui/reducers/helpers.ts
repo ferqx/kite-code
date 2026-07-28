@@ -78,18 +78,22 @@ export function replaceBlockById(state: TuiState, blockId: number, next: OutputB
   return { ...state, turns };
 }
 
-/** Finalize 最后 turn 中所有 streaming 的 text block（设为 false）。
+/** Finalize 最后 turn 中所有 mutable text block.
  *  need_approval、need_input、SET_IDLE、CTRL_C 时调用。 */
 export function finalizeLastTurnStreaming(state: TuiState): TuiState {
   const last = state.turns.at(-1);
   if (!last) return state;
   let changed = false;
-  const blocks = last.blocks.map((b) => {
-    if (b.kind === 'text' && b.streaming) {
+  const blocks = last.blocks.flatMap((b) => {
+    if (b.kind === 'text' && (b.streaming || b.responsePending)) {
       changed = true;
-      return { ...b, streaming: false } as typeof b;
+      return [{ ...b, streaming: false, responsePending: undefined } as typeof b];
     }
-    return b;
+    if (b.kind === 'tool_summary' && b.responsePending) {
+      changed = true;
+      return [{ ...b, responsePending: undefined } as typeof b];
+    }
+    return [b];
   });
   if (!changed) return state;
   const turns = state.turns.slice();

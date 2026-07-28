@@ -677,6 +677,15 @@ export interface ModelRequestedEvent {
 /** Ephemeral cumulative reasoning text for live consumers; never persisted. */
 export interface ModelReasoningDeltaEvent {
   type: 'model.reasoning_delta';
+  /** Stable within one reasoning segment; absent on legacy producers. */
+  segmentId?: string;
+  text: string;
+}
+
+/** Ephemeral boundary for one complete reasoning segment; never persisted. */
+export interface ModelReasoningCompletedEvent {
+  type: 'model.reasoning_completed';
+  segmentId: string;
   text: string;
 }
 
@@ -937,6 +946,7 @@ export type RuntimeEvent =
   | UserCommandInvokedEvent
   | ModelRequestedEvent
   | ModelReasoningDeltaEvent
+  | ModelReasoningCompletedEvent
   | ModelTextDeltaEvent
   | ModelRespondedEvent
   | ModelRetryEvent

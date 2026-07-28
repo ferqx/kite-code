@@ -4,7 +4,7 @@
 范围：TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界
 读取时机：修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done/text/model_requested）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks/settleActiveThought）、`compaction.ts`（折叠引擎）时必读。
 验证：`bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/runtime/agent.integration.test.ts tests/model-invoke.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`
-最后更新：2026-07-26
+最后更新：2026-07-28
 
 ## 约束
 
@@ -16,7 +16,7 @@
 
 4. **跨 thinking 合并**：同一 Thought 内，探索工具之间可以夹着 `reason/thinking`。这些 thinking 不创建新的工具聚合，只更新 `tool_summary.latestActivity`。
 
-5. **运行态互斥活动窗口与块顶字幕**：`latestActivity` 决定标题下方的唯一运行态活动视图。最新事件为 reasoning 时，只显示已经形成完整句/行的 reasoning 内容，按终端宽度自然换行并保留最新 5 个视觉行；未完成尾句继续缓冲，不逐 token 刷新。reasoning 首行使用 `└─` 连接实际内容，后续视觉行与首行正文对齐。最新事件为探索工具时，reasoning 视图立即隐藏，只显示最新 5 条工具消息，最后一条工具消息使用 `└─`；后续 reasoning 可再次覆盖工具视图，二者始终互斥。连接符不得指向“运行中”等合成状态行。Thought 一旦 settle，活动窗口立即折叠：reasoning、工具步骤和 footer 全部隐藏，只保留单行 `Thought for Xs · <工具统计>` 摘要；纯思考回答仍按规则 19 并入回答题头。**旁白文本**（可见 assistant 文本）在阶段块活跃时吸收为字幕：待确认 `pendingCaption` 实时渲染于块顶（标题行下、步骤树上），被随后只读工具确认后转入 `captions` 永久保留（多段按时间顺序累积）；阶段结束仍未确认则脱离为独立文本块（规则 24、ADR-0030）。
+5. **运行态活动与块顶字幕**：Thought 运行期间展示已完整提交的 reasoning 段落；最新活动为工具时改为展示工具步骤。Thought settle 后 reasoning 正文、工具步骤和 footer 都折叠，只保留摘要。**旁白文本**（可见 assistant 文本）在阶段块活跃时吸收为字幕：待确认 `pendingCaption` 实时渲染于块顶（标题行下、步骤树上），被随后只读工具确认后转入 `captions` 永久保留（多段按时间顺序累积）；阶段结束仍未确认则脱离为独立文本块（规则 24、ADR-0030）。
 
 6. **人机交互停止计时**：进入审批、提问或方案评审等待时，当前 Thought 必须置为 `active=false` 并冻结 `totalElapsedMs`。用户阅读、审批或输入答案的耗时不计入 Thought 时间。
 
@@ -32,7 +32,7 @@
 
 12. **最小显示 1s**：`formatDuration` 和 `buildToolSummaryLine` 中的耗时格式化，秒数最小为 1。
 
-13. **聚合块圆点 = 阶段存活**（ADR-0030 修订）：`active=true`（阶段进行中）→ 暗色闪烁圆点；标题中的 `Thought for Xs` 已表达进行状态与耗时，运行态不再重复渲染 footer「运行中 (Xs)」。即使所有工具已完成，模型调用间隙仍属于阶段内部，圆点持续动画。`active=false`（阶段结束）→ Thought 与非 Thought 工具聚合摘要都移除圆点并保留两个空格列位，折叠为单行摘要，不渲染 footer 或活动明细。独立工具卡仍使用自身的运行及结果状态语义。旧版"工具全完成即 ●"的提前结算已随 model.requested settle 一同废除（规则 21）。reasoning 活动窗口与圆点解耦，可独立展示。
+13. **聚合块圆点 = 阶段存活**（ADR-0030 修订）：`active=true`（阶段进行中）→ 暗色闪烁圆点；标题中的 `Thought for Xs` 已表达进行状态与耗时，运行态不再重复渲染 footer「运行中 (Xs)」。即使所有工具已完成，模型调用间隙仍属于阶段内部，圆点持续动画。`active=false`（阶段结束）→ Thought 与非 Thought 工具聚合摘要都移除圆点并保留两个空格列位，折叠为单行摘要，不渲染 footer 或活动明细。独立工具卡仍使用自身的运行及结果状态语义。
 
 14. **Static 边界**：`tool_summary` 仅在 `active=false` 且 `tools.every(t => t.status !== 'running')` 时进入 Static。
 
@@ -44,7 +44,7 @@
 
 18. **审批无关**：探索工具永远不需要审批，`ToolSummaryBlock` 不接受 `awaitingApproval` prop。
 
-19. **纯思考块持久化与题头并入**：`tools.length === 0` 的 Thought 块（纯问答轮的 `reason → text`，或 `reason → 非探索工具` 产生）。**非流式模型下文本不直接关闭它**——文本先吸收为 `pendingCaption`（规则 24）；`final` 关闭时 pendingCaption 即回答本身 → **并入该文本块题头**（ADR-0026：独立块删除，冻结 elapsed 写为文本块 `thoughtElapsedMs`，渲染为文本块顶部暗色题头行 `Thought for Xs`——两空格缩进、无圆点、与正文固定间隔一行）。流式模型路径（文本事件先关闭思考块）由 `mergePureThoughtHeader` 完成同样的并入。纯空白文本整体忽略、不触发并入。被非探索工具或人机交互边界关闭时**保留**裸线：未确认的 `pendingCaption` 脱离为块后独立文本块（无题头）。`closeCurrentThought`、`settleActiveThought`、`cancelRunningBlocks` 三条路径行为一致，均置 `active=false` 并冻结 `totalElapsedMs`（settle 时按工具状态重算 `result`，规则 15）。settle 后渲染为单行 `Thought for Xs`——**无圆点**（`●` 保留给"有状态"的行），保留两个空格列位使文字起始列与工具块名字列对齐，不显示步骤树与 footer；运行态左侧为暗色闪烁圆点（500ms 切换，隐藏帧两个空格、无行位移），展示互斥活动窗口且不显示运行态 footer。
+19. **纯思考块持久化与题头并入**：`tools.length === 0` 的 Thought 块（纯问答轮的 `reason → text`，或 `reason → 非探索工具` 产生）。**非流式模型下文本不直接关闭它**——文本先吸收为 `pendingCaption`（规则 24）；`final` 关闭时 pendingCaption 即回答本身 → **并入该文本块题头**（ADR-0026：独立块删除，冻结 elapsed 写为文本块 `thoughtElapsedMs`，只显示暗色 `Thought for Xs`，随后显示回答正文；reasoning 正文不渲染）。流式模型路径由终态 `model.responded` 和 `mergePureThoughtHeader` 完成同样的并入。纯空白文本整体忽略、不触发并入。被非探索工具或人机交互边界关闭时**保留**独立 Thought：无圆点，不显示 reasoning 正文、工具步骤与 footer。
 
 20. **非思考链聚合（纯统计标签的唯一来源）**：仅当阶段内从未出现 reasoning（所有调用均无思考），且无延续上下文（阶段边界后 carryover 已被 `model.requested` / 新 reason 清除）时，探索聚合使用纯工具统计标签（如 `read 2 files`，`hasThought=false`），不带 `Thought for` 前缀、无 thinking 条目。阶段内任一次调用有 reasoning（或边界 carryover 继承）时，阶段块带 `Thought for Xs · <统计>`（规则 23/24、ADR-0027/0030）。注意：无 reasoning 的调用其 `durationMs` 仍计入阶段 Σ 时长（规则 11），只不影响标签前缀。
 
@@ -56,15 +56,16 @@
 
 24. **探索阶段块与旁白字幕（ADR-0030）**：一段只读探索阶段 = 单个 `tool_summary` 块，跨模型调用存活：`model.requested` 不关闭（规则 21），`reason` 累加时长并更新预览（规则 4/11），探索 `tool_call` 并入同块（统计标签实时刷新）。圆点整个阶段持续闪烁，运行态不显示 footer（规则 13）；阶段边界（规则 1/3）关闭后 Thought 移除圆点、折叠工具步骤、保留已确认旁白字幕（`captions`），仅移除 reasoning 预览和运行态指示器。**旁白文本吸收**：阶段块活跃时，可见文本（非流式一次完整到达）不建独立块，写入 `pendingCaption`，渲染于标题行下、步骤树之上（Markdown 原样，缩进与标题文字列对齐）；随后到来只读工具将其确认为 `captions`（永久留在块内，多段按 `\n\n` 时序累积）；阶段结束时仍未确认的 `pendingCaption` 脱离为块后独立文本块（最终回答 / 写入前旁白）；纯思考块的 pendingCaption 被文本路径关闭时并入题头（规则 19）。流式增量文本（事件携带累积全文）以 `startsWith` 识别替换，避免重复。**纯空白文本整体忽略**（不关闭、不建块）。折叠阈值（`MAX_VISIBLE_STEPS=5`）作用于阶段块的合并步骤总数。
 
-25. **模型流式增量（ADR-0031 / ADR-0035 / ADR-0036）**：支持流式的模型在调用期间发出累计全文语义的 `model.text_delta` / `model.reasoning_delta`。首个 reasoning delta 在没有活跃阶段时立即建立实时纯 Thought；运行态展示只提交截至最近换行或句末标点的完整 reasoning 单元，未完成尾句不逐 token 渲染，完整原文仍保留供终态结算。首个 text delta 必须先冻结当前 Thought，再作为同级 text block 渲染；后续累计值只更新该块，任何工具排在文本之后，不得把流式文本写入或回收进 Thought 的 `pendingCaption`。兼容 Provider 若跨帧先发 text、后发 reasoning，仍在变化的尾部文本迁入新 Thought 后再按 Thought → text 结算；终态 `model.responded` 只补齐最后一条 thinking 内容、duration 和权威文本，不重复 timeline/全文。TUI live 派发按 50ms 合帧，并固定 reasoning 先于 text flush，仅保留各类型最新累计值；任何非 delta 事件到达前同步 flush，确保 `model.responded`、工具事件和 settle 不越序。delta 不进入 Runtime store、events.jsonl 或回放；取消、清空和会话切换必须 flush 或清理定时器。
+25. **模型流式增量与重复思考段（ADR-0045）**：Runtime 为每段连续 reasoning 分配稳定 `segmentId`，依次发出累计语义的 `model.reasoning_delta` 和一次 `model.reasoning_completed`；一次模型请求或 Agent 执行可包含任意多个 `reasoning → tool → reasoning` 段。Provider 缺少显式 start/end 时，模型适配层在 reasoning→text/tool/流结束边界合成 completed。Thought 阶段使用显式 `running | awaiting_terminal` 生命周期：delta 期间只缓存、不渲染；completed 把该段完整 reasoning 一次性放入活动窗口，后续工具活动可替换它，下一段 completed 又可替换工具活动，整个探索过程仍聚合为同一个 Thought。第一条 `model.text_delta` 使 Thought 停止圆点并转为 `awaiting_terminal`；第一段完整回答组件真正进入渲染树时，reasoning 与工具活动明细立即隐藏，Thought 以当时已知耗时冻结并进入 Static，同时仅在 reducer 状态中保留 `awaiting_terminal` 归属以阻止迟到事件创建第二个 Thought。之后每个完整回答组件也立即进入 Static/终端 scrollback，不等待 `model.responded`，因此流式期间向上滚动始终能看到全部已提交内容。`model.responded` 只结束内部归属并补齐未提交尾部，不回写已经输出到 Static 的视觉块。事件派发固定 delta 先于对应 completed；这些瞬态事件不进入 Runtime store、events.jsonl 或回放。
 
-26. **流式断线重连（ADR-0032 / ADR-0033）**：`model.retry` 冻结断线前的 Thought 和流式文本，旧内容永久保留；重连后的文本必须新开一段。新流重放相同前缀时仅派发新增后缀，发生分歧时完整的新生成进入新段，不得原位替换旧段。`model.responded` 到达时：若已渲染的文本块（旧段 + 新段拼接）与 `event.text`（仅含重试产出的权威全文）匹配，跳过；若分歧（不匹配），丢弃该请求所有文本块，以 `event.text` 单块替代，避免 streaming handler 的 `committedLength` 截断新文本。`model.responded` 清除 retry 状态。partial tool call 不创建卡片或 summary，只有完整成功流的终态工具调用进入 Runtime。
+26. **流式断线重连（ADR-0032 / ADR-0033）**：`model.retry` 冻结断线前已经提交的完整 Markdown 块；尚未闭合的文本尾部和 reasoning delta 从未进入渲染树，因此断线时仍保持隐藏。重连后的累计文本按新的提交边界继续处理；终态 `model.responded` 以权威全文补齐或在分歧时替换当前请求的文本块，并清除 retry 状态。partial tool call 不创建卡片或 summary，只有完整成功流的终态工具调用进入 Runtime。
 
-27. **流式 Markdown 组件层级（ADR-0037 / ADR-0038）**：同一次连接的累计 `model.text_delta` 始终更新同一个 streaming text block，不按换行拆成消息块。`MarkdownBlock` 在该文档内按逻辑段落、单行结构、围栏代码和表格建立块级组件，以 Markdown 源起始行作为稳定身份，并按内容签名 memoize。连续普通文本行归入同一个 paragraph；空行、标题、水平线、列表项、引用、代码和表格封闭段落。累计全文追加时，解析缓存保留全部已完成前缀组件及其签名，只重新解析最后一个可能继续增长或发生类型提升的组件（例如 pipe 行升级为表格）；非追加更新才重建全文解析结果。已完成前缀不重建、不重复计算内容签名。断线后的新段仍是独立 Markdown 文档。
+27. **流式 Markdown 组件层级（ADR-0037 / ADR-0038 / ADR-0046）**：空行是普通段落和引用的顶层提交边界；列表采用 item 级边界，下一个同级有序、无序或任务列表 marker 出现时提交前一个完整 item，缩进子列表与续行仍归属父 item。相邻 text block 按“前一块最后一个可见组件”和“当前块第一个可见组件”判断连续列表；两端同缩进且同为有序或无序 item 时使用零块间距，即使前一块还包含列表前的普通段落。列表与前后普通段落、结构组件或工具消息仍保留标准块间距。围栏代码在完整起始围栏到达后立即建立带完整上下边框的 Dynamic 组件，表格在完整表头与分隔行到达后立即建立 Dynamic 组件；两者随后只追加已经换行完成的内部行，当前未完成行保持隐藏。关闭围栏、下一个顶层边界或模型终态会冻结当前组件并使其进入 `<Static>`；此前完整组件始终保持 Static，不使用 `responsePending` 滞留整篇回答，也不显示独立的生成进度文字。断线后的新段仍是独立 Markdown 文档。
 
-28. **结构块内部增量（ADR-0039）**：表格、围栏代码、连续列表和连续引用不仅保持外层身份，内部也按稳定子行 memoize。表格保持单一父级 `Text` 以维持连续边框；新增数据行且列宽未变时复用已有行，新单元格扩大列宽时允许全部行重新布局。代码、列表和引用追加尾行时只创建新子行，不重新渲染既有子行。
+28. **结构块子行渲染（ADR-0039 / ADR-0046）**：已识别的表格与围栏代码由 `MarkdownBlock` 使用稳定父级和子行增量渲染，只把完整内部行交给可见组件；表格保持单一父级 `Text` 以维持连续边框。尚未识别的结构、当前未完成行以及普通段落尾部保持隐藏。
 
 29. **文件工具渲染**：`renderFileSummary` 自动区分 diff 格式（删除行红底 `diffRemovedBg`、新增行绿底 `diffAddedBg`、上下文行无背景）和纯内容格式。write_file 新建/追加时所有内容行视为新增全绿底，内容未变覆写保持 dim。文件内容行自动语法高亮：行号前缀（`LINE_RE`）走普通 `<Text>`，代码正文走 `<SyntaxHighlight code=... language=.../>`，语言由 `detectLanguage(path)` 从扩展名推断。`...` 分隔符不做高亮。
+
 
 ## 设计文档
 
@@ -74,6 +75,8 @@
 - `docs/adr/0027-thought-carryover-non-text-boundary.md` — 思考延续跨过阶段边界、边界后继承（规则 3/20/23）
 - `docs/adr/0030-exploration-phase-block.md` — 只读探索阶段 = 单一存活块、文本吸收为块顶字幕（规则 1/13/21/22/24）
 - `docs/adr/0041-inspect-ls-thought-aggregation.md` — 单一只读 `ls` 纳入 Thought，复合 shell 语法保持独立工具卡（规则 2/3）
+- `docs/adr/0045-streaming-render-complete-block-commit.md` — Thought 终态展示与完整 Markdown 块提交（规则 25/27/28）
+- `docs/adr/0046-atomic-streaming-component-progress.md` — 结构组件闭合外壳后的内部完整行渐进渲染（规则 27）
 - `docs/space/plans/2026-06-28-context-compaction.md` — M0/M1/M2 三层压缩方案
 
 ## 修改时必读

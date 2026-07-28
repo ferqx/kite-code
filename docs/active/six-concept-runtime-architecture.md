@@ -74,7 +74,7 @@ src/core/runtime/
 
 Capability、Skill 和 Verification 不得直接修改 RuntimeState。任何具有恢复价值的变化都必须先形成 Runtime Event，再由 reducer 归纳为当前事实。`user.command_invoked` 是例外：持久化以供审计与 TUI 重放，但 reducer 视为 no-op，不进入模型 transcript 也不改变 RuntimeState。
 
-模型流增量是另一类明确例外：`model.text_delta` 和 `model.reasoning_delta` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store 或 snapshot。Runner 仅在产生该增量的 model effect lease 仍为 current 时向 App 转发；过期 lease 的晚到增量必须丢弃。终态 `model.response_received` 仍是唯一可持久化、可重放的模型回答事实，并负责一次性归并完整文本、reasoning 与工具调用。模型服务暂时断开时，Model Controller 在同一 effect 内重试流消费，抑制已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
+模型流增量是另一类明确例外：`model.text_delta`、`model.reasoning_delta` 和 reasoning 段边界 `model.reasoning_completed` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store、snapshot 或 session log。Runner 仅在产生这些瞬态事件的 model effect lease 仍为 current 时向 App 转发；过期 lease 的晚到事件必须丢弃。终态 `model.response_received` 仍是唯一可持久化、可重放的模型回答事实，并负责一次性归并完整文本、reasoning 与工具调用。模型服务暂时断开时，Model Controller 在同一 effect 内重试流消费，抑制 text 与 reasoning 已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
 
 Runtime schema v15 将 transcript message identity、结构化 Tool Result 和 M2 checkpoint lifecycle 作为可恢复事实持久化。Kernel 为新产生的 user/model/tool transcript event 固化 `createdAt`，reducer 分配 turn、ordinal 和稳定 message ID；工具结果元数据同时投影到 `ToolCallRecord` 与 transcript。旧 snapshot migration 只补齐可确定的身份默认值，不从 stdout 反向推断 path、command 或其他结构化结果。
 

@@ -96,6 +96,7 @@ function cancelRunningBlocks(s: TuiState): TuiState {
     turns,
     nextBlockId,
     currentThoughtSummaryId: undefined,
+    thoughtPhaseStatus: undefined,
     thoughtCarryover: undefined,
   };
 }
@@ -146,7 +147,14 @@ function settleActiveThought(s: TuiState): TuiState {
   // settle 发生在轮次边界：思考延续上下文一并清除（ADR-0027）
   // Settling happens at turn boundaries — drop thinking carryover too
   return changed
-    ? { ...s, turns, nextBlockId, currentThoughtSummaryId: undefined, thoughtCarryover: undefined }
+    ? {
+        ...s,
+        turns,
+        nextBlockId,
+        currentThoughtSummaryId: undefined,
+        thoughtPhaseStatus: undefined,
+        thoughtCarryover: undefined,
+      }
     : s.thoughtCarryover
       ? { ...s, thoughtCarryover: undefined }
       : s;
@@ -271,8 +279,10 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         runTokenBaseline: state.status.totalTokens,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
+        thoughtPhaseStatus: undefined,
         currentModelRequestId: undefined,
         currentModelReasoningStreamed: false,
+        currentModelReasoningText: undefined,
         explorationSummaryIds: {},
         ctrlCPressed: false,
         exitRequested: false,

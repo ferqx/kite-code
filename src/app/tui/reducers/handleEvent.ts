@@ -75,11 +75,9 @@ export type RenderEvent =
   | { type: 'user_message'; data: Protocol.UserMessagePayload };
 
 // ── Structural text block helpers ──
-// During streaming, text events are split into per-line blocks for progressive
-// rendering. But structural markdown elements (tables, code blocks) need
-// multi-line context — MarkdownBlock.groupLines() requires seeing header+sep,
-// or opening+closing fences, within a single block. These helpers detect
-// structural elements and merge their per-line blocks back together.
+// Streaming text is published only at complete top-level Markdown boundaries.
+// Structural elements (tables, code blocks, lists, quotes) therefore reach
+// MarkdownBlock as a whole instead of changing shape while they are visible.
 
 // ── Table detection ──
 
@@ -122,29 +120,137 @@ type TextBlock = OutputBlock & { kind: 'text' };
  * quotes; keeping the final chunk live lets it continue changing shape.
  *
  * The boundary is committed only after at least one character arrives behind
- * it. This guarantees there is always one live tail for the next cumulative
- * delta and avoids creating an empty dynamic block.
+ * it. The unfinished tail stays entirely outside the render tree until another
+ * boundary or the terminal model response proves that it is complete.
  */
-function splitStreamingMarkdown(content: string): { committed: string; tail: string } {
+function splitStreamingMarkdown(content: string): {
+  committed: string;
+  tail: string;
+  live?: { kind: 'code' | 'table'; content: string };
+} {
   let inFence = false;
   let boundary = -1;
   let lineStart = 0;
+  let previousListItemStart = -1;
+  let listItemIndent = -1;
 
   while (lineStart < content.length) {
-    const lineEnd = content.indexOf('\n', lineStart);
-    if (lineEnd < 0) break;
+    const newlineIndex = content.indexOf('\n', lineStart);
+    const lineEnd = newlineIndex < 0 ? content.length : newlineIndex;
     const line = content.slice(lineStart, lineEnd);
     if (/^\s*```/.test(line)) inFence = !inFence;
 
-    if (!inFence && line.trim().length === 0 && lineEnd + 1 < content.length) {
-      boundary = lineEnd + 1;
+    if (!inFence) {
+      // A new top-level list item proves that the preceding item is complete.
+      // Commit before the new marker so ordered, unordered and task lists can
+      // appear item-by-item without exposing a half-written current item.
+      const listMatch = line.match(/^(\s*)(?:[-+*]|\d+[.)])\s+\S/);
+      if (listMatch) {
+        const indent = listMatch[1]!.length;
+        if (previousListItemStart < 0 || indent < listItemIndent) {
+          previousListItemStart = lineStart;
+          listItemIndent = indent;
+        } else if (indent === listItemIndent) {
+          boundary = lineStart;
+          previousListItemStart = lineStart;
+        }
+      } else if (line.trim().length === 0) {
+        previousListItemStart = -1;
+        listItemIndent = -1;
+        if (lineEnd + 1 < content.length) boundary = lineEnd + 1;
+      } else if (/^\S/.test(line) && previousListItemStart >= 0) {
+        // A non-indented top-level line ends the list. Keep the new component
+        // in the hidden tail until its own completion boundary.
+        boundary = lineStart;
+        previousListItemStart = -1;
+        listItemIndent = -1;
+      }
     }
+    if (newlineIndex < 0) break;
     lineStart = lineEnd + 1;
   }
 
-  return boundary > 0
-    ? { committed: content.slice(0, boundary), tail: content.slice(boundary) }
-    : { committed: '', tail: content };
+  if (boundary > 0) {
+    return { committed: content.slice(0, boundary), tail: content.slice(boundary) };
+  }
+
+  const lines = content.split('\n');
+  if (/^\s*```/.test(lines[0] ?? '')) {
+    const closingIndex = lines.findIndex((line, index) => index > 0 && /^\s*```\s*$/.test(line));
+    if (closingIndex >= 0) {
+      const committed = lines.slice(0, closingIndex + 1).join('\n');
+      return { committed, tail: content.slice(committed.length) };
+    }
+    const completeEnd = content.lastIndexOf('\n') + 1;
+    if (completeEnd > 0) {
+      return {
+        committed: '',
+        tail: content,
+        live: { kind: 'code', content: content.slice(0, completeEnd) },
+      };
+    }
+  }
+
+  const completeEnd = content.lastIndexOf('\n') + 1;
+  const completeLines =
+    completeEnd > 0 ? content.slice(0, completeEnd).split('\n').slice(0, -1) : [];
+  if (
+    completeLines.length >= 2 &&
+    isTableRowLike(completeLines[0] ?? '') &&
+    isTableSepLine(completeLines[1] ?? '')
+  ) {
+    return {
+      committed: '',
+      tail: content,
+      live: { kind: 'table', content: content.slice(0, completeEnd) },
+    };
+  }
+
+  return { committed: '', tail: content };
+}
+
+function removeStreamingComponent(state: TuiState): TuiState {
+  const last = lastTurn(state);
+  if (!last) return state;
+  const blocks = last.blocks.filter((block) => {
+    if (block.kind !== 'text' || block.streamingComponent == null) return true;
+    return (
+      state.currentModelRequestId != null && block.modelRequestId !== state.currentModelRequestId
+    );
+  });
+  if (blocks.length === last.blocks.length) return state;
+  const turns = state.turns.slice();
+  turns[turns.length - 1] = { blocks };
+  return { ...state, turns };
+}
+
+function showStreamingComponent(
+  state: TuiState,
+  source: string,
+  live: { kind: 'code' | 'table'; content: string },
+): TuiState {
+  const last = lastTurn(state);
+  const pending = last?.blocks.find(
+    (block): block is TextBlock => block.kind === 'text' && block.streamingComponent != null,
+  );
+  if (pending) {
+    if (pending.content === live.content && pending.streamingSource === source) return state;
+    return replaceBlockById(state, pending.id, {
+      ...pending,
+      content: live.content,
+      streamingComponent: live.kind,
+      streamingSource: source,
+    });
+  }
+  return appendBlock(state, {
+    id: state.nextBlockId,
+    kind: 'text',
+    content: live.content,
+    streaming: true,
+    streamingComponent: live.kind,
+    streamingSource: source,
+    ...(state.currentModelRequestId ? { modelRequestId: state.currentModelRequestId } : {}),
+  });
 }
 
 /** Merge consecutive text blocks that form structural markdown elements
@@ -172,10 +278,12 @@ function mergeStructuralTextBlocks(state: TuiState): TuiState {
       kind: 'text' as const,
       content,
       streaming: lastBuf.streaming,
+      responsePending: buffer.some((b) => b.responsePending === true) || undefined,
       isError: buffer.some((b) => b.isError === true) || undefined,
       // ADR-0026 题头字段随行块合并保留在首行块上
       // Preserve the ADR-0026 header field on the first line of a merged run
       thoughtElapsedMs: first.thoughtElapsedMs,
+      thoughtContent: first.thoughtContent,
       // Structural markdown assembled from streamed fragments still belongs
       // to the same model invocation for terminal-response reconciliation.
       modelRequestId: lastBuf.modelRequestId ?? first.modelRequestId,
@@ -275,6 +383,7 @@ function mergePureThoughtHeaderOnce(state: TuiState): TuiState {
   if (
     prev.kind !== 'tool_summary' ||
     prev.active ||
+    prev.responsePending === true ||
     prev.tools.length > 0 ||
     prev.hasThinking !== true
   ) {
@@ -287,7 +396,17 @@ function mergePureThoughtHeaderOnce(state: TuiState): TuiState {
   if (firstTextIdx === blocks.length) return state;
   const firstText = blocks[firstTextIdx]!;
   if (firstText.kind !== 'text' || firstText.thoughtElapsedMs != null) return state;
-  const stamped: OutputBlock = { ...firstText, thoughtElapsedMs: prev.totalElapsedMs };
+  const completeThought =
+    prev.latestActivity?.kind === 'thinking'
+      ? prev.latestActivity.text
+      : [...(prev.timeline ?? [])]
+          .reverse()
+          .find((entry) => entry.kind === 'thinking' && entry.text)?.text;
+  const stamped: OutputBlock = {
+    ...firstText,
+    thoughtElapsedMs: prev.totalElapsedMs,
+    ...(completeThought ? { thoughtContent: completeThought } : {}),
+  };
   const newBlocks = [
     ...blocks.slice(0, runStart - 1),
     ...blocks.slice(runStart, firstTextIdx),
@@ -406,7 +525,12 @@ function closeCurrentThought(state: TuiState, cause: ThoughtCloseCause = 'bounda
   // 生命周期边界清除（规则 23）。
   // With no active Thought, leave thoughtCarryover untouched until a reason /
   // model.requested / lifecycle boundary clears it (rule 23).
-  if (!summary) return { ...state, currentThoughtSummaryId: undefined };
+  if (!summary)
+    return {
+      ...state,
+      currentThoughtSummaryId: undefined,
+      thoughtPhaseStatus: undefined,
+    };
 
   // 有模型调用时长时以其冻结（对齐 Claude Code），否则回退墙钟
   // Freeze at model-call duration when known (CC parity), else wall clock
@@ -450,6 +574,7 @@ function closeCurrentThought(state: TuiState, cause: ThoughtCloseCause = 'bounda
         ...block,
         active: false,
         latestActivity: undefined,
+        responsePending: undefined,
         totalElapsedMs: frozenElapsed,
         // 待确认旁白在下方脱离为独立块——块上清除，避免字幕与文本块重复渲染
         // Pending caption is detached below; clear it here to avoid duplicates
@@ -480,7 +605,12 @@ function closeCurrentThought(state: TuiState, cause: ThoughtCloseCause = 'bounda
   // record carryover; only lifecycle boundaries end attribution.
   const carryover =
     cause !== 'boundary' && summary.hasThinking === true ? { modelMs: summary.modelMs } : undefined;
-  return { ...next, currentThoughtSummaryId: undefined, thoughtCarryover: carryover };
+  return {
+    ...next,
+    currentThoughtSummaryId: undefined,
+    thoughtPhaseStatus: undefined,
+    thoughtCarryover: carryover,
+  };
 }
 
 function updateCurrentThoughtActivity(
@@ -491,7 +621,7 @@ function updateCurrentThoughtActivity(
   const isThinking = latestActivity?.kind === 'thinking';
   const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
   if (summary?.active) {
-    return updateToolSummaryById(state, summary.id, (block) => {
+    const next = updateToolSummaryById(state, summary.id, (block) => {
       const seq = (block.nextTimelineSeq ?? block.timeline?.length ?? 0) + 1;
       const timelineEntry = isThinking
         ? { seq, kind: 'thinking' as const, text: latestActivity!.text }
@@ -514,6 +644,7 @@ function updateCurrentThoughtActivity(
         nextTimelineSeq: seq,
       };
     });
+    return { ...next, thoughtPhaseStatus: 'running' };
   }
 
   const id = state.nextBlockId;
@@ -547,6 +678,7 @@ function updateCurrentThoughtActivity(
   return {
     ...appendBlock(state, block),
     currentThoughtSummaryId: id,
+    thoughtPhaseStatus: 'running',
   };
 }
 
@@ -617,13 +749,80 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       // accumulate chronologically; streaming providers resend the full text
       // each event — startsWith detects growth and replaces instead of
       // duplicating.
+      if (state.running && event.data.streamingDelta) {
+        // The first answer delta is the only reliable stream-level signal that
+        // the reasoning channel is complete. Publish its cached full value in
+        // one update, then visually settle the Thought while it retains
+        // terminal duration ownership.
+        const activeStreamThought = findThoughtSummary(state, state.currentThoughtSummaryId);
+        const completedReasoning = state.currentModelReasoningText;
+        if (activeStreamThought?.active && completedReasoning) {
+          state = {
+            ...updateToolSummaryById(state, activeStreamThought.id, (block) => {
+              const timeline = [...(block.timeline ?? [])];
+              const alreadyPublished =
+                block.latestActivity?.kind === 'thinking' &&
+                block.latestActivity.text === completedReasoning;
+              const seq = alreadyPublished
+                ? (block.nextTimelineSeq ?? timeline.length)
+                : (block.nextTimelineSeq ?? timeline.length) + 1;
+              if (!alreadyPublished) {
+                timeline.push({ seq, kind: 'thinking', text: completedReasoning });
+              }
+              return {
+                ...block,
+                active: false,
+                responsePending: true,
+                hasThinking: true,
+                latestActivity: { kind: 'thinking', text: completedReasoning },
+                totalElapsedMs: block.modelMs ?? Date.now() - block.createdAt,
+                timeline,
+                nextTimelineSeq: seq,
+              };
+            }),
+            thoughtPhaseStatus: 'awaiting_terminal',
+          };
+        }
+        const committedLength = currentModelResponseTextParts(state)
+          .filter((part) => part.streamingSource == null)
+          .reduce((length, part) => length + part.text.length, 0);
+        const unpublishedSource = event.data.text.slice(committedLength);
+        const { committed, live } = splitStreamingMarkdown(unpublishedSource);
+        if (!committed) {
+          if (!live) return state;
+          if (state.thoughtPhaseStatus === 'awaiting_terminal') {
+            state = {
+              ...closeCurrentThought(state, 'text'),
+              thoughtPhaseStatus: 'awaiting_terminal',
+            };
+          }
+          return showStreamingComponent(state, unpublishedSource, live);
+        }
+        state = removeStreamingComponent(state);
+        // The complete reasoning is useful only while the user is waiting for
+        // an answer component. As soon as the first complete answer component
+        // becomes visible, settle the Thought into Static. Keep only the
+        // lifecycle attribution marker so late deltas cannot create a second
+        // Thought before model.responded arrives.
+        if (state.thoughtPhaseStatus === 'awaiting_terminal') {
+          state = {
+            ...closeCurrentThought(state, 'text'),
+            thoughtPhaseStatus: 'awaiting_terminal',
+          };
+        }
+      }
       const activeThought = findThoughtSummary(state, state.currentThoughtSummaryId);
       if (activeThought?.active) {
         if (event.data.streamingDelta) {
-          // User-visible streamed text must remain outside the Thought tree.
-          // Freeze the current Thought first, then let the normal text path
-          // create/update a sibling block below it.
-          state = closeCurrentThought(state, 'boundary');
+          state = {
+            ...updateToolSummaryById(state, activeThought.id, (block) => ({
+              ...block,
+              active: false,
+              responsePending: true,
+              totalElapsedMs: block.modelMs ?? Date.now() - block.createdAt,
+            })),
+            thoughtPhaseStatus: 'awaiting_terminal',
+          };
         } else {
           return updateToolSummaryById(state, activeThought.id, (block) => ({
             ...block,
@@ -638,69 +837,46 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           }));
         }
       }
-      state = closeCurrentThought(state, 'text');
+      const preservesPendingPhase =
+        event.data.streamingDelta &&
+        (state.thoughtPhaseStatus === 'running' ||
+          state.thoughtPhaseStatus === 'awaiting_terminal');
+      if (!preservesPendingPhase) {
+        state = closeCurrentThought(state, 'text');
+      }
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
 
-      // Keep one cumulative Markdown document in one live text block. Splitting
-      // it into one OutputBlock per line destroys the Markdown component tree:
-      // a table, list, paragraph, or fenced code block changes ownership as
-      // more lines arrive and Ink visibly reflows the entire tail.
-      if (state.running && lastBlock?.kind === 'text' && lastBlock.streaming) {
-        const responseParts = currentModelResponseTextParts(state);
-        const committedLength = responseParts
-          .slice(0, Math.max(0, responseParts.length - 1))
-          .reduce((length, part) => length + part.length, 0);
-        const liveSource = event.data.text.slice(committedLength);
-        if (lastBlock.content === liveSource) return state;
-        const { committed, tail } = splitStreamingMarkdown(liveSource);
-        if (committed) {
-          const frozen = updateLastBlock(state, {
-            ...lastBlock,
-            content: committed,
-            streaming: false,
-          });
-          return mergePureThoughtHeader(
-            appendBlock(frozen, {
-              id: frozen.nextBlockId,
-              kind: 'text',
-              content: tail,
-              streaming: true,
-              ...(lastBlock.modelRequestId ? { modelRequestId: lastBlock.modelRequestId } : {}),
-            }),
-          );
-        }
+      // Keep the legacy cumulative text event path intact. Runtime streaming
+      // deltas use the commit-boundary path below; legacy callers still own a
+      // single mutable live block until their final event arrives.
+      if (
+        state.running &&
+        !event.data.streamingDelta &&
+        lastBlock?.kind === 'text' &&
+        lastBlock.streaming
+      ) {
+        if (lastBlock.content === event.data.text) return state;
         return mergePureThoughtHeader(
-          updateLastBlock(state, { ...lastBlock, content: liveSource }),
+          updateLastBlock(state, { ...lastBlock, content: event.data.text }),
         );
       }
+
       if (state.running && event.data.streamingDelta) {
-        const { committed, tail } = splitStreamingMarkdown(event.data.text);
-        if (committed) {
-          const frozen = appendBlock(state, {
-            id: state.nextBlockId,
-            kind: 'text',
-            content: committed,
-            ...(state.currentModelRequestId ? { modelRequestId: state.currentModelRequestId } : {}),
-          });
-          return mergePureThoughtHeader(
-            appendBlock(frozen, {
-              id: frozen.nextBlockId,
-              kind: 'text',
-              content: tail,
-              streaming: true,
-              ...(state.currentModelRequestId
-                ? { modelRequestId: state.currentModelRequestId }
-                : {}),
-            }),
-          );
+        const committedLength = currentModelResponseTextParts(state)
+          .filter((part) => part.streamingSource == null)
+          .reduce((length, part) => length + part.text.length, 0);
+        const unpublishedSource = event.data.text.slice(committedLength);
+        const { committed, live } = splitStreamingMarkdown(unpublishedSource);
+        if (!committed) {
+          return live ? showStreamingComponent(state, unpublishedSource, live) : state;
         }
+        state = removeStreamingComponent(state);
         return mergePureThoughtHeader(
           appendBlock(state, {
             id: state.nextBlockId,
             kind: 'text',
-            content: event.data.text,
-            streaming: true,
+            content: committed,
             ...(state.currentModelRequestId ? { modelRequestId: state.currentModelRequestId } : {}),
           }),
         );
@@ -780,6 +956,22 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const toolStatus = event.data.status ?? 'running';
       // task tool has its own subagent block
       if (!isExploration) state = closeCurrentThought(state, 'tool');
+      if (isExploration) {
+        const turn = lastTurn(state);
+        const thoughtIndex = turn?.blocks.findIndex(
+          (block) => block.id === state.currentThoughtSummaryId,
+        );
+        if (
+          turn &&
+          thoughtIndex != null &&
+          thoughtIndex >= 0 &&
+          turn.blocks.slice(thoughtIndex + 1).some((block) => block.kind === 'text')
+        ) {
+          // Published assistant text is a phase boundary once a later tool
+          // proves it was narration before another exploration step.
+          state = mergePureThoughtHeader(closeCurrentThought(state, 'text'));
+        }
+      }
       if (event.data.name === 'task') return state;
       // 已审批方案后的 update_plan 调用是进度追踪，不在消息列表中展示
       if (event.data.name === 'update_plan' && state.status.plan !== null) return state;
@@ -855,6 +1047,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
               [event.data.call_id]: currentThought.id,
             },
             currentThoughtSummaryId: currentThought.id,
+            thoughtPhaseStatus: 'running',
           };
         }
 
@@ -889,6 +1082,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           toolStartTimes: times,
           explorationSummaryIds: { ...finalized.explorationSummaryIds, [event.data.call_id]: id },
           currentThoughtSummaryId: id,
+          thoughtPhaseStatus: 'running',
         };
       }
 
@@ -1195,6 +1389,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'boundary'));
       return {
         ...finalized,
+        currentModelReasoningText: undefined,
         status: {
           ...finalized.status,
           retryState: {
@@ -1638,33 +1833,87 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
 }
 
 /** Shared RuntimeEvent rendering path for live updates and session replay. */
-function currentModelResponseTextParts(state: TuiState): string[] {
+function currentModelResponseTextParts(
+  state: TuiState,
+): Array<{ text: string; streamingSource?: string }> {
   const blocks = lastTurn(state)?.blocks ?? [];
   if (state.currentModelRequestId) {
     const owned = blocks.flatMap((block) =>
       block.kind === 'text' && block.modelRequestId === state.currentModelRequestId
-        ? [block.content]
+        ? [
+            {
+              text: block.streamingSource ?? block.content,
+              ...(block.streamingSource ? { streamingSource: block.streamingSource } : {}),
+            },
+          ]
         : [],
     );
     if (owned.length > 0) return owned;
   }
 
-  const trailing: string[] = [];
+  const trailing: Array<{ text: string; streamingSource?: string }> = [];
   for (let index = blocks.length - 1; index >= 0; index--) {
     const block = blocks[index]!;
     if (block.kind !== 'text') break;
-    trailing.unshift(block.content);
+    trailing.unshift({
+      text: block.streamingSource ?? block.content,
+      ...(block.streamingSource ? { streamingSource: block.streamingSource } : {}),
+    });
   }
   return trailing;
 }
 
-/** Only expose completed reasoning units to the Thought window. */
-function completeReasoningUnits(text: string): string {
-  let boundary = -1;
-  for (let index = 0; index < text.length; index++) {
-    if (/[\n。！？.!?]/u.test(text[index]!)) boundary = index;
+/**
+ * Establish terminal reasoning before text already committed by the same model
+ * request. Streaming Markdown may have published complete prefix blocks before
+ * model.responded reveals the complete Thought; appending the Thought at the
+ * tail would place it between that prefix and the terminal paragraph.
+ */
+function insertTerminalReasoningBeforeCommittedText(
+  state: TuiState,
+  reasoningText: string,
+  durationMs?: number,
+): TuiState {
+  const turn = lastTurn(state);
+  if (!turn || !state.currentModelRequestId) {
+    return handleEventAction(state, {
+      type: 'reason',
+      data: { text: reasoningText, durationMs },
+    });
   }
-  return boundary >= 0 ? text.slice(0, boundary + 1).trim() : '';
+  const firstOwnedTextIndex = turn.blocks.findIndex(
+    (block) => block.kind === 'text' && block.modelRequestId === state.currentModelRequestId,
+  );
+  if (firstOwnedTextIndex < 0) {
+    return handleEventAction(state, {
+      type: 'reason',
+      data: { text: reasoningText, durationMs },
+    });
+  }
+
+  const committedText = turn.blocks.filter(
+    (block) => block.kind === 'text' && block.modelRequestId === state.currentModelRequestId,
+  );
+  const turns = state.turns.slice();
+  turns[turns.length - 1] = {
+    blocks: turn.blocks.filter(
+      (block) => !(block.kind === 'text' && block.modelRequestId === state.currentModelRequestId),
+    ),
+  };
+  const withThought = handleEventAction(
+    { ...state, turns },
+    {
+      type: 'reason',
+      data: { text: reasoningText, durationMs },
+    },
+  );
+  const nextTurns = withThought.turns.slice();
+  const nextTurn = nextTurns.at(-1);
+  if (!nextTurn) return withThought;
+  nextTurns[nextTurns.length - 1] = {
+    blocks: [...nextTurn.blocks, ...committedText],
+  };
+  return { ...withThought, turns: nextTurns };
 }
 
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
@@ -1699,6 +1948,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           ...state,
           currentModelRequestId: event.requestId,
           currentModelReasoningStreamed: false,
+          currentModelReasoningText: undefined,
         },
         {
           type: 'model_requested',
@@ -1711,70 +1961,57 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         { type: 'text', data: { text: event.text, streamingDelta: true } },
       );
     case 'model.reasoning_delta': {
-      let resumed: TuiState = {
+      const cached = {
         ...state,
         currentModelReasoningStreamed: true,
+        currentModelReasoningText: event.text,
         status: { ...state.status, retryState: null },
       };
-      const activeThought = findThoughtSummary(resumed, resumed.currentThoughtSummaryId);
-      const committedReasoning = completeReasoningUnits(event.text);
-      if (!activeThought?.active) {
-        // Some compatible providers emit text before reasoning across separate
-        // frames. Temporarily remove only the live tail, establish Thought,
-        // then restore that same block as a sibling. Routing it through the
-        // ordinary text event would absorb it into Thought.pendingCaption.
-        const turn = lastTurn(resumed);
-        const trailingBlock = turn?.blocks.at(-1);
-        const hasLiveTrailingText =
-          trailingBlock?.kind === 'text' && trailingBlock.streaming === true;
-        let liveText: Extract<OutputBlock, { kind: 'text' }> | undefined;
-        if (turn && hasLiveTrailingText) {
-          const blocks = turn.blocks.slice();
-          liveText = blocks.pop() as Extract<OutputBlock, { kind: 'text' }>;
-          const turns = resumed.turns.slice();
-          turns[turns.length - 1] = { blocks };
-          resumed = { ...resumed, turns };
-        }
-        let withThought = handleEventAction(resumed, {
-          type: 'reason',
-          // Preserve the complete reasoning fact for terminal settlement and
-          // replay; only the active preview is restricted to complete units.
-          data: { text: event.text },
-        });
-        const newThought = findThoughtSummary(withThought, withThought.currentThoughtSummaryId);
-        if (newThought) {
-          withThought = updateToolSummaryById(withThought, newThought.id, (block) => ({
-            ...block,
-            latestActivity: { kind: 'thinking', text: committedReasoning },
-          }));
-        }
-        if (!liveText) return withThought;
-        const turns = withThought.turns.slice();
-        const last = turns.at(-1);
-        if (!last) return withThought;
-        turns[turns.length - 1] = { blocks: [...last.blocks, liveText] };
-        return { ...withThought, turns };
+      // A reasoning stream is one atomic transient component. Deltas only
+      // update the cache; the first text delta publishes the complete value.
+      // Late reasoning after that boundary remains cache-only and must not
+      // reactivate or split the Thought.
+      if (
+        cached.thoughtPhaseStatus === 'running' ||
+        cached.thoughtPhaseStatus === 'awaiting_terminal'
+      ) {
+        return cached;
       }
-      return updateToolSummaryById(resumed, activeThought.id, (block) => ({
-        ...block,
-        ...(resumed.currentModelRequestId ? { modelRequestId: resumed.currentModelRequestId } : {}),
-        hasThinking: true,
-        hasThought: true,
-        latestActivity: {
-          kind: 'thinking',
-          text:
-            committedReasoning ||
-            (block.latestActivity?.kind === 'thinking' ? block.latestActivity.text : ''),
-        },
-      }));
+      return updateCurrentThoughtActivity(cached, undefined);
+    }
+    case 'model.reasoning_completed': {
+      const cached = {
+        ...state,
+        currentModelReasoningStreamed: true,
+        currentModelReasoningText: event.text,
+        status: { ...state.status, retryState: null },
+      };
+      if (cached.thoughtPhaseStatus === 'awaiting_terminal') return cached;
+      const current = findThoughtSummary(cached, cached.currentThoughtSummaryId);
+      if (
+        current?.active &&
+        current.latestActivity?.kind === 'thinking' &&
+        current.latestActivity.text === event.text
+      ) {
+        return cached;
+      }
+      return updateCurrentThoughtActivity(cached, {
+        kind: 'thinking',
+        text: event.text,
+      });
     }
     case 'model.responded': {
-      let next: TuiState = { ...state, status: { ...state.status, retryState: null } };
-      const renderedBeforeTerminal = currentModelResponseTextParts(next);
+      let next: TuiState = {
+        ...removeStreamingComponent(state),
+        status: { ...state.status, retryState: null },
+      };
+      const renderedBeforeTerminal = currentModelResponseTextParts(state);
+      const renderedBeforeTerminalText = renderedBeforeTerminal.map((part) => part.text);
       const terminalTextAlreadyRendered =
         event.text != null &&
-        (renderedBeforeTerminal.join('') === event.text ||
-          renderedBeforeTerminal.join('\n') === event.text);
+        renderedBeforeTerminal.every((part) => part.streamingSource == null) &&
+        (renderedBeforeTerminalText.join('') === event.text ||
+          renderedBeforeTerminalText.join('\n') === event.text);
       const activeStreamedThought = findThoughtSummary(next, next.currentThoughtSummaryId);
       const settledStreamedThought = terminalTextAlreadyRendered
         ? ([...(lastTurn(next)?.blocks ?? [])]
@@ -1796,23 +2033,31 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
                 block.kind === 'text' && block.thoughtElapsedMs != null,
             ) ?? null)
         : null;
-      const reasoningText = event.reasoningText;
+      const reasoningText = event.reasoningText ?? state.currentModelReasoningText;
       if (reasoningText) {
-        if (streamedThought?.hasThinking) {
+        if (streamedThought) {
           next = updateToolSummaryById(next, streamedThought.id, (block) => {
             const timeline = [...(block.timeline ?? [])];
             const lastEntry = timeline.at(-1);
             if (lastEntry?.kind === 'thinking') {
               timeline[timeline.length - 1] = { ...lastEntry, text: reasoningText };
+            } else {
+              timeline.push({
+                seq: (block.nextTimelineSeq ?? timeline.length) + 1,
+                kind: 'thinking',
+                text: reasoningText,
+              });
             }
             const modelMs =
               event.durationMs != null ? (block.modelMs ?? 0) + event.durationMs : block.modelMs;
             return {
               ...block,
+              hasThinking: true,
               ...(block.active
                 ? { latestActivity: { kind: 'thinking' as const, text: reasoningText } }
                 : {}),
               timeline,
+              nextTimelineSeq: timeline.at(-1)?.seq ?? block.nextTimelineSeq,
               ...(modelMs != null ? { modelMs, totalElapsedMs: modelMs } : {}),
             };
           });
@@ -1836,11 +2081,16 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
               thoughtElapsedMs: event.durationMs,
             });
           }
+        } else if (
+          next.thoughtPhaseStatus === 'awaiting_terminal' &&
+          next.currentModelReasoningStreamed
+        ) {
+          // The first complete answer component already committed the Thought
+          // (or merged a pure Thought into that text) to Static. Keep the
+          // terminal reasoning authoritative only in the model response; never
+          // insert or mutate a visual Thought behind already-published text.
         } else {
-          next = handleEventAction(next, {
-            type: 'reason',
-            data: { text: reasoningText, durationMs: event.durationMs },
-          });
+          next = insertTerminalReasoningBeforeCommittedText(next, reasoningText, event.durationMs);
         }
       } else if (event.durationMs != null)
         // ADR-0030 / 规则 24：无 reasoning 的调用同样计入阶段时长（Σ 各次
@@ -1850,13 +2100,31 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         next = addThoughtDuration(next, event.durationMs);
       if (event.text) {
         const renderedTextParts = currentModelResponseTextParts(next);
+        const renderedText = renderedTextParts.map((part) => part.text);
         // A reconnect freezes the interrupted prefix and streams only the
         // recovered suffix in a new block. Together they may already equal the
         // authoritative final response; do not replace the suffix block with
         // the full response and duplicate the preserved prefix.
         const alreadyRendered =
-          renderedTextParts.join('') === event.text || renderedTextParts.join('\n') === event.text;
+          renderedText.join('') === event.text || renderedText.join('\n') === event.text;
         if (!alreadyRendered) {
+          const renderedPrefix = renderedText.join('');
+          if (event.text.startsWith(renderedPrefix)) {
+            const remainder = event.text.slice(renderedPrefix.length);
+            if (remainder.length > 0) {
+              const closed = closeCurrentThought(next, 'text');
+              next = mergePureThoughtHeader(
+                appendBlock(closed, {
+                  id: closed.nextBlockId,
+                  kind: 'text',
+                  content: remainder,
+                  ...(closed.currentModelRequestId
+                    ? { modelRequestId: closed.currentModelRequestId }
+                    : {}),
+                }),
+              );
+            }
+          }
           // Divergent reconnect: the retry produced text that does not match
           // the frozen prefix from the previous attempt.  Dispatching through
           // the normal text handler would slice event.text by the prefix's
@@ -1864,7 +2132,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           // and new blocks) and truncate the new text.  Replace all text blocks
           // from this request with a single block holding the authoritative
           // final text.
-          if (renderedTextParts.length > 0) {
+          else if (renderedTextParts.length > 0) {
             const turns = next.turns.map((turn) => ({
               blocks: turn.blocks.flatMap((block) => {
                 if (block.kind === 'text' && block.modelRequestId === next.currentModelRequestId) {
@@ -1885,7 +2153,16 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           }
         }
       }
-      return next;
+      if (
+        event.text &&
+        (next.thoughtPhaseStatus === 'running' || next.thoughtPhaseStatus === 'awaiting_terminal')
+      ) {
+        next = mergePureThoughtHeader(closeCurrentThought(next, 'text'));
+      }
+      return {
+        ...finalizeLastTurnStreaming(next),
+        currentModelReasoningText: undefined,
+      };
     }
     case 'run.completed':
       // `model.responded` may be rendered while the run is still active, leaving

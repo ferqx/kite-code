@@ -197,10 +197,7 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
 });
 
 // ══════════════════════════════════════════════════════════════════
-// ThinkingWindow — 与工具步骤互斥的思考活动窗口
-//
-// 最新活动是 reasoning 时完整展示已提交内容，按终端宽度自然换行；
-// 最新活动是工具时改为展示工具步骤。两种模式最多都占五行。
+// 运行中的 Thought 展示已完整到达的 reasoning 段；settle 后正文消失。
 // ══════════════════════════════════════════════════════════════════
 
 function ThinkingWindow({ lines }: { lines: string[] }) {
@@ -240,16 +237,16 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   );
   const skipped = Math.max(0, stepCount - MAX_VISIBLE_STEPS);
   const hasSkipped = skipped > 0;
-  const showsThinking =
-    isRunning &&
-    block.latestActivity?.kind === 'thinking' &&
-    block.latestActivity.text.trim().length > 0;
+  const thinkingText =
+    (isRunning || block.responsePending === true) && block.latestActivity?.kind === 'thinking'
+      ? block.latestActivity.text
+      : undefined;
   const thinkingLines = useMemo(() => {
-    if (!showsThinking || block.latestActivity?.kind !== 'thinking') return [];
-    const wrapped = wrapDisplayLines(block.latestActivity.text.trim(), Math.max(1, col - 6));
+    if (!thinkingText?.trim()) return [];
+    const wrapped = wrapDisplayLines(thinkingText.trim(), Math.max(1, col - 6));
     return wrapped.length > MAX_VISIBLE_STEPS ? wrapped.slice(-MAX_VISIBLE_STEPS) : wrapped;
-  }, [block.latestActivity, col, showsThinking]);
-
+  }, [col, thinkingText]);
+  const showsThinking = thinkingLines.length > 0;
   // ── Summary label ──
   // 思考块标题 = "Thought for Xs · <工具统计>"：有工具时以 " · " 分隔附加
   // summaryLine 统计（如 "Thought for 2s · read 3 files"），随工具事件实时
@@ -291,8 +288,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
     return parts.length > 0 ? parts.join('\n\n') : '';
   }, [block.captions, block.pendingCaption]);
 
-  // ── settle 后统一折叠为单行摘要 ──
-  // 活动窗口只属于运行态；完成后不保留 reasoning、工具步骤或 footer。
+  // ── settle 后只保留 Thought 摘要，不展示 reasoning 正文 ──
   // 聚合摘要的圆点只表示“阶段正在进行”，因此 Thought 与非 Thought
   // 聚合块完成后都不保留圆点。独立工具卡使用自己的结果状态语义。
   // 置于所有 hook 之后，保证 hook 调用顺序稳定（rules-of-hooks）。
@@ -300,7 +296,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // stateful rows (running blink / tool outcome colors); a settled pure
   // thought carries no status. Two leading spaces keep the label aligned
   // with tool-block names. Placed after all hooks (rules-of-hooks).
-  if (!isRunning) {
+  if (!isRunning && block.responsePending !== true) {
     return (
       <Box flexDirection="column">
         <Box>
@@ -322,7 +318,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   return (
     <Box flexDirection="column">
       <Box>
-        <BlinkDot active />
+        {isRunning ? <BlinkDot active /> : <Text>{'  '}</Text>}
         <Text color={dt.dim}>{summaryLabel}</Text>
       </Box>
       {captionContent !== '' && (
