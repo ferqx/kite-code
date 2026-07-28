@@ -99,6 +99,8 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
   let cancelled = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const outputStop = new AbortController();
+  const executionBoundary =
+    process.platform === 'win32' ? ('unsandboxed_bash' as const) : ('unsandboxed_shell' as const);
   let removeAbortListener: (() => void) | undefined;
   try {
     const proc = Bun.spawn(buildShellInvocation(input.command), {
@@ -160,6 +162,7 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
             input.timeoutMs!,
           )
         : cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+      executionBoundary,
     };
   } catch (error) {
     if (timeoutId) clearTimeout(timeoutId);
@@ -178,33 +181,44 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
           : error instanceof Error
             ? error.message
             : String(error),
+      executionBoundary,
     };
   }
 }
 
 /** 构建平台特定的 Shell 调用参数 / Build platform-specific shell invocation arguments */
-function buildShellInvocation(command: string): string[] {
-  if (process.platform === 'win32') {
+export interface ShellInvocationDependencies {
+  platform?: NodeJS.Platform;
+  findSystemBash?: () => string | null;
+  findVendoredBash?: () => string | null;
+  unixShell?: string;
+}
+
+export function buildShellInvocation(
+  command: string,
+  dependencies: ShellInvocationDependencies = {},
+): string[] {
+  if ((dependencies.platform ?? process.platform) === 'win32') {
     // Prefer system bash (Git for Windows) — full MSYS2 env, no DLL issues
     // PATH fix: ensures GNU coreutils (find, grep, sort, etc.) take priority
     // over Windows System32 equivalents that shadow them on MSYS2 PATH
-    const systemBash = findSystemBash();
+    const systemBash = (dependencies.findSystemBash ?? findSystemBash)();
     if (systemBash) {
       return [systemBash, '-c', `export PATH="/usr/bin:$PATH" && ${command}`];
     }
 
     // Fallback to vendored bash with PATH fix for coreutils
-    const vendoredBash = findBashBinary();
+    const vendoredBash = (dependencies.findVendoredBash ?? findBashBinary)();
     if (vendoredBash) {
       return [vendoredBash, '-c', `export PATH="/usr/bin:$PATH" && ${command}`];
     }
 
-    // Last resort: cmd.exe
-    const systemRoot = process.env.SystemRoot || 'C:\\Windows';
-    return [`${systemRoot}\\System32\\cmd.exe`, '/d', '/c', command];
+    throw new Error(
+      'Shell admission denied: Windows requires Git for Windows Bash or the vendored MSYS2 Bash.',
+    );
   }
 
-  return [process.env.SHELL || '/bin/sh', '-lc', command];
+  return [dependencies.unixShell ?? process.env.SHELL ?? '/bin/sh', '-lc', command];
 }
 
 /** 过滤 MSYS2 启动时的无害噪音（/tmp 警告等） */

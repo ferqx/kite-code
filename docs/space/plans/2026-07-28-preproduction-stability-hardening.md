@@ -159,6 +159,13 @@ PR0 可以新增默认关闭的配置字段、接口和测试夹具，但不得�
 
 ## 五、PR1：Execution boundary admission
 
+实施状态：**completed（2026-07-29）**。已完成 invocation-scoped backend 探测、Unix
+fail-closed、Windows Git Bash → vendored MSYS2 Bash 准入、WSL/PATH/cmd fallback 拒绝、
+Windows `full` 禁用、无 sandbox 的 `auto` allowlist，以及状态栏、审批与 receipt 的
+`Unsandboxed Bash` 投影。验证由 `tests/sandbox-runtime.test.ts`、
+`tests/shell-exec.test.ts`、`tests/policies/mode-policy.test.ts`、
+`tests/tui-layout.test.tsx` 和 `tests/tui-reducer.test.ts` 覆盖。
+
 ### 实现
 
 - Linux/macOS 每次 Shell invocation 重新探测 sandbox backend 和能力。

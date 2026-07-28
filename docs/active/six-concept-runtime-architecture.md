@@ -141,6 +141,9 @@ Policy 使用本地计算得到的 effective effects，而不是直接相信 pro
 MCP annotation、Skill manifest 和远端描述都是不可信声明，只能辅助分类或收紧能力，不能扩大用户授权。未知、写入或破坏性外部副作用默认进入保守路径。
 
 Sandbox 是 Policy 的技术执行手段，不是授权决策本身；获得批准也不代表可以绕过 sandbox。
+Linux/macOS 在 sandbox 已启用时按 invocation 重新探测 backend，缺失或漂移必须 fail closed。
+Windows 0.1.0 的 `Unsandboxed Bash` 是 ADR-0047 批准的独立 Execution boundary，不计作
+`sandboxAvailable`：`full` 禁止，`auto` 只直通保守 allowlist，其余进入用户审批。
 
 ## 6. Execution：统一执行网关与回执
 
@@ -165,6 +168,8 @@ RuntimeEffectExecutor
 ```
 
 Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`CapabilityInvocationRecord` 保存调用身份、状态、参数摘要、观察到的副作用、外部引用、artifact、重试安全性和 reconciliation 结果。
+Shell 的 terminal result 还携带实际 `executionBoundary`；App 只投影该 Core 事实，不能根据
+命令文本猜测是否 sandboxed。
 
 工具被策略拒绝（`tool.rejected`）或被用户拒绝（`approval.rejected`）时，reducer 同时写入 `ToolCallRecord`（status: `rejected`，含 failure classification）和 transcript ToolMessage（`ok: false, rejected: true`），保证模型上下文能看到拒绝结果。仅当最近一条 assistant 消息的全部工具调用被**用户主动拒绝**（failure.kind 均为 `approval_rejected`）且其后无新用户消息时，scheduler 返回 `stop`，不再调用模型。策略拒绝（`policy_denied`）及其他自动失败继续 `call_model`，允许模型看到拒绝信息后调整策略。若拒绝后已有新用户消息到来（新轮次），scheduler 正常返回 `call_model`，由模型处理该新消息。
 

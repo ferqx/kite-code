@@ -21,6 +21,7 @@ import DiffPreview from '../src/app/tui/DiffPreview';
 import Footer from '../src/app/tui/Footer';
 import Header from '../src/app/tui/Header';
 import { createInitialState } from '../src/app/tui/initialState';
+import { executionBoundaryLabel } from '../src/app/tui/interaction-mode';
 import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
 import { eventReducer } from '../src/app/tui/reducers';
@@ -77,6 +78,14 @@ describe('spinner timing', () => {
     expect(SPINNER[spinnerIndexForElapsed(0)]).toBe('● ');
     expect(SPINNER[spinnerIndexForElapsed(120)]).toBe('● ');
     expect(SPINNER[spinnerIndexForElapsed(SPINNER.length * 1000)]).toBe('● ');
+  });
+});
+
+describe('execution boundary presentation', () => {
+  test('labels only the approved Windows unsandboxed Bash boundary', () => {
+    expect(executionBoundaryLabel('win32', 'none')).toBe('Unsandboxed Bash');
+    expect(executionBoundaryLabel('linux', 'none')).toBeNull();
+    expect(executionBoundaryLabel('darwin', 'seatbelt')).toBeNull();
   });
 });
 
@@ -772,6 +781,18 @@ describe('StartupScreen', () => {
 // ── ApprovalBlock ──
 
 describe('ApprovalBlock', () => {
+  test('shows the Windows unsandboxed Bash boundary for shell approval', () => {
+    if (process.platform !== 'win32') return;
+    const { lastFrame } = render(
+      <ApprovalBlock
+        approval={fakeApproval()}
+        provider={fakeProvider()}
+        onResolved={onResolved}
+        sandboxBackend="none"
+      />,
+    );
+    expect(lastFrame()).toContain('Execution boundary: Unsandboxed Bash');
+  });
   test('renders compact approval prompt without repeating tool command', () => {
     const approval = fakeApproval({
       command: 'rm -rf /tmp/test',

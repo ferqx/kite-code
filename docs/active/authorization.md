@@ -68,6 +68,11 @@ authorization: {
 2. **auto-review 不能授予 `full_access`** — `source === 'system' && autoReview` → 拒绝
 3. **loop-mode 不能自动提升授权** — `source === 'system' && loopMode` → 拒绝
 
+Windows 的 `Unsandboxed Bash` 不满足 `sandboxAvailable`，因此不能进入 `full` /
+`full_access`。它也不产生 authorization grant；`accept_edits` 与 `auto` 仍逐次经过既有
+Tool Policy 和 Approval Policy。无真实 sandbox 时，`auto` 不调用 auto-review 扩大准入，
+只保留 `accept_edits` 的保守直通 allowlist。
+
 ## MCP Tool 策略边界
 
 MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive effect 变成无审批调用。只有 effective effects 全部为 `none|read` 且 `minimumApproval: none` 时，Approval Policy 才把它当作只读；`minimumApproval: user` 始终要求单次用户批准。远端 annotation 不直接进入该判断，project 配置也不能降低 minimum approval 或 effect 风险。Tool filter 只决定 catalog 可见性，不产生 authorization grant。
@@ -81,7 +86,7 @@ MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive e
 | 测试注入 | `'test'` | `tests/policies/authorization-elevation.test.ts` |
 | System (禁止) | `'system'` | `src/core/policies/mode-policy.ts:23,26` |
 
-TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前请求值覆盖恢复态，确保 `/permissions full` 在新轮次立即生效。
+TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；存在真实 sandbox 时，`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前请求值覆盖恢复态，确保已通过准入的 `/permissions full` 在新轮次立即生效。Windows `Unsandboxed Bash` 与其他无 sandbox 环境在 App 和 Kernel 两层拒绝该提升。
 
 ## 测试
 
@@ -95,3 +100,4 @@ bun test tests/policies/authorization-elevation.test.ts
 - auto-review system source 拒绝 full_access
 - loop-mode system source 拒绝 full_access
 - 各 source 值正确传播到 state 和 grant 记录
+- Windows 非沙箱 Bash 不能提升为 `full_access`

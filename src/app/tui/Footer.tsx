@@ -1,5 +1,6 @@
 import { Box } from 'ink';
 import type { ReactNode } from 'react';
+import type { SandboxBackend } from '@/core/sandbox';
 import type { RunStatusSnapshot } from './run-status';
 import StatsLine from './StatsLine';
 import StatusBar from './StatusBar';
@@ -12,6 +13,7 @@ interface FooterProps {
   timerKey: number;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   children?: ReactNode;
+  sandboxBackend?: SandboxBackend;
 }
 
 export default function Footer({
@@ -21,6 +23,7 @@ export default function Footer({
   timerKey,
   interactionMode,
   children,
+  sandboxBackend,
 }: FooterProps) {
   return (
     <Box flexDirection="column">
@@ -33,6 +36,7 @@ export default function Footer({
         modelName={status.modelName}
         interactionMode={interactionMode}
         planMode={status.phase === 'planning'}
+        sandboxBackend={sandboxBackend}
       />
     </Box>
   );

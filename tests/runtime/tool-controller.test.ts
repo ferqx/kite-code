@@ -1047,6 +1047,35 @@ describe('executeRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.started')).toBe(false);
   });
 
+  test('keeps network access behind user approval in auto mode without a sandbox', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-auto-network-unsandboxed',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.mode = 'auto';
+    state.tools.calls.fetch = {
+      toolCallId: 'fetch',
+      modelMessageId: 'model',
+      ordinal: 0,
+      name: 'web_fetch',
+      args: { url: 'https://example.com' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('fetch');
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['fetch'],
+      sandboxAvailable: false,
+    });
+
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(true);
+    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.started')).toBe(false);
+  });
+
   test('runs a proven workspace-only shell write directly in accept_edits mode', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-accept-edits-shell-write',

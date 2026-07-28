@@ -1,5 +1,7 @@
 import { Box, Text, useStdout } from 'ink';
+import type { SandboxBackend } from '@/core/sandbox';
 import { InteractionMode } from '@/protocol/events';
+import { executionBoundaryLabel } from './interaction-mode';
 import { useTheme } from './theme';
 import type { StatusState } from './types';
 
@@ -10,6 +12,7 @@ interface StatsLineProps {
   modelName?: string;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
   planMode?: boolean;
+  sandboxBackend?: SandboxBackend;
 }
 
 function formatTokens(n: number): string {
@@ -24,6 +27,7 @@ function fullWidth(
   planMode?: boolean,
   contextPct?: string,
   absoluteContextTokens?: number,
+  boundaryLabel?: string | null,
 ): number {
   let w = status.modelName.length;
   const isDS = status.modelProvider === 'deepseek';
@@ -34,12 +38,18 @@ function fullWidth(
   else if (absoluteContextTokens != null && absoluteContextTokens > 0)
     w += 3 + formatTokens(absoluteContextTokens).length;
   if (interactionMode) w += 3 + 6;
+  if (boundaryLabel) w += 3 + boundaryLabel.length + 2;
   // plan mode adds: "  Shift+Tab to exit" ≈ 19 chars
   if (planMode) w += 19;
   return w;
 }
 
-export default function StatsLine({ status, interactionMode, planMode }: StatsLineProps) {
+export default function StatsLine({
+  status,
+  interactionMode,
+  planMode,
+  sandboxBackend,
+}: StatsLineProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const cacheTotal = status.cacheHitTokens + status.cacheMissTokens;
@@ -70,11 +80,20 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
   const absoluteContextTokens =
     status.contextSnapshot?.estimate.totalInputTokens ?? status.totalTokens;
   const showTokens = !contextPct && absoluteContextTokens > 0;
+  const boundaryLabel = sandboxBackend
+    ? executionBoundaryLabel(process.platform, sandboxBackend)
+    : null;
 
   const cols = stdout?.columns ?? 80;
   const compact =
-    fullWidth(status, interactionMode, planMode, contextPct ?? undefined, absoluteContextTokens) >
-    cols;
+    fullWidth(
+      status,
+      interactionMode,
+      planMode,
+      contextPct ?? undefined,
+      absoluteContextTokens,
+      boundaryLabel,
+    ) > cols;
 
   return (
     <Box>
@@ -109,6 +128,12 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
         <>
           <Text color={t.dim}> · </Text>
           <Text color={labelColor}>[{label}]</Text>
+        </>
+      )}
+      {boundaryLabel && (
+        <>
+          <Text color={t.dim}> · </Text>
+          <Text color={t.warning}>[{boundaryLabel}]</Text>
         </>
       )}
       {/* Spacer — push hint to the right */}

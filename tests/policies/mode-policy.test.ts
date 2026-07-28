@@ -284,6 +284,20 @@ describe('createModePolicy', () => {
     expect(policy.name).toBe('auto-mode');
   });
 
+  it('limits auto mode to the conservative allowlist without a sandbox', () => {
+    const policy = createModePolicy('auto', false);
+    expect(
+      policy.shouldApproveTool(baseInput({ interactionMode: 'auto', toolRisk: 'execute_code' }))
+        .kind,
+    ).toBe('need_tool_approval');
+    expect(
+      policy.shouldApproveTool(baseInput({ interactionMode: 'auto', toolRisk: 'read' })).kind,
+    ).toBe('allow');
+    expect(
+      policy.shouldApproveTool(baseInput({ interactionMode: 'auto', toolRisk: 'write_file' })).kind,
+    ).toBe('allow');
+  });
+
   it('should return full mode policy', () => {
     const policy = createModePolicy('full', true);
     expect(policy.name).toBe('full-mode');

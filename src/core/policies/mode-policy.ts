@@ -94,7 +94,10 @@ export interface AutoModeConfig {
  * - ask_user: 正常支持 / fully supported
  * - auto-review: 对需审批的工具自动审查 / auto-review for tools that need approval
  */
-export function createAutoModePolicy(_config?: AutoModeConfig): RuntimePolicy {
+export function createAutoModePolicy(
+  _config?: AutoModeConfig,
+  sandboxAvailable = true,
+): RuntimePolicy {
   const decideTool = (input: PolicyInput): PolicyDecision => {
     const acceptEditsDecision = decideAcceptEditsTool(input);
 
@@ -104,6 +107,12 @@ export function createAutoModePolicy(_config?: AutoModeConfig): RuntimePolicy {
       return acceptEditsDecision;
     }
     if (input.circuitBreakerTripped) {
+      return { kind: 'need_tool_approval' };
+    }
+    // Without a real sandbox (the Windows Unsandboxed Bash boundary), Auto is
+    // limited to the conservative accept_edits allowlist. Everything else
+    // remains an explicit user decision.
+    if (!sandboxAvailable) {
       return { kind: 'need_tool_approval' };
     }
     return {
@@ -335,7 +344,7 @@ export function createModePolicy(
     case 'accept_edits':
       return createAcceptEditsModePolicy();
     case 'auto':
-      return createAutoModePolicy(autoConfig);
+      return createAutoModePolicy(autoConfig, sandboxAvailable ?? true);
     case 'full':
       return createFullModePolicy(sandboxAvailable ?? false);
   }

@@ -50,19 +50,11 @@ export function isWslStubPath(p: string, systemRoot: string): boolean {
 /** 定位系统自带 bash（Git for Windows / MSYS2）/ Locate system bash (Git for Windows / MSYS2) */
 export function findSystemBash(): string | null {
   const systemRoot = process.env.SystemRoot || 'C:\\Windows';
-  const { gitDerived, pathBash } = gatherSystemBashCandidates(
-    (name) => Bun.which(name),
-    systemRoot,
-  );
+  const { gitDerived } = gatherSystemBashCandidates((name) => Bun.which(name), systemRoot);
 
   // 优先通过 git 定位 Git for Windows 带的 bash（最可靠）
   for (const candidate of gitDerived) {
     if (existsSync(candidate)) return candidate;
-  }
-
-  // Fallback: bash in PATH, skip WSL stub
-  if (pathBash && !isWslStubPath(pathBash, systemRoot)) {
-    return pathBash;
   }
 
   return null;

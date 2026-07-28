@@ -8,7 +8,7 @@ import {
   gatherSystemBashCandidates,
   isWslStubPath,
 } from '../src/core/tools/bash-path';
-import { shellTool } from '../src/core/tools/shell';
+import { buildShellInvocation, shellTool } from '../src/core/tools/shell';
 
 describe('shell execute integration', () => {
   const workspace = join(tmpdir(), 'kite-code-e2e-shell');
@@ -22,6 +22,11 @@ describe('shell execute integration', () => {
     expect(r.ok).toBe(true);
     expect(r.exitCode).toBe(0);
     expect(r.stdout).toContain('test.txt');
+    if (process.platform === 'win32') {
+      expect(r.executionBoundary).toBe('unsandboxed_bash');
+    } else {
+      expect(r.executionBoundary).toMatch(/^sandboxed_/);
+    }
   });
 
   test('pipe with grep works', async () => {
@@ -146,5 +151,37 @@ describe('findSystemBash — candidate selection logic', () => {
       expect(isWslStubPath(bashPath, process.env.SystemRoot || 'C:\\Windows')).toBe(false);
     }
     // If null, no bash available — vendored or cmd.exe will be used (valid)
+  });
+});
+
+describe('Windows shell admission', () => {
+  test('uses Git for Windows Bash before the vendored Bash', () => {
+    expect(
+      buildShellInvocation('echo ok', {
+        platform: 'win32',
+        findSystemBash: () => 'C:\\Program Files\\Git\\bin\\bash.exe',
+        findVendoredBash: () => 'D:\\vendor\\bash.exe',
+      })[0],
+    ).toBe('C:\\Program Files\\Git\\bin\\bash.exe');
+  });
+
+  test('uses the vendored Bash when Git Bash is unavailable', () => {
+    expect(
+      buildShellInvocation('echo ok', {
+        platform: 'win32',
+        findSystemBash: () => null,
+        findVendoredBash: () => 'D:\\vendor\\bash.exe',
+      })[0],
+    ).toBe('D:\\vendor\\bash.exe');
+  });
+
+  test('rejects Windows execution instead of falling back to cmd.exe', () => {
+    expect(() =>
+      buildShellInvocation('echo unsafe', {
+        platform: 'win32',
+        findSystemBash: () => null,
+        findVendoredBash: () => null,
+      }),
+    ).toThrow('Windows requires Git for Windows Bash or the vendored MSYS2 Bash');
   });
 });

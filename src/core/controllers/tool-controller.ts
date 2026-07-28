@@ -492,6 +492,7 @@ export async function executeRuntimeTools(params: {
   state: RuntimeState;
   toolCallIds: string[];
   shellExecutor?: ShellExecutor;
+  sandboxAvailable?: boolean;
   mcpManager?: McpRuntimeProvider;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -724,7 +725,10 @@ export async function executeRuntimeTools(params: {
             continue;
           }
           const effectiveMode = getEffectiveInteractionMode(params.state);
-          const modeDecision = createModePolicy(effectiveMode).shouldApproveTool({
+          const modeDecision = createModePolicy(
+            effectiveMode,
+            params.sandboxAvailable,
+          ).shouldApproveTool({
             interactionMode: effectiveMode as InteractionMode,
             phase: getAgentPhase(getActivePlanning(params.state)),
             planKind: getActivePlanning(params.state).kind,
@@ -1074,7 +1078,7 @@ export async function executeRuntimeTools(params: {
     ) {
       // Delegate mode-specific routing to mode-policy
       const effectiveMode = getEffectiveInteractionMode(params.state);
-      const modePolicy = createModePolicy(effectiveMode);
+      const modePolicy = createModePolicy(effectiveMode, params.sandboxAvailable);
       const modeDecision = modePolicy.shouldApproveTool({
         interactionMode: effectiveMode as InteractionMode,
         phase: getAgentPhase(getActivePlanning(params.state)),

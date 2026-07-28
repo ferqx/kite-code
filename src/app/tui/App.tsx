@@ -269,6 +269,7 @@ export default function App({
         running={showRunStatus}
         timerKey={state.runCount}
         interactionMode={state.interactionMode}
+        sandboxBackend={sandboxBackend}
       >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}
         {!state.interrupt && children}
@@ -277,6 +278,7 @@ export default function App({
             approval={interruptBlock.approval}
             provider={provider}
             onResolved={resolveApproval}
+            sandboxBackend={sandboxBackend}
           />
         )}
         {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (

@@ -20,30 +20,54 @@ import {
 } from './shell-wrapper';
 import type { SandboxOptions } from './types';
 
+export interface SandboxExecutorDependencies {
+  platform?: NodeJS.Platform;
+  detectBackend?: typeof detectSandboxBackend;
+  unsandboxedExecutor?: ShellExecutor;
+}
+
 /** 获取当前系统 shell 路径 / Get current system shell path */
 function getSystemShell(): string {
   return process.env.SHELL || '/bin/sh';
 }
 
 /** 创建沙箱化的 ShellExecutor / Create a sandboxed ShellExecutor */
-export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
+export function createSandboxExecutor(
+  options: SandboxOptions,
+  dependencies: SandboxExecutorDependencies = {},
+): ShellExecutor {
   const { enabled } = options;
+  const platform = dependencies.platform ?? process.platform;
+  const detectBackend = dependencies.detectBackend ?? detectSandboxBackend;
+  const unsandboxedExecutor = dependencies.unsandboxedExecutor ?? shellTool;
 
   if (!enabled) {
     warn('Sandbox disabled by flag. Shell commands will run without isolation.');
-    return shellTool;
+    return unsandboxedExecutor;
   }
 
-  const backend = detectSandboxBackend();
-
-  switch (backend) {
-    case 'seatbelt':
-      return createSeatbeltExecutor(options);
-    case 'bubblewrap':
-      return createBwrapExecutor(options);
-    default:
-      return shellTool;
-  }
+  return async (input) => {
+    // Admission is invocation-scoped: a backend that disappears after startup
+    // must not silently downgrade an enabled sandbox to a raw shell.
+    const backend = detectBackend();
+    if (platform === 'win32') {
+      return unsandboxedExecutor(input);
+    }
+    switch (backend) {
+      case 'seatbelt':
+        return createSeatbeltExecutor(options)(input);
+      case 'bubblewrap':
+        return createBwrapExecutor(options)(input);
+      default:
+        return {
+          ok: false,
+          command: input.command,
+          exitCode: -1,
+          stdout: '',
+          stderr: 'Sandbox admission denied: enabled sandbox backend is unavailable.',
+        };
+    }
+  };
 }
 
 /** macOS Seatbelt executor（参照 Codex create_seatbelt_command_args 使用 -p 传 profile）*/
@@ -53,6 +77,7 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   return createWrappedExecutor(
     workspace,
     resourceLimits,
+    'sandboxed_seatbelt',
     (wrappedCommand, networkMode) => {
       const profile = generateSandboxProfile(workspace, { network: networkMode });
       return {
@@ -72,6 +97,7 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   return createWrappedExecutor(
     workspace,
     resourceLimits,
+    'sandboxed_bubblewrap',
     (wrappedCommand, networkMode) => {
       const bwrapArgs = generateBwrapArgs(workspace, {
         network: networkMode,
@@ -94,6 +120,7 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
 function createWrappedExecutor(
   workspace: string,
   resourceLimits: SandboxOptions['resourceLimits'],
+  executionBoundary: 'sandboxed_seatbelt' | 'sandboxed_bubblewrap',
   buildSpawn: (
     wrappedCommand: string,
     networkMode: ShellNetworkMode,
@@ -176,6 +203,7 @@ function createWrappedExecutor(
         exitCode: timedOut ? 124 : exitCode,
         stdout,
         stderr: timedOut ? appendTimeoutMessage(stderr, input.timeoutMs!) : stderr,
+        executionBoundary,
       };
     } catch (error) {
       if (timeoutId) clearTimeout(timeoutId);
@@ -192,6 +220,7 @@ function createWrappedExecutor(
             : error instanceof Error
               ? error.message
               : String(error),
+        executionBoundary,
       };
     }
   };

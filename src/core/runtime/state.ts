@@ -265,6 +265,7 @@ export interface ToolResultMeta {
   totalLines?: number;
   command?: string;
   intent?: string;
+  executionBoundary?: import('@/core/types').ShellExecutionBoundary;
   matchCount?: number;
   truncated?: boolean;
   contentDigest?: string;

@@ -234,6 +234,8 @@ export async function* runRuntimeAgent(
       config: input.config,
       model,
       shellExecutor: input.shellExecutor,
+      sandboxAvailable:
+        input.sandboxBackend === 'seatbelt' || input.sandboxBackend === 'bubblewrap',
       mcpManager: input.mcpManager,
       runtimeStore: kernel.runtimeStore,
       skills: input.skills,

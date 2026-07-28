@@ -33,13 +33,19 @@
 
 ## 1. bash 选择优先级（Windows）
 
-三层降级策略，严禁更改顺序：
+两层准入策略，严禁更改顺序：
 
 ```
 1. 系统 Git for Windows bash（通过 where git → 推导 ../bin/bash.exe）
 2. Vendored MSYS2 bash（vendor/msys2/usr/bin/bash.exe）
-3. cmd.exe（兜底）
+3. 找不到合格 Bash 时拒绝执行
 ```
+
+禁止回退 `cmd.exe`、PowerShell、WSL stub 或 PATH 中的任意 Shell。Windows 该边界是
+`Unsandboxed Bash`，不是 sandbox；它不产生授权，也不放宽 Policy、Approval 或资源限制。
+状态栏、Shell 审批和 terminal tool receipt 都必须持续投影该标签。receipt 的结构化
+`resultMeta.executionBoundary` 使用 `unsandboxed_bash`；Seatbelt 与 Bubblewrap 分别记录
+`sandboxed_seatbelt`、`sandboxed_bubblewrap`。
 
 ## 2. WSL 桩排除（关键安全规则）
 
@@ -48,7 +54,7 @@
 
 **强制规则**：
 - 选择系统 bash 时，**优先通过 `git` 路径推导**（`<git>/../bin/bash.exe` 或 `<git>/../usr/bin/bash.exe`），不依赖 `Bun.which("bash")`
-- 仅在 git 不可用时，才使用 `Bun.which("bash")`，且**必须排除 `SystemRoot` 下的路径**
+- `Bun.which("bash")` 只用于候选诊断与 WSL stub 测试，不进入生产准入选择
 - 判断逻辑：路径转小写 + 正斜杠后调用 `isWslStubPath()` 检查
 
 ## 3. vendored MSYS2 的 DLL 依赖
@@ -66,6 +72,16 @@ Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-i
 - 大小写、正反斜杠变体 → 正确识别
 
 **禁止仅依赖真实环境测试**——开发者的终端通常有 Git Bash，会掩盖 WSL 桩问题。
+
+## 4.1 Unix sandbox fail-closed
+
+Linux/macOS 在配置启用 sandbox 时，每次 Shell invocation 都重新探测 backend。backend 缺失、
+启动后消失或变为 `none` 时拒绝本次执行，不得降级到裸 Shell。Windows 是 ADR-0047 明确批准
+的例外：只进入上述受控非沙箱 Bash 边界。
+
+Windows `auto` 只直通 `accept_edits` 的保守 allowlist（只读、计划和已证明的本地工作区写入）；
+原本需要审批的 Shell、网络、外部写入及不确定操作必须进入人工审批，不能在非沙箱边界调用
+auto-review。`full` / `full_access` 始终拒绝。
 
 ## 5. 集成测试走 TUI 真实代码路径
 

@@ -43,6 +43,7 @@ export interface RuntimeExecutorDependencies {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
+  sandboxAvailable?: boolean;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -149,6 +150,7 @@ export function createRuntimeEffectExecutor(
           state,
           toolCallIds: effect.toolCallIds,
           shellExecutor: dependencies.shellExecutor,
+          sandboxAvailable: dependencies.sandboxAvailable,
           mcpManager: dependencies.mcpManager,
           skillManifests: dependencies.skills,
           skillOptions: dependencies.skillOptions,

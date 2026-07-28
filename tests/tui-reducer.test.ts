@@ -85,6 +85,31 @@ function question(data: Partial<UserInputPayload> = {}): UserInputPayload {
 
 describe('eventReducer (blocks model)', () => {
   describe('tool summary text', () => {
+    test('projects the Windows execution boundary into the terminal receipt', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('shell-boundary', 'shell_execute', { command: 'echo ok' }));
+      s = eventReducer(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.finished',
+          toolCallId: 'shell-boundary',
+          name: 'shell_execute',
+          result: {
+            ok: true,
+            command: 'echo ok',
+            exitCode: 0,
+            stdout: 'ok',
+            stderr: '',
+            resultMeta: { executionBoundary: 'unsandboxed_bash' },
+          },
+        },
+      });
+
+      const card = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(card.summary).toContain('[Unsandboxed Bash]');
+      expect(card.summary).toContain('ok');
+    });
+
     test('preserves the complete bounded capability search result for tree rendering', () => {
       const candidates = Array.from({ length: 4 }, (_, index) => ({
         kind: 'mcp_tool',

@@ -2,6 +2,11 @@ import type { AuthorizationMode, ShellApprovalGrant } from '@/protocol/events';
 
 /** 单次 Shell 调用的沙箱网络权限 / Per-invocation sandbox network permission */
 export type ShellNetworkMode = 'disabled' | 'allow_all';
+export type ShellExecutionBoundary =
+  | 'sandboxed_seatbelt'
+  | 'sandboxed_bubblewrap'
+  | 'unsandboxed_bash'
+  | 'unsandboxed_shell';
 
 export interface ShellInput {
   workspace: string;
@@ -22,6 +27,8 @@ export interface ShellResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** Actual execution boundary used for this invocation. */
+  executionBoundary?: ShellExecutionBoundary;
 }
 
 export type ShellIntent = 'inspect' | 'verify' | 'build' | 'test' | 'git' | 'other';

@@ -140,6 +140,7 @@ export const shellExecuteSpec = defineExecutableTool({
           : error instanceof Error
             ? error.message
             : String(error),
+        executionBoundary: undefined,
       };
     }
   },
@@ -152,6 +153,7 @@ export const shellExecuteSpec = defineExecutableTool({
       resultMeta: {
         command: output.command,
         intent: classifyShellActionIntent(output.command),
+        ...(output.executionBoundary ? { executionBoundary: output.executionBoundary } : {}),
         truncated: streams.truncated,
         rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
       },

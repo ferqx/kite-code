@@ -12,6 +12,13 @@ export interface InteractionModeAdmission {
   reason: string | null;
 }
 
+export function executionBoundaryLabel(
+  platform: NodeJS.Platform,
+  sandboxBackend: SandboxBackend,
+): string | null {
+  return platform === 'win32' && sandboxBackend === 'none' ? 'Unsandboxed Bash' : null;
+}
+
 export function fullModeUnavailableReason(
   interactionMode: TuiInteractionMode,
   sandboxBackend: SandboxBackend,

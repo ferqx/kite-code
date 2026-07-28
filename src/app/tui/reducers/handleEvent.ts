@@ -2082,19 +2082,29 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         type: 'tool_progress',
         data: { call_id: event.toolCallId, name: '', chunk: event.chunk, stream: event.stream },
       });
-    case 'tool.finished':
+    case 'tool.finished': {
+      const boundary =
+        event.name === 'shell_execute' &&
+        event.result.resultMeta?.executionBoundary === 'unsandboxed_bash'
+          ? '[Unsandboxed Bash]\n'
+          : '';
       return handleEventAction(state, {
         type: 'tool_done',
         data: {
           call_id: event.toolCallId,
           name: event.name,
           ok: event.result.ok,
-          summary: formatToolResultForDisplay(event.name, event.result.stdout, event.result.stderr),
+          summary: `${boundary}${formatToolResultForDisplay(
+            event.name,
+            event.result.stdout,
+            event.result.stderr,
+          )}`,
           exitCode: event.result.exitCode,
           status: event.result.status,
           userInput: event.result.userInput,
         },
       });
+    }
     case 'tool.failed':
       return handleEventAction(state, {
         type: 'tool_done',

@@ -115,7 +115,9 @@ export async function main(): Promise<void> {
     input: {},
   }));
 
-  const provider = createCliRuntimeProvider();
+  const provider = createCliRuntimeProvider({
+    unsandboxedBash: process.platform === 'win32' && sandboxRuntime.backend === 'none',
+  });
   const generator = runRuntimeAgent(
     {
       task,
@@ -141,7 +143,9 @@ export async function main(): Promise<void> {
   }
 }
 
-function createCliRuntimeProvider(): RuntimeActionProvider {
+function createCliRuntimeProvider(
+  boundary: { unsandboxedBash: boolean } = { unsandboxedBash: false },
+): RuntimeActionProvider {
   return {
     async requestAction(effect, state): Promise<RuntimeUserAction> {
       if (effect.type === 'request_verification_decision') {
@@ -204,9 +208,16 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
         const approval = state.interactions.approval;
         console.error(`\n[APPROVAL REQUIRED] ${approval.tool}: ${approval.command}`);
         console.error(`Risk: ${approval.risk} | ${approval.summary}`);
-        console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
+        if (boundary.unsandboxedBash && approval.tool === 'shell_execute') {
+          console.error('Execution boundary: Unsandboxed Bash');
+        }
+        console.error(
+          boundary.unsandboxedBash
+            ? 'Type y/yes to approve or n/no to reject:'
+            : 'Type y/yes to approve, n to reject, f/full_access for full access:',
+        );
         const value = (await readStdin()).toLowerCase();
-        if (value === 'f' || value === 'full_access')
+        if (!boundary.unsandboxedBash && (value === 'f' || value === 'full_access'))
           return { type: 'approve', interactionId: effect.interactionId, grant: 'full_access' };
         if (value === 'y' || value === 'yes')
           return { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' };

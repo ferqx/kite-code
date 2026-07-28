@@ -22,6 +22,10 @@ CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授
 
 Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者由 Runtime Policy 分别处理。
 
+Windows CLI 的 Shell 使用受控 `Unsandboxed Bash`：只接受 Git for Windows Bash 或内置
+MSYS2 Bash。审批会显示该执行边界，且不提供 `full_access` 选项；找不到合格 Bash 时执行
+fail closed。Linux/macOS 在 sandbox 已启用但 backend 不可用时同样拒绝执行。
+
 ## 9.3 配置来源
 
 用户配置与项目配置使用 JSONC，并由 Zod 校验后合并。主要配置域包括：

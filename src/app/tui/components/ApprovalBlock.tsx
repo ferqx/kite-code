@@ -1,13 +1,16 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import { useRef, useState } from 'react';
+import { executionBoundaryLabel } from '@/app/tui/interaction-mode';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
-import type { ShellApprovalGrant } from '@/protocol/events';
+import type { SandboxBackend } from '@/core/sandbox';
+import type { ShellApprovalGrant, ToolApprovalPayload } from '@/protocol/events';
 
 export interface ApprovalBlockProps {
-  approval?: unknown;
+  approval?: ToolApprovalPayload;
   provider: TuiUserInputProvider;
   onResolved: (action: string, grant?: string) => void;
+  sandboxBackend?: SandboxBackend;
 }
 
 interface Option {
@@ -22,13 +25,21 @@ const OPTIONS: Option[] = [
   { label: '拒绝', action: 'deny' },
 ];
 
-export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockProps) {
+export default function ApprovalBlock({
+  approval,
+  provider,
+  onResolved,
+  sandboxBackend,
+}: ApprovalBlockProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
   const rawInputBuffer = useRef('');
   const cols = stdout?.columns ?? 80;
+  const boundaryLabel = sandboxBackend
+    ? executionBoundaryLabel(process.platform, sandboxBackend)
+    : null;
 
   function resolve(opt: Option) {
     if (opt.action === 'approve') {
@@ -81,6 +92,11 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
       <Box marginTop={1}>
         <Text>授权执行命令</Text>
       </Box>
+      {approval?.tool === 'shell_execute' && boundaryLabel && (
+        <Box>
+          <Text color={t.warning}>Execution boundary: {boundaryLabel}</Text>
+        </Box>
+      )}
 
       {/* options */}
       <Box flexDirection="column" marginTop={1}>
