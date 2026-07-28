@@ -86,9 +86,7 @@ function cancelRunningBlocks(s: TuiState): TuiState {
     }
     return [b];
   });
-  // 取消/中断属于调用边界：思考延续上下文一并清除（ADR-0027）
-  // Cancel/interrupt is a lifecycle boundary — drop thinking carryover too
-  if (!changed) return s.thoughtCarryover ? { ...s, thoughtCarryover: undefined } : s;
+  if (!changed) return s;
   const turns = s.turns.slice();
   turns[turns.length - 1] = { blocks };
   return {
@@ -97,7 +95,6 @@ function cancelRunningBlocks(s: TuiState): TuiState {
     nextBlockId,
     currentThoughtSummaryId: undefined,
     thoughtPhaseStatus: undefined,
-    thoughtCarryover: undefined,
   };
 }
 
@@ -144,8 +141,6 @@ function settleActiveThought(s: TuiState): TuiState {
       return [settled];
     }),
   }));
-  // settle 发生在轮次边界：思考延续上下文一并清除（ADR-0027）
-  // Settling happens at turn boundaries — drop thinking carryover too
   return changed
     ? {
         ...s,
@@ -153,11 +148,8 @@ function settleActiveThought(s: TuiState): TuiState {
         nextBlockId,
         currentThoughtSummaryId: undefined,
         thoughtPhaseStatus: undefined,
-        thoughtCarryover: undefined,
       }
-    : s.thoughtCarryover
-      ? { ...s, thoughtCarryover: undefined }
-      : s;
+    : s;
 }
 
 /** 取消 ask_user 问题块时同步更新关联的 tool_card 为 Cancelled

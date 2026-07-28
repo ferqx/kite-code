@@ -12,15 +12,15 @@
 
 2. **探索工具不经 tool_card**：`read_file`、`search_content`、`search_files`、`read_mcp_resource` 在 `tool_call` 时直接进入 `tool_summary`，永远不创建独立 `tool_card`。`shell_execute` 仅在 `intent=inspect` 且满足以下一种情况时纳入 Thought 聚合：(a) 命令以搜索前缀（`rg`/`grep`/`ag`/`ack`/`git grep`/`find`）开头；(b) 命令是单一 `ls` 调用（含参数和目标路径）。`ls` 一旦包含管道、重定向、命令串联、换行或命令替换，就按通用 Bash 处理并渲染为独立 tool_card。其他 `shell_execute` 同样不纳入。
 
-3. **非探索工具 = 阶段边界**：所有未满足规则 2 的 `shell_execute`、写入工具、审批、`ask_user`、`update_plan`、`task` 等非探索工具关闭当前阶段块（关闭原因 `tool` / `human_wait`），按原有独立块渲染，其后开启新阶段。**阶段边界不打断思考归属**——被关闭块若 `hasThinking`，记录延续上下文（`thoughtCarryover`，含 `modelMs`），边界后新建的探索聚合继承 `hasThinking` / `modelMs`，标签为 `Thought for Xs · <统计>`（Xs 为同一次模型调用时长，规则 22/23、ADR-0027）。延续上下文的清除只发生在：新的 `reason` 事件、`model.requested`、生命周期边界。`list_mcp_resources` 也使用独立 tool card，以 `Provider · URI` 树展示资源目录；真正读取内容的 `read_mcp_resource` 仍属于探索工具。
+3. **非探索工具 = 阶段边界**：所有未满足规则 2 的 `shell_execute`、写入工具、审批、`ask_user`、`update_plan`、`task` 等非探索工具关闭当前阶段块（关闭原因 `tool` / `human_wait`），按原有独立块渲染，其后开启新阶段。一个 reasoning 段的 `Thought for Xs` 标签由关闭前的块消费，边界后的探索聚合不得复制该标签；它以纯工具统计标题开始，直到新的真实 `reason` 事件到达（ADR-0047）。`list_mcp_resources` 也使用独立 tool card，以 `Provider · URI` 树展示资源目录；真正读取内容的 `read_mcp_resource` 仍属于探索工具。
 
 4. **跨 thinking 合并**：同一 Thought 内，探索工具之间可以夹着 `reason/thinking`。这些 thinking 不创建新的工具聚合，只更新 `tool_summary.latestActivity`。
 
 5. **运行态活动与块顶字幕**：Thought 运行期间展示已完整提交的 reasoning 段落；最新活动为工具时改为展示工具步骤。Thought settle 后 reasoning 正文、工具步骤和 footer 都折叠，只保留摘要。**旁白文本**（可见 assistant 文本）在阶段块活跃时吸收为字幕：待确认 `pendingCaption` 实时渲染于块顶（标题行下、步骤树上），被随后只读工具确认后转入 `captions` 永久保留（多段按时间顺序累积）；阶段结束仍未确认则脱离为独立文本块（规则 24、ADR-0030）。
 
-6. **人机交互停止计时**：进入审批、提问或方案评审等待时，当前 Thought 必须置为 `active=false` 并冻结 `totalElapsedMs`。用户阅读、审批或输入答案的耗时不计入 Thought 时间。
+6. **人机交互停止计时**：进入审批、提问或方案评审等待时，承载该交互前置过程的当前 Thought 必须置为 `active=false` 并冻结 `totalElapsedMs`。例外：Runtime 同批预排队且位于审批目标工具之后、工具仍全部为 `queued` 的探索聚合属于未来执行阶段，不是正在等待审批的 Thought；它在渲染层保持隐藏、reducer 中保持活跃，以便执行到达后接收后续真实 reasoning。用户阅读、审批或输入答案的耗时不计入任何 Thought 模型时长。
 
-7. **审批焦点优先**：当 Shell 等工具等待用户审批时，OutputArea 只显示到待审批工具卡为止；同一并发批次中后续到达的探索工具或结果块暂时不显示，避免把审批目标挤出视窗。隐藏只发生在渲染层，审批结束后这些块按当前状态重新显示。
+7. **执行前沿与审批焦点优先**：Runtime 会先为同一模型响应中的全部工具发出排队事件，再按调度顺序执行。当前面存在运行中的独立工具卡时，OutputArea 不渲染其后仍完全处于 `queued` 的工具卡或 Thought 聚合块；后续块中任一工具收到 `tool.started` 后才进入渲染树。Shell 等工具等待用户审批时仍只显示到待审批工具卡为止，避免把审批目标挤出视窗。隐藏不改变调度顺序；审批目标之后的全 queued 探索聚合也不得被审批事件提前 settle（规则 6），否则后续 reasoning 无法并入。
 
 8. **保守调度策略**：TUI 只负责按边界截断 Thought，不重排、拆批、取消或强制 settle executor 已发出的 pending 工具。若同一批事件中出现探索工具和 Bash，Bash 关闭 Thought；pending 探索工具继续保留 `running` 状态并等待后续 `tool_done` 更新。
 
@@ -46,13 +46,13 @@
 
 19. **纯思考块持久化与题头并入**：`tools.length === 0` 的 Thought 块（纯问答轮的 `reason → text`，或 `reason → 非探索工具` 产生）。**非流式模型下文本不直接关闭它**——文本先吸收为 `pendingCaption`（规则 24）；`final` 关闭时 pendingCaption 即回答本身 → **并入该文本块题头**（ADR-0026：独立块删除，冻结 elapsed 写为文本块 `thoughtElapsedMs`，只显示暗色 `Thought for Xs`，随后显示回答正文；reasoning 正文不渲染）。流式模型路径由终态 `model.responded` 和 `mergePureThoughtHeader` 完成同样的并入。纯空白文本整体忽略、不触发并入。被非探索工具或人机交互边界关闭时**保留**独立 Thought：无圆点，不显示 reasoning 正文、工具步骤与 footer。
 
-20. **非思考链聚合（纯统计标签的唯一来源）**：仅当阶段内从未出现 reasoning（所有调用均无思考），且无延续上下文（阶段边界后 carryover 已被 `model.requested` / 新 reason 清除）时，探索聚合使用纯工具统计标签（如 `read 2 files`，`hasThought=false`），不带 `Thought for` 前缀、无 thinking 条目。阶段内任一次调用有 reasoning（或边界 carryover 继承）时，阶段块带 `Thought for Xs · <统计>`（规则 23/24、ADR-0027/0030）。注意：无 reasoning 的调用其 `durationMs` 仍计入阶段 Σ 时长（规则 11），只不影响标签前缀。
+20. **非思考链聚合（纯统计标签的唯一来源）**：阶段内尚未出现 reasoning 时，探索聚合使用纯工具统计标签（如 `read 2 files`，`hasThought=false`），不带 `Thought for` 前缀、无 thinking 条目。阶段内任一次真实 `reason` 到达后，该活动聚合原位升级为 `Thought for Xs · <统计>`（规则 23/24、ADR-0047/0030）。注意：无 reasoning 的调用其 `durationMs` 仍计入阶段 Σ 时长（规则 11），只不影响标签前缀。
 
-21. **model.requested 不关闭 Thought**（ADR-0030 取代 ADR-0025 的 settle 条款）：模型调用为非流式 `generateText`，调用期间不产生任何事件。`model.requested` 在 `await` 模型之前即时发出（ADR-0025 的即时发出机制保留），但 TUI **不再据此关闭 Thought**——模型调用是 kernel 分批喂工具结果的实现细节，不是用户感知的阶段边界：阶段块跨调用保持 `active=true`（圆点持续闪烁、时长累加、后续思考/工具/旁白继续流入，规则 24）。调用间隙块显示"工具全完成 + 圆点闪烁 + 运行中 (Σs)"——这正是"阶段仍在进行"的正确信号（旧版 settle 是为防止"运行中"残留，阶段模型下该残留即语义本身）。收到 `model.requested` 只清除思考延续上下文（新调用 = 新决策，ADR-0027）。回放兼容：旧日志经同一 reducer 回放，同样聚合为阶段块。
+21. **model.requested 不关闭 Thought**（ADR-0030 取代 ADR-0025 的 settle 条款）：模型调用为非流式 `generateText`，调用期间不产生任何事件。`model.requested` 在 `await` 模型之前即时发出（ADR-0025 的即时发出机制保留），但 TUI **不再据此关闭 Thought**——模型调用是 kernel 分批喂工具结果的实现细节，不是用户感知的阶段边界：阶段块跨调用保持 `active=true`（圆点持续闪烁、时长累加、后续思考/工具/旁白继续流入，规则 24）。调用间隙块显示"工具全完成 + 圆点闪烁 + 运行中 (Σs)"——这正是"阶段仍在进行"的正确信号（旧版 settle 是为防止"运行中"残留，阶段模型下该残留即语义本身）。回放兼容：旧日志经同一 reducer 回放，同样聚合为阶段块。
 
-22. **标签与计时语义**：思考阶段块（`hasThinking=true`，含规则 23 继承而来的块）标题行为 `Thought for Xs · <工具统计>`——有工具时以 ` · ` 分隔附加 `buildToolSummaryLine` 统计（如 `Thought for 2s · read 3 files`），统计随工具事件实时刷新；无工具的纯思考块保持裸 `Thought for Xs`。统计后缀由渲染层按终端宽度截断（`truncateToFit`），放不下时整体省略后缀、不留孤悬分隔符；工具明细仍在步骤树展示。非思考聚合块（规则 20）标题保持纯工具统计（如 `read 2 files`，对应 CC 的 `⏺ Read N files` 聚合行）。`Thought for Xs` 的时长 = **阶段内 Σ 各次模型调用时长**（`model.responded.durationMs`，含思考+响应生成，不含工具执行；无 reasoning 的调用同样计入，规则 11）：每次 `reason` 事件 / 无思考调用累加 `modelMs`，工具执行期间 elapsed 不增长，settle 时以 `modelMs` 冻结。回退：无 `durationMs` 的旧事件日志（ADR-0025 之前）用创建→settle 墙钟。纯思考块被文本关闭时不产生独立标题行，其时长以文本块题头形式展示（ADR-0026，见规则 19）。最终回答脱离为独立文本块时**不重复出题头**——回答前的思考时长已计入阶段块（ADR-0030）。
+22. **标签与计时语义**：思考阶段块（`hasThinking=true`，由本阶段真实 `reason` 设置）标题行为 `Thought for Xs · <工具统计>`——有工具时以 ` · ` 分隔附加 `buildToolSummaryLine` 统计（如 `Thought for 2s · read 3 files`），统计随工具事件实时刷新；无工具的纯思考块保持裸 `Thought for Xs`。统计后缀由渲染层按终端宽度截断（`truncateToFit`），放不下时整体省略后缀、不留孤悬分隔符；工具明细仍在步骤树展示。非思考聚合块（规则 20）标题保持纯工具统计（如 `read 2 files`，对应 CC 的 `⏺ Read N files` 聚合行）。`Thought for Xs` 的时长 = **阶段内 Σ 各次模型调用时长**（`model.responded.durationMs`，含思考+响应生成，不含工具执行；无 reasoning 的调用同样计入，规则 11）：每次 `reason` 事件 / 无思考调用累加 `modelMs`，工具执行期间 elapsed 不增长，settle 时以 `modelMs` 冻结。回退：无 `durationMs` 的旧事件日志（ADR-0025 之前）用创建→settle 墙钟。纯思考块被文本关闭时不产生独立标题行，其时长以文本块题头形式展示（ADR-0026，见规则 19）。最终回答脱离为独立文本块时**不重复出题头**——回答前的思考时长已计入阶段块（ADR-0030）。
 
-23. **思考延续（阶段边界，ADR-0027 / ADR-0030）**：Thought 块被非探索工具（关闭原因 `tool`）、人机交互等待（`human_wait`：审批 / 提问 / 方案评审）或流式路径的文本关闭（`text`）时，若块 `hasThinking`，记录延续上下文 `thoughtCarryover`（含 `modelMs`）；边界之后新建的探索工具聚合块继承 `hasThinking=true` / `hasThought=true` / `modelMs`，`totalElapsedMs` 冻结于同一 `modelMs`（规则 22 语义不变，不引入新标签形态）。清除条件：`model.requested`（新调用 = 新决策）、`model_retry` / `error` / 取消 / 中断（生命周期边界，`cancelRunningBlocks` / `settleActiveThought` 一并清除）、新的 `reason` 事件（新思考替代）。无活跃块的空关闭不触碰 carryover。物理约束不变：非探索工具需要独立富渲染块，Thought 树不能跨越它们，阶段块必须切分，只延续标签归属（如 `Thought for 3s · searched 1 file pattern` → 子代理块 → `Thought for 3s · read 2 files`）。
+23. **思考标签单次消费（ADR-0047，覆盖 ADR-0027）**：Thought 块被非探索工具、人机交互等待或文本边界关闭后，其 reasoning 内容与 `Thought for Xs` 标签均已完成展示，不向后续块延续。边界后的探索工具仍按执行顺序聚合并展示步骤，初始使用纯工具统计标题（如 `read 2 files`）；若该聚合仍活跃时收到新的真实 `reason`，reasoning 内容、`hasThought` 和本次模型时长必须并入该块，标题原位升级为 `Thought for Xs · read 2 files`，不得另建独立 Thought。物理约束不变：非探索工具继续使用独立富渲染块，Thought 树不跨越它们。
 
 24. **探索阶段块与旁白字幕（ADR-0030）**：一段只读探索阶段 = 单个 `tool_summary` 块，跨模型调用存活：`model.requested` 不关闭（规则 21），`reason` 累加时长并更新预览（规则 4/11），探索 `tool_call` 并入同块（统计标签实时刷新）。圆点整个阶段持续闪烁，运行态不显示 footer（规则 13）；阶段边界（规则 1/3）关闭后 Thought 移除圆点、折叠工具步骤、保留已确认旁白字幕（`captions`），仅移除 reasoning 预览和运行态指示器。**旁白文本吸收**：阶段块活跃时，可见文本（非流式一次完整到达）不建独立块，写入 `pendingCaption`，渲染于标题行下、步骤树之上（Markdown 原样，缩进与标题文字列对齐）；随后到来只读工具将其确认为 `captions`（永久留在块内，多段按 `\n\n` 时序累积）；阶段结束时仍未确认的 `pendingCaption` 脱离为块后独立文本块（最终回答 / 写入前旁白）；纯思考块的 pendingCaption 被文本路径关闭时并入题头（规则 19）。流式增量文本（事件携带累积全文）以 `startsWith` 识别替换，避免重复。**纯空白文本整体忽略**（不关闭、不建块）。折叠阈值（`MAX_VISIBLE_STEPS=5`）作用于阶段块的合并步骤总数。
 
@@ -72,7 +72,8 @@
 - `docs/space/understanding/2026-06-28-thought-pre-consolidation-design.md` — Thought 预整合设计详情
 - `docs/adr/0025-model-requested-live-emission.md` — model.requested 即时发出（settle 条款已被 ADR-0030 取代，规则 21）
 - `docs/adr/0026-thought-text-header-merge.md` — 纯思考块并入文本题头（文本关闭 Thought 条款已被 ADR-0030 取代，规则 19）
-- `docs/adr/0027-thought-carryover-non-text-boundary.md` — 思考延续跨过阶段边界、边界后继承（规则 3/20/23）
+- `docs/adr/0027-thought-carryover-non-text-boundary.md` — 历史方案：跨边界继承 Thought 标签（已被 ADR-0047 覆盖）
+- `docs/adr/0047-thought-label-single-consumption.md` — Thought 标签单次消费，边界后不重复继承（规则 3/23）
 - `docs/adr/0030-exploration-phase-block.md` — 只读探索阶段 = 单一存活块、文本吸收为块顶字幕（规则 1/13/21/22/24）
 - `docs/adr/0041-inspect-ls-thought-aggregation.md` — 单一只读 `ls` 纳入 Thought，复合 shell 语法保持独立工具卡（规则 2/3）
 - `docs/adr/0045-streaming-render-complete-block-commit.md` — Thought 终态展示与完整 Markdown 块提交（规则 25/27/28）

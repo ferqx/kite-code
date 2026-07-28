@@ -335,7 +335,7 @@ describe('eventReducer (blocks model)', () => {
       expect(text?.thoughtElapsedMs).toBe(2500);
     });
 
-    test('thinking carries over a task (sub-agent) boundary within the same batch (ADR-0027)', () => {
+    test('thinking is not repeated after a task boundary within the same batch (ADR-0047)', () => {
       let s = fresh();
       s = dispatch(s, {
         type: 'EVENT',
@@ -354,16 +354,15 @@ describe('eventReducer (blocks model)', () => {
       expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
       expect(summaries[0]!.hasThinking).toBe(true);
       expect(summaries[0]!.modelMs).toBe(3000);
-      // 边界后：read 聚合继承思考标记与同一次模型调用时长（规则 22 语义不变）
+      // 边界后：read 聚合保留工具过程，但不重复已经展示过的 Thought 标签
       expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c3', 'c4']);
-      expect(summaries[1]!.hasThinking).toBe(true);
-      expect(summaries[1]!.hasThought).toBe(true);
-      expect(summaries[1]!.modelMs).toBe(3000);
-      expect(summaries[1]!.totalElapsedMs).toBe(3000);
+      expect(summaries[1]!.hasThinking).toBeUndefined();
+      expect(summaries[1]!.hasThought).toBe(false);
+      expect(summaries[1]!.modelMs).toBeUndefined();
       expect(summaries[1]!.summaryLine).toBe('read 2 files');
     });
 
-    test('thinking carries over a write-tool boundary the same way (ADR-0027)', () => {
+    test('thinking is not repeated after a write-tool boundary (ADR-0047)', () => {
       let s = fresh();
       s = dispatch(s, {
         type: 'EVENT',
@@ -379,14 +378,54 @@ describe('eventReducer (blocks model)', () => {
       );
       expect(summaries).toHaveLength(2);
       expect(summaries[0]!.summaryLine).toBe('read 1 file');
-      expect(summaries[1]!.hasThinking).toBe(true);
-      expect(summaries[1]!.modelMs).toBe(2000);
+      expect(summaries[1]!.hasThinking).toBeUndefined();
+      expect(summaries[1]!.hasThought).toBe(false);
+      expect(summaries[1]!.modelMs).toBeUndefined();
       expect(summaries[1]!.summaryLine).toBe('read 1 file');
       // 写入卡片位于两个聚合块之间
       expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'w1')).toBe(true);
     });
 
-    test('model.requested clears carryover — next call without reason stays non-thinking (ADR-0027)', () => {
+    test('new reasoning joins the active exploration aggregate after a Bash boundary (ADR-0047)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'run tests first', durationMs: 2840 } },
+      });
+      s = dispatch(s, tcEvt('bash-1', 'shell_execute', { command: 'bun test' }));
+      s = dispatch(s, tcEvt('read-1', 'read_file', { path: 'README.md' }));
+      s = dispatch(s, tcEvt('search-1', 'search_files', { pattern: '*.ts' }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'next-model-call' },
+      });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'reason',
+          data: { text: 'the exploration results need follow-up', durationMs: 2891 },
+        },
+      });
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.modelMs).toBe(2840);
+
+      const exploration = summaries[1]!;
+      expect(exploration.tools.map((tool) => tool.callId)).toEqual(['read-1', 'search-1']);
+      expect(exploration.hasThought).toBe(true);
+      expect(exploration.hasThinking).toBe(true);
+      expect(exploration.modelMs).toBe(2891);
+      expect(exploration.latestActivity).toEqual({
+        kind: 'thinking',
+        text: 'the exploration results need follow-up',
+      });
+    });
+
+    test('a new call without reasoning remains non-thinking after a task boundary (ADR-0047)', () => {
       let s = fresh();
       s = dispatch(s, {
         type: 'EVENT',
@@ -1553,6 +1592,51 @@ describe('eventReducer (blocks model)', () => {
       expect(flatBlocks(s).some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
       expect(s.currentThoughtSummaryId).toBeUndefined();
       expect(s.interrupt?.kind).toBe('approval');
+    });
+    test('bash approval keeps a later all-queued exploration phase open for subsequent reasoning', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('assess production readiness'));
+      s = dispatch(
+        s,
+        tcEvt('bash-1', 'shell_execute', { command: 'find tests -name "*.test.ts"' }, 'queued'),
+      );
+      s = dispatch(s, tcEvt('read-1', 'read_file', { path: 'run-agent.ts' }, 'queued'));
+
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'need_approval',
+          data: approval({ callId: 'bash-1', command: 'find tests -name "*.test.ts"' }),
+        },
+      });
+
+      let summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.active).toBe(false);
+      expect(summaries[1]!.active).toBe(true);
+      expect(summaries[1]!.hasThought).toBe(false);
+      expect(s.currentThoughtSummaryId).toBe(summaries[1]!.id);
+
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'reason',
+          data: { text: 'evaluate the read result', durationMs: 4043 },
+        },
+      });
+      summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[1]!.hasThought).toBe(true);
+      expect(summaries[1]!.hasThinking).toBe(true);
+      expect(summaries[1]!.modelMs).toBe(4043);
+      expect(summaries[1]!.latestActivity).toEqual({
+        kind: 'thinking',
+        text: 'evaluate the read result',
+      });
     });
     test('need_input closes active Thought so its timer stops while waiting for the user', () => {
       let s = fresh();

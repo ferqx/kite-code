@@ -2972,6 +2972,71 @@ describe('OutputArea', () => {
     expect(frame).not.toContain('index.ts');
   });
 
+  test('hides a queued Thought phase behind a running standalone tool until execution reaches it', () => {
+    const runningShell: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-1',
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+      status: 'running',
+      summary: '',
+      preview: 'bun test',
+    };
+    const queuedThought: OutputBlock = {
+      id: 2,
+      kind: 'tool_summary',
+      active: true,
+      createdAt: Date.now() - 3000,
+      totalElapsedMs: 0,
+      summaryLine: 'read 1 file, searched 2 file patterns',
+      hasThought: false,
+      tools: [
+        {
+          callId: 'read-1',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          ok: false,
+          summary: '',
+          status: 'queued',
+        },
+        {
+          callId: 'search-1',
+          name: 'search_files',
+          args: { pattern: '*.ts' },
+          ok: false,
+          summary: '',
+          status: 'queued',
+        },
+      ],
+    };
+
+    const { lastFrame, rerender } = render(
+      <OutputAreaTestWrap
+        running
+        turns={[{ blocks: [runningShell, queuedThought] }]}
+        onToggleReason={noop}
+      />,
+    );
+
+    expect(lastFrame()).toContain('bun test');
+    expect(lastFrame()).not.toContain('read 1 file');
+
+    const startedThought: OutputBlock = {
+      ...queuedThought,
+      tools: [{ ...queuedThought.tools[0]!, status: 'running' }, queuedThought.tools[1]!],
+    };
+    rerender(
+      <OutputAreaTestWrap
+        running
+        turns={[{ blocks: [runningShell, startedThought] }]}
+        onToggleReason={noop}
+      />,
+    );
+
+    expect(lastFrame()).toContain('read 1 file');
+  });
+
   test('resolved approval block is rendered by tool_card, not OutputArea', () => {
     // sandbox 合并后 approval 由 tool_card + Footer 渲染，BlockRenderer 返回 null
     const blocks: OutputBlock[] = [

@@ -502,29 +502,18 @@ function findThoughtSummary(
   return block?.kind === 'tool_summary' ? block : null;
 }
 
-/** Thought 关闭原因（ADR-0027 / ADR-0030 / 规则 23-24：决定思考归属是否延续）：
- *  - 'text' / 'tool'（非探索工具）/ 'human_wait'（审批 / 提问 / 方案评审等待）：
- *    阶段边界但思路归属未尽——若关闭的块 hasThinking，记录延续上下文
- *    （modelMs），边界之后新建的探索聚合继承之（ADR-0027）；
- *  - 'boundary'（重试 / 错误 / 取消等生命周期边界）：思考归属终结，清除延续。
+/** Thought 关闭原因（ADR-0030 / ADR-0047 / 规则 23-24）：
+ *  text 决定纯思考块是否并入回答题头；其他原因均关闭当前可见 Thought。
+ *  思考归属不会跨边界复制到后续聚合块。
  *  注意：模型调用（model.requested）不再是关闭原因——阶段块跨调用存活
  *  （ADR-0030 / 规则 24）；文本在非流式模型下也不关闭活跃阶段块，而是作为
  *  旁白吸收进块顶（pendingCaption），仅在流式回退路径与 final 事件走 'text' 关闭。
- *  Cause of a Thought closure — decides whether thinking attribution carries
- *  over (ADR-0027 / ADR-0030): text / non-exploration tools / human waits are
- *  phase boundaries that still carry attribution forward; only lifecycle
- *  boundaries end it. Model calls no longer close Thoughts (the phase block
- *  survives across calls, rule 24); with a non-streaming model, visible text
- *  is absorbed into the active phase block instead of closing it. */
+ *  Cause of a Thought closure. Thinking attribution is consumed by the block
+ *  that rendered it and is never copied across a boundary (ADR-0047). */
 type ThoughtCloseCause = 'text' | 'tool' | 'human_wait' | 'boundary';
 
 function closeCurrentThought(state: TuiState, cause: ThoughtCloseCause = 'boundary'): TuiState {
   const summary = findThoughtSummary(state, state.currentThoughtSummaryId);
-  // 无活跃 Thought 时不动 thoughtCarryover：先行边界（如非探索工具）记录的
-  // 延续上下文要跨过中间的空关闭存活，直到被 reason / model.requested /
-  // 生命周期边界清除（规则 23）。
-  // With no active Thought, leave thoughtCarryover untouched until a reason /
-  // model.requested / lifecycle boundary clears it (rule 23).
   if (!summary)
     return {
       ...state,
@@ -598,19 +587,31 @@ function closeCurrentThought(state: TuiState, cause: ThoughtCloseCause = 'bounda
     };
     next = appendBlock(next, textBlock);
   }
-  // ADR-0027 / ADR-0030 / 规则 23：文本 / 非探索工具 / 人机等待关闭 hasThinking
-  // 的块时记录延续上下文——边界之后新建的探索聚合继承 hasThinking/modelMs；
-  // 仅生命周期边界（'boundary'）终结归属。
-  // Text / non-exploration tool / human wait closures of a hasThinking block
-  // record carryover; only lifecycle boundaries end attribution.
-  const carryover =
-    cause !== 'boundary' && summary.hasThinking === true ? { modelMs: summary.modelMs } : undefined;
   return {
     ...next,
     currentThoughtSummaryId: undefined,
     thoughtPhaseStatus: undefined,
-    thoughtCarryover: carryover,
   };
+}
+
+function isQueuedThoughtAfterApprovalTarget(state: TuiState, approvalCallId?: string): boolean {
+  if (!approvalCallId || state.currentThoughtSummaryId == null) return false;
+  const turn = lastTurn(state);
+  if (!turn) return false;
+  const targetIndex = turn.blocks.findIndex(
+    (block) => block.kind === 'tool_card' && block.callId === approvalCallId,
+  );
+  const thoughtIndex = turn.blocks.findIndex(
+    (block) => block.kind === 'tool_summary' && block.id === state.currentThoughtSummaryId,
+  );
+  if (targetIndex < 0 || thoughtIndex <= targetIndex) return false;
+  const thought = turn.blocks[thoughtIndex];
+  return (
+    thought?.kind === 'tool_summary' &&
+    thought.active &&
+    thought.tools.length > 0 &&
+    thought.tools.every((tool) => tool.status === 'queued')
+  );
 }
 
 function updateCurrentThoughtActivity(
@@ -637,6 +638,7 @@ function updateCurrentThoughtActivity(
         active: true,
         latestActivity,
         ...(state.currentModelRequestId ? { modelRequestId: state.currentModelRequestId } : {}),
+        hasThought: isThinking ? true : block.hasThought,
         hasThinking: isThinking ? true : block.hasThinking,
         totalElapsedMs: modelMs ?? Date.now() - block.createdAt,
         ...(modelMs != null ? { modelMs } : {}),
@@ -913,19 +915,14 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       // 吸收，直到真正的阶段边界（文本脱离 / 非探索工具 / 人机等待 / 生命
       // 周期）统一关闭 settle。（取代 ADR-0025 在此关闭的 settle 行为；
       // model.requested 即时发出本身保留。）
-      // 新模型调用 = 新决策：仅清除思考延续上下文（ADR-0027）。
       // A model call is NOT a phase boundary (ADR-0030 / rule 24): the phase
       // block survives across calls — the dot keeps blinking, elapsed keeps
       // accumulating, narrations keep absorbing — until a real phase boundary
       // closes it. (Supersedes the ADR-0025 settle-on-requested behavior; the
-      // immediate emission of model.requested itself is retained.) Only the
-      // thinking carryover is dropped (new call = new decision, ADR-0027).
-      return state.thoughtCarryover ? { ...state, thoughtCarryover: undefined } : state;
+      // immediate emission of model.requested itself is retained.)
+      return state;
     }
     case 'reason': {
-      // 新思考开始：旧的思考延续上下文作废（ADR-0027）
-      // New thinking begins — any pending carryover is superseded
-      if (state.thoughtCarryover) state = { ...state, thoughtCarryover: undefined };
       if (state.currentRunReasonId != null) {
         const reasonBlock = findBlockById(state, state.currentRunReasonId);
         if (reasonBlock?.kind === 'reason') {
@@ -1051,28 +1048,19 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           };
         }
 
-        // 创建新 tool_summary。思考延续（ADR-0027 / 规则 23）：被非探索工具 /
-        // 人机等待关闭的 Thought，其同一响应批次内的后续探索聚合继承
-        // hasThinking / modelMs（时长仍是同一次模型调用，规则 22 语义不变）；
-        // 无延续时才是无思考聚合（hasThought=false，规则 20）。
-        // Create a new tool_summary. With thinking carryover (ADR-0027):
-        // exploration tools following a non-exploration / human-wait boundary
-        // within the same response batch inherit hasThinking / modelMs (same
-        // model call, so rule 22 timing stays truthful); without carryover
-        // the aggregate is non-thinking (rule 20).
-        const carry = finalized.thoughtCarryover;
+        // A Thought label is consumed by the block that rendered the reasoning.
+        // Exploration after a standalone-tool boundary starts as a tool-only
+        // aggregate until a later, real reason event reaches it (ADR-0047).
         const id = finalized.nextBlockId;
         const block: OutputBlock = {
           id,
           kind: 'tool_summary',
           tools: [entry],
-          totalElapsedMs: carry?.modelMs ?? 0,
-          ...(carry?.modelMs != null ? { modelMs: carry.modelMs } : {}),
+          totalElapsedMs: 0,
           createdAt: now,
           summaryLine: buildToolSummaryLine([entry]),
           active: true,
-          hasThought: carry != null,
-          ...(carry ? { hasThinking: true } : {}),
+          hasThought: false,
           latestActivity: { kind: 'tool', callId: event.data.call_id },
           timeline: [{ seq: 1, kind: 'tool' as const, callId: event.data.call_id }],
           nextTimelineSeq: 1,
@@ -1481,7 +1469,14 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
     case 'need_approval': {
       // Dedup: side-channel + stream interrupt can both emit need_approval for the same request.
       if (state.interrupt?.kind === 'approval') return state;
-      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait'));
+      // Runtime queues the whole model batch before requesting approval for
+      // the first barrier tool. A later all-queued exploration summary is
+      // future work, not the phase waiting for approval; keep it active so
+      // the next real reasoning can join it after execution reaches it.
+      const keepFutureThought = isQueuedThoughtAfterApprovalTarget(state, event.data.callId);
+      const finalized = finalizeLastTurnStreaming(
+        keepFutureThought ? state : closeCurrentThought(state, 'human_wait'),
+      );
       const block: OutputBlock = {
         id: finalized.nextBlockId,
         kind: 'approval',
@@ -1591,10 +1586,8 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       };
     }
     case 'error': {
-      // 错误打断当前思考周期——恢复/重试后模型从头开始推理，不应延续旧 Thought，
-      // 思考延续上下文一并清除（'boundary'，ADR-0027）。
-      // An error breaks the current thinking cycle — recovery/retry starts fresh,
-      // so the old Thought must close and the carryover is cleared.
+      // 错误打断当前思考周期；恢复/重试后的 reasoning 属于新阶段。
+      // An error closes the current cycle; reasoning after recovery/retry is a new phase.
       const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'boundary'));
       const prefix = event.data.recoverable ? '⟳ Recoverable error' : 'Error';
       const id = finalized.nextBlockId;
@@ -2416,7 +2409,13 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         data: providerAdmissionInput(event.providerId, event.providerStatus, event.retryable),
       });
     case 'approval.requested':
-      return handleEventAction(state, { type: 'need_approval', data: event.approval });
+      return handleEventAction(state, {
+        type: 'need_approval',
+        data: {
+          ...event.approval,
+          callId: event.approval.callId ?? event.toolCallId,
+        },
+      });
     case 'planning.entered':
       return { ...state, status: { ...state.status, phase: 'planning' } };
     case 'plan.review_requested':

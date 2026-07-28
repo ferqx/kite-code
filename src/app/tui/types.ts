@@ -243,14 +243,6 @@ export interface TuiState {
   currentModelReasoningStreamed?: boolean;
   /** Latest cumulative reasoning segment, cached off-screen between boundaries. */
   currentModelReasoningText?: string;
-  /** 思考延续上下文（ADR-0027 / 规则 23）：Thought 块被非探索工具或人机
-   *  等待关闭时记录，同一响应批次内后续探索工具聚合继承 hasThinking /
-   *  modelMs。由文本（ADR-0026）、model.requested、reason 事件清除。
-   *  Thinking carryover (ADR-0027 / rule 23): recorded when a Thought block
-   *  is closed by a non-exploration tool or human wait; exploration
-   *  aggregates later in the same response batch inherit hasThinking /
-   *  modelMs. Cleared by text (ADR-0026), model.requested, and reason. */
-  thoughtCarryover?: { modelMs?: number };
   /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
   interactionMode: 'accept_edits' | 'auto' | 'full';
   /** Deduplicates durable terminal compaction notices during replay. */
