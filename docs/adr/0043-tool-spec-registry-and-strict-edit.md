@@ -136,3 +136,7 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 - **类型测试扩展**：新增 `ask_user` transform 输出（`UserInputRequest`）与 `write_plan` 可选 `action` 的编译期断言。
 - **deprecated 清理**：删除 `declareToolSpec` / `declareInterruptTool`（全库零引用，已被 `defineExecutableTool` / `defineInterruptTool` 替代）。
 - **Sub-agent runner cast 清理**：移除 `tc.args as Record<string, unknown>` 冗余断言（`ToolCall.args` 已是 `Record<string, unknown>`）。
+
+### 2026-07-28：ParseFailureCode 显式区分
+
+- **`parseToolCall` 不再返回 `null`**：返回类型从 `ParseResultOf<Spec> | ParseFailure | null` 收敛为 `ParseResultOf<Spec> | ParseFailure`。`ParseFailure` 新增 `code` 字段（`'unknown_tool' | 'tool_unavailable' | 'invalid_arguments'`），显式区分三种失败原因。`toolRequestFromCall` 仅在 `code === 'unknown_tool'` 时 fall through 到 MCP 前缀检查，`tool_unavailable` 和 `invalid_arguments` 直接返回 `InvalidToolRequest`。

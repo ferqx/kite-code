@@ -79,9 +79,12 @@ export function toolRequestFromCall(
     { id: call.id, name: call.name, args: call.args },
     context,
   );
-  if (viaRegistry) {
-    if (!viaRegistry.ok) {
-      // P1: Schema 参数校验失败 → InvalidToolRequest（tool_invalid_args）而非 null（tool_not_found）。
+  if (!viaRegistry.ok) {
+    // unknown_tool：名称不在 Registry 中，继续检查 MCP 前缀。
+    if (viaRegistry.code === 'unknown_tool') {
+      // fall through to MCP check below
+    } else {
+      // tool_unavailable 或 invalid_arguments → InvalidToolRequest。
       return {
         ok: false,
         request: {
@@ -93,6 +96,7 @@ export function toolRequestFromCall(
         },
       };
     }
+  } else {
     // Registry 返回类型化 ParseSuccess<N,A>；移去 ok 字段，保留 source 得到 PendingBuiltinToolRequest。
     const { ok: _, ...request } = viaRegistry;
     return { ok: true, request };

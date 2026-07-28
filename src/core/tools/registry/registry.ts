@@ -36,8 +36,11 @@ export interface ParseSuccess<Name extends string, Args> {
   protectedCommand: string;
 }
 
+export type ParseFailureCode = 'unknown_tool' | 'tool_unavailable' | 'invalid_arguments';
+
 export interface ParseFailure {
   ok: false;
+  code: ParseFailureCode;
   id?: string;
   name: string;
   error: string;
@@ -109,17 +112,32 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
   parseToolCall(
     call: { id?: string; name: string; args: unknown },
     context: ToolContext,
-  ): (ParseResultOf<Spec> | ParseFailure) | null {
+  ): ParseResultOf<Spec> | ParseFailure {
     const spec = this.#specs.get(call.name);
-    if (!spec || spec.availability?.(context) === false) {
-      return null;
+    if (!spec) {
+      return {
+        ok: false,
+        code: 'unknown_tool',
+        id: call.id,
+        name: call.name,
+        error: `Unknown tool '${call.name}'`,
+      };
+    }
+    if (spec.availability?.(context) === false) {
+      return {
+        ok: false,
+        code: 'tool_unavailable',
+        id: call.id,
+        name: call.name,
+        error: `Tool '${call.name}' is not available in this context`,
+      };
     }
     const parsed = spec.inputSchema.safeParse(call.args);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const path = issue && issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
       const message = issue ? `${path}${issue.message}` : 'invalid arguments';
-      return { ok: false, id: call.id, name: call.name, error: message };
+      return { ok: false, code: 'invalid_arguments', id: call.id, name: call.name, error: message };
     }
     // 唯一允许的异构类型断言 — Registry 内部紧跟 safeParse。
     // The single allowed heterogeneous type assertion — inside the Registry,

@@ -131,9 +131,11 @@ describe('ToolSpec Registry — registration behavior', () => {
     }
   });
 
-  test('returns null for unknown tool names so the existing rejection path handles them', () => {
+  test('returns ParseFailure for unknown tool names so the existing rejection path handles them', () => {
     const registry = sampleRegistry();
-    expect(registry.parseToolCall({ name: 'never_registered', args: {} }, CTX)).toBeNull();
+    const result = registry.parseToolCall({ name: 'never_registered', args: {} }, CTX);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe('unknown_tool');
   });
 
   test('rejects invalid arguments with a structured failure instead of dropping fields', () => {
@@ -142,14 +144,15 @@ describe('ToolSpec Registry — registration behavior', () => {
       { id: 'c1', name: 'registry_sample_read', args: {} },
       CTX,
     );
-    expect(missing).not.toBeNull();
-    expect(missing?.ok).toBe(false);
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.code).toBe('invalid_arguments');
 
     const wrongType = registry.parseToolCall(
       { name: 'registry_sample_read', args: { path: 42 } },
       CTX,
     );
-    expect(wrongType?.ok).toBe(false);
+    expect(wrongType.ok).toBe(false);
+    if (!wrongType.ok) expect(wrongType.code).toBe('invalid_arguments');
   });
 
   test('availability gates toolset, parsing and listing', () => {
@@ -169,8 +172,8 @@ describe('ToolSpec Registry — registration behavior', () => {
         {
           workspace: '/other',
         },
-      ),
-    ).toBeNull();
+      ).ok,
+    ).toBe(false);
   });
 });
 
