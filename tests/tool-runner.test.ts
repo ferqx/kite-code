@@ -85,6 +85,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
       ],
     );
     const request: PendingToolRequest = {
+      source: 'builtin',
       name: 'list_mcp_resources',
       args: {},
       reason: 'discover resources',
@@ -110,6 +111,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
     }));
     const manager = mockMcpManager(async () => '', resources);
     const request: PendingToolRequest = {
+      source: 'builtin',
       name: 'list_mcp_resources',
       args: { server: 'docs' },
       reason: 'discover resources',
@@ -127,6 +129,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
     const known = await runApprovedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin' as const,
         name: 'list_mcp_resources',
         args: { server: 'test-server' },
         reason: 'discover',
@@ -137,6 +140,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
     const unknown = await runApprovedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin' as const,
         name: 'list_mcp_resources',
         args: { server: 'missing' },
         reason: 'discover',
@@ -275,6 +279,7 @@ describe('runApprovedTool — bound MCP policy', () => {
     const result = await runApprovedTool({
       workspace: '/ws',
       request: {
+        source: 'mcp',
         id: 'call-authenticated-read',
         name: 'mcp__auth__read',
         args: { id: '42' },

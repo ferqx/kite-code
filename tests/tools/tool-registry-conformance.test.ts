@@ -33,12 +33,14 @@ import {
   type writeFileInputSchema,
   writeFileSpec,
 } from '@/core/tools/registry/builtins/write-file';
+import type { writePlanInputSchema } from '@/core/tools/registry/builtins/write-plan';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { createToolRegistry } from '@/core/tools/registry/registry';
 import type { ToolContext } from '@/core/tools/registry/spec';
 import { defineExecutableTool } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { buildDescription, KNOWN_TOOL_NAMES } from '@/core/tools/tool-contracts';
+import type { UserInputRequest } from '@/protocol/events';
 
 /**
  * ToolSpec Registry 一致性测试（ADR-0043 §5 / RFC §5）。
@@ -310,6 +312,7 @@ describe('read_file migration (S1.2)', () => {
     );
     expect(parsed).toEqual({
       ok: true,
+      source: 'builtin',
       id: 'tc1',
       name: 'read_file',
       args: { path: 'src/index.ts', offset: 10, limit: 50 },
@@ -450,6 +453,7 @@ describe('projectResult production closure', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-projection-'));
     try {
       const request = {
+        source: 'builtin' as const,
         id: 'write-projection',
         name: 'write_file' as const,
         args: { path: 'a.txt', content: 'hello\n' },
@@ -480,6 +484,7 @@ describe('projectResult production closure', () => {
 
 describe('dual output streams survive projection (regression)', () => {
   const SHELL_REQUEST = {
+    source: 'builtin' as const,
     id: 'shell-dual',
     name: 'shell_execute' as const,
     args: { command: 'make ci' },
@@ -672,6 +677,7 @@ describe('invariant i10 — shell governance is derived from command shape', () 
     const result = await runApprovedTool({
       workspace: '/tmp/sample',
       request: {
+        source: 'builtin' as const,
         id: 'shell-read',
         name: 'shell_execute',
         args: { command: 'git status', description: 'Inspect repository', timeout_ms: 3210 },
@@ -786,6 +792,16 @@ type BuiltinName = BuiltinSpec['name'];
 type NamesFromUnion = PendingBuiltinToolRequest['name'];
 type AllBuiltinNamesCovered = Expect<Equal<BuiltinName, NamesFromUnion>>;
 
+// --- i1.6 name === 'ask_user' ⇒ args 匹配 Schema transform 输出（UserInputRequest） ---
+type AskUserRequest = Extract<PendingBuiltinToolRequest, { name: 'ask_user' }>;
+type AskUserArgsMatchSchema = Expect<Equal<AskUserRequest['args'], UserInputRequest>>;
+
+// --- i1.7 name === 'write_plan' ⇒ action 可选（save 模式无需显式 action） ---
+type WritePlanRequest = Extract<PendingBuiltinToolRequest, { name: 'write_plan' }>;
+type WritePlanArgsMatchSchema = Expect<
+  Equal<WritePlanRequest['args'], z.infer<typeof writePlanInputSchema>>
+>;
+
 // 运行时占位符，消耗编译期类型变量以通过 noUnusedLocals
 describe('compile-time name → args invariants', () => {
   test('read_file args match schema', () => {
@@ -815,6 +831,16 @@ describe('compile-time name → args invariants', () => {
 
   test('all builtin names covered in PendingBuiltinToolRequest', () => {
     const _assert: AllBuiltinNamesCovered = true;
+    expect(_assert).toBe(true);
+  });
+
+  test('ask_user args match schema transform output (UserInputRequest)', () => {
+    const _assert: AskUserArgsMatchSchema = true;
+    expect(_assert).toBe(true);
+  });
+
+  test('write_plan args match schema (action optional)', () => {
+    const _assert: WritePlanArgsMatchSchema = true;
     expect(_assert).toBe(true);
   });
 });

@@ -45,6 +45,7 @@ test('records explicit test provenance for injected authorization', () => {
     threadId: 'test-thread',
     source: 'test',
     request: {
+      source: 'builtin' as const,
       id: 'call',
       name: 'shell_execute',
       args: { command: 'pwd' },

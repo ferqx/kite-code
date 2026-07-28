@@ -69,7 +69,7 @@ type RequestOf<Spec> = Spec extends {
   name: infer N extends string;
   inputSchema: import('zod').ZodType<infer A>;
 }
-  ? { id?: string; name: N; args: A; reason: string; protectedCommand: string }
+  ? { source: 'builtin'; id?: string; name: N; args: A; reason: string; protectedCommand: string }
   : never;
 
 /**

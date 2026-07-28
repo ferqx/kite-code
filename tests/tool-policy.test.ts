@@ -13,6 +13,7 @@ import type { PendingToolRequest } from '../src/core/harness/tool-requests';
 import { evaluateToolApproval } from '../src/core/policies/approval-policy';
 
 const shellExecuteRequest: PendingToolRequest = {
+  source: 'builtin',
   id: 'call-shell',
   name: 'shell_execute',
   args: { command: 'bun test' },
@@ -26,6 +27,7 @@ describe('tool policy', () => {
   test('allows read tools without approval', () => {
     const requests: PendingToolRequest[] = [
       {
+        source: 'builtin',
         id: 'call-read',
         name: 'read_file',
         args: { path: 'package.json' },
@@ -33,6 +35,7 @@ describe('tool policy', () => {
         protectedCommand: 'read_file package.json',
       },
       {
+        source: 'builtin',
         id: 'call-search-content',
         name: 'search_content',
         args: { pattern: 'describe(' },
@@ -40,6 +43,7 @@ describe('tool policy', () => {
         protectedCommand: 'search_content describe(',
       },
       {
+        source: 'builtin',
         id: 'call-search-files',
         name: 'search_files',
         args: { pattern: '*.md' },
@@ -357,8 +361,12 @@ describe('tool policy', () => {
       workspace: '/tmp/project',
       threadId: 'thread-a',
       request: {
-        ...shellExecuteRequest,
+        source: 'builtin' as const,
+        id: 'call-shell',
+        name: 'shell_execute' as const,
         args: { command: 'bun test tests/graph.test.ts' },
+        reason: 'Model requested shell_execute tool call',
+        protectedCommand: 'bun test tests/graph.test.ts',
       },
     });
 

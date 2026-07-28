@@ -126,3 +126,11 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 - **无效调用分离**：`InvalidToolRequest`（`source: 'invalid'`）独立建模，不混入 `PendingToolRequest` 联合。`toolRequestFromCall` 返回 `ToolRequestParseResult | null`，调用方在 `!parsed.ok` 时生成错误事件，`runApprovedTool` 不再处理 `_raw_invalid_args`。
 - **`isMcpRequest` type guard**：替代 `request.name.startsWith('mcp__')` 的不可缩窄模式，使 MCP 分支内 `request.args` 自动收窄为 `Record<string, unknown>`。
 - **编译期不变量测试**：`Equal` / `Expect` 类型断言验证 `name === 'read_file' ⇒ args ≡ z.infer<typeof readFileInputSchema>`，以及 `BuiltinName ≡ PendingBuiltinToolRequest['name']` 覆盖检查。
+
+### 2026-07-28：请求来源判别与错误分类修正
+
+- **`source` 判别字段**：`PendingBuiltinToolRequest` 增加 `source: 'builtin'`，`PendingMcpToolRequest` 增加 `source: 'mcp'`，`isMcpRequest` 改用 `req.source === 'mcp'` 替代 `req.name.startsWith('mcp__')`。`ToolRegistry.register` 拒绝 `mcp__` 前缀的 builtin spec。
+- **Schema 参数错误修正**：`toolRequestFromCall` 对 Registry `ParseFailure` 返回 `InvalidToolRequest`（`tool_invalid_args`），不再返回 `null`（`tool_not_found`）。模型收到 `"Invalid arguments for 'read_file': ..."` 而非 `"Unsupported tool 'read_file'"`。
+- **`_parse_error` 修正**：合成非法调用的 `parseError` 使用 `_parse_error` 字段，原始非法 JSON 保留在 `rawArgs`。
+- **不可信边界收紧**：`toolRequestFromCall` 签名 `args` 改为 `unknown`，`InvalidToolRequest.rawArgs` 改为 `unknown`，MCP 路径显式验证 args 为非 null 对象。
+- **类型测试扩展**：新增 `ask_user` transform 输出（`UserInputRequest`）与 `write_plan` 可选 `action` 的编译期断言。

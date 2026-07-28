@@ -11,12 +11,13 @@ export interface InvalidToolRequest {
   source: 'invalid';
   id?: string;
   name: string;
-  rawArgs: Record<string, unknown>;
+  rawArgs: unknown;
   parseError: string;
 }
 
 /** 动态 MCP 工具请求 — args 无法编译期验证，Record<string,unknown> 是合理上限。 */
 export interface PendingMcpToolRequest {
+  source: 'mcp';
   id?: string;
   name: `mcp__${string}`;
   args: Record<string, unknown>;
@@ -40,7 +41,7 @@ export type ToolRequestParseResult =
 
 /** 从单个 tool_call 解析工具请求 / Parse tool request from a single tool_call */
 export function toolRequestFromCall(
-  call: { id?: string; name: string; args: Record<string, unknown> },
+  call: { id?: string; name: string; args: unknown },
   availabilityContext: string | ToolAvailabilityContext,
 ): ToolRequestParseResult | null {
   const context: ToolAvailabilityContext =
@@ -50,36 +51,74 @@ export function toolRequestFromCall(
 
   // 合成调用：invokeModel 在 parseToolCall 失败后注入 _raw_invalid_args 标记。
   // 返回 InvalidToolRequest 而非强转进 PendingToolRequest 联合。
-  if (typeof call.args._raw_invalid_args === 'string') {
+  if (
+    call.args !== null &&
+    typeof call.args === 'object' &&
+    !Array.isArray(call.args) &&
+    typeof (call.args as Record<string, unknown>)._raw_invalid_args === 'string'
+  ) {
+    const argsObj = call.args as Record<string, unknown>;
     return {
       ok: false,
       request: {
         source: 'invalid',
         id: call.id,
         name: call.name,
-        rawArgs: call.args,
-        parseError: call.args._raw_invalid_args,
+        rawArgs: argsObj._raw_invalid_args,
+        parseError:
+          typeof argsObj._parse_error === 'string'
+            ? argsObj._parse_error
+            : 'invalid JSON arguments',
       },
     };
   }
 
   // 已迁移到 Registry 的工具走泛型解析（ADR-0043）：
   // parseToolCall 返回类型化结果，Registry 外部不恢复参数类型。
-  const viaRegistry = builtinToolRegistry.parseToolCall(call, context);
+  const viaRegistry = builtinToolRegistry.parseToolCall(
+    { id: call.id, name: call.name, args: call.args },
+    context,
+  );
   if (viaRegistry) {
-    if (!viaRegistry.ok) return null;
-    // Registry 返回类型化 ParseSuccess<N,A>；移去 ok 字段，得到 PendingBuiltinToolRequest。
+    if (!viaRegistry.ok) {
+      // P1: Schema 参数校验失败 → InvalidToolRequest（tool_invalid_args）而非 null（tool_not_found）。
+      return {
+        ok: false,
+        request: {
+          source: 'invalid',
+          id: viaRegistry.id,
+          name: viaRegistry.name,
+          rawArgs: call.args,
+          parseError: viaRegistry.error,
+        },
+      };
+    }
+    // Registry 返回类型化 ParseSuccess<N,A>；移去 ok 字段，保留 source 得到 PendingBuiltinToolRequest。
     const { ok: _, ...request } = viaRegistry;
     return { ok: true, request };
   }
 
   if (call.name.startsWith('mcp__')) {
+    // MCP 工具：显式验证 args 为非 null 对象，防止数组/字符串等原始值传播。
+    if (call.args === null || typeof call.args !== 'object' || Array.isArray(call.args)) {
+      return {
+        ok: false,
+        request: {
+          source: 'invalid',
+          id: call.id,
+          name: call.name,
+          rawArgs: call.args,
+          parseError: `MCP tool '${call.name}' arguments must be a JSON object`,
+        },
+      };
+    }
     return {
       ok: true,
       request: {
+        source: 'mcp',
         id: call.id,
         name: call.name as `mcp__${string}`,
-        args: call.args,
+        args: call.args as Record<string, unknown>,
         reason: `Model requested MCP tool ${call.name}`,
         protectedCommand: call.name,
       },
@@ -136,7 +175,7 @@ export function isShellApprovalGrant(value: unknown): value is ShellApprovalGran
   }
 }
 
-/** 类型守卫：判断请求是否为动态 MCP 工具调用。 */
+/** 类型守卫：判断请求是否为动态 MCP 工具调用（基于 source 判别字段）。 */
 export function isMcpRequest(req: PendingToolRequest): req is PendingMcpToolRequest {
-  return req.name.startsWith('mcp__');
+  return req.source === 'mcp';
 }

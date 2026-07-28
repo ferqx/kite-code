@@ -27,6 +27,7 @@ export interface SchemaOnlyModelTool {
 
 export interface ParseSuccess<Name extends string, Args> {
   ok: true;
+  source: 'builtin';
   id?: string;
   name: Name;
   /** 恒等于 inputSchema 解析结果（一致性不变量 i1）；禁止逐字段重映射。 */
@@ -59,6 +60,9 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
   register(spec: AnyToolSpec): this {
     if (!MODEL_TOOL_NAME_PATTERN.test(spec.name)) {
       throw new Error(`Tool spec name '${spec.name}' must be stable snake_case.`);
+    }
+    if (spec.name.startsWith('mcp__')) {
+      throw new Error(`Builtin tool name '${spec.name}' uses the reserved MCP prefix.`);
     }
     if (this.#specs.has(spec.name)) {
       throw new Error(`Tool spec '${spec.name}' is already registered.`);
@@ -122,6 +126,7 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
     // immediately after safeParse.
     return {
       ok: true as const,
+      source: 'builtin' as const,
       id: call.id,
       name: call.name,
       args: parsed.data,

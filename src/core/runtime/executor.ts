@@ -243,7 +243,7 @@ async function executeAutoReview(
   if (!call || state.interactions.kind !== 'awaiting_auto_review') return [];
 
   const parsed = toolRequestFromCall(
-    { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
+    { id: call.toolCallId, name: call.name, args: call.args },
     { workspace: state.session.workspace, threadId: state.session.threadId },
   );
   if (!parsed?.ok) {

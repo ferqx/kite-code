@@ -250,6 +250,7 @@ export function eventsForRuntimeAction(
         workspace: state.session.workspace,
         threadId: state.session.threadId,
         request: {
+          source: 'builtin' as const,
           id: interaction.toolCallId,
           name: 'shell_execute',
           args: { command: interaction.approval.command },

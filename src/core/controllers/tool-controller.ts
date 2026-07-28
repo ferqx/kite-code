@@ -540,7 +540,7 @@ export async function executeRuntimeTools(params: {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
     const parsed = toolRequestFromCall(
-      { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
+      { id: call.toolCallId, name: call.name, args: call.args },
       availCtx,
     );
     if (!parsed) {
@@ -905,9 +905,8 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'ask_user') {
-      const askInput = request.args as import('@/protocol/events').UserInputRequest;
-      const hasQuestion = (askInput.question ?? '').trim().length > 0;
-      const hasBatchQuestions = (askInput.questions?.length ?? 0) > 0;
+      const hasQuestion = (request.args.question ?? '').trim().length > 0;
+      const hasBatchQuestions = (request.args.questions?.length ?? 0) > 0;
       if (!hasQuestion && !hasBatchQuestions) {
         events.push({
           type: 'tool.failed',
@@ -928,14 +927,11 @@ export async function executeRuntimeTools(params: {
         type: 'user_input.requested',
         interactionId: genInteractionId(),
         toolCallId,
-        request: askUserSpec.createInterrupt(
-          request.args as import('@/protocol/events').UserInputRequest,
-          {
-            workspace: params.state.session.workspace,
-            threadId: params.state.session.threadId,
-            phase: getAgentPhase(getActivePlanning(params.state)),
-          },
-        ),
+        request: askUserSpec.createInterrupt(request.args, {
+          workspace: params.state.session.workspace,
+          threadId: params.state.session.threadId,
+          phase: getAgentPhase(getActivePlanning(params.state)),
+        }),
       });
       continue;
     }
