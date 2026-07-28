@@ -1,8 +1,8 @@
 # 当前规则：项目约定
 
 状态：active
-最后更新：2026-06-26
-最后验证：2026-06-26
+最后更新：2026-07-28
+最后验证：2026-07-28
 范围：
 
 - 所有 Markdown 文档与注释
@@ -45,6 +45,16 @@
 - 不在未说明原因的情况下跳过相关测试。
 - 不要为让测试通过而改弱约束；优先修正实现，使行为继续满足既有测试语义。
 - 如果现有测试和实现冲突，先确认哪一边表达的是当前真实规则，再决定修改测试还是实现。
+- 稳定性测试需要可重复时间或 identity 时，使用
+  `src/core/runtime/primitives.ts` 的可注入 clock/ID 契约，不依赖真实时钟或随机 UUID。
+- PR0 固定的资源预算由 `src/core/config/resource-budgets.ts` 统一定义。配置只接受正整数，
+  且 first-byte/idle 不得超过 model total、shell default 不得超过 shell max、
+  model projection 不得超过 in-memory stream。预算字段在后续调用路径切换前不改变生产行为。
+- `boundedExecutionV1`、`durableEventIdentityV2` 与 `transactionalRewindV1` 均默认关闭；
+  不得在缺少对应迁移与回滚证据时提前开启。
+- `bun run test` 由 `scripts/run-unit-tests.ts` 执行，默认 suite 硬超时为 600 秒。
+  `KITE_UNIT_TEST_TIMEOUT_MS` 只能改为正整数，不能取消 deadline；CI 设置
+  `KITE_UNIT_TEST_REPORT_DIR` 后必须输出 `unit.junit.xml` 与 `summary.json`。
 
 ## CLI 与接口
 

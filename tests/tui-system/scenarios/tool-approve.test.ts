@@ -119,7 +119,7 @@ describe('TUI PTY System — Tool Approve', () => {
 
   // ── full_access grant ─────────────────────────────────────
 
-  test(
+  test.skipIf(process.platform === 'win32')(
     'full_access grant auto-approves all subsequent tool calls',
     async () => {
       await sleep(3000);

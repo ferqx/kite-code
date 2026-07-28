@@ -14,6 +14,7 @@ import {
 } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { type ParseError, parse } from 'jsonc-parser';
+import { secureWindowsOwnerOnlyPath } from '@/core/security/windows-owner-only';
 import { mcpProjectApprovalPath } from './paths';
 
 /** Current source names plus Phase 0 spellings retained for persisted-record compatibility. */
@@ -184,7 +185,9 @@ export function readProjectMcpApprovalStore(
 }
 
 function writeStore(path: string, file: McpProjectApprovalFileV1): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  const directory = dirname(path);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  if (process.platform === 'win32') secureWindowsOwnerOnlyPath(directory);
   const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`;
   let fd: number | undefined;
   try {
@@ -194,7 +197,11 @@ function writeStore(path: string, file: McpProjectApprovalFileV1): void {
     closeSync(fd);
     fd = undefined;
     renameSync(temporary, path);
-    chmodSync(path, 0o600);
+    if (process.platform === 'win32') {
+      secureWindowsOwnerOnlyPath(path);
+    } else {
+      chmodSync(path, 0o600);
+    }
   } finally {
     if (fd !== undefined) closeSync(fd);
     if (existsSync(temporary)) unlinkSync(temporary);

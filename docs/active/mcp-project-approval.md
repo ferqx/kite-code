@@ -19,7 +19,11 @@ local 与 user 来源保持自动连接行为。调用方显式传入的 `config
 
 ## 批准绑定
 
-批准记录位于 `~/.kite-code/mcp-project-approvals.jsonc`，文件权限为 `0600`，使用临时文件、同步与 rename 原子替换。记录只保存 workspace/source/server 身份、SHA-256 摘要、决策和时间，不保存 command、args、URL、header、env 或 raw config。
+批准记录位于 `~/.kite-code/mcp-project-approvals.jsonc`，使用临时文件、同步与 rename 原子替换。
+POSIX 的目录/文件权限为 `0700/0600`；Windows 对目录和原子替换后的文件应用禁止继承、仅当前
+用户 SID 拥有 FullControl 的 ACL。ACL 设置失败时写入 fail closed，返回 `store_unavailable`。
+记录只保存 workspace/source/server 身份、SHA-256 摘要、决策和时间，不保存 command、args、
+URL、header、env 或 raw config。
 
 摘要绑定以下输入：
 

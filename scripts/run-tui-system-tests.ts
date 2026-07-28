@@ -1,8 +1,37 @@
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
 const DEFAULT_FILE_TIMEOUT_MS = 180_000;
 const scenariosDir = join(process.cwd(), 'tests', 'tui-system', 'scenarios');
+const reportDir = process.env.KITE_TUI_TEST_REPORT_DIR;
+
+interface ScenarioResult {
+  file: string;
+  exitCode: number;
+  durationMs: number;
+  timedOut: boolean;
+  junitPath?: string;
+  testCount?: number;
+  skippedCount?: number;
+  failureCount?: number;
+  lastTestCase?: string;
+}
+
+function parseJunit(
+  path: string,
+): Pick<ScenarioResult, 'testCount' | 'skippedCount' | 'failureCount' | 'lastTestCase'> {
+  const xml = readFileSync(path, 'utf8');
+  const suites = xml.match(/<testsuites\b[^>]*>/)?.[0] ?? '';
+  const numberAttribute = (name: string) =>
+    Number(suites.match(new RegExp(`${name}="(\\d+)"`))?.[1] ?? 0);
+  const cases = Array.from(xml.matchAll(/<testcase\b[^>]*\bname="([^"]+)"/g), (match) => match[1]!);
+  return {
+    testCount: numberAttribute('tests'),
+    skippedCount: numberAttribute('skipped'),
+    failureCount: numberAttribute('failures') + numberAttribute('errors'),
+    ...(cases.length > 0 ? { lastTestCase: cases.at(-1) } : {}),
+  };
+}
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -64,9 +93,18 @@ function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
   proc.kill('SIGKILL');
 }
 
-async function runFile(file: string, timeoutMs: number): Promise<number> {
+async function runFile(file: string, timeoutMs: number): Promise<ScenarioResult> {
   console.log(`\n[tui-system] ${file}`);
-  const proc = Bun.spawn([process.execPath, 'test', '--parallel=1', '--max-concurrency=1', file], {
+  const startedAt = Date.now();
+  const junitPath = reportDir
+    ? join(reportDir, `${basename(file, '.test.ts')}.junit.xml`)
+    : undefined;
+  const command = [process.execPath, 'test', '--parallel=1', '--max-concurrency=1'];
+  if (junitPath) {
+    command.push('--reporter=junit', `--reporter-outfile=${junitPath}`);
+  }
+  command.push(file);
+  const proc = Bun.spawn(command, {
     cwd: process.cwd(),
     env: process.env,
     stdin: 'inherit',
@@ -85,9 +123,22 @@ async function runFile(file: string, timeoutMs: number): Promise<number> {
     console.error(`[tui-system] timed out after ${timeoutMs}ms: ${file}`);
     terminateProcessTree(proc);
     await proc.exited.catch(() => {});
-    return 124;
+    return {
+      file,
+      exitCode: 124,
+      durationMs: Date.now() - startedAt,
+      timedOut: true,
+      ...(junitPath ? { junitPath } : {}),
+    };
   }
-  return result;
+  return {
+    file,
+    exitCode: result,
+    durationMs: Date.now() - startedAt,
+    timedOut: false,
+    ...(junitPath ? { junitPath } : {}),
+    ...(junitPath ? parseJunit(junitPath) : {}),
+  };
 }
 
 const timeoutMs = positiveInteger(
@@ -95,13 +146,28 @@ const timeoutMs = positiveInteger(
   DEFAULT_FILE_TIMEOUT_MS,
 );
 const files = scenarioFiles();
+if (reportDir) mkdirSync(reportDir, { recursive: true });
+const results: ScenarioResult[] = [];
 
 for (const file of files) {
-  const exitCode = await runFile(file, timeoutMs);
-  if (exitCode !== 0) {
-    console.error(`[tui-system] failed with exit code ${exitCode}: ${file}`);
-    process.exit(exitCode);
+  const result = await runFile(file, timeoutMs);
+  results.push(result);
+  if (result.exitCode !== 0) {
+    console.error(`[tui-system] failed with exit code ${result.exitCode}: ${file}`);
+    if (reportDir) {
+      writeFileSync(
+        join(reportDir, 'summary.json'),
+        `${JSON.stringify({ timeoutMs, totalFiles: files.length, completedFiles: results.length, results }, null, 2)}\n`,
+      );
+    }
+    process.exit(result.exitCode);
   }
 }
 
+if (reportDir) {
+  writeFileSync(
+    join(reportDir, 'summary.json'),
+    `${JSON.stringify({ timeoutMs, totalFiles: files.length, completedFiles: results.length, results }, null, 2)}\n`,
+  );
+}
 console.log(`\n[tui-system] passed ${files.length} scenario files`);

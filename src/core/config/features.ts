@@ -19,6 +19,9 @@ export interface FeatureFlags {
   contextCompactionV2: boolean;
   contextCompactionAutoV1: boolean;
   contextCompactionManualV1: boolean;
+  boundedExecutionV1: boolean;
+  durableEventIdentityV2: boolean;
+  transactionalRewindV1: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
@@ -38,6 +41,9 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   contextCompactionV2: true,
   contextCompactionAutoV1: false,
   contextCompactionManualV1: true,
+  boundedExecutionV1: false,
+  durableEventIdentityV2: false,
+  transactionalRewindV1: false,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

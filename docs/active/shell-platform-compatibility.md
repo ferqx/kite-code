@@ -1,8 +1,8 @@
 # 当前规则：Shell 工具平台兼容性
 
 状态：active
-最后更新：2026-05-26
-最后验证：2026-05-26
+最后更新：2026-07-28
+最后验证：2026-07-28
 范围：
 
 - `src/core/tools/shell.ts`（Shell 执行、bash 选择逻辑）
@@ -70,3 +70,16 @@ Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-i
 ## 5. 集成测试走 TUI 真实代码路径
 
 `tests/shell-exec.test.ts` 必须使用 `createSandboxExecutor`（与 TUI 完全相同的入口），而不是直接调 `shellTool`。确保工具选择、权限策略、沙箱配置等中间层也被覆盖。
+
+## 6. Abort 与进程树
+
+`shellTool` 不把外部 `AbortSignal` 直接交给 `Bun.spawn` 后等待继承 pipe 自行关闭。它必须先停止
+stdout/stderr reader，再终止受控进程树：
+
+- Windows 使用 `taskkill.exe /pid <pid> /t /f`；
+- Linux/macOS 把 Shell 放入独立进程组并终止整个组；
+- 用户取消稳定返回 exit code `130`，timeout 返回 `124`；
+- terminal result 只能在 reader 与主进程收敛后返回。
+
+`tests/tools.test.ts` 的 delayed abort 用例必须在 5 秒测试 deadline 内结束；只终止 Bash 主进程、
+让 `sleep` 等子进程继续持有 pipe 的实现不合格。

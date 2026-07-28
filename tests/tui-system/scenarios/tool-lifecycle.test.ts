@@ -253,7 +253,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
   );
 
   test(
-    'full lifecycle: interrupt → deny → no duplicate, model continues',
+    'full lifecycle: interrupt → deny → turn stops without duplicate approval',
     async () => {
       // ── 1. 触发审批 / Trigger approval ──
       await typeText(tui, 'Make a directory');
@@ -266,8 +266,8 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.output();
       expect(screenContains(output, '授权执行命令')).toBe(true);
-      expect(screenContains(output, 'Yes')).toBe(true);
-      expect(screenContains(output, 'Deny')).toBe(true);
+      expect(screenContains(output, '允许一次')).toBe(true);
+      expect(screenContains(output, '拒绝')).toBe(true);
 
       // ── 3. 验证渲染顺序：模型文字在审批块之前 / Verify order: text before approval ──
       const order = assertOrder(output, 'I will run a command', '授权执行命令');
@@ -283,13 +283,13 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       tui.write('\r');
       await sleep(3000);
 
-      // 等模型继续 / Wait for model to continue
-      await waitForText(() => tui.output(), 'Command was rejected', 15000);
+      await waitForText(() => tui.output(), 'Cancelled', 15000);
 
       output = tui.output();
 
-      // ── 5. 验证模型继续运行（有重复中断就会卡住）/ Verify model continues (duplicate interrupt would block) ──
-      expect(screenContains(output, 'Command was rejected')).toBe(true);
+      // Explicit user rejection stops this turn without another model call.
+      expect(screenContains(output, 'Cancelled')).toBe(true);
+      expect(server.getRequestCount()).toBe(1);
       expect(screenContains(output, '❯')).toBe(true);
     },
     TIMEOUT,

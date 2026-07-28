@@ -32,6 +32,11 @@ Core 不解释通用 Provider 术语（模型供应商）HTTP 400，也不通过
 
 Compaction 的 `preparing / summarizing / validating` 是 App-only 进度，不持久化。Completed、failed、cancelled 由 Core 统一映射为脱敏终态提示并按 `compactionId` 去重。指标 reporter 由 Runtime 组合根注入并由组合根拥有 flush；不存在全局 compaction metrics singleton。三轮 follow-up、稳定 session cohort 和显式 opt-in local debug 都不得记录 summary、transcript、prompt 或工具正文。
 
+Local compaction debug data root 在 POSIX 使用 `0700/0600`；Windows 使用共享 owner-only ACL
+adapter，禁止继承且只允许当前用户 SID FullControl。写入函数在真实 Windows 上默认使用该
+adapter，测试模拟 Windows 但未提供安全 adapter 时必须 fail closed。目录为 symlink/reparse
+point、owner 不属于当前用户或 ACL 应用失败时均拒绝写入。
+
 压缩原因只允许 `manual | auto`。本地 context pressure 术语（上下文压力）、token ratio 术语（文本计量比例）、绝对 token threshold 术语（文本计量阈值）与 target ratio 术语（目标比例）都只是诊断或自动尝试启发式，不能证明 Provider admission 术语（模型供应商接纳）、阻止普通模型请求或创建 `ContextHardBlock`。`ContextHardBlock` 只接受 Runtime correctness failure 术语（运行时正确性故障）原因。
 
 ## 禁止事项

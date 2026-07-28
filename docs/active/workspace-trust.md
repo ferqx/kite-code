@@ -1,6 +1,7 @@
 # Workspace 信任门禁 / Workspace Trust Gate
 
 状态：active
+最后验证：2026-07-28
 读取时机：修改 TUI 启动流程（`TuiBootstrap`）、CLI 入口（`src/app/cli/index.ts`）、workspace 信任存储、`src/core/config/workspace-trust.ts`、`WorkspaceTrustGate.tsx` 或测试 harness 的信任旁路时
 验证：`bun test tests/workspace-trust.test.ts tests/cli-workspace-trust.test.ts tests/docs-space.test.ts`、`bun run test:tui:system workspace-trust`
 

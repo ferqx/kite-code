@@ -69,15 +69,27 @@ describe('local compaction debug', () => {
           record: { compactionId: 'c', reason: 'manual', outcome: 'completed' },
         }),
       ).toThrow(/symbolic link|reparse point/);
-      expect(() =>
-        writeLocalCompactionDebugRecord({
-          enabled: true,
-          directory: join(root, 'windows'),
-          sessionId: 'session',
-          platform: 'win32',
-          record: { compactionId: 'c', reason: 'manual', outcome: 'completed' },
-        }),
-      ).toThrow(/owner-only ACL/);
+      if (process.platform === 'win32') {
+        expect(() =>
+          writeLocalCompactionDebugRecord({
+            enabled: true,
+            directory: join(root, 'windows'),
+            sessionId: 'session',
+            platform: 'win32',
+            record: { compactionId: 'c', reason: 'manual', outcome: 'completed' },
+          }),
+        ).not.toThrow();
+      } else {
+        expect(() =>
+          writeLocalCompactionDebugRecord({
+            enabled: true,
+            directory: join(root, 'windows'),
+            sessionId: 'session',
+            platform: 'win32',
+            record: { compactionId: 'c', reason: 'manual', outcome: 'completed' },
+          }),
+        ).toThrow(/owner-only ACL/);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -46,3 +46,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0042](0042-file-tool-semantics-and-write-safety.md)   | accepted   | 对齐 Claude Code：edit_file 强制先读后改，write_file 移除 append 自由覆写，checkpoint 兜底 |
 | [0043](0043-tool-spec-registry-and-strict-edit.md)     | accepted   | 工具单一事实源（ToolSpec Registry）：模型表面全部 schema-only，shell 治理参数收敛，Edit 严格化 |
 | [0044](0044-tool-spec-registry-single-path-cutover.md) | accepted   | 六个计算原语以 Registry 单路径收尾，删除从未接线的迁移 flag                         |
+| [0045](0045-runtime-event-identity-and-atomic-commit.md) | accepted | Runtime Event occurrence identity、thread sequence 与 Snapshot 使用原子提交协议 |
+| [0046](0046-crash-consistent-managed-file-rewind.md) | accepted | 受管文件 Rewind 使用持久 journal，在崩溃后恢复到一致状态 |
+| [0047](0047-cross-platform-shell-execution-boundary.md) | accepted | Linux/macOS sandbox fail closed，Windows 允许受控非沙箱 Bash 但禁用 full |
+| [0048](0048-security-config-secret-and-diagnostic-data-ceiling.md) | accepted | 项目配置、MCP Secret 和诊断数据受用户级安全 ceiling 约束 |

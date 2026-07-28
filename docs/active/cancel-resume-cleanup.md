@@ -10,6 +10,10 @@
 
 取消通过 AbortSignal 传播到模型、工具和 Subagent。Kernel 必须使当前 Effect lease 收敛为完成、失败或取消事件，不能留下永久 busy 状态。TUI 清理运行中 block 只是展示投影，不是 Runtime 取消事实。
 
+Shell 收到取消后必须停止 output reader 并清理受控进程树，不能只终止父 Bash。Windows 使用
+`taskkill /t /f`，POSIX 使用独立进程组；用户取消映射为 exit code `130`。如果无法确认进程树
+收敛，后续 bounded execution 路径必须使用 `cancellation_cleanup_failed`，不得产生虚假成功 receipt。
+
 ## Resume 语义
 
 恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。

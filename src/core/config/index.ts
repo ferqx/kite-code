@@ -5,6 +5,11 @@ import { z } from 'zod';
 import type { FeatureFlags } from './features';
 import { mcpServerSchema } from './mcp-server-config';
 import { defaultConfigPath, projectConfigPath } from './paths';
+import {
+  type ResourceBudgets,
+  resolveResourceBudgets,
+  resourceBudgetsSchema,
+} from './resource-budgets';
 
 export {
   DEFAULT_FEATURE_FLAGS,
@@ -36,6 +41,12 @@ export {
   validateMcpServerName,
 } from './mcp-config-repository';
 export { expandEnvVars } from './mcp-server-config';
+export {
+  DEFAULT_RESOURCE_BUDGETS,
+  type ResourceBudgets,
+  resolveResourceBudgets,
+  resourceBudgetsSchema,
+} from './resource-budgets';
 
 // ── Zod schemas ──
 
@@ -105,6 +116,9 @@ const featuresSchema = z
     contextCompactionV2: z.boolean().optional(),
     contextCompactionAutoV1: z.boolean().optional(),
     contextCompactionManualV1: z.boolean().optional(),
+    boundedExecutionV1: z.boolean().optional(),
+    durableEventIdentityV2: z.boolean().optional(),
+    transactionalRewindV1: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -182,6 +196,7 @@ export const configSchema = z.object({
       }
     })
     .optional(),
+  resourceBudgets: resourceBudgetsSchema.optional(),
   mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
 });
 
@@ -233,6 +248,7 @@ export interface AgentConfig {
     circuitBreakerWindowMs?: number;
   };
   compaction?: NonNullable<KiteCodeConfig['compaction']>;
+  resourceBudgets?: ResourceBudgets;
 }
 
 /** 加载配置选项 / Configuration loading options */
@@ -285,6 +301,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     sandbox: project.sandbox ?? user.sandbox,
     autoReview: project.autoReview ?? user.autoReview,
     compaction: project.compaction ?? user.compaction,
+    resourceBudgets: project.resourceBudgets ?? user.resourceBudgets,
     mcpServers: { ...user.mcpServers, ...project.mcpServers },
   };
 }
@@ -386,6 +403,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     sandbox: { enabled: cfg.sandbox?.enabled ?? true },
     autoReview: cfg.autoReview,
     compaction: cfg.compaction,
+    resourceBudgets: resolveResourceBudgets(cfg.resourceBudgets),
   };
 }
 

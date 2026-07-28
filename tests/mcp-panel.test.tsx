@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { render } from 'ink-testing-library';
 import McpOverlay from '@/app/tui/mcp/McpOverlay';
 import { buildServerActions, derivePrimaryStatus, moveSelection } from '@/app/tui/mcp/model';
@@ -400,7 +401,7 @@ describe('MCP management overlay', () => {
     stdin.write('\r');
     await Bun.sleep(5);
     expect(lastFrame()).toContain('Project  ');
-    expect(lastFrame()).toContain('.kite-code/mcp.json');
+    expect(lastFrame()).toContain(join('.kite-code', 'mcp.json'));
     stdin.write('\r');
     await Bun.sleep(5);
     expect(lastFrame()).toContain('> Add and connect');

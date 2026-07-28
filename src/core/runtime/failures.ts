@@ -12,6 +12,13 @@ export type FailureKind =
   | 'plan_revision_requested'
   | 'tool_runtime_error'
   | 'tool_timeout'
+  | 'deadline_exceeded'
+  | 'output_limit_exceeded'
+  | 'cancellation_cleanup_failed'
+  | 'storage_busy'
+  | 'storage_conflict'
+  | 'storage_io_error'
+  | 'transaction_interrupted'
   | 'tool_invalid_args'
   | 'tool_not_found'
   | 'provider_auth_required'
@@ -85,6 +92,13 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
   plan_revision_requested: { ...terminal, modelFixable: true, terminatesTurn: false },
   tool_runtime_error: { ...retryable, modelFixable: true, journal: true },
   tool_timeout: { ...retryable, journal: true },
+  deadline_exceeded: { ...retryable, journal: true },
+  output_limit_exceeded: { ...terminal, journal: true },
+  cancellation_cleanup_failed: terminal,
+  storage_busy: { ...retryable, journal: true },
+  storage_conflict: { ...terminal, journal: true },
+  storage_io_error: terminal,
+  transaction_interrupted: terminal,
   tool_invalid_args: {
     ...terminal,
     modelFixable: true,

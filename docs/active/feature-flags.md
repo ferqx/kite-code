@@ -16,6 +16,18 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.
 
+预生产稳定性切换均在 PR0 注册且默认关闭：
+
+| 开关 | 默认值 | 职责与关闭约束 |
+| --- | --- | --- |
+| `boundedExecutionV1` | `false` | PR2/PR3 的 deadline、进程树和 bounded output；关闭时保留现有路径，开启后失败不得回退到无界路径 |
+| `durableEventIdentityV2` | `false` | PR5 的新 Store identity/cutover；同一 thread 禁止混写两种 envelope |
+| `transactionalRewindV1` | `false` | PR6 的 durable pre-image 与 crash-consistent Rewind；只对新版 mutation receipt 开启 |
+
+这些 flag 只允许在对应 ADR、迁移、回滚与预生产证据齐全后切换。Sandbox fail-closed、
+Windows Shell admission、security ceiling 与 MCP env isolation 属于安全修复，不得放入这些普通
+feature flag。
+
 
 上下文压缩的 flag 术语（功能开关）真值如下：
 

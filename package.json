@@ -6,7 +6,7 @@
   "module": "src/index.ts",
   "scripts": {
     "agent": "bun run src/app/cli/index.ts",
-    "test": "bun test --path-ignore-patterns='tests/tui-system/**' --path-ignore-patterns='tests/pty-spike/**'",
+    "test": "bun run scripts/run-unit-tests.ts",
     "test:all": "bun run test && bun run test:tui:system",
     "test:mock": "bun test ./tests/runtime/context-compaction-e2e.test.ts",
     "test:mcp:live": "KITE_RUN_LIVE_MCP_SMOKE=1 bun run tests/e2e/live/mcp/langchain-docs.live.ts",

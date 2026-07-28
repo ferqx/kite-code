@@ -6,6 +6,21 @@ import { normalizeMsys2PathsInText } from './path-utils';
 /** Shell 执行器函数签名 / Shell executor function signature */
 export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;
 
+function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
+  if (process.platform === 'win32') {
+    Bun.spawnSync(['taskkill.exe', '/pid', String(proc.pid), '/t', '/f'], {
+      stdout: 'ignore',
+      stderr: 'ignore',
+    });
+    return;
+  }
+  try {
+    process.kill(-proc.pid, 'SIGKILL');
+  } catch {
+    proc.kill('SIGKILL');
+  }
+}
+
 /** 断言目标路径在工作区范围内 / Assert target path is inside workspace */
 export function assertInsideWorkspace(workspace: string, targetPath: string): string {
   const workspaceRoot = resolve(workspace);
@@ -81,15 +96,25 @@ export async function readWithProgress(
 /** 通过 Bun.spawn 执行 Shell 命令，返回结构化结果 / Execute shell command via Bun.spawn, return structured result */
 export async function shellTool(input: ShellInput): Promise<ShellResult> {
   let timedOut = false;
+  let cancelled = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const outputStop = new AbortController();
+  let removeAbortListener: (() => void) | undefined;
   try {
     const proc = Bun.spawn(buildShellInvocation(input.command), {
       cwd: input.workspace,
       stdout: 'pipe',
       stderr: 'pipe',
-      signal: input.signal,
+      ...(process.platform === 'win32' ? {} : { detached: true }),
     });
+    const abort = () => {
+      cancelled = true;
+      outputStop.abort();
+      terminateProcessTree(proc);
+    };
+    input.signal?.addEventListener('abort', abort, { once: true });
+    removeAbortListener = () => input.signal?.removeEventListener('abort', abort);
+    if (input.signal?.aborted) abort();
 
     if (input.timeoutMs && input.timeoutMs > 0) {
       timeoutId = setTimeout(() => {
@@ -99,7 +124,7 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
         // always reaches a terminal tool result.
         outputStop.abort();
         try {
-          proc.kill();
+          terminateProcessTree(proc);
         } catch {
           /* process may have exited already */
         }
@@ -122,11 +147,12 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
     ]);
     const exitCode = await proc.exited;
     if (timeoutId) clearTimeout(timeoutId);
+    removeAbortListener();
 
     return {
-      ok: !timedOut && exitCode === 0,
+      ok: !timedOut && !cancelled && exitCode === 0,
       command: input.command,
-      exitCode: timedOut ? 124 : exitCode,
+      exitCode: timedOut ? 124 : cancelled ? 130 : exitCode,
       stdout: normalizeMsys2PathsInText(stdout),
       stderr: timedOut
         ? appendTimeoutMessage(
@@ -137,6 +163,7 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
     };
   } catch (error) {
     if (timeoutId) clearTimeout(timeoutId);
+    removeAbortListener?.();
     // AbortError 表示用户主动取消，标记为非失败 / AbortError means user cancellation, mark as non-failure
     const isAbort = error instanceof Error && error.name === 'AbortError';
     return {

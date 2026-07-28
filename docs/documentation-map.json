@@ -145,6 +145,8 @@
       "documents": [
         "docs/active/real-model-test-boundary.md",
         "docs/active/mcp-runtime-governance.md",
+        "docs/active/project-conventions.md",
+        "docs/active/preproduction-stability-baseline.md",
         "README.md"
       ]
     },
@@ -169,6 +171,8 @@
         "docs/adr/0042-file-tool-semantics-and-write-safety.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
+        "docs/active/shell-platform-compatibility.md",
+        "docs/active/cancel-resume-cleanup.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/11-MCP与Skills扩展.md"
       ]
@@ -211,6 +215,29 @@
         "docs/book/09-CLI模式与配置.md",
         "docs/active/feature-flags.md",
         "docs/active/workspace-trust.md"
+      ]
+    },
+    {
+      "id": "security-data-roots",
+      "sources": ["src/core/security/**"],
+      "documents": [
+        "docs/active/mcp-project-approval.md",
+        "docs/active/model-provider-boundary.md",
+        "docs/active/preproduction-stability-baseline.md"
+      ]
+    },
+    {
+      "id": "test-runners",
+      "sources": [
+        "scripts/run-unit-tests.ts",
+        "scripts/run-tui-system-tests.ts",
+        "tests/test-discovery.test.ts"
+      ],
+      "documents": [
+        "docs/active/project-conventions.md",
+        "docs/active/real-model-test-boundary.md",
+        "docs/active/tui-e2e-standards.md",
+        "docs/active/preproduction-stability-baseline.md"
       ]
     },
     {

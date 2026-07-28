@@ -60,9 +60,11 @@ describe('test discovery boundaries', () => {
       scripts?: Record<string, string>;
     };
 
-    expect(pkg.scripts?.test).toContain('bun test');
-    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/tui-system/**'");
-    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/pty-spike/**'");
+    expect(pkg.scripts?.test).toContain('scripts/run-unit-tests.ts');
+    const unitRunner = readFileSync(join(repoRoot, 'scripts', 'run-unit-tests.ts'), 'utf8');
+    expect(unitRunner).toContain('--path-ignore-patterns=tests/tui-system/**');
+    expect(unitRunner).toContain('--path-ignore-patterns=tests/pty-spike/**');
+    expect(unitRunner).toContain('KITE_UNIT_TEST_TIMEOUT_MS');
     expect(pkg.scripts?.['test:all']).toBe('bun run test && bun run test:tui:system');
     expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/tui-system/');

@@ -1,3 +1,4 @@
+import { dirname } from 'node:path';
 import { render } from 'ink';
 import React from 'react';
 import {
@@ -446,7 +447,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         if (contextSnapshot) {
           dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
         }
-      } catch (e: any) {
+      } catch (error: unknown) {
         if (loadGenerationRef.current !== gen) return;
         // Roll back SessionManager: if we switched to a different session and the
         // load failed, revert the switch and remove the orphaned runtime.
@@ -458,7 +459,13 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         dispatch({
           type: 'LOAD_SESSION',
           threadId,
-          blocks: [{ id: 1, kind: 'text', content: `Failed to load session: ${e?.message ?? e}` }],
+          blocks: [
+            {
+              id: 1,
+              kind: 'text',
+              content: `Failed to load session: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
           interrupt: null,
           modelProvider: '',
           modelName: '',
@@ -597,14 +604,13 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         try {
           const fs = await import('node:fs/promises');
           const { mkdirSync } = await import('node:fs');
-          const dir = filename.split('/').slice(0, -1).join('/') || '.';
-          mkdirSync(dir, { recursive: true });
+          mkdirSync(dirname(filename), { recursive: true });
           await fs.writeFile(filename, header + body, { encoding: 'utf-8', mode: 0o600 });
           dispatch({ type: 'EXPORT_SESSION_DONE', filename });
-        } catch (e: any) {
+        } catch (error: unknown) {
           dispatch({
             type: 'LOCAL_TEXT',
-            text: `Export failed: ${e?.message ?? e}`,
+            text: `Export failed: ${error instanceof Error ? error.message : String(error)}`,
             isError: true,
           });
         }
