@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
@@ -174,6 +175,32 @@ describe('ToolSpec Registry — registration behavior', () => {
         },
       ).ok,
     ).toBe(false);
+  });
+});
+
+describe('toolRequestFromCall — parseFailureCode propagation', () => {
+  test('invalid_arguments is preserved on InvalidToolRequest from Registry schema failure', () => {
+    // write_file has required 'path' and 'content' fields; empty args triggers schema
+    // validation failure which flows: Registry.parseToolCall(invalid_arguments)
+    // → toolRequestFromCall → InvalidToolRequest with parseFailureCode
+    const result = toolRequestFromCall(
+      { id: 'e1', name: 'write_file', args: {} },
+      { workspace: '/tmp/sample' },
+    );
+    expect(result).not.toBeNull();
+    expect(result?.ok).toBe(false);
+    if (result && !result.ok) {
+      expect(result.request.parseFailureCode).toBe('invalid_arguments');
+      expect(result.request.parseError).toBeTruthy();
+    }
+  });
+
+  test('unknown tool returns null (handled by controller as tool_not_found)', () => {
+    const result = toolRequestFromCall(
+      { id: 'e2', name: 'nonexistent_tool', args: {} },
+      { workspace: '/tmp/sample' },
+    );
+    expect(result).toBeNull();
   });
 });
 

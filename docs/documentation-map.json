@@ -8,6 +8,7 @@
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/plan-mode-implementation.md",
         "docs/active/cancel-resume-cleanup.md",
+        "docs/active/failure-classification.md",
         "docs/book/04-Agent引擎.md",
         "docs/book/10-持久化与会话管理.md",
         "docs/adr/0025-model-requested-live-emission.md",

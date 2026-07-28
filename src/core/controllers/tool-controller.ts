@@ -4,7 +4,11 @@ import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { buildToolApproval } from '@/core/harness/tool-policy';
-import { isMcpRequest, toolRequestFromCall } from '@/core/harness/tool-requests';
+import {
+  isMcpRequest,
+  type PendingToolRequest,
+  toolRequestFromCall,
+} from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import {
@@ -230,6 +234,43 @@ function forkRole(agent: string): 'explore' | 'plan' | 'code' | 'review' {
   return agent === 'explore' || agent === 'plan' || agent === 'review' ? agent : 'code';
 }
 
+/**
+ * Build a proper PendingToolRequest from a blocked sub-agent tool via the
+ * request-adapter layer (Registry → toolRequestFromCall). Falls back to a
+ * minimal typed object when the tool is not registered in the builtin Registry
+ * (e.g. an MCP tool blocked before binding resolution).
+ */
+export function buildBlockedToolRequest(
+  blocked: { toolCallId: string; toolName: string; args: Record<string, unknown>; command: string },
+  availCtx: ReturnType<typeof toolAvailabilityContext>,
+): PendingToolRequest {
+  const parsed = toolRequestFromCall(
+    { id: blocked.toolCallId, name: blocked.toolName, args: blocked.args },
+    availCtx,
+  );
+  if (parsed?.ok) return parsed.request;
+  // Fallback: unknown/unavailable tool — construct minimal typed request.
+  // MCP tool names use the 'mcp__' prefix; route to the correct variant.
+  if (blocked.toolName.startsWith('mcp__')) {
+    return {
+      source: 'mcp',
+      id: blocked.toolCallId,
+      name: blocked.toolName as `mcp__${string}`,
+      args: blocked.args,
+      reason: `Sub-agent MCP tool "${blocked.toolName}" blocked for approval`,
+      protectedCommand: blocked.command,
+    };
+  }
+  return {
+    source: 'builtin',
+    id: blocked.toolCallId,
+    name: blocked.toolName,
+    args: blocked.args,
+    reason: `Sub-agent tool "${blocked.toolName}" blocked for approval`,
+    protectedCommand: blocked.command,
+  } as PendingToolRequest;
+}
+
 /** Resolve a sub-agent continuation that was rejected (user denied the approval).
  *  Emits subagent.failed + tool.finished so the TUI transitions the sub-agent block
  *  from awaiting_approval to error, and the task tool produces a result for the model.
@@ -438,12 +479,7 @@ async function handleSubAgentResume(params: {
     const blockedApproval = buildToolApproval({
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
-      request: {
-        id: blocked.toolCallId,
-        name: blocked.toolName,
-        args: blocked.args,
-        protectedCommand: blocked.command,
-      } as import('@/core/harness/tool-requests').PendingToolRequest,
+      request: buildBlockedToolRequest(blocked, availCtx),
       decision: blockedDecision,
     }) as import('@/protocol/events').ToolApprovalPayload;
     blockedApproval.subagentId = subagentId;
@@ -555,7 +591,11 @@ export async function executeRuntimeTools(params: {
       events.push({
         type: 'tool.failed',
         toolCallId,
-        failure: classifyFailure('tool_invalid_args', parsed.request.parseError),
+        failure: classifyFailure(
+          'tool_invalid_args',
+          parsed.request.parseError,
+          parsed.request.parseFailureCode,
+        ),
       });
       continue;
     }
@@ -1259,12 +1299,7 @@ export async function executeRuntimeTools(params: {
           const blockedApproval = buildToolApproval({
             workspace: params.state.session.workspace,
             threadId: params.state.session.threadId,
-            request: {
-              id: blocked.toolCallId,
-              name: blocked.toolName,
-              args: blocked.args,
-              protectedCommand: blocked.command,
-            } as import('@/core/harness/tool-requests').PendingToolRequest,
+            request: buildBlockedToolRequest(blocked, availCtx),
             decision: blockedDecision,
           }) as import('@/protocol/events').ToolApprovalPayload;
           blockedApproval.subagentId = subagentId;

@@ -3,12 +3,17 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
-import { executeRuntimeTools, toRuntimeSubagentEvent } from '@/core/controllers/tool-controller';
+import {
+  buildBlockedToolRequest,
+  executeRuntimeTools,
+  toRuntimeSubagentEvent,
+} from '@/core/controllers/tool-controller';
 import { exposedMcpToolName } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
+import { toolAvailabilityContext } from '@/core/tools/definitions';
 
 describe('executeRuntimeTools', () => {
   test('executes a normalized model tool name against the original remote MCP name', async () => {
@@ -1186,5 +1191,116 @@ describe('executeRuntimeTools', () => {
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
+  });
+
+  test('classifies an unregistered tool as tool_not_found through the full pipeline', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-e2e-unknown-tool',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.unknown = {
+      toolCallId: 'unknown',
+      modelMessageId: 'model',
+      name: 'nonexistent_tool_xyz',
+      args: { foo: 'bar' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('unknown');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['unknown'] });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'unknown',
+        failure: expect.objectContaining({
+          kind: 'tool_not_found',
+          message: expect.stringContaining('nonexistent_tool_xyz'),
+        }),
+      }),
+    ]);
+  });
+
+  test('propagates parseFailureCode through InvalidToolRequest to ClassifiedFailure', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-e2e-invalid-args-code',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    // write_file has required 'path' and 'content' fields; empty args triggers
+    // schema validation failure which flows:
+    // Registry.parseToolCall(invalid_arguments) → toolRequestFromCall → InvalidToolRequest
+    // → Controller classifyFailure('tool_invalid_args', ..., 'invalid_arguments')
+    state.tools.calls.wf = {
+      toolCallId: 'wf',
+      modelMessageId: 'model',
+      name: 'write_file',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('wf');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['wf'] });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'wf',
+        failure: expect.objectContaining({
+          kind: 'tool_invalid_args',
+          parseFailureCode: 'invalid_arguments',
+        }),
+      }),
+    ]);
+  });
+});
+
+describe('buildBlockedToolRequest', () => {
+  const availCtx = toolAvailabilityContext({ workspace: '/tmp/test' });
+
+  test('returns a proper PendingBuiltinToolRequest for a registered builtin tool', () => {
+    const blocked = {
+      toolCallId: 'tc-1',
+      toolName: 'read_file',
+      args: { path: 'src/index.ts' },
+      command: 'read_file src/index.ts',
+    };
+    const request = buildBlockedToolRequest(blocked, availCtx);
+    expect(request.source).toBe('builtin');
+    expect(request.name).toBe('read_file');
+    expect(request.id).toBe('tc-1');
+    expect(request.args).toEqual({ path: 'src/index.ts' });
+    expect(request.protectedCommand).toBe('read_file src/index.ts');
+  });
+
+  test('returns a PendingMcpToolRequest for an MCP tool name in the fallback path', () => {
+    const blocked = {
+      toolCallId: 'tc-2',
+      toolName: 'mcp__github__read',
+      args: { query: 'test' },
+      command: 'mcp__github__read',
+    };
+    const request = buildBlockedToolRequest(blocked, availCtx);
+    expect(request.source).toBe('mcp');
+    expect(request.name).toBe('mcp__github__read');
+    expect(request.id).toBe('tc-2');
+    expect(request.args).toEqual({ query: 'test' });
+  });
+
+  test('returns a fallback PendingBuiltinToolRequest for an unknown tool name', () => {
+    const blocked = {
+      toolCallId: 'tc-3',
+      toolName: 'nonexistent_tool',
+      args: { foo: 'bar' },
+      command: 'nonexistent_tool',
+    };
+    const request = buildBlockedToolRequest(blocked, availCtx);
+    expect(request.source).toBe('builtin');
+    expect(request.name as string).toBe('nonexistent_tool');
+    expect(request.args).toEqual({ foo: 'bar' });
+    expect(request.reason).toContain('blocked for approval');
   });
 });

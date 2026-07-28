@@ -13,6 +13,9 @@ export interface InvalidToolRequest {
   name: string;
   rawArgs: unknown;
   parseError: string;
+  /** Structured failure code from Registry.parseToolCall; distinguishes
+   *  unavailable vs. invalid-arguments at the request-adapter layer. */
+  parseFailureCode?: import('@/core/tools/registry/registry').ParseFailureCode;
 }
 
 /** 动态 MCP 工具请求 — args 无法编译期验证，Record<string,unknown> 是合理上限。 */
@@ -93,6 +96,7 @@ export function toolRequestFromCall(
           name: viaRegistry.name,
           rawArgs: call.args,
           parseError: viaRegistry.error,
+          parseFailureCode: viaRegistry.code,
         },
       };
     }

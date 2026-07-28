@@ -35,6 +35,9 @@ export interface ClassifiedFailure {
   needsUserIntervention: boolean;
   terminatesTurn: boolean;
   journal: boolean;
+  /** Original structured failure code from Registry.parseToolCall,
+   *  propagated through InvalidToolRequest for diagnostic observability. */
+  parseFailureCode?: import('@/core/tools/registry/registry').ParseFailureCode;
 }
 
 export interface RuntimeFailureContext {
@@ -46,6 +49,7 @@ export interface RuntimeFailureContext {
   toolCallId?: string;
   interactionId?: string;
   userVisible?: boolean;
+  parseFailureCode?: import('@/core/tools/registry/registry').ParseFailureCode;
 }
 
 export interface RuntimeFailureRecord extends RuntimeFailureContext {
@@ -126,8 +130,17 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
   unknown: terminal,
 };
 
-export function classifyFailure(kind: FailureKind, message: string): ClassifiedFailure {
-  return { kind, message, ...STRATEGIES[kind] };
+export function classifyFailure(
+  kind: FailureKind,
+  message: string,
+  parseFailureCode?: import('@/core/tools/registry/registry').ParseFailureCode,
+): ClassifiedFailure {
+  return {
+    kind,
+    message,
+    ...STRATEGIES[kind],
+    ...(parseFailureCode ? { parseFailureCode } : {}),
+  };
 }
 
 export function classifyMcpProviderError(error: McpProviderError): ClassifiedFailure {
@@ -145,7 +158,7 @@ export function classifyMcpProviderError(error: McpProviderError): ClassifiedFai
 
 /** Create one structured failure record for logging and public error mapping. */
 export function recordRuntimeFailure(input: RuntimeFailureContext): RuntimeFailureRecord {
-  const failure = classifyFailure(input.kind, input.message);
+  const failure = classifyFailure(input.kind, input.message, input.parseFailureCode);
   return {
     ...input,
     failure,
