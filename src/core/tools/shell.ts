@@ -6,19 +6,54 @@ import { normalizeMsys2PathsInText } from './path-utils';
 /** Shell 执行器函数签名 / Shell executor function signature */
 export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;
 
-function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
-  if (process.platform === 'win32') {
-    Bun.spawnSync(['taskkill.exe', '/pid', String(proc.pid), '/t', '/f'], {
+async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise.then(() => true),
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+export async function terminateControlledProcessTree(
+  proc: ReturnType<typeof Bun.spawn>,
+  input: { platform?: NodeJS.Platform; graceMs?: number } = {},
+): Promise<boolean> {
+  const platform = input.platform ?? process.platform;
+  const graceMs = input.graceMs ?? 3_000;
+  if (platform === 'win32') {
+    const killed = Bun.spawnSync(['taskkill.exe', '/pid', String(proc.pid), '/t', '/f'], {
       stdout: 'ignore',
       stderr: 'ignore',
     });
-    return;
+    const settled = await settlesWithin(proc.exited, graceMs);
+    return settled && (killed.exitCode === 0 || killed.exitCode === 128);
   }
+  try {
+    process.kill(-proc.pid, 'SIGTERM');
+  } catch {
+    try {
+      proc.kill('SIGTERM');
+    } catch {
+      return settlesWithin(proc.exited, graceMs);
+    }
+  }
+  if (await settlesWithin(proc.exited, graceMs)) return true;
   try {
     process.kill(-proc.pid, 'SIGKILL');
   } catch {
-    proc.kill('SIGKILL');
+    try {
+      proc.kill('SIGKILL');
+    } catch {
+      // Fall through to the convergence check.
+    }
   }
+  return settlesWithin(proc.exited, graceMs);
 }
 
 /** 断言目标路径在工作区范围内 / Assert target path is inside workspace */
@@ -102,6 +137,11 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
   const executionBoundary =
     process.platform === 'win32' ? ('unsandboxed_bash' as const) : ('unsandboxed_shell' as const);
   let removeAbortListener: (() => void) | undefined;
+  let cleanupPromise: Promise<boolean> | undefined;
+  const effectiveTimeoutMs =
+    input.deadlineAt !== undefined
+      ? Math.min(input.timeoutMs ?? Number.POSITIVE_INFINITY, input.deadlineAt - Date.now())
+      : input.timeoutMs;
   try {
     const proc = Bun.spawn(buildShellInvocation(input.command), {
       cwd: input.workspace,
@@ -110,27 +150,35 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
       ...(process.platform === 'win32' ? {} : { detached: true }),
     });
     const abort = () => {
+      if (timedOut || cancelled) return;
       cancelled = true;
       outputStop.abort();
-      terminateProcessTree(proc);
+      cleanupPromise ??= terminateControlledProcessTree(proc, {
+        graceMs: input.cancellationGraceMs,
+      });
     };
     input.signal?.addEventListener('abort', abort, { once: true });
     removeAbortListener = () => input.signal?.removeEventListener('abort', abort);
     if (input.signal?.aborted) abort();
 
-    if (input.timeoutMs && input.timeoutMs > 0) {
+    if (effectiveTimeoutMs !== undefined && effectiveTimeoutMs > 0) {
       timeoutId = setTimeout(() => {
+        if (timedOut || cancelled) return;
         timedOut = true;
         // A background child can keep inherited stdout/stderr pipes open even
         // after the shell process is killed. Stop readers first so timeout
         // always reaches a terminal tool result.
         outputStop.abort();
-        try {
-          terminateProcessTree(proc);
-        } catch {
-          /* process may have exited already */
-        }
-      }, input.timeoutMs);
+        cleanupPromise ??= terminateControlledProcessTree(proc, {
+          graceMs: input.cancellationGraceMs,
+        });
+      }, effectiveTimeoutMs);
+    } else if (effectiveTimeoutMs !== undefined) {
+      timedOut = true;
+      outputStop.abort();
+      cleanupPromise = terminateControlledProcessTree(proc, {
+        graceMs: input.cancellationGraceMs,
+      });
     }
 
     // Always consume both streams through the cancellable reader. This keeps
@@ -147,22 +195,30 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
         outputStop.signal,
       ),
     ]);
+    const cleanupSucceeded = cleanupPromise ? await cleanupPromise : true;
     const exitCode = await proc.exited;
     if (timeoutId) clearTimeout(timeoutId);
     removeAbortListener();
 
     return {
-      ok: !timedOut && !cancelled && exitCode === 0,
+      ok: cleanupSucceeded && !timedOut && !cancelled && exitCode === 0,
       command: input.command,
       exitCode: timedOut ? 124 : cancelled ? 130 : exitCode,
       stdout: normalizeMsys2PathsInText(stdout),
-      stderr: timedOut
-        ? appendTimeoutMessage(
-            cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
-            input.timeoutMs!,
-          )
-        : cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+      stderr: !cleanupSucceeded
+        ? 'cancellation_cleanup_failed: controlled process tree did not converge.'
+        : timedOut
+          ? appendTimeoutMessage(
+              cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+              effectiveTimeoutMs ?? 0,
+            )
+          : cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
       executionBoundary,
+      ...(!cleanupSucceeded
+        ? { failureCode: 'cancellation_cleanup_failed' as const }
+        : timedOut
+          ? { failureCode: 'deadline_exceeded' as const }
+          : {}),
     };
   } catch (error) {
     if (timeoutId) clearTimeout(timeoutId);

@@ -33,9 +33,17 @@ export interface TransientModelRetryOptions {
   sleep?: (delayMs: number) => Promise<void>;
   /** 重试时调用的回调 / Callback invoked on each retry */
   onRetry?: ModelRetryListener;
+  /** Absolute invocation deadline shared by attempts and backoff. */
+  deadlineAt?: number;
+  /** Invocation cancellation signal. */
+  signal?: AbortSignal;
+  /** Test seam for deterministic deadline accounting. */
+  now?: () => number;
 }
 
-const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions, 'onRetry'>> = {
+const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<
+  Omit<TransientModelRetryOptions, 'onRetry' | 'deadlineAt' | 'signal' | 'now'>
+> = {
   maxAttempts: 5,
   initialDelayMs: 500,
   maxDelayMs: 4_000,
@@ -50,15 +58,20 @@ export async function withTransientModelRetry<T>(
   options: TransientModelRetryOptions = {},
 ): Promise<T> {
   const retryOptions = { ...DEFAULT_TRANSIENT_RETRY_OPTIONS, ...options };
+  const now = options.now ?? Date.now;
   let lastError: unknown;
-  const retryStartedAt = Date.now();
+  const retryStartedAt = now();
 
   for (let attempt = 1; attempt <= retryOptions.maxAttempts; attempt++) {
+    if (options.signal?.aborted) throw options.signal.reason;
+    if (options.deadlineAt !== undefined && now() >= options.deadlineAt) {
+      throw new DOMException('Model invocation deadline exceeded.', 'TimeoutError');
+    }
     try {
       return await operation();
     } catch (error) {
       lastError = error;
-      const elapsedRetryMs = Date.now() - retryStartedAt;
+      const elapsedRetryMs = now() - retryStartedAt;
       if (
         attempt >= retryOptions.maxAttempts ||
         !isTransientModelConnectionError(error) ||
@@ -73,14 +86,40 @@ export async function withTransientModelRetry<T>(
       );
       const jitter =
         retryOptions.jitterMs > 0 ? Math.floor(Math.random() * retryOptions.jitterMs) : 0;
-      const delayMs = Math.min(baseDelay + jitter, retryOptions.maxTotalRetryMs - elapsedRetryMs);
+      const remainingDeadlineMs =
+        options.deadlineAt === undefined ? Number.POSITIVE_INFINITY : options.deadlineAt - now();
+      const delayMs = Math.min(
+        baseDelay + jitter,
+        retryOptions.maxTotalRetryMs - elapsedRetryMs,
+        remainingDeadlineMs,
+      );
+      if (remainingDeadlineMs <= 0) {
+        throw new DOMException('Model invocation deadline exceeded.', 'TimeoutError');
+      }
       // attempt 即重试次数（1-indexed）：attempt=1 表示第 1 次重试 / attempt is the retry number (1-indexed): attempt=1 means first retry
       retryOptions.onRetry?.(attempt, retryOptions.maxAttempts, error, delayMs);
-      await retryOptions.sleep(delayMs);
+      await abortableRetrySleep(retryOptions.sleep(delayMs), options.signal);
     }
   }
 
   throw lastError;
+}
+
+async function abortableRetrySleep(promise: Promise<void>, signal?: AbortSignal): Promise<void> {
+  if (!signal) return promise;
+  if (signal.aborted) throw signal.reason;
+  let onAbort: (() => void) | undefined;
+  try {
+    await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        onAbort = () => reject(signal.reason);
+        signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    ]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
 }
 
 /** 判断是否为可重试的模型连接错误 / Check whether an error is a retryable model connection error */

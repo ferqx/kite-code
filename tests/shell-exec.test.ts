@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSandboxExecutor } from '../src/core/sandbox/executor';
@@ -102,6 +102,25 @@ describe('shell live output', () => {
     expect(result.exitCode).toBe(124);
     expect(result.stderr).toContain('timed out');
   });
+
+  test('prevents a background grandchild from leaking into the next invocation', async () => {
+    const marker = join(workspace, 'late-grandchild.txt');
+    rmSync(marker, { force: true });
+
+    const timedOut = await shellTool({
+      workspace,
+      command: '( (sleep 1; echo leaked > late-grandchild.txt) & wait ) & wait',
+      timeoutMs: 50,
+      cancellationGraceMs: 50,
+    });
+    const next = await shellTool({ workspace, command: 'echo next-run' });
+    await Bun.sleep(1_100);
+
+    expect(timedOut.exitCode).toBe(124);
+    expect(next.ok).toBe(true);
+    expect(next.stdout).toContain('next-run');
+    expect(existsSync(marker)).toBe(false);
+  }, 5_000);
 });
 
 describe('findSystemBash — candidate selection logic', () => {

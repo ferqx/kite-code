@@ -164,6 +164,28 @@ describe('invokeBoundModel streaming', () => {
     expect(deltas).toEqual(['first']);
   });
 
+  test('terminates a stream when the shared idle deadline expires', async () => {
+    const { server, model } = setup('openai-compatible');
+    server.setResponses([
+      {
+        message: { content_chunks: ['first', ' second'] },
+        chunk_delay: 200,
+      },
+    ]);
+
+    await expect(
+      invokeBoundModel({
+        model,
+        tools: {} as ToolSet,
+        messages: [humanMessage('hello')],
+        streaming: true,
+        deadlineAt: Date.now() + 1_000,
+        firstByteTimeoutMs: 100,
+        idleTimeoutMs: 20,
+      }),
+    ).rejects.toMatchObject({ name: 'TimeoutError' });
+  });
+
   test('ignores empty chunks while retaining cumulative text', async () => {
     const { server, model } = setup('openai-compatible');
     server.setResponses([{ message: { content_chunks: ['', 'answer'] } }]);

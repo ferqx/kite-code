@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
+import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import type { McpRuntimeProvider } from '@/core/mcp';
@@ -11,6 +12,11 @@ import {
   type RuntimeMcpPolicy,
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
+import {
+  awaitAbortable,
+  createInvocationDeadline,
+  InvocationCancellationError,
+} from '@/core/runtime/deadline';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
@@ -654,32 +660,43 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'read_mcp_resource') {
-    const dispatched = await dispatchRegisteredTool(readMcpResourceSpec, request.args, {
-      workspace,
-      threadId,
-      signal,
-      mcpManager,
-    });
-    if (!dispatched.dispatched) {
-      return withFailureGuidance(request, {
-        ok: false,
-        command: request.protectedCommand,
-        exitCode: -1,
-        stdout: '',
-        stderr: dispatched.rejection.error,
+    const resourceDeadline =
+      taskConfig && getFeatureFlags(taskConfig).boundedExecutionV1
+        ? createInvocationDeadline({
+            deadlineAt: Date.now() + taskConfig.resourceBudgets!.mcpCallMs,
+            signal,
+          })
+        : undefined;
+    try {
+      const dispatched = await dispatchRegisteredTool(readMcpResourceSpec, request.args, {
+        workspace,
+        threadId,
+        signal: resourceDeadline?.signal ?? signal,
+        mcpManager,
       });
+      if (!dispatched.dispatched) {
+        return withFailureGuidance(request, {
+          ok: false,
+          command: request.protectedCommand,
+          exitCode: -1,
+          stdout: '',
+          stderr: dispatched.rejection.error,
+        });
+      }
+      const command = `read_mcp_resource ${request.args.server ?? ''}`;
+      const projected = dispatched.projected;
+      return withFailureGuidance(request, {
+        ok: projected.ok,
+        command,
+        exitCode: projected.ok ? 0 : -1,
+        // 消费逐流投影：资源内容/错误保留在 execute 产出的原流。
+        stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+        stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+        resultMeta: projected.resultMeta,
+      });
+    } finally {
+      resourceDeadline?.dispose();
     }
-    const command = `read_mcp_resource ${request.args.server ?? ''}`;
-    const projected = dispatched.projected;
-    return withFailureGuidance(request, {
-      ok: projected.ok,
-      command,
-      exitCode: projected.ok ? 0 : -1,
-      // 消费逐流投影：资源内容/错误保留在 execute 产出的原流。
-      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
-      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
-      resultMeta: projected.resultMeta,
-    });
   }
 
   if (isMcpRequest(request)) {
@@ -703,36 +720,54 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     try {
-      const raw = await mcpManager.callCapability({
-        capabilityId: mcpInvocation.capabilityId,
-        expectedRevision: mcpInvocation.expectedRevision,
-        arguments: request.args,
-        signal,
-      });
-      const rawContent = JSON.stringify(raw);
-      const descriptor = mcpManager.findCapability(mcpInvocation.capabilityId);
-      const capabilityResult = normalizeMcpToolResult(raw, descriptor?.outputSchema);
-      const output = serializeMcpResultForModel(capabilityResult);
-      return withFailureGuidance(request, {
-        ok: !raw.isError,
-        command: request.name,
-        exitCode: 0,
-        stdout: output.modelContent,
-        stderr: '',
-        capabilityResult,
-        resultMeta: {
-          rawResultDigest: resultContentDigest(rawContent, '', 0),
-          truncated: output.truncated,
-        },
-      });
+      const mcpDeadline =
+        taskConfig && getFeatureFlags(taskConfig).boundedExecutionV1
+          ? createInvocationDeadline({
+              deadlineAt: Date.now() + taskConfig.resourceBudgets!.mcpCallMs,
+              signal,
+            })
+          : undefined;
+      try {
+        const raw = await awaitAbortable(
+          mcpManager.callCapability({
+            capabilityId: mcpInvocation.capabilityId,
+            expectedRevision: mcpInvocation.expectedRevision,
+            arguments: request.args,
+            signal: mcpDeadline?.signal ?? signal,
+            deadlineAt: mcpDeadline?.deadlineAt,
+          }),
+          mcpDeadline?.signal ?? signal,
+        );
+        const rawContent = JSON.stringify(raw);
+        const descriptor = mcpManager.findCapability(mcpInvocation.capabilityId);
+        const capabilityResult = normalizeMcpToolResult(raw, descriptor?.outputSchema);
+        const output = serializeMcpResultForModel(capabilityResult);
+        return withFailureGuidance(request, {
+          ok: !raw.isError,
+          command: request.name,
+          exitCode: 0,
+          stdout: output.modelContent,
+          stderr: '',
+          capabilityResult,
+          resultMeta: {
+            rawResultDigest: resultContentDigest(rawContent, '', 0),
+            truncated: output.truncated,
+          },
+        });
+      } finally {
+        mcpDeadline?.dispose();
+      }
     } catch (err) {
       if (isMcpProviderError(err)) throw err;
+      const deadlineExceeded =
+        err instanceof InvocationCancellationError && err.kind !== 'external_abort';
       return withFailureGuidance(request, {
         ok: false,
         command: request.name,
         exitCode: -1,
         stdout: '',
         stderr: err instanceof Error ? err.message : String(err),
+        ...(deadlineExceeded ? { failureCode: 'deadline_exceeded' as const } : {}),
       });
     }
   }
@@ -771,6 +806,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       shellExecutor,
       shellNetworkMode: networkMode,
       onShellProgress: input.onShellProgress,
+      resourceBudgets:
+        taskConfig && getFeatureFlags(taskConfig).boundedExecutionV1
+          ? taskConfig.resourceBudgets
+          : undefined,
     });
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {

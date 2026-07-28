@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentConfig } from '../src/core/config';
+import { resolveResourceBudgets } from '../src/core/config/resource-budgets';
 import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
@@ -489,6 +491,36 @@ describe('runApprovedTool — shell_execute timeout', () => {
 
     expect(capturedTimeout).toBe(250);
     expect(result.exitCode).toBe(124);
+  });
+
+  it('applies the bounded default and clamps an excessive shell timeout', async () => {
+    const captured: number[] = [];
+    const taskConfig = {
+      features: { boundedExecutionV1: true },
+      resourceBudgets: resolveResourceBudgets({ shellDefaultMs: 111, shellMaxMs: 222 }),
+    } as AgentConfig;
+    const execute = (args: { command: string; timeout_ms?: number }) =>
+      runApprovedTool({
+        workspace: '/ws',
+        request: {
+          id: `call-${captured.length}`,
+          name: 'shell_execute',
+          args,
+          reason: 'bounded shell',
+          protectedCommand: args.command,
+        } as PendingToolRequest,
+        approvedGrant: 'approve_once',
+        taskConfig,
+        shellExecutor: async (input) => {
+          captured.push(input.timeoutMs!);
+          return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+        },
+      });
+
+    await execute({ command: 'npm test' });
+    await execute({ command: 'npm test', timeout_ms: 999 });
+
+    expect(captured).toEqual([111, 222]);
   });
 });
 

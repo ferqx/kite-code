@@ -52,6 +52,7 @@ export interface ToolExecutionContext extends ToolContext {
   shellExecutor?: ShellExecutor;
   shellNetworkMode?: ShellNetworkMode;
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  resourceBudgets?: import('@/core/config/resource-budgets').ResourceBudgets;
   /** MCP inventory/resource specs consume the already-governed Runtime provider. */
   mcpManager?: McpRuntimeProvider;
   /** Governed sub-agent adapter injected by the harness to avoid Registry→runner cycles. */

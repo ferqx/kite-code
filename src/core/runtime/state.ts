@@ -266,6 +266,7 @@ export interface ToolResultMeta {
   command?: string;
   intent?: string;
   executionBoundary?: import('@/core/types').ShellExecutionBoundary;
+  failureCode?: 'deadline_exceeded' | 'cancellation_cleanup_failed';
   matchCount?: number;
   truncated?: boolean;
   contentDigest?: string;

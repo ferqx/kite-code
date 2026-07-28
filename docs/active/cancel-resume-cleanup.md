@@ -4,15 +4,22 @@
 
 读取时机：修改 abort/cancel、Runtime 恢复、Effect lease、消息工具对清理、工具参数异常、Subagent continuation 或 TUI 取消行为时。
 
-验证：`bun test tests/runtime/kernel.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/tui-interrupt-clear.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/shell-exec.test.ts tests/model-invoke.test.ts tests/mcp-tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/tui-interrupt-clear.test.ts`、`bun run typecheck`。
 
 ## Runtime 取消语义
 
 取消通过 AbortSignal 传播到模型、工具和 Subagent。Kernel 必须使当前 Effect lease 收敛为完成、失败或取消事件，不能留下永久 busy 状态。TUI 清理运行中 block 只是展示投影，不是 Runtime 取消事实。
 
+启用 `boundedExecutionV1` 后，每次 Model、MCP、Shell 和 Subagent invocation 都使用绝对
+`deadlineAt`；首字节、idle、局部 timeout、retry backoff 与 Provider 调用只能消费同一份
+剩余预算。外部 AbortSignal、总 Deadline 和阶段 timer 竞争时保留首个取消原因，后到的 timer
+不得覆盖它，也不得影响相邻 invocation。
+
 Shell 收到取消后必须停止 output reader 并清理受控进程树，不能只终止父 Bash。Windows 使用
-`taskkill /t /f`，POSIX 使用独立进程组；用户取消映射为 exit code `130`。如果无法确认进程树
-收敛，后续 bounded execution 路径必须使用 `cancellation_cleanup_failed`，不得产生虚假成功 receipt。
+`taskkill /t /f`，POSIX 使用独立进程组并执行 TERM → grace → KILL；用户取消映射为 exit
+code `130`，deadline 映射为 `124`。terminal receipt 只能在主进程、reader 和受控进程树完成
+收敛后产生。如果无法确认进程树收敛，结果必须携带 `cancellation_cleanup_failed`，Scheduler
+进入 recovery-blocked，不得产生虚假成功 receipt 或开始新执行。
 
 ## Resume 语义
 

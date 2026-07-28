@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentConfig } from '@/core/config';
+import { resolveResourceBudgets } from '@/core/config/resource-budgets';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '@/core/mcp';
@@ -96,5 +98,32 @@ describe('MCP tool runner', () => {
       type: 'text',
       text: expect.stringMatching(/^x+$/),
     });
+  });
+
+  test('binds MCP calls to the configured absolute deadline', async () => {
+    let observedDeadlineAt: number | undefined;
+    const startedAt = Date.now();
+    const result = await runApprovedTool({
+      workspace: process.cwd(),
+      request: request(),
+      authorization: { mode: 'full_access', commandGrants: {} },
+      mcpPolicy: {
+        effects: { filesystem: 'none', network: 'read', externalState: 'read' },
+        minimumApproval: 'none',
+      },
+      taskConfig: {
+        features: { boundedExecutionV1: true },
+        resourceBudgets: resolveResourceBudgets({ mcpCallMs: 123 }),
+      } as AgentConfig,
+      mcpManager: provider(async (invocation) => {
+        observedDeadlineAt = invocation.deadlineAt;
+        return { content: [] };
+      }),
+      mcpInvocation: { capabilityId: 'mcp:docs/search_docs', expectedRevision: 'revision' },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(observedDeadlineAt).toBeGreaterThanOrEqual(startedAt + 123);
+    expect(observedDeadlineAt).toBeLessThanOrEqual(Date.now() + 123);
   });
 });

@@ -16,6 +16,7 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
+import { InvocationCancellationError } from './deadline';
 import type { RuntimeEvent } from './events';
 import { createRuntimeEffectExecutor } from './executor';
 import { recordRuntimeFailure } from './failures';
@@ -260,9 +261,16 @@ export async function* runRuntimeAgent(
     }
     if (input.signal?.aborted) exitStatus = 'aborted';
   } catch (error) {
-    exitStatus = 'fatal';
+    const cancellation =
+      error instanceof InvocationCancellationError
+        ? error
+        : input.signal?.aborted
+          ? new InvocationCancellationError('external_abort', 'Invocation cancelled by caller.')
+          : undefined;
+    exitStatus = cancellation?.kind === 'external_abort' ? 'aborted' : 'fatal';
     const failure = recordRuntimeFailure({
-      kind: 'unknown',
+      kind:
+        cancellation && cancellation.kind !== 'external_abort' ? 'deadline_exceeded' : 'unknown',
       message: error instanceof Error ? error.message : String(error),
       phase: 'building',
       turnId: kernel.getState().turn.turnId,

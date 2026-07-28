@@ -47,6 +47,7 @@ export interface McpCapabilityInvocation {
   expectedRevision: string;
   arguments: Record<string, unknown>;
   signal?: AbortSignal;
+  deadlineAt?: number;
 }
 
 /** Runtime-facing MCP contract. It intentionally excludes control-plane mutation and UI state. */

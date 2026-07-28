@@ -88,6 +88,11 @@ Model Controller 术语（模型控制器）在 Provider 调用前通过统一�
 
 模型控制器默认请求流式输出；adapter 未声明或未实现流能力时才使用非流式调用。`ResolvedModelCapabilities.streaming` 与其他能力字段一样按显式配置、adapter metadata、兼容配置的优先级独立解析，不能由模型名称推断。流式与非流式路径必须生成相同的终态 `AIMessage` 语义，确保 Capability binding、Policy、Execution 和持久化行为不因展示方式改变。
 
+启用 `boundedExecutionV1` 时，Model Controller 在单次 Effect 内建立绝对 deadline，并把
+同一剩余预算传给首字节、stream idle、Provider attempt 与 transient retry backoff。该预算
+只约束当前 invocation，不改变 Capability disclosure、binding 或授权；取消首因与 deadline
+状态也不得跨 invocation 共享。
+
 Tool runner 在任何模型可见截断发生前计算 `rawResultDigest`，截断后由 Tool Controller 计算 `modelContentDigest`；兼容字段 `contentDigest` 指向模型可见内容，`digestScope` 标记其为 `raw` 或 `projected`。M2 completed effect 只把真实 `rawResultDigest` 暴露为 summary 的 `rawResultDigest`，不得把 projected digest 冒充原始结果摘要。
 
 手动 `/compact` 同样不能绕过 Kernel。App shell 对空闲 session 可打开 Kernel 并执行单次 `compact_context`；若 agent loop 正在运行，则使用其暴露的受限 live control 只注入 RuntimeEvent，依靠现有 scheduler 排队。Live control 不暴露可变 State 或直接 reducer，外部事件推进 revision 后，正在运行的旧 effect 仍由 lease 机制判 stale。
@@ -169,7 +174,8 @@ RuntimeEffectExecutor
 
 Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`CapabilityInvocationRecord` 保存调用身份、状态、参数摘要、观察到的副作用、外部引用、artifact、重试安全性和 reconciliation 结果。
 Shell 的 terminal result 还携带实际 `executionBoundary`；App 只投影该 Core 事实，不能根据
-命令文本猜测是否 sandboxed。
+命令文本猜测是否 sandboxed。受控进程树无法证明已清理时，Receipt 必须携带
+`cancellation_cleanup_failed`，Scheduler 返回 recovery-blocked，禁止继续产生新的 Execution。
 
 工具被策略拒绝（`tool.rejected`）或被用户拒绝（`approval.rejected`）时，reducer 同时写入 `ToolCallRecord`（status: `rejected`，含 failure classification）和 transcript ToolMessage（`ok: false, rejected: true`），保证模型上下文能看到拒绝结果。仅当最近一条 assistant 消息的全部工具调用被**用户主动拒绝**（failure.kind 均为 `approval_rejected`）且其后无新用户消息时，scheduler 返回 `stop`，不再调用模型。策略拒绝（`policy_denied`）及其他自动失败继续 `call_model`，允许模型看到拒绝信息后调整策略。若拒绝后已有新用户消息到来（新轮次），scheduler 正常返回 `call_model`，由模型处理该新消息。
 

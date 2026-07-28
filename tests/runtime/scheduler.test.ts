@@ -102,6 +102,30 @@ describe('decideNextEffect', () => {
     expect(decideNextEffect(reconciled)).toEqual({ type: 'call_model' });
   });
 
+  test('blocks scheduling when cancellation cleanup cannot be proven', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.tools.calls['shell-cleanup-failed'] = {
+      toolCallId: 'shell-cleanup-failed',
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command: 'long-running-command' },
+      status: 'failed',
+      createdAtTurnId: state.turn.turnId,
+      result: {
+        ok: false,
+        summary: 'Cancellation cleanup failed',
+        resultMeta: { failureCode: 'cancellation_cleanup_failed' },
+      },
+    };
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'recovery_blocked',
+      reason:
+        'Tool call shell-cleanup-failed could not prove cancellation cleanup. ' +
+        'Reconcile the controlled process tree before continuing.',
+    });
+  });
+
   test('gives unresolved user interaction priority over queued tools', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
     state.tools.queue.push('tool');

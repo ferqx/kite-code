@@ -14,6 +14,11 @@ import {
   type ToolMessage,
 } from '@/core/messages';
 import {
+  awaitAbortable,
+  createDeadlinePhaseTimer,
+  createInvocationDeadline,
+} from '@/core/runtime/deadline';
+import {
   type ModelRetryListener,
   type TransientModelRetryOptions,
   withTransientModelRetry,
@@ -37,7 +42,15 @@ export async function invokeBoundModel(params: {
   onRetry?: ModelRetryListener;
   /** Test seam for deterministic retry timing; production uses the bounded defaults. */
   streamRetryOptions?: Omit<TransientModelRetryOptions, 'onRetry'>;
+  deadlineAt?: number;
+  firstByteTimeoutMs?: number;
+  idleTimeoutMs?: number;
 }): Promise<AIMessage> {
+  const deadline =
+    params.deadlineAt !== undefined
+      ? createInvocationDeadline({ deadlineAt: params.deadlineAt, signal: params.signal })
+      : undefined;
+  const invocationSignal = deadline?.signal ?? params.signal;
   // Separate system messages from chat messages — generateText requires
   // system prompts via `system`/`instructions`, not in `messages`.
   const allModelMessages = toModelMessages(params.messages);
@@ -67,7 +80,7 @@ export async function invokeBoundModel(params: {
     messages: chatMessages,
     system: systemText || undefined,
     stopWhen: stepCountIs(1),
-    abortSignal: params.signal,
+    abortSignal: invocationSignal,
     temperature: 0,
     maxRetries: 0, // retries handled by transientRetryMiddleware
     ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
@@ -79,66 +92,100 @@ export async function invokeBoundModel(params: {
     let lastAttemptReasoning = '';
     let retryBaselineText = '';
     let retryBaselineReasoning = '';
-    return withTransientModelRetry(
-      async () => {
-        attemptNumber++;
-        let streamError: unknown;
-        const result = streamText({
-          ...request,
-          onError: ({ error }) => {
-            streamError = error;
-          },
-        });
-        let text = '';
-        let reasoning = '';
-        lastAttemptText = '';
-        lastAttemptReasoning = '';
-        for await (const part of result.fullStream) {
-          if (part.type === 'text-delta') {
-            text += part.text;
-            lastAttemptText = text;
-            const visibleText =
-              attemptNumber === 1
-                ? text
-                : retryBaselineText.startsWith(text)
-                  ? ''
-                  : text.startsWith(retryBaselineText)
-                    ? text.slice(retryBaselineText.length)
-                    : text;
-            if (visibleText) params.onTextDelta?.(visibleText);
-          } else if (part.type === 'reasoning-delta') {
-            reasoning += part.text;
-            lastAttemptReasoning = reasoning;
-            const visibleReasoning =
-              attemptNumber === 1
-                ? reasoning
-                : retryBaselineReasoning.startsWith(reasoning)
-                  ? ''
-                  : reasoning.startsWith(retryBaselineReasoning)
-                    ? reasoning.slice(retryBaselineReasoning.length)
-                    : reasoning;
-            if (visibleReasoning) params.onReasoningDelta?.(visibleReasoning);
-          } else if (part.type === 'error') {
-            throw part.error;
-          } else if (part.type === 'abort') {
-            throw new DOMException(part.reason ?? 'Model stream aborted', 'AbortError');
+    const firstByteTimer =
+      deadline && params.firstByteTimeoutMs
+        ? createDeadlinePhaseTimer(deadline, 'first_byte_timeout', params.firstByteTimeoutMs)
+        : undefined;
+    let idleTimer: ReturnType<typeof createDeadlinePhaseTimer> | undefined;
+    let receivedFirstPart = false;
+    try {
+      return await withTransientModelRetry(
+        async () => {
+          attemptNumber++;
+          let streamError: unknown;
+          const result = streamText({
+            ...request,
+            onError: ({ error }) => {
+              streamError = error;
+            },
+          });
+          let text = '';
+          let reasoning = '';
+          lastAttemptText = '';
+          lastAttemptReasoning = '';
+          for await (const part of result.fullStream) {
+            if (!receivedFirstPart) {
+              receivedFirstPart = true;
+              firstByteTimer?.dispose();
+              if (deadline && params.idleTimeoutMs) {
+                idleTimer = createDeadlinePhaseTimer(
+                  deadline,
+                  'idle_timeout',
+                  params.idleTimeoutMs,
+                );
+              }
+            } else {
+              idleTimer?.reset();
+            }
+            if (part.type === 'text-delta') {
+              text += part.text;
+              lastAttemptText = text;
+              const visibleText =
+                attemptNumber === 1
+                  ? text
+                  : retryBaselineText.startsWith(text)
+                    ? ''
+                    : text.startsWith(retryBaselineText)
+                      ? text.slice(retryBaselineText.length)
+                      : text;
+              if (visibleText) params.onTextDelta?.(visibleText);
+            } else if (part.type === 'reasoning-delta') {
+              reasoning += part.text;
+              lastAttemptReasoning = reasoning;
+              const visibleReasoning =
+                attemptNumber === 1
+                  ? reasoning
+                  : retryBaselineReasoning.startsWith(reasoning)
+                    ? ''
+                    : reasoning.startsWith(retryBaselineReasoning)
+                      ? reasoning.slice(retryBaselineReasoning.length)
+                      : reasoning;
+              if (visibleReasoning) params.onReasoningDelta?.(visibleReasoning);
+            } else if (part.type === 'error') {
+              throw part.error;
+            } else if (part.type === 'abort') {
+              throw (
+                invocationSignal?.reason ??
+                new DOMException(part.reason ?? 'Model stream aborted', 'AbortError')
+              );
+            }
           }
-        }
-        if (streamError) throw streamError;
-        return toAIMessage(await result.finalStep);
-      },
-      {
-        ...params.streamRetryOptions,
-        onRetry: (attempt, maxAttempts, error, delayMs) => {
-          retryBaselineText = lastAttemptText;
-          retryBaselineReasoning = lastAttemptReasoning;
-          params.onRetry?.(attempt, maxAttempts, error, delayMs);
+          if (streamError) throw streamError;
+          return toAIMessage(await result.finalStep);
         },
-      },
-    );
+        {
+          ...params.streamRetryOptions,
+          deadlineAt: params.deadlineAt,
+          signal: invocationSignal,
+          onRetry: (attempt, maxAttempts, error, delayMs) => {
+            retryBaselineText = lastAttemptText;
+            retryBaselineReasoning = lastAttemptReasoning;
+            params.onRetry?.(attempt, maxAttempts, error, delayMs);
+          },
+        },
+      );
+    } finally {
+      firstByteTimer?.dispose();
+      idleTimer?.dispose();
+      deadline?.dispose();
+    }
   }
 
-  return toAIMessage(await generateText(request));
+  try {
+    return toAIMessage(await awaitAbortable(generateText(request), invocationSignal));
+  } finally {
+    deadline?.dispose();
+  }
 }
 
 // ── Message conversion: internal BaseMessage → AI SDK ModelMessage ──

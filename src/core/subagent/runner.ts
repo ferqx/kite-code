@@ -17,6 +17,7 @@ import { createChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
+import { createInvocationDeadline } from '@/core/runtime/deadline';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
 import { createAgentTools } from '@/core/tools/definitions';
@@ -282,22 +283,14 @@ async function runSubAgentLoop(
       ? wrapReadOnlyShell(input.shellExecutor)
       : input.shellExecutor;
 
-  const timeoutController = new AbortController();
-  const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
-  // 手动合并信号，避免 AbortSignal.any 的跨运行时兼容性问题
-  const combinedController = new AbortController();
-  const onAbort = () => combinedController.abort();
-  if (input.signal.aborted) {
-    combinedController.abort(input.signal.reason);
-  } else {
-    input.signal.addEventListener('abort', onAbort, { once: true });
-  }
-  if (timeoutController.signal.aborted) {
-    combinedController.abort(timeoutController.signal.reason);
-  } else {
-    timeoutController.signal.addEventListener('abort', onAbort, { once: true });
-  }
-  const combinedSignal = combinedController.signal;
+  const deadline = createInvocationDeadline({
+    deadlineAt: Math.min(
+      input.deadlineAt ?? Number.POSITIVE_INFINITY,
+      startTime + effectiveTimeoutMs,
+    ),
+    signal: input.signal,
+  });
+  const combinedSignal = deadline.signal;
 
   const allTools = createAgentTools({
     workspace: input.workspace,
@@ -357,7 +350,6 @@ async function runSubAgentLoop(
       }
 
       if (!response.tool_calls || response.tool_calls.length === 0) {
-        clearTimeout(timeoutId);
         messages.push(response);
         const summary = extractText(response.content);
         const durationMs = Date.now() - startTime;
@@ -606,7 +598,6 @@ async function runSubAgentLoop(
             },
           );
           if (blocked) {
-            clearTimeout(timeoutId);
             const totalDurationMs = Date.now() - startTime;
 
             // 同一 AI message 中可能有多个 tool call，blocked 后剩余的工具
@@ -729,10 +720,16 @@ async function runSubAgentLoop(
       }
     }
   } catch (e) {
-    clearTimeout(timeoutId);
     const durationMs = Date.now() - startTime;
     const errMsg = e instanceof Error ? e.message : String(e);
-    const summary = e instanceof Error && e.name === 'AbortError' ? 'Cancelled' : errMsg;
+    const summary =
+      deadline.reason?.kind === 'deadline_exceeded'
+        ? 'Sub-agent deadline exceeded'
+        : deadline.reason?.kind === 'external_abort'
+          ? 'Cancelled'
+          : e instanceof Error && e.name === 'AbortError'
+            ? 'Cancelled'
+            : errMsg;
     input.eventSink({
       type: 'error',
       data: { id, error: summary, summary, toolCallCount, durationMs },
@@ -748,5 +745,7 @@ async function runSubAgentLoop(
       exhaustedFingerprints:
         Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
     };
+  } finally {
+    deadline.dispose();
   }
 }

@@ -3,6 +3,7 @@ import {
   appendTimeoutMessage,
   readWithProgress,
   shellTool,
+  terminateControlledProcessTree,
   timeoutMessage,
 } from '@/core/tools/shell';
 import type { ShellNetworkMode } from '@/core/types';
@@ -131,6 +132,13 @@ function createWrappedExecutor(
     let timedOut = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
     const outputStop = new AbortController();
+    let cleanupPromise: Promise<boolean> | undefined;
+    let cancelled = false;
+    let removeAbortListener: (() => void) | undefined;
+    const effectiveTimeoutMs =
+      input.deadlineAt !== undefined
+        ? Math.min(input.timeoutMs ?? Number.POSITIVE_INFINITY, input.deadlineAt - Date.now())
+        : input.timeoutMs;
     try {
       // 执行前检查命令是否引用危险文件路径 / Pre-execution dangerous path check
       const dangerous = checkDangerousPaths(input.command);
@@ -160,21 +168,38 @@ function createWrappedExecutor(
         stdin: stdin !== undefined ? 'pipe' : 'inherit',
         stdout: 'pipe',
         stderr: 'pipe',
-        signal: input.signal,
+        detached: true,
       });
 
-      if (input.timeoutMs && input.timeoutMs > 0) {
+      const abort = () => {
+        if (timedOut || cancelled) return;
+        cancelled = true;
+        outputStop.abort();
+        cleanupPromise ??= terminateControlledProcessTree(proc, {
+          graceMs: input.cancellationGraceMs,
+        });
+      };
+      input.signal?.addEventListener('abort', abort, { once: true });
+      removeAbortListener = () => input.signal?.removeEventListener('abort', abort);
+      if (input.signal?.aborted) abort();
+
+      if (effectiveTimeoutMs !== undefined && effectiveTimeoutMs > 0) {
         timeoutId = setTimeout(() => {
+          if (timedOut || cancelled) return;
           timedOut = true;
           // Background descendants may retain inherited pipes after the shell
           // is killed. Cancel readers so the tool cannot remain non-terminal.
           outputStop.abort();
-          try {
-            proc.kill();
-          } catch {
-            /* process may have exited already */
-          }
-        }, input.timeoutMs);
+          cleanupPromise ??= terminateControlledProcessTree(proc, {
+            graceMs: input.cancellationGraceMs,
+          });
+        }, effectiveTimeoutMs);
+      } else if (effectiveTimeoutMs !== undefined) {
+        timedOut = true;
+        outputStop.abort();
+        cleanupPromise = terminateControlledProcessTree(proc, {
+          graceMs: input.cancellationGraceMs,
+        });
       }
 
       if (stdin !== undefined && proc.stdin) {
@@ -194,19 +219,31 @@ function createWrappedExecutor(
           outputStop.signal,
         ),
       ]);
+      const cleanupSucceeded = cleanupPromise ? await cleanupPromise : true;
       const exitCode = await proc.exited;
       if (timeoutId) clearTimeout(timeoutId);
+      removeAbortListener?.();
 
       return {
-        ok: !timedOut && exitCode === 0,
+        ok: cleanupSucceeded && !timedOut && !cancelled && exitCode === 0,
         command: input.command,
-        exitCode: timedOut ? 124 : exitCode,
+        exitCode: timedOut ? 124 : cancelled ? 130 : exitCode,
         stdout,
-        stderr: timedOut ? appendTimeoutMessage(stderr, input.timeoutMs!) : stderr,
+        stderr: !cleanupSucceeded
+          ? 'cancellation_cleanup_failed: controlled process tree did not converge.'
+          : timedOut
+            ? appendTimeoutMessage(stderr, effectiveTimeoutMs ?? 0)
+            : stderr,
         executionBoundary,
+        ...(!cleanupSucceeded
+          ? { failureCode: 'cancellation_cleanup_failed' as const }
+          : timedOut
+            ? { failureCode: 'deadline_exceeded' as const }
+            : {}),
       };
     } catch (error) {
       if (timeoutId) clearTimeout(timeoutId);
+      removeAbortListener?.();
       const isAbort = error instanceof Error && error.name === 'AbortError';
       return {
         ok: false,

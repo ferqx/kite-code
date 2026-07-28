@@ -186,6 +186,8 @@ Windows `full` 禁用、无 sandbox 的 `auto` allowlist，以及状态栏、审
 
 ## 六、PR2：统一 Deadline 与进程树取消
 
+状态：已完成（2026-07-29）
+
 ### 实现
 
 - 建立绝对 `deadlineAt`，first-byte/idle/local timeout/retry 共享剩余总预算。
@@ -200,6 +202,11 @@ Windows `full` 禁用、无 sandbox 的 `auto` allowlist，以及状态栏、审
 - child/grandchild/background process；
 - cancel 后立即新 run；
 - MCP、Model、Shell 和 Subagent 取消互不串线。
+
+完成证据：绝对 deadline 与首因取消已接入 Model、MCP、Shell、sandbox executor 和
+Subagent；POSIX/Windows 受控进程树在 terminal receipt 前完成收敛，无法证明清理时以
+`cancellation_cleanup_failed` 进入 recovery-blocked。定向 typecheck 与 73 个 deadline、
+调度、模型、MCP、Shell、工具 runner 测试通过。
 
 ## 七、PR3：有界输出与 Artifact
 

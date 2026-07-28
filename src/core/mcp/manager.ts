@@ -475,7 +475,15 @@ export class McpConnectionManager {
     const client = state.client as Client;
     try {
       const result = (await client.callTool({ name: toolName, arguments: args }, undefined, {
-        timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
+        timeout: Math.max(
+          1,
+          Math.min(
+            state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
+            invocation.deadlineAt === undefined
+              ? Number.POSITIVE_INFINITY
+              : invocation.deadlineAt - Date.now(),
+          ),
+        ),
         signal: invocation.signal,
       })) as CallToolResult;
       state.consecutiveCallFailures = 0;
@@ -487,6 +495,7 @@ export class McpConnectionManager {
       // synchronous tool calls only; the protocol result is validated by the server.
       return result;
     } catch (error) {
+      if (invocation.signal?.aborted) throw invocation.signal.reason;
       this.noteCallFailure(state, error);
       throw providerErrorFromDiagnostic(server, state.diagnostic);
     }
@@ -568,6 +577,7 @@ export class McpConnectionManager {
       }
       return JSON.stringify(result);
     } catch (error) {
+      if (signal?.aborted) throw signal.reason;
       this.noteCallFailure(state, error);
       throw providerErrorFromDiagnostic(serverName, state.diagnostic);
     }

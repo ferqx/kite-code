@@ -44,6 +44,17 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
         'Reconcile it or obtain a user decision before continuing.',
     };
   }
+  const incompleteCancellationCleanup = Object.values(state.tools.calls).find(
+    (call) => call.result?.resultMeta?.failureCode === 'cancellation_cleanup_failed',
+  );
+  if (incompleteCancellationCleanup) {
+    return {
+      type: 'recovery_blocked',
+      reason:
+        `Tool call ${incompleteCancellationCleanup.toolCallId} could not prove cancellation cleanup. ` +
+        'Reconcile the controlled process tree before continuing.',
+    };
+  }
 
   switch (state.interactions.kind) {
     case 'awaiting_user_input':

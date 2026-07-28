@@ -15,6 +15,10 @@ export interface ShellInput {
   signal?: AbortSignal;
   /** 最大运行时间（毫秒）；超时后终止子进程 / Max runtime in milliseconds; kills child on timeout */
   timeoutMs?: number;
+  /** Absolute deadline shared with caller retries/phases. */
+  deadlineAt?: number;
+  /** Grace between graceful and forced process-tree termination. */
+  cancellationGraceMs?: number;
   /** 实时输出回调 — shell 进程每产生一行文本时调用 / Called per output line while shell process is running */
   onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** 本次调用的网络权限；未指定时使用执行器默认值 / Network permission for this call */
@@ -29,6 +33,7 @@ export interface ShellResult {
   stderr: string;
   /** Actual execution boundary used for this invocation. */
   executionBoundary?: ShellExecutionBoundary;
+  failureCode?: 'deadline_exceeded' | 'cancellation_cleanup_failed';
 }
 
 export type ShellIntent = 'inspect' | 'verify' | 'build' | 'test' | 'git' | 'other';

@@ -539,11 +539,19 @@ export async function invokeRuntimeModel(params: {
     // above does not emit it (no model call happens on that path).
     params.emitRuntimeEvent?.({ type: 'model.requested', requestId });
     const callStartedAt = Date.now();
+    const executionBudgets = flags.boundedExecutionV1 ? params.config.resourceBudgets : undefined;
     const response = await invokeBoundModel({
       model: params.model,
       tools,
       messages: projection.providerMessages,
       signal: params.signal,
+      ...(executionBudgets
+        ? {
+            deadlineAt: callStartedAt + executionBudgets.modelTotalMs,
+            firstByteTimeoutMs: executionBudgets.modelFirstByteMs,
+            idleTimeoutMs: executionBudgets.modelIdleMs,
+          }
+        : {}),
       maxOutputTokens:
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         modelCapabilities.maxOutputTokens,

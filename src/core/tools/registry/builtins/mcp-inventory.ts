@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildMcpInventory, isMcpProviderError } from '@/core/mcp';
+import { awaitAbortable } from '@/core/runtime/deadline';
 import {
   LIST_MCP_RESOURCES_CONTRACT,
   LIST_MCP_TOOLS_CONTRACT,
@@ -168,9 +169,8 @@ export const readMcpResourceSpec = defineExecutableTool({
       };
     }
     try {
-      const content = await context.mcpManager.readResource(
-        input.server,
-        input.uri,
+      const content = await awaitAbortable(
+        context.mcpManager.readResource(input.server, input.uri, context.signal),
         context.signal,
       );
       if (content.length <= MAX_MODEL_MCP_RESULT_CHARS) {

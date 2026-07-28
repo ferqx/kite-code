@@ -46,6 +46,7 @@ export interface SubAgentRunnerInput {
   threadId?: string;
   model?: import('@/core/model/factory').SupportedChatModel;
   timeoutMs: number;
+  deadlineAt?: number;
   signal: AbortSignal;
   eventSink: SubAgentEventSink;
   /** 当前嵌套深度（0 = 主 agent 直接派生）/ Current nesting depth (0 = spawned by main agent) */

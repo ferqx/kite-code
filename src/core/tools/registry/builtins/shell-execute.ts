@@ -120,11 +120,19 @@ export const shellExecuteSpec = defineExecutableTool({
   approvalSummary: (input) => input.command,
   execute: async (input, context) => {
     try {
+      const timeoutMs = context.resourceBudgets
+        ? Math.min(
+            input.timeout_ms ?? context.resourceBudgets.shellDefaultMs,
+            context.resourceBudgets.shellMaxMs,
+          )
+        : input.timeout_ms;
       return await (context.shellExecutor ?? shellTool)({
         workspace: context.workspace,
         command: input.command,
         signal: context.signal,
-        timeoutMs: input.timeout_ms,
+        timeoutMs,
+        ...(timeoutMs ? { deadlineAt: Date.now() + timeoutMs } : {}),
+        cancellationGraceMs: context.resourceBudgets?.cancellationGraceMs,
         networkMode: context.shellNetworkMode,
         onProgress: context.onShellProgress,
       });
@@ -141,6 +149,7 @@ export const shellExecuteSpec = defineExecutableTool({
             ? error.message
             : String(error),
         executionBoundary: undefined,
+        failureCode: undefined,
       };
     }
   },
@@ -154,6 +163,7 @@ export const shellExecuteSpec = defineExecutableTool({
         command: output.command,
         intent: classifyShellActionIntent(output.command),
         ...(output.executionBoundary ? { executionBoundary: output.executionBoundary } : {}),
+        ...(output.failureCode ? { failureCode: output.failureCode } : {}),
         truncated: streams.truncated,
         rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
       },
