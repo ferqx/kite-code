@@ -134,3 +134,5 @@ MCP 动态工具的 binding/turn/revision/schema 校验与 `callCapability` 复�
 - **`_parse_error` 修正**：合成非法调用的 `parseError` 使用 `_parse_error` 字段，原始非法 JSON 保留在 `rawArgs`。
 - **不可信边界收紧**：`toolRequestFromCall` 签名 `args` 改为 `unknown`，`InvalidToolRequest.rawArgs` 改为 `unknown`，MCP 路径显式验证 args 为非 null 对象。
 - **类型测试扩展**：新增 `ask_user` transform 输出（`UserInputRequest`）与 `write_plan` 可选 `action` 的编译期断言。
+- **deprecated 清理**：删除 `declareToolSpec` / `declareInterruptTool`（全库零引用，已被 `defineExecutableTool` / `defineInterruptTool` 替代）。
+- **Sub-agent runner cast 清理**：移除 `tc.args as Record<string, unknown>` 冗余断言（`ToolCall.args` 已是 `Record<string, unknown>`）。

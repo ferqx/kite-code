@@ -430,18 +430,14 @@ async function runSubAgentLoop(
           });
           steps.push({
             toolName: tc.name,
-            toolArgs: (tc.args as Record<string, unknown>) ?? {},
+            toolArgs: tc.args ?? {},
             status: 'error' as const,
             ok: false,
           });
           continue;
         }
 
-        const toolArgs = normalizeSubAgentToolArgs(
-          tc.name,
-          (tc.args as Record<string, unknown>) ?? {},
-          input.workspace,
-        );
+        const toolArgs = normalizeSubAgentToolArgs(tc.name, tc.args ?? {}, input.workspace);
         const stepSnapshot: SubAgentStepSnapshot = {
           toolName: tc.name,
           toolArgs,
@@ -495,7 +491,7 @@ async function runSubAgentLoop(
 
         // Phase 5: 预检 — 如果 tool+path 已耗尽，跳过执行
         // Preflight: skip execution if this tool+path is already exhausted.
-        const preflightPath = (toolArgs as Record<string, unknown>).path as string | undefined;
+        const preflightPath = toolArgs.path as string | undefined;
         if (isFingerprintExhausted(exhaustedFingerprints, tc.name, preflightPath)) {
           const blockedOutput = JSON.stringify({
             ok: false,
@@ -692,7 +688,7 @@ async function runSubAgentLoop(
             ok,
             stderr: ok ? undefined : (JSON.parse(toolOutput).stderr as string | undefined),
             exitCode: ok ? undefined : (JSON.parse(toolOutput).exitCode as number | undefined),
-            path: (toolArgs as Record<string, unknown>).path as string | undefined,
+            path: toolArgs.path as string | undefined,
           },
         );
         executionJournal = journalResult.executionJournal;

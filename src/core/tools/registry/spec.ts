@@ -215,17 +215,3 @@ export function defineInterruptTool<const Name extends string, const Input>(
 ): InterruptToolSpec<Name, Input> {
   return spec;
 }
-
-/** @deprecated 使用 defineExecutableTool / defineInterruptTool 以保留 name 字面量类型。 */
-export function declareToolSpec<Input, Output>(
-  spec: ToolSpec<string, Input, Output>,
-): ToolSpec<string, Input, Output> {
-  return spec;
-}
-
-/** @deprecated 使用 defineInterruptTool 以保留 name 字面量类型。 */
-export function declareInterruptTool<Input>(
-  spec: InterruptToolSpec<string, Input>,
-): InterruptToolSpec<string, Input> {
-  return spec;
-}
