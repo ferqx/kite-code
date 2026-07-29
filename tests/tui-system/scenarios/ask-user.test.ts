@@ -40,12 +40,15 @@ describe('TUI PTY System — ask_user', () => {
               id: 'call_1',
               name: 'ask_user',
               args: {
-                question: 'What is your favorite color?',
-                options: [
-                  { id: 'blue', label: 'Blue' },
-                  { id: 'red', label: 'Red' },
+                questions: [
+                  {
+                    question: 'What is your favorite color?',
+                    options: [
+                      { label: 'Blue', description: 'Choose a calm primary color.' },
+                      { label: 'Red', description: 'Choose a warm primary color.' },
+                    ],
+                  },
                 ],
-                recommended: 'blue',
               },
             },
           ],

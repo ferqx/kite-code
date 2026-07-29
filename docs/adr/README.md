@@ -50,3 +50,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0046](0046-atomic-streaming-component-progress.md)    | accepted   | 结构组件先闭合外壳，再按完整内部行渐进渲染                                         |
 | [0047](0047-thought-label-single-consumption.md)      | accepted   | Thought 标签在阶段边界单次消费，边界后的探索聚合不重复继承                         |
 | [0048](0048-durable-user-turn-cancellation.md)         | accepted   | 用户停止 turn 时先原子取消未终结工具，再传播 AbortSignal；task 保持可继续           |
+| [0049](0049-effect-aware-read-scheduling.md)           | accepted   | 连续免审只读工具限流并行；TUI 只物化已开始、交互目标或终态失败的调用                |
+| [0050](0050-client-specific-session-navigation.md)     | accepted   | TUI 切换会话映射为取消；支持后台运行的客户端切换视图时保留 Runtime 状态             |

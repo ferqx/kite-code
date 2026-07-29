@@ -13,7 +13,7 @@ import {
   type builtinToolSpecs,
   type PendingBuiltinToolRequest,
 } from '@/core/tools/registry/builtins';
-import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
+import { type askUserInputSchema, askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import { type editFileInputSchema, editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import { type readFileInputSchema, readFileSpec } from '@/core/tools/registry/builtins/read-file';
 import {
@@ -41,7 +41,6 @@ import type { ToolContext } from '@/core/tools/registry/spec';
 import { defineExecutableTool } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { buildDescription, KNOWN_TOOL_NAMES } from '@/core/tools/tool-contracts';
-import type { UserInputRequest } from '@/protocol/events';
 
 /**
  * ToolSpec Registry 一致性测试（ADR-0043 §5 / RFC §5）。
@@ -230,13 +229,55 @@ describe('ToolSpec kind union', () => {
     expect('projectResult' in askUserSpec).toBe(false);
     expect(
       askUserSpec.createInterrupt(
-        { question: 'Continue?', options: [], allow_free_text: true },
+        {
+          questions: [
+            {
+              question: 'Continue?',
+              options: [
+                { label: 'Yes', description: 'Continue with the current approach.' },
+                { label: 'No', description: 'Stop and reconsider the approach.' },
+              ],
+            },
+          ],
+        },
         CTX,
       ),
     ).toEqual({
       question: 'Continue?',
-      options: [],
+      options: [
+        {
+          id: 'q1-o1',
+          label: 'Yes',
+          description: 'Continue with the current approach.',
+        },
+        {
+          id: 'q1-o2',
+          label: 'No',
+          description: 'Stop and reconsider the approach.',
+        },
+      ],
+      recommended: 'q1-o1',
       allow_free_text: true,
+      questions: [
+        {
+          id: 'q1',
+          question: 'Continue?',
+          options: [
+            {
+              id: 'q1-o1',
+              label: 'Yes',
+              description: 'Continue with the current approach.',
+            },
+            {
+              id: 'q1-o2',
+              label: 'No',
+              description: 'Stop and reconsider the approach.',
+            },
+          ],
+          recommended: 'q1-o1',
+          allow_free_text: true,
+        },
+      ],
     });
   });
 });
@@ -822,9 +863,11 @@ type BuiltinName = BuiltinSpec['name'];
 type NamesFromUnion = PendingBuiltinToolRequest['name'];
 type AllBuiltinNamesCovered = Expect<Equal<BuiltinName, NamesFromUnion>>;
 
-// --- i1.6 name === 'ask_user' ⇒ args 匹配 Schema transform 输出（UserInputRequest） ---
+// --- i1.6 name === 'ask_user' ⇒ args 匹配规范模型输入 Schema ---
 type AskUserRequest = Extract<PendingBuiltinToolRequest, { name: 'ask_user' }>;
-type AskUserArgsMatchSchema = Expect<Equal<AskUserRequest['args'], UserInputRequest>>;
+type AskUserArgsMatchSchema = Expect<
+  Equal<AskUserRequest['args'], z.infer<typeof askUserInputSchema>>
+>;
 
 // --- i1.7 name === 'write_plan' ⇒ action 可选（save 模式无需显式 action） ---
 type WritePlanRequest = Extract<PendingBuiltinToolRequest, { name: 'write_plan' }>;
@@ -864,7 +907,7 @@ describe('compile-time name → args invariants', () => {
     expect(_assert).toBe(true);
   });
 
-  test('ask_user args match schema transform output (UserInputRequest)', () => {
+  test('ask_user args match the canonical model input schema', () => {
     const _assert: AskUserArgsMatchSchema = true;
     expect(_assert).toBe(true);
   });

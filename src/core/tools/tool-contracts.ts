@@ -75,6 +75,7 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       'Replace specific text in an existing file. Use for targeted, small-to-medium edits. ' +
+      'Use edit_file only in the building phase. During planning, describe the exact intended edit in the plan; do not call edit_file or request approval for it. ' +
       'old_string MUST come from verified content — a recent read_file, a shell tool output, ' +
       'or a file you just wrote. NEVER fabricate old_string from memory or guesswork. ' +
       'Do NOT use for creating new files — use write_file. ' +
@@ -86,6 +87,7 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
       'the entire file if the changes are extensive.',
     commonMistakes:
       'Fabricating old_string from memory instead of using verified content — the #1 cause of edit failure. ' +
+      'Calling edit_file during planning instead of recording the intended change in the plan. ' +
       "old_string doesn't match the file exactly — whitespace, indentation, or blank lines differ. " +
       'Same old_string appears multiple times without replace_all: true — causes duplicate-match error. ' +
       'Not including enough surrounding context in old_string to make it unique. ' +
@@ -99,6 +101,7 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
       'If the file has not been read in this session: read_file is required before edit_file. ' +
       'If the file changed since your last read: it was modified externally — re-read it and retry. ' +
       'If duplicate match: add more surrounding context to old_string (preferred) or set replace_all: true. ' +
+      'If rejected by the planning phase: do not retry or request approval; describe the intended edit in the plan and apply it after plan approval. ' +
       'Always verify the edit with read_file afterward.',
   },
   description: '',
@@ -110,11 +113,13 @@ export const WRITE_FILE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       'Create a new file or completely rewrite an existing file. ' +
+      'Use write_file only in the building phase. During planning, describe the intended file creation or rewrite in the plan; do not call write_file or request approval for it. ' +
       'Before rewriting an existing file, call read_file first to verify its current content — every omitted line is lost. ' +
       'Do NOT use for small targeted edits — use read_file + edit_file instead. ' +
       'To append content, use edit_file matching the file tail (old_string = trailing content, new_string = trailing content + the addition) or a shell redirect.',
     commonMistakes:
       'Using write_file for small changes instead of edit_file — wasteful and loses precision. ' +
+      'Calling write_file during planning instead of recording the intended change in the plan. ' +
       'Overwriting an existing file without first calling read_file to verify its current content. ' +
       'Forgetting that write_file replaces the entire file — every omitted line is lost.',
     outputFormat:
@@ -124,6 +129,7 @@ export const WRITE_FILE_CONTRACT: ToolContract = {
     failureHandling:
       'If write fails: verify the path is a valid relative workspace path. ' +
       'If permission or boundary error: verify the path is inside the workspace. ' +
+      'If rejected by the planning phase: do not retry or request approval; describe the intended file change in the plan and apply it after plan approval. ' +
       'If the file already exists and you only need partial changes: use read_file + edit_file.',
   },
   description: '',
@@ -196,24 +202,28 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'Prefer search_content and search_files over `grep`, `rg`, `find`, and `ls` — they apply .gitignore rules and return structured results; shell_execute remains available when you need shell-specific behavior. ' +
       'Do NOT use shell_execute for: searching file contents (use search_content), finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file). ' +
       'Use shell_execute ONLY for: tests, typecheck, builds, installs, git operations, and other terminal-only tasks. ' +
+      'During planning, call shell_execute only for commands proven read-only. Do not run tests, typecheck, builds, installs, project scripts, or mutations; record the exact command in the plan for the building phase instead. ' +
       'Commands have a default hard timeout of 600000ms. For commands that start a TUI, dev server, watcher, or other long-running process, set a shorter timeout_ms (for example 10000) so the command returns after collecting startup output. ' +
       'Set a longer timeout_ms only when a finite build, install, or test suite is expected to need more than 10 minutes. ' +
       'Write a short human-readable description so the user understands what the command does.',
     commonMistakes:
       'Reaching for shell_execute with grep/rg/find when search_content/search_files would give structured, .gitignore-aware results. ' +
       'Missing description field — always provide a short human-readable summary. ' +
+      'Calling tests, typecheck, builds, installs, project scripts, or mutating commands during planning instead of preserving them as building-phase plan steps. ' +
       'Relying on the 600000ms default for interactive or long-running commands like `npm run tui`, `bun run dev`, or watch mode instead of setting a short startup timeout_ms. ' +
       'Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default.',
     outputFormat:
       'JSON with fields: ok (boolean), command (executed command), exitCode (0=success), stdout, stderr. ' +
       'If rejected by policy, ok: false with reason in stderr. ' +
+      'A planning phase deferral returns ok: false, deferred: true, and until_phase: building; it is not an approval request or execution failure. ' +
       'Check stderr for warnings even when exitCode is 0.',
     failureHandling:
       'If exitCode nonzero: read stderr, adjust command, retry. ' +
       'rg (ripgrep) exit code 1 means NO matches found — this is NOT an error, do not retry. ' +
       'grep exit code 1 likewise means no matches. ' +
       'If tests fail: read failure output, fix code, re-run. ' +
-      'If rejected by policy: explain why the command is needed and wait for the user approval flow. ' +
+      'If deferred until building: do not retry and do not ask for shell approval while planning; preserve the command in the plan and invoke it after plan approval. ' +
+      'If an approval request opens: wait for the user decision. If rejected by policy without an approval request: do not retry or claim the user can approve it; choose a safer capability or report the boundary. ' +
       'If output empty but exitCode 0: try different flags or path.',
   },
   description: '',
@@ -287,25 +297,23 @@ export const ASK_USER_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       'Ask the user focused questions when progress is blocked by uncertainty only the user can resolve. ' +
-      'Use the `questions` array to batch all unknowns into ONE call — ask everything at once rather than ' +
-      'spreading clarifications across multiple interruptions. Each question gets its own options (max 3). ' +
-      'Only use single-question mode (`question` + `options`) for simple choose-one scenarios. ' +
+      'Use one `questions` array to batch all unknowns into ONE call; a single question is an array with one item. ' +
+      'Each question has 2-3 concrete options, and the first option is the recommended choice. ' +
       'In plan mode: batch all pre-plan clarifications into one ask_user call before calling write_plan.',
     commonMistakes:
       'Making multiple ask_user calls in sequence instead of batching into one `questions` array. ' +
-      'Asking vague questions without concrete options — always provide 2-3 options to help non-expert users decide. ' +
+      'Using the removed top-level `question`, `options`, `recommended`, or `allow_free_text` fields instead of `questions`. ' +
+      'Adding an "Other" option — the client always adds free-text input automatically, so provide only 2-3 substantive choices. ' +
       'Using ask_user for questions the model could answer by reading workspace files. ' +
-      'Asking a question without providing any options at all. ' +
-      'Forgetting to set `recommended` on the most suitable option — users may not know which to pick.',
+      'Omitting an option description or putting the recommended choice anywhere except first.',
     outputFormat:
       'This tool triggers a user_input interrupt handled by the harness. It returns ok: false (the harness intercepts it). ' +
-      'Single mode: `question` (string), `options` (array of {id, label, description?}, max 3), `recommended` (option id), `allow_free_text` (boolean, default true), `context` (string). ' +
-      'Batch mode: `questions` (array of {id, question, options[max 3], recommended?, allow_free_text?}). ' +
-      'Always mark exactly one option as `recommended` — the TUI renders it with a ⭐ marker.',
+      '`questions` contains 1-3 items shaped as `{question, options}`; each `options` array contains 2-3 `{label, description}` objects. ' +
+      'The Runtime generates stable IDs, marks the first option as recommended, and enables free text before emitting user_input.requested.',
     failureHandling:
       'This tool always triggers an interrupt — ok: false is expected and not an error. ' +
       "The user's response will be injected as the next message in the conversation. " +
-      'If the ask_user call has schema errors (missing question or empty options), fix the parameters and try again. ' +
+      'If the ask_user call has schema errors, retry once with a JSON object containing only the canonical `questions` array; never pass stringified JSON. ' +
       "Do NOT retry ask_user with the same question if the user doesn't answer; respect that the user may not want to answer.",
   },
   description: '',

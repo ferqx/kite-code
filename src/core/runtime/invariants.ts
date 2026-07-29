@@ -54,6 +54,15 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
     );
   }
   assert(state.recoveryState.kind === 'normal', 'recovery state must be normal before execution.');
+  assert(
+    state.turn.status === 'active' ||
+      state.turn.status === 'completed' ||
+      state.turn.status === 'aborted',
+    'turn status must be a known lifecycle value.',
+  );
+  if (state.turn.status === 'aborted') {
+    assert(Boolean(state.turn.abortReason), 'aborted turn reason is required.');
+  }
   assertUnique(state.tools.queue, 'tool queue');
   assertUnique(state.tools.active, 'active tools');
   assert(state.context != null, 'context runtime state is required.');

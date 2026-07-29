@@ -1,6 +1,6 @@
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
-import { msys2ToWindowsPath } from '@/core/tools/path-utils';
+import { isPathInsideWorkspace, msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 import type { AgentPhase, ShellGrantUsed } from '@/protocol/events';
@@ -211,10 +211,23 @@ function denyForPlanningPhase(params: {
   fallbackRisk: ToolRisk;
 }): ApprovalDecision | null {
   if (params.phase === 'planning') {
+    if (params.toolName === 'write_file' || params.toolName === 'edit_file') {
+      const outcome =
+        params.toolName === 'write_file' ? 'No file was written.' : 'No file was edited.';
+      return deny({
+        risk: params.fallbackRisk,
+        reason:
+          'Plan mode is read-only. Workspace edits must be described in the plan and applied only after plan approval.',
+        userVisibleSummary: `Plan mode is read-only. ${outcome} Describe the intended change in the plan and apply it after plan approval.`,
+        expectedEffects: ['No workspace file was modified'],
+        phaseConstraint: 'planning',
+      });
+    }
     return deny({
       risk: params.fallbackRisk,
-      reason: 'planning phase allows read-only inspection and plan updates only.',
-      userVisibleSummary: `Rejected ${params.toolName} during planning phase.`,
+      reason: `planning phase allows read-only inspection and plan updates only; rejected ${params.toolName}.`,
+      userVisibleSummary:
+        'Plan mode is read-only. This operation did not run and cannot be approved while planning. Use read-only inspection or describe the intended implementation in the plan, then run it after plan approval.',
       expectedEffects: ['No workspace mutation or code execution will run'],
       phaseConstraint: 'planning',
     });
@@ -288,7 +301,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
       return deny({
         risk: 'execute_code',
         reason: 'planning phase allows read-only sub-agents only.',
-        userVisibleSummary: `Rejected ${String(subagentType ?? 'unknown')} sub-agent during planning phase.`,
+        userVisibleSummary: `Plan mode did not start the ${String(subagentType ?? 'unknown')} sub-agent. Use an explore, plan, or review sub-agent, or describe the implementation in the plan for execution after plan approval.`,
         expectedEffects: ['No implementation sub-agent will run during planning'],
         phaseConstraint: 'planning',
       });
@@ -371,8 +384,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
       if (normalizedPath.startsWith('~')) return true;
       if (!isAbsolute(normalizedPath)) return false;
       try {
-        const rel = relative(resolve(workspace), resolve(normalizedPath));
-        return rel.startsWith('..') || isAbsolute(rel);
+        return !isPathInsideWorkspace(workspace, normalizedPath);
       } catch {
         return true;
       }
@@ -473,6 +485,14 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
           expectedEffects: ['No command will be executed'],
         });
       }
+      const phaseDenial = denyForPlanningPhase({
+        toolName,
+        phase,
+        fallbackRisk: 'write_file',
+      });
+      if (phaseDenial) {
+        return phaseDenial;
+      }
       // Non-critical rm -rf: downgrade to write_file; mode policy handles approval
       return requireApproval({
         risk: 'write_file',
@@ -567,8 +587,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
       if (path.startsWith('~')) return true;
       if (!isAbsolute(path)) return false;
       try {
-        const rel = relative(resolve(workspace), resolve(path));
-        return rel.startsWith('..') || isAbsolute(rel);
+        return !isPathInsideWorkspace(workspace, path);
       } catch {
         return true; // 解析失败，保守视为外部路径
       }

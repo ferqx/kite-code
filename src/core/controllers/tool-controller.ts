@@ -40,7 +40,6 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
-import { contiguousShellBatchIds } from '@/core/runtime/tool-batches';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import {
@@ -270,49 +269,6 @@ export function buildBlockedToolRequest(
     reason: `Sub-agent tool "${blocked.toolName}" blocked for approval`,
     protectedCommand: blocked.command,
   } as PendingToolRequest;
-}
-
-/** Resolve a sub-agent continuation that was rejected (user denied the approval).
- *  Emits subagent.failed + tool.finished so the TUI transitions the sub-agent block
- *  from awaiting_approval to error, and the task tool produces a result for the model.
- *  Called by the runner after approval.rejected is processed. */
-export function resolveRejectedSubagentContinuation(
-  state: RuntimeState,
-  toolCallId: string,
-): RuntimeEvent[] {
-  const snapshot = state.suspendedSubagents[toolCallId];
-  if (!snapshot) return [];
-  const continuation = deserializeSubagentContinuation(snapshot);
-
-  const blockedToolName = continuation.blockedTool.toolName;
-  const subagentId = continuation.id;
-  const rejectionMsg = `Sub-agent tool "${blockedToolName}" was rejected by user.`;
-
-  return [
-    {
-      type: 'subagent.failed',
-      subagent: {
-        id: subagentId,
-        error: rejectionMsg,
-        summary: rejectionMsg,
-        toolCallCount: continuation.toolCallCount,
-        durationMs: 0,
-      },
-    } as RuntimeEvent,
-    {
-      type: 'tool.finished',
-      toolCallId,
-      name: 'task',
-      result: {
-        ok: false,
-        command: '',
-        exitCode: -1,
-        stdout: '',
-        stderr: rejectionMsg,
-        status: 'error',
-      },
-    },
-  ];
 }
 
 /** Convert the subagent runner's private callback payload into a durable public fact. */
@@ -619,10 +575,6 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     const request = parsed.request;
-    const isParallelShellPreflight =
-      request.name === 'shell_execute' &&
-      call.status === 'queued' &&
-      contiguousShellBatchIds(params.state, toolCallId).length > 1;
     const ceilingViolation = skillCapabilityCeilingViolation(params.state, call, request);
     if (ceilingViolation) {
       events.push({ type: 'tool.rejected', toolCallId, reason: ceilingViolation });
@@ -968,24 +920,12 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'ask_user') {
-      const hasQuestion = (request.args.question ?? '').trim().length > 0;
-      const hasBatchQuestions = (request.args.questions?.length ?? 0) > 0;
-      if (!hasQuestion && !hasBatchQuestions) {
-        events.push({
-          type: 'tool.failed',
-          toolCallId,
-          failure: classifyFailure(
-            'tool_invalid_args',
-            'ask_user requires a non-empty question or questions array.',
-          ),
-        });
-        continue;
-      }
       // 中断契约在 spec 闭环：事件载荷经 askUserSpec.createInterrupt 生成
-      // （Schema 规范化结果），Controller 不再手工组装中断内容。
+      // （规范模型输入 → 内部 UserInputRequest），Controller 不再二次校验或
+      // 手工组装中断内容。
       // The interrupt contract closes in the spec: the event payload is built
-      // by askUserSpec.createInterrupt; the controller does not hand-assemble
-      // interrupt content.
+      // by askUserSpec.createInterrupt from the already validated canonical
+      // model input; the controller does not revalidate or hand-assemble it.
       events.push({
         type: 'user_input.requested',
         interactionId: genInteractionId(),
@@ -1113,11 +1053,25 @@ export async function executeRuntimeTools(params: {
       capability: builtinToolRegistry.effectsOf(request.name, request.args, availCtx),
     });
     if (!decision.allowed) {
+      const deferredUntilBuilding =
+        request.name === 'shell_execute' && decision.phaseConstraint === 'planning';
+      const deniedByPlanningPhase =
+        !deferredUntilBuilding && decision.phaseConstraint === 'planning';
+      const reason = deferredUntilBuilding
+        ? 'Deferred shell_execute until building phase.'
+        : decision.userVisibleSummary;
       events.push({
         type: 'tool.rejected',
         toolCallId,
-        reason: decision.userVisibleSummary,
-        failure: classifyFailure('policy_denied', decision.userVisibleSummary),
+        reason,
+        failure: classifyFailure(
+          deferredUntilBuilding
+            ? 'phase_deferred'
+            : deniedByPlanningPhase
+              ? 'phase_denied'
+              : 'policy_denied',
+          reason,
+        ),
       });
       continue;
     }
@@ -1237,11 +1191,6 @@ export async function executeRuntimeTools(params: {
         });
         continue;
       }
-    }
-
-    if (isParallelShellPreflight) {
-      events.push({ type: 'tool.execution_ready', toolCallId });
-      continue;
     }
 
     if (request.name === 'task') {

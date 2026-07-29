@@ -116,7 +116,17 @@ describe('executeRuntimeTools', () => {
       toolCallId: 'ask',
       modelMessageId: 'model',
       name: 'ask_user',
-      args: { questions: [{ question: 'Continue with the migration?' }] },
+      args: {
+        questions: [
+          {
+            question: 'Continue with the migration?',
+            options: [
+              { label: 'Continue', description: 'Proceed with the migration now.' },
+              { label: 'Pause', description: 'Keep the current state and stop here.' },
+            ],
+          },
+        ],
+      },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
@@ -133,9 +143,40 @@ describe('executeRuntimeTools', () => {
     // options/allow_free_text 补齐默认值——模型原始 args 不直通事件。
     expect(requested?.request).toEqual({
       question: 'Continue with the migration?',
-      options: [],
+      options: [
+        {
+          id: 'q1-o1',
+          label: 'Continue',
+          description: 'Proceed with the migration now.',
+        },
+        {
+          id: 'q1-o2',
+          label: 'Pause',
+          description: 'Keep the current state and stop here.',
+        },
+      ],
       allow_free_text: true,
-      questions: [{ question: 'Continue with the migration?', options: [], allow_free_text: true }],
+      recommended: 'q1-o1',
+      questions: [
+        {
+          id: 'q1',
+          question: 'Continue with the migration?',
+          options: [
+            {
+              id: 'q1-o1',
+              label: 'Continue',
+              description: 'Proceed with the migration now.',
+            },
+            {
+              id: 'q1-o2',
+              label: 'Pause',
+              description: 'Keep the current state and stop here.',
+            },
+          ],
+          recommended: 'q1-o1',
+          allow_free_text: true,
+        },
+      ],
     });
   });
 
@@ -363,6 +404,42 @@ describe('executeRuntimeTools', () => {
     ]);
   });
 
+  test('rejects the removed top-level ask_user shape', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-legacy-ask-shape',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.ask = {
+      toolCallId: 'ask',
+      modelMessageId: 'model',
+      name: 'ask_user',
+      args: {
+        question: 'Continue?',
+        options: [
+          { id: 'yes', label: 'Yes' },
+          { id: 'no', label: 'No' },
+        ],
+      },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('ask');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['ask'] });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'ask',
+        failure: expect.objectContaining({
+          kind: 'tool_invalid_args',
+          message: expect.stringContaining('questions'),
+        }),
+      }),
+    ]);
+  });
+
   test('fails closed when a dynamic MCP call has no Runtime-issued binding', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-unbound-mcp',
@@ -572,7 +649,7 @@ describe('executeRuntimeTools', () => {
     expect(flagOffEvents.some((event) => event.type === 'verification.requested')).toBe(false);
   });
 
-  test('uses the first batch question when ask_user omits the summary question', async () => {
+  test('derives the internal summary question from the first canonical item', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-batch-ask',
       userId: 'user',
@@ -583,7 +660,15 @@ describe('executeRuntimeTools', () => {
       modelMessageId: 'model',
       name: 'ask_user',
       args: {
-        questions: [{ id: 'scope', question: 'What scope should be covered?' }],
+        questions: [
+          {
+            question: 'What scope should be covered?',
+            options: [
+              { label: 'Focused', description: 'Cover only the critical path.' },
+              { label: 'Complete', description: 'Cover the full production rollout.' },
+            ],
+          },
+        ],
       },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
@@ -623,7 +708,7 @@ describe('executeRuntimeTools', () => {
       toolCallId: 'denied',
       modelMessageId: 'model',
       name: 'shell_execute',
-      args: { command: 'node -e "process.exit(0)"' },
+      args: { command: 'bun run typecheck' },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
@@ -644,8 +729,41 @@ describe('executeRuntimeTools', () => {
       expect.objectContaining({
         type: 'tool.rejected',
         toolCallId: 'denied',
-        reason: 'Rejected shell_execute during planning phase.',
-        failure: expect.objectContaining({ kind: 'policy_denied' }),
+        reason: 'Deferred shell_execute until building phase.',
+        failure: expect.objectContaining({ kind: 'phase_deferred' }),
+      }),
+    ]);
+  });
+
+  test('keeps planning write calls as hard policy denials', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-write-policy',
+      userId: 'user',
+      workspace: process.cwd(),
+      phase: 'planning',
+    });
+    state.tools.calls.denied = {
+      toolCallId: 'denied',
+      modelMessageId: 'model',
+      name: 'write_file',
+      args: { path: 'blocked.txt', content: 'blocked' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('denied');
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['denied'],
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.rejected',
+        toolCallId: 'denied',
+        reason:
+          'Plan mode is read-only. No file was written. Describe the intended change in the plan and apply it after plan approval.',
+        failure: expect.objectContaining({ kind: 'phase_denied' }),
       }),
     ]);
   });
@@ -962,7 +1080,7 @@ describe('executeRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
-  test('preflights a read-only shell sibling without starting it early', async () => {
+  test('starts an allowed shell without waiting for sibling preflight', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-parallel-shell-preflight',
       userId: 'user',
@@ -991,8 +1109,10 @@ describe('executeRuntimeTools', () => {
       },
     });
 
-    expect(executionCount).toBe(0);
-    expect(events).toEqual([{ type: 'tool.execution_ready', toolCallId: 'first' }]);
+    expect(executionCount).toBe(1);
+    expect(events.some((event) => event.type === 'tool.execution_ready')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.started')).toBe(true);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
   test('does not preflight shell calls across a non-shell sibling', async () => {

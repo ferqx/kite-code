@@ -205,26 +205,11 @@ function cancelAskUserToolCard(s: TuiState, questionBlockId: number): TuiState {
 function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
   let next = finalizeLastTurnStreaming(s);
   if (s.interrupt) {
-    // plan_review 没有 blockId，仅清除 interrupt / plan_review has no blockId, just clear interrupt
+    // The reviewed plan card already contains the persisted draft. Runtime
+    // cancellation events settle the turn; do not add a local-only banner.
     if (s.interrupt.kind === 'plan_review') {
-      const planCard = findBlock(
-        next,
-        (b) => b.kind === 'tool_card' && (b.name === 'write_plan' || b.name === 'update_plan'),
-      );
-      if (planCard?.kind === 'tool_card') {
-        next = replaceBlockById(next, planCard.id, {
-          ...planCard,
-          status: 'done' as const,
-          expanded: true,
-        });
-      }
-      const block: OutputBlock = {
-        id: next.nextBlockId,
-        kind: 'text',
-        content: '── Plan declined ──',
-      };
       return {
-        ...appendBlock(settleActiveThought(next), block),
+        ...settleActiveThought(next),
         running: false,
         ctrlCPressed: setCtrlCPressed,
         interrupt: null,
@@ -300,6 +285,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
         explorationSummaryIds: {},
+        pendingToolCalls: {},
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
@@ -313,6 +299,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         exited: false,
         interrupt: null,
         toolStartTimes: undefined,
+        pendingToolCalls: {},
         currentRunReasonId: undefined,
         status: { ...s.status, currentNode: null, plan: null, retryState: null },
       };
@@ -329,65 +316,81 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       };
     }
     case 'RESOLVE_INTERRUPT': {
-      const b = findBlockById(state, action.blockId);
-      if (!b || (b.kind !== 'approval' && b.kind !== 'question')) {
-        return state;
-      }
-      let resolved: OutputBlock;
-      if (b.kind === 'approval') {
-        const r =
-          typeof action.resolution === 'string' ? { action: action.resolution } : action.resolution;
-        resolved = { ...b, resolved: r };
-      } else {
-        if (typeof action.resolution === 'string') {
-          resolved = { ...b, resolved: action.resolution };
-        } else {
-          // 多问题模式：resolved 带 answers / Multi-question: resolved with answers
-          const r = action.resolution as unknown as {
-            action?: string;
-            text?: string;
-            answers?: Record<string, string>;
-          };
-          const text = r.text ?? r.action ?? '';
-          resolved = { ...b, resolved: r.answers ? { text, answers: r.answers } : text };
+      const b = action.blockId == null ? undefined : findBlockById(state, action.blockId);
+      if (state.interrupt?.kind === 'approval') {
+        let withResolved = state;
+        if (b?.kind === 'approval') {
+          const resolution =
+            typeof action.resolution === 'string'
+              ? { action: action.resolution }
+              : action.resolution;
+          withResolved = replaceBlockById(state, b.id, { ...b, resolved: resolution });
         }
+        const approvedSubagentId = state.interrupt.approval?.subagentId;
+        const now = approvedSubagentId ? Date.now() : undefined;
+        const updatedTurns = withResolved.turns.map((turn) => {
+          let changed = false;
+          const blocks = turn.blocks.map((block) => {
+            if (
+              block.kind === 'subagent' &&
+              block.status === 'running' &&
+              block.subagentId === approvedSubagentId
+            ) {
+              changed = true;
+              return {
+                ...block,
+                ...(now != null ? { startedAt: now } : {}),
+                awaitingApproval: false,
+              };
+            }
+            return block;
+          });
+          return changed ? { blocks } : turn;
+        });
+        return {
+          ...withResolved,
+          turns: updatedTurns,
+          interrupt: null,
+        };
       }
-      // 重置工具启动时间戳，排除审批等待耗时 / Reset tool start timestamps to exclude approval wait time
+      if (b?.kind !== 'question') return state;
+
+      let resolved: OutputBlock;
+      if (typeof action.resolution === 'string') {
+        resolved = { ...b, resolved: action.resolution };
+      } else {
+        // 多问题模式：resolved 带 answers / Multi-question: resolved with answers
+        const r = action.resolution as unknown as {
+          action?: string;
+          text?: string;
+          answers?: Record<string, string>;
+        };
+        const text = r.text ?? r.action ?? '';
+        resolved = { ...b, resolved: r.answers ? { text, answers: r.answers } : text };
+      }
       const now = Date.now();
       const nextTimes: Record<string, number> = { ...(state.toolStartTimes ?? {}) };
-      if (b.kind === 'approval' && state.toolStartTimes) {
-        for (const k of Object.keys(state.toolStartTimes)) nextTimes[k] = now;
-      }
-      // 同步更新 block 上的 startedAt，排除审批等待耗时 / Sync startedAt on blocks to exclude approval wait
-      const withResolved = replaceBlockById(state, action.blockId, resolved);
+      const withResolved = replaceBlockById(state, b.id, resolved);
       const userInput =
-        b.kind !== 'question'
-          ? undefined
-          : typeof action.resolution === 'string'
-            ? { answer: action.resolution }
-            : {
-                answer: action.resolution.text ?? action.resolution.action ?? '',
-                ...(action.resolution.answers ? { answers: action.resolution.answers } : {}),
-              };
-      const activeAskUsers =
-        b.kind === 'question'
-          ? withResolved.turns.flatMap((turn) =>
-              turn.blocks.filter(
-                (blk): blk is Extract<OutputBlock, { kind: 'tool_card' }> =>
-                  blk.kind === 'tool_card' &&
-                  blk.name === 'ask_user' &&
-                  (blk.status === 'queued' || blk.status === 'running'),
-              ),
-            )
-          : [];
-      const activeAskUser =
-        b.kind !== 'question'
-          ? undefined
-          : b.toolCallId
-            ? activeAskUsers.find((blk) => blk.callId === b.toolCallId)
-            : activeAskUsers.length === 1
-              ? activeAskUsers[0]
-              : undefined;
+        typeof action.resolution === 'string'
+          ? { answer: action.resolution }
+          : {
+              answer: action.resolution.text ?? action.resolution.action ?? '',
+              ...(action.resolution.answers ? { answers: action.resolution.answers } : {}),
+            };
+      const activeAskUsers = withResolved.turns.flatMap((turn) =>
+        turn.blocks.filter(
+          (blk): blk is Extract<OutputBlock, { kind: 'tool_card' }> =>
+            blk.kind === 'tool_card' &&
+            blk.name === 'ask_user' &&
+            (blk.status === 'queued' || blk.status === 'running'),
+        ),
+      );
+      const activeAskUser = b.toolCallId
+        ? activeAskUsers.find((blk) => blk.callId === b.toolCallId)
+        : activeAskUsers.length === 1
+          ? activeAskUsers[0]
+          : undefined;
       if (activeAskUser) nextTimes[activeAskUser.callId] = now;
       const updatedTurns = withResolved.turns.map((turn) => {
         let changed = false;
@@ -409,14 +412,6 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
               detail,
               userInput,
             };
-          }
-          if (b.kind === 'approval' && blk.kind === 'tool_card' && blk.status === 'running') {
-            changed = true;
-            return { ...blk, startedAt: now };
-          }
-          if (b.kind === 'approval' && blk.kind === 'subagent' && blk.status === 'running') {
-            changed = true;
-            return { ...blk, startedAt: now, awaitingApproval: false };
           }
           return blk;
         });
@@ -518,35 +513,23 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'RESET_CTRL_C':
       return state.ctrlCPressed ? { ...state, ctrlCPressed: false } : state;
     case 'ESCAPE': {
-      // 审批/提问中 → 只取消中断，继续会话 / Interrupt active → cancel interrupt only
+      // Locally clear the interaction first. The provider then submits a
+      // durable cancel action. Tool approval and plan review cancellation come
+      // back as turn.aborted; ask_user keeps its per-interaction semantics.
       if (state.interrupt) {
-        // plan_review Esc → 只取消审查中断，不停止会话；graph 继续处理 rejection 落盘 checkpoint
-        // plan_review Esc → cancel review only, keep session alive so graph persists rejection to checkpoint
         if (state.interrupt.kind === 'plan_review') {
-          const s = cancelRunningBlocks(state);
-          const finalized = finalizeLastTurnStreaming(s);
-          // card 已被 need_plan_review 设为 done；工具执行成功，仅用户拒绝，保持 done
-          // card already set to done by need_plan_review; tool succeeded, user just declined, keep done
-          const planCard = findBlock(
-            finalized,
-            (b) => b.kind === 'tool_card' && (b.name === 'write_plan' || b.name === 'update_plan'),
-          );
-          let next = finalized;
-          if (planCard?.kind === 'tool_card') {
-            next = replaceBlockById(next, planCard.id, {
-              ...planCard,
-              status: 'done' as const,
-              expanded: true,
-            });
-          }
-          const block: OutputBlock = {
-            id: next.nextBlockId,
-            kind: 'text',
-            content: '── Plan declined ──',
-          };
-          return { ...appendBlock(next, block), interrupt: null };
+          return { ...finalizeLastTurnStreaming(state), interrupt: null };
         }
-        if (!state.interrupt.blockId) return state;
+        if (!state.interrupt.blockId) {
+          const turns = state.turns.map((turn) => ({
+            blocks: turn.blocks.map((block) =>
+              block.kind === 'subagent' && block.status === 'running'
+                ? { ...block, awaitingApproval: false }
+                : block,
+            ),
+          }));
+          return { ...state, turns, interrupt: null };
+        }
         const b = findBlockById(state, state.interrupt.blockId);
         if (b) {
           if (b.kind === 'approval') {

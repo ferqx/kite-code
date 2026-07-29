@@ -431,12 +431,13 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         const thinkingLevel = result.thinkingLevel ?? 'max';
         thinkingLevelRef.current = thinkingLevel;
 
-        const { blocks, interrupt } = sessionDataToUI(result);
+        const { blocks, interrupt, pendingToolCalls } = sessionDataToUI(result);
         dispatch({
           type: 'LOAD_SESSION',
           threadId,
           blocks,
           interrupt,
+          pendingToolCalls,
           modelProvider: result.modelProvider,
           modelName,
           thinkingLevel,
@@ -638,10 +639,18 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   }, [dispatchSessionLoad, sessionManager]);
 
   const togglePlanMode = React.useCallback(() => {
-    const events =
-      state.status.phase === 'planning'
-        ? sessionManager.exitPlanningMode(threadIdRef.current)
-        : sessionManager.enterPlanningMode(threadIdRef.current);
+    if (state.status.phase === 'planning') {
+      const result = sessionManager.exitPlanningMode(threadIdRef.current);
+      if (!result) return;
+      for (const event of result.events) {
+        dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+      }
+      if (result.events.length === 0 && result.phase === 'building') {
+        dispatchSessionLoad({ type: 'SET_PHASE', phase: 'building' });
+      }
+      return;
+    }
+    const events = sessionManager.enterPlanningMode(threadIdRef.current);
     for (const event of events) dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
   }, [dispatchSessionLoad, sessionManager, state.status.phase]);
 
@@ -876,7 +885,10 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       const activeRt = sessionManager.getRuntime(threadIdRef.current);
       if (activeRt?.agentLoopActive) return;
 
-      runTask(value);
+      // Plan mode is a sticky TUI input policy across completed conversations.
+      // Pass it explicitly for every plain prompt so the new Core Task cannot
+      // silently fall back to building while the Footer still says plan.
+      runTask(value, stateRef.current.status.phase);
     },
     [runTask, sessionManager],
   );

@@ -145,24 +145,32 @@ export function createRuntimeEffectExecutor(
     }
     if (effect.type === 'run_tools') {
       try {
-        return await executeRuntimeTools({
-          state,
-          toolCallIds: effect.toolCallIds,
-          shellExecutor: dependencies.shellExecutor,
-          mcpManager: dependencies.mcpManager,
-          skillManifests: dependencies.skills,
-          skillOptions: dependencies.skillOptions,
-          skillCatalog: currentSkillCatalog(),
-          signal: dependencies.signal,
-          taskConfig: dependencies.config,
-          taskModel: dependencies.model,
-          subagentEventSink,
-          emitRuntimeEvent: emit,
-          recordFilePreimage: createFilePreimageRecorder(
-            dependencies.runtimeStore,
-            state.session.threadId,
-          ),
-        });
+        const execute = (toolCallIds: string[]) =>
+          executeRuntimeTools({
+            state,
+            toolCallIds,
+            shellExecutor: dependencies.shellExecutor,
+            mcpManager: dependencies.mcpManager,
+            skillManifests: dependencies.skills,
+            skillOptions: dependencies.skillOptions,
+            skillCatalog: currentSkillCatalog(),
+            signal: dependencies.signal,
+            taskConfig: dependencies.config,
+            taskModel: dependencies.model,
+            subagentEventSink,
+            emitRuntimeEvent: emit,
+            recordFilePreimage: createFilePreimageRecorder(
+              dependencies.runtimeStore,
+              state.session.threadId,
+            ),
+          });
+        if (effect.toolCallIds.length <= 1) {
+          return await execute(effect.toolCallIds);
+        }
+        const batches = await Promise.all(
+          effect.toolCallIds.map((toolCallId) => execute([toolCallId])),
+        );
+        return batches.flat();
       } catch (error) {
         const mcpCalls = effect.toolCallIds.flatMap((toolCallId) => {
           const call = state.tools.calls[toolCallId];

@@ -1,4 +1,3 @@
-import { resolveRejectedSubagentContinuation } from '../controllers/tool-controller';
 import type { RuntimeUserAction } from './actions';
 import type { RuntimeEvent } from './events';
 import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
@@ -88,6 +87,21 @@ async function* executeEffectWithStreaming(
   return { applied: true, emitted: true };
 }
 
+function shellConcurrencyGroup(
+  effect: Extract<import('./effects').RuntimeEffect, { type: 'run_tools' }>,
+  state: Readonly<import('./state').RuntimeState>,
+): string | undefined {
+  let group: string | undefined;
+  for (const toolCallId of effect.toolCallIds) {
+    const call = state.tools.calls[toolCallId];
+    if (call?.name !== 'shell_execute' || !call.modelMessageId) return undefined;
+    const candidate = `${call.taskId ?? state.activeTaskId ?? ''}\0${call.modelMessageId}`;
+    if (group != null && group !== candidate) return undefined;
+    group = candidate;
+  }
+  return group;
+}
+
 /**
  * Kernel-native execution loop.  It is deliberately free of LangGraph stream,
  * checkpoint and AgentEvent concepts so application runners can adopt it as a
@@ -101,11 +115,92 @@ export async function* runRuntimeLoop(
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
   if (!runnerId) return;
+  const backgroundEvents: RuntimeEvent[] = [];
+  const backgroundGroups = new Map<string, number>();
+  let backgroundCount = 0;
+  let backgroundFailure: unknown;
+  let backgroundStopped = false;
+  let wakeBackground: (() => void) | undefined;
+  const signalBackground = () => {
+    wakeBackground?.();
+    wakeBackground = undefined;
+  };
+  const waitForBackground = () =>
+    backgroundEvents.length > 0 || backgroundFailure || backgroundStopped
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => {
+          wakeBackground = resolve;
+        });
+  const launchShellEffect = (
+    effect: Extract<import('./effects').RuntimeEffect, { type: 'run_tools' }>,
+    group: string,
+  ) => {
+    const lease = kernel.beginEffect(effect);
+    backgroundCount += 1;
+    backgroundGroups.set(group, (backgroundGroups.get(group) ?? 0) + 1);
+    void (async () => {
+      const stream = executeEffectWithStreaming(kernel, executor, lease);
+      try {
+        while (true) {
+          const step = await stream.next();
+          if (step.done) {
+            if (!step.value.emitted) backgroundStopped = true;
+            break;
+          }
+          backgroundEvents.push(step.value);
+          signalBackground();
+        }
+      } catch (error) {
+        backgroundFailure ??= error;
+      } finally {
+        backgroundCount -= 1;
+        const remaining = (backgroundGroups.get(group) ?? 1) - 1;
+        if (remaining > 0) backgroundGroups.set(group, remaining);
+        else backgroundGroups.delete(group);
+        signalBackground();
+      }
+    })();
+  };
+
   try {
-    for (let count = 0; count < maxEffects; count++) {
+    let count = 0;
+    while (count < maxEffects) {
+      while (backgroundEvents.length > 0) yield backgroundEvents.shift()!;
+      if (backgroundFailure) throw backgroundFailure;
+      if (backgroundStopped) return;
+
       const effect = decideNextEffect(kernel.getState());
+      const effectState = kernel.getState();
+      const shellGroup =
+        effect.type === 'run_tools' ? shellConcurrencyGroup(effect, effectState) : undefined;
+      const effectToolCallIds = effect.type === 'run_tools' ? effect.toolCallIds : [];
+      const overlapsRunningShell =
+        shellGroup != null && (backgroundGroups.get(shellGroup) ?? 0) > 0;
+      const hasQueuedShellSibling =
+        shellGroup != null &&
+        effectState.tools.queue.some(
+          (toolCallId) =>
+            !effectToolCallIds.includes(toolCallId) &&
+            shellConcurrencyGroup({ type: 'run_tools', toolCallIds: [toolCallId] }, effectState) ===
+              shellGroup,
+        );
+
+      // A running shell may overlap only with shell siblings from the same
+      // model response and task. Other tools, model calls and completion wait.
+      if (
+        backgroundCount > 0 &&
+        !(
+          effect.type === 'request_tool_approval' ||
+          (effect.type === 'run_tools' && overlapsRunningShell)
+        )
+      ) {
+        await waitForBackground();
+        continue;
+      }
+
       if (effect.type === 'stop') return;
       if (effect.type === 'recovery_blocked') {
+        count += 1;
         const lease = kernel.beginEffect(effect);
         yield {
           type: 'run.error',
@@ -117,6 +212,7 @@ export async function* runRuntimeLoop(
         return;
       }
       if (effect.type === 'subagent.recovery_unavailable') {
+        count += 1;
         const lease = kernel.beginEffect(effect);
         const outcome = yield* executeEffectWithStreaming(kernel, executor, lease);
         if (!outcome.emitted) return;
@@ -124,6 +220,7 @@ export async function* runRuntimeLoop(
         continue;
       }
       if (effect.type === 'emit_final') {
+        count += 1;
         const completed: RuntimeEvent = {
           type: 'run.completed',
           turnId: kernel.getState().turn.turnId,
@@ -141,6 +238,16 @@ export async function* runRuntimeLoop(
         return;
       }
       if (
+        effect.type === 'run_tools' &&
+        shellGroup != null &&
+        (overlapsRunningShell || hasQueuedShellSibling)
+      ) {
+        count += 1;
+        launchShellEffect(effect, shellGroup);
+        await waitForBackground();
+        continue;
+      }
+      if (
         effect.type === 'request_user_input' ||
         effect.type === 'request_plan_review' ||
         effect.type === 'request_tool_approval' ||
@@ -148,6 +255,7 @@ export async function* runRuntimeLoop(
         effect.type === 'request_provider_action' ||
         effect.type === 'request_provider_admission'
       ) {
+        count += 1;
         const interaction = kernel.getState().interactions;
         if (
           effect.type === 'request_provider_action' &&
@@ -163,7 +271,27 @@ export async function* runRuntimeLoop(
         }
         let action: RuntimeUserAction;
         try {
-          action = await provider.requestAction(effect, kernel.getState());
+          const requested = provider.requestAction(effect, kernel.getState()).then(
+            (value) => ({ ok: true as const, value }),
+            (error: unknown) => ({ ok: false as const, error }),
+          );
+          let resolved: Awaited<typeof requested> | undefined;
+          void requested.then((value) => {
+            resolved = value;
+            signalBackground();
+          });
+          while (!resolved) {
+            if (backgroundCount === 0) {
+              resolved = await requested;
+              break;
+            }
+            await waitForBackground();
+            while (backgroundEvents.length > 0) yield backgroundEvents.shift()!;
+            if (backgroundFailure) throw backgroundFailure;
+            if (backgroundStopped) return;
+          }
+          if (!resolved.ok) throw resolved.error;
+          action = resolved.value;
         } catch (error) {
           if (effect.type === 'request_provider_action') {
             action = {
@@ -190,25 +318,18 @@ export async function* runRuntimeLoop(
           continue;
         }
         const events = actionResult.events;
-        let subagentEvents: RuntimeEvent[] = [];
-
-        // When a sub-agent tool approval is rejected, emit subagent.failed +
-        // tool.finished to terminate the sub-agent and produce a result for the model.
-        if (
-          (action.type === 'reject' || action.type === 'cancel') &&
-          effect.type === 'request_tool_approval'
-        ) {
-          subagentEvents = resolveRejectedSubagentContinuation(
-            kernel.getState(),
-            effect.toolCallId,
-          );
-        }
+        // Cancelling either execution authorization barrier ends the turn.
+        // Declining ask_user remains a normal tool result, so the model can
+        // continue without the optional answer.
+        const executionAuthorizationCancelled =
+          (effect.type === 'request_tool_approval' &&
+            (action.type === 'reject' || action.type === 'cancel')) ||
+          (effect.type === 'request_plan_review' &&
+            (action.type === 'cancel' ||
+              (action.type === 'plan_review_decision' && action.decision.kind === 'cancel')));
 
         yield* events;
-        if (subagentEvents.length > 0) {
-          kernel.processEventBatch(subagentEvents);
-          yield* subagentEvents;
-        }
+        if (executionAuthorizationCancelled) return;
         if (
           effect.type === 'request_provider_admission' &&
           (action.type === 'cancel' ||
@@ -218,6 +339,7 @@ export async function* runRuntimeLoop(
         }
         continue;
       }
+      count += 1;
       const lease = kernel.beginEffect(effect);
       const outcome = yield* executeEffectWithStreaming(kernel, executor, lease);
       if (!outcome.emitted) return;

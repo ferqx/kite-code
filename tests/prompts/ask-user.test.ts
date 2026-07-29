@@ -2,22 +2,25 @@ import { expect, test } from 'bun:test';
 import { buildStaticSystemPrompt } from '@/core/model/context';
 
 /**
- * Contract: ask_user requires a question and either options or free text.
+ * Contract: ask_user uses one canonical questions array.
  *
- * The system prompt must enforce that every ask_user call includes a clear question
- * and 2-4 concrete options (with one marked recommended), OR a free-text prompt.
+ * Every question includes 2-3 concrete options. The first option is recommended,
+ * and the TUI supplies free text without a model-generated "Other" option.
  */
-test('system prompt requires 2-4 concrete options per ask_user call', () => {
+test('system prompt requires the canonical questions array and 2-3 options', () => {
   const prompt = buildStaticSystemPrompt('agent');
+  expect(prompt).toContain('Always use the `questions` array');
+  expect(prompt).toContain('Do not use top-level `question`');
   expect(prompt).toContain('Every question MUST include 2-3 concrete options');
 });
 
-test('system prompt requires one option marked as recommended', () => {
+test('system prompt makes the first option recommended', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toContain('mark exactly ONE option as `recommended`');
+  expect(prompt).toContain('Put the recommended option first');
 });
 
-test('system prompt requires every option to have label and description', () => {
+test('system prompt reserves Other for the TUI', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toMatch(/label|description/i);
+  expect(prompt).toContain(`Do not add an "Other" option`);
+  expect(prompt).toContain('provides free-text input automatically');
 });

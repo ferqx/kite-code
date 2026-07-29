@@ -1420,15 +1420,11 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('EVENT.need_approval / need_input + RESOLVE_INTERRUPT', () => {
-    test('appends approval block and sets interrupt', () => {
+    test('keeps approval in the Footer interrupt without appending a message block', () => {
       const a = approval({ command: 'rm -rf /' });
       const s = dispatch(fresh(), { type: 'EVENT', event: { type: 'need_approval', data: a } });
-      expect(flatBlocks(s)).toHaveLength(1);
-      expect(flatBlocks(s)[0]!.kind).toBe('approval');
-      expect(s.interrupt?.kind).toBe('approval');
-      expect(s.interrupt && 'blockId' in s.interrupt ? s.interrupt.blockId : undefined).toBe(
-        flatBlocks(s)[0]!.id,
-      );
+      expect(flatBlocks(s)).toHaveLength(0);
+      expect(s.interrupt).toEqual({ kind: 'approval', approval: a });
     });
     test('appends question block and sets interrupt', () => {
       const q = question({ question: 'Choose color' });
@@ -1436,18 +1432,15 @@ describe('eventReducer (blocks model)', () => {
       expect(flatBlocks(s)[0]!.kind).toBe('question');
       expect(s.interrupt?.kind).toBe('input');
     });
-    test('RESOLVE_INTERRUPT marks approval as resolved and clears interrupt', () => {
+    test('RESOLVE_INTERRUPT clears an off-screen approval', () => {
       let s = fresh();
       const a = approval();
       s = dispatch(s, { type: 'EVENT', event: { type: 'need_approval', data: a } });
-      const blockId = (s.interrupt as { blockId: number }).blockId;
       s = dispatch(s, {
         type: 'RESOLVE_INTERRUPT',
-        blockId,
         resolution: { action: 'approved', grant: 'approve_once' },
       });
-      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'approval' }>;
-      expect(b.resolved?.action).toBe('approved');
+      expect(flatBlocks(s)).toHaveLength(0);
       expect(s.interrupt).toBeNull();
     });
     test('RESOLVE_INTERRUPT marks question as resolved', () => {
@@ -1566,7 +1559,12 @@ describe('eventReducer (blocks model)', () => {
         (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
           block.kind === 'tool_card' && block.callId === 'ask-queued',
       );
-      expect(card).toMatchObject({ status: 'done', userInput: { answer: 'auto' } });
+      expect(card).toMatchObject({
+        status: 'done',
+        args: request,
+        detail: 'Choose a mode',
+        userInput: { answer: 'auto' },
+      });
     });
     test('RESOLVE_INTERRUPT pre-fills the sole active ask_user card for legacy need_input', () => {
       let s = fresh();
@@ -1688,50 +1686,160 @@ describe('eventReducer (blocks model)', () => {
       expect(s.currentThoughtSummaryId).toBeUndefined();
       expect(s.interrupt?.kind).toBe('approval');
     });
-    test('bash approval keeps a later all-queued exploration phase open for subsequent reasoning', () => {
+    test('runtime approval stays in Footer and materializes tools only when they start', () => {
       let s = fresh();
-      s = dispatch(s, reasonEvt('assess production readiness'));
-      s = dispatch(
-        s,
-        tcEvt('bash-1', 'shell_execute', { command: 'find tests -name "*.test.ts"' }, 'queued'),
-      );
-      s = dispatch(s, tcEvt('read-1', 'read_file', { path: 'run-agent.ts' }, 'queued'));
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.queued',
+        toolCallId: 'bash-1',
+        name: 'shell_execute',
+        args: { command: 'bun test' },
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.queued',
+        toolCallId: 'read-1',
+        name: 'read_file',
+        args: { path: 'run-agent.ts' },
+      });
+      expect(flatBlocks(s)).toHaveLength(0);
 
-      s = dispatch(s, {
-        type: 'EVENT',
-        event: {
-          type: 'need_approval',
-          data: approval({ callId: 'bash-1', command: 'find tests -name "*.test.ts"' }),
+      s = handleRuntimeEventAction(s, {
+        type: 'approval.requested',
+        interactionId: 'approval-1',
+        toolCallId: 'bash-1',
+        approval: {
+          ...approval({ callId: 'bash-1', command: 'bun test' }),
+          callId: 'bash-1',
         },
       });
 
-      let summaries = flatBlocks(s).filter(
-        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
-      );
-      expect(summaries).toHaveLength(2);
-      expect(summaries[0]!.active).toBe(false);
-      expect(summaries[1]!.active).toBe(true);
-      expect(summaries[1]!.hasThought).toBe(false);
-      expect(s.currentThoughtSummaryId).toBe(summaries[1]!.id);
+      expect(
+        flatBlocks(s).filter((block) => block.kind === 'tool_card' && block.callId === 'bash-1'),
+      ).toHaveLength(0);
+      expect(s.interrupt).toMatchObject({
+        kind: 'approval',
+        approval: { callId: 'bash-1', command: 'bun test' },
+      });
+      expect(
+        flatBlocks(s).some(
+          (block) =>
+            (block.kind === 'tool_card' && block.callId === 'read-1') ||
+            (block.kind === 'tool_summary' && block.tools.some((tool) => tool.callId === 'read-1')),
+        ),
+      ).toBe(false);
 
       s = dispatch(s, {
-        type: 'EVENT',
-        event: {
-          type: 'reason',
-          data: { text: 'evaluate the read result', durationMs: 4043 },
-        },
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
       });
-      summaries = flatBlocks(s).filter(
+      expect(s.interrupt).toBeNull();
+      expect(flatBlocks(s)).toHaveLength(0);
+
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.started',
+        toolCallId: 'bash-1',
+      });
+      expect(
+        flatBlocks(s).filter(
+          (block) =>
+            block.kind === 'tool_card' && block.callId === 'bash-1' && block.status === 'running',
+        ),
+      ).toHaveLength(1);
+
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.started',
+        toolCallId: 'read-1',
+      });
+      const summaries = flatBlocks(s).filter(
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
-      expect(summaries).toHaveLength(2);
-      expect(summaries[1]!.hasThought).toBe(true);
-      expect(summaries[1]!.hasThinking).toBe(true);
-      expect(summaries[1]!.modelMs).toBe(4043);
-      expect(summaries[1]!.latestActivity).toEqual({
-        kind: 'thinking',
-        text: 'evaluate the read result',
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools[0]).toMatchObject({
+        callId: 'read-1',
+        status: 'running',
       });
+    });
+    test('shows the next shell approval while an approved sibling remains running', () => {
+      let s = fresh();
+      for (const [toolCallId, command] of [
+        ['bash-1', 'bun test'],
+        ['bash-2', 'bun run typecheck'],
+      ] as const) {
+        s = handleRuntimeEventAction(s, {
+          type: 'tool.queued',
+          toolCallId,
+          name: 'shell_execute',
+          args: { command },
+        });
+      }
+      s = handleRuntimeEventAction(s, { type: 'tool.started', toolCallId: 'bash-1' });
+      s = handleRuntimeEventAction(s, {
+        type: 'approval.requested',
+        interactionId: 'approval-2',
+        toolCallId: 'bash-2',
+        approval: {
+          ...approval({ callId: 'bash-2', command: 'bun run typecheck' }),
+          callId: 'bash-2',
+        },
+      });
+
+      expect(
+        flatBlocks(s).filter(
+          (block) =>
+            block.kind === 'tool_card' && block.callId === 'bash-1' && block.status === 'running',
+        ),
+      ).toHaveLength(1);
+      expect(
+        flatBlocks(s).some((block) => block.kind === 'tool_card' && block.callId === 'bash-2'),
+      ).toBe(false);
+      expect(s.interrupt).toMatchObject({
+        kind: 'approval',
+        approval: { callId: 'bash-2', command: 'bun run typecheck' },
+      });
+    });
+    test('approving a later shell preserves a running sibling start time', () => {
+      let s = fresh();
+      for (const [toolCallId, command] of [
+        ['bash-1', 'bun test'],
+        ['bash-2', 'bun run typecheck'],
+      ] as const) {
+        s = handleRuntimeEventAction(s, {
+          type: 'tool.queued',
+          toolCallId,
+          name: 'shell_execute',
+          args: { command },
+        });
+      }
+      s = handleRuntimeEventAction(s, { type: 'tool.started', toolCallId: 'bash-1' });
+      s = {
+        ...s,
+        toolStartTimes: { 'bash-1': 123 },
+        turns: s.turns.map((turn) => ({
+          blocks: turn.blocks.map((block) =>
+            block.kind === 'tool_card' && block.callId === 'bash-1'
+              ? { ...block, startedAt: 123 }
+              : block,
+          ),
+        })),
+      };
+      s = handleRuntimeEventAction(s, {
+        type: 'approval.requested',
+        interactionId: 'approval-2',
+        toolCallId: 'bash-2',
+        approval: {
+          ...approval({ callId: 'bash-2', command: 'bun run typecheck' }),
+          callId: 'bash-2',
+        },
+      });
+      s = dispatch(s, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      });
+
+      const running = flatBlocks(s).find(
+        (block) => block.kind === 'tool_card' && block.callId === 'bash-1',
+      );
+      expect(running).toMatchObject({ kind: 'tool_card', startedAt: 123 });
+      expect(s.toolStartTimes).toEqual({ 'bash-1': 123 });
     });
     test('need_input closes active Thought so its timer stops while waiting for the user', () => {
       let s = fresh();
@@ -1969,6 +2077,17 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'SET_PHASE', phase: 'building' });
       expect(s.status.phase).toBe('building');
     });
+    test('planning.exited projects the durable exit back to building', () => {
+      const s = handleRuntimeEventAction(
+        { ...fresh(), status: { ...fresh().status, phase: 'planning' } },
+        {
+          type: 'planning.exited',
+          taskId: 'task-1',
+          reason: 'Exited Plan Mode.',
+        },
+      );
+      expect(s.status.phase).toBe('building');
+    });
     test('TOGGLE_PLAN_MODE toggles phase and resets auth', () => {
       let s = fresh();
       // 先设为 full_access / Start with full_access
@@ -2195,6 +2314,16 @@ describe('eventReducer (blocks model)', () => {
       s = {
         ...s,
         turns: [{ blocks: [{ id: 1, kind: 'text', content: 'old' }] }],
+        status: {
+          ...s.status,
+          phase: 'planning',
+          pendingPlan: {
+            name: 'Outgoing draft',
+            description: 'Must stay with the outgoing session',
+            status: 'pending',
+            steps: [],
+          },
+        },
         ctrlCPressed: true,
         interrupt: { kind: 'approval', blockId: 1 },
         showHelp: true,
@@ -2213,6 +2342,10 @@ describe('eventReducer (blocks model)', () => {
       expect(s.sessions).toHaveLength(1);
       expect(s.sessions[0]!.threadId).toBe('new-session-1');
       expect(s.sessions[0]!.active).toBe(true);
+      expect(s.status.phase).toBe('building');
+      expect(s.status.pendingPlan).toBeNull();
+      expect(s.sessions[0]!.status.phase).toBe('building');
+      expect(s.sessions[0]!.status.pendingPlan).toBeNull();
     });
     test('SET_RUNNING resets ctrlCPressed and exitRequested', () => {
       let s = fresh();
@@ -2851,6 +2984,66 @@ describe('eventReducer (blocks model)', () => {
       expect(next.interrupt).toBeNull();
     });
 
+    test('SWITCH_SESSION preserves off-screen queued tool metadata per session', () => {
+      const snapshot = (
+        threadId: string,
+        active: boolean,
+        turns: TuiState['turns'] = [],
+      ): SessionSnapshot => ({
+        threadId,
+        name: threadId,
+        workspace: '/tmp',
+        active,
+        running: true,
+        pendingInterrupt: false,
+        interrupt: null,
+        plan: null,
+        status: initialState.status,
+        turns,
+      });
+      let state: TuiState = {
+        ...fresh(),
+        activeSessionId: 'a',
+        sessions: [snapshot('a', true), snapshot('b', false)],
+      };
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.queued',
+        toolCallId: 'read-a',
+        name: 'read_file',
+        args: { path: 'README.md' },
+      });
+
+      state = eventReducer(state, { type: 'SWITCH_SESSION', threadId: 'b' });
+      state = eventReducer(state, { type: 'SWITCH_SESSION', threadId: 'a' });
+      expect(state.pendingToolCalls['read-a']).toEqual({
+        name: 'read_file',
+        args: { path: 'README.md' },
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.started',
+        toolCallId: 'read-a',
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.finished',
+        toolCallId: 'read-a',
+        name: 'read_file',
+        result: {
+          ok: true,
+          command: '',
+          exitCode: 0,
+          stdout: 'content',
+          stderr: '',
+        },
+      });
+      expect(
+        flatBlocks(state).some(
+          (block) =>
+            block.kind === 'tool_summary' && block.tools.some((tool) => tool.callId === 'read-a'),
+        ),
+      ).toBe(true);
+    });
+
     test('SWITCH_SESSION to nonexistent session uses default empty blocks', () => {
       const s: TuiState = {
         ...initialState,
@@ -3444,6 +3637,30 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('RUNTIME_EVENT message-list pipeline', () => {
+    test('keeps queued calls off-screen and drops a pre-start cancellation without a block', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'tool.queued',
+        toolCallId: 'future-read',
+        name: 'read_file',
+        args: { path: 'README.md' },
+      });
+
+      expect(flatBlocks(state)).toHaveLength(0);
+      expect(state.pendingToolCalls['future-read']).toEqual({
+        name: 'read_file',
+        args: { path: 'README.md' },
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.cancelled',
+        toolCallId: 'future-read',
+        reason: 'Earlier sibling opened an interaction.',
+      });
+
+      expect(flatBlocks(state)).toHaveLength(0);
+      expect(state.pendingToolCalls['future-read']).toBeUndefined();
+    });
+
     test('retains every structured multi-question answer when ask_user finishes with oversized stdout', () => {
       const answers = {
         intent: 'implement',
@@ -3538,7 +3755,7 @@ describe('eventReducer (blocks model)', () => {
       );
     });
 
-    test('renders approval, user input, and plan review as distinct interaction blocks', () => {
+    test('keeps approval in Footer while user input and plan review use their own projections', () => {
       const approvalEvent: import('../src/core/runtime/events').RuntimeEvent = {
         type: 'approval.requested',
         interactionId: 'approval-1',
@@ -3560,8 +3777,11 @@ describe('eventReducer (blocks model)', () => {
       };
 
       const approvalState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: approvalEvent });
-      expect(flatBlocks(approvalState).at(-1)?.kind).toBe('approval');
-      expect(approvalState.interrupt?.kind).toBe('approval');
+      expect(flatBlocks(approvalState)).toHaveLength(0);
+      expect(approvalState.interrupt).toMatchObject({
+        kind: 'approval',
+        approval: approvalEvent.approval,
+      });
 
       const inputState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: inputEvent });
       expect(flatBlocks(inputState).at(-1)?.kind).toBe('question');
@@ -3572,7 +3792,70 @@ describe('eventReducer (blocks model)', () => {
       expect(reviewState.status.pendingPlan?.name).toBe('Plan');
     });
 
-    test('approval rejection immediately settles its queued shell card', () => {
+    test('plan review cancellation has identical live and replay projections without a banner', () => {
+      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+        {
+          type: 'tool.queued',
+          toolCallId: 'plan-call',
+          name: 'write_plan',
+          args: { plan: 'Draft body' },
+        },
+        {
+          type: 'plan.review_requested',
+          interactionId: 'plan-review',
+          toolCallId: 'plan-call',
+          plan: {
+            name: 'Plan',
+            description: 'Do the work safely.',
+            status: 'pending',
+            steps: [{ id: 'step-1', step: 'Implement', status: 'pending' }],
+          },
+          planSummary: 'Do the work safely.',
+        },
+        {
+          type: 'plan.review_cancelled',
+          interactionId: 'plan-review',
+          reason: 'Plan execution confirmation cancelled by user.',
+        },
+        {
+          type: 'tool.cancelled',
+          toolCallId: 'plan-call',
+          reason: 'Plan execution confirmation cancelled by user.',
+        },
+        {
+          type: 'turn.aborted',
+          turnId: 'turn-1',
+          reason: 'Plan execution confirmation cancelled by user.',
+          cause: 'user',
+        },
+      ];
+
+      let live = fresh();
+      live = handleRuntimeEventAction(live, events[0]!);
+      live = handleRuntimeEventAction(live, events[1]!);
+      live = eventReducer(live, { type: 'ESCAPE' });
+      for (const event of events.slice(2)) live = handleRuntimeEventAction(live, event);
+
+      let replay = fresh();
+      for (const event of events) replay = handleRuntimeEventAction(replay, event);
+
+      expect(flatBlocks(live)).toEqual(flatBlocks(replay));
+      expect(
+        flatBlocks(live).some(
+          (block) => block.kind === 'text' && block.content.includes('Plan declined'),
+        ),
+      ).toBe(false);
+      expect(flatBlocks(live)).toContainEqual(
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: 'plan-call',
+          status: 'done',
+          summary: expect.stringContaining('Do the work safely.'),
+        }),
+      );
+    });
+
+    test('approval rejection removes the queued shell without a message card', () => {
       let state = dispatch(fresh(), {
         type: 'RUNTIME_EVENT',
         event: {
@@ -3608,13 +3891,174 @@ describe('eventReducer (blocks model)', () => {
       const approvalBlock = flatBlocks(state).find(
         (block): block is Extract<OutputBlock, { kind: 'approval' }> => block.kind === 'approval',
       );
-      expect(card?.status).toBe('error');
-      expect(card?.summary).toBe('Rejected by user.');
-      expect(approvalBlock?.resolved?.action).toBe('reject');
+      expect(card).toBeUndefined();
+      expect(approvalBlock).toBeUndefined();
+      expect(state.pendingToolCalls['shell-rejected']).toBeUndefined();
       expect(state.interrupt).toBeNull();
     });
 
-    test('keeps a preflighted shell card queued until its batch starts', () => {
+    test('keeps planning shell deferrals out of the message list', () => {
+      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+        {
+          type: 'tool.queued',
+          toolCallId: 'typecheck',
+          name: 'shell_execute',
+          args: { command: 'bun run typecheck' },
+        },
+        {
+          type: 'tool.rejected',
+          toolCallId: 'typecheck',
+          reason: 'Deferred shell_execute until building phase.',
+          failure: {
+            kind: 'phase_deferred',
+            message: 'Deferred shell_execute until building phase.',
+            retryable: false,
+            modelFixable: true,
+            needsUserIntervention: false,
+            terminatesTurn: false,
+            journal: true,
+          },
+        },
+        {
+          type: 'tool.queued',
+          toolCallId: 'tests',
+          name: 'shell_execute',
+          args: { command: 'bun test tests/runtime' },
+        },
+        {
+          type: 'tool.rejected',
+          toolCallId: 'tests',
+          reason: 'Deferred shell_execute until building phase.',
+          failure: {
+            kind: 'phase_deferred',
+            message: 'Deferred shell_execute until building phase.',
+            retryable: false,
+            modelFixable: true,
+            needsUserIntervention: false,
+            terminatesTurn: false,
+            journal: true,
+          },
+        },
+      ];
+
+      const live = events.reduce(handleRuntimeEventAction, fresh());
+      expect(flatBlocks(live)).toEqual([]);
+      expect(live.pendingToolCalls).toEqual({});
+
+      const replay = events.reduce(handleRuntimeEventAction, fresh());
+      expect(flatBlocks(replay)).toEqual(flatBlocks(live));
+    });
+
+    test('renders a planning edit denial as guidance without a tool card', () => {
+      const reason =
+        'Plan mode is read-only. No file was edited. Describe the intended change in the plan and apply it after plan approval.';
+      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+        {
+          type: 'tool.queued',
+          toolCallId: 'edit-denied',
+          name: 'edit_file',
+          args: {
+            path: 'src/example.ts',
+            old_string: 'before',
+            new_string: 'after',
+          },
+        },
+        {
+          type: 'tool.rejected',
+          toolCallId: 'edit-denied',
+          reason,
+          failure: {
+            kind: 'phase_denied',
+            message: reason,
+            retryable: false,
+            modelFixable: true,
+            needsUserIntervention: false,
+            terminatesTurn: false,
+            journal: true,
+          },
+        },
+      ];
+
+      const state = events.reduce(handleRuntimeEventAction, fresh());
+      expect(flatBlocks(state)).toEqual([
+        expect.objectContaining({
+          kind: 'text',
+          content: reason,
+        }),
+      ]);
+      expect(flatBlocks(state).some((block) => block.kind === 'tool_card')).toBe(false);
+      expect(state.pendingToolCalls).toEqual({});
+    });
+
+    test('approval cancellation keeps only started siblings visible and ends the current turn', () => {
+      let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+      for (const event of [
+        {
+          type: 'tool.queued' as const,
+          toolCallId: 'shell-running',
+          name: 'shell_execute',
+          args: { command: 'bun test' },
+        },
+        {
+          type: 'tool.started' as const,
+          toolCallId: 'shell-running',
+        },
+        {
+          type: 'tool.queued' as const,
+          toolCallId: 'shell-rejected',
+          name: 'shell_execute',
+          args: { command: 'rm generated.txt' },
+        },
+        {
+          type: 'approval.requested' as const,
+          interactionId: 'approval-rejected',
+          toolCallId: 'shell-rejected',
+          approval: approval(),
+        },
+        {
+          type: 'approval.rejected' as const,
+          interactionId: 'approval-rejected',
+          toolCallId: 'shell-rejected',
+          reason: 'Approval cancelled by user.',
+        },
+        {
+          type: 'tool.cancelled' as const,
+          toolCallId: 'shell-running',
+          reason: 'Approval cancelled by user.',
+        },
+        {
+          type: 'turn.aborted' as const,
+          turnId: 'turn-1',
+          reason: 'Approval cancelled by user.',
+          cause: 'user' as const,
+        },
+      ]) {
+        state = dispatch(state, { type: 'RUNTIME_EVENT', event });
+      }
+
+      expect(flatBlocks(state)).toContainEqual(
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: 'shell-running',
+          status: 'cancelled',
+        }),
+      );
+      expect(
+        flatBlocks(state).some(
+          (block) => block.kind === 'tool_card' && block.callId === 'shell-rejected',
+        ),
+      ).toBe(false);
+      expect(
+        flatBlocks(state).some(
+          (block) => block.kind === 'text' && block.content.includes('Run cancelled'),
+        ),
+      ).toBe(false);
+      expect(state.pendingToolCalls['shell-rejected']).toBeUndefined();
+      expect(state.interrupt).toBeNull();
+      expect(state.running).toBe(false);
+    });
+
+    test('keeps a legacy preflighted shell call invisible until it starts', () => {
       let state = dispatch(fresh(), {
         type: 'RUNTIME_EVENT',
         event: {
@@ -3634,7 +4078,11 @@ describe('eventReducer (blocks model)', () => {
         (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
           block.kind === 'tool_card' && block.callId === 'shell-ready',
       );
-      expect(card?.status).toBe('queued');
+      expect(card).toBeUndefined();
+      expect(state.pendingToolCalls['shell-ready']).toEqual({
+        name: 'shell_execute',
+        args: { command: 'pwd' },
+      });
     });
 
     test('updates cache statistics and keeps non-visual lifecycle facts out of the message list', () => {
@@ -3863,6 +4311,10 @@ describe('model streaming RuntimeEvent rendering', () => {
       args: { path: 'README.md' },
     });
     state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'read-between-segments',
+    });
+    state = handleRuntimeEventAction(state, {
       type: 'model.requested',
       requestId: 'segment-request-2',
     });
@@ -4039,6 +4491,10 @@ describe('model streaming RuntimeEvent rendering', () => {
       args: { pattern: '*', path: '.' },
     });
     state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'search-1',
+    });
+    state = handleRuntimeEventAction(state, {
       type: 'model.requested',
       requestId: 'explore-2',
     });
@@ -4057,6 +4513,10 @@ describe('model streaming RuntimeEvent rendering', () => {
       toolCallId: 'read-1',
       name: 'read_file',
       args: { path: 'README.md' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'read-1',
     });
     state = handleRuntimeEventAction(state, {
       type: 'model.requested',
@@ -4179,6 +4639,10 @@ describe('model streaming RuntimeEvent rendering', () => {
       toolCallId: 'read-1',
       name: 'read_file',
       args: { path: 'README.md' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'read-1',
     });
     state = handleRuntimeEventAction(state, {
       type: 'tool.finished',
@@ -4392,6 +4856,10 @@ describe('model streaming RuntimeEvent rendering', () => {
       toolCallId: 'read-1',
       name: 'read_file',
       args: { path: 'README.md' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'read-1',
     });
 
     const blocks = flatBlocks(state);

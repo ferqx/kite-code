@@ -317,8 +317,8 @@ export interface ToolStartedEvent {
 }
 
 /**
- * A batched shell call has completed parsing and policy preflight and is ready
- * to start once every sibling shell approval has been resolved.
+ * Legacy replay fact emitted by the former all-sibling shell approval barrier.
+ * New executions start each call immediately after its own approval.
  */
 export interface ToolExecutionReadyEvent {
   type: 'tool.execution_ready';

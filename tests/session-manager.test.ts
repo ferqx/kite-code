@@ -12,6 +12,7 @@ import {
   SessionRuntime,
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
+import { createAgentKernel } from '../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
@@ -534,6 +535,42 @@ describe('SessionManager', () => {
     expect(rt.notifyInterrupt).toBeDefined();
   });
 
+  test('exitPlanningMode reconciles a completed planning Task to building', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-plan-exit-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const deps = { ...makeDeps(), checkpointPath };
+    const mgr = new SessionManager(deps);
+    try {
+      const threadId = mgr.createSession('/tmp/ws');
+      expect(mgr.enterPlanningMode(threadId).map((event) => event.type)).toEqual([
+        'task.started',
+        'planning.entered',
+      ]);
+
+      const kernel = createAgentKernel({
+        threadId,
+        userId: 'tui',
+        workspace: '/tmp/ws',
+        storePath: runtimeStorePathFor(checkpointPath),
+        phase: 'building',
+      });
+      kernel.processEvent({
+        type: 'run.completed',
+        turnId: kernel.getState().turn.turnId,
+        output: 'Planning conversation completed.',
+      });
+      kernel.close();
+
+      expect(mgr.exitPlanningMode(threadId)).toEqual({
+        events: [],
+        phase: 'building',
+      });
+    } finally {
+      mgr.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // ── switchSession ──
 
   test('switchSession toggles active flag and updates activeId', () => {
@@ -573,6 +610,25 @@ describe('SessionManager', () => {
     mgr.switchSession(id1, id2);
 
     expect(rt1.pendingInterrupt).toBe(false);
+  });
+
+  test('switchSession cancels an active TUI turn before changing the visible session', () => {
+    const mgr = makeManager();
+    const id1 = mgr.createSession('/tmp/ws');
+    const id2 = mgr.createSession('/tmp/ws');
+    mgr.switchSession(id2, id1);
+    const rt1 = mgr.getRuntime(id1)!;
+    rt1.agentLoopActive = true;
+    let abortCalls = 0;
+    rt1.abort = () => {
+      abortCalls += 1;
+      rt1.agentLoopActive = false;
+    };
+
+    mgr.switchSession(id1, id2);
+
+    expect(abortCalls).toBe(1);
+    expect(mgr.getActiveId()).toBe(id2);
   });
 
   // ── removeRuntime ──
@@ -1177,6 +1233,37 @@ describe('SessionRuntime', () => {
     rt.abort();
 
     expect(rt.agentLoopActive).toBe(false);
+  });
+
+  test('a successor run waits until the aborted generator finishes cleanup', async () => {
+    const rt = makeRuntime();
+    const ac = new AbortController();
+    let releasePreviousRun!: () => void;
+    const previousRun = new Promise<void>((resolve) => {
+      releasePreviousRun = resolve;
+    });
+    rt.agentLoopActive = true;
+    rt.abortController = ac;
+    Reflect.set(rt, '_runCompletion', previousRun);
+
+    rt.abort();
+    expect(rt.agentLoopActive).toBe(false);
+
+    const actions: Action[] = [];
+    const successor = rt.runTask('next task', {
+      dispatch: (action) => actions.push(action),
+      provider: makeDeps().provider,
+      config: makeDeps().config,
+    });
+    await Promise.resolve();
+    expect(actions).toEqual([]);
+
+    // Simulate a competing waiter claiming the session as soon as cleanup
+    // completes. This waiter must return instead of opening a second loop.
+    rt.agentLoopActive = true;
+    releasePreviousRun();
+    await successor;
+    expect(actions).toEqual([]);
   });
 
   // ── setForeground ──

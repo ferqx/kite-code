@@ -136,6 +136,12 @@ describe('parseInline', () => {
     const result = parseInline('this *is not closed');
     expect(result).toEqual([{ text: 'this *is not closed' }]);
   });
+
+  test('consumes Markdown escapes without applying formatting', () => {
+    expect(parseInline(String.raw`web\_search and \*literal\* and \\`)).toEqual([
+      { text: 'web_search and *literal* and \\' },
+    ]);
+  });
 });
 
 // ── formatDuration ──

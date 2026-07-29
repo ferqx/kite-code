@@ -1,8 +1,8 @@
 # 当前规则：工具描述即契约
 
 状态：active
-最后更新：2026-05-06
-最后验证：2026-05-06
+最后更新：2026-07-30
+最后验证：2026-07-30
 范围：
 
 - `src/core/tools/tool-contracts.ts`
@@ -71,6 +71,12 @@
 - 修改 `tool-runner.ts` 中的执行结果格式、错误信息或 `toolUsageGuidance()` 时，必须检查契约的 `outputFormat` 和 `failureHandling` 是否一致。
 - 修改静态工具的模型结果、截断、diff 或结构化元数据时，必须在对应 `spec.projectResult()` 中完成；Runner/Controller 只消费投影。
 - 新增工具时必须先创建 ToolSpec 契约，再在生产 Registry 中注册；`definitions.ts` 只投影 Registry，不得再次枚举静态工具名。
+
+### `ask_user` 模型输入边界
+
+`ask_user` 的模型参数只有一种规范形态：顶层必须且只能使用 `questions` 数组，单问题也是长度为 1 的数组。每次调用包含 1-3 个问题，每个问题包含 `question` 与 2-3 个 `{label, description}` 选项；第一个选项表示推荐项。模型不得提交顶层 `question`/`options`、问题或选项 ID、`recommended`、`allow_free_text`，也不得显式添加 `Other` 选项。
+
+ToolSpec 的输入 Schema 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`createInterrupt()` 在 Schema 校验后生成稳定问题/选项 ID，将第一项标记为推荐，并为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
 
 ## 不要做
 

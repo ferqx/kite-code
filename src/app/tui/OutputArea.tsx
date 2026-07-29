@@ -59,34 +59,6 @@ function visibleDynamicBlocksForApproval(
 }
 
 /**
- * Runtime queues every tool from one model response before executing them.
- * Keep queued work behind the currently-running standalone tool out of the
- * render tree until execution actually reaches it; otherwise the future phase
- * looks active while the barrier tool is still running.
- */
-function visibleDynamicBlocksForExecutionFrontier(blocks: OutputBlock[]): OutputBlock[] {
-  let hasRunningBarrier = false;
-
-  for (let i = 0; i < blocks.length; i++) {
-    const block = blocks[i]!;
-    if (hasRunningBarrier) {
-      const isQueuedTool = block.kind === 'tool_card' && block.status === 'queued';
-      const isQueuedSummary =
-        block.kind === 'tool_summary' &&
-        block.tools.length > 0 &&
-        block.tools.every((tool) => tool.status === 'queued');
-      if (isQueuedTool || isQueuedSummary) return blocks.slice(0, i);
-    }
-
-    if (block.kind === 'tool_card' && block.status === 'running') {
-      hasRunningBarrier = true;
-    }
-  }
-
-  return blocks;
-}
-
-/**
  * OutputArea renders <Static> (immutable settled blocks + header) inline,
  * and all mutable blocks in the dynamic tree. Blocks only enter <Static>
  * once they become truly immutable (tool done, text complete, etc.).
@@ -112,8 +84,9 @@ export default function OutputArea({
   onToggleToolRef.current = onToggleToolExpand;
   const onToggleSubagentRef = useRef(onToggleSubagentExpand);
   onToggleSubagentRef.current = onToggleSubagentExpand;
-  const visibleDynamicBlocks = visibleDynamicBlocksForExecutionFrontier(
-    visibleDynamicBlocksForApproval(activeDynamicBlocks, awaitingApproval),
+  const visibleDynamicBlocks = visibleDynamicBlocksForApproval(
+    activeDynamicBlocks,
+    awaitingApproval,
   );
   const dynamicBlocksRef = useRef(visibleDynamicBlocks);
   dynamicBlocksRef.current = visibleDynamicBlocks;

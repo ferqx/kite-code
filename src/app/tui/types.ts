@@ -232,6 +232,11 @@ export interface TuiState {
   loadingSessionId: string | null;
   /** 探索工具 callId → tool_summary block ID 映射，用于 tool_done 精确定位 */
   explorationSummaryIds: Record<string, number>;
+  /**
+   * Runtime queue metadata is retained off-screen until execution reaches the
+   * call or it fails terminally. Approval targets remain in the Footer only.
+   */
+  pendingToolCalls: Record<string, { name: string; args: Record<string, unknown> }>;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
   /** Explicit Thought lifecycle. `awaiting_terminal` is visually settled but
@@ -255,7 +260,13 @@ export interface TuiState {
 }
 
 export type InterruptState =
-  | { kind: 'approval'; blockId: number }
+  | {
+      kind: 'approval';
+      /** Active Footer payload; absent only in legacy restored UI snapshots. */
+      approval?: ToolApprovalPayload;
+      /** Compatibility pointer for sessions created before approvals moved off-screen. */
+      blockId?: number;
+    }
   | { kind: 'input'; blockId: number }
   | {
       kind: 'plan_review';
@@ -301,4 +312,6 @@ export interface SessionSnapshot {
   plan: import('@/protocol/events').AgentPlan | null;
   status: StatusState;
   turns: Turn[];
+  /** Off-screen queued tool metadata owned by this TUI session projection. */
+  pendingToolCalls?: TuiState['pendingToolCalls'];
 }

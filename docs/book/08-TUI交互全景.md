@@ -18,14 +18,16 @@
 
 | 交互 | Runtime 行为 |
 | --- | --- |
-| 工具审批 | `approval` interrupt → approve/reject/replacement → RuntimeUserAction |
-| 用户问答 | `input` interrupt → 文本/结构化 answers → 恢复 Agent |
-| 计划审核 | `plan_review` interrupt → approve/revise/cancel |
+| 工具审批 | `approval` interrupt → approve/reject/cancel → RuntimeUserAction；批准单个调用后立即执行 |
+| 用户问答 | `input` interrupt → 文本/结构化 answers → 恢复 Agent；Esc 只取消本次回答 |
+| 计划审核 | `plan_review` interrupt → approve/revise/cancel；cancel 中止当前 turn 并保留 draft |
 | Verification 决策 | replan、compensation 或带理由 waiver |
 | Subagent 审批 | 保存 continuation，用户决策后恢复 |
 | 取消 | AbortSignal 传播并形成一致的终止/恢复状态 |
 
-Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根据当前交互类型显式处理。
+工具的 `tool.queued` 只在 reducer 中保存 name/args，不进入消息列表；收到 `tool.started` 后才物化 Tool Card。待审批命令只显示在 Footer 的 `授权执行命令（…）` 标题中，未获准调用不得提前出现在消息列表。多个 Shell 调用分别审批，任一调用获准后立即进入执行，不等待其他 sibling 审批完成。
+
+Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根据当前交互类型显式处理。工具审批或 plan review 被拒绝/取消时，Runtime 取消尚未终结的 sibling 与正在执行的调用，写入 `turn.aborted(cause=user)`，本轮不再调用模型；`ask_user` 的 Esc 只形成该工具的取消结果，模型可以在同一 turn 继续。
 
 ## 8.3 斜杠命令
 
@@ -35,7 +37,7 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 
 ## 8.4 Session 与恢复点
 
-会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。
+会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
 
 `/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无参数连续压缩直接提示 `No new messages to compact.`，不再次调用摘要模型，显式自定义指令仍可重写已有 narrative。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 

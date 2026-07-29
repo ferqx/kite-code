@@ -84,6 +84,16 @@ describe('TUI PTY System — Session Lifecycle', () => {
     TIMEOUT,
   );
 
+  test(
+    'enter plan mode before creating the next session',
+    async () => {
+      tui.write('\x1b[Z');
+      await waitForText(() => tui.output(), 'Shift+Tab to exit', 5000);
+      expect(screenContains(tui.output(), 'Shift+Tab to exit')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
   // ── /new Creates New Session ───────────────────────────
   //
   // NOTE: <Static> content from the old session persists in the terminal
@@ -96,6 +106,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
     '/new creates new session, TUI remains responsive',
     async () => {
       await typeText(tui, '/new');
+      const outputBeforeSubmit = tui.output().length;
       tui.write('\r');
       await sleep(1500);
 
@@ -104,6 +115,16 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       // Prompt should still be visible (TUI alive and in new session)
       expect(screenContains(output, '❯')).toBe(true);
+      // The new Runtime starts in building mode and must not inherit the
+      // outgoing session's planning-only UI projection.
+      expect(stripAnsi(output.slice(outputBeforeSubmit))).not.toContain('Shift+Tab to exit');
+
+      // Shift+Tab remains functional after the InputLine remount. Keep the
+      // new session in plan mode so the next test covers exiting only after a
+      // complete user/model conversation.
+      const outputBeforeEnterPlan = tui.output().length;
+      tui.write('\x1b[Z');
+      await waitForText(() => tui.output().slice(outputBeforeEnterPlan), 'Shift+Tab to exit', 5000);
 
       // After /new, the InputLine remounts (key changes via activeSessionId).
       // Ink's useFocus re-initializes setRawMode, requiring a mini-warmup
@@ -136,6 +157,23 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // Current session content must be visible
       expect(screenContains(output, 'Message in session B')).toBe(true);
       expect(screenContains(output, 'Second session response!')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'Shift+Tab exits plan mode after a completed conversation',
+    async () => {
+      const outputBeforeExitPlan = tui.output().length;
+      tui.write('\x1b[Z');
+      await sleep(700);
+      const exitPlanRender = stripAnsi(tui.output().slice(outputBeforeExitPlan));
+      expect(exitPlanRender).toContain('mock-model');
+      // Ink may emit one stale plan frame before the later building frame.
+      // Assert against render order so the final footer remains authoritative.
+      expect(exitPlanRender.lastIndexOf('mock-model')).toBeGreaterThan(
+        exitPlanRender.lastIndexOf('Shift+Tab to exit'),
+      );
     },
     TIMEOUT,
   );

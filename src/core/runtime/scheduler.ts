@@ -1,16 +1,68 @@
+import { evaluateToolApproval } from '@/core/policies/approval-policy';
 import type { RuntimeEffect } from './effects';
-import type { RuntimeState } from './state';
-import { contiguousShellBatchIds } from './tool-batches';
+import { getActivePlanning, getAgentPhase, type RuntimeState, type ToolCallRecord } from './state';
+
+/** Bound resource usage while still allowing independent reads to overlap. */
+export const MAX_PARALLEL_READ_TOOLS = 4;
+
+/**
+ * Only builtin execution tools with no interaction/control semantics may join
+ * a parallel read batch. Dynamic MCP capabilities need their bound descriptor
+ * at execution time, so the scheduler keeps them exclusive.
+ */
+const PARALLEL_READ_TOOLS = new Set([
+  'read_file',
+  'search_content',
+  'search_files',
+  'list_mcp_resources',
+  'list_mcp_tools',
+  'read_mcp_resource',
+  'web_fetch',
+  'shell_execute',
+]);
+
+function argsRecord(args: unknown): Record<string, unknown> {
+  return args && typeof args === 'object' && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : {};
+}
+
+function isApprovalFreeParallelRead(state: RuntimeState, call: ToolCallRecord): boolean {
+  if (
+    call.status !== 'queued' ||
+    call.effectClass !== 'read_only' ||
+    call.sideEffect !== false ||
+    !PARALLEL_READ_TOOLS.has(call.name)
+  ) {
+    return false;
+  }
+
+  const decision = evaluateToolApproval({
+    toolName: call.name,
+    toolArgs: argsRecord(call.args),
+    phase: getAgentPhase(getActivePlanning(state)),
+    workspace: state.session.workspace,
+    threadId: state.session.threadId,
+    authorization: state.authorization,
+    capability: {
+      effectClass: call.effectClass,
+      sideEffect: call.sideEffect,
+      classificationReason:
+        call.classificationReason ?? 'Runtime queue classified this call as read-only.',
+    },
+  });
+  return decision.allowed && !decision.requiresApproval;
+}
 
 /**
  * The only runtime scheduler.  It deliberately depends on RuntimeState only:
  * callers must encode every externally visible transition as a RuntimeEvent
  * before asking for the next effect.
  *
- * Interaction-producing tools still run one at a time so write_plan, ask_user
- * and approval barriers stop sibling execution. Shell calls from one model
- * response are the exception: each contiguous shell segment collects approvals
- * serially, then its approved siblings start in one concurrent batch.
+ * Consecutive calls proven read-only and approval-free may run together.
+ * Interaction, write, and unknown calls remain exclusive barriers. A tool that
+ * requires approval becomes runnable immediately after its own grant; sibling
+ * approvals never form an all-or-nothing execution barrier.
  */
 export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   if (state.recoveryState.kind !== 'normal') {
@@ -28,6 +80,11 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       type: 'recovery_blocked',
       reason: `Runtime context is blocked by a correctness failure: ${state.context.hardBlock.reason}. Rewind, clear, or start a new session.`,
     };
+  }
+  // A terminal turn remains terminal across snapshot recovery and loop
+  // re-entry. Only an explicit turn.started event may reopen scheduling.
+  if (state.turn.status !== 'active') {
+    return { type: 'stop' };
   }
   if (state.legacyUnrecoverableSubagentApproval) {
     return {
@@ -92,9 +149,12 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       break;
   }
 
-  // Interaction-producing tools normally run one at a time. Approved sub-agent
-  // task tools can remain active while waiting for their continuation, so scan
-  // both queue and active lists.
+  // Effect-aware scheduling preserves interaction barriers without forcing
+  // independent reads through one global single-tool lane.
+  //
+  // Normal approval leaves the call in queue and changes its status to approved.
+  // Legacy/sub-agent resume paths may instead retain an approved call in active,
+  // so both collections remain part of the runnable projection.
   const isRunnable = (id: string) => {
     const call = state.tools.calls[id];
     const belongsToCurrentTask = call?.taskId == null || call.taskId === state.activeTaskId;
@@ -103,22 +163,23 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   const nextRunnable = state.tools.queue.find(isRunnable) ?? state.tools.active.find(isRunnable);
   if (nextRunnable) {
     const nextCall = state.tools.calls[nextRunnable];
-    if (nextCall?.name === 'shell_execute' && nextCall.modelMessageId) {
-      const shellBatch = contiguousShellBatchIds(state, nextRunnable);
-      if (shellBatch.length > 1) {
-        // A previously approved sibling must not start while another sibling
-        // is still waiting for its policy/approval preflight.
-        const nextUnprepared = shellBatch.find((id) => state.tools.calls[id]?.status === 'queued');
-        if (nextUnprepared) return { type: 'run_tools', toolCallIds: [nextUnprepared] };
-
-        const approvedBatch = shellBatch.filter(
-          (id) => state.tools.calls[id]?.status === 'approved',
-        );
-        if (approvedBatch.length > 0) {
-          return { type: 'run_tools', toolCallIds: approvedBatch };
-        }
+    if (nextCall && isApprovalFreeParallelRead(state, nextCall)) {
+      const runnableQueue = state.tools.queue.filter(isRunnable);
+      const firstIndex = runnableQueue.indexOf(nextRunnable);
+      const batch: string[] = [];
+      for (
+        let index = firstIndex;
+        index >= 0 && index < runnableQueue.length && batch.length < MAX_PARALLEL_READ_TOOLS;
+        index++
+      ) {
+        const id = runnableQueue[index]!;
+        const call = state.tools.calls[id];
+        if (!call || !isApprovalFreeParallelRead(state, call)) break;
+        batch.push(id);
       }
+      return { type: 'run_tools', toolCallIds: batch };
     }
+
     return { type: 'run_tools', toolCallIds: [nextRunnable] };
   }
 
@@ -187,10 +248,9 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     return { type: 'stop' };
   }
 
-  // When every tool from the latest model response was explicitly rejected
-  // by the user (approval_rejected), stop the turn without calling the model
-  // again — the user already said no.  Policy denials (policy_denied) and
-  // other automatic failures still need a model call so the model can adjust.
+  // Any explicit user approval rejection aborts this turn. Policy denials
+  // (policy_denied) and other automatic failures still need a model call so
+  // the model can adjust.
   //
   // A new user message after the rejection starts a new turn that must be
   // processed regardless of failure kind.
@@ -205,25 +265,14 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   );
   if (latestAssistantEntry) {
     const { m: latestAssistantMsg, idx: latestAssistantIdx } = latestAssistantEntry;
-    const allRejectedOrCancelled = latestAssistantMsg.toolCalls.every((tc) => {
-      const call = state.tools.calls[tc.id];
-      return call?.status === 'rejected' || call?.status === 'cancelled';
-    });
-    if (allRejectedOrCancelled && latestAssistantMsg.toolCalls.length > 0) {
-      const hasNewUserMessageAfter = state.transcript.messages
-        .slice(latestAssistantIdx + 1)
-        .some((m) => m.kind === 'user');
-      if (!hasNewUserMessageAfter) {
-        // Only stop for user-driven rejection; policy denials and automatic
-        // failures still need a model call so the model can adjust.
-        const allUserRejected = latestAssistantMsg.toolCalls.every((tc) => {
-          const call = state.tools.calls[tc.id];
-          return call?.failure?.kind === 'approval_rejected';
-        });
-        if (allUserRejected) {
-          return { type: 'stop' };
-        }
-      }
+    const hasNewUserMessageAfter = state.transcript.messages
+      .slice(latestAssistantIdx + 1)
+      .some((m) => m.kind === 'user');
+    const anyUserRejected = latestAssistantMsg.toolCalls.some(
+      (tc) => state.tools.calls[tc.id]?.failure?.kind === 'approval_rejected',
+    );
+    if (anyUserRejected && !hasNewUserMessageAfter) {
+      return { type: 'stop' };
     }
   }
 

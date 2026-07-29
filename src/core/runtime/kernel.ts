@@ -224,10 +224,15 @@ export class AgentKernel {
 
   /** Apply an effect result only if no newer event changed the state. */
   applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEventInput[]): boolean {
-    if (lease.expectedRevision !== this.state.revision || lease.turnId !== this.state.turn.turnId) {
+    const current =
+      lease.expectedRevision === this.state.revision && lease.turnId === this.state.turn.turnId;
+    const concurrentShellResult =
+      !current && events.length > 0 && this.isConcurrentShellBatchCurrent(lease, events);
+    if (!current && !concurrentShellResult) {
       return false;
     }
     this.processEventBatch(events);
+    lease.expectedRevision = this.state.revision;
     return true;
   }
 
@@ -237,10 +242,60 @@ export class AgentKernel {
    * remains subject to the same stale-result check as a batch result.
    */
   applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
-    if (!this.isEffectLeaseCurrent(lease)) return false;
+    if (!this.isEffectLeaseCurrent(lease) && !this.isConcurrentShellEventCurrent(lease, event)) {
+      return false;
+    }
     this.processEvent(event);
     lease.expectedRevision = this.state.revision;
     return true;
+  }
+
+  private isConcurrentShellBatchCurrent(
+    lease: RuntimeEffectLease,
+    inputs: RuntimeEventInput[],
+  ): boolean {
+    let projectedState = this.state;
+    for (const input of inputs) {
+      if (!this.isConcurrentShellEventCurrent(lease, input, projectedState)) return false;
+      const event = isRuntimeEventEnvelope(input) ? input.payload : input;
+      projectedState = reduceRuntimeState(projectedState, event);
+    }
+    return true;
+  }
+
+  /**
+   * Shell siblings from one model response may keep running while the next
+   * sibling is being approved. Their leases therefore tolerate unrelated
+   * revision advances, but only for events owned by the same still-live call.
+   */
+  private isConcurrentShellEventCurrent(
+    lease: RuntimeEffectLease,
+    input: RuntimeEventInput,
+    state: RuntimeState = this.state,
+  ): boolean {
+    if (lease.turnId !== state.turn.turnId || lease.effect.type !== 'run_tools') return false;
+    const event = isRuntimeEventEnvelope(input) ? input.payload : input;
+    if (!('toolCallId' in event) || typeof event.toolCallId !== 'string') return false;
+    if (!lease.effect.toolCallIds.includes(event.toolCallId)) return false;
+
+    const call = state.tools.calls[event.toolCallId];
+    if (call?.name !== 'shell_execute') return false;
+    switch (event.type) {
+      case 'approval.requested':
+      case 'auto_review.requested':
+        return call.status === 'queued';
+      case 'tool.started':
+        return call.status === 'queued' || call.status === 'approved';
+      case 'tool.progress':
+        return call.status === 'running';
+      case 'tool.finished':
+        return call.status === 'running';
+      case 'tool.failed':
+      case 'tool.rejected':
+        return call.status === 'queued' || call.status === 'approved' || call.status === 'running';
+      default:
+        return false;
+    }
   }
 
   /** Validate an in-flight effect without reducing or persisting an event. */
@@ -490,6 +545,12 @@ export function createAgentKernel(params: {
       const snapshotPosition = snapshotRecord?.metadata.eventPosition ?? 0;
       const tail = allEvents.filter((entry) => entry.id > snapshotPosition);
       if (migratedState && snapshotRecord) {
+        if (restoredState && restoredState.schemaVersion < 17) {
+          migratedState = restoreLegacyTurnLifecycle(
+            migratedState,
+            allEvents.filter((entry) => entry.id <= snapshotPosition),
+          );
+        }
         migratedState = replayPersistedTail(migratedState, tail, params.threadId);
       }
     } catch (error) {
@@ -594,6 +655,26 @@ function replayPersistedTail(
   return current;
 }
 
+function restoreLegacyTurnLifecycle(state: RuntimeState, events: StoredEvent[]): RuntimeState {
+  let turn = state.turn;
+  for (const entry of events) {
+    const event = entry.event;
+    if (event.type === 'turn.started' && event.turnId === turn.turnId) {
+      turn = { turnId: turn.turnId, turnIndex: turn.turnIndex, status: 'active' };
+    } else if (event.type === 'turn.completed' && event.turnId === turn.turnId) {
+      turn = { ...turn, status: 'completed' };
+    } else if (event.type === 'turn.aborted' && event.turnId === turn.turnId) {
+      turn = {
+        ...turn,
+        status: 'aborted',
+        abortReason: event.reason,
+        ...(event.cause ? { abortCause: event.cause } : {}),
+      };
+    }
+  }
+  return turn === state.turn ? state : { ...state, turn };
+}
+
 function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   const normalizedSnapshot = snapshot;
 
@@ -682,6 +763,9 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     appliedEventIds?: string[];
     recoveryState?: RuntimeState['recoveryState'];
     context?: RuntimeState['context'];
+    turn: RuntimeState['turn'] & {
+      status?: RuntimeState['turn']['status'];
+    };
   };
   return {
     ...state,
@@ -689,6 +773,13 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
     context: normalizeContextRuntimeState(raw.context),
+    turn: {
+      ...state.turn,
+      status:
+        raw.turn.status === 'completed' || raw.turn.status === 'aborted'
+          ? raw.turn.status
+          : 'active',
+    },
     transcript: {
       ...state.transcript,
       messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({

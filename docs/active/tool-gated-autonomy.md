@@ -6,7 +6,7 @@
 
 验证：`bun test tests/runtime/tool-controller.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts`、`bun run typecheck`。
 
-相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042。
+相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049。
 
 ## 统一执行链路
 
@@ -53,7 +53,7 @@ disclosure、approval 与 fork adapter 仍属于 Controller 的跨领域治理�
 
 生产静态模型工具面必须直接由 `builtinToolRegistry.toSchemaOnlyToolSet()` 投影；`definitions.ts` 只负责构造不可变的可用性快照并合并 Runtime-issued MCP bindings。该快照包含 feature flags、task adapter、Tool Search、Skill catalog 与 active frame 可见性，并同时用于执行前的静态调用解析。工具表当前不做模块级缓存，避免长进程无界增长与运行中配置变化复用陈旧表面。Builtin Capability Descriptor 包含规范化输入 Schema，因此 Schema 变化必须改变 revision。静态工具进入审批与模型队列时，副作用分类优先且必须来自 `spec.effects()`；手写名称分类器仅用于动态或历史状态的保守回退。
 
-`ToolSpec` 按 kind 构成可辨识联合：`computer`、`coordination` 与 `runtime_action` 具有 `execute/projectResult`；`interrupt` 只具有 `createInterrupt`，类型上不得出现执行器或结果投影。`ask_user` 因此只能由 Tool Controller 创建 `user_input.requested`、不能误入 Registry dispatch，且事件载荷必须由 `askUserSpec.createInterrupt()` 生成（Schema 规范化结果），Controller 不得手工组装中断内容。子 agent 审批恢复路径的 `task` 结果同样复用 `taskSpec.projectResult()`，不存在第二份手写 task 结果格式。
+`ToolSpec` 按 kind 构成可辨识联合：`computer`、`coordination` 与 `runtime_action` 具有 `execute/projectResult`；`interrupt` 只具有 `createInterrupt`，类型上不得出现执行器或结果投影。Interrupt 的模型输入与中断协议输出可以是不同类型，但转换只能发生在 `createInterrupt()`。`ask_user` 因此只能由 Tool Controller 创建 `user_input.requested`、不能误入 Registry dispatch；模型只提交 1-3 项的规范 `questions` 数组，每项提供 2-3 个 `{label, description}` 选项，单问题同样使用数组。`askUserSpec.createInterrupt()` 负责生成稳定 ID、将第一项标为推荐并启用客户端自由输入，Controller 不得手工组装中断内容。子 agent 审批恢复路径的 `task` 结果同样复用 `taskSpec.projectResult()`，不存在第二份手写 task 结果格式。
 
 Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型化且恒等于 Schema 解析结果）并调用 `projectResult()`，其输出是静态工具模型内容、`resultMeta`、展示提示和 Runtime events 的规范来源。Tool Controller 对 runtime action、Skill 与 Tool Search 直接以该投影生成 `tool.finished`；Tool Runner 对 read/search/edit/write/shell/web_fetch 与 MCP inventory/resource 同样直接消费投影，不得再次按工具名重算 diff、截断、mutation scope 或 raw digest。产出双路模型就绪文本的工具经投影的 `streams` 字段逐流处理：shell_execute、search_content、search_files 逐流截断且失败时 stdout/stderr 两路保留；MCP 清单/资源三件（list_mcp_resources、list_mcp_tools、read_mcp_resource）逐流透传，结构化载荷（含 stale_cursor 等结构化拒绝）保持在 execute 产出的原流。单流工具（read_file、edit_file、write_file、web_fetch、task、Skill/Plan/Tool Search）以 `modelContent` 为唯一模型通道，Runner 按 ok 分流到 stdout 或 stderr。执行适配器仍可负责读取指纹、文件原像、permit、network mode 和授权来源等治理事实，但不得覆盖 spec 已投影的结果语义。
 
@@ -64,7 +64,34 @@ Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型
 3. `accept_edits`、`auto`、`full` 只决定交互策略，不取消 capability schema、revision、minimum approval 或 sandbox 检查。
 4. Authorization grant 只在声明的 thread/workspace/command 范围有效；新 thread 不继承单次授权。
 5. Destructive shell 与未知外部副作用保持保守边界，不能因 full access 或 same-command grant 自动放行。
-6. 批量 tool calls 必须逐个进入相同策略；一个只读调用不能掩盖同批写入调用。同一模型消息中的连续 `shell_execute` 调用先逐个完成策略预检与审批，所有决定收敛后才并发启动已批准项；单项拒绝不取消其他同批调用。批次在非 Shell 调用、不同模型消息或不同任务边界处截断，不得越过 interaction barrier 术语（交互中断边界）。只读免审项以 `tool.execution_ready` 留在队列中等待当前连续批次收敛。
+6. 批量 tool calls 必须逐个进入相同策略；一个只读调用不能掩盖同批写入调用。连续调用仅在
+   每项都已持久化为 `read_only + sideEffect=false`、属于无交互语义的内置读取工具且
+   Approval Policy 再确认无需审批时，才可组成最多 4 项的并行批次。`ask_user`、Plan/
+   Skill/Task/Tool Search、动态 MCP、已审批恢复、写入、未知分类和需要审批的调用都是
+   独占屏障；屏障后的读取不得越过它。同一模型消息、同一任务中的连续
+   `shell_execute` 逐项完成策略预检与审批；任一调用一经批准就立即启动，Runner 可在它
+   运行期间继续请求下一个 sibling 的审批，后一个获批后同样立即启动。单个调用的策略拒绝
+   只终结自身；用户拒绝或取消任一工具审批时则中止整个当前 turn：审批目标 rejected，
+   其余未终结 sibling cancelled，已启动执行收到 AbortSignal，Runner 不再继续审批、执行
+   或调用模型。策略拒绝和系统失败不套用这一用户取消语义。Shell 重叠在非 Shell 调用、
+   不同模型消息或不同任务边界处截断，不得
+   跨越 `ask_user`、方案审核或其他工具；`tool.execution_ready` 只用于旧回放兼容。
+7. `ask_user` 的拒答或取消不是工具审批拒绝。它只产生一个失败的成对 Tool Result 并清除
+   用户输入交互，Runner 必须继续同一 turn，让模型在缺少该答案的情况下继续；不得发出
+   `turn.aborted` 或中止其他执行。Schema 校验失败尚未创建用户输入交互，TUI 必须把它
+   显示为工具错误，不能伪装成 `(no answer)` 或 `User: ...`。
+8. 方案执行确认是授权屏障。用户取消 `request_plan_review` 时保留方案 draft，但取消方案
+   工具和所有未终结 sibling，发出 `turn.aborted(cause=user)`，Runner 立即退出；不得把
+   取消投影成成功的 `review_cancelled` Tool Result，也不得继续调用模型。
+9. Planning 的 phase 边界不可审批升级。非只读 `shell_execute` 在该阶段不创建 approval，
+   Controller 以 `phase_deferred` 终结本次 Tool Call，并向模型返回原始参数、
+   `until_phase=building` 与“写入方案、批准后重新调用”的结构化指引。TUI 消费对应的离屏
+   queued 元数据但不生成 Bash 卡、失败提示或 deferred command 行；这不是 Runtime 可自动
+   恢复的执行队列。`write_file`、`edit_file` 与实现型 Subagent 等其他阶段越界使用
+   `phase_denied` 硬拒绝，不创建 approval；模型结果必须明确当前阶段不可审批并要求把实现
+   意图写入 Plan。文件编辑拒绝在 TUI 保留“Plan mode 只读、文件未修改、方案批准后执行”的
+   可操作提示，但不物化未获准执行的 Tool Card，不能只显示通用 `Rejected ...`。破坏性
+   Shell 仍使用硬安全策略拒绝。
 
 ## 文件原像与可逆性（ADR-0042 §4）
 

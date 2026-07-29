@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   commandGrantKey,
   hasSameCommandGrant,
@@ -215,6 +218,32 @@ describe('evaluateToolApproval', () => {
       expect(result.effects).toEqual({ externalRead: true });
     });
 
+    it('allows an absolute workspace file reached through a filesystem alias', () => {
+      if (process.platform === 'win32') return;
+      const root = mkdtempSync(join(tmpdir(), 'kite-policy-path-alias-'));
+      const workspace = join(root, 'workspace');
+      const alias = join(root, 'workspace-alias');
+      try {
+        mkdirSync(workspace);
+        writeFileSync(join(workspace, 'data.txt'), 'inside');
+        symlinkSync(workspace, alias, 'dir');
+
+        const result = evaluateToolApproval(
+          baseParams({
+            toolName: 'read_file',
+            toolArgs: { path: join(alias, 'data.txt') },
+            workspace,
+          }),
+        );
+
+        expect(result.allowed).toBe(true);
+        expect(result.requiresApproval).toBe(false);
+        expect(result.effects?.externalRead).toBeUndefined();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
+
     it('allows search_content', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'search_content', toolArgs: { pattern: 'foo' } }),
@@ -421,6 +450,18 @@ describe('evaluateToolApproval', () => {
       expect(result.decision).toBe('ask');
     });
 
+    it('does not open approval for a downgraded removal during planning', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolArgs: { command: 'rm -rf /tmp/build' },
+          phase: 'planning',
+        }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.phaseConstraint).toBe('planning');
+    });
+
     it('denies empty shell commands', () => {
       const result = evaluateToolApproval(baseParams({ toolArgs: { command: '' } }));
       expect(result.allowed).toBe(false);
@@ -505,6 +546,21 @@ describe('evaluateToolApproval', () => {
       );
       expect(result.allowed).toBe(false);
       expect(result.decision).toBe('deny');
+      expect(result.requiresApproval).toBe(false);
+      expect(result.userVisibleSummary).toBe(
+        'Plan mode is read-only. No file was written. Describe the intended change in the plan and apply it after plan approval.',
+      );
+    });
+
+    it('explains that edit_file cannot be approved during planning', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'edit_file', toolArgs: { path: 'src/a.ts' }, phase: 'planning' }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.userVisibleSummary).toBe(
+        'Plan mode is read-only. No file was edited. Describe the intended change in the plan and apply it after plan approval.',
+      );
     });
 
     it('sets externalWrite effect for absolute paths', () => {
@@ -645,6 +701,8 @@ describe('evaluateToolApproval', () => {
         }),
       );
       expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.phaseConstraint).toBe('planning');
     });
   });
 
@@ -731,6 +789,26 @@ describe('evaluateToolApproval', () => {
         expect(result.requiresApproval).toBe(true);
         expect(result.risk).toBe('mcp');
       }
+    });
+
+    it('rejects a side-effectful MCP tool with actionable planning guidance', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'mcp__server__write',
+          toolArgs: {},
+          phase: 'planning',
+          mcpPolicy: {
+            effects: { filesystem: 'write', network: 'read', externalState: 'read' },
+            minimumApproval: 'none',
+          },
+        }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.phaseConstraint).toBe('planning');
+      expect(result.userVisibleSummary).toBe(
+        'Plan mode is read-only. This operation did not run and cannot be approved while planning. Use read-only inspection or describe the intended implementation in the plan, then run it after plan approval.',
+      );
     });
   });
 

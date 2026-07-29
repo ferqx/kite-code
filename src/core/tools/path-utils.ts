@@ -2,6 +2,40 @@
 // 共享路径工具 — MSYS2 路径转换 / Shared path utilities — MSYS2 path conversion
 // ============================================================================
 
+import { existsSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
+
+/**
+ * Resolve filesystem aliases in the existing prefix while retaining any
+ * non-existent suffix. This keeps policy checks and execution aligned for
+ * paths such as macOS `/var/...` and `/private/var/...`, and for symlinked
+ * workspace roots.
+ */
+export function canonicalPathForComparison(filePath: string): string {
+  const absolute = resolve(filePath);
+  let nearest = absolute;
+  while (!existsSync(nearest)) {
+    const parent = dirname(nearest);
+    if (parent === nearest) break;
+    nearest = parent;
+  }
+  const canonicalNearest = realpathSync(nearest);
+  const suffix = relative(nearest, absolute);
+  return normalizePathCase(resolve(canonicalNearest, suffix));
+}
+
+/** Return whether target resolves to the workspace itself or one of its descendants. */
+export function isPathInsideWorkspace(workspace: string, target: string): boolean {
+  const workspacePath = canonicalPathForComparison(workspace);
+  const targetPath = canonicalPathForComparison(target);
+  const rel = relative(workspacePath, targetPath);
+  return rel === '' || (!!rel && rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+}
+
+function normalizePathCase(filePath: string): string {
+  return process.platform === 'win32' ? filePath.toLowerCase() : filePath;
+}
+
 /** 将单个 MSYS2/Cygwin 驱动器路径转为 Windows 路径，仅 Windows 平台生效。
  *  /d/foo/bar → D:\foo\bar
  *  Convert a single MSYS2/Cygwin drive-letter path to Windows format (Windows only). */

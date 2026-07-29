@@ -139,8 +139,9 @@ subagent CWD 使用 `process.cwd()` 原生格式，不再通过 `toPosixPath` �
 
 - `msys2ToWindowsPath(path)` — 单个路径精确转换，`/d/foo` → `D:\foo`，用于 `file.ts` 防御纵深
 - `normalizeMsys2PathsInText(text)` — 正则匹配全部 `/X/...` 模式并转换，用于 `shell.ts`
+- `canonicalPathForComparison(path)` / `isPathInsideWorkspace(workspace, target)` — 对已存在的最近祖先调用 `realpath`，再拼回尚未创建的后缀；Approval Policy、file 边界与 search 遍历共同使用，确保 macOS `/var` 与 `/private/var`、符号链接 workspace 等文件系统别名不会被误判为外部路径，同时仍能识别通过符号链接逃逸工作区的目标。
 
-两个函数均以 `process.platform !== "win32"` 短路，Linux/macOS 完全透传。
+前两个 MSYS2 转换函数均以 `process.platform !== "win32"` 短路，Linux/macOS 完全透传。
 
 ## 跨平台行为
 
@@ -210,7 +211,12 @@ block 与已加载 block ID 冲突 → `replaceBlockById` 的 `findIndex` 替换
 
 ### Runtime 工具结果渐进展示
 
-- Runtime 逐项投影工具生命周期事件，TUI 在并发执行期间渐进刷新。
+- Runtime 可将连续、免审且已证明无副作用的内置读取组成最多 4 项的并行批次；每项仍独立
+  投影工具生命周期事件，TUI 在并发执行期间按实际 started/progress/terminal 事件渐进刷新。
+- `tool.queued` 只保留为 Runtime 调度事实，不创建可见工具块；启动前取消的读取不展示
+  Cancelled；只有开始执行，或开始前直接失败且需要展示诊断时才进入消息列表。审批目标只在
+  Footer 展示待授权命令，不因等待审批而物化。用户拒绝或取消任一工具审批会中止整个当前
+  turn：未开始读取保持不可见，已开始读取按 cancelled 收尾（ADR-0049）。
 - task 子 agent 与普通工具都通过 Runtime/Tool Controller 调度，不建立 UI 专用执行通道。
 - `tool_done` handler 的 `elapsedMs` 优先保留首次计时，避免后续投影覆盖。
 

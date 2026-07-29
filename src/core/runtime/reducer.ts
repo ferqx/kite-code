@@ -26,6 +26,7 @@ import {
   setActivePlanning,
   type ToolCallRecord,
   type ToolResultMeta,
+  type TranscriptMessage,
   updateActiveTask,
 } from './state';
 
@@ -35,6 +36,47 @@ function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: stri
     turnId: state.turn.turnId,
     ordinal: state.transcript.messages.length,
     createdAt: createdAt ?? new Date(0).toISOString(),
+  };
+}
+
+type ToolTranscriptMessage = Extract<TranscriptMessage, { kind: 'tool' }>;
+
+/**
+ * Runtime events remain chronological, but the canonical transcript keeps
+ * sibling Tool Results in assistant declaration order. This makes model
+ * context deterministic when parallel reads finish in a different order.
+ */
+function appendToolTranscriptMessage(
+  state: RuntimeState,
+  message: ToolTranscriptMessage,
+): RuntimeState['transcript'] {
+  const messages: TranscriptMessage[] = [...state.transcript.messages, message];
+  const sourceCall = state.tools.calls[message.toolCallId];
+  if (sourceCall?.modelMessageId) {
+    const positions = messages.flatMap((candidate, index) => {
+      if (candidate.kind !== 'tool') return [];
+      return state.tools.calls[candidate.toolCallId]?.modelMessageId === sourceCall.modelMessageId
+        ? [index]
+        : [];
+    });
+    const ordered = positions
+      .map((index) => ({ index, message: messages[index] as ToolTranscriptMessage }))
+      .sort((left, right) => {
+        const leftOrdinal = state.tools.calls[left.message.toolCallId]?.ordinal;
+        const rightOrdinal = state.tools.calls[right.message.toolCallId]?.ordinal;
+        if (leftOrdinal == null && rightOrdinal == null) return left.index - right.index;
+        if (leftOrdinal == null) return 1;
+        if (rightOrdinal == null) return -1;
+        return leftOrdinal - rightOrdinal || left.index - right.index;
+      })
+      .map((entry) => entry.message);
+    for (const [orderedIndex, position] of positions.entries()) {
+      messages[position] = ordered[orderedIndex]!;
+    }
+  }
+  return {
+    ...state.transcript,
+    messages: messages.map((candidate, ordinal) => ({ ...candidate, ordinal })),
   };
 }
 
@@ -883,21 +925,15 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
         },
-        transcript: {
-          ...state.transcript,
-          messages: [
-            ...state.transcript.messages,
-            {
-              kind: 'tool',
-              ...transcriptMeta(state, `tool-${event.toolCallId}`, event.createdAt),
-              toolCallId: event.toolCallId,
-              name: event.name,
-              content: event.result.stdout || event.result.stderr,
-              ok: event.result.ok,
-              resultMeta: toolResultMeta(existingCall, event),
-            },
-          ],
-        },
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${event.toolCallId}`, event.createdAt),
+          toolCallId: event.toolCallId,
+          name: event.name,
+          content: event.result.stdout || event.result.stderr,
+          ok: event.result.ok,
+          resultMeta: toolResultMeta(existingCall, event),
+        }),
         suspendedSubagents: clearSuspendedSubagent(state, event.toolCallId, isTaskCall),
         interactions:
           clearsMatchingApproval || clearsMatchingUserInput ? { kind: 'idle' } : state.interactions,
@@ -927,31 +963,25 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
         },
-        transcript: {
-          ...state.transcript,
-          messages: [
-            ...state.transcript.messages,
-            {
-              kind: 'tool',
-              ...transcriptMeta(state, `tool-${event.toolCallId}`),
-              toolCallId: event.toolCallId,
-              name: existingCall.name,
-              content: JSON.stringify({
-                ok: false,
-                error: {
-                  kind: failure.kind,
-                  message: failure.message,
-                  retryable: failure.retryable,
-                  model_fixable: failure.modelFixable,
-                },
-                next_step: failure.modelFixable
-                  ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
-                  : 'Explain the failure to the user and continue without assuming the tool succeeded.',
-              }),
-              ok: false,
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${event.toolCallId}`),
+          toolCallId: event.toolCallId,
+          name: existingCall.name,
+          content: JSON.stringify({
+            ok: false,
+            error: {
+              kind: failure.kind,
+              message: failure.message,
+              retryable: failure.retryable,
+              model_fixable: failure.modelFixable,
             },
-          ],
-        },
+            next_step: failure.modelFixable
+              ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
+              : 'Explain the failure to the user and continue without assuming the tool succeeded.',
+          }),
+          ok: false,
+        }),
         suspendedSubagents: clearSuspendedSubagent(
           state,
           event.toolCallId,
@@ -965,6 +995,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (existingCall) {
         if (existingCall.status === 'rejected') return state;
         const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
+        const deferredUntilBuilding = failure.kind === 'phase_deferred';
+        const deniedByPlanningPhase = failure.kind === 'phase_denied';
         return {
           ...state,
           tools: {
@@ -981,31 +1013,50 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             queue: state.tools.queue.filter((id) => id !== event.toolCallId),
             active: state.tools.active.filter((id) => id !== event.toolCallId),
           },
-          transcript: {
-            ...state.transcript,
-            messages: [
-              ...state.transcript.messages,
-              {
-                kind: 'tool',
-                ...transcriptMeta(state, `tool-${event.toolCallId}`),
-                toolCallId: event.toolCallId,
-                name: existingCall.name,
-                content: JSON.stringify({
-                  ok: false,
-                  rejected: true,
-                  error: {
-                    kind: failure.kind,
-                    message: event.reason,
-                    retryable: failure.retryable,
-                    model_fixable: failure.modelFixable,
-                  },
-                  next_step:
-                    'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
-                }),
-                ok: false,
-              },
-            ],
-          },
+          transcript: appendToolTranscriptMessage(state, {
+            kind: 'tool',
+            ...transcriptMeta(state, `tool-${event.toolCallId}`),
+            toolCallId: event.toolCallId,
+            name: existingCall.name,
+            content: JSON.stringify(
+              deferredUntilBuilding
+                ? {
+                    ok: false,
+                    deferred: true,
+                    reason: 'phase_constraint',
+                    until_phase: 'building',
+                    tool: existingCall.name,
+                    arguments: existingCall.args,
+                    next_step:
+                      'Do not retry or request approval while planning. Preserve this command in the plan execution or verification section, then invoke it only after plan approval changes the phase to building.',
+                  }
+                : deniedByPlanningPhase
+                  ? {
+                      ok: false,
+                      rejected: true,
+                      reason: 'phase_constraint',
+                      phase: 'planning',
+                      tool: existingCall.name,
+                      arguments: existingCall.args,
+                      message: event.reason,
+                      next_step:
+                        'Do not retry or request approval while planning. Use read-only inspection capabilities and preserve the intended implementation in the plan for execution after plan approval.',
+                    }
+                  : {
+                      ok: false,
+                      rejected: true,
+                      error: {
+                        kind: failure.kind,
+                        message: event.reason,
+                        retryable: failure.retryable,
+                        model_fixable: failure.modelFixable,
+                      },
+                      next_step:
+                        'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
+                    },
+            ),
+            ok: false,
+          }),
           suspendedSubagents: clearSuspendedSubagent(
             state,
             event.toolCallId,
@@ -1051,20 +1102,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
         },
-        transcript: {
-          ...state.transcript,
-          messages: [
-            ...state.transcript.messages,
-            {
-              kind: 'tool',
-              ...transcriptMeta(state, `tool-${event.toolCallId}`),
-              toolCallId: event.toolCallId,
-              name: existingCall.name,
-              content: event.reason,
-              ok: false,
-            },
-          ],
-        },
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${event.toolCallId}`),
+          toolCallId: event.toolCallId,
+          name: existingCall.name,
+          content: event.reason,
+          ok: false,
+        }),
         suspendedSubagents: clearSuspendedSubagent(
           state,
           event.toolCallId,
@@ -1182,29 +1227,28 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           queue: rejectedTools.queue.filter((id) => id !== toolCallId),
           active: rejectedTools.active.filter((id) => id !== toolCallId),
         },
-        transcript: {
-          ...state.transcript,
-          messages: [
-            ...state.transcript.messages,
-            {
-              kind: 'tool',
-              ...transcriptMeta(state, `tool-${toolCallId}`),
-              toolCallId,
-              name: state.tools.calls[toolCallId]?.name ?? 'unknown',
-              content: JSON.stringify({
-                ok: false,
-                rejected: true,
-                error: {
-                  kind: failure.kind,
-                  message: event.reason,
-                  retryable: failure.retryable,
-                  model_fixable: failure.modelFixable,
-                },
-              }),
-              ok: false,
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${toolCallId}`),
+          toolCallId,
+          name: state.tools.calls[toolCallId]?.name ?? 'unknown',
+          content: JSON.stringify({
+            ok: false,
+            rejected: true,
+            error: {
+              kind: failure.kind,
+              message: event.reason,
+              retryable: failure.retryable,
+              model_fixable: failure.modelFixable,
             },
-          ],
-        },
+          }),
+          ok: false,
+        }),
+        suspendedSubagents: clearSuspendedSubagent(
+          state,
+          toolCallId,
+          state.tools.calls[toolCallId]?.name === 'task',
+        ),
         interactions: { kind: 'idle' },
       };
     }
@@ -1352,20 +1396,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         },
         transcript: alreadyHasToolResult
           ? state.transcript
-          : {
-              ...state.transcript,
-              messages: [
-                ...state.transcript.messages,
-                {
-                  kind: 'tool',
-                  ...transcriptMeta(state, `tool-${call.toolCallId}`),
-                  toolCallId: call.toolCallId,
-                  name: call.name,
-                  content: call.error ?? 'MCP provider action is required.',
-                  ok: false,
-                },
-              ],
-            },
+          : appendToolTranscriptMessage(state, {
+              kind: 'tool',
+              ...transcriptMeta(state, `tool-${call.toolCallId}`),
+              toolCallId: call.toolCallId,
+              name: call.name,
+              content: call.error ?? 'MCP provider action is required.',
+              ok: false,
+            }),
       };
     }
 
@@ -1435,11 +1473,25 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         turn: {
           turnId: event.turnId,
           turnIndex: state.turn.turnIndex + 1,
+          status: 'active',
         },
       };
     case 'turn.completed':
+      return event.turnId === state.turn.turnId
+        ? { ...state, turn: { ...state.turn, status: 'completed' } }
+        : state;
     case 'turn.aborted':
-      return state;
+      return event.turnId === state.turn.turnId
+        ? {
+            ...state,
+            turn: {
+              ...state.turn,
+              status: 'aborted',
+              abortReason: event.reason,
+              ...(event.cause ? { abortCause: event.cause } : {}),
+            },
+          }
+        : state;
 
     // ── 用户消息 / User message ──
 

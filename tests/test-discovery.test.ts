@@ -59,10 +59,13 @@ describe('test discovery boundaries', () => {
     const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
+    const defaultRunner = readFileSync(join(repoRoot, 'scripts', 'run-default-tests.ts'), 'utf8');
 
-    expect(pkg.scripts?.test).toContain('bun test');
-    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/tui-system/**'");
-    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/pty-spike/**'");
+    expect(pkg.scripts?.test).toContain('scripts/run-default-tests.ts');
+    expect(defaultRunner).toContain("'tests/tui-system/**'");
+    expect(defaultRunner).toContain("'tests/pty-spike/**'");
+    expect(defaultRunner).toContain("'tests/mcp-config-catalog.test.ts'");
+    expect(defaultRunner).toContain("'tests/runtime/plan-artifacts.test.ts'");
     expect(pkg.scripts?.['test:all']).toBe('bun run test && bun run test:tui:system');
     expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/tui-system/');

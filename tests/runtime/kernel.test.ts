@@ -171,6 +171,62 @@ describe('AgentKernel durability', () => {
     }
   });
 
+  test('migrates a v16 snapshot by recovering its persisted terminal turn event', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-turn-lifecycle-migration-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'turn-lifecycle-migration';
+    try {
+      const legacy = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      legacy.schemaVersion = 16;
+      delete (legacy.turn as Partial<RuntimeState['turn']>).status;
+      legacy.revision = 1;
+      legacy.lastAppliedEventId = 'abort-v16';
+      legacy.appliedEventIds = ['abort-v16'];
+
+      const store = createRuntimeStore(storePath);
+      store.appendEvents(
+        threadId,
+        [
+          {
+            type: 'turn.aborted',
+            turnId: legacy.turn.turnId,
+            reason: 'Plan execution confirmation cancelled by user.',
+            cause: 'user',
+          },
+        ],
+        [
+          {
+            eventId: 'abort-v16',
+            revision: 1,
+            occurredAt: '2026-07-29T00:00:00.000Z',
+          },
+        ],
+      );
+      store.saveSnapshot(threadId, legacy);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().turn).toMatchObject({
+        status: 'aborted',
+        abortCause: 'user',
+      });
+      expect(decideNextEffect(restored.getState())).toEqual({ type: 'stop' });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('migrates v13 transcript identities without synthetic legacy turns', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-pr3-migration-'));
     const storePath = join(dir, 'runtime.db');
@@ -614,10 +670,11 @@ test('runRuntimeLoop completes provider recovery on a fresh turn without replayi
 });
 
 test.each([
-  'awaiting_user_input',
-  'awaiting_tool_approval',
-  'awaiting_review',
-] as const)('runRuntimeLoop consumes generic cancel for %s without throwing', async (interactionKind) => {
+  ['awaiting_user_input', 'generic'],
+  ['awaiting_tool_approval', 'generic'],
+  ['awaiting_review', 'generic'],
+  ['awaiting_review', 'structured'],
+] as const)('runRuntimeLoop consumes %s cancellation via %s action without throwing', async (interactionKind, actionKind) => {
   const store = createRuntimeStore(':memory:');
   const toolCallId =
     interactionKind === 'awaiting_user_input'
@@ -712,15 +769,40 @@ test.each([
 
   const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
   const events: string[] = [];
-  for await (const event of runRuntimeLoop(kernel, async () => [], {
-    requestAction: async () => ({ type: 'cancel', interactionId: 'interaction-1' }),
-  })) {
+  const executedEffects: string[] = [];
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect) => {
+      executedEffects.push(effect.type);
+      return [];
+    },
+    {
+      requestAction: async () =>
+        actionKind === 'structured' && initial.interactions.kind === 'awaiting_review'
+          ? {
+              type: 'plan_review_decision',
+              interactionId: 'interaction-1',
+              planId: initial.interactions.planId,
+              version: initial.interactions.version,
+              structuralDigest: initial.interactions.structuralDigest,
+              decision: { kind: 'cancel' },
+            }
+          : { type: 'cancel', interactionId: 'interaction-1' },
+    },
+  )) {
     events.push(event.type);
   }
 
-  expect(events).toContain(
-    interactionKind === 'awaiting_tool_approval' ? 'approval.rejected' : 'tool.finished',
-  );
+  if (interactionKind === 'awaiting_tool_approval') {
+    expect(events).toEqual(['approval.rejected', 'turn.aborted']);
+    expect(executedEffects).toEqual([]);
+  } else if (interactionKind === 'awaiting_review') {
+    expect(events).toEqual(['plan.review_cancelled', 'tool.cancelled', 'turn.aborted']);
+    expect(executedEffects).toEqual([]);
+  } else {
+    expect(events).toContain('tool.finished');
+    expect(executedEffects).toEqual(['call_model']);
+  }
   expect(kernel.getState().interactions.kind).toBe('idle');
   kernel.close();
 });
@@ -783,9 +865,10 @@ test('runRuntimeLoop closes a suspended subagent when its approval is cancelled'
     events.push(event.type);
   }
 
-  expect(events).toEqual(['approval.rejected', 'subagent.failed', 'tool.finished']);
+  expect(events).toEqual(['approval.rejected', 'turn.aborted']);
   expect(kernel.getState().interactions.kind).toBe('idle');
   expect(kernel.getState().suspendedSubagents).toEqual({});
+  expect(kernel.getState().tools.calls['task-1']?.status).toBe('rejected');
   kernel.close();
 });
 
@@ -877,6 +960,408 @@ test('runRuntimeLoop applies streamed tool events before the effect completes', 
   expect(kernel.getState().tools.queue).not.toContain('shell-1');
   expect(kernel.getState().tools.active).not.toContain('shell-1');
   kernel.close();
+});
+
+test('runRuntimeLoop starts each approved shell while later sibling approval is pending', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'incremental-shell-approval',
+    userId: 'u',
+    workspace: '/',
+  });
+  for (const [ordinal, toolCallId] of ['shell-1', 'shell-2'].entries()) {
+    initial.tools.queue.push(toolCallId);
+    initial.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: 'parallel-shell-message',
+      ordinal,
+      name: 'shell_execute',
+      args: { command: `node task-${ordinal + 1}.js` },
+      status: 'queued',
+      createdAtTurnId: initial.turn.turnId,
+    };
+  }
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reportBothStarted!: () => void;
+  const bothStarted = new Promise<void>((resolve) => {
+    reportBothStarted = resolve;
+  });
+  const started: string[] = [];
+  const approvalOrder: string[] = [];
+  const events: RuntimeEvent[] = [];
+  const run = (async () => {
+    for await (const event of runRuntimeLoop(
+      kernel,
+      async (effect, state, emit) => {
+        if (effect.type === 'call_model') {
+          return [{ type: 'model.responded', messageId: 'done', text: 'done' }];
+        }
+        if (effect.type !== 'run_tools') return [];
+        const toolCallId = effect.toolCallIds[0]!;
+        const call = state.tools.calls[toolCallId]!;
+        if (call.status === 'queued') {
+          emit?.({
+            type: 'approval.requested',
+            interactionId: `approval-${toolCallId}`,
+            toolCallId,
+            approval: {
+              scope: 'once',
+              cwd: '/',
+              threadId: state.session.threadId,
+              tool: 'shell_execute',
+              command: String((call.args as { command: string }).command),
+              risk: 'execute_code',
+              approvalHash: `hash-${toolCallId}`,
+              summary: `Run ${toolCallId}`,
+              reason: 'Test incremental approval.',
+              expectedEffects: [],
+              grantOptions: ['approve_once'],
+              recommendedGrant: 'approve_once',
+            },
+          });
+          return [];
+        }
+        emit?.({ type: 'tool.started', toolCallId });
+        started.push(toolCallId);
+        if (started.length === 2) reportBothStarted();
+        await released;
+        return [
+          {
+            type: 'tool.finished',
+            toolCallId,
+            name: 'shell_execute',
+            result: {
+              ok: true,
+              command: String((call.args as { command: string }).command),
+              exitCode: 0,
+              stdout: toolCallId,
+              stderr: '',
+            },
+          },
+        ];
+      },
+      {
+        requestAction: async (effect) => {
+          if (effect.type !== 'request_tool_approval') {
+            throw new Error(`Unexpected interaction: ${effect.type}`);
+          }
+          approvalOrder.push(effect.toolCallId);
+          if (effect.toolCallId === 'shell-2') {
+            expect(kernel.getState().tools.calls['shell-1']?.status).toBe('running');
+          }
+          return {
+            type: 'approve',
+            interactionId: effect.interactionId,
+            grant: 'approve_once',
+          };
+        },
+      },
+    )) {
+      events.push(event);
+    }
+  })();
+
+  const overlapped = await Promise.race([
+    bothStarted.then(() => true),
+    Bun.sleep(250).then(() => false),
+  ]);
+  expect(overlapped).toBe(true);
+  expect(approvalOrder).toEqual(['shell-1', 'shell-2']);
+  expect(started).toEqual(['shell-1', 'shell-2']);
+
+  release();
+  await run;
+  expect(events.filter((event) => event.type === 'tool.started')).toHaveLength(2);
+  expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
+  expect(kernel.getState().tools.calls['shell-2']?.status).toBe('succeeded');
+  kernel.close();
+});
+
+test('cancelling a later shell approval aborts the turn and cancels a running sibling', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'cancel-incremental-shell-approval',
+    userId: 'u',
+    workspace: '/',
+  });
+  for (const [ordinal, toolCallId] of ['shell-1', 'shell-2'].entries()) {
+    initial.tools.queue.push(toolCallId);
+    initial.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: 'parallel-shell-message',
+      ordinal,
+      name: 'shell_execute',
+      args: { command: `node task-${ordinal + 1}.js` },
+      status: 'queued',
+      createdAtTurnId: initial.turn.turnId,
+    };
+  }
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+
+  let releaseRunningShell!: () => void;
+  const runningShellReleased = new Promise<void>((resolve) => {
+    releaseRunningShell = resolve;
+  });
+  let reportRunningShellSettled!: () => void;
+  const runningShellSettled = new Promise<void>((resolve) => {
+    reportRunningShellSettled = resolve;
+  });
+  let modelCalls = 0;
+  const events: RuntimeEvent[] = [];
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect, state, emit) => {
+      if (effect.type === 'call_model') {
+        modelCalls += 1;
+        return [{ type: 'model.responded', messageId: 'unexpected', text: 'unexpected' }];
+      }
+      if (effect.type !== 'run_tools') return [];
+      const toolCallId = effect.toolCallIds[0]!;
+      const call = state.tools.calls[toolCallId]!;
+      if (call.status === 'queued') {
+        emit?.({
+          type: 'approval.requested',
+          interactionId: `approval-${toolCallId}`,
+          toolCallId,
+          approval: {
+            scope: 'once',
+            cwd: '/',
+            threadId: state.session.threadId,
+            tool: 'shell_execute',
+            command: String((call.args as { command: string }).command),
+            risk: 'execute_code',
+            approvalHash: `hash-${toolCallId}`,
+            summary: `Run ${toolCallId}`,
+            reason: 'Test whole-turn approval cancellation.',
+            expectedEffects: [],
+            grantOptions: ['approve_once'],
+            recommendedGrant: 'approve_once',
+          },
+        });
+        return [];
+      }
+      emit?.({ type: 'tool.started', toolCallId });
+      try {
+        await runningShellReleased;
+        return [
+          {
+            type: 'tool.finished',
+            toolCallId,
+            name: 'shell_execute',
+            result: {
+              ok: true,
+              command: String((call.args as { command: string }).command),
+              exitCode: 0,
+              stdout: toolCallId,
+              stderr: '',
+            },
+          },
+        ];
+      } finally {
+        reportRunningShellSettled();
+      }
+    },
+    {
+      requestAction: async (effect) => {
+        if (effect.type !== 'request_tool_approval') {
+          throw new Error(`Unexpected interaction: ${effect.type}`);
+        }
+        return effect.toolCallId === 'shell-1'
+          ? {
+              type: 'approve',
+              interactionId: effect.interactionId,
+              grant: 'approve_once',
+            }
+          : {
+              type: 'cancel',
+              interactionId: effect.interactionId,
+              reason: 'Cancelled second approval.',
+            };
+      },
+    },
+  )) {
+    events.push(event);
+  }
+
+  expect(events.map((event) => event.type)).toEqual(
+    expect.arrayContaining(['approval.rejected', 'tool.cancelled', 'turn.aborted']),
+  );
+  expect(modelCalls).toBe(0);
+  expect(kernel.getState().tools.calls['shell-1']?.status).toBe('cancelled');
+  expect(kernel.getState().tools.calls['shell-2']?.status).toBe('rejected');
+  expect(kernel.getState().interactions.kind).toBe('idle');
+
+  releaseRunningShell();
+  await runningShellSettled;
+  kernel.close();
+});
+
+test('a cancelled concurrent shell rejects its late terminal event', () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'cancel-concurrent-shell',
+    userId: 'u',
+    workspace: '/',
+  });
+  initial.tools.queue.push('shell-1');
+  initial.tools.calls['shell-1'] = {
+    toolCallId: 'shell-1',
+    modelMessageId: 'parallel-shell-message',
+    name: 'shell_execute',
+    args: { command: 'node long-running.js' },
+    status: 'approved',
+    approvalGrant: 'approve_once',
+    createdAtTurnId: initial.turn.turnId,
+  };
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const lease = kernel.beginEffect({ type: 'run_tools', toolCallIds: ['shell-1'] });
+
+  expect(kernel.applyEffectEvent(lease, { type: 'tool.started', toolCallId: 'shell-1' })).toBe(
+    true,
+  );
+  kernel.processEvent({
+    type: 'tool.cancelled',
+    toolCallId: 'shell-1',
+    reason: 'Cancelled by user.',
+  });
+  expect(
+    kernel.applyEffectEvent(lease, {
+      type: 'tool.finished',
+      toolCallId: 'shell-1',
+      name: 'shell_execute',
+      result: {
+        ok: true,
+        command: 'node long-running.js',
+        exitCode: 0,
+        stdout: 'late success',
+        stderr: '',
+      },
+    }),
+  ).toBe(false);
+  expect(kernel.getState().tools.calls['shell-1']?.status).toBe('cancelled');
+  kernel.close();
+});
+
+test('a stale concurrent shell lease accepts one ordered started-to-finished result batch', () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'concurrent-shell-result-batch',
+    userId: 'u',
+    workspace: '/',
+  });
+  initial.tools.queue.push('shell-1');
+  initial.tools.calls['shell-1'] = {
+    toolCallId: 'shell-1',
+    modelMessageId: 'parallel-shell-message',
+    name: 'shell_execute',
+    args: { command: 'node task.js' },
+    status: 'approved',
+    approvalGrant: 'approve_once',
+    createdAtTurnId: initial.turn.turnId,
+  };
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const lease = kernel.beginEffect({ type: 'run_tools', toolCallIds: ['shell-1'] });
+  kernel.processEvent({
+    type: 'run.error',
+    message: 'Unrelated diagnostic advanced the revision.',
+    recoverable: true,
+  });
+
+  expect(
+    kernel.applyEffectResult(lease, [
+      { type: 'tool.started', toolCallId: 'shell-1' },
+      {
+        type: 'tool.finished',
+        toolCallId: 'shell-1',
+        name: 'shell_execute',
+        result: {
+          ok: true,
+          command: 'node task.js',
+          exitCode: 0,
+          stdout: 'done',
+          stderr: '',
+        },
+      },
+    ]),
+  ).toBe(true);
+  expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
+  kernel.close();
+});
+
+test('production executor overlaps tools from a scheduler read batch', async () => {
+  const state = createInitialRuntimeState({
+    threadId: 'parallel-read-executor',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  for (const [toolCallId, command] of [
+    ['read-a', 'pwd'],
+    ['read-b', 'git status --short'],
+  ] as const) {
+    state.tools.queue.push(toolCallId);
+    state.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command },
+      status: 'queued',
+      effectClass: 'read_only',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+  }
+
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  let reportBothStarted!: () => void;
+  const bothStarted = new Promise<void>((resolve) => {
+    reportBothStarted = resolve;
+  });
+  const entered: string[] = [];
+  const executor = createRuntimeEffectExecutor({
+    config: {
+      providerName: 'test',
+      providerType: 'openai-compatible',
+      apiKey: 'test',
+      baseURL: 'http://localhost:1',
+      modelName: 'test',
+      sandbox: { enabled: true },
+    },
+    model: {} as never,
+    shellExecutor: async ({ command }) => {
+      entered.push(command);
+      if (entered.length === 2) reportBothStarted();
+      await released;
+      return { ok: true, command, exitCode: 0, stdout: command, stderr: '' };
+    },
+  });
+
+  const emitted: RuntimeEvent[] = [];
+  const execution = executor(
+    { type: 'run_tools', toolCallIds: ['read-a', 'read-b'] },
+    state,
+    (event) => emitted.push(event),
+  );
+  const overlapped = await Promise.race([
+    bothStarted.then(() => true),
+    Bun.sleep(250).then(() => false),
+  ]);
+  release();
+  const terminalEvents = await execution;
+
+  expect(overlapped).toBe(true);
+  expect(entered).toEqual(['pwd', 'git status --short']);
+  expect(emitted.filter((event) => event.type === 'tool.started')).toHaveLength(2);
+  expect(emitted.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+  expect(terminalEvents).toEqual([]);
 });
 
 test('runRuntimeLoop yields model deltas without persisting or reducing them', async () => {

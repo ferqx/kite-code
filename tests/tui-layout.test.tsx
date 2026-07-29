@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
+import stringWidth from 'string-width';
 import App from '../src/app/tui/App';
 import ApprovalBlock from '../src/app/tui/components/ApprovalBlock';
 import BlockRenderer from '../src/app/tui/components/BlockRenderer';
@@ -603,6 +604,76 @@ describe('MarkdownBlock', () => {
     expect(frame).toContain('stable');
   });
 
+  test('renders inline Markdown as visible table-cell text', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock
+        content={
+          '| 任务 | 改动范围 | 工作量 |\n| --- | --- | --- |\n| **A1. web\\_search 工具** | 新增 `web-search.ts`，通过 **MCP** 搜索。 | 中 |'
+        }
+      />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('A1. web_search 工具');
+    expect(frame).toContain('新增 web-search.ts，通过 MCP 搜索。');
+    expect(frame).not.toContain('**');
+    expect(frame).not.toContain('`');
+    expect(frame).not.toContain('\\_');
+  });
+
+  test('keeps escaped and code-span pipes inside their table cells', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock
+        content={'| A | B |\n| --- | --- |\n| x \\| y | first |\n| `left | right` | second |'}
+        maxWidth={80}
+      />,
+    );
+
+    const lines = lastFrame()?.split('\n') ?? [];
+    expect(lines).toContain('│ x | y        │ first  │');
+    expect(lines).toContain('│ left | right │ second │');
+    expect(lines.every((line) => (line.match(/│/g)?.length ?? 0) <= 3)).toBe(true);
+  });
+
+  test('keeps tables within the Markdown container width', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock
+        content={'| Header | Value |\n| --- | --- |\n| abcdefghijklmnop | 1234567890 |'}
+        maxWidth={20}
+      />,
+    );
+
+    const lines = lastFrame()?.split('\n') ?? [];
+    expect(lines.length).toBeGreaterThan(5);
+    expect(lines.every((line) => stringWidth(line) <= 20)).toBe(true);
+  });
+
+  test('keeps wide graphemes inside one-column cells in an extremely narrow table', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock content={'| 一 | B |\n| --- | --- |\n| 汉 | 👨‍👩‍👧‍👦 |'} maxWidth={9} />,
+    );
+
+    const lines = lastFrame()?.split('\n') ?? [];
+    expect(lines.every((line) => stringWidth(line) <= 9)).toBe(true);
+    expect(new Set(lines.map((line) => stringWidth(line))).size).toBe(1);
+    expect(lastFrame()).toContain('…');
+  });
+
+  test('preserves table link destinations and Unicode border alignment', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock
+        content={
+          '| 名称 | 值 |\n| --- | --- |\n| **文档** | [打开](https://example.com) |\n| emoji | 👨‍👩‍👧‍👦 é |'
+        }
+        maxWidth={50}
+      />,
+    );
+
+    const lines = lastFrame()?.split('\n') ?? [];
+    expect(lastFrame()).toContain('打开 (https://example.com)');
+    expect(new Set(lines.map((line) => stringWidth(line))).size).toBe(1);
+  });
+
   test('groups consecutive plain lines into logical paragraphs', () => {
     expect(groupLines(['first line', 'continued line', '', 'second paragraph'])).toEqual([
       {
@@ -772,7 +843,7 @@ describe('StartupScreen', () => {
 // ── ApprovalBlock ──
 
 describe('ApprovalBlock', () => {
-  test('renders compact approval prompt without repeating tool command', () => {
+  test('renders the pending command inside the compact approval title', () => {
     const approval = fakeApproval({
       command: 'rm -rf /tmp/test',
       summary: 'Delete temp files',
@@ -782,11 +853,21 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('授权执行命令');
+    expect(frame).toContain('授权执行命令（rm -rf /tmp/test）');
     expect(frame).not.toContain('● Bash');
-    expect(frame).not.toContain('rm -rf /tmp/test');
     expect(frame).not.toContain('Delete temp files');
     expect(frame).not.toContain('destructive');
+  });
+
+  test('keeps a multiline approval command on one compact title line', () => {
+    const approval = fakeApproval({
+      command: 'bun run typecheck 2>\\\n  /tmp/typecheck.log',
+    });
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+
+    expect(lastFrame()).toContain('授权执行命令（bun run typecheck 2>\\ /tmp/typecheck.log）');
   });
 
   test('shows three grant options', () => {
@@ -1351,6 +1432,30 @@ describe('BlockRenderer', () => {
 
     expect(frame).toContain('Legacy first');
     expect(frame).toContain('Legacy second');
+    expect(frame).not.toContain('(no answer)');
+  });
+
+  test('renders ask_user schema failures as errors instead of user answers', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-invalid',
+      name: 'ask_user',
+      args: {
+        questions: [{ question: 'Choose a scope?' }],
+      },
+      status: 'error',
+      summary: 'questions.0.options: Too big: expected array to have <=3 items',
+      expanded: true,
+    };
+
+    const { lastFrame } = render(
+      <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('questions.0.options: Too big');
+    expect(frame).not.toContain('User:');
     expect(frame).not.toContain('(no answer)');
   });
 
@@ -2588,6 +2693,10 @@ describe('OutputArea', () => {
         name: 'mcp__langchian__search_docs_by_lang_chain',
         args: { query: 'LangGraph' },
       },
+      {
+        type: 'tool.started',
+        toolCallId: 'mcp-1',
+      },
     ];
     const state = events.reduce(
       (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
@@ -2995,7 +3104,7 @@ describe('OutputArea', () => {
     expect(frame).not.toContain('index.ts');
   });
 
-  test('hides a queued Thought phase behind a running standalone tool until execution reaches it', () => {
+  test('does not apply an execution-frontier filter to blocks already materialized by the reducer', () => {
     const runningShell: OutputBlock = {
       id: 1,
       kind: 'tool_card',
@@ -3043,7 +3152,7 @@ describe('OutputArea', () => {
     );
 
     expect(lastFrame()).toContain('bun test');
-    expect(lastFrame()).not.toContain('read 1 file');
+    expect(lastFrame()).toContain('read 1 file');
 
     const startedThought: OutputBlock = {
       ...queuedThought,
@@ -3159,6 +3268,7 @@ describe('App', () => {
       sessionError: false,
       loadingSessionId: null,
       explorationSummaryIds: {},
+      pendingToolCalls: {},
       interactionMode: 'accept_edits',
       ...overrides,
     };
@@ -3204,8 +3314,8 @@ describe('App', () => {
     const state = fakeState({
       running: true,
       runStartTime: Date.now() - 28_000,
-      turns: [{ blocks: [{ id: 1, kind: 'approval', approval }] }],
-      interrupt: { kind: 'approval', blockId: 1 },
+      turns: [],
+      interrupt: { kind: 'approval', approval },
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
@@ -3292,7 +3402,7 @@ describe('App', () => {
           ],
         },
       ],
-      interrupt: { kind: 'approval', blockId: 1 },
+      interrupt: null,
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,

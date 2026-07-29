@@ -689,6 +689,8 @@ export default function ToolCardBlock({
         <Box paddingLeft={2} flexDirection="column">
           {block.status === 'exhausted' ? (
             <Text color={dt.warning}>⎿ blocked (too many repeated failures)</Text>
+          ) : block.status === 'error' ? (
+            <Text color={dt.error}>⎿ {block.summary || 'Ask failed.'}</Text>
           ) : (
             renderAskUserSummary(block.args, block.summary ?? '', dt, columns - 2, block.userInput)
           )}

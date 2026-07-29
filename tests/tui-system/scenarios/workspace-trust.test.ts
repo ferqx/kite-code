@@ -8,7 +8,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMockModelServer } from '../harness/fixtures';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
@@ -16,7 +16,7 @@ import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
-const GATE_TEXT = 'trust the authors';
+const GATE_TEXT = 'Open this workspace?';
 
 describe('TUI PTY System — Workspace Trust', () => {
   let server: ReturnType<typeof createMockModelServer>;
@@ -58,9 +58,9 @@ describe('TUI PTY System — Workspace Trust', () => {
       const out = tui.output();
       expect(screenContains(out, GATE_TEXT)).toBe(true);
       // The folder path must be visible so the user knows what they trust.
-      expect(screenContains(out, workspace.workspace)).toBe(true);
-      expect(screenContains(out, 'Yes, I trust the authors')).toBe(true);
-      expect(screenContains(out, 'No, exit')).toBe(true);
+      expect(screenContains(out, realpathSync(workspace.workspace))).toBe(true);
+      expect(screenContains(out, 'Trust this workspace and continue')).toBe(true);
+      expect(screenContains(out, 'Exit Kite Code')).toBe(true);
       // The main UI must not mount before a decision is made.
       expect(screenContains(out, 'shortcuts')).toBe(false);
       console.log('  Trust gate rendered, main UI blocked');
@@ -71,7 +71,9 @@ describe('TUI PTY System — Workspace Trust', () => {
   test(
     'trusting persists the record and boots the main UI',
     async () => {
-      // Default selection is "Yes, I trust the authors" — confirm with Enter.
+      // The safe default is Exit; explicitly move to Trust before confirming.
+      tui.write('\x1b[A');
+      await waitForText(() => tui.output(), '› Trust this workspace and continue', 10000);
       tui.write('\r');
       await waitForText(() => tui.output(), 'shortcuts', 15000);
       console.log('  Main UI booted after trust');
@@ -120,10 +122,7 @@ describe('TUI PTY System — Workspace Trust', () => {
       declined = proc;
       await waitForText(() => proc.output(), GATE_TEXT, 15000);
 
-      // Move the selection to "No, exit" and wait for the re-render so the
-      // following Enter is handled against the updated choice.
-      proc.write('\x1b[B');
-      await waitForText(() => proc.output(), '❯ No, exit', 10000);
+      // Exit is the safe default, so Enter must decline without persisting.
       proc.write('\r');
 
       const code = await proc.waitForExit();

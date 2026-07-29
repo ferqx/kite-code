@@ -160,8 +160,16 @@ describe('plan_review_decision actions', () => {
     }
   });
 
-  test('cancel → plan.review_cancelled + tool.finished with reason', () => {
+  test('cancel aborts the turn and cancels the plan tool', () => {
     const state = makeAwaitingReviewState();
+    state.tools.calls['queued-read'] = {
+      toolCallId: 'queued-read',
+      modelMessageId: 'model-1',
+      name: 'read_file',
+      args: { path: 'README.md' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
     const action: RuntimeUserAction = {
       type: 'plan_review_decision',
       interactionId: 'inter-99',
@@ -172,9 +180,12 @@ describe('plan_review_decision actions', () => {
     };
 
     const events = eventsForRuntimeAction(state, action);
-    const eventTypes = events.map((e) => e.type);
-    expect(eventTypes).toContain('plan.review_cancelled');
-    expect(eventTypes).toContain('tool.finished');
+    expect(events.map((event) => event.type)).toEqual([
+      'plan.review_cancelled',
+      'tool.cancelled',
+      'tool.cancelled',
+      'turn.aborted',
+    ]);
 
     const cancelled = events.find((e) => e.type === 'plan.review_cancelled');
     expect(cancelled).toBeDefined();
@@ -182,16 +193,24 @@ describe('plan_review_decision actions', () => {
       expect(cancelled.reason).toBe('Not needed');
     }
 
-    const finished = events.find((e) => e.type === 'tool.finished');
-    expect(finished).toBeDefined();
-    if (finished && finished.type === 'tool.finished') {
-      expect(finished.name).toBe('write_plan');
-      expect(finished.result.ok).toBe(true);
-      expect(finished.result.stdout).toContain('review_cancelled');
-    }
+    expect(events[1]).toMatchObject({
+      type: 'tool.cancelled',
+      toolCallId: 'call-99',
+      reason: 'Not needed',
+    });
+    expect(events[2]).toMatchObject({
+      type: 'tool.cancelled',
+      toolCallId: 'queued-read',
+      reason: 'Not needed',
+    });
+    expect(events[3]).toMatchObject({
+      type: 'turn.aborted',
+      cause: 'user',
+      reason: 'Not needed',
+    });
   });
 
-  test('generic cancel from Esc → plan.review_cancelled + tool.finished', () => {
+  test('generic cancel from Esc aborts the turn', () => {
     const state = makeAwaitingReviewState();
     const events = eventsForRuntimeAction(state, {
       type: 'cancel',
@@ -199,7 +218,11 @@ describe('plan_review_decision actions', () => {
       reason: 'Cancelled with Esc.',
     });
 
-    expect(events.map((event) => event.type)).toEqual(['plan.review_cancelled', 'tool.finished']);
+    expect(events.map((event) => event.type)).toEqual([
+      'plan.review_cancelled',
+      'tool.cancelled',
+      'turn.aborted',
+    ]);
     expect(events[0]).toMatchObject({
       type: 'plan.review_cancelled',
       reason: 'Cancelled with Esc.',

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
+import { classifyFailure } from '../../src/core/runtime/failures';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import type { RuntimeState } from '../../src/core/runtime/state';
 import {
@@ -600,7 +601,7 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     expect(next.tools.calls['tool-1']!.status).toBe('running');
   });
 
-  test('tool.execution_ready keeps a preflighted shell call queued for its batch', () => {
+  test('legacy tool.execution_ready keeps a preflighted shell call queued', () => {
     const state: RuntimeState = {
       ...makeInitialState(),
       tools: {
@@ -687,6 +688,46 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     expect(call.result!.ok).toBe(true);
     expect(call.result!.exitCode).toBe(0);
     expect(call.result!.summary).toContain('pwd');
+  });
+
+  test('parallel sibling results keep assistant declaration order when completion reverses', () => {
+    let state = makeInitialState();
+    for (const [ordinal, toolCallId] of ['read-first', 'read-second'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'model-parallel',
+        ordinal,
+        name: 'read_file',
+        args: { path: `${toolCallId}.txt` },
+        status: 'running',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.active.push(toolCallId);
+    }
+    const finish = (toolCallId: string): RuntimeEvent => ({
+      type: 'tool.finished',
+      toolCallId,
+      name: 'read_file',
+      result: {
+        ok: true,
+        command: '',
+        exitCode: 0,
+        stdout: toolCallId,
+        stderr: '',
+      },
+    });
+
+    state = reduceRuntimeState(state, finish('read-second'));
+    state = reduceRuntimeState(state, finish('read-first'));
+
+    expect(
+      state.transcript.messages
+        .filter((message) => message.kind === 'tool')
+        .map((message) => [message.toolCallId, message.ordinal]),
+    ).toEqual([
+      ['read-first', 0],
+      ['read-second', 1],
+    ]);
   });
 
   test('tool.finished removes an unstarted interactive tool from queue', () => {
@@ -877,6 +918,82 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     expect(next.tools.calls).toEqual({});
   });
 
+  test('returns a phase deferral as structured planning guidance to the model', () => {
+    const queued = reduceRuntimeState(makeInitialState(), {
+      type: 'tool.queued',
+      toolCallId: 'verify-later',
+      name: 'shell_execute',
+      args: { command: 'bun run typecheck', description: 'Type-check the project' },
+    });
+
+    const next = reduceRuntimeState(queued, {
+      type: 'tool.rejected',
+      toolCallId: 'verify-later',
+      reason: 'Deferred shell_execute until building phase.',
+      failure: classifyFailure('phase_deferred', 'Deferred shell_execute until building phase.'),
+    });
+
+    expect(next.tools.calls['verify-later']).toMatchObject({
+      status: 'rejected',
+      failure: { kind: 'phase_deferred' },
+    });
+    expect(JSON.parse(String(next.transcript.messages.at(-1)?.content))).toEqual({
+      ok: false,
+      deferred: true,
+      reason: 'phase_constraint',
+      until_phase: 'building',
+      tool: 'shell_execute',
+      arguments: {
+        command: 'bun run typecheck',
+        description: 'Type-check the project',
+      },
+      next_step:
+        'Do not retry or request approval while planning. Preserve this command in the plan execution or verification section, then invoke it only after plan approval changes the phase to building.',
+    });
+  });
+
+  test('returns a phase denial as actionable planning guidance to the model', () => {
+    const queued = reduceRuntimeState(makeInitialState(), {
+      type: 'tool.queued',
+      toolCallId: 'edit-after-plan',
+      name: 'edit_file',
+      args: {
+        path: 'src/example.ts',
+        old_string: 'const before = true;',
+        new_string: 'const after = true;',
+      },
+    });
+    const reason =
+      'Plan mode is read-only. No file was edited. Describe the intended change in the plan and apply it after plan approval.';
+
+    const next = reduceRuntimeState(queued, {
+      type: 'tool.rejected',
+      toolCallId: 'edit-after-plan',
+      reason,
+      failure: classifyFailure('phase_denied', reason),
+    });
+
+    expect(next.tools.calls['edit-after-plan']).toMatchObject({
+      status: 'rejected',
+      failure: { kind: 'phase_denied' },
+    });
+    expect(JSON.parse(String(next.transcript.messages.at(-1)?.content))).toEqual({
+      ok: false,
+      rejected: true,
+      reason: 'phase_constraint',
+      phase: 'planning',
+      tool: 'edit_file',
+      arguments: {
+        path: 'src/example.ts',
+        old_string: 'const before = true;',
+        new_string: 'const after = true;',
+      },
+      message: reason,
+      next_step:
+        'Do not retry or request approval while planning. Use read-only inspection capabilities and preserve the intended implementation in the plan for execution after plan approval.',
+    });
+  });
+
   // 验证 tool.progress 不修改 state
   test('tool.cancelled clears its interaction and is idempotent', () => {
     let state = reduceRuntimeState(makeInitialState(), {
@@ -1019,6 +1136,45 @@ describe('reduceRuntimeState — suspended subagents', () => {
     } as RuntimeEvent);
 
     expect(next).toMatchObject({ suspendedSubagents: {} });
+  });
+
+  test('approval.rejected clears the suspended snapshot for its task call', () => {
+    const snapshot = makeSuspendedSubagentSnapshot();
+    const suspended = reduceRuntimeState(queueTaskCall(makeInitialState()), {
+      type: 'subagent.suspended',
+      toolCallId: 'task-1',
+      snapshot,
+    });
+    const awaitingApproval: RuntimeState = {
+      ...suspended,
+      tools: {
+        ...suspended.tools,
+        calls: {
+          ...suspended.tools.calls,
+          'task-1': {
+            ...suspended.tools.calls['task-1']!,
+            status: 'awaiting_approval',
+          },
+        },
+      },
+      interactions: {
+        kind: 'awaiting_tool_approval',
+        interactionId: 'approval-1',
+        toolCallId: 'task-1',
+        approval: makeToolApproval('pwd'),
+      },
+    };
+
+    const next = reduceRuntimeState(awaitingApproval, {
+      type: 'approval.rejected',
+      interactionId: 'approval-1',
+      toolCallId: 'task-1',
+      reason: 'Cancelled by user.',
+    });
+
+    expect(next.suspendedSubagents).toEqual({});
+    expect(next.tools.calls['task-1']?.status).toBe('rejected');
+    expect(next.interactions).toEqual({ kind: 'idle' });
   });
 
   test('tool.finished clears only the matching stale task approval interaction and legacy marker', () => {
@@ -1445,27 +1601,42 @@ describe('reduceRuntimeState — turn lifecycle', () => {
     expect(next.turn.turnId).not.toBe(oldTurnId);
   });
 
-  // 验证 turn.completed 不修改状态（信息性事件）
-  test('turn.completed does not modify state', () => {
+  test('turn.completed durably closes the current turn', () => {
     const state = makeInitialState();
     const event: RuntimeEvent = {
       type: 'turn.completed',
       turnId: state.turn.turnId,
     };
     const next = reduceRuntimeState(state, event);
-    expect(next).toEqual(state);
+    expect(next.turn).toEqual({ ...state.turn, status: 'completed' });
   });
 
-  // 验证 turn.aborted 不修改状态（信息性事件）
-  test('turn.aborted does not modify state', () => {
+  test('turn.aborted durably closes the current turn with diagnostics', () => {
     const state = makeInitialState();
     const event: RuntimeEvent = {
       type: 'turn.aborted',
       turnId: state.turn.turnId,
       reason: 'user cancelled',
+      cause: 'user',
     };
     const next = reduceRuntimeState(state, event);
-    expect(next).toEqual(state);
+    expect(next.turn).toEqual({
+      ...state.turn,
+      status: 'aborted',
+      abortReason: 'user cancelled',
+      abortCause: 'user',
+    });
+  });
+
+  test('stale turn terminal events cannot close a newer turn', () => {
+    const state = makeInitialState();
+    const next = reduceRuntimeState(state, {
+      type: 'turn.aborted',
+      turnId: 'older-turn',
+      reason: 'late cancellation',
+      cause: 'user',
+    });
+    expect(next).toBe(state);
   });
 });
 

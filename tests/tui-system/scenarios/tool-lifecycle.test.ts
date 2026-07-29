@@ -47,12 +47,15 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
               id: 'call_ask',
               name: 'ask_user',
               args: {
-                question: 'What is your favorite color?',
-                options: [
-                  { id: 'blue', label: 'Blue' },
-                  { id: 'red', label: 'Red' },
+                questions: [
+                  {
+                    question: 'What is your favorite color?',
+                    options: [
+                      { label: 'Blue', description: 'Choose a calm primary color.' },
+                      { label: 'Red', description: 'Choose a warm primary color.' },
+                    ],
+                  },
                 ],
-                recommended: 'blue',
               },
             },
           ],
@@ -89,8 +92,9 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Ask me a question', 15000);
 
-      // 等中断块渲染 / Wait for interrupt block
-      await waitForText(() => tui.output(), 'What is your favorite color?', 15000);
+      // The question text may first appear in the started ask_user Tool Card.
+      // Wait for an option that only exists in the interactive footer.
+      await waitForText(() => tui.output(), 'Blue', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.output();
@@ -229,7 +233,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
           ],
         },
       },
-      { message: { content: 'Command was rejected. Let me try another approach.' } },
+      { message: { content: 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION' } },
     ]);
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -253,7 +257,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
   );
 
   test(
-    'full lifecycle: interrupt → deny → no duplicate, model continues',
+    'full lifecycle: interrupt → deny → current turn stops without model continuation',
     async () => {
       // ── 1. 触发审批 / Trigger approval ──
       await typeText(tui, 'Make a directory');
@@ -266,8 +270,8 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.output();
       expect(screenContains(output, '授权执行命令')).toBe(true);
-      expect(screenContains(output, 'Yes')).toBe(true);
-      expect(screenContains(output, 'Deny')).toBe(true);
+      expect(screenContains(output, '允许一次')).toBe(true);
+      expect(screenContains(output, '拒绝')).toBe(true);
 
       // ── 3. 验证渲染顺序：模型文字在审批块之前 / Verify order: text before approval ──
       const order = assertOrder(output, 'I will run a command', '授权执行命令');
@@ -278,19 +282,27 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       await sleep(100);
       tui.write('\x1b[B');
       await sleep(100);
+      // One extra Down is harmless because the selector clamps at "拒绝",
+      // and matches the real PTY escape-sequence behavior used by approval.test.
       tui.write('\x1b[B');
       await sleep(100);
+      const rejectionOutputOffset = tui.output().length;
       tui.write('\r');
-      await sleep(3000);
-
-      // 等模型继续 / Wait for model to continue
-      await waitForText(() => tui.output(), 'Command was rejected', 15000);
+      await sleep(2500);
 
       output = tui.output();
+      const afterRejection = output.slice(rejectionOutputOffset);
+      console.log('  output after approval rejection:', stripAnsi(afterRejection).slice(-2000));
 
-      // ── 5. 验证模型继续运行（有重复中断就会卡住）/ Verify model continues (duplicate interrupt would block) ──
-      expect(screenContains(output, 'Command was rejected')).toBe(true);
-      expect(screenContains(output, '❯')).toBe(true);
+      // ── 5. 用户拒绝审批会中止当前 turn，不再执行工具或调用模型 ──
+      // Rejecting approval aborts the current turn without executing the tool
+      // or asking the model for a continuation.
+      expect(screenContains(afterRejection, '授权执行命令')).toBe(false);
+      expect(screenContains(afterRejection, 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION')).toBe(
+        false,
+      );
+      expect(screenContains(afterRejection, 'node -e "1+1"')).toBe(false);
+      expect(screenContains(afterRejection, '❯')).toBe(true);
     },
     TIMEOUT,
   );

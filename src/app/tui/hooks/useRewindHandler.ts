@@ -101,6 +101,7 @@ export function useRunRewind(state: { rewindCounter: number }, deps: RewindDeps)
           threadId: targetThreadId,
           blocks: ui.blocks,
           interrupt: ui.interrupt,
+          pendingToolCalls: ui.pendingToolCalls,
           modelProvider: data.modelProvider,
           modelName: data.modelName,
           thinkingLevel: data.thinkingLevel,

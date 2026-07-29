@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
 import React, { useMemo, useRef } from 'react';
+import terminalStringWidth from 'string-width';
 import { useWindowSize } from '@/app/tui/hooks/useWindowSizeSig';
 import { type Theme, useTheme } from '@/app/tui/theme';
 
@@ -23,38 +24,55 @@ export interface InlineSegment {
 // ── inline markdown parsing ──
 
 export function parseInline(text: string): InlineSegment[] {
+  const escaped: string[] = [];
+  const protectedText = text.replace(/\\([\\`*{}[\]()#+\-.!_|>~])/g, (_, character: string) => {
+    const index = escaped.push(character) - 1;
+    return `\u{f0000}${index}\u{f0001}`;
+  });
   const allPatterns =
     /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|~~(.+?)~~|\[([^\]]+)\]\(([^)]+)\))/g;
   const segments: InlineSegment[] = [];
   let lastIndex = 0;
-  let match = allPatterns.exec(text);
+  const restoreEscapes = (value: string) =>
+    value.replace(/\u{f0000}(\d+)\u{f0001}/gu, (_, index: string) => escaped[Number(index)] ?? '');
+  let match = allPatterns.exec(protectedText);
 
   while (match !== null) {
     if (match.index > lastIndex) {
-      segments.push({ text: text.slice(lastIndex, match.index) });
+      segments.push({ text: restoreEscapes(protectedText.slice(lastIndex, match.index)) });
     }
     if (match[1]?.startsWith('***') && match[2] !== undefined) {
-      segments.push({ text: match[2], bold: true, italic: true });
+      segments.push({ text: restoreEscapes(match[2]), bold: true, italic: true });
     } else if (match[1]?.startsWith('**') && match[3] !== undefined) {
-      segments.push({ text: match[3], bold: true });
+      segments.push({ text: restoreEscapes(match[3]), bold: true });
     } else if (match[1]?.startsWith('*') && !match[1]?.startsWith('**') && match[4] !== undefined) {
-      segments.push({ text: match[4], italic: true });
+      segments.push({ text: restoreEscapes(match[4]), italic: true });
     } else if (match[5] !== undefined) {
-      segments.push({ text: match[5], code: true });
+      segments.push({ text: restoreEscapes(match[5]), code: true });
     } else if (match[6] !== undefined) {
-      segments.push({ text: match[6], strikethrough: true });
+      segments.push({ text: restoreEscapes(match[6]), strikethrough: true });
     } else if (match[7] !== undefined && match[8] !== undefined) {
-      segments.push({ text: match[7], bold: true, link: match[8] });
+      segments.push({
+        text: restoreEscapes(match[7]),
+        bold: true,
+        link: restoreEscapes(match[8]),
+      });
     }
     lastIndex = match.index + match[1]!.length;
-    match = allPatterns.exec(text);
+    match = allPatterns.exec(protectedText);
   }
 
-  if (lastIndex < text.length) {
-    segments.push({ text: text.slice(lastIndex) });
+  if (lastIndex < protectedText.length) {
+    segments.push({ text: restoreEscapes(protectedText.slice(lastIndex)) });
   }
 
   return segments;
+}
+
+function inlineVisibleText(text: string): string {
+  return parseInline(text)
+    .map((segment) => (segment.link ? `${segment.text} (${segment.link})` : segment.text))
+    .join('');
 }
 
 // ── syntax highlighting for code blocks ──
@@ -276,48 +294,27 @@ const CodeLine = React.memo(function CodeLine({ line, lang }: { line: string; la
 
 // ── CJK display width ──
 
-function charWidth(code: number): number {
-  if (code < 0x20) return 0;
-  if (code < 0x7f) return 1;
-  if (
-    (code >= 0x1100 && code <= 0x115f) || // Hangul Jamo
-    (code >= 0x2e80 && code <= 0x303e) || // CJK radicals, symbols
-    (code >= 0x3040 && code <= 0x33bf) || // Hiragana, Katakana, Bopomofo, CJK compat
-    (code >= 0x3400 && code <= 0x4dbf) || // CJK Ext-A
-    (code >= 0x4e00 && code <= 0xa4cf) || // CJK Unified + Yi
-    (code >= 0xac00 && code <= 0xd7a3) || // Hangul Syllables
-    (code >= 0xf900 && code <= 0xfaff) || // CJK Compat Ideographs
-    (code >= 0xfe10 && code <= 0xfe6f) || // Vertical forms, CJK compat
-    (code >= 0xff01 && code <= 0xff60) || // Fullwidth forms
-    (code >= 0xffe0 && code <= 0xffe6) || // Fullwidth signs
-    (code >= 0x1f300 && code <= 0x1f9ff) || // Emoji, pictographs
-    (code >= 0x20000 && code <= 0x2ffff) // CJK Ext-B+
-  ) {
-    return 2;
-  }
-  return 1;
-}
-
 /** 代码行中 tab 的展宽列数 — 大多数终端默认 4 或 8，此处保守取 4 */
 const TAB_WIDTH = 4;
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 function stringWidth(s: string): number {
-  let width = 0;
-  for (const ch of s) {
-    width += charWidth(ch.codePointAt(0) ?? 0);
-  }
-  return width;
+  return terminalStringWidth(s);
+}
+
+function graphemes(text: string): string[] {
+  return Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment);
 }
 
 /** 计算代码行在终端中的实际展宽，\t 按 TAB_WIDTH 展开
  *  Measure a code line's visual width with tab expansion. */
 function codeLineWidth(line: string): number {
   let width = 0;
-  for (const ch of line) {
-    if (ch === '\t') {
+  for (const grapheme of graphemes(line)) {
+    if (grapheme === '\t') {
       width += TAB_WIDTH;
     } else {
-      width += charWidth(ch.codePointAt(0) ?? 0);
+      width += stringWidth(grapheme);
     }
   }
   return width;
@@ -367,18 +364,48 @@ function isTableSeparator(line: string): boolean {
   return /^[\s\-:|─━┼╿]+$/.test(trimmed);
 }
 
-function parseTable(lines: string[]): { headers: string[]; rows: string[][]; widths: number[] } {
+function parseTable(lines: string[]): {
+  headers: string[];
+  rows: string[][];
+  headerSources: string[];
+  rowSources: string[][];
+  widths: number[];
+} {
   const parseCells = (line: string) => {
     let trimmed = line.trim();
     // Strip leading/trailing pipe │
     trimmed = trimmed.replace(/^[|│]\s*/, '').replace(/\s*[|│]$/, '');
-    return trimmed.split(PIPE).map((c) => c.trim());
+    const cells: string[] = [];
+    let cell = '';
+    let inCode = false;
+    for (let index = 0; index < trimmed.length; index++) {
+      const character = trimmed[index]!;
+      if (character === '\\' && index + 1 < trimmed.length) {
+        cell += character + trimmed[index + 1]!;
+        index++;
+      } else if (character === '`') {
+        inCode = !inCode;
+        cell += character;
+      } else if (!inCode && PIPE.test(character)) {
+        cells.push(cell.trim());
+        cell = '';
+      } else {
+        cell += character;
+      }
+    }
+    cells.push(cell.trim());
+    return cells;
   };
 
-  const headers = parseCells(lines[0]!);
+  const headerSources = parseCells(lines[0]!);
+  const headers = headerSources.map(inlineVisibleText);
   const rows: string[][] = [];
+  const rowSources: string[][] = [];
   for (let i = 2; i < lines.length; i++) {
-    rows.push(parseCells(lines[i]!));
+    const sources = parseCells(lines[i]!).slice(0, headers.length);
+    while (sources.length < headers.length) sources.push('');
+    rowSources.push(sources);
+    rows.push(sources.map(inlineVisibleText));
   }
 
   const widths = headers.map((h, col) => {
@@ -391,82 +418,140 @@ function parseTable(lines: string[]): { headers: string[]; rows: string[][]; wid
     return max;
   });
 
-  return { headers, rows, widths };
+  return { headers, rows, headerSources, rowSources, widths };
 }
 
 // ── responsive table width ──
 // Maximum table width available, accounting for block left-padding in layout
-function tableMaxWidth(): number {
-  const cols = process.stdout.columns ?? 80;
-  return Math.max(40, cols - 4);
+function tableMaxWidth(columns: number): number {
+  return Math.max(1, columns);
 }
 
-/** Split text into lines that fit within maxWidth, padding each line to maxWidth. */
-function wrapCell(text: string, maxWidth: number): string[] {
-  if (maxWidth <= 0) return [''];
-  const sw = stringWidth(text);
-  if (sw <= maxWidth) return [text + ' '.repeat(maxWidth - sw)];
+interface TableInlineSegment extends InlineSegment {
+  tone?: 'primary' | 'dim';
+}
 
-  const lines: string[] = [];
-  let current = '';
+function tableInlineSegments(source: string): TableInlineSegment[] {
+  return parseInline(source).flatMap((segment): TableInlineSegment[] =>
+    segment.link
+      ? [
+          { ...segment, tone: 'primary' },
+          { text: ` (${segment.link})`, tone: 'dim' },
+        ]
+      : [segment],
+  );
+}
+
+function appendTableSegment(target: TableInlineSegment[], segment: TableInlineSegment): void {
+  const previous = target.at(-1);
+  if (
+    previous &&
+    previous.bold === segment.bold &&
+    previous.italic === segment.italic &&
+    previous.code === segment.code &&
+    previous.strikethrough === segment.strikethrough &&
+    previous.tone === segment.tone
+  ) {
+    previous.text += segment.text;
+  } else {
+    target.push({ ...segment });
+  }
+}
+
+function wrapTableCell(source: string, maxWidth: number): TableInlineSegment[][] {
+  const lines: TableInlineSegment[][] = [[]];
   let currentWidth = 0;
-
-  for (const ch of text) {
-    const cw = charWidth(ch.codePointAt(0) ?? 0);
-    if (cw === 0) continue;
-    if (currentWidth + cw > maxWidth) {
-      lines.push(current + ' '.repeat(maxWidth - currentWidth));
-      current = ch;
-      currentWidth = cw;
-      // Trim leading space after a forced break
-      if (ch === ' ') {
-        current = '';
+  for (const segment of tableInlineSegments(source)) {
+    for (const grapheme of graphemes(segment.text)) {
+      const width = stringWidth(grapheme);
+      if (currentWidth + width > maxWidth && currentWidth > 0) {
+        lines.push([]);
         currentWidth = 0;
+        if (grapheme === ' ') continue;
       }
-    } else {
-      current += ch;
-      currentWidth += cw;
+      // A single CJK/emoji grapheme can be wider than a one-column cell in a
+      // very narrow terminal. Preserve the table boundary instead of letting
+      // that grapheme overflow into the next column.
+      if (width > maxWidth) {
+        appendTableSegment(lines.at(-1)!, { text: '…' });
+        currentWidth = 1;
+      } else {
+        appendTableSegment(lines.at(-1)!, { ...segment, text: grapheme });
+        currentWidth += width;
+      }
     }
   }
-  if (current || lines.length === 0) {
-    lines.push(current + ' '.repeat(maxWidth - currentWidth));
-  }
+  const finalWidth = lines.map((line) =>
+    line.reduce((total, segment) => total + stringWidth(segment.text), 0),
+  );
+  lines.forEach((line, index) => {
+    const padding = Math.max(0, maxWidth - finalWidth[index]!);
+    if (padding > 0) appendTableSegment(line, { text: ' '.repeat(padding) });
+  });
   return lines;
 }
 
-/** Truncate to single line with "…" — used for headers only. */
-function truncateHeader(text: string, maxWidth: number): string {
-  const sw = stringWidth(text);
-  if (sw <= maxWidth) return text + ' '.repeat(maxWidth - sw);
-  const limit = maxWidth - 1;
-  let result = '';
-  let w = 0;
-  for (const ch of text) {
-    const cw = charWidth(ch.codePointAt(0) ?? 0);
-    if (cw === 0) continue;
-    if (w + cw > limit) break;
-    result += ch;
-    w += cw;
+function truncateTableHeader(source: string, maxWidth: number): TableInlineSegment[] {
+  const visibleWidth = stringWidth(inlineVisibleText(source));
+  if (visibleWidth <= maxWidth) return wrapTableCell(source, maxWidth)[0]!;
+  const result: TableInlineSegment[] = [];
+  let width = 0;
+  for (const segment of tableInlineSegments(source)) {
+    for (const grapheme of graphemes(segment.text)) {
+      const graphemeWidth = stringWidth(grapheme);
+      if (width + graphemeWidth > maxWidth - 1) {
+        appendTableSegment(result, { text: `…${' '.repeat(maxWidth - width - 1)}` });
+        return result;
+      }
+      appendTableSegment(result, { ...segment, text: grapheme });
+      width += graphemeWidth;
+    }
   }
-  return `${result}…${' '.repeat(limit - w)}`;
+  return result;
+}
+
+function TableInlineText({ segments }: { segments: TableInlineSegment[] }) {
+  const t = useTheme();
+  return (
+    <>
+      {segments.map((segment, index) => (
+        <Text
+          key={index}
+          bold={segment.bold}
+          italic={segment.italic}
+          strikethrough={segment.strikethrough}
+          color={
+            segment.tone === 'primary' || segment.code
+              ? t.primary
+              : segment.tone === 'dim'
+                ? t.dim
+                : undefined
+          }
+        >
+          {segment.text}
+        </Text>
+      ))}
+    </>
+  );
 }
 
 function computeColumnWidths(
   headers: string[],
   _rows: string[][],
   naturalWidths: number[],
+  columns: number,
 ): number[] {
   const colCount = headers.length;
   const overhead = 2 + (colCount - 1) + colCount * 2; // ││ + inner │ + padding
-  const maxContentWidth = tableMaxWidth() - overhead;
+  const maxContentWidth = Math.max(colCount, tableMaxWidth(columns) - overhead);
   const naturalTotal = naturalWidths.reduce((a, w) => a + w, 0);
   if (naturalTotal <= maxContentWidth) return naturalWidths;
   if (maxContentWidth < colCount * 6) {
-    const w = Math.max(6, Math.floor(tableMaxWidth() / colCount) - 3);
+    const w = Math.max(1, Math.floor((tableMaxWidth(columns) - 1) / colCount) - 3);
     return headers.map(() => w);
   }
   const scale = maxContentWidth / naturalTotal;
-  return naturalWidths.map((w) => Math.max(6, Math.floor(w * scale)));
+  return naturalWidths.map((w) => Math.max(1, Math.floor(w * scale)));
 }
 
 /** Build a single border string: e.g. ┌────┬──────┐ */
@@ -478,21 +563,6 @@ function borderLine(
   fill: string,
 ): string {
   return left + widths.map((w) => fill.repeat(w + 2)).join(mid) + right;
-}
-
-/** Render a table row that may span multiple lines (cells wrap). */
-function dataRowLines(cells: string[], widths: number[]): string[] {
-  const wrapped = cells.map((c, i) => wrapCell(c, widths[i]!));
-  const maxLines = Math.max(1, ...wrapped.map((w) => w.length));
-  const lines: string[] = [];
-  for (let li = 0; li < maxLines; li++) {
-    const parts = wrapped.map((w, ci) => {
-      const cell = li < w.length ? w[li] : ' '.repeat(widths[ci]!);
-      return ` ${cell} `;
-    });
-    lines.push(`│${parts.join('│')}│`);
-  }
-  return lines;
 }
 
 const TableTextLine = React.memo(function TableTextLine({
@@ -512,10 +582,25 @@ const TableTextLine = React.memo(function TableTextLine({
 
 const TableDataRow = React.memo(
   function TableDataRow({ cells, widths }: { cells: string[]; widths: number[] }) {
+    const wrapped = cells.map((cell, index) => wrapTableCell(cell, widths[index]!));
+    const lineCount = Math.max(1, ...wrapped.map((lines) => lines.length));
     return (
       <>
-        {dataRowLines(cells, widths).join('\n')}
-        {'\n'}
+        {Array.from({ length: lineCount }, (_, lineIndex) => (
+          <React.Fragment key={lineIndex}>
+            {'│'}
+            {wrapped.map((cellLines, cellIndex) => (
+              <React.Fragment key={cellIndex}>
+                {' '}
+                <TableInlineText
+                  segments={cellLines[lineIndex] ?? [{ text: ' '.repeat(widths[cellIndex]!) }]}
+                />
+                {' │'}
+              </React.Fragment>
+            ))}
+            {'\n'}
+          </React.Fragment>
+        ))}
       </>
     );
   },
@@ -526,26 +611,39 @@ const TableDataRow = React.memo(
     previous.widths.every((width, index) => width === next.widths[index]),
 );
 
-function TableBlock({ lines }: { lines: string[] }) {
-  const { headers, rows, widths: natural } = useMemo(() => parseTable(lines), [lines]);
+function TableBlock({ lines, columns }: { lines: string[]; columns: number }) {
+  const {
+    headers,
+    rows,
+    headerSources,
+    rowSources,
+    widths: natural,
+  } = useMemo(() => parseTable(lines), [lines]);
   const widths = useMemo(
-    () => computeColumnWidths(headers, rows, natural),
-    [headers, rows, natural],
+    () => computeColumnWidths(headers, rows, natural, columns),
+    [headers, rows, natural, columns],
   );
 
   const topBorder = borderLine('┌', '┬', '┐', widths, '─');
   const sepBorder = borderLine('├', '┼', '┤', widths, '─');
   const botBorder = borderLine('└', '┴', '┘', widths, '─');
-  const headerLine = `│${headers.map((h, i) => ` ${truncateHeader(h, widths[i]!)} `).join('│')}│`;
 
   // Keep one parent Text so Yoga cannot introduce gaps between borders, while
   // memoized child rows retain their identity as the streaming table grows.
   return (
     <Text>
       <TableTextLine line={topBorder} />
-      <TableTextLine line={headerLine} />
+      {'│'}
+      {headerSources.map((header, index) => (
+        <React.Fragment key={index}>
+          {' '}
+          <TableInlineText segments={truncateTableHeader(header, widths[index]!)} />
+          {' │'}
+        </React.Fragment>
+      ))}
+      {'\n'}
       <TableTextLine line={sepBorder} />
-      {rows.map((row, index) => (
+      {rowSources.map((row, index) => (
         <TableDataRow key={index} cells={row} widths={widths} />
       ))}
       <TableTextLine line={botBorder} trailingNewline={false} />
@@ -934,7 +1032,7 @@ export default React.memo(function MarkdownBlock({ content, color, maxWidth }: M
       }
 
       if (group.kind === 'table') {
-        return <TableBlock lines={group.lines} />;
+        return <TableBlock lines={group.lines} columns={columns} />;
       }
 
       if (group.kind === 'paragraph') {
@@ -1085,7 +1183,7 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
     !segments[0]!.code &&
     !segments[0]!.strikethrough
   ) {
-    return <Text color={color}>{content}</Text>;
+    return <Text color={color}>{segments[0]!.text}</Text>;
   }
 
   return (
