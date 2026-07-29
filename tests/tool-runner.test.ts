@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
+import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
 
 // ── Helpers ──
 
@@ -445,7 +446,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
     expect(capturedNetworkMode).toBe('allow_all');
   });
 
-  it('does not set a timeout unless the model requested timeout_ms', async () => {
+  it('applies the default hard timeout when the model omits timeout_ms', async () => {
     let capturedTimeout: number | undefined;
 
     const result = await runApprovedTool({
@@ -464,7 +465,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
       },
     });
 
-    expect(capturedTimeout).toBeUndefined();
+    expect(capturedTimeout).toBe(DEFAULT_SHELL_TIMEOUT_MS);
     expect(result.ok).toBe(true);
   });
 

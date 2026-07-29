@@ -498,6 +498,7 @@ describe('edge cases', () => {
   test('round-trips all RuntimeEvent discriminated union variants', () => {
     const events: RuntimeEvent[] = [
       { type: 'tool.queued', toolCallId: 'c1', name: 'read', args: {} },
+      { type: 'tool.execution_ready', toolCallId: 'c1' },
       { type: 'tool.started', toolCallId: 'c1' },
       { type: 'tool.progress', toolCallId: 'c1', chunk: 'line1\n', stream: 'stdout' },
       {
@@ -548,7 +549,12 @@ describe('edge cases', () => {
         interactionId: 'i3',
         grant: { mode: 'once' } as any,
       },
-      { type: 'approval.rejected', interactionId: 'i3', reason: 'unsafe' },
+      {
+        type: 'approval.rejected',
+        interactionId: 'i3',
+        toolCallId: 'c1',
+        reason: 'unsafe',
+      },
       { type: 'authorization.changed', mode: 'full_access' },
     ];
 

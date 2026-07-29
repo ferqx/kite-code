@@ -804,6 +804,21 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
     }
 
+    case 'tool.execution_ready': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (existingCall?.status !== 'queued') return state;
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: { ...existingCall, status: 'approved' as const },
+          },
+        },
+      };
+    }
+
     case 'tool.started': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
@@ -1128,7 +1143,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'approval.rejected': {
       if (
         state.interactions.kind !== 'awaiting_tool_approval' ||
-        state.interactions.interactionId !== event.interactionId
+        state.interactions.interactionId !== event.interactionId ||
+        (event.toolCallId != null && event.toolCallId !== state.interactions.toolCallId)
       ) {
         return state;
       }

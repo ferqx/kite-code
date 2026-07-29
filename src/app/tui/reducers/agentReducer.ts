@@ -1,6 +1,7 @@
 // ── Agent 生命周期（运行/空闲/退出）、中断、授权、Ctrl+C/Esc ──
 
 import { InteractionMode } from '@/protocol/events';
+import { getToolDetail } from '../components/render-utils';
 import type { OutputBlock, TuiState } from '../types';
 import type { Action } from './actions';
 import { buildToolSummaryLine } from './consolidateTools';
@@ -42,16 +43,39 @@ function cancelRunningBlocks(s: TuiState): TuiState {
     }
     if (b.kind === 'tool_card' && (b.status === 'queued' || b.status === 'running')) {
       changed = true;
-      return [{ ...b, status: 'cancelled' as const, summary: 'Cancelled' }];
+      return [
+        {
+          ...b,
+          status: 'cancelled' as const,
+          summary: 'Cancelled',
+          detail: b.detail ?? getToolDetail(b.name, b.args),
+        },
+      ];
     }
     if (b.kind === 'tool_summary') {
-      const tools = b.tools.map((t) =>
-        t.status === 'queued' || t.status === 'running'
-          ? { ...t, status: 'cancelled' as const, summary: 'Cancelled' }
-          : t,
-      );
-      if (tools.some((t, i) => t.status !== b.tools[i]!.status) || b.active || b.pendingCaption) {
+      // Queued exploration calls never started, so they must not become
+      // completed-looking "read N files" statistics when the run is cancelled.
+      const tools = b.tools.flatMap((t) => {
+        if (t.status === 'queued') return [];
+        return [
+          t.status === 'running' ? { ...t, status: 'cancelled' as const, summary: 'Cancelled' } : t,
+        ];
+      });
+      const removedQueuedTools = tools.length !== b.tools.length;
+      if (
+        removedQueuedTools ||
+        tools.some((t, i) => t.status !== b.tools[i]!.status) ||
+        b.active ||
+        b.pendingCaption
+      ) {
         changed = true;
+        if (tools.length === 0 && b.hasThinking !== true) {
+          const narration = [
+            ...(b.captions ?? []),
+            ...(b.pendingCaption ? [b.pendingCaption] : []),
+          ].join('\n\n');
+          return narration ? [{ id: b.id, kind: 'text' as const, content: narration }] : [];
+        }
         // 取消/中断 settle 时按工具状态重算 result（阶段块可能横跨多轮工具，
         // 残留的旧 result 会误导结算状态）。规则 15。
         // Recompute result from tool states at cancel/interrupt settle (rule 15).

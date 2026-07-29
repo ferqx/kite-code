@@ -504,6 +504,32 @@ describe('recordEvent — 全量映射', () => {
 });
 
 describe('recordRuntimeEvent — compaction telemetry', () => {
+  test('records the rejected approval tool identity', () => {
+    const record = recordRuntimeEvent(
+      {
+        type: 'approval.rejected',
+        interactionId: 'approval-rejected',
+        toolCallId: 'shell-rejected',
+        reason: 'Rejected by user.',
+      },
+      TRACE,
+      PARENT,
+    );
+
+    expect(record.attributes['kite_code.tool.call_id']).toBe('shell-rejected');
+  });
+
+  test('records batched shell preflight readiness without marking execution started', () => {
+    const record = recordRuntimeEvent(
+      { type: 'tool.execution_ready', toolCallId: 'shell-ready' },
+      TRACE,
+      PARENT,
+    );
+
+    expect(record.name).toBe('tool.execution_ready');
+    expect(record.attributes['kite_code.tool.call_id']).toBe('shell-ready');
+  });
+
   test('persists completed token savings and real effect duration', () => {
     const r = recordRuntimeEvent(
       {

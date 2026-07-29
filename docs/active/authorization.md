@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
-验证：`bun test tests/policies/authorization-elevation.test.ts tests/policies/approval-policy.test.ts tests/mcp-tool-policy.test.ts`
+验证：`bun test tests/policies/authorization-elevation.test.ts tests/policies/approval-policy.test.ts tests/mcp-tool-policy.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-controller.test.ts`
 
 ## 概述
 
@@ -71,6 +71,12 @@ authorization: {
 ## MCP Tool 策略边界
 
 MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive effect 变成无审批调用。只有 effective effects 全部为 `none|read` 且 `minimumApproval: none` 时，Approval Policy 才把它当作只读；`minimumApproval: user` 始终要求单次用户批准。远端 annotation 不直接进入该判断，project 配置也不能降低 minimum approval 或 effect 风险。Tool filter 只决定 catalog 可见性，不产生 authorization grant。
+
+## Shell 批次审批与执行
+
+同一条模型消息产生多个连续的 `shell_execute` 调用时，Runtime Scheduler 术语（运行时调度器）先逐个完成参数解析、策略预检和用户审批，不在首个批准后立即启动命令。每次批准或拒绝只作用于对应调用；拒绝项进入终态并写入失败结果，后续同批调用继续审批。批次在首个非 Shell 调用、不同模型消息或不同任务边界处截断，不能跨越 `ask_user`、方案审核或其他工具。
+
+当批次内不再存在未预检调用后，所有已批准调用由同一个 `run_tools` effect 术语（工具执行效果）交给 Tool Controller 术语（工具控制器），通过 `Promise.all` 术语（并发等待组合）同时启动。只读免审调用也先记录 `tool.execution_ready`，等待同批审批收敛后再启动。`approval.rejected` 必须携带对应 `toolCallId`；Runtime 拒绝对应调用后，TUI 立即把仍处于 queued术语（排队中）的卡片收敛为失败终态，历史回放也必须清除审批中断，不得等到整轮结束后误标为取消。`approve_once`、`same_command` 与 `full_access` 的授权范围和溯源规则保持不变；批处理不会把一个调用的单次授权扩散给其他命令。`ask_user` 和方案审核仍保持串行 interaction barrier 术语（交互中断边界）。
 
 ## 入口覆盖
 

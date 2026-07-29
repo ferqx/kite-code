@@ -260,6 +260,7 @@ describe('runtime user actions', () => {
       expect.objectContaining({
         type: 'approval.rejected',
         interactionId: 'approval-1',
+        toolCallId: 'shell-1',
         reason: 'Cancelled with Ctrl+C.',
       }),
     ]);
@@ -344,6 +345,7 @@ test('full access approval is rejected when no sandbox is available', () => {
   ).toEqual([
     expect.objectContaining({
       type: 'approval.rejected',
+      toolCallId: 'tool-1',
       reason: expect.stringContaining('requires'),
     }),
   ]);

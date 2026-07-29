@@ -82,7 +82,7 @@ export type RenderEvent =
 // ── Table detection ──
 
 const TABLE_PIPE = /[|│]/;
-const TIMEOUT_RE = /^Command timed out after (\d+)ms\./;
+const TIMEOUT_RE = /(?:^|\r?\n)Command timed out after (\d+)ms\./;
 
 function parseTimeoutMs(summary: string): number | undefined {
   const match = summary.match(TIMEOUT_RE);
@@ -2347,6 +2347,10 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         type: 'tool_started',
         data: { call_id: event.toolCallId },
       });
+    case 'tool.execution_ready':
+      // Policy preflight is durable Runtime state only. Keep the card queued
+      // until the approved shell batch actually emits tool.started.
+      return state;
     case 'tool.progress':
       return handleEventAction(state, {
         type: 'tool_progress',
@@ -2416,6 +2420,34 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           callId: event.approval.callId ?? event.toolCallId,
         },
       });
+    case 'approval.rejected': {
+      const approvalBlock =
+        state.interrupt?.kind === 'approval'
+          ? findBlockById(state, state.interrupt.blockId)
+          : undefined;
+      const activeApproval = approvalBlock?.kind === 'approval' ? approvalBlock : undefined;
+      const toolCallId = event.toolCallId ?? activeApproval?.approval.callId;
+      let next = toolCallId
+        ? handleEventAction(state, {
+            type: 'tool_done',
+            data: {
+              call_id: toolCallId,
+              name: '',
+              ok: false,
+              summary: event.reason,
+              status: 'error',
+            },
+          })
+        : state;
+      if (activeApproval && (!toolCallId || activeApproval.approval.callId === toolCallId)) {
+        next = replaceBlockById(next, activeApproval.id, {
+          ...activeApproval,
+          resolved: activeApproval.resolved ?? { action: 'reject' },
+        });
+        next = { ...next, interrupt: null };
+      }
+      return next;
+    }
     case 'planning.entered':
       return { ...state, status: { ...state.status, phase: 'planning' } };
     case 'plan.review_requested':

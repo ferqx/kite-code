@@ -1,7 +1,9 @@
+import { guardProcessTree, processTreeSpawnOptions } from '@/core/tools/process-tree';
 import type { ShellExecutor } from '@/core/tools/shell';
 import {
   appendTimeoutMessage,
   readWithProgress,
+  resolveShellTimeoutMs,
   shellTool,
   timeoutMessage,
 } from '@/core/tools/shell';
@@ -101,9 +103,24 @@ function createWrappedExecutor(
   defaultNetworkMode: ShellNetworkMode = 'disabled',
 ): ShellExecutor {
   return async (input) => {
+    const timeoutMs = resolveShellTimeoutMs(input.timeoutMs);
     let timedOut = false;
+    let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let termination: Promise<void> | undefined;
+    let processTree: ReturnType<typeof guardProcessTree> | undefined;
     const outputStop = new AbortController();
+    const terminate = (reason: 'timeout' | 'cancelled') => {
+      if (timedOut || cancelled) return;
+      timedOut = reason === 'timeout';
+      cancelled = reason === 'cancelled';
+      outputStop.abort();
+      termination = processTree?.terminate();
+    };
+    const cancel = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      terminate('cancelled');
+    };
     try {
       // 执行前检查命令是否引用危险文件路径 / Pre-execution dangerous path check
       const dangerous = checkDangerousPaths(input.command);
@@ -134,21 +151,13 @@ function createWrappedExecutor(
         stdout: 'pipe',
         stderr: 'pipe',
         signal: input.signal,
+        ...processTreeSpawnOptions(),
       });
+      processTree = guardProcessTree(proc);
 
-      if (input.timeoutMs && input.timeoutMs > 0) {
-        timeoutId = setTimeout(() => {
-          timedOut = true;
-          // Background descendants may retain inherited pipes after the shell
-          // is killed. Cancel readers so the tool cannot remain non-terminal.
-          outputStop.abort();
-          try {
-            proc.kill();
-          } catch {
-            /* process may have exited already */
-          }
-        }, input.timeoutMs);
-      }
+      timeoutId = setTimeout(() => terminate('timeout'), timeoutMs);
+      input.signal?.addEventListener('abort', cancel, { once: true });
+      if (input.signal?.aborted) cancel();
 
       if (stdin !== undefined && proc.stdin) {
         proc.stdin.write(stdin);
@@ -167,32 +176,50 @@ function createWrappedExecutor(
           outputStop.signal,
         ),
       ]);
+      if (termination) await termination;
       const exitCode = await proc.exited;
       if (timeoutId) clearTimeout(timeoutId);
 
       return {
-        ok: !timedOut && exitCode === 0,
+        ok: !timedOut && !cancelled && exitCode === 0,
         command: input.command,
-        exitCode: timedOut ? 124 : exitCode,
+        exitCode: timedOut ? 124 : cancelled ? 130 : exitCode,
         stdout,
-        stderr: timedOut ? appendTimeoutMessage(stderr, input.timeoutMs!) : stderr,
+        stderr: timedOut
+          ? appendTimeoutMessage(stderr, timeoutMs)
+          : cancelled
+            ? stderr.trimEnd()
+              ? `${stderr.trimEnd()}\nCommand cancelled by user.`
+              : 'Command cancelled by user.'
+            : stderr,
       };
     } catch (error) {
       if (timeoutId) clearTimeout(timeoutId);
+      if (termination) {
+        try {
+          await termination;
+        } catch {
+          // Preserve the original sandbox outcome when process cleanup fails.
+        }
+      }
       const isAbort = error instanceof Error && error.name === 'AbortError';
       return {
         ok: false,
         command: input.command,
-        exitCode: timedOut ? 124 : isAbort ? 130 : -1,
+        exitCode: timedOut ? 124 : cancelled || isAbort ? 130 : -1,
         stdout: '',
         stderr: timedOut
-          ? timeoutMessage(input.timeoutMs ?? 0)
-          : isAbort
+          ? timeoutMessage(timeoutMs)
+          : cancelled || isAbort
             ? 'Command cancelled by user.'
             : error instanceof Error
               ? error.message
               : String(error),
       };
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      input.signal?.removeEventListener('abort', cancel);
+      processTree?.dispose();
     }
   };
 }

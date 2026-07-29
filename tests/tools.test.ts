@@ -5,7 +5,12 @@ import { join } from 'node:path';
 import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '../src/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '../src/core/tools/file';
 import { msys2ToWindowsPath, normalizeMsys2PathsInText } from '../src/core/tools/path-utils';
-import { assertInsideWorkspace, shellTool } from '../src/core/tools/shell';
+import {
+  assertInsideWorkspace,
+  DEFAULT_SHELL_TIMEOUT_MS,
+  resolveShellTimeoutMs,
+  shellTool,
+} from '../src/core/tools/shell';
 
 /** Convert MSYS2 Unix-style path to Windows-style path via cygpath (legacy test helper) */
 function msys2Win(p: string): string {
@@ -28,6 +33,13 @@ function msys2Win(p: string): string {
 }
 
 describe('tool safety', () => {
+  test('shell timeout resolution always returns a finite hard limit', () => {
+    expect(resolveShellTimeoutMs()).toBe(DEFAULT_SHELL_TIMEOUT_MS);
+    expect(resolveShellTimeoutMs(0)).toBe(DEFAULT_SHELL_TIMEOUT_MS);
+    expect(resolveShellTimeoutMs(Number.POSITIVE_INFINITY)).toBe(DEFAULT_SHELL_TIMEOUT_MS);
+    expect(resolveShellTimeoutMs(250)).toBe(250);
+  });
+
   test('allows paths inside the workspace', () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-safe');
     expect(assertInsideWorkspace(workspace, 'inside.txt')).toBe(join(workspace, 'inside.txt'));

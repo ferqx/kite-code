@@ -962,6 +962,130 @@ describe('executeRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
+  test('preflights a read-only shell sibling without starting it early', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-parallel-shell-preflight',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    for (const [ordinal, toolCallId] of ['first', 'second'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'parallel-shell-model',
+        ordinal,
+        name: 'shell_execute',
+        args: { command: ordinal === 0 ? 'pwd' : 'git status' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push(toolCallId);
+    }
+    let executionCount = 0;
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['first'],
+      shellExecutor: async () => {
+        executionCount += 1;
+        return { ok: true, command: 'pwd', exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(executionCount).toBe(0);
+    expect(events).toEqual([{ type: 'tool.execution_ready', toolCallId: 'first' }]);
+  });
+
+  test('does not preflight shell calls across a non-shell sibling', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-shell-interaction-barrier',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization.mode = 'full_access';
+    const modelMessageId = 'mixed-tool-model';
+    state.tools.queue.push('shell-before', 'question', 'shell-after');
+    state.tools.calls['shell-before'] = {
+      toolCallId: 'shell-before',
+      modelMessageId,
+      ordinal: 0,
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.question = {
+      toolCallId: 'question',
+      modelMessageId,
+      ordinal: 1,
+      name: 'ask_user',
+      args: { question: 'Continue?' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['shell-after'] = {
+      toolCallId: 'shell-after',
+      modelMessageId,
+      ordinal: 2,
+      name: 'shell_execute',
+      args: { command: 'git status' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    let executionCount = 0;
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['shell-before'],
+      shellExecutor: async ({ command }) => {
+        executionCount += 1;
+        return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(executionCount).toBe(1);
+    expect(events.some((event) => event.type === 'tool.execution_ready')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+  });
+
+  test('starts every approved shell sibling concurrently', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-parallel-shell-execution',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    for (const [ordinal, toolCallId] of ['first', 'second'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'parallel-shell-model',
+        ordinal,
+        name: 'shell_execute',
+        args: { command: `node task-${ordinal + 1}.js` },
+        status: 'approved',
+        approvalGrant: 'approve_once',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push(toolCallId);
+    }
+    let running = 0;
+    let maximumRunning = 0;
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['first', 'second'],
+      shellExecutor: async ({ command }) => {
+        running += 1;
+        maximumRunning = Math.max(maximumRunning, running);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        running -= 1;
+        return { ok: true, command, exitCode: 0, stdout: command, stderr: '' };
+      },
+    });
+
+    expect(maximumRunning).toBe(2);
+    expect(events.filter((event) => event.type === 'tool.started')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+  });
+
   test('streams shell lifecycle and progress events while the command is running', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-shell-stream',
@@ -980,11 +1104,20 @@ describe('executeRuntimeTools', () => {
     state.tools.queue.push('stream');
 
     const streamed: RuntimeEvent[] = [];
-    const returned = await executeRuntimeTools({
+    let releaseExecution!: () => void;
+    const executionGate = new Promise<void>((resolve) => {
+      releaseExecution = resolve;
+    });
+    let observeProgress!: () => void;
+    const progressObserved = new Promise<void>((resolve) => {
+      observeProgress = resolve;
+    });
+    const execution = executeRuntimeTools({
       state,
       toolCallIds: ['stream'],
       shellExecutor: async (input) => {
         input.onProgress?.('live output', 'stdout');
+        await executionGate;
         return {
           ok: true,
           command: input.command,
@@ -993,9 +1126,22 @@ describe('executeRuntimeTools', () => {
           stderr: '',
         };
       },
-      emitRuntimeEvent: (event) => streamed.push(event),
+      emitRuntimeEvent: (event) => {
+        streamed.push(event);
+        if (event.type === 'tool.progress') observeProgress();
+      },
     });
 
+    const progressArrivedWhileRunning = await Promise.race([
+      progressObserved.then(() => true),
+      Bun.sleep(1_000).then(() => false),
+    ]);
+    const eventTypesWhileRunning = streamed.map((event) => event.type);
+    releaseExecution();
+    const returned = await execution;
+
+    expect(progressArrivedWhileRunning).toBe(true);
+    expect(eventTypesWhileRunning).toEqual(['tool.started', 'tool.progress']);
     expect(returned).toEqual([]);
     expect(streamed.map((event) => event.type)).toEqual([
       'tool.started',

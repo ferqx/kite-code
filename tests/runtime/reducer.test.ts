@@ -484,6 +484,38 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     }
     expect(next.interactions.kind).toBe('idle');
   });
+
+  test('approval.rejected ignores a mismatched tool identity', () => {
+    const state = makeInitialState();
+    state.interactions = {
+      kind: 'awaiting_tool_approval',
+      interactionId: 'approval-mismatch',
+      toolCallId: 'expected-tool',
+      approval: {
+        scope: 'once',
+        cwd: '/tmp',
+        threadId: 'thread-1',
+        tool: 'shell_execute',
+        command: 'pwd',
+        risk: 'execute_code',
+        approvalHash: 'mismatch',
+        summary: 'inspect',
+        reason: 'test',
+        expectedEffects: [],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+      },
+    };
+
+    const next = reduceRuntimeState(state, {
+      type: 'approval.rejected',
+      interactionId: 'approval-mismatch',
+      toolCallId: 'other-tool',
+      reason: 'Rejected by user.',
+    });
+
+    expect(next).toBe(state);
+  });
 });
 
 // ── 工具生命周期 / Tool lifecycle ──
@@ -566,6 +598,35 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     expect(next.tools.queue).toEqual([]);
     expect(next.tools.active).toEqual(['tool-1']);
     expect(next.tools.calls['tool-1']!.status).toBe('running');
+  });
+
+  test('tool.execution_ready keeps a preflighted shell call queued for its batch', () => {
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      tools: {
+        calls: {
+          'shell-ready': {
+            toolCallId: 'shell-ready',
+            modelMessageId: 'parallel-shell-model',
+            name: 'shell_execute',
+            args: { command: 'pwd' },
+            status: 'queued',
+            createdAtTurnId: 'turn-0',
+          },
+        },
+        queue: ['shell-ready'],
+        active: [],
+      },
+    };
+
+    const next = reduceRuntimeState(state, {
+      type: 'tool.execution_ready',
+      toolCallId: 'shell-ready',
+    });
+
+    expect(next.tools.calls['shell-ready']?.status).toBe('approved');
+    expect(next.tools.queue).toEqual(['shell-ready']);
+    expect(next.tools.active).toEqual([]);
   });
 
   // 验证 tool.started 对不存在的 toolCallId 静默忽略

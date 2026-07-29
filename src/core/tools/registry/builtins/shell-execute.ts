@@ -7,7 +7,7 @@ import {
   isVcsMutationCommand,
   isWriteLikeShellCommand,
 } from '@/core/policies/shell-classification';
-import { shellTool } from '@/core/tools/shell';
+import { resolveShellTimeoutMs, shellTool } from '@/core/tools/shell';
 import { SHELL_EXECUTE_CONTRACT } from '@/core/tools/tool-contracts';
 import type { ShellIntent } from '@/core/types';
 import { projectionDigest, truncateProjectedStreams } from '../projection';
@@ -25,7 +25,7 @@ export const shellActionEnvelopeSchema = z.object({
     .positive()
     .optional()
     .describe(
-      'Maximum runtime in milliseconds. Use this for commands that start a TUI, dev server, watcher, or other long-running process.',
+      'Maximum runtime in milliseconds. Commands default to 600000ms when omitted; set a shorter limit for a TUI, dev server, watcher, or other long-running process, or a longer limit for an unusually slow finite command.',
     ),
 });
 
@@ -124,7 +124,7 @@ export const shellExecuteSpec = defineExecutableTool({
         workspace: context.workspace,
         command: input.command,
         signal: context.signal,
-        timeoutMs: input.timeout_ms,
+        timeoutMs: resolveShellTimeoutMs(input.timeout_ms),
         networkMode: context.shellNetworkMode,
         onProgress: context.onShellProgress,
       });

@@ -233,6 +233,126 @@ describe('decideNextEffect', () => {
     });
   });
 
+  test('collects sibling shell decisions before starting the approved batch', () => {
+    let state = createInitialRuntimeState({
+      threadId: 'parallel-shell-approvals',
+      userId: 'u',
+      workspace: '/',
+    });
+    const modelMessageId = 'parallel-shell-model';
+    for (const [ordinal, toolCallId] of ['shell-1', 'shell-2', 'shell-3'].entries()) {
+      state.tools.queue.push(toolCallId);
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId,
+        ordinal,
+        name: 'shell_execute',
+        args: { command: `node task-${ordinal + 1}.js` },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+    }
+    const approval = {
+      risk: 'execute_code',
+      summary: 'Run shell command',
+      reason: 'Needs review',
+      command: 'node task.js',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    };
+
+    state = reduceRuntimeState(state, {
+      type: 'approval.requested',
+      interactionId: 'approval-1',
+      toolCallId: 'shell-1',
+      approval: approval as never,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'approval.granted',
+      interactionId: 'approval-1',
+      grant: 'approve_once',
+    });
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['shell-2'],
+    });
+
+    state = reduceRuntimeState(state, {
+      type: 'approval.requested',
+      interactionId: 'approval-2',
+      toolCallId: 'shell-2',
+      approval: approval as never,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'approval.rejected',
+      interactionId: 'approval-2',
+      reason: 'Rejected by user.',
+    });
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['shell-3'],
+    });
+
+    state = reduceRuntimeState(state, {
+      type: 'approval.requested',
+      interactionId: 'approval-3',
+      toolCallId: 'shell-3',
+      approval: approval as never,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'approval.granted',
+      interactionId: 'approval-3',
+      grant: 'approve_once',
+    });
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['shell-1', 'shell-3'],
+    });
+  });
+
+  test('does not batch shell calls across an interaction barrier', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'shell-interaction-barrier',
+      userId: 'u',
+      workspace: '/',
+    });
+    const modelMessageId = 'mixed-tool-model';
+    state.tools.queue.push('shell-before', 'question', 'shell-after');
+    state.tools.calls['shell-before'] = {
+      toolCallId: 'shell-before',
+      modelMessageId,
+      ordinal: 0,
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.question = {
+      toolCallId: 'question',
+      modelMessageId,
+      ordinal: 1,
+      name: 'ask_user',
+      args: { question: 'Continue?' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['shell-after'] = {
+      toolCallId: 'shell-after',
+      modelMessageId,
+      ordinal: 2,
+      name: 'shell_execute',
+      args: { command: 'git status' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['shell-before'],
+    });
+  });
+
   test('stops when all tools from the latest model response are rejected', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
     const modelMessageId = 'model-msg';

@@ -465,6 +465,10 @@ export function recordRuntimeEvent(
       base.name = 'tool.start';
       base.attributes['kite_code.tool.call_id'] = event.toolCallId;
       break;
+    case 'tool.execution_ready':
+      base.name = 'tool.execution_ready';
+      base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      break;
     case 'tool.finished':
       base.name = `tool.${event.name}`;
       base.attributes['kite_code.tool.name'] = event.name;
@@ -514,6 +518,7 @@ export function recordRuntimeEvent(
     case 'approval.rejected':
       base.name = 'approval.rejected';
       base.attributes['kite_code.interaction_id'] = event.interactionId;
+      if (event.toolCallId) base.attributes['kite_code.tool.call_id'] = event.toolCallId;
       if (event.reason)
         base.attributes['kite_code.approval.reject_reason'] = trunc(event.reason, TRUNC_SUMMARY);
       break;

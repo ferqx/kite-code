@@ -316,6 +316,15 @@ export interface ToolStartedEvent {
   toolCallId: string;
 }
 
+/**
+ * A batched shell call has completed parsing and policy preflight and is ready
+ * to start once every sibling shell approval has been resolved.
+ */
+export interface ToolExecutionReadyEvent {
+  type: 'tool.execution_ready';
+  toolCallId: string;
+}
+
 /** 工具执行过程中产生进度数据（如 shell 逐行输出） */
 export interface ToolProgressEvent {
   type: 'tool.progress';
@@ -499,6 +508,8 @@ export interface ApprovalGrantedEvent {
 export interface ApprovalRejectedEvent {
   type: 'approval.rejected';
   interactionId: string;
+  /** Tool call whose approval was rejected; optional for legacy replay. */
+  toolCallId?: string;
   reason: string;
   failure?: ClassifiedFailure;
 }
@@ -903,6 +914,7 @@ export type RuntimeEvent =
   | VerificationCompensationRequestedEvent
   | VerificationCompensationCompletedEvent
   | ToolQueuedEvent
+  | ToolExecutionReadyEvent
   | ToolStartedEvent
   | ToolProgressEvent
   | ToolFinishedEvent

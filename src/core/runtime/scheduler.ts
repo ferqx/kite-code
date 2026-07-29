@@ -1,14 +1,16 @@
 import type { RuntimeEffect } from './effects';
 import type { RuntimeState } from './state';
+import { contiguousShellBatchIds } from './tool-batches';
 
 /**
  * The only runtime scheduler.  It deliberately depends on RuntimeState only:
  * callers must encode every externally visible transition as a RuntimeEvent
  * before asking for the next effect.
  *
- * v2: single-tool scheduling — runs one tool at a time so interaction barriers
- * (write_plan with action=submit, ask_user, approval.requested) naturally interrupt the queue
- * before sibling tool calls execute.
+ * Interaction-producing tools still run one at a time so write_plan, ask_user
+ * and approval barriers stop sibling execution. Shell calls from one model
+ * response are the exception: each contiguous shell segment collects approvals
+ * serially, then its approved siblings start in one concurrent batch.
  */
 export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   if (state.recoveryState.kind !== 'normal') {
@@ -90,21 +92,35 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       break;
   }
 
-  // Single-tool scheduling: run one tool at a time to support interaction barriers.
-  // When an interaction-creating tool (write_plan action=submit, ask_user, approval) is reached,
-  // the scheduler naturally stops before sibling tool calls execute.
-  //
-  // Tools that need approval are moved from queue → active by tool.started before the
-  // approval interaction fires.  When approval is granted, the tool is still in active
-  // (not queue), so the scheduler must scan both lists.  Without this, approved
-  // sub-agent task tools are invisible to the scheduler and call_model runs prematurely.
+  // Interaction-producing tools normally run one at a time. Approved sub-agent
+  // task tools can remain active while waiting for their continuation, so scan
+  // both queue and active lists.
   const isRunnable = (id: string) => {
     const call = state.tools.calls[id];
     const belongsToCurrentTask = call?.taskId == null || call.taskId === state.activeTaskId;
     return belongsToCurrentTask && (call?.status === 'queued' || call?.status === 'approved');
   };
   const nextRunnable = state.tools.queue.find(isRunnable) ?? state.tools.active.find(isRunnable);
-  if (nextRunnable) return { type: 'run_tools', toolCallIds: [nextRunnable] };
+  if (nextRunnable) {
+    const nextCall = state.tools.calls[nextRunnable];
+    if (nextCall?.name === 'shell_execute' && nextCall.modelMessageId) {
+      const shellBatch = contiguousShellBatchIds(state, nextRunnable);
+      if (shellBatch.length > 1) {
+        // A previously approved sibling must not start while another sibling
+        // is still waiting for its policy/approval preflight.
+        const nextUnprepared = shellBatch.find((id) => state.tools.calls[id]?.status === 'queued');
+        if (nextUnprepared) return { type: 'run_tools', toolCallIds: [nextUnprepared] };
+
+        const approvedBatch = shellBatch.filter(
+          (id) => state.tools.calls[id]?.status === 'approved',
+        );
+        if (approvedBatch.length > 0) {
+          return { type: 'run_tools', toolCallIds: approvedBatch };
+        }
+      }
+    }
+    return { type: 'run_tools', toolCallIds: [nextRunnable] };
+  }
 
   const verificationRecords = Object.values(state.verification.records)
     .filter((record) => !record.taskId || record.taskId === state.activeTaskId)

@@ -656,6 +656,37 @@ describe('eventReducer (blocks model)', () => {
       expect(blocks.map((b) => b.status)).toEqual(['cancelled', 'cancelled']);
     });
 
+    test('escape preserves the cancelled Bash command and drops never-started read statistics', () => {
+      let s = dispatch(fresh(), { type: 'SET_RUNNING' });
+      s = dispatch(
+        s,
+        tcEvt('shell-1', 'shell_execute', {
+          command: 'bun test --dry-run 2>&1 | tail -20',
+        }),
+      );
+      s = dispatch(
+        s,
+        tcEvt('read-1', 'read_file', { path: 'src/core/runtime/runner.ts' }, 'queued'),
+      );
+      s = dispatch(
+        s,
+        tcEvt('read-2', 'read_file', { path: 'src/core/runtime/reducer.ts' }, 'queued'),
+      );
+
+      s = dispatch(s, { type: 'ESCAPE' });
+
+      const blocks = flatBlocks(s);
+      const shell = blocks.find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'shell-1',
+      );
+      expect(shell).toMatchObject({
+        status: 'cancelled',
+        detail: 'Ran: bun test --dry-run 2>&1 | tail -20',
+      });
+      expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
+    });
+
     test('appends tool_card block with running status', () => {
       // read_file is an exploration tool → pre-consolidated to tool_summary
       const s = dispatch(fresh(), tcEvt('c1', 'read_file', { path: 'a.txt' }));
@@ -821,6 +852,7 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, tdEvt('c1', 'shell_execute', false, 'Command timed out after 10000ms.'));
       const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(t.status).toBe('timeout');
+      expect(t.timeoutMs).toBe(10000);
     });
     test('tool_done preserves live shell output when command times out', () => {
       let s = fresh();
@@ -843,6 +875,18 @@ describe('eventReducer (blocks model)', () => {
       expect(t.status).toBe('timeout');
       expect(t.summary).toBe('Kite Code ready');
       expect(t.timeoutMs).toBe(5000);
+    });
+    test('tool_done recovers the default timeout after preceding stderr output', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'npm run test' }));
+      s = dispatch(
+        s,
+        tdEvt('c1', 'shell_execute', false, 'watcher warning\nCommand timed out after 600000ms.'),
+      );
+
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('timeout');
+      expect(t.timeoutMs).toBe(600000);
     });
     test('tool_done preserves full timeout stdout summary when exitCode is available', () => {
       let s = fresh();
@@ -3475,6 +3519,71 @@ describe('eventReducer (blocks model)', () => {
       const reviewState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: reviewEvent });
       expect(reviewState.interrupt?.kind).toBe('plan_review');
       expect(reviewState.status.pendingPlan?.name).toBe('Plan');
+    });
+
+    test('approval rejection immediately settles its queued shell card', () => {
+      let state = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.queued',
+          toolCallId: 'shell-rejected',
+          name: 'shell_execute',
+          args: { command: 'rm generated.txt' },
+        },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'approval.requested',
+          interactionId: 'approval-rejected',
+          toolCallId: 'shell-rejected',
+          approval: approval(),
+        },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'approval.rejected',
+          interactionId: 'approval-rejected',
+          toolCallId: 'shell-rejected',
+          reason: 'Rejected by user.',
+        },
+      });
+
+      const card = flatBlocks(state).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'shell-rejected',
+      );
+      const approvalBlock = flatBlocks(state).find(
+        (block): block is Extract<OutputBlock, { kind: 'approval' }> => block.kind === 'approval',
+      );
+      expect(card?.status).toBe('error');
+      expect(card?.summary).toBe('Rejected by user.');
+      expect(approvalBlock?.resolved?.action).toBe('reject');
+      expect(state.interrupt).toBeNull();
+    });
+
+    test('keeps a preflighted shell card queued until its batch starts', () => {
+      let state = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.queued',
+          toolCallId: 'shell-ready',
+          name: 'shell_execute',
+          args: { command: 'pwd' },
+        },
+      });
+
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'tool.execution_ready', toolCallId: 'shell-ready' },
+      });
+
+      const card = flatBlocks(state).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'shell-ready',
+      );
+      expect(card?.status).toBe('queued');
     });
 
     test('updates cache statistics and keeps non-visual lifecycle facts out of the message list', () => {

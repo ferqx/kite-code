@@ -40,6 +40,7 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { contiguousShellBatchIds } from '@/core/runtime/tool-batches';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import {
@@ -543,6 +544,24 @@ export async function executeRuntimeTools(params: {
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
   recordFilePreimage?: FilePreimageRecorder;
 }): Promise<RuntimeEvent[]> {
+  const approvedParallelShellBatch =
+    params.toolCallIds.length > 1 &&
+    params.toolCallIds.every((toolCallId) => {
+      const call = params.state.tools.calls[toolCallId];
+      return call?.name === 'shell_execute' && call.status === 'approved';
+    });
+  if (approvedParallelShellBatch) {
+    const batches = await Promise.all(
+      params.toolCallIds.map((toolCallId) =>
+        executeRuntimeTools({
+          ...params,
+          toolCallIds: [toolCallId],
+        }),
+      ),
+    );
+    return batches.flat();
+  }
+
   const events: RuntimeEvent[] = [];
   // Keep the direct-call API unchanged for tests and legacy callers.  The
   // Runtime runner replaces push with a streaming sink, so events are applied
@@ -600,6 +619,10 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     const request = parsed.request;
+    const isParallelShellPreflight =
+      request.name === 'shell_execute' &&
+      call.status === 'queued' &&
+      contiguousShellBatchIds(params.state, toolCallId).length > 1;
     const ceilingViolation = skillCapabilityCeilingViolation(params.state, call, request);
     if (ceilingViolation) {
       events.push({ type: 'tool.rejected', toolCallId, reason: ceilingViolation });
@@ -1216,6 +1239,11 @@ export async function executeRuntimeTools(params: {
       }
     }
 
+    if (isParallelShellPreflight) {
+      events.push({ type: 'tool.execution_ready', toolCallId });
+      continue;
+    }
+
     if (request.name === 'task') {
       // ── Sub-agent approval resume path ──
       // When a sub-agent paused for approval, the task tool call was set to
@@ -1244,7 +1272,6 @@ export async function executeRuntimeTools(params: {
 
       // ── Normal sub-agent execution ──
       events.push({ type: 'tool.started', toolCallId });
-      const progress: RuntimeEvent[] = [];
       try {
         const result = await runApprovedTool({
           workspace: params.state.session.workspace,
@@ -1266,9 +1293,8 @@ export async function executeRuntimeTools(params: {
           subagentEventSink: emitSubagentEvent,
           availabilityContext: availCtx,
           onShellProgress: (chunk, stream) =>
-            progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
+            events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
         });
-        events.push(...progress);
 
         // ── Sub-agent blocked for approval → surface through Runtime Kernel ──
         if (result.subagentResult?.blocked) {
@@ -1384,7 +1410,6 @@ export async function executeRuntimeTools(params: {
         startedAt: new Date().toISOString(),
       });
     }
-    const progress: RuntimeEvent[] = [];
     try {
       if (request.name === 'read_mcp_resource') {
         await params.mcpManager?.ensureProviderReady?.(
@@ -1445,7 +1470,7 @@ export async function executeRuntimeTools(params: {
             subagentEventSink: emitSubagentEvent,
             availabilityContext: availCtx,
             onShellProgress: (chunk, stream) =>
-              progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
+              events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
           });
           break;
         } catch (error) {
@@ -1455,7 +1480,6 @@ export async function executeRuntimeTools(params: {
         }
       }
       if (!result) throw new Error('MCP execution completed without a result.');
-      events.push(...progress);
 
       if (invocation) {
         const terminal = invocationTerminalEvent(

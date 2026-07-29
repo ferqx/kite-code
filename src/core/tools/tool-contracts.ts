@@ -196,13 +196,13 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
       'Prefer search_content and search_files over `grep`, `rg`, `find`, and `ls` — they apply .gitignore rules and return structured results; shell_execute remains available when you need shell-specific behavior. ' +
       'Do NOT use shell_execute for: searching file contents (use search_content), finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file). ' +
       'Use shell_execute ONLY for: tests, typecheck, builds, installs, git operations, and other terminal-only tasks. ' +
-      'For commands that start a TUI, dev server, watcher, or other long-running process, set timeout_ms (for example 10000) so the command returns after collecting startup output. ' +
-      'Do not set timeout_ms for finite commands such as builds, installs, or test suites unless the user explicitly asks for a bounded smoke check. ' +
+      'Commands have a default hard timeout of 600000ms. For commands that start a TUI, dev server, watcher, or other long-running process, set a shorter timeout_ms (for example 10000) so the command returns after collecting startup output. ' +
+      'Set a longer timeout_ms only when a finite build, install, or test suite is expected to need more than 10 minutes. ' +
       'Write a short human-readable description so the user understands what the command does.',
     commonMistakes:
       'Reaching for shell_execute with grep/rg/find when search_content/search_files would give structured, .gitignore-aware results. ' +
       'Missing description field — always provide a short human-readable summary. ' +
-      'Running interactive or long-running commands like `npm run tui`, `bun run dev`, or watch mode without timeout_ms — the tool will keep running until the process exits. ' +
+      'Relying on the 600000ms default for interactive or long-running commands like `npm run tui`, `bun run dev`, or watch mode instead of setting a short startup timeout_ms. ' +
       'Running destructive commands (rm -rf, git reset --hard, curl | sh, chmod -R) — denied by default.',
     outputFormat:
       'JSON with fields: ok (boolean), command (executed command), exitCode (0=success), stdout, stderr. ' +

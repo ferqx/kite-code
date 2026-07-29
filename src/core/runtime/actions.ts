@@ -234,6 +234,7 @@ export function eventsForRuntimeAction(
             {
               type: 'approval.rejected',
               interactionId: action.interactionId,
+              toolCallId: interaction.toolCallId,
               reason: error instanceof Error ? error.message : String(error),
               failure: classifyFailure(
                 'sandbox_error',
@@ -274,6 +275,7 @@ export function eventsForRuntimeAction(
         {
           type: 'approval.rejected',
           interactionId: action.interactionId,
+          toolCallId: interaction.toolCallId,
           reason: action.reason ?? 'Rejected by user.',
           failure: classifyFailure('approval_rejected', action.reason ?? 'Rejected by user.'),
         },
