@@ -738,9 +738,6 @@ export default function ToolCardBlock({
               {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
             </Text>
           ) : null}
-          {(block.status === 'error' || isWebFetch) &&
-            block.summary &&
-            block.summary.split('\n').length > 3 && <Text color={dt.dim}>Enter 折叠</Text>}
         </Box>
       )}
       {/* 文件工具 / File tools — 无 summary 时展示文件路径（如工具被取消无 ToolMessage） */}
@@ -768,8 +765,6 @@ export default function ToolCardBlock({
             block.status === 'error' || block.status === 'exhausted',
             dt,
           )}
-          {(block.status === 'error' || block.status === 'exhausted') &&
-            block.summary?.split('\n').length > 3 && <Text color={dt.dim}>Enter 折叠</Text>}
         </Box>
       )}
     </Box>
