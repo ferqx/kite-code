@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-07-26（登记 ToolSpec Registry 实施计划）
+最后更新：2026-07-29（登记 Agent 生产就绪 Phase 0–6 实施计划组）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -82,6 +82,7 @@
 | `understanding/2026-06-10-shell-concurrent-execution-design.md` | understanding | Shell 工具并发执行 + 批量审批流程 |
 | `understanding/2026-06-28-thought-pre-consolidation-design.md` | understanding | Thought 预整合设计 — 探索工具合并为 tool_summary、ToolSummaryBlock 三态渲染、explorationSummaryIds 映射、与 SubAgentBlock 对齐。 |
 | `understanding/2026-06-27-osc4-bold-bright-slot.md` | understanding | OSC 4 高亮调色槽发现：终端 bold 文本使用 slot 8-15，OSC 4 需同时重编程基础槽和高亮槽才能让 bold+color 文本跟随主题 |
+| `understanding/2026-07-29-agent-production-feasibility.md` | understanding | 基于源码、默认 feature flags、确定性测试、PTY、本地/公网 MCP 和真实模型压缩实验，给出内部试用、受限灰度与全功能 GA 的可行性结论，并路由至生产就绪 RFC。 |
 
 ## Backlog（工作待办）
 
@@ -98,6 +99,7 @@
 | --- | --- | --- |
 | `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
+| `plans/2026-07-29-agent-production-readiness-roadmap.md` | draft | 已批准生产就绪 RFC 的统一实施入口：10 个子计划、M0–M4 Gate、共享证据和回滚依赖。 |
 | `plans/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
 | `plans/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 ✅，Phase3 ✅。 |
 | `plans/2026-05-22-production-gaps-phase1.md` | archived | Phase 1 实施记录（8 commits）。MCP + 事件闭环 + 错误分类。 |
@@ -108,8 +110,9 @@
 | `plans/2026-05-25-e2e-restructure.md` | archived | E2E 测试套件重构（~71 tests，P0-P3 分层）。 |
 | `plans/2026-05-26-tui-claude-code-parity.md` | archived | TUI Claude Code 全面对标（14 tasks）：布局、快捷键、功能、配置、主题。 |
 | `plans/2026-06-17-background-subagent.md` | draft | 后台子 Agent — `background: true` 异步派发、SessionContext 容器、BackgroundTaskManager、跨 run 并发模型（8 phases）。 |
-| `plans/2026-06-18-opentelemetry-observability.md` | draft | Agent OpenTelemetry 可观测性 — Trace/Span 建模 + OTLP/HTTP 导出，工具失败分类驱动提示词优化闭环。 |
-| `plans/2026-06-18-session-logger.md` | draft | 会话日志本地记录 — AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断。 |
+| `plans/2026-06-18-opentelemetry-observability.md` | superseded | 旧方案允许导出路径、命令和错误正文；被 2026-07-29 无正文可观测性计划替代。 |
+| `plans/2026-06-18-kite-code-telemetry-collection.md` | superseded | 旧双通道 scrub 方案不满足 metadata-only 边界；被 2026-07-29 无正文可观测性计划替代。 |
+| `plans/2026-06-18-session-logger.md` | archived | 会话日志当前实现的历史计划；生产 metadata/权限/保留迁移由 2026-07-29 Phase 1A 接管。 |
 | `plans/2026-06-19-event-mechanism-refactor.md` | draft | 事件机制重构 — turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一。 |
 | `plans/2026-06-28-context-compaction.md` | active | 上下文压缩方案 — M0 TUI 预整合 + M1 Core 工具折叠 + M2 对话摘要（延后）。 |
 | `plans/2026-07-14-mcp-runtime-governance-p0.md` | archived | MCP Runtime 治理 Phase 0 + 1：revisioned catalog、turn binding、fail-closed schema、policy 与结构化结果。 |

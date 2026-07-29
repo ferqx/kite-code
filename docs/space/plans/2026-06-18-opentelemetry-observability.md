@@ -1,7 +1,13 @@
 # Agent OpenTelemetry 可观测性方案
 
-状态：draft
+状态：superseded
 创建：2026-06-18
+替代者：
+[`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md)
+
+> 本计划允许导出 Workspace、文件、命令和错误正文，不符合已批准的生产隐私边界，不再作为
+> 实施依据。新实现必须从结构化元数据通过 allowlist mapper 构造，不能复用本计划的全量
+> Span → exporter 路径。
 
 ## 目标
 

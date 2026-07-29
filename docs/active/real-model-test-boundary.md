@@ -1,6 +1,8 @@
 # 当前规则：真实模型测试边界
 
 状态：active
+最后更新：2026-07-29
+最后验证：2026-07-29
 
 读取时机：新增真实网络/模型测试、修改测试发现规则、package scripts 或声明 provider 端到端验证结果时。
 
@@ -18,7 +20,7 @@
 
 - `local/`：使用本地隔离 fixture 的确定性跨进程 E2E，由 `test:e2e` 执行；
 - `live/mcp/`：访问公网或外部 MCP 的显式 opt-in 套件，只能使用 `*.live.ts`；
-- `live/model/`：消耗真实模型 Provider 配额的显式 opt-in 套件，只能使用 `*.live.ts`。当前只有边界说明，没有受维护的测试文件。
+- `live/model/`：消耗真实模型 Provider 配额的显式 opt-in 套件，只能使用 `*.live.ts`。当前维护 context compaction direct/incremental summary runner；它不属于 Required CI，历史或单次通过也不能替代持续的 provider/model 兼容与语义保真验证。
 
 `test:e2e` 必须显式指向 `tests/e2e/local/`，不得以整个 `tests/e2e/` 为目标。TUI PTY 继续位于 `tests/tui-system/scenarios/`，因为它有独立的串行 harness 和测试标准。公网 MCP 验证不等于真实模型验证。
 

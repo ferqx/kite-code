@@ -1,7 +1,6 @@
-# Real-model E2E suites
+# 真实模型 E2E 套件
 
-This directory contains explicit, opt-in real-model end-to-end suites. Run the maintained context
-compaction suite with:
+本目录包含显式 opt-in 的真实模型端到端套件。运行受维护的 context compaction 套件：
 
 ```bash
 KITE_RUN_LIVE_MODEL_COMPACTION=1 \
@@ -11,23 +10,22 @@ KITE_LIVE_MODEL_NAME=model-name \
 bun run test:model:live
 ```
 
-Set `KITE_LIVE_MODEL_PROVIDER_TYPE=deepseek` only for a DeepSeek-compatible endpoint. The runner
-has a bounded timeout, runs two Provider calls serially, and reports identifiers but no prompts,
-requests, summaries, configuration, or credentials. Every suite must:
+只有 DeepSeek-compatible endpoint 才设置 `KITE_LIVE_MODEL_PROVIDER_TYPE=deepseek`。Runner 有超时上限，串行执行两次 Provider 调用，只报告标识，不输出 prompt、request、summary、配置或凭据。每个套件必须：
 
-- use a `*.live.ts` filename;
-- select provider and model from isolated environment configuration;
-- be a standalone runner invoked with `bun run` through an explicit package script and opt-in environment guard;
-- run serially with a bounded timeout;
-- redact credentials, complete prompts, requests and user configuration;
-- document the provider, model, date, network conditions and command used for any reported result.
+- 使用 `*.live.ts` 文件名；
+- 从隔离的环境配置选择 provider 和 model；
+- 作为独立 runner，由显式 package script 和 opt-in 环境门禁通过 `bun run` 调用；
+- 串行运行并设置超时上限；
+- 脱敏凭据、完整 prompt、request 和用户配置；
+- 记录所有被引用结果的 provider、model、日期、网络条件和命令。
 
-Mock model, public MCP-only and local transport tests do not belong in this directory.
+Mock model、仅公网 MCP 和本地 transport 测试不属于本目录。
 
-## Verification record
+## 验证记录
 
-- 2026-07-22, provider `deepseek`, model `deepseek-v4-flash`, normal network conditions.
-- Command: `bun run test:model:live` with the opt-in variables populated from the local Kite Code
-  configuration.
-- Result: `manual-direct-summary` and `incremental-summary` passed. No request or response body was
-  retained in this record.
+- 2026-07-22，provider `deepseek`，model `deepseek-v4-flash`，正常网络条件。
+- 命令：从本地 Kite Code 配置填充 opt-in 变量后运行 `bun run test:model:live`。
+- 结果：`manual-direct-summary` 和 `incremental-summary` 通过。本记录未保留 request 或 response 正文。
+- 2026-07-29，provider `deepseek`，model `deepseek-v4-flash`，正常本地网络条件。
+- 命令：从本地 Kite Code 配置填充 opt-in 变量后运行 `bun run test:model:live`。
+- 结果：`manual-direct-summary` 因 `ContextCompactionValidationError: Summary was truncated` 失败，未进入 incremental 场景。本记录未保留 request 或 response 正文。

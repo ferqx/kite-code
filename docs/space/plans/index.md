@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-26（登记 ToolSpec Registry 实施计划）
+最后更新：2026-07-29（登记 Agent 生产就绪实施计划组）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,17 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | draft | P0 | 已批准 Agent 生产就绪 RFC | Phase 0–6 总入口 | 首发拓扑、依赖图、M0–M4 Gate、共享证据与回滚规则 |
+| [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | draft | P0 | 生产就绪 roadmap | RFC Phase 0 | 具名 Owner/backup、14 项决策、ADR 与 schema ownership |
+| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | draft | P0 | Phase 0 | RFC Phase 1A | metadata 默认、安全日志、Provider Data Policy、remote MCP egress |
+| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | draft | P0 | Phase 0 | RFC Phase 1B | workspace sandbox、network allowlist、protected path、worktree、MCP transport boundary |
+| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | draft | P0 | Phase 0 | RFC Phase 1C | 累计资源预算、有界取消、failure matrix、PTY/soak 稳定 |
+| [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) | draft | P0 | 2A-F 依赖 Phase 0；2A-RC 依赖 1A–1C/2B/3 | RFC Phase 2A | payload/detached manifest、Release Profile、evidence/Gate、平台制品 |
+| [`2026-07-29-agent-production-evaluation.md`](2026-07-29-agent-production-evaluation.md) | draft | P0 | Phase 0、2A-F；执行 fixture 依赖 1B/1C | RFC Phase 2B | Agent task suite、oracle、重复运行、人工验收 |
+| [`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md) | draft | P0 | 1A、1C、`MS:2A-F`、2B metrics contract | 替代两份 2026-06-18 telemetry 草案 | 无正文 metrics、告警、kill switch、事故演练、limited cohort SLO |
+| [`2026-07-29-agent-production-compaction-qualification.md`](2026-07-29-agent-production-compaction-qualification.md) | draft | P1 | 2A、2B、3、ADR-0021/22/24；external 等待 LIM/SLO | RFC Phase 4 | 离线资格、internal auto 新鲜度、external manual canary 与 maturity |
+| [`2026-07-29-agent-production-capability-rollout.md`](2026-07-29-agent-production-capability-rollout.md) | draft | P1 | 1A–1C、2A、2B、3；external 等待 LIM/SLO | RFC Phase 5 | Verification、MCP write、Skills 分别 internal、external canary、beta/stable maturity |
+| [`2026-07-29-agent-production-ga.md`](2026-07-29-agent-production-ga.md) | draft | P1 | `MS:LIM-APPROVED`、`MS:LIMITED-SLO`、manual stable；只等待拟入 GA capability | RFC Phase 6A/6B | 可选 Auto maturity；GA selection、artifact 与发布后观察 |
 | [`2026-07-26-tool-spec-registry-phase-2.md`](2026-07-26-tool-spec-registry-phase-2.md) | archived | P0 | ADR-0026、ADR-0027 | 延续已归档阶段 0/1 | coordination、interrupt、runtime_action 工具全部迁入 Registry |
 | [`2026-05-20-tui-production-roadmap.md`](2026-05-20-tui-production-roadmap.md) | archived | P0 | — | — | Step2 感知闭环：流式指示器 + Plan 连线 + Phase 确认<br>Step3 防御纵深：Error Boundary + Checkpoint 关闭 + Temp 清理<br>Step4 功能补齐：手动 Compaction |<!-- replaced by 2026-05-22-production-gaps-closure.md for remaining gaps -->|
 | [`2026-05-22-production-gaps-closure.md`](2026-05-22-production-gaps-closure.md) | archived | P0 | — | 替代 2026-05-20 路线图中未完成项 | Phase1 ✅ MCP + 事件闭环<br>Phase2 ✅ Rewind + MCP Resources<br>Phase3 ✅ Skills 系统<br>Hooks + 自定义命令延后 |
@@ -32,8 +43,8 @@
 | [`2026-06-16-plan-review-interrupt.md`](2026-06-16-plan-review-interrupt.md) | archived | P1 | — | — | 为 update_plan 增加 plan_review 中断。实际实现有偏差，参见 [[plan-mode-implementation]] |
 | [`2026-06-17-background-subagent.md`](2026-06-17-background-subagent.md) | draft | P0 | `understanding/2026-05-30-multi-agent-design.md` | — | 后台子 Agent：`background: true` 异步派发、SessionContext 容器、BackgroundTaskManager、跨 run 注入与中止（8 phases）。 |
 | [`2026-06-14-p0-gap-closure.md`](2026-06-14-p0-gap-closure.md) | draft | P0 | — | — | P0 缺口补齐：Web Search + Token 展示 + 开箱即用 + 工作空间授权（4 大类 19 tasks）。 |
-| [`2026-06-18-opentelemetry-observability.md`](2026-06-18-opentelemetry-observability.md) | draft | P1 | — | — | Agent OpenTelemetry 可观测性：Trace/Span 建模 + OTLP 导出，工具失败分类 → 提示词优化闭环 |
-| [`2026-06-18-kite-code-telemetry-collection.md`](2026-06-18-kite-code-telemetry-collection.md) | draft | P2 | `opentelemetry-observability` | — | Kite Code 遥测收集：双通道 opt-in，脱敏工具调用统计，驱动工具契约优化 |
+| [`2026-06-18-opentelemetry-observability.md`](2026-06-18-opentelemetry-observability.md) | superseded | P1 | — | 被 2026-07-29 无正文可观测性计划替代 | 旧方案允许导出 Workspace、命令、路径和错误正文，不再实施 |
+| [`2026-06-18-kite-code-telemetry-collection.md`](2026-06-18-kite-code-telemetry-collection.md) | superseded | P2 | `opentelemetry-observability` | 被 2026-07-29 无正文可观测性计划替代 | 旧双通道 scrub 方案不满足 metadata-only 边界 |
 | [`2026-06-18-session-logger.md`](2026-06-18-session-logger.md) | archived | P0 | — | — | 会话日志本地记录：AgentEvent 全量 → OTel 兼容 JSONL + RunSummary，离线回溯与故障诊断 |
 | [`2026-06-19-event-mechanism-refactor.md`](2026-06-19-event-mechanism-refactor.md) | archived | P0 | `session-logger` | — | 事件机制重构：turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一 |
 | [`2026-06-26-shell-live-output.md`](2026-06-26-shell-live-output.md) | archived | P0 | — | — | Shell 实时输出已实施；计划仅作历史参考。 |
