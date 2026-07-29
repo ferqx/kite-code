@@ -1379,6 +1379,29 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('exit: error');
   });
 
+  test('cancelled shell tool_card keeps its command and renders only a cancelled footer', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+      status: 'cancelled',
+      summary: 'Cancelled',
+      detail: 'Ran: bun test',
+      expanded: true,
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Ran: bun test');
+    expect(frame).toContain('cancelled');
+    expect(frame).not.toContain('exit: 0');
+    expect(frame.match(/Cancelled/g) ?? []).toHaveLength(0);
+  });
+
   test('file_change block is rendered by tool_card, not BlockRenderer', () => {
     // sandbox 合并后 file_change 由 tool_card 渲染，BlockRenderer 返回 null
     const block: OutputBlock = {

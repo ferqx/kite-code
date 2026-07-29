@@ -16,6 +16,7 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
+import { eventsForRunCancellation } from './actions';
 import type { RuntimeEvent } from './events';
 import { createRuntimeEffectExecutor } from './executor';
 import { recordRuntimeFailure } from './failures';
@@ -85,13 +86,15 @@ export interface RunRuntimeAgentInput {
   signal?: AbortSignal;
   frontend?: string;
   /** App-shell control plane for injecting durable user commands into a live Kernel. */
-  onKernelControl?: (
-    control: {
-      getState: () => Readonly<import('./state').RuntimeState>;
-      processEvent: (event: RuntimeEvent) => void;
-    } | null,
-  ) => void;
+  onKernelControl?: (control: RuntimeKernelControl | null) => void;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
+}
+
+/** Durable control surface exposed to an app shell while a Kernel run is live. */
+export interface RuntimeKernelControl {
+  getState: () => Readonly<import('./state').RuntimeState>;
+  processEvent: (event: RuntimeEvent) => void;
+  cancelRun: (reason?: string) => RuntimeEvent[];
 }
 
 /** Start a fresh RuntimeStore-backed session without LangGraph/checkpoint state. */
@@ -125,10 +128,20 @@ export async function* runRuntimeAgent(
     { provider: input.config.providerName, name: input.config.modelName },
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
+  let runCancelled = false;
   input.onKernelControl?.({
     getState: () => kernel.getState(),
     processEvent: (event) => {
       kernel.processEvent(event);
+    },
+    cancelRun: (reason) => {
+      if (runCancelled) return [];
+      runCancelled = true;
+      exitStatus = 'aborted';
+      const events = eventsForRunCancellation(kernel.getState(), reason);
+      kernel.processEventBatch(events);
+      for (const event of events) collector.recordRuntime(event);
+      return events;
     },
   });
   try {
@@ -258,6 +271,10 @@ export async function* runRuntimeAgent(
     }
     if (input.signal?.aborted) exitStatus = 'aborted';
   } catch (error) {
+    if (input.signal?.aborted) {
+      exitStatus = 'aborted';
+      return;
+    }
     exitStatus = 'fatal';
     const failure = recordRuntimeFailure({
       kind: 'unknown',
@@ -281,6 +298,7 @@ export async function* runRuntimeAgent(
       type: 'turn.aborted',
       turnId: kernel.getState().turn.turnId,
       reason: errorEvent.message,
+      cause: 'error',
     };
     kernel.processEvent(aborted);
     collector.recordRuntime(aborted);

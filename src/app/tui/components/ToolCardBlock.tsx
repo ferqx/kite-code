@@ -697,7 +697,7 @@ export default function ToolCardBlock({
       {/* Shell + Web Fetch 工具：统一渲染 / Shell + Web Fetch: unified rendering */}
       {isExpanded && (isShell || isWebFetch) && (
         <Box paddingLeft={2} flexDirection="column">
-          {hasSummary ? (
+          {block.status === 'cancelled' && block.summary === 'Cancelled' ? null : hasSummary ? (
             renderShellLines(
               block.summary!,
               dt.dim,
@@ -714,12 +714,15 @@ export default function ToolCardBlock({
             {block.status === 'exhausted'
               ? 'blocked (too many repeated failures)'
               : isWebFetch
-                ? block.status === 'error'
-                  ? 'fetch failed'
-                  : block.status === 'timeout'
-                    ? `timed out after ${block.timeoutMs ?? 15000}ms`
-                    : 'fetched'
-                : block.summary?.startsWith('Command cancelled') ||
+                ? block.status === 'cancelled'
+                  ? 'cancelled'
+                  : block.status === 'error'
+                    ? 'fetch failed'
+                    : block.status === 'timeout'
+                      ? `timed out after ${block.timeoutMs ?? 15000}ms`
+                      : 'fetched'
+                : block.status === 'cancelled' ||
+                    block.summary?.startsWith('Command cancelled') ||
                     block.summary?.includes('"cancelled":true')
                   ? 'cancelled'
                   : block.status === 'timeout'

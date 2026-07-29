@@ -15,7 +15,8 @@
         "docs/adr/0025-model-requested-live-emission.md",
         "docs/adr/0042-file-tool-semantics-and-write-safety.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
-        "docs/adr/0045-streaming-render-complete-block-commit.md"
+        "docs/adr/0045-streaming-render-complete-block-commit.md",
+        "docs/adr/0048-durable-user-turn-cancellation.md"
       ]
     },
     {

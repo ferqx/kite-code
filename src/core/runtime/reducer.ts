@@ -1026,6 +1026,20 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.cancelled': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      if (
+        existingCall.status === 'succeeded' ||
+        existingCall.status === 'failed' ||
+        existingCall.status === 'rejected' ||
+        existingCall.status === 'cancelled' ||
+        existingCall.status === 'exhausted'
+      ) {
+        return state;
+      }
+      const clearsMatchingInteraction =
+        state.interactions.kind !== 'idle' &&
+        state.interactions.kind !== 'awaiting_provider_action' &&
+        state.interactions.kind !== 'awaiting_provider_admission' &&
+        state.interactions.toolCallId === event.toolCallId;
       return {
         ...state,
         tools: {
@@ -1056,6 +1070,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           event.toolCallId,
           existingCall.name === 'task',
         ),
+        interactions: clearsMatchingInteraction ? { kind: 'idle' } : state.interactions,
       };
     }
 

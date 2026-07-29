@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Action } from '../src/app/tui/reducers/actions';
 import {
   admitInteractionModeTarget,
   fullModeUnavailableReason,
@@ -137,6 +138,7 @@ describe('SessionManager', () => {
       processEvent: (event) => {
         persisted.push(event);
       },
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId);
@@ -169,6 +171,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => persisted.push(event),
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId);
@@ -247,6 +250,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => persisted.push(event),
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId);
@@ -308,6 +312,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => persisted.push(event),
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId, 'focus on unfinished work');
@@ -376,6 +381,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: () => {},
+      cancelRun: () => [],
     };
 
     const snapshot = mgr.buildContextStatusSnapshot(threadId);
@@ -467,6 +473,7 @@ describe('SessionManager', () => {
       processEvent: (event) => {
         persisted.push(event);
       },
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId);
@@ -1095,6 +1102,49 @@ describe('SessionRuntime', () => {
     expect(rt.abortController).toBeNull();
     expect(rt.generator).toBeNull();
     expect(resolved).toBe(true);
+  });
+
+  test('abort persists and projects cancellation facts before signalling the controller', () => {
+    const rt = makeRuntime();
+    const ac = new AbortController();
+    const state = createInitialRuntimeState({
+      threadId: rt.threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+    });
+    const order: string[] = [];
+    const projected: string[] = [];
+    rt.agentLoopActive = true;
+    rt.abortController = ac;
+    rt.runtimeControl = {
+      getState: () => state,
+      processEvent: () => {},
+      cancelRun: () => {
+        order.push(ac.signal.aborted ? 'signal-first' : 'persist-first');
+        return [
+          {
+            type: 'tool.cancelled',
+            toolCallId: 'shell-1',
+            reason: 'Cancelled by user.',
+          },
+          {
+            type: 'turn.aborted',
+            turnId: state.turn.turnId,
+            reason: 'Cancelled by user.',
+            cause: 'user',
+          },
+        ];
+      },
+    };
+    Reflect.set(rt, '_activeDispatch', (action: Action) => {
+      if (action.type === 'RUNTIME_EVENT') projected.push(action.event.type);
+    });
+
+    rt.abort();
+
+    expect(order).toEqual(['persist-first']);
+    expect(projected).toEqual(['tool.cancelled', 'turn.aborted']);
+    expect(ac.signal.aborted).toBe(true);
   });
 
   test('abort wakes foregroundWake promise', () => {

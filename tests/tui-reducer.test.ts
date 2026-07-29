@@ -687,6 +687,57 @@ describe('eventReducer (blocks model)', () => {
       expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
     });
 
+    test('replayed user cancellation matches live cleanup without a turn notice', () => {
+      let s = dispatch(fresh(), { type: 'SET_RUNNING' });
+      s = dispatch(
+        s,
+        tcEvt('shell-1', 'shell_execute', {
+          command: 'bun test --dry-run 2>&1 | tail -20',
+        }),
+      );
+      s = dispatch(
+        s,
+        tcEvt('read-1', 'read_file', { path: 'src/core/runtime/runner.ts' }, 'queued'),
+      );
+      s = dispatch(
+        s,
+        tcEvt('read-2', 'read_file', { path: 'src/core/runtime/reducer.ts' }, 'queued'),
+      );
+
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'turn.aborted',
+          turnId: 'turn-1',
+          reason: 'Cancelled by user.',
+          cause: 'user',
+        },
+      });
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'turn.aborted',
+          turnId: 'turn-1',
+          reason: 'Cancelled by user.',
+          cause: 'user',
+        },
+      });
+
+      const blocks = flatBlocks(s);
+      expect(blocks).toContainEqual(
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: 'shell-1',
+          status: 'cancelled',
+          detail: 'Ran: bun test --dry-run 2>&1 | tail -20',
+        }),
+      );
+      expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
+      expect(
+        blocks.some((block) => block.kind === 'text' && block.content.includes('Run cancelled')),
+      ).toBe(false);
+    });
+
     test('appends tool_card block with running status', () => {
       // read_file is an exploration tool → pre-consolidated to tool_summary
       const s = dispatch(fresh(), tcEvt('c1', 'read_file', { path: 'a.txt' }));

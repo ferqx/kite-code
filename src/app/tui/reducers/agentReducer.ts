@@ -20,7 +20,7 @@ import {
  *  之前同步收尾，否则 spinner 状态被写入 scrollback 后永远不可恢复。
  *  Mark all queued/running subagent/tool_card/tool_summary blocks in the last turn as cancelled
  *  before running flips to false, so they don't get frozen into Static. */
-function cancelRunningBlocks(s: TuiState): TuiState {
+export function cancelRunningBlocks(s: TuiState): TuiState {
   const last = lastTurn(s);
   if (!last) return s;
   const now = Date.now();

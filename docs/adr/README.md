@@ -48,3 +48,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0044](0044-tool-spec-registry-single-path-cutover.md) | accepted   | 六个计算原语以 Registry 单路径收尾，删除从未接线的迁移 flag                         |
 | [0045](0045-streaming-render-complete-block-commit.md) | accepted   | Thought 等终态一次展示，文本按完整 Markdown 顶层块提交                              |
 | [0046](0046-atomic-streaming-component-progress.md)    | accepted   | 结构组件先闭合外壳，再按完整内部行渐进渲染                                         |
+| [0047](0047-thought-label-single-consumption.md)      | accepted   | Thought 标签在阶段边界单次消费，边界后的探索聚合不重复继承                         |
+| [0048](0048-durable-user-turn-cancellation.md)         | accepted   | 用户停止 turn 时先原子取消未终结工具，再传播 AbortSignal；task 保持可继续           |

@@ -11,6 +11,7 @@ import {
 import { MAX_TOOL_LINES } from '../components/ToolCardBlock';
 import { providerActionInput, providerAdmissionInput } from '../mcp/runtime-interrupts';
 import type { ConsolidatedToolEntry, FileChangeRecord, OutputBlock, TuiState } from '../types';
+import { cancelRunningBlocks } from './agentReducer';
 import {
   buildToolSummaryLine,
   isExplorationToolByName,
@@ -2498,6 +2499,10 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       return { ...state, status: { ...state.status, phase: 'building' } };
     case 'task.cancelled':
       return { ...state, status: { ...state.status, phase: 'building', pendingPlan: null } };
+    case 'turn.aborted': {
+      if (event.cause !== 'user') return state;
+      return finalizeLastTurnStreaming(cancelRunningBlocks(state));
+    }
     default:
       return state;
   }

@@ -2,7 +2,43 @@ import { applyApprovalGrant } from '@/core/harness/tool-policy';
 import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
-import { getActiveTask, type RuntimeState } from './state';
+import { getActiveTask, type RuntimeState, type ToolCallStatus } from './state';
+
+const TERMINAL_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
+  'succeeded',
+  'failed',
+  'rejected',
+  'cancelled',
+  'exhausted',
+]);
+
+/**
+ * Build the durable facts for stopping the current turn.
+ *
+ * The active task remains resumable. Every unfinished tool call receives a
+ * result-pairing cancellation event before the turn is marked aborted.
+ */
+export function eventsForRunCancellation(
+  state: Readonly<RuntimeState>,
+  reason = 'Cancelled by user.',
+): RuntimeEvent[] {
+  const toolEvents: RuntimeEvent[] = Object.values(state.tools.calls)
+    .filter((call) => !TERMINAL_TOOL_STATUSES.has(call.status))
+    .map((call) => ({
+      type: 'tool.cancelled',
+      toolCallId: call.toolCallId,
+      reason,
+    }));
+  return [
+    ...toolEvents,
+    {
+      type: 'turn.aborted',
+      turnId: state.turn.turnId,
+      reason,
+      cause: 'user',
+    },
+  ];
+}
 
 /** 生成取消方案审核时的事件，统一处理显式拒绝和 Esc/取消动作。 */
 function planReviewCancelledEvents(
@@ -379,6 +415,7 @@ export function eventsForRuntimeAction(
         type: 'turn.aborted',
         turnId: state.turn.turnId,
         reason: `Required MCP provider '${interaction.providerId}' admission was cancelled.`,
+        cause: 'user',
       },
     ];
   }

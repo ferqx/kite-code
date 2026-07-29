@@ -658,6 +658,8 @@ export interface TurnAbortedEvent {
   type: 'turn.aborted';
   turnId: string;
   reason: string;
+  /** Distinguishes an explicit user stop from an unexpected runtime failure. */
+  cause?: 'user' | 'error';
 }
 
 // ── 用户消息事件 / User message events ──

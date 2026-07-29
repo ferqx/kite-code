@@ -878,6 +878,40 @@ describe('reduceRuntimeState — tool lifecycle', () => {
   });
 
   // 验证 tool.progress 不修改 state
+  test('tool.cancelled clears its interaction and is idempotent', () => {
+    let state = reduceRuntimeState(makeInitialState(), {
+      type: 'tool.queued',
+      toolCallId: 'tool-cancel',
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'approval.requested',
+      interactionId: 'approval-cancel',
+      toolCallId: 'tool-cancel',
+      approval: makeToolApproval('bun test'),
+    });
+
+    const cancelled = reduceRuntimeState(state, {
+      type: 'tool.cancelled',
+      toolCallId: 'tool-cancel',
+      reason: 'Cancelled by user.',
+    });
+    const replayed = reduceRuntimeState(cancelled, {
+      type: 'tool.cancelled',
+      toolCallId: 'tool-cancel',
+      reason: 'Cancelled by user.',
+    });
+
+    expect(cancelled.interactions).toEqual({ kind: 'idle' });
+    expect(cancelled.tools.calls['tool-cancel']!.status).toBe('cancelled');
+    expect(cancelled.tools.queue).toEqual([]);
+    expect(cancelled.transcript.messages.filter((message) => message.kind === 'tool')).toHaveLength(
+      1,
+    );
+    expect(replayed).toEqual(cancelled);
+  });
+
   test('tool.progress does not modify state', () => {
     const state = makeInitialState();
     const event: RuntimeEvent = {

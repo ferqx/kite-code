@@ -14,7 +14,11 @@ import type { ContextStatusSnapshot } from '@/core/model/context-status';
 import { createChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
-import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
+import {
+  type RunRuntimeAgentInput,
+  type RuntimeKernelControl,
+  runRuntimeAgent,
+} from '@/core/runtime/agent';
 import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import {
@@ -111,10 +115,7 @@ export class SessionRuntime {
   mcpRecoveryController: Pick<McpController, 'recover'> | null;
 
   generator: AsyncGenerator<RuntimeEvent> | null = null;
-  runtimeControl: {
-    getState: () => Readonly<RuntimeState>;
-    processEvent: (event: RuntimeEvent) => void;
-  } | null = null;
+  runtimeControl: RuntimeKernelControl | null = null;
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
   notifyInterrupt: (() => void) | null = null;
 
@@ -125,6 +126,7 @@ export class SessionRuntime {
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
   private _pendingInterrupt: InterruptPayload | null = null;
   private _pendingResolve: ((action: UserAction) => void) | null = null;
+  private _activeDispatch: ((action: Action) => void) | null = null;
   private _deltaBuffer: {
     dispatch: ((action: Action) => void) | null;
     text?: Extract<RuntimeEvent, { type: 'model.text_delta' }>;
@@ -149,16 +151,36 @@ export class SessionRuntime {
 
   abort(): void {
     this._flushModelDeltas();
-    // 必须先 resolve 挂起的中断，否则 generator 永远卡在 requestAction 的 Promise 上，
-    // runAgent 的 finally 块无法执行，checkpointer.close() 永远不会被调用，导致 DB 句柄泄漏
-    this.resolveInterrupt({ type: 'cancel' as const });
-    this.abortController?.abort();
-    this.abortController = null;
-    this.agentLoopActive = false;
-    this.generator = null;
-    // 如果有挂起的后台中断等待，解除阻塞
-    this._foregroundWake?.();
-    this._foregroundWake = null;
+    try {
+      const cancellationEvents = this.runtimeControl?.cancelRun('Cancelled by user.') ?? [];
+      for (const event of cancellationEvents) {
+        if (this._activeDispatch) {
+          this._routeRuntimeEvent(event, this._activeDispatch);
+        } else {
+          this._pushToBuffer(event);
+        }
+      }
+    } catch (error) {
+      const event: RuntimeEvent = {
+        type: 'run.error',
+        message: `Failed to persist cancellation: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        recoverable: false,
+      };
+      if (this._activeDispatch) this._routeRuntimeEvent(event, this._activeDispatch);
+      else this._pushToBuffer(event);
+    } finally {
+      // Resolve a suspended interaction before aborting so the generator can
+      // leave requestAction and close its RuntimeStore handle.
+      this.resolveInterrupt({ type: 'cancel' as const });
+      this.abortController?.abort();
+      this.abortController = null;
+      this.agentLoopActive = false;
+      this.generator = null;
+      this._foregroundWake?.();
+      this._foregroundWake = null;
+    }
   }
 
   clearBuffer(): void {
@@ -279,6 +301,7 @@ export class SessionRuntime {
       this.agentLoopActive = true;
       this.abortController = abortController;
       this.generator = generator;
+      this._activeDispatch = deps.dispatch;
       for await (const event of generator) {
         if (isSilentCancellationMismatch(event)) continue;
         this._routeRuntimeEvent(event, deps.dispatch);
@@ -338,6 +361,7 @@ export class SessionRuntime {
       this.agentLoopActive = false;
       this.abortController = null;
       this.generator = null;
+      this._activeDispatch = null;
       if (this._foreground) {
         deps.provider.reset();
       }

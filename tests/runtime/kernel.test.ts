@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildContextProjection } from '../../src/core/model/context-projection';
+import { eventsForRunCancellation } from '../../src/core/runtime/actions';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
 import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
@@ -1157,6 +1158,84 @@ test('runRuntimeLoop persists legacy recovery failure events as one atomic batch
     ['subagent.failed', 'tool.finished'],
     ['run.completed'],
     ['turn.completed'],
+  ]);
+  kernel.close();
+});
+
+test('run cancellation atomically settles running and queued tools while keeping the task resumable', () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'cancel-run',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  kernel.processEvents([
+    {
+      type: 'user.message_appended',
+      messageId: 'user-1',
+      content: 'inspect the runtime',
+    },
+    {
+      type: 'model.responded',
+      messageId: 'model-1',
+      toolCalls: [
+        { id: 'shell-1', name: 'shell_execute', args: { command: 'bun test' } },
+        { id: 'read-1', name: 'read_file', args: { path: 'src/core/runtime/agent.ts' } },
+      ],
+    },
+    {
+      type: 'tool.queued',
+      toolCallId: 'shell-1',
+      modelMessageId: 'model-1',
+      ordinal: 0,
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+    },
+    {
+      type: 'tool.queued',
+      toolCallId: 'read-1',
+      modelMessageId: 'model-1',
+      ordinal: 1,
+      name: 'read_file',
+      args: { path: 'src/core/runtime/agent.ts' },
+    },
+    { type: 'tool.started', toolCallId: 'shell-1' },
+  ]);
+  const activeTaskId = kernel.getState().activeTaskId;
+
+  const events = eventsForRunCancellation(kernel.getState());
+  kernel.processEventBatch(events);
+
+  expect(events.map((event) => event.type)).toEqual([
+    'tool.cancelled',
+    'tool.cancelled',
+    'turn.aborted',
+  ]);
+  expect(kernel.getState().tools.queue).toEqual([]);
+  expect(kernel.getState().tools.active).toEqual([]);
+  expect(kernel.getState().tools.calls['shell-1']!.status).toBe('cancelled');
+  expect(kernel.getState().tools.calls['read-1']!.status).toBe('cancelled');
+  expect(kernel.getState().activeTaskId).toBe(activeTaskId);
+  expect(
+    kernel
+      .getState()
+      .transcript.messages.filter((message) => message.kind === 'tool')
+      .map((message) => message.toolCallId),
+  ).toEqual(['shell-1', 'read-1']);
+  expect(
+    kernel
+      .loadEvents('cancel-run')
+      .slice(-3)
+      .map(({ event }) => event),
+  ).toMatchObject([
+    { type: 'tool.cancelled', toolCallId: 'shell-1' },
+    { type: 'tool.cancelled', toolCallId: 'read-1' },
+    { type: 'turn.aborted', cause: 'user' },
   ]);
   kernel.close();
 });

@@ -66,7 +66,7 @@
 
 29. **文件工具渲染**：`renderFileSummary` 自动区分 diff 格式（删除行红底 `diffRemovedBg`、新增行绿底 `diffAddedBg`、上下文行无背景）和纯内容格式。write_file 新建/追加时所有内容行视为新增全绿底，内容未变覆写保持 dim。文件内容行自动语法高亮：行号前缀（`LINE_RE`）走普通 `<Text>`，代码正文走 `<SyntaxHighlight code=... language=.../>`，语言由 `detectLanguage(path)` 从扩展名推断。`...` 分隔符不做高亮。
 
-30. **取消时只统计实际开始的探索项**：TUI 取消收尾时，仍为 `queued`、从未收到 `tool.started` 的探索项从聚合投影移除，不得转成看似已完成的 `read N files` 等统计；纯工具聚合因此为空时整块移除，已有 reasoning 或旁白仍保留。已进入 `running` 的探索项保留并标记为 cancelled。独立工具卡取消时必须从原始参数补齐终态 `detail`，Bash 卡片不得丢失原执行指令。
+30. **取消时只统计实际开始的探索项**：TUI 取消收尾时，仍为 `queued`、从未收到 `tool.started` 的探索项从聚合投影移除，不得转成看似已完成的 `read N files` 等统计；纯工具聚合因此为空时整块移除，已有 reasoning 或旁白仍保留。已进入 `running` 的探索项保留并标记为 cancelled。独立工具卡取消时必须从原始参数补齐终态 `detail`，Bash 卡片不得丢失原执行指令，也不得把取消误渲染为 `exit: 0`；纯取消摘要不重复充当命令输出。带 `cause=user` 的 `turn.aborted` 必须复用同一清理投影，不追加独立的整轮取消提示，保证实时界面与事件重放一致。
 
 
 ## 设计文档
