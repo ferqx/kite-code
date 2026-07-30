@@ -48,6 +48,12 @@ TUI、Headless CLI、恢复和 Sub-agent 使用同一失败与降级语义。
 - `tests/runtime/stability.test.ts`
 - Sub-agent、PTY、故障注入和 soak tests
 
+## 共享 schema ownership
+
+本计划是 `ResourceBudgetV1`、`RuntimeSchedulingPolicyV1` 和 terminal/failure reason 的
+首个实现计划，Runtime 是规范 owner。2A 只能消费实际 Runtime 导出的 canonical scheduling snapshot；
+1B 只拥有 process-tree 平台 enforcement 投影，不得复制预算默认值、scheduler barrier 或终态。
+
 ## 实施步骤
 
 ### 任务执行矩阵
@@ -438,6 +444,9 @@ ADR-0049/ADR-0050 的调度/客户端投影在 upgrade、feature disable 和 art
 | soak 不可重复 | 固定 fixture、seed、预算和环境版本 |
 
 ## 完成证据
+
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 - ResourceBudget conformance；
 - scheduling policy snapshot/digest conformance；

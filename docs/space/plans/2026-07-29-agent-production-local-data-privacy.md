@@ -45,6 +45,12 @@
 - MCP/model data policy 与迁移测试
 - 相关 active、book、ADR 和 documentation map
 
+## 共享 schema ownership
+
+本计划是 `ProviderDataPolicyV1` 的首个实现计划，Security & Privacy 是规范 owner。2A 只消费
+本计划导出的 canonical snapshot/digest，3 只消费无正文 mapper；两者不得复制或扩展 schema。
+本计划同时拥有 session logging policy 和 remote MCP egress permit 的首个 schema 实现。
+
 ## 实施步骤
 
 ### 任务执行矩阵
@@ -416,6 +422,9 @@ interface RemoteMcpEgressPermitV1 {
 | content opt-in 成为隐性默认 | artifact ceiling + 用户显式操作 + project deny |
 
 ## 完成证据
+
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 完成记录至少附：
 

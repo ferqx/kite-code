@@ -33,6 +33,12 @@ Contract 依赖：
 - 产品 dogfood 和人工 review 流程
 - benchmark 版本、污染和隐私治理
 
+## 共享 schema ownership
+
+本计划是 `AgentTaskCaseV1` 的首个实现计划，Evaluation/Product 是规范 owner，Release 只审核其
+Evidence adapter 与 Gate identity。case、oracle、scorer 或 report schema 变化必须生成新 suite
+identity，不得由 2A 平行定义。
+
 ## 任务模型
 
 建议定义：
@@ -325,6 +331,9 @@ limited 与 GA 分别设置：
 | 分数驱动过拟合 | holdout、污染登记、版本化 retire |
 
 ## 完成证据
+
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-evaluation.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 - `AgentTaskCaseV1` schema 和 suite digest；
 - fixture builder 与 oracle conformance；

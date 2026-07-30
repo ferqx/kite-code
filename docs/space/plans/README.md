@@ -43,6 +43,20 @@
 文件、依赖和验证。尚未确定执行人、branch 或 baseline commit 时，计划必须保持 `draft`；
 激活 Task 前再写入可审计 execution binding，不得用虚构人员或占位 identity 越过门禁。
 
+每个 Task 的完成记录可汇总到同一 Phase 文件，但计划必须写出具体
+`docs/space/execution/completed/YYYY-MM-DD-*.md` 目标路径，完成记录内按 Task ID 分节，并逐项
+记录实现/测试/文档影响、实际 commit/artifact、运行命令与结果、未运行项、风险、Gate、偏差和
+rollback。`N/A` 必须在同一字段内用括号说明原因。
+
+2026-07-29 Agent 生产就绪计划组额外运行：
+
+```bash
+bun run scripts/check-plan-execution-matrix.ts
+```
+
+该门禁检查矩阵与正文 Task 一一对应、`dependsOn` 稳定语法、跨计划引用、依赖环、milestone
+唯一 producer、完成记录目标以及 D-01–D-14 的必填字段。`bun run check:docs` 已包含该门禁。
+
 ## 生命周期
 
 1. 创建：识别到需要多步骤实施的任务时，从 backlog 或审查中提取

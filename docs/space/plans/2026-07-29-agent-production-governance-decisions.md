@@ -1,6 +1,6 @@
 # Agent 生产化 Phase 0：治理、决策与 ADR 计划
 
-状态：draft
+状态：active
 创建：2026-07-29
 优先级：P0
 依赖：
@@ -30,6 +30,14 @@
 - `docs/space/plans/index.md`
 - 发布决策记录的规范位置和模板
 - Owner、backup、升级路径和计划完成责任
+
+## 当前进度
+
+- Task 0.1–0.4 的工作区产出已建立并通过定向门禁，状态保持 `in_progress`，等待形成可审计
+  commit/artifact 与评审记录后再标记完成；
+- D-02/D-08/D-09/D-11/D-12/D-13/D-14 已关闭，ADR-0051–0060 已接受；
+- Task 0.5 等待 Task 0.1–0.4 形成真实 commit/artifact 后执行最终评审；
+- 当前不产生 `MS:M0`，所有非 Phase 0 子计划保持 `draft` 且没有 execution binding。
 
 ## 需要关闭的决策
 
@@ -74,7 +82,8 @@
 
 - 新增一份不含个人敏感联系方式的决策记录，使用可审计团队 identity；
 - 为 Capability、Release、Security & Privacy、Platform、Evaluation/Product、
-  Incident Commander 指定 primary/backup；
+  Incident Commander 指定 primary；没有真实 backup 时显式登记 `none (single-maintainer)`，
+  不得伪造第二身份；
 - 每项决策记录：
   `id/status/owner/backup/dueMilestone/blockingPhase/decision/evidence/approvedAt`；
 - 联系电话、私人邮箱等值保留在组织内部系统，仓库只保存值班入口或团队别名。
@@ -101,6 +110,7 @@
 7. compaction 离线质量门禁与 route qualification；
 8. Agent task/diff/test/review 作为产品验收结果；
 9. 可选 disable-only signed rollout manifest。
+10. single-maintainer 角色合并、显式无 backup 和 external release 前第三方安全评审。
 
 实施约束：
 
@@ -124,6 +134,7 @@ bun run check:docs-impact
 | --- | --- | --- |
 | `ReleaseProfileV1` | Release + Security | 2A |
 | `ProviderDataPolicyV1` | Security & Privacy | 1A |
+| `ExecutionBoundaryV1` | Platform + Security & Privacy | 1B |
 | `ResourceBudgetV1` | Platform | 1C |
 | `RuntimeSchedulingPolicyV1` | Runtime | 1C |
 | terminal/failure reason | Runtime | 1C |
@@ -189,6 +200,10 @@ milestone producer。
 - Runtime/Capability Owner；
 - Evaluation/Product Owner。
 
+ADR-0060 的 single-maintainer 模式允许上述角色由 `github:@ferqx` 同一人承担；签署必须按角色
+逐项留下结论，不能把一次笼统批准复制成五份。M0 只允许内部实现。独立第三方安全评审延后到
+`MS:LIM-APPROVED` 前，且仍是 external release 的硬门禁。
+
 必须逐项确认：
 
 - 当前 execution binding 基线是
@@ -207,16 +222,16 @@ milestone，也不得为非 Phase 0 Task 创建 execution binding。
 
 ## 验收条件
 
-- [ ] 六类 Owner 和 backup 已具名；
-- [ ] RFC §24 的 14 项决策全部登记；
-- [ ] Phase 0 blocking 决策已关闭；
-- [ ] 必要 ADR 已接受或明确由哪个子计划先完成；
-- [ ] 共享 schema ownership 无冲突；
-- [ ] 所有子计划有可解析依赖、验证、rollback 和完成记录入口；
-- [ ] execution binding 与合并增量复核基线一致；
-- [ ] 下一批即将启动的 Task 有真实 execution binding，远期 Task 不要求预绑定；
-- [ ] `bun run check:docs` 通过；
-- [ ] `bun run check:docs-impact` 通过。
+- [x] 六类 Owner 已具名；不存在的 backup 已显式登记为 `none (single-maintainer)`；
+- [x] RFC §24 的 14 项决策全部登记；
+- [x] Phase 0 blocking 决策已关闭；
+- [x] 必要 ADR 已接受；
+- [x] 共享 schema ownership 无冲突；
+- [x] 所有子计划有可解析依赖、验证、rollback 和完成记录入口；
+- [x] execution binding 与合并增量复核基线一致；
+- [x] 下一批即将启动的 Task 有真实 execution binding，远期 Task 不要求预绑定；
+- [x] `bun run check:docs` 通过；
+- [x] 工作区级 documentation-map 影响检查与 `bun run check:docs-impact` 通过。
 
 ## 回滚
 
@@ -240,7 +255,9 @@ Phase 0 只改文档和决策，不改生产行为。若某项决策被后续证
 
 ## 完成后的文档动作
 
-- 在 `docs/space/execution/completed/` 创建 Phase 0 完成记录；
+- 在 `docs/space/execution/completed/2026-07-30-agent-production-governance.md` 创建 Phase 0
+  完成记录；记录内按 Task ID 分节，逐项填写 commit/artifact、命令结果、未运行项、文档影响、
+  风险、Gate 和计划偏差；
 - 更新本计划和 `plans/index.md` 为 `archived`；
 - 在 roadmap 标记 M0 完成；
 - 后续当前行为变化由对应子计划更新 active 文档，本计划不提前修改 active 事实。

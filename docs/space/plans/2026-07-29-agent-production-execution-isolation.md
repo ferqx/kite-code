@@ -44,6 +44,12 @@
 - sandbox/network/worktree conformance tests
 - 三平台 artifact smoke
 
+## 共享 schema ownership
+
+本计划是 `ExecutionBoundaryV1` 的首个实现计划，Platform 与 Security & Privacy 共同审批，
+Platform 是规范 producer。它只投影 2A `ReleaseProfileV1` 的 process-tree limit，并拥有平台
+enforcement；不得复制 2A 的预算默认值/composition 或 1C 的 reservation、waiter 和终态语义。
+
 ## 实施步骤
 
 ### 任务执行矩阵
@@ -363,6 +369,9 @@ Runtime/MCP/Skill 前失败。
 | protected path 与 Git controller 冲突 | 模型工具 gate 与 App typed controller 分权 |
 
 ## 完成证据
+
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-execution-isolation.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 - 三平台 backend 支持矩阵；
 - 真实文件/network adversarial 报告；

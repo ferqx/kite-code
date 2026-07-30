@@ -49,6 +49,12 @@ metadata 通过 allowlist mapper 构造生产指标。
 - `.github/workflows/` 和 Release Evidence
 - active/book/ADR/map
 
+## 共享 schema ownership
+
+本计划是 production metrics allowlist 的首个实现计划，Security & Privacy 与 Operations 是规范
+owner。它只消费 1A 的无正文 metadata mapper 和 1C 的稳定 reason code；不得复制
+`ProviderDataPolicyV1`、terminal/failure schema 或建立通用 event serializer。
+
 ## 实施步骤
 
 ### 任务执行矩阵
@@ -222,7 +228,8 @@ SLO：
 至少包含：
 
 1. detection/classification；
-2. Owner/backup 与升级路径；
+2. Owner、真实 backup 或显式 `none (single-maintainer)` 与升级路径；single-maintainer
+   不可联系时 cohort=0 且恢复批准 blocked；
 3. containment；
 4. evidence preservation；
 5. credential/key rotation；
@@ -336,10 +343,13 @@ SLO：
 | 低基数字段变高基数 | schema allowlist + cardinality budget |
 | exporter 阻塞退出 | bounded queue/flush timeout |
 | 无数据 dashboard 显示健康 | explicit no-data 状态，Gate 阻断 |
-| 告警无人响应 | Owner/backup/on-call 在 Phase 0 绑定 |
+| 告警无人响应 | Phase 0 绑定 Owner/on-call；single-maintainer 无 backup 时不可联系即 cohort=0 |
 | 演练只验证按钮 | 真实 artifact、route、credential 和恢复检查 |
 
 ## 完成证据
+
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-observability-operations.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 - metric schema/allowlist；
 - privacy/cardinality tests；

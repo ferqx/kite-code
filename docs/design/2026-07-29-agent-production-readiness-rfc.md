@@ -1311,7 +1311,9 @@ SLO 由 release profile 和 capability policy 版本化，不能散落在代码�
 
 ### 16.1 责任角色与决策闭环
 
-进入实施计划前必须把以下角色绑定到可联系的具体负责人和 backup，不能只写“团队负责”：
+进入实施计划前必须把以下角色绑定到可联系的具体负责人，不能只写“团队负责”。多维护者模式
+还必须绑定真实 backup；单人维护模式必须显式写 `none (single-maintainer)`，不得把同一人的
+另一个账号当作 backup：
 
 | 角色 | 最小职责 |
 | --- | --- |
@@ -1322,10 +1324,13 @@ SLO 由 release profile 和 capability policy 版本化，不能散落在代码�
 | Evaluation/Product Owner | 任务集、oracle、用户试用、成功阈值和 benchmark contamination |
 | Incident Commander | 事故分级、遏制、沟通、恢复批准和 postmortem |
 
-同一人可以承担多个角色，但 G0 例外不存在，外部发布至少要求 Release Owner 与 Security &
-Privacy Owner 独立确认。每个待确认决策必须记录 `owner`、`due milestone`、`blocking
-phase`、结论、证据链接和 ADR/RFC 影响；到期未决按最严格默认值处理，不允许实施者现场
-猜测。
+同一人可以承担多个角色，但 G0 例外不存在。多维护者模式的外部发布至少要求 Release Owner
+与 Security & Privacy Owner 由不同真人独立确认；按 ADR-0060 登记的单人维护模式允许同一
+维护者完成 Phase 0/M0，但 `MS:LIM-APPROVED` 前必须取得由不同真人完成、绑定 candidate
+behavior identity 的第三方安全评审。维护者不能批准自己的 G0 例外，第三方评审缺失、过期或
+identity mismatch 时 external release fail closed。每个待确认决策必须记录 `owner`、`due
+milestone`、`blocking phase`、结论、证据链接和 ADR/RFC 影响；到期未决按最严格默认值处理，
+不允许实施者现场猜测。
 
 ### 16.2 事故响应
 
@@ -1466,7 +1471,8 @@ interaction，或把 late tool terminal 重新投影为 active。
 
 - 审核首发本地单用户部署形态、release capability 列表、maturity/rollout 拆分、字段组合
   规则、执行边界、资源预算、Provider 数据边界和日志隐私。
-- 为所有责任角色指定具体 owner/backup，给待确认决策设置 blocking phase 和到期时间。
+- 为所有责任角色指定具体 owner；真实 backup 不存在时按 ADR-0060 显式登记
+  `none (single-maintainer)`，给待确认决策设置 blocking phase 和到期时间。
 - 新增必要 ADR。
 - 将本 RFC 拆为多个 `docs/space/plans/`，每个计划有独立验证和 rollback。
 
@@ -1490,16 +1496,17 @@ interaction，或把 late tool terminal 重新投影为 active。
   smoke。
 - Phase 3 运营 evidence 完成后再执行 2A-RC，生成 candidate payload/manifest，完成 actual
   artifact smoke、rollback rehearsal 和最终 Gate；Phase 3 前不得生成可发布结论。
-- 2A-RC 通过只产生 limited candidate；还必须经过独立人工发布评审，核对 artifact
-  identity、Owner、支持矩阵、已知限制和可联系 cohort，批准后才能进入基础 external
-  limited cohort。
+- 2A-RC 通过只产生 limited candidate；还必须经过人工发布评审，核对 artifact identity、
+  Owner、支持矩阵、已知限制和可联系 cohort。single-maintainer 模式还必须附加不同真人完成的
+  第三方安全评审；完整批准后才能进入基础 external limited cohort。
 
 ### Phase 3：结构化可观测性
 
 - 建立无正文 metrics、dashboard、alert 和 canary cohort。
 - 用内部 dogfood 形成 SLO baseline。
-- limited candidate 经独立人工评审后，仅以基础能力运行预注册的 limited SLO 窗口；无数据、
-  样本不足或 G0/G1 时保持 blocked。只有该窗口通过，Phase 4/5 的 external canary 才能开始。
+- limited candidate 经人工发布评审后，仅以基础能力运行预注册的 limited SLO 窗口；
+  single-maintainer 模式的评审必须包含第三方安全评审。无数据、样本不足或 G0/G1 时保持
+  blocked。只有该窗口通过，Phase 4/5 的 external canary 才能开始。
 - 明确 telemetry consent 和 enterprise admin policy。
 - 完成事故 runbook、联系人/值班入口、遏制/credential rotation/恢复演练并写入 evidence。
 - 只有需要分钟级外部 kill switch 时才实现签名的 disable-only Rollout Manifest。
@@ -1580,6 +1587,7 @@ RFC 批准后至少评估：
 10. 父子 Agent 累计资源预算、tool/shell invocation permit、process-tree 上限、有界取消和
     统一 failure-mode terminal 语义。
 11. 模型 Provider/远程 MCP 的数据分类、接收方独立 consent 与 route data policy 资格。
+12. 单人维护模式的角色合并、显式无 backup 和 external release 前第三方安全评审。
 
 若既有 ADR 已覆盖其中部分，只新增补充或替代 ADR，不改写历史结论。
 
@@ -1604,7 +1612,8 @@ RFC 批准后至少评估：
 - rollout manifest 的 optional、disable-only 和 mandatory-admin fail-closed 原则获得确认；
 - telemetry consent 与 canary 纳入条件获得确认；
 - 分层 Agent task benchmark、diff/test/review 结果门禁获得确认；
-- 每个 Phase 有具名 owner/backup、测试、failure fallback、rollback、事故 runbook 和文档影响；
+- 每个 Phase 有具名 owner、真实 backup 或显式 single-maintainer 缺席声明、测试、failure
+  fallback、rollback、事故 runbook 和文档影响；
 - P0 不被后续 feature 开发插队绕过。
 
 ### 23.2 需求—设计—证据追踪
@@ -1622,7 +1631,7 @@ RFC 批准后至少评估：
 | 模型/MCP 正常请求是否越界 | Provider Data Policy、数据分类、接收方独立 consent、最小化 | route policy digest、privacy approval、egress conformance |
 | 制品证据是否串包 | behavior digests、artifact identity、deterministic gate | manifest/evidence digest match、artifact smoke、provenance |
 | 出故障能否止损 | capability rollback、kill switch、统一 fallback、事故 runbook | rollback/incident rehearsal、稳定 reason code、恢复复测 |
-| 谁来决定和负责 | Owner/backup、blocking phase、双重批准 | 决策记录、批准记录、联系人和值班/通知入口 |
+| 谁来决定和负责 | Owner/真实 backup 或 single-maintainer 声明、blocking phase、双人批准或 external 前第三方评审 | 决策记录、批准记录、reviewer identity、联系人和值班/通知入口 |
 | 结论适用于哪里 | 本地单用户 TUI/前台 Headless CLI 支持边界 | 入口/platform/route 分项 evidence；其他拓扑保持 No-Go |
 
 实施计划拆分后，每一行必须能反向定位到具体 plan、测试 job、evidence 字段、owner 和

@@ -33,7 +33,8 @@ capability 同理。
 
 - `MS:LIM-APPROVED` 和 `MS:LIMITED-SLO` 已产生；
 - 1A–3 的 P0 没有回归；
-- Owner/backup/on-call/rollback 可用；
+- Owner、真实 backup 或显式 `none (single-maintainer)`、on-call/rollback 可用；没有 backup
+  时维护者不可联系即阻断发布和扩面；
 - 所有 G0/G1 关闭；
 - payload/detached manifest/evidence 可重放；
 - route/platform/capability identity 与 evidence freshness 可验证。
@@ -271,6 +272,9 @@ RFC 保持 accepted 历史设计；当前行为只由源码、测试、active �
 | 回滚删除历史状态 | profile 只影响新 admission，原始事实保留 |
 
 ## 完成证据
+
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-ga.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 - optional Auto shadow/live/maturity 报告（仅在实施 6A 时）；
 - GASelection decision；

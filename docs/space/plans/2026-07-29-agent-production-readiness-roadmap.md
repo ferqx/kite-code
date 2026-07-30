@@ -151,7 +151,8 @@ interface TaskExecutionBinding {
 }
 ```
 
-- `executor` 使用可审计团队 identity，不在计划中虚构个人；
+- `executor` 使用可审计 identity，不在计划中虚构个人；single-maintainer 模式不得把维护者的
+  另一个账号伪装成 backup；
 - branch/commit 必须在实际工作开始时绑定，不能预写不存在的引用；
 - 每次只能激活所有 `dependsOn` 已满足的 Task；
 - 实现偏离矩阵时先更新计划/ADR，再继续代码；
@@ -183,7 +184,7 @@ Task 区间。
 | `MS:3-OPS-READY` | Task 3.9 运营就绪记录 |
 | `MS:2A-RC` | Task 2A.11 RC Gate |
 | `MS:M2-CANDIDATE` | M2 candidate Gate |
-| `MS:LIM-APPROVED` | M2 后独立人工发布评审记录 |
+| `MS:LIM-APPROVED` | M2 后人工发布评审记录；single-maintainer 模式必须包含独立第三方安全评审 |
 | `MS:LIMITED-SLO` | Task 3.10 limited cohort SLO Gate |
 | `MS:4-INTERNAL-AUTO-FRESH` | Task 4.9 internal rollout evidence |
 | `MS:4-MANUAL-STABLE` | Task 4.11 manual maturity Gate |
@@ -273,7 +274,7 @@ production Release Evidence。
 
 完成条件：
 
-- Phase 0 的 Owner、backup 和决策记录建立；
+- Phase 0 的 Owner、真实 backup 或显式 `none (single-maintainer)` 和决策记录建立；
 - 必要 ADR 已接受；
 - 各子计划的边界、依赖和验证命令获得确认；
 - 未决项有到期 milestone，默认值为最严格配置。
@@ -303,9 +304,11 @@ M1 只授权团队内部 dogfood，不产生外部发布结论。
 - rollback 和事故 runbook 演练通过；
 - 所有适用 G0–G4 通过且无普通 waiver。
 
-M2 只产生 `MS:M2-CANDIDATE`，允许提交独立 `limited-production` 人工发布评审。该评审
-验证 artifact identity、Owner、支持矩阵、已知限制和 cohort 联系方式；批准记录产生
-`MS:LIM-APPROVED`。没有该记录不得进入任何 external cohort。
+M2 只产生 `MS:M2-CANDIDATE`，允许提交 `limited-production` 人工发布评审。该评审验证
+artifact identity、Owner、支持矩阵、已知限制和 cohort 联系方式；single-maintainer 模式还
+必须包含由不同真人完成的第三方安全评审，绑定 candidate payload/manifest/profile、平台、
+route、安全边界和 findings。维护者不能自批 G0 例外。完整批准记录产生
+`MS:LIM-APPROVED`；没有该记录不得进入任何 external cohort。
 
 ### M2.5：Limited SLO 资格
 

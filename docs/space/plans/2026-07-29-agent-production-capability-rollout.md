@@ -426,6 +426,9 @@ Skill `allowed-tools`/dependencies 只表达 ceiling，不预批准工具。
 
 ## 完成证据
 
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-capability-rollout.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
+
 - per-capability manifest/evidence/Gate；
 - Verification lifecycle report；
 - MCP write route/recovery matrix；

@@ -40,6 +40,13 @@ RC Assembly 依赖：Phase 1A、1B、1C、Phase 2B 和 Phase 3
 - artifact packaging/version/changelog/security docs
 - active、book、ADR 和 documentation map
 
+## 共享 schema ownership
+
+本计划是 `ReleaseProfileV1`、`ReleaseManifestV1` 和 `ReleaseEvidenceV1` 的首个实现计划，Release
+与 Security 分别按治理表审批。它只消费 1A 的 `ProviderDataPolicyV1` 和 1C 的
+`RuntimeSchedulingPolicyV1` canonical snapshot/digest，不得复制 producer schema 或 Runtime
+安全语义。
+
 ## 实施步骤
 
 ### 任务执行矩阵
@@ -369,7 +376,9 @@ producer；任一前置 Task 或 foundation Gate 失败时不得写入。
 ### 2A-RC：Release Candidate Assembly
 
 Task 2A.8、2A.10、2A.11 完成；Task 2A.9 只有在决策要求分钟级远程 kill switch 时才进入
-该里程碑。Task 2A.11 是 `MS:2A-RC` 的唯一 producer。
+该里程碑。Task 2A.11 是 `MS:2A-RC` 的唯一 producer。该 milestone 只表示 candidate
+assembly，不产生 `MS:LIM-APPROVED`；ADR-0060 的 single-maintainer 模式必须在后续人工发布
+评审中附加由不同真人完成、绑定 candidate identity 的第三方安全评审。
 
 ## 验收条件
 
@@ -386,6 +395,8 @@ Task 2A.8、2A.10、2A.11 完成；Task 2A.9 只有在决策要求分钟级远�
 - [ ] dependency/license/SBOM/provenance 与三平台 artifact smoke 完成；
 - [ ] schema upgrade/rollback rehearsal 在 1C 完成后的 RC 阶段通过；
 - [ ] limited artifact 只在 Phase 1A–3 与 2B Gate 全部满足后由 Task 2A.11 生成。
+- [ ] single-maintainer external release 在 `MS:LIM-APPROVED` 前有有效第三方安全评审，且
+  维护者没有自批 G0 例外。
 
 ## 回滚
 
@@ -410,6 +421,9 @@ Task 2A.8、2A.10、2A.11 完成；Task 2A.9 只有在决策要求分钟级远�
 | release profile 侵入 Runtime state | composition root 注入，不持久化 maturity |
 
 ## 完成证据
+
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-release-control.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 - limited candidate manifest/evidence；
 - Gate replay 输出；

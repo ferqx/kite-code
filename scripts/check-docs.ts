@@ -28,5 +28,13 @@ for (const directory of ['design', 'deprecated', 'adr']) {
   if (!existsSync(join(root, 'docs', directory))) fail(`docs/${directory}/ is missing.`);
 }
 
+const planMatrixCheck = Bun.spawnSync({
+  cmd: ['bun', 'run', 'scripts/check-plan-execution-matrix.ts'],
+  cwd: root,
+  stdout: 'inherit',
+  stderr: 'inherit',
+});
+if (planMatrixCheck.exitCode !== 0) failed = true;
+
 if (failed) process.exitCode = 1;
-else console.log('Documentation structure checks passed.');
+else console.log('Documentation structure and plan governance checks passed.');

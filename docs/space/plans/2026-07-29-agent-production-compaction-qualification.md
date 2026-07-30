@@ -42,6 +42,12 @@
 - TUI/CLI route status 与 handoff
 - active/ADR/book/map
 
+## 共享 schema ownership
+
+本计划是 `CompactionCaseV1` 与 Route Qualification identity 的首个实现计划，Compaction
+Capability 是规范 owner。2A 只消费其 suite/route/evaluator digest 和 Gate result，不得在 release
+scripts 平行定义 case、matcher 或 qualification 语义。
+
 ## 实施步骤
 
 ### 任务执行矩阵
@@ -296,6 +302,9 @@ non-inferiority、G3–G5、用户理解度和 rollback rehearsal：
 | live cost 无界 | Phase 1C budget + 固定 suite/sample |
 
 ## 完成证据
+
+目标路径：`docs/space/execution/completed/2026-07-30-agent-production-compaction-qualification.md`。
+记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 - CompactionCase suite/scorer digest；
 - structural/semantic/continuation 报告；

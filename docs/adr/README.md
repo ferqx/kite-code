@@ -52,3 +52,13 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0048](0048-durable-user-turn-cancellation.md)         | accepted   | 用户停止 turn 时先原子取消未终结工具，再传播 AbortSignal；task 保持可继续           |
 | [0049](0049-effect-aware-read-scheduling.md)           | accepted   | 连续免审只读工具限流并行；TUI 只物化已开始、交互目标或终态失败的调用                |
 | [0050](0050-client-specific-session-navigation.md)     | accepted   | TUI 切换会话映射为取消；支持后台运行的客户端切换视图时保留 Runtime 状态             |
+| [0051](0051-release-profile-monotonic-composition.md)  | accepted   | Release Profile 使用正交 maturity/rollout 与按字段单调组合                         |
+| [0052](0052-release-evidence-and-behavior-identity.md) | accepted   | Manifest、Evidence 与 Gate 绑定同一行为身份                                        |
+| [0053](0053-local-single-user-first-topology.md)       | accepted   | 首发仅支持本地单用户拓扑，hosted 形态独立准入                                      |
+| [0054](0054-production-execution-isolation.md)         | accepted   | 生产执行统一采用 sandbox、网络、受保护路径与 worktree 隔离                         |
+| [0055](0055-cumulative-runtime-resource-governance.md) | accepted   | 父子 Agent 使用累计预算、原子并发许可与统一终态                                    |
+| [0056](0056-metadata-first-data-boundaries.md)         | accepted   | 本地日志 metadata-first，telemetry 无正文，远程接收方独立治理                      |
+| [0057](0057-compaction-release-qualification.md)       | accepted   | Compaction 发布资格使用结构、语义与 continuation 三层门禁                          |
+| [0058](0058-agent-task-product-acceptance.md)          | accepted   | Agent task、diff、test 与 review 是产品验收主证据                                  |
+| [0059](0059-optional-disable-only-signed-rollout.md)   | accepted   | 远程 rollout manifest 可选且只能签名降级                                           |
+| [0060](0060-single-maintainer-release-governance.md)   | accepted   | 单人维护模式以 external release 前第三方安全评审替代 Phase 0 双人签署               |

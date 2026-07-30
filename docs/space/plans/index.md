@@ -20,7 +20,7 @@
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
 | [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | draft | P0 | 已批准 Agent 生产就绪 RFC | Phase 0–6 总入口 | 首发拓扑、依赖图、M0–M4 Gate、共享证据与回滚规则 |
-| [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | draft | P0 | 生产就绪 roadmap | RFC Phase 0 | 具名 Owner/backup、14 项决策、ADR 与 schema ownership |
+| [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | active | P0 | 生产就绪 roadmap | RFC Phase 0 | single-maintainer Owner、显式无 backup、14 项决策、ADR 与 schema ownership；Task 0.5/M0 仍 blocked |
 | [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | draft | P0 | Phase 0 | RFC Phase 1A | metadata 默认、安全日志、Provider Data Policy、remote MCP egress |
 | [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | draft | P0 | Phase 0 | RFC Phase 1B | workspace sandbox、network allowlist、protected path、worktree、MCP transport boundary |
 | [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | draft | P0 | Phase 0 | RFC Phase 1C | 累计资源预算、有界取消、failure matrix、PTY/soak 稳定 |
