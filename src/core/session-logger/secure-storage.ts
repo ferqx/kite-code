@@ -43,6 +43,7 @@ const WINDOWS_RESERVED_SEGMENTS = new Set([
   'lpt8',
   'lpt9',
 ]);
+export const WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS = 10_000;
 
 export interface SecureSessionStorageOptions {
   platform?: NodeJS.Platform;
@@ -113,11 +114,13 @@ Set-Acl -LiteralPath $item.FullName -AclObject $acl
     {
       encoding: 'utf8',
       windowsHide: true,
+      timeout: WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
       env: windowsPowerShellEnvironment(process.env, { KITE_SESSION_LOG_ACL_PATH: path }),
     },
   );
   if (result.status !== 0) {
-    const detail = `${result.stderr}\n${result.stdout}`
+    const detail = `${result.error?.message ?? ''}\n${result.stderr}\n${result.stdout}`
       .trim()
       .replaceAll(/\s+/g, ' ')
       .slice(0, 512);

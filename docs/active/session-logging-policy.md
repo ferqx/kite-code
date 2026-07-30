@@ -84,7 +84,8 @@ App/Runtime 把完整 resolved policy 注入 writer。POSIX 上 `.kite-code`、s
 frontend 和 session 目录收紧为 `0700`，日志与 lease/terminal metadata 为 `0600`；Windows
 对同一路径应用 owner-only、禁继承 ACL；调用系统 Windows PowerShell 5.1 时固定其系统
 `PSModulePath`，不继承 PowerShell 7 的不兼容模块路径。路径 segment 使用封闭格式并拒绝 Windows reserved
-名称；任何 user data/session root、session 目录或目标文件 symlink/reparse point 都 fail
+名称；每次 ACL 设置与 smoke 验证的 PowerShell 子进程有 10 秒硬 timeout，超时即 fail
+closed。任何 user data/session root、session 目录或目标文件 symlink/reparse point 都 fail
 closed。JSON metadata 使用同目录 exclusive temp、fsync、rename 和目录 fsync；JSONL append
 在 writer 构造期以 no-follow descriptor 立即打开并固定，不延迟到首批事件。所有受管文件必须
 是 `nlink=1` 的 owner-owned regular file；构造、每批 append 与 retention 都拒绝 symlink、

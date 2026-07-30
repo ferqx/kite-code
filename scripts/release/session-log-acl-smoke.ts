@@ -24,7 +24,10 @@ import {
 } from '../../src/core/config/paths';
 import type { SessionLoggingPolicyV1 } from '../../src/core/config/session-logging-policy';
 import { SESSION_LOG_LEASE_FILE } from '../../src/core/session-logger/active-session-lease';
-import { windowsPowerShellEnvironment } from '../../src/core/session-logger/secure-storage';
+import {
+  WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
+  windowsPowerShellEnvironment,
+} from '../../src/core/session-logger/secure-storage';
 import { SessionLogWriter } from '../../src/core/session-logger/writer';
 
 const SMOKE_POLICY: SessionLoggingPolicyV1 = {
@@ -284,13 +287,17 @@ foreach ($path in $paths) {
     {
       encoding: 'utf8',
       windowsHide: true,
+      timeout: WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
       env: windowsPowerShellEnvironment(process.env, {
         KITE_SESSION_LOG_ACL_SMOKE_PATHS: JSON.stringify(paths),
       }),
     },
   );
   if (result.status !== 0) {
-    throw new Error(`Windows owner-only ACL verification failed with status ${result.status}.`);
+    throw new Error(
+      `Windows owner-only ACL verification failed with status ${result.status ?? 'unknown'}.`,
+    );
   }
 }
 
