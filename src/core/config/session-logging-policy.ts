@@ -89,11 +89,17 @@ export function resolveSessionLoggingPolicyV1(input: {
   user?: SessionLoggingPolicyTightening;
   project?: SessionLoggingPolicyTightening;
 }): SessionLoggingPolicyV1 {
+  if (input.project?.mode === 'content') {
+    throw new Error('Project config cannot enable content session logging.');
+  }
   let resolved = parseSessionLoggingPolicyV1(
     input.artifactPolicy ?? DEFAULT_SESSION_LOGGING_POLICY_V1,
   );
   if (!input.enabled) {
     resolved = tightenSessionLoggingPolicyV1(resolved, { mode: 'off' });
+  } else if (resolved.mode === 'content' && input.user?.mode !== 'content') {
+    // An artifact may permit content logging, but it never opts the user in.
+    resolved = tightenSessionLoggingPolicyV1(resolved, { mode: 'metadata' });
   }
   if (input.user) resolved = tightenSessionLoggingPolicyV1(resolved, input.user);
   if (input.project) resolved = tightenSessionLoggingPolicyV1(resolved, input.project);

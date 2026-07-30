@@ -5,13 +5,21 @@ import {
   createApprovedProviderDataAdmissionV1,
   ProviderDataAdmissionError,
 } from '@/core/config/provider-data-admission';
+import type {
+  SessionLoggingMode,
+  SessionLoggingPolicyV1,
+} from '@/core/config/session-logging-policy';
 import { resolveSessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { SandboxBackend } from '@/core/sandbox';
-import { SessionLogCollector } from '@/core/session-logger';
+import {
+  createRuntimeSecretDetectorV1,
+  SessionLogCollector,
+  type SessionLoggingContentInspectorV1,
+} from '@/core/session-logger';
 import {
   createSkillCapabilityResolver,
   evaluateSkillActivation,
@@ -92,6 +100,12 @@ export interface RunRuntimeAgentInput {
   sandboxBackend?: SandboxBackend | 'unknown';
   signal?: AbortSignal;
   frontend?: string;
+  /** App-resolved artifact/user/project policy. App composition roots should always inject it. */
+  sessionLoggingPolicy?: SessionLoggingPolicyV1;
+  /** Trusted detector required before content-mode text can be persisted. */
+  sessionLoggingContentInspector?: SessionLoggingContentInspectorV1;
+  onSessionLoggingStatus?: (status: { mode: SessionLoggingMode }) => void;
+  onSessionLoggingDiagnostic?: (message: string) => void;
   /** App-shell control plane for injecting durable user commands into a live Kernel. */
   onKernelControl?: (control: RuntimeKernelControl | null) => void;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
@@ -128,15 +142,27 @@ export async function* runRuntimeAgent(
     phase: 'building',
     sandboxAvailable: input.sandboxBackend === 'seatbelt' || input.sandboxBackend === 'bubblewrap',
   });
+  const sessionLoggingPolicy =
+    input.sessionLoggingPolicy ??
+    input.config.sessionLoggingPolicy ??
+    resolveSessionLoggingPolicyV1({
+      enabled: getFeatureFlags(input.config).sessionLoggingPolicyV1,
+    });
+  input.onSessionLoggingStatus?.({ mode: sessionLoggingPolicy.mode });
+  const sessionLoggingContentInspector =
+    input.sessionLoggingContentInspector ??
+    createRuntimeSecretDetectorV1({
+      knownSecrets: [input.config.apiKey],
+    });
   const collector = new SessionLogCollector(
     input.threadId,
     input.workspace,
     input.frontend ?? 'runtime',
     { provider: input.config.providerName, name: input.config.modelName },
     {
-      mode: resolveSessionLoggingPolicyV1({
-        enabled: getFeatureFlags(input.config).sessionLoggingPolicyV1,
-      }).mode,
+      mode: sessionLoggingPolicy.mode,
+      contentInspector: sessionLoggingContentInspector,
+      onDiagnostic: (diagnostic) => input.onSessionLoggingDiagnostic?.(diagnostic.message),
     },
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';

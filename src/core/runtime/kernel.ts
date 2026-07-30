@@ -157,6 +157,15 @@ export class AgentKernel {
     this.store.appendEventsAndSnapshot(this.state.session.threadId, payloads, nextState, metadata);
     this.state = nextState;
     for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
+    for (const payload of payloads) {
+      if (payload.type === 'run.completed') {
+        this.store.saveNamedSnapshot(
+          this.state.session.threadId,
+          `turn-${payload.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
+          this.state,
+        );
+      }
+    }
   }
 
   /**

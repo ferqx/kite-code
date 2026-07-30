@@ -20,6 +20,9 @@
 6. PTY 测试成本高，不应用来穷举纯 reducer、policy 或 schema 分支。
 7. 完整 PTY suite 按文件隔离执行并设置单文件硬超时；因此失败会定位到具体
    scenario，且不会因一个遗留 TUI 子进程无限占用整套测试。
+8. suite runner 的 RSS/active-resource/FD 趋势只覆盖协调进程和 scenario 边界资源回收；
+   每个 TUI 子进程内部的长期缓慢泄漏仍需要 1C.7 bounded soak。Windows 无通用 `/proc/self/fd`
+   时 FD 数显示为 unsupported，由 active-resource 与平台 smoke 补充。
 
 ## 分层选择
 

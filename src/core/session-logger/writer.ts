@@ -14,14 +14,27 @@ import { sessionLogDir } from '@/core/config/paths';
 
 // 每批次最多缓存的记录数
 const BATCH_SIZE = 50;
+type AppendSessionLog = (path: string, data: string, encoding: 'utf-8') => Promise<void>;
 
 export class SessionLogWriter {
   private _filePath: string;
   private _buffer: string[] = [];
   private _scheduled = false;
   private _pendingFlush: Promise<void> | null = null;
+  private _failed = false;
+  private _failureReported = false;
+  private readonly onFailure?: () => void;
+  private readonly append: AppendSessionLog;
 
-  constructor(frontend: string, threadId: string, basename = 'events') {
+  constructor(
+    frontend: string,
+    threadId: string,
+    basename = 'events',
+    onFailure?: () => void,
+    append: AppendSessionLog = appendFile,
+  ) {
+    this.onFailure = onFailure;
+    this.append = append;
     const dir = sessionLogDir(frontend, threadId);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
@@ -31,7 +44,13 @@ export class SessionLogWriter {
 
   /** 追加一条记录。O(1) push 到内存缓冲，异步触发写盘，永不阻塞主流程 */
   write(record: unknown): void {
-    this._buffer.push(JSON.stringify(record));
+    if (this._failed) return;
+    try {
+      this._buffer.push(JSON.stringify(record));
+    } catch {
+      this.reportFailure();
+      return;
+    }
 
     if (this._buffer.length >= BATCH_SIZE) {
       // 满了 → 立即异步写
@@ -50,20 +69,28 @@ export class SessionLogWriter {
 
   /** 异步写盘——链式串行，保证写入顺序，跟踪末次 promise 供 finalize 等待 */
   private _flushAsync(): void {
+    if (this._failed) {
+      this._buffer.length = 0;
+      return;
+    }
     const batch = this._buffer.splice(0);
     if (batch.length === 0) return;
 
     const lines = `${batch.join('\n')}\n`;
     // 链到上一次 flush 之后执行，保证 JSONL 行顺序与 write() 调用顺序一致
     this._pendingFlush = (this._pendingFlush ?? Promise.resolve())
-      .then(() => appendFile(this._filePath, lines, 'utf-8'))
+      .then(() => {
+        if (this._failed) return;
+        return this.append(this._filePath, lines, 'utf-8');
+      })
       .catch(() => {
-        // 磁盘 I/O 失败静默——日志是辅助功能，不能拖垮 Agent
+        this.reportFailure();
       });
   }
 
   /** 会话结束时写盘——先等待所有异步写入完成，再同步写剩余缓冲，避免数据交错 */
   async finalize(): Promise<void> {
+    if (this._failed) return;
     // 抑制尚未执行的微任务，并将当前缓冲串到已有 flush 后。这样 finalize
     // 等待的是完整链，而不会在等待期间被微任务追加新的未等待写入。
     this._scheduled = false;
@@ -72,6 +99,19 @@ export class SessionLogWriter {
     if (this._pendingFlush) {
       await this._pendingFlush;
       this._pendingFlush = null;
+    }
+  }
+
+  private reportFailure(): void {
+    this._failed = true;
+    this._scheduled = false;
+    this._buffer.length = 0;
+    if (this._failureReported) return;
+    this._failureReported = true;
+    try {
+      this.onFailure?.();
+    } catch {
+      // Logging diagnostics are advisory and never escape into Runtime.
     }
   }
 }

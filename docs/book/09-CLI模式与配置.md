@@ -35,6 +35,7 @@ Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者
   "sandbox": { "enabled": true },
   "autoReview": {},
   "compaction": {},
+  "sessionLogging": {},
   "mcpServers": {},
   "features": {}
 }
@@ -70,6 +71,17 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 Rollout 可额外配置 `cohortSalt` 与 `livePercentage`：相同 salt/session 始终进入相同 bucket，live 百分比外按 shadow 执行，master flag 关闭恒为 off。显式 `localDebug: { enabled: true, directory }` 只写脱敏压缩元数据；未启用时不创建文件。
 
 TUI 启动时执行 workspace 信任门禁：首次打开未信任目录会显示授权确认（类似 VS Code 打开新项目），显式信任记录写入用户级 `~/.kite-code/workspace-trust.jsonc`，以 canonical realpath 的 sha256 作为 `workspaceKey`，之后同目录启动自动放行；目录移动或改名后信任失效。CLI `run` 执行同一门禁：未信任目录拒绝运行并向 stderr 报错，`--trust-workspace` 显式记录信任（`source: 'config'`）后继续，CI/自动化应使用该旗标或预写信任存储。门禁刻意不提供环境变量旁路：Bun 会自动注入 `<cwd>/.env*`，env 开关可被目录内文件伪造；web 前端当前不执行该门禁。当前行为以 `docs/active/workspace-trust.md` 为准。
+
+### Session logging
+
+`sessionLogging.mode` 只允许 `off | metadata | content`。`sessionLoggingPolicyV1` 关闭时 resolved
+mode 恒为 `off`；开启时默认使用 release artifact 的 metadata policy。用户和项目配置只能收紧
+retention/容量与 mode，项目配置不得开启 `content`。
+
+`content` 需要 release artifact 允许并由用户/管理员在用户配置显式 opt-in，两者缺一不可；
+即使开启仍不记录 reasoning、工具/文件正文、审批命令、Plan/Sub-agent 正文、secret 或
+credential。TUI 每个 session 首次运行显示 resolved mode，CLI 把 mode 写到 stderr；content
+另有显式披露。Logger 不可用时两端只显示一次固定脱敏诊断，Agent 继续运行且不使用 fallback。
 
 ## 9.4 MCP 配置
 

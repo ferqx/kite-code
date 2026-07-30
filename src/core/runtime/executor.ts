@@ -281,6 +281,7 @@ export function createRuntimeEffectExecutor(
               event.type === 'capability.execution_succeeded' ||
               event.type === 'capability.execution_failed' ||
               event.type === 'capability.execution_unknown' ||
+              event.type === 'provider.action_required' ||
               event.type === 'subagent.completed' ||
               event.type === 'subagent.failed' ||
               event.type === 'verification.requested'

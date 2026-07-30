@@ -11,6 +11,7 @@ import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { runtimeStorePathFor } from '@/core/runtime/store';
 import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
+import { createRuntimeSecretDetectorV1 } from '@/core/session-logger';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
@@ -132,6 +133,21 @@ export async function main(): Promise<void> {
       authorizationSource: authorizationMode === 'full_access' ? 'config' : undefined,
       sandboxBackend: sandboxRuntime.backend,
       frontend: 'cli',
+      sessionLoggingPolicy: config.sessionLoggingPolicy,
+      sessionLoggingContentInspector: createRuntimeSecretDetectorV1({
+        knownSecrets: [config.apiKey],
+      }),
+      onSessionLoggingStatus: ({ mode }) => {
+        console.error(`[SESSION LOGGING] mode=${mode}`);
+        if (mode === 'content') {
+          console.error(
+            '[SESSION LOGGING] Content logging is enabled by the release artifact and explicit user opt-in; reasoning, tool/file content, secrets, and credentials remain excluded.',
+          );
+        }
+      },
+      onSessionLoggingDiagnostic: (message) => {
+        console.error(`[SESSION LOGGING DISABLED] ${message}`);
+      },
       skillOptions,
       initialSkillActivations,
     },

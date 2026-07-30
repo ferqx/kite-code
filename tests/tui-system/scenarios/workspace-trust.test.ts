@@ -100,6 +100,8 @@ describe('TUI PTY System — Workspace Trust', () => {
       restarted = proc;
       await waitForText(() => proc.output(), 'shortcuts', 15000);
       expect(screenContains(proc.output(), GATE_TEXT)).toBe(false);
+      await proc.killAndWait();
+      restarted = undefined;
       console.log('  Restart skipped the gate');
     },
     TIMEOUT,
@@ -122,7 +124,18 @@ describe('TUI PTY System — Workspace Trust', () => {
       declined = proc;
       await waitForText(() => proc.output(), GATE_TEXT, 15000);
 
-      // Exit is the safe default, so Enter must decline without persisting.
+      // Prove the input handler is ready before confirming the safe default.
+      // Under a busy full-suite run, the first rendered gate text can precede
+      // Ink attaching its stdin handler, which would otherwise lose Enter.
+      proc.write('\x1b[A');
+      await waitForText(() => proc.output(), '› Trust this workspace and continue', 10000);
+      const outputBeforeExitSelection = proc.output().length;
+      proc.write('\x1b[B');
+      await waitForText(
+        () => proc.output().slice(outputBeforeExitSelection),
+        '› Exit Kite Code',
+        10000,
+      );
       proc.write('\r');
 
       const code = await proc.waitForExit();

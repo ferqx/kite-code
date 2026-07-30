@@ -133,6 +133,8 @@ export class SessionRuntime {
   private _pendingInterrupt: InterruptPayload | null = null;
   private _pendingResolve: ((action: UserAction) => void) | null = null;
   private _activeDispatch: ((action: Action) => void) | null = null;
+  private _contentLoggingDisclosureShown = false;
+  private _sessionLoggingStatusShown = false;
   /**
    * Remains pending while the previous generator is unwinding after abort().
    * abort() clears the user-visible running flag immediately, but a new run
@@ -299,6 +301,32 @@ export class SessionRuntime {
       sandboxBackend: runAgentParams.sandboxBackend,
       signal: runAgentParams.signal,
       frontend: 'tui',
+      sessionLoggingPolicy: runAgentParams.sessionLoggingPolicy,
+      sessionLoggingContentInspector: runAgentParams.sessionLoggingContentInspector,
+      onSessionLoggingStatus: ({ mode }) => {
+        if (!this._sessionLoggingStatusShown) {
+          this._sessionLoggingStatusShown = true;
+          deps.dispatch({
+            type: 'LOCAL_TEXT',
+            text: `  ⎿  Session logging mode: ${mode}.`,
+          });
+        }
+        if (mode === 'content' && !this._contentLoggingDisclosureShown) {
+          this._contentLoggingDisclosureShown = true;
+          deps.dispatch({
+            type: 'LOCAL_TEXT',
+            text:
+              '  ⎿  Session content logging is enabled by the release artifact and your explicit opt-in. ' +
+              'Reasoning, tool/file content, secrets, and credentials remain excluded.',
+          });
+        }
+      },
+      onSessionLoggingDiagnostic: (message) => {
+        deps.dispatch({
+          type: 'LOCAL_TEXT',
+          text: `  ⎿  ${message}`,
+        });
+      },
       onKernelControl: (control) => {
         this.runtimeControl = control;
       },

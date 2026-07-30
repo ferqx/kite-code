@@ -25,6 +25,10 @@ App.tsx
 
 TUI 不应根据展示文本反推工具是否成功，也不能自行构造 verification passed、approval granted 等 Runtime 事实。
 
+终端 focus reporting 由进程级 store 复用：所有 React subscriber 共享一个 stdin listener，
+首订阅开启 DEC 1004，最后退订移除 listener 并关闭该模式，避免 session/mount 增长造成
+listener warning。
+
 MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 的 list、detail、add、authenticate、project approval 和 confirm route，以及 selection、draft 和动态操作菜单都属于 App。业务键只产生 move/confirm/back，再由 controller 调用 Core retry、typed mutation、摘要决定和 auth flow；Core 不依赖 Select 或 TUI 展示类型。
 
 ## 7.3 事件渲染

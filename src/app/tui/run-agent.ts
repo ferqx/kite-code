@@ -5,6 +5,7 @@ import type { SupportedChatModel } from '@/core/model/factory';
 import type { RunRuntimeAgentInput } from '@/core/runtime/agent';
 import { runtimeStorePathFor } from '@/core/runtime/store';
 import type { SandboxBackend } from '@/core/sandbox';
+import { createRuntimeSecretDetectorV1 } from '@/core/session-logger';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 
@@ -56,5 +57,9 @@ export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
     sandboxBackend: p.sandboxBackend,
     signal: p.signal,
     frontend: 'tui',
+    sessionLoggingPolicy: p.config.sessionLoggingPolicy,
+    sessionLoggingContentInspector: createRuntimeSecretDetectorV1({
+      knownSecrets: [p.config.apiKey],
+    }),
   };
 }

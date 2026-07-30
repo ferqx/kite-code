@@ -47,6 +47,11 @@ descendant 退出时发出结构化 `runtime.cancellation_diagnostic(cancel_inco
 正常完成则必须在向消费者 yield 之前，将 `run.completed` 与 `turn.completed` 原子持久化；
 慢消费者不能让 deadline 在两条完成事实之间把已完成 turn 改写为 aborted。
 
+Kernel 的 batch 后置动作必须与单事件路径等价。包含 `run.completed` 的 batch 在事务提交后
+必须保存命名 rewind 恢复点；否则正常完成虽然持久化，却无法出现在 `/rewind`。工具失败后
+产生的 `provider.action_required` 必须与原 `tool.failed` 一起延后到 tool lifecycle terminal
+后按序提交，不能在工具仍为 running 时提前打开 recovery interaction。
+
 ## 会话导航的客户端映射
 
 “切换会话”是否表示取消属于 App 适配层交互语义，不是 Core Runtime 规则（ADR-0050）。当前 TUI 是单前台、终端式交互：新建或切换到另一会话时，`SessionManager` 必须先对离开的活动 turn 调用持久化取消，再把会话切到后台，因此 TUI 中切换会话等同用户取消当前 turn。

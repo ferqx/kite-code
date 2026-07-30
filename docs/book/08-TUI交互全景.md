@@ -14,6 +14,9 @@
 
 多行输入、粘贴、软换行、宽字符和终端 resize 由 InputLine 与专用 hooks 处理；这些行为不进入 Core。
 
+每个 SessionRuntime 首次运行会显示 resolved session logging mode；`content` 另显示 artifact
+许可与用户显式 opt-in 的披露。Logger 失败只显示一次脱敏诊断，不改变当前 Agent run。
+
 ## 8.2 运行中的结构化交互
 
 | 交互 | Runtime 行为 |
@@ -42,6 +45,7 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 `/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无参数连续压缩直接提示 `No new messages to compact.`，不再次调用摘要模型，显式自定义指令仍可重写已有 narrative。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 
 `/rewind` 打开检查点面板（命名恢复点，按创建时间倒序），Enter/R 回退、F 分叉、Esc 关闭、方向键导航。回退先按文件原像把工作区文件恢复到检查点时刻状态（当时不存在的文件删除），再截断会话事件与后续恢复点；单个文件恢复失败不阻断会话回退，但会逐个提示。Fork 只复制 fork 点之前的文件原像行，不改动共享工作区文件（ADR-0025 §4）。
+正常完成的 `run.completed + turn.completed` 即使以 batch 原子提交，也必须生成同一个命名恢复点。
 
 `/context` 是只读诊断命令，显示 system、当前工具 schema、checkpoint summary、live transcript、动态 Runtime 和 provider framing 的同源 token 投影。它与正常模型调用和 compaction acceptance 术语（压缩验收）共用 Runtime 的 projection environment resolver 术语（投影环境解析器）及当前 adapter metadata 术语（适配器元数据）解析出的模型能力，因此当前 MCP binding、tool search、workflow skill、active inline skill instructions 和真实模型窗口必须计入估算。`/compact reset` 不以本地 hard threshold 术语（硬比例阈值）做容量门禁；重置后下一次真实调用是否被接受由 Provider 术语（模型供应商）决定。
 

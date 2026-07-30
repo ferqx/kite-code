@@ -1,5 +1,9 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  resourceTrendFailures,
+  type TuiSystemResourceSample,
+} from '../tests/tui-system/harness/resource-trend';
 
 const DEFAULT_FILE_TIMEOUT_MS = 180_000;
 const scenariosDir = join(process.cwd(), 'tests', 'tui-system', 'scenarios');
@@ -90,11 +94,36 @@ async function runFile(file: string, timeoutMs: number): Promise<number> {
   return result;
 }
 
+function fileDescriptorCount(): number | undefined {
+  if (process.platform === 'win32') return undefined;
+  const directory = process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd';
+  try {
+    return readdirSync(directory).length;
+  } catch {
+    return undefined;
+  }
+}
+
+function sampleResources(): TuiSystemResourceSample {
+  return {
+    rssBytes: process.memoryUsage.rss(),
+    activeResourceCount: process.getActiveResourcesInfo().length,
+    fdCount: fileDescriptorCount(),
+  };
+}
+
+function formatDelta(first: number | undefined, last: number | undefined): string {
+  if (first == null || last == null) return 'unsupported';
+  const delta = last - first;
+  return `${first}->${last} (${delta >= 0 ? '+' : ''}${delta})`;
+}
+
 const timeoutMs = positiveInteger(
   process.env.KITE_TUI_TEST_FILE_TIMEOUT_MS,
   DEFAULT_FILE_TIMEOUT_MS,
 );
 const files = scenarioFiles();
+const resourceSamples: TuiSystemResourceSample[] = [sampleResources()];
 
 for (const file of files) {
   const exitCode = await runFile(file, timeoutMs);
@@ -102,6 +131,25 @@ for (const file of files) {
     console.error(`[tui-system] failed with exit code ${exitCode}: ${file}`);
     process.exit(exitCode);
   }
+  await Bun.sleep(0);
+  resourceSamples.push(sampleResources());
+}
+
+const firstSample = resourceSamples[0]!;
+const lastSample = resourceSamples.at(-1)!;
+console.log(
+  `[tui-system] resource trend: rss=${formatDelta(
+    Math.round(firstSample.rssBytes / 1024 / 1024),
+    Math.round(lastSample.rssBytes / 1024 / 1024),
+  )}MiB active=${formatDelta(
+    firstSample.activeResourceCount,
+    lastSample.activeResourceCount,
+  )} fd=${formatDelta(firstSample.fdCount, lastSample.fdCount)}`,
+);
+const trendFailures = resourceTrendFailures(resourceSamples);
+if (trendFailures.length > 0) {
+  console.error(`[tui-system] sustained positive resource slope: ${trendFailures.join(', ')}`);
+  process.exit(1);
 }
 
 console.log(`\n[tui-system] passed ${files.length} scenario files`);

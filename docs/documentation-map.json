@@ -159,13 +159,30 @@
     },
     {
       "id": "session-logging",
-      "sources": ["src/core/session-logger/**"],
+      "sources": [
+        "src/core/session-logger/**",
+        "src/core/config/session-logging-policy.ts",
+        "src/app/cli/index.ts",
+        "src/app/tui/run-agent.ts",
+        "src/app/tui/session-manager.ts",
+        "tests/session-logger/**",
+        "tests/tui-system/scenarios/session-logging-status.test.ts"
+      ],
       "documents": [
         "docs/active/session-logging-policy.md",
         "docs/active/model-provider-boundary.md",
         "docs/active/feature-flags.md",
         "docs/book/09-CLI模式与配置.md"
       ]
+    },
+    {
+      "id": "tui-system-governance",
+      "sources": [
+        "scripts/run-tui-system-tests.ts",
+        "tests/tui-system/harness/resource-trend.ts",
+        "tests/tui-resource-trend.test.ts"
+      ],
+      "documents": ["docs/active/tui-e2e-standards.md", "docs/active/tui-e2e-testing-limits.md"]
     },
     {
       "id": "live-e2e-boundary",

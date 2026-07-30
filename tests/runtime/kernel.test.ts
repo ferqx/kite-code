@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { McpConnectionManager } from '../../src/core/mcp/manager';
 import { buildContextProjection } from '../../src/core/model/context-projection';
 import { eventsForRunCancellation } from '../../src/core/runtime/actions';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
@@ -1362,6 +1363,113 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   expect(emitted.filter((event) => event.type === 'tool.started')).toHaveLength(2);
   expect(emitted.filter((event) => event.type === 'tool.finished')).toHaveLength(0);
   expect(terminalEvents.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+});
+
+test('production executor commits provider recovery after the originating tool failure', async () => {
+  const state = createInitialRuntimeState({
+    threadId: 'provider-action-order',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  state.capabilities.bindings.binding = {
+    bindingId: 'binding',
+    capabilityId: 'mcp:github/publish',
+    capabilityRevision: 'stale-revision',
+    exposedToolName: 'mcp__github__publish',
+    schemaDigest: 'schema',
+    issuedForTurnId: state.turn.turnId,
+  };
+  state.tools.calls.mcp = {
+    toolCallId: 'mcp',
+    modelMessageId: 'model',
+    name: 'mcp__github__publish',
+    args: {},
+    status: 'queued',
+    bindingId: 'binding',
+    capabilityId: 'mcp:github/publish',
+    capabilityRevision: 'stale-revision',
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.tools.queue.push('mcp');
+  const manager = new McpConnectionManager();
+  manager.getProviderDirectorySnapshot = () => ({
+    revision: 'directory',
+    entries: [
+      {
+        providerId: 'github',
+        status: 'login_required',
+        required: false,
+        source: 'user',
+        lastKnownCapabilityNames: ['publish'],
+        diagnosticCode: 'auth_required',
+        retryable: false,
+      },
+    ],
+  });
+  const executor = createRuntimeEffectExecutor({
+    config: {
+      providerName: 'test',
+      providerType: 'openai-compatible',
+      apiKey: 'test',
+      baseURL: 'http://localhost:1',
+      modelName: 'test',
+      sandbox: { enabled: false },
+      features: {
+        capabilityCatalogV1: true,
+        mcpRuntimeBindingV1: true,
+        mcpProviderActionV1: true,
+      },
+    },
+    model: {} as never,
+    mcpManager: manager,
+  });
+  const emitted: RuntimeEvent[] = [];
+
+  const terminalEvents = await executor(
+    { type: 'run_tools', toolCallIds: ['mcp'] },
+    state,
+    (event) => emitted.push(event),
+  );
+
+  expect(emitted.some((event) => event.type === 'provider.action_required')).toBe(false);
+  expect(terminalEvents.map((event) => event.type)).toEqual([
+    'tool.failed',
+    'provider.action_required',
+  ]);
+});
+
+test('batch run completion persists a named rewind recovery point', () => {
+  const store = createRuntimeStore(':memory:');
+  const initialState = createInitialRuntimeState({
+    threadId: 'batch-completion-rewind',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  const kernel = new AgentKernel({
+    store,
+    initialState,
+    interactionMode: 'accept_edits',
+  });
+
+  kernel.processEventBatch([
+    {
+      type: 'run.completed',
+      turnId: initialState.turn.turnId,
+      output: 'done',
+    },
+    {
+      type: 'turn.completed',
+      turnId: initialState.turn.turnId,
+    },
+  ]);
+
+  expect(store.listNamedSnapshots(initialState.session.threadId)).toEqual([
+    expect.objectContaining({
+      snapshotId: expect.stringContaining(`turn-${initialState.turn.turnId}-`),
+      eventPosition: 2,
+    }),
+  ]);
+  kernel.close();
 });
 
 test('runRuntimeLoop yields model deltas without persisting or reducing them', async () => {

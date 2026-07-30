@@ -36,7 +36,7 @@ describe('recordEvent — 全量映射', () => {
     expect(r.attributes['kite_code.text.content']).toBe('hello world');
   });
 
-  test('reason — 记录实际推理内容', () => {
+  test('reason — 只记录长度，不记录推理内容', () => {
     const r = recordEvent(
       { type: 'reason', data: { text: 'Let me think about this...' } },
       TRACE,
@@ -44,7 +44,8 @@ describe('recordEvent — 全量映射', () => {
     );
     expect(r.name).toBe('reason');
     expect(r.attributes['kite_code.reason.length']).toBe(26);
-    expect(r.attributes['kite_code.reason.content']).toBe('Let me think about this...');
+    expect(r.attributes['kite_code.reason.content']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('Let me think about this...');
   });
 
   test('text 超长内容截断', () => {
@@ -56,7 +57,7 @@ describe('recordEvent — 全量映射', () => {
     expect(r.attributes['kite_code.text.length']).toBe(15_000);
   });
 
-  test('tool_call — 记录工具参数', () => {
+  test('tool_call — 只记录工具标识，不记录参数', () => {
     const r = recordEvent(
       {
         type: 'tool_call',
@@ -72,12 +73,11 @@ describe('recordEvent — 全量映射', () => {
     expect(r.name).toBe('tool.read_file.call');
     expect(r.attributes['kite_code.tool.name']).toBe('read_file');
     expect(r.attributes['kite_code.tool.call_id']).toBe('c1');
-    const args = JSON.parse(r.attributes['kite_code.tool.args'] as string);
-    expect(args.path).toBe('src/a.ts');
-    expect(args.offset).toBe(1);
+    expect(r.attributes['kite_code.tool.args']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('src/a.ts');
   });
 
-  test('tool_done (成功) — 记录 summary', () => {
+  test('tool_done (成功) — 不记录输出 summary', () => {
     const r = recordEvent(
       {
         type: 'tool_done',
@@ -95,11 +95,12 @@ describe('recordEvent — 全量映射', () => {
     expect(r.name).toBe('tool.read_file');
     expect(r.attributes['kite_code.tool.ok']).toBe(true);
     expect(r.attributes['kite_code.tool.total_lines']).toBe(42);
-    expect(r.attributes['kite_code.tool.summary']).toBe('line 1\nline 2\nline 3');
+    expect(r.attributes['kite_code.tool.summary']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('line 1');
     expect(r.status.code).toBe('OK');
   });
 
-  test('tool_done 会脱敏配置和认证材料', () => {
+  test('tool_done 不保留配置和认证材料', () => {
     const secret = `sk-${'a'.repeat(32)}`;
     const r = recordEvent(
       {
@@ -118,9 +119,8 @@ describe('recordEvent — 全量映射', () => {
       TRACE,
       PARENT,
     );
-    const summary = String(r.attributes['kite_code.tool.summary']);
-    expect(summary).not.toContain(secret);
-    expect(summary).toContain('[REDACTED]');
+    expect(r.attributes['kite_code.tool.summary']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain(secret);
   });
 
   test('tool_done (失败) — 含 failure_reason + error event', () => {
@@ -140,13 +140,14 @@ describe('recordEvent — 全量映射', () => {
     expect(r.name).toBe('tool.shell_execute');
     expect(r.status.code).toBe('ERROR');
     expect(r.attributes['kite_code.tool.failure_reason']).toBe('shell_command_not_found');
-    expect(r.attributes['kite_code.tool.summary']).toBe('command not found: jest');
+    expect(r.attributes['kite_code.tool.summary']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('command not found: jest');
     expect(r.events).toBeDefined();
     expect(r.events![0]!.name).toBe('tool.error');
     expect(r.events![0]!.attributes['tool.failure_reason']).toBe('shell_command_not_found');
   });
 
-  test('need_approval — records runtime-derived reason and expectedEffects', () => {
+  test('need_approval — 只记录低基数审批元数据', () => {
     const r = recordEvent(
       {
         type: 'need_approval',
@@ -171,11 +172,12 @@ describe('recordEvent — 全量映射', () => {
     expect(r.name).toBe('approval');
     expect(r.attributes['kite_code.approval.tool']).toBe('shell_execute');
     expect(r.attributes['kite_code.approval.risk']).toBe('execute_code');
-    expect(r.attributes['kite_code.approval.command']).toContain('npm test');
-    expect(r.attributes['kite_code.approval.reason']).toBe('Need to verify changes');
-    expect(r.attributes['kite_code.approval.expected_effects']).toContain('Runs test suite');
+    expect(r.attributes['kite_code.approval.command']).toBeUndefined();
+    expect(r.attributes['kite_code.approval.reason']).toBeUndefined();
+    expect(r.attributes['kite_code.approval.expected_effects']).toBeUndefined();
     expect(r.attributes['kite_code.approval.model_justification']).toBeUndefined();
     expect(r.attributes['kite_code.approval.objective']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('npm test');
   });
 
   test('need_input — 记录 options 和 context', () => {
@@ -200,7 +202,7 @@ describe('recordEvent — 全量映射', () => {
     expect(r.attributes['kite_code.input.context']).toBe('We need a date formatting library');
   });
 
-  test('state_change — 记录 plan 和 authorization', () => {
+  test('state_change — 记录状态和授权，不记录 plan 内容', () => {
     const r = recordEvent(
       {
         type: 'state_change',
@@ -217,9 +219,8 @@ describe('recordEvent — 全量映射', () => {
     expect(r.name).toBe('state_change');
     expect(r.attributes['kite_code.phase']).toBe('building');
     expect(r.attributes['kite_code.authorization_mode']).toBe('full_access');
-    expect(r.attributes['kite_code.plan']).toBeDefined();
-    const plan = JSON.parse(r.attributes['kite_code.plan'] as string);
-    expect(plan.name).toBe('my-plan');
+    expect(r.attributes['kite_code.plan']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('my-plan');
   });
 
   test('final — 记录实际内容', () => {
@@ -299,7 +300,7 @@ describe('recordEvent — 全量映射', () => {
     expect(r.attributes['kite_code.error.message']).toBe('something broke');
   });
 
-  test('subagent_start / subagent_step / subagent_done / subagent_error — 含内容', () => {
+  test('subagent_start / subagent_step / subagent_done / subagent_error — 不含任务与结果正文', () => {
     const r1 = recordEvent(
       {
         type: 'subagent_start',
@@ -310,7 +311,8 @@ describe('recordEvent — 全量映射', () => {
     );
     expect(r1.name).toBe('subagent.start');
     expect(r1.attributes['kite_code.subagent.role']).toBe('explore');
-    expect(r1.attributes['kite_code.subagent.task']).toBe('find all security bugs in the codebase');
+    expect(r1.attributes['kite_code.subagent.task']).toBeUndefined();
+    expect(JSON.stringify(r1)).not.toContain('find all security bugs');
 
     const rStep = recordEvent(
       {
@@ -321,8 +323,8 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(rStep.name).toBe('subagent.tool.read_file');
-    const stepArgs = JSON.parse(rStep.attributes['kite_code.tool.args'] as string);
-    expect(stepArgs.path).toBe('src/a.ts');
+    expect(rStep.attributes['kite_code.tool.args']).toBeUndefined();
+    expect(JSON.stringify(rStep)).not.toContain('src/a.ts');
 
     const r2 = recordEvent(
       {
@@ -333,7 +335,8 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(r2.name).toBe('subagent.done');
-    expect(r2.attributes['kite_code.subagent.summary']).toBe('found 3 critical bugs');
+    expect(r2.attributes['kite_code.subagent.summary']).toBeUndefined();
+    expect(JSON.stringify(r2)).not.toContain('found 3 critical bugs');
     expect(r2.status.code).toBe('OK');
 
     const r3 = recordEvent(
@@ -352,10 +355,11 @@ describe('recordEvent — 全量映射', () => {
     );
     expect(r3.name).toBe('subagent.error');
     expect(r3.status.code).toBe('ERROR');
-    expect(r3.attributes['kite_code.subagent.summary']).toBe('partially completed');
+    expect(r3.attributes['kite_code.subagent.summary']).toBeUndefined();
+    expect(JSON.stringify(r3)).not.toContain('partially completed');
   });
 
-  test('subagent_tool_result — 记录 summary（成功时）', () => {
+  test('subagent_tool_result — 不记录 summary', () => {
     const r = recordEvent(
       {
         type: 'subagent_tool_result',
@@ -372,7 +376,8 @@ describe('recordEvent — 全量映射', () => {
     );
     expect(r.name).toBe('subagent.tool.read_file.result');
     expect(r.attributes['kite_code.tool.ok']).toBe(true);
-    expect(r.attributes['kite_code.tool.summary']).toBe('line 1\nline 2');
+    expect(r.attributes['kite_code.tool.summary']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('line 1');
     expect(r.attributes['kite_code.tool.duration_ms']).toBe(15);
     expect(r.status.code).toBe('OK');
   });
@@ -391,7 +396,7 @@ describe('recordEvent — 全量映射', () => {
     expect(r.attributes['kite_code.cache.hit_tokens']).toBe(50);
   });
 
-  test('interrupt / update — 记录原始数据', () => {
+  test('interrupt / update — 不记录原始图数据', () => {
     const ri = recordEvent(
       {
         type: 'interrupt',
@@ -401,8 +406,8 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(ri.name).toBe('interrupt');
-    expect(ri.attributes['kite_code.interrupt.data']).toBeDefined();
-    expect(ri.attributes['kite_code.interrupt.data'] as string).toContain('tool_approval');
+    expect(ri.attributes['kite_code.interrupt.data']).toBeUndefined();
+    expect(JSON.stringify(ri)).not.toContain('tool_approval');
 
     const ru = recordEvent(
       {
@@ -413,7 +418,7 @@ describe('recordEvent — 全量映射', () => {
       PARENT,
     );
     expect(ru.name).toBe('graph.update');
-    expect(ru.attributes['kite_code.update.data']).toBeDefined();
+    expect(ru.attributes['kite_code.update.data']).toBeUndefined();
   });
 
   test('turn_begin / turn_end', () => {
@@ -621,7 +626,8 @@ describe('recordRuntimeEvent — compaction telemetry', () => {
     expect(r.attributes['kite_code.model.message_id']).toBe('msg-1');
     expect(r.attributes['kite_code.model.duration_ms']).toBe(2093);
     expect(r.attributes['kite_code.text.content']).toContain('core files');
-    expect(r.attributes['kite_code.reason.content']).toContain('TUI module');
+    expect(r.attributes['kite_code.reason.content']).toBeUndefined();
+    expect(JSON.stringify(r)).not.toContain('TUI module');
 
     // 旧事件无 durationMs 时不写入该属性（回放走创建→settle 墙钟回退）
     const legacy = recordRuntimeEvent(

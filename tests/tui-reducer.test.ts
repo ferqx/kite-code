@@ -2394,6 +2394,40 @@ describe('eventReducer (blocks model)', () => {
       expect(text).toContain('TAIL_MARKER must be visible before the prompt.');
       expect(flatBlocks(s).some((block) => block.kind === 'text' && block.streaming)).toBe(false);
     });
+    test('SET_EXITED preserves streamed paragraph blocks already handed to Static', () => {
+      let s = dispatch(fresh(), { type: 'SET_RUNNING' });
+      s = handleRuntimeEventAction(s, { type: 'model.requested', requestId: 'stream-request' });
+      s = handleRuntimeEventAction(s, {
+        type: 'model.text_delta',
+        text: 'STREAM_FIRST\n\n',
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'model.text_delta',
+        text: 'STREAM_FIRST\n\nSTREAM_MIDDLE\n\n',
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'model.text_delta',
+        text: 'STREAM_FIRST\n\nSTREAM_MIDDLE\n\nSTREAM_FINAL',
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'model.responded',
+        messageId: 'stream-response',
+        text: 'STREAM_FIRST\n\nSTREAM_MIDDLE\n\nSTREAM_FINAL',
+      });
+      const beforeExit = flatBlocks(s).filter(
+        (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+      );
+
+      s = dispatch(s, { type: 'SET_EXITED' });
+
+      const afterExit = flatBlocks(s).filter(
+        (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+      );
+      expect(afterExit.map((block) => block.id)).toEqual(beforeExit.map((block) => block.id));
+      expect(afterExit.map((block) => block.content).join('')).toBe(
+        'STREAM_FIRST\n\nSTREAM_MIDDLE\n\nSTREAM_FINAL',
+      );
+    });
     test('SET_EXITED sets exited flag', () => {
       let s = fresh();
       s = { ...s, running: true, runStartTime: Date.now() - 5000 };

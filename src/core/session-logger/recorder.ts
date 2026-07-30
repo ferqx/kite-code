@@ -1,8 +1,8 @@
 // src/core/session-logger/recorder.ts
-// AgentEvent → TraceRecord 映射器（全量记录，所有事件都留痕）
+// AgentEvent → TraceRecord 映射器（事件全量留痕，敏感正文按字段拒绝落盘）
 //
-// 截断策略：本地会话日志用于调试回溯，保留完整语义但控制文件体积。
-// 本地日志也必须执行最小敏感信息脱敏；遥测通道会再执行独立 scrubber。
+// 截断策略：content 模式保留允许的用户/模型可见正文，同时控制文件体积。
+// reasoning、工具输入输出、计划和子 Agent 正文不进入记录；允许正文仍执行脱敏。
 
 import { genSpanId } from '@/core/id-utils';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -13,9 +13,7 @@ import type { TraceRecord } from './types';
 // 内容截断阈值（字符数）
 const TRUNC_CONTENT = 10_000; // text / reason / final 正文
 const TRUNC_SUMMARY = 4096; // tool_done summary / subagent summary
-const TRUNC_ARGS = 4096; // tool_call args / subagent toolArgs
 const TRUNC_ERROR = 500; // 错误消息
-const TRUNC_COMMAND = 500; // 审批命令
 const TRUNC_QUESTION = 500; // 用户提问
 
 /** 安全截断字符串，超过长度时追加 "…(truncated)" */
@@ -37,16 +35,54 @@ function safeStringify(value: unknown, max: number): string {
 function redactSensitiveText(value: string): string {
   return value
     .replace(
-      /((?:["']?)(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization)(?:["']?)\s*[:=]\s*["'])([^"'\r\n]+)(["'])/gi,
-      '$1[REDACTED]$3',
+      /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/gi,
+      '[REDACTED PRIVATE KEY]',
+    )
+    .replace(
+      /(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization)["']?\s*[:=]\s*)(["'])([^"'\r\n]+)\2/gi,
+      '$1$2[REDACTED]$2',
+    )
+    .replace(
+      /(["']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|token|secret|password|authorization)["']?\s*[:=]\s*)(?!["'])[^\s,;}\]\r\n]+/gi,
+      '$1[REDACTED]',
     )
     .replace(/\b(bearer|basic)\s+[a-z0-9._~+/=-]+/gi, '$1 [REDACTED]')
-    .replace(/\bsk-[a-z0-9_-]{16,}\b/gi, '[REDACTED]');
+    .replace(/\b(?:sk|ghp|github_pat)[-_][a-z0-9_-]{16,}\b/gi, '[REDACTED]');
 }
 
 /** ISO 8601 with ns (OTel 格式) */
 function ts(): string {
   return new Date().toISOString();
+}
+
+type ContentRuntimeEvent = Extract<
+  RuntimeEvent,
+  { type: 'user.message_appended' | 'model.responded' }
+>;
+
+/**
+ * Explicit content-mode allowlist. Only redacted user text and model-visible
+ * text cross this boundary; IDs, reasoning, tool data, paths and errors do not.
+ */
+export function recordContentRuntimeEvent(
+  event: ContentRuntimeEvent,
+  traceId: string,
+  parentSpanId: string,
+): TraceRecord {
+  const content = event.type === 'user.message_appended' ? event.content : (event.text ?? '');
+  return {
+    traceId,
+    spanId: genSpanId(),
+    parentSpanId,
+    name: event.type === 'user.message_appended' ? 'user.message' : 'model.message',
+    kind: event.type === 'model.responded' ? 3 : 1,
+    timestamp: ts(),
+    attributes: {
+      'kite_code.text.length': content.length,
+      'kite_code.text.content': trunc(content, TRUNC_CONTENT),
+    },
+    status: { code: 'OK', message: '' },
+  };
 }
 
 /** 将 AgentEvent 转为 TraceRecord（全量，一条都不丢）
@@ -104,7 +140,6 @@ export function recordEvent(
       base.name = 'reason';
       base.attributes = {
         'kite_code.reason.length': event.data.text.length,
-        'kite_code.reason.content': trunc(event.data.text, TRUNC_CONTENT),
       };
       break;
 
@@ -114,7 +149,6 @@ export function recordEvent(
       base.attributes = {
         'kite_code.tool.name': event.data.name,
         'kite_code.tool.call_id': event.data.call_id,
-        'kite_code.tool.args': safeStringify(event.data.args, TRUNC_ARGS),
       };
       break;
 
@@ -124,7 +158,6 @@ export function recordEvent(
         'kite_code.tool.name': event.data.name,
         'kite_code.tool.call_id': event.data.call_id,
         'kite_code.tool.ok': event.data.ok,
-        'kite_code.tool.summary': trunc(event.data.summary, TRUNC_SUMMARY),
       };
       if (event.data.totalLines != null) {
         base.attributes['kite_code.tool.total_lines'] = event.data.totalLines;
@@ -138,7 +171,6 @@ export function recordEvent(
             name: 'tool.error',
             timestamp: ts(),
             attributes: {
-              'tool.error.summary': trunc(event.data.summary, TRUNC_ERROR),
               'tool.failure_reason': reason,
             },
           },
@@ -152,15 +184,7 @@ export function recordEvent(
       base.attributes = {
         'kite_code.approval.tool': event.data.tool,
         'kite_code.approval.risk': event.data.risk,
-        'kite_code.approval.command': trunc(event.data.command, TRUNC_COMMAND),
-        'kite_code.approval.reason': trunc(event.data.reason, TRUNC_SUMMARY),
       };
-      if (event.data.expectedEffects && event.data.expectedEffects.length > 0) {
-        base.attributes['kite_code.approval.expected_effects'] = trunc(
-          event.data.expectedEffects.join('; '),
-          TRUNC_SUMMARY,
-        );
-      }
       if (event.data.subagentId) base.attributes['kite_code.subagent.id'] = event.data.subagentId;
       break;
 
@@ -189,9 +213,6 @@ export function recordEvent(
       if (event.data.phase) base.attributes['kite_code.phase'] = event.data.phase;
       if (event.data.modelProvider) base.attributes['gen_ai.system'] = event.data.modelProvider;
       if (event.data.modelName) base.attributes['gen_ai.request.model'] = event.data.modelName;
-      if (event.data.plan) {
-        base.attributes['kite_code.plan'] = safeStringify(event.data.plan, TRUNC_SUMMARY);
-      }
       if (event.data.authorization) {
         base.attributes['kite_code.authorization_mode'] = event.data.authorization.mode;
       }
@@ -200,15 +221,12 @@ export function recordEvent(
     case 'file_change':
       base.name = 'file_change';
       base.attributes = {
-        'kite_code.file.path': event.data.path,
         'kite_code.file.kind': event.data.kind,
       };
       if (event.data.linesAdded != null)
         base.attributes['kite_code.file.lines_added'] = event.data.linesAdded;
       if (event.data.linesRemoved != null)
         base.attributes['kite_code.file.lines_removed'] = event.data.linesRemoved;
-      if (event.data.preview)
-        base.attributes['kite_code.file.preview'] = trunc(event.data.preview, TRUNC_CONTENT);
       break;
 
     // ── 缓存指标 ──
@@ -264,7 +282,6 @@ export function recordEvent(
       base.attributes = {
         'kite_code.subagent.id': event.data.id,
         'kite_code.subagent.role': event.data.role,
-        'kite_code.subagent.task': trunc(event.data.task, TRUNC_SUMMARY),
       };
       break;
 
@@ -273,7 +290,6 @@ export function recordEvent(
       base.attributes = {
         'kite_code.subagent.id': event.data.id,
         'kite_code.tool.name': event.data.toolName,
-        'kite_code.tool.args': safeStringify(event.data.toolArgs, TRUNC_ARGS),
       };
       break;
 
@@ -284,9 +300,6 @@ export function recordEvent(
         'kite_code.tool.name': event.data.toolName,
         'kite_code.tool.ok': event.data.ok,
       };
-      if (event.data.summary) {
-        base.attributes['kite_code.tool.summary'] = trunc(event.data.summary, TRUNC_SUMMARY);
-      }
       if (event.data.durationMs != null) {
         base.attributes['kite_code.tool.duration_ms'] = event.data.durationMs;
       }
@@ -304,23 +317,19 @@ export function recordEvent(
         'kite_code.subagent.id': event.data.id,
         'kite_code.subagent.tool_call_count': event.data.toolCallCount,
         'kite_code.subagent.duration_ms': event.data.durationMs,
-        'kite_code.subagent.summary': trunc(event.data.summary, TRUNC_SUMMARY),
       };
       break;
 
     case 'subagent_error':
       base.name = 'subagent.error';
-      base.status = { code: 'ERROR', message: trunc(event.data.error, TRUNC_ERROR) };
+      base.status = { code: 'ERROR', message: 'subagent failed' };
       base.attributes = {
         'kite_code.subagent.id': event.data.id,
-        'kite_code.subagent.error': trunc(event.data.error, TRUNC_ERROR),
       };
       if (event.data.toolCallCount != null)
         base.attributes['kite_code.subagent.tool_call_count'] = event.data.toolCallCount;
       if (event.data.durationMs != null)
         base.attributes['kite_code.subagent.duration_ms'] = event.data.durationMs;
-      if (event.data.summary)
-        base.attributes['kite_code.subagent.summary'] = trunc(event.data.summary, TRUNC_SUMMARY);
       break;
 
     case 'subagent_cache_metrics':
@@ -361,15 +370,12 @@ export function recordEvent(
       base.name = 'interrupt';
       base.attributes = {
         'kite_code.interrupt.type': 'graph_interrupt',
-        'kite_code.interrupt.data': safeStringify(event.data, TRUNC_SUMMARY),
       };
       break;
 
     case 'update':
       base.name = 'graph.update';
-      base.attributes = {
-        'kite_code.update.data': safeStringify(event.data, TRUNC_SUMMARY),
-      };
+      base.attributes = {};
       break;
   }
 
@@ -452,14 +458,11 @@ export function recordRuntimeEvent(
       if (event.durationMs != null)
         base.attributes['kite_code.model.duration_ms'] = event.durationMs;
       if (event.text) base.attributes['kite_code.text.content'] = trunc(event.text, TRUNC_CONTENT);
-      if (event.reasoningText)
-        base.attributes['kite_code.reason.content'] = trunc(event.reasoningText, TRUNC_CONTENT);
       break;
     case 'tool.queued':
       base.name = `tool.${event.name}.call`;
       base.attributes['kite_code.tool.name'] = event.name;
       base.attributes['kite_code.tool.call_id'] = event.toolCallId;
-      base.attributes['kite_code.tool.args'] = safeStringify(event.args, TRUNC_ARGS);
       break;
     case 'tool.started':
       base.name = 'tool.start';
@@ -474,12 +477,7 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.tool.name'] = event.name;
       base.attributes['kite_code.tool.call_id'] = event.toolCallId;
       base.attributes['kite_code.tool.ok'] = event.result.ok;
-      base.attributes['kite_code.tool.summary'] = trunc(
-        event.result.stdout || event.result.stderr,
-        TRUNC_SUMMARY,
-      );
-      if (!event.result.ok)
-        base.status = { code: 'ERROR', message: event.result.stderr || 'tool failed' };
+      if (!event.result.ok) base.status = { code: 'ERROR', message: 'tool failed' };
       break;
     case 'tool.failed':
     case 'tool.rejected':
@@ -504,9 +502,7 @@ export function recordRuntimeEvent(
       base.name = 'approval.requested';
       base.attributes['kite_code.interaction_id'] = event.interactionId;
       base.attributes['kite_code.approval.tool'] = event.approval.tool;
-      base.attributes['kite_code.approval.command'] = trunc(event.approval.command, TRUNC_COMMAND);
       base.attributes['kite_code.approval.risk'] = event.approval.risk;
-      base.attributes['kite_code.approval.reason'] = trunc(event.approval.reason, TRUNC_SUMMARY);
       if (event.approval.subagentId)
         base.attributes['kite_code.subagent.id'] = event.approval.subagentId;
       break;
@@ -524,31 +520,24 @@ export function recordRuntimeEvent(
       break;
     case 'plan.review_requested':
       base.attributes['kite_code.interaction_id'] = event.interactionId;
-      base.attributes['kite_code.plan'] = safeStringify(event.plan, TRUNC_SUMMARY);
       break;
     case 'auto_review.requested':
       base.name = 'auto_review.requested';
       base.attributes['kite_code.interaction_id'] = event.reviewId;
       base.attributes['kite_code.tool.call_id'] = event.toolCallId;
       base.attributes['kite_code.tool.name'] = event.toolName;
-      base.attributes['kite_code.auto_review.reason'] = trunc(event.reason, TRUNC_SUMMARY);
       break;
     case 'auto_review.completed':
       base.name = 'auto_review.completed';
       base.attributes['kite_code.interaction_id'] = event.reviewId;
       base.attributes['kite_code.tool.call_id'] = event.toolCallId;
       base.attributes['kite_code.auto_review.approved'] = event.result.approved;
-      base.attributes['kite_code.auto_review.reason'] = trunc(
-        event.result.reason ?? '',
-        TRUNC_SUMMARY,
-      );
       base.attributes['kite_code.auto_review.model'] = event.result.reviewerModelName ?? 'unknown';
       base.attributes['kite_code.auto_review.duration_ms'] = event.result.durationMs;
       break;
     case 'verification.requested':
       base.attributes['kite_code.verification.id'] = event.verificationId;
       base.attributes['kite_code.verification.mode'] = event.mode;
-      base.attributes['kite_code.verification.subject'] = trunc(event.spec.subject, TRUNC_SUMMARY);
       break;
     case 'verification.started':
       base.attributes['kite_code.verification.id'] = event.verificationId;
@@ -578,13 +567,11 @@ export function recordRuntimeEvent(
       base.name = 'subagent.start';
       base.attributes['kite_code.subagent.id'] = event.subagent.id;
       base.attributes['kite_code.subagent.role'] = event.subagent.role;
-      base.attributes['kite_code.subagent.task'] = trunc(event.subagent.task, TRUNC_SUMMARY);
       break;
     case 'subagent.step':
       base.name = 'subagent.step';
       base.attributes['kite_code.subagent.id'] = event.subagent.id;
       base.attributes['kite_code.tool.name'] = event.subagent.toolName;
-      base.attributes['kite_code.tool.args'] = safeStringify(event.subagent.toolArgs, TRUNC_ARGS);
       break;
     case 'subagent.tool_result':
       base.name = 'subagent.tool_result';
@@ -593,16 +580,11 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.tool.ok'] = event.subagent.ok;
       if (event.subagent.failureReason)
         base.attributes['kite_code.tool.failure_reason'] = event.subagent.failureReason;
-      if (!event.subagent.ok)
-        base.status = { code: 'ERROR', message: event.subagent.summary ?? 'tool failed' };
+      if (!event.subagent.ok) base.status = { code: 'ERROR', message: 'tool failed' };
       break;
     case 'subagent.suspended':
       base.name = 'subagent.suspended';
       base.attributes['kite_code.subagent.blocked_tool'] = event.snapshot.blockedTool.toolName;
-      base.attributes['kite_code.subagent.blocked_command'] = trunc(
-        event.snapshot.blockedTool.command,
-        TRUNC_SUMMARY,
-      );
       base.attributes['kite_code.subagent.id'] = event.snapshot.subagentId;
       base.attributes['kite_code.subagent.role'] = event.snapshot.role;
       base.attributes['kite_code.subagent.tool_call_count'] = event.snapshot.toolCallCount;
@@ -611,17 +593,12 @@ export function recordRuntimeEvent(
     case 'subagent.failed':
       base.name = event.type === 'subagent.completed' ? 'subagent.done' : 'subagent.error';
       base.attributes['kite_code.subagent.id'] = event.subagent.id;
-      if (event.subagent.summary)
-        base.attributes['kite_code.subagent.summary'] = trunc(
-          event.subagent.summary,
-          TRUNC_SUMMARY,
-        );
       if (event.subagent.toolCallCount != null)
         base.attributes['kite_code.subagent.tool_call_count'] = event.subagent.toolCallCount;
       if (event.subagent.durationMs != null)
         base.attributes['kite_code.subagent.duration_ms'] = event.subagent.durationMs;
       if (event.type === 'subagent.failed')
-        base.status = { code: 'ERROR', message: event.subagent.error };
+        base.status = { code: 'ERROR', message: 'subagent failed' };
       break;
     case 'subagent.cache_metrics':
       base.name = 'subagent.cache_metrics';

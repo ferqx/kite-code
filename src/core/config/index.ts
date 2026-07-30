@@ -5,6 +5,10 @@ import { z } from 'zod';
 import type { FeatureFlags } from './features';
 import { mcpServerSchema } from './mcp-server-config';
 import { defaultConfigPath, projectConfigPath } from './paths';
+import {
+  resolveSessionLoggingPolicyV1,
+  type SessionLoggingPolicyV1,
+} from './session-logging-policy';
 
 export {
   DEFAULT_FEATURE_FLAGS,
@@ -138,6 +142,15 @@ const sandboxSchema = z
     enabled: z.boolean().optional(),
   })
   .optional();
+const sessionLoggingTighteningSchema = z
+  .object({
+    mode: z.enum(['off', 'metadata', 'content']).optional(),
+    retentionDays: z.number().int().positive().optional(),
+    maxTotalBytes: z.number().int().positive().optional(),
+    maxSessionBytes: z.number().int().positive().optional(),
+  })
+  .strict()
+  .optional();
 
 const featuresSchema = z
   .object({
@@ -174,6 +187,7 @@ export const configSchema = z.object({
   colorPreset: z.string().optional(),
   interactionMode: interactionModeSchema.optional(),
   features: featuresSchema,
+  sessionLogging: sessionLoggingTighteningSchema,
   sandbox: sandboxSchema,
   autoReview: z
     .object({
@@ -277,6 +291,8 @@ export interface AgentConfig {
   };
   interactionMode?: z.infer<typeof interactionModeSchema>;
   features?: Partial<FeatureFlags>;
+  /** Resolved artifact + user + project session logging policy. */
+  sessionLoggingPolicy?: SessionLoggingPolicyV1;
   sandbox: {
     enabled: boolean;
   };
@@ -300,6 +316,8 @@ export interface LoadAgentConfigOptions {
   providerName?: string;
   /** 覆盖默认模型名称 / Override default model name */
   modelName?: string;
+  /** Release-controlled policy; callers cannot source this from project config. */
+  artifactSessionLoggingPolicy?: SessionLoggingPolicyV1;
 }
 
 export {
@@ -339,6 +357,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     colorPreset: project.colorPreset ?? user.colorPreset,
     interactionMode: project.interactionMode ?? user.interactionMode,
     features: { ...user.features, ...project.features },
+    sessionLogging: project.sessionLogging ?? user.sessionLogging,
     sandbox: project.sandbox ?? user.sandbox,
     autoReview: project.autoReview ?? user.autoReview,
     compaction: project.compaction ?? user.compaction,
@@ -392,6 +411,18 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
 export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConfig {
   const { configPath } = options;
   const cfg = loadConfig(process.cwd(), configPath);
+  const userSessionLogging = configPath
+    ? cfg.sessionLogging
+    : readConfigFile(defaultConfigPath())?.sessionLogging;
+  const projectSessionLogging = configPath
+    ? undefined
+    : readConfigFile(projectConfigPath(process.cwd()))?.sessionLogging;
+  const sessionLoggingPolicy = resolveSessionLoggingPolicyV1({
+    enabled: cfg.features?.sessionLoggingPolicyV1 ?? false,
+    artifactPolicy: options.artifactSessionLoggingPolicy,
+    user: userSessionLogging,
+    project: projectSessionLogging,
+  });
 
   const defaultModel = findDefaultModel(cfg);
 
@@ -440,6 +471,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
       : {}),
     interactionMode: cfg.interactionMode,
     features: cfg.features,
+    sessionLoggingPolicy,
     sandbox: { enabled: cfg.sandbox?.enabled ?? true },
     autoReview: cfg.autoReview,
     compaction: cfg.compaction,

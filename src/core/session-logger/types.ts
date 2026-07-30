@@ -85,6 +85,25 @@ export interface SessionMetadataContextV1 {
   releaseCohort?: string;
 }
 
+export interface SessionLoggingDiagnosticV1 {
+  code: 'writer_unavailable';
+  message: 'Session logging is unavailable; the Agent will continue without a logging fallback.';
+}
+
+export type SessionLoggingContentProvenanceV1 = 'user_message' | 'model_visible_answer';
+
+/** Trusted, structured result from the Runtime secret detector. */
+export interface SessionLoggingContentInspectionV1 {
+  schemaVersion: 1;
+  detector: 'runtime_secret_detector';
+  verdict: 'clear' | 'secret' | 'unknown';
+}
+
+export type SessionLoggingContentInspectorV1 = (input: {
+  text: string;
+  provenance: SessionLoggingContentProvenanceV1;
+}) => SessionLoggingContentInspectionV1;
+
 // ── 会话摘要 ──
 
 export interface RunSummary {

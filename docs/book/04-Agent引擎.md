@@ -47,6 +47,8 @@ Plan mode 与普通执行共享同一个 Kernel，只通过策略和可用工具
 Scheduler 只有在没有待执行工具、审批、Provider Action、恢复动作或 required verification 门禁时才可 `emit_final`。失败根据分类进入重试、repair、replan、用户决策或终止；关闭 feature flag 不能绕过已持久化的安全门禁。
 
 MCP Provider Action 是持久化交互。旧 Tool Call 必须先失败并退出调度，Runtime 才向 App shell 请求固定的 login、approve 或 retry。恢复成功会开始新 turn，旧 binding、approval、参数和 invocation 都不重放；延后或失败也会形成明确事实并清除交互。
+工具失败与紧随其后的 Provider Action 使用同一有序 event batch 提交，确保 Kernel 不会在
+Tool Call 仍为 running 时拒绝或提前展示恢复交互。
 
 新 run 还会在第一次模型调用前执行 required Provider 准入。ready/degraded 可继续，其余 Provider 逐个等待 retry、当前 session waiver 或 cancel。Waiver 是持久事实但不会恢复能力可见性；cancel 会取消任务并中止 turn。
 

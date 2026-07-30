@@ -11,7 +11,6 @@ import {
   findBlock,
   findBlockById,
   lastTurn,
-  mergeConsecutiveTextBlocksInLastTurn,
   replaceBlockById,
 } from './helpers';
 
@@ -305,14 +304,13 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       };
     }
     case 'SET_EXITED': {
-      const s = finalizeLastTurnStreaming(settleActiveThought(state));
-      const merged = mergeConsecutiveTextBlocksInLastTurn(s);
+      const settled = finalizeLastTurnStreaming(settleActiveThought(state));
       return {
-        ...merged,
+        ...settled,
         running: false,
         exited: true,
         interrupt: null,
-        status: { ...merged.status, currentNode: null, plan: null },
+        status: { ...settled.status, currentNode: null, plan: null },
       };
     }
     case 'RESOLVE_INTERRUPT': {
