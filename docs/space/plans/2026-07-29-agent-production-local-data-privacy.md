@@ -7,8 +7,9 @@
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §3.4、§9.5、§13、§14
 
-当前 execution binding：Task 1A.1 为 `in_progress`，baseline commit 为
-`4be8735b29ec0fe3951bf7a0876f7b5e722c846a`；规范记录见
+Task 1A.1 已由 `4b8eec058df0af545675fc0e1c4135ee855848fd` 完成；Task 1A.5 为
+`ready`，baseline commit 为该实现提交。Task 1A.2 仍等待 1C.4，1A.3/1A.4/1A.6/1A.7
+继续按依赖保持未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标

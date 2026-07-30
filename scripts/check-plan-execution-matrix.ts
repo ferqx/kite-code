@@ -402,6 +402,7 @@ for (let number = 51; number <= 60; number += 1) {
 }
 
 const phase0ArtifactCommit = '4be8735b29ec0fe3951bf7a0876f7b5e722c846a';
+const phase1SchemaCommit = '4b8eec058df0af545675fc0e1c4135ee855848fd';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
@@ -448,6 +449,20 @@ for (const taskId of ['1A.1', '1C.1']) {
   }
   if (!/\| `(ready|in_progress|completed)` \|/.test(bindingRow)) {
     fail(`${taskId}: post-M0 execution binding must be ready, in_progress, or completed`);
+  }
+}
+
+for (const taskId of ['1A.5', '1C.2', '1C.4']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-schema execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase1SchemaCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed schema implementation baseline`);
+  }
+  if (!bindingRow.includes('| `ready` |')) {
+    fail(`${taskId}: next execution binding must be ready`);
   }
 }
 

@@ -273,10 +273,14 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 0.3 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
 | 0.4 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
 | 0.5 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
-| 1A.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `in_progress` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-30` |
-| 1C.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `in_progress` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
+| 1A.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-30` |
+| 1A.5 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `ready` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-30` |
+| 1C.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
+| 1C.2 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `ready` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
+| 1C.4 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `ready` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 
-除已满足依赖并准备启动的 1A.1/1C.1 外，其他非 Phase 0 Task 不创建 execution binding。
+除已完成的 1A.1/1C.1 和依赖已满足、准备启动的 1A.5/1C.2/1C.4 外，其他非 Phase 0 Task
+不创建 execution binding。
 
 ## Revision history
 
@@ -286,3 +290,4 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 2 | 2026-07-30 | 采用 single-maintainer 治理；D-13 关闭，external 前增加第三方安全评审硬门禁 | 用户直接决策、ADR-0060 |
 | 3 | 2026-07-30 | 按批准包关闭 D-02/D-08/D-09/D-11/D-12/D-14，并接受 ADR-0051–0059 | 用户直接批准的 Phase 0 决策包 |
 | 4 | 2026-07-30 | Task 0.5 产生 `MS:M0`；完成 Phase 0 并激活 1A.1/1C.1 binding | [Phase 0 完成记录](../execution/completed/2026-07-30-agent-production-governance.md)、`4be8735b29ec0fe3951bf7a0876f7b5e722c846a` |
+| 5 | 2026-07-30 | 完成 1A.1/1C.1；激活 1A.5/1C.2/1C.4 | `4b8eec058df0af545675fc0e1c4135ee855848fd`、默认测试 2005 pass/6 skip、定向测试 17 pass |

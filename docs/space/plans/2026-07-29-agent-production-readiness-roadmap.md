@@ -36,7 +36,8 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   唯一产生；artifact commit 为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。
 - Gate 结论仅为 `approved_for_internal_implementation`，不生成 production artifact，也不允许
   external cohort。
-- 当前只有 1A.1 与 1C.1 具备 `ready` execution binding；后续 milestone 均为 pending。
+- 1A.1 与 1C.1 已完成；当前 1A.5、1C.2 与 1C.4 具备 `ready` execution binding，后续
+  milestone 均为 pending。
 
 ## 首发支持边界
 
