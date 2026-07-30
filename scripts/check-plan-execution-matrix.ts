@@ -404,6 +404,7 @@ for (let number = 51; number <= 60; number += 1) {
 const phase0ArtifactCommit = '4be8735b29ec0fe3951bf7a0876f7b5e722c846a';
 const phase1SchemaCommit = '4b8eec058df0af545675fc0e1c4135ee855848fd';
 const phase1AdmissionCommit = '1e21055eb8b2579d710eb566728294f2ad8b2621';
+const phase1OperationalCommit = 'd0bd571e6a937aac55850bcc09df6f41bf95ac99';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
@@ -476,6 +477,20 @@ for (const taskId of ['1A.2', '1C.3']) {
   if (!bindingRow.includes(`| \`${phase1AdmissionCommit}\` |`)) {
     fail(`${taskId}: binding must use the completed admission/taxonomy implementation baseline`);
   }
+  if (!bindingRow.includes('| `completed` |')) {
+    fail(`${taskId}: operational execution binding must be completed`);
+  }
+}
+
+for (const taskId of ['1A.3', '1C.6']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-operational execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase1OperationalCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed operational implementation baseline`);
+  }
   if (!bindingRow.includes('| `ready` |')) {
     fail(`${taskId}: next execution binding must be ready`);
   }
@@ -506,6 +521,9 @@ for (const completionPath of phase1CompletionRecords) {
   }
   if (!completion.includes(phase1AdmissionCommit)) {
     fail(`${relative(root, completionPath)} must identify the admission/taxonomy implementation`);
+  }
+  if (!completion.includes(phase1OperationalCommit)) {
+    fail(`${relative(root, completionPath)} must identify the operational implementation`);
   }
 }
 
