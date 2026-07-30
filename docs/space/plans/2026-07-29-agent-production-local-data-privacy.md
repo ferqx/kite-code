@@ -7,8 +7,8 @@
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §3.4、§9.5、§13、§14
 
-Task 1A.1、1A.2 与 1A.5 已完成；1A.2 实现提交为
-`d0bd571e6a937aac55850bcc09df6f41bf95ac99`。Task 1A.3 已具备 `ready` binding；其余 Task
+Task 1A.1、1A.2、1A.3 与 1A.5 已完成；1A.3 实现提交为
+`2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`。Task 1A.4 已具备 `ready` binding；其余 Task
 继续按依赖保持未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
@@ -68,7 +68,7 @@ Task 1A.1、1A.2 与 1A.5 已完成；1A.2 实现提交为
 | --- | --- | --- | --- | --- |
 | 1A.1 | `T:0:0.2`、`T:0:0.3`、`D-02:CLOSED`、`D-14:CLOSED` | `src/core/config/session-logging-policy.ts`、`provider-data-policy.ts`、`release/provider-data-policies/`、schema/property tests | `bun test tests/config.test.ts tests/config/provider-data-policy.test.ts`；`bun run typecheck` | `sessionLoggingPolicyV1=false`、`providerDataPolicyV1=false`；production 缺失时 fail closed |
 | 1A.2 | 1A.1、`T:1C:1C.4` | `src/core/session-logger/metadata-mapper.ts`、types/collector、secret fixtures | `bun test tests/session-logger/metadata.test.ts` | 跟随 `sessionLoggingPolicyV1`；关闭时 production logging=off，不回旧 serializer |
-| 1A.3 | 1A.2 | `src/core/runtime/agent.ts`、`src/app/cli/index.ts`、`src/app/tui/run-agent.ts`、`session-manager.ts`、`tests/session-logger/composition.test.ts`、`tests/tui-system/scenarios/session-logging-status.test.ts` | `bun test tests/session-logger/collector.test.ts tests/session-logger/composition.test.ts tests/config.test.ts`；`bun test tests/tui-system/scenarios/session-logging-status.test.ts` | 双路径至少两周；production profile 只允许新 policy path |
+| 1A.3 | 1A.2 | `src/core/runtime/agent.ts`、`src/app/cli/index.ts`、`src/app/tui/run-agent.ts`、`session-manager.ts`、`tests/session-logger/composition.test.ts`、`tests/tui-system/scenarios/session-logging-status.test.ts` | `bun test tests/session-logger/composition.test.ts tests/session-logger/metadata.test.ts tests/session-logger/writer.test.ts tests/config.test.ts`；`bun test tests/tui-system/scenarios/session-logging-status.test.ts` | 双路径至少两周；production profile 只允许新 policy path |
 | 1A.4 | 1A.3 | secure writer、`active-session-lease.ts`、retention/migration、`scripts/release/session-log-acl-smoke.ts` | `bun test tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts`；POSIX/Windows ACL workflow | migration 先收紧权限再切换；lease 不确定时不删除 |
 | 1A.5 | 1A.1、`D-14:CLOSED` | policy registry/loader、route/data classifier、payload provenance、model admission/status tests | `bun test tests/config/provider-data-policy.test.ts tests/model-provider-data-policy.test.ts` | `providerDataPolicyV1=false` 时 production route 全部关闭；旧资格全部失效 |
 | 1A.6 | 1A.1、1A.5、`T:1B:1B.4` | MCP route identity/egress permit/policy/integration/concurrency tests | `bun test tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts` | `remoteMcpEgressPolicyV1=false`；回滚为禁止 remote content egress |
@@ -244,6 +244,10 @@ bun run typecheck
 - `off` 模式无日志根目录；
 - project 配置尝试开启 content 被拒；
 - logger 构造失败不影响只读 Runtime，但不写到不安全 fallback。
+
+完成证据：`2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`；独立复核未发现 P0/P1，
+定向回归 333 pass，默认套件 2067 pass/6 skip，真实 content composition、writer
+fail-closed 与 TUI/CLI mode/status 均已覆盖。
 
 ### Task 1A.4：文件权限、轮转与迁移
 

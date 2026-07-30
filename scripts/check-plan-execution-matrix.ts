@@ -405,10 +405,12 @@ const phase0ArtifactCommit = '4be8735b29ec0fe3951bf7a0876f7b5e722c846a';
 const phase1SchemaCommit = '4b8eec058df0af545675fc0e1c4135ee855848fd';
 const phase1AdmissionCommit = '1e21055eb8b2579d710eb566728294f2ad8b2621';
 const phase1OperationalCommit = 'd0bd571e6a937aac55850bcc09df6f41bf95ac99';
+const phase1CompositionCommit = '2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
   ['2026-07-29-agent-production-local-data-privacy.md', 'active'],
+  ['2026-07-29-agent-production-execution-isolation.md', 'active'],
   ['2026-07-29-agent-production-runtime-resilience.md', 'active'],
 ]);
 for (const [file, expectedState] of expectedPlanStates) {
@@ -488,8 +490,22 @@ for (const taskId of ['1A.3', '1C.6']) {
     fail(`${taskId}: missing post-operational execution binding`);
     continue;
   }
-  if (!bindingRow.includes(`| \`${phase1OperationalCommit}\` |`)) {
-    fail(`${taskId}: binding must use the completed operational implementation baseline`);
+  if (!bindingRow.includes(`| \`${phase1CompositionCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed composition/stability implementation`);
+  }
+  if (!bindingRow.includes('| `completed` |')) {
+    fail(`${taskId}: composition/stability execution binding must be completed`);
+  }
+}
+
+for (const taskId of ['1A.4', '1B.0']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing next execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase1CompositionCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed composition/stability baseline`);
   }
   if (!bindingRow.includes('| `ready` |')) {
     fail(`${taskId}: next execution binding must be ready`);
@@ -524,6 +540,11 @@ for (const completionPath of phase1CompletionRecords) {
   }
   if (!completion.includes(phase1OperationalCommit)) {
     fail(`${relative(root, completionPath)} must identify the operational implementation`);
+  }
+  if (!completion.includes(phase1CompositionCommit)) {
+    fail(
+      `${relative(root, completionPath)} must identify the composition/stability implementation`,
+    );
   }
 }
 

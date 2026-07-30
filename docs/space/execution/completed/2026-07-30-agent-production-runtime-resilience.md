@@ -1,14 +1,16 @@
-# Agent 生产化 Phase 1C Task 1C.1/1C.2/1C.3/1C.4 完成记录
+# Agent 生产化 Phase 1C Task 1C.1/1C.2/1C.3/1C.4/1C.6 完成记录
 
 状态：completed
 日期：2026-07-30
+更新：2026-07-31（补充 Task 1C.6）
 计划：
 [`2026-07-29-agent-production-runtime-resilience.md`](../../plans/2026-07-29-agent-production-runtime-resilience.md)
 执行者：`github:@ferqx`
 实现提交：
 `1C.1=4b8eec058df0af545675fc0e1c4135ee855848fd`；
 `1C.2/1C.4=1e21055eb8b2579d710eb566728294f2ad8b2621`；
-`1C.2-hardening/1C.3=d0bd571e6a937aac55850bcc09df6f41bf95ac99`
+`1C.2-hardening/1C.3=d0bd571e6a937aac55850bcc09df6f41bf95ac99`；
+`1C.6=2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`
 
 ## Task 1C.1
 
@@ -49,10 +51,23 @@
   verification 字段；TUI/CLI 共享 mapper。
 - v18→v19 保留 ledger 并补空 queue；既有 v16/v17 migration fixtures 继续通过。
 
+## Task 1C.6
+
+- `TerminalFocusStore` 把全部 React subscriber 复用为单一 stdin listener，首订阅开启
+  DEC 1004，末退订移除 listener 并关闭 focus reporting。
+- Kernel batch 在包含 `run.completed` 时创建命名 rewind snapshot；工具失败后的
+  `provider.action_required` 与 terminal event 保持批内顺序；TUI `SET_EXITED` 保留已提交给
+  Ink Static 的 streamed paragraph。
+- PTY runner 每个 scenario 后采集协调进程 RSS、active resource 与 FD，并对持续正斜率
+  fail closed；workspace trust 使用新增输出握手确认输入 handler 已就绪，并及时回收重启进程。
+
 ## 验证
 
-- 独立只读复核：1C.3 PASS、无残余 P0/P1；联合定向回归 125 pass/0 fail；
-- 标准默认套件：2059 pass/6 skip/0 fail；
+- 独立只读复核：1C.6 GO、无 P0/P1；联合定向回归 333 pass/0 fail；
+- 同一冻结快照连续两次完整 `bun run test:tui:system` 均 36/36，无 warning/timeout；两次趋势
+  均为 RSS 30→31 MiB、active 0→0、FD 5→5；
+- workspace trust 孤立连续 3 次均 4/4；本地 `--rerun-each 5` 为 20/20；
+- 标准默认套件：2067 pass/6 skip/0 fail；
 - `bun run check:docs-impact`、`bun run check:docs`、`bun run check:core-boundary`、
   `bun run typecheck`、Biome 和 `git diff --check`：通过；
 - pre-commit golden：10 pass。
@@ -63,9 +78,6 @@
   `legacy_unconfigured` snapshot 不允许热补余额。
 - `terminalOutcomeV1=false` 只回滚客户端 rollout；production 客户端不得把 unknown/block/
   budget/saturation 显示为完成。
-- 默认测试仍出现既有 TUI `MaxListenersExceededWarning`；本记录不把该 warning 当绿色证据，
-  root-cause 修复属于 1C.6。
-- 既有 MCP authentication PTY 请求计数失败已在基线提交独立复现；failure-mode conformance、
-  PTY/listener root cause、soak/fault evidence 和 `MS:1C-DONE` 仍等待 1C.5–1C.8。
+- failure-mode conformance、soak/fault evidence 和 `MS:1C-DONE` 仍等待 1C.5、1C.7 与 1C.8。
 - Phase 2 Release Profile/Gate 尚未组合，本记录不生成 production artifact 或 production-ready
   结论。

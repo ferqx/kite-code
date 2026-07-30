@@ -1,11 +1,15 @@
 # Agent 生产化 Phase 1B：执行隔离与变更边界计划
 
-状态：draft
+状态：active
 创建：2026-07-29
 优先级：P0
 依赖：
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §7、§9.4、§18
+
+Task 1B.0 已基于 `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` 建立 `ready`
+execution binding；后续 Task 继续按依赖保持未绑定。规范记录见
+[decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
 

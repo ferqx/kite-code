@@ -9,8 +9,8 @@
 
 Task 1C.1 已由 `4b8eec058df0af545675fc0e1c4135ee855848fd` 完成；Task 1C.2 与
 1C.4 已由 `1e21055eb8b2579d710eb566728294f2ad8b2621` 完成；Task 1C.3 已由
-`d0bd571e6a937aac55850bcc09df6f41bf95ac99` 完成。Task 1C.6 已具备 `ready`
-binding；其余 Task 继续按依赖保持未绑定。规范记录见
+`d0bd571e6a937aac55850bcc09df6f41bf95ac99` 完成；Task 1C.6 已由
+`2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` 完成。其余 Task 继续按依赖保持未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
@@ -367,9 +367,12 @@ ADR-0049/ADR-0050 的调度/客户端投影在 upgrade、feature disable 和 art
 - listener、FD、handle、RSS 没有持续正斜率；
 - 孤立与完整 suite 结果一致。
 
-2026-07-30 增量复核的单次完整 suite 已通过，说明原 Sub-agent timeout 不再是当前单次
-必现故障；但 `MaxListenersExceededWarning` 仍存在，且尚未完成连续运行和资源斜率验证，
-因此本 Task 仍是 P0，不能提前关闭。
+完成证据：`2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`。进程级
+`TerminalFocusStore` 将任意 React subscriber 复用到单一 stdin listener，并在首订阅/末退订
+对称管理 DEC 1004；PTY suite runner 在每个 scenario 后采集 RSS、active resource 与 FD 趋势。
+同一冻结快照连续两次完整 suite 均 36/36，无 warning/timeout，趋势均为
+RSS 30→31 MiB、active 0→0、FD 5→5。workspace trust 使用可观察的 Up/Down 输入握手并及时
+回收重启进程，孤立重复与完整 suite 均稳定通过。
 
 ### Task 1C.7：soak 与故障注入
 

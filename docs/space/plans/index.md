@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-30（完成 Task 1A.2/1C.3）
+最后更新：2026-07-31（完成 Task 1A.3/1C.6）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -21,9 +21,9 @@
 |------|------|--------|------|-----------|----------|
 | [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | active | P0 | 已批准 Agent 生产就绪 RFC | Phase 0–6 总入口 | `MS:M0` 已完成；首发拓扑、依赖图、后续 Gate、共享证据与回滚规则 |
 | [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | archived | P0 | 生产就绪 roadmap | RFC Phase 0 | single-maintainer 治理与 M0 已完成；[完成记录](../execution/completed/2026-07-30-agent-production-governance.md) |
-| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | active | P0 | `MS:M0` | RFC Phase 1A | Task 1A.1/1A.2/1A.5 completed；Task 1A.3 ready：logger composition/status |
-| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | draft | P0 | Phase 0 | RFC Phase 1B | workspace sandbox、network allowlist、protected path、worktree、MCP transport boundary |
-| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | active | P0 | `MS:M0` | RFC Phase 1C | Task 1C.1–1C.4 completed；Task 1C.6 ready：TUI listener/PTY stability |
+| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | active | P0 | `MS:M0` | RFC Phase 1A | Task 1A.1/1A.2/1A.3/1A.5 completed；Task 1A.4 ready：secure writer/retention/ACL |
+| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | active | P0 | `MS:M0` | RFC Phase 1B | Task 1B.0 ready：平台 backend 可行性与支持矩阵 |
+| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | active | P0 | `MS:M0` | RFC Phase 1C | Task 1C.1–1C.4/1C.6 completed；1C.5/1C.7 仍等待依赖 |
 | [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) | draft | P0 | 2A-F 依赖 Phase 0；2A-RC 依赖 1A–1C/2B/3 | RFC Phase 2A | payload/detached manifest、Release Profile、evidence/Gate、平台制品 |
 | [`2026-07-29-agent-production-evaluation.md`](2026-07-29-agent-production-evaluation.md) | draft | P0 | Phase 0、2A-F；执行 fixture 依赖 1B/1C | RFC Phase 2B | Agent task suite、oracle、重复运行、人工验收 |
 | [`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md) | draft | P0 | 1A、1C、`MS:2A-F`、2B metrics contract | 替代两份 2026-06-18 telemetry 草案 | 无正文 metrics、告警、kill switch、事故演练、limited cohort SLO |
