@@ -446,8 +446,8 @@ for (const taskId of ['1A.1', '1C.1']) {
   if (!bindingRow.includes(`| \`${phase0ArtifactCommit}\` |`)) {
     fail(`${taskId}: binding must use the Phase 0 artifact baseline`);
   }
-  if (!bindingRow.includes('| `ready` |')) {
-    fail(`${taskId}: post-M0 execution binding must be ready`);
+  if (!/\| `(ready|in_progress|completed)` \|/.test(bindingRow)) {
+    fail(`${taskId}: post-M0 execution binding must be ready, in_progress, or completed`);
   }
 }
 

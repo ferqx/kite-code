@@ -36,6 +36,36 @@ export {
   validateMcpServerName,
 } from './mcp-config-repository';
 export { expandEnvVars } from './mcp-server-config';
+export type {
+  ProviderDataPolicyBundleV1,
+  ProviderDataPolicyV1,
+  ProviderRouteIdentityV1,
+  WorkspaceDataLabelV1,
+} from './provider-data-policy';
+export {
+  computeProviderDataPolicyBundleDigest,
+  computeProviderEndpointIdentityDigest,
+  normalizeProviderRouteIdentityV1,
+  parseProviderDataPolicyBundleV1,
+  parseProviderDataPolicyV1,
+  providerDataPolicyBundleV1Schema,
+  providerDataPolicyV1Schema,
+  providerRouteIdentityV1Schema,
+  raiseWorkspaceDataLabelV1,
+  workspaceDataLabelV1Schema,
+} from './provider-data-policy';
+export type {
+  SessionLoggingMode,
+  SessionLoggingPolicyTightening,
+  SessionLoggingPolicyV1,
+} from './session-logging-policy';
+export {
+  DEFAULT_SESSION_LOGGING_POLICY_V1,
+  parseSessionLoggingPolicyV1,
+  resolveSessionLoggingPolicyV1,
+  sessionLoggingPolicyV1Schema,
+  tightenSessionLoggingPolicyV1,
+} from './session-logging-policy';
 
 // ── Zod schemas ──
 
@@ -105,6 +135,9 @@ const featuresSchema = z
     contextCompactionV2: z.boolean().optional(),
     contextCompactionAutoV1: z.boolean().optional(),
     contextCompactionManualV1: z.boolean().optional(),
+    sessionLoggingPolicyV1: z.boolean().optional(),
+    providerDataPolicyV1: z.boolean().optional(),
+    resourceBudgetV1: z.boolean().optional(),
   })
   .strict()
   .optional();

@@ -87,4 +87,9 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 
 ToolSpec Registry 的六个计算原语已按 ADR-0027 完成单路径切换；旧迁移 flag 未接入运行时并已删除，不再接受 `toolSpecRegistryV1` 配置。
 
+生产治理 schema 的 `sessionLoggingPolicyV1`、`providerDataPolicyV1` 和 `resourceBudgetV1`
+均默认关闭。它们分别保护 metadata-first 日志策略、Provider route 数据策略和 Runtime v18
+累计资源 ledger。当前阶段单独启用这些 flag 不会授予 production 资格：Provider 批准 route
+集合为空，logger composition 与 invocation admission 仍由后续 Task 接入。
+
 上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManualV1` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。

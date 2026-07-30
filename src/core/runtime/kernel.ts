@@ -26,6 +26,7 @@ import {
 } from './events';
 import { assertRuntimeStateInvariants } from './invariants';
 import { reduceRuntimeState } from './reducer';
+import { createLegacyResourceBudgetStateV1 } from './resource-budget';
 import { decideNextEffect } from './scheduler';
 import {
   computePlanStructuralDigest,
@@ -702,6 +703,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
     context: normalizeContextRuntimeState((normalizedSnapshot as Partial<RuntimeState>).context),
+    resourceBudget: createLegacyResourceBudgetStateV1(snapshot.schemaVersion),
     providerAdmission: (normalizedSnapshot as Partial<RuntimeState>).providerAdmission ?? {
       pending: [],
       waivers: {},
@@ -763,6 +765,7 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     appliedEventIds?: string[];
     recoveryState?: RuntimeState['recoveryState'];
     context?: RuntimeState['context'];
+    resourceBudget?: RuntimeState['resourceBudget'];
     turn: RuntimeState['turn'] & {
       status?: RuntimeState['turn']['status'];
     };
@@ -773,6 +776,7 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
     context: normalizeContextRuntimeState(raw.context),
+    resourceBudget: raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
     turn: {
       ...state.turn,
       status:

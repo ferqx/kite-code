@@ -20,6 +20,19 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
 - Provider 是否支持 tool calling 与上下文预算会影响 Capability disclosure，但不能改变授权语义。
 - API key、base URL 和本地模型配置不得写入测试 fixture、日志或文档。
 
+`ProviderDataPolicyV1` 是 production route 数据边界的版本化 schema。资格绑定
+provider type、operator、规范化 endpoint origin、endpoint class、deployment 和 region 的
+canonical identity digest，不绑定 model name。仓库受控 snapshot 位于
+`release/provider-data-policies/`；当前 D-14 批准 bundle 明确为空，因此还没有任何
+production-qualified model/MCP route。`providerDataPolicyV1` 默认关闭；Task 1A.5 完成 route
+loader/admission 前，schema 和 bundle 只提供 fail-closed 契约，不改变现有开发 Provider 调用。
+
+`WorkspaceDataLabelV1` 固定 `public < internal < confidential < secret` 的 deny-wins 顺序。
+artifact/admin/project rule/runtime secret detector 只能提高分类；用户主动粘贴或项目配置不能降低
+已有分类，也不自动产生外发授权。日志策略同时固定 metadata-first 的 7 天、总量 256 MiB、单
+session 16 MiB 上限，并永久禁止 reasoning/file/tool content 字段；实际 logger composition 由
+后续 1A.2–1A.4 完成。
+
 模型上下文能力必须先解析为统一的 `ResolvedModelCapabilities`。每个字段只按所选模型条目的显式配置、provider adapter runtime metadata、`modelKwargs` 兼容字段依次解析，并记录 `explicit_config | adapter_runtime | compatibility_config` source；缺失值保持 unknown，布尔能力保持 true/false/unknown 三态。模型名称和默认模型列表不得提供 context window、max output、tokenizer、usage 或 prompt-cache 能力，也不得为未知输出预算隐式预留 4096 tokens。Capability disclosure、上下文 preflight、metrics 和实际模型请求必须共用同一个 resolved object；未知窗口不显示利用率，也不运行 ratio auto，但不阻止普通模型请求或手动 `/compact`。
 
 模型响应流式能力优先从显式模型配置、adapter runtime metadata 或 `modelKwargs.streaming` 解析；缺失时默认 `true` 且不伪造 source，用户无需配置。正常 Agent 调用使用单步 `streamText`，以累计全文语义实时发出不可持久化的 `model.text_delta` / `model.reasoning_delta`；每段连续 reasoning 另发一次带稳定 `segmentId` 的 `model.reasoning_completed`，Provider 缁少显式 start/end 时由 adapter 在 reasoning→text/tool/流结束边界合成。三种瞬态事件都不进入 reducer、event store、snapshot 或 session log，流结束后仍只由 durable `model.responded` 推进 transcript、工具分发和轮次状态。显式 `streaming: false` 时使用 `generateText`；summary/reviewer 等内部模型调用不切换到此 TUI 流式路径。详见 ADR-0034、ADR-0045。

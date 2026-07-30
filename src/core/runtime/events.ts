@@ -41,6 +41,14 @@ import type {
   ContextHardBlockReason,
 } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
+import type {
+  ResourceBudgetConfiguredEvent,
+  ResourceBudgetDispatchStartedEvent,
+  ResourceBudgetReconciledEvent,
+  ResourceBudgetReleasedEvent,
+  ResourceBudgetReservedEvent,
+  ResourceBudgetUnknownEvent,
+} from './resource-budget';
 import type { SkillActivation } from './state';
 
 /** Runtime event metadata used for idempotency, tracing and stale-result checks. */
@@ -889,6 +897,12 @@ export interface SubagentSuspendedEvent {
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
 export type RuntimeEvent =
+  | ResourceBudgetConfiguredEvent
+  | ResourceBudgetReservedEvent
+  | ResourceBudgetDispatchStartedEvent
+  | ResourceBudgetReconciledEvent
+  | ResourceBudgetReleasedEvent
+  | ResourceBudgetUnknownEvent
   | ContextCompactionRequestedEvent
   | ContextCompactionCompletedEvent
   | ContextCompactionFailedEvent

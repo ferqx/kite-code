@@ -7,7 +7,7 @@
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §9.1、§15.3、§17
 
-当前 execution binding：Task 1C.1 为 `ready`，baseline commit 为
+当前 execution binding：Task 1C.1 为 `in_progress`，baseline commit 为
 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`；规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
@@ -32,8 +32,8 @@ TUI、Headless CLI、恢复和 Sub-agent 使用同一失败与降级语义。
 - 取消使用 AbortSignal 与 process-tree guard；
 - 当前 scheduler 对 effect-safe read batch 使用代码常量 `MAX_PARALLEL_READ_TOOLS=4`，
   runner 允许 shell sibling 与后续审批重叠；两者尚未接入 production profile 并发硬预算；
-- 当前持久化 Runtime schema 为 v17，turn lifecycle 包含
-  `active/completed/aborted`；
+- 当前持久化 Runtime schema 为 v18；v17 的 turn lifecycle
+  `active/completed/aborted` 保持不变，v18 新增 fail-closed resource budget ledger；
 - 缺少父 Agent + 全部 Sub-agent 的累计 run budget；
 - failure fallback 分散在入口和 provider；
 - 初始基线出现 `MaxListenersExceededWarning` 和 Sub-agent Read PTY 30 秒超时；2026-07-30
@@ -64,10 +64,10 @@ TUI、Headless CLI、恢复和 Sub-agent 使用同一失败与降级语义。
 
 | Task | dependsOn | 文件/产出 | 定向验证 | 迁移与回滚 |
 | --- | --- | --- | --- | --- |
-| 1C.1 | `T:0:0.2`、`T:0:0.3`、`D-11:CLOSED` | `src/core/runtime/resource-budget.ts`、budget events/store、v17→next migration/recovery tests；消费 2A.1 注入的 effective limits，不改写 `ReleaseProfileV1` | `bun test tests/runtime/resource-budget.test.ts tests/runtime/resource-budget-recovery.test.ts` | `resourceBudgetV1=false` 时拒绝 production run；不存在描述性 legacy fallback |
+| 1C.1 | `T:0:0.2`、`T:0:0.3`、`D-11:CLOSED` | `src/core/runtime/resource-budget.ts`、budget events/store、v17→v18 migration/recovery tests；消费 2A.1 注入的 effective limits，不改写 `ReleaseProfileV1` | `bun test tests/runtime/resource-budget.test.ts tests/runtime/resource-budget-recovery.test.ts` | `resourceBudgetV1=false` 时拒绝 production run；不存在描述性 legacy fallback |
 | 1C.2 | 1C.1 | `scheduler.ts`/`runner.ts`/executor admission、`runtime-scheduling-policy.ts`、batch/tool/shell permit 与 saturation tests | `bun test tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts` | 同 flag；Store/admission/policy snapshot 不可用时副作用前 hard block |
 | 1C.3 | 1C.1、1C.2 | Abort propagation/process-tree cleanup/approval-overlap/recovery tests | `bun test tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts` | `boundedCancellationV1=false` 时 production writer/child capability 关闭 |
-| 1C.4 | `T:0:0.3`、1C.1 | failure/events/state/protocol/TUI/CLI golden、v16→v17→next fixtures | `bun test tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts` | `terminalOutcomeV1=false`；production 不允许旧 UI 把 unknown 显示完成 |
+| 1C.4 | `T:0:0.3`、1C.1 | failure/events/state/protocol/TUI/CLI golden、v16→v17→v18→next fixtures | `bun test tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts` | `terminalOutcomeV1=false`；production 不允许旧 UI 把 unknown 显示完成 |
 | 1C.5 | 1C.2–1C.4、`T:1A:1A.1`、`T:1B:1B.1` | table-driven failure-mode conformance | `bun test tests/runtime/failure-mode-conformance.test.ts` | fixture 失败阻断相关 capability，不放宽 fallback |
 | 1C.6 | 1C.3、1C.4 | TUI listener/PTY root-cause fix、stability tests | `bun run test:tui:system` 连续运行；`bun test tests/runtime/stability.test.ts` | 不以延长 timeout 回滚；失败关闭相关 Sub-agent flow |
 | 1C.7 | 1C.2–1C.6 | soak/fault runner、resource trend/evidence adapter | `bun test tests/runtime/fault-injection.test.ts`；bounded soak runner | 超阈值停止扩面；保留诊断与 pending intent |
@@ -291,7 +291,8 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 - verification failed/inconclusive；
 - mandatory policy unavailable。
 
-迁移以 schema v17 为当前稳定输入，至少提供 v16→v17 和 v17→next fixtures；验证
+迁移以 schema v18 为当前稳定输入，保留 v17 作为前一稳定输入；至少提供
+v16→v17→v18 和 v18→next fixtures；验证
 `active/completed/aborted` turn、pending interaction、tool call/result 顺序以及
 ADR-0049/ADR-0050 的调度/客户端投影在 upgrade、feature disable 和 artifact rollback 后
 继续收敛。
@@ -423,7 +424,7 @@ ADR-0049/ADR-0050 的调度/客户端投影在 upgrade、feature disable 和 art
 - [ ] 完整 PTY suite 无 warning/timeout；
 - [ ] soak 无 listener/FD/handle/RSS 持续增长；
 - [ ] kill -9/磁盘满/网络抖动 fixture 不损坏 Runtime；
-- [ ] schema v16→v17→next 与 rollback fixture 不重开 aborted/completed turn；
+- [ ] schema v16→v17→v18→next 与 rollback fixture 不重开 aborted/completed turn；
 - [ ] active/book/ADR/map 收敛。
 
 ## 回滚

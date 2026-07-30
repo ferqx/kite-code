@@ -24,6 +24,9 @@ describe('feature flags', () => {
     expect(getFeatureFlags().contextCompactionManualV1).toBe(true);
     expect(getFeatureFlags().verificationV1).toBe(false);
     expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
+    expect(getFeatureFlags().sessionLoggingPolicyV1).toBe(false);
+    expect(getFeatureFlags().providerDataPolicyV1).toBe(false);
+    expect(getFeatureFlags().resourceBudgetV1).toBe(false);
     expect(getFeatureFlags({ features: { verificationV1: true } }).verificationV1).toBe(true);
     expect(getFeatureFlags({ features: { mcpRuntimeBindingV1: true } }).mcpRuntimeBindingV1).toBe(
       true,
@@ -39,6 +42,7 @@ describe('feature flags', () => {
     expect(parseFeatureOverride('contextCompactionAutoV1')).toEqual({
       contextCompactionAutoV1: true,
     });
+    expect(parseFeatureOverride('resourceBudgetV1')).toEqual({ resourceBudgetV1: true });
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });
 

@@ -16,6 +16,18 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.
 
+生产治理基础 schema 使用三个默认关闭的迁移 flag：
+
+| 开关 | 默认值 | 当前职责 |
+| --- | --- | --- |
+| `sessionLoggingPolicyV1` | `false` | 注册 metadata-first 日志策略 schema；关闭时 policy resolver 收紧为 `off` |
+| `providerDataPolicyV1` | `false` | 注册仓库受控的 Provider 数据策略 schema；当前批准 route bundle 为空 |
+| `resourceBudgetV1` | `false` | 注册 Runtime v18 累计预算 ledger；invocation admission 接入前不能产生 production 资格 |
+
+这些开关目前只保护 schema 迁移边界。单独打开开关不会让 Provider route、production logging
+或 production run 获得资格；对应 admission/composition Task 完成前仍 fail closed。用户、项目和
+CLI 覆盖只能在后续 effective policy 组合中收紧批准上限。
+
 
 上下文压缩的 flag 术语（功能开关）真值如下：
 

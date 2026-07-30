@@ -18,6 +18,7 @@ import {
 } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
+import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
   computePlanStructuralDigest,
   getActivePlanning,
@@ -140,6 +141,17 @@ function toolResultMeta(
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
   switch (event.type) {
+    case 'resource_budget.configured':
+    case 'resource_budget.reserved':
+    case 'resource_budget.dispatch_started':
+    case 'resource_budget.reconciled':
+    case 'resource_budget.released':
+    case 'resource_budget.unknown':
+      return {
+        ...state,
+        resourceBudget: reduceResourceBudgetStateV1(state.resourceBudget, event),
+      };
+
     case 'context.compaction_requested': {
       const pending = state.context.pendingCompaction;
       if (pending && pending.compactionId !== event.compactionId) return state;

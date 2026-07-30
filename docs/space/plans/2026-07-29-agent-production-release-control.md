@@ -350,7 +350,7 @@ Gate：
 - 从实际 payload 导出 `RuntimeSchedulingPolicyV1`，与 manifest digest、1C evidence 和
   synthetic canonical golden 交叉比对；
 - 只消费各计划按 2A Foundation contract 生成且 identity/freshness 匹配的 evidence；
-- 以 schema v17 为当前复核基线，分别执行 v16→v17、v17→最终 1C schema upgrade 和
+- 以 schema v18 为当前复核基线，分别执行 v16→v17→v18、v18→最终 1C schema upgrade 和
   artifact rollback rehearsal，验证 `aborted/completed` turn、pending interaction、permit
   waiter 与 late tool event 不被错误重开；
 - 运行 actual artifact smoke，不从源码目录替代；

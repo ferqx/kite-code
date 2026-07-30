@@ -37,6 +37,10 @@ import type {
 } from '@/protocol/verification';
 import type { ContextRuntimeState } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
+import {
+  createUnconfiguredResourceBudgetStateV1,
+  type ResourceBudgetRuntimeStateV1,
+} from './resource-budget';
 
 // ── Re-export for convenience ──
 export { getAgentPhase };
@@ -405,7 +409,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 17;
+export const RUNTIME_STATE_SCHEMA_VERSION = 18;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -483,6 +487,8 @@ export interface RuntimeState {
   transcript: TranscriptState;
   /** Durable M2 compaction checkpoint lifecycle. */
   context: ContextRuntimeState;
+  /** Shared cumulative resource ledger for this run and all descendants. */
+  resourceBudget: ResourceBudgetRuntimeStateV1;
   /** 方案生命周期状态（v2: PlanningState 取代 PlanLifecycleState）/ Plan lifecycle state */
   planning: PlanningState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
@@ -579,6 +585,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
         disabledUntilManualAction: false,
       },
     },
+    resourceBudget: createUnconfiguredResourceBudgetStateV1(),
     planning: initialPlanning,
     activeTaskId: null,
     tasks: {},

@@ -273,8 +273,8 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 0.3 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
 | 0.4 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
 | 0.5 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
-| 1A.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `ready` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-30` |
-| 1C.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `ready` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
+| 1A.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `in_progress` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-30` |
+| 1C.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `in_progress` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 
 除已满足依赖并准备启动的 1A.1/1C.1 外，其他非 Phase 0 Task 不创建 execution binding。
 

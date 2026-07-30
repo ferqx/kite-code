@@ -25,8 +25,9 @@
 2026-07-30 的 Phase 0 artifact 不改变 Phase 0–6 顺序、Task ID、`dependsOn` 或 milestone
 producer。它把新 execution binding 的最低 `baselineCommit` 前移到
 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`（或经重新复核的后继提交），并把更早基线的 live
-结果降为历史证据。schema v17、工具调度、系统/工具契约和默认测试 runner 必须进入
-1C/2A/2B/3 的实现及 Release Evidence；不得用本说明把尚未完成的 Task 标为完成。
+结果降为历史证据。1C.1 已把原 schema v17 基线迁移为带 resource ledger 的 v18；v17→v18
+迁移、工具调度、系统/工具契约和默认测试 runner 必须继续进入 1C/2A/2B/3 的实现及 Release
+Evidence；不得用本说明把尚未完成的 Task 标为完成。
 
 ## 里程碑状态
 

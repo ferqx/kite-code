@@ -144,6 +144,19 @@
       ]
     },
     {
+      "id": "provider-data-policy",
+      "sources": [
+        "src/core/config/provider-data-policy.ts",
+        "src/core/config/session-logging-policy.ts",
+        "release/provider-data-policies/**"
+      ],
+      "documents": [
+        "docs/active/model-provider-boundary.md",
+        "docs/active/feature-flags.md",
+        "docs/book/09-CLI模式与配置.md"
+      ]
+    },
+    {
       "id": "live-e2e-boundary",
       "sources": [
         "tests/e2e/live/**",

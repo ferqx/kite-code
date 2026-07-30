@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openpx.dev/schemas/provider-data-policy-v1.schema.json",
+  "title": "ProviderDataPolicyBundleV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "decisionId", "revision", "policies"],
+  "properties": {
+    "version": { "const": 1 },
+    "decisionId": { "const": "D-14" },
+    "revision": { "type": "string", "minLength": 1 },
+    "policies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "version",
+          "policyId",
+          "revision",
+          "decisionId",
+          "approvedRevision",
+          "effectiveFrom",
+          "expiresAt",
+          "routeId",
+          "providerType",
+          "operatorId",
+          "endpointOrigin",
+          "endpointClass",
+          "deploymentId",
+          "endpointIdentityDigest",
+          "region",
+          "credentialOwner",
+          "maxWorkspaceDataClassification",
+          "allowedPayloadKinds",
+          "contentRetention",
+          "trainingUse",
+          "abuseMonitoring",
+          "deletionBoundary",
+          "subprocessors",
+          "dpaOrAdminApproval",
+          "userDisclosureId",
+          "requestLogging",
+          "errorLogging",
+          "productDeletionScope",
+          "allowRemoteMcpContentEgress",
+          "allowProductionContentEvaluation"
+        ],
+        "properties": {
+          "version": { "const": 1 },
+          "policyId": { "type": "string", "minLength": 1 },
+          "revision": { "type": "string", "minLength": 1 },
+          "decisionId": { "const": "D-14" },
+          "approvedRevision": { "type": "string", "minLength": 1 },
+          "effectiveFrom": { "type": "string", "format": "date-time" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "routeId": { "type": "string", "minLength": 1 },
+          "providerType": { "type": "string", "minLength": 1 },
+          "operatorId": { "type": "string", "minLength": 1 },
+          "endpointOrigin": { "type": "string", "format": "uri" },
+          "endpointClass": { "type": "string", "minLength": 1 },
+          "deploymentId": { "type": "string", "minLength": 1 },
+          "endpointIdentityDigest": {
+            "type": "string",
+            "pattern": "^sha256:[a-f0-9]{64}$"
+          },
+          "region": { "type": "string", "minLength": 1 },
+          "credentialOwner": {
+            "enum": ["user_os_identity", "enterprise_admin"]
+          },
+          "maxWorkspaceDataClassification": {
+            "enum": ["public", "internal", "confidential"]
+          },
+          "allowedPayloadKinds": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["userPrompt", "fileSnippet", "toolResult", "summary"],
+            "properties": {
+              "userPrompt": { "type": "boolean" },
+              "fileSnippet": { "type": "boolean" },
+              "toolResult": { "type": "boolean" },
+              "summary": { "type": "boolean" }
+            }
+          },
+          "contentRetention": { "type": "string", "minLength": 1 },
+          "trainingUse": { "enum": ["prohibited", "contract_defined"] },
+          "abuseMonitoring": {
+            "enum": ["none", "metadata_only", "content_contract_defined"]
+          },
+          "deletionBoundary": { "type": "string", "minLength": 1 },
+          "subprocessors": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 }
+          },
+          "dpaOrAdminApproval": {
+            "enum": ["not_required", "required_and_verified"]
+          },
+          "userDisclosureId": { "type": "string", "minLength": 1 },
+          "requestLogging": {
+            "enum": ["none", "metadata", "content_contract_defined"]
+          },
+          "errorLogging": {
+            "enum": ["none", "metadata", "content_contract_defined"]
+          },
+          "productDeletionScope": { "type": "string", "minLength": 1 },
+          "allowRemoteMcpContentEgress": { "type": "boolean" },
+          "allowProductionContentEvaluation": { "const": false }
+        }
+      }
+    }
+  }
+}
