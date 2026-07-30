@@ -25,4 +25,9 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
-      - run: bun run scripts/release/session-log-acl-smoke.ts
+      - run: bun run scripts/release/session-log-acl-smoke.ts session-log-acl-evidence.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: session-log-acl-${{ matrix.os }}
+          path: session-log-acl-evidence.json
+          if-no-files-found: error

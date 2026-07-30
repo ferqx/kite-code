@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import {
   existsSync,
   linkSync,
@@ -13,8 +14,8 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { version as osVersion, release, tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import {
   sessionLogDir,
   sessionLogFrontendDir,
@@ -39,8 +40,13 @@ const SMOKE_POLICY: SessionLoggingPolicyV1 = {
 
 export interface SessionLogAclSmokeEvidenceV1 {
   version: 1;
+  evidenceId: string;
+  capturedAt: string;
   platform: NodeJS.Platform;
+  osRelease: string;
+  osVersion: string;
   arch: string;
+  bunVersion: string;
   directoryIsolation: 'verified';
   fileIsolation: 'verified';
   linkRejection: 'verified';
@@ -125,8 +131,13 @@ export async function runSessionLogAclSmoke(): Promise<SessionLogAclSmokeEvidenc
     await verifyLinkRejection(root);
     return {
       version: 1,
+      evidenceId: randomUUID(),
+      capturedAt: new Date().toISOString(),
       platform: process.platform,
+      osRelease: release(),
+      osVersion: osVersion(),
       arch: process.arch,
+      bunVersion: Bun.version,
       directoryIsolation: 'verified',
       fileIsolation: 'verified',
       linkRejection: 'verified',
@@ -285,5 +296,8 @@ foreach ($path in $paths) {
 
 if (import.meta.main) {
   const evidence = await runSessionLogAclSmoke();
-  process.stdout.write(`${JSON.stringify(evidence)}\n`);
+  const serialized = `${JSON.stringify(evidence)}\n`;
+  const outputPath = process.argv[2];
+  if (outputPath) writeFileSync(resolve(outputPath), serialized, { mode: 0o600 });
+  process.stdout.write(serialized);
 }

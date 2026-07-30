@@ -33,6 +33,8 @@ const SESSION_FILE_ALLOWLIST = new Set([
   SESSION_LOG_LEASE_FILE,
   '.session-operation.lock',
 ]);
+const DEFAULT_MAINTENANCE_DEADLINE_MS = 50;
+const DEFAULT_WINDOWS_MAINTENANCE_DEADLINE_MS = 30_000;
 
 export interface SessionLogMaintenanceOptions
   extends SecureSessionStorageOptions,
@@ -73,7 +75,13 @@ export function runSessionLogMaintenance(
 ): SessionLogMaintenanceReport {
   const root = options.root ?? sessionLogRoot();
   const now = options.now ?? (() => new Date());
-  const deadlineAt = Date.now() + (options.deadlineMs ?? 50);
+  const platform = options.platform ?? process.platform;
+  const deadlineAt =
+    Date.now() +
+    (options.deadlineMs ??
+      (platform === 'win32'
+        ? DEFAULT_WINDOWS_MAINTENANCE_DEADLINE_MS
+        : DEFAULT_MAINTENANCE_DEADLINE_MS));
   const maxEntries = options.maxEntries ?? 512;
   const report: SessionLogMaintenanceReport = {
     scannedEntries: 0,

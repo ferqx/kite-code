@@ -105,6 +105,8 @@ frontend、session 内的每个观察条目都计入预算，不先把任意目�
 基于局部候选执行删除。每次删除前在 session operation lock 内重验 lease 与目录 identity。
 含未知文件/link/hardlink 的 session 移入 owner-only `_quarantine`，并使容量 admission fail
 closed，直到人工处理。扫描超预算、容量不可证明或不安全存储存在时，新 writer 不建立。
+POSIX maintenance 默认时间预算为 50ms；Windows 因 owner-only ACL 需要启动系统 PowerShell，
+默认使用 30 秒预算。两者都保留 512 个观察条目的独立硬上限，显式配置可进一步收紧预算。
 
 不同 session 的 maintenance 与 lease 创建还由 sessions root 的跨进程 admission record
 串行化，避免两个 writer 同时通过总容量检查。operation/admission record 使用 exclusive create
@@ -115,4 +117,5 @@ closed，直到人工处理。扫描超预算、容量不可证明或不安全�
 单 session 使用 UTF-8 byte 计数；达到 `maxSessionBytes` 时最多写一条无正文
 `session.logging_limited` metadata，停止后续记录，并为 bounded terminal marker 预留空间。
 总容量 maintenance 为新 session 预留其完整上限。原生 ACL smoke 在 macOS、Ubuntu 和 Windows
-runner 验证权限、link/reparse rejection 与 terminal 原子落盘。
+runner 验证权限、link/reparse rejection 与 terminal 原子落盘，并分别上传带 OS/Bun
+身份的 `session-log-acl-<runner>` JSON 证据。

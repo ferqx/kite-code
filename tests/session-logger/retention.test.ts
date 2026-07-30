@@ -177,6 +177,28 @@ describe('session log retention and migration', () => {
     expect(report.scannedEntries).toBe(1);
   });
 
+  test('allows bounded Windows ACL setup to exceed the POSIX maintenance deadline', () => {
+    const root = createRoot();
+    let aclCalls = 0;
+
+    const report = runSessionLogMaintenance(POLICY, {
+      root,
+      platform: 'win32',
+      reserveBytes: 0,
+      secureWindowsPath: () => {
+        aclCalls++;
+        const completedAt = Date.now() + 75;
+        while (Date.now() < completedAt) {
+          // Model the bounded system PowerShell startup used by native ACL setup.
+        }
+      },
+    });
+
+    expect(aclCalls).toBe(1);
+    expect(report.bounded).toBe(false);
+    expect(report.capacitySatisfied).toBe(true);
+  });
+
   test('bounds individual session scans without deleting from a partial candidate set', () => {
     const root = createRoot();
     const newer = createSession(root, 'newer');
