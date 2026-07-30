@@ -8,7 +8,8 @@
 设计依据：RFC §9.1、§15.3、§17
 
 Task 1C.1 已由 `4b8eec058df0af545675fc0e1c4135ee855848fd` 完成；Task 1C.2 与
-1C.4 为 `ready`，baseline commit 为该实现提交。其余 Task 继续按依赖保持未绑定。规范记录见
+1C.4 已由 `1e21055eb8b2579d710eb566728294f2ad8b2621` 完成。Task 1C.3 已具备
+`ready` binding；其余 Task 继续按依赖保持未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
