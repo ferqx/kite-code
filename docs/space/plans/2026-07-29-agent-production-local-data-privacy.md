@@ -1,11 +1,15 @@
 # Agent 生产化 Phase 1A：本地日志、Provider 数据与隐私计划
 
-状态：draft
+状态：active
 创建：2026-07-29
 优先级：P0
 依赖：
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §3.4、§9.5、§13、§14
+
+当前 execution binding：Task 1A.1 为 `ready`，baseline commit 为
+`4be8735b29ec0fe3951bf7a0876f7b5e722c846a`；规范记录见
+[decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
 

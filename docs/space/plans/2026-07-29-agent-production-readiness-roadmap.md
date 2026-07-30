@@ -1,10 +1,10 @@
 # Agent 生产就绪实施总路线图
 
-状态：draft
+状态：active
 创建：2026-07-29
 优先级：P0
 初始论证基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
-当前执行复核基线：`a316a2df63e511f839d08aa72a20275afa8e3366`（2026-07-30）
+当前执行复核基线：`4be8735b29ec0fe3951bf7a0876f7b5e722c846a`（2026-07-30）
 依赖：已批准的
 [`Agent 生产就绪与渐进发布控制 RFC`](../../design/2026-07-29-agent-production-readiness-rfc.md)
 替代：无
@@ -22,11 +22,20 @@
 4. 明确哪些工作可以并行、哪些工作必须串行；
 5. 规定计划完成后如何更新 active 文档、ADR、完成记录和发布结论。
 
-2026-07-30 的合并增量不改变 Phase 0–6 顺序、Task ID、`dependsOn` 或 milestone
-producer。它把所有新 execution binding 的最低 `baselineCommit` 前移到
-`a316a2df63e511f839d08aa72a20275afa8e3366`（或经重新复核的后继提交），并把原基线的 live
-结果降为历史证据。新基线新增的 schema v17、工具调度、系统/工具契约和默认测试 runner
-必须进入 1C/2A/2B/3 的实现及 Release Evidence；不得用本说明把尚未完成的 Task 标为完成。
+2026-07-30 的 Phase 0 artifact 不改变 Phase 0–6 顺序、Task ID、`dependsOn` 或 milestone
+producer。它把新 execution binding 的最低 `baselineCommit` 前移到
+`4be8735b29ec0fe3951bf7a0876f7b5e722c846a`（或经重新复核的后继提交），并把更早基线的 live
+结果降为历史证据。schema v17、工具调度、系统/工具契约和默认测试 runner 必须进入
+1C/2A/2B/3 的实现及 Release Evidence；不得用本说明把尚未完成的 Task 标为完成。
+
+## 里程碑状态
+
+- `MS:M0`：2026-07-30 已完成，由
+  [Phase 0 Task 0.5 完成记录](../execution/completed/2026-07-30-agent-production-governance.md)
+  唯一产生；artifact commit 为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。
+- Gate 结论仅为 `approved_for_internal_implementation`，不生成 production artifact，也不允许
+  external cohort。
+- 当前只有 1A.1 与 1C.1 具备 `ready` execution binding；后续 milestone 均为 pending。
 
 ## 首发支持边界
 

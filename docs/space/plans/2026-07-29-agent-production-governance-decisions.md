@@ -1,6 +1,6 @@
 # Agent 生产化 Phase 0：治理、决策与 ADR 计划
 
-状态：active
+状态：archived
 创建：2026-07-29
 优先级：P0
 依赖：
@@ -33,11 +33,13 @@
 
 ## 当前进度
 
-- Task 0.1–0.4 的工作区产出已建立并通过定向门禁，状态保持 `in_progress`，等待形成可审计
-  commit/artifact 与评审记录后再标记完成；
+- Task 0.1–0.5 已完成；Phase 0 artifact commit 为
+  `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`；
 - D-02/D-08/D-09/D-11/D-12/D-13/D-14 已关闭，ADR-0051–0060 已接受；
-- Task 0.5 等待 Task 0.1–0.4 形成真实 commit/artifact 后执行最终评审；
-- 当前不产生 `MS:M0`，所有非 Phase 0 子计划保持 `draft` 且没有 execution binding。
+- [Task 0.5 完成记录](../execution/completed/2026-07-30-agent-production-governance.md)
+  唯一产生 `MS:M0`，结论为 `approved_for_internal_implementation`；
+- 1A.1/1C.1 已建立 `ready` execution binding；其余非 Phase 0 Task 仍按依赖保持未绑定；
+- 本阶段没有改变生产 Runtime 行为，也没有生成 `limited-production` artifact。
 
 ## 需要关闭的决策
 

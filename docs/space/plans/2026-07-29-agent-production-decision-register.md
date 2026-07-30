@@ -261,20 +261,22 @@
 
 ## Execution bindings
 
-当前基线 `9a94379afec288394abcf8f36a076789102b1066` 是路线图复核基线
-`a316a2df63e511f839d08aa72a20275afa8e3366` 的后继；增量
-`a316a2d..9a94379` 只修改 RFC、计划、理解与索引文档，没有生产源码、Runtime schema、system/tool
-contract 或测试 runner 变化。旧 live evidence 仍按路线图降为历史结果。
+Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提交是路线图复核
+基线 `a316a2df63e511f839d08aa72a20275afa8e3366` 的后继；增量只修改 RFC、计划、ADR、
+治理门禁与索引文档，没有生产源码、Runtime schema、system/tool contract 或测试 runner
+变化。旧 live evidence 仍按路线图降为历史结果。
 
 | taskId | executor | baselineCommit | branch | status | blockedReason | completionRecordPath | activatedAt |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| 0.1 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `in_progress` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
-| 0.2 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `in_progress` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
-| 0.3 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `in_progress` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
-| 0.4 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `in_progress` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
-| 0.5 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `blocked` | Task 0.1–0.4 尚未形成真实 commit/artifact | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
+| 0.1 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
+| 0.2 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
+| 0.3 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
+| 0.4 | `github:@ferqx` | `9a94379afec288394abcf8f36a076789102b1066` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
+| 0.5 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-governance.md` | `2026-07-30` |
+| 1A.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `ready` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-30` |
+| 1C.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `ready` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 
-Phase 4–6 与其他非 Phase 0 Task 不创建 execution binding。
+除已满足依赖并准备启动的 1A.1/1C.1 外，其他非 Phase 0 Task 不创建 execution binding。
 
 ## Revision history
 
@@ -283,3 +285,4 @@ Phase 4–6 与其他非 Phase 0 Task 不创建 execution binding。
 | 1 | 2026-07-30 | 建立 14 项决策、Owner/backup、严格默认值和首批 Phase 0 binding | RFC §16/§24、当前 Git identity 与基线增量复核 |
 | 2 | 2026-07-30 | 采用 single-maintainer 治理；D-13 关闭，external 前增加第三方安全评审硬门禁 | 用户直接决策、ADR-0060 |
 | 3 | 2026-07-30 | 按批准包关闭 D-02/D-08/D-09/D-11/D-12/D-14，并接受 ADR-0051–0059 | 用户直接批准的 Phase 0 决策包 |
+| 4 | 2026-07-30 | Task 0.5 产生 `MS:M0`；完成 Phase 0 并激活 1A.1/1C.1 binding | [Phase 0 完成记录](../execution/completed/2026-07-30-agent-production-governance.md)、`4be8735b29ec0fe3951bf7a0876f7b5e722c846a` |

@@ -401,6 +401,56 @@ for (let number = 51; number <= 60; number += 1) {
   if (!/^状态：accepted$/m.test(source)) fail(`ADR-${prefix}: must be accepted`);
 }
 
+const phase0ArtifactCommit = '4be8735b29ec0fe3951bf7a0876f7b5e722c846a';
+const expectedPlanStates = new Map([
+  ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
+  ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
+  ['2026-07-29-agent-production-local-data-privacy.md', 'active'],
+  ['2026-07-29-agent-production-runtime-resilience.md', 'active'],
+]);
+for (const [file, expectedState] of expectedPlanStates) {
+  const source = readFileSync(join(planDir, file), 'utf8');
+  if (!new RegExp(`^状态：${expectedState}$`, 'm').test(source)) {
+    fail(`${file}: expected lifecycle state ${expectedState} after MS:M0`);
+  }
+}
+
+const phase0CompletionPath = join(
+  root,
+  'docs',
+  'space',
+  'execution',
+  'completed',
+  '2026-07-30-agent-production-governance.md',
+);
+const phase0Completion = readFileSync(phase0CompletionPath, 'utf8');
+if (!/^状态：completed$/m.test(phase0Completion)) {
+  fail('Phase 0 completion record must be completed');
+}
+if (!phase0Completion.includes(`实现提交：\`${phase0ArtifactCommit}\``)) {
+  fail('Phase 0 completion record must identify the reviewed artifact commit');
+}
+if (!phase0Completion.includes('唯一产生 `MS:M0`')) {
+  fail('Phase 0 completion record must be the unique MS:M0 producer');
+}
+if (!phase0Completion.includes('结论：`approved_for_internal_implementation`')) {
+  fail('Phase 0 completion record must limit M0 approval to internal implementation');
+}
+
+for (const taskId of ['1A.1', '1C.1']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-M0 execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase0ArtifactCommit}\` |`)) {
+    fail(`${taskId}: binding must use the Phase 0 artifact baseline`);
+  }
+  if (!bindingRow.includes('| `ready` |')) {
+    fail(`${taskId}: post-M0 execution binding must be ready`);
+  }
+}
+
 if (failures.length > 0) {
   console.error('Plan execution matrix checks failed:');
   for (const message of failures) console.error(`- ${message}`);

@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-29（登记 Agent 生产就绪实施计划组）
+最后更新：2026-07-30（Phase 0 完成并产生 `MS:M0`）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,11 +19,11 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
-| [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | draft | P0 | 已批准 Agent 生产就绪 RFC | Phase 0–6 总入口 | 首发拓扑、依赖图、M0–M4 Gate、共享证据与回滚规则 |
-| [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | active | P0 | 生产就绪 roadmap | RFC Phase 0 | single-maintainer Owner、显式无 backup、14 项决策、ADR 与 schema ownership；Task 0.5/M0 仍 blocked |
-| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | draft | P0 | Phase 0 | RFC Phase 1A | metadata 默认、安全日志、Provider Data Policy、remote MCP egress |
+| [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | active | P0 | 已批准 Agent 生产就绪 RFC | Phase 0–6 总入口 | `MS:M0` 已完成；首发拓扑、依赖图、后续 Gate、共享证据与回滚规则 |
+| [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | archived | P0 | 生产就绪 roadmap | RFC Phase 0 | single-maintainer 治理与 M0 已完成；[完成记录](../execution/completed/2026-07-30-agent-production-governance.md) |
+| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | active | P0 | `MS:M0` | RFC Phase 1A | Task 1A.1 ready：metadata 默认、Provider Data Policy schema |
 | [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | draft | P0 | Phase 0 | RFC Phase 1B | workspace sandbox、network allowlist、protected path、worktree、MCP transport boundary |
-| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | draft | P0 | Phase 0 | RFC Phase 1C | 累计资源预算、有界取消、failure matrix、PTY/soak 稳定 |
+| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | active | P0 | `MS:M0` | RFC Phase 1C | Task 1C.1 ready：累计资源预算 schema 与持久化 |
 | [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) | draft | P0 | 2A-F 依赖 Phase 0；2A-RC 依赖 1A–1C/2B/3 | RFC Phase 2A | payload/detached manifest、Release Profile、evidence/Gate、平台制品 |
 | [`2026-07-29-agent-production-evaluation.md`](2026-07-29-agent-production-evaluation.md) | draft | P0 | Phase 0、2A-F；执行 fixture 依赖 1B/1C | RFC Phase 2B | Agent task suite、oracle、重复运行、人工验收 |
 | [`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md) | draft | P0 | 1A、1C、`MS:2A-F`、2B metrics contract | 替代两份 2026-06-18 telemetry 草案 | 无正文 metrics、告警、kill switch、事故演练、limited cohort SLO |
