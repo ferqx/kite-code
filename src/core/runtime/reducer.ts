@@ -1596,6 +1596,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'run.error':
       return event.outcome ? { ...state, terminalOutcome: event.outcome } : state;
     case 'runtime.action_ignored':
+    case 'provider.data_policy_status':
       return state;
 
     case 'model.responded':

@@ -54,7 +54,10 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       'lastAppliedEventId must be present in appliedEventIds.',
     );
   }
-  assert(state.recoveryState.kind === 'normal', 'recovery state must be normal before execution.');
+  assert(
+    state.recoveryState.kind === 'normal' || state.turn.status === 'aborted',
+    'recovery state must be normal before execution.',
+  );
   assert(
     state.turn.status === 'active' ||
       state.turn.status === 'completed' ||

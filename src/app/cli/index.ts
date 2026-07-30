@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import type { FeatureFlags } from '@/core/config/features';
+import { type FeatureFlags, getFeatureFlags } from '@/core/config/features';
 import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
 import { shouldPromptWorkspaceTrust, trustWorkspace } from '@/core/config/workspace-trust';
@@ -139,16 +139,25 @@ export async function main(): Promise<void> {
   );
 
   for await (const event of generator) {
-    console.log(JSON.stringify(projectCliRuntimeEventV1(event)));
+    console.log(
+      JSON.stringify(projectCliRuntimeEventV1(event, getFeatureFlags(config).terminalOutcomeV1)),
+    );
   }
 }
 
-export function projectCliRuntimeEventV1(event: RuntimeEvent):
+export function projectCliRuntimeEventV1(
+  event: RuntimeEvent,
+  terminalOutcomeEnabled = true,
+):
   | RuntimeEvent
   | (RuntimeEvent & {
       terminalPresentation: ReturnType<typeof projectTerminalOutcomeV1>;
     }) {
-  if ((event.type === 'run.completed' || event.type === 'run.error') && event.outcome) {
+  if (
+    terminalOutcomeEnabled &&
+    (event.type === 'run.completed' || event.type === 'run.error') &&
+    event.outcome
+  ) {
     return {
       ...event,
       terminalPresentation: projectTerminalOutcomeV1(event.outcome),

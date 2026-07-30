@@ -45,6 +45,8 @@ export interface SubAgentRunnerInput {
   phase?: import('@/protocol/events').AgentPhase;
   threadId?: string;
   model?: import('@/core/model/factory').SupportedChatModel;
+  providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   timeoutMs: number;
   signal: AbortSignal;
   eventSink: SubAgentEventSink;

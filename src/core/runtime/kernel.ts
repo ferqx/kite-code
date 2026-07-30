@@ -64,6 +64,10 @@ export type RuntimeEffectExecutor = (
   effect: RuntimeEffect,
   state: Readonly<RuntimeState>,
   emit?: RuntimeEffectEventSink,
+  context?: {
+    reservationIds: readonly string[];
+    persistEvent(event: RuntimeEvent): Promise<boolean>;
+  },
 ) => Promise<RuntimeEvent[]>;
 
 // ── AgentKernel 实现 / AgentKernel implementation ──
@@ -226,6 +230,9 @@ export class AgentKernel {
 
   /** Apply an effect result only if no newer event changed the state. */
   applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEventInput[]): boolean {
+    if (this.hasLateTerminalEventForCancelledTool(lease, events)) {
+      return false;
+    }
     const current =
       lease.expectedRevision === this.state.revision && lease.turnId === this.state.turn.turnId;
     const concurrentShellResult =
@@ -236,6 +243,45 @@ export class AgentKernel {
     this.processEventBatch(events);
     lease.expectedRevision = this.state.revision;
     return true;
+  }
+
+  /**
+   * Persist only bounded resource reconciliation from a stale/cancelled
+   * effect. This never accepts a tool/model terminal event and therefore
+   * cannot revive scheduling or rewrite a durable terminal outcome.
+   */
+  applyLateResourceReconciliation(
+    events: Array<Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }>>,
+  ): boolean {
+    if (events.length === 0 || this.state.resourceBudget.status !== 'active') return false;
+    const valid = events.every((event) => {
+      const reservation =
+        this.state.resourceBudget.status === 'active'
+          ? this.state.resourceBudget.reservations[event.reservationId]
+          : undefined;
+      return reservation?.state === 'dispatch_started' || reservation?.state === 'unknown';
+    });
+    if (!valid) return false;
+    this.processEventBatch(events);
+    return true;
+  }
+
+  private hasLateTerminalEventForCancelledTool(
+    lease: RuntimeEffectLease,
+    inputs: RuntimeEventInput[],
+  ): boolean {
+    if (lease.effect.type !== 'run_tools') return false;
+    return inputs.some((input) => {
+      const event = isRuntimeEventEnvelope(input) ? input.payload : input;
+      if (
+        event.type !== 'tool.finished' &&
+        event.type !== 'tool.failed' &&
+        event.type !== 'tool.rejected'
+      ) {
+        return false;
+      }
+      return this.state.tools.calls[event.toolCallId]?.status === 'cancelled';
+    });
   }
 
   /**
@@ -295,6 +341,8 @@ export class AgentKernel {
       case 'tool.failed':
       case 'tool.rejected':
         return call.status === 'queued' || call.status === 'approved' || call.status === 'running';
+      case 'runtime.cancellation_diagnostic':
+        return call.status === 'cancelled' || call.status === 'running';
       default:
         return false;
     }

@@ -4,9 +4,20 @@ import { dlopen } from 'bun:ffi';
 type KillableProcess = Pick<Bun.Subprocess, 'kill' | 'pid'>;
 
 export interface ProcessTreeGuard {
-  terminate(): Promise<void>;
+  terminate(): Promise<ProcessTreeTerminationResult>;
   dispose(): void;
 }
+
+export interface ProcessTreeTerminationResult {
+  rootPid: number;
+  gracefulRequested: boolean;
+  forced: boolean;
+  confirmedExited: boolean;
+  unconfirmedPids: number[];
+}
+
+const GRACEFUL_TERMINATION_MS = 500;
+const FORCED_TERMINATION_MS = 2_000;
 
 /**
  * POSIX commands run in their own process group so a timeout can terminate
@@ -32,38 +43,139 @@ export function guardProcessTree(proc: KillableProcess): ProcessTreeGuard {
   return {
     async terminate() {
       if (process.platform !== 'win32') {
+        let gracefulRequested = false;
+        try {
+          process.kill(-proc.pid, 'SIGTERM');
+          gracefulRequested = true;
+        } catch {
+          return {
+            rootPid: proc.pid,
+            gracefulRequested: false,
+            forced: false,
+            confirmedExited: true,
+            unconfirmedPids: [],
+          };
+        }
+        if (await waitForProcessGroupExit(proc.pid, GRACEFUL_TERMINATION_MS)) {
+          return {
+            rootPid: proc.pid,
+            gracefulRequested,
+            forced: false,
+            confirmedExited: true,
+            unconfirmedPids: [],
+          };
+        }
         try {
           process.kill(-proc.pid, 'SIGKILL');
-          await waitForProcessGroupExit(proc.pid);
-          return;
         } catch {
-          // The process group may already be gone. Fall back to its root.
+          // The process group exited between the bounded checks.
         }
+        const confirmedExited = await waitForProcessGroupExit(proc.pid, FORCED_TERMINATION_MS);
+        return {
+          rootPid: proc.pid,
+          gracefulRequested,
+          forced: true,
+          confirmedExited,
+          unconfirmedPids: confirmedExited ? [] : [proc.pid],
+        };
       }
 
-      if (process.platform === 'win32' && (await terminateWindowsProcessTree(proc.pid))) {
-        return;
+      if (process.platform === 'win32') {
+        try {
+          proc.kill();
+        } catch {
+          // Root may already be gone; the descendant sweep still runs.
+        }
+        await Bun.sleep(GRACEFUL_TERMINATION_MS);
+        if (!isProcessAlive(proc.pid)) {
+          return {
+            rootPid: proc.pid,
+            gracefulRequested: true,
+            forced: false,
+            confirmedExited: true,
+            unconfirmedPids: [],
+          };
+        }
+        await terminateWindowsProcessTree(proc.pid);
+        const confirmedExited = !isProcessAlive(proc.pid);
+        return {
+          rootPid: proc.pid,
+          gracefulRequested: true,
+          forced: true,
+          confirmedExited,
+          unconfirmedPids: confirmedExited ? [] : [proc.pid],
+        };
       }
 
+      try {
+        proc.kill('SIGTERM');
+        await Bun.sleep(GRACEFUL_TERMINATION_MS);
+      } catch {
+        // The root process may already have exited.
+      }
+      if (!isProcessAlive(proc.pid)) {
+        return {
+          rootPid: proc.pid,
+          gracefulRequested: true,
+          forced: false,
+          confirmedExited: true,
+          unconfirmedPids: [],
+        };
+      }
       try {
         proc.kill('SIGKILL');
       } catch {
         // The root process may already have exited.
       }
+      const confirmedExited = await waitForPidExit(proc.pid, FORCED_TERMINATION_MS);
+      return {
+        rootPid: proc.pid,
+        gracefulRequested: true,
+        forced: true,
+        confirmedExited,
+        unconfirmedPids: confirmedExited ? [] : [proc.pid],
+      };
     },
     dispose() {},
   };
 }
 
-async function waitForProcessGroupExit(processGroupId: number, timeoutMs = 2_000): Promise<void> {
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPidExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) return true;
+    await Bun.sleep(10);
+  }
+  return !isProcessAlive(pid);
+}
+
+async function waitForProcessGroupExit(
+  processGroupId: number,
+  timeoutMs = FORCED_TERMINATION_MS,
+): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
       process.kill(-processGroupId, 0);
     } catch {
-      return;
+      return true;
     }
     await Bun.sleep(10);
+  }
+  try {
+    process.kill(-processGroupId, 0);
+    return false;
+  } catch {
+    return true;
   }
 }
 
@@ -163,7 +275,31 @@ function createWindowsJobGuard(proc: KillableProcess): ProcessTreeGuard | null {
 
     return {
       async terminate() {
-        if (!active) return;
+        if (!active) {
+          return {
+            rootPid: proc.pid,
+            gracefulRequested: false,
+            forced: false,
+            confirmedExited: !isProcessAlive(proc.pid),
+            unconfirmedPids: isProcessAlive(proc.pid) ? [proc.pid] : [],
+          };
+        }
+        try {
+          proc.kill();
+        } catch {
+          // Root may already be gone.
+        }
+        await Bun.sleep(GRACEFUL_TERMINATION_MS);
+        if (!isProcessAlive(proc.pid)) {
+          close();
+          return {
+            rootPid: proc.pid,
+            gracefulRequested: true,
+            forced: false,
+            confirmedExited: true,
+            unconfirmedPids: [],
+          };
+        }
         const knownTree = new Set([proc.pid]);
         extendWindowsProcessTree(api, knownTree);
         const terminated = api.TerminateJobObject(job, 124);
@@ -171,6 +307,14 @@ function createWindowsJobGuard(proc: KillableProcess): ProcessTreeGuard | null {
         const rootTerminated = terminated || (await terminateWindowsProcess(api, proc.pid));
         await terminateKnownWindowsDescendants(api, knownTree, proc.pid);
         if (!rootTerminated) await terminateWindowsProcessTree(proc.pid);
+        const unconfirmedPids = [...knownTree].filter((pid) => isProcessAlive(pid));
+        return {
+          rootPid: proc.pid,
+          gracefulRequested: true,
+          forced: true,
+          confirmedExited: unconfirmedPids.length === 0,
+          unconfirmedPids,
+        };
       },
       dispose: close,
     };

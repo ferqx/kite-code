@@ -4,7 +4,7 @@
 
 读取时机：修改 abort/cancel、Runtime 恢复、Effect lease、消息工具对清理、工具参数异常、Subagent continuation 或 TUI 取消行为时。
 
-验证：`bun test tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/shell-exec.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts`、`bun run typecheck`。
 
 ## Runtime 取消语义
 
@@ -17,6 +17,35 @@
 `ask_user` 是用户输入交互，不是执行授权审批。用户拒答或按 Esc 时，Kernel 只为该 `ask_user` 写入 `tool.finished(ok=false, stdout=Cancelled)`，清除 `awaiting_user_input`，不得写入 `approval.rejected`、`tool.cancelled` 或 `turn.aborted`，也不得 abort 本轮执行信号。Runner 随后继续调度；模型在同一 turn 中看到拒答 Tool Result 后继续回答或调整方案。
 
 TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名称、关键参数和已有输出并显示 `cancelled`；从未开始的 queued 探索工具不计入 `read N files` 等统计；不追加独立的整轮取消提示。实时取消和 event-log replay 必须得到相同投影。
+
+`boundedCancellationV1` 启用后，持久化 ResourceBudget deadline 触发同一 execution
+AbortSignal；普通模型、compaction、tool/MCP、Subagent 和 Verification 都继承该信号。deadline
+首先在一个 transaction 中取消未完成工具、将未 dispatch reservation release、将
+`dispatch_started` reservation 标记 `unknown`、取消所有 durable waiter，并写入
+`turn.aborted(cause=error)`，然后才 abort 执行。Abort 必须唤醒 FIFO permit wait，且之后不能
+产生新的 model/tool dispatch；同一信号也必须唤醒没有后台 effect 的 ask_user、Plan/工具审批、
+Verification 和 Provider action/admission 等交互等待。执行链退出后还必须追加唯一的结构化
+`run.error`：清理已确认时
+failure=`budget_exceeded`、terminal reason=`budget_exhausted`；存在 unknown reservation 时仍
+保留 `knownExternalEffects=unknown` 和 reconciliation 入口。清理未确认时改为
+failure/reason=`cancel_incomplete`。
+
+若 deadline 命中交互等待时仍有并发 Shell 在后台运行，等待分支不得因 AbortSignal 直接返回。
+它必须先有界排空后台 effect，转发工具 terminal 与 `runtime.cancellation_diagnostic`，确认
+process-tree cleanup 已完成后才能关闭 RuntimeStore/logger 并形成 deadline terminal。
+
+Shell 取消由 process-tree guard 独占：POSIX 对独立 process group 先发 SIGTERM，等待 500ms，
+再以 SIGKILL 强制终止并进行 2 秒有界确认；Windows 先尝试 root graceful，再通过 Job Object
+或 `taskkill /T /F` 清理整棵树。结果必须携带 confirmed/forced/unconfirmed count。无法确认
+descendant 退出时发出结构化 `runtime.cancellation_diagnostic(cancel_incomplete)`，终态为
+`unknown` 且进入 reconciliation，不能降级为普通 cancelled。
+
+并发 Shell 的晚到 terminal 不得把 `cancelled` 工具改成 failed/succeeded，也不得启动 sibling
+或模型。若 cleanup 已确认，late path 只可提交受 upper bound 约束的 resource reconciliation；
+若收到 `cancel_incomplete`，reservation 保持 unknown。恢复阻断必须持久化结构化
+`run.error` 与 error-caused abort，同时保留 recovery hard block，后续 `turn.started` 不能绕过。
+正常完成则必须在向消费者 yield 之前，将 `run.completed` 与 `turn.completed` 原子持久化；
+慢消费者不能让 deadline 在两条完成事实之间把已完成 turn 改写为 aborted。
 
 ## 会话导航的客户端映射
 
@@ -55,3 +84,9 @@ TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名�
 ## Subagent continuation
 
 子 Agent 因审批暂停时，continuation 必须可序列化并绑定原 tool call、消息、步骤与 journal。恢复前重新校验批准内容和能力边界；用户拒绝或取消该审批时，清除 continuation，并按上述规则中止整个当前 turn，不再恢复子 Agent 生成后续结果。
+
+Resource budget 为每次 continuation/resume 创建新的 parent attempt reservation；每个子模型、
+工具、Shell/MCP 与 artifact 调用再创建链接到 parent 的独立 reservation。Provider/tool 在
+dispatch 后抛错时 child reservation 转为 unknown，不得只结算 parent 或静默退款。审批或本地
+策略尚未通过时不得提前创建 child reservation；Provider 最终本地 admission 明确拒绝且尚未
+网络 dispatch 时，只能携带 `local_provider_admission_denied` 证明释放 reservation。

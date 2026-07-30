@@ -1,8 +1,10 @@
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import type {
-  ProviderDataAdmissionDecisionV1,
-  ProviderPayloadPartV1,
+import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
+import {
+  createApprovedProviderDataAdmissionV1,
+  ProviderDataAdmissionError,
+  providerPayloadFromModelPromptV1,
 } from '@/core/config/provider-data-admission';
 import {
   type ContextCompactor,
@@ -15,6 +17,7 @@ import {
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import {
   createAutoReviewModel,
+  resolveAutoReviewConfig,
   reviewToolApproval,
   reviewVerificationEvidence,
 } from '@/core/execution/reviewer';
@@ -25,10 +28,15 @@ import {
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
 } from '@/core/model/compaction-summary';
+import { preflightModelContext } from '@/core/model/context-budget';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
+import { buildContextProjection } from '@/core/model/context-projection';
 import type { SupportedChatModel } from '@/core/model/factory';
+import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
+import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
+import { createDescendantResourceAdmissionV1 } from '@/core/runtime/resource-budget-admission';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
@@ -60,12 +68,27 @@ export interface RuntimeExecutorDependencies {
   /** 用于记录文件写入前原像（ADR-0042 §4），缺省时工具写入不留原像。 */
   runtimeStore?: RuntimeStore;
   /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
-  providerDataAdmission?: (payload: ProviderPayloadPartV1[]) => ProviderDataAdmissionDecisionV1;
+  providerDataAdmission?: ProviderDataAdmissionGateV1;
 }
 
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
 export function resolveAutoReviewTimeout(config: AgentConfig): number {
   return getFeatureFlags(config).autoReviewV2 ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
+}
+
+function reviewerProviderDataAdmission(
+  dependencies: RuntimeExecutorDependencies,
+  reviewerConfig: AgentConfig,
+): ProviderDataAdmissionGateV1 | undefined {
+  if (!getFeatureFlags(dependencies.config).providerDataPolicyV1) return undefined;
+  const sameRoute =
+    reviewerConfig.providerType === dependencies.config.providerType &&
+    reviewerConfig.providerName === dependencies.config.providerName &&
+    reviewerConfig.modelName === dependencies.config.modelName &&
+    reviewerConfig.baseURL === dependencies.config.baseURL;
+  return sameRoute
+    ? dependencies.providerDataAdmission
+    : createApprovedProviderDataAdmissionV1(reviewerConfig);
 }
 
 export function resolveRuntimeContextProjectionEnvironment(
@@ -93,6 +116,73 @@ export function resolveRuntimeContextProjectionEnvironment(
   });
 }
 
+/** Prepare the exact model input and bounded output before Runtime reservation. */
+export function prepareRuntimeEffectForBudgetV1(
+  effect: import('./effects').RuntimeEffect,
+  state: import('./state').RuntimeState,
+  dependencies: RuntimeExecutorDependencies,
+): import('./effects').RuntimeEffect {
+  if (effect.type !== 'call_model') return effect;
+  const environment = resolveRuntimeContextProjectionEnvironment(dependencies, state);
+  const projection = buildContextProjection({
+    role: 'agent',
+    state,
+    serializedTools: environment.serializedTools,
+    activeSkillInstructions: environment.activeSkillInstructions,
+    workflowSkills: environment.workflowSkills,
+  });
+  if (getFeatureFlags(dependencies.config).providerDataPolicyV1) {
+    const decision = dependencies.providerDataAdmission?.(
+      providerPayloadFromModelPromptV1(projection.providerMessages),
+      'primary_model',
+    ) ?? {
+      admitted: false,
+      reason: 'mandatory_policy_unavailable' as const,
+      routeAlias: 'unresolved',
+    };
+    if (!decision.admitted) throw new ProviderDataAdmissionError(decision);
+  }
+  const capabilities = resolveModelCapabilities({
+    config: dependencies.config,
+    adapter: dependencies.model.capabilityMetadata,
+  });
+  const configuredMaxOutput =
+    typeof dependencies.config.modelKwargs?.maxOutputTokens === 'number'
+      ? dependencies.config.modelKwargs.maxOutputTokens
+      : typeof dependencies.config.modelKwargs?.maxTokens === 'number'
+        ? dependencies.config.modelKwargs.maxTokens
+        : undefined;
+  const preflight = preflightModelContext({
+    estimate: projection.estimate,
+    capabilities,
+    requestMaxOutputTokens: configuredMaxOutput,
+    providerSafetyRatio: dependencies.config.compaction?.providerSafetyRatio,
+    compactRatio: dependencies.config.compaction?.compactRatio,
+    hardRatio: dependencies.config.compaction?.hardRatio,
+    warningRatio: dependencies.config.compaction?.warningRatio,
+  });
+  const providerOutputLimit =
+    preflight.reservedOutputTokens ?? configuredMaxOutput ?? capabilities.maxOutputTokens;
+  const remainingOutputTokens =
+    state.resourceBudget.status === 'active'
+      ? state.resourceBudget.budget.maxRunOutputTokens -
+        committedResourceUsageV1(state.resourceBudget).counters.outputTokens
+      : providerOutputLimit;
+  if (remainingOutputTokens == null) {
+    throw new Error('Model output admission requires a configured Runtime resource budget.');
+  }
+  return {
+    ...effect,
+    resourceEstimate: {
+      inputTokens: preflight.estimate.totalInputTokens,
+      maxOutputTokens: Math.max(
+        1,
+        Math.min(providerOutputLimit ?? remainingOutputTokens, remainingOutputTokens),
+      ),
+    },
+  };
+}
+
 /** Build the production executor for Kernel effects. */
 export function createRuntimeEffectExecutor(
   dependencies: RuntimeExecutorDependencies,
@@ -115,12 +205,14 @@ export function createRuntimeEffectExecutor(
       generate: createModelContextSummaryGenerator({
         model: dependencies.model,
         signal: dependencies.signal,
+        providerDataAdmission: dependencies.providerDataAdmission,
+        providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
       }),
       maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
       maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
       maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
     });
-  return async (effect, state, emit) => {
+  return async (effect, state, emit, executionContext) => {
     if (effect.type === 'compact_context') {
       const resolveProjectionEnvironment = () =>
         resolveRuntimeContextProjectionEnvironment({ ...dependencies, subagentEventSink }, state);
@@ -148,11 +240,36 @@ export function createRuntimeEffectExecutor(
         emitRuntimeEvent: emit,
         compactionReporter: dependencies.compactionReporter,
         providerDataAdmission: dependencies.providerDataAdmission,
+        resourceAdmission: effect.resourceEstimate,
       });
     }
     if (effect.type === 'run_tools') {
       try {
         const execute = async (toolCallIds: string[]) => {
+          const taskCallId =
+            toolCallIds.length === 1 && state.tools.calls[toolCallIds[0]!]?.name === 'task'
+              ? toolCallIds[0]
+              : undefined;
+          const parentReservationId = taskCallId
+            ? executionContext?.reservationIds.find((reservationId) => {
+                const budget = state.resourceBudget;
+                const reservation =
+                  budget.status === 'active' ? budget.reservations[reservationId] : undefined;
+                return (
+                  reservation?.resourceKind === 'subagent' &&
+                  (reservation.invocationId === `tool:${taskCallId}` ||
+                    reservation.invocationId.startsWith(`tool:${taskCallId}:resume:`))
+                );
+              })
+            : undefined;
+          const descendantResourceAdmission =
+            parentReservationId && executionContext
+              ? createDescendantResourceAdmissionV1({
+                  state: state as import('./state').RuntimeState,
+                  parentReservationId,
+                  persistEvent: executionContext.persistEvent,
+                })
+              : undefined;
           const terminalEvents: RuntimeEvent[] = [];
           const emitOrDefer = (event: RuntimeEvent) => {
             if (
@@ -184,6 +301,8 @@ export function createRuntimeEffectExecutor(
             signal: dependencies.signal,
             taskConfig: dependencies.config,
             taskModel: dependencies.model,
+            providerDataAdmission: dependencies.providerDataAdmission,
+            descendantResourceAdmission,
             subagentEventSink,
             emitRuntimeEvent: emitOrDefer,
             recordFilePreimage: createFilePreimageRecorder(
@@ -230,11 +349,14 @@ export function createRuntimeEffectExecutor(
         mcpManager: dependencies.mcpManager,
         signal: dependencies.signal,
         reviewer: async (evidence) => {
-          reviewerModel ??= createAutoReviewModel(dependencies.config);
+          const reviewerConfig = resolveAutoReviewConfig(dependencies.config);
+          reviewerModel ??= createAutoReviewModel(reviewerConfig);
           return reviewVerificationEvidence({
             model: reviewerModel,
             evidence,
             timeoutMs: dependencies.config.autoReview?.timeoutMs ?? 30_000,
+            providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
+            providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
           });
         },
       });
@@ -303,15 +425,7 @@ async function executeAutoReview(
 
   const startTime = Date.now();
   try {
-    const reviewerConfig = dependencies.config.autoReview
-      ? dependencies.config
-      : {
-          ...dependencies.config,
-          autoReview: {
-            provider: dependencies.config.providerName,
-            model: dependencies.config.modelName,
-          },
-        };
+    const reviewerConfig = resolveAutoReviewConfig(dependencies.config);
     const reviewerModel = createAutoReviewModel(reviewerConfig);
 
     const result = await reviewToolApproval({
@@ -322,6 +436,8 @@ async function executeAutoReview(
       // V2 makes the configured reviewer timeout part of the rollout surface;
       // the established path retains the fixed compatibility timeout.
       timeoutMs: resolveAutoReviewTimeout(dependencies.config),
+      providerDataAdmission: reviewerProviderDataAdmission(dependencies, reviewerConfig),
+      providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
     });
 
     return [
@@ -340,6 +456,7 @@ async function executeAutoReview(
       },
     ];
   } catch (error) {
+    if (error instanceof ProviderDataAdmissionError) throw error;
     return [
       {
         type: 'auto_review.completed',

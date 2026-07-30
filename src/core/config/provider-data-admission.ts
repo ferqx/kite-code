@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import type { AgentConfig } from './index';
 import {
   computeProviderDataPolicyBundleDigest,
   computeProviderEndpointIdentityDigest,
@@ -10,6 +12,12 @@ import {
 } from './provider-data-policy';
 
 export type ProviderPayloadKindV1 = 'user_prompt' | 'file_snippet' | 'tool_result' | 'summary';
+export type ProviderDispatchPurposeV1 =
+  | 'primary_model'
+  | 'compaction'
+  | 'subagent'
+  | 'auto_review'
+  | 'verification_review';
 
 export interface ProviderPayloadPartV1 {
   kind: ProviderPayloadKindV1;
@@ -35,6 +43,7 @@ export type ProviderDataAdmissionReasonV1 =
   | 'provider_route_identity_mismatch'
   | 'provider_payload_kind_denied'
   | 'provider_data_classification_denied'
+  | 'provider_content_evaluation_denied'
   | 'provider_secret_denied';
 
 export interface ProviderDataAdmissionDecisionV1 {
@@ -54,6 +63,7 @@ export interface ProviderDataAdmissionInputV1 {
   registry?: ProviderDataPolicyRegistryV1;
   route: ProviderRouteIdentityV1;
   payload: ProviderPayloadPartV1[];
+  purpose?: ProviderDispatchPurposeV1;
   now?: Date;
   expectedRegistryDigest?: string;
 }
@@ -128,6 +138,73 @@ export function loadProviderDataPolicyRegistryV1(
   return createProviderDataPolicyRegistryV1(parseProviderDataPolicyBundleV1(source), loadedAt);
 }
 
+export const APPROVED_PROVIDER_DATA_POLICY_REVISION_V1 = 'm0-empty-2026-07-30';
+export const APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1 =
+  'sha256:e99df35ca2163eb0d0b1ebc22181c013d6f301051e1e92faa5490689859704b5';
+
+/**
+ * Production loader for the repository-controlled, release-pinned policy
+ * artifact. It has no caller-supplied path or digest.
+ */
+export function loadApprovedProviderDataPolicyRegistryV1(
+  loadedAt = new Date(),
+): ProviderDataPolicyRegistryV1 {
+  const approvedPath = new URL(
+    '../../../release/provider-data-policies/approved-v1.json',
+    import.meta.url,
+  );
+  const registry = loadProviderDataPolicyRegistryV1(fileURLToPath(approvedPath), loadedAt);
+  if (
+    registry.revision !== APPROVED_PROVIDER_DATA_POLICY_REVISION_V1 ||
+    registry.digest !== APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1
+  ) {
+    throw new Error('Approved Provider data policy artifact does not match the release pin.');
+  }
+  return registry;
+}
+
+/** Canonical route identity derived from resolved runtime config, never project overlays. */
+export function providerRouteIdentityFromAgentConfigV1(
+  config: AgentConfig,
+): ProviderRouteIdentityV1 {
+  return {
+    providerType: config.providerType,
+    operatorId: config.providerName,
+    endpointOrigin: config.baseURL,
+    endpointClass:
+      config.providerType === 'openai-compatible' ? 'custom_configured' : 'managed_default',
+    deploymentId: config.modelName,
+    region: 'unspecified',
+  };
+}
+
+export type ProviderDataAdmissionGateV1 = (
+  payload: ProviderPayloadPartV1[],
+  purpose?: ProviderDispatchPurposeV1,
+) => ProviderDataAdmissionDecisionV1;
+
+/**
+ * Sealed production gate. Limited clients can only use the release-pinned
+ * registry; configuration may select a route but cannot add policy.
+ */
+export function createApprovedProviderDataAdmissionV1(
+  config: AgentConfig,
+  loadedAt = new Date(),
+): ProviderDataAdmissionGateV1 {
+  const registry = loadApprovedProviderDataPolicyRegistryV1(loadedAt);
+  const route = providerRouteIdentityFromAgentConfigV1(config);
+  return (payload, purpose = 'primary_model') =>
+    evaluateProviderDataAdmissionV1({
+      featureEnabled: true,
+      profile: 'limited',
+      registry,
+      expectedRegistryDigest: APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
+      route,
+      payload,
+      purpose,
+    });
+}
+
 export function evaluateProviderDataAdmissionV1(
   input: ProviderDataAdmissionInputV1,
 ): ProviderDataAdmissionDecisionV1 {
@@ -195,6 +272,19 @@ export function evaluateProviderDataAdmissionV1(
     return {
       admitted: false,
       reason: 'provider_route_identity_mismatch',
+      routeAlias,
+      registryDigest: input.registry.digest,
+      policyId: policy.policyId,
+      policyRevision: policy.revision,
+    };
+  }
+  if (
+    (input.purpose === 'auto_review' || input.purpose === 'verification_review') &&
+    !policy.allowProductionContentEvaluation
+  ) {
+    return {
+      admitted: false,
+      reason: 'provider_content_evaluation_denied',
       routeAlias,
       registryDigest: input.registry.digest,
       policyId: policy.policyId,
@@ -277,7 +367,13 @@ export function providerPayloadFromModelPromptV1(
             : ('user_prompt' as const),
       text: promptPartText(part),
       label: {
-        classification: 'internal' as const,
+        // Provider message objects do not retain workspace/admin labels.
+        // Treat user/tool content conservatively as confidential; only
+        // generated/runtime-owned system and assistant text is internal.
+        classification:
+          role === 'system' || role === 'assistant'
+            ? ('internal' as const)
+            : ('confidential' as const),
         source: 'artifact' as const,
         provenance:
           role === 'tool'
@@ -292,10 +388,15 @@ export function providerPayloadFromModelPromptV1(
 
 export class ProviderDataAdmissionError extends Error {
   readonly decision: ProviderDataAdmissionDecisionV1;
+  readonly knownExternalEffects: 'none' | 'unknown';
 
-  constructor(decision: ProviderDataAdmissionDecisionV1) {
+  constructor(
+    decision: ProviderDataAdmissionDecisionV1,
+    options: { knownExternalEffects?: 'none' | 'unknown' } = {},
+  ) {
     super(`Provider data admission denied: ${decision.reason}.`);
     this.name = 'ProviderDataAdmissionError';
     this.decision = decision;
+    this.knownExternalEffects = options.knownExternalEffects ?? 'none';
   }
 }

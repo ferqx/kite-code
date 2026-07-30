@@ -21,16 +21,49 @@ const TERMINAL_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
 export function eventsForRunCancellation(
   state: Readonly<RuntimeState>,
   reason = 'Cancelled by user.',
+  cause: 'user' | 'error' = 'user',
 ): RuntimeEvent[] {
   return [
     ...unfinishedToolCancellationEvents(state, reason),
+    ...resourceReservationCancellationEvents(state),
+    ...resourceWaiterCancellationEvents(state),
     {
       type: 'turn.aborted',
       turnId: state.turn.turnId,
       reason,
-      cause: 'user',
+      cause,
     },
   ];
+}
+
+function resourceReservationCancellationEvents(state: Readonly<RuntimeState>): RuntimeEvent[] {
+  if (state.resourceBudget.status !== 'active') return [];
+  const events: RuntimeEvent[] = [];
+  for (const reservation of Object.values(state.resourceBudget.reservations)) {
+    if (reservation.state === 'reserved') {
+      events.push({
+        type: 'resource_budget.released',
+        reservationId: reservation.reservationId,
+      });
+    } else if (reservation.state === 'dispatch_started') {
+      events.push({
+        type: 'resource_budget.unknown',
+        reservationId: reservation.reservationId,
+      });
+    }
+  }
+  return events;
+}
+
+function resourceWaiterCancellationEvents(state: Readonly<RuntimeState>): RuntimeEvent[] {
+  return state.resourceBudget.status === 'active'
+    ? Object.values(state.resourceBudget.waiters)
+        .filter((waiter) => waiter.state === 'waiting')
+        .map((waiter) => ({
+          type: 'resource_budget.waiter_cancelled' as const,
+          invocationId: waiter.invocationId,
+        }))
+    : [];
 }
 
 function unfinishedToolCancellationEvents(
@@ -62,6 +95,8 @@ function approvalCancellationEvents(
       failure: classifyFailure('approval_rejected', reason),
     },
     ...unfinishedToolCancellationEvents(state, reason, interaction.toolCallId),
+    ...resourceReservationCancellationEvents(state),
+    ...resourceWaiterCancellationEvents(state),
     {
       type: 'turn.aborted',
       turnId: state.turn.turnId,
@@ -90,6 +125,8 @@ function planReviewCancelledEvents(
       reason: cancellationReason,
     },
     ...unfinishedToolCancellationEvents(state, cancellationReason, interaction.toolCallId),
+    ...resourceReservationCancellationEvents(state),
+    ...resourceWaiterCancellationEvents(state),
     {
       type: 'turn.aborted',
       turnId: state.turn.turnId,

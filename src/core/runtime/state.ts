@@ -281,6 +281,9 @@ export interface ToolResultMeta {
   modelContentDigest?: string;
   /** Provenance of the digest fields. 'legacy_unknown' means pre-V2 data — treat conservatively. */
   digestScope?: 'raw' | 'projected' | 'legacy_unknown';
+  /** Bounded process-tree cleanup facts; never contains process IDs or command text. */
+  processCleanupConfirmed?: boolean;
+  unconfirmedDescendantCount?: number;
 }
 
 export interface CapabilityRuntimeState {

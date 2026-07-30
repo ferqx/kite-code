@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
 import { humanMessage, systemMessage } from '@/core/messages';
 import type {
   ContextCompactionCheckpoint,
@@ -52,6 +53,8 @@ export type ContextSummaryGenerator = (
 export function createModelContextSummaryGenerator(input: {
   model: SupportedChatModel;
   signal?: AbortSignal;
+  providerDataAdmission?: ProviderDataAdmissionGateV1;
+  providerDataPolicyRequired?: boolean;
 }): ContextSummaryGenerator {
   return async (request) => {
     const response = await invokeBoundModel({
@@ -60,6 +63,9 @@ export function createModelContextSummaryGenerator(input: {
       messages: [systemMessage(request.systemPrompt), humanMessage(request.input)],
       signal: input.signal,
       maxOutputTokens: request.maxOutputTokens,
+      providerDataAdmission: input.providerDataAdmission,
+      providerDataPolicyRequired: input.providerDataPolicyRequired,
+      providerDispatchPurpose: 'compaction',
     });
     const summary =
       typeof response.content === 'string'

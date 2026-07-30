@@ -73,6 +73,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
         state.recoveryState.kind === 'corrupted'
           ? state.recoveryState.reason
           : `Runtime schema ${state.recoveryState.schemaVersion} is not supported.`,
+      failureKind: state.recoveryState.kind === 'corrupted' ? 'persistence_unavailable' : 'unknown',
     };
   }
   // Durable hard blocks represent proven Runtime correctness failures only.
@@ -80,6 +81,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     return {
       type: 'recovery_blocked',
       reason: `Runtime context is blocked by a correctness failure: ${state.context.hardBlock.reason}. Rewind, clear, or start a new session.`,
+      failureKind: 'unknown',
     };
   }
   // A terminal turn remains terminal across snapshot recovery and loop
@@ -102,6 +104,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       reason:
         `Capability invocation ${unknownInvocation.invocationId} has an unknown external outcome. ` +
         'Reconcile it or obtain a user decision before continuing.',
+      failureKind: 'unknown',
     };
   }
 

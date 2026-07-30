@@ -22,6 +22,12 @@ export interface ShellResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  processCleanup?: {
+    confirmedExited: boolean;
+    gracefulRequested: boolean;
+    forced: boolean;
+    unconfirmedDescendantCount: number;
+  };
 }
 
 export type ShellIntent = 'inspect' | 'verify' | 'build' | 'test' | 'git' | 'other';

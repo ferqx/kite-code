@@ -30,6 +30,20 @@ Controller 必须在 Provider dispatch 前取得由受控 bundle 构造的 regis
 `limited` profile 的 unknown route 一律拒绝；自定义 endpoint 只能进入显式
 `internal_experimental` 路径，不能产生 production 资格。
 
+生产 loader 只能读取仓库固定的 `approved-v1.json`，并同时校验编译期 revision 与 SHA-256
+digest；调用方不能传入文件路径或期望 digest。Runtime 从最终 resolved `AgentConfig` 构造
+route identity。启用 flag 时，最终 `invokeBoundModel` dispatch 边界强制要求 gate，普通模型、
+context compaction、Sub-agent、auto review 与 Verification reviewer 都不能绕过。Runtime 在
+启动时发出不含 endpoint/payload 的 `provider.data_policy_status`，供 CLI/TUI 显示批准状态。
+ResourceBudget 与该门禁同时开启时，主模型在创建 reservation 前执行同一确定性 admission；
+Subagent 等已建立 child attempt 的路径若在最终本地门禁被拒绝，必须以
+`local_provider_admission_denied` 证明释放，不能标记为已外发的 unknown，也不能出现
+`dispatch_started` 后的 Provider 网络调用。Compaction、auto review 与 Verification reviewer
+不得把 `ProviderDataAdmissionError` 转成普通业务失败或 inconclusive 后核销预算；异常必须
+穿透至 Runtime reservation owner。只有整个 reservation 都能证明尚未外发/执行时才按同一
+未外发证明释放；组合 Verification 若前序 command、MCP 或 reviewer check 可能已经 dispatch，
+reservation 必须转为 `unknown` 并进入 reconciliation，不能整体退款。
+
 Provider admission payload 为每段正文保留 `user_prompt | file_snippet | tool_result | summary`
 provenance 和 Workspace data label。`secret` label、runtime secret detector、credential marker
 或 protected-path marker 在 mocked/real Provider 收到请求前独立阻断。状态投影只暴露 route
@@ -38,9 +52,12 @@ origin。用户、项目或 CLI 配置不能向 registry 增加 policy，也不�
 
 `WorkspaceDataLabelV1` 固定 `public < internal < confidential < secret` 的 deny-wins 顺序。
 artifact/admin/project rule/runtime secret detector 只能提高分类；用户主动粘贴或项目配置不能降低
-已有分类，也不自动产生外发授权。日志策略同时固定 metadata-first 的 7 天、总量 256 MiB、单
-session 16 MiB 上限，并永久禁止 reasoning/file/tool content 字段；实际 logger composition 由
-后续 1A.2–1A.4 完成。
+已有分类，也不自动产生外发授权。缺少细粒度 provenance 时，system/assistant 最低为
+`internal`，user/tool 最低为 `confidential`；不能把任意正文硬编码成较低分类。auto review 与
+Verification reviewer 还要求 policy 明确允许 production content evaluation。日志策略固定
+metadata-first 的 7 天、总量 256 MiB、单 session 16 MiB 上限，并永久禁止
+reasoning/file/tool content 字段；metadata mapper 已完成，完整 CLI/TUI mode/status 入口仍由
+后续 1A.3–1A.4 收敛。
 
 模型上下文能力必须先解析为统一的 `ResolvedModelCapabilities`。每个字段只按所选模型条目的显式配置、provider adapter runtime metadata、`modelKwargs` 兼容字段依次解析，并记录 `explicit_config | adapter_runtime | compatibility_config` source；缺失值保持 unknown，布尔能力保持 true/false/unknown 三态。模型名称和默认模型列表不得提供 context window、max output、tokenizer、usage 或 prompt-cache 能力，也不得为未知输出预算隐式预留 4096 tokens。Capability disclosure、上下文 preflight、metrics 和实际模型请求必须共用同一个 resolved object；未知窗口不显示利用率，也不运行 ratio auto，但不阻止普通模型请求或手动 `/compact`。
 

@@ -87,11 +87,16 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 
 ToolSpec Registry 的六个计算原语已按 ADR-0027 完成单路径切换；旧迁移 flag 未接入运行时并已删除，不再接受 `toolSpecRegistryV1` 配置。
 
-生产治理的 `sessionLoggingPolicyV1`、`providerDataPolicyV1`、`resourceBudgetV1` 和
-`terminalOutcomeV1` 均默认关闭。Provider flag 启用后仍必须加载仓库批准 registry；当前
+生产治理的 `sessionLoggingPolicyV1`、`providerDataPolicyV1`、`resourceBudgetV1`、
+`boundedCancellationV1` 和 `terminalOutcomeV1` 均默认关闭。Logger flag 开启时 Runtime 只写
+显式 allowlist metadata，关闭时不创建日志目录。Provider flag 启用后从固定 release asset
+加载并校验 revision/digest，所有普通模型、压缩、Sub-agent 和 reviewer dispatch 共用最终
+gate；当前
 route 集合为空，因此 limited profile 全部 fail closed。Resource flag 只为新 run 建立 Runtime
-v19 limited preset ledger，并拒绝 legacy snapshot 热补余额。Terminal flag 控制客户端 rollout，
-不能把 unknown/blocked/budget/saturation 回退成普通完成。Logger composition 仍由后续 Task
-接入；单独启用任一 flag 都不授予 production 资格。
+v19 limited preset ledger，并拒绝 legacy snapshot 热补余额。Bounded cancellation flag 提供
+deadline、统一 AbortSignal 与进程树清理；Resource 开启但该 flag 关闭时不披露 writer/Shell/
+child capability。Terminal flag 只控制 CLI 派生 presentation，原始结构化 outcome 始终保留，
+不能把 unknown/blocked/budget/saturation 回退成普通完成。单独启用任一 flag 都不授予
+production 资格。
 
 上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManualV1` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。

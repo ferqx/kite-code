@@ -107,7 +107,10 @@ function createWrappedExecutor(
     let timedOut = false;
     let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    let termination: Promise<void> | undefined;
+    let termination: ReturnType<ReturnType<typeof guardProcessTree>['terminate']> | undefined;
+    let terminationResult:
+      | Awaited<ReturnType<ReturnType<typeof guardProcessTree>['terminate']>>
+      | undefined;
     let processTree: ReturnType<typeof guardProcessTree> | undefined;
     const outputStop = new AbortController();
     const terminate = (reason: 'timeout' | 'cancelled') => {
@@ -150,7 +153,6 @@ function createWrappedExecutor(
         stdin: stdin !== undefined ? 'pipe' : 'inherit',
         stdout: 'pipe',
         stderr: 'pipe',
-        signal: input.signal,
         ...processTreeSpawnOptions(),
       });
       processTree = guardProcessTree(proc);
@@ -176,7 +178,7 @@ function createWrappedExecutor(
           outputStop.signal,
         ),
       ]);
-      if (termination) await termination;
+      if (termination) terminationResult = await termination;
       const exitCode = await proc.exited;
       if (timeoutId) clearTimeout(timeoutId);
 
@@ -192,12 +194,22 @@ function createWrappedExecutor(
               ? `${stderr.trimEnd()}\nCommand cancelled by user.`
               : 'Command cancelled by user.'
             : stderr,
+        ...(terminationResult
+          ? {
+              processCleanup: {
+                confirmedExited: terminationResult.confirmedExited,
+                gracefulRequested: terminationResult.gracefulRequested,
+                forced: terminationResult.forced,
+                unconfirmedDescendantCount: terminationResult.unconfirmedPids.length,
+              },
+            }
+          : {}),
       };
     } catch (error) {
       if (timeoutId) clearTimeout(timeoutId);
       if (termination) {
         try {
-          await termination;
+          terminationResult = await termination;
         } catch {
           // Preserve the original sandbox outcome when process cleanup fails.
         }
@@ -215,6 +227,16 @@ function createWrappedExecutor(
             : error instanceof Error
               ? error.message
               : String(error),
+        ...(terminationResult
+          ? {
+              processCleanup: {
+                confirmedExited: terminationResult.confirmedExited,
+                gracefulRequested: terminationResult.gracefulRequested,
+                forced: terminationResult.forced,
+                unconfirmedDescendantCount: terminationResult.unconfirmedPids.length,
+              },
+            }
+          : {}),
       };
     } finally {
       if (timeoutId) clearTimeout(timeoutId);

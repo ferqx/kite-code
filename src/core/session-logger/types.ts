@@ -37,6 +37,54 @@ export interface TraceEvent {
   attributes: Record<string, OtelValue>;
 }
 
+// ── Production metadata-only records ──
+
+/**
+ * Content-free schema shared by local metadata logging and future telemetry.
+ * Producers construct this object from structured Runtime fields only; a full
+ * RuntimeEvent is never serialized into this shape.
+ */
+export interface MetadataEventRecordV1 {
+  schemaVersion: 1;
+  eventType: string;
+  timestamp: string;
+  status: 'ok' | 'error' | 'cancelled' | 'blocked' | 'unknown';
+  metadata: MetadataFieldsV1;
+}
+
+export interface MetadataFieldsV1 {
+  durationMs?: number;
+  toolKind?: string;
+  capabilityKind?: string;
+  failureKind?: import('@/core/runtime/failures').FailureKind;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  retryAttempt?: number;
+  retryMaxAttempts?: number;
+  approvalType?: string;
+  approvalResult?: string;
+  verificationType?: string;
+  verificationResult?: string;
+  compactionInputTokensBefore?: number;
+  compactionInputTokensAfter?: number;
+  compactionFailureKind?: string;
+  providerPolicyDigest?: string;
+  providerPolicyRevision?: string;
+  releaseVersion?: string;
+  releaseProfile?: ReleaseProfileMetadataV1;
+  releaseCohort?: string;
+}
+
+export type ReleaseProfileMetadataV1 = 'limited' | 'internal' | 'canary' | 'ga';
+
+export interface SessionMetadataContextV1 {
+  releaseVersion?: string;
+  releaseProfile?: ReleaseProfileMetadataV1;
+  releaseCohort?: string;
+}
+
 // ── 会话摘要 ──
 
 export interface RunSummary {

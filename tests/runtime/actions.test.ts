@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import { eventsForRuntimeAction } from '../../src/core/runtime/actions';
+import { eventsForRunCancellation, eventsForRuntimeAction } from '../../src/core/runtime/actions';
+import { reduceRuntimeState } from '../../src/core/runtime/reducer';
+import { LIMITED_RESOURCE_BUDGET_V1 } from '../../src/core/runtime/resource-budget';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
 
 describe('runtime user actions', () => {
@@ -395,4 +397,40 @@ test('full access approval is rejected when no sandbox is available', () => {
       reason: expect.stringContaining('requires'),
     }),
   ]);
+});
+
+test('bounded cancellation removes every durable waiter before aborting the turn', () => {
+  let state = createInitialRuntimeState({ threadId: 'wait-cancel', userId: 'u', workspace: '/' });
+  state = reduceRuntimeState(state, {
+    type: 'resource_budget.configured',
+    runId: 'run-1',
+    startedAt: '2026-07-30T00:00:00Z',
+    deadlineAt: '2026-07-30T00:30:00Z',
+    budget: LIMITED_RESOURCE_BUDGET_V1,
+  });
+  state = reduceRuntimeState(state, {
+    type: 'resource_budget.waiter_enqueued',
+    waiter: {
+      version: 1,
+      runId: 'run-1',
+      invocationId: 'tool:queued',
+      requiredPermits: ['tool'],
+      sequence: 0,
+      enqueuedAt: '2026-07-30T00:00:01Z',
+      deadlineAt: '2026-07-30T00:00:10Z',
+      state: 'waiting',
+    },
+  });
+
+  const events = eventsForRunCancellation(state, 'Run deadline exceeded.', 'error');
+  expect(events.map((event) => event.type)).toEqual([
+    'resource_budget.waiter_cancelled',
+    'turn.aborted',
+  ]);
+  expect(events.at(-1)).toMatchObject({ type: 'turn.aborted', cause: 'error' });
+  const cancelled = events.reduce(reduceRuntimeState, state);
+  expect(cancelled.resourceBudget).toMatchObject({
+    status: 'active',
+    waiters: { 'tool:queued': { state: 'cancelled' } },
+  });
 });

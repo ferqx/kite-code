@@ -61,5 +61,23 @@ describe('runtime terminal taxonomy v1', () => {
         recoveryEntry: 'operator_action',
       },
     });
+    expect(
+      projectCliRuntimeEventV1(
+        {
+          type: 'run.error',
+          message: '任意展示字符串',
+          recoverable: false,
+          failure,
+          outcome,
+        },
+        false,
+      ),
+    ).toEqual({
+      type: 'run.error',
+      message: '任意展示字符串',
+      recoverable: false,
+      failure,
+      outcome,
+    });
   });
 });

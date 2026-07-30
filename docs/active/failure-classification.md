@@ -25,3 +25,11 @@ saturation, process limit exceeded, cancel incomplete, compaction unqualified/fa
 verification failed/inconclusive, mandatory policy unavailable, blocked, and unknown.
 `completed` is the only projection with `complete=true`; `unknown` requires reconciliation and is
 never safe to retry automatically.
+
+`recovery_blocked` 不能只生成瞬态字符串。Runtime 必须将不兼容/未知恢复映射为结构化
+`unknown`，将损坏的持久化恢复映射为 `persistence_unavailable`，持久化 error-caused
+`turn.aborted` 与带 outcome 的 `run.error`，并保留 recovery hard block。`cancel_incomplete`
+表示 descendant 退出未确认，external effects 固定为 unknown，不能与普通 cancelled 合并。
+
+`terminalOutcomeV1=false` 只关闭 CLI 派生的 `terminalPresentation`；Runtime 仍规范化和持久化
+outcome，因此 rollback 客户端仍可直接读取 status/reasonCode，不能把 unknown 当 completed。

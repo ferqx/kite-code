@@ -217,6 +217,10 @@ describe('shell live output', () => {
       expect(result.stderr).toContain('cancelled by user');
       expect(descendantPid).toBeDefined();
       expect(isProcessAlive(descendantPid!)).toBe(false);
+      expect(result.processCleanup).toMatchObject({
+        confirmedExited: true,
+        gracefulRequested: true,
+      });
     } finally {
       if (descendantPid && isProcessAlive(descendantPid)) {
         try {
@@ -228,6 +232,31 @@ describe('shell live output', () => {
       rmSync(scriptPath, { force: true });
     }
   }, 12_000);
+
+  test('escalates from graceful termination to a bounded forced process-group kill', async () => {
+    if (process.platform === 'win32') return;
+    const controller = new AbortController();
+    const startedAt = Date.now();
+    const result = await shell({
+      workspace,
+      command:
+        "node -e \"process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)\"",
+      timeoutMs: 8_000,
+      signal: controller.signal,
+      onProgress: (line) => {
+        if (line === 'ready') controller.abort();
+      },
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(4_000);
+    expect(result.exitCode).toBe(130);
+    expect(result.processCleanup).toEqual({
+      confirmedExited: true,
+      gracefulRequested: true,
+      forced: true,
+      unconfirmedDescendantCount: 0,
+    });
+  }, 8_000);
 });
 
 function isProcessAlive(pid: number): boolean {

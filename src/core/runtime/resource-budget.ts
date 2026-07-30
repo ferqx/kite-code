@@ -118,6 +118,7 @@ export interface ResourceBudgetReconciledEvent {
 export interface ResourceBudgetReleasedEvent {
   type: 'resource_budget.released';
   reservationId: string;
+  proof?: 'local_provider_admission_denied';
 }
 export interface ResourceBudgetUnknownEvent {
   type: 'resource_budget.unknown';
@@ -538,8 +539,15 @@ export function reduceResourceBudgetStateV1(
     }
     case 'resource_budget.released':
       if (reservation.state === 'released') return active;
-      if (reservation.state !== 'reserved')
+      if (
+        reservation.state !== 'reserved' &&
+        !(
+          reservation.state === 'dispatch_started' &&
+          event.proof === 'local_provider_admission_denied'
+        )
+      ) {
         throw new Error('Only a proven undispatched reservation can be released.');
+      }
       return replaceReservation(active, { ...reservation, state: 'released' });
     case 'resource_budget.unknown':
       if (reservation.state === 'unknown') return active;

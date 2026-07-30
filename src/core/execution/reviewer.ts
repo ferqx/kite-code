@@ -1,7 +1,11 @@
-import { generateText, stepCountIs } from 'ai';
 import type { AgentConfig } from '@/core/config/index';
-import { type BaseMessage, humanMessage, isSystemMessage, systemMessage } from '@/core/messages';
+import {
+  ProviderDataAdmissionError,
+  type ProviderDataAdmissionGateV1,
+} from '@/core/config/provider-data-admission';
+import { type BaseMessage, humanMessage, systemMessage } from '@/core/messages';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
+import { invokeBoundModel } from '@/core/model/invoke';
 import type { ShellApprovalGrant } from '@/protocol/events';
 import type {
   VerificationReviewerInput,
@@ -53,6 +57,8 @@ export async function reviewToolApproval(input: {
   request: PendingToolRequest;
   context?: ReviewContext;
   timeoutMs?: number;
+  providerDataAdmission?: ProviderDataAdmissionGateV1;
+  providerDataPolicyRequired?: boolean;
 }): Promise<AutoReviewResult> {
   const baseTimeout = input.timeoutMs ?? 15_000;
   const effectiveTimeout = riskAdjustedTimeout(input.payload.risk, baseTimeout);
@@ -63,26 +69,20 @@ export async function reviewToolApproval(input: {
   );
   try {
     const messages = buildReviewPrompt(input.payload, input.request, input.context);
-    // Convert LangChain messages to AI SDK format — system messages go via `system` option
-    const systemMsgs: string[] = [];
-    const chatMsgs: Array<{ role: 'user'; content: string }> = [];
-    for (const msg of messages) {
-      if (isSystemMessage(msg)) {
-        systemMsgs.push(msg.content as string);
-      } else {
-        chatMsgs.push({ role: 'user' as const, content: msg.content as string });
-      }
-    }
-    const result = await generateText({
-      model: input.model.model,
-      messages: chatMsgs,
-      system: systemMsgs.join('\n\n') || undefined,
-      stopWhen: stepCountIs(1),
-      temperature: 0,
-      maxRetries: 0,
-      abortSignal: controller.signal,
+    const result = await invokeBoundModel({
+      model: input.model,
+      tools: {},
+      messages,
+      signal: controller.signal,
+      maxOutputTokens: 1_000,
+      providerDataAdmission: input.providerDataAdmission,
+      providerDataPolicyRequired: input.providerDataPolicyRequired,
+      providerDispatchPurpose: 'auto_review',
     });
-    const reviewResult = parseAutoReviewSuggestion(result.text, input.payload.grantOptions);
+    const reviewResult = parseAutoReviewSuggestion(
+      modelResponseText(result.content),
+      input.payload.grantOptions,
+    );
 
     // Belt-and-suspenders: destructive commands are never auto-approved
     if (
@@ -103,6 +103,7 @@ export async function reviewToolApproval(input: {
 
     return reviewResult;
   } catch (error) {
+    if (error instanceof ProviderDataAdmissionError) throw error;
     return {
       ok: false,
       reason: error instanceof Error ? error.message : String(error),
@@ -118,6 +119,8 @@ export async function reviewVerificationEvidence(input: {
   model: SupportedChatModel;
   evidence: VerificationReviewerInput;
   timeoutMs?: number;
+  providerDataAdmission?: ProviderDataAdmissionGateV1;
+  providerDataPolicyRequired?: boolean;
 }): Promise<VerificationReviewerResult> {
   const controller = new AbortController();
   const timeoutId = setTimeout(
@@ -125,21 +128,27 @@ export async function reviewVerificationEvidence(input: {
     input.timeoutMs ?? 30_000,
   );
   try {
-    const result = await generateText({
-      model: input.model.model,
-      system: [
-        'You are an independent post-execution verifier.',
-        'Use only the supplied original receipts, artifacts, and structured workflow outputs.',
-        'Do not trust or infer any main-model claim.',
-        'Return only JSON: {"outcome":"passed|failed|inconclusive","summary":"..."}.',
-      ].join('\n'),
-      messages: [{ role: 'user', content: JSON.stringify(input.evidence) }],
-      stopWhen: stepCountIs(1),
-      temperature: 0,
-      maxRetries: 0,
-      abortSignal: controller.signal,
+    const result = await invokeBoundModel({
+      model: input.model,
+      tools: {},
+      messages: [
+        systemMessage(
+          [
+            'You are an independent post-execution verifier.',
+            'Use only the supplied original receipts, artifacts, and structured workflow outputs.',
+            'Do not trust or infer any main-model claim.',
+            'Return only JSON: {"outcome":"passed|failed|inconclusive","summary":"..."}.',
+          ].join('\n'),
+        ),
+        humanMessage(JSON.stringify(input.evidence)),
+      ],
+      signal: controller.signal,
+      maxOutputTokens: 1_000,
+      providerDataAdmission: input.providerDataAdmission,
+      providerDataPolicyRequired: input.providerDataPolicyRequired,
+      providerDispatchPurpose: 'verification_review',
     });
-    const parsed = JSON.parse(result.text) as Record<string, unknown>;
+    const parsed = JSON.parse(modelResponseText(result.content)) as Record<string, unknown>;
     if (
       !['passed', 'failed', 'inconclusive'].includes(String(parsed.outcome)) ||
       typeof parsed.summary !== 'string'
@@ -151,6 +160,7 @@ export async function reviewVerificationEvidence(input: {
       summary: parsed.summary,
     };
   } catch (error) {
+    if (error instanceof ProviderDataAdmissionError) throw error;
     return {
       outcome: 'inconclusive',
       summary: error instanceof Error ? error.message : String(error),
@@ -158,6 +168,18 @@ export async function reviewVerificationEvidence(input: {
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function modelResponseText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) =>
+      part && typeof part === 'object' && 'text' in part
+        ? String((part as { text: unknown }).text)
+        : '',
+    )
+    .join('');
 }
 
 const REVIEWER_SYSTEM_PROMPT = [

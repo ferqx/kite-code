@@ -4,7 +4,7 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test tests/runtime/tool-controller.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/tool-controller.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts`、`bun run typecheck`。
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049。
 
@@ -24,6 +24,14 @@
 ```
 
 工具声明只让模型表达意图。模型侧不得直接执行工具，TUI 不得绕过 Tool Controller 调用 provider。
+
+`resourceBudgetV1` 启用时，策略/审批仍先于 child reservation；只有调用已经可执行时才原子写入
+reservation，再单独写入 `dispatch_started`，最后进入 adapter。Subagent parent 只代表一次
+lifecycle attempt，child 模型、工具、Shell/MCP 和 artifact 调用各自链接独立 reservation。
+本地 Provider 最终 gate 明确拒绝且能证明未 dispatch 时可携带证明 release；已经执行部分
+command/MCP check 的组合 Verification 必须转 `unknown`，不能整体退款。`resourceBudgetV1`
+开启但 `boundedCancellationV1` 关闭时，模型不披露 writer、Shell 或 child capability，
+Controller 也必须拒绝直接执行，不能退回无界副作用路径。
 
 Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运行中）状态时直接发布 `tool.progress`，Runtime event sink术语（运行时事件接收器）随即把增量交给 TUI；不得先缓存在 Controller 私有数组中等待终态结果。同一批并发 Shell 的增量允许按真实到达顺序交错，但每条事件必须保留各自 `toolCallId`。未提供 event sink术语（事件接收器）的直接调用兼容路径仍在返回数组中收集事件。
 
@@ -92,6 +100,10 @@ Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型
    意图写入 Plan。文件编辑拒绝在 TUI 保留“Plan mode 只读、文件未修改、方案批准后执行”的
    可操作提示，但不物化未获准执行的 Tool Card，不能只显示通用 `Rejected ...`。破坏性
    Shell 仍使用硬安全策略拒绝。
+10. 统一 AbortSignal 命中时，正在执行的 Shell 必须先完成有界 process-tree 清理并回传
+    `processCleanup`；未确认 descendant 退出时另发 `cancel_incomplete`。若此时前台正等待
+    sibling approval，Runner 必须先排空后台 terminal/diagnostic 再结束，不能提前关闭
+    RuntimeStore 或 logger。
 
 ## 文件原像与可逆性（ADR-0042 §4）
 

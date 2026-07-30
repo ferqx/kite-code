@@ -804,6 +804,23 @@ export interface RuntimeActionIgnoredEvent {
   reason: string;
 }
 
+/** Late process cleanup diagnostics never rewrite an already terminal tool/turn. */
+export interface RuntimeCancellationDiagnosticEvent {
+  type: 'runtime.cancellation_diagnostic';
+  toolCallId: string;
+  failure: ClassifiedFailure;
+  unconfirmedDescendantCount: number;
+}
+
+/** Safe release-policy readiness projection; contains no endpoint or payload content. */
+export interface ProviderDataPolicyStatusEvent {
+  type: 'provider.data_policy_status';
+  status: 'ready' | 'blocked';
+  reason: import('@/core/config/provider-data-admission').ProviderDataAdmissionReasonV1;
+  registryDigest?: string;
+  policyRevision?: string;
+}
+
 // ── Plan 生命周期补充事件 / Additional plan lifecycle events ──
 
 /** Plan 草案已生成 / Plan draft has been generated */
@@ -997,6 +1014,8 @@ export type RuntimeEvent =
   | RunCompletedEvent
   | RunErrorEvent
   | RuntimeActionIgnoredEvent
+  | RuntimeCancellationDiagnosticEvent
+  | ProviderDataPolicyStatusEvent
   | PlanDraftedEvent
   | PlanProgressUpdatedEvent
   | PlanCompletedEvent

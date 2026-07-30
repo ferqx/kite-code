@@ -18,6 +18,7 @@ export type RuntimeBudgetAdmissionReasonV1 =
   | 'admitted'
   | 'budget_unconfigured'
   | 'budget_exhausted'
+  | 'reconciliation_required'
   | 'tool_concurrency_saturated'
   | 'shell_concurrency_saturated';
 
@@ -31,8 +32,43 @@ export interface RuntimeBudgetAdmissionPlanV1 {
   waitDeadlineAt?: string;
 }
 
+export interface DescendantBudgetReservationV1 {
+  reservationId: string;
+  maxOutputTokens?: number;
+}
+
+export interface DescendantResourceAdmissionV1 {
+  reserveModel(input: {
+    invocationKey: string;
+    inputTokens: number;
+    requestedMaxOutputTokens?: number;
+  }): Promise<DescendantBudgetReservationV1>;
+  reconcileModel(input: {
+    reservationId: string;
+    inputTokens: number;
+    outputTokens: number;
+  }): Promise<void>;
+  reserveTool(input: {
+    invocationKey: string;
+    toolKind: string;
+    shell: boolean;
+    artifactBytes?: number;
+  }): Promise<DescendantBudgetReservationV1>;
+  reconcileTool(input: { reservationId: string; artifactBytes?: number }): Promise<void>;
+  markUnknown(reservationId: string): Promise<void>;
+  markLocalProviderAdmissionDenied(reservationId: string): Promise<void>;
+}
+
+export class DescendantResourceAdmissionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'DescendantResourceAdmissionError';
+  }
+}
+
 interface PlannedInvocation {
   invocationId: string;
+  toolCallId?: string;
   resourceKind: BudgetReservationV1['resourceKind'];
   requiredPermits: readonly ('tool' | 'shell_invocation')[];
   upperBound: ResourceUsageV1;
@@ -81,17 +117,14 @@ function upperBoundForTool(state: RuntimeState, toolCallId: string): ResourceUsa
   const call = state.tools.calls[toolCallId];
   if (call?.name === 'shell_execute') usage.gauges.activeShellInvocations = 1;
   if (call?.sideEffect) usage.gauges.activeWriters = 1;
-  if (call?.name === 'task') usage.gauges.activeSubagents = 1;
-  usage.counters.artifactBytes = Math.max(0, artifactUpperBound(state, toolCallId));
-  if (call?.name === 'task' && state.resourceBudget.status === 'active') {
-    const committed = committedResourceUsageV1(state.resourceBudget);
-    usage.counters.modelRequests =
-      state.resourceBudget.budget.maxModelRequests - committed.counters.modelRequests;
-    usage.counters.inputTokens =
-      state.resourceBudget.budget.maxRunInputTokens - committed.counters.inputTokens;
-    usage.counters.outputTokens =
-      state.resourceBudget.budget.maxRunOutputTokens - committed.counters.outputTokens;
+  if (call?.name === 'task') {
+    // The parent owns only Sub-agent concurrency/lifecycle. Descendant model,
+    // tool, shell and MCP invocations reserve independently in the shared
+    // ledger so the parent cannot hide multiple calls behind one coarse cap.
+    usage.gauges.activeToolInvocations = 0;
+    usage.gauges.activeSubagents = 1;
   }
+  usage.counters.artifactBytes = Math.max(0, artifactUpperBound(state, toolCallId));
   return usage;
 }
 
@@ -102,8 +135,10 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
     if (state.resourceBudget.status === 'active') {
       const committed = committedResourceUsageV1(state.resourceBudget);
       usage.counters.inputTokens =
+        effect.resourceEstimate?.inputTokens ??
         state.resourceBudget.budget.maxRunInputTokens - committed.counters.inputTokens;
       usage.counters.outputTokens =
+        effect.resourceEstimate?.maxOutputTokens ??
         state.resourceBudget.budget.maxRunOutputTokens - committed.counters.outputTokens;
       usage.counters.turns = Object.values(state.resourceBudget.reservations).some((reservation) =>
         reservation.invocationId.startsWith(`model:${state.turn.turnId}:`),
@@ -210,8 +245,25 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
           : call?.name.startsWith('mcp__')
             ? ('mcp' as const)
             : ('tool' as const);
+    const taskInvocationPrefix = `tool:${toolCallId}`;
+    const completedTaskAttempts =
+      call?.name === 'task' &&
+      state.suspendedSubagents[toolCallId] &&
+      state.resourceBudget.status === 'active'
+        ? Object.values(state.resourceBudget.reservations).filter(
+            (reservation) =>
+              reservation.resourceKind === 'subagent' &&
+              reservation.state === 'reconciled' &&
+              (reservation.invocationId === taskInvocationPrefix ||
+                reservation.invocationId.startsWith(`${taskInvocationPrefix}:resume:`)),
+          ).length
+        : 0;
     return {
-      invocationId: `tool:${toolCallId}`,
+      invocationId:
+        completedTaskAttempts > 0
+          ? `${taskInvocationPrefix}:resume:${completedTaskAttempts}`
+          : taskInvocationPrefix,
+      toolCallId,
       resourceKind,
       requiredPermits: shell ? (['tool', 'shell_invocation'] as const) : (['tool'] as const),
       upperBound: upperBoundForTool(state, toolCallId),
@@ -221,6 +273,141 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
 
 function activeBudget(state: RuntimeState): ActiveResourceBudgetRuntimeStateV1 | undefined {
   return state.resourceBudget.status === 'active' ? state.resourceBudget : undefined;
+}
+
+/**
+ * Create a durable child-admission handle for one dispatched Sub-agent
+ * reservation. Every child model/tool invocation receives its own linked
+ * reservation and is persisted before dispatch through `persistEvent`.
+ */
+export function createDescendantResourceAdmissionV1(input: {
+  state: RuntimeState;
+  parentReservationId: string;
+  persistEvent(event: RuntimeEvent): Promise<boolean>;
+}): DescendantResourceAdmissionV1 {
+  if (input.state.resourceBudget.status !== 'active') {
+    throw new DescendantResourceAdmissionError('Shared resource budget is unavailable.');
+  }
+  const parent = input.state.resourceBudget.reservations[input.parentReservationId];
+  if (parent?.resourceKind !== 'subagent' || parent.state !== 'dispatch_started') {
+    throw new DescendantResourceAdmissionError(
+      'Sub-agent parent reservation is not dispatch-started.',
+    );
+  }
+  let projected = input.state.resourceBudget;
+
+  const persist = async (event: RuntimeEvent): Promise<void> => {
+    let next: ResourceBudgetRuntimeStateV1;
+    try {
+      next = reduceResourceBudgetStateV1(projected, event as never);
+    } catch (error) {
+      throw new DescendantResourceAdmissionError(
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    if (!(await input.persistEvent(event))) {
+      throw new DescendantResourceAdmissionError(
+        'Sub-agent resource reservation lost its active Runtime lease.',
+      );
+    }
+    if (next.status !== 'active') {
+      throw new DescendantResourceAdmissionError('Shared resource budget became inactive.');
+    }
+    projected = next;
+  };
+
+  const reserve = async (
+    invocationKey: string,
+    resourceKind: BudgetReservationV1['resourceKind'],
+    upperBound: ResourceUsageV1,
+  ): Promise<DescendantBudgetReservationV1> => {
+    const reservation: BudgetReservationV1 = {
+      version: 1,
+      reservationId: crypto.randomUUID(),
+      runId: projected.runId,
+      invocationId: `descendant:${parent.invocationId}:${invocationKey}`,
+      parentReservationId: parent.reservationId,
+      resourceKind,
+      executableUpperBound: upperBound,
+      state: 'reserved',
+    };
+    await persist({ type: 'resource_budget.reserved', reservation });
+    await persist({
+      type: 'resource_budget.dispatch_started',
+      reservationId: reservation.reservationId,
+    });
+    return {
+      reservationId: reservation.reservationId,
+      ...(upperBound.counters.outputTokens > 0
+        ? { maxOutputTokens: upperBound.counters.outputTokens }
+        : {}),
+    };
+  };
+
+  const reconcile = async (reservationId: string, actual: ResourceUsageV1): Promise<void> => {
+    await persist({ type: 'resource_budget.reconciled', reservationId, actual });
+  };
+
+  return {
+    async reserveModel(request) {
+      const committed = committedResourceUsageV1(projected);
+      const remainingOutput = projected.budget.maxRunOutputTokens - committed.counters.outputTokens;
+      const outputTokens = Math.min(
+        request.requestedMaxOutputTokens ?? remainingOutput,
+        remainingOutput,
+      );
+      if (outputTokens <= 0) {
+        throw new DescendantResourceAdmissionError('Sub-agent model output budget is exhausted.');
+      }
+      const usage = createZeroResourceUsageV1('versioned_upper_bound', 'descendant-runtime-v1');
+      usage.counters.modelRequests = 1;
+      usage.counters.inputTokens = request.inputTokens;
+      usage.counters.outputTokens = outputTokens;
+      return reserve(request.invocationKey, 'model', usage);
+    },
+    async reconcileModel(request) {
+      const usage = createZeroResourceUsageV1();
+      usage.counters.modelRequests = 1;
+      usage.counters.inputTokens = request.inputTokens;
+      usage.counters.outputTokens = request.outputTokens;
+      await reconcile(request.reservationId, usage);
+    },
+    async reserveTool(request) {
+      const usage = createZeroResourceUsageV1('versioned_upper_bound', 'descendant-runtime-v1');
+      usage.counters.toolInvocations = 1;
+      const committed = committedResourceUsageV1(projected);
+      const remainingArtifactBytes =
+        projected.budget.maxArtifactBytes - committed.counters.artifactBytes;
+      usage.counters.artifactBytes =
+        request.artifactBytes ??
+        (request.toolKind === 'write_file' || request.toolKind === 'edit_file'
+          ? remainingArtifactBytes
+          : 0);
+      usage.gauges.activeToolInvocations = 1;
+      if (request.shell) usage.gauges.activeShellInvocations = 1;
+      return reserve(
+        request.invocationKey,
+        request.toolKind.startsWith('mcp__') ? 'mcp' : 'tool',
+        usage,
+      );
+    },
+    async reconcileTool(request) {
+      const usage = createZeroResourceUsageV1();
+      usage.counters.toolInvocations = 1;
+      usage.counters.artifactBytes = request.artifactBytes ?? 0;
+      await reconcile(request.reservationId, usage);
+    },
+    async markUnknown(reservationId) {
+      await persist({ type: 'resource_budget.unknown', reservationId });
+    },
+    async markLocalProviderAdmissionDenied(reservationId) {
+      await persist({
+        type: 'resource_budget.released',
+        reservationId,
+        proof: 'local_provider_admission_denied',
+      });
+    },
+  };
 }
 
 function waitingInFifoOrder(budget: ActiveResourceBudgetRuntimeStateV1): ConcurrencyWaiterV1[] {
@@ -376,6 +563,14 @@ export function planRuntimeBudgetAdmissionV1(
 
   for (const invocation of invocations) {
     if (projected.status !== 'active') throw new Error('Budget projection became inactive.');
+    const unresolved = Object.values(projected.reservations).find(
+      (reservation) =>
+        reservation.invocationId === invocation.invocationId && reservation.state === 'unknown',
+    );
+    if (unresolved) {
+      blocked = { reason: 'reconciliation_required' };
+      break;
+    }
     const existingWaiter = projected.waiters?.[invocation.invocationId];
     if (existingWaiter && Date.parse(existingWaiter.deadlineAt) <= now.getTime()) {
       const timedOutEvent = {
@@ -426,7 +621,10 @@ export function planRuntimeBudgetAdmissionV1(
       });
       reservationIds.push(reservation.reservationId);
       if (effect.type === 'run_tools') {
-        admittedToolCallIds.push(invocation.invocationId.slice('tool:'.length));
+        if (!invocation.toolCallId) {
+          throw new Error('Tool admission is missing its durable toolCallId.');
+        }
+        admittedToolCallIds.push(invocation.toolCallId);
       }
     } catch {
       const activeProjected = projected;
@@ -449,7 +647,7 @@ export function planRuntimeBudgetAdmissionV1(
     let queueState: ActiveResourceBudgetRuntimeStateV1 = projected;
     for (const invocation of invocations) {
       if (
-        admittedToolCallIds.includes(invocation.invocationId.slice('tool:'.length)) ||
+        (invocation.toolCallId && admittedToolCallIds.includes(invocation.toolCallId)) ||
         queueState.waiters?.[invocation.invocationId]
       ) {
         continue;
@@ -478,7 +676,10 @@ export function planRuntimeBudgetAdmissionV1(
     };
   }
   return {
-    status: blocked?.reason === 'budget_exhausted' ? 'denied' : 'waiting',
+    status:
+      blocked?.reason === 'budget_exhausted' || blocked?.reason === 'reconciliation_required'
+        ? 'denied'
+        : 'waiting',
     reason: blocked?.reason ?? 'budget_exhausted',
     effect,
     preparationEvents,
@@ -514,11 +715,6 @@ export function actualUsageForReservationV1(
     modelResponse?.inputTokens ?? reservation.executableUpperBound.counters.inputTokens;
   usage.counters.outputTokens =
     modelResponse?.outputTokens ?? reservation.executableUpperBound.counters.outputTokens;
-  if (reservation.resourceKind === 'subagent') {
-    usage.counters.modelRequests = reservation.executableUpperBound.counters.modelRequests;
-    usage.counters.inputTokens = reservation.executableUpperBound.counters.inputTokens;
-    usage.counters.outputTokens = reservation.executableUpperBound.counters.outputTokens;
-  }
   const toolCallId = reservation.invocationId.startsWith('tool:')
     ? reservation.invocationId.slice('tool:'.length)
     : undefined;
@@ -546,7 +742,7 @@ export function reconciliationEventsForReservationsV1(
   state: RuntimeState,
   reservationIds: string[],
   terminalEvents: RuntimeEvent[] = [],
-): RuntimeEvent[] {
+): Array<Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }>> {
   if (state.resourceBudget.status !== 'active') return [];
   return reservationIds.map((reservationId) => {
     const reservation = state.resourceBudget.reservations[reservationId];

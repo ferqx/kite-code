@@ -16,21 +16,25 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.
 
-生产治理基础 schema 使用三个默认关闭的迁移 flag：
+生产治理基础 schema 使用以下默认关闭的迁移 flag：
 
 | 开关 | 默认值 | 当前职责 |
 | --- | --- | --- |
-| `sessionLoggingPolicyV1` | `false` | 注册 metadata-first 日志策略 schema；关闭时 policy resolver 收紧为 `off` |
-| `providerDataPolicyV1` | `false` | 注册仓库受控的 Provider 数据策略 schema；当前批准 route bundle 为空 |
+| `sessionLoggingPolicyV1` | `false` | Runtime 组合根选择 metadata-only collector；关闭时为 `off`，不创建日志目录 |
+| `providerDataPolicyV1` | `false` | 所有模型 dispatch 使用 release-pinned Provider 数据 gate；当前批准 route bundle 为空 |
 | `resourceBudgetV1` | `false` | 启用 Runtime v19 累计预算 admission、FIFO/compound permit 与恢复语义 |
-| `terminalOutcomeV1` | `false` | 注册结构化 terminal outcome rollout；新持久化终态已使用 v1 taxonomy |
+| `boundedCancellationV1` | `false` | 启用 run deadline、统一 AbortSignal 与 descendant/process-tree 有界清理 |
+| `terminalOutcomeV1` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
 
 `providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
 前者仍要求批准 registry/gate，且当前 route 集合为空；后者只允许新 run 建立 limited preset
 ledger，v17 及更早 snapshot 的 `legacy_unconfigured` 状态仍拒绝热迁移。关闭任一开关时，
 production profile 必须 fail closed；开发 profile 才可显式使用旧路径。用户、项目和 CLI 覆盖
 不能放宽批准 policy/budget。`terminalOutcomeV1=false` 只用于 rollout 回退，不允许 production
-客户端把 `unknown`、`blocked`、`budget_exhausted` 或 `resource_saturated` 显示成完成。
+客户端把 `unknown`、`blocked`、`budget_exhausted` 或 `resource_saturated` 显示成完成；
+CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除。启用 resource budget 但未
+启用 bounded cancellation 时，模型不披露 writer、Shell 和 child capability，Controller 同时
+拒绝其执行，不能退回无界副作用路径。
 
 
 上下文压缩的 flag 术语（功能开关）真值如下：

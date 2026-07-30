@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
+import {
+  createApprovedProviderDataAdmissionV1,
+  ProviderDataAdmissionError,
+} from '@/core/config/provider-data-admission';
+import { resolveSessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
@@ -19,7 +23,7 @@ import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
 import { eventsForRunCancellation } from './actions';
 import type { RuntimeEvent } from './events';
-import { createRuntimeEffectExecutor } from './executor';
+import { createRuntimeEffectExecutor, prepareRuntimeEffectForBudgetV1 } from './executor';
 import { recordRuntimeFailure } from './failures';
 import { createAgentKernel } from './kernel';
 import { LIMITED_RESOURCE_BUDGET_V1 } from './resource-budget';
@@ -129,30 +133,102 @@ export async function* runRuntimeAgent(
     input.workspace,
     input.frontend ?? 'runtime',
     { provider: input.config.providerName, name: input.config.modelName },
+    {
+      mode: resolveSessionLoggingPolicyV1({
+        enabled: getFeatureFlags(input.config).sessionLoggingPolicyV1,
+      }).mode,
+    },
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
   let runCancelled = false;
+  let runDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let deadlineCancellationEvents: RuntimeEvent[] = [];
+  let deadlineEventsYielded = false;
+  let deadlineTriggered = false;
+  let deadlineTerminalYielded = false;
+  let cancellationIncomplete = false;
   const executionAbortController = new AbortController();
+  const providerDataAdmission = getFeatureFlags(input.config).providerDataPolicyV1
+    ? createApprovedProviderDataAdmissionV1(input.config)
+    : undefined;
   const forwardExternalAbort = () => executionAbortController.abort(input.signal?.reason);
   if (input.signal?.aborted) forwardExternalAbort();
   else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
+  const cancelRun = (
+    reason = 'Cancelled by user.',
+    cause: 'user' | 'error' = 'user',
+  ): RuntimeEvent[] => {
+    if (runCancelled) return [];
+    runCancelled = true;
+    exitStatus = 'aborted';
+    const events = eventsForRunCancellation(kernel.getState(), reason, cause);
+    kernel.processEventBatch(events);
+    for (const event of events) collector.recordRuntime(event);
+    executionAbortController.abort(reason);
+    return events;
+  };
+  const scheduleRunDeadline = (deadlineAt: string) => {
+    if (!getFeatureFlags(input.config).boundedCancellationV1 || runDeadlineTimer) return;
+    const remainingMs = Math.max(0, Date.parse(deadlineAt) - Date.now());
+    runDeadlineTimer = setTimeout(() => {
+      if (runCancelled || kernel.getState().turn.status !== 'active') return;
+      deadlineTriggered = true;
+      deadlineCancellationEvents = cancelRun(
+        'Runtime deadline exceeded; bounded cancellation started.',
+        'error',
+      );
+    }, remainingMs);
+  };
+  const createDeadlineTerminalEvent = (): RuntimeEvent | undefined => {
+    if (!deadlineTriggered || deadlineTerminalYielded) return undefined;
+    deadlineTerminalYielded = true;
+    const unknownReservation =
+      kernel.getState().resourceBudget.status === 'active' &&
+      Object.values(kernel.getState().resourceBudget.reservations).some(
+        (reservation) => reservation.state === 'unknown',
+      );
+    const failure = recordRuntimeFailure({
+      kind: cancellationIncomplete ? 'cancel_incomplete' : 'budget_exceeded',
+      message: cancellationIncomplete
+        ? 'Runtime deadline exceeded and descendant cleanup could not be confirmed.'
+        : 'Runtime deadline exceeded and bounded cancellation completed.',
+      phase: 'building',
+      turnId: kernel.getState().turn.turnId,
+      userVisible: true,
+    });
+    return {
+      type: 'run.error',
+      message: failure.message,
+      recoverable: false,
+      failure: failure.failure,
+      turnId: failure.turnId,
+      outcome: failedTerminalOutcomeV1(failure.failure, {
+        knownExternalEffects: cancellationIncomplete || unknownReservation ? 'unknown' : 'known',
+        reasonCode: cancellationIncomplete ? 'cancel_incomplete' : 'budget_exhausted',
+      }),
+    };
+  };
   input.onKernelControl?.({
     getState: () => kernel.getState(),
     processEvent: (event) => {
       kernel.processEvent(event);
     },
-    cancelRun: (reason) => {
-      if (runCancelled) return [];
-      runCancelled = true;
-      exitStatus = 'aborted';
-      const events = eventsForRunCancellation(kernel.getState(), reason);
-      kernel.processEventBatch(events);
-      for (const event of events) collector.recordRuntime(event);
-      executionAbortController.abort(reason);
-      return events;
-    },
+    cancelRun: (reason) => cancelRun(reason),
   });
   try {
+    if (providerDataAdmission) {
+      const readiness = providerDataAdmission([], 'primary_model');
+      const event: RuntimeEvent = {
+        type: 'provider.data_policy_status',
+        status: readiness.admitted ? 'ready' : 'blocked',
+        reason: readiness.reason,
+        ...(readiness.registryDigest ? { registryDigest: readiness.registryDigest } : {}),
+        ...(readiness.policyRevision ? { policyRevision: readiness.policyRevision } : {}),
+      };
+      kernel.processEvent(event);
+      collector.recordRuntime(event);
+      yield event;
+    }
     if (getFeatureFlags(input.config).resourceBudgetV1) {
       if (kernel.getState().resourceBudget.status !== 'unconfigured') {
         if (kernel.getState().resourceBudget.status !== 'active') {
@@ -193,7 +269,12 @@ export async function* runRuntimeAgent(
         kernel.processEvent(event);
         collector.recordRuntime(event);
         yield event;
+        scheduleRunDeadline(event.deadlineAt);
       }
+    }
+    const activeBudget = kernel.getState().resourceBudget;
+    if (activeBudget.status === 'active') {
+      scheduleRunDeadline(activeBudget.deadlineAt);
     }
     const admissionEvents = requiredProviderAdmissionEvents(
       kernel.getState(),
@@ -329,8 +410,29 @@ export async function* runRuntimeAgent(
             sessionId: input.threadId,
           })
         : undefined,
+      providerDataAdmission,
     });
-    for await (const event of runRuntimeLoop(kernel, executor, provider)) {
+    for await (const event of runRuntimeLoop(
+      kernel,
+      executor,
+      provider,
+      10_000,
+      (effect, state) =>
+        getFeatureFlags(input.config).resourceBudgetV1
+          ? prepareRuntimeEffectForBudgetV1(effect, state as import('./state').RuntimeState, {
+              config: input.config,
+              model,
+              shellExecutor: input.shellExecutor,
+              mcpManager: input.mcpManager,
+              skills: input.skills,
+              skillOptions: input.skillOptions,
+              signal: executionAbortController.signal,
+              providerDataAdmission,
+              subagentEventSink: () => {},
+            })
+          : effect,
+      executionAbortController.signal,
+    )) {
       collector.recordRuntime(event);
       if (event.type === 'approval.rejected' && event.failure?.kind === 'approval_rejected') {
         runCancelled = true;
@@ -342,6 +444,12 @@ export async function* runRuntimeAgent(
         exitStatus = 'aborted';
         executionAbortController.abort(event.reason);
       }
+      if (
+        event.type === 'runtime.cancellation_diagnostic' &&
+        event.failure.kind === 'cancel_incomplete'
+      ) {
+        cancellationIncomplete = true;
+      }
       // Task lifecycle facts are durable RuntimeEvents, but remain internal to
       // the legacy public stream; UI projections are driven by planning/tool
       // events and existing consumers should not see extra turn markers.
@@ -349,9 +457,29 @@ export async function* runRuntimeAgent(
       yield event;
     }
     if (executionAbortController.signal.aborted) exitStatus = 'aborted';
+    if (deadlineCancellationEvents.length > 0) {
+      deadlineEventsYielded = true;
+      yield* deadlineCancellationEvents;
+    }
+    const deadlineTerminal = createDeadlineTerminalEvent();
+    if (deadlineTerminal) {
+      kernel.processEvent(deadlineTerminal);
+      collector.recordRuntime(deadlineTerminal);
+      yield deadlineTerminal;
+    }
   } catch (error) {
     if (executionAbortController.signal.aborted) {
       exitStatus = 'aborted';
+      if (!deadlineEventsYielded && deadlineCancellationEvents.length > 0) {
+        deadlineEventsYielded = true;
+        yield* deadlineCancellationEvents;
+      }
+      const deadlineTerminal = createDeadlineTerminalEvent();
+      if (deadlineTerminal) {
+        kernel.processEvent(deadlineTerminal);
+        collector.recordRuntime(deadlineTerminal);
+        yield deadlineTerminal;
+      }
       return;
     }
     exitStatus = 'fatal';
@@ -382,12 +510,14 @@ export async function* runRuntimeAgent(
       turnId: failure.turnId,
       outcome: failedTerminalOutcomeV1(failure.failure, {
         knownExternalEffects:
-          kernel.getState().resourceBudget.status === 'active' &&
-          Object.values(kernel.getState().resourceBudget.reservations).some(
-            (reservation) => reservation.state === 'unknown',
-          )
-            ? 'unknown'
-            : 'known',
+          error instanceof ProviderDataAdmissionError
+            ? error.knownExternalEffects
+            : kernel.getState().resourceBudget.status === 'active' &&
+                Object.values(kernel.getState().resourceBudget.reservations).some(
+                  (reservation) => reservation.state === 'unknown',
+                )
+              ? 'unknown'
+              : 'known',
       }),
     };
     kernel.processEvent(errorEvent);
@@ -404,6 +534,7 @@ export async function* runRuntimeAgent(
     collector.recordRuntime(aborted);
     yield aborted;
   } finally {
+    if (runDeadlineTimer) clearTimeout(runDeadlineTimer);
     input.signal?.removeEventListener('abort', forwardExternalAbort);
     input.onKernelControl?.(null);
     await collector.finalize(exitStatus);

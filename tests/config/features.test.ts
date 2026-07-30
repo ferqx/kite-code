@@ -27,7 +27,11 @@ describe('feature flags', () => {
     expect(getFeatureFlags().sessionLoggingPolicyV1).toBe(false);
     expect(getFeatureFlags().providerDataPolicyV1).toBe(false);
     expect(getFeatureFlags().resourceBudgetV1).toBe(false);
+    expect(getFeatureFlags().boundedCancellationV1).toBe(false);
     expect(getFeatureFlags().terminalOutcomeV1).toBe(false);
+    expect(
+      getFeatureFlags({ features: { boundedCancellationV1: true } }).boundedCancellationV1,
+    ).toBe(true);
     expect(getFeatureFlags({ features: { verificationV1: true } }).verificationV1).toBe(true);
     expect(getFeatureFlags({ features: { mcpRuntimeBindingV1: true } }).mcpRuntimeBindingV1).toBe(
       true,
@@ -44,6 +48,9 @@ describe('feature flags', () => {
       contextCompactionAutoV1: true,
     });
     expect(parseFeatureOverride('resourceBudgetV1')).toEqual({ resourceBudgetV1: true });
+    expect(parseFeatureOverride('boundedCancellationV1')).toEqual({
+      boundedCancellationV1: true,
+    });
     expect(parseFeatureOverride('terminalOutcomeV1=false')).toEqual({ terminalOutcomeV1: false });
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });

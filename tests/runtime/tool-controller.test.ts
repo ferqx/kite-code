@@ -10,12 +10,133 @@ import {
 } from '@/core/controllers/tool-controller';
 import { exposedMcpToolName } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
+import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
+import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
+import { getRoleConfig } from '@/core/subagent/roles';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
+import { createMockModel } from '../mock-model';
 
 describe('executeRuntimeTools', () => {
+  test('reserves and reconciles the actual child tool when a suspended Sub-agent resumes', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-subagent-resume-budget-'));
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'subagent-resume-budget',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'model',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'Run pwd and finish.' },
+        status: 'approved',
+        approvalGrant: 'approve_once',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.active.push('task');
+      state.suspendedSubagents.task = serializeSubagentContinuation(
+        {
+          id: 'child',
+          role: getRoleConfig('code'),
+          task: 'Run pwd and finish.',
+          messages: [
+            aiMessage({
+              content: 'I need to inspect the directory.',
+              tool_calls: [{ id: 'child-shell', name: 'shell_execute', args: { command: 'pwd' } }],
+            }),
+          ],
+          toolCallCount: 1,
+          steps: [
+            {
+              toolName: 'shell_execute',
+              toolArgs: { command: 'pwd' },
+              status: 'awaiting_approval',
+            },
+          ],
+        },
+        {
+          toolCallId: 'child-shell',
+          toolName: 'shell_execute',
+          args: { command: 'pwd' },
+          command: 'pwd',
+        },
+      );
+
+      const order: string[] = [];
+      const model = createMockModel([{ message: aiMessage({ content: 'Done.' }) }]);
+      const generate = model.model.doGenerate.bind(model.model);
+      model.model.doGenerate = async (...args: unknown[]) => {
+        order.push('model-dispatch');
+        return generate(...args);
+      };
+      const config: AgentConfig = {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        features: { resourceBudgetV1: true, boundedCancellationV1: true },
+        sandbox: { enabled: false },
+      };
+
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: config,
+        taskModel: model,
+        subagentEventSink: () => {},
+        shellExecutor: async ({ command }) => {
+          order.push('tool-dispatch');
+          return { ok: true, command, exitCode: 0, stdout: workspace, stderr: '' };
+        },
+        descendantResourceAdmission: {
+          reserveTool: async () => {
+            order.push('reserve-tool');
+            return { reservationId: 'child-tool' };
+          },
+          reconcileTool: async ({ reservationId }) => {
+            expect(reservationId).toBe('child-tool');
+            order.push('reconcile-tool');
+          },
+          reserveModel: async () => {
+            order.push('reserve-model');
+            return { reservationId: 'child-model', maxOutputTokens: 64 };
+          },
+          reconcileModel: async ({ reservationId }) => {
+            expect(reservationId).toBe('child-model');
+            order.push('reconcile-model');
+          },
+          markUnknown: async () => {
+            order.push('unknown');
+          },
+          markLocalProviderAdmissionDenied: async () => {
+            order.push('released');
+          },
+        },
+      });
+
+      expect(order).toEqual([
+        'reserve-tool',
+        'tool-dispatch',
+        'reconcile-tool',
+        'reserve-model',
+        'model-dispatch',
+        'reconcile-model',
+      ]);
+      expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'tool.finished', toolCallId: 'task' }),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('executes a normalized model tool name against the original remote MCP name', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-normalized-mcp-name',

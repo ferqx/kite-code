@@ -1,8 +1,11 @@
+import { statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
+import { getFeatureFlags } from '@/core/config/features';
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import {
   type ExecutionJournalEntry,
   isFingerprintExhausted,
@@ -12,7 +15,9 @@ import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import type { BaseMessage } from '@/core/messages';
-import { humanMessage, systemMessage, toolMessage } from '@/core/messages';
+import { humanMessage, isSystemMessage, systemMessage, toolMessage } from '@/core/messages';
+import { estimateContextTokens } from '@/core/model/context-budget';
+import { serializeToolDescriptors } from '@/core/model/context-projection';
 import { createChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
@@ -176,6 +181,54 @@ function normalizeRoleConfig(role: SubAgentRoleConfig): SubAgentRoleConfig {
   };
 }
 
+function configuredSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | undefined {
+  const configured =
+    input.config.modelKwargs?.maxOutputTokens ?? input.config.modelKwargs?.maxTokens;
+  return typeof configured === 'number' && Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : undefined;
+}
+
+function subagentModelInputTokens(messages: BaseMessage[], tools: ToolSet): number {
+  return estimateContextTokens({
+    systemMessages: messages.filter(isSystemMessage),
+    transcriptMessages: messages.filter((message) => !isSystemMessage(message)),
+    dynamicRuntimeMessages: [],
+    serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
+  }).totalInputTokens;
+}
+
+function subagentModelOutputTokens(message: unknown): number {
+  if (!message || typeof message !== 'object') return 0;
+  const candidate = message as {
+    content?: unknown;
+    response_metadata?: { usage?: { completion_tokens?: number } };
+    usage_metadata?: { output_tokens?: number };
+  };
+  return Number(
+    candidate.response_metadata?.usage?.completion_tokens ??
+      candidate.usage_metadata?.output_tokens ??
+      countTokens(extractText(candidate.content)),
+  );
+}
+
+function artifactSizeAfterTool(
+  workspace: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): number {
+  if ((toolName !== 'write_file' && toolName !== 'edit_file') || typeof args.path !== 'string') {
+    return 0;
+  }
+  const normalized = normalizeSubAgentToolArgs(toolName, args, workspace);
+  if (typeof normalized.path !== 'string') return 0;
+  try {
+    return statSync(resolve(workspace, normalized.path)).size;
+  } catch {
+    return 0;
+  }
+}
+
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
   const id = nextSubAgentId();
   const normalizedInput = { ...input, role: normalizeRoleConfig(input.role) };
@@ -335,12 +388,48 @@ async function runSubAgentLoop(
 
     while (true) {
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-      const response = await invokeBoundModel({
-        model,
-        tools,
-        messages,
-        signal: combinedSignal,
-      });
+      const modelInputTokens = subagentModelInputTokens(messages, tools);
+      const modelReservation = input.descendantResourceAdmission
+        ? await input.descendantResourceAdmission.reserveModel({
+            invocationKey: `model:${messages.length}:${toolCallCount}`,
+            inputTokens: modelInputTokens,
+            requestedMaxOutputTokens: configuredSubagentMaxOutputTokens(input),
+          })
+        : undefined;
+      let response: Awaited<ReturnType<typeof invokeBoundModel>>;
+      let modelReconciled = false;
+      try {
+        response = await invokeBoundModel({
+          model,
+          tools,
+          messages,
+          signal: combinedSignal,
+          providerDataAdmission: input.providerDataAdmission,
+          providerDataPolicyRequired: getFeatureFlags(input.config).providerDataPolicyV1,
+          providerDispatchPurpose: 'subagent',
+          maxOutputTokens:
+            modelReservation?.maxOutputTokens ?? configuredSubagentMaxOutputTokens(input),
+        });
+        if (modelReservation) {
+          await input.descendantResourceAdmission!.reconcileModel({
+            reservationId: modelReservation.reservationId,
+            inputTokens: modelInputTokens,
+            outputTokens: subagentModelOutputTokens(response),
+          });
+          modelReconciled = true;
+        }
+      } catch (error) {
+        if (modelReservation && !modelReconciled) {
+          if (error instanceof ProviderDataAdmissionError) {
+            await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+              modelReservation.reservationId,
+            );
+          } else {
+            await input.descendantResourceAdmission!.markUnknown(modelReservation.reservationId);
+          }
+        }
+        throw error;
+      }
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
 
       const cacheMetrics = extractPromptCacheMetrics(response);
@@ -535,6 +624,9 @@ async function runSubAgentLoop(
         let toolOutput: string;
         let ok = true;
         let totalLines: number | undefined;
+        let toolReservation:
+          | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
+          | undefined;
         try {
           const parsed = toolRequestFromCall(
             {
@@ -584,8 +676,25 @@ async function runSubAgentLoop(
             interactionMode: 'accept_edits',
             taskConfig: input.config,
             taskModel: model,
+            providerDataAdmission: input.providerDataAdmission,
             subagentEventSink: input.eventSink,
+            beforeDispatch: input.descendantResourceAdmission
+              ? async () => {
+                  toolReservation = await input.descendantResourceAdmission!.reserveTool({
+                    invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}`,
+                    toolKind: tc.name,
+                    shell: tc.name === 'shell_execute',
+                  });
+                }
+              : undefined,
           });
+          if (toolReservation) {
+            await input.descendantResourceAdmission!.reconcileTool({
+              reservationId: toolReservation.reservationId,
+              artifactBytes: artifactSizeAfterTool(input.workspace, tc.name, toolArgs),
+            });
+            toolReservation = undefined;
+          }
           const blocked = approvalRequiredBlock(
             result,
             pendingRequest.id ?? tc.id ?? `subagent-${toolCallCount}`,
@@ -672,6 +781,15 @@ async function runSubAgentLoop(
           ok = result.ok !== false;
           if (typeof result.totalLines === 'number') totalLines = result.totalLines;
         } catch (e) {
+          if (toolReservation) {
+            if (e instanceof ProviderDataAdmissionError) {
+              await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+                toolReservation.reservationId,
+              );
+            } else {
+              await input.descendantResourceAdmission!.markUnknown(toolReservation.reservationId);
+            }
+          }
           toolOutput = JSON.stringify({
             ok: false,
             error: e instanceof Error ? e.message : String(e),

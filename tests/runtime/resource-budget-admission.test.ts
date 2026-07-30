@@ -1,14 +1,24 @@
 import { describe, expect, test } from 'bun:test';
+import type { AgentConfig } from '@/core/config';
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
+import { invokeRuntimeModel } from '@/core/controllers/model-controller';
+import { aiMessage } from '@/core/messages';
+import {
+  createRuntimeEffectExecutor,
+  prepareRuntimeEffectForBudgetV1,
+} from '@/core/runtime/executor';
 import { AgentKernel } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
 import {
+  createDescendantResourceAdmissionV1,
   planRuntimeBudgetAdmissionV1,
   reconciliationEventsForReservationsV1,
 } from '@/core/runtime/resource-budget-admission';
 import { runRuntimeLoop } from '@/core/runtime/runner';
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { createMockModel } from '../mock-model';
 
 function configuredState(overrides: Partial<typeof LIMITED_RESOURCE_BUDGET_V1> = {}): RuntimeState {
   return reduceRuntimeState(
@@ -52,6 +62,70 @@ describe('runtime resource budget admission', () => {
     });
   });
 
+  test('reserves the exact main-model projection and clamps Provider output', async () => {
+    let state = configuredState({ maxRunOutputTokens: 7 });
+    state = reduceRuntimeState(state, {
+      type: 'user.message_appended',
+      messageId: 'budgeted-prompt',
+      content: 'Inspect the current runtime state.',
+    });
+    const config: AgentConfig = {
+      apiKey: 'unused',
+      baseURL: 'https://example.invalid',
+      modelName: 'budget-model',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      modelKwargs: { maxOutputTokens: 100 },
+      sandbox: { enabled: false },
+    };
+    const model = createMockModel([{ message: aiMessage({ content: 'done' }) }]);
+    let providerMaxOutputTokens: number | undefined;
+    const originalGenerate = model.model.doGenerate.bind(model.model);
+    model.model.doGenerate = async (options: { maxOutputTokens?: number }) => {
+      providerMaxOutputTokens = options.maxOutputTokens;
+      return originalGenerate(options);
+    };
+
+    const prepared = prepareRuntimeEffectForBudgetV1({ type: 'call_model' }, state, {
+      config,
+      model,
+    });
+    if (prepared.type !== 'call_model' || !prepared.resourceEstimate) {
+      throw new Error('Expected a prepared model effect.');
+    }
+    if (!Number.isFinite(prepared.resourceEstimate.inputTokens)) {
+      throw new Error(`Non-finite input estimate: ${prepared.resourceEstimate.inputTokens}`);
+    }
+    expect(prepared.resourceEstimate.inputTokens).toBeGreaterThan(0);
+    expect(prepared.resourceEstimate.maxOutputTokens).toBe(7);
+    const admission = planRuntimeBudgetAdmissionV1(
+      state,
+      prepared,
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    expect(admission.reason).toBe('admitted');
+    expect(admission.status).toBe('admitted');
+    expect(admission.preparationEvents[0]).toMatchObject({
+      type: 'resource_budget.reserved',
+      reservation: {
+        executableUpperBound: {
+          counters: {
+            inputTokens: prepared.resourceEstimate?.inputTokens,
+            outputTokens: 7,
+          },
+        },
+      },
+    });
+
+    await invokeRuntimeModel({
+      model,
+      state,
+      config,
+      resourceAdmission: prepared.resourceEstimate,
+    });
+    expect(providerMaxOutputTokens).toBe(7);
+  });
+
   test('denies cumulative exhaustion before producing dispatch_started', () => {
     const state = configuredState({ maxModelRequests: 1 });
     const first = planRuntimeBudgetAdmissionV1(
@@ -80,6 +154,173 @@ describe('runtime resource budget admission', () => {
     );
     expect(second).toMatchObject({ status: 'denied', reason: 'budget_exhausted' });
     expect(second.dispatchEvents).toEqual([]);
+  });
+
+  test('preserves unknown external outcome instead of misclassifying it as budget exhaustion', () => {
+    const state = configuredState();
+    const first = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'call_model' },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    const dispatched = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
+    const unknown = apply(
+      dispatched,
+      first.reservationIds.map((reservationId) => ({
+        type: 'resource_budget.unknown' as const,
+        reservationId,
+      })),
+    );
+
+    const resumed = planRuntimeBudgetAdmissionV1(
+      unknown,
+      { type: 'call_model' },
+      new Date('2026-07-30T00:00:02Z'),
+    );
+    expect(resumed).toMatchObject({
+      status: 'denied',
+      reason: 'reconciliation_required',
+    });
+    expect(resumed.preparationEvents).toEqual([]);
+    expect(resumed.dispatchEvents).toEqual([]);
+  });
+
+  test('releases dispatch-started usage only with local Provider denial proof', () => {
+    const state = configuredState();
+    const plan = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'call_model' },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    const dispatched = apply(state, [...plan.preparationEvents, ...plan.dispatchEvents]);
+    const reservationId = plan.reservationIds[0]!;
+
+    expect(() =>
+      reduceRuntimeState(dispatched, {
+        type: 'resource_budget.released',
+        reservationId,
+      }),
+    ).toThrow('Only a proven undispatched reservation can be released');
+    expect(
+      reduceRuntimeState(dispatched, {
+        type: 'resource_budget.released',
+        reservationId,
+        proof: 'local_provider_admission_denied',
+      }).resourceBudget,
+    ).toMatchObject({
+      reservations: { [reservationId]: { state: 'released' } },
+    });
+  });
+
+  test('enforces every Sub-agent model invocation in the shared durable ledger', async () => {
+    let state = configuredState({ maxModelRequests: 1 });
+    state.tools.calls['task-1'] = {
+      toolCallId: 'task-1',
+      modelMessageId: 'model-1',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'inspect' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-1');
+    const parentPlan = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-1'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    const persisted: string[] = [];
+    const admission = createDescendantResourceAdmissionV1({
+      state,
+      parentReservationId: parentPlan.reservationIds[0]!,
+      persistEvent: async (event) => {
+        state = reduceRuntimeState(state, event);
+        persisted.push(event.type);
+        return true;
+      },
+    });
+
+    const first = await admission.reserveModel({
+      invocationKey: 'model:0',
+      inputTokens: 20,
+      requestedMaxOutputTokens: 5,
+    });
+    await admission.reconcileModel({
+      reservationId: first.reservationId,
+      inputTokens: 20,
+      outputTokens: 3,
+    });
+    await expect(
+      admission.reserveModel({
+        invocationKey: 'model:1',
+        inputTokens: 20,
+        requestedMaxOutputTokens: 5,
+      }),
+    ).rejects.toThrow('Resource budget exhausted before dispatch');
+
+    expect(persisted).toEqual([
+      'resource_budget.reserved',
+      'resource_budget.dispatch_started',
+      'resource_budget.reconciled',
+    ]);
+    expect(state.resourceBudget).toMatchObject({
+      status: 'active',
+      reconciledUsage: {
+        counters: { modelRequests: 1, inputTokens: 20, outputTokens: 3 },
+      },
+    });
+  });
+
+  test('opens a distinct parent reservation when a suspended Sub-agent resumes', () => {
+    let state = configuredState();
+    state.tools.calls['task-1'] = {
+      toolCallId: 'task-1',
+      modelMessageId: 'model-1',
+      name: 'task',
+      args: { subagent_type: 'code', task: 'continue' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-1');
+    const first = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-1'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    state = apply(state, [...first.preparationEvents, ...first.dispatchEvents]);
+    state = apply(state, reconciliationEventsForReservationsV1(state, first.reservationIds));
+    state.suspendedSubagents['task-1'] = {
+      subagentId: 'subagent-1',
+      role: 'code',
+      task: 'continue',
+      messages: [],
+      toolCallCount: 1,
+      steps: [],
+      blockedTool: {
+        toolCallId: 'nested-shell',
+        toolName: 'shell_execute',
+        args: { command: 'pwd' },
+        command: 'pwd',
+      },
+    };
+
+    const resumed = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-1'] },
+      new Date('2026-07-30T00:00:02Z'),
+    );
+
+    expect(resumed).toMatchObject({
+      status: 'admitted',
+      effect: { type: 'run_tools', toolCallIds: ['task-1'] },
+    });
+    expect(resumed.preparationEvents[0]).toMatchObject({
+      type: 'resource_budget.reserved',
+      reservation: {
+        invocationId: 'tool:task-1:resume:1',
+        resourceKind: 'subagent',
+      },
+    });
   });
 
   test('runner persists dispatch before the executor and reconciles with the terminal batch', async () => {
@@ -140,6 +381,196 @@ describe('runtime resource budget admission', () => {
         counters: { turns: 1, modelRequests: 1, inputTokens: 10, outputTokens: 2 },
       },
     });
+    kernel.close();
+  });
+
+  test('releases an auto-review reservation when the final local Provider gate denies dispatch', async () => {
+    let state = configuredState();
+    if (state.resourceBudget.status === 'active') {
+      const now = Date.now();
+      state.resourceBudget = {
+        ...state.resourceBudget,
+        startedAt: new Date(now).toISOString(),
+        deadlineAt: new Date(now + 30_000).toISOString(),
+      };
+    }
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'reviewed-shell',
+      name: 'shell_execute',
+      args: { command: 'printf ok' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'auto_review.requested',
+      reviewId: 'review-denied',
+      toolCallId: 'reviewed-shell',
+      toolName: 'shell_execute',
+      reason: 'Requires governed review.',
+      approval: {
+        scope: 'once',
+        cwd: '/',
+        threadId: state.session.threadId,
+        tool: 'shell_execute',
+        command: 'printf ok',
+        risk: 'execute_code',
+        approvalHash: 'review-denied-hash',
+        summary: 'Run a fixture command.',
+        reason: 'Requires governed review.',
+        expectedEffects: [],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+      },
+    });
+    const store = createRuntimeStore(':memory:');
+    const kernel = new AgentKernel({
+      store,
+      initialState: state,
+      interactionMode: 'auto',
+    });
+    const model = createMockModel([]);
+    const config: AgentConfig = {
+      apiKey: 'unused',
+      baseURL: 'https://example.invalid',
+      modelName: 'review-model',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      features: { providerDataPolicyV1: true, resourceBudgetV1: true },
+      sandbox: { enabled: false },
+    };
+    const executor = createRuntimeEffectExecutor({
+      config,
+      model,
+      providerDataAdmission: () => ({
+        admitted: false,
+        reason: 'mandatory_policy_unavailable',
+        routeAlias: 'fixture:denied',
+      }),
+    });
+    let thrown: unknown;
+    try {
+      for await (const _event of runRuntimeLoop(kernel, executor, {
+        requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+      })) {
+        // Drain until the governed local denial terminates execution.
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ProviderDataAdmissionError);
+    expect(model.callCount.count).toBe(0);
+    expect(
+      Object.values(
+        kernel.getState().resourceBudget.status === 'active'
+          ? kernel.getState().resourceBudget.reservations
+          : {},
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        resourceKind: 'verification',
+        state: 'released',
+      }),
+    ]);
+    kernel.close();
+  });
+
+  test('keeps a verification reservation unknown when Provider denial follows an executed check', async () => {
+    let state = configuredState();
+    if (state.resourceBudget.status === 'active') {
+      const now = Date.now();
+      state.resourceBudget = {
+        ...state.resourceBudget,
+        startedAt: new Date(now).toISOString(),
+        deadlineAt: new Date(now + 30_000).toISOString(),
+      };
+    }
+    state.transcript.final = 'Ready for verification.';
+    state = reduceRuntimeState(state, {
+      type: 'verification.requested',
+      verificationId: 'partial-verification',
+      mode: 'required',
+      spec: {
+        schemaVersion: 1,
+        verificationId: 'partial-verification',
+        subject: 'Partially executed verification',
+        checks: [
+          {
+            checkId: 'command-first',
+            type: 'command',
+            description: 'Execute a local verification command.',
+            command: 'printf ok',
+          },
+          {
+            checkId: 'reviewer-last',
+            type: 'reviewer',
+            description: 'Review the collected evidence.',
+            instructions: 'Confirm the evidence.',
+          },
+        ],
+        repair: { maxAttempts: 0 },
+      },
+      requestedAt: new Date().toISOString(),
+    });
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'auto',
+    });
+    let shellCalls = 0;
+    const config: AgentConfig = {
+      apiKey: 'unused',
+      baseURL: 'https://example.invalid',
+      modelName: 'review-model',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      features: { providerDataPolicyV1: true, resourceBudgetV1: true },
+      sandbox: { enabled: false },
+    };
+    const executor = createRuntimeEffectExecutor({
+      config,
+      model: createMockModel([]),
+      shellExecutor: async ({ command }) => {
+        shellCalls += 1;
+        return {
+          ok: true,
+          command,
+          exitCode: 0,
+          stdout: 'ok',
+          stderr: '',
+        };
+      },
+      providerDataAdmission: (_payload, purpose) => ({
+        admitted: purpose !== 'verification_review',
+        reason: purpose === 'verification_review' ? 'provider_policy_missing' : 'admitted',
+        routeAlias: 'fixture:review',
+      }),
+    });
+    let thrown: unknown;
+    try {
+      for await (const _event of runRuntimeLoop(kernel, executor, {
+        requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+      })) {
+        // Drain until the reviewer admission denial terminates execution.
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(shellCalls).toBe(1);
+    expect(thrown).toBeInstanceOf(ProviderDataAdmissionError);
+    expect(thrown).toMatchObject({ knownExternalEffects: 'unknown' });
+    expect(
+      Object.values(
+        kernel.getState().resourceBudget.status === 'active'
+          ? kernel.getState().resourceBudget.reservations
+          : {},
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        resourceKind: 'verification',
+        state: 'unknown',
+      }),
+    ]);
     kernel.close();
   });
 });

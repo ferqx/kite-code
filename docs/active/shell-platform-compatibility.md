@@ -1,8 +1,8 @@
 # 当前规则：Shell 工具平台兼容性
 
 状态：active
-最后更新：2026-07-29
-最后验证：2026-07-29
+最后更新：2026-07-30
+最后验证：2026-07-30
 范围：
 
 - `src/core/tools/shell.ts`（Shell 执行、bash 选择逻辑）
@@ -78,6 +78,12 @@ Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-i
 Shell 命令未提供 `timeout_ms` 时必须使用 600000ms 的默认硬超时；显式 `timeout_ms` 可以覆盖为更短或更长的正整数，但不得存在无限执行路径。达到有效超时后，执行器必须先停止 stdout/stderr reader术语（标准输出/错误读取器），再强制终止 shell 包装进程及其全部后代，并等待终止动作完成后返回 exit code 124。用户通过 AbortSignal术语（中止信号）取消时必须复用同一套 reader 停止和进程树终止流程，但返回 exit code 130 与取消提示，不得继续等待默认超时或误报为超时。不得只结束 shell 包装进程而留下后台子进程。
 
 - Windows 在命令启动后立即关联 Job Object术语（作业对象），终止时先记录原生 process snapshot术语（进程快照），终止整个 Job 后继续清扫关联前已经启动的后代；原生句柄不可用时降级为 `taskkill /T /F`。原生终止必须保留 process handle术语（进程句柄）并等待其进入终态后再返回。
-- Unix 启动命令时创建独立 process group术语（进程组），终止时向整个进程组发送 `SIGKILL` 并进行有界退出等待。
+- Unix 启动命令时创建独立 process group术语（进程组）。终止时先向整组发送 `SIGTERM` 并等待 500ms；仍存活时发送 `SIGKILL`，再进行最多 2 秒的退出确认。忽略 SIGTERM 的后代必须由强制阶段清理。
 - `tests/shell-exec.test.ts` 必须记录实际后代 PID，并断言超时或取消结果返回时该 PID 已不再存活；取消测试还必须证明不会等待显式超时到期。
 - Windows 回归测试还必须故意在 Job 关联前启动后代，验证关联竞态中的逃逸进程同样被清理。
+
+Shell result 必须返回结构化 `processCleanup`：是否确认退出、是否进入 forced 阶段和未确认
+descendant 数。Tool Controller 只能把这些安全事实写入 result metadata；未确认退出必须另发
+`cancel_incomplete` cancellation diagnostic，禁止把原始命令、路径或进程输出复制到诊断。
+Bun spawn 不直接消费 AbortSignal，整棵树的取消由 ProcessTreeGuard 唯一负责，避免只终止
+root process。

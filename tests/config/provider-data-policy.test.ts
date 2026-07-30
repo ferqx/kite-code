@@ -5,6 +5,7 @@ import {
   createProviderDataPolicyRegistryV1,
   evaluateProviderDataAdmissionV1,
   loadProviderDataPolicyRegistryV1,
+  providerPayloadFromModelPromptV1,
 } from '@/core/config/provider-data-admission';
 import {
   computeProviderDataPolicyBundleDigest,
@@ -177,6 +178,31 @@ describe('ProviderDataPolicyV1', () => {
     expect(raiseWorkspaceDataLabelV1(secret, internal)).toEqual(secret);
   });
 
+  test('fails closed when prompt provenance loses an explicit workspace label', () => {
+    const payload = providerPayloadFromModelPromptV1([
+      { role: 'system', content: 'runtime-owned instructions' },
+      { role: 'user', content: 'user-provided context' },
+      { role: 'tool', content: 'workspace file contents' },
+    ]);
+    expect(payload.map((part) => part.label)).toEqual([
+      {
+        classification: 'internal',
+        source: 'artifact',
+        provenance: 'generated_summary',
+      },
+      {
+        classification: 'confidential',
+        source: 'artifact',
+        provenance: 'user_prompt',
+      },
+      {
+        classification: 'confidential',
+        source: 'artifact',
+        provenance: 'tool_result',
+      },
+    ]);
+  });
+
   test('loads only the canonical bundle and fails closed on digest drift or expiry', () => {
     const bundle = {
       version: 1 as const,
@@ -208,6 +234,20 @@ describe('ProviderDataPolicyV1', () => {
       reason: 'admitted',
       routeAlias: 'openai-compatible:operator.example:primary:US-EAST',
       maxWorkspaceDataClassification: 'confidential',
+    });
+    expect(
+      evaluateProviderDataAdmissionV1({
+        featureEnabled: true,
+        profile: 'limited',
+        registry,
+        route,
+        now: new Date('2026-08-01T00:00:00Z'),
+        purpose: 'auto_review',
+        payload: [],
+      }),
+    ).toMatchObject({
+      admitted: false,
+      reason: 'provider_content_evaluation_denied',
     });
     expect(admitted).not.toHaveProperty('endpointOrigin');
     expect(

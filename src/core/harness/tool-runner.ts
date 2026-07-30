@@ -118,6 +118,10 @@ export interface RunApprovedToolInput {
   interactionMode?: import('@/protocol/events').InteractionMode;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
+  providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
+  /** Runs after all local policy/approval checks and immediately before tool dispatch. */
+  beforeDispatch?: () => Promise<void>;
   subagentEventSink?: SubAgentEventSink;
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
@@ -154,6 +158,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     interactionMode = 'accept_edits',
     taskConfig,
     taskModel,
+    providerDataAdmission,
+    descendantResourceAdmission,
+    beforeDispatch,
     subagentEventSink,
     availabilityContext,
   } = input;
@@ -231,6 +238,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
   }
 
+  await beforeDispatch?.();
+
   if (request.name === 'task') {
     try {
       const runTask =
@@ -251,6 +260,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
                   eventSink: subagentEventSink,
                   signal,
                   model: taskModel,
+                  providerDataAdmission,
+                  descendantResourceAdmission,
                   recordFilePreimage: input.recordFilePreimage,
                 },
                 taskInput,

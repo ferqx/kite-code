@@ -13,12 +13,7 @@ import {
 } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import {
-  type ProviderDataAdmissionDecisionV1,
-  ProviderDataAdmissionError,
-  type ProviderPayloadPartV1,
-  providerPayloadFromModelPromptV1,
-} from '@/core/config/provider-data-admission';
+import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
 import type { AIMessage } from '@/core/messages';
 import type { CompactionReporter } from '@/core/model/compaction-metrics';
@@ -76,6 +71,26 @@ function extractReasoningText(message: AIMessage | undefined): string | undefine
       | string
       | undefined);
   return reasoning && reasoning.length > 0 ? reasoning : undefined;
+}
+
+const BOUNDED_CANCELLATION_REQUIRED_TOOLS = new Set([
+  'task',
+  'shell_execute',
+  'write_file',
+  'edit_file',
+  'write_plan',
+  'update_plan',
+]);
+
+function boundedCancellationTools<T extends Record<string, unknown>>(
+  tools: T,
+  config: AgentConfig,
+): T {
+  const flags = getFeatureFlags(config);
+  if (!flags.resourceBudgetV1 || flags.boundedCancellationV1) return tools;
+  return Object.fromEntries(
+    Object.entries(tools).filter(([name]) => !BOUNDED_CANCELLATION_REQUIRED_TOOLS.has(name)),
+  ) as T;
 }
 
 /** Convert invalid provider tool arguments into durable queued-and-failed facts. */
@@ -176,30 +191,33 @@ export function resolveContextProjectionEnvironment(input: {
       const disclosure = input.state.capabilities.disclosures[descriptor.capabilityId];
       return disclosure?.capabilityRevision === descriptor.revision;
     });
-  const tools = createAgentTools({
-    workspace: input.state.session.workspace,
-    shellExecutor: input.shellExecutor,
-    mcpManager: input.mcpManager,
-    mcpBindings: persistedBindings,
-    toolSearch:
-      getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
-    skills: input.skills,
-    skillOptions: input.skillOptions,
-    skillCatalog: input.skillCatalog,
-    activeSkillFrames: Object.values(input.state.skills.frames).filter(
-      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
-    ),
-    config: input.config,
-    subagentEventSink: input.subagentEventSink,
-    subagentSignal: input.signal,
-    signal: input.signal,
-    model: input.model,
-    threadId: input.state.session.threadId,
-    authorization: input.state.authorization,
-    workspaceAccess: input.state.workspaceAccess,
-    phase: getAgentPhase(getActivePlanning(input.state)),
-    interactionMode: getEffectiveInteractionMode(input.state),
-  });
+  const tools = boundedCancellationTools(
+    createAgentTools({
+      workspace: input.state.session.workspace,
+      shellExecutor: input.shellExecutor,
+      mcpManager: input.mcpManager,
+      mcpBindings: persistedBindings,
+      toolSearch:
+        getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
+      skills: input.skills,
+      skillOptions: input.skillOptions,
+      skillCatalog: input.skillCatalog,
+      activeSkillFrames: Object.values(input.state.skills.frames).filter(
+        (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+      ),
+      config: input.config,
+      subagentEventSink: input.subagentEventSink,
+      subagentSignal: input.signal,
+      signal: input.signal,
+      model: input.model,
+      threadId: input.state.session.threadId,
+      authorization: input.state.authorization,
+      workspaceAccess: input.state.workspaceAccess,
+      phase: getAgentPhase(getActivePlanning(input.state)),
+      interactionMode: getEffectiveInteractionMode(input.state),
+    }),
+    input.config,
+  );
   return {
     serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
     activeSkillInstructions: activeInlineSkillInstructions(input.state, input.skillCatalog),
@@ -248,7 +266,8 @@ export async function invokeRuntimeModel(params: {
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
   /** Production composition must supply the immutable route-policy gate. */
-  providerDataAdmission?: (payload: ProviderPayloadPartV1[]) => ProviderDataAdmissionDecisionV1;
+  providerDataAdmission?: ProviderDataAdmissionGateV1;
+  resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const requestId = genInteractionId();
@@ -440,7 +459,10 @@ export async function invokeRuntimeModel(params: {
       interactionMode: getEffectiveInteractionMode(state),
     };
     const toolAvailCtx = toolAvailabilityContext(toolInput);
-    const tools = createAgentTools(toolInput, toolAvailCtx);
+    const tools = boundedCancellationTools(
+      createAgentTools(toolInput, toolAvailCtx),
+      params.config,
+    );
     const projectionEnvironment = resolveContextProjectionEnvironment({
       state,
       config: params.config,
@@ -534,15 +556,13 @@ export async function invokeRuntimeModel(params: {
         },
       ];
     }
-    if (flags.providerDataPolicyV1) {
-      const decision = params.providerDataAdmission?.(
-        providerPayloadFromModelPromptV1(projection.providerMessages),
-      ) ?? {
-        admitted: false,
-        reason: 'mandatory_policy_unavailable' as const,
-        routeAlias: `${params.config.providerType}:${params.config.providerName}`,
-      };
-      if (!decision.admitted) throw new ProviderDataAdmissionError(decision);
+    if (
+      params.resourceAdmission &&
+      params.resourceAdmission.inputTokens !== preflight.estimate.totalInputTokens
+    ) {
+      throw new Error(
+        'Model request projection changed after resource admission; refusing Provider dispatch.',
+      );
     }
     // model.requested 必须在 await 之前即时发出，而不是响应完成后与
     // model.responded 一起补发——消费方（TUI）需要它作为"新一轮模型调用
@@ -563,6 +583,7 @@ export async function invokeRuntimeModel(params: {
       messages: projection.providerMessages,
       signal: params.signal,
       maxOutputTokens:
+        params.resourceAdmission?.maxOutputTokens ??
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         modelCapabilities.maxOutputTokens,
       streaming: modelCapabilities.streaming,
@@ -580,6 +601,9 @@ export async function invokeRuntimeModel(params: {
           delayMs,
         });
       },
+      providerDataAdmission: params.providerDataAdmission,
+      providerDataPolicyRequired: flags.providerDataPolicyV1,
+      providerDispatchPurpose: 'primary_model',
     });
     const durationMs = Date.now() - callStartedAt;
     const toolCalls =

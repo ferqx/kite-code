@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import { buildToolApproval } from '@/core/harness/tool-policy';
 import {
   isMcpRequest,
@@ -306,6 +308,8 @@ async function handleSubAgentResume(params: {
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
+  providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   emitSubagentEvent: SubAgentEventSink;
   recordFilePreimage?: FilePreimageRecorder;
 }): Promise<RuntimeEvent[]> {
@@ -342,33 +346,77 @@ async function handleSubAgentResume(params: {
     const resumedBinding = call?.bindingId
       ? params.state.capabilities.bindings[call.bindingId]
       : undefined;
-    toolResult = await runApprovedTool({
-      workspace: params.state.session.workspace,
-      request: blockedRequest,
-      shellExecutor: params.shellExecutor,
-      workspaceAccess: params.state.workspaceAccess,
-      phase: getAgentPhase(getActivePlanning(params.state)),
-      authorization: params.state.authorization,
-      approvedGrant: call?.approvalGrant ?? 'none',
-      threadId: params.state.session.threadId,
-      recordFilePreimage: params.recordFilePreimage,
-      mcpManager: params.mcpManager,
-      ...(resumedBinding
-        ? {
-            mcpInvocation: {
-              capabilityId: resumedBinding.capabilityId,
-              expectedRevision: resumedBinding.capabilityRevision,
-            },
+    let childReservation:
+      | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
+      | undefined;
+    try {
+      toolResult = await runApprovedTool({
+        workspace: params.state.session.workspace,
+        request: blockedRequest,
+        shellExecutor: params.shellExecutor,
+        workspaceAccess: params.state.workspaceAccess,
+        phase: getAgentPhase(getActivePlanning(params.state)),
+        authorization: params.state.authorization,
+        approvedGrant: call?.approvalGrant ?? 'none',
+        threadId: params.state.session.threadId,
+        recordFilePreimage: params.recordFilePreimage,
+        mcpManager: params.mcpManager,
+        ...(resumedBinding
+          ? {
+              mcpInvocation: {
+                capabilityId: resumedBinding.capabilityId,
+                expectedRevision: resumedBinding.capabilityRevision,
+              },
+            }
+          : {}),
+        skillManifests: params.skillManifests,
+        skillOptions: params.skillOptions,
+        signal: params.signal,
+        taskConfig: params.taskConfig,
+        taskModel: params.taskModel,
+        providerDataAdmission: params.providerDataAdmission,
+        descendantResourceAdmission: params.descendantResourceAdmission,
+        subagentEventSink: params.emitSubagentEvent,
+        availabilityContext: availCtx,
+        beforeDispatch: params.descendantResourceAdmission
+          ? async () => {
+              childReservation = await params.descendantResourceAdmission!.reserveTool({
+                invocationKey: `resume-tool:${continuation.toolCallCount}:${blockedRequest.id ?? blockedToolName}`,
+                toolKind: blockedToolName,
+                shell: blockedToolName === 'shell_execute',
+              });
+            }
+          : undefined,
+      });
+      if (childReservation) {
+        let artifactBytes = 0;
+        if (
+          (blockedToolName === 'write_file' || blockedToolName === 'edit_file') &&
+          toolResult.path
+        ) {
+          try {
+            artifactBytes = statSync(toolResult.path).size;
+          } catch {
+            artifactBytes = 0;
           }
-        : {}),
-      skillManifests: params.skillManifests,
-      skillOptions: params.skillOptions,
-      signal: params.signal,
-      taskConfig: params.taskConfig,
-      taskModel: params.taskModel,
-      subagentEventSink: params.emitSubagentEvent,
-      availabilityContext: availCtx,
-    });
+        }
+        await params.descendantResourceAdmission!.reconcileTool({
+          reservationId: childReservation.reservationId,
+          artifactBytes,
+        });
+      }
+    } catch (error) {
+      if (childReservation) {
+        if (error instanceof ProviderDataAdmissionError) {
+          await params.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+            childReservation.reservationId,
+          );
+        } else {
+          await params.descendantResourceAdmission!.markUnknown(childReservation.reservationId);
+        }
+      }
+      throw error;
+    }
   } else {
     toolResult = {
       ok: false,
@@ -399,6 +447,8 @@ async function handleSubAgentResume(params: {
       signal: params.signal ?? new AbortController().signal,
       eventSink: params.emitSubagentEvent,
       model: params.taskModel,
+      providerDataAdmission: params.providerDataAdmission,
+      descendantResourceAdmission: params.descendantResourceAdmission,
       depth: 1,
       maxDepth: 0,
     },
@@ -492,6 +542,8 @@ export async function executeRuntimeTools(params: {
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
+  providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   subagentEventSink?: SubAgentEventSink;
   planArtifactStore?: PlanArtifactStore;
   capabilityArtifactStore?: CapabilityArtifactStore;
@@ -550,6 +602,26 @@ export async function executeRuntimeTools(params: {
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+    const productionFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
+    if (
+      productionFlags?.resourceBudgetV1 &&
+      !productionFlags.boundedCancellationV1 &&
+      (call.sideEffect ||
+        ['task', 'shell_execute', 'write_file', 'edit_file', 'write_plan', 'update_plan'].includes(
+          call.name,
+        ))
+    ) {
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: 'Bounded cancellation is required before production writer/child dispatch.',
+        failure: classifyFailure(
+          'mandatory_policy_unavailable',
+          'Bounded cancellation is required before production writer/child dispatch.',
+        ),
+      });
+      continue;
+    }
     const parsed = toolRequestFromCall(
       { id: call.toolCallId, name: call.name, args: call.args },
       availCtx,
@@ -802,6 +874,8 @@ export async function executeRuntimeTools(params: {
                   eventSink: emitSubagentEvent,
                   signal: params.signal,
                   model: params.taskModel,
+                  providerDataAdmission: params.providerDataAdmission,
+                  descendantResourceAdmission: params.descendantResourceAdmission,
                   maxDepth: 0,
                 },
                 {
@@ -1212,6 +1286,8 @@ export async function executeRuntimeTools(params: {
           signal: params.signal,
           taskConfig: params.taskConfig,
           taskModel: params.taskModel,
+          providerDataAdmission: params.providerDataAdmission,
+          descendantResourceAdmission: params.descendantResourceAdmission,
           emitSubagentEvent,
           recordFilePreimage: params.recordFilePreimage,
         });
@@ -1239,6 +1315,8 @@ export async function executeRuntimeTools(params: {
           interactionMode: getEffectiveInteractionMode(params.state),
           taskConfig: params.taskConfig,
           taskModel: params.taskModel,
+          providerDataAdmission: params.providerDataAdmission,
+          descendantResourceAdmission: params.descendantResourceAdmission,
           subagentEventSink: emitSubagentEvent,
           availabilityContext: availCtx,
           onShellProgress: (chunk, stream) =>
@@ -1471,6 +1549,18 @@ export async function executeRuntimeTools(params: {
         }
       }
 
+      if (result.processCleanup && !result.processCleanup.confirmedExited) {
+        events.push({
+          type: 'runtime.cancellation_diagnostic',
+          toolCallId,
+          failure: classifyFailure(
+            'cancel_incomplete',
+            'One or more shell descendants could not be confirmed exited after bounded cleanup.',
+          ),
+          unconfirmedDescendantCount: result.processCleanup.unconfirmedDescendantCount,
+        });
+      }
+
       events.push({
         type: 'tool.finished',
         toolCallId,
@@ -1486,6 +1576,12 @@ export async function executeRuntimeTools(params: {
             ...(result.path ? { path: result.path } : {}),
             ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
             ...(result.action?.intent ? { intent: result.action.intent } : {}),
+            ...(result.processCleanup
+              ? {
+                  processCleanupConfirmed: result.processCleanup.confirmedExited,
+                  unconfirmedDescendantCount: result.processCleanup.unconfirmedDescendantCount,
+                }
+              : {}),
             ...computeToolResultDigest({
               stdout: result.stdout ?? '',
               stderr: result.stderr ?? '',

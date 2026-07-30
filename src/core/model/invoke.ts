@@ -4,6 +4,12 @@
 
 import { generateText, type ModelMessage, stepCountIs, streamText, type ToolSet } from 'ai';
 import {
+  ProviderDataAdmissionError,
+  type ProviderDataAdmissionGateV1,
+  type ProviderDispatchPurposeV1,
+  providerPayloadFromModelPromptV1,
+} from '@/core/config/provider-data-admission';
+import {
   type AIMessage,
   aiMessage,
   type BaseMessage,
@@ -36,9 +42,25 @@ export async function invokeBoundModel(params: {
   onReasoningDelta?: (text: string, segmentId: string) => void;
   onReasoningCompleted?: (text: string, segmentId: string) => void;
   onRetry?: ModelRetryListener;
+  /** Shared final dispatch boundary for every production Provider request. */
+  providerDataAdmission?: ProviderDataAdmissionGateV1;
+  providerDataPolicyRequired?: boolean;
+  providerDispatchPurpose?: ProviderDispatchPurposeV1;
   /** Test seam for deterministic retry timing; production uses the bounded defaults. */
   streamRetryOptions?: Omit<TransientModelRetryOptions, 'onRetry'>;
 }): Promise<AIMessage> {
+  if (params.providerDataPolicyRequired) {
+    const decision = params.providerDataAdmission?.(
+      providerPayloadFromModelPromptV1(params.messages),
+      params.providerDispatchPurpose ?? 'primary_model',
+    ) ?? {
+      admitted: false,
+      reason: 'mandatory_policy_unavailable' as const,
+      routeAlias: 'unresolved',
+    };
+    if (!decision.admitted) throw new ProviderDataAdmissionError(decision);
+  }
+
   // Separate system messages from chat messages — generateText requires
   // system prompts via `system`/`instructions`, not in `messages`.
   const allModelMessages = toModelMessages(params.messages);

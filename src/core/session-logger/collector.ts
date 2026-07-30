@@ -23,17 +23,20 @@ import { sessionLogDir } from '@/core/config/paths';
 import { genSpanId, genTraceId } from '@/core/id-utils';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { AgentEvent } from '@/protocol/events';
+import { mapRuntimeMetadataV1, mapSessionBoundaryMetadataV1 } from './metadata-mapper';
 import { recordEvent, recordRuntimeEvent } from './recorder';
-import type { RunSummary, TraceRecord } from './types';
+import type { RunSummary, SessionMetadataContextV1, TraceRecord } from './types';
 import { SessionLogWriter } from './writer';
 
 /** 是否为开发模式（非 NODE_ENV=production） */
 const isDev = process.env.NODE_ENV !== 'production';
 
 export class SessionLogCollector {
-  private _writer: SessionLogWriter;
+  private _writer: SessionLogWriter | null;
   /** 开发模式下单独记录异常（工具失败 / 子 agent 错误 / 模型重试） */
   private _errorWriter: SessionLogWriter | null = null;
+  private _mode: 'off' | 'metadata' | 'content';
+  private _metadataContext: SessionMetadataContextV1;
   private _traceId: string;
   private _summary: RunSummary;
   private _turnIdx = 0;
@@ -49,10 +52,16 @@ export class SessionLogCollector {
     workspace: string,
     frontend: string,
     model: { provider: string; name: string },
+    options: {
+      mode?: 'off' | 'metadata' | 'content';
+      metadataContext?: SessionMetadataContextV1;
+    } = {},
   ) {
+    this._mode = options.mode ?? 'content';
+    this._metadataContext = options.metadataContext ?? {};
     this._traceId = genTraceId();
-    this._writer = new SessionLogWriter(frontend, threadId);
-    if (isDev) {
+    this._writer = this._mode === 'off' ? null : new SessionLogWriter(frontend, threadId);
+    if (this._mode === 'content' && isDev) {
       this._errorWriter = new SessionLogWriter(frontend, threadId, 'errors');
     }
     this._summary = {
@@ -80,7 +89,14 @@ export class SessionLogCollector {
       },
     };
 
-    // 写入 session_start 记录
+    if (this._mode === 'metadata') {
+      this._writer?.write(
+        mapSessionBoundaryMetadataV1('session.start', 'ok', this._metadataContext),
+      );
+      return;
+    }
+
+    // 写入 session_start 记录（仅显式 content mode）
     this._recordRaw({
       traceId: this._traceId,
       spanId: genSpanId(),
@@ -109,6 +125,7 @@ export class SessionLogCollector {
   /** 处理一个 AgentEvent——全量记录 + 聚合统计。
    *  事件流应诚实完整，去重/过滤是消费者的职责。本层只做结构性过滤（internal 节点）。 */
   record(event: AgentEvent): void {
+    if (this._mode !== 'content') return;
     try {
       // 跳过内部图节点（step_begin 携带 internal 标记）
       if (event.type === 'step_begin' && event.data.internal) {
@@ -164,6 +181,15 @@ export class SessionLogCollector {
 
   /** Runtime-native log path; no AgentEvent projection is required. */
   recordRuntime(event: RuntimeEvent): void {
+    if (this._mode === 'off') return;
+    if (this._mode === 'metadata') {
+      try {
+        this._writer?.write(mapRuntimeMetadataV1(event));
+      } catch {
+        // Logging cannot interrupt the runtime.
+      }
+      return;
+    }
     try {
       if (
         event.type === 'model.reasoning_delta' ||
@@ -217,6 +243,19 @@ export class SessionLogCollector {
 
   /** 会话结束。需要 await 以保证日志完全落盘 */
   async finalize(status: 'completed' | 'aborted' | 'fatal'): Promise<void> {
+    if (this._mode === 'off') return;
+    if (this._mode === 'metadata') {
+      this._writer?.write(
+        mapSessionBoundaryMetadataV1(
+          'session.end',
+          status === 'completed' ? 'ok' : status === 'aborted' ? 'cancelled' : 'error',
+          this._metadataContext,
+        ),
+      );
+      await this._writer?.finalize();
+      return;
+    }
+
     this._summary.endedAt = new Date().toISOString();
     this._summary.status = status;
 
@@ -239,14 +278,14 @@ export class SessionLogCollector {
     } catch {
       // ignore
     }
-    await this._writer.finalize();
+    await this._writer?.finalize();
     if (this._errorWriter) await this._errorWriter.finalize();
   }
 
   // ── private ──
 
   private _recordRaw(rec: TraceRecord): void {
-    this._writer.write(rec);
+    this._writer?.write(rec);
   }
 
   /** 错误事件同步写入 errors.jsonl（仅开发模式），附带入参 */

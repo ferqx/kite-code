@@ -1641,8 +1641,7 @@ test('runRuntimeLoop persists legacy recovery failure events as one atomic batch
 
   expect(batches.map((events) => events.map((event) => event.type))).toEqual([
     ['subagent.failed', 'tool.finished'],
-    ['run.completed'],
-    ['turn.completed'],
+    ['run.completed', 'turn.completed'],
   ]);
   kernel.close();
 });

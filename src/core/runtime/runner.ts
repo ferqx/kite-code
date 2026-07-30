@@ -1,3 +1,4 @@
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { RuntimeUserAction } from './actions';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
@@ -18,6 +19,32 @@ export interface RuntimeActionProvider {
 }
 
 type EffectExecutionOutcome = { applied: boolean; emitted: boolean };
+const ABORTED_WAIT = Symbol('aborted-wait');
+
+async function waitForPromiseOrAbort<T>(
+  promise: Promise<T>,
+  signal: AbortSignal | undefined,
+): Promise<T | typeof ABORTED_WAIT> {
+  if (!signal) return promise;
+  if (signal.aborted) return ABORTED_WAIT;
+  return new Promise<T | typeof ABORTED_WAIT>((resolve, reject) => {
+    let settled = false;
+    const finish = (value: T | typeof ABORTED_WAIT) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      resolve(value);
+    };
+    const abort = () => finish(ABORTED_WAIT);
+    signal.addEventListener('abort', abort, { once: true });
+    void promise.then(finish, (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      reject(error);
+    });
+  });
+}
 
 function isEphemeralModelDelta(
   event: RuntimeEvent,
@@ -39,17 +66,34 @@ async function* executeEffectWithStreaming(
   lease: import('./effects').RuntimeEffectLease,
   reservationIds: string[] = [],
 ): AsyncGenerator<RuntimeEvent, EffectExecutionOutcome> {
-  const pending: RuntimeEvent[] = [];
+  const pending: Array<{
+    event: RuntimeEvent;
+    resolve?: (applied: boolean) => void;
+  }> = [];
   let wake: (() => void) | null = null;
   let settled = false;
   let result: RuntimeEvent[] = [];
   let failure: unknown;
 
-  const execution = executor(lease.effect, kernel.getState(), (event) => {
-    pending.push(event);
+  const enqueue = (event: RuntimeEvent, resolve?: (applied: boolean) => void) => {
+    pending.push({ event, resolve });
     wake?.();
     wake = null;
-  }).then(
+  };
+  const execution = executor(
+    lease.effect,
+    kernel.getState(),
+    (event) => {
+      enqueue(event);
+    },
+    {
+      reservationIds,
+      persistEvent: (event) =>
+        new Promise<boolean>((resolve) => {
+          enqueue(event, resolve);
+        }),
+    },
+  ).then(
     (events) => {
       result = events;
       settled = true;
@@ -65,6 +109,7 @@ async function* executeEffectWithStreaming(
   );
 
   let emitted = false;
+  let cancellationIncomplete = false;
   while (!settled || pending.length > 0) {
     if (pending.length === 0) {
       await new Promise<void>((resolve) => {
@@ -72,23 +117,41 @@ async function* executeEffectWithStreaming(
       });
     }
     while (pending.length > 0) {
-      const event = pending.shift()!;
+      const pendingEvent = pending.shift()!;
+      const event = pendingEvent.event;
       emitted = true;
       if (isEphemeralModelDelta(event)) {
-        if (kernel.isEffectLeaseCurrent(lease)) yield event;
-      } else if (kernel.applyEffectEvent(lease, event)) {
-        yield event;
+        const applied = kernel.isEffectLeaseCurrent(lease);
+        pendingEvent.resolve?.(applied);
+        if (applied) yield event;
+      } else {
+        if (event.type === 'runtime.cancellation_diagnostic') {
+          cancellationIncomplete = true;
+        }
+        const applied = kernel.applyEffectEvent(lease, event);
+        pendingEvent.resolve?.(applied);
+        if (applied) {
+          yield event;
+        }
       }
     }
   }
   await execution;
   if (failure) {
     if (reservationIds.length > 0) {
-      const unknownEvents: RuntimeEvent[] = reservationIds.map((reservationId) => ({
-        type: 'resource_budget.unknown',
-        reservationId,
-      }));
-      kernel.applyEffectResult(lease, unknownEvents);
+      const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) =>
+        failure instanceof ProviderDataAdmissionError && failure.knownExternalEffects === 'none'
+          ? {
+              type: 'resource_budget.released',
+              reservationId,
+              proof: 'local_provider_admission_denied',
+            }
+          : {
+              type: 'resource_budget.unknown',
+              reservationId,
+            },
+      );
+      kernel.applyEffectResult(lease, terminalReservationEvents);
     }
     throw failure;
   }
@@ -103,6 +166,13 @@ async function* executeEffectWithStreaming(
     emitted = true;
     try {
       if (!kernel.applyEffectResult(lease, terminalResult)) {
+        if (
+          !cancellationIncomplete &&
+          reconciled.length > 0 &&
+          kernel.applyLateResourceReconciliation(reconciled)
+        ) {
+          yield* reconciled;
+        }
         return { applied: false, emitted };
       }
     } catch (error) {
@@ -147,6 +217,11 @@ export async function* runRuntimeLoop(
   executor: RuntimeEffectExecutor,
   provider: RuntimeActionProvider,
   maxEffects = 10_000,
+  prepareEffect?: (
+    effect: import('./effects').RuntimeEffect,
+    state: Readonly<import('./state').RuntimeState>,
+  ) => Promise<import('./effects').RuntimeEffect> | import('./effects').RuntimeEffect,
+  signal?: AbortSignal,
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
   if (!runnerId) return;
@@ -197,6 +272,26 @@ export async function* runRuntimeLoop(
       }
     })();
   };
+  const drainBackgroundEffects = async function* (): AsyncGenerator<
+    RuntimeEvent,
+    Extract<RuntimeEvent, { type: 'runtime.cancellation_diagnostic' }> | undefined
+  > {
+    let cancellationIncomplete:
+      | Extract<RuntimeEvent, { type: 'runtime.cancellation_diagnostic' }>
+      | undefined;
+    while (backgroundCount > 0 || backgroundEvents.length > 0) {
+      if (backgroundEvents.length === 0) await waitForBackground();
+      while (backgroundEvents.length > 0) {
+        const backgroundEvent = backgroundEvents.shift()!;
+        if (backgroundEvent.type === 'runtime.cancellation_diagnostic') {
+          cancellationIncomplete = backgroundEvent;
+        }
+        yield backgroundEvent;
+      }
+      if (backgroundFailure) throw backgroundFailure;
+    }
+    return cancellationIncomplete;
+  };
 
   try {
     let count = 0;
@@ -206,6 +301,7 @@ export async function* runRuntimeLoop(
       if (backgroundStopped) return;
 
       let effect = decideNextEffect(kernel.getState());
+      if (prepareEffect) effect = await prepareEffect(effect, kernel.getState());
       const effectState = kernel.getState();
       const shellGroup =
         effect.type === 'run_tools' ? shellConcurrencyGroup(effect, effectState) : undefined;
@@ -238,13 +334,33 @@ export async function* runRuntimeLoop(
       if (effect.type === 'recovery_blocked') {
         count += 1;
         const lease = kernel.beginEffect(effect);
-        yield {
+        const failure = classifyFailure(
+          effect.failureKind,
+          `Runtime recovery is blocked: ${effect.reason}`,
+        );
+        const terminal: RuntimeEvent = {
           type: 'run.error',
-          message: `Runtime recovery is blocked: ${effect.reason}`,
+          message: failure.message,
           recoverable: false,
+          failure,
           effectId: lease.effectId,
           turnId: lease.turnId,
+          outcome: failedTerminalOutcomeV1(failure, {
+            knownExternalEffects: effect.failureKind === 'unknown' ? 'unknown' : 'none',
+          }),
         };
+        const aborted: RuntimeEvent = {
+          type: 'turn.aborted',
+          turnId: lease.turnId,
+          reason: failure.message,
+          cause: 'error',
+        };
+        // A non-normal recovery state may only cross the Kernel invariant
+        // boundary after the turn is terminal. Persist the abort first and
+        // retain the recovery hard block so a later turn cannot restart it.
+        kernel.processEventBatch([aborted, terminal]);
+        yield aborted;
+        yield terminal;
         return;
       }
       if (effect.type === 'subagent.recovery_unavailable') {
@@ -263,14 +379,15 @@ export async function* runRuntimeLoop(
           output: kernel.getState().transcript.final ?? '',
           outcome: completedTerminalOutcomeV1(),
         };
-        kernel.processEvent(completed);
-        yield completed;
-
         const turnCompleted: RuntimeEvent = {
           type: 'turn.completed',
           turnId: kernel.getState().turn.turnId,
         };
-        kernel.processEvent(turnCompleted);
+        // Persist both completion facts before exposing either one. A slow
+        // consumer must not leave an active turn vulnerable to the deadline
+        // timer after run.completed is already durable.
+        kernel.processEventBatch([completed, turnCompleted]);
+        yield completed;
         yield turnCompleted;
         return;
       }
@@ -296,11 +413,15 @@ export async function* runRuntimeLoop(
                 if (settled) return;
                 settled = true;
                 clearTimeout(timer);
+                signal?.removeEventListener('abort', finish);
                 resolve();
               };
               const timer = setTimeout(finish, remainingMs);
+              if (signal?.aborted) finish();
+              else signal?.addEventListener('abort', finish, { once: true });
               if (backgroundCount > 0) void waitForBackground().then(finish);
             });
+            if (signal?.aborted) return;
             continue;
           }
           const failureEvent = resourceAdmissionFailureEvent(
@@ -380,10 +501,19 @@ export async function* runRuntimeLoop(
           });
           while (!resolved) {
             if (backgroundCount === 0) {
-              resolved = await requested;
+              const waited = await waitForPromiseOrAbort(requested, signal);
+              if (waited === ABORTED_WAIT) {
+                yield* drainBackgroundEffects();
+                return;
+              }
+              resolved = waited;
               break;
             }
-            await waitForBackground();
+            const waited = await waitForPromiseOrAbort(waitForBackground(), signal);
+            if (waited === ABORTED_WAIT) {
+              yield* drainBackgroundEffects();
+              return;
+            }
             while (backgroundEvents.length > 0) yield backgroundEvents.shift()!;
             if (backgroundFailure) throw backgroundFailure;
             if (backgroundStopped) return;
@@ -435,7 +565,26 @@ export async function* runRuntimeLoop(
               (action.type === 'plan_review_decision' && action.decision.kind === 'cancel')));
 
         yield* events;
-        if (executionAuthorizationCancelled) return;
+        if (executionAuthorizationCancelled) {
+          if (!signal) return;
+          const cancellationIncomplete = yield* drainBackgroundEffects();
+          if (cancellationIncomplete) {
+            const failure = cancellationIncomplete.failure;
+            const terminal: RuntimeEvent = {
+              type: 'run.error',
+              message: failure.message,
+              recoverable: false,
+              failure,
+              turnId: kernel.getState().turn.turnId,
+              outcome: failedTerminalOutcomeV1(failure, {
+                knownExternalEffects: 'unknown',
+              }),
+            };
+            kernel.processEvent(terminal);
+            yield terminal;
+          }
+          return;
+        }
         if (
           effect.type === 'request_provider_admission' &&
           (action.type === 'cancel' ||
@@ -464,9 +613,11 @@ function resourceAdmissionFailureEvent(
   const failureKind =
     reason === 'budget_unconfigured'
       ? 'mandatory_policy_unavailable'
-      : reason === 'budget_exhausted'
-        ? 'budget_exceeded'
-        : 'resource_saturated';
+      : reason === 'reconciliation_required'
+        ? 'unknown'
+        : reason === 'budget_exhausted'
+          ? 'budget_exceeded'
+          : 'resource_saturated';
   const failure = classifyFailure(failureKind, `Runtime resource admission denied: ${reason}.`);
   return {
     type: 'run.error',
@@ -475,7 +626,7 @@ function resourceAdmissionFailureEvent(
     failure,
     turnId,
     outcome: failedTerminalOutcomeV1(failure, {
-      knownExternalEffects: 'none',
+      knownExternalEffects: reason === 'reconciliation_required' ? 'unknown' : 'none',
       reasonCode:
         reason === 'tool_concurrency_saturated' || reason === 'shell_concurrency_saturated'
           ? reason

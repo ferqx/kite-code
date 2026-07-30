@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import {
   type CapabilityArtifactStore,
@@ -112,14 +113,25 @@ export async function executeVerificationEffect(
     },
   ];
   const results: VerificationCheckResult[] = [];
-  for (const check of record.spec.checks) {
-    const result = await executeCheck(check, state, dependencies);
-    results.push(result);
-    events.push({
-      type: 'verification.check_completed',
-      verificationId: record.verificationId,
-      result,
-    });
+  let externalEffectsMayHaveOccurred = false;
+  try {
+    for (const check of record.spec.checks) {
+      const result = await executeCheck(check, state, dependencies);
+      results.push(result);
+      events.push({
+        type: 'verification.check_completed',
+        verificationId: record.verificationId,
+        result,
+      });
+      externalEffectsMayHaveOccurred ||= checkMayDispatchExternalEffect(check, dependencies);
+    }
+  } catch (error) {
+    if (error instanceof ProviderDataAdmissionError && externalEffectsMayHaveOccurred) {
+      throw new ProviderDataAdmissionError(error.decision, {
+        knownExternalEffects: 'unknown',
+      });
+    }
+    throw error;
   }
   const outcome = aggregateOutcome(results);
   events.push({
@@ -129,6 +141,17 @@ export async function executeVerificationEffect(
     completedAt: new Date().toISOString(),
   });
   return events;
+}
+
+function checkMayDispatchExternalEffect(
+  check: VerificationCheck,
+  dependencies: VerificationExecutorDependencies,
+): boolean {
+  return (
+    (check.type === 'command' && Boolean(dependencies.shellExecutor)) ||
+    (check.type === 'mcp_read_after_write' && Boolean(dependencies.mcpManager)) ||
+    (check.type === 'reviewer' && Boolean(dependencies.reviewer))
+  );
 }
 
 async function executeCheck(
@@ -148,6 +171,7 @@ async function executeCheck(
       finishedAt: new Date().toISOString(),
     };
   } catch (error) {
+    if (error instanceof ProviderDataAdmissionError) throw error;
     return {
       checkId: check.checkId,
       outcome: 'inconclusive',

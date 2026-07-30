@@ -95,7 +95,10 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
   let timedOut = false;
   let cancelled = false;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let termination: Promise<void> | undefined;
+  let termination: ReturnType<ReturnType<typeof guardProcessTree>['terminate']> | undefined;
+  let terminationResult:
+    | Awaited<ReturnType<ReturnType<typeof guardProcessTree>['terminate']>>
+    | undefined;
   let processTree: ReturnType<typeof guardProcessTree> | undefined;
   const outputStop = new AbortController();
   const terminate = (reason: 'timeout' | 'cancelled') => {
@@ -114,7 +117,6 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
       cwd: input.workspace,
       stdout: 'pipe',
       stderr: 'pipe',
-      signal: input.signal,
       ...processTreeSpawnOptions(),
     });
     processTree = guardProcessTree(proc);
@@ -137,7 +139,7 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
         outputStop.signal,
       ),
     ]);
-    if (termination) await termination;
+    if (termination) terminationResult = await termination;
     const exitCode = await proc.exited;
     if (timeoutId) clearTimeout(timeoutId);
 
@@ -154,12 +156,22 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
               'Command cancelled by user.',
             )
           : cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+      ...(terminationResult
+        ? {
+            processCleanup: {
+              confirmedExited: terminationResult.confirmedExited,
+              gracefulRequested: terminationResult.gracefulRequested,
+              forced: terminationResult.forced,
+              unconfirmedDescendantCount: terminationResult.unconfirmedPids.length,
+            },
+          }
+        : {}),
     };
   } catch (error) {
     if (timeoutId) clearTimeout(timeoutId);
     if (termination) {
       try {
-        await termination;
+        terminationResult = await termination;
       } catch {
         // Preserve the original shell outcome when process cleanup fails.
       }
@@ -178,6 +190,16 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
           : error instanceof Error
             ? error.message
             : String(error),
+      ...(terminationResult
+        ? {
+            processCleanup: {
+              confirmedExited: terminationResult.confirmedExited,
+              gracefulRequested: terminationResult.gracefulRequested,
+              forced: terminationResult.forced,
+              unconfirmedDescendantCount: terminationResult.unconfirmedPids.length,
+            },
+          }
+        : {}),
     };
   } finally {
     if (timeoutId) clearTimeout(timeoutId);
