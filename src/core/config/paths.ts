@@ -88,6 +88,14 @@ export function skillDirs(workspace: string): SkillScanOptions {
 
 /** 会话日志目录：~/.kite-code/sessions/<frontend>/<threadId>/
  *  按平台分子目录，Agent 可通过 frontend + threadId 自定位日志。 */
+export function sessionLogRoot(): string {
+  return join(getKiteCodeDir(), 'sessions');
+}
+
+export function sessionLogFrontendDir(frontend: string): string {
+  return join(sessionLogRoot(), frontend);
+}
+
 export function sessionLogDir(frontend: string, threadId: string): string {
-  return join(getKiteCodeDir(), 'sessions', frontend, threadId);
+  return join(sessionLogFrontendDir(frontend), threadId);
 }

@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "decisionId": "D-04",
+  "status": "native_evidence_pending",
+  "selectedNetworkMode": "off",
+  "productionSupportedPlatforms": [],
+  "outcomeVocabulary": ["supported", "read_only_only", "excluded"],
+  "processTreeVocabulary": ["enforced", "unsupported"],
+  "targets": [
+    {
+      "runner": "macos-15",
+      "expectedArch": null,
+      "candidateBackend": "seatbelt",
+      "currentOutcome": "excluded",
+      "reason": "current profile permits workspace-external and protected-path reads/writes; no hard process-tree limit or TUI/CLI composition evidence"
+    },
+    {
+      "runner": "ubuntu-24.04",
+      "expectedArch": null,
+      "candidateBackend": "bubblewrap",
+      "currentOutcome": "excluded",
+      "reason": "native evidence is not pinned; no hard process-tree limit or TUI/CLI composition evidence"
+    },
+    {
+      "runner": "windows-2025",
+      "expectedArch": null,
+      "candidateBackend": "none",
+      "currentOutcome": "excluded",
+      "reason": "no filesystem/network sandbox backend is implemented"
+    }
+  ],
+  "requiredEvidence": [
+    "exact OS release/version/build and architecture",
+    "workspace read/write plus read-only mode and outside read/write deny",
+    "protected .git, agent config, credential, and symlink deny",
+    "selected network mode (off by default) and its matching native enforcement",
+    "DNS/redirect-safe allowlist only when allowlist is selected or claimed as a capability",
+    "hard process-tree count limit plus kill with no residual descendants",
+    "shell, nested descendant, forked Skill, and local stdio MCP inheritance",
+    "TUI and foreground CLI composition identity"
+  ]
+}

@@ -507,8 +507,8 @@ for (const taskId of ['1A.4', '1B.0']) {
   if (!bindingRow.includes(`| \`${phase1CompositionCommit}\` |`)) {
     fail(`${taskId}: binding must use the completed composition/stability baseline`);
   }
-  if (!bindingRow.includes('| `ready` |')) {
-    fail(`${taskId}: next execution binding must be ready`);
+  if (!/\| `(ready|in_progress)` \|/.test(bindingRow)) {
+    fail(`${taskId}: active execution binding must be ready or in_progress`);
   }
 }
 

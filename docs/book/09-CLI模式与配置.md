@@ -83,6 +83,13 @@ retention/容量与 mode，项目配置不得开启 `content`。
 credential。TUI 每个 session 首次运行显示 resolved mode，CLI 把 mode 写到 stderr；content
 另有显式披露。Logger 不可用时两端只显示一次固定脱敏诊断，Agent 继续运行且不使用 fallback。
 
+日志存储使用 owner-only 权限：POSIX 目录 `0700`、文件 `0600`，Windows 使用禁继承的
+owner-only ACL，并拒绝 symlink/reparse point。活动 session 通过绑定 PID/start identity、
+owner、目录 identity 与 heartbeat 的 durable lease 防止并发回收；无法确认 lease、扫描超
+预算或发现被隔离的不安全旧目录时，logger fail closed 而 Agent 继续运行。retention/总容量
+按 bounded oldest-first maintenance 执行，单 session 达到 byte cap 后只保留一条无正文限额
+记录与 bounded terminal marker。
+
 ## 9.4 MCP 配置
 
 MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、timeout、trust 和逐工具 policy override。`enabledTools` 是 allowlist，`disabledTools` 随后应用，最后由 `tools.<name>.enabled` 精确覆盖。逐工具配置还使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。开启默认关闭的 `mcpProviderActionV1` 后，非 ready/degraded 的 required Provider 会在首次模型调用前要求 Retry、当前 session waiver 或 Cancel Run；waiver 不会恢复该 Provider 的 capability 可见性。

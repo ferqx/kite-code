@@ -4,6 +4,7 @@
     {
       "id": "runtime-kernel",
       "sources": ["src/core/runtime/**"],
+      "excludeSources": ["src/core/runtime/agent.ts"],
       "documents": [
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/plan-mode-implementation.md",
@@ -96,6 +97,10 @@
       "sources": [
         "src/core/policies/**",
         "src/core/sandbox/**",
+        "scripts/release/platform-capability-probe.ts",
+        "tests/sandbox/platform-capability-probe.test.ts",
+        "release/platform-capabilities/**",
+        ".github/workflows/platform-capability-probe.yml",
         "src/core/controllers/tool-controller.ts",
         "src/core/execution/**",
         "src/core/harness/tool-policy.ts",
@@ -105,11 +110,13 @@
       "documents": [
         "docs/active/tool-gated-autonomy.md",
         "docs/active/authorization.md",
+        "docs/active/execution-platform-support.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/adr/0042-file-tool-semantics-and-write-safety.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md",
+        "docs/adr/0061-production-platform-capability-admission.md",
         "docs/adr/0049-effect-aware-read-scheduling.md"
       ]
     },
@@ -162,10 +169,14 @@
       "sources": [
         "src/core/session-logger/**",
         "src/core/config/session-logging-policy.ts",
+        "src/core/config/paths.ts",
+        "src/core/runtime/agent.ts",
         "src/app/cli/index.ts",
         "src/app/tui/run-agent.ts",
         "src/app/tui/session-manager.ts",
         "tests/session-logger/**",
+        "scripts/release/session-log-acl-smoke.ts",
+        ".github/workflows/session-log-acl-smoke.yml",
         "tests/tui-system/scenarios/session-logging-status.test.ts"
       ],
       "documents": [

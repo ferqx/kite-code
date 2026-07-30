@@ -169,5 +169,8 @@ describe('SessionLogWriter', () => {
     expect(appendCalls).toBe(1);
     expect(diagnostics).toBe(1);
     expect(existsSync(join(testDir(), 'events.jsonl'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(testDir(), 'terminal.json'), 'utf8')).outcome).toBe(
+      'failed',
+    );
   });
 });

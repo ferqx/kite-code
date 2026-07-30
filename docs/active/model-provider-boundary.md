@@ -57,7 +57,9 @@ artifact/admin/project rule/runtime secret detector 只能提高分类；用户�
 Verification reviewer 还要求 policy 明确允许 production content evaluation。日志策略固定
 metadata-first 的 7 天、总量 256 MiB、单 session 16 MiB 上限，并永久禁止
 reasoning/file/tool content 字段；metadata mapper、CLI/TUI resolved mode/status 和 content
-双重 opt-in 已完成。文件权限、轮转、active-session lease 与迁移仍由 1A.4 收敛。
+双重 opt-in 已完成。session storage 已使用 owner-only 权限/ACL、no-follow append、durable
+active-session lease、bounded retention/容量回收和 fail-closed legacy quarantine；当前行为见
+`session-logging-policy.md`。
 
 模型上下文能力必须先解析为统一的 `ResolvedModelCapabilities`。每个字段只按所选模型条目的显式配置、provider adapter runtime metadata、`modelKwargs` 兼容字段依次解析，并记录 `explicit_config | adapter_runtime | compatibility_config` source；缺失值保持 unknown，布尔能力保持 true/false/unknown 三态。模型名称和默认模型列表不得提供 context window、max output、tokenizer、usage 或 prompt-cache 能力，也不得为未知输出预算隐式预留 4096 tokens。Capability disclosure、上下文 preflight、metrics 和实际模型请求必须共用同一个 resolved object；未知窗口不显示利用率，也不运行 ratio auto，但不阻止普通模型请求或手动 `/compact`。
 

@@ -46,6 +46,26 @@ function ollamaConfig(extra = ''): string {
 }
 
 describe('session logger composition', () => {
+  test('passes the complete resolved retention and capacity policy into the writer', async () => {
+    let receivedPolicy: SessionLoggingPolicyV1 | undefined;
+    const collector = new SessionLogCollector(
+      'policy-forwarding',
+      '/workspace',
+      'fixture',
+      { provider: 'fixture', name: 'fixture' },
+      {
+        policy: CONTENT_ARTIFACT_POLICY,
+        contentInspector: CLEAR_CONTENT_INSPECTOR,
+        writerFactory: (_frontend, _threadId, _basename, _onDiagnostic, policy) => {
+          receivedPolicy = policy;
+          return { write() {}, async finalize() {} };
+        },
+      },
+    );
+    await collector.finalize('completed');
+    expect(receivedPolicy).toEqual(CONTENT_ARTIFACT_POLICY);
+  });
+
   test('requires both artifact permission and explicit user opt-in for content mode', () => {
     expect(resolveSessionLoggingPolicyV1({ enabled: false }).mode).toBe('off');
     expect(resolveSessionLoggingPolicyV1({ enabled: true }).mode).toBe('metadata');
@@ -373,7 +393,7 @@ describe('session logger composition', () => {
     }
   });
 
-  test('writer failure trips logging once and prevents later writes or finalize propagation', async () => {
+  test('writer failure stops later writes but retains one contained finalization attempt', async () => {
     const records: unknown[] = [];
     const diagnostics: string[] = [];
     let finalizeCalls = 0;
@@ -415,7 +435,7 @@ describe('session logger composition', () => {
 
     expect(records).toHaveLength(2);
     expect(JSON.stringify(records)).not.toContain('MUST_NOT_BE_WRITTEN');
-    expect(finalizeCalls).toBe(0);
+    expect(finalizeCalls).toBe(1);
     expect(diagnostics).toEqual([
       'Session logging is unavailable; the Agent will continue without a logging fallback.',
     ]);

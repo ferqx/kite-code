@@ -4,7 +4,8 @@
 
 读取时机：修改 SessionLogCollector、Runtime 日志事件映射、日志字段、日志目录创建或 `sessionLoggingPolicyV1` 时。
 
-验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts`、`bun run typecheck`。
+验证：`bun test tests/session-logger/metadata.test.ts tests/session-logger/recorder.test.ts tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts tests/session-logger/retention.test.ts tests/session-logger/writer-security.test.ts`、
+`bun run scripts/release/session-log-acl-smoke.ts`、`bun run typecheck`。
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`。
 
@@ -75,3 +76,41 @@ secret 集合，并叠加保守 secret shape/protected-path 检测；Core 组合
 writer 构造、写入或 finalize 失败时，collector 立即停止继续写入，并向 App 最多报告一次固定、
 脱敏诊断。失败不得传播到 Runtime、不得改变 run terminal outcome，也不得写到权限更弱或含
 正文的 fallback。
+
+## 安全存储、lease 与回收
+
+App/Runtime 把完整 resolved policy 注入 writer。POSIX 上 `.kite-code`、sessions root、
+frontend 和 session 目录收紧为 `0700`，日志与 lease/terminal metadata 为 `0600`；Windows
+对同一路径应用 owner-only、禁继承 ACL。路径 segment 使用封闭格式并拒绝 Windows reserved
+名称；任何 user data/session root、session 目录或目标文件 symlink/reparse point 都 fail
+closed。JSON metadata 使用同目录 exclusive temp、fsync、rename 和目录 fsync；JSONL append
+在 writer 构造期以 no-follow descriptor 立即打开并固定，不延迟到首批事件。所有受管文件必须
+是 `nlink=1` 的 owner-owned regular file；构造、每批 append 与 retention 都拒绝 symlink、
+reparse point 和 hardlink。writer/lease 同时固定 `.kite-code`、sessions root、frontend、
+session 的 dev/inode 与 canonical realpath，并在 append、heartbeat、terminal/release 前重验；
+任一祖先被移动、替换或 link-back 时停止写入，也不沿替换后的路径执行空文件清理。
+
+每个活动 session 持有 durable lease，绑定 PID、process start identity、OS owner、session
+directory identity、nonce、创建时间和 heartbeat。正常/失败/容量终止先原子写
+`terminal.json`，再释放匹配 nonce 的 lease。另一个 TUI/CLI 进程不能取得同一 session；
+heartbeat 未过期、进程 identity 仍匹配、wall-clock 回拨、PID identity 不可确认或 lease
+损坏时，cleanup 都保守保护目录。只有 heartbeat 超过 stale window 且 PID/start identity
+不匹配时才可回收。
+
+retention/migration 使用逐条 directory iterator，在固定时间与条目预算内扫描；root、
+frontend、session 内的每个观察条目都计入预算，不先把任意目录整体载入内存。只有完整扫描后
+才按 `(mtime, path)` 稳定最旧优先删除超过 retention/总容量的非活动 session；部分扫描不会
+基于局部候选执行删除。每次删除前在 session operation lock 内重验 lease 与目录 identity。
+含未知文件/link/hardlink 的 session 移入 owner-only `_quarantine`，并使容量 admission fail
+closed，直到人工处理。扫描超预算、容量不可证明或不安全存储存在时，新 writer 不建立。
+
+不同 session 的 maintenance 与 lease 创建还由 sessions root 的跨进程 admission record
+串行化，避免两个 writer 同时通过总容量检查。operation/admission record 使用 exclusive create
+与 PID/start identity/nonce 绑定释放；由于当前跨平台文件 API 没有安全的 unlink-CAS，进程
+持有 operation/admission record 时 crash 后不自动抢占该 record，而是 fail closed 并要求人工
+隔离/恢复，不能用有双 reclaimer 竞态的 stale unlink 冒充恢复。
+
+单 session 使用 UTF-8 byte 计数；达到 `maxSessionBytes` 时最多写一条无正文
+`session.logging_limited` metadata，停止后续记录，并为 bounded terminal marker 预留空间。
+总容量 maintenance 为新 session 预留其完整上限。原生 ACL smoke 在 macOS、Ubuntu 和 Windows
+runner 验证权限、link/reparse rejection 与 terminal 原子落盘。

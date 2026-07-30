@@ -62,3 +62,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0058](0058-agent-task-product-acceptance.md)          | accepted   | Agent task、diff、test 与 review 是产品验收主证据                                  |
 | [0059](0059-optional-disable-only-signed-rollout.md)   | accepted   | 远程 rollout manifest 可选且只能签名降级                                           |
 | [0060](0060-single-maintainer-release-governance.md)   | accepted   | 单人维护模式以 external release 前第三方安全评审替代 Phase 0 双人签署               |
+| [0061](0061-production-platform-capability-admission.md) | proposed | 生产平台能力必须由原生探针逐项准入，当前支持集合为空                              |

@@ -47,4 +47,30 @@ describe('documentation impact gate', () => {
     expect(evaluateDocumentationImpact(['tests/runtime/kernel.test.ts'], map)).toEqual([]);
     expect(evaluateDocumentationImpact(['docs/active/runtime.md'], map)).toEqual([]);
   });
+
+  it('lets a narrower rule own an explicitly excluded composition source', () => {
+    const withCompositionRule: DocumentationMap = {
+      version: 1,
+      rules: [
+        {
+          id: 'runtime',
+          sources: ['src/core/runtime/**'],
+          excludeSources: ['src/core/runtime/agent.ts'],
+          documents: ['docs/active/runtime.md'],
+        },
+        {
+          id: 'composition',
+          sources: ['src/core/runtime/agent.ts'],
+          documents: ['docs/active/session-logging.md'],
+        },
+      ],
+    };
+
+    expect(
+      evaluateDocumentationImpact(
+        ['src/core/runtime/agent.ts', 'docs/active/session-logging.md'],
+        withCompositionRule,
+      ),
+    ).toEqual([]);
+  });
 });

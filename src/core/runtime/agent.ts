@@ -160,7 +160,7 @@ export async function* runRuntimeAgent(
     input.frontend ?? 'runtime',
     { provider: input.config.providerName, name: input.config.modelName },
     {
-      mode: sessionLoggingPolicy.mode,
+      policy: sessionLoggingPolicy,
       contentInspector: sessionLoggingContentInspector,
       onDiagnostic: (diagnostic) => input.onSessionLoggingDiagnostic?.(diagnostic.message),
     },

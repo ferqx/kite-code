@@ -48,7 +48,7 @@ bun install
 
 启用 `features.contextCompactionManualV1`（默认开启）后可使用 `/compact` 命令，支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。运行中请求会排队到安全边界；消息不足时提示 `Not enough messages to compact.`，active checkpoint 后没有新增消息时，无参数连续压缩提示 `No new messages to compact.` 且不会再次调用摘要模型。进入历史会话时，TUI 会基于恢复的 checkpoint 和当前投影环境在本地重算 Footer context token，不产生模型请求。
 
-会话日志治理默认关闭：`features.sessionLoggingPolicyV1=false` 时 mode 为 `off` 且不创建日志目录；开启时默认只记录 allowlist metadata。`content` 需要 release artifact 允许和用户配置显式 opt-in，项目配置不能开启；即使 opt-in 也不记录 reasoning、工具/文件正文、审批命令、Plan/Sub-agent 正文或 credential。TUI/CLI 会显示 resolved mode，logger 不可用时 Agent 继续运行且不使用不安全 fallback。
+会话日志治理默认关闭：`features.sessionLoggingPolicyV1=false` 时 mode 为 `off` 且不创建日志目录；开启时默认只记录 allowlist metadata。`content` 需要 release artifact 允许和用户配置显式 opt-in，项目配置不能开启；即使 opt-in 也不记录 reasoning、工具/文件正文、审批命令、Plan/Sub-agent 正文或 credential。日志目录/文件使用 owner-only 权限或 ACL、拒绝 link/reparse point，并通过 durable active-session lease、bounded retention/容量与 fail-closed quarantine 保护；TUI/CLI 会显示 resolved mode，logger 不可用时 Agent 继续运行且不使用不安全 fallback。
 
 MCP 默认配置只有两个规范位置：项目级 `<project>/.kite-code/mcp.json` 与用户级 `~/.kite-code/mcp.json`，同名 Server 按 `project > user` 选择。`/mcp` 的 Current project 与 All projects 分别写入这两个文件；项目声明必须在 Server Detail 的 Review 页面显式批准。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 仅只读兼容与显式迁移，不再作为写入目标。
 
