@@ -82,6 +82,14 @@ metadata 通过 allowlist mapper 构造生产指标。
 - Resource；
 - Release/rollout。
 
+首版 Resource/Runtime 指标至少包含低基数的：
+
+- active/reserved tool invocations 与顶层 shell invocations；
+- process-tree size high-water/limit termination（不带 PID/command）；
+- read batch size、tool/shell concurrency wait/saturation；
+- approval overlap 后的 cancelled/not-dispatched sibling；
+- cancel incomplete、orphan shell/descendant 与 late terminal rejection。
+
 每个 metric 定义：
 
 - 名称；
@@ -173,6 +181,8 @@ Dashboard 最少：
 - compaction eligibility/result/failure/before-after；
 - replay/migration/checkpoint/hard block；
 - budget exhausted、RSS、listener、FD/handle、event-loop lag；
+- tool/shell concurrency wait/saturation、`resource_saturated`、batch admission rejection、
+  process-tree limit、cancel incomplete/orphan child；
 - log/artifact bytes；
 - task checks/human accepted/integrated/reverted 的聚合结果。
 

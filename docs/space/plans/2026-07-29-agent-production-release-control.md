@@ -52,14 +52,14 @@ RC Assembly 依赖：Phase 1A、1B、1C、Phase 2B 和 Phase 3
 | 2A.1 | `T:0:0.3`、2A.0 | `src/core/config/release-profile.ts`、`release-capabilities.ts`、embedded profiles、`tests/release/release-profile.test.ts` | `bun test tests/release/release-profile.test.ts` | `releaseProfileV1=false` 起步；production profile 要求开启，否则拒绝启动 |
 | 2A.2 | 2A.1 | `src/core/config/release-profile-composer.ts`、property tests | `bun test tests/release/release-profile-composition.test.ts` | 与 2A.1 同 flag；回滚只能收紧为 embedded ceiling |
 | 2A.3 | 2A.2 | `src/app/release/composition-root.ts`、`status-projection.ts`、`src/app/cli/index.ts`、`src/app/tui/session-manager.ts`、`tests/release/release-status.test.ts`、`tests/tui-system/scenarios/release-status.test.ts` | `bun test tests/release/release-status.test.ts`；`bun test tests/tui-system/scenarios/release-status.test.ts` | 开发入口可关闭状态 UI；production 不得绕过 profile loader |
-| 2A.4 | 2A.0–2A.2 | `scripts/release/behavior-digest.ts`、cross-platform golden | `bun test tests/release/behavior-digest.test.ts` | 无 Runtime flag；digest 改变使旧 evidence 失效 |
+| 2A.4 | 2A.0–2A.2 | `scripts/release/behavior-digest.ts`、`RuntimeSchedulingPolicyV1` consumer、system/tool/default-runner canonical inputs、cross-platform golden | `bun test tests/release/behavior-digest.test.ts` | 无 Runtime flag；digest 改变使旧 evidence 失效 |
 | 2A.5 | 2A.0、2A.4 | `scripts/release/generate-manifest.ts`、`bootstrap-verifier.ts`、`src/app/release/manifest-loader.ts`、`tests/release/manifest.test.ts`、tamper fixtures | `bun test tests/release/manifest.test.ts tests/release/bootstrap-verifier.test.ts`；`bun run release:verify` | launcher 先验签/验 payload；Runtime loader 仅一致性复核 |
 | 2A.6 | 2A.5 | `scripts/release/evidence-schema.ts`、`evidence-bundle.ts`、evidence tests | `bun test tests/release/evidence.test.ts` | 无 Runtime flag；缺失或陈旧 evidence 不自动回退 |
 | 2A.7 | 2A.3、2A.6 | `scripts/release/gate-evaluator.ts`、gate policy/fixtures/tests、foundation Gate record；唯一产生 `MS:2A-F` | `bun test tests/release/gate-evaluator.test.ts`；clean-environment replay | Gate policy versioned；回滚 policy 必须重新评估全部 evidence |
-| 2A.8 | 2A.0、2A.3、2A.5、2A.7、`D-04:CLOSED`、`D-06:CLOSED` | `.github/workflows/release-candidate.yml`、`scripts/release/platform-smoke.ts`、`generate-sbom.ts`、`verify-provenance.ts`、tamper smoke | `bun run release:smoke`；各声明支持平台 workflow | workflow/tamper smoke 失败不发布；不得回退为源码 smoke |
+| 2A.8 | 2A.0、2A.3、2A.5、2A.7、`D-04:CLOSED`、`D-06:CLOSED` | `.github/workflows/release-candidate.yml`、`scripts/release/platform-smoke.ts`、`scripts/run-default-tests.ts`、`generate-sbom.ts`、`verify-provenance.ts`、tamper smoke | `bun run test`、`bun run release:smoke`；各声明支持平台 workflow | workflow/tamper smoke 失败不发布；不得回退为源码 smoke |
 | 2A.9 | 2A.7、`D-03:CLOSED`、`D-06:CLOSED`、`D-13:CLOSED` | `src/app/release/rollout-manifest-loader.ts`、`rollout-cache.ts`、`scripts/release/sign-rollout-manifest.ts`、`tests/release/disable-only-rollout.test.ts` | `bun test tests/release/disable-only-rollout.test.ts` | 可选且默认不开启；故障回到 embedded ceiling，不能扩大权限 |
 | 2A.10 | 2A.1–2A.8 | active/book/README/map/ADR/changelog/support matrix | `bun run check:docs-impact`、`bun run check:docs` | 文档与实现不一致时阻断 2A-RC |
-| 2A.11 | `MS:1A-DONE`、`MS:1B-DONE`、`MS:1C-DONE`、`MS:2B-DONE`、`MS:3-OPS-READY`、2A.8、2A.10 | `scripts/release/assemble-rc.ts`、`replay-gate.ts`、`tests/release/rc-assembly.test.ts`、RC workflow；唯一产生 `MS:2A-RC` | `bun test tests/release/rc-assembly.test.ts`；`bun run release:build`；`bun run release:verify`；Gate replay | Gate 失败不发布；回滚完整 payload/manifest/evidence identity |
+| 2A.11 | `MS:1A-DONE`、`MS:1B-DONE`、`MS:1C-DONE`、`MS:2B-DONE`、`MS:3-OPS-READY`、2A.8、2A.10 | `scripts/release/assemble-rc.ts`、`replay-gate.ts`、schema upgrade/rollback rehearsal、`tests/release/rc-assembly.test.ts`、`schema-rollback.test.ts`、RC workflow；唯一产生 `MS:2A-RC` | `bun test tests/release/rc-assembly.test.ts tests/release/schema-rollback.test.ts`；`bun run release:build`；`bun run release:verify`；Gate replay | Gate 失败不发布；回滚完整 payload/manifest/evidence identity |
 
 ### Task 2A.0：冻结 payload、detached manifest 与打包入口
 
@@ -103,6 +103,8 @@ release bundle
 - `ReleaseCapability` 稳定枚举；
 - `CapabilityMaturity` 与 `RolloutStage` 正交；
 - `ReleaseProfileV1`；
+- RFC `resources` 字段及其有限非负整数、embedded ceiling 和只能收紧的组合校验；1C 消费
+  累计/tool/shell invocation/wait limits，1B 消费 process-tree limit；
 - limited/internal/canary/ga embedded profiles；
 - capability maturity/rollout 合法组合校验；
 - 安全敏感未知字段 fail closed。
@@ -176,14 +178,18 @@ Headless CLI：
 规范化并 hash 实际打包/解析后的：
 
 - agent/system contract；
+- system prompt 与 `ask_user` canonical questions schema/rejection contract；
 - compaction prompt/policy；
-- model-visible Tool Registry 名称和 schema；
+- model-visible Tool Registry 名称、schema 和 effect 分类；
+- Runtime 导出的 `RuntimeSchedulingPolicyV1` canonical snapshot；2A 不复制 parallel-read
+  allowlist、shell overlap、approval、admission 或 late-event 常量；
 - 内建 Skill contracts；
 - default config/feature/预算/权限；
 - Provider Data Policy；
 - Release Profile；
 - Gate policy；
-- build recipe；
+- build recipe，包括 `package.json` 默认 test script、实际打包的
+  `scripts/run-default-tests.ts` 与 process-isolated test 清单；
 - lockfile。
 
 要求：
@@ -193,6 +199,8 @@ Headless CLI：
 - 语义变化必须改变 digest；
 - artifact smoke 重新计算并比对；
 - digest 规则有跨平台 golden fixture；
+- synthetic fixture 可在 2A-F 验证 canonicalizer；production snapshot 只有 1C 产生，并在
+  2A.11 从实际 payload 重新导出；
 - 任何 digest 变化使旧 task/live evidence 失效。
 
 ### Task 2A.5：实现 Release Manifest
@@ -202,6 +210,7 @@ Headless CLI：
 - product version、commit、build time、Bun；
 - payload SHA-256；
 - profile/lockfile/behavior/data/gate/build digests；
+- 独立的 Runtime scheduling policy digest；
 - Runtime schema；
 - supported platform/provider type。
 
@@ -237,6 +246,10 @@ Evidence bundle 至少聚合：
 - Agent task suite；
 - compaction semantic/continuation；
 - soak/resource/failure matrix；
+- tool/shell invocation permit/saturation、process-tree enforcement、batch admission、
+  approval/cancel/late-event conformance；
+- Runtime schema migration/rollback、system/tool/scheduling contract 与默认测试 runner
+  identity；
 - rollback/incident rehearsal；
 - canary SLO window/sample；
 - risks 和有限例外。
@@ -281,6 +294,9 @@ Gate：
 新增/强化：
 
 - clean checkout + `bun install --frozen-lockfile`；
+- 执行 `bun run test`，验证 `package.json` 默认入口解析到制品内绑定的
+  `scripts/run-default-tests.ts`，并运行清单中的主 deterministic suite 与全部
+  process-isolated tests；入口或隔离清单变化必须改变 build recipe digest；
 - dependency vulnerability、license、SBOM；
 - artifact provenance 和签名/校验；
 - Linux/macOS/Windows artifact build/smoke；
@@ -324,7 +340,12 @@ Gate：
 本任务是 2A 的第二个里程碑，只在 Phase 1A–1C、2B、3 完成后执行：
 
 - 从 clean checkout 生成真实 payload、detached manifest、signature/provenance；
+- 从实际 payload 导出 `RuntimeSchedulingPolicyV1`，与 manifest digest、1C evidence 和
+  synthetic canonical golden 交叉比对；
 - 只消费各计划按 2A Foundation contract 生成且 identity/freshness 匹配的 evidence；
+- 以 schema v17 为当前复核基线，分别执行 v16→v17、v17→最终 1C schema upgrade 和
+  artifact rollback rehearsal，验证 `aborted/completed` turn、pending interaction、permit
+  waiter 与 late tool event 不被错误重开；
 - 运行 actual artifact smoke，不从源码目录替代；
 - 重放 G0–G5，输出 artifact overall 和 per-capability decision；
 - limited Gate 未通过时不发布 payload，也不把计划局部完成宣传为 production ready。
@@ -334,6 +355,7 @@ Gate：
 - `scripts/release/assemble-rc.ts`
 - `scripts/release/replay-gate.ts`
 - `tests/release/rc-assembly.test.ts`
+- `tests/release/schema-rollback.test.ts`
 - `.github/workflows/release-candidate.yml`
 
 ## 里程碑
@@ -356,11 +378,13 @@ Task 2A.8、2A.10、2A.11 完成；Task 2A.9 只有在决策要求分钟级远�
 - [ ] field composition property tests 通过；
 - [ ] TUI/CLI 状态投影准确且不泄密；
 - [ ] behavior digest 跨平台稳定、语义变化敏感；
+- [ ] scheduling policy digest 来自实际 Runtime canonical snapshot，没有 release 平行配置；
 - [ ] detached manifest 在实际 payload 上完成单向 SHA 校验，无自引用；
 - [ ] evidence identity mismatch 阻断；
 - [ ] Gate decision 可重放；
 - [ ] G0/G1 无普通 waiver；
 - [ ] dependency/license/SBOM/provenance 与三平台 artifact smoke 完成；
+- [ ] schema upgrade/rollback rehearsal 在 1C 完成后的 RC 阶段通过；
 - [ ] limited artifact 只在 Phase 1A–3 与 2B Gate 全部满足后由 Task 2A.11 生成。
 
 ## 回滚

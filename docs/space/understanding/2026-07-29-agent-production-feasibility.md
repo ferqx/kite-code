@@ -7,6 +7,7 @@
 - Agent Runtime、内置工具、MCP、Skills、Plan、上下文压缩、TUI 与恢复链路
 - 安全与隐私、可观测性、发布工程和产品可用性
 - 基线提交 `410b2c24717ab50f0cd7fe32d54942fa6fca9840`
+- 合并增量复核 `a316a2df63e511f839d08aa72a20275afa8e3366`（2026-07-30）
 
 读取时机：
 
@@ -121,6 +122,37 @@
 - 本地依赖目录初始缺少 lockfile 已声明的 `@inkjs/ui`，`bun install --frozen-lockfile` 补齐 5 个包后质量门禁通过。这是工作区安装状态问题，但说明发布验证必须从 clean install 开始。
 - 默认 unit 的 6 个 skip 包括原生 keyring、Windows ACL 和 Windows/MSYS2 路径场景；相关行为不能用本次 macOS 本地结果代替多平台结论。
 - 最近 30 天基线历史包含 227 个提交，变更速度很高。发布前需要冻结窗口和稳定分支，不能只在持续变化的开发分支上取一次快照。
+
+## 2026-07-30 合并增量复核
+
+复核对象为从初始论证基线到合并提交
+`a316a2df63e511f839d08aa72a20275afa8e3366` 的增量，主要包含 effect-aware read
+scheduling、shell sibling/approval/cancellation 调度、TUI turn/thought lifecycle、
+`ask_user` canonical schema、Runtime schema v17 和新的默认测试 runner。
+
+当前提交的增量验证结果：
+
+| 验证 | 结果 | 解释 |
+| --- | --- | --- |
+| `bun run test` | 主 deterministic suite `1992 pass`、`6 skip`；5 个隔离文件合计 `26 pass`；`0 fail` | 新 runner 的原生环境执行通过；受管 sandbox 内最初因 PTY/process isolation `EPERM` 失败，不作为代码失败，但环境差异必须进入制品证据 |
+| `bun run test:mock` | `5 pass`、`0 fail` | 压缩 Runtime mock contract 未回归 |
+| `bun run test:tui:system` | 35 个 scenario 文件通过 | 原 Sub-agent Read File 30 秒超时本次未复现；仍出现 `MaxListenersExceededWarning`，且只有单次结果 |
+| 静态与文档门禁 | typecheck、Core boundary、docs impact、docs 均通过 | 合并没有破坏当前架构与文档门禁 |
+| live MCP / 真实模型 | 本轮未重跑 | 2026-07-29 的 live 结果只属于旧 artifact identity，不能为本提交或未来 release 放行 |
+
+增量改变了实现细节和证据身份，没有推翻可行性结论、RFC 架构、Phase 顺序或 108 个 Task
+DAG。它同时暴露出计划必须显式覆盖的新边界：
+
+1. scheduler 的 read batch 代码上限 `4` 和 runner 的 shell overlap 不是 production
+   `ResourceBudget`；必须新增父/子 Agent 共享的 tool/shell invocation 并发硬上限、有界
+   permit wait 和原子 reservation，并由平台另行强制每次 shell 的 process-tree 上限。
+2. parallel batch 中每个 network/MCP invocation 必须独立执行 boundary、egress permit、
+   revision 与 receipt 检查，不能共享 sibling 的放行结果。
+3. schema v17、system prompt/`ask_user` contract、tool effect 分类、Runtime 导出的 canonical
+   scheduling policy snapshot 和默认测试 runner 必须进入 behavior/build digests；任一变化
+   使旧 task/live evidence 失效。
+4. Task 1C.6 继续保持 P0：timeout 风险从“本次可复现”收窄为“需 soak 证明已消失”，listener
+   warning 仍未关闭。
 
 ## 能力放行矩阵
 
@@ -285,7 +317,11 @@ Required CI 当前有 `quality`、`unit`、`compaction-contract`、`runtime-e2e`
 - 正式版本 tag、changelog、release artifact、升级/降级和 rollback 演练。
 - lint warning budget；当前 191 warnings 仍返回成功。
 
-`MaxListenersExceededWarning` 指向 `useTerminalFocus` 相关 ReadStream data listener。它可能只是测试 harness 生命周期问题，也可能代表真实长会话中的监听器泄漏；完整 PTY 回归还出现 sub-agent read flow 30 秒超时，孤立重跑可复现。在定位并让 required suite 稳定变绿前不能忽略。
+初始基线的 `MaxListenersExceededWarning` 指向 `useTerminalFocus` 相关 ReadStream data
+listener。它可能只是测试 harness 生命周期问题，也可能代表真实长会话中的监听器泄漏；
+当时的完整 PTY 回归还出现 sub-agent read flow 30 秒超时，孤立重跑可复现。新基线单次
+完整 suite 未复现 timeout，但 listener warning 仍存在；在连续运行与资源斜率验证通过前
+不能忽略。
 
 ## “好用”尚未被证明
 
@@ -320,9 +356,11 @@ PTY 和 E2E 能证明用户路径可被程序走通，不能证明目标用户�
 10. 将首发支持边界固定为本地单 OS 用户的 TUI 和用户在场的前台 Headless CLI；Web、
     多租户、远程托管、跨设备控制和服务端 credential custody 保持不可达或 unsupported。
 11. 为父 Agent 与全部 Sub-agent 建立累计 time/turn/model/tool/token/concurrency/artifact
-    硬预算、有界取消、descendant 清理和稳定 `budget_exhausted` 终态。
+    硬预算、顶层 shell invocation 与 process-tree 独立上限、有界 permit wait/取消、
+    descendant 清理和稳定 `budget_exhausted/resource_saturated` 终态。
 12. 让 release manifest/evidence 绑定实际 agent contract、模型可见 tool schema、默认配置、
-    gate policy、build recipe、任务/压缩 suite 和 route identity，digest mismatch 必须阻断。
+    Runtime 导出的 canonical scheduling policy、gate policy、build recipe、任务/压缩 suite
+    和 route identity，digest mismatch 必须阻断。
 13. 用同一 conformance suite 验证 sandbox、network、worktree、Provider、MCP、存储、预算、
     压缩、Verification、日志和管理员策略的 fail-closed/fallback 语义。
 14. 指定 Release/Security/Platform/Capability/Evaluation/Incident owner 与 backup，完成事故

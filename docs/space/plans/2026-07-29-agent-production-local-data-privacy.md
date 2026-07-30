@@ -60,7 +60,7 @@
 | 1A.3 | 1A.2 | `src/core/runtime/agent.ts`、`src/app/cli/index.ts`、`src/app/tui/run-agent.ts`、`session-manager.ts`、`tests/session-logger/composition.test.ts`、`tests/tui-system/scenarios/session-logging-status.test.ts` | `bun test tests/session-logger/collector.test.ts tests/session-logger/composition.test.ts tests/config.test.ts`；`bun test tests/tui-system/scenarios/session-logging-status.test.ts` | 双路径至少两周；production profile 只允许新 policy path |
 | 1A.4 | 1A.3 | secure writer、`active-session-lease.ts`、retention/migration、`scripts/release/session-log-acl-smoke.ts` | `bun test tests/session-logger/writer.test.ts tests/session-logger/active-session-lease.test.ts`；POSIX/Windows ACL workflow | migration 先收紧权限再切换；lease 不确定时不删除 |
 | 1A.5 | 1A.1、`D-14:CLOSED` | policy registry/loader、route/data classifier、payload provenance、model admission/status tests | `bun test tests/config/provider-data-policy.test.ts tests/model-provider-data-policy.test.ts` | `providerDataPolicyV1=false` 时 production route 全部关闭；旧资格全部失效 |
-| 1A.6 | 1A.1、1A.5、`T:1B:1B.4` | MCP route identity/egress permit/policy/integration tests | `bun test tests/mcp/data-egress-policy.test.ts` | `remoteMcpEgressPolicyV1=false`；回滚为禁止 remote content egress |
+| 1A.6 | 1A.1、1A.5、`T:1B:1B.4` | MCP route identity/egress permit/policy/integration/concurrency tests | `bun test tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts` | `remoteMcpEgressPolicyV1=false`；回滚为禁止 remote content egress |
 | 1A.7 | 1A.1–1A.6 | active/book/map/ADR/README/完成记录；唯一产生 `MS:1A-DONE` | `bun run check:docs-impact`、`bun run check:docs` | 文档不收敛则 Phase 1A 不完成 |
 
 ### Task 1A.1：定义日志与数据策略 schema
@@ -337,6 +337,10 @@ interface RemoteMcpEgressPermitV1 {
 - permit 独立于 Tool effects approval 和 model Provider consent；
 - permit 绑定规范化后的最终参数 digest、server/endpoint/tool revision 和 invocation；
 - dispatch 前原子消费一次；过期、revision/argument mismatch、重复消费全部拒绝；
+- parallel/batched MCP 的每个 invocation 必须持有独立 nonce/permit，并分别在 dispatch 前
+  原子消费；permit 不得在 sibling 间共享、转移，或由 batch 级 approval 代替；
+- 一个 sibling 的 permit 消费、拒绝或失败不改变其他 sibling 的授权状态；参数排序或
+  tool/server revision 变化必须对对应 invocation 重新求值；
 - read-only MCP 只有在不发送 Workspace/content 数据时才可不要求 egress permit；
 - permit/拒绝原因进入 receipt，正文和原始参数不进入 telemetry。
 
@@ -356,6 +360,8 @@ interface RemoteMcpEgressPermitV1 {
 - read-only effect 不自动代表数据可外发；
 - project MCP config 不能降低数据分类。
 - permit argument/revision mismatch、过期和 replay 均产生零网络请求。
+- 并发 sibling 不能复用同一 nonce/permit；竞争消费只允许一个成功，其余均在网络请求前
+  fail closed，且一个拒绝不会授权同 batch 的其他调用。
 
 ### Task 1A.7：文档和迁移收敛
 

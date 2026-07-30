@@ -45,8 +45,9 @@
 8. `D-08` network allowlist、protected path 和 sandbox fallback；
 9. `D-09` Headless CLI 写入限制和 worktree 适用形态；
 10. `D-10` `skills_readonly`/`skills_effectful` 分界；
-11. `D-11` time/turn/model/tool/token/sub-agent/artifact 预算；
-12. `D-12` behavior digest canonicalization 与 evidence 失效；
+11. `D-11` time/turn/model/tool/token/sub-agent/artifact 预算，以及 tool/shell invocation、
+    process-tree 与 permit wait 硬上限；
+12. `D-12` behavior digest canonicalization、`RuntimeSchedulingPolicyV1` 和 evidence 失效；
 13. `D-13` Owner、事故联系人、通知渠道和演练；
 14. `D-14` model/MCP route 的数据策略。
 
@@ -94,7 +95,8 @@
 2. Release Manifest/Evidence/Gate 与 behavior digest；
 3. 本地单用户首发拓扑和 hosted 独立准入；
 4. sandbox/network/protected path/worktree 执行隔离；
-5. 父子 Agent 累计资源预算与统一 terminal 语义；
+5. 父子 Agent 累计资源预算、`RuntimeSchedulingPolicyV1`、effect-aware batch/shell
+   invocation permit、process-tree 上限与统一 terminal 语义；
 6. metadata-first 本地日志、无正文 telemetry 与 Provider Data Policy；
 7. compaction 离线质量门禁与 route qualification；
 8. Agent task/diff/test/review 作为产品验收结果；
@@ -123,6 +125,7 @@ bun run check:docs-impact
 | `ReleaseProfileV1` | Release + Security | 2A |
 | `ProviderDataPolicyV1` | Security & Privacy | 1A |
 | `ResourceBudgetV1` | Platform | 1C |
+| `RuntimeSchedulingPolicyV1` | Runtime | 1C |
 | terminal/failure reason | Runtime | 1C |
 | `ReleaseManifestV1` / `ReleaseEvidenceV1` | Release | 2A |
 | `AgentTaskCaseV1` | Evaluation/Product | 2B |
@@ -134,6 +137,12 @@ bun run check:docs-impact
 - schema source 位于 Core 或 release scripts 由对应计划决定；
 - 2A 只消费 1A 生成的 `ProviderDataPolicyV1` canonical snapshot/digest，不得复制或扩展该
   schema；
+- 2A 只消费 1C 从实际 Runtime 导出的 `RuntimeSchedulingPolicyV1` canonical snapshot；
+  release scripts 不得复制 scheduler allowlist、barrier 或 terminal 语义；
+- `ReleaseProfileV1` 的资源字段由 2A 定义和组合；1C 只投影累计预算及 tool/shell
+  invocation/wait limits，并拥有 Runtime reservation/waiter；1B 只把 process-tree limit
+  投影到 `ExecutionBoundaryV1` 并拥有平台 enforcement。不得在三个计划中平行定义默认值
+  或 composition 规则；
 - App 只加载/展示，不重新定义安全语义；
 - 共享字段变更同时更新 producer、consumer、fixture、digest 和 active 文档；
 - schema 未知时安全敏感路径 fail closed。
@@ -182,6 +191,10 @@ milestone producer。
 
 必须逐项确认：
 
+- 当前 execution binding 基线是
+  `a316a2df63e511f839d08aa72a20275afa8e3366` 或已单独完成增量复核的后继提交；
+- 旧基线 live evidence 已标记为历史结果，schema v17、调度策略、system/tool contract 和
+  默认测试 runner 的证据失效边界已进入 1C/2A/2B；
 - 首发拓扑没有扩大；
 - P0 不能被普通 waiver；
 - 计划依赖图没有循环；
@@ -200,6 +213,7 @@ milestone，也不得为非 Phase 0 Task 创建 execution binding。
 - [ ] 必要 ADR 已接受或明确由哪个子计划先完成；
 - [ ] 共享 schema ownership 无冲突；
 - [ ] 所有子计划有可解析依赖、验证、rollback 和完成记录入口；
+- [ ] execution binding 与合并增量复核基线一致；
 - [ ] 下一批即将启动的 Task 有真实 execution binding，远期 Task 不要求预绑定；
 - [ ] `bun run check:docs` 通过；
 - [ ] `bun run check:docs-impact` 通过。

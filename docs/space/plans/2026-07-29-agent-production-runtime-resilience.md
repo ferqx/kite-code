@@ -26,9 +26,15 @@ TUI、Headless CLI、恢复和 Sub-agent 使用同一失败与降级语义。
 - Runtime 已有 `FailureKind`、`budget_exceeded` 和 effect 上限；
 - shell 有单命令 timeout 和部分 ulimit；
 - 取消使用 AbortSignal 与 process-tree guard；
+- 当前 scheduler 对 effect-safe read batch 使用代码常量 `MAX_PARALLEL_READ_TOOLS=4`，
+  runner 允许 shell sibling 与后续审批重叠；两者尚未接入 production profile 并发硬预算；
+- 当前持久化 Runtime schema 为 v17，turn lifecycle 包含
+  `active/completed/aborted`；
 - 缺少父 Agent + 全部 Sub-agent 的累计 run budget；
 - failure fallback 分散在入口和 provider；
-- 基线测试出现 `MaxListenersExceededWarning` 和 Sub-agent Read PTY 30 秒超时；
+- 初始基线出现 `MaxListenersExceededWarning` 和 Sub-agent Read PTY 30 秒超时；2026-07-30
+  新基线完整 TUI suite 单次通过、未复现 timeout，但 listener warning 仍存在且没有 soak
+  证据；
 - session logger、SQLite、磁盘满和 cancel incomplete 没有统一 terminal projection。
 
 ## 主要改动范围
@@ -48,10 +54,10 @@ TUI、Headless CLI、恢复和 Sub-agent 使用同一失败与降级语义。
 
 | Task | dependsOn | 文件/产出 | 定向验证 | 迁移与回滚 |
 | --- | --- | --- | --- | --- |
-| 1C.1 | `T:0:0.2`、`T:0:0.3`、`D-11:CLOSED` | `src/core/runtime/resource-budget.ts`、budget events/store migration、recovery tests | `bun test tests/runtime/resource-budget.test.ts tests/runtime/resource-budget-recovery.test.ts` | `resourceBudgetV1=false` 时拒绝 production run；不存在描述性 legacy fallback |
-| 1C.2 | 1C.1 | invocation admission/reservation/reconcile integration、concurrency tests | `bun test tests/runtime/resource-budget-admission.test.ts` | 同 flag；Store/admission 不可用时副作用前 hard block |
-| 1C.3 | 1C.1、1C.2 | Abort propagation/process-tree/recovery tests | `bun test tests/runtime/cancel-resume.test.ts` | `boundedCancellationV1=false` 时 production writer/child capability 关闭 |
-| 1C.4 | `T:0:0.3`、1C.1 | failure/events/state/protocol/TUI/CLI golden fixtures | `bun test tests/runtime/failure-taxonomy.test.ts` | `terminalOutcomeV1=false`；production 不允许旧 UI 把 unknown 显示完成 |
+| 1C.1 | `T:0:0.2`、`T:0:0.3`、`D-11:CLOSED` | `src/core/runtime/resource-budget.ts`、budget events/store、v17→next migration/recovery tests；消费 2A.1 注入的 effective limits，不改写 `ReleaseProfileV1` | `bun test tests/runtime/resource-budget.test.ts tests/runtime/resource-budget-recovery.test.ts` | `resourceBudgetV1=false` 时拒绝 production run；不存在描述性 legacy fallback |
+| 1C.2 | 1C.1 | `scheduler.ts`/`runner.ts`/executor admission、`runtime-scheduling-policy.ts`、batch/tool/shell permit 与 saturation tests | `bun test tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts` | 同 flag；Store/admission/policy snapshot 不可用时副作用前 hard block |
+| 1C.3 | 1C.1、1C.2 | Abort propagation/process-tree cleanup/approval-overlap/recovery tests | `bun test tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts` | `boundedCancellationV1=false` 时 production writer/child capability 关闭 |
+| 1C.4 | `T:0:0.3`、1C.1 | failure/events/state/protocol/TUI/CLI golden、v16→v17→next fixtures | `bun test tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts` | `terminalOutcomeV1=false`；production 不允许旧 UI 把 unknown 显示完成 |
 | 1C.5 | 1C.2–1C.4、`T:1A:1A.1`、`T:1B:1B.1` | table-driven failure-mode conformance | `bun test tests/runtime/failure-mode-conformance.test.ts` | fixture 失败阻断相关 capability，不放宽 fallback |
 | 1C.6 | 1C.3、1C.4 | TUI listener/PTY root-cause fix、stability tests | `bun run test:tui:system` 连续运行；`bun test tests/runtime/stability.test.ts` | 不以延长 timeout 回滚；失败关闭相关 Sub-agent flow |
 | 1C.7 | 1C.2–1C.6 | soak/fault runner、resource trend/evidence adapter | `bun test tests/runtime/fault-injection.test.ts`；bounded soak runner | 超阈值停止扩面；保留诊断与 pending intent |
@@ -71,6 +77,9 @@ interface ResourceBudgetV1 {
   maxRunOutputTokens: number;
   maxConcurrentSubagents: number;
   maxConcurrentWriters: number;
+  maxConcurrentToolInvocations: number;
+  maxConcurrentShellInvocations: number;
+  maxConcurrencyWaitMs: number;
   maxArtifactBytes: number;
 }
 
@@ -87,6 +96,8 @@ interface ResourceUsageV1 {
     elapsedRunMs: number;
     activeSubagents: number;
     activeWriters: number;
+    activeToolInvocations: number;
+    activeShellInvocations: number;
   };
   source: 'actual' | 'versioned_upper_bound';
   estimatorVersion?: string;
@@ -105,6 +116,17 @@ interface BudgetReservationV1 {
   actual?: ResourceUsageV1;
   state: BudgetReservationState;
 }
+
+interface ConcurrencyWaiterV1 {
+  version: 1;
+  runId: string;
+  invocationId: string;
+  requiredPermits: ['tool'] | ['tool', 'shell_invocation'];
+  sequence: number;
+  enqueuedAt: string;
+  deadlineAt: string;
+  state: 'waiting' | 'promoted' | 'cancelled' | 'timed_out';
+}
 ```
 
 规则：
@@ -114,7 +136,9 @@ interface BudgetReservationV1 {
 - Provider usage 优先，缺失时用版本化保守 estimator；
 - `versioned_upper_bound` 和实际 usage 分开；
 - 货币预算只有在 currency/pricing version 可验证时才启用；
-- budget schema 属于 Release Profile，但 ledger 属于 Runtime 执行事实；
+- `ResourceBudgetV1` 是 Runtime 对 2A effective Release Profile 中累计预算和 invocation
+  permit 字段的执行投影，ledger 属于 Runtime 执行事实；process-tree limit 不进入该投影，
+  而是由 1B 的 `ExecutionBoundaryV1` 消费和执行；
 - replay 不重复计费已经持久化的 completed invocation。
 - `reservationId` 是 reserve/reconcile/replay 的幂等键；父子 Agent 不建立私有余额；
 - ledger 的 projection 可以重建，但 reservation 和 terminal event 必须 durable；
@@ -124,6 +148,22 @@ interface BudgetReservationV1 {
   `reconciledUsage + Σ(activeReservation.executableUpperBound) <= ResourceBudgetV1`；
 - concurrency gauge 在 reserve transaction 内检查 active + reserved，run duration 由 persisted
   deadline 与 monotonic elapsed 共同限制；
+- scheduler 的 read batch 代码上限 `4` 只是实现 ceiling；有效 tool 并发上限取代码
+  ceiling、Release Profile、管理策略和用户收紧值的最小值。shell overlap 同时受
+  `maxConcurrentToolInvocations` 与 `maxConcurrentShellInvocations` 约束；
+- `run_tools` 的每个成员分别 reserve/reconcile，batch 不能作为一个 invocation 计数。
+  admission 必须按剩余 permit 缩小或拆分 batch，不能让 sibling 同时越过最后余额；
+- 非 shell 工具只申请 `['tool']`；shell 以一个 waiter 申请
+  `['tool', 'shell_invocation']`，同一 sequence 加入两个资源队列，只有同时位于两个队首且
+  两类额度均可用时才在一个 Store transaction 中全量 reserve。禁止部分占用后等待另一
+  permit，取消/超时也必须从全部所需队列原子移除；
+- shell sibling 在后续 sibling 等待 approval 时仍占用 tool/shell permit；只有 terminal
+  event 与 reservation reconcile 同事务提交后才释放；
+- shell permit 的计量单位是顶层 `shell_execute` invocation，不是 OS process。shell、
+  pipeline 和 descendants 的完整 process tree 由 1B 选定的平台 backend 以
+  `ExecutionBoundaryV1.maxProcessTreeSizePerShellInvocation` 强制限制；backend 不能执行时
+  production shell unavailable。process tree 超限记录 `process_limit_exceeded` 并终止
+  完整 tree；
 - model request dispatch 前精确计量 input，设置不高于剩余预算的 `maxOutputTokens`；不能接受
   该上限或无法提供保守 output 上界的 route 不进入 production；
 - artifact/file/tool output 在写入前已知大小时精确 reserve，streaming 时使用会在上界处中止
@@ -158,10 +198,31 @@ interface BudgetReservationV1 {
 4. 明确未 dispatch 的本地失败才释放 reservation；
 5. crash/recovery 遇到 `dispatch_started` 且终态未知时标记 `unknown`，外部调用不退款、不
    自动重放；
-6. 达到上限停止新 invocation，写入结构化 `budget_exhausted` event/receipt；
+6. 累计预算耗尽时停止新 invocation，写入结构化 `budget_exhausted` event/receipt；
 7. Store transaction 或 schema migration 不可用时，在任何副作用前 hard block。
 
-并发场景必须使用原子 reservation，不能让多个 Sub-agent 同时越过最后余额。
+并发场景必须使用原子 reservation，不能让多个 Sub-agent、read batch 成员、MCP
+inventory/resource call 或重叠 shell 同时越过最后余额。先按可用 permit 缩小/拆分 batch，
+剩余调用进入持久化的按资源 FIFO wait queue；不能先 dispatch 后补记账。
+
+并发 admission 语义：
+
+- 等待期限是 `min(enqueuedAt + maxConcurrencyWaitMs, persistedRunDeadline)`，等待可由 run/
+  turn/user cancellation 中断；
+- waiter 只有在全部 required permits 的队列中均为队首且额度同时可用时，才原子转为
+  reservation，再写 `dispatch_started`；不得持有部分 permit；
+- `maxConcurrencyWaitMs` 先到时，等待中的调用产生零副作用，稳定 reason code 为
+  `tool_concurrency_saturated` 或 `shell_concurrency_saturated`；Runtime 有界取消运行中
+  sibling 并以 `resource_saturated` 结束本轮；
+- run deadline 先到仍为 `budget_exhausted`；任何 running sibling/process tree 无法确认退出
+  时升级为 `cancel_incomplete`；
+- queue/recovery 保持 FIFO sequence 与 invocation identity；crash 后不能插队、重复占 permit
+  或自动 dispatch 已终止 turn 的 waiter。
+
+1C 导出唯一 `RuntimeSchedulingPolicyV1` canonical snapshot，内容至少覆盖 parallel-read
+allowlist/ceiling/barrier、shell overlap scope/approval/rejection、按资源 FIFO + compound
+atomic admission 字段和 late-event policy。snapshot 必须从 Runtime 实际配置生成；2A
+release script 只能消费和 hash，不能维护平行常量。
 
 恢复状态矩阵：
 
@@ -186,6 +247,10 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 - process tree 先 graceful、再 bounded terminate；
 - 记录未能确认退出的 descendant；
 - 取消不能产生新的 model/tool invocation；
+- sibling 正在运行而后续 approval 被拒绝/取消时，停止所有尚未 dispatch 的 sibling，对
+  已运行 shell 执行有界清理，并保持 intent/receipt 可 reconciliation；
+- stale lease、已终止 turn 或已释放 reservation 的 late terminal event 只能记入诊断/
+  reconciliation，不能恢复 permit、启动后继调用或改写 durable terminal；
 - `cancel_incomplete` 与普通 `cancelled` 分开；
 - 恢复时处理 pending intent、lease 和 unknown external terminal。
 
@@ -209,17 +274,24 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 - provider/MCP unavailable；
 - persistence unavailable；
 - budget exhausted；
+- resource saturated；
+- shell process limit exceeded（稳定 reason code：`process_limit_exceeded`）；
 - cancel incomplete；
 - compaction unqualified/failed；
 - verification failed/inconclusive；
 - mandatory policy unavailable。
+
+迁移以 schema v17 为当前稳定输入，至少提供 v16→v17 和 v17→next fixtures；验证
+`active/completed/aborted` turn、pending interaction、tool call/result 顺序以及
+ADR-0049/ADR-0050 的调度/客户端投影在 upgrade、feature disable 和 artifact rollback 后
+继续收敛。
 
 要求：
 
 - Runtime 事件保存结构化 kind，不解析 UI 字符串；
 - TUI/CLI 使用同一 mapper；
 - terminal result 包含 known external effects、safe retry、recovery entry、pending verification；
-- `blocked/unknown/budget_exhausted` 不合并为普通结束；
+- `blocked/unknown/budget_exhausted/resource_saturated` 不合并为普通结束；
 - logger/telemetry failure 不能改写 Runtime terminal。
 
 涉及文件：
@@ -241,6 +313,7 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 - MCP discovery/auth/revision/transport；
 - disk full、read-only、SQLite busy/corrupt；
 - budget exhausted；
+- tool/shell permit wait timeout 与 process-tree limit；
 - cancel timeout；
 - compaction failed；
 - Verification failed/inconclusive；
@@ -280,6 +353,10 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 - 完整 `bun run test:tui:system` 连续多次无 warning/timeout；
 - listener、FD、handle、RSS 没有持续正斜率；
 - 孤立与完整 suite 结果一致。
+
+2026-07-30 增量复核的单次完整 suite 已通过，说明原 Sub-agent timeout 不再是当前单次
+必现故障；但 `MaxListenersExceededWarning` 仍存在，且尚未完成连续运行和资源斜率验证，
+因此本 Task 仍是 P0，不能提前关闭。
 
 ### Task 1C.7：soak 与故障注入
 
@@ -321,6 +398,13 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 ## 验收条件
 
 - [ ] 父/子 Agent 共享累计预算；
+- [ ] tool invocation/shell invocation 并发硬上限在 batch、approval overlap 和 Sub-agent
+  间原子生效；
+- [ ] shell invocation cap 与 process-tree cap 在类型/投影中分离，1C 不用顶层计数替代 1B
+  平台 enforcement；
+- [ ] permit 的按资源 FIFO、compound atomic acquire、等待期限/recovery 和
+  `resource_saturated` 终态一致；
+- [ ] `RuntimeSchedulingPolicyV1` 从实际 Runtime 导出并通过 canonical golden；
 - [ ] 所有 invocation admission 覆盖；
 - [ ] budget/cancel 终态不会显示完成；
 - [ ] descendant 有界清理且残留可诊断；
@@ -329,6 +413,7 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 - [ ] 完整 PTY suite 无 warning/timeout；
 - [ ] soak 无 listener/FD/handle/RSS 持续增长；
 - [ ] kill -9/磁盘满/网络抖动 fixture 不损坏 Runtime；
+- [ ] schema v16→v17→next 与 rollback fixture 不重开 aborted/completed turn；
 - [ ] active/book/ADR/map 收敛。
 
 ## 回滚
@@ -355,6 +440,8 @@ profile 拒绝创建 run；开发 profile 可以显式测试旧路径，但不�
 ## 完成证据
 
 - ResourceBudget conformance；
+- scheduling policy snapshot/digest conformance；
+- concurrency saturation 报告，并引用 1B 的 process-tree limit evidence；
 - failure matrix 报告；
 - PTY 连续运行结果；
 - soak/resource 趋势；

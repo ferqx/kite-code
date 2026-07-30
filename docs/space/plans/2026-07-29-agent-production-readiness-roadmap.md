@@ -3,7 +3,8 @@
 状态：draft
 创建：2026-07-29
 优先级：P0
-代码基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
+初始论证基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
+当前执行复核基线：`a316a2df63e511f839d08aa72a20275afa8e3366`（2026-07-30）
 依赖：已批准的
 [`Agent 生产就绪与渐进发布控制 RFC`](../../design/2026-07-29-agent-production-readiness-rfc.md)
 替代：无
@@ -20,6 +21,12 @@
 3. 防止某个子计划局部完成后被错误宣传为整体生产就绪；
 4. 明确哪些工作可以并行、哪些工作必须串行；
 5. 规定计划完成后如何更新 active 文档、ADR、完成记录和发布结论。
+
+2026-07-30 的合并增量不改变 Phase 0–6 顺序、Task ID、`dependsOn` 或 milestone
+producer。它把所有新 execution binding 的最低 `baselineCommit` 前移到
+`a316a2df63e511f839d08aa72a20275afa8e3366`（或经重新复核的后继提交），并把原基线的 live
+结果降为历史证据。新基线新增的 schema v17、工具调度、系统/工具契约和默认测试 runner
+必须进入 1C/2A/2B/3 的实现及 Release Evidence；不得用本说明把尚未完成的 Task 标为完成。
 
 ## 首发支持边界
 
@@ -198,7 +205,9 @@ Task 区间。
 - model-visible Tool Registry digest；
 - default config digest；
 - Provider Data Policy digest；
-- Gate policy 与 build recipe digest；
+- Runtime scheduling policy digest；
+- Gate policy 与 build recipe digest，其中 build recipe 绑定默认测试入口和隔离测试清单；
+- Runtime schema version；
 - task/compaction suite、scorer 和 route identity。
 
 这些字段由 2A 计划提供规范实现。2A 完成前，其他计划可以产出原型报告，但不能形成
@@ -215,6 +224,7 @@ production Release Evidence。
 - `cancelled`；
 - `cancel_incomplete`；
 - `budget_exhausted`；
+- `resource_saturated`；
 - `verification_failed`；
 - `verification_inconclusive`。
 
@@ -231,14 +241,31 @@ production Release Evidence。
 
 1A 提供 schema 和 mapper；2A 把 policy digest 绑定制品；3 只消费无正文 mapper。
 
-### 4. 执行边界
+### 4. 执行与并发边界
 
+- 父/子 Agent 共用 `maxConcurrentToolInvocations` 与
+  `maxConcurrentShellInvocations`，项目、用户和 CLI 只能收紧；
+- parallel read batch 与 shell sibling overlap 中的每个 invocation 分别原子占用预算，
+  scheduler 常量不是 Release Profile；
+- shell invocation permit 只统计顶层调用；每个调用的完整 process tree 另受
+  `maxProcessTreeSizePerShellInvocation` 平台强制上限约束；
+- permit 等待使用有界的按资源 FIFO；shell 的 tool + shell invocation permit 必须同事务
+  全有或全无，不能部分占用；超时是 `resource_saturated`，run deadline 到期仍是
+  `budget_exhausted`，清理不完整为 `cancel_incomplete`；
+- 每个并发网络/MCP 调用独立执行 network boundary、egress permit、revision 和 receipt
+  检查，不能共享前一个 sibling 的允许结果；
+- 取消、审批拒绝或 terminal outcome 后不再启动未 dispatch sibling；运行中 child 有界
+  清理，late event 不改变 durable terminal。
 - `auto` 不替代 sandbox、network、protected path 或 worktree；
 - sandbox/allowlist/worktree controller 不可用时按统一 failure matrix 降级；
 - 后台、并发、定时和委派 writer 不得回退到共享 checkout；
 - push、PR、merge、deploy 等外部边界继续经过既有授权和 Verification。
 
 1B 提供技术边界，1C 提供失败终态，2B 提供 adversarial task 验收。
+
+1C 同时导出唯一的 `RuntimeSchedulingPolicyV1` canonical snapshot；2A 只对实际打包 snapshot
+做 canonical serialize、digest 和 artifact smoke 比对，不复制 scheduler allowlist 或取消
+语义。
 
 ## 里程碑与 Gate
 

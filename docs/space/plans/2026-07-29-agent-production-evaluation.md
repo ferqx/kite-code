@@ -77,7 +77,7 @@ Evaluation 是离线/受控执行面，不新增生产 capability flag；所有 
 | 2B.2 | `T:1B:1B.6`、`T:1C:1C.3`、2B.1 | `tests/evals/agent-tasks/fixtures/`、baseline builder、worktree/artifact collector、cleanup tests | `bun test tests/evals/agent-tasks/fixture-runner.test.ts` | 临时 worktree identity 不匹配时拒绝清理；失败保留诊断后安全清理 |
 | 2B.3 | 2B.1、2B.2 | oracle/diff/check runners、good/bad fixtures | `bun test tests/evals/agent-tasks/oracle.test.ts` | oracle version 变化使旧结果失效 |
 | 2B.4 | 2B.3、`MS:2A-F` | repeated runner、statistics/report schema | `bun test tests/evals/agent-tasks/repeated-run.test.ts` | 报告 append-only；不得只保留最好一次 |
-| 2B.5 | `MS:1A-DONE`、`MS:1B-DONE`、`MS:1C-DONE`、2B.2、2B.3 | adversarial cases、network/sandbox/secret fixtures | `bun test tests/evals/agent-tasks/adversarial.test.ts` | 任一 G0 立即阻断对应 artifact；不能降级 oracle |
+| 2B.5 | `MS:1A-DONE`、`MS:1B-DONE`、`MS:1C-DONE`、2B.2、2B.3 | adversarial cases、network/sandbox/secret/concurrency/ordering fixtures | `bun test tests/evals/agent-tasks/adversarial.test.ts tests/evals/agent-tasks/concurrency-adversarial.test.ts` | 任一 G0 立即阻断对应 artifact；不能降级 oracle |
 | 2B.6 | 2B.2–2B.4 | Plan/tool discovery/recovery cases、UX result mapper | `bun test tests/evals/agent-tasks/plan-recovery.test.ts` | 仅测试资产；失败不改变生产 Runtime |
 | 2B.7 | `T:1A:1A.5`、2B.4 | dogfood consent、blind review form、human result schema | `bun test tests/evals/agent-tasks/human-review.test.ts`；人工流程 rehearsal | 退出后不再收集；正文不进入 release bundle |
 | 2B.8 | 2B.1、2B.3 | suite registry、contamination/change policy | `bun test tests/evals/agent-tasks/suite-registry.test.ts` | suite revision immutable；变更生成新版本 |
@@ -185,6 +185,16 @@ oracle 自身必须单测，并能对预制 good/bad patch 给出预期结果。
 - stale MCP revision；
 - Plan completed 但 Verification 未通过；
 - compaction 约束丢失后的继续执行。
+- 4-way read batch 超过有效 tool 并发预算或把整个 batch 计为一次调用；
+- 按资源 FIFO permit 在期限内释放后按序执行；shell 的 tool + shell permit 不得部分占有
+  或错序晋升；`maxConcurrencyWaitMs` 超时后零 dispatch、`resource_saturated`/稳定
+  reason code 和有界 sibling cleanup；
+- shell invocation 上限不能替代 process-tree 上限；fork/pipeline 超限时完整 tree 被终止且
+  无 orphan descendant；
+- 并发 `web_fetch`/remote MCP sibling 复用 network allow 或 egress permit；
+- shell sibling 已运行、后续 approval 被拒绝/取消时仍启动新调用，或 late result 改写终态；
+- 并发工具完成顺序不同导致 Tool Result 偏离 assistant tool-call 顺序；
+- Plan mode 的 `phase_deferred`/`phase_denied` action 仍被执行。
 
 硬门槛：
 
@@ -201,6 +211,7 @@ oracle 自身必须单测，并能对预制 good/bad patch 给出预期结果。
 - Plan review 后是否仍逐工具授权；
 - Tool Search 召回、漏召回、延迟和错误候选；
 - MCP/Skill discovery/activation 误触发；
+- `ask_user` canonical questions schema、拒绝/取消与恢复是否在 TUI/CLI 一致；
 - model/tool/MCP failure 后恢复成功率；
 - 用户是否理解 blocked/unknown/unverified；
 - diff/review handoff 是否足以决定接受或拒绝。

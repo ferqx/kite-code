@@ -3,7 +3,8 @@
 状态：accepted
 日期：2026-07-29
 批准：2026-07-29
-代码基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
+初始设计基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
+当前实施复核基线：`a316a2df63e511f839d08aa72a20275afa8e3366`（2026-07-30）
 范围：Runtime、内置工具、MCP、Skills、Plan、Verification、上下文压缩、日志、可观测性、发布与回滚
 
 相关：
@@ -24,6 +25,13 @@
 > [`../space/plans/2026-07-29-agent-production-readiness-roadmap.md`](../space/plans/2026-07-29-agent-production-readiness-roadmap.md)
 > 及其子计划；涉及架构决策时新增 ADR，不得改写既有 ADR。计划与 ADR 未完成前，本文仍
 > 不得被当作当前行为依据。
+
+2026-07-30 合并增量复核确认：新基线加入 effect-aware read scheduling、并发 shell/审批
+调度、Runtime schema v17、`ask_user` canonical schema 与隔离默认测试 runner，但没有改变
+本文发布控制面的总体架构、阶段顺序或任务 DAG。实施与 Release Evidence 必须绑定新基线
+或其后继提交；旧基线的 live MCP/真实模型结果只保留为历史论证，不能为新制品放行。
+本次完整 TUI suite 未复现原 Sub-agent read timeout，但仍出现 listener warning，因此只收窄
+了 Task 1C.6 的调查范围，不构成稳定性关闭证据。
 
 ## 一、摘要
 
@@ -450,6 +458,10 @@ interface ReleaseProfileV1 {
     maxRunOutputTokens: number;
     maxConcurrentSubagents: number;
     maxConcurrentWriters: number;
+    maxConcurrentToolInvocations: number;
+    maxConcurrentShellInvocations: number;
+    maxProcessTreeSizePerShellInvocation: number;
+    maxConcurrencyWaitMs: number;
     maxArtifactBytes: number;
   };
 
@@ -488,6 +500,19 @@ interface ReleaseProfileV1 {
 - `full` 同时要求 profile 允许、用户/config 可追溯授权、独立隔离环境和现有 Policy 通过。
 - MCP allowlist 使用本地稳定 provider identity，不使用模型可见别名或远端自然语言名称。
 - 资源预算统计父 Agent 与全部 Sub-agent 的累计消耗；项目、用户和 CLI 只能把上限调低。
+- 调度器内建并发常量只是实现硬上限；实际有效并发取代码上限、Release Profile、管理策略
+  与用户收紧值的最小值。当前 read batch 上限 `4` 不能代替
+  `maxConcurrentToolInvocations`，shell sibling overlap 不能绕过
+  `maxConcurrentShellInvocations`。
+- `run_tools`/并行 batch 只是调度单元，每个成员必须以自己的 invocation ID 原子申请 tool
+  reservation；每个顶层 `shell_execute` invocation 还要独立申请 shell invocation
+  reservation。不能把整个 batch 记为一次调用，也不能在后续 sibling 等待审批时释放仍在
+  运行的 shell reservation。shell 所需的 tool + shell invocation permit 必须在同一事务
+  全有或全无，不能先持有一种 permit 再等待另一种。
+- `maxConcurrentShellInvocations` 只统计顶层 shell 工具调用，不伪装成 OS process 数量。
+  每次调用的 shell、管道和 descendants 构成一个 process tree，由 sandbox backend/cgroup/
+  Job Object/等价强制机制执行 `maxProcessTreeSizePerShellInvocation`；平台无法执行该上限时，
+  production profile 必须关闭 shell，不能只依赖 Runtime 计数。
 - token 使用以 Provider usage 为准；Provider 不返回 usage 时使用版本化的保守估算，并在
   evidence 中标为 `estimated`，不能把估算值宣传为账单金额。
 - 预算 admission 使用可执行上界而不是均值估算：已 reconcile 累计量加所有 active
@@ -496,6 +521,15 @@ interface ReleaseProfileV1 {
   写入前可计算上界或有界 streaming limit admission。
 - 达到任一预算必须停止创建新的 model/tool/sub-agent invocation，执行有界取消并以
   `budget_exhausted` 结束；不得把该终态展示为“已完成”。
+- 并发上限不足时不得先 dispatch 再排队记账；先缩小/拆分 batch，剩余 invocation 进入按
+  资源 FIFO 的可取消队列。需要多种 permit 的 waiter 使用同一 sequence 加入各资源队列，
+  只有同时位于所有所需队列队首且全部额度可用时，才能在同一事务原子晋升；不允许部分
+  reservation。等待期限取 `maxConcurrencyWaitMs` 与 run deadline 的较早者；permit 到期前
+  可用则继续，等待超时且 run deadline 尚未到达时以
+  `resource_saturated(tool_concurrency_saturated|shell_concurrency_saturated)` 结束本轮，
+  未 dispatch sibling 保持零副作用并有界取消运行中 sibling；若 run deadline 先到则仍为
+  `budget_exhausted`，清理失败升级为 `cancel_incomplete`。迟到 terminal event 不得恢复已
+  释放 permit 或改写终态。
 - production profile 强制要求 durable resource budget；关闭 budget implementation 必须
   拒绝 production run，不能描述成“较严格 legacy fallback”而没有实际实现和 conformance。
 - 若未来增加货币成本上限，必须同时绑定 currency、pricing source/version 和更新时间；
@@ -683,6 +717,7 @@ interface ReleaseManifestV1 {
   defaultConfigDigest: string;
   providerDataPolicyDigest: string;
   releaseGatePolicyDigest: string;
+  runtimeSchedulingPolicyDigest: string;
   buildRecipeDigest: string;
   runtimeSchemaVersion: number;
   supportedPlatforms: string[];
@@ -690,13 +725,53 @@ interface ReleaseManifestV1 {
 }
 ```
 
+`runtimeSchedulingPolicyDigest` 的规范输入不是任意源码文件或手工版本号，而是 Runtime
+根据实际打包配置导出的 canonical snapshot：
+
+```typescript
+interface RuntimeSchedulingPolicyV1 {
+  version: 1;
+  parallelRead: {
+    toolNames: string[];
+    maxBatchSize: number;
+    requiresReadOnlyClassification: true;
+    requiresApprovalFree: true;
+    barrierKinds: Array<
+      'interaction' | 'write' | 'unknown_effect' | 'approval_required' | 'dynamic_capability'
+    >;
+  };
+  shellOverlap: {
+    scope: 'same_task_and_model_message';
+    approval: 'per_invocation';
+    rejection: 'abort_turn';
+  };
+  concurrencyAdmission: {
+    queue: 'per_resource_fifo';
+    compoundAcquire: 'atomic_all_or_none';
+    toolLimitField: 'maxConcurrentToolInvocations';
+    shellLimitField: 'maxConcurrentShellInvocations';
+    waitLimitField: 'maxConcurrencyWaitMs';
+    timeoutTerminal: 'resource_saturated';
+  };
+  lateEventPolicy: 'reject_stale_lease_or_terminal_turn';
+}
+```
+
+该 snapshot 由 1C 的 Runtime owner 生成并随 payload 打包，2A 只负责 canonical serialize、
+hash 和 manifest/evidence 校验。tool allowlist、barrier、overlap、admission 或 late-event
+实现发生语义变化时必须先更新 snapshot/schema；artifact smoke 从实际 Runtime 重新导出并
+比对，禁止由 release script 复制一份平行配置。未知 schema/value 对 production fail closed。
+
 构建时间不能参与 capability revision 或 Runtime replay，只用于制品身份和诊断。
 `payloadSha256` 只覆盖 manifest 之外的 immutable payload bytes；启动器先验证 detached
 manifest schema/signature，再按该字段验证 payload，最后才允许加载 production profile。
 上述 digest 必须基于规范化、实际打包或运行时解析后的内容生成，而不是只 hash 源目录。
-`agentContractDigest` 覆盖系统行为契约和压缩 prompt/policy；tool registry digest 覆盖模型
-实际可见的工具名、schema 和内置 Skill contract；default config digest 覆盖会影响行为的
-默认 flag、预算和权限；provider data policy digest 覆盖制品内建 route 的数据治理快照。
+`agentContractDigest` 覆盖系统 prompt、`ask_user` canonical contract 和压缩
+prompt/policy；tool registry digest 覆盖模型实际可见的工具名、schema、effect 分类和内置
+Skill contract；default config digest 覆盖会影响行为的默认 flag、预算和权限；
+`runtimeSchedulingPolicyDigest` 覆盖上述 Runtime 导出的 canonical snapshot；provider data
+policy digest 覆盖制品内建 route 的数据治理快照。`buildRecipeDigest` 还必须覆盖
+`package.json` 的默认测试入口及实际打包的 `scripts/run-default-tests.ts`/隔离测试清单。
 任何一项变化都产生新的 evidence identity，不能沿用上一制品的真实模型、任务评估或 gate
 结果。
 
@@ -712,12 +787,15 @@ Evidence 是 CI 产物，不提交包含用户内容的原始日志。至少包�
 - lint warning budget；
 - dependency audit、license、SBOM 和 artifact provenance；
 - 真实 MCP/provider route 的测试日期与匿名 route identity；
-- 与 manifest 一致的 agent contract、tool registry、default config 和 gate policy digest；
+- 与 manifest 一致的 agent contract、tool registry、default config、Runtime scheduling
+  policy 和 gate policy digest；
 - provider data policy snapshot/digest、route 审批和 privacy conformance；
 - 版本化 Agent task suite、oracle/scorer 与运行配置 digest；
 - compaction case suite、semantic rubric、continuation policy 与 route qualification digest；
 - soak/performance/resource 报告；
-- 资源预算和统一 failure-mode matrix 的 conformance 报告；
+- 资源预算、tool/shell invocation permit/saturation、process-tree enforcement、
+  batch/cancel/late-event 与统一 failure-mode matrix 的 conformance 报告；
+- Runtime schema、系统/工具契约、调度策略和实际默认测试 runner 的 identity；
 - 未关闭风险和批准的有限例外；
 - canary SLO 观察窗口和样本量。
 
@@ -1300,6 +1378,12 @@ Release manifest 声明 Runtime schema。涉及新 schema 的实施计划必须�
 - migration 失败的 fail-closed 隔离；
 - 新版本禁用 feature 后对已有状态的继续收敛。
 
+当前实施复核基线是 Runtime schema v17，已持久化 turn lifecycle
+`active/completed/aborted`。Phase 1C/2A 的首批 fixture 至少覆盖 v16→v17，以及 v17→本次
+实施引入的新 schema；并验证 ADR-0049/ADR-0050 所约束的调度、取消和客户端投影语义。
+artifact/profile rollback 不得重新打开已 `aborted`/`completed` turn、丢失 pending
+interaction，或把 late tool terminal 重新投影为 active。
+
 不允许仅因为“当前还没有正式用户”而跳过发布后的兼容设计。
 
 ### 17.4 失败与降级矩阵
@@ -1318,6 +1402,8 @@ Release manifest 声明 Runtime schema。涉及新 schema 的实施计划必须�
 | MCP/Skill discovery、auth、revision 或 transport 失败 | 只关闭受影响 binding；必要步骤进入 blocked/recovery | 搜索旧 adapter、猜工具名或绕过 Policy |
 | intent/receipt/checkpoint 因磁盘满、SQLite 或权限错误无法持久化 | 在新副作用前 hard block；允许安全的只读诊断/导出 | 先执行副作用再补记录 |
 | 预算耗尽或取消超时 | 停止新 invocation、有界取消、记录 `budget_exhausted`/`cancel_incomplete` | 继续生成、遗留无 owner 进程或报告成功 |
+| 并发 permit 等待超时 | 不 dispatch 等待中的调用；有界取消运行中 sibling；记录 `resource_saturated` 和 tool/shell 稳定 reason code | 无限等待、把临时饱和记为累计预算耗尽、或在 permit 前执行 |
+| shell process tree 超限 | 由平台强制终止完整 tree，记录 `process_limit_exceeded`，本轮为 `budget_exhausted`；无法确认清理则 `cancel_incomplete` | 只停止父 shell、遗留 descendants 或把顶层 invocation 数冒充实际 process 限制 |
 | compaction 不合格、失败或 route 未获资格 | 保留原 transcript；关闭本次压缩；提供新 session handoff | 写入候选 checkpoint 或 silent `/clear` |
 | Verification failed/inconclusive | 保留 required 状态并显示未验证/失败 | 因 Agent final、rollback 或 capability 关闭而变成完成 |
 | metadata logger/可选 telemetry 失败 | 禁用对应诊断通道、计本地有界错误，主循环按安全边界继续 | 写入不安全路径、改记正文或阻塞 Runtime |
@@ -1326,7 +1412,7 @@ Release manifest 声明 Runtime schema。涉及新 schema 的实施计划必须�
 
 所有 terminal/degraded 结果都必须包含稳定 reason code、已知外部副作用、可安全重试与否、
 恢复入口和未完成验证；用户可见文案不能把 `blocked`、`unknown`、`cancel_incomplete` 或
-`budget_exhausted` 合并为普通“结束”。
+`budget_exhausted`、`resource_saturated` 合并为普通“结束”。
 
 ## 十八、安全威胁模型
 
@@ -1360,7 +1446,8 @@ Release manifest 声明 Runtime schema。涉及新 schema 的实施计划必须�
 | `src/core/config/release-profile.ts` | profile schema、maturity/rollout 正交模型、按字段单调组合、资源预算和 effective capability 计算 |
 | `src/core/config/execution-boundary.ts` | filesystem/network/protected path/sandbox fallback 的平台无关策略 |
 | `src/core/config/provider-data-policy.ts` | route identity、数据分类、内容外发上限和 policy digest |
-| `src/core/runtime/resource-budget.ts` | 父/子 Agent 累计预算、取消和稳定 terminal reason |
+| `src/core/runtime/resource-budget.ts` | 父/子 Agent 累计预算、并发 permit、取消和稳定 terminal reason |
+| `src/core/runtime/runtime-scheduling-policy.ts` | 导出 `RuntimeSchedulingPolicyV1` canonical snapshot；不得由 release script 平行定义 |
 | `src/core/observability/` | 无正文结构化 metric 类型、reporter 接口和 allowlist serializer |
 | `src/core/session-logger/` | logging mode、权限、rotation、retention、metadata mapper |
 | `src/app/cli/`、`src/app/tui/` composition root | 加载 embedded profile/rollout，注入 effective config/reporter |
@@ -1490,7 +1577,8 @@ RFC 批准后至少评估：
 7. sandbox/network/protected path 与 worktree/branch 的执行隔离边界；
 8. Code Agent task/diff/test/review 作为产品验收主结果。
 9. 首发本地单用户部署形态及 hosted/multi-tenant 另行准入的支持边界；
-10. 父子 Agent 累计资源预算、有界取消和统一 failure-mode terminal 语义。
+10. 父子 Agent 累计资源预算、tool/shell invocation permit、process-tree 上限、有界取消和
+    统一 failure-mode terminal 语义。
 11. 模型 Provider/远程 MCP 的数据分类、接收方独立 consent 与 route data policy 资格。
 
 若既有 ADR 已覆盖其中部分，只新增补充或替代 ADR，不改写历史结论。

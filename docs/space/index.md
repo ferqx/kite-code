@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-07-29（登记 Agent 生产就绪 Phase 0–6 实施计划组）
+最后更新：2026-07-30（补充 Agent 生产就绪合并增量复核）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -82,7 +82,7 @@
 | `understanding/2026-06-10-shell-concurrent-execution-design.md` | understanding | Shell 工具并发执行 + 批量审批流程 |
 | `understanding/2026-06-28-thought-pre-consolidation-design.md` | understanding | Thought 预整合设计 — 探索工具合并为 tool_summary、ToolSummaryBlock 三态渲染、explorationSummaryIds 映射、与 SubAgentBlock 对齐。 |
 | `understanding/2026-06-27-osc4-bold-bright-slot.md` | understanding | OSC 4 高亮调色槽发现：终端 bold 文本使用 slot 8-15，OSC 4 需同时重编程基础槽和高亮槽才能让 bold+color 文本跟随主题 |
-| `understanding/2026-07-29-agent-production-feasibility.md` | understanding | 基于源码、默认 feature flags、确定性测试、PTY、本地/公网 MCP 和真实模型压缩实验，给出内部试用、受限灰度与全功能 GA 的可行性结论，并路由至生产就绪 RFC。 |
+| `understanding/2026-07-29-agent-production-feasibility.md` | understanding | 基于源码、默认 feature flags、确定性测试、PTY、本地/公网 MCP 和真实模型压缩实验，给出内部试用、受限灰度与全功能 GA 的可行性结论；并包含 `a316a2d` 合并增量的调度/schema/测试证据复核，路由至生产就绪 RFC。 |
 
 ## Backlog（工作待办）
 

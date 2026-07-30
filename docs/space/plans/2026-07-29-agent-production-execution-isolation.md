@@ -50,16 +50,16 @@
 
 | Task | dependsOn | 文件/产出 | 定向验证 | 迁移与回滚 |
 | --- | --- | --- | --- | --- |
-| 1B.0 | `T:0:0.1`、`T:0:0.2`、`D-04:CLOSED`、`D-08:CLOSED`、`D-09:CLOSED` | `docs/adr/` 隔离 ADR、`scripts/release/platform-capability-probe.ts`、support matrix、`tests/sandbox/platform-capability-probe.test.ts` | `bun test tests/sandbox/platform-capability-probe.test.ts`；每个声明支持组合运行 native deny/allow probe | 仅调查/ADR；不可行平台明确 verified in-process read-only 或排除 |
+| 1B.0 | `T:0:0.1`、`T:0:0.2`、`D-04:CLOSED`、`D-08:CLOSED`、`D-09:CLOSED` | `docs/adr/` 隔离 ADR、`scripts/release/platform-capability-probe.ts`、filesystem/network/process-tree support matrix、`tests/sandbox/platform-capability-probe.test.ts` | `bun test tests/sandbox/platform-capability-probe.test.ts`；每个声明支持组合运行 native deny/allow/process probe | 仅调查/ADR；不可行平台明确 verified in-process read-only 或排除 |
 | 1B.1 | 1B.0、`T:0:0.3` | `src/core/sandbox/types.ts`、`src/core/config/execution-boundary.ts`、`src/core/types.ts`、`tests/sandbox/execution-boundary.test.ts` | `bun test tests/sandbox/execution-boundary.test.ts` | `executionBoundaryV1=false` 时 production 禁止进程型/写能力；不得用审批恢复 |
-| 1B.2 | 1B.0、1B.1 | `src/core/sandbox/profile.ts`、`executor.ts`、`shell-wrapper.ts`、真实 sandbox tests | `bun test tests/sandbox.test.ts tests/sandbox-runtime.test.ts`；macOS native smoke | production 不回退裸 shell；失败关闭 macOS process/write capability |
-| 1B.3 | 1B.0、1B.1 | `src/core/sandbox/bwrap.ts`、Windows backend/projection、platform tests | `bun test tests/sandbox/platform-backends.test.ts`；声明支持平台 native smoke | unsupported 不伪装 sandbox；仅 verified in-process read-only 或平台排除 |
-| 1B.4 | 1B.0、1B.1 | `src/core/sandbox/network-policy.ts`、`network-enforcer.ts`、`executor.ts`、`process-tree.ts`、DNS/redirect tests | `bun test tests/sandbox/network-boundary.test.ts`；child bypass native smoke | `networkBoundaryV1=false`；production 回滚为 network=off |
+| 1B.2 | 1B.0、1B.1 | `src/core/sandbox/profile.ts`、`executor.ts`、`shell-wrapper.ts`、macOS process-tree limit 与真实 sandbox tests | `bun test tests/sandbox.test.ts tests/sandbox-runtime.test.ts tests/sandbox/process-tree-limit.test.ts`；macOS native smoke | production 不回退裸 shell；失败关闭 macOS process/write capability |
+| 1B.3 | 1B.0、1B.1 | `src/core/sandbox/bwrap.ts`、Windows backend/projection、platform/process-tree tests | `bun test tests/sandbox/platform-backends.test.ts tests/sandbox/process-tree-limit.test.ts`；声明支持平台 native smoke | unsupported 不伪装 sandbox；仅 verified in-process read-only 或平台排除 |
+| 1B.4 | 1B.0、1B.1 | `src/core/sandbox/network-policy.ts`、`network-enforcer.ts`、`executor.ts`、`process-tree.ts`、DNS/redirect/concurrent-call tests | `bun test tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`；child bypass native smoke | `networkBoundaryV1=false`；production 回滚为 network=off |
 | 1B.5 | 1B.1–1B.4 | shared protected-path policy、registry/harness integration tests | `bun test tests/policies/protected-path.test.ts` | 跟随 `executionBoundaryV1`；production 缺 gate 时拒绝写 |
 | 1B.6 | 1B.1、1B.5、`D-09:CLOSED` | `src/app/workspace/worktree-controller.ts`、`change-handoff.ts`、真实 Git repo E2E | `bun test tests/workspace/worktree-controller.test.ts` | `worktreeControllerV1=false`；后台/并发 writer 随之关闭 |
 | 1B.7 | 1B.1、1B.4–1B.6 | `src/app/release/execution-status.ts`、CLI/TUI composition/status、`tests/sandbox/status-projection.test.ts`、TUI scenario | `bun test tests/sandbox/status-projection.test.ts tests/tui-system/scenarios/sandbox-mode.test.ts` | 状态 UI 可回退，但 production admission 不可绕过 |
-| 1B.8 | 1B.1、1B.4、1B.5、`T:1A:1A.6` | `src/core/mcp/supervisor.ts`、`manager.ts`、`runtime-provider.ts`、`src/app/tui/hooks/useMcpController.ts`、transport boundary tests | `bun test tests/mcp-supervisor.test.ts tests/mcp-manager.test.ts tests/mcp-transport-boundary.test.ts` | conformance 前 limited 排除 local stdio MCP；HTTP MCP enforcement 不可回退为环境代理 |
-| 1B.9 | 1B.2–1B.8、`T:2A:2A.0` | `scripts/release/execution-boundary-smoke.ts`、platform/adversarial matrix、artifact workflows；唯一产生 `MS:1B-DONE` | `bun run release:smoke`；声明支持组合 native conformance | 任一 bypass 关闭对应 platform/capability |
+| 1B.8 | 1B.1、1B.4、1B.5、`T:1A:1A.6` | `src/core/mcp/supervisor.ts`、`manager.ts`、`runtime-provider.ts`、`src/app/tui/hooks/useMcpController.ts`、transport boundary/concurrency tests | `bun test tests/mcp-supervisor.test.ts tests/mcp-manager.test.ts tests/mcp-transport-boundary.test.ts tests/mcp-transport-boundary-concurrency.test.ts` | conformance 前 limited 排除 local stdio MCP；HTTP MCP enforcement 不可回退为环境代理 |
+| 1B.9 | 1B.2–1B.8、`T:2A:2A.0` | `scripts/release/execution-boundary-smoke.ts`、platform/adversarial/parallel-batch matrix、artifact workflows；唯一产生 `MS:1B-DONE` | `bun run release:smoke`；声明支持组合 native conformance | 任一 bypass 关闭对应 platform/capability |
 
 ### Task 1B.0：平台 backend 可行性与支持矩阵
 
@@ -69,6 +69,9 @@
   能力矩阵；
 - macOS Seatbelt、Linux bubblewrap/network namespace、Windows 候选 backend 的真实探针；
 - shell、Skill、local stdio MCP child/descendant 是否继承边界；
+- 每个平台是否能对单个 shell invocation 的完整 process tree 强制数量上限，并在 kill 后
+  确认无残留 descendant；只能报告 `enforced` 或 `unsupported`，不能用顶层 invocation
+  计数替代；
 - 每个平台结论只能是 `supported`、`read_only_only` 或 `excluded`；
 - allowlist backend 不可行时允许 `network=off`，但不得以 proxy environment 变量作为无旁路
   技术边界；
@@ -90,6 +93,7 @@ interface ExecutionBoundaryV1 {
   networkAllowlist: string[];
   allowLocalAndPrivateNetwork: false;
   protectedPathPolicy: 'deny' | 'prompt';
+  maxProcessTreeSizePerShellInvocation: number;
   sandboxRequired: boolean;
   sandboxUnavailable: 'fail' | 'verified_in_process_read_only';
 }
@@ -102,6 +106,9 @@ interface ExecutionBoundaryV1 {
 - allowlist 取交集；
 - App 可以把边界注入 Core，Core 不导入 TUI 类型；
 - backend 声明其实际强度，不使用单一 `sandboxAvailable: boolean` 掩盖差异。
+- `maxProcessTreeSizePerShellInvocation` 来自 effective Release Profile，只能收紧；它限制
+  shell、pipeline 与 descendants 的完整 process tree，不限制顶层 shell invocation 数。
+  后者由 1C 的 `maxConcurrentShellInvocations` permit 管理；
 - `verified_in_process_read_only` 不是审批降级：它只暴露 conformance allowlist 中不创建
   process、不能访问 Workspace 外路径的进程内只读工具，强制 network off；
 - flag 关闭、backend 缺失或 fallback 未通过 conformance 时，production run 在 composition
@@ -140,6 +147,8 @@ interface ExecutionBoundaryV1 {
 - 拒绝 protected path；
 - symlink 指向 Workspace 外被拒；
 - tool、shell 和 Skill 子进程继承同一边界；
+- 超过 process-tree 上限时完整 tree 被平台强制终止，产生稳定
+  `process_limit_exceeded`，无 orphan descendant；
 - 测试直接检查真实 `sandbox-exec` 行为，不只 snapshot profile 文本。
 
 无法在目标 macOS 版本实现真实 `workspace_write` 时，该平台的 `auto` 保持 off，不得降低门槛。
@@ -151,12 +160,15 @@ Linux：
 - 校验 bubblewrap 只读系统 bind、Workspace rw bind 和 network namespace；
 - seccomp 缺失时报告实际强度，不伪装完整；
 - runtime temp 和必要 socket 显式 allow。
+- 使用 cgroup/pids controller 或已接受的等价 backend 强制 process-tree 上限；不可用时
+  该平台 production shell unsupported。
 
 Windows：
 
 - 只实现 Task 1B.0 已接受的 backend outcome；
 - 没有等价技术隔离时 limited profile 只允许 verified in-process Workspace-bound read-only
   工具，关闭 shell/Skill child/stdio MCP/writer，或暂不列为支持平台；
+- 若 Job Object/已接受 backend 不能强制 process-tree 上限，同样关闭 production shell；
 - 不能把路径字符串检查表述为 sandbox。
 
 验证：
@@ -175,6 +187,11 @@ Windows：
 - 拒绝 loopback、link-local、private、metadata endpoint；
 - 拒绝 IP literal/编码绕过和 DNS rebinding；
 - shell/Skill/MCP child 与 descendants 无代理旁路；
+- 同一 turn 的并发 `web_fetch`、shell、remote MCP inventory/resource/tool call 必须逐
+  invocation 执行 DNS、redirect、endpoint revision 与 network admission；不能复用同 batch
+  中首个 sibling 的 allow 结果；
+- 一个 sibling 的 denial/controller failure 不得放行、重写或取消其他 sibling 已持久化的
+  独立边界决定；
 - 只按 host 执行时不宣传 URL path 隔离；
 - 无法执行 allowlist 时自动收紧为 `off`，不能回退 `allow_all`。
 
@@ -193,6 +210,8 @@ Windows：
 - allowlisted host redirect 到 private IP 失败；
 - DNS 首次 public、后续 private 失败；
 - child process 清除 proxy env 后仍不能旁路；
+- 4-way 并发 read/network batch 中每个 destination 独立判定，private/redirect/rebinding
+  sibling 收到零请求且 public sibling 的 receipt 不被串用；
 - network controller crash 后任务得到 typed unavailable。
 
 ### Task 1B.5：protected path 统一求值
@@ -270,6 +289,9 @@ Runtime/MCP/Skill 前失败。
 - remote HTTP transport 的 DNS、redirect、private destination 和 endpoint revision 进入
   network enforcer；环境 proxy 变量不是权威边界；
 - remote server 端执行仍标记为 unsandboxed remote effect，并继续经过 1A.6 egress permit；
+- 并发 local/remote MCP 调用分别绑定 Workspace/run boundary revision、endpoint/tool
+  revision、network decision 和 invocation receipt；transport pool 不得把一次 admission
+  缓存成 sibling 的通行证；
 - 本任务 conformance 通过前，首个 limited profile 排除 local stdio MCP；没有强制 endpoint
   enforcement 的 remote HTTP MCP 同样不进入 allowlist。
 
@@ -294,6 +316,8 @@ Runtime/MCP/Skill 前失败。
 - local stdio MCP child；
 - symlink/path traversal；
 - DNS/redirect/child bypass；
+- parallel read/network/MCP batch 的逐调用隔离、permit/revision 串用和部分失败；
+- process-tree 超限、完整清理和 orphan detection；
 - sandbox missing；
 - worktree collision/cleanup。
 
@@ -314,6 +338,7 @@ Runtime/MCP/Skill 前失败。
 - [ ] TUI/CLI 显示实际边界；
 - [ ] 三平台 artifact conformance 有明确通过/不支持结果；
 - [ ] local stdio/remote HTTP MCP transport 使用同一有效 boundary revision；
+- [ ] production shell 平台强制 process-tree 上限，不能执行的平台明确 unsupported；
 - [ ] active/book/ADR/map 与实现同步。
 
 ## 回滚
@@ -341,6 +366,7 @@ Runtime/MCP/Skill 前失败。
 
 - 三平台 backend 支持矩阵；
 - 真实文件/network adversarial 报告；
+- process-tree limit 与 orphan cleanup native 报告；
 - worktree 并发/失败/cleanup E2E；
 - TUI/CLI 状态截图或 snapshot；
 - limited profile 的 effective boundary；
