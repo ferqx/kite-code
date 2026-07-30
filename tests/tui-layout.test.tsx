@@ -1654,7 +1654,7 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('├─ Read');
   });
 
-  test('awaiting-terminal Thought shows complete reasoning once without an active dot', () => {
+  test('awaiting-terminal Thought collapses details as soon as answer text starts', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1669,7 +1669,16 @@ describe('BlockRenderer', () => {
       summaryLine: 'thinking',
       hasThought: true,
       hasThinking: true,
-      tools: [],
+      tools: [
+        {
+          callId: 'read-1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          status: 'done',
+          ok: true,
+          summary: 'Read App.tsx',
+        },
+      ],
     } as Extract<OutputBlock, { kind: 'tool_summary' }>;
     const { lastFrame } = render(
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
@@ -1677,11 +1686,12 @@ describe('BlockRenderer', () => {
 
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Thought for 1s');
-    expect(frame).toContain('the complete reasoning stream appears atomically');
+    expect(frame).not.toContain('the complete reasoning stream appears atomically');
+    expect(frame).not.toContain('Read App.tsx');
     expect(frame).not.toContain('●');
   });
 
-  test('Thought activity window shows only the latest five reasoning lines', () => {
+  test('Thought activity window shows the first five reasoning lines and an ellipsis', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1702,10 +1712,52 @@ describe('BlockRenderer', () => {
         <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
       ).lastFrame() ?? '';
 
-    expect(frame).not.toContain('reason one');
-    for (const line of ['two', 'three', 'four', 'five', 'six']) {
+    for (const line of ['one', 'two', 'three', 'four', 'five']) {
       expect(frame).toContain(`reason ${line}`);
     }
+    expect(frame).not.toContain('reason six');
+    expect(frame).toContain('...');
+  });
+
+  test('Thought activity window removes blank lines before taking the head', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: {
+        kind: 'thinking',
+        text: [
+          'kept first line',
+          '',
+          '   ',
+          'kept second line   ',
+          '',
+          'kept third line',
+          'kept fourth line',
+          '',
+          'kept fifth line',
+          'discarded sixth line',
+          '',
+        ].join('\n'),
+      },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      tools: [],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const frame =
+      render(
+        <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    for (const line of ['first', 'second', 'third', 'fourth', 'fifth']) {
+      expect(frame).toContain(`kept ${line} line`);
+    }
+    expect(frame).not.toContain('discarded sixth line');
+    expect(frame).toContain('...');
+    expect(frame).not.toMatch(/\n\s*\n/u);
   });
 
   test('latest tool activity replaces the reasoning window', () => {

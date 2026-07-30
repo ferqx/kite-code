@@ -238,13 +238,24 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   const skipped = Math.max(0, stepCount - MAX_VISIBLE_STEPS);
   const hasSkipped = skipped > 0;
   const thinkingText =
-    (isRunning || block.responsePending === true) && block.latestActivity?.kind === 'thinking'
-      ? block.latestActivity.text
-      : undefined;
+    isRunning && block.latestActivity?.kind === 'thinking' ? block.latestActivity.text : undefined;
   const thinkingLines = useMemo(() => {
     if (!thinkingText?.trim()) return [];
-    const wrapped = wrapDisplayLines(thinkingText.trim(), Math.max(1, col - 6));
-    return wrapped.length > MAX_VISIBLE_STEPS ? wrapped.slice(-MAX_VISIBLE_STEPS) : wrapped;
+    // Reasoning payloads commonly contain paragraph separators and trailing
+    // newlines. They should not consume slots in the compact activity window.
+    // Normalize each source line before wrapping, then keep the visual head
+    // with an explicit truncation marker.
+    const compactText = thinkingText
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .join('\n');
+    const wrapped = wrapDisplayLines(compactText, Math.max(1, col - 6)).filter(
+      (line) => line.trim().length > 0,
+    );
+    return wrapped.length > MAX_VISIBLE_STEPS
+      ? [...wrapped.slice(0, MAX_VISIBLE_STEPS), '...']
+      : wrapped;
   }, [col, thinkingText]);
   const showsThinking = thinkingLines.length > 0;
   // ── Summary label ──
@@ -296,7 +307,11 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   // stateful rows (running blink / tool outcome colors); a settled pure
   // thought carries no status. Two leading spaces keep the label aligned
   // with tool-block names. Placed after all hooks (rules-of-hooks).
-  if (!isRunning && block.responsePending !== true) {
+  // `responsePending` keeps the block mutable until the terminal model event,
+  // but it is not a visual expansion state. The first visible text event has
+  // already ended the Thought from the user's perspective, so collapse its
+  // reasoning/tool details immediately while retaining terminal ownership.
+  if (!isRunning) {
     return (
       <Box flexDirection="column">
         <Box>
