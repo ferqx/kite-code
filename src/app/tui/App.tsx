@@ -162,7 +162,9 @@ export default function App({
 
   const interruptBlock = useMemo(() => {
     if (!state.interrupt) return undefined;
-    if (state.interrupt.kind === 'plan_review') return undefined; // plan_review 数据从 interrupt.plan 读取
+    if (state.interrupt.kind === 'plan_review' || state.interrupt.kind === 'approval') {
+      return undefined;
+    }
     const blockId = state.interrupt.blockId;
     for (const turn of state.turns) {
       const found = turn.blocks.find((b) => b.id === blockId);
@@ -173,17 +175,28 @@ export default function App({
 
   const awaitingApproval = state.interrupt?.kind === 'approval';
   const awaitingInput = state.interrupt?.kind === 'input';
+  const activeApproval = useMemo(() => {
+    if (state.interrupt?.kind !== 'approval') return undefined;
+    if (state.interrupt.approval) return state.interrupt.approval;
+    const blockId = state.interrupt.blockId;
+    if (blockId == null) return undefined;
+    for (const turn of state.turns) {
+      const block = turn.blocks.find((candidate) => candidate.id === blockId);
+      if (block?.kind === 'approval' && !block.resolved) return block.approval;
+    }
+    return undefined;
+  }, [state.interrupt, state.turns]);
 
   const resolveApproval = useCallback(
     (action: string, grant?: string) => {
-      if (!interruptBlock) return;
+      if (state.interrupt?.kind !== 'approval') return;
       dispatch({
         type: 'RESOLVE_INTERRUPT',
-        blockId: interruptBlock.id,
+        blockId: state.interrupt.blockId,
         resolution: { action, grant },
       });
     },
-    [dispatch, interruptBlock],
+    [dispatch, state.interrupt],
   );
 
   const resolveInput = useCallback(
@@ -272,9 +285,9 @@ export default function App({
       >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}
         {!state.interrupt && children}
-        {interruptBlock?.kind === 'approval' && !interruptBlock.resolved && (
+        {activeApproval && (
           <ApprovalBlock
-            approval={interruptBlock.approval}
+            approval={activeApproval}
             provider={provider}
             onResolved={resolveApproval}
           />

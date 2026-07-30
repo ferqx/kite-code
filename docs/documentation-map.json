@@ -16,7 +16,8 @@
         "docs/adr/0042-file-tool-semantics-and-write-safety.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
         "docs/adr/0045-streaming-render-complete-block-commit.md",
-        "docs/adr/0048-durable-user-turn-cancellation.md"
+        "docs/adr/0048-durable-user-turn-cancellation.md",
+        "docs/adr/0049-effect-aware-read-scheduling.md"
       ]
     },
     {
@@ -108,7 +109,8 @@
         "docs/adr/0042-file-tool-semantics-and-write-safety.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
-        "docs/book/05-工具系统与安全策略.md"
+        "docs/book/05-工具系统与安全策略.md",
+        "docs/adr/0049-effect-aware-read-scheduling.md"
       ]
     },
     {
@@ -146,6 +148,8 @@
       "sources": [
         "tests/e2e/live/**",
         "tests/test-discovery.test.ts",
+        "scripts/run-default-tests.ts",
+        "package.json",
         ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
       "documents": [
@@ -201,12 +205,14 @@
         "docs/active/authorization.md",
         "docs/active/mcp-control-plane.md",
         "docs/active/workspace-trust.md",
+        "docs/active/cancel-resume-cleanup.md",
         "docs/active/thought-pre-consolidation.md",
         "docs/active/tui-run-status-bar.md",
-        "docs/active/thought-pre-consolidation.md",
         "docs/book/07-TUI结构.md",
         "docs/book/08-TUI交互全景.md",
-        "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
+        "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
+        "docs/adr/0049-effect-aware-read-scheduling.md",
+        "docs/adr/0050-client-specific-session-navigation.md"
       ]
     },
     {

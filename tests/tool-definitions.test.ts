@@ -6,6 +6,7 @@ import { exposedMcpToolName } from '../src/core/mcp';
 import { isReadOnlyShellCommand } from '../src/core/policies/shell-classification';
 import { clearToolCache, createAgentTools } from '../src/core/tools/definitions';
 import { builtinToolRegistry } from '../src/core/tools/registry/builtins';
+import { askUserSpec } from '../src/core/tools/registry/builtins/ask-user';
 import { searchContentSpec } from '../src/core/tools/registry/builtins/search-content';
 import { searchFilesSpec } from '../src/core/tools/registry/builtins/search-files';
 import { writePlanSpec } from '../src/core/tools/registry/builtins/write-plan';
@@ -168,18 +169,77 @@ describe('code agent tool definitions', () => {
     ).toBe(true);
   });
 
-  test('ask_user accepts batch questions without a duplicate top-level question', async () => {
+  test('ask_user exposes one canonical questions-only model schema', async () => {
     const tools = createAgentTools({ workspace: '/tmp' });
     const schema = (tools.ask_user as any).inputSchema;
+    const validQuestion = {
+      question: 'What scope should be covered?',
+      options: [
+        { label: 'Focused', description: 'Cover only the critical path.' },
+        { label: 'Complete', description: 'Cover the full production rollout.' },
+      ],
+    };
 
+    expect((await schema.validate({ questions: [validQuestion] })).success).toBe(true);
+    expect((await schema.validate({})).success).toBe(false);
+    expect((await schema.validate({ question: validQuestion.question })).success).toBe(false);
     expect(
       (
         await schema.validate({
-          questions: [{ id: 'scope', question: 'What scope should be covered?' }],
+          questions: [validQuestion],
+          question: validQuestion.question,
         })
       ).success,
-    ).toBe(true);
-    expect((await schema.validate({})).success).toBe(false);
+    ).toBe(false);
+    expect(
+      (
+        await schema.validate({
+          questions: [{ ...validQuestion, id: 'legacy-question-id' }],
+        })
+      ).success,
+    ).toBe(false);
+    expect(
+      (
+        await schema.validate({
+          questions: [
+            {
+              ...validQuestion,
+              options: [
+                { ...validQuestion.options[0], id: 'legacy-option-id' },
+                validQuestion.options[1],
+              ],
+            },
+          ],
+        })
+      ).success,
+    ).toBe(false);
+    expect(
+      (
+        await schema.validate({
+          questions: [{ ...validQuestion, options: validQuestion.options.slice(0, 1) }],
+        })
+      ).success,
+    ).toBe(false);
+    expect(
+      (await schema.validate({ questions: Array.from({ length: 4 }, () => validQuestion) }))
+        .success,
+    ).toBe(false);
+
+    const json = schema.jsonSchema as Record<string, any>;
+    expect(Object.keys(json.properties)).toEqual(['questions']);
+    expect(json.required).toEqual(['questions']);
+    expect(json.properties.questions.minItems).toBe(1);
+    expect(json.properties.questions.maxItems).toBe(3);
+    expect(json.properties.questions.items.properties.options.minItems).toBe(2);
+    expect(json.properties.questions.items.properties.options.maxItems).toBe(3);
+  });
+
+  test('ask_user input schema remains capability-descriptor representable', () => {
+    const descriptor = builtinToolRegistry.descriptorOf(askUserSpec);
+    expect(descriptor.inputSchema).toMatchObject({
+      type: 'object',
+      required: ['questions'],
+    });
   });
 
   test('exposes one cache-stable tool set', () => {
@@ -508,8 +568,38 @@ describe('tool contracts (ACI)', () => {
   test('shell_execute contract covers command-shaped approval rejection', () => {
     const contract = TOOL_CONTRACTS.get('shell_execute')!;
     expect(contract.sections.whenToUse).not.toMatch(/intent=|grant_request|prefix_rule/);
+    expect(contract.sections.whenToUse).toMatch(/During planning.*proven read-only/);
     expect(contract.sections.commonMistakes).toMatch(/denied|reject/);
+    expect(contract.sections.outputFormat).toMatch(/deferred: true.*until_phase: building/);
+    expect(contract.sections.failureHandling).toMatch(
+      /deferred until building.*do not retry.*do not ask for shell approval/,
+    );
     expect(contract.sections.failureHandling).toMatch(/rejected by policy|approval flow|denied/);
+  });
+
+  test('file mutation contracts keep planning changes in the Plan', () => {
+    for (const name of ['edit_file', 'write_file']) {
+      const contract = TOOL_CONTRACTS.get(name)!;
+      expect(contract.sections.whenToUse).toMatch(/only in the building phase/);
+      expect(contract.sections.whenToUse).toMatch(
+        /During planning.*describe.*in the plan.*do not call.*or request approval/,
+      );
+      expect(contract.sections.failureHandling).toMatch(
+        /planning phase.*do not retry or request approval.*plan.*after plan approval/,
+      );
+    }
+  });
+
+  test('ask_user contract exposes only the canonical questions shape', () => {
+    const contract = TOOL_CONTRACTS.get('ask_user')!;
+    expect(contract.sections.whenToUse).toMatch(/single question is an array with one item/);
+    expect(contract.sections.commonMistakes).toMatch(/removed top-level `question`/);
+    expect(contract.sections.commonMistakes).toMatch(/client always adds free-text input/);
+    expect(contract.sections.outputFormat).toContain('`questions` contains 1-3 items');
+    expect(contract.sections.outputFormat).toContain('2-3 `{label, description}`');
+    expect(contract.sections.failureHandling).toMatch(
+      /canonical `questions` array.*never pass stringified JSON/,
+    );
   });
 
   // MCP resource tools form one discover/read client-side chain.

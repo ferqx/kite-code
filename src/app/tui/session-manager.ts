@@ -90,6 +90,12 @@ export interface ContextCompactionCommandResult {
   isError?: boolean;
 }
 
+export interface PlanningModeExitResult {
+  events: RuntimeEvent[];
+  /** Runtime-authoritative phase after evaluating the exit request. */
+  phase: AgentPhase;
+}
+
 /** 单会话运行时：持有独立的 AbortController、generator、缓冲 */
 export class SessionRuntime {
   readonly threadId: string;
@@ -127,6 +133,12 @@ export class SessionRuntime {
   private _pendingInterrupt: InterruptPayload | null = null;
   private _pendingResolve: ((action: UserAction) => void) | null = null;
   private _activeDispatch: ((action: Action) => void) | null = null;
+  /**
+   * Remains pending while the previous generator is unwinding after abort().
+   * abort() clears the user-visible running flag immediately, but a new run
+   * must not enter the same RuntimeStore until the old loop has closed.
+   */
+  private _runCompletion: Promise<void> | null = null;
   private _deltaBuffer: {
     dispatch: ((action: Action) => void) | null;
     text?: Extract<RuntimeEvent, { type: 'model.text_delta' }>;
@@ -215,6 +227,11 @@ export class SessionRuntime {
     initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
   ): Promise<void> {
     if (this.agentLoopActive) return;
+    const previousRun = this._runCompletion;
+    if (previousRun) await previousRun;
+    // Several callers may have waited for the same cancelled run. Only the
+    // first continuation may claim the session for a new loop.
+    if (this.agentLoopActive) return;
 
     const shellContext =
       this.conversationHistory.length > 0 ? `\n${this.conversationHistory.join('\n')}` : '';
@@ -293,6 +310,11 @@ export class SessionRuntime {
       requestAction: (effect, state) => this._requestRuntimeAction(effect, state),
     };
     const generator = runRuntimeAgent(runtimeInput, runtimeProvider);
+    let resolveRunCompletion!: () => void;
+    const runCompletion = new Promise<void>((resolve) => {
+      resolveRunCompletion = resolve;
+    });
+    this._runCompletion = runCompletion;
 
     // 所有状态变更必须在 try 块内，防止 buildRunAgentParams/runAgent 抛出时
     // agentLoopActive 和 abortController 泄漏导致会话永久冻结
@@ -362,6 +384,10 @@ export class SessionRuntime {
       this.abortController = null;
       this.generator = null;
       this._activeDispatch = null;
+      if (this._runCompletion === runCompletion) {
+        this._runCompletion = null;
+      }
+      resolveRunCompletion();
       if (this._foreground) {
         deps.provider.reset();
       }
@@ -829,10 +855,12 @@ export class SessionManager {
   }
 
   createSession(workspace: string): string {
-    // Deactivate old session before creating new one — same logic as switchSession
+    // TUI navigation is an explicit cancellation gesture. Other clients may
+    // retain background runs because their navigation model is different.
     const oldRt = this.runtimes.get(this.activeId);
     if (oldRt) {
-      oldRt.resolveInterrupt({ type: 'cancel' as const });
+      if (oldRt.agentLoopActive) oldRt.abort();
+      else oldRt.resolveInterrupt({ type: 'cancel' as const });
       oldRt.setForeground(false);
       oldRt.pendingInterrupt = false;
     }
@@ -1311,9 +1339,9 @@ export class SessionManager {
   }
 
   /** Persist an explicit plan-mode exit; review cancellation remains separate. */
-  exitPlanningMode(threadId: string): RuntimeEvent[] {
+  exitPlanningMode(threadId: string): PlanningModeExitResult | null {
     const rt = this.runtimes.get(threadId);
-    if (!rt) return [];
+    if (!rt) return null;
     const kernel = createAgentKernel({
       threadId,
       userId: 'tui',
@@ -1325,18 +1353,21 @@ export class SessionManager {
     try {
       const active = getActiveTask(kernel.getState());
       const planning = getActivePlanning(kernel.getState());
-      if (
-        !active ||
-        getAgentPhase(planning) !== 'planning' ||
-        kernel.getState().interactions.kind !== 'idle'
-      )
-        return [];
+      const phase = getAgentPhase(planning);
+      // run.completed closes the Core Task before the TUI user explicitly
+      // leaves its sticky plan input mode. In that settled state there is no
+      // Task lifecycle left to cancel; report the authoritative building
+      // phase so the client can reconcile its projection locally.
+      if (!active || phase !== 'planning') return { events: [], phase };
+      if (kernel.getState().interactions.kind !== 'idle') {
+        return { events: [], phase };
+      }
       const events: RuntimeEvent[] = [
         { type: 'planning.exited', taskId: active.taskId, reason: 'Exited Plan Mode.' },
         { type: 'task.cancelled', taskId: active.taskId, reason: 'Exited Plan Mode.' },
       ];
       kernel.processEventBatch(events);
-      return events;
+      return { events, phase: 'building' };
     } finally {
       kernel.close();
     }
@@ -1347,11 +1378,13 @@ export class SessionManager {
   }
 
   switchSession(fromId: string, toId: string): void {
-    // 离开的会话切到后台模式
+    // In the TUI, leaving a session cancels its current turn. This adapter
+    // policy must not be lifted into Core: a future client can keep the same
+    // Runtime and interrupt alive while only changing the visible session.
     const fromRt = this.runtimes.get(fromId);
     if (fromRt) {
-      // 取消旧会话的挂起中断，防止 generator 卡在 requestAction 的 Promise 上
-      fromRt.resolveInterrupt({ type: 'cancel' as const });
+      if (fromRt.agentLoopActive) fromRt.abort();
+      else fromRt.resolveInterrupt({ type: 'cancel' as const });
       fromRt.setForeground(false);
       fromRt.pendingInterrupt = false;
     }
@@ -1421,6 +1454,7 @@ export class SessionManager {
         plan: null,
         status: rawStatus,
         turns: [],
+        pendingToolCalls: {},
       });
     }
     return result;

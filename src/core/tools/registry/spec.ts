@@ -189,11 +189,11 @@ export interface ExecutableToolSpec<Name extends string = string, Input = unknow
   ): ProjectedToolResult;
 }
 
-export interface InterruptToolSpec<Name extends string = string, Input = unknown>
+export interface InterruptToolSpec<Name extends string = string, Input = unknown, Interrupt = Input>
   extends BaseToolSpec<Name, Input> {
   readonly kind: 'interrupt';
   /** 构造中断协议；interrupt 不存在 execute/projectResult。 */
-  createInterrupt(input: Input, context: ToolContext): Input;
+  createInterrupt(input: Input, context: ToolContext): Interrupt;
 }
 
 export type ToolSpec<Name extends string = string, Input = unknown, Output = never> = [
@@ -210,8 +210,8 @@ export function defineExecutableTool<const Name extends string, const Input, con
 }
 
 /** const tuple 类型推导用 — Interrupt 变体。 */
-export function defineInterruptTool<const Name extends string, const Input>(
-  spec: InterruptToolSpec<Name, Input>,
-): InterruptToolSpec<Name, Input> {
+export function defineInterruptTool<const Name extends string, const Input, const Interrupt>(
+  spec: InterruptToolSpec<Name, Input, Interrupt>,
+): InterruptToolSpec<Name, Input, Interrupt> {
   return spec;
 }

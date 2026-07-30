@@ -17,8 +17,8 @@
  *      searched 2 file patterns"（跨 7 次模型调用聚合，时长累加）
  *   2. 三段旁白文本作为块顶字幕按序渲染，不产生独立文本块
  *   3. 最终回答脱离为独立文本块（思考时长已计入阶段块，不重复出题头）
- *   4. 非探索工具边界（write_file，等价 task）仍切分阶段，后段继承
- *      思考标签（ADR-0027）
+ *   4. 非探索工具边界（write_file，等价 task）切分阶段，后段按
+ *      ADR-0047 单次消费规则使用纯工具统计标签
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -223,16 +223,17 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
   );
 
   // ═══════════════════════════════════════════════════════════════
-  // Test 2 — 思考延续跨过非探索工具边界（ADR-0027）
+  // Test 2 — 非探索工具边界后的思考标签单次消费（ADR-0047）
   //
   // 真实日志 tui-ms0ihe3d-0 第 5 次调用为 search + task + read×2（task
-  // 切断 Thought，后段 read 保持非思考标签——改规前的行为）。ADR-0027 后
-  // 后段继承思考标记。harness 无子代理执行环境，以 write_file（同为非
-  // 探索工具，accept_edits 下自动审批）触发等价切断。
+  // 切断 Thought，后段 read 保持非思考标签）。ADR-0047 覆盖 ADR-0027：
+  // 前段已经消费 reasoning 与 Thought 标签，后段只有收到新的真实 reason
+  // 才能升级为 Thought。harness 无子代理执行环境，以 write_file（同为非
+  // 探索工具）触发等价切断。
   // ═══════════════════════════════════════════════════════════════
 
   test(
-    'thinking carries over a write-tool boundary within one batch (ADR-0027)',
+    'thinking is consumed once across a write-tool boundary (ADR-0047)',
     async () => {
       server.setResponses([
         {
@@ -269,12 +270,11 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       // 边界前：Thought · read 1 file；写入卡片独立渲染
       expect(screenContains(output, '· read 1 file')).toBe(true);
       expect(screenContains(output, 'notes.md')).toBe(true);
-      // 边界后：继承思考标记（不再是纯统计 "● read 2 files"）
-      expect(/Thought for \d+s · read 2 files/.test(clean)).toBe(true);
-      // 时序：read 1 file 块 → 写入卡片 → 继承的 Thought 块
-      expect(/read 1 file[\s\S]*notes\.md[\s\S]*Thought for \d+s · read 2 files/.test(clean)).toBe(
-        true,
-      );
+      // 边界后：没有新的 reason，因此只显示纯工具统计，不重复 Thought 标签。
+      expect(screenContains(output, 'read 2 files')).toBe(true);
+      expect(/Thought for \d+s · read 2 files/.test(clean)).toBe(false);
+      // 时序：read 1 file Thought → 写入卡片 → 纯统计 read 2 files。
+      expect(/read 1 file[\s\S]*notes\.md[\s\S]*read 2 files/.test(clean)).toBe(true);
 
       console.log('  [carryover] clean output (last 2000 chars):', clean.slice(-2000));
     },

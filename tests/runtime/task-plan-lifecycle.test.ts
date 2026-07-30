@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { eventsForRuntimeAction } from '@/core/runtime/actions';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { decideNextEffect } from '@/core/runtime/scheduler';
 import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
@@ -255,11 +256,17 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       structuralDigest: state.interactions.structuralDigest,
       decision: { kind: 'cancel', reason: 'Need to revisit the draft.' },
     });
-    expect(events.map((event) => event.type)).toEqual(['plan.review_cancelled', 'tool.finished']);
+    expect(events.map((event) => event.type)).toEqual([
+      'plan.review_cancelled',
+      'tool.cancelled',
+      'turn.aborted',
+    ]);
     for (const event of events) state = reduceRuntimeState(state, event);
     expect(getActivePlanning(state).kind).toBe('planning_draft');
     expect(state.interactions.kind).toBe('idle');
-    expect(state.tools.calls['plan-call']?.status).toBe('succeeded');
+    expect(state.tools.calls['plan-call']?.status).toBe('cancelled');
+    expect(state.turn.status).toBe('aborted');
+    expect(decideNextEffect(state)).toEqual({ type: 'stop' });
   });
 
   test('executing supports structural replan and retains the superseded version', async () => {

@@ -3,55 +3,51 @@ import { ASK_USER_CONTRACT } from '@/core/tools/tool-contracts';
 import type { UserInputRequest } from '@/protocol/events';
 import { defineInterruptTool } from '../spec';
 
-const optionSchema = z.object({
-  id: z.string(),
-  label: z.string().min(1),
-  description: z.string().optional(),
-});
-const questionSchema = z.object({
-  id: z.string().optional(),
-  question: z.string().min(1),
-  options: z.array(optionSchema).max(3).optional(),
-  recommended: z.string().optional(),
-  allow_free_text: z.boolean().optional(),
-});
+const optionSchema = z
+  .object({
+    label: z.string().trim().min(1),
+    description: z.string().trim().min(1),
+  })
+  .strict();
+const questionSchema = z
+  .object({
+    question: z.string().trim().min(1),
+    options: z.array(optionSchema).min(2).max(3),
+  })
+  .strict();
 
 export const askUserInputSchema = z
   .object({
-    question: z.string().min(1).optional(),
-    options: z.array(optionSchema).max(3).optional(),
-    recommended: z.string().optional(),
-    allow_free_text: z.boolean().optional(),
-    context: z.string().optional(),
-    questions: z.array(questionSchema).min(1).optional(),
+    questions: z.array(questionSchema).min(1).max(3),
   })
-  .superRefine((value, context) => {
-    if (!value.question && !value.questions) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['question'],
-        message: 'Provide question or a non-empty questions array',
-      });
-    }
-  })
-  .transform(
-    (value): UserInputRequest => ({
-      question: value.question ?? value.questions?.[0]?.question ?? '',
-      options: value.options ?? [],
-      allow_free_text: value.allow_free_text !== false,
-      ...(value.context ? { context: value.context } : {}),
-      ...(value.recommended ? { recommended: value.recommended } : {}),
-      ...(value.questions
-        ? {
-            questions: value.questions.map((question) => ({
-              ...question,
-              options: question.options ?? [],
-              allow_free_text: question.allow_free_text !== false,
-            })),
-          }
-        : {}),
-    }),
-  );
+  .strict();
+
+export type AskUserInput = z.infer<typeof askUserInputSchema>;
+
+export function normalizeAskUserInput(input: AskUserInput): UserInputRequest {
+  const questions = input.questions.map((question, questionIndex) => {
+    const id = `q${questionIndex + 1}`;
+    const options = question.options.map((option, optionIndex) => ({
+      id: `${id}-o${optionIndex + 1}`,
+      ...option,
+    }));
+    return {
+      id,
+      question: question.question,
+      options,
+      recommended: options[0]!.id,
+      allow_free_text: true,
+    };
+  });
+  const first = questions[0]!;
+  return {
+    question: first.question,
+    options: first.options,
+    recommended: first.recommended,
+    allow_free_text: true,
+    questions,
+  };
+}
 
 export const askUserSpec = defineInterruptTool({
   name: 'ask_user',
@@ -65,5 +61,5 @@ export const askUserSpec = defineInterruptTool({
     sideEffect: false,
     classificationReason: 'Pauses execution for explicit user input.',
   }),
-  createInterrupt: (input) => input,
+  createInterrupt: (input) => normalizeAskUserInput(input),
 });

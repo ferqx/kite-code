@@ -28,7 +28,7 @@ describe('TUI PTY System — ask_user Escape', () => {
     workspace = createTestWorkspace();
 
     // Response #1: ask_user tool call — triggers need_input interrupt
-    // Response #2: spare for generateSessionName wrap-around
+    // Response #2: the same turn continues after the user declines to answer
     server.setResponses([
       {
         message: {
@@ -38,18 +38,21 @@ describe('TUI PTY System — ask_user Escape', () => {
               id: 'call_1',
               name: 'ask_user',
               args: {
-                question: 'What is your preferred programming language?',
-                options: [
-                  { id: 'ts', label: 'TypeScript' },
-                  { id: 'py', label: 'Python' },
+                questions: [
+                  {
+                    question: 'What is your preferred programming language?',
+                    options: [
+                      { label: 'TypeScript', description: 'Use static types and Bun tooling.' },
+                      { label: 'Python', description: 'Use the Python runtime and ecosystem.' },
+                    ],
+                  },
                 ],
-                recommended: 'ts',
               },
             },
           ],
         },
       },
-      { message: { content: 'Ask esc spare' } },
+      { message: { content: 'Continued after question cancellation.' } },
     ]);
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -100,10 +103,12 @@ describe('TUI PTY System — ask_user Escape', () => {
 
       // Press Escape to cancel the ask_user interrupt
       tui.write('\x1b');
-      await sleep(2000);
+      await waitForText(() => tui.output(), 'Continued after question cancellation.', 15000);
+      await sleep(300);
 
-      // TUI should recover — prompt visible (question cancelled)
+      // TUI should render the follow-up model response and then recover to the prompt.
       const afterOutput = tui.output();
+      expect(screenContains(afterOutput, 'Continued after question cancellation.')).toBe(true);
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },
     TIMEOUT,

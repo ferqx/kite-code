@@ -595,26 +595,6 @@ function closeCurrentThought(state: TuiState, cause: ThoughtCloseCause = 'bounda
   };
 }
 
-function isQueuedThoughtAfterApprovalTarget(state: TuiState, approvalCallId?: string): boolean {
-  if (!approvalCallId || state.currentThoughtSummaryId == null) return false;
-  const turn = lastTurn(state);
-  if (!turn) return false;
-  const targetIndex = turn.blocks.findIndex(
-    (block) => block.kind === 'tool_card' && block.callId === approvalCallId,
-  );
-  const thoughtIndex = turn.blocks.findIndex(
-    (block) => block.kind === 'tool_summary' && block.id === state.currentThoughtSummaryId,
-  );
-  if (targetIndex < 0 || thoughtIndex <= targetIndex) return false;
-  const thought = turn.blocks[thoughtIndex];
-  return (
-    thought?.kind === 'tool_summary' &&
-    thought.active &&
-    thought.tools.length > 0 &&
-    thought.tools.every((tool) => tool.status === 'queued')
-  );
-}
-
 function updateCurrentThoughtActivity(
   state: TuiState,
   latestActivity: Extract<OutputBlock, { kind: 'tool_summary' }>['latestActivity'],
@@ -955,6 +935,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       // task tool has its own subagent block
       if (!isExploration) state = closeCurrentThought(state, 'tool');
       if (isExploration) {
+        // Execution start is the real phase boundary. Publish any model text
+        // held off-screen before deciding whether the next exploration call
+        // belongs to the preceding Thought.
+        state = finalizeLastTurnStreaming(state);
         const turn = lastTurn(state);
         const thoughtIndex = turn?.blocks.findIndex(
           (block) => block.id === state.currentThoughtSummaryId,
@@ -1470,22 +1454,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
     case 'need_approval': {
       // Dedup: side-channel + stream interrupt can both emit need_approval for the same request.
       if (state.interrupt?.kind === 'approval') return state;
-      // Runtime queues the whole model batch before requesting approval for
-      // the first barrier tool. A later all-queued exploration summary is
-      // future work, not the phase waiting for approval; keep it active so
-      // the next real reasoning can join it after execution reaches it.
-      const keepFutureThought = isQueuedThoughtAfterApprovalTarget(state, event.data.callId);
-      const finalized = finalizeLastTurnStreaming(
-        keepFutureThought ? state : closeCurrentThought(state, 'human_wait'),
-      );
-      const block: OutputBlock = {
-        id: finalized.nextBlockId,
-        kind: 'approval',
-        approval: event.data,
-      };
+      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait'));
       let next: TuiState = {
-        ...appendBlock(finalized, block),
-        interrupt: { kind: 'approval' as const, blockId: block.id },
+        ...finalized,
+        interrupt: { kind: 'approval' as const, approval: event.data },
       };
       if (event.data.reviewFailure) {
         const pendingTool = findBlock(
@@ -1538,7 +1510,22 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       // Dedup: side-channel + stream interrupt can both emit need_input for the same request.
       // Skip if a question block is already active (interrupt pending).
       if (state.interrupt?.kind === 'input') return state;
-      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait'));
+      let finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait'));
+      const askCard = findBlock(
+        finalized,
+        (candidate) =>
+          candidate.kind === 'tool_card' &&
+          candidate.name === 'ask_user' &&
+          candidate.callId === event.toolCallId,
+      );
+      if (askCard?.kind === 'tool_card') {
+        const args = { ...event.data };
+        finalized = replaceBlockById(finalized, askCard.id, {
+          ...askCard,
+          args,
+          detail: getToolDetail('ask_user', args),
+        });
+      }
       const block: OutputBlock = {
         id: finalized.nextBlockId,
         kind: 'question',
@@ -1908,6 +1895,48 @@ function insertTerminalReasoningBeforeCommittedText(
     blocks: [...nextTurn.blocks, ...committedText],
   };
   return { ...withThought, turns: nextTurns };
+}
+
+function pendingToolArgs(args: unknown): Record<string, unknown> {
+  return args && typeof args === 'object' && !Array.isArray(args)
+    ? (args as Record<string, unknown>)
+    : {};
+}
+
+function withoutPendingTool(state: TuiState, toolCallId: string): TuiState {
+  if (!state.pendingToolCalls[toolCallId]) return state;
+  const { [toolCallId]: _, ...pendingToolCalls } = state.pendingToolCalls;
+  return { ...state, pendingToolCalls };
+}
+
+function visibleToolName(state: TuiState, toolCallId: string): string | undefined {
+  const card = findBlock(
+    state,
+    (block) => block.kind === 'tool_card' && block.callId === toolCallId,
+  );
+  if (card?.kind === 'tool_card') return card.name;
+  const summary = findToolSummaryLocation(state, toolCallId)?.block;
+  return summary?.tools.find((tool) => tool.callId === toolCallId)?.name;
+}
+
+function materializePendingTool(
+  state: TuiState,
+  toolCallId: string,
+  status: 'queued' | 'running',
+  consume: boolean,
+): TuiState {
+  const pending = state.pendingToolCalls[toolCallId];
+  if (!pending) return state;
+  const materialized = handleEventAction(state, {
+    type: 'tool_call',
+    data: {
+      call_id: toolCallId,
+      name: pending.name,
+      args: pending.args,
+      status,
+    },
+  });
+  return consume ? withoutPendingTool(materialized, toolCallId) : materialized;
 }
 
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
@@ -2334,31 +2363,35 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         data: { message: event.message, recoverable: event.recoverable },
       });
     case 'tool.queued':
-      return handleEventAction(state, {
-        type: 'tool_call',
-        data: {
-          call_id: event.toolCallId,
-          name: event.name,
-          args: event.args as Record<string, unknown>,
-          status: 'queued',
+      return {
+        ...state,
+        pendingToolCalls: {
+          ...state.pendingToolCalls,
+          [event.toolCallId]: {
+            name: event.name,
+            args: pendingToolArgs(event.args),
+          },
         },
-      });
-    case 'tool.started':
-      return handleEventAction(state, {
+      };
+    case 'tool.started': {
+      const materialized = materializePendingTool(state, event.toolCallId, 'running', true);
+      return handleEventAction(materialized, {
         type: 'tool_started',
         data: { call_id: event.toolCallId },
       });
+    }
     case 'tool.execution_ready':
-      // Policy preflight is durable Runtime state only. Keep the card queued
-      // until the approved shell batch actually emits tool.started.
+      // Legacy replay compatibility: the former shell batch barrier persisted
+      // readiness without starting the call, so it remains invisible.
       return state;
     case 'tool.progress':
       return handleEventAction(state, {
         type: 'tool_progress',
         data: { call_id: event.toolCallId, name: '', chunk: event.chunk, stream: event.stream },
       });
-    case 'tool.finished':
-      return handleEventAction(state, {
+    case 'tool.finished': {
+      const materialized = materializePendingTool(state, event.toolCallId, 'running', true);
+      return handleEventAction(materialized, {
         type: 'tool_done',
         data: {
           call_id: event.toolCallId,
@@ -2370,21 +2403,82 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           userInput: event.result.userInput,
         },
       });
-    case 'tool.failed':
-      return handleEventAction(state, {
+    }
+    case 'tool.failed': {
+      const pendingName =
+        state.pendingToolCalls[event.toolCallId]?.name ??
+        visibleToolName(state, event.toolCallId) ??
+        '';
+      const materialized = materializePendingTool(state, event.toolCallId, 'queued', true);
+      return handleEventAction(materialized, {
         type: 'tool_done',
         data: {
           call_id: event.toolCallId,
-          name: '',
+          name: pendingName,
           ok: false,
           summary: event.failure?.message ?? event.error ?? 'Tool failed.',
         },
       });
-    case 'tool.rejected':
-      return handleEventAction(state, {
+    }
+    case 'tool.rejected': {
+      if (event.failure?.kind === 'phase_deferred') {
+        return withoutPendingTool(state, event.toolCallId);
+      }
+      if (event.failure?.kind === 'phase_denied') {
+        if (state.pendingToolCalls[event.toolCallId] == null) return state;
+        const cleared = withoutPendingTool(state, event.toolCallId);
+        const finalized = closeCurrentThought(cleared, 'tool');
+        return appendBlock(finalized, {
+          id: finalized.nextBlockId,
+          kind: 'text',
+          content: event.reason,
+        });
+      }
+      const pendingName =
+        state.pendingToolCalls[event.toolCallId]?.name ??
+        visibleToolName(state, event.toolCallId) ??
+        '';
+      const materialized = materializePendingTool(state, event.toolCallId, 'queued', true);
+      return handleEventAction(materialized, {
         type: 'tool_done',
-        data: { call_id: event.toolCallId, name: '', ok: false, summary: event.reason },
+        data: {
+          call_id: event.toolCallId,
+          name: pendingName,
+          ok: false,
+          summary: event.reason,
+        },
       });
+    }
+    case 'tool.cancelled': {
+      const wasPending = state.pendingToolCalls[event.toolCallId] != null;
+      const visibleCard = findBlock(
+        state,
+        (block) => block.kind === 'tool_card' && block.callId === event.toolCallId,
+      );
+      const name = visibleToolName(state, event.toolCallId);
+      const next = withoutPendingTool(state, event.toolCallId);
+      if (wasPending && !name) return next;
+      if (!name) return next;
+      // plan.review_requested already rendered the durable draft and marked its
+      // card done. Cancelling execution authorization must not replace that
+      // document with a synthetic Cancelled result.
+      if (
+        visibleCard?.kind === 'tool_card' &&
+        visibleCard.status === 'done' &&
+        (visibleCard.name === 'write_plan' || visibleCard.name === 'update_plan')
+      ) {
+        return next;
+      }
+      return handleEventAction(next, {
+        type: 'tool_done',
+        data: {
+          call_id: event.toolCallId,
+          name,
+          ok: false,
+          summary: 'Cancelled',
+        },
+      });
+    }
     case 'tool.file_change':
       return handleEventAction(state, {
         type: 'file_change',
@@ -2396,12 +2490,14 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           preview: event.preview,
         },
       });
-    case 'user_input.requested':
-      return handleEventAction(state, {
+    case 'user_input.requested': {
+      const materialized = materializePendingTool(state, event.toolCallId, 'queued', false);
+      return handleEventAction(materialized, {
         type: 'need_input',
         data: event.request,
         toolCallId: event.toolCallId,
       });
+    }
     case 'provider.action_required':
       return handleEventAction(state, {
         type: 'need_input',
@@ -2413,7 +2509,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         type: 'need_input',
         data: providerAdmissionInput(event.providerId, event.providerStatus, event.retryable),
       });
-    case 'approval.requested':
+    case 'approval.requested': {
       return handleEventAction(state, {
         type: 'need_approval',
         data: {
@@ -2421,41 +2517,50 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           callId: event.approval.callId ?? event.toolCallId,
         },
       });
+    }
     case 'approval.rejected': {
       const approvalBlock =
-        state.interrupt?.kind === 'approval'
+        state.interrupt?.kind === 'approval' && state.interrupt.blockId
           ? findBlockById(state, state.interrupt.blockId)
           : undefined;
       const activeApproval = approvalBlock?.kind === 'approval' ? approvalBlock : undefined;
-      const toolCallId = event.toolCallId ?? activeApproval?.approval.callId;
-      let next = toolCallId
-        ? handleEventAction(state, {
-            type: 'tool_done',
-            data: {
-              call_id: toolCallId,
-              name: '',
-              ok: false,
-              summary: event.reason,
-              status: 'error',
-            },
-          })
-        : state;
+      const interruptApproval =
+        state.interrupt?.kind === 'approval' ? state.interrupt.approval : undefined;
+      const toolCallId =
+        event.toolCallId ?? interruptApproval?.callId ?? activeApproval?.approval.callId;
+      const visibleName = toolCallId ? visibleToolName(state, toolCallId) : undefined;
+      let next = toolCallId ? withoutPendingTool(state, toolCallId) : state;
+      if (toolCallId && visibleName) {
+        next = handleEventAction(next, {
+          type: 'tool_done',
+          data: {
+            call_id: toolCallId,
+            name: visibleName,
+            ok: false,
+            summary: event.reason,
+            status: 'error',
+          },
+        });
+      }
       if (activeApproval && (!toolCallId || activeApproval.approval.callId === toolCallId)) {
         next = replaceBlockById(next, activeApproval.id, {
           ...activeApproval,
           resolved: activeApproval.resolved ?? { action: 'reject' },
         });
-        next = { ...next, interrupt: null };
       }
-      return next;
+      return { ...next, interrupt: null };
     }
     case 'planning.entered':
       return { ...state, status: { ...state.status, phase: 'planning' } };
-    case 'plan.review_requested':
-      return handleEventAction(state, {
+    case 'planning.exited':
+      return { ...state, status: { ...state.status, phase: 'building' } };
+    case 'plan.review_requested': {
+      const materialized = materializePendingTool(state, event.toolCallId, 'queued', false);
+      return handleEventAction(materialized, {
         type: 'need_plan_review',
         data: { plan: event.plan, ...(event.artifact ? { artifact: event.artifact } : {}) },
       });
+    }
     case 'plan.approved':
       return {
         ...state,
@@ -2501,7 +2606,17 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       return { ...state, status: { ...state.status, phase: 'building', pendingPlan: null } };
     case 'turn.aborted': {
       if (event.cause !== 'user') return state;
-      return finalizeLastTurnStreaming(cancelRunningBlocks(state));
+      const cancelled = finalizeLastTurnStreaming(
+        cancelRunningBlocks({
+          ...state,
+          pendingToolCalls: {},
+        }),
+      );
+      return {
+        ...cancelled,
+        running: false,
+        interrupt: null,
+      };
     }
     default:
       return state;

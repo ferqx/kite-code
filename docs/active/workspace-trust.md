@@ -51,7 +51,7 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 
 - map key 必须等于记录的 `workspaceKey`，`records` 必须是对象（数组等形式判 `corrupt`），否则整个存储视为损坏（防手工篡改误放）。
 - `workspacePath` 仅供审计，不参与判定；目录移动或改名后 key 变化，信任自然失效。
-- 写入使用 fsync + 原子 rename，文件权限 0o600，与 MCP 项目批准存储同一模式。读写为 last-writer-wins，无跨进程锁：并发信任不同目录时后写覆盖先写，被丢记录的方向是 fail-closed（下次重新提示），与 MCP 项目批准存储同一语义。
+- 写入使用 fsync + 原子 rename，文件权限 0o600，与 MCP 项目批准存储同一模式。`trustWorkspace()` 在读取-合并-写入前获取 `.lock` 文件（排他创建 + 指数退避重试，5s 过期清理残留锁），并在持锁后重新读取存储，避免多进程并发信任不同目录时发生记录覆盖。
 - `source` 当前取值：`user`（TUI 确认）、`config`（CLI `--trust-workspace` 显式背书）、`test`（测试 harness 预写）。
 
 ## 测试边界
@@ -65,4 +65,3 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - TUI 与 CLI `run` 均执行门禁；web 前端当前不做 workspace 信任检查。
 - workspace 信任是目录级一次性决定，不是逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
 - 门禁求值前只读取惰性配置（JSONC 解析，不执行项目代码）；skill 扫描、MCP 连接与 shell 执行全部发生在门禁通过之后。
-- 信任存储写入使用 lock 文件防并发：`trustWorkspace()` 在读取-合并-写入前获取 `.lock` 文件（排他创建 + 指数退避重试，5s 过期清理残留锁），消除多进程并发写入覆盖风险。

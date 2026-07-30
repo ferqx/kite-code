@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile as readFileBufferAsync } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { msys2ToWindowsPath } from './path-utils';
+import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { isPathInsideWorkspace, msys2ToWindowsPath } from './path-utils';
 
 // ============================================================================
 // 公用 — 换行符正规化 / Common — line ending normalization
@@ -47,39 +47,9 @@ export function resolvePath(
 }
 
 function assertInsideWorkspace(workspace: string, target: string, originalPath: string): void {
-  const workspaceReal = realpathSync(workspace);
-  const nearest = nearestExistingPath(target);
-  const nearestReal = realpathSync(nearest);
-  if (!isPathInside(workspaceReal, nearestReal)) {
+  if (!isPathInsideWorkspace(workspace, target)) {
     throw new Error(`Path is outside workspace: ${originalPath}`);
   }
-  if (existsSync(target)) {
-    const targetReal = realpathSync(target);
-    if (!isPathInside(workspaceReal, targetReal)) {
-      throw new Error(`Path is outside workspace: ${originalPath}`);
-    }
-  }
-}
-
-function nearestExistingPath(path: string): string {
-  let current = path;
-  while (!existsSync(current)) {
-    const parent = dirname(current);
-    if (parent === current) return parent;
-    current = parent;
-  }
-  return current;
-}
-
-function isPathInside(parent: string, child: string): boolean {
-  const parentNorm = normalizeForCompare(parent);
-  const childNorm = normalizeForCompare(child);
-  const rel = relative(parentNorm, childNorm);
-  return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
-}
-
-function normalizeForCompare(path: string): string {
-  return process.platform === 'win32' ? path.toLowerCase() : path;
 }
 
 // ============================================================================

@@ -72,11 +72,11 @@ authorization: {
 
 MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive effect 变成无审批调用。只有 effective effects 全部为 `none|read` 且 `minimumApproval: none` 时，Approval Policy 才把它当作只读；`minimumApproval: user` 始终要求单次用户批准。远端 annotation 不直接进入该判断，project 配置也不能降低 minimum approval 或 effect 风险。Tool filter 只决定 catalog 可见性，不产生 authorization grant。
 
-## Shell 批次审批与执行
+## Shell 逐项审批与重叠执行
 
-同一条模型消息产生多个连续的 `shell_execute` 调用时，Runtime Scheduler 术语（运行时调度器）先逐个完成参数解析、策略预检和用户审批，不在首个批准后立即启动命令。每次批准或拒绝只作用于对应调用；拒绝项进入终态并写入失败结果，后续同批调用继续审批。批次在首个非 Shell 调用、不同模型消息或不同任务边界处截断，不能跨越 `ask_user`、方案审核或其他工具。
+同一条模型消息产生多个连续的 `shell_execute` 调用时，每个调用独立完成参数解析、策略预检和用户审批。某一调用收到 `approval.granted` 后立即成为 Scheduler 术语（运行时调度器）的下一项，不能等待 sibling 的审批决定共同收敛。Runtime Runner 术语（运行时执行循环）在该调用发出 `tool.started` 后继续处理同组下一个 Shell；因此前一个命令可以一边运行，Footer 一边展示后一个命令的审批，后一个获批后也立即启动。TUI 同一时刻仍只展示一个审批交互；解决后一个审批时只能重置对应等待项或 Subagent 的审批等待计时，不得重置已经运行的 sibling Shell 的 `startedAt` 或累计耗时。
 
-当批次内不再存在未预检调用后，所有已批准调用由同一个 `run_tools` effect 术语（工具执行效果）交给 Tool Controller 术语（工具控制器），通过 `Promise.all` 术语（并发等待组合）同时启动。只读免审调用也先记录 `tool.execution_ready`，等待同批审批收敛后再启动。`approval.rejected` 必须携带对应 `toolCallId`；Runtime 拒绝对应调用后，TUI 立即把仍处于 queued术语（排队中）的卡片收敛为失败终态，历史回放也必须清除审批中断，不得等到整轮结束后误标为取消。`approve_once`、`same_command` 与 `full_access` 的授权范围和溯源规则保持不变；批处理不会把一个调用的单次授权扩散给其他命令。`ask_user` 和方案审核仍保持串行 interaction barrier 术语（交互中断边界）。
+Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling；遇到非 Shell 调用、不同模型消息、不同任务、`ask_user` 或方案审核时，Runner 必须等待已启动 Shell 收敛，不能跨过交互和副作用边界。`approval.rejected` 必须携带对应 `toolCallId`。用户显式拒绝或取消任一工具审批时，当前审批目标记为 rejected，其余运行中或 queued sibling 记为 cancelled，Runtime 写入 `turn.aborted(cause=user)` 后立即结束当前 turn；不再请求后续审批、执行其他工具或调用模型，已启动执行通过 AbortSignal 停止。TUI 清除未开始调用的 queued术语（排队中）临时元数据和审批中断，不在消息列表生成取消卡；只有实际收到 `tool.started` 的调用才进入消息列表并按 cancelled 终态收尾。策略拒绝、sandbox 缺失和系统审查失败不是用户取消，不触发该整轮中止。`approve_once`、`same_command` 与 `full_access` 的授权范围和溯源规则保持不变，一个调用的单次授权不会扩散给其他命令。`tool.execution_ready` 仅为旧会话回放兼容事件，新执行不再产生。
 
 ## 入口覆盖
 

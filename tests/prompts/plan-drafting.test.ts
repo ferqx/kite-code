@@ -25,3 +25,18 @@ test('system prompt submits an initial plan without a redundant draft save', () 
   expect(prompt).toMatch(/write the complete plan once with `write_plan`\s+\(action="save"\)/);
   expect(prompt).toMatch(/Use\s+a\s+new\s+`save`\s+only\s+for\s+an\s+explicit\s+revision/);
 });
+
+test('system prompt defers executable validation without requesting approval in planning', () => {
+  const prompt = buildStaticSystemPrompt('agent');
+  expect(prompt).toContain('Tests, typechecks, builds, installs, and project scripts');
+  expect(prompt).toContain('`phase_deferred` shell result is not an approval request');
+  expect(prompt).toMatch(/do not\s+retry it during planning/);
+});
+
+test('system prompt directs planning edits into the Plan instead of an approval request', () => {
+  const prompt = buildStaticSystemPrompt('agent');
+  expect(prompt).toContain('never call `write_file` or `edit_file`');
+  expect(prompt).toContain('Describe the exact intended file changes in the Plan');
+  expect(prompt).toContain('`phase_denied` result means the tool did not run');
+  expect(prompt).toContain('any capability that can mutate workspace or external state');
+});

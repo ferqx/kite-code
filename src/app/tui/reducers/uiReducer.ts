@@ -104,6 +104,7 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         nextBlockId: 0,
         interrupt: null,
         toolStartTimes: undefined,
+        pendingToolCalls: {},
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
         thoughtPhaseStatus: undefined,

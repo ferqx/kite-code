@@ -57,6 +57,16 @@ export function writeFileActionName(
   return 'Write';
 }
 
+function askUserQuestion(args: Record<string, unknown>): string {
+  if (typeof args.question === 'string') return args.question;
+  const questions = args.questions;
+  if (!Array.isArray(questions)) return '';
+  const first = questions[0];
+  return first && typeof first === 'object' && typeof first.question === 'string'
+    ? first.question
+    : '';
+}
+
 export interface ThemeColors {
   primary: string;
   success: string;
@@ -191,7 +201,7 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
       return undefined;
     }
     case 'ask_user': {
-      const q = typeof args.question === 'string' ? args.question : '';
+      const q = askUserQuestion(args);
       if (!q) return undefined;
       return q.length > 60 ? `${q.slice(0, 57)}...` : q;
     }
@@ -266,7 +276,7 @@ export function getToolDetail(
       return undefined;
     }
     case 'ask_user': {
-      const q = typeof args.question === 'string' ? args.question : '';
+      const q = askUserQuestion(args);
       if (!q) return 'Asked';
       return q.length > 50 ? `${q.slice(0, 47)}...` : q;
     }

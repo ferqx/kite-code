@@ -242,7 +242,20 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
       await waitForRequestMessage(server, 'Read data.txt', 15000);
 
       // Wait for sub-agent to complete — read should NOT trigger approval
-      await waitForText(() => tui.output(), 'Sub-agent read completed successfully.', TIMEOUT);
+      try {
+        await waitForText(
+          () => tui.output(),
+          'Sub-agent read completed successfully.',
+          TIMEOUT - 5000,
+        );
+      } catch (error) {
+        console.log('  output after read timeout:', stripAnsi(tui.output()).slice(-4000));
+        console.log(
+          '  model requests after read timeout:',
+          server.getRequests().map((request) => request.messages.at(-1)),
+        );
+        throw error;
+      }
 
       const output = tui.output();
       const clean = stripAnsi(output);

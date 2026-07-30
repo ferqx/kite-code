@@ -405,7 +405,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 16;
+export const RUNTIME_STATE_SCHEMA_VERSION = 17;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -473,6 +473,11 @@ export interface RuntimeState {
     turnId: string;
     /** Turn 序号（从 0 开始递增）/ Turn index (incrementing from 0) */
     turnIndex: number;
+    /** Durable lifecycle gate used to prevent a completed or aborted turn from resuming. */
+    status: 'active' | 'completed' | 'aborted';
+    /** Persisted diagnostics for an aborted turn. */
+    abortReason?: string;
+    abortCause?: 'user' | 'error';
   };
   /** Persisted, provider-neutral transcript used to rebuild model context. */
   transcript: TranscriptState;
@@ -563,6 +568,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     turn: {
       turnId: crypto.randomUUID(),
       turnIndex: 0,
+      status: 'active',
     },
     transcript: { messages: [] },
     context: {

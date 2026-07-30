@@ -1,10 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '../src/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '../src/core/tools/file';
-import { msys2ToWindowsPath, normalizeMsys2PathsInText } from '../src/core/tools/path-utils';
+import {
+  isPathInsideWorkspace,
+  msys2ToWindowsPath,
+  normalizeMsys2PathsInText,
+} from '../src/core/tools/path-utils';
+import { searchContent, searchFiles } from '../src/core/tools/search';
 import {
   assertInsideWorkspace,
   DEFAULT_SHELL_TIMEOUT_MS,
@@ -320,6 +333,41 @@ describe('msys2ToWindowsPath', () => {
     // On Linux/macOS, /d/foo is a legitimate absolute path, not a drive letter
     expect(msys2ToWindowsPath('/d/foo/bar')).toBe('/d/foo/bar');
     expect(msys2ToWindowsPath('/tmp/test/file.txt')).toBe('/tmp/test/file.txt');
+  });
+});
+
+describe('canonical workspace path comparison', () => {
+  test('treats a symlink alias as the same workspace boundary for reads and searches', async () => {
+    if (process.platform === 'win32') return;
+    const root = mkdtempSync(join(tmpdir(), 'kite-tools-path-alias-'));
+    const workspace = join(root, 'workspace');
+    const alias = join(root, 'workspace-alias');
+    try {
+      mkdirSync(workspace);
+      writeFileSync(join(workspace, 'data.txt'), 'alias needle');
+      symlinkSync(workspace, alias, 'dir');
+
+      expect(isPathInsideWorkspace(workspace, join(alias, 'data.txt'))).toBe(true);
+      expect(readFile({ workspace, path: join(alias, 'data.txt') }).ok).toBe(true);
+
+      const files = await searchFiles({
+        workspace,
+        path: alias,
+        pattern: '*.txt',
+      });
+      expect(files.ok).toBe(true);
+      expect(files.stdout).toBe('data.txt\n');
+
+      const content = await searchContent({
+        workspace,
+        path: alias,
+        pattern: 'needle',
+      });
+      expect(content.ok).toBe(true);
+      expect(content.stdout).toContain('data.txt:1:alias needle');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

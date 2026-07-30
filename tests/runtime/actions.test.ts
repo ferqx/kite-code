@@ -228,8 +228,35 @@ describe('runtime user actions', () => {
     );
   });
 
-  test('cancels a matching tool approval into an approval rejection', () => {
+  test.each([
+    'cancel',
+    'reject',
+  ] as const)('%s on a matching tool approval rejects the target and aborts the whole turn', (actionType) => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.tools.calls['shell-1'] = {
+      toolCallId: 'shell-1',
+      modelMessageId: 'model-1',
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'awaiting_approval',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['shell-running'] = {
+      toolCallId: 'shell-running',
+      modelMessageId: 'model-1',
+      name: 'shell_execute',
+      args: { command: 'sleep 10' },
+      status: 'running',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['read-queued'] = {
+      toolCallId: 'read-queued',
+      modelMessageId: 'model-1',
+      name: 'read_file',
+      args: { path: '/tmp/example' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
     state.interactions = {
       kind: 'awaiting_tool_approval',
       interactionId: 'approval-1',
@@ -250,17 +277,36 @@ describe('runtime user actions', () => {
       },
     };
 
-    expect(
-      eventsForRuntimeAction(state, {
-        type: 'cancel',
-        interactionId: 'approval-1',
-        reason: 'Cancelled with Ctrl+C.',
-      }),
-    ).toEqual([
+    const events = eventsForRuntimeAction(state, {
+      type: actionType,
+      interactionId: 'approval-1',
+      reason: 'Cancelled with Ctrl+C.',
+    });
+
+    expect(events.map((event) => event.type)).toEqual([
+      'approval.rejected',
+      'tool.cancelled',
+      'tool.cancelled',
+      'turn.aborted',
+    ]);
+    expect(events).toEqual([
       expect.objectContaining({
         type: 'approval.rejected',
         interactionId: 'approval-1',
         toolCallId: 'shell-1',
+        reason: 'Cancelled with Ctrl+C.',
+      }),
+      expect.objectContaining({
+        type: 'tool.cancelled',
+        toolCallId: 'shell-running',
+      }),
+      expect.objectContaining({
+        type: 'tool.cancelled',
+        toolCallId: 'read-queued',
+      }),
+      expect.objectContaining({
+        type: 'turn.aborted',
+        cause: 'user',
         reason: 'Cancelled with Ctrl+C.',
       }),
     ]);

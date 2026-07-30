@@ -1,10 +1,61 @@
 import { describe, expect, test } from 'bun:test';
 import { eventsForRuntimeAction } from '../../src/core/runtime/actions';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { decideNextEffect } from '../../src/core/runtime/scheduler';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+import { decideNextEffect, MAX_PARALLEL_READ_TOOLS } from '../../src/core/runtime/scheduler';
+import {
+  createInitialRuntimeState,
+  type RuntimeState,
+  type ToolCallRecord,
+} from '../../src/core/runtime/state';
+
+function queueCall(
+  state: RuntimeState,
+  id: string,
+  input: Pick<ToolCallRecord, 'name' | 'args' | 'effectClass' | 'sideEffect'>,
+): void {
+  state.tools.queue.push(id);
+  state.tools.calls[id] = {
+    toolCallId: id,
+    modelMessageId: 'model',
+    status: 'queued',
+    createdAtTurnId: state.turn.turnId,
+    ...input,
+  };
+}
 
 describe('decideNextEffect', () => {
+  test('keeps completed and aborted turns stopped until a new turn starts', () => {
+    const initial = createInitialRuntimeState({
+      threadId: 'terminal-turn',
+      userId: 'u',
+      workspace: '/',
+    });
+    const aborted = reduceRuntimeState(initial, {
+      type: 'turn.aborted',
+      turnId: initial.turn.turnId,
+      reason: 'Plan review cancelled.',
+      cause: 'user',
+    });
+    expect(decideNextEffect(aborted)).toEqual({ type: 'stop' });
+
+    const resumed = reduceRuntimeState(aborted, {
+      type: 'turn.started',
+      turnId: 'next-turn',
+    });
+    expect(resumed.turn).toEqual({
+      turnId: 'next-turn',
+      turnIndex: initial.turn.turnIndex + 1,
+      status: 'active',
+    });
+    expect(decideNextEffect(resumed)).toEqual({ type: 'call_model' });
+
+    const completed = reduceRuntimeState(resumed, {
+      type: 'turn.completed',
+      turnId: resumed.turn.turnId,
+    });
+    expect(decideNextEffect(completed)).toEqual({ type: 'stop' });
+  });
+
   test('stops the current turn after auto compaction failure and retries admission next turn', () => {
     const state = createInitialRuntimeState({ threadId: 'compact', userId: 'u', workspace: '/' });
     const failedTurnId = state.turn.turnId;
@@ -140,6 +191,164 @@ describe('decideNextEffect', () => {
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['tool'] });
   });
 
+  test('batches consecutive approval-free reads', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'parallel-reads',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    queueCall(state, 'read-a', {
+      name: 'read_file',
+      args: { path: 'a.ts' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    queueCall(state, 'search', {
+      name: 'search_content',
+      args: { path: '.', query: 'needle' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    queueCall(state, 'status', {
+      name: 'shell_execute',
+      args: { command: 'git status --short' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['read-a', 'search', 'status'],
+    });
+  });
+
+  test('stops a read batch at the first interaction or side-effect barrier', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'read-barrier',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    queueCall(state, 'read-a', {
+      name: 'read_file',
+      args: { path: 'a.ts' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    queueCall(state, 'unknown-shell', {
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+      effectClass: 'unknown',
+      sideEffect: true,
+    });
+    queueCall(state, 'read-b', {
+      name: 'read_file',
+      args: { path: 'b.ts' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['read-a'],
+    });
+  });
+
+  test('does not let reads overtake an unknown shell barrier', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'shell-first-barrier',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    queueCall(state, 'test-shell', {
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+      effectClass: 'unknown',
+      sideEffect: true,
+    });
+    queueCall(state, 'read-after-shell', {
+      name: 'read_file',
+      args: { path: 'README.md' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['test-shell'],
+    });
+  });
+
+  test('does not batch control tools even when their capability is read-only', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'interaction-barrier',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    queueCall(state, 'ask', {
+      name: 'ask_user',
+      args: { question: 'Continue?' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    queueCall(state, 'read', {
+      name: 'read_file',
+      args: { path: 'a.ts' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['ask'],
+    });
+  });
+
+  test('keeps external reads exclusive until their approval is resolved', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'external-read',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    queueCall(state, 'external', {
+      name: 'read_file',
+      args: { path: '/outside/secrets.txt' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    queueCall(state, 'workspace', {
+      name: 'read_file',
+      args: { path: 'a.ts' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['external'],
+    });
+  });
+
+  test('caps one parallel read batch', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'bounded-reads',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    for (let index = 0; index < MAX_PARALLEL_READ_TOOLS + 2; index++) {
+      queueCall(state, `read-${index}`, {
+        name: 'read_file',
+        args: { path: `${index}.ts` },
+        effectClass: 'read_only',
+        sideEffect: false,
+      });
+    }
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: Array.from({ length: MAX_PARALLEL_READ_TOOLS }, (_, index) => `read-${index}`),
+    });
+  });
+
   test('picks approved tool from active list (sub-agent approval resume)', () => {
     // Bug reproduction: after tool.started moves a tool from queue → active,
     // and the tool is later approved (approval.granted), the scheduler must
@@ -233,7 +442,7 @@ describe('decideNextEffect', () => {
     });
   });
 
-  test('collects sibling shell decisions before starting the approved batch', () => {
+  test('runs each approved shell before requesting approval for its next sibling', () => {
     let state = createInitialRuntimeState({
       threadId: 'parallel-shell-approvals',
       userId: 'u',
@@ -275,9 +484,13 @@ describe('decideNextEffect', () => {
     });
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: ['shell-2'],
+      toolCallIds: ['shell-1'],
     });
 
+    state = reduceRuntimeState(state, {
+      type: 'tool.started',
+      toolCallId: 'shell-1',
+    });
     state = reduceRuntimeState(state, {
       type: 'approval.requested',
       interactionId: 'approval-2',
@@ -307,7 +520,7 @@ describe('decideNextEffect', () => {
     });
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: ['shell-1', 'shell-3'],
+      toolCallIds: ['shell-3'],
     });
   });
 
@@ -353,7 +566,7 @@ describe('decideNextEffect', () => {
     });
   });
 
-  test('stops when all tools from the latest model response are rejected', () => {
+  test('stops when tools from the latest model response carry a user approval rejection', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
     const modelMessageId = 'model-msg';
     state.transcript.messages.push({
@@ -394,7 +607,7 @@ describe('decideNextEffect', () => {
     expect(decideNextEffect(state)).toEqual({ type: 'stop' });
   });
 
-  test('calls model when not all tools from the latest model response are rejected', () => {
+  test('calls model for a legacy rejection without an approval_rejected failure', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
     const modelMessageId = 'model-msg';
     state.transcript.messages.push({
@@ -422,6 +635,46 @@ describe('decideNextEffect', () => {
       createdAtTurnId: state.turn.turnId,
     };
     expect(decideNextEffect(state)).toEqual({ type: 'call_model' });
+  });
+
+  test('stops when one sibling succeeded but another has a user approval rejection', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    const modelMessageId = 'model-msg';
+    state.transcript.messages.push({
+      kind: 'assistant',
+      messageId: modelMessageId,
+      toolCalls: [
+        { id: 'shell-1', name: 'shell_execute', args: { command: 'pwd' } },
+        { id: 'shell-2', name: 'shell_execute', args: { command: 'node task.js' } },
+      ],
+    });
+    state.tools.calls['shell-1'] = {
+      toolCallId: 'shell-1',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'succeeded',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['shell-2'] = {
+      toolCallId: 'shell-2',
+      modelMessageId,
+      name: 'shell_execute',
+      args: { command: 'node task.js' },
+      status: 'rejected',
+      failure: {
+        kind: 'approval_rejected',
+        message: 'Cancelled by user.',
+        retryable: false,
+        modelFixable: false,
+        needsUserIntervention: false,
+        terminatesTurn: false,
+        journal: true,
+      },
+      createdAtTurnId: state.turn.turnId,
+    };
+
+    expect(decideNextEffect(state)).toEqual({ type: 'stop' });
   });
 
   test('stops when all tools from the latest model response are cancelled', () => {

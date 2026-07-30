@@ -22,7 +22,7 @@ import { createRuntimeEffectExecutor } from './executor';
 import { recordRuntimeFailure } from './failures';
 import { createAgentKernel } from './kernel';
 import { type RuntimeActionProvider, runRuntimeLoop } from './runner';
-import { getActiveTask } from './state';
+import { getActivePlanning, getActiveTask } from './state';
 
 /** Build redacted admission facts for unavailable required providers before model execution. */
 export function requiredProviderAdmissionEvents(
@@ -129,6 +129,10 @@ export async function* runRuntimeAgent(
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
   let runCancelled = false;
+  const executionAbortController = new AbortController();
+  const forwardExternalAbort = () => executionAbortController.abort(input.signal?.reason);
+  if (input.signal?.aborted) forwardExternalAbort();
+  else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
   input.onKernelControl?.({
     getState: () => kernel.getState(),
     processEvent: (event) => {
@@ -141,6 +145,7 @@ export async function* runRuntimeAgent(
       const events = eventsForRunCancellation(kernel.getState(), reason);
       kernel.processEventBatch(events);
       for (const event of events) collector.recordRuntime(event);
+      executionAbortController.abort(reason);
       return events;
     },
   });
@@ -159,7 +164,26 @@ export async function* runRuntimeAgent(
     const resumedInteraction =
       getActiveTask(kernel.getState()) && kernel.getState().interactions.kind !== 'idle';
     if (!resumedInteraction) {
-      if (input.phase === 'planning') {
+      // Shift+Tab persists a planning_empty placeholder before the user has
+      // supplied a goal. Close that placeholder explicitly so the real Task
+      // retains the submitted prompt as its durable userGoal.
+      const placeholder = getActiveTask(kernel.getState());
+      if (
+        input.phase === 'planning' &&
+        placeholder?.userGoal.trim() === '' &&
+        getActivePlanning(kernel.getState()).kind === 'planning_empty'
+      ) {
+        const cancelled: RuntimeEvent = {
+          type: 'task.cancelled',
+          taskId: placeholder.taskId,
+          reason: 'Replaced Plan Mode placeholder with the submitted task.',
+        };
+        kernel.processEvent(cancelled);
+        collector.recordRuntime(cancelled);
+        yield cancelled;
+      }
+
+      if (input.phase === 'planning' && !getActiveTask(kernel.getState())) {
         const taskStarted: RuntimeEvent = {
           type: 'task.started',
           taskId: randomUUID(),
@@ -251,7 +275,7 @@ export async function* runRuntimeAgent(
       runtimeStore: kernel.runtimeStore,
       skills: input.skills,
       skillOptions: input.skillOptions,
-      signal: input.signal,
+      signal: executionAbortController.signal,
       onCompactionProgress: input.onCompactionProgress,
       compactionReporter: input.config.compaction?.localDebug?.enabled
         ? createLocalCompactionDebugReporter({
@@ -263,15 +287,25 @@ export async function* runRuntimeAgent(
     });
     for await (const event of runRuntimeLoop(kernel, executor, provider)) {
       collector.recordRuntime(event);
+      if (event.type === 'approval.rejected' && event.failure?.kind === 'approval_rejected') {
+        runCancelled = true;
+        exitStatus = 'aborted';
+        executionAbortController.abort(event.reason);
+      }
+      if (event.type === 'turn.aborted' && event.cause === 'user') {
+        runCancelled = true;
+        exitStatus = 'aborted';
+        executionAbortController.abort(event.reason);
+      }
       // Task lifecycle facts are durable RuntimeEvents, but remain internal to
       // the legacy public stream; UI projections are driven by planning/tool
       // events and existing consumers should not see extra turn markers.
       if (event.type === 'task.completed') continue;
       yield event;
     }
-    if (input.signal?.aborted) exitStatus = 'aborted';
+    if (executionAbortController.signal.aborted) exitStatus = 'aborted';
   } catch (error) {
-    if (input.signal?.aborted) {
+    if (executionAbortController.signal.aborted) {
       exitStatus = 'aborted';
       return;
     }
@@ -304,6 +338,7 @@ export async function* runRuntimeAgent(
     collector.recordRuntime(aborted);
     yield aborted;
   } finally {
+    input.signal?.removeEventListener('abort', forwardExternalAbort);
     input.onKernelControl?.(null);
     await collector.finalize(exitStatus);
     kernel.close();

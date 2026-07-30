@@ -46,6 +46,7 @@ export const initialState: TuiState = {
   sessionError: false,
   loadingSessionId: null,
   explorationSummaryIds: {},
+  pendingToolCalls: {},
   currentThoughtSummaryId: undefined,
   thoughtPhaseStatus: undefined,
   currentModelRequestId: undefined,
@@ -56,5 +57,5 @@ export const initialState: TuiState = {
 };
 
 export function createInitialState(): TuiState {
-  return { ...initialState, turns: [], interrupt: null };
+  return { ...initialState, turns: [], interrupt: null, pendingToolCalls: {} };
 }

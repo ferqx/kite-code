@@ -1,8 +1,12 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { basename, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, join, relative, resolve } from 'node:path';
 import type { ShellResult } from '@/core/types';
 import { readTextContentAsync } from './file';
-import { msys2ToWindowsPath } from './path-utils';
+import {
+  canonicalPathForComparison,
+  isPathInsideWorkspace,
+  msys2ToWindowsPath,
+} from './path-utils';
 
 interface SearchFilesInput {
   workspace: string;
@@ -36,10 +40,11 @@ export async function searchFiles(input: SearchFilesInput): Promise<ShellResult>
     const pattern = String(input.pattern || '*');
     const rawPath = msys2ToWindowsPath(String(input.path || '.'));
     const root = resolve(input.workspace, rawPath);
+    const workspaceRoot = canonicalPathForComparison(input.workspace);
     const matches: string[] = [];
 
     for await (const file of walkFiles(input.workspace, root, input.allowExternal)) {
-      const rel = toPosix(relative(input.workspace, file));
+      const rel = toPosix(relative(workspaceRoot, file));
       if (matchesFilePattern(rel, pattern)) {
         matches.push(rel);
       }
@@ -63,12 +68,13 @@ export async function searchContent(input: SearchContentInput): Promise<ShellRes
   try {
     const rawPath = msys2ToWindowsPath(String(input.path || '.'));
     const root = resolve(input.workspace, rawPath);
+    const workspaceRoot = canonicalPathForComparison(input.workspace);
     const regex = new RegExp(pattern);
     const glob = input.glob === undefined ? null : String(input.glob);
     const lines: string[] = [];
 
     for await (const file of walkFiles(input.workspace, root, input.allowExternal)) {
-      const rel = toPosix(relative(input.workspace, file));
+      const rel = toPosix(relative(workspaceRoot, file));
       if (glob && !matchesFilePattern(rel, glob)) {
         continue;
       }
@@ -326,20 +332,10 @@ async function* walkFiles(
   root: string,
   allowExternal?: boolean,
 ): AsyncGenerator<string> {
-  const workspaceRoot = resolve(workspace);
-  const resolvedRoot = resolve(root);
+  const workspaceRoot = canonicalPathForComparison(workspace);
+  const resolvedRoot = canonicalPathForComparison(root);
   if (!allowExternal) {
-    // 跨盘符时 relative() 返回绝对路径（如 'D:\other'），同样视为工作区外。
-    // Cross-drive relative() returns an absolute path (e.g. 'D:\other') —
-    // treat that as outside the workspace too.
-    const relRoot = relative(workspaceRoot, resolvedRoot);
-    if (
-      relRoot &&
-      (isAbsolute(relRoot) ||
-        relRoot === '..' ||
-        relRoot.startsWith('..\\') ||
-        relRoot.startsWith('../'))
-    ) {
+    if (!isPathInsideWorkspace(workspaceRoot, resolvedRoot)) {
       throw new Error(`Refusing search outside workspace: ${root}`);
     }
   }

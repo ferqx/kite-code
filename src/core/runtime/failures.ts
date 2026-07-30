@@ -7,6 +7,8 @@ export type FailureKind =
   | 'model_rate_limited'
   | 'model_server_error'
   | 'policy_denied'
+  | 'phase_deferred'
+  | 'phase_denied'
   | 'approval_rejected'
   | 'auto_review_rejected'
   | 'plan_revision_requested'
@@ -79,6 +81,18 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
   model_rate_limited: retryable,
   model_server_error: retryable,
   policy_denied: {
+    ...terminal,
+    modelFixable: true,
+    needsUserIntervention: false,
+    terminatesTurn: false,
+  },
+  phase_deferred: {
+    ...terminal,
+    modelFixable: true,
+    needsUserIntervention: false,
+    terminatesTurn: false,
+  },
+  phase_denied: {
     ...terminal,
     modelFixable: true,
     needsUserIntervention: false,
