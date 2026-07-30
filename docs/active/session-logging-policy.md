@@ -75,7 +75,8 @@ secret 集合，并叠加保守 secret shape/protected-path 检测；Core 组合
 
 writer 构造、写入或 finalize 失败时，collector 立即停止继续写入，并向 App 最多报告一次固定、
 脱敏诊断。失败不得传播到 Runtime、不得改变 run terminal outcome，也不得写到权限更弱或含
-正文的 fallback。
+正文的 fallback。Windows ACL helper 只在内部异常中保留 bounded 原生状态/错误用于 native
+smoke 定位；collector 不把该技术细节投影给 App。
 
 ## 安全存储、lease 与回收
 

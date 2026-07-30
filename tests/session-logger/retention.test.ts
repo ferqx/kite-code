@@ -32,8 +32,10 @@ const POLICY: SessionLoggingPolicyV1 = {
 };
 
 function createRoot(): string {
-  const root = mkdtempSync(join(tmpdir(), 'openpx-session-retention-'));
-  roots.push(root);
+  const container = mkdtempSync(join(tmpdir(), 'openpx-session-retention-'));
+  roots.push(container);
+  const root = join(container, 'sessions');
+  mkdirSync(root, { mode: 0o700 });
   return root;
 }
 

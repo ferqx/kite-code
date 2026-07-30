@@ -104,7 +104,13 @@ Set-Acl -LiteralPath $item.FullName -AclObject $acl
     },
   );
   if (result.status !== 0) {
-    throw new Error('Failed to apply an owner-only, non-inheriting session-log ACL.');
+    const detail = `${result.stderr}\n${result.stdout}`
+      .trim()
+      .replaceAll(/\s+/g, ' ')
+      .slice(0, 512);
+    throw new Error(
+      `Failed to apply an owner-only, non-inheriting session-log ACL (status ${result.status ?? 'unknown'}${detail ? `: ${detail}` : ''}).`,
+    );
   }
 }
 
