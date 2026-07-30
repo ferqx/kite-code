@@ -56,6 +56,19 @@ export interface SecureSessionLogDirectoryBinding {
   ino: number;
 }
 
+export function windowsPowerShellEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+  extra: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  const environment = { ...source, ...extra };
+  for (const key of Object.keys(environment)) {
+    if (key.toLowerCase() === 'psmodulepath') delete environment[key];
+  }
+  const systemRoot = environment.SystemRoot ?? environment.SYSTEMROOT ?? 'C:\\Windows';
+  environment.PSModulePath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\Modules`;
+  return environment;
+}
+
 export function assertSafeSessionLogSegment(value: string, label: string): void {
   const windowsBase = value.split('.')[0]?.toLowerCase() ?? '';
   if (
@@ -100,7 +113,7 @@ Set-Acl -LiteralPath $item.FullName -AclObject $acl
     {
       encoding: 'utf8',
       windowsHide: true,
-      env: { ...process.env, KITE_SESSION_LOG_ACL_PATH: path },
+      env: windowsPowerShellEnvironment(process.env, { KITE_SESSION_LOG_ACL_PATH: path }),
     },
   );
   if (result.status !== 0) {

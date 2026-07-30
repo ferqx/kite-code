@@ -23,6 +23,7 @@ import {
 } from '../../src/core/config/paths';
 import type { SessionLoggingPolicyV1 } from '../../src/core/config/session-logging-policy';
 import { SESSION_LOG_LEASE_FILE } from '../../src/core/session-logger/active-session-lease';
+import { windowsPowerShellEnvironment } from '../../src/core/session-logger/secure-storage';
 import { SessionLogWriter } from '../../src/core/session-logger/writer';
 
 const SMOKE_POLICY: SessionLoggingPolicyV1 = {
@@ -272,10 +273,9 @@ foreach ($path in $paths) {
     {
       encoding: 'utf8',
       windowsHide: true,
-      env: {
-        ...process.env,
+      env: windowsPowerShellEnvironment(process.env, {
         KITE_SESSION_LOG_ACL_SMOKE_PATHS: JSON.stringify(paths),
-      },
+      }),
     },
   );
   if (result.status !== 0) {
