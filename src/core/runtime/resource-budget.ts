@@ -82,6 +82,8 @@ export interface ActiveResourceBudgetRuntimeStateV1 {
   budget: ResourceBudgetV1;
   reconciledUsage: ResourceUsageV1;
   reservations: Record<string, BudgetReservationV1>;
+  waiters: Record<string, ConcurrencyWaiterV1>;
+  nextWaiterSequence: number;
 }
 
 export type ResourceBudgetRuntimeStateV1 =
@@ -121,13 +123,33 @@ export interface ResourceBudgetUnknownEvent {
   type: 'resource_budget.unknown';
   reservationId: string;
 }
+export interface ResourceBudgetWaiterEnqueuedEvent {
+  type: 'resource_budget.waiter_enqueued';
+  waiter: ConcurrencyWaiterV1;
+}
+export interface ResourceBudgetWaiterPromotedEvent {
+  type: 'resource_budget.waiter_promoted';
+  invocationId: string;
+}
+export interface ResourceBudgetWaiterCancelledEvent {
+  type: 'resource_budget.waiter_cancelled';
+  invocationId: string;
+}
+export interface ResourceBudgetWaiterTimedOutEvent {
+  type: 'resource_budget.waiter_timed_out';
+  invocationId: string;
+}
 export type ResourceBudgetEvent =
   | ResourceBudgetConfiguredEvent
   | ResourceBudgetReservedEvent
   | ResourceBudgetDispatchStartedEvent
   | ResourceBudgetReconciledEvent
   | ResourceBudgetReleasedEvent
-  | ResourceBudgetUnknownEvent;
+  | ResourceBudgetUnknownEvent
+  | ResourceBudgetWaiterEnqueuedEvent
+  | ResourceBudgetWaiterPromotedEvent
+  | ResourceBudgetWaiterCancelledEvent
+  | ResourceBudgetWaiterTimedOutEvent;
 
 export const LIMITED_RESOURCE_BUDGET_V1: Readonly<ResourceBudgetV1> = Object.freeze({
   version: 1,
@@ -404,10 +426,59 @@ export function reduceResourceBudgetStateV1(
       budget: event.budget,
       reconciledUsage: createZeroResourceUsageV1(),
       reservations: {},
+      waiters: {},
+      nextWaiterSequence: 0,
     };
   }
 
   const active = activeState(state);
+  if (event.type === 'resource_budget.waiter_enqueued') {
+    const waiter = event.waiter;
+    nonEmpty(waiter.runId, 'runId');
+    nonEmpty(waiter.invocationId, 'invocationId');
+    if (waiter.version !== 1 || waiter.state !== 'waiting')
+      throw new Error('A new concurrency waiter must be version 1 and waiting.');
+    if (waiter.runId !== active.runId) throw new Error('Concurrency waiter runId mismatch.');
+    if (waiter.sequence !== active.nextWaiterSequence)
+      throw new Error('Concurrency waiter sequence must be the next durable FIFO sequence.');
+    if (Date.parse(waiter.deadlineAt) <= Date.parse(waiter.enqueuedAt))
+      throw new Error('Concurrency waiter deadline must be after enqueue time.');
+    if (Date.parse(waiter.deadlineAt) > Date.parse(active.deadlineAt))
+      throw new Error('Concurrency waiter deadline exceeds the persisted run deadline.');
+    const existing = active.waiters[waiter.invocationId];
+    if (existing) {
+      if (JSON.stringify(existing) === JSON.stringify(waiter)) return active;
+      throw new Error('Concurrency waiter invocation was reused with different facts.');
+    }
+    return {
+      ...active,
+      waiters: { ...active.waiters, [waiter.invocationId]: waiter },
+      nextWaiterSequence: active.nextWaiterSequence + 1,
+    };
+  }
+  if (
+    event.type === 'resource_budget.waiter_promoted' ||
+    event.type === 'resource_budget.waiter_cancelled' ||
+    event.type === 'resource_budget.waiter_timed_out'
+  ) {
+    const waiter = active.waiters[event.invocationId];
+    if (!waiter) throw new Error(`Unknown concurrency waiter ${event.invocationId}.`);
+    const targetState =
+      event.type === 'resource_budget.waiter_promoted'
+        ? 'promoted'
+        : event.type === 'resource_budget.waiter_cancelled'
+          ? 'cancelled'
+          : 'timed_out';
+    if (waiter.state === targetState) return active;
+    if (waiter.state !== 'waiting') throw new Error(`Cannot change a ${waiter.state} waiter.`);
+    return {
+      ...active,
+      waiters: {
+        ...active.waiters,
+        [event.invocationId]: { ...waiter, state: targetState },
+      },
+    };
+  }
   if (event.type === 'resource_budget.reserved') {
     const candidate = event.reservation;
     assertReservation(candidate);
@@ -495,6 +566,16 @@ export function assertResourceBudgetRuntimeStateV1(state: ResourceBudgetRuntimeS
     if (reservation.parentReservationId && !state.reservations[reservation.parentReservationId])
       throw new Error('Reservation parent is absent from the shared ledger.');
   }
+  const sequences = new Set<number>();
+  for (const waiter of Object.values(state.waiters ?? {})) {
+    if (waiter.version !== 1 || waiter.runId !== state.runId)
+      throw new Error('Concurrency waiter is invalid.');
+    nonNegativeInteger(waiter.sequence, 'waiter.sequence');
+    if (sequences.has(waiter.sequence))
+      throw new Error('Concurrency waiter sequence is not unique.');
+    sequences.add(waiter.sequence);
+  }
+  nonNegativeInteger(state.nextWaiterSequence ?? 0, 'nextWaiterSequence');
   if (!withinBudget(committedResourceUsageV1(state), state.budget))
     throw new Error('Committed resource usage exceeds the effective budget.');
 }

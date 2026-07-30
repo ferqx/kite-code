@@ -22,11 +22,15 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | --- | --- | --- |
 | `sessionLoggingPolicyV1` | `false` | 注册 metadata-first 日志策略 schema；关闭时 policy resolver 收紧为 `off` |
 | `providerDataPolicyV1` | `false` | 注册仓库受控的 Provider 数据策略 schema；当前批准 route bundle 为空 |
-| `resourceBudgetV1` | `false` | 注册 Runtime v18 累计预算 ledger；invocation admission 接入前不能产生 production 资格 |
+| `resourceBudgetV1` | `false` | 启用 Runtime v19 累计预算 admission、FIFO/compound permit 与恢复语义 |
+| `terminalOutcomeV1` | `false` | 注册结构化 terminal outcome rollout；新持久化终态已使用 v1 taxonomy |
 
-这些开关目前只保护 schema 迁移边界。单独打开开关不会让 Provider route、production logging
-或 production run 获得资格；对应 admission/composition Task 完成前仍 fail closed。用户、项目和
-CLI 覆盖只能在后续 effective policy 组合中收紧批准上限。
+`providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
+前者仍要求批准 registry/gate，且当前 route 集合为空；后者只允许新 run 建立 limited preset
+ledger，v17 及更早 snapshot 的 `legacy_unconfigured` 状态仍拒绝热迁移。关闭任一开关时，
+production profile 必须 fail closed；开发 profile 才可显式使用旧路径。用户、项目和 CLI 覆盖
+不能放宽批准 policy/budget。`terminalOutcomeV1=false` 只用于 rollout 回退，不允许 production
+客户端把 `unknown`、`blocked`、`budget_exhausted` 或 `resource_saturated` 显示成完成。
 
 
 上下文压缩的 flag 术语（功能开关）真值如下：

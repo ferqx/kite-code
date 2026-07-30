@@ -6,8 +6,10 @@ import { shouldPromptWorkspaceTrust, trustWorkspace } from '@/core/config/worksp
 import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import { runRuntimeAgent } from '@/core/runtime/agent';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { runtimeStorePathFor } from '@/core/runtime/store';
+import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
 import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -137,8 +139,22 @@ export async function main(): Promise<void> {
   );
 
   for await (const event of generator) {
-    console.log(JSON.stringify(event));
+    console.log(JSON.stringify(projectCliRuntimeEventV1(event)));
   }
+}
+
+export function projectCliRuntimeEventV1(event: RuntimeEvent):
+  | RuntimeEvent
+  | (RuntimeEvent & {
+      terminalPresentation: ReturnType<typeof projectTerminalOutcomeV1>;
+    }) {
+  if ((event.type === 'run.completed' || event.type === 'run.error') && event.outcome) {
+    return {
+      ...event,
+      terminalPresentation: projectTerminalOutcomeV1(event.outcome),
+    };
+  }
+  return event;
 }
 
 function createCliRuntimeProvider(): RuntimeActionProvider {

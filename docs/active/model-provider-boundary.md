@@ -4,7 +4,7 @@
 
 读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文或缓存指标时。
 
-验证：`bun test tests/config.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
+验证：`bun test tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
 
 相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、`real-model-test-boundary.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
@@ -24,8 +24,17 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
 provider type、operator、规范化 endpoint origin、endpoint class、deployment 和 region 的
 canonical identity digest，不绑定 model name。仓库受控 snapshot 位于
 `release/provider-data-policies/`；当前 D-14 批准 bundle 明确为空，因此还没有任何
-production-qualified model/MCP route。`providerDataPolicyV1` 默认关闭；Task 1A.5 完成 route
-loader/admission 前，schema 和 bundle 只提供 fail-closed 契约，不改变现有开发 Provider 调用。
+production-qualified model/MCP route。`providerDataPolicyV1` 默认关闭；启用后 Model
+Controller 必须在 Provider dispatch 前取得由受控 bundle 构造的 registry/gate，缺失、
+未生效、过期、digest/route identity 漂移、payload kind 越权或数据分类越权全部 fail closed。
+`limited` profile 的 unknown route 一律拒绝；自定义 endpoint 只能进入显式
+`internal_experimental` 路径，不能产生 production 资格。
+
+Provider admission payload 为每段正文保留 `user_prompt | file_snippet | tool_result | summary`
+provenance 和 Workspace data label。`secret` label、runtime secret detector、credential marker
+或 protected-path marker 在 mocked/real Provider 收到请求前独立阻断。状态投影只暴露 route
+alias、允许分类、retention/training/logging 用途和 policy/registry revision，不暴露 endpoint
+origin。用户、项目或 CLI 配置不能向 registry 增加 policy，也不能放宽仓库批准 bundle。
 
 `WorkspaceDataLabelV1` 固定 `public < internal < confidential < secret` 的 deny-wins 顺序。
 artifact/admin/project rule/runtime secret detector 只能提高分类；用户主动粘贴或项目配置不能降低

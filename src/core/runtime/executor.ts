@@ -1,5 +1,9 @@
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import type {
+  ProviderDataAdmissionDecisionV1,
+  ProviderPayloadPartV1,
+} from '@/core/config/provider-data-admission';
 import {
   type ContextCompactor,
   executeContextCompaction,
@@ -55,6 +59,8 @@ export interface RuntimeExecutorDependencies {
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   /** 用于记录文件写入前原像（ADR-0042 §4），缺省时工具写入不留原像。 */
   runtimeStore?: RuntimeStore;
+  /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
+  providerDataAdmission?: (payload: ProviderPayloadPartV1[]) => ProviderDataAdmissionDecisionV1;
 }
 
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
@@ -141,12 +147,33 @@ export function createRuntimeEffectExecutor(
         signal: dependencies.signal,
         emitRuntimeEvent: emit,
         compactionReporter: dependencies.compactionReporter,
+        providerDataAdmission: dependencies.providerDataAdmission,
       });
     }
     if (effect.type === 'run_tools') {
       try {
-        const execute = (toolCallIds: string[]) =>
-          executeRuntimeTools({
+        const execute = async (toolCallIds: string[]) => {
+          const terminalEvents: RuntimeEvent[] = [];
+          const emitOrDefer = (event: RuntimeEvent) => {
+            if (
+              event.type === 'tool.file_change' ||
+              event.type === 'tool.finished' ||
+              event.type === 'tool.failed' ||
+              event.type === 'tool.rejected' ||
+              event.type === 'tool.cancelled' ||
+              event.type === 'capability.execution_succeeded' ||
+              event.type === 'capability.execution_failed' ||
+              event.type === 'capability.execution_unknown' ||
+              event.type === 'subagent.completed' ||
+              event.type === 'subagent.failed' ||
+              event.type === 'verification.requested'
+            ) {
+              terminalEvents.push(event);
+            } else {
+              emit?.(event);
+            }
+          };
+          await executeRuntimeTools({
             state,
             toolCallIds,
             shellExecutor: dependencies.shellExecutor,
@@ -158,12 +185,14 @@ export function createRuntimeEffectExecutor(
             taskConfig: dependencies.config,
             taskModel: dependencies.model,
             subagentEventSink,
-            emitRuntimeEvent: emit,
+            emitRuntimeEvent: emitOrDefer,
             recordFilePreimage: createFilePreimageRecorder(
               dependencies.runtimeStore,
               state.session.threadId,
             ),
           });
+          return terminalEvents;
+        };
         if (effect.toolCallIds.length <= 1) {
           return await execute(effect.toolCallIds);
         }

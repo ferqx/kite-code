@@ -50,6 +50,16 @@ MCP Provider Action 是持久化交互。旧 Tool Call 必须先失败并退出�
 
 新 run 还会在第一次模型调用前执行 required Provider 准入。ready/degraded 可继续，其余 Provider 逐个等待 retry、当前 session waiver 或 cancel。Waiver 是持久事实但不会恢复能力可见性；cancel 会取消任务并中止 turn。
 
+启用 `resourceBudgetV1` 的新 run 在所有 Runtime invocation 前执行累计预算 admission。
+reservation 与 FIFO waiter 先持久化，`dispatch_started` 落盘后才允许 Controller 调用模型、
+工具、MCP、Skill/Sub-agent、Verification 或 compaction；terminal fact 与实际 usage 原子
+reconcile。Shell 同时取得 tool/shell 两类 permit，不会部分占位。累计耗尽、并发等待超时和
+未知外部结果分别保留不同终态，不会投影为普通完成。
+
+Runtime schema v19 的终态使用 `RunTerminalOutcomeV1`。展示层读取 reason code、external
+effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
+`status=completed` 可进入完成展示。
+
 ## 4.5 上下文与缓存
 
 静态 prompt、稳定工具契约和 cacheable Runtime context 尽量保持前缀稳定；动态状态、Skill disclosure、搜索结果和 turn binding 放在轮次投影中。上下文压缩保留任务事实、计划和工具结果语义，不取代 Runtime Store。

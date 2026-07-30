@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { McpRuntimeProvider } from '@/core/mcp';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
@@ -21,8 +22,10 @@ import type { RuntimeEvent } from './events';
 import { createRuntimeEffectExecutor } from './executor';
 import { recordRuntimeFailure } from './failures';
 import { createAgentKernel } from './kernel';
+import { LIMITED_RESOURCE_BUDGET_V1 } from './resource-budget';
 import { type RuntimeActionProvider, runRuntimeLoop } from './runner';
 import { getActivePlanning, getActiveTask } from './state';
+import { failedTerminalOutcomeV1 } from './terminal-outcome';
 
 /** Build redacted admission facts for unavailable required providers before model execution. */
 export function requiredProviderAdmissionEvents(
@@ -150,6 +153,48 @@ export async function* runRuntimeAgent(
     },
   });
   try {
+    if (getFeatureFlags(input.config).resourceBudgetV1) {
+      if (kernel.getState().resourceBudget.status !== 'unconfigured') {
+        if (kernel.getState().resourceBudget.status !== 'active') {
+          const failure = recordRuntimeFailure({
+            kind: 'mandatory_policy_unavailable',
+            message:
+              'ResourceBudgetV1 cannot start from a legacy snapshot; start a new production run.',
+            phase: 'building',
+            turnId: kernel.getState().turn.turnId,
+            userVisible: true,
+          });
+          const event: RuntimeEvent = {
+            type: 'run.error',
+            message: failure.message,
+            recoverable: false,
+            failure: failure.failure,
+            turnId: failure.turnId,
+            outcome: failedTerminalOutcomeV1(failure.failure, {
+              knownExternalEffects: 'none',
+            }),
+          };
+          kernel.processEvent(event);
+          collector.recordRuntime(event);
+          yield event;
+          return;
+        }
+      } else {
+        const startedAt = new Date();
+        const event: RuntimeEvent = {
+          type: 'resource_budget.configured',
+          runId: randomUUID(),
+          startedAt: startedAt.toISOString(),
+          deadlineAt: new Date(
+            startedAt.getTime() + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs,
+          ).toISOString(),
+          budget: LIMITED_RESOURCE_BUDGET_V1,
+        };
+        kernel.processEvent(event);
+        collector.recordRuntime(event);
+        yield event;
+      }
+    }
     const admissionEvents = requiredProviderAdmissionEvents(
       kernel.getState(),
       input.mcpManager,
@@ -310,8 +355,20 @@ export async function* runRuntimeAgent(
       return;
     }
     exitStatus = 'fatal';
+    const providerPolicyUnavailable =
+      error instanceof ProviderDataAdmissionError &&
+      (error.decision.reason === 'mandatory_policy_unavailable' ||
+        error.decision.reason === 'provider_policy_missing' ||
+        error.decision.reason === 'provider_policy_not_yet_effective' ||
+        error.decision.reason === 'provider_policy_expired' ||
+        error.decision.reason === 'provider_route_identity_mismatch');
     const failure = recordRuntimeFailure({
-      kind: 'unknown',
+      kind:
+        error instanceof ProviderDataAdmissionError
+          ? providerPolicyUnavailable
+            ? 'mandatory_policy_unavailable'
+            : 'policy_denied'
+          : 'unknown',
       message: error instanceof Error ? error.message : String(error),
       phase: 'building',
       turnId: kernel.getState().turn.turnId,
@@ -323,6 +380,15 @@ export async function* runRuntimeAgent(
       recoverable: false,
       failure: failure.failure,
       turnId: failure.turnId,
+      outcome: failedTerminalOutcomeV1(failure.failure, {
+        knownExternalEffects:
+          kernel.getState().resourceBudget.status === 'active' &&
+          Object.values(kernel.getState().resourceBudget.reservations).some(
+            (reservation) => reservation.state === 'unknown',
+          )
+            ? 'unknown'
+            : 'known',
+      }),
     };
     kernel.processEvent(errorEvent);
     collector.recordRuntime(errorEvent);

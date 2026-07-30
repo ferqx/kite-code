@@ -37,6 +37,21 @@ export {
 } from './mcp-config-repository';
 export { expandEnvVars } from './mcp-server-config';
 export type {
+  ProviderDataAdmissionDecisionV1,
+  ProviderDataAdmissionInputV1,
+  ProviderDataAdmissionReasonV1,
+  ProviderDataPolicyRegistryV1,
+  ProviderPayloadKindV1,
+  ProviderPayloadPartV1,
+} from './provider-data-admission';
+export {
+  createProviderDataPolicyRegistryV1,
+  evaluateProviderDataAdmissionV1,
+  loadProviderDataPolicyRegistryV1,
+  ProviderDataAdmissionError,
+  providerPayloadFromModelPromptV1,
+} from './provider-data-admission';
+export type {
   ProviderDataPolicyBundleV1,
   ProviderDataPolicyV1,
   ProviderRouteIdentityV1,
@@ -138,6 +153,7 @@ const featuresSchema = z
     sessionLoggingPolicyV1: z.boolean().optional(),
     providerDataPolicyV1: z.boolean().optional(),
     resourceBudgetV1: z.boolean().optional(),
+    terminalOutcomeV1: z.boolean().optional(),
   })
   .strict()
   .optional();

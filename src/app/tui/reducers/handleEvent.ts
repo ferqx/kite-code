@@ -2,6 +2,7 @@
 
 import { contextCompactionTerminalNotice } from '@/core/model/context-compaction-presentation';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
 import type * as Protocol from '@/protocol/events';
 import {
   formatToolResultForDisplay,
@@ -2188,6 +2189,15 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       };
     }
     case 'run.completed':
+      if (event.outcome && !projectTerminalOutcomeV1(event.outcome).complete) {
+        return handleEventAction(state, {
+          type: 'error',
+          data: {
+            message: projectTerminalOutcomeV1(event.outcome).label,
+            recoverable: event.outcome.safeRetry,
+          },
+        });
+      }
       // `model.responded` may be rendered while the run is still active, leaving
       // its final line in the dynamic streaming tree. Reconcile against the
       // authoritative persisted output and finalize it before SET_IDLE moves
@@ -2360,7 +2370,12 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
     case 'run.error':
       return handleEventAction(state, {
         type: 'error',
-        data: { message: event.message, recoverable: event.recoverable },
+        data: {
+          message: event.outcome
+            ? `${projectTerminalOutcomeV1(event.outcome).label}: ${event.message}`
+            : event.message,
+          recoverable: event.outcome?.safeRetry ?? event.recoverable,
+        },
       });
     case 'tool.queued':
       return {

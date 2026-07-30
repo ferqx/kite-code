@@ -30,6 +30,7 @@ import {
   type TranscriptMessage,
   updateActiveTask,
 } from './state';
+import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 
 function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: string) {
   return {
@@ -140,6 +141,7 @@ function toolResultMeta(
  * @returns 新的不可变运行时状态 / New immutable runtime state
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  event = normalizeTerminalRuntimeEventV1(event);
   switch (event.type) {
     case 'resource_budget.configured':
     case 'resource_budget.reserved':
@@ -147,6 +149,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'resource_budget.reconciled':
     case 'resource_budget.released':
     case 'resource_budget.unknown':
+    case 'resource_budget.waiter_enqueued':
+    case 'resource_budget.waiter_promoted':
+    case 'resource_budget.waiter_cancelled':
+    case 'resource_budget.waiter_timed_out':
       return {
         ...state,
         resourceBudget: reduceResourceBudgetStateV1(state.resourceBudget, event),
@@ -1581,12 +1587,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
       return {
         ...state,
+        terminalOutcome: event.outcome,
         activeTaskId: null,
         tasks: { ...state.tasks, [completed.taskId]: completed },
         planning: completed.planning,
       };
     }
     case 'run.error':
+      return event.outcome ? { ...state, terminalOutcome: event.outcome } : state;
     case 'runtime.action_ignored':
       return state;
 

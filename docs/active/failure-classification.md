@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：新增工具或模型失败路径、调整重试/升级策略、修改运行时错误日志时。
-验证：`bun test tests/runtime/failures.test.ts`。
+验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts`。
 
 Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and auto-review rejection all retain the classification on their tool call record.
 
@@ -11,3 +11,17 @@ Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. It
 New `tool.failed` producers must emit `failure: classifyFailure(...)`. The legacy `error` field remains accepted only so existing persisted v3 events can replay; reducers and trace logging prefer the structured value.
 
 Choose the narrowest kind. Add a kind only when it has a distinct recovery policy, test its strategy, and update this document.
+
+Runtime schema v19 adds `RunTerminalOutcomeV1`. New `run.completed` and `run.error` events are
+normalized before persistence and retain a stable reason code, known/unknown external-effects
+state, safe-retry decision, recovery entry, and pending-verification bit. TUI and headless
+consumers use `projectTerminalOutcomeV1`; they do not infer terminal meaning from localized error
+strings.
+
+The production reason-code set distinguishes artifact/profile/digest invalid, workspace
+untrusted, sandbox/network/worktree unavailable, model retry exhausted, Provider/MCP unavailable,
+persistence unavailable, budget exhausted, resource saturation, tool/shell concurrency
+saturation, process limit exceeded, cancel incomplete, compaction unqualified/failed,
+verification failed/inconclusive, mandatory policy unavailable, blocked, and unknown.
+`completed` is the only projection with `complete=true`; `unknown` requires reconciliation and is
+never safe to retry automatically.

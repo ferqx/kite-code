@@ -13,6 +13,12 @@ import {
 } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import {
+  type ProviderDataAdmissionDecisionV1,
+  ProviderDataAdmissionError,
+  type ProviderPayloadPartV1,
+  providerPayloadFromModelPromptV1,
+} from '@/core/config/provider-data-admission';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
 import type { AIMessage } from '@/core/messages';
 import type { CompactionReporter } from '@/core/model/compaction-metrics';
@@ -241,6 +247,8 @@ export async function invokeRuntimeModel(params: {
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
+  /** Production composition must supply the immutable route-policy gate. */
+  providerDataAdmission?: (payload: ProviderPayloadPartV1[]) => ProviderDataAdmissionDecisionV1;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const requestId = genInteractionId();
@@ -526,6 +534,16 @@ export async function invokeRuntimeModel(params: {
         },
       ];
     }
+    if (flags.providerDataPolicyV1) {
+      const decision = params.providerDataAdmission?.(
+        providerPayloadFromModelPromptV1(projection.providerMessages),
+      ) ?? {
+        admitted: false,
+        reason: 'mandatory_policy_unavailable' as const,
+        routeAlias: `${params.config.providerType}:${params.config.providerName}`,
+      };
+      if (!decision.admitted) throw new ProviderDataAdmissionError(decision);
+    }
     // model.requested 必须在 await 之前即时发出，而不是响应完成后与
     // model.responded 一起补发——消费方（TUI）需要它作为"新一轮模型调用
     // 已开始"的时机信号（例如 settle 上一轮的 Thought 聚合块，避免最终
@@ -589,6 +607,14 @@ export async function invokeRuntimeModel(params: {
           _parse_error: call.error ?? 'invalid JSON arguments',
         },
       }));
+    const providerUsage = response.response_metadata?.usage as
+      | {
+          input_tokens?: number;
+          prompt_tokens?: number;
+          completion_tokens?: number;
+        }
+      | undefined;
+    const providerInputTokens = providerUsage?.input_tokens ?? providerUsage?.prompt_tokens;
     const events: RuntimeEvent[] = [
       ...retryEvents,
       contextMetricsEvent,
@@ -599,6 +625,10 @@ export async function invokeRuntimeModel(params: {
         toolCalls: [...toolCalls, ...invalidToolCalls],
         reasoningText: extractReasoningText(response),
         text: extractText(response.content),
+        ...(typeof providerInputTokens === 'number' ? { inputTokens: providerInputTokens } : {}),
+        ...(typeof providerUsage?.completion_tokens === 'number'
+          ? { outputTokens: providerUsage.completion_tokens }
+          : {}),
       },
     ];
 

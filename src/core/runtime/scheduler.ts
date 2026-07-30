@@ -10,7 +10,7 @@ export const MAX_PARALLEL_READ_TOOLS = 4;
  * a parallel read batch. Dynamic MCP capabilities need their bound descriptor
  * at execution time, so the scheduler keeps them exclusive.
  */
-const PARALLEL_READ_TOOLS = new Set([
+export const PARALLEL_READ_TOOL_NAMES = Object.freeze([
   'read_file',
   'search_content',
   'search_files',
@@ -19,7 +19,8 @@ const PARALLEL_READ_TOOLS = new Set([
   'read_mcp_resource',
   'web_fetch',
   'shell_execute',
-]);
+] as const);
+const PARALLEL_READ_TOOLS = new Set<string>(PARALLEL_READ_TOOL_NAMES);
 
 function argsRecord(args: unknown): Record<string, unknown> {
   return args && typeof args === 'object' && !Array.isArray(args)

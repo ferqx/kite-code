@@ -72,7 +72,7 @@ describe('resource budget recovery', () => {
     expect(recovered.getState().resourceBudget).toMatchObject({
       status: 'active',
       runId: 'run-1',
-      reservations: { 'reservation-1': { state: 'dispatch_started' } },
+      reservations: { 'reservation-1': { state: 'unknown' } },
     });
     recovered.close();
   });

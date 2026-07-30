@@ -1360,8 +1360,8 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   expect(overlapped).toBe(true);
   expect(entered).toEqual(['pwd', 'git status --short']);
   expect(emitted.filter((event) => event.type === 'tool.started')).toHaveLength(2);
-  expect(emitted.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
-  expect(terminalEvents).toEqual([]);
+  expect(emitted.filter((event) => event.type === 'tool.finished')).toHaveLength(0);
+  expect(terminalEvents.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
 });
 
 test('runRuntimeLoop yields model deltas without persisting or reducing them', async () => {

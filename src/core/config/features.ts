@@ -22,6 +22,7 @@ export interface FeatureFlags {
   sessionLoggingPolicyV1: boolean;
   providerDataPolicyV1: boolean;
   resourceBudgetV1: boolean;
+  terminalOutcomeV1: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
@@ -44,6 +45,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   sessionLoggingPolicyV1: false,
   providerDataPolicyV1: false,
   resourceBudgetV1: false,
+  terminalOutcomeV1: false,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

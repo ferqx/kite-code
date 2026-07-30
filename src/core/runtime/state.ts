@@ -41,6 +41,7 @@ import {
   createUnconfiguredResourceBudgetStateV1,
   type ResourceBudgetRuntimeStateV1,
 } from './resource-budget';
+import type { RunTerminalOutcomeV1 } from './terminal-outcome';
 
 // ── Re-export for convenience ──
 export { getAgentPhase };
@@ -409,7 +410,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 18;
+export const RUNTIME_STATE_SCHEMA_VERSION = 19;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -489,6 +490,8 @@ export interface RuntimeState {
   context: ContextRuntimeState;
   /** Shared cumulative resource ledger for this run and all descendants. */
   resourceBudget: ResourceBudgetRuntimeStateV1;
+  /** Durable structured terminal projection; absent only on legacy/pre-flag runs. */
+  terminalOutcome?: RunTerminalOutcomeV1;
   /** 方案生命周期状态（v2: PlanningState 取代 PlanLifecycleState）/ Plan lifecycle state */
   planning: PlanningState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */

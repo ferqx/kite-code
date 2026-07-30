@@ -27,6 +27,50 @@ export type FailureKind =
   | 'transcript_invariant_error'
   | 'loop_exhausted'
   | 'budget_exceeded'
+  | 'artifact_invalid'
+  | 'profile_invalid'
+  | 'digest_invalid'
+  | 'workspace_untrusted'
+  | 'network_unavailable'
+  | 'worktree_unavailable'
+  | 'model_retry_exhausted'
+  | 'mcp_unavailable'
+  | 'persistence_unavailable'
+  | 'resource_saturated'
+  | 'process_limit_exceeded'
+  | 'cancel_incomplete'
+  | 'compaction_unqualified'
+  | 'compaction_failed'
+  | 'verification_failed'
+  | 'verification_inconclusive'
+  | 'mandatory_policy_unavailable'
+  | 'unknown';
+
+export type TerminalReasonCodeV1 =
+  | 'completed'
+  | 'artifact_invalid'
+  | 'profile_invalid'
+  | 'digest_invalid'
+  | 'workspace_untrusted'
+  | 'sandbox_unavailable'
+  | 'network_unavailable'
+  | 'worktree_unavailable'
+  | 'model_retry_exhausted'
+  | 'provider_unavailable'
+  | 'mcp_unavailable'
+  | 'persistence_unavailable'
+  | 'budget_exhausted'
+  | 'resource_saturated'
+  | 'tool_concurrency_saturated'
+  | 'shell_concurrency_saturated'
+  | 'process_limit_exceeded'
+  | 'cancel_incomplete'
+  | 'compaction_unqualified'
+  | 'compaction_failed'
+  | 'verification_failed'
+  | 'verification_inconclusive'
+  | 'mandatory_policy_unavailable'
+  | 'blocked'
   | 'unknown';
 
 export interface ClassifiedFailure {
@@ -141,8 +185,54 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
   transcript_invariant_error: terminal,
   loop_exhausted: terminal,
   budget_exceeded: terminal,
+  artifact_invalid: terminal,
+  profile_invalid: terminal,
+  digest_invalid: terminal,
+  workspace_untrusted: terminal,
+  network_unavailable: terminal,
+  worktree_unavailable: terminal,
+  model_retry_exhausted: terminal,
+  mcp_unavailable: { ...terminal, retryable: true },
+  persistence_unavailable: terminal,
+  resource_saturated: terminal,
+  process_limit_exceeded: terminal,
+  cancel_incomplete: terminal,
+  compaction_unqualified: terminal,
+  compaction_failed: terminal,
+  verification_failed: terminal,
+  verification_inconclusive: terminal,
+  mandatory_policy_unavailable: terminal,
   unknown: terminal,
 };
+
+const TERMINAL_REASON_BY_FAILURE: Readonly<Partial<Record<FailureKind, TerminalReasonCodeV1>>> =
+  Object.freeze({
+    artifact_invalid: 'artifact_invalid',
+    profile_invalid: 'profile_invalid',
+    digest_invalid: 'digest_invalid',
+    workspace_untrusted: 'workspace_untrusted',
+    sandbox_error: 'sandbox_unavailable',
+    network_unavailable: 'network_unavailable',
+    worktree_unavailable: 'worktree_unavailable',
+    model_retry_exhausted: 'model_retry_exhausted',
+    provider_unavailable: 'provider_unavailable',
+    mcp_unavailable: 'mcp_unavailable',
+    persistence_unavailable: 'persistence_unavailable',
+    budget_exceeded: 'budget_exhausted',
+    resource_saturated: 'resource_saturated',
+    process_limit_exceeded: 'process_limit_exceeded',
+    cancel_incomplete: 'cancel_incomplete',
+    compaction_unqualified: 'compaction_unqualified',
+    compaction_failed: 'compaction_failed',
+    verification_failed: 'verification_failed',
+    verification_inconclusive: 'verification_inconclusive',
+    mandatory_policy_unavailable: 'mandatory_policy_unavailable',
+    unknown: 'unknown',
+  });
+
+export function terminalReasonForFailureV1(kind: FailureKind): TerminalReasonCodeV1 {
+  return TERMINAL_REASON_BY_FAILURE[kind] ?? 'blocked';
+}
 
 export function classifyFailure(
   kind: FailureKind,

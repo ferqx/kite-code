@@ -147,6 +147,7 @@
       "id": "provider-data-policy",
       "sources": [
         "src/core/config/provider-data-policy.ts",
+        "src/core/config/provider-data-admission.ts",
         "src/core/config/session-logging-policy.ts",
         "release/provider-data-policies/**"
       ],

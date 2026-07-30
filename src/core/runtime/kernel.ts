@@ -41,6 +41,7 @@ import {
   type RuntimeStore,
   type StoredEvent,
 } from './store';
+import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 
 // ── Kernel 配置 / Kernel configuration ──
 
@@ -351,7 +352,10 @@ export class AgentKernel {
   }
 
   /** Apply a user action only when it matches the currently persisted interaction. */
-  applyAction(action: RuntimeUserAction): RuntimeActionResult {
+  applyAction(
+    action: RuntimeUserAction,
+    additionalEvents: RuntimeEvent[] = [],
+  ): RuntimeActionResult {
     const events = eventsForRuntimeAction(this.state, action, {
       sandboxAvailable: this.sandboxAvailable,
     });
@@ -370,8 +374,9 @@ export class AgentKernel {
         },
       };
     }
-    this.processEventBatch(events);
-    return { status: 'applied', events };
+    const combined = [...events, ...additionalEvents];
+    this.processEventBatch(combined);
+    return { status: 'applied', events: combined };
   }
 
   private createEnvelope(event: RuntimeEventInput, revision: number): RuntimeEventEnvelope {
@@ -381,16 +386,17 @@ export class AgentKernel {
       }
       return event;
     }
-    const serialized = JSON.stringify(event);
+    const normalizedEvent = normalizeTerminalRuntimeEventV1(event);
+    const serialized = JSON.stringify(normalizedEvent);
     const eventId = createHash('sha256').update(serialized).digest('hex');
     const occurredAt = new Date().toISOString();
     const payload =
-      (event.type === 'user.message_appended' ||
-        event.type === 'model.responded' ||
-        event.type === 'tool.finished') &&
-      !event.createdAt
-        ? { ...event, createdAt: occurredAt }
-        : event;
+      (normalizedEvent.type === 'user.message_appended' ||
+        normalizedEvent.type === 'model.responded' ||
+        normalizedEvent.type === 'tool.finished') &&
+      !normalizedEvent.createdAt
+        ? { ...normalizedEvent, createdAt: occurredAt }
+        : normalizedEvent;
     return {
       eventId,
       threadId: this.state.session.threadId,
@@ -623,6 +629,31 @@ export function createAgentKernel(params: {
       finishedAt: new Date().toISOString(),
     });
   }
+  const recoveredBudget = kernel.getState().resourceBudget;
+  if (recoveredBudget.status === 'active') {
+    for (const reservation of Object.values(recoveredBudget.reservations)) {
+      if (reservation.state === 'reserved') {
+        kernel.processEvent({
+          type: 'resource_budget.released',
+          reservationId: reservation.reservationId,
+        });
+      } else if (reservation.state === 'dispatch_started') {
+        kernel.processEvent({
+          type: 'resource_budget.unknown',
+          reservationId: reservation.reservationId,
+        });
+      }
+    }
+    if (kernel.getState().turn.status !== 'active') {
+      for (const waiter of Object.values(recoveredBudget.waiters ?? {})) {
+        if (waiter.state !== 'waiting') continue;
+        kernel.processEvent({
+          type: 'resource_budget.waiter_cancelled',
+          invocationId: waiter.invocationId,
+        });
+      }
+    }
+  }
   return kernel;
 }
 
@@ -703,7 +734,13 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
     context: normalizeContextRuntimeState((normalizedSnapshot as Partial<RuntimeState>).context),
-    resourceBudget: createLegacyResourceBudgetStateV1(snapshot.schemaVersion),
+    resourceBudget:
+      snapshot.schemaVersion >= 18
+        ? normalizeResourceBudgetMetadata(
+            (snapshot as Partial<RuntimeState>).resourceBudget ??
+              createLegacyResourceBudgetStateV1(snapshot.schemaVersion),
+          )
+        : createLegacyResourceBudgetStateV1(snapshot.schemaVersion),
     providerAdmission: (normalizedSnapshot as Partial<RuntimeState>).providerAdmission ?? {
       pending: [],
       waivers: {},
@@ -776,7 +813,9 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
     context: normalizeContextRuntimeState(raw.context),
-    resourceBudget: raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
+    resourceBudget: normalizeResourceBudgetMetadata(
+      raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
+    ),
     turn: {
       ...state.turn,
       status:
@@ -808,6 +847,21 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
         : {}),
       invocations: state.capabilities?.invocations ?? {},
     },
+  };
+}
+
+function normalizeResourceBudgetMetadata(
+  budget: RuntimeState['resourceBudget'],
+): RuntimeState['resourceBudget'] {
+  if (budget.status !== 'active') return budget;
+  const legacy = budget as RuntimeState['resourceBudget'] & {
+    waiters?: Extract<RuntimeState['resourceBudget'], { status: 'active' }>['waiters'];
+    nextWaiterSequence?: number;
+  };
+  return {
+    ...budget,
+    waiters: legacy.waiters ?? {},
+    nextWaiterSequence: legacy.nextWaiterSequence ?? 0,
   };
 }
 

@@ -1,9 +1,9 @@
 # TUI Run Status Bar — 3 阶段单向状态行
 
 状态：active
-范围：`src/app/tui/run-status.ts`、`src/app/tui/StatusBar.tsx`、`src/app/tui/App.tsx`、`src/app/tui/Footer.tsx`、`tests/run-status.test.ts`、`tests/tui-mock-render.test.tsx`
+范围：`src/app/tui/run-status.ts`、`src/app/tui/StatusBar.tsx`、`src/app/tui/App.tsx`、`src/app/tui/Footer.tsx`、`src/app/tui/reducers/handleEvent.ts`、`tests/run-status.test.ts`、`tests/tui-mock-render.test.tsx`、`tests/runtime/failure-taxonomy.test.ts`
 读取时机：修改 StatusBar 渲染、run-status 推导逻辑、状态行动画、阶段切换规则时必读。
-验证：`bun test tests/run-status.test.ts tests/tui-mock-render.test.tsx`
+验证：`bun test tests/run-status.test.ts tests/tui-mock-render.test.tsx tests/runtime/failure-taxonomy.test.ts`
 
 ## 设计原则
 
@@ -105,6 +105,12 @@ Working 阶段通过 `WORKING_GRADIENT` hex 色值在蓝→青→绿→金之间
 `shouldShowRunStatus` 在渲染前调用，为 false 时跳过 `deriveRunStatusSnapshot()`。
 
 ## Context Footer 与终态提示
+
+Runtime v19 的新终态通过共享 `projectTerminalOutcomeV1` 投影。TUI 只在
+`outcome.status=completed` 时进入完成展示；`unknown`、`blocked`、`budget_exhausted` 和
+`resource_saturated` 保持错误/警告终态，并使用结构化 `safeRetry`，不得从本地化 message
+反推。没有 outcome 的历史事件继续按原 `recoverable` 字段回放。Headless CLI 对带 outcome 的
+同一事件调用同一 mapper，并在 JSON 行中附加 `terminalPresentation`。
 
 `StatsLine` 只读取 Core `ContextStatusSnapshot` 的 utilization；模型名称和累计 usage 不能推导 context 百分比。没有可信窗口但已有 snapshot 时，绝对 token 数必须显示同一 snapshot 的 `estimate.totalInputTokens`，与 `/context` 和压缩前后估算保持同一口径；仅在尚无 snapshot 时才兼容回退到累计 usage。`context.compaction_completed` 到达 App 后必须立即用 checkpoint 的 `inputTokensAfter` 刷新 snapshot 总量，并在窗口可信时重算 utilization，不能保留压缩前的 Footer 数字等待下一次模型调用。状态栏不持久展示历史压缩率（例如 `91% compacted`）；压缩收益只在一次性终态提示和诊断数据中保留。Completed、failed、cancelled 统一通过 Core 脱敏映射生成提示；TUI 以 `compactionId` 去重，每个压缩恰好显示一个不进入 transcript 的终态提示。Summary Provider 失败提示用户检查所选模型的 `contextWindowTokens` 或执行 `/clear`，不得展示 Provider 原始错误正文。
 

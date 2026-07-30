@@ -2,6 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  createProviderDataPolicyRegistryV1,
+  evaluateProviderDataAdmissionV1,
+  loadProviderDataPolicyRegistryV1,
+} from '@/core/config/provider-data-admission';
+import {
   computeProviderDataPolicyBundleDigest,
   computeProviderEndpointIdentityDigest,
   parseProviderDataPolicyBundleV1,
@@ -170,5 +175,116 @@ describe('ProviderDataPolicyV1', () => {
     };
     expect(raiseWorkspaceDataLabelV1(internal, secret)).toEqual(secret);
     expect(raiseWorkspaceDataLabelV1(secret, internal)).toEqual(secret);
+  });
+
+  test('loads only the canonical bundle and fails closed on digest drift or expiry', () => {
+    const bundle = {
+      version: 1 as const,
+      decisionId: 'D-14' as const,
+      revision: 'registry-1',
+      policies: [policy()],
+    };
+    const registry = createProviderDataPolicyRegistryV1(bundle, new Date('2026-08-01T00:00:00Z'));
+    const admitted = evaluateProviderDataAdmissionV1({
+      featureEnabled: true,
+      profile: 'limited',
+      registry,
+      route,
+      now: new Date('2026-08-01T00:00:00Z'),
+      payload: [
+        {
+          kind: 'user_prompt',
+          text: 'summarize public API behavior',
+          label: {
+            classification: 'internal',
+            source: 'artifact',
+            provenance: 'user_prompt',
+          },
+        },
+      ],
+    });
+    expect(admitted).toMatchObject({
+      admitted: true,
+      reason: 'admitted',
+      routeAlias: 'openai-compatible:operator.example:primary:US-EAST',
+      maxWorkspaceDataClassification: 'confidential',
+    });
+    expect(admitted).not.toHaveProperty('endpointOrigin');
+    expect(
+      evaluateProviderDataAdmissionV1({
+        featureEnabled: true,
+        profile: 'limited',
+        registry,
+        expectedRegistryDigest: `sha256:${'0'.repeat(64)}`,
+        route,
+        payload: [],
+      }).reason,
+    ).toBe('provider_route_identity_mismatch');
+    expect(
+      evaluateProviderDataAdmissionV1({
+        featureEnabled: true,
+        profile: 'limited',
+        registry,
+        route,
+        now: new Date('2028-01-01T00:00:00Z'),
+        payload: [],
+      }).reason,
+    ).toBe('provider_policy_expired');
+  });
+
+  test('loads the release warehouse without allowing config overlays', () => {
+    const registry = loadProviderDataPolicyRegistryV1(
+      join(process.cwd(), 'release/provider-data-policies/approved-v1.json'),
+      new Date('2026-07-30T00:00:00Z'),
+    );
+    expect(registry.revision).toBe('m0-empty-2026-07-30');
+    expect(registry.policiesByRouteDigest).toEqual({});
+    expect(
+      evaluateProviderDataAdmissionV1({
+        featureEnabled: true,
+        profile: 'limited',
+        registry,
+        route,
+        payload: [],
+      }),
+    ).toMatchObject({ admitted: false, reason: 'provider_policy_missing' });
+    expect(
+      evaluateProviderDataAdmissionV1({
+        featureEnabled: true,
+        profile: 'internal_experimental',
+        registry,
+        route,
+        payload: [
+          {
+            kind: 'file_snippet',
+            text: 'confidential design',
+            label: {
+              classification: 'confidential',
+              source: 'artifact',
+              provenance: 'workspace_file',
+            },
+          },
+        ],
+      }),
+    ).toMatchObject({ admitted: false, reason: 'provider_data_classification_denied' });
+    expect(
+      evaluateProviderDataAdmissionV1({
+        featureEnabled: true,
+        profile: 'internal_experimental',
+        registry,
+        route,
+        payload: [
+          {
+            kind: 'user_prompt',
+            text: 'read ~/.ssh/id_ed25519',
+            label: {
+              classification: 'internal',
+              source: 'artifact',
+              provenance: 'user_prompt',
+            },
+          },
+        ],
+      }),
+    ).toMatchObject({ admitted: false, reason: 'provider_secret_denied' });
   });
 });

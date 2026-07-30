@@ -4,7 +4,7 @@
 
 读取时机：理解或修改 Agent 主循环、Runtime Kernel、Capability、Policy、Execution、Verification，以及 MCP、Skill、Subagent 的跨模块职责时。
 
-验证：`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
 相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
@@ -84,15 +84,31 @@ Runtime schema v15 将 transcript message identity、结构化 Tool Result 和 M
 
 Runtime schema v17 将当前 turn 的 `active/completed/aborted` 生命周期和 abort 诊断持久化。Scheduler 对 completed 或 aborted turn 始终返回 `stop`，只有新的 `turn.started` 才能重新开放调度。迁移旧 snapshot 时，Kernel 从 snapshot position 之前已经落盘的 `turn.completed` / `turn.aborted` 恢复终态，避免进程恢复后把已取消 turn 误判为可继续并再次调用模型。
 
-Runtime schema v18 新增 `ResourceBudgetV1` 的 run-scoped 累计 ledger。父 Agent 与 descendants
+Runtime schema v19 在 v18 `ResourceBudgetV1` run-scoped 累计 ledger 上增加持久化 FIFO waiter
+和结构化 terminal outcome。父 Agent 与 descendants
 共享一个 `runId`、累计 usage 和 reservation map；`resource_budget.configured/reserved/
-dispatch_started/reconciled/released/unknown` 事件通过现有 event + snapshot 单事务持久化。
+dispatch_started/reconciled/released/unknown` 以及 waiter enqueue/promote/cancel/timeout 事件
+通过现有 event + snapshot 单事务持久化。
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
 dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
-`legacy_unconfigured`，不会伪造余额；production admission 必须拒绝这种状态。当前 1C.1 只建立
-schema、reducer、Store 恢复与不变量，实际 model/tool/MCP/subagent dispatch 前 admission 和
-FIFO concurrency permit 由 1C.2 接入；默认关闭的 `resourceBudgetV1` 不能单独生成 production
-资格。
+`legacy_unconfigured`，不会伪造余额；v18 ledger 保留 reservation，并补齐空 waiter queue。
+恢复时未 dispatch 的 reservation 自动 release，已 dispatch 无 terminal 的 reservation 转
+`unknown` 且不退款/重放。
+
+Runner 对 model、compaction、auto-review、Verification、builtin/MCP/Skill/Sub-agent tool、
+Provider recovery 和 artifact-writing tool 在副作用前执行 admission。preparation transaction
+先原子持久化 reservation/queue promotion，再单独持久化 `dispatch_started`；tool/capability
+terminal facts 与 actual reconciliation 在一个 result transaction 中提交。并发调用使用按
+resource 的 FIFO sequence；shell 同时要求 `tool + shell_invocation` compound permit，不持有
+部分额度。等待期限为 concurrency deadline 与 run deadline 的较早者；稳定结果区分
+`tool_concurrency_saturated`、`shell_concurrency_saturated` 和 `budget_exhausted`。Sub-agent
+内部计量缺少细粒度 usage 时以父 reservation 的 versioned upper bound 保守结算，不会隐式
+退款。
+
+`RuntimeSchedulingPolicyV1` 从实际 scheduler 常量导出 parallel-read allowlist/ceiling/barrier、
+shell overlap/approval/rejection、FIFO compound admission 和 late-event policy 的唯一 canonical
+snapshot/digest。Release tooling 只能 hash/消费该 snapshot。默认关闭的 `resourceBudgetV1`
+不能单独生成 production 资格。
 
 Context compaction 当前只有一条 Markdown narrative 管线。专用 summary request 使用当前对话模型、空工具集、确定性温度和零 SDK retry；输入只包含最小固定 prompt、已有 checkpoint narrative、全部 safe settled history 与作为不可信数据的 custom instructions，不携带普通 Agent system prompt、工具 schema、live tail 或动态 RuntimeState。模型内容产物只有规范化 `summary: string`，不生成工具结果投影、JSON、fact/evidence ledger、file ledger、repair、chunk 或 merge 产物。首次和增量压缩都只调用模型一次；manual 总结全部安全历史，auto 保护当前 turn 后总结其余安全历史，增量输入为旧 narrative 加 checkpoint 后的全部 safe history，整体替换 active checkpoint。显式 summary input 上限超出时整体失败，不得静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、可序列化且不超过 narrative 上限。Manual 与 auto 共享至少 1024 token 的统一绝对缩减门槛；target ratio 只作诊断。Checkpoint 保存 Markdown 与 Core 生成的 boundary、digest、revision 和 estimate；统一 serializer 规范化 LF、移除外围空白并 XML 转义后，生成且只生成一个历史区首位的 `<compacted_history>` assistant frame。
 
