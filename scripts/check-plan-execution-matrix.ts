@@ -406,6 +406,7 @@ const phase1SchemaCommit = '4b8eec058df0af545675fc0e1c4135ee855848fd';
 const phase1AdmissionCommit = '1e21055eb8b2579d710eb566728294f2ad8b2621';
 const phase1OperationalCommit = 'd0bd571e6a937aac55850bcc09df6f41bf95ac99';
 const phase1CompositionCommit = '2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee';
+const phase1NativeEvidenceCommit = '1063e879933f3e1b0cf8c0958363c999bb2696ab';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
@@ -507,8 +508,22 @@ for (const taskId of ['1A.4', '1B.0']) {
   if (!bindingRow.includes(`| \`${phase1CompositionCommit}\` |`)) {
     fail(`${taskId}: binding must use the completed composition/stability baseline`);
   }
-  if (!/\| `(ready|in_progress)` \|/.test(bindingRow)) {
-    fail(`${taskId}: active execution binding must be ready or in_progress`);
+  if (!bindingRow.includes('| `completed` |')) {
+    fail(`${taskId}: native-evidence execution binding must be completed`);
+  }
+}
+
+const phase1BoundaryBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1B.1 |'));
+if (!phase1BoundaryBinding) {
+  fail('1B.1: missing execution-boundary schema binding');
+} else {
+  if (!phase1BoundaryBinding.includes(`| \`${phase1NativeEvidenceCommit}\` |`)) {
+    fail('1B.1: binding must use the completed native-evidence baseline');
+  }
+  if (!phase1BoundaryBinding.includes('| `in_progress` |')) {
+    fail('1B.1: execution-boundary schema binding must be in_progress');
   }
 }
 
@@ -545,6 +560,24 @@ for (const completionPath of phase1CompletionRecords) {
     fail(
       `${relative(root, completionPath)} must identify the composition/stability implementation`,
     );
+  }
+}
+
+const phase1IsolationCompletionPath = resolve(
+  root,
+  'docs',
+  'space',
+  'execution',
+  'completed',
+  '2026-07-31-agent-production-execution-isolation-spike.md',
+);
+const phase1IsolationCompletion = readFileSync(phase1IsolationCompletionPath, 'utf8');
+if (!/^状态：completed$/m.test(phase1IsolationCompletion)) {
+  fail(`${relative(root, phase1IsolationCompletionPath)} must be completed`);
+}
+for (const evidence of ['30579701659', 'ADR-0061', 'D-04']) {
+  if (!phase1IsolationCompletion.includes(evidence)) {
+    fail(`${relative(root, phase1IsolationCompletionPath)} must identify ${evidence}`);
   }
 }
 

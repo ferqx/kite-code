@@ -7,9 +7,10 @@
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §7、§9.4、§18
 
-Task 1B.0 已基于 `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` 进入 `in_progress`：
-bounded probe、拟议 ADR 和空支持矩阵已完成本地验证，但仍等待三平台原生 artifact、ADR
-acceptance 与 D-04 关闭。Task 1B.1–1B.4 继续 blocked，其余 Task 按依赖保持未绑定。规范记录见
+Task 1B.0 已完成：三平台原生 probe 均为 `excluded`、`productionSupported=false`，
+ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1 已基于
+`1063e879933f3e1b0cf8c0958363c999bb2696ab` 激活；1B.2–1B.4 继续等待 1B.1，其余 Task 按
+依赖保持未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标

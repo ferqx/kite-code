@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-07-31（Task 1A.4/1B.0 进入原生证据阶段）
+最后更新：2026-07-31（完成 Task 1A.4/1B.0，激活 1B.1）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -21,8 +21,8 @@
 |------|------|--------|------|-----------|----------|
 | [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | active | P0 | 已批准 Agent 生产就绪 RFC | Phase 0–6 总入口 | `MS:M0` 已完成；首发拓扑、依赖图、后续 Gate、共享证据与回滚规则 |
 | [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | archived | P0 | 生产就绪 roadmap | RFC Phase 0 | single-maintainer 治理与 M0 已完成；[完成记录](../execution/completed/2026-07-30-agent-production-governance.md) |
-| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | active | P0 | `MS:M0` | RFC Phase 1A | Task 1A.1/1A.2/1A.3/1A.5 completed；Task 1A.4 in progress：等待三平台 ACL evidence |
-| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | active | P0 | `MS:M0` | RFC Phase 1B | Task 1B.0 in progress：bounded probe 已收敛，等待原生 evidence/ADR/D-04 |
+| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | active | P0 | `MS:M0` | RFC Phase 1A | Task 1A.1–1A.5 completed；1A.6 等待 1B.4 |
+| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | active | P0 | `MS:M0` | RFC Phase 1B | Task 1B.0 completed，D-04 空支持集；Task 1B.1 in progress |
 | [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | active | P0 | `MS:M0` | RFC Phase 1C | Task 1C.1–1C.4/1C.6 completed；1C.5/1C.7 仍等待依赖 |
 | [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) | draft | P0 | 2A-F 依赖 Phase 0；2A-RC 依赖 1A–1C/2B/3 | RFC Phase 2A | payload/detached manifest、Release Profile、evidence/Gate、平台制品 |
 | [`2026-07-29-agent-production-evaluation.md`](2026-07-29-agent-production-evaluation.md) | draft | P0 | Phase 0、2A-F；执行 fixture 依赖 1B/1C | RFC Phase 2B | Agent task suite、oracle、重复运行、人工验收 |

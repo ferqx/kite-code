@@ -14,19 +14,21 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 
 ## 当前支持集合
 
-当前 production-supported platform/backend 集合为空，D-04 保持 `open`，不得生成 production
-artifact。候选组合不是支持声明：
+当前 production-supported platform/backend 集合为空，D-04 已按“空支持集”关闭，不得生成
+production artifact。候选组合不是支持声明：
 
 | runner 候选 | backend 候选 | 当前结论 | 主要缺口 |
 | --- | --- | --- | --- |
 | macOS 15 | Seatbelt | `excluded` | Workspace 外及 protected path 读写仍开放；无完整 process-tree 上限、继承与入口组合证据 |
-| Ubuntu 24.04 | bubblewrap | `excluded` | 原生证据未固定；无完整 process-tree 上限与入口组合证据 |
+| Ubuntu 24.04 | bubblewrap | `excluded` | Workspace 外/protected path deny 未证明；无完整 process-tree 上限、继承与入口组合证据 |
 | Windows Server 2025 | none | `excluded` | 没有 filesystem/network sandbox backend |
 
-本机 macOS arm64、Darwin 25.6.0、Bun 1.3.14 的探针只证明当前 Seatbelt backend 可以允许
-Workspace 写并阻断 network；它同时证明 Workspace 外、`.git` 与 symlink escape 写没有被
-现有 profile 阻断，因此结论仍是 `excluded`。本机证据不能代替另外两个原生 runner，也不能
-代替 TUI/CLI composition evidence。
+固定证据来自
+[Platform Capability Probe run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)，
+绑定提交 `a4bdf22aa7c2a987734524c278c4750e7b9faa96`。macOS arm64、Ubuntu x64 与 Windows
+x64 artifact 均为 `excluded`、`productionSupported=false`；三个 artifact 的 archive digest
+固定在 support matrix。它们不包含 TUI/CLI composition evidence，也不能产生 production
+资格。
 
 ## 准入语义
 
@@ -42,13 +44,13 @@ backend discovery、sandbox 命令成功、顶层 shell invocation permit、PID 
 `--die-with-parent`、child 自然退出或 proxy 环境变量都不是对应能力的 enforcement evidence。
 探针无法执行或不能证明时按 `unavailable/unsupported` 处理，最终结论为 `excluded`。
 `outcome` 只是技术能力分类；探针固定输出 `productionSupported=false`，不能自行完成治理签署。
-即使某 runner 的技术项全部为 `enforced`，也必须由 accepted ADR、已关闭 D-04 与已固定矩阵的
-独立 release gate 才能产生 production support 声明。`backend=none` 不可能产生进程型
+即使某 runner 的技术项全部为 `enforced`，也必须由新的追加 ADR、新鲜证据与独立 release
+gate 才能改变已关闭 D-04 的空支持集并产生 production support 声明。`backend=none` 不可能产生进程型
 `supported`，只能在另行验证的无进程 fallback 条件下产生 `read_only_only`。
 
 ## Evidence 生命周期
 
 探针 JSON 记录实际 OS release/version、architecture、Bun、backend、逐项 verdict、限制和
-canonical digest。Workflow artifact 运行并固定前，静态 support matrix 保持
-`native_evidence_pending`。任一 backend、profile、composition root、runner image 或边界实现
-变化都需要新 evidence；只有拟议 ADR accepted 且 D-04 关闭后，矩阵才能加入非空生产支持项。
+canonical digest。静态 support matrix 当前为 `accepted_empty_support_set`。任一 backend、
+profile、composition root、runner image 或边界实现变化都需要新 evidence；只有新的追加 ADR
+与独立 release gate 才能加入非空生产支持项。

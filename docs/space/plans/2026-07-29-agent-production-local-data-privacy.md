@@ -7,10 +7,9 @@
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §3.4、§9.5、§13、§14
 
-Task 1A.1、1A.2、1A.3 与 1A.5 已完成；1A.3 实现提交为
-`2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`。Task 1A.4 本地实现与复核已通过，当前为
-`in_progress`，等待 macOS/Ubuntu/Windows 原生 ACL workflow artifact 后再关闭；其余 Task
-继续按依赖保持未绑定。规范记录见
+Task 1A.1–1A.5 已完成（1A.4 最终加固提交为
+`1063e879933f3e1b0cf8c0958363c999bb2696ab`）；1A.6 继续等待 1B.4，其余 Task 按依赖保持
+未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标

@@ -36,9 +36,8 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   唯一产生；artifact commit 为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。
 - Gate 结论仅为 `approved_for_internal_implementation`，不生成 production artifact，也不允许
   external cohort。
-- 1A.1/1A.2/1A.3/1A.5 与 1C.1/1C.2/1C.3/1C.4/1C.6 已完成；当前 1A.4 与
-  1B.0 为 `in_progress`，本地实现/复核已收敛但三平台原生 evidence 尚未固定；后续 milestone
-  均为 pending。
+- 1A.1–1A.5、1B.0 与 1C.1/1C.2/1C.3/1C.4/1C.6 已完成；D-04 以空支持集关闭，不产生
+  production artifact。1B.1 已激活；后续 milestone 均为 pending。
 
 ## 首发支持边界
 
