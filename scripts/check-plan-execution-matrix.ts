@@ -438,7 +438,9 @@ const phase1NetworkCommit = 'bc03f77a3dac2962cd3158d3413f292b8388a0d8';
 const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
 const phase1RemoteMcpCommit = '545161a7103365038989c6a935a216c5bd5fc7e8';
 const phase1PrivacyClosureEvidenceCommit = '389a0cc45c36e59d961c659ab4df4015a722f7de';
+const phase1FailureConformanceBaseline = '4a64837855b76c8c71e956b19d04ad67d77b18c9';
 const phase1PrivacyPlan = sources.get('1A') ?? '';
+const phase1RuntimePlan = sources.get('1C') ?? '';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
@@ -674,6 +676,65 @@ if (!phase1PrivacyPlanIndexRow) {
     fail('plans/index.md: Phase 1A row must link the completion record');
   }
 }
+
+const phase1FailureConformanceBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1C.5 |'));
+if (!phase1FailureConformanceBinding) {
+  fail('1C.5: missing failure-mode conformance execution binding');
+} else {
+  if (!phase1FailureConformanceBinding.includes(`| \`${phase1FailureConformanceBaseline}\` |`)) {
+    fail('1C.5: binding must use the reviewed Phase 1A closure baseline');
+  }
+  if (!phase1FailureConformanceBinding.includes('| `in_progress` |')) {
+    fail('1C.5: failure-mode conformance binding must be in_progress');
+  }
+  const cells = parsePipeRow(phase1FailureConformanceBinding);
+  if (cells[6] !== '—') {
+    fail('1C.5: in-progress binding must not claim a completion record');
+  }
+}
+if (
+  !phase1RuntimePlan.includes(
+    `Task 1C.5 已以\n\`${phase1FailureConformanceBaseline}\` 全绿基线激活`,
+  )
+) {
+  fail('1C.5: runtime plan must record the active reviewed baseline');
+}
+const phase1RuntimePlanIndexRow = plansIndex
+  .split('\n')
+  .find((line) =>
+    line.startsWith(
+      '| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) |',
+    ),
+  );
+if (!phase1RuntimePlanIndexRow?.includes('1C.5 in progress')) {
+  fail('plans/index.md: Phase 1C row must record 1C.5 in progress');
+}
+if (!/1B\.2\/1B\.3 与 1C\.5 正在执行/.test(roadmap)) {
+  fail('roadmap must record 1C.5 in progress');
+}
+const phase1FailureConformanceRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 15 |'));
+if (phase1FailureConformanceRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 15 exactly once; found ${phase1FailureConformanceRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '激活 1C.5 failure-mode conformance',
+    phase1FailureConformanceBaseline,
+    'Required run 30671609567',
+    '五个 job 全部通过',
+    '同 head 三个原生 workflow 全部通过',
+  ]) {
+    if (!phase1FailureConformanceRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 15 must identify ${evidence}`);
+    }
+  }
+}
+requireReachableCommit(phase1FailureConformanceBaseline, '1C.5');
 
 for (const [description, pattern] of [
   ['Phase 1A completion', /Phase 1A（Task 1A\.1–1A\.7）已完成/],
