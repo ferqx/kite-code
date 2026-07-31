@@ -7,6 +7,8 @@ import {
   createRuntimeEffectExecutor,
   prepareRuntimeEffectForBudgetV1,
 } from '@/core/runtime/executor';
+import { resolveFailureModeV1 } from '@/core/runtime/failure-mode-conformance';
+import { classifyFailure } from '@/core/runtime/failures';
 import { AgentKernel } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
@@ -15,9 +17,10 @@ import {
   planRuntimeBudgetAdmissionV1,
   reconciliationEventsForReservationsV1,
 } from '@/core/runtime/resource-budget-admission';
-import { runRuntimeLoop } from '@/core/runtime/runner';
+import { resolveResourceAdmissionFailureOutcomeV1, runRuntimeLoop } from '@/core/runtime/runner';
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { failedTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
 import { createMockModel } from '../mock-model';
 
 function configuredState(overrides: Partial<typeof LIMITED_RESOURCE_BUDGET_V1> = {}): RuntimeState {
@@ -382,6 +385,107 @@ describe('runtime resource budget admission', () => {
       },
     });
     kernel.close();
+  });
+
+  test('runner emits the canonical failure-mode outcome when budget admission is denied', async () => {
+    const now = Date.now();
+    const state = configuredState({ maxModelRequests: 1 });
+    if (state.resourceBudget.status === 'active') {
+      state.resourceBudget = {
+        ...state.resourceBudget,
+        startedAt: new Date(now).toISOString(),
+        deadlineAt: new Date(now + 30_000).toISOString(),
+        reconciledUsage: {
+          ...state.resourceBudget.reconciledUsage,
+          counters: {
+            ...state.resourceBudget.reconciledUsage.counters,
+            modelRequests: 1,
+          },
+        },
+      };
+    }
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const events: import('@/core/runtime/events').RuntimeEvent[] = [];
+    let executorCalled = false;
+
+    for await (const event of runRuntimeLoop(
+      kernel,
+      async () => {
+        executorCalled = true;
+        return [];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event);
+    }
+
+    expect(executorCalled).toBe(false);
+    const terminal = events.find((event) => event.type === 'run.error');
+    expect(terminal).toMatchObject({
+      type: 'run.error',
+      failure: { kind: 'budget_exceeded' },
+    });
+    expect(terminal?.type === 'run.error' ? terminal.outcome : undefined).toEqual(
+      resolveFailureModeV1('budget_exhausted', {
+        knownExternalEffects: 'known',
+      }).terminalOutcome!,
+    );
+    kernel.close();
+  });
+
+  test.each([
+    ['budget_unconfigured', 'mandatory_admin_policy_unavailable', 'none'],
+    ['budget_exhausted', 'budget_exhausted', 'known'],
+    ['tool_concurrency_saturated', 'tool_permit_timeout', 'none'],
+    ['shell_concurrency_saturated', 'shell_permit_timeout', 'none'],
+  ] as const)('production admission adapter maps %s to the canonical %s outcome', (reason, mode, knownExternalEffects) => {
+    const state =
+      reason === 'budget_unconfigured'
+        ? createInitialRuntimeState({ threadId: 'unconfigured', userId: 'u', workspace: '/' })
+        : configuredState();
+    if (reason === 'budget_exhausted' && state.resourceBudget.status === 'active') {
+      state.resourceBudget = {
+        ...state.resourceBudget,
+        reconciledUsage: {
+          ...state.resourceBudget.reconciledUsage,
+          counters: {
+            ...state.resourceBudget.reconciledUsage.counters,
+            modelRequests: 1,
+          },
+        },
+      };
+    }
+    expect(resolveResourceAdmissionFailureOutcomeV1(reason, state)).toEqual(
+      resolveFailureModeV1(mode, { knownExternalEffects }).terminalOutcome!,
+    );
+  });
+
+  test('production admission adapter keeps reconciliation-required outcomes unknown', () => {
+    const state = configuredState();
+    const plan = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'call_model' },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    const dispatched = apply(state, [...plan.preparationEvents, ...plan.dispatchEvents]);
+    const unknown = apply(
+      dispatched,
+      plan.reservationIds.map((reservationId) => ({
+        type: 'resource_budget.unknown' as const,
+        reservationId,
+      })),
+    );
+
+    expect(resolveResourceAdmissionFailureOutcomeV1('reconciliation_required', unknown)).toEqual(
+      failedTerminalOutcomeV1(
+        classifyFailure('unknown', 'Runtime resource admission denied: reconciliation_required.'),
+        { knownExternalEffects: 'unknown' },
+      ),
+    );
   });
 
   test('releases an auto-review reservation when the final local Provider gate denies dispatch', async () => {

@@ -33,6 +33,7 @@ import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
 import { eventsForRunCancellation } from './actions';
 import type { RuntimeEvent } from './events';
 import { createRuntimeEffectExecutor, prepareRuntimeEffectForBudgetV1 } from './executor';
+import { resolveFailureModeV1 } from './failure-mode-conformance';
 import { recordRuntimeFailure } from './failures';
 import { createAgentKernel } from './kernel';
 import { LIMITED_RESOURCE_BUDGET_V1 } from './resource-budget';
@@ -224,16 +225,19 @@ export async function* runRuntimeAgent(
       turnId: kernel.getState().turn.turnId,
       userVisible: true,
     });
+    const conformance = resolveFailureModeV1(
+      cancellationIncomplete ? 'cancel_timeout' : 'budget_exhausted',
+      {
+        knownExternalEffects: cancellationIncomplete || unknownReservation ? 'unknown' : 'known',
+      },
+    );
     return {
       type: 'run.error',
       message: failure.message,
       recoverable: false,
       failure: failure.failure,
       turnId: failure.turnId,
-      outcome: failedTerminalOutcomeV1(failure.failure, {
-        knownExternalEffects: cancellationIncomplete || unknownReservation ? 'unknown' : 'known',
-        reasonCode: cancellationIncomplete ? 'cancel_incomplete' : 'budget_exhausted',
-      }),
+      outcome: conformance.terminalOutcome!,
     };
   };
   input.onKernelControl?.({

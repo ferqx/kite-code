@@ -40,6 +40,11 @@ route、endpoint 或 payload。revision/cohort 使用最多 64 字符的小写�
 `sha256:` 加 64 位小写十六进制，release version 最多 32 字符且只接受版本字符；不合法值直接
 省略。release profile 是 `limited | internal | canary | ga` 封闭枚举。
 
+Runtime 的 deadline、budget admission 等 `run.error` producer 可以携带结构化
+`RunTerminalOutcomeV1` 供 Runtime Store、恢复与前端投影使用；session metadata mapper 仍只记录
+allowlist 中的稳定 `FailureKind`，不得把 terminal outcome 对象或用户可见错误文案整体序列化到
+session log。
+
 永久禁止 user/model/reasoning/summary 正文、tool args/stdout/stderr、MCP content、文件和
 workspace path、Plan/Skill/Capability description、base URL、header、credential reference、
 原始异常栈和 Provider response body。Failure classifier 只消费结构化 failure，不从用户可见

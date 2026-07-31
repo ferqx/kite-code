@@ -50,7 +50,7 @@ export function failedTerminalOutcomeV1(
 ): RunTerminalOutcomeV1 {
   const reasonCode = input.reasonCode ?? terminalReasonForFailureV1(failure.kind);
   const status: RuntimeTerminalStatusV1 =
-    reasonCode === 'budget_exhausted'
+    reasonCode === 'budget_exhausted' || reasonCode === 'process_limit_exceeded'
       ? 'budget_exhausted'
       : reasonCode === 'resource_saturated' ||
           reasonCode === 'tool_concurrency_saturated' ||

@@ -6,6 +6,7 @@ import type { AgentConfig } from '@/core/config';
 import { aiMessage } from '@/core/messages';
 import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { resolveFailureModeV1 } from '@/core/runtime/failure-mode-conformance';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
 import { createInitialRuntimeState } from '@/core/runtime/state';
@@ -89,6 +90,12 @@ describe('Runtime run deadline', () => {
           cause: 'error',
           reason: expect.stringContaining('deadline exceeded'),
         }),
+      );
+      const deadlineTerminal = events.find((event) => event.type === 'run.error');
+      expect(deadlineTerminal?.type === 'run.error' ? deadlineTerminal.outcome : undefined).toEqual(
+        resolveFailureModeV1('budget_exhausted', {
+          knownExternalEffects: 'unknown',
+        }).terminalOutcome!,
       );
       expect(events).toContainEqual(
         expect.objectContaining({

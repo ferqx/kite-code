@@ -62,6 +62,16 @@ Runtime schema v19 的终态使用 `RunTerminalOutcomeV1`。展示层读取 reas
 effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
 `status=completed` 可进入完成展示。
 
+统一失败矩阵由 `resolveFailureModeV1()` 解析。它为 sandbox/network/worktree、model/MCP、
+persistence、预算与并发、process-tree、compaction/Verification、可选诊断和 rollout 返回同一
+组 disposition、invocation 数、durable/external-effects 状态、reason、恢复入口与 fallback。
+预算准入和 run deadline 直接消费该结果；suite 将其 terminal 结果通过 Core recovery、CLI 与
+TUI 的同一 `RunTerminalOutcomeV1` 投影复测。其他 producer 需要显式接线或等价入口 contract
+test 后才能声明 coverage。展示层和各入口不能用本地错误字符串发明更宽松 fallback；缺少
+external-effect 证据时结果为 `unknown`，未 reconciliation 时不能继续。process-tree 超限且清理有明确
+正向证据时仍以 `budget_exhausted` 状态结束，稳定 reason 保留
+`process_limit_exceeded`，清理未确认则为 `cancel_incomplete`/unknown。
+
 Runtime schema v20 保留上述终态，并把每个网络 hop 的 allow/deny admission receipt 持久化到
 对应 Tool Call。获准 socket 只有在 receipt event 提交成功后才能打开；恢复 v19 snapshot 时
 不会为历史调用补造网络决定。

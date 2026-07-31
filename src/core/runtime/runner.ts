@@ -1,6 +1,7 @@
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { RuntimeUserAction } from './actions';
 import type { RuntimeEvent } from './events';
+import { resolveFailureModeV1 } from './failure-mode-conformance';
 import { classifyFailure } from './failures';
 import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
 import {
@@ -9,7 +10,11 @@ import {
   reconciliationEventsForReservationsV1,
 } from './resource-budget-admission';
 import { decideNextEffect } from './scheduler';
-import { completedTerminalOutcomeV1, failedTerminalOutcomeV1 } from './terminal-outcome';
+import {
+  completedTerminalOutcomeV1,
+  failedTerminalOutcomeV1,
+  type RunTerminalOutcomeV1,
+} from './terminal-outcome';
 
 export interface RuntimeActionProvider {
   requestAction(
@@ -436,7 +441,7 @@ export async function* runRuntimeLoop(
           }
           const failureEvent = resourceAdmissionFailureEvent(
             admission.reason,
-            kernel.getState().turn.turnId,
+            kernel.getState() as import('./state').RuntimeState,
           );
           const terminalEvents = resourceAdmissionTerminalEvents(
             kernel.getState() as import('./state').RuntimeState,
@@ -449,7 +454,7 @@ export async function* runRuntimeLoop(
         if (admission.status === 'denied') {
           const failureEvent = resourceAdmissionFailureEvent(
             admission.reason,
-            kernel.getState().turn.turnId,
+            kernel.getState() as import('./state').RuntimeState,
           );
           const terminalEvents = resourceAdmissionTerminalEvents(
             kernel.getState() as import('./state').RuntimeState,
@@ -618,7 +623,7 @@ export async function* runRuntimeLoop(
 
 function resourceAdmissionFailureEvent(
   reason: RuntimeBudgetAdmissionReasonV1,
-  turnId: string,
+  state: import('./state').RuntimeState,
 ): Extract<RuntimeEvent, { type: 'run.error' }> {
   const failureKind =
     reason === 'budget_unconfigured'
@@ -634,15 +639,49 @@ function resourceAdmissionFailureEvent(
     message: failure.message,
     recoverable: false,
     failure,
-    turnId,
-    outcome: failedTerminalOutcomeV1(failure, {
-      knownExternalEffects: reason === 'reconciliation_required' ? 'unknown' : 'none',
-      reasonCode:
-        reason === 'tool_concurrency_saturated' || reason === 'shell_concurrency_saturated'
-          ? reason
-          : undefined,
-    }),
+    turnId: state.turn.turnId,
+    outcome: resolveResourceAdmissionFailureOutcomeV1(reason, state),
   };
+}
+
+/** Production adapter from budget admission reasons to the canonical terminal policy. */
+export function resolveResourceAdmissionFailureOutcomeV1(
+  reason: RuntimeBudgetAdmissionReasonV1,
+  state: import('./state').RuntimeState,
+): RunTerminalOutcomeV1 {
+  const reservationStates =
+    state.resourceBudget.status === 'active'
+      ? Object.values(state.resourceBudget.reservations).map((reservation) => reservation.state)
+      : [];
+  const knownExternalEffects = reservationStates.some(
+    (reservationState) => reservationState === 'dispatch_started' || reservationState === 'unknown',
+  )
+    ? 'unknown'
+    : reservationStates.some((reservationState) => reservationState === 'reconciled') ||
+        (state.resourceBudget.status === 'active' &&
+          (state.resourceBudget.reconciledUsage.counters.modelRequests > 0 ||
+            state.resourceBudget.reconciledUsage.counters.toolInvocations > 0 ||
+            state.resourceBudget.reconciledUsage.counters.artifactBytes > 0))
+      ? 'known'
+      : 'none';
+  const conformanceMode =
+    reason === 'budget_unconfigured'
+      ? 'mandatory_admin_policy_unavailable'
+      : reason === 'budget_exhausted'
+        ? 'budget_exhausted'
+        : reason === 'tool_concurrency_saturated'
+          ? 'tool_permit_timeout'
+          : reason === 'shell_concurrency_saturated'
+            ? 'shell_permit_timeout'
+            : undefined;
+  const conformanceOutcome = conformanceMode
+    ? resolveFailureModeV1(conformanceMode, { knownExternalEffects }).terminalOutcome
+    : null;
+  if (conformanceOutcome) return conformanceOutcome;
+  return failedTerminalOutcomeV1(
+    classifyFailure('unknown', `Runtime resource admission denied: ${reason}.`),
+    { knownExternalEffects: 'unknown' },
+  );
 }
 
 function resourceAdmissionTerminalEvents(

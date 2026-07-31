@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { projectCliRuntimeEventV1 } from '@/app/cli';
+import { resolveFailureModeV1 } from '@/core/runtime/failure-mode-conformance';
 import { classifyFailure, terminalReasonForFailureV1 } from '@/core/runtime/failures';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
@@ -16,6 +17,12 @@ describe('runtime terminal taxonomy v1', () => {
     expect(terminalReasonForFailureV1('mandatory_policy_unavailable')).toBe(
       'mandatory_policy_unavailable',
     );
+    expect(
+      failedTerminalOutcomeV1(classifyFailure('process_limit_exceeded', 'tree too large')),
+    ).toMatchObject({
+      status: 'budget_exhausted',
+      reasonCode: 'process_limit_exceeded',
+    });
     const unknown = failedTerminalOutcomeV1(classifyFailure('unknown', 'unknown external result'), {
       knownExternalEffects: 'unknown',
     });
@@ -36,7 +43,9 @@ describe('runtime terminal taxonomy v1', () => {
       workspace: '/',
     });
     const failure = classifyFailure('verification_inconclusive', 'localized display text');
-    const outcome = failedTerminalOutcomeV1(failure, { pendingVerification: true });
+    const outcome = resolveFailureModeV1('verification_inconclusive', {
+      knownExternalEffects: 'known',
+    }).terminalOutcome!;
     const state = reduceRuntimeState(initial, {
       type: 'run.error',
       message: '任意展示字符串',
