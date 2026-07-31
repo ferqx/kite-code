@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { findUsableBubblewrap } from './platform';
 import type { ResourceLimits } from './types';
 import { DEFAULT_RESOURCE_LIMITS } from './types';
 
@@ -128,11 +129,12 @@ function runDarwinPhysicalCleanup(target: string): boolean {
 }
 
 function runLinuxIsolatedCleanup(target: string): boolean {
-  const bwrap = Bun.which('bwrap');
+  const bwrap = findUsableBubblewrap();
   if (!bwrap) {
-    // Without a native backend createSandboxExecutor never creates a runtime.
-    // Keep direct utility callers/tests recoverable without pretending isolation.
-    return runWindowsPhysicalCleanup(target);
+    // An installed but unusable binary is not a native cleanup boundary. The
+    // executor will not select it, and any pre-existing runtime is retained so
+    // a physical traversal cannot race an attacker-controlled symlink swap.
+    return false;
   }
   const args = [bwrap];
   for (const path of ['/usr', '/bin', '/sbin', '/lib', '/lib64']) {

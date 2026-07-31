@@ -44,6 +44,9 @@ Workspace-bound 只读工具、network-off 和两个入口组合证据；当前�
 backend discovery、sandbox 命令成功、顶层 shell invocation permit、PID namespace、
 `--die-with-parent`、child 自然退出或 proxy 环境变量都不是对应能力的 enforcement evidence。
 探针无法执行或不能证明时按 `unavailable/unsupported` 处理，最终结论为 `excluded`。
+Linux backend detection 还会执行与真实 executor 相同的 PID/network namespace 最小启动探针；
+只有 binary 在 PATH 上但宿主禁止这些 namespace 时投影为 `backend=none`，而不是创建随后必败的
+runtime 或把 binary discovery 当成可执行边界。
 `outcome` 只是技术能力分类；探针固定输出 `productionSupported=false`，不能自行完成治理签署。
 即使某 runner 的技术项全部为 `enforced`，也必须由新的追加 ADR、新鲜证据与独立 release
 gate 才能改变已关闭 D-04 的空支持集并产生 production support 声明。`backend=none` 不可能产生进程型

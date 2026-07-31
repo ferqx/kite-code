@@ -75,7 +75,7 @@ describe('sandbox profile generation', () => {
 
   test('profile limits reads to workspace and explicit system runtime roots', () => {
     const profile = generateSandboxProfile(workspace);
-    expect(profile).toContain('(subpath "/System")');
+    if (existsSync('/System')) expect(profile).toContain('(subpath "/System")');
     expect(profile).toContain('(subpath "/usr/bin")');
     expect(profile).not.toContain('(subpath "/usr")');
     expect(profile).not.toContain('(subpath "/")');
@@ -189,42 +189,45 @@ describe('shell wrapper utilities', () => {
     }
   });
 
-  test('runtime cleanup recovers nested hostile modes without following symlinks', () => {
-    const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-cleanup-test-'));
-    const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-external-test-'));
-    const runtimeDir = createSandboxRuntimeDir(ws);
-    const nested = join(runtimeDir, 'nested');
-    const deeper = join(nested, 'deeper');
-    const flagged = join(deeper, 'flagged');
-    mkdirSync(deeper, { recursive: true });
-    writeFileSync(flagged, 'flagged');
-    chmodSync(external, 0o755);
-    symlinkSync(external, join(deeper, 'external-link'));
-    if (process.platform === 'darwin') {
-      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', flagged]).exitCode).toBe(0);
-    }
-    chmodSync(deeper, 0o000);
-    expect(statSync(deeper).mode & 0o777).toBe(0o000);
-    if (process.platform === 'darwin') {
-      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', deeper]).exitCode).toBe(0);
-    }
-    chmodSync(nested, 0o000);
-    expect(statSync(nested).mode & 0o777).toBe(0o000);
-    if (process.platform === 'darwin') {
-      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', nested]).exitCode).toBe(0);
-    }
-    chmodSync(runtimeDir, 0o000);
-    try {
-      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
-      expect(existsSync(runtimeDir)).toBe(false);
-      expect(existsSync(external)).toBe(true);
-      expect(statSync(external).mode & 0o777).toBe(0o755);
-    } finally {
-      cleanupSandboxRuntimeDir(runtimeDir);
-      rmSync(external, { recursive: true, force: true });
-      rmSync(ws, { recursive: true, force: true });
-    }
-  });
+  test.skipIf(process.platform === 'linux' && detectSandboxBackend() !== 'bubblewrap')(
+    'runtime cleanup recovers nested hostile modes without following symlinks',
+    () => {
+      const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-cleanup-test-'));
+      const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-external-test-'));
+      const runtimeDir = createSandboxRuntimeDir(ws);
+      const nested = join(runtimeDir, 'nested');
+      const deeper = join(nested, 'deeper');
+      const flagged = join(deeper, 'flagged');
+      mkdirSync(deeper, { recursive: true });
+      writeFileSync(flagged, 'flagged');
+      chmodSync(external, 0o755);
+      symlinkSync(external, join(deeper, 'external-link'));
+      if (process.platform === 'darwin') {
+        expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', flagged]).exitCode).toBe(0);
+      }
+      chmodSync(deeper, 0o000);
+      expect(statSync(deeper).mode & 0o777).toBe(0o000);
+      if (process.platform === 'darwin') {
+        expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', deeper]).exitCode).toBe(0);
+      }
+      chmodSync(nested, 0o000);
+      expect(statSync(nested).mode & 0o777).toBe(0o000);
+      if (process.platform === 'darwin') {
+        expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', nested]).exitCode).toBe(0);
+      }
+      chmodSync(runtimeDir, 0o000);
+      try {
+        expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+        expect(existsSync(runtimeDir)).toBe(false);
+        expect(existsSync(external)).toBe(true);
+        expect(statSync(external).mode & 0o777).toBe(0o755);
+      } finally {
+        cleanupSandboxRuntimeDir(runtimeDir);
+        rmSync(external, { recursive: true, force: true });
+        rmSync(ws, { recursive: true, force: true });
+      }
+    },
+  );
 
   test('runtime cleanup unlinks a dangling root symlink without touching its former target', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-link-cleanup-test-'));

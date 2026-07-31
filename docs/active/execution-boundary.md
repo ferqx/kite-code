@@ -128,3 +128,6 @@ Linux bubblewrap 使用同一 `filesystemScope` 投影 canonical Workspace 的 r
 绑定 invocation runtime。Linux runtime 清理另起只包含该 runtime 与只读系统工具的 mount
 namespace；这只收紧开发实现，不构成 Linux production qualification。protected path、seccomp、
 process-tree 与入口/child inheritance 未有完整原生证据前，Linux 仍 fail closed 为 `excluded`。
+binary discovery 之前还会运行真实 PID/network namespace 最小启动探针；宿主禁止 namespace 时
+backend 直接视为 unavailable，production 拒绝执行，cleanup 也保留未知旧 runtime 而不降级到
+可能遭 symlink swap 的宿主物理遍历。

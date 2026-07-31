@@ -3,12 +3,13 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSandboxExecutor } from '../src/core/sandbox/executor';
+import { detectSandboxBackend } from '../src/core/sandbox/platform';
 
-const hasNativeBubblewrap = process.platform === 'linux' && Bun.which('bwrap') !== null;
+const hasNativeBubblewrap = detectSandboxBackend() === 'bubblewrap';
 
 describe('bubblewrap sandbox executor integration', () => {
   if (!hasNativeBubblewrap) {
-    test('requires a Linux runner with bubblewrap', () => {
+    test('reports an unusable or absent bubblewrap backend as excluded', () => {
       expect(hasNativeBubblewrap).toBe(false);
     });
     return;

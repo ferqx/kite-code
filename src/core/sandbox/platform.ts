@@ -17,12 +17,48 @@ export interface ResolveSandboxRuntimeOptions {
   detectBackend?: () => SandboxBackend;
 }
 
+let cachedBubblewrapPath: string | null | undefined;
+
+/**
+ * Resolve bubblewrap only when the host permits the namespace operations used
+ * by the real executor. A binary on PATH is discovery evidence, not an
+ * executable sandbox boundary.
+ */
+export function findUsableBubblewrap(): string | null {
+  if (cachedBubblewrapPath !== undefined) return cachedBubblewrapPath;
+  const path = Bun.which('bwrap');
+  if (!path) {
+    cachedBubblewrapPath = null;
+    return null;
+  }
+  const probe = Bun.spawnSync(
+    [
+      path,
+      '--ro-bind',
+      '/',
+      '/',
+      '--dev',
+      '/dev',
+      '--proc',
+      '/proc',
+      '--unshare-pid',
+      '--unshare-net',
+      '--die-with-parent',
+      '--new-session',
+      '/bin/true',
+    ],
+    { stdout: 'ignore', stderr: 'ignore' },
+  );
+  cachedBubblewrapPath = probe.exitCode === 0 ? path : null;
+  return cachedBubblewrapPath;
+}
+
 /** 检测当前平台可用的沙箱后端 / Detect available sandbox backend on current platform */
 export function detectSandboxBackend(): SandboxBackend {
   if (process.platform === 'darwin' && existsSync('/usr/bin/sandbox-exec')) {
     return 'seatbelt';
   }
-  if (process.platform === 'linux' && Bun.which('bwrap') !== null) {
+  if (process.platform === 'linux' && findUsableBubblewrap() !== null) {
     return 'bubblewrap';
   }
   return 'none';

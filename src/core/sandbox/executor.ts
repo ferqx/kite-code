@@ -9,7 +9,7 @@ import {
 } from '@/core/tools/shell';
 import type { ShellNetworkMode, ShellResult } from '@/core/types';
 import { generateBwrapArgs } from './bwrap';
-import { detectSandboxBackend } from './platform';
+import { detectSandboxBackend, findUsableBubblewrap } from './platform';
 import { discoverRuntimeReadOnlyRoots, generateSandboxProfile } from './profile';
 import { findApplySeccomp, resolveSeccompPath } from './seccomp';
 import {
@@ -102,7 +102,8 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
 /** Linux Bubblewrap executor */
 function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const bwrapPath = Bun.which('bwrap')!;
+  const bwrapPath = findUsableBubblewrap();
+  if (!bwrapPath) return createUnavailableExecutor('bubblewrap_unusable');
   const seccompBinary = findApplySeccomp();
 
   return createWrappedExecutor(
