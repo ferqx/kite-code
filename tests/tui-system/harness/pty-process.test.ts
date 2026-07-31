@@ -48,9 +48,9 @@ describe('resolveTuiLaunchPaths', () => {
 describe('PTY output checkpoints', () => {
   test('separates output emitted before and after an action checkpoint', () => {
     const output = createPtyOutputBuffer();
-    output.append(new TextEncoder().encode('old prompt\n'));
+    output.publishThrough(output.append(new TextEncoder().encode('old prompt\n')));
     const action = output.mark();
-    output.append(new TextEncoder().encode('new modal\n'));
+    output.publishThrough(output.append(new TextEncoder().encode('new modal\n')));
 
     expect(output.output()).toBe('old prompt\nnew modal\n');
     expect(output.outputSince(action)).toBe('new modal\n');
@@ -58,11 +58,11 @@ describe('PTY output checkpoints', () => {
 
   test('keeps UTF-8 output intact across multiple chunks', () => {
     const output = createPtyOutputBuffer();
-    output.append(new TextEncoder().encode('历史提示\n'));
+    output.publishThrough(output.append(new TextEncoder().encode('历史提示\n')));
     const action = output.mark();
     const current = new TextEncoder().encode('当前确认\n');
-    output.append(current.subarray(0, 2));
-    output.append(current.subarray(2));
+    output.publishThrough(output.append(current.subarray(0, 2)));
+    output.publishThrough(output.append(current.subarray(2)));
 
     expect(output.outputSince(action)).toBe('当前确认\n');
   });
@@ -70,10 +70,10 @@ describe('PTY output checkpoints', () => {
   test('excludes a UTF-8 code point that started before the action checkpoint', () => {
     const output = createPtyOutputBuffer();
     const splitCharacter = new TextEncoder().encode('你');
-    output.append(splitCharacter.subarray(0, 1));
+    output.publishThrough(output.append(splitCharacter.subarray(0, 1)));
     const action = output.mark();
-    output.append(splitCharacter.subarray(1));
-    output.append(new TextEncoder().encode('新'));
+    output.publishThrough(output.append(splitCharacter.subarray(1)));
+    output.publishThrough(output.append(new TextEncoder().encode('新')));
 
     expect(output.output()).toBe('你新');
     expect(output.outputSince(action)).toBe('新');
@@ -81,10 +81,22 @@ describe('PTY output checkpoints', () => {
 
   test('rejects marks outside the current output stream', () => {
     const output = createPtyOutputBuffer();
-    output.append(new TextEncoder().encode('ready'));
+    output.publishThrough(output.append(new TextEncoder().encode('ready')));
 
     expect(() => output.outputSince(99 as ReturnType<typeof output.mark>)).toThrow(
       'Invalid PTY output mark 99',
     );
+  });
+
+  test('does not expose received bytes until their terminal frame is published', () => {
+    const output = createPtyOutputBuffer();
+    const action = output.mark();
+    const receivedThrough = output.append(new TextEncoder().encode('parsed later'));
+
+    expect(output.outputSince(action)).toBe('');
+    expect(output.output()).toBe('parsed later');
+
+    output.publishThrough(receivedThrough);
+    expect(output.outputSince(action)).toBe('parsed later');
   });
 });

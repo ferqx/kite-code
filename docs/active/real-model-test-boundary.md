@@ -1,8 +1,8 @@
 # 当前规则：真实模型测试边界
 
 状态：active
-最后更新：2026-07-29
-最后验证：2026-07-29
+最后更新：2026-08-01
+最后验证：2026-08-01
 
 读取时机：新增真实网络/模型测试、修改测试发现规则、package scripts 或声明 provider 端到端验证结果时。
 
@@ -13,6 +13,10 @@
 ## 当前状态
 
 仓库注册了显式 opt-in 的 `test:model:live` package script，用于真实 Provider 的 context compaction direct/incremental summary 验证。默认 `bun run test` 通过 `scripts/run-default-tests.ts` 只运行确定性的本地/mock 测试：主 suite 使用 `--max-concurrency=1 --only-failures` 限制 Bun 共享进程中的测试和输出资源竞争，并排除 PTY 与 spike；会临时修改进程级 cwd 或 `KITE_CODE_HOME` 的少量路径测试逐文件启动独立 Bun 进程，避免污染 Shell、Plan Artifact 和 Session Logger 用例。不得改用 Bun per-file isolate；当前 Ink/Yoga ESM 在该模式下不能稳定初始化。`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。未实际执行 live runner 时，文档、PR 或完成记录不得表述为真实 provider 已验证。
+
+TUI system 使用 `@xterm/headless` 只在测试进程内解析本地 PTY 控制序列；它不会建立 Provider
+连接，也不会改变 live test 发现边界。`tests/tui-system/scenarios/` 仍只连接隔离的本地 mock
+model server，不能据此声明真实模型或公网 Provider 已验证。
 
 ## E2E 目录归类
 

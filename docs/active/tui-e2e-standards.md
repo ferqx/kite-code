@@ -30,10 +30,18 @@ tests/tui-system/
    `submitUserMessage()`，把输入回显、Enter 和“本次提交之后产生的 mock model request”绑定
    为一个同步原语。slash command 优先使用 `submitCommand()`；需要分步断言时可使用
    receipt-confirmed `typeText()` 后单独发送 Enter。
-3. `write()`、`resize()` 和 `setRawMode()` 都会记录动作前的输出 checkpoint。动作结果等待必须
-   读取 `outputSinceLastAction()`；需要跨多个动作观察时必须先用 `markOutput()`，再读取
-   `outputSince(mark)`。`output()` 只允许用于最终 transcript、渲染顺序或当前累计状态断言，
-   不能传给条件等待，否则历史 prompt、卡片或回答会制造假阳性。等待单一状态使用
+3. `write()`、`resize()` 和 `setRawMode()` 都会记录动作前的原始输出 checkpoint。`outputSinceLastAction()`
+   与 `outputSince(mark)` 只证明动作后产生了新 PTY 字节，不能作为当前 UI 语义的最终断言。
+   Harness 只有在对应 chunk 完成 VT 解析后才向 action delta 发布该字节范围，避免 byte receipt
+   先于 screen state；scenario contract 仍会拒绝任何直接或间接以 raw delta 完成的最终 `expect()`。
+   Harness 使用 headless VT parser 应用 ANSI erase、光标移动、换行和 resize：当前可见状态必须断言
+   `viewport()`，已经提交且仍可通过终端回看器访问的历史断言 `scrollback()`；短暂 streaming/modal
+   阶段使用 `markScreen()` 与 `screenFramesSince(mark)` 证明某个解析后的真实 frame 曾显示。
+   “本次动作从未显示敏感/错误文本”同样必须遍历 action-local screen frame，不能用最终 viewport
+   或 scrollback 的缺失替代。frame mark 绑定入队操作序号，mark 前已接收但尚未解析的 chunk 不得
+   进入 mark 后历史；历史采用有界保留并在 PTY cleanup 时释放，因此 mark 应靠近被验证动作。若
+   mark 已早于保留窗口，读取必须失败而不是对不完整历史给出通过结果。
+   原始 `transcript()` 只允许进入失败诊断，scenario contract 禁止用它等待或断言语义。等待单一状态使用
    `waitForText()`，多终态使用 `waitForAnyText()`，非终端条件使用 `waitForCondition()`，需要
    settled Ink frame 时使用 `waitForOutputQuiescence()`。静默等待默认必须先观察到 checkpoint
    后的新输出，不能用“动作后没有输出”通过测试；语义结果明确时应先等待该结果，再等待稳定帧。
@@ -44,9 +52,12 @@ tests/tui-system/
    文件内 test step 可以共享该旅程状态，但不得把 setup/readiness 伪装成可独立通过的测试用例。
 5. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
-   同一进程内的 `/new` 或 session switch 不能只依赖累计 PTY transcript：新 session 首次产生
-   Runtime event 后必须校验 Runtime Store 中出现不同 thread ID，切换回放必须只断言 Enter
-   checkpoint 之后的新输出。空 session 尚未产生事件时不要求提前出现在持久化 session 列表。
+   同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生
+   Runtime event 后必须校验 Runtime Store 中出现不同 thread ID；切换回放先用 Enter checkpoint
+   确认新输出，再用 `viewport()` 同时断言目标会话内容存在、另一会话内容不存在。空 session 尚未
+   产生事件时不要求提前出现在持久化 session 列表。
+   session 删除确认必须同时验证被选 thread ID 已从 Runtime Store 消失且 active thread 保留；取消
+   删除必须验证 thread ID 集合不变，不能只依赖 selector 列表缓存。
 7. 改动 Runtime 多轮语义时同时运行 `tests/runtime/agent.integration.test.ts`、`tests/runtime/store.test.ts` 和相应 PTY scenario。
 8. PTY suite 必须串行运行，避免终端尺寸、端口和全局环境相互污染。
    完整 suite 由 `scripts/run-tui-system-tests.ts` 先运行 harness 单元测试，再按 scenario

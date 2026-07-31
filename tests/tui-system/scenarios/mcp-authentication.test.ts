@@ -129,12 +129,10 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     await waitForText(() => tui!.outputSinceLastAction(), 'Authenticate', 10_000);
     tui.write('\r');
     await waitForText(() => tui!.outputSinceLastAction(), 'Open browser', 10_000);
+    const openerFrames = tui.markScreen();
     tui.write('\r');
-    const openerFailureOutput = await waitForText(
-      () => tui!.outputSinceLastAction(),
-      'browser_open_failed',
-      15_000,
-    );
+    await waitForText(() => tui!.outputSinceLastAction(), 'browser_open_failed', 15_000);
+    const openerFailureOutput = tui.screenFramesSince(openerFrames).join('\n');
     expect(metadataRequests).toBeGreaterThanOrEqual(2);
     expect(authorizationRequests).toBe(0);
     expect(screenContains(openerFailureOutput, 'ftp://')).toBe(false);

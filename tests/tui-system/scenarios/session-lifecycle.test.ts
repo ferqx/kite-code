@@ -26,6 +26,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let sessionIdsBeforeNew: string[] = [];
+  let activeSessionId = '';
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -65,9 +66,9 @@ describe('TUI PTY System — Session Lifecycle', () => {
       await waitForRequestMessage(server, 'Message in session A', 15000);
 
       // Wait for the mock model response
-      await waitForText(() => tui.outputSinceLastAction(), 'First session response!', 15000);
+      await waitForText(() => tui.viewport(), 'First session response!', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Message in session A')).toBe(true);
       expect(screenContains(output, 'First session response!')).toBe(true);
       // Prompt should still be visible
@@ -81,18 +82,15 @@ describe('TUI PTY System — Session Lifecycle', () => {
     async () => {
       tui.write('\x1b[Z');
       await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 5000);
-      expect(screenContains(tui.output(), 'Shift+Tab to exit')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Shift+Tab to exit')).toBe(true);
     },
     TIMEOUT,
   );
 
   // ── /new Creates New Session ───────────────────────────
   //
-  // NOTE: <Static> content from the old session persists in the terminal
-  // scrollback and cannot be cleared. PTY output accumulates all bytes,
-  // so old content inevitably remains visible in screenContains assertions.
-  // The test verifies /new creates a functional new session by checking
-  // that prompt is visible and a new message can be sent.
+  // The headless terminal model applies Ink's erase/cursor sequences, so this
+  // checks the actual viewport instead of accepting stale raw PTY bytes.
 
   test(
     '/new creates new session, TUI remains responsive',
@@ -100,25 +98,25 @@ describe('TUI PTY System — Session Lifecycle', () => {
       sessionIdsBeforeNew = persistedSessionIds(workspace);
       expect(sessionIdsBeforeNew).toHaveLength(1);
       await typeText(tui, '/new');
-      const outputBeforeSubmit = tui.markOutput();
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('output after /new:', stripAnsi(output).slice(-500));
 
       // Prompt should still be visible (TUI alive and in new session)
       expect(screenContains(output, '❯')).toBe(true);
+      expect(screenContains(output, 'Message in session A')).toBe(false);
+      expect(screenContains(output, 'First session response!')).toBe(false);
       // The new Runtime starts in building mode and must not inherit the
       // outgoing session's planning-only UI projection.
-      expect(stripAnsi(tui.outputSince(outputBeforeSubmit))).not.toContain('Shift+Tab to exit');
+      expect(screenContains(output, 'Shift+Tab to exit')).toBe(false);
 
       // Shift+Tab remains functional after the InputLine remount. Keep the
       // new session in plan mode so the next test covers exiting only after a
       // complete user/model conversation.
-      const outputBeforeEnterPlan = tui.markOutput();
       tui.write('\x1b[Z');
-      await waitForText(() => tui.outputSince(outputBeforeEnterPlan), 'Shift+Tab to exit', 5000);
+      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 5000);
     },
     TIMEOUT,
   );
@@ -133,7 +131,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
       await waitForRequestMessage(server, 'Message in session B', 15000);
 
       // Wait for the second model response
-      await waitForText(() => tui.outputSinceLastAction(), 'Second session response!', 15000);
+      await waitForText(() => tui.viewport(), 'Second session response!', 15000);
       await waitForCondition(
         () => {
           const current = persistedSessionIds(workspace);
@@ -145,8 +143,12 @@ describe('TUI PTY System — Session Lifecycle', () => {
         'Runtime Store to persist the distinct session created by /new',
         10_000,
       );
+      activeSessionId = persistedSessionIds(workspace).find(
+        (sessionId) => !sessionIdsBeforeNew.includes(sessionId),
+      )!;
+      expect(activeSessionId).toBeTruthy();
 
-      const output = tui.output();
+      const output = tui.viewport();
 
       // Current session content must be visible
       expect(screenContains(output, 'Message in session B')).toBe(true);
@@ -158,15 +160,14 @@ describe('TUI PTY System — Session Lifecycle', () => {
   test(
     'Shift+Tab exits plan mode after a completed conversation',
     async () => {
-      const outputBeforeExitPlan = tui.markOutput();
       tui.write('\x1b[Z');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      const exitPlanRender = stripAnsi(tui.outputSince(outputBeforeExitPlan));
-      expect(exitPlanRender).toContain('mock-model');
-      // Ink may emit one stale plan frame before the later building frame.
-      // Assert against render order so the final footer remains authoritative.
-      expect(exitPlanRender.lastIndexOf('mock-model')).toBeGreaterThan(
-        exitPlanRender.lastIndexOf('Shift+Tab to exit'),
+      await waitForCondition(
+        () =>
+          screenContains(tui.viewport(), 'mock-model') &&
+          !screenContains(tui.viewport(), 'Shift+Tab to exit'),
+        'building footer to replace the planning footer',
+        5_000,
       );
     },
     TIMEOUT,
@@ -182,21 +183,22 @@ describe('TUI PTY System — Session Lifecycle', () => {
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
 
-      const panelOutput = tui.output();
+      const panelOutput = tui.viewport();
       expect(screenContains(panelOutput, '会话列表')).toBe(true);
       // Both sessions should be visible
-      expect(screenContains(panelOutput, 'First session response')).toBe(true);
-      expect(screenContains(panelOutput, 'Second session response')).toBe(true);
+      expect(screenContains(panelOutput, 'Message in session A')).toBe(true);
+      expect(screenContains(panelOutput, 'Message in session B')).toBe(true);
 
-      // Navigate to the first (non-active) session with Down arrow
+      // The active session is selected first. Confirm the Down-arrow render
+      // moved selection onto session A before sending the destructive key.
       tui.write('\x1b[B');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForText(() => tui.viewport(), '>   Message in session A', 5_000);
 
       // Press D to trigger delete confirmation
       tui.write('D');
       await waitForText(() => tui.outputSinceLastAction(), '确认', 5000);
 
-      const confirmOutput = tui.output();
+      const confirmOutput = tui.viewport();
       // Confirmation dialog should appear
       expect(screenContains(confirmOutput, '确认')).toBe(true);
       expect(screenContains(confirmOutput, 'Enter')).toBe(true);
@@ -204,18 +206,25 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // Press Enter to confirm deletion
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
+      const deletedSessionId = sessionIdsBeforeNew[0]!;
+      await waitForCondition(
+        () => {
+          const remaining = persistedSessionIds(workspace);
+          return !remaining.includes(deletedSessionId) && remaining.includes(activeSessionId);
+        },
+        'Runtime Store to delete session A while retaining active session B',
+        10_000,
+      );
 
       // Re-open session selector to verify session was deleted
       await typeText(tui, '/sessions');
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
 
-      const afterOutput = tui.output();
-      // Due to <Static> scrollback persistence, deleted session text may
-      // still appear in terminal history. Verify the panel is functional
-      // and the active session is still present.
+      const afterOutput = tui.viewport();
       expect(screenContains(afterOutput, '搜索')).toBe(true);
-      expect(screenContains(afterOutput, 'Second session response')).toBe(true);
+      expect(screenContains(afterOutput, 'Message in session A')).toBe(false);
+      expect(screenContains(afterOutput, 'Message in session B')).toBe(true);
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },
     TIMEOUT,
@@ -229,11 +238,14 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // The previous test deleted one session, so only 1 remains.
       // Attempt to delete the active (only) session but cancel.
 
+      const idsBeforeCancel = persistedSessionIds(workspace).sort();
+      expect(idsBeforeCancel).toEqual([activeSessionId]);
+
       // Press D to trigger delete confirmation
       tui.write('D');
       await waitForText(() => tui.outputSinceLastAction(), '确认', 5000);
 
-      const confirmOutput = tui.output();
+      const confirmOutput = tui.viewport();
       expect(screenContains(confirmOutput, '确认')).toBe(true);
 
       // Press Escape to cancel deletion
@@ -244,10 +256,11 @@ describe('TUI PTY System — Session Lifecycle', () => {
       await waitForText(() => tui.outputSinceLastAction(), '会话列表', 5000);
 
       // Session should still be in the list after reopening the panel.
-      const cancelOutput = tui.output();
-      expect(screenContains(cancelOutput, 'Second session response')).toBe(true);
+      const cancelOutput = tui.viewport();
+      expect(screenContains(cancelOutput, 'Message in session B')).toBe(true);
       // Panel controls should still be visible
       expect(screenContains(cancelOutput, 'D 删除')).toBe(true);
+      expect(persistedSessionIds(workspace).sort()).toEqual(idsBeforeCancel);
     },
     TIMEOUT,
   );

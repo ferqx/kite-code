@@ -39,10 +39,10 @@ describe('TUI PTY System — Sandbox Mode', () => {
       await typeText(tui, '/permissions f');
       await waitForText(() => tui.outputSinceLastAction(), '未启用沙箱，Full 不可用', 10000);
 
-      const suggestionOutput = stripAnsi(tui.output());
+      const suggestionOutput = stripAnsi(tui.viewport());
       expect(suggestionOutput).toContain('未启用沙箱，Full 不可用');
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, '未启用沙箱，Full 不可用')).toBe(true);
       expect(screenContains(output, '完全权限')).toBe(false);
     },

@@ -73,7 +73,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
       await waitForAnyText(() => tui.outputSinceLastAction(), ['Bash', 'Cancelled'], 15000);
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after parse error:', clean.slice(-500));
 
@@ -104,7 +104,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
         15000,
       );
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Recovery message after parse error!')).toBe(true);
       expect(screenContains(output, '❯')).toBe(true);
     },

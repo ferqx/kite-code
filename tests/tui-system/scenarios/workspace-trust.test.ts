@@ -55,7 +55,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     'a fresh workspace blocks startup behind the trust prompt',
     async () => {
       await waitForText(() => tui.outputSinceLastAction(), GATE_TEXT, 15000);
-      const out = tui.output();
+      const out = tui.viewport();
       expect(screenContains(out, GATE_TEXT)).toBe(true);
       // The folder path must be visible so the user knows what they trust.
       expect(screenContains(out, realpathSync(workspace.workspace))).toBe(true);
@@ -103,7 +103,7 @@ describe('TUI PTY System — Workspace Trust', () => {
       const proc = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
       restarted = proc;
       await waitForText(() => proc.outputSinceLastAction(), 'shortcuts', 15000);
-      expect(screenContains(proc.output(), GATE_TEXT)).toBe(false);
+      expect(screenContains(proc.viewport(), GATE_TEXT)).toBe(false);
       await proc.killAndWait();
       restarted = undefined;
       console.log('  Restart skipped the gate');

@@ -200,7 +200,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       await waitForText(() => tui.outputSinceLastAction(), 'ANALYSIS_DONE', 45000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       // ── 1. Settled Thought 只保留当前阶段的单行摘要 ──
@@ -259,7 +259,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       await waitForText(() => tui.outputSinceLastAction(), 'CARRY_DONE', 30000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       // 边界前：Thought · read 1 file；写入卡片独立渲染

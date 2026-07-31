@@ -102,7 +102,7 @@ describe('TUI PTY System — File Rewind', () => {
 
       // Disk holds the latest version after both turns
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V3);
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -132,7 +132,7 @@ describe('TUI PTY System — File Rewind', () => {
       expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V2);
 
       // TUI recovers — prompt visible
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );

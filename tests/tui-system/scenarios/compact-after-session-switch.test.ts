@@ -60,7 +60,7 @@ describe('TUI PTY System — /compact after session switch', () => {
   test(
     '/compact in session 1 produces a response',
     async () => {
-      const outputStart = tui.markOutput();
+      const screenStart = tui.markScreen();
       await typeText(tui, '/compact');
       tui.write('\r');
 
@@ -69,7 +69,7 @@ describe('TUI PTY System — /compact after session switch', () => {
       // or compaction queued/completed events.
       await waitForText(() => tui.outputSinceLastAction(), 'Not enough messages', 10000);
 
-      const output = tui.outputSince(outputStart);
+      const output = tui.screenFramesSince(screenStart).join('\n');
       const clean = stripAnsi(output);
       console.log('  output after /compact (session 1):', clean.slice(-500));
 
@@ -85,7 +85,7 @@ describe('TUI PTY System — /compact after session switch', () => {
       expect(hasResponse).toBe(true);
 
       // Prompt still visible — TUI responsive.
-      expect(screenContains(output, '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -107,7 +107,7 @@ describe('TUI PTY System — /compact after session switch', () => {
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('  output after /new:', stripAnsi(output).slice(-500));
       expect(screenContains(output, '❯')).toBe(true);
     },
@@ -121,7 +121,7 @@ describe('TUI PTY System — /compact after session switch', () => {
   test(
     '/compact in session 2 produces a response (regression)',
     async () => {
-      const outputStart = tui.markOutput();
+      const screenStart = tui.markScreen();
       await typeText(tui, '/compact');
       tui.write('\r');
 
@@ -138,7 +138,7 @@ describe('TUI PTY System — /compact after session switch', () => {
         10_000,
       );
 
-      const output = tui.outputSince(outputStart);
+      const output = tui.screenFramesSince(screenStart).join('\n');
       const clean = stripAnsi(output);
       console.log('  output after /compact (session 2):', clean.slice(-500));
 
@@ -154,7 +154,7 @@ describe('TUI PTY System — /compact after session switch', () => {
       expect(hasResponse).toBe(true);
 
       // TUI still responsive.
-      expect(screenContains(output, '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -169,7 +169,7 @@ describe('TUI PTY System — /compact after session switch', () => {
       await typeText(tui, `/compact ${marker}`);
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      expect(screenContains(tui.outputSinceLastAction(), marker)).toBe(true);
+      expect(screenContains(tui.viewport(), marker)).toBe(true);
 
       // Exit the first process gracefully so all RuntimeStore writes are
       // closed, then start a fresh TUI against the same HOME/workspace.
@@ -195,7 +195,7 @@ describe('TUI PTY System — /compact after session switch', () => {
 
       // tui is a fresh process: this cannot match output accumulated before
       // restart and therefore proves RuntimeEvent replay restored the command.
-      const restartedOutput = tui.output();
+      const restartedOutput = tui.viewport();
       expect(screenContains(restartedOutput, `/compact ${marker}`)).toBe(true);
       expect(screenContains(restartedOutput, '❯')).toBe(true);
     },

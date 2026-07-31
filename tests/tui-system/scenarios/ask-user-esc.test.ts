@@ -83,7 +83,7 @@ describe('TUI PTY System — ask_user Escape', () => {
         15000,
       );
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'What is your preferred programming language?')).toBe(true);
       // Options should be visible
       expect(screenContains(output, 'TypeScript')).toBe(true);
@@ -99,7 +99,7 @@ describe('TUI PTY System — ask_user Escape', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // TUI should render the follow-up model response and then recover to the prompt.
-      const afterOutput = tui.output();
+      const afterOutput = tui.viewport();
       expect(screenContains(afterOutput, 'Continued after question cancellation.')).toBe(true);
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },

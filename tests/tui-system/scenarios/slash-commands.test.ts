@@ -68,7 +68,7 @@ describe('TUI PTY System — Slash Commands', () => {
       // Help panel renders with Chinese shortcut title
       await waitForText(() => tui.outputSinceLastAction(), '快捷键', 10000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after /help:', clean.slice(-500));
       expect(screenContains(output, '快捷键')).toBe(true);
@@ -86,7 +86,7 @@ describe('TUI PTY System — Slash Commands', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // Prompt should be visible again (help panel closed, TUI in normal mode)
-      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -94,14 +94,16 @@ describe('TUI PTY System — Slash Commands', () => {
   // ── /clear ───────────────────────────────────────────────────
 
   test(
-    '/clear clears output and leaves prompt visible',
+    '/clear command returns to an interactive prompt',
     async () => {
       // First send some text as user message to create content to clear
       await submitUserMessage(tui, server, 'hello world');
       await waitForText(() => tui.outputSinceLastAction(), 'spare', 10000);
 
-      // Verify the text appeared in output
-      const before = stripAnsi(tui.output());
+      // The reducer clearing contract is covered by tui-reducer.test.ts.
+      // Ink <Static> lines already written to a physical terminal cannot be
+      // retracted, so this PTY step only verifies command routing/recovery.
+      const before = stripAnsi(tui.viewport());
       console.log('  output before /clear:', before.slice(-300));
 
       // Now clear
@@ -109,11 +111,11 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const after = tui.output();
+      const after = tui.viewport();
       const cleanAfter = stripAnsi(after);
       console.log('  output after /clear:', cleanAfter.slice(-500));
 
-      // Prompt should still be visible
+      // Prompt should still be visible and accept subsequent command input.
       expect(screenContains(after, '❯')).toBe(true);
     },
     TIMEOUT,
@@ -130,7 +132,7 @@ describe('TUI PTY System — Slash Commands', () => {
       // Theme change should produce a status message
       await waitForText(() => tui.outputSinceLastAction(), 'Theme set to purple', 10000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Theme set to purple')).toBe(true);
     },
     TIMEOUT,
@@ -142,14 +144,14 @@ describe('TUI PTY System — Slash Commands', () => {
     '/theme same preset twice does not duplicate message',
     async () => {
       // Get current output to use as baseline
-      const before = tui.output();
+      const before = tui.viewport();
 
       // Send same theme command again
       await typeText(tui, '/theme purple');
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const after = tui.output();
+      const after = tui.viewport();
 
       // Count occurrences of "Theme set to purple"
       const themeMsg = 'Theme set to purple';
@@ -173,7 +175,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 10000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after /plan:', clean.slice(-500));
 
@@ -193,7 +195,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\x1b[Z');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after Shift+Tab:', clean.slice(-500));
 
@@ -217,7 +219,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after /effort max:', clean.slice(-500));
 
@@ -238,7 +240,7 @@ describe('TUI PTY System — Slash Commands', () => {
       // Session selector overlay has search + footer hints
       await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after /sessions:', clean.slice(-500));
       expect(screenContains(output, '搜索')).toBe(true);
@@ -256,7 +258,7 @@ describe('TUI PTY System — Slash Commands', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // Prompt should be visible again (session selector closed, TUI in normal mode)
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -273,7 +275,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), '自动审批', 5000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, '自动审批')).toBe(true);
 
       // Toggle back to accept_edits (default)
@@ -295,7 +297,7 @@ describe('TUI PTY System — Slash Commands', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'default', 10000);
 
       // Model selector overlay should show model list
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('  output after /model:', stripAnsi(output).slice(-500));
       // The mock config has 'mock-model', selector should show it
       expect(screenContains(output, 'mock-model')).toBe(true);
@@ -311,7 +313,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\x1b');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -325,7 +327,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), 'Session exported', 10000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('  output after /export:', stripAnsi(output).slice(-500));
       // /export writes a file and appends a text block with the path
       expect(screenContains(output, 'Session exported')).toBe(true);
@@ -343,7 +345,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('  output after /rewind:', stripAnsi(output).slice(-500));
       // Fresh workspace has no checkpoints — empty state message
       const hasRewindUI =
@@ -361,7 +363,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\x1b');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -374,7 +376,7 @@ describe('TUI PTY System — Slash Commands', () => {
       await typeText(tui, '/mc');
       await waitForText(() => tui.outputSinceLastAction(), 'Manage MCP servers', 10000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, '命令匹配 /mc')).toBe(true);
       expect(screenContains(output, '/mcp')).toBe(true);
       expect(screenContains(output, 'Manage MCP servers')).toBe(true);
@@ -392,7 +394,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), 'MCP Servers', 10000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('  output after /mcp:', stripAnsi(output).slice(-500));
       expect(screenContains(output, 'MCP Servers')).toBe(true);
     },
@@ -407,7 +409,7 @@ describe('TUI PTY System — Slash Commands', () => {
       tui.write('\x1b');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );

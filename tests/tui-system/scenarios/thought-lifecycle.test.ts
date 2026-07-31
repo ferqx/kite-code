@@ -121,7 +121,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'TIMELINE_DONE', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       // ── 单一阶段块：两轮工具合并统计（ADR-0030 / 规则 24）──
@@ -180,7 +180,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'EXPLORE_DONE', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       // ── Thought 标题 = "Thought for Xs · <工具统计>"（规则 22）──
@@ -249,7 +249,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'TWO_PHASE_DONE', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       // ── 两轮合并统计为 "read 2 files"（ADR-0030 跨调用聚合）──
@@ -313,7 +313,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'SHELL_THOUGHT_DONE', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       // ── shell_execute without inspect intent stays as independent tool_card ──
@@ -369,7 +369,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'read 1 file', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       // ── 关键断言：不应该有 "Thought for" 前缀 ──
@@ -421,7 +421,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'Thought for', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       // ── 有 "Thought for" 但没有工具统计后缀 ──

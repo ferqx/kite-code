@@ -106,7 +106,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
       // Wait for the sub-agent to start and the external write to trigger approval
       await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', TIMEOUT);
 
-      const beforeApprove = tui.output();
+      const beforeApprove = tui.viewport();
       const clean = stripAnsi(beforeApprove);
       console.log('  output during approval:', clean.slice(-2000));
 
@@ -125,7 +125,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
         TIMEOUT,
       );
 
-      const afterApprove = tui.output();
+      const afterApprove = tui.viewport();
       const clean2 = stripAnsi(afterApprove);
       console.log('  output after approval (last 2000 chars):', clean2.slice(-2000));
 
@@ -233,7 +233,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
           TIMEOUT - 5000,
         );
       } catch (error) {
-        console.log('  output after read timeout:', stripAnsi(tui.output()).slice(-4000));
+        console.log('  output after read timeout:', stripAnsi(tui.viewport()).slice(-4000));
         console.log(
           '  model requests after read timeout:',
           server.getRequests().map((request) => request.messages.at(-1)),
@@ -241,7 +241,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
         throw error;
       }
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after read:', clean.slice(-2000));
 

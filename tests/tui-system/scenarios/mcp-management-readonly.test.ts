@@ -6,7 +6,7 @@ import { startTestHttpServer } from '../../helpers/test-http-server';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
 import { typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
 describe('TUI PTY System — MCP Select management', () => {
@@ -46,15 +46,15 @@ describe('TUI PTY System — MCP Select management', () => {
     tui.write('\r');
     await waitForText(() => tui!.outputSinceLastAction(), 'MCP Servers', 15_000);
     await waitForText(() => tui!.outputSinceLastAction(), 'fixture · ✔ connected', 15_000);
-    expect(screenContains(tui.output(), 'Add MCP server')).toBe(true);
-    expect(screenContains(tui.output(), 'echo')).toBe(false);
+    expect(screenContains(tui.viewport(), 'Add MCP server')).toBe(true);
+    expect(screenContains(tui.viewport(), 'echo')).toBe(false);
 
     tui.write('\r');
     await waitForText(() => tui!.outputSinceLastAction(), 'Reconnect', 10_000);
-    expect(screenContains(tui.output(), 'Disable server')).toBe(true);
-    expect(screenContains(tui.output(), 'Remove server')).toBe(true);
-    expect(screenContains(tui.output(), 'A Add')).toBe(false);
-    expect(screenContains(tui.output(), 'R Retry')).toBe(false);
+    expect(screenContains(tui.viewport(), 'Disable server')).toBe(true);
+    expect(screenContains(tui.viewport(), 'Remove server')).toBe(true);
+    expect(screenContains(tui.viewport(), 'A Add')).toBe(false);
+    expect(screenContains(tui.viewport(), 'R Retry')).toBe(false);
   }, 40_000);
 
   test('discovers, binds, and executes an MCP tool during a real TUI conversation', async () => {
@@ -267,6 +267,7 @@ describe('TUI PTY System — MCP Select management', () => {
     await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
     tui.setRawMode(true);
 
+    const conversationFrames = tui.markScreen();
     await typeText(tui, 'search the documentation with MCP', 20);
     tui.write('\r');
     await waitForText(
@@ -274,9 +275,23 @@ describe('TUI PTY System — MCP Select management', () => {
       'TAIL_MARKER: the final MCP summary paragraph is visible before the prompt.',
       20_000,
     );
+    await waitForCondition(
+      () =>
+        tui!
+          .screenFramesSince(conversationFrames)
+          .some(
+            (frame) =>
+              screenContains(
+                frame,
+                'TAIL_MARKER: the final MCP summary paragraph is visible before the prompt.',
+              ) && screenContains(frame, '❯'),
+          ),
+      'final MCP tail and interactive prompt to coexist in one parsed terminal frame',
+      10_000,
+    );
 
     expect(toolCalls).toBe(1);
-    expect(screenContains(tui.output(), '❯')).toBe(true);
+    expect(screenContains(tui.viewport(), '❯')).toBe(true);
     const requests = server.getRequests();
     expect(requests).toHaveLength(3);
     expect(JSON.stringify(requests[0]?.body)).toContain('tool_search');
@@ -284,9 +299,11 @@ describe('TUI PTY System — MCP Select management', () => {
     // MCP tool name may appear in the first request's tool list in 'all' mode.
     expect(JSON.stringify(requests[1]?.body)).toContain(exposedToolName);
     expect(JSON.stringify(requests[2]?.messages)).toContain('documentation result from MCP');
-    expect(tui.output()).toContain('Searched for tools');
-    expect(tui.output()).toContain(`docs · ${remoteToolName}`);
-    expect(tui.output()).not.toContain(`mcp__docs__${remoteToolName}`);
+    expect(tui.scrollback()).toContain('Searched for tools');
+    expect(tui.scrollback()).toContain(`docs · ${remoteToolName}`);
+    expect(tui.screenFramesSince(conversationFrames).join('\n')).not.toContain(
+      `mcp__docs__${remoteToolName}`,
+    );
 
     await typeText(tui, 'call the same MCP tool again', 20);
     tui.write('\r');
@@ -308,8 +325,8 @@ describe('TUI PTY System — MCP Select management', () => {
       'RESOURCE_TAIL: MCP resource discovery and reading completed.',
       20_000,
     );
-    expect(tui.output()).toContain('Listed MCP resources');
-    expect(tui.output()).toContain('docs · docs://langgraph/overview');
+    expect(tui.scrollback()).toContain('Listed MCP resources');
+    expect(tui.scrollback()).toContain('docs · docs://langgraph/overview');
     const resourceRequests = server.getRequests();
     expect(resourceRequests).toHaveLength(8);
     expect(JSON.stringify(resourceRequests[7]?.messages)).toContain(

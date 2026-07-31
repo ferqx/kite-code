@@ -78,7 +78,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
         15000,
       );
 
-      const output = tui1.output();
+      const output = tui1.viewport();
       expect(screenContains(output, 'Hello from tui1')).toBe(true);
       expect(screenContains(output, 'Response from the first instance.')).toBe(true);
       expect(screenContains(output, '❯')).toBe(true);
@@ -121,7 +121,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
 
       tui2.setRawMode(true);
 
-      const output = tui2.output();
+      const output = tui2.viewport();
       const clean = stripAnsi(output);
       console.log('  tui2 startup output:', clean.slice(-300));
       expect(screenContains(output, '❯')).toBe(true);
@@ -132,7 +132,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
 
       await waitForText(() => tui2.outputSinceLastAction(), '搜索', 15000);
 
-      const panelOutput = tui2.output();
+      const panelOutput = tui2.viewport();
       const panelClean = stripAnsi(panelOutput);
       console.log('  tui2 /sessions output:', panelClean.slice(-500));
 
@@ -155,7 +155,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
       tui2.write('\r');
       await waitForText(() => tui2.outputSinceLastAction(), 'Hello from tui1', 15000);
 
-      const afterLoad = tui2.output();
+      const afterLoad = tui2.viewport();
       const cleanLoad = stripAnsi(afterLoad);
       console.log('  tui2 after session load:', cleanLoad.slice(-500));
 

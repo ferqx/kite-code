@@ -70,7 +70,7 @@ describe('TUI PTY System — Input & Message', () => {
       // Wait for the mock model response
       await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Test message from PTY')).toBe(true);
       expect(screenContains(output, 'I received your message!')).toBe(true);
     },
@@ -94,7 +94,7 @@ describe('TUI PTY System — Input & Message', () => {
       // Verify the model received multi-line input and responded
       await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Line1')).toBe(true);
       expect(screenContains(output, 'Line2')).toBe(true);
       expect(screenContains(output, '❯')).toBe(true);
@@ -121,7 +121,7 @@ describe('TUI PTY System — Input & Message', () => {
       tui.write('\x1b[A');
       await waitForText(() => tui.outputSinceLastAction(), 'History message B', 5000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       // The recalled text should appear in the input area
       expect(screenContains(output, 'History message B')).toBe(true);
 
@@ -131,7 +131,7 @@ describe('TUI PTY System — Input & Message', () => {
 
       // Type something to verify input still works
       await typeText(tui, 'After history');
-      expect(screenContains(tui.output(), 'After history')).toBe(true);
+      expect(screenContains(tui.viewport(), 'After history')).toBe(true);
       await clearInput(tui, 'After history'.length);
     },
     TIMEOUT,
@@ -145,7 +145,7 @@ describe('TUI PTY System — Input & Message', () => {
       await typeText(tui, '@pack');
       await waitForText(() => tui.outputSinceLastAction(), 'package.json', 5000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after @pack:', clean.slice(-500));
 

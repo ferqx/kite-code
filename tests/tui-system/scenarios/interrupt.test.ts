@@ -18,7 +18,12 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -68,7 +73,7 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       tui.write('\x03');
       await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after Ctrl+C:', clean.slice(-300));
 
@@ -94,12 +99,14 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
     async () => {
       // Send Ctrl+C while TUI is idle (no agent running, ctrlCPressed=false).
       tui.write('\x03');
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction(), 1000, 250, false);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after idle Ctrl+C:', clean.slice(-300));
 
       // TUI should still be alive.
+      expect(tui.exited).toBe(false);
       expect(screenContains(output, '❯')).toBe(true);
 
       // Reset ctrlCPressed so test 3 starts with a clean flag.

@@ -33,16 +33,18 @@ describe('TUI PTY System — session logging status', () => {
   });
 
   test('shows the resolved metadata mode without a content disclosure', async () => {
+    const conversationFrames = tui.markScreen();
     await typeText(tui, 'Report logging status');
     tui.write('\r');
     await waitForRequestMessage(modelServer, 'Report logging status', 15_000);
-    const output = await waitForText(
-      () => tui.outputSinceLastAction(),
-      'Session logging mode: metadata.',
-      15_000,
-    );
+    await waitForText(() => tui.outputSinceLastAction(), 'Session logging mode: metadata.', 15_000);
     await waitForText(() => tui.outputSinceLastAction(), 'Logging status checked.', 15_000);
 
-    expect(screenContains(output, 'Session content logging is enabled')).toBe(false);
+    expect(
+      screenContains(
+        tui.screenFramesSince(conversationFrames).join('\n'),
+        'Session content logging is enabled',
+      ),
+    ).toBe(false);
   }, 30_000);
 });

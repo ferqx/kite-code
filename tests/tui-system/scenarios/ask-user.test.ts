@@ -81,7 +81,7 @@ describe('TUI PTY System — ask_user', () => {
       // Wait for the question to appear in the TUI output
       await waitForText(() => tui.outputSinceLastAction(), 'What is your favorite color?', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'What is your favorite color?')).toBe(true);
       // Options should be visible
       expect(screenContains(output, 'Blue')).toBe(true);
@@ -92,7 +92,7 @@ describe('TUI PTY System — ask_user', () => {
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
       // TUI should recover — prompt visible
-      const afterOutput = tui.output();
+      const afterOutput = tui.viewport();
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },
     TIMEOUT,

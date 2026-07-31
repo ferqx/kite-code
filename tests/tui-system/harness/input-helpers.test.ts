@@ -20,7 +20,12 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
       lastActionMark = output().length;
       return lastActionMark as ReturnType<PtyProcess['markOutput']>;
     },
-    output,
+    viewport: output,
+    scrollback: output,
+    transcript: output,
+    settleScreen: async () => {},
+    markScreen: () => 0 as ReturnType<PtyProcess['markScreen']>,
+    screenFramesSince: () => [output()],
     markOutput: () => output().length as ReturnType<PtyProcess['markOutput']>,
     outputSince: (mark) => output().slice(mark),
     outputSinceLastAction: () => output().slice(lastActionMark),

@@ -81,7 +81,7 @@ describe('TUI PTY System — Approval Escape', () => {
       // Wait for approval block to render
       await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
 
-      const beforeOutput = tui.output();
+      const beforeOutput = tui.viewport();
       expect(screenContains(beforeOutput, '授权执行命令')).toBe(true);
       expect(screenContains(beforeOutput, '允许一次')).toBe(true);
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
@@ -91,7 +91,7 @@ describe('TUI PTY System — Approval Escape', () => {
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
       // TUI should recover — prompt visible (approval cancelled)
-      const afterOutput = tui.output();
+      const afterOutput = tui.viewport();
       expect(screenContains(afterOutput, '❯')).toBe(true);
 
       // Now send a second message — verify agent responds normally after cancel
@@ -107,7 +107,7 @@ describe('TUI PTY System — Approval Escape', () => {
         15000,
       );
 
-      const finalOutput = tui.output();
+      const finalOutput = tui.viewport();
       expect(screenContains(finalOutput, 'Second message received after cancel.')).toBe(true);
       // TUI should still be idle with prompt visible after agent responds
       expect(screenContains(finalOutput, '❯')).toBe(true);

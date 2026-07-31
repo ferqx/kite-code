@@ -65,12 +65,12 @@ describe('TUI PTY System — Multi-turn Messages', () => {
       // Wait for the agent response to appear
       await waitForText(() => tui.outputSinceLastAction(), 'Hello! I completed my task.', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Do a simple task')).toBe(true);
       expect(screenContains(output, 'Hello! I completed my task.')).toBe(true);
 
       // TUI should be idle — prompt visible, ready for next input
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -86,10 +86,10 @@ describe('TUI PTY System — Multi-turn Messages', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'Second PTY turn response', 15000);
 
       // Both turns' content should still be visible
-      expect(screenContains(tui.output(), 'Do a simple task')).toBe(true);
-      expect(screenContains(tui.output(), 'Second multi-turn message')).toBe(true);
-      expect(screenContains(tui.output(), 'Hello! I completed my task.')).toBe(true);
-      expect(screenContains(tui.output(), 'Second PTY turn response')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Do a simple task')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Second multi-turn message')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Hello! I completed my task.')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Second PTY turn response')).toBe(true);
     },
     TIMEOUT,
   );

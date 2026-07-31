@@ -88,7 +88,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
       // Wait for the plan draft follow-up text
       await waitForText(() => tui.outputSinceLastAction(), 'Plan draft saved', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after write_plan:', clean.slice(-2000));
 
@@ -116,7 +116,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
 
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after building phase write_plan attempt:', clean.slice(-1500));
 

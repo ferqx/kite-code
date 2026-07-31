@@ -31,7 +31,7 @@ describe('TUI PTY System — Terminal Resize', () => {
   async function expectInteractiveAfterResize(): Promise<void> {
     const probe = `rz${++probeSequence}`;
     await typeText(tui, probe);
-    expect(screenContains(tui.outputSinceLastAction(), probe)).toBe(true);
+    expect(screenContains(tui.viewport(), probe)).toBe(true);
   }
 
   beforeAll(async () => {
@@ -62,7 +62,7 @@ describe('TUI PTY System — Terminal Resize', () => {
   test(
     'TUI renders at initial dimensions (120x40)',
     async () => {
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       console.log('  output snapshot (last 500 chars):', clean.slice(-500));
@@ -93,7 +93,7 @@ describe('TUI PTY System — Terminal Resize', () => {
       await expectInteractiveAfterResize();
 
       // TUI should still be alive with prompt visible.
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, '❯')).toBe(true);
 
       console.log('  resize to 80x24 — prompt still visible, TUI alive');
@@ -109,19 +109,19 @@ describe('TUI PTY System — Terminal Resize', () => {
       // Resize 1: 80x24 → 100x30
       tui.resize(100, 30);
       await expectInteractiveAfterResize();
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
       console.log('  resize 80x24→100x30 — alive');
 
       // Resize 2: 100x30 → 80x24
       tui.resize(80, 24);
       await expectInteractiveAfterResize();
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
       console.log('  resize 100x30→80x24 — alive');
 
       // Resize 3: 80x24 → 120x40 (back to original)
       tui.resize(120, 40);
       await expectInteractiveAfterResize();
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
       console.log('  resize 80x24→120x40 — alive');
     },
     TIMEOUT,

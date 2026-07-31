@@ -12,6 +12,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trustWorkspace } from '@/core/config/workspace-trust';
 import type { MockModelServer } from './fixtures';
+import { createHeadlessTerminalScreen, type TerminalFrameMark } from './terminal-screen';
 import type { TestWorkspace } from './test-workspace';
 
 export interface PtyProcessOptions {
@@ -36,8 +37,18 @@ export interface PtyProcess {
   setRawMode(enabled: boolean): PtyOutputMark;
   /** Resize the terminal (may not trigger resize event on Windows) */
   resize(cols: number, rows: number): PtyOutputMark;
-  /** Get all raw PTY output received so far (includes ANSI escapes) */
-  output(): string;
+  /** Get the current terminal viewport after VT/ANSI control sequences are applied. */
+  viewport(): string;
+  /** Get the terminal buffer retained above and within the current viewport. */
+  scrollback(): string;
+  /** Get all raw PTY output for diagnostics only (includes erased frames and ANSI). */
+  transcript(): string;
+  /** Wait until all PTY bytes already received by the harness are VT-parsed. */
+  settleScreen(): Promise<void>;
+  /** Capture a checkpoint in the sequence of VT-parsed viewport frames. */
+  markScreen(): TerminalFrameMark;
+  /** Read actual viewport frames parsed after a screen checkpoint. */
+  screenFramesSince(mark: TerminalFrameMark): readonly string[];
   /** Capture a stable byte checkpoint in the PTY output stream. */
   markOutput(): PtyOutputMark;
   /** Read only output emitted after a captured checkpoint. */
@@ -58,7 +69,8 @@ declare const PTY_OUTPUT_MARK: unique symbol;
 export type PtyOutputMark = number & { readonly [PTY_OUTPUT_MARK]: true };
 
 export interface PtyOutputBuffer {
-  append(chunk: Uint8Array): void;
+  append(chunk: Uint8Array): PtyOutputMark;
+  publishThrough(mark: PtyOutputMark): void;
   mark(): PtyOutputMark;
   output(): string;
   outputSince(mark: PtyOutputMark): string;
@@ -72,6 +84,7 @@ export interface PtyOutputBuffer {
 export function createPtyOutputBuffer(): PtyOutputBuffer {
   const chunks: Uint8Array[] = [];
   let byteLength = 0;
+  let publishedByteLength = 0;
 
   const bytes = (): Uint8Array => {
     const merged = new Uint8Array(byteLength);
@@ -87,7 +100,7 @@ export function createPtyOutputBuffer(): PtyOutputBuffer {
     if (!Number.isInteger(mark) || mark < 0 || mark > byteLength) {
       throw new Error(`Invalid PTY output mark ${mark}; current output length is ${byteLength}`);
     }
-    const outputBytes = bytes();
+    const outputBytes = bytes().subarray(0, publishedByteLength);
     let start = mark;
     while (start < outputBytes.byteLength && (outputBytes[start]! & 0xc0) === 0x80) {
       start++;
@@ -99,6 +112,15 @@ export function createPtyOutputBuffer(): PtyOutputBuffer {
     append(chunk) {
       chunks.push(chunk.slice());
       byteLength += chunk.byteLength;
+      return byteLength as PtyOutputMark;
+    },
+    publishThrough(mark) {
+      if (!Number.isInteger(mark) || mark < publishedByteLength || mark > byteLength) {
+        throw new Error(
+          `Invalid PTY publish mark ${mark}; published=${publishedByteLength}, received=${byteLength}`,
+        );
+      }
+      publishedByteLength = mark;
     },
     mark() {
       return byteLength as PtyOutputMark;
@@ -246,6 +268,8 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   }
 
   const outputBuffer = createPtyOutputBuffer();
+  const terminalScreen = createHeadlessTerminalScreen(cols, rows);
+  let screenDisposed = false;
   let lastActionMark = outputBuffer.mark();
   let exited = false;
   let exitResolver: ((code: number) => void) | null = null;
@@ -275,7 +299,8 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       cols,
       rows,
       data(_terminal: unknown, chunk: Uint8Array) {
-        outputBuffer.append(chunk);
+        const receivedThrough = outputBuffer.append(chunk);
+        void terminalScreen.append(chunk).then(() => outputBuffer.publishThrough(receivedThrough));
       },
     },
   });
@@ -297,22 +322,36 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   const KILL_TIMEOUT_MS = 2000;
   const EXIT_TIMEOUT_MS = 15_000;
 
-  async function killAndWaitImpl(): Promise<boolean> {
-    if (exited) return false;
+  async function disposeScreen(): Promise<void> {
+    if (screenDisposed) return;
+    await terminalScreen.settled();
+    terminalScreen.dispose();
+    screenDisposed = true;
+  }
 
-    // Graceful attempt first
-    proc.kill();
+  async function killAndWaitImpl(): Promise<boolean> {
+    let killed = false;
 
     try {
-      await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
-    } catch {
-      // Force kill — cannot be caught or ignored. On Windows this also kills
-      // the process tree, which prevents orphaned bun.exe descendants.
-      forceKillPtyChild(proc);
-      await waitForPtyExit(() => exited, 5000);
-    }
+      if (exited) return false;
 
-    return true;
+      // Graceful attempt first
+      proc.kill();
+      killed = true;
+
+      try {
+        await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
+      } catch {
+        // Force kill — cannot be caught or ignored. On Windows this also kills
+        // the process tree, which prevents orphaned bun.exe descendants.
+        forceKillPtyChild(proc);
+        await waitForPtyExit(() => exited, 5000);
+      }
+
+      return killed;
+    } finally {
+      await disposeScreen();
+    }
   }
 
   let killPromise: Promise<boolean> | null = null;
@@ -340,14 +379,35 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
 
     resize(newCols: number, newRows: number) {
       lastActionMark = outputBuffer.mark();
+      void terminalScreen.resize(newCols, newRows);
       if (!exited && proc.terminal && typeof proc.terminal.resize === 'function') {
         proc.terminal.resize(newCols, newRows);
       }
       return lastActionMark;
     },
 
-    output(): string {
+    viewport(): string {
+      return terminalScreen.viewport();
+    },
+
+    scrollback(): string {
+      return terminalScreen.scrollback();
+    },
+
+    transcript(): string {
       return outputBuffer.output();
+    },
+
+    settleScreen() {
+      return terminalScreen.settled();
+    },
+
+    markScreen() {
+      return terminalScreen.mark();
+    },
+
+    screenFramesSince(mark) {
+      return terminalScreen.framesSince(mark);
     },
 
     markOutput() {
@@ -362,7 +422,11 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       return outputBuffer.outputSince(lastActionMark);
     },
 
-    waitForExit: () => waitForPtyExitCode(exitPromise, EXIT_TIMEOUT_MS),
+    waitForExit: async () => {
+      const code = await waitForPtyExitCode(exitPromise, EXIT_TIMEOUT_MS);
+      await disposeScreen();
+      return code;
+    },
 
     kill() {
       // Fire-and-forget: initiate kill without waiting

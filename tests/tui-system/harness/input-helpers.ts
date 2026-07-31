@@ -71,7 +71,7 @@ export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Pro
     }
   }
 
-  const tail = stripAnsi(tui.output()).slice(-1_000);
+  const tail = stripAnsi(tui.transcript()).slice(-1_000);
   throw new Error(
     `PTY input delivery failed after ${attempts} attempt(s) for ${JSON.stringify(
       echoProbe,
@@ -127,7 +127,9 @@ export async function waitForRequestMessage(
     .slice(-3)
     .map((request) => JSON.stringify(request.messages).slice(-500))
     .join('\n');
-  const terminalTail = options?.tui ? stripAnsi(options.tui.output()).slice(-1_000) : 'unavailable';
+  const terminalTail = options?.tui
+    ? stripAnsi(options.tui.transcript()).slice(-1_000)
+    : 'unavailable';
   throw new Error(
     `Timeout (${effectiveTimeout}ms) waiting for model request containing "${text}". ` +
       `Saw ${requestCount - since} new request(s).\nRecent requests:\n${

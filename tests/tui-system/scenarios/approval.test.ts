@@ -69,7 +69,7 @@ describe('TUI PTY System — Tool Approval', () => {
       // Wait for approval block to render
       await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, '授权执行命令')).toBe(true);
       expect(screenContains(output, '允许一次')).toBe(true);
       expect(screenContains(output, '拒绝')).toBe(true);
@@ -83,7 +83,7 @@ describe('TUI PTY System — Tool Approval', () => {
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
       // TUI should recover — prompt visible
-      const afterOutput = tui.output();
+      const afterOutput = tui.viewport();
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },
     TIMEOUT,

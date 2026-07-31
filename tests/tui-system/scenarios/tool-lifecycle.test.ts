@@ -93,7 +93,7 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'Blue', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
-      let output = tui.output();
+      let output = tui.viewport();
       expect(screenContains(output, 'What is your favorite color?')).toBe(true);
       expect(screenContains(output, 'Blue')).toBe(true);
       expect(screenContains(output, 'Red')).toBe(true);
@@ -106,7 +106,7 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), 'Got it!', 15000);
 
-      output = tui.output();
+      output = tui.viewport();
 
       // ── 5. 验证模型继续运行（有重复中断就会卡住）/ Verify model continues (duplicate interrupt would block) ──
       expect(screenContains(output, 'Got it!')).toBe(true);
@@ -178,7 +178,7 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
       // Wait for follow-up text
       await waitForText(() => tui.outputSinceLastAction(), 'Draft saved', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after write_plan:', clean.slice(-2000));
 
@@ -246,7 +246,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
-      let output = tui.output();
+      let output = tui.viewport();
       expect(screenContains(output, '授权执行命令')).toBe(true);
       expect(screenContains(output, '允许一次')).toBe(true);
       expect(screenContains(output, '拒绝')).toBe(true);
@@ -260,12 +260,12 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       tui.write('\x1b[B');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      const rejectionOutputOffset = tui.markOutput();
+      const rejectionFrames = tui.markScreen();
       tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
-      output = tui.output();
-      const afterRejection = tui.outputSince(rejectionOutputOffset);
+      output = tui.viewport();
+      const afterRejection = tui.screenFramesSince(rejectionFrames).join('\n');
       console.log('  output after approval rejection:', stripAnsi(afterRejection).slice(-2000));
 
       // ── 5. 用户拒绝审批会中止当前 turn，不再执行工具或调用模型 ──
@@ -276,7 +276,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         false,
       );
       expect(screenContains(afterRejection, 'node -e "1+1"')).toBe(false);
-      expect(screenContains(afterRejection, '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -326,7 +326,7 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
       // 等工具执行完成 + 模型继续 / Wait for tool + model continuation
       await waitForText(() => tui.outputSinceLastAction(), 'Search complete', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
 
       // ── 2. 验证无审批块出现 / Verify no approval block ──
       expect(screenContains(output, '授权执行命令')).toBe(false);

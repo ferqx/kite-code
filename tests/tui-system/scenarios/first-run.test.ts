@@ -28,7 +28,7 @@ describe('first-run — comprehensive flow', () => {
   let workspace: ReturnType<typeof createTestWorkspace>;
 
   function getOutput(): string {
-    return stripAnsi(tui.output());
+    return stripAnsi(tui.viewport());
   }
 
   function getOutputSinceLastAction(): string {
@@ -91,7 +91,7 @@ describe('first-run — comprehensive flow', () => {
     const editMark = tui.markOutput();
     await typeText(tui, baseURL);
     await waitForOutputQuiescence(() => tui.outputSince(editMark));
-    expect(screenContains(tui.output(), baseURL)).toBe(true);
+    expect(screenContains(tui.viewport(), baseURL)).toBe(true);
     tui.write('\r');
   }
 
@@ -298,7 +298,7 @@ describe('first-run — comprehensive flow', () => {
 
       tui.write('\x1b');
       await waitForText(() => getOutputSinceLastAction(), 'Connect to a custom endpoint', 5000);
-      expect(screenContains(tui.outputSinceLastAction(), 'Base URL')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Base URL')).toBe(true);
       server.setModelsResponse({});
     },
     TIMEOUT,
@@ -340,7 +340,7 @@ describe('first-run — comprehensive flow', () => {
       await waitForText(() => getOutputSinceLastAction(), 'Choose a model provider', 5000);
 
       // Should be back on provider selection
-      expect(screenContains(tui.outputSinceLastAction(), 'Choose a model provider')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Choose a model provider')).toBe(true);
       server.setModelsResponse({});
     },
     TIMEOUT,
@@ -353,16 +353,16 @@ describe('first-run — comprehensive flow', () => {
       const modelRequestBaseline = server.getModelRequests().length;
       await connectCustomEndpoint(server.baseURL);
 
-      let terminalOutput = await waitForAnyText(
+      const terminalReceipt = await waitForAnyText(
         () => getOutputSinceLastAction(),
         ['local-model-a', 'The endpoint is reachable', 'The API key was rejected'],
         30000,
       );
-      if (!screenContains(terminalOutput, 'local-model-a')) {
-        expect(screenContains(terminalOutput, 'The API key was rejected')).toBe(true);
+      if (!screenContains(terminalReceipt, 'local-model-a')) {
+        expect(screenContains(getOutput(), 'The API key was rejected')).toBe(true);
         tui.write('\r');
         await waitForText(() => getOutputSinceLastAction(), 'Connect to a custom endpoint', 5000);
-        if (screenContains(tui.outputSinceLastAction(), '█')) {
+        if (screenContains(tui.viewport(), '█')) {
           tui.write('\x1b');
           await waitForText(() => getOutputSinceLastAction(), '› Base URL', 5000);
         }
@@ -374,17 +374,14 @@ describe('first-run — comprehensive flow', () => {
         await typeMaskedText(tui, 'local-key');
         await waitForOutputQuiescence(() => tui.outputSince(keyMark));
         tui.write('\r');
-        terminalOutput = await waitForText(
-          () => getOutputSinceLastAction(),
-          'local-model-a',
-          30000,
-        );
+        await waitForText(() => getOutputSinceLastAction(), 'local-model-a', 30000);
       }
+      const terminalOutput = getOutput();
       expect(
         screenContains(terminalOutput, 'local-model-a'),
         `model requests: ${server.getModelRequests().join(', ')}`,
       ).toBe(true);
-      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
 
       const savedConfig = readFileSync(workspace.configPath, 'utf8');
       expect(savedConfig).toContain('local-model-a');

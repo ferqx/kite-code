@@ -5,11 +5,163 @@
  * clear screen, terminal titles, etc.). This module strips those sequences
  * to produce clean text suitable for assertions.
  *
- * Phase 2 MVP: simple regex-based ANSI stripping.
- * Phase 2+: consider @xterm/headless for full terminal emulation.
+ * `createHeadlessTerminalScreen()` is authoritative for UI assertions. The
+ * regex helpers below remain useful for action-scoped raw-output diagnostics.
  */
 
+import { Terminal } from '@xterm/headless';
 import { tuiPollInterval, tuiWaitTimeout } from './timing';
+
+export interface HeadlessTerminalScreen {
+  /** Queue raw PTY bytes for VT parsing. */
+  append(chunk: Uint8Array): Promise<void>;
+  /** Resize the modeled terminal in the same order as pending PTY output. */
+  resize(cols: number, rows: number): Promise<void>;
+  /** Text currently visible in the terminal viewport. */
+  viewport(): string;
+  /** Text retained by the terminal buffer, including scrollback. */
+  scrollback(): string;
+  /** Wait until all queued PTY bytes and resizes have been parsed. */
+  settled(): Promise<void>;
+  /** Capture a checkpoint in the sequence of parsed terminal frames. */
+  mark(): TerminalFrameMark;
+  /** Return modeled viewport frames parsed after a checkpoint. */
+  framesSince(mark: TerminalFrameMark): readonly string[];
+  dispose(): void;
+}
+
+const MAX_RETAINED_TERMINAL_FRAMES = 4096;
+
+declare const TERMINAL_FRAME_MARK: unique symbol;
+export type TerminalFrameMark = number & { readonly [TERMINAL_FRAME_MARK]: true };
+
+function bufferText(terminal: Terminal, range: { start: number; end: number }): string {
+  const buffer = terminal.buffer.active;
+  const logicalLines: string[] = [];
+
+  for (let index = range.start; index < range.end; index++) {
+    const line = buffer.getLine(index);
+    if (!line) continue;
+    const text = line.translateToString(true);
+    if (line.isWrapped && logicalLines.length > 0) {
+      logicalLines[logicalLines.length - 1] += text;
+    } else {
+      logicalLines.push(text);
+    }
+  }
+
+  while (logicalLines.length > 0 && logicalLines.at(-1) === '') logicalLines.pop();
+  return logicalLines.join('\n');
+}
+
+/**
+ * Model the terminal state produced by the PTY stream. Raw transcripts retain
+ * erased Ink frames, so they are useful for diagnostics but not UI assertions.
+ */
+export function createHeadlessTerminalScreen(
+  cols: number,
+  rows: number,
+  maxRetainedFrames = MAX_RETAINED_TERMINAL_FRAMES,
+): HeadlessTerminalScreen {
+  if (!Number.isInteger(maxRetainedFrames) || maxRetainedFrames < 1) {
+    throw new Error(`maxRetainedFrames must be a positive integer; received ${maxRetainedFrames}`);
+  }
+  const terminal = new Terminal({
+    allowProposedApi: true,
+    cols,
+    rows,
+    scrollback: 10_000,
+    scrollOnEraseInDisplay: false,
+    logLevel: 'off',
+  });
+  let pending = Promise.resolve();
+  let disposed = false;
+  const frames: Array<{ sequence: number; text: string }> = [];
+  let nextOperationSequence = 0;
+  let marksBeforeSequenceAreExpired = 0;
+
+  const viewport = (): string => {
+    const buffer = terminal.buffer.active;
+    return bufferText(terminal, {
+      start: buffer.viewportY,
+      end: Math.min(buffer.viewportY + terminal.rows, buffer.length),
+    });
+  };
+
+  const captureFrame = (sequence: number): void => {
+    const frame = viewport();
+    if (frames.at(-1)?.text === frame) return;
+    frames.push({ sequence, text: frame });
+    if (frames.length > maxRetainedFrames) {
+      const removed = frames.splice(0, frames.length - maxRetainedFrames);
+      marksBeforeSequenceAreExpired = Math.max(
+        marksBeforeSequenceAreExpired,
+        (removed.at(-1)?.sequence ?? -1) + 1,
+      );
+    }
+  };
+
+  const enqueue = (operation: () => void | Promise<void>): Promise<void> => {
+    pending = pending.then(async () => {
+      if (disposed) return;
+      await operation();
+    });
+    return pending;
+  };
+
+  return {
+    append(chunk) {
+      const copy = chunk.slice();
+      const sequence = nextOperationSequence++;
+      return enqueue(
+        () =>
+          new Promise<void>((resolve) => {
+            terminal.write(copy, () => {
+              captureFrame(sequence);
+              resolve();
+            });
+          }),
+      );
+    },
+    resize(nextCols, nextRows) {
+      const sequence = nextOperationSequence++;
+      return enqueue(() => {
+        terminal.resize(nextCols, nextRows);
+        captureFrame(sequence);
+      });
+    },
+    viewport() {
+      return viewport();
+    },
+    scrollback() {
+      return bufferText(terminal, { start: 0, end: terminal.buffer.active.length });
+    },
+    settled() {
+      return pending;
+    },
+    mark() {
+      return nextOperationSequence as TerminalFrameMark;
+    },
+    framesSince(mark) {
+      if (!Number.isInteger(mark) || mark < 0 || mark > nextOperationSequence) {
+        throw new Error(
+          `Invalid terminal frame mark ${mark}; current operation sequence is ${nextOperationSequence}`,
+        );
+      }
+      if (mark < marksBeforeSequenceAreExpired) {
+        throw new Error(
+          `Terminal frame mark ${mark} expired; earliest retained operation is ${marksBeforeSequenceAreExpired}`,
+        );
+      }
+      return frames.filter((frame) => frame.sequence >= mark).map((frame) => frame.text);
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      terminal.dispose();
+    },
+  };
+}
 
 /**
  * Strip ANSI escape sequences, OSC sequences, and terminal control

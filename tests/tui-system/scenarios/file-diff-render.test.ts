@@ -125,7 +125,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'Notes file updated.', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
 
       // Card verb distinguishes overwrite from create
       expect(screenContains(output, 'Write (notes.md)')).toBe(true);
@@ -161,7 +161,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'Changelog created.', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
 
       // Card verb for a brand-new file
       expect(screenContains(output, 'Create (changelog.md)')).toBe(true);
@@ -188,7 +188,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'Changelog re-verified.', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
 
       // Card verb: no-op overwrite is Write, not Create
       // (Create (changelog.md) from turn 2 persists in Static scrollback —

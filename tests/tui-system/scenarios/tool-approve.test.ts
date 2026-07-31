@@ -73,7 +73,7 @@ describe('TUI PTY System — Tool Approve', () => {
       // Wait for approval block to render
       await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
 
-      const beforeOutput = tui.output();
+      const beforeOutput = tui.viewport();
       expect(screenContains(beforeOutput, '授权执行命令')).toBe(true);
       expect(screenContains(beforeOutput, '允许一次')).toBe(true);
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
@@ -84,7 +84,7 @@ describe('TUI PTY System — Tool Approve', () => {
       // Wait for the agent's follow-up response after tool execution
       await waitForText(() => tui.outputSinceLastAction(), 'Command executed successfully!', 15000);
 
-      const afterOutput = tui.output();
+      const afterOutput = tui.viewport();
       const clean = stripAnsi(afterOutput);
       console.log('  output after approve (last 1500 chars):', clean.slice(-1500));
 

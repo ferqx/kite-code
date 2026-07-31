@@ -64,20 +64,23 @@ describe('TUI PTY System — model stream reconnect', () => {
   test(
     'keeps partial text and commits only the recovered tool lifecycle',
     async () => {
+      const reconnectFrames = tui.markScreen();
       await typeText(tui, 'Reconnect the stream');
       tui.write('\r');
       await waitForRequestMessage(server, 'Reconnect the stream', 15_000);
       await waitForText(() => tui.outputSinceLastAction(), 'RECONNECT_PARTIAL', 10_000);
-      expect(screenContains(tui.output(), 'WRONG.md')).toBe(false);
 
       await waitForText(() => tui.outputSinceLastAction(), 'RECOVERED', 10_000);
       await waitForText(() => tui.outputSinceLastAction(), 'RECONNECT_DONE', 10_000);
 
       expect(server.getRequestCount()).toBeGreaterThanOrEqual(3);
-      expect(screenContains(tui.output(), 'RECONNECT_PARTIAL')).toBe(true);
-      expect(screenContains(tui.output(), 'RECOVERED')).toBe(true);
-      expect(screenContains(tui.output(), 'Read README.md')).toBe(true);
-      expect(screenContains(tui.output(), 'WRONG.md')).toBe(false);
+      const renderedLifecycle = tui.scrollback();
+      expect(screenContains(renderedLifecycle, 'RECONNECT_PARTIAL')).toBe(true);
+      expect(screenContains(renderedLifecycle, 'RECOVERED')).toBe(true);
+      expect(screenContains(renderedLifecycle, 'read 1 file')).toBe(true);
+      expect(screenContains(tui.screenFramesSince(reconnectFrames).join('\n'), 'WRONG.md')).toBe(
+        false,
+      );
     },
     TIMEOUT,
   );

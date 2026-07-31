@@ -81,7 +81,7 @@ export function findOutputWaitContractViolations(source: string, file = 'fixture
       const helper = node.expression.text;
       const outputReader = node.arguments[0];
       if (OUTPUT_WAIT_HELPERS.has(helper) && outputReader) {
-        if (nodeUsesOutputAccessor(outputReader, new Set(['output']), declarations)) {
+        if (nodeUsesOutputAccessor(outputReader, new Set(['output', 'transcript']), declarations)) {
           violations.push(
             `${file}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`,
           );
@@ -106,10 +106,54 @@ export function findOutputWaitContractViolations(source: string, file = 'fixture
   return violations;
 }
 
+export function findRawSemanticAssertionViolations(source: string, file = 'fixture.ts'): string[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const declarations = collectDeclarations(sourceFile);
+  const violations: string[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'expect' &&
+      node.arguments[0] &&
+      nodeUsesOutputAccessor(
+        node.arguments[0],
+        new Set(['output', 'outputSince', 'outputSinceLastAction', 'transcript']),
+        declarations,
+      )
+    ) {
+      violations.push(
+        `${file}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`,
+      );
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
 describe('TUI system scenario contract', () => {
   test('condition waits cannot be satisfied by cumulative output from an earlier action', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
       findOutputWaitContractViolations(source, file),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  test('scenario semantics never assert against the raw PTY transcript', () => {
+    expect(regexViolations(/\.transcript\(\)/)).toEqual([]);
+  });
+
+  test('final UI semantics never assert against raw action deltas', () => {
+    const violations = scenarioSources().flatMap(({ file, source }) =>
+      findRawSemanticAssertionViolations(source, file),
     );
     expect(violations).toEqual([]);
   });
@@ -122,6 +166,9 @@ describe('TUI system scenario contract', () => {
     ).not.toEqual([]);
     expect(
       findOutputWaitContractViolations('waitForText(tui.output.bind(tui), "ready");'),
+    ).not.toEqual([]);
+    expect(
+      findOutputWaitContractViolations('waitForText(() => tui.transcript(), "ready");'),
     ).not.toEqual([]);
     expect(
       findOutputWaitContractViolations(
@@ -139,6 +186,22 @@ describe('TUI system scenario contract', () => {
       ),
     ).toEqual([]);
     expect(findOutputWaitContractViolations('waitForOutputQuiescence(() => "");')).not.toEqual([]);
+  });
+
+  test('AST contract catches direct and indirect raw semantic assertions', () => {
+    expect(
+      findRawSemanticAssertionViolations(
+        'const render = tui.outputSince(mark); expect(screenContains(render, "ready")).toBe(true);',
+      ),
+    ).not.toEqual([]);
+    expect(
+      findRawSemanticAssertionViolations('expect(tui.viewport()).toContain("ready");'),
+    ).toEqual([]);
+    expect(
+      findRawSemanticAssertionViolations(
+        'const frames = tui.screenFramesSince(mark); expect(frames.join("\\n")).not.toContain("bad");',
+      ),
+    ).toEqual([]);
   });
 
   test('input readiness belongs to each input action instead of a warmup flow', () => {

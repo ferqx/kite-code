@@ -79,7 +79,7 @@ describe('TUI PTY System — Session Persistence', () => {
       // Wait for the mock model response to appear in the TUI
       await waitForText(() => tui1.outputSinceLastAction(), 'Hello from session!', 15000);
 
-      const output = tui1.output();
+      const output = tui1.viewport();
       expect(screenContains(output, 'Message before restart')).toBe(true);
       expect(screenContains(output, 'Hello from session!')).toBe(true);
       // Prompt should still be visible
@@ -123,7 +123,7 @@ describe('TUI PTY System — Session Persistence', () => {
       // Enable raw mode for tui2
       tui2.setRawMode(true);
 
-      const output = tui2.output();
+      const output = tui2.viewport();
       const clean = stripAnsi(output);
       console.log('  tui2 startup output:', clean.slice(-300));
       expect(screenContains(output, '❯')).toBe(true);
@@ -145,7 +145,7 @@ describe('TUI PTY System — Session Persistence', () => {
       // Verify SessionSelector panel is visible
       await waitForText(() => tui2.outputSinceLastAction(), '搜索', 10000);
 
-      const output = tui2.output();
+      const output = tui2.viewport();
       const clean = stripAnsi(output);
       console.log('  tui2 output after /sessions:', clean.slice(-500));
 
@@ -174,7 +174,7 @@ describe('TUI PTY System — Session Persistence', () => {
       // Both the user message and model response should be restored.
       await waitForText(() => tui2.outputSinceLastAction(), 'Message before restart', 15000);
 
-      const output = tui2.output();
+      const output = tui2.viewport();
       console.log('  tui2 output after loading session:', stripAnsi(output).slice(-500));
 
       // Verify historical user message is visible (replayed from DB)

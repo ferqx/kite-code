@@ -61,6 +61,7 @@
     "@biomejs/biome": "^2.5.0",
     "@types/bun": "latest",
     "@types/react": "^19.2.14",
+    "@xterm/headless": "6.0.0",
     "ink-testing-library": "^4.0.0",
     "lefthook": "^2.1.9",
     "typescript": "^5.9.3"

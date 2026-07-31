@@ -80,9 +80,9 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForRequestMessage(server, 'Message in session 1', 15000);
 
       // Wait for the mock model response
-      await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
+      await waitForText(() => tui.viewport(), 'Session 1 response', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Message in session 1')).toBe(true);
       expect(screenContains(output, 'Session 1 response')).toBe(true);
       // Prompt should still be visible
@@ -107,11 +107,13 @@ describe('TUI PTY System — Session Switching', () => {
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('  output after /new:', stripAnsi(output).slice(-500));
 
       // Prompt should still be visible (TUI alive and in new session)
       expect(screenContains(output, '❯')).toBe(true);
+      expect(screenContains(output, 'Message in session 1')).toBe(false);
+      expect(screenContains(output, 'Session 1 response')).toBe(false);
     },
     TIMEOUT,
   );
@@ -126,7 +128,7 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForRequestMessage(server, 'Message in session 2', 15000);
 
       // Wait for the second model response
-      await waitForText(() => tui.outputSinceLastAction(), 'Session 2 response', 15000);
+      await waitForText(() => tui.viewport(), 'Session 2 response', 15000);
       await waitForCondition(
         () => {
           const current = persistedSessionIds(workspace);
@@ -139,7 +141,7 @@ describe('TUI PTY System — Session Switching', () => {
         10_000,
       );
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Message in session 2')).toBe(true);
       expect(screenContains(output, 'Session 2 response')).toBe(true);
       // Prompt should still be visible
@@ -160,7 +162,7 @@ describe('TUI PTY System — Session Switching', () => {
       // Verify SessionSelector panel is visible
       await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
 
-      let output = tui.output();
+      let output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after /sessions:', clean.slice(-500));
 
@@ -196,12 +198,14 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForText(() => tui.outputSince(replayMark), 'Message in session 1', 15000);
       await waitForText(() => tui.outputSince(replayMark), 'Session 1 response', 15000);
 
-      output = tui.outputSince(replayMark);
-      console.log('  output after switch to session 1:', stripAnsi(output).slice(-500));
+      output = tui.viewport();
+      console.log('  viewport after switch to session 1:', output.slice(-500));
 
       // After switching, session 1 content must be visible (replayed)
       expect(screenContains(output, 'Message in session 1')).toBe(true);
       expect(screenContains(output, 'Session 1 response')).toBe(true);
+      expect(screenContains(output, 'Message in session 2')).toBe(false);
+      expect(screenContains(output, 'Session 2 response')).toBe(false);
 
       // TUI must remain responsive with prompt visible
       expect(screenContains(output, '❯')).toBe(true);
@@ -211,16 +215,8 @@ describe('TUI PTY System — Session Switching', () => {
 
   // ── Switch back to session 2 (session isolation) ──
   //
-  // NOTE: <Static> content from old sessions persists in the terminal
-  // scrollback and cannot be cleared. Verifying that session 1 content
-  // is "invisible" after switching to session 2 is not achievable in PTY
-  // E2E tests because `screenContains` searches the entire accumulated
-  // output, including Static scrollback from previous renders.
-  //
-  // Isolation is verified by confirming that each session correctly
-  // replays its own content after switching — session 1 shows its
-  // messages, session 2 shows its messages. Both sessions are
-  // independently functional.
+  // The viewport is authoritative for session isolation. Raw PTY history is
+  // retained only for diagnostics and must not satisfy these assertions.
 
   test(
     'switch back to session 2 — correct content replayed',
@@ -232,7 +228,7 @@ describe('TUI PTY System — Session Switching', () => {
       // Verify SessionSelector panel is open
       await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
 
-      let output = tui.output();
+      let output = tui.viewport();
       console.log('  output after second /sessions:', stripAnsi(output).slice(-500));
 
       // Filter to one stable target instead of depending on timestamp order.
@@ -246,12 +242,14 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForText(() => tui.outputSince(replayMark), 'Message in session 2', 15000);
       await waitForText(() => tui.outputSince(replayMark), 'Session 2 response', 15000);
 
-      output = tui.outputSince(replayMark);
-      console.log('  output after switch to session 2:', stripAnsi(output).slice(-500));
+      output = tui.viewport();
+      console.log('  viewport after switch to session 2:', output.slice(-500));
 
       // Session 2 content must be visible (replayed correctly)
       expect(screenContains(output, 'Message in session 2')).toBe(true);
       expect(screenContains(output, 'Session 2 response')).toBe(true);
+      expect(screenContains(output, 'Message in session 1')).toBe(false);
+      expect(screenContains(output, 'Session 1 response')).toBe(false);
 
       // TUI must remain responsive with prompt visible
       expect(screenContains(output, '❯')).toBe(true);

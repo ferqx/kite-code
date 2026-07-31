@@ -68,7 +68,7 @@ describe('TUI PTY System — Long Message', () => {
       // Verify the model responded
       await waitForText(() => tui.outputSinceLastAction(), 'I received your long message!', 15000);
 
-      const afterOutput = tui.output();
+      const afterOutput = tui.viewport();
       console.log('  output after long message:', stripAnsi(afterOutput).slice(-400));
 
       // Long message text should appear in output (user message block)

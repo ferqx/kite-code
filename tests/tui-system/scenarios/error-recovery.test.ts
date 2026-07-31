@@ -60,7 +60,7 @@ describe('TUI PTY System — Error Recovery', () => {
 
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('output after error:', stripAnsi(output).slice(-500));
 
       // TUI must still be alive with prompt
@@ -88,7 +88,7 @@ describe('TUI PTY System — Error Recovery', () => {
         15000,
       );
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Hello after error')).toBe(true);
       expect(screenContains(output, 'Second attempt: hello from model!')).toBe(true);
       // Prompt should still be visible
