@@ -1,4 +1,3 @@
-import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   existsSync,
@@ -9,16 +8,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import {
-  arch,
-  networkInterfaces,
-  version as nodeOsVersion,
-  platform,
-  release,
-  tmpdir,
-} from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { generateBwrapArgs } from '../../src/core/sandbox/bwrap';
+import { readExecutionEnvironmentIdentityV1 } from '../../src/core/sandbox/environment-identity';
 import { detectSandboxBackend, type SandboxBackend } from '../../src/core/sandbox/platform';
 import { generateSandboxProfile } from '../../src/core/sandbox/profile';
 
@@ -100,7 +93,7 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
   );
 
   try {
-    const exactOsVersion = readExactOsVersion();
+    const environmentIdentity = readExecutionEnvironmentIdentityV1();
     const { shellGrandchildDeny, ...filesystem } = await probeFilesystem(
       backend,
       workspace,
@@ -113,15 +106,15 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
         version: 1,
         evidenceId: randomUUID(),
         capturedAt: new Date().toISOString(),
-        platform: platform(),
-        osRelease: release(),
-        osVersion: exactOsVersion.value,
-        arch: arch(),
-        bunVersion: Bun.version,
+        platform: environmentIdentity.platform,
+        osRelease: environmentIdentity.osRelease,
+        osVersion: environmentIdentity.osVersion,
+        arch: environmentIdentity.arch,
+        bunVersion: environmentIdentity.bunVersion,
         backend,
         selectedNetworkMode: 'off',
         environmentIdentity: {
-          exactOsVersion: exactOsVersion.verdict,
+          exactOsVersion: environmentIdentity.exactOsVersionAvailable ? 'enforced' : 'unavailable',
         },
         // This spike exercises the concrete backend generator directly. Task
         // 1B.7 must prove that both production composition roots install the
@@ -650,60 +643,6 @@ function collectLimitations(
   if (evidence.inheritance.localStdioMcp !== 'enforced')
     limitations.push('local_stdio_mcp_bypasses_boundary');
   return limitations;
-}
-
-function readExactOsVersion(): { verdict: NativeProbeVerdict; value: string } {
-  if (process.platform === 'darwin') {
-    const product = spawnSync('/usr/bin/sw_vers', ['-productVersion'], {
-      encoding: 'utf8',
-    });
-    const build = spawnSync('/usr/bin/sw_vers', ['-buildVersion'], {
-      encoding: 'utf8',
-    });
-    if (product.status === 0 && build.status === 0) {
-      return {
-        verdict: 'enforced',
-        value: `macOS ${product.stdout.trim()} (${build.stdout.trim()})`,
-      };
-    }
-  } else if (process.platform === 'linux') {
-    try {
-      const fields = Object.fromEntries(
-        readFileSync('/etc/os-release', 'utf8')
-          .split('\n')
-          .filter((line) => line.includes('='))
-          .map((line) => {
-            const separator = line.indexOf('=');
-            return [
-              line.slice(0, separator),
-              line
-                .slice(separator + 1)
-                .replace(/^"/, '')
-                .replace(/"$/, ''),
-            ];
-          }),
-      );
-      const description = fields.PRETTY_NAME ?? fields.VERSION_ID;
-      if (description) return { verdict: 'enforced', value: description };
-    } catch {
-      // Fall through to the runtime's OS version.
-    }
-  } else if (process.platform === 'win32') {
-    const script =
-      '$os = Get-CimInstance Win32_OperatingSystem; "$($os.Caption) $($os.Version) build $($os.BuildNumber)"';
-    const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const result = spawnSync(
-      'powershell.exe',
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-      { encoding: 'utf8', windowsHide: true },
-    );
-    if (result.status === 0 && result.stdout.trim()) {
-      return { verdict: 'enforced', value: result.stdout.trim() };
-    }
-  }
-  const fallback = nodeOsVersion();
-  if (fallback && fallback !== 'unknown') return { verdict: 'enforced', value: fallback };
-  return { verdict: 'unavailable', value: 'unavailable' };
 }
 
 function canonicalJson(value: unknown): string {

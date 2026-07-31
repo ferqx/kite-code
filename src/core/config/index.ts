@@ -1,7 +1,14 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
+import type {
+  ExecutionBoundaryAdmissionV1,
+  ExecutionBoundaryV1,
+  ExecutionCapabilitySurfaceV1,
+  ProductionExecutionEntrypointV1,
+} from '@/core/sandbox/types';
+import { admitProductionExecutionBoundaryV1 } from './execution-boundary';
 import type { FeatureFlags } from './features';
 import { mcpServerSchema } from './mcp-server-config';
 import { defaultConfigPath, projectConfigPath } from './paths';
@@ -10,6 +17,31 @@ import {
   type SessionLoggingPolicyV1,
 } from './session-logging-policy';
 
+export type {
+  ExecutionBoundaryAdmissionInputV1,
+  ExecutionBoundaryQualificationEvaluationInputV1,
+  TightenExecutionBoundaryInputV1,
+} from './execution-boundary';
+export {
+  admitProductionExecutionBoundaryV1,
+  computeExecutionBoundaryDigestV1,
+  executionBackendCapabilitiesV1Schema,
+  executionBoundaryV1Schema,
+  parseExecutionBoundaryV1,
+  tightenExecutionBoundaryV1,
+} from './execution-boundary';
+export {
+  APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_V1,
+  APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_REVISION_V1,
+  computeInProcessReadOnlyToolCatalogDigestV1,
+  computeProductionExecutionQualificationRegistryDigestV1,
+  inProcessReadOnlyToolCatalogV1Schema,
+  loadApprovedProductionExecutionQualificationRegistryV1,
+  parseProductionExecutionQualificationRegistryV1,
+  parseProductionExecutionQualificationV1,
+  productionExecutionQualificationRegistryV1Schema,
+  qualificationMatchesExecutionEnvironmentV1,
+} from './execution-qualification';
 export {
   DEFAULT_FEATURE_FLAGS,
   getFeatureFlags,
@@ -175,6 +207,7 @@ const featuresSchema = z
     resourceBudgetV1: z.boolean().optional(),
     terminalOutcomeV1: z.boolean().optional(),
     boundedCancellationV1: z.boolean().optional(),
+    executionBoundaryV1: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -291,6 +324,10 @@ export interface AgentConfig {
   };
   interactionMode?: z.infer<typeof interactionModeSchema>;
   features?: Partial<FeatureFlags>;
+  /** Release-pinned execution boundary; never sourced from project/user config. */
+  executionBoundary?: ExecutionBoundaryV1;
+  /** Exact capability surface admitted by the sealed production gate. */
+  executionCapabilitySurface?: ExecutionCapabilitySurfaceV1;
   /** Resolved artifact + user + project session logging policy. */
   sessionLoggingPolicy?: SessionLoggingPolicyV1;
   sandbox: {
@@ -308,6 +345,17 @@ export interface AgentConfig {
   compaction?: NonNullable<KiteCodeConfig['compaction']>;
 }
 
+declare const productionAgentConfigBrandV1: unique symbol;
+
+/** Config returned only after release-approved execution admission. */
+export interface ProductionAgentConfigV1 extends AgentConfig {
+  readonly [productionAgentConfigBrandV1]: true;
+  executionBoundary: ExecutionBoundaryV1;
+  executionCapabilitySurface: ExecutionCapabilitySurfaceV1;
+  sandbox: { readonly enabled: true };
+  productionExecution: NonNullable<ExecutionBoundaryAdmissionV1['qualificationProof']>;
+}
+
 /** 加载配置选项 / Configuration loading options */
 export interface LoadAgentConfigOptions {
   /** 配置文件路径 / Configuration file path */
@@ -316,8 +364,36 @@ export interface LoadAgentConfigOptions {
   providerName?: string;
   /** 覆盖默认模型名称 / Override default model name */
   modelName?: string;
+  /** Workspace whose project config is loaded. Defaults to process.cwd(). */
+  workspace?: string;
   /** Release-controlled policy; callers cannot source this from project config. */
   artifactSessionLoggingPolicy?: SessionLoggingPolicyV1;
+}
+
+export interface LoadProductionAgentConfigOptions extends LoadAgentConfigOptions {
+  /** Release-profile ceiling. Config rollout can only disable it. */
+  artifactExecutionBoundaryV1Enabled: boolean;
+  /** Release-controlled boundary. Project/user config cannot define it. */
+  artifactExecutionBoundary: unknown;
+  /** Canonical workspace selected by the composition root. */
+  workspaceRoot: string;
+  /** Production composition root being admitted. */
+  entrypoint: ProductionExecutionEntrypointV1;
+  /** CLI/App rollout overrides; still bounded by the release ceiling. */
+  featureOverrides?: Partial<FeatureFlags>;
+  /** CLI/App sandbox restriction; false cannot be overridden by config. */
+  sandboxEnabled?: boolean;
+}
+
+export function composeExecutionBoundaryRolloutV1(
+  layers: readonly (boolean | undefined)[],
+): boolean {
+  const explicit = layers.filter((value): value is boolean => value !== undefined);
+  return explicit.length > 0 && explicit.every((value) => value);
+}
+
+function composeSandboxEnabledV1(layers: readonly (boolean | undefined)[]): boolean {
+  return layers.every((value) => value !== false);
 }
 
 export {
@@ -410,20 +486,20 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
 /** 加载并解析 Agent 配置 / Load and parse agent configuration */
 export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConfig {
   const { configPath } = options;
-  const cfg = loadConfig(process.cwd(), configPath);
+  const workspace = options.workspace ?? process.cwd();
+  const cfg = loadConfig(workspace, configPath);
   const userSessionLogging = configPath
     ? cfg.sessionLogging
     : readConfigFile(defaultConfigPath())?.sessionLogging;
   const projectSessionLogging = configPath
     ? undefined
-    : readConfigFile(projectConfigPath(process.cwd()))?.sessionLogging;
+    : readConfigFile(projectConfigPath(workspace))?.sessionLogging;
   const sessionLoggingPolicy = resolveSessionLoggingPolicyV1({
     enabled: cfg.features?.sessionLoggingPolicyV1 ?? false,
     artifactPolicy: options.artifactSessionLoggingPolicy,
     user: userSessionLogging,
     project: projectSessionLogging,
   });
-
   const defaultModel = findDefaultModel(cfg);
 
   const providerName = options.providerName ?? defaultModel?.provider ?? 'deepseek';
@@ -476,6 +552,76 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     autoReview: cfg.autoReview,
     compaction: cfg.compaction,
   };
+}
+
+export class ProductionExecutionAdmissionError extends Error {
+  readonly decision: ExecutionBoundaryAdmissionV1;
+
+  constructor(decision: ExecutionBoundaryAdmissionV1) {
+    super(`Production execution admission denied: ${decision.reason}`);
+    this.name = 'ProductionExecutionAdmissionError';
+    this.decision = decision;
+  }
+}
+
+/**
+ * Production-only composition gate. It resolves ordinary configuration but
+ * returns no runnable config unless both release and rollout flags are enabled
+ * and the sealed native qualification registry admits this exact environment.
+ */
+export function loadProductionAgentConfig(
+  options: LoadProductionAgentConfigOptions,
+): ProductionAgentConfigV1 {
+  const {
+    artifactExecutionBoundary,
+    artifactExecutionBoundaryV1Enabled,
+    workspaceRoot,
+    entrypoint,
+    featureOverrides,
+    sandboxEnabled,
+    ...agentOptions
+  } = options;
+  const canonicalWorkspaceRoot = realpathSync.native(resolve(workspaceRoot));
+  const configLayers = agentOptions.configPath
+    ? [readConfigFile(agentOptions.configPath)]
+    : [
+        readConfigFile(defaultConfigPath()),
+        readConfigFile(projectConfigPath(canonicalWorkspaceRoot)),
+      ];
+  const executionBoundaryRolloutEnabled = composeExecutionBoundaryRolloutV1([
+    ...configLayers.map((layer) => layer?.features?.executionBoundaryV1),
+    featureOverrides?.executionBoundaryV1,
+  ]);
+  const effectiveSandboxEnabled = composeSandboxEnabledV1([
+    ...configLayers.map((layer) => layer?.sandbox?.enabled),
+    sandboxEnabled,
+  ]);
+  const config = loadAgentConfig({ ...agentOptions, workspace: canonicalWorkspaceRoot });
+  const resolvedFeatures = { ...config.features, ...featureOverrides };
+  const featureEnabled = artifactExecutionBoundaryV1Enabled && executionBoundaryRolloutEnabled;
+  const decision = admitProductionExecutionBoundaryV1({
+    featureEnabled,
+    boundary: artifactExecutionBoundary,
+    workspaceRoot: canonicalWorkspaceRoot,
+    entrypoint,
+    sandboxEnabled: effectiveSandboxEnabled,
+  });
+  if (
+    !decision.allowed ||
+    decision.admissionKind !== 'release_approved' ||
+    !decision.boundary ||
+    !decision.qualificationProof
+  ) {
+    throw new ProductionExecutionAdmissionError(decision);
+  }
+  return {
+    ...config,
+    features: { ...resolvedFeatures, executionBoundaryV1: true },
+    executionBoundary: decision.boundary,
+    executionCapabilitySurface: decision.surface,
+    sandbox: { enabled: true },
+    productionExecution: decision.qualificationProof,
+  } as ProductionAgentConfigV1;
 }
 
 /** Like loadAgentConfig but returns null instead of throwing when no API key is configured. */

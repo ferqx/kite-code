@@ -1,0 +1,67 @@
+# Production execution boundary contract
+
+状态：active
+
+读取时机：修改 `ExecutionBoundaryV1`、production composition root、sandbox capability
+projection、release-controlled execution policy 或对应 feature flag 时。
+
+验证：`bun test tests/sandbox/execution-boundary.test.ts tests/config/features.test.ts`、
+`bun run typecheck`、`bun run check:core-boundary`。
+
+相关：ADR-0051、ADR-0054、ADR-0061、`execution-platform-support.md`。
+
+## Schema ownership
+
+`src/core/sandbox/types.ts` 是 `ExecutionBoundaryV1`、逐维 backend capability strength、
+qualification registry 和只读工具 effect contract 的类型来源；
+`src/core/config/execution-boundary.ts` 是严格解析、canonical digest、单调收紧和技术能力评估的
+规范实现。`src/core/config/execution-qualification.ts` 只从仓库固定路径读取 release-pinned
+qualification registry，并校验 revision 和 digest；调用方不能提供 registry 路径、批准 digest
+或 production qualification。同一 OS/Bun/backend/network admission key 只能有一个
+qualification，resolver 也只接受恰好一个匹配，JSON 顺序不能改变结果。
+
+用户、project config 和 CLI 不能提供 boundary。普通 `loadAgentConfig()` 不接受或投影
+execution artifact，只服务现有开发入口。production composition root 必须使用
+`loadProductionAgentConfig()`，同时提供 release profile 的 boundary 与 flag ceiling；只有
+artifact ceiling 和合并后的 rollout flag 都为 `true` 才进入 sealed admission。任一层为
+`false` 都只能收紧；显式 user、project、CLI/App 层按逻辑与组合，缺少全部显式 rollout 时默认
+关闭，因此后层的 `true` 不能提升前层的 `false`。production loader 使用 boundary 对应的
+canonical Workspace 加载 project config，不使用进程启动目录代替该 identity。
+
+## Fail-closed admission
+
+production root 在创建 Runtime、Shell、writer、Skill child 或 local stdio MCP 之前必须通过
+`loadProductionAgentConfig()`；它内部调用 sealed `admitProductionExecutionBoundaryV1()`。
+准入同时要求：
+
+- flag 开启且 boundary 严格有效；
+- boundary 与实际 Workspace 的 canonical key 一致；
+- 仓库固定的批准 registry 对实际 OS release/version、architecture、Bun、backend 和入口给出
+  精确 qualification；
+- native probe 与 runtime resolver 共用 `readExecutionEnvironmentIdentityV1()`，并要求同一
+  qualification 同时绑定 TUI 与 foreground CLI 入口证据；
+- backend 按 filesystem、network、process-tree、child inheritance 逐维报告 `enforced`；
+- production boundary 要求 sandbox 配置和 CLI/App runtime restriction 均未关闭，且当前不接受
+  `full_access`；成功返回的 `ProductionAgentConfigV1` 把 sandbox 固定为 enabled，并携带
+  release-approved qualification proof。
+
+任一条件失败返回全 false capability surface，不进入审批。审批、`full` interaction mode 或
+裸 shell fallback 都不能改变结果。
+
+`read_only_only` 是独立受限 surface：registry 必须携带 digest 校验通过的非空工具 catalog；每个
+工具都固定 `workspace_read + network:none + process:false + write:false + externalPath:false`。
+其 capability surface 保留 catalog revision/digest、每个 descriptor revision 和完整 effect
+contract，而不是只列 tool ID，并显式关闭 network、process、writer、Shell、Skill child 和
+local stdio MCP。模型工具 disclosure 和执行 runner 都会把当前 builtin capability descriptor 的
+revision/effects 与该 catalog 精确匹配；不匹配、外部路径或动态 MCP 工具均 fail closed。技术
+fixture evaluator 只返回 `technical_evaluation` 标记，且不从 Core config
+barrel 导出；production loader 只接受带 registry proof 的 `release_approved` decision。当前批准
+registry 是空支持集，因此所有 production 配置加载都在返回可运行配置前拒绝；现有 TUI/CLI
+仍是开发入口，不构成生产旁路。
+
+## 单调组合与 identity
+
+`tightenExecutionBoundaryV1()` 只执行权限交集/限制收紧；不同 Workspace 禁止组合。解析后的
+Workspace realpath、排序去重后的 host allowlist 和所有安全字段进入
+`computeExecutionBoundaryDigestV1()`。字段、Workspace identity 或有效 allowlist 变化都会改变
+digest，使旧 release evidence 失效。

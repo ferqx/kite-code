@@ -5,7 +5,7 @@
 读取时机：修改 sandbox backend、production execution admission、process-tree 限制、
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
-验证：`bun test tests/sandbox/platform-capability-probe.test.ts`、
+验证：`bun test tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
@@ -47,6 +47,45 @@ backend discovery、sandbox 命令成功、顶层 shell invocation permit、PID 
 即使某 runner 的技术项全部为 `enforced`，也必须由新的追加 ADR、新鲜证据与独立 release
 gate 才能改变已关闭 D-04 的空支持集并产生 production support 声明。`backend=none` 不可能产生进程型
 `supported`，只能在另行验证的无进程 fallback 条件下产生 `read_only_only`。
+
+## ExecutionBoundaryV1 schema 与 composition gate
+
+Task 1B.1 已在 Core 冻结 `ExecutionBoundaryV1`：filesystem 只允许
+`read_only | workspace_write | full_access`，network 只允许 `off | allowlist`，local/private
+network 固定为 `false`，process-tree 上限必须是有限正整数。Workspace root 在解析时使用真实
+路径 canonicalize，并与 Workspace Trust 共用 `canonicalWorkspaceKey()`；allowlist 只接受精确
+DNS host、统一小写/排序/去重，不接受 URL、IP literal 或空的 allowlist 模式。
+
+边界组合只能收紧：filesystem scope 取更小权限、allowlist 取交集（空交集变成 network off）、
+protected policy 取 deny、process-tree limit 取更小值、sandbox required 取逻辑或、unavailable
+fallback 取 fail。不同 canonical Workspace 的边界禁止组合。
+
+production composition gate 不接受单一 `sandboxAvailable`，也不接受调用方传入 raw
+`supported | read_only_only`。它只读取
+`release/platform-capabilities/approved-execution-qualifications-v1.json`，校验固定 revision/digest，
+再按实际 OS release/version、architecture、Bun、backend、network mode 和 TUI/foreground CLI
+入口精确解析 qualification。probe 与 resolver 共用 canonical environment identity producer，且
+每个可批准 qualification 必须同时包含两个入口的 composition evidence。qualification 内逐维固定 filesystem、network、完整 process tree、
+child inheritance 和 verified in-process read-only strength。flag/artifact 缺失、Workspace 不匹配、
+`full_access`、环境无匹配 qualification 或任一必需维度 `unsupported` 时 capability surface 全部
+关闭；同一环境 admission key 重复也按歧义拒绝，不能由 registry 文件顺序选择首项。
+
+`read_only_only` 还要求 digest 校验通过的非空 tool catalog；每个 tool contract 明确禁止 network、
+process、write 和 workspace 外路径，只允许 Workspace read。准入 surface 保留 catalog
+revision/digest、descriptor revision 与 effect contract，供后续 tool disclosure/execution 对照，
+不能只按相同 tool ID 放行。当前 builtin disclosure 与 runner 已执行该匹配，并拒绝外部路径及
+动态 MCP；该 surface 的 shell、writer、Skill child 和 local stdio MCP 始终关闭。
+
+`loadProductionAgentConfig()` 是 2A composition root 必须使用的 Core 配置准入入口，并在返回
+任何可供 Runtime/进程使用的配置前完成 sealed gate；它不改变当前开发 TUI/CLI。当前静态
+support matrix 与批准 qualification registry 都是空支持集，1B.1 schema 或技术评估 fixture
+不能自行提升为 release approval。未来改变 registry 必须绑定新的固定 evidence/manifest，不能
+从用户、项目、CLI 或普通 App 调用参数构造。
+
+production loader 按 boundary 的 canonical Workspace 读取 project config，并将 user、project、
+CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enabled=false` 或
+`--no-sandbox` 等价 restriction 必须在 composition 阶段拒绝，不能获得 shell/process surface；
+成功的 production config 固定 `sandbox.enabled=true`，后续入口必须直接消费该 sealed config。
 
 ## Evidence 生命周期
 

@@ -25,6 +25,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | `resourceBudgetV1` | `false` | 启用 Runtime v19 累计预算 admission、FIFO/compound permit 与恢复语义 |
 | `boundedCancellationV1` | `false` | 启用 run deadline、统一 AbortSignal 与 descendant/process-tree 有界清理 |
 | `terminalOutcomeV1` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
+| `executionBoundaryV1` | `false` | 允许 composition root 消费 release-pinned `ExecutionBoundaryV1`；开启本身不产生平台资格或边界 artifact |
 
 `providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
 前者仍要求批准 registry/gate，且当前 route 集合为空；后者只允许新 run 建立 limited preset
@@ -39,6 +40,16 @@ CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除
 `sessionLoggingPolicyV1` 开启不等于允许正文。`content` 还要求 release artifact 明确允许且
 用户/管理员在用户配置显式 opt-in；project config 永远不能开启。关闭 flag 必须收紧为 `off`，
 不能回退到旧 content serializer。
+
+`executionBoundaryV1` 的用户、项目或 CLI 值只控制 rollout 请求，不能定义
+`ExecutionBoundaryV1`。production 的有效值固定为 release artifact ceiling 与 rollout 请求的
+逻辑与；user、project、CLI/App 的每个显式值也按逻辑与组合，全部未指定时使用默认关闭。任一
+为 `false` 都关闭，后层的 `true` 不能抬高前层或 artifact ceiling。普通
+`loadAgentConfig()` 不投影 boundary；只有 `loadProductionAgentConfig()` 接受 release-controlled
+`artifactExecutionBoundary`，并在返回可运行配置前使用仓库固定、revision/digest 校验的批准
+qualification registry。artifact 缺失/非法、Workspace 不匹配、实际环境无精确 qualification 或
+任一 backend 维度未强制时，生产 capability surface 全部关闭；审批不能恢复。当前批准 registry
+为空支持集，因此本 flag 不产生 production artifact 或可运行的 production shell/writer。
 
 
 上下文压缩的 flag 术语（功能开关）真值如下：

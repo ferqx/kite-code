@@ -2,6 +2,7 @@ import { dynamicTool, jsonSchema, type ToolSet } from 'ai';
 import { modelVisibleCapabilitySchema } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { SupportedChatModel } from '@/core/model/factory';
+import { isDescriptorAdmittedByInProcessReadOnlyCatalogV1 } from '@/core/sandbox/in-process-read-only';
 import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
 import { builtinToolRegistry } from './registry/builtins';
@@ -82,10 +83,31 @@ export function createAgentTools(
   context?: ToolAvailabilityContext,
 ): ToolSet {
   const ctx = context ?? toolAvailabilityContext(input);
-  const builtinTools = builtinToolRegistry.toSchemaOnlyToolSet(ctx) as ToolSet;
+  let builtinTools = builtinToolRegistry.toSchemaOnlyToolSet(ctx) as ToolSet;
+  const executionSurface = input.config?.executionCapabilitySurface;
+  const restrictToInProcessReadOnly = Boolean(
+    executionSurface && !executionSurface.process && !executionSurface.write,
+  );
+  const readOnlyCatalog = executionSurface?.inProcessReadOnlyTools;
+  if (restrictToInProcessReadOnly) {
+    builtinTools = readOnlyCatalog
+      ? Object.fromEntries(
+          Object.entries(builtinTools).filter(([name]) => {
+            const spec = builtinToolRegistry.get(name);
+            if (!spec) return false;
+            return isDescriptorAdmittedByInProcessReadOnlyCatalogV1({
+              catalog: readOnlyCatalog,
+              descriptor: builtinToolRegistry.descriptorOf(spec),
+            });
+          }),
+        )
+      : {};
+  }
 
   const mcpTools: ToolSet = {};
-  for (const { binding, descriptor } of input.mcpBindings ?? []) {
+  for (const { binding, descriptor } of restrictToInProcessReadOnly
+    ? []
+    : (input.mcpBindings ?? [])) {
     if (descriptor.kind !== 'mcp_tool' || descriptor.availability !== 'available') continue;
     if (!descriptor.inputSchema) continue;
     // AI SDK's JSONSchema7 type is narrower than MCP's runtime schema. The

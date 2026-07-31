@@ -1,7 +1,25 @@
+import type { ShellNetworkMode } from '@/core/sandbox/types';
 import type { AuthorizationMode, ShellApprovalGrant } from '@/protocol/events';
 
-/** 单次 Shell 调用的沙箱网络权限 / Per-invocation sandbox network permission */
-export type ShellNetworkMode = 'disabled' | 'allow_all';
+export type {
+  BoundaryEnforcementV1,
+  ExecutionBackendCapabilitiesV1,
+  ExecutionBoundaryAdmissionReasonV1,
+  ExecutionBoundaryAdmissionV1,
+  ExecutionBoundaryV1,
+  ExecutionCapabilitySurfaceV1,
+  ExecutionNetworkMode,
+  FilesystemScope,
+  InProcessReadOnlyToolCatalogV1,
+  InProcessReadOnlyToolContractV1,
+  ProductionExecutionEntrypointV1,
+  ProductionExecutionQualificationRegistryV1,
+  ProductionExecutionQualificationV1,
+  ProductionPlatformQualificationV1,
+  ProtectedPathPolicy,
+  SandboxUnavailablePolicy,
+  ShellNetworkMode,
+} from '@/core/sandbox/types';
 
 export interface ShellInput {
   workspace: string;

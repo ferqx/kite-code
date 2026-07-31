@@ -24,6 +24,7 @@ export interface FeatureFlags {
   resourceBudgetV1: boolean;
   terminalOutcomeV1: boolean;
   boundedCancellationV1: boolean;
+  executionBoundaryV1: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
@@ -48,6 +49,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   resourceBudgetV1: false,
   terminalOutcomeV1: false,
   boundedCancellationV1: false,
+  executionBoundaryV1: false,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

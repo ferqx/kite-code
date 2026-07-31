@@ -111,6 +111,7 @@
         "docs/active/tool-gated-autonomy.md",
         "docs/active/authorization.md",
         "docs/active/execution-platform-support.md",
+        "docs/active/execution-boundary.md",
         "docs/active/mcp-runtime-governance.md",
         "docs/adr/0042-file-tool-semantics-and-write-safety.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
@@ -275,6 +276,7 @@
         "README.md",
         "docs/book/09-CLI模式与配置.md",
         "docs/active/feature-flags.md",
+        "docs/active/execution-boundary.md",
         "docs/active/workspace-trust.md"
       ]
     },

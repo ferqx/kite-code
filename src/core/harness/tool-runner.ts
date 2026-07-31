@@ -11,6 +11,7 @@ import {
   type RuntimeMcpPolicy,
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
+import { isDescriptorAdmittedByInProcessReadOnlyCatalogV1 } from '@/core/sandbox/in-process-read-only';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
@@ -164,6 +165,35 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     subagentEventSink,
     availabilityContext,
   } = input;
+
+  const executionSurface = taskConfig?.executionCapabilitySurface;
+  const restrictToInProcessReadOnly = Boolean(
+    executionSurface && !executionSurface.process && !executionSurface.write,
+  );
+  const readOnlyCatalog = executionSurface?.inProcessReadOnlyTools;
+  if (restrictToInProcessReadOnly) {
+    const spec = builtinToolRegistry.get(request.name);
+    const descriptor = spec ? builtinToolRegistry.descriptorOf(spec) : undefined;
+    const externalPath = isExternalPathArg(
+      String((request.args as Record<string, unknown>).path ?? ''),
+    );
+    if (
+      !readOnlyCatalog ||
+      !descriptor ||
+      externalPath ||
+      !isDescriptorAdmittedByInProcessReadOnlyCatalogV1({ catalog: readOnlyCatalog, descriptor })
+    ) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr:
+          'Rejected by production execution boundary: tool is not in the sealed read-only catalog.',
+        status: 'rejected',
+      });
+    }
+  }
 
   const policy = evaluateToolApproval({
     toolName: request.name,
