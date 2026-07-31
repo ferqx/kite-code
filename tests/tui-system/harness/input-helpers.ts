@@ -1,22 +1,83 @@
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
+import { stripAnsi } from './terminal-screen';
+import { tuiPollInterval, tuiWaitTimeout } from './timing';
 
 export async function sleep(ms: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-const INPUT_SETTLE_MS = 200;
+const INPUT_SETTLE_MS = 100;
+const INPUT_ECHO_TIMEOUT_MS = 2_000;
+const INPUT_DELIVERY_ATTEMPTS = 3;
+const INPUT_RETRY_LIMIT = 256;
+
+function inputEchoProbe(text: string): string {
+  const characters = Array.from(text);
+  return characters.length <= 64 ? text : characters.slice(-32).join('');
+}
+
+function normalizeInputEcho(text: string): string {
+  return stripAnsi(text).replace(/\s+/g, '');
+}
+
+async function waitForInputEcho(
+  getOutput: () => string,
+  text: string,
+  timeoutMs: number,
+): Promise<void> {
+  const effectiveTimeout = tuiWaitTimeout(timeoutMs);
+  const normalizedProbe = normalizeInputEcho(text);
+  const start = Date.now();
+  while (Date.now() - start < effectiveTimeout) {
+    if (normalizeInputEcho(getOutput()).includes(normalizedProbe)) return;
+    await sleep(tuiPollInterval(25));
+  }
+  throw new Error(
+    `Timeout (${effectiveTimeout}ms) waiting for normalized input echo ${JSON.stringify(text)}`,
+  );
+}
 
 export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Promise<void> {
-  for (const ch of text) {
-    tui.write(ch);
-    await sleep(delayMs);
+  if (text.length === 0) return;
+  const characters = Array.from(text);
+  const echoProbe = inputEchoProbe(text);
+  const attempts = characters.length <= INPUT_RETRY_LIMIT ? INPUT_DELIVERY_ATTEMPTS : 1;
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    const outputMark = tui.output().length;
+    for (const ch of characters) {
+      tui.write(ch);
+      await sleep(delayMs);
+    }
+    await sleep(INPUT_SETTLE_MS);
+
+    try {
+      // Confirm that Ink rendered the final input value before a following
+      // control key is sent. This is a per-submission readiness check; the
+      // one-time startup warmup cannot cover later modal/focus transitions.
+      await waitForInputEcho(
+        () => tui.output().slice(outputMark),
+        echoProbe,
+        INPUT_ECHO_TIMEOUT_MS,
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt === attempts) break;
+      await clearInput(tui, characters.length);
+      await sleep(INPUT_SETTLE_MS);
+    }
   }
-  // Keep the final character and a following control key in separate PTY
-  // delivery/render cycles. On slower Linux CI runners, writing Enter
-  // immediately after the last character can leave the command in the input
-  // buffer, so the next test appends to it (for example `/compact/new`).
-  await sleep(INPUT_SETTLE_MS);
+
+  const tail = stripAnsi(tui.output()).slice(-1_000);
+  throw new Error(
+    `PTY input delivery failed after ${attempts} attempt(s) for ${JSON.stringify(
+      echoProbe,
+    )}. Last output:\n${tail}`,
+    { cause: lastError },
+  );
 }
 
 export async function clearInput(tui: PtyProcess, length: number): Promise<void> {
@@ -31,14 +92,59 @@ export async function waitForRequestMessage(
   server: MockModelServer,
   text: string,
   timeout = 10000,
+  options?: {
+    since?: number;
+    tui?: PtyProcess;
+  },
 ): Promise<void> {
+  const effectiveTimeout = tuiWaitTimeout(timeout);
+  const interval = tuiPollInterval(100);
+  const since = options?.since ?? 0;
   const start = Date.now();
-  while (Date.now() - start < timeout) {
-    if (server.hasRequestMessage(text)) return;
-    await sleep(100);
+  while (Date.now() - start < effectiveTimeout) {
+    if (server.hasRequestMessage(text, since)) return;
+    await sleep(interval);
   }
   const requestCount = server.getRequestCount();
+  const requestTail = server
+    .getRequests()
+    .slice(since)
+    .slice(-3)
+    .map((request) => JSON.stringify(request.messages).slice(-500))
+    .join('\n');
+  const terminalTail = options?.tui ? stripAnsi(options.tui.output()).slice(-1_000) : 'unavailable';
   throw new Error(
-    `Timeout (${timeout}ms) waiting for model request containing "${text}". Saw ${requestCount} requests.`,
+    `Timeout (${effectiveTimeout}ms) waiting for model request containing "${text}". ` +
+      `Saw ${requestCount - since} new request(s).\nRecent requests:\n${
+        requestTail || 'none'
+      }\nLast terminal output:\n${terminalTail}`,
   );
+}
+
+export async function submitUserMessage(
+  tui: PtyProcess,
+  server: MockModelServer,
+  text: string,
+  options?: {
+    delayMs?: number;
+    requestText?: string;
+    timeout?: number;
+  },
+): Promise<void> {
+  const since = server.getRequestCount();
+  await typeText(tui, text, options?.delayMs);
+  tui.write('\r');
+  await waitForRequestMessage(server, options?.requestText ?? text, options?.timeout, {
+    since,
+    tui,
+  });
+}
+
+export async function submitCommand(
+  tui: PtyProcess,
+  command: string,
+  delayMs?: number,
+): Promise<void> {
+  await typeText(tui, command, delayMs);
+  tui.write('\r');
 }

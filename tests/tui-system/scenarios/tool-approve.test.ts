@@ -11,13 +11,13 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { sleep, submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 import { warmupInputPipeline } from '../harness/warmup';
 
-const TIMEOUT = 30000;
+const TIMEOUT = 60000;
 
 describe('TUI PTY System — Tool Approve', () => {
   let tui: PtyProcess;
@@ -84,9 +84,7 @@ describe('TUI PTY System — Tool Approve', () => {
   test(
     'approve (Enter, default "Yes") triggers tool execution and agent continues',
     async () => {
-      await typeText(tui, 'Run a command for me');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Run a command for me', 15000);
+      await submitUserMessage(tui, server, 'Run a command for me', { timeout: 15000 });
 
       // Wait for approval block to render
       await waitForText(() => tui.output(), '授权执行命令', 15000);
@@ -125,9 +123,8 @@ describe('TUI PTY System — Tool Approve', () => {
       await sleep(3000);
 
       // Switch to full permissions mode — tool calls will auto-execute
-      await typeText(tui, '/permissions full');
-      tui.write('\r');
-      await sleep(1000);
+      await submitCommand(tui, '/permissions full');
+      await waitForText(() => tui.output(), '完全权限', 10000);
 
       // Wait for background calls (generateSessionName) to finish
       // before resetting the server, so they use the old spare
@@ -168,9 +165,7 @@ describe('TUI PTY System — Tool Approve', () => {
         { message: { content: 'spare 2' }, delay: 10 },
       ]);
 
-      await typeText(tui, 'Full access test');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Full access test', 15000);
+      await submitUserMessage(tui, server, 'Full access test', { timeout: 15000 });
 
       // In full mode, tools auto-execute — wait for the final model response
       await waitForText(() => tui.output(), 'OK, full_access confirmed.', 20000);

@@ -16,6 +16,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -63,11 +64,7 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
     'single Ctrl+C during agent response cancels the run and TUI recovers to idle',
     async () => {
       // Send a message to trigger the agent run (uses the first delayed mock response).
-      tui.write('Interrupt me\r');
-
-      // Wait for the user message to appear in the TUI output — this confirms
-      // the TUI processed the input and is now in a running state.
-      await waitForText(() => tui.output(), 'Interrupt me', 10000);
+      await submitUserMessage(tui, server, 'Interrupt me');
 
       // Send Ctrl+C to cancel the run.
       tui.write('\x03');
@@ -126,11 +123,7 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
     'double Ctrl+C during agent response exits the TUI process with code 0',
     async () => {
       // Send a message to trigger the agent run (uses the second delayed mock response).
-      tui.write('Exit after double Ctrl+C\r');
-
-      // Wait for the user message to appear, confirming the TUI is in a
-      // running state before we send the interrupt.
-      await waitForText(() => tui.output(), 'Exit after double Ctrl+C', 10000);
+      await submitUserMessage(tui, server, 'Exit after double Ctrl+C');
 
       // First Ctrl+C: cancels the run (running=true → cancelInterrupt).
       // Sets running=false and ctrlCPressed=true.

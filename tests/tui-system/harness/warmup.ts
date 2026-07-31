@@ -1,7 +1,7 @@
 import type { MockModelServer } from './fixtures';
 import { clearInput, sleep, typeText } from './input-helpers';
 import type { PtyProcess } from './pty-process';
-import { screenContains, waitForText } from './terminal-screen';
+import { screenContains } from './terminal-screen';
 
 /**
  * Shared warmup for PTY E2E tests.
@@ -14,24 +14,10 @@ import { screenContains, waitForText } from './terminal-screen';
 export async function warmupInputPipeline(tui: PtyProcess, server: MockModelServer): Promise<void> {
   // ── Validate raw-mode keystrokes reach the input line ──
   const text = 'hello';
-  let inputReady = false;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    await typeText(tui, text, 80);
-    try {
-      // A newly spawned Linux PTY can discard the first raw keystrokes while
-      // Ink is still attaching its input listener. Clear and retry so a failed
-      // warmup cannot leave partial input that contaminates later tests.
-      await waitForText(() => tui.output(), text, 1500);
-      inputReady = true;
-      break;
-    } catch {
-      await clearInput(tui, text.length);
-      await sleep(300);
-    }
-  }
-  if (!inputReady) {
-    throw new Error(`Warmup failed: typed text "${text}" not found after 3 attempts`);
-  }
+  // typeText performs the same receipt-confirmed delivery used by every later
+  // submission, including bounded recovery when the first raw keystrokes are
+  // lost while Ink attaches or restores focus.
+  await typeText(tui, text, 80);
 
   await clearInput(tui, text.length);
 

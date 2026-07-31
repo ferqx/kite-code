@@ -190,7 +190,7 @@
       "id": "tui-system-governance",
       "sources": [
         "scripts/run-tui-system-tests.ts",
-        "tests/tui-system/harness/resource-trend.ts",
+        "tests/tui-system/harness/**",
         "tests/tui-resource-trend.test.ts"
       ],
       "documents": ["docs/active/tui-e2e-standards.md", "docs/active/tui-e2e-testing-limits.md"]

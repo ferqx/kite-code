@@ -6,6 +6,7 @@ import {
 } from '../tests/tui-system/harness/resource-trend';
 
 const DEFAULT_FILE_TIMEOUT_MS = 180_000;
+const harnessDir = join(process.cwd(), 'tests', 'tui-system', 'harness');
 const scenariosDir = join(process.cwd(), 'tests', 'tui-system', 'scenarios');
 
 function positiveInteger(value: string | undefined, fallback: number): number {
@@ -28,6 +29,13 @@ function scenarioFiles(): string[] {
     throw new Error(`No TUI system scenarios matched: ${requested.join(', ')}`);
   }
   return selected.map((name) => join(scenariosDir, name));
+}
+
+function harnessTestFiles(): string[] {
+  return readdirSync(harnessDir)
+    .filter((name) => name.endsWith('.test.ts'))
+    .sort()
+    .map((name) => join(harnessDir, name));
 }
 
 function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
@@ -122,7 +130,9 @@ const timeoutMs = positiveInteger(
   process.env.KITE_TUI_TEST_FILE_TIMEOUT_MS,
   DEFAULT_FILE_TIMEOUT_MS,
 );
-const files = scenarioFiles();
+const harnessFiles = harnessTestFiles();
+const scenarios = scenarioFiles();
+const files = [...harnessFiles, ...scenarios];
 const resourceSamples: TuiSystemResourceSample[] = [sampleResources()];
 
 for (const file of files) {
@@ -152,4 +162,6 @@ if (trendFailures.length > 0) {
   process.exit(1);
 }
 
-console.log(`\n[tui-system] passed ${files.length} scenario files`);
+console.log(
+  `\n[tui-system] passed ${harnessFiles.length} harness files and ${scenarios.length} scenario files`,
+);

@@ -23,14 +23,19 @@ tests/tui-system/
 ## 编写规则
 
 1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。
-2. 输入和等待使用 harness helper；不得用任意长 sleep 代替条件等待。
+2. 输入和等待使用 harness helper；不得用任意长 sleep 代替条件等待。`typeText()` 必须在
+   返回前确认本次输入已由 Ink 回显；普通模型消息优先使用 `submitUserMessage()`，把输入回显、
+   Enter 和“本次提交之后产生的 mock model request”绑定为一个同步原语。slash command 优先
+   使用 `submitCommand()`；需要分步断言时可使用 receipt-confirmed `typeText()` 后单独发送
+   Enter。两种方式都必须随后等待该命令独有的可见状态，不能用历史输出中的旧 prompt 作为
+   就绪证据。
 3. 每个 scenario 负责关闭子进程、mock server 和临时资源。
 4. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。
 5. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
 6. 改动 Runtime 多轮语义时同时运行 `tests/runtime/agent.integration.test.ts`、`tests/runtime/store.test.ts` 和相应 PTY scenario。
 7. PTY suite 必须串行运行，避免终端尺寸、端口和全局环境相互污染。
-   完整 suite 由 `scripts/run-tui-system-tests.ts` 按 scenario 文件逐个启动独立
-   `bun test` 进程；每个文件默认硬超时 180 秒，超时后必须终止测试进程及其
+   完整 suite 由 `scripts/run-tui-system-tests.ts` 先运行 harness 单元测试，再按 scenario
+   文件逐个启动独立 `bun test` 进程；每个文件默认硬超时 180 秒，超时后必须终止测试进程及其
    TUI 子进程树。需要诊断慢场景时可通过 `KITE_TUI_TEST_FILE_TIMEOUT_MS`
    调整单文件上限，不得取消硬超时。
 8. `run.completed.output` 是最终回答的权威渲染校准点。TUI 必须在切换到 idle、把当前 turn 移入 Ink `<Static>` 之前，用它补齐可能缺失的尾部并结束所有 streaming text block。MCP/工具调用后的长回答必须断言末段在当前会话中可见，不能依赖重新进入会话后的 replay 才出现。
@@ -46,6 +51,10 @@ tests/tui-system/
     顺序提交；`run.completed + turn.completed` batch 必须产生命名 rewind 恢复点。
     `SET_EXITED` 不得重写已经交给 Ink `<Static>` 的 streamed text block；最终回答尾段由
     `run.completed.output` 校准。
+14. 条件等待在共享 CI runner 上默认使用 1.5 倍预算，本地保持 1 倍；可用
+    `KITE_TUI_TEST_TIMEOUT_SCALE` 设为大于 0 的倍数覆盖，超过 3 时按 3 倍处理。增加预算不能
+    替代输入回显、请求 baseline 和 modal/命令结果条件。失败诊断必须包含最近 mock request
+    与终端输出尾部。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 

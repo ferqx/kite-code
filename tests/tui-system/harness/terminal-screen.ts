@@ -9,19 +9,21 @@
  * Phase 2+: consider @xterm/headless for full terminal emulation.
  */
 
+import { tuiPollInterval, tuiWaitTimeout } from './timing';
+
 /**
  * Strip ANSI escape sequences, OSC sequences, and terminal control
  * characters from PTY output. Preserves printable text and newlines.
  */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: essential ANSI escape sequence regex — \x1b matches the ESC (0x1b) control character
 const CSI_RE = /\x1b\[[0-9;?]*[a-zA-Z]/g;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: <explanation>
+// biome-ignore lint/suspicious/noControlCharactersInRegex: OSC parsing requires ESC and BEL bytes
 const OSC_RE = /\x1b\][^\x07]*\x07/g;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: <explanation>
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal escape parsing requires the ESC byte
 const OTHER_ESC_RE = /\x1b[=>][0-9;]*[a-zA-Z]?/g;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: <explanation>
+// biome-ignore lint/suspicious/noControlCharactersInRegex: terminal charset parsing requires the ESC byte
 const CHARSET_RE = /\x1b[()][0-9A-Za-z]/g;
-// biome-ignore lint/suspicious/noControlCharactersInRegex: <explanation>
+// biome-ignore lint/suspicious/noControlCharactersInRegex: DEC private-mode parsing requires the ESC byte
 const DEC_PRIVATE_RE = /\x1b\[\?[0-9;]*[hl]/g;
 
 export function stripAnsi(raw: string): string {
@@ -53,15 +55,17 @@ export async function waitForText(
   timeout = 10000,
   interval = 100,
 ): Promise<string> {
+  const effectiveTimeout = tuiWaitTimeout(timeout);
+  const effectiveInterval = tuiPollInterval(interval);
   const start = Date.now();
-  while (Date.now() - start < timeout) {
+  while (Date.now() - start < effectiveTimeout) {
     const output = getOutput();
     if (screenContains(output, text)) return output;
-    await new Promise((r) => setTimeout(r, interval));
+    await new Promise((r) => setTimeout(r, effectiveInterval));
   }
   const last = stripAnsi(getOutput());
   throw new Error(
-    `Timeout (${timeout}ms) waiting for "${text}".\nLast output:\n${last.slice(-500)}`,
+    `Timeout (${effectiveTimeout}ms) waiting for "${text}".\nLast output:\n${last.slice(-1000)}`,
   );
 }
 
@@ -72,12 +76,14 @@ export async function waitForTextGone(
   timeout = 5000,
   interval = 100,
 ): Promise<void> {
+  const effectiveTimeout = tuiWaitTimeout(timeout);
+  const effectiveInterval = tuiPollInterval(interval);
   const start = Date.now();
-  while (Date.now() - start < timeout) {
+  while (Date.now() - start < effectiveTimeout) {
     if (!screenContains(getOutput(), text)) return;
-    await new Promise((r) => setTimeout(r, interval));
+    await new Promise((r) => setTimeout(r, effectiveInterval));
   }
-  throw new Error(`Timeout (${timeout}ms) waiting for "${text}" to disappear`);
+  throw new Error(`Timeout (${effectiveTimeout}ms) waiting for "${text}" to disappear`);
 }
 
 /** Take a clean-text snapshot of the current terminal screen. */

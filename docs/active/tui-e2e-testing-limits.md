@@ -23,6 +23,9 @@
 8. suite runner 的 RSS/active-resource/FD 趋势只覆盖协调进程和 scenario 边界资源回收；
    每个 TUI 子进程内部的长期缓慢泄漏仍需要 1C.7 bounded soak。Windows 无通用 `/proc/self/fd`
    时 FD 数显示为 unsupported，由 active-resource 与平台 smoke 补充。
+9. PTY 输出是累积字节流，历史 prompt 仍可能出现在 buffer 中，因此“曾出现 `❯`”不能证明
+   当前输入焦点可用。Harness 通过本次输出 mark 之后的输入回显与本次 mock request baseline
+   建立提交确认；复杂 modal 仍需等待其独有状态。
 
 ## 分层选择
 

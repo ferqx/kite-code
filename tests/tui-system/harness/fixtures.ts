@@ -51,8 +51,8 @@ export interface MockModelServer {
   getRequestCount(): number;
   /** Full request bodies received by /v1/chat/completions */
   getRequests(): MockChatRequest[];
-  /** Whether any chat request includes the provided text in any message content */
-  hasRequestMessage(text: string): boolean;
+  /** Whether a chat request at or after since includes text in any message content */
+  hasRequestMessage(text: string, since?: number): boolean;
   /** Stop the server */
   stop(): void;
 }
@@ -323,10 +323,12 @@ export function createMockModelServer(): MockModelServer {
     },
     getRequestCount: () => callCount,
     getRequests: () => [...requests],
-    hasRequestMessage: (text: string) =>
-      requests.some((request) =>
-        request.messages.some((message) => messageContentIncludes(message.content, text)),
-      ),
+    hasRequestMessage: (text: string, since = 0) =>
+      requests
+        .slice(since)
+        .some((request) =>
+          request.messages.some((message) => messageContentIncludes(message.content, text)),
+        ),
     stop: () => server.stop(),
   };
 }
