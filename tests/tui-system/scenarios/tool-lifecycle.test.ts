@@ -18,11 +18,16 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { assertOrder, screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  assertOrder,
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 45000;
 
@@ -65,9 +70,8 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
     ]);
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
     tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -75,14 +79,6 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  test(
-    'warmup',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'full lifecycle: interrupt → confirm → no duplicate, model continues',
@@ -94,7 +90,7 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
 
       // The question text may first appear in the started ask_user Tool Card.
       // Wait for an option that only exists in the interactive footer.
-      await waitForText(() => tui.output(), 'Blue', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Blue', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.output();
@@ -108,7 +104,7 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
 
       // ── 4. 确认：按 Enter 接受默认选项 / Confirm: Enter to accept default ──
       tui.write('\r');
-      await sleep(2500);
+      await waitForText(() => tui.outputSinceLastAction(), 'Got it!', 15000);
 
       output = tui.output();
 
@@ -161,9 +157,8 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
     ]);
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
     tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -171,14 +166,6 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  test(
-    'warmup',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'write_plan renders plan content in planning phase',
@@ -189,7 +176,7 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
       await waitForRequestMessage(server, 'Draft a lifecycle plan', 15000);
 
       // Wait for follow-up text
-      await waitForText(() => tui.output(), 'Draft saved', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Draft saved', 15000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -237,9 +224,8 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
     ]);
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
     tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -247,14 +233,6 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  test(
-    'warmup',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'full lifecycle: interrupt → deny → current turn stops without model continuation',
@@ -265,7 +243,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       await waitForRequestMessage(server, 'Make a directory', 15000);
 
       // 等审批块 / Wait for approval block
-      await waitForText(() => tui.output(), '授权执行命令', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.output();
@@ -279,19 +257,15 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
 
       // ── 4. 拒绝：导航到 Deny 确认 / Deny: navigate to Deny and confirm ──
       tui.write('\x1b[B');
-      await sleep(100);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       tui.write('\x1b[B');
-      await sleep(100);
-      // One extra Down is harmless because the selector clamps at "拒绝",
-      // and matches the real PTY escape-sequence behavior used by approval.test.
-      tui.write('\x1b[B');
-      await sleep(100);
-      const rejectionOutputOffset = tui.output().length;
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      const rejectionOutputOffset = tui.markOutput();
       tui.write('\r');
-      await sleep(2500);
+      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
       output = tui.output();
-      const afterRejection = output.slice(rejectionOutputOffset);
+      const afterRejection = tui.outputSince(rejectionOutputOffset);
       console.log('  output after approval rejection:', stripAnsi(afterRejection).slice(-2000));
 
       // ── 5. 用户拒绝审批会中止当前 turn，不再执行工具或调用模型 ──
@@ -331,9 +305,8 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
     ]);
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
     tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -341,14 +314,6 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  test(
-    'warmup',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'full lifecycle: no interrupt, tool auto-executes, model continues',
@@ -359,7 +324,7 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
       await waitForRequestMessage(server, 'Search for ts files', 15000);
 
       // 等工具执行完成 + 模型继续 / Wait for tool + model continuation
-      await waitForText(() => tui.output(), 'Search complete', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Search complete', 15000);
 
       const output = tui.output();
 

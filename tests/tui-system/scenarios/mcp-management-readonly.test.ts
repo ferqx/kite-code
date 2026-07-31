@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { exposedMcpToolName } from '@/core/mcp';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import { sleep, typeText } from '../harness/input-helpers';
+import { typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
@@ -39,19 +39,18 @@ describe('TUI PTY System — MCP Select management', () => {
     });
     expect(readFileSync(workspace.configPath, 'utf-8')).not.toContain('mcpServers');
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui!.output(), '❯', 15_000);
+    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
     tui.setRawMode(true);
-    await sleep(300);
 
     await typeText(tui, '/mcp', 20);
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'MCP Servers', 15_000);
-    await waitForText(() => tui!.output(), 'fixture · ✔ connected', 15_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'MCP Servers', 15_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'fixture · ✔ connected', 15_000);
     expect(screenContains(tui.output(), 'Add MCP server')).toBe(true);
     expect(screenContains(tui.output(), 'echo')).toBe(false);
 
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'Reconnect', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'Reconnect', 10_000);
     expect(screenContains(tui.output(), 'Disable server')).toBe(true);
     expect(screenContains(tui.output(), 'Remove server')).toBe(true);
     expect(screenContains(tui.output(), 'A Add')).toBe(false);
@@ -265,14 +264,13 @@ describe('TUI PTY System — MCP Select management', () => {
       projectConfigOverrides: {},
     });
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui!.output(), '❯', 15_000);
+    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
     tui.setRawMode(true);
-    await sleep(300);
 
     await typeText(tui, 'search the documentation with MCP', 20);
     tui.write('\r');
     await waitForText(
-      () => tui!.output(),
+      () => tui!.outputSinceLastAction(),
       'TAIL_MARKER: the final MCP summary paragraph is visible before the prompt.',
       20_000,
     );
@@ -293,7 +291,7 @@ describe('TUI PTY System — MCP Select management', () => {
     await typeText(tui, 'call the same MCP tool again', 20);
     tui.write('\r');
     await waitForText(
-      () => tui!.output(),
+      () => tui!.outputSinceLastAction(),
       'The MCP call failed, but the TUI conversation continued normally.',
       20_000,
     );
@@ -306,7 +304,7 @@ describe('TUI PTY System — MCP Select management', () => {
     await typeText(tui, 'read the available MCP documentation resource', 20);
     tui.write('\r');
     await waitForText(
-      () => tui!.output(),
+      () => tui!.outputSinceLastAction(),
       'RESOURCE_TAIL: MCP resource discovery and reading completed.',
       20_000,
     );
@@ -321,7 +319,7 @@ describe('TUI PTY System — MCP Select management', () => {
     await typeText(tui, 'try a missing MCP resource and continue', 20);
     tui.write('\r');
     await waitForText(
-      () => tui!.output(),
+      () => tui!.outputSinceLastAction(),
       'RESOURCE_FAILURE_RECOVERED: the conversation continued after the read error.',
       20_000,
     );

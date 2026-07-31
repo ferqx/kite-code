@@ -177,8 +177,7 @@
         "src/app/tui/session-manager.ts",
         "tests/session-logger/**",
         "scripts/release/session-log-acl-smoke.ts",
-        ".github/workflows/session-log-acl-smoke.yml",
-        "tests/tui-system/scenarios/session-logging-status.test.ts"
+        ".github/workflows/session-log-acl-smoke.yml"
       ],
       "documents": [
         "docs/active/session-logging-policy.md",
@@ -190,8 +189,11 @@
     {
       "id": "tui-system-governance",
       "sources": [
+        "package.json",
         "scripts/run-tui-system-tests.ts",
         "tests/tui-system/harness/**",
+        "tests/tui-system/scenarios/**",
+        "tests/tui-system/smoke/**",
         "tests/tui-resource-trend.test.ts"
       ],
       "documents": ["docs/active/tui-e2e-standards.md", "docs/active/tui-e2e-testing-limits.md"]
@@ -246,9 +248,7 @@
         "src/app/tui/components/WorkspaceTrustGate.tsx",
         "src/app/tui/index.tsx",
         "tests/workspace-trust.test.ts",
-        "tests/cli-workspace-trust.test.ts",
-        "tests/tui-system/scenarios/workspace-trust.test.ts",
-        "tests/tui-system/harness/test-workspace.ts"
+        "tests/cli-workspace-trust.test.ts"
       ],
       "documents": ["docs/active/workspace-trust.md", "docs/book/09-CLI模式与配置.md"]
     },

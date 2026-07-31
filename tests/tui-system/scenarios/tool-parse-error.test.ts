@@ -9,17 +9,14 @@
  *
  * The mock server uses `invalid_tool_calls` with raw args strings
  * that simulate what happens when the model produces unparseable JSON.
- *
- * IMPORTANT: Follows the same 3-test warmup pattern as input.test.ts.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { screenContains, stripAnsi, waitForAnyText, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -52,11 +49,10 @@ describe('TUI PTY System — Tool Parse Error', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -64,16 +60,6 @@ describe('TUI PTY System — Tool Parse Error', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Malformed Tool Call → Error Recovery ──────────────────
 
@@ -84,8 +70,8 @@ describe('TUI PTY System — Tool Parse Error', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Run a broken command', 15000);
 
-      // Wait for the TUI to process the malformed tool call and recover
-      await sleep(3000);
+      await waitForAnyText(() => tui.outputSinceLastAction(), ['Bash', 'Cancelled'], 15000);
+      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -112,7 +98,11 @@ describe('TUI PTY System — Tool Parse Error', () => {
       await waitForRequestMessage(server, 'Hello after broken tool', 15000);
 
       // Wait for the recovery response
-      await waitForText(() => tui.output(), 'Recovery message after parse error!', 15000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Recovery message after parse error!',
+        15000,
+      );
 
       const output = tui.output();
       expect(screenContains(output, 'Recovery message after parse error!')).toBe(true);

@@ -30,14 +30,20 @@ export interface PtyProcessOptions {
 }
 
 export interface PtyProcess {
-  /** Write keystrokes to the child's stdin (simulates user typing) */
-  write(data: string): void;
+  /** Write keystrokes and return the output checkpoint immediately before the action. */
+  write(data: string): PtyOutputMark;
   /** Set raw mode on the terminal (disables line buffering) */
-  setRawMode(enabled: boolean): void;
+  setRawMode(enabled: boolean): PtyOutputMark;
   /** Resize the terminal (may not trigger resize event on Windows) */
-  resize(cols: number, rows: number): void;
+  resize(cols: number, rows: number): PtyOutputMark;
   /** Get all raw PTY output received so far (includes ANSI escapes) */
   output(): string;
+  /** Capture a stable byte checkpoint in the PTY output stream. */
+  markOutput(): PtyOutputMark;
+  /** Read only output emitted after a captured checkpoint. */
+  outputSince(mark: PtyOutputMark): string;
+  /** Read only output emitted after the most recent write/resize/raw-mode action. */
+  outputSinceLastAction(): string;
   /** Wait for the process to exit, returns exit code */
   waitForExit(): Promise<number>;
   /** Kill the process (SIGTERM → wait → SIGKILL fallback) */
@@ -46,6 +52,64 @@ export interface PtyProcess {
   killAndWait(): Promise<boolean>;
   /** Check if the process has exited */
   readonly exited: boolean;
+}
+
+declare const PTY_OUTPUT_MARK: unique symbol;
+export type PtyOutputMark = number & { readonly [PTY_OUTPUT_MARK]: true };
+
+export interface PtyOutputBuffer {
+  append(chunk: Uint8Array): void;
+  mark(): PtyOutputMark;
+  output(): string;
+  outputSince(mark: PtyOutputMark): string;
+}
+
+/**
+ * Preserve raw PTY bytes so a checkpoint cannot accidentally claim a UTF-8
+ * code point whose leading byte arrived before the checkpoint. Branded marks
+ * prevent callers from inventing unsafe offsets.
+ */
+export function createPtyOutputBuffer(): PtyOutputBuffer {
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+
+  const bytes = (): Uint8Array => {
+    const merged = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return merged;
+  };
+
+  const outputFrom = (mark: number): string => {
+    if (!Number.isInteger(mark) || mark < 0 || mark > byteLength) {
+      throw new Error(`Invalid PTY output mark ${mark}; current output length is ${byteLength}`);
+    }
+    const outputBytes = bytes();
+    let start = mark;
+    while (start < outputBytes.byteLength && (outputBytes[start]! & 0xc0) === 0x80) {
+      start++;
+    }
+    return new TextDecoder().decode(outputBytes.subarray(start));
+  };
+
+  return {
+    append(chunk) {
+      chunks.push(chunk.slice());
+      byteLength += chunk.byteLength;
+    },
+    mark() {
+      return byteLength as PtyOutputMark;
+    },
+    output() {
+      return new TextDecoder().decode(bytes());
+    },
+    outputSince(mark) {
+      return outputFrom(mark);
+    },
+  };
 }
 
 /** Wait until a PTY child has exited, or fail its cleanup instead of hiding a leak. */
@@ -181,7 +245,8 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     writeFileSync(join(wsDir, 'kite-code.jsonc'), projectConfigStr);
   }
 
-  const chunks: Uint8Array[] = [];
+  const outputBuffer = createPtyOutputBuffer();
+  let lastActionMark = outputBuffer.mark();
   let exited = false;
   let exitResolver: ((code: number) => void) | null = null;
   const exitPromise = new Promise<number>((resolve) => {
@@ -209,8 +274,8 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     terminal: {
       cols,
       rows,
-      data(_terminal: any, chunk: Uint8Array) {
-        chunks.push(chunk);
+      data(_terminal: unknown, chunk: Uint8Array) {
+        outputBuffer.append(chunk);
       },
     },
   });
@@ -258,32 +323,43 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     },
 
     write(data: string) {
+      lastActionMark = outputBuffer.mark();
       if (!exited && proc.terminal) {
         proc.terminal.write(data);
       }
+      return lastActionMark;
     },
 
     setRawMode(enabled: boolean) {
+      lastActionMark = outputBuffer.mark();
       if (!exited && proc.terminal && typeof proc.terminal.setRawMode === 'function') {
         proc.terminal.setRawMode(enabled);
       }
+      return lastActionMark;
     },
 
     resize(newCols: number, newRows: number) {
+      lastActionMark = outputBuffer.mark();
       if (!exited && proc.terminal && typeof proc.terminal.resize === 'function') {
         proc.terminal.resize(newCols, newRows);
       }
+      return lastActionMark;
     },
 
     output(): string {
-      const totalLen = chunks.reduce((sum, c) => sum + c.length, 0);
-      const merged = new Uint8Array(totalLen);
-      let offset = 0;
-      for (const c of chunks) {
-        merged.set(c, offset);
-        offset += c.length;
-      }
-      return new TextDecoder().decode(merged);
+      return outputBuffer.output();
+    },
+
+    markOutput() {
+      return outputBuffer.mark();
+    },
+
+    outputSince(mark) {
+      return outputBuffer.outputSince(mark);
+    },
+
+    outputSinceLastAction() {
+      return outputBuffer.outputSince(lastActionMark);
     },
 
     waitForExit: () => waitForPtyExitCode(exitPromise, EXIT_TIMEOUT_MS),

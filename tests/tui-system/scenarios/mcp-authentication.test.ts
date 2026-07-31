@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
 describe('TUI PTY System — MCP authentication recovery', () => {
@@ -44,22 +44,22 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       projectConfigOverrides: {},
     });
     tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.output(), '❯', 15_000);
-    await sleep(300);
+    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
+    await waitForCondition(() => mcpRequests > 0, 'initial MCP connection attempt', 5_000);
     expect(mcpRequests).toBeGreaterThan(0);
     expect(authorizationRequests).toBe(0);
 
     tui.setRawMode(true);
     await typeText(tui, '/mcp');
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'oauth · ✘ login required', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'oauth · ✘ login required', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'Authenticate', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'Authenticate', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'Open browser', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'Open browser', 10_000);
     expect(authorizationRequests).toBe(0);
     tui.write('\x1b');
-    await waitForText(() => tui!.output(), 'Authenticate', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'Authenticate', 10_000);
     expect(authorizationRequests).toBe(0);
   }, 40_000);
 
@@ -119,20 +119,19 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     workspace.env.NODE_ENV = 'test';
     workspace.env.KITE_TEST_MCP_CREDENTIAL_STORE = 'memory';
     tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.output(), '❯', 15_000);
-    await sleep(300);
+    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
 
     tui.setRawMode(true);
     await typeText(tui, '/mcp');
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'oauth · ✘ login required', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'oauth · ✘ login required', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'Authenticate', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'Authenticate', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'Open browser', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'Open browser', 10_000);
     tui.write('\r');
     const openerFailureOutput = await waitForText(
-      () => tui!.output(),
+      () => tui!.outputSinceLastAction(),
       'browser_open_failed',
       15_000,
     );
@@ -142,7 +141,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     expect(screenContains(openerFailureOutput, 'pty-client')).toBe(false);
 
     tui.write('\x1b');
-    await waitForText(() => tui!.output(), 'MCP authentication cancelled.', 10_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'MCP authentication cancelled.', 10_000);
   }, 50_000);
 
   test('required login provider gates the model and Session Waive continues without exposing it', async () => {
@@ -165,17 +164,20 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       projectConfigOverrides: {},
     });
     tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.output(), '❯', 15_000);
-    await sleep(300);
+    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
 
     tui.setRawMode(true);
     await typeText(tui, 'continue without required provider');
     tui.write('\r');
-    await waitForText(() => tui!.output(), "Required MCP provider 'oauth'", 15_000);
+    await waitForText(() => tui!.outputSinceLastAction(), "Required MCP provider 'oauth'", 15_000);
     expect(modelServer.getRequestCount()).toBe(0);
-    await waitForText(() => tui!.output(), 'Session Waive', 5_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'Session Waive', 5_000);
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'continued after provider waiver', 15_000);
+    await waitForText(
+      () => tui!.outputSinceLastAction(),
+      'continued after provider waiver',
+      15_000,
+    );
     expect(modelServer.getRequestCount()).toBe(1);
   }, 50_000);
 
@@ -285,20 +287,27 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       projectConfigOverrides: {},
     });
     tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.output(), '❯', 15_000);
+    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
 
     tui.setRawMode(true);
-    await sleep(300);
     await typeText(tui, 'call the recoverable echo tool');
     tui.write('\r');
     await waitForRequestMessage(modelServer, 'call the recoverable echo tool', 15_000);
-    await waitForText(() => tui!.output(), "MCP provider 'recoverable' requires login.", 15_000);
+    await waitForText(
+      () => tui!.outputSinceLastAction(),
+      "MCP provider 'recoverable' requires login.",
+      15_000,
+    );
     expect(toolCalls).toBe(1);
     expect(modelServer.getRequestCount()).toBe(2);
-    await waitForText(() => tui!.output(), 'Later', 5_000);
+    await waitForText(() => tui!.outputSinceLastAction(), 'Later', 5_000);
     tui.write('\x1b[B');
     tui.write('\r');
-    await waitForText(() => tui!.output(), 'continued after deferring provider login', 15_000);
+    await waitForText(
+      () => tui!.outputSinceLastAction(),
+      'continued after deferring provider login',
+      15_000,
+    );
     expect(toolCalls).toBe(1);
     expect(modelServer.getRequestCount()).toBe(3);
   }, 50_000);

@@ -1,6 +1,6 @@
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
-import { stripAnsi } from './terminal-screen';
+import { stripAnsi, waitForOutputQuiescence } from './terminal-screen';
 import { tuiPollInterval, tuiWaitTimeout } from './timing';
 
 export async function sleep(ms: number): Promise<void> {
@@ -46,7 +46,7 @@ export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Pro
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const outputMark = tui.output().length;
+    const outputMark = tui.markOutput();
     for (const ch of characters) {
       tui.write(ch);
       await sleep(delayMs);
@@ -55,18 +55,18 @@ export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Pro
 
     try {
       // Confirm that Ink rendered the final input value before a following
-      // control key is sent. This is a per-submission readiness check; the
-      // one-time startup warmup cannot cover later modal/focus transitions.
-      await waitForInputEcho(
-        () => tui.output().slice(outputMark),
-        echoProbe,
-        INPUT_ECHO_TIMEOUT_MS,
-      );
+      // control key is sent. Every input action owns this readiness check
+      // because modal and input-line remounts can change focus after startup.
+      await waitForInputEcho(() => tui.outputSince(outputMark), echoProbe, INPUT_ECHO_TIMEOUT_MS);
       return;
     } catch (error) {
       lastError = error;
       if (attempt === attempts) break;
-      await clearInput(tui, characters.length);
+      // A completely missing receipt means nothing reached the controlled
+      // input, so there is no stale text to erase before retrying.
+      if (tui.outputSince(outputMark).length > 0) {
+        await clearInput(tui, characters.length);
+      }
       await sleep(INPUT_SETTLE_MS);
     }
   }
@@ -80,12 +80,27 @@ export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Pro
   );
 }
 
-export async function clearInput(tui: PtyProcess, length: number): Promise<void> {
+/** Type into a masked field whose real value cannot be confirmed from PTY output. */
+export async function typeMaskedText(tui: PtyProcess, text: string, delayMs = 40): Promise<void> {
+  for (const character of Array.from(text)) {
+    tui.write(character);
+    await sleep(delayMs);
+  }
+}
+
+export async function clearInput(
+  tui: PtyProcess,
+  length: number,
+  options: { backspace?: 'delete' | 'ascii' } = {},
+): Promise<void> {
+  if (length <= 0) return;
+  const outputMark = tui.markOutput();
+  const backspace = options.backspace === 'ascii' ? '\x08' : '\x7f';
   for (let i = 0; i < length; i++) {
-    tui.write('\x7f');
+    tui.write(backspace);
     await sleep(50);
   }
-  await sleep(300);
+  await waitForOutputQuiescence(() => tui.outputSince(outputMark));
 }
 
 export async function waitForRequestMessage(

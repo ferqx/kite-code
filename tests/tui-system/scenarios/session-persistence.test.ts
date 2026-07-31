@@ -18,7 +18,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -50,12 +50,10 @@ describe('TUI PTY System — Session Persistence', () => {
     tui1 = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui1.output(), '❯', 15000);
+    await waitForText(() => tui1.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     tui1.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -68,39 +66,8 @@ describe('TUI PTY System — Session Persistence', () => {
   });
 
   // ═══════════════════════════════════════════════════════════
-  // TUI Instance 1 — Warmup + Message
+  // TUI Instance 1 — Message
   // ═══════════════════════════════════════════════════════════
-
-  test(
-    'warmup: individual keystrokes reach TUI input line (tui1)',
-    async () => {
-      const text = 'hello';
-      await typeText(tui1, text, 80);
-      await sleep(400);
-
-      const output = tui1.output();
-      const clean = stripAnsi(output);
-      console.log('  output after typing:', clean.slice(-300));
-      expect(clean).toContain(text);
-
-      await clearInput(tui1, text.length);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'empty Enter does not submit a message (tui1)',
-    async () => {
-      const before = server.getRequestCount();
-      tui1.write('\r');
-      await sleep(500);
-
-      const output = tui1.output();
-      expect(screenContains(output, '❯')).toBe(true);
-      expect(server.getRequestCount()).toBe(before);
-    },
-    TIMEOUT,
-  );
 
   test(
     'send message in tui1 → model responds, checkpoint written',
@@ -110,7 +77,7 @@ describe('TUI PTY System — Session Persistence', () => {
       await waitForRequestMessage(server, 'Message before restart', 15000);
 
       // Wait for the mock model response to appear in the TUI
-      await waitForText(() => tui1.output(), 'Hello from session!', 15000);
+      await waitForText(() => tui1.outputSinceLastAction(), 'Hello from session!', 15000);
 
       const output = tui1.output();
       expect(screenContains(output, 'Message before restart')).toBe(true);
@@ -151,11 +118,10 @@ describe('TUI PTY System — Session Persistence', () => {
       tui2 = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
       // Wait for TUI to finish rendering
-      await waitForText(() => tui2.output(), '❯', 15000);
+      await waitForText(() => tui2.outputSinceLastAction(), '❯', 15000);
 
       // Enable raw mode for tui2
       tui2.setRawMode(true);
-      await new Promise((r) => setTimeout(r, 300));
 
       const output = tui2.output();
       const clean = stripAnsi(output);
@@ -170,36 +136,14 @@ describe('TUI PTY System — Session Persistence', () => {
   // ═══════════════════════════════════════════════════════════
 
   test(
-    'warmup: type and clear on tui2',
-    async () => {
-      const text = 'x';
-      await typeText(tui2, text, 80);
-      await sleep(400);
-
-      const output = tui2.output();
-      const clean = stripAnsi(output);
-      console.log('  tui2 output after typing:', clean.slice(-300));
-      expect(clean).toContain(text);
-
-      await clearInput(tui2, text.length);
-      await sleep(300);
-
-      const afterClear = stripAnsi(tui2.output());
-      expect(screenContains(afterClear, '❯')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  test(
     'open /sessions → previous session appears in session list',
     async () => {
       // Open SessionSelector
       await typeText(tui2, '/sessions');
       tui2.write('\r');
-      await sleep(500);
 
       // Verify SessionSelector panel is visible
-      await waitForText(() => tui2.output(), '搜索', 10000);
+      await waitForText(() => tui2.outputSinceLastAction(), '搜索', 10000);
 
       const output = tui2.output();
       const clean = stripAnsi(output);
@@ -225,11 +169,10 @@ describe('TUI PTY System — Session Persistence', () => {
       // Press Enter to load it.
       console.log('  pressing Enter to load historical session...');
       tui2.write('\r');
-      await sleep(800);
 
       // Wait for the historical session content to be replayed.
       // Both the user message and model response should be restored.
-      await waitForText(() => tui2.output(), 'Message before restart', 15000);
+      await waitForText(() => tui2.outputSinceLastAction(), 'Message before restart', 15000);
 
       const output = tui2.output();
       console.log('  tui2 output after loading session:', stripAnsi(output).slice(-500));

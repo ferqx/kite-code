@@ -23,11 +23,15 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 60000;
 
@@ -101,10 +105,9 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -112,14 +115,6 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  test(
-    'warmup: TUI input pipeline functional',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'real-session replay: stats suffix on Thought blocks, pure thoughts merge into text headers',
@@ -202,8 +197,8 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       await waitForRequestMessage(server, '仔细了解TUI模块', 15000);
 
       // 等最终回答到达 → 全部 7 次模型调用完成
-      await waitForText(() => tui.output(), 'ANALYSIS_DONE', 45000);
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'ANALYSIS_DONE', 45000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -261,8 +256,8 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       tui.write('\r');
       await waitForRequestMessage(server, '读入口并记笔记', 15000);
 
-      await waitForText(() => tui.output(), 'CARRY_DONE', 30000);
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'CARRY_DONE', 30000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);

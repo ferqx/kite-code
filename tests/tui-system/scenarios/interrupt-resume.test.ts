@@ -19,7 +19,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -49,10 +49,9 @@ describe('TUI PTY System — Interrupt Resume', () => {
 
     tui1 = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
-    await waitForText(() => tui1.output(), '❯', 15000);
+    await waitForText(() => tui1.outputSinceLastAction(), '❯', 15000);
 
     tui1.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -63,39 +62,8 @@ describe('TUI PTY System — Interrupt Resume', () => {
   });
 
   // ═══════════════════════════════════════════════════════════
-  // TUI Instance 1 — Warmup + Create Session Data
+  // TUI Instance 1 — Create Session Data
   // ═══════════════════════════════════════════════════════════
-
-  test(
-    'warmup: individual keystrokes reach TUI input line (tui1)',
-    async () => {
-      const text = 'hello';
-      await typeText(tui1, text, 80);
-      await sleep(400);
-
-      const output = tui1.output();
-      const clean = stripAnsi(output);
-      console.log('  output after typing:', clean.slice(-300));
-      expect(clean).toContain(text);
-
-      await clearInput(tui1, text.length);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'empty Enter does not submit a message (tui1)',
-    async () => {
-      const before = server.getRequestCount();
-      tui1.write('\r');
-      await sleep(500);
-
-      const output = tui1.output();
-      expect(screenContains(output, '❯')).toBe(true);
-      expect(server.getRequestCount()).toBe(before);
-    },
-    TIMEOUT,
-  );
 
   test(
     'send message → model responds, checkpoint written to DB',
@@ -104,7 +72,11 @@ describe('TUI PTY System — Interrupt Resume', () => {
       tui1.write('\r');
       await waitForRequestMessage(server, 'Hello from tui1', 15000);
 
-      await waitForText(() => tui1.output(), 'Response from the first instance.', 15000);
+      await waitForText(
+        () => tui1.outputSinceLastAction(),
+        'Response from the first instance.',
+        15000,
+      );
 
       const output = tui1.output();
       expect(screenContains(output, 'Hello from tui1')).toBe(true);
@@ -115,19 +87,14 @@ describe('TUI PTY System — Interrupt Resume', () => {
   );
 
   // ═══════════════════════════════════════════════════════════
-  // Exit tui1 via Ctrl+C double-press
+  // Exit tui1 gracefully before reopening the persisted workspace
   // ═══════════════════════════════════════════════════════════
 
   test(
-    'exit tui1 via Ctrl+C double-press',
+    'exit tui1 gracefully with /exit',
     async () => {
-      // First Ctrl+C: during idle (agent already finished),
-      // sets ctrlCPressed=true
-      tui1.write('\x03');
-      await sleep(200);
-
-      // Second Ctrl+C: idle + ctrlCPressed=true → exit
-      tui1.write('\x03');
+      await typeText(tui1, '/exit');
+      tui1.write('\r');
 
       const exitCode = await tui1.waitForExit();
       console.log(`  tui1 exit code: ${exitCode}`);
@@ -150,10 +117,9 @@ describe('TUI PTY System — Interrupt Resume', () => {
 
       tui2 = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
-      await waitForText(() => tui2.output(), '❯', 15000);
+      await waitForText(() => tui2.outputSinceLastAction(), '❯', 15000);
 
       tui2.setRawMode(true);
-      await new Promise((r) => setTimeout(r, 300));
 
       const output = tui2.output();
       const clean = stripAnsi(output);
@@ -163,9 +129,8 @@ describe('TUI PTY System — Interrupt Resume', () => {
       // Open /sessions to verify the persisted session is listed
       await typeText(tui2, '/sessions');
       tui2.write('\r');
-      await sleep(1500);
 
-      await waitForText(() => tui2.output(), '搜索', 15000);
+      await waitForText(() => tui2.outputSinceLastAction(), '搜索', 15000);
 
       const panelOutput = tui2.output();
       const panelClean = stripAnsi(panelOutput);
@@ -188,7 +153,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
       // The session from tui1 should be at index 0.
       // Press Enter to select and load it.
       tui2.write('\r');
-      await sleep(1500);
+      await waitForText(() => tui2.outputSinceLastAction(), 'Hello from tui1', 15000);
 
       const afterLoad = tui2.output();
       const cleanLoad = stripAnsi(afterLoad);

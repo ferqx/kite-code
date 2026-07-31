@@ -9,11 +9,15 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -39,9 +43,8 @@ describe('TUI PTY System — /compact after session switch', () => {
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
     tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -50,31 +53,21 @@ describe('TUI PTY System — /compact after session switch', () => {
     workspace?.cleanup();
   });
 
-  // ── Warmup ──
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
-
   // ── Session 1 — /compact should produce a visible response ──
 
   test(
     '/compact in session 1 produces a response',
     async () => {
-      const outputStart = tui.output().length;
+      const outputStart = tui.markOutput();
       await typeText(tui, '/compact');
       tui.write('\r');
 
       // /compact is a slash command — it should NOT trigger a model call.
       // The response is LOCAL_TEXT: either "Not enough messages to compact."
       // or compaction queued/completed events.
-      await sleep(1000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Not enough messages', 10000);
 
-      const output = tui.output().slice(outputStart);
+      const output = tui.outputSince(outputStart);
       const clean = stripAnsi(output);
       console.log('  output after /compact (session 1):', clean.slice(-500));
 
@@ -104,24 +97,15 @@ describe('TUI PTY System — /compact after session switch', () => {
       await typeText(tui, 'Session 1 message');
       tui.write('\r');
       await waitForRequestMessage(server, 'Session 1 message', 15000);
-      await waitForText(() => tui.output(), 'Session 1 response', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
 
       await typeText(tui, '/new');
       tui.write('\r');
-      await sleep(1500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       console.log('  output after /new:', stripAnsi(output).slice(-500));
       expect(screenContains(output, '❯')).toBe(true);
-
-      // Mini-warmup after InputLine remount.
-      const warmupText = 'w';
-      await typeText(tui, warmupText, 80);
-      await sleep(400);
-      await clearInput(tui, warmupText.length);
-      await sleep(300);
-      tui.write('\r');
-      await sleep(500);
     },
     TIMEOUT,
   );
@@ -133,13 +117,13 @@ describe('TUI PTY System — /compact after session switch', () => {
   test(
     '/compact in session 2 produces a response (regression)',
     async () => {
-      const outputStart = tui.output().length;
+      const outputStart = tui.markOutput();
       await typeText(tui, '/compact');
       tui.write('\r');
 
-      await sleep(1000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Not enough messages', 10000);
 
-      const output = tui.output().slice(outputStart);
+      const output = tui.outputSince(outputStart);
       const clean = stripAnsi(output);
       console.log('  output after /compact (session 2):', clean.slice(-500));
 
@@ -165,15 +149,12 @@ describe('TUI PTY System — /compact after session switch', () => {
   test(
     '/compact command persists after exiting and restarting TUI',
     async () => {
-      // Close any overlay left by the preceding navigation test, then create a
-      // command with a unique marker in the currently active session.
-      tui.write('\x1b');
-      await sleep(300);
+      // Create a command with a unique marker in the active session.
       const marker = 'restart-persistence-marker';
       await typeText(tui, `/compact ${marker}`);
       tui.write('\r');
-      await sleep(1000);
-      expect(screenContains(tui.output(), marker)).toBe(true);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      expect(screenContains(tui.outputSinceLastAction(), marker)).toBe(true);
 
       // Exit the first process gracefully so all RuntimeStore writes are
       // closed, then start a fresh TUI against the same HOME/workspace.
@@ -187,16 +168,15 @@ describe('TUI PTY System — /compact after session switch', () => {
         { message: { content: 'dummy' }, delay: 10 },
       ]);
       tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-      await waitForText(() => tui.output(), '❯', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
       tui.setRawMode(true);
-      await sleep(300);
 
       await typeText(tui, '/sessions');
       tui.write('\r');
-      await waitForText(() => tui.output(), '会话列表', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), '会话列表', 10000);
       // The command-bearing session was just updated, so it is first.
       tui.write('\r');
-      await waitForText(() => tui.output(), marker, 15000);
+      await waitForText(() => tui.outputSinceLastAction(), marker, 15000);
 
       // tui is a fresh process: this cannot match output accumulated before
       // restart and therefore proves RuntimeEvent replay restored the command.

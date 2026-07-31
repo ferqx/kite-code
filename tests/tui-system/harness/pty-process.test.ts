@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveTuiLaunchPaths, waitForPtyExit, waitForPtyExitCode } from './pty-process';
+import {
+  createPtyOutputBuffer,
+  resolveTuiLaunchPaths,
+  waitForPtyExit,
+  waitForPtyExitCode,
+} from './pty-process';
 import type { TestWorkspace } from './test-workspace';
 
 describe('waitForPtyExit', () => {
@@ -37,5 +42,49 @@ describe('resolveTuiLaunchPaths', () => {
       cwd: '/tmp/kite-code-workspace',
       entryPath: '/project/src/app/tui/index.tsx',
     });
+  });
+});
+
+describe('PTY output checkpoints', () => {
+  test('separates output emitted before and after an action checkpoint', () => {
+    const output = createPtyOutputBuffer();
+    output.append(new TextEncoder().encode('old prompt\n'));
+    const action = output.mark();
+    output.append(new TextEncoder().encode('new modal\n'));
+
+    expect(output.output()).toBe('old prompt\nnew modal\n');
+    expect(output.outputSince(action)).toBe('new modal\n');
+  });
+
+  test('keeps UTF-8 output intact across multiple chunks', () => {
+    const output = createPtyOutputBuffer();
+    output.append(new TextEncoder().encode('历史提示\n'));
+    const action = output.mark();
+    const current = new TextEncoder().encode('当前确认\n');
+    output.append(current.subarray(0, 2));
+    output.append(current.subarray(2));
+
+    expect(output.outputSince(action)).toBe('当前确认\n');
+  });
+
+  test('excludes a UTF-8 code point that started before the action checkpoint', () => {
+    const output = createPtyOutputBuffer();
+    const splitCharacter = new TextEncoder().encode('你');
+    output.append(splitCharacter.subarray(0, 1));
+    const action = output.mark();
+    output.append(splitCharacter.subarray(1));
+    output.append(new TextEncoder().encode('新'));
+
+    expect(output.output()).toBe('你新');
+    expect(output.outputSince(action)).toBe('新');
+  });
+
+  test('rejects marks outside the current output stream', () => {
+    const output = createPtyOutputBuffer();
+    output.append(new TextEncoder().encode('ready'));
+
+    expect(() => output.outputSince(99 as ReturnType<typeof output.mark>)).toThrow(
+      'Invalid PTY output mark 99',
+    );
   });
 });

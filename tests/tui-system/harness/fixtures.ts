@@ -53,6 +53,10 @@ export interface MockModelServer {
   getRequests(): MockChatRequest[];
   /** Whether a chat request at or after since includes text in any message content */
   hasRequestMessage(text: string, since?: number): boolean;
+  /** Configure the local /v1/models response used by first-run scenarios. */
+  setModelsResponse(response: { status?: number; delay?: number; models?: string[] }): void;
+  /** GET URLs received by the local model-discovery fixture. */
+  getModelRequests(): string[];
   /** Stop the server */
   stop(): void;
 }
@@ -71,17 +75,34 @@ export function createMockModelServer(): MockModelServer {
   let responses: MockResponse[] = [];
   let callCount = 0;
   let requests: MockChatRequest[] = [];
+  let modelRequests: string[] = [];
+  let modelsResponse: { status: number; delay: number; models: string[] } = {
+    status: 200,
+    delay: 0,
+    models: ['mock-model'],
+  };
 
   const server = startTestHttpServer({
     async fetch(req) {
       const url = new URL(req.url);
+      if (req.method === 'GET') modelRequests.push(url.href);
 
       // ── GET /v1/models ──
       if (req.method === 'GET' && url.pathname === '/v1/models') {
+        const response = { ...modelsResponse, models: [...modelsResponse.models] };
+        if (response.delay > 0) {
+          await new Promise((resolve) => setTimeout(resolve, response.delay));
+        }
+        if (response.status < 200 || response.status >= 300) {
+          return new Response(JSON.stringify({ error: { message: 'model list rejected' } }), {
+            status: response.status,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         return new Response(
           JSON.stringify({
             object: 'list',
-            data: [{ id: 'mock-model', object: 'model', owned_by: 'test' }],
+            data: response.models.map((id) => ({ id, object: 'model', owned_by: 'test' })),
           }),
           { headers: { 'content-type': 'application/json' } },
         );
@@ -320,6 +341,7 @@ export function createMockModelServer(): MockModelServer {
       responses = r;
       callCount = 0;
       requests = [];
+      modelRequests = [];
     },
     getRequestCount: () => callCount,
     getRequests: () => [...requests],
@@ -329,6 +351,14 @@ export function createMockModelServer(): MockModelServer {
         .some((request) =>
           request.messages.some((message) => messageContentIncludes(message.content, text)),
         ),
+    setModelsResponse(response) {
+      modelsResponse = {
+        status: response.status ?? 200,
+        delay: response.delay ?? 0,
+        models: response.models ?? ['mock-model'],
+      };
+    },
+    getModelRequests: () => [...modelRequests],
     stop: () => server.stop(),
   };
 }

@@ -69,6 +69,29 @@ export async function waitForText(
   );
 }
 
+/** Poll until any one of the expected texts appears in terminal output. */
+export async function waitForAnyText(
+  getOutput: () => string,
+  texts: readonly string[],
+  timeout = 10000,
+  interval = 100,
+): Promise<string> {
+  if (texts.length === 0) throw new Error('waitForAnyText requires at least one text');
+  const effectiveTimeout = tuiWaitTimeout(timeout);
+  const effectiveInterval = tuiPollInterval(interval);
+  const start = Date.now();
+  while (Date.now() - start < effectiveTimeout) {
+    const output = getOutput();
+    if (texts.some((text) => screenContains(output, text))) return output;
+    await new Promise((resolve) => setTimeout(resolve, effectiveInterval));
+  }
+  const last = stripAnsi(getOutput());
+  throw new Error(
+    `Timeout (${effectiveTimeout}ms) waiting for any of ${JSON.stringify(texts)}.\n` +
+      `Last output:\n${last.slice(-1000)}`,
+  );
+}
+
 /** Poll for text to disappear from PTY output. */
 export async function waitForTextGone(
   getOutput: () => string,
@@ -84,6 +107,77 @@ export async function waitForTextGone(
     await new Promise((r) => setTimeout(r, effectiveInterval));
   }
   throw new Error(`Timeout (${effectiveTimeout}ms) waiting for "${text}" to disappear`);
+}
+
+/** Poll a non-terminal condition until it becomes true. */
+export async function waitForCondition(
+  condition: () => boolean,
+  description: string,
+  timeout = 10000,
+  interval = 100,
+): Promise<void> {
+  const effectiveTimeout = tuiWaitTimeout(timeout);
+  const effectiveInterval = tuiPollInterval(interval);
+  const start = Date.now();
+  while (Date.now() - start < effectiveTimeout) {
+    if (condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, effectiveInterval));
+  }
+  throw new Error(`Timeout (${effectiveTimeout}ms) waiting for ${description}`);
+}
+
+/** Assert that text remains absent for an explicit observation window. */
+export async function expectTextAbsentFor(
+  getOutput: () => string,
+  text: string,
+  duration = 500,
+  interval = 25,
+): Promise<void> {
+  const effectiveInterval = tuiPollInterval(interval);
+  const start = Date.now();
+  while (Date.now() - start < duration) {
+    if (screenContains(getOutput(), text)) {
+      throw new Error(`Expected "${text}" to remain absent for ${duration}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, effectiveInterval));
+  }
+}
+
+/**
+ * Wait until terminal output stops changing for a bounded quiet window. Use
+ * this after a semantic wait when the assertion needs the settled Ink frame;
+ * it replaces fixed sleeps without guessing how long a shared runner needs.
+ */
+export async function waitForOutputQuiescence(
+  getOutput: () => string,
+  timeout = 5000,
+  quietWindow = 250,
+  requireOutput = true,
+): Promise<string> {
+  const effectiveTimeout = tuiWaitTimeout(timeout);
+  const effectiveInterval = tuiPollInterval(Math.min(quietWindow / 4, 50));
+  const startedAt = Date.now();
+  let lastChangedAt = startedAt;
+  let lastOutput = getOutput();
+  let sawOutput = lastOutput.length > 0;
+
+  while (Date.now() - startedAt < effectiveTimeout) {
+    await new Promise((resolve) => setTimeout(resolve, effectiveInterval));
+    const output = getOutput();
+    if (output !== lastOutput) {
+      lastOutput = output;
+      sawOutput ||= output.length > 0;
+      lastChangedAt = Date.now();
+      continue;
+    }
+    if ((!requireOutput || sawOutput) && Date.now() - lastChangedAt >= quietWindow) return output;
+  }
+
+  throw new Error(
+    `Timeout (${effectiveTimeout}ms) waiting for ${
+      requireOutput ? 'new terminal output and ' : ''
+    }a quiet window of ${quietWindow}ms.\n` + `Last output:\n${stripAnsi(lastOutput).slice(-1000)}`,
+  );
 }
 
 /** Take a clean-text snapshot of the current terminal screen. */

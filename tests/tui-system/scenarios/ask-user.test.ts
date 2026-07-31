@@ -5,18 +5,14 @@
  * 1. Renders the question with options in the footer area
  * 2. Accepts Enter to select the recommended/default option
  * 3. Recovers to idle state after answering
- *
- * IMPORTANT: Follows the same 3-test warmup pattern as input.test.ts
- * and approval.test.ts. Without warmup, model calls are silently skipped.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -60,13 +56,11 @@ describe('TUI PTY System — ask_user', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -74,16 +68,6 @@ describe('TUI PTY System — ask_user', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── ask_user Question → Enter to accept default ────────────
 
@@ -95,7 +79,7 @@ describe('TUI PTY System — ask_user', () => {
       await waitForRequestMessage(server, 'Ask me a question', 15000);
 
       // Wait for the question to appear in the TUI output
-      await waitForText(() => tui.output(), 'What is your favorite color?', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'What is your favorite color?', 15000);
 
       const output = tui.output();
       expect(screenContains(output, 'What is your favorite color?')).toBe(true);
@@ -105,7 +89,7 @@ describe('TUI PTY System — ask_user', () => {
 
       // Press Enter to accept the recommended/default option (Blue, index 0)
       tui.write('\r');
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
       // TUI should recover — prompt visible
       const afterOutput = tui.output();

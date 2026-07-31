@@ -3,18 +3,14 @@
  *
  * Verifies that when an ask_user question is active, pressing Escape
  * cancels the interrupt and the TUI recovers to idle state.
- *
- * IMPORTANT: Follows the same 3-test warmup pattern as input.test.ts
- * and approval.test.ts. Without warmup, model calls are silently skipped.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -58,13 +54,11 @@ describe('TUI PTY System — ask_user Escape', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -72,16 +66,6 @@ describe('TUI PTY System — ask_user Escape', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── ask_user Question → Escape → Cancel & Recover ──────────
 
@@ -93,7 +77,11 @@ describe('TUI PTY System — ask_user Escape', () => {
       await waitForRequestMessage(server, 'Ask a question', 15000);
 
       // Wait for the question to appear in the TUI output
-      await waitForText(() => tui.output(), 'What is your preferred programming language?', 15000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'What is your preferred programming language?',
+        15000,
+      );
 
       const output = tui.output();
       expect(screenContains(output, 'What is your preferred programming language?')).toBe(true);
@@ -103,8 +91,12 @@ describe('TUI PTY System — ask_user Escape', () => {
 
       // Press Escape to cancel the ask_user interrupt
       tui.write('\x1b');
-      await waitForText(() => tui.output(), 'Continued after question cancellation.', 15000);
-      await sleep(300);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Continued after question cancellation.',
+        15000,
+      );
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // TUI should render the follow-up model response and then recover to the prompt.
       const afterOutput = tui.output();

@@ -21,18 +21,14 @@
  * NOTE: 默认交互模式为 accept-edits，工作区写入自动放行，无审批浮层。
  * Default interaction mode is accept-edits: workspace writes auto-approve.
  * Static scrollback 跨轮次累积，后续轮次不对旧卡片文案做"不存在"断言。
- *
- * IMPORTANT: Like approval.test.ts, this test requires a warmup phase
- * before the first model call.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -103,12 +99,10 @@ describe('TUI PTY System — File Tool Diff Render', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -116,16 +110,6 @@ describe('TUI PTY System — File Tool Diff Render', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Turn 1: overwrite → Write verb + diff summary intact ───
 
@@ -138,8 +122,8 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
       // accept-edits mode auto-approves the workspace write_file — wait
       // directly for tool execution + agent's follow-up response
-      await waitForText(() => tui.output(), 'Notes file updated.', 20000);
-      await sleep(500);
+      await waitForText(() => tui.outputSinceLastAction(), 'Notes file updated.', 20000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
 
@@ -174,8 +158,8 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Add a changelog', 15000);
 
-      await waitForText(() => tui.output(), 'Changelog created.', 20000);
-      await sleep(500);
+      await waitForText(() => tui.outputSinceLastAction(), 'Changelog created.', 20000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
 
@@ -201,8 +185,8 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Rewrite the changelog identically', 15000);
 
-      await waitForText(() => tui.output(), 'Changelog re-verified.', 20000);
-      await sleep(500);
+      await waitForText(() => tui.outputSinceLastAction(), 'Changelog re-verified.', 20000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
 

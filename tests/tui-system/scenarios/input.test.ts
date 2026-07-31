@@ -7,11 +7,15 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { clearInput, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -28,23 +32,24 @@ describe('TUI PTY System — Input & Message', () => {
       },
     });
 
-    server.setResponses([
-      { message: { content: 'I received your message!' }, delay: 50 },
-      { message: { content: 'spare 1' }, delay: 10 },
-      { message: { content: 'spare 2' }, delay: 10 },
-      { message: { content: 'spare 3' }, delay: 10 },
-    ]);
+    // Session-title requests may interleave with conversation requests. Every
+    // slot therefore remains valid for the behavior under test instead of
+    // relying on a fragile request-order guess.
+    server.setResponses(
+      Array.from({ length: 12 }, () => ({
+        message: { content: 'I received your message!' },
+        delay: 50,
+      })),
+    );
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -52,16 +57,6 @@ describe('TUI PTY System — Input & Message', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Send Message → Response ───────────────────────────────
 
@@ -73,7 +68,7 @@ describe('TUI PTY System — Input & Message', () => {
       await waitForRequestMessage(server, 'Test message from PTY', 15000);
 
       // Wait for the mock model response
-      await waitForText(() => tui.output(), 'I received your message!', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
 
       const output = tui.output();
       expect(screenContains(output, 'Test message from PTY')).toBe(true);
@@ -90,15 +85,14 @@ describe('TUI PTY System — Input & Message', () => {
       await typeText(tui, 'Line1');
       // Kitty keyboard protocol: Shift+Enter
       tui.write('\x1b[13;2u');
-      await sleep(200);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       await typeText(tui, 'Line2');
-      await sleep(400);
 
       tui.write('\r');
       await waitForRequestMessage(server, 'Line1\nLine2', 15000);
 
       // Verify the model received multi-line input and responded
-      await waitForText(() => tui.output(), 'I received your message!', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
 
       const output = tui.output();
       expect(screenContains(output, 'Line1')).toBe(true);
@@ -116,16 +110,16 @@ describe('TUI PTY System — Input & Message', () => {
       // Send first message
       await typeText(tui, 'History message A');
       tui.write('\r');
-      await waitForText(() => tui.output(), 'I received your message!', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
 
       // Send second message
       await typeText(tui, 'History message B');
       tui.write('\r');
-      await waitForText(() => tui.output(), 'I received your message!', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
 
       // Press Up to recall the last message
       tui.write('\x1b[A');
-      await sleep(500);
+      await waitForText(() => tui.outputSinceLastAction(), 'History message B', 5000);
 
       const output = tui.output();
       // The recalled text should appear in the input area
@@ -133,11 +127,10 @@ describe('TUI PTY System — Input & Message', () => {
 
       // Press Down to clear (navigate forward past the newest entry)
       tui.write('\x1b[B');
-      await sleep(300);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // Type something to verify input still works
       await typeText(tui, 'After history');
-      await sleep(200);
       expect(screenContains(tui.output(), 'After history')).toBe(true);
       await clearInput(tui, 'After history'.length);
     },
@@ -150,7 +143,7 @@ describe('TUI PTY System — Input & Message', () => {
     '@ triggers file search with matching results',
     async () => {
       await typeText(tui, '@pack');
-      await sleep(800);
+      await waitForText(() => tui.outputSinceLastAction(), 'package.json', 5000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -163,8 +156,7 @@ describe('TUI PTY System — Input & Message', () => {
 
       // Escape to dismiss the file search dropdown
       tui.write('\x1b');
-      await sleep(300);
-      await clearInput(tui, '@pack'.length);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
     },
     TIMEOUT,
   );

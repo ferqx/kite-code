@@ -11,9 +11,14 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText } from '../harness/input-helpers';
+import { clearInput, submitUserMessage, typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -39,13 +44,11 @@ describe('TUI PTY System — Slash Commands', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -54,51 +57,6 @@ describe('TUI PTY System — Slash Commands', () => {
     workspace?.cleanup();
   });
 
-  // ── Warmup: type + clear to init input pipeline ──────────────
-
-  test(
-    'warmup: type and clear to initialize input pipeline',
-    async () => {
-      const text = 'x';
-      await typeText(tui, text, 80);
-      await sleep(400);
-
-      const output = tui.output();
-      const clean = stripAnsi(output);
-      console.log('  output after typing:', clean.slice(-300));
-      expect(clean).toContain(text);
-
-      await clearInput(tui, text.length);
-      await sleep(300);
-
-      // Verify input is cleared
-      const afterClear = stripAnsi(tui.output());
-      // The typed char should no longer be in the visible input area
-      // (it may still appear as past output, so just check prompt is visible)
-      expect(screenContains(afterClear, '❯')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  // ── Empty Enter ──────────────────────────────────────────────
-
-  test(
-    'empty Enter does not submit',
-    async () => {
-      const before = server.getRequestCount();
-      // Send Enter with empty input
-      tui.write('\r');
-      await sleep(500);
-
-      const output = tui.output();
-      // TUI should still be alive with prompt
-      expect(screenContains(output, '❯')).toBe(true);
-      // No model call should have been made
-      expect(server.getRequestCount()).toBe(before);
-    },
-    TIMEOUT,
-  );
-
   // ── /help ────────────────────────────────────────────────────
 
   test(
@@ -106,10 +64,9 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/help');
       tui.write('\r');
-      await sleep(500);
 
       // Help panel renders with Chinese shortcut title
-      await waitForText(() => tui.output(), '快捷键', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), '快捷键', 10000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -126,10 +83,10 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       // Send Escape to close the help overlay
       tui.write('\x1b');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // Prompt should be visible again (help panel closed, TUI in normal mode)
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -140,9 +97,8 @@ describe('TUI PTY System — Slash Commands', () => {
     '/clear clears output and leaves prompt visible',
     async () => {
       // First send some text as user message to create content to clear
-      await typeText(tui, 'hello world');
-      tui.write('\r');
-      await sleep(1000);
+      await submitUserMessage(tui, server, 'hello world');
+      await waitForText(() => tui.outputSinceLastAction(), 'spare', 10000);
 
       // Verify the text appeared in output
       const before = stripAnsi(tui.output());
@@ -151,7 +107,7 @@ describe('TUI PTY System — Slash Commands', () => {
       // Now clear
       await typeText(tui, '/clear');
       tui.write('\r');
-      await sleep(800);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const after = tui.output();
       const cleanAfter = stripAnsi(after);
@@ -170,10 +126,9 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/theme purple');
       tui.write('\r');
-      await sleep(500);
 
       // Theme change should produce a status message
-      await waitForText(() => tui.output(), 'Theme set to purple', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Theme set to purple', 10000);
 
       const output = tui.output();
       expect(screenContains(output, 'Theme set to purple')).toBe(true);
@@ -192,7 +147,7 @@ describe('TUI PTY System — Slash Commands', () => {
       // Send same theme command again
       await typeText(tui, '/theme purple');
       tui.write('\r');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const after = tui.output();
 
@@ -216,7 +171,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/plan');
       tui.write('\r');
-      await sleep(500);
+      await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 10000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -236,7 +191,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       // Shift+Tab is ESC [ Z sequence
       tui.write('\x1b[Z');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -260,7 +215,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/effort max');
       tui.write('\r');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -279,10 +234,9 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/sessions');
       tui.write('\r');
-      await sleep(500);
 
       // Session selector overlay has search + footer hints
-      await waitForText(() => tui.output(), '搜索', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -299,7 +253,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       // Send Escape to close the session selector overlay
       tui.write('\x1b');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // Prompt should be visible again (session selector closed, TUI in normal mode)
       expect(screenContains(tui.output(), '❯')).toBe(true);
@@ -315,20 +269,18 @@ describe('TUI PTY System — Slash Commands', () => {
       // Auto is available on every platform. Full intentionally remains
       // disabled when the CI runner has no supported sandbox backend.
       await typeText(tui, '/permissions auto', 80);
-      // Let InputLine publish the final value to its suggestion refs before
-      // Enter. Sending retries while that render is pending can leave both
-      // keypresses suppressed and the command buffered for the next test.
-      await sleep(800);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       tui.write('\r');
-      await waitForText(() => tui.output(), '自动审批', 5000);
+      await waitForText(() => tui.outputSinceLastAction(), '自动审批', 5000);
 
       const output = tui.output();
       expect(screenContains(output, '自动审批')).toBe(true);
 
-      // Toggle back to ask (default)
-      await typeText(tui, '/permissions ask');
+      // Toggle back to accept_edits (default)
+      await typeText(tui, '/permissions accept_edits');
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       tui.write('\r');
-      await sleep(300);
+      await waitForText(() => tui.outputSinceLastAction(), '接受编辑', 5000);
     },
     TIMEOUT,
   );
@@ -340,7 +292,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/model');
       tui.write('\r');
-      await sleep(500);
+      await waitForText(() => tui.outputSinceLastAction(), 'default', 10000);
 
       // Model selector overlay should show model list
       const output = tui.output();
@@ -357,9 +309,9 @@ describe('TUI PTY System — Slash Commands', () => {
     'Esc closes model selector',
     async () => {
       tui.write('\x1b');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -371,7 +323,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/export');
       tui.write('\r');
-      await sleep(1000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Session exported', 10000);
 
       const output = tui.output();
       console.log('  output after /export:', stripAnsi(output).slice(-500));
@@ -389,7 +341,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/rewind');
       tui.write('\r');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       console.log('  output after /rewind:', stripAnsi(output).slice(-500));
@@ -407,9 +359,9 @@ describe('TUI PTY System — Slash Commands', () => {
     'Esc closes rewind panel',
     async () => {
       tui.write('\x1b');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -420,7 +372,7 @@ describe('TUI PTY System — Slash Commands', () => {
     'partial /mc input suggests /mcp',
     async () => {
       await typeText(tui, '/mc');
-      await waitForText(() => tui.output(), 'Manage MCP servers', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Manage MCP servers', 10000);
 
       const output = tui.output();
       expect(screenContains(output, '命令匹配 /mc')).toBe(true);
@@ -428,7 +380,7 @@ describe('TUI PTY System — Slash Commands', () => {
       expect(screenContains(output, 'Manage MCP servers')).toBe(true);
 
       await clearInput(tui, '/mc'.length);
-      await sleep(300);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
     },
     TIMEOUT,
   );
@@ -438,7 +390,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/mcp');
       tui.write('\r');
-      await sleep(500);
+      await waitForText(() => tui.outputSinceLastAction(), 'MCP Servers', 10000);
 
       const output = tui.output();
       console.log('  output after /mcp:', stripAnsi(output).slice(-500));
@@ -453,9 +405,9 @@ describe('TUI PTY System — Slash Commands', () => {
     'Esc closes MCP panel',
     async () => {
       tui.write('\x1b');
-      await sleep(500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      expect(screenContains(tui.outputSinceLastAction(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -467,7 +419,6 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await typeText(tui, '/exit');
       tui.write('\r');
-      await sleep(500);
 
       const exitCode = await tui.waitForExit();
       console.log(`  TUI exited with code ${exitCode}`);

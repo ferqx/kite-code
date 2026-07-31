@@ -54,7 +54,7 @@ describe('TUI PTY System — Workspace Trust', () => {
   test(
     'a fresh workspace blocks startup behind the trust prompt',
     async () => {
-      await waitForText(() => tui.output(), GATE_TEXT, 15000);
+      await waitForText(() => tui.outputSinceLastAction(), GATE_TEXT, 15000);
       const out = tui.output();
       expect(screenContains(out, GATE_TEXT)).toBe(true);
       // The folder path must be visible so the user knows what they trust.
@@ -73,9 +73,13 @@ describe('TUI PTY System — Workspace Trust', () => {
     async () => {
       // The safe default is Exit; explicitly move to Trust before confirming.
       tui.write('\x1b[A');
-      await waitForText(() => tui.output(), '› Trust this workspace and continue', 10000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        '› Trust this workspace and continue',
+        10000,
+      );
       tui.write('\r');
-      await waitForText(() => tui.output(), 'shortcuts', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'shortcuts', 15000);
       console.log('  Main UI booted after trust');
 
       const trustFile = join(workspace.home, '.kite-code', 'workspace-trust.jsonc');
@@ -98,7 +102,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     async () => {
       const proc = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
       restarted = proc;
-      await waitForText(() => proc.output(), 'shortcuts', 15000);
+      await waitForText(() => proc.outputSinceLastAction(), 'shortcuts', 15000);
       expect(screenContains(proc.output(), GATE_TEXT)).toBe(false);
       await proc.killAndWait();
       restarted = undefined;
@@ -122,17 +126,21 @@ describe('TUI PTY System — Workspace Trust', () => {
         workspace: declinedWorkspace,
       });
       declined = proc;
-      await waitForText(() => proc.output(), GATE_TEXT, 15000);
+      await waitForText(() => proc.outputSinceLastAction(), GATE_TEXT, 15000);
 
       // Prove the input handler is ready before confirming the safe default.
       // Under a busy full-suite run, the first rendered gate text can precede
       // Ink attaching its stdin handler, which would otherwise lose Enter.
       proc.write('\x1b[A');
-      await waitForText(() => proc.output(), '› Trust this workspace and continue', 10000);
-      const outputBeforeExitSelection = proc.output().length;
+      await waitForText(
+        () => proc.outputSinceLastAction(),
+        '› Trust this workspace and continue',
+        10000,
+      );
+      const outputBeforeExitSelection = proc.markOutput();
       proc.write('\x1b[B');
       await waitForText(
-        () => proc.output().slice(outputBeforeExitSelection),
+        () => proc.outputSince(outputBeforeExitSelection),
         '› Exit Kite Code',
         10000,
       );

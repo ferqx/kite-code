@@ -5,17 +5,14 @@
  * and remains functional afterwards. After an error, the TUI should:
  * 1. Stay alive with prompt visible
  * 2. Accept and process a new message normally
- *
- * IMPORTANT: Follows the same 3-test warmup pattern as input.test.ts.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -39,13 +36,11 @@ describe('TUI PTY System — Error Recovery', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -53,16 +48,6 @@ describe('TUI PTY System — Error Recovery', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Model Error Does Not Crash TUI ────────────────────────
 
@@ -73,8 +58,7 @@ describe('TUI PTY System — Error Recovery', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Trigger error', 15000);
 
-      // Allow time for the TUI to process the error response
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
       const output = tui.output();
       console.log('output after error:', stripAnsi(output).slice(-500));
@@ -98,7 +82,11 @@ describe('TUI PTY System — Error Recovery', () => {
       await waitForRequestMessage(server, 'Hello after error', 15000);
 
       // Wait for the second model response
-      await waitForText(() => tui.output(), 'Second attempt: hello from model!', 15000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Second attempt: hello from model!',
+        15000,
+      );
 
       const output = tui.output();
       expect(screenContains(output, 'Hello after error')).toBe(true);

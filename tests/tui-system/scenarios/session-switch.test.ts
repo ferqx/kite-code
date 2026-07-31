@@ -5,16 +5,18 @@
  * arrow-key navigation works, and switching between sessions correctly
  * replays session content. Also verifies session-to-session isolation
  * (each session displays its own content after switching).
- *
- * IMPORTANT: Follows the same warmup pattern as other PTY system tests.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -53,13 +55,11 @@ describe('TUI PTY System — Session Switching', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -67,16 +67,6 @@ describe('TUI PTY System — Session Switching', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Send Message in Session 1 ──
 
@@ -88,7 +78,7 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForRequestMessage(server, 'Message in session 1', 15000);
 
       // Wait for the mock model response
-      await waitForText(() => tui.output(), 'Session 1 response', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
 
       const output = tui.output();
       expect(screenContains(output, 'Message in session 1')).toBe(true);
@@ -104,30 +94,20 @@ describe('TUI PTY System — Session Switching', () => {
   // IMPORTANT: /new is ignored when the current session has no user
   // messages yet, so we must send a message in session 1 first (done above).
   // After /new, the InputLine remounts (key changes via activeSessionId),
-  // requiring a mini-warmup before the first model call in the new session.
+  // requiring a fresh receipt-confirmed input after the remount.
 
   test(
     '/new creates session 2, TUI remains responsive',
     async () => {
       await typeText(tui, '/new');
       tui.write('\r');
-      await sleep(1500);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       console.log('  output after /new:', stripAnsi(output).slice(-500));
 
       // Prompt should still be visible (TUI alive and in new session)
       expect(screenContains(output, '❯')).toBe(true);
-
-      // Mini-warmup: Ink's useFocus re-initializes setRawMode, so we need
-      // to type-and-clear before the first model call in the new session.
-      const warmupText = 'w';
-      await typeText(tui, warmupText, 80);
-      await sleep(400);
-      await clearInput(tui, warmupText.length);
-      await sleep(300);
-      tui.write('\r'); // empty Enter in new session
-      await sleep(500);
     },
     TIMEOUT,
   );
@@ -142,7 +122,7 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForRequestMessage(server, 'Message in session 2', 15000);
 
       // Wait for the second model response
-      await waitForText(() => tui.output(), 'Session 2 response', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Session 2 response', 15000);
 
       const output = tui.output();
       expect(screenContains(output, 'Message in session 2')).toBe(true);
@@ -153,22 +133,17 @@ describe('TUI PTY System — Session Switching', () => {
     TIMEOUT,
   );
 
-  // ── Open /sessions, navigate to session 1, switch ──
-  //
-  // Session list is sorted by updated_at DESC. After creating session 2
-  // and sending its message, session 2 is the most recent (index 0).
-  // Session 1 is at index 1. We press Down once to select it.
+  // ── Open /sessions, filter to session 1, switch ──
 
   test(
-    'open /sessions, navigate with arrow keys, switch to session 1',
+    'open /sessions, filter and switch to session 1',
     async () => {
       // Open SessionSelector
       await typeText(tui, '/sessions');
       tui.write('\r');
-      await sleep(500);
 
       // Verify SessionSelector panel is visible
-      await waitForText(() => tui.output(), '搜索', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
 
       let output = tui.output();
       const clean = stripAnsi(output);
@@ -193,19 +168,17 @@ describe('TUI PTY System — Session Switching', () => {
       expect(hasSession1Id).toBe(true);
       expect(hasSession2Id).toBe(true);
 
-      // Navigate Down once to select session 1 (from index 0 → index 1)
-      console.log('  pressing Down arrow to select session 1...');
-      tui.write('\x1b[B');
-      await sleep(300);
+      // Filter to one stable target instead of depending on timestamp order.
+      await typeText(tui, 'session 1');
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       // Press Enter to switch to session 1
       console.log('  pressing Enter to switch...');
       tui.write('\r');
-      await sleep(800);
 
       // Wait for session 1 content to be replayed after switch.
       // The TUI loads and replays the session blocks into the OutputArea.
-      await waitForText(() => tui.output(), 'Message in session 1', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Message in session 1', 15000);
 
       output = tui.output();
       console.log('  output after switch to session 1:', stripAnsi(output).slice(-500));
@@ -239,29 +212,22 @@ describe('TUI PTY System — Session Switching', () => {
       // Open SessionSelector again
       await typeText(tui, '/sessions');
       tui.write('\r');
-      await sleep(500);
 
       // Verify SessionSelector panel is open
-      await waitForText(() => tui.output(), '搜索', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
 
       let output = tui.output();
       console.log('  output after second /sessions:', stripAnsi(output).slice(-500));
 
-      // Session 2 should be at index 0 (most recently updated by checkpoint
-      // timestamp). Session 1 is the currently active session, so session 2
-      // is not active → pressing Enter will switch to it.
-      // Press Down then Up to demonstrate arrow key navigation, then Enter.
-      tui.write('\x1b[B');
-      await sleep(200);
-      tui.write('\x1b[A');
-      await sleep(200);
+      // Filter to one stable target instead of depending on timestamp order.
+      await typeText(tui, 'session 2');
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       console.log('  pressing Enter to switch to session 2...');
       tui.write('\r');
-      await sleep(800);
 
       // Wait for session 2 content to be replayed
-      await waitForText(() => tui.output(), 'Message in session 2', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Message in session 2', 15000);
 
       output = tui.output();
       console.log('  output after switch to session 2:', stripAnsi(output).slice(-500));

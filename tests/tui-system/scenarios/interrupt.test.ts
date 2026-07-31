@@ -42,13 +42,11 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered.
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately.
     // In canonical/line-buffered mode, input only arrives after CRLF.
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes.
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -68,8 +66,7 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
 
       // Send Ctrl+C to cancel the run.
       tui.write('\x03');
-      // Allow TUI to process the interrupt, update state, and re-render.
-      await new Promise((r) => setTimeout(r, 1000));
+      await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -86,7 +83,6 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       // be interpreted as a double-press (exitRequested) instead of an idle
       // single-press.  Any non-Ctrl+C key triggers RESET_CTRL_C in useGlobalKeys.
       tui.write(' ');
-      await new Promise((r) => setTimeout(r, 200));
     },
     TIMEOUT,
   );
@@ -98,7 +94,6 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
     async () => {
       // Send Ctrl+C while TUI is idle (no agent running, ctrlCPressed=false).
       tui.write('\x03');
-      await new Promise((r) => setTimeout(r, 500));
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -109,7 +104,6 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
 
       // Reset ctrlCPressed so test 3 starts with a clean flag.
       tui.write(' ');
-      await new Promise((r) => setTimeout(r, 200));
     },
     TIMEOUT,
   );
@@ -128,9 +122,7 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       // First Ctrl+C: cancels the run (running=true → cancelInterrupt).
       // Sets running=false and ctrlCPressed=true.
       tui.write('\x03');
-      // Brief pause to let React process the first CTRL_C state update.
-      // The reducer runs synchronously but Ink needs one render cycle.
-      await new Promise((r) => setTimeout(r, 150));
+      await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
 
       // Second Ctrl+C: running=false ∧ ctrlCPressed=true → exitRequested=true.
       // This triggers process.exit(0) in the TUI's useEffect.

@@ -1,15 +1,29 @@
 import { describe, expect, test } from 'bun:test';
 import type { MockModelServer } from './fixtures';
-import { submitUserMessage, typeText, waitForRequestMessage } from './input-helpers';
+import { clearInput, submitUserMessage, typeText, waitForRequestMessage } from './input-helpers';
 import type { PtyProcess } from './pty-process';
 
 function fakePty(onWrite: (data: string) => void, output: () => string): PtyProcess {
+  let lastActionMark = 0;
   return {
     exited: false,
-    write: onWrite,
-    setRawMode() {},
-    resize() {},
+    write(data) {
+      lastActionMark = output().length;
+      onWrite(data);
+      return lastActionMark as ReturnType<PtyProcess['markOutput']>;
+    },
+    setRawMode() {
+      lastActionMark = output().length;
+      return lastActionMark as ReturnType<PtyProcess['markOutput']>;
+    },
+    resize() {
+      lastActionMark = output().length;
+      return lastActionMark as ReturnType<PtyProcess['markOutput']>;
+    },
     output,
+    markOutput: () => output().length as ReturnType<PtyProcess['markOutput']>,
+    outputSince: (mark) => output().slice(mark),
+    outputSinceLastAction: () => output().slice(lastActionMark),
     waitForExit: async () => 0,
     kill() {},
     killAndWait: async () => true,
@@ -49,6 +63,22 @@ describe('TUI input helpers', () => {
     expect(rendered).toContain('\r\n');
   });
 
+  test('clearInput supports the input widget backspace encoding and waits for a receipt', async () => {
+    let rendered = '';
+    const writes: string[] = [];
+    const tui = fakePty(
+      (data) => {
+        writes.push(data);
+        rendered += '<rendered-backspace>';
+      },
+      () => rendered,
+    );
+
+    await clearInput(tui, 2, { backspace: 'ascii' });
+
+    expect(writes).toEqual(['\x08', '\x08']);
+  });
+
   test('waitForRequestMessage ignores matching requests before the supplied baseline', async () => {
     const requests = [
       { body: {}, messages: [{ content: 'target' }] },
@@ -64,6 +94,8 @@ describe('TUI input helpers', () => {
         requests
           .slice(since)
           .some((request) => request.messages.some((message) => message.content.includes(text))),
+      setModelsResponse() {},
+      getModelRequests: () => [],
       stop() {},
     } as MockModelServer;
 
@@ -99,6 +131,8 @@ describe('TUI input helpers', () => {
         requests
           .slice(since)
           .some((request) => request.messages.some((message) => message.content.includes(text))),
+      setModelsResponse() {},
+      getModelRequests: () => [],
       stop() {},
     } as MockModelServer;
 

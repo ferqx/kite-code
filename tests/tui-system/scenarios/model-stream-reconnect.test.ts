@@ -4,7 +4,6 @@ import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30_000;
 
@@ -52,7 +51,7 @@ describe('TUI PTY System — model stream reconnect', () => {
       { message: { content: 'spare 2' } },
     ]);
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15_000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15_000);
     tui.setRawMode(true);
   });
 
@@ -63,24 +62,16 @@ describe('TUI PTY System — model stream reconnect', () => {
   });
 
   test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
-
-  test(
     'keeps partial text and commits only the recovered tool lifecycle',
     async () => {
       await typeText(tui, 'Reconnect the stream');
       tui.write('\r');
       await waitForRequestMessage(server, 'Reconnect the stream', 15_000);
-      await waitForText(() => tui.output(), 'RECONNECT_PARTIAL', 10_000);
+      await waitForText(() => tui.outputSinceLastAction(), 'RECONNECT_PARTIAL', 10_000);
       expect(screenContains(tui.output(), 'WRONG.md')).toBe(false);
 
-      await waitForText(() => tui.output(), 'RECOVERED', 10_000);
-      await waitForText(() => tui.output(), 'RECONNECT_DONE', 10_000);
+      await waitForText(() => tui.outputSinceLastAction(), 'RECOVERED', 10_000);
+      await waitForText(() => tui.outputSinceLastAction(), 'RECONNECT_DONE', 10_000);
 
       expect(server.getRequestCount()).toBeGreaterThanOrEqual(3);
       expect(screenContains(tui.output(), 'RECONNECT_PARTIAL')).toBe(true);

@@ -15,10 +15,10 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
+import { typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -26,6 +26,13 @@ describe('TUI PTY System — Terminal Resize', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let probeSequence = 0;
+
+  async function expectInteractiveAfterResize(): Promise<void> {
+    const probe = `rz${++probeSequence}`;
+    await typeText(tui, probe);
+    expect(screenContains(tui.outputSinceLastAction(), probe)).toBe(true);
+  }
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -38,12 +45,10 @@ describe('TUI PTY System — Terminal Resize', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered before running any test
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     tui.setRawMode(true);
-    // Allow raw mode and Ink render to settle
-    await new Promise((r) => setTimeout(r, 500));
   });
 
   afterAll(async () => {
@@ -51,16 +56,6 @@ describe('TUI PTY System — Terminal Resize', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Test 1: Initial Render at Configured Dimensions ──────────
 
@@ -95,8 +90,7 @@ describe('TUI PTY System — Terminal Resize', () => {
       // but the call itself must not throw.
       tui.resize(80, 24);
 
-      // Give the TUI time to process and re-render.
-      await new Promise((r) => setTimeout(r, 800));
+      await expectInteractiveAfterResize();
 
       // TUI should still be alive with prompt visible.
       const output = tui.output();
@@ -114,19 +108,19 @@ describe('TUI PTY System — Terminal Resize', () => {
     async () => {
       // Resize 1: 80x24 → 100x30
       tui.resize(100, 30);
-      await new Promise((r) => setTimeout(r, 600));
+      await expectInteractiveAfterResize();
       expect(screenContains(tui.output(), '❯')).toBe(true);
       console.log('  resize 80x24→100x30 — alive');
 
       // Resize 2: 100x30 → 80x24
       tui.resize(80, 24);
-      await new Promise((r) => setTimeout(r, 600));
+      await expectInteractiveAfterResize();
       expect(screenContains(tui.output(), '❯')).toBe(true);
       console.log('  resize 100x30→80x24 — alive');
 
       // Resize 3: 80x24 → 120x40 (back to original)
       tui.resize(120, 40);
-      await new Promise((r) => setTimeout(r, 600));
+      await expectInteractiveAfterResize();
       expect(screenContains(tui.output(), '❯')).toBe(true);
       console.log('  resize 80x24→120x40 — alive');
     },

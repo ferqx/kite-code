@@ -9,18 +9,14 @@
  *   - approval.test.ts (deny via `d` key)
  *   - tool-approve.test.ts (approve via `a` key)
  *   - ask-user-esc.test.ts (escape to cancel ask_user interrupt)
- *
- * IMPORTANT: Follows the same 3-test warmup pattern as input.test.ts
- * and approval.test.ts. Without warmup, model calls are silently skipped.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -59,13 +55,11 @@ describe('TUI PTY System — Approval Escape', () => {
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
     tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -73,16 +67,6 @@ describe('TUI PTY System — Approval Escape', () => {
     await tui?.killAndWait();
     workspace?.cleanup();
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Approval → Escape → Cancel & Recover → Send Again ────
 
@@ -95,7 +79,7 @@ describe('TUI PTY System — Approval Escape', () => {
       await waitForRequestMessage(server, 'Create a directory', 15000);
 
       // Wait for approval block to render
-      await waitForText(() => tui.output(), '授权执行命令', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
 
       const beforeOutput = tui.output();
       expect(screenContains(beforeOutput, '授权执行命令')).toBe(true);
@@ -104,7 +88,7 @@ describe('TUI PTY System — Approval Escape', () => {
 
       // Press Escape to cancel the approval
       tui.write('\x1b');
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
       // TUI should recover — prompt visible (approval cancelled)
       const afterOutput = tui.output();
@@ -117,7 +101,11 @@ describe('TUI PTY System — Approval Escape', () => {
       await waitForRequestMessage(server, msg, 15000);
 
       // Wait for the agent's response
-      await waitForText(() => tui.output(), 'Second message received after cancel.', 15000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Second message received after cancel.',
+        15000,
+      );
 
       const finalOutput = tui.output();
       expect(screenContains(finalOutput, 'Second message received after cancel.')).toBe(true);

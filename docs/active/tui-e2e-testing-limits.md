@@ -25,9 +25,14 @@
 8. suite runner 的 RSS/active-resource/FD 趋势只覆盖协调进程和 scenario 边界资源回收；
    每个 TUI 子进程内部的长期缓慢泄漏仍需要 1C.7 bounded soak。Windows 无通用 `/proc/self/fd`
    时 FD 数显示为 unsupported，由 active-resource 与平台 smoke 补充。
-9. PTY 输出是累积字节流，历史 prompt 仍可能出现在 buffer 中，因此“曾出现 `❯`”不能证明
-   当前输入焦点可用。Harness 通过本次输出 mark 之后的输入回显与本次 mock request baseline
-   建立提交确认；复杂 modal 仍需等待其独有状态。
+9. PTY 原始输出仍是累积流，历史 prompt、卡片和回答会保留，因此“曾出现 `❯`”不能证明
+   当前输入焦点可用。Harness 保留原始 PTY 字节并生成带类型的 byte checkpoint；跨 checkpoint
+   的 UTF-8 code point 不归入动作后输出。每次 write/resize/raw-mode 动作都更新 checkpoint，条件
+   等待只读取它之后的新输出，静默等待也默认要求至少出现一次新输出。输入提交还必须通过本次
+   输入回显与本次 mock request baseline 建立确认；复杂 modal 仍需等待其独有状态。
+10. `stripAnsi()` 仍不是完整终端模拟器；`outputSinceLastAction()` 证明的是动作后的新输出，不是
+    当前物理屏幕像素。需要验证跨动作的 transcript 顺序时应显式 `markOutput()`，布局、光标和
+    wrapping 则继续由 Ink 组件测试或专门终端测试负责。
 
 ## 分层选择
 

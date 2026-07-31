@@ -1,10 +1,15 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  expectTextAbsentFor,
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30_000;
 
@@ -39,7 +44,7 @@ describe('TUI PTY System — model streaming', () => {
       },
     ]);
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15_000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15_000);
     tui.setRawMode(true);
   });
 
@@ -50,24 +55,15 @@ describe('TUI PTY System — model streaming', () => {
   });
 
   test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
-
-  test(
     'shows the complete reasoning stream atomically before committing answer components',
     async () => {
       await typeText(tui, 'Stream an answer');
       tui.write('\r');
       await waitForRequestMessage(server, 'Stream an answer', 15_000);
-      await sleep(400);
-      expect(screenContains(tui.output(), 'STREAM_THINKING')).toBe(false);
-      expect(screenContains(tui.output(), 'STREAM_PRIVATE_TAIL')).toBe(false);
+      await expectTextAbsentFor(() => tui.outputSinceLastAction(), 'STREAM_THINKING', 400);
+      expect(screenContains(tui.outputSinceLastAction(), 'STREAM_PRIVATE_TAIL')).toBe(false);
 
-      await waitForText(() => tui.output(), 'STREAM_THINKING', 10_000);
+      await waitForText(() => tui.outputSinceLastAction(), 'STREAM_THINKING', 10_000);
 
       const partialOutput = tui.output();
       expect(screenContains(partialOutput, 'STREAM_THINKING')).toBe(true);
@@ -75,7 +71,7 @@ describe('TUI PTY System — model streaming', () => {
       expect(screenContains(partialOutput, 'STREAM_FIRST')).toBe(false);
       expect(screenContains(partialOutput, 'STREAM_FINAL')).toBe(false);
 
-      await waitForText(() => tui.output(), 'STREAM_FIRST', 10_000);
+      await waitForText(() => tui.outputSinceLastAction(), 'STREAM_FIRST', 10_000);
       const firstAnswerFrameHistory = stripAnsi(tui.output());
       expect(firstAnswerFrameHistory.lastIndexOf('STREAM_THINKING')).toBeLessThan(
         firstAnswerFrameHistory.lastIndexOf('STREAM_FIRST'),
@@ -85,8 +81,8 @@ describe('TUI PTY System — model streaming', () => {
       );
       expect(screenContains(tui.output(), 'STREAM_FINAL')).toBe(false);
 
-      await waitForText(() => tui.output(), 'STREAM_FINAL', 10_000);
-      await sleep(800);
+      await waitForText(() => tui.outputSinceLastAction(), 'STREAM_FINAL', 10_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       expect(screenContains(tui.output(), 'STREAM_MIDDLE')).toBe(true);
       const clean = stripAnsi(tui.output());
       // Raw PTY capture retains overwritten frames; ensure reasoning was only

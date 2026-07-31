@@ -16,11 +16,15 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 40000;
 
@@ -53,10 +57,9 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
 
     tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
@@ -65,20 +68,10 @@ describe('TUI PTY System — Thought Lifecycle', () => {
     workspace?.cleanup();
   });
 
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: TUI input pipeline functional',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
-
   // ═══════════════════════════════════════════════════════════════
   // Test 0 — 多轮探索跨模型调用聚合为单一阶段块（ADR-0030 / 规则 24）
   //
-  // 放在 warmup 之后、其他测试之前，因为共享 PTY session 中
+  // 放在其他测试之前，因为共享 PTY session 中
   // 后续测试的 mock responses 会与前面的 auxiliary calls 竞争。
   //
   // 消息结构：
@@ -125,8 +118,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Timeline test', 15000);
 
-      await waitForText(() => tui.output(), 'TIMELINE_DONE', 25000);
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'TIMELINE_DONE', 25000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -184,8 +177,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForRequestMessage(server, 'Explore the codebase', 15000);
 
       // Wait for final text → Thought is settled in scrollback
-      await waitForText(() => tui.output(), 'EXPLORE_DONE', 20000);
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'EXPLORE_DONE', 20000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -253,8 +246,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Check config files', 15000);
 
-      await waitForText(() => tui.output(), 'TWO_PHASE_DONE', 20000);
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'TWO_PHASE_DONE', 20000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -317,8 +310,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Explore with shell', 15000);
 
-      await waitForText(() => tui.output(), 'SHELL_THOUGHT_DONE', 25000);
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'SHELL_THOUGHT_DONE', 25000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -373,8 +366,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Tools only no thinking', 15000);
 
-      await waitForText(() => tui.output(), 'read 1 file', 25000);
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'read 1 file', 25000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);
@@ -425,8 +418,8 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       await waitForRequestMessage(server, 'Think only no tools', 15000);
 
       // 等 Thought 完成
-      await waitForText(() => tui.output(), 'Thought for', 25000);
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Thought for', 25000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.output();
       const clean = stripAnsi(output);

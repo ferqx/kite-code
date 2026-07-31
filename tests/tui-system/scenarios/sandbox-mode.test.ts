@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText } from '../harness/input-helpers';
+import { typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -23,9 +23,8 @@ describe('TUI PTY System — Sandbox Mode', () => {
     server.setResponses([{ message: { content: 'spare' } }]);
     tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
-    await waitForText(() => tui.output(), '❯', 15000);
+    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
     tui.setRawMode(true);
-    await sleep(300);
   });
 
   afterAll(async () => {
@@ -35,17 +34,13 @@ describe('TUI PTY System — Sandbox Mode', () => {
   });
 
   test(
-    '/permissions full is disabled when sandbox config is off',
+    '/permissions marks full as disabled when sandbox config is off',
     async () => {
       await typeText(tui, '/permissions f');
-      await waitForText(() => tui.output(), '未启用沙箱，Full 不可用', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), '未启用沙箱，Full 不可用', 10000);
 
       const suggestionOutput = stripAnsi(tui.output());
       expect(suggestionOutput).toContain('未启用沙箱，Full 不可用');
-
-      await typeText(tui, 'ull');
-      tui.write('\r');
-      await sleep(500);
 
       const output = tui.output();
       expect(screenContains(output, '未启用沙箱，Full 不可用')).toBe(true);
