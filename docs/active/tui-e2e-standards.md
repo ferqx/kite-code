@@ -77,7 +77,9 @@ tests/tui-system/
    前序失败后依赖步骤不会继续执行，也不会制造级联失败。scenario contract 会拒绝
    `beforeAll` 下注册多个 `test()` 的结构。journey 总 deadline 必须先于 Bun test 与文件级硬超时，
    使慢场景仍由 harness 报告当前 step，而不是先收到匿名外层超时。setup/readiness 不得伪装成
-   可独立通过的测试用例。
+   可独立通过的测试用例。验证同一设置的双向转换时，如果反向转换不依赖正向转换的业务结果，
+   应为两个方向分别建立明确的初始配置与独立 fixture；不得让反向断言依赖前序 suggestion、
+   action delta 或重绘历史。
 5. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
    同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生

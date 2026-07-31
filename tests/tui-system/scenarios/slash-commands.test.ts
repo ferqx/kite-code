@@ -266,10 +266,10 @@ describe('TUI PTY System — Slash Commands', () => {
     TIMEOUT,
   );
 
-  // ── /permissions toggles interaction mode ───────────────────────
+  // ── /permissions selects an interaction mode ───────────────────
 
   step(
-    '/permissions toggles interaction mode',
+    '/permissions selects auto interaction mode',
     async () => {
       // Auto is available on every platform. Full intentionally remains
       // disabled when the CI runner has no supported sandbox backend.
@@ -281,11 +281,8 @@ describe('TUI PTY System — Slash Commands', () => {
       const output = tui.viewport();
       expect(screenContains(output, '自动审批')).toBe(true);
 
-      // Toggle back to accept_edits (default)
-      await typeText(tui, '/permissions accept_edits');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), '接受编辑', 5000);
+      // The reverse transition is isolated in permissions-mode.test.ts so it
+      // does not depend on this stateful journey's prior suggestion renders.
     },
     TIMEOUT,
   );
