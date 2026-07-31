@@ -21,7 +21,12 @@ import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForCondition,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -175,7 +180,18 @@ describe('TUI PTY System — Session Persistence', () => {
 
       // Wait for the historical session content to be replayed.
       // Both the user message and model response should be restored.
-      await waitForText(() => tui2.outputSinceLastAction(), 'Message before restart', 15000);
+      await waitForCondition(
+        () => {
+          const viewport = tui2.viewport();
+          return (
+            screenContains(viewport, 'Message before restart') &&
+            screenContains(viewport, 'Hello from session!') &&
+            screenContains(viewport, '❯')
+          );
+        },
+        'historical user and assistant messages to finish replaying in the viewport',
+        15000,
+      );
 
       const output = tui2.viewport();
       console.log('  tui2 output after loading session:', stripAnsi(output).slice(-500));

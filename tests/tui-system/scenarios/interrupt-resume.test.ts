@@ -22,7 +22,12 @@ import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForCondition,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 45000;
@@ -156,7 +161,18 @@ describe('TUI PTY System — Interrupt Resume', () => {
       // The session from tui1 should be at index 0.
       // Press Enter to select and load it.
       tui2.write('\r');
-      await waitForText(() => tui2.outputSinceLastAction(), 'Hello from tui1', 15000);
+      await waitForCondition(
+        () => {
+          const viewport = tui2.viewport();
+          return (
+            screenContains(viewport, 'Hello from tui1') &&
+            screenContains(viewport, 'Response from the first instance.') &&
+            screenContains(viewport, '❯')
+          );
+        },
+        'persisted user and assistant messages to finish replaying in the viewport',
+        15000,
+      );
 
       const afterLoad = tui2.viewport();
       const cleanLoad = stripAnsi(afterLoad);

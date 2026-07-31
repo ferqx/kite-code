@@ -194,13 +194,24 @@ describe('TUI PTY System — Session Switching', () => {
 
       // Press Enter to switch to session 1
       console.log('  pressing Enter to switch...');
-      const replayMark = tui.write('\r');
+      tui.write('\r');
 
       // Wait for session 1 content to be replayed after switch.
       // The TUI loads and replays the session blocks into the OutputArea.
-      await waitForText(() => tui.outputSince(replayMark), 'Message in session 1', 15000);
-      await waitForText(() => tui.outputSince(replayMark), 'Session 1 response', 15000);
-
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, 'Message in session 1') &&
+            screenContains(viewport, 'Session 1 response') &&
+            !screenContains(viewport, 'Message in session 2') &&
+            !screenContains(viewport, 'Session 2 response') &&
+            screenContains(viewport, '❯')
+          );
+        },
+        'session 1 replay to replace session 2 in the viewport',
+        15000,
+      );
       output = tui.viewport();
       console.log('  viewport after switch to session 1:', output.slice(-500));
 
@@ -239,12 +250,23 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       console.log('  pressing Enter to switch to session 2...');
-      const replayMark = tui.write('\r');
+      tui.write('\r');
 
       // Wait for session 2 content to be replayed
-      await waitForText(() => tui.outputSince(replayMark), 'Message in session 2', 15000);
-      await waitForText(() => tui.outputSince(replayMark), 'Session 2 response', 15000);
-
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, 'Message in session 2') &&
+            screenContains(viewport, 'Session 2 response') &&
+            !screenContains(viewport, 'Message in session 1') &&
+            !screenContains(viewport, 'Session 1 response') &&
+            screenContains(viewport, '❯')
+          );
+        },
+        'session 2 replay to replace session 1 in the viewport',
+        15000,
+      );
       output = tui.viewport();
       console.log('  viewport after switch to session 2:', output.slice(-500));
 

@@ -63,8 +63,10 @@ tests/tui-system/
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
    同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生
    Runtime event 后必须校验 Runtime Store 中出现不同 thread ID；切换回放先用 Enter checkpoint
-   确认新输出，再用 `viewport()` 同时断言目标会话内容存在、另一会话内容不存在。空 session 尚未
-   产生事件时不要求提前出现在持久化 session 列表。
+   确认新输出，再等待 `viewport()` 同时满足目标 user/assistant 内容与 prompt 已出现、另一会话
+   内容不存在。跨进程加载同样必须等待完整 viewport 组合状态；selector 已经包含的 session title
+   不能作为 Enter 后回放完成的 receipt。空 session 尚未产生事件时不要求提前出现在持久化 session
+   列表。
    session 删除确认必须同时验证被选 thread ID 已从 Runtime Store 消失且 active thread 保留；取消
    删除必须验证 thread ID 集合不变，不能只依赖 selector 列表缓存。
 7. 改动 Runtime 多轮语义时同时运行 `tests/runtime/agent.integration.test.ts`、`tests/runtime/store.test.ts` 和相应 PTY scenario。
