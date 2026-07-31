@@ -6,9 +6,9 @@
  *
  * 1. Turn 1: write_file 覆写 notes.md（V1 → V2）；turn 结束时 kernel 写入
  *    命名检查点 S1。
- * 2. Turn 2: write_file 再次覆写（V2 → V3）；写入前工具链记录原像 V2。
- * 3. /rewind 打开检查点面板（按创建时间倒序：[S2, S1]），↓ 选中 S1 并
- *    Enter 回退 → 工作区文件恢复为检查点时刻的 V2，会话截断到 S1。
+ * 2. Turn 2/3: write_file 继续覆写（V2 → V3 → V4）。
+ * 3. 第一次 /rewind 恢复到 S2（V3）并创建新会话；新会话仍保留 S1。
+ * 4. 新会话中再次 /rewind 恢复到 S1（V2），验证连续回退不会丢历史。
  *
  * 断言分两层：TUI 文本层（面板、恢复提示、prompt 恢复）与磁盘层
  * （直接读取 workspace 文件内容，证明回退真实发生）。
@@ -22,6 +22,7 @@
  * before the first model call.
  */
 
+import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -37,6 +38,7 @@ const TIMEOUT = 30000;
 const NOTES_V1 = 'v1 原始内容\n中间行\n';
 const NOTES_V2 = 'v2 第一次修改\n中间行\n';
 const NOTES_V3 = 'v3 第二次修改\n中间行\n';
+const NOTES_V4 = 'v4 第三次修改\n中间行\n';
 
 describe('TUI PTY System — File Rewind', () => {
   let tui: PtyProcess;
@@ -49,8 +51,7 @@ describe('TUI PTY System — File Rewind', () => {
       files: { 'notes.md': NOTES_V1 },
     });
 
-    // Turn 1: overwrite notes.md V1 → V2, then follow up
-    // Turn 2: overwrite notes.md V2 → V3, then follow up
+    // Turn 1/2/3: overwrite notes.md V1 → V2 → V3 → V4, with a follow-up each turn.
     // Spares for potential extra requests (wrap-around is defensive)
     server.setResponses([
       {
@@ -71,6 +72,15 @@ describe('TUI PTY System — File Rewind', () => {
         },
       },
       { message: { content: 'Notes v3 done.' } },
+      {
+        message: {
+          content: 'I will update your notes a third time.',
+          tool_calls: [
+            { id: 'call_rw3', name: 'write_file', args: { path: 'notes.md', content: NOTES_V4 } },
+          ],
+        },
+      },
+      { message: { content: 'Notes v4 done.' } },
       { message: { content: 'rewind spare 1' } },
       { message: { content: 'rewind spare 2' } },
       { message: { content: 'rewind spare 3' } },
@@ -99,10 +109,10 @@ describe('TUI PTY System — File Rewind', () => {
     TIMEOUT,
   );
 
-  // ── Turn 1 + Turn 2: two overwrites build checkpoint history ──
+  // ── Three turns build a rewind chain ──
 
   test(
-    'two write_file turns land on disk and create checkpoints',
+    'three write_file turns land on disk and create checkpoints',
     async () => {
       await typeText(tui, 'Update my notes');
       tui.write('\r');
@@ -113,40 +123,93 @@ describe('TUI PTY System — File Rewind', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Update my notes again', 15000);
       await waitForText(() => tui.output(), 'Notes v3 done.', 20000);
+
+      await typeText(tui, 'Update my notes a third time');
+      tui.write('\r');
+      await waitForRequestMessage(server, 'Update my notes a third time', 15000);
+      await waitForText(() => tui.output(), 'Notes v4 done.', 20000);
       await sleep(500);
 
-      // Disk holds the latest version after both turns
-      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V3);
+      // Disk holds the latest version after all three turns.
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V4);
       expect(screenContains(tui.output(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
 
-  // ── /rewind: revert to the first checkpoint restores V2 ──────
+  // ── First /rewind: latest actionable point restores V3 ──────
 
   test(
-    '/rewind revert to the first checkpoint restores the file on disk',
+    '/rewind restores V3 and preserves the earlier recovery point',
     async () => {
       await typeText(tui, '/rewind');
       tui.write('\r');
-      // 检查点面板出现（含两个 turn 检查点）/ checkpoint panel with both turns
-      await waitForText(() => tui.output(), '回退 — 选择检查点', 15000);
+      // 检查点面板以用户消息描述恢复边界，不暴露 event / snapshot ID。
+      await waitForText(() => tui.output(), 'Kite Code · 回退', 15000);
       await sleep(500);
 
-      // 列表按创建时间倒序：[S2, S1]。↓ 选中 S1，Enter 回退。
-      // List is DESC by creation: [S2, S1]. Down selects S1, Enter reverts.
+      // Enter 只进入确认层；默认“返回”，需要 ↓ 明确选择恢复代码和会话。
+      tui.write('\r');
+      await waitForText(() => tui.output(), '回退 · 确认', 15000);
       tui.write('\x1B[B');
       await sleep(300);
       tui.write('\r');
 
       // 恢复提示（LOCAL_TEXT）/ restore note
-      await waitForText(() => tui.output(), '已恢复 1 个文件到检查点', 20000);
+      await waitForText(() => tui.output(), '已从检查点创建新会话，并恢复 1 个文件', 20000);
       await sleep(500);
 
-      // 磁盘层断言：文件回到 S1 时刻的 V2 / disk is back to V2 (state at S1)
-      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V2);
+      // 磁盘层断言：文件回到 S2 时刻的 V3 / disk is back to V3 (state at S2)
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V3);
+
+      // 会话恢复使用 fork：源会话和新会话都仍在 Runtime Store 中。
+      const runtimeDb = new Database(join(workspace.home, '.kite-code', 'checkpoints.runtime.db'), {
+        readonly: true,
+      });
+      const sessionCount = runtimeDb
+        .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
+        .get()?.count;
+      runtimeDb.close();
+      expect(sessionCount).toBe(2);
 
       // TUI recovers — prompt visible
+      expect(screenContains(tui.output(), '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
+  // ── Second /rewind: forked session can continue to S1 ──────
+
+  test(
+    'the recovered session can rewind again to V2',
+    async () => {
+      const panelOffset = tui.output().length;
+      await typeText(tui, '/rewind');
+      tui.write('\r');
+      await waitForText(() => tui.output().slice(panelOffset), 'Kite Code · 回退', 15000);
+
+      tui.write('\r');
+      await waitForText(() => tui.output().slice(panelOffset), '回退 · 确认', 15000);
+      tui.write('\x1B[B');
+      await sleep(300);
+      const restoreOffset = tui.output().length;
+      tui.write('\r');
+
+      await waitForText(
+        () => tui.output().slice(restoreOffset),
+        '已从检查点创建新会话，并恢复 1 个文件',
+        20000,
+      );
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(NOTES_V2);
+
+      const runtimeDb = new Database(join(workspace.home, '.kite-code', 'checkpoints.runtime.db'), {
+        readonly: true,
+      });
+      const sessionCount = runtimeDb
+        .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_sessions')
+        .get()?.count;
+      runtimeDb.close();
+      expect(sessionCount).toBe(3);
       expect(screenContains(tui.output(), '❯')).toBe(true);
     },
     TIMEOUT,

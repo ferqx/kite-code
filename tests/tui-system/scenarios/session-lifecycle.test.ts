@@ -181,7 +181,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   // ── SessionSelector: D-key delete confirm ───────────────
 
   test(
-    'D key triggers delete confirmation, Enter confirms deletion',
+    'D key opens a safe-default confirmation, Down then Enter deletes',
     async () => {
       // Open session selector
       await typeText(tui, '/sessions');
@@ -205,10 +205,16 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       const confirmOutput = tui.output();
       // Confirmation dialog should appear
-      expect(screenContains(confirmOutput, '确认')).toBe(true);
-      expect(screenContains(confirmOutput, 'Enter')).toBe(true);
+      expect(screenContains(confirmOutput, '删除确认')).toBe(true);
+      expect(screenContains(confirmOutput, '❯ 保留会话')).toBe(true);
+      expect(screenContains(confirmOutput, '永久删除')).toBe(true);
+      expect(screenContains(confirmOutput, 'Enter 确认')).toBe(true);
 
-      // Press Enter to confirm deletion
+      // Move away from the safe default before confirming deletion.
+      tui.write('\x1b[B');
+      await sleep(300);
+      expect(screenContains(tui.output(), '❯ 永久删除')).toBe(true);
+
       tui.write('\r');
       await sleep(1000);
 
@@ -235,7 +241,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   // ── SessionSelector: D-key Esc cancel ─────────────────
 
   test(
-    'D key then Escape cancels deletion, session remains',
+    'Enter on the safe default and Escape both cancel deletion',
     async () => {
       // The previous test deleted one session, so only 1 remains.
       // Attempt to delete the active (only) session but cancel.
@@ -249,11 +255,28 @@ describe('TUI PTY System — Session Lifecycle', () => {
       await sleep(500);
 
       const confirmOutput = tui.output();
-      expect(screenContains(confirmOutput, '确认')).toBe(true);
+      expect(screenContains(confirmOutput, '删除确认')).toBe(true);
+      expect(screenContains(confirmOutput, '❯ 保留会话')).toBe(true);
 
-      // Press Escape to cancel deletion
+      // Enter confirms the selected safe default, returning to the list.
+      const beforeKeep = tui.output().length;
+      tui.write('\r');
+      await sleep(500);
+      expect(stripAnsi(tui.output().slice(beforeKeep))).toContain('搜索');
+
+      // Escape is also always safe.
+      tui.write('D');
+      await sleep(300);
       tui.write('\x1b');
       await sleep(500);
+
+      // Navigating to the search row proves the selector remained open.
+      const beforeNavigate = tui.output().length;
+      tui.write('\x1b[A');
+      await sleep(300);
+      expect(stripAnsi(tui.output().slice(beforeNavigate))).toContain('搜索:');
+      tui.write('\x1b[B');
+      await sleep(200);
 
       // Session should still be in the list (panel still open after cancel)
       const cancelOutput = tui.output();

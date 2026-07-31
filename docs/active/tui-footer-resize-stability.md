@@ -5,7 +5,7 @@
 读取时机：修改 Footer、高度测量、窗口 resize、InputLine 或 overlay 布局时。
 
 验证：`bun test tests/tui-layout.test.tsx tests/tui-extra-space.test.tsx tests/tui-system/scenarios/resize.test.ts`。
-范围：`src/app/tui/index.tsx`、`src/app/tui/components/InputLine.tsx`、`src/app/tui/hooks/useOverlayHeight.ts`、`src/app/tui/render/useStaticContent.tsx`
+范围：`src/app/tui/index.tsx`、`src/app/tui/components/InputLine.tsx`、`src/app/tui/components/OverlayFrame.tsx`、`src/app/tui/components/OverlayChoiceList.tsx`、`src/app/tui/components/OverlaySearchInput.tsx`、`src/app/tui/components/ApprovalBlock.tsx`、`src/app/tui/components/InputBlock.tsx`、`src/app/tui/components/PlanReviewBlock.tsx`、`src/app/tui/hooks/useOverlayHeight.ts`、`src/app/tui/hooks/useSlashSuggestions.ts`、`src/app/tui/render/useStaticContent.tsx`
 读取时机：修改 TUI resize 逻辑、怀疑缩放行为异常时必读。
 
 ## 最终方案（2026-06-15）
@@ -74,8 +74,99 @@ bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/
 
 - [[tui-reference-stability]] — useStaticContent 引用稳定性重构，解决高频渲染下的重复行问题
 
+## 底部 Overlay 视觉契约（2026-07-30）
+
+斜杠命令、文件搜索、帮助、模型、会话、检查点和 MCP 管理面板统一使用
+`OverlayFrame`。面板必须占满可用终端宽度（`width="100%"`），不得设置固定或最大面板宽度；
+宽度变化继续由 App remount 与 Ink 布局重算处理。普通底部浮层不得使用四周边框，而应由占满
+宽度的顶部品牌分隔线显示 `── ◆ Kite Code · <标题> ──`；可选的当前位置/总数位于分隔线
+右侧。底部操作使用统一的品牌色键名与弱化说明。删除确认等危险状态可使用独立强调，
+不得让常驻边框重新包围整个底部面板。
+会话删除进入确认态后必须暂时隐藏搜索与列表，只显示删除对象和影响说明；
+删除确认状态由标题栏右侧的 `删除确认` 标识，正文不得重复显示“删除会话”；会话名称和安全
+选择应分层展示，确认区保留左右内边距和层级间距。确认选项统一复用
+`OverlayChoiceList`，默认选择 `保留会话`；用户必须主动选择危险色的 `永久删除` 后按 Enter
+才可执行删除。底部操作同步切换为 `↑↓ 选择`、`Enter 确认` 与 `Esc 返回`，不得在正文中
+重复快捷键。搜索和删除确认等会话面板子状态必须通过分层 Esc ref 消费第一次 Esc，避免
+全局处理器在同一次按键中继续关闭整个会话面板。
+删除确认不得使用整行背景高亮，焦点仅由 `❯`、品牌色和字重表达；会话名称及其引号必须
+作为一个整体截断，不得用伸缩布局把闭引号推到终端右侧。
+
+浏览型选择列表（命令、模型、会话、文件与检查点）统一使用主题背景高亮当前行，并以 `❯` 作为唯一焦点标识。主文本紧跟焦点列；
+当前生效项在独立的右侧状态列显示 `当前`，时间、`default` 等信息进入更右侧的元数据列。
+状态列与元数据列之间至少保留两个终端列；会话和检查点时间固定使用本地时区
+`YYYY-MM-DD HH:mm:ss`，不得依赖 locale 格式。不得在主文本前预留状态列，也不得增加重复的圆点或竖线选中标记。命令、参数和说明等结构化内容必须按终端显示宽度
+使用显式列布局，并在窄终端中截断或隐藏低优先级说明，不得撑破全宽外框。
+`/rewind` 使用两阶段底部浮层。第一层只回答“回到哪里”：恢复点以其后的第一条用户消息
+描述“发送这条消息之前”的边界，主列显示最多两行的消息摘要，次行显示
+`YYYY-MM-DD HH:mm:ss` 和已记录的受影响文件数；当前最新、没有后续消息或文件影响的
+无操作恢复点不进入可选列表。不得展示事件位置、Snapshot ID、无数字快捷键的行号或
+`N more` 文案。Enter 只进入确认层，不能在列表层直接执行回退。
+
+第二层回答“恢复什么”：固定提供“返回检查点列表”“恢复代码和会话”“仅恢复会话”
+和“仅恢复代码”。默认焦点必须是无副作用的“返回检查点列表”，因此连续两次 Enter
+不得修改会话或工作区。涉及会话的选项从恢复点创建并切换到新会话，原会话保留；确认层
+必须展示会话与代码影响，并在代码恢复选项上提示只恢复 Kite Code 已记录、且当前内容仍
+匹配最后一次 Kite 写入结果的文件；同路径后续手动或 Bash 修改会形成冲突并跳过。确认层
+Esc 返回列表，列表层 Esc 才关闭浮层。实际恢复选项提交后必须立即锁定当前确认，组件卸载
+前的重复 Enter 不得再次派发；执行 handler 还必须用独立 in-flight 锁防止程序化重复调用。
+所有恢复范围执行前都要验证命名恢复点与可解析快照同时存在，失效的“仅恢复代码”不能
+误报为“没有需要恢复的文件”。
+会话虚拟列表不显示上下溢出提示；方向键导航继续自动滚动到选中项。不得暴露
+`ink-virtual-list` 默认的英文 `N more` 文案。
+搜索是会话列表顶部的可选行，非选中态显示 `搜索: —`；用户用方向键选中该行后才挂载共享的
+`OverlaySearchInput` 文本输入并接收搜索文字。所有带搜索能力的底部选择浮层应复用该组件，
+以统一选中态、提示符、空值占位和光标行为。面板挂载只执行一次初始会话加载，空搜索不得额外启动 debounce；
+查询结果变化只在当前索引越界时修正选择，不得无条件跳回首个会话。
+
+## 运行中操作交互契约（2026-07-30）
+
+工具授权、用户提问和方案审核虽然属于 Footer interrupt，而不是可随时打开的选择面板，但与
+底部浮层共享同一套视觉原语：使用 `OverlayFrame` 的全宽品牌分隔线、使用
+`OverlayChoiceList` 的 `❯` 焦点列与统一间距（需弱化的确认面板可关闭背景高亮），并通过 `OverlayShortcutBar` 渲染唯一一处
+底部快捷键。不得为这三类交互重新增加圆角四边框、`▶`/`›` 等第二套焦点符号，或在正文中
+重复快捷键。
+
+授权标题使用“工具类型 · 工具授权”：Shell 命令显示 `Shell · 工具授权`，文件写入显示
+`文件编辑 · 工具授权`，MCP 和 Subagent 使用对应类型；未知工具显示清理后的工具名。
+命令授权不得把命令正文压进“授权执行命令（…）”单行句式，也不得在工具授权标题后
+重复“执行命令”或“调用工具”等无信息标签。正文按左侧引用线对象块、决策列表和快捷键栏
+三层排列；层与层之间保留一个空行。三个决策均使用
+“主标签 + 一行影响说明”，选项之间保持一致间距；不得只在“拒绝”前额外留白。授权确认
+不使用整行背景高亮，焦点由 `❯`、品牌色和字重表达。“拒绝”是安全退出当前授权，不是
+破坏性操作，必须使用普通选项颜色，不得复用永久删除等操作的危险色。
+批准选项必须是 `approval.grantOptions` 的子集：非 Shell 工具通常只显示“允许一次”，不得
+展示或提交 payload 未声明的 `same_command`；“拒绝”始终作为本地安全退出项保留。
+
+`OverlaySearchInput` 只负责“未激活时是可选列表行、激活后挂载输入框”的搜索语义。提问的
+自由文本和方案反馈是始终可编辑的回答输入，不得为了表面复用而套用搜索组件。选择与输入
+之间的 Tab 提示必须与行为一致：存在预设选项时，Tab 可双向切换；没有预设选项时，不显示
+也不消费无意义的 Tab 切换。方案反馈的 Enter 只由文本输入提交一次，外层按键处理器不得
+重复提交。
+
+所有底部浮层和运行中操作条的标准快捷键说明使用中文动词：`选择`、`导航`、`确认`、
+`提交`、`返回`、`取消`、`关闭`。MCP 专有名词和 Server/Tool 内容可以保留英文，但通用
+键盘动作不得另起一套英文文案。
+
+工具授权、用户提问和方案审核是阻塞式 Footer 交互。任一 interrupt 可见时，Footer 必须
+隐藏全局 `StatusBar` 与 `StatsLine`，包括模型、思考级别、cache、context/token 和权限模式；
+只保留当前交互及其 `OverlayShortcutBar`。该隐藏只影响展示，不清空统计状态；interrupt
+解决或取消后，全局状态行按最新状态自动恢复。
+
+## 斜杠命令展示契约（2026-07-30）
+
+`SLASH_COMMAND_DEFS` 是内置斜杠命令的展示元数据单一来源，命令补全、精确命令识别和帮助
+面板不得各自维护不同清单。所有 `parseSlashCommand` 可执行的静态内置命令都必须进入该
+定义；动态 MCP Prompt 与 Skill 命令除外。当前静态清单包含 `effort`、`model`、`theme`、
+`sessions`、`new`、`plan`、`compact`、`permissions`、`mcp`、`rewind`、`export`、
+`context`、`clear`、`help` 和 `exit`。命令名匹配与执行均不区分大小写。
+
+参数提示必须使用实际可接受的值；权限模式显示 `accept_edits|auto|full`，不得再显示无法
+解析的旧名称 `ask`。帮助面板从同一元数据生成命令列表，确保新增可执行命令不会只出现在
+帮助或只出现在补全中。
+
 ## 验证：
 
 ```bash
-bun test tests/tui-soft-wrap.test.tsx tests/tui-cursor-nav.test.tsx tests/tui-edge-cases.test.tsx
+bun test tests/tui-soft-wrap.test.tsx tests/tui-cursor-nav.test.tsx tests/tui-edge-cases.test.tsx tests/slash-suggestions.test.ts tests/tui-slash-command.test.ts tests/tui-slash-suggestion-overlay.test.tsx tests/tui-overlay-choice-list.test.tsx tests/tui-checkpoint-selector.test.tsx tests/tui-layout.test.tsx tests/mcp-panel.test.tsx
 ```

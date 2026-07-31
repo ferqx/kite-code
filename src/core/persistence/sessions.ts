@@ -47,16 +47,20 @@ export interface SessionData {
   planAuthMode: string | null;
 }
 
-function formatTime(timestamp: number): string {
+export function formatLocalDateTime(timestamp: number): string {
   const date = new Date(timestamp * 1000);
-  return Number.isNaN(date.getTime()) ? '(unknown)' : date.toLocaleString();
+  if (Number.isNaN(date.getTime())) return '(unknown)';
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function mapSession(info: RuntimeSessionInfo): SessionInfo {
   return {
     threadId: info.threadId,
     name: info.name,
-    updatedAt: formatTime(info.updatedAt),
+    updatedAt: formatLocalDateTime(info.updatedAt),
     needsSmartName: info.needsSmartName,
   };
 }

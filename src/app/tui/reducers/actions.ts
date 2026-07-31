@@ -5,7 +5,7 @@ import type { ContextCompactionProgressPhase } from '@/core/model/context-compac
 import type { ContextStatusSnapshot } from '@/core/model/context-status';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeSnapshotEntry } from '@/core/runtime/store';
-import type { InterruptState, OutputBlock, TuiState } from '../types';
+import type { InterruptState, OutputBlock, RewindScope, TuiState } from '../types';
 
 export type Action =
   | { type: 'RUNTIME_EVENT'; event: RuntimeEvent }
@@ -69,8 +69,7 @@ export type Action =
   | { type: 'INJECT_MCP_PROMPT'; server: string; promptName: string }
   | { type: 'SHOW_REWIND' }
   | { type: 'HIDE_REWIND' }
-  | { type: 'REVERT_TO_CHECKPOINT'; checkpointId: string }
-  | { type: 'FORK_FROM_CHECKPOINT'; checkpointId: string }
+  | { type: 'EXECUTE_REWIND'; checkpointId: string; scope: RewindScope }
   | { type: 'SET_CHECKPOINTS'; checkpoints: RuntimeSnapshotEntry[] }
   | { type: 'LIST_SKILLS' }
   | { type: 'SET_SKILL_MANIFESTS'; manifests: import('@/core/skills/types').SkillManifest[] }

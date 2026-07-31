@@ -85,12 +85,15 @@ describe('TUI PTY System — Tool Approval', () => {
       await waitForRequestMessage(server, 'Create a directory', 15000);
 
       // Wait for approval block to render
-      await waitForText(() => tui.output(), '授权执行命令', 15000);
+      await waitForText(() => tui.output(), '工具授权', 15000);
 
       const output = tui.output();
-      expect(screenContains(output, '授权执行命令')).toBe(true);
+      expect(screenContains(output, '工具授权')).toBe(true);
       expect(screenContains(output, '允许一次')).toBe(true);
       expect(screenContains(output, '拒绝')).toBe(true);
+      const approvalFrameStart = output.lastIndexOf('工具授权');
+      expect(approvalFrameStart).toBeGreaterThanOrEqual(0);
+      expect(screenContains(output.slice(approvalFrameStart), '[接受编辑]')).toBe(false);
 
       // Navigate to "拒绝" (index 2) and press Enter
       tui.write('\x1b[B');
@@ -99,12 +102,14 @@ describe('TUI PTY System — Tool Approval', () => {
       await sleep(100);
       tui.write('\x1b[B');
       await sleep(100);
+      const decisionOutputStart = tui.output().length;
       tui.write('\r');
       await sleep(2000);
 
       // TUI should recover — prompt visible
-      const afterOutput = tui.output();
+      const afterOutput = tui.output().slice(decisionOutputStart);
       expect(screenContains(afterOutput, '❯')).toBe(true);
+      expect(screenContains(afterOutput, '[接受编辑]')).toBe(true);
     },
     TIMEOUT,
   );

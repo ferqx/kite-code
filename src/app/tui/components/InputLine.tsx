@@ -6,6 +6,7 @@ import { useFileSearch } from '@/app/tui/hooks/useFileSearch';
 import {
   SLASH_COMMAND_DEFS,
   SLASH_COMMANDS,
+  type SlashSuggestionData,
   useSlashSuggestions,
 } from '@/app/tui/hooks/useSlashSuggestions';
 import { useWindowSize } from '@/app/tui/hooks/useWindowSizeSig';
@@ -15,6 +16,7 @@ import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTerminalFocus } from '../hooks/useTerminalFocus';
 import type { AtomicBlock } from './CtrlSafeTextInput';
 import CtrlSafeTextInput from './CtrlSafeTextInput';
+import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
 export const PASTE_THRESHOLD = 100;
 const MAX_INPUT_LENGTH = 100_000; // 100KB — reject input exceeding this to prevent DOS
@@ -24,19 +26,7 @@ interface PasteState {
   placeholder: string;
 }
 
-export interface SlashSuggestionData {
-  kind: 'command' | 'model' | 'effort' | 'theme' | 'permissions';
-  partial: string;
-  items: Array<{
-    command: string;
-    aliases: string[];
-    description: string;
-    args?: string;
-    isActive?: boolean;
-    disabled?: boolean;
-  }>;
-  selectedIndex: number;
-}
+export type { SlashSuggestionData } from '@/app/tui/hooks/useSlashSuggestions';
 
 interface InputLineProps {
   mode: 'prompt' | 'approval' | 'question';
@@ -307,7 +297,7 @@ export default function InputLine({
   const slashMatched = useMemo((): boolean => {
     if (!value.startsWith('/')) return false;
     if (/\s/.test(value)) return false;
-    const cmd = value.slice(1);
+    const cmd = value.slice(1).toLowerCase();
     if (!cmd) return false;
     return SLASH_COMMAND_DEFS.some((def) => def.name === cmd || def.aliases.includes(cmd));
   }, [value]);
@@ -573,50 +563,70 @@ export default function InputLine({
         (() => {
           if (fileSearch.results.length === 0) {
             return (
-              <Box
-                flexDirection="column"
-                borderStyle="round"
-                borderColor={t.primary}
-                paddingX={1}
-                marginTop={1}
+              <OverlayFrame
+                title={`文件匹配 @${fileSearch.query}`}
+                footer={<OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: '关闭' }]} />}
               >
-                <Text bold color={t.primary}>
-                  文件匹配 @{fileSearch.query}
-                </Text>
-                <Text color={t.dim}> No matching files</Text>
-                <Text color={t.dim}>Esc 关闭</Text>
-              </Box>
+                <Box marginTop={1}>
+                  <Text color={t.dim}>No matching files</Text>
+                </Box>
+              </OverlayFrame>
             );
           }
           const listHeight = Math.max(3, fileMaxHeight - 2);
+          const fileNameWidth = Math.max(12, Math.min(32, Math.floor((columns - 6) * 0.35)));
           return (
-            <Box
-              flexDirection="column"
-              borderStyle="round"
-              borderColor={t.primary}
-              paddingX={1}
-              marginTop={1}
-              flexGrow={1}
-              maxHeight={fileMaxHeight}
+            <OverlayFrame
+              title={`文件匹配 @${fileSearch.query}`}
+              meta={
+                <Text color={t.dim}>
+                  {fileSearch.selectedIndex + 1} / {fileSearch.results.length}
+                </Text>
+              }
+              footer={
+                <OverlayShortcutBar
+                  shortcuts={[
+                    { keys: '↑↓', label: '导航' },
+                    { keys: 'Tab / Enter', label: '选择' },
+                    { keys: 'Esc', label: '关闭' },
+                  ]}
+                />
+              }
             >
-              <Text bold color={t.primary}>
-                文件匹配 @{fileSearch.query}
-              </Text>
-              <Box flexGrow={1} maxHeight={listHeight}>
+              <Box marginTop={1} flexGrow={1} maxHeight={listHeight}>
                 <ScrollList selectedIndex={fileSearch.selectedIndex} scrollAlignment="auto">
-                  {fileSearch.results.map((f, i) => (
-                    <Box key={f.path}>
-                      <Text color={i === fileSearch.selectedIndex ? t.primary : t.muted}>
-                        {i === fileSearch.selectedIndex ? '❯ ' : '  '}
-                        {f.name}
-                      </Text>
-                      <Text color={t.dim}> — {f.path}</Text>
-                    </Box>
-                  ))}
+                  {fileSearch.results.map((f, i) => {
+                    const isSelected = i === fileSearch.selectedIndex;
+                    return (
+                      <Box
+                        key={f.path}
+                        width="100%"
+                        paddingX={1}
+                        backgroundColor={isSelected ? t.userMsgBg : undefined}
+                      >
+                        <Box width={2} flexShrink={0}>
+                          <Text bold color={isSelected ? t.primary : t.dim}>
+                            {isSelected ? '❯ ' : '  '}
+                          </Text>
+                        </Box>
+                        <Box width={fileNameWidth} flexShrink={0}>
+                          <Text
+                            bold={isSelected}
+                            color={isSelected ? t.primary : t.muted}
+                            wrap="truncate-end"
+                          >
+                            {f.name}
+                          </Text>
+                        </Box>
+                        <Text color={t.dim} wrap="truncate-end">
+                          {f.path}
+                        </Text>
+                      </Box>
+                    );
+                  })}
                 </ScrollList>
               </Box>
-              <Text color={t.dim}>Tab/Enter 选择 Esc 关闭</Text>
-            </Box>
+            </OverlayFrame>
           );
         })()}
     </Box>

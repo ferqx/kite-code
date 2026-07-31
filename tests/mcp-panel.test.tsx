@@ -157,9 +157,10 @@ describe('MCP management overlay', () => {
     const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
     await Bun.sleep(5);
+    expect(lastFrame()).toContain('◆ Kite Code');
     expect(lastFrame()).toContain('1 server');
     expect(lastFrame()).toContain('Project MCPs (/workspace/.kite-code/mcp.json)');
-    expect(lastFrame()).toContain('> github · ✔ connected · 5 tools');
+    expect(lastFrame()).toContain('❯ github · ✔ connected · 5 tools');
     expect(lastFrame()).toContain('Add MCP server');
     expect(lastFrame()).not.toContain('A Add');
     expect(lastFrame()).not.toContain('L Login');
@@ -346,7 +347,7 @@ describe('MCP management overlay', () => {
     expect(lastFrame()).toContain('❯ 1. Authenticate');
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('> Open browser');
+    expect(lastFrame()).toContain('❯ Open browser');
     stdin.write('l');
     await Bun.sleep(5);
     expect(controller.logins).toEqual([]);
@@ -375,7 +376,7 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('> Decide later');
+    expect(lastFrame()).toContain('❯ Decide later');
     expect(lastFrame()).toContain('Approve and connect');
     expect(lastFrame()).toContain('Reject server');
     expect(controller.decisions).toEqual([]);
@@ -385,7 +386,7 @@ describe('MCP management overlay', () => {
     const controller = new FakeController([]);
     const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
-    expect(lastFrame()).toContain('> ＋ Add MCP server');
+    expect(lastFrame()).toContain('❯ ＋ Add MCP server');
     stdin.write('\r');
     await Bun.sleep(5);
     expect(lastFrame()).toContain('Add MCP Server · 1/5');
@@ -403,7 +404,7 @@ describe('MCP management overlay', () => {
     expect(lastFrame()).toContain('.kite-code/mcp.json');
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('> Add and connect');
+    expect(lastFrame()).toContain('❯ Add and connect');
     expect(lastFrame()).not.toContain('  Back');
     expect(lastFrame()).not.toContain('  Cancel');
     stdin.write('\r');
@@ -433,7 +434,7 @@ describe('MCP management overlay', () => {
     await Bun.sleep(10);
 
     expect(lastFrame()).toContain('Adding and connecting...');
-    expect(lastFrame()).toContain('Please wait');
+    expect(lastFrame()).toContain('请稍候');
   });
 
   test('protects disable with a safe-default confirmation', async () => {
@@ -448,7 +449,7 @@ describe('MCP management overlay', () => {
     expect(lastFrame()).toContain('❯ 3. Disable server');
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('> Cancel');
+    expect(lastFrame()).toContain('❯ Cancel');
     expect(controller.enabled).toEqual([]);
     stdin.write('\x1b[B');
     await Bun.sleep(5);

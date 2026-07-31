@@ -1,9 +1,12 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import React, { type MutableRefObject, useEffect, useState } from 'react';
+import stringWidth from 'string-width';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { UserInputPayload } from '@/protocol/events';
+import OverlayChoiceList from './OverlayChoiceList';
+import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
 interface InputBlockProps {
   question: UserInputPayload;
@@ -59,13 +62,37 @@ function SingleQuestion({
   const [freeText, setFreeText] = useState('');
   const [showEmptyHint, setShowEmptyHint] = useState(false);
   const [mode, setMode] = useState<'select' | 'type'>(options.length > 0 ? 'select' : 'type');
+  const choiceOptions = [
+    ...options.map((option, index) => ({
+      id: String(index),
+      label: `${index + 1}. ${option.label}${
+        question.recommended != null && option.id === question.recommended ? '（推荐）' : ''
+      }`,
+      description: option.description,
+    })),
+    ...(hasCustom
+      ? [
+          {
+            id: String(options.length),
+            label: '其他（自定义输入）',
+            separatorBefore: options.length > 0,
+          },
+        ]
+      : []),
+  ];
 
   useInput(
     (
       input: string,
-      key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean },
+      key: {
+        upArrow?: boolean;
+        downArrow?: boolean;
+        return?: boolean;
+        escape?: boolean;
+        tab?: boolean;
+      },
     ) => {
-      if (input === '\t') {
+      if ((key.tab || input === '\t') && options.length > 0) {
         setMode((m) => (m === 'select' ? 'type' : 'select'));
         return;
       }
@@ -101,33 +128,37 @@ function SingleQuestion({
   };
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
-      <Text bold color={t.primary}>
-        ? {question.question}
-      </Text>
-      {question.context && <Text color={t.dim}>{question.context}</Text>}
+    <OverlayFrame
+      title="需要你的回答"
+      footer={
+        <OverlayShortcutBar
+          shortcuts={
+            mode === 'select'
+              ? [
+                  { keys: '↑↓', label: '选择' },
+                  { keys: 'Enter', label: '确认' },
+                  ...(hasCustom ? [{ keys: 'Tab', label: '自定义输入' }] : []),
+                  { keys: 'Esc', label: '取消' },
+                ]
+              : [
+                  { keys: 'Enter', label: '提交' },
+                  ...(options.length > 0 ? [{ keys: 'Tab', label: '返回选项' }] : []),
+                  { keys: 'Esc', label: '取消' },
+                ]
+          }
+        />
+      }
+    >
+      <Box marginTop={1} flexDirection="column">
+        <Text bold color={t.primary}>
+          ? {question.question}
+        </Text>
+        {question.context && <Text color={t.dim}>{question.context}</Text>}
+      </Box>
 
       {mode === 'select' && options.length > 0 ? (
         <Box marginTop={1} flexDirection="column">
-          <Text color={t.dim}>{'─'.repeat(40)}</Text>
-          {options.map((opt, i) => {
-            const isSelected = i === selected;
-            const isRec = question.recommended != null && opt.id === question.recommended;
-            return (
-              <Text key={`${opt.id ?? 'opt'}-${i}`} color={isSelected ? t.primary : t.muted}>
-                {isSelected ? '▶' : ' '} {i + 1}. {opt.label}
-                {isRec ? ' ⭐ 推荐' : ''}
-                {opt.description ? ` — ${opt.description}` : ''}
-              </Text>
-            );
-          })}
-          {hasCustom && (
-            <Text color={selected === totalSlots - 1 ? t.primary : t.muted}>
-              {selected === totalSlots - 1 ? '▶' : ' '} ✎ 其他（自定义输入）
-            </Text>
-          )}
-          <Text color={t.dim}>{'─'.repeat(40)}</Text>
-          <Text color={t.dim}>↑↓ select Enter confirm Tab type freely Esc cancel</Text>
+          <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
         </Box>
       ) : (
         <Box flexDirection="column" marginTop={1}>
@@ -140,11 +171,10 @@ function SingleQuestion({
               placeholder="type your answer..."
             />
           </Box>
-          {showEmptyHint && <Text color={t.dim}> Please type an answer before submitting</Text>}
-          {options.length > 0 && <Text color={t.dim}>Tab back to select Esc cancel</Text>}
+          {showEmptyHint && <Text color={t.dim}>请输入回答后再提交。</Text>}
         </Box>
       )}
-    </Box>
+    </OverlayFrame>
   );
 }
 
@@ -170,17 +200,32 @@ function StepBar({
   const SUFFIX = ' ✔ Submit →';
   const ELLIPSIS = ' ... ';
   const SPACER = 2; // between steps
-  const fixedOverhead = PREFIX.length + SUFFIX.length;
+  const fixedOverhead = stringWidth(PREFIX) + stringWidth(SUFFIX);
+
+  function truncateStepLabel(label: string, maxWidth: number): string {
+    if (stringWidth(label) <= maxWidth) return label;
+    const ellipsis = '…';
+    const available = Math.max(0, maxWidth - stringWidth(ellipsis));
+    let result = '';
+    let used = 0;
+    for (const char of label) {
+      const charWidth = stringWidth(char);
+      if (used + charWidth > available) break;
+      result += char;
+      used += charWidth;
+    }
+    return `${result}${ellipsis}`;
+  }
 
   // 全量步骤字符串 / Full step strings (unbounded)
   const steps = items.map((item, i) => ({
-    text: `${i < current ? '☑' : '☐'} ${item.question.length > 20 ? `${item.question.slice(0, 20)}…` : item.question}`,
+    text: `${i < current ? '☑' : '☐'} ${truncateStepLabel(item.question, 20)}`,
     done: i < current,
     active: i === current,
   }));
 
   function stepWidth(s: (typeof steps)[number]) {
-    return s.text.length + SPACER;
+    return stringWidth(s.text) + SPACER;
   }
 
   const allStepsWidth = steps.reduce((sum, s) => sum + stepWidth(s), 0) - SPACER;
@@ -215,7 +260,7 @@ function StepBar({
   let hi = current + 1;
 
   // 左右交替扩展，尽量对称 / Expand left-right symmetrically
-  const available = width - fixedOverhead - ELLIPSIS.length * 2; // reserve for two … slots
+  const available = width - fixedOverhead - stringWidth(ELLIPSIS) * 2; // reserve for two … slots
   while (lo >= 0 || hi < total) {
     let added = false;
     // 优先向右（靠近 submit） / Prefer right side (closer to submit)
@@ -314,7 +359,13 @@ function MultiQuestionWizard({
   useInput(
     (
       input: string,
-      key: { upArrow?: boolean; downArrow?: boolean; return?: boolean; escape?: boolean },
+      key: {
+        upArrow?: boolean;
+        downArrow?: boolean;
+        return?: boolean;
+        escape?: boolean;
+        tab?: boolean;
+      },
     ) => {
       if (done) return;
 
@@ -330,12 +381,11 @@ function MultiQuestionWizard({
         return;
       }
 
-      if (mode === 'type') return; // TextInput handles input when typing
-
-      if (input === '\t') {
+      if ((key.tab || input === '\t') && options.length > 0) {
         setMode((m) => (m === 'select' ? 'type' : 'select'));
         return;
       }
+      if (mode === 'type') return; // TextInput handles remaining input when typing
       if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
       if (key.downArrow) setSelected((s) => Math.min(totalSlots - 1, s + 1));
       if (key.return) {
@@ -379,36 +429,72 @@ function MultiQuestionWizard({
     setAnswers(next);
     advanceStep(next);
   };
+  const choiceOptions = [
+    ...options.map((option, index) => ({
+      id: String(index),
+      label: `${index + 1}. ${option.label}${
+        cur.recommended != null && option.id === cur.recommended ? '（推荐）' : ''
+      }`,
+      description: option.description,
+    })),
+    ...(hasCustom
+      ? [
+          {
+            id: String(options.length),
+            label: '其他（自定义输入）',
+            separatorBefore: options.length > 0,
+          },
+        ]
+      : []),
+  ];
 
   // 汇总页：所有问题已答完 / Review page: all answered
   if (done) {
     return (
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor={t.success}
-        paddingX={1}
-        marginY={1}
-      >
-        <Text bold color={t.success}>
-          ✓ Answers submitted
-        </Text>
-        {Object.entries(answers).map(([id, val], i) => (
-          <Text key={`${id}-${i}`} color={t.muted}>
-            {id}: {val}
+      <OverlayFrame title="回答已提交">
+        <Box marginTop={1} flexDirection="column">
+          <Text bold color={t.success}>
+            ✓ 回答已提交
           </Text>
-        ))}
-      </Box>
+          {Object.entries(answers).map(([id, val], i) => (
+            <Text key={`${id}-${i}`} color={t.muted}>
+              {id}: {val}
+            </Text>
+          ))}
+        </Box>
+      </OverlayFrame>
     );
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
+    <OverlayFrame
+      title={`需要你的回答 · ${step + 1}/${total}`}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={
+            mode === 'select'
+              ? [
+                  { keys: '↑↓', label: '选择' },
+                  { keys: 'Enter', label: step < total - 1 ? '下一题' : '提交' },
+                  ...(hasCustom ? [{ keys: 'Tab', label: '自定义输入' }] : []),
+                  { keys: 'Esc', label: step > 0 ? '上一题' : '取消' },
+                ]
+              : [
+                  { keys: 'Enter', label: step < total - 1 ? '下一题' : '提交' },
+                  ...(options.length > 0 ? [{ keys: 'Tab', label: '返回选项' }] : []),
+                  { keys: 'Esc', label: step > 0 ? '上一题' : '取消' },
+                ]
+          }
+        />
+      }
+    >
       {/* 主问题 + 上下文 / Main question + context */}
-      <Text bold color={t.primary}>
-        ? {question.question}
-      </Text>
-      {question.context && <Text color={t.dim}>{question.context}</Text>}
+      <Box marginTop={1} flexDirection="column">
+        <Text bold color={t.primary}>
+          ? {question.question}
+        </Text>
+        {question.context && <Text color={t.dim}>{question.context}</Text>}
+      </Box>
 
       {/* 步骤条 / Step progress bar */}
       <Box marginTop={1}>
@@ -421,29 +507,7 @@ function MultiQuestionWizard({
         <Text color={t.dim}>{'─'.repeat(40)}</Text>
 
         {mode === 'select' && options.length > 0 ? (
-          <>
-            {options.map((opt, i) => {
-              const isSelected = i === selected;
-              const isRec = cur.recommended != null && opt.id === cur.recommended;
-              return (
-                <Text key={`${opt.id ?? 'opt'}-${i}`} color={isSelected ? t.primary : t.muted}>
-                  {isSelected ? '▶' : ' '} {i + 1}. {opt.label}
-                  {isRec ? ' ⭐ 推荐' : ''}
-                  {opt.description ? ` — ${opt.description}` : ''}
-                </Text>
-              );
-            })}
-            {hasCustom && (
-              <Text color={selected === totalSlots - 1 ? t.primary : t.muted}>
-                {selected === totalSlots - 1 ? '▶' : ' '} ✎ 其他（自定义输入）
-              </Text>
-            )}
-            <Text color={t.dim}>{'─'.repeat(40)}</Text>
-            <Text color={t.dim}>
-              ↑↓ select Enter {step < total - 1 ? 'next' : 'submit'} Tab type freely{' '}
-              {step > 0 ? 'Esc back' : 'Esc cancel'}
-            </Text>
-          </>
+          <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
         ) : (
           <Box flexDirection="column">
             <Box>
@@ -455,15 +519,9 @@ function MultiQuestionWizard({
                 placeholder="type your answer..."
               />
             </Box>
-            {options.length > 0 && (
-              <Text color={t.dim}>
-                Tab back to select Enter {step < total - 1 ? 'next' : 'submit'}{' '}
-                {step > 0 ? 'Esc back' : 'Esc cancel'}
-              </Text>
-            )}
           </Box>
         )}
       </Box>
-    </Box>
+    </OverlayFrame>
   );
 }

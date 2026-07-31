@@ -6,6 +6,7 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { AgentPhase } from '@/protocol/events';
 import { admitInteractionModeTarget, resolveInteractionModeTarget } from '../interaction-mode';
 import type { Action } from '../reducers/actions';
+import { SLASH_COMMAND_DEFS } from './useSlashSuggestions';
 
 export type SlashAction =
   | { type: 'effort'; level: string }
@@ -29,7 +30,14 @@ export type SlashAction =
 export function parseSlashCommand(input: string): SlashAction | null {
   if (!input.startsWith('/')) return null;
   const trimmed = input.slice(1).trim();
-  const [cmd, ...args] = trimmed.split(/\s+/);
+  const [rawCommand, ...args] = trimmed.split(/\s+/);
+  const normalizedCommand = rawCommand?.toLowerCase();
+  const cmd =
+    SLASH_COMMAND_DEFS.find(
+      (definition) =>
+        definition.name === normalizedCommand ||
+        definition.aliases.includes(normalizedCommand ?? ''),
+    )?.name ?? normalizedCommand;
   const arg = args.join(' ');
 
   switch (cmd) {
@@ -46,10 +54,8 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case 'permissions':
       return { type: 'permissions', mode: arg || undefined };
     case 'clear':
-    case 'c':
       return { type: 'clear' };
     case 'help':
-    case 'h':
       return { type: 'help' };
     case 'new':
       return { type: 'new' };
@@ -68,8 +74,6 @@ export function parseSlashCommand(input: string): SlashAction | null {
       }
       return { type: 'compact', ...(arg ? { customInstructions: arg } : {}) };
     case 'exit':
-    case 'quit':
-    case 'q':
       return { type: 'exit' };
     default:
       return { type: 'unknown', raw: input };

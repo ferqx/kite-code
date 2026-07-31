@@ -71,7 +71,6 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         showModelSelector: false,
         showSessions: false,
         showMcp: false,
-        rewindCounter: 0,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
         thoughtPhaseStatus: undefined,

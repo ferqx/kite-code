@@ -89,6 +89,11 @@ Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling
 
 TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前请求值覆盖恢复态，确保 `/permissions full` 在新轮次立即生效。
 
+`/rewind` 从恢复点 fork 新 thread 时不继承源 thread 的授权。Fork 必须把
+`authorization.mode` 重置为 `default`，删除 `modeSource` / `modeGrantedAt` 和全部 command
+grant，并把 `mode=full` 降为 `accept_edits`；同时清除 turn-scoped capability
+binding/disclosure 与 Provider session waiver。用户需要 full access 时必须在新会话中重新显式授予。
+
 ## 测试
 
 ```bash

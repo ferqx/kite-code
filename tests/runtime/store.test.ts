@@ -131,6 +131,25 @@ describe('createRuntimeStore', () => {
     store.close();
     expect(existsSync(`${dbPath}.legacy`)).toBe(true);
   });
+
+  test('adds post-image columns to an existing current-format store', () => {
+    createRuntimeStore(dbPath).close();
+    const legacy = new Database(dbPath);
+    legacy.run('ALTER TABLE runtime_file_preimages DROP COLUMN post_hash');
+    legacy.run('ALTER TABLE runtime_file_preimages DROP COLUMN post_existed');
+    legacy.close();
+
+    createRuntimeStore(dbPath).close();
+    const reopened = new Database(dbPath);
+    const columns = reopened
+      .query<{ name: string }, []>('PRAGMA table_info(runtime_file_preimages)')
+      .all()
+      .map((column) => column.name);
+    reopened.close();
+
+    expect(columns).toContain('post_hash');
+    expect(columns).toContain('post_existed');
+  });
 });
 
 describe('runtimeStorePathFor', () => {
@@ -887,22 +906,250 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
+  test('lists the next user message and recorded file impact for rewind previews', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('rewind-preview', [
+      {
+        type: 'user.message_appended',
+        messageId: 'message-1',
+        content: 'first turn',
+      },
+    ]);
+    store.saveNamedSnapshot('rewind-preview', 'after-first', { version: 1 });
+    store.appendEvents('rewind-preview', [
+      {
+        type: 'user.message_appended',
+        messageId: 'message-2',
+        content: 'restore to before this message',
+      },
+    ]);
+    store.recordFilePreimage('rewind-preview', 'notes.md', 'before', true);
+    store.recordFilePreimage('rewind-preview', 'created.md', null, false);
+
+    expect(store.listNamedSnapshots('rewind-preview')).toEqual([
+      expect.objectContaining({
+        snapshotId: 'after-first',
+        targetMessage: 'restore to before this message',
+        affectedFileCount: 2,
+      }),
+    ]);
+    expect(store.listNamedSnapshots('rewind-preview')[0]?.targetMessageCreatedAt).toBeGreaterThan(
+      0,
+    );
+    store.close();
+  });
+
   test('forkSession rebinds the persisted state to the target thread', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('source', [makeEvent({ toolCallId: 'source-call' })]);
     store.saveNamedSnapshot('source', 'safe', {
       session: { threadId: 'source', userId: 'u', workspace: '/workspace' },
-      authorization: { mode: 'default', commandGrants: { inherited: { threadId: 'source' } } },
+      authorization: {
+        mode: 'full_access',
+        modeSource: 'user',
+        modeGrantedAt: '2026-07-30T00:00:00.000Z',
+        commandGrants: { inherited: { threadId: 'source' } },
+      },
+      mode: 'full',
+      interactions: { kind: 'awaiting_tool_approval' },
+      tools: {
+        calls: { historical: { status: 'completed' } },
+        queue: ['pending'],
+        active: ['active'],
+      },
+      capabilities: {
+        catalogRevision: 'catalog-1',
+        bindings: { inherited: { bindingId: 'binding-1' } },
+        disclosures: { inherited: { capabilityId: 'cap-1' } },
+        pendingSearch: { query: 'shell' },
+        loadedCapabilities: { stable: { capabilityId: 'stable' } },
+        invocations: { historical: { invocationId: 'historical' } },
+      },
+      providerAdmission: {
+        pending: [{ providerId: 'pending-provider' }],
+        waivers: { inherited: { providerId: 'waived-provider' } },
+      },
+      suspendedSubagents: { inherited: { subagentId: 'subagent-1' } },
     });
 
     expect(store.forkSession('source', 'safe', 'fork')).toBe(true);
-    const fork = store.loadSnapshot<any>('fork');
+    const fork = store.loadSnapshot<{
+      session: { threadId: string };
+      authorization: {
+        mode: string;
+        modeSource?: string;
+        modeGrantedAt?: string;
+        commandGrants: Record<string, unknown>;
+      };
+      mode: string;
+      interactions: unknown;
+      tools: unknown;
+      capabilities: unknown;
+      providerAdmission: unknown;
+      suspendedSubagents: unknown;
+    }>('fork')!;
     expect(fork.session.threadId).toBe('fork');
+    expect(fork.authorization.mode).toBe('default');
     expect(fork.authorization.commandGrants).toEqual({});
+    expect(fork.authorization.modeSource).toBeUndefined();
+    expect(fork.authorization.modeGrantedAt).toBeUndefined();
+    expect(fork.mode).toBe('accept_edits');
+    expect(fork.interactions).toEqual({ kind: 'idle' });
+    expect(fork.tools).toEqual({
+      calls: { historical: { status: 'completed' } },
+      queue: [],
+      active: [],
+    });
+    expect(fork.capabilities).toEqual({
+      catalogRevision: 'catalog-1',
+      bindings: {},
+      disclosures: {},
+      loadedCapabilities: { stable: { capabilityId: 'stable' } },
+      invocations: { historical: { invocationId: 'historical' } },
+    });
+    expect(fork.providerAdmission).toEqual({ pending: [], waivers: {} });
+    expect(fork.suspendedSubagents).toEqual({});
     expect(store.loadEvents('fork')).toHaveLength(1);
     expect(store.listNamedSnapshots('fork')[0]!.eventPosition).toBe(
       store.getLastEventPosition('fork'),
     );
+    store.close();
+  });
+
+  test('forkSession preserves event timestamps and envelope metadata', () => {
+    let store = createRuntimeStore(dbPath);
+    store.appendEvents(
+      'metadata-source',
+      [makeEvent({ toolCallId: 'metadata-call' })],
+      [
+        {
+          eventId: 'event-metadata-1',
+          revision: 7,
+          causationId: 'cause-1',
+          occurredAt: '2026-07-30T12:34:56.789Z',
+        },
+      ],
+    );
+    store.saveNamedSnapshot('metadata-source', 'safe', {
+      session: { threadId: 'metadata-source' },
+      revision: 7,
+    });
+    store.close();
+
+    const database = new Database(dbPath);
+    database
+      .query('UPDATE runtime_events SET created_at = ? WHERE thread_id = ?')
+      .run(1_700_000_123, 'metadata-source');
+    database.close();
+
+    store = createRuntimeStore(dbPath);
+    expect(store.forkSession('metadata-source', 'safe', 'metadata-fork')).toBe(true);
+    const source = store.loadEventsStrict('metadata-source')[0];
+    const fork = store.loadEventsStrict('metadata-fork')[0];
+    expect(source).toBeDefined();
+    expect(fork).toBeDefined();
+    expect(fork).toEqual({ ...source!, id: fork!.id, thread_id: 'metadata-fork' });
+    store.close();
+  });
+
+  test('forkSession fails closed before mutating the target when source events are corrupt', () => {
+    let store = createRuntimeStore(dbPath);
+    store.appendEvents('corrupt-source', [makeEvent({ toolCallId: 'corrupt-call' })]);
+    store.saveNamedSnapshot('corrupt-source', 'safe', {
+      session: { threadId: 'corrupt-source' },
+    });
+    store.appendEvents('existing-target', [makeEvent({ toolCallId: 'keep-call' })]);
+    store.saveNamedSnapshot('existing-target', 'keep', {
+      session: { threadId: 'existing-target' },
+      marker: 'keep',
+    });
+    store.close();
+
+    const database = new Database(dbPath);
+    database
+      .query('UPDATE runtime_events SET event_json = ? WHERE thread_id = ?')
+      .run('{broken-json', 'corrupt-source');
+    database.close();
+
+    store = createRuntimeStore(dbPath);
+    expect(store.forkSession('corrupt-source', 'safe', 'existing-target')).toBe(false);
+    expect(store.loadEventsStrict('existing-target')).toHaveLength(1);
+    expect(
+      store.loadNamedSnapshot<{ session: { threadId: string }; marker: string }>(
+        'existing-target',
+        'keep',
+      ),
+    ).toEqual({ session: { threadId: 'existing-target' }, marker: 'keep' });
+    store.close();
+  });
+
+  test('forkSession rejects a parseable but structurally invalid selected snapshot', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('invalid-state-source', [makeEvent({ toolCallId: 'source-call' })]);
+    store.saveNamedSnapshot('invalid-state-source', 'invalid', 'not-a-runtime-state');
+    store.appendEvents('invalid-state-target', [makeEvent({ toolCallId: 'keep-call' })]);
+
+    expect(store.forkSession('invalid-state-source', 'invalid', 'invalid-state-target')).toBe(
+      false,
+    );
+    expect(store.loadEventsStrict('invalid-state-target')).toHaveLength(1);
+    store.close();
+  });
+
+  test('forkSession preserves earlier recovery points with remapped event positions', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('rewind-source', [
+      {
+        type: 'user.message_appended',
+        messageId: 'message-1',
+        content: 'first turn',
+      },
+    ]);
+    store.saveNamedSnapshot('rewind-source', 'checkpoint-1', {
+      session: { threadId: 'rewind-source' },
+      version: 1,
+    });
+    store.appendEvents('rewind-source', [
+      {
+        type: 'user.message_appended',
+        messageId: 'message-2',
+        content: 'second turn',
+      },
+    ]);
+    store.recordFilePreimage('rewind-source', 'notes.md', 'v1\n', true);
+    store.recordFilePostimage('rewind-source', 'notes.md', 'hash-v2', true);
+    store.saveNamedSnapshot('rewind-source', 'checkpoint-2', {
+      session: { threadId: 'rewind-source' },
+      version: 2,
+    });
+
+    expect(store.forkSession('rewind-source', 'checkpoint-2', 'rewind-fork')).toBe(true);
+
+    const forkPoints = store.listNamedSnapshots('rewind-fork');
+    expect(forkPoints.map((entry) => entry.snapshotId).sort()).toEqual([
+      'checkpoint-1',
+      'checkpoint-2',
+    ]);
+    const earlierPoint = forkPoints.find((entry) => entry.snapshotId === 'checkpoint-1');
+    expect(earlierPoint).toEqual(
+      expect.objectContaining({
+        targetMessage: 'second turn',
+        affectedFileCount: 1,
+      }),
+    );
+    expect(store.fileRestorePlan('rewind-fork', earlierPoint!.eventPosition)).toEqual([
+      {
+        path: 'notes.md',
+        content: 'v1\n',
+        existed: true,
+        postHash: 'hash-v2',
+        postExisted: true,
+      },
+    ]);
+    expect(store.forkSession('rewind-fork', 'checkpoint-1', 'rewind-fork-again')).toBe(true);
+    expect(
+      store.loadSnapshot<{ session: { threadId: string }; version: number }>('rewind-fork-again'),
+    ).toEqual(expect.objectContaining({ session: { threadId: 'rewind-fork-again' }, version: 1 }));
     store.close();
   });
 
@@ -917,23 +1164,43 @@ describe('persistence edge cases', () => {
     store.appendEvents('preimg', [makeEvent({ toolCallId: 'turn-2-tool' })]);
     store.recordFilePreimage('preimg', 'notes.md', 'v1 content', true);
     store.recordFilePreimage('preimg', 'notes.md', 'v2 content', true);
+    store.recordFilePostimage('preimg', 'notes.md', 'hash-v2', true);
 
     const pos1 = store.getNamedSnapshotEntry('preimg', 'turn-1')!.eventPosition;
     expect(store.fileRestorePlan('preimg', pos1)).toEqual([
-      { path: 'notes.md', content: 'v1 content', existed: true },
+      {
+        path: 'notes.md',
+        content: 'v1 content',
+        existed: true,
+        postHash: 'hash-v2',
+        postExisted: true,
+      },
     ]);
 
     // 新快照开启新窗口：可以再次捕获
     store.saveNamedSnapshot('preimg', 'turn-2', { version: 2 });
     store.appendEvents('preimg', [makeEvent({ toolCallId: 'turn-3-tool' })]);
     store.recordFilePreimage('preimg', 'notes.md', 'v3 content', true);
+    store.recordFilePostimage('preimg', 'notes.md', 'hash-v4', true);
     const pos2 = store.getNamedSnapshotEntry('preimg', 'turn-2')!.eventPosition;
     expect(store.fileRestorePlan('preimg', pos2)).toEqual([
-      { path: 'notes.md', content: 'v3 content', existed: true },
+      {
+        path: 'notes.md',
+        content: 'v3 content',
+        existed: true,
+        postHash: 'hash-v4',
+        postExisted: true,
+      },
     ]);
-    // 回退到 turn-1 仍取该窗口最早的捕获
+    // 回退到 turn-1 取最早原像，但用最后一次 Kite 写入指纹校验当前内容。
     expect(store.fileRestorePlan('preimg', pos1)).toEqual([
-      { path: 'notes.md', content: 'v1 content', existed: true },
+      {
+        path: 'notes.md',
+        content: 'v1 content',
+        existed: true,
+        postHash: 'hash-v4',
+        postExisted: true,
+      },
     ]);
     store.close();
   });
@@ -953,8 +1220,20 @@ describe('persistence edge cases', () => {
       .slice()
       .sort((a, b) => a.path.localeCompare(b.path));
     expect(plan).toEqual([
-      { path: 'created.md', content: null, existed: false },
-      { path: 'edited.md', content: 'before edit', existed: true },
+      {
+        path: 'created.md',
+        content: null,
+        existed: false,
+        postHash: null,
+        postExisted: null,
+      },
+      {
+        path: 'edited.md',
+        content: 'before edit',
+        existed: true,
+        postHash: null,
+        postExisted: null,
+      },
     ]);
     store.close();
   });

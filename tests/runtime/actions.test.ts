@@ -396,3 +396,34 @@ test('full access approval is rejected when no sandbox is available', () => {
     }),
   ]);
 });
+
+test('approval ignores grants that were not offered by the pending interaction', () => {
+  const state = createInitialRuntimeState({ threadId: 'auth', userId: 'u', workspace: '/' });
+  state.interactions = {
+    kind: 'awaiting_tool_approval',
+    interactionId: 'approval-1',
+    toolCallId: 'tool-1',
+    approval: {
+      scope: 'once',
+      cwd: '/',
+      threadId: 'auth',
+      tool: 'write_file',
+      command: 'write_file /tmp/example',
+      risk: 'write_file',
+      approvalHash: 'hash',
+      summary: 'Write file',
+      reason: 'test',
+      expectedEffects: [],
+      grantOptions: ['approve_once'],
+      recommendedGrant: 'approve_once',
+    },
+  };
+
+  expect(
+    eventsForRuntimeAction(state, {
+      type: 'approve',
+      interactionId: 'approval-1',
+      grant: 'same_command',
+    }),
+  ).toEqual([]);
+});

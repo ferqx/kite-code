@@ -222,7 +222,6 @@ export interface TuiState {
   showMcp: boolean;
   showRewind: boolean;
   checkpoints: import('@/core/runtime/store').RuntimeSnapshotEntry[];
-  rewindCounter: number;
   skillManifests: import('@/core/skills/types').SkillManifest[];
   ctrlCPressed: boolean;
   sessionKey: number;
@@ -258,6 +257,8 @@ export interface TuiState {
     placement: 'status' | 'inline';
   };
 }
+
+export type RewindScope = 'code_and_conversation' | 'conversation_only' | 'code_only';
 
 export type InterruptState =
   | {

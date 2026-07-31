@@ -11,8 +11,10 @@
  *   截断检查点之后的原像行，顺序不可颠倒）。
  * - fork 只复制原像行、不改动共享工作区的文件（与 Claude Code 一致）。
  */
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
+import { normalizeEOL } from '@/core/tools/file';
+import { fileContentHash } from '@/core/tools/read-state';
 import type { RuntimeStore } from './store';
 
 /**
@@ -21,7 +23,13 @@ import type { RuntimeStore } from './store';
  * File pre-image recorder injected from the runtime layer into the tool
  * execution chain. Best-effort: implementations must swallow their own errors.
  */
-export type FilePreimageRecorder = (path: string, content: string | null, existed: boolean) => void;
+export type FilePreimageRecorder = ((
+  path: string,
+  content: string | null,
+  existed: boolean,
+) => void) & {
+  recordPostimage?: (path: string, content: string | null, existed: boolean) => void;
+};
 
 /** 为指定线程构造原像记录器；store/threadId 缺省时返回 undefined（无处落库）。 */
 export function createFilePreimageRecorder(
@@ -29,13 +37,26 @@ export function createFilePreimageRecorder(
   threadId: string,
 ): FilePreimageRecorder | undefined {
   if (!store || !threadId) return undefined;
-  return (path, content, existed) => {
+  const recorder: FilePreimageRecorder = (path, content, existed) => {
     try {
       store.recordFilePreimage(threadId, path, content, existed);
     } catch {
       /* best-effort：记录失败不得影响工具执行 */
     }
   };
+  recorder.recordPostimage = (path, content, existed) => {
+    try {
+      store.recordFilePostimage(
+        threadId,
+        path,
+        existed && content != null ? fileContentHash(normalizeEOL(content)) : null,
+        existed,
+      );
+    } catch {
+      /* best-effort：记录失败不得影响工具执行 */
+    }
+  };
+  return recorder;
 }
 
 export interface FileRestoreOutcome {
@@ -45,6 +66,15 @@ export interface FileRestoreOutcome {
   deleted: string[];
   /** 恢复失败的文件（不阻断会话回退）/ files that failed to restore */
   failed: Array<{ path: string; error: string }>;
+  /** 当前内容不再匹配 Kite 最后写入结果，已跳过以保护后续修改。 */
+  conflicts: Array<{
+    path: string;
+    reason: 'modified_after_kite_write' | 'unverified_postimage';
+  }>;
+}
+
+function contentHashAtPath(path: string): string {
+  return fileContentHash(normalizeEOL(readFileSync(path, 'utf8')));
 }
 
 /**
@@ -64,14 +94,35 @@ export function restoreFilesToCheckpoint(
   snapshotId: string,
   workspace: string,
 ): FileRestoreOutcome {
-  const outcome: FileRestoreOutcome = { restored: [], deleted: [], failed: [] };
+  const outcome: FileRestoreOutcome = { restored: [], deleted: [], failed: [], conflicts: [] };
   const entry = store.getNamedSnapshotEntry(threadId, snapshotId);
   if (!entry) return outcome;
   for (const item of store.fileRestorePlan(threadId, entry.eventPosition)) {
     const target = isAbsolute(item.path) ? item.path : join(workspace, item.path);
     try {
+      const currentExists = existsSync(target);
+      const desiredAlreadyPresent =
+        item.existed &&
+        currentExists &&
+        contentHashAtPath(target) === fileContentHash(normalizeEOL(item.content ?? ''));
+      const desiredAlreadyAbsent = !item.existed && !currentExists;
+      if (desiredAlreadyPresent || desiredAlreadyAbsent) continue;
+
+      if (item.postExisted == null || (item.postExisted && !item.postHash)) {
+        outcome.conflicts.push({ path: item.path, reason: 'unverified_postimage' });
+        continue;
+      }
+
+      const stillMatchesLastKiteWrite = item.postExisted
+        ? currentExists && contentHashAtPath(target) === item.postHash
+        : !currentExists;
+      if (!stillMatchesLastKiteWrite) {
+        outcome.conflicts.push({ path: item.path, reason: 'modified_after_kite_write' });
+        continue;
+      }
+
       if (!item.existed) {
-        if (existsSync(target)) {
+        if (currentExists) {
           rmSync(target, { force: true });
           outcome.deleted.push(item.path);
         }

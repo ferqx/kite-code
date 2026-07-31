@@ -4,7 +4,7 @@
 
 读取时机：修改 abort/cancel、Runtime 恢复、Effect lease、消息工具对清理、工具参数异常、Subagent continuation 或 TUI 取消行为时。
 
-验证：`bun test tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run typecheck`。
 
 ## Runtime 取消语义
 
@@ -32,11 +32,32 @@ TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名�
 
 ## Rewind 文件恢复（ADR-0042 §4）
 
-`/rewind` 回退命名恢复点时必须先按文件原像表恢复工作区文件（检查点时刻存在的文件写回原像，不存在的文件删除），再截断事件日志与恢复点。约束：
+`/rewind` 的 TUI 默认恢复不再截断源会话。检查点列表把命名恢复点解释为其后第一条用户消息
+发送前的边界，用户确认后按范围执行：
 
-1. 顺序不可颠倒：`restoreNamedSnapshot` 截断检查点之后的原像行，文件恢复必须先执行。
-2. 单个文件恢复失败不阻断会话回退，但必须逐个显式提示失败路径。
-3. Fork 生成新 thread 并复制 fork 点之前的原像行；共享工作区文件不被 fork 改动。
+1. “恢复代码和会话”先从恢复点 fork 新 thread，成功后再按源 thread 的文件原像恢复
+   工作区，最后切换到新 thread；源会话及其后续事件保持不变。
+2. “仅恢复会话”只 fork 并切换新 thread，不修改共享工作区。
+3. “仅恢复代码”只按原像恢复工作区，保留当前 thread 与 transcript。
+4. Fork 必须复制选中恢复点及其之前的全部命名恢复点，并把事件位置、文件原像位置重映射
+   到新 thread 的事件 ID；因此恢复后的会话仍可继续向更早边界回退。
+5. Fork 复制事件时必须保留原始 `created_at` 与 envelope metadata；源事件 JSON 无法严格
+   解析时必须在修改目标 thread 前 fail closed，不能创建空会话。新 thread 必须回到默认
+   authorization，并清除命令 grant、full interaction mode、turn-scoped binding/disclosure、
+   Provider waiver/pending、待处理交互、活动工具队列与 suspended subagent；稳定的已加载
+   capability 与历史 invocation 事实可以保留。
+6. 自动恢复点只在 `turn.completed` 已持久化后创建，快照必须投影 completed turn；不得在
+   `run.completed` 与 `turn.completed` 之间暴露 active turn 恢复点。
+7. 单个文件恢复失败不阻断其余文件或新会话加载，但必须逐个显式提示失败路径；若所有
+   计划项均失败，结果不得误报为“没有需要恢复的文件”。
+8. 每个原像窗口同时保存最后一次成功 Kite 写入后的内容指纹。恢复前当前内容必须仍匹配
+   该指纹；同一路径随后发生手动编辑、Bash 修改或删除时视为冲突，跳过该路径并显式提示。
+   缺少后像指纹的旧记录同样 fail closed，不得用无法验证的原像覆盖当前文件。
+9. 所有恢复范围在执行文件或会话变更前都必须确认命名恢复点行存在且快照可解析；确认提交
+   在浮层与执行 handler 两层同步防重，同一次确认最多执行一个 fork 和一轮文件恢复。
+
+Core 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性原语；调用它时恢复文件
+必须先于事件与原像截断。TUI 的默认分叉路径使用 `forkSession`，不会调用该破坏性原语。
 
 ## 消息工具对清理
 

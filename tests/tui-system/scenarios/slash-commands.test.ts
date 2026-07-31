@@ -292,6 +292,33 @@ describe('TUI PTY System — Slash Commands', () => {
     TIMEOUT,
   );
 
+  test(
+    'session search becomes an input only when its row is selected',
+    async () => {
+      expect(screenContains(tui.output(), '搜索: —')).toBe(true);
+
+      tui.write('\x1b[A');
+      await sleep(300);
+      expect(screenContains(tui.output(), '❯ 搜索:')).toBe(true);
+
+      tui.write('hello');
+      await sleep(500);
+      expect(screenContains(tui.output(), '搜索: hello')).toBe(true);
+
+      for (let index = 0; index < 5; index++) {
+        tui.write('\x7f');
+        await sleep(50);
+      }
+      await sleep(500);
+      expect(screenContains(tui.output(), '❯ 搜索:')).toBe(true);
+
+      tui.write('\x1b[B');
+      await sleep(300);
+      expect(screenContains(tui.output(), '搜索: —')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
   // ── Esc closes session selector ──────────────────────────────
 
   test(
@@ -420,12 +447,12 @@ describe('TUI PTY System — Slash Commands', () => {
     'partial /mc input suggests /mcp',
     async () => {
       await typeText(tui, '/mc');
-      await waitForText(() => tui.output(), 'Manage MCP servers', 10000);
+      await waitForText(() => tui.output(), '管理 MCP Server', 10000);
 
       const output = tui.output();
       expect(screenContains(output, '命令匹配 /mc')).toBe(true);
       expect(screenContains(output, '/mcp')).toBe(true);
-      expect(screenContains(output, 'Manage MCP servers')).toBe(true);
+      expect(screenContains(output, '管理 MCP Server')).toBe(true);
 
       await clearInput(tui, '/mc'.length);
       await sleep(300);

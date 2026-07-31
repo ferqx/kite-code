@@ -89,10 +89,10 @@ describe('TUI PTY System — Tool Approve', () => {
       await waitForRequestMessage(server, 'Run a command for me', 15000);
 
       // Wait for approval block to render
-      await waitForText(() => tui.output(), '授权执行命令', 15000);
+      await waitForText(() => tui.output(), '工具授权', 15000);
 
       const beforeOutput = tui.output();
-      expect(screenContains(beforeOutput, '授权执行命令')).toBe(true);
+      expect(screenContains(beforeOutput, '工具授权')).toBe(true);
       expect(screenContains(beforeOutput, '允许一次')).toBe(true);
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
 

@@ -142,6 +142,19 @@ describe('Footer', () => {
     // Placeholder footer renders an empty Box
     expect(typeof lastFrame()).toBe('string');
   });
+
+  test('hides global status while keeping blocking interaction content', () => {
+    const { lastFrame } = render(
+      <Footer {...footerProps} interactionMode="accept_edits" hideGlobalStatus>
+        <Text>blocking interaction</Text>
+      </Footer>,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('blocking interaction');
+    expect(frame).not.toContain('claude-opus');
+    expect(frame).not.toContain('[接受编辑]');
+  });
 });
 
 // ── Header ──
@@ -149,7 +162,7 @@ describe('Footer', () => {
 describe('Header', () => {
   test('renders Kite Code logo and product name', () => {
     const { lastFrame } = render(<Header running={false} />);
-    const frame = lastFrame();
+    const frame = lastFrame() ?? '';
     expect(frame).toContain('Kite Code');
     // Cat ASCII art is present
     expect(frame).toContain('/\\_/\\');
@@ -763,6 +776,7 @@ describe('HelpPanel', () => {
   test('renders title and sections', () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
     const frame = lastFrame();
+    expect(frame).toContain('◆ Kite Code');
     expect(frame).toContain('快捷键');
     expect(frame).toContain('斜杠命令');
   });
@@ -772,6 +786,17 @@ describe('HelpPanel', () => {
     const frame = lastFrame();
     expect(frame).toContain('Ctrl+C');
     expect(frame).toContain('中断运行 / 双按退出');
+  });
+
+  test('uses the shared command metadata for complete and accurate help', () => {
+    const { lastFrame } = render(<HelpPanel onClose={noop} />);
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('/context');
+    expect(frame).toContain('/rewind');
+    expect(frame).toContain('/export');
+    expect(frame).toContain('accept_edits/auto');
+    expect(frame).not.toContain('ask/auto');
   });
 
   test('shows close hint', () => {
@@ -788,15 +813,16 @@ describe('ModelSelector', () => {
       <ModelSelector currentModel="deepseek-chat" onSelect={noop} onClose={noop} />,
     );
     const frame = lastFrame();
+    expect(frame).toContain('◆ Kite Code');
     expect(frame).toContain('选择模型');
     expect(frame).toContain('deepseek-v4-flash');
   });
 
-  test('marks current model with ●', () => {
+  test('marks the current model in the fixed status column', () => {
     const { lastFrame } = render(
       <ModelSelector currentModel="deepseek-v4-flash" onSelect={noop} onClose={noop} />,
     );
-    expect(lastFrame()).toContain('●');
+    expect(lastFrame()).toContain('当前');
   });
 
   test('shows navigation hints', () => {
@@ -843,7 +869,7 @@ describe('StartupScreen', () => {
 // ── ApprovalBlock ──
 
 describe('ApprovalBlock', () => {
-  test('renders the pending command inside the compact approval title', () => {
+  test('renders the pending command as a separate approval subject', () => {
     const approval = fakeApproval({
       command: 'rm -rf /tmp/test',
       summary: 'Delete temp files',
@@ -852,14 +878,18 @@ describe('ApprovalBlock', () => {
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    const frame = lastFrame();
-    expect(frame).toContain('授权执行命令（rm -rf /tmp/test）');
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('◆ Kite Code · Shell · 工具授权');
+    expect(frame).toContain('│ rm -rf /tmp/test');
+    const lines = frame.split('\n').map((line) => line.trim());
+    expect(lines).not.toContain('执行命令');
+    expect(lines).not.toContain('调用工具');
     expect(frame).not.toContain('● Bash');
     expect(frame).not.toContain('Delete temp files');
     expect(frame).not.toContain('destructive');
   });
 
-  test('keeps a multiline approval command on one compact title line', () => {
+  test('normalizes a multiline approval command inside the command block', () => {
     const approval = fakeApproval({
       command: 'bun run typecheck 2>\\\n  /tmp/typecheck.log',
     });
@@ -867,7 +897,7 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
 
-    expect(lastFrame()).toContain('授权执行命令（bun run typecheck 2>\\ /tmp/typecheck.log）');
+    expect(lastFrame()).toContain('│ bun run typecheck 2>\\ /tmp/typecheck.log');
   });
 
   test('shows three grant options', () => {
@@ -877,8 +907,29 @@ describe('ApprovalBlock', () => {
     );
     const frame = lastFrame();
     expect(frame).toContain('允许一次');
+    expect(frame).toContain('仅批准本次执行');
     expect(frame).toContain('本次会话允许');
+    expect(frame).toContain('相同命令在本次会话中不再询问');
     expect(frame).toContain('拒绝');
+    expect(frame).toContain('不执行命令并结束当前轮次');
+  });
+
+  test('keeps one blank row between the subject, every decision, and shortcuts', () => {
+    const { lastFrame } = render(
+      <ApprovalBlock approval={fakeApproval()} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const command = lines.findIndex((line) => line.includes('│ npm test'));
+    const allowOnce = lines.findIndex((line) => line.includes('❯ 允许一次'));
+    const allowSession = lines.findIndex((line) => line.includes('本次会话允许'));
+    const deny = lines.findIndex((line) => line.trim() === '拒绝');
+    const shortcuts = lines.findIndex((line) => line.includes('↑↓ 选择'));
+
+    expect(lines[command + 1]?.trim()).toBe('');
+    expect(lines[allowOnce + 2]?.trim()).toBe('');
+    expect(lines[allowSession + 2]?.trim()).toBe('');
+    expect(lines[deny + 2]?.trim()).toBe('');
+    expect(shortcuts).toBe(deny + 3);
   });
 
   test('uses a simple top divider instead of a rounded border', () => {
@@ -887,20 +938,23 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
+    expect(frame).toContain('◆ Kite Code · Shell · 工具授权');
+    expect(frame).toContain('❯ 允许一次');
     expect(frame).toContain('────────────────────────────────────────');
     expect(frame).not.toContain('╭');
     expect(frame).not.toContain('╰');
-    expect(frame).not.toContain('│');
+    expect(frame).toContain('│ npm test');
   });
 
-  test('non‑shell tools show same three options', () => {
+  test('non-shell tools only show grants declared by the approval payload', () => {
     const approval = fakeApproval({ tool: 'write_file', grantOptions: ['approve_once'] });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
+    expect(frame).toContain('◆ Kite Code · 文件编辑 · 工具授权');
     expect(frame).toContain('允许一次');
-    expect(frame).toContain('本次会话允许');
+    expect(frame).not.toContain('本次会话允许');
     expect(frame).toContain('拒绝');
   });
 
@@ -970,7 +1024,59 @@ describe('InputBlock', () => {
     const { lastFrame } = render(
       <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain('Tab type freely');
+    expect(lastFrame()).toContain('Tab 自定义输入');
+  });
+
+  test('uses the shared borderless interaction frame and choice marker', () => {
+    const question = fakeQuestion({ allow_free_text: true });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('◆ Kite Code · 需要你的回答');
+    expect(frame).toContain('❯ 1.');
+    expect(frame).not.toContain('╭');
+    expect(frame).not.toContain('╰');
+  });
+
+  test('returns from free-text mode to options with Tab', async () => {
+    const question = fakeQuestion({ allow_free_text: true });
+    const { lastFrame, stdin } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+
+    stdin.write('\t');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lastFrame()).toContain('Tab 返回选项');
+
+    stdin.write('\t');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lastFrame()).toContain('Tab 自定义输入');
+  });
+
+  test('returns from multi-question free-text mode to options with Tab', async () => {
+    const question = fakeQuestion({
+      questions: [
+        {
+          id: 'scope',
+          question: 'Choose a scope',
+          options: [{ id: 'small', label: 'Small' }],
+          allow_free_text: true,
+        },
+      ],
+    });
+    const { lastFrame, stdin } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+
+    stdin.write('\t');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lastFrame()).toContain('Tab 返回选项');
+
+    stdin.write('\t');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lastFrame()).toContain('Tab 自定义输入');
   });
 });
 
@@ -1039,10 +1145,10 @@ describe('PlanReviewBlock', () => {
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Approve and start in Auto');
-    expect(frame).toContain('Approve and accept edits');
-    expect(frame).toContain('(Recommended)');
-    expect(frame).toContain('Keep planning with feedback');
+    expect(frame).toContain('在 Auto 模式下开始执行');
+    expect(frame).toContain('在接受编辑模式下开始执行');
+    expect(frame).toContain('（推荐）');
+    expect(frame).toContain('携带反馈继续规划');
   });
 
   test('shows option descriptions', () => {
@@ -1051,8 +1157,8 @@ describe('PlanReviewBlock', () => {
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Run non-destructive work with automatic review');
-    expect(frame).toContain('Provide feedback to revise the plan');
+    expect(frame).toContain('自动审核非破坏性操作');
+    expect(frame).toContain('输入反馈，让方案继续调整');
   });
 
   test('shows quick key hint', () => {
@@ -1060,7 +1166,9 @@ describe('PlanReviewBlock', () => {
     const { lastFrame } = render(
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain('↑↓ select Enter confirm Esc cancel');
+    expect(lastFrame()).toContain('↑↓ 选择');
+    expect(lastFrame()).toContain('Enter 确认');
+    expect(lastFrame()).toContain('Esc 取消');
   });
 
   test('notifies the UI when a review option is selected', () => {
@@ -1076,6 +1184,30 @@ describe('PlanReviewBlock', () => {
     stdin.write('\r');
 
     expect(resolved).toEqual(['approved_auto']);
+  });
+
+  test('submits plan feedback exactly once', async () => {
+    const resolved: Array<{ action: string; feedback?: string }> = [];
+    const { stdin } = render(
+      <PlanReviewBlock
+        plan={fakePlan()}
+        provider={fakeProvider()}
+        onResolved={(action, feedback) => resolved.push({ action, feedback })}
+      />,
+    );
+
+    stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stdin.write('Please revise');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(resolved).toEqual([{ action: 'supplemented', feedback: 'Please revise' }]);
   });
 
   test('renders plan review confirmation bar', () => {
@@ -1101,11 +1233,23 @@ describe('PlanReviewBlock', () => {
     const frame = lastFrame();
     // 方案内容移至 OutputArea tool_card Markdown 渲染，Footer 仅显示确认操作条
     // Plan content moved to OutputArea tool_card Markdown; Footer only shows confirmation bar
-    expect(frame).toContain('Review the plan above');
-    expect(frame).toContain('Approve and start in Auto');
-    expect(frame).toContain('Approve and accept edits');
-    expect(frame).toContain('Keep planning with feedback');
+    expect(frame).toContain('请审核上方方案');
+    expect(frame).toContain('在 Auto 模式下开始执行');
+    expect(frame).toContain('在接受编辑模式下开始执行');
+    expect(frame).toContain('携带反馈继续规划');
     expect(frame).not.toContain('Plan document:');
+  });
+
+  test('uses the shared borderless frame and choice list', () => {
+    const { lastFrame } = render(
+      <PlanReviewBlock plan={fakePlan()} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('◆ Kite Code · 方案审核');
+    expect(frame).toContain('❯ 1.');
+    expect(frame).not.toContain('╭');
+    expect(frame).not.toContain('╰');
   });
 });
 
@@ -3312,7 +3456,6 @@ describe('App', () => {
       showMcp: false,
       showRewind: false,
       checkpoints: [],
-      rewindCounter: 0,
       skillManifests: [],
       ctrlCPressed: false,
       sessionKey: 0,
@@ -3373,9 +3516,11 @@ describe('App', () => {
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('授权执行命令');
+    expect(frame).toContain('工具授权');
     expect(frame).toContain('允许一次');
     expect(frame).not.toContain('Waiting...');
+    expect(frame).not.toContain('claude-opus');
+    expect(frame).not.toContain('[接受编辑]');
   });
 
   test('hides run status once final assistant text is visible', () => {
@@ -3436,7 +3581,24 @@ describe('App', () => {
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
-    expect(lastFrame()).toContain(question.question);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain(question.question);
+    expect(frame).not.toContain('claude-opus');
+    expect(frame).not.toContain('[接受编辑]');
+  });
+
+  test('hides global status while reviewing a plan', () => {
+    const state = fakeState({
+      interrupt: { kind: 'plan_review', plan: fakePlan() },
+    });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('方案审核');
+    expect(frame).not.toContain('claude-opus');
+    expect(frame).not.toContain('[接受编辑]');
   });
 
   test('does not show ApprovalBlock when resolved', () => {

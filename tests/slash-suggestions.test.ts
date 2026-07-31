@@ -11,14 +11,33 @@ describe('slash command suggestions', () => {
       {
         name: 'mcp',
         aliases: [],
-        description: 'Manage MCP servers',
+        description: '管理 MCP Server',
       },
     ]);
   });
 
-  test('makes /mcp available to tab completion and exact-command matching', () => {
-    expect(SLASH_COMMANDS).toContain('mcp');
-    expect(SLASH_COMMANDS).toContain('compact');
+  test('exposes every executable built-in command to completion', () => {
+    expect(SLASH_COMMANDS).toEqual([
+      'effort',
+      'model',
+      'theme',
+      'sessions',
+      'new',
+      'plan',
+      'compact',
+      'permissions',
+      'mcp',
+      'rewind',
+      'export',
+      'context',
+      'clear',
+      'help',
+      'exit',
+    ]);
+  });
+
+  test('shows the actual permissions values instead of the obsolete ask label', () => {
+    expect(findSlashCommandDefs('permissions')[0]?.args).toBe('accept_edits|auto|full');
   });
 });
 

@@ -114,7 +114,7 @@ export class AgentKernel {
     ]);
     this.state = nextState;
     this.appliedEventIds.add(envelope.eventId);
-    if (envelope.payload.type === 'run.completed') {
+    if (envelope.payload.type === 'turn.completed') {
       this.store.saveNamedSnapshot(
         this.state.session.threadId,
         `turn-${envelope.payload.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
@@ -151,6 +151,17 @@ export class AgentKernel {
     this.store.appendEventsAndSnapshot(this.state.session.threadId, payloads, nextState, metadata);
     this.state = nextState;
     for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
+    let completedTurn: RuntimeEvent | undefined;
+    for (const event of payloads) {
+      if (event.type === 'turn.completed') completedTurn = event;
+    }
+    if (completedTurn?.type === 'turn.completed') {
+      this.store.saveNamedSnapshot(
+        this.state.session.threadId,
+        `turn-${completedTurn.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
+        this.state,
+      );
+    }
   }
 
   /**
