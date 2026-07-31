@@ -200,6 +200,34 @@ export function screenContains(raw: string, text: string): boolean {
   return stripAnsi(raw).includes(text);
 }
 
+/** Match a visible SessionSelector row rather than modal chrome or background conversation text. */
+export function screenHasSessionRow(
+  raw: string,
+  name: string,
+  expected: { selected?: boolean; active?: boolean } = {},
+): boolean {
+  if (!screenContains(raw, '会话列表')) return false;
+
+  for (const line of stripAnsi(raw).split(/\r?\n/)) {
+    const borderedLine = line.trimStart();
+    if (!borderedLine.startsWith('│')) continue;
+    const nameIndex = borderedLine.indexOf(name, 1);
+    if (nameIndex < 0) continue;
+
+    const prefix = borderedLine.slice(1, nameIndex);
+    const rowPrefix = /^\s*(?<cursor>>|⏳)?\s*(?<active>●)?\s*$/.exec(prefix);
+    if (!rowPrefix) continue;
+
+    const selected = rowPrefix.groups?.cursor === '>';
+    const active = rowPrefix.groups?.active === '●';
+    if (expected.selected !== undefined && selected !== expected.selected) continue;
+    if (expected.active !== undefined && active !== expected.active) continue;
+    return true;
+  }
+
+  return false;
+}
+
 /** Poll for text in PTY output until timeout. Throws with last output on failure. */
 export async function waitForText(
   getOutput: () => string,

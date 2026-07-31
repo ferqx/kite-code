@@ -23,6 +23,7 @@ import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
+  screenHasSessionRow,
   stripAnsi,
   waitForCondition,
   waitForText,
@@ -150,8 +151,19 @@ describe('TUI PTY System — Session Persistence', () => {
       await typeText(tui2, '/sessions');
       tui2.write('\r');
 
-      // Verify SessionSelector panel is visible
-      await waitForText(() => tui2.outputSinceLastAction(), '搜索', 10000);
+      await waitForCondition(
+        () => {
+          const viewport = tui2.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Message before restart', {
+              selected: true,
+              active: false,
+            }) && !screenContains(viewport, 'Loading...')
+          );
+        },
+        'persisted session row to load in the selector',
+        10_000,
+      );
 
       const output = tui2.viewport();
       const clean = stripAnsi(output);
@@ -165,7 +177,12 @@ describe('TUI PTY System — Session Persistence', () => {
       // The session from tui1 should appear in the list.
       // Session name defaults to threadId; after smart naming, it becomes
       // the first user message text (truncated to 30 chars).
-      expect(screenContains(output, 'Message before restart')).toBe(true);
+      expect(
+        screenHasSessionRow(output, 'Message before restart', {
+          selected: true,
+          active: false,
+        }),
+      ).toBe(true);
     },
     TIMEOUT,
   );

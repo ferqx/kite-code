@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createHeadlessTerminalScreen,
   expectTextAbsentFor,
+  screenHasSessionRow,
   waitForAnyText,
   waitForCondition,
   waitForOutputQuiescence,
@@ -97,6 +98,29 @@ describe('terminal output quiescence', () => {
 });
 
 describe('terminal condition helpers', () => {
+  test('matches SessionSelector rows without accepting background conversation text', () => {
+    const selector = [
+      '❟ Message in session B',
+      '╭───╮',
+      '│ 会话列表 │',
+      '│ 搜索: _ │',
+      '│ > ● Message in session B  8/1/2026 │',
+      '│     Message in session A  8/1/2026 │',
+      '╰───╯',
+    ].join('\n');
+
+    expect(screenHasSessionRow(selector, 'Message in session B')).toBe(true);
+    expect(
+      screenHasSessionRow(selector, 'Message in session B', { selected: true, active: true }),
+    ).toBe(true);
+    expect(screenHasSessionRow(selector, 'Message in session A', { active: false })).toBe(true);
+    expect(screenHasSessionRow(selector, 'Message in session A', { selected: true })).toBe(false);
+    expect(screenHasSessionRow('会话列表\n❟ Message in session B', 'Message in session B')).toBe(
+      false,
+    );
+    expect(screenHasSessionRow('│ Loading... │\n会话列表', 'Message in session B')).toBe(false);
+  });
+
   test('waits for a non-terminal condition', async () => {
     let ready = false;
     setTimeout(() => {

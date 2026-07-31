@@ -13,6 +13,7 @@ import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
+  screenHasSessionRow,
   stripAnsi,
   waitForCondition,
   waitForOutputQuiescence,
@@ -162,8 +163,26 @@ describe('TUI PTY System — Session Switching', () => {
       await typeText(tui, '/sessions');
       tui.write('\r');
 
-      // Verify SessionSelector panel is visible
-      await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
+      // The selector chrome renders before its asynchronous session query can
+      // populate every row. Wait for the complete user-visible list state.
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '会话列表') &&
+            screenContains(viewport, '搜索') &&
+            screenContains(viewport, '导航') &&
+            screenHasSessionRow(viewport, 'Message in session 1', { active: false }) &&
+            screenHasSessionRow(viewport, 'Message in session 2', {
+              selected: true,
+              active: true,
+            }) &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session selector to load both persisted sessions',
+        10_000,
+      );
 
       let output = tui.viewport();
       const clean = stripAnsi(output);
@@ -174,23 +193,23 @@ describe('TUI PTY System — Session Switching', () => {
       expect(screenContains(output, '搜索')).toBe(true);
       expect(screenContains(output, '导航')).toBe(true);
 
-      // Session names in the list come from generateSessionName (if the
-      // fire-and-forget call completed) or from the first user message.
-      // Both patterns are predictable given our mock responses.
-      // Verify at least one recognizable session-pattern text appears in
-      // the output (the list renders both sessions with their names).
-      const hasSession1Id =
-        screenContains(output, 'Session 1 response') ||
-        screenContains(output, 'Message in session 1');
-      const hasSession2Id =
-        screenContains(output, 'Session 2 response') ||
-        screenContains(output, 'Message in session 2');
-      expect(hasSession1Id).toBe(true);
-      expect(hasSession2Id).toBe(true);
-
       // Filter to one stable target instead of depending on timestamp order.
       await typeText(tui, 'session 1');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Message in session 1', {
+              selected: true,
+              active: false,
+            }) &&
+            !screenHasSessionRow(viewport, 'Message in session 2') &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session 1 filter results to replace the unfiltered selector rows',
+        10_000,
+      );
 
       // Press Enter to switch to session 1
       console.log('  pressing Enter to switch...');
@@ -239,15 +258,44 @@ describe('TUI PTY System — Session Switching', () => {
       await typeText(tui, '/sessions');
       tui.write('\r');
 
-      // Verify SessionSelector panel is open
-      await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '会话列表') &&
+            screenContains(viewport, '搜索') &&
+            screenHasSessionRow(viewport, 'Message in session 1', { active: true }) &&
+            screenHasSessionRow(viewport, 'Message in session 2', {
+              selected: true,
+              active: false,
+            }) &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session selector to reload both persisted sessions',
+        10_000,
+      );
 
       let output = tui.viewport();
       console.log('  output after second /sessions:', stripAnsi(output).slice(-500));
 
       // Filter to one stable target instead of depending on timestamp order.
       await typeText(tui, 'session 2');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Message in session 2', {
+              selected: true,
+              active: false,
+            }) &&
+            !screenHasSessionRow(viewport, 'Message in session 1') &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session 2 filter results to replace the unfiltered selector rows',
+        10_000,
+      );
 
       console.log('  pressing Enter to switch to session 2...');
       tui.write('\r');

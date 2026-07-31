@@ -14,6 +14,7 @@ import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
+  screenHasSessionRow,
   stripAnsi,
   waitForCondition,
   waitForOutputQuiescence,
@@ -23,6 +24,7 @@ import {
   createTestWorkspace,
   persistedRuntimeContains,
   persistedSessionIds,
+  persistedSessionSummaries,
 } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -187,6 +189,8 @@ describe('TUI PTY System — /compact after session switch', () => {
         'marked compact command to render and reach the Runtime Store',
         10000,
       );
+      const selectedSessionName = persistedSessionSummaries(workspace)[0]?.name;
+      expect(selectedSessionName).toBeTruthy();
 
       // Exit the first process gracefully so all RuntimeStore writes are
       // closed, then start a fresh TUI against the same HOME/workspace.
@@ -205,7 +209,19 @@ describe('TUI PTY System — /compact after session switch', () => {
 
       await typeText(tui, '/sessions');
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), '会话列表', 10000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenHasSessionRow(viewport, selectedSessionName!, {
+              selected: true,
+              active: false,
+            }) && !screenContains(viewport, 'Loading...')
+          );
+        },
+        'most recently updated compact session row to load in the selector',
+        10_000,
+      );
       // The command-bearing session was just updated, so it is first.
       tui.write('\r');
       await waitForCondition(

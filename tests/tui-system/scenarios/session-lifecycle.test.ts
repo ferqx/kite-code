@@ -13,6 +13,7 @@ import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
+  screenHasSessionRow,
   stripAnsi,
   waitForCondition,
   waitForOutputQuiescence,
@@ -184,7 +185,23 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // Open session selector
       await typeText(tui, '/sessions');
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '会话列表') &&
+            screenContains(viewport, '搜索') &&
+            screenHasSessionRow(viewport, 'Message in session A', { active: false }) &&
+            screenHasSessionRow(viewport, 'Message in session B', {
+              selected: true,
+              active: true,
+            }) &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session selector to load both persisted sessions',
+        10_000,
+      );
 
       const panelOutput = tui.viewport();
       expect(screenContains(panelOutput, '会话列表')).toBe(true);
@@ -195,7 +212,15 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // The active session is selected first. Confirm the Down-arrow render
       // moved selection onto session A before sending the destructive key.
       tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '>   Message in session A', 5_000);
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui.viewport(), 'Message in session A', {
+            selected: true,
+            active: false,
+          }),
+        'session A row to become selected',
+        5_000,
+      );
 
       // Press D to trigger delete confirmation
       tui.write('D');
@@ -222,12 +247,33 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // Re-open session selector to verify session was deleted
       await typeText(tui, '/sessions');
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '会话列表') &&
+            screenContains(viewport, '搜索') &&
+            !screenHasSessionRow(viewport, 'Message in session A') &&
+            screenHasSessionRow(viewport, 'Message in session B', {
+              selected: true,
+              active: true,
+            }) &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session selector to reload the retained session after deletion',
+        10_000,
+      );
 
       const afterOutput = tui.viewport();
       expect(screenContains(afterOutput, '搜索')).toBe(true);
-      expect(screenContains(afterOutput, 'Message in session A')).toBe(false);
-      expect(screenContains(afterOutput, 'Message in session B')).toBe(true);
+      expect(screenHasSessionRow(afterOutput, 'Message in session A')).toBe(false);
+      expect(
+        screenHasSessionRow(afterOutput, 'Message in session B', {
+          selected: true,
+          active: true,
+        }),
+      ).toBe(true);
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },
     TIMEOUT,
@@ -256,11 +302,31 @@ describe('TUI PTY System — Session Lifecycle', () => {
       await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
       await typeText(tui, '/sessions');
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), '会话列表', 5000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '会话列表') &&
+            screenHasSessionRow(viewport, 'Message in session B', {
+              selected: true,
+              active: true,
+            }) &&
+            screenContains(viewport, 'D 删除') &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session selector to reload the retained session after cancel',
+        5_000,
+      );
 
       // Session should still be in the list after reopening the panel.
       const cancelOutput = tui.viewport();
-      expect(screenContains(cancelOutput, 'Message in session B')).toBe(true);
+      expect(
+        screenHasSessionRow(cancelOutput, 'Message in session B', {
+          selected: true,
+          active: true,
+        }),
+      ).toBe(true);
       // Panel controls should still be visible
       expect(screenContains(cancelOutput, 'D 删除')).toBe(true);
       expect(persistedSessionIds(workspace).sort()).toEqual(idsBeforeCancel);

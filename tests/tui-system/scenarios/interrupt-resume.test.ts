@@ -24,6 +24,7 @@ import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
+  screenHasSessionRow,
   stripAnsi,
   waitForCondition,
   waitForText,
@@ -138,7 +139,19 @@ describe('TUI PTY System — Interrupt Resume', () => {
       await typeText(tui2, '/sessions');
       tui2.write('\r');
 
-      await waitForText(() => tui2.outputSinceLastAction(), '搜索', 15000);
+      await waitForCondition(
+        () => {
+          const viewport = tui2.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Hello from tui1', {
+              selected: true,
+              active: false,
+            }) && !screenContains(viewport, 'Loading...')
+          );
+        },
+        'persisted session row to load in the selector',
+        15_000,
+      );
 
       const panelOutput = tui2.viewport();
       const panelClean = stripAnsi(panelOutput);
@@ -150,7 +163,12 @@ describe('TUI PTY System — Interrupt Resume', () => {
 
       // The session from tui1 should appear in the list.
       // Session name is generated from the first user message by smart naming.
-      expect(screenContains(panelOutput, 'Hello from tui1')).toBe(true);
+      expect(
+        screenHasSessionRow(panelOutput, 'Hello from tui1', {
+          selected: true,
+          active: false,
+        }),
+      ).toBe(true);
     },
     TIMEOUT,
   );

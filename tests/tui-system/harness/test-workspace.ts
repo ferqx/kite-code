@@ -49,6 +49,19 @@ export function persistedSessionIds(workspace: Pick<TestWorkspace, 'home'>): str
   }
 }
 
+/** Read durable session identity/name pairs in the same recency order used by SessionSelector. */
+export function persistedSessionSummaries(
+  workspace: Pick<TestWorkspace, 'home'>,
+): Array<{ threadId: string; name: string }> {
+  const checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
+  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
+  try {
+    return store.listSessions().map(({ threadId, name }) => ({ threadId, name }));
+  } finally {
+    store.close();
+  }
+}
+
 /** Check durable Runtime events without treating terminal rendering as persistence evidence. */
 export function persistedRuntimeContains(
   workspace: Pick<TestWorkspace, 'home'>,
