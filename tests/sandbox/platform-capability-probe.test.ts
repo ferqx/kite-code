@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  deniedReadVerdict,
   evaluatePlatformSupport,
   type PlatformCapabilityEvidenceV1,
 } from '../../scripts/release/platform-capability-probe';
@@ -57,6 +58,11 @@ function evidence(overrides: Partial<ProbeInput> = {}): ProbeInput {
 }
 
 describe('platform capability probe admission', () => {
+  test('cannot mark a read denial enforced when the positive read control failed', () => {
+    expect(deniedReadVerdict({ available: true, code: 1 }, false)).toBe('unavailable');
+    expect(deniedReadVerdict({ available: true, code: 1 }, true)).toBe('enforced');
+  });
+
   test('requires every process-capability probe before declaring supported', () => {
     expect(evaluatePlatformSupport(evidence())).toBe('supported');
     expect(

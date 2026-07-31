@@ -238,6 +238,8 @@ async function probeFilesystem(
   }
   const workspaceReadable = join(workspace, 'readable.txt');
   const workspaceTarget = join(workspace, 'allowed.txt');
+  const workspaceReadOnlyTarget = join(workspace, 'read-only-denied.txt');
+  const grandchildWorkspaceTarget = join(workspace, 'grandchild-allowed.txt');
   const outsideReadable = join(outside, 'read-secret.txt');
   const outsideTarget = join(outside, 'denied.txt');
   const gitTarget = join(workspace, '.git', 'config');
@@ -258,6 +260,7 @@ async function probeFilesystem(
   const baseEnv = {
     PROBE_WORKSPACE_READABLE: workspaceReadable,
     PROBE_WORKSPACE_TARGET: workspaceTarget,
+    PROBE_GRANDCHILD_WORKSPACE_TARGET: grandchildWorkspaceTarget,
     PROBE_OUTSIDE_READABLE: outsideReadable,
     PROBE_OUTSIDE_TARGET: outsideTarget,
     PROBE_GIT_TARGET: gitTarget,
@@ -279,6 +282,20 @@ async function probeFilesystem(
     workspace,
     'printf allowed > "$PROBE_WORKSPACE_TARGET"',
     baseEnv,
+  );
+  const workspaceReadOnlyResult = await runSandboxCommand(
+    backend,
+    workspace,
+    'printf denied > "$PROBE_WORKSPACE_READ_ONLY_TARGET"',
+    { ...baseEnv, PROBE_WORKSPACE_READ_ONLY_TARGET: workspaceReadOnlyTarget },
+    { filesystemScope: 'read_only' },
+  );
+  const workspaceReadOnlyReadResult = await runSandboxCommand(
+    backend,
+    workspace,
+    'test "$(cat "$PROBE_WORKSPACE_READABLE")" = readable',
+    baseEnv,
+    { filesystemScope: 'read_only' },
   );
   const outsideResult = await runSandboxCommand(
     backend,
@@ -358,6 +375,12 @@ async function probeFilesystem(
     `/bin/sh -c 'printf denied > "$PROBE_GRANDCHILD_TARGET"'`,
     baseEnv,
   );
+  const grandchildControl = await runSandboxCommand(
+    backend,
+    workspace,
+    `/bin/sh -c 'printf allowed > "$PROBE_GRANDCHILD_WORKSPACE_TARGET"'`,
+    baseEnv,
+  );
   const workspaceWrite =
     workspaceResult.available && workspaceResult.code === 0 && existsSync(workspaceTarget)
       ? 'enforced'
@@ -365,50 +388,63 @@ async function probeFilesystem(
         ? 'unsupported'
         : 'unavailable';
   const backendUsable = workspaceWrite === 'enforced';
+  const readControlUsable =
+    backendUsable && workspaceReadResult.available && workspaceReadResult.code === 0;
+  const readOnlyControlUsable =
+    backendUsable &&
+    workspaceReadOnlyReadResult.available &&
+    workspaceReadOnlyReadResult.code === 0;
+  const grandchildControlUsable =
+    backendUsable &&
+    grandchildControl.available &&
+    grandchildControl.code === 0 &&
+    existsSync(grandchildWorkspaceTarget);
   return {
-    workspaceRead:
-      backendUsable && workspaceReadResult.available && workspaceReadResult.code === 0
-        ? 'enforced'
-        : workspaceReadResult.available
-          ? 'unsupported'
-          : 'unavailable',
+    workspaceRead: readControlUsable
+      ? 'enforced'
+      : workspaceReadResult.available
+        ? 'unsupported'
+        : 'unavailable',
     workspaceWrite,
-    // The current backend API cannot construct a workspace-read-only process boundary.
-    workspaceReadOnly: 'unsupported',
-    workspaceOutsideReadDeny: deniedReadVerdict(outsideReadResult, backendUsable),
+    workspaceReadOnly: deniedVerdict(
+      workspaceReadOnlyResult,
+      workspaceReadOnlyTarget,
+      readOnlyControlUsable,
+    ),
+    workspaceOutsideReadDeny: deniedReadVerdict(outsideReadResult, readControlUsable),
     workspaceOutsideWriteDeny: deniedVerdict(outsideResult, outsideTarget, backendUsable),
-    protectedGitReadDeny: deniedReadVerdict(gitReadResult, backendUsable),
+    protectedGitReadDeny: deniedReadVerdict(gitReadResult, readControlUsable),
     protectedGitWriteDeny: deniedUnchangedVerdict(
       gitWriteResult,
       gitTarget,
       'protected',
       backendUsable,
     ),
-    protectedAgentConfigReadDeny: deniedReadVerdict(agentConfigReadResult, backendUsable),
+    protectedAgentConfigReadDeny: deniedReadVerdict(agentConfigReadResult, readControlUsable),
     protectedAgentConfigWriteDeny: deniedUnchangedVerdict(
       agentConfigWriteResult,
       agentConfigTarget,
       'protected',
       backendUsable,
     ),
-    protectedCredentialReadDeny: deniedReadVerdict(credentialReadResult, backendUsable),
+    protectedCredentialReadDeny: deniedReadVerdict(credentialReadResult, readControlUsable),
     protectedCredentialWriteDeny: deniedUnchangedVerdict(
       credentialWriteResult,
       credentialTarget,
       'protected',
       backendUsable,
     ),
-    protectedShellProfileReadDeny: deniedReadVerdict(shellProfileReadResult, backendUsable),
+    protectedShellProfileReadDeny: deniedReadVerdict(shellProfileReadResult, readControlUsable),
     protectedShellProfileWriteDeny: deniedUnchangedVerdict(
       shellProfileWriteResult,
       shellProfileTarget,
       'protected',
       backendUsable,
     ),
-    symlinkEscapeReadDeny: deniedReadVerdict(symlinkReadResult, backendUsable),
+    symlinkEscapeReadDeny: deniedReadVerdict(symlinkReadResult, readControlUsable),
     symlinkEscapeWriteDeny: deniedVerdict(symlinkWriteResult, symlinkTarget, backendUsable),
     inProcessReadOnly: 'unsupported',
-    shellGrandchildDeny: deniedVerdict(grandchildResult, grandchildTarget, backendUsable),
+    shellGrandchildDeny: deniedVerdict(grandchildResult, grandchildTarget, grandchildControlUsable),
   };
 }
 
@@ -496,8 +532,9 @@ async function runSandboxCommand(
   workspace: string,
   command: string,
   env: Record<string, string>,
+  options: { filesystemScope?: 'read_only' | 'workspace_write' } = {},
 ): Promise<{ available: boolean; code: number }> {
-  const invocation = sandboxInvocation(backend, workspace, command);
+  const invocation = sandboxInvocation(backend, workspace, command, options);
   if (!invocation) return { available: false, code: -1 };
   try {
     const child = Bun.spawn({
@@ -530,12 +567,16 @@ function sandboxInvocation(
   backend: SandboxBackend,
   workspace: string,
   command: string,
+  options: { filesystemScope?: 'read_only' | 'workspace_write' },
 ): string[] | undefined {
   if (backend === 'seatbelt') {
     return [
       '/usr/bin/sandbox-exec',
       '-p',
-      generateSandboxProfile(workspace, { network: 'disabled' }),
+      generateSandboxProfile(workspace, {
+        network: 'disabled',
+        filesystemScope: options.filesystemScope,
+      }),
       '/bin/sh',
       '-c',
       command,
@@ -565,7 +606,7 @@ function deniedVerdict(
   return result.code !== 0 && !existsSync(target) ? 'enforced' : 'unsupported';
 }
 
-function deniedReadVerdict(
+export function deniedReadVerdict(
   result: { available: boolean; code: number },
   backendUsable: boolean,
 ): NativeProbeVerdict {

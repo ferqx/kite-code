@@ -19,7 +19,7 @@ production artifact。候选组合不是支持声明：
 
 | runner 候选 | backend 候选 | 当前结论 | 主要缺口 |
 | --- | --- | --- | --- |
-| macOS 15 | Seatbelt | `excluded` | Workspace 外及 protected path 读写仍开放；无完整 process-tree 上限、继承与入口组合证据 |
+| macOS 15 | Seatbelt | `excluded` | 本地 filesystem profile 已加固，但缺少新 release-pinned native artifact、完整 process-tree 上限、Skill/MCP 继承与入口组合证据 |
 | Ubuntu 24.04 | bubblewrap | `excluded` | Workspace 外/protected path deny 未证明；无完整 process-tree 上限、继承与入口组合证据 |
 | Windows Server 2025 | none | `excluded` | 没有 filesystem/network sandbox backend |
 
@@ -47,6 +47,18 @@ backend discovery、sandbox 命令成功、顶层 shell invocation permit、PID 
 即使某 runner 的技术项全部为 `enforced`，也必须由新的追加 ADR、新鲜证据与独立 release
 gate 才能改变已关闭 D-04 的空支持集并产生 production support 声明。`backend=none` 不可能产生进程型
 `supported`，只能在另行验证的无进程 fallback 条件下产生 `read_only_only`。
+
+当前 macOS 本机增量 probe 已能证明 Workspace read/write、Workspace read-only、Workspace 外
+read/write、protected Git/Agent config/credential/shell profile、symlink escape、network-off 和
+shell descendant filesystem inheritance；executor 还使用逐 invocation、`0700`、结束清理且不
+共享的 runtime temp，返回前请求终止已跟踪 process group；未确认退出时 fail closed 并保留 runtime，
+确认后才以不跟随 symlink 的物理清理恢复 hostile mode/BSD immutable flag，删除不能确认时也
+fail closed。profile 还拒绝读取未列为 runtime
+dependency 的 `/private/etc/hosts`。这些只是
+未固定的开发 evidence。Seatbelt 没有实现并
+证明每次 Shell invocation 的硬 process-tree 数量上限，forked Skill/local stdio MCP 与两个
+production composition entrypoint 也尚未形成 native evidence，因此 outcome 仍必须是
+`excluded`、`productionSupported=false`。
 
 ## ExecutionBoundaryV1 schema 与 composition gate
 

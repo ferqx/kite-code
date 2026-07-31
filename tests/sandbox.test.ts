@@ -1,10 +1,20 @@
-import { describe, expect, test } from 'bun:test';
-import { chmodSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { afterAll, describe, expect, test } from 'bun:test';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from '../src/app/cli/index';
 import { generateBwrapArgs } from '../src/core/sandbox/bwrap';
-import { createSandboxExecutor } from '../src/core/sandbox/executor';
+import { createSandboxExecutor, resolveSandboxExitCode } from '../src/core/sandbox/executor';
 import { detectSandboxBackend, isSandboxAvailable } from '../src/core/sandbox/platform';
 import { generateSandboxProfile } from '../src/core/sandbox/profile';
 import { findApplySeccomp, resolveSeccompPath } from '../src/core/sandbox/seccomp';
@@ -14,57 +24,98 @@ import {
   buildHardenedEnv,
   buildUlimitPreamble,
   checkDangerousPaths,
-  getSandboxRuntimeDir,
+  cleanupSandboxRuntimeDir,
+  createSandboxRuntimeDir,
 } from '../src/core/sandbox/shell-wrapper';
 import { DEFAULT_RESOURCE_LIMITS } from '../src/core/sandbox/types';
 import { shellTool } from '../src/core/tools/shell';
 
 // 验证沙箱 profile 结构 / Validate sandbox profile structure
 describe('sandbox profile generation', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'sandbox-profile-test-'));
+  const canonicalWorkspace = realpathSync.native(workspace);
+  afterAll(() => rmSync(workspace, { recursive: true, force: true }));
+
   test('profile includes deny-default posture', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace');
+    const profile = generateSandboxProfile(workspace);
     expect(profile).toContain('(deny default)');
   });
 
   test('profile includes version marker', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace');
+    const profile = generateSandboxProfile(workspace);
     expect(profile).toContain('(version 1)');
   });
 
   test('profile allows process execution and forking', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace');
+    const profile = generateSandboxProfile(workspace);
     expect(profile).toContain('(allow process-exec)');
     expect(profile).toContain('(allow process-fork)');
   });
 
-  test('profile allows ordinary file writes for tool-policy to authorize', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace');
-    expect(profile).toContain('(allow file-write* file-ioctl (subpath "/"))');
+  test('profile writes are limited to the canonical workspace', () => {
+    const profile = generateSandboxProfile(workspace);
+    expect(profile).toContain(`(subpath "${canonicalWorkspace}")`);
+    expect(profile).not.toContain('(subpath "/")');
   });
 
   test('profile denies network by default', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace');
+    const profile = generateSandboxProfile(workspace);
     expect(profile).toContain('(deny network*)');
   });
 
   test('profile explicitly grants network access when allow_all is selected', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace', { network: 'allow_all' });
+    const profile = generateSandboxProfile(workspace, { network: 'allow_all' });
     expect(profile).toContain('(allow network*)');
   });
 
   test('profile imports system.sb as base', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace');
+    const profile = generateSandboxProfile(workspace);
     expect(profile).toContain('(import "system.sb")');
   });
 
-  test('profile allows global file read so dev tools (git, xcrun) can access system paths', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace');
-    expect(profile).toContain('(allow file-read* (subpath "/"))');
+  test('profile limits reads to workspace and explicit system runtime roots', () => {
+    const profile = generateSandboxProfile(workspace);
+    expect(profile).toContain('(subpath "/System")');
+    expect(profile).toContain('(subpath "/usr/bin")');
+    expect(profile).not.toContain('(subpath "/usr")');
+    expect(profile).not.toContain('(subpath "/")');
   });
 
-  test('profile allows ordinary file create and unlink for tool-policy to authorize', () => {
-    const profile = generateSandboxProfile('/tmp/test-workspace');
-    expect(profile).toContain('(allow file-write-unlink file-write-create (subpath "/"))');
+  test('profile does not make data-only roots executable', () => {
+    const profile = generateSandboxProfile(workspace);
+    const executableSection = profile.slice(
+      profile.indexOf('(allow file-map-executable'),
+      profile.indexOf(';; Writes are limited'),
+    );
+    expect(executableSection).not.toContain('/private/etc/ssl');
+    expect(executableSection).not.toContain('/usr/share');
+    expect(executableSection).not.toContain('/opt/homebrew/share');
+  });
+
+  test('profile denies protected workspace paths', () => {
+    const profile = generateSandboxProfile(workspace);
+    expect(profile).toContain(`(subpath "${join(canonicalWorkspace, '.git')}")`);
+    expect(profile).toContain(`(literal "${join(canonicalWorkspace, '.env')}")`);
+    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+  });
+
+  test('read-only scope omits workspace from writable filters', () => {
+    const profile = generateSandboxProfile(workspace, { filesystemScope: 'read_only' });
+    const writeSection = profile.slice(profile.indexOf(';; Writes are limited'));
+    expect(writeSection).not.toContain(`(subpath "${canonicalWorkspace}")`);
+  });
+
+  test('canonicalizes a symlinked workspace before emitting rules', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'sandbox-profile-link-test-'));
+    const link = join(parent, 'workspace-link');
+    symlinkSync(workspace, link);
+    try {
+      const profile = generateSandboxProfile(link);
+      expect(profile).toContain(`(subpath "${canonicalWorkspace}")`);
+      expect(profile).not.toContain(`(subpath "${link}")`);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 });
 
@@ -89,33 +140,136 @@ describe('shell wrapper utilities', () => {
 
   test('hardened env retains safe variables', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-test-'));
+    const runtimeDir = createSandboxRuntimeDir(ws);
     try {
       process.env.TEST_KEEP_VAR = 'keep-me';
-      const env = buildHardenedEnv(ws);
+      const env = buildHardenedEnv(ws, runtimeDir);
       // PATH and HOME should be inherited from parent
       expect(env.PATH).toBeDefined();
       expect(env.HOME).toBe(process.env.HOME as string);
     } finally {
       rmSync(ws, { recursive: true, force: true });
+      rmSync(runtimeDir, { recursive: true, force: true });
       delete process.env.TEST_KEEP_VAR;
     }
   });
 
   test('hardened env redirects temp and cache paths to sandbox runtime dir', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-test-'));
+    const runtimeDir = createSandboxRuntimeDir(ws);
     try {
-      const env = buildHardenedEnv(ws);
+      const env = buildHardenedEnv(ws, runtimeDir);
       // HOME is inherited from parent (real user home), not redirected
       if (process.env.HOME !== undefined) {
         expect(env.HOME).toBe(process.env.HOME);
       }
       // Temp and cache paths are redirected to sandbox runtime dir in system temp
-      const runtimeDir = getSandboxRuntimeDir();
-      expect(env.TMPDIR).toBe(join(runtimeDir, 'tmp'));
-      expect(env.TMP).toBe(join(runtimeDir, 'tmp'));
-      expect(env.TEMP).toBe(join(runtimeDir, 'tmp'));
+      const canonicalRuntimeDir = realpathSync.native(runtimeDir);
+      expect(env.TMPDIR).toBe(join(canonicalRuntimeDir, 'tmp'));
+      expect(env.TMP).toBe(join(canonicalRuntimeDir, 'tmp'));
+      expect(env.TEMP).toBe(join(canonicalRuntimeDir, 'tmp'));
     } finally {
       rmSync(ws, { recursive: true, force: true });
+      rmSync(runtimeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime directories are private and unique per invocation', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-test-'));
+    const first = createSandboxRuntimeDir(ws);
+    const second = createSandboxRuntimeDir(ws);
+    try {
+      expect(first).not.toBe(second);
+      expect(statSync(first).mode & 0o777).toBe(0o700);
+      expect(statSync(second).mode & 0o777).toBe(0o700);
+    } finally {
+      rmSync(first, { recursive: true, force: true });
+      rmSync(second, { recursive: true, force: true });
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime cleanup recovers nested hostile modes without following symlinks', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-cleanup-test-'));
+    const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-external-test-'));
+    const runtimeDir = createSandboxRuntimeDir(ws);
+    const nested = join(runtimeDir, 'nested');
+    const deeper = join(nested, 'deeper');
+    const flagged = join(deeper, 'flagged');
+    mkdirSync(deeper, { recursive: true });
+    writeFileSync(flagged, 'flagged');
+    chmodSync(external, 0o755);
+    symlinkSync(external, join(deeper, 'external-link'));
+    if (process.platform === 'darwin') {
+      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', flagged]).exitCode).toBe(0);
+    }
+    chmodSync(deeper, 0o000);
+    expect(statSync(deeper).mode & 0o777).toBe(0o000);
+    if (process.platform === 'darwin') {
+      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', deeper]).exitCode).toBe(0);
+    }
+    chmodSync(nested, 0o000);
+    expect(statSync(nested).mode & 0o777).toBe(0o000);
+    if (process.platform === 'darwin') {
+      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', nested]).exitCode).toBe(0);
+    }
+    chmodSync(runtimeDir, 0o000);
+    try {
+      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(existsSync(runtimeDir)).toBe(false);
+      expect(existsSync(external)).toBe(true);
+      expect(statSync(external).mode & 0o777).toBe(0o755);
+    } finally {
+      cleanupSandboxRuntimeDir(runtimeDir);
+      rmSync(external, { recursive: true, force: true });
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime cleanup unlinks a dangling root symlink without touching its former target', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-link-cleanup-test-'));
+    const external = join(tmpdir(), `sandbox-runtime-missing-target-${process.pid}-${Date.now()}`);
+    const runtimeDir = createSandboxRuntimeDir(ws);
+    rmSync(runtimeDir, { recursive: true, force: true });
+    symlinkSync(external, runtimeDir);
+    try {
+      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(existsSync(runtimeDir)).toBe(false);
+      expect(existsSync(external)).toBe(false);
+    } finally {
+      rmSync(runtimeDir, { recursive: true, force: true });
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime cleanup unlinks a valid root symlink without traversing its target', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-root-link-test-'));
+    const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-root-target-test-'));
+    const marker = join(external, 'keep.txt');
+    const runtimeDir = createSandboxRuntimeDir(ws);
+    writeFileSync(marker, 'keep');
+    chmodSync(external, 0o755);
+    rmSync(runtimeDir, { recursive: true, force: true });
+    symlinkSync(external, runtimeDir);
+    try {
+      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(existsSync(runtimeDir)).toBe(false);
+      expect(existsSync(marker)).toBe(true);
+      expect(statSync(external).mode & 0o777).toBe(0o755);
+    } finally {
+      rmSync(runtimeDir, { recursive: true, force: true });
+      rmSync(external, { recursive: true, force: true });
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('runtime cleanup rejects paths outside its private base', () => {
+    const outside = mkdtempSync(join(tmpdir(), 'sandbox-cleanup-reject-test-'));
+    try {
+      expect(cleanupSandboxRuntimeDir(outside)).toBe(false);
+      expect(existsSync(outside)).toBe(true);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
     }
   });
 
@@ -306,6 +460,16 @@ describe('bwrap argument generation', () => {
 
 // 验证 executor 工厂回退行为 / Validate executor factory fallback behavior
 describe('sandbox executor factory', () => {
+  test('uses a stable non-zero exit code when process cleanup is unconfirmed', () => {
+    expect(
+      resolveSandboxExitCode(0, {
+        timedOut: false,
+        cancelled: false,
+        processCleanupConfirmed: false,
+      }),
+    ).toBe(-1);
+  });
+
   test('returns shellTool when disabled', () => {
     const executor = createSandboxExecutor({
       enabled: false,
@@ -313,6 +477,22 @@ describe('sandbox executor factory', () => {
     });
     // When disabled, should return the exact shellTool reference
     expect(executor).toBe(shellTool);
+  });
+
+  test('fails closed instead of returning bare shell when production fallback is fail', async () => {
+    const executor = createSandboxExecutor({
+      enabled: false,
+      workspace: '/tmp/test',
+      unavailableFallback: 'fail',
+    });
+    expect(executor).not.toBe(shellTool);
+    await expect(executor({ workspace: '/tmp/test', command: 'echo bypass' })).resolves.toEqual({
+      ok: false,
+      command: 'echo bypass',
+      exitCode: -1,
+      stdout: '',
+      stderr: 'Sandbox unavailable (sandbox_disabled); refusing unsandboxed shell execution.',
+    });
   });
 });
 
@@ -353,29 +533,31 @@ describe('seccomp resolution', () => {
   });
 
   test('resolveSeccompPath returns null for null input', () => {
-    expect(resolveSeccompPath(null, '/tmp/ws')).toBeNull();
+    expect(resolveSeccompPath(null, '/tmp/ws', '/tmp/runtime')).toBeNull();
   });
 
   test('resolveSeccompPath returns same path when binary is within workspace', () => {
     const ws = '/tmp/my-workspace';
     const binary = '/tmp/my-workspace/vendor/seccomp/arm64/apply-seccomp';
-    expect(resolveSeccompPath(binary, ws)).toBe(binary);
+    expect(resolveSeccompPath(binary, ws, '/tmp/runtime')).toBe(binary);
   });
 
   test('resolveSeccompPath copies binary when outside workspace', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'seccomp-test-'));
     const srcDir = mkdtempSync(join(tmpdir(), 'seccomp-src-'));
+    const runtimeDir = createSandboxRuntimeDir(ws);
     try {
       const srcBinary = join(srcDir, 'apply-seccomp');
       await Bun.write(srcBinary, '#!/bin/sh\necho fake');
       chmodSync(srcBinary, 0o755);
 
-      const resolved = resolveSeccompPath(srcBinary, ws);
-      expect(resolved).toBe(join(getSandboxRuntimeDir(), 'apply-seccomp'));
+      const resolved = resolveSeccompPath(srcBinary, ws, runtimeDir);
+      expect(resolved).toBe(join(runtimeDir, 'apply-seccomp'));
       expect(existsSync(resolved!)).toBe(true);
     } finally {
       rmSync(ws, { recursive: true, force: true });
       rmSync(srcDir, { recursive: true, force: true });
+      rmSync(runtimeDir, { recursive: true, force: true });
     }
   });
 });

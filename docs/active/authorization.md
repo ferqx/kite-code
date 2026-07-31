@@ -68,6 +68,11 @@ authorization: {
 2. **auto-review 不能授予 `full_access`** — `source === 'system' && autoReview` → 拒绝
 3. **loop-mode 不能自动提升授权** — `source === 'system' && loopMode` → 拒绝
 
+`full_access` 只描述审批/authorization mode，不提升 native execution ceiling。macOS Seatbelt
+仍把 Shell 文件权限限制为 canonical Workspace 与受控 runtime temp；审批不能恢复 Workspace
+外读写或 protected path。production sandbox 不可用时必须选择 fail-closed executor，不能使用
+开发入口的裸 Shell fallback。
+
 ## MCP Tool 策略边界
 
 MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive effect 变成无审批调用。只有 effective effects 全部为 `none|read` 且 `minimumApproval: none` 时，Approval Policy 才把它当作只读；`minimumApproval: user` 始终要求单次用户批准。远端 annotation 不直接进入该判断，project 配置也不能降低 minimum approval 或 effect 风险。Tool filter 只决定 catalog 可见性，不产生 authorization grant。

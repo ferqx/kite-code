@@ -153,6 +153,12 @@ export interface SandboxOptions {
   enabled: boolean;
   /** 工作目录路径 / Workspace directory path */
   workspace: string;
+  /** Native filesystem ceiling. full_access is never a sandbox profile. */
+  filesystemScope?: Exclude<FilesystemScope, 'full_access'>;
+  /** Legacy app entries may opt into bare shell; production callers must use fail. */
+  unavailableFallback?: 'bare_shell' | 'fail';
+  /** Explicit executable/runtime roots that the native profile may read but never write. */
+  runtimeReadOnlyRoots?: readonly string[];
   /** 自定义资源限制（覆盖默认值）/ Custom resource limits (overrides defaults) */
   resourceLimits?: Partial<ResourceLimits>;
   /** Network access policy inside the sandbox. Defaults to disabled. */

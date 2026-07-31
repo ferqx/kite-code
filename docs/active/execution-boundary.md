@@ -75,3 +75,19 @@ registry 是空支持集，因此所有 production 配置加载都在返回可�
 Workspace realpath、排序去重后的 host allowlist 和所有安全字段进入
 `computeExecutionBoundaryDigestV1()`。字段、Workspace identity 或有效 allowlist 变化都会改变
 digest，使旧 release evidence 失效。
+
+## Native filesystem projection
+
+macOS Seatbelt profile 在生成任何 allow rule 前 canonicalize Workspace 与受控 runtime temp。
+每次 invocation 使用独立的 `0700` runtime directory；executor 在返回前先请求终止已跟踪的
+process group，未确认退出时结果 fail closed 并保留 runtime，确认后再以不跟随 symlink 的物理
+遍历恢复 hostile mode/BSD immutable flag 并删除该目录，删除不能确认时同样 fail closed。并发调用不能共享该目录，writable temp 也不进入 executable-map
+allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；`read_only` 不允许 Workspace 写入。系统与当前 Bun/Node runtime 依赖只有
+显式只读 root；除此之外的 Workspace 外 read/write/create/unlink、指向外部的 symlink，以及
+Workspace 内 `.git`、Agent/MCP 配置、credential、shell profile 等 protected path 均由
+Seatbelt deny，`checkDangerousPaths()` 只保留为 defense-in-depth。Shell child 会继承相同
+profile。
+
+`createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
+production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，
+但它们不通过 production composition root，不能形成 production qualification。
