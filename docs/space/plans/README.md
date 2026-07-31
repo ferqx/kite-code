@@ -56,7 +56,7 @@ bun run scripts/check-plan-execution-matrix.ts
 
 该门禁检查矩阵与正文 Task 一一对应、`dependsOn` 稳定语法、跨计划引用、依赖环、milestone
 唯一 producer、完成记录目标以及 D-01–D-14 的必填字段。当前 1B.1/1B.4/1A.6 completion ratchet
-与 1A.7 activation ratchet 还会在 Pull Request quality job 中使用完整 Git 历史，验证 evidence commit
+与 1A.7 activation/completion ratchet 还会在 Pull Request quality job 中使用完整 Git 历史，验证 evidence commit
 存在并可从 PR merge
 `HEAD` 到达；squash/rebase 合入后的 push 仍校验记录字段，但不把被历史重写替换的原 SHA 强制
 当作新主干祖先。`bun run check:docs` 已包含该门禁。

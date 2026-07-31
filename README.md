@@ -50,6 +50,12 @@ bun install
 
 会话日志治理默认关闭：`features.sessionLoggingPolicyV1=false` 时 mode 为 `off` 且不创建日志目录；开启时默认只记录 allowlist metadata。`content` 需要 release artifact 允许和用户配置显式 opt-in，项目配置不能开启；即使 opt-in 也不记录 reasoning、工具/文件正文、审批命令、Plan/Sub-agent 正文或 credential。日志目录/文件使用 owner-only 权限或 ACL、拒绝 link/reparse point，并通过 durable active-session lease、bounded retention/容量与 fail-closed quarantine 保护；TUI/CLI 会显示 resolved mode，logger 不可用时 Agent 继续运行且不使用不安全 fallback。
 
+生产模型数据门禁与远程 HTTP MCP 正文外发是两个独立授权域。`providerDataPolicyV1` 开启后，
+模型、压缩、Sub-agent 和 reviewer 都必须匹配仓库固定的 route/data policy；当前批准 bundle 为空，
+因此没有 production-qualified model route。`remoteMcpEgressPolicyV1` 开启后，非空 MCP 参数仍需
+逐 invocation、短时、route/tool/参数 digest/nonce 精确绑定的独立许可；关闭时保持 no-egress，
+Tool Approval、read-only annotation、模型 Provider consent 或 network allowlist 都不能替代该许可。
+
 MCP 默认配置只有两个规范位置：项目级 `<project>/.kite-code/mcp.json` 与用户级 `~/.kite-code/mcp.json`，同名 Server 按 `project > user` 选择。`/mcp` 的 Current project 与 All projects 分别写入这两个文件；项目声明必须在 Server Detail 的 Review 页面显式批准。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 仅只读兼容与显式迁移，不再作为写入目标。
 
 Tool 可见性可在 JSONC 中用 `enabledTools` allowlist、`disabledTools` denylist 和 `tools.<name>.enabled` 精确 override 控制；逐 Tool policy 还支持 `effects`、`minimumApproval`、`retry` 与 `idempotencyKeyArgument`。项目配置只能用这些字段收紧可见性或策略，不能信任远端 annotation、降低风险或扩大重试。任何 filter/policy 变化都会使旧 turn binding 失效。

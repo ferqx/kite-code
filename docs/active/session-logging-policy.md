@@ -115,6 +115,11 @@ POSIX maintenance 默认时间预算为 50ms；Windows 因 owner-only ACL 需要
 持有 operation/admission record 时 crash 后不自动抢占该 record，而是 fail closed 并要求人工
 隔离/恢复，不能用有双 reclaimer 竞态的 stale unlink 冒充恢复。
 
+归档的 `2026-06-18-session-logger.md` 只记录旧实现历史，其中“全量本地日志”的结论不再代表
+当前行为。Phase 1A 迁移先收紧可识别旧目录和文件的 owner-only 权限，再按本节 lease、容量与
+retention 规则接管；存在未知条目、link/hardlink、损坏 lease 或无法证明完整扫描时只隔离并
+拒绝建立新 writer，不读取或复制旧正文，也不把旧全量 serializer 作为兼容 fallback。
+
 单 session 使用 UTF-8 byte 计数；达到 `maxSessionBytes` 时最多写一条无正文
 `session.logging_limited` metadata，停止后续记录，并为 bounded terminal marker 预留空间。
 总容量 maintenance 为新 session 预留其完整上限。原生 ACL smoke 在 macOS、Ubuntu 和 Windows

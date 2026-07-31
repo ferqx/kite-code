@@ -435,7 +435,7 @@ const phase1NativeEvidenceCommit = '1063e879933f3e1b0cf8c0958363c999bb2696ab';
 const phase1BoundaryCommit = '3ada4246b149444ce27ed713cd5425090367c1fc';
 const phase1NetworkCommit = 'bc03f77a3dac2962cd3158d3413f292b8388a0d8';
 const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
-const phase1RemoteMcpCommit = '545161a5c93bfe2127e9e01189f8a4ac8b425157';
+const phase1RemoteMcpCommit = '545161a7103365038989c6a935a216c5bd5fc7e8';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],

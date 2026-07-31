@@ -8,7 +8,7 @@
 设计依据：RFC §3.4、§9.5、§13、§14
 
 Task 1A.1–1A.6 已完成（1A.6 实现提交为
-`545161a5c93bfe2127e9e01189f8a4ac8b425157`）；1A.7 已按依赖激活并负责 Phase 1A 文档、迁移与
+`545161a7103365038989c6a935a216c5bd5fc7e8`）；1A.7 已按依赖激活并负责 Phase 1A 文档、迁移与
 milestone 总收敛。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
@@ -62,7 +62,9 @@ milestone 总收敛。规范记录见
 
 三个迁移 flag 均默认 `false`，但 production profile 只能在对应 flag 打开且 policy 可解析时
 启用相关能力。关闭 flag 的生产回滚必须收紧为 `off/metadata/no-egress`，不得回到旧全量正文
-或未治理外发路径。
+或未治理外发路径。本文“production 默认 metadata”指 Release Profile 激活日志治理能力后的
+artifact policy ceiling；当前 Release Profile 尚未组合且 flag 默认关闭时，resolved mode 为
+更严格的 `off`，不构成对该默认值的放宽。
 
 | Task | dependsOn | 文件/产出 | 定向验证 | 迁移与回滚 |
 | --- | --- | --- | --- | --- |
