@@ -3,6 +3,7 @@
 // 所有状态变更通过类型化事件表示，供 runtime 内部及各层消费者使用
 
 import type { ContextTokenEstimate } from '@/core/model/context-budget';
+import type { NetworkDecisionReceiptV1 } from '@/core/sandbox/network-enforcer';
 import type { ToolGrant } from '@/core/types';
 import type {
   CapabilityArtifactRef,
@@ -344,6 +345,13 @@ export interface ToolProgressEvent {
   toolCallId: string;
   chunk: string;
   stream: 'stdout' | 'stderr';
+}
+
+/** Durable allow/deny fact persisted before an admitted network socket opens. */
+export interface NetworkAdmissionDecidedEvent {
+  type: 'network.admission_decided';
+  toolCallId: string;
+  decision: NetworkDecisionReceiptV1;
 }
 
 /** 工具调用成功完成 */
@@ -964,6 +972,7 @@ export type RuntimeEvent =
   | ToolExecutionReadyEvent
   | ToolStartedEvent
   | ToolProgressEvent
+  | NetworkAdmissionDecidedEvent
   | ToolFinishedEvent
   | ToolFailedEvent
   | ToolRejectedEvent

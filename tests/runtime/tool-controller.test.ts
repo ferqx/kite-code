@@ -227,6 +227,142 @@ describe('executeRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
+  test('sealed network boundary rejects every MCP provider path before readiness or search', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'sealed-mcp-network',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization = { mode: 'full_access', commandGrants: {} };
+    const descriptor = {
+      capabilityId: 'mcp:docs/search',
+      revision: 'revision-1',
+      kind: 'mcp_tool' as const,
+      displayName: 'search',
+      description: 'search fixture',
+      provider: { type: 'mcp' as const, id: 'docs', provenance: 'remote' as const },
+      inputSchema: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      },
+      declaredEffects: {
+        filesystem: 'none' as const,
+        network: 'read' as const,
+        externalState: 'read' as const,
+      },
+      effectiveEffects: {
+        filesystem: 'none' as const,
+        network: 'read' as const,
+        externalState: 'read' as const,
+      },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
+      availability: 'available' as const,
+      diagnostics: [],
+    };
+    const dynamicName = exposedMcpToolName('docs', 'search');
+    state.capabilities.bindings.binding = {
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: dynamicName,
+      schemaDigest: 'schema',
+      issuedForTurnId: state.turn.turnId,
+    };
+    state.tools.calls.resource = {
+      toolCallId: 'resource',
+      modelMessageId: 'model',
+      name: 'read_mcp_resource',
+      args: { server: 'docs', uri: 'docs://one' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.dynamic = {
+      toolCallId: 'dynamic',
+      modelMessageId: 'model',
+      name: dynamicName,
+      args: { query: 'runtime' },
+      status: 'queued',
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.search = {
+      toolCallId: 'search',
+      modelMessageId: 'model',
+      name: 'tool_search',
+      args: { query: 'docs search' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('resource', 'dynamic', 'search');
+
+    const manager = new McpConnectionManager();
+    const runtimeManager = manager as McpConnectionManager & {
+      ensureProviderReady(providerId: string, timeoutMs?: number): Promise<void>;
+    };
+    let providerCalls = 0;
+    runtimeManager.ensureProviderReady = async () => {
+      providerCalls += 1;
+    };
+    manager.findCapability = () => {
+      providerCalls += 1;
+      return descriptor;
+    };
+    manager.callCapability = async () => {
+      providerCalls += 1;
+      return { content: [] };
+    };
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['resource', 'dynamic', 'search'],
+      mcpManager: runtimeManager,
+      taskConfig: {
+        apiKey: 'test',
+        baseURL: 'http://localhost',
+        modelName: 'mock',
+        providerName: 'mock',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: true },
+        features: {
+          capabilityCatalogV1: true,
+          mcpRuntimeBindingV1: true,
+          toolSearchV1: true,
+          networkBoundaryV1: true,
+        },
+        executionBoundary: {
+          filesystemScope: 'workspace_write',
+          workspaceRoot: process.cwd(),
+          networkMode: 'allowlist',
+          networkAllowlist: ['docs.example'],
+          allowLocalAndPrivateNetwork: false,
+          protectedPathPolicy: 'deny',
+          maxProcessTreeSizePerShellInvocation: 8,
+          sandboxRequired: true,
+          sandboxUnavailable: 'fail',
+        },
+      },
+    });
+
+    expect(providerCalls).toBe(0);
+    expect(events).toHaveLength(3);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'tool.rejected', toolCallId: 'resource' }),
+        expect.objectContaining({ type: 'tool.rejected', toolCallId: 'dynamic' }),
+        expect.objectContaining({ type: 'tool.rejected', toolCallId: 'search' }),
+      ]),
+    );
+    for (const event of events) {
+      expect(event).toMatchObject({
+        type: 'tool.rejected',
+        failure: { kind: 'mandatory_policy_unavailable' },
+      });
+    }
+  });
+
   test('ask_user emits user_input.requested with the interrupt spec payload', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-ask-user-interrupt',

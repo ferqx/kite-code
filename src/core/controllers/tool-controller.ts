@@ -42,6 +42,7 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import {
@@ -312,6 +313,7 @@ async function handleSubAgentResume(params: {
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   emitSubagentEvent: SubAgentEventSink;
   recordFilePreimage?: FilePreimageRecorder;
+  recordNetworkDecision?: NetworkDecisionRecorderV1;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   const { continuation } = params;
@@ -360,6 +362,7 @@ async function handleSubAgentResume(params: {
         approvedGrant: call?.approvalGrant ?? 'none',
         threadId: params.state.session.threadId,
         recordFilePreimage: params.recordFilePreimage,
+        recordNetworkDecision: params.recordNetworkDecision,
         mcpManager: params.mcpManager,
         ...(resumedBinding
           ? {
@@ -551,6 +554,7 @@ export async function executeRuntimeTools(params: {
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
   recordFilePreimage?: FilePreimageRecorder;
+  recordNetworkDecision?: NetworkDecisionRecorderV1;
 }): Promise<RuntimeEvent[]> {
   const approvedParallelShellBatch =
     params.toolCallIds.length > 1 &&
@@ -650,6 +654,24 @@ export async function executeRuntimeTools(params: {
     const ceilingViolation = skillCapabilityCeilingViolation(params.state, call, request);
     if (ceilingViolation) {
       events.push({ type: 'tool.rejected', toolCallId, reason: ceilingViolation });
+      continue;
+    }
+    if (
+      params.taskConfig?.executionBoundary &&
+      (request.name === 'tool_search' ||
+        request.name === 'list_mcp_resources' ||
+        request.name === 'list_mcp_tools' ||
+        request.name === 'read_mcp_resource' ||
+        isMcpRequest(request))
+    ) {
+      const reason =
+        'MCP and capability-search provider access is unavailable under the sealed network boundary until its transport uses per-invocation endpoint admission.';
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason,
+        failure: classifyFailure('mandatory_policy_unavailable', reason),
+      });
       continue;
     }
     if (isMcpRequest(request)) {
@@ -1290,6 +1312,7 @@ export async function executeRuntimeTools(params: {
           descendantResourceAdmission: params.descendantResourceAdmission,
           emitSubagentEvent,
           recordFilePreimage: params.recordFilePreimage,
+          recordNetworkDecision: params.recordNetworkDecision,
         });
         events.push(...resumeEvents);
         continue;
@@ -1308,6 +1331,7 @@ export async function executeRuntimeTools(params: {
           approvedGrant: call.approvalGrant ?? 'none',
           threadId: params.state.session.threadId,
           recordFilePreimage: params.recordFilePreimage,
+          recordNetworkDecision: params.recordNetworkDecision,
           mcpManager: params.mcpManager,
           skillManifests: params.skillManifests,
           skillOptions: params.skillOptions,
@@ -1478,6 +1502,7 @@ export async function executeRuntimeTools(params: {
             approvedGrant: call.approvalGrant ?? 'none',
             threadId: params.state.session.threadId,
             recordFilePreimage: params.recordFilePreimage,
+            recordNetworkDecision: params.recordNetworkDecision,
             mcpManager: params.mcpManager,
             ...(mcpDescriptor
               ? {

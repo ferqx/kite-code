@@ -5,7 +5,8 @@
 读取时机：修改 sandbox backend、production execution admission、process-tree 限制、
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
-验证：`bun test tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts`、
+验证：`bun test tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
+tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
@@ -59,6 +60,13 @@ dependency 的 `/private/etc/hosts`。这些只是
 证明每次 Shell invocation 的硬 process-tree 数量上限，forked Skill/local stdio MCP 与两个
 production composition entrypoint 也尚未形成 native evidence，因此 outcome 仍必须是
 `excluded`、`productionSupported=false`。
+
+Task 1B.4 的进程内网络控制器已能对 `web_fetch` 逐 invocation/hop 执行精确 host allowlist、
+DNS 实际地址检查、manual redirect 复查、endpoint revision 与 pinned socket，并在 dispatch 前
+持久化 allow/deny receipt。该控制器不依赖 proxy environment，但也不能约束任意 descendant。
+因此所有候选平台在 sealed boundary 下仍把 Shell/Skill 网络收紧为 off，并在 Task 1B.8 前关闭
+全部 MCP transport entrypoint 和 `tool_search` Provider readiness；没有 child-bypass native
+conformance，也没有平台因此进入支持集。
 
 Linux bubblewrap 的开发边界现已把 canonical Workspace 按 `workspace_write` 或 `read_only`
 分别投影为 rw/ro bind，并把逐 invocation runtime 显式 rw bind；runtime 清理在只暴露该 runtime

@@ -208,6 +208,7 @@ const featuresSchema = z
     terminalOutcomeV1: z.boolean().optional(),
     boundedCancellationV1: z.boolean().optional(),
     executionBoundaryV1: z.boolean().optional(),
+    networkBoundaryV1: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -592,6 +593,10 @@ export function loadProductionAgentConfig(
     ...configLayers.map((layer) => layer?.features?.executionBoundaryV1),
     featureOverrides?.executionBoundaryV1,
   ]);
+  const networkBoundaryRolloutEnabled = composeExecutionBoundaryRolloutV1([
+    ...configLayers.map((layer) => layer?.features?.networkBoundaryV1),
+    featureOverrides?.networkBoundaryV1,
+  ]);
   const effectiveSandboxEnabled = composeSandboxEnabledV1([
     ...configLayers.map((layer) => layer?.sandbox?.enabled),
     sandboxEnabled,
@@ -616,9 +621,15 @@ export function loadProductionAgentConfig(
   }
   return {
     ...config,
-    features: { ...resolvedFeatures, executionBoundaryV1: true },
+    features: {
+      ...resolvedFeatures,
+      executionBoundaryV1: true,
+      networkBoundaryV1: networkBoundaryRolloutEnabled,
+    },
     executionBoundary: decision.boundary,
-    executionCapabilitySurface: decision.surface,
+    executionCapabilitySurface: networkBoundaryRolloutEnabled
+      ? decision.surface
+      : { ...decision.surface, network: false },
     sandbox: { enabled: true },
     productionExecution: decision.qualificationProof,
   } as ProductionAgentConfigV1;

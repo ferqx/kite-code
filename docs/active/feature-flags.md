@@ -26,6 +26,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | `boundedCancellationV1` | `false` | 启用 run deadline、统一 AbortSignal 与 descendant/process-tree 有界清理 |
 | `terminalOutcomeV1` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
 | `executionBoundaryV1` | `false` | 允许 composition root 消费 release-pinned `ExecutionBoundaryV1`；开启本身不产生平台资格或边界 artifact |
+| `networkBoundaryV1` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
 
 `providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
 前者仍要求批准 registry/gate，且当前 route 集合为空；后者只允许新 run 建立 limited preset
@@ -51,6 +52,12 @@ qualification registry。artifact 缺失/非法、Workspace 不匹配、实际�
 任一 backend 维度未强制时，生产 capability surface 全部关闭；审批不能恢复。当前批准 registry
 为空支持集，因此本 flag 不产生 production artifact 或可运行的 production shell/writer。
 
+`networkBoundaryV1` 同样按 user、project、CLI/App 的显式值 deny-wins 组合；全部未指定时默认
+关闭。关闭不能恢复旧 `allow_all`：production capability surface 的 network 轴被关闭，sealed
+boundary 内的 `web_fetch` 在 DNS 前以 `network_off` 拒绝，Shell/Skill descendant 固定使用
+network-off，MCP transport 在 Task 1B.8 接入同一逐调用 admission 前整体拒绝。开启只允许
+`web_fetch` 使用 release boundary 的精确 host allowlist；每个 robots/content/redirect hop 独立
+解析、持久化决定并把 socket 固定到已批准 IP，不提供 URL path 级隔离，也不产生平台资格。
 
 上下文压缩的 flag 术语（功能开关）真值如下：
 

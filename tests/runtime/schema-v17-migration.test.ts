@@ -18,7 +18,7 @@ afterEach(() => {
   }
 });
 
-describe('runtime schema v17/v18 migration', () => {
+describe('runtime schema v17-v20 migration', () => {
   test('preserves the v18 ledger while adding v19 waiter and terminal fields', () => {
     const path = join(tmpdir(), `kite-v18-v19-${crypto.randomUUID()}.db`);
     paths.push(path);
@@ -53,6 +53,34 @@ describe('runtime schema v17/v18 migration', () => {
       },
     });
     expect(kernel.getState().terminalOutcome).toBeUndefined();
+    kernel.close();
+  });
+
+  test('upgrades a v19 snapshot to v20 without inventing network decisions', () => {
+    const path = join(tmpdir(), `kite-v19-v20-${crypto.randomUUID()}.db`);
+    paths.push(path);
+    const state = createInitialRuntimeState({ threadId: 'v19', userId: 'u', workspace: '/' });
+    state.tools.calls.fetch = {
+      toolCallId: 'fetch',
+      modelMessageId: 'model',
+      name: 'web_fetch',
+      args: { url: 'https://example.com' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('fetch');
+    const store = createRuntimeStore(path);
+    store.saveSnapshot('v19', { ...state, schemaVersion: 19 });
+    store.close();
+
+    const kernel = createAgentKernel({
+      threadId: 'v19',
+      userId: 'u',
+      workspace: '/',
+      storePath: path,
+    });
+    expect(kernel.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+    expect(kernel.getState().tools.calls.fetch?.networkDecisions).toBeUndefined();
     kernel.close();
   });
 });

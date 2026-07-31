@@ -10,6 +10,7 @@ import type {
   McpProviderDirectoryStatus,
 } from '@/core/mcp/runtime-provider';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
+import type { NetworkDecisionReceiptV1 } from '@/core/sandbox/network-enforcer';
 import type { AuthorizationSource, ToolGrant } from '@/core/types';
 import type {
   CapabilityBinding,
@@ -262,6 +263,8 @@ export interface ToolCallRecord {
   bindingId?: string;
   capabilityId?: string;
   capabilityRevision?: string;
+  /** Durable per-hop decisions recorded before network dispatch. */
+  networkDecisions?: NetworkDecisionReceiptV1[];
 }
 
 /** Structured, JSON-safe facts produced by a tool execution. */
@@ -284,6 +287,10 @@ export interface ToolResultMeta {
   /** Bounded process-tree cleanup facts; never contains process IDs or command text. */
   processCleanupConfirmed?: boolean;
   unconfirmedDescendantCount?: number;
+  /** Sealed network policy revision and per-hop admission receipts. */
+  networkPolicyRevision?: string;
+  networkAdmissionDigests?: string[];
+  networkFailureCode?: string;
 }
 
 export interface CapabilityRuntimeState {
@@ -413,7 +420,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 19;
+export const RUNTIME_STATE_SCHEMA_VERSION = 20;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;

@@ -1155,6 +1155,31 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.file_change':
       return state;
 
+    case 'network.admission_decided': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (!existingCall || event.decision.toolCallId !== event.toolCallId) return state;
+      if (
+        existingCall.networkDecisions?.some(
+          (decision) => decision.receiptDigest === event.decision.receiptDigest,
+        )
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: {
+              ...existingCall,
+              networkDecisions: [...(existingCall.networkDecisions ?? []), event.decision],
+            },
+          },
+        },
+      };
+    }
+
     // ── 用户输入交互 / User input interaction ──
 
     case 'user_input.requested':

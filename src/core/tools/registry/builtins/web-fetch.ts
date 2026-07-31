@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  createNetworkBoundaryFetchV1,
+  NetworkBoundaryError,
+} from '@/core/sandbox/network-enforcer';
 import { WEB_FETCH_CONTRACT } from '@/core/tools/tool-contracts';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { WebFetchResult } from '@/core/web/types';
@@ -27,6 +31,16 @@ export const webFetchInputSchema = z.object({
 
 export type WebFetchInput = z.infer<typeof webFetchInputSchema>;
 
+type GovernedWebFetchResult = WebFetchResult & {
+  aborted?: boolean;
+  timedOut?: boolean;
+  networkBoundary?: {
+    policyRevision: string;
+    admissionDigests: string[];
+    failureCode?: string;
+  };
+};
+
 export const webFetchSpec = defineExecutableTool({
   name: 'web_fetch',
   kind: 'computer',
@@ -40,20 +54,44 @@ export const webFetchSpec = defineExecutableTool({
     classificationReason: 'Fetches public web content without external mutation.',
   }),
   approvalSummary: (input) => `web_fetch ${input.url}`,
-  execute: async (
-    input,
-    context,
-  ): Promise<WebFetchResult & { aborted?: boolean; timedOut?: boolean }> => {
+  execute: async (input, context): Promise<GovernedWebFetchResult> => {
+    const admissionDigests: string[] = [];
+    const networkBoundary = context.networkBoundaryPolicy;
     try {
-      return await fetchAndExtract(input.url, {
+      if (networkBoundary && (!context.toolCallId || !context.recordNetworkDecision)) {
+        throw new NetworkBoundaryError(
+          'controller_unavailable',
+          'Durable network decision recording is unavailable.',
+        );
+      }
+      const fetchImpl = networkBoundary
+        ? createNetworkBoundaryFetchV1(networkBoundary, {
+            toolCallId: context.toolCallId,
+            recordDecision: async (decision) => {
+              await context.recordNetworkDecision?.(decision);
+              admissionDigests.push(decision.receiptDigest);
+            },
+          })
+        : undefined;
+      const result = await fetchAndExtract(input.url, {
         signal: context.signal,
         maxChars: input.max_chars,
         timeoutMs: input.timeout_ms,
+        fetch: fetchImpl,
       });
+      return networkBoundary
+        ? {
+            ...result,
+            networkBoundary: {
+              policyRevision: networkBoundary.revision,
+              admissionDigests,
+            },
+          }
+        : result;
     } catch (error) {
       const aborted = error instanceof Error && error.name === 'AbortError';
       const timedOut = aborted && error.message === 'Fetch timeout';
-      return {
+      const result: GovernedWebFetchResult = {
         ok: false,
         url: input.url,
         truncated: false,
@@ -67,6 +105,14 @@ export const webFetchSpec = defineExecutableTool({
         aborted,
         timedOut,
       };
+      if (networkBoundary) {
+        result.networkBoundary = {
+          policyRevision: networkBoundary.revision,
+          admissionDigests,
+          ...(error instanceof NetworkBoundaryError ? { failureCode: error.code } : {}),
+        };
+      }
+      return result;
     }
   },
   projectResult: (output, context) => {
@@ -94,6 +140,15 @@ export const webFetchSpec = defineExecutableTool({
           ? { rawResultDigest: projectionDigest(rawContent, '', 0) }
           : {}),
         truncated: modelContent !== rawContent || (output.ok && output.truncated),
+        ...(output.networkBoundary
+          ? {
+              networkPolicyRevision: output.networkBoundary.policyRevision,
+              networkAdmissionDigests: output.networkBoundary.admissionDigests,
+              ...(output.networkBoundary.failureCode
+                ? { networkFailureCode: output.networkBoundary.failureCode }
+                : {}),
+            }
+          : {}),
       },
       display: { verb: 'Fetch' },
     };

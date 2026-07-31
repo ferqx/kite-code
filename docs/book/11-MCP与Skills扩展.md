@@ -26,6 +26,11 @@ MCP Tools 通过三个内置只读工具按意图使用：
 
 三个工具正交：Resource 为空不表示没有 MCP Tool，search 零匹配不表示 catalog 为空。
 
+当配置携带 sealed production execution boundary 时，当前 Controller 会在任何 Provider
+lookup/readiness 前拒绝上述 inventory/resource/search 和动态 MCP 调用；这用于在 Task 1B.8
+完成逐 invocation transport admission 前保持 fail closed，不表示 MCP 已继承进程内
+`web_fetch` 的 host allowlist。
+
 ## 11.3 Health 与恢复
 
 Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circuit-open 和断开等运行阶段。Catalog 或 capability revision 变化使旧 binding 失效。崩溃后的非终态写入进入 reconciliation，不自动重复创建外部对象。

@@ -18,6 +18,11 @@ state, safe-retry decision, recovery entry, and pending-verification bit. TUI an
 consumers use `projectTerminalOutcomeV1`; they do not infer terminal meaning from localized error
 strings.
 
+Runtime schema v20 preserves that terminal contract and adds durable per-hop network admission facts.
+Network denial metadata uses stable boundary codes such as `network_off`,
+`host_not_allowlisted`, `private_or_reserved_address`, `endpoint_revision_mismatch`, and
+`controller_unavailable`; clients do not infer these outcomes from transport error strings.
+
 The production reason-code set distinguishes artifact/profile/digest invalid, workspace
 untrusted, sandbox/network/worktree unavailable, model retry exhausted, Provider/MCP unavailable,
 persistence unavailable, budget exhausted, resource saturation, tool/shell concurrency

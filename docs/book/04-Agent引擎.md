@@ -62,6 +62,10 @@ Runtime schema v19 的终态使用 `RunTerminalOutcomeV1`。展示层读取 reas
 effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
 `status=completed` 可进入完成展示。
 
+Runtime schema v20 保留上述终态，并把每个网络 hop 的 allow/deny admission receipt 持久化到
+对应 Tool Call。获准 socket 只有在 receipt event 提交成功后才能打开；恢复 v19 snapshot 时
+不会为历史调用补造网络决定。
+
 ## 4.5 上下文与缓存
 
 静态 prompt、稳定工具契约和 cacheable Runtime context 尽量保持前缀稳定；动态状态、Skill disclosure、搜索结果和 turn binding 放在轮次投影中。上下文压缩保留任务事实、计划和工具结果语义，不取代 Runtime Store。

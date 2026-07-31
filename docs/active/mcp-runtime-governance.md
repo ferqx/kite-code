@@ -2,11 +2,19 @@
 
 状态：active
 读取时机：修改 MCP discovery、动态工具绑定、MCP policy、MCP 调用或结果归一化时。
-验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-tool-runner.test.ts tests/mcp-tool-policy.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/actions.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/verification.test.ts tests/golden/golden.test.ts tests/policies/approval-policy.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`（`tests/e2e/live/mcp/` 下的显式公网 smoke）、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-tool-runner.test.ts tests/mcp-tool-policy.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/actions.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/verification.test.ts tests/golden/golden.test.ts tests/policies/approval-policy.test.ts tests/sandbox/network-boundary.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`（`tests/e2e/live/mcp/` 下的显式公网 smoke）、`bun run typecheck`、`bun run check:core-boundary`。
 
 MCP tool execution is available only when both `capabilityCatalogV1` and `mcpRuntimeBindingV1` are enabled. The ModelController records bindings before the model call; a dynamic model-visible name must match its binding, turn, descriptor revision and input schema. Runtime invokes `McpRuntimeProvider.callCapability({ capabilityId, expectedRevision, arguments, signal })`; the Supervisor façade rechecks effective Provider availability, and the connection manager atomically resolves the current descriptor, compares revision, validates the current schema and only then obtains the original Provider/Tool identity. Model-visible names are never parsed as execution identity.
 
 When a production execution capability surface is present, dynamic MCP disclosure and Runner dispatch also apply that surface before policy or approval. A descriptor whose declared/effective filesystem, network, or external-state effects exceed the independent `write`/`network` axes is omitted and rejected; when both remote network and local stdio MCP are closed, no MCP Tool binding is executable. Approval cannot widen this ceiling. The sealed no-process read-only fallback continues to omit every dynamic MCP binding.
+
+Task 1B.4 additionally closes every MCP transport entrypoint whenever a sealed execution boundary is
+present: dynamic Tool calls, resource/tool inventory, resource reads, and `tool_search` paths that could
+trigger Provider readiness are rejected by the Controller before Provider lookup/readiness. This is
+intentional fail-closed composition, not an assertion that local stdio or
+remote HTTP MCP already inherit the in-process `web_fetch` controller. Task 1B.8 must integrate each MCP
+transport operation with per-invocation DNS/redirect/endpoint admission and durable receipts before any
+of these entrypoints can reopen under a production boundary.
 
 MCP list changes replace the immutable catalog snapshot. Existing bindings do not update in place and fail closed. P0 accepts object-root JSON Schema Draft-07 only; each schema is validated against an admission budget (256 KiB UTF-8 bytes, 32 levels depth, 4096 object nodes, 1024 properties) in a single traversal. Manager retains the complete raw Tool discovery, while the capability catalog contains only enabled and schema-valid Tools. Disabled, invalid, budget-exceeding or unsupported Tools remain diagnosable through the control snapshot but are not model-visible or executable; direct Manager calls also require a current available descriptor.
 

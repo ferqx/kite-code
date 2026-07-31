@@ -30,6 +30,7 @@ describe('feature flags', () => {
     expect(getFeatureFlags().boundedCancellationV1).toBe(false);
     expect(getFeatureFlags().terminalOutcomeV1).toBe(false);
     expect(getFeatureFlags().executionBoundaryV1).toBe(false);
+    expect(getFeatureFlags().networkBoundaryV1).toBe(false);
     expect(
       getFeatureFlags({ features: { boundedCancellationV1: true } }).boundedCancellationV1,
     ).toBe(true);
@@ -54,6 +55,7 @@ describe('feature flags', () => {
     });
     expect(parseFeatureOverride('terminalOutcomeV1=false')).toEqual({ terminalOutcomeV1: false });
     expect(parseFeatureOverride('executionBoundaryV1')).toEqual({ executionBoundaryV1: true });
+    expect(parseFeatureOverride('networkBoundaryV1')).toEqual({ networkBoundaryV1: true });
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });
 

@@ -4,7 +4,7 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test tests/runtime/tool-controller.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/tool-controller.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、`bun run typecheck`。
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049。
 
@@ -32,6 +32,14 @@ lifecycle attempt，child 模型、工具、Shell/MCP 和 artifact 调用各自�
 command/MCP check 的组合 Verification 必须转 `unknown`，不能整体退款。`resourceBudgetV1`
 开启但 `boundedCancellationV1` 关闭时，模型不披露 writer、Shell 或 child capability，
 Controller 也必须拒绝直接执行，不能退回无界副作用路径。
+
+sealed `ExecutionBoundaryV1` 还会在 dispatch 时派生逐调用 network policy。当前 `web_fetch`
+对 robots、正文和每个 redirect hop 分别做 DNS/endpoint admission，并在 socket 前持久化
+`network.admission_decided`；Tool Result 只携带 policy revision、receipt digest 和 typed failure。
+feature 关闭、决定无法持久化或 controller 不可用都 fail closed。因为当前没有可证明的跨进程
+host allowlist，Shell/Skill descendant 固定 network-off，MCP inventory/resource/tool 与可能触发
+Provider readiness 的 `tool_search` 在 Controller provider lookup 前拒绝；审批或 `full` mode 不能
+把这些路径提升为 `allow_all`。
 
 Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运行中）状态时直接发布 `tool.progress`，Runtime event sink术语（运行时事件接收器）随即把增量交给 TUI；不得先缓存在 Controller 私有数组中等待终态结果。同一批并发 Shell 的增量允许按真实到达顺序交错，但每条事件必须保留各自 `toolCallId`。未提供 event sink术语（事件接收器）的直接调用兼容路径仍在返回数组中收集事件。
 

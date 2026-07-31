@@ -12,6 +12,11 @@ import {
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '@/core/sandbox/execution-capability-surface';
+import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
+import {
+  type NetworkBoundaryPolicyV1,
+  networkBoundaryPolicyFromExecutionBoundaryV1,
+} from '@/core/sandbox/network-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
@@ -148,6 +153,8 @@ export interface RunApprovedToolInput {
    * enabling /rewind to restore files. Best-effort by contract.
    */
   recordFilePreimage?: (path: string, content: string | null, existed: boolean) => void;
+  /** Persists one network decision before the admitted socket can be opened. */
+  recordNetworkDecision?: NetworkDecisionRecorderV1;
   /** 当前模型轮次的工具可用性快照，用于 Registry effects 分类。省略时回退到仅 workspace/threadId。 */
   availabilityContext?: ToolAvailabilityContext;
 }
@@ -182,6 +189,12 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   } = input;
 
   const executionSurface = taskConfig?.executionCapabilitySurface;
+  const networkBoundaryPolicy = taskConfig?.executionBoundary
+    ? networkBoundaryPolicyFromExecutionBoundaryV1(
+        taskConfig.executionBoundary,
+        taskConfig.features?.networkBoundaryV1 === true,
+      )
+    : undefined;
   if (executionSurface) {
     const builtinSpec = builtinToolRegistry.get(request.name);
     const descriptor = builtinSpec
@@ -658,6 +671,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'list_mcp_resources') {
+    if (networkBoundaryPolicy) {
+      return ungovernedMcpNetworkResult(request, networkBoundaryPolicy);
+    }
     const dispatched = await dispatchRegisteredTool(listMcpResourcesSpec, request.args, {
       workspace,
       threadId,
@@ -687,6 +703,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'list_mcp_tools') {
+    if (networkBoundaryPolicy) {
+      return ungovernedMcpNetworkResult(request, networkBoundaryPolicy);
+    }
     const dispatched = await dispatchRegisteredTool(listMcpToolsSpec, request.args, {
       workspace,
       threadId,
@@ -716,6 +735,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'read_mcp_resource') {
+    if (networkBoundaryPolicy) {
+      return ungovernedMcpNetworkResult(request, networkBoundaryPolicy);
+    }
     const dispatched = await dispatchRegisteredTool(readMcpResourceSpec, request.args, {
       workspace,
       threadId,
@@ -745,6 +767,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (isMcpRequest(request)) {
+    if (networkBoundaryPolicy) {
+      return ungovernedMcpNetworkResult(request, networkBoundaryPolicy);
+    }
     if (!mcpManager) {
       return withFailureGuidance(request, {
         ok: false,
@@ -804,6 +829,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       workspace,
       threadId,
       signal,
+      toolCallId: request.id,
+      networkBoundaryPolicy,
+      recordNetworkDecision: input.recordNetworkDecision,
     });
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -826,7 +854,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'shell_execute') {
-    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant);
+    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant, networkBoundaryPolicy);
     const dispatched = await dispatchRegisteredTool(shellExecuteSpec, request.args, {
       workspace,
       signal,
@@ -936,9 +964,34 @@ function serializeMcpResultForModel(result: import('@/core/capabilities/result')
 function resolveShellNetworkMode(
   policy: ReturnType<typeof evaluateToolApproval>,
   hasExecutionGrant: boolean,
+  networkBoundaryPolicy?: NetworkBoundaryPolicyV1,
 ): ShellNetworkMode {
+  // No supported native backend can enforce a host allowlist for arbitrary
+  // descendants yet. A sealed execution boundary therefore tightens process
+  // networking to off instead of falling back to legacy allow_all.
+  if (networkBoundaryPolicy) return 'disabled';
   const mayNeedNetwork = policy.effects?.network || policy.effects?.uncertainEffects;
   return mayNeedNetwork && hasExecutionGrant ? 'allow_all' : 'disabled';
+}
+
+function ungovernedMcpNetworkResult(
+  request: PendingToolRequest,
+  policy: NetworkBoundaryPolicyV1,
+): ToolExecutionResult {
+  return withFailureGuidance(request, {
+    ok: false,
+    command: request.protectedCommand,
+    exitCode: -1,
+    stdout: '',
+    stderr:
+      'MCP execution is unavailable under the sealed network boundary until its transport uses per-invocation endpoint admission.',
+    status: 'rejected',
+    resultMeta: {
+      networkPolicyRevision: policy.revision,
+      networkAdmissionDigests: [],
+      networkFailureCode: 'controller_unavailable',
+    },
+  });
 }
 
 /** 给失败工具结果补充模型可直接使用的原因和正确用法 / Add model-facing failure guidance to failed tool results */

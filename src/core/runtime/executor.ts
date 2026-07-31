@@ -310,6 +310,22 @@ export function createRuntimeEffectExecutor(
               dependencies.runtimeStore,
               state.session.threadId,
             ),
+            ...(executionContext
+              ? {
+                  recordNetworkDecision: async (
+                    decision: import('@/core/sandbox/network-enforcer').NetworkDecisionReceiptV1,
+                  ) => {
+                    const applied = await executionContext.persistEvent({
+                      type: 'network.admission_decided',
+                      toolCallId: decision.toolCallId,
+                      decision,
+                    });
+                    if (!applied) {
+                      throw new Error('Network admission decision became stale before dispatch.');
+                    }
+                  },
+                }
+              : {}),
           });
           return terminalEvents;
         };

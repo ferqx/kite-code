@@ -5,7 +5,9 @@
 读取时机：修改 `ExecutionBoundaryV1`、production composition root、sandbox capability
 projection、release-controlled execution policy 或对应 feature flag 时。
 
-验证：`bun test tests/sandbox/execution-boundary.test.ts tests/config/features.test.ts`、
+验证：`bun test tests/sandbox/execution-boundary.test.ts tests/sandbox/network-boundary.test.ts
+tests/sandbox/network-boundary-concurrency.test.ts tests/runtime/tool-controller.test.ts
+tests/config/features.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0051、ADR-0054、ADR-0061、`execution-platform-support.md`。
@@ -75,6 +77,28 @@ registry 是空支持集，因此所有 production 配置加载都在返回可�
 Workspace realpath、排序去重后的 host allowlist 和所有安全字段进入
 `computeExecutionBoundaryDigestV1()`。字段、Workspace identity 或有效 allowlist 变化都会改变
 digest，使旧 release evidence 失效。
+
+## Network projection and durable admission
+
+存在 sealed `ExecutionBoundaryV1` 时，Runner 总是派生不可变 `NetworkBoundaryPolicyV1`。
+`networkBoundaryV1=false` 只会把 policy 收紧为 `off`，不会回到开发期 `allow_all`。开启后，当前
+唯一具备透明逐调用执行层的网络工具是进程内 `web_fetch`：每次 robots、正文和 redirect hop
+都重新校验精确 allowlisted DNS host，解析全部实际地址并拒绝 IP literal、loopback、private、
+link-local、metadata 与 reserved range；transport 使用已批准地址的 pinned lookup，且不消费
+proxy environment。这里只承诺 host 级 admission，不承诺 URL path 隔离。
+
+每个 allow/deny 决定都带独立 invocation/hop、policy/endpoint revision 和 digest，并在任何已
+批准 socket 打开前通过 `network.admission_decided` 写入 Runtime。decision store、resolver 或
+observer 不可用时返回 typed `controller_unavailable`；并发 sibling 不共享 receipt，某个 denial
+或 controller failure 不会覆盖或取消其他 sibling 已持久化的决定。Runtime schema v20 把这些
+决定保存在对应 Tool Call，Tool Result 只投影 policy revision、receipt digests 与失败码，不保存
+响应正文。
+
+当前原生 backend 尚不能对任意 Shell/Skill descendant 实现无旁路 host allowlist，因此 sealed
+boundary 下 Shell 网络固定为 disabled；所有 MCP inventory/resource/tool transport 和可能触发
+Provider readiness 的 `tool_search` 也在 Controller 的 provider lookup/readiness 前拒绝，直到
+Task 1B.8 把 transport 接入同一逐 invocation admission。该 fail-closed 行为与
+当前空 production support set 一致，不是 network allowlist 的跨进程 conformance 声明。
 
 ## Native filesystem projection
 

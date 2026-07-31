@@ -89,6 +89,13 @@ Runtime schema v19 在 v18 `ResourceBudgetV1` run-scoped 累计 ledger 上增加
 共享一个 `runId`、累计 usage 和 reservation map；`resource_budget.configured/reserved/
 dispatch_started/reconciled/released/unknown` 以及 waiter enqueue/promote/cancel/timeout 事件
 通过现有 event + snapshot 单事务持久化。
+
+Runtime schema v20 保留 v19 的 ledger、waiter 与 terminal outcome，并新增每个 Tool Call 的
+durable `network.admission_decided` receipt。网络 controller 在任何已批准 socket 打开前先提交
+allow/deny event；reducer 以 receipt digest 幂等追加到对应调用。迁移 v19 snapshot 只升级
+schema version，不虚构历史 network decision。并发调用各自持有 invocation/hop 和 endpoint
+revision，不能复用 sibling 的 admission。
+
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
 dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
 `legacy_unconfigured`，不会伪造余额；v18 ledger 保留 reservation，并补齐空 waiter queue。

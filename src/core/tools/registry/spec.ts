@@ -13,6 +13,8 @@ import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { PlanRuntimeContext } from '@/core/runtime/plan-facade';
 import type { RuntimeState, ToolResultMeta } from '@/core/runtime/state';
+import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
+import type { NetworkBoundaryPolicyV1 } from '@/core/sandbox/network-policy';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
@@ -51,6 +53,10 @@ export interface ToolExecutionContext extends ToolContext {
   signal?: AbortSignal;
   shellExecutor?: ShellExecutor;
   shellNetworkMode?: ShellNetworkMode;
+  /** Per-invocation network ceiling derived from the sealed execution boundary. */
+  networkBoundaryPolicy?: NetworkBoundaryPolicyV1;
+  /** Durable pre-dispatch sink. A governed socket cannot open until it resolves. */
+  recordNetworkDecision?: NetworkDecisionRecorderV1;
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** MCP inventory/resource specs consume the already-governed Runtime provider. */
   mcpManager?: McpRuntimeProvider;
