@@ -49,6 +49,26 @@ export function persistedSessionIds(workspace: Pick<TestWorkspace, 'home'>): str
   }
 }
 
+/** Check durable Runtime events without treating terminal rendering as persistence evidence. */
+export function persistedRuntimeContains(
+  workspace: Pick<TestWorkspace, 'home'>,
+  text: string,
+): boolean {
+  const checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
+  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
+  try {
+    return store
+      .listSessions()
+      .some((session) =>
+        store
+          .loadEvents(session.threadId)
+          .some((stored) => JSON.stringify(stored.event).includes(text)),
+      );
+  } finally {
+    store.close();
+  }
+}
+
 /**
  * Create a fully isolated test environment.
  *

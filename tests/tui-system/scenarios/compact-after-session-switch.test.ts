@@ -19,7 +19,11 @@ import {
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace, persistedSessionIds } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  persistedRuntimeContains,
+  persistedSessionIds,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -171,8 +175,18 @@ describe('TUI PTY System — /compact after session switch', () => {
       const marker = 'restart-persistence-marker';
       await typeText(tui, `/compact ${marker}`);
       tui.write('\r');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      expect(screenContains(tui.viewport(), marker)).toBe(true);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, `/compact ${marker}`) &&
+            screenContains(viewport, '❯') &&
+            persistedRuntimeContains(workspace, `/compact ${marker}`)
+          );
+        },
+        'marked compact command to render and reach the Runtime Store',
+        10000,
+      );
 
       // Exit the first process gracefully so all RuntimeStore writes are
       // closed, then start a fresh TUI against the same HOME/workspace.
@@ -194,7 +208,18 @@ describe('TUI PTY System — /compact after session switch', () => {
       await waitForText(() => tui.outputSinceLastAction(), '会话列表', 10000);
       // The command-bearing session was just updated, so it is first.
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), marker, 15000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, `/compact ${marker}`) &&
+            screenContains(viewport, '❯') &&
+            !screenContains(viewport, '会话列表')
+          );
+        },
+        'persisted compact command to replace the session selector after restart',
+        15000,
+      );
 
       // tui is a fresh process: this cannot match output accumulated before
       // restart and therefore proves RuntimeEvent replay restored the command.

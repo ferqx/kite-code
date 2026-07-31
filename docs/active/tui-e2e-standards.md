@@ -70,6 +70,8 @@ tests/tui-system/
    内容不存在。跨进程加载同样必须等待完整 viewport 组合状态；selector 已经包含的 session title
    不能作为 Enter 后回放完成的 receipt。空 session 尚未产生事件时不要求提前出现在持久化 session
    列表。
+   需要证明输入或 slash command 可跨进程恢复时，当前 viewport 只证明渲染，不证明 SQLite 已提交；
+   退出进程前必须同时读取隔离 Runtime Store，确认目标 event 已持久化。
    session 删除确认必须同时验证被选 thread ID 已从 Runtime Store 消失且 active thread 保留；取消
    删除必须验证 thread ID 集合不变，不能只依赖 selector 列表缓存。
 7. 改动 Runtime 多轮语义时同时运行 `tests/runtime/agent.integration.test.ts`、`tests/runtime/store.test.ts` 和相应 PTY scenario。
