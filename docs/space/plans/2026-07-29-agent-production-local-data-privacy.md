@@ -7,10 +7,9 @@
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §3.4、§9.5、§13、§14
 
-Task 1A.1–1A.5 已完成（1A.4 最终加固提交为
-`1063e879933f3e1b0cf8c0958363c999bb2696ab`）；1B.4 已由
-`bc03f77a3dac2962cd3158d3413f292b8388a0d8` 完成，1A.6 已激活并处于执行中；1A.7 按依赖保持
-未绑定。规范记录见
+Task 1A.1–1A.6 已完成（1A.6 实现提交为
+`545161a5c93bfe2127e9e01189f8a4ac8b425157`）；1A.7 已按依赖激活并负责 Phase 1A 文档、迁移与
+milestone 总收敛。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
@@ -406,7 +405,7 @@ interface RemoteMcpEgressPermitV1 {
 - [ ] POSIX 0700/0600 和 Windows owner-only ACL smoke 通过；
 - [ ] retention、单 session/总容量、symlink 和历史迁移通过；
 - [ ] model route 有版本化 data policy 和 digest；
-- [ ] remote MCP 使用独立 egress consent；
+- [x] remote MCP 使用独立 egress consent；
 - [ ] 真实用户正文默认不进入 secondary evaluation；
 - [ ] 相关 active/book/ADR/map 收敛；
 - [ ] 完整 Required CI 通过。

@@ -1,8 +1,8 @@
-# Agent 生产化 Phase 1A Task 1A.1/1A.2/1A.3/1A.4/1A.5 完成记录
+# Agent 生产化 Phase 1A Task 1A.1/1A.2/1A.3/1A.4/1A.5/1A.6 完成记录
 
 状态：completed
 日期：2026-07-30
-更新：2026-07-31（补充 Task 1A.3/1A.4）
+更新：2026-08-01（补充 Task 1A.6）
 计划：
 [`2026-07-29-agent-production-local-data-privacy.md`](../../plans/2026-07-29-agent-production-local-data-privacy.md)
 执行者：`github:@ferqx`
@@ -12,7 +12,8 @@
 `1A.2/1A.5-hardening=d0bd571e6a937aac55850bcc09df6f41bf95ac99`；
 `1A.3=2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`；
 `1A.4=bb1a6c7049284723958ca42a417411fac1a76e62`；
-`1A.4-hardening=302112e696d1dde1e31a1e652fef4b9e5a91c548,a935b2ea1b0dea5e51ea68062b8fdf77b948ccd9,a4bdf22aa7c2a987734524c278c4750e7b9faa96,1063e879933f3e1b0cf8c0958363c999bb2696ab`
+`1A.4-hardening=302112e696d1dde1e31a1e652fef4b9e5a91c548,a935b2ea1b0dea5e51ea68062b8fdf77b948ccd9,a4bdf22aa7c2a987734524c278c4750e7b9faa96,1063e879933f3e1b0cf8c0958363c999bb2696ab`；
+`1A.6=545161a5c93bfe2127e9e01189f8a4ac8b425157`
 
 ## Task 1A.1
 
@@ -72,6 +73,18 @@
   Ubuntu `sha256:3a75101d969ececc1ad0ce0f6ccc7ed9a2983ff131441d92dc829930e8953c34`、
   Windows `sha256:54d47a14caa4a8988a90c2f29b54319a47e3416687112277e699a8e03f607e02`。
 
+## Task 1A.6
+
+- 远程 HTTP MCP 的非空最终参数默认 no-egress；开启 `remoteMcpEgressPolicyV1` 后仍要求独立、
+  最长五分钟、单 invocation/route/tool/argument digest/nonce 绑定的 permit，stdio 与空参数不消费。
+- ToolController 和 Manager 双层执行 bounded secret/unknown 检查，并在任何异步授权前捕获
+  immutable JSON-safe 深快照；schema、digest、receipt 与 SDK wire payload 使用同一快照，关闭
+  resolver/receipt callback 修改原对象的 TOCTOU。
+- Runtime schema v21 持久化脱敏 `mcp.egress_decided`；Runtime Store 与 admitted receipt 同事务
+  全库唯一 claim nonce digest，重启/并行进程 replay 转换并持久化为 `permit_replayed` denial。
+- TUI system 正向 remote MCP 场景只通过显式测试组合根逐 invocation 签发 permit；生产组合根
+  保留默认拒绝并断言零 `tools/call`，scenario contract 禁止 flag/fixture 半配置。
+
 ## 验证
 
 - 独立只读复核：1A.3 GO，无 P0/P1；与 1C.6 联合定向回归 333 pass/0 fail；
@@ -83,12 +96,19 @@
 - pre-commit golden：10 pass。
 - 1A.4 独立只读复核：最终 P1 已关闭，无剩余 P0/P1；相关安全/retention 回归 25 pass；
   三平台最终 ACL workflow 全部通过。
+- 1A.6 独立只读复核：第五轮最终 GO，无剩余 P0/P1/P2；真实 Manager TOCTOU 复现已关闭；
+  定向复核 122 pass，MCP TUI 3/3 通过。
+- 1A.6 标准默认套件：2202 pass/6 skip/0 fail；完整 TUI system 通过 5 个 harness 文件和
+  36 个 scenario 文件，资源趋势 RSS +1 MiB、active +0、fd +0。
+- 1A.6 命令：`bun test tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts`、
+  `bun run test:tui:system`、`bun run test`、`bun run check:docs-impact`、`bun run check:docs`、
+  `bun run check:core-boundary`、`bun run typecheck`、`git diff --check` 均通过。
 
 ## 回滚与限制
 
 - 回滚设置 `providerDataPolicyV1=false`；production route 全部关闭，旧 qualification 不恢复。
 - 当前 approved route bundle 为空，因此本记录不产生 production-qualified route，也不产生
   `MS:1A-DONE`。
-- remote MCP content egress 仍等待 1A.6。
+- 1A.7 文档与迁移总收敛尚未完成，因此本记录仍不产生 `MS:1A-DONE`。
 - Phase 2 Release Profile/Gate 尚未组合，本记录只证明内部实现完成，不产生 production
   artifact、external qualification 或 Release/Security 签署。

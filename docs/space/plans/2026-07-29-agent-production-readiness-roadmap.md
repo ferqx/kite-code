@@ -37,7 +37,7 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
 - Gate 结论仅为 `approved_for_internal_implementation`，不生成 production artifact，也不允许
   external cohort。
 - 1A.1–1A.5、1B.0/1B.1/1B.4 与 1C.1/1C.2/1C.3/1C.4/1C.6 已完成；D-04 以空支持集关闭，
-  不产生 production artifact。1A.6、1B.2/1B.3 已激活；后续 milestone 均为 pending。
+  不产生 production artifact。1A.6 已完成并激活 1A.7；1B.2/1B.3 仍在执行；后续 milestone 均为 pending。
 
 ## 首发支持边界
 

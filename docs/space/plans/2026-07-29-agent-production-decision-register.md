@@ -283,7 +283,8 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1A.2 | `github:@ferqx` | `1e21055eb8b2579d710eb566728294f2ad8b2621` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-30` |
 | 1A.3 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-31` |
 | 1A.4 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-31` |
-| 1A.6 | `github:@ferqx` | `9bc626a1996261545c94e1e5950274029152bf1e` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-08-01` |
+| 1A.6 | `github:@ferqx` | `9bc626a1996261545c94e1e5950274029152bf1e` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-08-01` |
+| 1A.7 | `github:@ferqx` | `545161a5c93bfe2127e9e01189f8a4ac8b425157` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-08-01` |
 | 1B.0 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-31-agent-production-execution-isolation-spike.md` | `2026-07-31` |
 | 1B.1 | `github:@ferqx` | `1063e879933f3e1b0cf8c0958363c999bb2696ab` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-31-agent-production-execution-boundary.md` | `2026-07-31` |
 | 1B.2 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-07-31` |
@@ -295,8 +296,8 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1C.3 | `github:@ferqx` | `1e21055eb8b2579d710eb566728294f2ad8b2621` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.6 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-31` |
 
-除已完成的 1A.1–1A.5、1B.0/1B.1/1B.4、1C.1/1C.2/1C.3/1C.4/1C.6 和已激活的
-1A.6、1B.2/1B.3 外，其他非 Phase 0 Task 不创建 execution binding。
+除已完成的 1A.1–1A.6、1B.0/1B.1/1B.4、1C.1/1C.2/1C.3/1C.4/1C.6 和已激活的
+1A.7、1B.2/1B.3 外，其他非 Phase 0 Task 不创建 execution binding。
 
 ## Revision history
 
@@ -314,3 +315,4 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 10 | 2026-07-31 | 完成 1A.4/1B.0；接受 ADR-0061，以空支持集关闭 D-04；激活 1B.1 | ACL run 30580337754、platform run 30579701659、独立复核无剩余 P0/P1；三平台 ACL verified，三平台 capability 均 `excluded`/`productionSupported=false` |
 | 11 | 2026-07-31 | 完成 1B.1 fail-closed execution boundary；激活 1B.2/1B.3/1B.4 | `3ada4246b149444ce27ed713cd5425090367c1fc`、[完成记录](../execution/completed/2026-07-31-agent-production-execution-boundary.md)、独立复核最终 GO 且无剩余 P0/P1/P2 |
 | 12 | 2026-08-01 | 完成 1B.4 fail-closed network boundary；激活 1A.6 remote MCP egress | `bc03f77a3dac2962cd3158d3413f292b8388a0d8`、[完成记录](../execution/completed/2026-08-01-agent-production-network-boundary.md)、独立复核最终 GO 且无剩余 P0/P1/P2 |
+| 13 | 2026-08-01 | 完成 1A.6 remote MCP 独立内容外发门禁；激活 1A.7 文档与迁移收敛 | `545161a5c93bfe2127e9e01189f8a4ac8b425157`、[完成记录](../execution/completed/2026-07-30-agent-production-local-data-privacy.md)、独立复核第五轮最终 GO 且无剩余 P0/P1/P2 |

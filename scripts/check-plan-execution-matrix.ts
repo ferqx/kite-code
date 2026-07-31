@@ -435,6 +435,7 @@ const phase1NativeEvidenceCommit = '1063e879933f3e1b0cf8c0958363c999bb2696ab';
 const phase1BoundaryCommit = '3ada4246b149444ce27ed713cd5425090367c1fc';
 const phase1NetworkCommit = 'bc03f77a3dac2962cd3158d3413f292b8388a0d8';
 const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
+const phase1RemoteMcpCommit = '545161a5c93bfe2127e9e01189f8a4ac8b425157';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
@@ -604,8 +605,28 @@ if (!phase1RemoteMcpBinding) {
   if (!phase1RemoteMcpBinding.includes(`| \`${phase1NetworkReviewBaseline}\` |`)) {
     fail('1A.6: binding must use the reviewed network-boundary baseline');
   }
-  if (!phase1RemoteMcpBinding.includes('| `in_progress` |')) {
-    fail('1A.6: remote MCP egress execution binding must be in_progress');
+  if (!phase1RemoteMcpBinding.includes('| `completed` |')) {
+    fail('1A.6: remote MCP egress execution binding must be completed');
+  }
+  const cells = parsePipeRow(phase1RemoteMcpBinding);
+  const expectedCompletionPath =
+    'docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md';
+  if (cells[6]?.replaceAll('`', '') !== expectedCompletionPath) {
+    fail(`1A.6: completionRecordPath must be ${expectedCompletionPath}`);
+  }
+}
+
+const phase1PrivacyClosureBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1A.7 |'));
+if (!phase1PrivacyClosureBinding) {
+  fail('1A.7: missing post-egress execution binding');
+} else {
+  if (!phase1PrivacyClosureBinding.includes(`| \`${phase1RemoteMcpCommit}\` |`)) {
+    fail('1A.7: binding must use the completed remote MCP egress baseline');
+  }
+  if (!phase1PrivacyClosureBinding.includes('| `in_progress` |')) {
+    fail('1A.7: documentation closure execution binding must be in_progress');
   }
 }
 
@@ -784,6 +805,21 @@ for (const command of [
 for (const commit of [phase1NetworkCommit, phase1NetworkReviewBaseline]) {
   requireReachableCommit(commit, '1B.4');
 }
+
+const phase1AdmissionCompletionPath = phase1CompletionRecords[0]!;
+const phase1AdmissionCompletion = readFileSync(phase1AdmissionCompletionPath, 'utf8');
+if (!phase1AdmissionCompletion.includes(phase1RemoteMcpCommit)) {
+  fail(
+    `${relative(root, phase1AdmissionCompletionPath)} must identify the remote MCP egress implementation`,
+  );
+}
+if (!/^## Task 1A\.6$/m.test(phase1AdmissionCompletion)) {
+  fail(`${relative(root, phase1AdmissionCompletionPath)} must include ## Task 1A.6`);
+}
+if (!/第五轮最终 GO，无剩余 P0\/P1\/P2/.test(phase1AdmissionCompletion)) {
+  fail(`${relative(root, phase1AdmissionCompletionPath)} must record final 1A.6 independent GO`);
+}
+requireReachableCommit(phase1RemoteMcpCommit, '1A.6');
 
 if (failures.length > 0) {
   console.error('Plan execution matrix checks failed:');
