@@ -528,6 +528,44 @@ export function createAgentKernel(params: {
   sandboxAvailable?: boolean;
 }): AgentKernel {
   const store = createRuntimeStore(params.storePath);
+  const restored = restoreRuntimeStateFromStore({ ...params, store });
+  if (restored.migratedSnapshot) {
+    store.saveSnapshot(params.threadId, restored.migratedSnapshot);
+  }
+
+  const kernel = new AgentKernel({
+    store,
+    initialState: restored.state,
+    interactionMode: params.interactionMode ?? 'accept_edits',
+    sandboxAvailable: params.sandboxAvailable,
+  });
+  // A persisted intent without a terminal provider result is deliberately not
+  // replayed.  Record the uncertainty durably so a later reconciliation/user
+  // decision can resolve it without issuing a duplicate external write.
+  for (const invocation of Object.values(kernel.getState().capabilities.invocations)) {
+    if (invocation.status !== 'recorded' && invocation.status !== 'running') continue;
+    kernel.processEvent({
+      type: 'capability.execution_unknown',
+      invocationId: invocation.invocationId,
+      reason: 'Runtime recovered after invocation intent was persisted without a terminal result.',
+      finishedAt: new Date().toISOString(),
+    });
+  }
+  return kernel;
+}
+
+/** Strictly restore Runtime state without executing reconciliation side effects. */
+export function restoreRuntimeStateFromStore(params: {
+  store: RuntimeStore;
+  threadId: string;
+  userId: string;
+  workspace: string;
+  interactionMode?: InteractionMode;
+  authorizationMode?: AuthorizationMode;
+  authorizationSource?: AuthorizationSource;
+  phase?: 'planning' | 'building';
+}): { state: RuntimeState; migratedSnapshot: RuntimeState | null } {
+  const store = params.store;
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
     userId: params.userId,
@@ -611,29 +649,13 @@ export function createAgentKernel(params: {
             }
           : freshState;
 
-  if (migratedState && migratedState !== restoredState && initialState === migratedState) {
-    store.saveSnapshot(params.threadId, migratedState);
-  }
-
-  const kernel = new AgentKernel({
-    store,
-    initialState,
-    interactionMode: params.interactionMode ?? 'accept_edits',
-    sandboxAvailable: params.sandboxAvailable,
-  });
-  // A persisted intent without a terminal provider result is deliberately not
-  // replayed.  Record the uncertainty durably so a later reconciliation/user
-  // decision can resolve it without issuing a duplicate external write.
-  for (const invocation of Object.values(kernel.getState().capabilities.invocations)) {
-    if (invocation.status !== 'recorded' && invocation.status !== 'running') continue;
-    kernel.processEvent({
-      type: 'capability.execution_unknown',
-      invocationId: invocation.invocationId,
-      reason: 'Runtime recovered after invocation intent was persisted without a terminal result.',
-      finishedAt: new Date().toISOString(),
-    });
-  }
-  return kernel;
+  return {
+    state: initialState,
+    migratedSnapshot:
+      migratedState && migratedState !== restoredState && initialState === migratedState
+        ? migratedState
+        : null,
+  };
 }
 
 function replayPersistedTail(

@@ -263,6 +263,8 @@ export type RewindScope = 'code_and_conversation' | 'conversation_only' | 'code_
 export type InterruptState =
   | {
       kind: 'approval';
+      /** Durable Runtime interaction identity, when projected from RuntimeEvent replay. */
+      interactionId?: string;
       /** Active Footer payload; absent only in legacy restored UI snapshots. */
       approval?: ToolApprovalPayload;
       /** Compatibility pointer for sessions created before approvals moved off-screen. */

@@ -3789,6 +3789,45 @@ describe('eventReducer (blocks model)', () => {
       expect(reviewState.status.pendingPlan?.name).toBe('Plan');
     });
 
+    test('durable approval grant clears the Footer interrupt during replay', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-1',
+        toolCallId: 'shell-1',
+        approval: approval(),
+      });
+
+      const granted = handleRuntimeEventAction(requested, {
+        type: 'approval.granted',
+        interactionId: 'approval-1',
+        grant: 'same_command',
+      });
+
+      expect(requested.interrupt?.kind).toBe('approval');
+      expect(granted.interrupt).toBeNull();
+    });
+
+    test('a stale approval grant cannot clear a different active approval', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-current',
+        toolCallId: 'shell-current',
+        approval: approval(),
+      });
+
+      const unchanged = handleRuntimeEventAction(requested, {
+        type: 'approval.granted',
+        interactionId: 'approval-stale',
+        grant: 'approve_once',
+      });
+
+      expect(unchanged.interrupt).toEqual(requested.interrupt);
+      expect(unchanged.interrupt).toMatchObject({
+        kind: 'approval',
+        interactionId: 'approval-current',
+      });
+    });
+
     test('plan review cancellation has identical live and replay projections without a banner', () => {
       const events: import('../src/core/runtime/events').RuntimeEvent[] = [
         {

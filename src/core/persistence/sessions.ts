@@ -1,5 +1,6 @@
 import type { AgentPlan, PlanArtifactRef, PlanDocument } from '../../protocol/events.js';
 import type { RuntimeEvent } from '../runtime/events.js';
+import { restoreRuntimeStateFromStore } from '../runtime/kernel.js';
 import type { RuntimeState } from '../runtime/state.js';
 import { getActivePlanning } from '../runtime/state.js';
 import {
@@ -92,9 +93,15 @@ export async function loadSession(
 ): Promise<SessionData | null> {
   const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
   try {
-    const events = store.loadEvents(threadId).map((entry) => entry.event);
-    const state = store.loadSnapshot<RuntimeState>(threadId);
-    if (!state && events.length === 0) return null;
+    const storedEvents = store.loadEvents(threadId);
+    const events = storedEvents.map((entry) => entry.event);
+    if (events.length === 0 && !store.loadSnapshotRecord<RuntimeState>(threadId)) return null;
+    const state = restoreRuntimeStateFromStore({
+      store,
+      threadId,
+      userId: 'tui',
+      workspace: '',
+    }).state;
     const interaction = state?.interactions;
     const interrupt: ReplayInterrupt | null =
       interaction?.kind === 'awaiting_tool_approval'
