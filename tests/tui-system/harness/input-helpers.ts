@@ -11,53 +11,205 @@ const INPUT_SETTLE_MS = 100;
 const INPUT_ECHO_TIMEOUT_MS = 2_000;
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
-
-function inputEchoProbe(text: string): string {
-  const characters = Array.from(text);
-  return characters.length <= 64 ? text : characters.slice(-32).join('');
-}
+const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
 
 function normalizeInputEcho(text: string): string {
   return stripAnsi(text).replace(/\s+/g, '');
 }
 
-function containsInputFragment(output: string, text: string): boolean {
-  const normalizedOutput = normalizeInputEcho(output);
-  const normalizedText = normalizeInputEcho(text);
-  const fragmentLength = Math.min(3, normalizedText.length);
-  if (fragmentLength === 0) return false;
-  for (let start = 0; start <= normalizedText.length - fragmentLength; start++) {
-    if (normalizedOutput.includes(normalizedText.slice(start, start + fragmentLength))) return true;
+type ActiveInput = {
+  kind:
+    | 'main'
+    | 'session-search'
+    | 'slash-query'
+    | 'slash-argument-query'
+    | 'file-query'
+    | 'block-cursor';
+  value: string;
+};
+
+function currentPromptInput(lines: readonly string[]): string | undefined {
+  let promptLine = -1;
+  for (let index = lines.length - 1; index >= 0; index--) {
+    if (/^\s*❯(?:\s|$)/.test(lines[index]!)) {
+      promptLine = index;
+      break;
+    }
   }
-  return false;
+  if (promptLine < 0) return undefined;
+
+  const inputLines = [lines[promptLine]!.replace(/^\s*❯\s?/, '')];
+  for (let index = promptLine + 1; index < lines.length; index++) {
+    const line = lines[index]!;
+    const trimmed = line.trim();
+    if (/^[─━═╭╰┌└]/.test(trimmed) || /^(?:mock-model|\S+\s+·)/.test(trimmed)) break;
+    inputLines.push(line);
+  }
+  return normalizeInputEcho(inputLines.join('\n'));
+}
+
+function activeInput(viewport: string): ActiveInput | undefined {
+  const lines = stripAnsi(viewport).split(/\r?\n/);
+
+  for (const [marker, command] of [
+    ['模型匹配 "', '/model '],
+    ['推理深度匹配 "', '/effort '],
+    ['主题匹配 "', '/theme '],
+    ['权限模式匹配 "', '/permissions '],
+  ] as const) {
+    const queryLine = lines.find((line) => line.includes(marker));
+    if (queryLine) {
+      const remainder = queryLine.slice(queryLine.indexOf(marker) + marker.length);
+      const partial = remainder.slice(0, Math.max(0, remainder.indexOf('"')));
+      return {
+        kind: 'slash-argument-query',
+        value: normalizeInputEcho(`${command}${partial}`),
+      };
+    }
+  }
+
+  for (const [marker, kind] of [
+    ['命令匹配 ', 'slash-query'],
+    ['文件匹配 ', 'file-query'],
+  ] as const) {
+    const queryLine = lines.find((line) => line.includes(marker));
+    if (queryLine) {
+      const value = queryLine
+        .slice(queryLine.indexOf(marker) + marker.length)
+        .replace(/\s*│?\s*$/, '')
+        .trim();
+      return { kind, value: normalizeInputEcho(value) };
+    }
+  }
+
+  if (lines.some((line) => line.includes('会话列表'))) {
+    const searchLine = lines.find((line) => line.includes('搜索:'));
+    if (searchLine) {
+      const value = searchLine
+        .slice(searchLine.indexOf('搜索:') + '搜索:'.length)
+        .replace(/\|?\s*│?\s*$/, '')
+        .replace(/_$/, '')
+        .trim();
+      return { kind: 'session-search', value: normalizeInputEcho(value) };
+    }
+  }
+
+  for (let index = lines.length - 1; index >= 0; index--) {
+    const line = lines[index]!;
+    const cursorIndex = line.indexOf('█');
+    if (cursorIndex >= 0) {
+      return {
+        kind: 'block-cursor',
+        value: normalizeInputEcho(line.slice(0, cursorIndex).trim()),
+      };
+    }
+  }
+
+  const promptInput = currentPromptInput(lines);
+  return promptInput === undefined ? undefined : { kind: 'main', value: promptInput };
 }
 
 async function waitForInputEcho(
-  getOutput: () => string,
-  text: string,
+  tui: PtyProcess,
+  expectedValue: string,
+  expectedKind: ActiveInput['kind'] | undefined,
+  allowFocusTransfer: boolean,
   timeoutMs: number,
 ): Promise<void> {
   const effectiveTimeout = tuiWaitTimeout(timeoutMs);
-  const normalizedProbe = normalizeInputEcho(text);
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
-    if (normalizeInputEcho(getOutput()).includes(normalizedProbe)) return;
+    await tui.settleScreen();
+    const current = activeInput(tui.viewport());
+    if (
+      current?.value === expectedValue &&
+      (current.kind === expectedKind || (allowFocusTransfer && expectedValue.length > 0))
+    ) {
+      return;
+    }
     await sleep(tuiPollInterval(25));
   }
   throw new Error(
-    `Timeout (${effectiveTimeout}ms) waiting for normalized input echo ${JSON.stringify(text)}`,
+    `Timeout (${effectiveTimeout}ms) waiting for active input value ${JSON.stringify(expectedValue)}`,
   );
 }
 
-export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Promise<void> {
+async function clearActiveInputTo(
+  tui: PtyProcess,
+  targetValue: string,
+  expectedKind: ActiveInput['kind'] | undefined,
+): Promise<ActiveInput> {
+  const effectiveTimeout = tuiWaitTimeout(5_000);
+  const start = Date.now();
+  let backspaces = 0;
+  let lastInput: ActiveInput | undefined;
+  let previousValue: string | undefined;
+  while (Date.now() - start < effectiveTimeout && backspaces <= INPUT_RETRY_LIMIT) {
+    await tui.settleScreen();
+    const current = activeInput(tui.viewport());
+    if (!current) {
+      await sleep(tuiPollInterval(25));
+      continue;
+    }
+    lastInput = current;
+    if (
+      current.kind === 'block-cursor' &&
+      targetValue.length === 0 &&
+      previousValue !== undefined &&
+      current.value.length > previousValue.length
+    ) {
+      return { ...current, value: '' };
+    }
+    if (current.value === targetValue) return current;
+    if (expectedKind !== undefined && current.kind !== expectedKind && targetValue.length > 0) {
+      throw new Error(
+        `Input focus changed from ${expectedKind} to ${current.kind} during append retry`,
+      );
+    }
+    if (!current.value.startsWith(targetValue)) {
+      throw new Error(
+        `Cannot restore active input ${JSON.stringify(current.value)} to baseline ${JSON.stringify(targetValue)}`,
+      );
+    }
+    previousValue = current.value;
+    tui.write(current.kind === 'block-cursor' ? '\x08' : '\x7f');
+    backspaces++;
+    await sleep(INPUT_RETRY_BACKSPACE_DELAY_MS);
+  }
+  throw new Error(
+    `Timeout restoring active input to ${JSON.stringify(targetValue)}; last active input was ${JSON.stringify(lastInput)}. ` +
+      `Last terminal output:\n${stripAnsi(tui.transcript()).slice(-1_000)}`,
+  );
+}
+
+export async function typeText(
+  tui: PtyProcess,
+  text: string,
+  delayOrOptions: number | { append?: boolean; delayMs?: number } = 40,
+): Promise<void> {
   if (text.length === 0) return;
+  const options = typeof delayOrOptions === 'number' ? { delayMs: delayOrOptions } : delayOrOptions;
+  const delayMs = options.delayMs ?? 40;
+  await tui.settleScreen();
+  let initial = activeInput(tui.viewport());
+  if (!initial) {
+    throw new Error('Cannot type text because no active input field is visible');
+  }
+  if (!options.append && initial.kind === 'block-cursor') {
+    // First-run forms render their configured default as a placeholder even
+    // after the logical field has been cleared, so the visible default is not
+    // an append baseline. Their scenarios clear the field explicitly first.
+    initial = { ...initial, value: '' };
+  } else if (!options.append && initial.value.length > 0) {
+    initial = await clearActiveInputTo(tui, '', initial.kind);
+  }
+  const baselineValue = options.append ? initial.value : '';
+  const expectedValue = `${baselineValue}${normalizeInputEcho(text)}`;
   const characters = Array.from(text);
-  const echoProbe = inputEchoProbe(text);
   const attempts = characters.length <= INPUT_RETRY_LIMIT ? INPUT_DELIVERY_ATTEMPTS : 1;
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    const outputMark = tui.markOutput();
     for (const ch of characters) {
       tui.write(ch);
       await sleep(delayMs);
@@ -66,28 +218,31 @@ export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Pro
 
     try {
       // Confirm that Ink rendered the final input value before a following
-      // control key is sent. Every input action owns this readiness check
-      // because modal and input-line remounts can change focus after startup.
-      await waitForInputEcho(() => tui.outputSince(outputMark), echoProbe, INPUT_ECHO_TIMEOUT_MS);
+      // control key is sent. The current VT viewport is authoritative here:
+      // raw output retains erased Ink frames and can falsely acknowledge text
+      // that is no longer present in the active input line.
+      await waitForInputEcho(
+        tui,
+        expectedValue,
+        initial.kind,
+        !options.append && baselineValue.length === 0,
+        INPUT_ECHO_TIMEOUT_MS,
+      );
       return;
     } catch (error) {
       lastError = error;
       if (attempt === attempts) break;
-      // A completely missing receipt means nothing reached the controlled
-      // input, so there is no stale text to erase before retrying.
-      const attemptedOutput = tui.outputSince(outputMark);
-      if (containsInputFragment(attemptedOutput, text)) {
-        await clearInput(tui, characters.length, { requireReceipt: false });
-      }
+      // Restore the exact pre-action baseline one visible character at a time.
+      // This clears arbitrary partial delivery without deleting legitimate
+      // content that an explicit append action intends to preserve.
+      initial = await clearActiveInputTo(tui, baselineValue, initial.kind);
       await sleep(INPUT_SETTLE_MS);
     }
   }
 
   const tail = stripAnsi(tui.transcript()).slice(-1_000);
   throw new Error(
-    `PTY input delivery failed after ${attempts} attempt(s) for ${JSON.stringify(
-      echoProbe,
-    )}. Last output:\n${tail}`,
+    `PTY input delivery failed after ${attempts} attempt(s) for ${JSON.stringify(text)}. Last output:\n${tail}`,
     { cause: lastError },
   );
 }

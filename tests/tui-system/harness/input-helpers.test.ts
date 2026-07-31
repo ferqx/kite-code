@@ -20,7 +20,7 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
       lastActionMark = output().length;
       return lastActionMark as ReturnType<PtyProcess['markOutput']>;
     },
-    viewport: output,
+    viewport: () => `❯ ${output()}`,
     scrollback: output,
     transcript: output,
     settleScreen: async () => {},
@@ -41,7 +41,10 @@ describe('TUI input helpers', () => {
     let attempt = 0;
     const tui = fakePty(
       (data) => {
-        if (data === '\x7f') return;
+        if (data === '\x7f') {
+          rendered = rendered.slice(0, -1);
+          return;
+        }
         if (data === 'h') attempt++;
         if (attempt >= 2) rendered += data;
       },
@@ -68,32 +71,191 @@ describe('TUI input helpers', () => {
     expect(rendered).toContain('\r\n');
   });
 
-  test('typeText does not erase an empty input because an unrelated redraw arrived', async () => {
-    let rendered = '';
+  test('typeText resets the input before retrying after an unrelated redraw', async () => {
+    let transcript = '';
+    let currentInput = '';
     let attempt = 0;
     let deletes = 0;
     const tui = fakePty(
       (data) => {
         if (data === '\x7f') {
           deletes++;
+          currentInput = currentInput.slice(0, -1);
           return;
         }
         if (data === 'h') attempt++;
         if (attempt === 1) {
-          rendered = '<prompt-redraw>';
+          transcript = '<prompt-redraw>';
           return;
         }
-        rendered += data;
+        currentInput += data;
+        transcript += data;
       },
-      () => rendered,
+      () => transcript,
     );
+    tui.viewport = () => `❯ ${currentInput}`;
 
     await typeText(tui, 'hello', 0);
 
     expect(attempt).toBe(2);
     expect(deletes).toBe(0);
-    expect(rendered).toContain('hello');
+    expect(currentInput).toBe('hello');
   }, 10_000);
+
+  test('typeText rejects an erased transcript receipt and clears partial visible input', async () => {
+    let transcript = '';
+    let currentInput = '';
+    let attempt = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data === '\x7f') {
+          currentInput = currentInput.slice(0, -1);
+          transcript += '<delete>';
+          return;
+        }
+        if (data === '/') attempt++;
+        transcript += data;
+        if (attempt === 1) {
+          currentInput = data === 'p' ? 'cp' : data;
+          return;
+        }
+        currentInput += data;
+      },
+      () => transcript,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await typeText(tui, '/mcp', 0);
+
+    expect(attempt).toBe(2);
+    expect(currentInput).toBe('/mcp');
+  }, 10_000);
+
+  test('typeText clears a stale pre-action prefix before entering a command', async () => {
+    let currentInput = 'cp';
+    let transcript = '';
+    const tui = fakePty(
+      (data) => {
+        transcript += data;
+        currentInput = data === '\x7f' ? currentInput.slice(0, -1) : currentInput + data;
+      },
+      () => transcript,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await typeText(tui, '/mcp', 0);
+
+    expect(currentInput).toBe('/mcp');
+  });
+
+  test('typeText restores a non-empty append baseline after partial delivery', async () => {
+    let suffix = '';
+    let transcript = '';
+    let attempt = 0;
+    const tui = fakePty(
+      (data) => {
+        transcript += data;
+        if (data === '\x7f') {
+          suffix = suffix.slice(0, -1);
+          return;
+        }
+        if (data === 'L') attempt++;
+        if (attempt >= 2 || suffix.length < 2) suffix += data;
+      },
+      () => transcript,
+    );
+    tui.viewport = () => `❯ Line1\n  ${suffix}`;
+
+    await typeText(tui, 'Line2', { append: true, delayMs: 0 });
+
+    expect(attempt).toBe(2);
+    expect(suffix).toBe('Line2');
+  }, 10_000);
+
+  test('typeText follows the active session search instead of matching list content', async () => {
+    let transcript = '';
+    let searchInput = '';
+    let attempt = 0;
+    let deliveryCharacters = 0;
+    const tui = fakePty(
+      (data) => {
+        transcript += data;
+        if (data === '\x7f') {
+          searchInput = searchInput.slice(0, -1);
+          return;
+        }
+        if (deliveryCharacters % 'session 1'.length === 0) attempt++;
+        deliveryCharacters++;
+        if (attempt >= 2) searchInput += data;
+      },
+      () => transcript,
+    );
+    tui.viewport = () =>
+      `╭────────╮\n│ 会话列表\n│ 搜索: ${searchInput}_\n│ > session 1\n╰────────╯`;
+
+    await typeText(tui, 'session 1', 0);
+
+    expect(attempt).toBe(2);
+    expect(searchInput).toBe('session 1');
+  }, 10_000);
+
+  test('typeText does not accept a long message already present in history', async () => {
+    const message =
+      'This is a very long test message that exceeds one hundred characters and already appears in history';
+    let currentInput = '';
+    let transcript = '';
+    let attempt = 0;
+    const tui = fakePty(
+      (data) => {
+        transcript += data;
+        if (data === '\x7f') {
+          currentInput = currentInput.slice(0, -1);
+          return;
+        }
+        if (data === 'T') attempt++;
+        if (attempt >= 2) currentInput += data;
+      },
+      () => transcript,
+    );
+    tui.viewport = () => `❯ ${message}\n\nresponse\n────────\n❯ ${currentInput}`;
+
+    await typeText(tui, message, 0);
+
+    expect(attempt).toBe(2);
+    expect(currentInput).toBe(message);
+  }, 10_000);
+
+  test('typeText rejects slash argument ghost text as an input receipt', async () => {
+    const requested = '/permissions auto';
+    const delivered = '/permissions a';
+    let actual = '';
+    let transcript = '';
+    const tui = fakePty(
+      (data) => {
+        transcript += data;
+        if (data === '\x7f') {
+          actual = actual.slice(0, -1);
+        } else if (actual.length < delivered.length) {
+          actual += data;
+        }
+      },
+      () => transcript,
+    );
+    tui.viewport = () => {
+      if (actual.startsWith('/permissions ')) {
+        const partial = actual.slice('/permissions '.length);
+        return `❯ ${actual}${'auto'.slice(partial.length)}\n────────\n╭────╮\n│ 权限模式匹配 "${partial}"\n│ auto\n╰────╯`;
+      }
+      if (actual.startsWith('/')) {
+        return `❯ ${actual}\n────────\n╭────╮\n│ 命令匹配 ${actual}\n│ /permissions\n╰────╯`;
+      }
+      return '❯ ';
+    };
+
+    await expect(typeText(tui, requested, 0)).rejects.toThrow('PTY input delivery failed');
+
+    expect(actual).not.toBe(requested);
+  }, 15_000);
 
   test('clearInput supports the input widget backspace encoding and waits for a receipt', async () => {
     let rendered = '';

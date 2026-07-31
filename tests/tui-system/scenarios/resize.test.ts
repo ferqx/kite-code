@@ -15,7 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText } from '../harness/input-helpers';
+import { clearInput, typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -32,6 +32,8 @@ describe('TUI PTY System — Terminal Resize', () => {
     const probe = `rz${++probeSequence}`;
     await typeText(tui, probe);
     expect(screenContains(tui.viewport(), probe)).toBe(true);
+    await clearInput(tui, probe.length);
+    expect(screenContains(tui.viewport(), probe)).toBe(false);
   }
 
   beforeEach(async () => {

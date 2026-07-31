@@ -86,7 +86,7 @@ describe('TUI PTY System — Input & Message', () => {
       // Kitty keyboard protocol: Shift+Enter
       tui.write('\x1b[13;2u');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      await typeText(tui, 'Line2');
+      await typeText(tui, 'Line2', { append: true });
 
       tui.write('\r');
       await waitForRequestMessage(server, 'Line1\nLine2', 15000);

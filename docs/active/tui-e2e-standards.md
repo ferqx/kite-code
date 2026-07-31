@@ -29,9 +29,16 @@ tests/tui-system/
    自己承担 readiness，不允许建立 warmup 测试或 warmup 流程。普通模型消息优先使用
    `submitUserMessage()`，把输入回显、Enter 和“本次提交之后产生的 mock model request”绑定
    为一个同步原语。slash command 优先使用 `submitCommand()`；需要分步断言时可使用
-   receipt-confirmed `typeText()` 后单独发送 Enter。输入重试不能把任意 action-local redraw 当作
-   “已有残留文本”：只有本次输入的连续片段实际回显后才发送清空键；对已空输入发送的防御性
-   清空允许只等待 quiet window，不得强制等待一个不会产生的 Ink receipt。
+   receipt-confirmed `typeText()` 后单独发送 Enter。输入回执必须来自 VT parser 的当前
+   `viewport()`，不得把 raw transcript 中已经被 Ink 擦除的历史帧当作输入成功，也不得以整个
+   viewport 的任意文本命中代替活动字段。Harness 必须分别提取主 `❯` 输入、session 搜索、slash/file
+   query 和 first-run block-cursor 字段，并对完整归一化字段值做等值验证；长输入同样不能退化为历史
+   文本或尾部探针命中。`typeText()` 默认要求空输入语义：主输入或搜索框若已有残留，先恢复为空再
+   输入；确实追加到合法非空输入时必须显式传入 `append: true`，例如 Shift+Enter 多行输入。追加重试
+   必须逐字符恢复动作前基线，不能按尝试长度过度删除已有内容。输入期间发生 modal focus transfer 时，
+   只允许由已识别的新活动字段完成回执；列表项或 ghost suggestion 不能充当输入值。first-run 表单
+   可能在逻辑空值时继续显示 configured default placeholder，helper 必须把该 placeholder 与追加基线
+   区分。对已空输入的防御性清空允许只等待 quiet window，不得强制等待不会产生的 Ink receipt。
 3. `write()`、`resize()` 和 `setRawMode()` 都会记录动作前的原始输出 checkpoint。`outputSinceLastAction()`
    与 `outputSince(mark)` 只证明动作后产生了新 PTY 字节，不能作为当前 UI 语义的最终断言。
    Harness 只有在对应 chunk 完成 VT 解析后才向 action delta 发布该字节范围，避免 byte receipt
@@ -49,7 +56,8 @@ tests/tui-system/
    后的新输出，不能用“动作后没有输出”通过测试；语义结果明确时应先等待该结果，再等待稳定帧。
    prompt `❯` 是常驻 UI，提交请求、错误处理或 interrupt 后的任意中间重绘都可能再次输出它，
    因此不能把 prompt receipt 单独当作动作完成；应先等待该动作唯一的结果，再等待稳定帧或完整
-   viewport 组合状态。
+   viewport 组合状态。连续 resize 的交互探针必须在每次断言后清空，不能让前一次未提交输入参与
+   下一次 resize 的 readiness 基线。
    确实验证“某文本在时间窗内不出现”时使用 `expectTextAbsentFor()` 明示时间语义。清空输入统一
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
    普通输入使用默认 DEL 编码。只有 `typeText()` 已确认输入片段未完整交付的内部恢复路径可以显式
