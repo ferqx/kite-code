@@ -450,7 +450,8 @@ describe('TUI PTY System — Slash Commands', () => {
       await waitForText(() => tui.output(), '管理 MCP Server', 10000);
 
       const output = tui.output();
-      expect(screenContains(output, '命令匹配 /mc')).toBe(true);
+      expect(screenContains(output, '命令匹配')).toBe(true);
+      expect(screenContains(output, '命令匹配 /mc')).toBe(false);
       expect(screenContains(output, '/mcp')).toBe(true);
       expect(screenContains(output, '管理 MCP Server')).toBe(true);
 

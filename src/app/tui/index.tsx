@@ -905,6 +905,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         dispatch={dispatchSessionLoad}
         onToggleReason={onToggleReason}
         provider={provider}
+        workspace={workspace}
         mcpController={mcpController}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}

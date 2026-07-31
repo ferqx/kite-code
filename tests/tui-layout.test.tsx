@@ -20,7 +20,7 @@ import SubAgentBlock from '../src/app/tui/components/SubAgentBlock';
 import TaskProgressBlock from '../src/app/tui/components/TaskProgressBlock';
 import DiffPreview from '../src/app/tui/DiffPreview';
 import Footer from '../src/app/tui/Footer';
-import Header from '../src/app/tui/Header';
+import Header, { formatHeaderWorkspace } from '../src/app/tui/Header';
 import { createInitialState } from '../src/app/tui/initialState';
 import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
@@ -160,56 +160,63 @@ describe('Footer', () => {
 // ── Header ──
 
 describe('Header', () => {
-  test('renders Kite Code logo and product name', () => {
-    const { lastFrame } = render(<Header running={false} />);
+  test('renders the branded session startup card', () => {
+    const { lastFrame } = render(
+      <Header modelName="gpt-5.6" thinkingMode="low" workspace="/tmp/kite-code" columns={60} />,
+    );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Kite Code');
-    // Cat ASCII art is present
-    expect(frame).toContain('/\\_/\\');
-    expect(frame).toContain('( = = )');
-    expect(frame).toContain('> ~ <');
+
+    expect(frame).toContain('──◆ Kite Code');
+    expect(frame).toContain('gpt-5.6 · low');
+    expect(frame).not.toContain('/model');
+    expect(frame).toContain('/tmp/kite-code');
+    expect(frame).toContain('│ model');
+    expect(frame).toContain('│ workspace');
+    expect(frame).not.toContain('/\\_/\\');
+    expect(frame).toContain('╭');
+    expect(frame).toContain('╰');
   });
 
-  test('shows idle cat when not running and no error', () => {
-    const { lastFrame } = render(<Header running={false} />);
-    expect(lastFrame()).toContain('( = = )');
-    expect(lastFrame()).toContain('> ~ <');
+  test('uses a six-row rounded startup header', () => {
+    const { lastFrame } = render(
+      <Header modelName="gpt-5.6" thinkingMode="low" workspace="/tmp/kite-code" columns={60} />,
+    );
+    expect(lastFrame()?.split('\n')).toHaveLength(6);
   });
 
-  test('shows working cat when running', () => {
-    const { lastFrame } = render(<Header running />);
-    expect(lastFrame()).toContain('( ^ ^ )');
-    expect(lastFrame()).toContain('> w <');
+  test('caps the startup card at 60 columns on wide terminals', () => {
+    const { lastFrame } = render(
+      <Header modelName="gpt-5.6" thinkingMode="low" workspace="/tmp/kite-code" columns={120} />,
+    );
+    expect(
+      lastFrame()
+        ?.split('\n')
+        .every((line) => stringWidth(line) <= 60),
+    ).toBe(true);
   });
 
-  test('shows error cat when error is true', () => {
-    const { lastFrame } = render(<Header running={false} error />);
-    expect(lastFrame()).toContain('( T T )');
-    expect(lastFrame()).toContain('> . <');
+  test('contracts the home directory in the workspace snapshot', () => {
+    expect(formatHeaderWorkspace('/Users/test/Code/ai/kite-code', '/Users/test')).toBe(
+      '~/Code/ai/kite-code',
+    );
   });
 
-  test('shows all usage hints', () => {
-    const { lastFrame } = render(<Header running={false} />);
-    const frame = lastFrame();
-    expect(frame).toContain('/help shortcuts');
-    expect(frame).toContain('Ctrl+C exit');
-    expect(frame).toContain('/ commands');
-  });
+  test('hides secondary model details on narrow terminals', () => {
+    const { lastFrame } = render(
+      <Header
+        modelName="gpt-5.6"
+        thinkingMode="low"
+        workspace="/a/very/long/workspace/path/kite-code"
+        columns={36}
+      />,
+    );
+    const frame = lastFrame() ?? '';
 
-  test('usage hints appear after cat ASCII', () => {
-    const { lastFrame } = render(<Header running={false} />);
-    const frame = lastFrame()!;
-    const catIdx = frame.indexOf('/\\_/\\');
-    const hintIdx = frame.indexOf('/help shortcuts');
-    expect(catIdx).toBeGreaterThanOrEqual(0);
-    expect(hintIdx).toBeGreaterThanOrEqual(0);
-    expect(catIdx).toBeLessThan(hintIdx);
-  });
-
-  test('header is 3 rows (cat art + hints on middle line)', () => {
-    const { lastFrame } = render(<Header running />);
-    const lines = lastFrame()?.split('\n').filter(Boolean);
-    expect(lines?.length).toBe(3);
+    expect(frame).toContain('gpt-5.6');
+    expect(frame).not.toContain('· low');
+    expect(frame).not.toContain('/model');
+    expect(frame).toContain('…');
+    expect(frame.split('\n').every((line) => stringWidth(line) <= 36)).toBe(true);
   });
 });
 
@@ -776,7 +783,8 @@ describe('HelpPanel', () => {
   test('renders title and sections', () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
     const frame = lastFrame();
-    expect(frame).toContain('◆ Kite Code');
+    expect(frame).toContain('── 快捷键');
+    expect(frame).not.toContain('◆ Kite Code');
     expect(frame).toContain('快捷键');
     expect(frame).toContain('斜杠命令');
   });
@@ -813,7 +821,8 @@ describe('ModelSelector', () => {
       <ModelSelector currentModel="deepseek-chat" onSelect={noop} onClose={noop} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('◆ Kite Code');
+    expect(frame).toContain('── 选择模型');
+    expect(frame).not.toContain('◆ Kite Code');
     expect(frame).toContain('选择模型');
     expect(frame).toContain('deepseek-v4-flash');
   });
@@ -879,7 +888,7 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('◆ Kite Code · Shell · 工具授权');
+    expect(frame).toContain('── Shell · 工具授权');
     expect(frame).toContain('│ rm -rf /tmp/test');
     const lines = frame.split('\n').map((line) => line.trim());
     expect(lines).not.toContain('执行命令');
@@ -938,7 +947,7 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('◆ Kite Code · Shell · 工具授权');
+    expect(frame).toContain('── Shell · 工具授权');
     expect(frame).toContain('❯ 允许一次');
     expect(frame).toContain('────────────────────────────────────────');
     expect(frame).not.toContain('╭');
@@ -952,7 +961,7 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('◆ Kite Code · 文件编辑 · 工具授权');
+    expect(frame).toContain('── 文件编辑 · 工具授权');
     expect(frame).toContain('允许一次');
     expect(frame).not.toContain('本次会话允许');
     expect(frame).toContain('拒绝');
@@ -1034,7 +1043,7 @@ describe('InputBlock', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('◆ Kite Code · 需要你的回答');
+    expect(frame).toContain('── 需要你的回答');
     expect(frame).toContain('❯ 1.');
     expect(frame).not.toContain('╭');
     expect(frame).not.toContain('╰');
@@ -1246,7 +1255,7 @@ describe('PlanReviewBlock', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('◆ Kite Code · 方案审核');
+    expect(frame).toContain('── 方案审核');
     expect(frame).toContain('❯ 1.');
     expect(frame).not.toContain('╭');
     expect(frame).not.toContain('╰');
@@ -3519,7 +3528,7 @@ describe('App', () => {
     expect(frame).toContain('工具授权');
     expect(frame).toContain('允许一次');
     expect(frame).not.toContain('Waiting...');
-    expect(frame).not.toContain('claude-opus');
+    expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
 
@@ -3583,7 +3592,7 @@ describe('App', () => {
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain(question.question);
-    expect(frame).not.toContain('claude-opus');
+    expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
 
@@ -3597,7 +3606,7 @@ describe('App', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('方案审核');
-    expect(frame).not.toContain('claude-opus');
+    expect(frame.match(/claude-opus/g)).toHaveLength(1);
     expect(frame).not.toContain('[接受编辑]');
   });
 
@@ -3634,7 +3643,7 @@ describe('App', () => {
     );
     // children InputLine should be rendered
     const frame = lastFrame();
-    const promptIdx = frame?.indexOf('>');
+    const promptIdx = frame?.indexOf('❯');
     expect(promptIdx).toBeGreaterThanOrEqual(0);
   });
 });

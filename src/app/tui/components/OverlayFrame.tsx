@@ -63,9 +63,9 @@ export default function OverlayFrame({ title, meta, children, footer }: OverlayF
       <Box width="100%" alignItems="center">
         <Text color={t.dim}>── </Text>
         <Text bold color={t.primary}>
-          ◆ Kite Code
+          {title}
         </Text>
-        <Text color={t.dim}> · {title} </Text>
+        <Text color={t.dim}> </Text>
         <Box
           flexGrow={1}
           flexShrink={1}

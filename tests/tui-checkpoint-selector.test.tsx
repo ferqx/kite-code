@@ -32,7 +32,8 @@ describe('CheckpointSelector', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('◆ Kite Code · 回退');
+    expect(frame).toContain('── 回退');
+    expect(frame).not.toContain('◆ Kite Code');
     expect(frame).toContain('嗯，我觉得没啥问题');
     expect(frame).toContain('先提交这轮代码，然后出设计');
     expect(frame).toContain('2026-07-30 21:03:00');
@@ -59,7 +60,7 @@ describe('CheckpointSelector', () => {
     await Bun.sleep(10);
 
     const confirmFrame = lastFrame() ?? '';
-    expect(confirmFrame).toContain('◆ Kite Code · 回退 · 确认');
+    expect(confirmFrame).toContain('── 回退 · 确认');
     expect(confirmFrame).toContain('恢复到这条消息发送之前');
     expect(confirmFrame).toContain('❯ 返回检查点列表');
     expect(confirmFrame).toContain('恢复代码和会话');

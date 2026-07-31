@@ -22,7 +22,7 @@ function suggestionTitle(suggestion: SlashSuggestionData): string {
     case 'permissions':
       return suggestion.partial ? `权限模式匹配 "${suggestion.partial}"` : '权限模式';
     default:
-      return `命令匹配 /${suggestion.partial}`;
+      return '命令匹配';
   }
 }
 

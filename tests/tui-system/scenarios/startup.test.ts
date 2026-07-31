@@ -49,11 +49,12 @@ describe('TUI PTY System — Startup', () => {
   );
 
   test(
-    'TUI renders footer with shortcuts text',
+    'TUI renders the startup card context and model',
     async () => {
-      // Footer may render in later frames — wait for it
-      await waitForText(() => tui.output(), 'shortcuts', 10000);
-      console.log('  Footer visible');
+      const output = await waitForText(() => tui.output(), 'workspace', 10000);
+      expect(screenContains(output, 'mock-model')).toBe(true);
+      expect(screenContains(output, '/model')).toBe(false);
+      console.log('  Startup card context visible');
     },
     TIMEOUT,
   );

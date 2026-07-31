@@ -24,15 +24,16 @@ const commandSuggestion: SlashSuggestionData = {
 };
 
 describe('SlashSuggestionOverlay', () => {
-  test('renders the branded command palette hierarchy', () => {
+  test('renders the command palette hierarchy without repeating the product brand', () => {
     const { lastFrame, stdout } = render(
       <SlashSuggestionOverlay suggestion={commandSuggestion} maxVisibleItems={5} width={88} />,
     );
     const frame = lastFrame() ?? '';
-    const titleDivider = frame.split('\n').find((line) => line.includes('◆ Kite Code')) ?? '';
+    const titleDivider = frame.split('\n').find((line) => line.includes('命令匹配')) ?? '';
 
-    expect(frame).toContain('◆ Kite Code');
-    expect(frame).toContain('命令匹配 /');
+    expect(frame).not.toContain('◆ Kite Code');
+    expect(frame).toContain('── 命令匹配');
+    expect(frame).not.toContain('命令匹配 /effort');
     expect(frame).toContain('1 / 2');
     expect(frame).toContain('❯ /effort');
     expect(frame).toContain('low|medium|high|max');

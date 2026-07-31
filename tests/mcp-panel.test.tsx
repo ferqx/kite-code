@@ -157,7 +157,7 @@ describe('MCP management overlay', () => {
     const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('◆ Kite Code');
+    expect(lastFrame()).not.toContain('◆ Kite Code');
     expect(lastFrame()).toContain('1 server');
     expect(lastFrame()).toContain('Project MCPs (/workspace/.kite-code/mcp.json)');
     expect(lastFrame()).toContain('❯ github · ✔ connected · 5 tools');

@@ -35,6 +35,8 @@ MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，
 
 静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。交互式入口直接使用终端主屏缓冲区，不启用 Ink alternate screen；运行内容保留在终端原生 scrollback 中，退出时不恢复进入 TUI 前的旧画面。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
 
+Header 是每个会话写入 Static scrollback 的启动快照：低对比度圆角边框包裹 `──◆ Kite Code` 品牌字标，品牌行、模型和工作区在边框内统一左对齐。它不承担 working/error 等实时状态；同一会话切换模型时不重绘历史 Header，当前模型继续由 Footer 展示。窄屏会隐藏推理强度，并从中部截断过长路径。完整视觉与状态契约见 [`../active/tui-session-startup-card.md`](../active/tui-session-startup-card.md)。
+
 ## 7.4 会话前后台
 
 前台 SessionRuntime 将事件实时 dispatch 到 UI；后台会话缓存可丢弃的展示事件和必要状态，切回时重放/重建投影。取消、切换和组件卸载必须清理 AbortController 与订阅。

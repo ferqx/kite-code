@@ -48,6 +48,7 @@ export interface AppProps {
   dispatch: Dispatch<Action>;
   onToggleReason: (id: number) => void;
   provider: import('./provider').TuiUserInputProvider;
+  workspace?: string;
   mcpController?: McpController;
   availableModels?: import('@/core/config').AvailableModel[];
   slashSuggestion?: import('./hooks/useSlashSuggestions').SlashSuggestionData | null;
@@ -84,6 +85,7 @@ export default function App({
   dispatch,
   onToggleReason,
   provider,
+  workspace = process.cwd(),
   mcpController,
   slashSuggestion,
   sandboxBackend = 'none',
@@ -218,9 +220,34 @@ export default function App({
   // ── Static content computation ──
   // <Static> is rendered at ROOT LEVEL (outside any layout Box) so its
   // scrollback writes never compete with the dynamic tree's Yoga layout.
+  const activeWorkspace =
+    state.sessions.find((session) => session.threadId === state.activeSessionId)?.workspace ??
+    workspace;
+  const headerSnapshotRef = useRef({
+    sessionKey: state.sessionKey,
+    modelName: state.status.modelName,
+    thinkingMode: state.status.thinkingMode,
+    workspace: activeWorkspace,
+  });
+  if (headerSnapshotRef.current.sessionKey !== state.sessionKey) {
+    headerSnapshotRef.current = {
+      sessionKey: state.sessionKey,
+      modelName: state.status.modelName,
+      thinkingMode: state.status.thinkingMode,
+      workspace: activeWorkspace,
+    };
+  }
+  const headerSnapshot = headerSnapshotRef.current;
   const header = useMemo(
-    () => <MemoHeader running={state.running} error={state.sessionError} />,
-    [state.running, state.sessionError],
+    () => (
+      <MemoHeader
+        modelName={headerSnapshot.modelName}
+        thinkingMode={headerSnapshot.thinkingMode}
+        workspace={headerSnapshot.workspace}
+        columns={columns}
+      />
+    ),
+    [columns, headerSnapshot],
   );
 
   const {
