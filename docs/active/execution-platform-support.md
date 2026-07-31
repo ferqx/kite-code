@@ -76,6 +76,11 @@ revision/digest、descriptor revision 与 effect contract，供后续 tool discl
 不能只按相同 tool ID 放行。当前 builtin disclosure 与 runner 已执行该匹配，并拒绝外部路径及
 动态 MCP；该 surface 的 shell、writer、Skill child 和 local stdio MCP 始终关闭。
 
+对未来非空的原生 `supported` qualification，surface 各能力轴同样独立执行：例如
+`filesystemScope=read_only` 可以保留受 native sandbox 约束的 process/Shell，但模型披露和
+Runner 都必须按 descriptor effects 拒绝进程内 writer；`network=off` 拒绝进程内网络工具，
+任意 production surface 都拒绝进程内文件工具的 Workspace 外路径。审批不能提升这些 ceiling。
+
 `loadProductionAgentConfig()` 是 2A composition root 必须使用的 Core 配置准入入口，并在返回
 任何可供 Runtime/进程使用的配置前完成 sealed gate；它不改变当前开发 TUI/CLI。当前静态
 support matrix 与批准 qualification registry 都是空支持集，1B.1 schema 或技术评估 fixture

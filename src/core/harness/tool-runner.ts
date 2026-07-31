@@ -11,7 +11,7 @@ import {
   type RuntimeMcpPolicy,
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
-import { isDescriptorAdmittedByInProcessReadOnlyCatalogV1 } from '@/core/sandbox/in-process-read-only';
+import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '@/core/sandbox/execution-capability-surface';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
@@ -83,6 +83,21 @@ function safeRecordPreimage(
 function isExternalPathArg(pathArg: string): boolean {
   const normalized = msys2ToWindowsPath(pathArg);
   return isAbsolute(normalized) || normalized.startsWith('~');
+}
+
+/** Production capability surfaces reject every path that does not resolve
+ * inside the canonical workspace, including relative traversal and symlink
+ * escape. Keep this separate from isExternalPathArg: the latter is the legacy
+ * approval-shape predicate, while this is a fail-closed execution ceiling. */
+function isOutsideProductionWorkspace(workspace: string, pathArg: string): boolean {
+  if (!pathArg) return false;
+  if (isExternalPathArg(pathArg)) return true;
+  try {
+    resolvePath(workspace, pathArg, { allowExternal: false });
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /** 规范化路径参数（读取状态跟踪的键，与 readTextContent 的解析一致）。 */
@@ -167,29 +182,35 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   } = input;
 
   const executionSurface = taskConfig?.executionCapabilitySurface;
-  const restrictToInProcessReadOnly = Boolean(
-    executionSurface && !executionSurface.process && !executionSurface.write,
-  );
-  const readOnlyCatalog = executionSurface?.inProcessReadOnlyTools;
-  if (restrictToInProcessReadOnly) {
-    const spec = builtinToolRegistry.get(request.name);
-    const descriptor = spec ? builtinToolRegistry.descriptorOf(spec) : undefined;
-    const externalPath = isExternalPathArg(
+  if (executionSurface) {
+    const builtinSpec = builtinToolRegistry.get(request.name);
+    const descriptor = builtinSpec
+      ? builtinToolRegistry.descriptorOf(builtinSpec)
+      : isMcpRequest(request) && mcpManager && mcpInvocation
+        ? mcpManager.findCapability(mcpInvocation.capabilityId)
+        : undefined;
+    const externalPath = isOutsideProductionWorkspace(
+      workspace,
       String((request.args as Record<string, unknown>).path ?? ''),
     );
     if (
-      !readOnlyCatalog ||
       !descriptor ||
       externalPath ||
-      !isDescriptorAdmittedByInProcessReadOnlyCatalogV1({ catalog: readOnlyCatalog, descriptor })
+      !isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
+        surface: executionSurface,
+        descriptor,
+      })
     ) {
+      const reason =
+        executionSurface.process === false && executionSurface.write === false
+          ? 'tool is not in the sealed read-only catalog'
+          : 'capability is outside the admitted execution surface';
       return withFailureGuidance(request, {
         ok: false,
         command: request.protectedCommand,
         exitCode: -1,
         stdout: '',
-        stderr:
-          'Rejected by production execution boundary: tool is not in the sealed read-only catalog.',
+        stderr: `Rejected by production execution boundary: ${reason}.`,
         status: 'rejected',
       });
     }

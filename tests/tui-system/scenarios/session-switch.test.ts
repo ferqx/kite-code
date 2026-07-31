@@ -13,10 +13,11 @@ import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
+  waitForCondition,
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, persistedSessionIds } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -24,6 +25,7 @@ describe('TUI PTY System — Session Switching', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let sessionIdsBeforeNew: string[] = [];
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -99,6 +101,8 @@ describe('TUI PTY System — Session Switching', () => {
   test(
     '/new creates session 2, TUI remains responsive',
     async () => {
+      sessionIdsBeforeNew = persistedSessionIds(workspace);
+      expect(sessionIdsBeforeNew).toHaveLength(1);
       await typeText(tui, '/new');
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -123,6 +127,17 @@ describe('TUI PTY System — Session Switching', () => {
 
       // Wait for the second model response
       await waitForText(() => tui.outputSinceLastAction(), 'Session 2 response', 15000);
+      await waitForCondition(
+        () => {
+          const current = persistedSessionIds(workspace);
+          return (
+            current.length === sessionIdsBeforeNew.length + 1 &&
+            sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
+          );
+        },
+        'Runtime Store to persist the distinct session created by /new',
+        10_000,
+      );
 
       const output = tui.output();
       expect(screenContains(output, 'Message in session 2')).toBe(true);
@@ -174,13 +189,14 @@ describe('TUI PTY System — Session Switching', () => {
 
       // Press Enter to switch to session 1
       console.log('  pressing Enter to switch...');
-      tui.write('\r');
+      const replayMark = tui.write('\r');
 
       // Wait for session 1 content to be replayed after switch.
       // The TUI loads and replays the session blocks into the OutputArea.
-      await waitForText(() => tui.outputSinceLastAction(), 'Message in session 1', 15000);
+      await waitForText(() => tui.outputSince(replayMark), 'Message in session 1', 15000);
+      await waitForText(() => tui.outputSince(replayMark), 'Session 1 response', 15000);
 
-      output = tui.output();
+      output = tui.outputSince(replayMark);
       console.log('  output after switch to session 1:', stripAnsi(output).slice(-500));
 
       // After switching, session 1 content must be visible (replayed)
@@ -224,12 +240,13 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       console.log('  pressing Enter to switch to session 2...');
-      tui.write('\r');
+      const replayMark = tui.write('\r');
 
       // Wait for session 2 content to be replayed
-      await waitForText(() => tui.outputSinceLastAction(), 'Message in session 2', 15000);
+      await waitForText(() => tui.outputSince(replayMark), 'Message in session 2', 15000);
+      await waitForText(() => tui.outputSince(replayMark), 'Session 2 response', 15000);
 
-      output = tui.output();
+      output = tui.outputSince(replayMark);
       console.log('  output after switch to session 2:', stripAnsi(output).slice(-500));
 
       // Session 2 content must be visible (replayed correctly)

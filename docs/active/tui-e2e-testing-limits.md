@@ -33,6 +33,9 @@
 10. `stripAnsi()` 仍不是完整终端模拟器；`outputSinceLastAction()` 证明的是动作后的新输出，不是
     当前物理屏幕像素。需要验证跨动作的 transcript 顺序时应显式 `markOutput()`，布局、光标和
     wrapping 则继续由 Ink 组件测试或专门终端测试负责。
+11. Runtime Store 在 session 首次产生持久事件后才列出该 thread；因此 `/new` 的持久化身份断言
+    应绑定新 session 的首个真实动作，而不是要求空 session 立即出现。该断言必须同时保留旧
+    thread ID 并观察到一个新 ID，避免把同一 session 的累计 transcript 误判为切换成功。
 
 ## 分层选择
 

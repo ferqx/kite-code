@@ -12,6 +12,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRuntimeStore, runtimeStorePathFor } from '@/core/runtime/store';
 
 export interface TestWorkspace {
   /** Temp HOME directory */
@@ -32,6 +33,20 @@ export interface TestWorkspace {
   enforceWorkspaceTrust?: boolean;
   /** Remove all temp directories */
   cleanup(): void;
+}
+
+/** Read the durable Runtime session identities without relying on terminal scrollback. */
+export function persistedSessionIds(workspace: Pick<TestWorkspace, 'home'>): string[] {
+  const checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
+  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
+  try {
+    return store
+      .listSessions()
+      .map((session) => session.threadId)
+      .sort();
+  } finally {
+    store.close();
+  }
 }
 
 /**

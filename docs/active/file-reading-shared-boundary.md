@@ -168,6 +168,11 @@ allowExternal = hasExecutionGrant && isExternal
 
 其中 `hasExecutionGrant` 由审批管线统一计算（用户审批通过或 `full_access` 授权）。
 
+若当前配置携带 production `executionCapabilitySurface`，该 surface 是审批之前的上限：所有带
+Workspace 外 path 参数的进程内文件工具都会在 Runner dispatch 前直接拒绝，不能通过
+`hasExecutionGrant`、`same_command` 或 `full_access` 把 production boundary 提升为外部访问。
+上述 `allowExternal` 公式只适用于未携带该 production surface 的开发入口。
+
 **所有路径类工具保持一致** — 5 个工具均在 handler 中计算 `isExternal` / `allowExternal` 并透传至实现层：
 
 | 工具 | 实现层边界检查 | allowExternal 透传 |

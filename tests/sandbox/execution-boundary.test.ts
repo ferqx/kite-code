@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -144,6 +152,32 @@ function qualification(
     inProcessReadOnlyTools: toolCatalog(),
     ...overrides,
   };
+}
+
+function reverseObjectInsertionOrder<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(reverseObjectInsertionOrder) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .reverse()
+        .map(([key, child]) => [key, reverseObjectInsertionOrder(child)]),
+    ) as T;
+  }
+  return value;
+}
+
+function expectProductionRejection(
+  load: () => unknown,
+  reason: ExecutionBoundaryAdmissionReasonV1,
+): void {
+  let thrown: unknown;
+  try {
+    load();
+  } catch (error) {
+    thrown = error;
+  }
+  expect(thrown).toBeInstanceOf(ProductionExecutionAdmissionError);
+  expect((thrown as ProductionExecutionAdmissionError).decision.reason).toBe(reason);
 }
 
 afterEach(() => {
@@ -413,6 +447,59 @@ describe('production execution admission', () => {
     ).toThrow('production environment admission keys must be unique');
   });
 
+  test('qualification and catalog digests ignore caller object insertion order', () => {
+    const catalogWithoutDigest = {
+      version: 1 as const,
+      revision: 'canonical-order-fixture',
+      tools: [
+        {
+          toolId: 'builtin:β',
+          descriptorRevision: 'revision-β',
+          filesystem: 'workspace_read' as const,
+          network: 'none' as const,
+          process: false as const,
+          write: false as const,
+          externalPath: false as const,
+        },
+        {
+          toolId: 'builtin:Z',
+          descriptorRevision: 'revision-Z',
+          filesystem: 'workspace_read' as const,
+          network: 'none' as const,
+          process: false as const,
+          write: false as const,
+          externalPath: false as const,
+        },
+      ],
+    };
+    const catalogDigest = computeInProcessReadOnlyToolCatalogDigestV1(catalogWithoutDigest);
+    expect(
+      computeInProcessReadOnlyToolCatalogDigestV1(
+        reverseObjectInsertionOrder(catalogWithoutDigest),
+      ),
+    ).toBe(catalogDigest);
+
+    const registryWithoutDigest = {
+      version: 1 as const,
+      decisionId: 'D-04' as const,
+      revision: 'canonical-order-fixture',
+      status: 'accepted_non_empty_support_set' as const,
+      selectedNetworkMode: 'off' as const,
+      evidenceCommit: 'a'.repeat(40),
+      qualifications: [
+        qualification('supported', {
+          qualificationId: 'qualification-β',
+          inProcessReadOnlyTools: { ...catalogWithoutDigest, digest: catalogDigest },
+        }),
+      ],
+    };
+    expect(
+      computeProductionExecutionQualificationRegistryDigestV1(
+        reverseObjectInsertionOrder(registryWithoutDigest),
+      ),
+    ).toBe(computeProductionExecutionQualificationRegistryDigestV1(registryWithoutDigest));
+  });
+
   test('the fixture-only technical evaluator fails closed on identity and scope', () => {
     const workspace = temporaryWorkspace();
     const otherWorkspace = temporaryWorkspace();
@@ -511,6 +598,86 @@ describe('production execution admission', () => {
       skillChild: true,
       localStdioMcp: true,
     });
+  });
+
+  test('read-only native surface independently blocks in-process writers and network tools', async () => {
+    const workspace = temporaryWorkspace();
+    const configPath = join(workspace, 'kite-code.jsonc');
+    writeFileSync(configPath, JSON.stringify({ provider: { ollama: { type: 'ollama' } } }));
+    const decision = evaluateExecutionBoundaryQualificationV1({
+      featureEnabled: true,
+      boundary: boundary(workspace, { filesystemScope: 'read_only' }),
+      workspaceRoot: workspace,
+      qualification: qualification(),
+    });
+    expect(decision.allowed).toBe(true);
+    expect(decision.surface).toMatchObject({
+      network: false,
+      process: true,
+      write: false,
+      shell: true,
+    });
+
+    const config = {
+      ...loadAgentConfig({ configPath, providerName: 'ollama' }),
+      executionCapabilitySurface: decision.surface,
+    };
+    const disclosed = createAgentTools({ workspace, config });
+    expect(disclosed).toHaveProperty('read_file');
+    expect(disclosed).toHaveProperty('shell_execute');
+    expect(disclosed).not.toHaveProperty('write_file');
+    expect(disclosed).not.toHaveProperty('edit_file');
+    expect(disclosed).not.toHaveProperty('web_fetch');
+
+    const target = join(workspace, 'should-not-exist.txt');
+    for (const request of [
+      {
+        source: 'builtin' as const,
+        name: 'write_file' as const,
+        args: { path: 'should-not-exist.txt', content: 'forbidden' },
+        reason: 'fixture',
+        protectedCommand: 'write_file should-not-exist.txt',
+      },
+      {
+        source: 'builtin' as const,
+        name: 'edit_file' as const,
+        args: {
+          path: 'should-not-exist.txt',
+          old_string: 'before',
+          new_string: 'after',
+        },
+        reason: 'fixture',
+        protectedCommand: 'edit_file should-not-exist.txt',
+      },
+    ]) {
+      const rejected = await runApprovedTool({ workspace, taskConfig: config, request });
+      expect(rejected.ok).toBe(false);
+      expect(rejected.status).toBe('rejected');
+      expect(rejected.stderr).toContain('outside the admitted execution surface');
+      expect(existsSync(target)).toBe(false);
+    }
+
+    const outsideWorkspace = temporaryWorkspace();
+    symlinkSync(outsideWorkspace, join(workspace, 'escape'), 'dir');
+    for (const path of [
+      join(workspace, '..', 'outside.txt'),
+      '../outside.txt',
+      'escape/secret.txt',
+    ]) {
+      const externalRead = await runApprovedTool({
+        workspace,
+        taskConfig: config,
+        request: {
+          source: 'builtin',
+          name: 'read_file',
+          args: { path },
+          reason: 'fixture',
+          protectedCommand: `read_file ${path}`,
+        },
+      });
+      expect(externalRead.status).toBe('rejected');
+      expect(externalRead.stderr).toContain('outside the admitted execution surface');
+    }
   });
 
   test('read-only-only qualification never exposes a process or writer', () => {
@@ -673,51 +840,27 @@ describe('execution boundary config injection', () => {
         featureOverrides,
         sandboxEnabled,
       });
-    expect(() => production(false)).toThrow(ProductionExecutionAdmissionError);
-    try {
-      production(false);
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe('feature_disabled');
-    }
-    try {
-      production(true);
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe(
-        'platform_excluded',
-      );
-    }
-    try {
-      production(true, { executionBoundaryV1: false });
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe('feature_disabled');
-    }
-    try {
-      production(true, undefined, false);
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe('sandbox_disabled');
-    }
+    expectProductionRejection(() => production(false), 'feature_disabled');
+    expectProductionRejection(() => production(true), 'platform_excluded');
+    expectProductionRejection(
+      () => production(true, { executionBoundaryV1: false }),
+      'feature_disabled',
+    );
+    expectProductionRejection(() => production(true, undefined, false), 'sandbox_disabled');
 
     writeFileSync(
       configPath,
       JSON.stringify({ provider: { ollama: { type: 'ollama' } }, features: {} }),
     );
-    try {
-      production(true);
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe('feature_disabled');
-    }
-    try {
-      production(false, { executionBoundaryV1: true });
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe('feature_disabled');
-    }
-    try {
-      production(true, { executionBoundaryV1: true });
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe(
-        'platform_excluded',
-      );
-    }
+    expectProductionRejection(() => production(true), 'feature_disabled');
+    expectProductionRejection(
+      () => production(false, { executionBoundaryV1: true }),
+      'feature_disabled',
+    );
+    expectProductionRejection(
+      () => production(true, { executionBoundaryV1: true }),
+      'platform_excluded',
+    );
 
     writeFileSync(
       configPath,
@@ -726,11 +869,7 @@ describe('execution boundary config injection', () => {
         features: { executionBoundaryV1: false },
       }),
     );
-    try {
-      production(true);
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe('feature_disabled');
-    }
+    expectProductionRejection(() => production(true), 'feature_disabled');
 
     writeFileSync(
       configPath,
@@ -740,11 +879,7 @@ describe('execution boundary config injection', () => {
         sandbox: { enabled: false },
       }),
     );
-    try {
-      production(true);
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe('sandbox_disabled');
-    }
+    expectProductionRejection(() => production(true), 'sandbox_disabled');
   });
 
   test('loads project configuration from the admitted canonical workspace', () => {
@@ -788,12 +923,7 @@ describe('execution boundary config injection', () => {
         workspaceRoot: workspace,
         entrypoint: 'tui',
       });
-    expect(load).toThrow(ProductionExecutionAdmissionError);
-    try {
-      load();
-    } catch (error) {
-      expect((error as ProductionExecutionAdmissionError).decision.reason).toBe('feature_disabled');
-    }
+    expectProductionRejection(load, 'feature_disabled');
   });
 
   test('rejects malformed backend strength projections', () => {

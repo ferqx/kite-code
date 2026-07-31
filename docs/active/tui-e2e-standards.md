@@ -44,6 +44,9 @@ tests/tui-system/
    文件内 test step 可以共享该旅程状态，但不得把 setup/readiness 伪装成可独立通过的测试用例。
 5. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
+   同一进程内的 `/new` 或 session switch 不能只依赖累计 PTY transcript：新 session 首次产生
+   Runtime event 后必须校验 Runtime Store 中出现不同 thread ID，切换回放必须只断言 Enter
+   checkpoint 之后的新输出。空 session 尚未产生事件时不要求提前出现在持久化 session 列表。
 7. 改动 Runtime 多轮语义时同时运行 `tests/runtime/agent.integration.test.ts`、`tests/runtime/store.test.ts` 和相应 PTY scenario。
 8. PTY suite 必须串行运行，避免终端尺寸、端口和全局环境相互污染。
    完整 suite 由 `scripts/run-tui-system-tests.ts` 先运行 harness 单元测试，再按 scenario

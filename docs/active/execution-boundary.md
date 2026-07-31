@@ -18,7 +18,8 @@ qualification registry 和只读工具 effect contract 的类型来源；
 规范实现。`src/core/config/execution-qualification.ts` 只从仓库固定路径读取 release-pinned
 qualification registry，并校验 revision 和 digest；调用方不能提供 registry 路径、批准 digest
 或 production qualification。同一 OS/Bun/backend/network admission key 只能有一个
-qualification，resolver 也只接受恰好一个匹配，JSON 顺序不能改变结果。
+qualification，resolver 也只接受恰好一个匹配。Digest canonicalizer 显式重建每一层字段，
+使用与 locale 无关的 code-unit 排序；JSON 对象字段插入顺序不能改变结果。
 
 用户、project config 和 CLI 不能提供 boundary。普通 `loadAgentConfig()` 不接受或投影
 execution artifact，只服务现有开发入口。production composition root 必须使用
@@ -47,6 +48,15 @@ production root 在创建 Runtime、Shell、writer、Skill child 或 local stdio
 
 任一条件失败返回全 false capability surface，不进入审批。审批、`full` interaction mode 或
 裸 shell fallback 都不能改变结果。
+
+成功 surface 的 `network`、`process`、`write`、`shell`、`skillChild` 和 `localStdioMcp`
+是彼此独立的能力轴，不得合并成一个“只要仍有 process 就全部披露”的条件。例如原生
+`read_only` 可以保留受 sandbox 约束的 Shell process，但 `write=false` 仍必须在模型 disclosure
+和 Runner dispatch 两层拒绝进程内 writer，`network=false` 同样拒绝进程内网络工具。两层门禁
+都消费 Registry Capability Descriptor 的 declared/effective effects；Shell 的保守 `unknown`
+descriptor 只由显式 `process + shell` surface 接管，实际 filesystem/network 继续由 native
+sandbox 强制。带外部 path 参数的进程内文件调用在任意 production surface 下都拒绝，不能因
+保留 process capability 绕过 canonical Workspace identity。
 
 `read_only_only` 是独立受限 surface：registry 必须携带 digest 校验通过的非空工具 catalog；每个
 工具都固定 `workspace_read + network:none + process:false + write:false + externalPath:false`。

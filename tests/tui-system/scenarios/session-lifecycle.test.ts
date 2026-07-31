@@ -13,10 +13,11 @@ import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
+  waitForCondition,
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, persistedSessionIds } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -24,6 +25,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let sessionIdsBeforeNew: string[] = [];
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -95,6 +97,8 @@ describe('TUI PTY System — Session Lifecycle', () => {
   test(
     '/new creates new session, TUI remains responsive',
     async () => {
+      sessionIdsBeforeNew = persistedSessionIds(workspace);
+      expect(sessionIdsBeforeNew).toHaveLength(1);
       await typeText(tui, '/new');
       const outputBeforeSubmit = tui.markOutput();
       tui.write('\r');
@@ -130,6 +134,17 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       // Wait for the second model response
       await waitForText(() => tui.outputSinceLastAction(), 'Second session response!', 15000);
+      await waitForCondition(
+        () => {
+          const current = persistedSessionIds(workspace);
+          return (
+            current.length === sessionIdsBeforeNew.length + 1 &&
+            sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
+          );
+        },
+        'Runtime Store to persist the distinct session created by /new',
+        10_000,
+      );
 
       const output = tui.output();
 

@@ -14,10 +14,11 @@ import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
+  waitForCondition,
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, persistedSessionIds } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -25,6 +26,7 @@ describe('TUI PTY System — /compact after session switch', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let sessionIdsBeforeNew: string[] = [];
 
   beforeAll(async () => {
     server = createMockModelServer();
@@ -99,6 +101,8 @@ describe('TUI PTY System — /compact after session switch', () => {
       await waitForRequestMessage(server, 'Session 1 message', 15000);
       await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
 
+      sessionIdsBeforeNew = persistedSessionIds(workspace);
+      expect(sessionIdsBeforeNew).toHaveLength(1);
       await typeText(tui, '/new');
       tui.write('\r');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -122,6 +126,17 @@ describe('TUI PTY System — /compact after session switch', () => {
       tui.write('\r');
 
       await waitForText(() => tui.outputSinceLastAction(), 'Not enough messages', 10000);
+      await waitForCondition(
+        () => {
+          const current = persistedSessionIds(workspace);
+          return (
+            current.length === sessionIdsBeforeNew.length + 1 &&
+            sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
+          );
+        },
+        'Runtime Store to persist the distinct session created by /new',
+        10_000,
+      );
 
       const output = tui.outputSince(outputStart);
       const clean = stripAnsi(output);

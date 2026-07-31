@@ -60,13 +60,25 @@ const inProcessReadOnlyToolCatalogObjectV1Schema = z
   })
   .strict();
 
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function catalogCanonicalValue(catalog: Omit<InProcessReadOnlyToolCatalogV1, 'digest'>): unknown {
   return {
     version: catalog.version,
     revision: catalog.revision,
     tools: [...catalog.tools]
-      .map((tool) => ({ ...tool }))
-      .sort((left, right) => left.toolId.localeCompare(right.toolId)),
+      .map((tool) => ({
+        toolId: tool.toolId,
+        descriptorRevision: tool.descriptorRevision,
+        filesystem: tool.filesystem,
+        network: tool.network,
+        process: tool.process,
+        write: tool.write,
+        externalPath: tool.externalPath,
+      }))
+      .sort((left, right) => compareCodeUnits(left.toolId, right.toolId)),
   };
 }
 
@@ -187,16 +199,53 @@ function registryCanonicalValue(
     evidenceCommit: registry.evidenceCommit,
     qualifications: [...registry.qualifications]
       .map((qualification) => ({
-        ...qualification,
-        entrypoints: [...qualification.entrypoints].sort(),
+        version: qualification.version,
+        qualificationId: qualification.qualificationId,
+        decisionId: qualification.decisionId,
+        outcome: qualification.outcome,
+        platform: qualification.platform,
+        osRelease: qualification.osRelease,
+        osVersion: qualification.osVersion,
+        arch: qualification.arch,
+        bunVersion: qualification.bunVersion,
+        backend: qualification.backend,
+        selectedNetworkMode: qualification.selectedNetworkMode,
+        entrypoints: [...qualification.entrypoints].sort(compareCodeUnits),
+        evidenceDigest: qualification.evidenceDigest,
+        evidenceCommit: qualification.evidenceCommit,
+        backendCapabilities: {
+          backend: qualification.backendCapabilities.backend,
+          filesystem: {
+            read_only: qualification.backendCapabilities.filesystem.read_only,
+            workspace_write: qualification.backendCapabilities.filesystem.workspace_write,
+            full_access: qualification.backendCapabilities.filesystem.full_access,
+          },
+          network: {
+            off: qualification.backendCapabilities.network.off,
+            allowlist: qualification.backendCapabilities.network.allowlist,
+          },
+          processTreeLimit: qualification.backendCapabilities.processTreeLimit,
+          childProcessInheritance: qualification.backendCapabilities.childProcessInheritance,
+          verifiedInProcessReadOnly: qualification.backendCapabilities.verifiedInProcessReadOnly,
+        },
         inProcessReadOnlyTools: {
-          ...qualification.inProcessReadOnlyTools,
-          tools: [...qualification.inProcessReadOnlyTools.tools].sort((left, right) =>
-            left.toolId.localeCompare(right.toolId),
-          ),
+          version: qualification.inProcessReadOnlyTools.version,
+          revision: qualification.inProcessReadOnlyTools.revision,
+          digest: qualification.inProcessReadOnlyTools.digest,
+          tools: [...qualification.inProcessReadOnlyTools.tools]
+            .map((tool) => ({
+              toolId: tool.toolId,
+              descriptorRevision: tool.descriptorRevision,
+              filesystem: tool.filesystem,
+              network: tool.network,
+              process: tool.process,
+              write: tool.write,
+              externalPath: tool.externalPath,
+            }))
+            .sort((left, right) => compareCodeUnits(left.toolId, right.toolId)),
         },
       }))
-      .sort((left, right) => left.qualificationId.localeCompare(right.qualificationId)),
+      .sort((left, right) => compareCodeUnits(left.qualificationId, right.qualificationId)),
   };
 }
 
