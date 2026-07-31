@@ -19,6 +19,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -26,6 +27,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Session Persistence', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui1: PtyProcess;
   let tui2: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
@@ -69,7 +72,7 @@ describe('TUI PTY System — Session Persistence', () => {
   // TUI Instance 1 — Message
   // ═══════════════════════════════════════════════════════════
 
-  test(
+  step(
     'send message in tui1 → model responds, checkpoint written',
     async () => {
       await typeText(tui1, 'Message before restart');
@@ -92,7 +95,7 @@ describe('TUI PTY System — Session Persistence', () => {
   // Exit tui1 + Restart tui2 on same workspace
   // ═══════════════════════════════════════════════════════════
 
-  test(
+  step(
     'exit tui1, restart tui2 on same workspace → prompt visible',
     async () => {
       // Graceful exit via /exit command
@@ -135,7 +138,7 @@ describe('TUI PTY System — Session Persistence', () => {
   // TUI Instance 2 — Verify session persistence
   // ═══════════════════════════════════════════════════════════
 
-  test(
+  step(
     'open /sessions → previous session appears in session list',
     async () => {
       // Open SessionSelector
@@ -162,7 +165,7 @@ describe('TUI PTY System — Session Persistence', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'load historical session → message content restored from checkpoint DB',
     async () => {
       // The session from tui1 should be at index 0 (only persisted session).
@@ -186,4 +189,5 @@ describe('TUI PTY System — Session Persistence', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

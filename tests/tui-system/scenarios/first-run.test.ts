@@ -5,7 +5,7 @@
  * connection flow, error recovery, manual model entry, and full success path.
  * Config is fully isolated via KITE_CODE_HOME — user-level files are never touched.
  */
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, typeMaskedText, typeText } from '../harness/input-helpers';
@@ -35,7 +35,7 @@ describe('first-run — comprehensive flow', () => {
     return stripAnsi(tui.outputSinceLastAction());
   }
 
-  beforeAll(async () => {
+  beforeEach(() => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
@@ -53,7 +53,7 @@ describe('first-run — comprehensive flow', () => {
     workspace.env.OPENAI_API_KEY = '';
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     server?.stop();
     await tui?.killAndWait();
     workspace?.cleanup();

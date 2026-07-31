@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMockModelServer } from '../harness/fixtures';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -19,6 +20,8 @@ const TIMEOUT = 30000;
 const GATE_TEXT = 'Open this workspace?';
 
 describe('TUI PTY System — Workspace Trust', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
   let declinedWorkspace: ReturnType<typeof createTestWorkspace> | undefined;
@@ -51,7 +54,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     declinedWorkspace?.cleanup();
   });
 
-  test(
+  step(
     'a fresh workspace blocks startup behind the trust prompt',
     async () => {
       await waitForText(() => tui.outputSinceLastAction(), GATE_TEXT, 15000);
@@ -68,7 +71,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'trusting persists the record and boots the main UI',
     async () => {
       // The safe default is Exit; explicitly move to Trust before confirming.
@@ -97,7 +100,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'a trusted workspace skips the prompt on restart',
     async () => {
       const proc = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -111,7 +114,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'declining the prompt exits without persisting trust',
     async () => {
       declinedWorkspace = createTestWorkspace({
@@ -155,4 +158,5 @@ describe('TUI PTY System — Workspace Trust', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

@@ -26,6 +26,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -35,6 +36,8 @@ const TIMEOUT = 30000;
 const CHANGELOG_CONTENT = '# Changelog\n\n- 初始版本';
 
 describe('TUI PTY System — File Tool Diff Render', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -113,7 +116,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
   // ── Turn 1: overwrite → Write verb + diff summary intact ───
 
-  test(
+  step(
     'write_file overwrite renders Write verb and diff summary with list-item context lines intact',
     async () => {
       await typeText(tui, 'Update my notes file');
@@ -151,7 +154,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
   // ── Turn 2: create → Create verb + plain content summary ───
 
-  test(
+  step(
     'write_file create renders Create verb and plain content summary',
     async () => {
       await typeText(tui, 'Add a changelog');
@@ -178,7 +181,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
 
   // ── Turn 3: no-op overwrite → Write verb + unchanged marker ─
 
-  test(
+  step(
     'write_file no-op overwrite renders Write verb with content-unchanged marker',
     async () => {
       await typeText(tui, 'Rewrite the changelog identically');
@@ -201,4 +204,5 @@ describe('TUI PTY System — File Tool Diff Render', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

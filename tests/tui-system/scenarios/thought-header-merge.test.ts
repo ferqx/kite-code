@@ -24,6 +24,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -81,6 +82,8 @@ const readCalls = (paths: string[]) =>
   paths.map((path) => ({ id: `t${++toolSeq}`, name: 'read_file', args: { path } }));
 
 describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session replay)', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -116,7 +119,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
     workspace?.cleanup();
   });
 
-  test(
+  step(
     'real-session replay: stats suffix on Thought blocks, pure thoughts merge into text headers',
     async () => {
       toolSeq = 0;
@@ -227,7 +230,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
   // 探索工具）触发等价切断。
   // ═══════════════════════════════════════════════════════════════
 
-  test(
+  step(
     'thinking is consumed once across a write-tool boundary (ADR-0047)',
     async () => {
       server.setResponses([
@@ -275,4 +278,5 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

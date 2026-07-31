@@ -14,6 +14,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForAnyText, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -21,6 +22,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Tool Parse Error', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -63,7 +66,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
 
   // ── Malformed Tool Call → Error Recovery ──────────────────
 
-  test(
+  step(
     'malformed tool call args do not crash TUI, returns to idle',
     async () => {
       await typeText(tui, 'Run a broken command');
@@ -90,7 +93,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
 
   // ── Recovery: Accept New Message After Error ───────────────
 
-  test(
+  step(
     'TUI accepts new message after tool parse error',
     async () => {
       await typeText(tui, 'Hello after broken tool');
@@ -110,4 +113,5 @@ describe('TUI PTY System — Tool Parse Error', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

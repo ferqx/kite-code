@@ -12,6 +12,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitUserMessage, typeText } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -24,6 +25,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Slash Commands', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -59,7 +62,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /help ────────────────────────────────────────────────────
 
-  test(
+  step(
     '/help opens help panel',
     async () => {
       await typeText(tui, '/help');
@@ -78,7 +81,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── Esc closes help ──────────────────────────────────────────
 
-  test(
+  step(
     'Esc closes help panel',
     async () => {
       // Send Escape to close the help overlay
@@ -93,7 +96,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /clear ───────────────────────────────────────────────────
 
-  test(
+  step(
     '/clear command returns to an interactive prompt',
     async () => {
       // First send some text as user message to create content to clear
@@ -123,7 +126,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /theme purple ────────────────────────────────────────────
 
-  test(
+  step(
     '/theme purple shows theme message',
     async () => {
       await typeText(tui, '/theme purple');
@@ -140,7 +143,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /theme purple again (dedup) ──────────────────────────────
 
-  test(
+  step(
     '/theme same preset twice does not duplicate message',
     async () => {
       // Get current output to use as baseline
@@ -168,7 +171,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /plan ────────────────────────────────────────────────────
 
-  test(
+  step(
     '/plan enters planning mode',
     async () => {
       await typeText(tui, '/plan');
@@ -188,7 +191,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── Shift+Tab exits planning ─────────────────────────────────
 
-  test(
+  step(
     'Shift+Tab exits planning mode',
     async () => {
       // Shift+Tab is ESC [ Z sequence
@@ -212,7 +215,7 @@ describe('TUI PTY System — Slash Commands', () => {
   // is NOT displayed in StatsLine. The test verifies the command
   // is processed without crash and the TUI remains responsive.
 
-  test(
+  step(
     '/effort max does not crash TUI',
     async () => {
       await typeText(tui, '/effort max');
@@ -231,7 +234,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /sessions ────────────────────────────────────────────────
 
-  test(
+  step(
     '/sessions opens session selector',
     async () => {
       await typeText(tui, '/sessions');
@@ -250,7 +253,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── Esc closes session selector ──────────────────────────────
 
-  test(
+  step(
     'Esc closes session selector',
     async () => {
       // Send Escape to close the session selector overlay
@@ -265,7 +268,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /permissions toggles interaction mode ───────────────────────
 
-  test(
+  step(
     '/permissions toggles interaction mode',
     async () => {
       // Auto is available on every platform. Full intentionally remains
@@ -289,7 +292,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /model opens model selector ────────────────────────────
 
-  test(
+  step(
     '/model opens model selector',
     async () => {
       await typeText(tui, '/model');
@@ -307,7 +310,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── Esc closes model selector ──────────────────────────────
 
-  test(
+  step(
     'Esc closes model selector',
     async () => {
       tui.write('\x1b');
@@ -320,7 +323,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /export exports session ────────────────────────────────
 
-  test(
+  step(
     '/export exports current session to file',
     async () => {
       await typeText(tui, '/export');
@@ -338,7 +341,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /rewind opens rewind checkpoint panel ──────────────────
 
-  test(
+  step(
     '/rewind opens checkpoint panel',
     async () => {
       await typeText(tui, '/rewind');
@@ -357,7 +360,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── Esc closes rewind panel ────────────────────────────────
 
-  test(
+  step(
     'Esc closes rewind panel',
     async () => {
       tui.write('\x1b');
@@ -370,7 +373,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /mcp suggestion and panel ──────────────────────────────
 
-  test(
+  step(
     'partial /mc input suggests /mcp',
     async () => {
       await typeText(tui, '/mc');
@@ -387,7 +390,7 @@ describe('TUI PTY System — Slash Commands', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     '/mcp opens MCP panel',
     async () => {
       await typeText(tui, '/mcp');
@@ -403,7 +406,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── Esc closes MCP panel ───────────────────────────────────
 
-  test(
+  step(
     'Esc closes MCP panel',
     async () => {
       tui.write('\x1b');
@@ -416,7 +419,7 @@ describe('TUI PTY System — Slash Commands', () => {
 
   // ── /exit (MUST be last test) ────────────────────────────────
 
-  test(
+  step(
     '/exit exits process with code 0',
     async () => {
       await typeText(tui, '/exit');
@@ -428,4 +431,5 @@ describe('TUI PTY System — Slash Commands', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

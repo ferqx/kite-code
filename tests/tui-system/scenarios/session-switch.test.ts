@@ -9,6 +9,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -22,6 +23,8 @@ import { createTestWorkspace, persistedSessionIds } from '../harness/test-worksp
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Session Switching', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -72,7 +75,7 @@ describe('TUI PTY System — Session Switching', () => {
 
   // ── Send Message in Session 1 ──
 
-  test(
+  step(
     'send message in session 1 → model responds',
     async () => {
       await typeText(tui, 'Message in session 1');
@@ -98,7 +101,7 @@ describe('TUI PTY System — Session Switching', () => {
   // After /new, the InputLine remounts (key changes via activeSessionId),
   // requiring a fresh receipt-confirmed input after the remount.
 
-  test(
+  step(
     '/new creates session 2, TUI remains responsive',
     async () => {
       sessionIdsBeforeNew = persistedSessionIds(workspace);
@@ -120,7 +123,7 @@ describe('TUI PTY System — Session Switching', () => {
 
   // ── Send Message in Session 2 ──
 
-  test(
+  step(
     'send message in session 2 → model responds',
     async () => {
       await typeText(tui, 'Message in session 2');
@@ -152,7 +155,7 @@ describe('TUI PTY System — Session Switching', () => {
 
   // ── Open /sessions, filter to session 1, switch ──
 
-  test(
+  step(
     'open /sessions, filter and switch to session 1',
     async () => {
       // Open SessionSelector
@@ -218,7 +221,7 @@ describe('TUI PTY System — Session Switching', () => {
   // The viewport is authoritative for session isolation. Raw PTY history is
   // retained only for diagnostics and must not satisfy these assertions.
 
-  test(
+  step(
     'switch back to session 2 — correct content replayed',
     async () => {
       // Open SessionSelector again
@@ -256,4 +259,5 @@ describe('TUI PTY System — Session Switching', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

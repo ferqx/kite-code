@@ -2,7 +2,7 @@
  * PTY System Test — Sub-agent External Write Approval
  *
  * Verifies that when a sub-agent attempts to write a file outside the workspace
- * (absolute path), the approval flow is triggered correctly:
+ * (an absolute path outside the workspace), the approval flow is triggered correctly:
  *   1. Main agent spawns a code sub-agent via the task tool
  *   2. Sub-agent attempts write_file with an absolute path
  *   3. Approval dialog appears for the external write
@@ -17,6 +17,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -24,13 +25,17 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Sub-agent External Write Approval', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
+    externalFile = join(workspace.home, 'external-subagent-write.txt');
 
     // Response sequence:
     // #1: Main agent → dispatches a code sub-agent (task tool)
@@ -48,7 +53,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
               name: 'task',
               args: {
                 subagent_type: 'code',
-                task: 'Write a test file at /tmp/test-subagent-write.txt with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.',
+                task: `Write a test file at ${externalFile} with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.`,
               },
             },
           ],
@@ -62,7 +67,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
               id: 'call_subagent_write',
               name: 'write_file',
               args: {
-                path: '/tmp/test-subagent-write.txt',
+                path: externalFile,
                 content: 'Test: sub-agent external write',
               },
             },
@@ -95,7 +100,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     workspace?.cleanup();
   });
 
-  test(
+  step(
     'sub-agent external write triggers approval dialog, approve → tool executes → completes',
     async () => {
       // Type the user message
@@ -112,8 +117,12 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
       // Verify approval dialog content
       expect(screenContains(beforeApprove, '授权执行命令')).toBe(true);
-      // The approval should reference the external file path
-      expect(screenContains(beforeApprove, '/tmp/test-subagent-write.txt')).toBe(true);
+      // The terminal truncates long absolute paths to fit the viewport. Prove
+      // the fixture target is external separately, then assert the stable file
+      // identity that remains visible in the approval card.
+      expect(externalFile.startsWith(workspace.workspace)).toBe(false);
+      expect(screenContains(beforeApprove, 'external-subagent-write')).toBe(true);
+      expect(existsSync(externalFile)).toBe(false);
 
       // Approve the tool (default "允许一次" at index 0, press Enter)
       tui.write('\r');
@@ -138,19 +147,16 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'external file was actually written after approval',
     async () => {
-      // The file at /tmp/test-subagent-write.txt should exist
-      // after the approval allowed the write to proceed
-      const externalFile = '/tmp/test-subagent-write.txt';
-      if (existsSync(externalFile)) {
-        const content = readFileSync(externalFile, 'utf8');
-        expect(content).toContain('Test: sub-agent external write');
-      }
+      expect(existsSync(externalFile)).toBe(true);
+      const content = readFileSync(externalFile, 'utf8');
+      expect(content).toContain('Test: sub-agent external write');
     },
     TIMEOUT,
   );
+  test('runs the complete external-write approval journey', () => journey.run(), 170_000);
 });
 
 describe('TUI PTY System — Sub-agent Read File Flow', () => {

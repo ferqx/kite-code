@@ -20,6 +20,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -27,6 +28,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 45000;
 
 describe('TUI PTY System — Interrupt Resume', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui1: PtyProcess;
   let tui2: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
@@ -65,7 +68,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
   // TUI Instance 1 — Create Session Data
   // ═══════════════════════════════════════════════════════════
 
-  test(
+  step(
     'send message → model responds, checkpoint written to DB',
     async () => {
       await typeText(tui1, 'Hello from tui1');
@@ -90,7 +93,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
   // Exit tui1 gracefully before reopening the persisted workspace
   // ═══════════════════════════════════════════════════════════
 
-  test(
+  step(
     'exit tui1 gracefully with /exit',
     async () => {
       await typeText(tui1, '/exit');
@@ -106,7 +109,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
   // Restart tui2 on same workspace + Verify Session Recovery
   // ═══════════════════════════════════════════════════════════
 
-  test(
+  step(
     'restart tui2 on same workspace → session list shows persisted session',
     async () => {
       server.setResponses([
@@ -147,7 +150,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'load persisted session → historical messages restored from DB',
     async () => {
       // The session from tui1 should be at index 0.
@@ -167,4 +170,5 @@ describe('TUI PTY System — Interrupt Resume', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

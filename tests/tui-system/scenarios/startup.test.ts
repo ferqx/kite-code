@@ -37,34 +37,14 @@ describe('TUI PTY System — Startup', () => {
   });
 
   test(
-    'TUI starts and renders prompt ❯ in a CI-backed PTY',
+    'renders the prompt, footer, and Kite Code branding in a CI-backed PTY',
     async () => {
-      // Wait for the TUI to fully render (prompt character)
       await waitForText(() => tui.viewport(), '❯', 15000);
-      const output = tui.viewport();
-      expect(screenContains(output, '❯')).toBe(true);
-      console.log('  TUI rendered, prompt visible');
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'TUI renders footer with shortcuts text',
-    async () => {
-      // Footer may render in later frames — wait for it
-      const output = await waitForText(() => tui.viewport(), 'shortcuts', 10000);
-      expect(screenContains(output, 'shortcuts')).toBe(true);
-      console.log('  Footer visible');
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'TUI renders header with Kite Code branding',
-    async () => {
+      await waitForText(() => tui.viewport(), 'shortcuts', 10000);
       const output = await waitForText(() => tui.viewport(), 'Kite Code', 5000);
+      expect(screenContains(output, '❯')).toBe(true);
+      expect(screenContains(output, 'shortcuts')).toBe(true);
       expect(screenContains(output, 'Kite Code')).toBe(true);
-      console.log('  Header visible');
     },
     TIMEOUT,
   );

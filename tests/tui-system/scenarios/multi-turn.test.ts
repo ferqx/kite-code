@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -24,6 +25,8 @@ const TIMEOUT = 30000;
 // ──────────────────────────────
 
 describe('TUI PTY System — Multi-turn Messages', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -55,7 +58,7 @@ describe('TUI PTY System — Multi-turn Messages', () => {
   // ── First Turn: Agent Completes → Idle Recovery ────────────
   //   (absorbs idle-summary.test.ts coverage)
 
-  test(
+  step(
     'agent completes first turn and returns to idle state',
     async () => {
       await typeText(tui, 'Do a simple task');
@@ -77,7 +80,7 @@ describe('TUI PTY System — Multi-turn Messages', () => {
 
   // ── Second Turn: Multi-turn Capability ──────────────────────
 
-  test(
+  step(
     'second message in same PTY session triggers another model request',
     async () => {
       await typeText(tui, 'Second multi-turn message');
@@ -93,4 +96,5 @@ describe('TUI PTY System — Multi-turn Messages', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

@@ -139,6 +139,143 @@ export function findRawSemanticAssertionViolations(source: string, file = 'fixtu
   return violations;
 }
 
+interface BunTestBindings {
+  beforeAll: Set<string>;
+  describe: Set<string>;
+  test: Set<string>;
+}
+
+function expressionRootName(expression: ts.Expression): string | undefined {
+  if (ts.isIdentifier(expression)) return expression.text;
+  if (ts.isPropertyAccessExpression(expression)) return expressionRootName(expression.expression);
+  if (ts.isElementAccessExpression(expression)) return expressionRootName(expression.expression);
+  if (ts.isCallExpression(expression)) return expressionRootName(expression.expression);
+  if (
+    ts.isParenthesizedExpression(expression) ||
+    ts.isAsExpression(expression) ||
+    ts.isSatisfiesExpression(expression) ||
+    ts.isNonNullExpression(expression)
+  ) {
+    return expressionRootName(expression.expression);
+  }
+  return undefined;
+}
+
+function bunTestBindings(sourceFile: ts.SourceFile): BunTestBindings {
+  const bindings: BunTestBindings = {
+    beforeAll: new Set(['beforeAll']),
+    describe: new Set(['describe']),
+    test: new Set(['it', 'test']),
+  };
+
+  for (const statement of sourceFile.statements) {
+    if (
+      !ts.isImportDeclaration(statement) ||
+      statement.moduleSpecifier.getText(sourceFile).replaceAll(/['"]/g, '') !== 'bun:test' ||
+      !statement.importClause?.namedBindings ||
+      !ts.isNamedImports(statement.importClause.namedBindings)
+    ) {
+      continue;
+    }
+    for (const element of statement.importClause.namedBindings.elements) {
+      const imported = element.propertyName?.text ?? element.name.text;
+      if (imported === 'beforeAll') bindings.beforeAll.add(element.name.text);
+      if (imported === 'describe') bindings.describe.add(element.name.text);
+      if (imported === 'test' || imported === 'it') bindings.test.add(element.name.text);
+    }
+  }
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const visit = (node: ts.Node): void => {
+      if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+        const root = expressionRootName(node.initializer);
+        for (const names of [bindings.beforeAll, bindings.describe, bindings.test]) {
+          if (root && names.has(root) && !names.has(node.name.text)) {
+            names.add(node.name.text);
+            changed = true;
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(sourceFile);
+  }
+
+  return bindings;
+}
+
+function isOutermostRegistrationCall(node: ts.CallExpression, names: ReadonlySet<string>): boolean {
+  const root = expressionRootName(node.expression);
+  if (!root || !names.has(root)) return false;
+  return !(ts.isCallExpression(node.parent) && node.parent.expression === node);
+}
+
+function hasDirectBeforeAll(
+  statements: ts.NodeArray<ts.Statement>,
+  names: ReadonlySet<string>,
+): boolean {
+  return statements.some(
+    (statement) =>
+      ts.isExpressionStatement(statement) &&
+      ts.isCallExpression(statement.expression) &&
+      isOutermostRegistrationCall(statement.expression, names),
+  );
+}
+
+function countTestRegistrations(node: ts.Node, names: ReadonlySet<string>): number {
+  let count = 0;
+  const visit = (current: ts.Node): void => {
+    if (ts.isCallExpression(current) && isOutermostRegistrationCall(current, names)) count++;
+    ts.forEachChild(current, visit);
+  };
+  visit(node);
+  return count;
+}
+
+export function findSharedFixtureTestViolations(source: string, file = 'fixture.ts'): string[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const bindings = bunTestBindings(sourceFile);
+  const violations: string[] = [];
+
+  if (
+    hasDirectBeforeAll(sourceFile.statements, bindings.beforeAll) &&
+    countTestRegistrations(sourceFile, bindings.test) > 1
+  ) {
+    violations.push(`${file}:1`);
+  }
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && isOutermostRegistrationCall(node, bindings.describe)) {
+      const body = node.arguments[1];
+      if (
+        body &&
+        (ts.isArrowFunction(body) || ts.isFunctionExpression(body)) &&
+        ts.isBlock(body.body)
+      ) {
+        if (
+          hasDirectBeforeAll(body.body.statements, bindings.beforeAll) &&
+          countTestRegistrations(body.body, bindings.test) > 1
+        ) {
+          violations.push(
+            `${file}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}`,
+          );
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
 describe('TUI system scenario contract', () => {
   test('condition waits cannot be satisfied by cumulative output from an earlier action', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
@@ -154,6 +291,13 @@ describe('TUI system scenario contract', () => {
   test('final UI semantics never assert against raw action deltas', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
       findRawSemanticAssertionViolations(source, file),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  test('shared beforeAll fixtures expose one runnable journey instead of dependent tests', () => {
+    const violations = scenarioSources().flatMap(({ file, source }) =>
+      findSharedFixtureTestViolations(source, file),
     );
     expect(violations).toEqual([]);
   });
@@ -202,6 +346,39 @@ describe('TUI system scenario contract', () => {
         'const frames = tui.screenFramesSince(mark); expect(frames.join("\\n")).not.toContain("bad");',
       ),
     ).toEqual([]);
+  });
+
+  test('AST contract distinguishes dependent shared-fixture tests from isolated cases', () => {
+    expect(
+      findSharedFixtureTestViolations(
+        'describe("bad", () => { beforeAll(setup); test("a", first); test("b", second); });',
+      ),
+    ).not.toEqual([]);
+    expect(
+      findSharedFixtureTestViolations(
+        'describe("journey", () => { beforeAll(setup); step("a", first); step("b", second); test("journey", run); });',
+      ),
+    ).toEqual([]);
+    expect(
+      findSharedFixtureTestViolations(
+        'describe("isolated", () => { beforeEach(setup); test("a", first); test("b", second); });',
+      ),
+    ).toEqual([]);
+    expect(
+      findSharedFixtureTestViolations(
+        'describe("modifiers", () => { beforeAll(setup); test.only("a", first); test.each([1])("b", second); });',
+      ),
+    ).not.toEqual([]);
+    expect(
+      findSharedFixtureTestViolations(
+        'import { test as scenario } from "bun:test"; describe("alias", () => { beforeAll(setup); const selected = scenario.skip; selected("a", first); scenario("b", second); });',
+      ),
+    ).not.toEqual([]);
+    expect(
+      findSharedFixtureTestViolations(
+        'beforeAll(setup); describe("nested", () => { it("a", first); test("b", second); });',
+      ),
+    ).not.toEqual([]);
   });
 
   test('input readiness belongs to each input action instead of a warmup flow', () => {

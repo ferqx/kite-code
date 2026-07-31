@@ -17,6 +17,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -29,6 +30,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 40000;
 
 describe('TUI PTY System — Thought Lifecycle', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -85,7 +88,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 阶段块 settle 为单行摘要，最终回答为独立文本块
   // ═══════════════════════════════════════════════════════════════
 
-  test(
+  step(
     'multi-round exploration aggregates into one phase block across model calls (ADR-0030)',
     async () => {
       server.setResponses([
@@ -151,7 +154,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 模型回复文本可见
   // ═══════════════════════════════════════════════════════════════
 
-  test(
+  step(
     'single Thought: reasoning + exploration tools → text closes Thought',
     async () => {
       server.setResponses([
@@ -218,7 +221,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 两个工具步骤同块可见
   // ═══════════════════════════════════════════════════════════════
 
-  test(
+  step(
     'multi-phase reasoning merges into one phase block across model calls (ADR-0030)',
     async () => {
       server.setResponses([
@@ -283,7 +286,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 最终文本正常出现
   // ═══════════════════════════════════════════════════════════════
 
-  test(
+  step(
     'read-only shell_execute search command keeps its governed tool lifecycle',
     async () => {
       server.setResponses([
@@ -346,7 +349,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 无 Thinking preview 行
   // ═══════════════════════════════════════════════════════════════
 
-  test(
+  step(
     'tools-only (no reasoning) → label is bare tool count without Thought prefix',
     async () => {
       server.setResponses([
@@ -398,7 +401,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - settle 后随文本块保留在消息列表中（时长并入题头，信息不丢失）
   // ═══════════════════════════════════════════════════════════════
 
-  test(
+  step(
     'thinking-only (no tools) → label is Thought for Xs without tool counts',
     async () => {
       server.setResponses([
@@ -441,4 +444,5 @@ describe('TUI PTY System — Thought Lifecycle', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

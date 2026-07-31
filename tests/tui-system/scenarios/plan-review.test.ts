@@ -16,6 +16,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -23,6 +24,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Plan Draft (write_plan)', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -77,7 +80,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
 
   // ── write_plan in planning phase renders plan content ───
 
-  test(
+  step(
     'write_plan renders plan content in planning phase',
     async () => {
       // Enter planning phase via /plan command
@@ -106,7 +109,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
 
   // ── write_plan in building phase is rejected ─────────────
 
-  test(
+  step(
     'write_plan is rejected in building phase',
     async () => {
       // Submit a new message (in building phase — default mode)
@@ -125,4 +128,5 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

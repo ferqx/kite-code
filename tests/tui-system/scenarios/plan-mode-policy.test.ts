@@ -13,6 +13,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -26,6 +27,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Plan Mode Policy Boundary', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -90,7 +93,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
     workspace?.cleanup();
   });
 
-  test(
+  step(
     'Shift+Tab plan mode applies to a plain conversation and denies write_file',
     async () => {
       const task = 'Create plan-created.txt during planning';
@@ -122,7 +125,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'Shift+Tab exits plan mode after the conversation completes',
     async () => {
       tui.write('\x1b[Z');
@@ -138,7 +141,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'planning shell validation stays internal without approval or message cards',
     async () => {
       const task = 'Plan the runtime validation commands';
@@ -164,4 +167,5 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

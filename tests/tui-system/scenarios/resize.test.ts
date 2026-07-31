@@ -13,7 +13,7 @@
  * at new dimensions" — they pass on all platforms.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
@@ -34,7 +34,7 @@ describe('TUI PTY System — Terminal Resize', () => {
     expect(screenContains(tui.viewport(), probe)).toBe(true);
   }
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
@@ -51,7 +51,7 @@ describe('TUI PTY System — Terminal Resize', () => {
     tui.setRawMode(true);
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     server?.stop();
     await tui?.killAndWait();
     workspace?.cleanup();

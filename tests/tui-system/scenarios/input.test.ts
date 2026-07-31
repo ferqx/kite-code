@@ -5,7 +5,7 @@
  * and full message send → agent response cycle.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
@@ -24,7 +24,7 @@ describe('TUI PTY System — Input & Message', () => {
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
       files: {
@@ -52,7 +52,7 @@ describe('TUI PTY System — Input & Message', () => {
     tui.setRawMode(true);
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     server?.stop();
     await tui?.killAndWait();
     workspace?.cleanup();

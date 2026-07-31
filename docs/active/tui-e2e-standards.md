@@ -48,8 +48,14 @@ tests/tui-system/
    确实验证“某文本在时间窗内不出现”时使用 `expectTextAbsentFor()` 明示时间语义。清空输入统一
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
    普通输入使用默认 DEL 编码。
-4. 每个 scenario 文件是一个隔离的有序用户旅程，负责关闭子进程、mock server 和临时资源；
-   文件内 test step 可以共享该旅程状态，但不得把 setup/readiness 伪装成可独立通过的测试用例。
+4. 每个 Bun `test()` 必须拥有真实、可单独运行的测试语义。多个 `test()` 不得通过 `beforeAll`
+   共享同一个 TUI、mock response 队列或 workspace；真正独立的场景必须使用 `beforeEach/afterEach`
+   获得新 fixture。确实需要共享跨动作状态时，该文件应通过 `createTuiSystemJourney()` 暴露一个
+   Bun test，并把中间检查点注册为有独立超时和失败名称的 `step()`。step 不是可筛选的测试用例：
+   前序失败后依赖步骤不会继续执行，也不会制造级联失败。scenario contract 会拒绝
+   `beforeAll` 下注册多个 `test()` 的结构。journey 总 deadline 必须先于 Bun test 与文件级硬超时，
+   使慢场景仍由 harness 报告当前 step，而不是先收到匿名外层超时。setup/readiness 不得伪装成
+   可独立通过的测试用例。
 5. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
    同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生

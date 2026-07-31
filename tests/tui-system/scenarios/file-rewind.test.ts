@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -35,6 +36,8 @@ const NOTES_V2 = 'v2 第一次修改\n中间行\n';
 const NOTES_V3 = 'v3 第二次修改\n中间行\n';
 
 describe('TUI PTY System — File Rewind', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -86,7 +89,7 @@ describe('TUI PTY System — File Rewind', () => {
 
   // ── Turn 1 + Turn 2: two overwrites build checkpoint history ──
 
-  test(
+  step(
     'two write_file turns land on disk and create checkpoints',
     async () => {
       await typeText(tui, 'Update my notes');
@@ -109,7 +112,7 @@ describe('TUI PTY System — File Rewind', () => {
 
   // ── /rewind: revert to the first checkpoint restores V2 ──────
 
-  test(
+  step(
     '/rewind revert to the first checkpoint restores the file on disk',
     async () => {
       await typeText(tui, '/rewind');
@@ -136,4 +139,5 @@ describe('TUI PTY System — File Rewind', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

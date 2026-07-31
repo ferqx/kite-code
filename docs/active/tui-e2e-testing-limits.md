@@ -47,6 +47,11 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     thread ID 并观察到一个新 ID，避免把同一 session 的累计 transcript 误判为切换成功。
 12. selector 中名称消失只能证明 UI 投影更新，不能单独证明删除持久化成功；confirm/cancel 场景
     还必须分别验证 Runtime Store thread ID 的删除与集合不变。
+13. 有状态 journey 在一个 Bun test 内按 step 执行；首个失败会报告 step 名称并停止后续依赖步骤。
+    每个 step 有局部超时，journey 另有早于 Bun test 和单文件硬超时的总 deadline；总预算耗尽时
+    当前 step 会收到具名失败，因此局部超时之和不是文件可用总时长。测试报告中的 pass 数表示独立
+    测试边界，不表示 journey 内动作数量。需要独立筛选、重跑或并行的行为必须使用新 fixture 写成
+    独立 test，不能仅为增加报告粒度拆分共享状态。
 
 ## 分层选择
 

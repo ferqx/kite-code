@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -23,6 +24,8 @@ import { createTestWorkspace, persistedSessionIds } from '../harness/test-worksp
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — /compact after session switch', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -57,7 +60,7 @@ describe('TUI PTY System — /compact after session switch', () => {
 
   // ── Session 1 — /compact should produce a visible response ──
 
-  test(
+  step(
     '/compact in session 1 produces a response',
     async () => {
       const screenStart = tui.markScreen();
@@ -92,7 +95,7 @@ describe('TUI PTY System — /compact after session switch', () => {
 
   // ── Create session 2 via /new ──
 
-  test(
+  step(
     '/new creates session 2',
     async () => {
       // Send a message first so /new is not ignored.
@@ -118,7 +121,7 @@ describe('TUI PTY System — /compact after session switch', () => {
   // This is the regression test: after InputLine remounts (key change),
   // the useInput handler must still invoke the slash command callback.
 
-  test(
+  step(
     '/compact in session 2 produces a response (regression)',
     async () => {
       const screenStart = tui.markScreen();
@@ -161,7 +164,7 @@ describe('TUI PTY System — /compact after session switch', () => {
 
   // ── Persistence: /compact survives a real TUI process restart ──
 
-  test(
+  step(
     '/compact command persists after exiting and restarting TUI',
     async () => {
       // Create a command with a unique marker in the active session.
@@ -201,4 +204,5 @@ describe('TUI PTY System — /compact after session switch', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

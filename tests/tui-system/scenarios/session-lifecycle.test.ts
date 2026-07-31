@@ -9,6 +9,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -22,6 +23,8 @@ import { createTestWorkspace, persistedSessionIds } from '../harness/test-worksp
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Session Lifecycle', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -58,7 +61,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
   // ── Send Message in First Session ─────────────────────────
 
-  test(
+  step(
     'send message in first session → model responds',
     async () => {
       await typeText(tui, 'Message in session A');
@@ -77,7 +80,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'enter plan mode before creating the next session',
     async () => {
       tui.write('\x1b[Z');
@@ -92,7 +95,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   // The headless terminal model applies Ink's erase/cursor sequences, so this
   // checks the actual viewport instead of accepting stale raw PTY bytes.
 
-  test(
+  step(
     '/new creates new session, TUI remains responsive',
     async () => {
       sessionIdsBeforeNew = persistedSessionIds(workspace);
@@ -123,7 +126,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
   // ── Send Message in New Session ───────────────────────────
 
-  test(
+  step(
     'send message in new session → new response arrives',
     async () => {
       await typeText(tui, 'Message in session B');
@@ -157,7 +160,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'Shift+Tab exits plan mode after a completed conversation',
     async () => {
       tui.write('\x1b[Z');
@@ -175,7 +178,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
   // ── SessionSelector: D-key delete confirm ───────────────
 
-  test(
+  step(
     'D key triggers delete confirmation, Enter confirms deletion',
     async () => {
       // Open session selector
@@ -232,7 +235,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
   // ── SessionSelector: D-key Esc cancel ─────────────────
 
-  test(
+  step(
     'D key then Escape cancels deletion, session remains',
     async () => {
       // The previous test deleted one session, so only 1 remains.
@@ -264,4 +267,5 @@ describe('TUI PTY System — Session Lifecycle', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });

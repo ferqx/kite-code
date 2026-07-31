@@ -10,6 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -17,6 +18,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Error Recovery', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -51,7 +54,7 @@ describe('TUI PTY System — Error Recovery', () => {
 
   // ── Model Error Does Not Crash TUI ────────────────────────
 
-  test(
+  step(
     'model error (HTTP 500) does not crash TUI, prompt remains visible',
     async () => {
       await typeText(tui, 'Trigger error');
@@ -74,7 +77,7 @@ describe('TUI PTY System — Error Recovery', () => {
 
   // ── TUI Accepts New Message After Error ───────────────────
 
-  test(
+  step(
     'TUI accepts new message after error and processes response normally',
     async () => {
       await typeText(tui, 'Hello after error');
@@ -96,4 +99,5 @@ describe('TUI PTY System — Error Recovery', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run(), 170_000);
 });
