@@ -10,6 +10,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { detectSandboxBackend } from '@/core/sandbox';
 import { createMockModelServer } from '../harness/fixtures';
 import { sleep, submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
@@ -18,6 +19,7 @@ import { createTestWorkspace } from '../harness/test-workspace';
 import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 60000;
+const nativeSandboxSmoke = process.env.KITE_RUN_NATIVE_SANDBOX_SMOKE === '1' ? test : test.skip;
 
 describe('TUI PTY System — Tool Approve', () => {
   let tui: PtyProcess;
@@ -117,9 +119,13 @@ describe('TUI PTY System — Tool Approve', () => {
 
   // ── full_access grant ─────────────────────────────────────
 
-  test(
-    'full_access grant auto-approves all subsequent tool calls',
+  nativeSandboxSmoke(
+    'native sandbox smoke: full_access auto-approves all subsequent tool calls',
     async () => {
+      // Full mode is a platform capability, not a config-only test fixture.
+      // Keep this real PTY path opt-in so default CI does not silently depend
+      // on sandbox-exec/bwrap being installed on its runner.
+      expect(detectSandboxBackend()).not.toBe('none');
       await sleep(3000);
 
       // Switch to full permissions mode — tool calls will auto-execute

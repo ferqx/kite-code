@@ -55,6 +55,10 @@ tests/tui-system/
     `KITE_TUI_TEST_TIMEOUT_SCALE` 设为大于 0 的倍数覆盖，超过 3 时按 3 倍处理。增加预算不能
     替代输入回显、请求 baseline 和 modal/命令结果条件。失败诊断必须包含最近 mock request
     与终端输出尾部。
+15. 依赖宿主机原生能力的正向场景不得进入默认 PTY 门禁。sandbox、keyring、外部编辑器等
+    场景应使用显式 opt-in smoke，并在运行时确认后端存在；默认 suite 只验证可人为固定的
+    负向/降级路径。授权、policy 和 reducer 的完整分支必须由注入能力状态的确定性单元或
+    Runtime 集成测试覆盖，不能让 GitHub runner 是否预装 `bwrap` 改变默认测试结果。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 
@@ -62,5 +66,7 @@ tests/tui-system/
 
 - `bun run test`：默认快速门禁，排除 PTY 与 spike，适合日常修改。
 - `bun run test:tui:system`：按文件串行执行完整 PTY suite。
+- `KITE_RUN_NATIVE_SANDBOX_SMOKE=1 bun test --max-concurrency=1 tests/tui-system/scenarios/tool-approve.test.ts`：
+  在已安装 `sandbox-exec` 或 `bwrap` 的宿主机上显式验证 Full 模式真实 PTY 链路。
 - `bun run test:all`：先运行默认门禁，再运行完整 PTY suite。
 - 裸 `bun test` 会按 Bun 默认发现规则包含高成本 PTY 文件，不是仓库规范的全量入口。

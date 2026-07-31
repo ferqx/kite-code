@@ -16,7 +16,9 @@
 2. Spinner、耗时和异步事件到达顺序不稳定，不应作为精确快照契约。
 3. `<Static>` scrollback 已提交内容不会像普通 React 节点一样撤回；测试应验证最终语义而非旧块消失。
 4. Screen parser 不能证明所有 ANSI 状态正确；DEC synchronized output、光标和 wrapping 仍需专门测试。
-5. 外部编辑器、真实 MCP、真实模型和平台 sandbox 不属于默认 PTY suite，应使用边界测试或显式环境测试。
+5. 外部编辑器、真实 MCP、真实模型和平台 sandbox 不属于默认 PTY suite，应使用边界测试或
+   显式 opt-in 环境 smoke。平台能力的正向场景必须在测试入口确认真实后端存在；默认门禁只
+   保留可固定能力状态的降级路径，不能按 runner 恰好安装的软件改变断言。
 6. PTY 测试成本高，不应用来穷举纯 reducer、policy 或 schema 分支。
 7. 完整 PTY suite 按文件隔离执行并设置单文件硬超时；因此失败会定位到具体
    scenario，且不会因一个遗留 TUI 子进程无限占用整套测试。
