@@ -68,6 +68,33 @@ describe('TUI input helpers', () => {
     expect(rendered).toContain('\r\n');
   });
 
+  test('typeText does not erase an empty input because an unrelated redraw arrived', async () => {
+    let rendered = '';
+    let attempt = 0;
+    let deletes = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data === '\x7f') {
+          deletes++;
+          return;
+        }
+        if (data === 'h') attempt++;
+        if (attempt === 1) {
+          rendered = '<prompt-redraw>';
+          return;
+        }
+        rendered += data;
+      },
+      () => rendered,
+    );
+
+    await typeText(tui, 'hello', 0);
+
+    expect(attempt).toBe(2);
+    expect(deletes).toBe(0);
+    expect(rendered).toContain('hello');
+  }, 10_000);
+
   test('clearInput supports the input widget backspace encoding and waits for a receipt', async () => {
     let rendered = '';
     const writes: string[] = [];
@@ -82,6 +109,15 @@ describe('TUI input helpers', () => {
     await clearInput(tui, 2, { backspace: 'ascii' });
 
     expect(writes).toEqual(['\x08', '\x08']);
+  });
+
+  test('clearInput can settle a retry cleanup when an already-empty widget emits no receipt', async () => {
+    const tui = fakePty(
+      () => {},
+      () => '',
+    );
+
+    await clearInput(tui, 2, { requireReceipt: false });
   });
 
   test('waitForRequestMessage ignores matching requests before the supplied baseline', async () => {

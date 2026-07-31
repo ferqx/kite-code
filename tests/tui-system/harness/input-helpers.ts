@@ -21,6 +21,17 @@ function normalizeInputEcho(text: string): string {
   return stripAnsi(text).replace(/\s+/g, '');
 }
 
+function containsInputFragment(output: string, text: string): boolean {
+  const normalizedOutput = normalizeInputEcho(output);
+  const normalizedText = normalizeInputEcho(text);
+  const fragmentLength = Math.min(3, normalizedText.length);
+  if (fragmentLength === 0) return false;
+  for (let start = 0; start <= normalizedText.length - fragmentLength; start++) {
+    if (normalizedOutput.includes(normalizedText.slice(start, start + fragmentLength))) return true;
+  }
+  return false;
+}
+
 async function waitForInputEcho(
   getOutput: () => string,
   text: string,
@@ -64,8 +75,9 @@ export async function typeText(tui: PtyProcess, text: string, delayMs = 40): Pro
       if (attempt === attempts) break;
       // A completely missing receipt means nothing reached the controlled
       // input, so there is no stale text to erase before retrying.
-      if (tui.outputSince(outputMark).length > 0) {
-        await clearInput(tui, characters.length);
+      const attemptedOutput = tui.outputSince(outputMark);
+      if (containsInputFragment(attemptedOutput, text)) {
+        await clearInput(tui, characters.length, { requireReceipt: false });
       }
       await sleep(INPUT_SETTLE_MS);
     }
@@ -91,7 +103,7 @@ export async function typeMaskedText(tui: PtyProcess, text: string, delayMs = 40
 export async function clearInput(
   tui: PtyProcess,
   length: number,
-  options: { backspace?: 'delete' | 'ascii' } = {},
+  options: { backspace?: 'delete' | 'ascii'; requireReceipt?: boolean } = {},
 ): Promise<void> {
   if (length <= 0) return;
   const outputMark = tui.markOutput();
@@ -100,7 +112,12 @@ export async function clearInput(
     tui.write(backspace);
     await sleep(50);
   }
-  await waitForOutputQuiescence(() => tui.outputSince(outputMark));
+  await waitForOutputQuiescence(
+    () => tui.outputSince(outputMark),
+    undefined,
+    undefined,
+    options.requireReceipt ?? true,
+  );
 }
 
 export async function waitForRequestMessage(

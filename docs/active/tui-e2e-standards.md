@@ -29,7 +29,9 @@ tests/tui-system/
    自己承担 readiness，不允许建立 warmup 测试或 warmup 流程。普通模型消息优先使用
    `submitUserMessage()`，把输入回显、Enter 和“本次提交之后产生的 mock model request”绑定
    为一个同步原语。slash command 优先使用 `submitCommand()`；需要分步断言时可使用
-   receipt-confirmed `typeText()` 后单独发送 Enter。
+   receipt-confirmed `typeText()` 后单独发送 Enter。输入重试不能把任意 action-local redraw 当作
+   “已有残留文本”：只有本次输入的连续片段实际回显后才发送清空键；对已空输入发送的防御性
+   清空允许只等待 quiet window，不得强制等待一个不会产生的 Ink receipt。
 3. `write()`、`resize()` 和 `setRawMode()` 都会记录动作前的原始输出 checkpoint。`outputSinceLastAction()`
    与 `outputSince(mark)` 只证明动作后产生了新 PTY 字节，不能作为当前 UI 语义的最终断言。
    Harness 只有在对应 chunk 完成 VT 解析后才向 action delta 发布该字节范围，避免 byte receipt
@@ -47,7 +49,8 @@ tests/tui-system/
    后的新输出，不能用“动作后没有输出”通过测试；语义结果明确时应先等待该结果，再等待稳定帧。
    确实验证“某文本在时间窗内不出现”时使用 `expectTextAbsentFor()` 明示时间语义。清空输入统一
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
-   普通输入使用默认 DEL 编码。
+   普通输入使用默认 DEL 编码。只有 `typeText()` 已确认输入片段未完整交付的内部恢复路径可以显式
+   选择无 receipt 的 quiet-window 清空；scenario 不能用该选项跳过语义 readiness。
 4. 每个 Bun `test()` 必须拥有真实、可单独运行的测试语义。多个 `test()` 不得通过 `beforeAll`
    共享同一个 TUI、mock response 队列或 workspace；真正独立的场景必须使用 `beforeEach/afterEach`
    获得新 fixture。确实需要共享跨动作状态时，该文件应通过 `createTuiSystemJourney()` 暴露一个
