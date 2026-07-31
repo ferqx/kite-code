@@ -2,6 +2,7 @@
 // Phase 1: 工具生命周期 + 交互事件
 // 所有状态变更通过类型化事件表示，供 runtime 内部及各层消费者使用
 
+import type { RemoteMcpEgressReceiptV1 } from '@/core/mcp/egress-permit';
 import type { ContextTokenEstimate } from '@/core/model/context-budget';
 import type { NetworkDecisionReceiptV1 } from '@/core/sandbox/network-enforcer';
 import type { ToolGrant } from '@/core/types';
@@ -352,6 +353,13 @@ export interface NetworkAdmissionDecidedEvent {
   type: 'network.admission_decided';
   toolCallId: string;
   decision: NetworkDecisionReceiptV1;
+}
+
+/** Durable remote-content decision persisted before an admitted MCP request. */
+export interface RemoteMcpEgressDecidedEvent {
+  type: 'mcp.egress_decided';
+  toolCallId: string;
+  decision: RemoteMcpEgressReceiptV1;
 }
 
 /** 工具调用成功完成 */
@@ -973,6 +981,7 @@ export type RuntimeEvent =
   | ToolStartedEvent
   | ToolProgressEvent
   | NetworkAdmissionDecidedEvent
+  | RemoteMcpEgressDecidedEvent
   | ToolFinishedEvent
   | ToolFailedEvent
   | ToolRejectedEvent

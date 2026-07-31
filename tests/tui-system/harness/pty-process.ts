@@ -28,6 +28,8 @@ export interface PtyProcessOptions {
   workspace?: TestWorkspace;
   /** Skip writing mock config — use for first-run/setup tests */
   noPreConfig?: boolean;
+  /** Use the test-only composition root that issues one permit per remote MCP invocation. */
+  remoteMcpEgressPermitResolver?: 'allow-each-invocation';
 }
 
 export interface PtyProcess {
@@ -184,12 +186,15 @@ function forceKillPtyChild(proc: ReturnType<typeof Bun.spawn>): void {
 }
 
 export function resolveTuiLaunchPaths(
-  opts: Pick<PtyProcessOptions, 'cwd' | 'workspace'>,
+  opts: Pick<PtyProcessOptions, 'cwd' | 'workspace' | 'remoteMcpEgressPermitResolver'>,
   projectRoot = process.cwd(),
 ): { cwd: string; entryPath: string } {
   return {
     cwd: opts.cwd ?? opts.workspace?.workspace ?? projectRoot,
-    entryPath: join(projectRoot, 'src/app/tui/index.tsx'),
+    entryPath:
+      opts.remoteMcpEgressPermitResolver === 'allow-each-invocation'
+        ? join(projectRoot, 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx')
+        : join(projectRoot, 'src/app/tui/index.tsx'),
   };
 }
 

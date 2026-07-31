@@ -90,9 +90,17 @@ proxy environment。这里只承诺 host 级 admission，不承诺 URL path 隔�
 每个 allow/deny 决定都带独立 invocation/hop、policy/endpoint revision 和 digest，并在任何已
 批准 socket 打开前通过 `network.admission_decided` 写入 Runtime。decision store、resolver 或
 observer 不可用时返回 typed `controller_unavailable`；并发 sibling 不共享 receipt，某个 denial
-或 controller failure 不会覆盖或取消其他 sibling 已持久化的决定。Runtime schema v20 把这些
+或 controller failure 不会覆盖或取消其他 sibling 已持久化的决定。Runtime schema v21 保留 v20 的这些
 决定保存在对应 Tool Call，Tool Result 只投影 policy revision、receipt digests 与失败码，不保存
 响应正文。
+
+远程 HTTP MCP 另有独立 content-egress gate，并以 `mcp.egress_decided` 保存脱敏 permit/denial
+原因；它不等于本节的 DNS/endpoint transport admission。该 gate 已能阻止非空参数在没有单次
+许可时进入 MCP Tool request；secret、受保护 credential path 或无法在固定预算内完成检查的参数
+不允许请求/消费 permit。许可、digest 与协议发送共同使用 await 前捕获的 immutable JSON-safe
+参数快照，调用方或 receipt callback 后续修改原对象不会改变 wire payload。nonce 的持久化唯一
+冲突会先保存 `permit_replayed` denial，不会悬挂执行循环或退化为协议请求。但在 Task 1B.8 完成前
+仍不能让 sealed boundary 下的 MCP transport 重新开放。
 
 当前原生 backend 尚不能对任意 Shell/Skill descendant 实现无旁路 host allowlist，因此 sealed
 boundary 下 Shell 网络固定为 disabled；所有 MCP inventory/resource/tool transport 和可能触发

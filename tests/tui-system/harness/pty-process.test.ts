@@ -43,6 +43,20 @@ describe('resolveTuiLaunchPaths', () => {
       entryPath: '/project/src/app/tui/index.tsx',
     });
   });
+
+  test('uses the explicit test composition root only for admitted remote MCP scenarios', () => {
+    const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;
+
+    expect(
+      resolveTuiLaunchPaths(
+        { workspace, remoteMcpEgressPermitResolver: 'allow-each-invocation' },
+        '/project',
+      ),
+    ).toEqual({
+      cwd: '/tmp/kite-code-workspace',
+      entryPath: '/project/tests/tui-system/fixtures/remote-mcp-egress-tui.tsx',
+    });
+  });
 });
 
 describe('PTY output checkpoints', () => {

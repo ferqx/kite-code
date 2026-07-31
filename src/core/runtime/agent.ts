@@ -11,6 +11,7 @@ import type {
 } from '@/core/config/session-logging-policy';
 import { resolveSessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import type { RemoteMcpEgressPermitResolverV1 } from '@/core/mcp/egress-permit';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
@@ -87,6 +88,7 @@ export interface RunRuntimeAgentInput {
   model?: SupportedChatModel;
   shellExecutor?: ShellExecutor;
   mcpManager?: McpRuntimeProvider;
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */
@@ -437,6 +439,7 @@ export async function* runRuntimeAgent(
           })
         : undefined,
       providerDataAdmission,
+      remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });
     for await (const event of runRuntimeLoop(
       kernel,
@@ -454,6 +457,7 @@ export async function* runRuntimeAgent(
               skillOptions: input.skillOptions,
               signal: executionAbortController.signal,
               providerDataAdmission,
+              remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
               subagentEventSink: () => {},
             })
           : effect,

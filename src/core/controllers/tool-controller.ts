@@ -15,11 +15,22 @@ import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import {
   capabilityChangedProviderError,
+  classifyRemoteMcpArgumentsV1,
+  createRemoteMcpEgressReceiptV1,
   exposedMcpToolName,
+  hasRemoteMcpContentV1,
+  inspectRemoteMcpArgumentsV1,
   isMcpProviderError,
   type McpProviderRecoveryAction,
   type McpRuntimeProvider,
   providerErrorFromDirectoryEntry,
+  type RemoteMcpEgressDecisionRecorderV1,
+  RemoteMcpEgressDeniedError,
+  type RemoteMcpEgressInvocationPolicyV1,
+  type RemoteMcpEgressPermitRequestV1,
+  type RemoteMcpEgressPermitResolverV1,
+  remoteMcpArgumentDigestV1,
+  snapshotRemoteMcpArgumentsV1,
 } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
@@ -546,6 +557,8 @@ export async function executeRuntimeTools(params: {
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
+  recordRemoteMcpEgressDecision?: RemoteMcpEgressDecisionRecorderV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   subagentEventSink?: SubAgentEventSink;
   planArtifactStore?: PlanArtifactStore;
@@ -1436,22 +1449,180 @@ export async function executeRuntimeTools(params: {
       continue;
     }
 
+    const mcpFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
+    const mcpRoute = mcpDescriptor
+      ? params.mcpManager?.getCapabilityRoute?.(mcpDescriptor.capabilityId)
+      : undefined;
+    const controllerArgumentSnapshot =
+      mcpRoute?.transport === 'http'
+        ? snapshotRemoteMcpArgumentsV1(request.args as Record<string, unknown>)
+        : undefined;
+    const controllerArguments =
+      controllerArgumentSnapshot?.ok === true
+        ? controllerArgumentSnapshot.arguments
+        : controllerArgumentSnapshot
+          ? Object.freeze({ invalidArgumentShape: true })
+          : (request.args as Record<string, unknown>);
     const invocation = createMcpInvocationRecord({
       state: params.state,
       call,
       descriptor: mcpDescriptor,
-      flags: params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined,
+      flags: mcpFlags,
+      argumentsValue: controllerArguments,
     });
-    const executionRequest =
+    const snapshotBoundRequest = controllerArgumentSnapshot
+      ? ({ ...request, args: controllerArguments } as typeof request)
+      : request;
+    let executionRequest =
       invocation?.idempotencyKeyArgument && invocation.idempotencyKey
         ? ({
-            ...request,
+            ...snapshotBoundRequest,
             args: {
-              ...(request.args as Record<string, unknown>),
+              ...controllerArguments,
               [invocation.idempotencyKeyArgument]: invocation.idempotencyKey,
             },
           } as typeof request)
-        : request;
+        : snapshotBoundRequest;
+    let remoteEgress: RemoteMcpEgressInvocationPolicyV1 | undefined;
+    let remoteEgressPreflightFailure: import('@/core/mcp').RemoteMcpEgressReceiptV1 | undefined;
+    let remoteEgressPersistenceUnavailable = false;
+    if (mcpDescriptor) {
+      const flags = mcpFlags;
+      const route = mcpRoute;
+      if (route?.transport === 'http') {
+        const argumentSnapshot =
+          controllerArgumentSnapshot?.ok === false
+            ? controllerArgumentSnapshot
+            : snapshotRemoteMcpArgumentsV1(executionRequest.args as Record<string, unknown>);
+        const finalArguments = argumentSnapshot.ok
+          ? argumentSnapshot.arguments
+          : Object.freeze({ invalidArgumentShape: true });
+        if (argumentSnapshot.ok) {
+          executionRequest = {
+            ...executionRequest,
+            args: argumentSnapshot.arguments,
+          } as typeof executionRequest;
+        }
+        const content = classifyRemoteMcpArgumentsV1(finalArguments);
+        const egressRequest: RemoteMcpEgressPermitRequestV1 = {
+          ...route,
+          invocationId: digestCapability({
+            threadId: params.state.session.threadId,
+            toolCallId,
+            capabilityId: mcpDescriptor.capabilityId,
+            toolRevision: mcpDescriptor.revision,
+            arguments: finalArguments,
+          }),
+          toolCallId,
+          argumentDigest: remoteMcpArgumentDigestV1(finalArguments),
+          content,
+        };
+        if (!params.recordRemoteMcpEgressDecision) {
+          remoteEgressPersistenceUnavailable = true;
+        } else {
+          const enabled = flags?.remoteMcpEgressPolicyV1 === true;
+          const contentInspection = argumentSnapshot.ok
+            ? inspectRemoteMcpArgumentsV1(finalArguments, {
+                knownSecrets: [params.taskConfig?.apiKey],
+              })
+            : 'unknown';
+          const permit =
+            enabled && hasRemoteMcpContentV1(content) && contentInspection === 'clear'
+              ? await params.remoteMcpEgressPermitResolver?.(Object.freeze(egressRequest))
+              : undefined;
+          const preflight = createRemoteMcpEgressReceiptV1({
+            enabled,
+            request: egressRequest,
+            permit,
+            ...(contentInspection === 'secret'
+              ? { reason: 'secret_detected' as const }
+              : contentInspection === 'unknown'
+                ? { reason: 'content_inspection_unknown' as const }
+                : {}),
+          });
+          if (!preflight.admitted) {
+            remoteEgressPreflightFailure = preflight;
+          } else {
+            remoteEgress = {
+              enabled,
+              invocationId: egressRequest.invocationId,
+              toolCallId,
+              content,
+              ...(permit ? { permit } : {}),
+              recordDecision: params.recordRemoteMcpEgressDecision,
+            };
+          }
+        }
+      } else if (flags && !route) {
+        const argumentSnapshot = snapshotRemoteMcpArgumentsV1(
+          executionRequest.args as Record<string, unknown>,
+        );
+        const finalArguments = argumentSnapshot.ok
+          ? argumentSnapshot.arguments
+          : Object.freeze({ invalidArgumentShape: true });
+        const content = classifyRemoteMcpArgumentsV1(finalArguments);
+        if (hasRemoteMcpContentV1(content)) {
+          const receipt = createRemoteMcpEgressReceiptV1({
+            enabled: true,
+            request: {
+              transport: 'http',
+              serverIdentity: mcpDescriptor.provider.id,
+              endpointRevision: 'unavailable',
+              toolRevision: mcpDescriptor.revision,
+              invocationId: digestCapability({
+                threadId: params.state.session.threadId,
+                toolCallId,
+                capabilityId: mcpDescriptor.capabilityId,
+              }),
+              toolCallId,
+              argumentDigest: remoteMcpArgumentDigestV1(finalArguments),
+              content,
+            },
+            reason: 'route_unavailable',
+          });
+          remoteEgressPreflightFailure = receipt;
+        }
+      }
+    }
+    if (remoteEgressPersistenceUnavailable) {
+      const reason = 'Remote MCP egress decision persistence is required before dispatch.';
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure('persistence_unavailable', reason),
+      });
+      continue;
+    }
+    if (remoteEgressPreflightFailure) {
+      if (!params.recordRemoteMcpEgressDecision) {
+        const reason = 'Remote MCP egress decision persistence is required before dispatch.';
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure('persistence_unavailable', reason),
+        });
+        continue;
+      }
+      try {
+        await params.recordRemoteMcpEgressDecision(remoteEgressPreflightFailure);
+      } catch {
+        const reason = 'Remote MCP egress decision could not be persisted before dispatch.';
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure('persistence_unavailable', reason),
+        });
+        continue;
+      }
+      const denied = new RemoteMcpEgressDeniedError(remoteEgressPreflightFailure);
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: denied.message,
+        failure: classifyFailure('policy_denied', denied.message),
+      });
+      continue;
+    }
     if (invocation) events.push(invocation.recorded);
     events.push({ type: 'tool.started', toolCallId });
     if (invocation) {
@@ -1509,6 +1680,7 @@ export async function executeRuntimeTools(params: {
                   mcpInvocation: {
                     capabilityId: mcpDescriptor.capabilityId,
                     expectedRevision: mcpDescriptor.revision,
+                    ...(remoteEgress ? { remoteEgress } : {}),
                   },
                 }
               : {}),
@@ -1631,10 +1803,17 @@ export async function executeRuntimeTools(params: {
       }
       const failure = isMcpProviderError(error)
         ? classifyMcpProviderError(error)
-        : classifyFailure(
-            'tool_runtime_error',
-            error instanceof Error ? error.message : String(error),
-          );
+        : error instanceof RemoteMcpEgressDeniedError
+          ? classifyFailure(
+              error.receipt.reason === 'receipt_persistence_failed'
+                ? 'persistence_unavailable'
+                : 'policy_denied',
+              error.message,
+            )
+          : classifyFailure(
+              'tool_runtime_error',
+              error instanceof Error ? error.message : String(error),
+            );
       events.push({
         type: 'tool.failed',
         toolCallId,
@@ -1665,6 +1844,7 @@ function createMcpInvocationRecord(params: {
   call: RuntimeState['tools']['calls'][string];
   descriptor: import('@/protocol/capabilities').CapabilityDescriptor | undefined;
   flags: ReturnType<typeof getFeatureFlags> | undefined;
+  argumentsValue?: Record<string, unknown>;
 }):
   | {
       invocationId: string;
@@ -1681,12 +1861,13 @@ function createMcpInvocationRecord(params: {
   ) {
     return undefined;
   }
+  const argumentsValue = params.argumentsValue ?? params.call.args;
   const invocationId = digestCapability({
     threadId: params.state.session.threadId,
     toolCallId: params.call.toolCallId,
     capabilityId: params.descriptor.capabilityId,
     capabilityRevision: params.descriptor.revision,
-    arguments: params.call.args,
+    arguments: argumentsValue,
   });
   const planning = getActivePlanning(params.state);
   const planId = 'document' in planning ? planning.document?.planId : undefined;
@@ -1715,7 +1896,7 @@ function createMcpInvocationRecord(params: {
         ? { taskId: params.call.taskId ?? params.state.activeTaskId ?? undefined }
         : {}),
       ...(planId ? { planId } : {}),
-      argumentsDigest: digestCapability(params.call.args),
+      argumentsDigest: digestCapability(argumentsValue),
       authorizationDigest,
       effectiveEffectsDigest: digestCapability(params.descriptor.effectiveEffects),
       effectiveEffects: params.descriptor.effectiveEffects,

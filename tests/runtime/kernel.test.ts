@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createRemoteMcpEgressReceiptV1 } from '../../src/core/mcp/egress-permit';
 import { McpConnectionManager } from '../../src/core/mcp/manager';
 import { buildContextProjection } from '../../src/core/model/context-projection';
 import { eventsForRunCancellation } from '../../src/core/runtime/actions';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
+import { classifyFailure } from '../../src/core/runtime/failures';
 import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
 import { runRuntimeLoop } from '../../src/core/runtime/runner';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
@@ -15,7 +17,11 @@ import {
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
 } from '../../src/core/runtime/state';
-import { createRuntimeStore } from '../../src/core/runtime/store';
+import {
+  createRuntimeStore,
+  RemoteMcpEgressNonceConflictError,
+  type RuntimeStore,
+} from '../../src/core/runtime/store';
 
 describe('AgentKernel durability', () => {
   test('replays the context compaction crash matrix from snapshot plus event tail', () => {
@@ -960,6 +966,86 @@ test('runRuntimeLoop applies streamed tool events before the effect completes', 
   expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
   expect(kernel.getState().tools.queue).not.toContain('shell-1');
   expect(kernel.getState().tools.active).not.toContain('shell-1');
+  kernel.close();
+});
+
+test('runRuntimeLoop rejects persistEvent when durable persistence throws instead of hanging', async () => {
+  const durableStore = createRuntimeStore(':memory:');
+  const store: RuntimeStore = {
+    ...durableStore,
+    appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata) {
+      if (events.some((event) => event.type === 'mcp.egress_decided')) {
+        throw new RemoteMcpEgressNonceConflictError();
+      }
+      durableStore.appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata);
+    },
+  };
+  const initialState = createInitialRuntimeState({
+    threadId: 'streamed-persistence-rejection',
+    userId: 'u',
+    workspace: '/',
+  });
+  initialState.tools.queue.push('shell-1');
+  initialState.tools.calls['shell-1'] = {
+    toolCallId: 'shell-1',
+    modelMessageId: 'model-1',
+    name: 'shell_execute',
+    args: { command: 'printf safe' },
+    status: 'queued',
+    createdAtTurnId: initialState.turn.turnId,
+  };
+  const kernel = new AgentKernel({ store, initialState, interactionMode: 'accept_edits' });
+  const decision = createRemoteMcpEgressReceiptV1({
+    enabled: true,
+    request: {
+      transport: 'http',
+      serverIdentity: 'docs',
+      endpointRevision: 'endpoint-v1',
+      toolRevision: 'tool-v1',
+      invocationId: 'invocation-1',
+      toolCallId: 'shell-1',
+      argumentDigest: 'redacted-digest',
+      content: { dataClassifications: ['confidential'], payloadKinds: ['user_prompt'] },
+    },
+    reason: 'permit_consumed',
+  });
+  let persistenceRejected = false;
+  const stream = runRuntimeLoop(
+    kernel,
+    async (effect, _state, _emit, context) => {
+      if (effect.type !== 'run_tools') return [];
+      try {
+        await context?.persistEvent({
+          type: 'mcp.egress_decided',
+          toolCallId: 'shell-1',
+          decision,
+        });
+      } catch (error) {
+        persistenceRejected = error instanceof RemoteMcpEgressNonceConflictError;
+      }
+      return [
+        {
+          type: 'tool.failed',
+          toolCallId: 'shell-1',
+          failure: classifyFailure('persistence_unavailable', 'fixture persistence failure'),
+        },
+      ];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const first = await Promise.race([
+    stream.next(),
+    new Promise<'timeout'>((resolve) => {
+      timer = setTimeout(() => resolve('timeout'), 1_000);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
+
+  expect(first).not.toBe('timeout');
+  expect(persistenceRejected).toBe(true);
+  if (first !== 'timeout') expect(first.value).toMatchObject({ type: 'tool.failed' });
+  await stream.return(undefined);
   kernel.close();
 });
 

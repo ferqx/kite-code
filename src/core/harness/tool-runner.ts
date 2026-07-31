@@ -2,8 +2,13 @@ import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
-import type { McpRuntimeProvider } from '@/core/mcp';
-import { isMcpProviderError, normalizeMcpToolResult } from '@/core/mcp';
+import {
+  isMcpProviderError,
+  type McpRuntimeProvider,
+  normalizeMcpToolResult,
+  RemoteMcpEgressDeniedError,
+  type RemoteMcpEgressInvocationPolicyV1,
+} from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
   evaluateToolApproval,
@@ -129,6 +134,7 @@ export interface RunApprovedToolInput {
   mcpInvocation?: {
     capabilityId: string;
     expectedRevision: string;
+    remoteEgress?: RemoteMcpEgressInvocationPolicyV1;
   };
   /** Runtime-resolved policy for a binding-validated MCP capability. */
   mcpPolicy?: RuntimeMcpPolicy;
@@ -794,6 +800,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         capabilityId: mcpInvocation.capabilityId,
         expectedRevision: mcpInvocation.expectedRevision,
         arguments: request.args,
+        ...(mcpInvocation.remoteEgress ? { remoteEgress: mcpInvocation.remoteEgress } : {}),
         signal,
       });
       const rawContent = JSON.stringify(raw);
@@ -813,7 +820,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         },
       });
     } catch (err) {
-      if (isMcpProviderError(err)) throw err;
+      if (isMcpProviderError(err) || err instanceof RemoteMcpEgressDeniedError) throw err;
       return withFailureGuidance(request, {
         ok: false,
         command: request.name,

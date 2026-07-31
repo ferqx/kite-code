@@ -93,6 +93,13 @@ tests/tui-system/
     场景应使用显式 opt-in smoke，并在运行时确认后端存在；默认 suite 只验证可人为固定的
     负向/降级路径。授权、policy 和 reducer 的完整分支必须由注入能力状态的确定性单元或
     Runtime 集成测试覆盖，不能让 GitHub runner 是否预装 `bwrap` 改变默认测试结果。
+18. 远程 HTTP MCP 正文调用不得沿用旧的隐式外发前置条件。验证默认边界时使用生产 TUI
+    组合根，并断言 `remoteMcpEgressPolicyV1=false` 产生零 `tools/call` 请求；验证认证恢复、
+    失败隔离等需要成功外发的其他主题时，场景必须在同一个 Bun test 内显式开启该 flag，
+    并通过 `remoteMcpEgressPermitResolver: 'allow-each-invocation'` 选择仅测试组合根。该组合根
+    为每个 invocation 签发独立短时 permit，不得由全局 harness、环境变量或生产入口自动放行。
+    scenario contract 会拒绝只配置 flag 或只注入 permit issuer 的半配置场景。自动重试与
+    permit replay 属于 MCP policy/integration 层；不以重试为主题的 PTY 场景应配置 `retry: never`。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 

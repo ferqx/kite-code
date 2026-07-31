@@ -202,6 +202,12 @@ describe('executeRuntimeTools', () => {
     };
     let calledWith: { server: string; tool: string } | undefined;
     runtimeManager.ensureProviderReady = async () => {};
+    runtimeManager.getCapabilityRoute = () => ({
+      transport: 'stdio',
+      serverIdentity: descriptor.provider.id,
+      endpointRevision: 'stdio-v1',
+      toolRevision: descriptor.revision,
+    });
     manager.findCapability = () => descriptor;
     manager.callCapability = async () => {
       calledWith = { server: descriptor.provider.id, tool: descriptor.displayName };
@@ -834,6 +840,12 @@ describe('executeRuntimeTools', () => {
     const manager = new McpConnectionManager();
     manager.findCapability = (capabilityId) =>
       capabilityId === descriptor.capabilityId ? descriptor : undefined;
+    manager.getCapabilityRoute = () => ({
+      transport: 'stdio',
+      serverIdentity: descriptor.provider.id,
+      endpointRevision: 'stdio-v1',
+      toolRevision: descriptor.revision,
+    });
     manager.callCapability = async ({ arguments: args }) =>
       ({
         content: [

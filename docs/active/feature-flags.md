@@ -22,6 +22,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | --- | --- | --- |
 | `sessionLoggingPolicyV1` | `false` | App 注入 resolved logging policy；关闭时为 `off`，开启时默认 metadata-only |
 | `providerDataPolicyV1` | `false` | 所有模型 dispatch 使用 release-pinned Provider 数据 gate；当前批准 route bundle 为空 |
+| `remoteMcpEgressPolicyV1` | `false` | 开启远程 HTTP MCP 单 invocation 内容许可；关闭时 remote content=no-egress |
 | `resourceBudgetV1` | `false` | 启用 Runtime v19 累计预算 admission、FIFO/compound permit 与恢复语义 |
 | `boundedCancellationV1` | `false` | 启用 run deadline、统一 AbortSignal 与 descendant/process-tree 有界清理 |
 | `terminalOutcomeV1` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
@@ -37,6 +38,13 @@ production profile 必须 fail closed；开发 profile 才可显式使用旧路�
 CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除。启用 resource budget 但未
 启用 bounded cancellation 时，模型不披露 writer、Shell 和 child capability，Controller 同时
 拒绝其执行，不能退回无界副作用路径。
+
+`remoteMcpEgressPolicyV1=false` 不恢复旧远程外发：HTTP MCP 只有空参数的 content-free Tool Call
+可继续，任何非空最终参数都在 Provider readiness/Tool request 前拒绝。开启后仍必须由 App
+边界注入独立的单次 permit resolver；缺失、格式错误、超过五分钟 TTL、过期、
+revision/argument/classification 不匹配、nonce replay 或 receipt 持久化失败全部 fail closed。
+该 flag 不继承 `providerDataPolicyV1` 的
+模型 route consent，也不解封 sealed boundary 下等待 Task 1B.8 的 MCP transport。
 
 `sessionLoggingPolicyV1` 开启不等于允许正文。`content` 还要求 release artifact 明确允许且
 用户/管理员在用户配置显式 opt-in；project config 永远不能开启。关闭 flag 必须收紧为 `off`，

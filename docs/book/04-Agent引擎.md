@@ -66,6 +66,12 @@ Runtime schema v20 保留上述终态，并把每个网络 hop 的 allow/deny ad
 对应 Tool Call。获准 socket 只有在 receipt event 提交成功后才能打开；恢复 v19 snapshot 时
 不会为历史调用补造网络决定。
 
+Runtime schema v21 继续保留这些网络事实，并把远程 HTTP MCP 的独立内容外发决定以
+`mcp.egress_decided` 追加到对应 Tool Call。许可只绑定一次 invocation 的 Server/endpoint/Tool/
+最终参数 digest，nonce digest 由 Runtime Store 与 receipt 同事务唯一 claim，进程重启后仍不能
+重放；持久化唯一冲突会转换并保存为 `permit_replayed`，流式持久化异常会 reject 调用方而不会
+让执行循环挂起。恢复 v20 snapshot 不补造历史外发决定。
+
 ## 4.5 上下文与缓存
 
 静态 prompt、稳定工具契约和 cacheable Runtime context 尽量保持前缀稳定；动态状态、Skill disclosure、搜索结果和 turn binding 放在轮次投影中。上下文压缩保留任务事实、计划和工具结果语义，不取代 Runtime Store。

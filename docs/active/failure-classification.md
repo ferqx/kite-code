@@ -23,6 +23,15 @@ Network denial metadata uses stable boundary codes such as `network_off`,
 `host_not_allowlisted`, `private_or_reserved_address`, `endpoint_revision_mismatch`, and
 `controller_unavailable`; clients do not infer these outcomes from transport error strings.
 
+Runtime schema v21 additionally persists remote MCP content-egress decisions. Missing/expired/mismatched
+or replayed permits are `policy_denied`; inability to persist the decision before dispatch is
+`persistence_unavailable`. Stable receipt reasons include `feature_disabled`, `permit_missing`,
+`permit_invalid`, `argument_digest_mismatch`, `endpoint_revision_mismatch`,
+`tool_revision_mismatch`, `permit_ttl_exceeded`, `permit_expired`, `secret_detected`,
+`content_inspection_unknown` and `permit_replayed`; clients do not parse the error message to recover these
+facts. A Store nonce uniqueness conflict is not reported as generic persistence loss: Runtime first persists
+the redacted `permit_replayed` denial. Other receipt-write failures remain `persistence_unavailable`.
+
 The production reason-code set distinguishes artifact/profile/digest invalid, workspace
 untrusted, sandbox/network/worktree unavailable, model retry exhausted, Provider/MCP unavailable,
 persistence unavailable, budget exhausted, resource saturation, tool/shell concurrency

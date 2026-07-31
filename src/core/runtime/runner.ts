@@ -69,14 +69,19 @@ async function* executeEffectWithStreaming(
   const pending: Array<{
     event: RuntimeEvent;
     resolve?: (applied: boolean) => void;
+    reject?: (error: unknown) => void;
   }> = [];
   let wake: (() => void) | null = null;
   let settled = false;
   let result: RuntimeEvent[] = [];
   let failure: unknown;
 
-  const enqueue = (event: RuntimeEvent, resolve?: (applied: boolean) => void) => {
-    pending.push({ event, resolve });
+  const enqueue = (
+    event: RuntimeEvent,
+    resolve?: (applied: boolean) => void,
+    reject?: (error: unknown) => void,
+  ) => {
+    pending.push({ event, resolve, reject });
     wake?.();
     wake = null;
   };
@@ -89,8 +94,8 @@ async function* executeEffectWithStreaming(
     {
       reservationIds,
       persistEvent: (event) =>
-        new Promise<boolean>((resolve) => {
-          enqueue(event, resolve);
+        new Promise<boolean>((resolve, reject) => {
+          enqueue(event, resolve, reject);
         }),
     },
   ).then(
@@ -128,10 +133,15 @@ async function* executeEffectWithStreaming(
         if (event.type === 'runtime.cancellation_diagnostic') {
           cancellationIncomplete = true;
         }
-        const applied = kernel.applyEffectEvent(lease, event);
-        pendingEvent.resolve?.(applied);
-        if (applied) {
-          yield event;
+        try {
+          const applied = kernel.applyEffectEvent(lease, event);
+          pendingEvent.resolve?.(applied);
+          if (applied) {
+            yield event;
+          }
+        } catch (error) {
+          if (!pendingEvent.reject) throw error;
+          pendingEvent.reject(error);
         }
       }
     }

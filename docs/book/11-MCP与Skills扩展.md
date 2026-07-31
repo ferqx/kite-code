@@ -76,4 +76,15 @@ Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入�
 
 Resource discovery 与 Tool discovery 分离：需要盘点 Provider 和 Tool 时用 `list_mcp_tools`，需要可执行能力时用 `tool_search`，需要 MCP 内容 URI 时用 `list_mcp_resources` / `read_mcp_resource`。三类 MCP 概念（Provider、Tool、Resource）正交：任何一个为空不自动推出另外两个为空。当前不支持 `@resource` 输入补全和 Resource Templates。
 
+Remote HTTP MCP Tool 还有独立内容外发门禁。最终参数非空时，Runtime 使用脱敏 route identity
+和规范化参数 digest 请求 `RemoteMcpEgressPermitV1`；许可与 Tool Approval、模型 Provider
+consent、read-only annotation 和 network allowlist 正交。每个并发 invocation 使用独立 nonce，
+Manager 在 SDK 调用前校验进程内 ledger，Runtime Store 再把 nonce digest 与无正文 receipt
+同事务唯一持久化，重启或并行进程 replay 均在零请求处拒绝并保存 `permit_replayed`。最终参数还会
+在 ToolController 和 Manager 两处执行有界 secret 检查；credential 字段/形状、受保护路径以及
+无法完成检查的输入都不能通过 permit 外发。边界在任何异步授权前创建 immutable JSON-safe 深
+快照，schema、检查、digest 和最终 SDK request 使用同一份内容，禁止 accessor/custom serializer
+造成签署后变更。permit 最长五分钟；空参数 HTTP Tool 和 local stdio 不消费该 permit；Tool
+Search/discovery 只处理元数据，也不会触发正文许可。
+
 完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。

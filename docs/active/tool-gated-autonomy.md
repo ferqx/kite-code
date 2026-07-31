@@ -41,6 +41,12 @@ host allowlist，Shell/Skill descendant 固定 network-off，MCP inventory/resou
 Provider readiness 的 `tool_search` 在 Controller provider lookup 前拒绝；审批或 `full` mode 不能
 把这些路径提升为 `allow_all`。
 
+在非 sealed 开发路径中，remote HTTP MCP 的非空最终参数还必须通过独立 content-egress
+permit；read-only effects、Tool Approval、`full_access`、Provider consent 或 host allowlist 都不
+能替代。Controller 在 readiness 前拒绝确定性的缺失/过期/mismatch，Manager 在 SDK dispatch
+前原子消费 nonce 并等待 durable `mcp.egress_decided` receipt。stdio 与空参数 HTTP 调用不消费
+remote content permit；项目配置不能降低保守分类。
+
 Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运行中）状态时直接发布 `tool.progress`，Runtime event sink术语（运行时事件接收器）随即把增量交给 TUI；不得先缓存在 Controller 私有数组中等待终态结果。同一批并发 Shell 的增量允许按真实到达顺序交错，但每条事件必须保留各自 `toolCallId`。未提供 event sink术语（事件接收器）的直接调用兼容路径仍在返回数组中收集事件。
 
 ## 工具名单单一事实源（ADR-0043）

@@ -22,6 +22,16 @@ import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabi
 import { type McpCredentialStore, NativeMcpCredentialStore } from './credential-store';
 import { diagnoseMcpError } from './diagnostics';
 import {
+  classifyRemoteMcpArgumentsV1,
+  createRemoteMcpEgressReceiptV1,
+  inspectRemoteMcpArgumentsV1,
+  type McpCapabilityRouteV1,
+  RemoteMcpEgressDeniedError,
+  RemoteMcpEgressPermitLedgerV1,
+  remoteMcpArgumentDigestV1,
+  snapshotRemoteMcpArgumentsV1,
+} from './egress-permit';
+import {
   capabilityChangedProviderError,
   McpProviderError,
   providerErrorFromDiagnostic,
@@ -60,6 +70,9 @@ export interface McpConnectionManagerOptions {
     authProvider?: OAuthClientProvider,
   ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
   credentialStore?: McpCredentialStore;
+  /** Production supervisors enable this; direct manager users remain an internal compatibility API. */
+  remoteMcpEgressPolicyRequired?: boolean;
+  remoteMcpEgressPermitLedger?: RemoteMcpEgressPermitLedgerV1;
 }
 
 /**
@@ -71,6 +84,8 @@ export class McpConnectionManager {
     config: McpServerConfig,
     authProvider?: OAuthClientProvider,
   ) => Parameters<Client['connect']>[0] | Promise<Parameters<Client['connect']>[0]>;
+  private readonly remoteMcpEgressPolicyRequired: boolean;
+  private readonly remoteMcpEgressPermitLedger: RemoteMcpEgressPermitLedgerV1;
   private servers = new Map<string, McpServerState>();
   private promptRegistry = new Map<string, PromptEntry>();
   private snapshot: CapabilitySnapshot = createSnapshot([]);
@@ -91,6 +106,9 @@ export class McpConnectionManager {
     this.createManagerTransport =
       options.createTransport ??
       ((config, authProvider) => createTransport(config, authProvider, credentialStore));
+    this.remoteMcpEgressPolicyRequired = options.remoteMcpEgressPolicyRequired === true;
+    this.remoteMcpEgressPermitLedger =
+      options.remoteMcpEgressPermitLedger ?? new RemoteMcpEgressPermitLedgerV1();
   }
 
   /** Connect to all configured servers in parallel, non-blocking on individual failures */
@@ -438,6 +456,26 @@ export class McpConnectionManager {
     return this.snapshot.descriptors.find((descriptor) => descriptor.capabilityId === capabilityId);
   }
 
+  getCapabilityRoute(capabilityId: string): McpCapabilityRouteV1 | undefined {
+    const descriptor = this.findCapability(capabilityId);
+    if (descriptor?.kind !== 'mcp_tool') return undefined;
+    const server = descriptor.provider.id;
+    const state = this.servers.get(server);
+    if (!state) return undefined;
+    return Object.freeze({
+      transport: state.config.type,
+      serverIdentity: server,
+      endpointRevision:
+        state.config.providerVersion ??
+        digestCapability({
+          serverIdentity: server,
+          type: state.config.type,
+          url: state.config.url,
+        }),
+      toolRevision: descriptor.revision,
+    });
+  }
+
   /** Execute exactly one revision-checked MCP capability invocation. */
   async callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult> {
     const descriptor = this.findCapability(invocation.capabilityId);
@@ -451,21 +489,107 @@ export class McpConnectionManager {
         descriptor?.provider.id ?? providerIdFromCapability(invocation.capabilityId);
       throw capabilityChangedProviderError(providerId);
     }
-    const argumentError = validateCapabilityArguments(descriptor.inputSchema, invocation.arguments);
-    if (argumentError) {
-      throw new McpProviderError({
-        providerId: descriptor.provider.id,
-        kind: 'provider_capability_changed',
-        message: argumentError,
-        retryable: false,
-      });
-    }
     const server = descriptor.provider.id;
     const toolName = descriptor.displayName;
-    const args = invocation.arguments;
     const state = this.servers.get(server);
     if (!state) {
       throw providerErrorFromDiagnostic(server, undefined);
+    }
+    const route = this.getCapabilityRoute(invocation.capabilityId);
+    const argumentSnapshot = snapshotRemoteMcpArgumentsV1(invocation.arguments);
+    const governedRemoteHttp =
+      route?.transport === 'http' &&
+      (this.remoteMcpEgressPolicyRequired || invocation.remoteEgress);
+    if (!argumentSnapshot.ok && !governedRemoteHttp) {
+      throw new McpProviderError({
+        providerId: descriptor.provider.id,
+        kind: 'provider_capability_changed',
+        message: 'MCP arguments must be a bounded JSON-safe object without custom serialization.',
+        retryable: false,
+      });
+    }
+    const args = argumentSnapshot.ok ? argumentSnapshot.arguments : Object.freeze({});
+    if (argumentSnapshot.ok) {
+      const argumentError = validateCapabilityArguments(descriptor.inputSchema, args);
+      if (argumentError) {
+        throw new McpProviderError({
+          providerId: descriptor.provider.id,
+          kind: 'provider_capability_changed',
+          message: argumentError,
+          retryable: false,
+        });
+      }
+    }
+    if (governedRemoteHttp) {
+      const policy = invocation.remoteEgress;
+      const content = argumentSnapshot.ok
+        ? classifyRemoteMcpArgumentsV1(args)
+        : Object.freeze({
+            dataClassifications: Object.freeze(['confidential'] as const),
+            payloadKinds: Object.freeze(['user_prompt', 'file_snippet', 'tool_result'] as const),
+          });
+      const request = {
+        ...route,
+        invocationId:
+          policy?.invocationId ??
+          digestCapability({
+            capabilityId: invocation.capabilityId,
+            expectedRevision: invocation.expectedRevision,
+            arguments: argumentSnapshot.ok ? args : { invalidArgumentShape: true },
+          }),
+        toolCallId: policy?.toolCallId ?? 'unscoped-runtime-call',
+        argumentDigest: remoteMcpArgumentDigestV1(
+          argumentSnapshot.ok ? args : { invalidArgumentShape: true },
+        ),
+        content,
+      };
+      if (!policy?.recordDecision) {
+        throw new RemoteMcpEgressDeniedError(
+          createRemoteMcpEgressReceiptV1({
+            enabled: policy?.enabled === true,
+            request,
+            permit: policy?.permit,
+            reason: 'receipt_persistence_failed',
+          }),
+        );
+      }
+      const contentInspection = argumentSnapshot.ok ? inspectRemoteMcpArgumentsV1(args) : 'unknown';
+      const receipt =
+        contentInspection === 'clear'
+          ? this.remoteMcpEgressPermitLedger.consume({
+              enabled: policy?.enabled === true,
+              request,
+              permit: policy?.permit,
+            })
+          : createRemoteMcpEgressReceiptV1({
+              enabled: policy?.enabled === true,
+              request,
+              permit: policy?.permit,
+              reason:
+                contentInspection === 'secret' ? 'secret_detected' : 'content_inspection_unknown',
+            });
+      try {
+        await policy.recordDecision(receipt);
+      } catch (error) {
+        if (error instanceof RemoteMcpEgressDeniedError) throw error;
+        throw new RemoteMcpEgressDeniedError(
+          createRemoteMcpEgressReceiptV1({
+            enabled: policy?.enabled === true,
+            request,
+            permit: policy?.permit,
+            reason: 'receipt_persistence_failed',
+          }),
+        );
+      }
+      if (!receipt.admitted) throw new RemoteMcpEgressDeniedError(receipt);
+    }
+    if (!argumentSnapshot.ok) {
+      throw new McpProviderError({
+        providerId: descriptor.provider.id,
+        kind: 'provider_capability_changed',
+        message: 'MCP arguments must be a bounded JSON-safe object without custom serialization.',
+        retryable: false,
+      });
     }
     this.assertCallable(state, server);
     const discoveredTool = state.tools.find((tool) => tool.name === toolName);

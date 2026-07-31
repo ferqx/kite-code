@@ -23,6 +23,11 @@ import {
 } from '@/core/execution/reviewer';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import {
+  RemoteMcpEgressDeniedError,
+  type RemoteMcpEgressPermitResolverV1,
+  reclassifyRemoteMcpEgressReceiptV1,
+} from '@/core/mcp/egress-permit';
 import type { CompactionReporter } from '@/core/model/compaction-metrics';
 import {
   createModelContextSummaryGenerator,
@@ -48,7 +53,7 @@ import type { ShellExecutor } from '@/core/tools/shell';
 import { executeVerificationEffect } from '@/core/verification';
 import { createFilePreimageRecorder } from './file-checkpoints';
 import type { RuntimeEffectExecutor } from './kernel';
-import type { RuntimeStore } from './store';
+import { RemoteMcpEgressNonceConflictError, type RuntimeStore } from './store';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
 export interface RuntimeExecutorDependencies {
@@ -69,6 +74,8 @@ export interface RuntimeExecutorDependencies {
   runtimeStore?: RuntimeStore;
   /** Immutable production Provider policy gate. Missing gate fails closed when enabled. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
+  /** Independent user/admin authorization source for one remote MCP invocation. */
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
 
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
@@ -303,6 +310,7 @@ export function createRuntimeEffectExecutor(
             taskConfig: dependencies.config,
             taskModel: dependencies.model,
             providerDataAdmission: dependencies.providerDataAdmission,
+            remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
             descendantResourceAdmission,
             subagentEventSink,
             emitRuntimeEvent: emitOrDefer,
@@ -322,6 +330,41 @@ export function createRuntimeEffectExecutor(
                     });
                     if (!applied) {
                       throw new Error('Network admission decision became stale before dispatch.');
+                    }
+                  },
+                  recordRemoteMcpEgressDecision: async (
+                    decision: import('@/core/mcp/egress-permit').RemoteMcpEgressReceiptV1,
+                  ) => {
+                    let applied: boolean;
+                    try {
+                      applied = await executionContext.persistEvent({
+                        type: 'mcp.egress_decided',
+                        toolCallId: decision.toolCallId,
+                        decision,
+                      });
+                    } catch (error) {
+                      if (
+                        !(error instanceof RemoteMcpEgressNonceConflictError) ||
+                        decision.reason !== 'permit_consumed'
+                      ) {
+                        throw error;
+                      }
+                      const replayDecision = reclassifyRemoteMcpEgressReceiptV1(
+                        decision,
+                        'permit_replayed',
+                      );
+                      const replayApplied = await executionContext.persistEvent({
+                        type: 'mcp.egress_decided',
+                        toolCallId: replayDecision.toolCallId,
+                        decision: replayDecision,
+                      });
+                      if (!replayApplied) {
+                        throw new Error('Remote MCP replay denial became stale before dispatch.');
+                      }
+                      throw new RemoteMcpEgressDeniedError(replayDecision);
+                    }
+                    if (!applied) {
+                      throw new Error('Remote MCP egress decision became stale before dispatch.');
                     }
                   },
                 }

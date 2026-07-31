@@ -22,9 +22,11 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
    `tests/tui-reducer.test.ts` 覆盖，PTY 场景只验证命令路由与恢复，不能声称已经擦除终端 scrollback。
 4. Headless VT parser 能处理当前 Ink 使用的 erase、光标和 wrapping 序列，但不能证明所有终端实现
    一致；DEC synchronized output、ConPTY 差异和宿主终端字体宽度仍需专门平台测试。
-5. 外部编辑器、真实 MCP、真实模型和平台 sandbox 不属于默认 PTY suite，应使用边界测试或
-   显式 opt-in 环境 smoke。平台能力的正向场景必须在测试入口确认真实后端存在；默认门禁只
-   保留可固定能力状态的降级路径，不能按 runner 恰好安装的软件改变断言。
+5. 外部编辑器、公网 MCP、真实模型和平台 sandbox 不属于默认 PTY suite，应使用边界测试或
+   显式 opt-in 环境 smoke。默认 suite 可以连接进程内本地 MCP fixture 走真实 HTTP/stdio
+   协议；涉及 HTTP 正文调用时必须显式注入每 invocation 的测试 permit，生产组合根仍保持
+   no-egress。平台能力的正向场景必须在测试入口确认真实后端存在；默认门禁只保留可固定能力
+   状态的降级路径，不能按 runner 恰好安装的软件改变断言。
 6. PTY 测试成本高，不应用来穷举纯 reducer、policy 或 schema 分支。
 7. 完整 PTY suite 按文件隔离执行并设置单文件硬超时；因此失败会定位到具体
    scenario，且不会因一个遗留 TUI 子进程无限占用整套测试。
@@ -52,6 +54,9 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     当前 step 会收到具名失败，因此局部超时之和不是文件可用总时长。测试报告中的 pass 数表示独立
     测试边界，不表示 journey 内动作数量。需要独立筛选、重跑或并行的行为必须使用新 fixture 写成
     独立 test，不能仅为增加报告粒度拆分共享状态。
+14. 测试 permit issuer 位于 `tests/tui-system/fixtures/`，只能由单个 `spawnTui()` 调用显式选择。
+    它不是生产授权实现，也不通过可被 workspace `.env` 伪造的环境开关启用；默认拒绝与允许
+    外发必须写成不同、隔离的 test 语义。
 
 ## 分层选择
 

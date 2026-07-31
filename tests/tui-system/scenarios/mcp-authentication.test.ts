@@ -266,6 +266,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
           capabilityCatalogV1: true,
           mcpRuntimeBindingV1: true,
           mcpProviderActionV1: true,
+          remoteMcpEgressPolicyV1: true,
         },
         mcpServers: {
           recoverable: {
@@ -284,7 +285,13 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
+    tui = spawnTui({
+      cols: 120,
+      rows: 40,
+      mockServer: modelServer,
+      workspace,
+      remoteMcpEgressPermitResolver: 'allow-each-invocation',
+    });
     await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
 
     tui.setRawMode(true);

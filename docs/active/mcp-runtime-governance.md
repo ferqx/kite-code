@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 MCP discovery、动态工具绑定、MCP policy、MCP 调用或结果归一化时。
-验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-tool-runner.test.ts tests/mcp-tool-policy.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/actions.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/verification.test.ts tests/golden/golden.test.ts tests/policies/approval-policy.test.ts tests/sandbox/network-boundary.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`（`tests/e2e/live/mcp/` 下的显式公网 smoke）、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-tool-runner.test.ts tests/mcp-tool-policy.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/actions.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/verification.test.ts tests/golden/golden.test.ts tests/policies/approval-policy.test.ts tests/sandbox/network-boundary.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`（`tests/e2e/live/mcp/` 下的显式公网 smoke）、`bun run typecheck`、`bun run check:core-boundary`。
 
 MCP tool execution is available only when both `capabilityCatalogV1` and `mcpRuntimeBindingV1` are enabled. The ModelController records bindings before the model call; a dynamic model-visible name must match its binding, turn, descriptor revision and input schema. Runtime invokes `McpRuntimeProvider.callCapability({ capabilityId, expectedRevision, arguments, signal })`; the Supervisor façade rechecks effective Provider availability, and the connection manager atomically resolves the current descriptor, compares revision, validates the current schema and only then obtains the original Provider/Tool identity. Model-visible names are never parsed as execution identity.
 
@@ -15,6 +15,41 @@ intentional fail-closed composition, not an assertion that local stdio or
 remote HTTP MCP already inherit the in-process `web_fetch` controller. Task 1B.8 must integrate each MCP
 transport operation with per-invocation DNS/redirect/endpoint admission and durable receipts before any
 of these entrypoints can reopen under a production boundary.
+
+Remote HTTP Tool content has an additional boundary independent of transport admission, Tool effects
+approval and model Provider consent. `McpRuntimeProvider.getCapabilityRoute()` exposes only the redacted
+`transport + serverIdentity + endpointRevision + toolRevision` identity. Local stdio does not enter this
+HTTP egress gate. For remote HTTP, any non-empty final argument object has unknown field provenance and is
+conservatively bound as `confidential` plus all supported payload kinds (`user_prompt`、`file_snippet`、
+`tool_result`); neither project MCP config nor a read-only annotation can lower that floor.
+Before permit resolution, ToolController applies the shared bounded Runtime secret detector to the final
+structured arguments; Manager repeats the inspection immediately before ledger consumption. Credential
+fields, credential-shaped values and protected credential paths are `secret_detected` and cannot be made
+sendable by a permit. Cyclic, unsupported, over-depth, over-node or over-character input is
+`content_inspection_unknown` and also fails closed. Before either inspection or any asynchronous resolver/
+receipt work, the boundary captures one deeply immutable JSON-safe snapshot. Schema validation,
+classification, inspection, argument digest and SDK dispatch all consume that same snapshot; accessors,
+custom `toJSON`, symbols, non-enumerable properties, cycles and non-JSON objects are rejected, so callback
+mutation cannot create a digest-to-wire TOCTOU gap. Empty arguments are content-free; all other clear
+remote arguments require one exact
+`RemoteMcpEgressPermitV1` when `remoteMcpEgressPolicyV1=true`. With the flag false, remote content remains
+no-egress rather than falling back to the old path.
+
+The permit binds invocation, server, endpoint revision, Tool revision, canonical final-argument digest,
+classification, payload kind, expiry and nonce. Permit TTL is positive and at most five minutes. The
+Manager owns the process-local fast-path ledger and synchronously validates it immediately before the SDK
+call; the Runtime Store then claims the redacted nonce digest under a database-wide unique constraint in
+the same transaction as the receipt. A restart, sibling process or deleted/rewound session therefore
+cannot replay a still-live permit. A durable uniqueness conflict is translated into, and durably records, a
+`permit_replayed` denial before returning to the Tool lifecycle. Expiry, excessive TTL, malformed shape,
+secret/unknown inspection, any binding mismatch, missing permit, replay or receipt-persistence failure sends
+zero Tool requests. Parallel siblings require independent
+invocation IDs and nonces; one sibling cannot consume, transfer or authorize another's permit. The
+Manager persists a redacted `mcp.egress_decided` receipt before dispatch; admitted dispatch is impossible
+without a recorder. The receipt contains digests, permit expiry and reason codes, never raw arguments,
+content or nonce. Tool Search and metadata discovery do not request a content
+permit. This gate does not satisfy Task 1B.8 and therefore does not reopen MCP under a sealed production
+network boundary.
 
 MCP list changes replace the immutable catalog snapshot. Existing bindings do not update in place and fail closed. P0 accepts object-root JSON Schema Draft-07 only; each schema is validated against an admission budget (256 KiB UTF-8 bytes, 32 levels depth, 4096 object nodes, 1024 properties) in a single traversal. Manager retains the complete raw Tool discovery, while the capability catalog contains only enabled and schema-valid Tools. Disabled, invalid, budget-exceeding or unsupported Tools remain diagnosable through the control snapshot but are not model-visible or executable; direct Manager calls also require a current available descriptor.
 

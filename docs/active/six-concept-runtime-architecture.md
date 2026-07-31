@@ -96,6 +96,13 @@ allow/deny event；reducer 以 receipt digest 幂等追加到对应调用。迁�
 schema version，不虚构历史 network decision。并发调用各自持有 invocation/hop 和 endpoint
 revision，不能复用 sibling 的 admission。
 
+Runtime schema v21 保留 v20 全部网络事实，并新增 redacted `mcp.egress_decided` receipt。远程
+HTTP MCP 的正文许可绑定 invocation/server/endpoint/Tool/最终参数 digest，Manager 在 SDK
+dispatch 前校验进程内 nonce，并由 Runtime Store 在 receipt event 同一事务中以全库唯一键
+claim nonce digest；Runtime 只有在该 durable claim 成功后才允许请求，重启或 sibling process
+不能复用仍有效 permit。迁移 v20 snapshot 不为历史调用虚构 egress decision，receipt 不持久化
+raw arguments、正文或 nonce。
+
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
 dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
 `legacy_unconfigured`，不会伪造余额；v18 ledger 保留 reservation，并补齐空 waiter queue。

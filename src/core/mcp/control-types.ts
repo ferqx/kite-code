@@ -88,6 +88,12 @@ export interface McpServerControlState {
   authErrorCode?: string;
   health: McpHealthState;
   transport: McpTransportType;
+  /** Redacted content boundary; independent of effects approval and Provider consent. */
+  contentEgress: Readonly<{
+    remote: boolean;
+    nonEmptyArgumentsClassification: 'confidential';
+    independentPermitRequired: boolean;
+  }>;
   source: McpConfigSourceKind;
   sourcePath: string;
   configuration: Readonly<McpServerConfigurationView>;

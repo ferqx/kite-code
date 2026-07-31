@@ -94,6 +94,14 @@ owner、目录 identity 与 heartbeat 的 durable lease 防止并发回收；无
 
 MCP server 可配置 stdio/HTTP transport、`enabled`、`required`、`cwd`、timeout、trust 和逐工具 policy override。`enabledTools` 是 allowlist，`disabledTools` 随后应用，最后由 `tools.<name>.enabled` 精确覆盖。逐工具配置还使用 `effects`、`minimumApproval`、`retry` 和 `idempotencyKeyArgument`，不使用旧的单一 `risk` 字段作为权威策略。开启默认关闭的 `mcpProviderActionV1` 后，非 ready/degraded 的 required Provider 会在首次模型调用前要求 Retry、当前 session waiver 或 Cancel Run；waiver 不会恢复该 Provider 的 capability 可见性。
 
+stdio 与远程 HTTP 的内容边界不同。HTTP Tool 的任何非空最终参数最低按
+`confidential` 加 `user_prompt/file_snippet/tool_result` 全量未知来源集合处理，项目配置不能声明
+更低分类；read-only、Tool Approval、模型
+Provider consent 和 host allowlist 都不授权正文上传。`remoteMcpEgressPolicyV1=false` 时这类
+调用保持 no-egress；开启后每个 invocation 仍需由 App 注入精确、短期、单次 nonce permit。
+credential 字段/形状、受保护 credential path 或无法在固定检查预算内确认安全的参数不会进入
+permit resolver，也不能被 permit 覆盖。
+
 默认 MCP 规范来源只有 project `<workspace>/.kite-code/mcp.json` 与 user `~/.kite-code/mcp.json`，优先级为 `project > user`。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 只读并通过显式迁移进入规范位置。所有 project 来源必须匹配 `~/.kite-code/mcp-project-approvals.jsonc` 中绑定 workspace/source/name/config digest 的本地决定；未批准、已拒绝、配置变化或存储损坏时不创建 transport，且不回退同名低优先级 Server。项目批准只保留 allowlist、denylist、精确 disable、`minimumApproval: user` 和 `retry: never` 等收紧项，不采纳 annotation trust、精确 enable 或逐工具放宽策略。显式 `configPath` 是调用方授权的单文件来源，不与 workspace 来源合并。
 
 `McpSupervisor` 投影全部来源和 shadow 状态，`McpConfigRepository` 使用 expected revision、JSONC edit 与原子 rename 提供 add/update/remove/set_enabled/migrate；文件 watcher 只触发 debounce 后全量 reload，外部冲突不覆盖。TUI `/mcp` 可通过 typed mutation 向 project/user 两个规范位置添加最小 Server、启停和移除，但不编辑高级字段或执行 legacy migrate。项目配置只可在脱敏 Review 页面按当前摘要决定，不能隐式自批。
@@ -106,7 +114,7 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 
 ToolSpec Registry 的六个计算原语已按 ADR-0027 完成单路径切换；旧迁移 flag 未接入运行时并已删除，不再接受 `toolSpecRegistryV1` 配置。
 
-生产治理的 `sessionLoggingPolicyV1`、`providerDataPolicyV1`、`resourceBudgetV1`、
+生产治理的 `sessionLoggingPolicyV1`、`providerDataPolicyV1`、`remoteMcpEgressPolicyV1`、`resourceBudgetV1`、
 `boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1` 和
 `networkBoundaryV1` 均默认关闭。Logger flag 开启时 Runtime 只写
 显式 allowlist metadata，关闭时不创建日志目录。Provider flag 启用后从固定 release asset

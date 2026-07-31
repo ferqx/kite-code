@@ -173,6 +173,20 @@
       ]
     },
     {
+      "id": "remote-mcp-egress-policy",
+      "sources": [
+        "src/core/mcp/egress-permit.ts",
+        "tests/mcp/data-egress-policy.test.ts",
+        "tests/mcp/data-egress-concurrency.test.ts"
+      ],
+      "documents": [
+        "docs/active/mcp-runtime-governance.md",
+        "docs/active/model-provider-boundary.md",
+        "docs/active/feature-flags.md",
+        "docs/book/11-MCP与Skills扩展.md"
+      ]
+    },
+    {
       "id": "session-logging",
       "sources": [
         "src/core/session-logger/**",
@@ -198,12 +212,17 @@
       "sources": [
         "package.json",
         "scripts/run-tui-system-tests.ts",
+        "tests/tui-system/fixtures/**",
         "tests/tui-system/harness/**",
         "tests/tui-system/scenarios/**",
         "tests/tui-system/smoke/**",
         "tests/tui-resource-trend.test.ts"
       ],
-      "documents": ["docs/active/tui-e2e-standards.md", "docs/active/tui-e2e-testing-limits.md"]
+      "documents": [
+        "docs/active/tui-e2e-standards.md",
+        "docs/active/tui-e2e-testing-limits.md",
+        "docs/book/12-测试体系.md"
+      ]
     },
     {
       "id": "live-e2e-boundary",

@@ -11,7 +11,7 @@ import {
 } from '@/core/config/index';
 import { sessionExportPath } from '@/core/config/paths';
 import { shouldPromptWorkspaceTrust } from '@/core/config/workspace-trust';
-import type { McpRuntimeProvider } from '@/core/mcp';
+import type { McpRuntimeProvider, RemoteMcpEgressPermitResolverV1 } from '@/core/mcp';
 import { resolveSandboxRuntime } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
@@ -44,15 +44,21 @@ function resolveModelForResume(currentConfig: AgentConfig, persistedModelName: s
 export interface TuiBootstrapProps {
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   model?: import('@/core/model/factory').SupportedChatModel;
+  /** App-owned authorization source; omitted production composition remains fail closed. */
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
 
 interface TuiAppProps {
   config: AgentConfig;
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   injectModel?: import('@/core/model/factory').SupportedChatModel;
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
 
-export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
+export function TuiBootstrap({
+  model: injectModel,
+  remoteMcpEgressPermitResolver,
+}: TuiBootstrapProps = {}) {
   const workspace = process.cwd();
   // Workspace trust is checked first — no project-level config is read before trust.
   const [workspaceTrusted, setWorkspaceTrusted] = React.useState<boolean>(
@@ -111,10 +117,16 @@ export function TuiBootstrap({ model: injectModel }: TuiBootstrapProps = {}) {
     );
   }
 
-  return <TuiApp config={probeResult.config} injectModel={injectModel} />;
+  return (
+    <TuiApp
+      config={probeResult.config}
+      injectModel={injectModel}
+      remoteMcpEgressPermitResolver={remoteMcpEgressPermitResolver}
+    />
+  );
 }
 
-function TuiApp({ config, injectModel }: TuiAppProps) {
+function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppProps) {
   const workspace = process.cwd();
   const { state, dispatch, onToggleReason } = useTuiState(
     config.modelName,
@@ -224,6 +236,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
       skillManifests: skillManifestsRef.current,
       skillOptions: skillOptionsRef.current,
       mcpManager: mcpRuntimeProviderRef.current,
+      remoteMcpEgressPermitResolver,
       checkpointPath: defaultCheckpointPath(),
     });
     mgr.setSnapshotCallback((threadId) => {
@@ -231,7 +244,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     });
     _sessionManagerForExit = mgr;
     return mgr;
-  }, [config, provider, dispatch]);
+  }, [config, provider, dispatch, remoteMcpEgressPermitResolver]);
   const sandboxRuntime = React.useMemo(
     () => resolveSandboxRuntime({ enabled: config.sandbox.enabled }),
     [config.sandbox.enabled],
@@ -945,7 +958,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
   );
 }
 
-if (import.meta.main) {
+export function runTui(props: TuiBootstrapProps = {}): void {
   // 在 Ink 初始化前禁用终端回显 + 隐藏光标 + 清屏
   // 否则 cooked-mode 下用户按键会被终端驱动回显到屏幕上，出现残留字符
   // Disable terminal echo + hide cursor + clear screen before Ink init,
@@ -966,7 +979,7 @@ if (import.meta.main) {
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
   const { unmount } = render(
     <ErrorBoundary>
-      <TuiBootstrap />
+      <TuiBootstrap {...props} />
     </ErrorBoundary>,
     {
       maxFps: 60,
@@ -997,3 +1010,5 @@ if (import.meta.main) {
     process.exit(0);
   });
 }
+
+if (import.meta.main) runTui();

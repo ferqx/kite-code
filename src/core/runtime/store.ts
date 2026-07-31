@@ -21,6 +21,14 @@ export interface RuntimeStoreOptions {
   journalMode?: RuntimeJournalMode;
 }
 
+/** A durable one-shot egress permit nonce was already claimed by another receipt. */
+export class RemoteMcpEgressNonceConflictError extends Error {
+  constructor(options: { cause?: unknown } = {}) {
+    super('Remote MCP egress permit nonce was already consumed.', options);
+    this.name = 'RemoteMcpEgressNonceConflictError';
+  }
+}
+
 export interface RuntimeEventMetadata {
   eventId: string;
   revision: number;
@@ -274,6 +282,17 @@ export function createRuntimeStore(
       PRIMARY KEY (thread_id, path, event_position)
     )
   `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS runtime_mcp_egress_nonces (
+      thread_id     TEXT NOT NULL,
+      nonce_digest  TEXT NOT NULL,
+      invocation_id TEXT NOT NULL,
+      receipt_digest TEXT NOT NULL,
+      expires_at    TEXT NOT NULL,
+      created_at    INTEGER DEFAULT (unixepoch()),
+      PRIMARY KEY (nonce_digest)
+    )
+  `);
 
   // Additive metadata upgrades for stores created before runtime tracing was added.
   for (const [table, column, definition] of [
@@ -307,6 +326,12 @@ export function createRuntimeStore(
   const insertEvent = db.query('INSERT INTO runtime_events (thread_id, event_json) VALUES (?, ?)');
   const insertEventWithMetadata = db.query(
     'INSERT OR IGNORE INTO runtime_events (thread_id, event_json, event_id, revision, causation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?)',
+  );
+  const insertMcpEgressNonce = db.query(
+    'INSERT INTO runtime_mcp_egress_nonces (thread_id, nonce_digest, invocation_id, receipt_digest, expires_at) VALUES (?, ?, ?, ?, ?)',
+  );
+  const deleteExpiredMcpEgressNonces = db.query(
+    'DELETE FROM runtime_mcp_egress_nonces WHERE expires_at <= ?',
   );
   const selectEvents = db.query<EventRow, [string, number]>(
     'SELECT id, thread_id, event_json, event_id, revision, causation_id, occurred_at, created_at FROM runtime_events WHERE thread_id = ? AND id > ? ORDER BY id ASC',
@@ -401,6 +426,8 @@ export function createRuntimeStore(
   const statements = [
     insertEvent,
     insertEventWithMetadata,
+    insertMcpEgressNonce,
+    deleteExpiredMcpEgressNonces,
     selectEvents,
     selectAllEvents,
     upsertSnapshot,
@@ -428,6 +455,37 @@ export function createRuntimeStore(
     listNamedSnapshots,
   ] as const;
 
+  const claimMcpEgressNonce = (threadId: string, event: RuntimeEvent): void => {
+    if (
+      event.type !== 'mcp.egress_decided' ||
+      !event.decision.admitted ||
+      event.decision.reason !== 'permit_consumed' ||
+      !event.decision.nonceDigest ||
+      !event.decision.permitExpiresAt
+    ) {
+      return;
+    }
+    deleteExpiredMcpEgressNonces.run(event.decision.decidedAt);
+    try {
+      insertMcpEgressNonce.run(
+        threadId,
+        event.decision.nonceDigest,
+        event.decision.invocationId,
+        event.decision.receiptDigest,
+        event.decision.permitExpiresAt,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes('runtime_mcp_egress_nonces.nonce_digest') ||
+        message.includes('UNIQUE constraint failed: runtime_mcp_egress_nonces')
+      ) {
+        throw new RemoteMcpEgressNonceConflictError({ cause: error });
+      }
+      throw error;
+    }
+  };
+
   const store: RuntimeStore = {
     appendEvents(
       threadId: string,
@@ -441,6 +499,7 @@ export function createRuntimeStore(
         db.transaction(() => {
           upsertSession.run(threadId);
           for (const [index, event] of events.entries()) {
+            claimMcpEgressNonce(threadId, event);
             const entry = metadata?.[index];
             if (entry) {
               insertEventWithMetadata.run(
@@ -457,6 +516,7 @@ export function createRuntimeStore(
           }
         })();
       } catch (e) {
+        if (e instanceof RemoteMcpEgressNonceConflictError) throw e;
         throw new Error(
           `Failed to append events for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
           { cause: e },
@@ -476,6 +536,7 @@ export function createRuntimeStore(
         db.transaction(() => {
           upsertSession.run(threadId);
           for (const [index, event] of events.entries()) {
+            claimMcpEgressNonce(threadId, event);
             const entry = metadata?.[index];
             if (entry) {
               insertEventWithMetadata.run(
@@ -502,6 +563,7 @@ export function createRuntimeStore(
           );
         })();
       } catch (e) {
+        if (e instanceof RemoteMcpEgressNonceConflictError) throw e;
         throw new Error(
           `Failed to appendEventsAndSnapshot for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
           { cause: e },

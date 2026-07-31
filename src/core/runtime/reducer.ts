@@ -1180,6 +1180,34 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
     }
 
+    case 'mcp.egress_decided': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (!existingCall || event.decision.toolCallId !== event.toolCallId) return state;
+      if (
+        existingCall.remoteMcpEgressDecisions?.some(
+          (decision) => decision.receiptDigest === event.decision.receiptDigest,
+        )
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: {
+              ...existingCall,
+              remoteMcpEgressDecisions: [
+                ...(existingCall.remoteMcpEgressDecisions ?? []),
+                event.decision,
+              ],
+            },
+          },
+        },
+      };
+    }
+
     // ── 用户输入交互 / User input interaction ──
 
     case 'user_input.requested':

@@ -4,6 +4,7 @@
 
 import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
+import type { RemoteMcpEgressReceiptV1 } from '@/core/mcp/egress-permit';
 import type { McpProviderRecoveryAction } from '@/core/mcp/provider-errors';
 import type {
   McpProviderDirectoryEntry,
@@ -265,6 +266,8 @@ export interface ToolCallRecord {
   capabilityRevision?: string;
   /** Durable per-hop decisions recorded before network dispatch. */
   networkDecisions?: NetworkDecisionReceiptV1[];
+  /** Redacted independent content-egress decisions for remote MCP calls. */
+  remoteMcpEgressDecisions?: RemoteMcpEgressReceiptV1[];
 }
 
 /** Structured, JSON-safe facts produced by a tool execution. */
@@ -420,7 +423,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 20;
+export const RUNTIME_STATE_SCHEMA_VERSION = 21;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;

@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import type { McpRuntimeProvider } from '@/core/mcp';
+import type { McpRuntimeProvider, RemoteMcpEgressPermitResolverV1 } from '@/core/mcp';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import {
   buildContextStatusReport,
@@ -79,6 +79,8 @@ export interface SessionDeps {
   skillManifests: SkillManifest[];
   skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
+  /** Independent authorization source for one remote MCP content invocation. */
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   mcpRecoveryController?: Pick<McpController, 'recover'> | null;
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
@@ -119,6 +121,7 @@ export class SessionRuntime {
   readonly skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
   mcpRecoveryController: Pick<McpController, 'recover'> | null;
+  remoteMcpEgressPermitResolver: RemoteMcpEgressPermitResolverV1 | undefined;
 
   generator: AsyncGenerator<RuntimeEvent> | null = null;
   runtimeControl: RuntimeKernelControl | null = null;
@@ -156,6 +159,7 @@ export class SessionRuntime {
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
     this.mcpRecoveryController = deps.mcpRecoveryController ?? null;
+    this.remoteMcpEgressPermitResolver = deps.remoteMcpEgressPermitResolver;
     this.interactionMode = deps.config.interactionMode ?? 'accept_edits';
 
     this._proxyProvider = this._createProxyProvider();
@@ -270,6 +274,7 @@ export class SessionRuntime {
       skillOptions: this.skillOptions,
       initialSkillActivations,
       mcpManager: this.mcpManager,
+      remoteMcpEgressPermitResolver: this.remoteMcpEgressPermitResolver,
       shellContext,
       interactionMode: this.interactionMode,
       authorizationMode: authMode,
@@ -290,6 +295,7 @@ export class SessionRuntime {
       model: runAgentParams.model,
       shellExecutor: runAgentParams.shellExecutor,
       mcpManager: runAgentParams.mcpManager,
+      remoteMcpEgressPermitResolver: runAgentParams.remoteMcpEgressPermitResolver,
       skills: runAgentParams.skills,
       skillOptions: runAgentParams.skillOptions,
       initialSkillActivations: runAgentParams.initialSkillActivations,

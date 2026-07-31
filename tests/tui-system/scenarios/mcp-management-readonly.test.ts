@@ -57,6 +57,105 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(screenContains(tui.viewport(), 'R Retry')).toBe(false);
   }, 40_000);
 
+  test('denies remote MCP content by default without sending a Tool request', async () => {
+    let toolCalls = 0;
+    const remoteToolName = 'remote echo';
+    const exposedToolName = exposedMcpToolName('closed', remoteToolName);
+    mcpServer = startTestHttpServer({
+      fetch: async (request) => {
+        if (request.method === 'GET' || request.method === 'DELETE') {
+          return new Response(null, { status: 405 });
+        }
+        const message = (await request.json()) as {
+          id?: string | number;
+          method?: string;
+          params?: { protocolVersion?: string };
+        };
+        if (message.method === 'initialize') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              protocolVersion: message.params?.protocolVersion ?? '2025-06-18',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'closed-fixture', version: '1.0.0' },
+            },
+          });
+        }
+        if (message.method === 'tools/list') {
+          return Response.json({
+            jsonrpc: '2.0',
+            id: message.id,
+            result: {
+              tools: [
+                {
+                  name: remoteToolName,
+                  inputSchema: {
+                    type: 'object',
+                    properties: { message: { type: 'string' } },
+                    required: ['message'],
+                  },
+                },
+              ],
+            },
+          });
+        }
+        if (message.method === 'prompts/list') {
+          return Response.json({ jsonrpc: '2.0', id: message.id, result: { prompts: [] } });
+        }
+        if (message.method === 'resources/list') {
+          return Response.json({ jsonrpc: '2.0', id: message.id, result: { resources: [] } });
+        }
+        if (message.method === 'tools/call') toolCalls += 1;
+        return new Response(null, { status: 202 });
+      },
+    });
+    server = createMockModelServer();
+    server.setResponses([
+      {
+        message: {
+          tool_calls: [
+            {
+              id: 'closed-mcp-call',
+              name: exposedToolName,
+              args: { message: 'must not leave the process' },
+            },
+          ],
+        },
+      },
+      { message: { content: 'REMOTE_EGRESS_DENIAL_HANDLED' } },
+    ]);
+    workspace = createTestWorkspace({
+      configOverrides: {
+        mcpServers: {
+          closed: {
+            type: 'http',
+            url: `${mcpServer.url.origin}/mcp`,
+            tools: {
+              [remoteToolName]: {
+                effects: { filesystem: 'none', network: 'read', externalState: 'read' },
+                minimumApproval: 'none',
+                retry: 'never',
+              },
+            },
+          },
+        },
+      },
+      projectConfigOverrides: {},
+    });
+    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
+    tui.setRawMode(true);
+
+    await typeText(tui, 'call the closed remote MCP tool', 20);
+    tui.write('\r');
+    await waitForText(() => tui!.outputSinceLastAction(), 'REMOTE_EGRESS_DENIAL_HANDLED', 20_000);
+
+    expect(toolCalls).toBe(0);
+    expect(tui.scrollback()).toContain('Remote MCP content egress denied: feature_disabled.');
+    expect(JSON.stringify(server.getRequests().at(-1)?.messages)).toContain('feature_disabled');
+  }, 40_000);
+
   test('discovers, binds, and executes an MCP tool during a real TUI conversation', async () => {
     let toolCalls = 0;
     const remoteToolName = 'search documentation / latest';
@@ -247,6 +346,7 @@ describe('TUI PTY System — MCP Select management', () => {
     ]);
     workspace = createTestWorkspace({
       configOverrides: {
+        features: { remoteMcpEgressPolicyV1: true },
         mcpServers: {
           docs: {
             type: 'http',
@@ -255,7 +355,7 @@ describe('TUI PTY System — MCP Select management', () => {
               [remoteToolName]: {
                 effects: { filesystem: 'none', network: 'read', externalState: 'read' },
                 minimumApproval: 'none',
-                retry: 'safe_read',
+                retry: 'never',
               },
             },
           },
@@ -263,7 +363,13 @@ describe('TUI PTY System — MCP Select management', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = spawnTui({
+      cols: 120,
+      rows: 40,
+      mockServer: server,
+      workspace,
+      remoteMcpEgressPermitResolver: 'allow-each-invocation',
+    });
     await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
     tui.setRawMode(true);
 

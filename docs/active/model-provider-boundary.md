@@ -50,6 +50,11 @@ provenance 和 Workspace data label。`secret` label、runtime secret detector�
 alias、允许分类、retention/training/logging 用途和 policy/registry revision，不暴露 endpoint
 origin。用户、项目或 CLI 配置不能向 registry 增加 policy，也不能放宽仓库批准 bundle。
 
+Model Provider admission 与 remote HTTP MCP content egress 是两个独立授权域。模型 route 的
+policy/consent 即使允许 `confidential` payload，也不能签发、复用或替代
+`RemoteMcpEgressPermitV1`；反向同样成立。Tool effects approval 与 host/network admission 也不
+构成正文外发许可。当前 secondary evaluator 仍默认关闭，且没有消费生产正文的旁路。
+
 `WorkspaceDataLabelV1` 固定 `public < internal < confidential < secret` 的 deny-wins 顺序。
 artifact/admin/project rule/runtime secret detector 只能提高分类；用户主动粘贴或项目配置不能降低
 已有分类，也不自动产生外发授权。缺少细粒度 provenance 时，system/assistant 最低为
