@@ -308,6 +308,7 @@ const roadmap = readFileSync(
   join(planDir, '2026-07-29-agent-production-readiness-roadmap.md'),
   'utf8',
 );
+const plansIndex = readFileSync(join(planDir, 'index.md'), 'utf8');
 for (const milestone of knownMilestones) {
   const tableRows = roadmap
     .split('\n')
@@ -436,10 +437,12 @@ const phase1BoundaryCommit = '3ada4246b149444ce27ed713cd5425090367c1fc';
 const phase1NetworkCommit = 'bc03f77a3dac2962cd3158d3413f292b8388a0d8';
 const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
 const phase1RemoteMcpCommit = '545161a7103365038989c6a935a216c5bd5fc7e8';
+const phase1PrivacyClosureEvidenceCommit = '389a0cc45c36e59d961c659ab4df4015a722f7de';
+const phase1PrivacyPlan = sources.get('1A') ?? '';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
-  ['2026-07-29-agent-production-local-data-privacy.md', 'active'],
+  ['2026-07-29-agent-production-local-data-privacy.md', 'completed'],
   ['2026-07-29-agent-production-execution-isolation.md', 'active'],
   ['2026-07-29-agent-production-runtime-resilience.md', 'active'],
 ]);
@@ -448,6 +451,15 @@ for (const [file, expectedState] of expectedPlanStates) {
   if (!new RegExp(`^状态：${expectedState}$`, 'm').test(source)) {
     fail(`${file}: expected lifecycle state ${expectedState} after MS:M0`);
   }
+}
+
+const phase1PrivacyAcceptance =
+  phase1PrivacyPlan.match(/^## 验收条件\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
+const checkedPhase1PrivacyAcceptance = phase1PrivacyAcceptance.match(/^- \[x\] /gm) ?? [];
+if (checkedPhase1PrivacyAcceptance.length !== 11 || /^- \[ \] /m.test(phase1PrivacyAcceptance)) {
+  fail(
+    '1A: completed plan must retain all 11 checked acceptance criteria and no unchecked criteria',
+  );
 }
 
 const phase0CompletionPath = join(
@@ -625,8 +637,82 @@ if (!phase1PrivacyClosureBinding) {
   if (!phase1PrivacyClosureBinding.includes(`| \`${phase1RemoteMcpCommit}\` |`)) {
     fail('1A.7: binding must use the completed remote MCP egress baseline');
   }
-  if (!phase1PrivacyClosureBinding.includes('| `in_progress` |')) {
-    fail('1A.7: documentation closure execution binding must be in_progress');
+  if (!phase1PrivacyClosureBinding.includes('| `completed` |')) {
+    fail('1A.7: documentation closure execution binding must be completed');
+  }
+  const cells = parsePipeRow(phase1PrivacyClosureBinding);
+  const expectedCompletionPath =
+    'docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md';
+  if (cells[6]?.replaceAll('`', '') !== expectedCompletionPath) {
+    fail(`1A.7: completionRecordPath must be ${expectedCompletionPath}`);
+  }
+}
+
+const phase1PrivacyPlanIndexRow = plansIndex
+  .split('\n')
+  .find((line) =>
+    line.startsWith(
+      '| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) |',
+    ),
+  );
+if (!phase1PrivacyPlanIndexRow) {
+  fail('plans/index.md: missing Phase 1A local-data-privacy row');
+} else {
+  const cells = parsePipeRow(phase1PrivacyPlanIndexRow);
+  if (cells[1] !== 'completed') {
+    fail('plans/index.md: Phase 1A local-data-privacy plan must be completed');
+  }
+  if (!cells[5]?.includes('Task 1A.1–1A.7 completed')) {
+    fail('plans/index.md: Phase 1A row must record Task 1A.1–1A.7 completed');
+  }
+  if (!cells[5]?.includes('`MS:1A-DONE` 已产生')) {
+    fail('plans/index.md: Phase 1A row must record MS:1A-DONE production');
+  }
+  if (
+    !cells[5]?.includes('../execution/completed/2026-07-30-agent-production-local-data-privacy.md')
+  ) {
+    fail('plans/index.md: Phase 1A row must link the completion record');
+  }
+}
+
+for (const [description, pattern] of [
+  ['Phase 1A completion', /Phase 1A（Task 1A\.1–1A\.7）已完成/],
+  ['unique MS:1A-DONE producer', /唯一产生 `MS:1A-DONE`/],
+  ['no qualified route or artifact', /不产生 production-qualified route 或\s+production artifact/],
+  ['empty ProviderDataPolicy bundle', /ProviderDataPolicy approved bundle 仍为空/],
+  ['empty D-14 MCP route set', /D-14 批准的 MCP\s+route 集合也为空/],
+] as const) {
+  if (!pattern.test(roadmap)) {
+    fail(`roadmap must preserve Phase 1A closure: ${description}`);
+  }
+}
+if (
+  !new RegExp(
+    `^当前执行复核基线：\`${phase1PrivacyClosureEvidenceCommit}\`（2026-08-01）$`,
+    'm',
+  ).test(roadmap)
+) {
+  fail('roadmap must bind the current execution review baseline to the 1A.7 evidence commit');
+}
+
+const phase1PrivacyRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 14 |'));
+if (phase1PrivacyRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 14 exactly once; found ${phase1PrivacyRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '完成 1A.7 文档与迁移总收敛；唯一产生 `MS:1A-DONE`',
+    phase1PrivacyClosureEvidenceCommit,
+    'Required run 30670346726',
+    '../execution/completed/2026-07-30-agent-production-local-data-privacy.md',
+    '独立复核最终 GO 且无 P0/P1/P2',
+  ]) {
+    if (!phase1PrivacyRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 14 must identify ${evidence}`);
+    }
   }
 }
 
@@ -820,6 +906,57 @@ if (!/第五轮最终 GO，无剩余 P0\/P1\/P2/.test(phase1AdmissionCompletion)
   fail(`${relative(root, phase1AdmissionCompletionPath)} must record final 1A.6 independent GO`);
 }
 requireReachableCommit(phase1RemoteMcpCommit, '1A.6');
+if (!/^## Task 1A\.7$/m.test(phase1AdmissionCompletion)) {
+  fail(`${relative(root, phase1AdmissionCompletionPath)} must include ## Task 1A.7`);
+}
+for (const evidence of [
+  phase1PrivacyClosureEvidenceCommit,
+  '30670346726',
+  '唯一产生 `MS:1A-DONE`',
+  '2179 pass/7 skip/0 fail',
+  '5 个 harness 文件和 36 个 scenario',
+  'RSS 44→44 MiB、active 0→0、fd 12→12',
+]) {
+  if (!phase1AdmissionCompletion.includes(evidence)) {
+    fail(`${relative(root, phase1AdmissionCompletionPath)} must identify ${evidence}`);
+  }
+}
+for (const [description, pattern] of [
+  [
+    'empty ProviderDataPolicy bundle and zero model routes',
+    /ProviderDataPolicy approved bundle 的 `policies=\[\]`，所以 production-qualified model\s+route 为 0/,
+  ],
+  [
+    'D-14 zero MCP routes without an independent revision',
+    /D-14 同时冻结空的 model\/MCP route 集合，且仓库没有独立批准的 remote MCP\s+route revision，所以 production-qualified MCP route 也为 0/,
+  ],
+  [
+    'internal-only milestone',
+    /`MS:1A-DONE` 只表示 Phase 1A 实现与文档收敛，不表示存在可发布 route/,
+  ],
+  [
+    'no qualified route from empty Provider and MCP sets',
+    /ProviderDataPolicy approved bundle 与 D-14 MCP route 集合都为空，因此本记录不产生\s+production-qualified route/,
+  ],
+  [
+    'no release artifact, external qualification, or signing',
+    /不产生 production\s+artifact、external qualification 或 Release\/Security 签署/,
+  ],
+] as const) {
+  if (!pattern.test(phase1AdmissionCompletion)) {
+    fail(
+      `${relative(root, phase1AdmissionCompletionPath)} must preserve Phase 1A limitation: ${description}`,
+    );
+  }
+}
+if (
+  !/- 1A\.7 独立只读复核：[^\n]*(?:\n {2}[^\n]*)*最终 GO 且无 P0\/P1\/P2/.test(
+    phase1AdmissionCompletion,
+  )
+) {
+  fail(`${relative(root, phase1AdmissionCompletionPath)} must record final 1A.7 independent GO`);
+}
+requireReachableCommit(phase1PrivacyClosureEvidenceCommit, '1A.7');
 
 if (failures.length > 0) {
   console.error('Plan execution matrix checks failed:');

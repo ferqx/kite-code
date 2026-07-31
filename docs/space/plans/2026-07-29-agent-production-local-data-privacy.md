@@ -1,15 +1,15 @@
 # Agent 生产化 Phase 1A：本地日志、Provider 数据与隐私计划
 
-状态：active
+状态：completed
 创建：2026-07-29
 优先级：P0
 依赖：
 [`Phase 0 治理、决策与 ADR`](2026-07-29-agent-production-governance-decisions.md)
 设计依据：RFC §3.4、§9.5、§13、§14
 
-Task 1A.1–1A.6 已完成（1A.6 实现提交为
-`545161a7103365038989c6a935a216c5bd5fc7e8`）；1A.7 已按依赖激活并负责 Phase 1A 文档、迁移与
-milestone 总收敛。规范记录见
+Task 1A.1–1A.7 已完成；1A.7 以
+`389a0cc45c36e59d961c659ab4df4015a722f7de` 上完整 Required CI 及独立复核的最终行为证据，
+完成 Phase 1A 文档、迁移与 milestone 总收敛，并唯一产生 `MS:1A-DONE`。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
@@ -400,17 +400,17 @@ interface RemoteMcpEgressPermitV1 {
 
 ## 验收条件
 
-- [ ] production 默认 `metadata`；
-- [ ] `off` 不落盘；
-- [ ] content 只能显式 opt-in，项目不能开启；
-- [ ] metadata/telemetry mapper 的敏感 marker 命中为 0；
-- [ ] POSIX 0700/0600 和 Windows owner-only ACL smoke 通过；
-- [ ] retention、单 session/总容量、symlink 和历史迁移通过；
-- [ ] model route 有版本化 data policy 和 digest；
+- [x] production policy ceiling 启用时默认 `metadata`；feature flag 默认关闭时实际模式为 `off`；
+- [x] `off` 不落盘；
+- [x] content 只能显式 opt-in，项目不能开启；
+- [x] metadata/telemetry mapper 的敏感 marker 命中为 0；
+- [x] POSIX 0700/0600 和 Windows owner-only ACL smoke 通过；
+- [x] retention、单 session/总容量、symlink 和历史迁移通过；
+- [x] model route 有版本化 data policy 和 digest；
 - [x] remote MCP 使用独立 egress consent；
-- [ ] 真实用户正文默认不进入 secondary evaluation；
-- [ ] 相关 active/book/ADR/map 收敛；
-- [ ] 完整 Required CI 通过。
+- [x] 真实用户正文默认不进入 secondary evaluation；
+- [x] 相关 active/book/ADR/map 收敛；
+- [x] 完整 Required CI 通过。
 
 ## 回滚
 

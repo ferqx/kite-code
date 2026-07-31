@@ -1,8 +1,8 @@
-# Agent 生产化 Phase 1A Task 1A.1/1A.2/1A.3/1A.4/1A.5/1A.6 完成记录
+# Agent 生产化 Phase 1A Task 1A.1–1A.7 完成记录
 
 状态：completed
 日期：2026-07-30
-更新：2026-08-01（补充 Task 1A.6）
+更新：2026-08-01（完成 Task 1A.7 与 Phase 1A 收敛）
 计划：
 [`2026-07-29-agent-production-local-data-privacy.md`](../../plans/2026-07-29-agent-production-local-data-privacy.md)
 执行者：`github:@ferqx`
@@ -13,7 +13,8 @@
 `1A.3=2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`；
 `1A.4=bb1a6c7049284723958ca42a417411fac1a76e62`；
 `1A.4-hardening=302112e696d1dde1e31a1e652fef4b9e5a91c548,a935b2ea1b0dea5e51ea68062b8fdf77b948ccd9,a4bdf22aa7c2a987734524c278c4750e7b9faa96,1063e879933f3e1b0cf8c0958363c999bb2696ab`；
-`1A.6=545161a7103365038989c6a935a216c5bd5fc7e8`
+`1A.6=545161a7103365038989c6a935a216c5bd5fc7e8`；
+`1A.7-evidence=389a0cc45c36e59d961c659ab4df4015a722f7de`
 
 ## Task 1A.1
 
@@ -85,6 +86,24 @@
 - TUI system 正向 remote MCP 场景只通过显式测试组合根逐 invocation 签发 permit；生产组合根
   保留默认拒绝并断言零 `tools/call`，scenario contract 禁止 flag/fixture 半配置。
 
+## Task 1A.7
+
+- `docs/active/session-logging-policy.md`、`model-provider-boundary.md` 和
+  `mcp-runtime-governance.md` 已与 README、Book 10/11、ADR 和
+  `docs/documentation-map.json` 共同收敛；`docs/space/execution/completed/2026-06-18-session-logger.md`
+  仅保留归档历史，不再作为当前行为依据。
+- 当前 ProviderDataPolicy approved bundle 的 `policies=[]`，所以 production-qualified model
+  route 为 0。D-14 同时冻结空的 model/MCP route 集合，且仓库没有独立批准的 remote MCP
+  route revision，所以 production-qualified MCP route 也为 0。model Provider 与 remote MCP
+  使用独立数据边界，两者都不能由 Tool effects approval 替代。
+- 默认关闭 `sessionLoggingPolicyV1`、`providerDataPolicyV1` 和
+  `remoteMcpEgressPolicyV1` 时，实际状态分别是 logging=`off`、无 model dispatch
+  资格和 remote content=no-egress；production profile metadata-only 是启用日志治理后的
+  artifact ceiling，不是默认开启日志的声明。
+- 不支持的 route、unknown/expired/drift policy 和无法强制安全边界的平台继续
+  fail closed；本任务不改变 D-04 的空平台支持集。
+- 本完成记录是 Task 1A.7 和 Phase 1A 唯一产生 `MS:1A-DONE` 的记录。
+
 ## 验证
 
 - 独立只读复核：1A.3 GO，无 P0/P1；与 1C.6 联合定向回归 333 pass/0 fail；
@@ -103,12 +122,22 @@
 - 1A.6 命令：`bun test tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts`、
   `bun run test:tui:system`、`bun run test`、`bun run check:docs-impact`、`bun run check:docs`、
   `bun run check:core-boundary`、`bun run typecheck`、`git diff --check` 均通过。
+- 1A.7 行为证据提交 `389a0cc45c36e59d961c659ab4df4015a722f7de` 的 Required CI：unit
+  2179 pass/7 skip/0 fail；完整 TUI system 通过 5 个 harness 文件和 36 个 scenario
+  文件，资源趋势 RSS 44→44 MiB、active 0→0、fd 12→12。
+- [Required run 30670346726](https://github.com/ferqx/kite-code/actions/runs/30670346726)
+  的 `quality`、`unit`、`runtime-e2e`、`compaction-contract` 和 `tui-system` 全部通过；
+  同一 head 上 Platform Capability Probe、MCP native keyring smoke 和 Session Log ACL Smoke
+  全部通过。
+- 1A.7 独立只读复核：TUI receipt、selector row 与 debounced selection 的阻断问题
+  均已关闭，最终 GO 且无 P0/P1/P2；Phase 1A 声明与 ProviderDataPolicy/MCP 空集合、
+  fail-closed 边界一致。
 
 ## 回滚与限制
 
 - 回滚设置 `providerDataPolicyV1=false`；production route 全部关闭，旧 qualification 不恢复。
-- 当前 approved route bundle 为空，因此本记录不产生 production-qualified route，也不产生
-  `MS:1A-DONE`。
-- 1A.7 文档与迁移总收敛尚未完成，因此本记录仍不产生 `MS:1A-DONE`。
+- 当前 ProviderDataPolicy approved bundle 与 D-14 MCP route 集合都为空，因此本记录不产生
+  production-qualified route；
+  `MS:1A-DONE` 只表示 Phase 1A 实现与文档收敛，不表示存在可发布 route。
 - Phase 2 Release Profile/Gate 尚未组合，本记录只证明内部实现完成，不产生 production
   artifact、external qualification 或 Release/Security 签署。

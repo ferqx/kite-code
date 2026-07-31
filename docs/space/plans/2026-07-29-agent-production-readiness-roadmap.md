@@ -4,7 +4,7 @@
 创建：2026-07-29
 优先级：P0
 初始论证基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
-当前执行复核基线：`9bc626a1996261545c94e1e5950274029152bf1e`（2026-08-01）
+当前执行复核基线：`389a0cc45c36e59d961c659ab4df4015a722f7de`（2026-08-01）
 依赖：已批准的
 [`Agent 生产就绪与渐进发布控制 RFC`](../../design/2026-07-29-agent-production-readiness-rfc.md)
 替代：无
@@ -36,8 +36,13 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   唯一产生；artifact commit 为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。
 - Gate 结论仅为 `approved_for_internal_implementation`，不生成 production artifact，也不允许
   external cohort。
-- 1A.1–1A.5、1B.0/1B.1/1B.4 与 1C.1/1C.2/1C.3/1C.4/1C.6 已完成；D-04 以空支持集关闭，
-  不产生 production artifact。1A.6 已完成并激活 1A.7；1B.2/1B.3 仍在执行；后续 milestone 均为 pending。
+- Phase 1A（Task 1A.1–1A.7）已完成，由
+  [Task 1A.7 完成记录](../execution/completed/2026-07-30-agent-production-local-data-privacy.md)
+  唯一产生 `MS:1A-DONE`。该 milestone 不产生 production-qualified route 或
+  production artifact；当前 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
+  route 集合也为空。
+- 1B.0/1B.1/1B.4 与 1C.1/1C.2/1C.3/1C.4/1C.6 已完成；D-04 以空支持集关闭。
+  1B.2/1B.3 仍在执行；其他后续 milestone 均为 pending。
 
 ## 首发支持边界
 
