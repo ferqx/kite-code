@@ -16,7 +16,13 @@ import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForAnyText, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForCondition,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -73,8 +79,20 @@ describe('TUI PTY System — Tool Parse Error', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Run a broken command', 15000);
 
-      await waitForAnyText(() => tui.outputSinceLastAction(), ['Bash', 'Cancelled'], 15000);
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Invalid input', 15000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            (screenContains(viewport, 'Bash') || screenContains(viewport, 'Cancelled')) &&
+            screenContains(viewport, 'Invalid input') &&
+            screenContains(viewport, '❯')
+          );
+        },
+        'malformed tool result and recovered prompt to coexist in the settled viewport',
+        15000,
+      );
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
@@ -87,6 +105,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
       // The mock returns shell_execute with broken args → tool card shows "Bash"
       const hasToolHandled = screenContains(output, 'Bash') || screenContains(output, 'Cancelled');
       expect(hasToolHandled).toBe(true);
+      expect(screenContains(output, 'Invalid input')).toBe(true);
     },
     TIMEOUT,
   );
@@ -106,6 +125,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
         'Recovery message after parse error!',
         15000,
       );
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
       expect(screenContains(output, 'Recovery message after parse error!')).toBe(true);

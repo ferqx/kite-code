@@ -12,7 +12,13 @@ import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForCondition,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -61,7 +67,16 @@ describe('TUI PTY System — Error Recovery', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Trigger error', 15000);
 
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Internal server error', 15000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return screenContains(viewport, 'Internal server error') && screenContains(viewport, '❯');
+        },
+        'model error and recovered prompt to coexist in the settled viewport',
+        15000,
+      );
 
       const output = tui.viewport();
       console.log('output after error:', stripAnsi(output).slice(-500));
@@ -90,6 +105,7 @@ describe('TUI PTY System — Error Recovery', () => {
         'Second attempt: hello from model!',
         15000,
       );
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
       expect(screenContains(output, 'Hello after error')).toBe(true);

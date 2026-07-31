@@ -47,6 +47,9 @@ tests/tui-system/
    `waitForText()`，多终态使用 `waitForAnyText()`，非终端条件使用 `waitForCondition()`，需要
    settled Ink frame 时使用 `waitForOutputQuiescence()`。静默等待默认必须先观察到 checkpoint
    后的新输出，不能用“动作后没有输出”通过测试；语义结果明确时应先等待该结果，再等待稳定帧。
+   prompt `❯` 是常驻 UI，提交请求、错误处理或 interrupt 后的任意中间重绘都可能再次输出它，
+   因此不能把 prompt receipt 单独当作动作完成；应先等待该动作唯一的结果，再等待稳定帧或完整
+   viewport 组合状态。
    确实验证“某文本在时间窗内不出现”时使用 `expectTextAbsentFor()` 明示时间语义。清空输入统一
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
    普通输入使用默认 DEL 编码。只有 `typeText()` 已确认输入片段未完整交付的内部恢复路径可以显式
