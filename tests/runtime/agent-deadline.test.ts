@@ -111,7 +111,11 @@ describe('Runtime run deadline', () => {
     const threadId = 'deadline-interaction';
     try {
       const startedAt = new Date();
-      const deadlineAt = new Date(startedAt.getTime() + 300);
+      // This fixture must reach requestAction before the deadline fires. The
+      // full suite runs files concurrently on CI, so a 300ms wall-clock window
+      // could expire while the process was descheduled and only prove the
+      // earlier model-stage deadline path covered by the previous test.
+      const deadlineAt = new Date(startedAt.getTime() + 1_500);
       const state = reduceRuntimeState(
         createInitialRuntimeState({ threadId, userId: 'u', workspace: directory }),
         {
@@ -190,7 +194,7 @@ describe('Runtime run deadline', () => {
       await Promise.race([
         consume(),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Interaction deadline did not terminate.')), 2_000),
+          setTimeout(() => reject(new Error('Interaction deadline did not terminate.')), 5_000),
         ),
       ]);
 
