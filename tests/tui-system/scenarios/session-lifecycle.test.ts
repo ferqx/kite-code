@@ -8,7 +8,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { clearInput, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
@@ -209,8 +209,43 @@ describe('TUI PTY System — Session Lifecycle', () => {
       expect(screenContains(panelOutput, 'Message in session A')).toBe(true);
       expect(screenContains(panelOutput, 'Message in session B')).toBe(true);
 
-      // The active session is selected first. Confirm the Down-arrow render
-      // moved selection onto session A before sending the destructive key.
+      // Drive the initial empty-query debounce to a completed filtered result,
+      // then clear it and wait for the final full-list reload. D is deliberately
+      // disabled while search is non-empty, so navigation happens only after
+      // that reload has no pending query transition left.
+      await typeText(tui, 'session A');
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Message in session A', {
+              selected: true,
+              active: false,
+            }) &&
+            !screenHasSessionRow(viewport, 'Message in session B') &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session A filter results to replace the unfiltered selector rows',
+        10_000,
+      );
+      await clearInput(tui, Array.from('session A').length);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Message in session A', { active: false }) &&
+            screenHasSessionRow(viewport, 'Message in session B', {
+              selected: true,
+              active: true,
+            }) &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'cleared search to finish reloading the full session list',
+        10_000,
+      );
+
       tui.write('\x1b[B');
       await waitForCondition(
         () =>
@@ -218,7 +253,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
             selected: true,
             active: false,
           }),
-        'session A row to become selected',
+        'session A row to become selected after the settled reload',
         5_000,
       );
 

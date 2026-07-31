@@ -60,8 +60,12 @@ tests/tui-system/
    作为数据就绪 receipt；必须通过 row-specific screen parser 等待当前 `viewport()`
    同时包含预期列表行、selection/active 状态与控件，且 loading 已结束，再执行筛选、
    选择或删除。普通 `screenContains()` 命中 modal 背后的 conversation 文本不能代替 row
-   receipt。连续 resize 的交互探针必须在每次断言后清空，不能让前一次未提交输入参与下一次
-   resize 的 readiness 基线。
+   receipt。对有 debounced query 且包含多行的 selector，仅有首帧 rows + `!Loading`
+   不足以证明 selection 稳定：依赖非默认行的场景必须先用 receipt-confirmed filter
+   驱动一次最终查询并等待唯一目标 row。若 `D` 等动作的产品契约要求空搜索，再使用
+   `clearInput()` 清空，等待最终 full-list reload 的 rows/selection/active/`!Loading`
+   组合状态后才能导航或操作。连续 resize 的交互探针必须在每次断言后清空，不能让前一次未提交
+   输入参与下一次 resize 的 readiness 基线。
    确实验证“某文本在时间窗内不出现”时使用 `expectTextAbsentFor()` 明示时间语义。清空输入统一
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
    普通输入使用默认 DEL 编码。只有 `typeText()` 已确认输入片段未完整交付的内部恢复路径可以显式
