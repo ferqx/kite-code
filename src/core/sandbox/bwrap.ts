@@ -1,4 +1,6 @@
-import { existsSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
+import { resolve } from 'node:path';
+import type { FilesystemScope } from './types';
 
 /**
  * 生成 Bubblewrap 参数，创建最小化 Linux 容器
@@ -11,10 +13,15 @@ import { existsSync } from 'node:fs';
  */
 export function generateBwrapArgs(
   workspace: string,
-  options?: { network?: 'disabled' | 'allow_all'; sandboxRuntimeDir?: string },
+  options?: {
+    network?: 'disabled' | 'allow_all';
+    sandboxRuntimeDir?: string;
+    filesystemScope?: Exclude<FilesystemScope, 'full_access'>;
+  },
 ): string[] {
   const args: string[] = [];
   const networkMode = options?.network ?? 'disabled';
+  const workspaceRoot = realpathSync.native(resolve(workspace));
 
   // 系统路径：只读绑定 / System paths: read-only bind
   for (const path of ['/usr', '/bin', '/sbin', '/lib', '/lib64', '/etc', '/sys']) {
@@ -23,17 +30,20 @@ export function generateBwrapArgs(
     }
   }
 
-  // 工作区：读写绑定
-  args.push('--bind', workspace, workspace);
+  // Mount the generic temp filesystem before any Workspace/runtime child bind.
+  // A later /tmp mount would hide canonical paths located under the host tmpdir.
+  args.push('--tmpfs', '/tmp');
+
+  // Workspace bind follows the selected native filesystem ceiling.
+  const workspaceBind = options?.filesystemScope === 'read_only' ? '--ro-bind' : '--bind';
+  args.push(workspaceBind, workspaceRoot, workspaceRoot);
 
   // 沙箱运行时目录：读写绑定（存放 TMPDIR、bun cache 等）
   const runtimeDir = options?.sandboxRuntimeDir;
   if (runtimeDir && dirExists(runtimeDir)) {
-    args.push('--bind', runtimeDir, runtimeDir);
+    const runtimeRoot = realpathSync.native(resolve(runtimeDir));
+    args.push('--bind', runtimeRoot, runtimeRoot);
   }
-
-  // 临时目录：tmpfs
-  args.push('--tmpfs', '/tmp');
 
   // 最小设备节点和 proc
   args.push('--dev', '/dev');

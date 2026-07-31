@@ -91,3 +91,8 @@ profile。
 `createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
 production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，
 但它们不通过 production composition root，不能形成 production qualification。
+
+Linux bubblewrap 使用同一 `filesystemScope` 投影 canonical Workspace 的 rw/ro bind，并显式
+绑定 invocation runtime。Linux runtime 清理另起只包含该 runtime 与只读系统工具的 mount
+namespace；这只收紧开发实现，不构成 Linux production qualification。protected path、seccomp、
+process-tree 与入口/child inheritance 未有完整原生证据前，Linux 仍 fail closed 为 `excluded`。

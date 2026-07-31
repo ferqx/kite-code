@@ -587,7 +587,10 @@ function sandboxInvocation(
     if (!bwrap) return undefined;
     return [
       bwrap,
-      ...generateBwrapArgs(workspace, { network: 'disabled' }),
+      ...generateBwrapArgs(workspace, {
+        network: 'disabled',
+        filesystemScope: options.filesystemScope,
+      }),
       '--',
       '/bin/sh',
       '-c',

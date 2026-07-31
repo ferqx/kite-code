@@ -103,6 +103,8 @@
         "src/core/policies/**",
         "src/core/sandbox/**",
         "scripts/release/platform-capability-probe.ts",
+        "tests/sandbox.test.ts",
+        "tests/sandbox-bwrap-executor.test.ts",
         "tests/sandbox/platform-capability-probe.test.ts",
         "release/platform-capabilities/**",
         ".github/workflows/platform-capability-probe.yml",

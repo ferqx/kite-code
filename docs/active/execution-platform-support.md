@@ -60,6 +60,14 @@ dependency 的 `/private/etc/hosts`。这些只是
 production composition entrypoint 也尚未形成 native evidence，因此 outcome 仍必须是
 `excluded`、`productionSupported=false`。
 
+Linux bubblewrap 的开发边界现已把 canonical Workspace 按 `workspace_write` 或 `read_only`
+分别投影为 rw/ro bind，并把逐 invocation runtime 显式 rw bind；runtime 清理在只暴露该 runtime
+和只读系统工具的独立 mount namespace 内执行，避免 nested symlink 把宿主清理重定向到
+Workspace 或其他宿主路径。Ubuntu workflow 会运行真实 executor 与 hostile cleanup 测试，
+验证 Workspace 写、read-only 拒绝、Workspace 外读取拒绝，以及多层 `000` 目录和 external
+symlink 下的 runtime 清理。protected path、seccomp strength、硬 process-tree 上限和完整
+child/入口继承仍未证明，因此 Linux 结论继续是 `excluded`。
+
 ## ExecutionBoundaryV1 schema 与 composition gate
 
 Task 1B.1 已在 Core 冻结 `ExecutionBoundaryV1`：filesystem 只允许

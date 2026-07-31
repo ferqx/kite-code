@@ -113,6 +113,7 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
       const bwrapArgs = generateBwrapArgs(workspace, {
         network: networkMode,
         sandboxRuntimeDir,
+        filesystemScope: options.filesystemScope,
       });
       const shell = getSystemShell();
       const innerCmd = seccompPath

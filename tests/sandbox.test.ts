@@ -412,33 +412,80 @@ describe('sandbox platform detection', () => {
 
 // 验证 Bubblewrap 参数生成 / Validate Bubblewrap argument generation
 describe('bwrap argument generation', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'bwrap-args-test-'));
+  const canonicalWorkspace = realpathSync.native(workspace);
+  afterAll(() => rmSync(workspace, { recursive: true, force: true }));
+
   test('includes workspace bind mount', () => {
-    const args = generateBwrapArgs('/tmp/test-ws');
+    const args = generateBwrapArgs(workspace);
     expect(args).toContain('--bind');
-    expect(args).toContain('/tmp/test-ws');
+    expect(args).toContain(canonicalWorkspace);
+  });
+
+  test('uses a canonical read-only workspace bind when requested', () => {
+    const parent = mkdtempSync(join(tmpdir(), 'bwrap-link-test-'));
+    const link = join(parent, 'workspace-link');
+    symlinkSync(workspace, link);
+    try {
+      const args = generateBwrapArgs(link, { filesystemScope: 'read_only' });
+      const bindIndex = args.findIndex(
+        (value, index) => value === '--ro-bind' && args[index + 1] === canonicalWorkspace,
+      );
+      expect(bindIndex).toBeGreaterThanOrEqual(0);
+      expect(args.slice(bindIndex, bindIndex + 3)).toEqual([
+        '--ro-bind',
+        canonicalWorkspace,
+        canonicalWorkspace,
+      ]);
+      expect(args).not.toContain(link);
+    } finally {
+      rmSync(parent, { recursive: true, force: true });
+    }
   });
 
   test('includes essential isolation flags', () => {
-    const args = generateBwrapArgs('/tmp/test-ws');
+    const args = generateBwrapArgs(workspace);
     expect(args).toContain('--unshare-pid');
     expect(args).toContain('--die-with-parent');
     expect(args).toContain('--new-session');
   });
 
   test('includes minimal /dev and /proc', () => {
-    const args = generateBwrapArgs('/tmp/test-ws');
+    const args = generateBwrapArgs(workspace);
     expect(args).toContain('--dev');
     expect(args).toContain('--proc');
   });
 
   test('includes tmpfs /tmp', () => {
-    const args = generateBwrapArgs('/tmp/test-ws');
+    const args = generateBwrapArgs(workspace);
     expect(args).toContain('--tmpfs');
     expect(args).toContain('/tmp');
   });
 
+  test('mounts /tmp before Workspace and runtime child binds', () => {
+    const runtimeDir = createSandboxRuntimeDir(workspace);
+    try {
+      const args = generateBwrapArgs(workspace, { sandboxRuntimeDir: runtimeDir });
+      const tmpfsIndex = args.findIndex(
+        (value, index) => value === '--tmpfs' && args[index + 1] === '/tmp',
+      );
+      const workspaceIndex = args.findIndex(
+        (value, index) => value === '--bind' && args[index + 1] === canonicalWorkspace,
+      );
+      const canonicalRuntime = realpathSync.native(runtimeDir);
+      const runtimeIndex = args.findIndex(
+        (value, index) => value === '--bind' && args[index + 1] === canonicalRuntime,
+      );
+      expect(tmpfsIndex).toBeGreaterThanOrEqual(0);
+      expect(workspaceIndex).toBeGreaterThan(tmpfsIndex);
+      expect(runtimeIndex).toBeGreaterThan(tmpfsIndex);
+    } finally {
+      cleanupSandboxRuntimeDir(runtimeDir);
+    }
+  });
+
   test('includes system paths as read-only', () => {
-    const args = generateBwrapArgs('/tmp/test-ws');
+    const args = generateBwrapArgs(workspace);
     if (process.platform === 'linux') {
       expect(args).toContain('--ro-bind');
       // 至少包含 /usr 或 /bin（取决于系统）
@@ -448,12 +495,12 @@ describe('bwrap argument generation', () => {
   });
 
   test('can disable network namespace', () => {
-    const args = generateBwrapArgs('/tmp/test-ws', { network: 'disabled' });
+    const args = generateBwrapArgs(workspace, { network: 'disabled' });
     expect(args).toContain('--unshare-net');
   });
 
   test('disables the network namespace by default', () => {
-    const args = generateBwrapArgs('/tmp/test-ws');
+    const args = generateBwrapArgs(workspace);
     expect(args).toContain('--unshare-net');
   });
 });
