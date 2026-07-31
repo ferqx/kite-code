@@ -8,9 +8,10 @@
 设计依据：RFC §7、§9.4、§18
 
 Task 1B.0 已完成：三平台原生 probe 均为 `excluded`、`productionSupported=false`，
-ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1 已基于
-`1063e879933f3e1b0cf8c0958363c999bb2696ab` 激活；1B.2–1B.4 继续等待 1B.1，其余 Task 按
-依赖保持未绑定。规范记录见
+ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1 已完成；1B.2–1B.4 已基于
+`3ada4246b149444ce27ed713cd5425090367c1fc` 激活，其余 Task 按依赖保持未绑定。完成证据见
+[Task 1B.1 完成记录](../execution/completed/2026-07-31-agent-production-execution-boundary.md)，
+规范 binding 见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标

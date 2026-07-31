@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 
@@ -56,6 +57,30 @@ const failures: string[] = [];
 
 function fail(message: string): void {
   failures.push(message);
+}
+
+function requireReachableCommit(commit: string, label: string): void {
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    fail(`${label}: evidence commit must be a full lowercase SHA-1`);
+    return;
+  }
+  const object = spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], {
+    cwd: root,
+    stdio: 'ignore',
+  });
+  if (object.status !== 0) {
+    if (process.env.OPENPX_REQUIRE_EVIDENCE_HISTORY === '1') {
+      fail(`${label}: evidence commit ${commit} does not exist in the checkout`);
+    }
+    return;
+  }
+  const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
+    cwd: root,
+    stdio: 'ignore',
+  });
+  if (ancestor.status !== 0 && process.env.OPENPX_REQUIRE_EVIDENCE_HISTORY === '1') {
+    fail(`${label}: evidence commit ${commit} is not reachable from HEAD`);
+  }
 }
 
 function readPlan(plan: PlanSpec): string {
@@ -407,6 +432,7 @@ const phase1AdmissionCommit = '1e21055eb8b2579d710eb566728294f2ad8b2621';
 const phase1OperationalCommit = 'd0bd571e6a937aac55850bcc09df6f41bf95ac99';
 const phase1CompositionCommit = '2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee';
 const phase1NativeEvidenceCommit = '1063e879933f3e1b0cf8c0958363c999bb2696ab';
+const phase1BoundaryCommit = '3ada4246b149444ce27ed713cd5425090367c1fc';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
@@ -522,8 +548,28 @@ if (!phase1BoundaryBinding) {
   if (!phase1BoundaryBinding.includes(`| \`${phase1NativeEvidenceCommit}\` |`)) {
     fail('1B.1: binding must use the completed native-evidence baseline');
   }
-  if (!phase1BoundaryBinding.includes('| `in_progress` |')) {
-    fail('1B.1: execution-boundary schema binding must be in_progress');
+  if (!phase1BoundaryBinding.includes('| `completed` |')) {
+    fail('1B.1: execution-boundary schema binding must be completed');
+  }
+  const cells = parsePipeRow(phase1BoundaryBinding);
+  const expectedCompletionPath =
+    'docs/space/execution/completed/2026-07-31-agent-production-execution-boundary.md';
+  if (cells[6]?.replaceAll('`', '') !== expectedCompletionPath) {
+    fail(`1B.1: completionRecordPath must be ${expectedCompletionPath}`);
+  }
+}
+
+for (const taskId of ['1B.2', '1B.3', '1B.4']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-boundary execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase1BoundaryCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed execution-boundary baseline`);
+  }
+  if (!bindingRow.includes('| `in_progress` |')) {
+    fail(`${taskId}: post-boundary execution binding must be in_progress`);
   }
 }
 
@@ -579,6 +625,71 @@ for (const evidence of ['30579701659', 'ADR-0061', 'D-04']) {
   if (!phase1IsolationCompletion.includes(evidence)) {
     fail(`${relative(root, phase1IsolationCompletionPath)} must identify ${evidence}`);
   }
+}
+
+const phase1BoundaryCompletionPath = resolve(
+  root,
+  'docs',
+  'space',
+  'execution',
+  'completed',
+  '2026-07-31-agent-production-execution-boundary.md',
+);
+const phase1BoundaryCompletion = readFileSync(phase1BoundaryCompletionPath, 'utf8');
+if (!/^状态：completed$/m.test(phase1BoundaryCompletion)) {
+  fail(`${relative(root, phase1BoundaryCompletionPath)} must be completed`);
+}
+for (const evidence of [phase1BoundaryCommit, 'accepted_empty_support_set']) {
+  if (!phase1BoundaryCompletion.includes(evidence)) {
+    fail(`${relative(root, phase1BoundaryCompletionPath)} must identify ${evidence}`);
+  }
+}
+for (const heading of [
+  'Gate 决策',
+  '实际 commit / artifact',
+  '验证命令与结果',
+  '未运行项',
+  '风险与限制',
+  '与计划偏差',
+  'Active 文档与 ADR 收敛',
+]) {
+  if (!new RegExp(`^## ${heading}$`, 'm').test(phase1BoundaryCompletion)) {
+    fail(`${relative(root, phase1BoundaryCompletionPath)} must include ## ${heading}`);
+  }
+}
+if (!/最终 GO，未发现剩余\s*P0\/P1\/P2/.test(phase1BoundaryCompletion)) {
+  fail(
+    `${relative(root, phase1BoundaryCompletionPath)} must record final GO with no remaining P0/P1/P2`,
+  );
+}
+if (!/没有未运行的 1B\.1 必需验证/.test(phase1BoundaryCompletion)) {
+  fail(
+    `${relative(root, phase1BoundaryCompletionPath)} must explicitly account for required unrun items`,
+  );
+}
+for (const command of [
+  'bun test tests/sandbox/execution-boundary.test.ts tests/config/features.test.ts',
+  'bun run test:tui:system',
+  'bun run test',
+  'bun run check:docs-impact',
+  'bun run check:docs',
+  'bun run check:core-boundary',
+  'bun run typecheck',
+  'git diff --check',
+]) {
+  if (!phase1BoundaryCompletion.includes(`\`${command}\``)) {
+    fail(`${relative(root, phase1BoundaryCompletionPath)} must record command: ${command}`);
+  }
+}
+for (const commit of [
+  'cd2bd8819c86f4585cdf45fd6c6d785152cdba98',
+  'e4ed8a05106e3a49f110dbcc0066efa874d4c382',
+  phase1BoundaryCommit,
+]) {
+  if (!phase1BoundaryCompletion.includes(commit)) {
+    fail(`${relative(root, phase1BoundaryCompletionPath)} must identify evidence commit ${commit}`);
+  }
+  requireReachableCommit(commit, '1B.1');
 }
 
 if (failures.length > 0) {

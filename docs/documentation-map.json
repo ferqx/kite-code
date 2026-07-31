@@ -2,6 +2,11 @@
   "version": 1,
   "rules": [
     {
+      "id": "plan-execution-governance",
+      "sources": ["scripts/check-plan-execution-matrix.ts", ".github/workflows/required.yml"],
+      "documents": ["docs/space/plans/README.md"]
+    },
+    {
       "id": "runtime-kernel",
       "sources": ["src/core/runtime/**"],
       "excludeSources": ["src/core/runtime/agent.ts"],

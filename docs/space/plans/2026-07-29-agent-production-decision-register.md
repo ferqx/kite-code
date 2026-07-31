@@ -284,15 +284,18 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1A.3 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-31` |
 | 1A.4 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md` | `2026-07-31` |
 | 1B.0 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-31-agent-production-execution-isolation-spike.md` | `2026-07-31` |
-| 1B.1 | `github:@ferqx` | `1063e879933f3e1b0cf8c0958363c999bb2696ab` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-07-31` |
+| 1B.1 | `github:@ferqx` | `1063e879933f3e1b0cf8c0958363c999bb2696ab` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-31-agent-production-execution-boundary.md` | `2026-07-31` |
+| 1B.2 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-07-31` |
+| 1B.3 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-07-31` |
+| 1B.4 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-07-31` |
 | 1C.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.2 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.4 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.3 | `github:@ferqx` | `1e21055eb8b2579d710eb566728294f2ad8b2621` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.6 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-31` |
 
-除已完成的 1A.1–1A.5、1B.0、1C.1/1C.2/1C.3/1C.4/1C.6 和已激活的 1B.1 外，其他非
-Phase 0 Task 不创建 execution binding。
+除已完成的 1A.1–1A.5、1B.0/1B.1、1C.1/1C.2/1C.3/1C.4/1C.6 和已激活的
+1B.2/1B.3/1B.4 外，其他非 Phase 0 Task 不创建 execution binding。
 
 ## Revision history
 
@@ -308,3 +311,4 @@ Phase 0 Task 不创建 execution binding。
 | 8 | 2026-07-31 | 完成 1A.3/1C.6；激活 1A.4/1B.0 | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`、默认测试 2067 pass/6 skip、冻结快照连续两次 PTY 36/36、独立复核定向测试 333 pass/0 fail |
 | 9 | 2026-07-31 | 1A.4 secure storage/retention 与 1B.0 bounded probe 本地收敛；保持 in progress 等待原生 evidence | 默认测试 2103 pass/6 skip、独立复核无本地 P0/P1、本机 ACL smoke 通过、本机 platform outcome=`excluded` 且 `productionSupported=false` |
 | 10 | 2026-07-31 | 完成 1A.4/1B.0；接受 ADR-0061，以空支持集关闭 D-04；激活 1B.1 | ACL run 30580337754、platform run 30579701659、独立复核无剩余 P0/P1；三平台 ACL verified，三平台 capability 均 `excluded`/`productionSupported=false` |
+| 11 | 2026-07-31 | 完成 1B.1 fail-closed execution boundary；激活 1B.2/1B.3/1B.4 | `3ada4246b149444ce27ed713cd5425090367c1fc`、[完成记录](../execution/completed/2026-07-31-agent-production-execution-boundary.md)、独立复核最终 GO 且无剩余 P0/P1/P2 |
