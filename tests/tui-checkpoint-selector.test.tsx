@@ -3,6 +3,7 @@ import { render } from 'ink-testing-library';
 import type { MutableRefObject } from 'react';
 import CheckpointSelector from '../src/app/tui/components/CheckpointSelector';
 import type { RewindScope } from '../src/app/tui/types';
+import type { FileRestorePreview } from '../src/core/runtime/file-checkpoints';
 import type { RuntimeSnapshotEntry } from '../src/core/runtime/store';
 
 const checkpoints: RuntimeSnapshotEntry[] = [
@@ -25,6 +26,27 @@ const checkpoints: RuntimeSnapshotEntry[] = [
   },
 ];
 
+const filePreview: FileRestorePreview = {
+  files: [
+    { path: 'types.ts', addedLines: 881, removedLines: 3921 },
+    { path: 'config.ts', addedLines: 2, removedLines: 1 },
+  ],
+  lineStatsAvailable: true,
+  addedLines: 883,
+  removedLines: 3922,
+  conflictCount: 1,
+  failureCount: 0,
+};
+
+const noChangePreview: FileRestorePreview = {
+  files: [],
+  lineStatsAvailable: true,
+  addedLines: 0,
+  removedLines: 0,
+  conflictCount: 0,
+  failureCount: 0,
+};
+
 describe('CheckpointSelector', () => {
   test('shows human-readable message boundaries instead of internal checkpoint metadata', () => {
     const { lastFrame } = render(
@@ -44,7 +66,7 @@ describe('CheckpointSelector', () => {
     expect(frame).not.toContain('more');
   });
 
-  test('uses a safe confirmation step before executing a rewind', async () => {
+  test('uses a confirmation step before executing a rewind', async () => {
     const confirmed: Array<{ checkpointId: string; scope: RewindScope }> = [];
     const layeredEscRef = { current: false } as MutableRefObject<boolean>;
     const { stdin, lastFrame } = render(
@@ -60,30 +82,57 @@ describe('CheckpointSelector', () => {
     await Bun.sleep(10);
 
     const confirmFrame = lastFrame() ?? '';
-    expect(confirmFrame).toContain('── 回退 · 确认');
-    expect(confirmFrame).toContain('恢复到这条消息发送之前');
-    expect(confirmFrame).toContain('❯ 返回检查点列表');
-    expect(confirmFrame).toContain('恢复代码和会话');
+    expect(confirmFrame).toContain('── 回退 · 恢复到此消息之前');
+    expect(confirmFrame).not.toContain('恢复到这条消息发送之前');
+    expect(confirmFrame).toContain('❯ 恢复代码和会话');
     expect(confirmFrame).toContain('仅恢复会话');
     expect(confirmFrame).toContain('仅恢复代码');
+    expect(confirmFrame).not.toContain('返回检查点列表');
     expect(layeredEscRef.current).toBe(true);
 
-    // The default choice only returns to the list; two Enter presses cannot
-    // accidentally mutate the workspace.
+    // Enter from the list only opens the confirmation step. The second Enter
+    // confirms the default recovery scope.
+    expect(confirmed).toEqual([]);
     stdin.write('\r');
     await Bun.sleep(10);
-    expect(confirmed).toEqual([]);
-    expect(lastFrame()).not.toContain('回退 · 确认');
-    expect(layeredEscRef.current).toBe(false);
+    expect(confirmed).toEqual([{ checkpointId: 'turn-2c123456', scope: 'code_and_conversation' }]);
+    expect(layeredEscRef.current).toBe(true);
   });
 
-  test('confirms the selected recovery scope and explains its impact', async () => {
+  test('previews the selected recovery scope without a static impact summary', async () => {
     const confirmed: Array<{ checkpointId: string; scope: RewindScope }> = [];
     const { stdin, lastFrame } = render(
       <CheckpointSelector
         checkpoints={checkpoints}
         onConfirm={(checkpointId, scope) => confirmed.push({ checkpointId, scope })}
         onClose={() => {}}
+        getRewindPreview={() => filePreview}
+      />,
+    );
+
+    stdin.write('\r');
+    await Bun.sleep(10);
+
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('影响');
+    expect(frame).not.toContain('尚未执行');
+    expect(frame).not.toContain('将创建一个新会话；当前会话保留。');
+    expect(frame).toContain('代码将恢复 +883 −3922，涉及 types.ts 和另外 1 个文件。');
+    expect(frame).toContain('将跳过 1 个后续已变更的文件。');
+    expect(frame).not.toContain('只恢复 Kite Code 已记录');
+
+    stdin.write('\r');
+    await Bun.sleep(10);
+    expect(confirmed).toEqual([{ checkpointId: 'turn-2c123456', scope: 'code_and_conversation' }]);
+  });
+
+  test('hides the preview when code-only recovery would make no change', async () => {
+    const { stdin, lastFrame } = render(
+      <CheckpointSelector
+        checkpoints={checkpoints}
+        onConfirm={() => {}}
+        onClose={() => {}}
+        getRewindPreview={() => noChangePreview}
       />,
     );
 
@@ -91,16 +140,13 @@ describe('CheckpointSelector', () => {
     await Bun.sleep(10);
     stdin.write('\u001b[B');
     await Bun.sleep(10);
+    stdin.write('\u001b[B');
+    await Bun.sleep(10);
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('从此处创建新会话；当前会话保留');
-    expect(frame).toContain('恢复 17 个已记录文件');
-    expect(frame).toContain('冲突路径会跳过并提示');
-
-    stdin.write('\r');
-    stdin.write('\r');
-    await Bun.sleep(10);
-    expect(confirmed).toEqual([{ checkpointId: 'turn-2c123456', scope: 'code_and_conversation' }]);
+    expect(frame).toContain('❯ 仅恢复代码');
+    expect(frame).not.toContain('会话将保持不变。');
+    expect(frame).not.toContain('代码将保持不变。');
   });
 
   test('Esc returns from confirmation before closing the overlay', async () => {
@@ -121,7 +167,7 @@ describe('CheckpointSelector', () => {
     await Bun.sleep(100);
 
     expect(closed).toBe(0);
-    expect(lastFrame()).not.toContain('回退 · 确认');
+    expect(lastFrame()).not.toContain('回退 · 恢复到此消息之前');
 
     stdin.write('\u001b');
     await Bun.sleep(100);

@@ -3,6 +3,7 @@ import { ScrollList } from 'ink-scroll-list';
 import { type MutableRefObject, useEffect, useMemo, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import { formatLocalDateTime } from '@/core/persistence/sessions';
+import type { FileRestorePreview } from '@/core/runtime/file-checkpoints';
 import type { RuntimeSnapshotEntry } from '@/core/runtime/store';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTheme } from '../theme';
@@ -13,12 +14,13 @@ import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 export type { RuntimeSnapshotEntry };
 
 type RewindStage = 'browse' | 'confirm';
-type ConfirmChoice = 'back' | RewindScope;
+type ConfirmChoice = RewindScope;
 
 interface CheckpointSelectorProps {
   checkpoints: RuntimeSnapshotEntry[];
   onConfirm: (checkpointId: string, scope: RewindScope) => void;
   onClose: () => void;
+  getRewindPreview?: (checkpointId: string) => FileRestorePreview | null;
   layeredEscRef?: MutableRefObject<boolean>;
 }
 
@@ -45,17 +47,18 @@ function fileImpactLabel(count: number): string {
   return count > 0 ? `${count} 个已记录文件` : '无已记录文件变更';
 }
 
+function previewFileLabel(preview: FileRestorePreview): string {
+  const primaryPath = preview.files[0]?.path;
+  if (!primaryPath) return '';
+  const remainingFiles = preview.files.length - 1;
+  return remainingFiles > 0 ? `${primaryPath} 和另外 ${remainingFiles} 个文件` : primaryPath;
+}
+
 const confirmOptions: readonly OverlayChoiceOption<ConfirmChoice>[] = [
-  {
-    id: 'back',
-    label: '返回检查点列表',
-    description: '不做任何更改',
-  },
   {
     id: 'code_and_conversation',
     label: '恢复代码和会话',
     description: '创建新会话并恢复工作区文件；当前会话保留',
-    separatorBefore: true,
   },
   {
     id: 'conversation_only',
@@ -66,7 +69,6 @@ const confirmOptions: readonly OverlayChoiceOption<ConfirmChoice>[] = [
     id: 'code_only',
     label: '仅恢复代码',
     description: '保留当前会话，只恢复工作区文件',
-    destructive: true,
   },
 ];
 
@@ -74,13 +76,15 @@ export default function CheckpointSelector({
   checkpoints,
   onConfirm,
   onClose,
+  getRewindPreview,
   layeredEscRef,
 }: CheckpointSelectorProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const [stage, setStage] = useState<RewindStage>('browse');
   const [selected, setSelected] = useState(0);
-  const [confirmChoice, setConfirmChoice] = useState<ConfirmChoice>('back');
+  const [confirmChoice, setConfirmChoice] = useState<ConfirmChoice>('code_and_conversation');
+  const [filePreview, setFilePreview] = useState<FileRestorePreview | null>(null);
   const submittingRef = useRef(false);
   const maxContentHeight = useOverlayHeight(9);
   const columns = stdout?.columns ?? 80;
@@ -108,28 +112,40 @@ export default function CheckpointSelector({
     setSelected((current) => Math.min(current, Math.max(0, actionableCheckpoints.length - 1)));
   }, [actionableCheckpoints.length]);
 
+  const selectConfirmChoice = (choice: ConfirmChoice) => {
+    setConfirmChoice(choice);
+    if (
+      selectedCheckpoint &&
+      getRewindPreview &&
+      (choice === 'code_and_conversation' || choice === 'code_only')
+    ) {
+      setFilePreview(getRewindPreview(selectedCheckpoint.snapshotId));
+      return;
+    }
+    setFilePreview(null);
+  };
+
   useInput((_input, key) => {
     if (stage === 'confirm') {
       if (key.escape) {
         setStage('browse');
-        setConfirmChoice('back');
+        setFilePreview(null);
         return;
       }
       if (key.upArrow) {
-        setConfirmChoice(confirmOptions[Math.max(0, confirmIndex - 1)]?.id ?? 'back');
+        selectConfirmChoice(
+          confirmOptions[Math.max(0, confirmIndex - 1)]?.id ?? 'code_and_conversation',
+        );
         return;
       }
       if (key.downArrow) {
-        setConfirmChoice(
-          confirmOptions[Math.min(confirmOptions.length - 1, confirmIndex + 1)]?.id ?? 'back',
+        selectConfirmChoice(
+          confirmOptions[Math.min(confirmOptions.length - 1, confirmIndex + 1)]?.id ??
+            'code_and_conversation',
         );
         return;
       }
       if (key.return) {
-        if (confirmChoice === 'back') {
-          setStage('browse');
-          return;
-        }
         if (selectedCheckpoint && !submittingRef.current) {
           submittingRef.current = true;
           onConfirm(selectedCheckpoint.snapshotId, confirmChoice);
@@ -151,7 +167,7 @@ export default function CheckpointSelector({
       return;
     }
     if (key.return && selectedCheckpoint) {
-      setConfirmChoice('back');
+      selectConfirmChoice('code_and_conversation');
       setStage('confirm');
     }
   });
@@ -171,18 +187,12 @@ export default function CheckpointSelector({
 
   if (stage === 'confirm' && selectedCheckpoint) {
     const affectsCode = confirmChoice === 'code_and_conversation' || confirmChoice === 'code_only';
-    const conversationImpact =
-      confirmChoice === 'code_only'
-        ? '保持当前会话不变'
-        : confirmChoice === 'back'
-          ? '尚未执行'
-          : '从此处创建新会话；当前会话保留';
-    const codeImpact =
-      confirmChoice === 'conversation_only'
-        ? '保持当前工作区不变'
-        : confirmChoice === 'back'
-          ? '尚未执行'
-          : `恢复 ${fileImpactLabel(selectedCheckpoint.affectedFileCount ?? 0)}`;
+    const hasCodePreview =
+      filePreview != null &&
+      (filePreview.files.length > 0 ||
+        filePreview.conflictCount > 0 ||
+        filePreview.failureCount > 0);
+    const showPreview = hasCodePreview;
     const message = truncateByDisplayWidth(
       normalizeMessage(selectedCheckpoint.targetMessage),
       messageWidth * 2,
@@ -193,7 +203,7 @@ export default function CheckpointSelector({
 
     return (
       <OverlayFrame
-        title="回退 · 确认"
+        title="回退 · 恢复到此消息之前"
         footer={
           <OverlayShortcutBar
             shortcuts={[
@@ -205,11 +215,7 @@ export default function CheckpointSelector({
         }
       >
         <Box flexDirection="column" marginTop={1}>
-          <Text bold color={t.muted}>
-            恢复到这条消息发送之前
-          </Text>
           <Box
-            marginTop={1}
             marginLeft={1}
             paddingLeft={1}
             width={Math.max(20, columns - 6)}
@@ -224,37 +230,41 @@ export default function CheckpointSelector({
             <Text color={t.dim}>{messageTime}</Text>
           </Box>
 
-          <Box flexDirection="column" marginTop={1} marginBottom={1}>
-            <Text bold color={t.muted}>
-              影响
-            </Text>
-            <Box>
-              <Box width={6}>
-                <Text color={t.dim}>会话</Text>
-              </Box>
-              <Text color={t.muted}>{conversationImpact}</Text>
-            </Box>
-            <Box>
-              <Box width={6}>
-                <Text color={t.dim}>代码</Text>
-              </Box>
-              <Text color={t.muted}>{codeImpact}</Text>
-            </Box>
-          </Box>
-
-          <OverlayChoiceList
-            options={confirmOptions}
-            selectedId={confirmChoice}
-            selectionBackground={false}
-          />
-
-          {affectsCode && (
-            <Box marginTop={1}>
-              <Text color={t.warning}>
-                ⚠ 只恢复 Kite Code 已记录且未被再次修改的文件；冲突路径会跳过并提示。
-              </Text>
+          {showPreview && (
+            <Box flexDirection="column" marginTop={1} paddingLeft={1}>
+              {affectsCode && hasCodePreview && filePreview && (
+                <>
+                  <Text color={t.muted}>
+                    {filePreview.files.length === 0
+                      ? filePreview.conflictCount || filePreview.failureCount
+                        ? '没有可安全恢复的文件。'
+                        : '代码将保持不变。'
+                      : filePreview.lineStatsAvailable
+                        ? `代码将恢复 +${filePreview.addedLines} −${filePreview.removedLines}，涉及 ${previewFileLabel(filePreview)}。`
+                        : `代码将恢复，涉及 ${previewFileLabel(filePreview)}。`}
+                  </Text>
+                  {filePreview.conflictCount > 0 && (
+                    <Text color={t.warning}>
+                      {`将跳过 ${filePreview.conflictCount} 个后续已变更的文件。`}
+                    </Text>
+                  )}
+                  {filePreview.failureCount > 0 && (
+                    <Text color={t.warning}>
+                      {`有 ${filePreview.failureCount} 个文件无法预览。`}
+                    </Text>
+                  )}
+                </>
+              )}
             </Box>
           )}
+
+          <Box marginTop={1}>
+            <OverlayChoiceList
+              options={confirmOptions}
+              selectedId={confirmChoice}
+              selectionBackground={false}
+            />
+          </Box>
         </Box>
       </OverlayFrame>
     );

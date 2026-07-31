@@ -145,14 +145,13 @@ describe('TUI PTY System — File Rewind', () => {
       await typeText(tui, '/rewind');
       tui.write('\r');
       // 检查点面板以用户消息描述恢复边界，不暴露 event / snapshot ID。
-      await waitForText(() => tui.output(), 'Kite Code · 回退', 15000);
+      await waitForText(() => tui.output(), '── 回退', 15000);
       await sleep(500);
 
-      // Enter 只进入确认层；默认“返回”，需要 ↓ 明确选择恢复代码和会话。
+      // Enter 只进入确认层；默认选择恢复代码和会话。
       tui.write('\r');
-      await waitForText(() => tui.output(), '回退 · 确认', 15000);
-      tui.write('\x1B[B');
-      await sleep(300);
+      await waitForText(() => tui.output(), '回退 · 恢复到此消息之前', 15000);
+      await waitForText(() => tui.output(), '代码将恢复 +1 −1，涉及 notes.md', 15000);
       tui.write('\r');
 
       // 恢复提示（LOCAL_TEXT）/ restore note
@@ -186,12 +185,15 @@ describe('TUI PTY System — File Rewind', () => {
       const panelOffset = tui.output().length;
       await typeText(tui, '/rewind');
       tui.write('\r');
-      await waitForText(() => tui.output().slice(panelOffset), 'Kite Code · 回退', 15000);
+      await waitForText(() => tui.output().slice(panelOffset), '── 回退', 15000);
 
       tui.write('\r');
-      await waitForText(() => tui.output().slice(panelOffset), '回退 · 确认', 15000);
-      tui.write('\x1B[B');
-      await sleep(300);
+      await waitForText(() => tui.output().slice(panelOffset), '回退 · 恢复到此消息之前', 15000);
+      await waitForText(
+        () => tui.output().slice(panelOffset),
+        '代码将恢复 +1 −1，涉及 notes.md',
+        15000,
+      );
       const restoreOffset = tui.output().length;
       tui.write('\r');
 

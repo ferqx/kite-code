@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
 import {
   createFilePreimageRecorder,
+  previewFilesToCheckpoint,
   restoreFilesToCheckpoint,
 } from '../../src/core/runtime/file-checkpoints';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
@@ -35,6 +36,56 @@ function appendEvent(threadId: string, toolCallId: string): void {
 }
 
 describe('restoreFilesToCheckpoint', () => {
+  test('previews exact line changes and the most affected path before restoring', () => {
+    writeFileSync(join(workspace, 'notes.md'), 'before\nkeep\n', 'utf8');
+    appendEvent('th-preview', 'a');
+    store.saveNamedSnapshot('th-preview', 'cp', { version: 1 });
+
+    appendEvent('th-preview', 'turn-2-tool');
+    store.recordFilePreimage('th-preview', 'notes.md', 'before\nkeep\n', true);
+    store.recordFilePreimage('th-preview', 'scratch.md', null, false);
+    writeFileSync(join(workspace, 'notes.md'), 'after\nkeep\nextra\n', 'utf8');
+    writeFileSync(join(workspace, 'scratch.md'), 'scratch\n', 'utf8');
+    store.recordFilePostimage(
+      'th-preview',
+      'notes.md',
+      fileContentHash('after\nkeep\nextra\n'),
+      true,
+    );
+    store.recordFilePostimage('th-preview', 'scratch.md', fileContentHash('scratch\n'), true);
+
+    expect(previewFilesToCheckpoint(store, 'th-preview', 'cp', workspace)).toEqual({
+      files: [
+        { path: 'notes.md', addedLines: 1, removedLines: 2 },
+        { path: 'scratch.md', addedLines: 0, removedLines: 1 },
+      ],
+      lineStatsAvailable: true,
+      addedLines: 1,
+      removedLines: 3,
+      conflictCount: 0,
+      failureCount: 0,
+    });
+  });
+
+  test('excludes manually changed files from the restore preview', () => {
+    writeFileSync(join(workspace, 'notes.md'), 'before\n', 'utf8');
+    appendEvent('th-preview-conflict', 'a');
+    store.saveNamedSnapshot('th-preview-conflict', 'cp', { version: 1 });
+    appendEvent('th-preview-conflict', 'turn-2-tool');
+    store.recordFilePreimage('th-preview-conflict', 'notes.md', 'before\n', true);
+    writeFileSync(join(workspace, 'notes.md'), 'manual\n', 'utf8');
+    store.recordFilePostimage('th-preview-conflict', 'notes.md', fileContentHash('kite\n'), true);
+
+    expect(previewFilesToCheckpoint(store, 'th-preview-conflict', 'cp', workspace)).toEqual({
+      files: [],
+      lineStatsAvailable: true,
+      addedLines: 0,
+      removedLines: 0,
+      conflictCount: 1,
+      failureCount: 0,
+    });
+  });
+
   test('restores overwritten files and deletes files created after the checkpoint', () => {
     writeFileSync(join(workspace, 'notes.md'), 'v1 content\n', 'utf8');
     appendEvent('th', 'a');

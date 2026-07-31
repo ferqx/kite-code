@@ -2,7 +2,12 @@ import type { Dispatch } from 'react';
 import React from 'react';
 import { defaultCheckpointPath } from '@/core/config/paths';
 import { loadSession } from '@/core/persistence/sessions';
-import { type FileRestoreOutcome, restoreFilesToCheckpoint } from '@/core/runtime/file-checkpoints';
+import {
+  type FileRestoreOutcome,
+  type FileRestorePreview,
+  previewFilesToCheckpoint,
+  restoreFilesToCheckpoint,
+} from '@/core/runtime/file-checkpoints';
 import { createRuntimeStore } from '@/core/runtime/store';
 import type { Action } from '../reducers/actions';
 import { sessionDataToUI } from '../replay-blocks';
@@ -106,6 +111,20 @@ export function useRewindCheckpoints(
 
 export function useRunRewind(deps: RewindDeps) {
   const rewindInProgressRef = React.useRef(false);
+  const previewRewind = React.useCallback(
+    (snapshotId: string): FileRestorePreview | null => {
+      const threadId = deps.threadIdRef.current;
+      if (!threadId) return null;
+      const store = createRuntimeStore(storePath());
+      try {
+        if (!isRewindCheckpointAvailable(store, threadId, snapshotId)) return null;
+        return previewFilesToCheckpoint(store, threadId, snapshotId, deps.workspace);
+      } finally {
+        store.close();
+      }
+    },
+    [deps.threadIdRef, deps.workspace],
+  );
   const runRewind = React.useCallback(
     async (scope: RewindScope, snapshotId: string) => {
       const sourceThreadId = deps.threadIdRef.current;
@@ -191,5 +210,5 @@ export function useRunRewind(deps: RewindDeps) {
     [deps],
   );
 
-  return { runRewind };
+  return { runRewind, previewRewind };
 }

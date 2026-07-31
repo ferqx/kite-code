@@ -291,7 +291,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
     }),
     [dispatch, provider, config, workspace, sessionManager],
   );
-  const { runRewind } = useRunRewind(rewindDeps);
+  const { runRewind, previewRewind } = useRunRewind(rewindDeps);
   const runRewindRef = React.useRef(runRewind);
   runRewindRef.current = runRewind;
 
@@ -910,6 +910,7 @@ function TuiApp({ config, injectModel }: TuiAppProps) {
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
+        getRewindPreview={previewRewind}
         resizeGeneration={resizeKey}
       >
         <InputLine

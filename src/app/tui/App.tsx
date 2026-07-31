@@ -54,6 +54,9 @@ export interface AppProps {
   slashSuggestion?: import('./hooks/useSlashSuggestions').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
   onTogglePlanMode?: () => void;
+  getRewindPreview?: (
+    checkpointId: string,
+  ) => import('@/core/runtime/file-checkpoints').FileRestorePreview | null;
   resizeGeneration?: number;
   children?: ReactNode;
 }
@@ -90,6 +93,7 @@ export default function App({
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
+  getRewindPreview,
   resizeGeneration,
   children,
 }: AppProps) {
@@ -364,6 +368,7 @@ export default function App({
           checkpoints={state.checkpoints}
           onConfirm={executeRewind}
           onClose={hideRewind}
+          getRewindPreview={getRewindPreview}
           layeredEscRef={layeredOverlayEscRef}
         />
       )}
