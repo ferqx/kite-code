@@ -8,7 +8,8 @@
 设计依据：RFC §3.4、§9.5、§13、§14
 
 Task 1A.1–1A.5 已完成（1A.4 最终加固提交为
-`1063e879933f3e1b0cf8c0958363c999bb2696ab`）；1A.6 继续等待 1B.4，其余 Task 按依赖保持
+`1063e879933f3e1b0cf8c0958363c999bb2696ab`）；1B.4 已由
+`bc03f77a3dac2962cd3158d3413f292b8388a0d8` 完成，1A.6 已激活并处于执行中；1A.7 按依赖保持
 未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 

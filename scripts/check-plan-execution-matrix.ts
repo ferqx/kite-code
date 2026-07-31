@@ -433,6 +433,8 @@ const phase1OperationalCommit = 'd0bd571e6a937aac55850bcc09df6f41bf95ac99';
 const phase1CompositionCommit = '2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee';
 const phase1NativeEvidenceCommit = '1063e879933f3e1b0cf8c0958363c999bb2696ab';
 const phase1BoundaryCommit = '3ada4246b149444ce27ed713cd5425090367c1fc';
+const phase1NetworkCommit = 'bc03f77a3dac2962cd3158d3413f292b8388a0d8';
+const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
@@ -559,7 +561,7 @@ if (!phase1BoundaryBinding) {
   }
 }
 
-for (const taskId of ['1B.2', '1B.3', '1B.4']) {
+for (const taskId of ['1B.2', '1B.3']) {
   const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
   if (!bindingRow) {
     fail(`${taskId}: missing post-boundary execution binding`);
@@ -570,6 +572,40 @@ for (const taskId of ['1B.2', '1B.3', '1B.4']) {
   }
   if (!bindingRow.includes('| `in_progress` |')) {
     fail(`${taskId}: post-boundary execution binding must be in_progress`);
+  }
+}
+
+const phase1NetworkBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1B.4 |'));
+if (!phase1NetworkBinding) {
+  fail('1B.4: missing network-boundary execution binding');
+} else {
+  if (!phase1NetworkBinding.includes(`| \`${phase1BoundaryCommit}\` |`)) {
+    fail('1B.4: binding must use the completed execution-boundary baseline');
+  }
+  if (!phase1NetworkBinding.includes('| `completed` |')) {
+    fail('1B.4: network-boundary execution binding must be completed');
+  }
+  const cells = parsePipeRow(phase1NetworkBinding);
+  const expectedCompletionPath =
+    'docs/space/execution/completed/2026-08-01-agent-production-network-boundary.md';
+  if (cells[6]?.replaceAll('`', '') !== expectedCompletionPath) {
+    fail(`1B.4: completionRecordPath must be ${expectedCompletionPath}`);
+  }
+}
+
+const phase1RemoteMcpBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1A.6 |'));
+if (!phase1RemoteMcpBinding) {
+  fail('1A.6: missing post-network execution binding');
+} else {
+  if (!phase1RemoteMcpBinding.includes(`| \`${phase1NetworkReviewBaseline}\` |`)) {
+    fail('1A.6: binding must use the reviewed network-boundary baseline');
+  }
+  if (!phase1RemoteMcpBinding.includes('| `in_progress` |')) {
+    fail('1A.6: remote MCP egress execution binding must be in_progress');
   }
 }
 
@@ -690,6 +726,63 @@ for (const commit of [
     fail(`${relative(root, phase1BoundaryCompletionPath)} must identify evidence commit ${commit}`);
   }
   requireReachableCommit(commit, '1B.1');
+}
+
+const phase1NetworkCompletionPath = resolve(
+  root,
+  'docs',
+  'space',
+  'execution',
+  'completed',
+  '2026-08-01-agent-production-network-boundary.md',
+);
+const phase1NetworkCompletion = readFileSync(phase1NetworkCompletionPath, 'utf8');
+if (!/^状态：completed$/m.test(phase1NetworkCompletion)) {
+  fail(`${relative(root, phase1NetworkCompletionPath)} must be completed`);
+}
+for (const evidence of [
+  phase1NetworkCommit,
+  phase1NetworkReviewBaseline,
+  'accepted_empty_support_set',
+]) {
+  if (!phase1NetworkCompletion.includes(evidence)) {
+    fail(`${relative(root, phase1NetworkCompletionPath)} must identify ${evidence}`);
+  }
+}
+for (const heading of [
+  'Gate 决策',
+  '实际 commit / artifact',
+  '验证命令与结果',
+  '未运行项',
+  '风险与限制',
+  '与计划偏差',
+  'Active 文档与 ADR 收敛',
+]) {
+  if (!new RegExp(`^## ${heading}$`, 'm').test(phase1NetworkCompletion)) {
+    fail(`${relative(root, phase1NetworkCompletionPath)} must include ## ${heading}`);
+  }
+}
+if (!/最终 GO，无剩余\s*P0\/P1\/P2/.test(phase1NetworkCompletion)) {
+  fail(
+    `${relative(root, phase1NetworkCompletionPath)} must record final GO with no remaining P0/P1/P2`,
+  );
+}
+for (const command of [
+  'bun test tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts',
+  'bun run test:tui:system',
+  'bun run test',
+  'bun run check:docs-impact',
+  'bun run check:docs',
+  'bun run check:core-boundary',
+  'bun run typecheck',
+  'git diff --check',
+]) {
+  if (!phase1NetworkCompletion.includes(`\`${command}\``)) {
+    fail(`${relative(root, phase1NetworkCompletionPath)} must record command: ${command}`);
+  }
+}
+for (const commit of [phase1NetworkCommit, phase1NetworkReviewBaseline]) {
+  requireReachableCommit(commit, '1B.4');
 }
 
 if (failures.length > 0) {
