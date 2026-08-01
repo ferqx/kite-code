@@ -190,6 +190,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 24. Tool Card 中先出现的问题或标题不代表 interrupt/modal 已可交互。场景必须等待该交互独有的
     最后一个选项或操作，再发送 Enter/Escape；后续 canned continuation 还必须校验同
     `tool_call_id` 的实际选择或取消结果，不能只因问题文本可见就判定交互就绪。
+25. 最终回答文本可见不等于上一轮已回到稳定 idle。跨轮发送新消息、slash command 或 `/exit` 前，
+    场景必须等待完整 main readiness（空输入、无 loading/modal 且输出稳定）；不得把回答尾部文本
+    当作下一次键盘输入已可接受的信号。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 

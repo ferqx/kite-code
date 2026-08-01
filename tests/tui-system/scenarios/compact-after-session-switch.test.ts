@@ -17,7 +17,7 @@ import {
   waitForRequestMessage,
 } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
@@ -181,6 +181,7 @@ describe('TUI PTY System — /compact after session switch', () => {
       server.setResponses([{ message: { content: sessionResponse }, delay: 10 }]);
       await submitUserMessage(tui, server, sessionSearchIdentity, { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), sessionResponse, 15000);
+      await waitForTuiReady(tui);
 
       // Create a command with a unique marker in the active session.
       const marker = 'restart-persistence-marker';
@@ -209,6 +210,7 @@ describe('TUI PTY System — /compact after session switch', () => {
 
       // Exit the first process gracefully so all RuntimeStore writes are
       // closed, then start a fresh TUI against the same HOME/workspace.
+      await waitForTuiReady(tui);
       await submitCommand(tui, '/exit');
       await tui.waitForExit();
 
