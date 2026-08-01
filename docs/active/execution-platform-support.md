@@ -112,6 +112,8 @@ production composition gate 不接受单一 `sandboxAvailable`，也不接受调
 `release/platform-capabilities/approved-execution-qualifications-v1.json`，校验固定 revision/digest，
 再按实际 OS release/version、architecture、Bun、backend、network mode 和 TUI/foreground CLI
 入口精确解析 qualification。probe 与 resolver 共用 canonical environment identity producer，且
+Windows identity 直接读取 Runtime 的 OS version API，不启动 PowerShell/CIM 子进程，避免冷启动或
+runner 负载把 production admission 变成无界同步等待；native evidence 与 resolver 仍消费同一值。
 每个可批准 qualification 必须同时包含两个入口的 composition evidence。qualification 内逐维固定 filesystem、network、完整 process tree、
 child inheritance 和 verified in-process read-only strength。flag/artifact 缺失、Workspace 不匹配、
 `full_access`、环境无匹配 qualification 或任一必需维度 `unsupported` 时 capability surface 全部

@@ -54,16 +54,12 @@ function readExactOsVersion(): { available: boolean; value: string } {
       // Fall through to the runtime OS version.
     }
   } else if (process.platform === 'win32') {
-    const script =
-      '$os = Get-CimInstance Win32_OperatingSystem; "$($os.Caption) $($os.Version) build $($os.BuildNumber)"';
-    const encoded = Buffer.from(script, 'utf16le').toString('base64');
-    const result = spawnSync(
-      'powershell.exe',
-      ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
-      { encoding: 'utf8', windowsHide: true },
-    );
-    if (result.status === 0 && result.stdout.trim()) {
-      return { available: true, value: result.stdout.trim() };
+    // os.version() is populated from the Windows version APIs by the runtime.
+    // Avoid a synchronous PowerShell/CIM child process here: on a cold or busy
+    // Windows host it can block production admission and exceed test deadlines.
+    const windowsVersion = nodeOsVersion().trim();
+    if (windowsVersion && windowsVersion !== 'unknown') {
+      return { available: true, value: windowsVersion };
     }
   }
   const fallback = nodeOsVersion();
