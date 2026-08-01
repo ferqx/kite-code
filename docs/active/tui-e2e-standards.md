@@ -38,7 +38,9 @@ tests/tui-system/
    必须逐字符恢复动作前基线，不能按尝试长度过度删除已有内容。输入期间发生 modal focus transfer 时，
    只允许由已识别的新活动字段完成回执；列表项或 ghost suggestion 不能充当输入值。first-run 表单
    可能在逻辑空值时继续显示 configured default placeholder，helper 必须把该 placeholder 与追加基线
-   区分。对已空输入的防御性清空允许只等待 quiet window，不得强制等待不会产生的 Ink receipt。
+   区分。setup helper 在发送第一个控制键前，必须等待当前 `viewport()` 的完整可交互状态（包括
+   默认 selection）并等待该渲染稳定；单个标题字节出现不代表 `useInput` 已可接收输入。对已空输入
+   的防御性清空允许只等待 quiet window，不得强制等待不会产生的 Ink receipt。
 3. `write()`、`resize()` 和 `setRawMode()` 都会记录动作前的原始输出 checkpoint。`outputSinceLastAction()`
    与 `outputSince(mark)` 只证明动作后产生了新 PTY 字节，不能作为当前 UI 语义的最终断言。
    Harness 只有在对应 chunk 完成 VT 解析后才向 action delta 发布该字节范围，避免 byte receipt

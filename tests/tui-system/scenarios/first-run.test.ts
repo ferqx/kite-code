@@ -68,8 +68,20 @@ describe('first-run — comprehensive flow', () => {
       workspace,
       noPreConfig: true,
     });
-    await waitForText(() => getOutputSinceLastAction(), 'Setup 1 of 2', 15000);
+    await waitForText(() => getOutput(), 'Setup 1 of 2', 15000);
+    await waitForText(() => getOutput(), '› DeepSeek', 15000);
+    await waitForOutputQuiescence(() => getOutputSinceLastAction());
     tui.setRawMode(true);
+    await tui.settleScreen();
+  }
+
+  async function openDeepSeekForm(): Promise<void> {
+    await spawnFirstRun();
+    const selectMark = tui.markOutput();
+    tui.write('\r');
+    await waitForText(() => getOutput(), 'Connect to DeepSeek', 5000);
+    await waitForText(() => getOutput(), 'API key', 5000);
+    await waitForOutputQuiescence(() => tui.outputSince(selectMark));
   }
 
   async function openCustomEndpointForm(): Promise<void> {
@@ -141,9 +153,7 @@ describe('first-run — comprehensive flow', () => {
   test(
     'DeepSeek: shows API key form with mask',
     async () => {
-      await spawnFirstRun();
-      tui.write('\r'); // select DeepSeek (default)
-      await waitForText(() => getOutputSinceLastAction(), 'Connect to DeepSeek', 5000);
+      await openDeepSeekForm();
       expect(screenContains(getOutput(), 'API key')).toBe(true);
       expect(screenContains(getOutput(), 'Setup 2 of 2')).toBe(true);
     },
@@ -153,9 +163,7 @@ describe('first-run — comprehensive flow', () => {
   test(
     'DeepSeek: empty key + Enter stays on form',
     async () => {
-      await spawnFirstRun();
-      tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), 'API key', 5000);
+      await openDeepSeekForm();
       tui.write('\r'); // Enter with empty key
       await waitForText(() => getOutputSinceLastAction(), 'API key cannot be empty', 5000);
       // Should still be on the form
@@ -168,9 +176,7 @@ describe('first-run — comprehensive flow', () => {
   test(
     'DeepSeek: Esc returns to provider selection',
     async () => {
-      await spawnFirstRun();
-      tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), 'Connect to DeepSeek', 5000);
+      await openDeepSeekForm();
       tui.write('\x1b'); // Esc
       await waitForText(() => getOutputSinceLastAction(), 'Choose a model provider', 5000);
       expect(screenContains(getOutput(), 'Setup 1 of 2')).toBe(true);
@@ -181,9 +187,7 @@ describe('first-run — comprehensive flow', () => {
   test(
     'DeepSeek: typing key shows masked characters',
     async () => {
-      await spawnFirstRun();
-      tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), 'API key', 5000);
+      await openDeepSeekForm();
       await typeMaskedText(tui, 'sk-test', 50);
       await waitForText(() => getOutputSinceLastAction(), '*******', 5000);
       // With mask="*", output should show asterisks not the actual key
