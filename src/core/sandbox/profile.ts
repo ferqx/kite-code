@@ -1,5 +1,9 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, parse, resolve } from 'node:path';
+import {
+  PROTECTED_WORKSPACE_DIRECTORIES_V1,
+  PROTECTED_WORKSPACE_FILES_V1,
+} from '@/core/policies/protected-path';
 import type { FilesystemScope } from './types';
 
 export interface SandboxProfileOptions {
@@ -228,46 +232,11 @@ function fileWritePolicy(
   ${filters.join('\n  ')})`;
 }
 
-const PROTECTED_DIRECTORY_PATHS = [
-  '.git',
-  '.ssh',
-  '.aws',
-  '.docker',
-  '.claude',
-  '.codex',
-  '.kite-code',
-  '.openpx',
-  '.vscode',
-  '.idea',
-  '.config/openpx',
-  '.config/mcp',
-];
-
-const PROTECTED_FILE_PATHS = [
-  '.bashrc',
-  '.bash_profile',
-  '.bash_logout',
-  '.zshrc',
-  '.zprofile',
-  '.zlogout',
-  '.profile',
-  '.npmrc',
-  '.yarnrc',
-  '.netrc',
-  '.git-credentials',
-  '.gitmodules',
-  '.env',
-  '.env.local',
-  '.env.production',
-  '.mcp.json',
-  'mcp.json',
-];
-
 function protectedPathPolicy(workspaceRoot: string): string {
-  const directoryFilters = PROTECTED_DIRECTORY_PATHS.map((path) =>
+  const directoryFilters = PROTECTED_WORKSPACE_DIRECTORIES_V1.map((path) =>
     subpathFilter(resolve(workspaceRoot, path)),
   );
-  const fileFilters = PROTECTED_FILE_PATHS.map((path) =>
+  const fileFilters = PROTECTED_WORKSPACE_FILES_V1.map((path) =>
     literalFilter(resolve(workspaceRoot, path)),
   );
   return `;; Protected paths deny model-driven reads and writes even inside the Workspace.

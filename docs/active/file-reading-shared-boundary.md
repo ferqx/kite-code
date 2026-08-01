@@ -3,7 +3,7 @@
 状态：active
 范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/tools/search.ts`、`src/core/harness/tool-runner.ts`、`src/core/model/runtime-context.ts`、`src/core/runtime/agent.ts`、`src/core/subagent/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
 读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
-验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx`
+验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx`
 
 ## 设计目标
 
@@ -62,6 +62,15 @@ Workspace: /d/work/my-project
 
 同理 `search.ts` 的目录遍历全部走 `node:fs/promises`（`readdir`/`stat`），每次 `await` 让出事件循环；结果顺序与遍历语义保持与历史同步实现一致（readdir 目录序 + 深度优先递归，`search_files` 结果排序）。
 
+sealed execution boundary 下，解码/读取之前还有独立的 protected-path V1 gate。它复用
+`canonicalPathForComparison()` 解析最近存在祖先与 symlink identity，同时保留 lexical Workspace
+identity，并按结构化 operation 区分 read/write/execute。因此 `.git`/`.env` 即使向内链接普通文件
+仍按 protected 名称拒绝。Runner 在异步 `beforeDispatch` 后、`write_file`/`edit_file` 旧内容读取和
+pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 protected root 会拒绝，workspace-wide search 则在
+进入目录或读取文件前剪枝 protected descendants，因而 `.env`、`.kite-code` 等内容不会成为
+搜索结果。该密封边界优先于外部路径 grant；未携带 execution boundary 的开发入口仍维持下文
+`allowExternal` 兼容行为。
+
 ### 搜索遍历的 `.gitignore` 过滤（`search.ts`）
 
 `search_files` / `search_content` 的工作区内遍历遵循 `.gitignore` 忽略规则（与 ripgrep 默认语义对齐）：
@@ -70,6 +79,8 @@ Workspace: /d/work/my-project
 - **支持的规则子集**：空行/注释、`!` 反选、目录专用尾斜杠（`build/` 不忽略同名文件）、前导/中段 `/` 锚定、`*`、`?`、`[abc]`/`[!abc]`、`**`（前导 `**/`、尾随 `/**`、中段 `/**/`）、反斜杠转义；规则按目录叠加，后匹配覆盖先匹配。
 - **被排除目录整体剪枝**：git 语义——父目录被排除后，其内部 `.gitignore` 不参与（无法用内部规则重新包含）。
 - **`.git` 目录永远跳过**（与 ripgrep 一致）。
+- **sealed protected path 额外剪枝**：共享 evaluator 拒绝的 Agent/MCP 配置、credential、shell
+  profile 与 additional deny root 不进入遍历；deny 优先于 allow。
 - **显式单个文件目标不做忽略过滤**（显式路径优先）；工作区外搜索（`allowExternal`）不做过滤。
 
 ### 编码检测与二进制检测的优先级

@@ -19,12 +19,17 @@ export const writeFileSpec = defineExecutableTool({
   inputSchema: writeFileInputSchema,
   declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
+  governanceRevision: 'protected-path-v1',
   effects: () => ({
     effectClass: 'workspace_write',
     sideEffect: true,
     classificationReason: 'write_file creates or overwrites workspace files.',
   }),
   approvalSummary: (input) => `write_file ${input.path}`,
+  protectedPathAccesses: (input) => [
+    { path: input.path, operation: 'read' },
+    { path: input.path, operation: 'write' },
+  ],
   execute: async (input, context) =>
     writeFile({
       workspace: context.workspace,

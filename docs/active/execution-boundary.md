@@ -125,6 +125,25 @@ Workspace 内 `.git`、Agent/MCP 配置、credential、shell profile 等 protect
 Seatbelt deny，`checkDangerousPaths()` 只保留为 defense-in-depth。Shell child 会继承相同
 profile。
 
+密封配置还会从同一份 protected-path V1 定义编译平台无关 evaluator。每项访问都携带
+canonical target、未 realpath 的 lexical Workspace identity 与 `read`/`write`/`execute` operation；
+最近存在祖先先经 realpath，尚未创建的后缀再拼回，因此 `..`、Workspace alias、symlink ancestor
+以及把 `.git`/`.env` 指向普通 Workspace 文件的 inward alias 都不能绕过。Workspace 外路径、
+`.git`、Agent/MCP 配置、credential 与 shell profile 都返回 `deny`（`prompt` 也保持非执行终态，
+直到存在单独的 typed approval protocol）；additional deny 与内建 deny 取并集，deny 在可选
+allow root 前求值。Tool Runner 在审批前执行一次，并在异步 `beforeDispatch` hook 返回后、旧内容
+预读/pre-image capture 前重新求值；Registry dispatch 在 `spec.execute` 前再重复一次。
+`read_file`、`write_file`、`edit_file` 和 search spec 通过
+结构化 path-access 声明接入；workspace-wide search 会剪枝 protected descendants，而不是只检查
+搜索根。未携带 sealed boundary 的开发入口继续使用既有外部路径审批语义。
+
+Seatbelt profile 直接消费该共享定义的目录/文件集合；Shell 的命令字符串扫描不再是权威 gate。
+forked Skill 的文件工具继承同一 `taskConfig` evaluator。local stdio MCP manager 可接收同一 evaluator，
+并在 transport construction 前以 `execute` operation 拒绝 protected/outside cwd 与 path-like
+executable，再把 canonical cwd 和 path-like executable identity 交给 transport factory。bare PATH
+command 的 runtime pinning 与完整 child boundary 仍属于 Task 1B.8，生产 MCP transport 继续关闭。未来 typed Git/worktree
+controller 走独立 App 授权，不能借此向模型 Shell 或通用文件工具开放 `.git`。
+
 `createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
 production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，
 但它们不通过 production composition root，不能形成 production qualification。

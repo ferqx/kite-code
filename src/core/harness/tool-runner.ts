@@ -16,6 +16,7 @@ import {
   type RuntimeMcpPolicy,
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
+import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '@/core/sandbox/execution-capability-surface';
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
@@ -46,7 +47,10 @@ import {
 import { taskSpec } from '@/core/tools/registry/builtins/task';
 import { webFetchSpec } from '@/core/tools/registry/builtins/web-fetch';
 import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
-import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
+import {
+  dispatchRegisteredTool,
+  evaluateRegisteredToolProtectedPaths,
+} from '@/core/tools/registry/dispatch';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type {
@@ -196,6 +200,30 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   } = input;
 
   const executionSurface = taskConfig?.executionCapabilitySurface;
+  const protectedPathEvaluator = taskConfig?.executionBoundary
+    ? createProtectedPathEvaluatorV1({
+        workspaceRoot: taskConfig.executionBoundary.workspaceRoot,
+        mode: taskConfig.executionBoundary.protectedPathPolicy,
+      })
+    : undefined;
+  const builtinSpec = builtinToolRegistry.get(request.name);
+  if (builtinSpec && protectedPathEvaluator) {
+    const pathDecision = evaluateRegisteredToolProtectedPaths(builtinSpec, request.args, {
+      workspace,
+      threadId,
+      protectedPathEvaluator,
+    });
+    if (!pathDecision.ok) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: pathDecision.error,
+        status: 'rejected',
+      });
+    }
+  }
   const networkBoundaryPolicy = taskConfig?.executionBoundary
     ? networkBoundaryPolicyFromExecutionBoundaryV1(
         taskConfig.executionBoundary,
@@ -203,7 +231,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       )
     : undefined;
   if (executionSurface) {
-    const builtinSpec = builtinToolRegistry.get(request.name);
     const descriptor = builtinSpec
       ? builtinToolRegistry.descriptorOf(builtinSpec)
       : isMcpRequest(request) && mcpManager && mcpInvocation
@@ -311,6 +338,28 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   await beforeDispatch?.();
 
+  // Approval/permit hooks are asynchronous and may allow an external actor to
+  // replace a path component. Re-evaluate before write/edit perform any old
+  // content read or pre-image capture; Registry dispatch repeats the same gate
+  // immediately before execute.
+  if (builtinSpec && protectedPathEvaluator) {
+    const pathDecision = evaluateRegisteredToolProtectedPaths(builtinSpec, request.args, {
+      workspace,
+      threadId,
+      protectedPathEvaluator,
+    });
+    if (!pathDecision.ok) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: pathDecision.error,
+        status: 'rejected',
+      });
+    }
+  }
+
   if (request.name === 'task') {
     try {
       const runTask =
@@ -343,6 +392,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         threadId,
         signal,
         runTask,
+        protectedPathEvaluator,
       });
       if (!dispatched.dispatched) {
         return withFailureGuidance(request, {
@@ -397,7 +447,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const dispatched = await dispatchRegisteredTool(
       readFileSpec,
       { path: filePath, offset: request.args.offset, limit: request.args.limit },
-      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        protectedPathEvaluator,
+      },
     );
     const output = dispatched.dispatched
       ? dispatched.output
@@ -476,6 +532,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         signal,
         allowExternalPaths: allowExternal,
         writeTarget: { path: editPath, readState },
+        protectedPathEvaluator,
       },
     );
     if (!dispatched.dispatched) {
@@ -544,6 +601,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           previousContent: oldRead.ok ? oldRead.content : undefined,
           existed: oldExisted,
         },
+        protectedPathEvaluator,
       },
     );
     if (!dispatched.dispatched) {
@@ -624,7 +682,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const dispatched = await dispatchRegisteredTool(
       searchContentSpec,
       { pattern: searchInput.pattern, path: searchPath, glob: searchInput.glob },
-      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        protectedPathEvaluator,
+      },
     );
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -656,7 +720,13 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const dispatched = await dispatchRegisteredTool(
       searchFilesSpec,
       { pattern: searchInput.pattern, path: searchPath },
-      { workspace, threadId, signal, allowExternalPaths: allowExternal },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        protectedPathEvaluator,
+      },
     );
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -687,6 +757,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       threadId,
       signal,
       mcpManager,
+      protectedPathEvaluator,
     });
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -719,6 +790,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       threadId,
       signal,
       mcpManager,
+      protectedPathEvaluator,
     });
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -751,6 +823,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       threadId,
       signal,
       mcpManager,
+      protectedPathEvaluator,
     });
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -841,6 +914,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       toolCallId: request.id,
       networkBoundaryPolicy,
       recordNetworkDecision: input.recordNetworkDecision,
+      protectedPathEvaluator,
     });
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -870,6 +944,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       shellExecutor,
       shellNetworkMode: networkMode,
       onShellProgress: input.onShellProgress,
+      protectedPathEvaluator,
     });
     if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
@@ -905,6 +980,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       workspace,
       threadId,
       signal,
+      protectedPathEvaluator,
       allowExternalPaths: isExternalPathArg(
         String((request.args as Record<string, unknown>).path ?? ''),
       )

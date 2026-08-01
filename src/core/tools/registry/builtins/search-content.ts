@@ -26,12 +26,14 @@ export const searchContentSpec = defineExecutableTool({
   inputSchema: searchContentInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
+  governanceRevision: 'protected-path-v1',
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
     classificationReason: 'search_content is a read-only capability.',
   }),
   approvalSummary: (input) => `search_content ${input.pattern}`,
+  protectedPathAccesses: (input) => [{ path: input.path ?? '.', operation: 'read' }],
   execute: (input, context) =>
     searchContent({
       workspace: context.workspace,
@@ -39,6 +41,7 @@ export const searchContentSpec = defineExecutableTool({
       path: input.path ?? '.',
       glob: input.glob,
       allowExternal: context.allowExternalPaths === true,
+      protectedPathEvaluator: context.protectedPathEvaluator,
     }),
   projectResult: (output, context) => {
     const input = context.invocationInput;

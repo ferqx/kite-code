@@ -9,6 +9,10 @@
 import type { z } from 'zod';
 import type { FeatureFlags } from '@/core/config/features';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import type {
+  ProtectedPathAccessV1,
+  ProtectedPathEvaluatorV1,
+} from '@/core/policies/protected-path';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { PlanRuntimeContext } from '@/core/runtime/plan-facade';
@@ -98,6 +102,8 @@ export interface ToolExecutionContext extends ToolContext {
   };
   /** Registry dispatch 注入的已解析参数，仅供 projectResult 生成规范结果。 */
   invocationInput?: unknown;
+  /** Release-owned canonical protected-path evaluator for this run. */
+  protectedPathEvaluator?: ProtectedPathEvaluatorV1;
 }
 
 /**
@@ -167,6 +173,8 @@ export interface BaseToolSpec<Name extends string = string, Input = unknown> {
   availability?(context: ToolContext): boolean;
   /** 每次调用的动态分类；shell 工具复用命令形态分析，不读取治理参数。 */
   effects(input: Input, context: ToolContext): ToolEffects;
+  /** Structured filesystem accesses evaluated before any tool pre-read or execution. */
+  protectedPathAccesses?(input: Input, context: ToolContext): readonly ProtectedPathAccessV1[];
   /** 审批展示命令（可选）。默认使用工具名，替代逐分支的 protectedCommand。 */
   approvalSummary?(input: Input, context: ToolContext): string;
   /** 治理版本标签（可选），effects/分类逻辑变化时递增，纳入 descriptor revision 以保证缓存失效。 */

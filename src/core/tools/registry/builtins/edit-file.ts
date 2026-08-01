@@ -34,12 +34,17 @@ export const editFileSpec = defineExecutableTool({
   inputSchema: editFileInputSchema,
   declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
+  governanceRevision: 'protected-path-v1',
   effects: () => ({
     effectClass: 'workspace_write',
     sideEffect: true,
     classificationReason: 'edit_file modifies workspace files.',
   }),
   approvalSummary: (input) => `edit_file ${input.path}`,
+  protectedPathAccesses: (input) => [
+    { path: input.path, operation: 'read' },
+    { path: input.path, operation: 'write' },
+  ],
   preExecute: (input, context) => {
     const target = context.writeTarget;
     if (!target) {

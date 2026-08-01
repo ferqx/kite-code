@@ -155,13 +155,16 @@
         "tests/sandbox/platform-backends.test.ts",
         "tests/sandbox/process-tree-limit.test.ts",
         "tests/sandbox/platform-capability-probe.test.ts",
+        "tests/policies/protected-path.test.ts",
         "release/platform-capabilities/**",
         ".github/workflows/platform-capability-probe.yml",
         "src/core/controllers/tool-controller.ts",
         "src/core/execution/**",
         "src/core/harness/tool-policy.ts",
         "src/core/harness/tool-runner.ts",
-        "src/core/harness/tool-requests.ts"
+        "src/core/harness/tool-requests.ts",
+        "src/core/tools/registry/**",
+        "src/core/tools/search.ts"
       ],
       "documents": [
         "docs/active/tool-gated-autonomy.md",

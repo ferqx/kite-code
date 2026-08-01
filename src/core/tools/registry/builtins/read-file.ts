@@ -40,12 +40,14 @@ export const readFileSpec = defineExecutableTool({
   inputSchema: readFileInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
+  governanceRevision: 'protected-path-v1',
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
     classificationReason: 'read_file is a read-only capability.',
   }),
   approvalSummary: (input) => `read_file ${input.path}`,
+  protectedPathAccesses: (input) => [{ path: input.path, operation: 'read' }],
   execute: async (input, context) => {
     const result = readFile({
       workspace: context.workspace,

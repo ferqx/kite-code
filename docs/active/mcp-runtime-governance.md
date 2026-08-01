@@ -51,6 +51,14 @@ content or nonce. Tool Search and metadata discovery do not request a content
 permit. This gate does not satisfy Task 1B.8 and therefore does not reopen MCP under a sealed production
 network boundary.
 
+`McpConnectionManagerOptions` 可注入 sealed run 的 protected-path V1 evaluator。local stdio
+connection 在 SDK transport construction 前，以 `execute` operation 校验 `cwd`（缺省为 evaluator
+绑定的 canonical Workspace）和 path-like executable；protected、Workspace 外、无效或 prompt-only
+路径都拒绝，且不会调用 transport factory。准入后 manager 把 canonical cwd 和 path-like
+executable identity 而非未解析 alias 交给 factory。bare PATH command 的 runtime pinning、composition root 注入、child
+sandbox/network/process inheritance 与逐调用 transport boundary 仍属于 Task 1B.8；该 adapter
+不代表 local stdio 已获得 production admission，当前 sealed surface 继续关闭 local stdio MCP。
+
 MCP list changes replace the immutable catalog snapshot. Existing bindings do not update in place and fail closed. P0 accepts object-root JSON Schema Draft-07 only; each schema is validated against an admission budget (256 KiB UTF-8 bytes, 32 levels depth, 4096 object nodes, 1024 properties) in a single traversal. Manager retains the complete raw Tool discovery, while the capability catalog contains only enabled and schema-valid Tools. Disabled, invalid, budget-exceeding or unsupported Tools remain diagnosable through the control snapshot but are not model-visible or executable; direct Manager calls also require a current available descriptor.
 
 Transport health does not define Tool identity. After one successful discovery, Manager retains the last revisioned descriptor set while an effective Provider is connecting, degraded or failed. Remove, disable, visibility-policy change and successful `list_changed` refresh may replace or remove it. Runtime schema 13 persists session-loaded MCP capabilities; each model request revalidates their revisions and issues fresh turn bindings. Provider health is checked again immediately before execution.

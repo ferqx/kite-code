@@ -1,5 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, join, relative, resolve } from 'node:path';
+import type { ProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
 import type { ShellResult } from '@/core/types';
 import { readTextContentAsync } from './file';
 import {
@@ -13,6 +14,7 @@ interface SearchFilesInput {
   pattern: unknown;
   path?: unknown;
   allowExternal?: boolean;
+  protectedPathEvaluator?: ProtectedPathEvaluatorV1;
 }
 
 interface SearchContentInput {
@@ -21,6 +23,7 @@ interface SearchContentInput {
   path?: unknown;
   glob?: unknown;
   allowExternal?: boolean;
+  protectedPathEvaluator?: ProtectedPathEvaluatorV1;
 }
 
 // .git 目录永远跳过（与 ripgrep 一致；git 不追踪自身，gitignore 也无法重新包含它）。
@@ -43,7 +46,12 @@ export async function searchFiles(input: SearchFilesInput): Promise<ShellResult>
     const workspaceRoot = canonicalPathForComparison(input.workspace);
     const matches: string[] = [];
 
-    for await (const file of walkFiles(input.workspace, root, input.allowExternal)) {
+    for await (const file of walkFiles(
+      input.workspace,
+      root,
+      input.allowExternal,
+      input.protectedPathEvaluator,
+    )) {
       const rel = toPosix(relative(workspaceRoot, file));
       if (matchesFilePattern(rel, pattern)) {
         matches.push(rel);
@@ -73,7 +81,12 @@ export async function searchContent(input: SearchContentInput): Promise<ShellRes
     const glob = input.glob === undefined ? null : String(input.glob);
     const lines: string[] = [];
 
-    for await (const file of walkFiles(input.workspace, root, input.allowExternal)) {
+    for await (const file of walkFiles(
+      input.workspace,
+      root,
+      input.allowExternal,
+      input.protectedPathEvaluator,
+    )) {
       const rel = toPosix(relative(workspaceRoot, file));
       if (glob && !matchesFilePattern(rel, glob)) {
         continue;
@@ -331,9 +344,17 @@ async function* walkFiles(
   workspace: string,
   root: string,
   allowExternal?: boolean,
+  protectedPathEvaluator?: ProtectedPathEvaluatorV1,
 ): AsyncGenerator<string> {
   const workspaceRoot = canonicalPathForComparison(workspace);
   const resolvedRoot = canonicalPathForComparison(root);
+  const rootProtectedPathDecision = protectedPathEvaluator?.evaluate({
+    path: resolvedRoot,
+    operation: 'read',
+  });
+  if (rootProtectedPathDecision && rootProtectedPathDecision.outcome !== 'allow') {
+    throw new Error(`Refusing search of protected path: ${rootProtectedPathDecision.reason}`);
+  }
   if (!allowExternal) {
     if (!isPathInsideWorkspace(workspaceRoot, resolvedRoot)) {
       throw new Error(`Refusing search outside workspace: ${root}`);
@@ -366,7 +387,14 @@ async function* walkFiles(
     }
   }
 
-  yield* walkDir(workspaceRoot, resolvedRoot, relRoot, rules, allowExternal);
+  yield* walkDir(
+    workspaceRoot,
+    resolvedRoot,
+    relRoot,
+    rules,
+    allowExternal,
+    protectedPathEvaluator,
+  );
 }
 
 async function* walkDir(
@@ -375,10 +403,18 @@ async function* walkDir(
   relDir: string,
   rules: IgnoreRule[],
   allowExternal?: boolean,
+  protectedPathEvaluator?: ProtectedPathEvaluatorV1,
 ): AsyncGenerator<string> {
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     const child = resolve(dir, entry.name);
     const relChild = relDir === '' ? entry.name : `${relDir}/${entry.name}`;
+    const protectedPathDecision = protectedPathEvaluator?.evaluate({
+      path: child,
+      operation: 'read',
+    });
+    if (protectedPathDecision && protectedPathDecision.outcome !== 'allow') {
+      continue;
+    }
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) {
         continue;
@@ -394,7 +430,14 @@ async function* walkDir(
       const childRules = allowExternal
         ? rules
         : [...rules, ...(await loadIgnoreRules(child, relChild))];
-      yield* walkDir(workspaceRoot, child, relChild, childRules, allowExternal);
+      yield* walkDir(
+        workspaceRoot,
+        child,
+        relChild,
+        childRules,
+        allowExternal,
+        protectedPathEvaluator,
+      );
     } else if (entry.isFile()) {
       if (!allowExternal && isIgnored(relChild, false, rules)) {
         continue;

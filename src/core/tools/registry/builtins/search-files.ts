@@ -22,18 +22,21 @@ export const searchFilesSpec = defineExecutableTool({
   inputSchema: searchFilesInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
+  governanceRevision: 'protected-path-v1',
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
     classificationReason: 'search_files is a read-only capability.',
   }),
   approvalSummary: (input) => `search_files ${input.pattern}`,
+  protectedPathAccesses: (input) => [{ path: input.path ?? '.', operation: 'read' }],
   execute: (input, context) =>
     searchFiles({
       workspace: context.workspace,
       pattern: input.pattern,
       path: input.path ?? '.',
       allowExternal: context.allowExternalPaths === true,
+      protectedPathEvaluator: context.protectedPathEvaluator,
     }),
   projectResult: (output, context) => {
     const input = context.invocationInput;
