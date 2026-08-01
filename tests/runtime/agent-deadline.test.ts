@@ -20,7 +20,12 @@ describe('Runtime run deadline', () => {
     const threadId = 'deadline-run';
     try {
       const startedAt = new Date();
-      const deadlineAt = new Date(startedAt.getTime() + 300);
+      // The provider must first receive the unified signal for this test to
+      // prove propagation. A 300ms wall-clock window can expire while a busy
+      // CI worker has descheduled this process, which only proves admission
+      // stopped before the provider call. Match the interaction fixture's
+      // scheduling margin so the intended boundary is deterministic.
+      const deadlineAt = new Date(startedAt.getTime() + 1_500);
       const state = reduceRuntimeState(
         createInitialRuntimeState({ threadId, userId: 'u', workspace: directory }),
         {

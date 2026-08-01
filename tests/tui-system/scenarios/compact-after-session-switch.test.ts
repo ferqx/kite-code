@@ -36,21 +36,6 @@ import {
 
 const TIMEOUT = 30000;
 
-function promptRowCount(output: string): number {
-  return stripAnsi(output)
-    .split(/\r?\n/)
-    .filter((line) => /^\s*❯(?:\s|$)/.test(line)).length;
-}
-
-function activePromptIsEmpty(output: string): boolean {
-  const lines = stripAnsi(output).split(/\r?\n/);
-  for (let index = lines.length - 1; index >= 0; index--) {
-    const line = lines[index]!;
-    if (/^\s*❯(?:\s|$)/.test(line)) return /^\s*❯\s*$/.test(line);
-  }
-  return false;
-}
-
 describe('TUI PTY System — /compact after session switch', () => {
   const journey = createTuiSystemJourney();
   const step = journey.step;
@@ -200,29 +185,13 @@ describe('TUI PTY System — /compact after session switch', () => {
       // Create a command with a unique marker in the active session.
       const marker = 'restart-persistence-marker';
       const command = `/compact ${marker}`;
-      const promptRowsBeforeSubmit = promptRowCount(tui.scrollback());
       await submitCommand(tui, command);
 
-      // First prove the keyboard action committed into the current terminal
-      // history. Merely seeing the command can be an unsubmitted input echo;
-      // committing it adds a new historical prompt row and restores a distinct
-      // empty active prompt. Persistence is a separate observation boundary.
-      await waitForCondition(
-        () => {
-          const history = tui.scrollback();
-          return (
-            screenContains(history, command) &&
-            promptRowCount(history) > promptRowsBeforeSubmit &&
-            activePromptIsEmpty(tui.viewport())
-          );
-        },
-        'marked compact command to commit as history before returning to an empty prompt',
-        10000,
-      );
-
-      // Then prove the exact audit event reached the Runtime Store using a
-      // read-only observer. Binding the witness to its thread avoids relying
-      // on second-resolution session recency ordering.
+      // Prove submission with the exact durable audit event. PTY scrollback is
+      // not an ownership boundary: Ink may redraw or compact prompt rows under
+      // a slower CI terminal, so counting historical prompt rows is flaky.
+      // Binding the durable witness to its thread also avoids relying on
+      // second-resolution session recency ordering.
       let persistedCommand: { threadId: string; name: string } | undefined;
       await waitForCondition(
         () => {

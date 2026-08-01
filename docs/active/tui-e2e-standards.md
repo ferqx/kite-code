@@ -184,6 +184,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 22. Scenario teardown 必须使用 `cleanupTuiSystemFixtures()`，先等待所有 TUI 自有进程组退出，再停止
     mock/本地服务，最后清理 workspace；任一阶段失败都不能跳过后续资源，最终以 `AggregateError`
     报告。scenario contract 禁止直接调用 server `stop()` 或 workspace `cleanup()`。
+23. 终端 scrollback 行数不是命令提交凭据。Ink 在不同 PTY 速度下可以重绘或压缩历史行；若行为会
+    产生持久 Runtime fact，scenario 必须用只读 observer 断言精确事件，并只把终端输出用于验证
+    用户可见投影。没有持久事实时应等待命令的唯一语义响应，不能用 prompt 行数变化替代。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 
