@@ -196,6 +196,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 26. 同时包含本地模式切换和模型任务的复合 slash 输入不得作为 PTY 场景的同步捷径。规划场景应先
     提交 `/plan`，等待规划提示和 main readiness，再以普通用户消息提交任务；这样分别证明模式切换
     与模型请求，避免 slash ref commit 和 Enter 竞争。
+27. `submitCommand()` 不得以“命令字符已回显”作为提交完成。共享 helper 必须在发送 Enter 后确认
+    active input 已离开该命令或进程已退出；若输入仍由原命令占有，只能在固定次数内重送 Enter，
+    耗尽后明确失败。场景不得自行用 sleep 或无回执的单次 `write('\\r')` 替代。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 

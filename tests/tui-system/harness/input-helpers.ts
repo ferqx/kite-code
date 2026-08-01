@@ -12,6 +12,8 @@ const INPUT_ECHO_TIMEOUT_MS = 2_000;
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
+const COMMAND_SUBMIT_ATTEMPTS = 3;
+const COMMAND_SUBMIT_RECEIPT_TIMEOUT_MS = 1_500;
 const SELECTOR_COMMAND_PREFIX = /^\/(?:model|effort|theme|permissions)\s$/;
 
 interface InputDeliveryTestTiming {
@@ -366,6 +368,7 @@ export async function submitCommand(
   tui: PtyProcess,
   command: string,
   delayMs?: number,
+  testTiming?: { submitReceiptTimeoutMs?: number },
 ): Promise<void> {
   await typeText(tui, command, delayMs);
   const expectedKind: ActiveInput['kind'] | undefined =
@@ -386,5 +389,36 @@ export async function submitCommand(
     expectedKind === undefined,
     INPUT_ECHO_TIMEOUT_MS,
   );
-  tui.write('\r');
+  const expectedValue = normalizeInputEcho(command);
+  for (let attempt = 1; attempt <= COMMAND_SUBMIT_ATTEMPTS; attempt++) {
+    tui.write('\r');
+    if (
+      await waitForCommandSubmissionReceipt(
+        tui,
+        expectedValue,
+        testTiming?.submitReceiptTimeoutMs ?? COMMAND_SUBMIT_RECEIPT_TIMEOUT_MS,
+      )
+    ) {
+      return;
+    }
+  }
+  throw new Error(
+    `PTY command submission failed after ${COMMAND_SUBMIT_ATTEMPTS} Enter attempt(s): ${JSON.stringify(command)}`,
+  );
+}
+
+async function waitForCommandSubmissionReceipt(
+  tui: PtyProcess,
+  expectedValue: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const effectiveTimeout = tuiWaitTimeout(timeoutMs);
+  const start = Date.now();
+  while (Date.now() - start < effectiveTimeout) {
+    await tui.settleScreen();
+    if (tui.exited) return true;
+    if (activeInput(tui.viewport())?.value !== expectedValue) return true;
+    await sleep(tuiPollInterval(25));
+  }
+  return false;
 }

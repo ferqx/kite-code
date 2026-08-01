@@ -375,6 +375,7 @@ describe('TUI input helpers', () => {
       (data) => {
         if (data === '\r') {
           submitted = suggestionReady;
+          if (submitted) currentInput = '';
           return;
         }
         if (currentInput === '/permissions ' && !argumentReady) {
@@ -403,11 +404,34 @@ describe('TUI input helpers', () => {
       return `❯ ${currentInput}`;
     };
 
-    await submitCommand(tui, command, 0);
+    await submitCommand(tui, command, 0, { submitReceiptTimeoutMs: 20 });
 
     expect(argumentArrivedBeforeFocusTransfer).toBe(false);
     expect(suggestionReady).toBe(true);
     expect(submitted).toBe(true);
+  });
+
+  test('submitCommand retries Enter until the active input leaves the submitted command', async () => {
+    const command = '/compact marker';
+    let currentInput = '';
+    let enterAttempts = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data === '\r') {
+          enterAttempts++;
+          if (enterAttempts >= 2) currentInput = '';
+          return;
+        }
+        currentInput += data;
+      },
+      () => currentInput,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await submitCommand(tui, command, 0, { submitReceiptTimeoutMs: 20 });
+
+    expect(enterAttempts).toBe(2);
+    expect(currentInput).toBe('');
   });
 
   test('typeText retries the complete selector transaction when focus transfer is missed', async () => {
