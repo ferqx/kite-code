@@ -1,6 +1,7 @@
 import { afterAll, beforeAll } from 'bun:test';
 import { appendFileSync, readdirSync } from 'node:fs';
 import { readOsProcessStartIdentity } from '../../../scripts/runtime/process-start-identity';
+import { settleSameProcessResourceSample } from './fault-soak-resource-settle';
 
 interface ProcessResourceSample {
   rssBytes: number;
@@ -104,16 +105,19 @@ if (telemetryFile) {
   const lifecycleGroupNonce = process.env.KITE_FAULT_SOAK_LIFECYCLE_GROUP_NONCE ?? 'unbound';
   const processStartNonce = `${process.env.KITE_FAULT_SOAK_PROCESS_NONCE ?? 'unbound'}:${process.pid}`;
   const configuredDeadline = Number(process.env.KITE_FAULT_SOAK_LIFECYCLE_DEADLINE_MS);
+  const repeatCount = Number(process.env.KITE_FAULT_SOAK_REPEAT_COUNT ?? '1');
   const deadlineMs =
     Number.isInteger(configuredDeadline) && configuredDeadline > 0 ? configuredDeadline : 180_000;
-  beforeAll(() => {
+  beforeAll(async () => {
     sequence += 1;
     (globalThis as FaultSoakLifecycleGlobal).__KITE_FAULT_SOAK_LIFECYCLE_SEQUENCE__ = sequence;
+    await settleSameProcessResourceSample(repeatCount);
     startedAt = performance.now();
     before = sample();
   });
   afterAll(async () => {
-    await Bun.sleep(0);
+    await settleSameProcessResourceSample(repeatCount);
+    const after = sample();
     const descendants = descendantPids(process.pid);
     const record: ProcessResourceRecordV2 = {
       version: 2,
@@ -134,7 +138,7 @@ if (telemetryFile) {
         descendantPidsAfter: descendants ?? [],
       },
       before: before ?? sample(),
-      after: sample(),
+      after,
     };
     appendFileSync(telemetryFile, `${JSON.stringify(record)}\n`, { mode: 0o600 });
   });
