@@ -479,14 +479,15 @@ describe('TUI input helpers', () => {
         currentInput = '';
         setTimeout(() => {
           accepted = true;
-        }, 5);
+        }, 30);
       },
       () => currentInput,
     );
     tui.viewport = () => `❯ ${currentInput}`;
 
     await submitCurrentInput(tui, {
-      submitReceiptTimeoutMs: 20,
+      submitReceiptTimeoutMs: 10,
+      semanticReceiptTimeoutMs: 100,
       acceptWhen: () => accepted,
       requireAcceptWhen: true,
     });
@@ -510,6 +511,7 @@ describe('TUI input helpers', () => {
     await expect(
       submitCurrentInput(tui, {
         submitReceiptTimeoutMs: 20,
+        semanticReceiptTimeoutMs: 20,
         acceptWhen: () => false,
         requireAcceptWhen: true,
       }),

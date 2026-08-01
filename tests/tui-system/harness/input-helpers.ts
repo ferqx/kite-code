@@ -385,7 +385,7 @@ export async function submitUserMessage(
     delayMs?: number;
     requestText?: string;
     timeout?: number;
-    testTiming?: { submitReceiptTimeoutMs?: number };
+    testTiming?: { submitReceiptTimeoutMs?: number; semanticReceiptTimeoutMs?: number };
   },
 ): Promise<void> {
   const since = server.getRequestCount();
@@ -394,6 +394,8 @@ export async function submitUserMessage(
     ...options?.testTiming,
     acceptWhen: () => server.getRequestCount() > since,
     requireAcceptWhen: true,
+    semanticReceiptTimeoutMs:
+      options?.testTiming?.semanticReceiptTimeoutMs ?? options?.timeout ?? 10_000,
   });
   await waitForRequestMessage(server, options?.requestText ?? text, options?.timeout, {
     since,
@@ -411,6 +413,7 @@ export async function submitCurrentInput(
   tui: PtyProcess,
   options?: {
     submitReceiptTimeoutMs?: number;
+    semanticReceiptTimeoutMs?: number;
     acceptWhen?: (viewport: string) => boolean;
     requireAcceptWhen?: boolean;
   },
@@ -436,7 +439,15 @@ export async function submitCurrentInput(
     if (receipt === 'accepted') return;
     if (receipt === 'advanced') {
       if (!options?.requireAcceptWhen) return;
-      if (await waitForSemanticSubmissionReceipt(tui, timeoutMs, options.acceptWhen!)) return;
+      if (
+        await waitForSemanticSubmissionReceipt(
+          tui,
+          options.semanticReceiptTimeoutMs ?? timeoutMs,
+          options.acceptWhen!,
+        )
+      ) {
+        return;
+      }
       throw new Error(
         `PTY input left ${JSON.stringify(submitted.value)} but its required semantic receipt did not arrive`,
       );
@@ -453,6 +464,7 @@ export async function submitCommand(
   delayMs?: number,
   testTiming?: {
     submitReceiptTimeoutMs?: number;
+    semanticReceiptTimeoutMs?: number;
     acceptWhen?: (viewport: string) => boolean;
     requireAcceptWhen?: boolean;
   },

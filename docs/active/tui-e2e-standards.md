@@ -36,7 +36,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    调用方提供新 modal、request 或终态的语义 receipt，避免 Enter 重试穿透到刚出现的下一层交互。
    要求语义 receipt 时，只有原字段仍保持原值才允许重试 Enter；字段消失或改变后只能继续等待
    receipt，超时必须失败，不能向未知的新焦点再次发送控制键。命令需要持久事件等强回执时，
-   `submitCommand()` 必须把该 receipt 传入同一提交状态机。
+   `submitCommand()` 必须把该 receipt 传入同一提交状态机。Enter delivery 的短重试预算与 request、
+   持久事件等 semantic receipt 的场景预算必须分离；慢 CI 不能因输入框先清空而把后者缩短到
+   delivery budget。
    需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自

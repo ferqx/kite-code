@@ -60,7 +60,7 @@ describe('TUI PTY System — /compact persistence', () => {
           return targetSession !== undefined;
         },
         requireAcceptWhen: true,
-        submitReceiptTimeoutMs: 10_000,
+        semanticReceiptTimeoutMs: 10_000,
       });
       expect(targetSession).toBeDefined();
       expect(targetSession!.name).not.toBe(targetSession!.threadId);

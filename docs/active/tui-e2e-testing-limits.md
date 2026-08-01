@@ -98,7 +98,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     必须等待新 request 这一 semantic receipt；输入字段暂时消失或清空不能单独使提交成功，也会
     永久停止该提交动作的 Enter 重试，后续只能等待 receipt 或失败，不能穿透到新焦点。输入
     projection 可忽略内部 wrap whitespace，但必须保留 leading whitespace，并在 replacement 重试时
-    确定性删除已尝试字符与 bounded 隐藏空白，避免残留空格改变下一次输入类别。
+    确定性删除已尝试字符与 bounded 隐藏空白，避免残留空格改变下一次输入类别。Enter delivery
+    与 semantic receipt 使用独立 timeout；后者继续使用 request/event 场景预算。
 20. suite runner 默认在进程隔离和串行顺序不变的前提下运行所有选中 scenario，末尾一次性汇总失败；
     `KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required 的默认证据模式。
 
