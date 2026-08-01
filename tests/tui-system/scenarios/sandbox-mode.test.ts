@@ -45,4 +45,26 @@ describe('TUI PTY System — Sandbox Mode', () => {
     },
     TIMEOUT,
   );
+
+  test(
+    '/permissions reports that the development entry has no production admission',
+    async () => {
+      await typeText(tui, '/permissions');
+      tui.write('\r');
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Execution boundary: not admitted',
+        10000,
+      );
+
+      expect(screenContains(tui.viewport(), 'Execution boundary: not admitted')).toBe(true);
+      expect(
+        screenContains(
+          tui.viewport(),
+          'Filesystem/network/protected-path/worktree/capability status: unavailable',
+        ),
+      ).toBe(true);
+    },
+    TIMEOUT,
+  );
 });

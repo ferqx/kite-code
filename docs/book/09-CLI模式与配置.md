@@ -10,7 +10,7 @@ bun run agent resume --thread <thread-id>
 bun run agent trace <events.jsonl> --turn 1
 ```
 
-CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
+CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。CLI 不能把 release-controlled `executionBoundaryV1` 或 `networkBoundaryV1` 打开，只能用显式 false 收紧。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
 
 ## 9.2 Interaction mode
 
@@ -129,8 +129,9 @@ production 资格。
 
 `networkBoundaryV1` 关闭时 production network 收紧为 off，不能恢复旧 `allow_all`。开启时只
 使密封 boundary 内的 `web_fetch` 获得逐 invocation DNS/redirect/endpoint admission；Shell/Skill
-descendant 仍为 network-off，MCP transport 与 `tool_search` Provider readiness 在 Task 1B.8
-完成接入前拒绝。该 flag 不定义 allowlist、不提供 URL path isolation，也不改变当前空
-production platform 支持集。
+descendant 仍为 network-off。Remote HTTP MCP 还要求 App 签发绑定 boundary/run/profile/endpoint/
+invocation 的单次 transport receipt；当前 production TUI 没有该 controller，local stdio 也明确
+排除，因此 Provider readiness 继续拒绝。该 flag 不定义 allowlist、不提供 URL path isolation，
+也不改变当前空 production platform 支持集。
 
 上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManualV1` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。

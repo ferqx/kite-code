@@ -3,6 +3,7 @@ import type { McpConfigSourceKind } from '@/core/config/mcp-config';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
 import type { McpDiagnosticCode } from './diagnostics';
 import type { McpCapabilityRouteV1, RemoteMcpEgressInvocationPolicyV1 } from './egress-permit';
+import type { McpTransportInvocationBindingV1 } from './transport-boundary';
 
 export type McpProviderDirectoryStatus =
   | 'pending_approval'
@@ -48,6 +49,7 @@ export interface McpCapabilityInvocation {
   expectedRevision: string;
   arguments: Record<string, unknown>;
   remoteEgress?: RemoteMcpEgressInvocationPolicyV1;
+  transportBoundary?: McpTransportInvocationBindingV1;
   signal?: AbortSignal;
 }
 
@@ -62,5 +64,10 @@ export interface McpRuntimeProvider {
   /** Wait for an already-configured remote provider to become executable. */
   ensureProviderReady?(providerId: string, timeoutMs?: number, signal?: AbortSignal): Promise<void>;
   callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;
-  readResource(serverName: string, uri: string, signal?: AbortSignal): Promise<string>;
+  readResource(
+    serverName: string,
+    uri: string,
+    signal?: AbortSignal,
+    transportBoundary?: McpTransportInvocationBindingV1,
+  ): Promise<string>;
 }

@@ -85,9 +85,9 @@ production composition entrypoint 也尚未形成 native evidence，因此 outco
 Task 1B.4 的进程内网络控制器已能对 `web_fetch` 逐 invocation/hop 执行精确 host allowlist、
 DNS 实际地址检查、manual redirect 复查、endpoint revision 与 pinned socket，并在 dispatch 前
 持久化 allow/deny receipt。该控制器不依赖 proxy environment，但也不能约束任意 descendant。
-因此所有候选平台在 sealed boundary 下仍把 Shell/Skill 网络收紧为 off，并在 Task 1B.8 前关闭
-全部 MCP transport entrypoint 和 `tool_search` Provider readiness；没有 child-bypass native
-conformance，也没有平台因此进入支持集。
+因此所有候选平台在 sealed boundary 下仍把 Shell/Skill 网络收紧为 off。Remote HTTP MCP 已有
+逐 invocation transport/endpoint admission 实现，但当前 production TUI 未提供 receipt controller，
+local stdio 也因缺少 native child conformance 明确排除；没有平台因此进入支持集。
 
 Linux bubblewrap 的开发边界现已把 canonical Workspace 按 `workspace_write` 或 `read_only`
 分别投影为 rw/ro bind，并把逐 invocation runtime 显式 rw bind；runtime 清理在只暴露该 runtime

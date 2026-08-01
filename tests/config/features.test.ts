@@ -83,6 +83,18 @@ describe('feature flags', () => {
     }
   });
 
+  test('rejects CLI attempts to enable release-controlled execution boundaries', () => {
+    expect(() => parseArgs(['run', '--feature', 'executionBoundaryV1'])).toThrow(
+      'release-controlled',
+    );
+    expect(() => parseArgs(['run', '--feature', 'networkBoundaryV1=true'])).toThrow(
+      'release-controlled',
+    );
+    expect(parseArgs(['run', '--feature', 'networkBoundaryV1=false']).featureOverrides).toEqual({
+      networkBoundaryV1: false,
+    });
+  });
+
   test('keeps the legacy reviewer timeout until autoReviewV2 is enabled', () => {
     const config = {
       apiKey: '',

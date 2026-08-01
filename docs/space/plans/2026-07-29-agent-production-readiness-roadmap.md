@@ -4,7 +4,7 @@
 创建：2026-07-29
 优先级：P0
 初始论证基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
-当前执行复核基线：`e6e0ffb51115c3380a1dcc340dd1627b3bdd0970`（2026-08-01）
+当前执行复核基线：`e23b81b1087a7cdea5f4d9c5d419f5d040b67702`（2026-08-02）
 依赖：已批准的
 [`Agent 生产就绪与渐进发布控制 RFC`](../../design/2026-07-29-agent-production-readiness-rfc.md)
 替代：无
@@ -41,11 +41,12 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   唯一产生 `MS:1A-DONE`。该 milestone 不产生 production-qualified route 或
   production artifact；当前 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
   route 集合也为空。
-- 1B.0–1B.5 与 1C.1–1C.6 已完成；D-04 以空支持集关闭。1B.2/1B.3 的完成结论是
-  三平台候选均明确 `excluded`，不产生 production qualification；1B.6/1B.8 已 ready 但尚未
-  建立 execution binding，1C.7 仍在执行。
-  1C.8 与其他后续 milestone 均为 pending。1C.8 已开始不产生 milestone
-  的 pre-close 文档审计，但完成与 `MS:1C-DONE` 仍等待 1C.7 qualification artifact。
+- 1B.0–1B.5 与 1C.1–1C.8 已完成；D-04 以空支持集关闭。1B.2/1B.3 的完成结论是
+  三平台候选均明确 `excluded`，不产生 production qualification；1B.6–1B.8 已完成本地实现和
+  定向验证并保持 `in_progress`，等待约定的最终整体 Review。1B.9 仍等待 2A.0 和正式 conformance。
+- Phase 1C 已由默认分支 [Ubuntu qualification run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064)
+  的正式 artifact 与独立 verifier 收口；Task 1C.8 唯一产生 `MS:1C-DONE`。该 milestone 不生成
+  production artifact，其他后续 milestone 仍为 pending。
 
 ## 首发支持边界
 

@@ -61,17 +61,23 @@ bun run scripts/check-plan-execution-matrix.ts
 raw candidate artifact、明确 `excluded` 负向结论、D-04 空支持集不变、完成记录与 1B.5 激活
 基线，绿色 probe 不能被误写为 production qualification 或 `MS:1B-DONE`；1B.5 completion
 ratchet 锁定 shared evaluator、Registry/Harness/Sub-agent/native projection evidence、最终独立
-复核、空支持集、完成记录以及 1B.6/1B.8 仅 ready 未绑定的边界；1C.5 completion
-ratchet 则锁定激活基线、实现与 qualification commit、全绿 CI、execution binding、完成记录、
-1C.7 激活、计划及全局状态。上述门禁在 Pull Request quality job 中使用完整 Git
+复核、空支持集、完成记录以及 Revision 18 当时 1B.6/1B.8 仅 ready 未绑定的历史边界；Revision 20
+进一步锁定 1B.6–1B.8 的 `in_progress` binding、本地定向证据、D-09 Headless 只读与 MCP 负向
+开放边界，但在最终整体 Review 前不把这些 Task 或 `MS:1B-DONE` 写成完成；1C.5 completion
+ratchet 则锁定激活基线、实现与 qualification commit、全绿 CI、execution binding、完成记录及
+1C.7 激活历史；1C closure ratchet 进一步锁定默认分支 Ubuntu run 的 source identity、正式 artifact、
+7 case/56 probe、资源样本、72 条 actual Runtime ledger receipt、零 orphan/residual、canonical
+digest、1C.7/1C.8 完成 binding 与 `MS:1C-DONE`。上述门禁在 Pull Request quality job 中使用完整 Git
 历史验证 evidence commit 存在并可从 PR merge
 `HEAD` 到达；squash/rebase 合入后的 push 仍校验记录字段，但不把被历史重写替换的原 SHA 强制
 当作新主干祖先。`bun run check:docs` 已包含该门禁。
 
 Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
 case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的
-正式资源证据必须通过手动 `Runtime Resilience Qualification` workflow 在 Ubuntu 上运行至少
-8 轮，并以上传 artifact 中的 `status=passed` 作为关闭条件；`inconclusive` 不能按通过处理。
+正式资源证据已由手动 `Runtime Resilience Qualification` workflow 的 Ubuntu
+[run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064) 运行 8 轮并以独立
+verifier 收口；后续回归仍须保持上传 artifact 为 `status=passed`，`failed`/`inconclusive` 不能按
+通过处理。
 
 ## 生命周期
 

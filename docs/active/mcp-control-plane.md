@@ -17,6 +17,12 @@ identity、endpoint revision 和 Tool revision，不包含 URL、header 或 cred
 stdio 不进入 remote HTTP 内容门禁。该字段是只读状态，不提供在项目配置或 TUI 中降低分类的
 mutation。
 
+当 `AgentConfig` 携带 sealed execution boundary 时，App 还必须为 Supervisor 提供匹配
+Workspace/boundary/run/profile/network identity 的 transport admission controller。当前 TUI 只构造
+该 sealed identity，不签发 receipt；因此 remote HTTP connect/inventory/resource/Tool/OAuth 在
+Provider readiness 前稳定拒绝，local stdio 也始终关闭。普通开发配置继续使用既有 control plane；
+这条负向 production 组合不能由 OAuth recovery、Retry 或项目批准绕过。
+
 ## 生命周期与 generation
 
 - `disconnect(name)` 用于删除或禁用时先撤销 capability；reconnect 的 transport replacement 会保留最后成功 descriptor；

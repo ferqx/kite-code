@@ -17,6 +17,11 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
 import type { AgentPhase } from '../../protocol/events.js';
+import {
+  formatExecutionStatusV1,
+  formatUnadmittedExecutionStatusV1,
+  tryProjectAdmittedExecutionStatusV1,
+} from '../release/execution-status';
 import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
@@ -250,6 +255,12 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     [config.sandbox.enabled],
   );
   const sandboxBackend = sandboxRuntime.backend;
+  const executionStatusText = React.useMemo(() => {
+    const status = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+    return status
+      ? formatExecutionStatusV1(status)
+      : formatUnadmittedExecutionStatusV1(sandboxRuntime);
+  }, [config, sandboxRuntime]);
 
   // Reset conversation history and thread on new session
   React.useEffect(() => {
@@ -312,6 +323,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     mcpRuntimeProviderRef,
     sessionManager,
     workspace,
+    config,
   );
 
   // Skills loader: scan on mount
@@ -757,6 +769,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         });
       });
     },
+    executionStatusText,
   );
 
   // Stable reference — avoids re-creating the object on every render and causing

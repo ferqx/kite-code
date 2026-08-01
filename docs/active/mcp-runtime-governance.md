@@ -2,19 +2,21 @@
 
 状态：active
 读取时机：修改 MCP discovery、动态工具绑定、MCP policy、MCP 调用或结果归一化时。
-验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-tool-runner.test.ts tests/mcp-tool-policy.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/actions.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/verification.test.ts tests/golden/golden.test.ts tests/policies/approval-policy.test.ts tests/sandbox/network-boundary.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`（`tests/e2e/live/mcp/` 下的显式公网 smoke）、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-tool-runner.test.ts tests/mcp-tool-policy.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts tests/mcp-transport-boundary.test.ts tests/mcp-transport-boundary-concurrency.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/actions.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/verification.test.ts tests/golden/golden.test.ts tests/policies/approval-policy.test.ts tests/sandbox/network-boundary.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`（`tests/e2e/live/mcp/` 下的显式公网 smoke）、`bun run typecheck`、`bun run check:core-boundary`。
 
 MCP tool execution is available only when both `capabilityCatalogV1` and `mcpRuntimeBindingV1` are enabled. The ModelController records bindings before the model call; a dynamic model-visible name must match its binding, turn, descriptor revision and input schema. Runtime invokes `McpRuntimeProvider.callCapability({ capabilityId, expectedRevision, arguments, signal })`; the Supervisor façade rechecks effective Provider availability, and the connection manager atomically resolves the current descriptor, compares revision, validates the current schema and only then obtains the original Provider/Tool identity. Model-visible names are never parsed as execution identity.
 
 When a production execution capability surface is present, dynamic MCP disclosure and Runner dispatch also apply that surface before policy or approval. A descriptor whose declared/effective filesystem, network, or external-state effects exceed the independent `write`/`network` axes is omitted and rejected; when both remote network and local stdio MCP are closed, no MCP Tool binding is executable. Approval cannot widen this ceiling. The sealed no-process read-only fallback continues to omit every dynamic MCP binding.
 
-Task 1B.4 additionally closes every MCP transport entrypoint whenever a sealed execution boundary is
-present: dynamic Tool calls, resource/tool inventory, resource reads, and `tool_search` paths that could
-trigger Provider readiness are rejected by the Controller before Provider lookup/readiness. This is
-intentional fail-closed composition, not an assertion that local stdio or
-remote HTTP MCP already inherit the in-process `web_fetch` controller. Task 1B.8 must integrate each MCP
-transport operation with per-invocation DNS/redirect/endpoint admission and durable receipts before any
-of these entrypoints can reopen under a production boundary.
+Task 1B.8 adds a sealed transport identity to every MCP connection. Remote HTTP connect, discovery,
+inventory, resource, Tool and OAuth operations require a fresh admission bound to canonical Workspace,
+execution boundary/run/profile/network revisions, canonical endpoint/endpoint revision and invocation/
+tool-call identity. The SDK receives a custom fetch that rechecks DNS, private destinations, exact host
+allowlist and redirects per hop, pins the approved addresses and does not consume environment proxy
+variables. A sibling operation cannot reuse another operation's receipt. Local stdio remains explicitly
+excluded until a sandbox-backed transport factory and native child conformance exist. The production TUI
+currently has no receipt-signing App controller, so sealed MCP Provider readiness remains fail closed;
+the implementation is transport enforcement infrastructure, not a production availability claim.
 
 Remote HTTP Tool content has an additional boundary independent of transport admission, Tool effects
 approval and model Provider consent. `McpRuntimeProvider.getCapabilityRoute()` exposes only the redacted
@@ -48,18 +50,18 @@ invocation IDs and nonces; one sibling cannot consume, transfer or authorize ano
 Manager persists a redacted `mcp.egress_decided` receipt before dispatch; admitted dispatch is impossible
 without a recorder. The receipt contains digests, permit expiry and reason codes, never raw arguments,
 content or nonce. Tool Search and metadata discovery do not request a content
-permit. This gate does not satisfy Task 1B.8 and therefore does not reopen MCP under a sealed production
-network boundary.
+permit. This content gate and the transport boundary are independent; both must admit the same invocation
+before a remote Tool request is sent.
 
 `McpConnectionManagerOptions` 可注入 sealed run 的 protected-path V1 evaluator。local stdio
 connection 在 SDK transport construction 前，以 `execute` operation 校验 `cwd`（缺省为 evaluator
 绑定的 canonical Workspace）和 path-like executable；protected、Workspace 外、无效或 prompt-only
 路径都拒绝，且不会调用 transport factory。准入后 manager 把 canonical cwd 和 path-like
-executable identity 而非未解析 alias 交给 factory。在 Task 1B.8 提供 sealed argv pinning 前，
-注入 evaluator 的 stdio config 对任意非空 `args` 都在 factory 前 fail closed；不能通过 interpreter
-argv 把 protected 或 Workspace 外脚本交给 child。bare PATH command 的 runtime pinning、composition root 注入、child
-sandbox/network/process inheritance 与逐调用 transport boundary 仍属于 Task 1B.8；该 adapter
-不代表 local stdio 已获得 production admission，当前 sealed surface 继续关闭 local stdio MCP。
+executable identity 而非未解析 alias 交给 factory。注入 evaluator 的 stdio config 对任意非空
+`args` 都在 factory 前 fail closed；不能通过 interpreter argv 把 protected 或 Workspace 外脚本交给
+child。sealed transport identity 无条件关闭 local stdio，不能由 surface bit、审批或配置重新开启。
+bare PATH command pinning、真实 sandbox/network/process inheritance 与 native child conformance
+完成前，现有开发 adapter 不代表 local stdio 已获得 production admission。
 
 MCP list changes replace the immutable catalog snapshot. Existing bindings do not update in place and fail closed. P0 accepts object-root JSON Schema Draft-07 only; each schema is validated against an admission budget (256 KiB UTF-8 bytes, 32 levels depth, 4096 object nodes, 1024 properties) in a single traversal. Manager retains the complete raw Tool discovery, while the capability catalog contains only enabled and schema-valid Tools. Disabled, invalid, budget-exceeding or unsupported Tools remain diagnosable through the control snapshot but are not model-visible or executable; direct Manager calls also require a current available descriptor.
 

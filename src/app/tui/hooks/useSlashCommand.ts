@@ -100,6 +100,7 @@ export function useSlashCommand(
   onCompact?: (customInstructions?: string) => void,
   onContext?: () => void,
   onCompactReset?: () => void,
+  executionStatusText?: string,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -146,6 +147,10 @@ export function useSlashCommand(
           }
           break;
         case 'permissions': {
+          if (!action.mode && executionStatusText) {
+            dispatch({ type: 'LOCAL_TEXT', text: executionStatusText });
+            break;
+          }
           const target = resolveInteractionModeTarget(
             action.mode,
             currentInteractionMode,
@@ -240,6 +245,7 @@ export function useSlashCommand(
       onCompact,
       onContext,
       onCompactReset,
+      executionStatusText,
     ],
   );
 }

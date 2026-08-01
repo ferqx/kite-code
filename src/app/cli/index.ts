@@ -1,4 +1,9 @@
 import { resolve } from 'node:path';
+import {
+  formatExecutionStatusV1,
+  formatUnadmittedExecutionStatusV1,
+  tryProjectAdmittedExecutionStatusV1,
+} from '@/app/release/execution-status';
 import { type FeatureFlags, getFeatureFlags } from '@/core/config/features';
 import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
@@ -39,6 +44,7 @@ export interface ParsedArgs {
   tracePath?: string;
   traceTurn?: number;
   traceFormat?: 'text' | 'json';
+  executionStatus: boolean;
 }
 
 export async function main(): Promise<void> {
@@ -94,6 +100,13 @@ export async function main(): Promise<void> {
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
   });
+  if (args.executionStatus) {
+    const status = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+    console.log(
+      status ? formatExecutionStatusV1(status) : formatUnadmittedExecutionStatusV1(sandboxRuntime),
+    );
+    return;
+  }
   if (interactionMode === 'full' && !sandboxRuntime.available) {
     throw new Error('full mode requires an available workspace sandbox.');
   }
@@ -427,7 +440,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   const featureOverrides: Partial<FeatureFlags> = {};
   for (const feature of multi('--feature')) {
-    Object.assign(featureOverrides, parseFeatureOverride(feature));
+    const override = parseFeatureOverride(feature);
+    if (override.executionBoundaryV1 === true || override.networkBoundaryV1 === true) {
+      throw new Error(
+        `Feature flag '${feature.split('=', 1)[0]}' is release-controlled and cannot be enabled by the CLI.`,
+      );
+    }
+    Object.assign(featureOverrides, override);
   }
   return {
     command,
@@ -451,6 +470,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     tracePath: command === 'trace' ? argv[1] : undefined,
     traceTurn,
     traceFormat: optionalValue('--format') === 'json' ? 'json' : 'text',
+    executionStatus: argv.includes('--execution-status'),
   };
 }
 
@@ -520,6 +540,7 @@ Options:
   --mode <mode>          auto, write, or builder
   --skill <name>         Activate a skill (repeatable)
   --feature <name[=bool]> Temporarily override a registered feature flag (repeatable)
+  --execution-status     Print the effective production execution boundary and exit
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
   --approve              Approve tool call on resume

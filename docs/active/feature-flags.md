@@ -44,14 +44,15 @@ CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除
 边界注入独立的单次 permit resolver；缺失、格式错误、超过五分钟 TTL、过期、
 revision/argument/classification 不匹配、nonce replay 或 receipt 持久化失败全部 fail closed。
 该 flag 不继承 `providerDataPolicyV1` 的
-模型 route consent，也不解封 sealed boundary 下等待 Task 1B.8 的 MCP transport。
+模型 route consent，也不替代 sealed MCP transport 的逐 invocation receipt 与 endpoint admission。
 
 `sessionLoggingPolicyV1` 开启不等于允许正文。`content` 还要求 release artifact 明确允许且
 用户/管理员在用户配置显式 opt-in；project config 永远不能开启。关闭 flag 必须收紧为 `off`，
 不能回退到旧 content serializer。
 
 `executionBoundaryV1` 的用户、项目或 CLI 值只控制 rollout 请求，不能定义
-`ExecutionBoundaryV1`。production 的有效值固定为 release artifact ceiling 与 rollout 请求的
+`ExecutionBoundaryV1`。普通 CLI 直接用 `--feature` 把 `executionBoundaryV1` 或
+`networkBoundaryV1` 设为 true 会立即拒绝；production 的有效值固定为 release artifact ceiling 与 rollout 请求的
 逻辑与；user、project、CLI/App 的每个显式值也按逻辑与组合，全部未指定时使用默认关闭。任一
 为 `false` 都关闭，后层的 `true` 不能抬高前层或 artifact ceiling。普通
 `loadAgentConfig()` 不投影 boundary；只有 `loadProductionAgentConfig()` 接受 release-controlled
@@ -63,9 +64,10 @@ qualification registry。artifact 缺失/非法、Workspace 不匹配、实际�
 `networkBoundaryV1` 同样按 user、project、CLI/App 的显式值 deny-wins 组合；全部未指定时默认
 关闭。关闭不能恢复旧 `allow_all`：production capability surface 的 network 轴被关闭，sealed
 boundary 内的 `web_fetch` 在 DNS 前以 `network_off` 拒绝，Shell/Skill descendant 固定使用
-network-off，MCP transport 在 Task 1B.8 接入同一逐调用 admission 前整体拒绝。开启只允许
-`web_fetch` 使用 release boundary 的精确 host allowlist；每个 robots/content/redirect hop 独立
-解析、持久化决定并把 socket 固定到已批准 IP，不提供 URL path 级隔离，也不产生平台资格。
+network-off。开启允许 `web_fetch` 与具备 App receipt controller 的 remote HTTP MCP 使用 release
+boundary 的精确 host allowlist；每个请求/redirect hop 独立解析并把 socket 固定到已批准 IP。
+当前 production TUI 没有该 MCP controller，因此 remote transport 仍关闭；local stdio 无条件排除。
+该 flag 不提供 URL path 级隔离，也不产生平台资格。
 
 上下文压缩的 flag 术语（功能开关）真值如下：
 

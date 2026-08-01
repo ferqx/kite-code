@@ -72,3 +72,6 @@ Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到�
 ## 8.6 终端稳定性
 
 交互式 TUI 运行在终端主屏缓冲区中，不启用 Ink alternate screen；输出保留在终端原生 scrollback 中，退出时不恢复旧主屏。Ink 交互模式由真实的 stdin/stdout TTY 能力决定，CI 环境中的真实 PTY 仍保持输入与持续渲染；非 TTY 输入或输出不强制进入交互模式。关键质量边界还包括 DEC synchronized output、无应用内 viewport culling、静态内容引用稳定、Footer resize、输入光标和 mixed-script wrapping。Spinner 帧由 elapsed time 的纯函数确定；测试使用受控时间验证帧序列，不依赖真实事件循环恰好在 120ms 内调度。对应规则位于 `docs/active/tui-*.md`。
+`/permissions` 带参数时切换 interaction mode；无参数时只显示当前执行边界。未通过 production
+composition gate 的开发入口显示 `not admitted`，不会从普通配置推断 release capability。状态
+投影不包含 Workspace path、host 名、qualification proof 或 credential，也不产生授权。

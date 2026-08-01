@@ -93,6 +93,8 @@
       "sources": [
         "src/core/mcp/**",
         "src/core/skills/**",
+        "tests/mcp-transport-boundary.test.ts",
+        "tests/mcp-transport-boundary-concurrency.test.ts",
         ".github/workflows/mcp-native-keyring-smoke.yml",
         ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
@@ -141,6 +143,26 @@
       "documents": [
         "docs/active/verification-governance.md",
         "docs/active/six-concept-runtime-architecture.md"
+      ]
+    },
+    {
+      "id": "app-execution-boundary",
+      "sources": [
+        "src/app/workspace/**",
+        "src/app/release/execution-status.ts",
+        "src/app/cli/index.ts",
+        "src/app/tui/index.tsx",
+        "src/app/tui/hooks/useSlashCommand.ts",
+        "tests/workspace/**",
+        "tests/sandbox/status-projection.test.ts",
+        "tests/tui-system/scenarios/sandbox-mode.test.ts"
+      ],
+      "documents": [
+        "docs/active/execution-boundary.md",
+        "docs/active/execution-platform-support.md",
+        "docs/active/feature-flags.md",
+        "docs/book/05-工具系统与安全策略.md",
+        "docs/book/09-CLI模式与配置.md"
       ]
     },
     {

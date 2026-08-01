@@ -12,7 +12,11 @@ ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1–1B.4 已完成；�
 `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4` 的候选加固、fresh 三平台 artifact 与独立复核
 收口为明确 `excluded`。该负向完成不产生 production qualification 或 `MS:1B-DONE`。
 Task 1B.5 已以 `e6e0ffb51115c3380a1dcc340dd1627b3bdd0970` 的全绿 Required/Platform
-证据与独立复核完成；1B.6/1B.8 的依赖现已满足，但在实际开始前保持未绑定。完成证据见
+证据与独立复核完成。Task 1B.6–1B.8 已绑定到 `e23b81b1087a7cdea5f4d9c5d419f5d040b67702`
+并完成本地实现与定向验证，保持 `in_progress` 等待路线图约定的最终整体 Review；其中 foreground
+Headless CLI writer 按 D-09 保持只读，remote HTTP MCP 只完成强制 transport 基础设施，local
+stdio 与缺少 App receipt controller 的 production TUI 均保持关闭。1B.9 仍等待 2A.0 与最终
+platform/adversarial artifact conformance，因此不产生 `MS:1B-DONE`。既有完成证据见
 [Task 1B.1 完成记录](../execution/completed/2026-07-31-agent-production-execution-boundary.md)与
 [Task 1B.2/1B.3 完成记录](../execution/completed/2026-08-01-agent-production-platform-exclusions.md)、
 [Task 1B.4 完成记录](../execution/completed/2026-08-01-agent-production-network-boundary.md)与
@@ -351,9 +355,9 @@ Runtime/MCP/Skill 前失败。
 - [ ] allowlist 无 DNS/redirect/child bypass；
 - [ ] protected path 在所有本地执行路径统一生效；
 - [ ] sandbox/network controller 不可用时 fail closed；
-- [ ] 后台/并发/委派 writer 强制 worktree；
-- [ ] worktree 创建失败不触碰共享 checkout；
-- [ ] TUI/CLI 显示实际边界；
+- [x] 后台/并发/委派 writer 强制 worktree；
+- [x] worktree 创建失败不触碰共享 checkout；
+- [x] TUI/CLI 显示实际边界；
 - [x] 三平台 artifact conformance 有明确通过/不支持结果；
 - [ ] local stdio/remote HTTP MCP transport 使用同一有效 boundary revision；
 - [x] production shell 平台强制 process-tree 上限，不能执行的平台明确 unsupported；

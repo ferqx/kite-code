@@ -1,8 +1,8 @@
-# Agent 生产化 Phase 1C Task 1C.1–1C.6 完成记录
+# Agent 生产化 Phase 1C Task 1C.1–1C.8 完成记录
 
 状态：completed
 日期：2026-07-30
-更新：2026-08-01（补充 Task 1C.5）
+更新：2026-08-02（完成 Task 1C.7/1C.8）
 计划：
 [`2026-07-29-agent-production-runtime-resilience.md`](../../plans/2026-07-29-agent-production-runtime-resilience.md)
 执行者：`github:@ferqx`
@@ -12,7 +12,10 @@
 `1C.2-hardening/1C.3=d0bd571e6a937aac55850bcc09df6f41bf95ac99`；
 `1C.6=2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`；
 `1C.5=aa66e872f3206df9718493adbfef7445fb582a4f`；
-`1C.5 qualification=dfd8f209f89b4980b9c3905d3e73c166b33bea2b`
+`1C.5 qualification=dfd8f209f89b4980b9c3905d3e73c166b33bea2b`；
+`1C.7=23f8fe8427fc9c6bc3fa6c55cf0eef4892d915e3`；
+`1C.7 hardening=ff683b12cbe78f478a5a6b31be7627412e3ed372`；
+`1C.7 qualification/1C.8 baseline=e23b81b1087a7cdea5f4d9c5d419f5d040b67702`
 
 ## Task 1C.1
 
@@ -80,6 +83,29 @@
   lifecycle 负责。workspace trust 使用新增输出握手确认输入 handler 已就绪，并及时回收重启
   进程。
 
+## Task 1C.7
+
+- v2 bounded runner 固化 7 case、seed、8 轮/56 probe、per-case 与全局 deadline、逐 attempt
+  retained evidence、case-specific state/terminal/cleanup invariant、同进程资源趋势与真实 Runtime
+  budget ledger provenance；不完整 source identity 或 qualification 轮次 fail closed。
+- 手动 Ubuntu workflow 绑定 repository/head/ref/workflow ref/workflow SHA/run ID/attempt，在上传
+  artifact 前运行独立 verifier；verifier 从 retained attempts 重建 case、资源、cleanup、ledger
+  摘要与 canonical digest，不信任预聚合字段。
+- 默认分支首次正式 [run 30709529119](https://github.com/ferqx/kite-code/actions/runs/30709529119)
+  的失败 artifact 只作为诊断；没有登记为通过。后续加固没有放宽 32 MiB RSS 上限、8 轮或样本数。
+- 默认分支 `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` 的正式
+  [run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064) attempt 1
+  通过，artifact `runtime-resilience-qualification-30710906064`（ID `8822010140`）保留正式证据。
+
+## Task 1C.8
+
+- 指定 active 文档、Book 04/06/10、ADR-0055、documentation map、计划、roadmap、decision
+  register 与本完成记录共同收敛；未改写已接受 ADR 的历史结论。
+- Task 1C.7 的正式 artifact 通过来源身份、retained attempts、canonical digest、cleanup、资源
+  样本与 actual Runtime ledger receipt 的独立重建后，本 Task 唯一产生 `MS:1C-DONE`。
+- milestone 只关闭 Runtime resilience 阶段；Phase 2 Release Profile/Gate 尚未组合，不生成
+  production artifact 或 production-ready 结论。
+
 ## 验证
 
 - [Required run 30676359548](https://github.com/ferqx/kite-code/actions/runs/30676359548)：
@@ -101,6 +127,16 @@
 - `bun run check:docs-impact`、`bun run check:docs`、`bun run check:core-boundary`、
   `bun run typecheck`、Biome 和 `git diff --check`：通过；
 - pre-commit golden：10 pass。
+- 正式 Ubuntu qualification：`seed=1729`、`iterations=8`、7 case、56/56 probe；
+  long-runtime 的 RSS/active resource/FD/listener/handle 各 128 samples，其他每个 case 各 64
+  samples；72 条 `actual_runtime_ledger` receipts；所有 case orphan PID/worktree/residual path 为 0；
+- source identity：repository `ferqx/kite-code`、head/workflow SHA
+  `e23b81b1087a7cdea5f4d9c5d419f5d040b67702`、ref `refs/heads/main`、workflow ref
+  `ferqx/kite-code/.github/workflows/runtime-resilience-qualification.yml@refs/heads/main`、run ID
+  `30710906064`、attempt `1`；
+- artifact ZIP digest `sha256:f0c3ba98f85285c10919103bbc9f38029186a9e72b6a072893774dbfdf67fd4d`；
+  独立 verifier 重建 canonical digest
+  `sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694` 并通过。
 
 ## 回滚、风险与未完成项
 
@@ -108,6 +144,7 @@
   `legacy_unconfigured` snapshot 不允许热补余额。
 - `terminalOutcomeV1=false` 只回滚客户端 rollout；production 客户端不得把 unknown/block/
   budget/saturation 显示为完成。
-- soak/fault evidence 和 `MS:1C-DONE` 仍等待 1C.7 与 1C.8。
+- `MS:1C-DONE` 已由 Task 1C.8 产生；它不解除后续 Release Profile、evaluation、operations、
+  external cohort 或第三方安全评审 Gate。
 - Phase 2 Release Profile/Gate 尚未组合，本记录不生成 production artifact 或 production-ready
   结论。
