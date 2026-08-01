@@ -56,7 +56,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     还必须分别验证 Runtime Store thread ID 的删除与集合不变。
     Harness 的持久化探针只能通过 readonly SQLite 查询观察已经存在的 schema；数据库/WAL 正在
     重开、锁定或 schema 尚未出现时返回“尚未就绪”，由 scenario 的 bounded condition 继续轮询。
-    Linux 对暂时不可打开的目录型 DB 路径可能返回精确的 `SQLITE_IOERR: disk I/O error`，观察器
+    Linux 对暂时不可打开的目录型 DB 路径可能返回 `SQLITE_IOERR` 的扩展 code/errno 与精确的
+    `disk I/O error` message，观察器
     只在路径仍为目录时将该组合视为同一 readiness 状态；普通 DB 文件上的任意 `SQLITE_IOERR`
     仍立即抛出，不能被负断言误当成空 Store；
     持续异常最终以具名 timeout 失败。在轮询中调用

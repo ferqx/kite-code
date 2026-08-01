@@ -31,13 +31,16 @@ describe('TUI persisted Runtime observers', () => {
   test('classifies the Linux readonly directory error without hiding unrelated I/O faults', () => {
     expect(
       isPersistedRuntimeNotReady(
-        Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' }),
+        Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR_FSTAT' }),
         true,
       ),
     ).toBe(true);
     expect(
+      isPersistedRuntimeNotReady(Object.assign(new Error('disk I/O error'), { errno: 266 }), true),
+    ).toBe(true);
+    expect(
       isPersistedRuntimeNotReady(
-        Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' }),
+        Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR_FSTAT' }),
         false,
       ),
     ).toBe(false);

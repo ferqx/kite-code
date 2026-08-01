@@ -42,14 +42,20 @@ type PersistedSessionRow = {
 };
 
 export function isPersistedRuntimeNotReady(error: unknown, pathIsDirectory: boolean): boolean {
-  const code =
-    typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined;
+  const errorRecord = typeof error === 'object' && error !== null ? error : undefined;
+  const code = errorRecord && 'code' in errorRecord ? String(errorRecord.code) : undefined;
+  const errno =
+    errorRecord && 'errno' in errorRecord && typeof errorRecord.errno === 'number'
+      ? errorRecord.errno
+      : undefined;
   const message = error instanceof Error ? error.message : '';
+  const isIoError =
+    code?.startsWith('SQLITE_IOERR') === true || (errno !== undefined && (errno & 0xff) === 10);
   return (
     code === 'SQLITE_CANTOPEN' ||
     code === 'SQLITE_BUSY' ||
     code === 'SQLITE_LOCKED' ||
-    (pathIsDirectory && code === 'SQLITE_IOERR' && message === 'disk I/O error') ||
+    (pathIsDirectory && isIoError && message === 'disk I/O error') ||
     (code === 'SQLITE_ERROR' && message.includes('no such table'))
   );
 }
