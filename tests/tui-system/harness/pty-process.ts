@@ -630,7 +630,7 @@ export async function waitForTuiReady(
     () => {
       const viewport = tui.viewport();
       if (readiness === 'main') {
-        const input = activeInput(viewport);
+        const input = activeInput(tui.inputViewport());
         return (
           input?.kind === 'main' &&
           input.value === '' &&
