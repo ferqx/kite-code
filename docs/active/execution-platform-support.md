@@ -74,8 +74,9 @@ shell descendant filesystem inheritance；executor 还使用逐 invocation、`07
 fail closed。profile 还拒绝读取未列为 runtime
 dependency 的 `/private/etc/hosts`。这些只是
 未固定的开发 evidence。当前候选 profile 还从共享 protected-path 定义生成大小写不敏感的
-anchored regex，并由 native smoke 对 `.GIT/config` read 与 `.ENV.TEST` write 做负向验证；该新增
-场景在绑定当前实现提交的非嵌套 macOS workflow 通过前仍不能成为 qualification evidence。
+anchored regex，并由 native smoke 对 `.GIT/config` read 与 `.ENV.TEST` write 做负向验证；绑定
+`e6e0ffb51115c3380a1dcc340dd1627b3bdd0970` 的 Platform Capability Probe run `30705493919`
+已通过该候选场景。这仍是 raw candidate evidence，不是 release-pinned production qualification。
 Seatbelt 没有实现并
 证明每次 Shell invocation 的硬 process-tree 数量上限，forked Skill/local stdio MCP 与两个
 production composition entrypoint 也尚未形成 native evidence，因此 outcome 仍必须是

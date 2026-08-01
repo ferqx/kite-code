@@ -438,6 +438,12 @@ const phase1BoundaryCommit = '3ada4246b149444ce27ed713cd5425090367c1fc';
 const phase1PlatformExclusionCommit = 'c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4';
 const phase1PlatformExclusionCompletionPath =
   'docs/space/execution/completed/2026-08-01-agent-production-platform-exclusions.md';
+const phase1ProtectedPathInitialCommit = '138fee19d7ce9f9622f1e32ea1d7cfdd2076bf8c';
+const phase1ProtectedPathCommit = '512e2c3582bdd2bea2e7f670213f7616f545084c';
+const phase1ProtectedPathSeatbeltCommit = '77db1830771aaf65116fb8802892d74c4bcbd7dc';
+const phase1ProtectedPathQualification = 'e6e0ffb51115c3380a1dcc340dd1627b3bdd0970';
+const phase1ProtectedPathCompletionPath =
+  'docs/space/execution/completed/2026-08-01-agent-production-protected-path.md';
 const phase1NetworkCommit = 'bc03f77a3dac2962cd3158d3413f292b8388a0d8';
 const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
 const phase1RemoteMcpCommit = '545161a7103365038989c6a935a216c5bd5fc7e8';
@@ -448,6 +454,7 @@ const phase1FailureConformanceQualification = 'dfd8f209f89b4980b9c3905d3e73c166b
 const phase1RuntimeCompletionPath =
   'docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md';
 const phase1PrivacyPlan = sources.get('1A') ?? '';
+const phase1ExecutionPlan = sources.get('1B') ?? '';
 const phase1RuntimePlan = sources.get('1C') ?? '';
 const phase1RuntimeCompletion = readFileSync(join(root, phase1RuntimeCompletionPath), 'utf8');
 const expectedPlanStates = new Map([
@@ -613,11 +620,16 @@ if (!phase1ProtectedPathBinding) {
   if (cells[2]?.replaceAll('`', '') !== phase1PlatformExclusionCommit) {
     fail('1B.5: binding must use the completed platform-exclusion baseline');
   }
-  if (cells[4]?.replaceAll('`', '') !== 'in_progress') {
-    fail('1B.5: protected-path execution binding must be in_progress');
+  if (cells[4]?.replaceAll('`', '') !== 'completed') {
+    fail('1B.5: protected-path execution binding must be completed');
   }
-  if (cells[6] !== '—') {
-    fail('1B.5: in-progress binding must not claim a completion record');
+  if (cells[6]?.replaceAll('`', '') !== phase1ProtectedPathCompletionPath) {
+    fail(`1B.5: completionRecordPath must be ${phase1ProtectedPathCompletionPath}`);
+  }
+}
+for (const taskId of ['1B.6', '1B.8']) {
+  if (decisionRegister.split('\n').some((line) => line.startsWith(`| ${taskId} |`))) {
+    fail(`${taskId}: ready Task must remain unbound until implementation actually starts`);
   }
 }
 
@@ -716,14 +728,14 @@ const phase1ExecutionPlanIndexRow = plansIndex
     ),
   );
 if (
-  !phase1ExecutionPlanIndexRow?.includes('Task 1B.0–1B.4 completed') ||
+  !phase1ExecutionPlanIndexRow?.includes('Task 1B.0–1B.5 completed') ||
   !phase1ExecutionPlanIndexRow.includes('1B.2/1B.3 以三平台 `excluded` 负向收口') ||
-  !phase1ExecutionPlanIndexRow.includes('Task 1B.5 in progress') ||
+  !phase1ExecutionPlanIndexRow.includes('1B.6/1B.8 ready 且未绑定') ||
   !phase1ExecutionPlanIndexRow.includes(
-    '../execution/completed/2026-08-01-agent-production-platform-exclusions.md',
+    '../execution/completed/2026-08-01-agent-production-protected-path.md',
   )
 ) {
-  fail('plans/index.md: Phase 1B row must record platform exclusions and 1B.5 activation');
+  fail('plans/index.md: Phase 1B row must record 1B.5 completion and ready/unbound next Tasks');
 }
 
 const phase1FailureConformanceBinding = decisionRegister
@@ -770,10 +782,13 @@ if (
 if (
   !/1C\.1–1C\.6 已完成/.test(roadmap) ||
   !/1B\.2\/1B\.3 的完成结论是\s+三平台候选均明确 `excluded`/.test(roadmap) ||
-  !/1B\.5 与 1C\.7 正在执行/.test(roadmap) ||
+  !/1B\.0–1B\.5 与 1C\.1–1C\.6 已完成/.test(roadmap) ||
+  !/1B\.6\/1B\.8 已 ready 但尚未\s+建立 execution binding，1C\.7 仍在执行/.test(roadmap) ||
   !/1C\.8 与其他后续 milestone 均为 pending/.test(roadmap)
 ) {
-  fail('roadmap must record 1B.2/1B.3 excluded completion, 1B.5/1C.7 active, and 1C.8 pending');
+  fail(
+    'roadmap must record 1B.5 completion, ready/unbound next Tasks, 1C.7 active, and 1C.8 pending',
+  );
 }
 const phase1FailureConformanceRevision = decisionRegister
   .split('\n')
@@ -875,11 +890,14 @@ for (const [description, pattern] of [
   }
 }
 if (
-  !new RegExp(`^当前执行复核基线：\`${phase1PlatformExclusionCommit}\`（2026-08-01）$`, 'm').test(
-    roadmap,
-  )
+  !new RegExp(
+    `^当前执行复核基线：\`${phase1ProtectedPathQualification}\`（2026-08-01）$`,
+    'm',
+  ).test(roadmap)
 ) {
-  fail('roadmap must bind the current execution review baseline to the platform-exclusion commit');
+  fail(
+    'roadmap must bind the current execution review baseline to the protected-path qualification head',
+  );
 }
 
 const phase1PrivacyRevision = decisionRegister
@@ -1181,6 +1199,128 @@ if (phase1PlatformExclusionRevision.length !== 1) {
       fail(`decision register Revision 17 must identify ${evidence}`);
     }
   }
+}
+
+const phase1ProtectedPathCompletion = readFileSync(
+  join(root, phase1ProtectedPathCompletionPath),
+  'utf8',
+);
+if (!/^状态：completed$/m.test(phase1ProtectedPathCompletion)) {
+  fail(`${phase1ProtectedPathCompletionPath} must be completed`);
+}
+for (const evidence of [
+  phase1PlatformExclusionCommit,
+  phase1ProtectedPathInitialCommit,
+  phase1ProtectedPathCommit,
+  phase1ProtectedPathSeatbeltCommit,
+  phase1ProtectedPathQualification,
+  'accepted_empty_support_set',
+  'Required run 30705493952',
+  'Platform Capability Probe run 30705493919',
+  'artifact id `8820200695`',
+  'sha256:6bc8332393bd10da97170cc4d314d66e21e0f005b751da16cd9a649361ee2559',
+  'sha256:48a304768ae04b501c8609f3ee3f7e5b1de7ad9cbd7c71a4fe733c654d2bcde3',
+]) {
+  if (!phase1ProtectedPathCompletion.includes(evidence)) {
+    fail(`${phase1ProtectedPathCompletionPath} must identify ${evidence}`);
+  }
+}
+for (const heading of [
+  'Gate 决策',
+  '实际 commit / artifact',
+  '结论',
+  '验证命令与结果',
+  '未运行项',
+  '风险与限制',
+  '与计划偏差',
+  'Active 文档与 ADR 收敛',
+]) {
+  if (!new RegExp(`^## ${heading}$`, 'm').test(phase1ProtectedPathCompletion)) {
+    fail(`${phase1ProtectedPathCompletionPath} must include ## ${heading}`);
+  }
+}
+for (const command of [
+  'bun test tests/policies/protected-path.test.ts tests/sandbox.test.ts tests/sandbox-executor.test.ts tests/subagent-runner.test.ts tests/mcp-manager.test.ts',
+  'bun test tests/tool-definitions.test.ts tests/tools.test.ts tests/shell-exec.test.ts',
+  'bun run test:tui:harness',
+  'CI=true bun run scripts/run-tui-system-tests.ts long-message input compact-persistence',
+  'bun run typecheck',
+  'bun run check:core-boundary',
+  'bun run check:docs-impact',
+  'bun run check:docs',
+  'git diff --check',
+]) {
+  if (!phase1ProtectedPathCompletion.includes(`\`${command}\``)) {
+    fail(`${phase1ProtectedPathCompletionPath} must record command: ${command}`);
+  }
+}
+if (!/最终独立只读复核结论为 GO，P0\/P1\/P2 均为 0/.test(phase1ProtectedPathCompletion)) {
+  fail(`${phase1ProtectedPathCompletionPath} must record final GO with no P0/P1/P2`);
+}
+if (
+  /productionSupported\s*[:=]\s*true/.test(phase1ProtectedPathCompletion) ||
+  phase1ProtectedPathCompletion.includes('accepted_non_empty_support_set')
+) {
+  fail(`${phase1ProtectedPathCompletionPath} must not claim positive production qualification`);
+}
+const protectedPathMilestoneMentions = [...phase1ProtectedPathCompletion.matchAll(/`MS:1B-DONE`/g)]
+  .length;
+const protectedPathNegativeMilestoneMentions = [
+  ...phase1ProtectedPathCompletion.matchAll(/不产生\s+`MS:1B-DONE`/g),
+].length;
+if (protectedPathMilestoneMentions !== 1 || protectedPathNegativeMilestoneMentions !== 1) {
+  fail(`${phase1ProtectedPathCompletionPath} must only mention MS:1B-DONE as not produced`);
+}
+if (
+  !phase1ExecutionPlan.includes(
+    `Task 1B.5 已以 \`${phase1ProtectedPathQualification}\` 的全绿 Required/Platform`,
+  ) ||
+  !phase1ExecutionPlan.includes(
+    '[Task 1B.5 完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md)',
+  )
+) {
+  fail('1B.5: execution-isolation plan must record completion and completion record');
+}
+if (!phase1ExecutionPlan.includes('- [ ] protected path 在所有本地执行路径统一生效；')) {
+  fail('1B: phase-level all-local-paths acceptance must remain open until later Tasks complete');
+}
+if (!roadmap.includes(`当前执行复核基线：\`${phase1ProtectedPathQualification}\``)) {
+  fail('roadmap must advance the reviewed execution baseline to the 1B.5 qualification head');
+}
+const phase1ProtectedPathRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 18 |'));
+if (phase1ProtectedPathRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 18 exactly once; found ${phase1ProtectedPathRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '完成 1B.5 shared protected-path policy',
+    '1B.6/1B.8 变为 ready 但保持未绑定',
+    phase1ProtectedPathInitialCommit,
+    phase1ProtectedPathCommit,
+    phase1ProtectedPathQualification,
+    'Required run 30705493952',
+    '六个 job 全部通过',
+    'Platform Capability Probe run 30705493919',
+    '三平台全绿',
+    '../execution/completed/2026-08-01-agent-production-protected-path.md',
+    '无剩余 P0/P1/P2',
+    '不产生 `MS:1B-DONE`',
+  ]) {
+    if (!phase1ProtectedPathRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 18 must identify ${evidence}`);
+    }
+  }
+}
+for (const commit of [
+  phase1ProtectedPathInitialCommit,
+  phase1ProtectedPathCommit,
+  phase1ProtectedPathSeatbeltCommit,
+  phase1ProtectedPathQualification,
+]) {
+  requireReachableCommit(commit, '1B.5');
 }
 
 const phase1NetworkCompletionPath = resolve(

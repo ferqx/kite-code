@@ -290,7 +290,7 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1B.2 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-08-01-agent-production-platform-exclusions.md` | `2026-07-31` |
 | 1B.3 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-08-01-agent-production-platform-exclusions.md` | `2026-07-31` |
 | 1B.4 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-08-01-agent-production-network-boundary.md` | `2026-07-31` |
-| 1B.5 | `github:@ferqx` | `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-08-01` |
+| 1B.5 | `github:@ferqx` | `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-08-01-agent-production-protected-path.md` | `2026-08-01` |
 | 1C.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.2 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.4 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
@@ -299,8 +299,8 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1C.6 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-31` |
 | 1C.7 | `github:@ferqx` | `dfd8f209f89b4980b9c3905d3e73c166b33bea2b` | `codex/agent-production-readiness-docs` | `in_progress` | — | — | `2026-08-01` |
 
-除已完成的 1A.1–1A.7、1B.0–1B.4、1C.1–1C.6 和已激活的
-1B.5/1C.7 外，其他非 Phase 0 Task 不创建 execution binding。
+除已完成的 1A.1–1A.7、1B.0–1B.5、1C.1–1C.6 和已激活的 1C.7 外，其他非 Phase 0 Task
+尚未创建 execution binding。1B.6/1B.8 依赖已满足，但只能在实际开始时绑定。
 
 ## Revision history
 
@@ -323,3 +323,4 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 15 | 2026-08-01 | 以 Phase 1A 收口后的全绿基线激活 1C.5 failure-mode conformance | `4a64837855b76c8c71e956b19d04ad67d77b18c9`、[Required run 30671609567](https://github.com/ferqx/kite-code/actions/runs/30671609567) 五个 job 全部通过；同 head 三个原生 workflow 全部通过 |
 | 16 | 2026-08-01 | 完成 1C.5 failure-mode conformance 并激活 1C.7 soak/fault evidence；保持 1C.8 pending，不产生 `MS:1C-DONE` | `aa66e872f3206df9718493adbfef7445fb582a4f`、qualification/1C.7 baseline `dfd8f209f89b4980b9c3905d3e73c166b33bea2b`、[Required run 30676359548](https://github.com/ferqx/kite-code/actions/runs/30676359548) 五个 job 全部通过、同 head 三个原生 workflow 全部通过、独立复核 GO 且 P0/P1/P2 均为 0 |
 | 17 | 2026-08-01 | 以三平台明确排除负向完成 1B.2/1B.3，并激活 1B.5；保持 D-04 空支持集且不产生 `MS:1B-DONE` | `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4`、[Platform Capability Probe run 30693651821](https://github.com/ferqx/kite-code/actions/runs/30693651821)、[Required run 30693651834](https://github.com/ferqx/kite-code/actions/runs/30693651834) 六个 job 全部通过、[完成记录](../execution/completed/2026-08-01-agent-production-platform-exclusions.md)、两路独立复核最终 GO 且无剩余 P0/P1/P2 |
+| 18 | 2026-08-01 | 完成 1B.5 shared protected-path policy；1B.6/1B.8 变为 ready 但保持未绑定；D-04 空支持集不变且不产生 `MS:1B-DONE` | `138fee19d7ce9f9622f1e32ea1d7cfdd2076bf8c`、`512e2c3582bdd2bea2e7f670213f7616f545084c`、qualification head `e6e0ffb51115c3380a1dcc340dd1627b3bdd0970`、[Required run 30705493952](https://github.com/ferqx/kite-code/actions/runs/30705493952) 六个 job 全部通过、[Platform Capability Probe run 30705493919](https://github.com/ferqx/kite-code/actions/runs/30705493919) 三平台全绿、[完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md)、两路独立复核最终 GO 且无剩余 P0/P1/P2 |

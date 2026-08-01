@@ -59,7 +59,9 @@ bun run scripts/check-plan-execution-matrix.ts
 与 1A.7 completion ratchet 还会锁定计划验收、注册表状态、roadmap 基线、decision revision、
 独立复核结论和 production qualification 限制；1B.2/1B.3 completion ratchet 还会锁定三平台
 raw candidate artifact、明确 `excluded` 负向结论、D-04 空支持集不变、完成记录与 1B.5 激活
-基线，绿色 probe 不能被误写为 production qualification 或 `MS:1B-DONE`；1C.5 completion
+基线，绿色 probe 不能被误写为 production qualification 或 `MS:1B-DONE`；1B.5 completion
+ratchet 锁定 shared evaluator、Registry/Harness/Sub-agent/native projection evidence、最终独立
+复核、空支持集、完成记录以及 1B.6/1B.8 仅 ready 未绑定的边界；1C.5 completion
 ratchet 则锁定激活基线、实现与 qualification commit、全绿 CI、execution binding、完成记录、
 1C.7 激活、计划及全局状态。上述门禁在 Pull Request quality job 中使用完整 Git
 历史验证 evidence commit 存在并可从 PR merge

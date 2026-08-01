@@ -11,10 +11,12 @@ Task 1B.0 已完成：三平台原生 probe 均为 `excluded`、`productionSuppo
 ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1–1B.4 已完成；其中 1B.2/1B.3 以
 `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4` 的候选加固、fresh 三平台 artifact 与独立复核
 收口为明确 `excluded`。该负向完成不产生 production qualification 或 `MS:1B-DONE`。
-Task 1B.5 已基于同一提交激活，其余 Task 按依赖保持未绑定。完成证据见
+Task 1B.5 已以 `e6e0ffb51115c3380a1dcc340dd1627b3bdd0970` 的全绿 Required/Platform
+证据与独立复核完成；1B.6/1B.8 的依赖现已满足，但在实际开始前保持未绑定。完成证据见
 [Task 1B.1 完成记录](../execution/completed/2026-07-31-agent-production-execution-boundary.md)与
 [Task 1B.2/1B.3 完成记录](../execution/completed/2026-08-01-agent-production-platform-exclusions.md)、
-[Task 1B.4 完成记录](../execution/completed/2026-08-01-agent-production-network-boundary.md)，规范 binding 见
+[Task 1B.4 完成记录](../execution/completed/2026-08-01-agent-production-network-boundary.md)与
+[Task 1B.5 完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md)，规范 binding 见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
