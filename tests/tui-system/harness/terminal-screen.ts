@@ -20,6 +20,11 @@ export interface HeadlessTerminalScreen {
   resize(cols: number, rows: number): Promise<void>;
   /** Text currently visible in the terminal viewport. */
   viewport(): string;
+  /**
+   * Viewport projection for harness-owned input actions, whose cursor remains
+   * at input end. Removes CtrlSafeTextInput's synthetic inverse-space cursor.
+   */
+  inputViewport(): string;
   /** Text retained by the terminal buffer, including scrollback. */
   scrollback(): string;
   /** Wait until all queued PTY bytes and resizes have been parsed. */
@@ -36,23 +41,64 @@ const MAX_RETAINED_TERMINAL_FRAMES = 4096;
 declare const TERMINAL_FRAME_MARK: unique symbol;
 export type TerminalFrameMark = number & { readonly [TERMINAL_FRAME_MARK]: true };
 
-function bufferText(terminal: Terminal, range: { start: number; end: number }): string {
+function bufferText(
+  terminal: Terminal,
+  range: { start: number; end: number },
+  options: { omitPromptCursor?: boolean } = {},
+): string {
   const buffer = terminal.buffer.active;
-  const logicalLines: string[] = [];
+  const logicalLines: Array<{ text: string; physicalRows: number[] }> = [];
 
   for (let index = range.start; index < range.end; index++) {
     const line = buffer.getLine(index);
     if (!line) continue;
     const text = line.translateToString(true);
     if (line.isWrapped && logicalLines.length > 0) {
-      logicalLines[logicalLines.length - 1] += text;
+      logicalLines[logicalLines.length - 1]!.text += text;
+      logicalLines[logicalLines.length - 1]!.physicalRows.push(index);
     } else {
-      logicalLines.push(text);
+      logicalLines.push({ text, physicalRows: [index] });
     }
   }
 
-  while (logicalLines.length > 0 && logicalLines.at(-1) === '') logicalLines.pop();
-  return logicalLines.join('\n');
+  if (options.omitPromptCursor) {
+    let promptLineIndex = -1;
+    for (let index = logicalLines.length - 1; index >= 0; index--) {
+      if (/^\s*❯(?:\s|$)/.test(logicalLines[index]!.text)) {
+        promptLineIndex = index;
+        break;
+      }
+    }
+
+    if (promptLineIndex >= 0) {
+      let inputEndLineIndex = promptLineIndex;
+      for (let index = promptLineIndex + 1; index < logicalLines.length; index++) {
+        const trimmed = logicalLines[index]!.text.trim();
+        if (/^[─━═╭╰┌└]/.test(trimmed) || /^(?:mock-model|\S+\s+·)/.test(trimmed)) break;
+        inputEndLineIndex = index;
+      }
+
+      for (let index = inputEndLineIndex; index >= promptLineIndex; index--) {
+        const projectionLine = logicalLines[index]!;
+        const finalPhysicalRow = projectionLine.physicalRows.at(-1);
+        const finalLine =
+          finalPhysicalRow === undefined ? undefined : buffer.getLine(finalPhysicalRow);
+        if (!projectionLine.text.endsWith(' ') || !finalLine) continue;
+        for (let column = terminal.cols - 1; column >= 0; column--) {
+          const cell = finalLine.getCell(column);
+          if (!cell || cell.getCode() === 0) continue;
+          if (cell.getChars() === ' ' && cell.isInverse()) {
+            projectionLine.text = projectionLine.text.slice(0, -1);
+          }
+          break;
+        }
+        break;
+      }
+    }
+  }
+
+  while (logicalLines.length > 0 && logicalLines.at(-1)?.text === '') logicalLines.pop();
+  return logicalLines.map((line) => line.text).join('\n');
 }
 
 /**
@@ -133,6 +179,17 @@ export function createHeadlessTerminalScreen(
     },
     viewport() {
       return viewport();
+    },
+    inputViewport() {
+      const buffer = terminal.buffer.active;
+      return bufferText(
+        terminal,
+        {
+          start: buffer.viewportY,
+          end: Math.min(buffer.viewportY + terminal.rows, buffer.length),
+        },
+        { omitPromptCursor: true },
+      );
     },
     scrollback() {
       return bufferText(terminal, { start: 0, end: terminal.buffer.active.length });

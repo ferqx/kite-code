@@ -97,7 +97,11 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     新 request 或新 modal 出现时停止，避免同一个重试跨过焦点边界执行下一层操作。普通模型消息
     必须等待新 request 这一 semantic receipt；输入字段暂时消失或清空不能单独使提交成功，也会
     永久停止该提交动作的 Enter 重试，后续只能等待 receipt 或失败，不能穿透到新焦点。输入
-    projection 可忽略内部 wrap whitespace，但必须保留 leading whitespace，并在 replacement 重试时
+    projection 可忽略内部 wrap whitespace，但必须保留 leading whitespace。`CtrlSafeTextInput` 在
+    输入末尾绘制的 inverse-space cursor 是 presentation cell；共享 helper 只在自己拥有且保持 end-cursor
+    的输入动作中，通过 cell 属性从专用 input projection 剔除它。该 projection 支持 terminal auto-wrap
+    和 Ink continuation row，但不声称区分任意光标位置上的真实 inverse blank；普通 `viewport()` 仍
+    保留用户实际看到的画面。replacement 重试必须
     确定性删除已尝试字符与 bounded 隐藏空白，避免残留空格改变下一次输入类别。Enter delivery
     与 semantic receipt 使用独立 timeout；后者继续使用 request/event 场景预算。
 20. suite runner 默认在进程隔离和串行顺序不变的前提下运行所有选中 scenario，末尾一次性汇总失败；

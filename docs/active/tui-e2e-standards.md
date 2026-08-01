@@ -42,11 +42,14 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自
-   VT parser 的当前
-   `viewport()`，不得把 raw transcript 中已经被 Ink 擦除的历史帧当作输入成功，也不得以整个
+   VT parser 的当前 input projection，不得把 raw transcript 中已经被 Ink 擦除的历史帧当作输入成功，也不得以整个
    viewport 的任意文本命中代替活动字段。Harness 必须分别提取主 `❯` 输入、session 搜索、slash/file
    query 和 first-run block-cursor 字段，并对完整归一化字段值做等值验证；长输入同样不能退化为历史
-   文本或尾部探针命中。内部换行/终端 wrap 可以归一化，但前导空白不能被删除：它会把普通消息改义，
+   文本或尾部探针命中。共享输入 helper 拥有的动作保持光标位于输入末尾；其主输入 projection 必须
+   根据 VT cell 属性剔除 `CtrlSafeTextInput` 绘制的 synthetic inverse-space end cursor，并覆盖 terminal
+   auto-wrap 与 Ink continuation row。该 projection 不是任意光标位置的通用编辑器状态解析器。它不能
+   把视觉光标当作逻辑空格，也不能因此删除用户真实输入的 leading blank。内部换行/终端 wrap 可以
+   归一化，但前导空白不能被删除：它会把普通消息改义，
    也会把 `/command` 变成普通文本。replacement 输入重试必须按已尝试字符确定性回滚到空基线，并
    额外清除 VT 投影可能裁掉的 bounded whitespace；不能仅因输入投影看起来为空就停止回滚。
    `typeText()` 默认要求空输入语义：主输入或搜索框若已有残留，先恢复为空再

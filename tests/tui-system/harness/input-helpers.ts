@@ -145,7 +145,7 @@ async function waitForInputEcho(
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     await tui.settleScreen();
-    const current = activeInput(tui.viewport());
+    const current = activeInput(tui.inputViewport());
     if (
       current?.value === expectedValue &&
       (current.kind === expectedKind || (allowFocusTransfer && expectedValue.length > 0))
@@ -172,7 +172,7 @@ async function clearActiveInputTo(
   let previousValue: string | undefined;
   while (Date.now() - start < effectiveTimeout && backspaces <= INPUT_RETRY_LIMIT) {
     await tui.settleScreen();
-    const current = activeInput(tui.viewport());
+    const current = activeInput(tui.inputViewport());
     if (!current) {
       await sleep(tuiPollInterval(25));
       continue;
@@ -218,7 +218,7 @@ export async function typeText(
     typeof delayOrOptions === 'number' ? { delayMs: delayOrOptions } : delayOrOptions;
   const delayMs = options.delayMs ?? 40;
   await tui.settleScreen();
-  let initial = activeInput(tui.viewport());
+  let initial = activeInput(tui.inputViewport());
   if (!initial) {
     throw new Error('Cannot type text because no active input field is visible');
   }
@@ -287,7 +287,7 @@ export async function typeText(
           delayMs: options.testTiming?.retryBackspaceDelayMs,
         });
         await tui.settleScreen();
-        initial = activeInput(tui.viewport()) ?? initial;
+        initial = activeInput(tui.inputViewport()) ?? initial;
         if (initial.value.length > 0) {
           initial = await clearActiveInputTo(tui, '', initial.kind, options.testTiming);
         }
@@ -422,7 +422,7 @@ export async function submitCurrentInput(
     throw new Error('submitCurrentInput requires acceptWhen when requireAcceptWhen is true');
   }
   await tui.settleScreen();
-  const submitted = activeInput(tui.viewport());
+  const submitted = activeInput(tui.inputViewport());
   if (!submitted || submitted.value.length === 0) {
     throw new Error('Cannot submit because no non-empty active input field is visible');
   }
@@ -504,7 +504,7 @@ async function waitForInputSubmissionReceipt(
     if (tui.exited) return 'accepted';
     const viewport = tui.viewport();
     if (acceptWhen?.(viewport)) return 'accepted';
-    const current = activeInput(viewport);
+    const current = activeInput(tui.inputViewport());
     if (current?.kind !== submitted.kind || current.value !== submitted.value) return 'advanced';
     await sleep(tuiPollInterval(25));
   }

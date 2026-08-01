@@ -32,6 +32,38 @@ describe('headless terminal screen', () => {
     screen.dispose();
   });
 
+  test('input projection omits the end cursor and preserves a leading logical blank', async () => {
+    const screen = createHeadlessTerminalScreen(20, 3);
+    screen.append(new TextEncoder().encode('❯  x\x1b[7m \x1b[27m'));
+    await screen.settled();
+
+    expect(screen.viewport()).toBe('❯  x ');
+    expect(screen.inputViewport()).toBe('❯  x');
+    screen.dispose();
+
+    const wrappedScreen = createHeadlessTerminalScreen(5, 3);
+    wrappedScreen.append(new TextEncoder().encode('❯ abc\x1b[7m \x1b[27m'));
+    await wrappedScreen.settled();
+
+    expect(wrappedScreen.viewport()).toBe('❯ abc ');
+    expect(wrappedScreen.inputViewport()).toBe('❯ abc');
+    wrappedScreen.dispose();
+  });
+
+  test('input projection follows Ink continuation rows but leaves modal chrome unchanged', async () => {
+    const screen = createHeadlessTerminalScreen(20, 5);
+    screen.append(
+      new TextEncoder().encode(
+        '❯ abcdef\r\n  gh\x1b[7m \x1b[27m\r\n────────\r\n│ option \x1b[7m \x1b[27m',
+      ),
+    );
+    await screen.settled();
+
+    expect(screen.viewport()).toBe('❯ abcdef\n  gh \n────────\n│ option  ');
+    expect(screen.inputViewport()).toBe('❯ abcdef\n  gh\n────────\n│ option  ');
+    screen.dispose();
+  });
+
   test('retains scrollback separately from the current viewport', async () => {
     const screen = createHeadlessTerminalScreen(20, 2);
     screen.append(new TextEncoder().encode('first\r\nsecond\r\nthird'));

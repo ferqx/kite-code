@@ -40,6 +40,9 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
       return lastActionMark as ReturnType<PtyProcess['markOutput']>;
     },
     viewport: () => `❯ ${output()}`,
+    inputViewport() {
+      return this.viewport();
+    },
     scrollback: output,
     transcript: output,
     settleScreen: async () => {},
@@ -209,14 +212,17 @@ describe('TUI input helpers', () => {
     expect(currentInput).toBe('Ask me');
   });
 
-  test('headless terminal input projection preserves a leading logical blank', async () => {
+  test('headless terminal input projection removes the end cursor but preserves a leading blank', async () => {
     const screen = createHeadlessTerminalScreen(40, 3);
     try {
-      await screen.append(new TextEncoder().encode('❯  '));
-      expect(activeInput(screen.viewport())?.value).toBe(' ');
+      await screen.append(new TextEncoder().encode('❯ \x1b[7m \x1b[27m'));
+      expect(activeInput(screen.inputViewport())?.value).toBe('');
 
-      await screen.append(new TextEncoder().encode('x'));
-      expect(activeInput(screen.viewport())?.value).toBe(' x');
+      await screen.append(new TextEncoder().encode('\r\x1b[2K❯  \x1b[7m \x1b[27m'));
+      expect(activeInput(screen.inputViewport())?.value).toBe(' ');
+
+      await screen.append(new TextEncoder().encode('\r\x1b[2K❯  x\x1b[7m \x1b[27m'));
+      expect(activeInput(screen.inputViewport())?.value).toBe(' x');
     } finally {
       screen.dispose();
     }

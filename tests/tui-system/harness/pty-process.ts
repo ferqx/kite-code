@@ -56,6 +56,8 @@ export interface PtyProcess {
   resize(cols: number, rows: number): PtyOutputMark;
   /** Get the current terminal viewport after VT/ANSI control sequences are applied. */
   viewport(): string;
+  /** Get the end-cursor input projection used by harness-owned input actions. */
+  inputViewport(): string;
   /** Get the terminal buffer retained above and within the current viewport. */
   scrollback(): string;
   /** Get all raw PTY output for diagnostics only (includes erased frames and ANSI). */
@@ -535,6 +537,10 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
 
     viewport(): string {
       return terminalScreen.viewport();
+    },
+
+    inputViewport(): string {
+      return terminalScreen.inputViewport();
     },
 
     scrollback(): string {
