@@ -28,6 +28,7 @@
 验证：
 
 - `bun test tests/shell-exec.test.ts`
+- `bun run test:sandbox:smoke:native`（显式宿主机 native sandbox smoke）
 - `bun test tests/tools.test.ts`
 - `bun run typecheck`
 
@@ -71,7 +72,11 @@ Vendored bash 依赖 `msys-2.0.dll` 及核心工具所需的其他 DLL（`msys-i
 
 ## 5. 集成测试走 TUI 真实代码路径
 
-`tests/shell-exec.test.ts` 必须使用 `createSandboxExecutor`（与 TUI 完全相同的入口），而不是直接调 `shellTool`。确保工具选择、权限策略、沙箱配置等中间层也被覆盖。
+`tests/shell-exec.test.ts` 必须使用 `createSandboxExecutor`（与 TUI 完全相同的入口），而不是直接调
+`shellTool`。默认门禁中的 Shell/进程树语义显式使用 `enabled: false`，避免宿主 Seatbelt/bubblewrap
+能力改变确定性结果；这仍覆盖统一 executor 的 shell 选择、流式输出、超时、取消和进程树清理。
+真实 filesystem/network sandbox enforcement 由 `test:sandbox:smoke:native` 和
+`.github/workflows/platform-capability-probe.yml` 独立验证，不能从默认 Shell suite 推导。
 
 ## 6. 超时必须终止整棵进程树
 

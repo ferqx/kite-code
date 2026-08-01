@@ -51,6 +51,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         model: { default: { provider: 'mock', name: 'mock-model' } },
+        sandbox: { enabled: false },
       },
       files: {
         'CLAUDE.md': '# Test workspace\n\nFixture used by Thought Lifecycle read-tool scenarios.\n',
@@ -272,7 +273,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   // ═══════════════════════════════════════════════════════════════
 
   step(
-    'read-only shell_execute search command keeps its governed tool lifecycle',
+    'shell_execute keeps its governed tool lifecycle with a verified result',
     async () => {
       server.setResponses([
         {
@@ -288,9 +289,16 @@ describe('TUI PTY System — Thought Lifecycle', () => {
             ],
           },
         },
-        { message: { content: 'SHELL_THOUGHT_DONE: exploration complete.' }, delay: 10 },
+        {
+          expectedRequest: {
+            toolResults: [{ toolCallId: 's2', contentIncludes: ['thought-lifecycle-fixture'] }],
+          },
+          message: { content: 'SHELL_THOUGHT_DONE: exploration complete.' },
+          delay: 10,
+        },
       ]);
 
+      const shellFrames = tui.markScreen();
       await typeText(tui, 'Explore with shell');
       tui.write('\r');
       await waitForRequestMessage(server, 'Explore with shell', 15000);
@@ -300,10 +308,13 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
+      const shellHistory = tui.screenFramesSince(shellFrames).join('\n');
 
       // ── shell_execute without inspect intent stays as independent tool_card ──
       expect(screenContains(output, 'read 1 file')).toBe(true);
       expect(screenContains(output, 'ran 1 command')).toBe(false);
+      expect(screenContains(shellHistory, 'thought-lifecycle-fixture')).toBe(true);
+      expect(screenContains(shellHistory, 'exit: error')).toBe(false);
 
       // ── 独立工具卡完成后可折叠；最终回答仍可见 ──
       expect(screenContains(output, 'SHELL_THOUGHT_DONE')).toBe(true);

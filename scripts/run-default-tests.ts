@@ -24,6 +24,8 @@ const DEFAULT_IGNORES = [
   'tests/tui-system/scenarios/**',
   'tests/tui-system/smoke/**',
   'tests/pty-spike/**',
+  'tests/sandbox-executor.test.ts',
+  'tests/sandbox-bwrap-executor.test.ts',
   ...PROCESS_ISOLATED_TEST_FILES,
 ] as const;
 

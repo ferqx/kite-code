@@ -33,11 +33,25 @@ export interface MockResponse {
   /** Emit a provider connection error after content frames, before the terminal frame. */
   disconnect_after_content?: boolean;
   error?: string;
+  /**
+   * Tool calls remain pending until a matching tool-result request arrives.
+   * Mark only intentionally aborted turns (deny/Escape) as `aborted`;
+   * otherwise teardown fails closed.
+   */
+  toolContinuation?: 'required' | 'aborted';
+  /** Preconditions for the request that is about to consume this response. */
+  expectedRequest?: {
+    toolResults?: Array<{
+      toolCallId: string;
+      contentIncludes?: string[];
+      contentExcludes?: string[];
+    }>;
+  };
 }
 
 export interface MockChatRequest {
   body: Record<string, unknown>;
-  messages: Array<{ role?: string; content?: unknown }>;
+  messages: Array<{ role?: string; content?: unknown; tool_call_id?: string }>;
 }
 
 export interface MockModelServer {
@@ -80,6 +94,8 @@ export function createMockModelServer(): MockModelServer {
   const requests: MockChatRequest[] = [];
   const modelRequests: string[] = [];
   const unexpectedRequests: number[] = [];
+  const contractViolations: string[] = [];
+  const pendingToolContinuations = new Map<string, number>();
   let modelsResponse: { status: number; delay: number; models: string[] } = {
     status: 200,
     delay: 0,
@@ -118,7 +134,11 @@ export function createMockModelServer(): MockModelServer {
         const bodyRecord =
           body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
         const messages = Array.isArray(bodyRecord.messages)
-          ? (bodyRecord.messages as Array<{ role?: string; content?: unknown }>)
+          ? (bodyRecord.messages as Array<{
+              role?: string;
+              content?: unknown;
+              tool_call_id?: string;
+            }>)
           : [];
         requests.push({ body: bodyRecord, messages });
         const stream = body?.stream === true;
@@ -136,6 +156,57 @@ export function createMockModelServer(): MockModelServer {
               },
             }),
             { status: 500, headers: { 'content-type': 'application/json' } },
+          );
+        }
+
+        const requestContractFailures: string[] = [];
+        const toolResultIds = new Set(
+          messages
+            .filter((message) => message.role === 'tool')
+            .map((message) => message.tool_call_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        );
+        for (const toolCallId of toolResultIds) {
+          pendingToolContinuations.delete(toolCallId);
+        }
+
+        for (const expected of resp.expectedRequest?.toolResults ?? []) {
+          const toolResult = messages.find(
+            (message) => message.role === 'tool' && message.tool_call_id === expected.toolCallId,
+          );
+          if (!toolResult) {
+            requestContractFailures.push(
+              `request ${idx + 1} is missing expected tool result ${expected.toolCallId}`,
+            );
+            continue;
+          }
+          const content = serializedMessageContent(toolResult.content);
+          for (const text of expected.contentIncludes ?? []) {
+            if (!content.includes(text)) {
+              requestContractFailures.push(
+                `tool result ${expected.toolCallId} in request ${idx + 1} does not include ${JSON.stringify(text)}`,
+              );
+            }
+          }
+          for (const text of expected.contentExcludes ?? []) {
+            if (content.includes(text)) {
+              requestContractFailures.push(
+                `tool result ${expected.toolCallId} in request ${idx + 1} unexpectedly includes ${JSON.stringify(text)}`,
+              );
+            }
+          }
+        }
+
+        if (requestContractFailures.length > 0) {
+          contractViolations.push(...requestContractFailures);
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: requestContractFailures.join('; '),
+                type: 'test_fixture_contract_error',
+              },
+            }),
+            { status: 422, headers: { 'content-type': 'application/json' } },
           );
         }
 
@@ -157,6 +228,24 @@ export function createMockModelServer(): MockModelServer {
           resp.message?.reasoning_content ?? resp.message?.reasoning_chunks?.join('') ?? '';
         const toolCalls = resp.message?.tool_calls;
         const invalidToolCalls = resp.message?.invalid_tool_calls;
+        const emittedToolCallIds = [
+          ...(toolCalls ?? []).map((toolCall) => toolCall.id),
+          ...(invalidToolCalls ?? []).map((toolCall) => toolCall.id),
+        ];
+        if (
+          emittedToolCallIds.length > 0 &&
+          !resp.disconnect_after_content &&
+          resp.toolContinuation !== 'aborted'
+        ) {
+          for (const toolCallId of emittedToolCallIds) {
+            if (pendingToolContinuations.has(toolCallId)) {
+              contractViolations.push(
+                `response ${idx + 1} reused unresolved tool call id ${toolCallId}`,
+              );
+            }
+            pendingToolContinuations.set(toolCallId, idx + 1);
+          }
+        }
 
         if (stream) {
           // SSE streaming response
@@ -348,6 +437,11 @@ export function createMockModelServer(): MockModelServer {
           `Cannot replace mock response phase with ${responses.length - responseCursor} unconsumed response(s).`,
         );
       }
+      if (pendingToolContinuations.size > 0) {
+        throw new Error(
+          `Cannot replace mock response phase while tool result(s) are pending: ${formatPendingToolContinuations(pendingToolContinuations)}`,
+        );
+      }
       responses = [...r];
       responseCursor = 0;
     },
@@ -381,6 +475,14 @@ export function createMockModelServer(): MockModelServer {
           `${responses.length - responseCursor} configured response(s) were unconsumed`,
         );
       }
+      if (pendingToolContinuations.size > 0) {
+        failures.push(
+          `tool result(s) are still pending: ${formatPendingToolContinuations(pendingToolContinuations)}`,
+        );
+      }
+      if (contractViolations.length > 0) {
+        failures.push(`request contract violation(s): ${contractViolations.join('; ')}`);
+      }
       if (failures.length > 0)
         throw new Error(`Mock model fixture incomplete: ${failures.join('; ')}`);
     },
@@ -398,4 +500,19 @@ function messageContentIncludes(content: unknown, text: string): boolean {
     });
   }
   return false;
+}
+
+function serializedMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return String(content);
+  }
+}
+
+function formatPendingToolContinuations(pending: ReadonlyMap<string, number>): string {
+  return [...pending.entries()]
+    .map(([toolCallId, responseNumber]) => `${toolCallId} (response ${responseNumber})`)
+    .join(', ');
 }

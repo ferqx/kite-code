@@ -201,6 +201,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
     workspace = createTestWorkspace();
     server.setResponses([
       {
+        toolContinuation: 'aborted',
         message: {
           content: 'I will run a command.',
           tool_calls: [

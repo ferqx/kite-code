@@ -34,6 +34,7 @@ describe('TUI PTY System — Approval Escape', () => {
     // Response #2: normal response for the second user message after Escape cancel
     server.setResponses([
       {
+        toolContinuation: 'aborted',
         message: {
           content: 'I will create a directory for you.',
           tool_calls: [

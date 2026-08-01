@@ -2,8 +2,10 @@
  * PTY System Test — Tool Approve (A) Flow
  *
  * Verifies the full approve flow: tool call → approve → tool executes → agent continues.
- * Also verifies block rendering: reason block (from reasoning_content),
- * tool_card done status, and file_change block (from write_file).
+ * Native sandbox enforcement is covered by smoke/native-sandbox.test.ts; this
+ * deterministic scenario explicitly disables it and verifies the actual tool
+ * result sent back to the model.
+ * Also verifies block rendering for the reasoning and completed shell card.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -23,7 +25,9 @@ describe('TUI PTY System — Tool Approve', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({
+      configOverrides: { sandbox: { enabled: false } },
+    });
 
     // Response #1: shell_execute tool call (needs approval in any mode)
     // Response #2: what the agent says AFTER the tool executes
@@ -36,12 +40,26 @@ describe('TUI PTY System — Tool Approve', () => {
             {
               id: 'call_1',
               name: 'shell_execute',
-              args: { command: 'node -e "console.log(1)"', description: 'test' },
+              args: {
+                command: 'bun -e "console.log(\'TUI_APPROVAL_EXECUTED\')"',
+                description: 'emit deterministic approval marker',
+              },
             },
           ],
         },
       },
-      { message: { content: 'Command executed successfully!' } },
+      {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_1',
+              contentIncludes: ['TUI_APPROVAL_EXECUTED'],
+              contentExcludes: ['sandbox_apply: Operation not permitted'],
+            },
+          ],
+        },
+        message: { content: 'APPROVAL_FLOW_COMPLETE' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -71,17 +89,24 @@ describe('TUI PTY System — Tool Approve', () => {
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
 
       // Approve the tool ("允许一次" is default selected at index 0, press Enter)
+      const executionFrames = tui.markScreen();
       tui.write('\r');
 
-      // Wait for the agent's follow-up response after tool execution
-      await waitForText(() => tui.outputSinceLastAction(), 'Command executed successfully!', 15000);
+      // The fixture serves the follow-up only after seeing the marker in the
+      // tool result request, so this cannot pass on a failed sandbox launch.
+      await waitForText(() => tui.outputSinceLastAction(), 'APPROVAL_FLOW_COMPLETE', 15000);
 
       const afterOutput = tui.viewport();
       const clean = stripAnsi(afterOutput);
       console.log('  output after approve (last 1500 chars):', clean.slice(-1500));
 
-      // Agent's response should be visible
-      expect(screenContains(afterOutput, 'Command executed successfully!')).toBe(true);
+      const executionHistory = tui.screenFramesSince(executionFrames).join('\n');
+      expect(screenContains(executionHistory, 'TUI_APPROVAL_EXECUTED')).toBe(true);
+      expect(screenContains(executionHistory, 'exit: error')).toBe(false);
+      expect(screenContains(executionHistory, 'sandbox_apply: Operation not permitted')).toBe(
+        false,
+      );
+      expect(screenContains(afterOutput, 'APPROVAL_FLOW_COMPLETE')).toBe(true);
 
       // TUI should recover — prompt visible
       expect(screenContains(afterOutput, '❯')).toBe(true);

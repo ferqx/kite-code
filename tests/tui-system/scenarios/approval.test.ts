@@ -28,6 +28,7 @@ describe('TUI PTY System — Tool Approval', () => {
 
     server.setResponses([
       {
+        toolContinuation: 'aborted',
         message: {
           content: 'I will create a directory.',
           tool_calls: [

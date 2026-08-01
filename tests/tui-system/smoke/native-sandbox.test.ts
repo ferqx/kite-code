@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { detectSandboxBackend } from '@/core/sandbox';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -25,37 +26,45 @@ describe('TUI PTY native sandbox smoke', () => {
             {
               id: 'call_fa1',
               name: 'shell_execute',
-              args: { command: 'node -e "42"', description: 'quick test' },
+              args: {
+                command: 'bun -e "console.log(\'NATIVE_SANDBOX_FIRST\')"',
+                description: 'first native sandbox marker',
+              },
             },
           ],
         },
       },
       {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_fa1', contentIncludes: ['NATIVE_SANDBOX_FIRST'] }],
+        },
         message: {
           content: 'FA_DONE: all tools passed.',
           tool_calls: [
             {
               id: 'call_fa2',
               name: 'shell_execute',
-              args: { command: 'node -e "84"', description: 'another test' },
+              args: {
+                command: 'bun -e "console.log(\'NATIVE_SANDBOX_SECOND\')"',
+                description: 'second native sandbox marker',
+              },
             },
           ],
         },
       },
-      { message: { content: 'OK, full_access confirmed.' } },
-      { message: { content: 'spare 1' }, delay: 10 },
-      { message: { content: 'spare 2' }, delay: 10 },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_fa2', contentIncludes: ['NATIVE_SANDBOX_SECOND'] }],
+        },
+        message: { content: 'NATIVE_SANDBOX_FLOW_COMPLETE' },
+      },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15_000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   nativeSandboxSmoke(
@@ -65,11 +74,16 @@ describe('TUI PTY native sandbox smoke', () => {
 
       await submitCommand(tui, '/permissions full');
       await waitForText(() => tui.outputSinceLastAction(), '完全权限', 10_000);
+      const executionFrames = tui.markScreen();
       await submitUserMessage(tui, server, 'Full access test', { timeout: 15_000 });
-      await waitForText(() => tui.outputSinceLastAction(), 'OK, full_access confirmed.', 20_000);
+      await waitForText(() => tui.outputSinceLastAction(), 'NATIVE_SANDBOX_FLOW_COMPLETE', 20_000);
 
-      const output = tui.outputSinceLastAction();
-      expect(screenContains(output, 'OK, full_access confirmed.')).toBe(true);
+      const output = tui.viewport();
+      const executionHistory = tui.screenFramesSince(executionFrames).join('\n');
+      expect(screenContains(executionHistory, 'NATIVE_SANDBOX_FIRST')).toBe(true);
+      expect(screenContains(executionHistory, 'NATIVE_SANDBOX_SECOND')).toBe(true);
+      expect(screenContains(executionHistory, 'exit: error')).toBe(false);
+      expect(screenContains(output, 'NATIVE_SANDBOX_FLOW_COMPLETE')).toBe(true);
       expect(screenContains(output, '❯')).toBe(true);
     },
     TIMEOUT,

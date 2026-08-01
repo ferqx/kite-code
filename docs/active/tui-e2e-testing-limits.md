@@ -79,6 +79,12 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     response 不会循环复用；队列耗尽、切换阶段时尚有剩余、teardown 时存在剩余都会产生显式
     fixture failure。终态 error-recovery 场景必须耗尽完整 retry budget，并用跨阶段单调请求计数
     证明没有提前终止或无限重试。
+17. Mock 模型的成功文字不是工具成功证据。Harness 会按 `tool_call_id` 跨交错的父 Agent/Subagent
+    请求跟踪 Tool result，未闭合调用在 teardown 失败；明确取消的调用必须显式标记 aborted。
+    需要证明成功的场景还必须在 canned response 前校验 Tool result 中的唯一 marker，并同时用
+    viewport、screen-frame history 或磁盘状态验证用户可见/持久副作用。该机制只能证明测试夹具观察到
+    的协议和结果，不能把显式关闭 sandbox 的确定性 Shell 场景解释为 native sandbox 资格证据；
+    Seatbelt/bubblewrap 的正向证据仍只来自 opt-in native smoke。
 
 ## 分层选择
 

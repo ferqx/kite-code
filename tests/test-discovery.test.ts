@@ -66,6 +66,8 @@ describe('test discovery boundaries', () => {
     expect(defaultRunner).toContain("'tests/tui-system/scenarios/**'");
     expect(defaultRunner).toContain("'tests/tui-system/smoke/**'");
     expect(defaultRunner).toContain("'tests/pty-spike/**'");
+    expect(defaultRunner).toContain("'tests/sandbox-executor.test.ts'");
+    expect(defaultRunner).toContain("'tests/sandbox-bwrap-executor.test.ts'");
     expect(defaultRunner).toContain("'tests/mcp-config-catalog.test.ts'");
     expect(defaultRunner).toContain("'tests/runtime/plan-artifacts.test.ts'");
     expect(defaultRunner).toContain('KITE_CODE_HOME: testHome');
@@ -80,6 +82,10 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.['test:model:live']).toContain('bun run');
     expect(pkg.scripts?.['test:tui:system']).toContain('scripts/run-tui-system-tests.ts');
     expect(pkg.scripts?.['test:tui:harness']).toContain('tests/tui-system/harness/');
+    expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain('tests/sandbox-executor.test.ts');
+    expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain(
+      'tests/sandbox-bwrap-executor.test.ts',
+    );
     expect(pkg.scripts?.['test:real']).toBeUndefined();
     expect(pkg.scripts?.['test:real:direct']).toBeUndefined();
   });

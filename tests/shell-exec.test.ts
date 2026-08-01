@@ -15,7 +15,9 @@ describe('shell execute integration', () => {
   mkdirSync(workspace, { recursive: true });
   writeFileSync(join(workspace, 'test.txt'), 'hello');
 
-  const shell = createSandboxExecutor({ enabled: true, workspace });
+  // Shell semantics belong to the deterministic default suite. Native
+  // sandbox enforcement is isolated in test:sandbox:smoke:native.
+  const shell = createSandboxExecutor({ enabled: false, workspace });
 
   test('ls returns file list with ok=true', async () => {
     const r = await shell({ workspace, command: 'ls' });
@@ -53,7 +55,7 @@ describe('shell execute integration', () => {
 describe('shell live output', () => {
   const workspace = join(tmpdir(), 'kite-code-e2e-shell-live');
   mkdirSync(workspace, { recursive: true });
-  const shell = createSandboxExecutor({ enabled: true, workspace });
+  const shell = createSandboxExecutor({ enabled: false, workspace });
 
   test('emits stderr progress before later stdout', async () => {
     const events: Array<{ chunk: string; stream: 'stdout' | 'stderr' }> = [];

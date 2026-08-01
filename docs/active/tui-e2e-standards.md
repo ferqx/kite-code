@@ -151,7 +151,10 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 17. 依赖宿主机原生能力的正向场景不得进入默认 PTY 门禁。sandbox、keyring、外部编辑器等
     场景应使用显式 opt-in smoke，并在运行时确认后端存在；默认 suite 只验证可人为固定的
     负向/降级路径。授权、policy 和 reducer 的完整分支必须由注入能力状态的确定性单元或
-    Runtime 集成测试覆盖，不能让 GitHub runner 是否预装 `bwrap` 改变默认测试结果。
+    Runtime 集成测试覆盖，不能让 GitHub runner 是否预装 `bwrap` 改变默认测试结果。若默认
+    scenario 需要验证 Shell 审批或展示链路，必须在隔离 workspace 配置中显式关闭 native sandbox，
+    运行只依赖测试 Runtime 的受控命令，并从真实 Tool result 校验唯一 marker；不得让
+    `sandbox_apply`/`bwrap` 失败后仍靠模型固定回答通过。
 18. 远程 HTTP MCP 正文调用不得沿用旧的隐式外发前置条件。验证默认边界时使用生产 TUI
     组合根，并断言 `remoteMcpEgressPolicyV1=false` 产生零 `tools/call` 请求；验证认证恢复、
     失败隔离等需要成功外发的其他主题时，场景必须在同一个 Bun test 内显式开启该 flag，
@@ -171,7 +174,13 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 21. Mock response queue 是一次性、按阶段配置的严格队列，不得循环复用响应；队列耗尽必须返回
     fixture error，存在未消费响应时不得切换 response phase，teardown 同时拒绝意外请求和剩余响应。
     请求历史和请求计数跨 `setResponses()` 保持单调，便于证明 retry/auxiliary call 的真实数量；不得
-    以重复文本、dummy 或历史 `generateSessionName` 假设填充队列。
+    以重复文本、dummy 或历史 `generateSessionName` 假设填充队列。Mock 发出的每个
+    `tool_call_id` 还必须跨父 Agent、Subagent 等交错请求保持未闭合跟踪，直到某个后续模型请求携带
+    同 ID 的 Tool result；teardown 时仍未闭合即失败。只有审批拒绝或 Esc 取消等明确终止本轮的
+    fixture 才能在该 Mock response 上声明 `toolContinuation: 'aborted'`。当后续 canned response
+    声称工具成功时，必须通过 `expectedRequest.toolResults` 校验真实 Tool result 的稳定成功标记；
+    缺失或内容不符时 mock server 返回 fixture contract error，不能继续输出成功文案。嵌套
+    Subagent 请求可以合法穿插，但不能清除父调用的未闭合状态。
 22. Scenario teardown 必须使用 `cleanupTuiSystemFixtures()`，先等待所有 TUI 自有进程组退出，再停止
     mock/本地服务，最后清理 workspace；任一阶段失败都不能跳过后续资源，最终以 `AggregateError`
     报告。scenario contract 禁止直接调用 server `stop()` 或 workspace `cleanup()`。
