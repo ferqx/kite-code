@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createRuntimeStore, runtimeStorePathFor } from '@/core/runtime/store';
 import {
   createTestWorkspace,
+  isPersistedRuntimeNotReady,
   persistedCommandSession,
   persistedSessionIds,
   persistedSessionSummaries,
@@ -25,6 +26,27 @@ describe('TUI persisted Runtime observers', () => {
     expect(persistedSessionIds(workspace)).toEqual([]);
     expect(persistedSessionSummaries(workspace)).toEqual([]);
     expect(persistedCommandSession(workspace, '/compact marker')).toBeUndefined();
+  });
+
+  test('classifies the Linux readonly directory error without hiding unrelated I/O faults', () => {
+    expect(
+      isPersistedRuntimeNotReady(
+        Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' }),
+        true,
+      ),
+    ).toBe(true);
+    expect(
+      isPersistedRuntimeNotReady(
+        Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' }),
+        false,
+      ),
+    ).toBe(false);
+    expect(
+      isPersistedRuntimeNotReady(
+        Object.assign(new Error('short read'), { code: 'SQLITE_IOERR' }),
+        true,
+      ),
+    ).toBe(false);
   });
 
   test('treats a temporarily unopenable Runtime path as not ready for bounded polling', () => {

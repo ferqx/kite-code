@@ -10,7 +10,7 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runtimeStorePathFor } from '@/core/runtime/store';
@@ -41,6 +41,19 @@ type PersistedSessionRow = {
   name: string;
 };
 
+export function isPersistedRuntimeNotReady(error: unknown, pathIsDirectory: boolean): boolean {
+  const code =
+    typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined;
+  const message = error instanceof Error ? error.message : '';
+  return (
+    code === 'SQLITE_CANTOPEN' ||
+    code === 'SQLITE_BUSY' ||
+    code === 'SQLITE_LOCKED' ||
+    (pathIsDirectory && code === 'SQLITE_IOERR' && message === 'disk I/O error') ||
+    (code === 'SQLITE_ERROR' && message.includes('no such table'))
+  );
+}
+
 function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
   return runtimeStorePathFor(join(workspace.home, '.kite-code', 'checkpoints.sqlite'));
 }
@@ -62,19 +75,13 @@ function readPersistedRuntime<T>(
     database = new Database(path, { readonly: true });
     return read(database);
   } catch (error) {
-    const code =
-      typeof error === 'object' && error !== null && 'code' in error
-        ? String(error.code)
-        : undefined;
-    const message = error instanceof Error ? error.message : '';
-    if (
-      code === 'SQLITE_CANTOPEN' ||
-      code === 'SQLITE_BUSY' ||
-      code === 'SQLITE_LOCKED' ||
-      (code === 'SQLITE_ERROR' && message.includes('no such table'))
-    ) {
-      return whenMissing;
+    let pathIsDirectory = false;
+    try {
+      pathIsDirectory = statSync(path).isDirectory();
+    } catch {
+      // A concurrently removed path is covered by SQLITE_CANTOPEN below.
     }
+    if (isPersistedRuntimeNotReady(error, pathIsDirectory)) return whenMissing;
     throw error;
   } finally {
     database?.close();
