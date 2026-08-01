@@ -9,10 +9,11 @@
  * Reuses the temp-home isolation pattern previously used by the old TUI harness.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { Database } from 'bun:sqlite';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createRuntimeStore, runtimeStorePathFor } from '@/core/runtime/store';
+import { runtimeStorePathFor } from '@/core/runtime/store';
 
 export interface TestWorkspace {
   /** Temp HOME directory */
@@ -35,51 +36,109 @@ export interface TestWorkspace {
   cleanup(): void;
 }
 
+type PersistedSessionRow = {
+  thread_id: string;
+  name: string;
+};
+
+function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
+  return runtimeStorePathFor(join(workspace.home, '.kite-code', 'checkpoints.sqlite'));
+}
+
+/**
+ * Observe the child Runtime Store without running production initialization.
+ * Polling helpers must never execute journal/schema writes against the system
+ * under test: on slower hosts that can contend with or starve the real writer.
+ */
+function readPersistedRuntime<T>(
+  workspace: Pick<TestWorkspace, 'home'>,
+  whenMissing: T,
+  read: (database: Database) => T,
+): T {
+  const path = persistedRuntimePath(workspace);
+  if (!existsSync(path)) return whenMissing;
+  const database = new Database(path, { readonly: true });
+  try {
+    return read(database);
+  } finally {
+    database.close();
+  }
+}
+
 /** Read the durable Runtime session identities without relying on terminal scrollback. */
 export function persistedSessionIds(workspace: Pick<TestWorkspace, 'home'>): string[] {
-  const checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
-  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
-  try {
-    return store
-      .listSessions()
-      .map((session) => session.threadId)
-      .sort();
-  } finally {
-    store.close();
-  }
+  return readPersistedRuntime(workspace, [], (database) =>
+    database
+      .query<{ thread_id: string }, []>(
+        'SELECT thread_id FROM runtime_sessions ORDER BY thread_id ASC',
+      )
+      .all()
+      .map((session) => session.thread_id),
+  );
 }
 
 /** Read durable session identity/name pairs in the same recency order used by SessionSelector. */
 export function persistedSessionSummaries(
   workspace: Pick<TestWorkspace, 'home'>,
 ): Array<{ threadId: string; name: string }> {
-  const checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
-  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
-  try {
-    return store.listSessions().map(({ threadId, name }) => ({ threadId, name }));
-  } finally {
-    store.close();
-  }
+  return readPersistedRuntime(workspace, [], (database) =>
+    database
+      .query<PersistedSessionRow, []>(`
+        SELECT
+          session.thread_id,
+          COALESCE(
+            NULLIF(session.name, ''),
+            NULLIF((
+              SELECT json_extract(event.event_json, '$.content')
+              FROM runtime_events event
+              WHERE event.thread_id = session.thread_id
+                AND json_extract(event.event_json, '$.type') = 'user.message_appended'
+              ORDER BY event.id ASC
+              LIMIT 1
+            ), ''),
+            session.thread_id
+          ) AS name
+        FROM runtime_sessions session
+        ORDER BY session.updated_at DESC
+        LIMIT 50
+      `)
+      .all()
+      .map(({ thread_id: threadId, name }) => ({ threadId, name })),
+  );
 }
 
-/** Check durable Runtime events without treating terminal rendering as persistence evidence. */
-export function persistedRuntimeContains(
+/** Resolve the exact session carrying a durable slash-command audit event. */
+export function persistedCommandSession(
   workspace: Pick<TestWorkspace, 'home'>,
-  text: string,
-): boolean {
-  const checkpointPath = join(workspace.home, '.kite-code', 'checkpoints.sqlite');
-  const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
-  try {
-    return store
-      .listSessions()
-      .some((session) =>
-        store
-          .loadEvents(session.threadId)
-          .some((stored) => JSON.stringify(stored.event).includes(text)),
-      );
-  } finally {
-    store.close();
-  }
+  command: string,
+): { threadId: string; name: string } | undefined {
+  return readPersistedRuntime(workspace, undefined, (database) => {
+    const row = database
+      .query<PersistedSessionRow, [string]>(`
+        SELECT
+          session.thread_id,
+          COALESCE(
+            NULLIF(session.name, ''),
+            NULLIF((
+              SELECT json_extract(first_event.event_json, '$.content')
+              FROM runtime_events first_event
+              WHERE first_event.thread_id = session.thread_id
+                AND json_extract(first_event.event_json, '$.type') = 'user.message_appended'
+              ORDER BY first_event.id ASC
+              LIMIT 1
+            ), ''),
+            session.thread_id
+          ) AS name
+        FROM runtime_events command_event
+        JOIN runtime_sessions session ON session.thread_id = command_event.thread_id
+        WHERE json_extract(command_event.event_json, '$.type') = 'user.command_invoked'
+          AND json_extract(command_event.event_json, '$.command') = ?
+        ORDER BY command_event.id DESC
+        LIMIT 1
+      `)
+      .get(command);
+    return row ? { threadId: row.thread_id, name: row.name } : undefined;
+  });
 }
 
 /**

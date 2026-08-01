@@ -93,7 +93,11 @@ tests/tui-system/
    不能作为 Enter 后回放完成的 receipt。空 session 尚未产生事件时不要求提前出现在持久化 session
    列表。
    需要证明输入或 slash command 可跨进程恢复时，当前 viewport 只证明渲染，不证明 SQLite 已提交；
-   退出进程前必须同时读取隔离 Runtime Store，确认目标 event 已持久化。
+   退出进程前必须同时读取隔离 Runtime Store，确认目标 event 已持久化。轮询持久化证据时必须使用
+   SQLite readonly 连接和精确 event 字段查询；不得调用会设置 journal mode、执行 schema migration
+   或创建索引的生产 `createRuntimeStore()` 初始化路径，否则观察器会与被测 TUI writer 竞争。
+   终端提交回执、Runtime event 落盘和重启后 replay 是三个独立证据边界，必须分别等待并报告失败；
+   选择待恢复 session 时绑定目标 event 的 thread ID，不得依赖秒级 `updated_at` 排序猜测第一行。
    session 删除确认必须同时验证被选 thread ID 已从 Runtime Store 消失且 active thread 保留；取消
    删除必须验证 thread ID 集合不变，不能只依赖 selector 列表缓存。
 7. 改动 Runtime 多轮语义时同时运行 `tests/runtime/agent.integration.test.ts`、`tests/runtime/store.test.ts` 和相应 PTY scenario。

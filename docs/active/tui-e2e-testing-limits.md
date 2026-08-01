@@ -51,6 +51,10 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     thread ID 并观察到一个新 ID，避免把同一 session 的累计 transcript 误判为切换成功。
 12. selector 中名称消失只能证明 UI 投影更新，不能单独证明删除持久化成功；confirm/cancel 场景
     还必须分别验证 Runtime Store thread ID 的删除与集合不变。
+    Harness 的持久化探针只能通过 readonly SQLite 查询观察已经存在的 schema；在轮询中调用
+    `createRuntimeStore()` 会重复执行 journal/schema 写入并干扰被测 writer，尤其会在共享 CI runner
+    上把真实落盘延迟误报为 TUI 失败。命令回放场景还应查询精确 `user.command_invoked.command` 并
+    使用该 event 所属 thread，不能用 JSON substring 或 session recency 代替持久化身份。
 13. 有状态 journey 在一个 Bun test 内按 step 执行；首个失败会报告 step 名称并停止后续依赖步骤。
     每个 step 有局部超时，journey 另有早于 Bun test 和单文件硬超时的总 deadline；总预算耗尽时
     当前 step 会收到具名失败，因此局部超时之和不是文件可用总时长。测试报告中的 pass 数表示独立
