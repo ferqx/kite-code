@@ -49,7 +49,12 @@ describe('TUI PTY System — ask_user Escape', () => {
           ],
         },
       },
-      { message: { content: 'Continued after question cancellation.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['Cancelled'] }],
+        },
+        message: { content: 'Continued after question cancellation.' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -72,12 +77,9 @@ describe('TUI PTY System — ask_user Escape', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Ask a question', 15000);
 
-      // Wait for the question to appear in the TUI output
-      await waitForText(
-        () => tui.outputSinceLastAction(),
-        'What is your preferred programming language?',
-        15000,
-      );
+      // Wait for the last option, not the question text that can appear first
+      // in the Tool Card before the interactive footer is ready.
+      await waitForText(() => tui.viewport(), 'Python', 15000);
 
       const output = tui.viewport();
       expect(screenContains(output, 'What is your preferred programming language?')).toBe(true);

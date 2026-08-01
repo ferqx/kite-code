@@ -51,7 +51,12 @@ describe('TUI PTY System — ask_user', () => {
           ],
         },
       },
-      { message: { content: 'Ask test session' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['Blue'] }],
+        },
+        message: { content: 'Ask test session' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -74,8 +79,9 @@ describe('TUI PTY System — ask_user', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Ask me a question', 15000);
 
-      // Wait for the question to appear in the TUI output
-      await waitForText(() => tui.outputSinceLastAction(), 'What is your favorite color?', 15000);
+      // The question may appear in the Tool Card before the interactive footer
+      // finishes rendering. The last option is the modal-ready witness.
+      await waitForText(() => tui.viewport(), 'Red', 15000);
 
       const output = tui.viewport();
       expect(screenContains(output, 'What is your favorite color?')).toBe(true);
@@ -85,10 +91,12 @@ describe('TUI PTY System — ask_user', () => {
 
       // Press Enter to accept the recommended/default option (Blue, index 0)
       tui.write('\r');
+      await waitForText(() => tui.outputSinceLastAction(), 'Ask test session', 15000);
       await waitForTuiReady(tui);
 
-      // TUI should recover — prompt visible
+      // The verified answer reached the model and the TUI recovered.
       const afterOutput = tui.viewport();
+      expect(screenContains(afterOutput, 'Ask test session')).toBe(true);
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },
     TIMEOUT,

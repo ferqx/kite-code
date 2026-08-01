@@ -67,7 +67,12 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
           ],
         },
       },
-      { message: { content: 'Got it! Your favorite color is blue.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_ask', contentIncludes: ['Blue'] }],
+        },
+        message: { content: 'Got it! Your favorite color is blue.' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -86,8 +91,8 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
       await waitForRequestMessage(server, 'Ask me a question', 15000);
 
       // The question text may first appear in the started ask_user Tool Card.
-      // Wait for an option that only exists in the interactive footer.
-      await waitForText(() => tui.outputSinceLastAction(), 'Blue', 15000);
+      // Wait for the last option that proves the interactive footer is complete.
+      await waitForText(() => tui.viewport(), 'Red', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.viewport();
