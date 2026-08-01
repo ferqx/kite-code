@@ -104,7 +104,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     保留用户实际看到的画面。main readiness 也必须使用该 input projection 判断空输入，并另用普通
     viewport 验证可见 chrome；不能让视觉光标阻止 idle 判定。replacement 重试必须
     确定性删除已尝试字符与 bounded 隐藏空白，避免残留空格改变下一次输入类别。Enter delivery
-    与 semantic receipt 使用独立 timeout；后者继续使用 request/event 场景预算。
+    与 semantic receipt 使用独立 timeout；后者继续使用 request/event 场景预算。持久事件加进程重启
+    的复合场景还要让 test deadline 覆盖完整 event receipt 与 restart replay，两者不能争用短输入预算。
 20. suite runner 默认在进程隔离和串行顺序不变的前提下运行所有选中 scenario，末尾一次性汇总失败；
     `KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required 的默认证据模式。
 

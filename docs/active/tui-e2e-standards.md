@@ -38,7 +38,8 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    receipt，超时必须失败，不能向未知的新焦点再次发送控制键。命令需要持久事件等强回执时，
    `submitCommand()` 必须把该 receipt 传入同一提交状态机。Enter delivery 的短重试预算与 request、
    持久事件等 semantic receipt 的场景预算必须分离；慢 CI 不能因输入框先清空而把后者缩短到
-   delivery budget。
+   delivery budget。跨进程回放场景的 test deadline 还必须覆盖独立的持久事件预算和后续 restart/
+   selector replay，不得让外层测试先于其语义阶段超时。
    需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自

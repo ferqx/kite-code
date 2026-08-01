@@ -23,7 +23,8 @@ import {
 } from '../harness/terminal-screen';
 import { createTestWorkspace, observePersistedCommandSession } from '../harness/test-workspace';
 
-const TIMEOUT = 60_000;
+const TIMEOUT = 90_000;
+const DURABLE_COMMAND_RECEIPT_TIMEOUT_MS = 30_000;
 
 describe('TUI PTY System — /compact persistence', () => {
   let tui: PtyProcess;
@@ -60,7 +61,7 @@ describe('TUI PTY System — /compact persistence', () => {
           return targetSession !== undefined;
         },
         requireAcceptWhen: true,
-        semanticReceiptTimeoutMs: 10_000,
+        semanticReceiptTimeoutMs: DURABLE_COMMAND_RECEIPT_TIMEOUT_MS,
       });
       expect(targetSession).toBeDefined();
       expect(targetSession!.name).not.toBe(targetSession!.threadId);
