@@ -12,9 +12,9 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import {
   submitCommand,
+  submitCurrentInput,
   submitUserMessage,
   typeText,
-  waitForRequestMessage,
 } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
@@ -98,9 +98,7 @@ describe('TUI PTY System — /compact after session switch', () => {
     '/new creates session 2',
     async () => {
       // Send a message first so /new is not ignored.
-      await typeText(tui, 'Session 1 message');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Session 1 message', 15000);
+      await submitUserMessage(tui, server, 'Session 1 message', { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
 
       await waitForCondition(
@@ -272,7 +270,7 @@ describe('TUI PTY System — /compact after session switch', () => {
         'command-bearing session filter to select the exact persisted thread',
         10_000,
       );
-      tui.write('\r');
+      await submitCurrentInput(tui);
       await waitForCondition(
         () => {
           const viewport = tui.viewport();

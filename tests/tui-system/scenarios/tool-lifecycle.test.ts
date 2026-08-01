@@ -17,23 +17,13 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { basename } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  submitCommand,
-  submitUserMessage,
-  typeText,
-  waitForRequestMessage,
-} from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
-import {
-  assertOrder,
-  screenContains,
-  stripAnsi,
-  waitForOutputQuiescence,
-  waitForText,
-} from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { assertOrder, screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { createTestWorkspace, readPersistedPlanArtifacts } from '../harness/test-workspace';
 
 const TIMEOUT = 45000;
 
@@ -91,9 +81,7 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
     'full lifecycle: interrupt → confirm → no duplicate, model continues',
     async () => {
       // ── 1. 触发 ask_user / Trigger ask_user ──
-      await typeText(tui, 'Ask me a question');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Ask me a question', 15000);
+      await submitUserMessage(tui, server, 'Ask me a question', { timeout: 15000 });
 
       // The question text may first appear in the started ask_user Tool Card.
       // Wait for the last option that proves the interactive footer is complete.
@@ -194,6 +182,14 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
       // Plan content visible
       expect(clean.includes('Lifecycle Test Plan')).toBe(true);
 
+      const artifacts = readPersistedPlanArtifacts(workspace);
+      expect(artifacts).toHaveLength(1);
+      expect(basename(artifacts[0]!.path)).toBe('v1.md');
+      expect(artifacts[0]!.content).toContain('# Lifecycle Test Plan');
+      expect(artifacts[0]!.content).toContain('Verify plan lifecycle rendering in the TUI.');
+      expect(artifacts[0]!.content).toContain('"id":"step-1"');
+      expect(artifacts[0]!.content).toContain('"title":"Step 2: Verify"');
+
       // No plan_review interrupt (write_plan does NOT trigger review)
       expect(clean.includes('Review the plan above')).toBe(false);
 
@@ -243,12 +239,10 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
     'full lifecycle: interrupt → deny → current turn stops without model continuation',
     async () => {
       // ── 1. 触发审批 / Trigger approval ──
-      await typeText(tui, 'Make a directory');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Make a directory', 15000);
+      await submitUserMessage(tui, server, 'Make a directory', { timeout: 15000 });
 
       // 等审批块 / Wait for approval block
-      await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
+      await waitForText(() => tui.viewport(), '› 允许一次', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.viewport();
@@ -262,9 +256,9 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
 
       // ── 4. 拒绝：导航到 Deny 确认 / Deny: navigate to Deny and confirm ──
       tui.write('\x1b[B');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForText(() => tui.viewport(), '› 本次会话允许', 5000);
       tui.write('\x1b[B');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForText(() => tui.viewport(), '› 拒绝', 5000);
       const rejectionFrames = tui.markScreen();
       tui.write('\r');
       await waitForTuiReady(tui);
@@ -298,7 +292,7 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({ files: { 'fixture.ts': 'export const marker = true;\n' } });
     server.setResponses([
       {
         message: {
@@ -306,7 +300,12 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
           tool_calls: [{ id: 'call_search', name: 'search_files', args: { pattern: '*.ts' } }],
         },
       },
-      { message: { content: 'Search complete.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_search', contentIncludes: ['fixture.ts'] }],
+        },
+        message: { content: 'Search complete.' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -320,9 +319,7 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
     'full lifecycle: no interrupt, tool auto-executes, model continues',
     async () => {
       // ── 1. 触发自动放行工具 / Trigger auto-approved tool ──
-      await typeText(tui, 'Search for ts files');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Search for ts files', 15000);
+      await submitUserMessage(tui, server, 'Search for ts files', { timeout: 15000 });
 
       // 等工具执行完成 + 模型继续 / Wait for tool + model continuation
       await waitForText(() => tui.outputSinceLastAction(), 'Search complete', 15000);

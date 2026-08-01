@@ -10,9 +10,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
-import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -58,12 +58,10 @@ describe('TUI PTY System — Tool Approval', () => {
   test(
     'tool call triggers approval block, deny (d) recovers TUI',
     async () => {
-      await typeText(tui, 'Create a directory');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Create a directory', 15000);
+      await submitUserMessage(tui, server, 'Create a directory', { timeout: 15000 });
 
       // Wait for approval block to render
-      await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
+      await waitForText(() => tui.viewport(), '› 允许一次', 15000);
 
       const output = tui.viewport();
       expect(screenContains(output, '授权执行命令')).toBe(true);
@@ -72,9 +70,9 @@ describe('TUI PTY System — Tool Approval', () => {
 
       // Navigate to "拒绝" (index 2) and press Enter
       tui.write('\x1b[B');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForText(() => tui.viewport(), '› 本次会话允许', 5000);
       tui.write('\x1b[B');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForText(() => tui.viewport(), '› 拒绝', 5000);
       tui.write('\r');
       await waitForTuiReady(tui);
 

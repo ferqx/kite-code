@@ -20,7 +20,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -66,9 +66,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
   step(
     'send message → model responds, checkpoint written to DB',
     async () => {
-      await typeText(tui1, 'Hello from tui1');
-      tui1.write('\r');
-      await waitForRequestMessage(server, 'Hello from tui1', 15000);
+      await submitUserMessage(tui1, server, 'Hello from tui1', { timeout: 15000 });
 
       await waitForText(
         () => tui1.outputSinceLastAction(),

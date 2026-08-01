@@ -10,7 +10,15 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runtimeStorePathFor } from '@/core/runtime/store';
@@ -48,6 +56,21 @@ export type PersistedRuntimeObservation<T> =
 export function requirePersistedRuntimeReady<T>(observation: PersistedRuntimeObservation<T>): T {
   if (observation.status === 'ready') return observation.value;
   throw new Error(`Runtime Store observation is ${observation.status} at ${observation.path}`);
+}
+
+/** Read plan artifacts from the isolated child HOME as durable side-effect evidence. */
+export function readPersistedPlanArtifacts(
+  workspace: Pick<TestWorkspace, 'home'>,
+): Array<{ path: string; content: string }> {
+  const root = join(workspace.home, '.kite-code', 'plans');
+  if (!existsSync(root)) return [];
+  return readdirSync(root, { recursive: true, encoding: 'utf8' })
+    .filter((path) => path.endsWith('.md'))
+    .sort()
+    .map((relativePath) => {
+      const path = join(root, relativePath);
+      return { path, content: readFileSync(path, 'utf8') };
+    });
 }
 
 function persistedRuntimeObservationFailure(

@@ -24,7 +24,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
@@ -60,7 +60,12 @@ describe('TUI PTY System — File Rewind', () => {
           ],
         },
       },
-      { message: { content: 'Notes v2 done.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_rw1', contentIncludes: ['+v2 第一次修改'] }],
+        },
+        message: { content: 'Notes v2 done.' },
+      },
       {
         message: {
           content: 'I will update your notes again.',
@@ -69,7 +74,12 @@ describe('TUI PTY System — File Rewind', () => {
           ],
         },
       },
-      { message: { content: 'Notes v3 done.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_rw2', contentIncludes: ['+v3 第二次修改'] }],
+        },
+        message: { content: 'Notes v3 done.' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -84,14 +94,10 @@ describe('TUI PTY System — File Rewind', () => {
   step(
     'two write_file turns land on disk and create checkpoints',
     async () => {
-      await typeText(tui, 'Update my notes');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Update my notes', 15000);
+      await submitUserMessage(tui, server, 'Update my notes', { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), 'Notes v2 done.', 20000);
 
-      await typeText(tui, 'Update my notes again');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Update my notes again', 15000);
+      await submitUserMessage(tui, server, 'Update my notes again', { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), 'Notes v3 done.', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
@@ -109,13 +115,12 @@ describe('TUI PTY System — File Rewind', () => {
     async () => {
       await submitCommand(tui, '/rewind');
       // 检查点面板出现（含两个 turn 检查点）/ checkpoint panel with both turns
-      await waitForText(() => tui.outputSinceLastAction(), '回退 — 选择检查点', 15000);
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForText(() => tui.viewport(), '回退 — 选择检查点', 15000);
 
       // 列表按创建时间倒序：[S2, S1]。↓ 选中 S1，Enter 回退。
       // List is DESC by creation: [S2, S1]. Down selects S1, Enter reverts.
       tui.write('\x1B[B');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForText(() => tui.viewport(), '❯ 2.', 5000);
       tui.write('\r');
 
       // 恢复提示（LOCAL_TEXT）/ restore note

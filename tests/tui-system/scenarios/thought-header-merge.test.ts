@@ -21,11 +21,10 @@
  *      ADR-0047 单次消费规则使用纯工具统计标签
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -81,15 +80,34 @@ const RESP6_FILES = [
 let toolSeq = 0;
 const readCalls = (paths: string[]) =>
   paths.map((path) => ({ id: `t${++toolSeq}`, name: 'read_file', args: { path } }));
+interface FixtureToolCall {
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+}
+
+function expectedFixtureToolResults(calls: readonly FixtureToolCall[]) {
+  return calls.map((call) => {
+    const path = String(call.args.path ?? '');
+    return {
+      toolCallId: call.id,
+      contentIncludes: [
+        call.name === 'search_files'
+          ? 'src/app/tui'
+          : path === 'package.json'
+            ? 'tui-header-merge-fixture'
+            : `fixture: ${path}`,
+      ],
+    };
+  });
+}
 
 describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session replay)', () => {
-  const journey = createTuiSystemJourney();
-  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     server = createMockModelServer();
 
     // fixture 工作区复刻真实日志的文件布局（搜索 **/tui/** 与读取均命中）
@@ -110,75 +128,87 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
-  step(
+  test(
     'real-session replay: stats suffix on Thought blocks, pure thoughts merge into text headers',
     async () => {
       toolSeq = 0;
+      const response1Calls = [
+        { id: `t${++toolSeq}`, name: 'search_files', args: { pattern: '**/tui/**' } },
+        { id: `t${++toolSeq}`, name: 'search_files', args: { pattern: '**/tui/**/*.tsx' } },
+        { id: `t${++toolSeq}`, name: 'read_file', args: { path: 'package.json' } },
+      ];
+      const response2Calls = readCalls(RESP2_FILES);
+      const response3Calls = readCalls(RESP3_FILES);
+      const response4Calls = readCalls(RESP4_FILES);
+      const response5Calls = readCalls(RESP5_FILES);
+      const response6Calls = readCalls(RESP6_FILES);
       server.setResponses([
         // Response 1: reason + search×2 + read×1（真实日志结构）
         {
           message: {
             reasoning_content:
               'The user wants to thoroughly understand the TUI module. Let me first explore the project structure.',
-            tool_calls: [
-              { id: `t${++toolSeq}`, name: 'search_files', args: { pattern: '**/tui/**' } },
-              { id: `t${++toolSeq}`, name: 'search_files', args: { pattern: '**/*tui*' } },
-              { id: `t${++toolSeq}`, name: 'read_file', args: { path: 'package.json' } },
-            ],
+            tool_calls: response1Calls,
           },
         },
         // Response 2: reason + text + read×6
         {
+          expectedRequest: { toolResults: expectedFixtureToolResults(response1Calls) },
           message: {
             reasoning_content:
               'The user wants to thoroughly understand the TUI module. Let me read all the core files.',
             content: 'Let me read the core files systematically.',
-            tool_calls: readCalls(RESP2_FILES),
+            tool_calls: response2Calls,
           },
           delay: 10,
         },
         // Response 3: reason + read×5
         {
+          expectedRequest: { toolResults: expectedFixtureToolResults(response2Calls) },
           message: {
             reasoning_content:
               'The user wants to "仔细了解TUI模块" (carefully understand the TUI module). Read-only exploration.',
-            tool_calls: readCalls(RESP3_FILES),
+            tool_calls: response3Calls,
           },
           delay: 10,
         },
         // Response 4: reason + read×6
         {
+          expectedRequest: { toolResults: expectedFixtureToolResults(response3Calls) },
           message: {
             reasoning_content: 'Let me continue reading the remaining important files.',
-            tool_calls: readCalls(RESP4_FILES),
+            tool_calls: response4Calls,
           },
           delay: 10,
         },
         // Response 5: reason + text + read×6
         {
+          expectedRequest: { toolResults: expectedFixtureToolResults(response4Calls) },
           message: {
             reasoning_content: 'The user asked to "仔细了解TUI模块". Read-only exploration.',
             content: '继续读取其余关键文件：',
-            tool_calls: readCalls(RESP5_FILES),
+            tool_calls: response5Calls,
           },
           delay: 10,
         },
         // Response 6: reason + text + read×6
         {
+          expectedRequest: { toolResults: expectedFixtureToolResults(response5Calls) },
           message: {
             reasoning_content:
               'I have now read all the key files. A few more components and hooks.',
             content: '现在让我看完剩下的关键组件和 hooks：',
-            tool_calls: readCalls(RESP6_FILES),
+            tool_calls: response6Calls,
           },
           delay: 10,
         },
         // Response 7: reason + final text（无工具）
         {
+          expectedRequest: { toolResults: expectedFixtureToolResults(response6Calls) },
           message: {
             reasoning_content:
               "I've now read a comprehensive set of files. Time to synthesize the full analysis.",
@@ -188,9 +218,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
         },
       ]);
 
-      await typeText(tui, '仔细了解TUI模块');
-      tui.write('\r');
-      await waitForRequestMessage(server, '仔细了解TUI模块', 15000);
+      await submitUserMessage(tui, server, '仔细了解TUI模块', { timeout: 15000 });
 
       // 等最终回答到达 → 全部 7 次模型调用完成
       await waitForText(() => tui.outputSinceLastAction(), 'ANALYSIS_DONE', 45000);
@@ -223,7 +251,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
   // 探索工具）触发等价切断。
   // ═══════════════════════════════════════════════════════════════
 
-  step(
+  test(
     'thinking is consumed once across a write-tool boundary (ADR-0047)',
     async () => {
       server.setResponses([
@@ -238,17 +266,26 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
                 args: { path: 'notes.md', content: 'entry: src/app/tui/index.tsx\n' },
               },
               { id: 'w3', name: 'read_file', args: { path: 'src/app/tui/theme.ts' } },
-              { id: 'w4', name: 'read_file', args: { path: 'src/app/tui/StatsLine.tsx' } },
+              { id: 'w4', name: 'read_file', args: { path: 'src/app/tui/StatsLine.ts' } },
             ],
           },
         },
         // 新一轮模型调用：model.requested settle 带工具 Thought → 最终回答
-        { message: { content: 'CARRY_DONE: boundary crossed, reading resumed.' }, delay: 10 },
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'w1', contentIncludes: ['tui-header-merge-fixture'] },
+              { toolCallId: 'w2', contentIncludes: ['Wrote 1 lines to notes.md'] },
+              { toolCallId: 'w3', contentIncludes: ['src/app/tui/theme.ts'] },
+              { toolCallId: 'w4', contentIncludes: ['src/app/tui/StatsLine.ts'] },
+            ],
+          },
+          message: { content: 'CARRY_DONE: boundary crossed, reading resumed.' },
+          delay: 10,
+        },
       ]);
 
-      await typeText(tui, '读入口并记笔记');
-      tui.write('\r');
-      await waitForRequestMessage(server, '读入口并记笔记', 15000);
+      await submitUserMessage(tui, server, '读入口并记笔记', { timeout: 15000 });
 
       await waitForText(() => tui.outputSinceLastAction(), 'CARRY_DONE', 30000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -269,5 +306,4 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run());
 });

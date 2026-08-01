@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -66,12 +66,10 @@ describe('TUI PTY System — Approval Escape', () => {
     'Escape cancels approval, TUI goes idle, can send new message',
     async () => {
       // Send first message to trigger tool approval
-      await typeText(tui, 'Create a directory');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Create a directory', 15000);
+      await submitUserMessage(tui, server, 'Create a directory', { timeout: 15000 });
 
       // Wait for approval block to render
-      await waitForText(() => tui.outputSinceLastAction(), '授权执行命令', 15000);
+      await waitForText(() => tui.viewport(), '› 允许一次', 15000);
 
       const beforeOutput = tui.viewport();
       expect(screenContains(beforeOutput, '授权执行命令')).toBe(true);
@@ -88,9 +86,7 @@ describe('TUI PTY System — Approval Escape', () => {
 
       // Now send a second message — verify agent responds normally after cancel
       const msg = 'Second message';
-      await typeText(tui, msg);
-      tui.write('\r');
-      await waitForRequestMessage(server, msg, 15000);
+      await submitUserMessage(tui, server, msg, { timeout: 15000 });
 
       // Wait for the agent's response
       await waitForText(

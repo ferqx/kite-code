@@ -9,12 +9,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  clearInput,
-  submitCommand,
-  typeText,
-  waitForRequestMessage,
-} from '../harness/input-helpers';
+import { clearInput, submitCommand, submitUserMessage, typeText } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
@@ -67,9 +62,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   step(
     'send message in first session → model responds',
     async () => {
-      await typeText(tui, 'Message in session A');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Message in session A', 15000);
+      await submitUserMessage(tui, server, 'Message in session A', { timeout: 15000 });
 
       // Wait for the mock model response
       await waitForText(() => tui.viewport(), 'First session response!', 15000);
@@ -111,7 +104,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
       );
       sessionIdsBeforeNew = requirePersistedRuntimeReady(observePersistedSessionIds(workspace));
       await submitCommand(tui, '/new');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      await waitForTuiReady(tui);
 
       const output = tui.viewport();
       console.log('output after /new:', stripAnsi(output).slice(-500));
@@ -138,9 +131,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   step(
     'send message in new session → new response arrives',
     async () => {
-      await typeText(tui, 'Message in session B');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Message in session B', 15000);
+      await submitUserMessage(tui, server, 'Message in session B', { timeout: 15000 });
 
       // Wait for the second model response
       await waitForText(() => tui.viewport(), 'Second session response!', 15000);
@@ -268,7 +259,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       // Press D to trigger delete confirmation
       tui.write('D');
-      await waitForText(() => tui.outputSinceLastAction(), '确认', 5000);
+      await waitForText(() => tui.viewport(), '确认', 5000);
 
       const confirmOutput = tui.viewport();
       // Confirmation dialog should appear
@@ -339,7 +330,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       // Press D to trigger delete confirmation
       tui.write('D');
-      await waitForText(() => tui.outputSinceLastAction(), '确认', 5000);
+      await waitForText(() => tui.viewport(), '确认', 5000);
 
       const confirmOutput = tui.viewport();
       expect(screenContains(confirmOutput, '确认')).toBe(true);

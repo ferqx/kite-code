@@ -5,7 +5,7 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
 import { submitCommand } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { waitForCondition, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
+import { waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
 const fixture = (name: string) => resolve(import.meta.dir, '..', '..', 'fixtures', name);
@@ -61,18 +61,14 @@ describe('TUI PTY System — project MCP approval', () => {
     expect(existsSync(markerPath)).toBe(false);
 
     await submitCommand(tui, '/mcp', 20);
-    await waitForText(
-      () => tui!.outputSinceLastAction(),
-      'project_stdio · ✘ approval required',
-      10_000,
-    );
+    await waitForText(() => tui!.viewport(), 'project_stdio · ✘ approval required', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.outputSinceLastAction(), 'Review server', 10_000);
+    await waitForText(() => tui!.viewport(), 'Review server', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.outputSinceLastAction(), 'Decide later', 10_000);
+    await waitForText(() => tui!.viewport(), '> Decide later', 10_000);
     expect(existsSync(markerPath)).toBe(false);
     tui.write('\x1b[B');
-    await waitForOutputQuiescence(() => tui!.outputSinceLastAction());
+    await waitForText(() => tui!.viewport(), '> Approve and connect', 10_000);
     tui.write('\r');
     await waitForFile(markerPath);
     await waitForText(

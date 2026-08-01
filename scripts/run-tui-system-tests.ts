@@ -36,15 +36,25 @@ export function selectTuiSystemTestFiles(args: readonly string[]): TuiSystemTest
     .sort();
   const includeLifecycleHarness = args.includes(TUI_LIFECYCLE_HARNESS_FLAG);
   const requested = args.filter((argument) => argument !== TUI_LIFECYCLE_HARNESS_FLAG);
-  const selected =
-    requested.length === 0
-      ? available
-      : available.filter((name) =>
-          requested.some((query) => name === query || name === `${query}.test.ts`),
-        );
-  if (selected.length === 0) {
-    throw new Error(`No TUI system scenarios matched: ${requested.join(', ')}`);
+  const normalizedRequested = requested.map((query) =>
+    query.endsWith('.test.ts') ? query : `${query}.test.ts`,
+  );
+  const unknown = normalizedRequested.filter((name) => !available.includes(name));
+  const duplicates = normalizedRequested.filter(
+    (name, index) => normalizedRequested.indexOf(name) !== index,
+  );
+  if (unknown.length > 0 || duplicates.length > 0) {
+    const details = [
+      unknown.length > 0 ? `unknown: ${[...new Set(unknown)].join(', ')}` : undefined,
+      duplicates.length > 0 ? `duplicate: ${[...new Set(duplicates)].join(', ')}` : undefined,
+      `available: ${available.join(', ')}`,
+    ].filter(Boolean);
+    throw new Error(`Invalid TUI system scenario selection (${details.join('; ')})`);
   }
+  const selected =
+    normalizedRequested.length === 0
+      ? available
+      : available.filter((name) => normalizedRequested.includes(name));
   return {
     harnessFiles: includeLifecycleHarness
       ? [join(harnessDir, 'tui-lifecycle-resource.test.ts')]
@@ -54,6 +64,7 @@ export function selectTuiSystemTestFiles(args: readonly string[]): TuiSystemTest
 }
 
 async function runFile(file: string, timeoutMs: number): Promise<number> {
+  const startedAt = performance.now();
   console.log(`\n[tui-system] ${file}`);
   const { bunTestTimeoutMs, journeyDeadlineMs } = nestedTuiDeadlineBudget({
     fileTimeoutMs: timeoutMs,
@@ -99,7 +110,9 @@ async function runFile(file: string, timeoutMs: number): Promise<number> {
   if (timer) clearTimeout(timer);
 
   if (result === 'timeout') {
-    console.error(`[tui-system] timed out after ${timeoutMs}ms: ${file}`);
+    console.error(
+      `[tui-system] timed out after ${Math.round(performance.now() - startedAt)}ms: ${file}`,
+    );
     if (inheritsFaultSoakProcessGroup && process.platform !== 'win32') {
       // The fault-soak probe owns this entire process group. Killing it also
       // reaps per-file and lifecycle children when `ps` inspection is absent.
@@ -112,6 +125,9 @@ async function runFile(file: string, timeoutMs: number): Promise<number> {
   if (process.platform === 'win32' || processGroupId !== undefined) {
     await terminateOwnedProcessTree(proc, processGroupId).catch(() => {});
   }
+  console.log(
+    `[tui-system] ${result === 0 ? 'passed' : `failed(${result})`} in ${Math.round(performance.now() - startedAt)}ms: ${file}`,
+  );
   return result;
 }
 

@@ -8,8 +8,14 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import {
+  clearInput,
+  submitCurrentInput,
+  submitUserMessage,
+  typeText,
+  waitForRequestMessage,
+} from '../harness/input-helpers';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -52,9 +58,7 @@ describe('TUI PTY System — Input & Message', () => {
     'send message → agent responds with mock text',
     async () => {
       server.setResponses([{ message: { content: 'I received your message!' }, delay: 50 }]);
-      await typeText(tui, 'Test message from PTY');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Test message from PTY', 15000);
+      await submitUserMessage(tui, server, 'Test message from PTY', { timeout: 15000 });
 
       // Wait for the mock model response
       await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
@@ -66,20 +70,22 @@ describe('TUI PTY System — Input & Message', () => {
     TIMEOUT,
   );
 
-  // ── Shift+Enter Soft Newline ─────────────────────────────
+  // ── Multiline Input ──────────────────────────────────────
 
   test(
-    'Shift+Enter inserts a newline in the input',
+    'bracketed paste preserves a newline in the submitted message',
     async () => {
       server.setResponses([{ message: { content: 'I received your message!' }, delay: 50 }]);
-      await typeText(tui, 'Line1');
-      // Kitty keyboard protocol: Shift+Enter
-      tui.write('\x1b[13;2u');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      await typeText(tui, 'Line2', { append: true });
+      const requestBaseline = server.getRequestCount();
+      tui.write('\x1b[200~Line1\nLine2\x1b[201~');
+      await waitForText(() => tui.viewport(), 'Line1', 5000);
+      await waitForText(() => tui.viewport(), 'Line2', 5000);
 
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Line1\nLine2', 15000);
+      await submitCurrentInput(tui);
+      await waitForRequestMessage(server, 'Line1\nLine2', 15000, {
+        since: requestBaseline,
+        tui,
+      });
 
       // Verify the model received multi-line input and responded
       await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
@@ -102,18 +108,18 @@ describe('TUI PTY System — Input & Message', () => {
         { message: { content: 'I received your message!' }, delay: 50 },
       ]);
       // Send first message
-      await typeText(tui, 'History message A');
-      tui.write('\r');
+      await submitUserMessage(tui, server, 'History message A', { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
+      await waitForTuiReady(tui);
 
       // Send second message
-      await typeText(tui, 'History message B');
-      tui.write('\r');
+      await submitUserMessage(tui, server, 'History message B', { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), 'I received your message!', 15000);
+      await waitForTuiReady(tui);
 
       // Press Up to recall the last message
       tui.write('\x1b[A');
-      await waitForText(() => tui.outputSinceLastAction(), 'History message B', 5000);
+      await waitForText(() => tui.viewport(), 'History message B', 5000);
 
       const output = tui.viewport();
       // The recalled text should appear in the input area
@@ -137,7 +143,7 @@ describe('TUI PTY System — Input & Message', () => {
     '@ triggers file search with matching results',
     async () => {
       await typeText(tui, '@pack');
-      await waitForText(() => tui.outputSinceLastAction(), 'package.json', 5000);
+      await waitForText(() => tui.viewport(), 'package.json', 5000);
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
@@ -148,9 +154,12 @@ describe('TUI PTY System — Input & Message', () => {
       // package.json should be in the results
       expect(screenContains(output, 'package.json')).toBe(true);
 
-      // Escape to dismiss the file search dropdown
-      tui.write('\x1b');
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      // Select the matched path, then explicitly clear the resulting input.
+      // This proves the overlay owns the current query and leaves no hidden
+      // input state for the next scenario.
+      tui.write('\t');
+      await waitForText(() => tui.viewport(), '@package.json', 5000);
+      await clearInput(tui, '@package.json '.length);
     },
     TIMEOUT,
   );

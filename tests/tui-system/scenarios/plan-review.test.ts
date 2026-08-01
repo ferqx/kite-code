@@ -14,18 +14,14 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { basename } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  submitCommand,
-  submitUserMessage,
-  typeText,
-  waitForRequestMessage,
-} from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, readPersistedPlanArtifacts } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -102,6 +98,16 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
       // Plan content should appear in the rendered output
       expect(clean.includes('Test Draft Plan')).toBe(true);
 
+      const artifacts = readPersistedPlanArtifacts(workspace);
+      expect(artifacts).toHaveLength(1);
+      expect(basename(artifacts[0]!.path)).toBe('v1.md');
+      expect(artifacts[0]!.content).toContain('# Test Draft Plan');
+      expect(artifacts[0]!.content).toContain(
+        'Implement the feature step by step with careful testing.',
+      );
+      expect(artifacts[0]!.content).toContain('"id":"setup"');
+      expect(artifacts[0]!.content).toContain('"title":"Write tests"');
+
       // Plan review UI should NOT be shown (write_plan does not trigger review)
       expect(clean.includes('Review the plan above and choose')).toBe(false);
 
@@ -117,9 +123,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     'write_plan is rejected in building phase',
     async () => {
       // Submit a new message (in building phase — default mode)
-      await typeText(tui, 'Try to write a plan now');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Try to write a plan now', 15000);
+      await submitUserMessage(tui, server, 'Try to write a plan now', { timeout: 15000 });
 
       await waitForTuiReady(tui);
 

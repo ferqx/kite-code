@@ -5,7 +5,7 @@ import { exposedMcpToolName } from '@/core/mcp';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import { submitCommand, typeText } from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
@@ -44,13 +44,13 @@ describe('TUI PTY System — MCP Select management', () => {
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     await submitCommand(tui, '/mcp', 20);
-    await waitForText(() => tui!.outputSinceLastAction(), 'MCP Servers', 15_000);
-    await waitForText(() => tui!.outputSinceLastAction(), 'fixture · ✔ connected', 15_000);
+    await waitForText(() => tui!.viewport(), 'MCP Servers', 15_000);
+    await waitForText(() => tui!.viewport(), 'fixture · ✔ connected', 15_000);
     expect(screenContains(tui.viewport(), 'Add MCP server')).toBe(true);
     expect(screenContains(tui.viewport(), 'echo')).toBe(false);
 
     tui.write('\r');
-    await waitForText(() => tui!.outputSinceLastAction(), 'Reconnect', 10_000);
+    await waitForText(() => tui!.viewport(), 'Reconnect', 10_000);
     expect(screenContains(tui.viewport(), 'Disable server')).toBe(true);
     expect(screenContains(tui.viewport(), 'Remove server')).toBe(true);
     expect(screenContains(tui.viewport(), 'A Add')).toBe(false);
@@ -123,7 +123,12 @@ describe('TUI PTY System — MCP Select management', () => {
           ],
         },
       },
-      { message: { content: 'REMOTE_EGRESS_DENIAL_HANDLED' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'closed-mcp-call', contentIncludes: ['feature_disabled'] }],
+        },
+        message: { content: 'REMOTE_EGRESS_DENIAL_HANDLED' },
+      },
     ]);
     workspace = createTestWorkspace({
       configOverrides: {
@@ -145,8 +150,10 @@ describe('TUI PTY System — MCP Select management', () => {
     });
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
-    await typeText(tui, 'call the closed remote MCP tool', 20);
-    tui.write('\r');
+    await submitUserMessage(tui, server, 'call the closed remote MCP tool', {
+      delayMs: 20,
+      timeout: 15_000,
+    });
     await waitForText(() => tui!.outputSinceLastAction(), 'REMOTE_EGRESS_DENIAL_HANDLED', 20_000);
 
     expect(toolCalls).toBe(0);
@@ -271,6 +278,9 @@ describe('TUI PTY System — MCP Select management', () => {
         },
       },
       {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'search-capabilities', contentIncludes: [remoteToolName] }],
+        },
         message: {
           tool_calls: [
             {
@@ -281,7 +291,14 @@ describe('TUI PTY System — MCP Select management', () => {
           ],
         },
       },
-      { message: { content: longMcpSummary } },
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call-mcp-tool', contentIncludes: ['documentation result from MCP'] },
+          ],
+        },
+        message: { content: longMcpSummary },
+      },
       {
         message: {
           tool_calls: [
@@ -294,6 +311,11 @@ describe('TUI PTY System — MCP Select management', () => {
         },
       },
       {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call-failing-mcp-tool', contentIncludes: ['provider_unavailable'] },
+          ],
+        },
         message: {
           content: 'The MCP call failed, but the TUI conversation continued normally.',
         },
@@ -310,6 +332,11 @@ describe('TUI PTY System — MCP Select management', () => {
         },
       },
       {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'list-mcp-resources', contentIncludes: ['docs://langgraph/overview'] },
+          ],
+        },
         message: {
           tool_calls: [
             {
@@ -321,6 +348,14 @@ describe('TUI PTY System — MCP Select management', () => {
         },
       },
       {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'read-mcp-resource',
+              contentIncludes: ['LangGraph resource content from MCP resources/read.'],
+            },
+          ],
+        },
         message: {
           content: 'RESOURCE_TAIL: MCP resource discovery and reading completed.',
         },
@@ -337,6 +372,14 @@ describe('TUI PTY System — MCP Select management', () => {
         },
       },
       {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'read-missing-mcp-resource',
+              contentIncludes: ['not present in the current discovery snapshot'],
+            },
+          ],
+        },
         message: {
           content: 'RESOURCE_FAILURE_RECOVERED: the conversation continued after the read error.',
         },
@@ -370,8 +413,10 @@ describe('TUI PTY System — MCP Select management', () => {
     });
 
     const conversationFrames = tui.markScreen();
-    await typeText(tui, 'search the documentation with MCP', 20);
-    tui.write('\r');
+    await submitUserMessage(tui, server, 'search the documentation with MCP', {
+      delayMs: 20,
+      timeout: 15_000,
+    });
     await waitForText(
       () => tui!.outputSinceLastAction(),
       'TAIL_MARKER: the final MCP summary paragraph is visible before the prompt.',
@@ -407,8 +452,10 @@ describe('TUI PTY System — MCP Select management', () => {
       `mcp__docs__${remoteToolName}`,
     );
 
-    await typeText(tui, 'call the same MCP tool again', 20);
-    tui.write('\r');
+    await submitUserMessage(tui, server, 'call the same MCP tool again', {
+      delayMs: 20,
+      timeout: 15_000,
+    });
     await waitForText(
       () => tui!.outputSinceLastAction(),
       'The MCP call failed, but the TUI conversation continued normally.',
@@ -420,8 +467,10 @@ describe('TUI PTY System — MCP Select management', () => {
     expect(continuedRequests).toHaveLength(5);
     expect(JSON.stringify(continuedRequests[4]?.messages)).toContain('provider_unavailable');
 
-    await typeText(tui, 'read the available MCP documentation resource', 20);
-    tui.write('\r');
+    await submitUserMessage(tui, server, 'read the available MCP documentation resource', {
+      delayMs: 20,
+      timeout: 15_000,
+    });
     await waitForText(
       () => tui!.outputSinceLastAction(),
       'RESOURCE_TAIL: MCP resource discovery and reading completed.',
@@ -435,8 +484,10 @@ describe('TUI PTY System — MCP Select management', () => {
       'LangGraph resource content from MCP resources/read.',
     );
 
-    await typeText(tui, 'try a missing MCP resource and continue', 20);
-    tui.write('\r');
+    await submitUserMessage(tui, server, 'try a missing MCP resource and continue', {
+      delayMs: 20,
+      timeout: 15_000,
+    });
     await waitForText(
       () => tui!.outputSinceLastAction(),
       'RESOURCE_FAILURE_RECOVERED: the conversation continued after the read error.',

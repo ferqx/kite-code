@@ -30,7 +30,11 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    何时就绪。`typeText()` 必须在返回前确认本次输入已由 Ink 回显并做有界重试；每次输入动作
    自己承担 readiness，不允许建立 warmup 测试或 warmup 流程。普通模型消息优先使用
    `submitUserMessage()`，把输入回显、Enter 和“本次提交之后产生的 mock model request”绑定
-   为一个同步原语。需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
+   为一个同步原语。该 request 必须从显式 baseline 之后查找，并匹配最新真实 user turn 的完整
+   归一化文本；历史同文消息和 Kernel 注入的 `<runtime-state ...>` user message 都不能充当回执。
+   已通过多步动作组成的输入使用 `submitCurrentInput()`；它必须确认活动字段已经离开提交值，并允许
+   调用方提供新 modal、request 或终态的语义 receipt，避免 Enter 重试穿透到刚出现的下一层交互。
+   需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自
    VT parser 的当前
@@ -56,6 +60,8 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    或 scrollback 的缺失替代。frame mark 绑定入队操作序号，mark 前已接收但尚未解析的 chunk 不得
    进入 mark 后历史；历史采用有界保留并在 PTY cleanup 时释放，因此 mark 应靠近被验证动作。若
    mark 已早于保留窗口，读取必须失败而不是对不完整历史给出通过结果。
+   raw action delta 也不得直接授权下一个 Enter、Escape、方向键等控制输入；必须先从当前
+   `viewport()`、row parser、mock request 或持久状态得到与该控件唯一对应的 readiness receipt。
    原始 `transcript()` 只允许进入失败诊断，scenario contract 禁止用它等待或断言语义。等待单一状态使用
    `waitForText()`，多终态使用 `waitForAnyText()`，非终端条件使用 `waitForCondition()`，需要
    settled Ink frame 时使用 `waitForOutputQuiescence()`。静默等待默认必须先观察到 checkpoint
@@ -106,6 +112,8 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 8. PTY suite 必须串行运行，避免终端尺寸、端口和全局环境相互污染。
    Harness 单元测试由默认 `bun run test` 或显式 `bun run test:tui:harness` 执行；
    `scripts/run-tui-system-tests.ts` 只按 scenario 文件逐个启动独立 `bun test` 进程。
+   runner 的显式 scenario 参数按完整文件名匹配；未知名称和重复名称必须在启动前失败并列出
+   可用文件，不能静默少跑。每个文件都输出独立耗时，便于定位预算异常。
    唯一例外是 fault-soak 通过 `--with-lifecycle-harness` 显式追加
    `tui-lifecycle-resource.test.ts`；该参数不会发现或运行其他 harness 文件，普通
    `test:tui:system` 也不得隐式包含 harness。这样 terminal taxonomy 的 PTY 场景与
@@ -177,9 +185,12 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
     以重复文本、dummy 或历史 `generateSessionName` 假设填充队列。Mock 发出的每个
     `tool_call_id` 还必须跨父 Agent、Subagent 等交错请求保持未闭合跟踪，直到某个后续模型请求携带
     同 ID 的 Tool result；teardown 时仍未闭合即失败。只有审批拒绝或 Esc 取消等明确终止本轮的
-    fixture 才能在该 Mock response 上声明 `toolContinuation: 'aborted'`。当后续 canned response
-    声称工具成功时，必须通过 `expectedRequest.toolResults` 校验真实 Tool result 的稳定成功标记；
-    缺失或内容不符时 mock server 返回 fixture contract error，不能继续输出成功文案。嵌套
+    fixture 才能在该 Mock response 上声明 `toolContinuation: 'aborted'`。每个未取消 Tool call 的
+    下一次 continuation response 都必须通过 `expectedRequest.toolResults` 声明并校验真实 Tool
+    result 的稳定结果标记，包括预期拒绝、延迟、parse error 和 provider failure；不能只在成功
+    文案前选择性校验。缺失或内容不符时 mock server 返回 fixture contract error，不能继续输出
+    canned 文案。文件、导出、持久化等副作用还必须以磁盘或 Store observer 验证真实状态，模型文字
+    和 Tool result 二者都不能单独替代副作用证据。嵌套
     Subagent 请求可以合法穿插，但不能清除父调用的未闭合状态。
 22. Scenario teardown 必须使用 `cleanupTuiSystemFixtures()`，先等待所有 TUI 自有进程组退出，再停止
     mock/本地服务，最后清理 workspace；任一阶段失败都不能跳过后续资源，最终以 `AggregateError`

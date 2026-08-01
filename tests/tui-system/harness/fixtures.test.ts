@@ -51,8 +51,37 @@ describe('mock model fixture', () => {
 
       expect(server.getRequestCount()).toBe(2);
       expect(server.getRequests()).toHaveLength(2);
-      expect(server.hasRequestMessage('first')).toBe(true);
+      expect(server.hasRequestMessage('first', 0)).toBe(true);
       expect(server.hasRequestMessage('second', 1)).toBe(true);
+      expect(() => server.assertComplete()).not.toThrow();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test('matches only the current user turn, not history or injected runtime state', async () => {
+    const server = createMockModelServer();
+    try {
+      server.setResponses([{ message: { content: 'ok' } }]);
+      await fetch(`${server.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          messages: [
+            { role: 'user', content: 'historical target' },
+            { role: 'assistant', content: 'old answer' },
+            { role: 'user', content: 'current target' },
+            {
+              role: 'user',
+              content: '<runtime-state source="runtime.kernel">injected policy</runtime-state>',
+            },
+          ],
+          stream: false,
+        }),
+      });
+
+      expect(server.hasRequestMessage('historical target', 0)).toBe(false);
+      expect(server.hasRequestMessage('current target', 0)).toBe(true);
       expect(() => server.assertComplete()).not.toThrow();
     } finally {
       server.stop();
@@ -101,6 +130,39 @@ describe('mock model fixture', () => {
         ]),
       ).toHaveProperty('status', 200);
       expect(() => server.assertComplete()).not.toThrow();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test('rejects a tool continuation without an explicit outcome contract', async () => {
+    const server = createMockModelServer();
+    try {
+      server.setResponses([
+        {
+          message: {
+            tool_calls: [{ id: 'call_unchecked', name: 'read_file', args: { path: 'x.txt' } }],
+          },
+        },
+        { message: { content: 'unchecked success claim' } },
+      ]);
+      await fetch(`${server.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'read x' }], stream: false }),
+      });
+      const response = await fetch(`${server.baseURL}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'tool', tool_call_id: 'call_unchecked', content: 'missing' }],
+          stream: false,
+        }),
+      });
+
+      expect(response.status).toBe(422);
+      expect(await response.text()).toContain('without an expectedRequest.toolResults outcome');
+      expect(() => server.assertComplete()).toThrow('without an expectedRequest.toolResults');
     } finally {
       server.stop();
     }

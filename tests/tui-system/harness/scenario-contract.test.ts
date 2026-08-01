@@ -143,6 +143,123 @@ export function findRawSemanticAssertionViolations(source: string, file = 'fixtu
   return violations;
 }
 
+export function findRawDeltaControlReadinessViolations(
+  source: string,
+  file = 'fixture.ts',
+): string[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const declarations = collectDeclarations(sourceFile);
+  const violations: string[] = [];
+
+  const hasControlWrite = (node: ts.Node): boolean => {
+    if (ts.isFunctionLike(node)) return false;
+    let found = false;
+    const visit = (current: ts.Node): void => {
+      if (current !== node && ts.isFunctionLike(current)) return;
+      if (
+        ts.isCallExpression(current) &&
+        ts.isPropertyAccessExpression(current.expression) &&
+        current.expression.name.text === 'write'
+      ) {
+        found = true;
+        return;
+      }
+      ts.forEachChild(current, visit);
+    };
+    visit(node);
+    return found;
+  };
+
+  const usesRawDeltaReadiness = (node: ts.Node): boolean => {
+    if (ts.isFunctionLike(node)) return false;
+    let found = false;
+    const visit = (current: ts.Node): void => {
+      if (current !== node && ts.isFunctionLike(current)) return;
+      if (
+        ts.isCallExpression(current) &&
+        ts.isIdentifier(current.expression) &&
+        OUTPUT_WAIT_HELPERS.has(current.expression.text) &&
+        current.arguments[0] &&
+        nodeUsesOutputAccessor(
+          current.arguments[0],
+          new Set(['outputSince', 'outputSinceLastAction']),
+          declarations,
+        )
+      ) {
+        found = true;
+        return;
+      }
+      ts.forEachChild(current, visit);
+    };
+    visit(node);
+    return found;
+  };
+
+  const establishesSemanticReadiness = (node: ts.Node): boolean => {
+    if (ts.isFunctionLike(node)) return false;
+    let found = false;
+    const visit = (current: ts.Node): void => {
+      if (current !== node && ts.isFunctionLike(current)) return;
+      if (ts.isCallExpression(current) && ts.isIdentifier(current.expression)) {
+        const helper = current.expression.text;
+        if (
+          helper === 'waitForTuiReady' ||
+          helper === 'submitUserMessage' ||
+          helper === 'submitCommand' ||
+          helper === 'submitCurrentInput' ||
+          helper === 'typeText' ||
+          helper === 'clearInput'
+        ) {
+          found = true;
+          return;
+        }
+        if (
+          OUTPUT_WAIT_HELPERS.has(helper) &&
+          current.arguments[0] &&
+          !nodeUsesOutputAccessor(
+            current.arguments[0],
+            new Set(['outputSince', 'outputSinceLastAction']),
+            declarations,
+          )
+        ) {
+          found = true;
+          return;
+        }
+      }
+      ts.forEachChild(current, visit);
+    };
+    visit(node);
+    return found;
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isBlock(node) || ts.isSourceFile(node)) {
+      let rawDeltaTaint = false;
+      for (const current of node.statements) {
+        if (rawDeltaTaint && hasControlWrite(current)) {
+          violations.push(
+            `${file}:${sourceFile.getLineAndCharacterOfPosition(current.getStart()).line + 1}`,
+          );
+        }
+        if (usesRawDeltaReadiness(current)) {
+          rawDeltaTaint = true;
+        } else if (establishesSemanticReadiness(current)) {
+          rawDeltaTaint = false;
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
 interface BunTestBindings {
   beforeAll: Set<string>;
   describe: Set<string>;
@@ -315,7 +432,7 @@ export function findRemoteMcpPermitFixtureViolations(
   return violations;
 }
 
-export function findDirectSlashSubmitViolations(source: string, file = 'fixture.ts'): string[] {
+export function findTypedInputLifecycleViolations(source: string, file = 'fixture.ts'): string[] {
   const sourceFile = ts.createSourceFile(
     file,
     source,
@@ -327,7 +444,7 @@ export function findDirectSlashSubmitViolations(source: string, file = 'fixture.
   const violations: string[] = [];
 
   const helperBindings = (
-    importedName: 'clearInput' | 'submitCommand' | 'typeText',
+    importedName: 'clearInput' | 'submitCommand' | 'submitCurrentInput' | 'typeText',
   ): Set<string> => {
     const bindings = new Set<string>([importedName]);
     for (const statement of sourceFile.statements) {
@@ -367,6 +484,7 @@ export function findDirectSlashSubmitViolations(source: string, file = 'fixture.
   const clearInputBindings = helperBindings('clearInput');
   const typeTextBindings = helperBindings('typeText');
   const submitCommandBindings = helperBindings('submitCommand');
+  const submitCurrentInputBindings = helperBindings('submitCurrentInput');
 
   const resolveStaticString = (
     expression: ts.Expression,
@@ -441,16 +559,11 @@ export function findDirectSlashSubmitViolations(source: string, file = 'fixture.
       for (let index = 0; index < statements.length; index++) {
         const current = statements[index];
         if (!current) continue;
-        const directSlashInputs = callsIn(current).filter(
-          (call) =>
-            isHelperCall(call, typeTextBindings) &&
-            call.arguments[1] !== undefined &&
-            resolveStaticString(call.arguments[1])?.startsWith('/'),
-        );
+        const typedInputs = callsIn(current).filter((call) => isHelperCall(call, typeTextBindings));
 
-        for (const slashInput of directSlashInputs) {
-          const expectedRoot = inputRoot(slashInput);
-          let clearedSafely = false;
+        for (const typedInput of typedInputs) {
+          const expectedRoot = inputRoot(typedInput);
+          let completedSafely = false;
           scan: for (let nextIndex = index + 1; nextIndex < statements.length; nextIndex++) {
             const next = statements[nextIndex];
             if (!next) continue;
@@ -459,21 +572,40 @@ export function findDirectSlashSubmitViolations(source: string, file = 'fixture.
                 break scan;
               }
               if (isHelperCall(call, clearInputBindings) && inputRoot(call) === expectedRoot) {
-                clearedSafely = true;
+                completedSafely = true;
                 break scan;
               }
               if (
-                (isHelperCall(call, typeTextBindings) ||
-                  isHelperCall(call, submitCommandBindings)) &&
+                isHelperCall(call, submitCurrentInputBindings) &&
                 inputRoot(call) === expectedRoot
               ) {
+                completedSafely = true;
+                break scan;
+              }
+              if (isHelperCall(call, typeTextBindings) && inputRoot(call) === expectedRoot) {
+                const options = call.arguments[2];
+                if (
+                  options &&
+                  ts.isObjectLiteralExpression(options) &&
+                  options.properties.some(
+                    (property) =>
+                      ts.isPropertyAssignment(property) &&
+                      property.name.getText(sourceFile) === 'append' &&
+                      property.initializer.kind === ts.SyntaxKind.TrueKeyword,
+                  )
+                ) {
+                  continue;
+                }
+                break scan;
+              }
+              if (isHelperCall(call, submitCommandBindings) && inputRoot(call) === expectedRoot) {
                 break scan;
               }
             }
           }
-          if (!clearedSafely) {
+          if (!completedSafely) {
             violations.push(
-              `${file}:${sourceFile.getLineAndCharacterOfPosition(slashInput.getStart()).line + 1}`,
+              `${file}:${sourceFile.getLineAndCharacterOfPosition(typedInput.getStart()).line + 1}`,
             );
           }
         }
@@ -490,6 +622,12 @@ describe('TUI system scenario contract', () => {
     const regular = selectTuiSystemTestFiles(['session-switch']);
     expect(regular.harnessFiles).toEqual([]);
     expect(regular.scenarioFiles.map((file) => basename(file))).toEqual(['session-switch.test.ts']);
+    expect(() => selectTuiSystemTestFiles(['session-switch', 'statrup'])).toThrow(
+      'unknown: statrup.test.ts',
+    );
+    expect(() => selectTuiSystemTestFiles(['startup', 'startup.test.ts'])).toThrow(
+      'duplicate: startup.test.ts',
+    );
 
     const faultSoak = selectTuiSystemTestFiles([
       TUI_LIFECYCLE_HARNESS_FLAG,
@@ -525,6 +663,13 @@ describe('TUI system scenario contract', () => {
     expect(violations).toEqual([]);
   });
 
+  test('raw action deltas never authorize the next control key', () => {
+    const violations = scenarioSources().flatMap(({ file, source }) =>
+      findRawDeltaControlReadinessViolations(source, file),
+    );
+    expect(violations).toEqual([]);
+  });
+
   test('shared beforeAll fixtures expose one runnable journey instead of dependent tests', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
       findSharedFixtureTestViolations(source, file),
@@ -539,9 +684,9 @@ describe('TUI system scenario contract', () => {
     expect(violations).toEqual([]);
   });
 
-  test('slash command submission uses the semantic submitCommand receipt', () => {
+  test('every typed input is semantically submitted or explicitly cleared', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
-      findDirectSlashSubmitViolations(source, file),
+      findTypedInputLifecycleViolations(source, file),
     );
     expect(violations).toEqual([]);
   });
@@ -588,6 +733,29 @@ describe('TUI system scenario contract', () => {
     expect(
       findRawSemanticAssertionViolations(
         'const frames = tui.screenFramesSince(mark); expect(frames.join("\\n")).not.toContain("bad");',
+      ),
+    ).toEqual([]);
+  });
+
+  test('AST contract rejects a control key authorized only by raw delta readiness', () => {
+    expect(
+      findRawDeltaControlReadinessViolations(
+        "await waitForText(() => tui.outputSinceLastAction(), 'Ready');\ntui.write('\\r');",
+      ),
+    ).not.toEqual([]);
+    expect(
+      findRawDeltaControlReadinessViolations(
+        "await waitForText(() => tui.viewport(), 'Ready');\ntui.write('\\r');",
+      ),
+    ).toEqual([]);
+    expect(
+      findRawDeltaControlReadinessViolations(
+        "await waitForText(() => tui.outputSinceLastAction(), 'Ready');\nexpect(true).toBe(true);\nconst frames = tui.markScreen();\ntui.write('\\x1b');",
+      ),
+    ).not.toEqual([]);
+    expect(
+      findRawDeltaControlReadinessViolations(
+        "await waitForText(() => tui.outputSinceLastAction(), 'Starting');\nexpect(true).toBe(true);\nawait waitForText(() => tui.viewport(), 'Ready');\ntui.write('\\r');",
       ),
     ).toEqual([]);
   });
@@ -646,21 +814,31 @@ describe('TUI system scenario contract', () => {
     ).toEqual([]);
   });
 
-  test('AST contract rejects direct slash Enter and requires suggestion cleanup', () => {
+  test('AST contract rejects direct Enter and requires typed-input lifecycle completion', () => {
     expect(
-      findDirectSlashSubmitViolations("await typeText(tui, '/theme purple');\ntui.write('\\r');"),
+      findTypedInputLifecycleViolations("await typeText(tui, 'hello');\ntui.write('\\r');"),
     ).not.toEqual([]);
-    expect(findDirectSlashSubmitViolations("await typeText(tui, '/mc');")).not.toEqual([]);
+    expect(findTypedInputLifecycleViolations("await typeText(tui, '/mc');")).not.toEqual([]);
     expect(
-      findDirectSlashSubmitViolations(
+      findTypedInputLifecycleViolations(
         "await typeText(tui, '/mc');\nawait clearInput(tui, 3);\ntui.write('\\r');",
       ),
     ).toEqual([]);
-    expect(findDirectSlashSubmitViolations("await submitCommand(tui, '/theme purple');")).toEqual(
+    expect(
+      findTypedInputLifecycleViolations(
+        "await typeText(tui, 'hello');\nawait submitCurrentInput(tui);",
+      ),
+    ).toEqual([]);
+    expect(
+      findTypedInputLifecycleViolations(
+        "await typeText(tui, 'Line1');\ntui.write('shift-enter');\nawait typeText(tui, 'Line2', { append: true });\nawait submitCurrentInput(tui);",
+      ),
+    ).toEqual([]);
+    expect(findTypedInputLifecycleViolations("await submitCommand(tui, '/theme purple');")).toEqual(
       [],
     );
     expect(
-      findDirectSlashSubmitViolations(`
+      findTypedInputLifecycleViolations(`
         import { typeText as enterText } from '../harness/input-helpers';
         const alias = enterText;
         const command = '/theme purple';

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
@@ -35,9 +35,7 @@ describe('TUI PTY System — session logging status', () => {
 
   test('shows the resolved metadata mode without a content disclosure', async () => {
     const conversationFrames = tui.markScreen();
-    await typeText(tui, 'Report logging status');
-    tui.write('\r');
-    await waitForRequestMessage(modelServer, 'Report logging status', 15_000);
+    await submitUserMessage(tui, modelServer, 'Report logging status', { timeout: 15_000 });
     await waitForText(() => tui.outputSinceLastAction(), 'Session logging mode: metadata.', 15_000);
     await waitForText(() => tui.outputSinceLastAction(), 'Logging status checked.', 15_000);
 

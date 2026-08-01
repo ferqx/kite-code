@@ -12,8 +12,8 @@ const INPUT_ECHO_TIMEOUT_MS = 2_000;
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
-const COMMAND_SUBMIT_ATTEMPTS = 3;
-const COMMAND_SUBMIT_RECEIPT_TIMEOUT_MS = 1_500;
+const INPUT_SUBMIT_ATTEMPTS = 3;
+const INPUT_SUBMIT_RECEIPT_TIMEOUT_MS = 1_500;
 const SELECTOR_COMMAND_PREFIX = /^\/(?:model|effort|theme|permissions)\s$/;
 
 interface InputDeliveryTestTiming {
@@ -314,14 +314,14 @@ export async function waitForRequestMessage(
   server: MockModelServer,
   text: string,
   timeout = 10000,
-  options?: {
-    since?: number;
+  options: {
+    since: number;
     tui?: PtyProcess;
   },
 ): Promise<void> {
   const effectiveTimeout = tuiWaitTimeout(timeout);
   const interval = tuiPollInterval(100);
-  const since = options?.since ?? 0;
+  const since = options.since;
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     if (server.hasRequestMessage(text, since)) return;
@@ -332,9 +332,16 @@ export async function waitForRequestMessage(
     .getRequests()
     .slice(since)
     .slice(-3)
-    .map((request) => JSON.stringify(request.messages).slice(-500))
+    .map((request) =>
+      request.messages
+        .map(
+          (message) =>
+            `${message.role ?? 'unknown'}:${JSON.stringify(message.content).slice(0, 300)}`,
+        )
+        .join(' | '),
+    )
     .join('\n');
-  const terminalTail = options?.tui
+  const terminalTail = options.tui
     ? stripAnsi(options.tui.transcript()).slice(-1_000)
     : 'unavailable';
   throw new Error(
@@ -353,15 +360,56 @@ export async function submitUserMessage(
     delayMs?: number;
     requestText?: string;
     timeout?: number;
+    testTiming?: { submitReceiptTimeoutMs?: number };
   },
 ): Promise<void> {
   const since = server.getRequestCount();
   await typeText(tui, text, options?.delayMs);
-  tui.write('\r');
+  await submitCurrentInput(tui, {
+    ...options?.testTiming,
+    acceptWhen: () => server.getRequestCount() > since,
+  });
   await waitForRequestMessage(server, options?.requestText ?? text, options?.timeout, {
     since,
     tui,
   });
+}
+
+/**
+ * Submit the currently active input and confirm that the input field has
+ * advanced. Use this after composing an input through multiple actions (for
+ * example Shift+Enter) or when production is expected to intercept the input
+ * before a model request is issued.
+ */
+export async function submitCurrentInput(
+  tui: PtyProcess,
+  options?: {
+    submitReceiptTimeoutMs?: number;
+    acceptWhen?: (viewport: string) => boolean;
+  },
+): Promise<void> {
+  await tui.settleScreen();
+  const submitted = activeInput(tui.viewport());
+  if (!submitted || submitted.value.length === 0) {
+    throw new Error('Cannot submit because no non-empty active input field is visible');
+  }
+
+  for (let attempt = 1; attempt <= INPUT_SUBMIT_ATTEMPTS; attempt++) {
+    tui.write('\r');
+    if (
+      await waitForInputSubmissionReceipt(
+        tui,
+        submitted,
+        options?.submitReceiptTimeoutMs ?? INPUT_SUBMIT_RECEIPT_TIMEOUT_MS,
+        options?.acceptWhen,
+      )
+    ) {
+      return;
+    }
+  }
+  throw new Error(
+    `PTY input submission failed after ${INPUT_SUBMIT_ATTEMPTS} Enter attempt(s): ${JSON.stringify(submitted.value)}`,
+  );
 }
 
 export async function submitCommand(
@@ -389,35 +437,24 @@ export async function submitCommand(
     expectedKind === undefined,
     INPUT_ECHO_TIMEOUT_MS,
   );
-  const expectedValue = normalizeInputEcho(command);
-  for (let attempt = 1; attempt <= COMMAND_SUBMIT_ATTEMPTS; attempt++) {
-    tui.write('\r');
-    if (
-      await waitForCommandSubmissionReceipt(
-        tui,
-        expectedValue,
-        testTiming?.submitReceiptTimeoutMs ?? COMMAND_SUBMIT_RECEIPT_TIMEOUT_MS,
-      )
-    ) {
-      return;
-    }
-  }
-  throw new Error(
-    `PTY command submission failed after ${COMMAND_SUBMIT_ATTEMPTS} Enter attempt(s): ${JSON.stringify(command)}`,
-  );
+  await submitCurrentInput(tui, testTiming);
 }
 
-async function waitForCommandSubmissionReceipt(
+async function waitForInputSubmissionReceipt(
   tui: PtyProcess,
-  expectedValue: string,
+  submitted: ActiveInput,
   timeoutMs: number,
+  acceptWhen?: (viewport: string) => boolean,
 ): Promise<boolean> {
   const effectiveTimeout = tuiWaitTimeout(timeoutMs);
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     await tui.settleScreen();
     if (tui.exited) return true;
-    if (activeInput(tui.viewport())?.value !== expectedValue) return true;
+    const viewport = tui.viewport();
+    if (acceptWhen?.(viewport)) return true;
+    const current = activeInput(viewport);
+    if (current?.kind !== submitted.kind || current.value !== submitted.value) return true;
     await sleep(tuiPollInterval(25));
   }
   return false;

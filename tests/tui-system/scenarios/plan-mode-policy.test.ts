@@ -13,7 +13,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -54,7 +54,14 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           ],
         },
       },
-      { message: { content: 'Planning write attempt was blocked.' } },
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_plan_write_denied', contentIncludes: ['Plan mode is read-only'] },
+          ],
+        },
+        message: { content: 'Planning write attempt was blocked.' },
+      },
       {
         message: {
           content: 'I will validate the plan.',
@@ -78,7 +85,21 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           ],
         },
       },
-      { message: { content: 'Recorded validation commands for the execution phase.' } },
+      {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_plan_typecheck_deferred',
+              contentIncludes: ['"deferred":true', '"until_phase":"building"'],
+            },
+            {
+              toolCallId: 'call_plan_tests_deferred',
+              contentIncludes: ['"deferred":true', '"until_phase":"building"'],
+            },
+          ],
+        },
+        message: { content: 'Recorded validation commands for the execution phase.' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -95,9 +116,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       tui.write('\x1b[Z');
       await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 5000);
       const conversationFrames = tui.markScreen();
-      await typeText(tui, task);
-      tui.write('\r');
-      await waitForRequestMessage(server, task, 15000);
+      await submitUserMessage(tui, server, task, { timeout: 15000 });
 
       await waitForText(() => tui.viewport(), 'Planning write attempt was blocked.', 15000);
 
@@ -143,9 +162,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       tui.write('\x1b[Z');
       await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 5000);
       const conversationFrames = tui.markScreen();
-      await typeText(tui, task);
-      tui.write('\r');
-      await waitForRequestMessage(server, task, 15000);
+      await submitUserMessage(tui, server, task, { timeout: 15000 });
       await waitForText(
         () => tui.viewport(),
         'Recorded validation commands for the execution phase.',

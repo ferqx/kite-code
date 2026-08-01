@@ -9,7 +9,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import {
+  submitCommand,
+  submitCurrentInput,
+  submitUserMessage,
+  typeText,
+} from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -63,9 +68,7 @@ describe('TUI PTY System — Session Switching', () => {
   step(
     'send message in session 1 → model responds',
     async () => {
-      await typeText(tui, 'Message in session 1');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Message in session 1', 15000);
+      await submitUserMessage(tui, server, 'Message in session 1', { timeout: 15000 });
 
       // Wait for the mock model response
       await waitForText(() => tui.viewport(), 'Session 1 response', 15000);
@@ -117,9 +120,7 @@ describe('TUI PTY System — Session Switching', () => {
   step(
     'send message in session 2 → model responds',
     async () => {
-      await typeText(tui, 'Message in session 2');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Message in session 2', 15000);
+      await submitUserMessage(tui, server, 'Message in session 2', { timeout: 15000 });
 
       // Wait for the second model response
       await waitForText(() => tui.viewport(), 'Session 2 response', 15000);
@@ -204,7 +205,7 @@ describe('TUI PTY System — Session Switching', () => {
 
       // Press Enter to switch to session 1
       console.log('  pressing Enter to switch...');
-      tui.write('\r');
+      await submitCurrentInput(tui);
 
       // Wait for session 1 content to be replayed after switch.
       // The TUI loads and replays the session blocks into the OutputArea.
@@ -288,7 +289,7 @@ describe('TUI PTY System — Session Switching', () => {
       );
 
       console.log('  pressing Enter to switch to session 2...');
-      tui.write('\r');
+      await submitCurrentInput(tui);
 
       // Wait for session 2 content to be replayed
       await waitForCondition(

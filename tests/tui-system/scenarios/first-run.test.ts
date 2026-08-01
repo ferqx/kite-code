@@ -9,12 +9,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, typeMaskedText, typeText } from '../harness/input-helpers';
+import { clearInput, submitCurrentInput, typeMaskedText, typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
-  waitForAnyText,
+  waitForCondition,
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
@@ -33,7 +33,9 @@ describe('first-run — comprehensive flow', () => {
   }
 
   function getOutputSinceLastAction(): string {
-    return stripAnsi(tui.outputSinceLastAction());
+    // Keep the existing call-site name while making readiness semantic: the
+    // current VT viewport, not an erased action delta, authorizes the next key.
+    return stripAnsi(tui.viewport());
   }
 
   beforeEach(() => {
@@ -81,6 +83,7 @@ describe('first-run — comprehensive flow', () => {
 
   async function openCustomEndpointForm(): Promise<void> {
     await spawnFirstRun();
+    await waitForText(() => getOutput(), '› DeepSeek', 5000);
     tui.write('\x1b[B');
     await waitForText(() => getOutputSinceLastAction(), '› OpenAI', 5000);
     tui.write('\x1b[B');
@@ -99,7 +102,7 @@ describe('first-run — comprehensive flow', () => {
     await typeText(tui, baseURL);
     await waitForOutputQuiescence(() => tui.outputSince(editMark));
     expect(screenContains(tui.viewport(), baseURL)).toBe(true);
-    tui.write('\r');
+    await submitCurrentInput(tui);
   }
 
   // ─── Provider Selection ───
@@ -223,6 +226,7 @@ describe('first-run — comprehensive flow', () => {
 
       // Verify the typed text appears
       expect(screenContains(getOutput(), 'http://x.co')).toBe(true);
+      await clearInput(tui, Array.from('http://x.co').length, { backspace: 'ascii' });
     },
     TIMEOUT,
   );
@@ -240,7 +244,17 @@ describe('first-run — comprehensive flow', () => {
       await waitForText(() => getOutputSinceLastAction(), 'http://localhost:8080/v1x', 5000);
       // Esc to cancel edit
       tui.write('\x1b');
-      await waitForText(() => getOutputSinceLastAction(), 'http://localhost:8080/v1', 5000);
+      await waitForCondition(
+        () => {
+          const viewport = getOutput();
+          return (
+            !viewport.includes('█') &&
+            viewport.split('\n').some((line) => line.trim() === DEFAULT_CUSTOM_ENDPOINT)
+          );
+        },
+        'custom endpoint edit to cancel and restore the exact original URL',
+        5000,
+      );
 
       // Re-enter edit mode — the value should be the original (cancel restored it)
       tui.write('\r');
@@ -352,29 +366,31 @@ describe('first-run — comprehensive flow', () => {
       const modelRequestBaseline = server.getModelRequests().length;
       await connectCustomEndpoint(server.baseURL);
 
-      const terminalReceipt = await waitForAnyText(
-        () => getOutputSinceLastAction(),
-        ['local-model-a', 'The endpoint is reachable', 'The API key was rejected'],
-        30000,
+      // The runtime still requires a non-empty key when it boots the saved
+      // openai-compatible provider. Exercise the recovery path explicitly
+      // instead of conditionally falling back after any loosely matched error.
+      await waitForText(() => getOutputSinceLastAction(), 'The API key was rejected.', 30000);
+      await waitForText(() => getOutput(), '› Edit connection settings', 5000);
+      tui.write('\r');
+      await waitForText(() => getOutput(), '█', 5000);
+      tui.write('\x1b');
+      await waitForCondition(
+        () => !getOutput().includes('█') && screenContains(getOutput(), '› Base URL'),
+        'restored custom endpoint navigation after cancelling the automatic base URL edit',
+        5000,
       );
-      if (!screenContains(terminalReceipt, 'local-model-a')) {
-        expect(screenContains(getOutput(), 'The API key was rejected')).toBe(true);
-        tui.write('\r');
-        await waitForText(() => getOutputSinceLastAction(), 'Connect to a custom endpoint', 5000);
-        if (screenContains(tui.viewport(), '█')) {
-          tui.write('\x1b');
-          await waitForText(() => getOutputSinceLastAction(), '› Base URL', 5000);
-        }
-        tui.write('\x1b[B');
-        await waitForText(() => getOutputSinceLastAction(), '› API key', 5000);
-        tui.write('\r');
-        await waitForText(() => getOutputSinceLastAction(), '█', 5000);
-        const keyMark = tui.markOutput();
-        await typeMaskedText(tui, 'local-key');
-        await waitForOutputQuiescence(() => tui.outputSince(keyMark));
-        tui.write('\r');
-        await waitForText(() => getOutputSinceLastAction(), 'local-model-a', 30000);
-      }
+      tui.write('\x1b[B');
+      await waitForText(() => getOutput(), '› API key', 5000);
+      tui.write('\r');
+      await waitForText(() => getOutput(), '█', 5000);
+      await typeMaskedText(tui, 'local-key');
+      await waitForText(() => getOutput(), '*********', 5000);
+      await submitCurrentInput(tui, {
+        acceptWhen: (viewport) =>
+          screenContains(viewport, 'Connecting to Custom endpoint') ||
+          screenContains(viewport, 'local-model-a'),
+      });
+      await waitForText(() => getOutputSinceLastAction(), 'local-model-a', 30000);
       const terminalOutput = getOutput();
       expect(
         screenContains(terminalOutput, 'local-model-a'),

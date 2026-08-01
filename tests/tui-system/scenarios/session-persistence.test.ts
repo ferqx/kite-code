@@ -19,7 +19,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -69,9 +69,7 @@ describe('TUI PTY System — Session Persistence', () => {
   step(
     'send message in tui1 → model responds, checkpoint written',
     async () => {
-      await typeText(tui1, 'Message before restart');
-      tui1.write('\r');
-      await waitForRequestMessage(server, 'Message before restart', 15000);
+      await submitUserMessage(tui1, server, 'Message before restart', { timeout: 15000 });
 
       // Wait for the mock model response to appear in the TUI
       await waitForText(() => tui1.outputSinceLastAction(), 'Hello from session!', 15000);

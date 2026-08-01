@@ -3,6 +3,7 @@ import type { MockModelServer } from './fixtures';
 import {
   clearInput,
   submitCommand,
+  submitCurrentInput,
   submitUserMessage,
   typeText,
   waitForRequestMessage,
@@ -309,7 +310,7 @@ describe('TUI input helpers', () => {
       setResponses() {},
       getRequestCount: () => requests.length,
       getRequests: () => requests,
-      hasRequestMessage: (text: string, since = 0) =>
+      hasRequestMessage: (text: string, since: number) =>
         requests
           .slice(since)
           .some((request) => request.messages.some((message) => message.content.includes(text))),
@@ -329,25 +330,29 @@ describe('TUI input helpers', () => {
     const requests: Array<{ body: Record<string, never>; messages: Array<{ content: string }> }> =
       [];
     let pending = '';
+    let currentInput = '';
     const tui = fakePty(
       (data) => {
         if (data === '\r') {
           requests.push({ body: {}, messages: [{ content: pending }] });
           pending = '';
+          currentInput = '';
           return;
         }
         pending += data;
+        currentInput += data;
         rendered += data;
       },
       () => rendered,
     );
+    tui.viewport = () => `❯ ${currentInput}`;
     const server = {
       baseURL: 'http://127.0.0.1/v1',
       port: 0,
       setResponses() {},
       getRequestCount: () => requests.length,
       getRequests: () => requests,
-      hasRequestMessage: (text: string, since = 0) =>
+      hasRequestMessage: (text: string, since: number) =>
         requests
           .slice(since)
           .some((request) => request.messages.some((message) => message.content.includes(text))),
@@ -361,6 +366,49 @@ describe('TUI input helpers', () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.messages[0]?.content).toBe('hello');
+  });
+
+  test('submitCurrentInput retries Enter until the active field advances', async () => {
+    let currentInput = 'typed value';
+    let enterAttempts = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data !== '\r') return;
+        enterAttempts++;
+        if (enterAttempts >= 2) currentInput = '';
+      },
+      () => currentInput,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await submitCurrentInput(tui, { submitReceiptTimeoutMs: 20 });
+
+    expect(enterAttempts).toBe(2);
+    expect(currentInput).toBe('');
+  });
+
+  test('submitCurrentInput stops before a control key can cross into a new modal', async () => {
+    const currentInput = 'blocked message';
+    let modalVisible = false;
+    let enterAttempts = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data !== '\r') return;
+        enterAttempts++;
+        if (enterAttempts === 1) modalVisible = true;
+      },
+      () => currentInput,
+    );
+    tui.viewport = () =>
+      modalVisible ? `❯ ${currentInput}\n▶ 1. Session Waive` : `❯ ${currentInput}`;
+
+    await submitCurrentInput(tui, {
+      submitReceiptTimeoutMs: 20,
+      acceptWhen: (viewport) => viewport.includes('Session Waive'),
+    });
+
+    expect(enterAttempts).toBe(1);
+    expect(modalVisible).toBe(true);
   });
 
   test('submitCommand waits for the slash suggestion frame before pressing Enter', async () => {

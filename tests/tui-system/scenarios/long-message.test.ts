@@ -9,7 +9,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -47,14 +47,10 @@ describe('TUI PTY System — Long Message', () => {
       const longMessage =
         'This is a very long test message that exceeds one hundred characters to verify that the TUI input handling works correctly with longer inputs';
 
-      // Type the long message with faster delay since it is long
-      await typeText(tui, longMessage, 10);
-
-      // Submit the long message
-      tui.write('\r');
-
-      // Verify the long message was received by the model server
-      await waitForRequestMessage(server, 'one hundred characters', 15000);
+      await submitUserMessage(tui, server, longMessage, {
+        delayMs: 10,
+        timeout: 15000,
+      });
 
       // Verify the model responded
       await waitForText(() => tui.outputSinceLastAction(), 'I received your long message!', 15000);

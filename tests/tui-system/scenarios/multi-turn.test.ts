@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
@@ -54,9 +54,7 @@ describe('TUI PTY System — Multi-turn Messages', () => {
   step(
     'agent completes first turn and returns to idle state',
     async () => {
-      await typeText(tui, 'Do a simple task');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Do a simple task', 15000);
+      await submitUserMessage(tui, server, 'Do a simple task', { timeout: 15000 });
 
       // Wait for the agent response to appear
       await waitForText(() => tui.outputSinceLastAction(), 'Hello! I completed my task.', 15000);
@@ -76,9 +74,7 @@ describe('TUI PTY System — Multi-turn Messages', () => {
   step(
     'second message in same PTY session triggers another model request',
     async () => {
-      await typeText(tui, 'Second multi-turn message');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Second multi-turn message', 15000);
+      await submitUserMessage(tui, server, 'Second multi-turn message', { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), 'Second PTY turn response', 15000);
 
       // Both turns' content should still be visible

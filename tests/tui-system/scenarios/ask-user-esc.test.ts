@@ -8,7 +8,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -73,9 +73,7 @@ describe('TUI PTY System — ask_user Escape', () => {
   test(
     'ask_user renders question, Escape cancels and recovers TUI',
     async () => {
-      await typeText(tui, 'Ask a question');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Ask a question', 15000);
+      await submitUserMessage(tui, server, 'Ask a question', { timeout: 15000 });
 
       // Wait for the last option, not the question text that can appear first
       // in the Tool Card before the interactive footer is ready.

@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -61,9 +61,7 @@ describe('TUI PTY System — Error Recovery', () => {
   step(
     'bounded HTTP 500 retries exhaust without crashing TUI',
     async () => {
-      await typeText(tui, 'Trigger error');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Trigger error', 15000);
+      await submitUserMessage(tui, server, 'Trigger error', { timeout: 15000 });
 
       await waitForText(() => tui.outputSinceLastAction(), 'Retrying', 15000);
       await waitForText(() => tui.outputSinceLastAction(), 'Internal server error', 15000);
@@ -95,9 +93,7 @@ describe('TUI PTY System — Error Recovery', () => {
   step(
     'TUI accepts new message after error and processes response normally',
     async () => {
-      await typeText(tui, 'Hello after error');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Hello after error', 15000);
+      await submitUserMessage(tui, server, 'Hello after error', { timeout: 15000 });
 
       // Wait for the next user turn's successful model response.
       await waitForText(

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   expectTextAbsentFor,
@@ -56,9 +56,7 @@ describe('TUI PTY System — model streaming', () => {
     'shows the complete reasoning stream atomically before committing answer components',
     async () => {
       const responseFrames = tui.markScreen();
-      await typeText(tui, 'Stream an answer');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Stream an answer', 15_000);
+      await submitUserMessage(tui, server, 'Stream an answer', { timeout: 15_000 });
       await expectTextAbsentFor(
         () => tui.screenFramesSince(responseFrames).join('\n'),
         'STREAM_THINKING',

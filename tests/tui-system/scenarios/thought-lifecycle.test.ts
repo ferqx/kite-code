@@ -14,11 +14,10 @@
  *   → TUI 将同一个思考周期内的探索工具合并为一个 tool_summary Thought 块。
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -31,13 +30,11 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 40000;
 
 describe('TUI PTY System — Thought Lifecycle', () => {
-  const journey = createTuiSystemJourney();
-  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
-  beforeAll(async () => {
+  beforeEach(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
@@ -63,7 +60,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
-  afterAll(async () => {
+  afterEach(async () => {
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
@@ -84,7 +81,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 阶段块 settle 为单行摘要，最终回答为独立文本块
   // ═══════════════════════════════════════════════════════════════
 
-  step(
+  test(
     'multi-round exploration aggregates into one phase block across model calls (ADR-0030)',
     async () => {
       server.setResponses([
@@ -97,6 +94,9 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         },
         // Response 2: Phase 2 thinking + second tool (same thought cycle)
         {
+          expectedRequest: {
+            toolResults: [{ toolCallId: 't1', contentIncludes: ['Fixture used by Thought'] }],
+          },
           message: {
             reasoning_content: 'PHASE_TWO: also searching the source tree.',
             tool_calls: [
@@ -105,12 +105,16 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         // Response 3: text closes the Thought
-        { message: { content: 'TIMELINE_DONE: exploration complete.' }, delay: 10 },
+        {
+          expectedRequest: {
+            toolResults: [{ toolCallId: 't2', contentIncludes: ['CLAUDE.md'] }],
+          },
+          message: { content: 'TIMELINE_DONE: exploration complete.' },
+          delay: 10,
+        },
       ]);
 
-      await typeText(tui, 'Timeline test');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Timeline test', 15000);
+      await submitUserMessage(tui, server, 'Timeline test', { timeout: 15000 });
 
       await waitForText(() => tui.outputSinceLastAction(), 'TIMELINE_DONE', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -145,7 +149,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 模型回复文本可见
   // ═══════════════════════════════════════════════════════════════
 
-  step(
+  test(
     'single Thought: reasoning + exploration tools → text closes Thought',
     async () => {
       server.setResponses([
@@ -160,12 +164,19 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         // Response 2: plain text output → closes the Thought
-        { message: { content: 'EXPLORE_DONE: project uses LangGraph.' }, delay: 10 },
+        {
+          expectedRequest: {
+            toolResults: [
+              { toolCallId: 'c1', contentIncludes: ['Fixture used by Thought'] },
+              { toolCallId: 'c2', contentIncludes: ['langgraph migration fixture'] },
+            ],
+          },
+          message: { content: 'EXPLORE_DONE: project uses LangGraph.' },
+          delay: 10,
+        },
       ]);
 
-      await typeText(tui, 'Explore the codebase');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Explore the codebase', 15000);
+      await submitUserMessage(tui, server, 'Explore the codebase', { timeout: 15000 });
 
       // Wait for final text → Thought is settled in scrollback
       await waitForText(() => tui.outputSinceLastAction(), 'EXPLORE_DONE', 20000);
@@ -209,7 +220,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 两个工具步骤同块可见
   // ═══════════════════════════════════════════════════════════════
 
-  step(
+  test(
     'multi-phase reasoning merges into one phase block across model calls (ADR-0030)',
     async () => {
       server.setResponses([
@@ -222,18 +233,25 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         },
         // Phase 2 — same thought cycle
         {
+          expectedRequest: {
+            toolResults: [{ toolCallId: 'm1', contentIncludes: ['Fixture used by Thought'] }],
+          },
           message: {
             reasoning_content: 'Phase 2: also need to check package.json.',
             tool_calls: [{ id: 'm2', name: 'read_file', args: { path: 'package.json' } }],
           },
         },
         // Phase 3: text closes the accumulated Thought
-        { message: { content: 'TWO_PHASE_DONE: both files reviewed.' }, delay: 10 },
+        {
+          expectedRequest: {
+            toolResults: [{ toolCallId: 'm2', contentIncludes: ['thought-lifecycle-fixture'] }],
+          },
+          message: { content: 'TWO_PHASE_DONE: both files reviewed.' },
+          delay: 10,
+        },
       ]);
 
-      await typeText(tui, 'Check config files');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Check config files', 15000);
+      await submitUserMessage(tui, server, 'Check config files', { timeout: 15000 });
 
       await waitForText(() => tui.outputSinceLastAction(), 'TWO_PHASE_DONE', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -272,7 +290,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 最终文本正常出现
   // ═══════════════════════════════════════════════════════════════
 
-  step(
+  test(
     'shell_execute keeps its governed tool lifecycle with a verified result',
     async () => {
       server.setResponses([
@@ -291,7 +309,10 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         },
         {
           expectedRequest: {
-            toolResults: [{ toolCallId: 's2', contentIncludes: ['thought-lifecycle-fixture'] }],
+            toolResults: [
+              { toolCallId: 's1', contentIncludes: ['Fixture used by Thought'] },
+              { toolCallId: 's2', contentIncludes: ['thought-lifecycle-fixture'] },
+            ],
           },
           message: { content: 'SHELL_THOUGHT_DONE: exploration complete.' },
           delay: 10,
@@ -299,9 +320,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       ]);
 
       const shellFrames = tui.markScreen();
-      await typeText(tui, 'Explore with shell');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Explore with shell', 15000);
+      await submitUserMessage(tui, server, 'Explore with shell', { timeout: 15000 });
 
       await waitForText(() => tui.outputSinceLastAction(), 'SHELL_THOUGHT_DONE', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -342,7 +361,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - 无 Thinking preview 行
   // ═══════════════════════════════════════════════════════════════
 
-  step(
+  test(
     'tools-only (no reasoning) → label is bare tool count without Thought prefix',
     async () => {
       server.setResponses([
@@ -352,14 +371,19 @@ describe('TUI PTY System — Thought Lifecycle', () => {
             tool_calls: [{ id: 'n1', name: 'read_file', args: { path: 'CLAUDE.md' } }],
           },
         },
-        { message: { content: 'TOOLS_ONLY_DONE: file read.' }, delay: 10 },
+        {
+          expectedRequest: {
+            toolResults: [{ toolCallId: 'n1', contentIncludes: ['Fixture used by Thought'] }],
+          },
+          message: { content: 'TOOLS_ONLY_DONE: file read.' },
+          delay: 10,
+        },
       ]);
 
-      await typeText(tui, 'Tools only no thinking');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Tools only no thinking', 15000);
+      const toolsOnlyFrames = tui.markScreen();
+      await submitUserMessage(tui, server, 'Tools only no thinking', { timeout: 15000 });
 
-      await waitForText(() => tui.outputSinceLastAction(), 'read 1 file', 25000);
+      await waitForText(() => tui.outputSinceLastAction(), 'TOOLS_ONLY_DONE: file read.', 25000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
@@ -367,6 +391,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
 
       // ── 关键断言：不应该有 "Thought for" 前缀 ──
       expect(screenContains(output, 'read 1 file')).toBe(true);
+      const actionLocalRender = tui
+        .screenFramesSince(toolsOnlyFrames)
+        .map((frame) => frame.slice(Math.max(0, frame.lastIndexOf('❯ Tools only no thinking'))))
+        .join('\n');
+      expect(screenContains(actionLocalRender, 'Thought for')).toBe(false);
 
       // ── Settled 后无 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
@@ -391,7 +420,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
   //   - settle 后随文本块保留在消息列表中（时长并入题头，信息不丢失）
   // ═══════════════════════════════════════════════════════════════
 
-  step(
+  test(
     'thinking-only (no tools) → label is Thought for Xs without tool counts',
     async () => {
       server.setResponses([
@@ -404,9 +433,7 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         { message: { content: 'THINK_ONLY_DONE: thought it through.' }, delay: 10 },
       ]);
 
-      await typeText(tui, 'Think only no tools');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Think only no tools', 15000);
+      await submitUserMessage(tui, server, 'Think only no tools', { timeout: 15000 });
 
       // 等 Thought 完成
       await waitForText(() => tui.outputSinceLastAction(), 'Thought for', 25000);
@@ -432,5 +459,4 @@ describe('TUI PTY System — Thought Lifecycle', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run());
 });

@@ -10,7 +10,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -75,9 +75,7 @@ describe('TUI PTY System — ask_user', () => {
   test(
     'ask_user renders question, Enter accepts default and recovers',
     async () => {
-      await typeText(tui, 'Ask me a question');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Ask me a question', 15000);
+      await submitUserMessage(tui, server, 'Ask me a question', { timeout: 15000 });
 
       // The question may appear in the Tool Card before the interactive footer
       // finishes rendering. The last option is the modal-ready witness.

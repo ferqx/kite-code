@@ -82,11 +82,7 @@ describe('TUI PTY System — Workspace Trust', () => {
     async () => {
       // The safe default is Exit; explicitly move to Trust before confirming.
       tui.write('\x1b[A');
-      await waitForText(
-        () => tui.outputSinceLastAction(),
-        '› Trust this workspace and continue',
-        10000,
-      );
+      await waitForText(() => tui.viewport(), '› Trust this workspace and continue', 10000);
       tui.write('\r');
       await waitForTuiReady(tui, 'main', workspace);
       console.log('  Main UI booted after trust');

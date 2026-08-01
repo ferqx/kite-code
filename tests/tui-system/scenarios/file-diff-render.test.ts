@@ -24,9 +24,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
@@ -67,7 +69,12 @@ describe('TUI PTY System — File Tool Diff Render', () => {
           ],
         },
       },
-      { message: { content: 'Notes file updated.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_wf1', contentIncludes: ['+新结尾'] }],
+        },
+        message: { content: 'Notes file updated.' },
+      },
       {
         message: {
           content: 'I will add a changelog.',
@@ -80,7 +87,14 @@ describe('TUI PTY System — File Tool Diff Render', () => {
           ],
         },
       },
-      { message: { content: 'Changelog created.' } },
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_wf2', contentIncludes: ['Wrote 3 lines to changelog.md'] },
+          ],
+        },
+        message: { content: 'Changelog created.' },
+      },
       {
         message: {
           content: 'I will rewrite the changelog identically.',
@@ -93,7 +107,17 @@ describe('TUI PTY System — File Tool Diff Render', () => {
           ],
         },
       },
-      { message: { content: 'Changelog re-verified.' } },
+      {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_wf4',
+              contentIncludes: ['Wrote 3 lines to changelog.md (content unchanged)'],
+            },
+          ],
+        },
+        message: { content: 'Changelog re-verified.' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -111,9 +135,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
   step(
     'write_file overwrite renders Write verb and diff summary with list-item context lines intact',
     async () => {
-      await typeText(tui, 'Update my notes file');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Update my notes file', 15000);
+      await submitUserMessage(tui, server, 'Update my notes file', { timeout: 15000 });
 
       // accept-edits mode auto-approves the workspace write_file — wait
       // directly for tool execution + agent's follow-up response
@@ -137,6 +159,9 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       // Genuine removed/added lines: marker glued to the text
       expect(screenContains(output, '3 -旧结尾')).toBe(true);
       expect(screenContains(output, '3 +新结尾')).toBe(true);
+      expect(readFileSync(join(workspace.workspace, 'notes.md'), 'utf8')).toBe(
+        '- 嘻嘻嘻\n- 详细信息\n新结尾',
+      );
 
       // TUI should recover — prompt visible
       expect(screenContains(output, '❯')).toBe(true);
@@ -149,9 +174,7 @@ describe('TUI PTY System — File Tool Diff Render', () => {
   step(
     'write_file create renders Create verb and plain content summary',
     async () => {
-      await typeText(tui, 'Add a changelog');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Add a changelog', 15000);
+      await submitUserMessage(tui, server, 'Add a changelog', { timeout: 15000 });
 
       await waitForText(() => tui.outputSinceLastAction(), 'Changelog created.', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -164,6 +187,9 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       // Plain content summary (no diff markers for new files)
       expect(screenContains(output, 'Wrote 3 lines to changelog.md')).toBe(true);
       expect(screenContains(output, '# Changelog')).toBe(true);
+      expect(readFileSync(join(workspace.workspace, 'changelog.md'), 'utf8')).toBe(
+        CHANGELOG_CONTENT,
+      );
 
       // TUI should recover — prompt visible
       expect(screenContains(output, '❯')).toBe(true);
@@ -176,9 +202,9 @@ describe('TUI PTY System — File Tool Diff Render', () => {
   step(
     'write_file no-op overwrite renders Write verb with content-unchanged marker',
     async () => {
-      await typeText(tui, 'Rewrite the changelog identically');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Rewrite the changelog identically', 15000);
+      await submitUserMessage(tui, server, 'Rewrite the changelog identically', {
+        timeout: 15000,
+      });
 
       await waitForText(() => tui.outputSinceLastAction(), 'Changelog re-verified.', 20000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -190,6 +216,9 @@ describe('TUI PTY System — File Tool Diff Render', () => {
       // assert presence of the new card's label only)
       expect(screenContains(output, 'Write (changelog.md)')).toBe(true);
       expect(screenContains(output, '(content unchanged)')).toBe(true);
+      expect(readFileSync(join(workspace.workspace, 'changelog.md'), 'utf8')).toBe(
+        CHANGELOG_CONTENT,
+      );
 
       // TUI should recover — prompt visible
       expect(screenContains(output, '❯')).toBe(true);

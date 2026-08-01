@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
@@ -50,7 +50,13 @@ describe('TUI PTY System — Tool Parse Error', () => {
         },
         delay: 50,
       },
-      { message: { content: 'Kernel recovered after the invalid tool input.' }, delay: 50 },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['Invalid input'] }],
+        },
+        message: { content: 'Kernel recovered after the invalid tool input.' },
+        delay: 50,
+      },
       { message: { content: 'Recovery message after parse error!' }, delay: 50 },
     ]);
 
@@ -69,9 +75,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
   step(
     'malformed tool call args do not crash TUI, returns to idle',
     async () => {
-      await typeText(tui, 'Run a broken command');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Run a broken command', 15000);
+      await submitUserMessage(tui, server, 'Run a broken command', { timeout: 15000 });
 
       await waitForText(() => tui.outputSinceLastAction(), 'Invalid input', 15000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
@@ -109,9 +113,7 @@ describe('TUI PTY System — Tool Parse Error', () => {
   step(
     'TUI accepts new message after tool parse error',
     async () => {
-      await typeText(tui, 'Hello after broken tool');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Hello after broken tool', 15000);
+      await submitUserMessage(tui, server, 'Hello after broken tool', { timeout: 15000 });
 
       // Wait for the recovery response
       await waitForText(

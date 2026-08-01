@@ -81,10 +81,18 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     证明没有提前终止或无限重试。
 17. Mock 模型的成功文字不是工具成功证据。Harness 会按 `tool_call_id` 跨交错的父 Agent/Subagent
     请求跟踪 Tool result，未闭合调用在 teardown 失败；明确取消的调用必须显式标记 aborted。
-    需要证明成功的场景还必须在 canned response 前校验 Tool result 中的唯一 marker，并同时用
+    每个未取消调用的 continuation 都必须在 canned response 前声明并校验 Tool result 中的唯一
+    结果 marker；预期失败同样需要验证其分类或原因，不能只检查成功路径。涉及副作用时还要同时用
     viewport、screen-frame history 或磁盘状态验证用户可见/持久副作用。该机制只能证明测试夹具观察到
     的协议和结果，不能把显式关闭 sandbox 的确定性 Shell 场景解释为 native sandbox 资格证据；
     Seatbelt/bubblewrap 的正向证据仍只来自 opt-in native smoke。
+18. 无头 PTY 能稳定验证普通 Enter、方向键、Escape、Tab 和 bracketed paste，但不能保证完成宿主终端
+    对 Kitty Shift+Enter 的协议协商。Shift+Enter 到软换行的键解析由 Ink 组件测试覆盖；PTY 默认
+    场景用 bracketed paste 验证多行值从输入控件进入真实 model request 的端到端语义。不得发送一个
+    未被协商的 CSI-u 序列、只检查两段文本仍可见，就声称已经验证软换行。
+19. Mock request 回执只在显式 request baseline 之后匹配最新真实 user turn；Kernel 注入的
+    `<runtime-state ...>` 消息不属于用户输入。输入提交的 Enter 重试必须在活动字段离开提交值、
+    新 request 或新 modal 出现时停止，避免同一个重试跨过焦点边界执行下一层操作。
 
 ## 分层选择
 

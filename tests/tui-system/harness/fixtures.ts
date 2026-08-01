@@ -65,8 +65,8 @@ export interface MockModelServer {
   getRequestCount(): number;
   /** Full request bodies received by /v1/chat/completions */
   getRequests(): MockChatRequest[];
-  /** Whether a chat request at or after since includes text in any message content */
-  hasRequestMessage(text: string, since?: number): boolean;
+  /** Whether the first request after since contains this exact user message. */
+  hasRequestMessage(text: string, since: number): boolean;
   /** Configure the local /v1/models response used by first-run scenarios. */
   setModelsResponse(response: { status?: number; delay?: number; models?: string[] }): void;
   /** GET URLs received by the local model-discovery fixture. */
@@ -166,6 +166,19 @@ export function createMockModelServer(): MockModelServer {
             .map((message) => message.tool_call_id)
             .filter((id): id is string => typeof id === 'string' && id.length > 0),
         );
+        const resolvedPendingIds = [...toolResultIds].filter((toolCallId) =>
+          pendingToolContinuations.has(toolCallId),
+        );
+        const explicitlyCheckedIds = new Set(
+          (resp.expectedRequest?.toolResults ?? []).map((expected) => expected.toolCallId),
+        );
+        for (const toolCallId of resolvedPendingIds) {
+          if (!explicitlyCheckedIds.has(toolCallId)) {
+            requestContractFailures.push(
+              `request ${idx + 1} resolves tool result ${toolCallId} without an expectedRequest.toolResults outcome contract`,
+            );
+          }
+        }
         for (const toolCallId of toolResultIds) {
           pendingToolContinuations.delete(toolCallId);
         }
@@ -184,7 +197,7 @@ export function createMockModelServer(): MockModelServer {
           for (const text of expected.contentIncludes ?? []) {
             if (!content.includes(text)) {
               requestContractFailures.push(
-                `tool result ${expected.toolCallId} in request ${idx + 1} does not include ${JSON.stringify(text)}`,
+                `tool result ${expected.toolCallId} in request ${idx + 1} does not include ${JSON.stringify(text)}; content=${JSON.stringify(content.slice(0, 500))}`,
               );
             }
           }
@@ -447,12 +460,23 @@ export function createMockModelServer(): MockModelServer {
     },
     getRequestCount: () => callCount,
     getRequests: () => [...requests],
-    hasRequestMessage: (text: string, since = 0) =>
-      requests
-        .slice(since)
-        .some((request) =>
-          request.messages.some((message) => messageContentIncludes(message.content, text)),
-        ),
+    hasRequestMessage: (text: string, since: number) => {
+      const messages = requests[since]?.messages ?? [];
+      const expected = normalizeRequestedText(text);
+      let matched = false;
+      for (let index = 0; index < messages.length; index++) {
+        const message = messages[index];
+        if (message?.role !== 'user') continue;
+        const content = normalizedMessageContent(message.content);
+        if (!content || content.trimStart().startsWith('<runtime-state')) continue;
+        if (content === expected) {
+          matched = true;
+          continue;
+        }
+        if (matched) return false;
+      }
+      return matched;
+    },
     setModelsResponse(response) {
       modelsResponse = {
         status: response.status ?? 200,
@@ -490,16 +514,23 @@ export function createMockModelServer(): MockModelServer {
   };
 }
 
-function messageContentIncludes(content: unknown, text: string): boolean {
-  if (typeof content === 'string') return content.includes(text);
+function normalizedMessageContent(content: unknown): string | undefined {
+  if (typeof content === 'string') return normalizeRequestedText(content);
   if (Array.isArray(content)) {
-    return content.some((part) => {
-      if (!part || typeof part !== 'object') return false;
-      const record = part as Record<string, unknown>;
-      return typeof record.text === 'string' && record.text.includes(text);
-    });
+    const text = content
+      .map((part) => {
+        if (!part || typeof part !== 'object') return '';
+        const record = part as Record<string, unknown>;
+        return typeof record.text === 'string' ? record.text : '';
+      })
+      .join('');
+    return normalizeRequestedText(text);
   }
-  return false;
+  return undefined;
+}
+
+function normalizeRequestedText(text: string): string {
+  return text.replaceAll('\r\n', '\n');
 }
 
 function serializedMessageContent(content: unknown): string {
