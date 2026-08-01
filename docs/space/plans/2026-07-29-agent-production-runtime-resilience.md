@@ -10,9 +10,11 @@
 Task 1C.1 已由 `4b8eec058df0af545675fc0e1c4135ee855848fd` 完成；Task 1C.2 与
 1C.4 已由 `1e21055eb8b2579d710eb566728294f2ad8b2621` 完成；Task 1C.3 已由
 `d0bd571e6a937aac55850bcc09df6f41bf95ac99` 完成；Task 1C.6 已由
-`2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` 完成。Task 1C.5 已以
-`4a64837855b76c8c71e956b19d04ad67d77b18c9` 全绿基线激活，负责统一 failure-mode
-conformance；1C.7/1C.8 继续按依赖保持未绑定。规范记录见
+`2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` 完成。Task 1C.5 已由
+`aa66e872f3206df9718493adbfef7445fb582a4f` 实现，并以
+`dfd8f209f89b4980b9c3905d3e73c166b33bea2b` 的全绿 Required qualification 完成；
+Task 1C.7 已以上述 qualification head 激活，负责 soak/fault evidence；1C.8 继续按依赖
+保持未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
@@ -345,6 +347,15 @@ ADR-0049/ADR-0050 的调度/客户端投影在 upgrade、feature disable 和 art
 - terminal reason；
 - 用户文案；
 - 是否允许安全 retry。
+
+完成证据：`aa66e872f3206df9718493adbfef7445fb582a4f` 固化 31 个 mode 的封闭
+Core policy table、精确 snapshot/entrypoint conformance，并把 run deadline 与 resource
+admission 两类生产 producer 直接接入 resolver。process-tree limit 已覆盖 table semantics 与
+terminal projection，但尚未声明 production producer 直接接线。遗漏 external-effects facts 时
+动态继续/降级一律 fail closed 为 unknown；TUI 与 CLI 仅消费同一 terminal mapper。qualification head
+`dfd8f209f89b4980b9c3905d3e73c166b33bea2b` 的
+[Required run 30676359548](https://github.com/ferqx/kite-code/actions/runs/30676359548)
+五个 job 全部通过，同 head 三个原生 workflow 通过，独立复核 GO 且 P0/P1/P2 均为 0。
 
 ### Task 1C.6：修复 Listener warning 与 PTY timeout
 

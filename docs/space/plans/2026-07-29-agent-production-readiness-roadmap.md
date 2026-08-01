@@ -41,8 +41,8 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   唯一产生 `MS:1A-DONE`。该 milestone 不产生 production-qualified route 或
   production artifact；当前 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
   route 集合也为空。
-- 1B.0/1B.1/1B.4 与 1C.1/1C.2/1C.3/1C.4/1C.6 已完成；D-04 以空支持集关闭。
-  1B.2/1B.3 与 1C.5 正在执行；其他后续 milestone 均为 pending。
+- 1B.0/1B.1/1B.4 与 1C.1–1C.6 已完成；D-04 以空支持集关闭。1B.2/1B.3
+  与 1C.7 正在执行；1C.8 与其他后续 milestone 均为 pending。
 
 ## 首发支持边界
 

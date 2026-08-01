@@ -439,8 +439,13 @@ const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
 const phase1RemoteMcpCommit = '545161a7103365038989c6a935a216c5bd5fc7e8';
 const phase1PrivacyClosureEvidenceCommit = '389a0cc45c36e59d961c659ab4df4015a722f7de';
 const phase1FailureConformanceBaseline = '4a64837855b76c8c71e956b19d04ad67d77b18c9';
+const phase1FailureConformanceCommit = 'aa66e872f3206df9718493adbfef7445fb582a4f';
+const phase1FailureConformanceQualification = 'dfd8f209f89b4980b9c3905d3e73c166b33bea2b';
+const phase1RuntimeCompletionPath =
+  'docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md';
 const phase1PrivacyPlan = sources.get('1A') ?? '';
 const phase1RuntimePlan = sources.get('1C') ?? '';
+const phase1RuntimeCompletion = readFileSync(join(root, phase1RuntimeCompletionPath), 'utf8');
 const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
@@ -686,20 +691,21 @@ if (!phase1FailureConformanceBinding) {
   if (!phase1FailureConformanceBinding.includes(`| \`${phase1FailureConformanceBaseline}\` |`)) {
     fail('1C.5: binding must use the reviewed Phase 1A closure baseline');
   }
-  if (!phase1FailureConformanceBinding.includes('| `in_progress` |')) {
-    fail('1C.5: failure-mode conformance binding must be in_progress');
+  if (!phase1FailureConformanceBinding.includes('| `completed` |')) {
+    fail('1C.5: failure-mode conformance binding must be completed');
   }
   const cells = parsePipeRow(phase1FailureConformanceBinding);
-  if (cells[6] !== '—') {
-    fail('1C.5: in-progress binding must not claim a completion record');
+  if (cells[6]?.replaceAll('`', '') !== phase1RuntimeCompletionPath) {
+    fail(`1C.5: completionRecordPath must be ${phase1RuntimeCompletionPath}`);
   }
 }
 if (
+  !phase1RuntimePlan.includes(`Task 1C.5 已由\n\`${phase1FailureConformanceCommit}\` 实现`) ||
   !phase1RuntimePlan.includes(
-    `Task 1C.5 已以\n\`${phase1FailureConformanceBaseline}\` 全绿基线激活`,
+    `\`${phase1FailureConformanceQualification}\` 的全绿 Required qualification 完成`,
   )
 ) {
-  fail('1C.5: runtime plan must record the active reviewed baseline');
+  fail('1C.5: runtime plan must record implementation and qualification completion');
 }
 const phase1RuntimePlanIndexRow = plansIndex
   .split('\n')
@@ -708,11 +714,21 @@ const phase1RuntimePlanIndexRow = plansIndex
       '| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) |',
     ),
   );
-if (!phase1RuntimePlanIndexRow?.includes('1C.5 in progress')) {
-  fail('plans/index.md: Phase 1C row must record 1C.5 in progress');
+if (
+  !phase1RuntimePlanIndexRow?.includes('Task 1C.1–1C.6 completed') ||
+  !phase1RuntimePlanIndexRow.includes('1C.7 in progress') ||
+  !phase1RuntimePlanIndexRow.includes(
+    '../execution/completed/2026-07-30-agent-production-runtime-resilience.md',
+  )
+) {
+  fail('plans/index.md: Phase 1C row must record 1C.5 completion and link its record');
 }
-if (!/1B\.2\/1B\.3 与 1C\.5 正在执行/.test(roadmap)) {
-  fail('roadmap must record 1C.5 in progress');
+if (
+  !/1C\.1–1C\.6 已完成/.test(roadmap) ||
+  !/1B\.2\/1B\.3\s+与 1C\.7 正在执行/.test(roadmap) ||
+  !/1C\.8 与其他后续 milestone 均为 pending/.test(roadmap)
+) {
+  fail('roadmap must record 1C.5 completed, 1C.7 active, and 1C.8 pending');
 }
 const phase1FailureConformanceRevision = decisionRegister
   .split('\n')
@@ -735,6 +751,72 @@ if (phase1FailureConformanceRevision.length !== 1) {
   }
 }
 requireReachableCommit(phase1FailureConformanceBaseline, '1C.5');
+
+const phase1FailureConformanceCompletionRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 16 |'));
+if (phase1FailureConformanceCompletionRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 16 exactly once; found ${phase1FailureConformanceCompletionRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '完成 1C.5 failure-mode conformance',
+    '激活 1C.7 soak/fault evidence',
+    phase1FailureConformanceCommit,
+    phase1FailureConformanceQualification,
+    'Required run 30676359548',
+    '五个 job 全部通过',
+    '同 head 三个原生 workflow 全部通过',
+    'P0/P1/P2 均为 0',
+    '不产生 `MS:1C-DONE`',
+    '保持 1C.8 pending',
+  ]) {
+    if (!phase1FailureConformanceCompletionRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 16 must identify ${evidence}`);
+    }
+  }
+}
+
+for (const evidence of [
+  phase1FailureConformanceCommit,
+  phase1FailureConformanceQualification,
+  'Required run 30676359548',
+  'Task 1C.5 独立复核最终 GO，P0/P1/P2 均为 0',
+  '`MS:1C-DONE` 仍等待 1C.7 与 1C.8',
+]) {
+  if (!phase1RuntimeCompletion.includes(evidence)) {
+    fail(`1C.5 completion record must identify ${evidence}`);
+  }
+}
+requireReachableCommit(phase1FailureConformanceCommit, '1C.5 implementation');
+requireReachableCommit(phase1FailureConformanceQualification, '1C.5 qualification');
+
+const phase1SoakBinding = decisionRegister.split('\n').find((line) => line.startsWith('| 1C.7 |'));
+if (!phase1SoakBinding) {
+  fail('1C.7: missing soak/fault evidence execution binding');
+} else {
+  if (!phase1SoakBinding.includes(`| \`${phase1FailureConformanceQualification}\` |`)) {
+    fail('1C.7: binding must use the completed 1C.5 qualification head');
+  }
+  if (!phase1SoakBinding.includes('| `in_progress` |')) {
+    fail('1C.7: soak/fault evidence binding must be in_progress');
+  }
+  const cells = parsePipeRow(phase1SoakBinding);
+  if (cells[6] !== '—') {
+    fail('1C.7: in-progress binding must not claim a completion record');
+  }
+}
+if (
+  !phase1RuntimePlan.includes(
+    'Task 1C.7 已以上述 qualification head 激活，负责 soak/fault evidence',
+  )
+) {
+  fail('1C.7: runtime plan must record activation from the 1C.5 qualification head');
+}
+if (decisionRegister.split('\n').some((line) => line.startsWith('| 1C.8 |'))) {
+  fail('1C.8: execution binding must remain absent until Task 1C.7 completes');
+}
 
 for (const [description, pattern] of [
   ['Phase 1A completion', /Phase 1A（Task 1A\.1–1A\.7）已完成/],
