@@ -8,12 +8,12 @@
 设计依据：RFC §7、§9.4、§18
 
 Task 1B.0 已完成：三平台原生 probe 均为 `excluded`、`productionSupported=false`，
-ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1/1B.4 已完成；1B.2/1B.3 仍基于
-`3ada4246b149444ce27ed713cd5425090367c1fc` 执行。2026-08-01 的负向完成加固批次已补齐
-platform backend 与 process-tree 专项契约、bubblewrap syscall-filter 强度投影和 native workflow
-覆盖；任务仍等待该批次的 fresh 三平台 artifact 与独立复核后收口为明确 `excluded`，不产生
-production qualification 或 `MS:1B-DONE`。其余 Task 按依赖保持未绑定。完成证据见
+ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1–1B.4 已完成；其中 1B.2/1B.3 以
+`c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4` 的候选加固、fresh 三平台 artifact 与独立复核
+收口为明确 `excluded`。该负向完成不产生 production qualification 或 `MS:1B-DONE`。
+Task 1B.5 已基于同一提交激活，其余 Task 按依赖保持未绑定。完成证据见
 [Task 1B.1 完成记录](../execution/completed/2026-07-31-agent-production-execution-boundary.md)与
+[Task 1B.2/1B.3 完成记录](../execution/completed/2026-08-01-agent-production-platform-exclusions.md)、
 [Task 1B.4 完成记录](../execution/completed/2026-08-01-agent-production-network-boundary.md)，规范 binding 见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
@@ -344,7 +344,7 @@ Runtime/MCP/Skill 前失败。
 
 ## 验收条件
 
-- [ ] macOS/Linux 支持声明与真实隔离强度一致；
+- [x] macOS/Linux 支持声明与真实隔离强度一致；
 - [ ] 写入支持平台实现真实 `workspace_write`；
 - [ ] allowlist 无 DNS/redirect/child bypass；
 - [ ] protected path 在所有本地执行路径统一生效；
@@ -352,10 +352,10 @@ Runtime/MCP/Skill 前失败。
 - [ ] 后台/并发/委派 writer 强制 worktree；
 - [ ] worktree 创建失败不触碰共享 checkout；
 - [ ] TUI/CLI 显示实际边界；
-- [ ] 三平台 artifact conformance 有明确通过/不支持结果；
+- [x] 三平台 artifact conformance 有明确通过/不支持结果；
 - [ ] local stdio/remote HTTP MCP transport 使用同一有效 boundary revision；
-- [ ] production shell 平台强制 process-tree 上限，不能执行的平台明确 unsupported；
-- [ ] active/book/ADR/map 与实现同步。
+- [x] production shell 平台强制 process-tree 上限，不能执行的平台明确 unsupported；
+- [x] active/book/ADR/map 与当前 1B.2/1B.3 实现同步。
 
 ## 回滚
 

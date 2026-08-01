@@ -21,8 +21,8 @@ production artifact。候选组合不是支持声明：
 
 | runner 候选 | backend 候选 | 当前结论 | 主要缺口 |
 | --- | --- | --- | --- |
-| macOS 15 | Seatbelt | `excluded` | 本地 filesystem profile 已加固，但缺少新 release-pinned native artifact、完整 process-tree 上限、Skill/MCP 继承与入口组合证据 |
-| Ubuntu 24.04 | bubblewrap | `excluded` | Workspace 外/protected path deny 未证明；无完整 process-tree 上限、继承与入口组合证据 |
+| macOS 15 | Seatbelt | `excluded` | fresh candidate artifact 证明 filesystem 与 network-off，但没有硬 process-tree 上限、cleanup、Skill/MCP 继承与入口组合证据 |
+| Ubuntu 24.04 | none（bubblewrap namespace probe 不可用） | `excluded` | runner 不能启动所需 namespace；没有 filesystem、process-tree、继承与入口组合证据 |
 | Windows Server 2025 | none | `excluded` | 没有 filesystem/network sandbox backend |
 
 固定证据来自
@@ -31,6 +31,16 @@ production artifact。候选组合不是支持声明：
 x64 artifact 均为 `excluded`、`productionSupported=false`；三个 artifact 的 archive digest
 固定在 support matrix。它们不包含 TUI/CLI composition evidence，也不能产生 production
 资格。
+
+2026-08-01 的候选加固证据来自
+[Platform Capability Probe run 30693651821](https://github.com/ferqx/kite-code/actions/runs/30693651821)，
+绑定实现提交 `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4`。该 run 不替换上述 D-04
+固定证据或批准 registry，只验证最新候选实现仍安全排除：macOS evidence digest 为
+`sha256:439b29a506a43d8ff684a289a0ee083fffff2ac08849798a2082299f78029590`，Ubuntu 为
+`sha256:88e9de9a7480dc27bd651a477d5befd2ca3b3bdb1413b30b8d07cfdf24dcf176`，Windows 为
+`sha256:7dfd1390fae758ac64d74476231e53dd4f5233bef6a5e8832fc324dcb6a82f7d`；三者均为
+`excluded`、`productionSupported=false`，且 `hardCountMechanism=none`。因此 Task 1B.2/1B.3
+以负向结果完成，但 production support set 继续为空。
 
 ## 准入语义
 

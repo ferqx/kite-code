@@ -4,7 +4,7 @@
 创建：2026-07-29
 优先级：P0
 初始论证基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
-当前执行复核基线：`389a0cc45c36e59d961c659ab4df4015a722f7de`（2026-08-01）
+当前执行复核基线：`c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4`（2026-08-01）
 依赖：已批准的
 [`Agent 生产就绪与渐进发布控制 RFC`](../../design/2026-07-29-agent-production-readiness-rfc.md)
 替代：无
@@ -41,8 +41,9 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   唯一产生 `MS:1A-DONE`。该 milestone 不产生 production-qualified route 或
   production artifact；当前 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
   route 集合也为空。
-- 1B.0/1B.1/1B.4 与 1C.1–1C.6 已完成；D-04 以空支持集关闭。1B.2/1B.3
-  与 1C.7 正在执行；1C.8 与其他后续 milestone 均为 pending。1C.8 已开始不产生 milestone
+- 1B.0–1B.4 与 1C.1–1C.6 已完成；D-04 以空支持集关闭。1B.2/1B.3 的完成结论是
+  三平台候选均明确 `excluded`，不产生 production qualification；1B.5 与 1C.7 正在执行。
+  1C.8 与其他后续 milestone 均为 pending。1C.8 已开始不产生 milestone
   的 pre-close 文档审计，但完成与 `MS:1C-DONE` 仍等待 1C.7 qualification artifact。
 
 ## 首发支持边界

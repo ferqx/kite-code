@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
+import { loadApprovedProductionExecutionQualificationRegistryV1 } from '../src/core/config/execution-qualification';
 
 interface PlanSpec {
   alias: string;
@@ -434,6 +435,9 @@ const phase1OperationalCommit = 'd0bd571e6a937aac55850bcc09df6f41bf95ac99';
 const phase1CompositionCommit = '2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee';
 const phase1NativeEvidenceCommit = '1063e879933f3e1b0cf8c0958363c999bb2696ab';
 const phase1BoundaryCommit = '3ada4246b149444ce27ed713cd5425090367c1fc';
+const phase1PlatformExclusionCommit = 'c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4';
+const phase1PlatformExclusionCompletionPath =
+  'docs/space/execution/completed/2026-08-01-agent-production-platform-exclusions.md';
 const phase1NetworkCommit = 'bc03f77a3dac2962cd3158d3413f292b8388a0d8';
 const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
 const phase1RemoteMcpCommit = '545161a7103365038989c6a935a216c5bd5fc7e8';
@@ -587,11 +591,33 @@ for (const taskId of ['1B.2', '1B.3']) {
     fail(`${taskId}: missing post-boundary execution binding`);
     continue;
   }
-  if (!bindingRow.includes(`| \`${phase1BoundaryCommit}\` |`)) {
+  const cells = parsePipeRow(bindingRow);
+  if (cells[2]?.replaceAll('`', '') !== phase1BoundaryCommit) {
     fail(`${taskId}: binding must use the completed execution-boundary baseline`);
   }
-  if (!bindingRow.includes('| `in_progress` |')) {
-    fail(`${taskId}: post-boundary execution binding must be in_progress`);
+  if (cells[4]?.replaceAll('`', '') !== 'completed') {
+    fail(`${taskId}: platform-exclusion execution binding must be completed`);
+  }
+  if (cells[6]?.replaceAll('`', '') !== phase1PlatformExclusionCompletionPath) {
+    fail(`${taskId}: completionRecordPath must be ${phase1PlatformExclusionCompletionPath}`);
+  }
+}
+
+const phase1ProtectedPathBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1B.5 |'));
+if (!phase1ProtectedPathBinding) {
+  fail('1B.5: missing protected-path execution binding');
+} else {
+  const cells = parsePipeRow(phase1ProtectedPathBinding);
+  if (cells[2]?.replaceAll('`', '') !== phase1PlatformExclusionCommit) {
+    fail('1B.5: binding must use the completed platform-exclusion baseline');
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'in_progress') {
+    fail('1B.5: protected-path execution binding must be in_progress');
+  }
+  if (cells[6] !== '—') {
+    fail('1B.5: in-progress binding must not claim a completion record');
   }
 }
 
@@ -682,6 +708,24 @@ if (!phase1PrivacyPlanIndexRow) {
   }
 }
 
+const phase1ExecutionPlanIndexRow = plansIndex
+  .split('\n')
+  .find((line) =>
+    line.startsWith(
+      '| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) |',
+    ),
+  );
+if (
+  !phase1ExecutionPlanIndexRow?.includes('Task 1B.0–1B.4 completed') ||
+  !phase1ExecutionPlanIndexRow.includes('1B.2/1B.3 以三平台 `excluded` 负向收口') ||
+  !phase1ExecutionPlanIndexRow.includes('Task 1B.5 in progress') ||
+  !phase1ExecutionPlanIndexRow.includes(
+    '../execution/completed/2026-08-01-agent-production-platform-exclusions.md',
+  )
+) {
+  fail('plans/index.md: Phase 1B row must record platform exclusions and 1B.5 activation');
+}
+
 const phase1FailureConformanceBinding = decisionRegister
   .split('\n')
   .find((line) => line.startsWith('| 1C.5 |'));
@@ -725,10 +769,11 @@ if (
 }
 if (
   !/1C\.1–1C\.6 已完成/.test(roadmap) ||
-  !/1B\.2\/1B\.3\s+与 1C\.7 正在执行/.test(roadmap) ||
+  !/1B\.2\/1B\.3 的完成结论是\s+三平台候选均明确 `excluded`/.test(roadmap) ||
+  !/1B\.5 与 1C\.7 正在执行/.test(roadmap) ||
   !/1C\.8 与其他后续 milestone 均为 pending/.test(roadmap)
 ) {
-  fail('roadmap must record 1C.5 completed, 1C.7 active, and 1C.8 pending');
+  fail('roadmap must record 1B.2/1B.3 excluded completion, 1B.5/1C.7 active, and 1C.8 pending');
 }
 const phase1FailureConformanceRevision = decisionRegister
   .split('\n')
@@ -830,12 +875,11 @@ for (const [description, pattern] of [
   }
 }
 if (
-  !new RegExp(
-    `^当前执行复核基线：\`${phase1PrivacyClosureEvidenceCommit}\`（2026-08-01）$`,
-    'm',
-  ).test(roadmap)
+  !new RegExp(`^当前执行复核基线：\`${phase1PlatformExclusionCommit}\`（2026-08-01）$`, 'm').test(
+    roadmap,
+  )
 ) {
-  fail('roadmap must bind the current execution review baseline to the 1A.7 evidence commit');
+  fail('roadmap must bind the current execution review baseline to the platform-exclusion commit');
 }
 
 const phase1PrivacyRevision = decisionRegister
@@ -976,6 +1020,167 @@ for (const commit of [
     fail(`${relative(root, phase1BoundaryCompletionPath)} must identify evidence commit ${commit}`);
   }
   requireReachableCommit(commit, '1B.1');
+}
+
+const phase1SupportMatrix = JSON.parse(
+  readFileSync(join(root, 'release', 'platform-capabilities', 'support-matrix-v1.json'), 'utf8'),
+) as {
+  version?: unknown;
+  decisionId?: unknown;
+  status?: unknown;
+  selectedNetworkMode?: unknown;
+  productionSupportedPlatforms?: unknown;
+  targets?: unknown;
+};
+if (
+  phase1SupportMatrix.version !== 1 ||
+  phase1SupportMatrix.decisionId !== 'D-04' ||
+  phase1SupportMatrix.status !== 'accepted_empty_support_set' ||
+  phase1SupportMatrix.selectedNetworkMode !== 'off' ||
+  !Array.isArray(phase1SupportMatrix.productionSupportedPlatforms) ||
+  phase1SupportMatrix.productionSupportedPlatforms.length !== 0
+) {
+  fail('D-04 support matrix must retain the accepted empty production support set');
+}
+const phase1SupportTargets = Array.isArray(phase1SupportMatrix.targets)
+  ? phase1SupportMatrix.targets
+  : [];
+const expectedExcludedRunners = new Set(['macos-15', 'ubuntu-24.04', 'windows-2025']);
+const actualExcludedRunners = phase1SupportTargets.flatMap((target) => {
+  if (
+    typeof target !== 'object' ||
+    target === null ||
+    typeof (target as { runner?: unknown }).runner !== 'string' ||
+    (target as { currentOutcome?: unknown }).currentOutcome !== 'excluded'
+  ) {
+    return [];
+  }
+  return [(target as { runner: string }).runner];
+});
+if (
+  phase1SupportTargets.length !== expectedExcludedRunners.size ||
+  actualExcludedRunners.length !== expectedExcludedRunners.size ||
+  new Set(actualExcludedRunners).size !== expectedExcludedRunners.size ||
+  actualExcludedRunners.some((runner) => !expectedExcludedRunners.has(runner))
+) {
+  fail('D-04 support matrix must retain exactly three explicitly excluded candidate runners');
+}
+
+const phase1ApprovedRegistry = loadApprovedProductionExecutionQualificationRegistryV1();
+if (
+  phase1ApprovedRegistry.decisionId !== 'D-04' ||
+  phase1ApprovedRegistry.status !== 'accepted_empty_support_set' ||
+  phase1ApprovedRegistry.selectedNetworkMode !== 'off' ||
+  phase1ApprovedRegistry.qualifications.length !== 0
+) {
+  fail('D-04 approved qualification registry must retain its pinned empty qualification set');
+}
+
+const phase1PlatformExclusionCompletion = readFileSync(
+  join(root, phase1PlatformExclusionCompletionPath),
+  'utf8',
+);
+if (!/^状态：completed$/m.test(phase1PlatformExclusionCompletion)) {
+  fail(`${phase1PlatformExclusionCompletionPath} must be completed`);
+}
+for (const evidence of [
+  phase1PlatformExclusionCommit,
+  'accepted_empty_support_set',
+  'Platform Capability Probe run 30693651821',
+  'Required run 30693651834',
+  'sha256:439b29a506a43d8ff684a289a0ee083fffff2ac08849798a2082299f78029590',
+  'sha256:88e9de9a7480dc27bd651a477d5befd2ca3b3bdb1413b30b8d07cfdf24dcf176',
+  'sha256:7dfd1390fae758ac64d74476231e53dd4f5233bef6a5e8832fc324dcb6a82f7d',
+  '不产生 `MS:1B-DONE`',
+]) {
+  if (!phase1PlatformExclusionCompletion.includes(evidence)) {
+    fail(`${phase1PlatformExclusionCompletionPath} must identify ${evidence}`);
+  }
+}
+const normalizedPlatformExclusionCompletion = phase1PlatformExclusionCompletion.replace(
+  /\s+/g,
+  ' ',
+);
+for (const artifact of [
+  {
+    name: 'platform-capability-macos-15',
+    id: '8816525761',
+    digest: 'sha256:439b29a506a43d8ff684a289a0ee083fffff2ac08849798a2082299f78029590',
+  },
+  {
+    name: 'platform-capability-ubuntu-24.04',
+    id: '8816527325',
+    digest: 'sha256:88e9de9a7480dc27bd651a477d5befd2ca3b3bdb1413b30b8d07cfdf24dcf176',
+  },
+  {
+    name: 'platform-capability-windows-2025',
+    id: '8816532433',
+    digest: 'sha256:7dfd1390fae758ac64d74476231e53dd4f5233bef6a5e8832fc324dcb6a82f7d',
+  },
+]) {
+  const mapping = `artifact \`${artifact.name}\`，artifact id \`${artifact.id}\`，evidence digest \`${artifact.digest}\``;
+  if (!normalizedPlatformExclusionCompletion.includes(mapping)) {
+    fail(
+      `${phase1PlatformExclusionCompletionPath} must bind ${artifact.name} to its id and digest`,
+    );
+  }
+}
+const milestoneMentions = [...phase1PlatformExclusionCompletion.matchAll(/`MS:1B-DONE`/g)].length;
+const negativeMilestoneMentions = [
+  ...phase1PlatformExclusionCompletion.matchAll(/不产生 `MS:1B-DONE`/g),
+].length;
+if (milestoneMentions !== 1 || negativeMilestoneMentions !== 1) {
+  fail(`${phase1PlatformExclusionCompletionPath} must only mention MS:1B-DONE as not produced`);
+}
+if (
+  /productionSupported\s*[:=]\s*true/.test(phase1PlatformExclusionCompletion) ||
+  phase1PlatformExclusionCompletion.includes('accepted_non_empty_support_set')
+) {
+  fail(`${phase1PlatformExclusionCompletionPath} must not claim positive production qualification`);
+}
+for (const heading of [
+  'Gate 决策',
+  '实际 commit / artifact',
+  'Task 1B.2 结论：macOS',
+  'Task 1B.3 结论：Linux/Windows',
+  '验证命令与结果',
+  '未运行项',
+  '风险、限制与 rollback',
+  '与计划偏差',
+  'Active 文档与 ADR 收敛',
+]) {
+  if (!new RegExp(`^## ${heading}$`, 'm').test(phase1PlatformExclusionCompletion)) {
+    fail(`${phase1PlatformExclusionCompletionPath} must include ## ${heading}`);
+  }
+}
+if (!/两路独立复核最终均为 GO，P0\/P1\/P2 各为 0/.test(phase1PlatformExclusionCompletion)) {
+  fail(`${phase1PlatformExclusionCompletionPath} must record final GO with no P0/P1/P2`);
+}
+requireReachableCommit(phase1PlatformExclusionCommit, '1B.2/1B.3 implementation');
+
+const phase1PlatformExclusionRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 17 |'));
+if (phase1PlatformExclusionRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 17 exactly once; found ${phase1PlatformExclusionRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '负向完成 1B.2/1B.3',
+    '激活 1B.5',
+    phase1PlatformExclusionCommit,
+    'Platform Capability Probe run 30693651821',
+    'Required run 30693651834',
+    '六个 job 全部通过',
+    '../execution/completed/2026-08-01-agent-production-platform-exclusions.md',
+    '无剩余 P0/P1/P2',
+    '不产生 `MS:1B-DONE`',
+  ]) {
+    if (!phase1PlatformExclusionRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 17 must identify ${evidence}`);
+    }
+  }
 }
 
 const phase1NetworkCompletionPath = resolve(
