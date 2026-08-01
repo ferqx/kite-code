@@ -15,6 +15,8 @@ export interface ResolvedModelCapabilities {
   supportsUsageMetadataSource?: ModelCapabilitySource;
   supportsPromptCache?: boolean;
   supportsPromptCacheSource?: ModelCapabilitySource;
+  streaming: boolean;
+  streamingSource?: ModelCapabilitySource;
 }
 
 export interface ModelCapabilityMetadata {
@@ -23,6 +25,7 @@ export interface ModelCapabilityMetadata {
   tokenizerFamily?: string;
   supportsUsageMetadata?: boolean;
   supportsPromptCache?: boolean;
+  streaming?: boolean;
 }
 
 function positiveNumber(value: unknown): number | undefined {
@@ -88,6 +91,11 @@ export function resolveModelCapabilities(input: {
     [booleanValue(adapter.supportsPromptCache), 'adapter_runtime'],
     [booleanValue(compatibility.supportsPromptCache), 'compatibility_config'],
   ]);
+  const streaming = firstDefined<boolean>([
+    [booleanValue(explicit.streaming), 'explicit_config'],
+    [booleanValue(adapter.streaming), 'adapter_runtime'],
+    [booleanValue(compatibility.streaming), 'compatibility_config'],
+  ]);
 
   return {
     providerName: input.config.providerName,
@@ -109,6 +117,8 @@ export function resolveModelCapabilities(input: {
         }
       : {}),
     ...(cache ? { supportsPromptCache: cache.value, supportsPromptCacheSource: cache.source } : {}),
+    streaming: streaming?.value ?? true,
+    ...(streaming ? { streamingSource: streaming.source } : {}),
   };
 }
 

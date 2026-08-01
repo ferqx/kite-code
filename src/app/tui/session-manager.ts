@@ -1,7 +1,7 @@
 import { Database } from 'bun:sqlite';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import type { McpRuntimeProvider } from '@/core/mcp';
+import type { McpRuntimeProvider, RemoteMcpEgressPermitResolverV1 } from '@/core/mcp';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import {
   buildContextStatusReport,
@@ -14,7 +14,11 @@ import type { ContextStatusSnapshot } from '@/core/model/context-status';
 import { createChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
-import { type RunRuntimeAgentInput, runRuntimeAgent } from '@/core/runtime/agent';
+import {
+  type RunRuntimeAgentInput,
+  type RuntimeKernelControl,
+  runRuntimeAgent,
+} from '@/core/runtime/agent';
 import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import {
@@ -60,7 +64,13 @@ export {
 } from './interaction-mode';
 
 /** 可丢弃的缓冲事件类型（text/reason 为非关键信息，丢弃时不丢失用户可见状态） */
-const DISPOSABLE_EVENT_TYPES = new Set(['text', 'reason']);
+const DISPOSABLE_EVENT_TYPES = new Set([
+  'text',
+  'reason',
+  'model.text_delta',
+  'model.reasoning_delta',
+  'model.reasoning_completed',
+]);
 
 /** 工厂依赖：注入到每个 SessionRuntime */
 export interface SessionDeps {
@@ -69,6 +79,8 @@ export interface SessionDeps {
   skillManifests: SkillManifest[];
   skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
+  /** Independent authorization source for one remote MCP content invocation. */
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   mcpRecoveryController?: Pick<McpController, 'recover'> | null;
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
@@ -78,6 +90,12 @@ export interface ContextCompactionCommandResult {
   events: RuntimeEvent[];
   text: string;
   isError?: boolean;
+}
+
+export interface PlanningModeExitResult {
+  events: RuntimeEvent[];
+  /** Runtime-authoritative phase after evaluating the exit request. */
+  phase: AgentPhase;
 }
 
 /** 单会话运行时：持有独立的 AbortController、generator、缓冲 */
@@ -103,12 +121,10 @@ export class SessionRuntime {
   readonly skillOptions: SkillScanOptions | null;
   mcpManager: McpRuntimeProvider | null;
   mcpRecoveryController: Pick<McpController, 'recover'> | null;
+  remoteMcpEgressPermitResolver: RemoteMcpEgressPermitResolverV1 | undefined;
 
   generator: AsyncGenerator<RuntimeEvent> | null = null;
-  runtimeControl: {
-    getState: () => Readonly<RuntimeState>;
-    processEvent: (event: RuntimeEvent) => void;
-  } | null = null;
+  runtimeControl: RuntimeKernelControl | null = null;
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
   notifyInterrupt: (() => void) | null = null;
 
@@ -119,6 +135,21 @@ export class SessionRuntime {
   /** 每实例独立的中断状态，不与 realProvider 共享 pendingResolve。中断永久等待用户处理 */
   private _pendingInterrupt: InterruptPayload | null = null;
   private _pendingResolve: ((action: UserAction) => void) | null = null;
+  private _activeDispatch: ((action: Action) => void) | null = null;
+  private _contentLoggingDisclosureShown = false;
+  private _sessionLoggingStatusShown = false;
+  /**
+   * Remains pending while the previous generator is unwinding after abort().
+   * abort() clears the user-visible running flag immediately, but a new run
+   * must not enter the same RuntimeStore until the old loop has closed.
+   */
+  private _runCompletion: Promise<void> | null = null;
+  private _deltaBuffer: {
+    dispatch: ((action: Action) => void) | null;
+    text?: Extract<RuntimeEvent, { type: 'model.text_delta' }>;
+    reasoning?: Extract<RuntimeEvent, { type: 'model.reasoning_delta' }>;
+    timer: ReturnType<typeof setTimeout> | null;
+  } = { dispatch: null, timer: null };
 
   constructor(threadId: string, workspace: string, deps: SessionDeps) {
     this.threadId = threadId;
@@ -128,6 +159,7 @@ export class SessionRuntime {
     this.skillOptions = deps.skillOptions;
     this.mcpManager = deps.mcpManager;
     this.mcpRecoveryController = deps.mcpRecoveryController ?? null;
+    this.remoteMcpEgressPermitResolver = deps.remoteMcpEgressPermitResolver;
     this.interactionMode = deps.config.interactionMode ?? 'accept_edits';
 
     this._proxyProvider = this._createProxyProvider();
@@ -136,19 +168,41 @@ export class SessionRuntime {
   // ── 公开 API ──
 
   abort(): void {
-    // 必须先 resolve 挂起的中断，否则 generator 永远卡在 requestAction 的 Promise 上，
-    // runAgent 的 finally 块无法执行，checkpointer.close() 永远不会被调用，导致 DB 句柄泄漏
-    this.resolveInterrupt({ type: 'cancel' as const });
-    this.abortController?.abort();
-    this.abortController = null;
-    this.agentLoopActive = false;
-    this.generator = null;
-    // 如果有挂起的后台中断等待，解除阻塞
-    this._foregroundWake?.();
-    this._foregroundWake = null;
+    this._flushModelDeltas();
+    try {
+      const cancellationEvents = this.runtimeControl?.cancelRun('Cancelled by user.') ?? [];
+      for (const event of cancellationEvents) {
+        if (this._activeDispatch) {
+          this._routeRuntimeEvent(event, this._activeDispatch);
+        } else {
+          this._pushToBuffer(event);
+        }
+      }
+    } catch (error) {
+      const event: RuntimeEvent = {
+        type: 'run.error',
+        message: `Failed to persist cancellation: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        recoverable: false,
+      };
+      if (this._activeDispatch) this._routeRuntimeEvent(event, this._activeDispatch);
+      else this._pushToBuffer(event);
+    } finally {
+      // Resolve a suspended interaction before aborting so the generator can
+      // leave requestAction and close its RuntimeStore handle.
+      this.resolveInterrupt({ type: 'cancel' as const });
+      this.abortController?.abort();
+      this.abortController = null;
+      this.agentLoopActive = false;
+      this.generator = null;
+      this._foregroundWake?.();
+      this._foregroundWake = null;
+    }
   }
 
   clearBuffer(): void {
+    this._clearModelDeltas();
     this.eventBuffer = [];
     this.conversationHistory = [];
     this.pendingInterrupt = false;
@@ -156,6 +210,7 @@ export class SessionRuntime {
 
   /** 切换到前台：新事件路由到 provider.onEvent，唤醒挂起的后台中断 */
   setForeground(foreground: boolean): void {
+    this._flushModelDeltas();
     this._foreground = foreground;
     if (foreground) {
       this._foregroundWake?.();
@@ -178,6 +233,11 @@ export class SessionRuntime {
     initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
   ): Promise<void> {
     if (this.agentLoopActive) return;
+    const previousRun = this._runCompletion;
+    if (previousRun) await previousRun;
+    // Several callers may have waited for the same cancelled run. Only the
+    // first continuation may claim the session for a new loop.
+    if (this.agentLoopActive) return;
 
     const shellContext =
       this.conversationHistory.length > 0 ? `\n${this.conversationHistory.join('\n')}` : '';
@@ -199,6 +259,9 @@ export class SessionRuntime {
 
     const abortController = new AbortController();
 
+    const authMode =
+      this.interactionMode === 'full' ? ('full_access' as const) : ('default' as const);
+
     const runAgentParams = buildRunAgentParams({
       task,
       threadId: this.threadId,
@@ -211,8 +274,10 @@ export class SessionRuntime {
       skillOptions: this.skillOptions,
       initialSkillActivations,
       mcpManager: this.mcpManager,
+      remoteMcpEgressPermitResolver: this.remoteMcpEgressPermitResolver,
       shellContext,
       interactionMode: this.interactionMode,
+      authorizationMode: authMode,
       phase: requestedPhase ?? 'building',
       sandboxBackend: sandboxRuntime.backend,
       model: deps.model,
@@ -230,15 +295,44 @@ export class SessionRuntime {
       model: runAgentParams.model,
       shellExecutor: runAgentParams.shellExecutor,
       mcpManager: runAgentParams.mcpManager,
+      remoteMcpEgressPermitResolver: runAgentParams.remoteMcpEgressPermitResolver,
       skills: runAgentParams.skills,
       skillOptions: runAgentParams.skillOptions,
       initialSkillActivations: runAgentParams.initialSkillActivations,
       interactionMode: runAgentParams.interactionMode,
+      authorizationMode: runAgentParams.authorizationMode,
+      authorizationSource: runAgentParams.authorizationSource,
       phase: runAgentParams.phase,
       thinkingLevel: runAgentParams.thinkingLevel,
       sandboxBackend: runAgentParams.sandboxBackend,
       signal: runAgentParams.signal,
       frontend: 'tui',
+      sessionLoggingPolicy: runAgentParams.sessionLoggingPolicy,
+      sessionLoggingContentInspector: runAgentParams.sessionLoggingContentInspector,
+      onSessionLoggingStatus: ({ mode }) => {
+        if (!this._sessionLoggingStatusShown) {
+          this._sessionLoggingStatusShown = true;
+          deps.dispatch({
+            type: 'LOCAL_TEXT',
+            text: `  ⎿  Session logging mode: ${mode}.`,
+          });
+        }
+        if (mode === 'content' && !this._contentLoggingDisclosureShown) {
+          this._contentLoggingDisclosureShown = true;
+          deps.dispatch({
+            type: 'LOCAL_TEXT',
+            text:
+              '  ⎿  Session content logging is enabled by the release artifact and your explicit opt-in. ' +
+              'Reasoning, tool/file content, secrets, and credentials remain excluded.',
+          });
+        }
+      },
+      onSessionLoggingDiagnostic: (message) => {
+        deps.dispatch({
+          type: 'LOCAL_TEXT',
+          text: `  ⎿  ${message}`,
+        });
+      },
       onKernelControl: (control) => {
         this.runtimeControl = control;
       },
@@ -250,6 +344,11 @@ export class SessionRuntime {
       requestAction: (effect, state) => this._requestRuntimeAction(effect, state),
     };
     const generator = runRuntimeAgent(runtimeInput, runtimeProvider);
+    let resolveRunCompletion!: () => void;
+    const runCompletion = new Promise<void>((resolve) => {
+      resolveRunCompletion = resolve;
+    });
+    this._runCompletion = runCompletion;
 
     // 所有状态变更必须在 try 块内，防止 buildRunAgentParams/runAgent 抛出时
     // agentLoopActive 和 abortController 泄漏导致会话永久冻结
@@ -258,6 +357,7 @@ export class SessionRuntime {
       this.agentLoopActive = true;
       this.abortController = abortController;
       this.generator = generator;
+      this._activeDispatch = deps.dispatch;
       for await (const event of generator) {
         if (isSilentCancellationMismatch(event)) continue;
         this._routeRuntimeEvent(event, deps.dispatch);
@@ -317,6 +417,11 @@ export class SessionRuntime {
       this.agentLoopActive = false;
       this.abortController = null;
       this.generator = null;
+      this._activeDispatch = null;
+      if (this._runCompletion === runCompletion) {
+        this._runCompletion = null;
+      }
+      resolveRunCompletion();
       if (this._foreground) {
         deps.provider.reset();
       }
@@ -342,6 +447,11 @@ export class SessionRuntime {
 
   /** Route the public RuntimeEvent stream directly to the foreground or buffer. */
   private _routeRuntimeEvent(event: RuntimeEvent, dispatch: (action: Action) => void): void {
+    if (event.type === 'model.text_delta' || event.type === 'model.reasoning_delta') {
+      this._bufferModelDelta(event, dispatch);
+      return;
+    }
+    this._flushModelDeltas();
     if (this._foreground) {
       dispatch({ type: 'RUNTIME_EVENT', event });
       return;
@@ -354,6 +464,36 @@ export class SessionRuntime {
       this.pendingInterrupt = true;
       this.notifyInterrupt?.();
     }
+  }
+
+  private _bufferModelDelta(
+    event: Extract<RuntimeEvent, { type: 'model.text_delta' | 'model.reasoning_delta' }>,
+    dispatch: (action: Action) => void,
+  ): void {
+    this._deltaBuffer.dispatch = dispatch;
+    if (event.type === 'model.text_delta') this._deltaBuffer.text = event;
+    else this._deltaBuffer.reasoning = event;
+    if (this._deltaBuffer.timer) return;
+    this._deltaBuffer.timer = setTimeout(() => this._flushModelDeltas(), 50);
+  }
+
+  private _flushModelDeltas(): void {
+    const buffered = this._deltaBuffer;
+    if (buffered.timer) clearTimeout(buffered.timer);
+    this._deltaBuffer = { dispatch: null, timer: null };
+    for (const event of [buffered.reasoning, buffered.text]) {
+      if (!event) continue;
+      if (this._foreground && buffered.dispatch) {
+        buffered.dispatch({ type: 'RUNTIME_EVENT', event });
+      } else {
+        this._pushToBuffer(event);
+      }
+    }
+  }
+
+  private _clearModelDeltas(): void {
+    if (this._deltaBuffer.timer) clearTimeout(this._deltaBuffer.timer);
+    this._deltaBuffer = { dispatch: null, timer: null };
   }
 
   /** Adapt existing Ink button actions at the UI edge and bind the persisted interaction id. */
@@ -749,10 +889,12 @@ export class SessionManager {
   }
 
   createSession(workspace: string): string {
-    // Deactivate old session before creating new one — same logic as switchSession
+    // TUI navigation is an explicit cancellation gesture. Other clients may
+    // retain background runs because their navigation model is different.
     const oldRt = this.runtimes.get(this.activeId);
     if (oldRt) {
-      oldRt.resolveInterrupt({ type: 'cancel' as const });
+      if (oldRt.agentLoopActive) oldRt.abort();
+      else oldRt.resolveInterrupt({ type: 'cancel' as const });
       oldRt.setForeground(false);
       oldRt.pendingInterrupt = false;
     }
@@ -1231,9 +1373,9 @@ export class SessionManager {
   }
 
   /** Persist an explicit plan-mode exit; review cancellation remains separate. */
-  exitPlanningMode(threadId: string): RuntimeEvent[] {
+  exitPlanningMode(threadId: string): PlanningModeExitResult | null {
     const rt = this.runtimes.get(threadId);
-    if (!rt) return [];
+    if (!rt) return null;
     const kernel = createAgentKernel({
       threadId,
       userId: 'tui',
@@ -1245,18 +1387,21 @@ export class SessionManager {
     try {
       const active = getActiveTask(kernel.getState());
       const planning = getActivePlanning(kernel.getState());
-      if (
-        !active ||
-        getAgentPhase(planning) !== 'planning' ||
-        kernel.getState().interactions.kind !== 'idle'
-      )
-        return [];
+      const phase = getAgentPhase(planning);
+      // run.completed closes the Core Task before the TUI user explicitly
+      // leaves its sticky plan input mode. In that settled state there is no
+      // Task lifecycle left to cancel; report the authoritative building
+      // phase so the client can reconcile its projection locally.
+      if (!active || phase !== 'planning') return { events: [], phase };
+      if (kernel.getState().interactions.kind !== 'idle') {
+        return { events: [], phase };
+      }
       const events: RuntimeEvent[] = [
         { type: 'planning.exited', taskId: active.taskId, reason: 'Exited Plan Mode.' },
         { type: 'task.cancelled', taskId: active.taskId, reason: 'Exited Plan Mode.' },
       ];
       kernel.processEventBatch(events);
-      return events;
+      return { events, phase: 'building' };
     } finally {
       kernel.close();
     }
@@ -1267,11 +1412,13 @@ export class SessionManager {
   }
 
   switchSession(fromId: string, toId: string): void {
-    // 离开的会话切到后台模式
+    // In the TUI, leaving a session cancels its current turn. This adapter
+    // policy must not be lifted into Core: a future client can keep the same
+    // Runtime and interrupt alive while only changing the visible session.
     const fromRt = this.runtimes.get(fromId);
     if (fromRt) {
-      // 取消旧会话的挂起中断，防止 generator 卡在 requestAction 的 Promise 上
-      fromRt.resolveInterrupt({ type: 'cancel' as const });
+      if (fromRt.agentLoopActive) fromRt.abort();
+      else fromRt.resolveInterrupt({ type: 'cancel' as const });
       fromRt.setForeground(false);
       fromRt.pendingInterrupt = false;
     }
@@ -1341,6 +1488,7 @@ export class SessionManager {
         plan: null,
         status: rawStatus,
         turns: [],
+        pendingToolCalls: {},
       });
     }
     return result;

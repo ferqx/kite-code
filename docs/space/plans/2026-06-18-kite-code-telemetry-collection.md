@@ -1,7 +1,12 @@
 # Kite Code 遥测收集方案
 
-状态：draft
+状态：superseded
 创建：2026-06-18
+替代者：
+[`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md)
+
+> 本计划仍允许 project basename、命令名和截断错误正文进入远程通道，不符合已批准的
+> metadata-only、无路径、无命令、无自由错误文本边界，不再作为实施依据。
 
 ## 目标
 

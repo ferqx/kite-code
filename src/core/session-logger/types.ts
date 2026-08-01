@@ -37,6 +37,82 @@ export interface TraceEvent {
   attributes: Record<string, OtelValue>;
 }
 
+// ── Production metadata-only records ──
+
+/**
+ * Content-free schema shared by local metadata logging and future telemetry.
+ * Producers construct this object from structured Runtime fields only; a full
+ * RuntimeEvent is never serialized into this shape.
+ */
+export interface MetadataEventRecordV1 {
+  schemaVersion: 1;
+  eventType: string;
+  timestamp: string;
+  status: 'ok' | 'error' | 'cancelled' | 'blocked' | 'unknown';
+  metadata: MetadataFieldsV1;
+}
+
+export interface MetadataFieldsV1 {
+  durationMs?: number;
+  toolKind?: string;
+  capabilityKind?: string;
+  failureKind?: import('@/core/runtime/failures').FailureKind;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
+  retryAttempt?: number;
+  retryMaxAttempts?: number;
+  approvalType?: string;
+  approvalResult?: string;
+  verificationType?: string;
+  verificationResult?: string;
+  compactionInputTokensBefore?: number;
+  compactionInputTokensAfter?: number;
+  compactionFailureKind?: string;
+  providerPolicyDigest?: string;
+  providerPolicyRevision?: string;
+  releaseVersion?: string;
+  releaseProfile?: ReleaseProfileMetadataV1;
+  releaseCohort?: string;
+}
+
+export type ReleaseProfileMetadataV1 = 'limited' | 'internal' | 'canary' | 'ga';
+
+export interface SessionMetadataContextV1 {
+  releaseVersion?: string;
+  releaseProfile?: ReleaseProfileMetadataV1;
+  releaseCohort?: string;
+}
+
+export type SessionLoggingDiagnosticV1 =
+  | {
+      code: 'writer_unavailable';
+      message: 'Session logging is unavailable; the Agent will continue without a logging fallback.';
+    }
+  | {
+      code: 'storage_quarantined';
+      message: 'Unsafe legacy session-log storage was quarantined; the Agent will continue.';
+    }
+  | {
+      code: 'session_limit_reached';
+      message: 'The session log reached its configured size limit; further records were disabled.';
+    };
+
+export type SessionLoggingContentProvenanceV1 = 'user_message' | 'model_visible_answer';
+
+/** Trusted, structured result from the Runtime secret detector. */
+export interface SessionLoggingContentInspectionV1 {
+  schemaVersion: 1;
+  detector: 'runtime_secret_detector';
+  verdict: 'clear' | 'secret' | 'unknown';
+}
+
+export type SessionLoggingContentInspectorV1 = (input: {
+  text: string;
+  provenance: SessionLoggingContentProvenanceV1;
+}) => SessionLoggingContentInspectionV1;
+
 // ── 会话摘要 ──
 
 export interface RunSummary {

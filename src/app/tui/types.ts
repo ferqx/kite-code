@@ -50,7 +50,29 @@ export interface SubAgentStepRecord {
 
 export type OutputBlock =
   | { id: number; kind: 'user'; content: string }
-  | { id: number; kind: 'text'; content: string; streaming?: boolean; isError?: boolean }
+  | {
+      id: number;
+      kind: 'text';
+      content: string;
+      streaming?: boolean;
+      /** Compatibility marker for mutable text that cannot enter Static yet. */
+      responsePending?: boolean;
+      isError?: boolean;
+      /** Model invocation that owns this live/reconnected response segment. */
+      modelRequestId?: string;
+      /** Recognized structural component whose shell is visible while complete
+       * child rows are appended. The hidden source retains the unfinished row. */
+      streamingComponent?: 'code' | 'table';
+      streamingSource?: string;
+      /** 被文本关闭的纯思考块并入的时长（ms，ADR-0026）。存在时在文本块顶部
+       *  渲染暗色 "Thought for Xs" 题头行；独立思考块已删除，时长全量转移。
+       *  Elapsed (ms) of a pure-thinking block merged in when text closed it
+       *  (ADR-0026). Renders a dim "Thought for Xs" header above the content;
+       *  the standalone block was removed with its elapsed fully transferred. */
+      thoughtElapsedMs?: number;
+      /** Complete reasoning revealed only after model.responded, merged with the Thought header. */
+      thoughtContent?: string;
+    }
   | { id: number; kind: 'reason'; content: string; folded: boolean }
   | {
       id: number;
@@ -83,15 +105,27 @@ export type OutputBlock =
       tools: ConsolidatedToolEntry[];
       totalElapsedMs: number;
       createdAt: number;
+      /** 该轮模型调用累计耗时（ms，来自 model.responded.durationMs，不含工具执行）。
+       *  存在时 totalElapsedMs 以此为准（对齐 Claude Code "Thought for Xs" 计时语义）；
+       *  旧事件日志无此字段，回退创建→settle 墙钟。
+       *  Accumulated model-call duration (ms, from model.responded.durationMs,
+       *  excluding tool execution). When present, totalElapsedMs follows it
+       *  (Claude Code "Thought for Xs" semantics); absent in old logs → wall clock. */
+      modelMs?: number;
       summaryLine: string;
       active: boolean;
+      /** Keep a just-closed streamed Thought dynamic until model.responded
+       *  removes its transient reasoning preview. */
+      responsePending?: boolean;
+      /** Model invocation that most recently contributed reasoning to this phase. */
+      modelRequestId?: string;
       /** 是否有过 reason 思考块 — 用于三态顶行：Thought + tools / 仅 Thought / 仅 tools */
       hasThought: boolean;
       latestActivity?: ThoughtActivity;
       /** 本 Thought 生命周期内是否出现过思考（reason 事件）。
-       *  用于渲染时区分 "Thought for 3s, read 2 files" vs "read 2 files" vs "Thought for 3s"。
+       *  用于渲染时区分 "Thought for 3s · read 2 files"（有思考）vs "read 2 files"（仅工具统计）。
        *  Whether any reasoning (reason events) occurred during this Thought's lifetime.
-       *  Controls the summary label: with thinking → "Thought for Xs, …", without → just tool counts. */
+       *  Controls the summary label: with thinking → "Thought for Xs · <tool stats>", without → just tool counts. */
       hasThinking?: boolean;
       /** 事件时间线：记录 reason / tool_call 的先后顺序，渲染时按序交错思考行与工具步骤。
        *  Event timeline: records reason/tool_call ordering so the render layer
@@ -101,6 +135,18 @@ export type OutputBlock =
       nextTimelineSeq?: number;
       /** 整体结果状态（仅 active=false 时有意义），替代从子 tool 状态推断 / Overall outcome (meaningful when active=false), replaces boolean inference */
       result?: 'done' | 'error' | 'cancelled';
+      /** ADR-0030 / 规则 24：阶段内已确认的旁白文本（被随后的只读工具确认），
+       *  渲染于块顶部。多段按时间顺序累积。
+       *  Confirmed narration texts (confirmed by a subsequent read-only tool),
+       *  rendered at the top of the phase block in chronological order. */
+      captions?: string[];
+      /** ADR-0030 / 规则 24：待确认的旁白文本——文本在阶段块活跃时先吸收于此，
+       *  随后到来只读工具则确认进 captions；阶段结束时仍未确认则脱离为独立
+       *  文本块（最终回答）。纯思考块被文本关闭时并入该文本块题头（ADR-0026）。
+       *  Pending narration: absorbed while the phase block is active; confirmed
+       *  into captions when a read-only tool arrives, or detached as a standalone
+       *  text block (final answer) when the phase ends unconfirmed. */
+      pendingCaption?: string;
     }
   | { id: number; kind: 'file_change'; changes: FileChangeRecord[] }
   | {
@@ -186,8 +232,22 @@ export interface TuiState {
   loadingSessionId: string | null;
   /** 探索工具 callId → tool_summary block ID 映射，用于 tool_done 精确定位 */
   explorationSummaryIds: Record<string, number>;
+  /**
+   * Runtime queue metadata is retained off-screen until execution reaches the
+   * call or it fails terminally. Approval targets remain in the Footer only.
+   */
+  pendingToolCalls: Record<string, { name: string; args: Record<string, unknown> }>;
   /** 当前未被可见文本或非探索工具打断的 Thought summary block ID */
   currentThoughtSummaryId?: number;
+  /** Explicit Thought lifecycle. `awaiting_terminal` is visually settled but
+   *  still owns the current model invocation's terminal duration. */
+  thoughtPhaseStatus?: 'running' | 'awaiting_terminal';
+  /** Current model invocation, used to scope streamed terminal reconciliation. */
+  currentModelRequestId?: string;
+  /** Whether the current model invocation has emitted at least one reasoning delta. */
+  currentModelReasoningStreamed?: boolean;
+  /** Latest cumulative reasoning segment, cached off-screen between boundaries. */
+  currentModelReasoningText?: string;
   /** 交互模式：ask（询问审批）/ auto（自动审核）/ full（自主运行） */
   interactionMode: 'accept_edits' | 'auto' | 'full';
   /** Deduplicates durable terminal compaction notices during replay. */
@@ -200,7 +260,13 @@ export interface TuiState {
 }
 
 export type InterruptState =
-  | { kind: 'approval'; blockId: number }
+  | {
+      kind: 'approval';
+      /** Active Footer payload; absent only in legacy restored UI snapshots. */
+      approval?: ToolApprovalPayload;
+      /** Compatibility pointer for sessions created before approvals moved off-screen. */
+      blockId?: number;
+    }
   | { kind: 'input'; blockId: number }
   | {
       kind: 'plan_review';
@@ -246,4 +312,6 @@ export interface SessionSnapshot {
   plan: import('@/protocol/events').AgentPlan | null;
   status: StatusState;
   turns: Turn[];
+  /** Off-screen queued tool metadata owned by this TUI session projection. */
+  pendingToolCalls?: TuiState['pendingToolCalls'];
 }

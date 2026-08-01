@@ -8,9 +8,24 @@
  * sent via `terminal.write()`. Terminal resize via `terminal.resize()`.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { trustWorkspace } from '@/core/config/workspace-trust';
+import {
+  currentTuiSystemStepSignal,
+  throwIfTuiSystemStepAborted,
+  tuiSystemDelay,
+} from './cancellation';
 import type { MockModelServer } from './fixtures';
+import { activeInput } from './input-helpers';
+import {
+  createHeadlessTerminalScreen,
+  screenContains,
+  stripAnsi,
+  type TerminalFrameMark,
+  waitForCondition,
+  waitForOutputQuiescence,
+} from './terminal-screen';
 import type { TestWorkspace } from './test-workspace';
 
 export interface PtyProcessOptions {
@@ -24,17 +39,41 @@ export interface PtyProcessOptions {
   mockServer?: MockModelServer;
   /** Test workspace (creates config pointing to mock server) */
   workspace?: TestWorkspace;
+  /** Skip writing mock config — use for first-run/setup tests */
+  noPreConfig?: boolean;
+  /** Use the test-only composition root that issues one permit per remote MCP invocation. */
+  remoteMcpEgressPermitResolver?: 'allow-each-invocation';
 }
 
+export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust';
+
 export interface PtyProcess {
-  /** Write keystrokes to the child's stdin (simulates user typing) */
-  write(data: string): void;
+  /** Write keystrokes and return the output checkpoint immediately before the action. */
+  write(data: string): PtyOutputMark;
   /** Set raw mode on the terminal (disables line buffering) */
-  setRawMode(enabled: boolean): void;
+  setRawMode(enabled: boolean): PtyOutputMark;
   /** Resize the terminal (may not trigger resize event on Windows) */
-  resize(cols: number, rows: number): void;
-  /** Get all raw PTY output received so far (includes ANSI escapes) */
-  output(): string;
+  resize(cols: number, rows: number): PtyOutputMark;
+  /** Get the current terminal viewport after VT/ANSI control sequences are applied. */
+  viewport(): string;
+  /** Get the end-cursor input projection used by harness-owned input actions. */
+  inputViewport(): string;
+  /** Get the terminal buffer retained above and within the current viewport. */
+  scrollback(): string;
+  /** Get all raw PTY output for diagnostics only (includes erased frames and ANSI). */
+  transcript(): string;
+  /** Wait until all PTY bytes already received by the harness are VT-parsed. */
+  settleScreen(): Promise<void>;
+  /** Capture a checkpoint in the sequence of VT-parsed viewport frames. */
+  markScreen(): TerminalFrameMark;
+  /** Read actual viewport frames parsed after a screen checkpoint. */
+  screenFramesSince(mark: TerminalFrameMark): readonly string[];
+  /** Capture a stable byte checkpoint in the PTY output stream. */
+  markOutput(): PtyOutputMark;
+  /** Read only output emitted after a captured checkpoint. */
+  outputSince(mark: PtyOutputMark): string;
+  /** Read only output emitted after the most recent write/resize/raw-mode action. */
+  outputSinceLastAction(): string;
   /** Wait for the process to exit, returns exit code */
   waitForExit(): Promise<number>;
   /** Kill the process (SIGTERM → wait → SIGKILL fallback) */
@@ -45,6 +84,75 @@ export interface PtyProcess {
   readonly exited: boolean;
 }
 
+declare const PTY_OUTPUT_MARK: unique symbol;
+export type PtyOutputMark = number & { readonly [PTY_OUTPUT_MARK]: true };
+
+export interface PtyOutputBuffer {
+  append(chunk: Uint8Array): PtyOutputMark;
+  publishThrough(mark: PtyOutputMark): void;
+  mark(): PtyOutputMark;
+  output(): string;
+  outputSince(mark: PtyOutputMark): string;
+}
+
+/**
+ * Preserve raw PTY bytes so a checkpoint cannot accidentally claim a UTF-8
+ * code point whose leading byte arrived before the checkpoint. Branded marks
+ * prevent callers from inventing unsafe offsets.
+ */
+export function createPtyOutputBuffer(): PtyOutputBuffer {
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  let publishedByteLength = 0;
+
+  const bytes = (): Uint8Array => {
+    const merged = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return merged;
+  };
+
+  const outputFrom = (mark: number): string => {
+    if (!Number.isInteger(mark) || mark < 0 || mark > byteLength) {
+      throw new Error(`Invalid PTY output mark ${mark}; current output length is ${byteLength}`);
+    }
+    const outputBytes = bytes().subarray(0, publishedByteLength);
+    let start = mark;
+    while (start < outputBytes.byteLength && (outputBytes[start]! & 0xc0) === 0x80) {
+      start++;
+    }
+    return new TextDecoder().decode(outputBytes.subarray(start));
+  };
+
+  return {
+    append(chunk) {
+      chunks.push(chunk.slice());
+      byteLength += chunk.byteLength;
+      return byteLength as PtyOutputMark;
+    },
+    publishThrough(mark) {
+      if (!Number.isInteger(mark) || mark < publishedByteLength || mark > byteLength) {
+        throw new Error(
+          `Invalid PTY publish mark ${mark}; published=${publishedByteLength}, received=${byteLength}`,
+        );
+      }
+      publishedByteLength = mark;
+    },
+    mark() {
+      return byteLength as PtyOutputMark;
+    },
+    output() {
+      return new TextDecoder().decode(bytes());
+    },
+    outputSince(mark) {
+      return outputFrom(mark);
+    },
+  };
+}
+
 /** Wait until a PTY child has exited, or fail its cleanup instead of hiding a leak. */
 export async function waitForPtyExit(
   hasExited: () => boolean,
@@ -53,7 +161,7 @@ export async function waitForPtyExit(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!hasExited() && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    await tuiSystemDelay(pollIntervalMs);
   }
   if (!hasExited()) {
     throw new Error(`PTY child did not exit within ${timeoutMs}ms`);
@@ -66,6 +174,9 @@ export async function waitForPtyExitCode(
   timeoutMs: number,
 ): Promise<number> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const signal = currentTuiSystemStepSignal();
+  let onAbort: (() => void) | undefined;
+  throwIfTuiSystemStepAborted();
   try {
     return await Promise.race([
       exitPromise,
@@ -75,13 +186,55 @@ export async function waitForPtyExitCode(
           timeoutMs,
         );
       }),
+      ...(signal
+        ? [
+            new Promise<never>((_, reject) => {
+              onAbort = () =>
+                reject(
+                  signal.reason instanceof Error
+                    ? signal.reason
+                    : new Error('TUI system step aborted'),
+                );
+              signal.addEventListener('abort', onAbort, { once: true });
+            }),
+          ]
+        : []),
     ]);
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 
-function forceKillPtyChild(proc: ReturnType<typeof Bun.spawn>): void {
+function processGroupExists(processGroupId: number): boolean {
+  if (process.platform === 'win32') return false;
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+/** Prove the owned detached child and its PID-named process group both exist. */
+export function verifiedOwnedProcessGroupId(pid: number): number | undefined {
+  if (process.platform === 'win32') return undefined;
+  try {
+    process.kill(pid, 0);
+    process.kill(-pid, 0);
+  } catch (error) {
+    throw new Error(`Detached test child ${pid} does not own its PID-named process group.`, {
+      cause: error,
+    });
+  }
+  return pid;
+}
+
+function signalOwnedProcessTree(
+  proc: ReturnType<typeof Bun.spawn>,
+  signal: 'SIGTERM' | 'SIGKILL',
+  processGroupId: number | undefined,
+): void {
   if (process.platform === 'win32') {
     // Bun's signal emulation only targets the direct process on Windows. The
     // TUI may own descendants, so taskkill is needed to terminate its tree.
@@ -91,17 +244,61 @@ function forceKillPtyChild(proc: ReturnType<typeof Bun.spawn>): void {
     });
     return;
   }
-  proc.kill('SIGKILL');
+  if (processGroupId === undefined) {
+    throw new Error(`Missing verified process group for POSIX child ${proc.pid}.`);
+  }
+  try {
+    process.kill(-processGroupId, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
+}
+
+async function waitForOwnedProcessTreeExit(
+  processGroupId: number,
+  timeoutMs: number,
+): Promise<void> {
+  if (process.platform === 'win32') return;
+  await waitForPtyExit(() => !processGroupExists(processGroupId), timeoutMs, 50);
+}
+
+/** Terminate a detached test child and all members of its verified owned group. */
+export async function terminateOwnedProcessTree(
+  proc: ReturnType<typeof Bun.spawn>,
+  processGroupId: number | undefined,
+  timeoutMs = 2_000,
+): Promise<void> {
+  signalOwnedProcessTree(proc, 'SIGTERM', processGroupId);
+  try {
+    await waitForPtyExitCode(proc.exited, timeoutMs);
+  } catch {
+    signalOwnedProcessTree(proc, 'SIGKILL', processGroupId);
+    await waitForPtyExitCode(proc.exited, 5_000);
+  }
+  if (processGroupId !== undefined && processGroupExists(processGroupId)) {
+    signalOwnedProcessTree(proc, 'SIGKILL', processGroupId);
+    await waitForOwnedProcessTreeExit(processGroupId, 5_000);
+  }
 }
 
 export function resolveTuiLaunchPaths(
-  opts: Pick<PtyProcessOptions, 'cwd' | 'workspace'>,
+  opts: Pick<PtyProcessOptions, 'cwd' | 'workspace' | 'remoteMcpEgressPermitResolver'>,
   projectRoot = process.cwd(),
 ): { cwd: string; entryPath: string } {
   return {
     cwd: opts.cwd ?? opts.workspace?.workspace ?? projectRoot,
-    entryPath: join(projectRoot, 'src/app/tui/index.tsx'),
+    entryPath:
+      opts.remoteMcpEgressPermitResolver === 'allow-each-invocation'
+        ? join(projectRoot, 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx')
+        : join(projectRoot, 'src/app/tui/index.tsx'),
   };
+}
+
+export function shouldDetachTuiProcess(
+  platform: NodeJS.Platform,
+  faultSoakProcessNonce: string | undefined,
+): boolean {
+  return platform !== 'win32' && !faultSoakProcessNonce;
 }
 
 /**
@@ -118,11 +315,25 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   // tool paths inside the isolated test workspace.
   const { cwd, entryPath } = resolveTuiLaunchPaths(opts);
 
+  // Pre-trust the launch directory (source:'test') so the startup gate does not
+  // block every PTY scenario. This exercises the exact production "already
+  // trusted" fast path; no env bypass exists because Bun auto-injects
+  // `<cwd>/.env*` and an env switch could be forged by workspace files.
+  // Scenarios testing the gate itself pass enforceWorkspaceTrust: true.
+  if (opts.workspace && !opts.workspace.enforceWorkspaceTrust) {
+    trustWorkspace({
+      workspace: cwd,
+      source: 'test',
+      storePath: join(opts.workspace.home, '.kite-code', 'workspace-trust.jsonc'),
+    });
+  }
+
   // If a mock server is provided, write config that points to it.
   // Config is written to BOTH the home-level (~/.kite-code/) AND the
   // workspace-level (.kite-code/) paths since the TUI merges both.
   // We set KITE_CODE_HOME env var so defaultConfigPath() resolves correctly.
-  if (opts.mockServer && opts.workspace) {
+  // Skip when noPreConfig is set — used for first-run/setup tests.
+  if (opts.mockServer && opts.workspace && !opts.noPreConfig) {
     const baseMockConfig = {
       provider: {
         mock: {
@@ -164,39 +375,74 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     writeFileSync(join(wsDir, 'kite-code.jsonc'), projectConfigStr);
   }
 
-  const chunks: Uint8Array[] = [];
+  const outputBuffer = createPtyOutputBuffer();
+  const terminalScreen = createHeadlessTerminalScreen(cols, rows);
+  let screenDisposed = false;
+  let lastActionMark = outputBuffer.mark();
   let exited = false;
   let exitResolver: ((code: number) => void) | null = null;
   const exitPromise = new Promise<number>((resolve) => {
     exitResolver = resolve;
   });
 
-  // Build env: merge parent env with test overrides.
+  // Build an allowlisted child environment. Test scenarios must never inherit
+  // developer credentials, provider configuration, proxies, or feature flags.
   // Explicit KITE_CODE_HOME is critical — on Windows, homedir() defaults to
   // USERPROFILE, so KITE_CODE_HOME must be set for defaultConfigPath().
   const childEnv: Record<string, string> = {};
-  // Copy only defined parent env vars (process.env can have undefined values)
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined) childEnv[k] = v;
+  for (const key of [
+    'PATH',
+    'SystemRoot',
+    'WINDIR',
+    'ComSpec',
+    'PATHEXT',
+    'TMPDIR',
+    'TMP',
+    'TEMP',
+    'LANG',
+    'LC_ALL',
+    'TZ',
+    'CI',
+    'GITHUB_ACTIONS',
+    'KITE_FAULT_SOAK_PROCESS_NONCE',
+  ]) {
+    const value = process.env[key];
+    if (value !== undefined) childEnv[key] = value;
   }
   // Test overrides
   if (opts.workspace?.env) {
     Object.assign(childEnv, opts.workspace.env);
   }
-  childEnv['TERM'] = 'xterm-256color';
+  childEnv.TERM = 'xterm-256color';
+  const detachTuiProcess = shouldDetachTuiProcess(
+    process.platform,
+    childEnv.KITE_FAULT_SOAK_PROCESS_NONCE,
+  );
+  const inheritsFaultSoakProcessGroup = process.platform !== 'win32' && !detachTuiProcess;
 
   const proc = Bun.spawn({
     cmd: [process.execPath, 'run', entryPath],
     cwd,
     env: childEnv,
+    detached: detachTuiProcess,
     terminal: {
       cols,
       rows,
-      data(_terminal: any, chunk: Uint8Array) {
-        chunks.push(chunk);
+      data(_terminal: unknown, chunk: Uint8Array) {
+        const receivedThrough = outputBuffer.append(chunk);
+        void terminalScreen.append(chunk).then(() => outputBuffer.publishThrough(receivedThrough));
       },
     },
   });
+  let ownedProcessGroupId: number | undefined;
+  if (!inheritsFaultSoakProcessGroup) {
+    try {
+      ownedProcessGroupId = verifiedOwnedProcessGroupId(proc.pid);
+    } catch (error) {
+      proc.kill('SIGKILL');
+      throw error;
+    }
+  }
 
   proc.exited.then((code) => {
     exited = true;
@@ -215,22 +461,46 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   const KILL_TIMEOUT_MS = 2000;
   const EXIT_TIMEOUT_MS = 15_000;
 
-  async function killAndWaitImpl(): Promise<boolean> {
-    if (exited) return false;
+  function signalTui(signal: 'SIGTERM' | 'SIGKILL'): void {
+    if (inheritsFaultSoakProcessGroup) {
+      try {
+        proc.kill(signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+      return;
+    }
+    signalOwnedProcessTree(proc, signal, ownedProcessGroupId);
+  }
 
-    // Graceful attempt first
-    proc.kill();
+  async function disposeScreen(): Promise<void> {
+    if (screenDisposed) return;
+    await terminalScreen.settled();
+    terminalScreen.dispose();
+    screenDisposed = true;
+  }
+
+  async function killAndWaitImpl(): Promise<boolean> {
+    const wasRunning = !exited;
 
     try {
-      await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
-    } catch {
-      // Force kill — cannot be caught or ignored. On Windows this also kills
-      // the process tree, which prevents orphaned bun.exe descendants.
-      forceKillPtyChild(proc);
-      await waitForPtyExit(() => exited, 5000);
+      if (!exited) {
+        signalTui('SIGTERM');
+        try {
+          await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
+        } catch {
+          signalTui('SIGKILL');
+          await waitForPtyExit(() => exited, 5000);
+        }
+      }
+      if (ownedProcessGroupId !== undefined && processGroupExists(ownedProcessGroupId)) {
+        signalOwnedProcessTree(proc, 'SIGKILL', ownedProcessGroupId);
+        await waitForOwnedProcessTreeExit(ownedProcessGroupId, 5000);
+      }
+      return wasRunning;
+    } finally {
+      await disposeScreen();
     }
-
-    return true;
   }
 
   let killPromise: Promise<boolean> | null = null;
@@ -241,35 +511,75 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     },
 
     write(data: string) {
+      lastActionMark = outputBuffer.mark();
       if (!exited && proc.terminal) {
         proc.terminal.write(data);
       }
+      return lastActionMark;
     },
 
     setRawMode(enabled: boolean) {
+      lastActionMark = outputBuffer.mark();
       if (!exited && proc.terminal && typeof proc.terminal.setRawMode === 'function') {
         proc.terminal.setRawMode(enabled);
       }
+      return lastActionMark;
     },
 
     resize(newCols: number, newRows: number) {
+      lastActionMark = outputBuffer.mark();
+      void terminalScreen.resize(newCols, newRows);
       if (!exited && proc.terminal && typeof proc.terminal.resize === 'function') {
         proc.terminal.resize(newCols, newRows);
       }
+      return lastActionMark;
     },
 
-    output(): string {
-      const totalLen = chunks.reduce((sum, c) => sum + c.length, 0);
-      const merged = new Uint8Array(totalLen);
-      let offset = 0;
-      for (const c of chunks) {
-        merged.set(c, offset);
-        offset += c.length;
-      }
-      return new TextDecoder().decode(merged);
+    viewport(): string {
+      return terminalScreen.viewport();
     },
 
-    waitForExit: () => waitForPtyExitCode(exitPromise, EXIT_TIMEOUT_MS),
+    inputViewport(): string {
+      return terminalScreen.inputViewport();
+    },
+
+    scrollback(): string {
+      return terminalScreen.scrollback();
+    },
+
+    transcript(): string {
+      return outputBuffer.output();
+    },
+
+    settleScreen() {
+      return terminalScreen.settled();
+    },
+
+    markScreen() {
+      return terminalScreen.mark();
+    },
+
+    screenFramesSince(mark) {
+      return terminalScreen.framesSince(mark);
+    },
+
+    markOutput() {
+      return outputBuffer.mark();
+    },
+
+    outputSince(mark) {
+      return outputBuffer.outputSince(mark);
+    },
+
+    outputSinceLastAction() {
+      return outputBuffer.outputSince(lastActionMark);
+    },
+
+    waitForExit: async () => {
+      const code = await waitForPtyExitCode(exitPromise, EXIT_TIMEOUT_MS);
+      await disposeScreen();
+      return code;
+    },
 
     kill() {
       // Fire-and-forget: initiate kill without waiting
@@ -288,4 +598,70 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       return killPromise;
     },
   };
+}
+
+/** Spawn one isolated TUI and return only after its selected semantic surface is stable. */
+export async function spawnReadyTui(
+  opts: PtyProcessOptions & { readiness?: TuiReadiness } = {},
+): Promise<PtyProcess> {
+  const readiness = opts.readiness ?? 'main';
+  const tui = spawnTui(opts);
+  tui.setRawMode(true);
+  try {
+    await waitForTuiReady(tui, readiness, opts.workspace);
+    return tui;
+  } catch (error) {
+    await tui.killAndWait().catch(() => {});
+    throw new Error(
+      `TUI failed ${readiness} readiness. Last output:\n${stripAnsi(tui.transcript()).slice(-1_500)}`,
+      { cause: error },
+    );
+  }
+}
+
+/** Wait for one already-running TUI to expose a complete, stable semantic surface. */
+export async function waitForTuiReady(
+  tui: PtyProcess,
+  readiness: TuiReadiness = 'main',
+  workspace?: TestWorkspace,
+): Promise<void> {
+  const workspacePath = workspace ? realpathSync(workspace.workspace) : undefined;
+  await waitForCondition(
+    () => {
+      const viewport = tui.viewport();
+      if (readiness === 'main') {
+        const input = activeInput(tui.inputViewport());
+        return (
+          input?.kind === 'main' &&
+          input.value === '' &&
+          screenContains(viewport, 'Kite Code') &&
+          screenContains(viewport, 'mock-model') &&
+          !screenContains(viewport, 'Loading...') &&
+          !screenContains(viewport, 'Open this workspace?') &&
+          !screenContains(viewport, 'Setup 1 of 2')
+        );
+      }
+      if (readiness === 'first-run-provider') {
+        return (
+          screenContains(viewport, 'Setup 1 of 2') &&
+          screenContains(viewport, 'Choose a model provider') &&
+          screenContains(viewport, '› DeepSeek') &&
+          screenContains(viewport, 'OpenAI') &&
+          screenContains(viewport, 'Custom endpoint')
+        );
+      }
+      return (
+        workspacePath !== undefined &&
+        screenContains(viewport, 'Open this workspace?') &&
+        screenContains(viewport, workspacePath) &&
+        screenContains(viewport, 'Trust this workspace and continue') &&
+        screenContains(viewport, '› Exit Kite Code') &&
+        !screenContains(viewport, 'shortcuts')
+      );
+    },
+    `${readiness} TUI readiness`,
+    15_000,
+  );
+  await waitForOutputQuiescence(() => tui.viewport(), 5_000, 250, false);
+  await tui.settleScreen();
 }

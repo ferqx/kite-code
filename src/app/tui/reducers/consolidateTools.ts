@@ -4,6 +4,12 @@
  * Pre-consolidation logic — merge consecutive read-only exploration tools
  * into a single tool_summary block, matching Claude Code's
  * "Thought for Xs, read N files, searched for M patterns" pattern.
+ * 注：工具统计（summaryLine）用于两类标题——思考块的
+ * "Thought for Xs · <统计>" 后缀（规则 22）与非思考聚合块的
+ * 纯统计标签（规则 20）。
+ * Note: the tool-stats summaryLine feeds both header forms — the thinking
+ * block suffix "Thought for Xs · <stats>" (rule 22) and the pure-stats
+ * label of non-thinking aggregates (rule 20).
  */
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
 
@@ -19,13 +25,27 @@ const EXPLORATION_TOOLS = new Set([
 /** shell_execute 搜索/查找类命令前缀，匹配后纳入 Thought 预整合 */
 const SHELL_SEARCH_PREFIXES = ['rg ', 'grep ', 'ag ', 'ack ', 'git grep ', 'find ./', 'find /'];
 
+/**
+ * `ls` is read-only only while it remains one simple command. Keep compound
+ * shell syntax out of Thought: it may execute another command or write output.
+ */
+function isPureLsCommand(command: string): boolean {
+  const normalized = command.trim();
+  if (!/^ls(?:\s|$)/.test(normalized)) return false;
+  return !/[|&;<>\n\r`]|\$\(/.test(normalized);
+}
+
 /** 判断 shell_execute 是否为搜索/查找类探索命令 */
 function isShellExploreCommand(args: Record<string, unknown>): boolean {
   const intent = args.intent;
   if (intent !== 'inspect') return false;
   const command = args.command;
   if (typeof command !== 'string') return false;
-  return SHELL_SEARCH_PREFIXES.some((prefix) => command.startsWith(prefix));
+  const normalized = command.trim();
+  return (
+    isPureLsCommand(normalized) ||
+    SHELL_SEARCH_PREFIXES.some((prefix) => normalized.startsWith(prefix))
+  );
 }
 
 /** 从事件数据判断是否为可合并的探索工具（用于 tool_call 事件，此时还没有 block） */
@@ -40,18 +60,13 @@ export function isExplorationToolEvent(data: {
   return false;
 }
 
-/** 从工具名判断是否为探索工具（用于 tool_done 事件）。
- *  shell_execute 无条件返回 true——若未被预整合（非 inspect 或非搜索命令），
- *  其 tool_done 在 handleEvent 中会因找不到对应的 tool_summary 而 fall through
- *  到标准 tool_card 更新路径。 */
+/** 从工具名判断是否为探索工具（用于 tool_done 事件）。 */
 export function isExplorationToolByName(name: string): boolean {
   return EXPLORATION_TOOLS.has(name);
 }
 
-/**
- * 判断一个 tool_card 是否为可合并的探索工具。
- * shell_execute 需要额外检查 intent + 命令前缀。
- */
+/** 判断一个 tool_card 是否为可合并的探索工具。
+ * shell_execute 需要额外检查 intent + 命令前缀。 */
 export function isExplorationTool(block: OutputBlock): boolean {
   if (block.kind !== 'tool_card') return false;
   if (!EXPLORATION_TOOLS.has(block.name)) return false;
@@ -62,13 +77,16 @@ export function isExplorationTool(block: OutputBlock): boolean {
 /**
  * 生成合并摘要行 / Build the consolidated summary line.
  *
- * 统计各类工具的数量，生成类似 "Thought for 3s, read 2 files, searched for 1 pattern" 的行。
+ * 统计各类工具的数量，生成类似 "read 2 files, searched for 1 pattern" 的行
+ * （用作非思考聚合块标签，以及思考块 "Thought for Xs · <统计>" 的后缀，
+ * 见规则 20/22）。
  */
 export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   let readFiles = 0;
   let searched = 0;
   let filePatterns = 0;
   let readMcp = 0;
+  let listedDirectories = 0;
   let ranCommands = 0;
 
   for (const t of tools) {
@@ -76,6 +94,12 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
     else if (t.name === 'search_content') searched++;
     else if (t.name === 'search_files') filePatterns++;
     else if (t.name === 'read_mcp_resource') readMcp++;
+    else if (
+      t.name === 'shell_execute' &&
+      typeof t.args.command === 'string' &&
+      isPureLsCommand(t.args.command)
+    )
+      listedDirectories++;
     else if (t.name === 'shell_execute' || t.name === 'bash') ranCommands++;
     else if (EXPLORATION_TOOLS.has(t.name)) readFiles++; // fallback
   }
@@ -86,6 +110,8 @@ export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {
   if (filePatterns > 0)
     parts.push(`searched ${filePatterns} file pattern${filePatterns > 1 ? 's' : ''}`);
   if (readMcp > 0) parts.push(`read ${readMcp} MCP resource${readMcp > 1 ? 's' : ''}`);
+  if (listedDirectories > 0)
+    parts.push(`listed ${listedDirectories} director${listedDirectories > 1 ? 'ies' : 'y'}`);
   if (ranCommands > 0) parts.push(`ran ${ranCommands} command${ranCommands > 1 ? 's' : ''}`);
 
   if (parts.length === 0) {

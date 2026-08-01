@@ -1,52 +1,41 @@
 import { Box, Text } from 'ink';
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useMemo } from 'react';
 import stringWidth from 'string-width';
 import { useTheme } from '../theme';
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
+import MarkdownBlock from './MarkdownBlock';
 import {
   actionName,
   formatElapsed,
   formatReadFileRange,
-  SPINNER,
-  SPINNER_INTERVAL_MS,
-  toolColor,
+  writeFileActionName,
 } from './render-utils';
+import { wrapDisplayLines } from './soft-wrap';
+import { useBlinkDot } from './use-blink-dot';
 
 // ══════════════════════════════════════════════════════════════════
-// SpinnerDot — 独立组件，隔离 spinner 状态更新
+// BlinkDot — 独立组件，隔离闪烁圆点状态更新
 //
-// 把 spinner 抽离为独立组件是最关键的渲染性能优化。
-// 父组件 ToolSummaryBlock 的 props（block, columns）在 spinner tick
-// 之间不变 → React 跳过父组件重渲染 → Ink 只输出变化的 spinner 字符，
+// 进行中圆点为主题暗（dim，不抢眼）实心 ● 显隐闪烁：
+// 隐藏帧渲染为两个空格，符号位置、宽度（2 字符）不变，无行位移。
+// settle 后变为纯思考白点（muted）——"运行中暗灰闪烁、完成后白色静止"。
+// 思考链与非思考链聚合共用此组件。
+//
+// 把圆点抽离为独立组件是最关键的渲染性能优化。
+// 父组件 ToolSummaryBlock 的 props（block, columns）在闪烁之间不变
+// → React 跳过父组件重渲染 → Ink 只输出变化的圆点字符，
 // 不触发整个 Thought 树（15+ Yoga 布局节点）的 diff/layout/write。
 //
-// SpinnerDot isolates spinner state so tick updates don't cascade into
-// the parent ToolSummaryBlock re-render. When parent props are stable,
-// React skips the parent tree entirely — Ink only writes the single
-// changed spinner glyph, not the full Thought tree (15+ Yoga nodes).
+// BlinkDot isolates the blink state so tick updates don't cascade
+// into the parent ToolSummaryBlock re-render. When parent props are
+// stable, React skips the parent tree entirely — Ink only writes the
+// single changed dot glyph, not the full Thought tree.
 // ══════════════════════════════════════════════════════════════════
 
-function SpinnerDot({ active }: { active: boolean }) {
-  const [idx, setIdx] = useState(0);
-  const startRef = useRef(Date.now());
-  const activeRef = useRef(active);
-
-  useEffect(() => {
-    activeRef.current = active;
-    if (active) startRef.current = Date.now();
-    else setIdx(0);
-  }, [active]);
-
-  useEffect(() => {
-    const tick = () => {
-      if (!activeRef.current) return;
-      setIdx(Math.floor((Date.now() - startRef.current) / 80) % SPINNER.length);
-    };
-    const timer = setInterval(tick, SPINNER_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
-
-  return <Text>{SPINNER[idx]!} </Text>;
+function BlinkDot({ active }: { active: boolean }) {
+  const dt = useTheme();
+  const frame = useBlinkDot(active);
+  return <Text color={dt.dim}>{frame}</Text>;
 }
 
 /** 工具步骤折叠阈值：超过此行数的 Thought 只展示最后 N 步，其余折叠。
@@ -111,9 +100,36 @@ function truncateToFit(text: string, maxWidth: number): string {
   return `${result}…`;
 }
 
+/** 思考块标题：`Thought for Xs`，有工具时附加 ` · <工具统计>` 后缀（规则 22）。
+ *  统计后缀按可用宽度截断；放不下时整体省略后缀，不留孤悬分隔符。
+ *  Thinking-block header: bare "Thought for Xs"; when tools exist, appends
+ *  " · <tool stats>" truncated to fit — the suffix is dropped entirely when
+ *  it doesn't fit, so no dangling separator remains (rule 22). */
+function thinkingLabel(
+  elapsedStr: string,
+  summaryLine: string,
+  hasTools: boolean,
+  maxWidth: number,
+): string {
+  const base = `Thought for ${elapsedStr}`;
+  if (!hasTools) return base;
+  const prefix = `${base} · `;
+  const fitted = truncateToFit(summaryLine, Math.max(0, maxWidth - stringWidth(prefix)));
+  return fitted ? prefix + fitted : base;
+}
+
 function failureSummary(step: { status: string; summary: string }, maxWidth: number): string {
   if ((step.status !== 'error' && step.status !== 'exhausted') || !step.summary.trim()) return '';
   return truncateToFit(step.summary.replace(/\s+/g, ' ').trim(), maxWidth);
+}
+
+/** 步骤动词：write_file 按结果区分新建/覆写/追加，其余走静态映射
+ *  Step verb: write_file distinguishes create/overwrite/append by result;
+ *  other tools use the static ACTION_NAMES map */
+function stepActionName(step: ConsolidatedToolEntry): string {
+  return step.name === 'write_file'
+    ? writeFileActionName(step.summary, step.args)
+    : actionName(step.name);
 }
 
 function latestActivityLabel(
@@ -128,7 +144,7 @@ function latestActivityLabel(
   const step = block.tools.find((t) => t.callId === activity.callId);
   if (!step) return '';
   const args = toolArgsLabel(step.name, step.args, step.totalLines);
-  const label = args ? `${actionName(step.name)} ${args}` : actionName(step.name);
+  const label = args ? `${stepActionName(step)} ${args}` : stepActionName(step);
   return truncateToFit(label, maxWidth);
 }
 
@@ -161,7 +177,7 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
   const isError = step.status === 'error' || step.status === 'exhausted';
   const lineColor = isError ? dt.error : dt.dim;
   const rawLabel = toolArgsLabel(step.name, step.args, step.totalLines);
-  const stepPreW = stringWidth(`${connector}${actionName(step.name)}`);
+  const stepPreW = stringWidth(`${connector}${stepActionName(step)}`);
   const errSummary = failureSummary(step, 32);
   const stepSufW = isError ? stringWidth(errSummary) + 1 : 0;
   const fitLabel = rawLabel
@@ -171,7 +187,7 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
   return (
     <Box paddingLeft={3}>
       <Text color={lineColor}>{connector}</Text>
-      <Text>{actionName(step.name)}</Text>
+      <Text>{stepActionName(step)}</Text>
       {fitLabel && <Text color={lineColor}> {fitLabel}</Text>}
       {step.status === 'queued' && <Text color={dt.muted}> queued</Text>}
       {step.status === 'running' && <Text color={dt.warning}> …</Text>}
@@ -181,20 +197,23 @@ const StepRow = memo(function StepRow({ step, connector, col, dt }: StepRowProps
 });
 
 // ══════════════════════════════════════════════════════════════════
-// ThinkingLine — 思考预览行，嵌在工具树底部
-//
-// 展示模型当前最新的思考内容（reason 文本），与工具步骤同缩进层级，
-// 作为树的一部分而非置顶独立行。仅 running 态渲染。
+// 运行中的 Thought 展示已完整到达的 reasoning 段；settle 后正文消失。
 // ══════════════════════════════════════════════════════════════════
 
-function ThinkingLine({ text, col }: { text: string; col: number }) {
+function ThinkingWindow({ lines }: { lines: string[] }) {
   const dt = useTheme();
-  const trimmed = text.replace(/\s+/g, ' ').trim();
-  if (!trimmed) return null;
+  if (lines.length === 0) return null;
   return (
-    <Box paddingLeft={3}>
-      <Text color={dt.dim}>├─ </Text>
-      <Text color={dt.muted}>{truncateToFit(`Thinking ${trimmed}`, Math.max(0, col - 9))}</Text>
+    <Box flexDirection="column" paddingLeft={3}>
+      <Box>
+        <Text color={dt.dim}>└─ </Text>
+        <Text color={dt.muted}>{lines[0]}</Text>
+      </Box>
+      {lines.slice(1).map((line, index) => (
+        <Box key={`${index + 1}:${line}`} paddingLeft={3}>
+          <Text color={dt.muted}>{line}</Text>
+        </Box>
+      ))}
     </Box>
   );
 }
@@ -203,17 +222,7 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   const dt = useTheme();
   const col = columns > 0 ? columns : (process.stdout.columns ?? 80);
 
-  // ── Derived booleans (memoized to avoid re-scanning tools array on every render) ──
-  const { hasPendingTools, hasError, isRunning } = useMemo(() => {
-    let pending = false;
-    let err = false;
-    for (const t of block.tools) {
-      if (t.status === 'queued' || t.status === 'running') pending = true;
-      if (t.status === 'error' || t.status === 'exhausted' || t.status === 'timeout') err = true;
-      if (pending && err) break;
-    }
-    return { hasPendingTools: pending, hasError: err, isRunning: block.active };
-  }, [block.active, block.tools]);
+  const isRunning = block.active;
 
   const elapsedMs = block.totalElapsedMs;
   const elapsedStr = formatElapsed(elapsedMs);
@@ -228,91 +237,95 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   );
   const skipped = Math.max(0, stepCount - MAX_VISIBLE_STEPS);
   const hasSkipped = skipped > 0;
-
+  const thinkingText =
+    isRunning && block.latestActivity?.kind === 'thinking' ? block.latestActivity.text : undefined;
+  const thinkingLines = useMemo(() => {
+    if (!thinkingText?.trim()) return [];
+    // Reasoning payloads commonly contain paragraph separators and trailing
+    // newlines. They should not consume slots in the compact activity window.
+    // Normalize each source line before wrapping, then keep the visual head
+    // with an explicit truncation marker.
+    const compactText = thinkingText
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0)
+      .join('\n');
+    const wrapped = wrapDisplayLines(compactText, Math.max(1, col - 6)).filter(
+      (line) => line.trim().length > 0,
+    );
+    return wrapped.length > MAX_VISIBLE_STEPS
+      ? [...wrapped.slice(0, MAX_VISIBLE_STEPS), '...']
+      : wrapped;
+  }, [col, thinkingText]);
+  const showsThinking = thinkingLines.length > 0;
   // ── Summary label ──
+  // 思考块标题 = "Thought for Xs · <工具统计>"：有工具时以 " · " 分隔附加
+  // summaryLine 统计（如 "Thought for 2s · read 3 files"），随工具事件实时
+  // 刷新；无工具的纯思考块保持裸 "Thought for Xs"。步骤树仍展示工具明细。
+  // 非思考聚合块（无 hasThinking）保持纯工具统计标签（对应 CC 的
+  // "⏺ Read N files" 聚合行，规则 20）。elapsed 为模型调用时长（规则 22）。
+  // Thinking blocks render "Thought for Xs · <tool stats>" (stats from
+  // summaryLine, live-updated on tool events; the step tree below keeps the
+  // detail). Pure thinking without tools keeps the bare "Thought for Xs";
+  // non-thinking aggregates keep the pure tool-stats label (rule 20).
+  // elapsed = model-call duration (rule 22). col-2 扣除圆点列宽。
   const hasThink = block.hasThinking === true;
   const hasTools = block.tools.length > 0;
   const summaryLabel = hasThink
-    ? hasTools
-      ? `Thought for ${elapsedStr}, ${summaryLine}`
-      : `Thought for ${elapsedStr}`
+    ? thinkingLabel(elapsedStr, summaryLine, hasTools, col - 2)
     : hasTools
       ? summaryLine
       : `Thought for ${elapsedStr}`;
 
-  // ── 两态差异：footer / dot / connector ──
-  const settledStatus = isRunning
-    ? null
-    : hasError
-      ? 'error'
-      : hasPendingTools
-        ? 'cancelled'
-        : 'done';
-  const doneColor = settledStatus ? toolColor(settledStatus, dt) : undefined;
-  const footer = isRunning
-    ? `运行中 (${elapsedStr})`
-    : settledStatus === 'error'
-      ? '部分失败'
-      : settledStatus === 'cancelled'
-        ? '等待工具结果'
-        : '完成';
-
   // ── Step connector ──
-  // Running: always ├─. Settled without timeline: last visible step uses └─.
-  // Settled with timeline: always ├─ (thinking lines intersperse, so no tool
-  // is definitively "last" — only the footer uses └─).
+  // The last visible tool owns └─ so the connector always points to content,
+  // never to a synthetic running footer.
   const getConnector = (i: number, total: number): string => {
-    if (isRunning) return '├─ ';
-    if (renderedTimeline) return '├─ ';
-    return !hasSkipped && i === total - 1 ? '└─ ' : '├─ ';
+    return i === total - 1 ? '└─ ' : '├─ ';
   };
 
-  // ── 时间线渲染：按 seq 顺序交错工具步骤与思考行 ──
-  const renderedTimeline = useMemo(() => {
-    const timeline = block.timeline;
-    if (!timeline || timeline.length === 0) return null; // legacy fallback
+  // ── ADR-0030 / 规则 24：块顶旁白字幕 ──
+  // 已确认字幕（captions，被随后只读工具确认）按时间顺序累积；待确认字幕
+  // （pendingCaption，运行态等待工具确认 / 脱离）实时附在其后。两者以
+  // Markdown 渲染于标题行之下、步骤树之上，缩进与标题文字列对齐。
+  // Confirmed narrations (captions) accumulate chronologically; the pending
+  // caption (awaiting tool confirmation / detachment) trails them live.
+  // Hook 必须置于所有早退之前（rules-of-hooks）。
+  const captionContent = useMemo(() => {
+    const parts = [
+      ...(block.captions ?? []),
+      ...(block.pendingCaption ? [block.pendingCaption] : []),
+    ];
+    return parts.length > 0 ? parts.join('\n\n') : '';
+  }, [block.captions, block.pendingCaption]);
 
-    const toolIdx = new Map<string, number>();
-    for (let i = 0; i < steps.length; i++) toolIdx.set(steps[i]!.callId, i);
-    const vStart = Math.max(0, stepCount - MAX_VISIBLE_STEPS);
-
-    // seq of the first visible tool
-    let firstVisSeq = Infinity;
-    for (const e of timeline) {
-      if (e.kind === 'tool' && e.callId) {
-        const i = toolIdx.get(e.callId);
-        if (i != null && i >= vStart && e.seq < firstVisSeq) firstVisSeq = e.seq;
-      }
-    }
-
-    // Expand visibility window backward to include any thinking entry
-    // that immediately precedes the first visible tool.
-    let includeFromSeq = firstVisSeq;
-    if (firstVisSeq !== Infinity) {
-      for (const e of timeline) {
-        if (e.seq === firstVisSeq - 1 && e.kind === 'thinking') {
-          includeFromSeq = firstVisSeq - 1;
-          break;
-        }
-      }
-    }
-
-    type Item =
-      | { kind: 'tool'; step: ConsolidatedToolEntry; idx: number }
-      | { kind: 'thinking'; text: string };
-
-    const items: Item[] = [];
-    for (const e of timeline) {
-      if (includeFromSeq !== Infinity && e.seq < includeFromSeq) continue;
-      if (e.kind === 'tool' && e.callId) {
-        const i = toolIdx.get(e.callId);
-        if (i != null && i >= vStart) items.push({ kind: 'tool', step: steps[i]!, idx: i });
-      } else if (e.kind === 'thinking' && e.text) {
-        items.push({ kind: 'thinking', text: e.text });
-      }
-    }
-    return items;
-  }, [block.timeline, steps, stepCount]);
+  // ── settle 后只保留 Thought 摘要，不展示 reasoning 正文 ──
+  // 聚合摘要的圆点只表示“阶段正在进行”，因此 Thought 与非 Thought
+  // 聚合块完成后都不保留圆点。独立工具卡使用自己的结果状态语义。
+  // 置于所有 hook 之后，保证 hook 调用顺序稳定（rules-of-hooks）。
+  // ── Pure-thinking block settled: single line, no dot — ● is reserved for
+  // stateful rows (running blink / tool outcome colors); a settled pure
+  // thought carries no status. Two leading spaces keep the label aligned
+  // with tool-block names. Placed after all hooks (rules-of-hooks).
+  // `responsePending` keeps the block mutable until the terminal model event,
+  // but it is not a visual expansion state. The first visible text event has
+  // already ended the Thought from the user's perspective, so collapse its
+  // reasoning/tool details immediately while retaining terminal ownership.
+  if (!isRunning) {
+    return (
+      <Box flexDirection="column">
+        <Box>
+          {/* 两个空格列位 = 圆点列宽（"● "），避免 settle 时标题横向跳动 */}
+          <Text color={dt.dim}>{`  ${summaryLabel}`}</Text>
+        </Box>
+        {captionContent !== '' && (
+          <Box paddingLeft={2}>
+            <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
+          </Box>
+        )}
+      </Box>
+    );
+  }
 
   // ═══════════════════════════════════════════════════════════
   // 统一渲染
@@ -320,48 +333,34 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
   return (
     <Box flexDirection="column">
       <Box>
-        {isRunning ? <SpinnerDot active={isRunning} /> : <Text color={doneColor}>● </Text>}
+        {isRunning ? <BlinkDot active /> : <Text>{'  '}</Text>}
         <Text color={dt.dim}>{summaryLabel}</Text>
       </Box>
-      {hasSkipped && (
+      {captionContent !== '' && (
+        <Box paddingLeft={2}>
+          <MarkdownBlock content={captionContent} streaming={false} maxWidth={col - 2} />
+        </Box>
+      )}
+      {!showsThinking && hasSkipped && (
         <Box paddingLeft={3}>
           <Text color={dt.dim}>├─ ... 以上 {skipped} 步已折叠</Text>
         </Box>
       )}
-      {renderedTimeline
-        ? renderedTimeline.map((item, i) => {
-            if (item.kind === 'tool') {
-              const connector = getConnector(i, renderedTimeline.length);
-              return (
-                <StepRow
-                  key={item.step.callId}
-                  step={item.step}
-                  connector={connector}
-                  col={col}
-                  dt={dt}
-                />
-              );
-            }
-            // thinking line — interspersed chronologically
-            return <ThinkingLine key={`think-${i}`} text={item.text} col={col} />;
-          })
-        : // Legacy fallback: no timeline → visibleSteps + thinking at bottom
-          visibleSteps.map((step, i) => (
-            <StepRow
-              key={step.callId}
-              step={step}
-              connector={getConnector(i, visibleSteps.length)}
-              col={col}
-              dt={dt}
-            />
-          ))}
-      {/* Running-only: thinking preview for legacy blocks or when timeline is empty */}
-      {!renderedTimeline &&
-        isRunning &&
-        block.latestActivity?.kind === 'thinking' &&
-        block.latestActivity.text && <ThinkingLine text={block.latestActivity.text} col={col} />}
+      {showsThinking ? (
+        <ThinkingWindow lines={thinkingLines} />
+      ) : (
+        visibleSteps.map((step, i) => (
+          <StepRow
+            key={step.callId}
+            step={step}
+            connector={getConnector(i, visibleSteps.length)}
+            col={col}
+            dt={dt}
+          />
+        ))
+      )}
       {/* Running-only: tool preview for legacy blocks (new tool not yet in visibleSteps) */}
-      {!renderedTimeline &&
+      {!showsThinking &&
         isRunning &&
         block.latestActivity?.kind === 'tool' &&
         !visibleSteps.some(
@@ -372,9 +371,6 @@ export default memo(function ToolSummaryBlock({ block, columns }: ToolSummaryBlo
             <Text color={dt.muted}>{latestActivityLabel(block, Math.max(0, col - 9))}</Text>
           </Box>
         )}
-      <Box paddingLeft={3}>
-        <Text color={dt.dim}>└─ {footer}</Text>
-      </Box>
     </Box>
   );
 });

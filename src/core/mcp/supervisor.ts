@@ -86,6 +86,9 @@ export interface McpConnectionManagerControlPlane {
   findCapability(
     capabilityId: string,
   ): import('@/protocol/capabilities').CapabilityDescriptor | undefined;
+  getCapabilityRoute?(
+    capabilityId: string,
+  ): import('./egress-permit').McpCapabilityRouteV1 | undefined;
   callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;
   readResource(serverName: string, uri: string, signal?: AbortSignal): Promise<string>;
   beginOAuth?(
@@ -128,7 +131,12 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private readonly lastKnownCapabilityNames = new Map<string, readonly string[]>();
 
   constructor(options: McpSupervisorOptions = {}) {
-    this.manager = options.manager ?? new McpConnectionManager(options.connectionManagerOptions);
+    this.manager =
+      options.manager ??
+      new McpConnectionManager({
+        ...options.connectionManagerOptions,
+        remoteMcpEgressPolicyRequired: true,
+      });
     this.repository =
       options.repository ?? new DefaultMcpConfigRepository({ loadCatalog: options.loadCatalog });
     this.authCoordinator = options.authCoordinator ?? new DefaultMcpAuthCoordinator();
@@ -479,6 +487,23 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
 
   findCapability(capabilityId: string) {
     return this.manager.findCapability(capabilityId);
+  }
+
+  getCapabilityRoute(capabilityId: string) {
+    const fromManager = this.manager.getCapabilityRoute?.(capabilityId);
+    if (fromManager) return fromManager;
+    const descriptor = this.manager.findCapability(capabilityId);
+    if (descriptor?.kind !== 'mcp_tool') return undefined;
+    const server = this.snapshot.servers.find(
+      (candidate) => candidate.effective && candidate.key.name === descriptor.provider.id,
+    );
+    if (!server) return undefined;
+    return Object.freeze({
+      transport: server.transport,
+      serverIdentity: server.key.name,
+      endpointRevision: server.revision,
+      toolRevision: descriptor.revision,
+    });
   }
 
   getResourceDirectorySnapshot(): McpResourceDirectorySnapshot {
@@ -870,6 +895,15 @@ function projectServer(
     ...(auth?.errorCode ? { authErrorCode: auth.errorCode } : {}),
     health: currentRuntimeState?.health ?? 'disconnected',
     transport: entry.normalizedConfig?.type ?? (entry.rawConfig.type === 'http' ? 'http' : 'stdio'),
+    contentEgress: Object.freeze({
+      remote:
+        (entry.normalizedConfig?.type ?? (entry.rawConfig.type === 'http' ? 'http' : 'stdio')) ===
+        'http',
+      nonEmptyArgumentsClassification: 'confidential' as const,
+      independentPermitRequired:
+        (entry.normalizedConfig?.type ?? (entry.rawConfig.type === 'http' ? 'http' : 'stdio')) ===
+        'http',
+    }),
     source: entry.source.kind,
     sourcePath: entry.source.path,
     configuration: Object.freeze({

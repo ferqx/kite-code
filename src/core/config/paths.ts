@@ -31,6 +31,11 @@ export function mcpProjectApprovalPath(): string {
   return join(getKiteCodeDir(), 'mcp-project-approvals.jsonc');
 }
 
+/** Local records of workspaces the user has explicitly trusted to run the agent. */
+export function workspaceTrustPath(): string {
+  return join(getKiteCodeDir(), 'workspace-trust.jsonc');
+}
+
 /** Legacy workspace-local MCP config retained for read-only migration compatibility. */
 export function localMcpConfigPath(workspaceKey: string): string {
   return join(getKiteCodeDir(), 'projects', workspaceKey, 'mcp.jsonc');
@@ -83,6 +88,14 @@ export function skillDirs(workspace: string): SkillScanOptions {
 
 /** 会话日志目录：~/.kite-code/sessions/<frontend>/<threadId>/
  *  按平台分子目录，Agent 可通过 frontend + threadId 自定位日志。 */
+export function sessionLogRoot(): string {
+  return join(getKiteCodeDir(), 'sessions');
+}
+
+export function sessionLogFrontendDir(frontend: string): string {
+  return join(sessionLogRoot(), frontend);
+}
+
 export function sessionLogDir(frontend: string, threadId: string): string {
-  return join(getKiteCodeDir(), 'sessions', frontend, threadId);
+  return join(sessionLogFrontendDir(frontend), threadId);
 }

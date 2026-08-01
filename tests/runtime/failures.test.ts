@@ -10,6 +10,8 @@ const kinds: FailureKind[] = [
   'model_rate_limited',
   'model_server_error',
   'policy_denied',
+  'phase_deferred',
+  'phase_denied',
   'approval_rejected',
   'auto_review_rejected',
   'plan_revision_requested',
@@ -28,6 +30,23 @@ const kinds: FailureKind[] = [
   'transcript_invariant_error',
   'loop_exhausted',
   'budget_exceeded',
+  'artifact_invalid',
+  'profile_invalid',
+  'digest_invalid',
+  'workspace_untrusted',
+  'network_unavailable',
+  'worktree_unavailable',
+  'model_retry_exhausted',
+  'mcp_unavailable',
+  'persistence_unavailable',
+  'resource_saturated',
+  'process_limit_exceeded',
+  'cancel_incomplete',
+  'compaction_unqualified',
+  'compaction_failed',
+  'verification_failed',
+  'verification_inconclusive',
+  'mandatory_policy_unavailable',
   'unknown',
 ];
 
@@ -45,6 +64,26 @@ describe('failure classification', () => {
     expect(classifyFailure('tool_runtime_error', 'broken')).toMatchObject({
       retryable: true,
       modelFixable: true,
+      journal: true,
+    });
+  });
+
+  test('treats a phase deferral as model-fixable without requiring user input', () => {
+    expect(classifyFailure('phase_deferred', 'wait for building')).toMatchObject({
+      retryable: false,
+      modelFixable: true,
+      needsUserIntervention: false,
+      terminatesTurn: false,
+      journal: true,
+    });
+  });
+
+  test('treats a hard phase denial as model-fixable without offering approval', () => {
+    expect(classifyFailure('phase_denied', 'planning is read-only')).toMatchObject({
+      retryable: false,
+      modelFixable: true,
+      needsUserIntervention: false,
+      terminatesTurn: false,
       journal: true,
     });
   });

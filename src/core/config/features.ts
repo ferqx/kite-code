@@ -19,6 +19,14 @@ export interface FeatureFlags {
   contextCompactionV2: boolean;
   contextCompactionAutoV1: boolean;
   contextCompactionManualV1: boolean;
+  sessionLoggingPolicyV1: boolean;
+  providerDataPolicyV1: boolean;
+  remoteMcpEgressPolicyV1: boolean;
+  resourceBudgetV1: boolean;
+  terminalOutcomeV1: boolean;
+  boundedCancellationV1: boolean;
+  executionBoundaryV1: boolean;
+  networkBoundaryV1: boolean;
 }
 
 export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
@@ -38,6 +46,14 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   contextCompactionV2: true,
   contextCompactionAutoV1: false,
   contextCompactionManualV1: true,
+  sessionLoggingPolicyV1: false,
+  providerDataPolicyV1: false,
+  remoteMcpEgressPolicyV1: false,
+  resourceBudgetV1: false,
+  terminalOutcomeV1: false,
+  boundedCancellationV1: false,
+  executionBoundaryV1: false,
+  networkBoundaryV1: false,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

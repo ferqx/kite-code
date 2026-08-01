@@ -26,6 +26,11 @@ MCP Tools 通过三个内置只读工具按意图使用：
 
 三个工具正交：Resource 为空不表示没有 MCP Tool，search 零匹配不表示 catalog 为空。
 
+当配置携带 sealed production execution boundary 时，当前 Controller 会在任何 Provider
+lookup/readiness 前拒绝上述 inventory/resource/search 和动态 MCP 调用；这用于在 Task 1B.8
+完成逐 invocation transport admission 前保持 fail closed，不表示 MCP 已继承进程内
+`web_fetch` 的 host allowlist。
+
 ## 11.3 Health 与恢复
 
 Server 状态覆盖 connecting、discovering、ready、degraded、half-open/circuit-open 和断开等运行阶段。Catalog 或 capability revision 变化使旧 binding 失效。崩溃后的非终态写入进入 reconciliation，不自动重复创建外部对象。
@@ -70,5 +75,18 @@ Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入�
 `tool_search` 的具体业务 query 使用相关性召回。包含”有哪些 MCP 工具”等清单意图的中英文查询会被重定向到 `list_mcp_tools`，避免把搜索零匹配误解为空 catalog。
 
 Resource discovery 与 Tool discovery 分离：需要盘点 Provider 和 Tool 时用 `list_mcp_tools`，需要可执行能力时用 `tool_search`，需要 MCP 内容 URI 时用 `list_mcp_resources` / `read_mcp_resource`。三类 MCP 概念（Provider、Tool、Resource）正交：任何一个为空不自动推出另外两个为空。当前不支持 `@resource` 输入补全和 Resource Templates。
+
+Remote HTTP MCP Tool 还有独立内容外发门禁。最终参数非空时，Runtime 使用脱敏 route identity
+和规范化参数 digest 请求 `RemoteMcpEgressPermitV1`；许可与 Tool Approval、模型 Provider
+consent、read-only annotation 和 network allowlist 正交。每个并发 invocation 使用独立 nonce，
+Manager 在 SDK 调用前校验进程内 ledger，Runtime Store 再把 nonce digest 与无正文 receipt
+同事务唯一持久化，重启或并行进程 replay 均在零请求处拒绝并保存 `permit_replayed`。最终参数还会
+在 ToolController 和 Manager 两处执行有界 secret 检查；credential 字段/形状、受保护路径以及
+无法完成检查的输入都不能通过 permit 外发。边界在任何异步授权前创建 immutable JSON-safe 深
+快照，schema、检查、digest 和最终 SDK request 使用同一份内容，禁止 accessor/custom serializer
+造成签署后变更。permit 最长五分钟；空参数 HTTP Tool 和 local stdio 不消费该 permit；这不表示
+stdio 已有 production admission。Task 1B.8 完成 sealed argv/runtime/child boundary 前，注入
+protected-path evaluator 的 local stdio 配置只允许空 argv，任意非空 `args` 都在 transport factory
+前 fail closed。Tool Search/discovery 只处理元数据，也不会触发正文许可。
 
 完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。

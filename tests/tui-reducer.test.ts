@@ -38,7 +38,7 @@ function tcEvt(
 ): LegacyRenderAction {
   return {
     type: 'EVENT',
-    event: { type: 'tool_call', data: { call_id: callId, name: name as any, args, status } },
+    event: { type: 'tool_call', data: { call_id: callId, name, args, status } },
   };
 }
 function tsEvt(callId: string): LegacyRenderAction {
@@ -149,7 +149,7 @@ describe('eventReducer (blocks model)', () => {
       const s = dispatch(fresh(), textEvt('hello'));
       expect(flatBlocks(s)).toHaveLength(1);
       expect(flatBlocks(s)[0]!.kind).toBe('text');
-      expect((flatBlocks(s)[0] as any).content).toBe('hello');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe('hello');
     });
     test('assigns unique incrementing ids to blocks', () => {
       let s = fresh();
@@ -171,7 +171,7 @@ describe('eventReducer (blocks model)', () => {
       expect(r.folded).toBe(true);
     });
 
-    test('updates the active Thought preview without ending the current exploration summary', () => {
+    test('switches the active Thought window between reasoning and tool activity', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('first thought'));
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
@@ -186,8 +186,8 @@ describe('eventReducer (blocks model)', () => {
       expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
       expect(summaries[0]!.active).toBe(true);
       expect(summaries[0]!.latestActivity).toEqual({
-        kind: 'thinking',
-        text: 'second thought',
+        kind: 'tool',
+        callId: 'c2',
       });
     });
 
@@ -203,6 +203,414 @@ describe('eventReducer (blocks model)', () => {
         kind: 'thinking',
         text: 'checking the repo shape',
       });
+    });
+
+    test('pure-thinking phase merges into the answer header when the final closes it (ADR-0026 via ADR-0030)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'thinking before answering', durationMs: 2093 } },
+      });
+      // 非流式模型：文本先吸收为 pendingCaption（阶段块保持活跃）
+      // Non-streaming: text is absorbed pending confirmation; the block stays active
+      s = dispatch(s, textEvt('Here is the answer.'));
+      let summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.pendingCaption).toBe('Here is the answer.');
+
+      // final 关闭阶段：纯思考块的 pendingCaption 即最终回答 → 并入题头
+      // final closes the phase: the pure block's caption IS the answer → header merge
+      s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: 'Here is the answer.' } });
+
+      summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(0);
+      const text = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      expect(text).toBeDefined();
+      expect(text!.content).toBe('Here is the answer.');
+      expect(text!.thoughtElapsedMs).toBe(2093);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+    });
+
+    test('reason → text → exploration tools: text becomes a confirmed caption inside one phase block (ADR-0030)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'let me look', durationMs: 2000 } },
+      });
+      s = dispatch(s, textEvt('Let me read the core files.'));
+      // 文本吸收进同一个阶段块，不创建独立文本块
+      expect(flatBlocks(s).some((b) => b.kind === 'text')).toBe(false);
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.ts' }));
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.ts' }));
+
+      const blocks = flatBlocks(s);
+      // 只有一个阶段块：思考 + 旁白 + 工具同块，无独立文本块
+      expect(blocks.some((b) => b.kind === 'text')).toBe(false);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      const summary = summaries[0]!;
+      expect(summary.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summary.hasThinking).toBe(true);
+      expect(summary.modelMs).toBe(2000);
+      expect(summary.summaryLine).toBe('read 2 files');
+      // 只读工具确认旁白为正式块顶字幕
+      expect(summary.captions).toEqual(['Let me read the core files.']);
+      expect(summary.pendingCaption).toBeUndefined();
+      expect(summary.active).toBe(true);
+    });
+
+    test('pure thought closed by non-exploration tool keeps bare line even when text follows (ADR-0026 boundary)', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking before writing'));
+      s = dispatch(s, tcEvt('c1', 'write_file', { path: 'a.txt' }));
+      s = dispatch(s, textEvt('Done writing.'));
+
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 被非探索工具关闭的纯思考块与后续文本隔着 tool_card，永不并入
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.active).toBe(false);
+      const text = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      expect(text?.thoughtElapsedMs).toBeUndefined();
+    });
+
+    test('whitespace text is ignored entirely — the phase block keeps accumulating (ADR-0030)', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking'));
+      s = dispatch(s, textEvt('   \n  '));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.ts' }));
+
+      const blocks = flatBlocks(s);
+      expect(blocks.some((b) => b.kind === 'text')).toBe(false);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 空白文本不关闭 Thought：思考与工具仍是同一个活跃阶段块
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(1);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.hasThinking).toBe(true);
+    });
+
+    test('multi-round pure-thinking chain accumulates modelMs into the merged header (rules 19/24)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'round one', durationMs: 1000 } },
+      });
+      // model.requested 不关闭 Thought（ADR-0030），思考链跨调用延续
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'r1' },
+      });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'round two', durationMs: 1500 } },
+      });
+      s = dispatch(s, textEvt('The answer.'));
+      s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: 'The answer.' } });
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(0);
+      const text = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      // 1000 + 1500 = 2500ms 累加后并入题头
+      expect(text?.thoughtElapsedMs).toBe(2500);
+    });
+
+    test('thinking is not repeated after a task boundary within the same batch (ADR-0047)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'exploring the module', durationMs: 3000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'search_files', { pattern: 'reducer*' }));
+      s = dispatch(s, tcEvt('c2', 'task', { description: 'deep exploration' }));
+      s = dispatch(s, tcEvt('c3', 'read_file', { path: 'a.ts' }));
+      s = dispatch(s, tcEvt('c4', 'read_file', { path: 'b.ts' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      // 边界前：search 块带思考标记
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summaries[0]!.hasThinking).toBe(true);
+      expect(summaries[0]!.modelMs).toBe(3000);
+      // 边界后：read 聚合保留工具过程，但不重复已经展示过的 Thought 标签
+      expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c3', 'c4']);
+      expect(summaries[1]!.hasThinking).toBeUndefined();
+      expect(summaries[1]!.hasThought).toBe(false);
+      expect(summaries[1]!.modelMs).toBeUndefined();
+      expect(summaries[1]!.summaryLine).toBe('read 2 files');
+    });
+
+    test('thinking is not repeated after a write-tool boundary (ADR-0047)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'read, note, keep reading', durationMs: 2000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.ts' }));
+      s = dispatch(s, tcEvt('w1', 'write_file', { path: 'notes.md' }));
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.ts' }));
+
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.summaryLine).toBe('read 1 file');
+      expect(summaries[1]!.hasThinking).toBeUndefined();
+      expect(summaries[1]!.hasThought).toBe(false);
+      expect(summaries[1]!.modelMs).toBeUndefined();
+      expect(summaries[1]!.summaryLine).toBe('read 1 file');
+      // 写入卡片位于两个聚合块之间
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'w1')).toBe(true);
+    });
+
+    test('new reasoning joins the active exploration aggregate after a Bash boundary (ADR-0047)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'run tests first', durationMs: 2840 } },
+      });
+      s = dispatch(s, tcEvt('bash-1', 'shell_execute', { command: 'bun test' }));
+      s = dispatch(s, tcEvt('read-1', 'read_file', { path: 'README.md' }));
+      s = dispatch(s, tcEvt('search-1', 'search_files', { pattern: '*.ts' }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'next-model-call' },
+      });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: {
+          type: 'reason',
+          data: { text: 'the exploration results need follow-up', durationMs: 2891 },
+        },
+      });
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.modelMs).toBe(2840);
+
+      const exploration = summaries[1]!;
+      expect(exploration.tools.map((tool) => tool.callId)).toEqual(['read-1', 'search-1']);
+      expect(exploration.hasThought).toBe(true);
+      expect(exploration.hasThinking).toBe(true);
+      expect(exploration.modelMs).toBe(2891);
+      expect(exploration.latestActivity).toEqual({
+        kind: 'thinking',
+        text: 'the exploration results need follow-up',
+      });
+    });
+
+    test('a new call without reasoning remains non-thinking after a task boundary (ADR-0047)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'thinking', durationMs: 1000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'task', {}));
+      // 新一轮模型调用 = 新决策，延续清除
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'r1' },
+      });
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'a.ts' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(2);
+      expect(summaries[0]!.hasThinking).toBe(true);
+      // 新调用无 reasoning → 非思考聚合，不继承
+      expect(summaries[1]!.hasThinking).toBeUndefined();
+      expect(summaries[1]!.hasThought).toBe(false);
+      expect(summaries[1]!.modelMs).toBeUndefined();
+    });
+
+    test('pure-thinking Thought persists when a non-exploration tool follows', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking before writing'));
+      s = dispatch(s, tcEvt('c1', 'write_file', { path: 'a.txt' }));
+
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.active).toBe(false);
+      expect(summaries[0]!.result).toBe('done');
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c1')).toBe(true);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+    });
+
+    test('SET_IDLE settles and keeps a pure-thinking Thought', () => {
+      let s = fresh();
+      s = dispatch(s, { type: 'SET_RUNNING' });
+      s = dispatch(s, reasonEvt('thinking at interruption'));
+      s = dispatch(s, { type: 'SET_IDLE' });
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(s.running).toBe(false);
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools).toHaveLength(0);
+      expect(summaries[0]!.active).toBe(false);
+    });
+
+    test('model.requested keeps an active tool-backed Thought alive across calls (ADR-0030 phase block)', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('thinking'));
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
+      // 新一轮模型调用 = kernel 分批实现细节，不是阶段边界：块保持活跃
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-1' },
+      });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
+      // 阶段块跨调用存活：圆点持续闪烁，等待后续思考/工具继续流入
+      // （result 由工具状态推导，工具全完成即为 done，不影响活跃态渲染）
+      expect(summary!.active).toBe(true);
+      expect(s.currentThoughtSummaryId).toBe(summary!.id);
+    });
+
+    test('model.requested keeps a pure-thinking Thought active (chain continues until text)', () => {
+      let s = fresh();
+      s = dispatch(s, reasonEvt('still thinking'));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-2' },
+      });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.tools).toHaveLength(0);
+      // 规则 1/19：思考链只被 text 等边界打断，不被新一轮模型调用打断
+      expect(summary!.active).toBe(true);
+      expect(s.currentThoughtSummaryId).toBe(summary!.id);
+    });
+
+    test('model.responded durationMs freezes Thought elapsed to model-call duration (CC parity)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'model.responded',
+          messageId: 'm1',
+          reasoningText: 'thinking hard',
+          durationMs: 3210,
+        },
+      });
+      // 工具执行期间 elapsed 不增长（对齐 Claude Code：Thought 计时不含工具执行）
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
+
+      let summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary).toBeDefined();
+      expect(summary!.totalElapsedMs).toBe(3210);
+
+      // 阶段边界关闭后仍以模型调用时长冻结
+      s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: 'done' } });
+      summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary!.active).toBe(false);
+      expect(summary!.result).toBe('done');
+      expect(summary!.totalElapsedMs).toBe(3210);
+    });
+
+    test('multi-round exploration stays ONE phase block across model.requested (ADR-0030)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'round one', durationMs: 3000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-3' },
+      });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'round two', durationMs: 3000 } },
+      });
+      s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.txt' }));
+
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 不切分：两轮工具同块，时长跨调用累加（3000 + 3000）
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summaries[0]!.modelMs).toBe(6000);
+      expect(summaries[0]!.totalElapsedMs).toBe(6000);
+      expect(summaries[0]!.summaryLine).toBe('read 2 files');
+    });
+
+    test('a model call without reasoning still adds its duration to the phase (ADR-0030 rule 24)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'model.responded',
+          messageId: 'm1',
+          reasoningText: 'think',
+          durationMs: 1000,
+        },
+      });
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-x' },
+      });
+      // 第二次调用无 reasoning：时长仍计入阶段 Σ
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.responded', messageId: 'm2', durationMs: 800 },
+      });
+
+      const summary = flatBlocks(s).find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summary!.modelMs).toBe(1800);
+      expect(summary!.totalElapsedMs).toBe(1800);
+      expect(summary!.hasThinking).toBe(true);
     });
   });
 
@@ -246,6 +654,88 @@ describe('eventReducer (blocks model)', () => {
       );
       expect(s.running).toBe(false);
       expect(blocks.map((b) => b.status)).toEqual(['cancelled', 'cancelled']);
+    });
+
+    test('escape preserves the cancelled Bash command and drops never-started read statistics', () => {
+      let s = dispatch(fresh(), { type: 'SET_RUNNING' });
+      s = dispatch(
+        s,
+        tcEvt('shell-1', 'shell_execute', {
+          command: 'bun test --dry-run 2>&1 | tail -20',
+        }),
+      );
+      s = dispatch(
+        s,
+        tcEvt('read-1', 'read_file', { path: 'src/core/runtime/runner.ts' }, 'queued'),
+      );
+      s = dispatch(
+        s,
+        tcEvt('read-2', 'read_file', { path: 'src/core/runtime/reducer.ts' }, 'queued'),
+      );
+
+      s = dispatch(s, { type: 'ESCAPE' });
+
+      const blocks = flatBlocks(s);
+      const shell = blocks.find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'shell-1',
+      );
+      expect(shell).toMatchObject({
+        status: 'cancelled',
+        detail: 'Ran: bun test --dry-run 2>&1 | tail -20',
+      });
+      expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
+    });
+
+    test('replayed user cancellation matches live cleanup without a turn notice', () => {
+      let s = dispatch(fresh(), { type: 'SET_RUNNING' });
+      s = dispatch(
+        s,
+        tcEvt('shell-1', 'shell_execute', {
+          command: 'bun test --dry-run 2>&1 | tail -20',
+        }),
+      );
+      s = dispatch(
+        s,
+        tcEvt('read-1', 'read_file', { path: 'src/core/runtime/runner.ts' }, 'queued'),
+      );
+      s = dispatch(
+        s,
+        tcEvt('read-2', 'read_file', { path: 'src/core/runtime/reducer.ts' }, 'queued'),
+      );
+
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'turn.aborted',
+          turnId: 'turn-1',
+          reason: 'Cancelled by user.',
+          cause: 'user',
+        },
+      });
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'turn.aborted',
+          turnId: 'turn-1',
+          reason: 'Cancelled by user.',
+          cause: 'user',
+        },
+      });
+
+      const blocks = flatBlocks(s);
+      expect(blocks).toContainEqual(
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: 'shell-1',
+          status: 'cancelled',
+          detail: 'Ran: bun test --dry-run 2>&1 | tail -20',
+        }),
+      );
+      expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
+      expect(
+        blocks.some((block) => block.kind === 'text' && block.content.includes('Run cancelled')),
+      ).toBe(false);
     });
 
     test('appends tool_card block with running status', () => {
@@ -413,6 +903,7 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, tdEvt('c1', 'shell_execute', false, 'Command timed out after 10000ms.'));
       const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(t.status).toBe('timeout');
+      expect(t.timeoutMs).toBe(10000);
     });
     test('tool_done preserves live shell output when command times out', () => {
       let s = fresh();
@@ -435,6 +926,18 @@ describe('eventReducer (blocks model)', () => {
       expect(t.status).toBe('timeout');
       expect(t.summary).toBe('Kite Code ready');
       expect(t.timeoutMs).toBe(5000);
+    });
+    test('tool_done recovers the default timeout after preceding stderr output', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute', { command: 'npm run test' }));
+      s = dispatch(
+        s,
+        tdEvt('c1', 'shell_execute', false, 'watcher warning\nCommand timed out after 600000ms.'),
+      );
+
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('timeout');
+      expect(t.timeoutMs).toBe(600000);
     });
     test('tool_done preserves full timeout stdout summary when exitCode is available', () => {
       let s = fresh();
@@ -516,25 +1019,27 @@ describe('eventReducer (blocks model)', () => {
       expect(t2.status).toBe('running');
     });
 
-    test('visible assistant text closes the current Thought before the next exploration tool', () => {
+    test('visible assistant text is absorbed into the phase block and confirmed by the next exploration tool (ADR-0030)', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
       s = dispatch(s, tdEvt('c1', 'read_file', true, 'a'));
       s = dispatch(s, textEvt('I checked that file.'));
+      // 文本被吸收：不关闭 Thought、不建文本块
+      expect(flatBlocks(s).some((b) => b.kind === 'text')).toBe(false);
       s = dispatch(s, tcEvt('c2', 'read_file', { path: 'b.txt' }));
 
       const summaries = flatBlocks(s).filter(
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
-      expect(summaries).toHaveLength(2);
-      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1']);
-      expect(summaries[0]!.active).toBe(false);
-      expect(summaries[0]!.latestActivity).toBeUndefined();
-      expect(summaries[1]!.tools.map((t) => t.callId)).toEqual(['c2']);
-      expect(summaries[1]!.active).toBe(true);
+      // 同一个阶段块：两批工具 + 块顶旁白
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
+      expect(summaries[0]!.active).toBe(true);
+      expect(summaries[0]!.captions).toEqual(['I checked that file.']);
+      expect(summaries[0]!.pendingCaption).toBeUndefined();
     });
 
-    test('late tool_started does not reactivate a Thought closed by assistant text', () => {
+    test('non-exploration tool settles the phase and detaches the unconfirmed caption (ADR-0030)', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('checking files'));
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }, 'queued'));
@@ -542,15 +1047,59 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, tsEvt('c1'));
       s = dispatch(s, tcEvt('c2', 'shell_execute', { command: 'npm test' }));
 
-      const summaries = flatBlocks(s).filter(
+      const blocks = flatBlocks(s);
+      const summaries = blocks.filter(
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
       expect(summaries).toHaveLength(1);
       expect(summaries[0]!.active).toBe(false);
       expect(summaries[0]!.latestActivity).toBeUndefined();
       expect(summaries[0]!.tools[0]!.status).toBe('running');
+      expect(summaries[0]!.pendingCaption).toBeUndefined();
+      // 未被只读工具确认的旁白脱离为独立文本块（无题头：思考时长留在块里）
+      const text = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      expect(text?.content).toBe('I checked that file.');
+      expect(text?.thoughtElapsedMs).toBeUndefined();
       expect(s.currentThoughtSummaryId).toBeUndefined();
-      expect(flatBlocks(s).some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+    });
+
+    test('final answer detaches from a tool phase block as standalone text without header (ADR-0030)', () => {
+      let s = fresh();
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'explore', durationMs: 2000 } },
+      });
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
+      s = dispatch(s, tdEvt('c1', 'read_file', true, 'ok'));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'req-f' },
+      });
+      s = dispatch(s, {
+        type: 'EVENT',
+        event: { type: 'reason', data: { text: 'synthesize', durationMs: 1500 } },
+      });
+      s = dispatch(s, textEvt('The analysis follows.'));
+      s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: 'The analysis follows.' } });
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      // 阶段块 settle：两次调用时长累加，最终回答前的思考已计入
+      expect(summary!.active).toBe(false);
+      expect(summary!.result).toBe('done');
+      expect(summary!.modelMs).toBe(3500);
+      expect(summary!.totalElapsedMs).toBe(3500);
+      // 最终回答脱离为独立文本块，无 Thought 题头（时长已在块内）
+      const text = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'text' }> => b.kind === 'text',
+      );
+      expect(text?.content).toBe('The analysis follows.');
+      expect(text?.thoughtElapsedMs).toBeUndefined();
     });
 
     test('non-exploration tool call closes the current Thought before later exploration tools', () => {
@@ -572,13 +1121,12 @@ describe('eventReducer (blocks model)', () => {
       expect(s.currentThoughtSummaryId).toBe(summaries[1]!.id);
     });
 
-    test('inspect shell search with search prefix is consolidated into Thought', () => {
+    test('read-only shell search remains an independent tool card', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
       s = dispatch(
         s,
         tcEvt('c2', 'shell_execute', {
-          intent: 'inspect',
           command: 'find /Users/chenchao/Code/ai/openpx-new/src -type f | sort',
         }),
       );
@@ -588,12 +1136,69 @@ describe('eventReducer (blocks model)', () => {
         (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
       );
 
-      // Both c1 and c2 are now exploration tools → consolidated into the same Thought
+      // read_file is exploration; shell_execute remains governed as a separate card.
+      expect(summary).toBeDefined();
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summary!.active).toBe(false);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+    });
+
+    test('simple inspect ls is consolidated into Thought as a directory listing', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(
+        s,
+        tcEvt('c2', 'shell_execute', {
+          intent: 'inspect',
+          command: '  ls -la src/app/tui  ',
+        }),
+      );
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+
       expect(summary).toBeDefined();
       expect(summary!.tools.map((t) => t.callId)).toEqual(['c1', 'c2']);
-      expect(summary!.active).toBe(true);
+      expect(summary!.summaryLine).toBe('read 1 file, listed 1 directory');
       expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(false);
-      expect(s.currentThoughtSummaryId).toBe(summary!.id);
+    });
+
+    test.each([
+      ['ls -la | tee listing.txt', 'pipeline'],
+      ['ls -la > listing.txt', 'redirection'],
+      ['ls -la && rm -rf output', 'command chain'],
+      ['ls -la $(touch marker)', 'command substitution'],
+    ])('inspect ls with %s remains a barrier tool_card (%s)', (command) => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(s, tcEvt('c2', 'shell_execute', { intent: 'inspect', command }));
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summary!.active).toBe(false);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+    });
+
+    test('ls without inspect intent remains a barrier tool_card', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(
+        s,
+        tcEvt('c2', 'shell_execute', {
+          intent: 'execute',
+          command: 'ls -la',
+        }),
+      );
+
+      const blocks = flatBlocks(s);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
     });
 
     test('inspect shell search without search prefix is a barrier tool_card', () => {
@@ -603,6 +1208,29 @@ describe('eventReducer (blocks model)', () => {
         s,
         tcEvt('c2', 'shell_execute', {
           intent: 'inspect',
+          command: 'npm test', // not a search prefix
+        }),
+      );
+
+      const blocks = flatBlocks(s);
+      const summary = blocks.find(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+
+      // c1 is exploration → tool_summary; c2 is NOT (npm test is not search) → tool_card
+      expect(summary).toBeDefined();
+      expect(summary!.tools.map((t) => t.callId)).toEqual(['c1']);
+      expect(summary!.active).toBe(false);
+      expect(blocks.some((b) => b.kind === 'tool_card' && b.callId === 'c2')).toBe(true);
+      expect(s.currentThoughtSummaryId).toBeUndefined();
+    });
+
+    test('non-read shell command is also a barrier tool_card', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'read_file', { path: 'ROADMAP.md' }));
+      s = dispatch(
+        s,
+        tcEvt('c2', 'shell_execute', {
           command: 'npm test', // not a search prefix
         }),
       );
@@ -640,7 +1268,7 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('EVENT.model_retry', () => {
-    test('appends text block for model_retry', () => {
+    test('sets retry status without appending output or closing the live stream', () => {
       const s = dispatch(fresh(), {
         type: 'EVENT',
         event: {
@@ -648,8 +1276,7 @@ describe('eventReducer (blocks model)', () => {
           data: { attempt: 2, maxAttempts: 5, error: 'rate limit', delayMs: 1000 },
         },
       });
-      expect(flatBlocks(s)[0]!.kind).toBe('text');
-      expect((flatBlocks(s)[0] as any).content).toContain('Model retry #2/5');
+      expect(flatBlocks(s)).toEqual([]);
       expect(s.status.retryState).toEqual({
         attempt: 2,
         maxAttempts: 5,
@@ -745,7 +1372,7 @@ describe('eventReducer (blocks model)', () => {
     test('appends text block when non-empty', () => {
       const s = dispatch(fresh(), { type: 'EVENT', event: { type: 'final', data: 'done' } });
       expect(flatBlocks(s)).toHaveLength(1);
-      expect((flatBlocks(s)[0] as any).content).toBe('done');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe('done');
     });
     test('no-ops when empty', () => {
       const s = dispatch(fresh(), { type: 'EVENT', event: { type: 'final', data: '' } });
@@ -773,8 +1400,7 @@ describe('eventReducer (blocks model)', () => {
       });
       // Should have only 1 text block with the duplicate content
       const textBlocks = flatBlocks(s).filter(
-        (b) =>
-          b.kind === 'text' && (b as any).content === '我看了你的项目环境，这是 Kite Code 项目本身',
+        (b) => b.kind === 'text' && b.content === '我看了你的项目环境，这是 Kite Code 项目本身',
       );
       expect(textBlocks).toHaveLength(1);
     });
@@ -788,21 +1414,17 @@ describe('eventReducer (blocks model)', () => {
       // final arrives, last block is tool_card (done), not text
       s = dispatch(s, { type: 'EVENT', event: { type: 'final', data: '分析完成' } });
       // Should not create another text block for the same content
-      const textBlocks = flatBlocks(s).filter(
-        (b) => b.kind === 'text' && (b as any).content === '分析完成',
-      );
+      const textBlocks = flatBlocks(s).filter((b) => b.kind === 'text' && b.content === '分析完成');
       expect(textBlocks).toHaveLength(1);
     });
   });
 
   describe('EVENT.need_approval / need_input + RESOLVE_INTERRUPT', () => {
-    test('appends approval block and sets interrupt', () => {
+    test('keeps approval in the Footer interrupt without appending a message block', () => {
       const a = approval({ command: 'rm -rf /' });
       const s = dispatch(fresh(), { type: 'EVENT', event: { type: 'need_approval', data: a } });
-      expect(flatBlocks(s)).toHaveLength(1);
-      expect(flatBlocks(s)[0]!.kind).toBe('approval');
-      expect(s.interrupt?.kind).toBe('approval');
-      expect((s.interrupt as any)?.blockId).toBe(flatBlocks(s)[0]!.id);
+      expect(flatBlocks(s)).toHaveLength(0);
+      expect(s.interrupt).toEqual({ kind: 'approval', approval: a });
     });
     test('appends question block and sets interrupt', () => {
       const q = question({ question: 'Choose color' });
@@ -810,18 +1432,15 @@ describe('eventReducer (blocks model)', () => {
       expect(flatBlocks(s)[0]!.kind).toBe('question');
       expect(s.interrupt?.kind).toBe('input');
     });
-    test('RESOLVE_INTERRUPT marks approval as resolved and clears interrupt', () => {
+    test('RESOLVE_INTERRUPT clears an off-screen approval', () => {
       let s = fresh();
       const a = approval();
       s = dispatch(s, { type: 'EVENT', event: { type: 'need_approval', data: a } });
-      const blockId = (s.interrupt as { blockId: number }).blockId;
       s = dispatch(s, {
         type: 'RESOLVE_INTERRUPT',
-        blockId,
         resolution: { action: 'approved', grant: 'approve_once' },
       });
-      const b = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'approval' }>;
-      expect(b.resolved?.action).toBe('approved');
+      expect(flatBlocks(s)).toHaveLength(0);
       expect(s.interrupt).toBeNull();
     });
     test('RESOLVE_INTERRUPT marks question as resolved', () => {
@@ -940,7 +1559,12 @@ describe('eventReducer (blocks model)', () => {
         (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
           block.kind === 'tool_card' && block.callId === 'ask-queued',
       );
-      expect(card).toMatchObject({ status: 'done', userInput: { answer: 'auto' } });
+      expect(card).toMatchObject({
+        status: 'done',
+        args: request,
+        detail: 'Choose a mode',
+        userInput: { answer: 'auto' },
+      });
     });
     test('RESOLVE_INTERRUPT pre-fills the sole active ask_user card for legacy need_input', () => {
       let s = fresh();
@@ -1062,6 +1686,161 @@ describe('eventReducer (blocks model)', () => {
       expect(s.currentThoughtSummaryId).toBeUndefined();
       expect(s.interrupt?.kind).toBe('approval');
     });
+    test('runtime approval stays in Footer and materializes tools only when they start', () => {
+      let s = fresh();
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.queued',
+        toolCallId: 'bash-1',
+        name: 'shell_execute',
+        args: { command: 'bun test' },
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.queued',
+        toolCallId: 'read-1',
+        name: 'read_file',
+        args: { path: 'run-agent.ts' },
+      });
+      expect(flatBlocks(s)).toHaveLength(0);
+
+      s = handleRuntimeEventAction(s, {
+        type: 'approval.requested',
+        interactionId: 'approval-1',
+        toolCallId: 'bash-1',
+        approval: {
+          ...approval({ callId: 'bash-1', command: 'bun test' }),
+          callId: 'bash-1',
+        },
+      });
+
+      expect(
+        flatBlocks(s).filter((block) => block.kind === 'tool_card' && block.callId === 'bash-1'),
+      ).toHaveLength(0);
+      expect(s.interrupt).toMatchObject({
+        kind: 'approval',
+        approval: { callId: 'bash-1', command: 'bun test' },
+      });
+      expect(
+        flatBlocks(s).some(
+          (block) =>
+            (block.kind === 'tool_card' && block.callId === 'read-1') ||
+            (block.kind === 'tool_summary' && block.tools.some((tool) => tool.callId === 'read-1')),
+        ),
+      ).toBe(false);
+
+      s = dispatch(s, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      });
+      expect(s.interrupt).toBeNull();
+      expect(flatBlocks(s)).toHaveLength(0);
+
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.started',
+        toolCallId: 'bash-1',
+      });
+      expect(
+        flatBlocks(s).filter(
+          (block) =>
+            block.kind === 'tool_card' && block.callId === 'bash-1' && block.status === 'running',
+        ),
+      ).toHaveLength(1);
+
+      s = handleRuntimeEventAction(s, {
+        type: 'tool.started',
+        toolCallId: 'read-1',
+      });
+      const summaries = flatBlocks(s).filter(
+        (b): b is Extract<OutputBlock, { kind: 'tool_summary' }> => b.kind === 'tool_summary',
+      );
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]!.tools[0]).toMatchObject({
+        callId: 'read-1',
+        status: 'running',
+      });
+    });
+    test('shows the next shell approval while an approved sibling remains running', () => {
+      let s = fresh();
+      for (const [toolCallId, command] of [
+        ['bash-1', 'bun test'],
+        ['bash-2', 'bun run typecheck'],
+      ] as const) {
+        s = handleRuntimeEventAction(s, {
+          type: 'tool.queued',
+          toolCallId,
+          name: 'shell_execute',
+          args: { command },
+        });
+      }
+      s = handleRuntimeEventAction(s, { type: 'tool.started', toolCallId: 'bash-1' });
+      s = handleRuntimeEventAction(s, {
+        type: 'approval.requested',
+        interactionId: 'approval-2',
+        toolCallId: 'bash-2',
+        approval: {
+          ...approval({ callId: 'bash-2', command: 'bun run typecheck' }),
+          callId: 'bash-2',
+        },
+      });
+
+      expect(
+        flatBlocks(s).filter(
+          (block) =>
+            block.kind === 'tool_card' && block.callId === 'bash-1' && block.status === 'running',
+        ),
+      ).toHaveLength(1);
+      expect(
+        flatBlocks(s).some((block) => block.kind === 'tool_card' && block.callId === 'bash-2'),
+      ).toBe(false);
+      expect(s.interrupt).toMatchObject({
+        kind: 'approval',
+        approval: { callId: 'bash-2', command: 'bun run typecheck' },
+      });
+    });
+    test('approving a later shell preserves a running sibling start time', () => {
+      let s = fresh();
+      for (const [toolCallId, command] of [
+        ['bash-1', 'bun test'],
+        ['bash-2', 'bun run typecheck'],
+      ] as const) {
+        s = handleRuntimeEventAction(s, {
+          type: 'tool.queued',
+          toolCallId,
+          name: 'shell_execute',
+          args: { command },
+        });
+      }
+      s = handleRuntimeEventAction(s, { type: 'tool.started', toolCallId: 'bash-1' });
+      s = {
+        ...s,
+        toolStartTimes: { 'bash-1': 123 },
+        turns: s.turns.map((turn) => ({
+          blocks: turn.blocks.map((block) =>
+            block.kind === 'tool_card' && block.callId === 'bash-1'
+              ? { ...block, startedAt: 123 }
+              : block,
+          ),
+        })),
+      };
+      s = handleRuntimeEventAction(s, {
+        type: 'approval.requested',
+        interactionId: 'approval-2',
+        toolCallId: 'bash-2',
+        approval: {
+          ...approval({ callId: 'bash-2', command: 'bun run typecheck' }),
+          callId: 'bash-2',
+        },
+      });
+      s = dispatch(s, {
+        type: 'RESOLVE_INTERRUPT',
+        resolution: { action: 'approved', grant: 'approve_once' },
+      });
+
+      const running = flatBlocks(s).find(
+        (block) => block.kind === 'tool_card' && block.callId === 'bash-1',
+      );
+      expect(running).toMatchObject({ kind: 'tool_card', startedAt: 123 });
+      expect(s.toolStartTimes).toEqual({ 'bash-1': 123 });
+    });
     test('need_input closes active Thought so its timer stops while waiting for the user', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('asking after inspection'));
@@ -1110,7 +1889,9 @@ describe('eventReducer (blocks model)', () => {
         type: 'EVENT',
         event: { type: 'error', data: { message: 'boom', recoverable: true } },
       });
-      expect((flatBlocks(s)[0] as any).content).toContain('boom');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toContain(
+        'boom',
+      );
     });
   });
 
@@ -1158,26 +1939,28 @@ describe('eventReducer (blocks model)', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('think'));
       const id = (flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).id;
-      expect((flatBlocks(s)[0] as any).folded).toBe(true);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(true);
       s = dispatch(s, { type: 'TOGGLE_REASON', id });
-      expect((flatBlocks(s)[0] as any).folded).toBe(false);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(false);
     });
     test('TOGGLE_ALL_REASON toggles all reason blocks folded', () => {
       let s = fresh();
       s = dispatch(s, reasonEvt('first'));
       s = dispatch(s, textEvt('between'));
       s = dispatch(s, reasonEvt('second'));
-      // First block auto-expanded on non-reason event, second still folded
-      expect((flatBlocks(s)[0] as any).folded).toBe(false);
-      expect((flatBlocks(s)[2] as any).folded).toBe(true);
+      // 布局（ADR-0026 后）：[reason1, text（纯思考已并入题头）, reason2, tool_summary(活跃纯思考)]
+      // Layout: [reason1, text (pure thought merged as header), reason2, tool_summary(active pure)]
+      // First reason block auto-expanded on non-reason event, second still folded
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(false);
+      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(true);
       // Toggle: collapse all (anyExpanded → fold all)
       s = dispatch(s, { type: 'TOGGLE_ALL_REASON' });
-      expect((flatBlocks(s)[0] as any).folded).toBe(true);
-      expect((flatBlocks(s)[2] as any).folded).toBe(true);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(true);
+      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(true);
       // Toggle: expand all (none expanded → unfold all)
       s = dispatch(s, { type: 'TOGGLE_ALL_REASON' });
-      expect((flatBlocks(s)[0] as any).folded).toBe(false);
-      expect((flatBlocks(s)[2] as any).folded).toBe(false);
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(false);
+      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'reason' }>).folded).toBe(false);
     });
     test('TOGGLE_ALL_REASON is no-op when no reason blocks', () => {
       let s = dispatch(fresh(), textEvt('hello'));
@@ -1294,6 +2077,17 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'SET_PHASE', phase: 'building' });
       expect(s.status.phase).toBe('building');
     });
+    test('planning.exited projects the durable exit back to building', () => {
+      const s = handleRuntimeEventAction(
+        { ...fresh(), status: { ...fresh().status, phase: 'planning' } },
+        {
+          type: 'planning.exited',
+          taskId: 'task-1',
+          reason: 'Exited Plan Mode.',
+        },
+      );
+      expect(s.status.phase).toBe('building');
+    });
     test('TOGGLE_PLAN_MODE toggles phase and resets auth', () => {
       let s = fresh();
       // 先设为 full_access / Start with full_access
@@ -1314,11 +2108,12 @@ describe('eventReducer (blocks model)', () => {
       };
       const event: LegacyRenderAction = {
         type: 'EVENT',
-        event: { type: 'need_plan_review' as any, data: eventPayload },
+        event: { type: 'need_plan_review', data: eventPayload } as unknown as RenderEvent,
       };
       let s = dispatch(fresh(), event);
       // No plan_review block created (plan content shown via update_plan tool_card)
-      const block = flatBlocks(s).find((b: any) => b.kind === 'plan_review');
+      // plan_review 不是块类型（内容由 update_plan tool_card 渲染）：断言无此块
+      const block = flatBlocks(s).find((b) => (b.kind as string) === 'plan_review');
       expect(block).toBeUndefined();
       expect(s.interrupt?.kind).toBe('plan_review');
       expect(s.status.pendingPlan).toEqual(eventPayload.plan);
@@ -1339,7 +2134,7 @@ describe('eventReducer (blocks model)', () => {
       };
       let s = dispatch(fresh(), {
         type: 'EVENT',
-        event: { type: 'need_plan_review' as any, data: eventPayload },
+        event: { type: 'need_plan_review', data: eventPayload } as unknown as RenderEvent,
       });
       expect(s.interrupt?.kind).toBe('plan_review');
       s = dispatch(s, {
@@ -1444,7 +2239,7 @@ describe('eventReducer (blocks model)', () => {
       let s = dispatch(fresh(), {
         type: 'EVENT',
         event: {
-          type: 'tool_call' as any,
+          type: 'tool_call',
           data: {
             call_id: 'plan-1',
             name: 'update_plan',
@@ -1458,11 +2253,9 @@ describe('eventReducer (blocks model)', () => {
         },
       });
       // Verify tool_card created with running status
-      const cards = flatBlocks(s).filter(
-        (b: any) => b.kind === 'tool_card' && b.name === 'update_plan',
-      );
+      const cards = flatBlocks(s).filter((b) => b.kind === 'tool_card' && b.name === 'update_plan');
       expect(cards.length).toBe(1);
-      const card = cards[0] as any;
+      const card = cards[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(card.status).toBe('running');
       expect(card.summary).toBe('');
       expect(card.expanded).toBeUndefined();
@@ -1471,7 +2264,7 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, {
         type: 'EVENT',
         event: {
-          type: 'need_plan_review' as any,
+          type: 'need_plan_review',
           data: {
             plan: {
               name: 'Test Plan',
@@ -1480,13 +2273,13 @@ describe('eventReducer (blocks model)', () => {
               steps: [{ step: 'Do thing', status: 'pending' as const }],
             },
           },
-        },
+        } as unknown as RenderEvent,
       });
       const doneCards = flatBlocks(s).filter(
-        (b: any) => b.kind === 'tool_card' && b.name === 'update_plan',
+        (b) => b.kind === 'tool_card' && b.name === 'update_plan',
       );
       expect(doneCards.length).toBe(1);
-      const doneCard = doneCards[0] as any;
+      const doneCard = doneCards[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(doneCard.status).toBe('done');
       expect(doneCard.summary).toContain('A great plan');
       expect(doneCard.summary).toContain('Steps:');
@@ -1512,13 +2305,25 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'USER_MESSAGE', text: 'Hello, AI' });
       expect(flatBlocks(s)).toHaveLength(1);
       expect(flatBlocks(s)[0]!.kind).toBe('user');
-      expect((flatBlocks(s)[0] as any).content).toBe('Hello, AI');
+      expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe(
+        'Hello, AI',
+      );
     });
     test('NEW_SESSION clears blocks, resets state, increments sessionKey', () => {
       let s = fresh();
       s = {
         ...s,
         turns: [{ blocks: [{ id: 1, kind: 'text', content: 'old' }] }],
+        status: {
+          ...s.status,
+          phase: 'planning',
+          pendingPlan: {
+            name: 'Outgoing draft',
+            description: 'Must stay with the outgoing session',
+            status: 'pending',
+            steps: [],
+          },
+        },
         ctrlCPressed: true,
         interrupt: { kind: 'approval', blockId: 1 },
         showHelp: true,
@@ -1537,6 +2342,10 @@ describe('eventReducer (blocks model)', () => {
       expect(s.sessions).toHaveLength(1);
       expect(s.sessions[0]!.threadId).toBe('new-session-1');
       expect(s.sessions[0]!.active).toBe(true);
+      expect(s.status.phase).toBe('building');
+      expect(s.status.pendingPlan).toBeNull();
+      expect(s.sessions[0]!.status.phase).toBe('building');
+      expect(s.sessions[0]!.status.pendingPlan).toBeNull();
     });
     test('SET_RUNNING resets ctrlCPressed and exitRequested', () => {
       let s = fresh();
@@ -1569,7 +2378,7 @@ describe('eventReducer (blocks model)', () => {
         text: 'First paragraph.\n\nSecond paragraph.',
         toolCalls: [],
       });
-      expect(flatBlocks(s).some((block) => block.kind === 'text' && block.streaming)).toBe(true);
+      expect(flatBlocks(s).some((block) => block.kind === 'text' && block.streaming)).toBe(false);
 
       s = handleRuntimeEventAction(s, {
         type: 'run.completed',
@@ -1584,6 +2393,40 @@ describe('eventReducer (blocks model)', () => {
         .join('\n');
       expect(text).toContain('TAIL_MARKER must be visible before the prompt.');
       expect(flatBlocks(s).some((block) => block.kind === 'text' && block.streaming)).toBe(false);
+    });
+    test('SET_EXITED preserves streamed paragraph blocks already handed to Static', () => {
+      let s = dispatch(fresh(), { type: 'SET_RUNNING' });
+      s = handleRuntimeEventAction(s, { type: 'model.requested', requestId: 'stream-request' });
+      s = handleRuntimeEventAction(s, {
+        type: 'model.text_delta',
+        text: 'STREAM_FIRST\n\n',
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'model.text_delta',
+        text: 'STREAM_FIRST\n\nSTREAM_MIDDLE\n\n',
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'model.text_delta',
+        text: 'STREAM_FIRST\n\nSTREAM_MIDDLE\n\nSTREAM_FINAL',
+      });
+      s = handleRuntimeEventAction(s, {
+        type: 'model.responded',
+        messageId: 'stream-response',
+        text: 'STREAM_FIRST\n\nSTREAM_MIDDLE\n\nSTREAM_FINAL',
+      });
+      const beforeExit = flatBlocks(s).filter(
+        (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+      );
+
+      s = dispatch(s, { type: 'SET_EXITED' });
+
+      const afterExit = flatBlocks(s).filter(
+        (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+      );
+      expect(afterExit.map((block) => block.id)).toEqual(beforeExit.map((block) => block.id));
+      expect(afterExit.map((block) => block.content).join('')).toBe(
+        'STREAM_FIRST\n\nSTREAM_MIDDLE\n\nSTREAM_FINAL',
+      );
     });
     test('SET_EXITED sets exited flag', () => {
       let s = fresh();
@@ -1635,23 +2478,20 @@ describe('eventReducer (blocks model)', () => {
         'Hello, world!',
       );
     });
-    test('streaming text appends new block when last block is not streaming text', () => {
+    test('text after an active phase block is absorbed as caption, not a new block (ADR-0030)', () => {
       let s = fresh();
       s = { ...s, running: true };
-      // First text (streaming)
+      // First text: no active Thought → normal text block
       s = dispatch(s, textEvt('Hello'));
-      // Tool card interleaved
+      // Exploration tool opens a phase block
       s = dispatch(s, tcEvt('c1', 'read_file'));
-      // Next text should be a new block (last is tool_card, not streaming text)
+      // Next text is absorbed into the active phase block (pending caption)
       s = dispatch(s, textEvt('After tool'));
-      expect(flatBlocks(s)).toHaveLength(3);
+      expect(flatBlocks(s)).toHaveLength(2);
       expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe('Hello');
-      expect(
-        flatBlocks(s)[1]!.kind === 'tool_card' || flatBlocks(s)[1]!.kind === 'tool_summary',
-      ).toBe(true);
-      expect((flatBlocks(s)[2] as Extract<OutputBlock, { kind: 'text' }>).content).toBe(
-        'After tool',
-      );
+      const summary = flatBlocks(s)[1] as Extract<OutputBlock, { kind: 'tool_summary' }>;
+      expect(summary.kind).toBe('tool_summary');
+      expect(summary.pendingCaption).toBe('After tool');
     });
     test('SET_EXITED then SET_IDLE clears exited flag', () => {
       let s = fresh();
@@ -2176,6 +3016,66 @@ describe('eventReducer (blocks model)', () => {
       expect(next.activeSessionId).toBe('t2');
       expect(flatBlocks(next)).toEqual(t2.turns[0]!.blocks);
       expect(next.interrupt).toBeNull();
+    });
+
+    test('SWITCH_SESSION preserves off-screen queued tool metadata per session', () => {
+      const snapshot = (
+        threadId: string,
+        active: boolean,
+        turns: TuiState['turns'] = [],
+      ): SessionSnapshot => ({
+        threadId,
+        name: threadId,
+        workspace: '/tmp',
+        active,
+        running: true,
+        pendingInterrupt: false,
+        interrupt: null,
+        plan: null,
+        status: initialState.status,
+        turns,
+      });
+      let state: TuiState = {
+        ...fresh(),
+        activeSessionId: 'a',
+        sessions: [snapshot('a', true), snapshot('b', false)],
+      };
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.queued',
+        toolCallId: 'read-a',
+        name: 'read_file',
+        args: { path: 'README.md' },
+      });
+
+      state = eventReducer(state, { type: 'SWITCH_SESSION', threadId: 'b' });
+      state = eventReducer(state, { type: 'SWITCH_SESSION', threadId: 'a' });
+      expect(state.pendingToolCalls['read-a']).toEqual({
+        name: 'read_file',
+        args: { path: 'README.md' },
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.started',
+        toolCallId: 'read-a',
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.finished',
+        toolCallId: 'read-a',
+        name: 'read_file',
+        result: {
+          ok: true,
+          command: '',
+          exitCode: 0,
+          stdout: 'content',
+          stderr: '',
+        },
+      });
+      expect(
+        flatBlocks(state).some(
+          (block) =>
+            block.kind === 'tool_summary' && block.tools.some((tool) => tool.callId === 'read-a'),
+        ),
+      ).toBe(true);
     });
 
     test('SWITCH_SESSION to nonexistent session uses default empty blocks', () => {
@@ -2771,6 +3671,30 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('RUNTIME_EVENT message-list pipeline', () => {
+    test('keeps queued calls off-screen and drops a pre-start cancellation without a block', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'tool.queued',
+        toolCallId: 'future-read',
+        name: 'read_file',
+        args: { path: 'README.md' },
+      });
+
+      expect(flatBlocks(state)).toHaveLength(0);
+      expect(state.pendingToolCalls['future-read']).toEqual({
+        name: 'read_file',
+        args: { path: 'README.md' },
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'tool.cancelled',
+        toolCallId: 'future-read',
+        reason: 'Earlier sibling opened an interaction.',
+      });
+
+      expect(flatBlocks(state)).toHaveLength(0);
+      expect(state.pendingToolCalls['future-read']).toBeUndefined();
+    });
+
     test('retains every structured multi-question answer when ask_user finishes with oversized stdout', () => {
       const answers = {
         intent: 'implement',
@@ -2865,7 +3789,7 @@ describe('eventReducer (blocks model)', () => {
       );
     });
 
-    test('renders approval, user input, and plan review as distinct interaction blocks', () => {
+    test('keeps approval in Footer while user input and plan review use their own projections', () => {
       const approvalEvent: import('../src/core/runtime/events').RuntimeEvent = {
         type: 'approval.requested',
         interactionId: 'approval-1',
@@ -2887,8 +3811,11 @@ describe('eventReducer (blocks model)', () => {
       };
 
       const approvalState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: approvalEvent });
-      expect(flatBlocks(approvalState).at(-1)?.kind).toBe('approval');
-      expect(approvalState.interrupt?.kind).toBe('approval');
+      expect(flatBlocks(approvalState)).toHaveLength(0);
+      expect(approvalState.interrupt).toMatchObject({
+        kind: 'approval',
+        approval: approvalEvent.approval,
+      });
 
       const inputState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: inputEvent });
       expect(flatBlocks(inputState).at(-1)?.kind).toBe('question');
@@ -2897,6 +3824,299 @@ describe('eventReducer (blocks model)', () => {
       const reviewState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: reviewEvent });
       expect(reviewState.interrupt?.kind).toBe('plan_review');
       expect(reviewState.status.pendingPlan?.name).toBe('Plan');
+    });
+
+    test('plan review cancellation has identical live and replay projections without a banner', () => {
+      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+        {
+          type: 'tool.queued',
+          toolCallId: 'plan-call',
+          name: 'write_plan',
+          args: { plan: 'Draft body' },
+        },
+        {
+          type: 'plan.review_requested',
+          interactionId: 'plan-review',
+          toolCallId: 'plan-call',
+          plan: {
+            name: 'Plan',
+            description: 'Do the work safely.',
+            status: 'pending',
+            steps: [{ id: 'step-1', step: 'Implement', status: 'pending' }],
+          },
+          planSummary: 'Do the work safely.',
+        },
+        {
+          type: 'plan.review_cancelled',
+          interactionId: 'plan-review',
+          reason: 'Plan execution confirmation cancelled by user.',
+        },
+        {
+          type: 'tool.cancelled',
+          toolCallId: 'plan-call',
+          reason: 'Plan execution confirmation cancelled by user.',
+        },
+        {
+          type: 'turn.aborted',
+          turnId: 'turn-1',
+          reason: 'Plan execution confirmation cancelled by user.',
+          cause: 'user',
+        },
+      ];
+
+      let live = fresh();
+      live = handleRuntimeEventAction(live, events[0]!);
+      live = handleRuntimeEventAction(live, events[1]!);
+      live = eventReducer(live, { type: 'ESCAPE' });
+      for (const event of events.slice(2)) live = handleRuntimeEventAction(live, event);
+
+      let replay = fresh();
+      for (const event of events) replay = handleRuntimeEventAction(replay, event);
+
+      expect(flatBlocks(live)).toEqual(flatBlocks(replay));
+      expect(
+        flatBlocks(live).some(
+          (block) => block.kind === 'text' && block.content.includes('Plan declined'),
+        ),
+      ).toBe(false);
+      expect(flatBlocks(live)).toContainEqual(
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: 'plan-call',
+          status: 'done',
+          summary: expect.stringContaining('Do the work safely.'),
+        }),
+      );
+    });
+
+    test('approval rejection removes the queued shell without a message card', () => {
+      let state = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.queued',
+          toolCallId: 'shell-rejected',
+          name: 'shell_execute',
+          args: { command: 'rm generated.txt' },
+        },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'approval.requested',
+          interactionId: 'approval-rejected',
+          toolCallId: 'shell-rejected',
+          approval: approval(),
+        },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'approval.rejected',
+          interactionId: 'approval-rejected',
+          toolCallId: 'shell-rejected',
+          reason: 'Rejected by user.',
+        },
+      });
+
+      const card = flatBlocks(state).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'shell-rejected',
+      );
+      const approvalBlock = flatBlocks(state).find(
+        (block): block is Extract<OutputBlock, { kind: 'approval' }> => block.kind === 'approval',
+      );
+      expect(card).toBeUndefined();
+      expect(approvalBlock).toBeUndefined();
+      expect(state.pendingToolCalls['shell-rejected']).toBeUndefined();
+      expect(state.interrupt).toBeNull();
+    });
+
+    test('keeps planning shell deferrals out of the message list', () => {
+      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+        {
+          type: 'tool.queued',
+          toolCallId: 'typecheck',
+          name: 'shell_execute',
+          args: { command: 'bun run typecheck' },
+        },
+        {
+          type: 'tool.rejected',
+          toolCallId: 'typecheck',
+          reason: 'Deferred shell_execute until building phase.',
+          failure: {
+            kind: 'phase_deferred',
+            message: 'Deferred shell_execute until building phase.',
+            retryable: false,
+            modelFixable: true,
+            needsUserIntervention: false,
+            terminatesTurn: false,
+            journal: true,
+          },
+        },
+        {
+          type: 'tool.queued',
+          toolCallId: 'tests',
+          name: 'shell_execute',
+          args: { command: 'bun test tests/runtime' },
+        },
+        {
+          type: 'tool.rejected',
+          toolCallId: 'tests',
+          reason: 'Deferred shell_execute until building phase.',
+          failure: {
+            kind: 'phase_deferred',
+            message: 'Deferred shell_execute until building phase.',
+            retryable: false,
+            modelFixable: true,
+            needsUserIntervention: false,
+            terminatesTurn: false,
+            journal: true,
+          },
+        },
+      ];
+
+      const live = events.reduce(handleRuntimeEventAction, fresh());
+      expect(flatBlocks(live)).toEqual([]);
+      expect(live.pendingToolCalls).toEqual({});
+
+      const replay = events.reduce(handleRuntimeEventAction, fresh());
+      expect(flatBlocks(replay)).toEqual(flatBlocks(live));
+    });
+
+    test('renders a planning edit denial as guidance without a tool card', () => {
+      const reason =
+        'Plan mode is read-only. No file was edited. Describe the intended change in the plan and apply it after plan approval.';
+      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+        {
+          type: 'tool.queued',
+          toolCallId: 'edit-denied',
+          name: 'edit_file',
+          args: {
+            path: 'src/example.ts',
+            old_string: 'before',
+            new_string: 'after',
+          },
+        },
+        {
+          type: 'tool.rejected',
+          toolCallId: 'edit-denied',
+          reason,
+          failure: {
+            kind: 'phase_denied',
+            message: reason,
+            retryable: false,
+            modelFixable: true,
+            needsUserIntervention: false,
+            terminatesTurn: false,
+            journal: true,
+          },
+        },
+      ];
+
+      const state = events.reduce(handleRuntimeEventAction, fresh());
+      expect(flatBlocks(state)).toEqual([
+        expect.objectContaining({
+          kind: 'text',
+          content: reason,
+        }),
+      ]);
+      expect(flatBlocks(state).some((block) => block.kind === 'tool_card')).toBe(false);
+      expect(state.pendingToolCalls).toEqual({});
+    });
+
+    test('approval cancellation keeps only started siblings visible and ends the current turn', () => {
+      let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+      for (const event of [
+        {
+          type: 'tool.queued' as const,
+          toolCallId: 'shell-running',
+          name: 'shell_execute',
+          args: { command: 'bun test' },
+        },
+        {
+          type: 'tool.started' as const,
+          toolCallId: 'shell-running',
+        },
+        {
+          type: 'tool.queued' as const,
+          toolCallId: 'shell-rejected',
+          name: 'shell_execute',
+          args: { command: 'rm generated.txt' },
+        },
+        {
+          type: 'approval.requested' as const,
+          interactionId: 'approval-rejected',
+          toolCallId: 'shell-rejected',
+          approval: approval(),
+        },
+        {
+          type: 'approval.rejected' as const,
+          interactionId: 'approval-rejected',
+          toolCallId: 'shell-rejected',
+          reason: 'Approval cancelled by user.',
+        },
+        {
+          type: 'tool.cancelled' as const,
+          toolCallId: 'shell-running',
+          reason: 'Approval cancelled by user.',
+        },
+        {
+          type: 'turn.aborted' as const,
+          turnId: 'turn-1',
+          reason: 'Approval cancelled by user.',
+          cause: 'user' as const,
+        },
+      ]) {
+        state = dispatch(state, { type: 'RUNTIME_EVENT', event });
+      }
+
+      expect(flatBlocks(state)).toContainEqual(
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: 'shell-running',
+          status: 'cancelled',
+        }),
+      );
+      expect(
+        flatBlocks(state).some(
+          (block) => block.kind === 'tool_card' && block.callId === 'shell-rejected',
+        ),
+      ).toBe(false);
+      expect(
+        flatBlocks(state).some(
+          (block) => block.kind === 'text' && block.content.includes('Run cancelled'),
+        ),
+      ).toBe(false);
+      expect(state.pendingToolCalls['shell-rejected']).toBeUndefined();
+      expect(state.interrupt).toBeNull();
+      expect(state.running).toBe(false);
+    });
+
+    test('keeps a legacy preflighted shell call invisible until it starts', () => {
+      let state = dispatch(fresh(), {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.queued',
+          toolCallId: 'shell-ready',
+          name: 'shell_execute',
+          args: { command: 'pwd' },
+        },
+      });
+
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'tool.execution_ready', toolCallId: 'shell-ready' },
+      });
+
+      const card = flatBlocks(state).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'shell-ready',
+      );
+      expect(card).toBeUndefined();
+      expect(state.pendingToolCalls['shell-ready']).toEqual({
+        name: 'shell_execute',
+        args: { command: 'pwd' },
+      });
     });
 
     test('updates cache statistics and keeps non-visual lifecycle facts out of the message list', () => {
@@ -2987,6 +4207,820 @@ describe('eventReducer (blocks model)', () => {
       expect(s.interactionMode).toBe('accept_edits');
       expect(s.status.authorization).toBe('default');
     });
+  });
+});
+
+describe('model streaming RuntimeEvent rendering', () => {
+  test('keeps an incomplete streamed paragraph out of the render tree', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: 'Hel' });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: 'Hello' });
+
+    const blocks = flatBlocks(state);
+    const thoughtIndex = blocks.findIndex(
+      (block) =>
+        block.kind === 'reason' || (block.kind === 'text' && block.thoughtElapsedMs != null),
+    );
+    expect(thoughtIndex).toBeGreaterThanOrEqual(0);
+    expect(blocks.some((block) => block.kind === 'text')).toBe(false);
+  });
+
+  test('keeps reasoning deltas hidden until the reasoning stream completes', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'initial',
+    });
+    const reasonCount = flatBlocks(state).filter((block) => block.kind === 'reason').length;
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'cumulative preview.',
+    });
+
+    expect(flatBlocks(state).find((block) => block.kind === 'tool_summary')).toMatchObject({
+      latestActivity: { kind: 'thinking', text: 'initial' },
+    });
+    expect(flatBlocks(state).filter((block) => block.kind === 'reason')).toHaveLength(reasonCount);
+  });
+
+  test('publishes the complete reasoning atomically when answer streaming begins', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'First complete sentence. partial',
+    });
+    let summary = flatBlocks(state).find(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+    expect(summary).toMatchObject({
+      active: true,
+      latestActivity: undefined,
+    });
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'First complete sentence. Second complete line\npartial tail',
+    });
+    summary = flatBlocks(state).find(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+    expect(summary).toMatchObject({
+      active: true,
+      latestActivity: undefined,
+    });
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Answer paragraph is still incomplete',
+    });
+    summary = flatBlocks(state).find(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+    expect(summary).toMatchObject({
+      active: false,
+      responsePending: true,
+      latestActivity: {
+        kind: 'thinking',
+        text: 'First complete sentence. Second complete line\npartial tail',
+      },
+    });
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'First answer paragraph.\n\nSecond paragraph is incomplete',
+    });
+    summary = flatBlocks(state).find(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+    expect(summary).toBeUndefined();
+    expect(
+      flatBlocks(state)
+        .filter((block) => block.kind === 'text')
+        .map((block) => block.content),
+    ).toEqual(['First answer paragraph.\n\n']);
+    const firstCommittedText = flatBlocks(state).find((block) => block.kind === 'text');
+    expect(firstCommittedText).toMatchObject({
+      thoughtContent: 'First complete sentence. Second complete line\npartial tail',
+    });
+    expect(firstCommittedText).not.toHaveProperty('responsePending');
+  });
+
+  test('handles repeated complete reasoning segments around exploration tools', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'segment-request-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      segmentId: 'segment-1',
+      text: 'partial first segment',
+    });
+    expect(flatBlocks(state).find((block) => block.kind === 'tool_summary')).toMatchObject({
+      latestActivity: undefined,
+    });
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_completed',
+      segmentId: 'segment-1',
+      text: 'complete first segment',
+    });
+    expect(flatBlocks(state).find((block) => block.kind === 'tool_summary')).toMatchObject({
+      latestActivity: { kind: 'thinking', text: 'complete first segment' },
+    });
+
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'read-between-segments',
+      name: 'read_file',
+      args: { path: 'README.md' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'read-between-segments',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'segment-request-2',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      segmentId: 'segment-2',
+      text: 'partial second segment',
+    });
+    expect(flatBlocks(state).find((block) => block.kind === 'tool_summary')).toMatchObject({
+      latestActivity: { kind: 'tool', callId: 'read-between-segments' },
+    });
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_completed',
+      segmentId: 'segment-2',
+      text: 'complete second segment',
+    });
+    const summaries = flatBlocks(state).filter((block) => block.kind === 'tool_summary');
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({
+      active: true,
+      latestActivity: { kind: 'thinking', text: 'complete second segment' },
+    });
+  });
+
+  test('publishes ordered and unordered Markdown lists one complete item at a time', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: '- first item\n- second item',
+    });
+    expect(
+      flatBlocks(state)
+        .filter((block) => block.kind === 'text')
+        .map((block) => block.content),
+    ).toEqual(['- first item\n']);
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: '- first item\n- second item\n1. ordered item\n2. unfinished item',
+    });
+    expect(
+      flatBlocks(state)
+        .filter((block) => block.kind === 'text')
+        .map((block) => block.content),
+    ).toEqual(['- first item\n', '- second item\n1. ordered item\n']);
+  });
+
+  test('keeps nested list lines with their parent item until the next top-level item', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: '- first item\n  - nested item\n  continuation\n- second item',
+    });
+    expect(
+      flatBlocks(state)
+        .filter((block) => block.kind === 'text')
+        .map((block) => block.content),
+    ).toEqual(['- first item\n  - nested item\n  continuation\n']);
+  });
+
+  test('creates Thought before streamed answer text when reasoning arrives first', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Hello from the model.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'streamed',
+      reasoningText: 'thinking',
+      text: 'Hello from the model.',
+      durationMs: 1_000,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'run.completed',
+      turnId: 'turn-1',
+      output: 'Hello from the model.',
+    });
+
+    const blocks = flatBlocks(state);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toMatchObject({
+      kind: 'text',
+      content: 'Hello from the model.',
+      thoughtElapsedMs: 1_000,
+    });
+  });
+
+  test('inserts terminal Thought before Markdown prefixes committed by the same response', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'ordered-response',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'complete project reasoning',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Project overview.\n\nFinal invitation.',
+    });
+
+    expect(
+      flatBlocks(state)
+        .filter((block) => block.kind === 'text')
+        .map((block) => block.content),
+    ).toEqual(['Project overview.\n\n']);
+    expect(state.thoughtPhaseStatus).toBe('awaiting_terminal');
+    expect(flatBlocks(state).find((block) => block.kind === 'tool_summary')).toBeUndefined();
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'complete project reasoning.\n\nlate tail',
+    });
+    expect(flatBlocks(state).filter((block) => block.kind === 'tool_summary')).toHaveLength(0);
+    expect(state.thoughtPhaseStatus).toBe('awaiting_terminal');
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Project overview.\n\nSecond complete paragraph.\n\nFinal invitation.',
+    });
+    expect(state.thoughtPhaseStatus).toBe('awaiting_terminal');
+    expect(flatBlocks(state).filter((block) => block.kind === 'tool_summary')).toHaveLength(0);
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'ordered-answer',
+      reasoningText: 'complete project reasoning',
+      text: 'Project overview.\n\nSecond complete paragraph.\n\nFinal invitation.',
+      durationMs: 8_511,
+    });
+
+    const blocks = flatBlocks(state);
+    const prefixIndex = blocks.findIndex(
+      (block) => block.kind === 'text' && block.content === 'Project overview.\n\n',
+    );
+    const tailIndex = blocks.findIndex(
+      (block) => block.kind === 'text' && block.content === 'Final invitation.',
+    );
+    expect(prefixIndex).toBeGreaterThanOrEqual(0);
+    expect(tailIndex).toBeGreaterThan(prefixIndex);
+    expect(blocks[prefixIndex]).toMatchObject({
+      kind: 'text',
+      thoughtElapsedMs: expect.any(Number),
+      thoughtContent: 'complete project reasoning',
+    });
+  });
+
+  test('keeps one Thought across multiple exploration calls when a complete late reasoning paragraph follows answer text', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'explore-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'inspect files',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'explore-answer-1',
+      reasoningText: 'inspect files',
+      durationMs: 1_512,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'search-1',
+      name: 'search_files',
+      args: { pattern: '*', path: '.' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'search-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'explore-2',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'read key files',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'explore-answer-2',
+      reasoningText: 'read key files',
+      durationMs: 1_727,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'read-1',
+      name: 'read_file',
+      args: { path: 'README.md' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'read-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'final-summary',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Project overview.\n\nFinal details.',
+    });
+    expect(state.thoughtPhaseStatus).toBe('awaiting_terminal');
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'final synthesis.\n\nlate reasoning tail',
+    });
+    expect(flatBlocks(state).filter((block) => block.kind === 'tool_summary')).toHaveLength(1);
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'final-answer',
+      reasoningText: 'final synthesis.',
+      text: 'Project overview.\n\nFinal details.',
+      durationMs: 7_094,
+    });
+
+    const summaries = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+        block.kind === 'tool_summary',
+    );
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({
+      active: false,
+      totalElapsedMs: 10_333,
+    });
+  });
+
+  test('moves already streamed text behind Thought when reasoning arrives in a later frame', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Text arrived first.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'late thinking',
+    });
+    const intermediate = flatBlocks(state);
+    expect(intermediate).toHaveLength(1);
+    expect(intermediate[0]).toMatchObject({
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: undefined,
+    });
+    expect(
+      intermediate.some((block) => block.kind === 'tool_summary' && block.pendingCaption != null),
+    ).toBe(false);
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'late-reasoning',
+      reasoningText: 'late thinking',
+      text: 'Text arrived first.',
+      durationMs: 800,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'run.completed',
+      turnId: 'turn-1',
+      output: 'Text arrived first.',
+    });
+
+    const blocks = flatBlocks(state);
+    expect(blocks.map((block) => block.kind)).toEqual(['text']);
+    expect(blocks[0]).toMatchObject({
+      content: 'Text arrived first.',
+    });
+    expect(blocks[0]).toMatchObject({ kind: 'text', thoughtElapsedMs: 800 });
+  });
+
+  test('preserves the frozen reconnect segment when late reasoning reorders the live tail', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'request-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'frozen prefix',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.retry',
+      attempt: 1,
+      maxAttempts: 5,
+      error: 'socket disconnected',
+      delayMs: 10,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: ' recovered suffix',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'late recovered reasoning',
+    });
+
+    const textBlocks = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+    );
+    expect(textBlocks).toEqual([]);
+  });
+
+  test('settles terminal reasoning against only the current model response text', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'request-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'I will inspect it.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'read-1',
+      name: 'read_file',
+      args: { path: 'README.md' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'read-1',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.finished',
+      toolCallId: 'read-1',
+      name: 'read_file',
+      result: { ok: true, command: '', exitCode: 0, stdout: 'done', stderr: '' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'request-2',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'final reasoning',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Final answer.',
+    });
+    const currentReasoningCount = (blocks: OutputBlock[]) =>
+      blocks.filter(
+        (block) =>
+          (block.kind === 'reason' && block.content === 'final reasoning') ||
+          (block.kind === 'tool_summary' &&
+            block.hasThinking === true &&
+            block.modelRequestId === 'request-2'),
+      ).length;
+    const reasonCountBeforeTerminal = currentReasoningCount(flatBlocks(state));
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'answer-2',
+      reasoningText: 'final reasoning',
+      text: 'Final answer.',
+      durationMs: 500,
+    });
+
+    expect(reasonCountBeforeTerminal).toBe(0);
+    expect(currentReasoningCount(flatBlocks(state))).toBe(0);
+    expect(
+      flatBlocks(state).filter(
+        (block) => block.kind === 'text' && block.content === 'Final answer.',
+      ),
+    ).toHaveLength(1);
+  });
+
+  test('does not duplicate streamed reasoning when the terminal response settles it', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.reasoning_delta',
+      text: 'same thought',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'reasoning-only',
+      reasoningText: 'same thought',
+      durationMs: 500,
+    });
+
+    const summary = flatBlocks(state).find((block) => block.kind === 'tool_summary');
+    expect(summary).toMatchObject({
+      timeline: [{ kind: 'thinking', text: 'same thought' }],
+      totalElapsedMs: 500,
+    });
+  });
+
+  test('does not publish a paragraph before its boundary', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: 'first' });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: 'first line' });
+    expect(flatBlocks(state)).toEqual([]);
+  });
+
+  test('publishes complete Markdown chunks and keeps the final component hidden', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    const markdown =
+      '# Result\n\nA paragraph.\n\n- one\n- two\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n```ts\nconst x = 1\n```';
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: '# Result' });
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: markdown });
+
+    const textBlocks = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+    );
+    expect(textBlocks).toHaveLength(1);
+    expect(textBlocks[0]?.streaming).not.toBe(true);
+    expect(textBlocks[0]?.content).toBe(markdown.slice(0, markdown.indexOf('```ts')));
+    expect(textBlocks.map((block) => block.content).join('')).not.toContain('const x = 1');
+  });
+
+  test('renders a closed code shell with only complete streamed rows', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    const markdown = '```ts\nconst first = 1\n\nconst second = 2';
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: markdown });
+
+    const textBlocks = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+    );
+    expect(textBlocks).toEqual([
+      expect.objectContaining({
+        content: '```ts\nconst first = 1\n\n',
+        streaming: true,
+        streamingComponent: 'code',
+        streamingSource: markdown,
+      }),
+    ]);
+  });
+
+  test('appends complete rows inside a recognized component and freezes it on closure', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: '```text\nsrc/\n├── app/\n',
+    });
+
+    expect(flatBlocks(state)).toEqual([
+      expect.objectContaining({
+        kind: 'text',
+        content: '```text\nsrc/\n├── app/\n',
+        streaming: true,
+        streamingComponent: 'code',
+      }),
+    ]);
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: '```text\nsrc/\n├── app/\n```',
+    });
+    const blocks = flatBlocks(state);
+    expect(blocks).toContainEqual(
+      expect.objectContaining({
+        kind: 'text',
+        content: '```text\nsrc/\n├── app/\n```',
+      }),
+    );
+    expect(
+      blocks.some(
+        (block) => block.kind === 'text' && (block.streaming || block.streamingComponent != null),
+      ),
+    ).toBe(false);
+  });
+
+  test('recognizes a table shell and appends only complete rows', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    const partial = '| Name | Role |\n| --- | --- |\n| App | entry |\n| Footer | sta';
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: partial });
+
+    expect(flatBlocks(state)).toEqual([
+      expect.objectContaining({
+        kind: 'text',
+        content: '| Name | Role |\n| --- | --- |\n| App | entry |\n',
+        streaming: true,
+        streamingComponent: 'table',
+        streamingSource: partial,
+      }),
+    ]);
+  });
+
+  test('terminal response replaces a live component with the authoritative full text', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: '```text\nfirst\nsecond',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'answer',
+      text: '```text\nfirst\nsecond\n```',
+    });
+
+    expect(flatBlocks(state)).toEqual([
+      expect.objectContaining({
+        kind: 'text',
+        content: '```text\nfirst\nsecond\n```',
+      }),
+    ]);
+    expect(
+      flatBlocks(state).some(
+        (block) => block.kind === 'text' && (block.streaming || block.streamingComponent != null),
+      ),
+    ).toBe(false);
+  });
+
+  test('deduplicates the legacy final event against paragraph-frozen streaming segments', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, { type: 'model.requested', requestId: 'req-1' });
+    const markdown = 'First paragraph.\n\nSecond paragraph.';
+    state = handleRuntimeEventAction(state, { type: 'model.text_delta', text: markdown });
+    const blockCount = flatBlocks(state).length;
+
+    state = dispatch(state, { type: 'EVENT', event: { type: 'final', data: markdown } });
+
+    const textBlocks = flatBlocks(state).filter(
+      (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+    );
+    expect(flatBlocks(state).length).toBeGreaterThan(blockCount);
+    expect(textBlocks.map((block) => block.content).join('')).toBe(markdown);
+  });
+
+  test('keeps streamed text between the settled Thought and a later exploration tool', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'I will inspect it.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'read-1',
+      name: 'read_file',
+      args: { path: 'README.md' },
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.started',
+      toolCallId: 'read-1',
+    });
+
+    const blocks = flatBlocks(state);
+    expect(blocks.map((block) => block.kind)).toEqual(['reason', 'text', 'tool_summary']);
+    expect(blocks[1]).toMatchObject({ kind: 'text', content: 'I will inspect it.' });
+    expect(
+      blocks
+        .filter((block) => block.kind === 'tool_summary')
+        .every((block) => !block.captions && !block.pendingCaption),
+    ).toBe(true);
+  });
+
+  test('detaches a streamed caption before a non-exploration tool', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'I will change it.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.queued',
+      toolCallId: 'write-1',
+      name: 'write_file',
+      args: { path: 'output.txt', content: 'done' },
+    });
+
+    expect(
+      flatBlocks(state).some(
+        (block) => block.kind === 'text' && block.content === 'I will change it.',
+      ),
+    ).toBe(true);
+  });
+
+  test('settles a streamed final answer without duplicating the terminal text', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.responded',
+      messageId: 'reasoning',
+      reasoningText: 'thinking',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'Final answer.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'answer',
+      text: 'Final answer.',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'run.completed',
+      turnId: 'turn-1',
+      output: 'Final answer.',
+    });
+
+    expect(
+      flatBlocks(state).filter(
+        (block) => block.kind === 'text' && block.content === 'Final answer.',
+      ),
+    ).toHaveLength(1);
+  });
+
+  test('keeps interrupted incomplete text hidden and publishes the recovered terminal response', () => {
+    let state = eventReducer(fresh(), { type: 'SET_RUNNING' });
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: { type: 'model.text_delta', text: 'partial answer' },
+    });
+    expect(flatBlocks(state)).toEqual([]);
+
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'model.retry',
+        attempt: 1,
+        maxAttempts: 5,
+        error: 'socket disconnected',
+        delayMs: 10,
+      },
+    });
+
+    expect(state.status.retryState?.attempt).toBe(1);
+    expect(flatBlocks(state)).toEqual([]);
+
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: { type: 'model.text_delta', text: ' continued' },
+    });
+    state = eventReducer(state, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'model.responded',
+        messageId: 'recovered',
+        text: 'partial answer continued',
+      },
+    });
+    expect(state.status.retryState).toBeNull();
+    expect(state.turns.at(-1)?.blocks.at(-1)).toMatchObject({
+      content: 'partial answer continued',
+    });
+  });
+
+  test('preserves interrupted lines and renders divergent regeneration in a new segment', () => {
+    let state = eventReducer(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'old line one\nold line two',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.retry',
+      attempt: 1,
+      maxAttempts: 5,
+      error: 'socket disconnected',
+      delayMs: 10,
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'new line one\nnew line two',
+    });
+
+    expect(
+      flatBlocks(state).filter(
+        (block): block is Extract<OutputBlock, { kind: 'text' }> => block.kind === 'text',
+      ),
+    ).toEqual([]);
   });
 });
 

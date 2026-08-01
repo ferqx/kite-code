@@ -15,6 +15,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
@@ -25,6 +27,8 @@ jobs:
       - run: bun run check:core-boundary
       - run: bun run check:compaction-legacy
       - run: bun run check:docs
+        env:
+          OPENPX_REQUIRE_EVIDENCE_HISTORY: ${{ github.event_name == 'pull_request' && '1' || '0' }}
       - run: bun run check:docs-impact
 
   unit:
@@ -62,6 +66,19 @@ jobs:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
       - run: bun run test:e2e
+
+  runtime-fault-soak:
+    name: runtime-fault-soak
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - run: bun run test:runtime:fault
+      - run: bun run test:runtime:soak
 
   tui-system:
     name: tui-system

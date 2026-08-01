@@ -29,7 +29,6 @@ interface SourceRoot {
 
 const READ_ONLY_BUILTINS = new Set([
   'read_file',
-  'list_files',
   'search_content',
   'search_files',
   'list_mcp_resources',
@@ -37,7 +36,6 @@ const READ_ONLY_BUILTINS = new Set([
 ]);
 const KNOWN_BUILTINS = new Set([
   ...READ_ONLY_BUILTINS,
-  'apply_patch',
   'ask_user',
   'tool_search',
   'edit_file',

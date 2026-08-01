@@ -125,4 +125,52 @@ describe('SessionLogWriter', () => {
       expect(() => JSON.parse(line!)).not.toThrow();
     }
   });
+
+  test('序列化失败后立即熔断且诊断回调异常不会传播', async () => {
+    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    cleanup();
+    let diagnostics = 0;
+    const writer = new SessionLogWriter(TEST_FRONTEND, TEST_THREAD, 'events', () => {
+      diagnostics++;
+      throw new Error('diagnostic callback failed');
+    });
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    expect(() => writer.write(circular)).not.toThrow();
+    expect(() => writer.write({ ignored: true })).not.toThrow();
+    await expect(writer.finalize()).resolves.toBeUndefined();
+
+    expect(diagnostics).toBe(1);
+    expect(existsSync(join(testDir(), 'events.jsonl'))).toBe(false);
+  });
+
+  test('首批异步写失败后不执行已排队的后续批次', async () => {
+    const { SessionLogWriter } = await import('@/core/session-logger/writer');
+    cleanup();
+    let appendCalls = 0;
+    let diagnostics = 0;
+    const writer = new SessionLogWriter(
+      TEST_FRONTEND,
+      TEST_THREAD,
+      'events',
+      () => {
+        diagnostics++;
+      },
+      async () => {
+        appendCalls++;
+        if (appendCalls === 1) throw new Error('first append failed');
+      },
+    );
+
+    for (let index = 0; index < 100; index++) writer.write({ index });
+    await writer.finalize();
+
+    expect(appendCalls).toBe(1);
+    expect(diagnostics).toBe(1);
+    expect(existsSync(join(testDir(), 'events.jsonl'))).toBe(false);
+    expect(JSON.parse(readFileSync(join(testDir(), 'terminal.json'), 'utf8')).outcome).toBe(
+      'failed',
+    );
+  });
 });

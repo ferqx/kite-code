@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
+import terminalStringWidth from 'string-width';
 import { useWindowSize } from '@/app/tui/hooks/useWindowSizeSig';
 import { type Theme, useTheme } from '@/app/tui/theme';
 
@@ -23,38 +24,55 @@ export interface InlineSegment {
 // ── inline markdown parsing ──
 
 export function parseInline(text: string): InlineSegment[] {
+  const escaped: string[] = [];
+  const protectedText = text.replace(/\\([\\`*{}[\]()#+\-.!_|>~])/g, (_, character: string) => {
+    const index = escaped.push(character) - 1;
+    return `\u{f0000}${index}\u{f0001}`;
+  });
   const allPatterns =
     /(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|\*(.+?)\*|`(.+?)`|~~(.+?)~~|\[([^\]]+)\]\(([^)]+)\))/g;
   const segments: InlineSegment[] = [];
   let lastIndex = 0;
-  let match = allPatterns.exec(text);
+  const restoreEscapes = (value: string) =>
+    value.replace(/\u{f0000}(\d+)\u{f0001}/gu, (_, index: string) => escaped[Number(index)] ?? '');
+  let match = allPatterns.exec(protectedText);
 
   while (match !== null) {
     if (match.index > lastIndex) {
-      segments.push({ text: text.slice(lastIndex, match.index) });
+      segments.push({ text: restoreEscapes(protectedText.slice(lastIndex, match.index)) });
     }
     if (match[1]?.startsWith('***') && match[2] !== undefined) {
-      segments.push({ text: match[2], bold: true, italic: true });
+      segments.push({ text: restoreEscapes(match[2]), bold: true, italic: true });
     } else if (match[1]?.startsWith('**') && match[3] !== undefined) {
-      segments.push({ text: match[3], bold: true });
+      segments.push({ text: restoreEscapes(match[3]), bold: true });
     } else if (match[1]?.startsWith('*') && !match[1]?.startsWith('**') && match[4] !== undefined) {
-      segments.push({ text: match[4], italic: true });
+      segments.push({ text: restoreEscapes(match[4]), italic: true });
     } else if (match[5] !== undefined) {
-      segments.push({ text: match[5], code: true });
+      segments.push({ text: restoreEscapes(match[5]), code: true });
     } else if (match[6] !== undefined) {
-      segments.push({ text: match[6], strikethrough: true });
+      segments.push({ text: restoreEscapes(match[6]), strikethrough: true });
     } else if (match[7] !== undefined && match[8] !== undefined) {
-      segments.push({ text: match[7], bold: true, link: match[8] });
+      segments.push({
+        text: restoreEscapes(match[7]),
+        bold: true,
+        link: restoreEscapes(match[8]),
+      });
     }
     lastIndex = match.index + match[1]!.length;
-    match = allPatterns.exec(text);
+    match = allPatterns.exec(protectedText);
   }
 
-  if (lastIndex < text.length) {
-    segments.push({ text: text.slice(lastIndex) });
+  if (lastIndex < protectedText.length) {
+    segments.push({ text: restoreEscapes(protectedText.slice(lastIndex)) });
   }
 
   return segments;
+}
+
+function inlineVisibleText(text: string): string {
+  return parseInline(text)
+    .map((segment) => (segment.link ? `${segment.text} (${segment.link})` : segment.text))
+    .join('');
 }
 
 // ── syntax highlighting for code blocks ──
@@ -256,7 +274,7 @@ function tokenizeCodeLine(line: string, lang: string, t: Theme): Token[] {
   return tokens;
 }
 
-function CodeLine({ line, lang }: { line: string; lang: string }) {
+const CodeLine = React.memo(function CodeLine({ line, lang }: { line: string; lang: string }) {
   const t = useTheme();
   if (!lang) {
     return <Text color={t.muted}>{line}</Text>;
@@ -272,56 +290,57 @@ function CodeLine({ line, lang }: { line: string; lang: string }) {
       ))}
     </Text>
   );
-}
+});
 
 // ── CJK display width ──
 
-function charWidth(code: number): number {
-  if (code < 0x20) return 0;
-  if (code < 0x7f) return 1;
-  if (
-    (code >= 0x1100 && code <= 0x115f) || // Hangul Jamo
-    (code >= 0x2e80 && code <= 0x303e) || // CJK radicals, symbols
-    (code >= 0x3040 && code <= 0x33bf) || // Hiragana, Katakana, Bopomofo, CJK compat
-    (code >= 0x3400 && code <= 0x4dbf) || // CJK Ext-A
-    (code >= 0x4e00 && code <= 0xa4cf) || // CJK Unified + Yi
-    (code >= 0xac00 && code <= 0xd7a3) || // Hangul Syllables
-    (code >= 0xf900 && code <= 0xfaff) || // CJK Compat Ideographs
-    (code >= 0xfe10 && code <= 0xfe6f) || // Vertical forms, CJK compat
-    (code >= 0xff01 && code <= 0xff60) || // Fullwidth forms
-    (code >= 0xffe0 && code <= 0xffe6) || // Fullwidth signs
-    (code >= 0x1f300 && code <= 0x1f9ff) || // Emoji, pictographs
-    (code >= 0x20000 && code <= 0x2ffff) // CJK Ext-B+
-  ) {
-    return 2;
-  }
-  return 1;
-}
-
 /** 代码行中 tab 的展宽列数 — 大多数终端默认 4 或 8，此处保守取 4 */
 const TAB_WIDTH = 4;
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 function stringWidth(s: string): number {
-  let width = 0;
-  for (const ch of s) {
-    width += charWidth(ch.codePointAt(0) ?? 0);
-  }
-  return width;
+  return terminalStringWidth(s);
+}
+
+function graphemes(text: string): string[] {
+  return Array.from(graphemeSegmenter.segment(text), ({ segment }) => segment);
 }
 
 /** 计算代码行在终端中的实际展宽，\t 按 TAB_WIDTH 展开
  *  Measure a code line's visual width with tab expansion. */
 function codeLineWidth(line: string): number {
   let width = 0;
-  for (const ch of line) {
-    if (ch === '\t') {
+  for (const grapheme of graphemes(line)) {
+    if (grapheme === '\t') {
       width += TAB_WIDTH;
     } else {
-      width += charWidth(ch.codePointAt(0) ?? 0);
+      width += stringWidth(grapheme);
     }
   }
   return width;
 }
+
+const CodeRow = React.memo(function CodeRow({
+  line,
+  lang,
+  columns,
+  borderColor,
+}: {
+  line: string;
+  lang: string;
+  columns: number;
+  borderColor: string;
+}) {
+  const lineVisualWidth = codeLineWidth(line);
+  const padLen = Math.max(0, columns - 3 - lineVisualWidth);
+  return (
+    <Box flexDirection="row">
+      <Text color={borderColor}>│ </Text>
+      <CodeLine line={line} lang={lang} />
+      <Text color={borderColor}>{' '.repeat(padLen)}│</Text>
+    </Box>
+  );
+});
 
 // ── table detection & rendering ──
 
@@ -345,18 +364,48 @@ function isTableSeparator(line: string): boolean {
   return /^[\s\-:|─━┼╿]+$/.test(trimmed);
 }
 
-function parseTable(lines: string[]): { headers: string[]; rows: string[][]; widths: number[] } {
+function parseTable(lines: string[]): {
+  headers: string[];
+  rows: string[][];
+  headerSources: string[];
+  rowSources: string[][];
+  widths: number[];
+} {
   const parseCells = (line: string) => {
     let trimmed = line.trim();
     // Strip leading/trailing pipe │
     trimmed = trimmed.replace(/^[|│]\s*/, '').replace(/\s*[|│]$/, '');
-    return trimmed.split(PIPE).map((c) => c.trim());
+    const cells: string[] = [];
+    let cell = '';
+    let inCode = false;
+    for (let index = 0; index < trimmed.length; index++) {
+      const character = trimmed[index]!;
+      if (character === '\\' && index + 1 < trimmed.length) {
+        cell += character + trimmed[index + 1]!;
+        index++;
+      } else if (character === '`') {
+        inCode = !inCode;
+        cell += character;
+      } else if (!inCode && PIPE.test(character)) {
+        cells.push(cell.trim());
+        cell = '';
+      } else {
+        cell += character;
+      }
+    }
+    cells.push(cell.trim());
+    return cells;
   };
 
-  const headers = parseCells(lines[0]!);
+  const headerSources = parseCells(lines[0]!);
+  const headers = headerSources.map(inlineVisibleText);
   const rows: string[][] = [];
+  const rowSources: string[][] = [];
   for (let i = 2; i < lines.length; i++) {
-    rows.push(parseCells(lines[i]!));
+    const sources = parseCells(lines[i]!).slice(0, headers.length);
+    while (sources.length < headers.length) sources.push('');
+    rowSources.push(sources);
+    rows.push(sources.map(inlineVisibleText));
   }
 
   const widths = headers.map((h, col) => {
@@ -369,82 +418,140 @@ function parseTable(lines: string[]): { headers: string[]; rows: string[][]; wid
     return max;
   });
 
-  return { headers, rows, widths };
+  return { headers, rows, headerSources, rowSources, widths };
 }
 
 // ── responsive table width ──
 // Maximum table width available, accounting for block left-padding in layout
-function tableMaxWidth(): number {
-  const cols = process.stdout.columns ?? 80;
-  return Math.max(40, cols - 4);
+function tableMaxWidth(columns: number): number {
+  return Math.max(1, columns);
 }
 
-/** Split text into lines that fit within maxWidth, padding each line to maxWidth. */
-function wrapCell(text: string, maxWidth: number): string[] {
-  if (maxWidth <= 0) return [''];
-  const sw = stringWidth(text);
-  if (sw <= maxWidth) return [text + ' '.repeat(maxWidth - sw)];
+interface TableInlineSegment extends InlineSegment {
+  tone?: 'primary' | 'dim';
+}
 
-  const lines: string[] = [];
-  let current = '';
+function tableInlineSegments(source: string): TableInlineSegment[] {
+  return parseInline(source).flatMap((segment): TableInlineSegment[] =>
+    segment.link
+      ? [
+          { ...segment, tone: 'primary' },
+          { text: ` (${segment.link})`, tone: 'dim' },
+        ]
+      : [segment],
+  );
+}
+
+function appendTableSegment(target: TableInlineSegment[], segment: TableInlineSegment): void {
+  const previous = target.at(-1);
+  if (
+    previous &&
+    previous.bold === segment.bold &&
+    previous.italic === segment.italic &&
+    previous.code === segment.code &&
+    previous.strikethrough === segment.strikethrough &&
+    previous.tone === segment.tone
+  ) {
+    previous.text += segment.text;
+  } else {
+    target.push({ ...segment });
+  }
+}
+
+function wrapTableCell(source: string, maxWidth: number): TableInlineSegment[][] {
+  const lines: TableInlineSegment[][] = [[]];
   let currentWidth = 0;
-
-  for (const ch of text) {
-    const cw = charWidth(ch.codePointAt(0) ?? 0);
-    if (cw === 0) continue;
-    if (currentWidth + cw > maxWidth) {
-      lines.push(current + ' '.repeat(maxWidth - currentWidth));
-      current = ch;
-      currentWidth = cw;
-      // Trim leading space after a forced break
-      if (ch === ' ') {
-        current = '';
+  for (const segment of tableInlineSegments(source)) {
+    for (const grapheme of graphemes(segment.text)) {
+      const width = stringWidth(grapheme);
+      if (currentWidth + width > maxWidth && currentWidth > 0) {
+        lines.push([]);
         currentWidth = 0;
+        if (grapheme === ' ') continue;
       }
-    } else {
-      current += ch;
-      currentWidth += cw;
+      // A single CJK/emoji grapheme can be wider than a one-column cell in a
+      // very narrow terminal. Preserve the table boundary instead of letting
+      // that grapheme overflow into the next column.
+      if (width > maxWidth) {
+        appendTableSegment(lines.at(-1)!, { text: '…' });
+        currentWidth = 1;
+      } else {
+        appendTableSegment(lines.at(-1)!, { ...segment, text: grapheme });
+        currentWidth += width;
+      }
     }
   }
-  if (current || lines.length === 0) {
-    lines.push(current + ' '.repeat(maxWidth - currentWidth));
-  }
+  const finalWidth = lines.map((line) =>
+    line.reduce((total, segment) => total + stringWidth(segment.text), 0),
+  );
+  lines.forEach((line, index) => {
+    const padding = Math.max(0, maxWidth - finalWidth[index]!);
+    if (padding > 0) appendTableSegment(line, { text: ' '.repeat(padding) });
+  });
   return lines;
 }
 
-/** Truncate to single line with "…" — used for headers only. */
-function truncateHeader(text: string, maxWidth: number): string {
-  const sw = stringWidth(text);
-  if (sw <= maxWidth) return text + ' '.repeat(maxWidth - sw);
-  const limit = maxWidth - 1;
-  let result = '';
-  let w = 0;
-  for (const ch of text) {
-    const cw = charWidth(ch.codePointAt(0) ?? 0);
-    if (cw === 0) continue;
-    if (w + cw > limit) break;
-    result += ch;
-    w += cw;
+function truncateTableHeader(source: string, maxWidth: number): TableInlineSegment[] {
+  const visibleWidth = stringWidth(inlineVisibleText(source));
+  if (visibleWidth <= maxWidth) return wrapTableCell(source, maxWidth)[0]!;
+  const result: TableInlineSegment[] = [];
+  let width = 0;
+  for (const segment of tableInlineSegments(source)) {
+    for (const grapheme of graphemes(segment.text)) {
+      const graphemeWidth = stringWidth(grapheme);
+      if (width + graphemeWidth > maxWidth - 1) {
+        appendTableSegment(result, { text: `…${' '.repeat(maxWidth - width - 1)}` });
+        return result;
+      }
+      appendTableSegment(result, { ...segment, text: grapheme });
+      width += graphemeWidth;
+    }
   }
-  return `${result}…${' '.repeat(limit - w)}`;
+  return result;
+}
+
+function TableInlineText({ segments }: { segments: TableInlineSegment[] }) {
+  const t = useTheme();
+  return (
+    <>
+      {segments.map((segment, index) => (
+        <Text
+          key={index}
+          bold={segment.bold}
+          italic={segment.italic}
+          strikethrough={segment.strikethrough}
+          color={
+            segment.tone === 'primary' || segment.code
+              ? t.primary
+              : segment.tone === 'dim'
+                ? t.dim
+                : undefined
+          }
+        >
+          {segment.text}
+        </Text>
+      ))}
+    </>
+  );
 }
 
 function computeColumnWidths(
   headers: string[],
   _rows: string[][],
   naturalWidths: number[],
+  columns: number,
 ): number[] {
   const colCount = headers.length;
   const overhead = 2 + (colCount - 1) + colCount * 2; // ││ + inner │ + padding
-  const maxContentWidth = tableMaxWidth() - overhead;
+  const maxContentWidth = Math.max(colCount, tableMaxWidth(columns) - overhead);
   const naturalTotal = naturalWidths.reduce((a, w) => a + w, 0);
   if (naturalTotal <= maxContentWidth) return naturalWidths;
   if (maxContentWidth < colCount * 6) {
-    const w = Math.max(6, Math.floor(tableMaxWidth() / colCount) - 3);
+    const w = Math.max(1, Math.floor((tableMaxWidth(columns) - 1) / colCount) - 3);
     return headers.map(() => w);
   }
   const scale = maxContentWidth / naturalTotal;
-  return naturalWidths.map((w) => Math.max(6, Math.floor(w * scale)));
+  return naturalWidths.map((w) => Math.max(1, Math.floor(w * scale)));
 }
 
 /** Build a single border string: e.g. ┌────┬──────┐ */
@@ -458,38 +565,90 @@ function borderLine(
   return left + widths.map((w) => fill.repeat(w + 2)).join(mid) + right;
 }
 
-/** Render a table row that may span multiple lines (cells wrap). */
-function dataRowLines(cells: string[], widths: number[]): string[] {
-  const wrapped = cells.map((c, i) => wrapCell(c, widths[i]!));
-  const maxLines = Math.max(1, ...wrapped.map((w) => w.length));
-  const lines: string[] = [];
-  for (let li = 0; li < maxLines; li++) {
-    const parts = wrapped.map((w, ci) => {
-      const cell = li < w.length ? w[li] : ' '.repeat(widths[ci]!);
-      return ` ${cell} `;
-    });
-    lines.push(`│${parts.join('│')}│`);
-  }
-  return lines;
-}
+const TableTextLine = React.memo(function TableTextLine({
+  line,
+  trailingNewline = true,
+}: {
+  line: string;
+  trailingNewline?: boolean;
+}) {
+  return (
+    <>
+      {line}
+      {trailingNewline ? '\n' : ''}
+    </>
+  );
+});
 
-function TableBlock({ lines }: { lines: string[] }) {
-  const { headers, rows, widths: natural } = useMemo(() => parseTable(lines), [lines]);
+const TableDataRow = React.memo(
+  function TableDataRow({ cells, widths }: { cells: string[]; widths: number[] }) {
+    const wrapped = cells.map((cell, index) => wrapTableCell(cell, widths[index]!));
+    const lineCount = Math.max(1, ...wrapped.map((lines) => lines.length));
+    return (
+      <>
+        {Array.from({ length: lineCount }, (_, lineIndex) => (
+          <React.Fragment key={lineIndex}>
+            {'│'}
+            {wrapped.map((cellLines, cellIndex) => (
+              <React.Fragment key={cellIndex}>
+                {' '}
+                <TableInlineText
+                  segments={cellLines[lineIndex] ?? [{ text: ' '.repeat(widths[cellIndex]!) }]}
+                />
+                {' │'}
+              </React.Fragment>
+            ))}
+            {'\n'}
+          </React.Fragment>
+        ))}
+      </>
+    );
+  },
+  (previous, next) =>
+    previous.cells.length === next.cells.length &&
+    previous.cells.every((cell, index) => cell === next.cells[index]) &&
+    previous.widths.length === next.widths.length &&
+    previous.widths.every((width, index) => width === next.widths[index]),
+);
+
+function TableBlock({ lines, columns }: { lines: string[]; columns: number }) {
+  const {
+    headers,
+    rows,
+    headerSources,
+    rowSources,
+    widths: natural,
+  } = useMemo(() => parseTable(lines), [lines]);
   const widths = useMemo(
-    () => computeColumnWidths(headers, rows, natural),
-    [headers, rows, natural],
+    () => computeColumnWidths(headers, rows, natural, columns),
+    [headers, rows, natural, columns],
   );
 
   const topBorder = borderLine('┌', '┬', '┐', widths, '─');
   const sepBorder = borderLine('├', '┼', '┤', widths, '─');
   const botBorder = borderLine('└', '┴', '┘', widths, '─');
-  const headerLine = `│${headers.map((h, i) => ` ${truncateHeader(h, widths[i]!)} `).join('│')}│`;
 
-  // Single string avoids Yoga border overlap between adjacent Text nodes
-  const dataRows = rows.flatMap((row) => dataRowLines(row, widths));
-  const output = [topBorder, headerLine, sepBorder, ...dataRows, botBorder].join('\n');
-
-  return <Text>{output}</Text>;
+  // Keep one parent Text so Yoga cannot introduce gaps between borders, while
+  // memoized child rows retain their identity as the streaming table grows.
+  return (
+    <Text>
+      <TableTextLine line={topBorder} />
+      {'│'}
+      {headerSources.map((header, index) => (
+        <React.Fragment key={index}>
+          {' '}
+          <TableInlineText segments={truncateTableHeader(header, widths[index]!)} />
+          {' │'}
+        </React.Fragment>
+      ))}
+      {'\n'}
+      <TableTextLine line={sepBorder} />
+      {rowSources.map((row, index) => (
+        <TableDataRow key={index} cells={row} widths={widths} />
+      ))}
+      <TableTextLine line={botBorder} trailingNewline={false} />
+    </Text>
+  );
 }
 
 // ── HTML entity decoding ──
@@ -511,12 +670,71 @@ function decodeHtmlEntities(text: string): string {
 
 // ── line grouping ──
 
-type LineGroup =
+export type LineGroup =
   | { kind: 'single'; line: string; index: number }
+  | { kind: 'paragraph'; lines: string[]; startIndex: number }
+  | { kind: 'list'; lines: string[]; startIndex: number }
+  | { kind: 'quote'; lines: string[]; startIndex: number }
   | { kind: 'code'; lines: string[]; lang: string; startIndex: number }
   | { kind: 'table'; lines: string[]; startIndex: number };
 
-function groupLines(lines: string[]): LineGroup[] {
+function groupSourceIndex(group: LineGroup): number {
+  return group.kind === 'single' ? group.index : group.startIndex;
+}
+
+const groupSignatureCache = new WeakMap<LineGroup, string>();
+
+function groupSignature(group: LineGroup): string {
+  const cached = groupSignatureCache.get(group);
+  if (cached != null) return cached;
+  const signature =
+    group.kind === 'single'
+      ? `single:${group.line}`
+      : group.kind === 'paragraph'
+        ? `paragraph:${group.lines.join('\n')}`
+        : group.kind === 'list'
+          ? `list:${group.lines.join('\n')}`
+          : group.kind === 'quote'
+            ? `quote:${group.lines.join('\n')}`
+            : group.kind === 'code'
+              ? `code:${group.lang}\0${group.lines.join('\n')}`
+              : `table:${group.lines.join('\n')}`;
+  groupSignatureCache.set(group, signature);
+  return signature;
+}
+
+const MarkdownGroup = React.memo(
+  function MarkdownGroup({
+    group,
+    render,
+  }: {
+    group: LineGroup;
+    render: (group: LineGroup) => React.ReactNode;
+  }) {
+    return <>{render(group)}</>;
+  },
+  (previous, next) =>
+    previous.render === next.render &&
+    groupSignature(previous.group) === groupSignature(next.group),
+);
+
+function isParagraphLine(line: string): boolean {
+  return (
+    line.trim() !== '' &&
+    !HEADING_RE.test(line) &&
+    !isHorizontalRule(line) &&
+    !UNORDERED_LIST_RE.test(line) &&
+    !ORDERED_LIST_RE.test(line) &&
+    !line.startsWith('> ') &&
+    !line.startsWith('```')
+  );
+}
+
+function isListLine(line: string): boolean {
+  return UNORDERED_LIST_RE.test(line) || ORDERED_LIST_RE.test(line);
+}
+
+export function groupLines(lines: string[]): LineGroup[] {
   const groups: LineGroup[] = [];
   let i = 0;
 
@@ -525,6 +743,7 @@ function groupLines(lines: string[]): LineGroup[] {
 
     // Code block
     if (line.startsWith('```')) {
+      const startIndex = i;
       const lang = detectLang(line);
       const codeLines: string[] = [];
       i++;
@@ -532,20 +751,64 @@ function groupLines(lines: string[]): LineGroup[] {
         codeLines.push(lines[i]!);
         i++;
       }
-      groups.push({ kind: 'code', lines: codeLines, lang, startIndex: i });
+      groups.push({ kind: 'code', lines: codeLines, lang, startIndex });
       if (i < lines.length) i++; // skip closing ```
       continue;
     }
 
     // Table: must have header row + separator row
     if (isTableRow(line) && i + 1 < lines.length && isTableSeparator(lines[i + 1]!)) {
+      const startIndex = i;
       const tableLines: string[] = [line, lines[i + 1]!];
       i += 2;
       while (i < lines.length && isTableRow(lines[i]!)) {
         tableLines.push(lines[i]!);
         i++;
       }
-      groups.push({ kind: 'table', lines: tableLines, startIndex: i });
+      groups.push({ kind: 'table', lines: tableLines, startIndex });
+      continue;
+    }
+
+    if (isListLine(line)) {
+      const startIndex = i;
+      const listLines = [line];
+      i++;
+      while (i < lines.length && isListLine(lines[i]!)) {
+        listLines.push(lines[i]!);
+        i++;
+      }
+      groups.push({ kind: 'list', lines: listLines, startIndex });
+      continue;
+    }
+
+    if (line.startsWith('> ')) {
+      const startIndex = i;
+      const quoteLines = [line];
+      i++;
+      while (i < lines.length && lines[i]!.startsWith('> ')) {
+        quoteLines.push(lines[i]!);
+        i++;
+      }
+      groups.push({ kind: 'quote', lines: quoteLines, startIndex });
+      continue;
+    }
+
+    // Consecutive plain-text lines belong to one logical Markdown paragraph.
+    // A later token can extend only this component without rebuilding every
+    // completed line or paragraph before it.
+    if (isParagraphLine(line)) {
+      const startIndex = i;
+      const paragraphLines = [line];
+      i++;
+      while (
+        i < lines.length &&
+        isParagraphLine(lines[i]!) &&
+        !(isTableRow(lines[i]!) && i + 1 < lines.length && isTableSeparator(lines[i + 1]!))
+      ) {
+        paragraphLines.push(lines[i]!);
+        i++;
+      }
+      groups.push({ kind: 'paragraph', lines: paragraphLines, startIndex });
       continue;
     }
 
@@ -554,6 +817,61 @@ function groupLines(lines: string[]): LineGroup[] {
   }
 
   return groups;
+}
+
+export interface MarkdownParseCache {
+  content: string;
+  rawLines: string[];
+  groups: LineGroup[];
+}
+
+function displayedDecodedLines(rawLines: string[]): string[] {
+  const lines = rawLines.map(decodeHtmlEntities);
+  if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+  return lines;
+}
+
+function offsetGroup(group: LineGroup, offset: number): LineGroup {
+  if (offset === 0) return group;
+  return group.kind === 'single'
+    ? { ...group, index: group.index + offset }
+    : { ...group, startIndex: group.startIndex + offset };
+}
+
+/**
+ * Incrementally parse cumulative streaming Markdown. Only the last existing
+ * group is reparsed because an appended token can extend or promote that
+ * group (for example a pipe row becoming a table); every earlier group is
+ * immutable and retains object identity for React.memo.
+ */
+export function updateMarkdownParseCache(
+  previous: MarkdownParseCache | undefined,
+  content: string,
+): MarkdownParseCache {
+  if (previous?.content === content) return previous;
+
+  if (previous && content.startsWith(previous.content)) {
+    const suffix = content.slice(previous.content.length);
+    const rawLines = previous.rawLines.slice();
+    const additions = suffix.split('\n');
+    if (rawLines.length === 0) rawLines.push('');
+    rawLines[rawLines.length - 1] = `${rawLines[rawLines.length - 1]}${additions[0] ?? ''}`;
+    rawLines.push(...additions.slice(1));
+
+    const lastGroup = previous.groups.at(-1);
+    const reparseStart = lastGroup ? groupSourceIndex(lastGroup) : 0;
+    const stableGroups = lastGroup ? previous.groups.slice(0, -1) : [];
+    const tailLines = displayedDecodedLines(rawLines.slice(reparseStart));
+    const tailGroups = groupLines(tailLines).map((group) => offsetGroup(group, reparseStart));
+    return { content, rawLines, groups: [...stableGroups, ...tailGroups] };
+  }
+
+  const rawLines = content.split('\n');
+  return {
+    content,
+    rawLines,
+    groups: groupLines(displayedDecodedLines(rawLines)),
+  };
 }
 
 function isHorizontalRule(line: string): boolean {
@@ -573,6 +891,7 @@ function isHeadingGroup(g: LineGroup | undefined): boolean {
 }
 
 function isListGroup(g: LineGroup | undefined): boolean {
+  if (g?.kind === 'list') return true;
   if (g?.kind !== 'single') return false;
   const line = g.line;
   return (
@@ -584,7 +903,10 @@ function isListGroup(g: LineGroup | undefined): boolean {
 }
 
 function isQuoteGroup(g: LineGroup | undefined): boolean {
-  return !!g && g.kind === 'single' && g.line.startsWith('> ') && !isBlankGroup(g);
+  return (
+    !!g &&
+    (g.kind === 'quote' || (g.kind === 'single' && g.line.startsWith('> ') && !isBlankGroup(g)))
+  );
 }
 
 function isStructuralGroup(g: LineGroup | undefined): boolean {
@@ -613,16 +935,57 @@ function spacingBetween(prev: LineGroup, next: LineGroup, blanks: number): numbe
   return Math.min(blanks, 1);
 }
 
+const ListRow = React.memo(function ListRow({ line, color }: { line: string; color?: string }) {
+  const t = useTheme();
+  const ulMatch = line.match(UNORDERED_LIST_RE);
+  if (ulMatch) {
+    const indent = ulMatch[1]!.length;
+    let item = ulMatch[2]!;
+    let bullet = '• ';
+    const taskMatch = item.match(/^(\[[ xX]\])\s+(.*)$/);
+    if (taskMatch) {
+      bullet = taskMatch[1]! === '[ ]' ? '☐ ' : '☑ ';
+      item = taskMatch[2]!;
+    }
+    return (
+      <Box paddingLeft={indent}>
+        <Text color={t.muted}>{bullet}</Text>
+        <MarkdownLine content={item} color={color} />
+      </Box>
+    );
+  }
+
+  const olMatch = line.match(ORDERED_LIST_RE);
+  if (!olMatch) return null;
+  return (
+    <Box paddingLeft={olMatch[1]!.length}>
+      <Text color={t.muted}>{olMatch[2]!}. </Text>
+      <MarkdownLine content={olMatch[3]!} color={color} />
+    </Box>
+  );
+});
+
+const QuoteRow = React.memo(function QuoteRow({ line, color }: { line: string; color?: string }) {
+  const t = useTheme();
+  return (
+    <Box flexDirection="row">
+      <Text color={t.dim}>▎ </Text>
+      <MarkdownLine content={line.slice(2)} color={color} />
+    </Box>
+  );
+});
+
 // ── main component ──
 
 export default React.memo(function MarkdownBlock({ content, color, maxWidth }: MarkdownBlockProps) {
   const t = useTheme();
   const { columns: termColumns } = useWindowSize();
   const columns = maxWidth ?? termColumns;
+  const parseCache = useRef<MarkdownParseCache | undefined>(undefined);
   const groups = useMemo(() => {
-    const lines = decodeHtmlEntities(content).split('\n');
-    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
-    return groupLines(lines);
+    const next = updateMarkdownParseCache(parseCache.current, content);
+    parseCache.current = next;
+    return next.groups;
   }, [content]);
 
   const nonBlank = groups.reduce<{ group: LineGroup; blanksBefore: number }[]>((acc, g) => {
@@ -635,149 +998,173 @@ export default React.memo(function MarkdownBlock({ content, color, maxWidth }: M
     return acc;
   }, []);
 
-  function renderGroup(group: LineGroup): React.ReactNode {
-    if (group.kind === 'code') {
-      if (group.lines.length === 0) return null;
-      const lang = group.lang || 'code';
-      // 顶边框 / Top border — 不够放完整 label 时退化为无标签模式
-      const label = `┌─ ${lang} `;
-      const labelWidth = stringWidth(label);
-      let topBorder: string;
-      if (columns > labelWidth + 1) {
-        topBorder = `${label}${'─'.repeat(columns - labelWidth - 1)}┐`;
-      } else {
-        topBorder = `┌${'─'.repeat(Math.max(0, columns - 2))}┐`;
+  const renderGroup = React.useCallback(
+    (group: LineGroup): React.ReactNode => {
+      if (group.kind === 'code') {
+        if (group.lines.length === 0) return null;
+        const lang = group.lang || 'code';
+        // 顶边框 / Top border — 不够放完整 label 时退化为无标签模式
+        const label = `┌─ ${lang} `;
+        const labelWidth = stringWidth(label);
+        let topBorder: string;
+        if (columns > labelWidth + 1) {
+          topBorder = `${label}${'─'.repeat(columns - labelWidth - 1)}┐`;
+        } else {
+          topBorder = `┌${'─'.repeat(Math.max(0, columns - 2))}┐`;
+        }
+        // 底边框 / Bottom border
+        const bottomBorder = `└${'─'.repeat(Math.max(0, columns - 2))}┘`;
+        return (
+          <Box flexDirection="column">
+            <Text color={t.dim}>{topBorder}</Text>
+            {group.lines.map((codeLine, ci) => (
+              <CodeRow
+                key={ci}
+                line={codeLine}
+                lang={group.lang}
+                columns={columns}
+                borderColor={t.dim}
+              />
+            ))}
+            <Text color={t.dim}>{bottomBorder}</Text>
+          </Box>
+        );
       }
-      // 底边框 / Bottom border
-      const bottomBorder = `└${'─'.repeat(Math.max(0, columns - 2))}┘`;
-      return (
-        <Box flexDirection="column">
-          <Text color={t.dim}>{topBorder}</Text>
-          {group.lines.map((codeLine, ci) => {
-            // 用 tab 展开后的视觉宽度计算右填充 / Use tab-expanded visual width for right padding
-            const lineVisualWidth = codeLineWidth(codeLine);
-            const padLen = Math.max(0, columns - 3 - lineVisualWidth);
-            return (
-              <Box key={ci} flexDirection="row">
-                <Text color={t.dim}>│ </Text>
-                <CodeLine line={codeLine} lang={group.lang} />
-                <Text color={t.dim}>{' '.repeat(padLen)}│</Text>
-              </Box>
-            );
-          })}
-          <Text color={t.dim}>{bottomBorder}</Text>
-        </Box>
-      );
-    }
 
-    if (group.kind === 'table') {
-      return <TableBlock lines={group.lines} />;
-    }
-
-    const line = group.line;
-
-    if (line.startsWith('###### ')) {
-      return (
-        <Text bold color={t.dim}>
-          <MarkdownLine content={line.slice(7)} color={t.dim} />
-        </Text>
-      );
-    }
-    if (line.startsWith('##### ')) {
-      return (
-        <Text bold color={t.muted}>
-          <MarkdownLine content={line.slice(6)} color={t.muted} />
-        </Text>
-      );
-    }
-    if (line.startsWith('#### ')) {
-      return (
-        <Text bold color={t.muted}>
-          <MarkdownLine content={line.slice(5)} color={t.muted} />
-        </Text>
-      );
-    }
-    if (line.startsWith('### ')) {
-      return (
-        <Text bold color={t.primary}>
-          <MarkdownLine content={line.slice(4)} color={t.primary} />
-        </Text>
-      );
-    }
-    if (line.startsWith('## ')) {
-      return (
-        <Text bold color={t.primary}>
-          ── <MarkdownLine content={line.slice(3)} color={t.primary} /> ──
-        </Text>
-      );
-    }
-    if (line.startsWith('# ')) {
-      return (
-        <Text bold underline color={t.primary}>
-          <MarkdownLine content={line.slice(2)} color={t.primary} />
-        </Text>
-      );
-    }
-
-    if (isHorizontalRule(line)) {
-      return <Text color={t.dim}>{'─'.repeat(columns)}</Text>;
-    }
-
-    const ulMatch = line.match(UNORDERED_LIST_RE);
-    if (ulMatch) {
-      const indent = ulMatch[1]!.length;
-      let item = ulMatch[2]!;
-      let bullet = '• ';
-      const taskMatch = item.match(/^(\[[ xX]\])\s+(.*)$/);
-      if (taskMatch) {
-        bullet = taskMatch[1]! === '[ ]' ? '☐ ' : '☑ ';
-        item = taskMatch[2]!;
+      if (group.kind === 'table') {
+        return <TableBlock lines={group.lines} columns={columns} />;
       }
-      return (
-        <Box paddingLeft={indent}>
-          <Text color={t.muted}>{bullet}</Text>
-          <MarkdownLine content={item} color={color} />
-        </Box>
-      );
-    }
 
-    const olMatch = line.match(ORDERED_LIST_RE);
-    if (olMatch && !line.startsWith('```')) {
-      const indent = olMatch[1]!.length;
-      return (
-        <Box paddingLeft={indent}>
-          <Text color={t.muted}>{olMatch[2]!}. </Text>
-          <MarkdownLine content={olMatch[3]!} color={color} />
-        </Box>
-      );
-    }
+      if (group.kind === 'paragraph') {
+        return <MarkdownLine content={group.lines.join('\n')} color={color} />;
+      }
 
-    if (line.startsWith('> ')) {
-      return (
-        <Box flexDirection="row">
-          <Text color={t.dim}>▎ </Text>
-          <MarkdownLine content={line.slice(2)} color={color} />
-        </Box>
-      );
-    }
+      if (group.kind === 'list') {
+        return (
+          <Box flexDirection="column">
+            {group.lines.map((line, index) => (
+              <ListRow key={index} line={line} color={color} />
+            ))}
+          </Box>
+        );
+      }
 
-    return <MarkdownLine content={line} color={color} />;
-  }
+      if (group.kind === 'quote') {
+        return (
+          <Box flexDirection="column">
+            {group.lines.map((line, index) => (
+              <QuoteRow key={index} line={line} color={color} />
+            ))}
+          </Box>
+        );
+      }
+
+      const line = group.line;
+
+      if (line.startsWith('###### ')) {
+        return (
+          <Text bold color={t.dim}>
+            <MarkdownLine content={line.slice(7)} color={t.dim} />
+          </Text>
+        );
+      }
+      if (line.startsWith('##### ')) {
+        return (
+          <Text bold color={t.muted}>
+            <MarkdownLine content={line.slice(6)} color={t.muted} />
+          </Text>
+        );
+      }
+      if (line.startsWith('#### ')) {
+        return (
+          <Text bold color={t.muted}>
+            <MarkdownLine content={line.slice(5)} color={t.muted} />
+          </Text>
+        );
+      }
+      if (line.startsWith('### ')) {
+        return (
+          <Text bold color={t.primary}>
+            <MarkdownLine content={line.slice(4)} color={t.primary} />
+          </Text>
+        );
+      }
+      if (line.startsWith('## ')) {
+        return (
+          <Text bold color={t.primary}>
+            ── <MarkdownLine content={line.slice(3)} color={t.primary} /> ──
+          </Text>
+        );
+      }
+      if (line.startsWith('# ')) {
+        return (
+          <Text bold underline color={t.primary}>
+            <MarkdownLine content={line.slice(2)} color={t.primary} />
+          </Text>
+        );
+      }
+
+      if (isHorizontalRule(line)) {
+        return <Text color={t.dim}>{'─'.repeat(columns)}</Text>;
+      }
+
+      const ulMatch = line.match(UNORDERED_LIST_RE);
+      if (ulMatch) {
+        const indent = ulMatch[1]!.length;
+        let item = ulMatch[2]!;
+        let bullet = '• ';
+        const taskMatch = item.match(/^(\[[ xX]\])\s+(.*)$/);
+        if (taskMatch) {
+          bullet = taskMatch[1]! === '[ ]' ? '☐ ' : '☑ ';
+          item = taskMatch[2]!;
+        }
+        return (
+          <Box paddingLeft={indent}>
+            <Text color={t.muted}>{bullet}</Text>
+            <MarkdownLine content={item} color={color} />
+          </Box>
+        );
+      }
+
+      const olMatch = line.match(ORDERED_LIST_RE);
+      if (olMatch && !line.startsWith('```')) {
+        const indent = olMatch[1]!.length;
+        return (
+          <Box paddingLeft={indent}>
+            <Text color={t.muted}>{olMatch[2]!}. </Text>
+            <MarkdownLine content={olMatch[3]!} color={color} />
+          </Box>
+        );
+      }
+
+      if (line.startsWith('> ')) {
+        return (
+          <Box flexDirection="row">
+            <Text color={t.dim}>▎ </Text>
+            <MarkdownLine content={line.slice(2)} color={color} />
+          </Box>
+        );
+      }
+
+      return <MarkdownLine content={line} color={color} />;
+    },
+    [color, columns, t.dim, t.muted, t.primary],
+  );
 
   let prevGroup: LineGroup | undefined;
   let prevBlanks = 0;
   return (
     <Box flexDirection="column">
-      {nonBlank.map(({ group, blanksBefore }, i) => {
+      {nonBlank.map(({ group, blanksBefore }) => {
         // blanksBefore on each group is actually blanks AFTER it (accumulated from blank groups).
         // The spacing between prev and current should use prevBlanks (blanks after prev group).
         const spacing = prevGroup ? spacingBetween(prevGroup, group, prevBlanks) : 0;
         prevGroup = group;
         prevBlanks = blanksBefore;
         return (
-          <React.Fragment key={i}>
+          <React.Fragment key={`md-block:${groupSourceIndex(group)}`}>
             {spacing > 0 && <Box height={spacing} />}
-            {renderGroup(group)}
+            <MarkdownGroup group={group} render={renderGroup} />
           </React.Fragment>
         );
       })}
@@ -796,7 +1183,7 @@ function MarkdownLine({ content, color }: { content: string; color?: string }) {
     !segments[0]!.code &&
     !segments[0]!.strikethrough
   ) {
-    return <Text color={color}>{content}</Text>;
+    return <Text color={color}>{segments[0]!.text}</Text>;
   }
 
   return (

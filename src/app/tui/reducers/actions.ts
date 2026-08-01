@@ -25,7 +25,7 @@ export type Action =
   | { type: 'CLEAR_OUTPUT' }
   | {
       type: 'RESOLVE_INTERRUPT';
-      blockId: number;
+      blockId?: number;
       resolution:
         | string
         | {
@@ -56,6 +56,7 @@ export type Action =
       threadId: string;
       blocks: OutputBlock[];
       interrupt: InterruptState | null;
+      pendingToolCalls?: TuiState['pendingToolCalls'];
       modelProvider: string;
       modelName: string;
       thinkingLevel: string | null;

@@ -26,6 +26,7 @@ import {
 } from './events';
 import { assertRuntimeStateInvariants } from './invariants';
 import { reduceRuntimeState } from './reducer';
+import { createLegacyResourceBudgetStateV1 } from './resource-budget';
 import { decideNextEffect } from './scheduler';
 import {
   computePlanStructuralDigest,
@@ -40,6 +41,7 @@ import {
   type RuntimeStore,
   type StoredEvent,
 } from './store';
+import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 
 // ── Kernel 配置 / Kernel configuration ──
 
@@ -62,6 +64,15 @@ export type RuntimeEffectExecutor = (
   effect: RuntimeEffect,
   state: Readonly<RuntimeState>,
   emit?: RuntimeEffectEventSink,
+  context?: {
+    reservationIds: readonly string[];
+    getState?(): Readonly<RuntimeState>;
+    persistEvent(event: RuntimeEvent): Promise<boolean>;
+    persistEvents(events: RuntimeEvent[]): Promise<boolean>;
+    persistLateResourceReconciliation?(
+      event: Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }>,
+    ): Promise<boolean>;
+  },
 ) => Promise<RuntimeEvent[]>;
 
 // ── AgentKernel 实现 / AgentKernel implementation ──
@@ -151,6 +162,15 @@ export class AgentKernel {
     this.store.appendEventsAndSnapshot(this.state.session.threadId, payloads, nextState, metadata);
     this.state = nextState;
     for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
+    for (const payload of payloads) {
+      if (payload.type === 'run.completed') {
+        this.store.saveNamedSnapshot(
+          this.state.session.threadId,
+          `turn-${payload.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
+          this.state,
+        );
+      }
+    }
   }
 
   /**
@@ -224,11 +244,63 @@ export class AgentKernel {
 
   /** Apply an effect result only if no newer event changed the state. */
   applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEventInput[]): boolean {
-    if (lease.expectedRevision !== this.state.revision || lease.turnId !== this.state.turn.turnId) {
+    if (this.hasLateTerminalEventForCancelledTool(lease, events)) {
+      return false;
+    }
+    const current =
+      lease.expectedRevision === this.state.revision && lease.turnId === this.state.turn.turnId;
+    const concurrentShellResult =
+      !current && events.length > 0 && this.isConcurrentShellBatchCurrent(lease, events);
+    if (!current && !concurrentShellResult) {
       return false;
     }
     this.processEventBatch(events);
+    lease.expectedRevision = this.state.revision;
     return true;
+  }
+
+  /**
+   * Persist only bounded resource reconciliation from a stale/cancelled
+   * effect. This never accepts a tool/model terminal event and therefore
+   * cannot revive scheduling or rewrite a durable terminal outcome.
+   */
+  applyLateResourceReconciliation(events: RuntimeEvent[]): boolean {
+    if (
+      events.length === 0 ||
+      events.some((event) => event.type !== 'resource_budget.reconciled') ||
+      this.state.resourceBudget.status !== 'active'
+    ) {
+      return false;
+    }
+    const valid = events.every((event) => {
+      if (event.type !== 'resource_budget.reconciled') return false;
+      const reservation =
+        this.state.resourceBudget.status === 'active'
+          ? this.state.resourceBudget.reservations[event.reservationId]
+          : undefined;
+      return reservation?.state === 'dispatch_started' || reservation?.state === 'unknown';
+    });
+    if (!valid) return false;
+    this.processEventBatch(events);
+    return true;
+  }
+
+  private hasLateTerminalEventForCancelledTool(
+    lease: RuntimeEffectLease,
+    inputs: RuntimeEventInput[],
+  ): boolean {
+    if (lease.effect.type !== 'run_tools') return false;
+    return inputs.some((input) => {
+      const event = isRuntimeEventEnvelope(input) ? input.payload : input;
+      if (
+        event.type !== 'tool.finished' &&
+        event.type !== 'tool.failed' &&
+        event.type !== 'tool.rejected'
+      ) {
+        return false;
+      }
+      return this.state.tools.calls[event.toolCallId]?.status === 'cancelled';
+    });
   }
 
   /**
@@ -237,12 +309,69 @@ export class AgentKernel {
    * remains subject to the same stale-result check as a batch result.
    */
   applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
-    if (lease.expectedRevision !== this.state.revision || lease.turnId !== this.state.turn.turnId) {
+    if (!this.isEffectLeaseCurrent(lease) && !this.isConcurrentShellEventCurrent(lease, event)) {
       return false;
     }
     this.processEvent(event);
     lease.expectedRevision = this.state.revision;
     return true;
+  }
+
+  private isConcurrentShellBatchCurrent(
+    lease: RuntimeEffectLease,
+    inputs: RuntimeEventInput[],
+  ): boolean {
+    let projectedState = this.state;
+    for (const input of inputs) {
+      if (!this.isConcurrentShellEventCurrent(lease, input, projectedState)) return false;
+      const event = isRuntimeEventEnvelope(input) ? input.payload : input;
+      projectedState = reduceRuntimeState(projectedState, event);
+    }
+    return true;
+  }
+
+  /**
+   * Shell siblings from one model response may keep running while the next
+   * sibling is being approved. Their leases therefore tolerate unrelated
+   * revision advances, but only for events owned by the same still-live call.
+   */
+  private isConcurrentShellEventCurrent(
+    lease: RuntimeEffectLease,
+    input: RuntimeEventInput,
+    state: RuntimeState = this.state,
+  ): boolean {
+    if (lease.turnId !== state.turn.turnId || lease.effect.type !== 'run_tools') return false;
+    const event = isRuntimeEventEnvelope(input) ? input.payload : input;
+    if (!('toolCallId' in event) || typeof event.toolCallId !== 'string') return false;
+    if (!lease.effect.toolCallIds.includes(event.toolCallId)) return false;
+
+    const call = state.tools.calls[event.toolCallId];
+    if (call?.name !== 'shell_execute') return false;
+    switch (event.type) {
+      case 'approval.requested':
+      case 'auto_review.requested':
+        return call.status === 'queued';
+      case 'tool.started':
+        return call.status === 'queued' || call.status === 'approved';
+      case 'tool.progress':
+        return call.status === 'running';
+      case 'tool.finished':
+        return call.status === 'running';
+      case 'tool.failed':
+      case 'tool.rejected':
+        return call.status === 'queued' || call.status === 'approved' || call.status === 'running';
+      case 'runtime.cancellation_diagnostic':
+        return call.status === 'cancelled' || call.status === 'running';
+      default:
+        return false;
+    }
+  }
+
+  /** Validate an in-flight effect without reducing or persisting an event. */
+  isEffectLeaseCurrent(lease: RuntimeEffectLease): boolean {
+    return (
+      lease.expectedRevision === this.state.revision && lease.turnId === this.state.turn.turnId
+    );
   }
 
   /**
@@ -290,7 +419,10 @@ export class AgentKernel {
   }
 
   /** Apply a user action only when it matches the currently persisted interaction. */
-  applyAction(action: RuntimeUserAction): RuntimeActionResult {
+  applyAction(
+    action: RuntimeUserAction,
+    additionalEvents: RuntimeEvent[] = [],
+  ): RuntimeActionResult {
     const events = eventsForRuntimeAction(this.state, action, {
       sandboxAvailable: this.sandboxAvailable,
     });
@@ -309,8 +441,9 @@ export class AgentKernel {
         },
       };
     }
-    this.processEventBatch(events);
-    return { status: 'applied', events };
+    const combined = [...events, ...additionalEvents];
+    this.processEventBatch(combined);
+    return { status: 'applied', events: combined };
   }
 
   private createEnvelope(event: RuntimeEventInput, revision: number): RuntimeEventEnvelope {
@@ -320,16 +453,17 @@ export class AgentKernel {
       }
       return event;
     }
-    const serialized = JSON.stringify(event);
+    const normalizedEvent = normalizeTerminalRuntimeEventV1(event);
+    const serialized = JSON.stringify(normalizedEvent);
     const eventId = createHash('sha256').update(serialized).digest('hex');
     const occurredAt = new Date().toISOString();
     const payload =
-      (event.type === 'user.message_appended' ||
-        event.type === 'model.responded' ||
-        event.type === 'tool.finished') &&
-      !event.createdAt
-        ? { ...event, createdAt: occurredAt }
-        : event;
+      (normalizedEvent.type === 'user.message_appended' ||
+        normalizedEvent.type === 'model.responded' ||
+        normalizedEvent.type === 'tool.finished') &&
+      !normalizedEvent.createdAt
+        ? { ...normalizedEvent, createdAt: occurredAt }
+        : normalizedEvent;
     return {
       eventId,
       threadId: this.state.session.threadId,
@@ -414,6 +548,14 @@ export class AgentKernel {
   // ── 生命周期 / Lifecycle ──
 
   /**
+   * 暴露运行时存储，供辅助持久化（如文件写入前原像，ADR-0042 §4）。
+   * Expose the runtime store for auxiliary persistence (e.g. file pre-images).
+   */
+  get runtimeStore(): RuntimeStore {
+    return this.store;
+  }
+
+  /**
    * 关闭 kernel（释放 store 连接等）。
    * Close the kernel (release store connections, etc.).
    */
@@ -477,6 +619,12 @@ export function createAgentKernel(params: {
       const snapshotPosition = snapshotRecord?.metadata.eventPosition ?? 0;
       const tail = allEvents.filter((entry) => entry.id > snapshotPosition);
       if (migratedState && snapshotRecord) {
+        if (restoredState && restoredState.schemaVersion < 17) {
+          migratedState = restoreLegacyTurnLifecycle(
+            migratedState,
+            allEvents.filter((entry) => entry.id <= snapshotPosition),
+          );
+        }
         migratedState = replayPersistedTail(migratedState, tail, params.threadId);
       }
     } catch (error) {
@@ -487,7 +635,25 @@ export function createAgentKernel(params: {
     !recoveryReason &&
     incompatibleSchemaVersion == null &&
     migratedState?.session.threadId === params.threadId
-      ? migratedState
+      ? (() => {
+          // A restored snapshot may carry a stale interaction mode from a
+          // previous run.  Apply the explicitly-requested params so the
+          // restored state reflects the current user intent.
+          let state = migratedState;
+          if (params.interactionMode && state.mode !== params.interactionMode) {
+            state = { ...state, mode: params.interactionMode };
+          }
+          if (
+            params.authorizationMode !== undefined &&
+            state.authorization.mode !== params.authorizationMode
+          ) {
+            state = {
+              ...state,
+              authorization: { ...state.authorization, mode: params.authorizationMode },
+            };
+          }
+          return state;
+        })()
       : incompatibleSchemaVersion != null
         ? {
             ...freshState,
@@ -530,6 +696,31 @@ export function createAgentKernel(params: {
       finishedAt: new Date().toISOString(),
     });
   }
+  const recoveredBudget = kernel.getState().resourceBudget;
+  if (recoveredBudget.status === 'active') {
+    for (const reservation of Object.values(recoveredBudget.reservations)) {
+      if (reservation.state === 'reserved') {
+        kernel.processEvent({
+          type: 'resource_budget.released',
+          reservationId: reservation.reservationId,
+        });
+      } else if (reservation.state === 'dispatch_started') {
+        kernel.processEvent({
+          type: 'resource_budget.unknown',
+          reservationId: reservation.reservationId,
+        });
+      }
+    }
+    if (kernel.getState().turn.status !== 'active') {
+      for (const waiter of Object.values(recoveredBudget.waiters ?? {})) {
+        if (waiter.state !== 'waiting') continue;
+        kernel.processEvent({
+          type: 'resource_budget.waiter_cancelled',
+          invocationId: waiter.invocationId,
+        });
+      }
+    }
+  }
   return kernel;
 }
 
@@ -563,6 +754,26 @@ function replayPersistedTail(
   return current;
 }
 
+function restoreLegacyTurnLifecycle(state: RuntimeState, events: StoredEvent[]): RuntimeState {
+  let turn = state.turn;
+  for (const entry of events) {
+    const event = entry.event;
+    if (event.type === 'turn.started' && event.turnId === turn.turnId) {
+      turn = { turnId: turn.turnId, turnIndex: turn.turnIndex, status: 'active' };
+    } else if (event.type === 'turn.completed' && event.turnId === turn.turnId) {
+      turn = { ...turn, status: 'completed' };
+    } else if (event.type === 'turn.aborted' && event.turnId === turn.turnId) {
+      turn = {
+        ...turn,
+        status: 'aborted',
+        abortReason: event.reason,
+        ...(event.cause ? { abortCause: event.cause } : {}),
+      };
+    }
+  }
+  return turn === state.turn ? state : { ...state, turn };
+}
+
 function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   const normalizedSnapshot = snapshot;
 
@@ -590,6 +801,13 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
     context: normalizeContextRuntimeState((normalizedSnapshot as Partial<RuntimeState>).context),
+    resourceBudget:
+      snapshot.schemaVersion >= 18
+        ? normalizeResourceBudgetMetadata(
+            (snapshot as Partial<RuntimeState>).resourceBudget ??
+              createLegacyResourceBudgetStateV1(snapshot.schemaVersion),
+          )
+        : createLegacyResourceBudgetStateV1(snapshot.schemaVersion),
     providerAdmission: (normalizedSnapshot as Partial<RuntimeState>).providerAdmission ?? {
       pending: [],
       waivers: {},
@@ -651,6 +869,10 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     appliedEventIds?: string[];
     recoveryState?: RuntimeState['recoveryState'];
     context?: RuntimeState['context'];
+    resourceBudget?: RuntimeState['resourceBudget'];
+    turn: RuntimeState['turn'] & {
+      status?: RuntimeState['turn']['status'];
+    };
   };
   return {
     ...state,
@@ -658,6 +880,16 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
     context: normalizeContextRuntimeState(raw.context),
+    resourceBudget: normalizeResourceBudgetMetadata(
+      raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
+    ),
+    turn: {
+      ...state.turn,
+      status:
+        raw.turn.status === 'completed' || raw.turn.status === 'aborted'
+          ? raw.turn.status
+          : 'active',
+    },
     transcript: {
       ...state.transcript,
       messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({
@@ -682,6 +914,21 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
         : {}),
       invocations: state.capabilities?.invocations ?? {},
     },
+  };
+}
+
+function normalizeResourceBudgetMetadata(
+  budget: RuntimeState['resourceBudget'],
+): RuntimeState['resourceBudget'] {
+  if (budget.status !== 'active') return budget;
+  const legacy = budget as RuntimeState['resourceBudget'] & {
+    waiters?: Extract<RuntimeState['resourceBudget'], { status: 'active' }>['waiters'];
+    nextWaiterSequence?: number;
+  };
+  return {
+    ...budget,
+    waiters: legacy.waiters ?? {},
+    nextWaiterSequence: legacy.nextWaiterSequence ?? 0,
   };
 }
 

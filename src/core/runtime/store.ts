@@ -19,6 +19,16 @@ export interface RuntimeStoreOptions {
    * after close on Windows, so DELETE is the safe platform default there.
    */
   journalMode?: RuntimeJournalMode;
+  /** Test-only SQLite page ceiling used to inject deterministic SQLITE_FULL writes. */
+  faultInjectionMaxPageCount?: number;
+}
+
+/** A durable one-shot egress permit nonce was already claimed by another receipt. */
+export class RemoteMcpEgressNonceConflictError extends Error {
+  constructor(options: { cause?: unknown } = {}) {
+    super('Remote MCP egress permit nonce was already consumed.', options);
+    this.name = 'RemoteMcpEgressNonceConflictError';
+  }
 }
 
 export interface RuntimeEventMetadata {
@@ -105,6 +115,26 @@ export interface RuntimeStore {
   listNamedSnapshots(threadId: string): RuntimeSnapshotEntry[];
   restoreNamedSnapshot(threadId: string, snapshotId: string): boolean;
   forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean;
+  /** Resolve a named recovery point entry (position + timestamp), or null when absent. */
+  getNamedSnapshotEntry(threadId: string, snapshotId: string): RuntimeSnapshotEntry | null;
+  /**
+   * 记录写入前文件原像（ADR-0042 §4）。best-effort：同一检查点窗口（上一次
+   * turn 快照之后）内按 path 去重，失败静默，绝不影响工具执行。
+   * Record a file pre-image before a write (ADR-0042 §4). Best-effort: deduped
+   * per path within a checkpoint window (since the last turn snapshot);
+   * failures never break tool execution.
+   */
+  recordFilePreimage(
+    threadId: string,
+    path: string,
+    content: string | null,
+    existed: boolean,
+  ): void;
+  /** 计算回退到某事件位置时的文件恢复计划 / Compute the file restore plan for rewinding to an event position. */
+  fileRestorePlan(
+    threadId: string,
+    eventPosition: number,
+  ): Array<{ path: string; content: string | null; existed: boolean }>;
   /** 关闭数据库连接 / Close the database */
   close(): void;
 }
@@ -161,10 +191,11 @@ export function createRuntimeStore(
   let isClosed = false;
   const journalMode = options.journalMode ?? defaultRuntimeJournalMode();
 
+  // Install the bounded lock wait before any pragma or schema write that can
+  // contend with another RuntimeStore connection.
+  db.run('PRAGMA busy_timeout = 5000');
   // WAL improves concurrency; Windows uses DELETE until Bun releases WAL file locks reliably.
   db.run(`PRAGMA journal_mode = ${journalMode}`);
-  // 多会话并发写入时避免 SQLITE_BUSY / Avoid SQLITE_BUSY under concurrent multi-session writes
-  db.run('PRAGMA busy_timeout = 5000');
 
   db.run(`
     CREATE TABLE IF NOT EXISTS runtime_store_meta (
@@ -237,6 +268,34 @@ export function createRuntimeStore(
       created_at INTEGER DEFAULT (unixepoch())
     )
   `);
+  // 文件写入前原像（ADR-0042 §4）：/rewind 回退检查点时用于恢复工作区文件。
+  // event_position 记录捕获时刻的最近事件位置；回退到位置 N 时，每个 path 取
+  // event_position > N 的最早一行即为检查点时刻的文件状态（existed=0 表示当时
+  // 文件不存在，恢复动作为删除）。
+  // File pre-images captured before tool writes (ADR-0042 §4); used to restore
+  // workspace files when /rewind reverts to a recovery point.
+  db.run(`
+    CREATE TABLE IF NOT EXISTS runtime_file_preimages (
+      thread_id      TEXT    NOT NULL,
+      path           TEXT    NOT NULL,
+      event_position INTEGER NOT NULL DEFAULT 0,
+      content        TEXT,
+      existed        INTEGER NOT NULL DEFAULT 1,
+      created_at     INTEGER DEFAULT (unixepoch()),
+      PRIMARY KEY (thread_id, path, event_position)
+    )
+  `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS runtime_mcp_egress_nonces (
+      thread_id     TEXT NOT NULL,
+      nonce_digest  TEXT NOT NULL,
+      invocation_id TEXT NOT NULL,
+      receipt_digest TEXT NOT NULL,
+      expires_at    TEXT NOT NULL,
+      created_at    INTEGER DEFAULT (unixepoch()),
+      PRIMARY KEY (nonce_digest)
+    )
+  `);
 
   // Additive metadata upgrades for stores created before runtime tracing was added.
   for (const [table, column, definition] of [
@@ -262,11 +321,30 @@ export function createRuntimeStore(
 
   // 索引加速按 thread_id 查询 / Index for thread_id lookups
   db.run('CREATE INDEX IF NOT EXISTS idx_runtime_events_thread ON runtime_events(thread_id)');
+  db.run(
+    'CREATE INDEX IF NOT EXISTS idx_runtime_file_preimages_position ON runtime_file_preimages(thread_id, event_position)',
+  );
+  if (options.faultInjectionMaxPageCount != null) {
+    if (
+      !Number.isInteger(options.faultInjectionMaxPageCount) ||
+      options.faultInjectionMaxPageCount <= 0
+    ) {
+      db.close();
+      throw new Error('faultInjectionMaxPageCount must be a positive integer');
+    }
+    db.run(`PRAGMA max_page_count = ${options.faultInjectionMaxPageCount}`);
+  }
 
   // 预编译 SQL / Prepare cached statements
   const insertEvent = db.query('INSERT INTO runtime_events (thread_id, event_json) VALUES (?, ?)');
   const insertEventWithMetadata = db.query(
     'INSERT OR IGNORE INTO runtime_events (thread_id, event_json, event_id, revision, causation_id, occurred_at) VALUES (?, ?, ?, ?, ?, ?)',
+  );
+  const insertMcpEgressNonce = db.query(
+    'INSERT INTO runtime_mcp_egress_nonces (thread_id, nonce_digest, invocation_id, receipt_digest, expires_at) VALUES (?, ?, ?, ?, ?)',
+  );
+  const deleteExpiredMcpEgressNonces = db.query(
+    'DELETE FROM runtime_mcp_egress_nonces WHERE expires_at <= ?',
   );
   const selectEvents = db.query<EventRow, [string, number]>(
     'SELECT id, thread_id, event_json, event_id, revision, causation_id, occurred_at, created_at FROM runtime_events WHERE thread_id = ? AND id > ? ORDER BY id ASC',
@@ -313,6 +391,44 @@ export function createRuntimeStore(
   const deleteNamedSnapshotsAfter = db.query(
     'DELETE FROM runtime_named_snapshots WHERE thread_id = ? AND event_position > ?',
   );
+  const insertFilePreimage = db.query(
+    'INSERT OR REPLACE INTO runtime_file_preimages (thread_id, path, event_position, content, existed) VALUES (?, ?, ?, ?, ?)',
+  );
+  const selectFilePreimageInWindow = db.query<{ path: string }, [string, string, number]>(
+    'SELECT path FROM runtime_file_preimages WHERE thread_id = ? AND path = ? AND event_position > ? LIMIT 1',
+  );
+  const selectLatestSnapshotPosition = db.query<{ event_position: number | null }, [string]>(
+    'SELECT MAX(event_position) AS event_position FROM runtime_named_snapshots WHERE thread_id = ?',
+  );
+  const selectNamedSnapshotEntry = db.query<
+    { name: string; event_position: number; created_at: number },
+    [string, string]
+  >(
+    'SELECT name, event_position, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
+  );
+  const selectFileRestorePlan = db.query<
+    { path: string; content: string | null; existed: number },
+    [string, number, string]
+  >(
+    `SELECT p.path AS path, p.content AS content, p.existed AS existed
+     FROM runtime_file_preimages p
+     JOIN (SELECT path, MIN(event_position) AS min_position
+           FROM runtime_file_preimages
+           WHERE thread_id = ? AND event_position > ?
+           GROUP BY path) m ON p.path = m.path AND p.event_position = m.min_position
+     WHERE p.thread_id = ?`,
+  );
+  const deleteFilePreimages = db.query('DELETE FROM runtime_file_preimages WHERE thread_id = ?');
+  const deleteFilePreimagesAfter = db.query(
+    'DELETE FROM runtime_file_preimages WHERE thread_id = ? AND event_position > ?',
+  );
+  const copyFilePreimages = db.query(
+    `INSERT OR REPLACE INTO runtime_file_preimages
+       (thread_id, path, event_position, content, existed, created_at)
+     SELECT ?, path, event_position, content, existed, created_at
+     FROM runtime_file_preimages
+     WHERE thread_id = ? AND event_position <= ?`,
+  );
   const deleteSession = db.query('DELETE FROM runtime_sessions WHERE thread_id = ?');
   const listNamedSnapshots = db.query<
     { name: string; event_position: number; created_at: number },
@@ -323,6 +439,8 @@ export function createRuntimeStore(
   const statements = [
     insertEvent,
     insertEventWithMetadata,
+    insertMcpEgressNonce,
+    deleteExpiredMcpEgressNonces,
     selectEvents,
     selectAllEvents,
     upsertSnapshot,
@@ -338,9 +456,48 @@ export function createRuntimeStore(
     deleteSnapshot,
     deleteNamedSnapshots,
     deleteNamedSnapshotsAfter,
+    insertFilePreimage,
+    selectFilePreimageInWindow,
+    selectLatestSnapshotPosition,
+    selectNamedSnapshotEntry,
+    selectFileRestorePlan,
+    deleteFilePreimages,
+    deleteFilePreimagesAfter,
+    copyFilePreimages,
     deleteSession,
     listNamedSnapshots,
   ] as const;
+
+  const claimMcpEgressNonce = (threadId: string, event: RuntimeEvent): void => {
+    if (
+      event.type !== 'mcp.egress_decided' ||
+      !event.decision.admitted ||
+      event.decision.reason !== 'permit_consumed' ||
+      !event.decision.nonceDigest ||
+      !event.decision.permitExpiresAt
+    ) {
+      return;
+    }
+    deleteExpiredMcpEgressNonces.run(event.decision.decidedAt);
+    try {
+      insertMcpEgressNonce.run(
+        threadId,
+        event.decision.nonceDigest,
+        event.decision.invocationId,
+        event.decision.receiptDigest,
+        event.decision.permitExpiresAt,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (
+        message.includes('runtime_mcp_egress_nonces.nonce_digest') ||
+        message.includes('UNIQUE constraint failed: runtime_mcp_egress_nonces')
+      ) {
+        throw new RemoteMcpEgressNonceConflictError({ cause: error });
+      }
+      throw error;
+    }
+  };
 
   const store: RuntimeStore = {
     appendEvents(
@@ -355,6 +512,7 @@ export function createRuntimeStore(
         db.transaction(() => {
           upsertSession.run(threadId);
           for (const [index, event] of events.entries()) {
+            claimMcpEgressNonce(threadId, event);
             const entry = metadata?.[index];
             if (entry) {
               insertEventWithMetadata.run(
@@ -371,6 +529,7 @@ export function createRuntimeStore(
           }
         })();
       } catch (e) {
+        if (e instanceof RemoteMcpEgressNonceConflictError) throw e;
         throw new Error(
           `Failed to append events for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
           { cause: e },
@@ -390,6 +549,7 @@ export function createRuntimeStore(
         db.transaction(() => {
           upsertSession.run(threadId);
           for (const [index, event] of events.entries()) {
+            claimMcpEgressNonce(threadId, event);
             const entry = metadata?.[index];
             if (entry) {
               insertEventWithMetadata.run(
@@ -416,6 +576,7 @@ export function createRuntimeStore(
           );
         })();
       } catch (e) {
+        if (e instanceof RemoteMcpEgressNonceConflictError) throw e;
         throw new Error(
           `Failed to appendEventsAndSnapshot for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
           { cause: e },
@@ -563,6 +724,7 @@ export function createRuntimeStore(
         deleteEvents.run(threadId);
         deleteSnapshot.run(threadId);
         deleteNamedSnapshots.run(threadId);
+        deleteFilePreimages.run(threadId);
         deleteSession.run(threadId);
       })();
     },
@@ -576,6 +738,43 @@ export function createRuntimeStore(
       }));
     },
 
+    getNamedSnapshotEntry(threadId: string, snapshotId: string): RuntimeSnapshotEntry | null {
+      if (isClosed) return null;
+      const row = selectNamedSnapshotEntry.get(threadId, snapshotId);
+      if (!row) return null;
+      return { snapshotId: row.name, eventPosition: row.event_position, createdAt: row.created_at };
+    },
+
+    recordFilePreimage(
+      threadId: string,
+      path: string,
+      content: string | null,
+      existed: boolean,
+    ): void {
+      if (isClosed || !threadId || !path) return;
+      try {
+        // 同一检查点窗口（上一个 turn 快照之后）内每个 path 只记录最早一份原像：
+        // 它才是检查点时刻的文件状态，后续覆写的原像对回退无意义。
+        const boundary = selectLatestSnapshotPosition.get(threadId)?.event_position ?? -1;
+        if (selectFilePreimageInWindow.get(threadId, path, boundary)) return;
+        const position = selectLastEventPosition.get(threadId)?.id ?? 0;
+        insertFilePreimage.run(threadId, path, position, content, existed ? 1 : 0);
+      } catch {
+        // best-effort：原像记录失败绝不影响工具执行
+        // best-effort: pre-image capture failure must never break tool execution
+      }
+    },
+
+    fileRestorePlan(
+      threadId: string,
+      eventPosition: number,
+    ): Array<{ path: string; content: string | null; existed: boolean }> {
+      if (isClosed) return [];
+      return selectFileRestorePlan
+        .all(threadId, eventPosition, threadId)
+        .map((row) => ({ path: row.path, content: row.content, existed: row.existed === 1 }));
+    },
+
     restoreNamedSnapshot(threadId: string, snapshotId: string): boolean {
       if (isClosed) return false;
       const snapshot = store.loadNamedSnapshot(threadId, snapshotId);
@@ -584,6 +783,8 @@ export function createRuntimeStore(
       db.transaction(() => {
         deleteEventsAfter.run(threadId, entry.event_position);
         deleteNamedSnapshotsAfter.run(threadId, entry.event_position);
+        // ADR-0042 §4：文件原像随恢复点一同截断（调用方应在此之前完成文件恢复）
+        deleteFilePreimagesAfter.run(threadId, entry.event_position);
         const serialized = JSON.stringify(snapshot);
         const state = snapshot as { revision?: number; schemaVersion?: number };
         upsertSnapshot.run(
@@ -619,9 +820,13 @@ export function createRuntimeStore(
         deleteEvents.run(targetThreadId);
         deleteSnapshot.run(targetThreadId);
         deleteNamedSnapshots.run(targetThreadId);
+        deleteFilePreimages.run(targetThreadId);
         deleteSession.run(targetThreadId);
         upsertSession.run(targetThreadId);
         for (const event of events) insertEvent.run(targetThreadId, JSON.stringify(event));
+        // ADR-0042 §4：复制 fork 点之前的文件原像（fork 复用源事件序列，
+        // 事件位置一一对应），fork 出的会话内 /rewind 同样可以恢复文件。
+        copyFilePreimages.run(targetThreadId, sourceThreadId, position);
         const targetPosition = selectLastEventPosition.get(targetThreadId)?.id ?? 0;
         const serialized = JSON.stringify(forkState);
         const state = forkState as { revision?: number; schemaVersion?: number };

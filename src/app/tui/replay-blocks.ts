@@ -8,6 +8,7 @@ import type { InterruptState, OutputBlock } from './types.js';
 export function sessionDataToUI(data: SessionData): {
   blocks: OutputBlock[];
   interrupt: InterruptState | null;
+  pendingToolCalls: import('./types.js').TuiState['pendingToolCalls'];
 } {
   let state = createInitialState();
   for (const event of data.runtimeEvents) state = handleRuntimeEventAction(state, event);
@@ -20,8 +21,16 @@ export function sessionDataToUI(data: SessionData): {
     ),
   );
   const interrupt: InterruptState | null =
-    data.interrupt?.kind === 'approval'
-      ? { kind: 'approval', blockId: callIds.get(data.interrupt.callId ?? '') ?? 0 }
+    state.interrupt ??
+    (data.interrupt?.kind === 'approval'
+      ? (() => {
+          const blockId = callIds.get(data.interrupt?.callId ?? '');
+          const block =
+            blockId == null ? undefined : blocks.find((candidate) => candidate.id === blockId);
+          return block?.kind === 'approval'
+            ? { kind: 'approval' as const, approval: block.approval, blockId }
+            : null;
+        })()
       : data.interrupt?.kind === 'input'
         ? { kind: 'input', blockId: callIds.get(data.interrupt.callId ?? '') ?? 0 }
         : data.interrupt?.kind === 'plan_review'
@@ -30,6 +39,6 @@ export function sessionDataToUI(data: SessionData): {
               plan: data.interrupt.plan,
               ...(data.interrupt.artifact ? { artifact: data.interrupt.artifact } : {}),
             }
-          : null;
-  return { blocks, interrupt };
+          : null);
+  return { blocks, interrupt, pendingToolCalls: state.pendingToolCalls };
 }

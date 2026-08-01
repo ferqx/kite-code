@@ -4,12 +4,14 @@
 
 import type { AutoReviewState } from '@/core/execution/circuit-breaker';
 import { DEFAULT_AUTO_REVIEW_STATE } from '@/core/execution/circuit-breaker';
+import type { RemoteMcpEgressReceiptV1 } from '@/core/mcp/egress-permit';
 import type { McpProviderRecoveryAction } from '@/core/mcp/provider-errors';
 import type {
   McpProviderDirectoryEntry,
   McpProviderDirectoryStatus,
 } from '@/core/mcp/runtime-provider';
 import type { ToolEffectClass } from '@/core/policies/tool-capabilities';
+import type { NetworkDecisionReceiptV1 } from '@/core/sandbox/network-enforcer';
 import type { AuthorizationSource, ToolGrant } from '@/core/types';
 import type {
   CapabilityBinding,
@@ -37,6 +39,11 @@ import type {
 } from '@/protocol/verification';
 import type { ContextRuntimeState } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
+import {
+  createUnconfiguredResourceBudgetStateV1,
+  type ResourceBudgetRuntimeStateV1,
+} from './resource-budget';
+import type { RunTerminalOutcomeV1 } from './terminal-outcome';
 
 // ── Re-export for convenience ──
 export { getAgentPhase };
@@ -257,6 +264,10 @@ export interface ToolCallRecord {
   bindingId?: string;
   capabilityId?: string;
   capabilityRevision?: string;
+  /** Durable per-hop decisions recorded before network dispatch. */
+  networkDecisions?: NetworkDecisionReceiptV1[];
+  /** Redacted independent content-egress decisions for remote MCP calls. */
+  remoteMcpEgressDecisions?: RemoteMcpEgressReceiptV1[];
 }
 
 /** Structured, JSON-safe facts produced by a tool execution. */
@@ -276,6 +287,13 @@ export interface ToolResultMeta {
   modelContentDigest?: string;
   /** Provenance of the digest fields. 'legacy_unknown' means pre-V2 data — treat conservatively. */
   digestScope?: 'raw' | 'projected' | 'legacy_unknown';
+  /** Bounded process-tree cleanup facts; never contains process IDs or command text. */
+  processCleanupConfirmed?: boolean;
+  unconfirmedDescendantCount?: number;
+  /** Sealed network policy revision and per-hop admission receipts. */
+  networkPolicyRevision?: string;
+  networkAdmissionDigests?: string[];
+  networkFailureCode?: string;
 }
 
 export interface CapabilityRuntimeState {
@@ -405,7 +423,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 16;
+export const RUNTIME_STATE_SCHEMA_VERSION = 21;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -473,11 +491,20 @@ export interface RuntimeState {
     turnId: string;
     /** Turn 序号（从 0 开始递增）/ Turn index (incrementing from 0) */
     turnIndex: number;
+    /** Durable lifecycle gate used to prevent a completed or aborted turn from resuming. */
+    status: 'active' | 'completed' | 'aborted';
+    /** Persisted diagnostics for an aborted turn. */
+    abortReason?: string;
+    abortCause?: 'user' | 'error';
   };
   /** Persisted, provider-neutral transcript used to rebuild model context. */
   transcript: TranscriptState;
   /** Durable M2 compaction checkpoint lifecycle. */
   context: ContextRuntimeState;
+  /** Shared cumulative resource ledger for this run and all descendants. */
+  resourceBudget: ResourceBudgetRuntimeStateV1;
+  /** Durable structured terminal projection; absent only on legacy/pre-flag runs. */
+  terminalOutcome?: RunTerminalOutcomeV1;
   /** 方案生命周期状态（v2: PlanningState 取代 PlanLifecycleState）/ Plan lifecycle state */
   planning: PlanningState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
@@ -563,6 +590,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     turn: {
       turnId: crypto.randomUUID(),
       turnIndex: 0,
+      status: 'active',
     },
     transcript: { messages: [] },
     context: {
@@ -573,6 +601,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
         disabledUntilManualAction: false,
       },
     },
+    resourceBudget: createUnconfiguredResourceBudgetStateV1(),
     planning: initialPlanning,
     activeTaskId: null,
     tasks: {},

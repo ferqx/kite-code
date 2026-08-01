@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "decisionId": "D-04",
+  "revision": "d04-empty-2026-07-31",
+  "status": "accepted_empty_support_set",
+  "selectedNetworkMode": "off",
+  "evidenceCommit": "a4bdf22aa7c2a987734524c278c4750e7b9faa96",
+  "digest": "sha256:6c33ab090cd138d0eb26cdcbdc97ef92bc794adb3b1690fd7e8d2d24a4510656",
+  "qualifications": []
+}

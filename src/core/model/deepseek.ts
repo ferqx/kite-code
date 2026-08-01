@@ -86,9 +86,15 @@ export async function withTransientModelRetry<T>(
 /** 判断是否为可重试的模型连接错误 / Check whether an error is a retryable model connection error */
 export function isTransientModelConnectionError(error: unknown): boolean {
   const record = error && typeof error === 'object' ? (error as Record<string, unknown>) : {};
-  const status = record.status;
+  const status =
+    typeof record.statusCode === 'number'
+      ? record.statusCode
+      : typeof record.status === 'number'
+        ? record.status
+        : undefined;
   if (typeof status === 'number') {
-    if (status >= 400 && status < 500) return false; // 4xx never retryable
+    if (status === 429) return true; // Rate limiting is transient within the bounded retry budget.
+    if (status >= 400 && status < 500) return false;
     if (status >= 500) return true; // 5xx always retryable (502/503/504 are transient server errors)
   }
 

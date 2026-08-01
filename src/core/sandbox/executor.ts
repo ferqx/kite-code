@@ -1,14 +1,16 @@
+import { guardProcessTree, processTreeSpawnOptions } from '@/core/tools/process-tree';
 import type { ShellExecutor } from '@/core/tools/shell';
 import {
   appendTimeoutMessage,
   readWithProgress,
+  resolveShellTimeoutMs,
   shellTool,
   timeoutMessage,
 } from '@/core/tools/shell';
-import type { ShellNetworkMode } from '@/core/types';
+import type { ShellNetworkMode, ShellResult } from '@/core/types';
 import { generateBwrapArgs } from './bwrap';
-import { detectSandboxBackend } from './platform';
-import { generateSandboxProfile } from './profile';
+import { detectSandboxBackend, findUsableBubblewrap } from './platform';
+import { discoverRuntimeReadOnlyRoots, generateSandboxProfile } from './profile';
 import { findApplySeccomp, resolveSeccompPath } from './seccomp';
 import {
   buildEnvExportSnippet,
@@ -16,9 +18,20 @@ import {
   buildHardenedEnv,
   buildUlimitPreamble,
   checkDangerousPaths,
-  getSandboxRuntimeDir,
+  cleanupSandboxRuntimeDir,
+  createSandboxRuntimeDir,
 } from './shell-wrapper';
 import type { SandboxOptions } from './types';
+
+export function resolveSandboxExitCode(
+  exitCode: number,
+  state: { timedOut: boolean; cancelled: boolean; processCleanupConfirmed: boolean },
+): number {
+  if (state.timedOut) return 124;
+  if (state.cancelled) return 130;
+  if (!state.processCleanupConfirmed) return -1;
+  return exitCode;
+}
 
 /** 获取当前系统 shell 路径 / Get current system shell path */
 function getSystemShell(): string {
@@ -30,6 +43,9 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
   const { enabled } = options;
 
   if (!enabled) {
+    if (options.unavailableFallback === 'fail') {
+      return createUnavailableExecutor('sandbox_disabled');
+    }
     warn('Sandbox disabled by flag. Shell commands will run without isolation.');
     return shellTool;
   }
@@ -42,19 +58,39 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
     case 'bubblewrap':
       return createBwrapExecutor(options);
     default:
+      if (options.unavailableFallback === 'fail') {
+        return createUnavailableExecutor('sandbox_backend_unavailable');
+      }
+      warn('No supported sandbox backend. Shell commands will run without isolation.');
       return shellTool;
   }
+}
+
+function createUnavailableExecutor(reason: string): ShellExecutor {
+  return async (input) => ({
+    ok: false,
+    command: input.command,
+    exitCode: -1,
+    stdout: '',
+    stderr: `Sandbox unavailable (${reason}); refusing unsandboxed shell execution.`,
+  });
 }
 
 /** macOS Seatbelt executor（参照 Codex create_seatbelt_command_args 使用 -p 传 profile）*/
 function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
+  const runtimeReadOnlyRoots = options.runtimeReadOnlyRoots ?? discoverRuntimeReadOnlyRoots();
 
   return createWrappedExecutor(
     workspace,
     resourceLimits,
-    (wrappedCommand, networkMode) => {
-      const profile = generateSandboxProfile(workspace, { network: networkMode });
+    (wrappedCommand, networkMode, sandboxRuntimeDir) => {
+      const profile = generateSandboxProfile(workspace, {
+        network: networkMode,
+        filesystemScope: options.filesystemScope,
+        sandboxRuntimeDir,
+        runtimeReadOnlyRoots,
+      });
       return {
         cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],
       };
@@ -66,16 +102,19 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
 /** Linux Bubblewrap executor */
 function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const { workspace, resourceLimits } = options;
-  const bwrapPath = Bun.which('bwrap')!;
-  const seccompPath = resolveSeccompPath(findApplySeccomp(), workspace);
+  const bwrapPath = findUsableBubblewrap();
+  if (!bwrapPath) return createUnavailableExecutor('bubblewrap_unusable');
+  const seccompBinary = findApplySeccomp();
 
   return createWrappedExecutor(
     workspace,
     resourceLimits,
-    (wrappedCommand, networkMode) => {
+    (wrappedCommand, networkMode, sandboxRuntimeDir) => {
+      const seccompPath = resolveSeccompPath(seccompBinary, workspace, sandboxRuntimeDir);
       const bwrapArgs = generateBwrapArgs(workspace, {
         network: networkMode,
-        sandboxRuntimeDir: getSandboxRuntimeDir(),
+        sandboxRuntimeDir,
+        filesystemScope: options.filesystemScope,
       });
       const shell = getSystemShell();
       const innerCmd = seccompPath
@@ -97,13 +136,35 @@ function createWrappedExecutor(
   buildSpawn: (
     wrappedCommand: string,
     networkMode: ShellNetworkMode,
+    sandboxRuntimeDir: string,
   ) => { cmd: string[]; stdin?: string },
   defaultNetworkMode: ShellNetworkMode = 'disabled',
 ): ShellExecutor {
   return async (input) => {
+    const timeoutMs = resolveShellTimeoutMs(input.timeoutMs);
     let timedOut = false;
+    let cancelled = false;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let termination: ReturnType<ReturnType<typeof guardProcessTree>['terminate']> | undefined;
+    let terminationResult:
+      | Awaited<ReturnType<ReturnType<typeof guardProcessTree>['terminate']>>
+      | undefined;
+    let processTree: ReturnType<typeof guardProcessTree> | undefined;
+    let processCleanupFailed = false;
+    let sandboxRuntimeDir: string | undefined;
+    let outcome: ShellResult | undefined;
     const outputStop = new AbortController();
+    const terminate = (reason: 'timeout' | 'cancelled') => {
+      if (timedOut || cancelled) return;
+      timedOut = reason === 'timeout';
+      cancelled = reason === 'cancelled';
+      outputStop.abort();
+      termination = processTree?.terminate();
+    };
+    const cancel = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      terminate('cancelled');
+    };
     try {
       // 执行前检查命令是否引用危险文件路径 / Pre-execution dangerous path check
       const dangerous = checkDangerousPaths(input.command);
@@ -117,7 +178,8 @@ function createWrappedExecutor(
         };
       }
 
-      const hardenedEnv = buildHardenedEnv(workspace);
+      sandboxRuntimeDir = createSandboxRuntimeDir(workspace);
+      const hardenedEnv = buildHardenedEnv(workspace, sandboxRuntimeDir);
 
       const preamble = [
         buildEnvStripSnippet(),
@@ -126,29 +188,24 @@ function createWrappedExecutor(
       ].join(' ');
 
       const wrappedCommand = `${preamble} ${input.command}`;
-      const { cmd, stdin } = buildSpawn(wrappedCommand, input.networkMode ?? defaultNetworkMode);
+      const { cmd, stdin } = buildSpawn(
+        wrappedCommand,
+        input.networkMode ?? defaultNetworkMode,
+        sandboxRuntimeDir,
+      );
 
       const proc = Bun.spawn(cmd, {
         cwd: workspace,
         stdin: stdin !== undefined ? 'pipe' : 'inherit',
         stdout: 'pipe',
         stderr: 'pipe',
-        signal: input.signal,
+        ...processTreeSpawnOptions(),
       });
+      processTree = guardProcessTree(proc);
 
-      if (input.timeoutMs && input.timeoutMs > 0) {
-        timeoutId = setTimeout(() => {
-          timedOut = true;
-          // Background descendants may retain inherited pipes after the shell
-          // is killed. Cancel readers so the tool cannot remain non-terminal.
-          outputStop.abort();
-          try {
-            proc.kill();
-          } catch {
-            /* process may have exited already */
-          }
-        }, input.timeoutMs);
-      }
+      timeoutId = setTimeout(() => terminate('timeout'), timeoutMs);
+      input.signal?.addEventListener('abort', cancel, { once: true });
+      if (input.signal?.aborted) cancel();
 
       if (stdin !== undefined && proc.stdin) {
         proc.stdin.write(stdin);
@@ -167,32 +224,106 @@ function createWrappedExecutor(
           outputStop.signal,
         ),
       ]);
+      if (termination) terminationResult = await termination;
       const exitCode = await proc.exited;
+      if (!termination) {
+        termination = processTree.terminate();
+        terminationResult = await termination;
+      }
       if (timeoutId) clearTimeout(timeoutId);
 
-      return {
-        ok: !timedOut && exitCode === 0,
+      outcome = {
+        ok:
+          !timedOut && !cancelled && exitCode === 0 && (terminationResult?.confirmedExited ?? true),
         command: input.command,
-        exitCode: timedOut ? 124 : exitCode,
+        exitCode: resolveSandboxExitCode(exitCode, {
+          timedOut,
+          cancelled,
+          processCleanupConfirmed: terminationResult?.confirmedExited ?? true,
+        }),
         stdout,
-        stderr: timedOut ? appendTimeoutMessage(stderr, input.timeoutMs!) : stderr,
+        stderr: timedOut
+          ? appendTimeoutMessage(stderr, timeoutMs)
+          : cancelled
+            ? stderr.trimEnd()
+              ? `${stderr.trimEnd()}\nCommand cancelled by user.`
+              : 'Command cancelled by user.'
+            : terminationResult && !terminationResult.confirmedExited
+              ? stderr.trimEnd()
+                ? `${stderr.trimEnd()}\nSandbox process cleanup could not confirm descendant exit.`
+                : 'Sandbox process cleanup could not confirm descendant exit.'
+              : stderr,
+        ...(terminationResult
+          ? {
+              processCleanup: {
+                confirmedExited: terminationResult.confirmedExited,
+                gracefulRequested: terminationResult.gracefulRequested,
+                forced: terminationResult.forced,
+                unconfirmedDescendantCount: terminationResult.unconfirmedPids.length,
+              },
+            }
+          : {}),
       };
+      return outcome;
     } catch (error) {
       if (timeoutId) clearTimeout(timeoutId);
+      if (processTree && !termination) termination = processTree.terminate();
+      if (termination) {
+        try {
+          terminationResult = await termination;
+        } catch {
+          processCleanupFailed = true;
+        }
+      }
       const isAbort = error instanceof Error && error.name === 'AbortError';
-      return {
+      const baseError = timedOut
+        ? timeoutMessage(timeoutMs)
+        : cancelled || isAbort
+          ? 'Command cancelled by user.'
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      outcome = {
         ok: false,
         command: input.command,
-        exitCode: timedOut ? 124 : isAbort ? 130 : -1,
+        exitCode: resolveSandboxExitCode(-1, {
+          timedOut,
+          cancelled: cancelled || isAbort,
+          processCleanupConfirmed: !processCleanupFailed,
+        }),
         stdout: '',
-        stderr: timedOut
-          ? timeoutMessage(input.timeoutMs ?? 0)
-          : isAbort
-            ? 'Command cancelled by user.'
-            : error instanceof Error
-              ? error.message
-              : String(error),
+        stderr: processCleanupFailed ? `${baseError}\nSandbox process cleanup failed.` : baseError,
+        ...(terminationResult
+          ? {
+              processCleanup: {
+                confirmedExited: terminationResult.confirmedExited,
+                gracefulRequested: terminationResult.gracefulRequested,
+                forced: terminationResult.forced,
+                unconfirmedDescendantCount: terminationResult.unconfirmedPids.length,
+              },
+            }
+          : {}),
       };
+      return outcome;
+    } finally {
+      if (timeoutId) clearTimeout(timeoutId);
+      input.signal?.removeEventListener('abort', cancel);
+      processTree?.dispose();
+      if (sandboxRuntimeDir && outcome) {
+        const processCleanupConfirmed = !processTree || terminationResult?.confirmedExited === true;
+        const runtimeCleanupConfirmed =
+          processCleanupConfirmed && cleanupSandboxRuntimeDir(sandboxRuntimeDir);
+        if (!runtimeCleanupConfirmed) {
+          outcome.ok = false;
+          outcome.exitCode = -1;
+          const message = processCleanupConfirmed
+            ? 'Sandbox runtime cleanup failed.'
+            : 'Sandbox runtime retained because process cleanup was not confirmed.';
+          outcome.stderr = outcome.stderr.trimEnd()
+            ? `${outcome.stderr.trimEnd()}\n${message}`
+            : message;
+        }
+      }
     }
   };
 }

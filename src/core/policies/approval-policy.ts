@@ -1,5 +1,6 @@
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute } from 'node:path';
 import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
+import { isPathInsideWorkspace, msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 import type { AgentPhase, ShellGrantUsed } from '@/protocol/events';
@@ -210,10 +211,23 @@ function denyForPlanningPhase(params: {
   fallbackRisk: ToolRisk;
 }): ApprovalDecision | null {
   if (params.phase === 'planning') {
+    if (params.toolName === 'write_file' || params.toolName === 'edit_file') {
+      const outcome =
+        params.toolName === 'write_file' ? 'No file was written.' : 'No file was edited.';
+      return deny({
+        risk: params.fallbackRisk,
+        reason:
+          'Plan mode is read-only. Workspace edits must be described in the plan and applied only after plan approval.',
+        userVisibleSummary: `Plan mode is read-only. ${outcome} Describe the intended change in the plan and apply it after plan approval.`,
+        expectedEffects: ['No workspace file was modified'],
+        phaseConstraint: 'planning',
+      });
+    }
     return deny({
       risk: params.fallbackRisk,
-      reason: 'planning phase allows read-only inspection and plan updates only.',
-      userVisibleSummary: `Rejected ${params.toolName} during planning phase.`,
+      reason: `planning phase allows read-only inspection and plan updates only; rejected ${params.toolName}.`,
+      userVisibleSummary:
+        'Plan mode is read-only. This operation did not run and cannot be approved while planning. Use read-only inspection or describe the intended implementation in the plan, then run it after plan approval.',
       expectedEffects: ['No workspace mutation or code execution will run'],
       phaseConstraint: 'planning',
     });
@@ -287,7 +301,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
       return deny({
         risk: 'execute_code',
         reason: 'planning phase allows read-only sub-agents only.',
-        userVisibleSummary: `Rejected ${String(subagentType ?? 'unknown')} sub-agent during planning phase.`,
+        userVisibleSummary: `Plan mode did not start the ${String(subagentType ?? 'unknown')} sub-agent. Use an explore, plan, or review sub-agent, or describe the implementation in the plan for execution after plan approval.`,
         expectedEffects: ['No implementation sub-agent will run during planning'],
         phaseConstraint: 'planning',
       });
@@ -356,9 +370,53 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // 只读工作区检查 — 直接放行
-  // Read-only workspace inspection — allow directly
+  // 只读工作区检查 — 直接放行（外部路径需审批）
+  // Read-only workspace inspection — allow directly (external paths require approval)
   if (toolName === 'read_file' || toolName === 'search_content' || toolName === 'search_files') {
+    const pathParam = String(toolArgs.path ?? (toolName === 'read_file' ? '<unknown>' : '.'));
+    // MSYS2 路径（/c/proj/...）先归一化为 Windows 原生格式再判断外部性，
+    // 否则 resolve() 会把 '/c/...' 挂到当前盘符，工作区内路径被误判为外部。
+    // Normalize MSYS2-style paths (/c/proj/...) before the external check;
+    // otherwise resolve() roots '/c/...' at the current drive and an
+    // in-workspace path is misclassified as external. No-op outside Windows.
+    const normalizedPath = msys2ToWindowsPath(pathParam);
+    const isOutside = (() => {
+      if (normalizedPath.startsWith('~')) return true;
+      if (!isAbsolute(normalizedPath)) return false;
+      try {
+        return !isPathInsideWorkspace(workspace, normalizedPath);
+      } catch {
+        return true;
+      }
+    })();
+    if (isOutside) {
+      // 展示归一化后的路径，与 write 分支摘要口径一致（非 Windows 平台两者相同）。
+      // Show the normalized path, consistent with the write branch summaries
+      // (identical to the raw path off Windows).
+      const label =
+        toolName === 'read_file'
+          ? `Read external file: ${normalizedPath}`
+          : toolName === 'search_content'
+            ? `Search content in external path: ${normalizedPath}`
+            : `Search files in external path: ${normalizedPath}`;
+      if (effectiveMode === 'full_access') {
+        return allow({
+          risk: 'read',
+          effects: { externalRead: true },
+          reason: 'full_access is enabled for this thread.',
+          userVisibleSummary: label,
+          expectedEffects: ['Reads files outside the workspace boundary'],
+          grantUsed: 'full_access',
+        });
+      }
+      return requireApproval({
+        risk: 'read',
+        effects: { externalRead: true },
+        reason: 'This tool reads files outside the workspace.',
+        userVisibleSummary: label,
+        expectedEffects: ['Reads files outside the workspace boundary'],
+      });
+    }
     return allow({
       risk: 'read',
       reason: 'Read-only workspace inspection.',
@@ -400,17 +458,6 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // Skill — 只读指令加载到对话上下文
-  // Skill — loads read-only instructions into conversation context
-  if (toolName === 'Skill') {
-    return allow({
-      risk: 'read',
-      reason: 'Skill invocation loads read-only instructions into conversation context.',
-      userVisibleSummary: `Load skill: ${String(toolArgs.skill ?? '?')}`,
-      expectedEffects: ['Loads skill instructions into conversation context', 'No side effects'],
-    });
-  }
-
   // shell_execute — 按命令内容分类
   // shell_execute — classify by command content
   if (toolName === 'shell_execute') {
@@ -437,6 +484,14 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
           userVisibleSummary: `Rejected destructive rm targeting critical system paths: ${command}`,
           expectedEffects: ['No command will be executed'],
         });
+      }
+      const phaseDenial = denyForPlanningPhase({
+        toolName,
+        phase,
+        fallbackRisk: 'write_file',
+      });
+      if (phaseDenial) {
+        return phaseDenial;
       }
       // Non-critical rm -rf: downgrade to write_file; mode policy handles approval
       return requireApproval({
@@ -522,15 +577,17 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
   // write_file / edit_file — 修改文件（工作区内外分别处理）
   // write_file / edit_file — modify files (handle internal vs external paths)
   if (toolName === 'write_file' || toolName === 'edit_file') {
-    const path = String(toolArgs.path ?? '<unknown>');
+    const rawPath = String(toolArgs.path ?? '<unknown>');
+    // 与只读分支一致：先做 MSYS2 归一化再判断外部性（非 Windows 平台透传）。
+    // Same as the read branch: normalize MSYS2 paths before the external check.
+    const path = msys2ToWindowsPath(rawPath);
     // 绝对路径可能指向工作区内部——解析后再判断外部性
     // Absolute path may resolve inside workspace — check after resolution
     const isOutside = (() => {
       if (path.startsWith('~')) return true;
       if (!isAbsolute(path)) return false;
       try {
-        const rel = relative(resolve(workspace), resolve(path));
-        return rel.startsWith('..') || isAbsolute(rel);
+        return !isPathInsideWorkspace(workspace, path);
       } catch {
         return true; // 解析失败，保守视为外部路径
       }
@@ -580,12 +637,73 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     });
   }
 
-  // 未知工具 — 拒绝
-  // Unknown tool — deny
-  return deny({
-    risk: 'unknown',
-    reason: `Unknown tool: ${toolName}`,
-    userVisibleSummary: `Rejected unknown tool: ${toolName}`,
-    expectedEffects: ['No tool will be executed'],
-  });
+  // Generic fallback — derive policy from Registry-sourced effectClass instead
+  // of a hand-written tool-name matrix.  Only tools with explicit security
+  // boundaries (web_fetch URL checks, shell command classifiers, file external-path
+  // guards, MCP binding validation) need dedicated branches above.
+  switch (capability.effectClass) {
+    case 'read_only':
+      return allow({
+        risk: 'read',
+        reason: `Registry classifies ${toolName} as read-only.`,
+        userVisibleSummary: `Run ${toolName}`,
+        expectedEffects: ['Reads data without mutating workspace or external state'],
+      });
+    case 'plan_only':
+      return allow({
+        risk: 'plan',
+        reason: `Registry classifies ${toolName} as plan-only.`,
+        userVisibleSummary: `Run ${toolName}`,
+        expectedEffects: ['Updates runtime state only'],
+      });
+    case 'workspace_write':
+      if (phase === 'planning') {
+        return deny({
+          risk: 'write_file',
+          reason: `planning phase rejects workspace writes (${toolName}).`,
+          userVisibleSummary: `Rejected ${toolName} during planning phase.`,
+          expectedEffects: ['No workspace files will be modified'],
+          phaseConstraint: 'planning',
+        });
+      }
+      if (effectiveMode === 'full_access') {
+        return allow({
+          risk: 'write_file',
+          reason: 'full_access is enabled for this thread.',
+          userVisibleSummary: `Modify workspace via ${toolName}`,
+          expectedEffects: ['Modifies workspace files'],
+          grantUsed: 'full_access',
+        });
+      }
+      return requireApproval({
+        risk: 'write_file',
+        reason: `${toolName} modifies workspace files.`,
+        userVisibleSummary: `Modify workspace via ${toolName}`,
+        expectedEffects: ['Modifies workspace files'],
+      });
+    case 'external_side_effect':
+      if (phase === 'planning') {
+        return deny({
+          risk: 'unknown',
+          reason: `planning phase rejects external side effects (${toolName}).`,
+          userVisibleSummary: `Rejected ${toolName} during planning phase.`,
+          expectedEffects: ['No external side effects from planning'],
+          phaseConstraint: 'planning',
+        });
+      }
+      return requireApproval({
+        risk: 'unknown',
+        effects: { uncertainEffects: true },
+        reason: `${toolName} may have external side effects.`,
+        userVisibleSummary: `Run ${toolName}`,
+        expectedEffects: ['May have external side effects'],
+      });
+    default:
+      return deny({
+        risk: 'unknown',
+        reason: `Unknown tool: ${toolName}`,
+        userVisibleSummary: `Rejected unknown tool: ${toolName}`,
+        expectedEffects: ['No tool will be executed'],
+      });
+  }
 }

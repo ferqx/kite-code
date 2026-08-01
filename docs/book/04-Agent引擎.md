@@ -20,9 +20,9 @@ RuntimeState
 | `runtime/kernel.ts` | Effect lease、事件提交、状态权威 |
 | `runtime/scheduler.ts` | 根据 State 决定下一 Effect |
 | `runtime/reducer.ts` | 将 Event 归纳为新 State |
-| `runtime/executor.ts` | 把 Effect 路由到模型、工具、验证或交互边界 |
+| `runtime/executor.ts` | 把 Effect 路由到模型、工具、验证或交互边界；持有 RuntimeStore 引用，供工具写入前记录文件原像（ADR-0025 §4） |
 | `runtime/runner.ts` | 驱动 Kernel 直至暂停或完成 |
-| `runtime/store.ts` | 事件、快照与恢复点 |
+| `runtime/store.ts` | 事件、快照、恢复点与文件原像 |
 
 ## 4.2 模型边界
 
@@ -47,8 +47,45 @@ Plan mode 与普通执行共享同一个 Kernel，只通过策略和可用工具
 Scheduler 只有在没有待执行工具、审批、Provider Action、恢复动作或 required verification 门禁时才可 `emit_final`。失败根据分类进入重试、repair、replan、用户决策或终止；关闭 feature flag 不能绕过已持久化的安全门禁。
 
 MCP Provider Action 是持久化交互。旧 Tool Call 必须先失败并退出调度，Runtime 才向 App shell 请求固定的 login、approve 或 retry。恢复成功会开始新 turn，旧 binding、approval、参数和 invocation 都不重放；延后或失败也会形成明确事实并清除交互。
+工具失败与紧随其后的 Provider Action 使用同一有序 event batch 提交，确保 Kernel 不会在
+Tool Call 仍为 running 时拒绝或提前展示恢复交互。
 
 新 run 还会在第一次模型调用前执行 required Provider 准入。ready/degraded 可继续，其余 Provider 逐个等待 retry、当前 session waiver 或 cancel。Waiver 是持久事实但不会恢复能力可见性；cancel 会取消任务并中止 turn。
+
+启用 `resourceBudgetV1` 的新 run 在所有 Runtime invocation 前执行累计预算 admission。
+reservation 与 FIFO waiter 先持久化，`dispatch_started` 落盘后才允许 Controller 调用模型、
+工具、MCP、Skill/Sub-agent、Verification 或 compaction；terminal fact 与实际 usage 原子
+reconcile。Shell 同时取得 tool/shell 两类 permit，不会部分占位。累计耗尽、并发等待超时和
+未知外部结果分别保留不同终态，不会投影为普通完成。
+
+Subagent child tool/shell 也使用同一 durable FIFO admission，而不是 parent task 内的私有计数器。
+child waiter promotion 与 reservation 原子提交，wait deadline/Abort 有界收敛；child saturation
+穿透 Task 执行链并由同一 terminal adapter 生成 `run.error + turn.aborted`。迟到 child usage 只能
+经 resource-only reconciliation 写入，不能携带工具终态或恢复调度。
+
+Runtime schema v19 的终态使用 `RunTerminalOutcomeV1`。展示层读取 reason code、external
+effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
+`status=completed` 可进入完成展示。
+
+统一失败矩阵由 `resolveFailureModeV1()` 解析。它为 sandbox/network/worktree、model/MCP、
+persistence、预算与并发、process-tree、compaction/Verification、可选诊断和 rollout 返回同一
+组 disposition、invocation 数、durable/external-effects 状态、reason、恢复入口与 fallback。
+预算准入和 run deadline 直接消费该结果；suite 将其 terminal 结果通过 Core recovery、CLI 与
+TUI 的同一 `RunTerminalOutcomeV1` 投影复测。其他 producer 需要显式接线或等价入口 contract
+test 后才能声明 coverage。展示层和各入口不能用本地错误字符串发明更宽松 fallback；缺少
+external-effect 证据时结果为 `unknown`，未 reconciliation 时不能继续。process-tree 超限且清理有明确
+正向证据时仍以 `budget_exhausted` 状态结束，稳定 reason 保留
+`process_limit_exceeded`，清理未确认则为 `cancel_incomplete`/unknown。
+
+Runtime schema v20 保留上述终态，并把每个网络 hop 的 allow/deny admission receipt 持久化到
+对应 Tool Call。获准 socket 只有在 receipt event 提交成功后才能打开；恢复 v19 snapshot 时
+不会为历史调用补造网络决定。
+
+Runtime schema v21 继续保留这些网络事实，并把远程 HTTP MCP 的独立内容外发决定以
+`mcp.egress_decided` 追加到对应 Tool Call。许可只绑定一次 invocation 的 Server/endpoint/Tool/
+最终参数 digest，nonce digest 由 Runtime Store 与 receipt 同事务唯一 claim，进程重启后仍不能
+重放；持久化唯一冲突会转换并保存为 `permit_replayed`，流式持久化异常会 reject 调用方而不会
+让执行循环挂起。恢复 v20 snapshot 不补造历史外发决定。
 
 ## 4.5 上下文与缓存
 

@@ -11,6 +11,12 @@
 
 Runtime 只接收由 `DefaultMcpSupervisor` 生成的 `McpRuntimeProvider` façade，不依赖 Supervisor control API、内部连接对象或 TUI controller。Runtime 能读取 capability snapshot、脱敏 provider/resource directory，并通过 revision-bearing `callCapability` 调用；它不能调用 reload、retry、login 或配置 mutation。TUI 只接收 `McpController` 和不可变 `McpControlSnapshot`。`McpConnectionManager` 不实现 Runtime provider、不从公共 MCP barrel 导出，其状态读取只供 Core control-plane 组合使用。
 
+Runtime façade 还可按 capability 查询脱敏 route identity：只包含 stdio/HTTP transport、Server
+identity、endpoint revision 和 Tool revision，不包含 URL、header 或 credential。Control snapshot
+为每个 Server 投影 `contentEgress`：HTTP 的非空参数最低为 `confidential` 且要求独立单次许可，
+stdio 不进入 remote HTTP 内容门禁。该字段是只读状态，不提供在项目配置或 TUI 中降低分类的
+mutation。
+
 ## 生命周期与 generation
 
 - `disconnect(name)` 用于删除或禁用时先撤销 capability；reconnect 的 transport replacement 会保留最后成功 descriptor；

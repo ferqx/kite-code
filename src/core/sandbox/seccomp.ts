@@ -1,6 +1,5 @@
 import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { getSandboxRuntimeDir } from './shell-wrapper';
 
 /**
  * 定位 vendored apply-seccomp 二进制
@@ -38,7 +37,11 @@ export function findApplySeccomp(): string | null {
  * bwrap only bind-mounts system paths and the workspace — everything else is invisible.
  * If the binary is outside the workspace, copy it into the sandbox runtime dir.
  */
-export function resolveSeccompPath(binary: string | null, workspace: string): string | null {
+export function resolveSeccompPath(
+  binary: string | null,
+  workspace: string,
+  runtimeDir: string,
+): string | null {
   if (!binary) return null;
 
   const rel = relative(workspace, binary);
@@ -46,7 +49,6 @@ export function resolveSeccompPath(binary: string | null, workspace: string): st
   if (!rel.startsWith('..') && !rel.startsWith(sep)) return binary;
 
   // 二进制在工作区外，复制到沙箱运行时目录
-  const runtimeDir = getSandboxRuntimeDir();
   const dest = join(runtimeDir, 'apply-seccomp');
   if (!existsSync(dest)) {
     mkdirSync(runtimeDir, { recursive: true });

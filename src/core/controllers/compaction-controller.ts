@@ -1,3 +1,4 @@
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { CompactionReporter } from '@/core/model/compaction-metrics';
 import { ContextCompactionValidationError } from '@/core/model/compaction-summary';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
@@ -175,6 +176,7 @@ export async function executeContextCompaction(input: {
       },
     ];
   } catch (error) {
+    if (error instanceof ProviderDataAdmissionError) throw error;
     if (error instanceof ContextCompactionValidationError) {
       return failure(
         pending,

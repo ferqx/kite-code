@@ -2,7 +2,7 @@
  * PTY System Test — Sub-agent External Write Approval
  *
  * Verifies that when a sub-agent attempts to write a file outside the workspace
- * (absolute path), the approval flow is triggered correctly:
+ * (an absolute path outside the workspace), the approval flow is triggered correctly:
  *   1. Main agent spawns a code sub-agent via the task tool
  *   2. Sub-agent attempts write_file with an absolute path
  *   3. Approval dialog appears for the external write
@@ -15,30 +15,34 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { submitUserMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Sub-agent External Write Approval', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
+    externalFile = join(workspace.home, 'external-subagent-write.txt');
 
     // Response sequence:
     // #1: Main agent → dispatches a code sub-agent (task tool)
     // #2: Sub-agent → attempts write_file with absolute path (triggers approval)
     // #3: Sub-agent after approval → summary
     // #4: Main agent after sub-agent completes → final response
-    // #5-6: spare for generateSessionName / retries
     server.setResponses([
       {
         message: {
@@ -49,7 +53,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
               name: 'task',
               args: {
                 subagent_type: 'code',
-                task: 'Write a test file at /tmp/test-subagent-write.txt with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.',
+                task: `Write a test file at ${externalFile} with content "Test: sub-agent external write". Report whether the write succeeded or was blocked.`,
               },
             },
           ],
@@ -63,7 +67,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
               id: 'call_subagent_write',
               name: 'write_file',
               args: {
-                path: '/tmp/test-subagent-write.txt',
+                path: externalFile,
                 content: 'Test: sub-agent external write',
               },
             },
@@ -71,68 +75,69 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
         },
       },
       {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_subagent_write', contentIncludes: ['external-subagent-write.txt'] },
+          ],
+        },
         message: {
           content: 'The write succeeded after approval.',
         },
       },
       {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_spawn_subagent', contentIncludes: ['write succeeded'] },
+          ],
+        },
         message: {
           content: 'Sub-agent completed successfully.',
         },
       },
-      { message: { content: 'spare 1' } },
-      { message: { content: 'spare 2' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui.output(), '❯', 15000);
-    tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
-
-  test(
+  step(
     'sub-agent external write triggers approval dialog, approve → tool executes → completes',
     async () => {
       // Type the user message
-      await typeText(tui, 'Test subagent external file write authorization');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Test subagent external file write authorization', 15000);
+      await submitUserMessage(tui, server, 'Test subagent external file write authorization', {
+        timeout: 15000,
+      });
 
       // Wait for the sub-agent to start and the external write to trigger approval
-      await waitForText(() => tui.output(), 'Approve this tool call?', TIMEOUT);
+      await waitForText(() => tui.viewport(), '› 允许一次', TIMEOUT);
 
-      const beforeApprove = tui.output();
+      const beforeApprove = tui.viewport();
       const clean = stripAnsi(beforeApprove);
       console.log('  output during approval:', clean.slice(-2000));
 
       // Verify approval dialog content
-      expect(screenContains(beforeApprove, 'Approve this tool call?')).toBe(true);
-      // The approval should reference the external file path
-      expect(screenContains(beforeApprove, '/tmp/test-subagent-write.txt')).toBe(true);
+      expect(screenContains(beforeApprove, '授权执行命令')).toBe(true);
+      // The terminal truncates long absolute paths to fit the viewport. Prove
+      // the fixture target is external separately, then assert the stable file
+      // identity that remains visible in the approval card.
+      expect(externalFile.startsWith(workspace.workspace)).toBe(false);
+      expect(screenContains(beforeApprove, 'external-subagent-write')).toBe(true);
+      expect(existsSync(externalFile)).toBe(false);
 
-      // Approve the tool (default "Yes · 仅本次" at index 0, press Enter)
+      // Approve the tool (default "允许一次" at index 0, press Enter)
       tui.write('\r');
-      await sleep(3000);
 
       // After approval, the sub-agent should continue and complete
-      await waitForText(() => tui.output(), 'Sub-agent completed successfully.', TIMEOUT);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Sub-agent completed successfully.',
+        TIMEOUT,
+      );
 
-      const afterApprove = tui.output();
+      const afterApprove = tui.viewport();
       const clean2 = stripAnsi(afterApprove);
       console.log('  output after approval (last 2000 chars):', clean2.slice(-2000));
 
@@ -145,19 +150,16 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     TIMEOUT,
   );
 
-  test(
+  step(
     'external file was actually written after approval',
     async () => {
-      // The file at /tmp/test-subagent-write.txt should exist
-      // after the approval allowed the write to proceed
-      const externalFile = '/tmp/test-subagent-write.txt';
-      if (existsSync(externalFile)) {
-        const content = readFileSync(externalFile, 'utf8');
-        expect(content).toContain('Test: sub-agent external write');
-      }
+      expect(existsSync(externalFile)).toBe(true);
+      const content = readFileSync(externalFile, 'utf8');
+      expect(content).toContain('Test: sub-agent external write');
     },
     TIMEOUT,
   );
+  test('runs the complete external-write approval journey', () => journey.run());
 });
 
 describe('TUI PTY System — Sub-agent Read File Flow', () => {
@@ -205,53 +207,59 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
         },
       },
       {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_subagent_read', contentIncludes: ['hello from workspace'] },
+          ],
+        },
         message: { content: 'File content: hello from workspace.' },
       },
       {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_spawn_reader', contentIncludes: ['hello from workspace'] },
+          ],
+        },
         message: { content: 'Sub-agent read completed successfully.' },
       },
-      { message: { content: 'spare 1' } },
-      { message: { content: 'spare 2' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
-    tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'sub-agent read_file with absolute path inside workspace succeeds without approval',
     async () => {
-      await typeText(tui, 'Read data.txt');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Read data.txt', 15000);
+      await submitUserMessage(tui, server, 'Read data.txt', { timeout: 15000 });
 
       // Wait for sub-agent to complete — read should NOT trigger approval
-      await waitForText(() => tui.output(), 'Sub-agent read completed successfully.', TIMEOUT);
+      try {
+        await waitForText(
+          () => tui.outputSinceLastAction(),
+          'Sub-agent read completed successfully.',
+          TIMEOUT - 5000,
+        );
+      } catch (error) {
+        console.log('  output after read timeout:', stripAnsi(tui.viewport()).slice(-4000));
+        console.log(
+          '  model requests after read timeout:',
+          server.getRequests().map((request) => request.messages.at(-1)),
+        );
+        throw error;
+      }
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after read:', clean.slice(-2000));
 
       // Sub-agent should have completed without cancellation
       expect(screenContains(output, 'Sub-agent read completed successfully.')).toBe(true);
       // No approval dialog should have appeared
-      expect(screenContains(output, 'Approve this tool call?')).toBe(false);
+      expect(screenContains(output, '授权执行命令')).toBe(false);
       // TUI prompt should be visible
       expect(screenContains(output, '❯')).toBe(true);
     },

@@ -5,92 +5,75 @@
  * arrow-key navigation works, and switching between sessions correctly
  * replays session content. Also verifies session-to-session isolation
  * (each session displays its own content after switching).
- *
- * IMPORTANT: Follows the same warmup pattern as other PTY system tests.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
+import {
+  submitCommand,
+  submitCurrentInput,
+  submitUserMessage,
+  typeText,
+} from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import {
+  screenContains,
+  screenHasSessionRow,
+  stripAnsi,
+  waitForCondition,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
+import {
+  createTestWorkspace,
+  observePersistedSessionIds,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Session Switching', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let sessionIdsBeforeNew: string[] = [];
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Response queue layout (critical ordering):
-    // [0]       → main response for session 1 ("Message in session 1")
-    // [1-N]     → all "Session 2 response"
-    //
-    // generateSessionName for session 1 is fire-and-forget. It may or may not
-    // consume a slot (depending on whether its model call starts before /new
-    // switches the active threadId). To handle both cases, idx 1+ must all
-    // contain "Session 2 response" so session 2 always gets the right content.
+    // One deterministic model request per user turn. Session naming is local
+    // string normalization and must never consume provider responses.
     server.setResponses([
       { message: { content: 'Session 1 response' }, delay: 50 },
       { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Send Message in Session 1 ──
 
-  test(
+  step(
     'send message in session 1 → model responds',
     async () => {
-      await typeText(tui, 'Message in session 1');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Message in session 1', 15000);
+      await submitUserMessage(tui, server, 'Message in session 1', { timeout: 15000 });
 
       // Wait for the mock model response
-      await waitForText(() => tui.output(), 'Session 1 response', 15000);
+      await waitForText(() => tui.viewport(), 'Session 1 response', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Message in session 1')).toBe(true);
       expect(screenContains(output, 'Session 1 response')).toBe(true);
       // Prompt should still be visible
@@ -104,47 +87,58 @@ describe('TUI PTY System — Session Switching', () => {
   // IMPORTANT: /new is ignored when the current session has no user
   // messages yet, so we must send a message in session 1 first (done above).
   // After /new, the InputLine remounts (key changes via activeSessionId),
-  // requiring a mini-warmup before the first model call in the new session.
+  // requiring a fresh receipt-confirmed input after the remount.
 
-  test(
+  step(
     '/new creates session 2, TUI remains responsive',
     async () => {
-      await typeText(tui, '/new');
-      tui.write('\r');
-      await sleep(1500);
+      await waitForCondition(
+        () => {
+          const observation = observePersistedSessionIds(workspace);
+          return observation.status === 'ready' && observation.value.length === 1;
+        },
+        'Runtime Store to persist session 1 before /new',
+        10_000,
+      );
+      sessionIdsBeforeNew = requirePersistedRuntimeReady(observePersistedSessionIds(workspace));
+      await submitCommand(tui, '/new');
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      const output = tui.output();
+      const output = tui.viewport();
       console.log('  output after /new:', stripAnsi(output).slice(-500));
 
       // Prompt should still be visible (TUI alive and in new session)
       expect(screenContains(output, '❯')).toBe(true);
-
-      // Mini-warmup: Ink's useFocus re-initializes setRawMode, so we need
-      // to type-and-clear before the first model call in the new session.
-      const warmupText = 'w';
-      await typeText(tui, warmupText, 80);
-      await sleep(400);
-      await clearInput(tui, warmupText.length);
-      await sleep(300);
-      tui.write('\r'); // empty Enter in new session
-      await sleep(500);
+      expect(screenContains(output, 'Message in session 1')).toBe(false);
+      expect(screenContains(output, 'Session 1 response')).toBe(false);
     },
     TIMEOUT,
   );
 
   // ── Send Message in Session 2 ──
 
-  test(
+  step(
     'send message in session 2 → model responds',
     async () => {
-      await typeText(tui, 'Message in session 2');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Message in session 2', 15000);
+      await submitUserMessage(tui, server, 'Message in session 2', { timeout: 15000 });
 
       // Wait for the second model response
-      await waitForText(() => tui.output(), 'Session 2 response', 15000);
+      await waitForText(() => tui.viewport(), 'Session 2 response', 15000);
+      await waitForCondition(
+        () => {
+          const observation = observePersistedSessionIds(workspace);
+          if (observation.status !== 'ready') return false;
+          const current = observation.value;
+          return (
+            current.length === sessionIdsBeforeNew.length + 1 &&
+            sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
+          );
+        },
+        'Runtime Store to persist the distinct session created by /new',
+        10_000,
+      );
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'Message in session 2')).toBe(true);
       expect(screenContains(output, 'Session 2 response')).toBe(true);
       // Prompt should still be visible
@@ -153,24 +147,36 @@ describe('TUI PTY System — Session Switching', () => {
     TIMEOUT,
   );
 
-  // ── Open /sessions, navigate to session 1, switch ──
-  //
-  // Session list is sorted by updated_at DESC. After creating session 2
-  // and sending its message, session 2 is the most recent (index 0).
-  // Session 1 is at index 1. We press Down once to select it.
+  // ── Open /sessions, filter to session 1, switch ──
 
-  test(
-    'open /sessions, navigate with arrow keys, switch to session 1',
+  step(
+    'open /sessions, filter and switch to session 1',
     async () => {
       // Open SessionSelector
-      await typeText(tui, '/sessions');
-      tui.write('\r');
-      await sleep(500);
+      await submitCommand(tui, '/sessions');
 
-      // Verify SessionSelector panel is visible
-      await waitForText(() => tui.output(), '搜索', 10000);
+      // The selector chrome renders before its asynchronous session query can
+      // populate every row. Wait for the complete user-visible list state.
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '会话列表') &&
+            screenContains(viewport, '搜索') &&
+            screenContains(viewport, '导航') &&
+            screenHasSessionRow(viewport, 'Message in session 1', { active: false }) &&
+            screenHasSessionRow(viewport, 'Message in session 2', {
+              selected: true,
+              active: true,
+            }) &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session selector to load both persisted sessions',
+        10_000,
+      );
 
-      let output = tui.output();
+      let output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after /sessions:', clean.slice(-500));
 
@@ -179,40 +185,52 @@ describe('TUI PTY System — Session Switching', () => {
       expect(screenContains(output, '搜索')).toBe(true);
       expect(screenContains(output, '导航')).toBe(true);
 
-      // Session names in the list come from generateSessionName (if the
-      // fire-and-forget call completed) or from the first user message.
-      // Both patterns are predictable given our mock responses.
-      // Verify at least one recognizable session-pattern text appears in
-      // the output (the list renders both sessions with their names).
-      const hasSession1Id =
-        screenContains(output, 'Session 1 response') ||
-        screenContains(output, 'Message in session 1');
-      const hasSession2Id =
-        screenContains(output, 'Session 2 response') ||
-        screenContains(output, 'Message in session 2');
-      expect(hasSession1Id).toBe(true);
-      expect(hasSession2Id).toBe(true);
-
-      // Navigate Down once to select session 1 (from index 0 → index 1)
-      console.log('  pressing Down arrow to select session 1...');
-      tui.write('\x1b[B');
-      await sleep(300);
+      // Filter to one stable target instead of depending on timestamp order.
+      await typeText(tui, 'session 1');
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Message in session 1', {
+              selected: true,
+              active: false,
+            }) &&
+            !screenHasSessionRow(viewport, 'Message in session 2') &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session 1 filter results to replace the unfiltered selector rows',
+        10_000,
+      );
 
       // Press Enter to switch to session 1
       console.log('  pressing Enter to switch...');
-      tui.write('\r');
-      await sleep(800);
+      await submitCurrentInput(tui);
 
       // Wait for session 1 content to be replayed after switch.
       // The TUI loads and replays the session blocks into the OutputArea.
-      await waitForText(() => tui.output(), 'Message in session 1', 15000);
-
-      output = tui.output();
-      console.log('  output after switch to session 1:', stripAnsi(output).slice(-500));
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, 'Message in session 1') &&
+            screenContains(viewport, 'Session 1 response') &&
+            !screenContains(viewport, 'Message in session 2') &&
+            !screenContains(viewport, 'Session 2 response') &&
+            screenContains(viewport, '❯')
+          );
+        },
+        'session 1 replay to replace session 2 in the viewport',
+        15000,
+      );
+      output = tui.viewport();
+      console.log('  viewport after switch to session 1:', output.slice(-500));
 
       // After switching, session 1 content must be visible (replayed)
       expect(screenContains(output, 'Message in session 1')).toBe(true);
       expect(screenContains(output, 'Session 1 response')).toBe(true);
+      expect(screenContains(output, 'Message in session 2')).toBe(false);
+      expect(screenContains(output, 'Session 2 response')).toBe(false);
 
       // TUI must remain responsive with prompt visible
       expect(screenContains(output, '❯')).toBe(true);
@@ -222,57 +240,85 @@ describe('TUI PTY System — Session Switching', () => {
 
   // ── Switch back to session 2 (session isolation) ──
   //
-  // NOTE: <Static> content from old sessions persists in the terminal
-  // scrollback and cannot be cleared. Verifying that session 1 content
-  // is "invisible" after switching to session 2 is not achievable in PTY
-  // E2E tests because `screenContains` searches the entire accumulated
-  // output, including Static scrollback from previous renders.
-  //
-  // Isolation is verified by confirming that each session correctly
-  // replays its own content after switching — session 1 shows its
-  // messages, session 2 shows its messages. Both sessions are
-  // independently functional.
+  // The viewport is authoritative for session isolation. Raw PTY history is
+  // retained only for diagnostics and must not satisfy these assertions.
 
-  test(
+  step(
     'switch back to session 2 — correct content replayed',
     async () => {
       // Open SessionSelector again
-      await typeText(tui, '/sessions');
-      tui.write('\r');
-      await sleep(500);
+      await submitCommand(tui, '/sessions');
 
-      // Verify SessionSelector panel is open
-      await waitForText(() => tui.output(), '搜索', 10000);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '会话列表') &&
+            screenContains(viewport, '搜索') &&
+            screenHasSessionRow(viewport, 'Message in session 1', { active: true }) &&
+            screenHasSessionRow(viewport, 'Message in session 2', {
+              selected: true,
+              active: false,
+            }) &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session selector to reload both persisted sessions',
+        10_000,
+      );
 
-      let output = tui.output();
+      let output = tui.viewport();
       console.log('  output after second /sessions:', stripAnsi(output).slice(-500));
 
-      // Session 2 should be at index 0 (most recently updated by checkpoint
-      // timestamp). Session 1 is the currently active session, so session 2
-      // is not active → pressing Enter will switch to it.
-      // Press Down then Up to demonstrate arrow key navigation, then Enter.
-      tui.write('\x1b[B');
-      await sleep(200);
-      tui.write('\x1b[A');
-      await sleep(200);
+      // Filter to one stable target instead of depending on timestamp order.
+      await typeText(tui, 'session 2');
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Message in session 2', {
+              selected: true,
+              active: false,
+            }) &&
+            !screenHasSessionRow(viewport, 'Message in session 1') &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session 2 filter results to replace the unfiltered selector rows',
+        10_000,
+      );
 
       console.log('  pressing Enter to switch to session 2...');
-      tui.write('\r');
-      await sleep(800);
+      await submitCurrentInput(tui);
 
       // Wait for session 2 content to be replayed
-      await waitForText(() => tui.output(), 'Message in session 2', 15000);
-
-      output = tui.output();
-      console.log('  output after switch to session 2:', stripAnsi(output).slice(-500));
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, 'Message in session 2') &&
+            screenContains(viewport, 'Session 2 response') &&
+            !screenContains(viewport, 'Message in session 1') &&
+            !screenContains(viewport, 'Session 1 response') &&
+            screenContains(viewport, '❯')
+          );
+        },
+        'session 2 replay to replace session 1 in the viewport',
+        15000,
+      );
+      output = tui.viewport();
+      console.log('  viewport after switch to session 2:', output.slice(-500));
 
       // Session 2 content must be visible (replayed correctly)
       expect(screenContains(output, 'Message in session 2')).toBe(true);
       expect(screenContains(output, 'Session 2 response')).toBe(true);
+      expect(screenContains(output, 'Message in session 1')).toBe(false);
+      expect(screenContains(output, 'Session 1 response')).toBe(false);
 
       // TUI must remain responsive with prompt visible
       expect(screenContains(output, '❯')).toBe(true);
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run());
 });

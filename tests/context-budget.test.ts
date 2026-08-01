@@ -60,6 +60,7 @@ describe('full request context estimator', () => {
       maxOutputTokens: 2_000,
       supportsUsageMetadata: false,
       supportsPromptCache: false,
+      streaming: false,
     };
     const makeEstimate = (totalInputTokens: number) => ({
       systemTokens: totalInputTokens,
@@ -106,6 +107,7 @@ describe('full request context estimator', () => {
         modelName: 'unknown',
         supportsUsageMetadata: false,
         supportsPromptCache: false,
+        streaming: false,
       },
     });
     expect(result.status).toBe('unknown');

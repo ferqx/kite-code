@@ -14,19 +14,44 @@ import { startTestHttpServer } from '../../helpers/test-http-server';
 export interface MockResponse {
   message?: {
     content?: string;
+    /** Optional SSE chunks; joined for non-streaming responses. */
+    content_chunks?: string[];
     /** 推理/思考内容（DeepSeek reasoning_content），生成 reason block */
     reasoning_content?: string;
+    /** Optional DeepSeek reasoning SSE chunks; joined for non-streaming responses. */
+    reasoning_chunks?: string[];
     tool_calls?: Array<{ id: string; name: string; args: Record<string, unknown> }>;
     /** 无效工具调用：args 为原始 JSON 字符串（可包含格式错误），模拟模型输出非法 JSON 的场景 */
     invalid_tool_calls?: Array<{ id: string; name: string; args: string }>;
   };
   delay?: number;
+  /** Delay between SSE frames, used to assert progressive rendering. */
+  chunk_delay?: number;
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number };
+  /** Inject an invalid JSON SSE data frame. */
+  malformed_sse?: boolean;
+  /** Emit a provider connection error after content frames, before the terminal frame. */
+  disconnect_after_content?: boolean;
   error?: string;
+  /**
+   * Tool calls remain pending until a matching tool-result request arrives.
+   * Mark only intentionally aborted turns (deny/Escape) as `aborted`;
+   * otherwise teardown fails closed.
+   */
+  toolContinuation?: 'required' | 'aborted';
+  /** Preconditions for the request that is about to consume this response. */
+  expectedRequest?: {
+    toolResults?: Array<{
+      toolCallId: string;
+      contentIncludes?: string[];
+      contentExcludes?: string[];
+    }>;
+  };
 }
 
 export interface MockChatRequest {
   body: Record<string, unknown>;
-  messages: Array<{ role?: string; content?: unknown }>;
+  messages: Array<{ role?: string; content?: unknown; tool_call_id?: string }>;
 }
 
 export interface MockModelServer {
@@ -40,8 +65,14 @@ export interface MockModelServer {
   getRequestCount(): number;
   /** Full request bodies received by /v1/chat/completions */
   getRequests(): MockChatRequest[];
-  /** Whether any chat request includes the provided text in any message content */
-  hasRequestMessage(text: string): boolean;
+  /** Whether the first request after since contains this exact user message. */
+  hasRequestMessage(text: string, since: number): boolean;
+  /** Configure the local /v1/models response used by first-run scenarios. */
+  setModelsResponse(response: { status?: number; delay?: number; models?: string[] }): void;
+  /** GET URLs received by the local model-discovery fixture. */
+  getModelRequests(): string[];
+  /** Fail when requests exceeded the queue or configured responses remain unused. */
+  assertComplete(): void;
   /** Stop the server */
   stop(): void;
 }
@@ -58,19 +89,40 @@ export interface MockModelServer {
  */
 export function createMockModelServer(): MockModelServer {
   let responses: MockResponse[] = [];
+  let responseCursor = 0;
   let callCount = 0;
-  let requests: MockChatRequest[] = [];
+  const requests: MockChatRequest[] = [];
+  const modelRequests: string[] = [];
+  const unexpectedRequests: number[] = [];
+  const contractViolations: string[] = [];
+  const pendingToolContinuations = new Map<string, number>();
+  let modelsResponse: { status: number; delay: number; models: string[] } = {
+    status: 200,
+    delay: 0,
+    models: ['mock-model'],
+  };
 
   const server = startTestHttpServer({
     async fetch(req) {
       const url = new URL(req.url);
+      if (req.method === 'GET') modelRequests.push(url.href);
 
       // ── GET /v1/models ──
       if (req.method === 'GET' && url.pathname === '/v1/models') {
+        const response = { ...modelsResponse, models: [...modelsResponse.models] };
+        if (response.delay > 0) {
+          await new Promise((resolve) => setTimeout(resolve, response.delay));
+        }
+        if (response.status < 200 || response.status >= 300) {
+          return new Response(JSON.stringify({ error: { message: 'model list rejected' } }), {
+            status: response.status,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
         return new Response(
           JSON.stringify({
             object: 'list',
-            data: [{ id: 'mock-model', object: 'model', owned_by: 'test' }],
+            data: response.models.map((id) => ({ id, object: 'model', owned_by: 'test' })),
           }),
           { headers: { 'content-type': 'application/json' } },
         );
@@ -82,23 +134,92 @@ export function createMockModelServer(): MockModelServer {
         const bodyRecord =
           body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
         const messages = Array.isArray(bodyRecord.messages)
-          ? (bodyRecord.messages as Array<{ role?: string; content?: unknown }>)
+          ? (bodyRecord.messages as Array<{
+              role?: string;
+              content?: unknown;
+              tool_call_id?: string;
+            }>)
           : [];
         requests.push({ body: bodyRecord, messages });
         const stream = body?.stream === true;
         const idx = callCount;
         callCount++;
 
-        // Wrap around if out of responses (defensive)
-        const resp = responses[idx % responses.length || 0];
+        const resp = responses[responseCursor++];
         if (!resp) {
+          unexpectedRequests.push(idx);
           return new Response(
             JSON.stringify({
-              choices: [
-                { index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' },
-              ],
+              error: {
+                message: `Unexpected model request ${idx + 1}: response queue exhausted`,
+                type: 'test_fixture_error',
+              },
             }),
-            { headers: { 'content-type': 'application/json' } },
+            { status: 500, headers: { 'content-type': 'application/json' } },
+          );
+        }
+
+        const requestContractFailures: string[] = [];
+        const toolResultIds = new Set(
+          messages
+            .filter((message) => message.role === 'tool')
+            .map((message) => message.tool_call_id)
+            .filter((id): id is string => typeof id === 'string' && id.length > 0),
+        );
+        const resolvedPendingIds = [...toolResultIds].filter((toolCallId) =>
+          pendingToolContinuations.has(toolCallId),
+        );
+        const explicitlyCheckedIds = new Set(
+          (resp.expectedRequest?.toolResults ?? []).map((expected) => expected.toolCallId),
+        );
+        for (const toolCallId of resolvedPendingIds) {
+          if (!explicitlyCheckedIds.has(toolCallId)) {
+            requestContractFailures.push(
+              `request ${idx + 1} resolves tool result ${toolCallId} without an expectedRequest.toolResults outcome contract`,
+            );
+          }
+        }
+        for (const toolCallId of toolResultIds) {
+          pendingToolContinuations.delete(toolCallId);
+        }
+
+        for (const expected of resp.expectedRequest?.toolResults ?? []) {
+          const toolResult = messages.find(
+            (message) => message.role === 'tool' && message.tool_call_id === expected.toolCallId,
+          );
+          if (!toolResult) {
+            requestContractFailures.push(
+              `request ${idx + 1} is missing expected tool result ${expected.toolCallId}`,
+            );
+            continue;
+          }
+          const content = serializedMessageContent(toolResult.content);
+          for (const text of expected.contentIncludes ?? []) {
+            if (!content.includes(text)) {
+              requestContractFailures.push(
+                `tool result ${expected.toolCallId} in request ${idx + 1} does not include ${JSON.stringify(text)}; content=${JSON.stringify(content.slice(0, 500))}`,
+              );
+            }
+          }
+          for (const text of expected.contentExcludes ?? []) {
+            if (content.includes(text)) {
+              requestContractFailures.push(
+                `tool result ${expected.toolCallId} in request ${idx + 1} unexpectedly includes ${JSON.stringify(text)}`,
+              );
+            }
+          }
+        }
+
+        if (requestContractFailures.length > 0) {
+          contractViolations.push(...requestContractFailures);
+          return new Response(
+            JSON.stringify({
+              error: {
+                message: requestContractFailures.join('; '),
+                type: 'test_fixture_contract_error',
+              },
+            }),
+            { status: 422, headers: { 'content-type': 'application/json' } },
           );
         }
 
@@ -115,28 +236,47 @@ export function createMockModelServer(): MockModelServer {
           await new Promise((r) => setTimeout(r, resp.delay));
         }
 
-        const content = resp.message?.content ?? '';
+        const content = resp.message?.content ?? resp.message?.content_chunks?.join('') ?? '';
+        const reasoningContent =
+          resp.message?.reasoning_content ?? resp.message?.reasoning_chunks?.join('') ?? '';
         const toolCalls = resp.message?.tool_calls;
         const invalidToolCalls = resp.message?.invalid_tool_calls;
+        const emittedToolCallIds = [
+          ...(toolCalls ?? []).map((toolCall) => toolCall.id),
+          ...(invalidToolCalls ?? []).map((toolCall) => toolCall.id),
+        ];
+        if (
+          emittedToolCallIds.length > 0 &&
+          !resp.disconnect_after_content &&
+          resp.toolContinuation !== 'aborted'
+        ) {
+          for (const toolCallId of emittedToolCallIds) {
+            if (pendingToolContinuations.has(toolCallId)) {
+              contractViolations.push(
+                `response ${idx + 1} reused unresolved tool call id ${toolCallId}`,
+              );
+            }
+            pendingToolContinuations.set(toolCallId, idx + 1);
+          }
+        }
 
         if (stream) {
           // SSE streaming response
-          let sseBody = '';
+          const sseFrames: string[] = [];
           const write = (data: string) => {
-            sseBody += data;
+            sseFrames.push(data);
           };
+          if (resp.malformed_sse) write('data: {not-json}\n\n');
 
           // Send reasoning_content delta (DeepSeek-style thinking)
-          if (
-            typeof resp.message?.reasoning_content === 'string' &&
-            resp.message.reasoning_content
-          ) {
+          for (const reasoningChunk of resp.message?.reasoning_chunks ?? [reasoningContent]) {
+            if (!reasoningChunk) continue;
             write(
               `data: ${JSON.stringify({
                 choices: [
                   {
                     index: 0,
-                    delta: { role: 'assistant', reasoning_content: resp.message.reasoning_content },
+                    delta: { role: 'assistant', reasoning_content: reasoningChunk },
                     finish_reason: null,
                   },
                 ],
@@ -146,7 +286,7 @@ export function createMockModelServer(): MockModelServer {
 
           if (toolCalls && toolCalls.length > 0) {
             // Send tool calls as deltas
-            for (const tc of toolCalls) {
+            for (const [toolIndex, tc] of toolCalls.entries()) {
               write(
                 `data: ${JSON.stringify({
                   choices: [
@@ -156,7 +296,7 @@ export function createMockModelServer(): MockModelServer {
                         role: 'assistant',
                         tool_calls: [
                           {
-                            index: 0,
+                            index: toolIndex,
                             id: tc.id,
                             type: 'function',
                             function: { name: tc.name, arguments: JSON.stringify(tc.args) },
@@ -173,7 +313,7 @@ export function createMockModelServer(): MockModelServer {
 
           // Send invalid tool calls with raw (possibly malformed) args
           if (invalidToolCalls && invalidToolCalls.length > 0) {
-            for (const tc of invalidToolCalls) {
+            for (const [invalidIndex, tc] of invalidToolCalls.entries()) {
               write(
                 `data: ${JSON.stringify({
                   choices: [
@@ -183,7 +323,7 @@ export function createMockModelServer(): MockModelServer {
                         role: 'assistant',
                         tool_calls: [
                           {
-                            index: 0,
+                            index: (toolCalls?.length ?? 0) + invalidIndex,
                             id: tc.id,
                             type: 'function',
                             function: { name: tc.name, arguments: tc.args },
@@ -199,21 +339,48 @@ export function createMockModelServer(): MockModelServer {
           }
 
           // Content delta
-          write(
-            `data: ${JSON.stringify({
-              choices: [{ index: 0, delta: { content }, finish_reason: null }],
-            })}\n\n`,
-          );
+          for (const contentChunk of resp.message?.content_chunks ?? [content]) {
+            write(
+              `data: ${JSON.stringify({
+                choices: [{ index: 0, delta: { content: contentChunk }, finish_reason: null }],
+              })}\n\n`,
+            );
+          }
 
-          // Done
-          write(
-            `data: ${JSON.stringify({
-              choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-            })}\n\n`,
-          );
-          write('data: [DONE]\n\n');
+          if (resp.disconnect_after_content) {
+            write(
+              `data: ${JSON.stringify({
+                error: {
+                  message: 'socket ECONNRESET: model stream disconnected',
+                  type: 'server_error',
+                },
+              })}\n\n`,
+            );
+          } else {
+            // Done
+            write(
+              `data: ${JSON.stringify({
+                choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+                ...(resp.usage ? { usage: resp.usage } : {}),
+              })}\n\n`,
+            );
+            write('data: [DONE]\n\n');
+          }
 
-          return new Response(sseBody, {
+          const body =
+            resp.chunk_delay && resp.chunk_delay > 0
+              ? new ReadableStream<Uint8Array>({
+                  async start(controller) {
+                    const encoder = new TextEncoder();
+                    for (const frame of sseFrames) {
+                      controller.enqueue(encoder.encode(frame));
+                      await new Promise((resolve) => setTimeout(resolve, resp.chunk_delay));
+                    }
+                    controller.close();
+                  },
+                })
+              : sseFrames.join('');
+          return new Response(body, {
             headers: { 'content-type': 'text/event-stream' },
           });
         }
@@ -223,9 +390,7 @@ export function createMockModelServer(): MockModelServer {
           role: 'assistant',
           content,
         };
-        if (typeof resp.message?.reasoning_content === 'string' && resp.message.reasoning_content) {
-          message.reasoning_content = resp.message.reasoning_content;
-        }
+        if (reasoningContent) message.reasoning_content = reasoningContent;
         if (toolCalls || invalidToolCalls) {
           const allToolCalls: Array<Record<string, unknown>> = [];
           if (toolCalls) {
@@ -280,28 +445,105 @@ export function createMockModelServer(): MockModelServer {
     baseURL,
     port,
     setResponses(r: MockResponse[]) {
-      responses = r;
-      callCount = 0;
-      requests = [];
+      if (responseCursor < responses.length) {
+        throw new Error(
+          `Cannot replace mock response phase with ${responses.length - responseCursor} unconsumed response(s).`,
+        );
+      }
+      if (pendingToolContinuations.size > 0) {
+        throw new Error(
+          `Cannot replace mock response phase while tool result(s) are pending: ${formatPendingToolContinuations(pendingToolContinuations)}`,
+        );
+      }
+      responses = [...r];
+      responseCursor = 0;
     },
     getRequestCount: () => callCount,
     getRequests: () => [...requests],
-    hasRequestMessage: (text: string) =>
-      requests.some((request) =>
-        request.messages.some((message) => messageContentIncludes(message.content, text)),
-      ),
+    hasRequestMessage: (text: string, since: number) => {
+      const messages = requests[since]?.messages ?? [];
+      const expected = normalizeRequestedText(text);
+      let matched = false;
+      for (let index = 0; index < messages.length; index++) {
+        const message = messages[index];
+        if (message?.role !== 'user') continue;
+        const content = normalizedMessageContent(message.content);
+        if (!content || content.trimStart().startsWith('<runtime-state')) continue;
+        if (content === expected) {
+          matched = true;
+          continue;
+        }
+        if (matched) return false;
+      }
+      return matched;
+    },
+    setModelsResponse(response) {
+      modelsResponse = {
+        status: response.status ?? 200,
+        delay: response.delay ?? 0,
+        models: response.models ?? ['mock-model'],
+      };
+    },
+    getModelRequests: () => [...modelRequests],
+    assertComplete() {
+      const failures: string[] = [];
+      if (unexpectedRequests.length > 0) {
+        failures.push(
+          `response queue exhausted for request(s): ${unexpectedRequests
+            .map((index) => index + 1)
+            .join(', ')}`,
+        );
+      }
+      if (responseCursor < responses.length) {
+        failures.push(
+          `${responses.length - responseCursor} configured response(s) were unconsumed`,
+        );
+      }
+      if (pendingToolContinuations.size > 0) {
+        failures.push(
+          `tool result(s) are still pending: ${formatPendingToolContinuations(pendingToolContinuations)}`,
+        );
+      }
+      if (contractViolations.length > 0) {
+        failures.push(`request contract violation(s): ${contractViolations.join('; ')}`);
+      }
+      if (failures.length > 0)
+        throw new Error(`Mock model fixture incomplete: ${failures.join('; ')}`);
+    },
     stop: () => server.stop(),
   };
 }
 
-function messageContentIncludes(content: unknown, text: string): boolean {
-  if (typeof content === 'string') return content.includes(text);
+function normalizedMessageContent(content: unknown): string | undefined {
+  if (typeof content === 'string') return normalizeRequestedText(content);
   if (Array.isArray(content)) {
-    return content.some((part) => {
-      if (!part || typeof part !== 'object') return false;
-      const record = part as Record<string, unknown>;
-      return typeof record.text === 'string' && record.text.includes(text);
-    });
+    const text = content
+      .map((part) => {
+        if (!part || typeof part !== 'object') return '';
+        const record = part as Record<string, unknown>;
+        return typeof record.text === 'string' ? record.text : '';
+      })
+      .join('');
+    return normalizeRequestedText(text);
   }
-  return false;
+  return undefined;
+}
+
+function normalizeRequestedText(text: string): string {
+  return text.replaceAll('\r\n', '\n');
+}
+
+function serializedMessageContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return String(content);
+  }
+}
+
+function formatPendingToolContinuations(pending: ReadonlyMap<string, number>): string {
+  return [...pending.entries()]
+    .map(([toolCallId, responseNumber]) => `${toolCallId} (response ${responseNumber})`)
+    .join(', ');
 }

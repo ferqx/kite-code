@@ -6,7 +6,7 @@
  * These tests verify actual sandbox-exec isolation. Skipped on non-macOS platforms.
  */
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSandboxExecutor } from '../src/core/sandbox/executor';
@@ -57,6 +57,23 @@ describe('sandbox executor integration', () => {
     }
   });
 
+  test('fallback /bin/sh can read the workspace when SHELL is absent', async () => {
+    const ws = setupWorkspace();
+    const previousShell = process.env.SHELL;
+    writeFileSync(join(ws, 'fallback-readable.txt'), 'fallback-readable');
+    try {
+      delete process.env.SHELL;
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'cat fallback-readable.txt' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('fallback-readable');
+    } finally {
+      if (previousShell === undefined) delete process.env.SHELL;
+      else process.env.SHELL = previousShell;
+      cleanupWorkspace(ws);
+    }
+  });
+
   test('can write files within workspace', async () => {
     const ws = setupWorkspace();
     try {
@@ -64,6 +81,18 @@ describe('sandbox executor integration', () => {
       await executor({ workspace: ws, command: 'echo created > sandbox-test.txt' });
       const result = await executor({ workspace: ws, command: 'cat sandbox-test.txt' });
       expect(result.stdout).toContain('created');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('can execute the controlled Bun runtime without granting its root write access', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'bun --version' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout.trim()).toBe(Bun.version);
     } finally {
       cleanupWorkspace(ws);
     }
@@ -112,12 +141,8 @@ describe('sandbox executor integration', () => {
     }
   });
 
-  test('allows file read outside workspace (dev tools need system paths)', async () => {
+  test('denies file read outside workspace at the OS boundary', async () => {
     const ws = setupWorkspace();
-    // 文件读取不再被沙箱阻止，以满足 git、xcrun 等开发工具的需求
-    // 危险文件访问由 checkDangerousPaths 和工具策略兜底
-    // File reads are no longer blocked by sandbox for dev tool compatibility
-    // Dangerous file access is caught by checkDangerousPaths and tool policy
     const externalFile = join(homedir(), `.kite-code-sandbox-test-${process.pid}`);
     writeFileSync(externalFile, 'secret');
     try {
@@ -126,15 +151,102 @@ describe('sandbox executor integration', () => {
         workspace: ws,
         command: `cat "${externalFile}"`,
       });
-      expect(result.ok).toBe(true);
-      expect(result.stdout).toContain('secret');
+      expect(result.ok).toBe(false);
+      expect(result.stdout).not.toContain('secret');
     } finally {
       rmSync(externalFile, { force: true });
       cleanupWorkspace(ws);
     }
   });
 
-  test('allows file write outside workspace (authorization handled by tool-policy)', async () => {
+  test('denies broad system configuration reads', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'cat /private/etc/hosts' });
+      expect(result.ok).toBe(false);
+      expect(result.stdout).toBe('');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('uses and removes an invocation-private runtime directory', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `printf secret > "$TMPDIR/secret"; printf '%s' "$TMPDIR"`,
+      });
+      expect(result.ok).toBe(true);
+      const runtimeTmp = result.stdout;
+      expect(runtimeTmp).toContain('openpx-sandbox-runtime');
+      expect(existsSync(runtimeTmp)).toBe(false);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('concurrent invocations cannot share runtime directories', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const [first, second] = await Promise.all([
+        executor({ workspace: ws, command: `printf '%s' "$TMPDIR"; sleep 0.05` }),
+        executor({ workspace: ws, command: `printf '%s' "$TMPDIR"; sleep 0.05` }),
+      ]);
+      expect(first.ok).toBe(true);
+      expect(second.ok).toBe(true);
+      expect(first.stdout).not.toBe(second.stdout);
+      expect(existsSync(first.stdout)).toBe(false);
+      expect(existsSync(second.stdout)).toBe(false);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('hostile runtime modes are recovered without throwing or leaving residue', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command:
+          'printf %s "$TMPDIR" > runtime-path.txt; mkdir -p "$TMPDIR/nested/deeper"; printf flagged > "$TMPDIR/nested/deeper/flagged"; chflags uchg,uappnd "$TMPDIR/nested/deeper/flagged"; chmod 000 "$TMPDIR/nested/deeper"; chflags uchg,uappnd "$TMPDIR/nested/deeper"; chmod 000 "$TMPDIR/nested"; chflags uchg,uappnd "$TMPDIR/nested"; chmod 000 "$TMPDIR/.."',
+      });
+      expect(result.ok).toBe(true);
+      const runtimeTmp = await Bun.file(join(ws, 'runtime-path.txt')).text();
+      expect(existsSync(runtimeTmp)).toBe(false);
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('normal shell exit terminates background descendants before runtime cleanup returns', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command:
+          'sleep 30 </dev/null >/dev/null 2>&1 & child=$!; printf "%s\\n%s" "$child" "$TMPDIR"',
+      });
+
+      const [pidText, runtimeTmp] = result.stdout.split('\n');
+      if (!pidText || !runtimeTmp) throw new Error('Expected background PID and runtime path.');
+      const childPid = Number(pidText);
+      expect(result.ok).toBe(true);
+      expect(result.processCleanup?.confirmedExited).toBe(true);
+      expect(Number.isSafeInteger(childPid)).toBe(true);
+      expect(existsSync(runtimeTmp)).toBe(false);
+      expect(() => process.kill(childPid, 0)).toThrow();
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies file write outside workspace at the OS boundary', async () => {
     const ws = setupWorkspace();
     const externalFile = join(homedir(), `.kite-code-sandbox-test-write-${process.pid}`);
     try {
@@ -143,12 +255,94 @@ describe('sandbox executor integration', () => {
         workspace: ws,
         command: `echo hello > "${externalFile}"`,
       });
-      // 工作区外写入由 tool-policy 审批控制，沙箱不再拦截
-      // Writes outside workspace are controlled by tool-policy approval, not sandbox
-      expect(result.ok).toBe(true);
-      expect(result.exitCode).toBe(0);
+      expect(result.ok).toBe(false);
+      expect(result.exitCode).not.toBe(0);
+      expect(existsSync(externalFile)).toBe(false);
     } finally {
       rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies unlink outside workspace at the OS boundary', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.kite-code-sandbox-unlink-${process.pid}`);
+    writeFileSync(externalFile, 'keep');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: `rm "${externalFile}"` });
+      expect(result.ok).toBe(false);
+      expect(existsSync(externalFile)).toBe(true);
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies symlink escape to a file outside workspace', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.kite-code-sandbox-link-${process.pid}`);
+    writeFileSync(externalFile, 'outside-secret');
+    symlinkSync(externalFile, join(ws, 'outside-link'));
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'cat outside-link' });
+      expect(result.ok).toBe(false);
+      expect(result.stdout).not.toContain('outside-secret');
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('denies protected paths inside workspace', async () => {
+    const ws = setupWorkspace();
+    mkdirSync(join(ws, '.GIT'));
+    writeFileSync(join(ws, '.GIT', 'config'), 'protected');
+    writeFileSync(join(ws, '.ENV.TEST'), 'keep');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      // Split the literal so checkDangerousPaths cannot be the mechanism under test.
+      const read = await executor({ workspace: ws, command: 'cat .G"IT/config"' });
+      const write = await executor({ workspace: ws, command: 'echo changed > .E"NV.TEST"' });
+      expect(read.ok).toBe(false);
+      expect(read.stdout).not.toContain('protected');
+      expect(write.ok).toBe(false);
+      expect(await Bun.file(join(ws, '.ENV.TEST')).text()).toBe('keep');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('child shells inherit the same filesystem boundary', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(homedir(), `.kite-code-sandbox-child-${process.pid}`);
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `sh -c 'echo bypass > "${externalFile}"'`,
+      });
+      expect(result.ok).toBe(false);
+      expect(existsSync(externalFile)).toBe(false);
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('enforces read-only workspace scope natively', async () => {
+    const ws = setupWorkspace();
+    try {
+      const executor = createSandboxExecutor({
+        enabled: true,
+        workspace: ws,
+        filesystemScope: 'read_only',
+      });
+      const result = await executor({ workspace: ws, command: 'echo denied > read-only.txt' });
+      expect(result.ok).toBe(false);
+      expect(existsSync(join(ws, 'read-only.txt'))).toBe(false);
+    } finally {
       cleanupWorkspace(ws);
     }
   });

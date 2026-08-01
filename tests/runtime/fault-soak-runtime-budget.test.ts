@@ -1,0 +1,101 @@
+import { expect, test } from 'bun:test';
+import { appendFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { aiMessage } from '@/core/messages';
+import type { RuntimeKernelControl } from '@/core/runtime/agent';
+import { runRuntimeAgent } from '@/core/runtime/agent';
+import { assertRuntimeStateInvariants } from '@/core/runtime/invariants';
+import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
+import type { RuntimeState } from '@/core/runtime/state';
+import { readOsProcessStartIdentity } from '../../scripts/runtime/process-start-identity';
+import { createMockModel } from '../mock-model';
+
+interface FaultSoakLifecycleGlobal {
+  __KITE_FAULT_SOAK_LIFECYCLE_SEQUENCE__?: number;
+}
+
+test('fault soak publishes the actual reconciled Runtime budget ledger', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'openpx-fault-soak-budget-receipt-'));
+  let control: RuntimeKernelControl | null = null;
+  let latestState: ReturnType<RuntimeKernelControl['getState']> | undefined;
+  try {
+    for await (const _event of runRuntimeAgent(
+      {
+        task: 'Return a bounded response.',
+        threadId: `fault-soak-budget-receipt-${process.pid}`,
+        userId: 'fault-soak',
+        workspace,
+        runtimeStorePath: join(workspace, 'runtime.db'),
+        model: createMockModel([{ message: aiMessage({ content: 'done' }) }]),
+        config: {
+          providerName: 'fault-soak',
+          providerType: 'openai-compatible',
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          modelName: 'fixture',
+          features: { resourceBudgetV1: true },
+          sandbox: { enabled: false },
+        },
+        sandboxBackend: 'unknown',
+        onKernelControl: (next) => {
+          control = next;
+        },
+      },
+      {
+        requestAction: async (effect) => ({ type: 'cancel', interactionId: effect.interactionId }),
+      },
+    )) {
+      const currentControl = control as RuntimeKernelControl | null;
+      if (!currentControl) throw new Error('Runtime control surface was not installed');
+      latestState = currentControl.getState();
+      assertRuntimeStateInvariants(latestState as RuntimeState);
+    }
+
+    if (!latestState) throw new Error('Runtime did not expose a final state');
+    assertRuntimeStateInvariants(latestState as RuntimeState);
+    if (latestState.resourceBudget.status !== 'active') {
+      throw new Error('Expected an active ResourceBudgetV1 ledger');
+    }
+    const committed = committedResourceUsageV1(latestState.resourceBudget);
+    expect(latestState.resourceBudget.reconciledUsage.counters.modelRequests).toBeGreaterThan(0);
+    expect(committed.counters.modelRequests).toBeGreaterThan(0);
+
+    const telemetryFile = process.env.KITE_FAULT_SOAK_TELEMETRY_FILE;
+    if (telemetryFile) {
+      const sequence = (globalThis as FaultSoakLifecycleGlobal)
+        .__KITE_FAULT_SOAK_LIFECYCLE_SEQUENCE__;
+      if (typeof sequence !== 'number' || !Number.isInteger(sequence) || sequence <= 0) {
+        throw new Error('Fault-soak preload did not publish the current lifecycle sequence');
+      }
+      const reservationStates: Record<string, number> = {};
+      for (const reservation of Object.values(latestState.resourceBudget.reservations)) {
+        reservationStates[reservation.state] = (reservationStates[reservation.state] ?? 0) + 1;
+      }
+      appendFileSync(
+        telemetryFile,
+        `${JSON.stringify({
+          version: 2,
+          kind: 'runtime_budget_usage',
+          pid: process.pid,
+          sequence,
+          iteration: Number(process.env.KITE_FAULT_SOAK_ITERATION ?? '0'),
+          caseId: process.env.KITE_FAULT_SOAK_CASE_ID ?? 'long_runtime_replay',
+          lifecycleId:
+            process.env.KITE_FAULT_SOAK_LIFECYCLE_ID ?? 'fault-soak-runtime-budget.test.ts',
+          processStartNonce: `${process.env.KITE_FAULT_SOAK_PROCESS_NONCE ?? 'unbound'}:${process.pid}`,
+          osProcessStartIdentity: readOsProcessStartIdentity(process.pid),
+          lifecycleGroupNonce: process.env.KITE_FAULT_SOAK_LIFECYCLE_GROUP_NONCE ?? 'unbound',
+          source: 'actual_runtime_ledger',
+          reconciled: latestState.resourceBudget.reconciledUsage,
+          committed,
+          ceilings: latestState.resourceBudget.budget,
+          reservationStates,
+        })}\n`,
+        { mode: 0o600 },
+      );
+    }
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});

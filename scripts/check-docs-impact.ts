@@ -4,6 +4,7 @@ import { join } from 'node:path';
 export interface DocumentationRule {
   id: string;
   sources: string[];
+  excludeSources?: string[];
   documents: string[];
 }
 
@@ -38,8 +39,10 @@ export function evaluateDocumentationImpact(
   const changed = new Set(changedFiles.map(normalize));
   const failures: DocumentationImpactFailure[] = [];
   for (const rule of map.rules) {
-    const matchedSources = [...changed].filter((path) =>
-      rule.sources.some((pattern) => matchesDocumentationPattern(path, pattern)),
+    const matchedSources = [...changed].filter(
+      (path) =>
+        rule.sources.some((pattern) => matchesDocumentationPattern(path, pattern)) &&
+        !rule.excludeSources?.some((pattern) => matchesDocumentationPattern(path, pattern)),
     );
     if (matchedSources.length === 0) continue;
     if (rule.documents.some((document) => changed.has(normalize(document)))) continue;

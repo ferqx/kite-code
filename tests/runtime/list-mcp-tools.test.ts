@@ -80,12 +80,12 @@ function makeProvider(
 }
 
 function makeListMcpToolsRequest(args: Record<string, unknown> = {}) {
-  const parsed = toolRequestFromCall(
+  const result = toolRequestFromCall(
     { id: 'list-tools', name: 'list_mcp_tools', args },
     process.cwd(),
   );
-  if (!parsed) throw new Error('Failed to construct list_mcp_tools request.');
-  return parsed;
+  if (!result?.ok) throw new Error('Failed to construct list_mcp_tools request.');
+  return result.request;
 }
 
 // ── tests ──

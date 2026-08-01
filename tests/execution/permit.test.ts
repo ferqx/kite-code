@@ -9,6 +9,7 @@ import { runApprovedTool } from '../../src/core/harness/tool-runner';
 
 function writeRequest(path = 'ok.txt', id = 'call-write'): PendingToolRequest {
   return {
+    source: 'builtin',
     id,
     name: 'write_file',
     args: { path, content: 'hello' },

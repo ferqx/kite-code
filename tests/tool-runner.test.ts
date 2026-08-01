@@ -1,13 +1,14 @@
 /**
  * tool-runner 单元测试 — 覆盖 runApprovedTool 各工具分发分支
  */
-import { describe, expect, it } from 'bun:test';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { PendingToolRequest } from '../src/core/harness/tool-requests';
+import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
+import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
 
 // ── Helpers ──
 
@@ -85,6 +86,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
       ],
     );
     const request: PendingToolRequest = {
+      source: 'builtin',
       name: 'list_mcp_resources',
       args: {},
       reason: 'discover resources',
@@ -110,6 +112,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
     }));
     const manager = mockMcpManager(async () => '', resources);
     const request: PendingToolRequest = {
+      source: 'builtin',
       name: 'list_mcp_resources',
       args: { server: 'docs' },
       reason: 'discover resources',
@@ -127,6 +130,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
     const known = await runApprovedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin' as const,
         name: 'list_mcp_resources',
         args: { server: 'test-server' },
         reason: 'discover',
@@ -137,6 +141,7 @@ describe('runApprovedTool — list_mcp_resources', () => {
     const unknown = await runApprovedTool({
       workspace: '/ws',
       request: {
+        source: 'builtin' as const,
         name: 'list_mcp_resources',
         args: { server: 'missing' },
         reason: 'discover',
@@ -275,6 +280,7 @@ describe('runApprovedTool — bound MCP policy', () => {
     const result = await runApprovedTool({
       workspace: '/ws',
       request: {
+        source: 'mcp',
         id: 'call-authenticated-read',
         name: 'mcp__auth__read',
         args: { id: '42' },
@@ -440,7 +446,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
     expect(capturedNetworkMode).toBe('allow_all');
   });
 
-  it('does not set a timeout unless the model requested timeout_ms', async () => {
+  it('applies the default hard timeout when the model omits timeout_ms', async () => {
     let capturedTimeout: number | undefined;
 
     const result = await runApprovedTool({
@@ -459,7 +465,7 @@ describe('runApprovedTool — shell_execute timeout', () => {
       },
     });
 
-    expect(capturedTimeout).toBeUndefined();
+    expect(capturedTimeout).toBe(DEFAULT_SHELL_TIMEOUT_MS);
     expect(result.ok).toBe(true);
   });
 
@@ -513,5 +519,85 @@ describe('runApprovedTool 鈥?search_content', () => {
       truncated: false,
       rawResultDigest: expect.any(String),
     });
+  });
+});
+
+// ── ADR-0042 §4：写入前文件原像捕获 / file pre-image capture ──
+
+describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
+  let workspace: string;
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), 'kite-code-preimage-capture-'));
+  });
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function requestOf(name: string, args: Record<string, unknown>): PendingToolRequest {
+    const result = toolRequestFromCall({ id: 'capture-call', name, args }, workspace);
+    if (!result?.ok) throw new Error(`Failed to build request for ${name}`);
+    return result.request;
+  }
+
+  it('captures the pre-image before write_file overwrites an existing file', async () => {
+    writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
+    const captured: Array<[string, string | null, boolean]> = [];
+    const result = await runApprovedTool({
+      workspace,
+      request: requestOf('write_file', { path: 'notes.md', content: 'v2\n' }),
+      recordFilePreimage: (path, content, existed) => {
+        captured.push([path, content, existed]);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(captured).toEqual([['notes.md', 'v1\n', true]]);
+  });
+
+  it('records existed=false when write_file creates a new file', async () => {
+    const captured: Array<[string, string | null, boolean]> = [];
+    const result = await runApprovedTool({
+      workspace,
+      request: requestOf('write_file', { path: 'fresh.md', content: 'hi\n' }),
+      recordFilePreimage: (path, content, existed) => {
+        captured.push([path, content, existed]);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(captured).toEqual([['fresh.md', null, false]]);
+  });
+
+  it('captures the pre-image before edit_file replaces content', async () => {
+    writeFileSync(join(workspace, 'code.ts'), 'const a = 1;\n', 'utf8');
+    // ADR-0042 §1：先读后改——先经 read_file 登记读取状态，edit 才能通过校验。
+    await runApprovedTool({
+      workspace,
+      request: requestOf('read_file', { path: 'code.ts' }),
+    });
+    const captured: Array<[string, string | null, boolean]> = [];
+    const result = await runApprovedTool({
+      workspace,
+      request: requestOf('edit_file', {
+        path: 'code.ts',
+        old_string: 'const a = 1;',
+        new_string: 'const a = 2;',
+      }),
+      recordFilePreimage: (path, content, existed) => {
+        captured.push([path, content, existed]);
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(captured).toEqual([['code.ts', 'const a = 1;\n', true]]);
+  });
+
+  it('a throwing recorder never fails the tool', async () => {
+    writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
+    const result = await runApprovedTool({
+      workspace,
+      request: requestOf('write_file', { path: 'notes.md', content: 'v2\n' }),
+      recordFilePreimage: () => {
+        throw new Error('recorder down');
+      },
+    });
+    expect(result.ok).toBe(true);
   });
 });

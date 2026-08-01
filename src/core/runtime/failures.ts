@@ -7,6 +7,8 @@ export type FailureKind =
   | 'model_rate_limited'
   | 'model_server_error'
   | 'policy_denied'
+  | 'phase_deferred'
+  | 'phase_denied'
   | 'approval_rejected'
   | 'auto_review_rejected'
   | 'plan_revision_requested'
@@ -25,6 +27,50 @@ export type FailureKind =
   | 'transcript_invariant_error'
   | 'loop_exhausted'
   | 'budget_exceeded'
+  | 'artifact_invalid'
+  | 'profile_invalid'
+  | 'digest_invalid'
+  | 'workspace_untrusted'
+  | 'network_unavailable'
+  | 'worktree_unavailable'
+  | 'model_retry_exhausted'
+  | 'mcp_unavailable'
+  | 'persistence_unavailable'
+  | 'resource_saturated'
+  | 'process_limit_exceeded'
+  | 'cancel_incomplete'
+  | 'compaction_unqualified'
+  | 'compaction_failed'
+  | 'verification_failed'
+  | 'verification_inconclusive'
+  | 'mandatory_policy_unavailable'
+  | 'unknown';
+
+export type TerminalReasonCodeV1 =
+  | 'completed'
+  | 'artifact_invalid'
+  | 'profile_invalid'
+  | 'digest_invalid'
+  | 'workspace_untrusted'
+  | 'sandbox_unavailable'
+  | 'network_unavailable'
+  | 'worktree_unavailable'
+  | 'model_retry_exhausted'
+  | 'provider_unavailable'
+  | 'mcp_unavailable'
+  | 'persistence_unavailable'
+  | 'budget_exhausted'
+  | 'resource_saturated'
+  | 'tool_concurrency_saturated'
+  | 'shell_concurrency_saturated'
+  | 'process_limit_exceeded'
+  | 'cancel_incomplete'
+  | 'compaction_unqualified'
+  | 'compaction_failed'
+  | 'verification_failed'
+  | 'verification_inconclusive'
+  | 'mandatory_policy_unavailable'
+  | 'blocked'
   | 'unknown';
 
 export interface ClassifiedFailure {
@@ -35,6 +81,9 @@ export interface ClassifiedFailure {
   needsUserIntervention: boolean;
   terminatesTurn: boolean;
   journal: boolean;
+  /** Original structured failure code from Registry.parseToolCall,
+   *  propagated through InvalidToolRequest for diagnostic observability. */
+  parseFailureCode?: import('@/core/tools/registry/registry').ParseFailureCode;
 }
 
 export interface RuntimeFailureContext {
@@ -46,6 +95,7 @@ export interface RuntimeFailureContext {
   toolCallId?: string;
   interactionId?: string;
   userVisible?: boolean;
+  parseFailureCode?: import('@/core/tools/registry/registry').ParseFailureCode;
 }
 
 export interface RuntimeFailureRecord extends RuntimeFailureContext {
@@ -75,6 +125,18 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
   model_rate_limited: retryable,
   model_server_error: retryable,
   policy_denied: {
+    ...terminal,
+    modelFixable: true,
+    needsUserIntervention: false,
+    terminatesTurn: false,
+  },
+  phase_deferred: {
+    ...terminal,
+    modelFixable: true,
+    needsUserIntervention: false,
+    terminatesTurn: false,
+  },
+  phase_denied: {
     ...terminal,
     modelFixable: true,
     needsUserIntervention: false,
@@ -123,11 +185,66 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
   transcript_invariant_error: terminal,
   loop_exhausted: terminal,
   budget_exceeded: terminal,
+  artifact_invalid: terminal,
+  profile_invalid: terminal,
+  digest_invalid: terminal,
+  workspace_untrusted: terminal,
+  network_unavailable: terminal,
+  worktree_unavailable: terminal,
+  model_retry_exhausted: terminal,
+  mcp_unavailable: { ...terminal, retryable: true },
+  persistence_unavailable: terminal,
+  resource_saturated: terminal,
+  process_limit_exceeded: terminal,
+  cancel_incomplete: terminal,
+  compaction_unqualified: terminal,
+  compaction_failed: terminal,
+  verification_failed: terminal,
+  verification_inconclusive: terminal,
+  mandatory_policy_unavailable: terminal,
   unknown: terminal,
 };
 
-export function classifyFailure(kind: FailureKind, message: string): ClassifiedFailure {
-  return { kind, message, ...STRATEGIES[kind] };
+const TERMINAL_REASON_BY_FAILURE: Readonly<Partial<Record<FailureKind, TerminalReasonCodeV1>>> =
+  Object.freeze({
+    artifact_invalid: 'artifact_invalid',
+    profile_invalid: 'profile_invalid',
+    digest_invalid: 'digest_invalid',
+    workspace_untrusted: 'workspace_untrusted',
+    sandbox_error: 'sandbox_unavailable',
+    network_unavailable: 'network_unavailable',
+    worktree_unavailable: 'worktree_unavailable',
+    model_retry_exhausted: 'model_retry_exhausted',
+    provider_unavailable: 'provider_unavailable',
+    mcp_unavailable: 'mcp_unavailable',
+    persistence_unavailable: 'persistence_unavailable',
+    budget_exceeded: 'budget_exhausted',
+    resource_saturated: 'resource_saturated',
+    process_limit_exceeded: 'process_limit_exceeded',
+    cancel_incomplete: 'cancel_incomplete',
+    compaction_unqualified: 'compaction_unqualified',
+    compaction_failed: 'compaction_failed',
+    verification_failed: 'verification_failed',
+    verification_inconclusive: 'verification_inconclusive',
+    mandatory_policy_unavailable: 'mandatory_policy_unavailable',
+    unknown: 'unknown',
+  });
+
+export function terminalReasonForFailureV1(kind: FailureKind): TerminalReasonCodeV1 {
+  return TERMINAL_REASON_BY_FAILURE[kind] ?? 'blocked';
+}
+
+export function classifyFailure(
+  kind: FailureKind,
+  message: string,
+  parseFailureCode?: import('@/core/tools/registry/registry').ParseFailureCode,
+): ClassifiedFailure {
+  return {
+    kind,
+    message,
+    ...STRATEGIES[kind],
+    ...(parseFailureCode ? { parseFailureCode } : {}),
+  };
 }
 
 export function classifyMcpProviderError(error: McpProviderError): ClassifiedFailure {
@@ -145,7 +262,7 @@ export function classifyMcpProviderError(error: McpProviderError): ClassifiedFai
 
 /** Create one structured failure record for logging and public error mapping. */
 export function recordRuntimeFailure(input: RuntimeFailureContext): RuntimeFailureRecord {
-  const failure = classifyFailure(input.kind, input.message);
+  const failure = classifyFailure(input.kind, input.message, input.parseFailureCode);
   return {
     ...input,
     failure,

@@ -57,6 +57,27 @@ describe('McpConnectionManager governance fixture', () => {
     expect(result.content).toHaveLength(2);
   });
 
+  test('degrades a real stdio provider that exits during an invocation', async () => {
+    await manager.connect('exiting-stdio', {
+      type: 'stdio',
+      command: process.execPath,
+      args: [resolve(import.meta.dir, 'fixtures/mcp-governance-server.ts')],
+      timeout: 2_000,
+    });
+    expect(manager.findCapability('mcp:exiting-stdio/exit_fixture')).toBeDefined();
+
+    await expect(manager.callTool('exiting-stdio', 'exit_fixture', {})).rejects.toMatchObject({
+      name: 'McpProviderError',
+      providerId: 'exiting-stdio',
+      kind: 'provider_unavailable',
+    });
+    expect(manager.getServerStates().get('exiting-stdio')).toMatchObject({
+      health: 'degraded',
+      consecutiveCallFailures: 1,
+    });
+    expect(manager.findCapability('mcp:exiting-stdio/exit_fixture')).toBeDefined();
+  });
+
   test('retains the last successful capability catalog during a failed reconnect', async () => {
     await manager.connect('stable', {
       type: 'stdio',

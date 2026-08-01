@@ -2,37 +2,136 @@ import { applyApprovalGrant } from '@/core/harness/tool-policy';
 import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
-import { getActiveTask, type RuntimeState } from './state';
+import { getActiveTask, type RuntimeState, type ToolCallStatus } from './state';
+
+const TERMINAL_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
+  'succeeded',
+  'failed',
+  'rejected',
+  'cancelled',
+  'exhausted',
+]);
+
+/**
+ * Build the durable facts for stopping the current turn.
+ *
+ * The active task remains resumable. Every unfinished tool call receives a
+ * result-pairing cancellation event before the turn is marked aborted.
+ */
+export function eventsForRunCancellation(
+  state: Readonly<RuntimeState>,
+  reason = 'Cancelled by user.',
+  cause: 'user' | 'error' = 'user',
+): RuntimeEvent[] {
+  return [
+    ...unfinishedToolCancellationEvents(state, reason),
+    ...resourceReservationCancellationEvents(state),
+    ...resourceWaiterCancellationEvents(state),
+    {
+      type: 'turn.aborted',
+      turnId: state.turn.turnId,
+      reason,
+      cause,
+    },
+  ];
+}
+
+function resourceReservationCancellationEvents(state: Readonly<RuntimeState>): RuntimeEvent[] {
+  if (state.resourceBudget.status !== 'active') return [];
+  const events: RuntimeEvent[] = [];
+  for (const reservation of Object.values(state.resourceBudget.reservations)) {
+    if (reservation.state === 'reserved') {
+      events.push({
+        type: 'resource_budget.released',
+        reservationId: reservation.reservationId,
+      });
+    } else if (reservation.state === 'dispatch_started') {
+      events.push({
+        type: 'resource_budget.unknown',
+        reservationId: reservation.reservationId,
+      });
+    }
+  }
+  return events;
+}
+
+function resourceWaiterCancellationEvents(state: Readonly<RuntimeState>): RuntimeEvent[] {
+  return state.resourceBudget.status === 'active'
+    ? Object.values(state.resourceBudget.waiters)
+        .filter((waiter) => waiter.state === 'waiting')
+        .map((waiter) => ({
+          type: 'resource_budget.waiter_cancelled' as const,
+          invocationId: waiter.invocationId,
+        }))
+    : [];
+}
+
+function unfinishedToolCancellationEvents(
+  state: Readonly<RuntimeState>,
+  reason: string,
+  excludedToolCallId?: string,
+): RuntimeEvent[] {
+  return Object.values(state.tools.calls)
+    .filter((call) => !TERMINAL_TOOL_STATUSES.has(call.status))
+    .filter((call) => call.toolCallId !== excludedToolCallId)
+    .map((call) => ({
+      type: 'tool.cancelled',
+      toolCallId: call.toolCallId,
+      reason,
+    }));
+}
+
+function approvalCancellationEvents(
+  state: Readonly<RuntimeState>,
+  interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_tool_approval' }>,
+  reason: string,
+): RuntimeEvent[] {
+  return [
+    {
+      type: 'approval.rejected',
+      interactionId: interaction.interactionId,
+      toolCallId: interaction.toolCallId,
+      reason,
+      failure: classifyFailure('approval_rejected', reason),
+    },
+    ...unfinishedToolCancellationEvents(state, reason, interaction.toolCallId),
+    ...resourceReservationCancellationEvents(state),
+    ...resourceWaiterCancellationEvents(state),
+    {
+      type: 'turn.aborted',
+      turnId: state.turn.turnId,
+      reason,
+      cause: 'user',
+    },
+  ];
+}
 
 /** 生成取消方案审核时的事件，统一处理显式拒绝和 Esc/取消动作。 */
 function planReviewCancelledEvents(
+  state: Readonly<RuntimeState>,
   interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_review' }>,
   reason?: string,
 ): RuntimeEvent[] {
+  const cancellationReason = reason ?? 'Plan execution confirmation cancelled by user.';
   return [
     {
       type: 'plan.review_cancelled',
       interactionId: interaction.interactionId,
-      reason: reason ?? 'Plan review cancelled by user.',
+      reason: cancellationReason,
     },
     {
-      type: 'tool.finished',
+      type: 'tool.cancelled',
       toolCallId: interaction.toolCallId,
-      name: 'write_plan',
-      result: {
-        ok: true,
-        command: '',
-        exitCode: 0,
-        stdout: JSON.stringify({
-          ok: true,
-          status: 'review_cancelled',
-          plan_id: interaction.planId,
-          version: interaction.version,
-          ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
-          feedback: reason,
-        }),
-        stderr: '',
-      },
+      reason: cancellationReason,
+    },
+    ...unfinishedToolCancellationEvents(state, cancellationReason, interaction.toolCallId),
+    ...resourceReservationCancellationEvents(state),
+    ...resourceWaiterCancellationEvents(state),
+    {
+      type: 'turn.aborted',
+      turnId: state.turn.turnId,
+      reason: cancellationReason,
+      cause: 'user',
     },
   ];
 }
@@ -234,6 +333,7 @@ export function eventsForRuntimeAction(
             {
               type: 'approval.rejected',
               interactionId: action.interactionId,
+              toolCallId: interaction.toolCallId,
               reason: error instanceof Error ? error.message : String(error),
               failure: classifyFailure(
                 'sandbox_error',
@@ -250,6 +350,7 @@ export function eventsForRuntimeAction(
         workspace: state.session.workspace,
         threadId: state.session.threadId,
         request: {
+          source: 'builtin' as const,
           id: interaction.toolCallId,
           name: 'shell_execute',
           args: { command: interaction.approval.command },
@@ -269,14 +370,14 @@ export function eventsForRuntimeAction(
       ];
     }
     if (action.type === 'reject' || action.type === 'cancel') {
-      return [
-        {
-          type: 'approval.rejected',
-          interactionId: action.interactionId,
-          reason: action.reason ?? 'Rejected by user.',
-          failure: classifyFailure('approval_rejected', action.reason ?? 'Rejected by user.'),
-        },
-      ];
+      return approvalCancellationEvents(
+        state,
+        interaction,
+        action.reason ??
+          (action.type === 'reject'
+            ? 'Tool approval rejected by user.'
+            : 'Tool approval cancelled by user.'),
+      );
     }
     return [];
   }
@@ -376,6 +477,7 @@ export function eventsForRuntimeAction(
         type: 'turn.aborted',
         turnId: state.turn.turnId,
         reason: `Required MCP provider '${interaction.providerId}' admission was cancelled.`,
+        cause: 'user',
       },
     ];
   }
@@ -383,7 +485,7 @@ export function eventsForRuntimeAction(
   // TUI 的 Esc/取消操作使用通用 cancel；Plan 审核需要落成完整的审核取消事件，
   // 否则运行循环会收到空事件并报 Runtime action does not match active interaction。
   if (interaction.kind === 'awaiting_review' && action.type === 'cancel') {
-    return planReviewCancelledEvents(interaction, action.reason);
+    return planReviewCancelledEvents(state, interaction, action.reason);
   }
 
   // ── Plan Mode v2: unified plan_review_decision ──
@@ -454,7 +556,7 @@ export function eventsForRuntimeAction(
       ];
     }
     if (decision.kind === 'cancel') {
-      return planReviewCancelledEvents(interaction, decision.reason);
+      return planReviewCancelledEvents(state, interaction, decision.reason);
     }
     return [];
   }

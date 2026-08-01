@@ -25,11 +25,17 @@ App.tsx
 
 TUI 不应根据展示文本反推工具是否成功，也不能自行构造 verification passed、approval granted 等 Runtime 事实。
 
+终端 focus reporting 由进程级 store 复用：所有 React subscriber 共享一个 stdin listener，
+首订阅开启 DEC 1004，最后退订移除 listener 并关闭该模式，避免 session/mount 增长造成
+listener warning。
+
 MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 的 list、detail、add、authenticate、project approval 和 confirm route，以及 selection、draft 和动态操作菜单都属于 App。业务键只产生 move/confirm/back，再由 controller 调用 Core retry、typed mutation、摘要决定和 auth flow；Core 不依赖 Select 或 TUI 展示类型。
 
 ## 7.3 事件渲染
 
 `handleEvent` 和 reducer 把 AgentEvent 转为稳定 block。工具生命周期、审批、计划、Subagent、thought、错误和最终回答分别投影；事件类型不以固定数量作为文档契约。
+
+模型流式展示采用分层完整提交：reasoning delta 只进入缓存，连续 reasoning 段完成后一次性更新 Thought 的活动窗口，最终回答可见后移除 reasoning 正文并只保留 `Thought for Xs` 摘要。普通文本按整段提交，列表按完整 item 提交；围栏代码与表格在结构可识别后先建立完整组件外壳，再只追加已经换行完成的内部行，组件关闭后进入静态历史。
 
 静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。交互式入口直接使用终端主屏缓冲区，不启用 Ink alternate screen；运行内容保留在终端原生 scrollback 中，退出时不恢复进入 TUI 前的旧画面。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
 

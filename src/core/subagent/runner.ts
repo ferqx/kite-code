@@ -1,8 +1,11 @@
+import { statSync } from 'node:fs';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
+import { getFeatureFlags } from '@/core/config/features';
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import {
   type ExecutionJournalEntry,
   isFingerprintExhausted,
@@ -12,13 +15,17 @@ import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import type { BaseMessage } from '@/core/messages';
-import { humanMessage, systemMessage, toolMessage } from '@/core/messages';
+import { humanMessage, isSystemMessage, systemMessage, toolMessage } from '@/core/messages';
+import { estimateContextTokens } from '@/core/model/context-budget';
+import { serializeToolDescriptors } from '@/core/model/context-projection';
 import { createChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
+import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
+import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
-import { createAgentTools, isReadOnlyShellCommand } from '@/core/tools/definitions';
+import { createAgentTools } from '@/core/tools/definitions';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { getRoleConfig } from './roles';
@@ -173,6 +180,54 @@ function normalizeRoleConfig(role: SubAgentRoleConfig): SubAgentRoleConfig {
     model: role.model,
     timeoutMs: role.timeoutMs,
   };
+}
+
+function configuredSubagentMaxOutputTokens(input: SubAgentRunnerInput): number | undefined {
+  const configured =
+    input.config.modelKwargs?.maxOutputTokens ?? input.config.modelKwargs?.maxTokens;
+  return typeof configured === 'number' && Number.isFinite(configured) && configured > 0
+    ? Math.floor(configured)
+    : undefined;
+}
+
+function subagentModelInputTokens(messages: BaseMessage[], tools: ToolSet): number {
+  return estimateContextTokens({
+    systemMessages: messages.filter(isSystemMessage),
+    transcriptMessages: messages.filter((message) => !isSystemMessage(message)),
+    dynamicRuntimeMessages: [],
+    serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
+  }).totalInputTokens;
+}
+
+function subagentModelOutputTokens(message: unknown): number {
+  if (!message || typeof message !== 'object') return 0;
+  const candidate = message as {
+    content?: unknown;
+    response_metadata?: { usage?: { completion_tokens?: number } };
+    usage_metadata?: { output_tokens?: number };
+  };
+  return Number(
+    candidate.response_metadata?.usage?.completion_tokens ??
+      candidate.usage_metadata?.output_tokens ??
+      countTokens(extractText(candidate.content)),
+  );
+}
+
+function artifactSizeAfterTool(
+  workspace: string,
+  toolName: string,
+  args: Record<string, unknown>,
+): number {
+  if ((toolName !== 'write_file' && toolName !== 'edit_file') || typeof args.path !== 'string') {
+    return 0;
+  }
+  const normalized = normalizeSubAgentToolArgs(toolName, args, workspace);
+  if (typeof normalized.path !== 'string') return 0;
+  try {
+    return statSync(resolve(workspace, normalized.path)).size;
+  } catch {
+    return 0;
+  }
 }
 
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
@@ -334,12 +389,48 @@ async function runSubAgentLoop(
 
     while (true) {
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
-      const response = await invokeBoundModel({
-        model,
-        tools,
-        messages,
-        signal: combinedSignal,
-      });
+      const modelInputTokens = subagentModelInputTokens(messages, tools);
+      const modelReservation = input.descendantResourceAdmission
+        ? await input.descendantResourceAdmission.reserveModel({
+            invocationKey: `model:${messages.length}:${toolCallCount}`,
+            inputTokens: modelInputTokens,
+            requestedMaxOutputTokens: configuredSubagentMaxOutputTokens(input),
+          })
+        : undefined;
+      let response: Awaited<ReturnType<typeof invokeBoundModel>>;
+      let modelReconciled = false;
+      try {
+        response = await invokeBoundModel({
+          model,
+          tools,
+          messages,
+          signal: combinedSignal,
+          providerDataAdmission: input.providerDataAdmission,
+          providerDataPolicyRequired: getFeatureFlags(input.config).providerDataPolicyV1,
+          providerDispatchPurpose: 'subagent',
+          maxOutputTokens:
+            modelReservation?.maxOutputTokens ?? configuredSubagentMaxOutputTokens(input),
+        });
+        if (modelReservation) {
+          await input.descendantResourceAdmission!.reconcileModel({
+            reservationId: modelReservation.reservationId,
+            inputTokens: modelInputTokens,
+            outputTokens: subagentModelOutputTokens(response),
+          });
+          modelReconciled = true;
+        }
+      } catch (error) {
+        if (modelReservation && !modelReconciled) {
+          if (error instanceof ProviderDataAdmissionError) {
+            await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+              modelReservation.reservationId,
+            );
+          } else {
+            await input.descendantResourceAdmission!.markUnknown(modelReservation.reservationId);
+          }
+        }
+        throw error;
+      }
       if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
 
       const cacheMetrics = extractPromptCacheMetrics(response);
@@ -429,18 +520,14 @@ async function runSubAgentLoop(
           });
           steps.push({
             toolName: tc.name,
-            toolArgs: (tc.args as Record<string, unknown>) ?? {},
+            toolArgs: tc.args ?? {},
             status: 'error' as const,
             ok: false,
           });
           continue;
         }
 
-        const toolArgs = normalizeSubAgentToolArgs(
-          tc.name,
-          (tc.args as Record<string, unknown>) ?? {},
-          input.workspace,
-        );
+        const toolArgs = normalizeSubAgentToolArgs(tc.name, tc.args ?? {}, input.workspace);
         const stepSnapshot: SubAgentStepSnapshot = {
           toolName: tc.name,
           toolArgs,
@@ -494,7 +581,7 @@ async function runSubAgentLoop(
 
         // Phase 5: 预检 — 如果 tool+path 已耗尽，跳过执行
         // Preflight: skip execution if this tool+path is already exhausted.
-        const preflightPath = (toolArgs as Record<string, unknown>).path as string | undefined;
+        const preflightPath = toolArgs.path as string | undefined;
         if (isFingerprintExhausted(exhaustedFingerprints, tc.name, preflightPath)) {
           const blockedOutput = JSON.stringify({
             ok: false,
@@ -538,18 +625,24 @@ async function runSubAgentLoop(
         let toolOutput: string;
         let ok = true;
         let totalLines: number | undefined;
+        let toolReservation:
+          | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
+          | undefined;
         try {
-          const pendingRequest = toolRequestFromCall(
+          const parsed = toolRequestFromCall(
             {
               id: tc.id ?? `subagent-${toolCallCount}`,
               name: tc.name,
               args: toolArgs,
             },
-            input.workspace,
+            { workspace: input.workspace },
           );
-          if (!pendingRequest) {
-            throw new Error(`Unknown tool requested by sub-agent: ${tc.name}`);
+          if (!parsed?.ok) {
+            throw new Error(
+              `Unknown or invalid tool requested by sub-agent: ${tc.name}${parsed ? ` — ${parsed.request.parseError}` : ''}`,
+            );
           }
+          const pendingRequest = parsed.request;
           const boundMcpDescriptor = tc.name.startsWith('mcp__')
             ? (() => {
                 const binding = mcpBindings.get(tc.name)?.binding;
@@ -564,6 +657,7 @@ async function runSubAgentLoop(
             phase: input.phase ?? 'building',
             authorization: input.authorization,
             threadId: input.threadId ?? '',
+            recordFilePreimage: input.recordFilePreimage,
             mcpManager: input.mcpManager,
             ...(boundMcpDescriptor
               ? {
@@ -583,8 +677,26 @@ async function runSubAgentLoop(
             interactionMode: 'accept_edits',
             taskConfig: input.config,
             taskModel: model,
+            providerDataAdmission: input.providerDataAdmission,
             subagentEventSink: input.eventSink,
+            beforeDispatch: input.descendantResourceAdmission
+              ? async () => {
+                  toolReservation = await input.descendantResourceAdmission!.reserveTool({
+                    invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}`,
+                    toolKind: tc.name,
+                    shell: tc.name === 'shell_execute',
+                    signal: combinedSignal,
+                  });
+                }
+              : undefined,
           });
+          if (toolReservation) {
+            await input.descendantResourceAdmission!.reconcileTool({
+              reservationId: toolReservation.reservationId,
+              artifactBytes: artifactSizeAfterTool(input.workspace, tc.name, toolArgs),
+            });
+            toolReservation = undefined;
+          }
           const blocked = approvalRequiredBlock(
             result,
             pendingRequest.id ?? tc.id ?? `subagent-${toolCallCount}`,
@@ -671,6 +783,16 @@ async function runSubAgentLoop(
           ok = result.ok !== false;
           if (typeof result.totalLines === 'number') totalLines = result.totalLines;
         } catch (e) {
+          if (toolReservation) {
+            if (e instanceof ProviderDataAdmissionError) {
+              await input.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+                toolReservation.reservationId,
+              );
+            } else {
+              await input.descendantResourceAdmission!.markUnknown(toolReservation.reservationId);
+            }
+          }
+          if (e instanceof DescendantResourceAdmissionError) throw e;
           toolOutput = JSON.stringify({
             ok: false,
             error: e instanceof Error ? e.message : String(e),
@@ -687,7 +809,7 @@ async function runSubAgentLoop(
             ok,
             stderr: ok ? undefined : (JSON.parse(toolOutput).stderr as string | undefined),
             exitCode: ok ? undefined : (JSON.parse(toolOutput).exitCode as number | undefined),
-            path: (toolArgs as Record<string, unknown>).path as string | undefined,
+            path: toolArgs.path as string | undefined,
           },
         );
         executionJournal = journalResult.executionJournal;
@@ -729,6 +851,7 @@ async function runSubAgentLoop(
     }
   } catch (e) {
     clearTimeout(timeoutId);
+    if (e instanceof DescendantResourceAdmissionError) throw e;
     const durationMs = Date.now() - startTime;
     const errMsg = e instanceof Error ? e.message : String(e);
     const summary = e instanceof Error && e.name === 'AbortError' ? 'Cancelled' : errMsg;

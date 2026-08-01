@@ -69,10 +69,12 @@ src/app/       CLI/TUI 输入输出适配
 ## 验证
 
 ```bash
-bun test
+bun run test:all
 bun run typecheck
 bun run check:core-boundary
 bun run check:docs
 ```
 
-TUI 系统测试使用 `bun run test:e2e`。仓库当前没有默认真实模型测试脚本。
+全量测试必须使用 `bun run test:all`（默认集合 + TUI 系统测试）。不要运行裸 `bun test`：它未经 `package.json` 的忽略配置，会误跑 `tests/tui-system/`、`tests/pty-spike/` 等非默认集合。定向回归可运行 `bun test <路径>`。
+
+TUI 端到端测试使用 `bun run test:e2e`。仓库当前没有默认真实模型测试脚本。

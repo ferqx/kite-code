@@ -2,8 +2,13 @@ import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
-import type { McpRuntimeProvider } from '@/core/mcp';
-import { buildMcpInventory, isMcpProviderError, normalizeMcpToolResult } from '@/core/mcp';
+import {
+  isMcpProviderError,
+  type McpRuntimeProvider,
+  normalizeMcpToolResult,
+  RemoteMcpEgressDeniedError,
+  type RemoteMcpEgressInvocationPolicyV1,
+} from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
   evaluateToolApproval,
@@ -11,24 +16,48 @@ import {
   type RuntimeMcpPolicy,
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
+import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
+import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '@/core/sandbox/execution-capability-surface';
+import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
+import {
+  type NetworkBoundaryPolicyV1,
+  networkBoundaryPolicyFromExecutionBoundaryV1,
+} from '@/core/sandbox/network-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
-import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
-import { editFile, readFile, readTextContent, writeFile } from '@/core/tools/file';
+import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
+import { msys2ToWindowsPath } from '@/core/tools/path-utils';
+import { fileContentHash, sessionReadTracker } from '@/core/tools/read-state';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import {
-  searchContent as searchContentNative,
-  searchFiles as searchFilesNative,
-} from '@/core/tools/search';
-import { type ShellExecutor, shellTool } from '@/core/tools/shell';
-import { formatToolParseError } from '@/core/tools/tool-parse-error';
+  listMcpResourcesSpec,
+  listMcpToolsSpec,
+  readMcpResourceSpec,
+} from '@/core/tools/registry/builtins/mcp-inventory';
+import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
+import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
+import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
+import {
+  projectedShellIntent,
+  shellExecuteSpec,
+} from '@/core/tools/registry/builtins/shell-execute';
+import { taskSpec } from '@/core/tools/registry/builtins/task';
+import { webFetchSpec } from '@/core/tools/registry/builtins/web-fetch';
+import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
+import {
+  dispatchRegisteredTool,
+  evaluateRegisteredToolProtectedPaths,
+} from '@/core/tools/registry/dispatch';
+import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
+import type { ShellExecutor } from '@/core/tools/shell';
 import type {
   AuthorizationOverride,
   ShellNetworkMode,
-  ShellResult,
   ThreadAuthorizationState,
 } from '@/core/types';
-import { fetchAndExtract } from '@/core/web/extractor';
 import type {
   AgentPhase,
   InteractionMode,
@@ -36,11 +65,63 @@ import type {
   WorkspaceAccess,
 } from '@/protocol/events';
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
-import type { PendingToolRequest } from './tool-requests';
+import { isMcpRequest, type PendingToolRequest } from './tool-requests';
 import type { ToolExecutionResult } from './tool-result';
 
 function resultContentDigest(stdout: string, stderr: string, exitCode: number): string {
   return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
+}
+
+/**
+ * ADR-0042 §4：best-effort 原像捕获 —— 记录器抛错绝不允许中断工具执行。
+ * Best-effort pre-image capture: a throwing recorder must never fail the tool.
+ */
+function safeRecordPreimage(
+  recorder: ((path: string, content: string | null, existed: boolean) => void) | undefined,
+  path: string,
+  content: string | null,
+  existed: boolean,
+): void {
+  if (!recorder) return;
+  try {
+    recorder(path, content, existed);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** 路径参数可能是 MSYS2 形式（/c/proj/...）——先归一化再判断外部性，
+ * 与策略层（approval-policy）保持一致，避免工作区内路径被误判为外部。
+ * Path args may arrive in MSYS2 form (/c/proj/...); normalize before the
+ * external check, consistent with the policy layer, so in-workspace paths
+ * are not treated as external. No-op outside Windows. */
+function isExternalPathArg(pathArg: string): boolean {
+  const normalized = msys2ToWindowsPath(pathArg);
+  return isAbsolute(normalized) || normalized.startsWith('~');
+}
+
+/** Production capability surfaces reject every path that does not resolve
+ * inside the canonical workspace, including relative traversal and symlink
+ * escape. Keep this separate from isExternalPathArg: the latter is the legacy
+ * approval-shape predicate, while this is a fail-closed execution ceiling. */
+function isOutsideProductionWorkspace(workspace: string, pathArg: string): boolean {
+  if (!pathArg) return false;
+  if (isExternalPathArg(pathArg)) return true;
+  try {
+    resolvePath(workspace, pathArg, { allowExternal: false });
+    return false;
+  } catch {
+    return true;
+  }
+}
+
+/** 规范化路径参数（读取状态跟踪的键，与 readTextContent 的解析一致）。 */
+function canonicalFilePath(workspace: string, pathArg: string, allowExternal: boolean): string {
+  try {
+    return resolvePath(workspace, pathArg, { allowExternal });
+  } catch {
+    return pathArg;
+  }
 }
 
 /** runApprovedTool 输入参数 / Input for runApprovedTool */
@@ -58,6 +139,7 @@ export interface RunApprovedToolInput {
   mcpInvocation?: {
     capabilityId: string;
     expectedRevision: string;
+    remoteEgress?: RemoteMcpEgressInvocationPolicyV1;
   };
   /** Runtime-resolved policy for a binding-validated MCP capability. */
   mcpPolicy?: RuntimeMcpPolicy;
@@ -68,9 +150,24 @@ export interface RunApprovedToolInput {
   interactionMode?: import('@/protocol/events').InteractionMode;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
+  providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
+  /** Runs after all local policy/approval checks and immediately before tool dispatch. */
+  beforeDispatch?: () => Promise<void>;
   subagentEventSink?: SubAgentEventSink;
   /** Shell 实时输出回调，仅对 shell_execute 生效 / Live output callback, only for shell_execute */
   onShellProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
+  /**
+   * 写入前文件原像记录器（ADR-0042 §4），供 /rewind 恢复工作区文件。
+   * best-effort：实现自身吞错，工具层直接调用即可。
+   * File pre-image recorder invoked before workspace writes (ADR-0042 §4),
+   * enabling /rewind to restore files. Best-effort by contract.
+   */
+  recordFilePreimage?: (path: string, content: string | null, existed: boolean) => void;
+  /** Persists one network decision before the admitted socket can be opened. */
+  recordNetworkDecision?: NetworkDecisionRecorderV1;
+  /** 当前模型轮次的工具可用性快照，用于 Registry effects 分类。省略时回退到仅 workspace/threadId。 */
+  availabilityContext?: ToolAvailabilityContext;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -95,26 +192,89 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     interactionMode = 'accept_edits',
     taskConfig,
     taskModel,
+    providerDataAdmission,
+    descendantResourceAdmission,
+    beforeDispatch,
     subagentEventSink,
+    availabilityContext,
   } = input;
-  // 合成调用：parseToolCall 失败后由 invokeModel 注入 _raw_invalid_args 标记。
-  // 跳过正常执行，直接生成工具特定的错误反馈让模型重试。
-  // Synthetic call: injected by invokeModel after parseToolCall failure.
-  // Skip normal execution, generate tool-specific error so model can retry.
-  const args = (request.args ?? {}) as Record<string, unknown>;
-  if (typeof args._raw_invalid_args === 'string') {
-    const errDetail = formatToolParseError(
-      request.name,
-      args._raw_invalid_args,
-      (args._parse_error as string) ?? 'invalid JSON arguments',
-    );
-    return {
+
+  const executionSurface = taskConfig?.executionCapabilitySurface;
+  const protectedPathEvaluator = taskConfig?.executionBoundary
+    ? createProtectedPathEvaluatorV1({
+        workspaceRoot: taskConfig.executionBoundary.workspaceRoot,
+        mode: taskConfig.executionBoundary.protectedPathPolicy,
+      })
+    : undefined;
+  const builtinSpec = builtinToolRegistry.get(request.name);
+  if (
+    taskConfig &&
+    'productionExecution' in taskConfig &&
+    (!executionSurface || !protectedPathEvaluator)
+  ) {
+    return withFailureGuidance(request, {
       ok: false,
-      command: request.name,
+      command: request.protectedCommand,
       exitCode: -1,
       stdout: '',
-      stderr: errDetail,
-    };
+      stderr: 'Rejected by production execution boundary: protected-path gate is unavailable.',
+      status: 'rejected',
+    });
+  }
+  if (builtinSpec && protectedPathEvaluator) {
+    const pathDecision = evaluateRegisteredToolProtectedPaths(builtinSpec, request.args, {
+      workspace,
+      threadId,
+      protectedPathEvaluator,
+    });
+    if (!pathDecision.ok) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: pathDecision.error,
+        status: 'rejected',
+      });
+    }
+  }
+  const networkBoundaryPolicy = taskConfig?.executionBoundary
+    ? networkBoundaryPolicyFromExecutionBoundaryV1(
+        taskConfig.executionBoundary,
+        taskConfig.features?.networkBoundaryV1 === true,
+      )
+    : undefined;
+  if (executionSurface) {
+    const descriptor = builtinSpec
+      ? builtinToolRegistry.descriptorOf(builtinSpec)
+      : isMcpRequest(request) && mcpManager && mcpInvocation
+        ? mcpManager.findCapability(mcpInvocation.capabilityId)
+        : undefined;
+    const externalPath = isOutsideProductionWorkspace(
+      workspace,
+      String((request.args as Record<string, unknown>).path ?? ''),
+    );
+    if (
+      !descriptor ||
+      externalPath ||
+      !isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
+        surface: executionSurface,
+        descriptor,
+      })
+    ) {
+      const reason =
+        executionSurface.process === false && executionSurface.write === false
+          ? 'tool is not in the sealed read-only catalog'
+          : 'capability is outside the admitted execution surface';
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: `Rejected by production execution boundary: ${reason}.`,
+        status: 'rejected',
+      });
+    }
   }
 
   const policy = evaluateToolApproval({
@@ -126,6 +286,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     authorization: normalizeAuthorizationState(authorization),
     override,
     mcpPolicy,
+    capability: builtinToolRegistry.effectsOf(
+      request.name,
+      request.args,
+      availabilityContext ?? { workspace, threadId },
+    ),
   });
   if (!policy.allowed) {
     return withFailureGuidance(request, {
@@ -185,52 +350,97 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
   }
 
-  if (request.name === 'task') {
-    if (!taskConfig || !subagentEventSink) {
+  await beforeDispatch?.();
+
+  // Approval/permit hooks are asynchronous and may allow an external actor to
+  // replace a path component. Re-evaluate before write/edit perform any old
+  // content read or pre-image capture; Registry dispatch repeats the same gate
+  // immediately before execute.
+  if (builtinSpec && protectedPathEvaluator) {
+    const pathDecision = evaluateRegisteredToolProtectedPaths(builtinSpec, request.args, {
+      workspace,
+      threadId,
+      protectedPathEvaluator,
+    });
+    if (!pathDecision.ok) {
       return withFailureGuidance(request, {
         ok: false,
-        command: 'task',
+        command: request.protectedCommand,
         exitCode: -1,
         stdout: '',
-        stderr: 'task tool is unavailable in this execution context.',
-        status: 'error',
+        stderr: pathDecision.error,
+        status: 'rejected',
       });
     }
+  }
+
+  if (request.name === 'task') {
     try {
-      const taskArgs = request.args as {
-        subagent_type: 'explore' | 'plan' | 'code' | 'review';
-        task: string;
-      };
-      const result = await runTaskSubAgent(
-        {
-          config: taskConfig,
-          workspace,
-          shellExecutor,
-          mcpManager,
-          skills: skillManifests,
-          skillOptions,
-          authorization: normalizeAuthorizationState(authorization),
-          workspaceAccess,
-          phase,
-          threadId,
-          eventSink: subagentEventSink,
-          signal,
-          model: taskModel,
-        },
-        taskArgs,
-      );
-      const output = JSON.stringify(result);
-      const ok = result.ok !== false;
+      const runTask =
+        taskConfig && subagentEventSink
+          ? (taskInput: { subagent_type: 'explore' | 'plan' | 'code' | 'review'; task: string }) =>
+              runTaskSubAgent(
+                {
+                  config: taskConfig,
+                  workspace,
+                  shellExecutor,
+                  mcpManager,
+                  skills: skillManifests,
+                  skillOptions,
+                  authorization: normalizeAuthorizationState(authorization),
+                  workspaceAccess,
+                  phase,
+                  threadId,
+                  eventSink: subagentEventSink,
+                  signal,
+                  model: taskModel,
+                  providerDataAdmission,
+                  descendantResourceAdmission,
+                  recordFilePreimage: input.recordFilePreimage,
+                },
+                taskInput,
+              )
+          : undefined;
+      const dispatched = await dispatchRegisteredTool(taskSpec, request.args, {
+        workspace,
+        threadId,
+        signal,
+        runTask,
+        protectedPathEvaluator,
+      });
+      if (!dispatched.dispatched) {
+        return withFailureGuidance(request, {
+          ok: false,
+          command: 'task',
+          exitCode: -1,
+          stdout: '',
+          stderr: dispatched.rejection.error,
+          status: 'error',
+        });
+      }
+      if (!dispatched.output.available) {
+        return withFailureGuidance(request, {
+          ok: false,
+          command: 'task',
+          exitCode: -1,
+          stdout: '',
+          stderr: dispatched.output.error,
+          status: 'error',
+        });
+      }
+      const result = dispatched.output.result;
       return withFailureGuidance(request, {
-        ok,
+        ok: dispatched.projected.ok,
         command: 'task',
-        exitCode: ok ? 0 : -1,
-        stdout: output,
-        stderr: ok ? '' : output,
-        status: ok ? 'success' : 'error',
+        exitCode: dispatched.projected.ok ? 0 : -1,
+        stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+        stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
+        status: dispatched.projected.ok ? 'success' : 'error',
+        resultMeta: dispatched.projected.resultMeta,
         subagentResult: result,
       });
     } catch (error) {
+      if (error instanceof DescendantResourceAdmissionError) throw error;
       return withFailureGuidance(request, {
         ok: false,
         command: 'task',
@@ -243,176 +453,198 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'read_file') {
-    const filePath = (request.args.path ?? '') as string;
-    const isExternal = isAbsolute(filePath) || filePath.startsWith('~');
+    const filePath = request.args.path;
+    const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = readFile({
-      workspace,
-      path: filePath,
-      offset: request.args.offset,
-      limit: request.args.limit,
-      allowExternal,
-    });
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
+    // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
+    const dispatched = await dispatchRegisteredTool(
+      readFileSpec,
+      { path: filePath, offset: request.args.offset, limit: request.args.limit },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        protectedPathEvaluator,
+      },
+    );
+    const output = dispatched.dispatched
+      ? dispatched.output
+      : {
+          ok: false as const,
+          content: '',
+          error: dispatched.rejection.error,
+          totalLines: 0,
+          path: filePath,
+        };
+    if (output.ok && output.rawContent !== undefined) {
+      // ADR-0042 §1 读取状态记录：指纹取原始文本（output.content 是带行号的
+      // 模型表面格式，与 edit 侧 preEditRead 指纹口径不一致，不可用于校验）。
+      sessionReadTracker(threadId || workspace).record(
+        canonicalFilePath(workspace, filePath, allowExternal),
+        fileContentHash(output.rawContent),
+      );
+    }
     return withFailureGuidance(request, {
-      ok: result.ok,
+      ok: dispatched.dispatched && dispatched.projected.ok,
       command: `read_file ${filePath}`,
-      exitCode: result.ok ? 0 : -1,
-      stdout: result.content,
-      stderr: result.error ?? '',
+      exitCode: dispatched.dispatched && dispatched.projected.ok ? 0 : -1,
+      stdout:
+        dispatched.dispatched && dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr:
+        dispatched.dispatched && !dispatched.projected.ok
+          ? dispatched.projected.modelContent
+          : dispatched.dispatched
+            ? ''
+            : dispatched.rejection.error,
       path: filePath,
-      totalLines: result.totalLines,
-      resultMeta: { path: filePath, totalLines: result.totalLines },
+      totalLines: output.totalLines,
+      resultMeta: dispatched.dispatched
+        ? dispatched.projected.resultMeta
+        : { path: filePath, totalLines: output.totalLines },
     });
   }
 
   if (request.name === 'edit_file') {
-    if (!request.args.old_string) {
+    const editInput = request.args;
+    if (!editInput.old_string) {
       return withFailureGuidance(request, {
         ok: false,
-        command: `edit_file ${request.args.path ?? ''}`,
+        command: `edit_file ${editInput.path ?? ''}`,
         exitCode: -1,
         stdout: '',
         stderr: 'edit_file requires old_string to locate the text to replace.',
       });
     }
-    const editPath = (request.args.path ?? '') as string;
-    const isExternal = isAbsolute(editPath) || editPath.startsWith('~');
+    const editPath = editInput.path;
+    const isExternal = isExternalPathArg(editPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = editFile({
-      workspace,
-      path: editPath,
-      oldString: request.args.old_string as string,
-      newString: (request.args.new_string ?? '') as string,
-      replaceAll: request.args.replace_all as boolean | undefined,
-      allowExternal,
-    });
-    let stdout = '';
-    if (result.ok) {
-      const diff = computeLineDiff(
-        request.args.old_string,
-        request.args.new_string ?? '',
-        result.fromLine ?? 1,
-      );
-      const parts: string[] = [];
-      if (request.args.replace_all) {
-        const count = result.replacements ?? 1;
-        parts.push(`(replaced ${count} time${count > 1 ? 's' : ''})`);
-      }
-      parts.push(formatDiffOutput(diff));
-      if (request.args.old_string === (request.args.new_string ?? '')) {
-        parts.push('(no effective change)');
-      }
-      // 保护 LLM 上下文：diff 超长时截断
-      // Cap for LLM context: truncate overlong diff output
-      stdout = parts.join('\n');
-      const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
-      if (stdout.length > 2000) {
-        stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
-      }
+    // ADR-0042 §4：改动前读取文件内容用于 readState 计算；
+    // 原像记录延迟到 preExecute 通过之后（只在实际写入前记录）。
+    const preEditRead = readTextContent(workspace, editPath, { allowExternal });
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2，含 §3 严格精确匹配）：
+    // 执行经 dispatchRegisteredTool；ADR-0042 §1 先读后改校验由 spec.preExecute
+    // 基于会话读取状态执行（not_read / stale → 硬失败，引导重读）。
+    const tracker = sessionReadTracker(threadId || workspace);
+    const canonicalPath = canonicalFilePath(workspace, editPath, allowExternal);
+    const readState = tracker.check(
+      canonicalPath,
+      preEditRead.ok ? fileContentHash(preEditRead.content) : null,
+    );
+    const dispatched = await dispatchRegisteredTool(
+      editFileSpec,
+      {
+        path: editPath,
+        old_string: editInput.old_string,
+        new_string: editInput.new_string ?? '',
+        replace_all: editInput.replace_all,
+      },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        writeTarget: { path: editPath, readState },
+        protectedPathEvaluator,
+      },
+    );
+    if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
-        ok: result.ok,
-        command: `edit_file ${request.args.path ?? ''}`,
-        exitCode: 0,
-        stdout,
-        stderr: '',
-        path: request.args.path,
-        resultMeta: {
-          path: editPath,
-          truncated: stdout.endsWith('... (truncated)'),
-          workspaceMutationScope: editPath ? [editPath] : [],
-          rawResultDigest,
-        },
+        ok: false,
+        command: `edit_file ${editPath}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
       });
     }
+    // preExecute 已通过，在工作区变更前记录原像供 /rewind 恢复
+    safeRecordPreimage(
+      input.recordFilePreimage,
+      editPath,
+      preEditRead.ok ? preEditRead.content : null,
+      preEditRead.ok,
+    );
+    const result = dispatched.output;
+    if (result.ok && result.content !== undefined) {
+      tracker.record(canonicalPath, fileContentHash(result.content));
+    }
     return withFailureGuidance(request, {
-      ok: result.ok,
-      command: `edit_file ${request.args.path ?? ''}`,
-      exitCode: result.ok ? 0 : -1,
-      stdout,
-      stderr: result.error ?? '',
-      path: request.args.path,
-      resultMeta: {
-        path: editPath,
-        truncated: stdout.endsWith('... (truncated)'),
-        workspaceMutationScope: editPath ? [editPath] : [],
-      },
+      ok: dispatched.projected.ok,
+      command: `edit_file ${editInput.path ?? ''}`,
+      exitCode: dispatched.projected.ok ? 0 : -1,
+      stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
+      path: editInput.path,
+      resultMeta: dispatched.projected.resultMeta,
     });
   }
 
   if (request.name === 'write_file') {
-    const filePath = (request.args.path ?? '') as string;
-    const isExternal = isAbsolute(filePath) || filePath.startsWith('~');
+    const writeInput = request.args;
+    const filePath = writeInput.path;
+    const content = writeInput.content;
+    const isExternal = isExternalPathArg(filePath);
     const allowExternal = hasExecutionGrant && isExternal;
 
     // 写入前读取旧内容，用于生成 diff / Read old content before writing for diff
     const oldRead = readTextContent(workspace, filePath, { allowExternal });
     const oldExisted = oldRead.ok;
 
-    const result = writeFile({
-      workspace,
-      path: filePath,
-      content: (request.args.content ?? '') as string,
-      mode: request.args.mode as 'overwrite' | 'append' | undefined,
-      allowExternal,
-    });
+    // ADR-0042 §4：覆写前捕获原像（复用上面已读取的旧内容，零额外 I/O）
+    // Capture pre-image before overwrite (reuses oldRead, zero extra I/O).
+    safeRecordPreimage(
+      input.recordFilePreimage,
+      filePath,
+      oldRead.ok ? oldRead.content : null,
+      oldRead.ok,
+    );
 
-    let stdout = '';
-    if (result.ok) {
-      if (oldExisted && request.args.mode !== 'append') {
-        // 覆写已有文件：diff 旧内容 → 新内容
-        // Overwrite existing file: diff old → new
-        const newContent = request.args.content ?? '';
-        const diff = computeLineDiff(oldRead.content, newContent, 1);
-        if (diff.addedLines === 0 && diff.removedLines === 0) {
-          // 内容未变更 — 展示实际行数而非无意义的 0 diff
-          // Content unchanged — show actual line count instead of meaningless 0 diff
-          const actualLines = result.lines ?? 0;
-          const linesWord = actualLines === 1 ? 'line' : 'lines';
-          const header = `Wrote ${actualLines} ${linesWord} to ${request.args.path} (content unchanged)`;
-          stdout = formatContentOutput(newContent, header);
-        } else {
-          stdout = formatDiffOutput(diff);
-        }
-      } else {
-        // 新建文件 / 追加模式：展示带行号的纯文本内容，无需 diff 样式
-        // New file or append: show plain content with line numbers, no diff markers
-        const verb = request.args.mode === 'append' ? 'Appended' : 'Wrote';
-        const header = `${verb} ${result.lines ?? 0} lines to ${request.args.path}`;
-        stdout = formatContentOutput(request.args.content ?? '', header);
-      }
-      const rawResultDigest = resultContentDigest(stdout, result.error ?? '', 0);
-      // 保护 LLM 上下文：超长时截断 / Cap for LLM context
-      if (stdout.length > 2000) {
-        stdout = `${stdout.slice(0, 2000)}\n... (truncated)`;
-      }
-      return withFailureGuidance(request, {
-        ok: result.ok,
-        command: `write_file ${request.args.path ?? ''}`,
-        exitCode: 0,
-        stdout,
-        stderr: '',
-        path: request.args.path,
-        resultMeta: {
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2，含 ADR-0042 §2 append 移除）：
+    // 执行经 dispatchRegisteredTool；mode 不再存在，创建/覆写统一语义。
+    const dispatched = await dispatchRegisteredTool(
+      writeFileSpec,
+      { path: filePath, content },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        writeTarget: {
           path: filePath,
-          truncated: stdout.endsWith('... (truncated)'),
-          workspaceMutationScope: filePath ? [filePath] : [],
-          rawResultDigest,
+          previousContent: oldRead.ok ? oldRead.content : undefined,
+          existed: oldExisted,
         },
+        protectedPathEvaluator,
+      },
+    );
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `write_file ${filePath}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
       });
+    }
+    const result = dispatched.output;
+    if (result.ok) {
+      // ADR-0042 §1 读取状态记录：写入成功后模型持有全部内容，等价于一次读取。
+      // 哈希取换行正规化后的文本，与后续 read_file 回读指纹一致。
+      sessionReadTracker(threadId || workspace).record(
+        canonicalFilePath(workspace, filePath, allowExternal),
+        fileContentHash(normalizeEOL(content)),
+      );
     }
 
     return withFailureGuidance(request, {
-      ok: result.ok,
-      command: `write_file ${request.args.path ?? ''}`,
-      exitCode: result.ok ? 0 : -1,
-      stdout,
-      stderr: result.error ?? '',
-      path: request.args.path,
-      resultMeta: {
-        path: filePath,
-        truncated: stdout.endsWith('... (truncated)'),
-        workspaceMutationScope: filePath ? [filePath] : [],
-      },
+      ok: dispatched.projected.ok,
+      command: `write_file ${filePath}`,
+      exitCode: dispatched.projected.ok ? 0 : -1,
+      stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
+      path: filePath,
+      resultMeta: dispatched.projected.resultMeta,
     });
   }
 
@@ -455,204 +687,184 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'search_content') {
-    const searchPath = (request.args.path ?? '.') as string;
-    const isExternal = isAbsolute(searchPath) || searchPath.startsWith('~');
+    const searchInput = request.args;
+    const searchPath = searchInput.path ?? '.';
+    const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = searchContentNative({
-      workspace,
-      pattern: request.args.pattern,
-      path: searchPath,
-      glob: request.args.glob,
-      allowExternal,
-    });
-    const stdout = truncateToolOutput(result.stdout);
-    const stderr = truncateToolOutput(result.stderr);
-    return withFailureGuidance(request, {
-      ...result,
-      stdout,
-      stderr,
-      command: `search_content ${request.args.pattern ?? ''}`,
-      resultMeta: {
-        path: searchPath,
-        matchCount: result.stdout.split('\n').filter(Boolean).length,
-        truncated: stdout.length < result.stdout.length,
-        rawResultDigest: resultContentDigest(result.stdout, result.stderr, result.exitCode),
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
+    // 截断与 resultMeta 组装保持与旧路径字节一致。
+    const dispatched = await dispatchRegisteredTool(
+      searchContentSpec,
+      { pattern: searchInput.pattern, path: searchPath, glob: searchInput.glob },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        protectedPathEvaluator,
       },
+    );
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `search_content ${searchInput.pattern}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    const projected = dispatched.projected;
+    return withFailureGuidance(request, {
+      ...dispatched.output,
+      // 双输出流工具消费逐流投影：失败时 stdout/stderr 两路保留（迁移前语义）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      command: `search_content ${searchInput.pattern}`,
+      resultMeta: projected.resultMeta,
     });
   }
 
   if (request.name === 'search_files') {
-    const searchPath = (request.args.path ?? '.') as string;
-    const isExternal = isAbsolute(searchPath) || searchPath.startsWith('~');
+    const searchInput = request.args;
+    const searchPath = searchInput.path ?? '.';
+    const isExternal = isExternalPathArg(searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
-    const result = searchFilesNative({
-      workspace,
-      pattern: request.args.pattern,
-      path: searchPath,
-      allowExternal,
-    });
-    const stdout = truncateToolOutput(result.stdout);
-    const stderr = truncateToolOutput(result.stderr);
-    return withFailureGuidance(request, {
-      ...result,
-      stdout,
-      stderr,
-      command: `search_files ${request.args.pattern ?? ''}`,
-      resultMeta: {
-        path: searchPath,
-        matchCount: result.stdout.split('\n').filter(Boolean).length,
-        truncated: stdout.length < result.stdout.length,
-        rawResultDigest: resultContentDigest(result.stdout, result.stderr, result.exitCode),
+    // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
+    // 截断与 resultMeta 组装保持与旧路径字节一致。
+    const dispatched = await dispatchRegisteredTool(
+      searchFilesSpec,
+      { pattern: searchInput.pattern, path: searchPath },
+      {
+        workspace,
+        threadId,
+        signal,
+        allowExternalPaths: allowExternal,
+        protectedPathEvaluator,
       },
+    );
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: `search_files ${searchInput.pattern}`,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    const projected = dispatched.projected;
+    return withFailureGuidance(request, {
+      ...dispatched.output,
+      // 双输出流工具消费逐流投影：失败时 stdout/stderr 两路保留（迁移前语义）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      command: `search_files ${searchInput.pattern}`,
+      resultMeta: projected.resultMeta,
     });
   }
 
   if (request.name === 'list_mcp_resources') {
-    if (!mcpManager) {
+    if (networkBoundaryPolicy) {
+      return ungovernedMcpNetworkResult(request, networkBoundaryPolicy);
+    }
+    const dispatched = await dispatchRegisteredTool(listMcpResourcesSpec, request.args, {
+      workspace,
+      threadId,
+      signal,
+      mcpManager,
+      protectedPathEvaluator,
+    });
+    if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
         ok: false,
         command: request.protectedCommand,
         exitCode: -1,
         stdout: '',
-        stderr:
-          'MCP Runtime is not available in this execution context. Use list_mcp_tools or /mcp to inspect configured providers.',
+        stderr: dispatched.rejection.error,
       });
     }
-    const { server } = request.args;
-    const snapshot = mcpManager.getResourceDirectorySnapshot();
-    const matching = snapshot.resources
-      .filter((resource) => server == null || resource.providerId === server)
-      .slice()
-      .sort(
-        (left, right) =>
-          left.providerId.localeCompare(right.providerId) ||
-          left.uri.localeCompare(right.uri) ||
-          left.name.localeCompare(right.name),
-      );
-    if (server && matching.length === 0) {
-      const provider = mcpManager
-        .getProviderDirectorySnapshot()
-        .entries.find((entry) => entry.providerId === server);
-      return withFailureGuidance(request, {
-        ok: false,
-        command: request.protectedCommand,
-        exitCode: -1,
-        stdout: '',
-        stderr: provider
-          ? `No available static MCP resources were discovered for server: ${server}`
-          : `Unknown MCP server: ${server}`,
-      });
-    }
-    const resources = matching.slice(0, 100).map((resource) => ({
-      server: resource.providerId,
-      uri: resource.uri,
-      name: resource.name,
-      ...(resource.mimeType ? { mime_type: resource.mimeType } : {}),
-    }));
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
-      ok: true,
+      ok: projected.ok,
       command: request.protectedCommand,
-      exitCode: 0,
-      stdout: JSON.stringify({
-        ok: true,
-        resource_count: resources.length,
-        resources,
-        truncated: matching.length > resources.length,
-        next_step:
-          matching.length > resources.length
-            ? 'Call list_mcp_resources with an exact server to narrow the result.'
-            : resources.length > 0
-              ? 'Call read_mcp_resource with an exact server and URI.'
-              : 'No static MCP resources are currently available.',
-      }),
-      stderr: '',
+      exitCode: projected.ok ? 0 : -1,
+      // 消费逐流投影：MCP 清单 spec 产出模型就绪文本，
+      // 失败时结构化载荷保留在原流（如 list_mcp_tools 的 stale_cursor JSON）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      resultMeta: projected.resultMeta,
     });
   }
 
   if (request.name === 'list_mcp_tools') {
-    if (!mcpManager) {
+    if (networkBoundaryPolicy) {
+      return ungovernedMcpNetworkResult(request, networkBoundaryPolicy);
+    }
+    const dispatched = await dispatchRegisteredTool(listMcpToolsSpec, request.args, {
+      workspace,
+      threadId,
+      signal,
+      mcpManager,
+      protectedPathEvaluator,
+    });
+    if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
-        ok: true,
+        ok: false,
         command: request.protectedCommand,
-        exitCode: 0,
-        stdout: JSON.stringify({
-          ok: true,
-          configured_provider_count: 0,
-          callable_provider_count: 0,
-          available_tool_count: 0,
-          providers: [],
-          tools: [],
-          truncated: false,
-        }),
-        stderr: '',
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
       });
     }
-    const result = buildMcpInventory({
-      capabilities: mcpManager.getCapabilitySnapshot(),
-      providers: mcpManager.getProviderDirectorySnapshot(),
-      query: {
-        provider: request.args.provider,
-        limit: request.args.limit,
-        cursor: request.args.cursor,
-      },
-    });
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
-      ok: result.ok,
+      ok: projected.ok,
       command: request.protectedCommand,
-      exitCode: result.ok ? 0 : -1,
-      stdout: JSON.stringify(result),
-      stderr: '',
+      exitCode: projected.ok ? 0 : -1,
+      // 消费逐流投影：MCP 清单 spec 产出模型就绪文本，
+      // 失败时结构化载荷保留在原流（如 list_mcp_tools 的 stale_cursor JSON）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      resultMeta: projected.resultMeta,
     });
   }
 
   if (request.name === 'read_mcp_resource') {
-    if (!mcpManager) {
+    if (networkBoundaryPolicy) {
+      return ungovernedMcpNetworkResult(request, networkBoundaryPolicy);
+    }
+    const dispatched = await dispatchRegisteredTool(readMcpResourceSpec, request.args, {
+      workspace,
+      threadId,
+      signal,
+      mcpManager,
+      protectedPathEvaluator,
+    });
+    if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
         ok: false,
-        command: `read_mcp_resource ${request.args.server ?? ''}`,
+        command: request.protectedCommand,
         exitCode: -1,
         stdout: '',
-        stderr:
-          'MCP Runtime is not available in this execution context. Use list_mcp_tools or /mcp to inspect configured providers.',
+        stderr: dispatched.rejection.error,
       });
     }
-    const { server, uri } = request.args;
-    if (!server || !uri) {
-      return withFailureGuidance(request, {
-        ok: false,
-        command: `read_mcp_resource ${server ?? ''}`,
-        exitCode: -1,
-        stdout: '',
-        stderr: 'server and uri are required',
-      });
-    }
-    try {
-      const content = await mcpManager.readResource(server, uri, signal);
-      const serialized = serializeMcpResourceForModel(content);
-      return withFailureGuidance(request, {
-        ok: true,
-        command: `read_mcp_resource ${server}`,
-        exitCode: 0,
-        stdout: serialized.modelContent,
-        stderr: '',
-        resultMeta: {
-          rawResultDigest: resultContentDigest(content, '', 0),
-          truncated: serialized.truncated,
-        },
-      });
-    } catch (err) {
-      if (isMcpProviderError(err)) throw err;
-      return withFailureGuidance(request, {
-        ok: false,
-        command: `read_mcp_resource ${server}`,
-        exitCode: -1,
-        stdout: '',
-        stderr: err instanceof Error ? err.message : String(err),
-      });
-    }
+    const command = `read_mcp_resource ${request.args.server ?? ''}`;
+    const projected = dispatched.projected;
+    return withFailureGuidance(request, {
+      ok: projected.ok,
+      command,
+      exitCode: projected.ok ? 0 : -1,
+      // 消费逐流投影：资源内容/错误保留在 execute 产出的原流。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      resultMeta: projected.resultMeta,
+    });
   }
 
-  if (request.name.startsWith('mcp__')) {
+  if (isMcpRequest(request)) {
+    if (networkBoundaryPolicy) {
+      return ungovernedMcpNetworkResult(request, networkBoundaryPolicy);
+    }
     if (!mcpManager) {
       return withFailureGuidance(request, {
         ok: false,
@@ -676,7 +888,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       const raw = await mcpManager.callCapability({
         capabilityId: mcpInvocation.capabilityId,
         expectedRevision: mcpInvocation.expectedRevision,
-        arguments: request.args as unknown as Record<string, unknown>,
+        arguments: request.args,
+        ...(mcpInvocation.remoteEgress ? { remoteEgress: mcpInvocation.remoteEgress } : {}),
         signal,
       });
       const rawContent = JSON.stringify(raw);
@@ -696,7 +909,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         },
       });
     } catch (err) {
-      if (isMcpProviderError(err)) throw err;
+      if (isMcpProviderError(err) || err instanceof RemoteMcpEgressDeniedError) throw err;
       return withFailureGuidance(request, {
         ok: false,
         command: request.name,
@@ -708,97 +921,109 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'web_fetch') {
-    try {
-      const result = await fetchAndExtract(request.args.url ?? '', {
-        signal,
-        maxChars: request.args.max_chars,
-        timeoutMs: request.args.timeout_ms,
-      });
-      const stdout = result.ok
-        ? [
-            `Fetched: ${result.title ?? result.finalUrl ?? request.args.url}`,
-            result.contentType ? `Type: ${result.contentType}` : '',
-            result.truncated ? '(content truncated)' : '',
-            '',
-            result.content ?? '',
-          ]
-            .filter(Boolean)
-            .join('\n')
-        : `Failed to fetch ${request.args.url}: ${result.error ?? 'unknown error'}`;
-
-      // 截断上限对齐 max_chars（含标题/元数据行的开销，+500 余量）
-      // truncation limit matches max_chars (with ~500 char overhead for metadata lines)
-      const contentLimit = Math.max(8000, (request.args.max_chars ?? 8000) + 500);
-      const projectedStdout = truncateToolOutput(stdout, contentLimit);
-      return withFailureGuidance(request, {
-        ok: result.ok,
-        command: `web_fetch ${request.args.url ?? ''}`,
-        exitCode: result.ok ? 0 : -1,
-        stdout: projectedStdout,
-        stderr: result.error ?? '',
-        resultMeta: {
-          ...(result.truncated
-            ? {}
-            : {
-                rawResultDigest: resultContentDigest(
-                  stdout,
-                  result.error ?? '',
-                  result.ok ? 0 : -1,
-                ),
-              }),
-          truncated: projectedStdout !== stdout || result.truncated,
-        },
-      });
-    } catch (error) {
-      const isAbort = error instanceof Error && error.name === 'AbortError';
-      const isTimeout = isAbort && error.message === 'Fetch timeout';
+    const dispatched = await dispatchRegisteredTool(webFetchSpec, request.args, {
+      workspace,
+      threadId,
+      signal,
+      toolCallId: request.id,
+      networkBoundaryPolicy,
+      recordNetworkDecision: input.recordNetworkDecision,
+      protectedPathEvaluator,
+    });
+    if (!dispatched.dispatched) {
       return withFailureGuidance(request, {
         ok: false,
-        command: `web_fetch ${request.args.url ?? ''}`,
-        exitCode: isTimeout ? 124 : isAbort ? 130 : -1,
+        command: request.protectedCommand,
+        exitCode: -1,
         stdout: '',
-        stderr: isTimeout
-          ? 'Fetch timed out.'
-          : isAbort
-            ? 'Web fetch cancelled by user.'
-            : error instanceof Error
-              ? error.message
-              : String(error),
+        stderr: dispatched.rejection.error,
       });
     }
+    const result = dispatched.output;
+    return withFailureGuidance(request, {
+      ok: result.ok,
+      command: request.protectedCommand,
+      exitCode: result.ok ? 0 : result.timedOut ? 124 : result.aborted ? 130 : -1,
+      stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
+      resultMeta: dispatched.projected.resultMeta,
+    });
   }
 
   if (request.name === 'shell_execute') {
-    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant);
-    const raw = await runShellForTool(
+    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant, networkBoundaryPolicy);
+    const dispatched = await dispatchRegisteredTool(shellExecuteSpec, request.args, {
       workspace,
-      request.args.command,
-      shellExecutor,
       signal,
-      input.onShellProgress,
-      request.args.timeout_ms,
-      networkMode,
-    );
-    const result: ShellResult = {
-      ...raw,
-      stdout: truncateToolOutput(raw.stdout),
-      stderr: truncateToolOutput(raw.stderr),
-    };
+      shellExecutor,
+      shellNetworkMode: networkMode,
+      onShellProgress: input.onShellProgress,
+      protectedPathEvaluator,
+    });
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.args.command,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    const result = dispatched.output;
+    const projected = dispatched.projected;
     return withFailureGuidance(request, {
       ...result,
-      resultMeta: {
-        rawResultDigest: resultContentDigest(raw.stdout, raw.stderr, raw.exitCode),
-        truncated: result.stdout !== raw.stdout || result.stderr !== raw.stderr,
-      },
+      // 双输出流工具消费逐流投影：失败命令的 stdout 与成功命令的 stderr
+      // 警告都保留（迁移前 Runner 对两路分别截断，现由 spec 投影承接）。
+      stdout: projected.streams?.stdout ?? (projected.ok ? projected.modelContent : ''),
+      stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
+      resultMeta: projected.resultMeta,
       action: {
-        intent: request.args.intent,
-        objective: request.args.objective,
-        expectedObservation: request.args.expected_observation,
-        failureStrategy: request.args.failure_strategy,
-        prefixRule: request.args.prefix_rule,
+        intent: projectedShellIntent(projected.resultMeta),
         grantUsed: approvedGrant === 'none' ? policy.grantUsed : approvedGrant,
       },
     });
+  }
+
+  // Generic Registry dispatch for registered tools without a dedicated
+  // branch.  Each spec is the sole source for availability, schema,
+  // execution, and result projection (ADR-0043).
+  const spec = builtinToolRegistry.get(request.name);
+  if (spec && 'execute' in spec) {
+    const dispatched = await dispatchRegisteredTool(spec, request.args, {
+      workspace,
+      threadId,
+      signal,
+      protectedPathEvaluator,
+      allowExternalPaths: isExternalPathArg(
+        String((request.args as Record<string, unknown>).path ?? ''),
+      )
+        ? hasExecutionGrant
+        : undefined,
+    });
+    if (!dispatched.dispatched) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.protectedCommand,
+        exitCode: -1,
+        stdout: '',
+        stderr: dispatched.rejection.error,
+      });
+    }
+    return {
+      ok: dispatched.projected.ok,
+      command: request.protectedCommand,
+      exitCode: dispatched.projected.ok ? 0 : -1,
+      stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
+      stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
+      resultMeta: dispatched.projected.resultMeta,
+      ...(dispatched.projected.streams
+        ? {
+            stdout: dispatched.projected.streams.stdout,
+            stderr: dispatched.projected.streams.stderr,
+          }
+        : {}),
+    };
   }
 
   return {
@@ -811,25 +1036,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 }
 
 const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;
-
-function serializeMcpResourceForModel(content: string): {
-  modelContent: string;
-  truncated: boolean;
-} {
-  if (content.length <= MAX_MODEL_MCP_RESULT_CHARS) {
-    return { modelContent: content, truncated: false };
-  }
-  return {
-    modelContent: JSON.stringify({
-      status: 'partial',
-      content: content.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
-      truncated: true,
-      original_characters: content.length,
-      message: 'The MCP resource exceeded the model-facing output limit.',
-    }),
-    truncated: true,
-  };
-}
 
 function serializeMcpResultForModel(result: import('@/core/capabilities/result').CapabilityResult) {
   const serialized = JSON.stringify(result);
@@ -854,58 +1060,37 @@ function serializeMcpResultForModel(result: import('@/core/capabilities/result')
   };
 }
 
-/** 共享截断函数：保留头部 + 尾部，中间标注省略行数。
- *  Shared truncation: keep head + tail with omitted-line marker in between.
- *  Zero hallucination risk — preserves verbatim content, just drops the middle. */
-export function truncateToolOutput(output: string, maxLen = 4000): string {
-  if (output.length <= maxLen) return output;
-  const keep = Math.floor(maxLen / 2);
-  const head = output.slice(0, keep);
-  const tail = output.slice(-keep);
-  const omittedLines = output.slice(keep, -keep).split('\n').filter(Boolean).length;
-  return `${head}\n... [${omittedLines} lines omitted, ${output.length - 2 * keep} total chars truncated]\n${tail}`;
-}
-
-async function runShellForTool(
-  workspace: string,
-  command: string,
-  shellExecutor?: ShellExecutor,
-  signal?: AbortSignal,
-  onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void,
-  timeoutMs?: number,
-  networkMode?: ShellNetworkMode,
-): Promise<ShellResult> {
-  try {
-    return await (shellExecutor ?? shellTool)({
-      workspace,
-      command,
-      signal,
-      onProgress,
-      timeoutMs,
-      networkMode,
-    });
-  } catch (error) {
-    const isAbort = error instanceof Error && error.name === 'AbortError';
-    return {
-      ok: false,
-      command,
-      exitCode: isAbort ? 130 : -1,
-      stdout: '',
-      stderr: isAbort
-        ? 'Command cancelled by user.'
-        : error instanceof Error
-          ? error.message
-          : String(error),
-    };
-  }
-}
-
 function resolveShellNetworkMode(
   policy: ReturnType<typeof evaluateToolApproval>,
   hasExecutionGrant: boolean,
+  networkBoundaryPolicy?: NetworkBoundaryPolicyV1,
 ): ShellNetworkMode {
+  // No supported native backend can enforce a host allowlist for arbitrary
+  // descendants yet. A sealed execution boundary therefore tightens process
+  // networking to off instead of falling back to legacy allow_all.
+  if (networkBoundaryPolicy) return 'disabled';
   const mayNeedNetwork = policy.effects?.network || policy.effects?.uncertainEffects;
   return mayNeedNetwork && hasExecutionGrant ? 'allow_all' : 'disabled';
+}
+
+function ungovernedMcpNetworkResult(
+  request: PendingToolRequest,
+  policy: NetworkBoundaryPolicyV1,
+): ToolExecutionResult {
+  return withFailureGuidance(request, {
+    ok: false,
+    command: request.protectedCommand,
+    exitCode: -1,
+    stdout: '',
+    stderr:
+      'MCP execution is unavailable under the sealed network boundary until its transport uses per-invocation endpoint admission.',
+    status: 'rejected',
+    resultMeta: {
+      networkPolicyRevision: policy.revision,
+      networkAdmissionDigests: [],
+      networkFailureCode: 'controller_unavailable',
+    },
+  });
 }
 
 /** 给失败工具结果补充模型可直接使用的原因和正确用法 / Add model-facing failure guidance to failed tool results */
@@ -942,13 +1127,13 @@ function withFailureGuidance(
 function toolUsageGuidance(request: PendingToolRequest): string {
   switch (request.name) {
     case 'read_file':
-      return 'Use read_file with a relative path inside the workspace. If the path is uncertain, use shell_execute with intent inspect and a read-only command such as rg, ls, find, or git status to locate the file first, then retry with the exact path.';
+      return 'Use read_file with a relative path inside the workspace. If the path is uncertain, use search_files to locate it, then retry with the exact path.';
     case 'edit_file':
       return 'Use edit_file only after read_file. old_string must exactly match existing file content, including whitespace and indentation; if the same text appears multiple times, make old_string more specific or set replace_all: true.';
     case 'write_file':
       return 'Use write_file with a relative path and complete file content when creating or fully overwriting a file. For small changes to an existing file, prefer read_file followed by edit_file.';
     case 'shell_execute':
-      return 'Use shell_execute with a concrete command and action metadata. Set intent to inspect for read-only checks such as rg, ls, cat, or git status; set intent to verify for tests, typecheck, build, lint, or smoke checks. Provide description to explain what the command does. Include grant_request for commands needing approval.';
+      return 'Use shell_execute with a concrete command. Read-only checks such as rg, ls, cat, or git status are classified from the command itself. Provide description to explain what the command does; commands needing approval enter the user approval flow automatically.';
     case 'ask_user':
       return 'Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.';
     case 'web_fetch':

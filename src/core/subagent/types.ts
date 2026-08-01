@@ -45,6 +45,8 @@ export interface SubAgentRunnerInput {
   phase?: import('@/protocol/events').AgentPhase;
   threadId?: string;
   model?: import('@/core/model/factory').SupportedChatModel;
+  providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   timeoutMs: number;
   signal: AbortSignal;
   eventSink: SubAgentEventSink;
@@ -52,6 +54,8 @@ export interface SubAgentRunnerInput {
   depth?: number;
   /** 最大允许嵌套深度（0 = 不允许子 agent 再派生）/ Max nesting depth (0 = no further nesting) */
   maxDepth?: number;
+  /** 写入前文件原像记录器（ADR-0042 §4），透传给工具执行。 */
+  recordFilePreimage?: import('@/core/runtime/file-checkpoints').FilePreimageRecorder;
 }
 
 export interface SubAgentContinuation {

@@ -1,12 +1,26 @@
 import { randomUUID } from 'node:crypto';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import {
+  createApprovedProviderDataAdmissionV1,
+  ProviderDataAdmissionError,
+} from '@/core/config/provider-data-admission';
+import type {
+  SessionLoggingMode,
+  SessionLoggingPolicyV1,
+} from '@/core/config/session-logging-policy';
+import { resolveSessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
 import type { McpRuntimeProvider } from '@/core/mcp';
+import type { RemoteMcpEgressPermitResolverV1 } from '@/core/mcp/egress-permit';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import type { SandboxBackend } from '@/core/sandbox';
-import { SessionLogCollector } from '@/core/session-logger';
+import {
+  createRuntimeSecretDetectorV1,
+  SessionLogCollector,
+  type SessionLoggingContentInspectorV1,
+} from '@/core/session-logger';
 import {
   createSkillCapabilityResolver,
   evaluateSkillActivation,
@@ -16,12 +30,16 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
+import { eventsForRunCancellation } from './actions';
 import type { RuntimeEvent } from './events';
-import { createRuntimeEffectExecutor } from './executor';
+import { createRuntimeEffectExecutor, prepareRuntimeEffectForBudgetV1 } from './executor';
+import { resolveFailureModeV1 } from './failure-mode-conformance';
 import { recordRuntimeFailure } from './failures';
 import { createAgentKernel } from './kernel';
+import { LIMITED_RESOURCE_BUDGET_V1 } from './resource-budget';
 import { type RuntimeActionProvider, runRuntimeLoop } from './runner';
-import { getActiveTask } from './state';
+import { getActivePlanning, getActiveTask } from './state';
+import { failedTerminalOutcomeV1 } from './terminal-outcome';
 
 /** Build redacted admission facts for unavailable required providers before model execution. */
 export function requiredProviderAdmissionEvents(
@@ -71,6 +89,7 @@ export interface RunRuntimeAgentInput {
   model?: SupportedChatModel;
   shellExecutor?: ShellExecutor;
   mcpManager?: McpRuntimeProvider;
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */
@@ -84,14 +103,22 @@ export interface RunRuntimeAgentInput {
   sandboxBackend?: SandboxBackend | 'unknown';
   signal?: AbortSignal;
   frontend?: string;
+  /** App-resolved artifact/user/project policy. App composition roots should always inject it. */
+  sessionLoggingPolicy?: SessionLoggingPolicyV1;
+  /** Trusted detector required before content-mode text can be persisted. */
+  sessionLoggingContentInspector?: SessionLoggingContentInspectorV1;
+  onSessionLoggingStatus?: (status: { mode: SessionLoggingMode }) => void;
+  onSessionLoggingDiagnostic?: (message: string) => void;
   /** App-shell control plane for injecting durable user commands into a live Kernel. */
-  onKernelControl?: (
-    control: {
-      getState: () => Readonly<import('./state').RuntimeState>;
-      processEvent: (event: RuntimeEvent) => void;
-    } | null,
-  ) => void;
+  onKernelControl?: (control: RuntimeKernelControl | null) => void;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
+}
+
+/** Durable control surface exposed to an app shell while a Kernel run is live. */
+export interface RuntimeKernelControl {
+  getState: () => Readonly<import('./state').RuntimeState>;
+  processEvent: (event: RuntimeEvent) => void;
+  cancelRun: (reason?: string) => RuntimeEvent[];
 }
 
 /** Start a fresh RuntimeStore-backed session without LangGraph/checkpoint state. */
@@ -118,20 +145,169 @@ export async function* runRuntimeAgent(
     phase: 'building',
     sandboxAvailable: input.sandboxBackend === 'seatbelt' || input.sandboxBackend === 'bubblewrap',
   });
+  const sessionLoggingPolicy =
+    input.sessionLoggingPolicy ??
+    input.config.sessionLoggingPolicy ??
+    resolveSessionLoggingPolicyV1({
+      enabled: getFeatureFlags(input.config).sessionLoggingPolicyV1,
+    });
+  input.onSessionLoggingStatus?.({ mode: sessionLoggingPolicy.mode });
+  const sessionLoggingContentInspector =
+    input.sessionLoggingContentInspector ??
+    createRuntimeSecretDetectorV1({
+      knownSecrets: [input.config.apiKey],
+    });
   const collector = new SessionLogCollector(
     input.threadId,
     input.workspace,
     input.frontend ?? 'runtime',
     { provider: input.config.providerName, name: input.config.modelName },
+    {
+      policy: sessionLoggingPolicy,
+      contentInspector: sessionLoggingContentInspector,
+      onDiagnostic: (diagnostic) => input.onSessionLoggingDiagnostic?.(diagnostic.message),
+    },
   );
   let exitStatus: 'completed' | 'aborted' | 'fatal' = 'completed';
+  let runCancelled = false;
+  let runDeadlineTimer: ReturnType<typeof setTimeout> | undefined;
+  let deadlineCancellationEvents: RuntimeEvent[] = [];
+  let deadlineEventsYielded = false;
+  let deadlineTriggered = false;
+  let deadlineTerminalYielded = false;
+  let cancellationIncomplete = false;
+  const executionAbortController = new AbortController();
+  const providerDataAdmission = getFeatureFlags(input.config).providerDataPolicyV1
+    ? createApprovedProviderDataAdmissionV1(input.config)
+    : undefined;
+  const forwardExternalAbort = () => executionAbortController.abort(input.signal?.reason);
+  if (input.signal?.aborted) forwardExternalAbort();
+  else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
+  const cancelRun = (
+    reason = 'Cancelled by user.',
+    cause: 'user' | 'error' = 'user',
+  ): RuntimeEvent[] => {
+    if (runCancelled) return [];
+    runCancelled = true;
+    exitStatus = 'aborted';
+    const events = eventsForRunCancellation(kernel.getState(), reason, cause);
+    kernel.processEventBatch(events);
+    for (const event of events) collector.recordRuntime(event);
+    executionAbortController.abort(reason);
+    return events;
+  };
+  const scheduleRunDeadline = (deadlineAt: string) => {
+    if (!getFeatureFlags(input.config).boundedCancellationV1 || runDeadlineTimer) return;
+    const remainingMs = Math.max(0, Date.parse(deadlineAt) - Date.now());
+    runDeadlineTimer = setTimeout(() => {
+      if (runCancelled || kernel.getState().turn.status !== 'active') return;
+      deadlineTriggered = true;
+      deadlineCancellationEvents = cancelRun(
+        'Runtime deadline exceeded; bounded cancellation started.',
+        'error',
+      );
+    }, remainingMs);
+  };
+  const createDeadlineTerminalEvent = (): RuntimeEvent | undefined => {
+    if (!deadlineTriggered || deadlineTerminalYielded) return undefined;
+    deadlineTerminalYielded = true;
+    const unknownReservation =
+      kernel.getState().resourceBudget.status === 'active' &&
+      Object.values(kernel.getState().resourceBudget.reservations).some(
+        (reservation) => reservation.state === 'unknown',
+      );
+    const failure = recordRuntimeFailure({
+      kind: cancellationIncomplete ? 'cancel_incomplete' : 'budget_exceeded',
+      message: cancellationIncomplete
+        ? 'Runtime deadline exceeded and descendant cleanup could not be confirmed.'
+        : 'Runtime deadline exceeded and bounded cancellation completed.',
+      phase: 'building',
+      turnId: kernel.getState().turn.turnId,
+      userVisible: true,
+    });
+    const conformance = resolveFailureModeV1(
+      cancellationIncomplete ? 'cancel_timeout' : 'budget_exhausted',
+      {
+        knownExternalEffects: cancellationIncomplete || unknownReservation ? 'unknown' : 'known',
+      },
+    );
+    return {
+      type: 'run.error',
+      message: failure.message,
+      recoverable: false,
+      failure: failure.failure,
+      turnId: failure.turnId,
+      outcome: conformance.terminalOutcome!,
+    };
+  };
   input.onKernelControl?.({
     getState: () => kernel.getState(),
     processEvent: (event) => {
       kernel.processEvent(event);
     },
+    cancelRun: (reason) => cancelRun(reason),
   });
   try {
+    if (providerDataAdmission) {
+      const readiness = providerDataAdmission([], 'primary_model');
+      const event: RuntimeEvent = {
+        type: 'provider.data_policy_status',
+        status: readiness.admitted ? 'ready' : 'blocked',
+        reason: readiness.reason,
+        ...(readiness.registryDigest ? { registryDigest: readiness.registryDigest } : {}),
+        ...(readiness.policyRevision ? { policyRevision: readiness.policyRevision } : {}),
+      };
+      kernel.processEvent(event);
+      collector.recordRuntime(event);
+      yield event;
+    }
+    if (getFeatureFlags(input.config).resourceBudgetV1) {
+      if (kernel.getState().resourceBudget.status !== 'unconfigured') {
+        if (kernel.getState().resourceBudget.status !== 'active') {
+          const failure = recordRuntimeFailure({
+            kind: 'mandatory_policy_unavailable',
+            message:
+              'ResourceBudgetV1 cannot start from a legacy snapshot; start a new production run.',
+            phase: 'building',
+            turnId: kernel.getState().turn.turnId,
+            userVisible: true,
+          });
+          const event: RuntimeEvent = {
+            type: 'run.error',
+            message: failure.message,
+            recoverable: false,
+            failure: failure.failure,
+            turnId: failure.turnId,
+            outcome: failedTerminalOutcomeV1(failure.failure, {
+              knownExternalEffects: 'none',
+            }),
+          };
+          kernel.processEvent(event);
+          collector.recordRuntime(event);
+          yield event;
+          return;
+        }
+      } else {
+        const startedAt = new Date();
+        const event: RuntimeEvent = {
+          type: 'resource_budget.configured',
+          runId: randomUUID(),
+          startedAt: startedAt.toISOString(),
+          deadlineAt: new Date(
+            startedAt.getTime() + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs,
+          ).toISOString(),
+          budget: LIMITED_RESOURCE_BUDGET_V1,
+        };
+        kernel.processEvent(event);
+        collector.recordRuntime(event);
+        yield event;
+        scheduleRunDeadline(event.deadlineAt);
+      }
+    }
+    const activeBudget = kernel.getState().resourceBudget;
+    if (activeBudget.status === 'active') {
+      scheduleRunDeadline(activeBudget.deadlineAt);
+    }
     const admissionEvents = requiredProviderAdmissionEvents(
       kernel.getState(),
       input.mcpManager,
@@ -146,7 +322,26 @@ export async function* runRuntimeAgent(
     const resumedInteraction =
       getActiveTask(kernel.getState()) && kernel.getState().interactions.kind !== 'idle';
     if (!resumedInteraction) {
-      if (input.phase === 'planning') {
+      // Shift+Tab persists a planning_empty placeholder before the user has
+      // supplied a goal. Close that placeholder explicitly so the real Task
+      // retains the submitted prompt as its durable userGoal.
+      const placeholder = getActiveTask(kernel.getState());
+      if (
+        input.phase === 'planning' &&
+        placeholder?.userGoal.trim() === '' &&
+        getActivePlanning(kernel.getState()).kind === 'planning_empty'
+      ) {
+        const cancelled: RuntimeEvent = {
+          type: 'task.cancelled',
+          taskId: placeholder.taskId,
+          reason: 'Replaced Plan Mode placeholder with the submitted task.',
+        };
+        kernel.processEvent(cancelled);
+        collector.recordRuntime(cancelled);
+        yield cancelled;
+      }
+
+      if (input.phase === 'planning' && !getActiveTask(kernel.getState())) {
         const taskStarted: RuntimeEvent = {
           type: 'task.started',
           taskId: randomUUID(),
@@ -235,9 +430,10 @@ export async function* runRuntimeAgent(
       model,
       shellExecutor: input.shellExecutor,
       mcpManager: input.mcpManager,
+      runtimeStore: kernel.runtimeStore,
       skills: input.skills,
       skillOptions: input.skillOptions,
-      signal: input.signal,
+      signal: executionAbortController.signal,
       onCompactionProgress: input.onCompactionProgress,
       compactionReporter: input.config.compaction?.localDebug?.enabled
         ? createLocalCompactionDebugReporter({
@@ -246,20 +442,95 @@ export async function* runRuntimeAgent(
             sessionId: input.threadId,
           })
         : undefined,
+      providerDataAdmission,
+      remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });
-    for await (const event of runRuntimeLoop(kernel, executor, provider)) {
+    for await (const event of runRuntimeLoop(
+      kernel,
+      executor,
+      provider,
+      10_000,
+      (effect, state) =>
+        getFeatureFlags(input.config).resourceBudgetV1
+          ? prepareRuntimeEffectForBudgetV1(effect, state as import('./state').RuntimeState, {
+              config: input.config,
+              model,
+              shellExecutor: input.shellExecutor,
+              mcpManager: input.mcpManager,
+              skills: input.skills,
+              skillOptions: input.skillOptions,
+              signal: executionAbortController.signal,
+              providerDataAdmission,
+              remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
+              subagentEventSink: () => {},
+            })
+          : effect,
+      executionAbortController.signal,
+    )) {
       collector.recordRuntime(event);
+      if (event.type === 'approval.rejected' && event.failure?.kind === 'approval_rejected') {
+        runCancelled = true;
+        exitStatus = 'aborted';
+        executionAbortController.abort(event.reason);
+      }
+      if (event.type === 'turn.aborted' && event.cause === 'user') {
+        runCancelled = true;
+        exitStatus = 'aborted';
+        executionAbortController.abort(event.reason);
+      }
+      if (
+        event.type === 'runtime.cancellation_diagnostic' &&
+        event.failure.kind === 'cancel_incomplete'
+      ) {
+        cancellationIncomplete = true;
+      }
       // Task lifecycle facts are durable RuntimeEvents, but remain internal to
       // the legacy public stream; UI projections are driven by planning/tool
       // events and existing consumers should not see extra turn markers.
       if (event.type === 'task.completed') continue;
       yield event;
     }
-    if (input.signal?.aborted) exitStatus = 'aborted';
+    if (executionAbortController.signal.aborted) exitStatus = 'aborted';
+    if (deadlineCancellationEvents.length > 0) {
+      deadlineEventsYielded = true;
+      yield* deadlineCancellationEvents;
+    }
+    const deadlineTerminal = createDeadlineTerminalEvent();
+    if (deadlineTerminal) {
+      kernel.processEvent(deadlineTerminal);
+      collector.recordRuntime(deadlineTerminal);
+      yield deadlineTerminal;
+    }
   } catch (error) {
+    if (executionAbortController.signal.aborted) {
+      exitStatus = 'aborted';
+      if (!deadlineEventsYielded && deadlineCancellationEvents.length > 0) {
+        deadlineEventsYielded = true;
+        yield* deadlineCancellationEvents;
+      }
+      const deadlineTerminal = createDeadlineTerminalEvent();
+      if (deadlineTerminal) {
+        kernel.processEvent(deadlineTerminal);
+        collector.recordRuntime(deadlineTerminal);
+        yield deadlineTerminal;
+      }
+      return;
+    }
     exitStatus = 'fatal';
+    const providerPolicyUnavailable =
+      error instanceof ProviderDataAdmissionError &&
+      (error.decision.reason === 'mandatory_policy_unavailable' ||
+        error.decision.reason === 'provider_policy_missing' ||
+        error.decision.reason === 'provider_policy_not_yet_effective' ||
+        error.decision.reason === 'provider_policy_expired' ||
+        error.decision.reason === 'provider_route_identity_mismatch');
     const failure = recordRuntimeFailure({
-      kind: 'unknown',
+      kind:
+        error instanceof ProviderDataAdmissionError
+          ? providerPolicyUnavailable
+            ? 'mandatory_policy_unavailable'
+            : 'policy_denied'
+          : 'unknown',
       message: error instanceof Error ? error.message : String(error),
       phase: 'building',
       turnId: kernel.getState().turn.turnId,
@@ -271,6 +542,17 @@ export async function* runRuntimeAgent(
       recoverable: false,
       failure: failure.failure,
       turnId: failure.turnId,
+      outcome: failedTerminalOutcomeV1(failure.failure, {
+        knownExternalEffects:
+          error instanceof ProviderDataAdmissionError
+            ? error.knownExternalEffects
+            : kernel.getState().resourceBudget.status === 'active' &&
+                Object.values(kernel.getState().resourceBudget.reservations).some(
+                  (reservation) => reservation.state === 'unknown',
+                )
+              ? 'unknown'
+              : 'known',
+      }),
     };
     kernel.processEvent(errorEvent);
     collector.recordRuntime(errorEvent);
@@ -280,11 +562,14 @@ export async function* runRuntimeAgent(
       type: 'turn.aborted',
       turnId: kernel.getState().turn.turnId,
       reason: errorEvent.message,
+      cause: 'error',
     };
     kernel.processEvent(aborted);
     collector.recordRuntime(aborted);
     yield aborted;
   } finally {
+    if (runDeadlineTimer) clearTimeout(runDeadlineTimer);
+    input.signal?.removeEventListener('abort', forwardExternalAbort);
     input.onKernelControl?.(null);
     await collector.finalize(exitStatus);
     kernel.close();

@@ -4,18 +4,15 @@
  * Verifies that the TUI does not crash when the user types a long message
  * (>100 characters) and submits it. This is a stability test — the key
  * assertion is that the TUI remains functional with the prompt visible.
- *
- * IMPORTANT: Follows the same 3-test warmup pattern as input.test.ts
- * and approval.test.ts. Without warmup, model calls are silently skipped.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { submitUserMessage } from '../harness/input-helpers';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -29,40 +26,18 @@ describe('TUI PTY System — Long Message', () => {
     workspace = createTestWorkspace();
 
     // Response #1: simple text response for the long message
-    // Responses #2-3: spare for generateSessionName wrap-around
-    server.setResponses([
-      { message: { content: 'I received your long message!' }, delay: 50 },
-      { message: { content: 'Long spare 1' } },
-      { message: { content: 'Long spare 2' } },
-    ]);
+    server.setResponses([{ message: { content: 'I received your long message!' }, delay: 50 }]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Long Message Input → No Crash ─────────────────────────
 
@@ -72,20 +47,15 @@ describe('TUI PTY System — Long Message', () => {
       const longMessage =
         'This is a very long test message that exceeds one hundred characters to verify that the TUI input handling works correctly with longer inputs';
 
-      // Type the long message with faster delay since it is long
-      await typeText(tui, longMessage, 10);
-      await sleep(500);
-
-      // Submit the long message
-      tui.write('\r');
-
-      // Verify the long message was received by the model server
-      await waitForRequestMessage(server, 'one hundred characters', 15000);
+      await submitUserMessage(tui, server, longMessage, {
+        delayMs: 10,
+        timeout: 15000,
+      });
 
       // Verify the model responded
-      await waitForText(() => tui.output(), 'I received your long message!', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'I received your long message!', 15000);
 
-      const afterOutput = tui.output();
+      const afterOutput = tui.viewport();
       console.log('  output after long message:', stripAnsi(afterOutput).slice(-400));
 
       // Long message text should appear in output (user message block)

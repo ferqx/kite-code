@@ -92,6 +92,9 @@ export function createMockModel(responses: MockResponse[]): any {
 
   return {
     model: model as unknown as LanguageModel,
+    // This legacy fixture implements doGenerate only. Advertise that boundary
+    // explicitly so production's default-on streaming does not call doStream.
+    capabilityMetadata: { streaming: false },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     setRetryListener: (_fn: any) => {
       // no-op in mock

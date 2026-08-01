@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadMcpConfig } from '@/core/config';
 import { decideProjectMcpServer } from '@/core/config/mcp-project-approvals';
+import { createRemoteMcpEgressPermitV1 } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
 import { runRuntimeAgent } from '@/core/runtime/agent';
@@ -85,6 +86,11 @@ try {
       runtimeStorePath: storePath,
       model,
       mcpManager: manager,
+      remoteMcpEgressPermitResolver: (request) =>
+        createRemoteMcpEgressPermitV1({
+          request,
+          expiresAt: new Date(Date.now() + 60_000),
+        }),
       config: {
         providerName: 'test',
         providerType: 'openai-compatible',
@@ -97,6 +103,7 @@ try {
           mcpRuntimeBindingV1: true,
           toolSearchV1: true,
           mcpExecutionRecordV1: true,
+          remoteMcpEgressPolicyV1: true,
         },
       },
     },

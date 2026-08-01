@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { Action } from '../src/app/tui/reducers/actions';
 import {
   admitInteractionModeTarget,
   fullModeUnavailableReason,
@@ -11,6 +12,7 @@ import {
   SessionRuntime,
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
+import { createAgentKernel } from '../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
@@ -137,6 +139,7 @@ describe('SessionManager', () => {
       processEvent: (event) => {
         persisted.push(event);
       },
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId);
@@ -169,6 +172,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => persisted.push(event),
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId);
@@ -247,6 +251,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => persisted.push(event),
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId);
@@ -308,6 +313,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: (event) => persisted.push(event),
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId, 'focus on unfinished work');
@@ -376,6 +382,7 @@ describe('SessionManager', () => {
     runtime.runtimeControl = {
       getState: () => state,
       processEvent: () => {},
+      cancelRun: () => [],
     };
 
     const snapshot = mgr.buildContextStatusSnapshot(threadId);
@@ -467,6 +474,7 @@ describe('SessionManager', () => {
       processEvent: (event) => {
         persisted.push(event);
       },
+      cancelRun: () => [],
     };
 
     const result = await mgr.handleContextCompaction(threadId);
@@ -527,6 +535,42 @@ describe('SessionManager', () => {
     expect(rt.notifyInterrupt).toBeDefined();
   });
 
+  test('exitPlanningMode reconciles a completed planning Task to building', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-plan-exit-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const deps = { ...makeDeps(), checkpointPath };
+    const mgr = new SessionManager(deps);
+    try {
+      const threadId = mgr.createSession('/tmp/ws');
+      expect(mgr.enterPlanningMode(threadId).map((event) => event.type)).toEqual([
+        'task.started',
+        'planning.entered',
+      ]);
+
+      const kernel = createAgentKernel({
+        threadId,
+        userId: 'tui',
+        workspace: '/tmp/ws',
+        storePath: runtimeStorePathFor(checkpointPath),
+        phase: 'building',
+      });
+      kernel.processEvent({
+        type: 'run.completed',
+        turnId: kernel.getState().turn.turnId,
+        output: 'Planning conversation completed.',
+      });
+      kernel.close();
+
+      expect(mgr.exitPlanningMode(threadId)).toEqual({
+        events: [],
+        phase: 'building',
+      });
+    } finally {
+      mgr.dispose();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // ── switchSession ──
 
   test('switchSession toggles active flag and updates activeId', () => {
@@ -566,6 +610,25 @@ describe('SessionManager', () => {
     mgr.switchSession(id1, id2);
 
     expect(rt1.pendingInterrupt).toBe(false);
+  });
+
+  test('switchSession cancels an active TUI turn before changing the visible session', () => {
+    const mgr = makeManager();
+    const id1 = mgr.createSession('/tmp/ws');
+    const id2 = mgr.createSession('/tmp/ws');
+    mgr.switchSession(id2, id1);
+    const rt1 = mgr.getRuntime(id1)!;
+    rt1.agentLoopActive = true;
+    let abortCalls = 0;
+    rt1.abort = () => {
+      abortCalls += 1;
+      rt1.agentLoopActive = false;
+    };
+
+    mgr.switchSession(id1, id2);
+
+    expect(abortCalls).toBe(1);
+    expect(mgr.getActiveId()).toBe(id2);
   });
 
   // ── removeRuntime ──
@@ -1097,6 +1160,49 @@ describe('SessionRuntime', () => {
     expect(resolved).toBe(true);
   });
 
+  test('abort persists and projects cancellation facts before signalling the controller', () => {
+    const rt = makeRuntime();
+    const ac = new AbortController();
+    const state = createInitialRuntimeState({
+      threadId: rt.threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+    });
+    const order: string[] = [];
+    const projected: string[] = [];
+    rt.agentLoopActive = true;
+    rt.abortController = ac;
+    rt.runtimeControl = {
+      getState: () => state,
+      processEvent: () => {},
+      cancelRun: () => {
+        order.push(ac.signal.aborted ? 'signal-first' : 'persist-first');
+        return [
+          {
+            type: 'tool.cancelled',
+            toolCallId: 'shell-1',
+            reason: 'Cancelled by user.',
+          },
+          {
+            type: 'turn.aborted',
+            turnId: state.turn.turnId,
+            reason: 'Cancelled by user.',
+            cause: 'user',
+          },
+        ];
+      },
+    };
+    Reflect.set(rt, '_activeDispatch', (action: Action) => {
+      if (action.type === 'RUNTIME_EVENT') projected.push(action.event.type);
+    });
+
+    rt.abort();
+
+    expect(order).toEqual(['persist-first']);
+    expect(projected).toEqual(['tool.cancelled', 'turn.aborted']);
+    expect(ac.signal.aborted).toBe(true);
+  });
+
   test('abort wakes foregroundWake promise', () => {
     const rt = makeRuntime();
     let woken = false;
@@ -1127,6 +1233,37 @@ describe('SessionRuntime', () => {
     rt.abort();
 
     expect(rt.agentLoopActive).toBe(false);
+  });
+
+  test('a successor run waits until the aborted generator finishes cleanup', async () => {
+    const rt = makeRuntime();
+    const ac = new AbortController();
+    let releasePreviousRun!: () => void;
+    const previousRun = new Promise<void>((resolve) => {
+      releasePreviousRun = resolve;
+    });
+    rt.agentLoopActive = true;
+    rt.abortController = ac;
+    Reflect.set(rt, '_runCompletion', previousRun);
+
+    rt.abort();
+    expect(rt.agentLoopActive).toBe(false);
+
+    const actions: Action[] = [];
+    const successor = rt.runTask('next task', {
+      dispatch: (action) => actions.push(action),
+      provider: makeDeps().provider,
+      config: makeDeps().config,
+    });
+    await Promise.resolve();
+    expect(actions).toEqual([]);
+
+    // Simulate a competing waiter claiming the session as soon as cleanup
+    // completes. This waiter must return instead of opening a second loop.
+    rt.agentLoopActive = true;
+    releasePreviousRun();
+    await successor;
+    expect(actions).toEqual([]);
   });
 
   // ── setForeground ──
@@ -1228,6 +1365,110 @@ describe('SessionRuntime', () => {
     });
     // Should have shifted oldest
     expect(rt.eventBuffer.length).toBe(MAX);
+  });
+
+  test('coalesces cumulative model deltas to the latest value per frame', async () => {
+    const rt = makeRuntime();
+    const actions: any[] = [];
+    const dispatch = (action: any) => actions.push(action);
+
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'a' }, dispatch);
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'answer' }, dispatch);
+    (rt as any)._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'r' }, dispatch);
+    (rt as any)._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'reasoning' }, dispatch);
+    expect(actions).toEqual([]);
+
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(actions.map((action) => action.event)).toEqual([
+      { type: 'model.reasoning_delta', text: 'reasoning' },
+      { type: 'model.text_delta', text: 'answer' },
+    ]);
+  });
+
+  test('flushes buffered deltas before a non-delta event', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    const dispatch = (action: any) => events.push(action.event);
+
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'answer' }, dispatch);
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.responded', messageId: 'final', text: 'answer' },
+      dispatch,
+    );
+
+    expect(events).toEqual([
+      { type: 'model.text_delta', text: 'answer' },
+      { type: 'model.responded', messageId: 'final', text: 'answer' },
+    ]);
+  });
+
+  test('flushes a reasoning delta before its explicit segment completion event', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    const dispatch = (action: any) => events.push(action.event);
+
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.reasoning_delta', segmentId: 'r1', text: 'complete reasoning' },
+      dispatch,
+    );
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.reasoning_completed', segmentId: 'r1', text: 'complete reasoning' },
+      dispatch,
+    );
+
+    expect(events).toEqual([
+      { type: 'model.reasoning_delta', segmentId: 'r1', text: 'complete reasoning' },
+      { type: 'model.reasoning_completed', segmentId: 'r1', text: 'complete reasoning' },
+    ]);
+  });
+
+  test('clearBuffer cancels a pending delta frame', async () => {
+    const rt = makeRuntime();
+    const actions: any[] = [];
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'discarded' }, (action: any) =>
+      actions.push(action),
+    );
+
+    rt.clearBuffer();
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(actions).toEqual([]);
+    expect(rt.eventBuffer).toEqual([]);
+  });
+
+  test('abort flushes the latest delta before cancelling the run', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.text_delta', text: 'partial answer' },
+      (action: any) => events.push(action.event),
+    );
+
+    rt.abort();
+    expect(events).toEqual([{ type: 'model.text_delta', text: 'partial answer' }]);
+  });
+
+  test('switching to background flushes a pending foreground delta first', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    (rt as any)._routeRuntimeEvent(
+      { type: 'model.text_delta', text: 'before switch' },
+      (action: any) => events.push(action.event),
+    );
+
+    rt.setForeground(false);
+    expect(events).toEqual([{ type: 'model.text_delta', text: 'before switch' }]);
+    expect(rt.eventBuffer).toEqual([]);
+  });
+
+  test('switching to foreground preserves a background delta for replay', () => {
+    const rt = makeRuntime();
+    rt.setForeground(false);
+    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'background update' }, () => {
+      throw new Error('background delta must not dispatch directly');
+    });
+
+    rt.setForeground(true);
+    expect(rt.eventBuffer).toEqual([{ type: 'model.text_delta', text: 'background update' }]);
   });
 
   // ── _createProxyProvider (via private access) ──

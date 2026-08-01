@@ -3,18 +3,15 @@
  *
  * Verifies that when an ask_user question is active, pressing Escape
  * cancels the interrupt and the TUI recovers to idle state.
- *
- * IMPORTANT: Follows the same 3-test warmup pattern as input.test.ts
- * and approval.test.ts. Without warmup, model calls are silently skipped.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, waitForText } from '../harness/terminal-screen';
+import { submitUserMessage } from '../harness/input-helpers';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -28,7 +25,7 @@ describe('TUI PTY System — ask_user Escape', () => {
     workspace = createTestWorkspace();
 
     // Response #1: ask_user tool call — triggers need_input interrupt
-    // Response #2: spare for generateSessionName wrap-around
+    // Response #2: the same turn continues after the user declines to answer
     server.setResponses([
       {
         message: {
@@ -38,61 +35,51 @@ describe('TUI PTY System — ask_user Escape', () => {
               id: 'call_1',
               name: 'ask_user',
               args: {
-                question: 'What is your preferred programming language?',
-                options: [
-                  { id: 'ts', label: 'TypeScript' },
-                  { id: 'py', label: 'Python' },
+                questions: [
+                  {
+                    question: 'What is your preferred programming language?',
+                    options: [
+                      { label: 'TypeScript', description: 'Use static types and Bun tooling.' },
+                      { label: 'Python', description: 'Use the Python runtime and ecosystem.' },
+                    ],
+                  },
                 ],
-                recommended: 'ts',
               },
             },
           ],
         },
       },
-      { message: { content: 'Ask esc spare' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['Cancelled'] }],
+        },
+        message: { content: 'Continued after question cancellation.' },
+      },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── ask_user Question → Escape → Cancel & Recover ──────────
 
   test(
     'ask_user renders question, Escape cancels and recovers TUI',
     async () => {
-      await typeText(tui, 'Ask a question');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Ask a question', 15000);
+      await submitUserMessage(tui, server, 'Ask a question', { timeout: 15000 });
 
-      // Wait for the question to appear in the TUI output
-      await waitForText(() => tui.output(), 'What is your preferred programming language?', 15000);
+      // Wait for the last option, not the question text that can appear first
+      // in the Tool Card before the interactive footer is ready.
+      await waitForText(() => tui.viewport(), 'Python', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'What is your preferred programming language?')).toBe(true);
       // Options should be visible
       expect(screenContains(output, 'TypeScript')).toBe(true);
@@ -100,10 +87,16 @@ describe('TUI PTY System — ask_user Escape', () => {
 
       // Press Escape to cancel the ask_user interrupt
       tui.write('\x1b');
-      await sleep(2000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Continued after question cancellation.',
+        15000,
+      );
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
-      // TUI should recover — prompt visible (question cancelled)
-      const afterOutput = tui.output();
+      // TUI should render the follow-up model response and then recover to the prompt.
+      const afterOutput = tui.viewport();
+      expect(screenContains(afterOutput, 'Continued after question cancellation.')).toBe(true);
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },
     TIMEOUT,

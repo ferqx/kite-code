@@ -11,22 +11,23 @@
  *   - tests/runtime/plan-state.test.ts
  *   - tests/runtime/plan-actions.test.ts
  *   - tests/runtime/tool-controller.test.ts
- *
- * IMPORTANT: Follows the standard 3-test warmup pattern from other PTY tests
- * (typing → empty Enter → main scenario).
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { basename } from 'node:path';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
+import { createTestWorkspace, readPersistedPlanArtifacts } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Plan Draft (write_plan)', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -38,7 +39,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     // Shared mock responses — write_plan in planning phase.
     // Response #1: write_plan tool call with v2 args
     // Response #2: agent text after drafting
-    // Response #3-7: spare responses for generateSessionName + retries
+    // Response #3: deterministic response to the explicit building-phase probe.
     server.setResponses([
       {
         message: {
@@ -60,55 +61,52 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
           ],
         },
       },
-      { message: { content: 'Plan draft saved. Ready for review when you are.' } },
-      { message: { content: 'Spare 1' } },
-      { message: { content: 'Spare 2' } },
-      { message: { content: 'Spare 3' } },
-      { message: { content: 'Spare 4' } },
-      { message: { content: 'Spare 5' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_write_1', contentIncludes: ['draft_saved'] }],
+        },
+        message: { content: 'Plan draft saved. Ready for review when you are.' },
+      },
+      { message: { content: 'No plan tool requested in building phase.' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
-    tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── write_plan in planning phase renders plan content ───
 
-  test(
+  step(
     'write_plan renders plan content in planning phase',
     async () => {
-      // Enter planning phase via /plan command
-      await typeText(tui, '/plan Draft a plan for testing');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Draft a plan for testing', 15000);
+      // Complete the local mode transition before sending the model task.
+      await submitCommand(tui, '/plan');
+      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 15000);
+      await waitForTuiReady(tui);
+      await submitUserMessage(tui, server, 'Draft a plan for testing', { timeout: 15000 });
 
       // Wait for the plan draft follow-up text
-      await waitForText(() => tui.output(), 'Plan draft saved', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Plan draft saved', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after write_plan:', clean.slice(-2000));
 
       // Plan content should appear in the rendered output
       expect(clean.includes('Test Draft Plan')).toBe(true);
+
+      const artifacts = readPersistedPlanArtifacts(workspace);
+      expect(artifacts).toHaveLength(1);
+      expect(basename(artifacts[0]!.path)).toBe('v1.md');
+      expect(artifacts[0]!.content).toContain('# Test Draft Plan');
+      expect(artifacts[0]!.content).toContain(
+        'Implement the feature step by step with careful testing.',
+      );
+      expect(artifacts[0]!.content).toContain('"id":"setup"');
+      expect(artifacts[0]!.content).toContain('"title":"Write tests"');
 
       // Plan review UI should NOT be shown (write_plan does not trigger review)
       expect(clean.includes('Review the plan above and choose')).toBe(false);
@@ -121,18 +119,15 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
 
   // ── write_plan in building phase is rejected ─────────────
 
-  test(
+  step(
     'write_plan is rejected in building phase',
     async () => {
       // Submit a new message (in building phase — default mode)
-      await typeText(tui, 'Try to write a plan now');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Try to write a plan now', 15000);
+      await submitUserMessage(tui, server, 'Try to write a plan now', { timeout: 15000 });
 
-      // Wait for agent processing
-      await sleep(4000);
+      await waitForTuiReady(tui);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after building phase write_plan attempt:', clean.slice(-1500));
 
@@ -141,4 +136,5 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     },
     TIMEOUT,
   );
+  test('runs the complete stateful journey', () => journey.run());
 });

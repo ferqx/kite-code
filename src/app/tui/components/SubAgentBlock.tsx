@@ -4,15 +4,8 @@ import stringWidth from 'string-width';
 import type { SubAgentRole } from '@/protocol/events';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
-import {
-  actionName,
-  formatElapsed,
-  formatReadFileRange,
-  SPINNER,
-  SPINNER_INTERVAL_MS,
-  spinnerIndexForElapsed,
-  toolColor,
-} from './render-utils';
+import { actionName, formatElapsed, formatReadFileRange, SPINNER, toolColor } from './render-utils';
+import { useBlinkDot } from './use-blink-dot';
 
 function roleLabel(role: SubAgentRole): string {
   switch (role) {
@@ -150,40 +143,23 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const taskSummary = taskLabel(block.task);
   const col = process.stdout.columns ?? 80;
 
+  // ── 闪烁圆点：统一 hook ──
+  const spinnerActive = block.status === 'running' && !block.awaitingApproval;
+  const spinnerFrame = useBlinkDot(spinnerActive);
+
   // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
   const [liveElapsed, setLiveElapsed] = useState(() =>
     block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
   );
   const startedAtRef = useRef(block.startedAt);
   startedAtRef.current = block.startedAt;
 
-  const spinnerStartRef = useRef(Date.now());
-  const spinnerRunningRef = useRef(false);
-
   useEffect(() => {
-    const shouldRun = block.status === 'running' && !block.awaitingApproval;
-    spinnerRunningRef.current = shouldRun;
-    if (shouldRun) spinnerStartRef.current = Date.now();
-    else setSpinnerIdx(0);
-  }, [block.status, block.awaitingApproval]);
-
-  // Single persistent timer — never restarts. Reads running state from ref.
-  useEffect(() => {
-    const tick = () => {
-      if (!spinnerRunningRef.current) return;
-      const idx = spinnerIndexForElapsed(Date.now() - spinnerStartRef.current);
-      setSpinnerIdx(idx);
-    };
-    const spinnerTimer = setInterval(tick, SPINNER_INTERVAL_MS);
-    const elapsedTimer = setInterval(() => {
+    const timer = setInterval(() => {
       const at = startedAtRef.current;
       if (at != null) setLiveElapsed(Date.now() - at);
     }, 200);
-    return () => {
-      clearInterval(spinnerTimer);
-      clearInterval(elapsedTimer);
-    };
+    return () => clearInterval(timer);
   }, []);
 
   // ── Status flags ──
@@ -202,8 +178,8 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const skipped = stepCount - MAX_RUNNING_STEPS;
 
   // ── Header ──
-  const icon = isRunning ? (isWaiting ? '○' : SPINNER[spinnerIdx]) : '●';
-  const headBefore = stringWidth(`${isRunning ? SPINNER[0]! : '●'} ${label} · `);
+  const icon = isRunning ? (isWaiting ? '○ ' : spinnerFrame) : '● ';
+  const headBefore = stringWidth(`${isRunning ? SPINNER[0]! : '● '}${label} · `);
   const fitTask = truncateToFit(taskSummary, Math.max(0, col - headBefore - 2));
 
   // ── Footer ──
@@ -220,7 +196,7 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   return (
     <Box flexDirection="column">
       <Box>
-        <Text color={toolColor(block.status, dt)}>{icon} </Text>
+        <Text color={toolColor(block.status, dt)}>{icon}</Text>
         <Text color={dt.primary}>{label}</Text>
         <Text color={dt.muted}> · {fitTask}</Text>
       </Box>

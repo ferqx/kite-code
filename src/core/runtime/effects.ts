@@ -14,7 +14,14 @@
  */
 export type RuntimeEffect =
   /** 调用模型生成响应 / Call the model to generate a response */
-  | { type: 'call_model' }
+  | {
+      type: 'call_model';
+      /** Exact input and bounded output prepared before budget reservation. */
+      resourceEstimate?: {
+        inputTokens: number;
+        maxOutputTokens: number;
+      };
+    }
   /** Build one durable M2 context checkpoint. */
   | { type: 'compact_context'; compactionId: string }
   /** 执行指定工具调用 / Execute the specified tool calls */
@@ -65,7 +72,11 @@ export type RuntimeEffect =
   /** 第二个 runner 被拒绝 / A second runner was rejected */
   | { type: 'busy'; reason: string }
   /** 持久化状态损坏，禁止继续执行 / Persisted state is corrupted */
-  | { type: 'recovery_blocked'; reason: string };
+  | {
+      type: 'recovery_blocked';
+      reason: string;
+      failureKind: 'persistence_unavailable' | 'unknown';
+    };
 
 /** Returned when a second runner attempts to enter the same Kernel. */
 export type RuntimeBusyEffect = { type: 'busy'; reason: string };

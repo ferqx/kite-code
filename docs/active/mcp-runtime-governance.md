@@ -2,9 +2,64 @@
 
 状态：active
 读取时机：修改 MCP discovery、动态工具绑定、MCP policy、MCP 调用或结果归一化时。
-验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-tool-runner.test.ts tests/mcp-tool-policy.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/actions.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/verification.test.ts tests/golden/golden.test.ts tests/policies/approval-policy.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`（`tests/e2e/live/mcp/` 下的显式公网 smoke）、`bun run typecheck`、`bun run check:core-boundary`。
+验证：`bun test tests/mcp.test.ts tests/mcp-manager.test.ts tests/mcp-tool-runner.test.ts tests/mcp-tool-policy.test.ts tests/mcp-supervisor.test.ts tests/mcp-config-catalog.test.ts tests/mcp-project-approval.test.ts tests/mcp/data-egress-policy.test.ts tests/mcp/data-egress-concurrency.test.ts tests/tool-definitions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/actions.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts tests/runtime/verification.test.ts tests/golden/golden.test.ts tests/policies/approval-policy.test.ts tests/sandbox/network-boundary.test.ts tests/tui-system/scenarios/mcp-management-readonly.test.ts`、`bun run test:mcp:live`（`tests/e2e/live/mcp/` 下的显式公网 smoke）、`bun run typecheck`、`bun run check:core-boundary`。
 
 MCP tool execution is available only when both `capabilityCatalogV1` and `mcpRuntimeBindingV1` are enabled. The ModelController records bindings before the model call; a dynamic model-visible name must match its binding, turn, descriptor revision and input schema. Runtime invokes `McpRuntimeProvider.callCapability({ capabilityId, expectedRevision, arguments, signal })`; the Supervisor façade rechecks effective Provider availability, and the connection manager atomically resolves the current descriptor, compares revision, validates the current schema and only then obtains the original Provider/Tool identity. Model-visible names are never parsed as execution identity.
+
+When a production execution capability surface is present, dynamic MCP disclosure and Runner dispatch also apply that surface before policy or approval. A descriptor whose declared/effective filesystem, network, or external-state effects exceed the independent `write`/`network` axes is omitted and rejected; when both remote network and local stdio MCP are closed, no MCP Tool binding is executable. Approval cannot widen this ceiling. The sealed no-process read-only fallback continues to omit every dynamic MCP binding.
+
+Task 1B.4 additionally closes every MCP transport entrypoint whenever a sealed execution boundary is
+present: dynamic Tool calls, resource/tool inventory, resource reads, and `tool_search` paths that could
+trigger Provider readiness are rejected by the Controller before Provider lookup/readiness. This is
+intentional fail-closed composition, not an assertion that local stdio or
+remote HTTP MCP already inherit the in-process `web_fetch` controller. Task 1B.8 must integrate each MCP
+transport operation with per-invocation DNS/redirect/endpoint admission and durable receipts before any
+of these entrypoints can reopen under a production boundary.
+
+Remote HTTP Tool content has an additional boundary independent of transport admission, Tool effects
+approval and model Provider consent. `McpRuntimeProvider.getCapabilityRoute()` exposes only the redacted
+`transport + serverIdentity + endpointRevision + toolRevision` identity. Local stdio does not enter this
+HTTP egress gate. For remote HTTP, any non-empty final argument object has unknown field provenance and is
+conservatively bound as `confidential` plus all supported payload kinds (`user_prompt`、`file_snippet`、
+`tool_result`); neither project MCP config nor a read-only annotation can lower that floor.
+Before permit resolution, ToolController applies the shared bounded Runtime secret detector to the final
+structured arguments; Manager repeats the inspection immediately before ledger consumption. Credential
+fields, credential-shaped values and protected credential paths are `secret_detected` and cannot be made
+sendable by a permit. Cyclic, unsupported, over-depth, over-node or over-character input is
+`content_inspection_unknown` and also fails closed. Before either inspection or any asynchronous resolver/
+receipt work, the boundary captures one deeply immutable JSON-safe snapshot. Schema validation,
+classification, inspection, argument digest and SDK dispatch all consume that same snapshot; accessors,
+custom `toJSON`, symbols, non-enumerable properties, cycles and non-JSON objects are rejected, so callback
+mutation cannot create a digest-to-wire TOCTOU gap. Empty arguments are content-free; all other clear
+remote arguments require one exact
+`RemoteMcpEgressPermitV1` when `remoteMcpEgressPolicyV1=true`. With the flag false, remote content remains
+no-egress rather than falling back to the old path.
+
+The permit binds invocation, server, endpoint revision, Tool revision, canonical final-argument digest,
+classification, payload kind, expiry and nonce. Permit TTL is positive and at most five minutes. The
+Manager owns the process-local fast-path ledger and synchronously validates it immediately before the SDK
+call; the Runtime Store then claims the redacted nonce digest under a database-wide unique constraint in
+the same transaction as the receipt. A restart, sibling process or deleted/rewound session therefore
+cannot replay a still-live permit. A durable uniqueness conflict is translated into, and durably records, a
+`permit_replayed` denial before returning to the Tool lifecycle. Expiry, excessive TTL, malformed shape,
+secret/unknown inspection, any binding mismatch, missing permit, replay or receipt-persistence failure sends
+zero Tool requests. Parallel siblings require independent
+invocation IDs and nonces; one sibling cannot consume, transfer or authorize another's permit. The
+Manager persists a redacted `mcp.egress_decided` receipt before dispatch; admitted dispatch is impossible
+without a recorder. The receipt contains digests, permit expiry and reason codes, never raw arguments,
+content or nonce. Tool Search and metadata discovery do not request a content
+permit. This gate does not satisfy Task 1B.8 and therefore does not reopen MCP under a sealed production
+network boundary.
+
+`McpConnectionManagerOptions` 可注入 sealed run 的 protected-path V1 evaluator。local stdio
+connection 在 SDK transport construction 前，以 `execute` operation 校验 `cwd`（缺省为 evaluator
+绑定的 canonical Workspace）和 path-like executable；protected、Workspace 外、无效或 prompt-only
+路径都拒绝，且不会调用 transport factory。准入后 manager 把 canonical cwd 和 path-like
+executable identity 而非未解析 alias 交给 factory。在 Task 1B.8 提供 sealed argv pinning 前，
+注入 evaluator 的 stdio config 对任意非空 `args` 都在 factory 前 fail closed；不能通过 interpreter
+argv 把 protected 或 Workspace 外脚本交给 child。bare PATH command 的 runtime pinning、composition root 注入、child
+sandbox/network/process inheritance 与逐调用 transport boundary 仍属于 Task 1B.8；该 adapter
+不代表 local stdio 已获得 production admission，当前 sealed surface 继续关闭 local stdio MCP。
 
 MCP list changes replace the immutable catalog snapshot. Existing bindings do not update in place and fail closed. P0 accepts object-root JSON Schema Draft-07 only; each schema is validated against an admission budget (256 KiB UTF-8 bytes, 32 levels depth, 4096 object nodes, 1024 properties) in a single traversal. Manager retains the complete raw Tool discovery, while the capability catalog contains only enabled and schema-valid Tools. Disabled, invalid, budget-exceeding or unsupported Tools remain diagnosable through the control snapshot but are not model-visible or executable; direct Manager calls also require a current available descriptor.
 
@@ -26,7 +81,18 @@ For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', 
 
 MCP results retain protocol content blocks and structured content. `_meta` is not persisted. When `mcpExecutionRecordV1` is enabled, MCP calls with write, destructive or unknown effects persist intent and terminal digests; restart marks a non-terminal invocation `unknown` and never replays it automatically. Artifact handles, trusted idempotency retry and user reconciliation are implemented. When `verificationV1` is enabled, a successful side-effecting receipt creates required verification backed by its immutable artifact and external references; existing verification remains binding after the flag is disabled.
 
+When Runtime resource admission governs an MCP invocation, its Tool terminal fact and actual resource
+reconciliation must be committed through the required atomic event-batch persistence boundary. Runtime has
+no sequential single-event fallback for this batch: persistence failure leaves the dispatch outcome
+conservative instead of exposing a terminal MCP result whose budget ledger was not reconciled.
+
 Skill Workflow Contract Phase 3 is complete. A Skill is not a prompt fragment: only a strict, versioned YAML `SKILL.md` compiled into a `skill` capability can become activatable. While `skillWorkflowV1` and `skillActivationV2` are disabled, Skill activation fails closed. The legacy body-injection path and `Skill` tool are removed; valid inline activations are revision-checked Runtime frames and can close only with output that validates against the contract schema. Compilation resolves Builtin and current MCP dependencies and produces one `effectiveCapabilityCeiling = require - deny`; deny entries outside require are invalid. Skill effective effects conservatively join the manifest with every effective dependency, and effective minimum approval is the maximum of manifest and dependencies. Model activation passes this effective risk through the normal approval/auto-review gateway before creating a frame, while explicit initial user activation is already user-requested. Verification derives its mode from effective effects. Inline and fork frames use the same effective ceiling, and dependency revisions participate in the Skill revision. Only an available higher-priority candidate may shadow a same-name lower-priority Skill, so an invalid project Skill cannot disable a valid user Skill. Scanning is bounded to depth 8, 256 files, 1 MiB per file and 8 MiB total, ignores common VCS/build/cache directories, rejects symlinks, and hashes sorted path/length/content without base64 expansion. Verification and compensation entrypoints cannot point into ignored directories. Supporting files are never injected wholesale; an active frame may read only declared regular files through `read_skill_reference`, subject to the source/revision boundary and 128 KiB direct-read limit.
+
+ToolSpec Registry 阶段 3 已把 Skill 领域规则收口到
+`src/core/skills/lifecycle.ts`。active frame 的 task/revision 校验、声明文件读取边界、inline
+结构化完成、activation、fork 输出校验、`skill.frame_closed` 与 Verification 请求均由该服务
+统一产生；三个 Skill ToolSpec 只保留 Schema、契约、effects、服务调用与结果投影。事件和
+回放形状不变。
 
 Phase 5 progressive disclosure is complete. With `toolSearchV1` enabled, MCP Tools ≤20 within token budget are directly bound to avoid a search round-trip; Skill disclosure uses an independent budget decision and is never force-disclosed by a small MCP catalog. `tool_search` is always exposed regardless of disclosure mode, reverting to metadata search when the catalog exceeds budget. Selected Tools remain loaded for the session while their revisions match. Search never authorizes execution. Stale search results, unsupported providers and revision drift fail closed.
 
@@ -53,3 +119,5 @@ MCP failure isolation is a session-level invariant. Protocol errors, unavailable
 When the MCP provider directory contains unavailable entries, `tool_search` may also be exposed beside a catalog that otherwise fits the budget. A query matching a provider name or last-known Tool name returns only a bounded provider status, diagnostic code and fixed next action. `degraded` providers are excluded from unavailable search results (they remain callable). It never returns a schema, capability ID or executable handle and never creates a binding. Provider status predicates (callable/unavailable/healthy) and next-action mapping are centralized in `src/core/capabilities/provider-status.ts`. Provider Action and required-provider admission lifecycles are available only behind their shared default-off flag and preserve ADR-0012.
 
 The E2E contract uses real MCP transports and real on-disk scope resolution. It covers user-level authenticated HTTP MCP with environment-expanded bearer headers, invalid-token fail-closed behavior, project-level authenticated stdio MCP after production approval, absence of stdio process and HTTP requests before approval, project-over-user precedence, plus user/project Skill discovery, shadowing, tool execution and frame closure. Credentials must not appear in Runtime or persisted events. OAuth/interactive `authProvider` is implemented through the same Manager/SDK path and has a local HTTP integration covering discovery, dynamic registration, PKCE/state, code exchange and post-auth discovery. TUI PTY Login/Cancel/opener failure and macOS Keychain, Windows Credential Manager and Linux Secret Service native smoke have passed. See [`mcp-authentication.md`](mcp-authentication.md).
+
+Builtin skill/tool catalog (`src/core/skills/catalog.ts`) tracks known agent tools. `apply_patch` was removed — it had a contract (`TOOL_CONTRACTS`) but was never registered as an agent tool.

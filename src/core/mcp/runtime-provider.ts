@@ -2,6 +2,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import type { McpConfigSourceKind } from '@/core/config/mcp-config';
 import type { CapabilityDescriptor, CapabilitySnapshot } from '@/protocol/capabilities';
 import type { McpDiagnosticCode } from './diagnostics';
+import type { McpCapabilityRouteV1, RemoteMcpEgressInvocationPolicyV1 } from './egress-permit';
 
 export type McpProviderDirectoryStatus =
   | 'pending_approval'
@@ -46,6 +47,7 @@ export interface McpCapabilityInvocation {
   capabilityId: string;
   expectedRevision: string;
   arguments: Record<string, unknown>;
+  remoteEgress?: RemoteMcpEgressInvocationPolicyV1;
   signal?: AbortSignal;
 }
 
@@ -55,6 +57,8 @@ export interface McpRuntimeProvider {
   getProviderDirectorySnapshot(): McpProviderDirectorySnapshot;
   getResourceDirectorySnapshot(): McpResourceDirectorySnapshot;
   findCapability(capabilityId: string): CapabilityDescriptor | undefined;
+  /** Redacted transport identity used by the independent remote-content gate. */
+  getCapabilityRoute?(capabilityId: string): McpCapabilityRouteV1 | undefined;
   /** Wait for an already-configured remote provider to become executable. */
   ensureProviderReady?(providerId: string, timeoutMs?: number, signal?: AbortSignal): Promise<void>;
   callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;

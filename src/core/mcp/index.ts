@@ -39,6 +39,34 @@ export {
 export type { McpDiagnostic, McpDiagnosticCode } from './diagnostics';
 export { diagnoseMcpError, redactDiagnosticMessage } from './diagnostics';
 export type {
+  McpCapabilityRouteV1,
+  RemoteMcpArgumentInspectionV1,
+  RemoteMcpArgumentSnapshotV1,
+  RemoteMcpDataClassificationV1,
+  RemoteMcpEgressContentV1,
+  RemoteMcpEgressDecisionReasonV1,
+  RemoteMcpEgressDecisionRecorderV1,
+  RemoteMcpEgressInvocationPolicyV1,
+  RemoteMcpEgressPermitRequestV1,
+  RemoteMcpEgressPermitResolverV1,
+  RemoteMcpEgressPermitV1,
+  RemoteMcpEgressReceiptV1,
+  RemoteMcpPayloadKindV1,
+} from './egress-permit';
+export {
+  classifyRemoteMcpArgumentsV1,
+  createRemoteMcpEgressPermitV1,
+  createRemoteMcpEgressReceiptV1,
+  hasRemoteMcpContentV1,
+  inspectRemoteMcpArgumentsV1,
+  REMOTE_MCP_EGRESS_MAX_TTL_MS,
+  RemoteMcpEgressDeniedError,
+  RemoteMcpEgressPermitLedgerV1,
+  reclassifyRemoteMcpEgressReceiptV1,
+  remoteMcpArgumentDigestV1,
+  snapshotRemoteMcpArgumentsV1,
+} from './egress-permit';
+export type {
   McpInventoryFailure,
   McpInventoryNextAction,
   McpInventoryProviderSummary,
@@ -80,7 +108,9 @@ export {
   configuredMcpToolNames,
   hasConfiguredMcpToolPolicy,
   isMcpToolEnabled,
+  type ResolvedMcpContentEgressPolicyV1,
   type ResolvedMcpToolPolicy,
+  resolveMcpContentEgressPolicyV1,
   resolveMcpToolPolicy,
 } from './tool-policy';
 export type {

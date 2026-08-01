@@ -1,22 +1,21 @@
 # 当前规则：工具描述即契约
 
 状态：active
-最后更新：2026-05-06
-最后验证：2026-05-06
+最后更新：2026-07-30
+最后验证：2026-07-30
 范围：
 
-- `src/tools/tool-contracts.ts`
-- `src/tools/definitions.ts`（description 字段）
-- `src/tools/apply-patch.ts`（APPLY_PATCH_DESCRIPTION 常量）
+- `src/core/tools/tool-contracts.ts`
+- `src/core/tools/definitions.ts`（description 字段）
 - `tests/tool-definitions.test.ts`（契约验证测试）
 
 读取时机：
 
 - 创建或修改工具定义，包括新增工具、调整 schema 或修改 description。
 - 修改 `src/tools/tool-contracts.ts` 中的契约结构或内容。
-- 修改工具的实际行为（`src/tools/file.ts`、`src/tools/shell.ts`、`src/tools/apply-patch.ts`），需要同步更新契约。
+- 修改工具的实际行为（`src/core/tools/file.ts`、`src/core/tools/shell.ts`），需要同步更新契约。
 - 修改 `src/harness/tool-runner.ts` 中的工具执行逻辑、错误处理或 `toolUsageGuidance()`。
-- 新增工具注册到 `definitions.ts` 的 `createAgentTools()`。
+- 新增工具注册到 `src/core/tools/registry/builtins.ts`。
 
 相关：
 
@@ -58,15 +57,26 @@
   Failure: [failureHandling]
   ```
 
+### Registry 迁移边界（ADR-0043）
+
+工具契约的单一事实源正从 `tool-contracts.ts` 迁移到 ToolSpec Registry（`src/core/tools/registry/`）。迁移期规则：
+
+- 未迁移工具：契约继续写在 `tool-contracts.ts`，本节规则不变。
+- 已迁移工具：契约移入 `spec.contract`，`description` 仍由 `buildDescription()` 生成，四个 section 的质量要求不变。
+- 新增工具一律直接注册到 Registry；模型表面 description 的确定性由 `tests/tools/tool-registry-conformance.test.ts` 守护。
+
 ### 契约与实现的同步
 
 - 修改工具实现行为时必须同步更新对应契约的四个 section。
 - 修改 `tool-runner.ts` 中的执行结果格式、错误信息或 `toolUsageGuidance()` 时，必须检查契约的 `outputFormat` 和 `failureHandling` 是否一致。
-- 新增工具时必须先创建契约，再在 `definitions.ts` 中注册。
+- 修改静态工具的模型结果、截断、diff 或结构化元数据时，必须在对应 `spec.projectResult()` 中完成；Runner/Controller 只消费投影。
+- 新增工具时必须先创建 ToolSpec 契约，再在生产 Registry 中注册；`definitions.ts` 只投影 Registry，不得再次枚举静态工具名。
 
-### apply_patch 特殊处理
+### `ask_user` 模型输入边界
 
-`APPLY_PATCH_CONTRACT` 的 `description` 字段保留原始 `APPLY_PATCH_DESCRIPTION` 常量（Codex 风格的补丁格式规范），不经由 `buildDescription()` 生成。当 `apply_patch` 工具接入 `definitions.ts` 时，需决定是否将四个 section 合并到最终 description。
+`ask_user` 的模型参数只有一种规范形态：顶层必须且只能使用 `questions` 数组，单问题也是长度为 1 的数组。每次调用包含 1-3 个问题，每个问题包含 `question` 与 2-3 个 `{label, description}` 选项；第一个选项表示推荐项。模型不得提交顶层 `question`/`options`、问题或选项 ID、`recommended`、`allow_free_text`，也不得显式添加 `Other` 选项。
+
+ToolSpec 的输入 Schema 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`createInterrupt()` 在 Schema 校验后生成稳定问题/选项 ID，将第一项标记为推荐，并为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
 
 ## 不要做
 
@@ -88,5 +98,4 @@
 - 每个工具的 `commonMistakes` 包含可识别的失败模式关键词。
 - 每个工具的 `outputFormat` 提及 `ok` 字段。
 - 每个工具的 `failureHandling` 包含可执行的恢复动作。
-- `shell_execute` 契约专项覆盖 intent 枚举和审批拒绝场景。
-- `apply_patch` 契约已存在且结构完整。
+- `shell_execute` 契约专项覆盖纯命令形态驱动的审批拒绝与恢复场景；契约不得再要求模型提交 `intent`、授权建议或 prefix rule。

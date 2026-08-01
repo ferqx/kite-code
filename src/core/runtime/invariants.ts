@@ -1,6 +1,7 @@
 // ── Runtime 状态不变量 / Runtime state invariants ──
 
 import { validateVerificationSpec } from '@/core/verification/spec';
+import { assertResourceBudgetRuntimeStateV1 } from './resource-budget';
 import type { RuntimeState, ToolCallStatus } from './state';
 
 const TERMINAL_TOOL_STATUSES = new Set<ToolCallStatus>([
@@ -53,10 +54,23 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       'lastAppliedEventId must be present in appliedEventIds.',
     );
   }
-  assert(state.recoveryState.kind === 'normal', 'recovery state must be normal before execution.');
+  assert(
+    state.recoveryState.kind === 'normal' || state.turn.status === 'aborted',
+    'recovery state must be normal before execution.',
+  );
+  assert(
+    state.turn.status === 'active' ||
+      state.turn.status === 'completed' ||
+      state.turn.status === 'aborted',
+    'turn status must be a known lifecycle value.',
+  );
+  if (state.turn.status === 'aborted') {
+    assert(Boolean(state.turn.abortReason), 'aborted turn reason is required.');
+  }
   assertUnique(state.tools.queue, 'tool queue');
   assertUnique(state.tools.active, 'active tools');
   assert(state.context != null, 'context runtime state is required.');
+  assertResourceBudgetRuntimeStateV1(state.resourceBudget);
   assert(state.context.autoGuard != null, 'context autoGuard is required.');
   assert(state.context.history.length <= 128, 'context compaction history exceeds its bound.');
   if (state.context.pendingCompaction) {

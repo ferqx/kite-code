@@ -5,18 +5,15 @@
  * 1. Renders the question with options in the footer area
  * 2. Accepts Enter to select the recommended/default option
  * 3. Recovers to idle state after answering
- *
- * IMPORTANT: Follows the same 3-test warmup pattern as input.test.ts
- * and approval.test.ts. Without warmup, model calls are silently skipped.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { submitUserMessage } from '../harness/input-helpers';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -30,7 +27,7 @@ describe('TUI PTY System — ask_user', () => {
     workspace = createTestWorkspace();
 
     // Response #1: ask_user tool call — triggers need_input interrupt
-    // Response #2: spare for generateSessionName wrap-around
+    // Response #2: model continuation after the structured user answer.
     server.setResponses([
       {
         message: {
@@ -40,61 +37,51 @@ describe('TUI PTY System — ask_user', () => {
               id: 'call_1',
               name: 'ask_user',
               args: {
-                question: 'What is your favorite color?',
-                options: [
-                  { id: 'blue', label: 'Blue' },
-                  { id: 'red', label: 'Red' },
+                questions: [
+                  {
+                    question: 'What is your favorite color?',
+                    options: [
+                      { label: 'Blue', description: 'Choose a calm primary color.' },
+                      { label: 'Red', description: 'Choose a warm primary color.' },
+                    ],
+                  },
                 ],
-                recommended: 'blue',
               },
             },
           ],
         },
       },
-      { message: { content: 'Ask test session' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['Blue'] }],
+        },
+        message: { content: 'Ask test session' },
+      },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.output(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
-    // Allow raw mode transition to settle before sending keystrokes
-    await new Promise((r) => setTimeout(r, 300));
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── ask_user Question → Enter to accept default ────────────
 
   test(
     'ask_user renders question, Enter accepts default and recovers',
     async () => {
-      await typeText(tui, 'Ask me a question');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Ask me a question', 15000);
+      await submitUserMessage(tui, server, 'Ask me a question', { timeout: 15000 });
 
-      // Wait for the question to appear in the TUI output
-      await waitForText(() => tui.output(), 'What is your favorite color?', 15000);
+      // The question may appear in the Tool Card before the interactive footer
+      // finishes rendering. The last option is the modal-ready witness.
+      await waitForText(() => tui.viewport(), 'Red', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, 'What is your favorite color?')).toBe(true);
       // Options should be visible
       expect(screenContains(output, 'Blue')).toBe(true);
@@ -102,10 +89,12 @@ describe('TUI PTY System — ask_user', () => {
 
       // Press Enter to accept the recommended/default option (Blue, index 0)
       tui.write('\r');
-      await sleep(2000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Ask test session', 15000);
+      await waitForTuiReady(tui);
 
-      // TUI should recover — prompt visible
-      const afterOutput = tui.output();
+      // The verified answer reached the model and the TUI recovered.
+      const afterOutput = tui.viewport();
+      expect(screenContains(afterOutput, 'Ask test session')).toBe(true);
       expect(screenContains(afterOutput, '❯')).toBe(true);
     },
     TIMEOUT,

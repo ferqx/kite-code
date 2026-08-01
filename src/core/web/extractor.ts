@@ -1,3 +1,4 @@
+import { NetworkBoundaryError } from '@/core/sandbox/network-enforcer';
 import { checkUrl } from './ssrf';
 import type { WebFetchResult } from './types';
 
@@ -13,7 +14,7 @@ const MAX_ROBOTS_RULES = 100; // 单域名 Disallow 规则上限
  *
  *  Check if target path is disallowed by robots.txt (basic rule parsing).
  *  Gracefully allows on unreachable/timeout — never blocks requests. */
-async function checkRobotsTxt(parsed: URL): Promise<{ allowed: boolean }> {
+async function checkRobotsTxt(parsed: URL, fetchImpl: typeof fetch): Promise<{ allowed: boolean }> {
   const domain = parsed.hostname;
   const cached = robotsCache.get(domain);
   if (cached && Date.now() - cached.fetchedAt < ROBOTS_CACHE_TTL_MS) {
@@ -52,7 +53,7 @@ async function checkRobotsTxt(parsed: URL): Promise<{ allowed: boolean }> {
     let robotsRedirects = 0;
     let resp: Response | undefined;
     while (robotsRedirects <= 2) {
-      const r = await fetch(robotsUrl, {
+      const r = await fetchImpl(robotsUrl, {
         signal: controller.signal,
         headers: { 'User-Agent': 'KiteCode/1.0 WebFetchBot', Accept: 'text/plain' },
         redirect: 'manual',
@@ -171,6 +172,8 @@ export interface ExtractOptions {
   maxChars?: number;
   /** 最大重定向次数，默认 3 / Max redirect count */
   maxRedirects?: number;
+  /** Governed fetch implementation. Production boundaries must provide one. */
+  fetch?: typeof fetch;
 }
 
 interface WorkerResult {
@@ -313,7 +316,8 @@ export async function fetchAndExtract(
 
   // ── 2. robots.txt 检查 + domain 节流 ──
   const parsedUrl = new URL(url);
-  const robotsCheck = await checkRobotsTxt(parsedUrl);
+  const fetchImpl = options?.fetch ?? fetch;
+  const robotsCheck = await checkRobotsTxt(parsedUrl, fetchImpl);
   if (!robotsCheck.allowed) {
     return {
       ok: false,
@@ -347,7 +351,7 @@ export async function fetchAndExtract(
     const maxRedirects = options?.maxRedirects ?? 3;
 
     while (redirects <= maxRedirects) {
-      const resp = await fetch(currentUrl, {
+      const resp = await fetchImpl(currentUrl, {
         signal: controller.signal,
         headers: {
           'User-Agent': 'KiteCode/1.0 WebFetchBot',
@@ -406,7 +410,7 @@ export async function fetchAndExtract(
         return { ok: false, url, truncated: false, error: `HTTP ${resp.status}` };
       }
 
-      finalUrl = resp.url;
+      finalUrl = currentUrl;
       contentType = resp.headers.get('content-type') ?? '';
 
       // 分类 Content-Type / Classify content type
@@ -470,6 +474,7 @@ export async function fetchAndExtract(
       };
     }
   } catch (err) {
+    if (err instanceof NetworkBoundaryError) throw err;
     if (err instanceof Error && err.name === 'AbortError') {
       return {
         ok: false,

@@ -1,6 +1,18 @@
-import { mkdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  realpathSync,
+  rmdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { findUsableBubblewrap } from './platform';
 import type { ResourceLimits } from './types';
 import { DEFAULT_RESOURCE_LIMITS } from './types';
 
@@ -17,21 +29,190 @@ export function buildUlimitPreamble(limits: Partial<ResourceLimits> = {}): strin
   return `${parts.join(' ; ')} ; `;
 }
 
-/** 沙箱运行时目录（系统临时目录下，不污染工作区）/ Sandbox runtime dir in system temp, never in workspace */
-let _runtimeDir: string | null = null;
+/** Create an invocation-private runtime directory bound to one canonical Workspace identity. */
+export function createSandboxRuntimeDir(workspace: string): string {
+  const workspaceRoot = realpathSync.native(resolve(workspace));
+  const workspaceKey = createHash('sha256').update(workspaceRoot).digest('hex').slice(0, 16);
+  const base = join(tmpdir(), 'openpx-sandbox-runtime');
+  mkdirSync(base, { recursive: true, mode: 0o700 });
+  chmodSync(base, 0o700);
+  const runtimeDir = mkdtempSync(join(base, `${workspaceKey}-`));
+  chmodSync(runtimeDir, 0o700);
+  return runtimeDir;
+}
 
-export function getSandboxRuntimeDir(): string {
-  if (!_runtimeDir) {
-    _runtimeDir = join(tmpdir(), 'openpx-sandbox-runtime');
-    mkdirSync(_runtimeDir, { recursive: true });
+/**
+ * Remove one invocation runtime without following attacker-created symlinks.
+ * Returns false instead of throwing so cleanup cannot replace the tool result.
+ */
+export function cleanupSandboxRuntimeDir(runtimeDir: string): boolean {
+  const base = resolve(tmpdir(), 'openpx-sandbox-runtime');
+  const target = resolve(runtimeDir);
+  const rel = relative(base, target);
+  if (!rel || rel.startsWith(`..${sep}`) || rel.includes(sep) || dirname(target) !== base) {
+    return false;
   }
-  return _runtimeDir;
+  if (!/^[0-9a-f]{16}-.+/.test(basename(target))) return false;
+  try {
+    const root = lstatOrNull(target);
+    if (!root) return true;
+    if (root.isSymbolicLink()) {
+      if (!removeRuntimeRootLink(target)) return false;
+      return lstatOrNull(target) === null;
+    }
+    const cleaned =
+      process.platform === 'darwin'
+        ? runDarwinPhysicalCleanup(target)
+        : process.platform === 'linux'
+          ? runLinuxIsolatedCleanup(target)
+          : runWindowsPhysicalCleanup(target);
+    if (!cleaned) {
+      return false;
+    }
+    return lstatOrNull(target) === null;
+  } catch {
+    return false;
+  }
+}
+
+function lstatOrNull(path: string) {
+  try {
+    return lstatSync(path);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+function removeRuntimeRootLink(target: string): boolean {
+  if (
+    process.platform === 'darwin' &&
+    !runCleanupCommands([['/usr/bin/chflags', '-f', '-h', 'nouchg,nouappnd', target]])
+  ) {
+    return false;
+  }
+  try {
+    unlinkSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runDarwinPhysicalCleanup(target: string): boolean {
+  const findArgs = [
+    '/usr/bin/find',
+    '-P',
+    '-x',
+    target,
+    '-exec',
+    '/usr/bin/chflags',
+    '-f',
+    '-h',
+    'nouchg,nouappnd',
+    '{}',
+    ';',
+    '-exec',
+    '/bin/chmod',
+    '-f',
+    '-h',
+    'u+rwx',
+    '{}',
+    ';',
+  ];
+  return runCleanupCommands([
+    ['/usr/bin/chflags', '-f', '-h', 'nouchg,nouappnd', target],
+    ['/bin/chmod', '-f', '-h', 'u+rwx', target],
+    findArgs,
+    ['/bin/rm', '-f', '-r', target],
+  ]);
+}
+
+function runLinuxIsolatedCleanup(target: string): boolean {
+  const bwrap = findUsableBubblewrap();
+  if (!bwrap) {
+    // An installed but unusable binary is not a native cleanup boundary. The
+    // executor will not select it, and any pre-existing runtime is retained so
+    // a physical traversal cannot race an attacker-controlled symlink swap.
+    return false;
+  }
+  const args = [bwrap];
+  for (const path of ['/usr', '/bin', '/sbin', '/lib', '/lib64']) {
+    if (existsSync(path)) args.push('--ro-bind', path, path);
+  }
+  args.push(
+    '--bind',
+    target,
+    '/runtime',
+    '--tmpfs',
+    '/tmp',
+    '--dev',
+    '/dev',
+    '--proc',
+    '/proc',
+    '--unshare-pid',
+    '--unshare-net',
+    '--die-with-parent',
+    '--new-session',
+    '/bin/sh',
+    '-c',
+    // GNU chmod ignores symlinks encountered during recursive traversal. Any
+    // referent is also absent or read-only in this cleanup-only mount namespace.
+    '/bin/chmod -R u+rwx /runtime && /usr/bin/find -P /runtime -mindepth 1 -delete',
+  );
+  const result = Bun.spawnSync(args, { stdout: 'ignore', stderr: 'ignore' });
+  if (result.exitCode !== 0) return false;
+  try {
+    rmdirSync(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function runWindowsPhysicalCleanup(target: string): boolean {
+  try {
+    restoreAndRemoveWindowsEntry(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function restoreAndRemoveWindowsEntry(path: string): void {
+  const entry = lstatOrNull(path);
+  if (!entry) return;
+  if (entry.isSymbolicLink()) {
+    unlinkSync(path);
+    return;
+  }
+  if (!entry.isDirectory()) {
+    chmodSync(path, 0o600);
+    unlinkSync(path);
+    return;
+  }
+  chmodSync(path, 0o700);
+  for (const child of readdirSync(path)) restoreAndRemoveWindowsEntry(join(path, child));
+  rmdirSync(path);
+}
+
+function runCleanupCommands(commands: string[][]): boolean {
+  for (const command of commands) {
+    const result = Bun.spawnSync(command, { stdout: 'ignore', stderr: 'ignore' });
+    if (result.exitCode !== 0) return false;
+  }
+  return true;
 }
 
 /** 构建硬化后的环境变量 / Build hardened environment variables */
-export function buildHardenedEnv(_workspace: string): Record<string, string> {
-  const sandboxTmp = join(getSandboxRuntimeDir(), 'tmp');
-  const sandboxBunCache = join(getSandboxRuntimeDir(), 'bun-cache');
+export function buildHardenedEnv(workspace: string, runtimeDir: string): Record<string, string> {
+  const canonicalWorkspace = realpathSync.native(resolve(workspace));
+  const canonicalRuntimeDir = realpathSync.native(resolve(runtimeDir));
+  if (canonicalRuntimeDir === canonicalWorkspace) {
+    throw new Error('Sandbox runtime directory must be outside the Workspace.');
+  }
+  const sandboxTmp = join(canonicalRuntimeDir, 'tmp');
+  const sandboxBunCache = join(canonicalRuntimeDir, 'bun-cache');
 
   // 确保沙箱目录存在 / Ensure sandbox directories exist
   mkdirSync(sandboxTmp, { recursive: true });
@@ -56,7 +237,7 @@ export function buildHardenedEnv(_workspace: string): Record<string, string> {
     env.HOME = process.env.HOME;
   }
 
-  // 重定向临时目录和缓存到工作区 / Redirect temp dirs and caches into workspace
+  // Redirect temp dirs and caches to this invocation-private runtime directory.
   env.TMPDIR = sandboxTmp;
   env.TMP = sandboxTmp;
   env.TEMP = sandboxTmp;

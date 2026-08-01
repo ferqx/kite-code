@@ -1,11 +1,47 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { applyEdits, modify, parse } from 'jsonc-parser';
 import { z } from 'zod';
+import type {
+  ExecutionBoundaryAdmissionV1,
+  ExecutionBoundaryV1,
+  ExecutionCapabilitySurfaceV1,
+  ProductionExecutionEntrypointV1,
+} from '@/core/sandbox/types';
+import { admitProductionExecutionBoundaryV1 } from './execution-boundary';
 import type { FeatureFlags } from './features';
 import { mcpServerSchema } from './mcp-server-config';
 import { defaultConfigPath, projectConfigPath } from './paths';
+import {
+  resolveSessionLoggingPolicyV1,
+  type SessionLoggingPolicyV1,
+} from './session-logging-policy';
 
+export type {
+  ExecutionBoundaryAdmissionInputV1,
+  ExecutionBoundaryQualificationEvaluationInputV1,
+  TightenExecutionBoundaryInputV1,
+} from './execution-boundary';
+export {
+  admitProductionExecutionBoundaryV1,
+  computeExecutionBoundaryDigestV1,
+  executionBackendCapabilitiesV1Schema,
+  executionBoundaryV1Schema,
+  parseExecutionBoundaryV1,
+  tightenExecutionBoundaryV1,
+} from './execution-boundary';
+export {
+  APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_DIGEST_V1,
+  APPROVED_PRODUCTION_EXECUTION_QUALIFICATION_REVISION_V1,
+  computeInProcessReadOnlyToolCatalogDigestV1,
+  computeProductionExecutionQualificationRegistryDigestV1,
+  inProcessReadOnlyToolCatalogV1Schema,
+  loadApprovedProductionExecutionQualificationRegistryV1,
+  parseProductionExecutionQualificationRegistryV1,
+  parseProductionExecutionQualificationV1,
+  productionExecutionQualificationRegistryV1Schema,
+  qualificationMatchesExecutionEnvironmentV1,
+} from './execution-qualification';
 export {
   DEFAULT_FEATURE_FLAGS,
   getFeatureFlags,
@@ -36,6 +72,58 @@ export {
   validateMcpServerName,
 } from './mcp-config-repository';
 export { expandEnvVars } from './mcp-server-config';
+export type {
+  ProviderDataAdmissionDecisionV1,
+  ProviderDataAdmissionGateV1,
+  ProviderDataAdmissionInputV1,
+  ProviderDataAdmissionReasonV1,
+  ProviderDataPolicyRegistryV1,
+  ProviderDispatchPurposeV1,
+  ProviderPayloadKindV1,
+  ProviderPayloadPartV1,
+} from './provider-data-admission';
+export {
+  APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
+  APPROVED_PROVIDER_DATA_POLICY_REVISION_V1,
+  createApprovedProviderDataAdmissionV1,
+  createProviderDataPolicyRegistryV1,
+  evaluateProviderDataAdmissionV1,
+  loadApprovedProviderDataPolicyRegistryV1,
+  loadProviderDataPolicyRegistryV1,
+  ProviderDataAdmissionError,
+  providerPayloadFromModelPromptV1,
+  providerRouteIdentityFromAgentConfigV1,
+} from './provider-data-admission';
+export type {
+  ProviderDataPolicyBundleV1,
+  ProviderDataPolicyV1,
+  ProviderRouteIdentityV1,
+  WorkspaceDataLabelV1,
+} from './provider-data-policy';
+export {
+  computeProviderDataPolicyBundleDigest,
+  computeProviderEndpointIdentityDigest,
+  normalizeProviderRouteIdentityV1,
+  parseProviderDataPolicyBundleV1,
+  parseProviderDataPolicyV1,
+  providerDataPolicyBundleV1Schema,
+  providerDataPolicyV1Schema,
+  providerRouteIdentityV1Schema,
+  raiseWorkspaceDataLabelV1,
+  workspaceDataLabelV1Schema,
+} from './provider-data-policy';
+export type {
+  SessionLoggingMode,
+  SessionLoggingPolicyTightening,
+  SessionLoggingPolicyV1,
+} from './session-logging-policy';
+export {
+  DEFAULT_SESSION_LOGGING_POLICY_V1,
+  parseSessionLoggingPolicyV1,
+  resolveSessionLoggingPolicyV1,
+  sessionLoggingPolicyV1Schema,
+  tightenSessionLoggingPolicyV1,
+} from './session-logging-policy';
 
 // ── Zod schemas ──
 
@@ -52,13 +140,14 @@ const modelEntrySchema = z.union([
       tokenizerFamily: z.string().min(1).optional(),
       supportsUsageMetadata: z.boolean().optional(),
       supportsPromptCache: z.boolean().optional(),
+      streaming: z.boolean().optional(),
     })
     .strict(),
 ]);
 
 const providerSchema = z.object({
   type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
-  apiKey: z.string().min(1).optional(),
+  apiKey: z.string().optional(),
   baseURL: z.string().url().optional(),
   /** Default model name */
   model: z.string().optional(),
@@ -85,6 +174,15 @@ const sandboxSchema = z
     enabled: z.boolean().optional(),
   })
   .optional();
+const sessionLoggingTighteningSchema = z
+  .object({
+    mode: z.enum(['off', 'metadata', 'content']).optional(),
+    retentionDays: z.number().int().positive().optional(),
+    maxTotalBytes: z.number().int().positive().optional(),
+    maxSessionBytes: z.number().int().positive().optional(),
+  })
+  .strict()
+  .optional();
 
 const featuresSchema = z
   .object({
@@ -104,6 +202,14 @@ const featuresSchema = z
     contextCompactionV2: z.boolean().optional(),
     contextCompactionAutoV1: z.boolean().optional(),
     contextCompactionManualV1: z.boolean().optional(),
+    sessionLoggingPolicyV1: z.boolean().optional(),
+    providerDataPolicyV1: z.boolean().optional(),
+    remoteMcpEgressPolicyV1: z.boolean().optional(),
+    resourceBudgetV1: z.boolean().optional(),
+    terminalOutcomeV1: z.boolean().optional(),
+    boundedCancellationV1: z.boolean().optional(),
+    executionBoundaryV1: z.boolean().optional(),
+    networkBoundaryV1: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -116,6 +222,7 @@ export const configSchema = z.object({
   colorPreset: z.string().optional(),
   interactionMode: interactionModeSchema.optional(),
   features: featuresSchema,
+  sessionLogging: sessionLoggingTighteningSchema,
   sandbox: sandboxSchema,
   autoReview: z
     .object({
@@ -215,9 +322,16 @@ export interface AgentConfig {
     tokenizerFamily?: string;
     supportsUsageMetadata?: boolean;
     supportsPromptCache?: boolean;
+    streaming?: boolean;
   };
   interactionMode?: z.infer<typeof interactionModeSchema>;
   features?: Partial<FeatureFlags>;
+  /** Release-pinned execution boundary; never sourced from project/user config. */
+  executionBoundary?: ExecutionBoundaryV1;
+  /** Exact capability surface admitted by the sealed production gate. */
+  executionCapabilitySurface?: ExecutionCapabilitySurfaceV1;
+  /** Resolved artifact + user + project session logging policy. */
+  sessionLoggingPolicy?: SessionLoggingPolicyV1;
   sandbox: {
     enabled: boolean;
   };
@@ -233,6 +347,17 @@ export interface AgentConfig {
   compaction?: NonNullable<KiteCodeConfig['compaction']>;
 }
 
+declare const productionAgentConfigBrandV1: unique symbol;
+
+/** Config returned only after release-approved execution admission. */
+export interface ProductionAgentConfigV1 extends AgentConfig {
+  readonly [productionAgentConfigBrandV1]: true;
+  executionBoundary: ExecutionBoundaryV1;
+  executionCapabilitySurface: ExecutionCapabilitySurfaceV1;
+  sandbox: { readonly enabled: true };
+  productionExecution: NonNullable<ExecutionBoundaryAdmissionV1['qualificationProof']>;
+}
+
 /** 加载配置选项 / Configuration loading options */
 export interface LoadAgentConfigOptions {
   /** 配置文件路径 / Configuration file path */
@@ -241,6 +366,36 @@ export interface LoadAgentConfigOptions {
   providerName?: string;
   /** 覆盖默认模型名称 / Override default model name */
   modelName?: string;
+  /** Workspace whose project config is loaded. Defaults to process.cwd(). */
+  workspace?: string;
+  /** Release-controlled policy; callers cannot source this from project config. */
+  artifactSessionLoggingPolicy?: SessionLoggingPolicyV1;
+}
+
+export interface LoadProductionAgentConfigOptions extends LoadAgentConfigOptions {
+  /** Release-profile ceiling. Config rollout can only disable it. */
+  artifactExecutionBoundaryV1Enabled: boolean;
+  /** Release-controlled boundary. Project/user config cannot define it. */
+  artifactExecutionBoundary: unknown;
+  /** Canonical workspace selected by the composition root. */
+  workspaceRoot: string;
+  /** Production composition root being admitted. */
+  entrypoint: ProductionExecutionEntrypointV1;
+  /** CLI/App rollout overrides; still bounded by the release ceiling. */
+  featureOverrides?: Partial<FeatureFlags>;
+  /** CLI/App sandbox restriction; false cannot be overridden by config. */
+  sandboxEnabled?: boolean;
+}
+
+export function composeExecutionBoundaryRolloutV1(
+  layers: readonly (boolean | undefined)[],
+): boolean {
+  const explicit = layers.filter((value): value is boolean => value !== undefined);
+  return explicit.length > 0 && explicit.every((value) => value);
+}
+
+function composeSandboxEnabledV1(layers: readonly (boolean | undefined)[]): boolean {
+  return layers.every((value) => value !== false);
 }
 
 export {
@@ -280,6 +435,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     colorPreset: project.colorPreset ?? user.colorPreset,
     interactionMode: project.interactionMode ?? user.interactionMode,
     features: { ...user.features, ...project.features },
+    sessionLogging: project.sessionLogging ?? user.sessionLogging,
     sandbox: project.sandbox ?? user.sandbox,
     autoReview: project.autoReview ?? user.autoReview,
     compaction: project.compaction ?? user.compaction,
@@ -332,8 +488,20 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
 /** 加载并解析 Agent 配置 / Load and parse agent configuration */
 export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConfig {
   const { configPath } = options;
-  const cfg = loadConfig(process.cwd(), configPath);
-
+  const workspace = options.workspace ?? process.cwd();
+  const cfg = loadConfig(workspace, configPath);
+  const userSessionLogging = configPath
+    ? cfg.sessionLogging
+    : readConfigFile(defaultConfigPath())?.sessionLogging;
+  const projectSessionLogging = configPath
+    ? undefined
+    : readConfigFile(projectConfigPath(workspace))?.sessionLogging;
+  const sessionLoggingPolicy = resolveSessionLoggingPolicyV1({
+    enabled: cfg.features?.sessionLoggingPolicyV1 ?? false,
+    artifactPolicy: options.artifactSessionLoggingPolicy,
+    user: userSessionLogging,
+    project: projectSessionLogging,
+  });
   const defaultModel = findDefaultModel(cfg);
 
   const providerName = options.providerName ?? defaultModel?.provider ?? 'deepseek';
@@ -375,15 +543,97 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
             ...(selected.supportsPromptCache != null
               ? { supportsPromptCache: selected.supportsPromptCache }
               : {}),
+            ...(selected.streaming != null ? { streaming: selected.streaming } : {}),
           },
         }
       : {}),
     interactionMode: cfg.interactionMode,
     features: cfg.features,
+    sessionLoggingPolicy,
     sandbox: { enabled: cfg.sandbox?.enabled ?? true },
     autoReview: cfg.autoReview,
     compaction: cfg.compaction,
   };
+}
+
+export class ProductionExecutionAdmissionError extends Error {
+  readonly decision: ExecutionBoundaryAdmissionV1;
+
+  constructor(decision: ExecutionBoundaryAdmissionV1) {
+    super(`Production execution admission denied: ${decision.reason}`);
+    this.name = 'ProductionExecutionAdmissionError';
+    this.decision = decision;
+  }
+}
+
+/**
+ * Production-only composition gate. It resolves ordinary configuration but
+ * returns no runnable config unless both release and rollout flags are enabled
+ * and the sealed native qualification registry admits this exact environment.
+ */
+export function loadProductionAgentConfig(
+  options: LoadProductionAgentConfigOptions,
+): ProductionAgentConfigV1 {
+  const {
+    artifactExecutionBoundary,
+    artifactExecutionBoundaryV1Enabled,
+    workspaceRoot,
+    entrypoint,
+    featureOverrides,
+    sandboxEnabled,
+    ...agentOptions
+  } = options;
+  const canonicalWorkspaceRoot = realpathSync.native(resolve(workspaceRoot));
+  const configLayers = agentOptions.configPath
+    ? [readConfigFile(agentOptions.configPath)]
+    : [
+        readConfigFile(defaultConfigPath()),
+        readConfigFile(projectConfigPath(canonicalWorkspaceRoot)),
+      ];
+  const executionBoundaryRolloutEnabled = composeExecutionBoundaryRolloutV1([
+    ...configLayers.map((layer) => layer?.features?.executionBoundaryV1),
+    featureOverrides?.executionBoundaryV1,
+  ]);
+  const networkBoundaryRolloutEnabled = composeExecutionBoundaryRolloutV1([
+    ...configLayers.map((layer) => layer?.features?.networkBoundaryV1),
+    featureOverrides?.networkBoundaryV1,
+  ]);
+  const effectiveSandboxEnabled = composeSandboxEnabledV1([
+    ...configLayers.map((layer) => layer?.sandbox?.enabled),
+    sandboxEnabled,
+  ]);
+  const config = loadAgentConfig({ ...agentOptions, workspace: canonicalWorkspaceRoot });
+  const resolvedFeatures = { ...config.features, ...featureOverrides };
+  const featureEnabled = artifactExecutionBoundaryV1Enabled && executionBoundaryRolloutEnabled;
+  const decision = admitProductionExecutionBoundaryV1({
+    featureEnabled,
+    boundary: artifactExecutionBoundary,
+    workspaceRoot: canonicalWorkspaceRoot,
+    entrypoint,
+    sandboxEnabled: effectiveSandboxEnabled,
+  });
+  if (
+    !decision.allowed ||
+    decision.admissionKind !== 'release_approved' ||
+    !decision.boundary ||
+    !decision.qualificationProof
+  ) {
+    throw new ProductionExecutionAdmissionError(decision);
+  }
+  return {
+    ...config,
+    features: {
+      ...resolvedFeatures,
+      executionBoundaryV1: true,
+      networkBoundaryV1: networkBoundaryRolloutEnabled,
+    },
+    executionBoundary: decision.boundary,
+    executionCapabilitySurface: networkBoundaryRolloutEnabled
+      ? decision.surface
+      : { ...decision.surface, network: false },
+    sandbox: { enabled: true },
+    productionExecution: decision.qualificationProof,
+  } as ProductionAgentConfigV1;
 }
 
 /** Like loadAgentConfig but returns null instead of throwing when no API key is configured. */
@@ -393,6 +643,65 @@ export function tryLoadAgentConfig(options: LoadAgentConfigOptions = {}): AgentC
   } catch {
     // No config file or missing API key → first-run setup needed
     return null;
+  }
+}
+
+export type ConfigProbeResult =
+  | {
+      status: 'ready';
+      config: AgentConfig;
+    }
+  | {
+      status: 'not-configured';
+    }
+  | {
+      status: 'invalid';
+      path: string;
+      message: string;
+    };
+
+/**
+ * Probe the agent configuration, distinguishing between:
+ * - ready: valid config with an API key
+ * - not-configured: no config file or no API key
+ * - invalid: config file exists but is malformed / fails schema validation
+ *
+ * Does NOT auto-enter setup; callers decide how to handle each case.
+ */
+export function probeAgentConfig(options: LoadAgentConfigOptions = {}): ConfigProbeResult {
+  const configPath = options.configPath ?? defaultConfigPath();
+  try {
+    const config = loadAgentConfig(options);
+    return { status: 'ready', config };
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      // If the only issue is an empty/missing apiKey, treat as not-configured
+      // rather than "configuration corrupt". The Zod schema uses .min(1) which
+      // rejects empty strings before resolveProviderApiKey can throw "requires apiKey".
+      const isApiKeyOnly = err.issues.every(
+        (issue) => issue.path.includes('apiKey') && issue.code === 'too_small',
+      );
+      if (isApiKeyOnly) {
+        return { status: 'not-configured' };
+      }
+      const firstIssue = err.issues[0];
+      const message = firstIssue
+        ? `${firstIssue.path.join('.')}: ${firstIssue.message}`
+        : 'Configuration schema validation failed.';
+      return { status: 'invalid', path: configPath, message };
+    }
+    if (err instanceof Error && err.message.includes('requires apiKey')) {
+      // Config file exists but has no API key — treat as not yet configured
+      return { status: 'not-configured' };
+    }
+    if (err instanceof Error && err.message.includes('config file not found')) {
+      return { status: 'not-configured' };
+    }
+    // Parsing errors from jsonc-parser, or other unexpected failures during load
+    if (err instanceof Error) {
+      return { status: 'invalid', path: configPath, message: err.message };
+    }
+    return { status: 'not-configured' };
   }
 }
 
@@ -440,12 +749,18 @@ function modelEntryObject(entry: unknown): {
 
 /**
  * Find the default model from config.
- * Priority: provider.model > legacy default:true > first model > null
+ * Priority:
+ * 1. Provider with apiKey + model set (first found)
+ * 2. Provider with apiKey + default:true model
+ * 3. Provider with apiKey + first model
+ * 4. Provider with model + apiKey from env var
+ * 5. Fall through all providers regardless of apiKey
  */
 function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string } | null {
+  // Pass 1: providers with an explicit apiKey
   for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (!prov.apiKey) continue;
     if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
-    // Legacy: model entry with default:true
     if (prov.models) {
       for (const m of prov.models) {
         if (modelEntryObject(m)?.default) {
@@ -455,6 +770,19 @@ function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string
       }
     }
   }
+  // Pass 2: providers with models (apiKey may come from env var)
+  for (const [provName, prov] of Object.entries(cfg.provider)) {
+    if (prov.model && prov.models?.length) return { provider: provName, name: prov.model };
+    if (prov.models) {
+      for (const m of prov.models) {
+        if (modelEntryObject(m)?.default) {
+          const name = modelEntryName(m);
+          if (name) return { provider: provName, name };
+        }
+      }
+    }
+  }
+  // Fallback: first model of any provider with models
   // Fallback: first model of first provider with models
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (prov.models?.length) {

@@ -55,14 +55,24 @@ describe('test discovery boundaries', () => {
     expect(e2eFiles).toContain('tests/e2e/live/model/context-compaction.live.ts');
   });
 
-  test('keeps real-agent and PTY suites out of the default test script', () => {
+  test('keeps real-agent and PTY scenarios out while admitting deterministic TUI harness tests', () => {
     const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
       scripts?: Record<string, string>;
     };
+    const defaultRunner = readFileSync(join(repoRoot, 'scripts', 'run-default-tests.ts'), 'utf8');
 
-    expect(pkg.scripts?.test).toContain('bun test');
-    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/tui-system/**'");
-    expect(pkg.scripts?.test).toContain("--path-ignore-patterns='tests/pty-spike/**'");
+    expect(pkg.scripts?.test).toContain('scripts/run-default-tests.ts');
+    expect(defaultRunner).not.toContain("'tests/tui-system/**'");
+    expect(defaultRunner).toContain("'tests/tui-system/scenarios/**'");
+    expect(defaultRunner).toContain("'tests/tui-system/smoke/**'");
+    expect(defaultRunner).toContain("'tests/pty-spike/**'");
+    expect(defaultRunner).toContain("'tests/sandbox-executor.test.ts'");
+    expect(defaultRunner).toContain("'tests/sandbox-bwrap-executor.test.ts'");
+    expect(defaultRunner).toContain("'tests/mcp-config-catalog.test.ts'");
+    expect(defaultRunner).toContain("'tests/runtime/plan-artifacts.test.ts'");
+    expect(defaultRunner).toContain('KITE_CODE_HOME: testHome');
+    expect(defaultRunner).toContain('HOME: testHome');
+    expect(pkg.scripts?.['test:all']).toBe('bun run test && bun run test:tui:system');
     expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/tui-system/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/e2e/live/');
@@ -70,6 +80,12 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
     expect(pkg.scripts?.['test:model:live']).toContain('tests/e2e/live/model/');
     expect(pkg.scripts?.['test:model:live']).toContain('bun run');
+    expect(pkg.scripts?.['test:tui:system']).toContain('scripts/run-tui-system-tests.ts');
+    expect(pkg.scripts?.['test:tui:harness']).toContain('tests/tui-system/harness/');
+    expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain('tests/sandbox-executor.test.ts');
+    expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain(
+      'tests/sandbox-bwrap-executor.test.ts',
+    );
     expect(pkg.scripts?.['test:real']).toBeUndefined();
     expect(pkg.scripts?.['test:real:direct']).toBeUndefined();
   });

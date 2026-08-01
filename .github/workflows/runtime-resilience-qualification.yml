@@ -1,0 +1,79 @@
+name: Runtime Resilience Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Deterministic case-order seed
+        required: true
+        default: "1729"
+        type: choice
+        options:
+          - "1729"
+      iterations:
+        description: Formal outer qualification iterations
+        required: true
+        default: "8"
+        type: choice
+        options:
+          - "8"
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: fault-soak-qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 190
+    env:
+      QUALIFICATION_SEED: ${{ inputs.seed }}
+      QUALIFICATION_ITERATIONS: ${{ inputs.iterations }}
+      QUALIFICATION_REPOSITORY: ${{ github.repository }}
+      QUALIFICATION_HEAD_SHA: ${{ github.sha }}
+      QUALIFICATION_REF: ${{ github.ref }}
+      QUALIFICATION_WORKFLOW_REF: ${{ github.workflow_ref }}
+      QUALIFICATION_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      QUALIFICATION_RUN_ID: ${{ github.run_id }}
+      QUALIFICATION_RUN_ATTEMPT: ${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Run bounded qualification
+        run: |
+          bun run scripts/runtime/run-fault-soak.ts \
+            --profile=qualification \
+            --seed="$QUALIFICATION_SEED" \
+            --iterations="$QUALIFICATION_ITERATIONS" \
+            --source-repository="$QUALIFICATION_REPOSITORY" \
+            --source-head-sha="$QUALIFICATION_HEAD_SHA" \
+            --source-ref="$QUALIFICATION_REF" \
+            --source-workflow="runtime-resilience-qualification.yml" \
+            --source-workflow-ref="$QUALIFICATION_WORKFLOW_REF" \
+            --source-workflow-sha="$QUALIFICATION_WORKFLOW_SHA" \
+            --source-run-id="$QUALIFICATION_RUN_ID" \
+            --source-run-attempt="$QUALIFICATION_RUN_ATTEMPT" \
+            --output=runtime-resilience-qualification.json
+      - name: Verify qualification evidence
+        if: always()
+        run: |
+          bun run scripts/runtime/verify-fault-soak-qualification.ts \
+            --report=runtime-resilience-qualification.json \
+            --expected-repository="$QUALIFICATION_REPOSITORY" \
+            --expected-head-sha="$QUALIFICATION_HEAD_SHA" \
+            --expected-ref="$QUALIFICATION_REF" \
+            --expected-workflow-ref="$QUALIFICATION_WORKFLOW_REF" \
+            --expected-workflow-sha="$QUALIFICATION_WORKFLOW_SHA" \
+            --expected-run-id="$QUALIFICATION_RUN_ID" \
+            --expected-run-attempt="$QUALIFICATION_RUN_ATTEMPT"
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-resilience-qualification-${{ github.run_id }}
+          path: runtime-resilience-qualification.json
+          if-no-files-found: error
+          retention-days: 30

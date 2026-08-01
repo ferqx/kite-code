@@ -6,8 +6,9 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -23,46 +24,23 @@ describe('TUI PTY System — Startup', () => {
     workspace = createTestWorkspace();
     workspace.env.CI = 'true';
 
-    server.setResponses([{ message: { content: 'Hello from PTY test!' } }]);
+    server.setResponses([]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui.output(), '❯', 15000);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   test(
-    'TUI starts and renders prompt ❯ in a CI-backed PTY',
+    'renders the prompt, footer, and Kite Code branding in a CI-backed PTY',
     async () => {
-      // Wait for the TUI to fully render (prompt character)
-      await waitForText(() => tui.output(), '❯', 15000);
-      const output = tui.output();
+      await waitForText(() => tui.viewport(), 'shortcuts', 10000);
+      const output = await waitForText(() => tui.viewport(), 'Kite Code', 5000);
       expect(screenContains(output, '❯')).toBe(true);
-      console.log('  TUI rendered, prompt visible');
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'TUI renders footer with shortcuts text',
-    async () => {
-      // Footer may render in later frames — wait for it
-      await waitForText(() => tui.output(), 'shortcuts', 10000);
-      console.log('  Footer visible');
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'TUI renders header with Kite Code branding',
-    async () => {
-      await waitForText(() => tui.output(), 'Kite Code', 5000);
-      console.log('  Header visible');
+      expect(screenContains(output, 'shortcuts')).toBe(true);
+      expect(screenContains(output, 'Kite Code')).toBe(true);
     },
     TIMEOUT,
   );

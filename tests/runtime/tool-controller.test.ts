@@ -3,14 +3,140 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
-import { executeRuntimeTools, toRuntimeSubagentEvent } from '@/core/controllers/tool-controller';
+import {
+  buildBlockedToolRequest,
+  executeRuntimeTools,
+  toRuntimeSubagentEvent,
+} from '@/core/controllers/tool-controller';
 import { exposedMcpToolName } from '@/core/mcp';
 import { McpConnectionManager } from '@/core/mcp/manager';
+import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
+import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
+import { getRoleConfig } from '@/core/subagent/roles';
+import { toolAvailabilityContext } from '@/core/tools/definitions';
+import { createMockModel } from '../mock-model';
 
 describe('executeRuntimeTools', () => {
+  test('reserves and reconciles the actual child tool when a suspended Sub-agent resumes', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-subagent-resume-budget-'));
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'subagent-resume-budget',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'model',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'Run pwd and finish.' },
+        status: 'approved',
+        approvalGrant: 'approve_once',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.active.push('task');
+      state.suspendedSubagents.task = serializeSubagentContinuation(
+        {
+          id: 'child',
+          role: getRoleConfig('code'),
+          task: 'Run pwd and finish.',
+          messages: [
+            aiMessage({
+              content: 'I need to inspect the directory.',
+              tool_calls: [{ id: 'child-shell', name: 'shell_execute', args: { command: 'pwd' } }],
+            }),
+          ],
+          toolCallCount: 1,
+          steps: [
+            {
+              toolName: 'shell_execute',
+              toolArgs: { command: 'pwd' },
+              status: 'awaiting_approval',
+            },
+          ],
+        },
+        {
+          toolCallId: 'child-shell',
+          toolName: 'shell_execute',
+          args: { command: 'pwd' },
+          command: 'pwd',
+        },
+      );
+
+      const order: string[] = [];
+      const model = createMockModel([{ message: aiMessage({ content: 'Done.' }) }]);
+      const generate = model.model.doGenerate.bind(model.model);
+      model.model.doGenerate = async (...args: unknown[]) => {
+        order.push('model-dispatch');
+        return generate(...args);
+      };
+      const config: AgentConfig = {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        features: { resourceBudgetV1: true, boundedCancellationV1: true },
+        sandbox: { enabled: false },
+      };
+
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: config,
+        taskModel: model,
+        subagentEventSink: () => {},
+        shellExecutor: async ({ command }) => {
+          order.push('tool-dispatch');
+          return { ok: true, command, exitCode: 0, stdout: workspace, stderr: '' };
+        },
+        descendantResourceAdmission: {
+          reserveTool: async () => {
+            order.push('reserve-tool');
+            return { reservationId: 'child-tool' };
+          },
+          reconcileTool: async ({ reservationId }) => {
+            expect(reservationId).toBe('child-tool');
+            order.push('reconcile-tool');
+          },
+          reserveModel: async () => {
+            order.push('reserve-model');
+            return { reservationId: 'child-model', maxOutputTokens: 64 };
+          },
+          reconcileModel: async ({ reservationId }) => {
+            expect(reservationId).toBe('child-model');
+            order.push('reconcile-model');
+          },
+          markUnknown: async () => {
+            order.push('unknown');
+          },
+          markLocalProviderAdmissionDenied: async () => {
+            order.push('released');
+          },
+        },
+      });
+
+      expect(order).toEqual([
+        'reserve-tool',
+        'tool-dispatch',
+        'reconcile-tool',
+        'reserve-model',
+        'model-dispatch',
+        'reconcile-model',
+      ]);
+      expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'tool.finished', toolCallId: 'task' }),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('executes a normalized model tool name against the original remote MCP name', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-normalized-mcp-name',
@@ -76,6 +202,12 @@ describe('executeRuntimeTools', () => {
     };
     let calledWith: { server: string; tool: string } | undefined;
     runtimeManager.ensureProviderReady = async () => {};
+    runtimeManager.getCapabilityRoute = () => ({
+      transport: 'stdio',
+      serverIdentity: descriptor.provider.id,
+      endpointRevision: 'stdio-v1',
+      toolRevision: descriptor.revision,
+    });
     manager.findCapability = () => descriptor;
     manager.callCapability = async () => {
       calledWith = { server: descriptor.provider.id, tool: descriptor.displayName };
@@ -99,6 +231,224 @@ describe('executeRuntimeTools', () => {
 
     expect(calledWith).toEqual({ server: 'docs.provider', tool: remoteToolName });
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+  });
+
+  test('sealed network boundary rejects every MCP provider path before readiness or search', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'sealed-mcp-network',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization = { mode: 'full_access', commandGrants: {} };
+    const descriptor = {
+      capabilityId: 'mcp:docs/search',
+      revision: 'revision-1',
+      kind: 'mcp_tool' as const,
+      displayName: 'search',
+      description: 'search fixture',
+      provider: { type: 'mcp' as const, id: 'docs', provenance: 'remote' as const },
+      inputSchema: {
+        type: 'object',
+        properties: { query: { type: 'string' } },
+        required: ['query'],
+      },
+      declaredEffects: {
+        filesystem: 'none' as const,
+        network: 'read' as const,
+        externalState: 'read' as const,
+      },
+      effectiveEffects: {
+        filesystem: 'none' as const,
+        network: 'read' as const,
+        externalState: 'read' as const,
+      },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' as const },
+      availability: 'available' as const,
+      diagnostics: [],
+    };
+    const dynamicName = exposedMcpToolName('docs', 'search');
+    state.capabilities.bindings.binding = {
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: dynamicName,
+      schemaDigest: 'schema',
+      issuedForTurnId: state.turn.turnId,
+    };
+    state.tools.calls.resource = {
+      toolCallId: 'resource',
+      modelMessageId: 'model',
+      name: 'read_mcp_resource',
+      args: { server: 'docs', uri: 'docs://one' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.dynamic = {
+      toolCallId: 'dynamic',
+      modelMessageId: 'model',
+      name: dynamicName,
+      args: { query: 'runtime' },
+      status: 'queued',
+      bindingId: 'binding',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.search = {
+      toolCallId: 'search',
+      modelMessageId: 'model',
+      name: 'tool_search',
+      args: { query: 'docs search' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('resource', 'dynamic', 'search');
+
+    const manager = new McpConnectionManager();
+    const runtimeManager = manager as McpConnectionManager & {
+      ensureProviderReady(providerId: string, timeoutMs?: number): Promise<void>;
+    };
+    let providerCalls = 0;
+    runtimeManager.ensureProviderReady = async () => {
+      providerCalls += 1;
+    };
+    manager.findCapability = () => {
+      providerCalls += 1;
+      return descriptor;
+    };
+    manager.callCapability = async () => {
+      providerCalls += 1;
+      return { content: [] };
+    };
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['resource', 'dynamic', 'search'],
+      mcpManager: runtimeManager,
+      taskConfig: {
+        apiKey: 'test',
+        baseURL: 'http://localhost',
+        modelName: 'mock',
+        providerName: 'mock',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: true },
+        features: {
+          capabilityCatalogV1: true,
+          mcpRuntimeBindingV1: true,
+          toolSearchV1: true,
+          networkBoundaryV1: true,
+        },
+        executionBoundary: {
+          filesystemScope: 'workspace_write',
+          workspaceRoot: process.cwd(),
+          networkMode: 'allowlist',
+          networkAllowlist: ['docs.example'],
+          allowLocalAndPrivateNetwork: false,
+          protectedPathPolicy: 'deny',
+          maxProcessTreeSizePerShellInvocation: 8,
+          sandboxRequired: true,
+          sandboxUnavailable: 'fail',
+        },
+      },
+    });
+
+    expect(providerCalls).toBe(0);
+    expect(events).toHaveLength(3);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'tool.rejected', toolCallId: 'resource' }),
+        expect.objectContaining({ type: 'tool.rejected', toolCallId: 'dynamic' }),
+        expect.objectContaining({ type: 'tool.rejected', toolCallId: 'search' }),
+      ]),
+    );
+    for (const event of events) {
+      expect(event).toMatchObject({
+        type: 'tool.rejected',
+        failure: { kind: 'mandatory_policy_unavailable' },
+      });
+    }
+  });
+
+  test('ask_user emits user_input.requested with the interrupt spec payload', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-ask-user-interrupt',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.ask = {
+      toolCallId: 'ask',
+      modelMessageId: 'model',
+      name: 'ask_user',
+      args: {
+        questions: [
+          {
+            question: 'Continue with the migration?',
+            options: [
+              { label: 'Continue', description: 'Proceed with the migration now.' },
+              { label: 'Pause', description: 'Keep the current state and stop here.' },
+            ],
+          },
+        ],
+      },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('ask');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['ask'] });
+
+    const requested = events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'user_input.requested' }> =>
+        event.type === 'user_input.requested',
+    );
+    expect(requested).toBeDefined();
+    // 载荷是 Schema 规范化的中断内容：question 从 questions[0] 派生，
+    // options/allow_free_text 补齐默认值——模型原始 args 不直通事件。
+    expect(requested?.request).toEqual({
+      question: 'Continue with the migration?',
+      options: [
+        {
+          id: 'q1-o1',
+          label: 'Continue',
+          description: 'Proceed with the migration now.',
+        },
+        {
+          id: 'q1-o2',
+          label: 'Pause',
+          description: 'Keep the current state and stop here.',
+        },
+      ],
+      allow_free_text: true,
+      recommended: 'q1-o1',
+      questions: [
+        {
+          id: 'q1',
+          question: 'Continue with the migration?',
+          options: [
+            {
+              id: 'q1-o1',
+              label: 'Continue',
+              description: 'Proceed with the migration now.',
+            },
+            {
+              id: 'q1-o2',
+              label: 'Pause',
+              description: 'Keep the current state and stop here.',
+            },
+          ],
+          recommended: 'q1-o1',
+          allow_free_text: true,
+        },
+      ],
+    });
+  });
+
+  test('controller routes the ask_user payload through askUserSpec.createInterrupt', () => {
+    const source = readFileSync(
+      new URL('../../src/core/controllers/tool-controller.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain('askUserSpec.createInterrupt(');
   });
 
   test('fails closed when a provider reconnect changes the bound descriptor revision', async () => {
@@ -317,6 +667,42 @@ describe('executeRuntimeTools', () => {
     ]);
   });
 
+  test('rejects the removed top-level ask_user shape', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-legacy-ask-shape',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.ask = {
+      toolCallId: 'ask',
+      modelMessageId: 'model',
+      name: 'ask_user',
+      args: {
+        question: 'Continue?',
+        options: [
+          { id: 'yes', label: 'Yes' },
+          { id: 'no', label: 'No' },
+        ],
+      },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('ask');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['ask'] });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'ask',
+        failure: expect.objectContaining({
+          kind: 'tool_invalid_args',
+          message: expect.stringContaining('questions'),
+        }),
+      }),
+    ]);
+  });
+
   test('fails closed when a dynamic MCP call has no Runtime-issued binding', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-unbound-mcp',
@@ -454,6 +840,12 @@ describe('executeRuntimeTools', () => {
     const manager = new McpConnectionManager();
     manager.findCapability = (capabilityId) =>
       capabilityId === descriptor.capabilityId ? descriptor : undefined;
+    manager.getCapabilityRoute = () => ({
+      transport: 'stdio',
+      serverIdentity: descriptor.provider.id,
+      endpointRevision: 'stdio-v1',
+      toolRevision: descriptor.revision,
+    });
     manager.callCapability = async ({ arguments: args }) =>
       ({
         content: [
@@ -526,7 +918,7 @@ describe('executeRuntimeTools', () => {
     expect(flagOffEvents.some((event) => event.type === 'verification.requested')).toBe(false);
   });
 
-  test('uses the first batch question when ask_user omits the summary question', async () => {
+  test('derives the internal summary question from the first canonical item', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-batch-ask',
       userId: 'user',
@@ -537,7 +929,15 @@ describe('executeRuntimeTools', () => {
       modelMessageId: 'model',
       name: 'ask_user',
       args: {
-        questions: [{ id: 'scope', question: 'What scope should be covered?' }],
+        questions: [
+          {
+            question: 'What scope should be covered?',
+            options: [
+              { label: 'Focused', description: 'Cover only the critical path.' },
+              { label: 'Complete', description: 'Cover the full production rollout.' },
+            ],
+          },
+        ],
       },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
@@ -577,7 +977,7 @@ describe('executeRuntimeTools', () => {
       toolCallId: 'denied',
       modelMessageId: 'model',
       name: 'shell_execute',
-      args: { command: 'node -e "process.exit(0)"' },
+      args: { command: 'bun run typecheck' },
       status: 'queued',
       createdAtTurnId: state.turn.turnId,
     };
@@ -598,44 +998,87 @@ describe('executeRuntimeTools', () => {
       expect.objectContaining({
         type: 'tool.rejected',
         toolCallId: 'denied',
-        reason: 'Rejected shell_execute during planning phase.',
-        failure: expect.objectContaining({ kind: 'policy_denied' }),
+        reason: 'Deferred shell_execute until building phase.',
+        failure: expect.objectContaining({ kind: 'phase_deferred' }),
+      }),
+    ]);
+  });
+
+  test('keeps planning write calls as hard policy denials', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-write-policy',
+      userId: 'user',
+      workspace: process.cwd(),
+      phase: 'planning',
+    });
+    state.tools.calls.denied = {
+      toolCallId: 'denied',
+      modelMessageId: 'model',
+      name: 'write_file',
+      args: { path: 'blocked.txt', content: 'blocked' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('denied');
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['denied'],
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.rejected',
+        toolCallId: 'denied',
+        reason:
+          'Plan mode is read-only. No file was written. Describe the intended change in the plan and apply it after plan approval.',
+        failure: expect.objectContaining({ kind: 'phase_denied' }),
       }),
     ]);
   });
 
   test('finishes write_plan once and returns the persisted plan identity', async () => {
-    const state = createInitialRuntimeState({
-      threadId: 'runtime-plan-write',
-      userId: 'user',
-      workspace: process.cwd(),
-      phase: 'planning',
-    });
-    state.tools.calls.write = {
-      toolCallId: 'write',
-      modelMessageId: 'model',
-      name: 'write_plan',
-      args: {
-        title: 'Inspect runtime',
-        body_markdown: 'Inspect the runtime lifecycle and verify every transition.',
-        steps: [{ id: 'inspect-runtime', title: 'Inspect runtime lifecycle' }],
-      },
-      status: 'queued',
-      createdAtTurnId: state.turn.turnId,
-    };
-    state.tools.queue.push('write');
-
-    const events = await executeRuntimeTools({ state, toolCallIds: ['write'] });
-
-    const finished = events.find((event) => event.type === 'tool.finished');
-    expect(finished).toBeDefined();
-    if (finished?.type === 'tool.finished') {
-      expect(finished.name).toBe('write_plan');
-      expect(JSON.parse(finished.result.stdout)).toMatchObject({
-        ok: true,
-        status: 'draft_saved',
-        version: 1,
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-plan-artifact-'));
+    const previousKiteCodeHome = process.env.KITE_CODE_HOME;
+    process.env.KITE_CODE_HOME = workspace;
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'runtime-plan-write',
+        userId: 'user',
+        workspace,
+        phase: 'planning',
       });
+      state.tools.calls.write = {
+        toolCallId: 'write',
+        modelMessageId: 'model',
+        name: 'write_plan',
+        args: {
+          title: 'Inspect runtime',
+          body_markdown: 'Inspect the runtime lifecycle and verify every transition.',
+          steps: [{ id: 'inspect-runtime', title: 'Inspect runtime lifecycle' }],
+        },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('write');
+
+      const events = await executeRuntimeTools({ state, toolCallIds: ['write'] });
+
+      const finished = events.find((event) => event.type === 'tool.finished');
+      expect(finished).toBeDefined();
+      if (finished?.type === 'tool.finished') {
+        expect(finished.name).toBe('write_plan');
+        expect(finished.result.status).toBeUndefined();
+        expect(JSON.parse(finished.result.stdout)).toMatchObject({
+          ok: true,
+          status: 'draft_saved',
+          version: 1,
+        });
+      }
+    } finally {
+      if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
+      else process.env.KITE_CODE_HOME = previousKiteCodeHome;
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 
@@ -782,6 +1225,27 @@ describe('executeRuntimeTools', () => {
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
       };
+      // ADR-0042 §1：先读取目标文件，使后续 edit_file 通过先读后改校验。
+      state.tools.calls.rf = {
+        toolCallId: 'rf',
+        modelMessageId: 'model',
+        ordinal: 0,
+        name: 'read_file',
+        args: { path: 'test.txt' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('rf');
+      await executeRuntimeTools({
+        state,
+        toolCallIds: ['rf'],
+        shellExecutor: {
+          execute: async (_command: string, _opts?: Record<string, unknown>) => {
+            return { ok: true, command: 'read_file test.txt', exitCode: 0, stdout: '', stderr: '' };
+          },
+        } as never,
+      });
+
       state.tools.calls.ef = {
         toolCallId: 'ef',
         modelMessageId: 'model',
@@ -894,6 +1358,132 @@ describe('executeRuntimeTools', () => {
     expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
   });
 
+  test('starts an allowed shell without waiting for sibling preflight', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-parallel-shell-preflight',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    for (const [ordinal, toolCallId] of ['first', 'second'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'parallel-shell-model',
+        ordinal,
+        name: 'shell_execute',
+        args: { command: ordinal === 0 ? 'pwd' : 'git status' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push(toolCallId);
+    }
+    let executionCount = 0;
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['first'],
+      shellExecutor: async () => {
+        executionCount += 1;
+        return { ok: true, command: 'pwd', exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(executionCount).toBe(1);
+    expect(events.some((event) => event.type === 'tool.execution_ready')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.started')).toBe(true);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+  });
+
+  test('does not preflight shell calls across a non-shell sibling', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-shell-interaction-barrier',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization.mode = 'full_access';
+    const modelMessageId = 'mixed-tool-model';
+    state.tools.queue.push('shell-before', 'question', 'shell-after');
+    state.tools.calls['shell-before'] = {
+      toolCallId: 'shell-before',
+      modelMessageId,
+      ordinal: 0,
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.question = {
+      toolCallId: 'question',
+      modelMessageId,
+      ordinal: 1,
+      name: 'ask_user',
+      args: { question: 'Continue?' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls['shell-after'] = {
+      toolCallId: 'shell-after',
+      modelMessageId,
+      ordinal: 2,
+      name: 'shell_execute',
+      args: { command: 'git status' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    let executionCount = 0;
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['shell-before'],
+      shellExecutor: async ({ command }) => {
+        executionCount += 1;
+        return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(executionCount).toBe(1);
+    expect(events.some((event) => event.type === 'tool.execution_ready')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.finished')).toBe(true);
+  });
+
+  test('starts every approved shell sibling concurrently', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-parallel-shell-execution',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    for (const [ordinal, toolCallId] of ['first', 'second'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'parallel-shell-model',
+        ordinal,
+        name: 'shell_execute',
+        args: { command: `node task-${ordinal + 1}.js` },
+        status: 'approved',
+        approvalGrant: 'approve_once',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push(toolCallId);
+    }
+    let running = 0;
+    let maximumRunning = 0;
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['first', 'second'],
+      shellExecutor: async ({ command }) => {
+        running += 1;
+        maximumRunning = Math.max(maximumRunning, running);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        running -= 1;
+        return { ok: true, command, exitCode: 0, stdout: command, stderr: '' };
+      },
+    });
+
+    expect(maximumRunning).toBe(2);
+    expect(events.filter((event) => event.type === 'tool.started')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+  });
+
   test('streams shell lifecycle and progress events while the command is running', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-shell-stream',
@@ -912,11 +1502,20 @@ describe('executeRuntimeTools', () => {
     state.tools.queue.push('stream');
 
     const streamed: RuntimeEvent[] = [];
-    const returned = await executeRuntimeTools({
+    let releaseExecution!: () => void;
+    const executionGate = new Promise<void>((resolve) => {
+      releaseExecution = resolve;
+    });
+    let observeProgress!: () => void;
+    const progressObserved = new Promise<void>((resolve) => {
+      observeProgress = resolve;
+    });
+    const execution = executeRuntimeTools({
       state,
       toolCallIds: ['stream'],
       shellExecutor: async (input) => {
         input.onProgress?.('live output', 'stdout');
+        await executionGate;
         return {
           ok: true,
           command: input.command,
@@ -925,9 +1524,22 @@ describe('executeRuntimeTools', () => {
           stderr: '',
         };
       },
-      emitRuntimeEvent: (event) => streamed.push(event),
+      emitRuntimeEvent: (event) => {
+        streamed.push(event);
+        if (event.type === 'tool.progress') observeProgress();
+      },
     });
 
+    const progressArrivedWhileRunning = await Promise.race([
+      progressObserved.then(() => true),
+      Bun.sleep(1_000).then(() => false),
+    ]);
+    const eventTypesWhileRunning = streamed.map((event) => event.type);
+    releaseExecution();
+    const returned = await execution;
+
+    expect(progressArrivedWhileRunning).toBe(true);
+    expect(eventTypesWhileRunning).toEqual(['tool.started', 'tool.progress']);
     expect(returned).toEqual([]);
     expect(streamed.map((event) => event.type)).toEqual([
       'tool.started',
@@ -1123,5 +1735,116 @@ describe('executeRuntimeTools', () => {
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
+  });
+
+  test('classifies an unregistered tool as tool_not_found through the full pipeline', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-e2e-unknown-tool',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.unknown = {
+      toolCallId: 'unknown',
+      modelMessageId: 'model',
+      name: 'nonexistent_tool_xyz',
+      args: { foo: 'bar' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('unknown');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['unknown'] });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'unknown',
+        failure: expect.objectContaining({
+          kind: 'tool_not_found',
+          message: expect.stringContaining('nonexistent_tool_xyz'),
+        }),
+      }),
+    ]);
+  });
+
+  test('propagates parseFailureCode through InvalidToolRequest to ClassifiedFailure', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-e2e-invalid-args-code',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    // write_file has required 'path' and 'content' fields; empty args triggers
+    // schema validation failure which flows:
+    // Registry.parseToolCall(invalid_arguments) → toolRequestFromCall → InvalidToolRequest
+    // → Controller classifyFailure('tool_invalid_args', ..., 'invalid_arguments')
+    state.tools.calls.wf = {
+      toolCallId: 'wf',
+      modelMessageId: 'model',
+      name: 'write_file',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('wf');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['wf'] });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'wf',
+        failure: expect.objectContaining({
+          kind: 'tool_invalid_args',
+          parseFailureCode: 'invalid_arguments',
+        }),
+      }),
+    ]);
+  });
+});
+
+describe('buildBlockedToolRequest', () => {
+  const availCtx = toolAvailabilityContext({ workspace: '/tmp/test' });
+
+  test('returns a proper PendingBuiltinToolRequest for a registered builtin tool', () => {
+    const blocked = {
+      toolCallId: 'tc-1',
+      toolName: 'read_file',
+      args: { path: 'src/index.ts' },
+      command: 'read_file src/index.ts',
+    };
+    const request = buildBlockedToolRequest(blocked, availCtx);
+    expect(request.source).toBe('builtin');
+    expect(request.name).toBe('read_file');
+    expect(request.id).toBe('tc-1');
+    expect(request.args).toEqual({ path: 'src/index.ts' });
+    expect(request.protectedCommand).toBe('read_file src/index.ts');
+  });
+
+  test('returns a PendingMcpToolRequest for an MCP tool name in the fallback path', () => {
+    const blocked = {
+      toolCallId: 'tc-2',
+      toolName: 'mcp__github__read',
+      args: { query: 'test' },
+      command: 'mcp__github__read',
+    };
+    const request = buildBlockedToolRequest(blocked, availCtx);
+    expect(request.source).toBe('mcp');
+    expect(request.name).toBe('mcp__github__read');
+    expect(request.id).toBe('tc-2');
+    expect(request.args).toEqual({ query: 'test' });
+  });
+
+  test('returns a fallback PendingBuiltinToolRequest for an unknown tool name', () => {
+    const blocked = {
+      toolCallId: 'tc-3',
+      toolName: 'nonexistent_tool',
+      args: { foo: 'bar' },
+      command: 'nonexistent_tool',
+    };
+    const request = buildBlockedToolRequest(blocked, availCtx);
+    expect(request.source).toBe('builtin');
+    expect(request.name as string).toBe('nonexistent_tool');
+    expect(request.args).toEqual({ foo: 'bar' });
+    expect(request.reason).toContain('blocked for approval');
   });
 });

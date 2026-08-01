@@ -13,12 +13,13 @@
  * at new dimensions" — they pass on all platforms.
  */
 
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { clearInput, typeText } from '../harness/input-helpers';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { screenContains, stripAnsi } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
 
 const TIMEOUT = 30000;
 
@@ -26,48 +27,40 @@ describe('TUI PTY System — Terminal Resize', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let probeSequence = 0;
 
-  beforeAll(async () => {
+  async function expectInteractiveAfterResize(): Promise<void> {
+    const probe = `rz${++probeSequence}`;
+    await typeText(tui, probe);
+    expect(screenContains(tui.viewport(), probe)).toBe(true);
+    await clearInput(tui, probe.length);
+    expect(screenContains(tui.viewport(), probe)).toBe(false);
+  }
+
+  beforeEach(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
     // Provide an empty mock response so the TUI model provider
     // resolves on startup (defensive — we are not sending messages).
-    server.setResponses([{ message: { content: '' }, delay: 0 }]);
+    server.setResponses([]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered before running any test
-    await waitForText(() => tui.output(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
-    tui.setRawMode(true);
-    // Allow raw mode and Ink render to settle
-    await new Promise((r) => setTimeout(r, 500));
   });
 
-  afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+  afterEach(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  // ── Warmup ───────────────────────────────────────────────
-
-  test(
-    'warmup: input pipeline initialized',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   // ── Test 1: Initial Render at Configured Dimensions ──────────
 
   test(
     'TUI renders at initial dimensions (120x40)',
     async () => {
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
 
       console.log('  output snapshot (last 500 chars):', clean.slice(-500));
@@ -95,11 +88,10 @@ describe('TUI PTY System — Terminal Resize', () => {
       // but the call itself must not throw.
       tui.resize(80, 24);
 
-      // Give the TUI time to process and re-render.
-      await new Promise((r) => setTimeout(r, 800));
+      await expectInteractiveAfterResize();
 
       // TUI should still be alive with prompt visible.
-      const output = tui.output();
+      const output = tui.viewport();
       expect(screenContains(output, '❯')).toBe(true);
 
       console.log('  resize to 80x24 — prompt still visible, TUI alive');
@@ -114,20 +106,20 @@ describe('TUI PTY System — Terminal Resize', () => {
     async () => {
       // Resize 1: 80x24 → 100x30
       tui.resize(100, 30);
-      await new Promise((r) => setTimeout(r, 600));
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      await expectInteractiveAfterResize();
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
       console.log('  resize 80x24→100x30 — alive');
 
       // Resize 2: 100x30 → 80x24
       tui.resize(80, 24);
-      await new Promise((r) => setTimeout(r, 600));
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      await expectInteractiveAfterResize();
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
       console.log('  resize 100x30→80x24 — alive');
 
       // Resize 3: 80x24 → 120x40 (back to original)
       tui.resize(120, 40);
-      await new Promise((r) => setTimeout(r, 600));
-      expect(screenContains(tui.output(), '❯')).toBe(true);
+      await expectInteractiveAfterResize();
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
       console.log('  resize 80x24→120x40 — alive');
     },
     TIMEOUT,

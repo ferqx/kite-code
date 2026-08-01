@@ -13,6 +13,15 @@ export {
   type SkillCatalogSnapshot,
   scanCompiledSkillManifests,
 } from './catalog';
+export {
+  activateSkillLifecycle,
+  completeSkillLifecycle,
+  findActiveSkillFrame,
+  readSkillReference,
+  type SkillActivationContext,
+  type SkillLifecycleContext,
+  type SkillLifecycleEmission,
+} from './lifecycle';
 export type { SkillManifest, SkillScanOptions } from './types';
 export {
   type CompiledSkillWorkflow,

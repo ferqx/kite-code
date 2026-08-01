@@ -42,6 +42,11 @@ function server(overrides: Partial<McpServerControlState> = {}): Readonly<McpSer
     credentialPresent: false,
     health: 'ready',
     transport: 'http',
+    contentEgress: Object.freeze({
+      remote: true,
+      nonEmptyArgumentsClassification: 'confidential',
+      independentPermitRequired: true,
+    }),
     source: 'project',
     sourcePath: '/workspace/.kite-code/mcp.json',
     configuration: Object.freeze({ endpoint: 'https://example.com/mcp' }),

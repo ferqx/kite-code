@@ -17,12 +17,13 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { basename } from 'node:path';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { sleep, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { assertOrder, screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
-import { warmupInputPipeline } from '../harness/warmup';
+import { createTestWorkspace, readPersistedPlanArtifacts } from '../harness/test-workspace';
 
 const TIMEOUT = 45000;
 
@@ -47,53 +48,47 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
               id: 'call_ask',
               name: 'ask_user',
               args: {
-                question: 'What is your favorite color?',
-                options: [
-                  { id: 'blue', label: 'Blue' },
-                  { id: 'red', label: 'Red' },
+                questions: [
+                  {
+                    question: 'What is your favorite color?',
+                    options: [
+                      { label: 'Blue', description: 'Choose a calm primary color.' },
+                      { label: 'Red', description: 'Choose a warm primary color.' },
+                    ],
+                  },
                 ],
-                recommended: 'blue',
               },
             },
           ],
         },
       },
-      { message: { content: 'Got it! Your favorite color is blue.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_ask', contentIncludes: ['Blue'] }],
+        },
+        message: { content: 'Got it! Your favorite color is blue.' },
+      },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
-    tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  test(
-    'warmup',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'full lifecycle: interrupt → confirm → no duplicate, model continues',
     async () => {
       // ── 1. 触发 ask_user / Trigger ask_user ──
-      await typeText(tui, 'Ask me a question');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Ask me a question', 15000);
+      await submitUserMessage(tui, server, 'Ask me a question', { timeout: 15000 });
 
-      // 等中断块渲染 / Wait for interrupt block
-      await waitForText(() => tui.output(), 'What is your favorite color?', 15000);
+      // The question text may first appear in the started ask_user Tool Card.
+      // Wait for the last option that proves the interactive footer is complete.
+      await waitForText(() => tui.viewport(), 'Red', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
-      let output = tui.output();
+      let output = tui.viewport();
       expect(screenContains(output, 'What is your favorite color?')).toBe(true);
       expect(screenContains(output, 'Blue')).toBe(true);
       expect(screenContains(output, 'Red')).toBe(true);
@@ -104,9 +99,9 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
 
       // ── 4. 确认：按 Enter 接受默认选项 / Confirm: Enter to accept default ──
       tui.write('\r');
-      await sleep(2500);
+      await waitForText(() => tui.outputSinceLastAction(), 'Got it!', 15000);
 
-      output = tui.output();
+      output = tui.viewport();
 
       // ── 5. 验证模型继续运行（有重复中断就会卡住）/ Verify model continues (duplicate interrupt would block) ──
       expect(screenContains(output, 'Got it!')).toBe(true);
@@ -153,46 +148,47 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
           ],
         },
       },
-      { message: { content: 'Draft saved! Ready for review.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_write', contentIncludes: ['draft_saved'] }],
+        },
+        message: { content: 'Draft saved! Ready for review.' },
+      },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
-    tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  test(
-    'warmup',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'write_plan renders plan content in planning phase',
     async () => {
       // Enter planning phase
-      await typeText(tui, '/plan Draft a lifecycle plan');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Draft a lifecycle plan', 15000);
+      await submitCommand(tui, '/plan');
+      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 15000);
+      await waitForTuiReady(tui);
+      await submitUserMessage(tui, server, 'Draft a lifecycle plan', { timeout: 15000 });
 
       // Wait for follow-up text
-      await waitForText(() => tui.output(), 'Draft saved', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Draft saved', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after write_plan:', clean.slice(-2000));
 
       // Plan content visible
       expect(clean.includes('Lifecycle Test Plan')).toBe(true);
+
+      const artifacts = readPersistedPlanArtifacts(workspace);
+      expect(artifacts).toHaveLength(1);
+      expect(basename(artifacts[0]!.path)).toBe('v1.md');
+      expect(artifacts[0]!.content).toContain('# Lifecycle Test Plan');
+      expect(artifacts[0]!.content).toContain('Verify plan lifecycle rendering in the TUI.');
+      expect(artifacts[0]!.content).toContain('"id":"step-1"');
+      expect(artifacts[0]!.content).toContain('"title":"Step 2: Verify"');
 
       // No plan_review interrupt (write_plan does NOT trigger review)
       expect(clean.includes('Review the plan above')).toBe(false);
@@ -218,6 +214,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
     workspace = createTestWorkspace();
     server.setResponses([
       {
+        toolContinuation: 'aborted',
         message: {
           content: 'I will run a command.',
           tool_calls: [
@@ -229,68 +226,56 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
           ],
         },
       },
-      { message: { content: 'Command was rejected. Let me try another approach.' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
-    tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   test(
-    'warmup',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'full lifecycle: interrupt → deny → no duplicate, model continues',
+    'full lifecycle: interrupt → deny → current turn stops without model continuation',
     async () => {
       // ── 1. 触发审批 / Trigger approval ──
-      await typeText(tui, 'Make a directory');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Make a directory', 15000);
+      await submitUserMessage(tui, server, 'Make a directory', { timeout: 15000 });
 
       // 等审批块 / Wait for approval block
-      await waitForText(() => tui.output(), 'Approve this tool call?', 15000);
+      await waitForText(() => tui.viewport(), '› 允许一次', 15000);
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
-      let output = tui.output();
-      expect(screenContains(output, 'Approve this tool call?')).toBe(true);
-      expect(screenContains(output, 'Yes')).toBe(true);
-      expect(screenContains(output, 'Deny')).toBe(true);
+      let output = tui.viewport();
+      expect(screenContains(output, '授权执行命令')).toBe(true);
+      expect(screenContains(output, '允许一次')).toBe(true);
+      expect(screenContains(output, '拒绝')).toBe(true);
 
       // ── 3. 验证渲染顺序：模型文字在审批块之前 / Verify order: text before approval ──
-      const order = assertOrder(output, 'I will run a command', 'Approve this tool call?');
+      const order = assertOrder(output, 'I will run a command', '授权执行命令');
       expect(order.pass).toBe(true);
 
       // ── 4. 拒绝：导航到 Deny 确认 / Deny: navigate to Deny and confirm ──
       tui.write('\x1b[B');
-      await sleep(100);
+      await waitForText(() => tui.viewport(), '› 本次会话允许', 5000);
       tui.write('\x1b[B');
-      await sleep(100);
-      tui.write('\x1b[B');
-      await sleep(100);
+      await waitForText(() => tui.viewport(), '› 拒绝', 5000);
+      const rejectionFrames = tui.markScreen();
       tui.write('\r');
-      await sleep(3000);
+      await waitForTuiReady(tui);
 
-      // 等模型继续 / Wait for model to continue
-      await waitForText(() => tui.output(), 'Command was rejected', 15000);
+      output = tui.viewport();
+      const afterRejection = tui.screenFramesSince(rejectionFrames).join('\n');
+      console.log('  output after approval rejection:', stripAnsi(afterRejection).slice(-2000));
 
-      output = tui.output();
-
-      // ── 5. 验证模型继续运行（有重复中断就会卡住）/ Verify model continues (duplicate interrupt would block) ──
-      expect(screenContains(output, 'Command was rejected')).toBe(true);
-      expect(screenContains(output, '❯')).toBe(true);
+      // ── 5. 用户拒绝审批会中止当前 turn，不再执行工具或调用模型 ──
+      // Rejecting approval aborts the current turn without executing the tool
+      // or asking the model for a continuation.
+      expect(screenContains(afterRejection, '授权执行命令')).toBe(false);
+      expect(screenContains(afterRejection, 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION')).toBe(
+        false,
+      );
+      expect(screenContains(afterRejection, 'node -e "1+1"')).toBe(false);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );
@@ -307,7 +292,7 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({ files: { 'fixture.ts': 'export const marker = true;\n' } });
     server.setResponses([
       {
         message: {
@@ -315,44 +300,34 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
           tool_calls: [{ id: 'call_search', name: 'search_files', args: { pattern: '*.ts' } }],
         },
       },
-      { message: { content: 'Search complete.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_search', contentIncludes: ['fixture.ts'] }],
+        },
+        message: { content: 'Search complete.' },
+      },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.output(), '❯', 15000);
-    tui.setRawMode(true);
-    await new Promise((r) => setTimeout(r, 300));
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
-
-  test(
-    'warmup',
-    async () => {
-      await warmupInputPipeline(tui, server);
-    },
-    TIMEOUT,
-  );
 
   test(
     'full lifecycle: no interrupt, tool auto-executes, model continues',
     async () => {
       // ── 1. 触发自动放行工具 / Trigger auto-approved tool ──
-      await typeText(tui, 'Search for ts files');
-      tui.write('\r');
-      await waitForRequestMessage(server, 'Search for ts files', 15000);
+      await submitUserMessage(tui, server, 'Search for ts files', { timeout: 15000 });
 
       // 等工具执行完成 + 模型继续 / Wait for tool + model continuation
-      await waitForText(() => tui.output(), 'Search complete', 15000);
+      await waitForText(() => tui.outputSinceLastAction(), 'Search complete', 15000);
 
-      const output = tui.output();
+      const output = tui.viewport();
 
       // ── 2. 验证无审批块出现 / Verify no approval block ──
-      expect(screenContains(output, 'Approve this tool call?')).toBe(false);
+      expect(screenContains(output, '授权执行命令')).toBe(false);
 
       // ── 3. 验证渲染顺序：模型文字在工具之前 / Verify order: text before tool ──
       const order = assertOrder(output, 'Let me search for files', 'Search complete');

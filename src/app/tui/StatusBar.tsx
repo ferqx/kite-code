@@ -22,9 +22,17 @@ export function runStatusColor(theme: Theme, tone: RunStatusTone): string {
 }
 
 // ── spinner ──
-
-/** Flowing dot — 6-frame ping-pong @ 200 ms/frame (1200 ms round trip). */
-const SPINNER = ['●···', '·●··', '··●·', '···●', '··●·', '·●··'];
+// Variable-duration frames: breathes slower at ★ peak, faster at edges
+const SPINNER: [string, number][] = [
+  ['·', 150],
+  ['⋄', 240],
+  ['⋆', 180],
+  ['✧', 200],
+  ['✦', 240],
+  ['✧', 200],
+  ['⋆', 180],
+  ['⋄', 240],
+];
 
 export default function StatusBar({ runStatus, running, timerKey }: StatusBarProps) {
   const t = useTheme();
@@ -34,7 +42,6 @@ export default function StatusBar({ runStatus, running, timerKey }: StatusBarPro
 
   // Refs for timer-stable values — updated without restarting timers
   const startedAtRef = useRef(Date.now());
-  const tickRef = useRef(0);
 
   // Sync elapsed baseline from prop -> ref only when the parent-provided
   // elapsed value changes. Internal timer renders must not reset the baseline.
@@ -57,25 +64,35 @@ export default function StatusBar({ runStatus, running, timerKey }: StatusBarPro
     if (!running) {
       setSpinnerIdx(0);
       setLiveElapsedMs(0);
-      tickRef.current = 0;
       return;
     }
 
     const initialElapsed = runStatus?.elapsedMs ?? 0;
     startedAtRef.current = Date.now() - initialElapsed;
     setLiveElapsedMs(initialElapsed);
-    tickRef.current = 0;
 
-    // Single 200 ms tick drives all animations.
-    // React 18 batches the 2 state updates into 1 render.
-    const timer = setInterval(() => {
-      tickRef.current++;
+    // Elapsed timer — fixed 200 ms interval
+    const elapsedTimer = setInterval(() => {
       setLiveElapsedMs(Date.now() - startedAtRef.current);
-      // Spinner: advance every tick → 1200 ms full ping-pong
-      setSpinnerIdx((prev) => (prev + 1) % SPINNER.length);
     }, 200);
 
-    return () => clearInterval(timer);
+    // Spinner — recursive setTimeout with per-frame duration
+    let spinnerTimer: ReturnType<typeof setTimeout>;
+    const scheduleNext = (idx: number) => {
+      const [, ms] = SPINNER[idx]!;
+      spinnerTimer = setTimeout(() => {
+        const next = (idx + 1) % SPINNER.length;
+        setSpinnerIdx(next);
+        scheduleNext(next);
+      }, ms);
+    };
+    setSpinnerIdx(0);
+    scheduleNext(0);
+
+    return () => {
+      clearInterval(elapsedTimer);
+      clearTimeout(spinnerTimer);
+    };
   }, [running, timerKey]);
 
   if (!running) return null;
@@ -89,7 +106,7 @@ export default function StatusBar({ runStatus, running, timerKey }: StatusBarPro
 
   return (
     <Box>
-      <Text color={statusColor}>{SPINNER[spinnerIdx]} </Text>
+      <Text color={statusColor}>{SPINNER[spinnerIdx]![0]} </Text>
       <Text color={statusColor}>{statusLine}</Text>
     </Box>
   );

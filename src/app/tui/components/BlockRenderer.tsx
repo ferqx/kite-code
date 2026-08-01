@@ -3,6 +3,7 @@ import React from 'react';
 import { useTheme } from '../theme';
 import type { OutputBlock } from '../types';
 import MarkdownBlock from './MarkdownBlock';
+import { formatElapsed } from './render-utils';
 import SubAgentBlock from './SubAgentBlock';
 import { wrapDisplayLines } from './soft-wrap';
 import ToolCardBlock from './ToolCardBlock';
@@ -42,10 +43,27 @@ const TEXT_INDENT = 2;
  *
  *  斜杠命令是唯一的例外 — 命令结果应紧跟命令本身，0 间距。
  *  Slash commands are the only exception — results should directly follow the command. */
-function gapFrom(prevBlock?: OutputBlock) {
+function listBlockIdentity(
+  block: OutputBlock | undefined,
+  edge: 'first' | 'last',
+): string | undefined {
+  if (block?.kind !== 'text') return undefined;
+  const visibleLines = block.content.split('\n').filter((line) => line.trim().length > 0);
+  const edgeLine = edge === 'first' ? visibleLines[0] : visibleLines.at(-1);
+  const match = edgeLine?.match(/^(\s*)(?:(?:[-+*])\s+|(?:\d+)[.)]\s+)/);
+  if (!match) return undefined;
+  const ordered = /^\s*\d+[.)]\s+/.test(edgeLine ?? '');
+  return `${match[1]!.length}:${ordered ? 'ordered' : 'unordered'}`;
+}
+
+function gapFrom(prevBlock?: OutputBlock, block?: OutputBlock) {
   if (!prevBlock) return { marginTop: 0, marginBottom: 0 } as const;
   // 斜杠命令结果紧跟命令，无间距 / Slash command results follow commands directly, no gap
   if (prevBlock.kind === 'user' && prevBlock.content.startsWith('/')) {
+    return { marginTop: 0, marginBottom: 0 } as const;
+  }
+  const previousList = listBlockIdentity(prevBlock, 'last');
+  if (previousList && previousList === listBlockIdentity(block, 'first')) {
     return { marginTop: 0, marginBottom: 0 } as const;
   }
   return { marginTop: BLOCK_GAP, marginBottom: 0 } as const;
@@ -107,13 +125,27 @@ const BlockRenderer = React.memo(function BlockRenderer({
       const hasVisible = /\S/u.test(block.content);
       if (!hasVisible) return null;
       return (
-        <Box paddingLeft={TEXT_INDENT} marginTop={gapFrom(prevBlock).marginTop} marginBottom={0}>
-          <MarkdownBlock
-            content={block.content}
-            streaming={block.streaming}
-            color={block.isError ? dt.error : undefined}
-            maxWidth={columns - TEXT_INDENT}
-          />
+        <Box
+          flexDirection="column"
+          paddingLeft={TEXT_INDENT}
+          marginTop={gapFrom(prevBlock, block).marginTop}
+          marginBottom={0}
+        >
+          {/* ADR-0026：并入的纯思考题头——暗色、与正文间隔一行、无圆点
+              （● 保留给有状态的行）；TEXT_INDENT=2 使文字起始列与工具块名字列对齐。
+              ADR-0026: merged pure-thinking header — dim, one-line gap to the
+              body, no dot; TEXT_INDENT=2 aligns it with tool-block names. */}
+          {block.thoughtElapsedMs != null && (
+            <Text color={dt.dim}>Thought for {formatElapsed(block.thoughtElapsedMs)}</Text>
+          )}
+          <Box marginTop={block.thoughtElapsedMs != null ? 1 : 0}>
+            <MarkdownBlock
+              content={block.content}
+              streaming={block.streaming}
+              color={block.isError ? dt.error : undefined}
+              maxWidth={columns - TEXT_INDENT}
+            />
+          </Box>
         </Box>
       );
     }

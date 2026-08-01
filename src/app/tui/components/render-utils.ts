@@ -1,5 +1,5 @@
-export const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-export const SPINNER_INTERVAL_MS = 80;
+export const SPINNER = ['● ', '  '];
+export const SPINNER_INTERVAL_MS = 1000;
 
 export function spinnerIndexForElapsed(elapsedMs: number): number {
   return Math.floor(Math.max(0, elapsedMs) / SPINNER_INTERVAL_MS) % SPINNER.length;
@@ -18,7 +18,6 @@ export const ACTION_NAMES: Record<string, string> = {
   update_plan: 'Progress',
   ask_user: 'Ask',
   task: 'Task',
-  Skill: 'Skill',
   web_fetch: 'Web Fetch',
   tool_search: 'Searched for tools',
   list_mcp_resources: 'Listed MCP resources',
@@ -28,6 +27,44 @@ export const ACTION_NAMES: Record<string, string> = {
 /** 取工具显示名，无映射则返回原名 / Get display name, fallback to original */
 export function actionName(name: string): string {
   return ACTION_NAMES[name] ?? name;
+}
+
+/**
+ * write_file 卡片动词 — 区分新建 / 覆写（ACTION_NAMES 的静态 'Create'
+ * 无法表达覆写）。完成态从 summary 首行推断：core 对覆写已有文件
+ * 输出 diff 统计（"Added … removed …"），新建输出 "Wrote …"，
+ * 内容未变的覆写输出 "Wrote … (content unchanged)"。
+ * 运行/排队态调用方没有 summary 可传，用中性 Write。
+ * append 已由 ADR-0025 §2 移除；历史会话残留的 "Appended …" summary
+ * 归入中性 Write（无 Append 分支）。
+ *
+ * Card verb for write_file — distinguishes create vs overwrite (the
+ * static 'Create' in ACTION_NAMES cannot express overwrite). Done state
+ * is inferred from the summary's first line (core emits diff stats for
+ * overwrites, "Wrote …" for creates, and "Wrote … (content unchanged)"
+ * for no-op overwrites). Running/queued callers pass no summary →
+ * neutral Write. Append was removed by ADR-0025 §2; legacy "Appended …"
+ * summaries from old sessions fall back to Write (no Append branch).
+ */
+export function writeFileActionName(
+  summary: string | undefined,
+  _args: Record<string, unknown>,
+): string {
+  const s = summary ?? '';
+  if (s.startsWith('Added ')) return 'Write'; // diff 统计 → 覆写已有文件 / overwrite
+  if (s.startsWith('Wrote ')) return s.includes('(content unchanged)') ? 'Write' : 'Create';
+  // running / queued / 无 summary 的终态（含历史 Appended summary）
+  return 'Write';
+}
+
+function askUserQuestion(args: Record<string, unknown>): string {
+  if (typeof args.question === 'string') return args.question;
+  const questions = args.questions;
+  if (!Array.isArray(questions)) return '';
+  const first = questions[0];
+  return first && typeof first === 'object' && typeof first.question === 'string'
+    ? first.question
+    : '';
 }
 
 export interface ThemeColors {
@@ -164,7 +201,7 @@ export function getToolPreview(name: string, args: Record<string, unknown>): str
       return undefined;
     }
     case 'ask_user': {
-      const q = typeof args.question === 'string' ? args.question : '';
+      const q = askUserQuestion(args);
       if (!q) return undefined;
       return q.length > 60 ? `${q.slice(0, 57)}...` : q;
     }
@@ -239,7 +276,7 @@ export function getToolDetail(
       return undefined;
     }
     case 'ask_user': {
-      const q = typeof args.question === 'string' ? args.question : '';
+      const q = askUserQuestion(args);
       if (!q) return 'Asked';
       return q.length > 50 ? `${q.slice(0, 47)}...` : q;
     }

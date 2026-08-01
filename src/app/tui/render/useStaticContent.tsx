@@ -45,7 +45,7 @@ function isSettled(block: OutputBlock): boolean {
     case 'user':
       return true; // never changes
     case 'text':
-      return !block.streaming; // streaming text is still mutating
+      return !block.streaming && !block.responsePending;
     case 'reason':
       return true; // content is final once emitted
     case 'tool_card':
@@ -58,6 +58,7 @@ function isSettled(block: OutputBlock): boolean {
       );
     case 'tool_summary':
       return (
+        !block.responsePending &&
         !block.active &&
         block.tools.every(
           (t) =>
@@ -90,7 +91,10 @@ export function blockFingerprint(b: OutputBlock): string {
   let extra = '';
   switch (b.kind) {
     case 'text':
-      extra = b.streaming ? `:s:${b.content.length}` : ':f';
+      extra =
+        (b.streaming ? `:s:${b.content.length}` : b.responsePending ? ':pending' : ':f') +
+        (b.thoughtElapsedMs != null ? `:th${b.thoughtElapsedMs}` : '') +
+        (b.thoughtContent ? `:tc${b.thoughtContent.length}:${b.thoughtContent.slice(-16)}` : '');
       break;
     case 'tool_card':
       // liveOutput 头尾各 8 字符 + totalLines 做指纹：窗口滑动 → 头部变；新增行 → 尾部变 / 计数变
@@ -103,12 +107,15 @@ export function blockFingerprint(b: OutputBlock): string {
     case 'tool_summary':
       // Every tool status change must trigger a split recomputation
       extra =
-        `:${b.active ? 'a' : 's'}:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}:${b.result ?? '_'}` +
+        `:${b.active ? 'a' : b.responsePending ? 'pending' : 's'}:${b.tools.length}:${b.tools.map((t) => t.status[0]).join('')}:${b.totalElapsedMs}:${b.result ?? '_'}` +
         (b.latestActivity
           ? b.latestActivity.kind === 'thinking'
             ? `:th:${b.latestActivity.text.length}:${b.latestActivity.text.slice(-16)}`
             : `:tc:${b.latestActivity.callId}`
-          : '');
+          : '') +
+        // ADR-0030 旁白字幕变化同样触发重算 / caption changes invalidate too
+        (b.captions?.length ? `:cap${b.captions.length}:${b.captions.join('|').length}` : '') +
+        (b.pendingCaption != null ? `:pc${b.pendingCaption.length}` : '');
       break;
     case 'subagent':
       extra =

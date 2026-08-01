@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
+import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import { aiMessage } from '../src/core/messages';
 import { StreamingMockModel } from './mock-model';
 
@@ -92,6 +93,68 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
+  test('task sub-agent inherits the parent sealed protected-path evaluator for writes', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-protected-path-'));
+    const protectedDirectory = join(ws, '.agents', 'skills', 'fixture');
+    const protectedFile = join(protectedDirectory, 'SKILL.md');
+    mkdirSync(protectedDirectory, { recursive: true });
+    writeFileSync(protectedFile, 'keep\n');
+
+    try {
+      const { events, sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: aiMessage({
+              content: 'write protected skill',
+              tool_calls: [
+                {
+                  id: 'tc-protected-child-write',
+                  name: 'write_file',
+                  args: { path: '.agents/skills/fixture/SKILL.md', content: 'changed\n' },
+                },
+              ],
+            }),
+          },
+          { message: aiMessage({ content: 'done' }) },
+        ],
+      }) as any;
+
+      await runTaskSubAgent(
+        {
+          config: {
+            providerName: 'deepseek',
+            modelName: 'test',
+            executionBoundary: {
+              filesystemScope: 'workspace_write',
+              workspaceRoot: ws,
+              networkMode: 'off',
+              networkAllowlist: [],
+              allowLocalAndPrivateNetwork: false,
+              protectedPathPolicy: 'deny',
+              maxProcessTreeSizePerShellInvocation: 8,
+              sandboxRequired: true,
+              sandboxUnavailable: 'fail',
+            },
+          } as any,
+          workspace: ws,
+          eventSink: sink,
+          model: model as any,
+        },
+        { subagent_type: 'code', task: 'write protected skill config' },
+      );
+
+      const writeResult = events.find(
+        (event) => event.type === 'tool_result' && event.data.toolName === 'write_file',
+      );
+      expect(writeResult?.data.ok).toBe(false);
+      expect(String(writeResult?.data.summary)).toContain('protected-path policy');
+      expect(readFileSync(protectedFile, 'utf8')).toBe('keep\n');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   test('normalizes workspace absolute file paths before executing read_file', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-abs-path-'));
     writeFileSync(join(ws, 'package.json'), '{"name":"fixture"}\n', 'utf-8');
@@ -152,7 +215,6 @@ describe('SubAgentRunner integration', () => {
                   args: {
                     command: 'bun run typecheck',
                     description: 'Run typecheck',
-                    intent: 'verify',
                   },
                 },
               ],
@@ -209,7 +271,6 @@ describe('SubAgentRunner integration', () => {
                   args: {
                     command: 'bun run typecheck',
                     description: 'Run typecheck',
-                    intent: 'verify',
                   },
                 },
               ],
@@ -282,7 +343,6 @@ describe('SubAgentRunner integration', () => {
                   args: {
                     command: 'bun run typecheck',
                     description: 'Run typecheck',
-                    intent: 'verify',
                   },
                 },
               ],
@@ -422,6 +482,61 @@ describe('SubAgentRunner integration', () => {
     // The abort should cause the subagent to fail
     expect(result.ok).toBe(false);
     expect(events.some((e) => e.type === 'error')).toBe(true);
+  });
+
+  test('propagates the role timeout signal into descendant tool admission', async () => {
+    const { events, sink } = mockEventSink();
+    const model = new StreamingMockModel({
+      responses: [
+        {
+          message: aiMessage({
+            content: 'read after admission',
+            tool_calls: [{ id: 'timeout-read', name: 'read_file', args: { path: 'README.md' } }],
+          }),
+        },
+      ],
+    }) as any;
+    let observedSignal: AbortSignal | undefined;
+    const descendantResourceAdmission = {
+      reserveModel: async () => ({ reservationId: 'model-reservation' }),
+      reconcileModel: async () => {},
+      reserveTool: async (request: { signal?: AbortSignal }) => {
+        observedSignal = request.signal;
+        await new Promise<never>((_, reject) => {
+          const onAbort = () => {
+            const error = new Error('descendant admission cancelled by role timeout');
+            error.name = 'AbortError';
+            reject(error);
+          };
+          if (request.signal?.aborted) {
+            onAbort();
+            return;
+          }
+          request.signal?.addEventListener('abort', onAbort, { once: true });
+        });
+      },
+      reconcileTool: async () => {},
+      markUnknown: async () => {},
+      markLocalProviderAdmissionDenied: async () => {},
+    } as unknown as NonNullable<
+      import('@/core/subagent/types').SubAgentRunnerInput['descendantResourceAdmission']
+    >;
+
+    const result = await runSubAgent({
+      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      workspace: process.cwd(),
+      role: getRoleConfig('code'),
+      task: 'wait for descendant admission',
+      timeoutMs: 25,
+      signal: new AbortController().signal,
+      eventSink: sink,
+      model: model as any,
+      descendantResourceAdmission,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(events.some((event) => event.type === 'error')).toBe(true);
   });
 
   test('aborts immediately when signal is already aborted', async () => {

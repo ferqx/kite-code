@@ -498,6 +498,7 @@ describe('edge cases', () => {
   test('round-trips all RuntimeEvent discriminated union variants', () => {
     const events: RuntimeEvent[] = [
       { type: 'tool.queued', toolCallId: 'c1', name: 'read', args: {} },
+      { type: 'tool.execution_ready', toolCallId: 'c1' },
       { type: 'tool.started', toolCallId: 'c1' },
       { type: 'tool.progress', toolCallId: 'c1', chunk: 'line1\n', stream: 'stdout' },
       {
@@ -548,7 +549,12 @@ describe('edge cases', () => {
         interactionId: 'i3',
         grant: { mode: 'once' } as any,
       },
-      { type: 'approval.rejected', interactionId: 'i3', reason: 'unsafe' },
+      {
+        type: 'approval.rejected',
+        interactionId: 'i3',
+        toolCallId: 'c1',
+        reason: 'unsafe',
+      },
       { type: 'authorization.changed', mode: 'full_access' },
     ];
 
@@ -897,6 +903,112 @@ describe('persistence edge cases', () => {
     expect(store.listNamedSnapshots('fork')[0]!.eventPosition).toBe(
       store.getLastEventPosition('fork'),
     );
+    store.close();
+  });
+
+  // ── ADR-0042 §4：文件原像 / file pre-images ──
+
+  test('recordFilePreimage keeps the earliest pre-image per path within a checkpoint window', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('preimg', [makeEvent({ toolCallId: 'turn-1' })]);
+    store.saveNamedSnapshot('preimg', 'turn-1', { version: 1 });
+
+    // turn-1 快照之后的窗口：首次捕获生效，同 path 后续捕获去重
+    store.appendEvents('preimg', [makeEvent({ toolCallId: 'turn-2-tool' })]);
+    store.recordFilePreimage('preimg', 'notes.md', 'v1 content', true);
+    store.recordFilePreimage('preimg', 'notes.md', 'v2 content', true);
+
+    const pos1 = store.getNamedSnapshotEntry('preimg', 'turn-1')!.eventPosition;
+    expect(store.fileRestorePlan('preimg', pos1)).toEqual([
+      { path: 'notes.md', content: 'v1 content', existed: true },
+    ]);
+
+    // 新快照开启新窗口：可以再次捕获
+    store.saveNamedSnapshot('preimg', 'turn-2', { version: 2 });
+    store.appendEvents('preimg', [makeEvent({ toolCallId: 'turn-3-tool' })]);
+    store.recordFilePreimage('preimg', 'notes.md', 'v3 content', true);
+    const pos2 = store.getNamedSnapshotEntry('preimg', 'turn-2')!.eventPosition;
+    expect(store.fileRestorePlan('preimg', pos2)).toEqual([
+      { path: 'notes.md', content: 'v3 content', existed: true },
+    ]);
+    // 回退到 turn-1 仍取该窗口最早的捕获
+    expect(store.fileRestorePlan('preimg', pos1)).toEqual([
+      { path: 'notes.md', content: 'v1 content', existed: true },
+    ]);
+    store.close();
+  });
+
+  test('fileRestorePlan reports created files for deletion and ignores pre-checkpoint captures', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('preimg-plan', [makeEvent({ toolCallId: 'a' })]);
+    store.recordFilePreimage('preimg-plan', 'ancient.md', 'before checkpoint', true);
+    store.saveNamedSnapshot('preimg-plan', 'cp', { version: 1 });
+    store.appendEvents('preimg-plan', [makeEvent({ toolCallId: 'next-turn' })]);
+    store.recordFilePreimage('preimg-plan', 'created.md', null, false);
+    store.recordFilePreimage('preimg-plan', 'edited.md', 'before edit', true);
+
+    const pos = store.getNamedSnapshotEntry('preimg-plan', 'cp')!.eventPosition;
+    const plan = store
+      .fileRestorePlan('preimg-plan', pos)
+      .slice()
+      .sort((a, b) => a.path.localeCompare(b.path));
+    expect(plan).toEqual([
+      { path: 'created.md', content: null, existed: false },
+      { path: 'edited.md', content: 'before edit', existed: true },
+    ]);
+    store.close();
+  });
+
+  test('restoreNamedSnapshot truncates pre-images beyond the restored position', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('preimg-trunc', [makeEvent({ toolCallId: 'a' })]);
+    store.saveNamedSnapshot('preimg-trunc', 'cp', { version: 1 });
+    store.appendEvents('preimg-trunc', [makeEvent({ toolCallId: 'next-turn' })]);
+    store.recordFilePreimage('preimg-trunc', 'notes.md', 'pre-turn-2', true);
+
+    expect(store.restoreNamedSnapshot('preimg-trunc', 'cp')).toBe(true);
+    const pos = store.getNamedSnapshotEntry('preimg-trunc', 'cp')!.eventPosition;
+    expect(store.fileRestorePlan('preimg-trunc', pos)).toEqual([]);
+    store.close();
+  });
+
+  test('deleteSession cascades file pre-images', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('preimg-gone', [makeEvent({ toolCallId: 'a' })]);
+    store.saveNamedSnapshot('preimg-gone', 'cp', { version: 1 });
+    store.recordFilePreimage('preimg-gone', 'notes.md', 'x', true);
+    store.deleteSession('preimg-gone');
+    expect(store.getNamedSnapshotEntry('preimg-gone', 'cp')).toBeNull();
+    store.close();
+  });
+
+  test('forkSession copies pre-images up to the fork point only', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('preimg-fork', [makeEvent({ toolCallId: 'a' })]);
+    store.recordFilePreimage('preimg-fork', 'notes.md', 'turn-1 pre-image', true);
+    store.saveNamedSnapshot('preimg-fork', 'cp', { session: { threadId: 'preimg-fork' } });
+    store.appendEvents('preimg-fork', [makeEvent({ toolCallId: 'next-turn' })]);
+    store.recordFilePreimage('preimg-fork', 'later.md', 'after fork point', true);
+
+    expect(store.forkSession('preimg-fork', 'cp', 'preimg-fork-target')).toBe(true);
+    expect(store.fileRestorePlan('preimg-fork-target', 0).map((p) => p.path)).toEqual(['notes.md']);
+    expect(
+      store
+        .fileRestorePlan('preimg-fork', 0)
+        .map((p) => p.path)
+        .sort(),
+    ).toEqual(['later.md', 'notes.md']);
+    store.close();
+  });
+
+  test('getNamedSnapshotEntry resolves position and timestamp, null when absent', () => {
+    const store = createRuntimeStore(dbPath);
+    store.appendEvents('preimg-entry', [makeEvent({ toolCallId: 'a' })]);
+    store.saveNamedSnapshot('preimg-entry', 'cp', { version: 1 });
+    const entry = store.getNamedSnapshotEntry('preimg-entry', 'cp');
+    expect(entry?.snapshotId).toBe('cp');
+    expect(entry?.eventPosition).toBeGreaterThan(0);
+    expect(store.getNamedSnapshotEntry('preimg-entry', 'missing')).toBeNull();
     store.close();
   });
 });

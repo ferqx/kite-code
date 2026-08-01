@@ -1,30 +1,36 @@
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { statSync } from 'node:fs';
 import { createBinding, digestCapability } from '@/core/capabilities/catalog';
-import { isProviderHealthy, isProviderUnavailable } from '@/core/capabilities/provider-status';
 import { validateCapabilityArguments } from '@/core/capabilities/schema';
-import {
-  checkInventoryRedirect,
-  publicProviderSearchMetadata,
-  publicSearchMetadata,
-  searchableCapabilitySnapshot,
-  searchCapabilities,
-  searchUnavailableProviders,
-} from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import { buildToolApproval } from '@/core/harness/tool-policy';
-import { toolRequestFromCall } from '@/core/harness/tool-requests';
+import {
+  isMcpRequest,
+  type PendingToolRequest,
+  toolRequestFromCall,
+} from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import {
   capabilityChangedProviderError,
+  classifyRemoteMcpArgumentsV1,
+  createRemoteMcpEgressReceiptV1,
   exposedMcpToolName,
+  hasRemoteMcpContentV1,
+  inspectRemoteMcpArgumentsV1,
   isMcpProviderError,
   type McpProviderRecoveryAction,
   type McpRuntimeProvider,
   providerErrorFromDirectoryEntry,
+  type RemoteMcpEgressDecisionRecorderV1,
+  RemoteMcpEgressDeniedError,
+  type RemoteMcpEgressInvocationPolicyV1,
+  type RemoteMcpEgressPermitRequestV1,
+  type RemoteMcpEgressPermitResolverV1,
+  remoteMcpArgumentDigestV1,
+  snapshotRemoteMcpArgumentsV1,
 } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import {
@@ -33,23 +39,23 @@ import {
 } from '@/core/persistence/capability-artifacts';
 import {
   defaultPlanArtifactStore,
-  PlanArtifactError,
   type PlanArtifactStore,
 } from '@/core/persistence/plan-artifacts';
 import { evaluateToolApproval, isReadOnlyMcpPolicy } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure, classifyMcpProviderError } from '@/core/runtime/failures';
+import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { genInteractionId } from '@/core/runtime/ids';
+import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
-  computePlanStructuralDigest,
   getActivePlanning,
-  getActiveTask,
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
-import { evaluateSkillActivation, type SkillCatalogSnapshot } from '@/core/skills';
+import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
+import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import {
   deserializeSubagentContinuation,
@@ -58,11 +64,62 @@ import {
 import { resumeSubAgent } from '@/core/subagent/runner';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
+import { toolAvailabilityContext } from '@/core/tools/definitions';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import { askUserSpec } from '@/core/tools/registry/builtins/ask-user';
+import type { ReadMcpResourceInput } from '@/core/tools/registry/builtins/mcp-inventory';
+import { readPlanSpec } from '@/core/tools/registry/builtins/read-plan';
+import {
+  activateSkillSpec,
+  completeSkillSpec,
+  readSkillReferenceSpec,
+} from '@/core/tools/registry/builtins/skill-runtime';
+import { taskSpec } from '@/core/tools/registry/builtins/task';
+import { toolSearchSpec } from '@/core/tools/registry/builtins/tool-search';
+import { updatePlanSpec } from '@/core/tools/registry/builtins/update-plan';
+import { writePlanSpec } from '@/core/tools/registry/builtins/write-plan';
+import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
+import type { ProjectedToolResult } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
-import { verificationRequestForCapability, verificationRequestForSkill } from '@/core/verification';
-import type { InteractionMode, PlanArtifactRef, PlanDocument } from '@/protocol/events';
+import { verificationRequestForCapability } from '@/core/verification';
+import type { InteractionMode } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
+
+function appendProjectedRuntimeEvents(
+  events: RuntimeEvent[],
+  projected: ProjectedToolResult,
+): void {
+  events.push(...(projected.runtimeEvents ?? []));
+}
+
+function registeredToolFinishedEvent(input: {
+  toolCallId: string;
+  name: string;
+  projected: ProjectedToolResult;
+  command: string;
+  includeStatus?: boolean;
+}): RuntimeEvent {
+  const { projected } = input;
+  return {
+    type: 'tool.finished',
+    toolCallId: input.toolCallId,
+    name: input.name,
+    result: {
+      ok: projected.ok,
+      command: input.command,
+      exitCode: projected.ok ? 0 : -1,
+      stdout: projected.ok ? projected.modelContent : '',
+      stderr: projected.ok ? '' : projected.modelContent,
+      resultMeta: projected.resultMeta,
+      ...(input.includeStatus
+        ? {
+            status: projected.ok ? ('success' as const) : ('error' as const),
+          }
+        : {}),
+    },
+  };
+}
 
 // ── PR 8: Tool result digest production ──
 
@@ -192,116 +249,41 @@ function forkRole(agent: string): 'explore' | 'plan' | 'code' | 'review' {
   return agent === 'explore' || agent === 'plan' || agent === 'review' ? agent : 'code';
 }
 
-function parseForkWorkflowOutput(
-  summary: string,
-  outputSchema: Record<string, unknown>,
-): { ok: true; output: Record<string, unknown> } | { ok: false; reason: string } {
-  let output: unknown;
-  try {
-    output = JSON.parse(summary);
-  } catch {
+/**
+ * Build a proper PendingToolRequest from a blocked sub-agent tool via the
+ * request-adapter layer (Registry → toolRequestFromCall). Falls back to a
+ * minimal typed object when the tool is not registered in the builtin Registry
+ * (e.g. an MCP tool blocked before binding resolution).
+ */
+export function buildBlockedToolRequest(
+  blocked: { toolCallId: string; toolName: string; args: Record<string, unknown>; command: string },
+  availCtx: ReturnType<typeof toolAvailabilityContext>,
+): PendingToolRequest {
+  const parsed = toolRequestFromCall(
+    { id: blocked.toolCallId, name: blocked.toolName, args: blocked.args },
+    availCtx,
+  );
+  if (parsed?.ok) return parsed.request;
+  // Fallback: unknown/unavailable tool — construct minimal typed request.
+  // MCP tool names use the 'mcp__' prefix; route to the correct variant.
+  if (blocked.toolName.startsWith('mcp__')) {
     return {
-      ok: false,
-      reason: 'Forked Skill must return exactly one JSON object matching its output schema.',
+      source: 'mcp',
+      id: blocked.toolCallId,
+      name: blocked.toolName as `mcp__${string}`,
+      args: blocked.args,
+      reason: `Sub-agent MCP tool "${blocked.toolName}" blocked for approval`,
+      protectedCommand: blocked.command,
     };
   }
-  if (!output || typeof output !== 'object' || Array.isArray(output)) {
-    return { ok: false, reason: 'Forked Skill output must be a JSON object.' };
-  }
-  const outputError = validateCapabilityArguments(outputSchema, output as Record<string, unknown>);
-  return outputError
-    ? { ok: false, reason: outputError }
-    : { ok: true, output: output as Record<string, unknown> };
-}
-
-function readDeclaredSkillReference(input: {
-  sourcePath: string;
-  files: string[];
-  path: string;
-}): { ok: true; content: string; encoding: 'utf8' | 'base64' } | { ok: false; reason: string } {
-  const normalized = input.path.replaceAll('\\', '/');
-  if (
-    !/^(?:scripts|references|assets|evals)\//.test(normalized) ||
-    !input.files.includes(normalized) ||
-    normalized.includes('\0')
-  ) {
-    return {
-      ok: false,
-      reason: 'Skill reference is not declared by the active Workflow Contract.',
-    };
-  }
-  const root = resolve(input.sourcePath);
-  const target = resolve(root, normalized);
-  const rel = relative(root, target);
-  if (rel.startsWith('..') || isAbsolute(rel)) {
-    return { ok: false, reason: 'Skill reference path escapes its Skill directory.' };
-  }
-  try {
-    const stat = lstatSync(target);
-    if (!stat.isFile() || stat.isSymbolicLink()) {
-      return { ok: false, reason: 'Skill reference must be a regular non-symlink file.' };
-    }
-    if (stat.size > 128 * 1024) {
-      return {
-        ok: false,
-        reason:
-          'Skill reference exceeds the 128 KiB direct-read limit; expose it through an Artifact in a later workflow step.',
-      };
-    }
-    const content = readFileSync(target);
-    const utf8 = content.toString('utf8');
-    return Buffer.from(utf8, 'utf8').equals(content)
-      ? { ok: true, content: utf8, encoding: 'utf8' }
-      : { ok: true, content: content.toString('base64'), encoding: 'base64' };
-  } catch (error) {
-    return {
-      ok: false,
-      reason: `Unable to read Skill reference: ${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-}
-
-/** Resolve a sub-agent continuation that was rejected (user denied the approval).
- *  Emits subagent.failed + tool.finished so the TUI transitions the sub-agent block
- *  from awaiting_approval to error, and the task tool produces a result for the model.
- *  Called by the runner after approval.rejected is processed. */
-export function resolveRejectedSubagentContinuation(
-  state: RuntimeState,
-  toolCallId: string,
-): RuntimeEvent[] {
-  const snapshot = state.suspendedSubagents[toolCallId];
-  if (!snapshot) return [];
-  const continuation = deserializeSubagentContinuation(snapshot);
-
-  const blockedToolName = continuation.blockedTool.toolName;
-  const subagentId = continuation.id;
-  const rejectionMsg = `Sub-agent tool "${blockedToolName}" was rejected by user.`;
-
-  return [
-    {
-      type: 'subagent.failed',
-      subagent: {
-        id: subagentId,
-        error: rejectionMsg,
-        summary: rejectionMsg,
-        toolCallCount: continuation.toolCallCount,
-        durationMs: 0,
-      },
-    } as RuntimeEvent,
-    {
-      type: 'tool.finished',
-      toolCallId,
-      name: 'task',
-      result: {
-        ok: false,
-        command: '',
-        exitCode: -1,
-        stdout: '',
-        stderr: rejectionMsg,
-        status: 'error',
-      },
-    },
-  ];
+  return {
+    source: 'builtin',
+    id: blocked.toolCallId,
+    name: blocked.toolName,
+    args: blocked.args,
+    reason: `Sub-agent tool "${blocked.toolName}" blocked for approval`,
+    protectedCommand: blocked.command,
+  } as PendingToolRequest;
 }
 
 /** Convert the subagent runner's private callback payload into a durable public fact. */
@@ -339,7 +321,11 @@ async function handleSubAgentResume(params: {
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
+  providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   emitSubagentEvent: SubAgentEventSink;
+  recordFilePreimage?: FilePreimageRecorder;
+  recordNetworkDecision?: NetworkDecisionRecorderV1;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   const { continuation } = params;
@@ -347,45 +333,105 @@ async function handleSubAgentResume(params: {
 
   // Execute the previously-blocked tool with the approval grant
   const call = params.state.tools.calls[params.toolCallId];
-  const blockedRequest = toolRequestFromCall(
+  const availCtx = toolAvailabilityContext({
+    workspace: params.state.session.workspace,
+    threadId: params.state.session.threadId,
+    config: params.taskConfig,
+    subagentEventSink: params.emitSubagentEvent,
+    toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
+    skillCatalog: params.skillCatalog,
+    activeSkillFrames: Object.values(params.state.skills.frames).filter(
+      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    ),
+    phase: getAgentPhase(getActivePlanning(params.state)),
+  });
+  const blockedParsed = toolRequestFromCall(
     {
       id: params.toolCallId,
       name: blockedToolName,
       args: blockedToolArgs,
     },
-    params.state.session.workspace,
+    availCtx,
   );
 
   let toolResult: ToolExecutionResult;
-  if (blockedRequest) {
+  if (blockedParsed?.ok) {
+    const blockedRequest = blockedParsed.request;
     const resumedBinding = call?.bindingId
       ? params.state.capabilities.bindings[call.bindingId]
       : undefined;
-    toolResult = await runApprovedTool({
-      workspace: params.state.session.workspace,
-      request: blockedRequest,
-      shellExecutor: params.shellExecutor,
-      workspaceAccess: params.state.workspaceAccess,
-      phase: getAgentPhase(getActivePlanning(params.state)),
-      authorization: params.state.authorization,
-      approvedGrant: call?.approvalGrant ?? 'none',
-      threadId: params.state.session.threadId,
-      mcpManager: params.mcpManager,
-      ...(resumedBinding
-        ? {
-            mcpInvocation: {
-              capabilityId: resumedBinding.capabilityId,
-              expectedRevision: resumedBinding.capabilityRevision,
-            },
+    let childReservation:
+      | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
+      | undefined;
+    try {
+      toolResult = await runApprovedTool({
+        workspace: params.state.session.workspace,
+        request: blockedRequest,
+        shellExecutor: params.shellExecutor,
+        workspaceAccess: params.state.workspaceAccess,
+        phase: getAgentPhase(getActivePlanning(params.state)),
+        authorization: params.state.authorization,
+        approvedGrant: call?.approvalGrant ?? 'none',
+        threadId: params.state.session.threadId,
+        recordFilePreimage: params.recordFilePreimage,
+        recordNetworkDecision: params.recordNetworkDecision,
+        mcpManager: params.mcpManager,
+        ...(resumedBinding
+          ? {
+              mcpInvocation: {
+                capabilityId: resumedBinding.capabilityId,
+                expectedRevision: resumedBinding.capabilityRevision,
+              },
+            }
+          : {}),
+        skillManifests: params.skillManifests,
+        skillOptions: params.skillOptions,
+        signal: params.signal,
+        taskConfig: params.taskConfig,
+        taskModel: params.taskModel,
+        providerDataAdmission: params.providerDataAdmission,
+        descendantResourceAdmission: params.descendantResourceAdmission,
+        subagentEventSink: params.emitSubagentEvent,
+        availabilityContext: availCtx,
+        beforeDispatch: params.descendantResourceAdmission
+          ? async () => {
+              childReservation = await params.descendantResourceAdmission!.reserveTool({
+                invocationKey: `resume-tool:${continuation.toolCallCount}:${blockedRequest.id ?? blockedToolName}`,
+                toolKind: blockedToolName,
+                shell: blockedToolName === 'shell_execute',
+              });
+            }
+          : undefined,
+      });
+      if (childReservation) {
+        let artifactBytes = 0;
+        if (
+          (blockedToolName === 'write_file' || blockedToolName === 'edit_file') &&
+          toolResult.path
+        ) {
+          try {
+            artifactBytes = statSync(toolResult.path).size;
+          } catch {
+            artifactBytes = 0;
           }
-        : {}),
-      skillManifests: params.skillManifests,
-      skillOptions: params.skillOptions,
-      signal: params.signal,
-      taskConfig: params.taskConfig,
-      taskModel: params.taskModel,
-      subagentEventSink: params.emitSubagentEvent,
-    });
+        }
+        await params.descendantResourceAdmission!.reconcileTool({
+          reservationId: childReservation.reservationId,
+          artifactBytes,
+        });
+      }
+    } catch (error) {
+      if (childReservation) {
+        if (error instanceof ProviderDataAdmissionError) {
+          await params.descendantResourceAdmission!.markLocalProviderAdmissionDenied(
+            childReservation.reservationId,
+          );
+        } else {
+          await params.descendantResourceAdmission!.markUnknown(childReservation.reservationId);
+        }
+      }
+      throw error;
+    }
   } else {
     toolResult = {
       ok: false,
@@ -416,6 +462,8 @@ async function handleSubAgentResume(params: {
       signal: params.signal ?? new AbortController().signal,
       eventSink: params.emitSubagentEvent,
       model: params.taskModel,
+      providerDataAdmission: params.providerDataAdmission,
+      descendantResourceAdmission: params.descendantResourceAdmission,
       depth: 1,
       maxDepth: 0,
     },
@@ -448,16 +496,12 @@ async function handleSubAgentResume(params: {
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
+      capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, availCtx),
     });
     const blockedApproval = buildToolApproval({
       workspace: params.state.session.workspace,
       threadId: params.state.session.threadId,
-      request: {
-        id: blocked.toolCallId,
-        name: blocked.toolName,
-        args: blocked.args,
-        protectedCommand: blocked.command,
-      } as import('@/core/harness/tool-requests').PendingToolRequest,
+      request: buildBlockedToolRequest(blocked, availCtx),
       decision: blockedDecision,
     }) as import('@/protocol/events').ToolApprovalPayload;
     blockedApproval.subagentId = subagentId;
@@ -470,22 +514,29 @@ async function handleSubAgentResume(params: {
     return events;
   }
 
-  // Emit tool.finished for the task tool — the sub-agent has produced its final result
-  const output = JSON.stringify(result);
-  const ok = result.ok !== false;
-  events.push({
-    type: 'tool.finished',
-    toolCallId: params.toolCallId,
-    name: 'task',
-    result: {
-      ok,
-      command: 'task',
-      exitCode: ok ? 0 : -1,
-      stdout: output,
-      stderr: ok ? '' : output,
-      status: ok ? ('success' as const) : ('error' as const),
+  // Emit tool.finished for the task tool — the sub-agent has produced its final
+  // result.  The payload is taskSpec's projection, the same source the runner's
+  // task branch consumes (ADR-0043 §1); the controller no longer hand-builds
+  // a second task result format.
+  const projected = taskSpec.projectResult(
+    { available: true, result },
+    {
+      workspace: params.state.session.workspace,
+      invocationInput: {
+        subagent_type: forkRole(continuation.role.role),
+        task: continuation.task,
+      },
     },
-  });
+  );
+  events.push(
+    registeredToolFinishedEvent({
+      toolCallId: params.toolCallId,
+      name: 'task',
+      projected,
+      command: 'task',
+      includeStatus: true,
+    }),
+  );
 
   return events;
 }
@@ -506,12 +557,37 @@ export async function executeRuntimeTools(params: {
   signal?: AbortSignal;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
+  providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
+  remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
+  recordRemoteMcpEgressDecision?: RemoteMcpEgressDecisionRecorderV1;
+  descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   subagentEventSink?: SubAgentEventSink;
   planArtifactStore?: PlanArtifactStore;
   capabilityArtifactStore?: CapabilityArtifactStore;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
+  /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
+  recordFilePreimage?: FilePreimageRecorder;
+  recordNetworkDecision?: NetworkDecisionRecorderV1;
 }): Promise<RuntimeEvent[]> {
+  const approvedParallelShellBatch =
+    params.toolCallIds.length > 1 &&
+    params.toolCallIds.every((toolCallId) => {
+      const call = params.state.tools.calls[toolCallId];
+      return call?.name === 'shell_execute' && call.status === 'approved';
+    });
+  if (approvedParallelShellBatch) {
+    const batches = await Promise.all(
+      params.toolCallIds.map((toolCallId) =>
+        executeRuntimeTools({
+          ...params,
+          toolCallIds: [toolCallId],
+        }),
+      ),
+    );
+    return batches.flat();
+  }
+
   const events: RuntimeEvent[] = [];
   // Keep the direct-call API unchanged for tests and legacy callers.  The
   // Runtime runner replaces push with a streaming sink, so events are applied
@@ -529,14 +605,46 @@ export async function executeRuntimeTools(params: {
     events.push(toRuntimeSubagentEvent(event));
     params.subagentEventSink?.(event);
   };
+  const availCtx = toolAvailabilityContext({
+    workspace: params.state.session.workspace,
+    threadId: params.state.session.threadId,
+    config: params.taskConfig,
+    subagentEventSink: params.subagentEventSink,
+    toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
+    skillCatalog: params.skillCatalog,
+    activeSkillFrames: Object.values(params.state.skills.frames).filter(
+      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    ),
+    phase: getAgentPhase(getActivePlanning(params.state)),
+  });
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
-    const request = toolRequestFromCall(
-      { id: call.toolCallId, name: call.name, args: (call.args ?? {}) as Record<string, unknown> },
-      params.state.session.workspace,
+    const productionFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
+    if (
+      productionFlags?.resourceBudgetV1 &&
+      !productionFlags.boundedCancellationV1 &&
+      (call.sideEffect ||
+        ['task', 'shell_execute', 'write_file', 'edit_file', 'write_plan', 'update_plan'].includes(
+          call.name,
+        ))
+    ) {
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: 'Bounded cancellation is required before production writer/child dispatch.',
+        failure: classifyFailure(
+          'mandatory_policy_unavailable',
+          'Bounded cancellation is required before production writer/child dispatch.',
+        ),
+      });
+      continue;
+    }
+    const parsed = toolRequestFromCall(
+      { id: call.toolCallId, name: call.name, args: call.args },
+      availCtx,
     );
-    if (!request) {
+    if (!parsed) {
       events.push({
         type: 'tool.failed',
         toolCallId,
@@ -544,12 +652,43 @@ export async function executeRuntimeTools(params: {
       });
       continue;
     }
+    if (!parsed.ok) {
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure(
+          'tool_invalid_args',
+          parsed.request.parseError,
+          parsed.request.parseFailureCode,
+        ),
+      });
+      continue;
+    }
+    const request = parsed.request;
     const ceilingViolation = skillCapabilityCeilingViolation(params.state, call, request);
     if (ceilingViolation) {
       events.push({ type: 'tool.rejected', toolCallId, reason: ceilingViolation });
       continue;
     }
-    if (request.name.startsWith('mcp__')) {
+    if (
+      params.taskConfig?.executionBoundary &&
+      (request.name === 'tool_search' ||
+        request.name === 'list_mcp_resources' ||
+        request.name === 'list_mcp_tools' ||
+        request.name === 'read_mcp_resource' ||
+        isMcpRequest(request))
+    ) {
+      const reason =
+        'MCP and capability-search provider access is unavailable under the sealed network boundary until its transport uses per-invocation endpoint admission.';
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason,
+        failure: classifyFailure('mandatory_policy_unavailable', reason),
+      });
+      continue;
+    }
+    if (isMcpRequest(request)) {
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
       const binding = call.bindingId
         ? params.state.capabilities.bindings[call.bindingId]
@@ -590,7 +729,7 @@ export async function executeRuntimeTools(params: {
                   : (() => {
                       const reason = validateCapabilityArguments(
                         descriptor.inputSchema,
-                        request.args as Record<string, unknown>,
+                        request.args,
                       );
                       return reason ? classifyFailure('tool_invalid_args', reason) : undefined;
                     })();
@@ -612,184 +751,52 @@ export async function executeRuntimeTools(params: {
     }
     if (request.name === 'tool_search') {
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
-      if (!flags.toolSearchV1) {
-        events.push({
-          type: 'tool.rejected',
+      const dispatched = await dispatchRegisteredTool(toolSearchSpec, request.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+        signal: params.signal,
+        toolSearch: {
+          enabled: flags.toolSearchV1,
+          mcpManager: params.mcpManager,
+          skillCatalog: params.skillCatalog,
+          turnId: params.state.turn.turnId,
           toolCallId,
-          reason: 'Capability search is disabled by feature flag.',
-        });
-        continue;
-      }
-      if (request.args.query.length < 2) {
+        },
+      });
+      if (!dispatched.dispatched) {
         events.push({
           type: 'tool.failed',
           toolCallId,
-          failure: classifyFailure('tool_invalid_args', 'Capability search query is too short.'),
+          failure: classifyFailure('tool_invalid_args', dispatched.rejection.error),
         });
         continue;
       }
-      // Redirect inventory intent to list_mcp_tools
-      const inventoryRedirect = checkInventoryRedirect(request.args.query);
-      if (inventoryRedirect) {
+      if (!dispatched.output.ok) {
         events.push({
-          type: 'tool.finished',
+          type: 'tool.rejected',
+          toolCallId,
+          reason: dispatched.output.stderr,
+        });
+        continue;
+      }
+      appendProjectedRuntimeEvents(events, dispatched.projected);
+      events.push(
+        registeredToolFinishedEvent({
           toolCallId,
           name: request.name,
-          result: {
-            ok: true,
-            command: request.name,
-            exitCode: 0,
-            stdout: JSON.stringify(inventoryRedirect),
-            stderr: '',
-          },
-        });
-        continue;
-      }
-      let snapshot = searchableCapabilitySnapshot({
-        mcp: params.mcpManager?.getCapabilitySnapshot(),
-        skills: params.skillCatalog?.capabilities,
-      });
-      let providerDirectory = params.mcpManager?.getProviderDirectorySnapshot();
-      let candidates = searchCapabilities({
-        snapshot,
-        query: request.args.query,
-        limit: request.args.limit,
-      });
-      let providers = searchUnavailableProviders({
-        directory: providerDirectory,
-        query: request.args.query,
-        limit: request.args.limit,
-      });
-      const connectingProviders = providers.filter((provider) => provider.status === 'connecting');
-      if (
-        candidates.length === 0 &&
-        connectingProviders.length > 0 &&
-        params.mcpManager?.ensureProviderReady
-      ) {
-        await Promise.all(
-          connectingProviders.map(async (provider) => {
-            try {
-              await params.mcpManager!.ensureProviderReady!(
-                provider.providerId,
-                5_000,
-                params.signal,
-              );
-            } catch (error) {
-              if (params.signal?.aborted) {
-                throw params.signal.reason ?? error;
-              }
-              // Provider connection failure is reflected by the refreshed directory
-              // below; do not cancel the whole search.
-            }
-          }),
-        );
-        snapshot = searchableCapabilitySnapshot({
-          mcp: params.mcpManager.getCapabilitySnapshot(),
-          skills: params.skillCatalog?.capabilities,
-        });
-        providerDirectory = params.mcpManager.getProviderDirectorySnapshot();
-        candidates = searchCapabilities({
-          snapshot,
-          query: request.args.query,
-          limit: request.args.limit,
-        });
-        providers = searchUnavailableProviders({
-          directory: providerDirectory,
-          query: request.args.query,
-          limit: request.args.limit,
-        });
-      }
-      const searchId = digestCapability({
-        threadId: params.state.session.threadId,
-        turnId: params.state.turn.turnId,
-        toolCallId,
-        query: request.args.query,
-        catalogRevision: snapshot.revision,
-      });
-      const publicCandidates = publicSearchMetadata(candidates);
-      const displayedCandidates = publicCandidates;
-      events.push({
-        type: 'capability.search_completed',
-        result: {
-          searchId,
-          query: request.args.query,
-          catalogRevision: snapshot.revision,
-          requestedAtTurnId: params.state.turn.turnId,
-          candidates,
-          ...(providers.length > 0 ? { providers } : {}),
-        },
-      });
-      const showSummary = candidates.length === 0;
-      const providerDir = params.mcpManager?.getProviderDirectorySnapshot();
-      const catalogMsg =
-        providers.length > 0
-          ? 'No executable capabilities matched. Matching providers are currently unavailable; the overall catalog may still contain other tools.'
-          : 'No capabilities matched this query. This does not mean the capability catalog is empty.';
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+          projected: dispatched.projected,
           command: request.name,
-          exitCode: 0,
-          stdout: JSON.stringify({
-            ok: true,
-            search_id: searchId,
-            candidate_count: displayedCandidates.length,
-            candidates: displayedCandidates,
-            executable_candidate_count: candidates.length,
-            provider_count: providers.length,
-            providers: publicProviderSearchMetadata(providers),
-            ...(showSummary
-              ? {
-                  catalog_summary: {
-                    available_mcp_tool_count:
-                      params.mcpManager
-                        ?.getCapabilitySnapshot()
-                        .descriptors.filter(
-                          (d) => d.kind === 'mcp_tool' && d.availability === 'available',
-                        ).length ?? 0,
-                    available_skill_count:
-                      params.skillCatalog?.capabilities.descriptors.filter(
-                        (d) => d.kind === 'skill' && d.availability === 'available',
-                      ).length ?? 0,
-                    configured_provider_count: providerDir?.entries.length ?? 0,
-                    unavailable_provider_count:
-                      providerDir?.entries.filter((e) => isProviderUnavailable(e.status)).length ??
-                      0,
-                    ...(providerDir
-                      ? (() => {
-                          const nonHealthy = providerDir.entries.filter(
-                            (e) => !isProviderHealthy(e.status),
-                          );
-                          return nonHealthy.length > 0
-                            ? { non_healthy_provider_count: nonHealthy.length }
-                            : {};
-                        })()
-                      : {}),
-                  },
-                  message: catalogMsg,
-                }
-              : {}),
-            next_step:
-              candidates.length > 0
-                ? 'The Runtime will disclose current matching capabilities on the next model call.'
-                : providers.length > 0
-                  ? 'The matching providers are unavailable and no executable binding was issued.'
-                  : 'No matching capability or known unavailable provider was found.',
-          }),
-          stderr: '',
-        },
-      });
+        }),
+      );
       continue;
     }
     if (request.name === 'activate_skill') {
+      const skillInput = request.args;
       const flags = params.taskConfig ? getFeatureFlags(params.taskConfig) : getFeatureFlags();
       const descriptor = params.skillCatalog?.capabilities.descriptors.find(
-        (candidate) => candidate.capabilityId === request.args.skill_id,
+        (candidate) => candidate.capabilityId === skillInput.skill_id,
       );
-      const disclosure = params.state.capabilities.disclosures[request.args.skill_id];
+      const disclosure = params.state.capabilities.disclosures[skillInput.skill_id];
       if (
         flags.toolSearchV1 &&
         (!descriptor ||
@@ -811,7 +818,7 @@ export async function executeRuntimeTools(params: {
         };
         const activationDecision = evaluateToolApproval({
           toolName: 'mcp__skill__activation',
-          toolArgs: request.args as Record<string, unknown>,
+          toolArgs: request.args,
           phase: getAgentPhase(getActivePlanning(params.state)),
           workspace: params.state.session.workspace,
           threadId: params.state.session.threadId,
@@ -871,779 +878,265 @@ export async function executeRuntimeTools(params: {
           }
         }
       }
-      const activation = params.skillCatalog
-        ? evaluateSkillActivation({
-            state: params.state,
-            catalog: params.skillCatalog,
-            flags,
-            request: {
-              skillId: request.args.skill_id,
-              input: request.args.input,
-              requestedBy: 'model',
-              implicit: true,
-            },
-          })
-        : { ok: false as const, reason: 'Skill catalog is unavailable.' };
-      if (!activation.ok) {
+      const runFork =
+        params.taskConfig && params.taskModel
+          ? async (fork: {
+              agent: string;
+              capabilityCeiling: string[];
+              instructions: string;
+              workflowInput: Record<string, unknown>;
+              outputSchema: Record<string, unknown>;
+            }) => {
+              const ceiling = forkToolCeiling({
+                capabilityCeiling: fork.capabilityCeiling,
+                mcpManager: params.mcpManager,
+                turnId: params.state.turn.turnId,
+              });
+              if (!ceiling) return null;
+              return runTaskSubAgent(
+                {
+                  config: params.taskConfig!,
+                  workspace: params.state.session.workspace,
+                  shellExecutor: params.shellExecutor,
+                  mcpManager: params.mcpManager,
+                  skills: params.skillManifests,
+                  skillOptions: params.skillOptions,
+                  allowedTools: ceiling.allowedTools,
+                  mcpBindings: ceiling.mcpBindings,
+                  authorization: params.state.authorization,
+                  workspaceAccess: params.state.workspaceAccess,
+                  phase: getAgentPhase(getActivePlanning(params.state)),
+                  threadId: params.state.session.threadId,
+                  eventSink: emitSubagentEvent,
+                  signal: params.signal,
+                  model: params.taskModel,
+                  providerDataAdmission: params.providerDataAdmission,
+                  descendantResourceAdmission: params.descendantResourceAdmission,
+                  maxDepth: 0,
+                },
+                {
+                  subagent_type: forkRole(fork.agent),
+                  task: [
+                    fork.instructions,
+                    '## Validated Workflow Input',
+                    JSON.stringify(fork.workflowInput),
+                    '## Required completion format',
+                    'When the work is complete, respond with only one JSON object. Do not add Markdown or commentary.',
+                    `The object must validate against this output schema: ${JSON.stringify(fork.outputSchema)}`,
+                  ].join('\n\n'),
+                },
+              );
+            }
+          : undefined;
+      const dispatched = await dispatchRegisteredTool(activateSkillSpec, request.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+        toolCallId,
+        signal: params.signal,
+        skillRuntime: {
+          state: params.state,
+          catalog: params.skillCatalog,
+          flags,
+          verificationEnabled: Boolean(params.taskConfig) && flags.verificationV1,
+          runFork,
+        },
+      });
+      if (!dispatched.dispatched) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
-          reason: activation.reason,
+          reason: dispatched.rejection.error,
         });
         continue;
       }
-      if (activation.activation.contextMode === 'fork') {
-        const entry = params.skillCatalog?.entries.find(
-          (candidate) =>
-            !candidate.shadowedBy &&
-            candidate.descriptor.capabilityId === activation.activation.skillId &&
-            candidate.descriptor.revision === activation.activation.skillRevision &&
-            candidate.contract,
-        );
-        const forkCeiling = forkToolCeiling({
-          capabilityCeiling: activation.activation.capabilityCeiling,
-          mcpManager: params.mcpManager,
-          turnId: params.state.turn.turnId,
-        });
-        if (!entry?.contract || !forkCeiling || !params.taskConfig || !params.taskModel) {
-          events.push({
-            type: 'tool.rejected',
-            toolCallId,
-            reason:
-              'Forked Skill requires a current compiled contract, Runtime model, and resolvable capability bindings.',
-          });
-          continue;
-        }
-        events.push(...activation.events);
-        const result = await runTaskSubAgent(
-          {
-            config: params.taskConfig,
-            workspace: params.state.session.workspace,
-            shellExecutor: params.shellExecutor,
-            mcpManager: params.mcpManager,
-            skills: params.skillManifests,
-            skillOptions: params.skillOptions,
-            allowedTools: forkCeiling.allowedTools,
-            mcpBindings: forkCeiling.mcpBindings,
-            authorization: params.state.authorization,
-            workspaceAccess: params.state.workspaceAccess,
-            phase: getAgentPhase(getActivePlanning(params.state)),
-            threadId: params.state.session.threadId,
-            eventSink: emitSubagentEvent,
-            signal: params.signal,
-            model: params.taskModel,
-            maxDepth: 0,
-          },
-          {
-            subagent_type: forkRole(activation.activation.agent),
-            task: [
-              entry.contract.instructions,
-              '## Validated Workflow Input',
-              JSON.stringify(activation.activation.input),
-              '## Required completion format',
-              'When the work is complete, respond with only one JSON object. Do not add Markdown or commentary.',
-              `The object must validate against this output schema: ${JSON.stringify(entry.contract.outputSchema)}`,
-            ].join('\n\n'),
-          },
-        );
-        const validatedOutput = result.ok
-          ? parseForkWorkflowOutput(result.summary, entry.contract.outputSchema)
-          : { ok: false as const, reason: result.error ?? result.summary };
-        const completed = result.ok && validatedOutput.ok;
-        const failureReason = validatedOutput.ok ? undefined : validatedOutput.reason;
+      appendProjectedRuntimeEvents(events, dispatched.projected);
+      if (!dispatched.output.ok && !dispatched.output.stdout) {
         events.push({
-          type: 'skill.frame_closed',
-          activationId: activation.activation.activationId,
-          status: completed ? 'closed' : 'invalidated',
-          reason: completed
-            ? 'Forked Skill execution completed.'
-            : (failureReason ?? 'Forked Skill execution failed.'),
-          closedAt: new Date().toISOString(),
-          ...(completed ? { output: validatedOutput.output } : {}),
+          type: 'tool.rejected',
+          toolCallId,
+          reason: dispatched.output.stderr,
         });
-        if (completed && getFeatureFlags(params.taskConfig).verificationV1) {
-          const verification = verificationRequestForSkill({
-            activation: activation.activation,
-            contract: entry.contract,
-            sourcePath: entry.sourcePath,
-            workspace: params.state.session.workspace,
-          });
-          if (verification) events.push(verification);
-        }
-        events.push({
-          type: 'tool.finished',
+        continue;
+      }
+      events.push(
+        registeredToolFinishedEvent({
           toolCallId,
           name: request.name,
-          result: {
-            ok: completed,
-            command: request.name,
-            exitCode: completed ? 0 : -1,
-            stdout: JSON.stringify({
-              ok: completed,
-              activation_id: activation.activation.activationId,
-              skill_id: activation.activation.skillId,
-              context_mode: 'fork',
-              ...(completed ? { output: validatedOutput.output } : { summary: result.summary }),
-            }),
-            stderr: completed ? '' : (failureReason ?? 'Forked Skill execution failed.'),
-            status: completed ? 'success' : 'error',
-          },
-        });
-        continue;
-      }
-      events.push(...activation.events);
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+          projected: dispatched.projected,
           command: request.name,
-          exitCode: 0,
-          stdout: JSON.stringify({
-            ok: true,
-            activation_id: activation.activation.activationId,
-            skill_id: activation.activation.skillId,
-            context_mode: activation.activation.contextMode,
-          }),
-          stderr: '',
-        },
-      });
+          includeStatus: true,
+        }),
+      );
       continue;
     }
     if (request.name === 'read_skill_reference') {
-      const frame = params.state.skills.frames[request.args.activation_id];
-      const entry =
-        frame &&
-        params.skillCatalog?.entries.find(
-          (candidate) =>
-            !candidate.shadowedBy &&
-            candidate.descriptor.capabilityId === frame.skillId &&
-            candidate.descriptor.revision === frame.skillRevision &&
-            candidate.contract,
-        );
-      if (
-        frame?.status !== 'active' ||
-        frame.taskId !== params.state.activeTaskId ||
-        !entry?.contract
-      ) {
+      const dispatched = await dispatchRegisteredTool(readSkillReferenceSpec, request.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+        signal: params.signal,
+        skillRuntime: {
+          state: params.state,
+          catalog: params.skillCatalog,
+          verificationEnabled: false,
+        },
+      });
+      if (!dispatched.dispatched || !dispatched.output.ok) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
-          reason: 'Skill frame is unavailable or changed.',
+          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
         });
         continue;
       }
-      const reference = readDeclaredSkillReference({
-        sourcePath: entry.sourcePath,
-        files: entry.contract.files,
-        path: request.args.path,
-      });
-      if (!reference.ok) {
-        events.push({ type: 'tool.rejected', toolCallId, reason: reference.reason });
-        continue;
-      }
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          projected: dispatched.projected,
           command: request.name,
-          exitCode: 0,
-          stdout: JSON.stringify({
-            ok: true,
-            activation_id: frame.activationId,
-            path: request.args.path,
-            encoding: reference.encoding,
-            content: reference.content,
-          }),
-          stderr: '',
-        },
-      });
+        }),
+      );
       continue;
     }
     if (request.name === 'complete_skill') {
-      const frame = params.state.skills.frames[request.args.activation_id];
-      const entry =
-        frame &&
-        params.skillCatalog?.entries.find(
-          (candidate) =>
-            !candidate.shadowedBy &&
-            candidate.descriptor.capabilityId === frame.skillId &&
-            candidate.descriptor.revision === frame.skillRevision &&
-            candidate.contract,
-        );
-      if (
-        frame?.status !== 'active' ||
-        frame.taskId !== params.state.activeTaskId ||
-        !entry?.contract
-      ) {
+      const dispatched = await dispatchRegisteredTool(completeSkillSpec, request.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+        signal: params.signal,
+        skillRuntime: {
+          state: params.state,
+          catalog: params.skillCatalog,
+          verificationEnabled:
+            Boolean(params.taskConfig) && getFeatureFlags(params.taskConfig!).verificationV1,
+        },
+      });
+      if (!dispatched.dispatched || !dispatched.output.ok) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
-          reason: 'Skill frame is unavailable or changed.',
+          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
         });
         continue;
       }
-      const contract = entry.contract;
-      const outputError = validateCapabilityArguments(contract.outputSchema, request.args.output);
-      if (outputError) {
-        events.push({ type: 'tool.rejected', toolCallId, reason: outputError });
-        continue;
-      }
-      events.push({
-        type: 'skill.frame_closed',
-        activationId: frame.activationId,
-        status: 'closed',
-        reason: 'Workflow completed with validated structured output.',
-        closedAt: new Date().toISOString(),
-        output: request.args.output,
-      });
-      if (params.taskConfig && getFeatureFlags(params.taskConfig).verificationV1) {
-        const verification = verificationRequestForSkill({
-          activation: frame,
-          contract,
-          sourcePath: entry.sourcePath,
-          workspace: params.state.session.workspace,
-        });
-        if (verification) events.push(verification);
-      }
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: request.name,
-        result: {
-          ok: true,
+      appendProjectedRuntimeEvents(events, dispatched.projected);
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          projected: dispatched.projected,
           command: request.name,
-          exitCode: 0,
-          stdout: JSON.stringify({
-            ok: true,
-            activation_id: frame.activationId,
-            output: request.args.output,
-          }),
-          stderr: '',
-        },
-      });
-      continue;
-    }
-    if (request.name === 'Skill') {
-      events.push({
-        type: 'tool.rejected',
-        toolCallId,
-        reason:
-          'Legacy prompt Skill loading is retired. Use a Runtime Workflow Contract activation.',
-      });
+        }),
+      );
       continue;
     }
     if (request.name === 'ask_user') {
-      const hasQuestion = request.args.question.trim().length > 0;
-      const hasBatchQuestions = (request.args.questions?.length ?? 0) > 0;
-      if (!hasQuestion && !hasBatchQuestions) {
-        events.push({
-          type: 'tool.failed',
-          toolCallId,
-          failure: classifyFailure(
-            'tool_invalid_args',
-            'ask_user requires a non-empty question or questions array.',
-          ),
-        });
-        continue;
-      }
+      // 中断契约在 spec 闭环：事件载荷经 askUserSpec.createInterrupt 生成
+      // （规范模型输入 → 内部 UserInputRequest），Controller 不再二次校验或
+      // 手工组装中断内容。
+      // The interrupt contract closes in the spec: the event payload is built
+      // by askUserSpec.createInterrupt from the already validated canonical
+      // model input; the controller does not revalidate or hand-assemble it.
       events.push({
         type: 'user_input.requested',
         interactionId: genInteractionId(),
         toolCallId,
-        request: request.args,
+        request: askUserSpec.createInterrupt(request.args, {
+          workspace: params.state.session.workspace,
+          threadId: params.state.session.threadId,
+          phase: getAgentPhase(getActivePlanning(params.state)),
+        }),
       });
       continue;
     }
 
     if (request.name === 'read_plan') {
-      const args = request.args as {
-        plan_id: string;
-        version?: number;
-        structural_digest?: string;
-      };
-      const planning = getActivePlanning(params.state);
-      const task = getActiveTask(params.state);
-      const taskId = task?.taskId ?? `legacy-${params.state.session.threadId}`;
-      const document =
-        planning.kind === 'planning_draft' ||
-        planning.kind === 'replanning_draft' ||
-        planning.kind === 'awaiting_review' ||
-        planning.kind === 'executing' ||
-        planning.kind === 'completed'
-          ? planning.document
-          : undefined;
-      const version = args.version ?? document?.version;
-      if (!document || args.plan_id !== document.planId || version !== document.version) {
+      const dispatched = await dispatchRegisteredTool(readPlanSpec, request.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
+        signal: params.signal,
+        planRuntime: { state: params.state, artifacts: planArtifacts },
+      });
+      if (!dispatched.dispatched || !dispatched.output.ok) {
         events.push({
           type: 'tool.rejected',
           toolCallId,
-          reason: 'read_plan must reference the active Task plan and its current version.',
+          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
         });
         continue;
       }
-      if (args.structural_digest && args.structural_digest !== document.structuralDigest) {
-        events.push({
-          type: 'tool.rejected',
+      events.push(
+        registeredToolFinishedEvent({
           toolCallId,
-          reason: 'read_plan structural_digest does not match the active Artifact.',
-        });
-        continue;
-      }
-      const artifactRef = document.artifact ?? {
-        artifactId: `${document.planId}:v${document.version}`,
-        taskId,
-        planId: document.planId,
-        version: document.version,
-        fileName: `v${document.version}.md`,
-        relativePath: '',
-        displayPath: '',
-        structuralDigest: document.structuralDigest,
-        byteLength: 0,
-      };
-      try {
-        const artifact = planArtifacts.read(artifactRef);
-        events.push({
-          type: 'tool.finished',
-          toolCallId,
-          name: 'read_plan',
-          result: {
-            ok: true,
-            command: '',
-            exitCode: 0,
-            stdout: JSON.stringify({
-              ok: true,
-              status: 'plan_loaded',
-              task_id: taskId,
-              plan_id: artifact.plan.planId,
-              version: artifact.plan.version,
-              structural_digest: artifact.plan.structuralDigest,
-              title: artifact.plan.title,
-              body_markdown: artifact.plan.bodyMarkdown,
-              steps: artifact.plan.steps,
-              artifact: artifact.artifact,
-            }),
-            stderr: '',
-          },
-        });
-      } catch (error) {
-        const reason =
-          error instanceof PlanArtifactError ? error.message : 'Unable to read the Plan Artifact.';
-        events.push({ type: 'tool.rejected', toolCallId, reason });
-      }
+          name: request.name,
+          projected: dispatched.projected,
+          command: '',
+        }),
+      );
       continue;
     }
 
     // ── Plan tools ──
 
     if (request.name === 'write_plan') {
-      const args = request.args as {
-        title?: string;
-        body_markdown?: string;
-        steps?: Array<{ id: string; title: string }>;
-        expected_version?: number;
-        action?: 'save' | 'submit';
-        replan_reason?: string;
-        plan_id?: string;
-        version?: number;
-        structural_digest?: string;
-      };
-      const action = args.action ?? 'save';
-      const hasDocument =
-        typeof args.title === 'string' &&
-        typeof args.body_markdown === 'string' &&
-        Array.isArray(args.steps);
-      const hasArtifactRef =
-        typeof args.plan_id === 'string' &&
-        Number.isInteger(args.version) &&
-        typeof args.structural_digest === 'string';
-      const planning = getActivePlanning(params.state);
-      const phase = getAgentPhase(planning);
-      const task = getActiveTask(params.state);
-      const taskId = task?.taskId ?? `legacy-${params.state.session.threadId}`;
-      const isSubmitExisting = action === 'submit' && hasArtifactRef && !hasDocument;
-      const isLegacyDocumentSubmit = action === 'submit' && hasDocument;
-      const autoEnter =
-        phase === 'building' &&
-        planning.kind === 'building_without_plan' &&
-        (action === 'save' || isLegacyDocumentSubmit) &&
-        Boolean(task && !task.sideEffectsStarted);
-      const draftWrite =
-        (planning.kind === 'planning_empty' || planning.kind === 'planning_draft') &&
-        hasDocument &&
-        (action === 'save' || isLegacyDocumentSubmit) &&
-        (task == null || !task.sideEffectsStarted);
-      const replanDraftSubmit =
-        planning.kind === 'replanning_draft' && (isSubmitExisting || isLegacyDocumentSubmit);
-      const replan =
-        phase === 'building' && planning.kind === 'executing' && args.action === 'submit';
-      const submitExistingAllowed =
-        isSubmitExisting &&
-        (planning.kind === 'planning_draft' || planning.kind === 'replanning_draft') &&
-        args.plan_id === planning.document.planId &&
-        args.version === planning.document.version &&
-        args.structural_digest === planning.document.structuralDigest;
-      const sideEffectsBlockDraft =
-        hasDocument &&
-        (action === 'save' || isLegacyDocumentSubmit) &&
-        task?.sideEffectsStarted === true;
-      if (!draftWrite && !replanDraftSubmit && !autoEnter && !replan && !submitExistingAllowed) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: isSubmitExisting
-            ? 'submit must reference the current saved plan_id, version, and structural_digest.'
-            : sideEffectsBlockDraft
-              ? 'write_plan cannot save a new plan after side effects have started.'
-              : 'write_plan requires a complete plan document when saving.',
-        });
-        continue;
-      }
-      if (autoEnter && task) {
-        events.push({ type: 'planning.entered', taskId: task.taskId, source: 'model_request' });
-      }
-      if (replan && planning.kind === 'executing') {
-        events.push({
-          type: 'plan.replan_requested',
-          toolCallId,
-          reason: args.replan_reason ?? (args.body_markdown ?? '').slice(0, 500),
-          supersedesPlanVersion: planning.document.version,
-        });
-      }
-
-      if (submitExistingAllowed) {
-        let artifact: ReturnType<typeof defaultPlanArtifactStore.read>;
-        try {
-          artifact = planArtifacts.read({
-            artifactId: `${args.plan_id}:v${args.version}`,
-            taskId,
-            planId: args.plan_id!,
-            version: args.version!,
-            fileName: `v${args.version}.md`,
-            relativePath: '',
-            displayPath: '',
-            structuralDigest: args.structural_digest!,
-            byteLength: 0,
-          });
-        } catch (error) {
-          const reason =
-            error instanceof PlanArtifactError
-              ? error.message
-              : 'Unable to read the saved Plan Artifact.';
-          events.push({ type: 'tool.rejected', toolCallId, reason });
-          continue;
-        }
-        const document = artifact.plan;
-        const plan = {
-          name: document.title,
-          description: document.bodyMarkdown,
-          status: 'pending' as const,
-          steps: document.steps.map((step) => ({
-            step: step.title,
-            id: step.id,
-            status: step.status,
-          })),
-        };
-        const interactionId = genInteractionId();
-        events.push({
-          type: 'plan.review_requested',
-          interactionId,
-          toolCallId,
-          taskId,
-          plan,
-          planSummary: `${document.title}\n\n${document.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}`,
-          planId: document.planId,
-          version: document.version,
-          structuralDigest: document.structuralDigest,
-          artifact: artifact.artifact,
-        });
-        for (const sibling of Object.values(params.state.tools.calls)) {
-          if (
-            sibling.status === 'queued' &&
-            sibling.modelMessageId === call.modelMessageId &&
-            (sibling.ordinal ?? 0) > (call.ordinal ?? 0)
-          ) {
-            events.push({
-              type: 'tool.cancelled',
-              toolCallId: sibling.toolCallId,
-              reason: 'Cancelled because an earlier tool call opened an interaction.',
-            });
-          }
-        }
-        continue;
-      }
-
-      if (!hasDocument) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: 'write_plan save requires title, body_markdown, and steps.',
-        });
-        continue;
-      }
-      // Version conflict check
-      if (
-        args.expected_version != null &&
-        (planning.kind === 'planning_draft' || planning.kind === 'replanning_draft') &&
-        args.expected_version !== planning.document.version
-      ) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: `Version conflict: expected v${args.expected_version}, current is v${planning.document.version}.`,
-        });
-        continue;
-      }
-      const previous =
-        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
-          ? planning.document
-          : undefined;
-      const replanMetadata =
-        replan && planning.kind === 'executing'
-          ? {
-              supersedesPlanVersion: planning.document.version,
-              replanReason: args.replan_reason ?? (args.body_markdown ?? '').slice(0, 500),
-            }
-          : planning.kind === 'replanning_draft'
-            ? {
-                supersedesPlanVersion: planning.supersedesPlanVersion,
-                replanReason: planning.replanReason,
-              }
-            : previous?.supersedesPlanVersion != null
-              ? {
-                  supersedesPlanVersion: previous.supersedesPlanVersion,
-                  replanReason: previous.replanReason ?? '',
-                }
-              : {};
-      const candidateDocument: PlanDocument = {
-        planId: previous?.planId ?? crypto.randomUUID(),
-        version: (previous?.version ?? 0) + 1,
-        title: args.title!,
-        bodyMarkdown: args.body_markdown!,
-        steps: args.steps!.map(({ id, title }) => ({ id, title, status: 'pending' as const })),
-        structuralDigest: '',
-        createdAtTurnId: previous?.createdAtTurnId ?? params.state.turn.turnId,
-        updatedAtTurnId: params.state.turn.turnId,
-        ...replanMetadata,
-      };
-      candidateDocument.structuralDigest = computePlanStructuralDigest(candidateDocument);
-
-      // A repeated save with identical structure is idempotent and does not create vN+1.
-      const document =
-        previous && previous.structuralDigest === candidateDocument.structuralDigest
-          ? { ...candidateDocument, ...previous, updatedAtTurnId: params.state.turn.turnId }
-          : candidateDocument;
-      let artifact: PlanArtifactRef;
-      try {
-        artifact = planArtifacts.write(taskId, document);
-      } catch (error) {
-        const reason =
-          error instanceof PlanArtifactError
-            ? error.message
-            : 'Unable to persist the Plan Artifact.';
-        events.push({ type: 'tool.rejected', toolCallId, reason });
-        continue;
-      }
-      const submit = isLegacyDocumentSubmit;
-
-      events.push({
-        type: 'plan.drafted',
+      const dispatched = await dispatchRegisteredTool(writePlanSpec, request.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
         toolCallId,
-        planId: document.planId,
-        version: document.version,
-        plan: {
-          name: document.title,
-          description: document.bodyMarkdown,
-          status: 'pending',
-          steps: document.steps.map((step) => ({
-            step: step.title,
-            id: step.id,
-            status: step.status,
-          })),
+        signal: params.signal,
+        planRuntime: {
+          state: params.state,
+          artifacts: planArtifacts,
+          modelMessageId: call.modelMessageId,
+          ordinal: call.ordinal,
         },
-        structuralHash: document.structuralDigest,
-        taskId,
-        artifact,
-        ...replanMetadata,
       });
-
-      if (submit) {
-        // Emit review_requested — tool stays pending until user decision
-        const interactionId = genInteractionId();
+      if (!dispatched.dispatched || !dispatched.output.ok) {
         events.push({
-          type: 'plan.review_requested',
-          interactionId,
+          type: 'tool.rejected',
           toolCallId,
-          plan: {
-            name: document.title,
-            description: document.bodyMarkdown,
-            status: 'pending',
-            steps: document.steps.map((step) => ({
-              step: step.title,
-              id: step.id,
-              status: step.status,
-            })),
-          },
-          planSummary: `${document.title}\n\n${document.steps.map((s, i) => `${i + 1}. ${s.title}`).join('\n')}`,
-          planId: document.planId,
-          version: document.version,
-          structuralDigest: document.structuralDigest,
-          taskId,
-          artifact,
+          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
         });
-        // Cancel later sibling tool calls
-        for (const sibling of Object.values(params.state.tools.calls)) {
-          if (
-            sibling.status === 'queued' &&
-            sibling.modelMessageId === call.modelMessageId &&
-            (sibling.ordinal ?? 0) > (call.ordinal ?? 0)
-          ) {
-            events.push({
-              type: 'tool.cancelled',
-              toolCallId: sibling.toolCallId,
-              reason: 'Cancelled because an earlier tool call opened an interaction.',
-            });
-          }
-        }
-      } else {
-        // Save-only: finish tool call immediately
-        events.push({
-          type: 'tool.finished',
-          toolCallId,
-          name: 'write_plan',
-          result: {
-            ok: true,
+        continue;
+      }
+      appendProjectedRuntimeEvents(events, dispatched.projected);
+      if (dispatched.output.stdout) {
+        events.push(
+          registeredToolFinishedEvent({
+            toolCallId,
+            name: request.name,
+            projected: dispatched.projected,
             command: '',
-            exitCode: 0,
-            stdout: JSON.stringify({
-              ok: true,
-              status: 'draft_saved',
-              task_id: taskId,
-              plan_id: document.planId,
-              version: document.version,
-              structural_digest: document.structuralDigest,
-              artifact: {
-                artifact_id: artifact.artifactId,
-                file_name: artifact.fileName,
-                path: artifact.displayPath,
-                relative_path: artifact.relativePath,
-                structural_digest: artifact.structuralDigest,
-                byte_length: artifact.byteLength,
-              },
-              next_action: 'submit',
-            }),
-            stderr: '',
-          },
-        });
+          }),
+        );
       }
       continue;
     }
 
     if (request.name === 'update_plan') {
-      const args = request.args as {
-        plan_id: string;
-        updates: Array<{ step_id: string; status: string; note?: string }>;
-        complete_plan?: boolean;
-      };
-      const planning = getActivePlanning(params.state);
-      const phase = getAgentPhase(planning);
-      if (phase !== 'building') {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: 'update_plan is only available in building phase after plan approval.',
-        });
-        continue;
-      }
-      if (planning.kind !== 'executing') {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: 'No executing plan. Wait for plan approval first.',
-        });
-        continue;
-      }
-      const doc = planning.document;
-      if (args.plan_id !== doc.planId) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: `Plan ID mismatch: expected ${args.plan_id}, current is ${doc.planId}.`,
-        });
-        continue;
-      }
-      const unknownStep = args.updates.find(
-        (update) => !doc.steps.some((step) => step.id === update.step_id),
-      );
-      if (unknownStep) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: `Unknown plan step ID: ${unknownStep.step_id}.`,
-        });
-        continue;
-      }
-      const plan = {
-        name: doc.title,
-        description: doc.bodyMarkdown,
-        status: args.complete_plan ? ('completed' as const) : ('in_progress' as const),
-        steps: doc.steps.map((step) => {
-          const update = args.updates.find((candidate) => candidate.step_id === step.id);
-          return {
-            step: step.title,
-            id: step.id,
-            status: (update?.status ?? step.status) as
-              | 'pending'
-              | 'in_progress'
-              | 'completed'
-              | 'skipped',
-            note: update?.note ?? step.note,
-          };
-        }),
-      };
-      if (
-        args.complete_plan &&
-        plan.steps.some((step) => step.status === 'pending' || step.status === 'in_progress')
-      ) {
-        events.push({
-          type: 'tool.rejected',
-          toolCallId,
-          reason: 'Cannot complete plan while steps are pending or in progress.',
-        });
-        continue;
-      }
-      events.push({
-        type: 'plan.progress_updated',
+      const dispatched = await dispatchRegisteredTool(updatePlanSpec, request.args, {
+        workspace: params.state.session.workspace,
+        threadId: params.state.session.threadId,
         toolCallId,
-        plan,
+        signal: params.signal,
+        planRuntime: { state: params.state, artifacts: planArtifacts },
       });
-      if (args.complete_plan) {
+      if (!dispatched.dispatched || !dispatched.output.ok) {
         events.push({
-          type: 'plan.completed',
+          type: 'tool.rejected',
           toolCallId,
-          plan,
+          reason: dispatched.dispatched ? dispatched.output.stderr : dispatched.rejection.error,
         });
+        continue;
       }
-      events.push({
-        type: 'tool.finished',
-        toolCallId,
-        name: 'update_plan',
-        result: {
-          ok: true,
+      appendProjectedRuntimeEvents(events, dispatched.projected);
+      events.push(
+        registeredToolFinishedEvent({
+          toolCallId,
+          name: request.name,
+          projected: dispatched.projected,
           command: '',
-          exitCode: 0,
-          stdout: JSON.stringify({
-            ok: true,
-            plan_id: doc.planId,
-            updated_steps: args.updates.map((update) => update.step_id),
-            plan_completed: args.complete_plan ?? false,
-          }),
-          stderr: '',
-        },
-      });
+        }),
+      );
       continue;
     }
 
@@ -1667,13 +1160,28 @@ export async function executeRuntimeTools(params: {
       threadId: params.state.session.threadId,
       authorization: params.state.authorization,
       ...(mcpPolicy ? { mcpPolicy } : {}),
+      capability: builtinToolRegistry.effectsOf(request.name, request.args, availCtx),
     });
     if (!decision.allowed) {
+      const deferredUntilBuilding =
+        request.name === 'shell_execute' && decision.phaseConstraint === 'planning';
+      const deniedByPlanningPhase =
+        !deferredUntilBuilding && decision.phaseConstraint === 'planning';
+      const reason = deferredUntilBuilding
+        ? 'Deferred shell_execute until building phase.'
+        : decision.userVisibleSummary;
       events.push({
         type: 'tool.rejected',
         toolCallId,
-        reason: decision.userVisibleSummary,
-        failure: classifyFailure('policy_denied', decision.userVisibleSummary),
+        reason,
+        failure: classifyFailure(
+          deferredUntilBuilding
+            ? 'phase_deferred'
+            : deniedByPlanningPhase
+              ? 'phase_denied'
+              : 'policy_denied',
+          reason,
+        ),
       });
       continue;
     }
@@ -1814,7 +1322,11 @@ export async function executeRuntimeTools(params: {
           signal: params.signal,
           taskConfig: params.taskConfig,
           taskModel: params.taskModel,
+          providerDataAdmission: params.providerDataAdmission,
+          descendantResourceAdmission: params.descendantResourceAdmission,
           emitSubagentEvent,
+          recordFilePreimage: params.recordFilePreimage,
+          recordNetworkDecision: params.recordNetworkDecision,
         });
         events.push(...resumeEvents);
         continue;
@@ -1822,7 +1334,6 @@ export async function executeRuntimeTools(params: {
 
       // ── Normal sub-agent execution ──
       events.push({ type: 'tool.started', toolCallId });
-      const progress: RuntimeEvent[] = [];
       try {
         const result = await runApprovedTool({
           workspace: params.state.session.workspace,
@@ -1833,6 +1344,8 @@ export async function executeRuntimeTools(params: {
           authorization: params.state.authorization,
           approvedGrant: call.approvalGrant ?? 'none',
           threadId: params.state.session.threadId,
+          recordFilePreimage: params.recordFilePreimage,
+          recordNetworkDecision: params.recordNetworkDecision,
           mcpManager: params.mcpManager,
           skillManifests: params.skillManifests,
           skillOptions: params.skillOptions,
@@ -1840,11 +1353,13 @@ export async function executeRuntimeTools(params: {
           interactionMode: getEffectiveInteractionMode(params.state),
           taskConfig: params.taskConfig,
           taskModel: params.taskModel,
+          providerDataAdmission: params.providerDataAdmission,
+          descendantResourceAdmission: params.descendantResourceAdmission,
           subagentEventSink: emitSubagentEvent,
+          availabilityContext: availCtx,
           onShellProgress: (chunk, stream) =>
-            progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
+            events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
         });
-        events.push(...progress);
 
         // ── Sub-agent blocked for approval → surface through Runtime Kernel ──
         if (result.subagentResult?.blocked) {
@@ -1870,16 +1385,12 @@ export async function executeRuntimeTools(params: {
             workspace: params.state.session.workspace,
             threadId: params.state.session.threadId,
             authorization: params.state.authorization,
+            capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, availCtx),
           });
           const blockedApproval = buildToolApproval({
             workspace: params.state.session.workspace,
             threadId: params.state.session.threadId,
-            request: {
-              id: blocked.toolCallId,
-              name: blocked.toolName,
-              args: blocked.args,
-              protectedCommand: blocked.command,
-            } as import('@/core/harness/tool-requests').PendingToolRequest,
+            request: buildBlockedToolRequest(blocked, availCtx),
             decision: blockedDecision,
           }) as import('@/protocol/events').ToolApprovalPayload;
           blockedApproval.subagentId = subagentId;
@@ -1927,6 +1438,7 @@ export async function executeRuntimeTools(params: {
           },
         });
       } catch (error) {
+        if (error instanceof DescendantResourceAdmissionError) throw error;
         events.push({
           type: 'tool.failed',
           toolCallId,
@@ -1939,22 +1451,180 @@ export async function executeRuntimeTools(params: {
       continue;
     }
 
+    const mcpFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
+    const mcpRoute = mcpDescriptor
+      ? params.mcpManager?.getCapabilityRoute?.(mcpDescriptor.capabilityId)
+      : undefined;
+    const controllerArgumentSnapshot =
+      mcpRoute?.transport === 'http'
+        ? snapshotRemoteMcpArgumentsV1(request.args as Record<string, unknown>)
+        : undefined;
+    const controllerArguments =
+      controllerArgumentSnapshot?.ok === true
+        ? controllerArgumentSnapshot.arguments
+        : controllerArgumentSnapshot
+          ? Object.freeze({ invalidArgumentShape: true })
+          : (request.args as Record<string, unknown>);
     const invocation = createMcpInvocationRecord({
       state: params.state,
       call,
       descriptor: mcpDescriptor,
-      flags: params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined,
+      flags: mcpFlags,
+      argumentsValue: controllerArguments,
     });
-    const executionRequest =
+    const snapshotBoundRequest = controllerArgumentSnapshot
+      ? ({ ...request, args: controllerArguments } as typeof request)
+      : request;
+    let executionRequest =
       invocation?.idempotencyKeyArgument && invocation.idempotencyKey
         ? ({
-            ...request,
+            ...snapshotBoundRequest,
             args: {
-              ...request.args,
+              ...controllerArguments,
               [invocation.idempotencyKeyArgument]: invocation.idempotencyKey,
             },
           } as typeof request)
-        : request;
+        : snapshotBoundRequest;
+    let remoteEgress: RemoteMcpEgressInvocationPolicyV1 | undefined;
+    let remoteEgressPreflightFailure: import('@/core/mcp').RemoteMcpEgressReceiptV1 | undefined;
+    let remoteEgressPersistenceUnavailable = false;
+    if (mcpDescriptor) {
+      const flags = mcpFlags;
+      const route = mcpRoute;
+      if (route?.transport === 'http') {
+        const argumentSnapshot =
+          controllerArgumentSnapshot?.ok === false
+            ? controllerArgumentSnapshot
+            : snapshotRemoteMcpArgumentsV1(executionRequest.args as Record<string, unknown>);
+        const finalArguments = argumentSnapshot.ok
+          ? argumentSnapshot.arguments
+          : Object.freeze({ invalidArgumentShape: true });
+        if (argumentSnapshot.ok) {
+          executionRequest = {
+            ...executionRequest,
+            args: argumentSnapshot.arguments,
+          } as typeof executionRequest;
+        }
+        const content = classifyRemoteMcpArgumentsV1(finalArguments);
+        const egressRequest: RemoteMcpEgressPermitRequestV1 = {
+          ...route,
+          invocationId: digestCapability({
+            threadId: params.state.session.threadId,
+            toolCallId,
+            capabilityId: mcpDescriptor.capabilityId,
+            toolRevision: mcpDescriptor.revision,
+            arguments: finalArguments,
+          }),
+          toolCallId,
+          argumentDigest: remoteMcpArgumentDigestV1(finalArguments),
+          content,
+        };
+        if (!params.recordRemoteMcpEgressDecision) {
+          remoteEgressPersistenceUnavailable = true;
+        } else {
+          const enabled = flags?.remoteMcpEgressPolicyV1 === true;
+          const contentInspection = argumentSnapshot.ok
+            ? inspectRemoteMcpArgumentsV1(finalArguments, {
+                knownSecrets: [params.taskConfig?.apiKey],
+              })
+            : 'unknown';
+          const permit =
+            enabled && hasRemoteMcpContentV1(content) && contentInspection === 'clear'
+              ? await params.remoteMcpEgressPermitResolver?.(Object.freeze(egressRequest))
+              : undefined;
+          const preflight = createRemoteMcpEgressReceiptV1({
+            enabled,
+            request: egressRequest,
+            permit,
+            ...(contentInspection === 'secret'
+              ? { reason: 'secret_detected' as const }
+              : contentInspection === 'unknown'
+                ? { reason: 'content_inspection_unknown' as const }
+                : {}),
+          });
+          if (!preflight.admitted) {
+            remoteEgressPreflightFailure = preflight;
+          } else {
+            remoteEgress = {
+              enabled,
+              invocationId: egressRequest.invocationId,
+              toolCallId,
+              content,
+              ...(permit ? { permit } : {}),
+              recordDecision: params.recordRemoteMcpEgressDecision,
+            };
+          }
+        }
+      } else if (flags && !route) {
+        const argumentSnapshot = snapshotRemoteMcpArgumentsV1(
+          executionRequest.args as Record<string, unknown>,
+        );
+        const finalArguments = argumentSnapshot.ok
+          ? argumentSnapshot.arguments
+          : Object.freeze({ invalidArgumentShape: true });
+        const content = classifyRemoteMcpArgumentsV1(finalArguments);
+        if (hasRemoteMcpContentV1(content)) {
+          const receipt = createRemoteMcpEgressReceiptV1({
+            enabled: true,
+            request: {
+              transport: 'http',
+              serverIdentity: mcpDescriptor.provider.id,
+              endpointRevision: 'unavailable',
+              toolRevision: mcpDescriptor.revision,
+              invocationId: digestCapability({
+                threadId: params.state.session.threadId,
+                toolCallId,
+                capabilityId: mcpDescriptor.capabilityId,
+              }),
+              toolCallId,
+              argumentDigest: remoteMcpArgumentDigestV1(finalArguments),
+              content,
+            },
+            reason: 'route_unavailable',
+          });
+          remoteEgressPreflightFailure = receipt;
+        }
+      }
+    }
+    if (remoteEgressPersistenceUnavailable) {
+      const reason = 'Remote MCP egress decision persistence is required before dispatch.';
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure: classifyFailure('persistence_unavailable', reason),
+      });
+      continue;
+    }
+    if (remoteEgressPreflightFailure) {
+      if (!params.recordRemoteMcpEgressDecision) {
+        const reason = 'Remote MCP egress decision persistence is required before dispatch.';
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure('persistence_unavailable', reason),
+        });
+        continue;
+      }
+      try {
+        await params.recordRemoteMcpEgressDecision(remoteEgressPreflightFailure);
+      } catch {
+        const reason = 'Remote MCP egress decision could not be persisted before dispatch.';
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: classifyFailure('persistence_unavailable', reason),
+        });
+        continue;
+      }
+      const denied = new RemoteMcpEgressDeniedError(remoteEgressPreflightFailure);
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: denied.message,
+        failure: classifyFailure('policy_denied', denied.message),
+      });
+      continue;
+    }
     if (invocation) events.push(invocation.recorded);
     events.push({ type: 'tool.started', toolCallId });
     if (invocation) {
@@ -1964,10 +1634,13 @@ export async function executeRuntimeTools(params: {
         startedAt: new Date().toISOString(),
       });
     }
-    const progress: RuntimeEvent[] = [];
     try {
       if (request.name === 'read_mcp_resource') {
-        await params.mcpManager?.ensureProviderReady?.(request.args.server, 30_000, params.signal);
+        await params.mcpManager?.ensureProviderReady?.(
+          (request.args as ReadMcpResourceInput).server,
+          30_000,
+          params.signal,
+        );
       }
       if (mcpDescriptor) {
         await params.mcpManager?.ensureProviderReady?.(
@@ -2001,12 +1674,15 @@ export async function executeRuntimeTools(params: {
             authorization: params.state.authorization,
             approvedGrant: call.approvalGrant ?? 'none',
             threadId: params.state.session.threadId,
+            recordFilePreimage: params.recordFilePreimage,
+            recordNetworkDecision: params.recordNetworkDecision,
             mcpManager: params.mcpManager,
             ...(mcpDescriptor
               ? {
                   mcpInvocation: {
                     capabilityId: mcpDescriptor.capabilityId,
                     expectedRevision: mcpDescriptor.revision,
+                    ...(remoteEgress ? { remoteEgress } : {}),
                   },
                 }
               : {}),
@@ -2018,8 +1694,9 @@ export async function executeRuntimeTools(params: {
             taskConfig: params.taskConfig,
             taskModel: params.taskModel,
             subagentEventSink: emitSubagentEvent,
+            availabilityContext: availCtx,
             onShellProgress: (chunk, stream) =>
-              progress.push({ type: 'tool.progress', toolCallId, chunk, stream }),
+              events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
           });
           break;
         } catch (error) {
@@ -2029,7 +1706,6 @@ export async function executeRuntimeTools(params: {
         }
       }
       if (!result) throw new Error('MCP execution completed without a result.');
-      events.push(...progress);
 
       if (invocation) {
         const terminal = invocationTerminalEvent(
@@ -2060,7 +1736,7 @@ export async function executeRuntimeTools(params: {
       // 文件变更事件 — write_file / edit_file 的结果通知 TUI
       // File change event — notify TUI of write_file / edit_file results
       if (result.ok !== false && (request.name === 'write_file' || request.name === 'edit_file')) {
-        const filePath = String((request.args as Record<string, unknown>).path ?? '');
+        const filePath = String(request.args.path ?? '');
         if (filePath) {
           events.push({
             type: 'tool.file_change',
@@ -2070,6 +1746,18 @@ export async function executeRuntimeTools(params: {
             preview: (result.stdout ?? result.stderr ?? '').slice(0, 500) || undefined,
           });
         }
+      }
+
+      if (result.processCleanup && !result.processCleanup.confirmedExited) {
+        events.push({
+          type: 'runtime.cancellation_diagnostic',
+          toolCallId,
+          failure: classifyFailure(
+            'cancel_incomplete',
+            'One or more shell descendants could not be confirmed exited after bounded cleanup.',
+          ),
+          unconfirmedDescendantCount: result.processCleanup.unconfirmedDescendantCount,
+        });
       }
 
       events.push({
@@ -2087,6 +1775,12 @@ export async function executeRuntimeTools(params: {
             ...(result.path ? { path: result.path } : {}),
             ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
             ...(result.action?.intent ? { intent: result.action.intent } : {}),
+            ...(result.processCleanup
+              ? {
+                  processCleanupConfirmed: result.processCleanup.confirmedExited,
+                  unconfirmedDescendantCount: result.processCleanup.unconfirmedDescendantCount,
+                }
+              : {}),
             ...computeToolResultDigest({
               stdout: result.stdout ?? '',
               stderr: result.stderr ?? '',
@@ -2101,6 +1795,7 @@ export async function executeRuntimeTools(params: {
         },
       });
     } catch (error) {
+      if (error instanceof DescendantResourceAdmissionError) throw error;
       if (invocation) {
         events.push({
           type: 'capability.execution_failed',
@@ -2111,10 +1806,17 @@ export async function executeRuntimeTools(params: {
       }
       const failure = isMcpProviderError(error)
         ? classifyMcpProviderError(error)
-        : classifyFailure(
-            'tool_runtime_error',
-            error instanceof Error ? error.message : String(error),
-          );
+        : error instanceof RemoteMcpEgressDeniedError
+          ? classifyFailure(
+              error.receipt.reason === 'receipt_persistence_failed'
+                ? 'persistence_unavailable'
+                : 'policy_denied',
+              error.message,
+            )
+          : classifyFailure(
+              'tool_runtime_error',
+              error instanceof Error ? error.message : String(error),
+            );
       events.push({
         type: 'tool.failed',
         toolCallId,
@@ -2145,6 +1847,7 @@ function createMcpInvocationRecord(params: {
   call: RuntimeState['tools']['calls'][string];
   descriptor: import('@/protocol/capabilities').CapabilityDescriptor | undefined;
   flags: ReturnType<typeof getFeatureFlags> | undefined;
+  argumentsValue?: Record<string, unknown>;
 }):
   | {
       invocationId: string;
@@ -2161,12 +1864,13 @@ function createMcpInvocationRecord(params: {
   ) {
     return undefined;
   }
+  const argumentsValue = params.argumentsValue ?? params.call.args;
   const invocationId = digestCapability({
     threadId: params.state.session.threadId,
     toolCallId: params.call.toolCallId,
     capabilityId: params.descriptor.capabilityId,
     capabilityRevision: params.descriptor.revision,
-    arguments: params.call.args,
+    arguments: argumentsValue,
   });
   const planning = getActivePlanning(params.state);
   const planId = 'document' in planning ? planning.document?.planId : undefined;
@@ -2195,7 +1899,7 @@ function createMcpInvocationRecord(params: {
         ? { taskId: params.call.taskId ?? params.state.activeTaskId ?? undefined }
         : {}),
       ...(planId ? { planId } : {}),
-      argumentsDigest: digestCapability(params.call.args),
+      argumentsDigest: digestCapability(argumentsValue),
       authorizationDigest,
       effectiveEffectsDigest: digestCapability(params.descriptor.effectiveEffects),
       effectiveEffects: params.descriptor.effectiveEffects,

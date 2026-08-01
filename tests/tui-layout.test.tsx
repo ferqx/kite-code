@@ -1,13 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
+import stringWidth from 'string-width';
 import App from '../src/app/tui/App';
 import ApprovalBlock from '../src/app/tui/components/ApprovalBlock';
 import BlockRenderer from '../src/app/tui/components/BlockRenderer';
 import HelpPanel from '../src/app/tui/components/HelpPanel';
 import InputBlock from '../src/app/tui/components/InputBlock';
 import InputLine from '../src/app/tui/components/InputLine';
-import MarkdownBlock from '../src/app/tui/components/MarkdownBlock';
+import MarkdownBlock, {
+  groupLines,
+  updateMarkdownParseCache,
+} from '../src/app/tui/components/MarkdownBlock';
 import ModelSelector from '../src/app/tui/components/ModelSelector';
 import PlanReviewBlock from '../src/app/tui/components/PlanReviewBlock';
 import { SPINNER, spinnerIndexForElapsed } from '../src/app/tui/components/render-utils';
@@ -71,9 +75,9 @@ function fakeRunStatus(overrides: Partial<RunStatusSnapshot> = {}): RunStatusSna
 
 describe('spinner timing', () => {
   test('derives frames deterministically from elapsed time', () => {
-    expect(SPINNER[spinnerIndexForElapsed(0)]).toBe('⠋');
-    expect(SPINNER[spinnerIndexForElapsed(120)]).toBe('⠙');
-    expect(SPINNER[spinnerIndexForElapsed(SPINNER.length * 80)]).toBe('⠋');
+    expect(SPINNER[spinnerIndexForElapsed(0)]).toBe('● ');
+    expect(SPINNER[spinnerIndexForElapsed(120)]).toBe('● ');
+    expect(SPINNER[spinnerIndexForElapsed(SPINNER.length * 1000)]).toBe('● ');
   });
 });
 
@@ -538,6 +542,219 @@ describe('MarkdownBlock', () => {
     const { lastFrame } = render(<MarkdownBlock content={'```ts\nx\n```'} />);
     expect(lastFrame()).toContain('┌─ ts ─');
   });
+
+  test('keeps earlier Markdown components stable while the tail grows', () => {
+    const view = render(<MarkdownBlock content={'# Result\n\nFirst paragraph'} />);
+    view.rerender(
+      <MarkdownBlock
+        content={'# Result\n\nFirst paragraph\n\n- item one\n- item two\n\n```ts\nconst x = 1\n```'}
+      />,
+    );
+
+    const frame = view.lastFrame();
+    expect(frame).toContain('Result');
+    expect(frame).toContain('First paragraph');
+    expect(frame).toContain('item one');
+    expect(frame).toContain('item two');
+    expect(frame).toContain('┌─ ts ─');
+    expect(frame).toContain('const x = 1');
+  });
+
+  test('incremental parsing preserves completed prefix group identities', () => {
+    const first = updateMarkdownParseCache(
+      undefined,
+      '# Result\n\nFirst paragraph\n\nSecond paragraph',
+    );
+    const next = updateMarkdownParseCache(
+      first,
+      '# Result\n\nFirst paragraph\n\nSecond paragraph grows',
+    );
+
+    expect(next.groups.slice(0, -1)).toEqual(first.groups.slice(0, -1));
+    expect(next.groups[0]).toBe(first.groups[0]);
+    expect(next.groups[1]).toBe(first.groups[1]);
+    expect(next.groups[2]).toBe(first.groups[2]);
+    expect(next.groups.at(-1)).not.toBe(first.groups.at(-1));
+  });
+
+  test('incremental parsing reparses the tail when a pipe row becomes a table', () => {
+    const first = updateMarkdownParseCache(undefined, 'Intro\n\n| Name | Value |');
+    const next = updateMarkdownParseCache(
+      first,
+      'Intro\n\n| Name | Value |\n| --- | --- |\n| streaming | stable |',
+    );
+
+    expect(next.groups[0]).toBe(first.groups[0]);
+    expect(next.groups.at(-1)).toMatchObject({
+      kind: 'table',
+      startIndex: 2,
+    });
+  });
+
+  test('promotes a growing pipe sequence into one table component', () => {
+    const view = render(<MarkdownBlock content="| Name | Value |" />);
+    view.rerender(
+      <MarkdownBlock content={'| Name | Value |\n| --- | --- |\n| streaming | stable |'} />,
+    );
+
+    const frame = view.lastFrame();
+    expect(frame).toContain('Name');
+    expect(frame).toContain('Value');
+    expect(frame).toContain('streaming');
+    expect(frame).toContain('stable');
+  });
+
+  test('renders inline Markdown as visible table-cell text', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock
+        content={
+          '| 任务 | 改动范围 | 工作量 |\n| --- | --- | --- |\n| **A1. web\\_search 工具** | 新增 `web-search.ts`，通过 **MCP** 搜索。 | 中 |'
+        }
+      />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('A1. web_search 工具');
+    expect(frame).toContain('新增 web-search.ts，通过 MCP 搜索。');
+    expect(frame).not.toContain('**');
+    expect(frame).not.toContain('`');
+    expect(frame).not.toContain('\\_');
+  });
+
+  test('keeps escaped and code-span pipes inside their table cells', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock
+        content={'| A | B |\n| --- | --- |\n| x \\| y | first |\n| `left | right` | second |'}
+        maxWidth={80}
+      />,
+    );
+
+    const lines = lastFrame()?.split('\n') ?? [];
+    expect(lines).toContain('│ x | y        │ first  │');
+    expect(lines).toContain('│ left | right │ second │');
+    expect(lines.every((line) => (line.match(/│/g)?.length ?? 0) <= 3)).toBe(true);
+  });
+
+  test('keeps tables within the Markdown container width', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock
+        content={'| Header | Value |\n| --- | --- |\n| abcdefghijklmnop | 1234567890 |'}
+        maxWidth={20}
+      />,
+    );
+
+    const lines = lastFrame()?.split('\n') ?? [];
+    expect(lines.length).toBeGreaterThan(5);
+    expect(lines.every((line) => stringWidth(line) <= 20)).toBe(true);
+  });
+
+  test('keeps wide graphemes inside one-column cells in an extremely narrow table', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock content={'| 一 | B |\n| --- | --- |\n| 汉 | 👨‍👩‍👧‍👦 |'} maxWidth={9} />,
+    );
+
+    const lines = lastFrame()?.split('\n') ?? [];
+    expect(lines.every((line) => stringWidth(line) <= 9)).toBe(true);
+    expect(new Set(lines.map((line) => stringWidth(line))).size).toBe(1);
+    expect(lastFrame()).toContain('…');
+  });
+
+  test('preserves table link destinations and Unicode border alignment', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock
+        content={
+          '| 名称 | 值 |\n| --- | --- |\n| **文档** | [打开](https://example.com) |\n| emoji | 👨‍👩‍👧‍👦 é |'
+        }
+        maxWidth={50}
+      />,
+    );
+
+    const lines = lastFrame()?.split('\n') ?? [];
+    expect(lastFrame()).toContain('打开 (https://example.com)');
+    expect(new Set(lines.map((line) => stringWidth(line))).size).toBe(1);
+  });
+
+  test('groups consecutive plain lines into logical paragraphs', () => {
+    expect(groupLines(['first line', 'continued line', '', 'second paragraph'])).toEqual([
+      {
+        kind: 'paragraph',
+        lines: ['first line', 'continued line'],
+        startIndex: 0,
+      },
+      { kind: 'single', line: '', index: 2 },
+      {
+        kind: 'paragraph',
+        lines: ['second paragraph'],
+        startIndex: 3,
+      },
+    ]);
+  });
+
+  test('renders a multi-line paragraph through one text node while preserving line breaks', () => {
+    const { lastFrame } = render(
+      <MarkdownBlock content={'first **bold** line\nsecond `code` line\nthird line'} />,
+    );
+
+    expect(lastFrame()?.split('\n')).toEqual(['first bold line', 'second code line', 'third line']);
+  });
+
+  test('keeps paragraph boundaries around Markdown structures', () => {
+    expect(
+      groupLines([
+        'intro',
+        'continues',
+        '',
+        '- item',
+        '',
+        '| A | B |',
+        '| --- | --- |',
+        '| 1 | 2 |',
+        '',
+        'outro',
+      ]).map((group) => group.kind),
+    ).toEqual(['paragraph', 'single', 'list', 'single', 'table', 'single', 'paragraph']);
+  });
+
+  test('grows table, code, list, and quote components by stable child rows', () => {
+    const view = render(
+      <MarkdownBlock
+        content={
+          '| Name | Value |\n| --- | --- |\n| first | one |\n\n```ts\nconst one = 1\n```\n\n- first\n\n> first'
+        }
+      />,
+    );
+    view.rerender(
+      <MarkdownBlock
+        content={
+          '| Name | Value |\n| --- | --- |\n| first | one |\n| second | two |\n\n```ts\nconst one = 1\nconst two = 2\n```\n\n- first\n- second\n\n> first\n> second'
+        }
+      />,
+    );
+
+    const frame = view.lastFrame();
+    expect(frame).toContain('first');
+    expect(frame).toContain('second');
+    expect(frame).toContain('const one = 1');
+    expect(frame).toContain('const two = 2');
+    expect(frame?.match(/•/g)).toHaveLength(2);
+    expect(frame?.match(/▎/g)).toHaveLength(2);
+  });
+
+  test('reflows all table rows when a new cell expands a column width', () => {
+    const view = render(
+      <MarkdownBlock content={'| A | B |\n| --- | --- |\n| x | y |'} maxWidth={80} />,
+    );
+    view.rerender(
+      <MarkdownBlock
+        content={'| A | B |\n| --- | --- |\n| x | y |\n| much-longer-value | z |'}
+        maxWidth={80}
+      />,
+    );
+
+    const lines = view.lastFrame()?.split('\n') ?? [];
+    expect(lines.some((line) => line.includes('much-longer-value'))).toBe(true);
+    expect(lines.filter((line) => line.startsWith('│'))).toHaveLength(3);
+  });
 });
 
 // ── HelpPanel ──
@@ -626,7 +843,7 @@ describe('StartupScreen', () => {
 // ── ApprovalBlock ──
 
 describe('ApprovalBlock', () => {
-  test('renders compact approval prompt without repeating tool command', () => {
+  test('renders the pending command inside the compact approval title', () => {
     const approval = fakeApproval({
       command: 'rm -rf /tmp/test',
       summary: 'Delete temp files',
@@ -636,23 +853,32 @@ describe('ApprovalBlock', () => {
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Approve this tool call?');
+    expect(frame).toContain('授权执行命令（rm -rf /tmp/test）');
     expect(frame).not.toContain('● Bash');
-    expect(frame).not.toContain('rm -rf /tmp/test');
     expect(frame).not.toContain('Delete temp files');
     expect(frame).not.toContain('destructive');
   });
 
-  test('shows all grant options with labels', () => {
+  test('keeps a multiline approval command on one compact title line', () => {
+    const approval = fakeApproval({
+      command: 'bun run typecheck 2>\\\n  /tmp/typecheck.log',
+    });
+    const { lastFrame } = render(
+      <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+
+    expect(lastFrame()).toContain('授权执行命令（bun run typecheck 2>\\ /tmp/typecheck.log）');
+  });
+
+  test('shows three grant options', () => {
     const approval = fakeApproval();
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Yes · 仅本次');
-    expect(frame).toContain('Auto · 自动审批');
-    expect(frame).toContain('Full · 完全权限');
-    expect(frame).toContain('Deny · 拒绝');
+    expect(frame).toContain('允许一次');
+    expect(frame).toContain('本次会话允许');
+    expect(frame).toContain('拒绝');
   });
 
   test('uses a simple top divider instead of a rounded border', () => {
@@ -667,17 +893,15 @@ describe('ApprovalBlock', () => {
     expect(frame).not.toContain('│');
   });
 
-  test('non‑shell tools also show all grant options', () => {
-    // sandbox 合并后，ApprovalBlock 不再区分 shell/non‑shell 工具类型，始终展示全部 4 个选项
+  test('non‑shell tools show same three options', () => {
     const approval = fakeApproval({ tool: 'write_file', grantOptions: ['approve_once'] });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
     const frame = lastFrame();
-    expect(frame).toContain('Yes · 仅本次');
-    expect(frame).toContain('Auto · 自动审批');
-    expect(frame).toContain('Full · 完全权限');
-    expect(frame).toContain('Deny · 拒绝');
+    expect(frame).toContain('允许一次');
+    expect(frame).toContain('本次会话允许');
+    expect(frame).toContain('拒绝');
   });
 
   test('recognizes raw terminal arrow sequences when selecting a grant', async () => {
@@ -692,12 +916,10 @@ describe('ApprovalBlock', () => {
 
     stdin.write('\u001b[B');
     await new Promise((resolve) => setTimeout(resolve, 10));
-    stdin.write('\u001b[B');
-    await new Promise((resolve) => setTimeout(resolve, 10));
     stdin.write('\r');
     await new Promise((resolve) => setTimeout(resolve, 10));
 
-    expect(resolved).toEqual([{ action: 'approve', grant: 'full_access' }]);
+    expect(resolved).toEqual([{ action: 'approve', grant: 'same_command' }]);
   });
 });
 
@@ -1087,7 +1309,7 @@ describe('BlockRenderer', () => {
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
 
-    expect(lastFrame()).toContain('⠋');
+    expect(lastFrame()).toContain('●');
   });
 
   test('running shell tool_card renders liveOutput', () => {
@@ -1213,6 +1435,30 @@ describe('BlockRenderer', () => {
     expect(frame).not.toContain('(no answer)');
   });
 
+  test('renders ask_user schema failures as errors instead of user answers', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-invalid',
+      name: 'ask_user',
+      args: {
+        questions: [{ question: 'Choose a scope?' }],
+      },
+      status: 'error',
+      summary: 'questions.0.options: Too big: expected array to have <=3 items',
+      expanded: true,
+    };
+
+    const { lastFrame } = render(
+      <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('questions.0.options: Too big');
+    expect(frame).not.toContain('User:');
+    expect(frame).not.toContain('(no answer)');
+  });
+
   test('timed out shell tool_card does not render as exit error', () => {
     const block: OutputBlock = {
       id: 1,
@@ -1236,6 +1482,29 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('… +2 lines');
     expect(frame).toContain('timed out after 5000ms');
     expect(frame).not.toContain('exit: error');
+  });
+
+  test('cancelled shell tool_card keeps its command and renders only a cancelled footer', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+      status: 'cancelled',
+      summary: 'Cancelled',
+      detail: 'Ran: bun test',
+      expanded: true,
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Ran: bun test');
+    expect(frame).toContain('cancelled');
+    expect(frame).not.toContain('exit: 0');
+    expect(frame.match(/Cancelled/g) ?? []).toHaveLength(0);
   });
 
   test('file_change block is rendered by tool_card, not BlockRenderer', () => {
@@ -1286,7 +1555,7 @@ describe('BlockRenderer', () => {
     expect(lastFrame()).toContain('find files');
   });
 
-  test('renders tool_summary error details', () => {
+  test('collapses settled tool_summary errors to the summary line', () => {
     const block: OutputBlock = {
       id: 1,
       kind: 'tool_summary',
@@ -1310,11 +1579,60 @@ describe('BlockRenderer', () => {
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
     );
 
-    expect(lastFrame()).toContain('Find package.json');
-    expect(lastFrame()).toContain('search command failed');
+    expect(lastFrame()).toContain('searched 1 file pattern');
+    expect(lastFrame()).not.toContain('Find package.json');
+    expect(lastFrame()).not.toContain('search command failed');
   });
 
-  test('Thinking phase: shows thinking preview, no tool steps', () => {
+  test('phase block renders confirmed captions and pending caption at the top (ADR-0030)', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      createdAt: Date.now() - 13000,
+      totalElapsedMs: 13000,
+      modelMs: 13000,
+      summaryLine: 'read 2 files',
+      hasThought: true,
+      hasThinking: true,
+      captions: ['让我系统地阅读 TUI 模块的核心文件。'],
+      pendingCaption: 'Now the remaining pieces.',
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+        {
+          callId: 'c2',
+          name: 'read_file',
+          args: { path: 'src/app/tui/types.ts' },
+          ok: false,
+          summary: '',
+          status: 'running',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    // 标题行 = 累加时长 + 合并统计；旁白位于标题之下、步骤树之上
+    expect(frame).toContain('Thought for 13s · read 2 files');
+    expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
+    expect(frame).toContain('Now the remaining pieces.');
+    const captionIdx = frame.indexOf('让我系统地阅读');
+    const headerIdx = frame.indexOf('Thought for 13s');
+    const stepsIdx = frame.indexOf('Read App.tsx');
+    expect(captionIdx).toBeGreaterThan(headerIdx);
+    expect(captionIdx).toBeLessThan(stepsIdx);
+  });
+
+  test('Thinking phase shows the active reasoning preview', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1331,11 +1649,147 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
-    // 新的 timeline 渲染：思考内容以 ├─ Thinking 形式展示
     expect(frame).toContain('Thought for 1s');
     expect(frame).toContain('checking current Thought boundaries');
-    expect(frame).toContain('├─ Thinking');
     expect(frame).not.toContain('├─ Read');
+  });
+
+  test('awaiting-terminal Thought collapses details as soon as answer text starts', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      responsePending: true,
+      latestActivity: {
+        kind: 'thinking',
+        text: 'the complete reasoning stream appears atomically',
+      },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      tools: [
+        {
+          callId: 'read-1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          status: 'done',
+          ok: true,
+          summary: 'Read App.tsx',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Thought for 1s');
+    expect(frame).not.toContain('the complete reasoning stream appears atomically');
+    expect(frame).not.toContain('Read App.tsx');
+    expect(frame).not.toContain('●');
+  });
+
+  test('Thought activity window shows the first five reasoning lines and an ellipsis', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: {
+        kind: 'thinking',
+        text: 'reason one\nreason two\nreason three\nreason four\nreason five\nreason six',
+      },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      tools: [],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const frame =
+      render(
+        <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    for (const line of ['one', 'two', 'three', 'four', 'five']) {
+      expect(frame).toContain(`reason ${line}`);
+    }
+    expect(frame).not.toContain('reason six');
+    expect(frame).toContain('...');
+  });
+
+  test('Thought activity window removes blank lines before taking the head', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: {
+        kind: 'thinking',
+        text: [
+          'kept first line',
+          '',
+          '   ',
+          'kept second line   ',
+          '',
+          'kept third line',
+          'kept fourth line',
+          '',
+          'kept fifth line',
+          'discarded sixth line',
+          '',
+        ].join('\n'),
+      },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      tools: [],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const frame =
+      render(
+        <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    for (const line of ['first', 'second', 'third', 'fourth', 'fifth']) {
+      expect(frame).toContain(`kept ${line} line`);
+    }
+    expect(frame).not.toContain('discarded sixth line');
+    expect(frame).toContain('...');
+    expect(frame).not.toMatch(/\n\s*\n/u);
+  });
+
+  test('latest tool activity replaces the reasoning window', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: { kind: 'tool', callId: 'c1' },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 1 file',
+      hasThought: true,
+      hasThinking: true,
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          ok: false,
+          summary: '',
+          status: 'running',
+        },
+      ],
+      timeline: [{ seq: 1, kind: 'thinking', text: 'reasoning must be hidden' }],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const frame =
+      render(
+        <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('└─ Read README.md');
+    expect(frame).not.toContain('reasoning must be hidden');
   });
 
   test('keeps running tool_summary thinking preview when latest visible activity is a tool', () => {
@@ -1348,6 +1802,7 @@ describe('BlockRenderer', () => {
       totalElapsedMs: 1000,
       summaryLine: 'read 3 files',
       hasThought: true,
+      hasThinking: true,
       tools: [
         {
           callId: 'c1',
@@ -1380,9 +1835,55 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 新 timeline 渲染：思考内容在 tool_summary 中作为 ├─ Thinking 展示
-    expect(frame).toContain('├─ Thinking');
-    expect(frame).toContain('Read README.md');
+    expect(frame).toContain('reviewing the project conventions');
+    expect(frame).not.toContain('Read README.md');
+    // 思考块标题 = "Thought for Xs · <工具统计>"（· 分隔，规则 22）
+    expect(frame).toContain('Thought for 1s · read 3 files');
+  });
+
+  test('thinking block header appends tool stats and truncates them to fit narrow terminals', () => {
+    const tools = ['README.md', 'package.json', 'CLAUDE.md'].map((path, i) => ({
+      callId: `c${i + 1}`,
+      name: 'read_file',
+      args: { path },
+      ok: true,
+      summary: 'ok',
+      status: 'done' as const,
+    }));
+    const wide = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      createdAt: Date.now() - 2000,
+      totalElapsedMs: 2000,
+      summaryLine: 'read 3 files, searched for 2 patterns',
+      hasThought: true,
+      hasThinking: true,
+      result: 'done' as const,
+      tools,
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+
+    // 宽终端：完整后缀 "Thought for Xs · <统计>"
+    const wideFrame =
+      render(
+        <BlockRenderer columns={100} block={wide} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+    expect(wideFrame).toContain('  Thought for 2s · read 3 files, searched for 2 patterns');
+    expect(wideFrame).not.toContain('●');
+
+    // 窄终端：前缀完整保留，统计后缀按宽度截断（… 省略号）
+    const narrowFrame =
+      render(<BlockRenderer columns={40} block={wide} isFocused={false} index={0} />).lastFrame() ??
+      '';
+    expect(narrowFrame).toContain('Thought for 2s · read 3 files, search…');
+    expect(narrowFrame).not.toContain('searched for 2 patterns');
+
+    // 极窄终端：后缀整体省略，不留孤悬分隔符
+    const tinyFrame =
+      render(<BlockRenderer columns={18} block={wide} isFocused={false} index={0} />).lastFrame() ??
+      '';
+    expect(tinyFrame).toContain('Thought for 2s');
+    expect(tinyFrame).not.toContain('●');
   });
 
   test('renders running tool_summary tree without duplicating latest tool preview', () => {
@@ -1412,16 +1913,12 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    expect(frame).toContain('├─ Read CLAUDE.md [lines 1-126 / 126]');
-    // 运行中的 Thought 始终显示「运行中」——即使当前工具已完成，
-    // 下一轮 reason / tool_call 通常紧随其后，显示「完成」会造成视觉抖动。
-    // Running Thought always shows "运行中" — tools completing is transient;
-    // the next reason/tool_call typically follows immediately.
-    expect(frame).toContain('└─ 运行中');
+    expect(frame).toContain('└─ Read CLAUDE.md [lines 1-126 / 126]');
+    expect(frame).not.toContain('└─ 运行中');
     expect(frame).not.toContain('\n   Read CLAUDE.md');
   });
 
-  test('Working phase: hides thinking preview, shows tool steps', () => {
+  test('latest reasoning activity hides tool steps and uses the full activity window', () => {
     const longThought =
       'this is a very long thinking preview that should not spill across the entire terminal width';
     const block = {
@@ -1433,6 +1930,7 @@ describe('BlockRenderer', () => {
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
       hasThought: true,
+      hasThinking: true,
       tools: [
         {
           callId: 'c1',
@@ -1449,14 +1947,12 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 新 timeline 渲染：思考内容以 ├─ Thinking 展示，但过长文本会被截断
-    expect(frame).toContain('├─ Thinking');
-    expect(frame).not.toContain(longThought);
-    expect(frame).toContain('运行中');
-    expect(frame).toContain('Read');
+    expect(frame).toContain('this is a very long thinking');
+    expect(frame).not.toContain('运行中');
+    expect(frame).not.toContain('Read App.tsx');
   });
 
-  test('shows thinking preview even when all tools are done (same thought cycle continues)', () => {
+  test('shows active reasoning while the cycle continues', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1466,6 +1962,7 @@ describe('BlockRenderer', () => {
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
       hasThought: true,
+      hasThinking: true,
       tools: [
         {
           callId: 'c1',
@@ -1482,14 +1979,11 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 运行中 Thought 的思考预览始终展示——工具完成不代表思考周期终止，
-    // 下一个 tool_call 很可能紧随其后，预览不应被隐藏又重现。
-    // Running Thought always shows thinking preview — completed tools
-    // don't mean the thinking cycle ended; another tool_call often follows.
-    expect(frame).toContain('Thinking still thinking');
+    expect(frame).toContain('still thinking after tools done');
+    expect(frame).not.toContain('Read App.tsx');
   });
 
-  test('omits thinking preview after tool_summary settles', () => {
+  test('keeps only the Thought summary after a tool_summary settles', () => {
     const block = {
       id: 1,
       kind: 'tool_summary',
@@ -1499,6 +1993,7 @@ describe('BlockRenderer', () => {
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
       hasThought: true,
+      hasThinking: true,
       tools: [
         {
           callId: 'c1',
@@ -1514,7 +2009,141 @@ describe('BlockRenderer', () => {
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
     );
 
-    expect(lastFrame()).not.toContain('hidden after settle');
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('  Thought for 1s · read 1 file');
+    expect(frame).not.toContain('●');
+    expect(frame).not.toContain('hidden after settle');
+    expect(frame).not.toContain('Read App.tsx');
+    expect(frame).not.toContain('└─ 完成');
+  });
+
+  test('settled non-thinking tool summary removes its activity dot', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'read 1 file',
+      hasThought: false,
+      hasThinking: false,
+      result: 'done' as const,
+      tools: [
+        {
+          callId: 'c1',
+          name: 'read_file',
+          args: { path: 'src/app/tui/App.tsx' },
+          ok: true,
+          summary: 'ok',
+          status: 'done',
+        },
+      ],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    expect(lastFrame()).toContain('  read 1 file');
+    expect(lastFrame()).not.toContain('●');
+  });
+
+  test('settled pure-thinking Thought hides reasoning and has no status dot', () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: false,
+      createdAt: Date.now() - 3000,
+      totalElapsedMs: 3000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      result: 'done' as const,
+      tools: [],
+      timeline: [{ seq: 1, kind: 'thinking' as const, text: 'hidden after settle' }],
+      nextTimelineSeq: 2,
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    // 单行形态：只有 "Thought for 3s"，无圆点、无步骤树、无 footer
+    expect(frame).toContain('Thought for 3s');
+    expect(frame).not.toContain('●');
+    expect(frame).not.toContain('hidden after settle');
+    expect(frame).not.toContain('完成');
+    // ● 保留给有状态的行；纯思考 settle 后无状态，不渲染圆点，
+    // 但保留两个空格列位，文字起始列与工具块名字列对齐
+    expect(frame).toContain('  Thought for 3s');
+    expect(frame.split('\n').filter((l) => l.trim())).toHaveLength(1);
+  });
+
+  test('text block with thoughtElapsedMs renders merged Thought header above content (ADR-0026)', () => {
+    const block = {
+      id: 1,
+      kind: 'text',
+      content: '── TUI 模块全面解析 ──',
+      thoughtElapsedMs: 24_000,
+      thoughtContent: 'internal reasoning must stay hidden',
+    } as Extract<OutputBlock, { kind: 'text' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    // 题头 + 正文同一块：无圆点，中间固定保留一行
+    expect(frame).toContain('Thought for 24s');
+    expect(frame).toContain('── TUI 模块全面解析 ──');
+    expect(frame).not.toContain('●');
+    expect(frame).not.toContain('internal reasoning must stay hidden');
+    const lines = frame.split('\n');
+    const headerIndex = lines.findIndex((line) => line.includes('Thought for 24s'));
+    const contentIndex = lines.findIndex((line) => line.includes('TUI 模块全面解析'));
+    expect(contentIndex - headerIndex).toBe(2);
+    // 题头两空格缩进，文字起始列与工具块名字列对齐
+    expect(frame).toContain('  Thought for 24s');
+  });
+
+  test('text block without thoughtElapsedMs renders no Thought header', () => {
+    const block = {
+      id: 1,
+      kind: 'text',
+      content: 'plain answer',
+    } as Extract<OutputBlock, { kind: 'text' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+    expect(lastFrame() ?? '').not.toContain('Thought for');
+  });
+
+  test('running pure-thinking Thought shows the blink dot without a running footer', async () => {
+    const block = {
+      id: 1,
+      kind: 'tool_summary',
+      active: true,
+      latestActivity: { kind: 'thinking', text: 'reviewing the layout rules' },
+      createdAt: Date.now() - 1000,
+      totalElapsedMs: 1000,
+      summaryLine: 'thinking',
+      hasThought: true,
+      hasThinking: true,
+      tools: [],
+    } as Extract<OutputBlock, { kind: 'tool_summary' }>;
+    const { lastFrame } = render(
+      <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
+    );
+
+    // 进行中首帧显示实心 ●（颜色为主题暗 dt.dim，ink-testing-library
+    // 剥离 ANSI 颜色码），与 settle 白点同位置同宽度，无列位移
+    expect(lastFrame()).toContain('● Thought for 1s');
+    expect(lastFrame()).toContain('reviewing the layout rules');
+    expect(lastFrame()).not.toContain('├─ Thinking');
+    expect(lastFrame()).not.toContain('运行中');
+
+    // 显隐闪烁：约 1000ms 后圆点隐藏（渲染为两个空格，行宽不变）
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+    expect(lastFrame()).not.toContain('●');
+    expect(lastFrame()).toContain('Thought for 1s');
   });
 
   test('stops showing running Thought state after a boundary even if a tool is still pending', () => {
@@ -1544,7 +2173,7 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('read 1 file');
-    expect(frame).toContain('等待工具结果');
+    expect(frame).not.toContain('等待工具结果');
     expect(frame).not.toContain('运行中');
     expect(frame).not.toContain('10s');
   });
@@ -1588,15 +2217,30 @@ describe('Block spacing', () => {
 
   test('user → text', () => {
     assertGap(
-      { id: 1, kind: 'user', content: 'hello world', _marker: 'hello world' } as any,
-      { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
+      {
+        id: 1,
+        kind: 'user',
+        content: 'hello world',
+        _marker: 'hello world',
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
       1,
     );
   });
 
   test('text → tool_card', () => {
     assertGap(
-      { id: 1, kind: 'text', content: '__BLOCK_0__', _marker: '__BLOCK_0__' } as any,
+      {
+        id: 1,
+        kind: 'text',
+        content: '__BLOCK_0__',
+        _marker: '__BLOCK_0__',
+      } as unknown as OutputBlock,
       {
         id: 2,
         kind: 'tool_card',
@@ -1606,7 +2250,7 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'done',
         _marker: 'Read',
-      } as any,
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1622,7 +2266,7 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'ok',
         _marker: 'tool_a',
-      } as any,
+      } as unknown as OutputBlock,
       {
         id: 2,
         kind: 'tool_card',
@@ -1632,7 +2276,7 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'ok',
         _marker: 'tool_b',
-      } as any,
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1648,8 +2292,13 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'result',
         _marker: 'Bash',
-      } as any,
-      { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1659,7 +2308,12 @@ describe('Block spacing', () => {
   test('text → file_change is no‑op (file_change rendered by tool_card)', () => {
     // file_change 不再通过 BlockRenderer 渲染，应在 tool_card 之间验证间距
     assertGap(
-      { id: 1, kind: 'text', content: '__BLOCK_0__', _marker: '__BLOCK_0__' } as any,
+      {
+        id: 1,
+        kind: 'text',
+        content: '__BLOCK_0__',
+        _marker: '__BLOCK_0__',
+      } as unknown as OutputBlock,
       {
         id: 2,
         kind: 'tool_card',
@@ -1669,7 +2323,7 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'done',
         _marker: 'Read',
-      } as any,
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1686,8 +2340,13 @@ describe('Block spacing', () => {
         status: 'done',
         summary: 'done',
         _marker: 'Read',
-      } as any,
-      { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
       1,
     );
   });
@@ -1706,16 +2365,31 @@ describe('Block spacing', () => {
         durationMs: 100,
         steps: [],
         _marker: 'find',
-      } as any,
-      { id: 2, kind: 'text', content: '__BLOCK_1__', _marker: '__BLOCK_1__' } as any,
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__BLOCK_1__',
+        _marker: '__BLOCK_1__',
+      } as unknown as OutputBlock,
       2, // subagent status line adds one extra line between header marker and next block
     );
   });
 
   test('slash command user → text (tight)', () => {
     assertGap(
-      { id: 1, kind: 'user', content: '/theme blue', _marker: '/theme blue' } as any,
-      { id: 2, kind: 'text', content: '__SLASH_RSLT__', _marker: '__SLASH_RSLT__' } as any,
+      {
+        id: 1,
+        kind: 'user',
+        content: '/theme blue',
+        _marker: '/theme blue',
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'text',
+        content: '__SLASH_RSLT__',
+        _marker: '__SLASH_RSLT__',
+      } as unknown as OutputBlock,
       0,
     );
   });
@@ -1767,6 +2441,71 @@ describe('Block spacing', () => {
     expect(i3).toBeGreaterThan(-1);
     expect(i4).toBeGreaterThan(-1);
     expect(i4 - i3).toBe(1); // consecutive, no blank line
+  });
+
+  test('separately committed list item blocks have no block gap', () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: 'user', content: 'list' },
+      { id: 2, kind: 'text', content: '1. first item\n' },
+      { id: 3, kind: 'text', content: '2. second item\n' },
+      { id: 4, kind: 'text', content: '3. third item' },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const first = lines.findIndex((line) => line.includes('first item'));
+    const second = lines.findIndex((line) => line.includes('second item'));
+    const third = lines.findIndex((line) => line.includes('third item'));
+
+    expect(second - first).toBe(1);
+    expect(third - second).toBe(1);
+  });
+
+  test('keeps a normal block gap around a progressively rendered list', () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: 'text', content: 'Introduction.' },
+      { id: 2, kind: 'text', content: '- first item\n' },
+      { id: 3, kind: 'text', content: '- second item\n' },
+      { id: 4, kind: 'text', content: 'Conclusion.' },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const intro = lines.findIndex((line) => line.includes('Introduction.'));
+    const first = lines.findIndex((line) => line.includes('first item'));
+    const second = lines.findIndex((line) => line.includes('second item'));
+    const conclusion = lines.findIndex((line) => line.includes('Conclusion.'));
+
+    expect(first - intro).toBe(2);
+    expect(second - first).toBe(1);
+    expect(conclusion - second).toBe(2);
+  });
+
+  test('joins a streamed item after a mixed block whose final component is a list', () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1,
+        kind: 'text',
+        content: '应用层在 src/app/：\n\n- tui/ — React Ink TUI 主界面\n',
+      },
+      { id: 2, kind: 'text', content: '- cli/ — Headless CLI\n' },
+      { id: 3, kind: 'text', content: '- web-server/ — Hono Web 服务' },
+    ];
+
+    const { lastFrame } = render(
+      <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const tui = lines.findIndex((line) => line.includes('tui/'));
+    const cli = lines.findIndex((line) => line.includes('cli/'));
+    const web = lines.findIndex((line) => line.includes('web-server/'));
+
+    expect(cli - tui).toBe(1);
+    expect(web - cli).toBe(1);
   });
 
   test('slash command user block has 0 gap to result', () => {
@@ -2005,6 +2744,10 @@ describe('OutputArea', () => {
         toolCallId: 'mcp-1',
         name: 'mcp__langchian__search_docs_by_lang_chain',
         args: { query: 'LangGraph' },
+      },
+      {
+        type: 'tool.started',
+        toolCallId: 'mcp-1',
       },
     ];
     const state = events.reduce(
@@ -2409,7 +3152,73 @@ describe('OutputArea', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('Bash');
-    expect(frame).toContain('index.ts');
+    expect(frame).toContain('read 1 file');
+    expect(frame).not.toContain('index.ts');
+  });
+
+  test('does not apply an execution-frontier filter to blocks already materialized by the reducer', () => {
+    const runningShell: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-1',
+      name: 'shell_execute',
+      args: { command: 'bun test' },
+      status: 'running',
+      summary: '',
+      preview: 'bun test',
+    };
+    const queuedThought: OutputBlock = {
+      id: 2,
+      kind: 'tool_summary',
+      active: true,
+      createdAt: Date.now() - 3000,
+      totalElapsedMs: 0,
+      summaryLine: 'read 1 file, searched 2 file patterns',
+      hasThought: false,
+      tools: [
+        {
+          callId: 'read-1',
+          name: 'read_file',
+          args: { path: 'README.md' },
+          ok: false,
+          summary: '',
+          status: 'queued',
+        },
+        {
+          callId: 'search-1',
+          name: 'search_files',
+          args: { pattern: '*.ts' },
+          ok: false,
+          summary: '',
+          status: 'queued',
+        },
+      ],
+    };
+
+    const { lastFrame, rerender } = render(
+      <OutputAreaTestWrap
+        running
+        turns={[{ blocks: [runningShell, queuedThought] }]}
+        onToggleReason={noop}
+      />,
+    );
+
+    expect(lastFrame()).toContain('bun test');
+    expect(lastFrame()).toContain('read 1 file');
+
+    const startedThought: OutputBlock = {
+      ...queuedThought,
+      tools: [{ ...queuedThought.tools[0]!, status: 'running' }, queuedThought.tools[1]!],
+    };
+    rerender(
+      <OutputAreaTestWrap
+        running
+        turns={[{ blocks: [runningShell, startedThought] }]}
+        onToggleReason={noop}
+      />,
+    );
+
+    expect(lastFrame()).toContain('read 1 file');
   });
 
   test('resolved approval block is rendered by tool_card, not OutputArea', () => {
@@ -2511,6 +3320,7 @@ describe('App', () => {
       sessionError: false,
       loadingSessionId: null,
       explorationSummaryIds: {},
+      pendingToolCalls: {},
       interactionMode: 'accept_edits',
       ...overrides,
     };
@@ -2556,15 +3366,15 @@ describe('App', () => {
     const state = fakeState({
       running: true,
       runStartTime: Date.now() - 28_000,
-      turns: [{ blocks: [{ id: 1, kind: 'approval', approval }] }],
-      interrupt: { kind: 'approval', blockId: 1 },
+      turns: [],
+      interrupt: { kind: 'approval', approval },
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Approve this tool call?');
-    expect(frame).toContain('Yes · 仅本次');
+    expect(frame).toContain('授权执行命令');
+    expect(frame).toContain('允许一次');
     expect(frame).not.toContain('Waiting...');
   });
 
@@ -2644,7 +3454,7 @@ describe('App', () => {
           ],
         },
       ],
-      interrupt: { kind: 'approval', blockId: 1 },
+      interrupt: null,
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
@@ -2716,7 +3526,7 @@ describe('SubAgentBlock rendering', () => {
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);
 
-    expect(lastFrame()).toContain('⠋');
+    expect(lastFrame()).toContain('●');
   });
 
   test('renders done subagent block', () => {

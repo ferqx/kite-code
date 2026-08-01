@@ -11,6 +11,112 @@ import { createRuntimeStore } from '@/core/runtime/store';
 import { aiMessage } from '../../src/core/messages';
 import { createMockModel } from '../mock-model';
 
+test('cancelling any shell approval aborts the current turn and its running sibling', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-approval-cancel-'));
+  const mockModel = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'shell-1',
+            name: 'shell_execute',
+            args: { command: 'node task-1.js' },
+          },
+          {
+            id: 'shell-2',
+            name: 'shell_execute',
+            args: { command: 'node task-2.js' },
+          },
+        ],
+      }),
+    },
+  ]);
+  let reportShellAborted!: () => void;
+  const shellAborted = new Promise<void>((resolve) => {
+    reportShellAborted = resolve;
+  });
+  let approvals = 0;
+
+  try {
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Run two commands',
+        threadId: 'approval-cancels-turn',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: join(workspace, 'runtime.db'),
+        model: mockModel as any,
+        shellExecutor: async (input) => {
+          if (input.command !== 'node task-1.js') {
+            throw new Error(`Unexpected shell execution: ${input.command}`);
+          }
+          return await new Promise((resolve) => {
+            const finish = () => {
+              reportShellAborted();
+              resolve({
+                ok: false,
+                command: input.command,
+                exitCode: 130,
+                stdout: '',
+                stderr: 'Command cancelled by user.',
+              });
+            };
+            if (input.signal?.aborted) finish();
+            else input.signal?.addEventListener('abort', finish, { once: true });
+          });
+        },
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      {
+        requestAction: async (effect) => {
+          if (effect.type !== 'request_tool_approval') {
+            throw new Error(`Unexpected interaction: ${effect.type}`);
+          }
+          approvals += 1;
+          return approvals === 1
+            ? {
+                type: 'approve',
+                interactionId: effect.interactionId,
+                grant: 'approve_once',
+              }
+            : {
+                type: 'cancel',
+                interactionId: effect.interactionId,
+                reason: 'Cancelled second approval.',
+              };
+        },
+      },
+    )) {
+      events.push(event);
+    }
+
+    await shellAborted;
+    expect(approvals).toBe(2);
+    expect(mockModel.callCount.count).toBe(1);
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(['approval.rejected', 'tool.cancelled', 'turn.aborted']),
+    );
+
+    const store = createRuntimeStore(join(workspace, 'runtime.db'));
+    const snapshot = store.loadSnapshot<RuntimeState>('approval-cancels-turn');
+    if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
+    expect(snapshot.tools.calls['shell-1']?.status).toBe('cancelled');
+    expect(snapshot.tools.calls['shell-2']?.status).toBe('rejected');
+    store.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('Runtime gates an unavailable required MCP provider before the model and persists waiver', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-required-provider-'));
   const storePath = join(workspace, 'runtime.db');
@@ -401,6 +507,124 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
   }
 });
 
+test('Runtime replaces the planning intent placeholder with the submitted Task', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-planning-intent-'));
+  const storePath = join(workspace, 'runtime.db');
+  const threadId = 'planning-intent';
+  const mockModel = createMockModel([
+    { message: aiMessage({ content: 'Planning conversation completed.' }) },
+    { message: aiMessage({ content: 'Second planning conversation completed.' }) },
+  ]);
+
+  try {
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'test',
+      workspace,
+      storePath,
+      phase: 'building',
+    });
+    const placeholderTaskId = 'planning-placeholder';
+    kernel.processEventBatch([
+      {
+        type: 'task.started',
+        taskId: placeholderTaskId,
+        userGoal: '',
+        turnId: kernel.getState().turn.turnId,
+      },
+      {
+        type: 'planning.entered',
+        taskId: placeholderTaskId,
+        source: 'user_command',
+      },
+    ]);
+    kernel.close();
+
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Inspect the repository and make a plan',
+        threadId,
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        phase: 'planning',
+        model: mockModel as any,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event);
+    }
+
+    expect(mockModel.callCount.count).toBe(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'task.cancelled',
+        taskId: placeholderTaskId,
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'task.started',
+        userGoal: 'Inspect the repository and make a plan',
+      }),
+    );
+    expect(events).not.toContainEqual(
+      expect.objectContaining({
+        type: 'run.error',
+        message: expect.stringContaining('active task'),
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'model.responded',
+        text: 'Planning conversation completed.',
+      }),
+    );
+
+    const secondEvents: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Continue planning in the same TUI mode',
+        threadId,
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        phase: 'planning',
+        model: mockModel as any,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      secondEvents.push(event);
+    }
+    expect(mockModel.callCount.count).toBe(2);
+    expect(secondEvents).toContainEqual(
+      expect.objectContaining({
+        type: 'model.responded',
+        text: 'Second planning conversation completed.',
+      }),
+    );
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const mockModel = createMockModel([
@@ -411,7 +635,17 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
           {
             id: 'ask-name',
             name: 'ask_user',
-            args: { question: 'What is your name?', options: [], allow_free_text: true },
+            args: {
+              questions: [
+                {
+                  question: 'What is your name?',
+                  options: [
+                    { label: 'Ada', description: 'Use Ada as the display name.' },
+                    { label: 'Grace', description: 'Use Grace as the display name.' },
+                  ],
+                },
+              ],
+            },
           },
         ],
       }),
@@ -457,8 +691,98 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
   }
 });
 
+test('Runtime Kernel continues the same turn after ask_user is cancelled', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-input-cancel-'));
+  const storePath = join(workspace, 'runtime.db');
+  const mockModel = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          {
+            id: 'ask-name',
+            name: 'ask_user',
+            args: {
+              questions: [
+                {
+                  question: 'What is your name?',
+                  options: [
+                    { label: 'Ada', description: 'Use Ada as the display name.' },
+                    { label: 'Grace', description: 'Use Grace as the display name.' },
+                  ],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    },
+    { message: aiMessage({ content: 'Continued without an answer.' }) },
+  ]);
+
+  try {
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'Ask for a name, but continue if I decline',
+        threadId: 'kernel-input-cancel-integration',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: mockModel as any,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+        },
+      },
+      {
+        requestAction: async (effect) => ({
+          type: 'cancel',
+          interactionId: effect.interactionId,
+          reason: 'User declined to answer.',
+        }),
+      },
+    )) {
+      events.push(event);
+    }
+
+    expect(mockModel.callCount.count).toBe(2);
+    expect(events.some((event) => event.type === 'turn.aborted')).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.finished',
+        toolCallId: 'ask-name',
+        name: 'ask_user',
+        result: expect.objectContaining({ ok: false, stdout: 'Cancelled' }),
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'model.responded',
+        text: 'Continued without an answer.',
+      }),
+    );
+    expect(events.at(-1)?.type).toBe('turn.completed');
+
+    const store = createRuntimeStore(storePath);
+    const snapshot = store.loadSnapshot<RuntimeState>('kernel-input-cancel-integration');
+    if (!snapshot) throw new Error('Expected a persisted Runtime snapshot');
+    expect(snapshot.tools.calls['ask-name']?.status).toBe('failed');
+    expect(snapshot.transcript.final).toBe('Continued without an answer.');
+    store.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('Runtime Kernel executes write_plan in planning phase', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const previousKiteCodeHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = workspace;
   const mockModel = createMockModel([
     {
       message: aiMessage({
@@ -479,7 +803,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
     { message: aiMessage({ content: 'Plan draft saved.' }) },
   ]);
   try {
-    const events: RuntimeEvent['type'][] = [];
+    const events: RuntimeEvent[] = [];
     for await (const event of runRuntimeAgent(
       {
         task: 'Create note.txt',
@@ -506,13 +830,23 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
         }),
       },
     ))
-      events.push(event.type);
+      events.push(event);
 
     // write_plan should succeed and produce plan.drafted
-    expect(events).toContain('plan.drafted');
+    const eventTypes = events.map((event) => event.type);
+    if (!eventTypes.includes('plan.drafted')) {
+      throw new Error(
+        `write_plan did not draft a plan: ${JSON.stringify(
+          events.filter((event) => event.type === 'tool.rejected'),
+        )}`,
+      );
+    }
+    expect(eventTypes).toContain('plan.drafted');
     // No review requested (write_plan does not trigger interrupt)
-    expect(events).not.toContain('plan.review_requested');
+    expect(eventTypes).not.toContain('plan.review_requested');
   } finally {
+    if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousKiteCodeHome;
     rmSync(workspace, { recursive: true, force: true });
   }
 });

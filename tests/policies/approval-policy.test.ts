@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   commandGrantKey,
   hasSameCommandGrant,
@@ -194,14 +197,51 @@ describe('hasSameCommandGrant', () => {
 describe('evaluateToolApproval', () => {
   // ── Read tools / 只读工具 ──
   describe('read tools', () => {
-    it('allows read_file', () => {
+    it('allows read_file with workspace path', () => {
       const result = evaluateToolApproval(
-        baseParams({ toolName: 'read_file', toolArgs: { path: '/f' } }),
+        baseParams({ toolName: 'read_file', toolArgs: { path: 'foo.txt' } }),
       );
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(false);
       expect(result.decision).toBe('allow');
       expect(result.risk).toBe('read');
+    });
+
+    it('requires approval for read_file with absolute path outside workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'read_file', toolArgs: { path: '/f' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.decision).toBe('ask');
+      expect(result.risk).toBe('read');
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
+    it('allows an absolute workspace file reached through a filesystem alias', () => {
+      if (process.platform === 'win32') return;
+      const root = mkdtempSync(join(tmpdir(), 'kite-policy-path-alias-'));
+      const workspace = join(root, 'workspace');
+      const alias = join(root, 'workspace-alias');
+      try {
+        mkdirSync(workspace);
+        writeFileSync(join(workspace, 'data.txt'), 'inside');
+        symlinkSync(workspace, alias, 'dir');
+
+        const result = evaluateToolApproval(
+          baseParams({
+            toolName: 'read_file',
+            toolArgs: { path: join(alias, 'data.txt') },
+            workspace,
+          }),
+        );
+
+        expect(result.allowed).toBe(true);
+        expect(result.requiresApproval).toBe(false);
+        expect(result.effects?.externalRead).toBeUndefined();
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     });
 
     it('allows search_content', () => {
@@ -212,12 +252,120 @@ describe('evaluateToolApproval', () => {
       expect(result.requiresApproval).toBe(false);
     });
 
+    it('requires approval for search_content with absolute path outside workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'search_content', toolArgs: { pattern: 'foo', path: '/etc' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.decision).toBe('ask');
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
     it('allows search_files', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'search_files', toolArgs: { pattern: '*.ts' } }),
       );
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(false);
+    });
+
+    it('requires approval for search_files with absolute path outside workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'search_files', toolArgs: { pattern: '*.txt', path: '/tmp' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.decision).toBe('ask');
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+  });
+
+  // ── MSYS2 path normalization (Windows only) / MSYS2 路径归一化 ──
+  // Windows 上 MSYS2 形式路径（/c/proj/...）必须先归一化再判断外部性，
+  // 否则 resolve() 会把它挂到当前盘符，工作区内路径被误判为外部。
+  // On Windows, MSYS2-style paths must be normalized before the external
+  // check; otherwise resolve() roots them at the current drive and
+  // in-workspace paths are misclassified as external.
+  const describeWin32 = process.platform === 'win32' ? describe : describe.skip;
+
+  describeWin32('MSYS2-style path normalization', () => {
+    const workspace = 'C:\\proj';
+
+    it('treats in-workspace MSYS2 paths as internal for search tools', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'search_files',
+          toolArgs: { pattern: '*.ts', path: '/c/proj/src' },
+          workspace,
+        }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.effects?.externalRead).toBeUndefined();
+    });
+
+    it('requires approval for MSYS2 paths outside the workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'search_content',
+          toolArgs: { pattern: 'foo', path: '/d/elsewhere' },
+          workspace,
+        }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
+    it('treats in-workspace MSYS2 paths as internal for write tools', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'write_file',
+          toolArgs: { path: '/c/proj/out.txt', content: 'x' },
+          workspace,
+        }),
+      );
+      // write_file 始终需要审批，但工作区内路径不应带 externalWrite effect
+      // write_file always requires approval, but in-workspace paths must not
+      // carry the externalWrite effect.
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects?.externalWrite).toBeUndefined();
+    });
+
+    it('flags MSYS2 paths outside the workspace as external writes', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'edit_file',
+          toolArgs: { path: '/d/other/file.txt' },
+          workspace,
+        }),
+      );
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalWrite: true });
+    });
+  });
+
+  // 非 Windows 平台契约：msys2ToWindowsPath 透传，'/c/proj' 是真正的外部
+  // 绝对路径，必须要求审批。该用例在 Linux CI 上运行，锁定 no-op 契约。
+  // Off-Windows contract: msys2ToWindowsPath is a no-op, so '/c/proj' is a
+  // genuine external absolute path and must require approval. Runs on Linux
+  // CI to pin the no-op contract.
+  const describeNonWin32 = process.platform !== 'win32' ? describe : describe.skip;
+
+  describeNonWin32('MSYS2 normalization is a no-op off Windows', () => {
+    it('still requires approval for /c/... paths on non-Windows platforms', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'search_files',
+          toolArgs: { pattern: '*.ts', path: '/c/proj/src' },
+          workspace: '/tmp/test',
+        }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalRead: true });
     });
   });
 
@@ -300,6 +448,18 @@ describe('evaluateToolApproval', () => {
       expect(result.requiresApproval).toBe(true);
       expect(result.risk).toBe('write_file');
       expect(result.decision).toBe('ask');
+    });
+
+    it('does not open approval for a downgraded removal during planning', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolArgs: { command: 'rm -rf /tmp/build' },
+          phase: 'planning',
+        }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.phaseConstraint).toBe('planning');
     });
 
     it('denies empty shell commands', () => {
@@ -386,6 +546,21 @@ describe('evaluateToolApproval', () => {
       );
       expect(result.allowed).toBe(false);
       expect(result.decision).toBe('deny');
+      expect(result.requiresApproval).toBe(false);
+      expect(result.userVisibleSummary).toBe(
+        'Plan mode is read-only. No file was written. Describe the intended change in the plan and apply it after plan approval.',
+      );
+    });
+
+    it('explains that edit_file cannot be approved during planning', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'edit_file', toolArgs: { path: 'src/a.ts' }, phase: 'planning' }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.userVisibleSummary).toBe(
+        'Plan mode is read-only. No file was edited. Describe the intended change in the plan and apply it after plan approval.',
+      );
     });
 
     it('sets externalWrite effect for absolute paths', () => {
@@ -526,6 +701,8 @@ describe('evaluateToolApproval', () => {
         }),
       );
       expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.phaseConstraint).toBe('planning');
     });
   });
 
@@ -613,6 +790,26 @@ describe('evaluateToolApproval', () => {
         expect(result.risk).toBe('mcp');
       }
     });
+
+    it('rejects a side-effectful MCP tool with actionable planning guidance', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'mcp__server__write',
+          toolArgs: {},
+          phase: 'planning',
+          mcpPolicy: {
+            effects: { filesystem: 'write', network: 'read', externalState: 'read' },
+            minimumApproval: 'none',
+          },
+        }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.phaseConstraint).toBe('planning');
+      expect(result.userVisibleSummary).toBe(
+        'Plan mode is read-only. This operation did not run and cannot be approved while planning. Use read-only inspection or describe the intended implementation in the plan, then run it after plan approval.',
+      );
+    });
   });
 
   // ── read_mcp_resource / MCP 资源读取 ──
@@ -628,18 +825,6 @@ describe('evaluateToolApproval', () => {
       expect(result.requiresApproval).toBe(false);
       expect(result.risk).toBe('read');
       expect(result.effects).toBeUndefined();
-    });
-  });
-
-  // ── Skill / 技能 ──
-  describe('Skill', () => {
-    it('allows Skill invocation directly', () => {
-      const result = evaluateToolApproval(
-        baseParams({ toolName: 'Skill', toolArgs: { skill: 'test' } }),
-      );
-      expect(result.allowed).toBe(true);
-      expect(result.requiresApproval).toBe(false);
-      expect(result.risk).toBe('read');
     });
   });
 

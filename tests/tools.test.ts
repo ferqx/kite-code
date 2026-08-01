@@ -1,11 +1,29 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { computeLineDiff, formatDiffOutput } from '../src/core/tools/diff';
+import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '../src/core/tools/diff';
 import { editFile, readFile, readTextContent, writeFile } from '../src/core/tools/file';
-import { msys2ToWindowsPath, normalizeMsys2PathsInText } from '../src/core/tools/path-utils';
-import { assertInsideWorkspace, shellTool } from '../src/core/tools/shell';
+import {
+  isPathInsideWorkspace,
+  msys2ToWindowsPath,
+  normalizeMsys2PathsInText,
+} from '../src/core/tools/path-utils';
+import { searchContent, searchFiles } from '../src/core/tools/search';
+import {
+  assertInsideWorkspace,
+  DEFAULT_SHELL_TIMEOUT_MS,
+  resolveShellTimeoutMs,
+  shellTool,
+} from '../src/core/tools/shell';
 
 /** Convert MSYS2 Unix-style path to Windows-style path via cygpath (legacy test helper) */
 function msys2Win(p: string): string {
@@ -28,6 +46,13 @@ function msys2Win(p: string): string {
 }
 
 describe('tool safety', () => {
+  test('shell timeout resolution always returns a finite hard limit', () => {
+    expect(resolveShellTimeoutMs()).toBe(DEFAULT_SHELL_TIMEOUT_MS);
+    expect(resolveShellTimeoutMs(0)).toBe(DEFAULT_SHELL_TIMEOUT_MS);
+    expect(resolveShellTimeoutMs(Number.POSITIVE_INFINITY)).toBe(DEFAULT_SHELL_TIMEOUT_MS);
+    expect(resolveShellTimeoutMs(250)).toBe(250);
+  });
+
   test('allows paths inside the workspace', () => {
     const workspace = join(tmpdir(), 'kite-code-langgraph-tools-safe');
     expect(assertInsideWorkspace(workspace, 'inside.txt')).toBe(join(workspace, 'inside.txt'));
@@ -140,7 +165,7 @@ describe('tool safety', () => {
     expect(readFileSync(join(workspace, 'config.ts'), 'utf8')).toContain('debug: false');
   });
 
-  test('edit_file auto-retry trimEnd: trailing whitespace mismatch succeeds', () => {
+  test('edit_file strict exact: trailing whitespace mismatch fails with re-read guidance', () => {
     const workspace = join(tmpdir(), 'kite-code-tools-autofix');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
@@ -148,7 +173,7 @@ describe('tool safety', () => {
     // File content has no trailing spaces
     writeFile({ workspace, path: 'cfg.ts', content: '  debug: true,\n  env: prod,\n' });
 
-    // oldString has trailing spaces — exact match fails, trimEnd rescues
+    // ADR-0043 §3: oldString has trailing spaces — matching is exact, no fallback
     const result = editFile({
       workspace,
       path: 'cfg.ts',
@@ -156,20 +181,21 @@ describe('tool safety', () => {
       newString: '  debug: false,',
     });
 
-    expect(result.ok).toBe(true);
-    expect(result.replacements).toBe(1);
-    const content = readFileSync(join(workspace, 'cfg.ts'), 'utf8');
-    expect(content).toContain('debug: false');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('not found');
+    expect(result.error).toContain('read_file');
+    // File untouched
+    expect(readFileSync(join(workspace, 'cfg.ts'), 'utf8')).toContain('debug: true');
   });
 
-  test('edit_file auto-retry per-line: leading whitespace mismatch succeeds', () => {
+  test('edit_file strict exact: leading whitespace mismatch fails', () => {
     const workspace = join(tmpdir(), 'kite-code-tools-autofix-ml');
     rmSync(workspace, { recursive: true, force: true });
     mkdirSync(workspace, { recursive: true });
 
     writeFile({ workspace, path: 'f.ts', content: '  const x = 1;\n  const y = 2;\n' });
 
-    // oldString stripped of indent — exact + trimEnd fail, per-line trim rescues
+    // ADR-0043 §3: oldString stripped of indent — exact match fails, no per-line fallback
     const result = editFile({
       workspace,
       path: 'f.ts',
@@ -177,10 +203,10 @@ describe('tool safety', () => {
       newString: 'const x = 10;\nconst y = 20;',
     });
 
-    expect(result.ok).toBe(true);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('not found');
     const content = readFileSync(join(workspace, 'f.ts'), 'utf8');
-    expect(content).toContain('const x = 10;');
-    expect(content).toContain('const y = 20;');
+    expect(content).toContain('const x = 1;');
   });
 
   test('edit_file fails when old_string not found', () => {
@@ -307,6 +333,41 @@ describe('msys2ToWindowsPath', () => {
     // On Linux/macOS, /d/foo is a legitimate absolute path, not a drive letter
     expect(msys2ToWindowsPath('/d/foo/bar')).toBe('/d/foo/bar');
     expect(msys2ToWindowsPath('/tmp/test/file.txt')).toBe('/tmp/test/file.txt');
+  });
+});
+
+describe('canonical workspace path comparison', () => {
+  test('treats a symlink alias as the same workspace boundary for reads and searches', async () => {
+    if (process.platform === 'win32') return;
+    const root = mkdtempSync(join(tmpdir(), 'kite-tools-path-alias-'));
+    const workspace = join(root, 'workspace');
+    const alias = join(root, 'workspace-alias');
+    try {
+      mkdirSync(workspace);
+      writeFileSync(join(workspace, 'data.txt'), 'alias needle');
+      symlinkSync(workspace, alias, 'dir');
+
+      expect(isPathInsideWorkspace(workspace, join(alias, 'data.txt'))).toBe(true);
+      expect(readFile({ workspace, path: join(alias, 'data.txt') }).ok).toBe(true);
+
+      const files = await searchFiles({
+        workspace,
+        path: alias,
+        pattern: '*.txt',
+      });
+      expect(files.ok).toBe(true);
+      expect(files.stdout).toBe('data.txt\n');
+
+      const content = await searchContent({
+        workspace,
+        path: alias,
+        pattern: 'needle',
+      });
+      expect(content.ok).toBe(true);
+      expect(content.stdout).toContain('data.txt:1:alias needle');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -556,5 +617,139 @@ describe('formatDiffOutput', () => {
     const lines = output.split('\n');
     expect(lines[1]!.startsWith('100  x')).toBe(true);
     expect(lines[2]!.startsWith('101 +y')).toBe(true);
+  });
+});
+
+describe('formatMultiHunkDiff', () => {
+  test('shows diffs for multiple match locations with correct line numbers', () => {
+    const output = formatMultiHunkDiff('old text', 'new text', [5, 20, 100], 3);
+    const lines = output.split('\n');
+    // stats line — cumulative: 1 per occurrence × 3 replacements
+    expect(lines[0]).toContain('Added 3 lines');
+    expect(lines[0]).toContain('removed 3 lines');
+    expect(lines[0]).toContain('(replaced 3 times)');
+    // first hunk at line 5 (pad=3 because maxLineNum=100+1=101)
+    expect(lines[1]).toBe('  5 -old text');
+    expect(lines[2]).toBe('  5 +new text');
+    // separator between groups (gap > 3)
+    expect(lines.some((l) => l === '...')).toBe(true);
+    // last hunk at line 100 (3-digit padding)
+    expect(lines.some((l) => l === '100 -old text')).toBe(true);
+    expect(lines.some((l) => l === '100 +new text')).toBe(true);
+  });
+
+  test('merges adjacent hunks (gap ≤ 3) without ellipsis', () => {
+    const output = formatMultiHunkDiff(
+      'old text',
+      'new text',
+      [10, 13], // gap = 3 → adjacent, merge
+      2,
+    );
+    const lines = output.split('\n');
+    // no ellipsis for adjacent hunks
+    expect(lines.includes('...')).toBe(false);
+    // both changes shown
+    expect(lines[1]).toBe('10 -old text');
+    expect(lines[2]).toBe('10 +new text');
+    expect(lines[3]).toBe('13 -old text');
+    expect(lines[4]).toBe('13 +new text');
+  });
+
+  test('inserts ellipsis between non-adjacent groups', () => {
+    const output = formatMultiHunkDiff('old text', 'new text', [5, 20, 50], 3);
+    const lines = output.split('\n');
+    const ellipsisCount = lines.filter((l) => l === '...').length;
+    // 3 matches, all far apart → 2 ellipsis separators
+    expect(ellipsisCount).toBe(2);
+  });
+
+  test('pads line numbers for large match lines', () => {
+    const output = formatMultiHunkDiff('old text', 'new text', [999, 1000], 2);
+    const lines = output.split('\n');
+    // max line num = 1000 + 1 (oldStr length) = 1001 → 4-char padding
+    expect(lines[1]!.startsWith(' 999 -old text')).toBe(true);
+    expect(lines[2]!.startsWith(' 999 +new text')).toBe(true);
+  });
+
+  test('handles single match identically to formatDiffOutput path', () => {
+    // single match — same behavior as computeLineDiff + formatDiffOutput
+    const output = formatMultiHunkDiff('old text', 'new text', [15], 1);
+    const lines = output.split('\n');
+    expect(lines[0]).toContain('(replaced 1 time)');
+    expect(lines[1]).toBe('15 -old text');
+    expect(lines[2]).toBe('15 +new text');
+  });
+
+  test('correctly computes added/removed counts from diff (not line subtraction)', () => {
+    // old has 3 lines, new has 1 line — 2 replacements, cumulative: removed 4
+    // Old code would show "Added -2 lines" via simple subtraction; fixed to use computeLineDiff
+    const output = formatMultiHunkDiff('line1\nline2\nline3', 'line1', [10, 50], 2);
+    const lines = output.split('\n');
+    expect(lines[0]).toContain('Added 0 lines');
+    expect(lines[0]).toContain('removed 4 lines');
+  });
+});
+
+describe('edit_file replace_all multi-hunk e2e', () => {
+  test('shows ... separators between far-apart matches and omits middle content', () => {
+    const workspace = join(
+      tmpdir(),
+      `kite-code-multihunk-${Math.random().toString(36).slice(2, 8)}`,
+    );
+    rmSync(workspace, { recursive: true, force: true });
+    mkdirSync(workspace, { recursive: true });
+
+    // 构造文件：三处出现相同模式，分别在第 10、40、100 行
+    // Build file with the same pattern at lines 10, 40, 100
+    // 构造文件：三处出现相同的 3 行文本块，行号 10-12、40-42、100-102
+    // Build file: same 3-line block repeats at lines 10-12, 40-42, 100-102
+    const lines: string[] = [];
+    for (let i = 0; i < 110; i++) {
+      const ln = i + 1;
+      if (ln === 10 || ln === 40 || ln === 100) lines.push('# TAG 1');
+      else if (ln === 11 || ln === 41 || ln === 101) lines.push('# TAG 2');
+      else if (ln === 12 || ln === 42 || ln === 102) lines.push('# TAG 3 - end');
+      else lines.push(`line ${ln}`);
+    }
+    writeFileSync(join(workspace, 'big.txt'), `${lines.join('\n')}\n`);
+
+    const oldBlock = '# TAG 1\n# TAG 2\n# TAG 3 - end';
+    const newBlock = '# CHAPTER 1\n# CHAPTER 2\n# CHAPTER 3 - end';
+    const editResult = editFile({
+      workspace,
+      path: 'big.txt',
+      oldString: oldBlock,
+      newString: newBlock,
+      replaceAll: true,
+    });
+
+    expect(editResult.ok).toBe(true);
+    if (!editResult.ok) throw new Error(editResult.error!);
+
+    expect(editResult.matchLines).toBeDefined();
+    expect(editResult.matchLines!.length).toBe(3);
+    expect(editResult.matchLines).toEqual([10, 40, 100]);
+
+    // 验证 formatMultiHunkDiff 输出：不相邻 hunk 间有 ...，中间内容不出现
+    // Verify formatMultiHunkDiff output: ... between non-adjacent hunks, skip middle content
+    const diffOutput = formatMultiHunkDiff(
+      oldBlock,
+      newBlock,
+      editResult.matchLines!,
+      editResult.replacements!,
+    );
+    const outputLines = diffOutput.split('\n');
+
+    expect(outputLines.filter((l) => l === '...').length).toBe(2);
+
+    expect(outputLines.some((l) => l.startsWith(' 10 -# TAG 1'))).toBe(true);
+    expect(outputLines.some((l) => l.startsWith(' 40 -# TAG 1'))).toBe(true);
+    expect(outputLines.some((l) => l.startsWith('100 -# TAG 1'))).toBe(true);
+
+    const middleText = outputLines.join('\n');
+    expect(middleText).not.toContain('line 25');
+    expect(middleText).not.toContain('line 80');
+
+    rmSync(workspace, { recursive: true, force: true });
   });
 });

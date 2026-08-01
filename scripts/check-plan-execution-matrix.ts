@@ -1,0 +1,1457 @@
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
+import { loadApprovedProductionExecutionQualificationRegistryV1 } from '../src/core/config/execution-qualification';
+
+interface PlanSpec {
+  alias: string;
+  file: string;
+}
+
+interface MatrixRow {
+  plan: PlanSpec;
+  taskId: string;
+  dependsOn: string;
+  outputs: string;
+  verification: string;
+  migrationAndRollback: string;
+  sourceLine: string;
+}
+
+const root = process.cwd();
+const planDir = join(root, 'docs', 'space', 'plans');
+const plans: PlanSpec[] = [
+  { alias: '0', file: '2026-07-29-agent-production-governance-decisions.md' },
+  { alias: '1A', file: '2026-07-29-agent-production-local-data-privacy.md' },
+  { alias: '1B', file: '2026-07-29-agent-production-execution-isolation.md' },
+  { alias: '1C', file: '2026-07-29-agent-production-runtime-resilience.md' },
+  { alias: '2A', file: '2026-07-29-agent-production-release-control.md' },
+  { alias: '2B', file: '2026-07-29-agent-production-evaluation.md' },
+  { alias: '3', file: '2026-07-29-agent-production-observability-operations.md' },
+  { alias: '4', file: '2026-07-29-agent-production-compaction-qualification.md' },
+  { alias: '5', file: '2026-07-29-agent-production-capability-rollout.md' },
+  { alias: '6', file: '2026-07-29-agent-production-ga.md' },
+];
+
+const stableMilestoneProducers = new Map<string, string>([
+  ['MS:M0', '0:0.5'],
+  ['MS:1A-DONE', '1A:1A.7'],
+  ['MS:1B-DONE', '1B:1B.9'],
+  ['MS:1C-DONE', '1C:1C.8'],
+  ['MS:2A-F', '2A:2A.7'],
+  ['MS:2B-DONE', '2B:2B.10'],
+  ['MS:3-OPS-READY', '3:3.9'],
+  ['MS:2A-RC', '2A:2A.11'],
+  ['MS:LIMITED-SLO', '3:3.10'],
+  ['MS:4-INTERNAL-AUTO-FRESH', '4:4.9'],
+  ['MS:4-MANUAL-STABLE', '4:4.11'],
+  ['MS:5A-STABLE', '5:5A.5'],
+  ['MS:5B-STABLE', '5:5B.6'],
+  ['MS:5C-READONLY-STABLE', '5:5C.5'],
+  ['MS:5C-EFFECTFUL-STABLE', '5:5C.8'],
+  ['MS:6A-AUTO-STABLE', '6:6A.4'],
+]);
+
+const roadmapOnlyMilestones = new Set(['MS:M2-CANDIDATE', 'MS:LIM-APPROVED']);
+const knownMilestones = new Set([...stableMilestoneProducers.keys(), ...roadmapOnlyMilestones]);
+const failures: string[] = [];
+
+function fail(message: string): void {
+  failures.push(message);
+}
+
+function requireReachableCommit(commit: string, label: string): void {
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    fail(`${label}: evidence commit must be a full lowercase SHA-1`);
+    return;
+  }
+  const object = spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], {
+    cwd: root,
+    stdio: 'ignore',
+  });
+  if (object.status !== 0) {
+    if (process.env.OPENPX_REQUIRE_EVIDENCE_HISTORY === '1') {
+      fail(`${label}: evidence commit ${commit} does not exist in the checkout`);
+    }
+    return;
+  }
+  const ancestor = spawnSync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], {
+    cwd: root,
+    stdio: 'ignore',
+  });
+  if (ancestor.status !== 0 && process.env.OPENPX_REQUIRE_EVIDENCE_HISTORY === '1') {
+    fail(`${label}: evidence commit ${commit} is not reachable from HEAD`);
+  }
+}
+
+function readPlan(plan: PlanSpec): string {
+  return readFileSync(join(planDir, plan.file), 'utf8');
+}
+
+function parsePipeRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, '')
+    .replace(/\|$/, '')
+    .split('|')
+    .map((cell) => cell.trim());
+}
+
+function extractMatrix(plan: PlanSpec, source: string): MatrixRow[] {
+  const lines = source.split('\n');
+  const heading = lines.findIndex((line) => /^#{2,3} 任务执行矩阵$/.test(line));
+  if (heading < 0) {
+    fail(`${plan.file}: missing 任务执行矩阵 heading`);
+    return [];
+  }
+
+  const headerIndex = lines.findIndex(
+    (line, index) => index > heading && /^\|\s*Task\s*\|/.test(line),
+  );
+  if (headerIndex < 0) {
+    fail(`${plan.file}: missing matrix header`);
+    return [];
+  }
+
+  const header = parsePipeRow(lines[headerIndex]);
+  const requiredHeader = ['Task', 'dependsOn', '文件/产出', '定向验证', '迁移与回滚'];
+  if (
+    header.length < requiredHeader.length ||
+    requiredHeader.some((cell, index) => header[index] !== cell)
+  ) {
+    fail(`${plan.file}: matrix must start with columns ${requiredHeader.join(' | ')}`);
+  }
+
+  const rows: MatrixRow[] = [];
+  for (let index = headerIndex + 2; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line.startsWith('|')) break;
+    const cells = parsePipeRow(line);
+    if (cells.length < 5) {
+      fail(`${plan.file}:${index + 1}: matrix row has fewer than 5 cells`);
+      continue;
+    }
+    const [taskId, dependsOn, outputs, verification, migrationAndRollback] = cells;
+    if ([taskId, dependsOn, outputs, verification, migrationAndRollback].some((cell) => !cell)) {
+      fail(`${plan.file}:${index + 1}: matrix cells must not be empty`);
+    }
+    for (const cell of cells) {
+      if (/\b(?:N\/A|NA)\b/i.test(cell) && !/\b(?:N\/A|NA)\b[^|]*[（(].+[）)]/i.test(cell)) {
+        fail(`${plan.file}:${index + 1}: N/A must include a reason in parentheses`);
+      }
+    }
+    rows.push({
+      plan,
+      taskId: taskId.replaceAll('`', ''),
+      dependsOn,
+      outputs,
+      verification,
+      migrationAndRollback,
+      sourceLine: `${plan.file}:${index + 1}`,
+    });
+  }
+  return rows;
+}
+
+function taskHeadings(source: string): string[] {
+  return [...source.matchAll(/^### Task ([^：:\n]+)[：:]/gm)].map((match) => match[1].trim());
+}
+
+function normalizeDependency(value: string): string {
+  return value.replaceAll('`', '').trim();
+}
+
+function expandLocalRange(token: string, taskIds: ReadonlySet<string>): string[] | undefined {
+  const match = token.match(/^([0-9]+[A-Z]?\.)?([0-9]+)–([0-9]+[A-Z]?\.)?([0-9]+)$/);
+  if (!match) return undefined;
+  const leftPrefix = match[1] ?? '';
+  const rightPrefix = match[3] ?? leftPrefix;
+  if (leftPrefix !== rightPrefix) return undefined;
+  const start = Number(match[2]);
+  const end = Number(match[4]);
+  if (start > end) return undefined;
+  const ids = Array.from(
+    { length: end - start + 1 },
+    (_, index) => `${leftPrefix}${start + index}`,
+  );
+  return ids.every((id) => taskIds.has(id)) ? ids : undefined;
+}
+
+function detectCycle(graph: ReadonlyMap<string, readonly string[]>): string[] | undefined {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const path: string[] = [];
+
+  function visit(node: string): string[] | undefined {
+    if (visiting.has(node)) {
+      const start = path.indexOf(node);
+      return [...path.slice(start), node];
+    }
+    if (visited.has(node)) return undefined;
+    visiting.add(node);
+    path.push(node);
+    for (const dependency of graph.get(node) ?? []) {
+      const cycle = visit(dependency);
+      if (cycle) return cycle;
+    }
+    path.pop();
+    visiting.delete(node);
+    visited.add(node);
+    return undefined;
+  }
+
+  for (const node of graph.keys()) {
+    const cycle = visit(node);
+    if (cycle) return cycle;
+  }
+  return undefined;
+}
+
+const sources = new Map(plans.map((plan) => [plan.alias, readPlan(plan)]));
+const rows = plans.flatMap((plan) => extractMatrix(plan, sources.get(plan.alias) ?? ''));
+const rowsByPlan = new Map<string, MatrixRow[]>();
+for (const plan of plans)
+  rowsByPlan.set(
+    plan.alias,
+    rows.filter((row) => row.plan === plan),
+  );
+
+for (const plan of plans) {
+  const planRows = rowsByPlan.get(plan.alias) ?? [];
+  const matrixIds = planRows.map((row) => row.taskId);
+  const headings = taskHeadings(sources.get(plan.alias) ?? '');
+  const duplicateIds = matrixIds.filter((id, index) => matrixIds.indexOf(id) !== index);
+  if (duplicateIds.length > 0) {
+    fail(`${plan.file}: duplicate matrix Task IDs: ${[...new Set(duplicateIds)].join(', ')}`);
+  }
+  const sortedMatrixIds = [...matrixIds].sort();
+  const sortedHeadings = [...headings].sort();
+  if (sortedMatrixIds.join('\0') !== sortedHeadings.join('\0')) {
+    fail(
+      `${plan.file}: matrix/body Task mismatch\n  matrix: ${matrixIds.join(', ')}\n  body: ${headings.join(', ')}`,
+    );
+  }
+  if (
+    !/docs\/space\/execution\/completed\/[0-9]{4}-[0-9]{2}-[0-9]{2}-[^`\s]+\.md/.test(
+      sources.get(plan.alias) ?? '',
+    )
+  ) {
+    fail(`${plan.file}: missing concrete completionRecordPath`);
+  }
+}
+
+const taskKeys = new Set(rows.map((row) => `${row.plan.alias}:${row.taskId}`));
+const graph = new Map<string, string[]>();
+for (const row of rows) {
+  const key = `${row.plan.alias}:${row.taskId}`;
+  const planTaskIds = new Set((rowsByPlan.get(row.plan.alias) ?? []).map((item) => item.taskId));
+  const dependencies: string[] = [];
+  const tokens = normalizeDependency(row.dependsOn)
+    .split('、')
+    .map((token) => token.trim());
+  if (tokens.length === 1 && tokens[0] === '—') {
+    graph.set(key, []);
+    continue;
+  }
+
+  for (const token of tokens) {
+    if (!token || token === '—') {
+      fail(`${row.sourceLine}: em dash may only be the sole dependsOn value`);
+      continue;
+    }
+    const crossTask = token.match(/^T:([0-9]+[A-Z]?):([0-9]+[A-Z]?\.[0-9]+[A-Z]?)$/);
+    if (crossTask) {
+      const dependency = `${crossTask[1]}:${crossTask[2]}`;
+      if (!taskKeys.has(dependency)) fail(`${row.sourceLine}: unknown dependency ${token}`);
+      else dependencies.push(dependency);
+      continue;
+    }
+    if (/^D-(?:0[1-9]|1[0-4]):CLOSED$/.test(token)) continue;
+    if (/^MS:/.test(token)) {
+      if (!knownMilestones.has(token)) fail(`${row.sourceLine}: unknown milestone ${token}`);
+      continue;
+    }
+    if (planTaskIds.has(token)) {
+      dependencies.push(`${row.plan.alias}:${token}`);
+      continue;
+    }
+    const range = expandLocalRange(token, planTaskIds);
+    if (range) {
+      dependencies.push(...range.map((taskId) => `${row.plan.alias}:${taskId}`));
+      continue;
+    }
+    fail(`${row.sourceLine}: invalid or natural-language dependsOn token "${token}"`);
+  }
+  graph.set(key, dependencies);
+}
+
+const cycle = detectCycle(graph);
+if (cycle) fail(`task dependency cycle: ${cycle.join(' -> ')}`);
+
+for (const [milestone, producer] of stableMilestoneProducers) {
+  const [alias, taskId] = producer.split(':', 2);
+  const matchingRows = rows.filter(
+    (row) =>
+      `${row.outputs} ${row.migrationAndRollback}`.includes(milestone) &&
+      /唯一产生/.test(`${row.outputs} ${row.migrationAndRollback}`),
+  );
+  if (matchingRows.length !== 1) {
+    fail(`${milestone}: expected one matrix producer, found ${matchingRows.length}`);
+    continue;
+  }
+  const actual = `${matchingRows[0].plan.alias}:${matchingRows[0].taskId}`;
+  if (actual !== `${alias}:${taskId}`) {
+    fail(`${milestone}: expected producer ${producer}, found ${actual}`);
+  }
+}
+
+const roadmap = readFileSync(
+  join(planDir, '2026-07-29-agent-production-readiness-roadmap.md'),
+  'utf8',
+);
+const plansIndex = readFileSync(join(planDir, 'index.md'), 'utf8');
+for (const milestone of knownMilestones) {
+  const tableRows = roadmap
+    .split('\n')
+    .filter((line) => line.startsWith('|') && line.includes(`\`${milestone}\``));
+  if (tableRows.length !== 1) {
+    fail(
+      `roadmap stable milestone table must contain ${milestone} exactly once; found ${tableRows.length}`,
+    );
+  } else if (
+    parsePipeRow(tableRows[0])
+      .slice(1)
+      .every((cell) => !cell)
+  ) {
+    fail(`roadmap ${milestone} producer is empty`);
+  }
+}
+
+const decisionRegister = readFileSync(
+  join(planDir, '2026-07-29-agent-production-decision-register.md'),
+  'utf8',
+);
+const decisionSections = [
+  ...decisionRegister.matchAll(
+    /^### (D-(?:0[1-9]|1[0-4]))\n([\s\S]*?)(?=^### D-|^## |(?![\s\S]))/gm,
+  ),
+];
+const decisionIds = decisionSections.map((match) => match[1]);
+const expectedDecisionIds = Array.from(
+  { length: 14 },
+  (_, index) => `D-${String(index + 1).padStart(2, '0')}`,
+);
+if (decisionIds.join('\0') !== expectedDecisionIds.join('\0')) {
+  fail(`decision register IDs must be D-01..D-14 exactly once; found ${decisionIds.join(', ')}`);
+}
+const requiredDecisionFields = [
+  'status',
+  'owner',
+  'backup',
+  'dueMilestone',
+  'blockingPhase',
+  'default',
+  'decision',
+  'evidence',
+  'approvedAt',
+];
+for (const match of decisionSections) {
+  const [, id, body] = match;
+  for (const field of requiredDecisionFields) {
+    if (!new RegExp(`^- ${field}: .+`, 'm').test(body)) fail(`${id}: missing ${field}`);
+  }
+  const status = body.match(/^- status: `([^`]+)`/m)?.[1];
+  const approvedAt = body.match(/^- approvedAt: `([^`]+)`/m)?.[1];
+  if (status !== 'open' && status !== 'closed')
+    fail(`${id}: invalid status ${status ?? '(missing)'}`);
+  if (status === 'closed' && (!approvedAt || approvedAt === 'null')) {
+    fail(`${id}: closed decision requires approvedAt`);
+  }
+}
+if (/TBD owner/i.test(decisionRegister)) fail('decision register contains TBD owner');
+
+if (decisionRegister.includes('single-maintainer')) {
+  for (const match of decisionSections) {
+    const [id, body] = [match[1], match[2]];
+    if (!/^- owner: `github:@ferqx`/m.test(body)) {
+      fail(`${id}: single-maintainer owner must be github:@ferqx`);
+    }
+    if (!/^- backup: `none \(single-maintainer\)`$/m.test(body)) {
+      fail(`${id}: single-maintainer backup must explicitly be none`);
+    }
+  }
+  const d13 = decisionSections.find((match) => match[1] === 'D-13')?.[2] ?? '';
+  if (!/^- status: `closed`$/m.test(d13)) {
+    fail('D-13 must be closed after single-maintainer governance is accepted');
+  }
+  const governanceAdr = readFileSync(
+    join(root, 'docs', 'adr', '0060-single-maintainer-release-governance.md'),
+    'utf8',
+  );
+  if (!/^状态：accepted$/m.test(governanceAdr)) {
+    fail('ADR-0060 must be accepted for single-maintainer governance');
+  }
+  const limitedApprovalRow = roadmap
+    .split('\n')
+    .find((line) => line.startsWith('|') && line.includes('`MS:LIM-APPROVED`'));
+  if (!limitedApprovalRow?.includes('第三方安全评审')) {
+    fail('MS:LIM-APPROVED must require third-party security review');
+  }
+}
+
+for (const decisionId of ['D-02', 'D-08', 'D-09', 'D-11', 'D-12', 'D-13', 'D-14']) {
+  const body = decisionSections.find((match) => match[1] === decisionId)?.[2] ?? '';
+  if (!/^- status: `closed`$/m.test(body)) {
+    fail(`${decisionId}: Phase 0 blocking decision must be closed`);
+  }
+}
+
+for (let number = 51; number <= 60; number += 1) {
+  const prefix = String(number).padStart(4, '0');
+  const adrFile = [
+    '0051-release-profile-monotonic-composition.md',
+    '0052-release-evidence-and-behavior-identity.md',
+    '0053-local-single-user-first-topology.md',
+    '0054-production-execution-isolation.md',
+    '0055-cumulative-runtime-resource-governance.md',
+    '0056-metadata-first-data-boundaries.md',
+    '0057-compaction-release-qualification.md',
+    '0058-agent-task-product-acceptance.md',
+    '0059-optional-disable-only-signed-rollout.md',
+    '0060-single-maintainer-release-governance.md',
+  ].find((file) => file.startsWith(prefix));
+  if (!adrFile) {
+    fail(`ADR-${prefix}: missing governance ADR path`);
+    continue;
+  }
+  const source = readFileSync(join(root, 'docs', 'adr', adrFile), 'utf8');
+  if (!/^状态：accepted$/m.test(source)) fail(`ADR-${prefix}: must be accepted`);
+}
+
+const phase0ArtifactCommit = '4be8735b29ec0fe3951bf7a0876f7b5e722c846a';
+const phase1SchemaCommit = '4b8eec058df0af545675fc0e1c4135ee855848fd';
+const phase1AdmissionCommit = '1e21055eb8b2579d710eb566728294f2ad8b2621';
+const phase1OperationalCommit = 'd0bd571e6a937aac55850bcc09df6f41bf95ac99';
+const phase1CompositionCommit = '2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee';
+const phase1NativeEvidenceCommit = '1063e879933f3e1b0cf8c0958363c999bb2696ab';
+const phase1BoundaryCommit = '3ada4246b149444ce27ed713cd5425090367c1fc';
+const phase1PlatformExclusionCommit = 'c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4';
+const phase1PlatformExclusionCompletionPath =
+  'docs/space/execution/completed/2026-08-01-agent-production-platform-exclusions.md';
+const phase1ProtectedPathInitialCommit = '138fee19d7ce9f9622f1e32ea1d7cfdd2076bf8c';
+const phase1ProtectedPathCommit = '512e2c3582bdd2bea2e7f670213f7616f545084c';
+const phase1ProtectedPathSeatbeltCommit = '77db1830771aaf65116fb8802892d74c4bcbd7dc';
+const phase1ProtectedPathQualification = 'e6e0ffb51115c3380a1dcc340dd1627b3bdd0970';
+const phase1ProtectedPathCompletionPath =
+  'docs/space/execution/completed/2026-08-01-agent-production-protected-path.md';
+const phase1NetworkCommit = 'bc03f77a3dac2962cd3158d3413f292b8388a0d8';
+const phase1NetworkReviewBaseline = '9bc626a1996261545c94e1e5950274029152bf1e';
+const phase1RemoteMcpCommit = '545161a7103365038989c6a935a216c5bd5fc7e8';
+const phase1PrivacyClosureEvidenceCommit = '389a0cc45c36e59d961c659ab4df4015a722f7de';
+const phase1FailureConformanceBaseline = '4a64837855b76c8c71e956b19d04ad67d77b18c9';
+const phase1FailureConformanceCommit = 'aa66e872f3206df9718493adbfef7445fb582a4f';
+const phase1FailureConformanceQualification = 'dfd8f209f89b4980b9c3905d3e73c166b33bea2b';
+const phase1RuntimeCompletionPath =
+  'docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md';
+const phase1PrivacyPlan = sources.get('1A') ?? '';
+const phase1ExecutionPlan = sources.get('1B') ?? '';
+const phase1RuntimePlan = sources.get('1C') ?? '';
+const phase1RuntimeCompletion = readFileSync(join(root, phase1RuntimeCompletionPath), 'utf8');
+const expectedPlanStates = new Map([
+  ['2026-07-29-agent-production-readiness-roadmap.md', 'active'],
+  ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
+  ['2026-07-29-agent-production-local-data-privacy.md', 'completed'],
+  ['2026-07-29-agent-production-execution-isolation.md', 'active'],
+  ['2026-07-29-agent-production-runtime-resilience.md', 'active'],
+]);
+for (const [file, expectedState] of expectedPlanStates) {
+  const source = readFileSync(join(planDir, file), 'utf8');
+  if (!new RegExp(`^状态：${expectedState}$`, 'm').test(source)) {
+    fail(`${file}: expected lifecycle state ${expectedState} after MS:M0`);
+  }
+}
+
+const phase1PrivacyAcceptance =
+  phase1PrivacyPlan.match(/^## 验收条件\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
+const checkedPhase1PrivacyAcceptance = phase1PrivacyAcceptance.match(/^- \[x\] /gm) ?? [];
+if (checkedPhase1PrivacyAcceptance.length !== 11 || /^- \[ \] /m.test(phase1PrivacyAcceptance)) {
+  fail(
+    '1A: completed plan must retain all 11 checked acceptance criteria and no unchecked criteria',
+  );
+}
+
+const phase0CompletionPath = join(
+  root,
+  'docs',
+  'space',
+  'execution',
+  'completed',
+  '2026-07-30-agent-production-governance.md',
+);
+const phase0Completion = readFileSync(phase0CompletionPath, 'utf8');
+if (!/^状态：completed$/m.test(phase0Completion)) {
+  fail('Phase 0 completion record must be completed');
+}
+if (!phase0Completion.includes(`实现提交：\`${phase0ArtifactCommit}\``)) {
+  fail('Phase 0 completion record must identify the reviewed artifact commit');
+}
+if (!phase0Completion.includes('唯一产生 `MS:M0`')) {
+  fail('Phase 0 completion record must be the unique MS:M0 producer');
+}
+if (!phase0Completion.includes('结论：`approved_for_internal_implementation`')) {
+  fail('Phase 0 completion record must limit M0 approval to internal implementation');
+}
+
+for (const taskId of ['1A.1', '1C.1']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-M0 execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase0ArtifactCommit}\` |`)) {
+    fail(`${taskId}: binding must use the Phase 0 artifact baseline`);
+  }
+  if (!/\| `(ready|in_progress|completed)` \|/.test(bindingRow)) {
+    fail(`${taskId}: post-M0 execution binding must be ready, in_progress, or completed`);
+  }
+}
+
+for (const taskId of ['1A.5', '1C.2', '1C.4']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-schema execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase1SchemaCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed schema implementation baseline`);
+  }
+  if (!bindingRow.includes('| `completed` |')) {
+    fail(`${taskId}: admission/taxonomy execution binding must be completed`);
+  }
+}
+
+for (const taskId of ['1A.2', '1C.3']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-admission execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase1AdmissionCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed admission/taxonomy implementation baseline`);
+  }
+  if (!bindingRow.includes('| `completed` |')) {
+    fail(`${taskId}: operational execution binding must be completed`);
+  }
+}
+
+for (const taskId of ['1A.3', '1C.6']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-operational execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase1CompositionCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed composition/stability implementation`);
+  }
+  if (!bindingRow.includes('| `completed` |')) {
+    fail(`${taskId}: composition/stability execution binding must be completed`);
+  }
+}
+
+for (const taskId of ['1A.4', '1B.0']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing next execution binding`);
+    continue;
+  }
+  if (!bindingRow.includes(`| \`${phase1CompositionCommit}\` |`)) {
+    fail(`${taskId}: binding must use the completed composition/stability baseline`);
+  }
+  if (!bindingRow.includes('| `completed` |')) {
+    fail(`${taskId}: native-evidence execution binding must be completed`);
+  }
+}
+
+const phase1BoundaryBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1B.1 |'));
+if (!phase1BoundaryBinding) {
+  fail('1B.1: missing execution-boundary schema binding');
+} else {
+  if (!phase1BoundaryBinding.includes(`| \`${phase1NativeEvidenceCommit}\` |`)) {
+    fail('1B.1: binding must use the completed native-evidence baseline');
+  }
+  if (!phase1BoundaryBinding.includes('| `completed` |')) {
+    fail('1B.1: execution-boundary schema binding must be completed');
+  }
+  const cells = parsePipeRow(phase1BoundaryBinding);
+  const expectedCompletionPath =
+    'docs/space/execution/completed/2026-07-31-agent-production-execution-boundary.md';
+  if (cells[6]?.replaceAll('`', '') !== expectedCompletionPath) {
+    fail(`1B.1: completionRecordPath must be ${expectedCompletionPath}`);
+  }
+}
+
+for (const taskId of ['1B.2', '1B.3']) {
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing post-boundary execution binding`);
+    continue;
+  }
+  const cells = parsePipeRow(bindingRow);
+  if (cells[2]?.replaceAll('`', '') !== phase1BoundaryCommit) {
+    fail(`${taskId}: binding must use the completed execution-boundary baseline`);
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'completed') {
+    fail(`${taskId}: platform-exclusion execution binding must be completed`);
+  }
+  if (cells[6]?.replaceAll('`', '') !== phase1PlatformExclusionCompletionPath) {
+    fail(`${taskId}: completionRecordPath must be ${phase1PlatformExclusionCompletionPath}`);
+  }
+}
+
+const phase1ProtectedPathBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1B.5 |'));
+if (!phase1ProtectedPathBinding) {
+  fail('1B.5: missing protected-path execution binding');
+} else {
+  const cells = parsePipeRow(phase1ProtectedPathBinding);
+  if (cells[2]?.replaceAll('`', '') !== phase1PlatformExclusionCommit) {
+    fail('1B.5: binding must use the completed platform-exclusion baseline');
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'completed') {
+    fail('1B.5: protected-path execution binding must be completed');
+  }
+  if (cells[6]?.replaceAll('`', '') !== phase1ProtectedPathCompletionPath) {
+    fail(`1B.5: completionRecordPath must be ${phase1ProtectedPathCompletionPath}`);
+  }
+}
+for (const taskId of ['1B.6', '1B.8']) {
+  if (decisionRegister.split('\n').some((line) => line.startsWith(`| ${taskId} |`))) {
+    fail(`${taskId}: ready Task must remain unbound until implementation actually starts`);
+  }
+}
+
+const phase1NetworkBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1B.4 |'));
+if (!phase1NetworkBinding) {
+  fail('1B.4: missing network-boundary execution binding');
+} else {
+  if (!phase1NetworkBinding.includes(`| \`${phase1BoundaryCommit}\` |`)) {
+    fail('1B.4: binding must use the completed execution-boundary baseline');
+  }
+  if (!phase1NetworkBinding.includes('| `completed` |')) {
+    fail('1B.4: network-boundary execution binding must be completed');
+  }
+  const cells = parsePipeRow(phase1NetworkBinding);
+  const expectedCompletionPath =
+    'docs/space/execution/completed/2026-08-01-agent-production-network-boundary.md';
+  if (cells[6]?.replaceAll('`', '') !== expectedCompletionPath) {
+    fail(`1B.4: completionRecordPath must be ${expectedCompletionPath}`);
+  }
+}
+
+const phase1RemoteMcpBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1A.6 |'));
+if (!phase1RemoteMcpBinding) {
+  fail('1A.6: missing post-network execution binding');
+} else {
+  if (!phase1RemoteMcpBinding.includes(`| \`${phase1NetworkReviewBaseline}\` |`)) {
+    fail('1A.6: binding must use the reviewed network-boundary baseline');
+  }
+  if (!phase1RemoteMcpBinding.includes('| `completed` |')) {
+    fail('1A.6: remote MCP egress execution binding must be completed');
+  }
+  const cells = parsePipeRow(phase1RemoteMcpBinding);
+  const expectedCompletionPath =
+    'docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md';
+  if (cells[6]?.replaceAll('`', '') !== expectedCompletionPath) {
+    fail(`1A.6: completionRecordPath must be ${expectedCompletionPath}`);
+  }
+}
+
+const phase1PrivacyClosureBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1A.7 |'));
+if (!phase1PrivacyClosureBinding) {
+  fail('1A.7: missing post-egress execution binding');
+} else {
+  if (!phase1PrivacyClosureBinding.includes(`| \`${phase1RemoteMcpCommit}\` |`)) {
+    fail('1A.7: binding must use the completed remote MCP egress baseline');
+  }
+  if (!phase1PrivacyClosureBinding.includes('| `completed` |')) {
+    fail('1A.7: documentation closure execution binding must be completed');
+  }
+  const cells = parsePipeRow(phase1PrivacyClosureBinding);
+  const expectedCompletionPath =
+    'docs/space/execution/completed/2026-07-30-agent-production-local-data-privacy.md';
+  if (cells[6]?.replaceAll('`', '') !== expectedCompletionPath) {
+    fail(`1A.7: completionRecordPath must be ${expectedCompletionPath}`);
+  }
+}
+
+const phase1PrivacyPlanIndexRow = plansIndex
+  .split('\n')
+  .find((line) =>
+    line.startsWith(
+      '| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) |',
+    ),
+  );
+if (!phase1PrivacyPlanIndexRow) {
+  fail('plans/index.md: missing Phase 1A local-data-privacy row');
+} else {
+  const cells = parsePipeRow(phase1PrivacyPlanIndexRow);
+  if (cells[1] !== 'completed') {
+    fail('plans/index.md: Phase 1A local-data-privacy plan must be completed');
+  }
+  if (!cells[5]?.includes('Task 1A.1–1A.7 completed')) {
+    fail('plans/index.md: Phase 1A row must record Task 1A.1–1A.7 completed');
+  }
+  if (!cells[5]?.includes('`MS:1A-DONE` 已产生')) {
+    fail('plans/index.md: Phase 1A row must record MS:1A-DONE production');
+  }
+  if (
+    !cells[5]?.includes('../execution/completed/2026-07-30-agent-production-local-data-privacy.md')
+  ) {
+    fail('plans/index.md: Phase 1A row must link the completion record');
+  }
+}
+
+const phase1ExecutionPlanIndexRow = plansIndex
+  .split('\n')
+  .find((line) =>
+    line.startsWith(
+      '| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) |',
+    ),
+  );
+if (
+  !phase1ExecutionPlanIndexRow?.includes('Task 1B.0–1B.5 completed') ||
+  !phase1ExecutionPlanIndexRow.includes('1B.2/1B.3 以三平台 `excluded` 负向收口') ||
+  !phase1ExecutionPlanIndexRow.includes('1B.6/1B.8 ready 且未绑定') ||
+  !phase1ExecutionPlanIndexRow.includes(
+    '../execution/completed/2026-08-01-agent-production-protected-path.md',
+  )
+) {
+  fail('plans/index.md: Phase 1B row must record 1B.5 completion and ready/unbound next Tasks');
+}
+
+const phase1FailureConformanceBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1C.5 |'));
+if (!phase1FailureConformanceBinding) {
+  fail('1C.5: missing failure-mode conformance execution binding');
+} else {
+  if (!phase1FailureConformanceBinding.includes(`| \`${phase1FailureConformanceBaseline}\` |`)) {
+    fail('1C.5: binding must use the reviewed Phase 1A closure baseline');
+  }
+  if (!phase1FailureConformanceBinding.includes('| `completed` |')) {
+    fail('1C.5: failure-mode conformance binding must be completed');
+  }
+  const cells = parsePipeRow(phase1FailureConformanceBinding);
+  if (cells[6]?.replaceAll('`', '') !== phase1RuntimeCompletionPath) {
+    fail(`1C.5: completionRecordPath must be ${phase1RuntimeCompletionPath}`);
+  }
+}
+if (
+  !phase1RuntimePlan.includes(`Task 1C.5 已由\n\`${phase1FailureConformanceCommit}\` 实现`) ||
+  !phase1RuntimePlan.includes(
+    `\`${phase1FailureConformanceQualification}\` 的全绿 Required qualification 完成`,
+  )
+) {
+  fail('1C.5: runtime plan must record implementation and qualification completion');
+}
+const phase1RuntimePlanIndexRow = plansIndex
+  .split('\n')
+  .find((line) =>
+    line.startsWith(
+      '| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) |',
+    ),
+  );
+if (
+  !phase1RuntimePlanIndexRow?.includes('Task 1C.1–1C.6 completed') ||
+  !phase1RuntimePlanIndexRow.includes('1C.7 in progress') ||
+  !phase1RuntimePlanIndexRow.includes(
+    '../execution/completed/2026-07-30-agent-production-runtime-resilience.md',
+  )
+) {
+  fail('plans/index.md: Phase 1C row must record 1C.5 completion and link its record');
+}
+if (
+  !/1C\.1–1C\.6 已完成/.test(roadmap) ||
+  !/1B\.2\/1B\.3 的完成结论是\s+三平台候选均明确 `excluded`/.test(roadmap) ||
+  !/1B\.0–1B\.5 与 1C\.1–1C\.6 已完成/.test(roadmap) ||
+  !/1B\.6\/1B\.8 已 ready 但尚未\s+建立 execution binding，1C\.7 仍在执行/.test(roadmap) ||
+  !/1C\.8 与其他后续 milestone 均为 pending/.test(roadmap)
+) {
+  fail(
+    'roadmap must record 1B.5 completion, ready/unbound next Tasks, 1C.7 active, and 1C.8 pending',
+  );
+}
+const phase1FailureConformanceRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 15 |'));
+if (phase1FailureConformanceRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 15 exactly once; found ${phase1FailureConformanceRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '激活 1C.5 failure-mode conformance',
+    phase1FailureConformanceBaseline,
+    'Required run 30671609567',
+    '五个 job 全部通过',
+    '同 head 三个原生 workflow 全部通过',
+  ]) {
+    if (!phase1FailureConformanceRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 15 must identify ${evidence}`);
+    }
+  }
+}
+requireReachableCommit(phase1FailureConformanceBaseline, '1C.5');
+
+const phase1FailureConformanceCompletionRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 16 |'));
+if (phase1FailureConformanceCompletionRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 16 exactly once; found ${phase1FailureConformanceCompletionRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '完成 1C.5 failure-mode conformance',
+    '激活 1C.7 soak/fault evidence',
+    phase1FailureConformanceCommit,
+    phase1FailureConformanceQualification,
+    'Required run 30676359548',
+    '五个 job 全部通过',
+    '同 head 三个原生 workflow 全部通过',
+    'P0/P1/P2 均为 0',
+    '不产生 `MS:1C-DONE`',
+    '保持 1C.8 pending',
+  ]) {
+    if (!phase1FailureConformanceCompletionRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 16 must identify ${evidence}`);
+    }
+  }
+}
+
+for (const evidence of [
+  phase1FailureConformanceCommit,
+  phase1FailureConformanceQualification,
+  'Required run 30676359548',
+  'Task 1C.5 独立复核最终 GO，P0/P1/P2 均为 0',
+  '`MS:1C-DONE` 仍等待 1C.7 与 1C.8',
+]) {
+  if (!phase1RuntimeCompletion.includes(evidence)) {
+    fail(`1C.5 completion record must identify ${evidence}`);
+  }
+}
+requireReachableCommit(phase1FailureConformanceCommit, '1C.5 implementation');
+requireReachableCommit(phase1FailureConformanceQualification, '1C.5 qualification');
+
+const phase1SoakBinding = decisionRegister.split('\n').find((line) => line.startsWith('| 1C.7 |'));
+if (!phase1SoakBinding) {
+  fail('1C.7: missing soak/fault evidence execution binding');
+} else {
+  if (!phase1SoakBinding.includes(`| \`${phase1FailureConformanceQualification}\` |`)) {
+    fail('1C.7: binding must use the completed 1C.5 qualification head');
+  }
+  if (!phase1SoakBinding.includes('| `in_progress` |')) {
+    fail('1C.7: soak/fault evidence binding must be in_progress');
+  }
+  const cells = parsePipeRow(phase1SoakBinding);
+  if (cells[6] !== '—') {
+    fail('1C.7: in-progress binding must not claim a completion record');
+  }
+}
+if (
+  !phase1RuntimePlan.includes(
+    'Task 1C.7 已以上述 qualification head 激活，负责 soak/fault evidence',
+  )
+) {
+  fail('1C.7: runtime plan must record activation from the 1C.5 qualification head');
+}
+if (decisionRegister.split('\n').some((line) => line.startsWith('| 1C.8 |'))) {
+  fail('1C.8: execution binding must remain absent until Task 1C.7 completes');
+}
+
+for (const [description, pattern] of [
+  ['Phase 1A completion', /Phase 1A（Task 1A\.1–1A\.7）已完成/],
+  ['unique MS:1A-DONE producer', /唯一产生 `MS:1A-DONE`/],
+  ['no qualified route or artifact', /不产生 production-qualified route 或\s+production artifact/],
+  ['empty ProviderDataPolicy bundle', /ProviderDataPolicy approved bundle 仍为空/],
+  ['empty D-14 MCP route set', /D-14 批准的 MCP\s+route 集合也为空/],
+] as const) {
+  if (!pattern.test(roadmap)) {
+    fail(`roadmap must preserve Phase 1A closure: ${description}`);
+  }
+}
+if (
+  !new RegExp(
+    `^当前执行复核基线：\`${phase1ProtectedPathQualification}\`（2026-08-01）$`,
+    'm',
+  ).test(roadmap)
+) {
+  fail(
+    'roadmap must bind the current execution review baseline to the protected-path qualification head',
+  );
+}
+
+const phase1PrivacyRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 14 |'));
+if (phase1PrivacyRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 14 exactly once; found ${phase1PrivacyRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '完成 1A.7 文档与迁移总收敛；唯一产生 `MS:1A-DONE`',
+    phase1PrivacyClosureEvidenceCommit,
+    'Required run 30670346726',
+    '../execution/completed/2026-07-30-agent-production-local-data-privacy.md',
+    '独立复核最终 GO 且无 P0/P1/P2',
+  ]) {
+    if (!phase1PrivacyRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 14 must identify ${evidence}`);
+    }
+  }
+}
+
+const phase1CompletionRecords = [
+  resolve(
+    root,
+    'docs',
+    'space',
+    'execution',
+    'completed',
+    '2026-07-30-agent-production-local-data-privacy.md',
+  ),
+  resolve(
+    root,
+    'docs',
+    'space',
+    'execution',
+    'completed',
+    '2026-07-30-agent-production-runtime-resilience.md',
+  ),
+];
+for (const completionPath of phase1CompletionRecords) {
+  const completion = readFileSync(completionPath, 'utf8');
+  if (!/^状态：completed$/m.test(completion)) {
+    fail(`${relative(root, completionPath)} must be completed`);
+  }
+  if (!completion.includes(phase1AdmissionCommit)) {
+    fail(`${relative(root, completionPath)} must identify the admission/taxonomy implementation`);
+  }
+  if (!completion.includes(phase1OperationalCommit)) {
+    fail(`${relative(root, completionPath)} must identify the operational implementation`);
+  }
+  if (!completion.includes(phase1CompositionCommit)) {
+    fail(
+      `${relative(root, completionPath)} must identify the composition/stability implementation`,
+    );
+  }
+}
+
+const phase1IsolationCompletionPath = resolve(
+  root,
+  'docs',
+  'space',
+  'execution',
+  'completed',
+  '2026-07-31-agent-production-execution-isolation-spike.md',
+);
+const phase1IsolationCompletion = readFileSync(phase1IsolationCompletionPath, 'utf8');
+if (!/^状态：completed$/m.test(phase1IsolationCompletion)) {
+  fail(`${relative(root, phase1IsolationCompletionPath)} must be completed`);
+}
+for (const evidence of ['30579701659', 'ADR-0061', 'D-04']) {
+  if (!phase1IsolationCompletion.includes(evidence)) {
+    fail(`${relative(root, phase1IsolationCompletionPath)} must identify ${evidence}`);
+  }
+}
+
+const phase1BoundaryCompletionPath = resolve(
+  root,
+  'docs',
+  'space',
+  'execution',
+  'completed',
+  '2026-07-31-agent-production-execution-boundary.md',
+);
+const phase1BoundaryCompletion = readFileSync(phase1BoundaryCompletionPath, 'utf8');
+if (!/^状态：completed$/m.test(phase1BoundaryCompletion)) {
+  fail(`${relative(root, phase1BoundaryCompletionPath)} must be completed`);
+}
+for (const evidence of [phase1BoundaryCommit, 'accepted_empty_support_set']) {
+  if (!phase1BoundaryCompletion.includes(evidence)) {
+    fail(`${relative(root, phase1BoundaryCompletionPath)} must identify ${evidence}`);
+  }
+}
+for (const heading of [
+  'Gate 决策',
+  '实际 commit / artifact',
+  '验证命令与结果',
+  '未运行项',
+  '风险与限制',
+  '与计划偏差',
+  'Active 文档与 ADR 收敛',
+]) {
+  if (!new RegExp(`^## ${heading}$`, 'm').test(phase1BoundaryCompletion)) {
+    fail(`${relative(root, phase1BoundaryCompletionPath)} must include ## ${heading}`);
+  }
+}
+if (!/最终 GO，未发现剩余\s*P0\/P1\/P2/.test(phase1BoundaryCompletion)) {
+  fail(
+    `${relative(root, phase1BoundaryCompletionPath)} must record final GO with no remaining P0/P1/P2`,
+  );
+}
+if (!/没有未运行的 1B\.1 必需验证/.test(phase1BoundaryCompletion)) {
+  fail(
+    `${relative(root, phase1BoundaryCompletionPath)} must explicitly account for required unrun items`,
+  );
+}
+for (const command of [
+  'bun test tests/sandbox/execution-boundary.test.ts tests/config/features.test.ts',
+  'bun run test:tui:system',
+  'bun run test',
+  'bun run check:docs-impact',
+  'bun run check:docs',
+  'bun run check:core-boundary',
+  'bun run typecheck',
+  'git diff --check',
+]) {
+  if (!phase1BoundaryCompletion.includes(`\`${command}\``)) {
+    fail(`${relative(root, phase1BoundaryCompletionPath)} must record command: ${command}`);
+  }
+}
+for (const commit of [
+  'cd2bd8819c86f4585cdf45fd6c6d785152cdba98',
+  'e4ed8a05106e3a49f110dbcc0066efa874d4c382',
+  phase1BoundaryCommit,
+]) {
+  if (!phase1BoundaryCompletion.includes(commit)) {
+    fail(`${relative(root, phase1BoundaryCompletionPath)} must identify evidence commit ${commit}`);
+  }
+  requireReachableCommit(commit, '1B.1');
+}
+
+const phase1SupportMatrix = JSON.parse(
+  readFileSync(join(root, 'release', 'platform-capabilities', 'support-matrix-v1.json'), 'utf8'),
+) as {
+  version?: unknown;
+  decisionId?: unknown;
+  status?: unknown;
+  selectedNetworkMode?: unknown;
+  productionSupportedPlatforms?: unknown;
+  targets?: unknown;
+};
+if (
+  phase1SupportMatrix.version !== 1 ||
+  phase1SupportMatrix.decisionId !== 'D-04' ||
+  phase1SupportMatrix.status !== 'accepted_empty_support_set' ||
+  phase1SupportMatrix.selectedNetworkMode !== 'off' ||
+  !Array.isArray(phase1SupportMatrix.productionSupportedPlatforms) ||
+  phase1SupportMatrix.productionSupportedPlatforms.length !== 0
+) {
+  fail('D-04 support matrix must retain the accepted empty production support set');
+}
+const phase1SupportTargets = Array.isArray(phase1SupportMatrix.targets)
+  ? phase1SupportMatrix.targets
+  : [];
+const expectedExcludedRunners = new Set(['macos-15', 'ubuntu-24.04', 'windows-2025']);
+const actualExcludedRunners = phase1SupportTargets.flatMap((target) => {
+  if (
+    typeof target !== 'object' ||
+    target === null ||
+    typeof (target as { runner?: unknown }).runner !== 'string' ||
+    (target as { currentOutcome?: unknown }).currentOutcome !== 'excluded'
+  ) {
+    return [];
+  }
+  return [(target as { runner: string }).runner];
+});
+if (
+  phase1SupportTargets.length !== expectedExcludedRunners.size ||
+  actualExcludedRunners.length !== expectedExcludedRunners.size ||
+  new Set(actualExcludedRunners).size !== expectedExcludedRunners.size ||
+  actualExcludedRunners.some((runner) => !expectedExcludedRunners.has(runner))
+) {
+  fail('D-04 support matrix must retain exactly three explicitly excluded candidate runners');
+}
+
+const phase1ApprovedRegistry = loadApprovedProductionExecutionQualificationRegistryV1();
+if (
+  phase1ApprovedRegistry.decisionId !== 'D-04' ||
+  phase1ApprovedRegistry.status !== 'accepted_empty_support_set' ||
+  phase1ApprovedRegistry.selectedNetworkMode !== 'off' ||
+  phase1ApprovedRegistry.qualifications.length !== 0
+) {
+  fail('D-04 approved qualification registry must retain its pinned empty qualification set');
+}
+
+const phase1PlatformExclusionCompletion = readFileSync(
+  join(root, phase1PlatformExclusionCompletionPath),
+  'utf8',
+);
+if (!/^状态：completed$/m.test(phase1PlatformExclusionCompletion)) {
+  fail(`${phase1PlatformExclusionCompletionPath} must be completed`);
+}
+for (const evidence of [
+  phase1PlatformExclusionCommit,
+  'accepted_empty_support_set',
+  'Platform Capability Probe run 30693651821',
+  'Required run 30693651834',
+  'sha256:439b29a506a43d8ff684a289a0ee083fffff2ac08849798a2082299f78029590',
+  'sha256:88e9de9a7480dc27bd651a477d5befd2ca3b3bdb1413b30b8d07cfdf24dcf176',
+  'sha256:7dfd1390fae758ac64d74476231e53dd4f5233bef6a5e8832fc324dcb6a82f7d',
+  '不产生 `MS:1B-DONE`',
+]) {
+  if (!phase1PlatformExclusionCompletion.includes(evidence)) {
+    fail(`${phase1PlatformExclusionCompletionPath} must identify ${evidence}`);
+  }
+}
+const normalizedPlatformExclusionCompletion = phase1PlatformExclusionCompletion.replace(
+  /\s+/g,
+  ' ',
+);
+for (const artifact of [
+  {
+    name: 'platform-capability-macos-15',
+    id: '8816525761',
+    digest: 'sha256:439b29a506a43d8ff684a289a0ee083fffff2ac08849798a2082299f78029590',
+  },
+  {
+    name: 'platform-capability-ubuntu-24.04',
+    id: '8816527325',
+    digest: 'sha256:88e9de9a7480dc27bd651a477d5befd2ca3b3bdb1413b30b8d07cfdf24dcf176',
+  },
+  {
+    name: 'platform-capability-windows-2025',
+    id: '8816532433',
+    digest: 'sha256:7dfd1390fae758ac64d74476231e53dd4f5233bef6a5e8832fc324dcb6a82f7d',
+  },
+]) {
+  const mapping = `artifact \`${artifact.name}\`，artifact id \`${artifact.id}\`，evidence digest \`${artifact.digest}\``;
+  if (!normalizedPlatformExclusionCompletion.includes(mapping)) {
+    fail(
+      `${phase1PlatformExclusionCompletionPath} must bind ${artifact.name} to its id and digest`,
+    );
+  }
+}
+const milestoneMentions = [...phase1PlatformExclusionCompletion.matchAll(/`MS:1B-DONE`/g)].length;
+const negativeMilestoneMentions = [
+  ...phase1PlatformExclusionCompletion.matchAll(/不产生 `MS:1B-DONE`/g),
+].length;
+if (milestoneMentions !== 1 || negativeMilestoneMentions !== 1) {
+  fail(`${phase1PlatformExclusionCompletionPath} must only mention MS:1B-DONE as not produced`);
+}
+if (
+  /productionSupported\s*[:=]\s*true/.test(phase1PlatformExclusionCompletion) ||
+  phase1PlatformExclusionCompletion.includes('accepted_non_empty_support_set')
+) {
+  fail(`${phase1PlatformExclusionCompletionPath} must not claim positive production qualification`);
+}
+for (const heading of [
+  'Gate 决策',
+  '实际 commit / artifact',
+  'Task 1B.2 结论：macOS',
+  'Task 1B.3 结论：Linux/Windows',
+  '验证命令与结果',
+  '未运行项',
+  '风险、限制与 rollback',
+  '与计划偏差',
+  'Active 文档与 ADR 收敛',
+]) {
+  if (!new RegExp(`^## ${heading}$`, 'm').test(phase1PlatformExclusionCompletion)) {
+    fail(`${phase1PlatformExclusionCompletionPath} must include ## ${heading}`);
+  }
+}
+if (!/两路独立复核最终均为 GO，P0\/P1\/P2 各为 0/.test(phase1PlatformExclusionCompletion)) {
+  fail(`${phase1PlatformExclusionCompletionPath} must record final GO with no P0/P1/P2`);
+}
+requireReachableCommit(phase1PlatformExclusionCommit, '1B.2/1B.3 implementation');
+
+const phase1PlatformExclusionRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 17 |'));
+if (phase1PlatformExclusionRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 17 exactly once; found ${phase1PlatformExclusionRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '负向完成 1B.2/1B.3',
+    '激活 1B.5',
+    phase1PlatformExclusionCommit,
+    'Platform Capability Probe run 30693651821',
+    'Required run 30693651834',
+    '六个 job 全部通过',
+    '../execution/completed/2026-08-01-agent-production-platform-exclusions.md',
+    '无剩余 P0/P1/P2',
+    '不产生 `MS:1B-DONE`',
+  ]) {
+    if (!phase1PlatformExclusionRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 17 must identify ${evidence}`);
+    }
+  }
+}
+
+const phase1ProtectedPathCompletion = readFileSync(
+  join(root, phase1ProtectedPathCompletionPath),
+  'utf8',
+);
+if (!/^状态：completed$/m.test(phase1ProtectedPathCompletion)) {
+  fail(`${phase1ProtectedPathCompletionPath} must be completed`);
+}
+for (const evidence of [
+  phase1PlatformExclusionCommit,
+  phase1ProtectedPathInitialCommit,
+  phase1ProtectedPathCommit,
+  phase1ProtectedPathSeatbeltCommit,
+  phase1ProtectedPathQualification,
+  'accepted_empty_support_set',
+  'Required run 30705493952',
+  'Platform Capability Probe run 30705493919',
+  'artifact id `8820200695`',
+  'sha256:6bc8332393bd10da97170cc4d314d66e21e0f005b751da16cd9a649361ee2559',
+  'sha256:48a304768ae04b501c8609f3ee3f7e5b1de7ad9cbd7c71a4fe733c654d2bcde3',
+]) {
+  if (!phase1ProtectedPathCompletion.includes(evidence)) {
+    fail(`${phase1ProtectedPathCompletionPath} must identify ${evidence}`);
+  }
+}
+for (const heading of [
+  'Gate 决策',
+  '实际 commit / artifact',
+  '结论',
+  '验证命令与结果',
+  '未运行项',
+  '风险与限制',
+  '与计划偏差',
+  'Active 文档与 ADR 收敛',
+]) {
+  if (!new RegExp(`^## ${heading}$`, 'm').test(phase1ProtectedPathCompletion)) {
+    fail(`${phase1ProtectedPathCompletionPath} must include ## ${heading}`);
+  }
+}
+for (const command of [
+  'bun test tests/policies/protected-path.test.ts tests/sandbox.test.ts tests/sandbox-executor.test.ts tests/subagent-runner.test.ts tests/mcp-manager.test.ts',
+  'bun test tests/tool-definitions.test.ts tests/tools.test.ts tests/shell-exec.test.ts',
+  'bun run test:tui:harness',
+  'CI=true bun run scripts/run-tui-system-tests.ts long-message input compact-persistence',
+  'bun run typecheck',
+  'bun run check:core-boundary',
+  'bun run check:docs-impact',
+  'bun run check:docs',
+  'git diff --check',
+]) {
+  if (!phase1ProtectedPathCompletion.includes(`\`${command}\``)) {
+    fail(`${phase1ProtectedPathCompletionPath} must record command: ${command}`);
+  }
+}
+if (!/最终独立只读复核结论为 GO，P0\/P1\/P2 均为 0/.test(phase1ProtectedPathCompletion)) {
+  fail(`${phase1ProtectedPathCompletionPath} must record final GO with no P0/P1/P2`);
+}
+if (
+  /productionSupported\s*[:=]\s*true/.test(phase1ProtectedPathCompletion) ||
+  phase1ProtectedPathCompletion.includes('accepted_non_empty_support_set')
+) {
+  fail(`${phase1ProtectedPathCompletionPath} must not claim positive production qualification`);
+}
+const protectedPathMilestoneMentions = [...phase1ProtectedPathCompletion.matchAll(/`MS:1B-DONE`/g)]
+  .length;
+const protectedPathNegativeMilestoneMentions = [
+  ...phase1ProtectedPathCompletion.matchAll(/不产生\s+`MS:1B-DONE`/g),
+].length;
+if (protectedPathMilestoneMentions !== 1 || protectedPathNegativeMilestoneMentions !== 1) {
+  fail(`${phase1ProtectedPathCompletionPath} must only mention MS:1B-DONE as not produced`);
+}
+if (
+  !phase1ExecutionPlan.includes(
+    `Task 1B.5 已以 \`${phase1ProtectedPathQualification}\` 的全绿 Required/Platform`,
+  ) ||
+  !phase1ExecutionPlan.includes(
+    '[Task 1B.5 完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md)',
+  )
+) {
+  fail('1B.5: execution-isolation plan must record completion and completion record');
+}
+if (!phase1ExecutionPlan.includes('- [ ] protected path 在所有本地执行路径统一生效；')) {
+  fail('1B: phase-level all-local-paths acceptance must remain open until later Tasks complete');
+}
+if (!roadmap.includes(`当前执行复核基线：\`${phase1ProtectedPathQualification}\``)) {
+  fail('roadmap must advance the reviewed execution baseline to the 1B.5 qualification head');
+}
+const phase1ProtectedPathRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 18 |'));
+if (phase1ProtectedPathRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 18 exactly once; found ${phase1ProtectedPathRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '完成 1B.5 shared protected-path policy',
+    '1B.6/1B.8 变为 ready 但保持未绑定',
+    phase1ProtectedPathInitialCommit,
+    phase1ProtectedPathCommit,
+    phase1ProtectedPathQualification,
+    'Required run 30705493952',
+    '六个 job 全部通过',
+    'Platform Capability Probe run 30705493919',
+    '三平台全绿',
+    '../execution/completed/2026-08-01-agent-production-protected-path.md',
+    '无剩余 P0/P1/P2',
+    '不产生 `MS:1B-DONE`',
+  ]) {
+    if (!phase1ProtectedPathRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 18 must identify ${evidence}`);
+    }
+  }
+}
+for (const commit of [
+  phase1ProtectedPathInitialCommit,
+  phase1ProtectedPathCommit,
+  phase1ProtectedPathSeatbeltCommit,
+  phase1ProtectedPathQualification,
+]) {
+  requireReachableCommit(commit, '1B.5');
+}
+
+const phase1NetworkCompletionPath = resolve(
+  root,
+  'docs',
+  'space',
+  'execution',
+  'completed',
+  '2026-08-01-agent-production-network-boundary.md',
+);
+const phase1NetworkCompletion = readFileSync(phase1NetworkCompletionPath, 'utf8');
+if (!/^状态：completed$/m.test(phase1NetworkCompletion)) {
+  fail(`${relative(root, phase1NetworkCompletionPath)} must be completed`);
+}
+for (const evidence of [
+  phase1NetworkCommit,
+  phase1NetworkReviewBaseline,
+  'accepted_empty_support_set',
+]) {
+  if (!phase1NetworkCompletion.includes(evidence)) {
+    fail(`${relative(root, phase1NetworkCompletionPath)} must identify ${evidence}`);
+  }
+}
+for (const heading of [
+  'Gate 决策',
+  '实际 commit / artifact',
+  '验证命令与结果',
+  '未运行项',
+  '风险与限制',
+  '与计划偏差',
+  'Active 文档与 ADR 收敛',
+]) {
+  if (!new RegExp(`^## ${heading}$`, 'm').test(phase1NetworkCompletion)) {
+    fail(`${relative(root, phase1NetworkCompletionPath)} must include ## ${heading}`);
+  }
+}
+if (!/最终 GO，无剩余\s*P0\/P1\/P2/.test(phase1NetworkCompletion)) {
+  fail(
+    `${relative(root, phase1NetworkCompletionPath)} must record final GO with no remaining P0/P1/P2`,
+  );
+}
+for (const command of [
+  'bun test tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts',
+  'bun run test:tui:system',
+  'bun run test',
+  'bun run check:docs-impact',
+  'bun run check:docs',
+  'bun run check:core-boundary',
+  'bun run typecheck',
+  'git diff --check',
+]) {
+  if (!phase1NetworkCompletion.includes(`\`${command}\``)) {
+    fail(`${relative(root, phase1NetworkCompletionPath)} must record command: ${command}`);
+  }
+}
+for (const commit of [phase1NetworkCommit, phase1NetworkReviewBaseline]) {
+  requireReachableCommit(commit, '1B.4');
+}
+
+const phase1AdmissionCompletionPath = phase1CompletionRecords[0]!;
+const phase1AdmissionCompletion = readFileSync(phase1AdmissionCompletionPath, 'utf8');
+if (!phase1AdmissionCompletion.includes(phase1RemoteMcpCommit)) {
+  fail(
+    `${relative(root, phase1AdmissionCompletionPath)} must identify the remote MCP egress implementation`,
+  );
+}
+if (!/^## Task 1A\.6$/m.test(phase1AdmissionCompletion)) {
+  fail(`${relative(root, phase1AdmissionCompletionPath)} must include ## Task 1A.6`);
+}
+if (!/第五轮最终 GO，无剩余 P0\/P1\/P2/.test(phase1AdmissionCompletion)) {
+  fail(`${relative(root, phase1AdmissionCompletionPath)} must record final 1A.6 independent GO`);
+}
+requireReachableCommit(phase1RemoteMcpCommit, '1A.6');
+if (!/^## Task 1A\.7$/m.test(phase1AdmissionCompletion)) {
+  fail(`${relative(root, phase1AdmissionCompletionPath)} must include ## Task 1A.7`);
+}
+for (const evidence of [
+  phase1PrivacyClosureEvidenceCommit,
+  '30670346726',
+  '唯一产生 `MS:1A-DONE`',
+  '2179 pass/7 skip/0 fail',
+  '5 个 harness 文件和 36 个 scenario',
+  'RSS 44→44 MiB、active 0→0、fd 12→12',
+]) {
+  if (!phase1AdmissionCompletion.includes(evidence)) {
+    fail(`${relative(root, phase1AdmissionCompletionPath)} must identify ${evidence}`);
+  }
+}
+for (const [description, pattern] of [
+  [
+    'empty ProviderDataPolicy bundle and zero model routes',
+    /ProviderDataPolicy approved bundle 的 `policies=\[\]`，所以 production-qualified model\s+route 为 0/,
+  ],
+  [
+    'D-14 zero MCP routes without an independent revision',
+    /D-14 同时冻结空的 model\/MCP route 集合，且仓库没有独立批准的 remote MCP\s+route revision，所以 production-qualified MCP route 也为 0/,
+  ],
+  [
+    'internal-only milestone',
+    /`MS:1A-DONE` 只表示 Phase 1A 实现与文档收敛，不表示存在可发布 route/,
+  ],
+  [
+    'no qualified route from empty Provider and MCP sets',
+    /ProviderDataPolicy approved bundle 与 D-14 MCP route 集合都为空，因此本记录不产生\s+production-qualified route/,
+  ],
+  [
+    'no release artifact, external qualification, or signing',
+    /不产生 production\s+artifact、external qualification 或 Release\/Security 签署/,
+  ],
+] as const) {
+  if (!pattern.test(phase1AdmissionCompletion)) {
+    fail(
+      `${relative(root, phase1AdmissionCompletionPath)} must preserve Phase 1A limitation: ${description}`,
+    );
+  }
+}
+if (
+  !/- 1A\.7 独立只读复核：[^\n]*(?:\n {2}[^\n]*)*最终 GO 且无 P0\/P1\/P2/.test(
+    phase1AdmissionCompletion,
+  )
+) {
+  fail(`${relative(root, phase1AdmissionCompletionPath)} must record final 1A.7 independent GO`);
+}
+requireReachableCommit(phase1PrivacyClosureEvidenceCommit, '1A.7');
+
+if (failures.length > 0) {
+  console.error('Plan execution matrix checks failed:');
+  for (const message of failures) console.error(`- ${message}`);
+  process.exitCode = 1;
+} else {
+  console.log(
+    `Plan execution matrix checks passed (${plans.length} plans, ${rows.length} tasks, 14 decisions).`,
+  );
+}

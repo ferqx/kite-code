@@ -13,6 +13,7 @@ import {
 } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
 import type { AIMessage } from '@/core/messages';
 import type { CompactionReporter } from '@/core/model/compaction-metrics';
@@ -41,7 +42,8 @@ import { skillFrameInvalidationReason } from '@/core/skills/activation';
 import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
-import { createAgentTools } from '@/core/tools/definitions';
+import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ShellExecutor } from '@/core/tools/shell';
 
 // ── 辅助函数 / Helpers ──
@@ -69,6 +71,26 @@ function extractReasoningText(message: AIMessage | undefined): string | undefine
       | string
       | undefined);
   return reasoning && reasoning.length > 0 ? reasoning : undefined;
+}
+
+const BOUNDED_CANCELLATION_REQUIRED_TOOLS = new Set([
+  'task',
+  'shell_execute',
+  'write_file',
+  'edit_file',
+  'write_plan',
+  'update_plan',
+]);
+
+function boundedCancellationTools<T extends Record<string, unknown>>(
+  tools: T,
+  config: AgentConfig,
+): T {
+  const flags = getFeatureFlags(config);
+  if (!flags.resourceBudgetV1 || flags.boundedCancellationV1) return tools;
+  return Object.fromEntries(
+    Object.entries(tools).filter(([name]) => !BOUNDED_CANCELLATION_REQUIRED_TOOLS.has(name)),
+  ) as T;
 }
 
 /** Convert invalid provider tool arguments into durable queued-and-failed facts. */
@@ -169,30 +191,33 @@ export function resolveContextProjectionEnvironment(input: {
       const disclosure = input.state.capabilities.disclosures[descriptor.capabilityId];
       return disclosure?.capabilityRevision === descriptor.revision;
     });
-  const tools = createAgentTools({
-    workspace: input.state.session.workspace,
-    shellExecutor: input.shellExecutor,
-    mcpManager: input.mcpManager,
-    mcpBindings: persistedBindings,
-    toolSearch:
-      getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
-    skills: input.skills,
-    skillOptions: input.skillOptions,
-    skillCatalog: input.skillCatalog,
-    activeSkillFrames: Object.values(input.state.skills.frames).filter(
-      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
-    ),
-    config: input.config,
-    subagentEventSink: input.subagentEventSink,
-    subagentSignal: input.signal,
-    signal: input.signal,
-    model: input.model,
-    threadId: input.state.session.threadId,
-    authorization: input.state.authorization,
-    workspaceAccess: input.state.workspaceAccess,
-    phase: getAgentPhase(getActivePlanning(input.state)),
-    interactionMode: getEffectiveInteractionMode(input.state),
-  });
+  const tools = boundedCancellationTools(
+    createAgentTools({
+      workspace: input.state.session.workspace,
+      shellExecutor: input.shellExecutor,
+      mcpManager: input.mcpManager,
+      mcpBindings: persistedBindings,
+      toolSearch:
+        getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
+      skills: input.skills,
+      skillOptions: input.skillOptions,
+      skillCatalog: input.skillCatalog,
+      activeSkillFrames: Object.values(input.state.skills.frames).filter(
+        (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+      ),
+      config: input.config,
+      subagentEventSink: input.subagentEventSink,
+      subagentSignal: input.signal,
+      signal: input.signal,
+      model: input.model,
+      threadId: input.state.session.threadId,
+      authorization: input.state.authorization,
+      workspaceAccess: input.state.workspaceAccess,
+      phase: getAgentPhase(getActivePlanning(input.state)),
+      interactionMode: getEffectiveInteractionMode(input.state),
+    }),
+    input.config,
+  );
   return {
     serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
     activeSkillInstructions: activeInlineSkillInstructions(input.state, input.skillCatalog),
@@ -240,6 +265,9 @@ export async function invokeRuntimeModel(params: {
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
+  /** Production composition must supply the immutable route-policy gate. */
+  providerDataAdmission?: ProviderDataAdmissionGateV1;
+  resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const requestId = genInteractionId();
@@ -407,7 +435,7 @@ export async function invokeRuntimeModel(params: {
         ...(searchToConsume ? { searchId: searchToConsume.searchId } : {}),
       });
     }
-    const tools = createAgentTools({
+    const toolInput = {
       workspace: state.session.workspace,
       shellExecutor: params.shellExecutor,
       mcpManager: params.mcpManager,
@@ -429,7 +457,12 @@ export async function invokeRuntimeModel(params: {
       workspaceAccess: state.workspaceAccess,
       phase: getAgentPhase(getActivePlanning(state)),
       interactionMode: getEffectiveInteractionMode(state),
-    });
+    };
+    const toolAvailCtx = toolAvailabilityContext(toolInput);
+    const tools = boundedCancellationTools(
+      createAgentTools(toolInput, toolAvailCtx),
+      params.config,
+    );
     const projectionEnvironment = resolveContextProjectionEnvironment({
       state,
       config: params.config,
@@ -523,15 +556,56 @@ export async function invokeRuntimeModel(params: {
         },
       ];
     }
+    if (
+      params.resourceAdmission &&
+      params.resourceAdmission.inputTokens !== preflight.estimate.totalInputTokens
+    ) {
+      throw new Error(
+        'Model request projection changed after resource admission; refusing Provider dispatch.',
+      );
+    }
+    // model.requested 必须在 await 之前即时发出，而不是响应完成后与
+    // model.responded 一起补发——消费方（TUI）需要它作为"新一轮模型调用
+    // 已开始"的时机信号（例如 settle 上一轮的 Thought 聚合块，避免最终
+    // 回复生成期间块一直显示运行中）。compaction 提前返回分支不发此事件
+    // （该分支不发起模型调用）。
+    // Emit model.requested at request time, not back-filled alongside
+    // model.responded after the response completes — consumers (the TUI)
+    // need it as the "a new model call began" timing signal (e.g. to settle
+    // the previous round's Thought block so it stops showing as running
+    // while the final answer is being generated). The compaction early-return
+    // above does not emit it (no model call happens on that path).
+    params.emitRuntimeEvent?.({ type: 'model.requested', requestId });
+    const callStartedAt = Date.now();
     const response = await invokeBoundModel({
       model: params.model,
       tools,
       messages: projection.providerMessages,
       signal: params.signal,
       maxOutputTokens:
+        params.resourceAdmission?.maxOutputTokens ??
         positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
         modelCapabilities.maxOutputTokens,
+      streaming: modelCapabilities.streaming,
+      onTextDelta: (text) => params.emitRuntimeEvent?.({ type: 'model.text_delta', text }),
+      onReasoningDelta: (text, segmentId) =>
+        params.emitRuntimeEvent?.({ type: 'model.reasoning_delta', segmentId, text }),
+      onReasoningCompleted: (text, segmentId) =>
+        params.emitRuntimeEvent?.({ type: 'model.reasoning_completed', segmentId, text }),
+      onRetry: (attempt, maxAttempts, error, delayMs) => {
+        params.emitRuntimeEvent?.({
+          type: 'model.retry',
+          attempt,
+          maxAttempts,
+          error: error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200),
+          delayMs,
+        });
+      },
+      providerDataAdmission: params.providerDataAdmission,
+      providerDataPolicyRequired: flags.providerDataPolicyV1,
+      providerDispatchPurpose: 'primary_model',
     });
+    const durationMs = Date.now() - callStartedAt;
     const toolCalls =
       response.tool_calls?.map((call) => ({
         id: call.id ?? crypto.randomUUID(),
@@ -557,16 +631,28 @@ export async function invokeRuntimeModel(params: {
           _parse_error: call.error ?? 'invalid JSON arguments',
         },
       }));
+    const providerUsage = response.response_metadata?.usage as
+      | {
+          input_tokens?: number;
+          prompt_tokens?: number;
+          completion_tokens?: number;
+        }
+      | undefined;
+    const providerInputTokens = providerUsage?.input_tokens ?? providerUsage?.prompt_tokens;
     const events: RuntimeEvent[] = [
       ...retryEvents,
       contextMetricsEvent,
-      { type: 'model.requested', requestId },
       {
         type: 'model.responded',
         messageId: response.id ?? requestId,
+        durationMs,
         toolCalls: [...toolCalls, ...invalidToolCalls],
         reasoningText: extractReasoningText(response),
         text: extractText(response.content),
+        ...(typeof providerInputTokens === 'number' ? { inputTokens: providerInputTokens } : {}),
+        ...(typeof providerUsage?.completion_tokens === 'number'
+          ? { outputTokens: providerUsage.completion_tokens }
+          : {}),
       },
     ];
 
@@ -584,7 +670,9 @@ export async function invokeRuntimeModel(params: {
     const messageId = response.id ?? requestId;
     let ordinal = 0;
     for (const call of toolCalls) {
-      const capability = classifyToolCapability(call.name, call.args);
+      const capability =
+        builtinToolRegistry.effectsOf(call.name, call.args, toolAvailCtx) ??
+        classifyToolCapability(call.name, call.args);
       const binding = mcpBindings.find(
         ({ binding: candidate }) => candidate.exposedToolName === call.name,
       )?.binding;

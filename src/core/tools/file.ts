@@ -1,20 +1,14 @@
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  realpathSync,
-  writeFileSync,
-} from 'node:fs';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { msys2ToWindowsPath } from './path-utils';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFile as readFileBufferAsync } from 'node:fs/promises';
+import { dirname, isAbsolute, resolve, sep } from 'node:path';
+import { isPathInsideWorkspace, msys2ToWindowsPath } from './path-utils';
 
 // ============================================================================
 // 公用 — 换行符正规化 / Common — line ending normalization
 // ============================================================================
 
 /** Windows (\r\n) / 老 Mac (\r) → Unix (\n) */
-function normalizeEOL(content: string): string {
+export function normalizeEOL(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
 
@@ -53,39 +47,9 @@ export function resolvePath(
 }
 
 function assertInsideWorkspace(workspace: string, target: string, originalPath: string): void {
-  const workspaceReal = realpathSync(workspace);
-  const nearest = nearestExistingPath(target);
-  const nearestReal = realpathSync(nearest);
-  if (!isPathInside(workspaceReal, nearestReal)) {
+  if (!isPathInsideWorkspace(workspace, target)) {
     throw new Error(`Path is outside workspace: ${originalPath}`);
   }
-  if (existsSync(target)) {
-    const targetReal = realpathSync(target);
-    if (!isPathInside(workspaceReal, targetReal)) {
-      throw new Error(`Path is outside workspace: ${originalPath}`);
-    }
-  }
-}
-
-function nearestExistingPath(path: string): string {
-  let current = path;
-  while (!existsSync(current)) {
-    const parent = dirname(current);
-    if (parent === current) return parent;
-    current = parent;
-  }
-  return current;
-}
-
-function isPathInside(parent: string, child: string): boolean {
-  const parentNorm = normalizeForCompare(parent);
-  const childNorm = normalizeForCompare(child);
-  const rel = relative(parentNorm, childNorm);
-  return rel === '' || (!!rel && !rel.startsWith('..') && !isAbsolute(rel));
-}
-
-function normalizeForCompare(path: string): string {
-  return process.platform === 'win32' ? path.toLowerCase() : path;
 }
 
 // ============================================================================
@@ -117,6 +81,16 @@ function isTextByte(b: number): boolean {
 // readTextContent — 共享的文件读取边界
 // Shared file reading boundary: encoding detection, BOM stripping, binary check,
 // line-ending normalization. Exported for unit testing.
+//
+// 同步入口 readTextContent 与异步入口 readTextContentAsync 共享同一个
+// decodeTextBuffer 解码核心，保证两条路径的编码检测、二进制检测与换行正规化
+// 行为完全一致。批量读取（如 search_content 全工作区扫描）必须走异步入口，
+// 否则同步 I/O 会长时间占用事件循环，阻塞 TUI 动画渲染。
+// The sync entry (readTextContent) and async entry (readTextContentAsync) share
+// the same decodeTextBuffer core so encoding detection, binary detection and
+// line-ending normalization behave identically. Bulk reads (e.g. search_content
+// walking a whole workspace) must use the async entry so synchronous I/O does
+// not hold the event loop and block TUI animation rendering.
 // ============================================================================
 
 interface TextContent {
@@ -131,18 +105,11 @@ interface TextContentError {
   totalLines: 0;
 }
 
-export function readTextContent(
-  workspace: string,
+function decodeTextBuffer(
+  raw: Buffer,
   filePath: string,
-  opts?: { force?: boolean; allowExternal?: boolean },
+  opts?: { force?: boolean },
 ): TextContent | TextContentError {
-  const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
-  if (!existsSync(target)) {
-    return { ok: false, error: `File not found: ${filePath}`, totalLines: 0 };
-  }
-
-  const raw = readFileSync(target);
-
   // 编码检测 / Encoding detection — 在二进制检测之前执行。
   // UTF-16 文本文件中 NUL byte 比例天然高（ASCII 字符每两字节一个 NUL），
   // 必须先识别 BOM 确定编码，再决定是否做二进制检测。
@@ -186,7 +153,7 @@ export function readTextContent(
     if (nonText > sampleLen * 0.3) {
       return {
         ok: false,
-        error: `Binary file detected: ${filePath}. Use force: true to read anyway.`,
+        error: `Binary file detected: ${filePath}. It cannot be read as text. Tell the user the file appears binary and ask how they want to proceed.`,
         totalLines: 0,
       };
     }
@@ -201,6 +168,52 @@ export function readTextContent(
   }
 
   return { ok: true, content, totalLines: allLines.length };
+}
+
+export function readTextContent(
+  workspace: string,
+  filePath: string,
+  opts?: { force?: boolean; allowExternal?: boolean },
+): TextContent | TextContentError {
+  const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
+  if (!existsSync(target)) {
+    return { ok: false, error: `File not found: ${filePath}`, totalLines: 0 };
+  }
+
+  return decodeTextBuffer(readFileSync(target), filePath, opts);
+}
+
+function isNotFound(error: unknown): boolean {
+  return (
+    typeof error === 'object' && error !== null && (error as { code?: unknown }).code === 'ENOENT'
+  );
+}
+
+/**
+ * readTextContent 的异步入口：行为与同步版本一致（同一解码核心、同样的
+ * 错误消息），但通过 fs.promises.readFile 让出事件循环。供 search_content
+ * 等需要遍历读取大量文件的调用方使用，避免同步 I/O 长时间阻塞 TUI 渲染。
+ * Async entry for readTextContent: identical behavior (same decode core, same
+ * error messages) that yields the event loop via fs.promises.readFile. Used by
+ * callers that read many files (e.g. search_content) so synchronous I/O does
+ * not block TUI rendering for extended periods.
+ */
+export async function readTextContentAsync(
+  workspace: string,
+  filePath: string,
+  opts?: { force?: boolean; allowExternal?: boolean },
+): Promise<TextContent | TextContentError> {
+  const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
+  let raw: Buffer;
+  try {
+    raw = await readFileBufferAsync(target);
+  } catch (error) {
+    if (isNotFound(error)) {
+      return { ok: false, error: `File not found: ${filePath}`, totalLines: 0 };
+    }
+    throw error;
+  }
+  return decodeTextBuffer(raw, filePath, opts);
 }
 
 // ============================================================================
@@ -224,6 +237,9 @@ export interface ReadFileResult {
   fromLine?: number;
   toLine?: number;
   error?: string;
+  /** 内部字段：换行正规化后的原始文本（读取状态指纹输入，不作模型输出）。
+   *  Internal: raw normalized text (read-state fingerprint input, not model output). */
+  rawContent?: string;
 }
 
 export function readFile(input: ReadFileInput): ReadFileResult {
@@ -259,6 +275,7 @@ export function readFile(input: ReadFileInput): ReadFileResult {
       totalLines: result.totalLines,
       fromLine,
       toLine,
+      rawContent: result.content,
     };
   } catch (e) {
     return {
@@ -337,10 +354,12 @@ export function editFile(input: EditFileInput): EditFileResult {
   }
 }
 
-/** Try exact match → fallback to trimEnd → fallback to per-line trimming.
- *  Auto-retry layer: when exact match fails, try progressively looser matching
- *  before reporting failure to the model, saving a model round-trip for
- *  common whitespace mismatches (trailing spaces, inconsistent line endings). */
+/** 严格精确匹配（ADR-0043 §3）：包含空白；失败即报错并引导重读。
+ *  模糊匹配降级为 matchMode='trimmed' 的内部显式 opt-in，不再无条件兜底——
+ *  无条件降级会让 Receipt 无法表达"模型意图 vs 实际匹配"的差异。
+ *  Strict exact matching: whitespace-sensitive; failures report an error that
+ *  instructs the model to re-read. Fuzzy matching is an internal opt-in via
+ *  matchMode='trimmed' only — unconditional fallbacks are removed. */
 function tryExactMatch(
   target: string,
   path: string,
@@ -349,7 +368,6 @@ function tryExactMatch(
   newStr: string,
   replaceAll?: boolean,
 ): EditFileResult {
-  // 1st attempt: exact match
   const index = content.indexOf(oldStr);
   if (index !== -1) {
     const secondIndex = content.indexOf(oldStr, index + 1);
@@ -363,145 +381,11 @@ function tryExactMatch(
     return performReplace(path, target, content, oldStr, newStr, replaceAll, index);
   }
 
-  // 2nd attempt: trim trailing whitespace from old_string (handles trailing-space mismatch)
-  const trimmedOld = oldStr.trimEnd();
-  if (trimmedOld !== oldStr) {
-    const trimmedIndex = content.indexOf(trimmedOld);
-    if (trimmedIndex !== -1) {
-      return performReplace(path, target, content, trimmedOld, newStr, replaceAll, trimmedIndex);
-    }
-  }
-
-  // 3rd attempt: per-line trim (handles mixed leading/trailing whitespace)
-  const multiLineAttempt = tryMultiLineTrimmedMatch(
-    target,
-    path,
-    content,
-    oldStr,
-    newStr,
-    replaceAll,
-  );
-  if (multiLineAttempt) return multiLineAttempt;
-
   const snippet = oldStr.slice(0, 100).replace(/\n/g, '\\n');
   return {
     ok: false,
     path,
-    error: `old_string not found in ${path}: "${snippet}..."`,
-  };
-}
-
-/** Per-line trimmed match: both old_str and file content lines are trimmed before
- *  comparison. Only succeeds when there is exactly one match (or replaceAll is set). */
-function tryMultiLineTrimmedMatch(
-  target: string,
-  path: string,
-  content: string,
-  oldStr: string,
-  newStr: string,
-  replaceAll?: boolean,
-): EditFileResult | null {
-  const oldLines = oldStr.split('\n');
-  if (oldLines.length < 2) return null; // single-line → trimEnd already covered; skip
-
-  const trimmedOldLines = oldLines.map((l) => l.trim());
-  const contentLines = content.split('\n');
-  const trimmedContentLines = contentLines.map((l) => l.trim());
-
-  let matchLine = -1;
-  for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
-    let mismatch = false;
-    for (let j = 0; j < oldLines.length; j++) {
-      if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
-        mismatch = true;
-        break;
-      }
-    }
-    if (!mismatch) {
-      matchLine = i;
-      break;
-    }
-  }
-
-  if (matchLine === -1) return null;
-
-  // Count matches for non-replaceAll
-  if (!replaceAll) {
-    let matchCount = 0;
-    for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
-      let mismatch = false;
-      for (let j = 0; j < oldLines.length; j++) {
-        if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
-          mismatch = true;
-          break;
-        }
-      }
-      if (!mismatch) matchCount++;
-    }
-    if (matchCount > 1) return null; // ambiguous
-  }
-
-  // Compute exact char offset from matched line position
-  let charOffset = 0;
-  for (let k = 0; k < matchLine; k++) {
-    charOffset += contentLines[k]!.length + 1; // +1 for \n
-  }
-  // Find the exact old_string span starting at charOffset (preserves original spacing)
-  const exactOld = content.slice(charOffset, charOffset + oldStr.length);
-
-  const result: EditFileResult = replaceAll
-    ? performReplaceAllTrimmed(path, target, contentLines, oldLines.length, newStr, trimmedOldLines)
-    : performReplace(path, target, content, exactOld, newStr, false, charOffset);
-
-  return result;
-}
-
-/** Replace all trimmed-matched occurrences in the file, preserving original line text. */
-function performReplaceAllTrimmed(
-  path: string,
-  target: string,
-  contentLines: string[],
-  oldLineCount: number,
-  newStr: string,
-  trimmedOldLines: string[],
-): EditFileResult {
-  const trimmedContentLines = contentLines.map((l) => l.trim());
-  const parts: string[] = [];
-  const matchLines: number[] = [];
-  let i = 0;
-  while (i <= contentLines.length - oldLineCount) {
-    let match = true;
-    for (let j = 0; j < oldLineCount; j++) {
-      if (trimmedContentLines[i + j] !== trimmedOldLines[j]) {
-        match = false;
-        break;
-      }
-    }
-    if (match) {
-      matchLines.push(i + 1); // 1-based
-      parts.push(newStr);
-      i += oldLineCount;
-    } else {
-      parts.push(contentLines[i]!);
-      i++;
-    }
-  }
-  for (; i < contentLines.length; i++) {
-    parts.push(contentLines[i]!);
-  }
-  const newContent = parts.join('\n');
-
-  mkdirSync(dirname(target), { recursive: true });
-  writeFileSync(target, newContent, 'utf8');
-
-  return {
-    ok: true,
-    path,
-    content: newContent,
-    fromLine: matchLines[0] ?? 1,
-    toLine: matchLines[0] ?? 1,
-    replacements: matchLines.length,
-    ...(matchLines.length > 1 ? { matchLines } : {}),
+    error: `old_string not found in ${path}: "${snippet}..." Matching is exact (including whitespace). Re-read the file with read_file, then retry with the exact current content.`,
   };
 }
 
@@ -717,7 +601,6 @@ export interface WriteFileInput {
   workspace: string;
   path: string;
   content: string;
-  mode?: 'overwrite' | 'append';
   allowExternal?: boolean;
 }
 
@@ -734,11 +617,7 @@ export function writeFile(input: WriteFileInput): WriteFileResult {
     const target = resolvePath(input.workspace, input.path, { allowExternal: input.allowExternal });
     mkdirSync(dirname(target), { recursive: true });
 
-    if (input.mode === 'append') {
-      appendFileSync(target, input.content, 'utf8');
-    } else {
-      writeFileSync(target, input.content, 'utf8');
-    }
+    writeFileSync(target, input.content, 'utf8');
 
     const lineCount = input.content.split('\n').length - (input.content.endsWith('\n') ? 1 : 0);
 

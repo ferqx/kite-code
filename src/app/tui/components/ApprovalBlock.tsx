@@ -2,7 +2,13 @@ import { Box, Text, useInput, useStdout } from 'ink';
 import { useRef, useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
-import type { ShellApprovalGrant } from '@/protocol/events';
+import type { ShellApprovalGrant, ToolApprovalPayload } from '@/protocol/events';
+
+export interface ApprovalBlockProps {
+  approval: ToolApprovalPayload;
+  provider: TuiUserInputProvider;
+  onResolved: (action: string, grant?: string) => void;
+}
 
 interface Option {
   label: string;
@@ -10,26 +16,22 @@ interface Option {
   grant?: ShellApprovalGrant;
 }
 
-interface ApprovalBlockProps {
-  approval?: unknown;
-  provider: TuiUserInputProvider;
-  onResolved: (action: string, grant?: string) => void;
-}
-
 const OPTIONS: Option[] = [
-  { label: 'Yes · 仅本次', action: 'approve', grant: 'approve_once' },
-  { label: 'Auto · 自动审批', action: 'approve', grant: 'same_command' },
-  { label: 'Full · 完全权限', action: 'approve', grant: 'full_access' },
-  { label: 'Deny · 拒绝', action: 'deny' },
+  { label: '允许一次', action: 'approve', grant: 'approve_once' },
+  { label: '本次会话允许', action: 'approve', grant: 'same_command' },
+  { label: '拒绝', action: 'deny' },
 ];
 
-export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockProps) {
+export default function ApprovalBlock({ approval, provider, onResolved }: ApprovalBlockProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const [selectedIndex, setSelectedIndex] = useState(0);
   const selectedIndexRef = useRef(0);
   const rawInputBuffer = useRef('');
   const cols = stdout?.columns ?? 80;
+  const approvalLabel = (approval.command || approval.summary || approval.tool)
+    .replace(/\s+/gu, ' ')
+    .trim();
 
   function resolve(opt: Option) {
     if (opt.action === 'approve') {
@@ -80,7 +82,7 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
 
       {/* title */}
       <Box marginTop={1}>
-        <Text>Approve this tool call?</Text>
+        <Text wrap="truncate-end">授权执行命令（{approvalLabel}）</Text>
       </Box>
 
       {/* options */}
@@ -91,7 +93,7 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
           return (
             <Box key={i} marginTop={i > 0 ? 1 : 0}>
               <Text color={color}>
-                {isSelected ? '>' : ' '} {o.label}
+                {isSelected ? '›' : ' '} {o.label}
               </Text>
             </Box>
           );
@@ -100,7 +102,7 @@ export default function ApprovalBlock({ provider, onResolved }: ApprovalBlockPro
 
       {/* footer */}
       <Box marginTop={1} marginBottom={1}>
-        <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
+        <Text color={t.dim}>↑↓ 选择 Enter 确认 Esc 取消</Text>
       </Box>
     </Box>
   );

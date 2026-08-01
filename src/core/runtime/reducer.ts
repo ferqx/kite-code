@@ -18,6 +18,7 @@ import {
 } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
+import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
   computePlanStructuralDigest,
   getActivePlanning,
@@ -26,8 +27,10 @@ import {
   setActivePlanning,
   type ToolCallRecord,
   type ToolResultMeta,
+  type TranscriptMessage,
   updateActiveTask,
 } from './state';
+import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 
 function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: string) {
   return {
@@ -35,6 +38,47 @@ function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: stri
     turnId: state.turn.turnId,
     ordinal: state.transcript.messages.length,
     createdAt: createdAt ?? new Date(0).toISOString(),
+  };
+}
+
+type ToolTranscriptMessage = Extract<TranscriptMessage, { kind: 'tool' }>;
+
+/**
+ * Runtime events remain chronological, but the canonical transcript keeps
+ * sibling Tool Results in assistant declaration order. This makes model
+ * context deterministic when parallel reads finish in a different order.
+ */
+function appendToolTranscriptMessage(
+  state: RuntimeState,
+  message: ToolTranscriptMessage,
+): RuntimeState['transcript'] {
+  const messages: TranscriptMessage[] = [...state.transcript.messages, message];
+  const sourceCall = state.tools.calls[message.toolCallId];
+  if (sourceCall?.modelMessageId) {
+    const positions = messages.flatMap((candidate, index) => {
+      if (candidate.kind !== 'tool') return [];
+      return state.tools.calls[candidate.toolCallId]?.modelMessageId === sourceCall.modelMessageId
+        ? [index]
+        : [];
+    });
+    const ordered = positions
+      .map((index) => ({ index, message: messages[index] as ToolTranscriptMessage }))
+      .sort((left, right) => {
+        const leftOrdinal = state.tools.calls[left.message.toolCallId]?.ordinal;
+        const rightOrdinal = state.tools.calls[right.message.toolCallId]?.ordinal;
+        if (leftOrdinal == null && rightOrdinal == null) return left.index - right.index;
+        if (leftOrdinal == null) return 1;
+        if (rightOrdinal == null) return -1;
+        return leftOrdinal - rightOrdinal || left.index - right.index;
+      })
+      .map((entry) => entry.message);
+    for (const [orderedIndex, position] of positions.entries()) {
+      messages[position] = ordered[orderedIndex]!;
+    }
+  }
+  return {
+    ...state.transcript,
+    messages: messages.map((candidate, ordinal) => ({ ...candidate, ordinal })),
   };
 }
 
@@ -58,7 +102,9 @@ function toolResultMeta(
   const effect = call.effectClass ?? classifyToolCapability(call.name, call.args).effectClass;
   const workspaceMutationScope =
     supplied.workspaceMutationScope ??
-    ((effect === 'workspace_write' || (effect === 'unknown' && call.sideEffect)) && path
+    (event.result.ok &&
+    (effect === 'workspace_write' || (effect === 'unknown' && call.sideEffect)) &&
+    path
       ? [path]
       : undefined);
   const fallbackModelDigest = createHash('sha256')
@@ -95,7 +141,23 @@ function toolResultMeta(
  * @returns 新的不可变运行时状态 / New immutable runtime state
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  event = normalizeTerminalRuntimeEventV1(event);
   switch (event.type) {
+    case 'resource_budget.configured':
+    case 'resource_budget.reserved':
+    case 'resource_budget.dispatch_started':
+    case 'resource_budget.reconciled':
+    case 'resource_budget.released':
+    case 'resource_budget.unknown':
+    case 'resource_budget.waiter_enqueued':
+    case 'resource_budget.waiter_promoted':
+    case 'resource_budget.waiter_cancelled':
+    case 'resource_budget.waiter_timed_out':
+      return {
+        ...state,
+        resourceBudget: reduceResourceBudgetStateV1(state.resourceBudget, event),
+      };
+
     case 'context.compaction_requested': {
       const pending = state.context.pendingCompaction;
       if (pending && pending.compactionId !== event.compactionId) return state;
@@ -802,6 +864,21 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
     }
 
+    case 'tool.execution_ready': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (existingCall?.status !== 'queued') return state;
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: { ...existingCall, status: 'approved' as const },
+          },
+        },
+      };
+    }
+
     case 'tool.started': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
@@ -866,21 +943,15 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
         },
-        transcript: {
-          ...state.transcript,
-          messages: [
-            ...state.transcript.messages,
-            {
-              kind: 'tool',
-              ...transcriptMeta(state, `tool-${event.toolCallId}`, event.createdAt),
-              toolCallId: event.toolCallId,
-              name: event.name,
-              content: event.result.stdout || event.result.stderr,
-              ok: event.result.ok,
-              resultMeta: toolResultMeta(existingCall, event),
-            },
-          ],
-        },
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${event.toolCallId}`, event.createdAt),
+          toolCallId: event.toolCallId,
+          name: event.name,
+          content: event.result.stdout || event.result.stderr,
+          ok: event.result.ok,
+          resultMeta: toolResultMeta(existingCall, event),
+        }),
         suspendedSubagents: clearSuspendedSubagent(state, event.toolCallId, isTaskCall),
         interactions:
           clearsMatchingApproval || clearsMatchingUserInput ? { kind: 'idle' } : state.interactions,
@@ -910,31 +981,25 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
         },
-        transcript: {
-          ...state.transcript,
-          messages: [
-            ...state.transcript.messages,
-            {
-              kind: 'tool',
-              ...transcriptMeta(state, `tool-${event.toolCallId}`),
-              toolCallId: event.toolCallId,
-              name: existingCall.name,
-              content: JSON.stringify({
-                ok: false,
-                error: {
-                  kind: failure.kind,
-                  message: failure.message,
-                  retryable: failure.retryable,
-                  model_fixable: failure.modelFixable,
-                },
-                next_step: failure.modelFixable
-                  ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
-                  : 'Explain the failure to the user and continue without assuming the tool succeeded.',
-              }),
-              ok: false,
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${event.toolCallId}`),
+          toolCallId: event.toolCallId,
+          name: existingCall.name,
+          content: JSON.stringify({
+            ok: false,
+            error: {
+              kind: failure.kind,
+              message: failure.message,
+              retryable: failure.retryable,
+              model_fixable: failure.modelFixable,
             },
-          ],
-        },
+            next_step: failure.modelFixable
+              ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
+              : 'Explain the failure to the user and continue without assuming the tool succeeded.',
+          }),
+          ok: false,
+        }),
         suspendedSubagents: clearSuspendedSubagent(
           state,
           event.toolCallId,
@@ -948,6 +1013,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (existingCall) {
         if (existingCall.status === 'rejected') return state;
         const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
+        const deferredUntilBuilding = failure.kind === 'phase_deferred';
+        const deniedByPlanningPhase = failure.kind === 'phase_denied';
         return {
           ...state,
           tools: {
@@ -964,31 +1031,50 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             queue: state.tools.queue.filter((id) => id !== event.toolCallId),
             active: state.tools.active.filter((id) => id !== event.toolCallId),
           },
-          transcript: {
-            ...state.transcript,
-            messages: [
-              ...state.transcript.messages,
-              {
-                kind: 'tool',
-                ...transcriptMeta(state, `tool-${event.toolCallId}`),
-                toolCallId: event.toolCallId,
-                name: existingCall.name,
-                content: JSON.stringify({
-                  ok: false,
-                  rejected: true,
-                  error: {
-                    kind: failure.kind,
-                    message: event.reason,
-                    retryable: failure.retryable,
-                    model_fixable: failure.modelFixable,
-                  },
-                  next_step:
-                    'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
-                }),
-                ok: false,
-              },
-            ],
-          },
+          transcript: appendToolTranscriptMessage(state, {
+            kind: 'tool',
+            ...transcriptMeta(state, `tool-${event.toolCallId}`),
+            toolCallId: event.toolCallId,
+            name: existingCall.name,
+            content: JSON.stringify(
+              deferredUntilBuilding
+                ? {
+                    ok: false,
+                    deferred: true,
+                    reason: 'phase_constraint',
+                    until_phase: 'building',
+                    tool: existingCall.name,
+                    arguments: existingCall.args,
+                    next_step:
+                      'Do not retry or request approval while planning. Preserve this command in the plan execution or verification section, then invoke it only after plan approval changes the phase to building.',
+                  }
+                : deniedByPlanningPhase
+                  ? {
+                      ok: false,
+                      rejected: true,
+                      reason: 'phase_constraint',
+                      phase: 'planning',
+                      tool: existingCall.name,
+                      arguments: existingCall.args,
+                      message: event.reason,
+                      next_step:
+                        'Do not retry or request approval while planning. Use read-only inspection capabilities and preserve the intended implementation in the plan for execution after plan approval.',
+                    }
+                  : {
+                      ok: false,
+                      rejected: true,
+                      error: {
+                        kind: failure.kind,
+                        message: event.reason,
+                        retryable: failure.retryable,
+                        model_fixable: failure.modelFixable,
+                      },
+                      next_step:
+                        'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
+                    },
+            ),
+            ok: false,
+          }),
           suspendedSubagents: clearSuspendedSubagent(
             state,
             event.toolCallId,
@@ -1009,6 +1095,20 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.cancelled': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      if (
+        existingCall.status === 'succeeded' ||
+        existingCall.status === 'failed' ||
+        existingCall.status === 'rejected' ||
+        existingCall.status === 'cancelled' ||
+        existingCall.status === 'exhausted'
+      ) {
+        return state;
+      }
+      const clearsMatchingInteraction =
+        state.interactions.kind !== 'idle' &&
+        state.interactions.kind !== 'awaiting_provider_action' &&
+        state.interactions.kind !== 'awaiting_provider_admission' &&
+        state.interactions.toolCallId === event.toolCallId;
       return {
         ...state,
         tools: {
@@ -1020,25 +1120,20 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
         },
-        transcript: {
-          ...state.transcript,
-          messages: [
-            ...state.transcript.messages,
-            {
-              kind: 'tool',
-              ...transcriptMeta(state, `tool-${event.toolCallId}`),
-              toolCallId: event.toolCallId,
-              name: existingCall.name,
-              content: event.reason,
-              ok: false,
-            },
-          ],
-        },
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${event.toolCallId}`),
+          toolCallId: event.toolCallId,
+          name: existingCall.name,
+          content: event.reason,
+          ok: false,
+        }),
         suspendedSubagents: clearSuspendedSubagent(
           state,
           event.toolCallId,
           existingCall.name === 'task',
         ),
+        interactions: clearsMatchingInteraction ? { kind: 'idle' } : state.interactions,
       };
     }
 
@@ -1059,6 +1154,59 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // tool.file_change is informational — consumed via event stream
     case 'tool.file_change':
       return state;
+
+    case 'network.admission_decided': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (!existingCall || event.decision.toolCallId !== event.toolCallId) return state;
+      if (
+        existingCall.networkDecisions?.some(
+          (decision) => decision.receiptDigest === event.decision.receiptDigest,
+        )
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: {
+              ...existingCall,
+              networkDecisions: [...(existingCall.networkDecisions ?? []), event.decision],
+            },
+          },
+        },
+      };
+    }
+
+    case 'mcp.egress_decided': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (!existingCall || event.decision.toolCallId !== event.toolCallId) return state;
+      if (
+        existingCall.remoteMcpEgressDecisions?.some(
+          (decision) => decision.receiptDigest === event.decision.receiptDigest,
+        )
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: {
+              ...existingCall,
+              remoteMcpEgressDecisions: [
+                ...(existingCall.remoteMcpEgressDecisions ?? []),
+                event.decision,
+              ],
+            },
+          },
+        },
+      };
+    }
 
     // ── 用户输入交互 / User input interaction ──
 
@@ -1126,12 +1274,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'approval.rejected': {
       if (
         state.interactions.kind !== 'awaiting_tool_approval' ||
-        state.interactions.interactionId !== event.interactionId
+        state.interactions.interactionId !== event.interactionId ||
+        (event.toolCallId != null && event.toolCallId !== state.interactions.toolCallId)
       ) {
         return state;
       }
       const toolCallId = state.interactions.toolCallId;
       const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
+      const failure = event.failure ?? classifyFailure('approval_rejected', event.reason);
       return {
         ...state,
         tools: {
@@ -1142,12 +1292,34 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ...rejectedTools.calls[toolCallId]!,
               status: 'rejected',
               error: event.reason,
-              failure: event.failure ?? classifyFailure('approval_rejected', event.reason),
+              failure,
             },
           },
           queue: rejectedTools.queue.filter((id) => id !== toolCallId),
           active: rejectedTools.active.filter((id) => id !== toolCallId),
         },
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${toolCallId}`),
+          toolCallId,
+          name: state.tools.calls[toolCallId]?.name ?? 'unknown',
+          content: JSON.stringify({
+            ok: false,
+            rejected: true,
+            error: {
+              kind: failure.kind,
+              message: event.reason,
+              retryable: failure.retryable,
+              model_fixable: failure.modelFixable,
+            },
+          }),
+          ok: false,
+        }),
+        suspendedSubagents: clearSuspendedSubagent(
+          state,
+          toolCallId,
+          state.tools.calls[toolCallId]?.name === 'task',
+        ),
         interactions: { kind: 'idle' },
       };
     }
@@ -1295,20 +1467,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         },
         transcript: alreadyHasToolResult
           ? state.transcript
-          : {
-              ...state.transcript,
-              messages: [
-                ...state.transcript.messages,
-                {
-                  kind: 'tool',
-                  ...transcriptMeta(state, `tool-${call.toolCallId}`),
-                  toolCallId: call.toolCallId,
-                  name: call.name,
-                  content: call.error ?? 'MCP provider action is required.',
-                  ok: false,
-                },
-              ],
-            },
+          : appendToolTranscriptMessage(state, {
+              kind: 'tool',
+              ...transcriptMeta(state, `tool-${call.toolCallId}`),
+              toolCallId: call.toolCallId,
+              name: call.name,
+              content: call.error ?? 'MCP provider action is required.',
+              ok: false,
+            }),
       };
     }
 
@@ -1378,11 +1544,25 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         turn: {
           turnId: event.turnId,
           turnIndex: state.turn.turnIndex + 1,
+          status: 'active',
         },
       };
     case 'turn.completed':
+      return event.turnId === state.turn.turnId
+        ? { ...state, turn: { ...state.turn, status: 'completed' } }
+        : state;
     case 'turn.aborted':
-      return state;
+      return event.turnId === state.turn.turnId
+        ? {
+            ...state,
+            turn: {
+              ...state.turn,
+              status: 'aborted',
+              abortReason: event.reason,
+              ...(event.cause ? { abortCause: event.cause } : {}),
+            },
+          }
+        : state;
 
     // ── 用户消息 / User message ──
 
@@ -1439,6 +1619,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // model.requested / model.responded 为信息性事件，由 TranscriptState 管理（未来）。
     // Informational — managed by TranscriptState (future).
     case 'model.requested':
+    case 'model.reasoning_delta':
+    case 'model.reasoning_completed':
+    case 'model.text_delta':
       return state;
 
     case 'model.retry':
@@ -1457,13 +1640,16 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
       return {
         ...state,
+        terminalOutcome: event.outcome,
         activeTaskId: null,
         tasks: { ...state.tasks, [completed.taskId]: completed },
         planning: completed.planning,
       };
     }
     case 'run.error':
+      return event.outcome ? { ...state, terminalOutcome: event.outcome } : state;
     case 'runtime.action_ignored':
+    case 'provider.data_policy_status':
       return state;
 
     case 'model.responded':

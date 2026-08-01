@@ -1,0 +1,58 @@
+{
+  "version": 1,
+  "decisionId": "D-04",
+  "status": "accepted_empty_support_set",
+  "selectedNetworkMode": "off",
+  "productionSupportedPlatforms": [],
+  "evidenceCommit": "a4bdf22aa7c2a987734524c278c4750e7b9faa96",
+  "nativeEvidenceRun": "https://github.com/ferqx/kite-code/actions/runs/30579701659",
+  "nativeEvidenceArtifacts": [
+    {
+      "name": "platform-capability-macos-15",
+      "digest": "sha256:048aeac4d4041926cc23961410ab7b1c9008cbe721cdc13c7820ff24dc3f06d9"
+    },
+    {
+      "name": "platform-capability-ubuntu-24.04",
+      "digest": "sha256:0f6e329339621a32ae2b71c6288da7066099e64ec3e76b9128fd50e0e79dfc2a"
+    },
+    {
+      "name": "platform-capability-windows-2025",
+      "digest": "sha256:7102fbfabc04cdbf74d53c99b67ef3cc4c8975b7d81f379bc750f2568bd04a99"
+    }
+  ],
+  "outcomeVocabulary": ["supported", "read_only_only", "excluded"],
+  "processTreeVocabulary": ["enforced", "unsupported"],
+  "targets": [
+    {
+      "runner": "macos-15",
+      "expectedArch": "arm64",
+      "candidateBackend": "seatbelt",
+      "currentOutcome": "excluded",
+      "reason": "current profile permits workspace-external and protected-path reads/writes; no hard process-tree limit or TUI/CLI composition evidence"
+    },
+    {
+      "runner": "ubuntu-24.04",
+      "expectedArch": "x64",
+      "candidateBackend": "bubblewrap",
+      "currentOutcome": "excluded",
+      "reason": "native evidence does not prove workspace-external/protected-path deny, a hard process-tree limit, complete inheritance, or TUI/CLI composition"
+    },
+    {
+      "runner": "windows-2025",
+      "expectedArch": "x64",
+      "candidateBackend": "none",
+      "currentOutcome": "excluded",
+      "reason": "no filesystem/network sandbox backend is implemented"
+    }
+  ],
+  "requiredEvidence": [
+    "exact OS release/version/build and architecture",
+    "workspace read/write plus read-only mode and outside read/write deny",
+    "protected .git, agent config, credential, and symlink deny",
+    "selected network mode (off by default) and its matching native enforcement",
+    "DNS/redirect-safe allowlist only when allowlist is selected or claimed as a capability",
+    "hard process-tree count limit plus kill with no residual descendants",
+    "shell, nested descendant, forked Skill, and local stdio MCP inheritance",
+    "TUI and foreground CLI composition identity"
+  ]
+}

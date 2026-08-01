@@ -17,10 +17,27 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               status: state.status,
               interrupt: state.interrupt,
               running: state.running,
+              pendingToolCalls: state.pendingToolCalls,
               active: false,
             }
           : s,
       );
+      // A new TUI session owns a fresh Runtime whose durable phase starts in
+      // building. Do not inherit the outgoing session's planning projection:
+      // Shift+Tab would otherwise try to exit planning in a Runtime that was
+      // never in planning mode and receive no transition event.
+      const newStatus = {
+        ...state.status,
+        phase: 'building' as const,
+        cacheHitTokens: 0,
+        cacheMissTokens: 0,
+        totalTokens: 0,
+        cacheHitRate: 0,
+        currentNode: null,
+        plan: null,
+        pendingPlan: null,
+        retryState: null,
+      };
       const newSnapshot: SessionSnapshot = {
         threadId: action.threadId,
         name: action.threadId,
@@ -31,17 +48,9 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         pendingInterrupt: false,
         interrupt: null,
         plan: null,
-        status: {
-          ...state.status,
-          cacheHitTokens: 0,
-          cacheMissTokens: 0,
-          totalTokens: 0,
-          cacheHitRate: 0,
-          currentNode: null,
-          plan: null,
-          retryState: null,
-        },
+        status: newStatus,
         turns: [],
+        pendingToolCalls: {},
       };
       return {
         ...state,
@@ -50,6 +59,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         turns: [],
         nextBlockId: 0,
         toolStartTimes: undefined,
+        pendingToolCalls: {},
         interrupt: null,
         exited: false,
         running: false,
@@ -64,17 +74,12 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         rewindCounter: 0,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
+        thoughtPhaseStatus: undefined,
+        currentModelRequestId: undefined,
+        currentModelReasoningStreamed: false,
+        currentModelReasoningText: undefined,
         sessionKey: state.sessionKey + 1,
-        status: {
-          ...state.status,
-          cacheHitTokens: 0,
-          cacheMissTokens: 0,
-          totalTokens: 0,
-          cacheHitRate: 0,
-          currentNode: null,
-          plan: null,
-          retryState: null,
-        },
+        status: newStatus,
       };
     }
     case 'LOAD_SESSION_PENDING':
@@ -89,6 +94,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               status: state.status,
               interrupt: state.interrupt,
               running: state.running,
+              pendingToolCalls: state.pendingToolCalls,
               active: false,
             }
           : s,
@@ -117,6 +123,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         turns: loadedTurns,
         nextBlockId: nextId,
         toolStartTimes: undefined,
+        pendingToolCalls: action.pendingToolCalls ?? target?.pendingToolCalls ?? {},
         interrupt: action.interrupt,
         showHelp: false,
         showSessions: false,
@@ -128,6 +135,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         running: false,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
+        thoughtPhaseStatus: undefined,
+        currentModelRequestId: undefined,
+        currentModelReasoningStreamed: false,
+        currentModelReasoningText: undefined,
         loadingSessionId: null,
         sessionKey: state.sessionKey + 1,
         sessionError: false,
@@ -155,6 +166,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               status: state.status,
               interrupt: state.interrupt,
               running: state.running,
+              pendingToolCalls: state.pendingToolCalls,
               active: false,
             }
           : s.threadId === action.threadId
@@ -172,10 +184,15 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         status: target?.status ?? state.status,
         interrupt: target?.interrupt ?? null,
         toolStartTimes: undefined,
+        pendingToolCalls: target?.pendingToolCalls ?? {},
         exited: false,
         running: target?.running ?? false,
         currentRunReasonId: undefined,
         currentThoughtSummaryId: undefined,
+        thoughtPhaseStatus: undefined,
+        currentModelRequestId: undefined,
+        currentModelReasoningStreamed: false,
+        currentModelReasoningText: undefined,
         sessionKey: state.sessionKey + 1,
         ctrlCPressed: false,
         exitRequested: false,
@@ -201,6 +218,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
             ...incoming,
             turns: existing.turns,
             status: isActive ? state.status : existing.status,
+            pendingToolCalls: isActive ? state.pendingToolCalls : existing.pendingToolCalls,
           };
         }
         return incoming;
