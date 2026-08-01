@@ -30,20 +30,43 @@ describe('TUI system journey', () => {
       calls.push('dependent');
     });
 
-    expect(journey.run()).rejects.toThrow('TUI system journey failed at step 1/2: broken action');
+    await expect(journey.run()).rejects.toThrow(
+      'TUI system journey failed at step 1/2: broken action',
+    );
     expect(calls).toEqual(['broken']);
   });
 
   test('keeps a bounded timeout for each checkpoint', async () => {
     const journey = createTuiSystemJourney();
-    journey.step('never settles', () => new Promise(() => {}), 10);
+    let settled = false;
+    journey.step(
+      'never settles',
+      (signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => {
+            settled = true;
+            reject(signal.reason);
+          });
+        }),
+      10,
+    );
 
-    expect(journey.run()).rejects.toThrow('TUI system journey failed at step 1/1: never settles');
+    await expect(journey.run()).rejects.toThrow(
+      'TUI system journey failed at step 1/1: never settles',
+    );
+    expect(settled).toBe(true);
   });
 
   test('reports the active step before the outer Bun and file deadlines', async () => {
     const journey = createTuiSystemJourney();
-    journey.step('active at journey deadline', () => new Promise(() => {}), 1_000);
+    journey.step(
+      'active at journey deadline',
+      (signal) =>
+        new Promise<void>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(signal.reason));
+        }),
+      1_000,
+    );
 
     try {
       await journey.run(10);
@@ -54,5 +77,17 @@ describe('TUI system journey', () => {
       expect((error as Error).cause).toBeInstanceOf(Error);
       expect(((error as Error).cause as Error).message).toContain('journey deadline of 10ms');
     }
+  });
+
+  test('bounds cancellation settlement when a step ignores its AbortSignal', async () => {
+    const journey = createTuiSystemJourney();
+    journey.step('ignores cancellation', () => new Promise(() => {}), 10);
+    const startedAt = Date.now();
+
+    await expect(journey.run()).rejects.toThrow(
+      'TUI system journey failed at step 1/1: ignores cancellation',
+    );
+
+    expect(Date.now() - startedAt).toBeLessThan(500);
   });
 });

@@ -1,6 +1,7 @@
+import { runWithTuiSystemStepSignal } from './cancellation';
 import { tuiWaitTimeout } from './timing';
 
-export type TuiSystemJourneyStep = () => void | Promise<void>;
+export type TuiSystemJourneyStep = (signal: AbortSignal) => void | Promise<void>;
 
 interface RegisteredJourneyStep {
   name: string;
@@ -16,6 +17,7 @@ export interface TuiSystemJourney {
 
 const DEFAULT_STEP_TIMEOUT_MS = 30_000;
 const DEFAULT_JOURNEY_DEADLINE_MS = 165_000;
+const STEP_ABORT_SETTLE_TIMEOUT_MS = 100;
 
 function defaultJourneyDeadlineMs(): number {
   const configured = Number(process.env.KITE_TUI_TEST_JOURNEY_DEADLINE_MS);
@@ -29,13 +31,42 @@ async function runWithTimeout(
   timeoutMessage: string,
 ): Promise<void> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const controller = new AbortController();
+  let timedOut = false;
+  const runPromise = runWithTuiSystemStepSignal(controller.signal, () =>
+    step.run(controller.signal),
+  );
   try {
     await Promise.race([
-      Promise.resolve().then(step.run),
+      runPromise,
       new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+        timeoutId = setTimeout(() => {
+          timedOut = true;
+          const timeoutError = new Error(timeoutMessage);
+          controller.abort(timeoutError);
+          reject(timeoutError);
+        }, timeoutMs);
       }),
     ]);
+  } catch (error) {
+    if (timedOut) {
+      const settled = await Promise.race([
+        runPromise.then(
+          () => true,
+          () => true,
+        ),
+        new Promise<false>((resolve) => {
+          setTimeout(() => resolve(false), STEP_ABORT_SETTLE_TIMEOUT_MS);
+        }),
+      ]);
+      if (!settled) {
+        throw new Error(
+          `${timeoutMessage}; step did not settle within ${STEP_ABORT_SETTLE_TIMEOUT_MS}ms after cancellation`,
+          { cause: error },
+        );
+      }
+    }
+    throw error;
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
   }

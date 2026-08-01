@@ -66,7 +66,9 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     每个 step 有局部超时，journey 另有早于 Bun test 和单文件硬超时的总 deadline；总预算耗尽时
     当前 step 会收到具名失败，因此局部超时之和不是文件可用总时长。测试报告中的 pass 数表示独立
     测试边界，不表示 journey 内动作数量。需要独立筛选、重跑或并行的行为必须使用新 fixture 写成
-    独立 test，不能仅为增加报告粒度拆分共享状态。
+    独立 test，不能仅为增加报告粒度拆分共享状态。journey 通过 step-local `AbortSignal` 取消共享
+    wait/delay/PTY exit wait，并在独立的有界 settle window 内等待该 step 收敛；忽略取消的 Promise
+    会得到具名 non-settling failure，不能无限延长 journey deadline。
 14. 测试 permit issuer 位于 `tests/tui-system/fixtures/`，只能由单个 `spawnReadyTui()` 调用显式选择。
     它不是生产授权实现，也不通过可被 workspace `.env` 伪造的环境开关启用；默认拒绝与允许
     外发必须写成不同、隔离的 test 语义。
@@ -92,7 +94,13 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     未被协商的 CSI-u 序列、只检查两段文本仍可见，就声称已经验证软换行。
 19. Mock request 回执只在显式 request baseline 之后匹配最新真实 user turn；Kernel 注入的
     `<runtime-state ...>` 消息不属于用户输入。输入提交的 Enter 重试必须在活动字段离开提交值、
-    新 request 或新 modal 出现时停止，避免同一个重试跨过焦点边界执行下一层操作。
+    新 request 或新 modal 出现时停止，避免同一个重试跨过焦点边界执行下一层操作。普通模型消息
+    必须等待新 request 这一 semantic receipt；输入字段暂时消失或清空不能单独使提交成功，也会
+    永久停止该提交动作的 Enter 重试，后续只能等待 receipt 或失败，不能穿透到新焦点。输入
+    projection 可忽略内部 wrap whitespace，但必须保留 leading whitespace，并在 replacement 重试时
+    确定性删除已尝试字符与 bounded 隐藏空白，避免残留空格改变下一次输入类别。
+20. suite runner 默认在进程隔离和串行顺序不变的前提下运行所有选中 scenario，末尾一次性汇总失败；
+    `KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required 的默认证据模式。
 
 ## 分层选择
 

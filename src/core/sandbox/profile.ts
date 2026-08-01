@@ -75,9 +75,14 @@ function literalFilter(path: string): string {
   return `(literal "${seatbeltString(path)}")`;
 }
 
+/** Escape only the delimiter inside Seatbelt's #"..." regex literal. */
+function seatbeltRegex(regex: string): string {
+  return regex.replaceAll('"', '\\"');
+}
+
 function regexFilterForLiteralPrefix(path: string): string {
   const regex = `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`;
-  return `(regex #"${seatbeltString(regex)}")`;
+  return `(regex #"${seatbeltRegex(regex)}")`;
 }
 
 function caseInsensitiveRegexLiteral(path: string): string {
@@ -93,7 +98,7 @@ function caseInsensitiveRegexLiteral(path: string): string {
 
 function regexFilterForCaseInsensitiveIdentity(path: string, suffix: '' | '(/.*)?' | '.*'): string {
   const regex = `^${caseInsensitiveRegexLiteral(path)}${suffix}$`;
-  return `(regex #"${seatbeltString(regex)}")`;
+  return `(regex #"${seatbeltRegex(regex)}")`;
 }
 
 /** Static process/IPC rules; descendants inherit the same Seatbelt sandbox. */

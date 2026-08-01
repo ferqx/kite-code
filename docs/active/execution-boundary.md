@@ -126,6 +126,9 @@ Seatbelt deny，`checkDangerousPaths()` 只保留为 defense-in-depth。Shell ch
 profile。共享规则除 exact literal/subpath 外，还编译 ASCII 大小写不敏感的 anchored regex；因此
 case-insensitive APFS/HFS+ 上的 `.GIT`、`.Agents`、`.ENV.*` alias，以及 case-sensitive volume
 上按混合大小写实际创建的同名 identity，都会由原生边界拒绝。
+Seatbelt 的 `#"..."` regex literal 直接消费正则反斜杠；profile generator 必须只转义该 literal
+的引号 delimiter，保留 `\.` 等单反斜杠 regex token，不能复用普通 Seatbelt string literal 的
+反斜杠转义。生成器测试同时要求单反斜杠模式存在、双反斜杠模式不存在。
 
 密封配置还会从同一份 protected-path V1 定义编译平台无关 evaluator。每项访问都携带
 canonical target、未 realpath 的 lexical Workspace identity 与 `read`/`write`/`execute` operation；

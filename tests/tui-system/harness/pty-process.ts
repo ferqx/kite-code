@@ -11,6 +11,11 @@
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trustWorkspace } from '@/core/config/workspace-trust';
+import {
+  currentTuiSystemStepSignal,
+  throwIfTuiSystemStepAborted,
+  tuiSystemDelay,
+} from './cancellation';
 import type { MockModelServer } from './fixtures';
 import { activeInput } from './input-helpers';
 import {
@@ -154,7 +159,7 @@ export async function waitForPtyExit(
 ): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!hasExited() && Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    await tuiSystemDelay(pollIntervalMs);
   }
   if (!hasExited()) {
     throw new Error(`PTY child did not exit within ${timeoutMs}ms`);
@@ -167,6 +172,9 @@ export async function waitForPtyExitCode(
   timeoutMs: number,
 ): Promise<number> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const signal = currentTuiSystemStepSignal();
+  let onAbort: (() => void) | undefined;
+  throwIfTuiSystemStepAborted();
   try {
     return await Promise.race([
       exitPromise,
@@ -176,9 +184,23 @@ export async function waitForPtyExitCode(
           timeoutMs,
         );
       }),
+      ...(signal
+        ? [
+            new Promise<never>((_, reject) => {
+              onAbort = () =>
+                reject(
+                  signal.reason instanceof Error
+                    ? signal.reason
+                    : new Error('TUI system step aborted'),
+                );
+              signal.addEventListener('abort', onAbort, { once: true });
+            }),
+          ]
+        : []),
     ]);
   } finally {
     if (timeoutId !== undefined) clearTimeout(timeoutId);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 

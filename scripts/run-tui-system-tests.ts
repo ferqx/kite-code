@@ -137,13 +137,24 @@ async function main(): Promise<void> {
     tuiWaitTimeout(DEFAULT_FILE_TIMEOUT_MS),
   );
   const selection = selectTuiSystemTestFiles(process.argv.slice(2));
+  const failures: Array<{ file: string; exitCode: number }> = [];
+  const failFast = process.env.KITE_TUI_TEST_FAIL_FAST === '1';
 
   for (const file of [...selection.harnessFiles, ...selection.scenarioFiles]) {
     const exitCode = await runFile(file, timeoutMs);
     if (exitCode !== 0) {
       console.error(`[tui-system] failed with exit code ${exitCode}: ${file}`);
-      process.exit(exitCode);
+      failures.push({ file, exitCode });
+      if (failFast) break;
     }
+  }
+
+  if (failures.length > 0) {
+    console.error(`\n[tui-system] ${failures.length} isolated file(s) failed:`);
+    for (const failure of failures) {
+      console.error(`  - exit ${failure.exitCode}: ${failure.file}`);
+    }
+    process.exit(failures[0]!.exitCode);
   }
 
   console.log(

@@ -34,6 +34,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    归一化文本；历史同文消息和 Kernel 注入的 `<runtime-state ...>` user message 都不能充当回执。
    已通过多步动作组成的输入使用 `submitCurrentInput()`；它必须确认活动字段已经离开提交值，并允许
    调用方提供新 modal、request 或终态的语义 receipt，避免 Enter 重试穿透到刚出现的下一层交互。
+   要求语义 receipt 时，只有原字段仍保持原值才允许重试 Enter；字段消失或改变后只能继续等待
+   receipt，超时必须失败，不能向未知的新焦点再次发送控制键。命令需要持久事件等强回执时，
+   `submitCommand()` 必须把该 receipt 传入同一提交状态机。
    需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自
@@ -41,7 +44,10 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    `viewport()`，不得把 raw transcript 中已经被 Ink 擦除的历史帧当作输入成功，也不得以整个
    viewport 的任意文本命中代替活动字段。Harness 必须分别提取主 `❯` 输入、session 搜索、slash/file
    query 和 first-run block-cursor 字段，并对完整归一化字段值做等值验证；长输入同样不能退化为历史
-   文本或尾部探针命中。`typeText()` 默认要求空输入语义：主输入或搜索框若已有残留，先恢复为空再
+   文本或尾部探针命中。内部换行/终端 wrap 可以归一化，但前导空白不能被删除：它会把普通消息改义，
+   也会把 `/command` 变成普通文本。replacement 输入重试必须按已尝试字符确定性回滚到空基线，并
+   额外清除 VT 投影可能裁掉的 bounded whitespace；不能仅因输入投影看起来为空就停止回滚。
+   `typeText()` 默认要求空输入语义：主输入或搜索框若已有残留，先恢复为空再
    输入；确实追加到合法非空输入时必须显式传入 `append: true`，例如 Shift+Enter 多行输入。追加重试
    必须逐字符恢复动作前基线，不能按尝试长度过度删除已有内容。输入期间发生 modal focus transfer 时，
    只允许由已识别的新活动字段完成回执；列表项或 ghost suggestion 不能充当输入值。first-run 表单
@@ -91,7 +97,11 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    使慢场景仍由 harness 报告当前 step，而不是先收到匿名外层超时。setup/readiness 不得伪装成
    可独立通过的测试用例。验证同一设置的双向转换时，如果反向转换不依赖正向转换的业务结果，
    应为两个方向分别建立明确的初始配置与独立 fixture；不得让反向断言依赖前序 suggestion、
-   action delta 或重绘历史。
+   action delta 或重绘历史。step timeout 必须中止共享条件等待，并在独立的有界 settle window 内
+   等待当前 step 收敛后才进入 fixture teardown；所有 journey 可达的 delay、screen polling 和
+   PTY exit wait 都必须消费 step-local `AbortSignal`。忽略取消的自定义 Promise 不能无限突破
+   journey deadline，必须以具名的 non-settling failure 返回；禁止超时 Promise 在后台继续访问
+   已关闭的 PTY、server 或 workspace。
 5. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
    同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生
@@ -113,7 +123,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    Harness 单元测试由默认 `bun run test` 或显式 `bun run test:tui:harness` 执行；
    `scripts/run-tui-system-tests.ts` 只按 scenario 文件逐个启动独立 `bun test` 进程。
    runner 的显式 scenario 参数按完整文件名匹配；未知名称和重复名称必须在启动前失败并列出
-   可用文件，不能静默少跑。每个文件都输出独立耗时，便于定位预算异常。
+   可用文件，不能静默少跑。默认运行会串行完成全部隔离文件并在末尾汇总所有失败，避免首错遮住
+   后续不稳定场景；本地只需快速复现首错时可显式设置 `KITE_TUI_TEST_FAIL_FAST=1`。每个文件都输出
+   独立耗时，便于定位预算异常。
    唯一例外是 fault-soak 通过 `--with-lifecycle-harness` 显式追加
    `tui-lifecycle-resource.test.ts`；该参数不会发现或运行其他 harness 文件，普通
    `test:tui:system` 也不得隐式包含 harness。这样 terminal taxonomy 的 PTY 场景与

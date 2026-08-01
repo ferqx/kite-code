@@ -10,6 +10,7 @@
  */
 
 import { Terminal } from '@xterm/headless';
+import { tuiSystemDelay } from './cancellation';
 import { tuiPollInterval, tuiWaitTimeout } from './timing';
 
 export interface HeadlessTerminalScreen {
@@ -241,7 +242,7 @@ export async function waitForText(
   while (Date.now() - start < effectiveTimeout) {
     const output = getOutput();
     if (screenContains(output, text)) return output;
-    await new Promise((r) => setTimeout(r, effectiveInterval));
+    await tuiSystemDelay(effectiveInterval);
   }
   const last = stripAnsi(getOutput());
   throw new Error(
@@ -263,7 +264,7 @@ export async function waitForAnyText(
   while (Date.now() - start < effectiveTimeout) {
     const output = getOutput();
     if (texts.some((text) => screenContains(output, text))) return output;
-    await new Promise((resolve) => setTimeout(resolve, effectiveInterval));
+    await tuiSystemDelay(effectiveInterval);
   }
   const last = stripAnsi(getOutput());
   throw new Error(
@@ -284,7 +285,7 @@ export async function waitForTextGone(
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     if (!screenContains(getOutput(), text)) return;
-    await new Promise((r) => setTimeout(r, effectiveInterval));
+    await tuiSystemDelay(effectiveInterval);
   }
   throw new Error(`Timeout (${effectiveTimeout}ms) waiting for "${text}" to disappear`);
 }
@@ -301,7 +302,7 @@ export async function waitForCondition(
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     if (condition()) return;
-    await new Promise((resolve) => setTimeout(resolve, effectiveInterval));
+    await tuiSystemDelay(effectiveInterval);
   }
   throw new Error(`Timeout (${effectiveTimeout}ms) waiting for ${description}`);
 }
@@ -319,7 +320,7 @@ export async function expectTextAbsentFor(
     if (screenContains(getOutput(), text)) {
       throw new Error(`Expected "${text}" to remain absent for ${duration}ms`);
     }
-    await new Promise((resolve) => setTimeout(resolve, effectiveInterval));
+    await tuiSystemDelay(effectiveInterval);
   }
 }
 
@@ -342,7 +343,7 @@ export async function waitForOutputQuiescence(
   let sawOutput = lastOutput.length > 0;
 
   while (Date.now() - startedAt < effectiveTimeout) {
-    await new Promise((resolve) => setTimeout(resolve, effectiveInterval));
+    await tuiSystemDelay(effectiveInterval);
     const output = getOutput();
     if (output !== lastOutput) {
       lastOutput = output;

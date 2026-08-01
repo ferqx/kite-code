@@ -96,6 +96,9 @@ describe('sandbox profile generation', () => {
     const profile = generateSandboxProfile(workspace);
     expect(profile).toContain(`(subpath "${join(canonicalWorkspace, '.git')}")`);
     expect(profile).toContain(`(literal "${join(canonicalWorkspace, '.env')}")`);
+    expect(profile).toContain(`(regex #"^${join(canonicalWorkspace, '\\.env\\.')}.*$")`);
+    expect(profile).toContain('/\\.[eE][nN][vV]\\..*$")');
+    expect(profile).not.toContain('\\\\.[eE][nN][vV]');
     expect(profile).toContain('(deny file-read* file-map-executable file-write*');
   });
 

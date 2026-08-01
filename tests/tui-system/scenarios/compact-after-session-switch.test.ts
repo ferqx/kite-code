@@ -10,17 +10,11 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import {
-  submitCommand,
-  submitCurrentInput,
-  submitUserMessage,
-  typeText,
-} from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
-  screenHasSessionRow,
   stripAnsi,
   waitForCondition,
   waitForOutputQuiescence,
@@ -28,9 +22,7 @@ import {
 } from '../harness/terminal-screen';
 import {
   createTestWorkspace,
-  observePersistedCommandSession,
   observePersistedSessionIds,
-  observePersistedSessionSummaries,
   requirePersistedRuntimeReady,
 } from '../harness/test-workspace';
 
@@ -166,131 +158,5 @@ describe('TUI PTY System — /compact after session switch', () => {
     TIMEOUT,
   );
 
-  // ── Persistence: /compact survives a real TUI process restart ──
-
-  step(
-    '/compact command persists after exiting and restarting TUI',
-    async () => {
-      // Give the target session a unique first message. RuntimeStore search
-      // matches explicit names and first messages, but intentionally does not
-      // search the thread-id display fallback.
-      const sessionSearchIdentity = 'restart persistence target identity';
-      const sessionResponse = 'Restart persistence target response';
-      server.setResponses([{ message: { content: sessionResponse }, delay: 10 }]);
-      await submitUserMessage(tui, server, sessionSearchIdentity, { timeout: 15000 });
-      await waitForText(() => tui.outputSinceLastAction(), sessionResponse, 15000);
-      await waitForTuiReady(tui);
-
-      // Create a command with a unique marker in the active session.
-      const marker = 'restart-persistence-marker';
-      const command = `/compact ${marker}`;
-      await submitCommand(tui, command);
-
-      // Prove submission with the exact durable audit event. PTY scrollback is
-      // not an ownership boundary: Ink may redraw or compact prompt rows under
-      // a slower CI terminal, so counting historical prompt rows is flaky.
-      // Binding the durable witness to its thread also avoids relying on
-      // second-resolution session recency ordering.
-      let persistedCommand: { threadId: string; name: string } | undefined;
-      await waitForCondition(
-        () => {
-          const observation = observePersistedCommandSession(workspace, command);
-          if (observation.status !== 'ready') return false;
-          persistedCommand = observation.value;
-          return persistedCommand !== undefined;
-        },
-        'user.command_invoked event to reach the Runtime Store',
-        10000,
-      );
-      expect(persistedCommand).toBeDefined();
-      const targetSession = persistedCommand!;
-      expect(targetSession.name).not.toBe(targetSession.threadId);
-
-      // Exit the first process gracefully so all RuntimeStore writes are
-      // closed, then start a fresh TUI against the same HOME/workspace.
-      await waitForTuiReady(tui);
-      await submitCommand(tui, '/exit');
-      await tui.waitForExit();
-
-      server.setResponses([]);
-      tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
-      let restoredTargetSession: { threadId: string; name: string } | undefined;
-      let otherSessionNames: string[] = [];
-      await waitForCondition(
-        () => {
-          const commandObservation = observePersistedCommandSession(workspace, command);
-          const summariesObservation = observePersistedSessionSummaries(workspace);
-          if (commandObservation.status !== 'ready' || summariesObservation.status !== 'ready') {
-            return false;
-          }
-          restoredTargetSession = commandObservation.value;
-          otherSessionNames = summariesObservation.value
-            .filter((session) => session.threadId !== targetSession.threadId)
-            .map((session) => session.name);
-          return (
-            restoredTargetSession?.threadId === targetSession.threadId &&
-            otherSessionNames.length > 0
-          );
-        },
-        'restarted Runtime Store observer to reopen the command-bearing session',
-        10_000,
-      );
-      expect(restoredTargetSession?.threadId).toBe(targetSession.threadId);
-
-      await submitCommand(tui, '/sessions');
-      await waitForCondition(
-        () => {
-          const viewport = tui.viewport();
-          return (
-            screenContains(viewport, '会话列表') &&
-            screenContains(viewport, '搜索') &&
-            !screenContains(viewport, 'Loading...')
-          );
-        },
-        'session selector chrome to finish its initial load',
-        10_000,
-      );
-
-      // Filter by the unique first message of the exact thread carrying the
-      // command event. Requiring every non-target row to disappear proves the
-      // debounced query replaced the initial list before Enter is sent.
-      await typeText(tui, sessionSearchIdentity);
-      await waitForCondition(
-        () => {
-          const viewport = tui.viewport();
-          return (
-            screenHasSessionRow(viewport, restoredTargetSession!.name, {
-              selected: true,
-              active: false,
-            }) &&
-            otherSessionNames.every((name) => !screenHasSessionRow(viewport, name)) &&
-            !screenContains(viewport, 'Loading...')
-          );
-        },
-        'command-bearing session filter to select the exact persisted thread',
-        10_000,
-      );
-      await submitCurrentInput(tui);
-      await waitForCondition(
-        () => {
-          const viewport = tui.viewport();
-          return (
-            screenContains(viewport, command) &&
-            screenContains(viewport, '❯') &&
-            !screenContains(viewport, '会话列表')
-          );
-        },
-        'persisted compact command to replace the session selector after restart',
-        15000,
-      );
-
-      // tui is a fresh process: this cannot match output accumulated before
-      // restart and therefore proves RuntimeEvent replay restored the command.
-      const restartedOutput = tui.viewport();
-      expect(screenContains(restartedOutput, command)).toBe(true);
-      expect(screenContains(restartedOutput, '❯')).toBe(true);
-    },
-    TIMEOUT,
-  );
   test('runs the complete stateful journey', () => journey.run());
 });

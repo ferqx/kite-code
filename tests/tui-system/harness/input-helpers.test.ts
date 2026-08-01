@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { MockModelServer } from './fixtures';
 import {
+  activeInput,
   clearInput,
   submitCommand,
   submitCurrentInput,
@@ -9,6 +10,7 @@ import {
   waitForRequestMessage,
 } from './input-helpers';
 import type { PtyProcess } from './pty-process';
+import { createHeadlessTerminalScreen } from './terminal-screen';
 
 const FAST_RETRY = {
   delayMs: 0,
@@ -88,7 +90,7 @@ describe('TUI input helpers', () => {
     expect(rendered).toContain('\r\n');
   });
 
-  test('typeText resets the input before retrying after an unrelated redraw', async () => {
+  test('typeText resets an empty replacement transaction after an unrelated redraw', async () => {
     let transcript = '';
     let currentInput = '';
     let attempt = 0;
@@ -115,7 +117,7 @@ describe('TUI input helpers', () => {
     await typeText(tui, 'hello', FAST_RETRY);
 
     expect(attempt).toBe(2);
-    expect(deletes).toBe(0);
+    expect(deletes).toBeGreaterThan(0);
     expect(currentInput).toBe('hello');
   }, 10_000);
 
@@ -163,6 +165,61 @@ describe('TUI input helpers', () => {
     await typeText(tui, '/mcp', 0);
 
     expect(currentInput).toBe('/mcp');
+  });
+
+  test('typeText clears leading whitespace that would change the submitted input kind', async () => {
+    let currentInput = ' ';
+    let transcript = '';
+    const tui = fakePty(
+      (data) => {
+        transcript += data;
+        currentInput = data === '\x7f' ? currentInput.slice(0, -1) : currentInput + data;
+      },
+      () => transcript,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await typeText(tui, '/compact marker', 0);
+
+    expect(currentInput).toBe('/compact marker');
+  });
+
+  test('typeText retry removes whitespace left behind by a partial delivery', async () => {
+    let currentInput = '';
+    let transcript = '';
+    let attempts = 0;
+    const tui = fakePty(
+      (data) => {
+        transcript += data;
+        if (data === '\x7f') {
+          currentInput = currentInput.slice(0, -1);
+          return;
+        }
+        if (data === 'A') attempts++;
+        if (attempts === 1 && data !== ' ') return;
+        currentInput += data;
+      },
+      () => transcript,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await typeText(tui, 'Ask me', FAST_RETRY);
+
+    expect(attempts).toBe(2);
+    expect(currentInput).toBe('Ask me');
+  });
+
+  test('headless terminal input projection preserves a leading logical blank', async () => {
+    const screen = createHeadlessTerminalScreen(40, 3);
+    try {
+      await screen.append(new TextEncoder().encode('❯  '));
+      expect(activeInput(screen.viewport())?.value).toBe(' ');
+
+      await screen.append(new TextEncoder().encode('x'));
+      expect(activeInput(screen.viewport())?.value).toBe(' x');
+    } finally {
+      screen.dispose();
+    }
   });
 
   test('typeText restores a non-empty append baseline after partial delivery', async () => {
@@ -409,6 +466,66 @@ describe('TUI input helpers', () => {
 
     expect(enterAttempts).toBe(1);
     expect(modalVisible).toBe(true);
+  });
+
+  test('submitCurrentInput waits without another Enter after the field clears', async () => {
+    let currentInput = 'submitted message';
+    let accepted = false;
+    let enterAttempts = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data !== '\r') return;
+        enterAttempts++;
+        currentInput = '';
+        setTimeout(() => {
+          accepted = true;
+        }, 5);
+      },
+      () => currentInput,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await submitCurrentInput(tui, {
+      submitReceiptTimeoutMs: 20,
+      acceptWhen: () => accepted,
+      requireAcceptWhen: true,
+    });
+
+    expect(enterAttempts).toBe(1);
+  });
+
+  test('submitCurrentInput fails safely when a changed field gets no semantic receipt', async () => {
+    let currentInput = 'submitted message';
+    let enterAttempts = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data !== '\r') return;
+        enterAttempts++;
+        currentInput = '';
+      },
+      () => currentInput,
+    );
+    tui.viewport = () => `❯ ${currentInput}\n▶ 1. New modal action`;
+
+    await expect(
+      submitCurrentInput(tui, {
+        submitReceiptTimeoutMs: 20,
+        acceptWhen: () => false,
+        requireAcceptWhen: true,
+      }),
+    ).rejects.toThrow('required semantic receipt did not arrive');
+
+    expect(enterAttempts).toBe(1);
+  });
+
+  test('submitCurrentInput rejects a required receipt without a predicate', async () => {
+    const tui = fakePty(
+      () => {},
+      () => 'message',
+    );
+    await expect(submitCurrentInput(tui, { requireAcceptWhen: true })).rejects.toThrow(
+      'requires acceptWhen',
+    );
   });
 
   test('submitCommand waits for the slash suggestion frame before pressing Enter', async () => {

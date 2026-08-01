@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { runWithTuiSystemStepSignal } from './cancellation';
 import {
   createPtyOutputBuffer,
   resolveTuiLaunchPaths,
@@ -42,6 +43,16 @@ describe('waitForPtyExitCode', () => {
     await expect(waitForPtyExitCode(neverExits, 10)).rejects.toThrow(
       'PTY child did not exit within 10ms',
     );
+  });
+
+  test('rejects immediately when the active journey step is cancelled', async () => {
+    const controller = new AbortController();
+    const wait = runWithTuiSystemStepSignal(controller.signal, () =>
+      waitForPtyExitCode(new Promise<number>(() => {}), 10_000),
+    );
+    controller.abort(new Error('step deadline reached'));
+
+    await expect(wait).rejects.toThrow('step deadline reached');
   });
 });
 

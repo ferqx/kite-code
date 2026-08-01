@@ -1,10 +1,11 @@
+import { tuiSystemDelay } from './cancellation';
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
 import { stripAnsi, waitForOutputQuiescence } from './terminal-screen';
 import { tuiPollInterval, tuiWaitTimeout } from './timing';
 
 export async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
+  await tuiSystemDelay(ms);
 }
 
 const INPUT_SETTLE_MS = 100;
@@ -12,6 +13,7 @@ const INPUT_ECHO_TIMEOUT_MS = 2_000;
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
+const INPUT_RETRY_EMPTY_BASELINE_MARGIN = 8;
 const INPUT_SUBMIT_ATTEMPTS = 3;
 const INPUT_SUBMIT_RECEIPT_TIMEOUT_MS = 1_500;
 const SELECTOR_COMMAND_PREFIX = /^\/(?:model|effort|theme|permissions)\s$/;
@@ -31,7 +33,13 @@ interface TypeTextOptions {
 }
 
 function normalizeInputEcho(text: string): string {
-  return stripAnsi(text).replace(/\s+/g, '');
+  const clean = stripAnsi(text);
+  const leadingWhitespace = clean.match(/^[ \t]+/)?.[0] ?? '';
+  // Terminal wrapping and selector chrome can change whitespace inside an
+  // input's rendered projection. Keep ignoring that presentation-only
+  // whitespace, but never erase a leading blank: a retry that leaves one
+  // behind changes a user message and turns `/command` into plain text.
+  return leadingWhitespace + clean.slice(leadingWhitespace.length).replace(/\s+/g, '');
 }
 
 export type ActiveInput = {
@@ -267,10 +275,27 @@ export async function typeText(
     } catch (error) {
       lastError = error;
       if (attempt === attempts) break;
-      // Restore the exact pre-action baseline one visible character at a time.
-      // This clears arbitrary partial delivery without deleting legitimate
-      // content that an explicit append action intends to preserve.
-      initial = await clearActiveInputTo(tui, baselineValue, initial.kind, options.testTiming);
+      if (!options.append && baselineValue.length === 0) {
+        // The VT projection trims a whitespace-only input line. Rolling back
+        // only until activeInput() looks empty can therefore leave invisible
+        // spaces behind, changing the next user message or `/command`. A
+        // replacement transaction owns an empty baseline, so it is safe to
+        // delete every attempted character plus a bounded stale-whitespace
+        // margin even when some bytes were never delivered.
+        await clearInput(tui, characters.length + INPUT_RETRY_EMPTY_BASELINE_MARGIN, {
+          requireReceipt: false,
+          delayMs: options.testTiming?.retryBackspaceDelayMs,
+        });
+        await tui.settleScreen();
+        initial = activeInput(tui.viewport()) ?? initial;
+        if (initial.value.length > 0) {
+          initial = await clearActiveInputTo(tui, '', initial.kind, options.testTiming);
+        }
+      } else {
+        // Append transactions must preserve their legitimate non-empty
+        // baseline, so only remove the visible attempted suffix.
+        initial = await clearActiveInputTo(tui, baselineValue, initial.kind, options.testTiming);
+      }
       await sleep(options.testTiming?.settleMs ?? INPUT_SETTLE_MS);
     }
   }
@@ -293,14 +318,14 @@ export async function typeMaskedText(tui: PtyProcess, text: string, delayMs = 40
 export async function clearInput(
   tui: PtyProcess,
   length: number,
-  options: { backspace?: 'delete' | 'ascii'; requireReceipt?: boolean } = {},
+  options: { backspace?: 'delete' | 'ascii'; requireReceipt?: boolean; delayMs?: number } = {},
 ): Promise<void> {
   if (length <= 0) return;
   const outputMark = tui.markOutput();
   const backspace = options.backspace === 'ascii' ? '\x08' : '\x7f';
   for (let i = 0; i < length; i++) {
     tui.write(backspace);
-    await sleep(50);
+    await sleep(options.delayMs ?? 50);
   }
   await waitForOutputQuiescence(
     () => tui.outputSince(outputMark),
@@ -368,6 +393,7 @@ export async function submitUserMessage(
   await submitCurrentInput(tui, {
     ...options?.testTiming,
     acceptWhen: () => server.getRequestCount() > since,
+    requireAcceptWhen: true,
   });
   await waitForRequestMessage(server, options?.requestText ?? text, options?.timeout, {
     since,
@@ -386,8 +412,12 @@ export async function submitCurrentInput(
   options?: {
     submitReceiptTimeoutMs?: number;
     acceptWhen?: (viewport: string) => boolean;
+    requireAcceptWhen?: boolean;
   },
 ): Promise<void> {
+  if (options?.requireAcceptWhen && !options.acceptWhen) {
+    throw new Error('submitCurrentInput requires acceptWhen when requireAcceptWhen is true');
+  }
   await tui.settleScreen();
   const submitted = activeInput(tui.viewport());
   if (!submitted || submitted.value.length === 0) {
@@ -396,15 +426,20 @@ export async function submitCurrentInput(
 
   for (let attempt = 1; attempt <= INPUT_SUBMIT_ATTEMPTS; attempt++) {
     tui.write('\r');
-    if (
-      await waitForInputSubmissionReceipt(
-        tui,
-        submitted,
-        options?.submitReceiptTimeoutMs ?? INPUT_SUBMIT_RECEIPT_TIMEOUT_MS,
-        options?.acceptWhen,
-      )
-    ) {
-      return;
+    const timeoutMs = options?.submitReceiptTimeoutMs ?? INPUT_SUBMIT_RECEIPT_TIMEOUT_MS;
+    const receipt = await waitForInputSubmissionReceipt(
+      tui,
+      submitted,
+      timeoutMs,
+      options?.acceptWhen,
+    );
+    if (receipt === 'accepted') return;
+    if (receipt === 'advanced') {
+      if (!options?.requireAcceptWhen) return;
+      if (await waitForSemanticSubmissionReceipt(tui, timeoutMs, options.acceptWhen!)) return;
+      throw new Error(
+        `PTY input left ${JSON.stringify(submitted.value)} but its required semantic receipt did not arrive`,
+      );
     }
   }
   throw new Error(
@@ -416,7 +451,11 @@ export async function submitCommand(
   tui: PtyProcess,
   command: string,
   delayMs?: number,
-  testTiming?: { submitReceiptTimeoutMs?: number },
+  testTiming?: {
+    submitReceiptTimeoutMs?: number;
+    acceptWhen?: (viewport: string) => boolean;
+    requireAcceptWhen?: boolean;
+  },
 ): Promise<void> {
   await typeText(tui, command, delayMs);
   const expectedKind: ActiveInput['kind'] | undefined =
@@ -445,17 +484,33 @@ async function waitForInputSubmissionReceipt(
   submitted: ActiveInput,
   timeoutMs: number,
   acceptWhen?: (viewport: string) => boolean,
+): Promise<'accepted' | 'advanced' | 'unchanged'> {
+  const effectiveTimeout = tuiWaitTimeout(timeoutMs);
+  const start = Date.now();
+  while (Date.now() - start < effectiveTimeout) {
+    await tui.settleScreen();
+    if (tui.exited) return 'accepted';
+    const viewport = tui.viewport();
+    if (acceptWhen?.(viewport)) return 'accepted';
+    const current = activeInput(viewport);
+    if (current?.kind !== submitted.kind || current.value !== submitted.value) return 'advanced';
+    await sleep(tuiPollInterval(25));
+  }
+  return 'unchanged';
+}
+
+async function waitForSemanticSubmissionReceipt(
+  tui: PtyProcess,
+  timeoutMs: number,
+  acceptWhen: (viewport: string) => boolean,
 ): Promise<boolean> {
   const effectiveTimeout = tuiWaitTimeout(timeoutMs);
   const start = Date.now();
   while (Date.now() - start < effectiveTimeout) {
     await tui.settleScreen();
-    if (tui.exited) return true;
-    const viewport = tui.viewport();
-    if (acceptWhen?.(viewport)) return true;
-    const current = activeInput(viewport);
-    if (current?.kind !== submitted.kind || current.value !== submitted.value) return true;
+    if (tui.exited || acceptWhen(tui.viewport())) return true;
     await sleep(tuiPollInterval(25));
   }
-  return false;
+  await tui.settleScreen();
+  return tui.exited || acceptWhen(tui.viewport());
 }
