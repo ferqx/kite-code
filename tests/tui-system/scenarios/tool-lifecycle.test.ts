@@ -19,7 +19,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import {
+  submitCommand,
+  submitUserMessage,
+  typeText,
+  waitForRequestMessage,
+} from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   assertOrder,
@@ -155,7 +160,12 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
           ],
         },
       },
-      { message: { content: 'Draft saved! Ready for review.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_write', contentIncludes: ['draft_saved'] }],
+        },
+        message: { content: 'Draft saved! Ready for review.' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -169,8 +179,10 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
     'write_plan renders plan content in planning phase',
     async () => {
       // Enter planning phase
-      await submitCommand(tui, '/plan Draft a lifecycle plan');
-      await waitForRequestMessage(server, 'Draft a lifecycle plan', 15000);
+      await submitCommand(tui, '/plan');
+      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 15000);
+      await waitForTuiReady(tui);
+      await submitUserMessage(tui, server, 'Draft a lifecycle plan', { timeout: 15000 });
 
       // Wait for follow-up text
       await waitForText(() => tui.outputSinceLastAction(), 'Draft saved', 15000);

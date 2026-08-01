@@ -16,7 +16,12 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import {
+  submitCommand,
+  submitUserMessage,
+  typeText,
+  waitForRequestMessage,
+} from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
@@ -60,7 +65,12 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
           ],
         },
       },
-      { message: { content: 'Plan draft saved. Ready for review when you are.' } },
+      {
+        expectedRequest: {
+          toolResults: [{ toolCallId: 'call_write_1', contentIncludes: ['draft_saved'] }],
+        },
+        message: { content: 'Plan draft saved. Ready for review when you are.' },
+      },
       { message: { content: 'No plan tool requested in building phase.' } },
     ]);
 
@@ -76,9 +86,11 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
   step(
     'write_plan renders plan content in planning phase',
     async () => {
-      // Enter planning phase via /plan command
-      await submitCommand(tui, '/plan Draft a plan for testing');
-      await waitForRequestMessage(server, 'Draft a plan for testing', 15000);
+      // Complete the local mode transition before sending the model task.
+      await submitCommand(tui, '/plan');
+      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 15000);
+      await waitForTuiReady(tui);
+      await submitUserMessage(tui, server, 'Draft a plan for testing', { timeout: 15000 });
 
       // Wait for the plan draft follow-up text
       await waitForText(() => tui.outputSinceLastAction(), 'Plan draft saved', 15000);

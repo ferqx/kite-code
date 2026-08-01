@@ -193,6 +193,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 25. 最终回答文本可见不等于上一轮已回到稳定 idle。跨轮发送新消息、slash command 或 `/exit` 前，
     场景必须等待完整 main readiness（空输入、无 loading/modal 且输出稳定）；不得把回答尾部文本
     当作下一次键盘输入已可接受的信号。
+26. 同时包含本地模式切换和模型任务的复合 slash 输入不得作为 PTY 场景的同步捷径。规划场景应先
+    提交 `/plan`，等待规划提示和 main readiness，再以普通用户消息提交任务；这样分别证明模式切换
+    与模型请求，避免 slash ref commit 和 Enter 竞争。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 
