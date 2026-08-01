@@ -12,7 +12,7 @@
     "test:mcp:live": "KITE_RUN_LIVE_MCP_SMOKE=1 bun run tests/e2e/live/mcp/langchain-docs.live.ts",
     "test:model:live": "bun run tests/e2e/live/model/context-compaction.live.ts",
     "test:e2e": "bun test --parallel=1 --max-concurrency=1 tests/e2e/local/",
-    "test:runtime:fault": "bun test tests/runtime/fault-injection.test.ts tests/runtime/fault-soak-report.test.ts tests/runtime/fault-soak-runner.test.ts",
+    "test:runtime:fault": "bun test tests/runtime/fault-injection.test.ts tests/runtime/fault-soak-report.test.ts tests/runtime/fault-soak-runner.test.ts tests/runtime/fault-soak-qualification-verifier.test.ts",
     "test:runtime:soak": "bun run scripts/runtime/run-fault-soak.ts --profile=ci",
     "test:sandbox:smoke:native": "bun test --parallel=1 --max-concurrency=1 tests/sandbox-executor.test.ts tests/sandbox-bwrap-executor.test.ts",
     "test:tui:harness": "bun test --parallel=1 --max-concurrency=1 tests/tui-system/harness/",

@@ -79,6 +79,7 @@ test('fault soak publishes the actual reconciled Runtime budget ledger', async (
           kind: 'runtime_budget_usage',
           pid: process.pid,
           sequence,
+          iteration: Number(process.env.KITE_FAULT_SOAK_ITERATION ?? '0'),
           caseId: process.env.KITE_FAULT_SOAK_CASE_ID ?? 'long_runtime_replay',
           lifecycleId:
             process.env.KITE_FAULT_SOAK_LIFECYCLE_ID ?? 'fault-soak-runtime-budget.test.ts',

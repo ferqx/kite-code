@@ -4,6 +4,7 @@ import {
   hasSustainedPositiveSlope,
   nearestRankPercentile,
   RUNTIME_FAULT_SOAK_CASE_IDS,
+  RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS,
   RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS,
   type RuntimeFaultSoakAttemptV2,
   type RuntimeFaultSoakMetricEvidenceV2,
@@ -74,17 +75,45 @@ function lifecycleMetric(
     supported: true,
     value: {
       kind: 'same_process_lifecycle',
-      series: [
-        {
+      series: RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS[attempt.caseId].map(
+        (lifecycleId, groupIndex) => ({
           process: {
-            pid: 1000 + attempt.iteration,
-            startNonce: `${attempt.caseId}-${attempt.iteration}`,
+            pid: 1000 + attempt.iteration * 10 + groupIndex,
+            startNonce: `${attempt.caseId}-${attempt.iteration}-${groupIndex}`,
+            osProcessStartIdentity: `linux:boot:${attempt.iteration}:${groupIndex}`,
+            lifecycleId,
+            lifecycleGroupNonce: `group-${attempt.iteration}-${groupIndex}`,
           },
           warmup: point(0, { before: 1, after: 1 }),
           lifecycles: values.map((value, index) => point(index + 1, value)),
-        },
-      ],
+        }),
+      ),
     },
+  };
+}
+
+function qualificationBudget(
+  attempt: RuntimeFaultSoakAttemptV2,
+): RuntimeFaultSoakAttemptV2['runtimeBudgetUsage'] {
+  if (attempt.caseId !== 'long_runtime_replay' || !attempt.runtimeBudgetUsage.supported) {
+    return attempt.runtimeBudgetUsage;
+  }
+  const receipt = attempt.runtimeBudgetUsage.value[0]!;
+  return {
+    supported: true,
+    value: Array.from({ length: 9 }, (_, index) => ({
+      ...receipt,
+      provenance: {
+        caseId: attempt.caseId,
+        iteration: attempt.iteration,
+        lifecycleId: 'fault-soak-runtime-budget.test.ts',
+        pid: 1000 + attempt.iteration * 10 + 1,
+        sequence: index + 1,
+        processStartNonce: `${attempt.caseId}-${attempt.iteration}-1`,
+        osProcessStartIdentity: `linux:boot:${attempt.iteration}:1`,
+        lifecycleGroupNonce: `group-${attempt.iteration}-1`,
+      },
+    })),
   };
 }
 
@@ -133,6 +162,7 @@ describe('runtime fault soak report', () => {
       expect.arrayContaining([
         'qualification_iterations_insufficient',
         'qualification_metrics_unsupported',
+        'qualification_source_identity_missing',
       ]),
     );
   });
@@ -193,6 +223,7 @@ describe('runtime fault soak report', () => {
   test('fails qualification on a sustained supported resource increase', () => {
     const values = attempts(8).map((attempt) => ({
       ...attempt,
+      runtimeBudgetUsage: qualificationBudget(attempt),
       cleanup: {
         ...attempt.cleanup,
         orphanPids: { supported: true as const, value: [] },
@@ -221,6 +252,7 @@ describe('runtime fault soak report', () => {
   test('fails qualification on a large within-attempt increase even without a cross-run slope', () => {
     const values = attempts(8).map((attempt) => ({
       ...attempt,
+      runtimeBudgetUsage: qualificationBudget(attempt),
       terminalTaxonomyAssertions: Object.fromEntries(
         Object.keys(attempt.terminalTaxonomyAssertions).map((reason) => [reason, 1]),
       ),

@@ -412,7 +412,24 @@ workspace trust 使用可观察的 Up/Down 输入握手并及时
 - budget usage；
 - terminal taxonomy；
 - orphan process/worktree；
-- state invariant。
+- state invariant；
+- 绑定 repository/head SHA/ref/`workflow_ref`/`workflow_sha`/run ID/run attempt 的 canonical digest；
+- retained attempt/resource evidence 与 Runtime ledger receipt provenance；
+- 独立 verifier 对固定 7 case、56 次 probe、清理、资源与 ledger receipt 摘要的重建。
+
+2026-08-01 的 pre-qualification 加固已把手动 workflow 输入限制为固定 `seed=1729`、
+`iterations=8`，改为通过带引号的环境变量传给 runner，并把 job timeout 提高到覆盖 168 分钟
+runner 全局 deadline 的 190 分钟。runner 从每个 child timeout 中预留清理/reap/drain 时间，
+全局预算不足时生成 typed failure 而不再启动 child；qualification 缺少完整 GitHub Actions
+source identity 时 fail closed 为 `inconclusive`。报告保留逐 attempt 证据与 ledger provenance，
+workflow 在上传前以 GitHub `workflow_ref`/`workflow_sha` 绑定 verifier 并重建摘要。该实现与本地/Required CI
+通过仍不完成本 Task：workflow 必须先存在于默认分支，再取得 Ubuntu 正式 run 和通过 verifier
+的 artifact。
+
+独立 adversarial review 进一步要求 case iteration 精确覆盖 `1..8`，warm-up point 满足
+`sequence=0`、有限数值、非负 duration 和正 deadline，并把跨 metric/receipt 的 process provenance
+改为无字段边界碰撞的结构化 tuple。对应重新计算 digest 的 delimiter collision、非法 warm-up 和
+越界 iteration 反例已固化为 verifier 回归测试。
 
 ### Task 1C.8：active 文档和迁移
 

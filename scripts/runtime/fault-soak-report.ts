@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 export const RUNTIME_FAULT_SOAK_REPORT_VERSION = 2 as const;
+export const RUNTIME_FAULT_SOAK_RUNNER_REVISION = 'runtime-fault-soak-v2' as const;
 export const MINIMUM_QUALIFICATION_ITERATIONS = 8;
 export const MINIMUM_POST_WARMUP_LIFECYCLES = 8;
 export const RUNTIME_FAULT_SOAK_GROWTH_LIMITS = Object.freeze({
@@ -21,9 +22,37 @@ export const RUNTIME_FAULT_SOAK_CASE_IDS = [
   'tui_lifecycle_churn',
 ] as const;
 
+export const RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS: Readonly<
+  Record<RuntimeFaultSoakCaseId, readonly string[]>
+> = Object.freeze({
+  long_runtime_replay: ['stability.test.ts', 'fault-soak-runtime-budget.test.ts'],
+  subagent_cancel_recovery: ['cancel-resume.test.ts'],
+  model_transient_stream: ['agent-deadline.test.ts'],
+  mcp_churn: ['mcp-supervisor.test.ts'],
+  runtime_sigkill_recovery: ['fault-injection.test.ts'],
+  storage_and_logger_faults: ['fault-injection.test.ts'],
+  tui_lifecycle_churn: ['tui-input-focus-lifecycle'],
+});
+
 export type RuntimeFaultSoakCaseId = (typeof RUNTIME_FAULT_SOAK_CASE_IDS)[number];
 export type RuntimeFaultSoakProfile = 'ci' | 'qualification';
 export type RuntimeFaultSoakStatus = 'passed' | 'failed' | 'inconclusive';
+
+export type RuntimeFaultSoakSourceV2 =
+  | {
+      kind: 'local';
+    }
+  | {
+      kind: 'github_actions';
+      repository: string;
+      headSha: string;
+      ref: string;
+      workflow: string;
+      workflowRef: string;
+      workflowSha: string;
+      runId: string;
+      runAttempt: number;
+    };
 
 export const RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS: Readonly<
   Record<RuntimeFaultSoakCaseId, readonly string[]>
@@ -70,6 +99,9 @@ export type RuntimeFaultSoakMetricEvidenceV2 =
         process: {
           pid: number;
           startNonce: string;
+          osProcessStartIdentity: string;
+          lifecycleId: string;
+          lifecycleGroupNonce: string;
         };
         warmup: RuntimeFaultSoakLifecyclePointV2;
         lifecycles: readonly RuntimeFaultSoakLifecyclePointV2[];
@@ -94,6 +126,16 @@ export type RuntimeFaultSoakMetricSummary =
 
 export interface RuntimeBudgetUsageEvidenceV2 {
   source: 'actual_runtime_ledger';
+  provenance?: {
+    caseId: RuntimeFaultSoakCaseId;
+    iteration: number;
+    lifecycleId: string;
+    pid: number;
+    sequence: number;
+    processStartNonce: string;
+    osProcessStartIdentity: string;
+    lifecycleGroupNonce: string;
+  };
   reconciled: {
     counters: Readonly<Record<string, number>>;
     gauges: Readonly<Record<string, number>>;
@@ -162,10 +204,12 @@ export interface RuntimeFaultSoakReportV2 {
     arch: string;
     bunVersion: string;
   };
+  source: RuntimeFaultSoakSourceV2;
   startedAt: string;
   finishedAt: string;
   status: RuntimeFaultSoakStatus;
   failureCodes: readonly string[];
+  attempts: readonly RuntimeFaultSoakAttemptV2[];
   cases: ReadonlyArray<{
     id: RuntimeFaultSoakCaseId;
     attempts: number;
@@ -222,6 +266,7 @@ export interface BuildRuntimeFaultSoakReportInput {
   startedAt: string;
   finishedAt: string;
   environment: RuntimeFaultSoakReportV2['environment'];
+  source?: RuntimeFaultSoakSourceV2;
   attempts: readonly RuntimeFaultSoakAttemptV2[];
 }
 
@@ -235,15 +280,42 @@ export function nearestRankPercentile(values: readonly number[], percentile: num
   return sorted[rank - 1]!;
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+export function canonicalRuntimeFaultSoakJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map(canonicalRuntimeFaultSoakJson).join(',')}]`;
+  }
   if (value && typeof value === 'object') {
     return `{${Object.entries(value)
+      .filter(([, child]) => child !== undefined)
       .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalJson(child)}`)
+      .map(([key, child]) => `${JSON.stringify(key)}:${canonicalRuntimeFaultSoakJson(child)}`)
       .join(',')}}`;
   }
   return JSON.stringify(value);
+}
+
+export function computeRuntimeFaultSoakReportDigest(
+  report: Omit<RuntimeFaultSoakReportV2, 'reportDigest'>,
+): string {
+  return `sha256:${createHash('sha256')
+    .update(canonicalRuntimeFaultSoakJson(report))
+    .digest('hex')}`;
+}
+
+function isValidGithubActionsSource(source: RuntimeFaultSoakSourceV2): boolean {
+  return (
+    source.kind === 'github_actions' &&
+    /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(source.repository) &&
+    /^[0-9a-f]{40}$/.test(source.headSha) &&
+    source.ref.startsWith('refs/') &&
+    source.workflow.length > 0 &&
+    source.workflowRef.includes('/.github/workflows/') &&
+    source.workflowRef.includes('@refs/') &&
+    /^[0-9a-f]{40}$/.test(source.workflowSha) &&
+    /^[1-9][0-9]*$/.test(source.runId) &&
+    Number.isInteger(source.runAttempt) &&
+    source.runAttempt > 0
+  );
 }
 
 function isEligibleLifecycleMetric(
@@ -256,7 +328,15 @@ function isEligibleLifecycleMetric(
       Number.isInteger(process.pid) &&
       process.pid > 0 &&
       process.startNonce.length > 0 &&
-      lifecycles.length >= MINIMUM_POST_WARMUP_LIFECYCLES &&
+      process.osProcessStartIdentity.length > 0 &&
+      process.lifecycleId.length > 0 &&
+      process.lifecycleGroupNonce.length > 0 &&
+      lifecycles.length === MINIMUM_POST_WARMUP_LIFECYCLES &&
+      warmup.sequence === 0 &&
+      Number.isFinite(warmup.before) &&
+      Number.isFinite(warmup.after) &&
+      warmup.durationMs >= 0 &&
+      warmup.deadlineMs > 0 &&
       warmup.durationMs <= warmup.deadlineMs &&
       warmup.cleanupConfirmed &&
       lifecycles.every(
@@ -276,12 +356,123 @@ function qualificationMetricsSupported(attempt: RuntimeFaultSoakAttemptV2): bool
   return (
     attempt.cleanup.orphanPids.supported &&
     attempt.cleanup.orphanWorktrees.supported &&
-    (attempt.caseId !== 'long_runtime_replay' || attempt.runtimeBudgetUsage.supported) &&
-    isEligibleLifecycleMetric(attempt.resources.rssBytes) &&
-    isEligibleLifecycleMetric(attempt.resources.activeResources) &&
-    isEligibleLifecycleMetric(attempt.resources.fileDescriptors) &&
-    isEligibleLifecycleMetric(attempt.resources.listeners) &&
-    isEligibleLifecycleMetric(attempt.resources.handles)
+    (attempt.caseId !== 'long_runtime_replay' || hasCompleteRuntimeBudgetProvenance(attempt)) &&
+    hasExpectedResourceProvenance(attempt)
+  );
+}
+
+function resourceSeriesSignature(
+  metric: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>,
+): string[] | undefined {
+  if (!metric.supported || metric.value.kind !== 'same_process_lifecycle') return undefined;
+  return metric.value.series
+    .map(({ process }) =>
+      JSON.stringify([
+        process.lifecycleId,
+        process.pid,
+        process.startNonce,
+        process.osProcessStartIdentity,
+        process.lifecycleGroupNonce,
+      ]),
+    )
+    .sort();
+}
+
+function hasExpectedResourceProvenance(attempt: RuntimeFaultSoakAttemptV2): boolean {
+  const metrics = Object.values(attempt.resources);
+  const signatures = metrics.map(resourceSeriesSignature);
+  if (signatures.some((value) => value === undefined)) return false;
+  const expectedLifecycleIds = [
+    ...RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS[attempt.caseId],
+  ].sort();
+  const first = metrics[0];
+  if (!first || !isEligibleLifecycleMetric(first) || !first.supported) return false;
+  const lifecycleIds =
+    first.value.kind === 'same_process_lifecycle'
+      ? first.value.series.map(({ process }) => process.lifecycleId).sort()
+      : [];
+  if (
+    lifecycleIds.length !== expectedLifecycleIds.length ||
+    lifecycleIds.some((lifecycleId, index) => lifecycleId !== expectedLifecycleIds[index])
+  ) {
+    return false;
+  }
+  const reference = JSON.stringify(signatures[0]);
+  return (
+    signatures.every((signature) => JSON.stringify(signature) === reference) &&
+    metrics.every(isEligibleLifecycleMetric)
+  );
+}
+
+function isFiniteNumberRecord(value: Readonly<Record<string, number>>): boolean {
+  return Object.values(value).every((amount) => Number.isFinite(amount) && amount >= 0);
+}
+
+function hasCompleteRuntimeBudgetProvenance(attempt: RuntimeFaultSoakAttemptV2): boolean {
+  if (!attempt.runtimeBudgetUsage.supported || attempt.runtimeBudgetUsage.value.length !== 9) {
+    return false;
+  }
+  const receipts = attempt.runtimeBudgetUsage.value;
+  const provenances = receipts.map((receipt) => receipt.provenance);
+  if (
+    receipts.some(
+      (receipt) =>
+        receipt.source !== 'actual_runtime_ledger' ||
+        receipt.provenance?.caseId !== 'long_runtime_replay' ||
+        receipt.provenance.iteration !== attempt.iteration ||
+        receipt.provenance.lifecycleId !== 'fault-soak-runtime-budget.test.ts' ||
+        !Number.isInteger(receipt.provenance.pid) ||
+        receipt.provenance.pid <= 0 ||
+        !receipt.provenance.processStartNonce ||
+        !receipt.provenance.osProcessStartIdentity ||
+        !receipt.provenance.lifecycleGroupNonce ||
+        !isFiniteNumberRecord(receipt.reconciled.counters) ||
+        !isFiniteNumberRecord(receipt.reconciled.gauges) ||
+        !isFiniteNumberRecord(receipt.committed.counters) ||
+        !isFiniteNumberRecord(receipt.committed.gauges) ||
+        !isFiniteNumberRecord(receipt.ceilings) ||
+        !isFiniteNumberRecord(receipt.reservationStates) ||
+        (receipt.reconciled.counters.modelRequests ?? 0) <= 0 ||
+        (receipt.committed.counters.modelRequests ?? 0) <= 0 ||
+        (receipt.ceilings.maxTurns ?? 0) <= 0 ||
+        (receipt.ceilings.maxModelRequests ?? 0) <= 0 ||
+        Object.keys(receipt.reservationStates).length === 0,
+    )
+  ) {
+    return false;
+  }
+  const identities = new Set(
+    provenances.map((provenance) =>
+      JSON.stringify([
+        provenance!.pid,
+        provenance!.processStartNonce,
+        provenance!.osProcessStartIdentity,
+        provenance!.lifecycleGroupNonce,
+      ]),
+    ),
+  );
+  const sequences = provenances
+    .map((provenance) => provenance!.sequence)
+    .sort((left, right) => left - right);
+  const rss = attempt.resources.rssBytes;
+  const budgetSeries =
+    rss.supported && rss.value.kind === 'same_process_lifecycle'
+      ? rss.value.series.find(
+          ({ process }) => process.lifecycleId === 'fault-soak-runtime-budget.test.ts',
+        )
+      : undefined;
+  const boundToResource = provenances.every(
+    (provenance) =>
+      budgetSeries &&
+      provenance!.pid === budgetSeries.process.pid &&
+      provenance!.processStartNonce === budgetSeries.process.startNonce &&
+      provenance!.osProcessStartIdentity === budgetSeries.process.osProcessStartIdentity &&
+      provenance!.lifecycleGroupNonce === budgetSeries.process.lifecycleGroupNonce,
+  );
+  return (
+    identities.size === 1 &&
+    sequences.every((sequence, index) => sequence === index + 1) &&
+    boundToResource
   );
 }
 
@@ -400,6 +591,7 @@ export function buildRuntimeFaultSoakReport(
     throw new Error('perCaseTimeoutMs must be a positive integer');
   }
 
+  const source = input.source ?? { kind: 'local' as const };
   const expectedAttempts = input.iterations * RUNTIME_FAULT_SOAK_CASE_IDS.length;
   const failureCodes = new Set<string>();
   const grouped = new Map<RuntimeFaultSoakCaseId, RuntimeFaultSoakAttemptV2[]>();
@@ -431,6 +623,14 @@ export function buildRuntimeFaultSoakReport(
     if (attempts.length !== input.iterations) failureCodes.add(`${id}:attempt_count`);
     const iterations = new Set(attempts.map((attempt) => attempt.iteration));
     if (iterations.size !== attempts.length) failureCodes.add(`${id}:duplicate_iteration`);
+    if (
+      Array.from({ length: input.iterations }, (_, index) => index + 1).some(
+        (iteration) => !iterations.has(iteration),
+      ) ||
+      [...iterations].some((iteration) => iteration < 1 || iteration > input.iterations)
+    ) {
+      failureCodes.add(`${id}:iteration_coverage`);
+    }
   }
 
   const cases = RUNTIME_FAULT_SOAK_CASE_IDS.map((id) => {
@@ -555,6 +755,9 @@ export function buildRuntimeFaultSoakReport(
   if (input.profile === 'qualification' && input.iterations < MINIMUM_QUALIFICATION_ITERATIONS) {
     failureCodes.add('qualification_iterations_insufficient');
   }
+  if (input.profile === 'qualification' && !isValidGithubActionsSource(source)) {
+    failureCodes.add('qualification_source_identity_missing');
+  }
   if (input.profile === 'qualification') {
     for (const entry of cases) {
       for (const [metric, summary] of Object.entries(entry.resources)) {
@@ -574,12 +777,15 @@ export function buildRuntimeFaultSoakReport(
   const hardFailure = [...failureCodes].some(
     (code) =>
       code !== 'qualification_metrics_unsupported' &&
-      code !== 'qualification_iterations_insufficient',
+      code !== 'qualification_iterations_insufficient' &&
+      code !== 'qualification_source_identity_missing',
   );
   const status: RuntimeFaultSoakStatus = hardFailure
     ? 'failed'
     : input.profile === 'qualification' &&
-        (!metricsSupported || input.iterations < MINIMUM_QUALIFICATION_ITERATIONS)
+        (!metricsSupported ||
+          input.iterations < MINIMUM_QUALIFICATION_ITERATIONS ||
+          !isValidGithubActionsSource(source))
       ? 'inconclusive'
       : 'passed';
 
@@ -595,10 +801,12 @@ export function buildRuntimeFaultSoakReport(
       maxWallTimeMs,
     },
     environment: input.environment,
+    source,
     startedAt: input.startedAt,
     finishedAt: input.finishedAt,
     status,
     failureCodes: [...failureCodes].sort(),
+    attempts: input.attempts,
     cases,
     aggregate: {
       attempts: input.attempts.length,
@@ -616,6 +824,6 @@ export function buildRuntimeFaultSoakReport(
   };
   return {
     ...withoutDigest,
-    reportDigest: `sha256:${createHash('sha256').update(canonicalJson(withoutDigest)).digest('hex')}`,
+    reportDigest: computeRuntimeFaultSoakReportDigest(withoutDigest),
   };
 }

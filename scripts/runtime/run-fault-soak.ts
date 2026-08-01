@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import {
   chmodSync,
@@ -14,19 +15,23 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import {
   buildRuntimeFaultSoakReport,
   type OptionalMetric,
+  RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS,
+  RUNTIME_FAULT_SOAK_RUNNER_REVISION,
   type RuntimeBudgetUsageEvidenceV2,
   type RuntimeFaultSoakAttemptV2,
   type RuntimeFaultSoakCaseId,
   type RuntimeFaultSoakMetricEvidenceV2,
   type RuntimeFaultSoakProfile,
+  type RuntimeFaultSoakSourceV2,
 } from './fault-soak-report';
 import { readOsProcessStartIdentity } from './process-start-identity';
 
-const RUNNER_REVISION = 'runtime-fault-soak-v2';
 const QUALIFICATION_REPEAT_COUNT = 9;
-const TUI_LIFECYCLE_TELEMETRY_ID = 'tui-input-focus-lifecycle';
 const MAX_CAPTURED_OUTPUT_BYTES = 256 * 1024;
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000;
+const PROCESS_REAP_TIMEOUT_MS = 5_000;
+export const RUNTIME_FAULT_SOAK_SETTLE_RESERVE_MS = 30_000;
+const INSPECTION_TIMEOUT_MS = 1_000;
 export const TUI_FAULT_SOAK_PROBE_ARGS = [
   'run',
   'scripts/run-tui-system-tests.ts',
@@ -174,6 +179,7 @@ interface RunnerOptions {
   seed: number;
   perCaseTimeoutMs: number;
   output?: string;
+  source: RuntimeFaultSoakSourceV2;
 }
 
 function positiveInteger(value: string | undefined, name: string): number {
@@ -189,6 +195,49 @@ function readOption(args: readonly string[], name: string): string | undefined {
   if (inline) return inline.slice(name.length + 1);
   const index = args.indexOf(name);
   return index >= 0 ? args[index + 1] : undefined;
+}
+
+export function boundedFaultSoakProbeTimeoutMs(
+  perCaseTimeoutMs: number,
+  globalRemainingMs: number,
+): number | undefined {
+  if (globalRemainingMs <= RUNTIME_FAULT_SOAK_SETTLE_RESERVE_MS) return undefined;
+  return Math.max(
+    1,
+    Math.min(perCaseTimeoutMs, globalRemainingMs - RUNTIME_FAULT_SOAK_SETTLE_RESERVE_MS),
+  );
+}
+
+function parseSource(args: readonly string[]): RuntimeFaultSoakSourceV2 {
+  const values = {
+    repository: readOption(args, '--source-repository'),
+    headSha: readOption(args, '--source-head-sha'),
+    ref: readOption(args, '--source-ref'),
+    workflow: readOption(args, '--source-workflow'),
+    workflowRef: readOption(args, '--source-workflow-ref'),
+    workflowSha: readOption(args, '--source-workflow-sha'),
+    runId: readOption(args, '--source-run-id'),
+    runAttempt: readOption(args, '--source-run-attempt'),
+  };
+  const supplied = Object.values(values).filter((value) => value !== undefined).length;
+  if (supplied === 0) return { kind: 'local' };
+  if (supplied !== Object.keys(values).length) {
+    throw new Error('GitHub Actions source identity options must be supplied together');
+  }
+  if (Object.values(values).some((value) => value?.trim().length === 0)) {
+    throw new Error('GitHub Actions source identity options must be non-empty');
+  }
+  return {
+    kind: 'github_actions',
+    repository: values.repository!,
+    headSha: values.headSha!,
+    ref: values.ref!,
+    workflow: values.workflow!,
+    workflowRef: values.workflowRef!,
+    workflowSha: values.workflowSha!,
+    runId: values.runId!,
+    runAttempt: positiveInteger(values.runAttempt, '--source-run-attempt'),
+  };
 }
 
 export function parseRuntimeFaultSoakOptions(args: readonly string[]): RunnerOptions {
@@ -208,6 +257,7 @@ export function parseRuntimeFaultSoakOptions(args: readonly string[]): RunnerOpt
       '--timeout-ms',
     ),
     output: readOption(args, '--output'),
+    source: parseSource(args),
   };
 }
 
@@ -326,15 +376,16 @@ export async function captureBounded(
 
 function registeredWorktrees(): Set<string> | undefined {
   try {
-    const result = Bun.spawnSync(['git', 'worktree', 'list', '--porcelain'], {
+    const result = spawnSync('git', ['worktree', 'list', '--porcelain'], {
       cwd: process.cwd(),
-      stdout: 'pipe',
-      stderr: 'ignore',
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: INSPECTION_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     });
-    if (result.exitCode !== 0) return undefined;
+    if (result.status !== 0 || result.error) return undefined;
     return new Set(
       result.stdout
-        .toString()
         .split('\n')
         .filter((line) => line.startsWith('worktree '))
         .map((line) => line.slice('worktree '.length)),
@@ -390,6 +441,7 @@ export interface RuntimeBudgetTelemetryRecord extends RuntimeBudgetUsageEvidence
   kind: 'runtime_budget_usage';
   pid: number;
   sequence: number;
+  iteration: number;
   caseId: string;
   lifecycleId: string;
   processStartNonce: string;
@@ -434,11 +486,13 @@ export function runtimeBudgetUsage(
   resourceRecords: readonly TelemetryRecord[],
   caseId: RuntimeFaultSoakCaseId,
   attemptNonce: string,
+  iteration: number,
   expectedSamples: number,
 ): OptionalMetric<readonly RuntimeBudgetUsageEvidenceV2[]> {
   const candidates = records.filter(
     (record) =>
       record.caseId === caseId &&
+      record.iteration === iteration &&
       record.lifecycleId === 'fault-soak-runtime-budget.test.ts' &&
       record.source === 'actual_runtime_ledger',
   );
@@ -481,12 +535,33 @@ export function runtimeBudgetUsage(
     groups.size === 1 &&
     sequences.every((sequence, index) => sequence === index + 1);
   const evidence = selected.map(
-    ({ source, reconciled, committed, ceilings, reservationStates }) => ({
+    ({
       source,
       reconciled,
       committed,
       ceilings,
       reservationStates,
+      pid,
+      sequence,
+      processStartNonce,
+      osProcessStartIdentity,
+      lifecycleGroupNonce,
+    }) => ({
+      source,
+      reconciled,
+      committed,
+      ceilings,
+      reservationStates,
+      provenance: {
+        caseId,
+        iteration,
+        lifecycleId: 'fault-soak-runtime-budget.test.ts',
+        pid,
+        sequence,
+        processStartNonce,
+        osProcessStartIdentity: osProcessStartIdentity!,
+        lifecycleGroupNonce,
+      },
     }),
   );
   return complete
@@ -615,7 +690,13 @@ export function qualificationTelemetryMetric(
           record.cleanup.descendantPidsAfter.length === 0,
       });
       series.push({
-        process: { pid: first.pid, startNonce: first.processStartNonce },
+        process: {
+          pid: first.pid,
+          startNonce: first.processStartNonce,
+          osProcessStartIdentity: first.osProcessStartIdentity!,
+          lifecycleId: first.lifecycleId,
+          lifecycleGroupNonce: first.lifecycleGroupNonce,
+        },
         warmup: point(first, 0),
         lifecycles: chunk.slice(1).map((record, index) => point(record, index + 1)),
       });
@@ -631,12 +712,14 @@ function descendantPids(rootPid: number): number[] | undefined {
   if (process.platform === 'win32') return undefined;
   let output: string;
   try {
-    const listing = Bun.spawnSync(['ps', '-Ao', 'pid=,ppid='], {
-      stdout: 'pipe',
-      stderr: 'ignore',
+    const listing = spawnSync('ps', ['-Ao', 'pid=,ppid='], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: INSPECTION_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     });
-    if (listing.exitCode !== 0) return undefined;
-    output = listing.stdout.toString();
+    if (listing.status !== 0 || listing.error) return undefined;
+    output = listing.stdout;
   } catch {
     return undefined;
   }
@@ -663,12 +746,14 @@ function processGroupPids(groupId: number): number[] | undefined {
   if (process.platform === 'win32') return undefined;
   let output: string;
   try {
-    const listing = Bun.spawnSync(['ps', '-Ao', 'pid=,pgid='], {
-      stdout: 'pipe',
-      stderr: 'ignore',
+    const listing = spawnSync('ps', ['-Ao', 'pid=,pgid='], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: INSPECTION_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     });
-    if (listing.exitCode !== 0) return undefined;
-    output = listing.stdout.toString();
+    if (listing.status !== 0 || listing.error) return undefined;
+    output = listing.stdout;
   } catch {
     return undefined;
   }
@@ -710,10 +795,7 @@ function rotatedProbes(seed: number, iteration: number): readonly ProbeDefinitio
 }
 
 function expectedQualificationLifecycleIds(definition: ProbeDefinition): ReadonlySet<string> {
-  if (definition.id === 'tui_lifecycle_churn') {
-    return new Set([TUI_LIFECYCLE_TELEMETRY_ID]);
-  }
-  return new Set(definition.qualificationLifecycleFiles.map((file) => basename(file)));
+  return new Set(RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS[definition.id]);
 }
 
 async function runProbe(
@@ -721,6 +803,7 @@ async function runProbe(
   iteration: number,
   options: RunnerOptions,
   root: string,
+  processTimeoutMs: number,
 ): Promise<RuntimeFaultSoakAttemptV2> {
   const probeRoot = join(root, `${String(iteration).padStart(3, '0')}-${definition.id}`);
   const telemetryFile = join(probeRoot, 'child-telemetry.jsonl');
@@ -749,7 +832,7 @@ async function runProbe(
         options.profile === 'qualification' ? QUALIFICATION_REPEAT_COUNT : 1,
       ),
       KITE_FAULT_SOAK_PROCESS_NONCE: attemptNonce,
-      KITE_FAULT_SOAK_LIFECYCLE_DEADLINE_MS: String(options.perCaseTimeoutMs),
+      KITE_FAULT_SOAK_LIFECYCLE_DEADLINE_MS: String(processTimeoutMs),
     },
     stdin: 'ignore',
     stdout: 'pipe',
@@ -779,7 +862,7 @@ async function runProbe(
   const pidMonitor = setInterval(sampleOwnedPids, 50);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<'timed_out'>((resolveTimeout) => {
-    timer = setTimeout(() => resolveTimeout('timed_out'), options.perCaseTimeoutMs);
+    timer = setTimeout(() => resolveTimeout('timed_out'), processTimeoutMs);
   });
   const outcome = await Promise.race([proc.exited, timeout]);
   if (timer) clearTimeout(timer);
@@ -787,7 +870,10 @@ async function runProbe(
   if (outcome === 'timed_out') {
     sampleOwnedPids();
     terminateFaultSoakProcessTree(proc, ownedPidIdentities);
-    await proc.exited.catch(() => {});
+    await Promise.race([
+      proc.exited.catch(() => undefined),
+      Bun.sleep(PROCESS_REAP_TIMEOUT_MS).then(() => undefined),
+    ]);
   }
   sampleOwnedPids();
   const drainTimer = setTimeout(() => captureAbort.abort(), CAPTURE_DRAIN_TIMEOUT_MS);
@@ -877,6 +963,7 @@ async function runProbe(
             telemetry.resources,
             definition.id,
             attemptNonce,
+            iteration,
             options.profile === 'qualification' ? QUALIFICATION_REPEAT_COUNT : 1,
           )
         : status === 'passed'
@@ -904,11 +991,43 @@ async function runProbe(
   };
 }
 
+function failedRunnerAttempt(
+  definition: ProbeDefinition,
+  iteration: number,
+  failureCode: 'global_deadline_exhausted' | 'runner_exception',
+): RuntimeFaultSoakAttemptV2 {
+  const reason = `runner did not execute accepted evidence: ${failureCode}`;
+  return {
+    caseId: definition.id,
+    iteration,
+    status: 'timed_out',
+    durationMs: 0,
+    failureCode,
+    stateInvariantAssertions: 0,
+    terminalTaxonomyAssertions: {},
+    runtimeBudgetUsage: unsupported(reason),
+    cleanup: {
+      confirmed: false,
+      orphanPids: unsupported(reason),
+      orphanWorktrees: unsupported(reason),
+      residualPaths: [],
+    },
+    resources: {
+      rssBytes: unsupported(reason),
+      activeResources: unsupported(reason),
+      fileDescriptors: unsupported(reason),
+      listeners: unsupported(reason),
+      handles: unsupported(reason),
+    },
+  };
+}
+
 export async function runRuntimeFaultSoak(
   options: RunnerOptions,
 ): Promise<ReturnType<typeof buildRuntimeFaultSoakReport>> {
   const root = mkdtempSync(join(tmpdir(), 'kite-runtime-fault-soak-'));
   const startedAt = new Date().toISOString();
+  const hardDeadlineAt = Date.now() + options.iterations * PROBES.length * options.perCaseTimeoutMs;
   const attempts: RuntimeFaultSoakAttemptV2[] = [];
   try {
     for (let iteration = 1; iteration <= options.iterations; iteration++) {
@@ -916,15 +1035,35 @@ export async function runRuntimeFaultSoak(
         console.log(
           `[fault-soak] iteration=${iteration}/${options.iterations} case=${definition.id}`,
         );
-        attempts.push(await runProbe(definition, iteration, options, root));
+        const remainingMs = hardDeadlineAt - Date.now();
+        const processTimeoutMs = boundedFaultSoakProbeTimeoutMs(
+          options.perCaseTimeoutMs,
+          remainingMs,
+        );
+        if (processTimeoutMs === undefined) {
+          attempts.push(failedRunnerAttempt(definition, iteration, 'global_deadline_exhausted'));
+          continue;
+        }
+        try {
+          attempts.push(await runProbe(definition, iteration, options, root, processTimeoutMs));
+        } catch (error) {
+          console.error(
+            `[fault-soak] ${definition.id} runner exception: ${error instanceof Error ? error.message : String(error)}`,
+          );
+          attempts.push(failedRunnerAttempt(definition, iteration, 'runner_exception'));
+        }
       }
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      // The report will still fail closed if an attempt could not confirm cleanup.
+    }
   }
   const finishedAt = new Date().toISOString();
   return buildRuntimeFaultSoakReport({
-    runnerRevision: RUNNER_REVISION,
+    runnerRevision: RUNTIME_FAULT_SOAK_RUNNER_REVISION,
     seed: options.seed,
     profile: options.profile,
     iterations: options.iterations,
@@ -936,6 +1075,7 @@ export async function runRuntimeFaultSoak(
       arch: process.arch,
       bunVersion: Bun.version,
     },
+    source: options.source,
     attempts,
   });
 }

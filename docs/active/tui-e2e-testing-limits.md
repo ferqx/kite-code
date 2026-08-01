@@ -37,7 +37,7 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
    并逐次证明 listener 先挂载、随后移除，DEC 1004 关闭且没有 descendant PID。只有该限定范围的
    lifecycle series 可进入 TUI leak 阈值；它不证明 session switch、tool lifecycle 或 model reconnect
    PTY 进程的资源斜率，多个 PTY scenario、父 runner 趋势或跨进程差值也不能替代它。Windows 无通用 `/proc/self/fd` 或平台不能
-   检查 owned descendant PID 时对应指标显示为 unsupported，qualification 返回 `inconclusive`。
+   检查 owned descendant PID 时对应指标显示为 unsupported，qualification 返回 `inconclusive`。该样本还必须作为 retained attempt evidence 进入绑定 GitHub repository、head SHA、ref、`workflow_ref`/`workflow_sha`、run ID/run attempt 的 v2 报告，并由 verifier 重建 8 个 attempt 共 64 个 measured 样本的摘要；单独的 PTY 输出、Required CI 通过或未绑定来源的本地报告都不是 1C.7 release evidence。
 9. PTY 原始输出仍是累积流，因此“原始字节里曾出现 `❯`”不能证明当前输入焦点可用。Harness
    生成带类型的 byte checkpoint；跨 checkpoint 的 UTF-8 code point 不归入动作后输出。每次
    write/resize/raw-mode 动作都更新 checkpoint，输入提交还必须通过本次输入回显与本次 mock

@@ -18,6 +18,8 @@ export function readOsProcessStartIdentity(pid: number): string | undefined {
   if (process.platform === 'darwin') {
     const result = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
+      timeout: 1_000,
+      killSignal: 'SIGKILL',
     });
     const started = result.status === 0 ? result.stdout.trim() : '';
     return started ? `darwin:ps:${started}` : undefined;

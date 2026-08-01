@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import { readOsProcessStartIdentity } from '../../scripts/runtime/process-start-identity';
 import {
+  boundedFaultSoakProbeTimeoutMs,
   buildFaultSoakProbeArgs,
   captureBounded,
   parseRuntimeFaultSoakOptions,
@@ -69,6 +70,7 @@ describe('runtime fault soak runner', () => {
       iterations: 1,
       seed: 1729,
       perCaseTimeoutMs: 120_000,
+      source: { kind: 'local' },
     });
     expect(
       parseRuntimeFaultSoakOptions([
@@ -85,6 +87,37 @@ describe('runtime fault soak runner', () => {
       seed: 23,
       perCaseTimeoutMs: 4567,
     });
+  });
+
+  test('requires the complete GitHub Actions source identity as one unit', () => {
+    expect(() => parseRuntimeFaultSoakOptions(['--source-repository=ferqx/kite-code'])).toThrow(
+      'must be supplied together',
+    );
+    expect(
+      parseRuntimeFaultSoakOptions([
+        '--source-repository=ferqx/kite-code',
+        `--source-head-sha=${'a'.repeat(40)}`,
+        '--source-ref=refs/heads/main',
+        '--source-workflow=runtime-resilience-qualification.yml',
+        '--source-workflow-ref=ferqx/kite-code/.github/workflows/runtime-resilience-qualification.yml@refs/heads/main',
+        `--source-workflow-sha=${'a'.repeat(40)}`,
+        '--source-run-id=30700000000',
+        '--source-run-attempt=2',
+      ]),
+    ).toMatchObject({
+      source: {
+        kind: 'github_actions',
+        repository: 'ferqx/kite-code',
+        runId: '30700000000',
+        runAttempt: 2,
+      },
+    });
+  });
+
+  test('reserves a bounded settle window inside the runner-wide hard deadline', () => {
+    expect(boundedFaultSoakProbeTimeoutMs(180_000, 500_000)).toBe(180_000);
+    expect(boundedFaultSoakProbeTimeoutMs(180_000, 60_000)).toBe(30_000);
+    expect(boundedFaultSoakProbeTimeoutMs(180_000, 30_000)).toBeUndefined();
   });
 
   test('keeps the seed at the case scheduler and only reruns qualification test probes', () => {
@@ -247,12 +280,42 @@ describe('runtime fault soak runner', () => {
     });
   });
 
+  test('retains both declared long-runtime lifecycle groups for 16 samples per attempt', () => {
+    const records = [
+      ...Array.from({ length: 9 }, (_, index) =>
+        telemetryRecord(index + 1, 100 + index, {
+          pid: 42,
+          lifecycleId: 'stability.test.ts',
+        }),
+      ),
+      ...Array.from({ length: 9 }, (_, index) =>
+        telemetryRecord(index + 1, 200 + index, {
+          pid: 43,
+          lifecycleId: 'fault-soak-runtime-budget.test.ts',
+        }),
+      ),
+    ];
+    const metric = qualificationTelemetryMetric(records, 'rssBytes', {
+      caseId: 'long_runtime_replay',
+      repeatCount: 9,
+      expectedLifecycleIds: new Set(['stability.test.ts', 'fault-soak-runtime-budget.test.ts']),
+      attemptNonce: 'attempt-nonce',
+    });
+    expect(metric).toMatchObject({ supported: true });
+    if (!metric.supported || metric.value.kind !== 'same_process_lifecycle') {
+      throw new Error('Expected two long-runtime lifecycle groups');
+    }
+    expect(metric.value.series).toHaveLength(2);
+    expect(metric.value.series.flatMap((series) => series.lifecycles)).toHaveLength(16);
+  });
+
   test('rejects a budget group contaminated by a wrong-attempt receipt', () => {
     const receipt = (processStartNonce: string): RuntimeBudgetTelemetryRecord => ({
       version: 2,
       kind: 'runtime_budget_usage',
       pid: 42,
       sequence: 1,
+      iteration: 1,
       caseId: 'long_runtime_replay',
       lifecycleId: 'fault-soak-runtime-budget.test.ts',
       processStartNonce,
@@ -277,6 +340,7 @@ describe('runtime fault soak runner', () => {
         'long_runtime_replay',
         'attempt-nonce',
         1,
+        1,
       ),
     ).toMatchObject({
       supported: false,
@@ -290,6 +354,7 @@ describe('runtime fault soak runner', () => {
       kind: 'runtime_budget_usage',
       pid: 42,
       sequence: 1,
+      iteration: 1,
       caseId: 'long_runtime_replay',
       lifecycleId: 'fault-soak-runtime-budget.test.ts',
       processStartNonce: 'attempt-nonce:42',
@@ -307,7 +372,7 @@ describe('runtime fault soak runner', () => {
     });
 
     expect(
-      runtimeBudgetUsage([receipt], [resource], 'long_runtime_replay', 'attempt-nonce', 1),
+      runtimeBudgetUsage([receipt], [resource], 'long_runtime_replay', 'attempt-nonce', 1, 1),
     ).toMatchObject({
       supported: false,
       reason: expect.stringContaining('did not match'),
