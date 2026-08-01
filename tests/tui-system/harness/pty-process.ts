@@ -270,6 +270,13 @@ export function resolveTuiLaunchPaths(
   };
 }
 
+export function shouldDetachTuiProcess(
+  platform: NodeJS.Platform,
+  faultSoakProcessNonce: string | undefined,
+): boolean {
+  return platform !== 'win32' && !faultSoakProcessNonce;
+}
+
 /**
  * Spawn the TUI subprocess with a real PTY.
  *
@@ -373,6 +380,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     'TZ',
     'CI',
     'GITHUB_ACTIONS',
+    'KITE_FAULT_SOAK_PROCESS_NONCE',
   ]) {
     const value = process.env[key];
     if (value !== undefined) childEnv[key] = value;
@@ -382,12 +390,17 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     Object.assign(childEnv, opts.workspace.env);
   }
   childEnv.TERM = 'xterm-256color';
+  const detachTuiProcess = shouldDetachTuiProcess(
+    process.platform,
+    childEnv.KITE_FAULT_SOAK_PROCESS_NONCE,
+  );
+  const inheritsFaultSoakProcessGroup = process.platform !== 'win32' && !detachTuiProcess;
 
   const proc = Bun.spawn({
     cmd: [process.execPath, 'run', entryPath],
     cwd,
     env: childEnv,
-    detached: process.platform !== 'win32',
+    detached: detachTuiProcess,
     terminal: {
       cols,
       rows,
@@ -398,11 +411,13 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     },
   });
   let ownedProcessGroupId: number | undefined;
-  try {
-    ownedProcessGroupId = verifiedOwnedProcessGroupId(proc.pid);
-  } catch (error) {
-    proc.kill('SIGKILL');
-    throw error;
+  if (!inheritsFaultSoakProcessGroup) {
+    try {
+      ownedProcessGroupId = verifiedOwnedProcessGroupId(proc.pid);
+    } catch (error) {
+      proc.kill('SIGKILL');
+      throw error;
+    }
   }
 
   proc.exited.then((code) => {
@@ -422,6 +437,18 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   const KILL_TIMEOUT_MS = 2000;
   const EXIT_TIMEOUT_MS = 15_000;
 
+  function signalTui(signal: 'SIGTERM' | 'SIGKILL'): void {
+    if (inheritsFaultSoakProcessGroup) {
+      try {
+        proc.kill(signal);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
+      return;
+    }
+    signalOwnedProcessTree(proc, signal, ownedProcessGroupId);
+  }
+
   async function disposeScreen(): Promise<void> {
     if (screenDisposed) return;
     await terminalScreen.settled();
@@ -434,11 +461,11 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
 
     try {
       if (!exited) {
-        signalOwnedProcessTree(proc, 'SIGTERM', ownedProcessGroupId);
+        signalTui('SIGTERM');
         try {
           await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
         } catch {
-          signalOwnedProcessTree(proc, 'SIGKILL', ownedProcessGroupId);
+          signalTui('SIGKILL');
           await waitForPtyExit(() => exited, 5000);
         }
       }

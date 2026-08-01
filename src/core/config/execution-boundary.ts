@@ -338,6 +338,9 @@ export function evaluateExecutionBoundaryQualificationV1(
   if (backend.network[boundary.networkMode] !== 'enforced') {
     return denied('backend_network_unsupported');
   }
+  if (backend.backend === 'bubblewrap' && backend.syscallFilter !== 'enforced') {
+    return denied('backend_syscall_filter_unsupported');
+  }
   if (backend.processTreeLimit !== 'enforced') {
     return denied('backend_process_tree_unsupported');
   }

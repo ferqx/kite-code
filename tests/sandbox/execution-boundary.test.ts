@@ -82,6 +82,7 @@ function supportedBackend(
       full_access: 'unsupported',
     },
     network: { off: 'enforced', allowlist: 'enforced' },
+    syscallFilter: 'unsupported',
     processTreeLimit: 'enforced',
     childProcessInheritance: 'enforced',
     verifiedInProcessReadOnly: 'unsupported',
@@ -549,6 +550,10 @@ describe('production execution admission', () => {
       [
         supportedBackend({ network: { off: 'unsupported', allowlist: 'enforced' } }),
         'backend_network_unsupported',
+      ],
+      [
+        supportedBackend({ backend: 'bubblewrap', syscallFilter: 'unsupported' }),
+        'backend_syscall_filter_unsupported',
       ],
       [supportedBackend({ processTreeLimit: 'unsupported' }), 'backend_process_tree_unsupported'],
       [

@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import ts from 'typescript';
+import {
+  selectTuiSystemTestFiles,
+  TUI_LIFECYCLE_HARNESS_FLAG,
+} from '../../../scripts/run-tui-system-tests';
 
 const scenariosDirectory = join(import.meta.dir, '..', 'scenarios');
 const OUTPUT_WAIT_HELPERS = new Set([
@@ -482,6 +486,27 @@ export function findDirectSlashSubmitViolations(source: string, file = 'fixture.
 }
 
 describe('TUI system scenario contract', () => {
+  test('keeps harness discovery explicit while allowing the fault-soak lifecycle probe', () => {
+    const regular = selectTuiSystemTestFiles(['session-switch']);
+    expect(regular.harnessFiles).toEqual([]);
+    expect(regular.scenarioFiles.map((file) => basename(file))).toEqual(['session-switch.test.ts']);
+
+    const faultSoak = selectTuiSystemTestFiles([
+      TUI_LIFECYCLE_HARNESS_FLAG,
+      'session-switch',
+      'tool-lifecycle',
+      'model-stream-reconnect',
+    ]);
+    expect(faultSoak.harnessFiles.map((file) => basename(file))).toEqual([
+      'tui-lifecycle-resource.test.ts',
+    ]);
+    expect(faultSoak.scenarioFiles.map((file) => basename(file))).toEqual([
+      'model-stream-reconnect.test.ts',
+      'session-switch.test.ts',
+      'tool-lifecycle.test.ts',
+    ]);
+  });
+
   test('condition waits cannot be satisfied by cumulative output from an earlier action', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
       findOutputWaitContractViolations(source, file),

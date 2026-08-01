@@ -42,6 +42,8 @@ export interface ExecutionBackendCapabilitiesV1 {
   backend: SandboxBackend;
   filesystem: Readonly<Record<FilesystemScope, BoundaryEnforcementV1>>;
   network: Readonly<Record<ExecutionNetworkMode, BoundaryEnforcementV1>>;
+  /** Required for bubblewrap; Seatbelt has a separate policy mechanism. */
+  syscallFilter: BoundaryEnforcementV1;
   processTreeLimit: BoundaryEnforcementV1;
   childProcessInheritance: BoundaryEnforcementV1;
   verifiedInProcessReadOnly: BoundaryEnforcementV1;
@@ -128,6 +130,7 @@ export type ExecutionBoundaryAdmissionReasonV1 =
   | 'sandbox_required'
   | 'backend_filesystem_unsupported'
   | 'backend_network_unsupported'
+  | 'backend_syscall_filter_unsupported'
   | 'backend_process_tree_unsupported'
   | 'backend_child_inheritance_unsupported'
   | 'read_only_fallback_unverified';

@@ -43,7 +43,12 @@ production root 在创建 Runtime、Shell、writer、Skill child 或 local stdio
   精确 qualification；
 - native probe 与 runtime resolver 共用 `readExecutionEnvironmentIdentityV1()`，并要求同一
   qualification 同时绑定 TUI 与 foreground CLI 入口证据；
-- backend 按 filesystem、network、process-tree、child inheritance 逐维报告 `enforced`；
+- backend 按 filesystem、network、process-tree、child inheritance 逐维报告 `enforced`；Linux
+  候选还单独报告 syscall-filter strength。该字段进入 sealed
+  `ExecutionBackendCapabilitiesV1` 与 registry canonical digest；缺少 native negative
+  conformance 或不是 `enforced` 时 admission 以 `backend_syscall_filter_unsupported` fail
+  closed。Seatbelt 使用独立 policy 机制，该字段可为 `unsupported`。旧 raw
+  `PlatformCapabilityEvidenceV1` 缺少新增可选字段时规范化为 `unsupported`，不得抛错或推断为已执行；
 - production boundary 要求 sandbox 配置和 CLI/App runtime restriction 均未关闭，且当前不接受
   `full_access`；成功返回的 `ProductionAgentConfigV1` 把 sandbox 固定为 enabled，并携带
   release-approved qualification proof。
@@ -131,3 +136,11 @@ process-tree 与入口/child inheritance 未有完整原生证据前，Linux 仍
 binary discovery 之前还会运行真实 PID/network namespace 最小启动探针；宿主禁止 namespace 时
 backend 直接视为 unavailable，production 拒绝执行，cleanup 也保留未知旧 runtime 而不降级到
 可能遭 symlink swap 的宿主物理遍历。
+
+`src/core/sandbox/process-tree-capability.ts` 是 native process-tree evidence 的分离投影：
+`hardCountLimit` 需要具名 limiter mechanism 与 native conformance；`terminationCleanup` 只表达
+终止后残留确认。process group、PID namespace、Windows Job termination 或清理成功都不能单独
+产生 `processTreeLimit=enforced`，所以当前 Seatbelt、bubblewrap 与 Windows `none` 均保持
+hard-count `unsupported`，production surface 在 admission 阶段全关闭。raw artifact 同时保留
+`hardCountMechanism`；旧 V1 artifact 缺失时按 `none` 解释，不能从 verdict 反推机制。通用布尔
+projector 不从 sandbox barrel 导出，release producer 只能读取当前保守投影。

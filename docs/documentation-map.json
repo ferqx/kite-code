@@ -36,6 +36,7 @@
         "tests/runtime/fault-soak-*.test.ts",
         "tests/runtime/harness/**",
         "tests/fixtures/runtime-fault-soak-child.ts",
+        "tests/fixtures/fault-soak-nested-process-tree.ts",
         "tests/mcp-manager.test.ts",
         "tests/model-invoke.test.ts",
         "tests/model.test.ts"
@@ -149,7 +150,10 @@
         "src/core/sandbox/**",
         "scripts/release/platform-capability-probe.ts",
         "tests/sandbox.test.ts",
+        "tests/sandbox-executor.test.ts",
         "tests/sandbox-bwrap-executor.test.ts",
+        "tests/sandbox/platform-backends.test.ts",
+        "tests/sandbox/process-tree-limit.test.ts",
         "tests/sandbox/platform-capability-probe.test.ts",
         "release/platform-capabilities/**",
         ".github/workflows/platform-capability-probe.yml",

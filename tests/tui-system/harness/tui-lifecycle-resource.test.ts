@@ -9,15 +9,19 @@ import {
 const fixture = join(import.meta.dir, '..', 'fixtures', 'tui-lifecycle-resource.tsx');
 
 test('runs repeated InputLine focus-listener mount and unmount in one owned child process', async () => {
+  const inheritsFaultSoakProcessGroup = Boolean(process.env.KITE_FAULT_SOAK_PROCESS_NONCE);
   const proc = Bun.spawn([process.execPath, fixture], {
     cwd: process.cwd(),
     env: process.env,
     stdin: 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',
-    detached: process.platform !== 'win32',
+    detached: process.platform !== 'win32' && !inheritsFaultSoakProcessGroup,
   });
-  const processGroupId = verifiedOwnedProcessGroupId(proc.pid);
+  const processGroupId =
+    process.platform !== 'win32' && !inheritsFaultSoakProcessGroup
+      ? verifiedOwnedProcessGroupId(proc.pid)
+      : undefined;
   try {
     const [exitCode, stdout, stderr] = await Promise.all([
       waitForPtyExitCode(proc.exited, 5_000),
@@ -27,6 +31,11 @@ test('runs repeated InputLine focus-listener mount and unmount in one owned chil
     expect(exitCode, `${stdout}\n${stderr}`).toBe(0);
     expect(stdout).toContain('TUI_LIFECYCLE_COMPLETE');
   } finally {
-    await terminateOwnedProcessTree(proc, processGroupId).catch(() => {});
+    if (process.platform === 'win32' || processGroupId !== undefined) {
+      await terminateOwnedProcessTree(proc, processGroupId).catch(() => {});
+    } else if (proc.exitCode === null) {
+      proc.kill('SIGKILL');
+      await proc.exited.catch(() => {});
+    }
   }
 });

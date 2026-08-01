@@ -27,6 +27,14 @@ const QUALIFICATION_REPEAT_COUNT = 9;
 const TUI_LIFECYCLE_TELEMETRY_ID = 'tui-input-focus-lifecycle';
 const MAX_CAPTURED_OUTPUT_BYTES = 256 * 1024;
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000;
+export const TUI_FAULT_SOAK_PROBE_ARGS = [
+  'run',
+  'scripts/run-tui-system-tests.ts',
+  '--with-lifecycle-harness',
+  'session-switch',
+  'tool-lifecycle',
+  'model-stream-reconnect',
+] as const;
 const telemetryPreload = resolve(
   process.cwd(),
   'tests/runtime/harness/fault-soak-telemetry-preload.ts',
@@ -148,13 +156,7 @@ const PROBES: readonly ProbeDefinition[] = [
   },
   {
     id: 'tui_lifecycle_churn',
-    args: [
-      'run',
-      'scripts/run-tui-system-tests.ts',
-      'session-switch',
-      'tool-lifecycle',
-      'model-stream-reconnect',
-    ],
+    args: TUI_FAULT_SOAK_PROBE_ARGS,
     qualificationLifecycleFiles: [],
     terminalEvidence: {
       completed: /\(pass\).*keeps partial text and commits only the recovered tool lifecycle/,
@@ -235,7 +237,10 @@ function unsupported<T>(reason: string): OptionalMetric<T> {
   return { supported: false, reason };
 }
 
-function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
+export function terminateFaultSoakProcessTree(
+  proc: ReturnType<typeof Bun.spawn>,
+  knownIdentities: ReadonlyMap<number, string> = new Map(),
+): void {
   if (process.platform === 'win32') {
     Bun.spawnSync(['taskkill.exe', '/pid', String(proc.pid), '/t', '/f'], {
       stdout: 'ignore',
@@ -243,47 +248,39 @@ function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
     });
     return;
   }
-  try {
-    process.kill(-proc.pid, 'SIGKILL');
-  } catch {
-    // A detached process group may already be gone or unavailable.
-  }
-  let listing = '';
-  try {
-    listing = Bun.spawnSync(['ps', '-Ao', 'pid=,ppid='], {
-      stdout: 'pipe',
-      stderr: 'ignore',
-    }).stdout.toString();
-  } catch {
-    listing = '';
-  }
-  const children = new Map<number, number[]>();
-  for (const line of listing.split('\n')) {
-    const [pidText, parentText] = line.trim().split(/\s+/);
-    const pid = Number(pidText);
-    const parent = Number(parentText);
-    if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
-    children.set(parent, [...(children.get(parent) ?? []), pid]);
-  }
-  const descendants: number[] = [];
-  const visit = (parent: number): void => {
-    for (const child of children.get(parent) ?? []) {
-      visit(child);
-      descendants.push(child);
+  // Snapshot first. Killing the coordinator group can reparent nested detached
+  // per-file/fixture groups and make them undiscoverable by PPID afterwards.
+  const owned = new Set([
+    ...knownIdentities.keys(),
+    ...(descendantPids(proc.pid) ?? []),
+    ...(processGroupPids(proc.pid) ?? []),
+  ]);
+  const identities = new Map(knownIdentities);
+  for (const pid of owned) {
+    if (!identities.has(pid)) {
+      const identity = readOsProcessStartIdentity(pid);
+      if (identity) identities.set(pid, identity);
     }
-  };
-  visit(proc.pid);
-  for (const pid of descendants) {
+  }
+  for (const pid of [...owned].reverse()) {
+    const expectedIdentity = identities.get(pid);
+    if (!expectedIdentity || readOsProcessStartIdentity(pid) !== expectedIdentity) continue;
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
       // The process may exit between discovery and termination.
     }
   }
-  try {
-    proc.kill('SIGKILL');
-  } catch {
-    // The process-group signal may already have reaped the leader.
+  if (proc.exitCode === null) {
+    try {
+      process.kill(-proc.pid, 'SIGKILL');
+    } catch {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        // The process-group signal may already have reaped the leader.
+      }
+    }
   }
 }
 
@@ -788,7 +785,8 @@ async function runProbe(
   if (timer) clearTimeout(timer);
   clearInterval(pidMonitor);
   if (outcome === 'timed_out') {
-    terminateProcessTree(proc);
+    sampleOwnedPids();
+    terminateFaultSoakProcessTree(proc, ownedPidIdentities);
     await proc.exited.catch(() => {});
   }
   sampleOwnedPids();

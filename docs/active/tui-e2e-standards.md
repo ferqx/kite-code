@@ -106,6 +106,13 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 8. PTY suite 必须串行运行，避免终端尺寸、端口和全局环境相互污染。
    Harness 单元测试由默认 `bun run test` 或显式 `bun run test:tui:harness` 执行；
    `scripts/run-tui-system-tests.ts` 只按 scenario 文件逐个启动独立 `bun test` 进程。
+   唯一例外是 fault-soak 通过 `--with-lifecycle-harness` 显式追加
+   `tui-lifecycle-resource.test.ts`；该参数不会发现或运行其他 harness 文件，普通
+   `test:tui:system` 也不得隐式包含 harness。这样 terminal taxonomy 的 PTY 场景与
+   focus-listener 同进程重复 lifecycle 证据在同一个 bounded probe 中收集，但仍保持独立进程。
+   fault-soak runner 必须先验证自身是 outer PGID owner，再让 per-file Bun、实际 TUI 与 lifecycle
+   fixture 继承该 group；普通 PTY suite 才为每个 child 创建独立 group。这样 `ps` inspection
+   不可用时，outer deadline 仍能通过一个已验证 PGID 回收完整 TUI 树。
    每个文件的本地基础硬超时为 240 秒，并与条件等待、Bun test 和 journey deadline 使用同一
    timeout scale；runner 会把实际 file budget 下传并自动保留 test/teardown 余量。自定义
    `KITE_TUI_TEST_FILE_TIMEOUT_MS` 时，内层 test 与 journey 会按该上限收缩，不能越过文件 deadline；
@@ -176,6 +183,8 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 - `bun run test`：默认快速门禁，包含 harness 单元测试，排除真实 PTY scenarios、smoke 与 spike。
 - `bun run test:tui:harness`：只运行快速 TUI harness 单元测试。
 - `bun run test:tui:system`：按文件串行执行完整 PTY suite。
+- `bun run scripts/run-tui-system-tests.ts --with-lifecycle-harness session-switch tool-lifecycle model-stream-reconnect`：
+  fault-soak 专用组合，显式追加一个 lifecycle harness；不是常规 PTY suite 入口。
 - `bun run test:tui:smoke:native`：
   在已安装 `sandbox-exec` 或 `bwrap` 的宿主机上显式验证 Full 模式真实 PTY 链路。
 - `bun run test:all`：先运行默认门禁，再运行完整 PTY suite。

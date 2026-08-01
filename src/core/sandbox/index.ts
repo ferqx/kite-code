@@ -23,6 +23,11 @@ export {
 } from './network-policy';
 export type { ResolveSandboxRuntimeOptions, SandboxBackend, SandboxRuntime } from './platform';
 export { detectSandboxBackend, isSandboxAvailable, resolveSandboxRuntime } from './platform';
+export {
+  currentProcessTreeCapabilityV1,
+  type ProcessTreeCapabilityEvidenceV1,
+  type ProcessTreeHardLimitMechanismV1,
+} from './process-tree-capability';
 export type {
   BoundaryEnforcementV1,
   ExecutionBackendCapabilitiesV1,

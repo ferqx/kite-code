@@ -33,6 +33,7 @@ export const executionBackendCapabilitiesV1Schema = z
         allowlist: enforcementSchema,
       })
       .strict(),
+    syscallFilter: enforcementSchema,
     processTreeLimit: enforcementSchema,
     childProcessInheritance: enforcementSchema,
     verifiedInProcessReadOnly: enforcementSchema,
@@ -224,6 +225,7 @@ function registryCanonicalValue(
             off: qualification.backendCapabilities.network.off,
             allowlist: qualification.backendCapabilities.network.allowlist,
           },
+          syscallFilter: qualification.backendCapabilities.syscallFilter,
           processTreeLimit: qualification.backendCapabilities.processTreeLimit,
           childProcessInheritance: qualification.backendCapabilities.childProcessInheritance,
           verifiedInProcessReadOnly: qualification.backendCapabilities.verifiedInProcessReadOnly,

@@ -23,6 +23,7 @@ function evidence(overrides: Partial<ProbeInput> = {}): ProbeInput {
     backend: 'bubblewrap',
     selectedNetworkMode: 'off',
     environmentIdentity: { exactOsVersion: 'enforced' },
+    backendIsolation: { syscallFilter: 'enforced' },
     entrypoints: { tui: 'enforced', foregroundCli: 'enforced' },
     filesystem: {
       workspaceRead: 'enforced',
@@ -44,6 +45,7 @@ function evidence(overrides: Partial<ProbeInput> = {}): ProbeInput {
     },
     network: { off: 'enforced', allowlist: 'enforced' },
     processTree: {
+      hardCountMechanism: 'cgroup_pids',
       hardCountLimit: 'enforced',
       killWithoutResidualDescendants: 'enforced',
     },
@@ -73,6 +75,37 @@ describe('platform capability probe admission', () => {
             killWithoutResidualDescendants: 'enforced',
           },
         }),
+      ),
+    ).toBe('excluded');
+  });
+
+  test('requires bubblewrap syscall-filter evidence but not a Seatbelt substitute', () => {
+    expect(
+      evaluatePlatformSupport(evidence({ backendIsolation: { syscallFilter: 'unsupported' } })),
+    ).toBe('excluded');
+    expect(
+      evaluatePlatformSupport(
+        evidence({
+          backend: 'seatbelt',
+          backendIsolation: { syscallFilter: 'unsupported' },
+        }),
+      ),
+    ).toBe('supported');
+  });
+
+  test('treats pre-extension V1 bubblewrap evidence as unsupported instead of throwing', () => {
+    const legacy = evidence();
+    delete legacy.backendIsolation;
+    expect(evaluatePlatformSupport(legacy)).toBe('excluded');
+  });
+
+  test('requires a named hard-count mechanism even when a legacy verdict claims enforced', () => {
+    const missingMechanism = evidence();
+    delete missingMechanism.processTree.hardCountMechanism;
+    expect(evaluatePlatformSupport(missingMechanism)).toBe('excluded');
+    expect(
+      evaluatePlatformSupport(
+        evidence({ processTree: { ...evidence().processTree, hardCountMechanism: 'none' } }),
       ),
     ).toBe('excluded');
   });

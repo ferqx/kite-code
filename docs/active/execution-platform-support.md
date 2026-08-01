@@ -5,7 +5,8 @@
 读取时机：修改 sandbox backend、production execution admission、process-tree 限制、
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
-验证：`bun test tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
+验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/process-tree-limit.test.ts
+tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
@@ -43,6 +44,9 @@ Workspace-bound 只读工具、network-off 和两个入口组合证据；当前�
 
 backend discovery、sandbox 命令成功、顶层 shell invocation permit、PID namespace、
 `--die-with-parent`、child 自然退出或 proxy 环境变量都不是对应能力的 enforcement evidence。
+`ProcessTreeCapabilityEvidenceV1` 把 hard-count limiter 与 termination cleanup 分开投影；只有具名的
+cgroup pids、Windows Job active-process limit 或已接受等价机制同时通过 native conformance，
+前者才能为 `enforced`。成功清理 process group/Job descendants 不会提升 hard-count verdict。
 探针无法执行或不能证明时按 `unavailable/unsupported` 处理，最终结论为 `excluded`。
 Linux backend detection 还会执行与真实 executor 相同的 PID/network namespace 最小启动探针；
 只有 binary 在 PATH 上但宿主禁止这些 namespace 时投影为 `backend=none`，而不是创建随后必败的
@@ -74,10 +78,12 @@ conformance，也没有平台因此进入支持集。
 Linux bubblewrap 的开发边界现已把 canonical Workspace 按 `workspace_write` 或 `read_only`
 分别投影为 rw/ro bind，并把逐 invocation runtime 显式 rw bind；runtime 清理在只暴露该 runtime
 和只读系统工具的独立 mount namespace 内执行，避免 nested symlink 把宿主清理重定向到
-Workspace 或其他宿主路径。Ubuntu workflow 会运行真实 executor 与 hostile cleanup 测试，
-验证 Workspace 写、read-only 拒绝、Workspace 外读取拒绝，以及多层 `000` 目录和 external
-symlink 下的 runtime 清理。protected path、seccomp strength、硬 process-tree 上限和完整
-child/入口继承仍未证明，因此 Linux 结论继续是 `excluded`。
+Workspace 或其他宿主路径。Ubuntu workflow 区分“namespace probe 可用并运行真实 executor”与
+“runner 禁止 user namespace 因而明确排除”；后者保持 `backend=none`，不能用绿色 workflow
+伪装 bubblewrap native qualification。probe 还单独投影 bubblewrap `syscallFilter` 强度；vendored
+binary 存在但没有 negative syscall conformance 时仍为 `unavailable`，并产生稳定 limitation。
+protected path、syscall filter、硬 process-tree 上限和完整 child/入口继承未证明时，Linux 结论
+继续是 `excluded`。
 
 ## ExecutionBoundaryV1 schema 与 composition gate
 

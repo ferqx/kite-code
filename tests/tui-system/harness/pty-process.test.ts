@@ -2,12 +2,21 @@ import { describe, expect, test } from 'bun:test';
 import {
   createPtyOutputBuffer,
   resolveTuiLaunchPaths,
+  shouldDetachTuiProcess,
   terminateOwnedProcessTree,
   verifiedOwnedProcessGroupId,
   waitForPtyExit,
   waitForPtyExitCode,
 } from './pty-process';
 import type { TestWorkspace } from './test-workspace';
+
+test('keeps ordinary TUI groups detached but joins the fault-soak owned group', () => {
+  expect(shouldDetachTuiProcess('darwin', undefined)).toBe(true);
+  expect(shouldDetachTuiProcess('linux', undefined)).toBe(true);
+  expect(shouldDetachTuiProcess('darwin', 'attempt-nonce')).toBe(false);
+  expect(shouldDetachTuiProcess('linux', 'attempt-nonce')).toBe(false);
+  expect(shouldDetachTuiProcess('win32', undefined)).toBe(false);
+});
 
 describe('waitForPtyExit', () => {
   test('resolves when the child reports an exit before the deadline', async () => {

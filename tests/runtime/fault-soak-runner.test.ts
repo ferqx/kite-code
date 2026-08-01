@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
+import { readOsProcessStartIdentity } from '../../scripts/runtime/process-start-identity';
 import {
   buildFaultSoakProbeArgs,
   captureBounded,
@@ -7,6 +9,8 @@ import {
   type RuntimeBudgetTelemetryRecord,
   runtimeBudgetUsage,
   type TelemetryRecord,
+  TUI_FAULT_SOAK_PROBE_ARGS,
+  terminateFaultSoakProcessTree,
 } from '../../scripts/runtime/run-fault-soak';
 
 function telemetryRecord(
@@ -45,6 +49,20 @@ function telemetryRecord(
 }
 
 describe('runtime fault soak runner', () => {
+  let processInspectionAvailable = false;
+  if (process.platform !== 'win32') {
+    try {
+      processInspectionAvailable =
+        Bun.spawnSync(['ps', '-Ao', 'pid=,ppid='], {
+          stdout: 'ignore',
+          stderr: 'ignore',
+        }).exitCode === 0;
+    } catch {
+      processInspectionAvailable = false;
+    }
+  }
+  const posixInspectionTest = processInspectionAvailable ? test : test.skip;
+
   test('uses bounded profile defaults and accepts explicit overrides', () => {
     expect(parseRuntimeFaultSoakOptions([])).toMatchObject({
       profile: 'ci',
@@ -87,6 +105,68 @@ describe('runtime fault soak runner', () => {
     expect(qualification[0]).toBe('run');
     expect(tui).toEqual(['run', 'scripts/run-tui-system-tests.ts']);
   });
+
+  test('binds TUI churn evidence to the explicit lifecycle harness and isolated scenarios', () => {
+    expect(TUI_FAULT_SOAK_PROBE_ARGS).toEqual([
+      'run',
+      'scripts/run-tui-system-tests.ts',
+      '--with-lifecycle-harness',
+      'session-switch',
+      'tool-lifecycle',
+      'model-stream-reconnect',
+    ]);
+  });
+
+  posixInspectionTest(
+    'reaps nested detached process groups when the outer soak probe times out',
+    async () => {
+      const fixture = join(import.meta.dir, '..', 'fixtures', 'fault-soak-nested-process-tree.ts');
+      const proc = Bun.spawn([process.execPath, fixture], {
+        detached: true,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const identities = new Map<number, string>();
+      try {
+        const reader = proc.stdout.getReader();
+        let output = '';
+        while (output.trim().split(/\s+/).length < 2) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          output += new TextDecoder().decode(chunk.value);
+        }
+        reader.releaseLock();
+        const nestedPids = output.trim().split(/\s+/).map(Number);
+        expect(nestedPids).toHaveLength(2);
+        expect(nestedPids.every(Number.isInteger)).toBe(true);
+        for (const pid of nestedPids) {
+          const identity = readOsProcessStartIdentity(pid);
+          if (identity) identities.set(pid, identity);
+        }
+
+        terminateFaultSoakProcessTree(proc, identities);
+        await proc.exited;
+        for (const pid of nestedPids) {
+          let gone = false;
+          for (let attempt = 0; attempt < 100; attempt += 1) {
+            try {
+              process.kill(pid, 0);
+            } catch (error) {
+              gone = (error as NodeJS.ErrnoException).code === 'ESRCH';
+              if (gone) break;
+            }
+            await Bun.sleep(25);
+          }
+          expect(gone).toBe(true);
+        }
+      } finally {
+        terminateFaultSoakProcessTree(proc, identities);
+        if (proc.exitCode === null) {
+          await proc.exited.catch(() => {});
+        }
+      }
+    },
+  );
 
   test('derives qualification metrics only after a same-process warm-up rerun', () => {
     const records = [100, 110, 120, 130, 140, 150, 160, 170, 180].map((rssBytes, index) =>

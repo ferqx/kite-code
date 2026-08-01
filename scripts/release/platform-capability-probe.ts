@@ -13,7 +13,12 @@ import { join, resolve } from 'node:path';
 import { generateBwrapArgs } from '../../src/core/sandbox/bwrap';
 import { readExecutionEnvironmentIdentityV1 } from '../../src/core/sandbox/environment-identity';
 import { detectSandboxBackend, type SandboxBackend } from '../../src/core/sandbox/platform';
+import {
+  currentProcessTreeCapabilityV1,
+  type ProcessTreeHardLimitMechanismV1,
+} from '../../src/core/sandbox/process-tree-capability';
 import { generateSandboxProfile } from '../../src/core/sandbox/profile';
+import { findApplySeccomp } from '../../src/core/sandbox/seccomp';
 
 export type NativeProbeVerdict = 'enforced' | 'unsupported' | 'unavailable';
 export type PlatformSupportOutcome = 'supported' | 'read_only_only' | 'excluded';
@@ -31,6 +36,10 @@ export interface PlatformCapabilityEvidenceV1 {
   selectedNetworkMode: 'off' | 'allowlist';
   environmentIdentity: {
     exactOsVersion: NativeProbeVerdict;
+  };
+  backendIsolation?: {
+    /** Bubblewrap requires independent syscall-filter conformance before support. */
+    syscallFilter: NativeProbeVerdict;
   };
   entrypoints: {
     tui: NativeProbeVerdict;
@@ -59,6 +68,8 @@ export interface PlatformCapabilityEvidenceV1 {
     allowlist: NativeProbeVerdict;
   };
   processTree: {
+    /** Additive V1 field; absent legacy artifacts normalize to `none`. */
+    hardCountMechanism?: ProcessTreeHardLimitMechanismV1;
     hardCountLimit: Exclude<NativeProbeVerdict, 'unavailable'>;
     killWithoutResidualDescendants: Exclude<NativeProbeVerdict, 'unavailable'>;
   };
@@ -75,6 +86,10 @@ export interface PlatformCapabilityEvidenceV1 {
 }
 
 type EvidenceWithoutDigest = Omit<PlatformCapabilityEvidenceV1, 'digest'>;
+type PlatformCapabilityProbeInputV1 = Omit<
+  EvidenceWithoutDigest,
+  'outcome' | 'productionSupported' | 'limitations'
+>;
 type FilesystemProbeResult = PlatformCapabilityEvidenceV1['filesystem'] & {
   shellGrandchildDeny: NativeProbeVerdict;
 };
@@ -115,6 +130,9 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
         selectedNetworkMode: 'off',
         environmentIdentity: {
           exactOsVersion: environmentIdentity.exactOsVersionAvailable ? 'enforced' : 'unavailable',
+        },
+        backendIsolation: {
+          syscallFilter: currentSyscallFilterVerdict(backend),
         },
         // This spike exercises the concrete backend generator directly. Task
         // 1B.7 must prove that both production composition roots install the
@@ -160,8 +178,9 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
 }
 
 export function evaluatePlatformSupport(
-  evidence: Omit<EvidenceWithoutDigest, 'outcome' | 'productionSupported' | 'limitations'>,
+  evidence: PlatformCapabilityProbeInputV1,
 ): PlatformSupportOutcome {
+  const hardCountMechanism = evidence.processTree.hardCountMechanism ?? 'none';
   const selectedNetworkBoundary =
     evidence.selectedNetworkMode === 'off' ? evidence.network.off : evidence.network.allowlist;
   const processCapabilities = [
@@ -190,9 +209,11 @@ export function evaluatePlatformSupport(
     evidence.inheritance.shellGrandchild,
     evidence.inheritance.forkedSkill,
     evidence.inheritance.localStdioMcp,
+    ...(evidence.backend === 'bubblewrap' ? [syscallFilterVerdict(evidence)] : []),
   ];
   if (
     evidence.backend !== 'none' &&
+    hardCountMechanism !== 'none' &&
     processCapabilities.every((verdict) => verdict === 'enforced')
   ) {
     return 'supported';
@@ -507,24 +528,34 @@ async function probeProcessTree(
   backend: SandboxBackend,
   workspace: string,
 ): Promise<PlatformCapabilityEvidenceV1['processTree']> {
-  if (backend === 'none') {
-    return {
-      hardCountLimit: 'unsupported',
-      killWithoutResidualDescendants: 'unsupported',
-    };
+  if (backend !== 'none') {
+    await runSandboxCommand(
+      backend,
+      workspace,
+      'sleep 0.2 & sleep 0.2 & sleep 0.2 & sleep 0.2 & wait',
+      {},
+    );
   }
-  await runSandboxCommand(
-    backend,
-    workspace,
-    'sleep 0.2 & sleep 0.2 & sleep 0.2 & sleep 0.2 & wait',
-    {},
-  );
+  const projection = currentProcessTreeCapabilityV1(backend);
   return {
-    // The production boundary has no per-invocation hard process-tree counter.
-    hardCountLimit: 'unsupported',
-    // Natural child exit is not proof of bounded cancellation cleanup.
-    killWithoutResidualDescendants: 'unsupported',
+    hardCountMechanism: projection.hardCountMechanism,
+    hardCountLimit: projection.hardCountLimit,
+    killWithoutResidualDescendants: projection.terminationCleanup,
   };
+}
+
+function currentSyscallFilterVerdict(backend: SandboxBackend): NativeProbeVerdict {
+  if (backend === 'none') return 'unavailable';
+  if (backend !== 'bubblewrap') return 'unsupported';
+  // Binary presence is not syscall-denial conformance. Keep the verdict
+  // unavailable until a native negative syscall fixture proves enforcement.
+  return findApplySeccomp() ? 'unavailable' : 'unsupported';
+}
+
+function syscallFilterVerdict(evidence: PlatformCapabilityProbeInputV1): NativeProbeVerdict {
+  // Early V1 artifacts did not carry this additive field. Missing evidence is
+  // never inferred from backend discovery; it normalizes fail-closed.
+  return evidence.backendIsolation?.syscallFilter ?? 'unsupported';
 }
 
 async function runSandboxCommand(
@@ -639,10 +670,16 @@ function collectLimitations(
   const limitations: string[] = [];
   if (evidence.environmentIdentity.exactOsVersion !== 'enforced')
     limitations.push('exact_os_version_not_available');
+  if (evidence.backend === 'bubblewrap' && syscallFilterVerdict(evidence) !== 'enforced') {
+    limitations.push('bubblewrap_syscall_filter_not_proven');
+  }
   if (evidence.entrypoints.tui !== 'enforced')
     limitations.push('tui_boundary_composition_not_proven');
   if (evidence.entrypoints.foregroundCli !== 'enforced')
     limitations.push('foreground_cli_boundary_composition_not_proven');
+  if ((evidence.processTree.hardCountMechanism ?? 'none') === 'none') {
+    limitations.push('process_tree_hard_limit_mechanism_not_proven');
+  }
   if (evidence.filesystem.workspaceRead !== 'enforced')
     limitations.push('workspace_read_not_proven');
   if (evidence.filesystem.workspaceReadOnly !== 'enforced')
