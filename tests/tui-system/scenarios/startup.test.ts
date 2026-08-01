@@ -6,8 +6,9 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -23,23 +24,18 @@ describe('TUI PTY System — Startup', () => {
     workspace = createTestWorkspace();
     workspace.env.CI = 'true';
 
-    server.setResponses([{ message: { content: 'Hello from PTY test!' } }]);
+    server.setResponses([]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   test(
     'renders the prompt, footer, and Kite Code branding in a CI-backed PTY',
     async () => {
-      await waitForText(() => tui.viewport(), '❯', 15000);
       await waitForText(() => tui.viewport(), 'shortcuts', 10000);
       const output = await waitForText(() => tui.viewport(), 'Kite Code', 5000);
       expect(screenContains(output, '❯')).toBe(true);

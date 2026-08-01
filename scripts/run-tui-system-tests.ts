@@ -1,8 +1,16 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  terminateOwnedProcessTree,
+  verifiedOwnedProcessGroupId,
+} from '../tests/tui-system/harness/pty-process';
+import { nestedTuiDeadlineBudget, tuiWaitTimeout } from '../tests/tui-system/harness/timing';
 
-const DEFAULT_FILE_TIMEOUT_MS = 180_000;
-const harnessDir = join(process.cwd(), 'tests', 'tui-system', 'harness');
+const DEFAULT_FILE_TIMEOUT_MS = 240_000;
+const DEFAULT_BUN_TEST_TIMEOUT_MS = 170_000;
+const DEFAULT_JOURNEY_DEADLINE_MS = 165_000;
+const FILE_TEARDOWN_MARGIN_MS = 10_000;
+const TEST_TEARDOWN_MARGIN_MS = 5_000;
 const scenariosDir = join(process.cwd(), 'tests', 'tui-system', 'scenarios');
 const faultSoakRepeatCount = positiveInteger(process.env.KITE_FAULT_SOAK_REPEAT_COUNT, 1);
 
@@ -28,63 +36,39 @@ function scenarioFiles(): string[] {
   return selected.map((name) => join(scenariosDir, name));
 }
 
-function harnessTestFiles(): string[] {
-  return readdirSync(harnessDir)
-    .filter((name) => name.endsWith('.test.ts') || name.endsWith('.test.tsx'))
-    .sort()
-    .map((name) => join(harnessDir, name));
-}
-
-function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
-  if (process.platform === 'win32') {
-    Bun.spawnSync(['taskkill.exe', '/pid', String(proc.pid), '/t', '/f'], {
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
-    return;
-  }
-  const listing = Bun.spawnSync(['ps', '-Ao', 'pid=,ppid='], {
-    stdout: 'pipe',
-    stderr: 'ignore',
-  }).stdout.toString();
-  const children = new Map<number, number[]>();
-  for (const line of listing.split('\n')) {
-    const [pidText, parentText] = line.trim().split(/\s+/);
-    const pid = Number(pidText);
-    const parent = Number(parentText);
-    if (!Number.isInteger(pid) || !Number.isInteger(parent)) continue;
-    children.set(parent, [...(children.get(parent) ?? []), pid]);
-  }
-  const descendants: number[] = [];
-  const visit = (parent: number) => {
-    for (const child of children.get(parent) ?? []) {
-      visit(child);
-      descendants.push(child);
-    }
-  };
-  visit(proc.pid);
-  for (const pid of descendants) {
-    try {
-      process.kill(pid, 'SIGKILL');
-    } catch {
-      // The child may have exited between the process snapshot and the kill.
-    }
-  }
-  proc.kill('SIGKILL');
-}
-
 async function runFile(file: string, timeoutMs: number): Promise<number> {
   console.log(`\n[tui-system] ${file}`);
-  const proc = Bun.spawn([process.execPath, 'test', '--parallel=1', '--max-concurrency=1', file], {
-    cwd: process.cwd(),
-    env: {
-      ...process.env,
-      KITE_FAULT_SOAK_REPEAT_COUNT: String(faultSoakRepeatCount),
-    },
-    stdin: 'inherit',
-    stdout: 'inherit',
-    stderr: 'inherit',
+  const { bunTestTimeoutMs, journeyDeadlineMs } = nestedTuiDeadlineBudget({
+    fileTimeoutMs: timeoutMs,
+    requestedBunTestTimeoutMs: tuiWaitTimeout(DEFAULT_BUN_TEST_TIMEOUT_MS),
+    requestedJourneyDeadlineMs: tuiWaitTimeout(DEFAULT_JOURNEY_DEADLINE_MS),
+    fileTeardownMarginMs: FILE_TEARDOWN_MARGIN_MS,
+    testTeardownMarginMs: TEST_TEARDOWN_MARGIN_MS,
   });
+  const proc = Bun.spawn(
+    [
+      process.execPath,
+      'test',
+      '--parallel=1',
+      '--max-concurrency=1',
+      '--timeout',
+      String(bunTestTimeoutMs),
+      file,
+    ],
+    {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        KITE_FAULT_SOAK_REPEAT_COUNT: String(faultSoakRepeatCount),
+        KITE_TUI_TEST_JOURNEY_DEADLINE_MS: String(journeyDeadlineMs),
+      },
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+      detached: process.platform !== 'win32',
+    },
+  );
+  const processGroupId = verifiedOwnedProcessGroupId(proc.pid);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<'timeout'>((resolve) => {
@@ -95,22 +79,20 @@ async function runFile(file: string, timeoutMs: number): Promise<number> {
 
   if (result === 'timeout') {
     console.error(`[tui-system] timed out after ${timeoutMs}ms: ${file}`);
-    terminateProcessTree(proc);
-    await proc.exited.catch(() => {});
+    await terminateOwnedProcessTree(proc, processGroupId).catch(() => {});
     return 124;
   }
+  await terminateOwnedProcessTree(proc, processGroupId).catch(() => {});
   return result;
 }
 
 const timeoutMs = positiveInteger(
   process.env.KITE_TUI_TEST_FILE_TIMEOUT_MS,
-  DEFAULT_FILE_TIMEOUT_MS,
+  tuiWaitTimeout(DEFAULT_FILE_TIMEOUT_MS),
 );
-const harnessFiles = harnessTestFiles();
 const scenarios = scenarioFiles();
-const files = [...harnessFiles, ...scenarios];
 
-for (const file of files) {
+for (const file of scenarios) {
   const exitCode = await runFile(file, timeoutMs);
   if (exitCode !== 0) {
     console.error(`[tui-system] failed with exit code ${exitCode}: ${file}`);
@@ -118,6 +100,4 @@ for (const file of files) {
   }
 }
 
-console.log(
-  `\n[tui-system] passed ${harnessFiles.length} harness files and ${scenarios.length} isolated PTY scenario files`,
-);
+console.log(`\n[tui-system] passed ${scenarios.length} isolated PTY scenario files`);

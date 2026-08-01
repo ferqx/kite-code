@@ -1,14 +1,13 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntimeStore, runtimeStorePathFor } from '@/core/runtime/store';
 import {
   createTestWorkspace,
-  isPersistedRuntimeNotReady,
-  persistedCommandSession,
-  persistedSessionIds,
-  persistedSessionSummaries,
+  observePersistedCommandSession,
+  observePersistedSessionIds,
+  observePersistedSessionSummaries,
   type TestWorkspace,
 } from './test-workspace';
 
@@ -23,45 +22,51 @@ describe('TUI persisted Runtime observers', () => {
   test('reports an uninitialized isolated workspace as not yet persisted', () => {
     workspace = createTestWorkspace();
 
-    expect(persistedSessionIds(workspace)).toEqual([]);
-    expect(persistedSessionSummaries(workspace)).toEqual([]);
-    expect(persistedCommandSession(workspace, '/compact marker')).toBeUndefined();
+    expect(observePersistedSessionIds(workspace)).toMatchObject({ status: 'not_created' });
+    expect(observePersistedSessionSummaries(workspace)).toMatchObject({
+      status: 'not_created',
+    });
+    expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
+      status: 'not_created',
+    });
   });
 
-  test('classifies the Linux readonly directory error without hiding unrelated I/O faults', () => {
-    expect(
-      isPersistedRuntimeNotReady(
-        Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR_FSTAT' }),
-        true,
-      ),
-    ).toBe(true);
-    expect(
-      isPersistedRuntimeNotReady(Object.assign(new Error('disk I/O error'), { errno: 266 }), true),
-    ).toBe(true);
-    expect(
-      isPersistedRuntimeNotReady(
-        Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR_FSTAT' }),
-        false,
-      ),
-    ).toBe(false);
-    expect(
-      isPersistedRuntimeNotReady(
-        Object.assign(new Error('short read'), { code: 'SQLITE_IOERR' }),
-        true,
-      ),
-    ).toBe(false);
-  });
-
-  test('treats a temporarily unopenable Runtime path as not ready for bounded polling', () => {
+  test('fails fast when the Runtime database path is a directory', () => {
     workspace = createTestWorkspace();
     const runtimePath = runtimeStorePathFor(
       join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
     );
     mkdirSync(runtimePath);
 
-    expect(persistedSessionIds(workspace)).toEqual([]);
-    expect(persistedSessionSummaries(workspace)).toEqual([]);
-    expect(persistedCommandSession(workspace, '/compact marker')).toBeUndefined();
+    expect(() => observePersistedSessionIds(workspace!)).toThrow(
+      'Failed to observe isolated Runtime Store',
+    );
+  });
+
+  test('treats an existing database without Runtime schema as not ready', () => {
+    workspace = createTestWorkspace();
+    const runtimePath = runtimeStorePathFor(
+      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
+    );
+    new Database(runtimePath).close();
+
+    expect(observePersistedSessionIds(workspace)).toMatchObject({ status: 'initializing' });
+    expect(observePersistedSessionSummaries(workspace)).toMatchObject({ status: 'initializing' });
+    expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
+      status: 'initializing',
+    });
+  });
+
+  test('fails fast when the Runtime database is corrupt', () => {
+    workspace = createTestWorkspace();
+    const runtimePath = runtimeStorePathFor(
+      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
+    );
+    writeFileSync(runtimePath, 'not a sqlite database');
+
+    expect(() => observePersistedSessionSummaries(workspace!)).toThrow(
+      'Failed to observe isolated Runtime Store',
+    );
   });
 
   test('reads exact persistence evidence without competing with the child writer', () => {
@@ -87,15 +92,22 @@ describe('TUI persisted Runtime observers', () => {
     writer.run('PRAGMA journal_mode = WAL');
     writer.run('BEGIN IMMEDIATE');
     try {
-      expect(persistedSessionIds(workspace)).toEqual(['thread-a']);
-      expect(persistedSessionSummaries(workspace)).toEqual([
-        { threadId: 'thread-a', name: 'Command session' },
-      ]);
-      expect(persistedCommandSession(workspace, '/compact marker')).toEqual({
-        threadId: 'thread-a',
-        name: 'Command session',
+      expect(observePersistedSessionIds(workspace)).toMatchObject({
+        status: 'ready',
+        value: ['thread-a'],
       });
-      expect(persistedCommandSession(workspace, '/compact other')).toBeUndefined();
+      expect(observePersistedSessionSummaries(workspace)).toMatchObject({
+        status: 'ready',
+        value: [{ threadId: 'thread-a', name: 'Command session' }],
+      });
+      expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
+        status: 'ready',
+        value: { threadId: 'thread-a', name: 'Command session' },
+      });
+      expect(observePersistedCommandSession(workspace, '/compact other')).toMatchObject({
+        status: 'ready',
+        value: undefined,
+      });
     } finally {
       writer.run('ROLLBACK');
       writer.close();
@@ -121,12 +133,13 @@ describe('TUI persisted Runtime observers', () => {
       },
     ]);
     try {
-      expect(persistedSessionSummaries(workspace)).toEqual([
-        { threadId: 'thread-empty', name: 'thread-empty' },
-      ]);
-      expect(persistedCommandSession(workspace, '/compact empty')).toEqual({
-        threadId: 'thread-empty',
-        name: 'thread-empty',
+      expect(observePersistedSessionSummaries(workspace)).toMatchObject({
+        status: 'ready',
+        value: [{ threadId: 'thread-empty', name: 'thread-empty' }],
+      });
+      expect(observePersistedCommandSession(workspace, '/compact empty')).toMatchObject({
+        status: 'ready',
+        value: { threadId: 'thread-empty', name: 'thread-empty' },
       });
     } finally {
       store.close();

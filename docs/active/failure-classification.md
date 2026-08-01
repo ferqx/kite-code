@@ -69,3 +69,11 @@ tree 超限仅在 cleanup 有明确正向证据时以
 
 `terminalOutcomeV1=false` 只关闭 CLI 派生的 `terminalPresentation`；Runtime 仍规范化和持久化
 outcome，因此 rollback 客户端仍可直接读取 status/reasonCode，不能把 unknown 当 completed。
+
+父 Runtime 与 Subagent descendant 的 budget admission 使用同一个 terminal adapter。child
+tool/shell waiter 超时的 typed reason 分别为 `tool_concurrency_saturated` /
+`shell_concurrency_saturated`，累计额度不足为 `budget_exhausted`，已有 unknown invocation 为
+`reconciliation_required`；这些错误必须穿透 Subagent runner、Task Tool 和 Tool Controller，
+最终形成 canonical `run.error + turn.aborted`，不能被转换成普通 Tool Result 或 Subagent summary。
+adapter 会合并整个 run 已知的 external-effect facts，因此存在未确认 dispatch 时仍保守投影为
+unknown/reconciliation，而不会为了显示 saturation 丢失外部副作用事实。

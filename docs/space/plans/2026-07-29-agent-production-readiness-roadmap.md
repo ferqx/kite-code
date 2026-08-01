@@ -42,7 +42,8 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   production artifact；当前 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
   route 集合也为空。
 - 1B.0/1B.1/1B.4 与 1C.1–1C.6 已完成；D-04 以空支持集关闭。1B.2/1B.3
-  与 1C.7 正在执行；1C.8 与其他后续 milestone 均为 pending。
+  与 1C.7 正在执行；1C.8 与其他后续 milestone 均为 pending。1C.8 已开始不产生 milestone
+  的 pre-close 文档审计，但完成与 `MS:1C-DONE` 仍等待 1C.7 qualification artifact。
 
 ## 首发支持边界
 

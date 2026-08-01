@@ -12,9 +12,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -31,7 +32,6 @@ describe('TUI PTY System — Approval Escape', () => {
 
     // Response #1: shell_execute tool call that needs approval
     // Response #2: normal response for the second user message after Escape cancel
-    // Response #3-6: spares for generateSessionName + potential retries
     server.setResponses([
       {
         message: {
@@ -46,26 +46,17 @@ describe('TUI PTY System — Approval Escape', () => {
         },
       },
       { message: { content: 'Second message received after cancel.' } },
-      { message: { content: 'Spare 1' } },
-      { message: { content: 'Spare 2' } },
-      { message: { content: 'Spare 3' } },
-      { message: { content: 'Spare 4' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Approval → Escape → Cancel & Recover → Send Again ────
@@ -88,7 +79,7 @@ describe('TUI PTY System — Approval Escape', () => {
 
       // Press Escape to cancel the approval
       tui.write('\x1b');
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
+      await waitForTuiReady(tui);
 
       // TUI should recover — prompt visible (approval cancelled)
       const afterOutput = tui.viewport();

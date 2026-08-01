@@ -57,6 +57,8 @@ export interface MockModelServer {
   setModelsResponse(response: { status?: number; delay?: number; models?: string[] }): void;
   /** GET URLs received by the local model-discovery fixture. */
   getModelRequests(): string[];
+  /** Fail when requests exceeded the queue or configured responses remain unused. */
+  assertComplete(): void;
   /** Stop the server */
   stop(): void;
 }
@@ -73,9 +75,11 @@ export interface MockModelServer {
  */
 export function createMockModelServer(): MockModelServer {
   let responses: MockResponse[] = [];
+  let responseCursor = 0;
   let callCount = 0;
-  let requests: MockChatRequest[] = [];
-  let modelRequests: string[] = [];
+  const requests: MockChatRequest[] = [];
+  const modelRequests: string[] = [];
+  const unexpectedRequests: number[] = [];
   let modelsResponse: { status: number; delay: number; models: string[] } = {
     status: 200,
     delay: 0,
@@ -121,16 +125,17 @@ export function createMockModelServer(): MockModelServer {
         const idx = callCount;
         callCount++;
 
-        // Wrap around if out of responses (defensive)
-        const resp = responses[idx % responses.length || 0];
+        const resp = responses[responseCursor++];
         if (!resp) {
+          unexpectedRequests.push(idx);
           return new Response(
             JSON.stringify({
-              choices: [
-                { index: 0, message: { role: 'assistant', content: '' }, finish_reason: 'stop' },
-              ],
+              error: {
+                message: `Unexpected model request ${idx + 1}: response queue exhausted`,
+                type: 'test_fixture_error',
+              },
             }),
-            { headers: { 'content-type': 'application/json' } },
+            { status: 500, headers: { 'content-type': 'application/json' } },
           );
         }
 
@@ -338,10 +343,13 @@ export function createMockModelServer(): MockModelServer {
     baseURL,
     port,
     setResponses(r: MockResponse[]) {
-      responses = r;
-      callCount = 0;
-      requests = [];
-      modelRequests = [];
+      if (responseCursor < responses.length) {
+        throw new Error(
+          `Cannot replace mock response phase with ${responses.length - responseCursor} unconsumed response(s).`,
+        );
+      }
+      responses = [...r];
+      responseCursor = 0;
     },
     getRequestCount: () => callCount,
     getRequests: () => [...requests],
@@ -359,6 +367,23 @@ export function createMockModelServer(): MockModelServer {
       };
     },
     getModelRequests: () => [...modelRequests],
+    assertComplete() {
+      const failures: string[] = [];
+      if (unexpectedRequests.length > 0) {
+        failures.push(
+          `response queue exhausted for request(s): ${unexpectedRequests
+            .map((index) => index + 1)
+            .join(', ')}`,
+        );
+      }
+      if (responseCursor < responses.length) {
+        failures.push(
+          `${responses.length - responseCursor} configured response(s) were unconsumed`,
+        );
+      }
+      if (failures.length > 0)
+        throw new Error(`Mock model fixture incomplete: ${failures.join('; ')}`);
+    },
     stop: () => server.stop(),
   };
 }

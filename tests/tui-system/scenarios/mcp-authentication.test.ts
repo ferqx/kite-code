@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { startTestHttpServer } from '../../helpers/test-http-server';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
 import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
@@ -13,10 +14,12 @@ describe('TUI PTY System — MCP authentication recovery', () => {
   let workspace: TestWorkspace | undefined;
 
   afterEach(async () => {
-    authServer?.stop(true);
-    modelServer?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({
+      tuis: [tui],
+      mockServers: [modelServer],
+      servers: [authServer],
+      workspaces: [workspace],
+    });
   });
 
   test('publishes login-required without browser navigation and exposes it through /mcp', async () => {
@@ -34,7 +37,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       },
     });
     modelServer = createMockModelServer();
-    modelServer.setResponses([{ message: { content: 'unused' } }]);
+    modelServer.setResponses([]);
     workspace = createTestWorkspace({
       configOverrides: {
         mcpServers: {
@@ -43,13 +46,10 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
     await waitForCondition(() => mcpRequests > 0, 'initial MCP connection attempt', 5_000);
     expect(mcpRequests).toBeGreaterThan(0);
     expect(authorizationRequests).toBe(0);
-
-    tui.setRawMode(true);
     await submitCommand(tui, '/mcp');
     await waitForText(() => tui!.outputSinceLastAction(), 'oauth · ✘ login required', 10_000);
     tui.write('\r');
@@ -102,7 +102,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     });
     baseUrl = authServer.url.origin;
     modelServer = createMockModelServer();
-    modelServer.setResponses([{ message: { content: 'unused' } }]);
+    modelServer.setResponses([]);
     workspace = createTestWorkspace({
       configOverrides: {
         mcpServers: {
@@ -117,10 +117,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     });
     workspace.env.NODE_ENV = 'test';
     workspace.env.KITE_TEST_MCP_CREDENTIAL_STORE = 'memory';
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
-
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
     await submitCommand(tui, '/mcp');
     await waitForText(() => tui!.outputSinceLastAction(), 'oauth · ✘ login required', 10_000);
     tui.write('\r');
@@ -159,10 +156,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
-    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
-
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
     await typeText(tui, 'continue without required provider');
     tui.write('\r');
     await waitForText(() => tui!.outputSinceLastAction(), "Required MCP provider 'oauth'", 15_000);
@@ -283,16 +277,13 @@ describe('TUI PTY System — MCP authentication recovery', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = spawnTui({
+    tui = await spawnReadyTui({
       cols: 120,
       rows: 40,
       mockServer: modelServer,
       workspace,
       remoteMcpEgressPermitResolver: 'allow-each-invocation',
     });
-    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
-
-    tui.setRawMode(true);
     await typeText(tui, 'call the recoverable echo tool');
     tui.write('\r');
     await waitForRequestMessage(modelServer, 'call the recoverable echo tool', 15_000);

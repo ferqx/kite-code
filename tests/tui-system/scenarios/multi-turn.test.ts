@@ -8,10 +8,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -38,21 +39,13 @@ describe('TUI PTY System — Multi-turn Messages', () => {
     server.setResponses([
       { message: { content: 'Hello! I completed my task.' }, delay: 50 },
       { message: { content: 'Second PTY turn response' }, delay: 50 },
-      { message: { content: 'Second PTY turn response' }, delay: 50 },
-      { message: { content: 'Second PTY turn response' }, delay: 50 },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── First Turn: Agent Completes → Idle Recovery ────────────
@@ -96,5 +89,5 @@ describe('TUI PTY System — Multi-turn Messages', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

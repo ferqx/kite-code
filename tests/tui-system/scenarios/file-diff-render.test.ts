@@ -24,10 +24,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -53,7 +54,6 @@ describe('TUI PTY System — File Tool Diff Render', () => {
     // Turn 1: write_file overwrites notes.md → diff summary, verb Write
     // Turn 2: write_file creates changelog.md → plain summary, verb Create
     // Turn 3: write_file rewrites changelog.md identically → no-change, verb Write
-    // Spares for generateSessionName + potential retries
     server.setResponses([
       {
         message: {
@@ -94,24 +94,16 @@ describe('TUI PTY System — File Tool Diff Render', () => {
         },
       },
       { message: { content: 'Changelog re-verified.' } },
-      { message: { content: 'diff render spare 1' } },
-      { message: { content: 'diff render spare 2' } },
-      { message: { content: 'diff render spare 3' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Turn 1: overwrite → Write verb + diff summary intact ───
@@ -204,5 +196,5 @@ describe('TUI PTY System — File Tool Diff Render', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

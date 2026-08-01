@@ -17,7 +17,8 @@ Task 1C.7 已以上述 qualification head 激活，负责 soak/fault evidence。
 TUI input-focus 专用 Ink child 与手动 Ubuntu qualification workflow 的实现；本地 CI profile 7/7
 通过，单轮 qualification 诊断的全部资源指标可用且无增长/清理失败，只因少于 8 轮返回
 `qualification_iterations_insufficient`。该任务保持 active，等待 Ubuntu workflow 产出 `status=passed` qualification
-artifact 后关闭；1C.8 继续按依赖保持未绑定。规范记录见
+artifact 后关闭；1C.8 已开始不依赖该 artifact 的 pre-close 文档审计，但完成状态与
+`MS:1C-DONE` 继续按依赖保持未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
@@ -426,6 +427,19 @@ workspace trust 使用可观察的 Up/Down 输入握手并及时
 - `docs/book/10-持久化与会话管理.md`
 - `docs/documentation-map.json`
 - 对应 ADR。
+
+2026-08-01 pre-close 审计已确认：四份指定 active 文档、Book 04/10 与 ADR-0055 已反映当前
+预算、调度、取消、恢复和终态实现；Book 06 已补齐父/子 Agent 共享 ledger、child reservation、
+compound permit 与 unknown/reconciliation 语义。独立审查发现的 child admission 缺口已通过
+durable FIFO waiter、原子 promotion + reservation、有界 deadline、canonical failure terminal 与
+resource-only late reconciliation 补强；artifact bytes 明确计入产出它的 child tool/MCP
+reservation，不虚构独立 invocation。documentation map 已把 Runtime/Subagent 变更路由到当前
+active 与协作章节；ADR-0055 继续作为已接受决策，不能替代当前行为文档。Task 1C.6 历史完成
+记录中跨隔离进程的 PTY 指标已降级为诊断，不再称为 qualification 资源趋势证据。
+
+该 pre-close 收敛不满足 1C.8 的依赖，也不产生 milestone。仍需取得 1C.7 的 Ubuntu 8 轮
+`status=passed` artifact，校验报告 identity/digest/cleanup/resource evidence，再更新完成记录、
+decision register、plan index/roadmap 和本计划终态。
 
 实现、故障矩阵、soak、迁移和文档门禁全部收敛后，本任务唯一产生 `MS:1C-DONE`。
 

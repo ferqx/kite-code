@@ -1,20 +1,17 @@
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { RuntimeUserAction } from './actions';
 import type { RuntimeEvent } from './events';
-import { resolveFailureModeV1 } from './failure-mode-conformance';
 import { classifyFailure } from './failures';
 import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
+import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import {
   planRuntimeBudgetAdmissionV1,
-  type RuntimeBudgetAdmissionReasonV1,
   reconciliationEventsForReservationsV1,
 } from './resource-budget-admission';
 import { decideNextEffect } from './scheduler';
-import {
-  completedTerminalOutcomeV1,
-  failedTerminalOutcomeV1,
-  type RunTerminalOutcomeV1,
-} from './terminal-outcome';
+import { completedTerminalOutcomeV1, failedTerminalOutcomeV1 } from './terminal-outcome';
+
+export { resolveResourceAdmissionFailureOutcomeV1 } from './resource-admission-terminal';
 
 export interface RuntimeActionProvider {
   requestAction(
@@ -72,7 +69,8 @@ async function* executeEffectWithStreaming(
   reservationIds: string[] = [],
 ): AsyncGenerator<RuntimeEvent, EffectExecutionOutcome> {
   const pending: Array<{
-    event: RuntimeEvent;
+    events: RuntimeEvent[];
+    mode?: 'late_resource_reconciliation';
     resolve?: (applied: boolean) => void;
     reject?: (error: unknown) => void;
   }> = [];
@@ -82,11 +80,12 @@ async function* executeEffectWithStreaming(
   let failure: unknown;
 
   const enqueue = (
-    event: RuntimeEvent,
+    events: RuntimeEvent[],
     resolve?: (applied: boolean) => void,
     reject?: (error: unknown) => void,
+    mode?: 'late_resource_reconciliation',
   ) => {
-    pending.push({ event, resolve, reject });
+    pending.push({ events, resolve, reject, mode });
     wake?.();
     wake = null;
   };
@@ -94,13 +93,22 @@ async function* executeEffectWithStreaming(
     lease.effect,
     kernel.getState(),
     (event) => {
-      enqueue(event);
+      enqueue([event]);
     },
     {
       reservationIds,
+      getState: () => kernel.getState(),
       persistEvent: (event) =>
         new Promise<boolean>((resolve, reject) => {
-          enqueue(event, resolve, reject);
+          enqueue([event], resolve, reject);
+        }),
+      persistEvents: (events) =>
+        new Promise<boolean>((resolve, reject) => {
+          enqueue(events, resolve, reject);
+        }),
+      persistLateResourceReconciliation: (event) =>
+        new Promise<boolean>((resolve, reject) => {
+          enqueue([event], resolve, reject, 'late_resource_reconciliation');
         }),
     },
   ).then(
@@ -128,21 +136,38 @@ async function* executeEffectWithStreaming(
     }
     while (pending.length > 0) {
       const pendingEvent = pending.shift()!;
-      const event = pendingEvent.event;
+      const events = pendingEvent.events;
+      const event = events[0];
+      if (!event) {
+        pendingEvent.resolve?.(true);
+        continue;
+      }
       emitted = true;
-      if (isEphemeralModelDelta(event)) {
+      if (pendingEvent.mode === 'late_resource_reconciliation') {
+        try {
+          const applied = kernel.applyLateResourceReconciliation([event]);
+          pendingEvent.resolve?.(applied);
+          if (applied) yield event;
+        } catch (error) {
+          if (!pendingEvent.reject) throw error;
+          pendingEvent.reject(error);
+        }
+      } else if (events.length === 1 && isEphemeralModelDelta(event)) {
         const applied = kernel.isEffectLeaseCurrent(lease);
         pendingEvent.resolve?.(applied);
         if (applied) yield event;
       } else {
-        if (event.type === 'runtime.cancellation_diagnostic') {
+        if (events.some((candidate) => candidate.type === 'runtime.cancellation_diagnostic')) {
           cancellationIncomplete = true;
         }
         try {
-          const applied = kernel.applyEffectEvent(lease, event);
+          const applied =
+            events.length === 1
+              ? kernel.applyEffectEvent(lease, event)
+              : kernel.applyEffectResult(lease, events);
           pendingEvent.resolve?.(applied);
           if (applied) {
-            yield event;
+            yield* events;
           }
         } catch (error) {
           if (!pendingEvent.reject) throw error;
@@ -439,26 +464,18 @@ export async function* runRuntimeLoop(
             if (signal?.aborted) return;
             continue;
           }
-          const failureEvent = resourceAdmissionFailureEvent(
+          const terminalEvents = resourceAdmissionTerminalEventsV1(
+            kernel.getState() as import('./state').RuntimeState,
             admission.reason,
-            kernel.getState() as import('./state').RuntimeState,
-          );
-          const terminalEvents = resourceAdmissionTerminalEvents(
-            kernel.getState() as import('./state').RuntimeState,
-            failureEvent,
           );
           kernel.processEventBatch(terminalEvents);
           yield* terminalEvents;
           return;
         }
         if (admission.status === 'denied') {
-          const failureEvent = resourceAdmissionFailureEvent(
+          const terminalEvents = resourceAdmissionTerminalEventsV1(
+            kernel.getState() as import('./state').RuntimeState,
             admission.reason,
-            kernel.getState() as import('./state').RuntimeState,
-          );
-          const terminalEvents = resourceAdmissionTerminalEvents(
-            kernel.getState() as import('./state').RuntimeState,
-            failureEvent,
           );
           kernel.processEventBatch(terminalEvents);
           yield* terminalEvents;
@@ -619,92 +636,4 @@ export async function* runRuntimeLoop(
   } finally {
     kernel.releaseRunner(runnerId);
   }
-}
-
-function resourceAdmissionFailureEvent(
-  reason: RuntimeBudgetAdmissionReasonV1,
-  state: import('./state').RuntimeState,
-): Extract<RuntimeEvent, { type: 'run.error' }> {
-  const failureKind =
-    reason === 'budget_unconfigured'
-      ? 'mandatory_policy_unavailable'
-      : reason === 'reconciliation_required'
-        ? 'unknown'
-        : reason === 'budget_exhausted'
-          ? 'budget_exceeded'
-          : 'resource_saturated';
-  const failure = classifyFailure(failureKind, `Runtime resource admission denied: ${reason}.`);
-  return {
-    type: 'run.error',
-    message: failure.message,
-    recoverable: false,
-    failure,
-    turnId: state.turn.turnId,
-    outcome: resolveResourceAdmissionFailureOutcomeV1(reason, state),
-  };
-}
-
-/** Production adapter from budget admission reasons to the canonical terminal policy. */
-export function resolveResourceAdmissionFailureOutcomeV1(
-  reason: RuntimeBudgetAdmissionReasonV1,
-  state: import('./state').RuntimeState,
-): RunTerminalOutcomeV1 {
-  const reservationStates =
-    state.resourceBudget.status === 'active'
-      ? Object.values(state.resourceBudget.reservations).map((reservation) => reservation.state)
-      : [];
-  const knownExternalEffects = reservationStates.some(
-    (reservationState) => reservationState === 'dispatch_started' || reservationState === 'unknown',
-  )
-    ? 'unknown'
-    : reservationStates.some((reservationState) => reservationState === 'reconciled') ||
-        (state.resourceBudget.status === 'active' &&
-          (state.resourceBudget.reconciledUsage.counters.modelRequests > 0 ||
-            state.resourceBudget.reconciledUsage.counters.toolInvocations > 0 ||
-            state.resourceBudget.reconciledUsage.counters.artifactBytes > 0))
-      ? 'known'
-      : 'none';
-  const conformanceMode =
-    reason === 'budget_unconfigured'
-      ? 'mandatory_admin_policy_unavailable'
-      : reason === 'budget_exhausted'
-        ? 'budget_exhausted'
-        : reason === 'tool_concurrency_saturated'
-          ? 'tool_permit_timeout'
-          : reason === 'shell_concurrency_saturated'
-            ? 'shell_permit_timeout'
-            : undefined;
-  const conformanceOutcome = conformanceMode
-    ? resolveFailureModeV1(conformanceMode, { knownExternalEffects }).terminalOutcome
-    : null;
-  if (conformanceOutcome) return conformanceOutcome;
-  return failedTerminalOutcomeV1(
-    classifyFailure('unknown', `Runtime resource admission denied: ${reason}.`),
-    { knownExternalEffects: 'unknown' },
-  );
-}
-
-function resourceAdmissionTerminalEvents(
-  state: import('./state').RuntimeState,
-  failure: Extract<RuntimeEvent, { type: 'run.error' }>,
-): RuntimeEvent[] {
-  const waiterCancellations: RuntimeEvent[] =
-    state.resourceBudget.status === 'active'
-      ? Object.values(state.resourceBudget.waiters)
-          .filter((waiter) => waiter.state === 'waiting')
-          .map((waiter) => ({
-            type: 'resource_budget.waiter_cancelled' as const,
-            invocationId: waiter.invocationId,
-          }))
-      : [];
-  return [
-    failure,
-    ...waiterCancellations,
-    {
-      type: 'turn.aborted',
-      turnId: state.turn.turnId,
-      reason: failure.message,
-      cause: 'error',
-    },
-  ];
 }

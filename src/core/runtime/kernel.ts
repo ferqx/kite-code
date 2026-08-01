@@ -66,7 +66,12 @@ export type RuntimeEffectExecutor = (
   emit?: RuntimeEffectEventSink,
   context?: {
     reservationIds: readonly string[];
+    getState?(): Readonly<RuntimeState>;
     persistEvent(event: RuntimeEvent): Promise<boolean>;
+    persistEvents(events: RuntimeEvent[]): Promise<boolean>;
+    persistLateResourceReconciliation?(
+      event: Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }>,
+    ): Promise<boolean>;
   },
 ) => Promise<RuntimeEvent[]>;
 
@@ -259,11 +264,16 @@ export class AgentKernel {
    * effect. This never accepts a tool/model terminal event and therefore
    * cannot revive scheduling or rewrite a durable terminal outcome.
    */
-  applyLateResourceReconciliation(
-    events: Array<Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }>>,
-  ): boolean {
-    if (events.length === 0 || this.state.resourceBudget.status !== 'active') return false;
+  applyLateResourceReconciliation(events: RuntimeEvent[]): boolean {
+    if (
+      events.length === 0 ||
+      events.some((event) => event.type !== 'resource_budget.reconciled') ||
+      this.state.resourceBudget.status !== 'active'
+    ) {
+      return false;
+    }
     const valid = events.every((event) => {
+      if (event.type !== 'resource_budget.reconciled') return false;
       const reservation =
         this.state.resourceBudget.status === 'active'
           ? this.state.resourceBudget.reservations[event.reservationId]

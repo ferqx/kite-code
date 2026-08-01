@@ -58,6 +58,11 @@ reservation 与 FIFO waiter 先持久化，`dispatch_started` 落盘后才允许
 reconcile。Shell 同时取得 tool/shell 两类 permit，不会部分占位。累计耗尽、并发等待超时和
 未知外部结果分别保留不同终态，不会投影为普通完成。
 
+Subagent child tool/shell 也使用同一 durable FIFO admission，而不是 parent task 内的私有计数器。
+child waiter promotion 与 reservation 原子提交，wait deadline/Abort 有界收敛；child saturation
+穿透 Task 执行链并由同一 terminal adapter 生成 `run.error + turn.aborted`。迟到 child usage 只能
+经 resource-only reconciliation 写入，不能携带工具终态或恢复调度。
+
 Runtime schema v19 的终态使用 `RunTerminalOutcomeV1`。展示层读取 reason code、external
 effects、safe retry、recovery entry 与 pending verification，不解析错误字符串；只有
 `status=completed` 可进入完成展示。

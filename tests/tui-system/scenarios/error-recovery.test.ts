@@ -9,10 +9,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -42,25 +43,17 @@ describe('TUI PTY System — Error Recovery', () => {
       { error: 'Internal server error', delay: 50 },
       { error: 'Internal server error', delay: 50 },
       { message: { content: 'Recovered after bounded model error.' }, delay: 50 },
-      { message: { content: 'Spare 1' } },
-      { message: { content: 'Spare 2' } },
-      { message: { content: 'Spare 3' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Model Error Does Not Crash TUI ────────────────────────
@@ -122,5 +115,5 @@ describe('TUI PTY System — Error Recovery', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

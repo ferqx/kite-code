@@ -15,10 +15,11 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -42,7 +43,6 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     // #2: Sub-agent → attempts write_file with absolute path (triggers approval)
     // #3: Sub-agent after approval → summary
     // #4: Main agent after sub-agent completes → final response
-    // #5-6: spare for generateSessionName / retries
     server.setResponses([
       {
         message: {
@@ -84,20 +84,13 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
           content: 'Sub-agent completed successfully.',
         },
       },
-      { message: { content: 'spare 1' } },
-      { message: { content: 'spare 2' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   step(
@@ -156,7 +149,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete external-write approval journey', () => journey.run(), 170_000);
+  test('runs the complete external-write approval journey', () => journey.run());
 });
 
 describe('TUI PTY System — Sub-agent Read File Flow', () => {
@@ -209,19 +202,13 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
       {
         message: { content: 'Sub-agent read completed successfully.' },
       },
-      { message: { content: 'spare 1' } },
-      { message: { content: 'spare 2' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   test(

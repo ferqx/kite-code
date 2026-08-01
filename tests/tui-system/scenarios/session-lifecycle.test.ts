@@ -7,6 +7,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import {
   clearInput,
@@ -15,7 +16,7 @@ import {
   waitForRequestMessage,
 } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
@@ -24,7 +25,11 @@ import {
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace, persistedSessionIds } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedSessionIds,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -44,25 +49,17 @@ describe('TUI PTY System — Session Lifecycle', () => {
     server.setResponses([
       { message: { content: 'First session response!' }, delay: 50 },
       { message: { content: 'Second session response!' }, delay: 50 },
-      { message: { content: 'Second session response!' }, delay: 50 },
-      { message: { content: 'Second session response!' }, delay: 50 },
-      { message: { content: 'Second session response!' }, delay: 50 },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Send Message in First Session ─────────────────────────
@@ -104,8 +101,15 @@ describe('TUI PTY System — Session Lifecycle', () => {
   step(
     '/new creates new session, TUI remains responsive',
     async () => {
-      sessionIdsBeforeNew = persistedSessionIds(workspace);
-      expect(sessionIdsBeforeNew).toHaveLength(1);
+      await waitForCondition(
+        () => {
+          const observation = observePersistedSessionIds(workspace);
+          return observation.status === 'ready' && observation.value.length === 1;
+        },
+        'Runtime Store to persist session 1 before /new',
+        10_000,
+      );
+      sessionIdsBeforeNew = requirePersistedRuntimeReady(observePersistedSessionIds(workspace));
       await submitCommand(tui, '/new');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
@@ -142,7 +146,9 @@ describe('TUI PTY System — Session Lifecycle', () => {
       await waitForText(() => tui.viewport(), 'Second session response!', 15000);
       await waitForCondition(
         () => {
-          const current = persistedSessionIds(workspace);
+          const observation = observePersistedSessionIds(workspace);
+          if (observation.status !== 'ready') return false;
+          const current = observation.value;
           return (
             current.length === sessionIdsBeforeNew.length + 1 &&
             sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
@@ -151,7 +157,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
         'Runtime Store to persist the distinct session created by /new',
         10_000,
       );
-      activeSessionId = persistedSessionIds(workspace).find(
+      activeSessionId = requirePersistedRuntimeReady(observePersistedSessionIds(workspace)).find(
         (sessionId) => !sessionIdsBeforeNew.includes(sessionId),
       )!;
       expect(activeSessionId).toBeTruthy();
@@ -271,11 +277,13 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       // Press Enter to confirm deletion
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
+      await waitForTuiReady(tui);
       const deletedSessionId = sessionIdsBeforeNew[0]!;
       await waitForCondition(
         () => {
-          const remaining = persistedSessionIds(workspace);
+          const observation = observePersistedSessionIds(workspace);
+          if (observation.status !== 'ready') return false;
+          const remaining = observation.value;
           return !remaining.includes(deletedSessionId) && remaining.includes(activeSessionId);
         },
         'Runtime Store to delete session A while retaining active session B',
@@ -324,7 +332,9 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // The previous test deleted one session, so only 1 remains.
       // Attempt to delete the active (only) session but cancel.
 
-      const idsBeforeCancel = persistedSessionIds(workspace).sort();
+      const idsBeforeCancel = requirePersistedRuntimeReady(
+        observePersistedSessionIds(workspace),
+      ).sort();
       expect(idsBeforeCancel).toEqual([activeSessionId]);
 
       // Press D to trigger delete confirmation
@@ -336,7 +346,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       // Press Escape to cancel deletion
       tui.write('\x1b');
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
+      await waitForTuiReady(tui);
       await submitCommand(tui, '/sessions');
       await waitForCondition(
         () => {
@@ -365,9 +375,11 @@ describe('TUI PTY System — Session Lifecycle', () => {
       ).toBe(true);
       // Panel controls should still be visible
       expect(screenContains(cancelOutput, 'D 删除')).toBe(true);
-      expect(persistedSessionIds(workspace).sort()).toEqual(idsBeforeCancel);
+      expect(requirePersistedRuntimeReady(observePersistedSessionIds(workspace)).sort()).toEqual(
+        idsBeforeCancel,
+      );
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

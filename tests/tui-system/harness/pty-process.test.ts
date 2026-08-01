@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   createPtyOutputBuffer,
   resolveTuiLaunchPaths,
+  terminateOwnedProcessTree,
+  verifiedOwnedProcessGroupId,
   waitForPtyExit,
   waitForPtyExitCode,
 } from './pty-process';
@@ -33,6 +35,44 @@ describe('waitForPtyExitCode', () => {
     );
   });
 });
+
+const posixTest = process.platform === 'win32' ? test.skip : test;
+
+posixTest(
+  'terminates a verified detached child process group including its grandchild',
+  async () => {
+    const proc = Bun.spawn(['/bin/sh', '-c', 'sleep 30 & child=$!; echo $child; wait'], {
+      detached: true,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const processGroupId = verifiedOwnedProcessGroupId(proc.pid);
+    const reader = proc.stdout.getReader();
+    let output = '';
+    while (!output.includes('\n')) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      output += new TextDecoder().decode(chunk.value);
+    }
+    reader.releaseLock();
+    const grandchildPid = Number(output.trim().split(/\s+/)[0]);
+    expect(Number.isInteger(grandchildPid)).toBe(true);
+
+    await terminateOwnedProcessTree(proc, processGroupId);
+    await waitForPtyExit(
+      () => {
+        try {
+          process.kill(grandchildPid, 0);
+          return false;
+        } catch (error) {
+          return (error as NodeJS.ErrnoException).code === 'ESRCH';
+        }
+      },
+      5_000,
+      25,
+    );
+  },
+);
 
 describe('resolveTuiLaunchPaths', () => {
   test('runs a PTY child from its isolated test workspace', () => {

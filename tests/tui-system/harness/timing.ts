@@ -1,4 +1,5 @@
 const DEFAULT_CI_TIMEOUT_SCALE = 1.5;
+const MINIMUM_TUI_FILE_TIMEOUT_MS = 16_000;
 
 function positiveNumber(value: string | undefined): number | undefined {
   if (value == null || value.trim() === '') return undefined;
@@ -19,4 +20,30 @@ export function tuiWaitTimeout(timeoutMs: number, env: NodeJS.ProcessEnv = proce
 
 export function tuiPollInterval(intervalMs: number): number {
   return Math.max(10, Math.min(intervalMs, 250));
+}
+
+export function nestedTuiDeadlineBudget(input: {
+  fileTimeoutMs: number;
+  requestedBunTestTimeoutMs: number;
+  requestedJourneyDeadlineMs: number;
+  fileTeardownMarginMs: number;
+  testTeardownMarginMs: number;
+}): { bunTestTimeoutMs: number; journeyDeadlineMs: number } {
+  if (!Number.isInteger(input.fileTimeoutMs) || input.fileTimeoutMs < MINIMUM_TUI_FILE_TIMEOUT_MS) {
+    throw new Error(
+      `TUI file timeout must be at least ${MINIMUM_TUI_FILE_TIMEOUT_MS}ms; received ${input.fileTimeoutMs}`,
+    );
+  }
+  const bunTestTimeoutMs = Math.min(
+    input.requestedBunTestTimeoutMs,
+    input.fileTimeoutMs - input.fileTeardownMarginMs,
+  );
+  const journeyDeadlineMs = Math.min(
+    input.requestedJourneyDeadlineMs,
+    bunTestTimeoutMs - input.testTeardownMarginMs,
+  );
+  if (journeyDeadlineMs <= 0) {
+    throw new Error('TUI deadline margins leave no positive journey budget.');
+  }
+  return { bunTestTimeoutMs, journeyDeadlineMs };
 }

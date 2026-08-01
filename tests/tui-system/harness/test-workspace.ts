@@ -10,7 +10,7 @@
  */
 
 import { Database } from 'bun:sqlite';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runtimeStorePathFor } from '@/core/runtime/store';
@@ -22,8 +22,6 @@ export interface TestWorkspace {
   workspace: string;
   /** Path to kite-code.jsonc config */
   configPath: string;
-  /** Checkpoint DB directory */
-  checkpointDir: string;
   /** Environment variables to pass to child process */
   env: Record<string, string>;
   /** Additional config fields merged into generated test config */
@@ -41,23 +39,37 @@ type PersistedSessionRow = {
   name: string;
 };
 
-export function isPersistedRuntimeNotReady(error: unknown, pathIsDirectory: boolean): boolean {
+export type PersistedRuntimeObservation<T> =
+  | { status: 'ready'; path: string; value: T }
+  | { status: 'not_created'; path: string }
+  | { status: 'initializing'; path: string; detail: string }
+  | { status: 'transient_lock'; path: string; detail: string };
+
+export function requirePersistedRuntimeReady<T>(observation: PersistedRuntimeObservation<T>): T {
+  if (observation.status === 'ready') return observation.value;
+  throw new Error(`Runtime Store observation is ${observation.status} at ${observation.path}`);
+}
+
+function persistedRuntimeObservationFailure(
+  error: unknown,
+): Extract<
+  PersistedRuntimeObservation<never>,
+  { status: 'initializing' | 'transient_lock' }
+> | null {
   const errorRecord = typeof error === 'object' && error !== null ? error : undefined;
   const code = errorRecord && 'code' in errorRecord ? String(errorRecord.code) : undefined;
   const errno =
     errorRecord && 'errno' in errorRecord && typeof errorRecord.errno === 'number'
-      ? errorRecord.errno
+      ? errorRecord.errno & 0xff
       : undefined;
   const message = error instanceof Error ? error.message : '';
-  const isIoError =
-    code?.startsWith('SQLITE_IOERR') === true || (errno !== undefined && (errno & 0xff) === 10);
-  return (
-    code === 'SQLITE_CANTOPEN' ||
-    code === 'SQLITE_BUSY' ||
-    code === 'SQLITE_LOCKED' ||
-    (pathIsDirectory && isIoError && message === 'disk I/O error') ||
-    (code === 'SQLITE_ERROR' && message.includes('no such table'))
-  );
+  if (code === 'SQLITE_BUSY' || code === 'SQLITE_LOCKED' || errno === 5 || errno === 6) {
+    return { status: 'transient_lock', path: '', detail: message || code || 'SQLite lock' };
+  }
+  if (/^no such table: runtime_(?:sessions|events)$/.test(message)) {
+    return { status: 'initializing', path: '', detail: message };
+  }
+  return null;
 }
 
 function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
@@ -71,32 +83,28 @@ function persistedRuntimePath(workspace: Pick<TestWorkspace, 'home'>): string {
  */
 function readPersistedRuntime<T>(
   workspace: Pick<TestWorkspace, 'home'>,
-  whenMissing: T,
   read: (database: Database) => T,
-): T {
+): PersistedRuntimeObservation<T> {
   const path = persistedRuntimePath(workspace);
-  if (!existsSync(path)) return whenMissing;
+  if (!existsSync(path)) return { status: 'not_created', path };
   let database: Database | undefined;
   try {
     database = new Database(path, { readonly: true });
-    return read(database);
+    return { status: 'ready', path, value: read(database) };
   } catch (error) {
-    let pathIsDirectory = false;
-    try {
-      pathIsDirectory = statSync(path).isDirectory();
-    } catch {
-      // A concurrently removed path is covered by SQLITE_CANTOPEN below.
-    }
-    if (isPersistedRuntimeNotReady(error, pathIsDirectory)) return whenMissing;
-    throw error;
+    const failure = persistedRuntimeObservationFailure(error);
+    if (failure) return { ...failure, path };
+    throw new Error(`Failed to observe isolated Runtime Store at ${path}`, { cause: error });
   } finally {
     database?.close();
   }
 }
 
 /** Read the durable Runtime session identities without relying on terminal scrollback. */
-export function persistedSessionIds(workspace: Pick<TestWorkspace, 'home'>): string[] {
-  return readPersistedRuntime(workspace, [], (database) =>
+export function observePersistedSessionIds(
+  workspace: Pick<TestWorkspace, 'home'>,
+): PersistedRuntimeObservation<string[]> {
+  return readPersistedRuntime(workspace, (database) =>
     database
       .query<{ thread_id: string }, []>(
         'SELECT thread_id FROM runtime_sessions ORDER BY thread_id ASC',
@@ -107,10 +115,10 @@ export function persistedSessionIds(workspace: Pick<TestWorkspace, 'home'>): str
 }
 
 /** Read durable session identity/name pairs in the same recency order used by SessionSelector. */
-export function persistedSessionSummaries(
+export function observePersistedSessionSummaries(
   workspace: Pick<TestWorkspace, 'home'>,
-): Array<{ threadId: string; name: string }> {
-  return readPersistedRuntime(workspace, [], (database) =>
+): PersistedRuntimeObservation<Array<{ threadId: string; name: string }>> {
+  return readPersistedRuntime(workspace, (database) =>
     database
       .query<PersistedSessionRow, []>(`
         SELECT
@@ -137,11 +145,11 @@ export function persistedSessionSummaries(
 }
 
 /** Resolve the exact session carrying a durable slash-command audit event. */
-export function persistedCommandSession(
+export function observePersistedCommandSession(
   workspace: Pick<TestWorkspace, 'home'>,
   command: string,
-): { threadId: string; name: string } | undefined {
-  return readPersistedRuntime(workspace, undefined, (database) => {
+): PersistedRuntimeObservation<{ threadId: string; name: string } | undefined> {
+  return readPersistedRuntime(workspace, (database) => {
     const row = database
       .query<PersistedSessionRow, [string]>(`
         SELECT
@@ -167,6 +175,26 @@ export function persistedCommandSession(
       `)
       .get(command);
     return row ? { threadId: row.thread_id, name: row.name } : undefined;
+  });
+}
+
+/** Resolve the exact session carrying a durable user message event. */
+export function observePersistedUserMessageSession(
+  workspace: Pick<TestWorkspace, 'home'>,
+  content: string,
+): PersistedRuntimeObservation<{ threadId: string } | undefined> {
+  return readPersistedRuntime(workspace, (database) => {
+    const row = database
+      .query<{ thread_id: string }, [string]>(`
+        SELECT thread_id
+        FROM runtime_events
+        WHERE json_extract(event_json, '$.type') = 'user.message_appended'
+          AND json_extract(event_json, '$.content') = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `)
+      .get(content);
+    return row ? { threadId: row.thread_id } : undefined;
   });
 }
 
@@ -224,9 +252,6 @@ export function createTestWorkspace(opts?: {
     );
   }
 
-  const checkpointDir = join(tempHome, 'checkpoints');
-  mkdirSync(checkpointDir, { recursive: true });
-
   const ws = mkdtempSync(join(tmpdir(), 'kite-code-ws-'));
   const files = opts?.files ?? opts?.workspaceFiles;
   if (files) {
@@ -257,23 +282,21 @@ export function createTestWorkspace(opts?: {
   const configPath = join(kiteCodeDir, 'kite-code.jsonc');
 
   const cleanup = () => {
-    try {
-      rmSync(tempHome, { recursive: true, force: true });
-    } catch {
-      /* best effort */
+    const errors: unknown[] = [];
+    for (const path of [tempHome, ws]) {
+      try {
+        rmSync(path, { recursive: true, force: true });
+      } catch (error) {
+        errors.push(error);
+      }
     }
-    try {
-      rmSync(ws, { recursive: true, force: true });
-    } catch {
-      /* best effort */
-    }
+    if (errors.length > 0) throw new AggregateError(errors, 'Failed to clean TUI test workspace');
   };
 
   return {
     home: tempHome,
     workspace: ws,
     configPath,
-    checkpointDir,
     env,
     configOverrides: opts?.configOverrides,
     projectConfigOverrides: opts?.projectConfigOverrides,

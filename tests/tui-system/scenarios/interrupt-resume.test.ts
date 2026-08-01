@@ -18,10 +18,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
@@ -45,29 +46,17 @@ describe('TUI PTY System — Interrupt Resume', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Response queue for tui1.
-    // Slot 0: normal text response to user message
-    // Extra slots: consumed by fire-and-forget generateSessionName
-    server.setResponses([
-      { message: { content: 'Response from the first instance.' }, delay: 50 },
-      { message: { content: 'Extra 1' }, delay: 10 },
-      { message: { content: 'Extra 2' }, delay: 10 },
-      { message: { content: 'Extra 3' }, delay: 10 },
-      { message: { content: 'Extra 4' }, delay: 10 },
-    ]);
+    server.setResponses([{ message: { content: 'Response from the first instance.' }, delay: 50 }]);
 
-    tui1 = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui1.outputSinceLastAction(), '❯', 15000);
-
-    tui1.setRawMode(true);
+    tui1 = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui1?.killAndWait();
-    await tui2?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({
+      tuis: [tui1, tui2],
+      mockServers: [server],
+      workspaces: [workspace],
+    });
   });
 
   // ═══════════════════════════════════════════════════════════
@@ -117,17 +106,9 @@ describe('TUI PTY System — Interrupt Resume', () => {
   step(
     'restart tui2 on same workspace → session list shows persisted session',
     async () => {
-      server.setResponses([
-        { message: { content: 'dummy' }, delay: 10 },
-        { message: { content: 'dummy' }, delay: 10 },
-        { message: { content: 'dummy' }, delay: 10 },
-      ]);
+      server.setResponses([]);
 
-      tui2 = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-      await waitForText(() => tui2.outputSinceLastAction(), '❯', 15000);
-
-      tui2.setRawMode(true);
+      tui2 = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
       const output = tui2.viewport();
       const clean = stripAnsi(output);
@@ -202,5 +183,5 @@ describe('TUI PTY System — Interrupt Resume', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

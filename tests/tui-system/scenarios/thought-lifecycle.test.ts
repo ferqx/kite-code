@@ -15,10 +15,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -58,17 +59,11 @@ describe('TUI PTY System — Thought Lifecycle', () => {
       },
     });
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ═══════════════════════════════════════════════════════════════
@@ -110,11 +105,6 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         },
         // Response 3: text closes the Thought
         { message: { content: 'TIMELINE_DONE: exploration complete.' }, delay: 10 },
-        { message: { content: 'spare-0a' }, delay: 10 },
-        { message: { content: 'spare-0b' }, delay: 10 },
-        { message: { content: 'spare-0c' }, delay: 10 },
-        { message: { content: 'spare-0d' }, delay: 10 },
-        { message: { content: 'spare-0e' }, delay: 10 },
       ]);
 
       await typeText(tui, 'Timeline test');
@@ -170,9 +160,6 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         },
         // Response 2: plain text output → closes the Thought
         { message: { content: 'EXPLORE_DONE: project uses LangGraph.' }, delay: 10 },
-        { message: { content: 'spare-1a' }, delay: 10 },
-        { message: { content: 'spare-1b' }, delay: 10 },
-        { message: { content: 'spare-1c' }, delay: 10 },
       ]);
 
       await typeText(tui, 'Explore the codebase');
@@ -241,8 +228,6 @@ describe('TUI PTY System — Thought Lifecycle', () => {
         },
         // Phase 3: text closes the accumulated Thought
         { message: { content: 'TWO_PHASE_DONE: both files reviewed.' }, delay: 10 },
-        { message: { content: 'spare-2a' }, delay: 10 },
-        { message: { content: 'spare-2b' }, delay: 10 },
       ]);
 
       await typeText(tui, 'Check config files');
@@ -304,9 +289,6 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         { message: { content: 'SHELL_THOUGHT_DONE: exploration complete.' }, delay: 10 },
-        { message: { content: 'spare-s1' }, delay: 10 },
-        { message: { content: 'spare-s2' }, delay: 10 },
-        { message: { content: 'spare-s3' }, delay: 10 },
       ]);
 
       await typeText(tui, 'Explore with shell');
@@ -360,9 +342,6 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         { message: { content: 'TOOLS_ONLY_DONE: file read.' }, delay: 10 },
-        { message: { content: 'spare-n1' }, delay: 10 },
-        { message: { content: 'spare-n2' }, delay: 10 },
-        { message: { content: 'spare-n3' }, delay: 10 },
       ]);
 
       await typeText(tui, 'Tools only no thinking');
@@ -412,8 +391,6 @@ describe('TUI PTY System — Thought Lifecycle', () => {
           },
         },
         { message: { content: 'THINK_ONLY_DONE: thought it through.' }, delay: 10 },
-        { message: { content: 'spare-t1' }, delay: 10 },
-        { message: { content: 'spare-t2' }, delay: 10 },
       ]);
 
       await typeText(tui, 'Think only no tools');
@@ -444,5 +421,5 @@ describe('TUI PTY System — Thought Lifecycle', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

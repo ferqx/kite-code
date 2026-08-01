@@ -3,9 +3,10 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { exposedMcpToolName } from '@/core/mcp';
 import { startTestHttpServer } from '../../helpers/test-http-server';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
 import { submitCommand, typeText } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
 
@@ -16,15 +17,17 @@ describe('TUI PTY System — MCP Select management', () => {
   let workspace: TestWorkspace | undefined;
 
   afterEach(async () => {
-    server?.stop();
-    mcpServer?.stop(true);
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({
+      tuis: [tui],
+      mockServers: [server],
+      servers: [mcpServer],
+      workspaces: [workspace],
+    });
   });
 
   test('opens a selected server in the read-only detail action menu', async () => {
     server = createMockModelServer();
-    server.setResponses([{ message: { content: 'unused' } }]);
+    server.setResponses([]);
     workspace = createTestWorkspace({
       configOverrides: {
         mcpServers: {
@@ -38,9 +41,7 @@ describe('TUI PTY System — MCP Select management', () => {
       projectConfigOverrides: {},
     });
     expect(readFileSync(workspace.configPath, 'utf-8')).not.toContain('mcpServers');
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     await submitCommand(tui, '/mcp', 20);
     await waitForText(() => tui!.outputSinceLastAction(), 'MCP Servers', 15_000);
@@ -142,9 +143,7 @@ describe('TUI PTY System — MCP Select management', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     await typeText(tui, 'call the closed remote MCP tool', 20);
     tui.write('\r');
@@ -362,15 +361,13 @@ describe('TUI PTY System — MCP Select management', () => {
       },
       projectConfigOverrides: {},
     });
-    tui = spawnTui({
+    tui = await spawnReadyTui({
       cols: 120,
       rows: 40,
       mockServer: server,
       workspace,
       remoteMcpEgressPermitResolver: 'allow-each-invocation',
     });
-    await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
-    tui.setRawMode(true);
 
     const conversationFrames = tui.markScreen();
     await typeText(tui, 'search the documentation with MCP', 20);

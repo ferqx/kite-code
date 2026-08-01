@@ -14,10 +14,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, typeText } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
+import { screenContains, stripAnsi } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -42,21 +43,16 @@ describe('TUI PTY System — Terminal Resize', () => {
 
     // Provide an empty mock response so the TUI model provider
     // resolves on startup (defensive — we are not sending messages).
-    server.setResponses([{ message: { content: '' }, delay: 0 }]);
+    server.setResponses([]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered before running any test
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
-    tui.setRawMode(true);
   });
 
   afterEach(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Test 1: Initial Render at Configured Dimensions ──────────

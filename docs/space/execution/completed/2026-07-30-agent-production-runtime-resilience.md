@@ -28,9 +28,11 @@
 - 工具/capability terminal facts 与 actual reconciliation 同批提交；crash 恢复时 reserved
   release、dispatch_started 转 unknown，均不自动重放。
 - 主模型按实际 projection 预留 input，并把 Provider max output clamp 到剩余预算。
-- Sub-agent parent 只持有 lifecycle/concurrency；每个 child 模型、工具、Shell/MCP 和 artifact
-  调用建立独立链接 reservation，resume 使用新的 parent attempt。dispatch 后错误转 unknown，
-  不因缺测量或 parent 粗粒度结算而退款。
+- Sub-agent parent 只持有 lifecycle/concurrency；每个 child 模型及工具/Shell/MCP 调用建立独立
+  链接 reservation，artifact bytes 计入产出它的调用，resume 使用新的 parent attempt。child
+  tool/shell 使用 durable FIFO、原子 compound promotion/reservation 与有界 wait deadline；拒绝
+  进入主 Runtime canonical terminal adapter。dispatch 后错误转 unknown，不因缺测量或 parent
+  粗粒度结算而退款；迟到 actual usage 只允许 resource-only bounded reconciliation。
 
 ## Task 1C.3
 
@@ -72,8 +74,11 @@
 - Kernel batch 在包含 `run.completed` 时创建命名 rewind snapshot；工具失败后的
   `provider.action_required` 与 terminal event 保持批内顺序；TUI `SET_EXITED` 保留已提交给
   Ink Static 的 streamed paragraph。
-- PTY runner 每个 scenario 后采集协调进程 RSS、active resource 与 FD，并对持续正斜率
-  fail closed；workspace trust 使用新增输出握手确认输入 handler 已就绪，并及时回收重启进程。
+- 当时的 PTY runner 在每个 scenario 后采集协调进程 RSS、active resource 与 FD；1C.7 后续
+  复核证明这些跨隔离进程差值只能作为诊断，不能证明同一产品 lifecycle 的泄漏趋势，因此当前
+  runner 已移除该门禁，资源资格由同进程、nonce/PID/start identity 绑定的 qualification
+  lifecycle 负责。workspace trust 使用新增输出握手确认输入 handler 已就绪，并及时回收重启
+  进程。
 
 ## 验证
 
@@ -83,13 +88,14 @@
   Probe、MCP native keyring 三个 workflow 全部通过；
 - failure-mode 与 producer 定向回归：41 pass、0 fail、202 assertions；标准默认套件：
   2228 pass、6 skip、0 fail；
-- TUI qualification：本地完整 suite 通过 5 个 harness 文件与 37 个 scenario 文件，资源趋势
-  RSS 30→31 MiB、active 0→0、FD 5→5；slash command 提交统一等待 semantic receipt，
-  direct Enter 与未清理 suggestion 输入由 AST contract 阻断；
+- TUI 功能稳定性基线：本地完整 suite 通过 5 个 harness 文件与 37 个 scenario 文件；当时记录的
+  协调进程 RSS 30→31 MiB、active 0→0、FD 5→5 只保留为历史诊断，不是 qualification 资源
+  趋势证据。slash command 提交统一等待 semantic receipt，direct Enter 与未清理 suggestion
+  输入由 AST contract 阻断；
 - Task 1C.5 独立复核最终 GO，P0/P1/P2 均为 0；
 - 独立只读复核：1C.6 GO、无 P0/P1；联合定向回归 333 pass/0 fail；
-- 同一冻结快照连续两次完整 `bun run test:tui:system` 均 36/36，无 warning/timeout；两次趋势
-  均为 RSS 30→31 MiB、active 0→0、FD 5→5；
+- 同一冻结快照连续两次完整 `bun run test:tui:system` 均 36/36，无 warning/timeout；当时两次
+  采集均为 RSS 30→31 MiB、active 0→0、FD 5→5，但不再据此声明资源趋势收敛；
 - workspace trust 孤立连续 3 次均 4/4；本地 `--rerun-each 5` 为 20/20；
 - 标准默认套件：2067 pass/6 skip/0 fail；
 - `bun run check:docs-impact`、`bun run check:docs`、`bun run check:core-boundary`、

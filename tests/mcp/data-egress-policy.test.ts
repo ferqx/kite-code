@@ -780,6 +780,10 @@ describe('remote MCP data egress policy', () => {
             store.appendEvents(threadId, [event]);
             return true;
           },
+          persistEvents: async (events) => {
+            store.appendEvents(threadId, events);
+            return true;
+          },
         },
       );
       return [...emitted, ...terminal];

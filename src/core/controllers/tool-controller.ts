@@ -47,6 +47,7 @@ import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure, classifyMcpProviderError } from '@/core/runtime/failures';
 import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { genInteractionId } from '@/core/runtime/ids';
+import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
@@ -1437,6 +1438,7 @@ export async function executeRuntimeTools(params: {
           },
         });
       } catch (error) {
+        if (error instanceof DescendantResourceAdmissionError) throw error;
         events.push({
           type: 'tool.failed',
           toolCallId,
@@ -1793,6 +1795,7 @@ export async function executeRuntimeTools(params: {
         },
       });
     } catch (error) {
+      if (error instanceof DescendantResourceAdmissionError) throw error;
       if (invocation) {
         events.push({
           type: 'capability.execution_failed',

@@ -8,6 +8,7 @@
  * InputLine component remounts via key={activeSessionId}.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import {
   submitCommand,
@@ -16,7 +17,7 @@ import {
   waitForRequestMessage,
 } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
@@ -27,9 +28,10 @@ import {
 } from '../harness/terminal-screen';
 import {
   createTestWorkspace,
-  persistedCommandSession,
-  persistedSessionIds,
-  persistedSessionSummaries,
+  observePersistedCommandSession,
+  observePersistedSessionIds,
+  observePersistedSessionSummaries,
+  requirePersistedRuntimeReady,
 } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -61,27 +63,14 @@ describe('TUI PTY System — /compact after session switch', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Multiple responses: each /compact triggers handleContextCompaction
-    // which may call inspectManualContextCompaction (read-only). Model
-    // responses are only needed for user messages, not for slash commands.
-    server.setResponses([
-      { message: { content: 'Session 1 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-    ]);
+    // Slash commands stay local; only the explicit session-1 message calls the model.
+    server.setResponses([{ message: { content: 'Session 1 response' }, delay: 50 }]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Session 1 — /compact should produce a visible response ──
@@ -129,8 +118,15 @@ describe('TUI PTY System — /compact after session switch', () => {
       await waitForRequestMessage(server, 'Session 1 message', 15000);
       await waitForText(() => tui.outputSinceLastAction(), 'Session 1 response', 15000);
 
-      sessionIdsBeforeNew = persistedSessionIds(workspace);
-      expect(sessionIdsBeforeNew).toHaveLength(1);
+      await waitForCondition(
+        () => {
+          const observation = observePersistedSessionIds(workspace);
+          return observation.status === 'ready' && observation.value.length === 1;
+        },
+        'Runtime Store to persist session 1 before /new',
+        10_000,
+      );
+      sessionIdsBeforeNew = requirePersistedRuntimeReady(observePersistedSessionIds(workspace));
       await submitCommand(tui, '/new');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
@@ -154,7 +150,9 @@ describe('TUI PTY System — /compact after session switch', () => {
       await waitForText(() => tui.outputSinceLastAction(), 'Not enough messages', 10000);
       await waitForCondition(
         () => {
-          const current = persistedSessionIds(workspace);
+          const observation = observePersistedSessionIds(workspace);
+          if (observation.status !== 'ready') return false;
+          const current = observation.value;
           return (
             current.length === sessionIdsBeforeNew.length + 1 &&
             sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
@@ -195,12 +193,7 @@ describe('TUI PTY System — /compact after session switch', () => {
       // search the thread-id display fallback.
       const sessionSearchIdentity = 'restart persistence target identity';
       const sessionResponse = 'Restart persistence target response';
-      server.setResponses(
-        Array.from({ length: 8 }, () => ({
-          message: { content: sessionResponse },
-          delay: 10,
-        })),
-      );
+      server.setResponses([{ message: { content: sessionResponse }, delay: 10 }]);
       await submitUserMessage(tui, server, sessionSearchIdentity, { timeout: 15000 });
       await waitForText(() => tui.outputSinceLastAction(), sessionResponse, 15000);
 
@@ -230,10 +223,12 @@ describe('TUI PTY System — /compact after session switch', () => {
       // Then prove the exact audit event reached the Runtime Store using a
       // read-only observer. Binding the witness to its thread avoids relying
       // on second-resolution session recency ordering.
-      let persistedCommand: ReturnType<typeof persistedCommandSession>;
+      let persistedCommand: { threadId: string; name: string } | undefined;
       await waitForCondition(
         () => {
-          persistedCommand = persistedCommandSession(workspace, command);
+          const observation = observePersistedCommandSession(workspace, command);
+          if (observation.status !== 'ready') return false;
+          persistedCommand = observation.value;
           return persistedCommand !== undefined;
         },
         'user.command_invoked event to reach the Runtime Store',
@@ -248,20 +243,19 @@ describe('TUI PTY System — /compact after session switch', () => {
       await submitCommand(tui, '/exit');
       await tui.waitForExit();
 
-      server.setResponses([
-        { message: { content: 'dummy' }, delay: 10 },
-        { message: { content: 'dummy' }, delay: 10 },
-        { message: { content: 'dummy' }, delay: 10 },
-      ]);
-      tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-      tui.setRawMode(true);
-      let restoredTargetSession: ReturnType<typeof persistedCommandSession>;
+      server.setResponses([]);
+      tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+      let restoredTargetSession: { threadId: string; name: string } | undefined;
       let otherSessionNames: string[] = [];
       await waitForCondition(
         () => {
-          restoredTargetSession = persistedCommandSession(workspace, command);
-          otherSessionNames = persistedSessionSummaries(workspace)
+          const commandObservation = observePersistedCommandSession(workspace, command);
+          const summariesObservation = observePersistedSessionSummaries(workspace);
+          if (commandObservation.status !== 'ready' || summariesObservation.status !== 'ready') {
+            return false;
+          }
+          restoredTargetSession = commandObservation.value;
+          otherSessionNames = summariesObservation.value
             .filter((session) => session.threadId !== targetSession.threadId)
             .map((session) => session.name);
           return (
@@ -329,5 +323,5 @@ describe('TUI PTY System — /compact after session switch', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

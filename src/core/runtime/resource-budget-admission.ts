@@ -17,6 +17,7 @@ import type { RuntimeState } from './state';
 export type RuntimeBudgetAdmissionReasonV1 =
   | 'admitted'
   | 'budget_unconfigured'
+  | 'persistence_unavailable'
   | 'budget_exhausted'
   | 'reconciliation_required'
   | 'tool_concurrency_saturated'
@@ -53,6 +54,7 @@ export interface DescendantResourceAdmissionV1 {
     toolKind: string;
     shell: boolean;
     artifactBytes?: number;
+    signal?: AbortSignal;
   }): Promise<DescendantBudgetReservationV1>;
   reconcileTool(input: { reservationId: string; artifactBytes?: number }): Promise<void>;
   markUnknown(reservationId: string): Promise<void>;
@@ -60,9 +62,22 @@ export interface DescendantResourceAdmissionV1 {
 }
 
 export class DescendantResourceAdmissionError extends Error {
-  constructor(message: string) {
+  readonly reason: Exclude<RuntimeBudgetAdmissionReasonV1, 'admitted'>;
+
+  constructor(
+    reason: Exclude<RuntimeBudgetAdmissionReasonV1, 'admitted'>,
+    message = `Sub-agent resource admission denied: ${reason}.`,
+  ) {
     super(message);
     this.name = 'DescendantResourceAdmissionError';
+    this.reason = reason;
+  }
+}
+
+class DescendantAdmissionProjectionConflict extends Error {
+  constructor() {
+    super('Concurrent resource admission changed the ledger projection.');
+    this.name = 'DescendantAdmissionProjectionConflict';
   }
 }
 
@@ -283,87 +298,421 @@ function activeBudget(state: RuntimeState): ActiveResourceBudgetRuntimeStateV1 |
 export function createDescendantResourceAdmissionV1(input: {
   state: RuntimeState;
   parentReservationId: string;
+  getState?(): Readonly<RuntimeState>;
   persistEvent(event: RuntimeEvent): Promise<boolean>;
+  persistEvents(events: RuntimeEvent[]): Promise<boolean>;
+  persistLateResourceReconciliation?(
+    event: Extract<RuntimeEvent, { type: 'resource_budget.reconciled' }>,
+  ): Promise<boolean>;
+  signal?: AbortSignal;
+  now?(): Date;
 }): DescendantResourceAdmissionV1 {
   if (input.state.resourceBudget.status !== 'active') {
-    throw new DescendantResourceAdmissionError('Shared resource budget is unavailable.');
+    throw new DescendantResourceAdmissionError(
+      'budget_unconfigured',
+      'Shared resource budget is unavailable.',
+    );
   }
   const parent = input.state.resourceBudget.reservations[input.parentReservationId];
   if (parent?.resourceKind !== 'subagent' || parent.state !== 'dispatch_started') {
     throw new DescendantResourceAdmissionError(
+      'reconciliation_required',
       'Sub-agent parent reservation is not dispatch-started.',
     );
   }
   let projected = input.state.resourceBudget;
+  let mutationTail = Promise.resolve();
+  let projectionRevision = 0;
+  const projectionListeners = new Set<() => void>();
+
+  const notifyProjectionChange = () => {
+    projectionRevision += 1;
+    for (const listener of projectionListeners) listener();
+    projectionListeners.clear();
+  };
+
+  const refreshProjected = (): ActiveResourceBudgetRuntimeStateV1 => {
+    const latest = input.getState?.().resourceBudget;
+    if (latest?.status === 'active' && latest.runId === projected.runId) projected = latest;
+    if (projected.status !== 'active') {
+      throw new DescendantResourceAdmissionError(
+        'budget_unconfigured',
+        'Shared resource budget became inactive.',
+      );
+    }
+    return projected;
+  };
+
+  const withMutation = <T>(mutate: () => Promise<T>): Promise<T> => {
+    const result = mutationTail.then(mutate, mutate);
+    mutationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
 
   const persist = async (event: RuntimeEvent): Promise<void> => {
+    refreshProjected();
     let next: ResourceBudgetRuntimeStateV1;
     try {
       next = reduceResourceBudgetStateV1(projected, event as never);
     } catch (error) {
       throw new DescendantResourceAdmissionError(
+        'budget_exhausted',
         error instanceof Error ? error.message : String(error),
       );
     }
-    if (!(await input.persistEvent(event))) {
+    const revisionBeforePersist = input.getState?.().revision;
+    let applied: boolean;
+    try {
+      applied = await input.persistEvent(event);
+    } catch (error) {
+      if (revisionBeforePersist != null && input.getState?.().revision !== revisionBeforePersist) {
+        throw new DescendantAdmissionProjectionConflict();
+      }
       throw new DescendantResourceAdmissionError(
+        'persistence_unavailable',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    if (!applied) {
+      throw new DescendantResourceAdmissionError(
+        'reconciliation_required',
         'Sub-agent resource reservation lost its active Runtime lease.',
       );
     }
     if (next.status !== 'active') {
-      throw new DescendantResourceAdmissionError('Shared resource budget became inactive.');
+      throw new DescendantResourceAdmissionError(
+        'budget_unconfigured',
+        'Shared resource budget became inactive.',
+      );
     }
     projected = next;
+    notifyProjectionChange();
   };
 
-  const reserve = async (
+  const persistBatch = async (events: RuntimeEvent[]): Promise<void> => {
+    if (events.length === 0) return;
+    refreshProjected();
+    let next: ResourceBudgetRuntimeStateV1 = projected;
+    try {
+      for (const event of events) next = reduceResourceBudgetStateV1(next, event as never);
+    } catch (error) {
+      throw new DescendantResourceAdmissionError(
+        'budget_exhausted',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    const revisionBeforePersist = input.getState?.().revision;
+    let applied: boolean;
+    try {
+      applied = await input.persistEvents(events);
+    } catch (error) {
+      if (revisionBeforePersist != null && input.getState?.().revision !== revisionBeforePersist) {
+        throw new DescendantAdmissionProjectionConflict();
+      }
+      throw new DescendantResourceAdmissionError(
+        'persistence_unavailable',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    if (!applied) {
+      throw new DescendantResourceAdmissionError(
+        'reconciliation_required',
+        'Sub-agent resource transaction lost its active Runtime lease.',
+      );
+    }
+    if (next.status !== 'active') {
+      throw new DescendantResourceAdmissionError(
+        'budget_unconfigured',
+        'Shared resource budget became inactive.',
+      );
+    }
+    projected = next;
+    notifyProjectionChange();
+  };
+
+  const assertParentDispatchStarted = (budget: ActiveResourceBudgetRuntimeStateV1): void => {
+    const currentParent = budget.reservations[parent.reservationId];
+    if (currentParent?.resourceKind !== 'subagent' || currentParent.state !== 'dispatch_started') {
+      throw new DescendantResourceAdmissionError(
+        'reconciliation_required',
+        'Sub-agent parent reservation is no longer dispatch-started.',
+      );
+    }
+  };
+
+  const now = (): Date => input.now?.() ?? new Date();
+
+  const assertRunDeadline = (budget: ActiveResourceBudgetRuntimeStateV1): void => {
+    if (now().getTime() >= Date.parse(budget.deadlineAt)) {
+      throw new DescendantResourceAdmissionError(
+        'budget_exhausted',
+        'Sub-agent run deadline was reached before dispatch.',
+      );
+    }
+  };
+
+  const descendantInvocationId = (invocationKey: string): string =>
+    `descendant:${parent.invocationId}:${invocationKey}`;
+
+  const reserveDirect = async (
     invocationKey: string,
     resourceKind: BudgetReservationV1['resourceKind'],
     upperBound: ResourceUsageV1,
   ): Promise<DescendantBudgetReservationV1> => {
-    const reservation: BudgetReservationV1 = {
-      version: 1,
-      reservationId: crypto.randomUUID(),
-      runId: projected.runId,
-      invocationId: `descendant:${parent.invocationId}:${invocationKey}`,
-      parentReservationId: parent.reservationId,
-      resourceKind,
-      executableUpperBound: upperBound,
-      state: 'reserved',
-    };
-    await persist({ type: 'resource_budget.reserved', reservation });
-    await persist({
-      type: 'resource_budget.dispatch_started',
-      reservationId: reservation.reservationId,
+    while (true) {
+      try {
+        return await withMutation(async () => {
+          const budget = refreshProjected();
+          assertParentDispatchStarted(budget);
+          assertRunDeadline(budget);
+          const reservation: BudgetReservationV1 = {
+            version: 1,
+            reservationId: crypto.randomUUID(),
+            runId: budget.runId,
+            invocationId: descendantInvocationId(invocationKey),
+            parentReservationId: parent.reservationId,
+            resourceKind,
+            executableUpperBound: upperBound,
+            state: 'reserved',
+          };
+          await persist({ type: 'resource_budget.reserved', reservation });
+          await persist({
+            type: 'resource_budget.dispatch_started',
+            reservationId: reservation.reservationId,
+          });
+          return {
+            reservationId: reservation.reservationId,
+            ...(upperBound.counters.outputTokens > 0
+              ? { maxOutputTokens: upperBound.counters.outputTokens }
+              : {}),
+          };
+        });
+      } catch (error) {
+        if (error instanceof DescendantAdmissionProjectionConflict) continue;
+        throw error;
+      }
+    }
+  };
+
+  const waitForProjectionChange = async (
+    deadlineAt: string,
+    signal: AbortSignal | undefined,
+  ): Promise<'changed' | 'timed_out' | 'aborted'> => {
+    if (signal?.aborted) return 'aborted';
+    const remainingMs = Date.parse(deadlineAt) - Date.now();
+    if (remainingMs <= 0) return 'timed_out';
+    const observedRevision = projectionRevision;
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (result: 'changed' | 'timed_out' | 'aborted') => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        projectionListeners.delete(onProjectionChange);
+        signal?.removeEventListener('abort', onAbort);
+        resolve(result);
+      };
+      const onProjectionChange = () => finish('changed');
+      const onAbort = () => finish('aborted');
+      projectionListeners.add(onProjectionChange);
+      const timer = setTimeout(
+        () => finish(Date.now() >= Date.parse(deadlineAt) ? 'timed_out' : 'changed'),
+        Math.min(25, remainingMs),
+      );
+      signal?.addEventListener('abort', onAbort, { once: true });
+      if (projectionRevision !== observedRevision) finish('changed');
     });
-    return {
-      reservationId: reservation.reservationId,
-      ...(upperBound.counters.outputTokens > 0
-        ? { maxOutputTokens: upperBound.counters.outputTokens }
-        : {}),
-    };
   };
 
   const reconcile = async (reservationId: string, actual: ResourceUsageV1): Promise<void> => {
-    await persist({ type: 'resource_budget.reconciled', reservationId, actual });
+    await withMutation(async () => {
+      refreshProjected();
+      const event = { type: 'resource_budget.reconciled', reservationId, actual } as const;
+      let next: ResourceBudgetRuntimeStateV1;
+      try {
+        next = reduceResourceBudgetStateV1(projected, event);
+      } catch (error) {
+        throw new DescendantResourceAdmissionError(
+          'reconciliation_required',
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      let applied = false;
+      const revisionBeforePersist = input.getState?.().revision;
+      try {
+        applied = await input.persistEvent(event);
+      } catch (error) {
+        const projectionChanged =
+          revisionBeforePersist != null && input.getState?.().revision !== revisionBeforePersist;
+        if (!projectionChanged) {
+          throw new DescendantResourceAdmissionError(
+            'persistence_unavailable',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+      if (!applied && input.persistLateResourceReconciliation) {
+        try {
+          applied = await input.persistLateResourceReconciliation(event);
+        } catch (error) {
+          throw new DescendantResourceAdmissionError(
+            'persistence_unavailable',
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+      }
+      if (!applied) {
+        throw new DescendantResourceAdmissionError(
+          'reconciliation_required',
+          'Sub-agent resource reconciliation could not be persisted.',
+        );
+      }
+      const latest = input.getState?.().resourceBudget;
+      if (next.status !== 'active') {
+        throw new DescendantResourceAdmissionError(
+          'reconciliation_required',
+          'Sub-agent resource reconciliation produced an inactive ledger.',
+        );
+      }
+      projected = latest?.status === 'active' && latest.runId === projected.runId ? latest : next;
+      notifyProjectionChange();
+    });
+  };
+
+  const cancelWaiter = async (invocationId: string): Promise<void> => {
+    await withMutation(async () => {
+      const budget = refreshProjected();
+      if (budget.waiters[invocationId]?.state !== 'waiting') return;
+      await persist({ type: 'resource_budget.waiter_cancelled', invocationId });
+    });
+  };
+
+  const persistWithProjectionRetry = async (event: RuntimeEvent): Promise<void> => {
+    while (true) {
+      try {
+        await withMutation(() => persist(event));
+        return;
+      } catch (error) {
+        if (error instanceof DescendantAdmissionProjectionConflict) continue;
+        throw error;
+      }
+    }
+  };
+
+  const reserveToolWithFifo = async (
+    invocation: PlannedInvocation,
+    signal: AbortSignal | undefined,
+  ): Promise<DescendantBudgetReservationV1> => {
+    while (true) {
+      const attempt = await withMutation(async () => {
+        const budget = refreshProjected();
+        assertParentDispatchStarted(budget);
+        const unresolved = Object.values(budget.reservations).find(
+          (reservation) =>
+            reservation.invocationId === invocation.invocationId && reservation.state === 'unknown',
+        );
+        if (unresolved) {
+          throw new DescendantResourceAdmissionError('reconciliation_required');
+        }
+        assertRunDeadline(budget);
+        const attemptTime = now();
+        const existingWaiter = budget.waiters[invocation.invocationId];
+        if (existingWaiter && Date.parse(existingWaiter.deadlineAt) <= attemptTime.getTime()) {
+          await persist({
+            type: 'resource_budget.waiter_timed_out',
+            invocationId: invocation.invocationId,
+          });
+          throw new DescendantResourceAdmissionError(saturationReason(invocation));
+        }
+        const reservation = reservationFor(budget, invocation, parent.reservationId);
+        let candidate: ActiveResourceBudgetRuntimeStateV1 = budget;
+        const preparationEvents: RuntimeEvent[] = [];
+        if (existingWaiter && isQueueHead(budget, invocation)) {
+          const promoted = {
+            type: 'resource_budget.waiter_promoted',
+            invocationId: invocation.invocationId,
+          } as const;
+          candidate = reduceResourceBudgetStateV1(
+            candidate,
+            promoted,
+          ) as ActiveResourceBudgetRuntimeStateV1;
+          preparationEvents.push(promoted);
+        } else if (!isQueueHead(budget, invocation)) {
+          const waiter = existingWaiter ?? waiterFor(budget, invocation, attemptTime);
+          if (!existingWaiter) {
+            await persist({ type: 'resource_budget.waiter_enqueued', waiter });
+          }
+          return { status: 'waiting' as const, deadlineAt: waiter.deadlineAt };
+        }
+        try {
+          candidate = reduceResourceBudgetStateV1(candidate, {
+            type: 'resource_budget.reserved',
+            reservation,
+          }) as ActiveResourceBudgetRuntimeStateV1;
+        } catch {
+          if (!canFitWithoutConcurrency(budget, reservation)) {
+            throw new DescendantResourceAdmissionError('budget_exhausted');
+          }
+          const waiter = existingWaiter ?? waiterFor(budget, invocation, attemptTime);
+          if (!existingWaiter) {
+            await persist({ type: 'resource_budget.waiter_enqueued', waiter });
+          }
+          return { status: 'waiting' as const, deadlineAt: waiter.deadlineAt };
+        }
+        preparationEvents.push({ type: 'resource_budget.reserved', reservation });
+        await persistBatch(preparationEvents);
+        await persist({
+          type: 'resource_budget.dispatch_started',
+          reservationId: reservation.reservationId,
+        });
+        return {
+          status: 'reserved' as const,
+          reservation: { reservationId: reservation.reservationId },
+        };
+      }).catch((error: unknown) => {
+        if (error instanceof DescendantAdmissionProjectionConflict) {
+          return { status: 'retry' as const };
+        }
+        throw error;
+      });
+      if (attempt.status === 'retry') continue;
+      if (attempt.status === 'reserved') return attempt.reservation;
+      const waited = await waitForProjectionChange(attempt.deadlineAt, signal);
+      if (waited !== 'aborted') continue;
+      try {
+        await cancelWaiter(invocation.invocationId);
+      } catch {
+        // The outer cancellation transaction owns cleanup if the effect lease is already stale.
+      }
+      const abortError = new Error('Sub-agent resource wait was cancelled.');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
   };
 
   return {
     async reserveModel(request) {
-      const committed = committedResourceUsageV1(projected);
-      const remainingOutput = projected.budget.maxRunOutputTokens - committed.counters.outputTokens;
+      const budget = refreshProjected();
+      const committed = committedResourceUsageV1(budget);
+      const remainingOutput = budget.budget.maxRunOutputTokens - committed.counters.outputTokens;
       const outputTokens = Math.min(
         request.requestedMaxOutputTokens ?? remainingOutput,
         remainingOutput,
       );
       if (outputTokens <= 0) {
-        throw new DescendantResourceAdmissionError('Sub-agent model output budget is exhausted.');
+        throw new DescendantResourceAdmissionError(
+          'budget_exhausted',
+          'Sub-agent model output budget is exhausted.',
+        );
       }
       const usage = createZeroResourceUsageV1('versioned_upper_bound', 'descendant-runtime-v1');
       usage.counters.modelRequests = 1;
       usage.counters.inputTokens = request.inputTokens;
       usage.counters.outputTokens = outputTokens;
-      return reserve(request.invocationKey, 'model', usage);
+      return reserveDirect(request.invocationKey, 'model', usage);
     },
     async reconcileModel(request) {
       const usage = createZeroResourceUsageV1();
@@ -373,11 +722,12 @@ export function createDescendantResourceAdmissionV1(input: {
       await reconcile(request.reservationId, usage);
     },
     async reserveTool(request) {
+      const budget = refreshProjected();
       const usage = createZeroResourceUsageV1('versioned_upper_bound', 'descendant-runtime-v1');
       usage.counters.toolInvocations = 1;
-      const committed = committedResourceUsageV1(projected);
+      const committed = committedResourceUsageV1(budget);
       const remainingArtifactBytes =
-        projected.budget.maxArtifactBytes - committed.counters.artifactBytes;
+        budget.budget.maxArtifactBytes - committed.counters.artifactBytes;
       usage.counters.artifactBytes =
         request.artifactBytes ??
         (request.toolKind === 'write_file' || request.toolKind === 'edit_file'
@@ -385,10 +735,14 @@ export function createDescendantResourceAdmissionV1(input: {
           : 0);
       usage.gauges.activeToolInvocations = 1;
       if (request.shell) usage.gauges.activeShellInvocations = 1;
-      return reserve(
-        request.invocationKey,
-        request.toolKind.startsWith('mcp__') ? 'mcp' : 'tool',
-        usage,
+      return reserveToolWithFifo(
+        {
+          invocationId: descendantInvocationId(request.invocationKey),
+          resourceKind: request.toolKind.startsWith('mcp__') ? 'mcp' : 'tool',
+          requiredPermits: request.shell ? ['tool', 'shell_invocation'] : ['tool'],
+          upperBound: usage,
+        },
+        request.signal ?? input.signal,
       );
     },
     async reconcileTool(request) {
@@ -398,10 +752,10 @@ export function createDescendantResourceAdmissionV1(input: {
       await reconcile(request.reservationId, usage);
     },
     async markUnknown(reservationId) {
-      await persist({ type: 'resource_budget.unknown', reservationId });
+      await persistWithProjectionRetry({ type: 'resource_budget.unknown', reservationId });
     },
     async markLocalProviderAdmissionDenied(reservationId) {
-      await persist({
+      await persistWithProjectionRetry({
         type: 'resource_budget.released',
         reservationId,
         proof: 'local_provider_admission_denied',
@@ -435,12 +789,14 @@ function isQueueHead(
 function reservationFor(
   budget: ActiveResourceBudgetRuntimeStateV1,
   invocation: PlannedInvocation,
+  parentReservationId?: string,
 ): BudgetReservationV1 {
   return {
     version: 1,
     reservationId: crypto.randomUUID(),
     runId: budget.runId,
     invocationId: invocation.invocationId,
+    ...(parentReservationId ? { parentReservationId } : {}),
     resourceKind: invocation.resourceKind,
     executableUpperBound: invocation.upperBound,
     state: 'reserved',

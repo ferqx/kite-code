@@ -12,15 +12,16 @@
  * 4. Open /sessions — verify previous session appears in the list
  * 5. Load the historical session — verify messages are replayed correctly
  *
- * IMPORTANT: Both TUI instances share the same workspace (checkpointDir),
- * which is the key to cross-process persistence.
+ * IMPORTANT: Both TUI instances share the same isolated HOME and workspace,
+ * so they resolve the same production Runtime Store path.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
@@ -28,7 +29,7 @@ import {
   waitForCondition,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace } from '../harness/test-workspace';
+import { createTestWorkspace, observePersistedUserMessageSession } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -39,39 +40,26 @@ describe('TUI PTY System — Session Persistence', () => {
   let tui2: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
+  let persistedThreadId: string | undefined;
 
   beforeAll(async () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Response queue for tui1.
-    // Slot 0 is consumed by the user message model call.
-    // Extra slots handle fire-and-forget generateSessionName calls
-    // that may or may not complete before /exit.
-    server.setResponses([
-      { message: { content: 'Hello from session!' }, delay: 50 },
-      { message: { content: 'Hello from session!' }, delay: 50 },
-      { message: { content: 'Hello from session!' }, delay: 50 },
-      { message: { content: 'Hello from session!' }, delay: 50 },
-      { message: { content: 'Hello from session!' }, delay: 50 },
-    ]);
+    server.setResponses([{ message: { content: 'Hello from session!' }, delay: 50 }]);
 
-    tui1 = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui1 = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui1.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
-    tui1.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    // tui1 may already be dead (exited via /exit in test 4); killAndWait is a no-op in that case
-    await tui1?.killAndWait();
-    // Kill tui2 if it was spawned (may be undefined if test 4 failed before spawn)
-    await tui2?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({
+      tuis: [tui1, tui2],
+      mockServers: [server],
+      workspaces: [workspace],
+    });
   });
 
   // ═══════════════════════════════════════════════════════════
@@ -93,6 +81,21 @@ describe('TUI PTY System — Session Persistence', () => {
       expect(screenContains(output, 'Hello from session!')).toBe(true);
       // Prompt should still be visible
       expect(screenContains(output, '❯')).toBe(true);
+
+      await waitForCondition(
+        () => {
+          const observation = observePersistedUserMessageSession(
+            workspace,
+            'Message before restart',
+          );
+          if (observation.status !== 'ready' || !observation.value) return false;
+          persistedThreadId = observation.value.threadId;
+          return true;
+        },
+        'exact user.message_appended event to be durable before exit',
+        10_000,
+      );
+      expect(persistedThreadId).toBeTruthy();
     },
     TIMEOUT,
   );
@@ -111,25 +114,14 @@ describe('TUI PTY System — Session Persistence', () => {
       const exitCode = await tui1.waitForExit();
       console.log(`  tui1 exit code: ${exitCode}`);
 
-      // Set fresh mock responses for tui2.
-      // tui2 will fire generateSessionName when SessionSelector opens,
-      // which consumes mock slots. Provide generous buffer.
-      server.setResponses([
-        { message: { content: 'dummy' }, delay: 10 },
-        { message: { content: 'dummy' }, delay: 10 },
-        { message: { content: 'dummy' }, delay: 10 },
-        { message: { content: 'dummy' }, delay: 10 },
-        { message: { content: 'dummy' }, delay: 10 },
-      ]);
+      // Restart and session selection do not call the model.
+      server.setResponses([]);
 
       // Spawn tui2 on the SAME workspace — shares checkpoint DB
-      tui2 = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+      tui2 = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
       // Wait for TUI to finish rendering
-      await waitForText(() => tui2.outputSinceLastAction(), '❯', 15000);
-
       // Enable raw mode for tui2
-      tui2.setRawMode(true);
 
       const output = tui2.viewport();
       const clean = stripAnsi(output);
@@ -181,6 +173,11 @@ describe('TUI PTY System — Session Persistence', () => {
           active: false,
         }),
       ).toBe(true);
+      const persisted = observePersistedUserMessageSession(workspace, 'Message before restart');
+      expect(persisted.status).toBe('ready');
+      expect(persisted.status === 'ready' ? persisted.value?.threadId : undefined).toBe(
+        persistedThreadId,
+      );
     },
     TIMEOUT,
   );
@@ -220,5 +217,5 @@ describe('TUI PTY System — Session Persistence', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

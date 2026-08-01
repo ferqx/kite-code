@@ -12,10 +12,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -49,25 +50,18 @@ describe('TUI PTY System — Tool Parse Error', () => {
         },
         delay: 50,
       },
-      { message: { content: 'Spare retry 1' }, delay: 50 },
+      { message: { content: 'Kernel recovered after the invalid tool input.' }, delay: 50 },
       { message: { content: 'Recovery message after parse error!' }, delay: 50 },
-      { message: { content: 'Spare 4' } },
-      { message: { content: 'Spare 5' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Malformed Tool Call → Error Recovery ──────────────────
@@ -133,5 +127,5 @@ describe('TUI PTY System — Tool Parse Error', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

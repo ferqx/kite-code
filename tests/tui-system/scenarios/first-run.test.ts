@@ -7,9 +7,10 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, typeMaskedText, typeText } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -54,25 +55,19 @@ describe('first-run — comprehensive flow', () => {
   });
 
   afterEach(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   async function spawnFirstRun() {
     await tui?.killAndWait();
-    tui = spawnTui({
+    tui = await spawnReadyTui({
       cols: 100,
       rows: 40,
       mockServer: server,
       workspace,
       noPreConfig: true,
+      readiness: 'first-run-provider',
     });
-    await waitForText(() => getOutput(), 'Setup 1 of 2', 15000);
-    await waitForText(() => getOutput(), '› DeepSeek', 15000);
-    await waitForOutputQuiescence(() => getOutputSinceLastAction());
-    tui.setRawMode(true);
-    await tui.settleScreen();
   }
 
   async function openDeepSeekForm(): Promise<void> {

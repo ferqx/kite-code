@@ -7,9 +7,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -25,27 +26,17 @@ describe('TUI PTY System — Long Message', () => {
     workspace = createTestWorkspace();
 
     // Response #1: simple text response for the long message
-    // Responses #2-3: spare for generateSessionName wrap-around
-    server.setResponses([
-      { message: { content: 'I received your long message!' }, delay: 50 },
-      { message: { content: 'Long spare 1' } },
-      { message: { content: 'Long spare 2' } },
-    ]);
+    server.setResponses([{ message: { content: 'I received your long message!' }, delay: 50 }]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Long Message Input → No Crash ─────────────────────────

@@ -90,8 +90,12 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `run.comple
 
 子 Agent 因审批暂停时，continuation 必须可序列化并绑定原 tool call、消息、步骤与 journal。恢复前重新校验批准内容和能力边界；用户拒绝或取消该审批时，清除 continuation，并按上述规则中止整个当前 turn，不再恢复子 Agent 生成后续结果。
 
-Resource budget 为每次 continuation/resume 创建新的 parent attempt reservation；每个子模型、
-工具、Shell/MCP 与 artifact 调用再创建链接到 parent 的独立 reservation。Provider/tool 在
+Resource budget 为每次 continuation/resume 创建新的 parent attempt reservation；每个子模型及
+工具、Shell/MCP 调用再创建链接到 parent 的独立 reservation，artifact bytes 由产出它的调用一并
+预留/结算。child permit waiter 按 durable FIFO 等待，取消时必须写入 waiter cancellation；若
+effect lease 已因整轮取消失效，则外层取消事务负责收敛全部 waiting waiter。Provider/tool 在
 dispatch 后抛错时 child reservation 转为 unknown，不得只结算 parent 或静默退款。审批或本地
 策略尚未通过时不得提前创建 child reservation；Provider 最终本地 admission 明确拒绝且尚未
-网络 dispatch 时，只能携带 `local_provider_admission_denied` 证明释放 reservation。
+网络 dispatch 时，只能携带 `local_provider_admission_denied` 证明释放 reservation。取消后迟到的
+child actual usage 只能经 Kernel 的 resource-only late reconciliation 入口提交；该入口不接受
+child tool/model terminal event，不能复活 turn、permit 或后继调用。

@@ -22,6 +22,7 @@ import { createChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
+import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
 import { createAgentTools } from '@/core/tools/definitions';
@@ -684,6 +685,7 @@ async function runSubAgentLoop(
                     invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}`,
                     toolKind: tc.name,
                     shell: tc.name === 'shell_execute',
+                    signal: combinedSignal,
                   });
                 }
               : undefined,
@@ -790,6 +792,7 @@ async function runSubAgentLoop(
               await input.descendantResourceAdmission!.markUnknown(toolReservation.reservationId);
             }
           }
+          if (e instanceof DescendantResourceAdmissionError) throw e;
           toolOutput = JSON.stringify({
             ok: false,
             error: e instanceof Error ? e.message : String(e),
@@ -848,6 +851,7 @@ async function runSubAgentLoop(
     }
   } catch (e) {
     clearTimeout(timeoutId);
+    if (e instanceof DescendantResourceAdmissionError) throw e;
     const durationMs = Date.now() - startTime;
     const errMsg = e instanceof Error ? e.message : String(e);
     const summary = e instanceof Error && e.name === 'AbortError' ? 'Cancelled' : errMsg;

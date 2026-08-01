@@ -16,6 +16,7 @@ import {
   type RuntimeMcpPolicy,
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
+import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '@/core/sandbox/execution-capability-surface';
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
 import {
@@ -375,6 +376,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         subagentResult: result,
       });
     } catch (error) {
+      if (error instanceof DescendantResourceAdmissionError) throw error;
       return withFailureGuidance(request, {
         ok: false,
         command: 'task',

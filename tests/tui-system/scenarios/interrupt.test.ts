@@ -15,15 +15,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
-import {
-  screenContains,
-  stripAnsi,
-  waitForOutputQuiescence,
-  waitForText,
-} from '../harness/terminal-screen';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
+import { screenContains, stripAnsi, waitForOutputQuiescence } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -37,29 +33,17 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Each test owns a fresh server and TUI. Keep two equivalent delayed
-    // responses only as retry headroom; no test depends on response order from
-    // another case.
-    server.setResponses([
-      { message: { content: 'This response will be interrupted by Ctrl+C.' }, delay: 5000 },
-      { message: { content: 'This response will be interrupted by Ctrl+C.' }, delay: 5000 },
-    ]);
+    server.setResponses([]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered.
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately.
     // In canonical/line-buffered mode, input only arrives after CRLF.
-    tui.setRawMode(true);
   });
 
   afterEach(async () => {
-    // tui.kill() is safe even if the process already exited (test 3).
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Test 1: Single Ctrl+C cancels the run ──────────────────────
@@ -67,12 +51,15 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
   test(
     'single Ctrl+C during agent response cancels the run and TUI recovers to idle',
     async () => {
+      server.setResponses([
+        { message: { content: 'This response will be interrupted by Ctrl+C.' }, delay: 5000 },
+      ]);
       // Send a message to trigger the agent run.
       await submitUserMessage(tui, server, 'Interrupt me');
 
       // Send Ctrl+C to cancel the run.
       tui.write('\x03');
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
+      await waitForTuiReady(tui);
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
@@ -112,13 +99,16 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
   test(
     'double Ctrl+C during agent response exits the TUI process with code 0',
     async () => {
+      server.setResponses([
+        { message: { content: 'This response will be interrupted by Ctrl+C.' }, delay: 5000 },
+      ]);
       // Send a message to trigger the agent run.
       await submitUserMessage(tui, server, 'Exit after double Ctrl+C');
 
       // First Ctrl+C: cancels the run (running=true → cancelInterrupt).
       // Sets running=false and ctrlCPressed=true.
       tui.write('\x03');
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
+      await waitForTuiReady(tui);
 
       // Second Ctrl+C: running=false ∧ ctrlCPressed=true → exitRequested=true.
       // This triggers process.exit(0) in the TUI's useEffect.

@@ -4,7 +4,7 @@
 
 读取时机：新增或修改 `tests/tui-system/`、终端交互、mock model server、SessionRuntime 或跨进程恢复场景时。
 
-验证：`bun run test:tui:system`、`bun run test:tui:system:core`。
+验证：`bun run test:tui:harness`、`bun run test:tui:system`、`bun run test:tui:system:core`。
 
 ## 测试边界
 
@@ -14,12 +14,14 @@ PTY E2E 必须启动真实 TUI 子进程，走生产配置加载、HTTP 模型�
 
 ```text
 tests/tui-system/
-├── harness/    PTY 进程、mock server、输入辅助、screen 解析、临时 workspace
+├── harness/    快速单元测试及 PTY 进程、mock server、输入、screen、workspace 基础设施
 ├── scenarios/  默认确定性门禁：startup、input、approval、session、recovery 等
 └── smoke/      依赖宿主机原生能力的显式 opt-in smoke
 ```
 
 测试必须使用隔离的临时 HOME、workspace、配置和 Runtime 数据库。禁止读取开发机真实密钥、用户配置或会话数据。
+Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动真实 TUI 的文件属于串行
+`tui-system` job。两者不得在 system runner 中重复执行。
 
 ## 编写规则
 
@@ -102,13 +104,25 @@ tests/tui-system/
    删除必须验证 thread ID 集合不变，不能只依赖 selector 列表缓存。
 7. 改动 Runtime 多轮语义时同时运行 `tests/runtime/agent.integration.test.ts`、`tests/runtime/store.test.ts` 和相应 PTY scenario。
 8. PTY suite 必须串行运行，避免终端尺寸、端口和全局环境相互污染。
-   完整 suite 由 `scripts/run-tui-system-tests.ts` 先运行 harness 单元测试，再按 scenario
-   文件逐个启动独立 `bun test` 进程；每个文件默认硬超时 180 秒，超时后必须终止测试进程及其
-   TUI 子进程树。需要诊断慢场景时可通过 `KITE_TUI_TEST_FILE_TIMEOUT_MS`
+   Harness 单元测试由默认 `bun run test` 或显式 `bun run test:tui:harness` 执行；
+   `scripts/run-tui-system-tests.ts` 只按 scenario 文件逐个启动独立 `bun test` 进程。
+   每个文件的本地基础硬超时为 240 秒，并与条件等待、Bun test 和 journey deadline 使用同一
+   timeout scale；runner 会把实际 file budget 下传并自动保留 test/teardown 余量。自定义
+   `KITE_TUI_TEST_FILE_TIMEOUT_MS` 时，内层 test 与 journey 会按该上限收缩，不能越过文件 deadline；
+   小于 16 秒、无法保留最小双层 cleanup margin 的自定义值会在启动前被拒绝。
+   超时后 runner
+   只向启动时已验证、PGID 等于 child PID 的自有进程组发送信号，终止测试进程及其 TUI 子进程树，
+   不得扫描或杀死非本 runner 创建的进程。需要诊断慢场景时可通过 `KITE_TUI_TEST_FILE_TIMEOUT_MS`
    调整单文件上限，不得取消硬超时。
 9. `run.completed.output` 是最终回答的权威渲染校准点。TUI 必须在切换到 idle、把当前 turn 移入 Ink `<Static>` 之前，用它补齐可能缺失的尾部并结束所有 streaming text block。MCP/工具调用后的长回答必须断言末段在当前会话中可见，不能依赖重新进入会话后的 replay 才出现。
 10. `tool_search` 在对话区按用户可理解的发现过程渲染：运行中显示 `Searching for tools…`，成功后显示 `Searched for tools`，并以 `Provider · Tool` 树列出 names-only 命中项；catalog revision 切换期间返回的 last-known names 使用同一树结构，但不得暗示已签发 Binding。只有当前结果和 last-known names 都为空时才显示 `No matching tools found`，失败使用独立状态文案。真实 MCP 调用仍是独立工具块，名称从协议形式 `mcp__provider__tool` 映射为 `provider · tool`。展示层不得从模型回答或任意参数猜测自然语言动作。
-11. workspace 信任门禁默认由 harness 预信任：`spawnTui()` 为启动目录写入 `source: 'test'` 信任记录，新增场景无需关心启动授权。不使用环境变量旁路（Bun 自动注入 `<cwd>/.env*`，env 开关可被 workspace 文件伪造）。验证门禁本身时使用 `createTestWorkspace({ enforceWorkspaceTrust: true })`，参考 `tests/tui-system/scenarios/workspace-trust.test.ts`，门禁行为以 `docs/active/workspace-trust.md` 为准。
+11. 所有 scenario 必须通过 `spawnReadyTui()` 启动；普通场景使用默认 `main` readiness，
+    first-run 与 workspace trust 场景分别显式选择 `first-run-provider`、`workspace-trust`。
+    仅出现标题或 prompt 不构成可交互就绪。普通场景由 harness
+    预写 `source: 'test'` 信任记录，验证门禁本身时使用
+    `createTestWorkspace({ enforceWorkspaceTrust: true })`。子进程环境采用 allowlist，只继承平台启动、
+    临时目录、locale、时区和 CI 所需变量，再叠加 fixture 显式环境；不得继承开发机密钥、代理、
+    Provider 配置或 feature flag。
 12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：任意数量 React subscriber 只能
     对 stdin 保持一个物理 `data` listener；首个 subscriber 开启 DEC 1004，最后一个
     unsubscribe 必须移除 listener 并关闭 DEC 1004。禁止组件 mount 各自添加 stdin listener。
@@ -147,12 +161,20 @@ tests/tui-system/
     transient failure 以耗尽 production bounded retry budget，并断言 retry UI、实际请求次数、终态错误
     与下一用户 turn 恢复；不得用一次 500 后的默认成功响应声称已经验证错误终态。只验证“不重试”时
     应使用 401 等明确非 transient 错误，或在模型单元测试中显式注入 `maxAttempts: 1`。
+21. Mock response queue 是一次性、按阶段配置的严格队列，不得循环复用响应；队列耗尽必须返回
+    fixture error，存在未消费响应时不得切换 response phase，teardown 同时拒绝意外请求和剩余响应。
+    请求历史和请求计数跨 `setResponses()` 保持单调，便于证明 retry/auxiliary call 的真实数量；不得
+    以重复文本、dummy 或历史 `generateSessionName` 假设填充队列。
+22. Scenario teardown 必须使用 `cleanupTuiSystemFixtures()`，先等待所有 TUI 自有进程组退出，再停止
+    mock/本地服务，最后清理 workspace；任一阶段失败都不能跳过后续资源，最终以 `AggregateError`
+    报告。scenario contract 禁止直接调用 server `stop()` 或 workspace `cleanup()`。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 
 ## 运行入口
 
-- `bun run test`：默认快速门禁，排除 PTY 与 spike，适合日常修改。
+- `bun run test`：默认快速门禁，包含 harness 单元测试，排除真实 PTY scenarios、smoke 与 spike。
+- `bun run test:tui:harness`：只运行快速 TUI harness 单元测试。
 - `bun run test:tui:system`：按文件串行执行完整 PTY suite。
 - `bun run test:tui:smoke:native`：
   在已安装 `sandbox-exec` 或 `bwrap` 的宿主机上显式验证 Full 模式真实 PTY 链路。

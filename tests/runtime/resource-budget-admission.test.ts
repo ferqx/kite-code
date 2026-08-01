@@ -11,9 +11,13 @@ import { resolveFailureModeV1 } from '@/core/runtime/failure-mode-conformance';
 import { classifyFailure } from '@/core/runtime/failures';
 import { AgentKernel } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
+import {
+  createZeroResourceUsageV1,
+  LIMITED_RESOURCE_BUDGET_V1,
+} from '@/core/runtime/resource-budget';
 import {
   createDescendantResourceAdmissionV1,
+  DescendantResourceAdmissionError,
   planRuntimeBudgetAdmissionV1,
   reconciliationEventsForReservationsV1,
 } from '@/core/runtime/resource-budget-admission';
@@ -236,9 +240,15 @@ describe('runtime resource budget admission', () => {
     const admission = createDescendantResourceAdmissionV1({
       state,
       parentReservationId: parentPlan.reservationIds[0]!,
+      now: () => new Date('2026-07-30T00:00:02Z'),
       persistEvent: async (event) => {
         state = reduceRuntimeState(state, event);
         persisted.push(event.type);
+        return true;
+      },
+      persistEvents: async (events) => {
+        state = apply(state, events);
+        persisted.push(...events.map((event) => event.type));
         return true;
       },
     });
@@ -272,6 +282,371 @@ describe('runtime resource budget admission', () => {
         counters: { modelRequests: 1, inputTokens: 20, outputTokens: 3 },
       },
     });
+  });
+
+  test('blocks descendant dispatch when the persisted run deadline has elapsed', async () => {
+    let state = configuredState();
+    state.tools.calls['task-deadline'] = {
+      toolCallId: 'task-deadline',
+      modelMessageId: 'model-deadline',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'inspect' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-deadline');
+    const parentPlan = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-deadline'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    let persisted = 0;
+    const admission = createDescendantResourceAdmissionV1({
+      state,
+      parentReservationId: parentPlan.reservationIds[0]!,
+      now: () => new Date('2026-07-30T00:30:01Z'),
+      persistEvent: async () => {
+        persisted += 1;
+        return true;
+      },
+      persistEvents: async () => {
+        persisted += 1;
+        return true;
+      },
+    });
+
+    let rejected: unknown;
+    try {
+      await admission.reserveModel({ invocationKey: 'model:late', inputTokens: 1 });
+    } catch (error) {
+      rejected = error;
+    }
+    expect(rejected).toMatchObject({ reason: 'budget_exhausted' });
+    expect(persisted).toBe(0);
+  });
+
+  test('queues descendant tool permits durably in FIFO order and promotes atomically', async () => {
+    let state = configuredState({
+      maxConcurrentToolInvocations: 1,
+      maxConcurrencyWaitMs: 1_000,
+    });
+    if (state.resourceBudget.status === 'active') {
+      state.resourceBudget = {
+        ...state.resourceBudget,
+        deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+      };
+    }
+    state.tools.calls['task-fifo'] = {
+      toolCallId: 'task-fifo',
+      modelMessageId: 'model-fifo',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'inspect' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-fifo');
+    const parentPlan = planRuntimeBudgetAdmissionV1(state, {
+      type: 'run_tools',
+      toolCallIds: ['task-fifo'],
+    });
+    state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const batches: string[][] = [];
+    const persistEvents = async (events: import('@/core/runtime/events').RuntimeEvent[]) => {
+      kernel.processEventBatch(events);
+      batches.push(events.map((event) => event.type));
+      return true;
+    };
+    const admission = () =>
+      createDescendantResourceAdmissionV1({
+        state: kernel.getState(),
+        parentReservationId: parentPlan.reservationIds[0]!,
+        getState: () => kernel.getState(),
+        persistEvent: async (event) => persistEvents([event]),
+        persistEvents,
+      });
+    const firstAdmission = admission();
+    const secondAdmission = admission();
+
+    const firstPromise = firstAdmission.reserveTool({
+      invocationKey: 'tool:first',
+      toolKind: 'read_file',
+      shell: false,
+    });
+    const secondPromise = secondAdmission.reserveTool({
+      invocationKey: 'tool:second',
+      toolKind: 'read_file',
+      shell: false,
+    });
+    const first = await firstPromise;
+    for (let i = 0; i < 20; i++) {
+      const budget = kernel.getState().resourceBudget;
+      if (
+        budget.status === 'active' &&
+        Object.values(budget.waiters).some((waiter) => waiter.state === 'waiting')
+      ) {
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    const waitingBudget = kernel.getState().resourceBudget;
+    expect(
+      waitingBudget.status === 'active'
+        ? Object.values(waitingBudget.waiters).map((waiter) => waiter.state)
+        : [],
+    ).toEqual(['waiting']);
+
+    await firstAdmission.reconcileTool({ reservationId: first.reservationId });
+    const second = await secondPromise;
+    expect(batches).toContainEqual(['resource_budget.waiter_promoted', 'resource_budget.reserved']);
+    expect(kernel.getState().resourceBudget).toMatchObject({
+      status: 'active',
+      reservations: { [second.reservationId]: { state: 'dispatch_started' } },
+    });
+    await secondAdmission.reconcileTool({ reservationId: second.reservationId });
+    kernel.close();
+  });
+
+  test('cancels a queued descendant permit with the child invocation signal', async () => {
+    let state = configuredState({
+      maxConcurrentToolInvocations: 1,
+      maxConcurrencyWaitMs: 1_000,
+    });
+    if (state.resourceBudget.status === 'active') {
+      state.resourceBudget = {
+        ...state.resourceBudget,
+        deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+      };
+    }
+    state.tools.calls['task-cancel'] = {
+      toolCallId: 'task-cancel',
+      modelMessageId: 'model-cancel',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'inspect' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-cancel');
+    const parentPlan = planRuntimeBudgetAdmissionV1(state, {
+      type: 'run_tools',
+      toolCallIds: ['task-cancel'],
+    });
+    state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const persistEvents = async (events: import('@/core/runtime/events').RuntimeEvent[]) => {
+      kernel.processEventBatch(events);
+      return true;
+    };
+    const admission = createDescendantResourceAdmissionV1({
+      state: kernel.getState(),
+      parentReservationId: parentPlan.reservationIds[0]!,
+      getState: () => kernel.getState(),
+      persistEvent: async (event) => persistEvents([event]),
+      persistEvents,
+    });
+    const occupied = await admission.reserveTool({
+      invocationKey: 'tool:occupied',
+      toolKind: 'read_file',
+      shell: false,
+    });
+    const abortController = new AbortController();
+    const queued = admission.reserveTool({
+      invocationKey: 'tool:cancelled',
+      toolKind: 'read_file',
+      shell: false,
+      signal: abortController.signal,
+    });
+
+    await Bun.sleep(10);
+    abortController.abort();
+    await expect(queued).rejects.toMatchObject({ name: 'AbortError' });
+    expect(kernel.getState().resourceBudget).toMatchObject({
+      status: 'active',
+      waiters: {
+        'descendant:tool:task-cancel:tool:cancelled': { state: 'cancelled' },
+      },
+    });
+
+    await admission.reconcileTool({ reservationId: occupied.reservationId });
+    kernel.close();
+  });
+
+  test('times out a descendant compound permit with a typed canonical reason', async () => {
+    let state = configuredState({
+      maxConcurrentToolInvocations: 1,
+      maxConcurrentShellInvocations: 1,
+      maxConcurrencyWaitMs: 5,
+    });
+    if (state.resourceBudget.status === 'active') {
+      state.resourceBudget = {
+        ...state.resourceBudget,
+        deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+      };
+    }
+    state.tools.calls['task-timeout'] = {
+      toolCallId: 'task-timeout',
+      modelMessageId: 'model-timeout',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'inspect' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-timeout');
+    const parentPlan = planRuntimeBudgetAdmissionV1(state, {
+      type: 'run_tools',
+      toolCallIds: ['task-timeout'],
+    });
+    state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    const persisted: string[] = [];
+    const admission = createDescendantResourceAdmissionV1({
+      state,
+      parentReservationId: parentPlan.reservationIds[0]!,
+      getState: () => state,
+      persistEvent: async (event) => {
+        state = reduceRuntimeState(state, event);
+        persisted.push(event.type);
+        return true;
+      },
+      persistEvents: async (events) => {
+        state = apply(state, events);
+        persisted.push(...events.map((event) => event.type));
+        return true;
+      },
+    });
+    const occupied = await admission.reserveTool({
+      invocationKey: 'shell:occupied',
+      toolKind: 'shell_execute',
+      shell: true,
+    });
+
+    let rejected: unknown;
+    try {
+      await admission.reserveTool({
+        invocationKey: 'shell:timeout',
+        toolKind: 'shell_execute',
+        shell: true,
+      });
+    } catch (error) {
+      rejected = error;
+    }
+    expect(rejected).toBeInstanceOf(DescendantResourceAdmissionError);
+    expect(rejected).toMatchObject({ reason: 'shell_concurrency_saturated' });
+    expect(persisted).toEqual([
+      'resource_budget.reserved',
+      'resource_budget.dispatch_started',
+      'resource_budget.waiter_enqueued',
+      'resource_budget.waiter_timed_out',
+    ]);
+    await admission.reconcileTool({ reservationId: occupied.reservationId });
+  });
+
+  test('reconciles a late descendant terminal only through the bounded resource path', async () => {
+    let state = configuredState();
+    state.tools.calls['task-late'] = {
+      toolCallId: 'task-late',
+      modelMessageId: 'model-late',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'inspect' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-late');
+    const parentPlan = planRuntimeBudgetAdmissionV1(
+      state,
+      {
+        type: 'run_tools',
+        toolCallIds: ['task-late'],
+      },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    state = apply(state, [...parentPlan.preparationEvents, ...parentPlan.dispatchEvents]);
+    let rejectNormalReconciliation = false;
+    let lateCalls = 0;
+    const admission = createDescendantResourceAdmissionV1({
+      state,
+      parentReservationId: parentPlan.reservationIds[0]!,
+      now: () => new Date('2026-07-30T00:00:02Z'),
+      getState: () => state,
+      persistEvent: async (event) => {
+        if (rejectNormalReconciliation && event.type === 'resource_budget.reconciled') return false;
+        state = reduceRuntimeState(state, event);
+        return true;
+      },
+      persistEvents: async (events) => {
+        state = apply(state, events);
+        return true;
+      },
+      persistLateResourceReconciliation: async (event) => {
+        lateCalls += 1;
+        state = reduceRuntimeState(state, event);
+        return true;
+      },
+    });
+    const reservation = await admission.reserveTool({
+      invocationKey: 'tool:late',
+      toolKind: 'read_file',
+      shell: false,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'resource_budget.unknown',
+      reservationId: reservation.reservationId,
+    });
+    rejectNormalReconciliation = true;
+
+    await admission.reconcileTool({ reservationId: reservation.reservationId });
+    expect(lateCalls).toBe(1);
+    expect(state.resourceBudget).toMatchObject({
+      status: 'active',
+      reservations: { [reservation.reservationId]: { state: 'reconciled' } },
+    });
+  });
+
+  test('rejects non-reconciliation events from the late resource channel at runtime', () => {
+    const state = configuredState();
+    const plan = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'call_model' },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+    const dispatched = apply(state, [...plan.preparationEvents, ...plan.dispatchEvents]);
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: dispatched,
+      interactionMode: 'accept_edits',
+    });
+    const revision = kernel.getState().revision;
+
+    expect(
+      kernel.applyLateResourceReconciliation([
+        {
+          type: 'user.message_appended',
+          messageId: 'late-channel-injection',
+          content: 'must not be accepted',
+        },
+      ]),
+    ).toBe(false);
+    expect(kernel.getState().revision).toBe(revision);
+    expect(kernel.applyLateResourceReconciliation([])).toBe(false);
+    expect(
+      kernel.applyLateResourceReconciliation([
+        {
+          type: 'resource_budget.reconciled',
+          reservationId: plan.reservationIds[0]!,
+          actual: createZeroResourceUsageV1(),
+        },
+      ]),
+    ).toBe(true);
+    expect(kernel.getState().revision).toBe(revision + 1);
+    kernel.close();
   });
 
   test('opens a distinct parent reservation when a suspended Sub-agent resumes', () => {
@@ -437,6 +812,93 @@ describe('runtime resource budget admission', () => {
     kernel.close();
   });
 
+  test('projects descendant permit timeout through the canonical run terminal policy', async () => {
+    let state = configuredState({
+      maxConcurrentToolInvocations: 1,
+      maxConcurrencyWaitMs: 5,
+    });
+    if (state.resourceBudget.status !== 'active') throw new Error('Expected active budget.');
+    state.resourceBudget = {
+      ...state.resourceBudget,
+      deadlineAt: new Date(Date.now() + 5_000).toISOString(),
+    };
+    const occupiedUsage = createZeroResourceUsageV1(
+      'versioned_upper_bound',
+      'descendant-terminal-test-v1',
+    );
+    occupiedUsage.counters.toolInvocations = 1;
+    occupiedUsage.gauges.activeToolInvocations = 1;
+    state = apply(state, [
+      {
+        type: 'resource_budget.reserved',
+        reservation: {
+          version: 1,
+          reservationId: 'occupied-tool',
+          runId: state.resourceBudget.runId,
+          invocationId: 'fixture:occupied-tool',
+          resourceKind: 'tool',
+          executableUpperBound: occupiedUsage,
+          state: 'reserved',
+        },
+      },
+      { type: 'resource_budget.dispatch_started', reservationId: 'occupied-tool' },
+    ]);
+    state.tools.calls['task-terminal'] = {
+      toolCallId: 'task-terminal',
+      modelMessageId: 'model-terminal',
+      name: 'task',
+      args: { subagent_type: 'explore', task: 'Read a file.' },
+      status: 'approved',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-terminal');
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const config: AgentConfig = {
+      apiKey: 'unused',
+      baseURL: 'https://example.invalid',
+      modelName: 'child-terminal-model',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      features: { resourceBudgetV1: true, boundedCancellationV1: true },
+      sandbox: { enabled: false },
+    };
+    const executor = createRuntimeEffectExecutor({
+      config,
+      model: createMockModel([
+        {
+          message: aiMessage({
+            content: 'read',
+            tool_calls: [{ id: 'child-read', name: 'read_file', args: { path: 'missing.txt' } }],
+          }),
+        },
+      ]),
+      subagentEventSink: () => {},
+    });
+    const events: import('@/core/runtime/events').RuntimeEvent[] = [];
+    for await (const event of runRuntimeLoop(kernel, executor, {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    })) {
+      events.push(event);
+    }
+
+    const terminal = events.find((event) => event.type === 'run.error');
+    expect(terminal).toMatchObject({
+      type: 'run.error',
+      failure: { kind: 'resource_saturated' },
+    });
+    expect(terminal?.type === 'run.error' ? terminal.outcome : undefined).toEqual(
+      resolveResourceAdmissionFailureOutcomeV1('tool_concurrency_saturated', kernel.getState()),
+    );
+    expect(events.map((event) => event.type)).toContain('turn.aborted');
+    expect(events.map((event) => event.type)).not.toContain('tool.failed');
+    kernel.close();
+  });
+
   test.each([
     ['budget_unconfigured', 'mandatory_admin_policy_unavailable', 'none'],
     ['budget_exhausted', 'budget_exhausted', 'known'],
@@ -461,6 +923,20 @@ describe('runtime resource budget admission', () => {
     }
     expect(resolveResourceAdmissionFailureOutcomeV1(reason, state)).toEqual(
       resolveFailureModeV1(mode, { knownExternalEffects }).terminalOutcome!,
+    );
+  });
+
+  test('production admission adapter maps persistence failure without inventing a conformance mode', () => {
+    expect(
+      resolveResourceAdmissionFailureOutcomeV1('persistence_unavailable', configuredState()),
+    ).toEqual(
+      failedTerminalOutcomeV1(
+        classifyFailure(
+          'persistence_unavailable',
+          'Runtime resource admission could not be persisted.',
+        ),
+        { knownExternalEffects: 'none' },
+      ),
     );
   });
 

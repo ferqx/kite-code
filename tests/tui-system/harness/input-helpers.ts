@@ -14,11 +14,25 @@ const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
 const SELECTOR_COMMAND_PREFIX = /^\/(?:model|effort|theme|permissions)\s$/;
 
+interface InputDeliveryTestTiming {
+  /** Harness-unit-test override. PTY scenarios must use production-like defaults. */
+  echoTimeoutMs?: number;
+  settleMs?: number;
+  retryBackspaceDelayMs?: number;
+  restoreTimeoutMs?: number;
+}
+
+interface TypeTextOptions {
+  append?: boolean;
+  delayMs?: number;
+  testTiming?: InputDeliveryTestTiming;
+}
+
 function normalizeInputEcho(text: string): string {
   return stripAnsi(text).replace(/\s+/g, '');
 }
 
-type ActiveInput = {
+export type ActiveInput = {
   kind:
     | 'main'
     | 'session-search'
@@ -49,7 +63,7 @@ function currentPromptInput(lines: readonly string[]): string | undefined {
   return normalizeInputEcho(inputLines.join('\n'));
 }
 
-function activeInput(viewport: string): ActiveInput | undefined {
+export function activeInput(viewport: string): ActiveInput | undefined {
   const lines = stripAnsi(viewport).split(/\r?\n/);
 
   for (const [marker, command] of [
@@ -139,8 +153,9 @@ async function clearActiveInputTo(
   tui: PtyProcess,
   targetValue: string,
   expectedKind: ActiveInput['kind'] | undefined,
+  timing: InputDeliveryTestTiming = {},
 ): Promise<ActiveInput> {
-  const effectiveTimeout = tuiWaitTimeout(5_000);
+  const effectiveTimeout = tuiWaitTimeout(timing.restoreTimeoutMs ?? 5_000);
   const start = Date.now();
   let backspaces = 0;
   let lastInput: ActiveInput | undefined;
@@ -175,7 +190,7 @@ async function clearActiveInputTo(
     previousValue = current.value;
     tui.write(current.kind === 'block-cursor' ? '\x08' : '\x7f');
     backspaces++;
-    await sleep(INPUT_RETRY_BACKSPACE_DELAY_MS);
+    await sleep(timing.retryBackspaceDelayMs ?? INPUT_RETRY_BACKSPACE_DELAY_MS);
   }
   throw new Error(
     `Timeout restoring active input to ${JSON.stringify(targetValue)}; last active input was ${JSON.stringify(lastInput)}. ` +
@@ -186,10 +201,11 @@ async function clearActiveInputTo(
 export async function typeText(
   tui: PtyProcess,
   text: string,
-  delayOrOptions: number | { append?: boolean; delayMs?: number } = 40,
+  delayOrOptions: number | TypeTextOptions = 40,
 ): Promise<void> {
   if (text.length === 0) return;
-  const options = typeof delayOrOptions === 'number' ? { delayMs: delayOrOptions } : delayOrOptions;
+  const options: TypeTextOptions =
+    typeof delayOrOptions === 'number' ? { delayMs: delayOrOptions } : delayOrOptions;
   const delayMs = options.delayMs ?? 40;
   await tui.settleScreen();
   let initial = activeInput(tui.viewport());
@@ -202,7 +218,7 @@ export async function typeText(
     // an append baseline. Their scenarios clear the field explicitly first.
     initial = { ...initial, value: '' };
   } else if (!options.append && initial.value.length > 0) {
-    initial = await clearActiveInputTo(tui, '', initial.kind);
+    initial = await clearActiveInputTo(tui, '', initial.kind, options.testTiming);
   }
   const baselineValue = options.append ? initial.value : '';
   const expectedValue = `${baselineValue}${normalizeInputEcho(text)}`;
@@ -228,11 +244,11 @@ export async function typeText(
             normalizeInputEcho(delivered),
             'slash-argument-query',
             false,
-            INPUT_ECHO_TIMEOUT_MS,
+            options.testTiming?.echoTimeoutMs ?? INPUT_ECHO_TIMEOUT_MS,
           );
         }
       }
-      await sleep(INPUT_SETTLE_MS);
+      await sleep(options.testTiming?.settleMs ?? INPUT_SETTLE_MS);
 
       // Confirm that Ink rendered the final input value before a following
       // control key is sent. The current VT viewport is authoritative here:
@@ -243,7 +259,7 @@ export async function typeText(
         expectedValue,
         initial.kind,
         !options.append && baselineValue.length === 0,
-        INPUT_ECHO_TIMEOUT_MS,
+        options.testTiming?.echoTimeoutMs ?? INPUT_ECHO_TIMEOUT_MS,
       );
       return;
     } catch (error) {
@@ -252,8 +268,8 @@ export async function typeText(
       // Restore the exact pre-action baseline one visible character at a time.
       // This clears arbitrary partial delivery without deleting legitimate
       // content that an explicit append action intends to preserve.
-      initial = await clearActiveInputTo(tui, baselineValue, initial.kind);
-      await sleep(INPUT_SETTLE_MS);
+      initial = await clearActiveInputTo(tui, baselineValue, initial.kind, options.testTiming);
+      await sleep(options.testTiming?.settleMs ?? INPUT_SETTLE_MS);
     }
   }
 

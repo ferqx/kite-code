@@ -6,9 +6,10 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -32,30 +33,17 @@ describe('TUI PTY System — Input & Message', () => {
       },
     });
 
-    // Session-title requests may interleave with conversation requests. Every
-    // slot therefore remains valid for the behavior under test instead of
-    // relying on a fragile request-order guess.
-    server.setResponses(
-      Array.from({ length: 12 }, () => ({
-        message: { content: 'I received your message!' },
-        delay: 50,
-      })),
-    );
+    server.setResponses([]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
   });
 
   afterEach(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Send Message → Response ───────────────────────────────
@@ -63,6 +51,7 @@ describe('TUI PTY System — Input & Message', () => {
   test(
     'send message → agent responds with mock text',
     async () => {
+      server.setResponses([{ message: { content: 'I received your message!' }, delay: 50 }]);
       await typeText(tui, 'Test message from PTY');
       tui.write('\r');
       await waitForRequestMessage(server, 'Test message from PTY', 15000);
@@ -82,6 +71,7 @@ describe('TUI PTY System — Input & Message', () => {
   test(
     'Shift+Enter inserts a newline in the input',
     async () => {
+      server.setResponses([{ message: { content: 'I received your message!' }, delay: 50 }]);
       await typeText(tui, 'Line1');
       // Kitty keyboard protocol: Shift+Enter
       tui.write('\x1b[13;2u');
@@ -107,6 +97,10 @@ describe('TUI PTY System — Input & Message', () => {
   test(
     'Up arrow recalls last message from history',
     async () => {
+      server.setResponses([
+        { message: { content: 'I received your message!' }, delay: 50 },
+        { message: { content: 'I received your message!' }, delay: 50 },
+      ]);
       // Send first message
       await typeText(tui, 'History message A');
       tui.write('\r');

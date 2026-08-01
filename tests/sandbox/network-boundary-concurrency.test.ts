@@ -302,6 +302,10 @@ describe('network boundary concurrent invocation isolation', () => {
           if (event.type === 'network.admission_decided') reportReceiptPersisted();
           return applied;
         },
+        persistEvents: async (events) => {
+          kernel.processEventBatch(events);
+          return true;
+        },
       },
     );
     const [shellWasEntered, receiptWasPersisted] = await Promise.all([

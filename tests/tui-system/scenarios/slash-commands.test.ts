@@ -10,10 +10,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitCommand, submitUserMessage, typeText } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -35,29 +36,18 @@ describe('TUI PTY System — Slash Commands', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Placeholder responses — no model calls expected from slash commands
-    // Extra spares for any internal calls (generateSessionName etc.)
-    server.setResponses([
-      { message: { content: 'spare' } },
-      { message: { content: 'spare 2' } },
-      { message: { content: 'spare 3' } },
-      { message: { content: 'spare 4' } },
-    ]);
+    // Exactly one model call is made by the explicit "hello world" turn.
+    server.setResponses([{ message: { content: 'Conversation response before clear.' } }]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── /help ────────────────────────────────────────────────────
@@ -100,7 +90,11 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       // First send some text as user message to create content to clear
       await submitUserMessage(tui, server, 'hello world');
-      await waitForText(() => tui.outputSinceLastAction(), 'spare', 10000);
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Conversation response before clear.',
+        10000,
+      );
 
       // The reducer clearing contract is covered by tui-reducer.test.ts.
       // Ink <Static> lines already written to a physical terminal cannot be
@@ -414,5 +408,5 @@ describe('TUI PTY System — Slash Commands', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

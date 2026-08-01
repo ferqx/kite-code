@@ -17,13 +17,8 @@
         "docs/active/failure-classification.md",
         "docs/active/thought-pre-consolidation.md",
         "docs/book/04-Agent引擎.md",
-        "docs/book/10-持久化与会话管理.md",
-        "docs/adr/0025-model-requested-live-emission.md",
-        "docs/adr/0042-file-tool-semantics-and-write-safety.md",
-        "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
-        "docs/adr/0045-streaming-render-complete-block-commit.md",
-        "docs/adr/0048-durable-user-turn-cancellation.md",
-        "docs/adr/0049-effect-aware-read-scheduling.md"
+        "docs/book/06-多Agent协作.md",
+        "docs/book/10-持久化与会话管理.md"
       ]
     },
     {
@@ -52,6 +47,20 @@
       ]
     },
     {
+      "id": "runtime-agent-composition",
+      "sources": ["src/core/runtime/agent.ts"],
+      "documents": [
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/cancel-resume-cleanup.md",
+        "docs/active/failure-classification.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/active/session-logging-policy.md",
+        "docs/book/04-Agent引擎.md",
+        "docs/book/06-多Agent协作.md",
+        "docs/book/10-持久化与会话管理.md"
+      ]
+    },
+    {
       "id": "capabilities",
       "sources": [
         "src/core/capabilities/**",
@@ -65,6 +74,17 @@
         "docs/active/six-concept-runtime-architecture.md",
         "docs/adr/0025-model-requested-live-emission.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
+      ]
+    },
+    {
+      "id": "tool-controller-runtime-composition",
+      "sources": ["src/core/controllers/tool-controller.ts"],
+      "documents": [
+        "docs/active/failure-classification.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/book/04-Agent引擎.md",
+        "docs/book/06-多Agent协作.md"
       ]
     },
     {
@@ -217,7 +237,6 @@
         "src/core/session-logger/**",
         "src/core/config/session-logging-policy.ts",
         "src/core/config/paths.ts",
-        "src/core/runtime/agent.ts",
         "src/app/cli/index.ts",
         "src/app/tui/run-agent.ts",
         "src/app/tui/session-manager.ts",
@@ -271,9 +290,11 @@
       "sources": ["src/core/subagent/**", "src/protocol/subagent.ts"],
       "documents": [
         "docs/active/cancel-resume-cleanup.md",
+        "docs/active/failure-classification.md",
         "docs/active/mcp-runtime-governance.md",
-        "docs/book/06-多Agent协作.md",
-        "docs/adr/0043-tool-spec-registry-and-strict-edit.md"
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/book/06-多Agent协作.md"
       ]
     },
     {

@@ -27,7 +27,10 @@
 
 `resourceBudgetV1` 启用时，策略/审批仍先于 child reservation；只有调用已经可执行时才原子写入
 reservation，再单独写入 `dispatch_started`，最后进入 adapter。Subagent parent 只代表一次
-lifecycle attempt，child 模型、工具、Shell/MCP 和 artifact 调用各自链接独立 reservation。
+lifecycle attempt，child 模型及工具/Shell/MCP 调用各自链接独立 reservation；artifact bytes
+计入产出它的 tool/MCP reservation，不另建一个虚构 invocation。child tool/shell permit 使用
+durable FIFO waiter、原子 promotion + reservation 与有界 wait deadline；超时通过主 Runtime 的
+canonical failure terminal 收敛，不转换成普通 child tool error。
 本地 Provider 最终 gate 明确拒绝且能证明未 dispatch 时可携带证明 release；已经执行部分
 command/MCP check 的组合 Verification 必须转 `unknown`，不能整体退款。`resourceBudgetV1`
 开启但 `boundedCancellationV1` 关闭时，模型不披露 writer、Shell 或 child capability，

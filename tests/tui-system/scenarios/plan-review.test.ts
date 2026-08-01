@@ -14,10 +14,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -37,7 +38,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     // Shared mock responses — write_plan in planning phase.
     // Response #1: write_plan tool call with v2 args
     // Response #2: agent text after drafting
-    // Response #3-7: spare responses for generateSessionName + retries
+    // Response #3: deterministic response to the explicit building-phase probe.
     server.setResponses([
       {
         message: {
@@ -60,22 +61,14 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
         },
       },
       { message: { content: 'Plan draft saved. Ready for review when you are.' } },
-      { message: { content: 'Spare 1' } },
-      { message: { content: 'Spare 2' } },
-      { message: { content: 'Spare 3' } },
-      { message: { content: 'Spare 4' } },
-      { message: { content: 'Spare 5' } },
+      { message: { content: 'No plan tool requested in building phase.' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── write_plan in planning phase renders plan content ───
@@ -116,7 +109,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Try to write a plan now', 15000);
 
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
+      await waitForTuiReady(tui);
 
       const output = tui.viewport();
       const clean = stripAnsi(output);
@@ -127,5 +120,5 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

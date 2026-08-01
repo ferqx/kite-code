@@ -7,10 +7,11 @@
  * (each session displays its own content after switching).
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   screenHasSessionRow,
@@ -19,7 +20,11 @@ import {
   waitForOutputQuiescence,
   waitForText,
 } from '../harness/terminal-screen';
-import { createTestWorkspace, persistedSessionIds } from '../harness/test-workspace';
+import {
+  createTestWorkspace,
+  observePersistedSessionIds,
+  requirePersistedRuntimeReady,
+} from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
 
@@ -35,43 +40,22 @@ describe('TUI PTY System — Session Switching', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
 
-    // Response queue layout (critical ordering):
-    // [0]       → main response for session 1 ("Message in session 1")
-    // [1-N]     → all "Session 2 response"
-    //
-    // generateSessionName for session 1 is fire-and-forget. It may or may not
-    // consume a slot (depending on whether its model call starts before /new
-    // switches the active threadId). To handle both cases, idx 1+ must all
-    // contain "Session 2 response" so session 2 always gets the right content.
+    // One deterministic model request per user turn. Session naming is local
+    // string normalization and must never consume provider responses.
     server.setResponses([
       { message: { content: 'Session 1 response' }, delay: 50 },
       { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
-      { message: { content: 'Session 2 response' }, delay: 50 },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Send Message in Session 1 ──
@@ -105,8 +89,15 @@ describe('TUI PTY System — Session Switching', () => {
   step(
     '/new creates session 2, TUI remains responsive',
     async () => {
-      sessionIdsBeforeNew = persistedSessionIds(workspace);
-      expect(sessionIdsBeforeNew).toHaveLength(1);
+      await waitForCondition(
+        () => {
+          const observation = observePersistedSessionIds(workspace);
+          return observation.status === 'ready' && observation.value.length === 1;
+        },
+        'Runtime Store to persist session 1 before /new',
+        10_000,
+      );
+      sessionIdsBeforeNew = requirePersistedRuntimeReady(observePersistedSessionIds(workspace));
       await submitCommand(tui, '/new');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
@@ -134,7 +125,9 @@ describe('TUI PTY System — Session Switching', () => {
       await waitForText(() => tui.viewport(), 'Session 2 response', 15000);
       await waitForCondition(
         () => {
-          const current = persistedSessionIds(workspace);
+          const observation = observePersistedSessionIds(workspace);
+          if (observation.status !== 'ready') return false;
+          const current = observation.value;
           return (
             current.length === sessionIdsBeforeNew.length + 1 &&
             sessionIdsBeforeNew.every((sessionId) => current.includes(sessionId))
@@ -326,5 +319,5 @@ describe('TUI PTY System — Session Switching', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

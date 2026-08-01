@@ -22,10 +22,11 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
   stripAnsi,
@@ -106,17 +107,11 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
     }
     workspace = createTestWorkspace({ files });
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   step(
@@ -191,8 +186,6 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
           },
           delay: 10,
         },
-        { message: { content: 'spare-h1' }, delay: 10 },
-        { message: { content: 'spare-h2' }, delay: 10 },
       ]);
 
       await typeText(tui, '仔细了解TUI模块');
@@ -251,8 +244,6 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
         },
         // 新一轮模型调用：model.requested settle 带工具 Thought → 最终回答
         { message: { content: 'CARRY_DONE: boundary crossed, reading resumed.' }, delay: 10 },
-        { message: { content: 'spare-c1' }, delay: 10 },
-        { message: { content: 'spare-c2' }, delay: 10 },
       ]);
 
       await typeText(tui, '读入口并记笔记');
@@ -278,5 +269,5 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

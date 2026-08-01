@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   type DocumentationMap,
   evaluateDocumentationImpact,
@@ -72,5 +73,27 @@ describe('documentation impact gate', () => {
         withCompositionRule,
       ),
     ).toEqual([]);
+  });
+
+  it('does not let accepted ADRs satisfy the Phase 1C current-document routes', () => {
+    const repositoryMap = JSON.parse(
+      readFileSync(new URL('../docs/documentation-map.json', import.meta.url), 'utf8'),
+    ) as DocumentationMap;
+    const phase1cRuleIds = new Set([
+      'runtime-kernel',
+      'runtime-agent-composition',
+      'tool-controller-runtime-composition',
+      'subagent',
+    ]);
+    const rules = repositoryMap.rules.filter((rule) => phase1cRuleIds.has(rule.id));
+    expect(rules.map((rule) => rule.id).sort()).toEqual([...phase1cRuleIds].sort());
+    for (const rule of rules) {
+      expect(rule.documents.some((document) => document.startsWith('docs/adr/'))).toBe(false);
+      expect(
+        rule.documents.some(
+          (document) => document.startsWith('docs/active/') || document.startsWith('docs/book/'),
+        ),
+      ).toBe(true);
+    }
   });
 });

@@ -41,7 +41,10 @@ import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
-import { createDescendantResourceAdmissionV1 } from '@/core/runtime/resource-budget-admission';
+import {
+  createDescendantResourceAdmissionV1,
+  DescendantResourceAdmissionError,
+} from '@/core/runtime/resource-budget-admission';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
@@ -53,6 +56,7 @@ import type { ShellExecutor } from '@/core/tools/shell';
 import { executeVerificationEffect } from '@/core/verification';
 import { createFilePreimageRecorder } from './file-checkpoints';
 import type { RuntimeEffectExecutor } from './kernel';
+import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import { RemoteMcpEgressNonceConflictError, type RuntimeStore } from './store';
 
 /** Dependencies owned by the application boundary, never persisted in RuntimeState. */
@@ -274,7 +278,17 @@ export function createRuntimeEffectExecutor(
               ? createDescendantResourceAdmissionV1({
                   state: state as import('./state').RuntimeState,
                   parentReservationId,
+                  getState: () =>
+                    (executionContext.getState?.() ?? state) as import('./state').RuntimeState,
                   persistEvent: executionContext.persistEvent,
+                  persistEvents: executionContext.persistEvents,
+                  ...(executionContext.persistLateResourceReconciliation
+                    ? {
+                        persistLateResourceReconciliation:
+                          executionContext.persistLateResourceReconciliation,
+                      }
+                    : {}),
+                  signal: dependencies.signal,
                 })
               : undefined;
           const terminalEvents: RuntimeEvent[] = [];
@@ -380,6 +394,11 @@ export function createRuntimeEffectExecutor(
         );
         return batches.flat();
       } catch (error) {
+        if (error instanceof DescendantResourceAdmissionError) {
+          const currentState =
+            (executionContext?.getState?.() as import('./state').RuntimeState | undefined) ?? state;
+          return resourceAdmissionTerminalEventsV1(currentState, error.reason);
+        }
         const mcpCalls = effect.toolCallIds.flatMap((toolCallId) => {
           const call = state.tools.calls[toolCallId];
           return call?.name.startsWith('mcp__') ? [{ toolCallId, call }] : [];

@@ -44,3 +44,28 @@ continuation codec 保存消息、步骤、journal 和阻塞请求，并在恢�
 ## 6.5 并发与边界
 
 Task Tool 按 Runtime/线程限制活动数量。取消通过 AbortController 传播。子 Agent 不递归无限派生，也不能修改主 RuntimeState；其结果必须通过主 Runtime Event 合并。
+
+## 6.6 累计预算、取消与恢复
+
+父 Agent 与全部 Subagent 共用同一个 run-scoped `ResourceBudgetV1` ledger，子 Agent 不获得独立
+余额。Task parent reservation 只覆盖本次 lifecycle/concurrency attempt；子模型及 Builtin、
+Shell、MCP invocation 分别建立带 `parentReservationId` 的 child reservation，并在 dispatch 前
+持久化。artifact bytes 计入产出它的 tool/MCP reservation，不重复计算一次 invocation。暂停后
+恢复会创建新的 parent attempt，不会复用旧 attempt 的许可或把旧 child usage 退回余额。
+
+`maxConcurrentSubagents`、`maxConcurrentWriters`、tool permit 与 shell permit 都由共享 Runtime
+原子执行。Shell child 必须同时取得 tool 和 shell invocation 两类 permit，不能先占一种再等待
+另一种；等待按资源 FIFO 排队，期限取 concurrency wait deadline 与 run deadline 的较早者。
+这些顶层 invocation permit 不替代平台对完整 Shell descendant process tree 的限制。
+
+取消或 run deadline 会传播到子 Agent 及其 descendants，并先收敛 durable 状态：未 dispatch
+reservation 才能 release，已经 `dispatch_started` 而无 terminal receipt 的调用转为
+`unknown`，不能自动重放或退款。process-tree 清理无法确认时，父 Runtime 以
+`cancel_incomplete` 和 reconciliation hard block 结束；迟到 child actual usage 只能经
+resource-only bounded reconciliation 提交，child tool/model terminal 本身会被拒绝，不能复活
+已取消 turn、释放未知额度或启动后继调用。
+
+子 Agent 的失败、资源饱和与终态使用主 Runtime 的同一 failure-mode policy 和
+`RunTerminalOutcomeV1` 投影。模型 final、子进程零退出码或 parent task 的表面成功都不能绕过
+required Verification，也不能把 `unknown`、`budget_exhausted` 或 `resource_saturated` 显示为
+完成。

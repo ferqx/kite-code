@@ -116,17 +116,21 @@ terminal facts 与 actual reconciliation 在一个 result transaction 中提交�
 resource 的 FIFO sequence；shell 同时要求 `tool + shell_invocation` compound permit，不持有
 部分额度。主模型 reservation 使用将要发送给 Provider 的同一 context projection 精确计量
 input，并把实际请求的 max output clamp 到剩余 run budget；projection 在 reserve 后变化时
-拒绝 dispatch。Sub-agent parent 只持有 lifecycle/concurrency，每个 child 模型、工具、
-Shell/MCP 和 artifact 调用都通过 `parentReservationId` 进入同一 durable ledger；暂停恢复使用
-新的 parent attempt。等待期限为 concurrency deadline 与 run deadline 的较早者；稳定结果区分
+拒绝 dispatch。Sub-agent parent 只持有 lifecycle/concurrency，每个 child 模型及工具/Shell/MCP
+调用都通过 `parentReservationId` 进入同一 durable ledger；artifact bytes 计入产出它的 child
+tool/MCP reservation，不伪造第二次 invocation。暂停恢复使用新的 parent attempt。child tool
+waiter 与顶层调用共用 durable FIFO sequence，promotion + reservation 原子持久化；等待期限为
+concurrency deadline 与 run deadline 的较早者，Abort 会取消仍在等待的 durable waiter。稳定结果区分
 `tool_concurrency_saturated`、`shell_concurrency_saturated` 和 `budget_exhausted`。Sub-agent
 Provider/tool dispatch 后失败会把 child 标记 unknown，不能由 parent 粗粒度结算掩盖。
-未知 invocation 返回 `reconciliation_required`，不伪装成 budget exhaustion。
+未知 invocation 返回 `reconciliation_required`，不伪装成 budget exhaustion。child admission
+拒绝不会被折叠为普通 tool/Subagent error，而是进入与顶层相同的 failure-mode terminal adapter。
 
 `boundedCancellationV1` 使用 budget deadline 驱动统一 AbortSignal。取消事务先 release
 undispatched reservation、把 dispatched reservation 转 unknown 并取消 FIFO waiter；late
-terminal 不能改写工具/turn 终态，只能在 cleanup 已确认时提交受约束的 resource
-reconciliation。未确认进程退出使用 `cancel_incomplete` 并保留 unknown。
+terminal 不能改写工具/turn 终态；父或 child reservation 只有通过 Kernel 专用的 bounded late
+resource reconciliation 入口才能从 `dispatch_started/unknown` 提交 actual usage，该入口不接受
+工具/model terminal event，不能复活调度。未确认进程退出使用 `cancel_incomplete` 并保留 unknown。
 
 `RuntimeSchedulingPolicyV1` 从实际 scheduler 常量导出 parallel-read allowlist/ceiling/barrier、
 shell overlap/approval/rejection、FIFO compound admission 和 late-event policy 的唯一 canonical

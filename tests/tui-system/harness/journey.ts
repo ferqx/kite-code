@@ -1,3 +1,5 @@
+import { tuiWaitTimeout } from './timing';
+
 export type TuiSystemJourneyStep = () => void | Promise<void>;
 
 interface RegisteredJourneyStep {
@@ -14,6 +16,12 @@ export interface TuiSystemJourney {
 
 const DEFAULT_STEP_TIMEOUT_MS = 30_000;
 const DEFAULT_JOURNEY_DEADLINE_MS = 165_000;
+
+function defaultJourneyDeadlineMs(): number {
+  const configured = Number(process.env.KITE_TUI_TEST_JOURNEY_DEADLINE_MS);
+  if (Number.isInteger(configured) && configured > 0) return configured;
+  return tuiWaitTimeout(DEFAULT_JOURNEY_DEADLINE_MS);
+}
 
 async function runWithTimeout(
   step: RegisteredJourneyStep,
@@ -54,7 +62,7 @@ export function createTuiSystemJourney(): TuiSystemJourney {
       }
       steps.push({ name, run, timeoutMs });
     },
-    async run(deadlineMs = DEFAULT_JOURNEY_DEADLINE_MS) {
+    async run(deadlineMs = defaultJourneyDeadlineMs()) {
       if (running) throw new Error('TUI system journey can only run once');
       if (!Number.isInteger(deadlineMs) || deadlineMs <= 0) {
         throw new Error(`TUI system journey deadline must be positive; received ${deadlineMs}`);
@@ -67,11 +75,12 @@ export function createTuiSystemJourney(): TuiSystemJourney {
           if (remainingMs <= 0) {
             throw new Error(`journey deadline of ${deadlineMs}ms was exhausted`);
           }
-          const timeoutMs = Math.min(step.timeoutMs, remainingMs);
+          const scaledStepTimeoutMs = tuiWaitTimeout(step.timeoutMs);
+          const timeoutMs = Math.min(scaledStepTimeoutMs, remainingMs);
           const timeoutMessage =
-            remainingMs <= step.timeoutMs
+            remainingMs <= scaledStepTimeoutMs
               ? `journey deadline of ${deadlineMs}ms was exhausted during this step`
-              : `step timed out after ${step.timeoutMs}ms`;
+              : `step timed out after ${scaledStepTimeoutMs}ms`;
           await runWithTimeout(step, timeoutMs, timeoutMessage);
         } catch (error) {
           throw new Error(

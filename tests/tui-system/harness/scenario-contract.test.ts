@@ -650,6 +650,9 @@ describe('TUI system scenario contract', () => {
   test('input readiness belongs to each input action instead of a warmup flow', () => {
     expect(regexViolations(/warmupInputPipeline/)).toEqual([]);
     expect(regexViolations(/test\([\s\S]{0,80}['"]warmup(?::|['"])/)).toEqual([]);
+    expect(regexViolations(/\bspawnTui\b/)).toEqual([]);
+    expect(regexViolations(/\.setRawMode\(true\)/)).toEqual([]);
+    expect(regexViolations(/waitForText\([^\n]*['"]❯['"]/)).toEqual([]);
   });
 
   test('raw-mode setup does not rely on an arbitrary fixed delay', () => {
@@ -660,9 +663,21 @@ describe('TUI system scenario contract', () => {
     ).toEqual([]);
   });
 
+  test('scenario teardown uses the fail-complete fixture lifecycle', () => {
+    expect(regexViolations(/\.(?:stop|cleanup)\(/)).toEqual([]);
+    expect(
+      scenarioSources()
+        .filter(({ source }) => /after(?:All|Each)\(/.test(source))
+        .filter(({ source }) => !/cleanupTuiSystemFixtures\(/.test(source))
+        .map(({ file }) => file),
+    ).toEqual([]);
+  });
+
   test('scenario steps do not use arbitrary fixed delays or character offsets', () => {
     expect(regexViolations(/await (?:sleep\(|new Promise\([^\n]*setTimeout)/)).toEqual([]);
     expect(regexViolations(/\.output\(\)\.(?:length|slice)/)).toEqual([]);
+    expect(regexViolations(/testTiming\s*:/)).toEqual([]);
+    expect(regexViolations(/test\([^\n]*journey\.run\(\)[^\n]*,\s*\d[\d_]*\s*\)/)).toEqual([]);
   });
 
   test('default scenarios do not contain public provider endpoints or native smoke switches', () => {

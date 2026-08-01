@@ -10,9 +10,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { createTuiSystemJourney } from '../harness/journey';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -29,7 +30,7 @@ describe('TUI PTY System — Workspace Trust', () => {
   let restarted: PtyProcess | undefined;
   let declined: PtyProcess | undefined;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     server = createMockModelServer();
     // enforceWorkspaceTrust skips the harness pre-trust so the gate runs. The
     // forged .env proves Bun dotenv injection cannot bypass the gate: Bun loads
@@ -40,18 +41,23 @@ describe('TUI PTY System — Workspace Trust', () => {
     });
     workspace.env.CI = 'true';
 
-    server.setResponses([{ message: { content: 'Hello after trust!' } }]);
+    server.setResponses([]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      mockServer: server,
+      workspace,
+      readiness: 'workspace-trust',
+    });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    if (restarted) await restarted.killAndWait();
-    if (declined) await declined.killAndWait();
-    workspace?.cleanup();
-    declinedWorkspace?.cleanup();
+    await cleanupTuiSystemFixtures({
+      tuis: [tui, restarted, declined],
+      mockServers: [server],
+      workspaces: [workspace, declinedWorkspace],
+    });
   });
 
   step(
@@ -82,7 +88,7 @@ describe('TUI PTY System — Workspace Trust', () => {
         10000,
       );
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), 'shortcuts', 15000);
+      await waitForTuiReady(tui, 'main', workspace);
       console.log('  Main UI booted after trust');
 
       const trustFile = join(workspace.home, '.kite-code', 'workspace-trust.jsonc');
@@ -103,7 +109,7 @@ describe('TUI PTY System — Workspace Trust', () => {
   step(
     'a trusted workspace skips the prompt on restart',
     async () => {
-      const proc = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+      const proc = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
       restarted = proc;
       await waitForText(() => proc.outputSinceLastAction(), 'shortcuts', 15000);
       expect(screenContains(proc.viewport(), GATE_TEXT)).toBe(false);
@@ -122,31 +128,14 @@ describe('TUI PTY System — Workspace Trust', () => {
         files: { '.env': 'KITE_TRUST_ALL_WORKSPACES=1\n' },
       });
       declinedWorkspace.env.CI = 'true';
-      const proc = spawnTui({
+      const proc = await spawnReadyTui({
         cols: 120,
         rows: 40,
         mockServer: server,
         workspace: declinedWorkspace,
+        readiness: 'workspace-trust',
       });
       declined = proc;
-      await waitForText(() => proc.outputSinceLastAction(), GATE_TEXT, 15000);
-
-      // Prove the input handler is ready before confirming the safe default.
-      // Under a busy full-suite run, the first rendered gate text can precede
-      // Ink attaching its stdin handler, which would otherwise lose Enter.
-      proc.write('\x1b[A');
-      await waitForText(
-        () => proc.outputSinceLastAction(),
-        '› Trust this workspace and continue',
-        10000,
-      );
-      const outputBeforeExitSelection = proc.markOutput();
-      proc.write('\x1b[B');
-      await waitForText(
-        () => proc.outputSince(outputBeforeExitSelection),
-        '› Exit Kite Code',
-        10000,
-      );
       proc.write('\r');
 
       const code = await proc.waitForExit();
@@ -158,5 +147,5 @@ describe('TUI PTY System — Workspace Trust', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run(), 170_000);
+  test('runs the complete stateful journey', () => journey.run());
 });

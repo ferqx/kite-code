@@ -421,6 +421,61 @@ describe('SubAgentRunner integration', () => {
     expect(events.some((e) => e.type === 'error')).toBe(true);
   });
 
+  test('propagates the role timeout signal into descendant tool admission', async () => {
+    const { events, sink } = mockEventSink();
+    const model = new StreamingMockModel({
+      responses: [
+        {
+          message: aiMessage({
+            content: 'read after admission',
+            tool_calls: [{ id: 'timeout-read', name: 'read_file', args: { path: 'README.md' } }],
+          }),
+        },
+      ],
+    }) as any;
+    let observedSignal: AbortSignal | undefined;
+    const descendantResourceAdmission = {
+      reserveModel: async () => ({ reservationId: 'model-reservation' }),
+      reconcileModel: async () => {},
+      reserveTool: async (request: { signal?: AbortSignal }) => {
+        observedSignal = request.signal;
+        await new Promise<never>((_, reject) => {
+          const onAbort = () => {
+            const error = new Error('descendant admission cancelled by role timeout');
+            error.name = 'AbortError';
+            reject(error);
+          };
+          if (request.signal?.aborted) {
+            onAbort();
+            return;
+          }
+          request.signal?.addEventListener('abort', onAbort, { once: true });
+        });
+      },
+      reconcileTool: async () => {},
+      markUnknown: async () => {},
+      markLocalProviderAdmissionDenied: async () => {},
+    } as unknown as NonNullable<
+      import('@/core/subagent/types').SubAgentRunnerInput['descendantResourceAdmission']
+    >;
+
+    const result = await runSubAgent({
+      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      workspace: process.cwd(),
+      role: getRoleConfig('code'),
+      task: 'wait for descendant admission',
+      timeoutMs: 25,
+      signal: new AbortController().signal,
+      eventSink: sink,
+      model: model as any,
+      descendantResourceAdmission,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(observedSignal?.aborted).toBe(true);
+    expect(events.some((event) => event.type === 'error')).toBe(true);
+  });
+
   test('aborts immediately when signal is already aborted', async () => {
     const { events, sink } = mockEventSink();
     const ac = new AbortController();

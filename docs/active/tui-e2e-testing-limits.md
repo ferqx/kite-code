@@ -4,7 +4,7 @@
 
 读取时机：评估 TUI 测试可覆盖性、处理平台差异、PTY flaky、终端 resize、跨进程会话恢复或选择组件测试与系统测试边界时。
 
-验证：`bun run test:tui:system`、`bun test tests/tui-layout.test.tsx tests/tui-reducer.test.ts tests/tui-system/harness/pty-process.test.ts tests/tui-system/harness/terminal-screen.test.ts`。
+验证：`bun run test:tui:harness`、`bun run test:tui:system`、`bun test tests/tui-layout.test.tsx tests/tui-reducer.test.ts`。
 
 ## 当前能力
 
@@ -54,13 +54,11 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     thread ID 并观察到一个新 ID，避免把同一 session 的累计 transcript 误判为切换成功。
 12. selector 中名称消失只能证明 UI 投影更新，不能单独证明删除持久化成功；confirm/cancel 场景
     还必须分别验证 Runtime Store thread ID 的删除与集合不变。
-    Harness 的持久化探针只能通过 readonly SQLite 查询观察已经存在的 schema；数据库/WAL 正在
-    重开、锁定或 schema 尚未出现时返回“尚未就绪”，由 scenario 的 bounded condition 继续轮询。
-    Linux 对暂时不可打开的目录型 DB 路径可能返回 `SQLITE_IOERR` 的扩展 code/errno 与精确的
-    `disk I/O error` message，观察器
-    只在路径仍为目录时将该组合视为同一 readiness 状态；普通 DB 文件上的任意 `SQLITE_IOERR`
-    仍立即抛出，不能被负断言误当成空 Store；
-    持续异常最终以具名 timeout 失败。在轮询中调用
+    Harness 的持久化探针只能通过 readonly SQLite 查询观察已经存在的 schema，并返回显式
+    `ready`、`not_created`、`initializing` 或 `transient_lock` 状态；只有数据库尚未创建、schema
+    尚未出现和明确的 SQLite busy/locked 可以由 bounded condition 继续轮询。目录路径、损坏 DB、
+    普通 `SQLITE_IOERR` 和未知错误必须立即抛出，不能被负断言误当成空 Store。
+    持续未就绪最终以具名 timeout 失败。在轮询中调用
     `createRuntimeStore()` 会重复执行 journal/schema 写入并干扰被测 writer，尤其会在共享 CI runner
     上把真实落盘延迟误报为 TUI 失败。命令回放场景还应查询精确 `user.command_invoked.command` 并
     使用该 event 所属 thread，不能用 JSON substring 或 session recency 代替持久化身份。
@@ -69,7 +67,7 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     当前 step 会收到具名失败，因此局部超时之和不是文件可用总时长。测试报告中的 pass 数表示独立
     测试边界，不表示 journey 内动作数量。需要独立筛选、重跑或并行的行为必须使用新 fixture 写成
     独立 test，不能仅为增加报告粒度拆分共享状态。
-14. 测试 permit issuer 位于 `tests/tui-system/fixtures/`，只能由单个 `spawnTui()` 调用显式选择。
+14. 测试 permit issuer 位于 `tests/tui-system/fixtures/`，只能由单个 `spawnReadyTui()` 调用显式选择。
     它不是生产授权实现，也不通过可被 workspace `.env` 伪造的环境开关启用；默认拒绝与允许
     外发必须写成不同、隔离的 test 语义。
 15. `/model`、`/effort`、`/theme`、`/permissions` 的命令前缀和参数属于两个 React 输入阶段。
@@ -78,7 +76,9 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     focus-transfer 回执超时与最终 query 回执超时使用同一完整输入重试和基线恢复语义。
 16. Mock server 的 response queue 会在每个 provider attempt 消耗一个响应。HTTP 429/5xx 已走
     production bounded retry；因此单个 transient error 后跟成功响应验证的是 reconnect，不是终态错误。
-    终态 error-recovery 场景必须耗尽完整 retry budget，并用请求计数证明没有提前终止或无限重试。
+    response 不会循环复用；队列耗尽、切换阶段时尚有剩余、teardown 时存在剩余都会产生显式
+    fixture failure。终态 error-recovery 场景必须耗尽完整 retry budget，并用跨阶段单调请求计数
+    证明没有提前终止或无限重试。
 
 ## 分层选择
 

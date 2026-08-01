@@ -21,7 +21,8 @@ const PROCESS_ISOLATED_TEST_FILES = [
 ] as const;
 
 const DEFAULT_IGNORES = [
-  'tests/tui-system/**',
+  'tests/tui-system/scenarios/**',
+  'tests/tui-system/smoke/**',
   'tests/pty-spike/**',
   ...PROCESS_ISOLATED_TEST_FILES,
 ] as const;

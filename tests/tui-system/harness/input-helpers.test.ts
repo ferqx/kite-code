@@ -9,6 +9,16 @@ import {
 } from './input-helpers';
 import type { PtyProcess } from './pty-process';
 
+const FAST_RETRY = {
+  delayMs: 0,
+  testTiming: {
+    echoTimeoutMs: 20,
+    settleMs: 0,
+    retryBackspaceDelayMs: 0,
+    restoreTimeoutMs: 100,
+  },
+} as const;
+
 function fakePty(onWrite: (data: string) => void, output: () => string): PtyProcess {
   let lastActionMark = 0;
   return {
@@ -57,7 +67,7 @@ describe('TUI input helpers', () => {
       () => rendered,
     );
 
-    await typeText(tui, 'hello', 0);
+    await typeText(tui, 'hello', FAST_RETRY);
 
     expect(attempt).toBe(2);
     expect(rendered).toContain('hello');
@@ -101,7 +111,7 @@ describe('TUI input helpers', () => {
     );
     tui.viewport = () => `❯ ${currentInput}`;
 
-    await typeText(tui, 'hello', 0);
+    await typeText(tui, 'hello', FAST_RETRY);
 
     expect(attempt).toBe(2);
     expect(deletes).toBe(0);
@@ -131,7 +141,7 @@ describe('TUI input helpers', () => {
     );
     tui.viewport = () => `❯ ${currentInput}`;
 
-    await typeText(tui, '/mcp', 0);
+    await typeText(tui, '/mcp', FAST_RETRY);
 
     expect(attempt).toBe(2);
     expect(currentInput).toBe('/mcp');
@@ -172,7 +182,7 @@ describe('TUI input helpers', () => {
     );
     tui.viewport = () => `❯ Line1\n  ${suffix}`;
 
-    await typeText(tui, 'Line2', { append: true, delayMs: 0 });
+    await typeText(tui, 'Line2', { ...FAST_RETRY, append: true });
 
     expect(attempt).toBe(2);
     expect(suffix).toBe('Line2');
@@ -199,7 +209,7 @@ describe('TUI input helpers', () => {
     tui.viewport = () =>
       `╭────────╮\n│ 会话列表\n│ 搜索: ${searchInput}_\n│ > session 1\n╰────────╯`;
 
-    await typeText(tui, 'session 1', 0);
+    await typeText(tui, 'session 1', FAST_RETRY);
 
     expect(attempt).toBe(2);
     expect(searchInput).toBe('session 1');
@@ -225,7 +235,7 @@ describe('TUI input helpers', () => {
     );
     tui.viewport = () => `❯ ${message}\n\nresponse\n────────\n❯ ${currentInput}`;
 
-    await typeText(tui, message, 0);
+    await typeText(tui, message, FAST_RETRY);
 
     expect(attempt).toBe(2);
     expect(currentInput).toBe(message);
@@ -258,7 +268,7 @@ describe('TUI input helpers', () => {
       return '❯ ';
     };
 
-    await expect(typeText(tui, requested, 0)).rejects.toThrow('PTY input delivery failed');
+    await expect(typeText(tui, requested, FAST_RETRY)).rejects.toThrow('PTY input delivery failed');
 
     expect(actual).not.toBe(requested);
   }, 15_000);
@@ -305,6 +315,7 @@ describe('TUI input helpers', () => {
           .some((request) => request.messages.some((message) => message.content.includes(text))),
       setModelsResponse() {},
       getModelRequests: () => [],
+      assertComplete() {},
       stop() {},
     } as MockModelServer;
 
@@ -342,6 +353,7 @@ describe('TUI input helpers', () => {
           .some((request) => request.messages.some((message) => message.content.includes(text))),
       setModelsResponse() {},
       getModelRequests: () => [],
+      assertComplete() {},
       stop() {},
     } as MockModelServer;
 
@@ -422,7 +434,7 @@ describe('TUI input helpers', () => {
         ? `❯ ${currentInput}\n╭────╮\n│ 权限模式匹配 "${currentInput.slice('/permissions '.length)}"\n│ full\n╰────╯`
         : `❯ ${currentInput}`;
 
-    await typeText(tui, command, 0);
+    await typeText(tui, command, FAST_RETRY);
 
     expect(deliveries).toBe(2);
     expect(currentInput).toBe(command);

@@ -17,9 +17,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   assertOrder,
   screenContains,
@@ -69,15 +70,11 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
       { message: { content: 'Got it! Your favorite color is blue.' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   test(
@@ -156,15 +153,11 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
       { message: { content: 'Draft saved! Ready for review.' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   test(
@@ -219,18 +212,13 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
           ],
         },
       },
-      { message: { content: 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   test(
@@ -261,7 +249,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       const rejectionFrames = tui.markScreen();
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
+      await waitForTuiReady(tui);
 
       output = tui.viewport();
       const afterRejection = tui.screenFramesSince(rejectionFrames).join('\n');
@@ -303,15 +291,11 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
       { message: { content: 'Search complete.' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-    tui.setRawMode(true);
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   test(

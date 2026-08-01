@@ -8,11 +8,19 @@
  * sent via `terminal.write()`. Terminal resize via `terminal.resize()`.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { trustWorkspace } from '@/core/config/workspace-trust';
 import type { MockModelServer } from './fixtures';
-import { createHeadlessTerminalScreen, type TerminalFrameMark } from './terminal-screen';
+import { activeInput } from './input-helpers';
+import {
+  createHeadlessTerminalScreen,
+  screenContains,
+  stripAnsi,
+  type TerminalFrameMark,
+  waitForCondition,
+  waitForOutputQuiescence,
+} from './terminal-screen';
 import type { TestWorkspace } from './test-workspace';
 
 export interface PtyProcessOptions {
@@ -31,6 +39,8 @@ export interface PtyProcessOptions {
   /** Use the test-only composition root that issues one permit per remote MCP invocation. */
   remoteMcpEgressPermitResolver?: 'allow-each-invocation';
 }
+
+export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust';
 
 export interface PtyProcess {
   /** Write keystrokes and return the output checkpoint immediately before the action. */
@@ -172,7 +182,35 @@ export async function waitForPtyExitCode(
   }
 }
 
-function forceKillPtyChild(proc: ReturnType<typeof Bun.spawn>): void {
+function processGroupExists(processGroupId: number): boolean {
+  if (process.platform === 'win32') return false;
+  try {
+    process.kill(-processGroupId, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== 'ESRCH';
+  }
+}
+
+/** Prove the owned detached child and its PID-named process group both exist. */
+export function verifiedOwnedProcessGroupId(pid: number): number | undefined {
+  if (process.platform === 'win32') return undefined;
+  try {
+    process.kill(pid, 0);
+    process.kill(-pid, 0);
+  } catch (error) {
+    throw new Error(`Detached test child ${pid} does not own its PID-named process group.`, {
+      cause: error,
+    });
+  }
+  return pid;
+}
+
+function signalOwnedProcessTree(
+  proc: ReturnType<typeof Bun.spawn>,
+  signal: 'SIGTERM' | 'SIGKILL',
+  processGroupId: number | undefined,
+): void {
   if (process.platform === 'win32') {
     // Bun's signal emulation only targets the direct process on Windows. The
     // TUI may own descendants, so taskkill is needed to terminate its tree.
@@ -182,7 +220,41 @@ function forceKillPtyChild(proc: ReturnType<typeof Bun.spawn>): void {
     });
     return;
   }
-  proc.kill('SIGKILL');
+  if (processGroupId === undefined) {
+    throw new Error(`Missing verified process group for POSIX child ${proc.pid}.`);
+  }
+  try {
+    process.kill(-processGroupId, signal);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+  }
+}
+
+async function waitForOwnedProcessTreeExit(
+  processGroupId: number,
+  timeoutMs: number,
+): Promise<void> {
+  if (process.platform === 'win32') return;
+  await waitForPtyExit(() => !processGroupExists(processGroupId), timeoutMs, 50);
+}
+
+/** Terminate a detached test child and all members of its verified owned group. */
+export async function terminateOwnedProcessTree(
+  proc: ReturnType<typeof Bun.spawn>,
+  processGroupId: number | undefined,
+  timeoutMs = 2_000,
+): Promise<void> {
+  signalOwnedProcessTree(proc, 'SIGTERM', processGroupId);
+  try {
+    await waitForPtyExitCode(proc.exited, timeoutMs);
+  } catch {
+    signalOwnedProcessTree(proc, 'SIGKILL', processGroupId);
+    await waitForPtyExitCode(proc.exited, 5_000);
+  }
+  if (processGroupId !== undefined && processGroupExists(processGroupId)) {
+    signalOwnedProcessTree(proc, 'SIGKILL', processGroupId);
+    await waitForOwnedProcessTreeExit(processGroupId, 5_000);
+  }
 }
 
 export function resolveTuiLaunchPaths(
@@ -282,13 +354,28 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     exitResolver = resolve;
   });
 
-  // Build env: merge parent env with test overrides.
+  // Build an allowlisted child environment. Test scenarios must never inherit
+  // developer credentials, provider configuration, proxies, or feature flags.
   // Explicit KITE_CODE_HOME is critical — on Windows, homedir() defaults to
   // USERPROFILE, so KITE_CODE_HOME must be set for defaultConfigPath().
   const childEnv: Record<string, string> = {};
-  // Copy only defined parent env vars (process.env can have undefined values)
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined) childEnv[k] = v;
+  for (const key of [
+    'PATH',
+    'SystemRoot',
+    'WINDIR',
+    'ComSpec',
+    'PATHEXT',
+    'TMPDIR',
+    'TMP',
+    'TEMP',
+    'LANG',
+    'LC_ALL',
+    'TZ',
+    'CI',
+    'GITHUB_ACTIONS',
+  ]) {
+    const value = process.env[key];
+    if (value !== undefined) childEnv[key] = value;
   }
   // Test overrides
   if (opts.workspace?.env) {
@@ -300,6 +387,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
     cmd: [process.execPath, 'run', entryPath],
     cwd,
     env: childEnv,
+    detached: process.platform !== 'win32',
     terminal: {
       cols,
       rows,
@@ -309,6 +397,13 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       },
     },
   });
+  let ownedProcessGroupId: number | undefined;
+  try {
+    ownedProcessGroupId = verifiedOwnedProcessGroupId(proc.pid);
+  } catch (error) {
+    proc.kill('SIGKILL');
+    throw error;
+  }
 
   proc.exited.then((code) => {
     exited = true;
@@ -335,25 +430,23 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   }
 
   async function killAndWaitImpl(): Promise<boolean> {
-    let killed = false;
+    const wasRunning = !exited;
 
     try {
-      if (exited) return false;
-
-      // Graceful attempt first
-      proc.kill();
-      killed = true;
-
-      try {
-        await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
-      } catch {
-        // Force kill — cannot be caught or ignored. On Windows this also kills
-        // the process tree, which prevents orphaned bun.exe descendants.
-        forceKillPtyChild(proc);
-        await waitForPtyExit(() => exited, 5000);
+      if (!exited) {
+        signalOwnedProcessTree(proc, 'SIGTERM', ownedProcessGroupId);
+        try {
+          await waitForPtyExit(() => exited, KILL_TIMEOUT_MS);
+        } catch {
+          signalOwnedProcessTree(proc, 'SIGKILL', ownedProcessGroupId);
+          await waitForPtyExit(() => exited, 5000);
+        }
       }
-
-      return killed;
+      if (ownedProcessGroupId !== undefined && processGroupExists(ownedProcessGroupId)) {
+        signalOwnedProcessTree(proc, 'SIGKILL', ownedProcessGroupId);
+        await waitForOwnedProcessTreeExit(ownedProcessGroupId, 5000);
+      }
+      return wasRunning;
     } finally {
       await disposeScreen();
     }
@@ -450,4 +543,70 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
       return killPromise;
     },
   };
+}
+
+/** Spawn one isolated TUI and return only after its selected semantic surface is stable. */
+export async function spawnReadyTui(
+  opts: PtyProcessOptions & { readiness?: TuiReadiness } = {},
+): Promise<PtyProcess> {
+  const readiness = opts.readiness ?? 'main';
+  const tui = spawnTui(opts);
+  tui.setRawMode(true);
+  try {
+    await waitForTuiReady(tui, readiness, opts.workspace);
+    return tui;
+  } catch (error) {
+    await tui.killAndWait().catch(() => {});
+    throw new Error(
+      `TUI failed ${readiness} readiness. Last output:\n${stripAnsi(tui.transcript()).slice(-1_500)}`,
+      { cause: error },
+    );
+  }
+}
+
+/** Wait for one already-running TUI to expose a complete, stable semantic surface. */
+export async function waitForTuiReady(
+  tui: PtyProcess,
+  readiness: TuiReadiness = 'main',
+  workspace?: TestWorkspace,
+): Promise<void> {
+  const workspacePath = workspace ? realpathSync(workspace.workspace) : undefined;
+  await waitForCondition(
+    () => {
+      const viewport = tui.viewport();
+      if (readiness === 'main') {
+        const input = activeInput(viewport);
+        return (
+          input?.kind === 'main' &&
+          input.value === '' &&
+          screenContains(viewport, 'Kite Code') &&
+          screenContains(viewport, 'mock-model') &&
+          !screenContains(viewport, 'Loading...') &&
+          !screenContains(viewport, 'Open this workspace?') &&
+          !screenContains(viewport, 'Setup 1 of 2')
+        );
+      }
+      if (readiness === 'first-run-provider') {
+        return (
+          screenContains(viewport, 'Setup 1 of 2') &&
+          screenContains(viewport, 'Choose a model provider') &&
+          screenContains(viewport, '› DeepSeek') &&
+          screenContains(viewport, 'OpenAI') &&
+          screenContains(viewport, 'Custom endpoint')
+        );
+      }
+      return (
+        workspacePath !== undefined &&
+        screenContains(viewport, 'Open this workspace?') &&
+        screenContains(viewport, workspacePath) &&
+        screenContains(viewport, 'Trust this workspace and continue') &&
+        screenContains(viewport, '› Exit Kite Code') &&
+        !screenContains(viewport, 'shortcuts')
+      );
+    },
+    `${readiness} TUI readiness`,
+    15_000,
+  );
+  await waitForOutputQuiescence(() => tui.viewport(), 5_000, 250, false);
+  await tui.settleScreen();
 }

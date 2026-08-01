@@ -8,9 +8,10 @@
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { typeText, waitForRequestMessage } from '../harness/input-helpers';
-import { type PtyProcess, spawnTui } from '../harness/pty-process';
+import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -38,23 +39,17 @@ describe('TUI PTY System — Tool Approval', () => {
           ],
         },
       },
-      { message: { content: 'Approval session' } },
     ]);
 
-    tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     // Wait for TUI fully rendered
-    await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
-
     // Enable raw mode so individual characters reach the child immediately
     // (in canonical/line-buffered mode, input only arrives after CRLF)
-    tui.setRawMode(true);
   });
 
   afterAll(async () => {
-    server?.stop();
-    await tui?.killAndWait();
-    workspace?.cleanup();
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
   // ── Approval Block → Deny → Recovery ──────────────────────
@@ -80,7 +75,7 @@ describe('TUI PTY System — Tool Approval', () => {
       tui.write('\x1b[B');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       tui.write('\r');
-      await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
+      await waitForTuiReady(tui);
 
       // TUI should recover — prompt visible
       const afterOutput = tui.viewport();
