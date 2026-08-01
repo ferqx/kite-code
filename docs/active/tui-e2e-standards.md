@@ -48,9 +48,11 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    query 和 first-run block-cursor 字段，并对完整归一化字段值做等值验证；长输入同样不能退化为历史
    文本或尾部探针命中。共享输入 helper 拥有的动作保持光标位于输入末尾；其主输入 projection 必须
    根据 VT cell 属性剔除 `CtrlSafeTextInput` 绘制的 synthetic inverse-space end cursor，并覆盖 terminal
-   auto-wrap 与 Ink continuation row。该 projection 不是任意光标位置的通用编辑器状态解析器。它不能
-   把视觉光标当作逻辑空格，也不能因此删除用户真实输入的 leading blank。内部换行/终端 wrap 可以
-   归一化，但前导空白不能被删除：它会把普通消息改义，
+   auto-wrap 与 Ink continuation row。Ink soft wrap 在英文词边界省略的显示空格必须按可用输入宽度
+   恢复，填满宽度的 hard wrap 则直接拼接；不能再通过删除全部内部 whitespace 让 `onehundred` 冒充
+   `one hundred` 的成功回执。该 projection 不是任意光标位置的通用编辑器状态解析器。它不能把视觉
+   光标当作逻辑空格，也不能因此删除用户真实输入的 leading/trailing blank。显式换行与重复空白可以
+   做等价规范化，但逻辑词边界和前导空白不能被删除：它们会把普通消息改义，
    也会把 `/command` 变成普通文本。replacement 输入重试必须按已尝试字符确定性回滚到空基线，并
    额外清除 VT 投影可能裁掉的 bounded whitespace；不能仅因输入投影看起来为空就停止回滚。
    `typeText()` 默认要求空输入语义：主输入或搜索框若已有残留，先恢复为空再

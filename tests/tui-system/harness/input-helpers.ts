@@ -1,3 +1,4 @@
+import stringWidth from 'string-width';
 import { tuiSystemDelay } from './cancellation';
 import type { MockModelServer } from './fixtures';
 import type { PtyProcess } from './pty-process';
@@ -35,11 +36,10 @@ interface TypeTextOptions {
 function normalizeInputEcho(text: string): string {
   const clean = stripAnsi(text);
   const leadingWhitespace = clean.match(/^[ \t]+/)?.[0] ?? '';
-  // Terminal wrapping and selector chrome can change whitespace inside an
-  // input's rendered projection. Keep ignoring that presentation-only
-  // whitespace, but never erase a leading blank: a retry that leaves one
-  // behind changes a user message and turns `/command` into plain text.
-  return leadingWhitespace + clean.slice(leadingWhitespace.length).replace(/\s+/g, '');
+  // Canonicalize line breaks and repeated whitespace without erasing logical
+  // word boundaries. Removing all internal whitespace can falsely acknowledge
+  // a PTY delivery that dropped a real space (for example `one hundred`).
+  return leadingWhitespace + clean.slice(leadingWhitespace.length).replace(/\s+/g, ' ');
 }
 
 export type ActiveInput = {
@@ -63,14 +63,35 @@ function currentPromptInput(lines: readonly string[]): string | undefined {
   }
   if (promptLine < 0) return undefined;
 
-  const inputLines = [lines[promptLine]!.replace(/^\s*❯\s?/, '')];
+  const promptPrefix = /^\s*❯\s?/.exec(lines[promptLine]!)?.[0] ?? '❯ ';
+  const promptWidth = stringWidth(promptPrefix);
+  const inputLines = [lines[promptLine]!.slice(promptPrefix.length)];
+  let separatorWidth: number | undefined;
   for (let index = promptLine + 1; index < lines.length; index++) {
     const line = lines[index]!;
     const trimmed = line.trim();
-    if (/^[─━═╭╰┌└]/.test(trimmed) || /^(?:mock-model|\S+\s+·)/.test(trimmed)) break;
-    inputLines.push(line);
+    if (/^[─━═╭╰┌└]/.test(trimmed) || /^(?:mock-model|\S+\s+·)/.test(trimmed)) {
+      if (/^[─━═]+$/.test(trimmed)) separatorWidth = stringWidth(trimmed);
+      break;
+    }
+    const continuationIndent = ' '.repeat(promptWidth);
+    inputLines.push(line.startsWith(continuationIndent) ? line.slice(promptWidth) : line);
   }
-  return normalizeInputEcho(inputLines.join('\n'));
+
+  const effectiveMaxWidth =
+    separatorWidth === undefined ? undefined : Math.max(1, separatorWidth - promptWidth - 1);
+  let projection = inputLines[0]!;
+  for (let index = 1; index < inputLines.length; index++) {
+    const previous = inputLines[index - 1]!;
+    const current = inputLines[index]!;
+    const firstCurrentChar = Array.from(current)[0];
+    const isForcedVisualWrap =
+      effectiveMaxWidth !== undefined &&
+      firstCurrentChar !== undefined &&
+      stringWidth(previous) + stringWidth(firstCurrentChar) > effectiveMaxWidth;
+    projection += `${isForcedVisualWrap ? '' : ' '}${current}`;
+  }
+  return normalizeInputEcho(projection);
 }
 
 export function activeInput(viewport: string): ActiveInput | undefined {

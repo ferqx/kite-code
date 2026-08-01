@@ -93,6 +93,28 @@ describe('TUI input helpers', () => {
     expect(rendered).toContain('\r\n');
   });
 
+  test('typeText retries when PTY delivery drops an internal word-boundary space', async () => {
+    let rendered = '';
+    let attempt = 0;
+    const tui = fakePty(
+      (data) => {
+        if (data === '\x7f') {
+          rendered = rendered.slice(0, -1);
+          return;
+        }
+        if (data === 'o' && rendered.length === 0) attempt++;
+        if (attempt === 1 && data === ' ') return;
+        rendered += data;
+      },
+      () => rendered,
+    );
+
+    await typeText(tui, 'one hundred', FAST_RETRY);
+
+    expect(attempt).toBe(2);
+    expect(rendered).toBe('one hundred');
+  });
+
   test('typeText resets an empty replacement transaction after an unrelated redraw', async () => {
     let transcript = '';
     let currentInput = '';
@@ -225,6 +247,25 @@ describe('TUI input helpers', () => {
       expect(activeInput(screen.inputViewport())?.value).toBe(' x');
     } finally {
       screen.dispose();
+    }
+  });
+
+  test('main input projection restores omitted word-wrap spaces without splitting hard wraps', async () => {
+    const wordWrapScreen = createHeadlessTerminalScreen(40, 4);
+    const hardWrapScreen = createHeadlessTerminalScreen(40, 4);
+    try {
+      await wordWrapScreen.append(
+        new TextEncoder().encode(`❯ one\r\n  hundred\x1b[7m \x1b[27m\r\n${'─'.repeat(20)}`),
+      );
+      expect(activeInput(wordWrapScreen.inputViewport())?.value).toBe('one hundred');
+
+      await hardWrapScreen.append(
+        new TextEncoder().encode(`❯ abcde\r\n  f\x1b[7m \x1b[27m\r\n${'─'.repeat(8)}`),
+      );
+      expect(activeInput(hardWrapScreen.inputViewport())?.value).toBe('abcdef');
+    } finally {
+      wordWrapScreen.dispose();
+      hardWrapScreen.dispose();
     }
   });
 
