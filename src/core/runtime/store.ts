@@ -19,6 +19,8 @@ export interface RuntimeStoreOptions {
    * after close on Windows, so DELETE is the safe platform default there.
    */
   journalMode?: RuntimeJournalMode;
+  /** Test-only SQLite page ceiling used to inject deterministic SQLITE_FULL writes. */
+  faultInjectionMaxPageCount?: number;
 }
 
 /** A durable one-shot egress permit nonce was already claimed by another receipt. */
@@ -189,10 +191,11 @@ export function createRuntimeStore(
   let isClosed = false;
   const journalMode = options.journalMode ?? defaultRuntimeJournalMode();
 
+  // Install the bounded lock wait before any pragma or schema write that can
+  // contend with another RuntimeStore connection.
+  db.run('PRAGMA busy_timeout = 5000');
   // WAL improves concurrency; Windows uses DELETE until Bun releases WAL file locks reliably.
   db.run(`PRAGMA journal_mode = ${journalMode}`);
-  // 多会话并发写入时避免 SQLITE_BUSY / Avoid SQLITE_BUSY under concurrent multi-session writes
-  db.run('PRAGMA busy_timeout = 5000');
 
   db.run(`
     CREATE TABLE IF NOT EXISTS runtime_store_meta (
@@ -321,6 +324,16 @@ export function createRuntimeStore(
   db.run(
     'CREATE INDEX IF NOT EXISTS idx_runtime_file_preimages_position ON runtime_file_preimages(thread_id, event_position)',
   );
+  if (options.faultInjectionMaxPageCount != null) {
+    if (
+      !Number.isInteger(options.faultInjectionMaxPageCount) ||
+      options.faultInjectionMaxPageCount <= 0
+    ) {
+      db.close();
+      throw new Error('faultInjectionMaxPageCount must be a positive integer');
+    }
+    db.run(`PRAGMA max_page_count = ${options.faultInjectionMaxPageCount}`);
+  }
 
   // 预编译 SQL / Prepare cached statements
   const insertEvent = db.query('INSERT INTO runtime_events (thread_id, event_json) VALUES (?, ?)');

@@ -51,6 +51,7 @@
 | `../active/workspace-trust.md` | active | Workspace 信任门禁 — TUI 启动授权确认、CLI `run` 门禁与 `--trust-workspace`、`~/.kite-code/workspace-trust.jsonc` 信任存储、无 env 旁路安全不变量 | 修改 TUI 启动流程、CLI 入口门禁、workspace 信任存储或测试 harness 信任预写时必读。 |
 | `../active/feature-flags.md` | active | Runtime feature flag 注册、配置合并、CLI 临时覆盖和灰度生命周期 | 新增或调整 runtime 开关、auto-review rollout、配置字段时必读。 |
 | `../active/failure-classification.md` | active | FailureKind 分类和 `ClassifiedFailure` 恢复策略 | 新增工具/模型失败路径、错误日志或重试策略时必读。 |
+| `../active/runtime-resilience-qualification.md` | active | Runtime fault/soak 的固定 case、报告 schema、资源趋势与 qualification fail-closed 规则 | 修改 Runtime 恢复/持久化、故障注入、bounded soak runner 或 release 韧性证据时必读。 |
 | `../active/core-entry-criteria.md` | active | 进入 core 的 Capability/Policy/Lifecycle/Engine 准入门槛 | 新增 `src/core/` 功能、状态机或执行引擎改动前必读。 |
 | `../active/mcp-runtime-governance.md` | active | MCP/Skill revisioned catalog、Runtime binding、policy、execution record 与恢复边界 | 修改 MCP discovery、动态工具 binding、MCP policy、调用结果或 Skill Runtime 治理时必读。 |
 | `../active/mcp-control-plane.md` | active | MCP Supervisor、generation 生命周期、不可变 control snapshot 与 TUI 只读状态视图 | 修改 MCP Manager/Supervisor 生命周期、control snapshot、Runtime provider 边界或 `/mcp` 状态视图时必读。 |

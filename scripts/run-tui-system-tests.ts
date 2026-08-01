@@ -8,6 +8,7 @@ import {
 const DEFAULT_FILE_TIMEOUT_MS = 180_000;
 const harnessDir = join(process.cwd(), 'tests', 'tui-system', 'harness');
 const scenariosDir = join(process.cwd(), 'tests', 'tui-system', 'scenarios');
+const faultSoakTelemetryPreload = process.env.KITE_FAULT_SOAK_TELEMETRY_PRELOAD;
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -78,13 +79,23 @@ function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
 
 async function runFile(file: string, timeoutMs: number): Promise<number> {
   console.log(`\n[tui-system] ${file}`);
-  const proc = Bun.spawn([process.execPath, 'test', '--parallel=1', '--max-concurrency=1', file], {
-    cwd: process.cwd(),
-    env: process.env,
-    stdin: 'inherit',
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
+  const proc = Bun.spawn(
+    [
+      process.execPath,
+      'test',
+      ...(faultSoakTelemetryPreload ? ['--preload', faultSoakTelemetryPreload] : []),
+      '--parallel=1',
+      '--max-concurrency=1',
+      file,
+    ],
+    {
+      cwd: process.cwd(),
+      env: process.env,
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    },
+  );
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<'timeout'>((resolve) => {

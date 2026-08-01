@@ -12,6 +12,7 @@ const INPUT_ECHO_TIMEOUT_MS = 2_000;
 const INPUT_DELIVERY_ATTEMPTS = 3;
 const INPUT_RETRY_LIMIT = 256;
 const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
+const SELECTOR_COMMAND_PREFIX = /^\/(?:model|effort|theme|permissions)\s$/;
 
 function normalizeInputEcho(text: string): string {
   return stripAnsi(text).replace(/\s+/g, '');
@@ -210,13 +211,29 @@ export async function typeText(
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= attempts; attempt++) {
-    for (const ch of characters) {
-      tui.write(ch);
-      await sleep(delayMs);
-    }
-    await sleep(INPUT_SETTLE_MS);
-
     try {
+      let delivered = baselineValue;
+      for (const [index, ch] of characters.entries()) {
+        tui.write(ch);
+        delivered += ch;
+        await sleep(delayMs);
+        if (SELECTOR_COMMAND_PREFIX.test(delivered) && index < characters.length - 1) {
+          // Ink first commits the command match and only then installs the
+          // argument selector's key handlers. On slower CI hosts, sending the
+          // first argument character in that gap can make the selector consume
+          // the separating space and produce `/permissionsf`. Treat the focus
+          // transfer as part of the retryable PTY delivery transaction.
+          await waitForInputEcho(
+            tui,
+            normalizeInputEcho(delivered),
+            'slash-argument-query',
+            false,
+            INPUT_ECHO_TIMEOUT_MS,
+          );
+        }
+      }
+      await sleep(INPUT_SETTLE_MS);
+
       // Confirm that Ink rendered the final input value before a following
       // control key is sent. The current VT viewport is authoritative here:
       // raw output retains erased Ink frames and can falsely acknowledge text

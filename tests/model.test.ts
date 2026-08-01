@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { APICallError } from '@ai-sdk/provider';
+import { generateText } from 'ai';
 import type { AgentConfig } from '../src/core/config/index';
 import { withTransientModelRetry } from '../src/core/model/deepseek';
 import { createChatModel } from '../src/core/model/factory';
@@ -81,9 +83,98 @@ describe('model transient retry', () => {
     expect(attempts).toBe(3);
   });
 
+  test('retries AI SDK HTTP 429 errors only within the bounded attempt budget', async () => {
+    let attempts = 0;
+    const errors = Array.from(
+      { length: 3 },
+      (_, index) =>
+        new APICallError({
+          message: `Rate limited ${index + 1}`,
+          url: 'http://127.0.0.1/v1/chat/completions',
+          requestBodyValues: {},
+          statusCode: 429,
+          responseBody: '{"error":"rate limited"}',
+        }),
+    );
+
+    await expect(
+      withTransientModelRetry(
+        async () => {
+          throw errors[attempts++];
+        },
+        {
+          maxAttempts: 3,
+          initialDelayMs: 1,
+          jitterMs: 0,
+          sleep: async () => {},
+        },
+      ),
+    ).rejects.toBe(errors[2]);
+    expect(attempts).toBe(3);
+  });
+
+  test('retries a real openai-compatible HTTP 429 through provider middleware', async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests++;
+        if (requests === 1) {
+          return Response.json(
+            { error: { message: 'rate limited', type: 'rate_limit' } },
+            { status: 429 },
+          );
+        }
+        return Response.json({
+          id: 'chatcmpl-fault-soak',
+          object: 'chat.completion',
+          created: 1,
+          model: 'fault-soak-model',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: 'recovered' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        });
+      },
+    });
+    try {
+      const binding = createChatModel({
+        providerName: 'fault-soak',
+        providerType: 'openai-compatible',
+        apiKey: 'sk-local-test',
+        baseURL: new URL('/v1', server.url).toString(),
+        modelName: 'fault-soak-model',
+        sandbox: { enabled: true },
+      });
+      const retries: number[] = [];
+      binding.setRetryListener((attempt) => retries.push(attempt));
+
+      const result = await generateText({
+        model: binding.model,
+        prompt: 'hello',
+        maxRetries: 0,
+      });
+
+      expect(result.text).toBe('recovered');
+      expect(requests).toBe(2);
+      expect(retries).toEqual([1]);
+    } finally {
+      server.stop(true);
+    }
+  }, 10_000);
+
   test('does not retry non-transient API errors', async () => {
     let attempts = 0;
-    const error = Object.assign(new Error('Unauthorized'), { status: 401 });
+    const error = new APICallError({
+      message: 'Unauthorized',
+      url: 'http://127.0.0.1/v1/chat/completions',
+      requestBodyValues: {},
+      statusCode: 401,
+    });
 
     await expect(
       withTransientModelRetry(

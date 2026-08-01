@@ -25,6 +25,10 @@ server.registerTool('fail_fixture', { inputSchema: {} }, async () => {
   throw new Error('fixture unavailable');
 });
 
+server.registerTool('exit_fixture', { inputSchema: {} }, async () => {
+  process.exit(23);
+});
+
 let retryCalls = 0;
 server.registerTool('retry_fixture', { inputSchema: {} }, async () => {
   retryCalls += 1;

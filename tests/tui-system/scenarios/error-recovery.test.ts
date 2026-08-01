@@ -1,8 +1,9 @@
 /**
  * PTY System Test — Error Recovery
  *
- * Verifies that the TUI gracefully handles model errors (HTTP 500)
- * and remains functional afterwards. After an error, the TUI should:
+ * Verifies that the TUI exhausts the bounded retry budget for transient
+ * model errors (HTTP 500) and remains functional afterwards. After an error,
+ * the TUI should:
  * 1. Stay alive with prompt visible
  * 2. Accept and process a new message normally
  */
@@ -36,7 +37,11 @@ describe('TUI PTY System — Error Recovery', () => {
 
     server.setResponses([
       { error: 'Internal server error', delay: 50 },
-      { message: { content: 'Second attempt: hello from model!' }, delay: 50 },
+      { error: 'Internal server error', delay: 50 },
+      { error: 'Internal server error', delay: 50 },
+      { error: 'Internal server error', delay: 50 },
+      { error: 'Internal server error', delay: 50 },
+      { message: { content: 'Recovered after bounded model error.' }, delay: 50 },
       { message: { content: 'Spare 1' } },
       { message: { content: 'Spare 2' } },
       { message: { content: 'Spare 3' } },
@@ -61,12 +66,13 @@ describe('TUI PTY System — Error Recovery', () => {
   // ── Model Error Does Not Crash TUI ────────────────────────
 
   step(
-    'model error (HTTP 500) does not crash TUI, prompt remains visible',
+    'bounded HTTP 500 retries exhaust without crashing TUI',
     async () => {
       await typeText(tui, 'Trigger error');
       tui.write('\r');
       await waitForRequestMessage(server, 'Trigger error', 15000);
 
+      await waitForText(() => tui.outputSinceLastAction(), 'Retrying', 15000);
       await waitForText(() => tui.outputSinceLastAction(), 'Internal server error', 15000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       await waitForCondition(
@@ -86,6 +92,7 @@ describe('TUI PTY System — Error Recovery', () => {
 
       // Verify the error message was displayed in the TUI output
       expect(screenContains(output, 'Internal server error')).toBe(true);
+      expect(server.getRequestCount()).toBe(5);
     },
     TIMEOUT,
   );
@@ -99,17 +106,17 @@ describe('TUI PTY System — Error Recovery', () => {
       tui.write('\r');
       await waitForRequestMessage(server, 'Hello after error', 15000);
 
-      // Wait for the second model response
+      // Wait for the next user turn's successful model response.
       await waitForText(
         () => tui.outputSinceLastAction(),
-        'Second attempt: hello from model!',
+        'Recovered after bounded model error.',
         15000,
       );
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
       expect(screenContains(output, 'Hello after error')).toBe(true);
-      expect(screenContains(output, 'Second attempt: hello from model!')).toBe(true);
+      expect(screenContains(output, 'Recovered after bounded model error.')).toBe(true);
       // Prompt should still be visible
       expect(screenContains(output, '❯')).toBe(true);
     },

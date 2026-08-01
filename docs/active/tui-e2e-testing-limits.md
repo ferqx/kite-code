@@ -31,8 +31,10 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 7. 完整 PTY suite 按文件隔离执行并设置单文件硬超时；因此失败会定位到具体
    scenario，且不会因一个遗留 TUI 子进程无限占用整套测试。
 8. suite runner 的 RSS/active-resource/FD 趋势只覆盖协调进程和 scenario 边界资源回收；
-   每个 TUI 子进程内部的长期缓慢泄漏仍需要 1C.7 bounded soak。Windows 无通用 `/proc/self/fd`
-   时 FD 数显示为 unsupported，由 active-resource 与平台 smoke 补充。
+   fault-soak preload 可以采集各 Bun test child 的 before/after，但多个独立 test/TUI 子进程的
+   样本不能替代同一 TUI 进程 repeated mount/unmount 证据。该指标缺口必须让正式 1C.7
+   qualification 返回 `inconclusive`，不得用父 runner 趋势宣称 child 无泄漏。Windows 无通用
+   `/proc/self/fd` 时 FD 和 owned descendant PID 显示为 unsupported。
 9. PTY 原始输出仍是累积流，因此“原始字节里曾出现 `❯`”不能证明当前输入焦点可用。Harness
    生成带类型的 byte checkpoint；跨 checkpoint 的 UTF-8 code point 不归入动作后输出。每次
    write/resize/raw-mode 动作都更新 checkpoint，输入提交还必须通过本次输入回显与本次 mock
@@ -57,6 +59,13 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 14. 测试 permit issuer 位于 `tests/tui-system/fixtures/`，只能由单个 `spawnTui()` 调用显式选择。
     它不是生产授权实现，也不通过可被 workspace `.env` 伪造的环境开关启用；默认拒绝与允许
     外发必须写成不同、隔离的 test 语义。
+15. `/model`、`/effort`、`/theme`、`/permissions` 的命令前缀和参数属于两个 React 输入阶段。
+    PTY helper 输入分隔空格后必须先观察 argument selector 的语义 frame，再发送首个参数字符；
+    只在命令行看到空格或累计 transcript 中出现字符不能证明 selector handler 已完成 focus transfer。
+    focus-transfer 回执超时与最终 query 回执超时使用同一完整输入重试和基线恢复语义。
+16. Mock server 的 response queue 会在每个 provider attempt 消耗一个响应。HTTP 429/5xx 已走
+    production bounded retry；因此单个 transient error 后跟成功响应验证的是 reconnect，不是终态错误。
+    终态 error-recovery 场景必须耗尽完整 retry budget，并用请求计数证明没有提前终止或无限重试。
 
 ## 分层选择
 

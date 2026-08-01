@@ -132,6 +132,15 @@ tests/tui-system/
     为每个 invocation 签发独立短时 permit，不得由全局 harness、环境变量或生产入口自动放行。
     scenario contract 会拒绝只配置 flag 或只注入 permit issuer 的半配置场景。自动重试与
     permit replay 属于 MCP policy/integration 层；不以重试为主题的 PTY 场景应配置 `retry: never`。
+19. selector 型 slash command（`/model`、`/effort`、`/theme`、`/permissions`）输入空格后，
+    共享输入 helper 必须等待 argument selector 的语义 frame，再发送第一个参数字符；随后仍需
+    等待完整 query frame 才能按 Enter。场景不得用固定 sleep 修补 command selector 到 argument
+    selector 的 React commit 竞争。argument focus 回执失败必须进入与字符交付相同的有界重试事务，
+    先恢复动作前输入基线再重送完整命令，不能在重试边界外直接超时。
+20. HTTP 429/5xx 属于模型 transient retry 场景。验证终态错误恢复时，mock 必须连续返回足够次数的
+    transient failure 以耗尽 production bounded retry budget，并断言 retry UI、实际请求次数、终态错误
+    与下一用户 turn 恢复；不得用一次 500 后的默认成功响应声称已经验证错误终态。只验证“不重试”时
+    应使用 401 等明确非 transient 错误，或在模型单元测试中显式注入 `maxAttempts: 1`。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 

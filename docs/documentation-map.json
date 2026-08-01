@@ -27,6 +27,30 @@
       ]
     },
     {
+      "id": "runtime-resilience-qualification",
+      "sources": [
+        "package.json",
+        "scripts/run-tui-system-tests.ts",
+        "scripts/runtime/**",
+        "src/core/model/deepseek.ts",
+        "src/core/runtime/store.ts",
+        "tests/fixtures/mcp-governance-server.ts",
+        "tests/runtime/fault-injection.test.ts",
+        "tests/runtime/fault-soak-report.test.ts",
+        "tests/runtime/fault-soak-runner.test.ts",
+        "tests/runtime/harness/**",
+        "tests/fixtures/runtime-fault-soak-child.ts",
+        "tests/mcp-manager.test.ts",
+        "tests/model-invoke.test.ts",
+        "tests/model.test.ts"
+      ],
+      "documents": [
+        "docs/active/runtime-resilience-qualification.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/tui-e2e-testing-limits.md"
+      ]
+    },
+    {
       "id": "capabilities",
       "sources": [
         "src/core/capabilities/**",

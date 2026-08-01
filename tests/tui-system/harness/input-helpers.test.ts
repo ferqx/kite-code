@@ -352,9 +352,11 @@ describe('TUI input helpers', () => {
   });
 
   test('submitCommand waits for the slash suggestion frame before pressing Enter', async () => {
-    const command = '/theme purple';
+    const command = '/permissions f';
     let currentInput = '';
     let rendered = '';
+    let argumentReady = false;
+    let argumentArrivedBeforeFocusTransfer = false;
     let suggestionReady = false;
     let submitted = false;
     const tui = fakePty(
@@ -363,25 +365,66 @@ describe('TUI input helpers', () => {
           submitted = suggestionReady;
           return;
         }
+        if (currentInput === '/permissions ' && !argumentReady) {
+          argumentArrivedBeforeFocusTransfer = true;
+        }
         currentInput += data;
         rendered += data;
-        if (currentInput === command) {
+        if (currentInput === '/permissions ') {
           setTimeout(() => {
-            suggestionReady = true;
-            rendered += '<theme-suggestion>';
-          }, 500);
+            argumentReady = true;
+            rendered += '<permissions-argument-ready>';
+          }, 100);
+        }
+        if (currentInput === command) {
+          suggestionReady = true;
+          rendered += '<permissions-suggestion>';
         }
       },
       () => rendered,
     );
-    tui.viewport = () =>
-      suggestionReady
-        ? `❯ ${currentInput}\n╭────╮\n│ 主题匹配 "purple"\n│ purple\n╰────╯`
-        : `❯ ${currentInput}`;
+    tui.viewport = () => {
+      if (argumentReady && currentInput.startsWith('/permissions ')) {
+        const query = currentInput.slice('/permissions '.length);
+        return `❯ ${currentInput}\n╭────╮\n│ 权限模式匹配 "${query}"\n│ ${suggestionReady ? 'full' : ''}\n╰────╯`;
+      }
+      return `❯ ${currentInput}`;
+    };
 
     await submitCommand(tui, command, 0);
 
+    expect(argumentArrivedBeforeFocusTransfer).toBe(false);
     expect(suggestionReady).toBe(true);
     expect(submitted).toBe(true);
   });
+
+  test('typeText retries the complete selector transaction when focus transfer is missed', async () => {
+    const command = '/permissions f';
+    let currentInput = '';
+    let deliveries = 0;
+    let argumentReady = false;
+    const tui = fakePty(
+      (data) => {
+        if (data === '\x7f') {
+          currentInput = currentInput.slice(0, -1);
+          return;
+        }
+        if (data === '/' && currentInput.length === 0) {
+          deliveries++;
+          argumentReady = deliveries >= 2;
+        }
+        currentInput += data;
+      },
+      () => currentInput,
+    );
+    tui.viewport = () =>
+      argumentReady && currentInput.startsWith('/permissions ')
+        ? `❯ ${currentInput}\n╭────╮\n│ 权限模式匹配 "${currentInput.slice('/permissions '.length)}"\n│ full\n╰────╯`
+        : `❯ ${currentInput}`;
+
+    await typeText(tui, command, 0);
+
+    expect(deliveries).toBe(2);
+    expect(currentInput).toBe(command);
+  }, 10_000);
 });

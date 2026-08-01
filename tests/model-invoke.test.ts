@@ -131,6 +131,7 @@ describe('invokeBoundModel streaming', () => {
         tools: {} as ToolSet,
         messages: [humanMessage('hello')],
         streaming: true,
+        streamRetryOptions: { maxAttempts: 1 },
         onTextDelta: (text) => deltas.push(text),
       }),
     ).rejects.toThrow();
