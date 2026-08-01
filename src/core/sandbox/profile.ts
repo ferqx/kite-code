@@ -2,6 +2,7 @@ import { existsSync, realpathSync } from 'node:fs';
 import { dirname, parse, resolve } from 'node:path';
 import {
   PROTECTED_WORKSPACE_DIRECTORIES_V1,
+  PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
   PROTECTED_WORKSPACE_FILES_V1,
 } from '@/core/policies/protected-path';
 import type { FilesystemScope } from './types';
@@ -72,6 +73,27 @@ function subpathFilter(path: string): string {
 
 function literalFilter(path: string): string {
   return `(literal "${seatbeltString(path)}")`;
+}
+
+function regexFilterForLiteralPrefix(path: string): string {
+  const regex = `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`;
+  return `(regex #"${seatbeltString(regex)}")`;
+}
+
+function caseInsensitiveRegexLiteral(path: string): string {
+  return [...path]
+    .map((character) => {
+      if (/^[A-Za-z]$/.test(character)) {
+        return `[${character.toLowerCase()}${character.toUpperCase()}]`;
+      }
+      return /[\\^$.*+?()[\]{}|]/.test(character) ? `\\${character}` : character;
+    })
+    .join('');
+}
+
+function regexFilterForCaseInsensitiveIdentity(path: string, suffix: '' | '(/.*)?' | '.*'): string {
+  const regex = `^${caseInsensitiveRegexLiteral(path)}${suffix}$`;
+  return `(regex #"${seatbeltString(regex)}")`;
 }
 
 /** Static process/IPC rules; descendants inherit the same Seatbelt sandbox. */
@@ -239,9 +261,27 @@ function protectedPathPolicy(workspaceRoot: string): string {
   const fileFilters = PROTECTED_WORKSPACE_FILES_V1.map((path) =>
     literalFilter(resolve(workspaceRoot, path)),
   );
+  const filePrefixFilters = PROTECTED_WORKSPACE_FILE_PREFIXES_V1.map((path) =>
+    regexFilterForLiteralPrefix(resolve(workspaceRoot, path)),
+  );
+  // APFS/HFS+ commonly resolve case aliases to the same filesystem identity.
+  // Keep the exact filters for a compact fast path, then add conservative
+  // ASCII-case-insensitive filters so `.GIT`, `.Agents`, and `.ENV.*` cannot
+  // bypass the native deny even on a differently configured Darwin volume.
+  const caseAliasFilters = [
+    ...PROTECTED_WORKSPACE_DIRECTORIES_V1.map((path) =>
+      regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), '(/.*)?'),
+    ),
+    ...PROTECTED_WORKSPACE_FILES_V1.map((path) =>
+      regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), ''),
+    ),
+    ...PROTECTED_WORKSPACE_FILE_PREFIXES_V1.map((path) =>
+      regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), '.*'),
+    ),
+  ];
   return `;; Protected paths deny model-driven reads and writes even inside the Workspace.
 (deny file-read* file-map-executable file-write* file-write-create file-write-unlink file-ioctl
-  ${[...directoryFilters, ...fileFilters].join('\n  ')})`;
+  ${[...directoryFilters, ...fileFilters, ...filePrefixFilters, ...caseAliasFilters].join('\n  ')})`;
 }
 
 function networkPolicy(mode: 'disabled' | 'allow_all'): string {

@@ -55,7 +55,9 @@ network boundary.
 connection 在 SDK transport construction 前，以 `execute` operation 校验 `cwd`（缺省为 evaluator
 绑定的 canonical Workspace）和 path-like executable；protected、Workspace 外、无效或 prompt-only
 路径都拒绝，且不会调用 transport factory。准入后 manager 把 canonical cwd 和 path-like
-executable identity 而非未解析 alias 交给 factory。bare PATH command 的 runtime pinning、composition root 注入、child
+executable identity 而非未解析 alias 交给 factory。在 Task 1B.8 提供 sealed argv pinning 前，
+注入 evaluator 的 stdio config 对任意非空 `args` 都在 factory 前 fail closed；不能通过 interpreter
+argv 把 protected 或 Workspace 外脚本交给 child。bare PATH command 的 runtime pinning、composition root 注入、child
 sandbox/network/process inheritance 与逐调用 transport boundary 仍属于 Task 1B.8；该 adapter
 不代表 local stdio 已获得 production admission，当前 sealed surface 继续关闭 local stdio MCP。
 

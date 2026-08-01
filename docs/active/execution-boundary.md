@@ -123,7 +123,9 @@ allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；
 显式只读 root；除此之外的 Workspace 外 read/write/create/unlink、指向外部的 symlink，以及
 Workspace 内 `.git`、Agent/MCP 配置、credential、shell profile 等 protected path 均由
 Seatbelt deny，`checkDangerousPaths()` 只保留为 defense-in-depth。Shell child 会继承相同
-profile。
+profile。共享规则除 exact literal/subpath 外，还编译 ASCII 大小写不敏感的 anchored regex；因此
+case-insensitive APFS/HFS+ 上的 `.GIT`、`.Agents`、`.ENV.*` alias，以及 case-sensitive volume
+上按混合大小写实际创建的同名 identity，都会由原生边界拒绝。
 
 密封配置还会从同一份 protected-path V1 定义编译平台无关 evaluator。每项访问都携带
 canonical target、未 realpath 的 lexical Workspace identity 与 `read`/`write`/`execute` operation；
@@ -131,17 +133,25 @@ canonical target、未 realpath 的 lexical Workspace identity 与 `read`/`write
 以及把 `.git`/`.env` 指向普通 Workspace 文件的 inward alias 都不能绕过。Workspace 外路径、
 `.git`、Agent/MCP 配置、credential 与 shell profile 都返回 `deny`（`prompt` 也保持非执行终态，
 直到存在单独的 typed approval protocol）；additional deny 与内建 deny 取并集，deny 在可选
-allow root 前求值。Tool Runner 在审批前执行一次，并在异步 `beforeDispatch` hook 返回后、旧内容
+allow root 前求值。内建 protected identity 使用保守的 ASCII 大小写不敏感比较，不能借
+case-insensitive filesystem alias 绕过。Tool Runner 在审批前执行一次，并在异步 `beforeDispatch` hook 返回后、旧内容
 预读/pre-image capture 前重新求值；Registry dispatch 在 `spec.execute` 前再重复一次。
 `read_file`、`write_file`、`edit_file` 和 search spec 通过
-结构化 path-access 声明接入；workspace-wide search 会剪枝 protected descendants，而不是只检查
+结构化 path-access 声明接入；Registry conformance 从完整 builtin tuple 派生所有
+`filesystem!=none` spec。没有通用 path hook 的 `read_plan`、`read_skill_reference`、
+`shell_execute`、`task`、`activate_skill` 必须分别登记由 typed Plan Artifact、Skill reference
+allowlist、native sandbox、child Harness 和 compiled inline/fork adapter 接管的闭合例外，因此新增
+filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 会剪枝 protected descendants，而不是只检查
 搜索根。未携带 sealed boundary 的开发入口继续使用既有外部路径审批语义。
 
 Seatbelt profile 直接消费该共享定义的目录/文件集合；Shell 的命令字符串扫描不再是权威 gate。
-forked Skill 的文件工具继承同一 `taskConfig` evaluator。local stdio MCP manager 可接收同一 evaluator，
+production execution surface 或 evaluator 任一缺失时，Runner 在任何 builtin adapter I/O 前拒绝。
+普通 Task child 与 forked Skill 的文件工具都继承父级同一 `taskConfig` evaluator。local stdio MCP manager 可接收同一 evaluator，
 并在 transport construction 前以 `execute` operation 拒绝 protected/outside cwd 与 path-like
-executable，再把 canonical cwd 和 path-like executable identity 交给 transport factory。bare PATH
-command 的 runtime pinning 与完整 child boundary 仍属于 Task 1B.8，生产 MCP transport 继续关闭。未来 typed Git/worktree
+executable，再把 canonical cwd 和 path-like executable identity 交给 transport factory。Task 1B.8
+完成 sealed argv/runtime pinning 前，带 evaluator 的 local stdio 配置只接受空 `args`；任意非空 argv
+均在 transport factory 前 fail closed。bare PATH command 的 runtime pinning 与完整 child boundary
+仍属于 Task 1B.8，生产 MCP transport 继续关闭。未来 typed Git/worktree
 controller 走独立 App 授权，不能借此向模型 Shell 或通用文件工具开放 `.git`。
 
 `createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；

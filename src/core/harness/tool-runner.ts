@@ -207,6 +207,20 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       })
     : undefined;
   const builtinSpec = builtinToolRegistry.get(request.name);
+  if (
+    taskConfig &&
+    'productionExecution' in taskConfig &&
+    (!executionSurface || !protectedPathEvaluator)
+  ) {
+    return withFailureGuidance(request, {
+      ok: false,
+      command: request.protectedCommand,
+      exitCode: -1,
+      stdout: '',
+      stderr: 'Rejected by production execution boundary: protected-path gate is unavailable.',
+      status: 'rejected',
+    });
+  }
   if (builtinSpec && protectedPathEvaluator) {
     const pathDecision = evaluateRegisteredToolProtectedPaths(builtinSpec, request.args, {
       workspace,

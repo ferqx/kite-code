@@ -55,14 +55,25 @@ export const PROTECTED_WORKSPACE_DIRECTORIES_V1 = Object.freeze([
   '.ssh',
   '.aws',
   '.docker',
+  '.gnupg',
+  '.kube',
+  '.direnv',
+  '.agents',
   '.claude',
   '.codex',
   '.kite-code',
   '.openpx',
   '.vscode',
   '.idea',
+  '.config/fish',
+  '.config/gh',
+  '.config/gcloud',
   '.config/openpx',
   '.config/mcp',
+  '.config/systemd/user',
+  '.config/autostart',
+  'Library/LaunchAgents',
+  'Library/LaunchDaemons',
 ] as const);
 
 /** Root-relative files hidden from every model-driven filesystem operation. */
@@ -74,8 +85,13 @@ export const PROTECTED_WORKSPACE_FILES_V1 = Object.freeze([
   '.zprofile',
   '.zlogout',
   '.profile',
+  '.cshrc',
+  '.tcshrc',
+  '.kshrc',
+  '.envrc',
   '.npmrc',
   '.yarnrc',
+  '.pypirc',
   '.netrc',
   '.git-credentials',
   '.gitmodules',
@@ -85,6 +101,9 @@ export const PROTECTED_WORKSPACE_FILES_V1 = Object.freeze([
   '.mcp.json',
   'mcp.json',
 ] as const);
+
+/** Root-relative filename prefixes hidden from every model-driven filesystem operation. */
+export const PROTECTED_WORKSPACE_FILE_PREFIXES_V1 = Object.freeze(['.env.'] as const);
 
 function pathFromWorkspace(workspaceRoot: string, candidate: string): string {
   if (candidate.includes('\0')) throw new Error('Path contains a NUL byte.');
@@ -109,7 +128,19 @@ function toLexicalRelativePath(workspaceRoot: string, targetPath: string): strin
 }
 
 function isSameOrDescendant(relativePath: string, rule: string): boolean {
-  return relativePath === rule || relativePath.startsWith(`${rule}/`);
+  const candidateIdentity = relativePath.toLowerCase();
+  const protectedIdentity = rule.toLowerCase();
+  return (
+    candidateIdentity === protectedIdentity || candidateIdentity.startsWith(`${protectedIdentity}/`)
+  );
+}
+
+function isSameProtectedIdentity(relativePath: string | null, rule: string): boolean {
+  return relativePath?.toLowerCase() === rule.toLowerCase();
+}
+
+function startsWithProtectedIdentity(relativePath: string | null, rule: string): boolean {
+  return relativePath?.toLowerCase().startsWith(rule.toLowerCase()) === true;
 }
 
 function denyOutcome(mode: ProtectedPathPolicy): 'deny' | 'prompt' {
@@ -180,7 +211,9 @@ export function createProtectedPathEvaluatorV1(
       }
 
       const protectedFile = PROTECTED_WORKSPACE_FILES_V1.find(
-        (rule) => relativePath === rule || lexicalRelativePath === rule,
+        (rule) =>
+          isSameProtectedIdentity(relativePath, rule) ||
+          isSameProtectedIdentity(lexicalRelativePath, rule),
       );
       if (protectedFile) {
         return {
@@ -188,6 +221,20 @@ export function createProtectedPathEvaluatorV1(
           outcome: denyOutcome(input.mode),
           reason: 'protected_file',
           matchedRule: protectedFile,
+        };
+      }
+
+      const protectedFilePrefix = PROTECTED_WORKSPACE_FILE_PREFIXES_V1.find(
+        (rule) =>
+          startsWithProtectedIdentity(relativePath, rule) ||
+          startsWithProtectedIdentity(lexicalRelativePath, rule),
+      );
+      if (protectedFilePrefix) {
+        return {
+          ...base,
+          outcome: denyOutcome(input.mode),
+          reason: 'protected_file',
+          matchedRule: protectedFilePrefix,
         };
       }
 

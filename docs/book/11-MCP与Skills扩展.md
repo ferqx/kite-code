@@ -84,7 +84,9 @@ Manager 在 SDK 调用前校验进程内 ledger，Runtime Store 再把 nonce dig
 在 ToolController 和 Manager 两处执行有界 secret 检查；credential 字段/形状、受保护路径以及
 无法完成检查的输入都不能通过 permit 外发。边界在任何异步授权前创建 immutable JSON-safe 深
 快照，schema、检查、digest 和最终 SDK request 使用同一份内容，禁止 accessor/custom serializer
-造成签署后变更。permit 最长五分钟；空参数 HTTP Tool 和 local stdio 不消费该 permit；Tool
-Search/discovery 只处理元数据，也不会触发正文许可。
+造成签署后变更。permit 最长五分钟；空参数 HTTP Tool 和 local stdio 不消费该 permit；这不表示
+stdio 已有 production admission。Task 1B.8 完成 sealed argv/runtime/child boundary 前，注入
+protected-path evaluator 的 local stdio 配置只允许空 argv，任意非空 `args` 都在 transport factory
+前 fail closed。Tool Search/discovery 只处理元数据，也不会触发正文许可。
 
 完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。

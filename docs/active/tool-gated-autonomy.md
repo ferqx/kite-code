@@ -88,7 +88,12 @@ Workspace identity 和 canonical target，防止 protected 名称通过 inward s
 Runner 必须在 policy 审批前检查，并在异步 `beforeDispatch` 返回后、文件旧内容预读与 rewind
 pre-image capture 前重检；Registry dispatch 在
 `preExecute/execute` 前再次执行同一 evaluator。read/write/edit 分别声明实际 read/write access，
-search 声明 root read 并在遍历中剪枝 protected descendants。所有拒绝都发生在 adapter I/O 前；
+search 声明 root read 并在遍历中剪枝 protected descendants。完整 builtin tuple 的
+`filesystem!=none` spec 必须具有该声明，或显式位于闭合例外集：`read_plan`、
+`read_skill_reference`、`shell_execute`、`task`、`activate_skill` 分别由 typed Plan Artifact、Skill
+reference allowlist、native sandbox、child Harness、compiled inline/fork adapter 接管。闭合例外测试
+会让新增 filesystem builtin 在遗漏 hook 或边界说明时失败。
+production execution 标记存在但 surface/evaluator 缺失时同样在 adapter I/O 前 fail closed。所有拒绝都发生在 adapter I/O 前；
 approval grant、`full_access` 或 optional allow root 不能重开内建/追加 deny。Shell 仍以原生
 sandbox profile 为权威，`checkDangerousPaths()` 只作 defense-in-depth。
 

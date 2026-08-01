@@ -187,6 +187,11 @@ export class McpConnectionManager {
           }
           admittedCommand = commandDecision.canonicalPath;
         }
+        if ((config.args?.length ?? 0) > 0) {
+          throw new Error(
+            'Rejected local stdio MCP arguments by protected-path policy; sealed argv pinning requires Task 1B.8.',
+          );
+        }
         transportConfig = { ...config, cwd: cwdDecision.canonicalPath, command: admittedCommand };
       }
       transport = await this.createManagerTransport(transportConfig, this.oauthProviders.get(name));

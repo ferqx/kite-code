@@ -11,14 +11,24 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { z } from 'zod';
 import type { AgentConfig } from '@/core/config';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import { McpConnectionManager } from '@/core/mcp/manager';
-import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+import {
+  createProtectedPathEvaluatorV1,
+  PROTECTED_WORKSPACE_DIRECTORIES_V1,
+  PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
+  PROTECTED_WORKSPACE_FILES_V1,
+} from '@/core/policies/protected-path';
+import { generateSandboxProfile } from '@/core/sandbox/profile';
 import { canonicalPathForComparison } from '@/core/tools/path-utils';
+import { builtinToolSpecs } from '@/core/tools/registry/builtins';
+import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
 import { readFileSpec } from '@/core/tools/registry/builtins/read-file';
 import { searchContentSpec } from '@/core/tools/registry/builtins/search-content';
+import { searchFilesSpec } from '@/core/tools/registry/builtins/search-files';
 import { writeFileSpec } from '@/core/tools/registry/builtins/write-file';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 
@@ -84,11 +94,15 @@ describe('protected-path policy V1', () => {
 
     for (const path of [
       '.git/config',
+      '.agents/skills/document-before-commit/SKILL.md',
       '.kite-code/kite-code.jsonc',
       '.mcp.json',
       '.env',
+      '.env.test',
       '.ssh/id_ed25519',
       '.zshrc',
+      '.cshrc',
+      '.config/fish/config.fish',
     ]) {
       expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('deny');
       expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('deny');
@@ -98,6 +112,22 @@ describe('protected-path policy V1', () => {
       reason: 'outside_workspace',
       relativePath: null,
     });
+  });
+
+  test('matches protected identities conservatively across ASCII case aliases', () => {
+    const workspace = temporaryDirectory('openpx-protected-case-alias-');
+    const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
+
+    for (const path of [
+      '.GIT/config',
+      '.Agents/skills/fixture/SKILL.md',
+      '.ENV.TEST',
+      '.Config/GH/hosts.yml',
+      'library/launchagents/fixture.plist',
+    ]) {
+      expect(evaluator.evaluate({ path, operation: 'read' }).outcome).toBe('deny');
+      expect(evaluator.evaluate({ path, operation: 'write' }).outcome).toBe('deny');
+    }
   });
 
   test('canonicalizes an existing symlink ancestor before deciding', () => {
@@ -170,6 +200,23 @@ describe('protected-path policy V1', () => {
       canonicalPath: null,
     });
   });
+
+  test('projects every shared protected rule into the native Seatbelt boundary', () => {
+    const workspace = temporaryDirectory('openpx-protected-seatbelt-');
+    const profile = generateSandboxProfile(workspace);
+
+    for (const path of [
+      ...PROTECTED_WORKSPACE_DIRECTORIES_V1,
+      ...PROTECTED_WORKSPACE_FILES_V1,
+      ...PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
+    ]) {
+      expect(profile).toContain(join(workspace, path));
+    }
+    expect(profile).toContain('(regex #"');
+    expect(profile).toContain('[gG][iI][tT]');
+    expect(profile).toContain('[aA][gG][eE][nN][tT][sS]');
+    expect(profile).toContain('[eE][nN][vV]');
+  });
 });
 
 describe('protected-path Registry and Harness integration', () => {
@@ -197,6 +244,77 @@ describe('protected-path Registry and Harness integration', () => {
     expect(read).toMatchObject({ dispatched: false });
     expect(write).toMatchObject({ dispatched: false });
     expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('keep');
+  });
+
+  test('every builtin path-bearing spec declares read/write operations structurally', () => {
+    const context = { workspace: '/fixture' };
+    expect(readFileSpec.protectedPathAccesses?.({ path: 'read.txt' }, context)).toEqual([
+      { path: 'read.txt', operation: 'read' },
+    ]);
+    expect(
+      writeFileSpec.protectedPathAccesses?.({ path: 'write.txt', content: '' }, context),
+    ).toEqual([
+      { path: 'write.txt', operation: 'read' },
+      { path: 'write.txt', operation: 'write' },
+    ]);
+    expect(
+      editFileSpec.protectedPathAccesses?.(
+        { path: 'edit.txt', old_string: 'a', new_string: 'b' },
+        context,
+      ),
+    ).toEqual([
+      { path: 'edit.txt', operation: 'read' },
+      { path: 'edit.txt', operation: 'write' },
+    ]);
+    expect(searchContentSpec.protectedPathAccesses?.({ pattern: 'x', path: '.' }, context)).toEqual(
+      [{ path: '.', operation: 'read' }],
+    );
+    expect(
+      searchFilesSpec.protectedPathAccesses?.({ pattern: '*.ts', path: '.' }, context),
+    ).toEqual([{ path: '.', operation: 'read' }]);
+  });
+
+  test('ratchets every filesystem builtin through a protected-path hook or closed exception set', () => {
+    const internalFilesystemExceptions = [
+      { name: 'read_plan', boundary: 'typed immutable Plan Artifact store' },
+      { name: 'read_skill_reference', boundary: 'compiled Skill reference allowlist' },
+      { name: 'shell_execute', boundary: 'native sandbox profile' },
+      { name: 'task', boundary: 'delegated child Harness' },
+      { name: 'activate_skill', boundary: 'compiled inline/fork adapter' },
+    ] as const;
+    const filesystemSpecs = builtinToolSpecs.filter(
+      (spec) => spec.declaredEffects.filesystem !== 'none',
+    );
+    const missingHooks = filesystemSpecs
+      .filter((spec) => !('protectedPathAccesses' in spec))
+      .map((spec) => spec.name)
+      .sort();
+    const expectedExceptions = internalFilesystemExceptions.map((exception) => exception.name);
+
+    expect(internalFilesystemExceptions.every((exception) => exception.boundary.length > 0)).toBe(
+      true,
+    );
+    expect(missingHooks).toEqual([...expectedExceptions].sort());
+    for (const spec of filesystemSpecs) {
+      if (expectedExceptions.includes(spec.name as (typeof expectedExceptions)[number])) {
+        continue;
+      }
+      expect(
+        'protectedPathAccesses' in spec && typeof spec.protectedPathAccesses === 'function',
+      ).toBe(true);
+    }
+
+    const modelPathSpecsWithoutHooks = builtinToolSpecs
+      .filter((spec) => {
+        const schema = z.toJSONSchema(spec.inputSchema) as {
+          properties?: Record<string, unknown>;
+        };
+        return Object.hasOwn(schema.properties ?? {}, 'path');
+      })
+      .filter((spec) => !('protectedPathAccesses' in spec))
+      .map((spec) => spec.name)
+      .sort();
+    expect(modelPathSpecsWithoutHooks).toEqual(['read_skill_reference']);
   });
 
   test('Registry rejects an explicit protected search root even when it aliases inward', async () => {
@@ -242,6 +360,29 @@ describe('protected-path Registry and Harness integration', () => {
     expect(result.stderr).toContain('protected-path policy');
     expect(preimages).toBe(0);
     expect(readFileSync(join(workspace, '.env'), 'utf8')).toBe('keep');
+  });
+
+  test('production writer fails closed when its protected-path gate is missing', async () => {
+    const workspace = temporaryDirectory('openpx-protected-missing-gate-');
+    const target = join(workspace, 'ordinary.txt');
+    writeFileSync(target, 'keep');
+    const parsed = toolRequestFromCall(
+      { id: 'missing-gate-write', name: 'write_file', args: { path: target, content: 'changed' } },
+      workspace,
+    );
+    if (!parsed?.ok) throw new Error('write_file request must parse');
+    const taskConfig = {
+      ...productionBoundaryConfig(workspace),
+      executionBoundary: undefined,
+      executionCapabilitySurface: undefined,
+      productionExecution: {},
+    } as unknown as AgentConfig;
+
+    const result = await runApprovedTool({ workspace, request: parsed.request, taskConfig });
+
+    expect(result).toMatchObject({ ok: false, status: 'rejected' });
+    expect(result.stderr).toContain('protected-path gate is unavailable');
+    expect(readFileSync(target, 'utf8')).toBe('keep');
   });
 
   test('Harness rechecks write/edit paths after the asynchronous pre-dispatch hook', async () => {
@@ -341,6 +482,16 @@ describe('protected-path Registry and Harness integration', () => {
         cwd: workspace,
       }),
     ).rejects.toThrow('executable by protected-path policy');
+    expect(transports).toBe(0);
+
+    await expect(
+      manager.connect('protected-interpreter-argument', {
+        type: 'stdio',
+        command: 'node',
+        args: ['.git/hooks/server.js'],
+        cwd: workspace,
+      }),
+    ).rejects.toThrow('arguments by protected-path policy');
     expect(transports).toBe(0);
   });
 

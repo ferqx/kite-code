@@ -65,7 +65,8 @@ Workspace: /d/work/my-project
 sealed execution boundary 下，解码/读取之前还有独立的 protected-path V1 gate。它复用
 `canonicalPathForComparison()` 解析最近存在祖先与 symlink identity，同时保留 lexical Workspace
 identity，并按结构化 operation 区分 read/write/execute。因此 `.git`/`.env` 即使向内链接普通文件
-仍按 protected 名称拒绝。Runner 在异步 `beforeDispatch` 后、`write_file`/`edit_file` 旧内容读取和
+仍按 protected 名称拒绝；内建名称还使用保守的 ASCII 大小写不敏感比较，`.GIT`、`.Agents`、
+`.ENV.*` 等 filesystem alias 同样拒绝。Runner 在异步 `beforeDispatch` 后、`write_file`/`edit_file` 旧内容读取和
 pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 protected root 会拒绝，workspace-wide search 则在
 进入目录或读取文件前剪枝 protected descendants，因而 `.env`、`.kite-code` 等内容不会成为
 搜索结果。该密封边界优先于外部路径 grant；未携带 execution boundary 的开发入口仍维持下文

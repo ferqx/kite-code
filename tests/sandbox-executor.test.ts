@@ -297,16 +297,18 @@ describe('sandbox executor integration', () => {
 
   test('denies protected paths inside workspace', async () => {
     const ws = setupWorkspace();
-    mkdirSync(join(ws, '.git'));
-    writeFileSync(join(ws, '.git', 'config'), 'protected');
+    mkdirSync(join(ws, '.GIT'));
+    writeFileSync(join(ws, '.GIT', 'config'), 'protected');
+    writeFileSync(join(ws, '.ENV.TEST'), 'keep');
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       // Split the literal so checkDangerousPaths cannot be the mechanism under test.
-      const read = await executor({ workspace: ws, command: 'cat .g"it/config"' });
-      const write = await executor({ workspace: ws, command: 'echo changed > .e"nv"' });
+      const read = await executor({ workspace: ws, command: 'cat .G"IT/config"' });
+      const write = await executor({ workspace: ws, command: 'echo changed > .E"NV.TEST"' });
       expect(read.ok).toBe(false);
       expect(read.stdout).not.toContain('protected');
       expect(write.ok).toBe(false);
+      expect(await Bun.file(join(ws, '.ENV.TEST')).text()).toBe('keep');
     } finally {
       cleanupWorkspace(ws);
     }
