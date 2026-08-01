@@ -30,14 +30,15 @@
       "id": "runtime-resilience-qualification",
       "sources": [
         "package.json",
+        ".github/workflows/required.yml",
+        ".github/workflows/runtime-resilience-qualification.yml",
         "scripts/run-tui-system-tests.ts",
         "scripts/runtime/**",
         "src/core/model/deepseek.ts",
         "src/core/runtime/store.ts",
         "tests/fixtures/mcp-governance-server.ts",
         "tests/runtime/fault-injection.test.ts",
-        "tests/runtime/fault-soak-report.test.ts",
-        "tests/runtime/fault-soak-runner.test.ts",
+        "tests/runtime/fault-soak-*.test.ts",
         "tests/runtime/harness/**",
         "tests/fixtures/runtime-fault-soak-child.ts",
         "tests/mcp-manager.test.ts",
@@ -261,6 +262,7 @@
       "documents": [
         "docs/active/real-model-test-boundary.md",
         "docs/active/mcp-runtime-governance.md",
+        "docs/book/12-测试体系.md",
         "README.md"
       ]
     },

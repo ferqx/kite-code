@@ -256,12 +256,23 @@ describe('TUI PTY System — /compact after session switch', () => {
       tui = spawnTui({ cols: 120, rows: 40, mockServer: server, workspace });
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
       tui.setRawMode(true);
-      const restoredTargetSession = persistedCommandSession(workspace, command);
+      let restoredTargetSession: ReturnType<typeof persistedCommandSession>;
+      let otherSessionNames: string[] = [];
+      await waitForCondition(
+        () => {
+          restoredTargetSession = persistedCommandSession(workspace, command);
+          otherSessionNames = persistedSessionSummaries(workspace)
+            .filter((session) => session.threadId !== targetSession.threadId)
+            .map((session) => session.name);
+          return (
+            restoredTargetSession?.threadId === targetSession.threadId &&
+            otherSessionNames.length > 0
+          );
+        },
+        'restarted Runtime Store observer to reopen the command-bearing session',
+        10_000,
+      );
       expect(restoredTargetSession?.threadId).toBe(targetSession.threadId);
-      const otherSessionNames = persistedSessionSummaries(workspace)
-        .filter((session) => session.threadId !== targetSession.threadId)
-        .map((session) => session.name);
-      expect(otherSessionNames.length).toBeGreaterThan(0);
 
       await submitCommand(tui, '/sessions');
       await waitForCondition(

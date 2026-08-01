@@ -1,5 +1,48 @@
 import { describe, expect, test } from 'bun:test';
-import { captureBounded, parseRuntimeFaultSoakOptions } from '../../scripts/runtime/run-fault-soak';
+import {
+  buildFaultSoakProbeArgs,
+  captureBounded,
+  parseRuntimeFaultSoakOptions,
+  qualificationTelemetryMetric,
+  type RuntimeBudgetTelemetryRecord,
+  runtimeBudgetUsage,
+  type TelemetryRecord,
+} from '../../scripts/runtime/run-fault-soak';
+
+function telemetryRecord(
+  sequence: number,
+  rssBytes: number,
+  overrides: Partial<Pick<TelemetryRecord, 'pid' | 'caseId' | 'lifecycleId'>> = {},
+): TelemetryRecord {
+  const sample = {
+    rssBytes,
+    activeResources: 1,
+    fileDescriptors: 5,
+    listeners: 0,
+    handles: 0,
+  };
+  return {
+    version: 2,
+    kind: 'process_resource',
+    pid: overrides.pid ?? 42,
+    parentPid: 1,
+    sequence,
+    caseId: overrides.caseId ?? 'long_runtime_replay',
+    lifecycleId: overrides.lifecycleId ?? 'bun-test-probe',
+    processStartNonce: `attempt-nonce:${overrides.pid ?? 42}`,
+    osProcessStartIdentity: `os-start-${overrides.pid ?? 42}`,
+    lifecycleGroupNonce: 'lifecycle-group-nonce',
+    durationMs: 10,
+    deadlineMs: 1000,
+    cleanup: {
+      confirmed: true,
+      descendantInspectionSupported: true,
+      descendantPidsAfter: [],
+    },
+    before: sample,
+    after: sample,
+  };
+}
 
 describe('runtime fault soak runner', () => {
   test('uses bounded profile defaults and accepts explicit overrides', () => {
@@ -24,6 +67,204 @@ describe('runtime fault soak runner', () => {
       seed: 23,
       perCaseTimeoutMs: 4567,
     });
+  });
+
+  test('keeps the seed at the case scheduler and only reruns qualification test probes', () => {
+    const ci = buildFaultSoakProbeArgs(['test', 'tests/runtime/stability.test.ts'], 'ci');
+    const qualification = buildFaultSoakProbeArgs(
+      ['test', 'tests/runtime/stability.test.ts'],
+      'qualification',
+    );
+    const tui = buildFaultSoakProbeArgs(
+      ['run', 'scripts/run-tui-system-tests.ts'],
+      'qualification',
+    );
+
+    expect(ci).not.toContain('--seed');
+    expect(qualification).not.toContain('--seed');
+    expect(qualification).toContain('--repeat-count');
+    expect(qualification).toContain('9');
+    expect(qualification[0]).toBe('run');
+    expect(tui).toEqual(['run', 'scripts/run-tui-system-tests.ts']);
+  });
+
+  test('derives qualification metrics only after a same-process warm-up rerun', () => {
+    const records = [100, 110, 120, 130, 140, 150, 160, 170, 180].map((rssBytes, index) =>
+      telemetryRecord(index + 1, rssBytes),
+    );
+
+    const metric = qualificationTelemetryMetric(records, 'rssBytes', {
+      caseId: 'long_runtime_replay',
+      repeatCount: 9,
+      expectedLifecycleIds: new Set(['bun-test-probe']),
+      attemptNonce: 'attempt-nonce',
+    });
+    expect(metric).toMatchObject({ supported: true });
+    if (!metric.supported || metric.value.kind !== 'same_process_lifecycle') {
+      throw new Error('Expected same-process lifecycle telemetry');
+    }
+    expect(metric.value.series).toHaveLength(1);
+    expect(metric.value.series[0]).toMatchObject({
+      process: { pid: 42, startNonce: 'attempt-nonce:42' },
+      warmup: { sequence: 0, before: 100, after: 100 },
+    });
+    expect(metric.value.series[0]?.lifecycles).toHaveLength(8);
+    expect(metric.value.series[0]?.lifecycles[0]).toMatchObject({
+      sequence: 1,
+      before: 110,
+      after: 110,
+    });
+    expect(metric.value.series[0]?.lifecycles[7]).toMatchObject({
+      sequence: 8,
+      before: 180,
+      after: 180,
+    });
+  });
+
+  test('rejects incomplete or cross-process qualification telemetry', () => {
+    const incomplete = Array.from({ length: 8 }, (_, index) =>
+      telemetryRecord(index + 1, 100 + index),
+    );
+    expect(
+      qualificationTelemetryMetric(incomplete, 'rssBytes', {
+        caseId: 'long_runtime_replay',
+        repeatCount: 9,
+        expectedLifecycleIds: new Set(['bun-test-probe']),
+        attemptNonce: 'attempt-nonce',
+      }),
+    ).toMatchObject({ supported: false });
+    expect(
+      qualificationTelemetryMetric(
+        Array.from({ length: 9 }, (_, index) =>
+          telemetryRecord(index + 1, 100 + index, { pid: index === 4 ? 43 : 42 }),
+        ),
+        'rssBytes',
+        {
+          caseId: 'long_runtime_replay',
+          repeatCount: 9,
+          expectedLifecycleIds: new Set(['bun-test-probe']),
+          attemptNonce: 'attempt-nonce',
+        },
+      ),
+    ).toMatchObject({ supported: false });
+  });
+
+  test('rejects telemetry when any declared qualification lifecycle is omitted', () => {
+    const records = Array.from({ length: 9 }, (_, index) =>
+      telemetryRecord(index + 1, 100 + index, { lifecycleId: 'stability.test.ts' }),
+    );
+
+    expect(
+      qualificationTelemetryMetric(records, 'rssBytes', {
+        caseId: 'long_runtime_replay',
+        repeatCount: 9,
+        expectedLifecycleIds: new Set(['stability.test.ts', 'fault-soak-runtime-budget.test.ts']),
+        attemptNonce: 'attempt-nonce',
+      }),
+    ).toMatchObject({
+      supported: false,
+      reason: expect.stringContaining('fault-soak-runtime-budget.test.ts'),
+    });
+  });
+
+  test('rejects a budget group contaminated by a wrong-attempt receipt', () => {
+    const receipt = (processStartNonce: string): RuntimeBudgetTelemetryRecord => ({
+      version: 2,
+      kind: 'runtime_budget_usage',
+      pid: 42,
+      sequence: 1,
+      caseId: 'long_runtime_replay',
+      lifecycleId: 'fault-soak-runtime-budget.test.ts',
+      processStartNonce,
+      osProcessStartIdentity: 'os-start-42',
+      lifecycleGroupNonce: 'budget-group',
+      source: 'actual_runtime_ledger',
+      reconciled: { counters: { modelRequests: 1 }, gauges: {} },
+      committed: { counters: { modelRequests: 1 }, gauges: {} },
+      ceilings: { maxModelRequests: 60 },
+      reservationStates: { reconciled: 1 },
+    });
+
+    expect(
+      runtimeBudgetUsage(
+        [receipt('attempt-nonce:42'), receipt('different-attempt:42')],
+        [
+          telemetryRecord(1, 100, {
+            caseId: 'long_runtime_replay',
+            lifecycleId: 'fault-soak-runtime-budget.test.ts',
+          }),
+        ],
+        'long_runtime_replay',
+        'attempt-nonce',
+        1,
+      ),
+    ).toMatchObject({
+      supported: false,
+      reason: expect.stringContaining('wrong-attempt'),
+    });
+  });
+
+  test('rejects a budget receipt whose OS identity does not match its resource lifecycle', () => {
+    const receipt: RuntimeBudgetTelemetryRecord = {
+      version: 2,
+      kind: 'runtime_budget_usage',
+      pid: 42,
+      sequence: 1,
+      caseId: 'long_runtime_replay',
+      lifecycleId: 'fault-soak-runtime-budget.test.ts',
+      processStartNonce: 'attempt-nonce:42',
+      osProcessStartIdentity: 'polluted-os-start',
+      lifecycleGroupNonce: 'lifecycle-group-nonce',
+      source: 'actual_runtime_ledger',
+      reconciled: { counters: { modelRequests: 1 }, gauges: {} },
+      committed: { counters: { modelRequests: 1 }, gauges: {} },
+      ceilings: { maxModelRequests: 60 },
+      reservationStates: { reconciled: 1 },
+    };
+    const resource = telemetryRecord(1, 100, {
+      caseId: 'long_runtime_replay',
+      lifecycleId: 'fault-soak-runtime-budget.test.ts',
+    });
+
+    expect(
+      runtimeBudgetUsage([receipt], [resource], 'long_runtime_replay', 'attempt-nonce', 1),
+    ).toMatchObject({
+      supported: false,
+      reason: expect.stringContaining('did not match'),
+    });
+  });
+
+  test('selects the dedicated TUI mount lifecycle instead of unrelated PTY parents', () => {
+    const records = [
+      ...Array.from({ length: 9 }, (_, index) =>
+        telemetryRecord(index + 1, 1 + index, {
+          pid: 70,
+          caseId: 'tui_lifecycle_churn',
+          lifecycleId: 'session-switch.test.ts',
+        }),
+      ),
+      ...Array.from({ length: 9 }, (_, index) =>
+        telemetryRecord(index + 1, 10 + index, {
+          pid: 71,
+          caseId: 'tui_lifecycle_churn',
+          lifecycleId: 'tui-input-focus-lifecycle',
+        }),
+      ),
+    ];
+
+    const metric = qualificationTelemetryMetric(records, 'rssBytes', {
+      caseId: 'tui_lifecycle_churn',
+      repeatCount: 9,
+      expectedLifecycleIds: new Set(['tui-input-focus-lifecycle']),
+      attemptNonce: 'attempt-nonce',
+    });
+    expect(metric).toMatchObject({ supported: true });
+    if (!metric.supported || metric.value.kind !== 'same_process_lifecycle') {
+      throw new Error('Expected TUI same-process lifecycle telemetry');
+    }
+    expect(metric.value.series).toHaveLength(1);
+    expect(metric.value.series[0]?.process.pid).toBe(71);
+    expect(metric.value.series[0]?.lifecycles).toHaveLength(8);
   });
 
   test('ends output capture when an inherited pipe never reaches EOF', async () => {

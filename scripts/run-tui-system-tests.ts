@@ -1,14 +1,10 @@
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  resourceTrendFailures,
-  type TuiSystemResourceSample,
-} from '../tests/tui-system/harness/resource-trend';
 
 const DEFAULT_FILE_TIMEOUT_MS = 180_000;
 const harnessDir = join(process.cwd(), 'tests', 'tui-system', 'harness');
 const scenariosDir = join(process.cwd(), 'tests', 'tui-system', 'scenarios');
-const faultSoakTelemetryPreload = process.env.KITE_FAULT_SOAK_TELEMETRY_PRELOAD;
+const faultSoakRepeatCount = positiveInteger(process.env.KITE_FAULT_SOAK_REPEAT_COUNT, 1);
 
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
@@ -34,7 +30,7 @@ function scenarioFiles(): string[] {
 
 function harnessTestFiles(): string[] {
   return readdirSync(harnessDir)
-    .filter((name) => name.endsWith('.test.ts'))
+    .filter((name) => name.endsWith('.test.ts') || name.endsWith('.test.tsx'))
     .sort()
     .map((name) => join(harnessDir, name));
 }
@@ -79,23 +75,16 @@ function terminateProcessTree(proc: ReturnType<typeof Bun.spawn>): void {
 
 async function runFile(file: string, timeoutMs: number): Promise<number> {
   console.log(`\n[tui-system] ${file}`);
-  const proc = Bun.spawn(
-    [
-      process.execPath,
-      'test',
-      ...(faultSoakTelemetryPreload ? ['--preload', faultSoakTelemetryPreload] : []),
-      '--parallel=1',
-      '--max-concurrency=1',
-      file,
-    ],
-    {
-      cwd: process.cwd(),
-      env: process.env,
-      stdin: 'inherit',
-      stdout: 'inherit',
-      stderr: 'inherit',
+  const proc = Bun.spawn([process.execPath, 'test', '--parallel=1', '--max-concurrency=1', file], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      KITE_FAULT_SOAK_REPEAT_COUNT: String(faultSoakRepeatCount),
     },
-  );
+    stdin: 'inherit',
+    stdout: 'inherit',
+    stderr: 'inherit',
+  });
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<'timeout'>((resolve) => {
@@ -113,30 +102,6 @@ async function runFile(file: string, timeoutMs: number): Promise<number> {
   return result;
 }
 
-function fileDescriptorCount(): number | undefined {
-  if (process.platform === 'win32') return undefined;
-  const directory = process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd';
-  try {
-    return readdirSync(directory).length;
-  } catch {
-    return undefined;
-  }
-}
-
-function sampleResources(): TuiSystemResourceSample {
-  return {
-    rssBytes: process.memoryUsage.rss(),
-    activeResourceCount: process.getActiveResourcesInfo().length,
-    fdCount: fileDescriptorCount(),
-  };
-}
-
-function formatDelta(first: number | undefined, last: number | undefined): string {
-  if (first == null || last == null) return 'unsupported';
-  const delta = last - first;
-  return `${first}->${last} (${delta >= 0 ? '+' : ''}${delta})`;
-}
-
 const timeoutMs = positiveInteger(
   process.env.KITE_TUI_TEST_FILE_TIMEOUT_MS,
   DEFAULT_FILE_TIMEOUT_MS,
@@ -144,7 +109,6 @@ const timeoutMs = positiveInteger(
 const harnessFiles = harnessTestFiles();
 const scenarios = scenarioFiles();
 const files = [...harnessFiles, ...scenarios];
-const resourceSamples: TuiSystemResourceSample[] = [sampleResources()];
 
 for (const file of files) {
   const exitCode = await runFile(file, timeoutMs);
@@ -152,27 +116,8 @@ for (const file of files) {
     console.error(`[tui-system] failed with exit code ${exitCode}: ${file}`);
     process.exit(exitCode);
   }
-  await Bun.sleep(0);
-  resourceSamples.push(sampleResources());
-}
-
-const firstSample = resourceSamples[0]!;
-const lastSample = resourceSamples.at(-1)!;
-console.log(
-  `[tui-system] resource trend: rss=${formatDelta(
-    Math.round(firstSample.rssBytes / 1024 / 1024),
-    Math.round(lastSample.rssBytes / 1024 / 1024),
-  )}MiB active=${formatDelta(
-    firstSample.activeResourceCount,
-    lastSample.activeResourceCount,
-  )} fd=${formatDelta(firstSample.fdCount, lastSample.fdCount)}`,
-);
-const trendFailures = resourceTrendFailures(resourceSamples);
-if (trendFailures.length > 0) {
-  console.error(`[tui-system] sustained positive resource slope: ${trendFailures.join(', ')}`);
-  process.exit(1);
 }
 
 console.log(
-  `\n[tui-system] passed ${harnessFiles.length} harness files and ${scenarios.length} scenario files`,
+  `\n[tui-system] passed ${harnessFiles.length} harness files and ${scenarios.length} isolated PTY scenario files`,
 );

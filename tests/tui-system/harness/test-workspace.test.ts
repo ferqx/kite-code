@@ -1,5 +1,6 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRuntimeStore, runtimeStorePathFor } from '@/core/runtime/store';
 import {
@@ -20,6 +21,18 @@ describe('TUI persisted Runtime observers', () => {
 
   test('reports an uninitialized isolated workspace as not yet persisted', () => {
     workspace = createTestWorkspace();
+
+    expect(persistedSessionIds(workspace)).toEqual([]);
+    expect(persistedSessionSummaries(workspace)).toEqual([]);
+    expect(persistedCommandSession(workspace, '/compact marker')).toBeUndefined();
+  });
+
+  test('treats a temporarily unopenable Runtime path as not ready for bounded polling', () => {
+    workspace = createTestWorkspace();
+    const runtimePath = runtimeStorePathFor(
+      join(workspace.home, '.kite-code', 'checkpoints.sqlite'),
+    );
+    mkdirSync(runtimePath);
 
     expect(persistedSessionIds(workspace)).toEqual([]);
     expect(persistedSessionSummaries(workspace)).toEqual([]);

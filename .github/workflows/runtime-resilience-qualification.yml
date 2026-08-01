@@ -1,0 +1,43 @@
+name: Runtime Resilience Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Deterministic case-order seed
+        required: true
+        default: "1729"
+      iterations:
+        description: Outer qualification iterations (minimum 8)
+        required: true
+        default: "8"
+
+permissions:
+  contents: read
+
+jobs:
+  qualify:
+    name: fault-soak-qualification
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Run bounded qualification
+        run: >-
+          bun run scripts/runtime/run-fault-soak.ts
+          --profile=qualification
+          --seed=${{ inputs.seed }}
+          --iterations=${{ inputs.iterations }}
+          --output=runtime-resilience-qualification.json
+      - name: Upload qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: runtime-resilience-qualification-${{ github.run_id }}
+          path: runtime-resilience-qualification.json
+          if-no-files-found: error
+          retention-days: 30

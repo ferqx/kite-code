@@ -64,6 +64,11 @@ bun run scripts/check-plan-execution-matrix.ts
 `HEAD` 到达；squash/rebase 合入后的 push 仍校验记录字段，但不把被历史重写替换的原 SHA 强制
 当作新主干祖先。`bun run check:docs` 已包含该门禁。
 
+Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
+case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的
+正式资源证据必须通过手动 `Runtime Resilience Qualification` workflow 在 Ubuntu 上运行至少
+8 轮，并以上传 artifact 中的 `status=passed` 作为关闭条件；`inconclusive` 不能按通过处理。
+
 ## 生命周期
 
 1. 创建：识别到需要多步骤实施的任务时，从 backlog 或审查中提取

@@ -5,28 +5,47 @@ import {
   nearestRankPercentile,
   RUNTIME_FAULT_SOAK_CASE_IDS,
   RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS,
-  type RuntimeFaultSoakAttemptV1,
+  type RuntimeFaultSoakAttemptV2,
+  type RuntimeFaultSoakMetricEvidenceV2,
 } from '../../scripts/runtime/fault-soak-report';
 
 function unsupported(reason: string) {
   return { supported: false as const, reason };
 }
 
-function attempts(iterations = 1): RuntimeFaultSoakAttemptV1[] {
+function attempts(iterations = 1): RuntimeFaultSoakAttemptV2[] {
   return RUNTIME_FAULT_SOAK_CASE_IDS.flatMap((caseId) =>
     Array.from({ length: iterations }, (_, index) => ({
       caseId,
       iteration: index + 1,
       status: 'passed' as const,
       durationMs: 10 + index,
-      invariantsPassed: true,
+      stateInvariantAssertions: 1,
       terminalTaxonomyAssertions: Object.fromEntries(
         RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS[caseId].map((reason) => [reason, 1]),
       ),
+      runtimeBudgetUsage: {
+        supported: true as const,
+        value: [
+          {
+            source: 'actual_runtime_ledger' as const,
+            reconciled: {
+              counters: { turns: 1, modelRequests: 1, toolInvocations: 1 },
+              gauges: { elapsedRunMs: 10, activeToolInvocations: 0 },
+            },
+            committed: {
+              counters: { turns: 1, modelRequests: 1, toolInvocations: 1 },
+              gauges: { elapsedRunMs: 10, activeToolInvocations: 0 },
+            },
+            ceilings: { maxTurns: 30, maxModelRequests: 60, maxToolInvocations: 250 },
+            reservationStates: { reconciled: 1 },
+          },
+        ],
+      },
       cleanup: {
         confirmed: true,
         orphanPids: unsupported('not collected by the CI profile'),
-        orphanWorktrees: [],
+        orphanWorktrees: unsupported('not collected by the CI profile'),
         residualPaths: [],
       },
       resources: {
@@ -38,6 +57,35 @@ function attempts(iterations = 1): RuntimeFaultSoakAttemptV1[] {
       },
     })),
   );
+}
+
+function lifecycleMetric(
+  values: ReadonlyArray<{ before: number; after: number }>,
+  attempt: RuntimeFaultSoakAttemptV2,
+): { supported: true; value: RuntimeFaultSoakMetricEvidenceV2 } {
+  const point = (sequence: number, value: { before: number; after: number }) => ({
+    sequence,
+    ...value,
+    durationMs: 10,
+    deadlineMs: 1000,
+    cleanupConfirmed: true,
+  });
+  return {
+    supported: true,
+    value: {
+      kind: 'same_process_lifecycle',
+      series: [
+        {
+          process: {
+            pid: 1000 + attempt.iteration,
+            startNonce: `${attempt.caseId}-${attempt.iteration}`,
+          },
+          warmup: point(0, { before: 1, after: 1 }),
+          lifecycles: values.map((value, index) => point(index + 1, value)),
+        },
+      ],
+    },
+  };
 }
 
 function build(profile: 'ci' | 'qualification', values = attempts(), iterations = 1) {
@@ -67,7 +115,14 @@ describe('runtime fault soak report', () => {
     const report = build('ci');
     expect(report.status).toBe('passed');
     expect(report.aggregate.qualificationMetricsSupported).toBe(false);
+    expect(report.version).toBe(2);
     expect(report.cases.map((entry) => entry.id)).toEqual([...RUNTIME_FAULT_SOAK_CASE_IDS]);
+    expect(report.aggregate.runnerBudgetUsage.probeInvocations).toBe(7);
+    expect(report.aggregate.runtimeBudgetUsage).toMatchObject({
+      supported: true,
+      samples: 7,
+      maxReconciledCounters: { modelRequests: 1, toolInvocations: 1, turns: 1 },
+    });
     expect(report.reportDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
@@ -82,15 +137,43 @@ describe('runtime fault soak report', () => {
     );
   });
 
+  test('fails qualification closed when a long-runtime attempt lacks its actual budget receipt', () => {
+    const values = attempts(8).map((attempt) => ({
+      ...attempt,
+      runtimeBudgetUsage:
+        attempt.caseId === 'long_runtime_replay'
+          ? unsupported('missing bound Runtime workload receipt')
+          : attempt.runtimeBudgetUsage,
+      cleanup: {
+        ...attempt.cleanup,
+        orphanPids: { supported: true as const, value: [] },
+        orphanWorktrees: { supported: true as const, value: [] },
+      },
+      resources: Object.fromEntries(
+        Object.keys(attempt.resources).map((metric) => [
+          metric,
+          lifecycleMetric(
+            Array.from({ length: 8 }, () => ({ before: 1, after: 1 })),
+            attempt,
+          ),
+        ]),
+      ) as RuntimeFaultSoakAttemptV2['resources'],
+    }));
+
+    const report = build('qualification', values, 8);
+    expect(report.status).toBe('inconclusive');
+    expect(report.failureCodes).toContain('qualification_metrics_unsupported');
+  });
+
   test('fails on missing cases, invariant damage, or cleanup residue', () => {
     const values = attempts();
     values.shift();
     values[0] = {
       ...values[0]!,
-      invariantsPassed: false,
+      stateInvariantAssertions: 0,
       cleanup: {
         ...values[0]!.cleanup,
-        orphanWorktrees: ['/tmp/registered-worktree'],
+        orphanWorktrees: { supported: true, value: ['/tmp/registered-worktree'] },
         residualPaths: ['retained.sqlite'],
       },
     };
@@ -113,23 +196,20 @@ describe('runtime fault soak report', () => {
       cleanup: {
         ...attempt.cleanup,
         orphanPids: { supported: true as const, value: [] },
+        orphanWorktrees: { supported: true as const, value: [] },
       },
       resources: Object.fromEntries(
         Object.keys(attempt.resources).map((metric) => [
           metric,
-          {
-            supported: true as const,
-            qualificationEligible: true,
-            value: {
-              before: attempt.iteration * 10,
-              after:
-                metric === 'rssBytes'
-                  ? attempt.iteration * 64 * 1024 * 1024
-                  : attempt.iteration * 10,
-            },
-          },
+          lifecycleMetric(
+            Array.from({ length: 8 }, (_, index) => {
+              const after = metric === 'rssBytes' ? (index + 1) * 8 * 1024 * 1024 : 10;
+              return { before: after, after };
+            }),
+            attempt,
+          ),
         ]),
-      ) as RuntimeFaultSoakAttemptV1['resources'],
+      ) as RuntimeFaultSoakAttemptV2['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -147,17 +227,20 @@ describe('runtime fault soak report', () => {
       cleanup: {
         ...attempt.cleanup,
         orphanPids: { supported: true as const, value: [] },
+        orphanWorktrees: { supported: true as const, value: [] },
       },
       resources: Object.fromEntries(
         Object.keys(attempt.resources).map((metric) => [
           metric,
-          {
-            supported: true as const,
-            qualificationEligible: true,
-            value: { before: 1, after: metric === 'rssBytes' ? 1_000_000_000 : 1 },
-          },
+          lifecycleMetric(
+            Array.from({ length: 8 }, (_, index) => ({
+              before: 1,
+              after: metric === 'rssBytes' && index === 4 ? 1_000_000_000 : 1,
+            })),
+            attempt,
+          ),
         ]),
-      ) as RuntimeFaultSoakAttemptV1['resources'],
+      ) as RuntimeFaultSoakAttemptV2['resources'],
     }));
 
     const report = build('qualification', values, 8);
@@ -171,17 +254,21 @@ describe('runtime fault soak report', () => {
       cleanup: {
         ...attempt.cleanup,
         orphanPids: { supported: true as const, value: [] },
+        orphanWorktrees: { supported: true as const, value: [] },
       },
       resources: Object.fromEntries(
         Object.keys(attempt.resources).map((metric) => [
           metric,
           {
             supported: true as const,
-            qualificationEligible: false,
-            value: { before: 1, after: 1_000_000_000 },
+            value: {
+              kind: 'fresh_process_diagnostic' as const,
+              before: 1,
+              after: 1_000_000_000,
+            },
           },
         ]),
-      ) as RuntimeFaultSoakAttemptV1['resources'],
+      ) as RuntimeFaultSoakAttemptV2['resources'],
     }));
 
     const report = build('qualification', values, 8);

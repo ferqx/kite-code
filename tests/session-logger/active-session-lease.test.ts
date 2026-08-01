@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import {
   ActiveSessionLease,
   inspectSessionLogLease,
+  readProcessStartIdentity,
   SESSION_LOG_LEASE_FILE,
   SESSION_LOG_TERMINAL_FILE,
   tryAcquireSessionOperation,
@@ -42,6 +43,14 @@ afterEach(() => {
 });
 
 describe('active session log lease', () => {
+  test('derives a stable current-process identity without requiring an external process listing', () => {
+    const first = readProcessStartIdentity(process.pid);
+    const second = readProcessStartIdentity(process.pid);
+    expect(first).toBeDefined();
+    expect(second).toBe(first);
+    if (process.platform === 'darwin') expect(first).toMatch(/^darwin:fallback:\d+:\d+$/);
+  });
+
   test('binds a writer to process and directory identity, then writes terminal before release', async () => {
     const session = createSessionDir();
     const lease = ActiveSessionLease.acquire(session, { heartbeatIntervalMs: 0 });
@@ -88,6 +97,25 @@ describe('active session log lease', () => {
         staleAfterMs: 1_000,
       }).status,
     ).toBe('stale');
+  });
+
+  test('never reclaims a live Darwin fallback lease using an incomparable ps identity', () => {
+    const session = createSessionDir();
+    const startedAt = new Date('2026-07-31T00:00:00.000Z');
+    ActiveSessionLease.acquire(session, {
+      now: () => startedAt,
+      processIdentity: () => `darwin:fallback:${process.pid}:123456`,
+      heartbeatIntervalMs: 0,
+      staleAfterMs: 1_000,
+    });
+
+    expect(
+      inspectSessionLogLease(session, {
+        now: () => new Date(startedAt.getTime() + 2_000),
+        processIdentity: () => 'darwin:ps:123',
+        staleAfterMs: 1_000,
+      }),
+    ).toEqual({ status: 'unknown', reason: 'process_identity_unavailable' });
   });
 
   test('fails closed for malformed leases and wall-clock rollback', () => {

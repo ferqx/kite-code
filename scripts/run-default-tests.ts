@@ -8,6 +8,10 @@
  * cannot initialize reliably under that mode.
  */
 
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 const PROCESS_ISOLATED_TEST_FILES = [
   'tests/mcp-config-catalog.test.ts',
   'tests/mcp-config-repository.test.ts',
@@ -23,14 +27,24 @@ const DEFAULT_IGNORES = [
 ] as const;
 
 async function runTestProcess(args: string[]): Promise<number> {
-  const child = Bun.spawn([process.execPath, 'test', '--no-orphans', ...args], {
-    cwd: process.cwd(),
-    env: process.env,
-    stdin: 'inherit',
-    stdout: 'inherit',
-    stderr: 'inherit',
-  });
-  return await child.exited;
+  const testHome = mkdtempSync(join(tmpdir(), 'openpx-default-test-home-'));
+  try {
+    const child = Bun.spawn([process.execPath, 'test', '--no-orphans', ...args], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        HOME: testHome,
+        KITE_CODE_HOME: testHome,
+        ...(process.platform === 'win32' ? { USERPROFILE: testHome } : {}),
+      },
+      stdin: 'inherit',
+      stdout: 'inherit',
+      stderr: 'inherit',
+    });
+    return await child.exited;
+  } finally {
+    rmSync(testHome, { recursive: true, force: true });
+  }
 }
 
 const mainExit = await runTestProcess([

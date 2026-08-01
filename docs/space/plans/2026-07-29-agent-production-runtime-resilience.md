@@ -13,8 +13,11 @@ Task 1C.1 已由 `4b8eec058df0af545675fc0e1c4135ee855848fd` 完成；Task 1C.2 �
 `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` 完成。Task 1C.5 已由
 `aa66e872f3206df9718493adbfef7445fb582a4f` 实现，并以
 `dfd8f209f89b4980b9c3905d3e73c166b33bea2b` 的全绿 Required qualification 完成；
-Task 1C.7 已以上述 qualification head 激活，负责 soak/fault evidence；1C.8 继续按依赖
-保持未绑定。规范记录见
+Task 1C.7 已以上述 qualification head 激活，负责 soak/fault evidence。当前已完成 v2 runner、fault/CI soak、case-specific state invariant、精确 lifecycle/进程 nonce 绑定、真实 Runtime workload budget receipt、
+TUI input-focus 专用 Ink child 与手动 Ubuntu qualification workflow 的实现；本地 CI profile 7/7
+通过，单轮 qualification 诊断的全部资源指标可用且无增长/清理失败，只因少于 8 轮返回
+`qualification_iterations_insufficient`。该任务保持 active，等待 Ubuntu workflow 产出 `status=passed` qualification
+artifact 后关闭；1C.8 继续按依赖保持未绑定。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
@@ -382,9 +385,11 @@ terminal projection，但尚未声明 production producer 直接接线。遗漏 
 
 完成证据：`2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee`。进程级
 `TerminalFocusStore` 将任意 React subscriber 复用到单一 stdin listener，并在首订阅/末退订
-对称管理 DEC 1004；PTY suite runner 在每个 scenario 后采集 RSS、active resource 与 FD 趋势。
-同一冻结快照连续两次完整 suite 均 36/36，无 warning/timeout，趋势均为
-RSS 30→31 MiB、active 0→0、FD 5→5。workspace trust 使用可观察的 Up/Down 输入握手并及时
+对称管理 DEC 1004。该提交当时还由 PTY suite runner 在每个 scenario 后采集 RSS、active resource
+与 FD 差值；1C.7 的整体测试边界复核已确认跨进程差值不能作为泄漏证据，因此当前 runner 已移除
+该门禁，资源资格改由同一 Ink child 的限定 focus-listener lifecycle 提供。此前冻结快照连续两次
+完整 suite 均 36/36，无 warning/timeout；这些结果只保留为功能稳定性证据，不再表述为资源趋势结论。
+workspace trust 使用可观察的 Up/Down 输入握手并及时
 回收重启进程，孤立重复与完整 suite 均稳定通过。
 
 ### Task 1C.7：soak 与故障注入

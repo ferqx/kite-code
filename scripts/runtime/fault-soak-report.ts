@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 
-export const RUNTIME_FAULT_SOAK_REPORT_VERSION = 1 as const;
+export const RUNTIME_FAULT_SOAK_REPORT_VERSION = 2 as const;
 export const MINIMUM_QUALIFICATION_ITERATIONS = 8;
+export const MINIMUM_POST_WARMUP_LIFECYCLES = 8;
 export const RUNTIME_FAULT_SOAK_GROWTH_LIMITS = Object.freeze({
   rssBytes: 32 * 1024 * 1024,
   activeResources: 2,
@@ -39,8 +40,6 @@ export const RUNTIME_FAULT_SOAK_REQUIRED_TERMINAL_ASSERTIONS: Readonly<
 export interface SupportedMetric<T> {
   supported: true;
   value: T;
-  /** True only for a post-warmup, same-process lifecycle sample. */
-  qualificationEligible?: boolean;
 }
 
 export interface UnsupportedMetric {
@@ -49,6 +48,33 @@ export interface UnsupportedMetric {
 }
 
 export type OptionalMetric<T> = SupportedMetric<T> | UnsupportedMetric;
+
+export interface RuntimeFaultSoakLifecyclePointV2 {
+  sequence: number;
+  before: number;
+  after: number;
+  durationMs: number;
+  deadlineMs: number;
+  cleanupConfirmed: boolean;
+}
+
+export type RuntimeFaultSoakMetricEvidenceV2 =
+  | {
+      kind: 'fresh_process_diagnostic';
+      before: number;
+      after: number;
+    }
+  | {
+      kind: 'same_process_lifecycle';
+      series: ReadonlyArray<{
+        process: {
+          pid: number;
+          startNonce: string;
+        };
+        warmup: RuntimeFaultSoakLifecyclePointV2;
+        lifecycles: readonly RuntimeFaultSoakLifecyclePointV2[];
+      }>;
+    };
 
 export type RuntimeFaultSoakMetricSummary =
   | {
@@ -66,31 +92,61 @@ export type RuntimeFaultSoakMetricSummary =
       reasons: readonly string[];
     };
 
-export interface RuntimeFaultSoakAttemptV1 {
+export interface RuntimeBudgetUsageEvidenceV2 {
+  source: 'actual_runtime_ledger';
+  reconciled: {
+    counters: Readonly<Record<string, number>>;
+    gauges: Readonly<Record<string, number>>;
+  };
+  committed: {
+    counters: Readonly<Record<string, number>>;
+    gauges: Readonly<Record<string, number>>;
+  };
+  ceilings: Readonly<Record<string, number>>;
+  reservationStates: Readonly<Record<string, number>>;
+}
+
+export type RuntimeBudgetUsageSummary =
+  | {
+      supported: true;
+      samples: number;
+      maxReconciledCounters: Readonly<Record<string, number>>;
+      maxReconciledGauges: Readonly<Record<string, number>>;
+      maxCommittedCounters: Readonly<Record<string, number>>;
+      maxCommittedGauges: Readonly<Record<string, number>>;
+      ceilings: Readonly<Record<string, number>>;
+      reservationStates: Readonly<Record<string, number>>;
+    }
+  | UnsupportedMetric;
+
+export interface RuntimeFaultSoakAttemptV2 {
   caseId: RuntimeFaultSoakCaseId;
   iteration: number;
   status: 'passed' | 'failed' | 'timed_out';
   durationMs: number;
   failureCode?: string;
-  invariantsPassed: boolean;
+  /** Passing probe assertions that explicitly checked a case state invariant. */
+  stateInvariantAssertions: number;
   /** Passing probe invocations that asserted each terminal taxonomy outcome. */
   terminalTaxonomyAssertions: Readonly<Record<string, number>>;
+  /** Actual reconciled/committed ResourceBudgetV1 ledger receipts, when this probe runs Runtime. */
+  runtimeBudgetUsage: OptionalMetric<readonly RuntimeBudgetUsageEvidenceV2[]>;
   cleanup: {
     confirmed: boolean;
     orphanPids: OptionalMetric<readonly number[]>;
-    orphanWorktrees: readonly string[];
+    orphanWorktrees: OptionalMetric<readonly string[]>;
     residualPaths: readonly string[];
   };
   resources: {
-    rssBytes: OptionalMetric<{ before: number; after: number }>;
-    activeResources: OptionalMetric<{ before: number; after: number }>;
-    fileDescriptors: OptionalMetric<{ before: number; after: number }>;
-    listeners: OptionalMetric<{ before: number; after: number }>;
-    handles: OptionalMetric<{ before: number; after: number }>;
+    rssBytes: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
+    activeResources: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
+    fileDescriptors: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
+    listeners: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
+    handles: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>;
   };
 }
 
-export interface RuntimeFaultSoakReportV1 {
+export interface RuntimeFaultSoakReportV2 {
   version: typeof RUNTIME_FAULT_SOAK_REPORT_VERSION;
   runnerRevision: string;
   seed: number;
@@ -125,6 +181,8 @@ export interface RuntimeFaultSoakReportV1 {
     };
     /** Coverage count, not observed production incident frequency. */
     terminalTaxonomyAssertions: Readonly<Record<string, number>>;
+    stateInvariantAssertions: number;
+    runtimeBudgetUsage: RuntimeBudgetUsageSummary;
     resources: {
       rssBytes: RuntimeFaultSoakMetricSummary;
       activeResources: RuntimeFaultSoakMetricSummary;
@@ -135,7 +193,7 @@ export interface RuntimeFaultSoakReportV1 {
     cleanup: {
       confirmedAttempts: number;
       orphanPidCount: OptionalMetric<number>;
-      orphanWorktreeCount: number;
+      orphanWorktreeCount: OptionalMetric<number>;
       residualPathCount: number;
     };
   }>;
@@ -143,12 +201,13 @@ export interface RuntimeFaultSoakReportV1 {
     attempts: number;
     passed: number;
     failed: number;
-    budgetUsage: {
+    runnerBudgetUsage: {
       probeInvocations: number;
       maxProbeInvocations: number;
       wallTimeMs: number;
       maxWallTimeMs: number;
     };
+    runtimeBudgetUsage: RuntimeBudgetUsageSummary;
     qualificationMetricsSupported: boolean;
   };
   reportDigest: string;
@@ -162,8 +221,8 @@ export interface BuildRuntimeFaultSoakReportInput {
   perCaseTimeoutMs: number;
   startedAt: string;
   finishedAt: string;
-  environment: RuntimeFaultSoakReportV1['environment'];
-  attempts: readonly RuntimeFaultSoakAttemptV1[];
+  environment: RuntimeFaultSoakReportV2['environment'];
+  attempts: readonly RuntimeFaultSoakAttemptV2[];
 }
 
 export function nearestRankPercentile(values: readonly number[], percentile: number): number {
@@ -187,25 +246,95 @@ function canonicalJson(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function qualificationMetricsSupported(attempt: RuntimeFaultSoakAttemptV1): boolean {
-  return (
-    attempt.cleanup.orphanPids.supported &&
-    attempt.resources.rssBytes.supported &&
-    attempt.resources.rssBytes.qualificationEligible === true &&
-    attempt.resources.activeResources.supported &&
-    attempt.resources.activeResources.qualificationEligible === true &&
-    attempt.resources.fileDescriptors.supported &&
-    attempt.resources.fileDescriptors.qualificationEligible === true &&
-    attempt.resources.listeners.supported &&
-    attempt.resources.listeners.qualificationEligible === true &&
-    attempt.resources.handles.supported &&
-    attempt.resources.handles.qualificationEligible === true
+function isEligibleLifecycleMetric(
+  metric: OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>,
+): boolean {
+  if (!metric.supported || metric.value.kind !== 'same_process_lifecycle') return false;
+  if (metric.value.series.length === 0) return false;
+  return metric.value.series.every(
+    ({ process, warmup, lifecycles }) =>
+      Number.isInteger(process.pid) &&
+      process.pid > 0 &&
+      process.startNonce.length > 0 &&
+      lifecycles.length >= MINIMUM_POST_WARMUP_LIFECYCLES &&
+      warmup.durationMs <= warmup.deadlineMs &&
+      warmup.cleanupConfirmed &&
+      lifecycles.every(
+        (point, index) =>
+          point.sequence === index + 1 &&
+          Number.isFinite(point.before) &&
+          Number.isFinite(point.after) &&
+          point.durationMs >= 0 &&
+          point.deadlineMs > 0 &&
+          point.durationMs <= point.deadlineMs &&
+          point.cleanupConfirmed,
+      ),
   );
 }
 
+function qualificationMetricsSupported(attempt: RuntimeFaultSoakAttemptV2): boolean {
+  return (
+    attempt.cleanup.orphanPids.supported &&
+    attempt.cleanup.orphanWorktrees.supported &&
+    (attempt.caseId !== 'long_runtime_replay' || attempt.runtimeBudgetUsage.supported) &&
+    isEligibleLifecycleMetric(attempt.resources.rssBytes) &&
+    isEligibleLifecycleMetric(attempt.resources.activeResources) &&
+    isEligibleLifecycleMetric(attempt.resources.fileDescriptors) &&
+    isEligibleLifecycleMetric(attempt.resources.listeners) &&
+    isEligibleLifecycleMetric(attempt.resources.handles)
+  );
+}
+
+function maxFields(
+  values: readonly Readonly<Record<string, number>>[],
+): Readonly<Record<string, number>> {
+  const result: Record<string, number> = {};
+  for (const value of values) {
+    for (const [key, amount] of Object.entries(value)) {
+      result[key] = Math.max(result[key] ?? 0, amount);
+    }
+  }
+  return result;
+}
+
+function sumFields(
+  values: readonly Readonly<Record<string, number>>[],
+): Readonly<Record<string, number>> {
+  const result: Record<string, number> = {};
+  for (const value of values) {
+    for (const [key, amount] of Object.entries(value)) {
+      result[key] = (result[key] ?? 0) + amount;
+    }
+  }
+  return result;
+}
+
+function summarizeRuntimeBudgetUsage(
+  metrics: readonly OptionalMetric<readonly RuntimeBudgetUsageEvidenceV2[]>[],
+): RuntimeBudgetUsageSummary {
+  const samples = metrics.flatMap((metric) => (metric.supported ? metric.value : []));
+  if (samples.length === 0) {
+    const reasons = metrics.flatMap((metric) => (metric.supported ? [] : [metric.reason]));
+    return {
+      supported: false,
+      reason: [...new Set(reasons)].join('; ') || 'no actual Runtime budget ledger receipt',
+    };
+  }
+  return {
+    supported: true,
+    samples: samples.length,
+    maxReconciledCounters: maxFields(samples.map((sample) => sample.reconciled.counters)),
+    maxReconciledGauges: maxFields(samples.map((sample) => sample.reconciled.gauges)),
+    maxCommittedCounters: maxFields(samples.map((sample) => sample.committed.counters)),
+    maxCommittedGauges: maxFields(samples.map((sample) => sample.committed.gauges)),
+    ceilings: maxFields(samples.map((sample) => sample.ceilings)),
+    reservationStates: sumFields(samples.map((sample) => sample.reservationStates)),
+  };
+}
+
 function summarizeMetric(
-  attempts: readonly RuntimeFaultSoakAttemptV1[],
-  select: (attempt: RuntimeFaultSoakAttemptV1) => OptionalMetric<{ before: number; after: number }>,
+  attempts: readonly RuntimeFaultSoakAttemptV2[],
+  select: (attempt: RuntimeFaultSoakAttemptV2) => OptionalMetric<RuntimeFaultSoakMetricEvidenceV2>,
   growthLimit: number,
 ): RuntimeFaultSoakMetricSummary {
   const metrics = attempts.map(select);
@@ -216,7 +345,15 @@ function summarizeMetric(
       reasons: [...new Set(unsupportedReasons.length > 0 ? unsupportedReasons : ['no samples'])],
     };
   }
-  const values = metrics.flatMap((metric) => (metric.supported ? [metric.value] : []));
+  const values = metrics.flatMap((metric) => {
+    if (!metric.supported) return [];
+    return metric.value.kind === 'fresh_process_diagnostic'
+      ? [{ before: metric.value.before, after: metric.value.after }]
+      : metric.value.series.flatMap((series) =>
+          series.lifecycles.map((point) => ({ before: point.before, after: point.after })),
+        );
+  });
+  const qualificationEligible = metrics.every(isEligibleLifecycleMetric);
   return {
     supported: true,
     samples: values.length,
@@ -224,14 +361,21 @@ function summarizeMetric(
     maxAfter: Math.max(...values.map((value) => value.after)),
     maxGrowth: Math.max(...values.map((value) => value.after - value.before)),
     growthLimit,
-    qualificationEligible: metrics.every(
-      (metric) => metric.supported && metric.qualificationEligible === true,
-    ),
-    sustainedPositiveSlope: hasSustainedPositiveSlope(
-      values.map((value) => value.after),
-      growthLimit,
-      MINIMUM_QUALIFICATION_ITERATIONS,
-    ),
+    qualificationEligible,
+    sustainedPositiveSlope:
+      qualificationEligible &&
+      metrics.some(
+        (metric) =>
+          metric.supported &&
+          metric.value.kind === 'same_process_lifecycle' &&
+          metric.value.series.some((series) =>
+            hasSustainedPositiveSlope(
+              series.lifecycles.map((point) => point.after),
+              growthLimit,
+              MINIMUM_POST_WARMUP_LIFECYCLES,
+            ),
+          ),
+      ),
   };
 }
 
@@ -248,7 +392,7 @@ export function hasSustainedPositiveSlope(
 
 export function buildRuntimeFaultSoakReport(
   input: BuildRuntimeFaultSoakReportInput,
-): RuntimeFaultSoakReportV1 {
+): RuntimeFaultSoakReportV2 {
   if (!Number.isInteger(input.iterations) || input.iterations <= 0) {
     throw new Error('iterations must be a positive integer');
   }
@@ -258,14 +402,19 @@ export function buildRuntimeFaultSoakReport(
 
   const expectedAttempts = input.iterations * RUNTIME_FAULT_SOAK_CASE_IDS.length;
   const failureCodes = new Set<string>();
-  const grouped = new Map<RuntimeFaultSoakCaseId, RuntimeFaultSoakAttemptV1[]>();
+  const grouped = new Map<RuntimeFaultSoakCaseId, RuntimeFaultSoakAttemptV2[]>();
   for (const id of RUNTIME_FAULT_SOAK_CASE_IDS) grouped.set(id, []);
   for (const attempt of input.attempts) {
     grouped.get(attempt.caseId)?.push(attempt);
     if (attempt.status !== 'passed') failureCodes.add(attempt.failureCode ?? attempt.status);
-    if (!attempt.invariantsPassed) failureCodes.add(`${attempt.caseId}:state_invariant`);
+    if (attempt.stateInvariantAssertions <= 0) {
+      failureCodes.add(`${attempt.caseId}:state_invariant`);
+    }
     if (!attempt.cleanup.confirmed) failureCodes.add(`${attempt.caseId}:cleanup_unconfirmed`);
-    if (attempt.cleanup.orphanWorktrees.length > 0) {
+    if (
+      attempt.cleanup.orphanWorktrees.supported &&
+      attempt.cleanup.orphanWorktrees.value.length > 0
+    ) {
       failureCodes.add(`${attempt.caseId}:orphan_worktree`);
     }
     if (attempt.cleanup.residualPaths.length > 0) {
@@ -303,6 +452,24 @@ export function buildRuntimeFaultSoakReport(
           supported: false,
           reason: 'owned descendant PID tracking was unsupported for at least one attempt',
         };
+    const orphanWorktreeCount: OptionalMetric<number> = attempts.every(
+      (attempt) => attempt.cleanup.orphanWorktrees.supported,
+    )
+      ? {
+          supported: true,
+          value: attempts.reduce(
+            (total, attempt) =>
+              total +
+              (attempt.cleanup.orphanWorktrees.supported
+                ? attempt.cleanup.orphanWorktrees.value.length
+                : 0),
+            0,
+          ),
+        }
+      : {
+          supported: false,
+          reason: 'Git worktree inspection was unsupported for at least one attempt',
+        };
     const terminalTaxonomyAssertions: Record<string, number> = {};
     for (const attempt of attempts) {
       for (const [reason, count] of Object.entries(attempt.terminalTaxonomyAssertions)) {
@@ -323,6 +490,13 @@ export function buildRuntimeFaultSoakReport(
         p99: nearestRankPercentile(durations, 0.99),
       },
       terminalTaxonomyAssertions,
+      stateInvariantAssertions: attempts.reduce(
+        (total, attempt) => total + attempt.stateInvariantAssertions,
+        0,
+      ),
+      runtimeBudgetUsage: summarizeRuntimeBudgetUsage(
+        attempts.map((attempt) => attempt.runtimeBudgetUsage),
+      ),
       resources: {
         rssBytes: summarizeMetric(
           attempts,
@@ -353,10 +527,7 @@ export function buildRuntimeFaultSoakReport(
       cleanup: {
         confirmedAttempts: attempts.filter((attempt) => attempt.cleanup.confirmed).length,
         orphanPidCount,
-        orphanWorktreeCount: attempts.reduce(
-          (total, attempt) => total + attempt.cleanup.orphanWorktrees.length,
-          0,
-        ),
+        orphanWorktreeCount,
         residualPathCount: attempts.reduce(
           (total, attempt) => total + attempt.cleanup.residualPaths.length,
           0,
@@ -373,7 +544,11 @@ export function buildRuntimeFaultSoakReport(
   const maxWallTimeMs = expectedAttempts * input.perCaseTimeoutMs;
   if (wallTimeMs > maxWallTimeMs) failureCodes.add('global_deadline_exceeded');
 
-  const metricsSupported = input.attempts.every(qualificationMetricsSupported);
+  const runtimeBudgetUsage = summarizeRuntimeBudgetUsage(
+    input.attempts.map((attempt) => attempt.runtimeBudgetUsage),
+  );
+  const metricsSupported =
+    input.attempts.every(qualificationMetricsSupported) && runtimeBudgetUsage.supported;
   if (input.profile === 'qualification' && !metricsSupported) {
     failureCodes.add('qualification_metrics_unsupported');
   }
@@ -408,7 +583,7 @@ export function buildRuntimeFaultSoakReport(
       ? 'inconclusive'
       : 'passed';
 
-  const withoutDigest: Omit<RuntimeFaultSoakReportV1, 'reportDigest'> = {
+  const withoutDigest: Omit<RuntimeFaultSoakReportV2, 'reportDigest'> = {
     version: RUNTIME_FAULT_SOAK_REPORT_VERSION,
     runnerRevision: input.runnerRevision,
     seed: input.seed,
@@ -429,12 +604,13 @@ export function buildRuntimeFaultSoakReport(
       attempts: input.attempts.length,
       passed: input.attempts.filter((attempt) => attempt.status === 'passed').length,
       failed: input.attempts.filter((attempt) => attempt.status !== 'passed').length,
-      budgetUsage: {
+      runnerBudgetUsage: {
         probeInvocations: input.attempts.length,
         maxProbeInvocations,
         wallTimeMs,
         maxWallTimeMs,
       },
+      runtimeBudgetUsage,
       qualificationMetricsSupported: metricsSupported,
     },
   };

@@ -57,11 +57,27 @@ function readPersistedRuntime<T>(
 ): T {
   const path = persistedRuntimePath(workspace);
   if (!existsSync(path)) return whenMissing;
-  const database = new Database(path, { readonly: true });
+  let database: Database | undefined;
   try {
+    database = new Database(path, { readonly: true });
     return read(database);
+  } catch (error) {
+    const code =
+      typeof error === 'object' && error !== null && 'code' in error
+        ? String(error.code)
+        : undefined;
+    const message = error instanceof Error ? error.message : '';
+    if (
+      code === 'SQLITE_CANTOPEN' ||
+      code === 'SQLITE_BUSY' ||
+      code === 'SQLITE_LOCKED' ||
+      (code === 'SQLITE_ERROR' && message.includes('no such table'))
+    ) {
+      return whenMissing;
+    }
+    throw error;
   } finally {
-    database.close();
+    database?.close();
   }
 }
 

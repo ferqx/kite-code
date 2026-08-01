@@ -1038,38 +1038,47 @@ describe('executeRuntimeTools', () => {
   });
 
   test('finishes write_plan once and returns the persisted plan identity', async () => {
-    const state = createInitialRuntimeState({
-      threadId: 'runtime-plan-write',
-      userId: 'user',
-      workspace: process.cwd(),
-      phase: 'planning',
-    });
-    state.tools.calls.write = {
-      toolCallId: 'write',
-      modelMessageId: 'model',
-      name: 'write_plan',
-      args: {
-        title: 'Inspect runtime',
-        body_markdown: 'Inspect the runtime lifecycle and verify every transition.',
-        steps: [{ id: 'inspect-runtime', title: 'Inspect runtime lifecycle' }],
-      },
-      status: 'queued',
-      createdAtTurnId: state.turn.turnId,
-    };
-    state.tools.queue.push('write');
-
-    const events = await executeRuntimeTools({ state, toolCallIds: ['write'] });
-
-    const finished = events.find((event) => event.type === 'tool.finished');
-    expect(finished).toBeDefined();
-    if (finished?.type === 'tool.finished') {
-      expect(finished.name).toBe('write_plan');
-      expect(finished.result.status).toBeUndefined();
-      expect(JSON.parse(finished.result.stdout)).toMatchObject({
-        ok: true,
-        status: 'draft_saved',
-        version: 1,
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-plan-artifact-'));
+    const previousKiteCodeHome = process.env.KITE_CODE_HOME;
+    process.env.KITE_CODE_HOME = workspace;
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'runtime-plan-write',
+        userId: 'user',
+        workspace,
+        phase: 'planning',
       });
+      state.tools.calls.write = {
+        toolCallId: 'write',
+        modelMessageId: 'model',
+        name: 'write_plan',
+        args: {
+          title: 'Inspect runtime',
+          body_markdown: 'Inspect the runtime lifecycle and verify every transition.',
+          steps: [{ id: 'inspect-runtime', title: 'Inspect runtime lifecycle' }],
+        },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('write');
+
+      const events = await executeRuntimeTools({ state, toolCallIds: ['write'] });
+
+      const finished = events.find((event) => event.type === 'tool.finished');
+      expect(finished).toBeDefined();
+      if (finished?.type === 'tool.finished') {
+        expect(finished.name).toBe('write_plan');
+        expect(finished.result.status).toBeUndefined();
+        expect(JSON.parse(finished.result.stdout)).toMatchObject({
+          ok: true,
+          status: 'draft_saved',
+          version: 1,
+        });
+      }
+    } finally {
+      if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
+      else process.env.KITE_CODE_HOME = previousKiteCodeHome;
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 

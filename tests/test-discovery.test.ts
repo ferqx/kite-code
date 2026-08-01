@@ -66,6 +66,8 @@ describe('test discovery boundaries', () => {
     expect(defaultRunner).toContain("'tests/pty-spike/**'");
     expect(defaultRunner).toContain("'tests/mcp-config-catalog.test.ts'");
     expect(defaultRunner).toContain("'tests/runtime/plan-artifacts.test.ts'");
+    expect(defaultRunner).toContain('KITE_CODE_HOME: testHome');
+    expect(defaultRunner).toContain('HOME: testHome');
     expect(pkg.scripts?.['test:all']).toBe('bun run test && bun run test:tui:system');
     expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/tui-system/');

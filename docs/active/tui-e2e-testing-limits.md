@@ -30,11 +30,14 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 6. PTY 测试成本高，不应用来穷举纯 reducer、policy 或 schema 分支。
 7. 完整 PTY suite 按文件隔离执行并设置单文件硬超时；因此失败会定位到具体
    scenario，且不会因一个遗留 TUI 子进程无限占用整套测试。
-8. suite runner 的 RSS/active-resource/FD 趋势只覆盖协调进程和 scenario 边界资源回收；
-   fault-soak preload 可以采集各 Bun test child 的 before/after，但多个独立 test/TUI 子进程的
-   样本不能替代同一 TUI 进程 repeated mount/unmount 证据。该指标缺口必须让正式 1C.7
-   qualification 返回 `inconclusive`，不得用父 runner 趋势宣称 child 无泄漏。Windows 无通用
-   `/proc/self/fd` 时 FD 和 owned descendant PID 显示为 unsupported。
+8. suite runner 只负责编排按文件隔离的功能场景，不从协调进程或跨 scenario child 的 RSS/
+   active-resource/FD 差值推导 leak 结论；fault-soak CI fresh child before/after 也只用于冷启动诊断。
+   正式 1C.7 qualification 另外启动一个受 outer runner ownership 约束的真实 Ink child，在同一
+   PID 内先 warm-up、再重复 8 次 `InputLine`/`TerminalFocusStore` focus-listener mount/unmount，
+   并逐次证明 listener 先挂载、随后移除，DEC 1004 关闭且没有 descendant PID。只有该限定范围的
+   lifecycle series 可进入 TUI leak 阈值；它不证明 session switch、tool lifecycle 或 model reconnect
+   PTY 进程的资源斜率，多个 PTY scenario、父 runner 趋势或跨进程差值也不能替代它。Windows 无通用 `/proc/self/fd` 或平台不能
+   检查 owned descendant PID 时对应指标显示为 unsupported，qualification 返回 `inconclusive`。
 9. PTY 原始输出仍是累积流，因此“原始字节里曾出现 `❯`”不能证明当前输入焦点可用。Harness
    生成带类型的 byte checkpoint；跨 checkpoint 的 UTF-8 code point 不归入动作后输出。每次
    write/resize/raw-mode 动作都更新 checkpoint，输入提交还必须通过本次输入回显与本次 mock
@@ -51,7 +54,9 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     thread ID 并观察到一个新 ID，避免把同一 session 的累计 transcript 误判为切换成功。
 12. selector 中名称消失只能证明 UI 投影更新，不能单独证明删除持久化成功；confirm/cancel 场景
     还必须分别验证 Runtime Store thread ID 的删除与集合不变。
-    Harness 的持久化探针只能通过 readonly SQLite 查询观察已经存在的 schema；在轮询中调用
+    Harness 的持久化探针只能通过 readonly SQLite 查询观察已经存在的 schema；数据库/WAL 正在
+    重开、锁定或 schema 尚未出现时返回“尚未就绪”，由 scenario 的 bounded condition 继续轮询，
+    持续异常最终以具名 timeout 失败。在轮询中调用
     `createRuntimeStore()` 会重复执行 journal/schema 写入并干扰被测 writer，尤其会在共享 CI runner
     上把真实落盘延迟误报为 TUI 失败。命令回放场景还应查询精确 `user.command_invoked.command` 并
     使用该 event 所属 thread，不能用 JSON substring 或 session recency 代替持久化身份。

@@ -112,9 +112,11 @@ tests/tui-system/
 12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：任意数量 React subscriber 只能
     对 stdin 保持一个物理 `data` listener；首个 subscriber 开启 DEC 1004，最后一个
     unsubscribe 必须移除 listener 并关闭 DEC 1004。禁止组件 mount 各自添加 stdin listener。
-13. 完整 suite 每个 scenario 后采集协调进程 RSS、active resource 和可用平台 FD 数；最后
-    一个窗口出现持续且超过阈值的正斜率时门禁失败。该趋势门禁用于发现 harness 泄漏，不替代
-    1C.7 的长会话 soak。
+13. 完整 suite 的协调进程和按文件隔离 scenario 只提供功能、终态和进程退出证据，不将跨进程
+    RSS、active resource 或 FD 冷启动差值拼接成 leak 趋势。1C.7 TUI 资格样本必须由专用 child
+    在同一进程内完成 warm-up 加 8 次 `InputLine`/`TerminalFocusStore` focus-listener lifecycle，
+    并逐次证明 listener 已真实挂载、随后卸载且 descendant 清理。该结论只覆盖输入 focus listener
+    生命周期，不覆盖 session switch、tool lifecycle 或 model reconnect 的 PTY 资源斜率。
 14. MCP tool failure 与紧随其后的 Provider recovery interaction 必须按同一 Kernel batch
     顺序提交；`run.completed + turn.completed` batch 必须产生命名 rewind 恢复点。
     `SET_EXITED` 不得重写已经交给 Ink `<Static>` 的 streamed text block；最终回答尾段由

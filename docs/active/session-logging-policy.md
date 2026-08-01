@@ -103,7 +103,12 @@ directory identity、nonce、创建时间和 heartbeat。正常/失败/容量终
 `terminal.json`，再释放匹配 nonce 的 lease。另一个 TUI/CLI 进程不能取得同一 session；
 heartbeat 未过期、进程 identity 仍匹配、wall-clock 回拨、PID identity 不可确认或 lease
 损坏时，cleanup 都保守保护目录。只有 heartbeat 超过 stale window 且 PID/start identity
-不匹配时才可回收。
+不匹配时才可回收。macOS writer 为当前进程使用带 `darwin:fallback` 标签的稳定
+`performance.timeOrigin` identity，
+不得把能否启动 `ps` 作为建立本进程 lease 的前置条件；检查其他 PID 时仍使用系统进程信息，
+`darwin:fallback` 与 `darwin:ps` 明确不可比较：只要记录 PID 仍存活，身份不同或无法读取都必须
+返回 `unknown`，不能据此回收；只有已知 PID 死亡，或双方使用可比较 identity 且确认 PID reuse，
+才能把过期 lease 判为 stale。
 
 retention/migration 使用逐条 directory iterator，在固定时间与条目预算内扫描；root、
 frontend、session 内的每个观察条目都计入预算，不先把任意目录整体载入内存。只有完整扫描后

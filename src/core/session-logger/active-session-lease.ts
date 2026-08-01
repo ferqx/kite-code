@@ -12,6 +12,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import {
   assertSecureOwnedRegularFile,
   assertSecureSessionLogDirectoryChainIdentity,
@@ -314,10 +315,23 @@ export function inspectSessionLogLease(
   const identity = (options.processIdentity ?? readProcessStartIdentity)(record.pid);
   if (identity === record.processStartIdentity) return { status: 'active', record };
   if (!stale) return { status: 'active', record };
-  if (identity === undefined && isProcessAlive(record.pid)) {
+  if (
+    isProcessAlive(record.pid) &&
+    (identity === undefined ||
+      !areProcessStartIdentitiesComparable(identity, record.processStartIdentity))
+  ) {
     return { status: 'unknown', reason: 'process_identity_unavailable' };
   }
   return { status: 'stale', record };
+}
+
+function areProcessStartIdentitiesComparable(left: string, right: string): boolean {
+  // A Darwin fallback identity is intentionally local-only. It keeps lease
+  // acquisition available inside a hardened sandbox, but its time origin is
+  // not guaranteed to match the seconds-resolution value reported by `ps`.
+  // Exact equality is handled before this function; any other comparison that
+  // involves a fallback must fail closed while the recorded PID is alive.
+  return !left.startsWith('darwin:fallback:') && !right.startsWith('darwin:fallback:');
 }
 
 export function tryAcquireSessionOperation(
@@ -349,11 +363,20 @@ export function readProcessStartIdentity(pid: number): string | undefined {
     }
   }
   if (process.platform === 'darwin') {
+    // Establishing the current writer must not depend on spawning `ps`: a
+    // hardened sandbox may deny process listing even though secure local file
+    // writes are allowed. This fallback is deliberately tagged as
+    // incomparable with a later `ps` observation; inspection fails closed for
+    // a live PID instead of treating clock rounding as evidence of PID reuse.
+    if (pid === process.pid && Number.isFinite(performance.timeOrigin)) {
+      return `darwin:fallback:${pid}:${Math.floor(performance.timeOrigin)}`;
+    }
     const result = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
     });
     const started = result.status === 0 ? result.stdout.trim() : '';
-    return started ? `darwin:${started}` : undefined;
+    const startedAt = Date.parse(started);
+    return Number.isFinite(startedAt) ? `darwin:ps:${Math.floor(startedAt / 1000)}` : undefined;
   }
   if (process.platform === 'win32') {
     const script = `(Get-Process -Id ${pid} -ErrorAction Stop).StartTime.ToUniversalTime().Ticks`;

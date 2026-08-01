@@ -781,6 +781,8 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
 
 test('Runtime Kernel executes write_plan in planning phase', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
+  const previousKiteCodeHome = process.env.KITE_CODE_HOME;
+  process.env.KITE_CODE_HOME = workspace;
   const mockModel = createMockModel([
     {
       message: aiMessage({
@@ -801,7 +803,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
     { message: aiMessage({ content: 'Plan draft saved.' }) },
   ]);
   try {
-    const events: RuntimeEvent['type'][] = [];
+    const events: RuntimeEvent[] = [];
     for await (const event of runRuntimeAgent(
       {
         task: 'Create note.txt',
@@ -828,13 +830,23 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
         }),
       },
     ))
-      events.push(event.type);
+      events.push(event);
 
     // write_plan should succeed and produce plan.drafted
-    expect(events).toContain('plan.drafted');
+    const eventTypes = events.map((event) => event.type);
+    if (!eventTypes.includes('plan.drafted')) {
+      throw new Error(
+        `write_plan did not draft a plan: ${JSON.stringify(
+          events.filter((event) => event.type === 'tool.rejected'),
+        )}`,
+      );
+    }
+    expect(eventTypes).toContain('plan.drafted');
     // No review requested (write_plan does not trigger interrupt)
-    expect(events).not.toContain('plan.review_requested');
+    expect(eventTypes).not.toContain('plan.review_requested');
   } finally {
+    if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousKiteCodeHome;
     rmSync(workspace, { recursive: true, force: true });
   }
 });
