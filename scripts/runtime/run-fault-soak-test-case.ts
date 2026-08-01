@@ -58,6 +58,7 @@ for (const file of files) {
         ...process.env,
         KITE_FAULT_SOAK_LIFECYCLE_ID: basename(file),
         KITE_FAULT_SOAK_LIFECYCLE_GROUP_NONCE: lifecycleGroupNonce,
+        KITE_FAULT_SOAK_REPEAT_COUNT: String(fileRepeatCount),
       },
       stdin: 'ignore',
       stdout: 'inherit',

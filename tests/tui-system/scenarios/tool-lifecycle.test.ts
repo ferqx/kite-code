@@ -22,7 +22,13 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
-import { assertOrder, screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import {
+  assertOrder,
+  screenContains,
+  stripAnsi,
+  waitForCondition,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace, readPersistedPlanArtifacts } from '../harness/test-workspace';
 
 const TIMEOUT = 45000;
@@ -241,8 +247,22 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       // ── 1. 触发审批 / Trigger approval ──
       await submitUserMessage(tui, server, 'Make a directory', { timeout: 15000 });
 
-      // 等审批块 / Wait for approval block
-      await waitForText(() => tui.viewport(), '› 允许一次', 15000);
+      // Wait for the complete interactive modal, not merely its first
+      // incrementally rendered option, before inspecting it or sending input.
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, '授权执行命令') &&
+            screenContains(viewport, '› 允许一次') &&
+            screenContains(viewport, '本次会话允许') &&
+            screenContains(viewport, '拒绝') &&
+            screenContains(viewport, '↑↓ 选择 Enter 确认 Esc 取消')
+          );
+        },
+        'complete approval modal to become interactive',
+        15000,
+      );
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.viewport();
