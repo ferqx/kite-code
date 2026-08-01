@@ -23,7 +23,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
@@ -115,8 +115,7 @@ describe('TUI PTY System — File Rewind', () => {
   step(
     '/rewind revert to the first checkpoint restores the file on disk',
     async () => {
-      await typeText(tui, '/rewind');
-      tui.write('\r');
+      await submitCommand(tui, '/rewind');
       // 检查点面板出现（含两个 turn 检查点）/ checkpoint panel with both turns
       await waitForText(() => tui.outputSinceLastAction(), '回退 — 选择检查点', 15000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());

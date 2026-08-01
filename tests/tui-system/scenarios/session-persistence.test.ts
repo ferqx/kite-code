@@ -18,7 +18,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
@@ -105,8 +105,7 @@ describe('TUI PTY System — Session Persistence', () => {
     'exit tui1, restart tui2 on same workspace → prompt visible',
     async () => {
       // Graceful exit via /exit command
-      await typeText(tui1, '/exit');
-      tui1.write('\r');
+      await submitCommand(tui1, '/exit');
 
       // Wait for tui1 process to exit (handleExit calls process.exit(0) after 300ms)
       const exitCode = await tui1.waitForExit();
@@ -148,8 +147,7 @@ describe('TUI PTY System — Session Persistence', () => {
     'open /sessions → previous session appears in session list',
     async () => {
       // Open SessionSelector
-      await typeText(tui2, '/sessions');
-      tui2.write('\r');
+      await submitCommand(tui2, '/sessions');
 
       await waitForCondition(
         () => {

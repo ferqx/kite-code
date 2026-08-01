@@ -18,7 +18,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
   assertOrder,
@@ -171,8 +171,7 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
     'write_plan renders plan content in planning phase',
     async () => {
       // Enter planning phase
-      await typeText(tui, '/plan Draft a lifecycle plan');
-      tui.write('\r');
+      await submitCommand(tui, '/plan Draft a lifecycle plan');
       await waitForRequestMessage(server, 'Draft a lifecycle plan', 15000);
 
       // Wait for follow-up text

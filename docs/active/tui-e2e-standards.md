@@ -28,8 +28,10 @@ tests/tui-system/
    何时就绪。`typeText()` 必须在返回前确认本次输入已由 Ink 回显并做有界重试；每次输入动作
    自己承担 readiness，不允许建立 warmup 测试或 warmup 流程。普通模型消息优先使用
    `submitUserMessage()`，把输入回显、Enter 和“本次提交之后产生的 mock model request”绑定
-   为一个同步原语。slash command 优先使用 `submitCommand()`；需要分步断言时可使用
-   receipt-confirmed `typeText()` 后单独发送 Enter。输入回执必须来自 VT parser 的当前
+   为一个同步原语。需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
+   的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
+   `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自
+   VT parser 的当前
    `viewport()`，不得把 raw transcript 中已经被 Ink 擦除的历史帧当作输入成功，也不得以整个
    viewport 的任意文本命中代替活动字段。Harness 必须分别提取主 `❯` 输入、session 搜索、slash/file
    query 和 first-run block-cursor 字段，并对完整归一化字段值做等值验证；长输入同样不能退化为历史

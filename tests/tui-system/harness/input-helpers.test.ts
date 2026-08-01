@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { MockModelServer } from './fixtures';
-import { clearInput, submitUserMessage, typeText, waitForRequestMessage } from './input-helpers';
+import {
+  clearInput,
+  submitCommand,
+  submitUserMessage,
+  typeText,
+  waitForRequestMessage,
+} from './input-helpers';
 import type { PtyProcess } from './pty-process';
 
 function fakePty(onWrite: (data: string) => void, output: () => string): PtyProcess {
@@ -343,5 +349,39 @@ describe('TUI input helpers', () => {
 
     expect(requests).toHaveLength(1);
     expect(requests[0]?.messages[0]?.content).toBe('hello');
+  });
+
+  test('submitCommand waits for the slash suggestion frame before pressing Enter', async () => {
+    const command = '/theme purple';
+    let currentInput = '';
+    let rendered = '';
+    let suggestionReady = false;
+    let submitted = false;
+    const tui = fakePty(
+      (data) => {
+        if (data === '\r') {
+          submitted = suggestionReady;
+          return;
+        }
+        currentInput += data;
+        rendered += data;
+        if (currentInput === command) {
+          setTimeout(() => {
+            suggestionReady = true;
+            rendered += '<theme-suggestion>';
+          }, 500);
+        }
+      },
+      () => rendered,
+    );
+    tui.viewport = () =>
+      suggestionReady
+        ? `❯ ${currentInput}\n╭────╮\n│ 主题匹配 "purple"\n│ purple\n╰────╯`
+        : `❯ ${currentInput}`;
+
+    await submitCommand(tui, command, 0);
+
+    expect(suggestionReady).toBe(true);
+    expect(submitted).toBe(true);
   });
 });

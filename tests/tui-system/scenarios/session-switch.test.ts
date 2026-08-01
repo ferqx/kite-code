@@ -8,7 +8,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
@@ -107,8 +107,7 @@ describe('TUI PTY System — Session Switching', () => {
     async () => {
       sessionIdsBeforeNew = persistedSessionIds(workspace);
       expect(sessionIdsBeforeNew).toHaveLength(1);
-      await typeText(tui, '/new');
-      tui.write('\r');
+      await submitCommand(tui, '/new');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
@@ -160,8 +159,7 @@ describe('TUI PTY System — Session Switching', () => {
     'open /sessions, filter and switch to session 1',
     async () => {
       // Open SessionSelector
-      await typeText(tui, '/sessions');
-      tui.write('\r');
+      await submitCommand(tui, '/sessions');
 
       // The selector chrome renders before its asynchronous session query can
       // populate every row. Wait for the complete user-visible list state.
@@ -255,8 +253,7 @@ describe('TUI PTY System — Session Switching', () => {
     'switch back to session 2 — correct content replayed',
     async () => {
       // Open SessionSelector again
-      await typeText(tui, '/sessions');
-      tui.write('\r');
+      await submitCommand(tui, '/sessions');
 
       await waitForCondition(
         () => {

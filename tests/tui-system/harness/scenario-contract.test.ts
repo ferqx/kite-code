@@ -311,6 +311,176 @@ export function findRemoteMcpPermitFixtureViolations(
   return violations;
 }
 
+export function findDirectSlashSubmitViolations(source: string, file = 'fixture.ts'): string[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const declarations = collectDeclarations(sourceFile);
+  const violations: string[] = [];
+
+  const helperBindings = (
+    importedName: 'clearInput' | 'submitCommand' | 'typeText',
+  ): Set<string> => {
+    const bindings = new Set<string>([importedName]);
+    for (const statement of sourceFile.statements) {
+      if (
+        !ts.isImportDeclaration(statement) ||
+        !statement.moduleSpecifier
+          .getText(sourceFile)
+          .replaceAll(/['"]/g, '')
+          .endsWith('input-helpers') ||
+        !statement.importClause?.namedBindings ||
+        !ts.isNamedImports(statement.importClause.namedBindings)
+      ) {
+        continue;
+      }
+      for (const element of statement.importClause.namedBindings.elements) {
+        if ((element.propertyName?.text ?? element.name.text) === importedName) {
+          bindings.add(element.name.text);
+        }
+      }
+    }
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const [name, declaration] of declarations) {
+        if (!ts.isExpression(declaration)) continue;
+        const root = expressionRootName(declaration);
+        if (root && bindings.has(root) && !bindings.has(name)) {
+          bindings.add(name);
+          changed = true;
+        }
+      }
+    }
+    return bindings;
+  };
+
+  const clearInputBindings = helperBindings('clearInput');
+  const typeTextBindings = helperBindings('typeText');
+  const submitCommandBindings = helperBindings('submitCommand');
+
+  const resolveStaticString = (
+    expression: ts.Expression,
+    visited = new Set<string>(),
+  ): string | undefined => {
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+      return expression.text;
+    }
+    if (ts.isIdentifier(expression)) {
+      if (visited.has(expression.text)) return undefined;
+      const declaration = declarations.get(expression.text);
+      if (!declaration || !ts.isExpression(declaration)) return undefined;
+      return resolveStaticString(declaration, new Set(visited).add(expression.text));
+    }
+    if (
+      ts.isParenthesizedExpression(expression) ||
+      ts.isAsExpression(expression) ||
+      ts.isSatisfiesExpression(expression) ||
+      ts.isNonNullExpression(expression)
+    ) {
+      return resolveStaticString(expression.expression, visited);
+    }
+    if (ts.isTemplateExpression(expression)) {
+      let value = expression.head.text;
+      for (const span of expression.templateSpans) {
+        const interpolation = resolveStaticString(span.expression, visited);
+        if (interpolation === undefined) return undefined;
+        value += interpolation + span.literal.text;
+      }
+      return value;
+    }
+    return undefined;
+  };
+
+  const callsIn = (node: ts.Node): ts.CallExpression[] => {
+    const calls: ts.CallExpression[] = [];
+    const collect = (current: ts.Node): void => {
+      if (ts.isFunctionLike(current)) return;
+      if (ts.isCallExpression(current)) calls.push(current);
+      ts.forEachChild(current, collect);
+    };
+    collect(node);
+    return calls.sort((left, right) => left.getStart() - right.getStart());
+  };
+
+  const isHelperCall = (call: ts.CallExpression, bindings: ReadonlySet<string>): boolean => {
+    const root = expressionRootName(call.expression);
+    return root !== undefined && bindings.has(root);
+  };
+
+  const inputRoot = (call: ts.CallExpression): string | undefined => {
+    const input = call.arguments[0];
+    return input ? expressionRootName(input) : undefined;
+  };
+
+  const isEnterWrite = (call: ts.CallExpression, expectedRoot: string | undefined): boolean => {
+    if (
+      !ts.isPropertyAccessExpression(call.expression) ||
+      call.expression.name.text !== 'write' ||
+      !call.arguments[0] ||
+      resolveStaticString(call.arguments[0]) !== '\r'
+    ) {
+      return false;
+    }
+    const root = expressionRootName(call.expression.expression);
+    return expectedRoot === undefined || root === undefined || root === expectedRoot;
+  };
+
+  const visit = (node: ts.Node): void => {
+    if (ts.isBlock(node) || ts.isSourceFile(node)) {
+      const statements = node.statements;
+      for (let index = 0; index < statements.length; index++) {
+        const current = statements[index];
+        if (!current) continue;
+        const directSlashInputs = callsIn(current).filter(
+          (call) =>
+            isHelperCall(call, typeTextBindings) &&
+            call.arguments[1] !== undefined &&
+            resolveStaticString(call.arguments[1])?.startsWith('/'),
+        );
+
+        for (const slashInput of directSlashInputs) {
+          const expectedRoot = inputRoot(slashInput);
+          let clearedSafely = false;
+          scan: for (let nextIndex = index + 1; nextIndex < statements.length; nextIndex++) {
+            const next = statements[nextIndex];
+            if (!next) continue;
+            for (const call of callsIn(next)) {
+              if (isEnterWrite(call, expectedRoot)) {
+                break scan;
+              }
+              if (isHelperCall(call, clearInputBindings) && inputRoot(call) === expectedRoot) {
+                clearedSafely = true;
+                break scan;
+              }
+              if (
+                (isHelperCall(call, typeTextBindings) ||
+                  isHelperCall(call, submitCommandBindings)) &&
+                inputRoot(call) === expectedRoot
+              ) {
+                break scan;
+              }
+            }
+          }
+          if (!clearedSafely) {
+            violations.push(
+              `${file}:${sourceFile.getLineAndCharacterOfPosition(slashInput.getStart()).line + 1}`,
+            );
+          }
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return violations;
+}
+
 describe('TUI system scenario contract', () => {
   test('condition waits cannot be satisfied by cumulative output from an earlier action', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
@@ -340,6 +510,13 @@ describe('TUI system scenario contract', () => {
   test('remote MCP permit fixtures are paired with the default-off policy in the same test', () => {
     const violations = scenarioSources().flatMap(({ file, source }) =>
       findRemoteMcpPermitFixtureViolations(source, file),
+    );
+    expect(violations).toEqual([]);
+  });
+
+  test('slash command submission uses the semantic submitCommand receipt', () => {
+    const violations = scenarioSources().flatMap(({ file, source }) =>
+      findDirectSlashSubmitViolations(source, file),
     );
     expect(violations).toEqual([]);
   });
@@ -442,6 +619,32 @@ describe('TUI system scenario contract', () => {
     expect(
       findRemoteMcpPermitFixtureViolations('test("default denial", () => spawnTui({}));'),
     ).toEqual([]);
+  });
+
+  test('AST contract rejects direct slash Enter and requires suggestion cleanup', () => {
+    expect(
+      findDirectSlashSubmitViolations("await typeText(tui, '/theme purple');\ntui.write('\\r');"),
+    ).not.toEqual([]);
+    expect(findDirectSlashSubmitViolations("await typeText(tui, '/mc');")).not.toEqual([]);
+    expect(
+      findDirectSlashSubmitViolations(
+        "await typeText(tui, '/mc');\nawait clearInput(tui, 3);\ntui.write('\\r');",
+      ),
+    ).toEqual([]);
+    expect(findDirectSlashSubmitViolations("await submitCommand(tui, '/theme purple');")).toEqual(
+      [],
+    );
+    expect(
+      findDirectSlashSubmitViolations(`
+        import { typeText as enterText } from '../harness/input-helpers';
+        const alias = enterText;
+        const command = '/theme purple';
+        const enter = '\\r';
+        await alias(tui, command);
+        await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+        tui.write(enter);
+      `),
+    ).not.toEqual([]);
   });
 
   test('input readiness belongs to each input action instead of a warmup flow', () => {

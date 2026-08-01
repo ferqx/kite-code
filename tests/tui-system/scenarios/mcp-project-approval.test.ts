@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import { typeText } from '../harness/input-helpers';
+import { submitCommand } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { waitForCondition, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
@@ -63,8 +63,7 @@ describe('TUI PTY System — project MCP approval', () => {
     expect(existsSync(markerPath)).toBe(false);
     expect(existsSync(markerPath)).toBe(false);
 
-    await typeText(tui, '/mcp', 20);
-    tui.write('\r');
+    await submitCommand(tui, '/mcp', 20);
     await waitForText(
       () => tui!.outputSinceLastAction(),
       'project_stdio · ✘ approval required',

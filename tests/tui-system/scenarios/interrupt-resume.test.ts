@@ -19,7 +19,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
@@ -102,8 +102,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
   step(
     'exit tui1 gracefully with /exit',
     async () => {
-      await typeText(tui1, '/exit');
-      tui1.write('\r');
+      await submitCommand(tui1, '/exit');
 
       const exitCode = await tui1.waitForExit();
       console.log(`  tui1 exit code: ${exitCode}`);
@@ -136,8 +135,7 @@ describe('TUI PTY System — Interrupt Resume', () => {
       expect(screenContains(output, '❯')).toBe(true);
 
       // Open /sessions to verify the persisted session is listed
-      await typeText(tui2, '/sessions');
-      tui2.write('\r');
+      await submitCommand(tui2, '/sessions');
 
       await waitForCondition(
         () => {

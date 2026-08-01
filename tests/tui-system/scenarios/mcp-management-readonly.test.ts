@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { exposedMcpToolName } from '@/core/mcp';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import { typeText } from '../harness/input-helpers';
+import { submitCommand, typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
@@ -42,8 +42,7 @@ describe('TUI PTY System — MCP Select management', () => {
     await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
     tui.setRawMode(true);
 
-    await typeText(tui, '/mcp', 20);
-    tui.write('\r');
+    await submitCommand(tui, '/mcp', 20);
     await waitForText(() => tui!.outputSinceLastAction(), 'MCP Servers', 15_000);
     await waitForText(() => tui!.outputSinceLastAction(), 'fixture · ✔ connected', 15_000);
     expect(screenContains(tui.viewport(), 'Add MCP server')).toBe(true);

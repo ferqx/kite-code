@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText } from '../harness/input-helpers';
+import { submitCommand } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForOutputQuiescence, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -33,8 +33,7 @@ describe('TUI PTY System — Permissions Mode', () => {
     async () => {
       expect(screenContains(tui.viewport(), '自动审批')).toBe(true);
 
-      await typeText(tui, '/permissions accept_edits', 80);
-      tui.write('\r');
+      await submitCommand(tui, '/permissions accept_edits', 80);
       await waitForText(() => tui.outputSinceLastAction(), '接受编辑', 10_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 

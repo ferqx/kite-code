@@ -15,7 +15,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
@@ -84,8 +84,7 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     'write_plan renders plan content in planning phase',
     async () => {
       // Enter planning phase via /plan command
-      await typeText(tui, '/plan Draft a plan for testing');
-      tui.write('\r');
+      await submitCommand(tui, '/plan Draft a plan for testing');
       await waitForRequestMessage(server, 'Draft a plan for testing', 15000);
 
       // Wait for the plan draft follow-up text

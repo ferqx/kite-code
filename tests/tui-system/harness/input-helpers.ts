@@ -335,5 +335,23 @@ export async function submitCommand(
   delayMs?: number,
 ): Promise<void> {
   await typeText(tui, command, delayMs);
+  const expectedKind: ActiveInput['kind'] | undefined =
+    /^\/(?:model|effort|theme|permissions)\s+\S/.test(command)
+      ? 'slash-argument-query'
+      : /^\/\S+$/.test(command)
+        ? undefined
+        : 'main';
+  // A plain input echo can precede the React commit that updates the slash
+  // suggestion refs consumed by Enter. Argument selectors require their exact
+  // semantic suggestion frame; free-form arguments require the settled main
+  // input. Exact no-argument commands are safe in either kind because the
+  // same render computes slashMatched=true and no longer suppresses submit.
+  await waitForInputEcho(
+    tui,
+    normalizeInputEcho(command),
+    expectedKind,
+    expectedKind === undefined,
+    INPUT_ECHO_TIMEOUT_MS,
+  );
   tui.write('\r');
 }

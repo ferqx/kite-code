@@ -9,7 +9,7 @@
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
@@ -70,8 +70,7 @@ describe('TUI PTY System — /compact after session switch', () => {
     '/compact in session 1 produces a response',
     async () => {
       const screenStart = tui.markScreen();
-      await typeText(tui, '/compact');
-      tui.write('\r');
+      await submitCommand(tui, '/compact');
 
       // /compact is a slash command — it should NOT trigger a model call.
       // The response is LOCAL_TEXT: either "Not enough messages to compact."
@@ -112,8 +111,7 @@ describe('TUI PTY System — /compact after session switch', () => {
 
       sessionIdsBeforeNew = persistedSessionIds(workspace);
       expect(sessionIdsBeforeNew).toHaveLength(1);
-      await typeText(tui, '/new');
-      tui.write('\r');
+      await submitCommand(tui, '/new');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
@@ -131,8 +129,7 @@ describe('TUI PTY System — /compact after session switch', () => {
     '/compact in session 2 produces a response (regression)',
     async () => {
       const screenStart = tui.markScreen();
-      await typeText(tui, '/compact');
-      tui.write('\r');
+      await submitCommand(tui, '/compact');
 
       await waitForText(() => tui.outputSinceLastAction(), 'Not enough messages', 10000);
       await waitForCondition(
@@ -175,8 +172,7 @@ describe('TUI PTY System — /compact after session switch', () => {
     async () => {
       // Create a command with a unique marker in the active session.
       const marker = 'restart-persistence-marker';
-      await typeText(tui, `/compact ${marker}`);
-      tui.write('\r');
+      await submitCommand(tui, `/compact ${marker}`);
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
@@ -194,8 +190,7 @@ describe('TUI PTY System — /compact after session switch', () => {
 
       // Exit the first process gracefully so all RuntimeStore writes are
       // closed, then start a fresh TUI against the same HOME/workspace.
-      await typeText(tui, '/exit');
-      tui.write('\r');
+      await submitCommand(tui, '/exit');
       await tui.waitForExit();
 
       server.setResponses([
@@ -207,8 +202,7 @@ describe('TUI PTY System — /compact after session switch', () => {
       await waitForText(() => tui.outputSinceLastAction(), '❯', 15000);
       tui.setRawMode(true);
 
-      await typeText(tui, '/sessions');
-      tui.write('\r');
+      await submitCommand(tui, '/sessions');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();

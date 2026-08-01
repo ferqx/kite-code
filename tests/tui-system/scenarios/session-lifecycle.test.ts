@@ -8,7 +8,12 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, typeText, waitForRequestMessage } from '../harness/input-helpers';
+import {
+  clearInput,
+  submitCommand,
+  typeText,
+  waitForRequestMessage,
+} from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
@@ -101,8 +106,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
     async () => {
       sessionIdsBeforeNew = persistedSessionIds(workspace);
       expect(sessionIdsBeforeNew).toHaveLength(1);
-      await typeText(tui, '/new');
-      tui.write('\r');
+      await submitCommand(tui, '/new');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
@@ -183,8 +187,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
     'D key triggers delete confirmation, Enter confirms deletion',
     async () => {
       // Open session selector
-      await typeText(tui, '/sessions');
-      tui.write('\r');
+      await submitCommand(tui, '/sessions');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
@@ -280,8 +283,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
       );
 
       // Re-open session selector to verify session was deleted
-      await typeText(tui, '/sessions');
-      tui.write('\r');
+      await submitCommand(tui, '/sessions');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
@@ -335,8 +337,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // Press Escape to cancel deletion
       tui.write('\x1b');
       await waitForText(() => tui.outputSinceLastAction(), '❯', 5000);
-      await typeText(tui, '/sessions');
-      tui.write('\r');
+      await submitCommand(tui, '/sessions');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { startTestHttpServer } from '../../helpers/test-http-server';
 import { createMockModelServer, type MockModelServer } from '../harness/fixtures';
-import { typeText, waitForRequestMessage } from '../harness/input-helpers';
+import { submitCommand, typeText, waitForRequestMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import { screenContains, waitForCondition, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace, type TestWorkspace } from '../harness/test-workspace';
@@ -50,8 +50,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     expect(authorizationRequests).toBe(0);
 
     tui.setRawMode(true);
-    await typeText(tui, '/mcp');
-    tui.write('\r');
+    await submitCommand(tui, '/mcp');
     await waitForText(() => tui!.outputSinceLastAction(), 'oauth · ✘ login required', 10_000);
     tui.write('\r');
     await waitForText(() => tui!.outputSinceLastAction(), 'Authenticate', 10_000);
@@ -122,8 +121,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     await waitForText(() => tui!.outputSinceLastAction(), '❯', 15_000);
 
     tui.setRawMode(true);
-    await typeText(tui, '/mcp');
-    tui.write('\r');
+    await submitCommand(tui, '/mcp');
     await waitForText(() => tui!.outputSinceLastAction(), 'oauth · ✘ login required', 10_000);
     tui.write('\r');
     await waitForText(() => tui!.outputSinceLastAction(), 'Authenticate', 10_000);

@@ -11,7 +11,7 @@
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, submitUserMessage, typeText } from '../harness/input-helpers';
+import { clearInput, submitCommand, submitUserMessage, typeText } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnTui } from '../harness/pty-process';
 import {
@@ -65,8 +65,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/help opens help panel',
     async () => {
-      await typeText(tui, '/help');
-      tui.write('\r');
+      await submitCommand(tui, '/help');
 
       // Help panel renders with Chinese shortcut title
       await waitForText(() => tui.outputSinceLastAction(), '快捷键', 10000);
@@ -110,8 +109,7 @@ describe('TUI PTY System — Slash Commands', () => {
       console.log('  output before /clear:', before.slice(-300));
 
       // Now clear
-      await typeText(tui, '/clear');
-      tui.write('\r');
+      await submitCommand(tui, '/clear');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const after = tui.viewport();
@@ -129,8 +127,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/theme purple shows theme message',
     async () => {
-      await typeText(tui, '/theme purple');
-      tui.write('\r');
+      await submitCommand(tui, '/theme purple');
 
       // Theme change should produce a status message
       await waitForText(() => tui.outputSinceLastAction(), 'Theme set to purple', 10000);
@@ -150,8 +147,7 @@ describe('TUI PTY System — Slash Commands', () => {
       const before = tui.viewport();
 
       // Send same theme command again
-      await typeText(tui, '/theme purple');
-      tui.write('\r');
+      await submitCommand(tui, '/theme purple');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const after = tui.viewport();
@@ -174,8 +170,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/plan enters planning mode',
     async () => {
-      await typeText(tui, '/plan');
-      tui.write('\r');
+      await submitCommand(tui, '/plan');
       await waitForText(() => tui.outputSinceLastAction(), 'Shift+Tab to exit', 10000);
 
       const output = tui.viewport();
@@ -218,8 +213,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/effort max does not crash TUI',
     async () => {
-      await typeText(tui, '/effort max');
-      tui.write('\r');
+      await submitCommand(tui, '/effort max');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
@@ -237,8 +231,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/sessions opens session selector',
     async () => {
-      await typeText(tui, '/sessions');
-      tui.write('\r');
+      await submitCommand(tui, '/sessions');
 
       // Session selector overlay has search + footer hints
       await waitForText(() => tui.outputSinceLastAction(), '搜索', 10000);
@@ -273,9 +266,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       // Auto is available on every platform. Full intentionally remains
       // disabled when the CI runner has no supported sandbox backend.
-      await typeText(tui, '/permissions auto', 80);
-      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
-      tui.write('\r');
+      await submitCommand(tui, '/permissions auto', 80);
       await waitForText(() => tui.outputSinceLastAction(), '自动审批', 5000);
 
       const output = tui.viewport();
@@ -292,8 +283,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/model opens model selector',
     async () => {
-      await typeText(tui, '/model');
-      tui.write('\r');
+      await submitCommand(tui, '/model');
       await waitForText(() => tui.outputSinceLastAction(), 'default', 10000);
 
       // Model selector overlay should show model list
@@ -323,8 +313,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/export exports current session to file',
     async () => {
-      await typeText(tui, '/export');
-      tui.write('\r');
+      await submitCommand(tui, '/export');
       await waitForText(() => tui.outputSinceLastAction(), 'Session exported', 10000);
 
       const output = tui.viewport();
@@ -341,8 +330,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/rewind opens checkpoint panel',
     async () => {
-      await typeText(tui, '/rewind');
-      tui.write('\r');
+      await submitCommand(tui, '/rewind');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
 
       const output = tui.viewport();
@@ -390,8 +378,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/mcp opens MCP panel',
     async () => {
-      await typeText(tui, '/mcp');
-      tui.write('\r');
+      await submitCommand(tui, '/mcp');
       await waitForText(() => tui.outputSinceLastAction(), 'MCP Servers', 10000);
 
       const output = tui.viewport();
@@ -419,8 +406,7 @@ describe('TUI PTY System — Slash Commands', () => {
   step(
     '/exit exits process with code 0',
     async () => {
-      await typeText(tui, '/exit');
-      tui.write('\r');
+      await submitCommand(tui, '/exit');
 
       const exitCode = await tui.waitForExit();
       console.log(`  TUI exited with code ${exitCode}`);
