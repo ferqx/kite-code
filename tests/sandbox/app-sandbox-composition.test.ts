@@ -41,7 +41,10 @@ describe('App sandbox composition', () => {
         config: { sandbox: { enabled: true } },
         sandboxEnabled: false,
       });
-      const result = await executor({ workspace, command: `printf explicit > ${marker}` });
+      const result = await executor({
+        workspace,
+        command: "bun -e \"require('node:fs').writeFileSync('development-override','explicit')\"",
+      });
       expect(result.ok).toBe(true);
       expect(existsSync(marker)).toBe(true);
     } finally {
@@ -62,7 +65,10 @@ describe('App sandbox composition', () => {
           executionCapabilitySurface: shellSurface,
         },
       });
-      const result = await executor({ workspace, command: `printf bypass > ${marker}` });
+      const result = await executor({
+        workspace,
+        command: "bun -e \"require('node:fs').writeFileSync('must-not-exist','bypass')\"",
+      });
       expect(result.ok).toBe(false);
       expect(result.stderr).toContain('refusing unsandboxed shell execution');
       expect(existsSync(marker)).toBe(false);

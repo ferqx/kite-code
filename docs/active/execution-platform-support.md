@@ -181,6 +181,10 @@ GitHub workflow 环境，不从待验证 JSON 自报。verifier 对 top-level、
 普通函数调用不能伪造该 evidence。cgroup TasksMax 只能投影 hard-count，cleanup 在 unit-owned cgroup
 empty/populated verifier 完成前固定不通过，process group 自然退出或 `setsid` 逃逸不能当作零 residual 证明。
 
+同一 workflow 的跨平台 exclusion contract 使用 workspace-relative、由 Bun 执行的 marker fixture；不得把
+未引用的宿主绝对路径直接拼入 shell 命令。这样 Windows Git Bash/cmd 与 POSIX shell 都实际验证 marker
+创建或未创建，路径语法差异不能造成正向假失败或把 release-boundary bypass 隐藏成负向通过。
+
 `scripts/release/execution-boundary-smoke.ts` 与
 `.github/workflows/execution-boundary-conformance.yml` 把当前空支持集带入 actual synthetic artifact
 smoke：三个 target 只能输出 `excluded`，八类 adversarial contract 只能输出
