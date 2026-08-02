@@ -113,4 +113,9 @@ export interface McpServerState {
   diagnostic?: McpDiagnostic;
   consecutiveCallFailures: number;
   retryAt?: number;
+  /** Sealed transport identity fixed when this client generation was admitted. */
+  transportBoundary?: {
+    identityDigest: string;
+    endpointRevision: string;
+  };
 }

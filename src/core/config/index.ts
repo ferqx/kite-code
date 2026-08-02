@@ -113,6 +113,63 @@ export {
   workspaceDataLabelV1Schema,
 } from './provider-data-policy';
 export type {
+  CapabilityMaturity,
+  CapabilityProfileAdmissionDecisionV1,
+  CapabilityProfileAdmissionReasonV1,
+  CapabilityProfileDependencyStateV1,
+  CapabilityProfileV1,
+  CapabilityReleaseState,
+  ReleaseCapability,
+  RolloutStage,
+} from './release-capabilities';
+export {
+  CAPABILITY_MATURITIES,
+  CAPABILITY_MATURITY_RANK,
+  CAPABILITY_PROFILE_GATES_V1,
+  CAPABILITY_PROFILE_VERSION_V1,
+  capabilityMaturitySchema,
+  capabilityProfileV1Schema,
+  capabilityReleaseStateSchema,
+  evaluateCapabilityProfileAdmissionV1,
+  isCapabilityReleaseStateValid,
+  parseCapabilityProfileV1,
+  parseCapabilityReleaseState,
+  RELEASE_CAPABILITIES,
+  ROLLOUT_STAGE_RANK,
+  ROLLOUT_STAGES,
+  releaseCapabilitySchema,
+  rolloutStageSchema,
+} from './release-capabilities';
+export type {
+  EmbeddedReleaseProfileIdV1,
+  ReleaseChannelV1,
+  ReleaseProfileApprovalRequirementV1,
+  ReleaseProfileV1,
+  ReleaseProfileVerificationRequirementV1,
+} from './release-profile';
+export {
+  admitEmbeddedReleaseProfileV1,
+  admitProductionReleaseSupportIdentityV1,
+  EMBEDDED_RELEASE_PROFILES_V1,
+  ProductionReleaseProfileAdmissionError,
+  parseReleaseProfileV1,
+  RELEASE_PROFILE_VERSION,
+  releaseCapabilityStatesSchema,
+  releaseProfileV1Schema,
+  SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1,
+} from './release-profile';
+export type {
+  ReleaseProfileRestrictionLayerV1,
+  ReleaseProfileRestrictionSourceV1,
+  ReleaseProfileRestrictionV1,
+} from './release-profile-composer';
+export {
+  composeReleaseProfileV1,
+  ReleaseProfileEscalationError,
+  releaseProfileRestrictionLayerV1Schema,
+  releaseProfileRestrictionV1Schema,
+} from './release-profile-composer';
+export type {
   SessionLoggingMode,
   SessionLoggingPolicyTightening,
   SessionLoggingPolicyV1,
@@ -183,6 +240,29 @@ const sessionLoggingTighteningSchema = z
   })
   .strict()
   .optional();
+const telemetryConsentGrantSchema = z
+  .object({
+    state: z.enum(['granted', 'withdrawn']),
+    metricCategories: z.array(
+      z.enum(['run_turn', 'model_usage', 'tool_mcp_skill', 'runtime_resource', 'release_rollout']),
+    ),
+    receiver: z.string().trim().min(1).max(128),
+    retentionDays: z.number().int().nonnegative(),
+    withdrawalMethod: z.string().trim().min(1).max(256),
+    canaryOptIn: z.boolean(),
+  })
+  .strict();
+const telemetryConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    endpointPolicy: z.enum(['disabled', 'vendor_managed', 'admin_managed']).optional(),
+    endpointSecret: z.string().min(1).optional(),
+    consent: telemetryConsentGrantSchema.optional(),
+    contentLoggingConsent: z.boolean().optional(),
+    modelProviderConsent: z.boolean().optional(),
+  })
+  .strict()
+  .optional();
 
 const featuresSchema = z
   .object({
@@ -210,6 +290,8 @@ const featuresSchema = z
     boundedCancellationV1: z.boolean().optional(),
     executionBoundaryV1: z.boolean().optional(),
     networkBoundaryV1: z.boolean().optional(),
+    releaseProfileV1: z.boolean().optional(),
+    observabilityMetricsV1: z.boolean().optional(),
   })
   .strict()
   .optional();
@@ -223,6 +305,7 @@ export const configSchema = z.object({
   interactionMode: interactionModeSchema.optional(),
   features: featuresSchema,
   sessionLogging: sessionLoggingTighteningSchema,
+  telemetry: telemetryConfigSchema,
   sandbox: sandboxSchema,
   autoReview: z
     .object({
@@ -332,6 +415,11 @@ export interface AgentConfig {
   executionCapabilitySurface?: ExecutionCapabilitySurfaceV1;
   /** Resolved artifact + user + project session logging policy. */
   sessionLoggingPolicy?: SessionLoggingPolicyV1;
+  /** Source-aware telemetry preferences; App consent composition remains authoritative. */
+  telemetry?: {
+    user?: NonNullable<KiteCodeConfig['telemetry']>;
+    project?: { enabled?: boolean };
+  };
   sandbox: {
     enabled: boolean;
   };
@@ -436,6 +524,7 @@ function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeCo
     interactionMode: project.interactionMode ?? user.interactionMode,
     features: { ...user.features, ...project.features },
     sessionLogging: project.sessionLogging ?? user.sessionLogging,
+    telemetry: user.telemetry,
     sandbox: project.sandbox ?? user.sandbox,
     autoReview: project.autoReview ?? user.autoReview,
     compaction: project.compaction ?? user.compaction,
@@ -478,6 +567,7 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
     theme: 'dark',
     interactionMode: 'accept_edits',
     features: {},
+    telemetry: undefined,
     sandbox: { enabled: true },
     mcpServers: {},
   };
@@ -496,6 +586,10 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
   const projectSessionLogging = configPath
     ? undefined
     : readConfigFile(projectConfigPath(workspace))?.sessionLogging;
+  const userTelemetry = configPath ? cfg.telemetry : readConfigFile(defaultConfigPath())?.telemetry;
+  const projectTelemetry = configPath
+    ? undefined
+    : readConfigFile(projectConfigPath(workspace))?.telemetry;
   const sessionLoggingPolicy = resolveSessionLoggingPolicyV1({
     enabled: cfg.features?.sessionLoggingPolicyV1 ?? false,
     artifactPolicy: options.artifactSessionLoggingPolicy,
@@ -550,6 +644,10 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     interactionMode: cfg.interactionMode,
     features: cfg.features,
     sessionLoggingPolicy,
+    telemetry: {
+      ...(userTelemetry ? { user: userTelemetry } : {}),
+      ...(projectTelemetry ? { project: { enabled: projectTelemetry.enabled } } : {}),
+    },
     sandbox: { enabled: cfg.sandbox?.enabled ?? true },
     autoReview: cfg.autoReview,
     compaction: cfg.compaction,

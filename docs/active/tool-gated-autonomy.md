@@ -169,6 +169,11 @@ Capability search 只负责发现。搜索候选不能作为调用句柄，也�
 - 不得从 UI summary、模型 final 或 ToolMessage 文本推断任务完成。
 - 新的已注册工具自动获得与其 Registry `effectClass` 对应的审批默认策略（`read_only`→放行、`plan_only`→放行、`workspace_write`→模式策略、`external_side_effect`→审批），不再需要逐工具手工维护审批矩阵。仅存在明确安全边界（URL 校验、外部路径、命令分类、MCP binding）的工具才需要专用分支。
 
+Skill 的 readonly 分类比单个 Tool 名或 manifest 声明更严格：自身和全部 dependency 的 effective
+effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；write、destructive、unknown、
+解析失败或 revision drift 都归 effectful/off。`allowed-tools` 只是 ceiling，不是授权；effectful Skill
+还必须经过 required Verification。
+
 ## 工具结果结构化元数据
 
 工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）从 `harness/tool-runner.ts` 写入 `ToolCallRecord`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在 MCP normalization、serialization 和任何模型可见截断前计算 raw digest，并显式传播截断状态；Controller 对模型可见内容计算 model digest，不能把 projected digest 标记成 raw。这些字段用于审计、恢复和摘要输入中的结构化事实；当前模型上下文不执行工具结果投影折叠。行为上不改变权限决策或审批路由。

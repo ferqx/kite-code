@@ -28,6 +28,14 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | `terminalOutcomeV1` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
 | `executionBoundaryV1` | `false` | 允许 composition root 消费 release-pinned `ExecutionBoundaryV1`；开启本身不产生平台资格或边界 artifact |
 | `networkBoundaryV1` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
+| `releaseProfileV1` | `false` | 请求使用 artifact-pinned Release Profile；没有独立 artifact authority 时 true 不生效且 CLI 拒绝抬高 |
+| `observabilityMetricsV1` | `false` | 允许 artifact-authorized、用户已 consent 的无正文 metric exporter；普通 CLI 只能设为 false |
+
+Phase 5 的 `verificationV1`、`mcpExecutionRecordV1`、`mcpProviderActionV1`、
+`skillActivationV2` 与 `skillWorkflowV1` 也全部默认关闭。Release admission 不接受 profile 自报开关：
+它验证实际 resolved flags，MCP write 同时要求两个 MCP flag 与 Verification，Skill 同时要求
+activation/workflow，并继续检查 dependency revision、route/platform 和实际 G3–G5 freshness。
+当前四条 capability profile 全部 `under_development/off`。
 
 `providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
 前者仍要求批准 registry/gate，且当前 route 集合为空；后者只允许新 run 建立 limited preset
@@ -44,14 +52,15 @@ CLI 关闭时只省略派生 presentation，原始结构化 outcome 不被删除
 边界注入独立的单次 permit resolver；缺失、格式错误、超过五分钟 TTL、过期、
 revision/argument/classification 不匹配、nonce replay 或 receipt 持久化失败全部 fail closed。
 该 flag 不继承 `providerDataPolicyV1` 的
-模型 route consent，也不解封 sealed boundary 下等待 Task 1B.8 的 MCP transport。
+模型 route consent，也不替代 sealed MCP transport 的逐 invocation receipt 与 endpoint admission。
 
 `sessionLoggingPolicyV1` 开启不等于允许正文。`content` 还要求 release artifact 明确允许且
 用户/管理员在用户配置显式 opt-in；project config 永远不能开启。关闭 flag 必须收紧为 `off`，
 不能回退到旧 content serializer。
 
 `executionBoundaryV1` 的用户、项目或 CLI 值只控制 rollout 请求，不能定义
-`ExecutionBoundaryV1`。production 的有效值固定为 release artifact ceiling 与 rollout 请求的
+`ExecutionBoundaryV1`。普通 CLI 直接用 `--feature` 把 `executionBoundaryV1` 或
+`networkBoundaryV1` 设为 true 会立即拒绝；production 的有效值固定为 release artifact ceiling 与 rollout 请求的
 逻辑与；user、project、CLI/App 的每个显式值也按逻辑与组合，全部未指定时使用默认关闭。任一
 为 `false` 都关闭，后层的 `true` 不能抬高前层或 artifact ceiling。普通
 `loadAgentConfig()` 不投影 boundary；只有 `loadProductionAgentConfig()` 接受 release-controlled
@@ -63,9 +72,24 @@ qualification registry。artifact 缺失/非法、Workspace 不匹配、实际�
 `networkBoundaryV1` 同样按 user、project、CLI/App 的显式值 deny-wins 组合；全部未指定时默认
 关闭。关闭不能恢复旧 `allow_all`：production capability surface 的 network 轴被关闭，sealed
 boundary 内的 `web_fetch` 在 DNS 前以 `network_off` 拒绝，Shell/Skill descendant 固定使用
-network-off，MCP transport 在 Task 1B.8 接入同一逐调用 admission 前整体拒绝。开启只允许
-`web_fetch` 使用 release boundary 的精确 host allowlist；每个 robots/content/redirect hop 独立
-解析、持久化决定并把 socket 固定到已批准 IP，不提供 URL path 级隔离，也不产生平台资格。
+network-off。开启允许 `web_fetch` 与具备 App receipt controller 的 remote HTTP MCP 使用 release
+boundary 的精确 host allowlist；每个请求/redirect hop 独立解析并把 socket 固定到已批准 IP。
+当前 production TUI 没有该 MCP controller，因此 remote transport 仍关闭；local stdio 无条件排除。
+该 flag 不提供 URL path 级隔离，也不产生平台资格。
+
+`releaseProfileV1` 不是普通功能开关。有效 Release composition 同时要求 App 注入的 artifact
+authority、embedded profile 和 deny-wins rollout/restriction layers；project/user 不能提供前两项。
+普通 CLI 的 `--feature releaseProfileV1=true` 立即拒绝，false 只会收紧。当前 D-04 支持集为空，
+所以即使 foundation fixture 同时打开 artifact/rollout，production profile 仍以
+`production_support_set_empty` 拒绝；internal fixture 的 capability、预算、route、logging 和
+telemetry 也全部关闭。production composition 必须携带 registry 接受的非空外部 support identity，
+不能使用 internal profile；controlled config 在 Runtime 创建前再次验证该身份，调用者不能用
+`production + internal-dogfood` 绕过空支持集。
+
+`observabilityMetricsV1` 不是 remote telemetry 的单一授权。有效 exporter 同时要求 release artifact
+明确允许、flag=true、用户 consent 有效和 exporter 已配置；project 配置只能关闭。普通 CLI 的
+`--feature observabilityMetricsV1=true` 会拒绝，false 只收紧。关闭时注入 no-op reporter，不回退到
+历史通用 OTel serializer，也不创建磁盘 spool。
 
 上下文压缩的 flag 术语（功能开关）真值如下：
 

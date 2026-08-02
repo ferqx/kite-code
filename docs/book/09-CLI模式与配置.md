@@ -10,7 +10,7 @@ bun run agent resume --thread <thread-id>
 bun run agent trace <events.jsonl> --turn 1
 ```
 
-CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
+CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundaryV1`、`networkBoundaryV1`、`releaseProfileV1` 或 `observabilityMetricsV1` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions`、`/release` 与 `/telemetry`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
 
 ## 9.2 Interaction mode
 
@@ -36,6 +36,7 @@ Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者
   "autoReview": {},
   "compaction": {},
   "sessionLogging": {},
+  "telemetry": { "enabled": false },
   "mcpServers": {},
   "features": {}
 }
@@ -115,8 +116,8 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 ToolSpec Registry 的六个计算原语已按 ADR-0027 完成单路径切换；旧迁移 flag 未接入运行时并已删除，不再接受 `toolSpecRegistryV1` 配置。
 
 生产治理的 `sessionLoggingPolicyV1`、`providerDataPolicyV1`、`remoteMcpEgressPolicyV1`、`resourceBudgetV1`、
-`boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1` 和
-`networkBoundaryV1` 均默认关闭。Logger flag 开启时 Runtime 只写
+`boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1`、
+`networkBoundaryV1`、`releaseProfileV1` 和 `observabilityMetricsV1` 均默认关闭。Logger flag 开启时 Runtime 只写
 显式 allowlist metadata，关闭时不创建日志目录。Provider flag 启用后从固定 release asset
 加载并校验 revision/digest，所有普通模型、压缩、Sub-agent 和 reviewer dispatch 共用最终
 gate；当前
@@ -127,10 +128,20 @@ child capability。Terminal flag 只控制 CLI 派生 presentation，原始结�
 不能把 unknown/blocked/budget/saturation 回退成普通完成。单独启用任一 flag 都不授予
 production 资格。
 
+Remote observability 还要求 artifact authority、用户 consent 与真实 exporter；flag 单独开启不生效。
+项目 telemetry 配置只保留 `enabled=false` 的收紧语义，不能提供 endpoint secret 或 consent。Reporter
+只有有界内存 queue，无磁盘 spool；content logging consent 和 Provider consent 都不隐含 telemetry。
+
+`releaseProfileV1` 还要求独立的 artifact authority；user/project/CLI 的 true 不能创建该 authority。
+当前 embedded profile 是 non-distributable foundation fixture，D-04 production 支持集为空，因此
+所有 production profile 都拒绝。Release status 不显示完整 profile、credential、Workspace path、
+route 名称或 cohort identity。
+
 `networkBoundaryV1` 关闭时 production network 收紧为 off，不能恢复旧 `allow_all`。开启时只
 使密封 boundary 内的 `web_fetch` 获得逐 invocation DNS/redirect/endpoint admission；Shell/Skill
-descendant 仍为 network-off，MCP transport 与 `tool_search` Provider readiness 在 Task 1B.8
-完成接入前拒绝。该 flag 不定义 allowlist、不提供 URL path isolation，也不改变当前空
-production platform 支持集。
+descendant 仍为 network-off。Remote HTTP MCP 还要求 App 签发绑定 boundary/run/profile/endpoint/
+invocation 的单次 transport receipt；当前 production TUI 没有该 controller，local stdio 也明确
+排除，因此 Provider readiness 继续拒绝。该 flag 不定义 allowlist、不提供 URL path isolation，
+也不改变当前空 production platform 支持集。
 
 上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManualV1` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。

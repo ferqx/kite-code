@@ -114,6 +114,22 @@ export {
   resolveMcpToolPolicy,
 } from './tool-policy';
 export type {
+  McpTransportAdmissionReceiptV1,
+  McpTransportAdmissionRequestV1,
+  McpTransportBoundaryControllerV1,
+  McpTransportBoundaryFailureCodeV1,
+  McpTransportBoundaryIdentityV1,
+  McpTransportInvocationBindingV1,
+  McpTransportOperationV1,
+} from './transport-boundary';
+export {
+  assertMcpTransportAdmissionReceiptV1,
+  canonicalMcpHttpEndpointIdentityV1,
+  createMcpTransportAdmissionReceiptV1,
+  createMcpTransportBoundaryIdentityV1,
+  McpTransportBoundaryErrorV1,
+} from './transport-boundary';
+export type {
   McpAuthConfig,
   McpHealthState,
   McpPrompt,

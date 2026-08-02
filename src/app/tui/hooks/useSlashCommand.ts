@@ -14,6 +14,8 @@ export type SlashAction =
   | { type: 'sessions'; id?: string }
   | { type: 'plan'; task?: string }
   | { type: 'permissions'; mode?: string }
+  | { type: 'release' }
+  | { type: 'telemetry' }
   | { type: 'clear' }
   | { type: 'help' }
   | { type: 'new' }
@@ -45,6 +47,10 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'plan', task: arg || undefined };
     case 'permissions':
       return { type: 'permissions', mode: arg || undefined };
+    case 'release':
+      return args.length === 0 ? { type: 'release' } : { type: 'unknown', raw: input };
+    case 'telemetry':
+      return args.length === 0 ? { type: 'telemetry' } : { type: 'unknown', raw: input };
     case 'clear':
     case 'c':
       return { type: 'clear' };
@@ -100,6 +106,9 @@ export function useSlashCommand(
   onCompact?: (customInstructions?: string) => void,
   onContext?: () => void,
   onCompactReset?: () => void,
+  executionStatusText?: string,
+  releaseStatusText?: string,
+  telemetryStatusText?: string,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -146,6 +155,10 @@ export function useSlashCommand(
           }
           break;
         case 'permissions': {
+          if (!action.mode && executionStatusText) {
+            dispatch({ type: 'LOCAL_TEXT', text: executionStatusText });
+            break;
+          }
           const target = resolveInteractionModeTarget(
             action.mode,
             currentInteractionMode,
@@ -165,6 +178,12 @@ export function useSlashCommand(
           dispatch({ type: 'SET_INTERACTION_MODE', mode: admission.mode });
           break;
         }
+        case 'release':
+          if (releaseStatusText) dispatch({ type: 'LOCAL_TEXT', text: releaseStatusText });
+          break;
+        case 'telemetry':
+          if (telemetryStatusText) dispatch({ type: 'LOCAL_TEXT', text: telemetryStatusText });
+          break;
         case 'clear':
           dispatch({ type: 'CLEAR_OUTPUT' });
           break;
@@ -240,6 +259,9 @@ export function useSlashCommand(
       onCompact,
       onContext,
       onCompactReset,
+      executionStatusText,
+      releaseStatusText,
+      telemetryStatusText,
     ],
   );
 }

@@ -1,6 +1,6 @@
 # Agent 生产化 Phase 1C：Runtime 稳定性、资源预算与故障语义计划
 
-状态：active
+状态：completed
 创建：2026-07-29
 优先级：P0
 依赖：
@@ -13,12 +13,16 @@ Task 1C.1 已由 `4b8eec058df0af545675fc0e1c4135ee855848fd` 完成；Task 1C.2 �
 `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` 完成。Task 1C.5 已由
 `aa66e872f3206df9718493adbfef7445fb582a4f` 实现，并以
 `dfd8f209f89b4980b9c3905d3e73c166b33bea2b` 的全绿 Required qualification 完成；
-Task 1C.7 已以上述 qualification head 激活，负责 soak/fault evidence。当前已完成 v2 runner、fault/CI soak、case-specific state invariant、精确 lifecycle/进程 nonce 绑定、真实 Runtime workload budget receipt、
-TUI input-focus 专用 Ink child 与手动 Ubuntu qualification workflow 的实现；本地 CI profile 7/7
-通过，单轮 qualification 诊断的全部资源指标可用且无增长/清理失败，只因少于 8 轮返回
-`qualification_iterations_insufficient`。该任务保持 active，等待 Ubuntu workflow 产出 `status=passed` qualification
-artifact 后关闭；1C.8 已开始不依赖该 artifact 的 pre-close 文档审计，但完成状态与
-`MS:1C-DONE` 继续按依赖保持未绑定。规范记录见
+Task 1C.7 的 runner、workflow、report/verifier 与 Ubuntu 稳定性加固已由
+`23f8fe8427fc9c6bc3fa6c55cf0eef4892d915e3`、
+`ff683b12cbe78f478a5a6b31be7627412e3ed372` 实现，并由默认分支
+`e23b81b1087a7cdea5f4d9c5d419f5d040b67702` 的正式 Ubuntu
+[run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064) 完成 8 轮
+qualification。保留 artifact `runtime-resilience-qualification-30710906064` 为
+`status=passed`，独立 verifier 重建 canonical digest
+`sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694`，确认 7 case、
+56/56 probe、72 条 actual Runtime ledger receipt、完整资源样本与零 orphan/residual。
+Task 1C.7/1C.8 因此完成，Task 1C.8 唯一产生 `MS:1C-DONE`。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 ## 目标
@@ -431,6 +435,19 @@ workflow 在上传前以 GitHub `workflow_ref`/`workflow_sha` 绑定 verifier �
 改为无字段边界碰撞的结构化 tuple。对应重新计算 digest 的 delimiter collision、非法 warm-up 和
 越界 iteration 反例已固化为 verifier 回归测试。
 
+正式 qualification 先在默认分支 `53388068a366f4f93bc7ec1854e5c81eb8b5e70f` 的
+[run 30709529119](https://github.com/ferqx/kite-code/actions/runs/30709529119) 暴露 TUI 增量渲染
+readiness 与 Ubuntu RSS GC/JIT 瞬时峰值问题；该失败 artifact 仅作诊断，不登记为通过。
+`ff683b12cbe78f478a5a6b31be7627412e3ed372` 保持 32 MiB 上限与样本/轮次不变，改为等待完整
+approval viewport，并只在重复 Bun lifecycle 的同进程 preload 采样边界执行受控 GC settle。
+修复合入默认分支后，[run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064)
+以 `seed=1729`、`iterations=8` 成功；artifact ID `8822010140`、ZIP digest
+`sha256:f0c3ba98f85285c10919103bbc9f38029186a9e72b6a072893774dbfdf67fd4d`，报告 canonical digest
+为 `sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694`。独立 verifier 重新绑定
+repository/head/ref/workflow ref/workflow SHA/run ID/attempt 并重建 retained attempts 后通过；报告
+包含 7 case、56/56 probe，long-runtime 每项资源 128 samples、其他 case 每项 64 samples、
+72 条 `actual_runtime_ledger` receipt，全部 case 的 orphan PID、orphan worktree 与 residual path 为 0。
+
 ### Task 1C.8：active 文档和迁移
 
 更新：
@@ -454,32 +471,32 @@ reservation，不虚构独立 invocation。documentation map 已把 Runtime/Suba
 active 与协作章节；ADR-0055 继续作为已接受决策，不能替代当前行为文档。Task 1C.6 历史完成
 记录中跨隔离进程的 PTY 指标已降级为诊断，不再称为 qualification 资源趋势证据。
 
-该 pre-close 收敛不满足 1C.8 的依赖，也不产生 milestone。仍需取得 1C.7 的 Ubuntu 8 轮
-`status=passed` artifact，校验报告 identity/digest/cleanup/resource evidence，再更新完成记录、
-decision register、plan index/roadmap 和本计划终态。
-
-实现、故障矩阵、soak、迁移和文档门禁全部收敛后，本任务唯一产生 `MS:1C-DONE`。
+默认分支正式 Ubuntu artifact 已按 Task 1C.7 所述通过来源身份、canonical digest、retained
+attempt、cleanup、resource 与 Runtime ledger receipt 的独立重建校验。完成记录、decision
+register、plan index/roadmap 和本计划终态已共同收敛；Task 1C.8 完成并唯一产生
+`MS:1C-DONE`。该 milestone 只关闭 Runtime resilience 阶段，不生成 production artifact 或
+production-ready 结论。
 
 ## 验收条件
 
-- [ ] 父/子 Agent 共享累计预算；
-- [ ] tool invocation/shell invocation 并发硬上限在 batch、approval overlap 和 Sub-agent
+- [x] 父/子 Agent 共享累计预算；
+- [x] tool invocation/shell invocation 并发硬上限在 batch、approval overlap 和 Sub-agent
   间原子生效；
-- [ ] shell invocation cap 与 process-tree cap 在类型/投影中分离，1C 不用顶层计数替代 1B
+- [x] shell invocation cap 与 process-tree cap 在类型/投影中分离，1C 不用顶层计数替代 1B
   平台 enforcement；
-- [ ] permit 的按资源 FIFO、compound atomic acquire、等待期限/recovery 和
+- [x] permit 的按资源 FIFO、compound atomic acquire、等待期限/recovery 和
   `resource_saturated` 终态一致；
-- [ ] `RuntimeSchedulingPolicyV1` 从实际 Runtime 导出并通过 canonical golden；
-- [ ] 所有 invocation admission 覆盖；
-- [ ] budget/cancel 终态不会显示完成；
-- [ ] descendant 有界清理且残留可诊断；
-- [ ] failure matrix 在 TUI/CLI/恢复/Sub-agent 一致；
-- [ ] persistence 失败在副作用前 hard block；
-- [ ] 完整 PTY suite 无 warning/timeout；
-- [ ] soak 无 listener/FD/handle/RSS 持续增长；
-- [ ] kill -9/磁盘满/网络抖动 fixture 不损坏 Runtime；
-- [ ] schema v16→v17→v18→next 与 rollback fixture 不重开 aborted/completed turn；
-- [ ] active/book/ADR/map 收敛。
+- [x] `RuntimeSchedulingPolicyV1` 从实际 Runtime 导出并通过 canonical golden；
+- [x] 所有 invocation admission 覆盖；
+- [x] budget/cancel 终态不会显示完成；
+- [x] descendant 有界清理且残留可诊断；
+- [x] failure matrix 在 TUI/CLI/恢复/Sub-agent 一致；
+- [x] persistence 失败在副作用前 hard block；
+- [x] 完整 PTY suite 无 warning/timeout；
+- [x] soak 无 listener/FD/handle/RSS 持续增长；
+- [x] kill -9/磁盘满/网络抖动 fixture 不损坏 Runtime；
+- [x] schema v16→v17→v18→next 与 rollback fixture 不重开 aborted/completed turn；
+- [x] active/book/ADR/map 收敛。
 
 ## 回滚
 

@@ -46,6 +46,11 @@ CI profile 的普通 Bun test probe 通过 preload 采集 fresh child 的 `befor
 
 本机或 CI 若不能确认 `ps` 进程树、Git worktree registry、完整 same-process series 或上述 TUI child ownership，正式 qualification 必须返回 `inconclusive`。Task 1C.7 只有 workflow 已存在于默认分支、Ubuntu 手动 run 在被审查 head 上完成、verifier 通过且上传 `status=passed` artifact 后才可关闭；两轮本地 CI profile 通过只证明 smoke 可重复，不等于 release qualification。
 
+`package.json` 中的 `release:build`、`release:verify`、`release:smoke` 与
+`release:gate:foundation` 只运行 non-production synthetic Release Contract fixture；它们不重跑、
+替代或升级本节的正式 Ubuntu fault/soak qualification artifact。后续 release evidence 若引用
+Runtime 韧性结论，仍必须绑定上文默认分支 run、独立 verifier 与完整 retained attempts identity。
+
 ## 持久化故障边界
 
 每个 `RuntimeStore` 连接在设置 journal mode 或执行 schema 写入前先安装 5000 ms `busy_timeout`，因此 journal/schema/事件写竞争都受同一有界等待约束。SQLite writer lock 释放后只允许一次成功提交；不能因为重试重复事件。

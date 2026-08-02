@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-01（完成 1B.5 protected-path 收口）
+最后更新：2026-08-02（Phase 1C/2A-F 完成；Phase 2A.8–6 本地 fail-closed contract 收敛）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -22,14 +22,14 @@
 | [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | active | P0 | 已批准 Agent 生产就绪 RFC | Phase 0–6 总入口 | `MS:M0` 已完成；首发拓扑、依赖图、后续 Gate、共享证据与回滚规则 |
 | [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | archived | P0 | 生产就绪 roadmap | RFC Phase 0 | single-maintainer 治理与 M0 已完成；[完成记录](../execution/completed/2026-07-30-agent-production-governance.md) |
 | [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | completed | P0 | `MS:M0` | RFC Phase 1A | Task 1A.1–1A.7 completed；`MS:1A-DONE` 已产生；[完成记录](../execution/completed/2026-07-30-agent-production-local-data-privacy.md) |
-| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | active | P0 | `MS:M0` | RFC Phase 1B | Task 1B.0–1B.5 completed，D-04 空支持集；1B.2/1B.3 以三平台 `excluded` 负向收口；1B.6/1B.8 ready 且未绑定；[1B.5 完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md) |
-| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | active | P0 | `MS:M0` | RFC Phase 1C | Task 1C.1–1C.6 completed；1C.7 in progress；1C.8 pre-close 文档审计进行中且完成仍等待 1C.7；[完成记录](../execution/completed/2026-07-30-agent-production-runtime-resilience.md) |
-| [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) | draft | P0 | 2A-F 依赖 Phase 0；2A-RC 依赖 1A–1C/2B/3 | RFC Phase 2A | payload/detached manifest、Release Profile、evidence/Gate、平台制品 |
-| [`2026-07-29-agent-production-evaluation.md`](2026-07-29-agent-production-evaluation.md) | draft | P0 | Phase 0、2A-F；执行 fixture 依赖 1B/1C | RFC Phase 2B | Agent task suite、oracle、重复运行、人工验收 |
-| [`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md) | draft | P0 | 1A、1C、`MS:2A-F`、2B metrics contract | 替代两份 2026-06-18 telemetry 草案 | 无正文 metrics、告警、kill switch、事故演练、limited cohort SLO |
-| [`2026-07-29-agent-production-compaction-qualification.md`](2026-07-29-agent-production-compaction-qualification.md) | draft | P1 | 2A、2B、3、ADR-0021/22/24；external 等待 LIM/SLO | RFC Phase 4 | 离线资格、internal auto 新鲜度、external manual canary 与 maturity |
-| [`2026-07-29-agent-production-capability-rollout.md`](2026-07-29-agent-production-capability-rollout.md) | draft | P1 | 1A–1C、2A、2B、3；external 等待 LIM/SLO | RFC Phase 5 | Verification、MCP write、Skills 分别 internal、external canary、beta/stable maturity |
-| [`2026-07-29-agent-production-ga.md`](2026-07-29-agent-production-ga.md) | draft | P1 | `MS:LIM-APPROVED`、`MS:LIMITED-SLO`、manual stable；只等待拟入 GA capability | RFC Phase 6A/6B | 可选 Auto maturity；GA selection、artifact 与发布后观察 |
+| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | active | P0 | `MS:M0` | RFC Phase 1B | Task 1B.0–1B.5 completed，D-04 空支持集；1B.6–1B.9 本地实现/定向验证收敛并保持 `in_progress`，等待最终整体 Review；1B.9 另等默认分支三平台 artifact；[1B.5 完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md) |
+| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | completed | P0 | `MS:M0` | RFC Phase 1C | Task 1C.1–1C.8 completed；`MS:1C-DONE` 已产生；[完成记录](../execution/completed/2026-07-30-agent-production-runtime-resilience.md) |
+| [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) | active | P0 | 2A-F 依赖 Phase 0；2A-RC 依赖 1A–1C/2B/3 | RFC Phase 2A | D-06 已关闭；2A.0–2A.7 completed，`MS:2A-F` 已产生；2A.8 local contract/in_progress；2A.9 local contract 受 D-03 阻断；真实 release disabled；[完成记录](../execution/completed/2026-07-30-agent-production-release-control.md) |
+| [`2026-07-29-agent-production-evaluation.md`](2026-07-29-agent-production-evaluation.md) | active | P0 | Phase 0、2A-F；正式执行依赖 1B/1C 与真实 route | RFC Phase 2B | D-07 closed；2B.1 in_progress；12-case/阈值 contract 实施中，真实 route/human/formal evidence 待满足，不产生 `MS:2B-DONE` |
+| [`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md) | active | P0 | 1A、1C、`MS:2A-F`、2B metrics contract | 替代两份 2026-06-18 telemetry 草案 | 3.1–3.8/3.10 local fail-closed contract；D-03/2B、真实 baseline/incident/SLO evidence 待满足，不产生运营 milestone |
+| [`2026-07-29-agent-production-compaction-qualification.md`](2026-07-29-agent-production-compaction-qualification.md) | draft | P1 | 2A、2B、3、ADR-0021/22/24；external 等待 LIM/SLO | RFC Phase 4 | local synthetic/blocked qualification contract 已实现；4.1 等待 2B.1，无 route/manual/stable evidence |
+| [`2026-07-29-agent-production-capability-rollout.md`](2026-07-29-agent-production-capability-rollout.md) | active | P1 | 1A–1C、2A、2B、3；external 等待 LIM/SLO | RFC Phase 5 | D-10 closed；5.1 local contract/in_progress；其余本地 conformance 提前实现但未绑定，所有 capability off |
+| [`2026-07-29-agent-production-ga.md`](2026-07-29-agent-production-ga.md) | draft | P1 | `MS:LIM-APPROVED`、`MS:LIMITED-SLO`、manual stable；只等待拟入 GA capability | RFC Phase 6A/6B | local selection/auto admission/compatibility contract 已实现且 blocked；无 GA/canary/maturity evidence |
 | [`2026-07-26-tool-spec-registry-phase-2.md`](2026-07-26-tool-spec-registry-phase-2.md) | archived | P0 | ADR-0026、ADR-0027 | 延续已归档阶段 0/1 | coordination、interrupt、runtime_action 工具全部迁入 Registry |
 | [`2026-05-20-tui-production-roadmap.md`](2026-05-20-tui-production-roadmap.md) | archived | P0 | — | — | Step2 感知闭环：流式指示器 + Plan 连线 + Phase 确认<br>Step3 防御纵深：Error Boundary + Checkpoint 关闭 + Temp 清理<br>Step4 功能补齐：手动 Compaction |<!-- replaced by 2026-05-22-production-gaps-closure.md for remaining gaps -->|
 | [`2026-05-22-production-gaps-closure.md`](2026-05-22-production-gaps-closure.md) | archived | P0 | — | 替代 2026-05-20 路线图中未完成项 | Phase1 ✅ MCP + 事件闭环<br>Phase2 ✅ Rewind + MCP Resources<br>Phase3 ✅ Skills 系统<br>Hooks + 自定义命令延后 |

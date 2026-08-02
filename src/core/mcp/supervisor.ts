@@ -40,6 +40,7 @@ import {
   hasConfiguredMcpToolPolicy,
   resolveMcpToolPolicy,
 } from './tool-policy';
+import type { McpTransportInvocationBindingV1 } from './transport-boundary';
 import type { McpServerConfig, McpServerState } from './types';
 
 const EMPTY_SNAPSHOT: McpControlSnapshot = Object.freeze({
@@ -89,8 +90,14 @@ export interface McpConnectionManagerControlPlane {
   getCapabilityRoute?(
     capabilityId: string,
   ): import('./egress-permit').McpCapabilityRouteV1 | undefined;
+  assertTransportBoundaryWorkspace?(workspace: string): void;
   callCapability(invocation: McpCapabilityInvocation): Promise<CallToolResult>;
-  readResource(serverName: string, uri: string, signal?: AbortSignal): Promise<string>;
+  readResource(
+    serverName: string,
+    uri: string,
+    signal?: AbortSignal,
+    transportBoundary?: McpTransportInvocationBindingV1,
+  ): Promise<string>;
   beginOAuth?(
     name: string,
     config: McpServerConfig,
@@ -149,6 +156,7 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   async start(workspace: string): Promise<void> {
     if (this.started && this.workspace === workspace) return;
     if (this.started) await this.stop();
+    this.manager.assertTransportBoundaryWorkspace?.(workspace);
     this.started = true;
     this.workspace = workspace;
     this.generation += 1;
@@ -537,9 +545,14 @@ export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
     return this.manager.callCapability(invocation);
   }
 
-  async readResource(server: string, uri: string, signal?: AbortSignal): Promise<string> {
+  async readResource(
+    server: string,
+    uri: string,
+    signal?: AbortSignal,
+    transportBoundary?: McpTransportInvocationBindingV1,
+  ): Promise<string> {
     this.assertProviderAvailable(server);
-    return this.manager.readResource(server, uri, signal);
+    return this.manager.readResource(server, uri, signal, transportBoundary);
   }
 
   private connectCatalog(catalog: McpConfigCatalog, generation: number): void {

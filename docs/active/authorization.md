@@ -94,6 +94,11 @@ Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling
 
 TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前请求值覆盖恢复态，确保 `/permissions full` 在新轮次立即生效。
 
+`/permissions` 无参数不改变 mode 或 authorization；它只显示 App 的 execution-status 投影。普通
+开发 TUI 明确显示 production boundary `not admitted`，已经通过 production gate 的配置才显示
+有效 sandbox/filesystem/network/protected-path/worktree/capability 状态。该状态文本不是 grant，
+不能扩大 capability surface。
+
 ## 测试
 
 ```bash

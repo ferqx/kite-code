@@ -1,4 +1,16 @@
 import { resolve } from 'node:path';
+import { resolveTelemetryConsentV1 } from '@/app/observability/consent';
+import {
+  formatObservabilityStatusV1,
+  projectObservabilityStatusV1,
+} from '@/app/observability/status';
+import { resolveReleaseCompositionV1 } from '@/app/release/composition-root';
+import {
+  formatExecutionStatusV1,
+  formatUnadmittedExecutionStatusV1,
+  tryProjectAdmittedExecutionStatusV1,
+} from '@/app/release/execution-status';
+import { formatReleaseStatusV1, projectReleaseStatusV1 } from '@/app/release/status-projection';
 import { type FeatureFlags, getFeatureFlags } from '@/core/config/features';
 import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
@@ -39,6 +51,9 @@ export interface ParsedArgs {
   tracePath?: string;
   traceTurn?: number;
   traceFormat?: 'text' | 'json';
+  executionStatus: boolean;
+  releaseStatus: boolean;
+  telemetryStatus: boolean;
 }
 
 export async function main(): Promise<void> {
@@ -94,6 +109,43 @@ export async function main(): Promise<void> {
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
   });
+  const executionStatus = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+  if (args.telemetryStatus) {
+    const consent = resolveTelemetryConsentV1({
+      releaseChannel: 'development',
+      user: config.telemetry?.user,
+      project: config.telemetry?.project,
+    });
+    console.log(
+      formatObservabilityStatusV1(
+        projectObservabilityStatusV1({
+          artifactTelemetryAllowed: false,
+          featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
+          consent,
+          remoteExporterConfigured: false,
+        }),
+      ),
+    );
+    return;
+  }
+  if (args.releaseStatus) {
+    const composition = resolveReleaseCompositionV1({
+      config,
+      artifactReleaseProfileV1Enabled: false,
+      profileId: 'internal-dogfood',
+      production: false,
+    });
+    console.log(formatReleaseStatusV1(projectReleaseStatusV1({ composition, executionStatus })));
+    return;
+  }
+  if (args.executionStatus) {
+    console.log(
+      executionStatus
+        ? formatExecutionStatusV1(executionStatus)
+        : formatUnadmittedExecutionStatusV1(sandboxRuntime),
+    );
+    return;
+  }
   if (interactionMode === 'full' && !sandboxRuntime.available) {
     throw new Error('full mode requires an available workspace sandbox.');
   }
@@ -427,7 +479,18 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
   const featureOverrides: Partial<FeatureFlags> = {};
   for (const feature of multi('--feature')) {
-    Object.assign(featureOverrides, parseFeatureOverride(feature));
+    const override = parseFeatureOverride(feature);
+    if (
+      override.executionBoundaryV1 === true ||
+      override.networkBoundaryV1 === true ||
+      override.releaseProfileV1 === true ||
+      override.observabilityMetricsV1 === true
+    ) {
+      throw new Error(
+        `Feature flag '${feature.split('=', 1)[0]}' is release-controlled and cannot be enabled by the CLI.`,
+      );
+    }
+    Object.assign(featureOverrides, override);
   }
   return {
     command,
@@ -451,6 +514,9 @@ export function parseArgs(argv: string[]): ParsedArgs {
     tracePath: command === 'trace' ? argv[1] : undefined,
     traceTurn,
     traceFormat: optionalValue('--format') === 'json' ? 'json' : 'text',
+    executionStatus: argv.includes('--execution-status'),
+    releaseStatus: argv.includes('--release-status'),
+    telemetryStatus: argv.includes('--telemetry-status'),
   };
 }
 
@@ -520,6 +586,9 @@ Options:
   --mode <mode>          auto, write, or builder
   --skill <name>         Activate a skill (repeatable)
   --feature <name[=bool]> Temporarily override a registered feature flag (repeatable)
+  --execution-status     Print the effective production execution boundary and exit
+  --release-status       Print the effective release profile and Gate status and exit
+  --telemetry-status     Print redacted telemetry consent/export status and exit
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
   --approve              Approve tool call on resume

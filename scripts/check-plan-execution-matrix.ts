@@ -451,6 +451,14 @@ const phase1PrivacyClosureEvidenceCommit = '389a0cc45c36e59d961c659ab4df4015a722
 const phase1FailureConformanceBaseline = '4a64837855b76c8c71e956b19d04ad67d77b18c9';
 const phase1FailureConformanceCommit = 'aa66e872f3206df9718493adbfef7445fb582a4f';
 const phase1FailureConformanceQualification = 'dfd8f209f89b4980b9c3905d3e73c166b33bea2b';
+const phase1RuntimeQualificationCommit = '23f8fe8427fc9c6bc3fa6c55cf0eef4892d915e3';
+const phase1RuntimeQualificationHardening = 'ff683b12cbe78f478a5a6b31be7627412e3ed372';
+const phase1RuntimeQualificationHead = 'e23b81b1087a7cdea5f4d9c5d419f5d040b67702';
+const phase1RuntimeQualificationRun = '30710906064';
+const phase1RuntimeQualificationArtifact = 'runtime-resilience-qualification-30710906064';
+const phase1RuntimeQualificationArtifactId = '8822010140';
+const phase1RuntimeQualificationDigest =
+  'sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694';
 const phase1RuntimeCompletionPath =
   'docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md';
 const phase1PrivacyPlan = sources.get('1A') ?? '';
@@ -462,7 +470,7 @@ const expectedPlanStates = new Map([
   ['2026-07-29-agent-production-governance-decisions.md', 'archived'],
   ['2026-07-29-agent-production-local-data-privacy.md', 'completed'],
   ['2026-07-29-agent-production-execution-isolation.md', 'active'],
-  ['2026-07-29-agent-production-runtime-resilience.md', 'active'],
+  ['2026-07-29-agent-production-runtime-resilience.md', 'completed'],
 ]);
 for (const [file, expectedState] of expectedPlanStates) {
   const source = readFileSync(join(planDir, file), 'utf8');
@@ -627,9 +635,21 @@ if (!phase1ProtectedPathBinding) {
     fail(`1B.5: completionRecordPath must be ${phase1ProtectedPathCompletionPath}`);
   }
 }
-for (const taskId of ['1B.6', '1B.8']) {
-  if (decisionRegister.split('\n').some((line) => line.startsWith(`| ${taskId} |`))) {
-    fail(`${taskId}: ready Task must remain unbound until implementation actually starts`);
+for (const taskId of ['1B.6', '1B.7', '1B.8']) {
+  const binding = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!binding) {
+    fail(`${taskId}: locally converged Task must have an execution binding`);
+    continue;
+  }
+  const cells = parsePipeRow(binding);
+  if (cells[2]?.replaceAll('`', '') !== phase1RuntimeQualificationHead) {
+    fail(`${taskId}: binding must use the post-1C qualification baseline`);
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'in_progress') {
+    fail(`${taskId}: binding must remain in_progress until the final whole-diff review`);
+  }
+  if (cells[6]?.replaceAll('`', '') !== '—') {
+    fail(`${taskId}: completionRecordPath must remain empty before final review`);
   }
 }
 
@@ -729,13 +749,14 @@ const phase1ExecutionPlanIndexRow = plansIndex
   );
 if (
   !phase1ExecutionPlanIndexRow?.includes('Task 1B.0–1B.5 completed') ||
-  !phase1ExecutionPlanIndexRow.includes('1B.2/1B.3 以三平台 `excluded` 负向收口') ||
-  !phase1ExecutionPlanIndexRow.includes('1B.6/1B.8 ready 且未绑定') ||
+  !phase1ExecutionPlanIndexRow.includes('1B.6–1B.9 本地实现/定向验证收敛') ||
+  !phase1ExecutionPlanIndexRow.includes('保持 `in_progress`，等待最终整体 Review') ||
+  !phase1ExecutionPlanIndexRow.includes('1B.9 另等默认分支三平台 artifact') ||
   !phase1ExecutionPlanIndexRow.includes(
     '../execution/completed/2026-08-01-agent-production-protected-path.md',
   )
 ) {
-  fail('plans/index.md: Phase 1B row must record 1B.5 completion and ready/unbound next Tasks');
+  fail('plans/index.md: Phase 1B row must record current local convergence and pending gates');
 }
 
 const phase1FailureConformanceBinding = decisionRegister
@@ -771,23 +792,27 @@ const phase1RuntimePlanIndexRow = plansIndex
     ),
   );
 if (
-  !phase1RuntimePlanIndexRow?.includes('Task 1C.1–1C.6 completed') ||
-  !phase1RuntimePlanIndexRow.includes('1C.7 in progress') ||
+  !phase1RuntimePlanIndexRow?.includes('Task 1C.1–1C.8 completed') ||
+  !phase1RuntimePlanIndexRow.includes('`MS:1C-DONE` 已产生') ||
   !phase1RuntimePlanIndexRow.includes(
     '../execution/completed/2026-07-30-agent-production-runtime-resilience.md',
   )
 ) {
-  fail('plans/index.md: Phase 1C row must record 1C.5 completion and link its record');
+  fail('plans/index.md: Phase 1C row must record 1C.1–1C.8 completion, milestone, and record');
 }
 if (
-  !/1C\.1–1C\.6 已完成/.test(roadmap) ||
+  !/1C\.1–1C\.8 已完成/.test(roadmap) ||
   !/1B\.2\/1B\.3 的完成结论是\s+三平台候选均明确 `excluded`/.test(roadmap) ||
-  !/1B\.0–1B\.5 与 1C\.1–1C\.6 已完成/.test(roadmap) ||
-  !/1B\.6\/1B\.8 已 ready 但尚未\s+建立 execution binding，1C\.7 仍在执行/.test(roadmap) ||
-  !/1C\.8 与其他后续 milestone 均为 pending/.test(roadmap)
+  !/1B\.0–1B\.5 与 1C\.1–1C\.8 已完成/.test(roadmap) ||
+  !/1B\.6–1B\.8 已完成本地实现和\s+定向验证并保持 `in_progress`/.test(roadmap) ||
+  !/1B\.9 已完成本地 negative\s+conformance，仍等待默认分支三平台 workflow artifact 与最终整体 Review/.test(
+    roadmap,
+  ) ||
+  !/Task 1C\.8 唯一产生 `MS:1C-DONE`/.test(roadmap) ||
+  !/该 milestone 不生成\s+production artifact/.test(roadmap)
 ) {
   fail(
-    'roadmap must record 1B.5 completion, ready/unbound next Tasks, 1C.7 active, and 1C.8 pending',
+    'roadmap must record current Phase 1B convergence and completed Phase 1C without a production artifact claim',
   );
 }
 const phase1FailureConformanceRevision = decisionRegister
@@ -843,10 +868,19 @@ for (const evidence of [
   phase1FailureConformanceQualification,
   'Required run 30676359548',
   'Task 1C.5 独立复核最终 GO，P0/P1/P2 均为 0',
-  '`MS:1C-DONE` 仍等待 1C.7 与 1C.8',
+  phase1RuntimeQualificationCommit,
+  phase1RuntimeQualificationHardening,
+  phase1RuntimeQualificationHead,
+  `run ${phase1RuntimeQualificationRun}`,
+  phase1RuntimeQualificationArtifact,
+  phase1RuntimeQualificationArtifactId,
+  phase1RuntimeQualificationDigest,
+  '7 case、56/56 probe',
+  '72 条 `actual_runtime_ledger` receipts',
+  '`MS:1C-DONE` 已由 Task 1C.8 产生',
 ]) {
   if (!phase1RuntimeCompletion.includes(evidence)) {
-    fail(`1C.5 completion record must identify ${evidence}`);
+    fail(`1C completion record must identify ${evidence}`);
   }
 }
 requireReachableCommit(phase1FailureConformanceCommit, '1C.5 implementation');
@@ -859,24 +893,76 @@ if (!phase1SoakBinding) {
   if (!phase1SoakBinding.includes(`| \`${phase1FailureConformanceQualification}\` |`)) {
     fail('1C.7: binding must use the completed 1C.5 qualification head');
   }
-  if (!phase1SoakBinding.includes('| `in_progress` |')) {
-    fail('1C.7: soak/fault evidence binding must be in_progress');
+  if (!phase1SoakBinding.includes('| `completed` |')) {
+    fail('1C.7: soak/fault evidence binding must be completed');
   }
   const cells = parsePipeRow(phase1SoakBinding);
-  if (cells[6] !== '—') {
-    fail('1C.7: in-progress binding must not claim a completion record');
+  if (cells[6]?.replaceAll('`', '') !== phase1RuntimeCompletionPath) {
+    fail(`1C.7: completionRecordPath must be ${phase1RuntimeCompletionPath}`);
   }
 }
 if (
   !phase1RuntimePlan.includes(
-    'Task 1C.7 已以上述 qualification head 激活，负责 soak/fault evidence',
+    'Task 1C.7 的 runner、workflow、report/verifier 与 Ubuntu 稳定性加固已由',
   )
 ) {
-  fail('1C.7: runtime plan must record activation from the 1C.5 qualification head');
+  fail('1C.7: runtime plan must record formal qualification completion');
 }
-if (decisionRegister.split('\n').some((line) => line.startsWith('| 1C.8 |'))) {
-  fail('1C.8: execution binding must remain absent until Task 1C.7 completes');
+const phase1RuntimeClosureBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 1C.8 |'));
+if (!phase1RuntimeClosureBinding) {
+  fail('1C.8: missing completed documentation closure execution binding');
+} else {
+  if (!phase1RuntimeClosureBinding.includes(`| \`${phase1RuntimeQualificationHead}\` |`)) {
+    fail('1C.8: binding must use the formal default-branch qualification head');
+  }
+  if (!phase1RuntimeClosureBinding.includes('| `completed` |')) {
+    fail('1C.8: documentation closure binding must be completed');
+  }
+  const cells = parsePipeRow(phase1RuntimeClosureBinding);
+  if (cells[6]?.replaceAll('`', '') !== phase1RuntimeCompletionPath) {
+    fail(`1C.8: completionRecordPath must be ${phase1RuntimeCompletionPath}`);
+  }
 }
+const phase1RuntimeAcceptance =
+  phase1RuntimePlan.match(/^## 验收条件\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? '';
+const checkedPhase1RuntimeAcceptance = phase1RuntimeAcceptance.match(/^- \[x\] /gm) ?? [];
+if (checkedPhase1RuntimeAcceptance.length !== 15 || /^- \[ \] /m.test(phase1RuntimeAcceptance)) {
+  fail(
+    '1C: completed plan must retain all 15 checked acceptance criteria and no unchecked criteria',
+  );
+}
+
+const phase1RuntimeClosureRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 19 |'));
+if (phase1RuntimeClosureRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 19 exactly once; found ${phase1RuntimeClosureRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '完成 1C.7 正式 Ubuntu qualification 与 1C.8 文档/迁移收口',
+    '唯一产生 `MS:1C-DONE`',
+    '不生成 production artifact',
+    phase1RuntimeQualificationHead,
+    `run ${phase1RuntimeQualificationRun}`,
+    'attempt 1',
+    phase1RuntimeQualificationArtifact,
+    phase1RuntimeQualificationArtifactId,
+    phase1RuntimeQualificationDigest,
+    '7 case/56 probe/72 actual Runtime ledger receipts',
+    '独立 verifier 通过',
+  ]) {
+    if (!phase1RuntimeClosureRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 19 must identify ${evidence}`);
+    }
+  }
+}
+requireReachableCommit(phase1RuntimeQualificationCommit, '1C.7 qualification implementation');
+requireReachableCommit(phase1RuntimeQualificationHardening, '1C.7 qualification hardening');
+requireReachableCommit(phase1RuntimeQualificationHead, '1C.7 formal qualification head');
 
 for (const [description, pattern] of [
   ['Phase 1A completion', /Phase 1A（Task 1A\.1–1A\.7）已完成/],
@@ -890,13 +976,12 @@ for (const [description, pattern] of [
   }
 }
 if (
-  !new RegExp(
-    `^当前执行复核基线：\`${phase1ProtectedPathQualification}\`（2026-08-01）$`,
-    'm',
-  ).test(roadmap)
+  !new RegExp(`^当前执行复核基线：\`${phase1RuntimeQualificationHead}\`（2026-08-02）$`, 'm').test(
+    roadmap,
+  )
 ) {
   fail(
-    'roadmap must bind the current execution review baseline to the protected-path qualification head',
+    'roadmap must bind the current execution review baseline to the Phase 1C qualification head',
   );
 }
 
@@ -1284,8 +1369,8 @@ if (
 if (!phase1ExecutionPlan.includes('- [ ] protected path 在所有本地执行路径统一生效；')) {
   fail('1B: phase-level all-local-paths acceptance must remain open until later Tasks complete');
 }
-if (!roadmap.includes(`当前执行复核基线：\`${phase1ProtectedPathQualification}\``)) {
-  fail('roadmap must advance the reviewed execution baseline to the 1B.5 qualification head');
+if (!roadmap.includes(`当前执行复核基线：\`${phase1RuntimeQualificationHead}\``)) {
+  fail('roadmap must advance the reviewed execution baseline to the Phase 1C qualification head');
 }
 const phase1ProtectedPathRevision = decisionRegister
   .split('\n')
@@ -1312,6 +1397,49 @@ if (phase1ProtectedPathRevision.length !== 1) {
     if (!phase1ProtectedPathRevision[0]?.includes(evidence)) {
       fail(`decision register Revision 18 must identify ${evidence}`);
     }
+  }
+}
+
+const phase1ExecutionFoundationRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 20 |'));
+if (phase1ExecutionFoundationRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 20 exactly once; found ${phase1ExecutionFoundationRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '激活 1B.6–1B.8',
+    '保持 `in_progress`',
+    phase1RuntimeQualificationHead,
+    'worktree controller 14 pass',
+    'MCP/边界组合 84 pass',
+    'status/config/CLI 22 pass',
+    'TUI sandbox-mode 2 pass',
+    'D-09 foreground Headless CLI writer 保持只读',
+    'local stdio 与无 App receipt controller 的 production TUI 保持关闭',
+    '不产生 `MS:1B-DONE`',
+  ]) {
+    if (!phase1ExecutionFoundationRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 20 must identify ${evidence}`);
+    }
+  }
+}
+for (const checkedCriterion of [
+  '- [x] 后台/并发/委派 writer 强制 worktree；',
+  '- [x] worktree 创建失败不触碰共享 checkout；',
+  '- [x] TUI/CLI 显示实际边界；',
+]) {
+  if (!phase1ExecutionPlan.includes(checkedCriterion)) {
+    fail(`1B: locally converged acceptance criterion missing: ${checkedCriterion}`);
+  }
+}
+for (const pendingCriterion of [
+  '- [ ] allowlist 无 DNS/redirect/child bypass；',
+  '- [ ] local stdio/remote HTTP MCP transport 使用同一有效 boundary revision；',
+]) {
+  if (!phase1ExecutionPlan.includes(pendingCriterion)) {
+    fail(`1B: conformance-dependent criterion must remain open: ${pendingCriterion}`);
   }
 }
 for (const commit of [
@@ -1445,6 +1573,319 @@ if (
   fail(`${relative(root, phase1AdmissionCompletionPath)} must record final 1A.7 independent GO`);
 }
 requireReachableCommit(phase1PrivacyClosureEvidenceCommit, '1A.7');
+
+const releaseFoundationCommit = '2e98681c800a2f1f745bc18e41ac682d9c09e84b';
+const releaseFoundationBaseline = 'd07d6d01f822e7afa95f1c98bd90f8780c6ca1d0';
+const releaseFoundationCompletionPath =
+  'docs/space/execution/completed/2026-07-30-agent-production-release-control.md';
+const releaseFoundationCompletion = readFileSync(
+  join(root, releaseFoundationCompletionPath),
+  'utf8',
+);
+const releasePlan = sources.get('2A') ?? '';
+const d06Body = decisionSections.find((match) => match[1] === 'D-06')?.[2] ?? '';
+const adr0062 = readFileSync(
+  join(root, 'docs/adr/0062-keyless-release-signing-and-github-hosting.md'),
+  'utf8',
+);
+
+if (!/^- status: `closed`$/m.test(d06Body) || !/^- approvedAt: `2026-08-02`$/m.test(d06Body)) {
+  fail('D-06: Release Foundation completion requires the approved closed decision');
+}
+if (!/^状态：accepted$/m.test(adr0062)) {
+  fail('ADR-0062: keyless release signing and GitHub hosting decision must be accepted');
+}
+
+for (let task = 0; task <= 7; task += 1) {
+  const taskId = `2A.${task}`;
+  const bindingRow = decisionRegister.split('\n').find((line) => line.startsWith(`| ${taskId} |`));
+  if (!bindingRow) {
+    fail(`${taskId}: missing Release Foundation execution binding`);
+    continue;
+  }
+  const cells = parsePipeRow(bindingRow);
+  if (cells[2]?.replaceAll('`', '') !== releaseFoundationBaseline) {
+    fail(`${taskId}: binding must preserve the Release Foundation activation baseline`);
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'completed') {
+    fail(`${taskId}: Release Foundation binding must be completed after MS:2A-F`);
+  }
+  if (cells[5]?.replaceAll('`', '') !== '—') {
+    fail(`${taskId}: completed Release Foundation binding must have no blocked reason`);
+  }
+  if (cells[6]?.replaceAll('`', '') !== releaseFoundationCompletionPath) {
+    fail(`${taskId}: completionRecordPath must be ${releaseFoundationCompletionPath}`);
+  }
+  if (
+    !new RegExp(`^## Task ${taskId.replace('.', '\\.')}(?:[:：]|$)`, 'm').test(
+      releaseFoundationCompletion,
+    )
+  ) {
+    fail(`${releaseFoundationCompletionPath} must include ## Task ${taskId}`);
+  }
+}
+
+for (const evidence of [
+  '状态：completed',
+  `实现提交：\`${releaseFoundationCommit}\``,
+  '结论：`approved_to_complete_2A.0–2A.7`',
+  '唯一产生 `MS:2A-F`',
+  '53 pass、0 fail、401 expect',
+  'sha256:24c58f186316d11dbd17889776bf1ff040d80333ba3ee3915746d8032d09c7f0',
+  'sha256:406882b0be2a5814ae3cf13cd72971f6873d11d981ed3d0ac3b956a85d24be35',
+  'sha256:ca24e4cebceacb0832078cefff5028fa0d5083251fe0c19d66abc3d8dca4ac23',
+  'G2–G5 均为 `not_applicable`',
+  '真实 signing/release disabled',
+  '所有 production capability 仍 off/excluded',
+]) {
+  if (!releaseFoundationCompletion.includes(evidence)) {
+    fail(`${releaseFoundationCompletionPath} must identify ${evidence}`);
+  }
+}
+for (const command of [
+  'bun run typecheck',
+  'bun test tests/release',
+  'bun run release:build',
+  'bun run release:verify',
+  'bun run release:smoke',
+  'bun run release:gate:foundation',
+  'bun run release:smoke:execution',
+  'bun run check:core-boundary',
+  'bun run check:docs-impact',
+  'bun run check:docs',
+  'git diff --check',
+]) {
+  if (!releaseFoundationCompletion.includes(`\`${command}\``)) {
+    fail(`${releaseFoundationCompletionPath} must record command: ${command}`);
+  }
+}
+
+if (
+  !releasePlan.includes(`\`${releaseFoundationCommit}\` 收口`) ||
+  !releasePlan.includes('Task 2A.7 唯一产生\n`MS:2A-F`') ||
+  !releasePlan.includes(releaseFoundationCompletionPath.replace('docs/space/', '../'))
+) {
+  fail('Phase 2A plan must record Release Foundation completion, milestone, and completion record');
+}
+const releasePlanIndexRow = plansIndex
+  .split('\n')
+  .find((line) =>
+    line.startsWith(
+      '| [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) |',
+    ),
+  );
+if (
+  !releasePlanIndexRow?.includes('2A.0–2A.7 completed') ||
+  !releasePlanIndexRow.includes('`MS:2A-F` 已产生') ||
+  !releasePlanIndexRow.includes(
+    '../execution/completed/2026-07-30-agent-production-release-control.md',
+  ) ||
+  !releasePlanIndexRow.includes('真实 release disabled')
+) {
+  fail('plans/index.md: Phase 2A row must record Foundation completion and release limitations');
+}
+if (
+  !roadmap.includes(releaseFoundationCommit) ||
+  !/Task 2A\.7\s+唯一产生 `MS:2A-F`/.test(roadmap) ||
+  !/不包含 G2–G5、真实 signing\/attestation、production platform、RC\s+或 external release 结论/.test(
+    roadmap,
+  )
+) {
+  fail('roadmap must record MS:2A-F without a production release claim');
+}
+const releaseFoundationRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 23 |'));
+if (
+  releaseFoundationRevision.length !== 1 ||
+  !releaseFoundationRevision[0]?.includes(releaseFoundationCommit) ||
+  !releaseFoundationRevision[0]?.includes('Task 2A.7 唯一产生 `MS:2A-F`') ||
+  !releaseFoundationRevision[0]?.includes('真实 signing/release disabled')
+) {
+  fail('decision register must contain the exact Revision 23 Release Foundation ratchet');
+}
+
+const releaseSupplyChainBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 2A.8 |'));
+if (!releaseSupplyChainBinding) {
+  fail('2A.8: local supply-chain contract must have an execution binding');
+} else {
+  const cells = parsePipeRow(releaseSupplyChainBinding);
+  if (cells[2]?.replaceAll('`', '') !== releaseFoundationCommit) {
+    fail('2A.8: binding must use the completed Release Foundation baseline');
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'in_progress') {
+    fail('2A.8: binding must remain in_progress until real supply-chain/platform evidence exists');
+  }
+  if (cells[6]?.replaceAll('`', '') !== '—') {
+    fail('2A.8: completionRecordPath must remain empty before real evidence');
+  }
+}
+
+const evaluationPlan = sources.get('2B') ?? '';
+const operationsPlan = sources.get('3') ?? '';
+for (const [label, source, expected] of [
+  ['2B', evaluationPlan, '状态：active'],
+  ['3', operationsPlan, '状态：active'],
+] as const) {
+  if (!source.includes(expected)) fail(`${label}: local contract plan must be active`);
+}
+for (const evidence of [
+  'D-07 已按 single-maintainer-first 推荐方案关闭',
+  'Evidence adapter 仍只有 `blocked/not_green`',
+  '不产生 `MS:2B-DONE`',
+]) {
+  if (!evaluationPlan.includes(evidence))
+    fail(`2B local-contract boundary must identify ${evidence}`);
+}
+for (const evidence of ['2B 正式证据依赖', 'D-03', '`MS:3-OPS-READY`', '`MS:LIMITED-SLO`']) {
+  if (!operationsPlan.includes(evidence))
+    fail(`Phase 3 local-contract boundary must identify ${evidence}`);
+}
+const localContractRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 24 |'));
+if (
+  localContractRevision.length !== 1 ||
+  !localContractRevision[0]?.includes('本地 fail-closed contract') ||
+  !localContractRevision[0]?.includes('D-03/D-07 open') ||
+  !localContractRevision[0]?.includes(
+    'formal platform/adversarial/human/incident/SLO/signing evidence 均未伪造',
+  )
+) {
+  fail('decision register must contain exact Revision 24 local-contract/evidence-waiting ratchet');
+}
+
+const d10 = decisionSections.find((match) => match[1] === 'D-10')?.[2] ?? '';
+for (const expected of [
+  '- status: `closed`',
+  'none|read',
+  'write、destructive、unknown',
+  'dependency/revision drift',
+  '[ADR-0064]',
+  '- approvedAt: `2026-08-02`',
+]) {
+  if (!d10.includes(expected))
+    fail(`D-10 conservative classifier decision must contain ${expected}`);
+}
+
+const phase5Plan = sources.get('5') ?? '';
+for (const expected of [
+  '状态：active',
+  'schema/conformance/evidence adapter 已提前实现',
+  '`under_development/off`',
+  '不产生任何',
+]) {
+  if (!phase5Plan.includes(expected))
+    fail(`Phase 5 local-contract boundary must contain ${expected}`);
+}
+
+const capabilityProfileBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 5.1 |'));
+if (!capabilityProfileBinding) {
+  fail('5.1: dependency-ready Capability Profile contract must have an execution binding');
+} else {
+  const cells = parsePipeRow(capabilityProfileBinding);
+  if (cells[2]?.replaceAll('`', '') !== releaseFoundationCommit) {
+    fail('5.1: binding must use the completed Release Foundation baseline');
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'in_progress') {
+    fail('5.1: binding must remain in_progress until final whole-diff review');
+  }
+  if (!cells[5]?.includes('所有 capability 仍 off')) {
+    fail('5.1: binding must preserve the all-capabilities-off boundary');
+  }
+  if (cells[6]?.replaceAll('`', '') !== '—') {
+    fail('5.1: completionRecordPath must remain empty before final whole-diff review');
+  }
+}
+
+const laterLocalContractRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 25 |'));
+if (
+  laterLocalContractRevision.length !== 1 ||
+  !laterLocalContractRevision[0]?.includes('关闭 D-10') ||
+  !laterLocalContractRevision[0]?.includes('Phase 4/5/6 本地 fail-closed contract') ||
+  !laterLocalContractRevision[0]?.includes('5.1 绑定 `in_progress`') ||
+  !laterLocalContractRevision[0]?.includes(
+    'formal task/live/canary/maturity/GA/第三方评审 evidence 均未产生',
+  )
+) {
+  fail('decision register must contain exact Revision 25 Phase 4/5/6 evidence boundary ratchet');
+}
+
+const d07 = decisionSections.find((match) => match[1] === 'D-07')?.[2] ?? '';
+for (const expected of [
+  '- status: `closed`',
+  '12 个 case',
+  '4 simple/6 medium/2 complex',
+  '3 read-only/9 workspace-write',
+  '4 TUI/8 Headless CLI',
+  '运行 8 次',
+  '运行 20 次',
+  '总成功率至少 90%',
+  '每个 case 至少 80%',
+  '只算 internal',
+  '至少 3 名不同的 opt-in 用户',
+  '回归上限为 25%',
+  '- approvedAt: `2026-08-02`',
+]) {
+  if (!d07.includes(expected)) fail(`D-07 approved product scope must contain ${expected}`);
+}
+
+const evaluationScopeBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 2B.1 |'));
+if (!evaluationScopeBinding) {
+  fail('2B.1: approved D-07 scope must have an execution binding');
+} else {
+  const cells = parsePipeRow(evaluationScopeBinding);
+  if (cells[2]?.replaceAll('`', '') !== '494858769bfb8436d721e1d0d8cd0426454a601d') {
+    fail('2B.1: binding must use the D-07 approval recovery-point baseline');
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'in_progress') {
+    fail('2B.1: binding must remain in_progress until targeted validation and whole-diff review');
+  }
+  if (!cells[5]?.includes('12-case suite')) {
+    fail('2B.1: binding must identify the approved 12-case suite contract');
+  }
+  if (cells[6]?.replaceAll('`', '') !== '—') {
+    fail('2B.1: completionRecordPath must remain empty before completion');
+  }
+}
+
+const evaluationScopeRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 26 |'));
+if (
+  evaluationScopeRevision.length !== 1 ||
+  !evaluationScopeRevision[0]?.includes('关闭 D-07') ||
+  !evaluationScopeRevision[0]?.includes('激活 2B.1') ||
+  !evaluationScopeRevision[0]?.includes('非确定性 PR=禁止/route-change=8/RC=20、确定性=1') ||
+  !evaluationScopeRevision[0]?.includes('维护者 dogfood 仅 internal') ||
+  !evaluationScopeRevision[0]?.includes('第三方安全评审边界不变')
+) {
+  fail('decision register must contain exact Revision 26 D-07 approval ratchet');
+}
+const wholeReviewRepairRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 27 |'));
+if (
+  wholeReviewRepairRevision.length !== 1 ||
+  !wholeReviewRepairRevision[0]?.includes('首轮整体 Review 为 NO-GO') ||
+  !wholeReviewRepairRevision[0]?.includes('第三方评审 Gate') ||
+  !wholeReviewRepairRevision[0]?.includes('Limited SLO') ||
+  !wholeReviewRepairRevision[0]?.includes('GA/Auto') ||
+  !wholeReviewRepairRevision[0]?.includes('worktree handoff/Git 环境') ||
+  !wholeReviewRepairRevision[0]?.includes('evidenceEligible=false') ||
+  !wholeReviewRepairRevision[0]?.includes('等待两路最终 GO')
+) {
+  fail('decision register must contain exact Revision 27 whole-review repair ratchet');
+}
+requireReachableCommit(releaseFoundationCommit, '2A.0–2A.7');
 
 if (failures.length > 0) {
   console.error('Plan execution matrix checks failed:');

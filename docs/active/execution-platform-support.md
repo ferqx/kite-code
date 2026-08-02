@@ -85,9 +85,9 @@ production composition entrypoint 也尚未形成 native evidence，因此 outco
 Task 1B.4 的进程内网络控制器已能对 `web_fetch` 逐 invocation/hop 执行精确 host allowlist、
 DNS 实际地址检查、manual redirect 复查、endpoint revision 与 pinned socket，并在 dispatch 前
 持久化 allow/deny receipt。该控制器不依赖 proxy environment，但也不能约束任意 descendant。
-因此所有候选平台在 sealed boundary 下仍把 Shell/Skill 网络收紧为 off，并在 Task 1B.8 前关闭
-全部 MCP transport entrypoint 和 `tool_search` Provider readiness；没有 child-bypass native
-conformance，也没有平台因此进入支持集。
+因此所有候选平台在 sealed boundary 下仍把 Shell/Skill 网络收紧为 off。Remote HTTP MCP 已有
+逐 invocation transport/endpoint admission 实现，但当前 production TUI 未提供 receipt controller，
+local stdio 也因缺少 native child conformance 明确排除；没有平台因此进入支持集。
 
 Linux bubblewrap 的开发边界现已把 canonical Workspace 按 `workspace_write` 或 `read_only`
 分别投影为 rw/ro bind，并把逐 invocation runtime 显式 rw bind；runtime 清理在只暴露该 runtime
@@ -151,3 +151,33 @@ CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enab
 canonical digest。静态 support matrix 当前为 `accepted_empty_support_set`。任一 backend、
 profile、composition root、runner image 或边界实现变化都需要新 evidence；只有新的追加 ADR
 与独立 release gate 才能加入非空生产支持项。
+
+`scripts/release/execution-boundary-smoke.ts` 与
+`.github/workflows/execution-boundary-conformance.yml` 把当前空支持集带入 actual synthetic artifact
+smoke：三个 target 只能输出 `excluded`，八类 adversarial contract 只能输出
+`excluded_not_admitted`，report 固定 `productionSupported=false`、supported count=0、
+`distributable=false`。这是一条负向 conformance 路径；三平台默认分支 artifact 未实际产生前，
+不得完成 1B.9 或产生 `MS:1B-DONE`。
+
+三平台 conformance 的测试夹具必须只依赖 runner 上可移植、可规范化的身份：临时路径按
+canonical native path 比较，不假定 POSIX `/tmp` 或未规范化的短路径；需要生成提交或 merge
+状态的 fixture 显式提供本地 Git author/committer identity；恢复 baseline 内容时直接恢复已知
+blob bytes，不继承宿主 `autocrlf` 或 filter。上述约束只消除 runner 假设，不改变任何 admission、
+excluded verdict 或生产支持声明。
+
+上述 workflow 的第三方 Actions 全部固定到 immutable commit SHA，并由 release workflow contract
+test 阻止 tag 回退。App worktree controller 的 Git 子进程使用最小环境，不继承宿主 credential/
+askpass/SSH/proxy 等任意变量，隔离 system/global config，并禁用 hooks、fsmonitor、external diff/
+textconv。controller 以 `worktree add --no-checkout` 建立 worktree，再从 Git tree 读取有界 regular blob
+并直接写入，结构上不调用 smudge/process filter；tracked `.gitattributes`、common-dir
+`info/attributes`、repo-local `filter.*` 或 config include 声明都会在 materialization 前后拒绝。
+首次拒绝检查发生在任何 `status`/`diff` 等 worktree-aware Git 命令之前，避免 stat-dirty tracked
+file 让 Git clean/process filter 在 admission 失败前执行。
+Git replacement objects 在最小环境中固定禁用；common-dir replacement refs、packed replacement refs
+或 legacy grafts 存在时 baseline admission 直接拒绝。单文件、总字节与文件数量都有显式上限。
+`provisioning` 记录只保留给 operator 诊断，不能经 `recover()` 自动提升为 `active`；必须显式丢弃并
+重新创建，只有已经 active 的 worktree 才能轮换 recovery lease。
+
+Review handoff 对 tracked 内容使用 binary diff，对 untracked owned regular file 生成有界、SHA-256
+绑定、base64 binary-safe 的 `KITE_UNTRACKED_FILE_V1` 内容记录。symlink、特殊文件、硬链接、超限、
+owner/path/前后快照变化全部 fail closed；changed-files 只有文件名而没有内容的 handoff 不再成立。

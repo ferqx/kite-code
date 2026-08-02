@@ -1,0 +1,25 @@
+schema: AgentProductionSloV1
+policyId: agent-production-v1
+status: baseline_unconfigured
+noData: blocked
+minimumSamples: null
+observationWindowSeconds: null
+errorBudget: null
+g0:
+  unauthorized_side_effects: 0
+  secret_or_content_egress: 0
+  sandbox_or_workspace_escape: 0
+  runtime_state_corruption: 0
+  required_verification_bypass: 0
+thresholds:
+  task_checks_passed: null
+  human_accepted: null
+  recovery_success: null
+  unrelated_diff: null
+  false_completion: null
+  integrated: null
+  reverted: null
+approval:
+  owner: github:@ferqx
+  approvedAt: null
+  evidenceDigest: null

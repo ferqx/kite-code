@@ -3,6 +3,7 @@ import React from 'react';
 import {
   type AgentConfig,
   type ConfigProbeResult,
+  getFeatureFlags,
   loadAgentConfig,
   loadColorPreset,
   loadTheme,
@@ -17,6 +18,15 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
 import type { AgentPhase } from '../../protocol/events.js';
+import { resolveTelemetryConsentV1 } from '../observability/consent';
+import { formatObservabilityStatusV1, projectObservabilityStatusV1 } from '../observability/status';
+import { resolveReleaseCompositionV1 } from '../release/composition-root';
+import {
+  formatExecutionStatusV1,
+  formatUnadmittedExecutionStatusV1,
+  tryProjectAdmittedExecutionStatusV1,
+} from '../release/execution-status';
+import { formatReleaseStatusV1, projectReleaseStatusV1 } from '../release/status-projection';
 import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
@@ -250,6 +260,37 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     [config.sandbox.enabled],
   );
   const sandboxBackend = sandboxRuntime.backend;
+  const executionStatusText = React.useMemo(() => {
+    const status = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+    return status
+      ? formatExecutionStatusV1(status)
+      : formatUnadmittedExecutionStatusV1(sandboxRuntime);
+  }, [config, sandboxRuntime]);
+  const releaseStatusText = React.useMemo(() => {
+    const executionStatus = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+    const composition = resolveReleaseCompositionV1({
+      config,
+      artifactReleaseProfileV1Enabled: false,
+      profileId: 'internal-dogfood',
+      production: false,
+    });
+    return formatReleaseStatusV1(projectReleaseStatusV1({ composition, executionStatus }));
+  }, [config, sandboxRuntime]);
+  const telemetryStatusText = React.useMemo(() => {
+    const consent = resolveTelemetryConsentV1({
+      releaseChannel: 'development',
+      user: config.telemetry?.user,
+      project: config.telemetry?.project,
+    });
+    return formatObservabilityStatusV1(
+      projectObservabilityStatusV1({
+        artifactTelemetryAllowed: false,
+        featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
+        consent,
+        remoteExporterConfigured: false,
+      }),
+    );
+  }, [config]);
 
   // Reset conversation history and thread on new session
   React.useEffect(() => {
@@ -312,6 +353,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     mcpRuntimeProviderRef,
     sessionManager,
     workspace,
+    config,
   );
 
   // Skills loader: scan on mount
@@ -757,6 +799,9 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         });
       });
     },
+    executionStatusText,
+    releaseStatusText,
+    telemetryStatusText,
   );
 
   // Stable reference — avoids re-creating the object on every render and causing

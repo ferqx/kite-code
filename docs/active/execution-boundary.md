@@ -7,7 +7,10 @@ projection、release-controlled execution policy 或对应 feature flag 时。
 
 验证：`bun test tests/sandbox/execution-boundary.test.ts tests/sandbox/network-boundary.test.ts
 tests/sandbox/network-boundary-concurrency.test.ts tests/runtime/tool-controller.test.ts
-tests/config/features.test.ts`、
+tests/config/features.test.ts tests/sandbox/status-projection.test.ts
+tests/workspace/worktree-controller.test.ts tests/mcp-transport-boundary.test.ts
+tests/mcp-transport-boundary-concurrency.test.ts`、
+`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
 相关：ADR-0051、ADR-0054、ADR-0061、`execution-platform-support.md`。
@@ -104,14 +107,17 @@ observer 不可用时返回 typed `controller_unavailable`；并发 sibling 不�
 许可时进入 MCP Tool request；secret、受保护 credential path 或无法在固定预算内完成检查的参数
 不允许请求/消费 permit。许可、digest 与协议发送共同使用 await 前捕获的 immutable JSON-safe
 参数快照，调用方或 receipt callback 后续修改原对象不会改变 wire payload。nonce 的持久化唯一
-冲突会先保存 `permit_replayed` denial，不会悬挂执行循环或退化为协议请求。但在 Task 1B.8 完成前
-仍不能让 sealed boundary 下的 MCP transport 重新开放。
+冲突会先保存 `permit_replayed` denial，不会悬挂执行循环或退化为协议请求。该内容许可仍不替代
+下述 transport admission；两者必须同时允许，任一缺失都发送零请求。
 
 当前原生 backend 尚不能对任意 Shell/Skill descendant 实现无旁路 host allowlist，因此 sealed
-boundary 下 Shell 网络固定为 disabled；所有 MCP inventory/resource/tool transport 和可能触发
-Provider readiness 的 `tool_search` 也在 Controller 的 provider lookup/readiness 前拒绝，直到
-Task 1B.8 把 transport 接入同一逐 invocation admission。该 fail-closed 行为与
-当前空 production support set 一致，不是 network allowlist 的跨进程 conformance 声明。
+boundary 下 Shell 网络固定为 disabled。Remote HTTP MCP 现在具有独立的 transport boundary：
+connection、inventory、resource、Tool、OAuth 操作均绑定 canonical Workspace、execution boundary
+digest、run/profile identity、network policy revision、canonical endpoint/endpoint revision 与单次
+invocation/tool-call receipt；实际 SDK fetch 对每个请求和 redirect hop 复用 network enforcer 的
+DNS/private/allowlist/pinned-address 检查，并忽略环境 proxy。并发 sibling 不能复用一次 receipt。
+但是当前 production TUI 没有可签发这些 receipt 的 App controller，因此仍在 Provider readiness
+前 fail closed；这与当前空 production support set 一致，不是已经开放 remote MCP 的声明。
 
 ## Native filesystem projection
 
@@ -149,13 +155,13 @@ filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 会剪�
 
 Seatbelt profile 直接消费该共享定义的目录/文件集合；Shell 的命令字符串扫描不再是权威 gate。
 production execution surface 或 evaluator 任一缺失时，Runner 在任何 builtin adapter I/O 前拒绝。
-普通 Task child 与 forked Skill 的文件工具都继承父级同一 `taskConfig` evaluator。local stdio MCP manager 可接收同一 evaluator，
-并在 transport construction 前以 `execute` operation 拒绝 protected/outside cwd 与 path-like
-executable，再把 canonical cwd 和 path-like executable identity 交给 transport factory。Task 1B.8
-完成 sealed argv/runtime pinning 前，带 evaluator 的 local stdio 配置只接受空 `args`；任意非空 argv
-均在 transport factory 前 fail closed。bare PATH command 的 runtime pinning 与完整 child boundary
-仍属于 Task 1B.8，生产 MCP transport 继续关闭。未来 typed Git/worktree
-controller 走独立 App 授权，不能借此向模型 Shell 或通用文件工具开放 `.git`。
+普通 Task child 与 forked Skill 的文件工具都继承父级同一 `taskConfig` evaluator。local stdio MCP
+manager 可接收同一 evaluator，并在 transport construction 前以 `execute` operation 拒绝
+protected/outside cwd 与 path-like executable，再把 canonical cwd 和 path-like executable identity
+交给 transport factory。sealed transport identity 固定把 `localStdioMcp=false`：在存在真实
+sandbox-backed stdio factory、argv/runtime pinning 与 native child inheritance conformance 前，
+即使 capability surface bit 被错误设为 true 也以 `transport_denied` 拒绝，生产不会构造本地 child。
+typed Git/worktree controller 走独立 App 授权，不能借此向模型 Shell 或通用文件工具开放 `.git`。
 
 `createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
 production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，
@@ -176,3 +182,23 @@ backend 直接视为 unavailable，production 拒绝执行，cleanup 也保留�
 hard-count `unsupported`，production surface 在 admission 阶段全关闭。raw artifact 同时保留
 `hardCountMechanism`；旧 V1 artifact 缺失时按 `none` 解释，不能从 verdict 反推机制。通用布尔
 projector 不从 sandbox barrel 导出，release producer 只能读取当前保守投影。
+
+## App-owned writer placement and status
+
+`src/app/workspace/worktree-controller.ts` 是唯一拥有 Git/worktree authority 的 typed App
+controller。共享 checkout 默认只读；只有用户在场且显式选择的 foreground TUI writer 可使用当前
+checkout。D-09 继续排除 foreground Headless CLI writer；后台、定时、无人值守、并发和委派 writer
+只有在 controller 开启时才可进入 identity-bound worktree，创建失败不得回退共享 checkout。
+controller 要求 clean、精确 40-hex baseline，使用持久单 writer lease、opaque Runtime binding 与
+ownership nonce；branch collision、Git/磁盘失败、crash recovery identity 不匹配全部 fail closed。
+cleanup 只移除 identity 验证通过且 clean 的 controller-owned worktree；dirty、conflict、operation
+lock 或 identity drift 都保留现场供人工恢复。它不 push、merge 或删除 branch，并关闭 checkout
+hooks。
+
+`src/app/release/execution-status.ts` 只投影已经通过 Core production admission 的有效状态：实际
+sandbox backend/availability/fallback、filesystem scope、network mode 与 host 数量、protected-path
+policy、controller worktree 状态以及 capability 的 typed disabled reasons。它不暴露 Workspace
+路径、host 名、process limit、qualification proof 或完整安全 profile，也不产生 capability。
+普通 TUI 的 `/permissions` 明确显示 `not admitted`；CLI `--execution-status` 在创建 Runtime、MCP 或
+Skill 前输出状态并退出。CLI 直接启用 `executionBoundaryV1`/`networkBoundaryV1` 会在参数解析阶段
+拒绝，显式 `false` 仍可单调收紧。

@@ -1,0 +1,28 @@
+schema: AgentProductionAlertPolicyV1
+policyId: agent-production-v1
+owner: github:@ferqx
+backup: none_single_maintainer
+noData: alert
+routes:
+  - id: g0-immediate
+    severity: critical
+    signals: [unauthorized_side_effects, secret_or_content_egress, sandbox_or_workspace_escape, runtime_state_corruption, required_verification_bypass]
+    actions: [capability_off, cohort_zero, preserve_metadata_evidence]
+  - id: required-ci
+    severity: high
+    signals: [required_ci_failed, release_gate_failed]
+    actions: [cohort_zero, artifact_rollback]
+  - id: error-budget
+    severity: high
+    signals: [error_budget_burn, telemetry_absent]
+    actions: [cohort_zero, preserve_metadata_evidence]
+  - id: runtime-critical
+    severity: critical
+    signals: [compaction_critical, sandbox_failure, network_failure, worktree_failure, resource_leak, cancel_incomplete]
+    actions: [capability_off, cohort_zero, preserve_metadata_evidence]
+  - id: provider-outage
+    severity: medium
+    signals: [provider_outage, mcp_outage, telemetry_dropped]
+    actions: [capability_off, preserve_metadata_evidence]
+controlPlaneFailure: cohort_zero
+remoteAutomaticKillSwitch: false

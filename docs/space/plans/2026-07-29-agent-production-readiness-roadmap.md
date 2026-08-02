@@ -4,7 +4,7 @@
 创建：2026-07-29
 优先级：P0
 初始论证基线：`410b2c24717ab50f0cd7fe32d54942fa6fca9840`
-当前执行复核基线：`e6e0ffb51115c3380a1dcc340dd1627b3bdd0970`（2026-08-01）
+当前执行复核基线：`e23b81b1087a7cdea5f4d9c5d419f5d040b67702`（2026-08-02）
 依赖：已批准的
 [`Agent 生产就绪与渐进发布控制 RFC`](../../design/2026-07-29-agent-production-readiness-rfc.md)
 替代：无
@@ -41,11 +41,30 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   唯一产生 `MS:1A-DONE`。该 milestone 不产生 production-qualified route 或
   production artifact；当前 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
   route 集合也为空。
-- 1B.0–1B.5 与 1C.1–1C.6 已完成；D-04 以空支持集关闭。1B.2/1B.3 的完成结论是
-  三平台候选均明确 `excluded`，不产生 production qualification；1B.6/1B.8 已 ready 但尚未
-  建立 execution binding，1C.7 仍在执行。
-  1C.8 与其他后续 milestone 均为 pending。1C.8 已开始不产生 milestone
-  的 pre-close 文档审计，但完成与 `MS:1C-DONE` 仍等待 1C.7 qualification artifact。
+- 1B.0–1B.5 与 1C.1–1C.8 已完成；D-04 以空支持集关闭。1B.2/1B.3 的完成结论是
+  三平台候选均明确 `excluded`，不产生 production qualification；1B.6–1B.8 已完成本地实现和
+  定向验证并保持 `in_progress`，等待约定的最终整体 Review。1B.9 已完成本地 negative
+  conformance，仍等待默认分支三平台 workflow artifact 与最终整体 Review。
+- Phase 1C 已由默认分支 [Ubuntu qualification run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064)
+  的正式 artifact 与独立 verifier 收口；Task 1C.8 唯一产生 `MS:1C-DONE`。该 milestone 不生成
+  production artifact，其他后续 milestone 仍为 pending。
+- D-06 已按 ADR-0062 关闭；2A.0–2A.7 Release Contract Foundation 已由
+  `2e98681c800a2f1f745bc18e41ac682d9c09e84b` 与
+  [完成记录](../execution/completed/2026-07-30-agent-production-release-control.md)收口，Task 2A.7
+  唯一产生 `MS:2A-F`。该结果不包含 G2–G5、真实 signing/attestation、production platform、RC
+  或 external release 结论。
+- 2A.8、2A.9、2B.1–2B.9、3.1–3.8/3.10 已完成各自本地 fail-closed contract；2A.8 和 D-07
+  关闭后解锁的 2B.1 已绑定为 `in_progress`。D-03、`MS:1B-DONE`、正式平台/供应链、真实人工/
+  incident/SLO evidence 未满足；这些 Task 不标记 completed，`MS:2B-DONE`、`MS:3-OPS-READY`、
+  `MS:2A-RC` 和 `MS:LIMITED-SLO` 均未产生。
+- Phase 4–6 的本地 schema、conformance、profile、selection 与 Gate contract 已提前实现；D-10 已按
+  ADR-0064 关闭，只有形式依赖已满足的 5.1 绑定为 `in_progress`。其余 Task 保持未绑定，所有
+  route/profile/cohort 均 off/empty/0；本地 synthetic/blocked fixture 不产生 manual stable、能力
+  stable、GA、canary、maturity 或第三方评审 evidence。
+- 首轮整体 Review 的 P1/P2 已进入修复：Release 第三方评审/production admission、Limited SLO、
+  D-07、GA/Auto、worktree handoff/Git 环境和 workflow pin 全部改为 fail-closed；在两路最终复核
+  给出 GO 前，不提升任何 `in_progress` Task 或产生新 milestone。
+  第三方 reviewer trust root 当前为空，本地 external review fixture 不能产生 approved candidate。
 
 ## 首发支持边界
 

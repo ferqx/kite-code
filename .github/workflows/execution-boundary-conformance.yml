@@ -1,0 +1,58 @@
+name: Execution Boundary Artifact Conformance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "src/core/config/release-*.ts"
+      - "src/core/sandbox/**"
+      - "src/core/mcp/**"
+      - "src/app/release/**"
+      - "src/app/workspace/**"
+      - "scripts/release/**"
+      - "release/platform-capabilities/**"
+      - "tests/release/**"
+      - "tests/sandbox/**"
+      - "tests/workspace/**"
+      - ".github/workflows/execution-boundary-conformance.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  negative-artifact-conformance:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Official refs/tags/v4, refs/tags/v2 and refs/tags/v4 commit objects,
+      # resolved through the GitHub API on 2026-08-02.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Boundary and adversarial contracts
+        run: >-
+          bun test
+          tests/policies/protected-path.test.ts
+          tests/sandbox/network-boundary.test.ts
+          tests/sandbox/network-boundary-concurrency.test.ts
+          tests/sandbox/process-tree-limit.test.ts
+          tests/sandbox/execution-boundary.test.ts
+          tests/workspace/worktree-controller.test.ts
+          tests/mcp-transport-boundary.test.ts
+          tests/mcp-transport-boundary-concurrency.test.ts
+          tests/release/execution-boundary-smoke.test.ts
+      - run: bun run release:build
+      - run: bun run release:verify
+      - run: bun run release:smoke:execution
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: execution-boundary-negative-conformance-${{ matrix.os }}
+          path: |
+            dist/release-synthetic/
+            dist/execution-boundary-smoke.json
+          if-no-files-found: error

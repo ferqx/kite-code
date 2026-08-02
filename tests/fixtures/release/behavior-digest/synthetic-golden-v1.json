@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "canonicalizer": "RFC8785",
+  "inputClass": "synthetic_non_production",
+  "items": {
+    "agentSystemContract": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.agent-system-contract.v1",
+      "digest": "sha256:5182fb51e62ef6bf4333fe7faf0fc485e8967839ddb672ac3181f9c1b30a210e"
+    },
+    "askUserContract": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.ask-user-contract.v1",
+      "digest": "sha256:f08b7d466f7a6d92b3552e4f2e05bfe6e37fa13c7078b553e2b454d08e371b79"
+    },
+    "compactionPolicy": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.compaction-policy.v1",
+      "digest": "sha256:21145526b207efe96a5a0da86b5efff82b9cacdab02c259eb47673f980da6ec3"
+    },
+    "toolRegistry": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.model-visible-tool-registry.v1",
+      "digest": "sha256:5fb2e4a97941b7fac222c05e63d142e900c5f35bfecd1183629b39b17ea4ef05"
+    },
+    "runtimeSchedulingPolicy": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.runtime-scheduling-policy.v1",
+      "digest": "sha256:12f9f40fe1b482f3850ebdda54f0353c1af18d8dc619611e578c5c0fb5c942ab"
+    },
+    "skillsContracts": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.builtin-skills-contracts.v1",
+      "digest": "sha256:2fe465d189c288471087e2d28b2a5d84c7531eccbc47138123425cc18f4eb152"
+    },
+    "defaultConfiguration": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.default-configuration.v1",
+      "digest": "sha256:0d64ba17a78ea2dbdf4045a4fba81b7b120c264ca75f0c9eda43ffc3e14f9e66"
+    },
+    "providerDataPolicy": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.provider-data-policy-bundle.v1",
+      "digest": "sha256:766446c48450b97b5eb57de97f96ae7c23fbd54dfef6b8181c958eb4f9fc0433"
+    },
+    "releaseProfile": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.release-profile.v1",
+      "digest": "sha256:810ea9f3f4ca37b8fd8edc10bfec279b0c7a6e32c3bdd42a2b56f9b4346c941f"
+    },
+    "gatePolicy": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.release-gate-policy.v1",
+      "digest": "sha256:bcd1fccd1a78ece342362ae149194fff2485c448bf0cdf139f8ea91522c6b010"
+    },
+    "buildRecipe": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.build-recipe.v1",
+      "digest": "sha256:ac6d0e1aacc950cb3821c37794bf19434dc4a26a892a79882a421002f9d1a46d"
+    },
+    "lockfile": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.bun-lockfile.v1",
+      "digest": "sha256:99b5aafda63ffd5f1e2bc20b5259dde3fbb8fc727d047c77e53833bef00c6348"
+    }
+  },
+  "aggregateDigest": "sha256:f783498ebe885c9871261aabe0052c6e2f860227849cc093d9bf3d4f43fbb083"
+}

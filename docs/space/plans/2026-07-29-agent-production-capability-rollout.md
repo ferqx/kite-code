@@ -1,6 +1,6 @@
 # Agent 生产化 Phase 5：MCP、Skills、Verification 分能力发布计划
 
-状态：draft
+状态：active
 创建：2026-07-29
 优先级：P1
 依赖：
@@ -15,6 +15,18 @@
 
 在 limited 基础能力稳定后，将 MCP write、Skills 和 Verification 作为三个独立 Release
 Capability 分别评估、canary、回滚，避免实现存在被误认为生产默认可用。
+
+## 当前本地 Contract 边界
+
+D-10 已由 ADR-0064 关闭；5.1 的 strict Capability Profile/admission contract 已满足形式依赖并
+绑定为 `in_progress`，等待最终整体 Review。5.2、5A.1–5A.2、5B.1–5B.3、5C.1–5C.2 与
+5.3B/5.3C 的本地 schema/conformance/evidence adapter 已提前实现，但各自正式 dependsOn 尚未全部
+满足，因此没有新增 execution binding，也不标记 Task completed。
+
+四个 profile 均为 `under_development/off`，production MCP write route 为空，Skills cohort 为 0；
+本地 adapter 固定 `local_contract_only`/blocked。formal Agent task、真实 Provider route、internal
+dogfood、external canary、beta/stable maturity 与第三方评审 evidence 均未发生，不产生任何
+`MS:5*-STABLE`。
 
 ## 非目标
 

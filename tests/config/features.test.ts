@@ -32,6 +32,7 @@ describe('feature flags', () => {
     expect(getFeatureFlags().terminalOutcomeV1).toBe(false);
     expect(getFeatureFlags().executionBoundaryV1).toBe(false);
     expect(getFeatureFlags().networkBoundaryV1).toBe(false);
+    expect(getFeatureFlags().observabilityMetricsV1).toBe(false);
     expect(
       getFeatureFlags({ features: { boundedCancellationV1: true } }).boundedCancellationV1,
     ).toBe(true);
@@ -81,6 +82,25 @@ describe('feature flags', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  test('rejects CLI attempts to enable release-controlled execution boundaries', () => {
+    expect(() => parseArgs(['run', '--feature', 'executionBoundaryV1'])).toThrow(
+      'release-controlled',
+    );
+    expect(() => parseArgs(['run', '--feature', 'networkBoundaryV1=true'])).toThrow(
+      'release-controlled',
+    );
+    expect(parseArgs(['run', '--feature', 'networkBoundaryV1=false']).featureOverrides).toEqual({
+      networkBoundaryV1: false,
+    });
+    expect(() => parseArgs(['run', '--feature', 'observabilityMetricsV1=true'])).toThrow(
+      'release-controlled',
+    );
+    expect(
+      parseArgs(['run', '--feature', 'observabilityMetricsV1=false']).featureOverrides,
+    ).toEqual({ observabilityMetricsV1: false });
+    expect(parseArgs(['run', '--telemetry-status']).telemetryStatus).toBe(true);
   });
 
   test('keeps the legacy reviewer timeout until autoReviewV2 is enabled', () => {

@@ -93,6 +93,8 @@
       "sources": [
         "src/core/mcp/**",
         "src/core/skills/**",
+        "tests/mcp-transport-boundary.test.ts",
+        "tests/mcp-transport-boundary-concurrency.test.ts",
         ".github/workflows/mcp-native-keyring-smoke.yml",
         ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
@@ -137,10 +139,36 @@
     },
     {
       "id": "verification",
-      "sources": ["src/core/verification/**", "src/protocol/verification.ts"],
+      "sources": [
+        "src/core/verification/**",
+        "src/protocol/verification.ts",
+        "tests/verification/**"
+      ],
       "documents": [
         "docs/active/verification-governance.md",
-        "docs/active/six-concept-runtime-architecture.md"
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/capability-release-tracks.md",
+        "docs/book/12-测试体系.md"
+      ]
+    },
+    {
+      "id": "app-execution-boundary",
+      "sources": [
+        "src/app/workspace/**",
+        "src/app/release/execution-status.ts",
+        "src/app/cli/index.ts",
+        "src/app/tui/index.tsx",
+        "src/app/tui/hooks/useSlashCommand.ts",
+        "tests/workspace/**",
+        "tests/sandbox/status-projection.test.ts",
+        "tests/tui-system/scenarios/sandbox-mode.test.ts"
+      ],
+      "documents": [
+        "docs/active/execution-boundary.md",
+        "docs/active/execution-platform-support.md",
+        "docs/active/feature-flags.md",
+        "docs/book/05-工具系统与安全策略.md",
+        "docs/book/09-CLI模式与配置.md"
       ]
     },
     {
@@ -178,6 +206,94 @@
         "docs/book/05-工具系统与安全策略.md",
         "docs/adr/0061-production-platform-capability-admission.md",
         "docs/adr/0049-effect-aware-read-scheduling.md"
+      ]
+    },
+    {
+      "id": "release-control",
+      "sources": [
+        "scripts/release/**",
+        "src/core/config/release-*.ts",
+        "src/app/release/**",
+        "tests/release/**",
+        "tests/fixtures/release/**",
+        "release/platform-capabilities/**",
+        ".github/workflows/execution-boundary-conformance.yml",
+        ".github/workflows/release-candidate.yml"
+      ],
+      "documents": [
+        "docs/active/release-control.md",
+        "docs/active/feature-flags.md",
+        "docs/active/execution-platform-support.md",
+        "docs/book/09-CLI模式与配置.md",
+        "docs/book/12-测试体系.md",
+        "docs/adr/0062-keyless-release-signing-and-github-hosting.md",
+        "README.md"
+      ]
+    },
+    {
+      "id": "agent-task-evaluation",
+      "sources": ["tests/evals/agent-tasks/**"],
+      "documents": [
+        "docs/active/agent-task-evaluation.md",
+        "docs/active/real-model-test-boundary.md",
+        "docs/book/12-测试体系.md",
+        "README.md"
+      ]
+    },
+    {
+      "id": "compaction-evaluation",
+      "sources": ["tests/evals/compaction/**"],
+      "documents": [
+        "docs/active/compaction-release-qualification.md",
+        "docs/active/real-model-test-boundary.md",
+        "docs/book/12-测试体系.md"
+      ]
+    },
+    {
+      "id": "capability-release-conformance",
+      "sources": [
+        "src/core/config/release-capabilities.ts",
+        "src/app/release/capability-status.ts",
+        "tests/capabilities/**",
+        "tests/mcp/write-*.test.ts",
+        "tests/mcp/write-contract-fixtures.ts",
+        "tests/skills/conformance-fixtures.ts",
+        "tests/skills/effect-classification.test.ts",
+        "tests/skills/workflow-contract.test.ts",
+        "tests/evals/capabilities/**",
+        "release/capability-profiles/**"
+      ],
+      "documents": [
+        "docs/active/capability-release-tracks.md",
+        "docs/active/mcp-runtime-governance.md",
+        "docs/active/verification-governance.md",
+        "docs/active/tool-gated-autonomy.md",
+        "docs/active/feature-flags.md",
+        "docs/book/11-MCP与Skills扩展.md",
+        "docs/book/12-测试体系.md",
+        "docs/adr/0064-conservative-skill-effects-and-capability-profile-admission.md"
+      ]
+    },
+    {
+      "id": "observability-and-operations",
+      "sources": [
+        "src/core/observability/**",
+        "src/app/observability/**",
+        "src/app/release/capability-kill-switch.ts",
+        "ops/**",
+        "scripts/operations/**",
+        "tests/observability/**"
+      ],
+      "documents": [
+        "docs/active/observability-privacy-operations.md",
+        "docs/active/feature-flags.md",
+        "docs/active/session-logging-policy.md",
+        "docs/book/08-TUI交互全景.md",
+        "docs/book/09-CLI模式与配置.md",
+        "docs/book/10-持久化与会话管理.md",
+        "docs/book/12-测试体系.md",
+        "docs/adr/0063-no-content-observability-and-single-maintainer-operations.md",
+        "README.md"
       ]
     },
     {

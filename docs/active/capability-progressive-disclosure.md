@@ -13,9 +13,11 @@ Capability disclosure 的 token budget 使用与 context preflight 相同的 `Re
 Per-tool 名称注入（`## Available MCP Tool Names` 段落）已移除。模型初始只通过 system prompt 中的固定 MCP Capability Usage 规则和工具列表中的 `list_mcp_tools`、`tool_search`、`list_mcp_resources` 三个内置工具发现 MCP 能力。`tool_search` 在 `toolSearchV1` 开启且 provider 支持工具调用时始终可用，不受 disclosure mode 影响；小目录直绑场景中 `tool_search` 仍保持可用，作为模型的 fallback 发现路径。规则明确禁止将 Resource 列表为空推断为 MCP Tool 不存在，并将三种用户意图路由到对应工具。
 
 上述可用性只适用于未携带 sealed production execution boundary 的路径。当前 sealed boundary
-会在 Controller 任何 Provider lookup/readiness 之前拒绝 `tool_search`、MCP inventory/resource
-和动态 Tool，直到 Task 1B.8 把 transport 接入逐 invocation network admission；模型披露不能
-被当作执行许可。
+只在 App 提供匹配 boundary/run/profile/network/endpoint/invocation identity 的单次 transport
+receipt 后允许 remote HTTP Provider lookup/readiness；实际 fetch 仍逐 hop 执行 DNS/private/
+allowlist/pinned-address 检查。当前 production TUI 没有该 controller，因此 `tool_search`、MCP
+inventory/resource 和动态 Tool 继续 fail closed。local stdio 在 native conformance 前始终排除。
+模型披露不能被当作执行许可。
 
 `list_mcp_tools` 是确定性的纯只读盘点工具，不触发网络连接或等待 Provider discovery。基于 CapabilitySnapshot 和 ProviderDirectorySnapshot 构建脱敏清单。列出每个 Provider 的状态、next_action、可用 Tool 名称，支持 provider 过滤和 cursor 分页；输出不含 capabilityId、revision、schema 或 binding。mcpManager 不存在时返回合法空清单。`configured_provider_count` 和 `available_tool_count` 为全量去重值，不受 provider 过滤影响；过滤时额外返回 `matched_provider_count` 和 `matched_tool_count`。Provider 名和 Tool 名通过 `safeCapabilityMetadata`（`src/core/capabilities/public-metadata.ts`）统一清理：过滤控制字符和 surrogates、压缩空白、以 code point 安全截断至 96 字符。
 
@@ -42,3 +44,8 @@ Per-tool 名称注入（`## Available MCP Tool Names` 段落）已移除。模�
 MCP Resources 不进入 `tool_search`、session-loaded Tool set 或 turn-scoped binding。`list_mcp_resources` 与 `read_mcp_resource` 是稳定内置只读工具：前者从 Runtime Resource Directory 枚举静态 URI，后者只读取当前 discovery snapshot 中存在的 URI。Resource discovery 与 Tool progressive disclosure 保持独立。
 
 三类 MCP 暴露概念必须正交：Provider != Tool != Resource。任何一个为空不自动推出另外两个为空。
+
+Disclosure/search 仍只表示发现，不表示 release admission。Phase 5 profile 即使列出 capability，也必须
+重新验证实际 feature flags、dependency revision、embedded ceiling、route/platform allowlist 和实际
+G3/G4/G5 freshness；unknown/stale/failed 全部 blocked。当前 MCP write 与 Skills production route/
+profile 均为空或 off。

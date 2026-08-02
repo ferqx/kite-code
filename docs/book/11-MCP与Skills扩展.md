@@ -26,10 +26,12 @@ MCP Tools 通过三个内置只读工具按意图使用：
 
 三个工具正交：Resource 为空不表示没有 MCP Tool，search 零匹配不表示 catalog 为空。
 
-当配置携带 sealed production execution boundary 时，当前 Controller 会在任何 Provider
-lookup/readiness 前拒绝上述 inventory/resource/search 和动态 MCP 调用；这用于在 Task 1B.8
-完成逐 invocation transport admission 前保持 fail closed，不表示 MCP 已继承进程内
-`web_fetch` 的 host allowlist。
+当配置携带 sealed production execution boundary 时，remote HTTP 的 connect、inventory、
+resource、Tool 与 OAuth 操作都要求绑定 Workspace、boundary/run/profile/network revision、endpoint
+revision 和 invocation/tool-call 的单次 receipt；SDK fetch 对每个 request/redirect hop 重新执行
+DNS/private/allowlist/pinned-address admission，不读取环境 proxy。当前 production TUI 没有 receipt
+controller，因此仍在 Provider lookup/readiness 前拒绝；local stdio 在 native child conformance 前
+始终排除。这是安全基础设施，不是 MCP production availability 声明。
 
 ## 11.3 Health 与恢复
 
@@ -85,8 +87,16 @@ Manager 在 SDK 调用前校验进程内 ledger，Runtime Store 再把 nonce dig
 无法完成检查的输入都不能通过 permit 外发。边界在任何异步授权前创建 immutable JSON-safe 深
 快照，schema、检查、digest 和最终 SDK request 使用同一份内容，禁止 accessor/custom serializer
 造成签署后变更。permit 最长五分钟；空参数 HTTP Tool 和 local stdio 不消费该 permit；这不表示
-stdio 已有 production admission。Task 1B.8 完成 sealed argv/runtime/child boundary 前，注入
-protected-path evaluator 的 local stdio 配置只允许空 argv，任意非空 `args` 都在 transport factory
-前 fail closed。Tool Search/discovery 只处理元数据，也不会触发正文许可。
+stdio 已有 production admission。sealed transport identity 固定把 local stdio 关闭；真实 sandbox
+factory、argv/runtime pinning 与 native child inheritance conformance 完成前，surface bit、审批或
+配置都不能重新打开。Tool Search/discovery 只处理元数据，也不会触发正文许可。
 
 完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。
+
+## 11.7 分能力发布
+
+Verification、MCP write、Skills readonly 与 Skills effectful 使用独立 strict profile。Profile 不能自行
+开启能力；admission 还要核对实际 flags、dependency revision、route/platform、evidence freshness 和
+G3–G5。MCP write 要求 execution record、Provider Action 与 stable Verification；Skill 的 unknown/
+write/destructive dependency 一律进入 effectful，并要求 Verification。当前四条 profile 全部
+`under_development/off`，production MCP write route 为空，本地 conformance 不代表 canary 或 stable。
