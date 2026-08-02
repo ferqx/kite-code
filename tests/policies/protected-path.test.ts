@@ -9,7 +9,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { z } from 'zod';
 import type { AgentConfig } from '@/core/config';
@@ -22,7 +22,7 @@ import {
   PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
   PROTECTED_WORKSPACE_FILES_V1,
 } from '@/core/policies/protected-path';
-import { generateSandboxProfile } from '@/core/sandbox/profile';
+import { canonicalExistingPath, generateSandboxProfile } from '@/core/sandbox/profile';
 import { canonicalPathForComparison } from '@/core/tools/path-utils';
 import { builtinToolSpecs } from '@/core/tools/registry/builtins';
 import { editFileSpec } from '@/core/tools/registry/builtins/edit-file';
@@ -204,13 +204,17 @@ describe('protected-path policy V1', () => {
   test('projects every shared protected rule into the native Seatbelt boundary', () => {
     const workspace = temporaryDirectory('openpx-protected-seatbelt-');
     const profile = generateSandboxProfile(workspace);
+    const canonicalWorkspace = canonicalExistingPath(workspace);
 
     for (const path of [
       ...PROTECTED_WORKSPACE_DIRECTORIES_V1,
       ...PROTECTED_WORKSPACE_FILES_V1,
       ...PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
     ]) {
-      expect(profile).toContain(join(workspace, path));
+      const seatbeltPath = resolve(canonicalWorkspace, path)
+        .replaceAll('\\', '\\\\')
+        .replaceAll('"', '\\"');
+      expect(profile).toContain(seatbeltPath);
     }
     expect(profile).toContain('(regex #"');
     expect(profile).toContain('[gG][iI][tT]');

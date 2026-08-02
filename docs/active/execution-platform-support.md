@@ -159,6 +159,12 @@ smoke：三个 target 只能输出 `excluded`，八类 adversarial contract 只�
 `distributable=false`。这是一条负向 conformance 路径；三平台默认分支 artifact 未实际产生前，
 不得完成 1B.9 或产生 `MS:1B-DONE`。
 
+三平台 conformance 的测试夹具必须只依赖 runner 上可移植、可规范化的身份：临时路径按
+canonical native path 比较，不假定 POSIX `/tmp` 或未规范化的短路径；需要生成提交或 merge
+状态的 fixture 显式提供本地 Git author/committer identity；恢复 baseline 内容时直接恢复已知
+blob bytes，不继承宿主 `autocrlf` 或 filter。上述约束只消除 runner 假设，不改变任何 admission、
+excluded verdict 或生产支持声明。
+
 上述 workflow 的第三方 Actions 全部固定到 immutable commit SHA，并由 release workflow contract
 test 阻止 tag 回退。App worktree controller 的 Git 子进程使用最小环境，不继承宿主 credential/
 askpass/SSH/proxy 等任意变量，隔离 system/global config，并禁用 hooks、fsmonitor、external diff/

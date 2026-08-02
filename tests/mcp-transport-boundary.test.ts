@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { dirname } from 'node:path';
 import type { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { ToolListChangedNotificationSchema } from '@modelcontextprotocol/sdk/types.js';
 import {
@@ -433,7 +434,9 @@ describe('MCP transport execution boundary', () => {
         throw new Error('must not load');
       },
     });
-    await expect(supervisor.start('/tmp')).rejects.toMatchObject({ code: 'workspace_mismatch' });
+    await expect(supervisor.start(dirname(workspace))).rejects.toMatchObject({
+      code: 'workspace_mismatch',
+    });
     expect(catalogLoads).toBe(0);
     expect(requests).toEqual([]);
   });

@@ -251,7 +251,9 @@ describe('App-owned worktree controller', () => {
     expect(readFileSync(join(lease.workspaceRoot, 'tracked.txt'), 'utf8')).toBe('dirty\n');
     expect(() => acquire(item)).toThrow('writer workspace lease already exists');
 
-    git(lease.workspaceRoot, ['restore', 'tracked.txt']);
+    // Restore the exact baseline blob bytes without inheriting host Git
+    // autocrlf/filter settings that the controller intentionally excludes.
+    writeFileSync(join(lease.workspaceRoot, 'tracked.txt'), 'baseline\n');
     const branch = git(lease.workspaceRoot, ['branch', '--show-current']);
     item.controller.cleanup(lease);
     expect(() => acquire(item)).toThrow(`Controller branch already exists: ${branch}`);
@@ -314,7 +316,11 @@ describe('App-owned worktree controller', () => {
       '-m',
       'baseline side',
     ]);
-    git(lease.workspaceRoot, ['merge', 'main'], [1]);
+    git(
+      lease.workspaceRoot,
+      ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'merge', 'main'],
+      [1],
+    );
 
     expect(() => createChangeHandoffV1({ controller: item.controller, lease })).toThrow(
       'unresolved conflicts',

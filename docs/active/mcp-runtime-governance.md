@@ -18,6 +18,11 @@ excluded until a sandbox-backed transport factory and native child conformance e
 currently has no receipt-signing App controller, so sealed MCP Provider readiness remains fail closed;
 the implementation is transport enforcement infrastructure, not a production availability claim.
 
+Transport boundary conformance 使用真实存在且 canonicalize 后仍与目标 Workspace 不同的原生目录
+验证 `workspace_mismatch`；fixture 不假定 `/tmp` 在 Windows runner 上存在。该可移植性约束只保证
+先经过 Workspace identity gate，再验证零 catalog load/零 transport request，不放宽 sealed
+admission 或任何 MCP production readiness 条件。
+
 Remote HTTP Tool content has an additional boundary independent of transport admission, Tool effects
 approval and model Provider consent. `McpRuntimeProvider.getCapabilityRoute()` exposes only the redacted
 `transport + serverIdentity + endpointRevision + toolRevision` identity. Local stdio does not enter this
