@@ -50,6 +50,18 @@ provenance 和 Workspace data label。`secret` label、runtime secret detector�
 alias、允许分类、retention/training/logging 用途和 policy/registry revision，不暴露 endpoint
 origin。用户、项目或 CLI 配置不能向 registry 增加 policy，也不能放宽仓库批准 bundle。
 
+首个候选记录在只读治理资产 `release/provider-data-policies/candidates-v1.json`：DeepSeek 官方
+API、`deepseek-v4-flash`、canonical endpoint origin `https://api.deepseek.com`，内置
+OpenAI-compatible base URL 保持 `https://api.deepseek.com/v1`。用户没有提供可验证 region，
+因此 route identity 显式记录 `region=unknown`。公开资料未形成可登记的 API 正文固定 retention、
+已验证 training opt-out、DPA 与产品下游披露实现，候选固定
+`status=blocked_policy_evidence`、`productionContentAllowed=false`。candidate loader 与 production
+approved loader 完全分离，不能把模型存在或本地可调用解释为生产数据资格。candidate loader 要求
+四种治理目的各恰好一个 official source，并固定 HTTPS origin：model catalog/context cache 只能来自
+`api-docs.deepseek.com`，terms/privacy 只能来自 `cdn.deepseek.com`；credentials、非默认端口、HTTP、
+其他 hostname、重复 purpose、来源缺失或过期都 fail closed。域名约束只证明来源入口正确，不把未确认的
+retention/training/DPA/披露结论升级为生产资格。
+
 Model Provider admission 与 remote HTTP MCP content egress 是两个独立授权域。模型 route 的
 policy/consent 即使允许 `confidential` payload，也不能签发、复用或替代
 `RemoteMcpEgressPermitV1`；反向同样成立。Tool effects approval 与 host/network admission 也不

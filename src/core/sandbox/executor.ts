@@ -9,6 +9,7 @@ import {
 } from '@/core/tools/shell';
 import type { ShellNetworkMode, ShellResult } from '@/core/types';
 import { generateBwrapArgs } from './bwrap';
+import { buildCgroupPidsInvocationV1, findUsableCgroupPidsRunnerV1 } from './cgroup-pids';
 import { detectSandboxBackend, findUsableBubblewrap } from './platform';
 import { discoverRuntimeReadOnlyRoots, generateSandboxProfile } from './profile';
 import { findApplySeccomp, resolveSeccompPath } from './seccomp';
@@ -105,6 +106,11 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   const bwrapPath = findUsableBubblewrap();
   if (!bwrapPath) return createUnavailableExecutor('bubblewrap_unusable');
   const seccompBinary = findApplySeccomp();
+  const cgroupPidsRunner =
+    options.maxProcessTreeTasks === undefined ? null : findUsableCgroupPidsRunnerV1();
+  if (options.maxProcessTreeTasks !== undefined && !cgroupPidsRunner) {
+    return createUnavailableExecutor('cgroup_pids_hard_limit_unavailable');
+  }
 
   return createWrappedExecutor(
     workspace,
@@ -120,7 +126,17 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
       const innerCmd = seccompPath
         ? [seccompPath, shell, '-c', wrappedCommand]
         : [shell, '-c', wrappedCommand];
-      return { cmd: [bwrapPath, ...bwrapArgs, ...innerCmd] };
+      const sandboxCommand = [bwrapPath, ...bwrapArgs, ...innerCmd];
+      return {
+        cmd:
+          options.maxProcessTreeTasks === undefined
+            ? sandboxCommand
+            : buildCgroupPidsInvocationV1({
+                runner: cgroupPidsRunner!,
+                maxTasks: options.maxProcessTreeTasks,
+                command: sandboxCommand,
+              }),
+      };
     },
     options.network?.mode,
   );

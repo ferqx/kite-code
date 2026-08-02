@@ -2,10 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   admitEmbeddedReleaseProfileV1,
   EMBEDDED_RELEASE_PROFILES_V1,
+  PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1,
+  PRODUCTION_DISTRIBUTION_TARGETS_V1,
   ProductionReleaseProfileAdmissionError,
   parseReleaseProfileV1,
   RELEASE_CAPABILITIES,
-  SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1,
+  SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1,
 } from '../../src/core/config';
 import { getFeatureFlags } from '../../src/core/config/features';
 
@@ -68,14 +70,43 @@ describe('ReleaseProfileV1', () => {
     expect(() => parseReleaseProfileV1(missingCapability)).toThrow();
   });
 
-  test('ships four fail-closed embedded ceilings under the D-04 empty support set', () => {
+  test('ships closed distribution identities independently from fail-closed ceilings', () => {
     expect(Object.keys(EMBEDDED_RELEASE_PROFILES_V1).sort()).toEqual([
       'capability-canary',
       'general-availability',
       'internal-dogfood',
       'limited-production',
     ]);
-    expect(SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1).toEqual([]);
+    expect(PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1).toEqual([
+      'macos-15-arm64',
+      'ubuntu-24.04-x64',
+      'windows-2025-x64',
+    ]);
+    expect(PRODUCTION_DISTRIBUTION_TARGETS_V1).toEqual({
+      'macos-15-arm64': {
+        identity: 'macos-15-arm64',
+        platform: 'macos',
+        arch: 'arm64',
+        nativeRunner: 'macos-15',
+      },
+      'ubuntu-24.04-x64': {
+        identity: 'ubuntu-24.04-x64',
+        platform: 'linux',
+        arch: 'x64',
+        nativeRunner: 'ubuntu-24.04',
+      },
+      'windows-2025-x64': {
+        identity: 'windows-2025-x64',
+        platform: 'windows',
+        arch: 'x64',
+        nativeRunner: 'windows-2025',
+      },
+    });
+    expect(Object.isFrozen(PRODUCTION_DISTRIBUTION_TARGETS_V1)).toBe(true);
+    expect(
+      Object.values(PRODUCTION_DISTRIBUTION_TARGETS_V1).every((target) => Object.isFrozen(target)),
+    ).toBe(true);
+    expect(SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1).toEqual([]);
     for (const profile of Object.values(EMBEDDED_RELEASE_PROFILES_V1)) {
       expect(Object.isFrozen(profile)).toBe(true);
       expect(Object.isFrozen(profile.capabilities)).toBe(true);
@@ -88,7 +119,7 @@ describe('ReleaseProfileV1', () => {
     }
   });
 
-  test('defaults the flag off and rejects production before composition starts', () => {
+  test('defaults the flag off while allowing a non-production profile ceiling', () => {
     expect(getFeatureFlags().releaseProfileV1).toBe(false);
     expect(() =>
       admitEmbeddedReleaseProfileV1({
@@ -96,12 +127,12 @@ describe('ReleaseProfileV1', () => {
         releaseProfileV1Enabled: false,
       }),
     ).toThrow(ProductionReleaseProfileAdmissionError);
-    expect(() =>
+    expect(
       admitEmbeddedReleaseProfileV1({
         profileId: 'limited-production',
         releaseProfileV1Enabled: true,
-      }),
-    ).toThrow('production_support_set_empty');
+      }).channel,
+    ).toBe('limited');
 
     const internal = admitEmbeddedReleaseProfileV1({
       profileId: 'internal-dogfood',
@@ -110,13 +141,13 @@ describe('ReleaseProfileV1', () => {
     expect(internal.channel).toBe('internal');
   });
 
-  test('requires production to use a supported non-internal identity', () => {
+  test('requires production to use a closed distribution identity without enabling capabilities', () => {
     expect(() =>
       admitEmbeddedReleaseProfileV1({
         profileId: 'internal-dogfood',
         releaseProfileV1Enabled: true,
         production: true,
-        productionSupportIdentity: 'future-supported-target',
+        distributionTargetIdentity: 'macos-15-arm64',
       }),
     ).toThrow('production_internal_profile');
     expect(() =>
@@ -125,15 +156,27 @@ describe('ReleaseProfileV1', () => {
         releaseProfileV1Enabled: true,
         production: true,
       }),
-    ).toThrow('production_support_identity_missing');
+    ).toThrow('distribution_target_identity_missing');
     expect(() =>
       admitEmbeddedReleaseProfileV1({
         profileId: 'limited-production',
         releaseProfileV1Enabled: true,
         production: true,
-        productionSupportIdentity: 'future-supported-target',
+        distributionTargetIdentity: 'future-supported-target',
       }),
-    ).toThrow('production_support_set_empty');
+    ).toThrow('distribution_target_identity_unsupported');
+
+    const admitted = admitEmbeddedReleaseProfileV1({
+      profileId: 'limited-production',
+      releaseProfileV1Enabled: true,
+      production: true,
+      distributionTargetIdentity: 'ubuntu-24.04-x64',
+    });
+    expect(Object.values(admitted.capabilities).every((state) => state.maxRollout === 'off')).toBe(
+      true,
+    );
+    expect(Object.values(admitted.resources).every((limit) => limit === 0)).toBe(true);
+    expect(SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1).toEqual([]);
   });
 
   test('allows no unknown embedded profile identity', () => {

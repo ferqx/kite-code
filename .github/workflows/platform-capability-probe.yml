@@ -5,15 +5,27 @@ on:
   pull_request:
     paths:
       - "src/core/sandbox/**"
+      - "src/core/config/execution-boundary.ts"
+      - "src/core/config/execution-qualification.ts"
+      - "src/core/config/release-profile.ts"
+      - "src/core/config/index.ts"
+      - "src/core/sandbox/types.ts"
+      - "src/app/sandbox/**"
+      - "src/app/cli/index.ts"
+      - "src/app/tui/session-manager.ts"
       - "src/core/tools/process-tree.ts"
       - "scripts/release/platform-capability-probe.ts"
+      - "scripts/release/verify-platform-capability-evidence.ts"
       - "release/platform-capabilities/**"
       - "tests/sandbox.test.ts"
       - "tests/sandbox-executor.test.ts"
       - "tests/sandbox-bwrap-executor.test.ts"
       - "tests/sandbox/platform-backends.test.ts"
       - "tests/sandbox/process-tree-limit.test.ts"
+      - "tests/sandbox/cgroup-pids.test.ts"
+      - "tests/sandbox/app-sandbox-composition.test.ts"
       - "tests/sandbox/platform-capability-probe.test.ts"
+      - "tests/sandbox/platform-capability-verifier.test.ts"
       - "tests/sandbox/execution-boundary.test.ts"
       - ".github/workflows/platform-capability-probe.yml"
 
@@ -22,14 +34,33 @@ permissions:
 
 jobs:
   native-probe:
+    env:
+      QUALIFICATION_REPOSITORY: ${{ github.repository }}
+      QUALIFICATION_REPOSITORY_ID: ${{ github.repository_id }}
+      QUALIFICATION_HEAD_SHA: ${{ github.sha }}
+      QUALIFICATION_REF: ${{ github.ref }}
+      QUALIFICATION_WORKFLOW: .github/workflows/platform-capability-probe.yml
+      QUALIFICATION_WORKFLOW_REF: ${{ github.workflow_ref }}
+      QUALIFICATION_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      QUALIFICATION_RUN_ID: ${{ github.run_id }}
+      QUALIFICATION_RUN_ATTEMPT: ${{ github.run_attempt }}
+      QUALIFICATION_RUNNER_CLASS: ${{ matrix.runner_class }}
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, ubuntu-24.04, windows-2025]
+        include:
+          - os: macos-15
+            runner_class: macos-15-arm64-github-hosted
+          - os: ubuntu-24.04
+            runner_class: ubuntu-24.04-x64-github-hosted
+          - os: windows-2025
+            runner_class: windows-2025-x64-github-hosted
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      # Official refs/tags/v4 and refs/tags/v2 commit objects, resolved through
+      # the GitHub API on 2026-08-02.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
@@ -39,8 +70,11 @@ jobs:
         run: >-
           bun test
           tests/sandbox/platform-backends.test.ts
+          tests/sandbox/cgroup-pids.test.ts
+          tests/sandbox/app-sandbox-composition.test.ts
           tests/sandbox/process-tree-limit.test.ts
           tests/sandbox/platform-capability-probe.test.ts
+          tests/sandbox/platform-capability-verifier.test.ts
           tests/sandbox/execution-boundary.test.ts
       - if: runner.os == 'macOS'
         name: macOS native Seatbelt executor
@@ -49,8 +83,14 @@ jobs:
         name: Linux native bubblewrap candidate
         run: bun test tests/sandbox.test.ts tests/sandbox-bwrap-executor.test.ts
       - run: bun run scripts/release/platform-capability-probe.ts platform-capability-evidence.json
-      - uses: actions/upload-artifact@v4
+      - run: >-
+          bun run scripts/release/verify-platform-capability-evidence.ts
+          platform-capability-evidence.json
+          platform-capability-verification.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: platform-capability-${{ matrix.os }}
-          path: platform-capability-evidence.json
+          path: |
+            platform-capability-evidence.json
+            platform-capability-verification.json
           if-no-files-found: error

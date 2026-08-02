@@ -18,7 +18,7 @@ export interface ProcessTreeCapabilityEvidenceV1 {
  * group, PID namespace, Job Object termination, or successful descendant
  * cleanup cannot by itself satisfy the per-invocation hard-count contract.
  */
-function projectProcessTreeCapabilityV1(input: {
+export function projectProcessTreeCapabilityV1(input: {
   hardLimitMechanism: ProcessTreeHardLimitMechanismV1;
   hardLimitConformancePassed: boolean;
   terminationCleanupConformancePassed: boolean;
@@ -33,10 +33,25 @@ function projectProcessTreeCapabilityV1(input: {
   };
 }
 
-/** Current native backends have termination guards but no accepted hard limiter. */
+/**
+ * Project only independently observed native conformance. Callers must not
+ * infer enforcement from binary discovery or a configured numeric limit.
+ */
 export function currentProcessTreeCapabilityV1(
-  _backend: SandboxBackend,
+  backend: SandboxBackend,
+  conformance: {
+    hardLimitMechanism?: ProcessTreeHardLimitMechanismV1;
+    hardLimitConformancePassed?: boolean;
+    terminationCleanupConformancePassed?: boolean;
+  } = {},
 ): ProcessTreeCapabilityEvidenceV1 {
+  if (backend === 'bubblewrap' && conformance.hardLimitMechanism === 'cgroup_pids') {
+    return projectProcessTreeCapabilityV1({
+      hardLimitMechanism: 'cgroup_pids',
+      hardLimitConformancePassed: conformance.hardLimitConformancePassed === true,
+      terminationCleanupConformancePassed: conformance.terminationCleanupConformancePassed === true,
+    });
+  }
   return projectProcessTreeCapabilityV1({
     hardLimitMechanism: 'none',
     hardLimitConformancePassed: false,

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1 } from '../../src/core/config/release-profile';
+import { SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1 } from '../../src/core/config/release-profile';
 import { verifyBootstrapArtifact } from './bootstrap-verifier';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
 
@@ -60,8 +60,8 @@ export function runExecutionBoundaryArtifactSmokeV1(input: {
   repositoryRoot?: string;
 }): ExecutionBoundarySmokeReportV1 {
   const matrix = parseSupportMatrix(input.supportMatrix);
-  if (SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1.length !== 0) {
-    throw new Error('Core release profile support set diverges from D-04 empty support set.');
+  if (SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1.length !== 0) {
+    throw new Error('Core D-04 execution registry diverges from the accepted empty support set.');
   }
   const root = resolve(input.repositoryRoot ?? '.');
   const adversarialCases = ADVERSARIAL_CASES.map(([caseId, sourceTest]) => {

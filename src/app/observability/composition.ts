@@ -4,7 +4,7 @@ import {
   type MetricReporterV1,
   NoopMetricReporterV1,
 } from '@/core/observability/reporter';
-import type { TelemetryConsentStatusV1 } from './consent';
+import { allowedMetricNamesForConsentV1, type TelemetryConsentStatusV1 } from './consent';
 
 export interface ObservabilityCompositionV1 {
   reporter: MetricReporterV1;
@@ -18,11 +18,14 @@ export function composeObservabilityV1(input: {
   consent: TelemetryConsentStatusV1;
   exporter?: MetricExporterV1;
   queueCapacity?: number;
+  releaseRouteAliases?: ReadonlySet<string>;
+  modelVisibleCapabilityAliases?: ReadonlySet<string>;
 }): ObservabilityCompositionV1 {
   const telemetryEnabled =
     input.artifactTelemetryAllowed === true &&
     input.featureEnabled === true &&
     input.consent.enabled &&
+    input.consent.managedSessionAdmission === 'admitted' &&
     input.exporter !== undefined;
   return Object.freeze({
     reporter: telemetryEnabled
@@ -30,6 +33,11 @@ export function composeObservabilityV1(input: {
           enabled: true,
           capacity: input.queueCapacity ?? 512,
           exporter: input.exporter!,
+          allowedMetricNames: allowedMetricNamesForConsentV1(input.consent.metricCategories),
+          controlledAliases: {
+            route: input.releaseRouteAliases ?? new Set(),
+            capability: input.modelVisibleCapabilityAliases ?? new Set(),
+          },
         })
       : new NoopMetricReporterV1(),
     telemetryEnabled,

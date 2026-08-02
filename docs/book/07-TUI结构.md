@@ -43,6 +43,10 @@ MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，
 
 前台 SessionRuntime 将事件实时 dispatch 到 UI；后台会话缓存可丢弃的展示事件和必要状态，切回时重放/重建投影。取消、切换和组件卸载必须清理 AbortController 与订阅。
 
+TUI 的 Shell executor 不在 `SessionRuntime` 内自行拼装 sandbox；它通过 App 层统一 composition root，
+与 foreground Headless CLI 共享 workspace、release ceiling、network mode 和平台 capability admission。
+composition 失败时会话在执行工具前 fail closed，不能由 TUI 入口单独放宽。
+
 `SessionManager` 可持有当前运行中 Kernel 的受限控制面，只暴露读取 RuntimeState 和提交 RuntimeEvent。`/compact` 等运行时命令必须通过该入口写入持久事件，由 scheduler 按工具、交互和 verification 的安全顺序处理；App 不直接改写 Core 状态。提交新事件会推进 revision，使旧的模型或执行 effect 结果按 lease 规则失效。
 
 ## 7.5 边界规则

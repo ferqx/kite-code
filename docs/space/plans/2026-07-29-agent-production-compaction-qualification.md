@@ -41,8 +41,12 @@ manual canary 或 `MS:4-MANUAL-STABLE`。证据见
 [本地 Compaction Foundation 记录](../execution/completed/2026-08-02-agent-production-compaction-foundation.md)。
 4.4 现已增加 opaque blind item、逐项 candidate commitment/receipt chain、aggregate 重建、共享 Release
 artifact 与完整 GitHub/evaluator identity，以及受信 deterministic outcome precedence verifier；它只能
-证明本地 contract 拒绝 label leak/splice/tamper，production
-OIDC/attestation verifier 与真实 evaluator workflow 仍未配置，因此 4.4 继续 `in_progress`。
+证明本地 contract 拒绝 label leak/splice/tamper。新增 manual/no-publish workflow 只生成
+`github_actions_unsigned_contract` artifact：retained input 使用 upload action 返回的真实 artifact ID，
+signature 明确 unconfigured，独立 verifier 固定 blocked。production OIDC/attestation verifier 与受信
+evaluator route 仍未配置，因此 4.4 继续 `in_progress`。
+workflow 输入现从 `GITHUB_SHA` 的 exact tracked blob 生成只读 snapshot，并把 tracked path、Git blob ID、
+SHA-256 写入 source identity；retained upload、producer 与 verifier 不再读取可变 worktree 路径。
 
 ## 主要改动范围
 

@@ -128,9 +128,16 @@ child capability。Terminal flag 只控制 CLI 派生 presentation，原始结�
 不能把 unknown/blocked/budget/saturation 回退成普通完成。单独启用任一 flag 都不授予
 production 资格。
 
+DeepSeek 官方 API 的 `deepseek-v4-flash` 当前只进入 blocked candidate registry；region、固定
+retention、training opt-out、DPA 与下游披露未验证，因此 production approved route bundle 仍为空。
+candidate 的四类治理链接分别固定到 `api-docs.deepseek.com` 或 `cdn.deepseek.com` 的 HTTPS origin，
+但正确域名本身不等于政策已满足。
+
 Remote observability 还要求 artifact authority、用户 consent 与真实 exporter；flag 单独开启不生效。
 项目 telemetry 配置只保留 `enabled=false` 的收紧语义，不能提供 endpoint secret 或 consent。Reporter
-只有有界内存 queue，无磁盘 spool；content logging consent 和 Provider consent 都不隐含 telemetry。
+只有有界内存 queue，无磁盘 spool；最终 export 会按 release-owned alias registry 折叠未知 route/capability
+并执行每 metric series budget。content logging consent 和 Provider consent 都不隐含 telemetry。
+External canary 还要求独立 canary opt-in；缺少任一 authority/consent/exporter 条件时 cohort blocked。
 
 `releaseProfileV1` 还要求独立的 artifact authority；user/project/CLI 的 true 不能创建该 authority。
 当前 embedded profile 是 non-distributable foundation fixture，D-04 production 支持集为空，因此

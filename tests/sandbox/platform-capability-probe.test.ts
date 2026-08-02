@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   deniedReadVerdict,
   evaluatePlatformSupport,
+  githubEvidenceSource,
   type PlatformCapabilityEvidenceV1,
 } from '../../scripts/release/platform-capability-probe';
 
@@ -22,6 +23,11 @@ function evidence(overrides: Partial<ProbeInput> = {}): ProbeInput {
     bunVersion: '1.3.14',
     backend: 'bubblewrap',
     selectedNetworkMode: 'off',
+    processCapabilitySurface: {
+      shell: true,
+      forkedSkill: false,
+      localStdioMcp: false,
+    },
     environmentIdentity: { exactOsVersion: 'enforced' },
     backendIsolation: { syscallFilter: 'enforced' },
     entrypoints: { tui: 'enforced', foregroundCli: 'enforced' },
@@ -60,6 +66,57 @@ function evidence(overrides: Partial<ProbeInput> = {}): ProbeInput {
 }
 
 describe('platform capability probe admission', () => {
+  const githubSource = {
+    QUALIFICATION_REPOSITORY: 'ferqx/kite-code',
+    QUALIFICATION_REPOSITORY_ID: '1218896626',
+    QUALIFICATION_HEAD_SHA: 'a'.repeat(40),
+    QUALIFICATION_REF: 'refs/heads/main',
+    QUALIFICATION_WORKFLOW: '.github/workflows/platform-capability-probe.yml',
+    QUALIFICATION_WORKFLOW_REF:
+      'ferqx/kite-code/.github/workflows/platform-capability-probe.yml@refs/heads/main',
+    QUALIFICATION_WORKFLOW_SHA: 'b'.repeat(40),
+    QUALIFICATION_RUN_ID: '123',
+    QUALIFICATION_RUN_ATTEMPT: '1',
+    QUALIFICATION_RUNNER_CLASS: 'ubuntu-24.04-x64-github-hosted',
+  };
+
+  test('binds source evidence to a closed GitHub-hosted runner class', () => {
+    expect(
+      githubEvidenceSource({ platform: 'linux', arch: 'x64' }, githubSource).source,
+    ).toMatchObject({
+      repository: 'ferqx/kite-code',
+      repositoryId: '1218896626',
+      runnerClass: 'ubuntu-24.04-x64-github-hosted',
+    });
+    expect(() =>
+      githubEvidenceSource(
+        { platform: 'linux', arch: 'x64' },
+        { ...githubSource, QUALIFICATION_RUNNER_CLASS: 'self-hosted' },
+      ),
+    ).toThrow('runner class is not recognized');
+    expect(() =>
+      githubEvidenceSource(
+        { platform: 'linux', arch: 'x64' },
+        { ...githubSource, QUALIFICATION_REPOSITORY: 'attacker/fork' },
+      ),
+    ).toThrow('repository identity is not canonical');
+    expect(() =>
+      githubEvidenceSource(
+        { platform: 'linux', arch: 'x64' },
+        { ...githubSource, QUALIFICATION_HEAD_SHA: 'not-a-sha' },
+      ),
+    ).toThrow('source SHA is invalid');
+    expect(() => githubEvidenceSource({ platform: 'darwin', arch: 'arm64' }, githubSource)).toThrow(
+      'does not match the runtime',
+    );
+    expect(() =>
+      githubEvidenceSource(
+        { platform: 'linux', arch: 'x64' },
+        { ...githubSource, QUALIFICATION_WORKFLOW_SHA: '' },
+      ),
+    ).toThrow('source identity is incomplete');
+  });
+
   test('cannot mark a read denial enforced when the positive read control failed', () => {
     expect(deniedReadVerdict({ available: true, code: 1 }, false)).toBe('unavailable');
     expect(deniedReadVerdict({ available: true, code: 1 }, true)).toBe('enforced');
@@ -73,6 +130,39 @@ describe('platform capability probe admission', () => {
           processTree: {
             hardCountLimit: 'unsupported',
             killWithoutResidualDescendants: 'enforced',
+          },
+        }),
+      ),
+    ).toBe('excluded');
+  });
+
+  test('never calls a process artifact supported when Shell is absent from its surface', () => {
+    expect(
+      evaluatePlatformSupport(
+        evidence({
+          processCapabilitySurface: {
+            shell: false,
+            forkedSkill: false,
+            localStdioMcp: false,
+          },
+        }),
+      ),
+    ).toBe('excluded');
+  });
+
+  test('requires inheritance only for process capabilities admitted by the evidence', () => {
+    expect(evaluatePlatformSupport(evidence())).toBe('supported');
+    expect(
+      evaluatePlatformSupport(
+        evidence({
+          processCapabilitySurface: {
+            shell: true,
+            forkedSkill: true,
+            localStdioMcp: false,
+          },
+          inheritance: {
+            ...evidence().inheritance,
+            forkedSkill: 'unsupported',
           },
         }),
       ),

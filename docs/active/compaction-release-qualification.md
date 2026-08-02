@@ -26,8 +26,18 @@ path/ref/SHA、run/attempt、job/artifact、route/config、suite/scorer、candid
 deterministic safety report+outcome。分组标签、缺失、重复、重排、aggregate/payload/candidate splice 全部
 拒绝，critical deterministic failure 始终覆盖 semantic pass。
 
-GitHub OIDC/attestation verifier 当前未配置，formal workflow 与真实 evaluator receipt 也未执行，因此
-结构完整的本地 fixture 仍为 blocked、`evidenceEligible=false`、milestone=null。uncertainty 超限保持
+`compaction-semantic-evaluation.yml` 现提供手动、无发布/OIDC 权限的 contract producer/verifier。
+workflow 不读取可变 worktree 输入：它禁用 replacement objects、确认 `GITHUB_SHA` 为 commit，再从该
+Git tree 精确解析 normalized repository-relative path，只接受 `100644/100755` blob，并由 `git cat-file`
+写入 runner temp 的只读 snapshot。原始 worktree
+即使被修改或生成 untracked 文件也不会进入 producer；tracked path、Git blob ID 与 snapshot SHA-256
+进入 source identity，上传、producer 和独立 verifier 全部消费同一 snapshot，并使用 upload action 返回的
+真实 retained artifact ID；
+source 明确为 `github_actions_unsigned_contract`，signature 固定 `unconfigured/none`，不得使用调用者提供的
+伪 artifact/attestation identity。verifier 的 repository/head/ref/workflow/run/attempt 与 retained artifact
+expected identity 来自 workflow 环境，并重建完整 ledger/digest。GitHub OIDC/attestation verifier、受信
+evaluator route 与真实 evaluator receipt 仍未配置，因此结构完整的 contract artifact 仍为 blocked、
+`evidenceEligible=false`、milestone=null。uncertainty 超限保持
 inconclusive/blocked，低于阈值或 deterministic safety 失败为 failed。control/treatment continuation
 在阈值、样本和 route 未预注册时同样 blocked，不能用单次 synthetic pass 宣称非劣。
 

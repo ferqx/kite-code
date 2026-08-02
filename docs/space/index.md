@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-02（Agent 生产化 Release/Evaluation/Operations/Capability 当前规则收敛）
+最后更新：2026-08-02（Agent 生产准入跨平台策略修正）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -136,6 +136,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-02-agent-production-admission-strategy-correction.md` | completed | 记录三平台发行与 effectful capability 正交准入、D-03 关闭和 DeepSeek blocked candidate；不提升 Task/milestone。 |
 | `execution/completed/2026-04-26-plan-state-reminder.md` | completed | 记录把计划状态移动到尾部合成用户侧提醒的实现和验证。 |
 | `execution/completed/2026-04-26-remove-stop-check.md` | completed | 记录移除最终答案 stop-check 和非危险模式确认门。 |
 | `execution/completed/2026-04-26-remove-internal-ledgers.md` | completed | 记录移除 evidence/progress 账本和 watchdog 式进度推断。 |

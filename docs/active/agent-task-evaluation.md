@@ -37,6 +37,12 @@ p95 regression 全部从 receipts 重建；本地 Gate 失败时顶层为 failed
 掩盖。formal adversarial evidence 必须绑定同一 source/candidate、canonical catalog digest 和精确有序的
 21 case receipts。缺失、best-only、重排、catalog drift、跨 identity、digest 或签名篡改全部 fail closed。
 
+新增的 `agent-task-evidence.yml` 只允许手动运行、`contents:read` 且没有 OIDC/发布权限。它先上传
+明确标记 `contract_conformance` 的 retained input 取得真实 GitHub artifact ID，再由 producer 从 raw
+input 重建 12 个 ledger、96/240 attempts、21 个 adversarial receipts 和全部 digest；独立 verifier 的
+repository/head/ref/workflow/run/attempt/job/artifact expected identity 来自 workflow/CLI，不从 evidence
+自报。signature 明确为 `unconfigured/none`，最终必须为 blocked、`evidenceEligible=false`。
+
 该 contract 的 Ed25519 只允许 `fixture_ed25519`，不能由调用者标成 production。ADR-0062 要求的
 GitHub Actions OIDC/keyless Sigstore verifier 与 production route registry 仍为空，因此所有本地重建
 固定 blocked、`evidenceEligible=false`。2B.4/2B.5 继续保持 `in_progress`，等待真实 approved route、

@@ -60,6 +60,11 @@ function qualification(
         childProcessInheritance: 'enforced',
         verifiedInProcessReadOnly: 'unsupported',
       },
+      processCapabilitySurface: {
+        shell: true,
+        skillChild: false,
+        localStdioMcp: false,
+      },
       inProcessReadOnlyTools: {
         ...catalog,
         digest: computeInProcessReadOnlyToolCatalogDigestV1(catalog),
@@ -100,5 +105,26 @@ describe('native process-tree hard-limit projection', () => {
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
+  });
+
+  test('projects cgroup pids only from separate hard-limit and cleanup conformance', () => {
+    expect(
+      currentProcessTreeCapabilityV1('bubblewrap', {
+        hardLimitMechanism: 'cgroup_pids',
+        hardLimitConformancePassed: true,
+        terminationCleanupConformancePassed: true,
+      }),
+    ).toEqual({
+      hardCountMechanism: 'cgroup_pids',
+      hardCountLimit: 'enforced',
+      terminationCleanup: 'enforced',
+    });
+    expect(
+      currentProcessTreeCapabilityV1('bubblewrap', {
+        hardLimitMechanism: 'cgroup_pids',
+        hardLimitConformancePassed: true,
+        terminationCleanupConformancePassed: false,
+      }).terminationCleanup,
+    ).toBe('unsupported');
   });
 });

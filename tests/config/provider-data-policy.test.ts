@@ -15,6 +15,10 @@ import {
   raiseWorkspaceDataLabelV1,
 } from '@/core/config/provider-data-policy';
 import {
+  loadProviderRouteCandidateBundleV1,
+  providerRouteCandidateBundleV1Schema,
+} from '@/core/config/provider-route-candidate';
+import {
   DEFAULT_SESSION_LOGGING_POLICY_V1,
   parseSessionLoggingPolicyV1,
   resolveSessionLoggingPolicyV1,
@@ -161,6 +165,50 @@ describe('ProviderDataPolicyV1', () => {
     expect(computeProviderDataPolicyBundleDigest(bundle)).toBe(
       computeProviderDataPolicyBundleDigest(structuredClone(bundle)),
     );
+  });
+
+  test('records DeepSeek as a non-admissible candidate without widening the approved bundle', () => {
+    const candidates = loadProviderRouteCandidateBundleV1(new Date('2026-08-02T12:00:00.000Z'));
+    expect(candidates.revision).toBe('d14-candidates-2026-08-02.1');
+    expect(candidates.candidates).toHaveLength(1);
+    expect(candidates.candidates[0]).toMatchObject({
+      candidateId: 'deepseek-official-region-unknown-v4-flash',
+      status: 'blocked_policy_evidence',
+      modelIds: ['deepseek-v4-flash'],
+      route: { region: 'unknown' },
+      assessment: { processingRegion: 'unknown', productionContentAllowed: false },
+    });
+    const approved = parseProviderDataPolicyBundleV1(
+      JSON.parse(
+        readFileSync(
+          join(process.cwd(), 'release/provider-data-policies/approved-v1.json'),
+          'utf8',
+        ),
+      ),
+    );
+    expect(approved.policies).toEqual([]);
+    expect(() => loadProviderRouteCandidateBundleV1(new Date('2026-09-01T00:00:00.000Z'))).toThrow(
+      'stale',
+    );
+    const duplicatePurpose = structuredClone(candidates);
+    duplicatePurpose.candidates[0]!.officialSources[3]!.purpose = 'privacy_policy';
+    expect(() => providerRouteCandidateBundleV1Schema.parse(duplicatePurpose)).toThrow(
+      'exactly one official source',
+    );
+    for (const replacement of [
+      'https://attacker.example/policy',
+      'https://user@cdn.deepseek.com/policy',
+      'https://cdn.deepseek.com:8443/policy',
+      'http://cdn.deepseek.com/policy',
+    ]) {
+      const substituted = structuredClone(candidates);
+      substituted.candidates[0]!.officialSources.find(
+        (source) => source.purpose === 'privacy_policy',
+      )!.url = replacement;
+      expect(() => providerRouteCandidateBundleV1Schema.parse(substituted)).toThrow(
+        'pinned DeepSeek HTTPS origin',
+      );
+    }
   });
 
   test('uses deny-wins classification composition', () => {

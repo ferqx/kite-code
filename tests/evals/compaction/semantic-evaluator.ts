@@ -1,8 +1,9 @@
 import { canonicalJsonBytes, sha256Digest } from '../../../scripts/release/canonical-json';
 import type { CompactionCaseV1 } from './schema';
 import { parseCompactionCase } from './schema';
+import { SEMANTIC_RUBRIC_VERSION } from './semantic-evidence';
 
-export const SEMANTIC_RUBRIC_VERSION = 'compaction-semantic-rubric-v1' as const;
+export { SEMANTIC_RUBRIC_VERSION };
 
 export interface BlindSemanticItemV1 {
   version: 1;

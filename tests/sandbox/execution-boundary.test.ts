@@ -150,6 +150,11 @@ function qualification(
     evidenceDigest: `sha256:${'a'.repeat(64)}`,
     evidenceCommit: 'a'.repeat(40),
     backendCapabilities,
+    processCapabilitySurface: {
+      shell: true,
+      skillChild: false,
+      localStdioMcp: false,
+    },
     inProcessReadOnlyTools: toolCatalog(),
     ...overrides,
   };
@@ -600,9 +605,45 @@ describe('production execution admission', () => {
       write: true,
       workspaceWrite: true,
       shell: true,
-      skillChild: true,
-      localStdioMcp: true,
+      skillChild: false,
+      localStdioMcp: false,
     });
+  });
+
+  test('never exposes process capabilities omitted by the qualification surface', () => {
+    const workspace = temporaryWorkspace();
+    const base = qualification();
+    const expanded = evaluateExecutionBoundaryQualificationV1({
+      featureEnabled: true,
+      boundary: boundary(workspace),
+      workspaceRoot: workspace,
+      qualification: {
+        ...base,
+        processCapabilitySurface: {
+          shell: true,
+          skillChild: true,
+          localStdioMcp: false,
+        },
+      },
+    });
+    expect(expanded.allowed).toBe(true);
+    expect(expanded.surface).toMatchObject({ shell: true, skillChild: true, localStdioMcp: false });
+
+    expect(
+      evaluateExecutionBoundaryQualificationV1({
+        featureEnabled: true,
+        boundary: boundary(workspace),
+        workspaceRoot: workspace,
+        qualification: {
+          ...base,
+          processCapabilitySurface: {
+            shell: false,
+            skillChild: true,
+            localStdioMcp: false,
+          },
+        },
+      }).reason,
+    ).toBe('approved_qualification_unavailable');
   });
 
   test('read-only native surface independently blocks in-process writers and network tools', async () => {

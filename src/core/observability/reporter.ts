@@ -1,8 +1,12 @@
 import {
   createMetricSampleV1,
+  METRIC_DEFINITIONS_V1,
+  type MetricControlledAliasRegistryV1,
+  type MetricNameV1,
   type MetricPriorityV1,
   type MetricSampleV1,
   metricPriorityV1,
+  parseMetricSampleV1,
 } from './metrics';
 
 export interface MetricExporterV1 {
@@ -120,18 +124,54 @@ export class NoopMetricReporterV1 implements MetricReporterV1 {
 export class BufferedMetricReporterV1 implements MetricReporterV1 {
   readonly #queue: BoundedMetricQueueV1;
   readonly #exporter: MetricExporterV1;
+  readonly #allowedMetricNames?: ReadonlySet<MetricNameV1>;
+  readonly #controlledAliases: MetricControlledAliasRegistryV1;
+  readonly #seriesByMetric = new Map<MetricNameV1, Set<string>>();
   #enabled: boolean;
   #exporterFailures = 0;
 
-  constructor(input: { enabled: boolean; capacity: number; exporter: MetricExporterV1 }) {
+  constructor(input: {
+    enabled: boolean;
+    capacity: number;
+    exporter: MetricExporterV1;
+    allowedMetricNames?: ReadonlySet<MetricNameV1>;
+    controlledAliases?: MetricControlledAliasRegistryV1;
+  }) {
     this.#enabled = input.enabled;
     this.#queue = new BoundedMetricQueueV1(input.capacity);
     this.#exporter = input.exporter;
+    this.#allowedMetricNames = input.allowedMetricNames;
+    this.#controlledAliases = Object.freeze({
+      route: new Set(input.controlledAliases?.route ?? []),
+      capability: new Set(input.controlledAliases?.capability ?? []),
+    });
   }
 
   report(sample: MetricSampleV1): void {
     if (!this.#enabled) return;
-    this.#queue.enqueue(sample);
+    try {
+      const rebuilt = parseMetricSampleV1(sample, this.#controlledAliases);
+      if (this.#allowedMetricNames && !this.#allowedMetricNames.has(rebuilt.name)) {
+        this.#queue.recordDropped(1);
+        return;
+      }
+      const seriesKey = JSON.stringify(
+        Object.entries(rebuilt.attributes).sort(([left], [right]) => left.localeCompare(right)),
+      );
+      const series = this.#seriesByMetric.get(rebuilt.name) ?? new Set<string>();
+      if (
+        !series.has(seriesKey) &&
+        series.size >= METRIC_DEFINITIONS_V1[rebuilt.name].cardinalityLimit
+      ) {
+        this.#queue.recordDropped(1);
+        return;
+      }
+      series.add(seriesKey);
+      this.#seriesByMetric.set(rebuilt.name, series);
+      this.#queue.enqueue(rebuilt);
+    } catch {
+      this.#queue.recordDropped(1);
+    }
   }
 
   reportMany(samples: readonly MetricSampleV1[]): void {
@@ -141,6 +181,7 @@ export class BufferedMetricReporterV1 implements MetricReporterV1 {
   withdrawConsent(): void {
     this.#enabled = false;
     this.#queue.clear();
+    this.#seriesByMetric.clear();
   }
 
   async flush(timeoutMs: number): Promise<void> {

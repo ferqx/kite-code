@@ -5,19 +5,26 @@
 读取时机：修改 sandbox backend、production execution admission、process-tree 限制、
 network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平台发布矩阵时。
 
-验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/process-tree-limit.test.ts
+验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/cgroup-pids.test.ts tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/process-tree-limit.test.ts
 tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
+`bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、`release/platform-capabilities/support-matrix-v1.json`、
+相关：ADR-0054、ADR-0061、ADR-0065、`release/platform-capabilities/support-matrix-v1.json`、
 `docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
 
 ## 当前支持集合
 
 当前 production-supported platform/backend 集合为空，D-04 已按“空支持集”关闭，不得生成
 production artifact。候选组合不是支持声明：
+
+Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标。发行/启动/PTY/路径/ACL/keyring
+兼容性与 effectful execution capability 是两个 Gate：某个平台可以通过普通 TUI/CLI 发行验证，
+但其 Shell、writer、Skill child 或 local stdio MCP 仍可因原生隔离证据不足而关闭。常规三平台
+验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
+Docker、WSL2 和架构模拟只作开发预检。
 
 | runner 候选 | backend 候选 | 当前结论 | 主要缺口 |
 | --- | --- | --- | --- |
@@ -45,9 +52,10 @@ x64 artifact 均为 `excluded`、`productionSupported=false`；三个 artifact �
 ## 准入语义
 
 矩阵当前显式选择 `selectedNetworkMode=off`。`supported` 要求 filesystem allow/deny、
-network-off、完整 process-tree 硬数量上限与 kill 后
-清理、shell/Skill/local stdio MCP inheritance，以及 TUI/foreground CLI 组合根全部为
-`enforced`。无旁路 allowlist 可以是 `unsupported`，但该平台此时只能支持 network-off profile；
+network-off、完整 process-tree 硬数量上限与 kill 后清理、TUI/foreground CLI 组合根，以及
+`processCapabilitySurface` 声明为 `true` 的每一种 child inheritance 全部为 `enforced`。声明为
+`false` 的 forked Skill/local stdio MCP 不会因 Shell 通过而继承资格。无旁路 allowlist 可以是
+`unsupported`，但该平台此时只能支持 network-off profile；
 需要 allowlist 的 profile 仍不可准入；若未来选择 allowlist，evaluator 必须改为要求
 `network.allowlist=enforced`。`read_only_only` 只接受单独通过 conformance 的无进程
 Workspace-bound 只读工具、network-off 和两个入口组合证据；当前不存在该 fallback。
@@ -98,6 +106,14 @@ Workspace 或其他宿主路径。Ubuntu workflow 区分“namespace probe 可�
 binary 存在但没有 negative syscall conformance 时仍为 `unavailable`，并产生稳定 limitation。
 protected path、syscall filter、硬 process-tree 上限和完整 child/入口继承未证明时，Linux 结论
 继续是 `excluded`。
+
+当前本地增量实现把 TUI 与 foreground CLI 收敛到同一个 App sandbox composition root，并为
+Linux 候选加入 `systemd-run --user --scope` + cgroup v2 `TasksMax` 的 argv-only 包装、真实启动探针
+及独立 hard-count/cleanup 投影。候选 capability surface 只声明 Shell；forked Skill 和 local stdio
+MCP 明确为 false。GitHub-hosted Ubuntu 是否同时允许 bubblewrap、seccomp、user systemd scope 和
+cgroup pids 必须由更新后的三平台 workflow 真实运行后决定；本地测试或代码存在不能提前改变
+`excluded`/空支持集结论。allowlist 目前没有 descendant-safe backend，App composition 对其直接
+fail closed，绝不映射为 `allow_all`。
 
 ## ExecutionBoundaryV1 schema 与 composition gate
 
@@ -151,6 +167,18 @@ CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enab
 canonical digest。静态 support matrix 当前为 `accepted_empty_support_set`。任一 backend、
 profile、composition root、runner image 或边界实现变化都需要新 evidence；只有新的追加 ADR
 与独立 release gate 才能加入非空生产支持项。
+
+GitHub-hosted evidence 还绑定 repository/head/ref/workflow ref/workflow SHA/run ID/attempt 与封闭
+runner class：`macos-15-arm64-github-hosted`、`ubuntu-24.04-x64-github-hosted`、
+`windows-2025-x64-github-hosted`。缺任一来源字段或未知 runner class 时 probe 直接失败；WSL2、
+Docker 或 self-hosted 结果不能伪装成上述 class。
+
+workflow 还绑定 numeric repository ID，并在上传 artifact 前调用独立 verifier；expected source 来自
+GitHub workflow 环境，不从待验证 JSON 自报。verifier 对 top-level、source 和每个嵌套对象执行 exact-key
+检查，重建 digest、outcome 与 limitations，并固定拒绝 `productionSupported=true`。当前 foreground CLI/TUI
+入口探针固定 `unavailable`，直到入口拥有的真实集成测试能注入断连/取消并证明同一 composition root；
+普通函数调用不能伪造该 evidence。cgroup TasksMax 只能投影 hard-count，cleanup 在 unit-owned cgroup
+empty/populated verifier 完成前固定不通过，process group 自然退出或 `setsid` 逃逸不能当作零 residual 证明。
 
 `scripts/release/execution-boundary-smoke.ts` 与
 `.github/workflows/execution-boundary-conformance.yml` 把当前空支持集带入 actual synthetic artifact

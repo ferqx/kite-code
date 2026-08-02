@@ -11,6 +11,7 @@ import {
   tryProjectAdmittedExecutionStatusV1,
 } from '@/app/release/execution-status';
 import { formatReleaseStatusV1, projectReleaseStatusV1 } from '@/app/release/status-projection';
+import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import { type FeatureFlags, getFeatureFlags } from '@/core/config/features';
 import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
@@ -22,7 +23,7 @@ import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { runtimeStorePathFor } from '@/core/runtime/store';
 import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
-import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
+import { resolveSandboxRuntime } from '@/core/sandbox/index';
 import { createRuntimeSecretDetectorV1 } from '@/core/session-logger';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -158,9 +159,11 @@ export async function main(): Promise<void> {
       sandboxAvailable: sandboxRuntime.available,
     });
   }
-  const shellExecutor = createSandboxExecutor({
-    enabled: sandboxRuntime.enabled,
+  const shellExecutor = composeAppSandboxExecutorV1({
+    entrypoint: 'foreground_cli',
     workspace: args.workspace,
+    config,
+    sandboxEnabled: sandboxRuntime.enabled,
   });
 
   const task = args.task ?? '';

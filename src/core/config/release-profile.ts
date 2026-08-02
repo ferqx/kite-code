@@ -9,7 +9,63 @@ import {
 } from './release-capabilities';
 
 export const RELEASE_PROFILE_VERSION = 1 as const;
-export const SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1: readonly string[] = Object.freeze([]);
+
+export const PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1 = [
+  'macos-15-arm64',
+  'ubuntu-24.04-x64',
+  'windows-2025-x64',
+] as const;
+export type ProductionDistributionTargetIdentityV1 =
+  (typeof PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1)[number];
+export type ProductionDistributionTargetV1 = Readonly<{
+  identity: ProductionDistributionTargetIdentityV1;
+  platform: 'macos' | 'linux' | 'windows';
+  arch: 'arm64' | 'x64';
+  nativeRunner: 'macos-15' | 'ubuntu-24.04' | 'windows-2025';
+}>;
+
+/**
+ * Release-owned, closed distribution target registry. Membership admits only
+ * a TUI/CLI artifact identity; it does not admit any effectful capability.
+ */
+export const PRODUCTION_DISTRIBUTION_TARGETS_V1: Readonly<
+  Record<ProductionDistributionTargetIdentityV1, ProductionDistributionTargetV1>
+> = Object.freeze({
+  'macos-15-arm64': Object.freeze({
+    identity: 'macos-15-arm64',
+    platform: 'macos',
+    arch: 'arm64',
+    nativeRunner: 'macos-15',
+  }),
+  'ubuntu-24.04-x64': Object.freeze({
+    identity: 'ubuntu-24.04-x64',
+    platform: 'linux',
+    arch: 'x64',
+    nativeRunner: 'ubuntu-24.04',
+  }),
+  'windows-2025-x64': Object.freeze({
+    identity: 'windows-2025-x64',
+    platform: 'windows',
+    arch: 'x64',
+    nativeRunner: 'windows-2025',
+  }),
+});
+
+/** D-04 effectful execution support remains independently empty. */
+export const SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1: readonly string[] = Object.freeze([]);
+
+export function parseProductionDistributionTargetIdentityV1(
+  value: unknown,
+): ProductionDistributionTargetIdentityV1 {
+  const identity = typeof value === 'string' ? value.trim() : '';
+  if (!identity) {
+    throw new ProductionReleaseProfileAdmissionError('distribution_target_identity_missing');
+  }
+  if (!Object.hasOwn(PRODUCTION_DISTRIBUTION_TARGETS_V1, identity)) {
+    throw new ProductionReleaseProfileAdmissionError('distribution_target_identity_unsupported');
+  }
+  return identity as ProductionDistributionTargetIdentityV1;
+}
 
 const finiteNonNegativeIntegerSchema = z.number().finite().int().nonnegative();
 const identitySchema = z.string().trim().min(1);
@@ -183,18 +239,18 @@ export type EmbeddedReleaseProfileIdV1 =
 export class ProductionReleaseProfileAdmissionError extends Error {
   readonly reason:
     | 'feature_disabled'
-    | 'production_support_set_empty'
-    | 'production_support_identity_missing'
-    | 'production_support_identity_unsupported'
+    | 'distribution_target_capabilities_not_off'
+    | 'distribution_target_identity_missing'
+    | 'distribution_target_identity_unsupported'
     | 'production_internal_profile'
     | 'profile_not_embedded';
 
   constructor(
     reason:
       | 'feature_disabled'
-      | 'production_support_set_empty'
-      | 'production_support_identity_missing'
-      | 'production_support_identity_unsupported'
+      | 'distribution_target_capabilities_not_off'
+      | 'distribution_target_identity_missing'
+      | 'distribution_target_identity_unsupported'
       | 'production_internal_profile'
       | 'profile_not_embedded',
   ) {
@@ -346,45 +402,38 @@ export function parseReleaseProfileV1(value: unknown): ReleaseProfileV1 {
 }
 
 /**
- * Bind a production composition to one release-supported target identity.
+ * Bind a production composition to one release-owned distribution identity.
  * The controlled-config boundary calls this again so an in-memory forged
  * composition cannot bypass the release profile admission decision.
  */
-export function admitProductionReleaseSupportIdentityV1(input: {
+export function admitProductionDistributionTargetIdentityV1(input: {
   profile: ReleaseProfileV1;
   production: true;
-  productionSupportIdentity?: string;
-}): string;
-export function admitProductionReleaseSupportIdentityV1(input: {
+  distributionTargetIdentity?: string;
+}): ProductionDistributionTargetIdentityV1;
+export function admitProductionDistributionTargetIdentityV1(input: {
   profile: ReleaseProfileV1;
   production: false;
-  productionSupportIdentity?: string;
+  distributionTargetIdentity?: string;
 }): undefined;
-export function admitProductionReleaseSupportIdentityV1(input: {
+export function admitProductionDistributionTargetIdentityV1(input: {
   profile: ReleaseProfileV1;
   production: boolean;
-  productionSupportIdentity?: string;
-}): string | undefined;
-export function admitProductionReleaseSupportIdentityV1(input: {
+  distributionTargetIdentity?: string;
+}): ProductionDistributionTargetIdentityV1 | undefined;
+export function admitProductionDistributionTargetIdentityV1(input: {
   profile: ReleaseProfileV1;
   production: boolean;
-  productionSupportIdentity?: string;
-}): string | undefined {
+  distributionTargetIdentity?: string;
+}): ProductionDistributionTargetIdentityV1 | undefined {
   if (!input.production) return undefined;
   if (input.profile.channel === 'internal') {
     throw new ProductionReleaseProfileAdmissionError('production_internal_profile');
   }
-  const identity = input.productionSupportIdentity?.trim();
-  if (!identity) {
-    throw new ProductionReleaseProfileAdmissionError('production_support_identity_missing');
+  if (Object.values(input.profile.capabilities).some((state) => state.maxRollout !== 'off')) {
+    throw new ProductionReleaseProfileAdmissionError('distribution_target_capabilities_not_off');
   }
-  if (SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1.length === 0) {
-    throw new ProductionReleaseProfileAdmissionError('production_support_set_empty');
-  }
-  if (!SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1.includes(identity)) {
-    throw new ProductionReleaseProfileAdmissionError('production_support_identity_unsupported');
-  }
-  return identity;
+  return parseProductionDistributionTargetIdentityV1(input.distributionTargetIdentity);
 }
 
 /** Admission must run before any production Runtime/provider/transport exists. */
@@ -392,20 +441,17 @@ export function admitEmbeddedReleaseProfileV1(input: {
   profileId: EmbeddedReleaseProfileIdV1;
   releaseProfileV1Enabled: boolean;
   production?: boolean;
-  productionSupportIdentity?: string;
+  distributionTargetIdentity?: string;
 }): ReleaseProfileV1 {
   if (!input.releaseProfileV1Enabled) {
     throw new ProductionReleaseProfileAdmissionError('feature_disabled');
   }
   const profile = EMBEDDED_RELEASE_PROFILES_V1[input.profileId];
   if (!profile) throw new ProductionReleaseProfileAdmissionError('profile_not_embedded');
-  admitProductionReleaseSupportIdentityV1({
+  admitProductionDistributionTargetIdentityV1({
     profile,
     production: input.production ?? false,
-    productionSupportIdentity: input.productionSupportIdentity,
+    distributionTargetIdentity: input.distributionTargetIdentity,
   });
-  if (profile.channel !== 'internal' && SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1.length === 0) {
-    throw new ProductionReleaseProfileAdmissionError('production_support_set_empty');
-  }
   return parseReleaseProfileV1(profile);
 }

@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "decisionId": "D-14",
+  "revision": "d14-candidates-2026-08-02.1",
+  "candidates": [
+    {
+      "version": 1,
+      "candidateId": "deepseek-official-region-unknown-v4-flash",
+      "decisionId": "D-14",
+      "status": "blocked_policy_evidence",
+      "route": {
+        "providerType": "deepseek",
+        "operatorId": "hangzhou-deepseek-ai",
+        "endpointOrigin": "https://api.deepseek.com",
+        "endpointClass": "official_api",
+        "deploymentId": "deepseek-api",
+        "region": "unknown"
+      },
+      "endpointIdentityDigest": "sha256:25ac4e3c30828216d4ddf01cc074a9956b16bb0f1800fb4b80a1da101936c332",
+      "modelIds": ["deepseek-v4-flash"],
+      "observedAt": "2026-08-02T00:00:00Z",
+      "expiresAt": "2026-09-01T00:00:00Z",
+      "officialSources": [
+        {
+          "purpose": "model_catalog",
+          "url": "https://api-docs.deepseek.com/api/list-models"
+        },
+        {
+          "purpose": "open_platform_terms",
+          "url": "https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html"
+        },
+        {
+          "purpose": "privacy_policy",
+          "url": "https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html"
+        },
+        {
+          "purpose": "context_cache",
+          "url": "https://api-docs.deepseek.com/guides/kv_cache"
+        }
+      ],
+      "assessment": {
+        "processingRegion": "unknown",
+        "fixedContentRetention": "not_published",
+        "trainingUse": "not_prohibited_by_published_policy",
+        "dpa": "not_verified",
+        "downstreamDisclosure": "required_not_implemented",
+        "productionContentAllowed": false
+      },
+      "blockers": [
+        "api_content_retention_not_contractually_bounded",
+        "api_training_opt_out_not_verified",
+        "dpa_not_verified",
+        "end_user_disclosure_not_implemented"
+      ]
+    }
+  ]
+}

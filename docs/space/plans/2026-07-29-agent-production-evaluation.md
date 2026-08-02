@@ -26,7 +26,9 @@ determinism；本地 `real_run` discriminator 和 participant/sample constructor
 Release artifact/frozen baseline identity、D-07 success/G0/p95 Gate、精确有序 21-case formal adversarial
 receipts 与 fixture signature 校验。本地 Gate 失败独立标为 failed；调用者不能把 fixture key/route 注入为
 production。ADR-0062 Sigstore verifier 和 production route registry 仍为空，所以 2B.4/2B.5 状态与上述
-真实 evidence 缺口不变。
+真实 evidence 缺口不变。新增 manual/no-publish workflow 已能用真实 GitHub artifact ID 生成并独立验证
+`contract_conformance` retained bundle，但 signature 固定 unconfigured、route 未配置、结果固定 blocked；
+它补齐本地 producer/verifier，不把 contract run 升格为 production route run。
 
 ## 目标
 

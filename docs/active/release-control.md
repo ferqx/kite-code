@@ -12,11 +12,12 @@
 
 - `releaseProfileV1` 默认关闭。普通 user/project/CLI 配置不能取得 artifact authority；CLI 直接把
   它设为 true 会在 Runtime、MCP、Skill 或 Provider 创建前拒绝，只允许 false 收紧。
-- App composition root 同时要求 release artifact ceiling 与 rollout flag。当前 D-04
-  production-supported platform 集合为空，因此 `limited/canary/ga` profile admission、production
-  payload assembly 和 production Runtime 创建全部 fail closed。`production=true` 还必须携带非空、
-  registry 接受的 production support identity，并直接拒绝 internal profile；controlled config 会对
-  composition 结果二次校验，调用者不能用 `production + internal-dogfood` 绕过空支持集。
+- App composition root 同时要求 release artifact ceiling 与 rollout flag。发行 identity registry 固定
+  为 `macos-15-arm64`、`ubuntu-24.04-x64`、`windows-2025-x64`，它只证明目标 artifact identity，
+  与 D-04 的空 effectful execution support registry 正交。由于 authenticated production artifact receipt
+  尚无 producer/trust root，App composition 对所有 `production=true` 固定返回
+  `production_artifact_authority_unconfigured`，controlled config 也拒绝调用者伪造 active production
+  composition。registry membership 只能用于 manifest/分发候选 contract，不能由布尔值变成 Runtime authority。
 - 四个 embedded profile 只是严格 schema/组合 fixture：所有 capability rollout=`off`、资源预算为
   0、network/logging/telemetry/route 全部关闭。它们不表示可分发产品配置。
 - CLI `--release-status` 与 TUI `/release` 只显示脱敏 profile/capability/rollout/execution/logging/
@@ -94,13 +95,67 @@ contract fixture；命令本身不写计划 milestone。其 G0/G1 验证 canonic
 `release-candidate.yml` 当前只有手动、无发布权限的 contract workflow；所有 Actions 固定 immutable
 commit，production signing job 永不运行。SBOM、provenance 与三平台 launcher smoke 只能生成或校验
 `nonDistributable=true` synthetic fixture；registry vulnerability/license audit、真实平台签名、实际制品
-smoke、OIDC Sigstore/attestation 和 GitHub Release 尚未发生。D-04 支持集为空，因此 2A.8 仍 blocked。
+smoke、OIDC Sigstore/attestation 和 GitHub Release 尚未发生。2A.8 因真实 build/audit、发布者身份、
+平台原生签名/notarization、provenance/attestation、actual artifact smoke 与真人第三方安全评审均缺失而
+保持 blocked；D-04 空 support set 只阻止 effectful execution capability，不阻止普通跨平台 TUI/CLI
+artifact 的构建与资格验证。
+
+禁用的 production job 已具备独立 verifier 骨架：canonical repo 的 numeric ID `1218896626` 用于
+GitHub/OIDC certificate identity，GraphQL node ID `R_kgDOSKbi8g` 用于 Release Gate artifact identity；
+tag/ref、commit、workflow ref/SHA、run/attempt 必须同时匹配。所有输入先经 no-follow、unique-inode、
+bounded regular-file 检查并复制到 verifier-owned immutable snapshot。`gh`、`cosign`、`codesign`、
+`spctl`/PowerShell 只允许来自 OS 管理、普通 runner 身份不可写的受保护安装树，并要求显式
+path+SHA-256 tool receipt、执行前后 digest 一致和命令超时；Windows 只接受 system volume 上的精确
+`GitHub CLI`、`PowerShell 7` 与 `Kite Verifiers/cosign.exe` allowlist（依赖标准 Program Files ACL），
+拒绝其他 volume 或任意 Program Files 子路径。user-writable tool cache 或 verifier 同 UID
+可改写的临时 executable 不属于信任边界。Windows PowerShell 从完整受保护安装目录原位运行，不复制
+孤立 `pwsh.exe`。
+
+上述工具所有权只在隔离 verifier job 内构成信任边界：该 matrix job 使用新的 GitHub-hosted VM，
+不 checkout、安装或执行 candidate source，只从 protected variable 指定的已评审 verifier commit 安装
+冻结依赖；checkout 后、任何 setup/install 前必须证明变量是 40 位小写 commit SHA 且实际 `HEAD` 精确
+相等，branch/tag/短 SHA 均 fail closed。job 通过 pinned `download-artifact` 把 build job 产物作为
+opaque input 下载。候选代码即使在
+build job 启动 sudo/admin 同权限后台进程也不能跨 VM 进入 verifier；缺失 protected verifier commit、
+下载 artifact 或任一 receipt 时直接失败。
+该 exact verifier commit 同时进入 expected identity、真人 security-review evidence、Gate artifact
+identity 与 verifier 返回 identity；修改 protected variable 会使既有 review/Gate digest 全部失效，
+不能在 workflow SHA 不变时静默更换判定实现。
+
+外层 `tar.gz` 只接受 canonical USTAR regular/directory entry、精确双零块终止与零 padding；拒绝
+PAX/GNU long-name/global metadata、link、`.`/`..`/空路径段、非规范 UTF-8/NUL padding 和规范化后的
+重复路径。payload 必须包含固定平台路径的精确 native launcher，提取成员 bytes 与独立签名对象
+digest 一致；canonical manifest 再绑定 archive digest、commit 与单一 distribution identity。GitHub
+attestation 覆盖 payload/native launcher/manifest/SBOM/provenance 五个 subject。Linux launcher 使用
+keyless Sigstore；macOS 从同一受控 archive 安全重建完整 `Kite.app`，要求 launcher、`Info.plist` 与
+`_CodeSignature/CodeResources`，对 app bundle 执行 deep/strict external requirement、固定 Developer ID
+Team ID、leaf certificate SHA-256 与 Gatekeeper notarization assessment，而不是只验证内部 executable；
+Windows 固定 Authenticode signer certificate/SPKI、trusted root 与 timestamp certificate。
+G0–G5 必须全部 `passed`，G5 还必须绑定不同于 `github:@ferqx` 的真人 review evidence、受保护 reviewer
+public-key digest 和真实 cosign signature，`not_applicable` 不能绕过第三方安全评审。
+当前 job 固定 `if: false && github.workflow_sha == protected expected workflow SHA`、无
+OIDC/attestation/write 权限、trusted verifier commit/expected workflow SHA 未配置且 Gate digest 故意
+无效；即使误删一个条件也会
+fail closed。完整真实验证前 verifier 只返回 blocked、`productionReceipt=null`。
+
+Windows、Linux 与 macOS 是发行目标，但这不把任一平台自动加入 production execution support
+set。普通跨平台 launcher/TUI contract 使用 GitHub-hosted matrix；Shell/writer 等 effectful
+capability 仍按精确平台 evidence 单独准入。常规发行不要求 self-hosted Ubuntu。
+
+platform capability workflow 现在把 canonical repository、numeric repository ID、head/ref、workflow
+path/ref/SHA、run/attempt、封闭 runner class 全部写入来源，并在上传前由独立 verifier 从环境提供的
+expected source 重建 exact schema、digest、outcome 与 limitations；未知字段或 source splice 直接失败。
+该 verifier 固定只接受 `productionSupported=false` 的 candidate evidence，不能提升 D-04。
 
 disable-only rollout loader/cache 已实现严格 canonical/signature/identity/sequence/expiry/replay 与 0600、
 no-follow、atomic cache contract。fixture trust root 是公开 synthetic key，
 `realRolloutSigningEnabled=false`。远程 manifest 只能关闭能力、降低 cohort 和缩 allowlist，再由 profile
 composer 二次拒绝扩大；invalid/unavailable 回 embedded ceiling，mandatory admin 无有效 cache 时 denied。
-D-03 仍 open，真实 rollout service/signing 未启用，因此该实现不产生远程控制能力或 2A-RC evidence。
+D-03 已关闭并要求 external canary 使用独立显式 opt-in、匿名无正文 telemetry；external canary
+composition 不再接受 caller-provided artifact/feature booleans，而只消费 release-owned production
+canary profile ceiling。当前所有 embedded capability 与 telemetry ceiling 均 off。真实 rollout
+service/signing、exporter、baseline 和 observation 仍未启用，因此该实现不产生远程控制能力或
+2A-RC evidence。
 
 ## Phase 6 本地 Gate contract
 
