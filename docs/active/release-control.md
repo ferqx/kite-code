@@ -61,6 +61,8 @@ Runtime schema、平台和 Provider type。Runtime-side loader 只做 pre-exec �
 platform（适用时）及带 digest URI；strict schema 不接收 transcript 或用户正文。freshness、identity、
 bundle digest mismatch 都是 blocked。G0/G1 不可普通 waiver；G3 capability-specific failure 只关闭
 对应 capability；未在 policy 要求的 G2–G5 显示 `not_applicable`，不得显示为 passed。
+Evidence kind 明确区分 Phase 3 limited cohort 的 `limited_slo` 与后续 capability canary 的
+`canary_slo`；二者不能互相替代或复用 milestone。
 
 GitHub release policy 必须恰好包含一个全局、不可 waiver 且带 freshness 的
 `third_party_security_review` requirement。Manual approval 只能由该 requirement 的已验证 decision

@@ -22,6 +22,11 @@ human accepted/integrated/reverted 全部保持 `not_observed`；Evidence adapte
 整体 Review 后 evaluator 又加固为绑定批准 suite ID/revision/digest、精确 12 case 与固定
 determinism；本地 `real_run` discriminator 和 participant/sample constructor 均无认证 authority，
 固定 `contract_only/evidenceEligible=false`，必须等待独立 run/consent/participant/ledger verifier。
+随后本地 authenticated evidence contract 已补齐 12 case × 8/20 的 96/240 receipt 全量重建、共享
+Release artifact/frozen baseline identity、D-07 success/G0/p95 Gate、精确有序 21-case formal adversarial
+receipts 与 fixture signature 校验。本地 Gate 失败独立标为 failed；调用者不能把 fixture key/route 注入为
+production。ADR-0062 Sigstore verifier 和 production route registry 仍为空，所以 2B.4/2B.5 状态与上述
+真实 evidence 缺口不变。
 
 ## 目标
 

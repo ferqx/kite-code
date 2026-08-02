@@ -103,6 +103,13 @@ Revision 29 在两路最终 GO 与 `MS:1B-DONE` 后批量锁定新的 dependency
 reviewed baseline 与所有 off/blocked 边界。authenticated live route/attempt/adversarial/semantic
 authority 缺失时不得继续提升，且不产生 2B、Compaction 或 Capability maturity milestone。
 
+Revision 30 补齐三个仍为 `in_progress`/blocked 的本地独立证据面：2B 从精确 96/240 retained attempts
+重建 D-07 Gate，并把完整 21-case formal adversarial 绑定同一 source/candidate；Phase 3 以时间单调、
+digest-chained admission/terminal receipts 重建 Limited SLO 并拒绝 outer identity splice；4.4 重建 opaque
+blind semantic item/receipt/aggregate，并绑定逐项 candidate commitment 与受信 deterministic outcome。
+三者都复用完整 Release artifact identity，production OIDC/Sigstore/attestation verifier/route registry 仍为空，
+因此不关闭 Task、不产生 milestone，也不替代真实 run。
+
 Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
 case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的
 正式资源证据已由手动 `Runtime Resilience Qualification` workflow 的 Ubuntu

@@ -57,13 +57,21 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   或 external release 结论。
 - 2A.8、2A.9、2B.1–2B.9、3.1–3.8/3.10 已完成各自本地 fail-closed contract。依赖与整体复核
   满足后，2B.1–2B.3/2B.8 已完成，2B.4/2B.5 保持 `in_progress`；2A.8 仍等待真实供应链/平台
-  evidence。D-03、authenticated live route/baseline/attempt、真实人工/incident/SLO evidence 未满足，
+  evidence。2B 现可从 12 case × 8/20 authenticated fixture ledger 重建 D-07 Gate，并校验同 identity
+  的精确 21-case adversarial contract；Phase 3 可从时间单调的 admissions/terminal receipts 独立重建
+  Limited SLO aggregate 并拒绝 outer identity splice，但两者的 production
+  OIDC/Sigstore/attestation trust registry 均为空。D-03、authenticated live route/baseline/attempt、真实
+  人工/incident/SLO evidence 未满足，
   `MS:2B-DONE`、`MS:3-OPS-READY`、`MS:2A-RC` 和 `MS:LIMITED-SLO` 均未产生。
 - Phase 4–6 的本地 schema、conformance、profile、selection 与 Gate contract 已提前实现；D-10 已按
   ADR-0064 关闭。4.1–4.3/4.6/4.8 与 5.1/5.2/5A.1/5A.2/5C.1/5C.2/5.4 已完成，4.4 保持
-  `in_progress` 等待 authenticated evaluator；其余 Task 按正式依赖保持未绑定。所有
+  `in_progress`；其 opaque blind item/candidate commitment/receipt/identity/aggregate verifier 已实现，
+  但等待真实 authenticated evaluator
+  workflow 与 attestation。其余 Task 按正式依赖保持未绑定。所有
   route/profile/cohort 均 off/empty/0；本地 synthetic/blocked fixture 不产生 manual stable、能力
   stable、GA、canary、maturity 或第三方评审 evidence。
+- 本批 authenticated evidence 整体 Review 的架构/治理 Reviewer 与安全/对抗 Reviewer 最终均为 GO，
+  P0/P1/P2=`0/0/0`；该结论只覆盖本地 diff 和完成声明，不是 external release 所需的真人第三方安全评审。
 - 整体 Review 发现的 Release 第三方评审/production admission、Limited SLO、D-07、GA/Auto、
   worktree handoff/Git 环境和 workflow pin 问题均已 fail-closed 修复；两路最终复核均为 GO 且
   P0/P1/P2=`0/0/0`。第三方 reviewer trust root 仍为空，本地 external review fixture 不能产生

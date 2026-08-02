@@ -45,11 +45,15 @@ Required CI 固定分为 `quality`、`unit`、`compaction-contract`、`runtime-e
 真实套件不存在或未运行时，只能报告本地 mock/contract 验证结果。
 
 `tests/evals/agent-tasks/` 当前同样属于本地 synthetic contract。D-07 已批准 12-case suite、1/8/20
-重复策略与阈值，但真实 route 仍 unconfigured；nightly dry-run 零 network dispatch，Evidence adapter
-只有 blocked 结果。它即使覆盖 adversarial、human-review schema 和统计重建，也不能表述为真实
+重复策略与阈值；本地 authenticated verifier 能重建 96/240 receipts 的 D-07 Gate 和精确 21-case
+adversarial ledger，但 production route/Sigstore authority 仍 unconfigured。nightly dry-run 零 network
+dispatch，Evidence adapter 只有 blocked/failed 结果。它即使覆盖 human-review schema，也不能表述为真实
 Provider、external 产品用户或正式 Agent task benchmark 已运行。
 
-`tests/evals/compaction/` 也只验证 synthetic schema/matcher/blocked Gate。semantic score、uncertainty、
+`tests/evals/compaction/` 也只验证 synthetic schema/matcher/blocked Gate；其中 formal semantic evidence
+测试会重建 opaque blind item/receipt ledger、逐项 candidate commitment 和完整 Release/GitHub identity，
+但 production OIDC/attestation verifier
+为空，不能把 fixture 升级为正式证据。真实 semantic score、uncertainty、
 continuation non-inferiority 和 route qualification 都保持 unconfigured/not_observed。只有显式 opt-in
 live runner 绑定真实 Provider route、artifact、suite/scorer 和 freshness 后，才可作为 Phase 4 evidence；
 本地 4.9 blocked adapter 不产生 internal rollout milestone。

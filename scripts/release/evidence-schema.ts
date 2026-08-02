@@ -24,6 +24,7 @@ export const RELEASE_EVIDENCE_KINDS = [
   'execution_conformance',
   'schema_rollback',
   'incident_rehearsal',
+  'limited_slo',
   'canary_slo',
   'third_party_security_review',
 ] as const;

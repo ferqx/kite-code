@@ -29,9 +29,19 @@ determinism；缺失、额外、重复或重分类 case 全部拒绝。它没有
 `executionClass` 写成 `real_run` 也不能升级为产品 evidence。
 
 批准 suite、隔离 fixture、deterministic oracle 与 immutable registry 已分别随 2B.1–2B.3/2B.8
-完成；2B.4/2B.5 已 dependency-ready，但 repeated live execution、formal adversarial 与下游
-nightly/evidence adapter 在真实 route/baseline/attempt ledger 满足前仍使用 local blocked 路径，不能
-把旧 `unconfigured` fixture 改名为正式 run。
+完成；2B.4/2B.5 已 dependency-ready。当前 authenticated evidence contract 能从完整 retained ledger
+重建批准的 12 case × 8/20 attempts（96/240 receipts），绑定完整 `ReleaseArtifactIdentityV1`、
+repository/repository ID、head/ref、workflow path/ref/SHA、run/attempt、job、suite、route、oracle、config
+与 real frozen baseline identity。D-07 的 per-case/aggregate success、G0/false-completion 与三项 non-G0
+p95 regression 全部从 receipts 重建；本地 Gate 失败时顶层为 failed，不会被 production verifier 缺失
+掩盖。formal adversarial evidence 必须绑定同一 source/candidate、canonical catalog digest 和精确有序的
+21 case receipts。缺失、best-only、重排、catalog drift、跨 identity、digest 或签名篡改全部 fail closed。
+
+该 contract 的 Ed25519 只允许 `fixture_ed25519`，不能由调用者标成 production。ADR-0062 要求的
+GitHub Actions OIDC/keyless Sigstore verifier 与 production route registry 仍为空，因此所有本地重建
+固定 blocked、`evidenceEligible=false`。2B.4/2B.5 继续保持 `in_progress`，等待真实 approved route、
+route-matched baseline、完整正式 attempts、同 identity adversarial run 与认证 attestation；不能把本地
+fixture 改名为正式 run。
 
 `github:@ferqx` 的授权 dogfood 可以记录真实 internal acceptance metadata，但不能算 external cohort
 或独立第三方安全评审。External limited 的产品 contract 至少需要 3 名不同 opt-in 用户、每人至少

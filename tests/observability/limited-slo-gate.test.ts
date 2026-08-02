@@ -3,6 +3,16 @@ import { qualifyLimitedSloV1 } from '../../scripts/operations/qualify-limited-sl
 
 const digest = `sha256:${'a'.repeat(64)}` as const;
 const commit = 'a'.repeat(40);
+const artifactIdentity = {
+  canonicalRepository: 'ferqx/kite-code',
+  repositoryId: 'R_kgDOSKbi8g',
+  commit,
+  payloadSha256: digest,
+  canonicalManifestDigest: digest,
+  behaviorDigest: digest,
+  profileDigest: digest,
+  gatePolicyDigest: digest,
+} as const;
 const metrics = {
   task_checks_passed: 0.99,
   human_accepted: 0.9,
@@ -14,18 +24,26 @@ const metrics = {
 };
 const observation = {
   schema: 'LimitedCohortObservationV1',
-  artifactDigest: digest,
-  profileDigest: digest,
+  artifactIdentity,
   routeDigest: digest,
   cohortDigest: digest,
   source: {
     repository: 'ferqx/kite-code',
+    repositoryId: 'R_kgDOSKbi8g',
     headSha: commit,
     ref: 'refs/heads/main',
+    workflowPath: '.github/workflows/limited-slo.yml',
     workflowRef: 'ferqx/kite-code/.github/workflows/limited-slo.yml@refs/heads/main',
     workflowSha: commit,
     runId: '1',
     runAttempt: 1,
+    jobName: 'limited-slo',
+    jobId: '2',
+    artifactName: 'limited-slo-evidence',
+    artifactId: '3',
+    artifactDigest: digest,
+    oidcIssuer: 'https://token.actions.githubusercontent.com',
+    attestationSubjectDigest: digest,
     reportDigest: digest,
     verifierDigest: digest,
     sampleLedgerDigest: digest,
@@ -99,6 +117,8 @@ describe('limited cohort SLO Gate', () => {
       reasonCodes: [
         'authenticated_observation_verifier_not_configured',
         'baseline_unconfigured_or_unapproved',
+        'retained_sample_ledger_missing',
+        'trusted_source_expectation_missing',
       ],
     });
   });
@@ -127,7 +147,9 @@ describe('limited cohort SLO Gate', () => {
       'no_data',
       'observation_window_insufficient',
       'owner_unavailable',
+      'retained_sample_ledger_missing',
       'sample_count_insufficient',
+      'trusted_source_expectation_missing',
     ]);
   });
 
@@ -140,7 +162,11 @@ describe('limited cohort SLO Gate', () => {
       milestone: null,
       evidenceClass: 'contract_only',
       evidenceEligible: false,
-      reasonCodes: ['authenticated_observation_verifier_not_configured'],
+      reasonCodes: [
+        'authenticated_observation_verifier_not_configured',
+        'retained_sample_ledger_missing',
+        'trusted_source_expectation_missing',
+      ],
     });
     expect(first.inputDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(first.observationDigest).toMatch(/^sha256:[a-f0-9]{64}$/);

@@ -37,9 +37,15 @@ Owner 不可联系时 cohort=0 且恢复批准 blocked。external release 前仍
 安全评审。
 
 本地 incident rehearsal 固定为 `synthetic_contract_only`，其 G4 adapter 为 `not_run`，不能代替真实
-detection/containment/credential rotation 演练。当前 Limited SLO 只实现 `contract_only` qualifier：
-schema 要求 `MS:LIM-APPROVED`、artifact/profile/route/cohort、repository/head/ref/workflow/run-attempt、
-report/verifier/sample-ledger digest，并把 policy、observation 和完整 input identity 都纳入输出 digest；
-但 authenticated observation verifier/retained-sample 重建尚未实现，所以 shape-valid fixture 也固定
-blocked、`evidenceEligible=false`、`milestone=null`。只有未来独立 verifier 从真实 retained samples
-重建指标并验证 provenance 后，才允许产生 `MS:LIMITED-SLO`。
+detection/containment/credential rotation 演练。Limited SLO qualifier 现已具备 retained evidence
+独立重建 contract：digest-chained admissions 与 terminal receipts 必须逐项一一对应，orphan、duplicate、
+drop、重排或篡改全部 fail closed；sample count、denominator、G0/G1、error-budget burn 和所有 rate 都从
+terminal receipts 重建，不信任汇总自报值。
+
+Verifier 绑定 `MS:LIM-APPROVED` policy、完整 `ReleaseArtifactIdentityV1`、route/cohort、canonical
+repository 与 repository ID、head/ref、workflow path/ref/SHA、run/attempt、job/artifact、GitHub OIDC
+issuer 和 attestation subject。Outer observation、retained ledger 与 expected identity 必须逐字段一致，
+report/verifier digest 不能跨 candidate 拼接；admission 与 terminal 两条 ledger 的时间分别非递减。
+当前 production producer/attestation trust registry 仍硬编码为空，也没有真实 observation window，因而
+所有本地 fixture 固定 blocked、`evidenceEligible=false`、`milestone=null`。只有真实 retained ledger、
+approved policy 和独立认证 verifier 共同通过后，才允许产生 `MS:LIMITED-SLO`。
