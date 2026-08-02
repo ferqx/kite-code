@@ -1,6 +1,6 @@
 # Agent 生产化 Phase 4：压缩质量资格与 Manual Canary 计划
 
-状态：draft
+状态：active
 创建：2026-07-29
 优先级：P1
 依赖：
@@ -34,9 +34,11 @@
 
 本批已提前落地 `tests/evals/compaction/` 的本地 schema、结构/replay、确定性 fact matcher、blind
 semantic contract、control/treatment、空 route registry、no-compaction handoff 与 blocked evidence
-adapter。结果全部为 synthetic/nonDistributable/evidenceEligible=false；由于 4.1 仍等待 2B.1 的正式
-完成，没有 Task execution binding，也不产生 route qualification、manual canary 或
-`MS:4-MANUAL-STABLE`。
+adapter。2B.1 正式完成后，4.1–4.3、4.6 与 4.8 的 dependency-ready local foundation 已完成；4.4
+保持 `in_progress`，等待 authenticated semantic evaluator authority。结果全部为
+synthetic/nonDistributable/evidenceEligible=false；空 route registry 不产生 route qualification、
+manual canary 或 `MS:4-MANUAL-STABLE`。证据见
+[本地 Compaction Foundation 记录](../execution/completed/2026-08-02-agent-production-compaction-foundation.md)。
 
 ## 主要改动范围
 

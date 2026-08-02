@@ -28,8 +28,10 @@ determinism；缺失、额外、重复或重分类 case 全部拒绝。它没有
 认证 authority，因此输出固定 `evidenceClass=contract_only`、`evidenceEligible=false`，即使调用者把
 `executionClass` 写成 `real_run` 也不能升级为产品 evidence。
 
-批准 suite 当前是 immutable definition；Phase 2B 下游 registry/nightly/evidence adapter 在 2B.2–2B.9
-依赖和真实 route 满足前仍使用 local blocked 路径，不能把旧 `unconfigured` fixture 改名为正式 run。
+批准 suite、隔离 fixture、deterministic oracle 与 immutable registry 已分别随 2B.1–2B.3/2B.8
+完成；2B.4/2B.5 已 dependency-ready，但 repeated live execution、formal adversarial 与下游
+nightly/evidence adapter 在真实 route/baseline/attempt ledger 满足前仍使用 local blocked 路径，不能
+把旧 `unconfigured` fixture 改名为正式 run。
 
 `github:@ferqx` 的授权 dogfood 可以记录真实 internal acceptance metadata，但不能算 external cohort
 或独立第三方安全评审。External limited 的产品 contract 至少需要 3 名不同 opt-in 用户、每人至少

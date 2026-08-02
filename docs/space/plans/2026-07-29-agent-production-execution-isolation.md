@@ -1,6 +1,6 @@
 # Agent 生产化 Phase 1B：执行隔离与变更边界计划
 
-状态：active
+状态：completed
 创建：2026-07-29
 优先级：P0
 依赖：
@@ -12,18 +12,19 @@ ADR-0061 已接受，D-04 以空支持集关闭。Task 1B.1–1B.4 已完成；�
 `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4` 的候选加固、fresh 三平台 artifact 与独立复核
 收口为明确 `excluded`。该负向完成不产生 production qualification 或 `MS:1B-DONE`。
 Task 1B.5 已以 `e6e0ffb51115c3380a1dcc340dd1627b3bdd0970` 的全绿 Required/Platform
-证据与独立复核完成。Task 1B.6–1B.8 已绑定到 `e23b81b1087a7cdea5f4d9c5d419f5d040b67702`
-并完成本地实现与定向验证，保持 `in_progress` 等待路线图约定的最终整体 Review；其中 foreground
-Headless CLI writer 按 D-09 保持只读，remote HTTP MCP 只完成强制 transport 基础设施，local
-stdio 与缺少 App receipt controller 的 production TUI 均保持关闭。1B.9 已完成本地 negative
-artifact conformance 实现：actual synthetic bundle 经过 bootstrap verifier，三平台 support target
-继续显式 `excluded`，八类 adversarial contract 为 `excluded_not_admitted`。它仍等待路线图约定的
-最终整体 Review 与默认分支三平台 workflow artifact，因此保持 `in_progress`，不产生
-`MS:1B-DONE`。既有完成证据见
+证据与独立复核完成。Task 1B.6–1B.8 的实现经两路最终整体 Review 收口，结论均为 GO 且
+P0/P1/P2=`0/0/0`；其中 foreground Headless CLI writer 按 D-09 保持只读，remote HTTP MCP 只完成
+强制 transport 基础设施，local stdio 与缺少 App receipt controller 的 production TUI 均保持关闭。
+PR #21 合并到默认分支后，[Execution Boundary Artifact Conformance run 30739946155](https://github.com/ferqx/kite-code/actions/runs/30739946155)
+在 `dc64d25d67c9e40330676668b5f039872d04269a` 上生成三平台正式 negative artifact：三个 support
+target 继续显式 `excluded`，八类 adversarial contract 均为 `excluded_not_admitted`，独立 verifier
+重建 canonical/report digest 并验证实际 synthetic bundle。Task 1B.6–1B.9 因而完成，1B.9 唯一产生
+`MS:1B-DONE`；该 milestone 不产生 production qualification 或可分发制品。既有完成证据见
 [Task 1B.1 完成记录](../execution/completed/2026-07-31-agent-production-execution-boundary.md)与
 [Task 1B.2/1B.3 完成记录](../execution/completed/2026-08-01-agent-production-platform-exclusions.md)、
-[Task 1B.4 完成记录](../execution/completed/2026-08-01-agent-production-network-boundary.md)与
-[Task 1B.5 完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md)，规范 binding 见
+[Task 1B.4 完成记录](../execution/completed/2026-08-01-agent-production-network-boundary.md)、
+[Task 1B.5 完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md)与
+[Phase 1B 完成记录](../execution/completed/2026-08-02-agent-production-phase-1b.md)，规范 binding 见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
 整体 Review 后，1B.6 的 handoff 已把 untracked regular file 的有界、digest-bound、binary-safe 内容
@@ -35,8 +36,8 @@ replacement/packed replacement refs 与 legacy grafts 均拒绝，物化同时�
 数量。首次 filter/config/attribute 预检位于任何 worktree-aware `status`/`diff` 之前，防止
 stat-dirty tracked file 在拒绝前触发 clean/process filter。多步物化留下的 `provisioning` 记录只能用于 operator 诊断，`recover()` 不会把它提升为
 `active`；只有已完成 activation 的记录可以轮换 recovery lease。
-Execution conformance workflow 的第三方 Actions 全部固定 immutable SHA。状态仍保持
-`in_progress`，等待最终复核与 1B.9 默认分支 artifact。
+Execution conformance workflow 的第三方 Actions 全部固定 immutable SHA。默认分支 run 与独立
+artifact verification 已完成；D-04 空支持集和所有 capability exclusion 保持不变。
 
 ## 目标
 
@@ -368,15 +369,15 @@ Runtime/MCP/Skill 前失败。
 - [x] macOS/Linux 支持声明与真实隔离强度一致；
 - [ ] 写入支持平台实现真实 `workspace_write`；
 - [ ] allowlist 无 DNS/redirect/child bypass；
-- [ ] protected path 在所有本地执行路径统一生效；
-- [ ] sandbox/network controller 不可用时 fail closed；
+- [x] protected path 在所有本地执行路径统一生效；
+- [x] sandbox/network controller 不可用时 fail closed；
 - [x] 后台/并发/委派 writer 强制 worktree；
 - [x] worktree 创建失败不触碰共享 checkout；
 - [x] TUI/CLI 显示实际边界；
 - [x] 三平台 artifact conformance 有明确通过/不支持结果；
 - [ ] local stdio/remote HTTP MCP transport 使用同一有效 boundary revision；
 - [x] production shell 平台强制 process-tree 上限，不能执行的平台明确 unsupported；
-- [x] active/book/ADR/map 与当前 1B.2/1B.3 实现同步。
+- [x] active/book/ADR/map 与 Phase 1B 最终实现和证据同步。
 
 ## 回滚
 
@@ -401,7 +402,7 @@ Runtime/MCP/Skill 前失败。
 
 ## 完成证据
 
-目标路径：`docs/space/execution/completed/2026-07-30-agent-production-execution-isolation.md`。
+完成记录：`docs/space/execution/completed/2026-08-02-agent-production-phase-1b.md`。
 记录内按 Task ID 分节并逐项包含文档影响、实际 commit/artifact、命令结果与偏差。
 
 - 三平台 backend 支持矩阵；

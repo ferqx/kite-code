@@ -10,11 +10,15 @@ Contract 依赖：
 执行 fixture/adversarial 依赖：Phase 1B、1C；涉及真实 data route/human review 时再依赖 Phase 1A
 设计依据：RFC §10、§15.4、§16、§23.2
 
-2026-08-02：D-07 已按 single-maintainer-first 推荐方案关闭，2B.1 已绑定 `in_progress`。批准范围
+2026-08-02：D-07 已按 single-maintainer-first 推荐方案关闭。2B.1–2B.3 与 2B.8 已在最终整体
+Review GO 后完成，批准范围
 固定 12-case 精确分层、PR/route-change/RC 为 1/8/20、G0/false-completion=0、aggregate≥90%、
-per-case≥80%。维护者 dogfood 只算 internal；external 至少 3 人且每人 4 tasks。2B.2 仍等待
-1B.6 正式完成，formal adversarial、真实 live route、human accepted/integrated/reverted 全部保持
-`not_observed`；Evidence adapter 仍只有 `blocked/not_green`，不产生 `MS:2B-DONE`。
+per-case≥80%。维护者 dogfood 只算 internal；external 至少 3 人且每人 4 tasks。1B.6 已随
+`MS:1B-DONE` 正式完成。2B.4/2B.5 已 dependency-ready 并保持 `in_progress`，等待 authenticated
+live route、route-matched baseline、完整 8/20 attempt ledger 与 formal adversarial G0 evidence。
+human accepted/integrated/reverted 全部保持 `not_observed`；Evidence adapter 仍只有
+`blocked/not_green`，不产生 `MS:2B-DONE`。本地完成证据见
+[Phase 2B 本地评估基础记录](../execution/completed/2026-08-02-agent-production-evaluation-foundation.md)。
 整体 Review 后 evaluator 又加固为绑定批准 suite ID/revision/digest、精确 12 case 与固定
 determinism；本地 `real_run` discriminator 和 participant/sample constructor 均无认证 authority，
 固定 `contract_only/evidenceEligible=false`，必须等待独立 run/consent/participant/ledger verifier。

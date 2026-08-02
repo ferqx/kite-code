@@ -18,13 +18,15 @@ embedded ceiling、实际 evidence age 与 G3/G4/G5 passed。MCP write 还必须
 
 状态投影分别展示 Agent final、Runtime terminal、Plan lifecycle、check counts 与 Verification；任何一项
 都不能模糊成另一项。Rollback 只关闭新 admission/cohort=0，并保留 Receipt 与已有 required
-Verification。当前 profile/Gate 不产生 internal/canary/maturity evidence。
+Verification。Task 5.1/5.2 的本地 Profile、admission 与状态 foundation 已完成；当前 profile/Gate
+仍不产生 internal/canary/maturity evidence。
 
 ## Verification
 
 `verificationV1=false` 只关闭新 admission；Runtime 中已有 required facts 继续执行和 replay。risk source
 只能提高 verification mode；failed/inconclusive、repair pending、budget exhausted 和 compensation 都不
 是 passed。只有结构化用户 waiver 可以在预算耗尽后形成独立 waived 状态，模型不能自发 waiver。
+Task 5A.1/5A.2 的 completion semantics 与 required lifecycle 本地 conformance 已完成。
 
 ## MCP write
 
@@ -40,7 +42,8 @@ formal adversarial/task evidence=`not_observed`，所以轨道 blocked/off。
 Workspace 已信任时，Skill 才能分类 readonly。任一 write/destructive/unknown dependency 都归
 effectful；effectful 必须 required Verification。Workflow contract 继续 strict schema/revision/reference/
 symlink/size/output/frame/recovery/budget 边界，malicious instruction 不能扩大 ceiling，也不恢复把
-SKILL.md 正文直接注入模型的旧路径。
+SKILL.md 正文直接注入模型的旧路径。Task 5C.1/5C.2 的分类与 Workflow Contract 本地
+conformance 已完成。
 
 本地 5.3B/5.3C adapter 固定 `local_contract_only`/blocked；duplicate/unauthorized/data violation 或
 effect/reference drift 使 capability off。真实 route、formal task evidence、internal/canary 运行和
