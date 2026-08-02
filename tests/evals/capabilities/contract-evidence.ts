@@ -7,6 +7,9 @@ import {
   type SkillEffectClassV1,
 } from '../../skills/conformance-fixtures';
 
+export * from '../../../scripts/evals/contracts/capability-evaluation-evidence';
+
+/** Legacy local adapter retained alongside the production-owned evidence layer. */
 export function buildMcpWriteContractEvidenceV1(input: {
   route?: McpWriteRouteContractV1;
   observedRouteDigest?: string;
@@ -33,6 +36,7 @@ export function buildMcpWriteContractEvidenceV1(input: {
   });
 }
 
+/** Legacy conformance adapter remains covered; it cannot produce maturity. */
 export function buildSkillContractEvidenceV1(input: {
   capability: 'skills_readonly' | 'skills_effectful';
   effectClass: SkillEffectClassV1;

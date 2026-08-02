@@ -18,7 +18,7 @@
   尚无 producer/trust root，App composition 对所有 `production=true` 固定返回
   `production_artifact_authority_unconfigured`，controlled config 也拒绝调用者伪造 active production
   composition。registry membership 只能用于 manifest/分发候选 contract，不能由布尔值变成 Runtime authority。
-- 四个 embedded profile 只是严格 schema/组合 fixture：所有 capability rollout=`off`、资源预算为
+- 六个 embedded profile（含 manual/auto compaction）只是严格 schema/组合 fixture：所有 capability rollout=`off`、资源预算为
   0、network/logging/telemetry/route 全部关闭。它们不表示可分发产品配置。
 - CLI `--release-status` 与 TUI `/release` 只显示脱敏 profile/capability/rollout/execution/logging/
   telemetry/data route count/Verification 状态；不显示 credential、Workspace path、route 名称、
@@ -158,6 +158,12 @@ service/signing、exporter、baseline 和 observation 仍未启用，因此该�
 2A-RC evidence。
 
 ## Phase 6 本地 Gate contract
+
+跨 capability maturity Gate 已预构建 canary → beta → stable 的严格顺序与 exact identity chain，要求
+预注册 observation window/sample/error budget、G3–G5、独立真人 approval、用户理解度、rollback 和
+freshness。当前 production authentication verifier 未实现；受信 evidence authority、已验证前序 decision
+与已验证真人 approval registry 各自固定为空。shape-valid production observation 或只填充其中一个身份
+集合仍只能 blocked，不能产生 promotion 或被 Phase 6 selection 当作 stable decision。
 
 `release/ga-selection-v1.json` 当前 selected capability 为空，并显式把全部 15 个 Release Capability
 forced off。validator 要求每个 selected capability 绑定精确且 fresh 的 stable decision，并要求 selected/

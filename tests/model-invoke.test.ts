@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { ToolSet } from 'ai';
 import { z } from 'zod';
 import { humanMessage } from '../src/core/messages';
+import { createModelContextSummaryGenerator } from '../src/core/model/compaction-summary';
 import { createChatModel } from '../src/core/model/factory';
 import { invokeBoundModel } from '../src/core/model/invoke';
 import { createMockModelServer } from './tui-system/harness/fixtures';
@@ -118,6 +119,24 @@ describe('invokeBoundModel streaming', () => {
     expect(server.getRequests()[0]?.body.stream).not.toBe(true);
     expect(deltas).toEqual([]);
     expect(response.content).toBe('non-streamed');
+  });
+
+  test('disables DeepSeek V4 thinking for bounded internal compaction summaries', async () => {
+    const { server, model } = setup('deepseek');
+    model.compactionProviderOptions = { deepseek: { thinking: { type: 'disabled' } } };
+    server.setResponses([{ message: { content: 'bounded summary' } }]);
+
+    const generate = createModelContextSummaryGenerator({ model });
+    await expect(
+      generate({ systemPrompt: 'summarize', input: 'settled history', maxOutputTokens: 600 }),
+    ).resolves.toMatchObject({ summary: 'bounded summary' });
+
+    expect(server.getRequests()[0]?.body).toMatchObject({
+      model: 'mock-model',
+      max_tokens: 600,
+      thinking: { type: 'disabled' },
+    });
+    expect(server.getRequests()[0]?.body.stream).not.toBe(true);
   });
 
   test('propagates a streamed provider failure without emitting deltas', async () => {

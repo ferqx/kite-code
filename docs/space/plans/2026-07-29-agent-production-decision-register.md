@@ -314,6 +314,25 @@ API 正文固定 retention、已验证 training opt-out、DPA 和产品下游披
 `release/provider-data-policies/candidates-v1.json`，production admission 不读取它。用户批准候选选择，
 但没有把未知政策事实批准为通过。
 
+Revision D-14.2（2026-08-02）：复核 DeepSeek 2026-02-10 官方隐私政策和 2026-04-22 Open
+Platform Terms。政策明确个人数据直接在中华人民共和国处理/存储、可能用于训练并提供个人数据训练
+opt-out 权利；同时明确开发者下游系统最终用户的数据处理不在该隐私政策覆盖范围内，开发者仍是控制者
+并负责披露。route deployment region 仍未公布，API 正文固定 retention、API 级 opt-out 落地、DPA
+和产品披露仍未验证。因此仅更新 candidate assessment，不改变 route identity digest、空 approved bundle
+或 `productionContentAllowed=false`。证据：
+https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html；
+https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html。
+
+Revision D-14.3（2026-08-02）：single owner `github:@ferqx` 明确接受 DeepSeek 官方 API 对该首发
+Route 的已披露数据风险：中国处理/存储、可能用于训练、未承诺固定 API 正文 retention、无 DPA，且
+deployment region 记为 `unspecified`；这些事实不再作为 admission blocker。批准项只绑定
+`providerType=deepseek`、`modelName=deepseek-v4-flash`、`https://api.deepseek.com[/v1]` 与 canonical
+operator/deployment identity，换模型、换 endpoint、URL credentials/query/fragment、policy 过期或
+digest 漂移均 fail closed。下游披露当前固定在 README/active/book release 文档，不要求 pre-release
+per-run acknowledgement；secret/protected credential 拦截、独立 remote MCP egress、
+`allowProductionContentEvaluation=false` 和真实 live evidence 要求保持不变。该风险接受不构成 2B.4
+真实评估通过，也不替代 external release 前真人第三方安全评审。架构记录：[ADR-0066](../../adr/0066-deepseek-owner-accepted-provider-data-policy.md)。
+
 ## Execution bindings
 
 Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提交是路线图复核
@@ -425,3 +444,6 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 31 | 2026-08-02 | 关闭 D-03；追加 D-04.1 跨平台发行/能力准入正交澄清与 D-14.1 DeepSeek blocked candidate；撤回未提交的 Ubuntu self-hosted 常规发行要求 | 用户直接决策；ADR-0065；GitHub-hosted 三平台 probe contract；external canary 60-test 定向批次中的 consent/admission contract；DeepSeek candidate policy 保持 productionContentAllowed=false、approved route bundle 为空 |
 | 32 | 2026-08-02 | 绑定 2A.9 `in_progress`；把三平台 distribution identity 与空 execution support registry 独立建模；加固 platform artifact、telemetry、DeepSeek candidate 与 external canary authority；补齐 2A.8/2B.4–2B.5/4.4 的本地正式 producer/verifier 骨架 | baseline `f38d819226aeceaa549e2466c35ed26fe642a6c9`；定向 platform/release/telemetry/provider/evaluation tests 与 typecheck；新增 workflow 均 manual/no-publish 或不可达，unsigned/unconfigured 结果固定 blocked；所有 production capability 仍 off、production assembly/signing/route/exporter 仍 disabled，不产生 milestone 或真实 evidence |
 | 33 | 2026-08-02 | 修复整体 Review 的 telemetry、supply-chain 与输入身份 P1/P2，不提升 Task 或 milestone | reporter release-owned alias/cardinality 与 audit no-op；2A.8 isolated verifier VM/protected verifier commit、immutable input snapshot、OS-protected pinned toolchain、canonical USTAR、archive launcher、macOS 完整 app bundle、manifest、G5 独立真人签名、timeout、macOS/Windows signer identity；platform workflow/ref exact binding；4.4 tracked Git blob snapshot；DeepSeek purpose-specific official origin；production authority 与所有真实 evidence 继续 disabled/waiting |
+| 34 | 2026-08-02 | 追加 D-14.3：single owner 接受官方 DeepSeek 精确 Route 的中国处理/存储、可能训练、无固定 retention 与无 DPA；不把这些政策事实作为阻塞 | ADR-0066；approved policy 仅绑定 `deepseek-v4-flash` + `api.deepseek.com[/v1]`，透明披露与 secret denial 保留；2B.4 仍等待真实 credential/live retained evidence，Task/milestone 不提升 |
+| 35 | 2026-08-02 | 预构建 Phase 4/5 的 production-owned retained evidence、Compaction rollout/shadow 与统一 capability maturity Gate；不提前绑定下游 Task | 61-test 定向批次；所有 authority registry 为空、manual/auto compaction 与四条 Phase 5 profile 均 `under_development/off`，完整 fixture 仍 blocked/evidenceEligible=false；Task 状态和 milestone 不变 |
+| 36 | 2026-08-02 | 修复本批整体 Review 的 secret inspection、maturity 认证、rollout 时间/consent/dependency 绑定与旧 adapter 回归；完成一次 DeepSeek V4 真实 compaction compatibility smoke，不提升 Task 或 milestone | Provider admission 复用 Runtime inspector 且 unknown fail closed；maturity authentication verifier/authority/previous decision/human approval 四门独立关闭；rollout 绑定三项 dependency digest、严格 stage window 与不可伪造 consent authority；DeepSeek direct/incremental smoke 通过但不具备正式 artifact/ledger/attestation，2B.4/2B.5/4.4 与所有 rollout/maturity milestone 保持等待 |

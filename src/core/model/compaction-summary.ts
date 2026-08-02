@@ -63,6 +63,7 @@ export function createModelContextSummaryGenerator(input: {
       messages: [systemMessage(request.systemPrompt), humanMessage(request.input)],
       signal: input.signal,
       maxOutputTokens: request.maxOutputTokens,
+      providerOptions: input.model.compactionProviderOptions,
       providerDataAdmission: input.providerDataAdmission,
       providerDataPolicyRequired: input.providerDataPolicyRequired,
       providerDispatchPurpose: 'compaction',

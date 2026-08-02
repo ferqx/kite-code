@@ -1,54 +1,51 @@
 import { describe, expect, test } from 'bun:test';
-import { buildSkillContractEvidenceV1 } from './contract-evidence';
+import { verifyCapabilityEvaluationEvidenceV1 } from './contract-evidence';
+import { buildCapabilityEvidenceFixtureV1 } from './evidence-fixtures';
 
-const safeContract = {
-  dependencyRevisionMatches: true,
-  maliciousInstructionDetected: false,
-  invalidShadowingDetected: false,
-  referenceBoundaryViolation: false,
-  duplicateSideEffect: false,
-  falseCompletion: false,
-} as const;
-
-describe('Skills capability evaluation adapter', () => {
+describe('production-owned Skills evaluation evidence', () => {
   test.each([
-    ['skills_readonly', 'readonly'],
-    ['skills_effectful', 'effectful'],
-  ] as const)('keeps %s blocked while formal task evidence is not observed', (capability, effectClass) => {
-    const evidence = buildSkillContractEvidenceV1({
-      capability,
-      effectClass,
-      formalTaskEvidence: 'not_observed',
-      ...safeContract,
-    });
-    expect(evidence).toMatchObject({
-      executionClass: 'local_contract_only',
-      status: 'blocked',
-      formalTaskEvidence: 'not_observed',
-      maturity: 'not_observed',
-      milestone: 'not_produced',
-    });
-    expect(evidence.reasonCodes).toEqual(['formal_task_evidence_not_passed']);
+    'skills_readonly',
+    'skills_effectful',
+  ] as const)('keeps canonical %s evidence blocked without authenticated authority', (capability) => {
+    const fixture = buildCapabilityEvidenceFixtureV1(capability);
+    const result = verifyCapabilityEvaluationEvidenceV1(fixture.evidence, fixture.expected);
+    expect(result.status).toBe('blocked');
+    expect(result.evidenceEligible).toBeFalse();
+    expect(result.capability).toBe(capability);
   });
 
   test.each([
-    ['malicious Skill content', { maliciousInstructionDetected: true }],
-    ['invalid shadowing', { invalidShadowingDetected: true }],
-    ['dependency drift', { dependencyRevisionMatches: false }],
-    ['reference boundary violation', { referenceBoundaryViolation: true }],
-    ['duplicate side effect', { duplicateSideEffect: true }],
-    ['false completion', { falseCompletion: true }],
-  ] as const)('revokes local contract qualification for %s', (_name, violation) => {
-    const evidence = buildSkillContractEvidenceV1({
-      capability: 'skills_effectful',
-      effectClass: 'effectful',
-      formalTaskEvidence: 'passed',
-      ...safeContract,
-      ...violation,
-    });
-    expect(evidence.status).toBe('off');
-    expect(evidence.maturity).toBe('not_observed');
-    expect(evidence.milestone).toBe('not_produced');
-    expect(evidence.reasonCodes).toHaveLength(1);
+    [
+      'malicious instruction',
+      { maliciousInstructionAccepted: 1 },
+      'skill_malicious_instruction_accepted',
+    ],
+    ['invalid shadowing', { invalidShadowingAccepted: 1 }, 'skill_invalid_shadowing_accepted'],
+    ['dependency drift', { dependencyRevisionDrift: 1 }, 'skill_dependency_revision_drift'],
+    [
+      'reference boundary violation',
+      { referenceBoundaryViolation: 1 },
+      'skill_reference_boundary_violation',
+    ],
+    ['duplicate effect', { duplicateEffect: 1 }, 'skill_duplicate_effect'],
+    [
+      'unknown effect reported as success',
+      { unknownEffectResolvedAsSuccess: 1 },
+      'unknown_effect_resolved_as_success',
+    ],
+    ['false completion', { falseCompletion: 1 }, 'skill_false_completion'],
+  ] as const)('fails closed for %s', (_name, safety, reason) => {
+    const fixture = buildCapabilityEvidenceFixtureV1('skills_effectful', safety);
+    const result = verifyCapabilityEvaluationEvidenceV1(fixture.evidence, fixture.expected);
+    expect(result.status).toBe('failed');
+    expect(result.reasonCodes).toContain(reason);
+  });
+
+  test('rejects workflow/run identity splicing', () => {
+    const fixture = buildCapabilityEvidenceFixtureV1('skills_readonly');
+    fixture.expected.source = { ...fixture.expected.source, runAttempt: 2 };
+    expect(() => verifyCapabilityEvaluationEvidenceV1(fixture.evidence, fixture.expected)).toThrow(
+      'expected workflow/run',
+    );
   });
 });

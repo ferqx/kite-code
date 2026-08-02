@@ -24,7 +24,7 @@ import {
   type TransientModelRetryOptions,
   withTransientModelRetry,
 } from './deepseek';
-import type { SupportedChatModel } from './factory';
+import type { ModelProviderOptions, SupportedChatModel } from './factory';
 
 /**
  * Invoke a bound model without depending on the execution graph.
@@ -37,6 +37,7 @@ export async function invokeBoundModel(params: {
   messages: BaseMessage[];
   signal?: AbortSignal;
   maxOutputTokens?: number;
+  providerOptions?: ModelProviderOptions;
   streaming?: boolean;
   onTextDelta?: (text: string) => void;
   onReasoningDelta?: (text: string, segmentId: string) => void;
@@ -93,6 +94,7 @@ export async function invokeBoundModel(params: {
     abortSignal: params.signal,
     temperature: 0,
     maxRetries: 0, // retries handled by transientRetryMiddleware
+    providerOptions: params.providerOptions,
     ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
   };
 

@@ -1,110 +1,47 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveMcpToolPolicy } from '@/core/mcp/tool-policy';
-import {
-  type McpWriteRouteContractV1,
-  routeContractDigestV1,
-} from '../../mcp/write-contract-fixtures';
-import { buildMcpWriteContractEvidenceV1 } from './contract-evidence';
+import { verifyCapabilityEvaluationEvidenceV1 } from './contract-evidence';
+import { buildCapabilityEvidenceFixtureV1 } from './evidence-fixtures';
 
-function syntheticRoute(): McpWriteRouteContractV1 {
-  const policy = resolveMcpToolPolicy(
-    {
-      type: 'http',
-      trust: 'untrusted',
-      tools: {
-        write: {
-          minimumApproval: 'user',
-          retry: 'never',
-          effects: { filesystem: 'none', network: 'write', externalState: 'write' },
-        },
-      },
-    },
-    { name: 'write', annotations: { readOnlyHint: false } },
-  );
-  return {
-    routeId: 'synthetic-contract-route',
-    operatorIdentity: 'synthetic-operator',
-    serverIdentity: 'synthetic-server',
-    endpointRevision: 'synthetic-endpoint-v1',
-    toolName: 'write',
-    toolRevision: 'synthetic-tool-v1',
-    schemaDigest: 'synthetic-schema-v1',
-    policyDigest: 'synthetic-policy-v1',
-    effects: policy.effectiveEffects,
-    minimumApproval: policy.minimumApproval,
-    providerDataPolicyRevision: 'synthetic-data-policy-v1',
-    idempotency: 'unsupported',
-    reconciliation: 'required',
-    rateLimitPerMinute: 1,
-    timeoutMs: 1000,
-    evidenceObservedAt: '2026-08-01T00:00:00.000Z',
-    evidenceExpiresAt: '2026-08-03T00:00:00.000Z',
-  };
-}
-
-describe('MCP write capability evaluation adapter', () => {
-  test('keeps missing production route and formal task evidence blocked', () => {
-    expect(
-      buildMcpWriteContractEvidenceV1({
-        formalTaskEvidence: 'not_observed',
-        duplicateSideEffects: 0,
-        unauthorizedSideEffects: 0,
-        dataBoundaryViolations: 0,
-        now: new Date('2026-08-02T00:00:00.000Z'),
-      }),
-    ).toEqual({
-      schemaVersion: 1,
+describe('production-owned MCP write evaluation evidence', () => {
+  test('retains a canonical safe ledger but cannot qualify without authenticated authority', () => {
+    const fixture = buildCapabilityEvidenceFixtureV1('mcp_write');
+    const result = verifyCapabilityEvaluationEvidenceV1(fixture.evidence, fixture.expected);
+    expect(result).toMatchObject({
       capability: 'mcp_write',
-      executionClass: 'local_contract_only',
-      productionRouteConfigured: false,
-      formalTaskEvidence: 'not_observed',
       status: 'blocked',
-      reasonCodes: ['formal_task_evidence_not_passed', 'production_route_unconfigured'],
-      maturity: 'not_observed',
-      milestone: 'not_produced',
+      evidenceEligible: false,
+      authenticatedAuthorityConfigured: false,
+      retainedReceiptCount: 1,
     });
-  });
-
-  test('a synthetic passing route cannot manufacture formal qualification', () => {
-    const route = syntheticRoute();
-    const evidence = buildMcpWriteContractEvidenceV1({
-      route,
-      observedRouteDigest: routeContractDigestV1(route),
-      formalTaskEvidence: 'passed',
-      duplicateSideEffects: 0,
-      unauthorizedSideEffects: 0,
-      dataBoundaryViolations: 0,
-      now: new Date('2026-08-02T00:00:00.000Z'),
-    });
-    expect(evidence.status).toBe('blocked');
-    expect(evidence.reasonCodes).toEqual(['contract_only_cannot_qualify']);
-    expect(evidence.maturity).toBe('not_observed');
-    expect(evidence.milestone).toBe('not_produced');
+    expect(result.reasonCodes).toEqual([
+      'contract_conformance_not_production',
+      'production_oidc_sigstore_authority_unconfigured',
+    ]);
   });
 
   test.each([
+    ['duplicate effect', { duplicateEffect: 1 }, 'mcp_write_duplicate_effect'],
+    ['unauthorized effect', { unauthorizedEffect: 1 }, 'mcp_write_unauthorized_effect'],
+    ['data boundary violation', { dataBoundaryViolation: 1 }, 'mcp_write_data_boundary_violation'],
     [
-      'duplicate side effect',
-      { duplicateSideEffects: 1, unauthorizedSideEffects: 0, dataBoundaryViolations: 0 },
+      'unknown effect reported as success',
+      { unknownEffectResolvedAsSuccess: 1 },
+      'unknown_effect_resolved_as_success',
     ],
-    [
-      'unauthorized side effect',
-      { duplicateSideEffects: 0, unauthorizedSideEffects: 1, dataBoundaryViolations: 0 },
-    ],
-    [
-      'data boundary violation',
-      { duplicateSideEffects: 0, unauthorizedSideEffects: 0, dataBoundaryViolations: 1 },
-    ],
-  ] as const)('forces MCP write off for %s', (_name, violations) => {
-    const route = syntheticRoute();
-    const evidence = buildMcpWriteContractEvidenceV1({
-      route,
-      observedRouteDigest: routeContractDigestV1(route),
-      formalTaskEvidence: 'passed',
-      ...violations,
-      now: new Date('2026-08-02T00:00:00.000Z'),
-    });
-    expect(evidence.status).toBe('off');
-    expect(evidence.reasonCodes).toContain('hard_safety_violation');
+    ['false completion', { falseCompletion: 1 }, 'mcp_write_false_completion'],
+  ] as const)('fails closed for %s', (_name, safety, reason) => {
+    const fixture = buildCapabilityEvidenceFixtureV1('mcp_write', safety);
+    const result = verifyCapabilityEvaluationEvidenceV1(fixture.evidence, fixture.expected);
+    expect(result.status).toBe('failed');
+    expect(result.evidenceEligible).toBeFalse();
+    expect(result.reasonCodes).toContain(reason);
+  });
+
+  test('rejects a retained receipt whose canonical digest was not rebuilt', () => {
+    const fixture = buildCapabilityEvidenceFixtureV1('mcp_write');
+    fixture.evidence.receipts[0]!.observedResultDigest = `sha256:${'f'.repeat(64)}`;
+    expect(() => verifyCapabilityEvaluationEvidenceV1(fixture.evidence, fixture.expected)).toThrow(
+      'receipt digest does not rebuild',
+    );
   });
 });

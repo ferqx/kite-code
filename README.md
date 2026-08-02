@@ -55,15 +55,17 @@ bun install
 会话日志治理默认关闭：`features.sessionLoggingPolicyV1=false` 时 mode 为 `off` 且不创建日志目录；开启时默认只记录 allowlist metadata。`content` 需要 release artifact 允许和用户配置显式 opt-in，项目配置不能开启；即使 opt-in 也不记录 reasoning、工具/文件正文、审批命令、Plan/Sub-agent 正文或 credential。日志目录/文件使用 owner-only 权限或 ACL、拒绝 link/reparse point，并通过 durable active-session lease、bounded retention/容量与 fail-closed quarantine 保护；TUI/CLI 会显示 resolved mode，logger 不可用时 Agent 继续运行且不使用不安全 fallback。
 
 生产模型数据门禁与远程 HTTP MCP 正文外发是两个独立授权域。`providerDataPolicyV1` 开启后，
-模型、压缩、Sub-agent 和 reviewer 都必须匹配仓库固定的 route/data policy；当前批准 bundle 为空，
-因此没有 production-qualified model route。`remoteMcpEgressPolicyV1` 开启后，非空 MCP 参数仍需
+模型、压缩、Sub-agent 和 reviewer 都必须匹配仓库固定的 route/data policy；当前只批准
+DeepSeek 官方 API 的精确 `deepseek-v4-flash` Route。`remoteMcpEgressPolicyV1` 开启后，非空 MCP 参数仍需
 逐 invocation、短时、route/tool/参数 digest/nonce 精确绑定的独立许可；关闭时保持 no-egress，
 Tool Approval、read-only annotation、模型 Provider consent 或 network allowlist 都不能替代该许可。
 
-当前首个 route 候选是 DeepSeek 官方 API 的 `deepseek-v4-flash`，但 region、API 正文固定
-retention、training opt-out、DPA 和下游用户披露证据尚未满足，因此只记录为 blocked candidate；
-批准 bundle 仍为空，不能处理 production content。候选治理来源也按 purpose 固定到 DeepSeek 的
-`api-docs.deepseek.com`/`cdn.deepseek.com` HTTPS origin；这只防止伪造“官方来源”，不补齐缺失政策。
+该 Route 固定为 `type=deepseek`、`model=deepseek-v4-flash` 与
+`https://api.deepseek.com[/v1]`，并按 ADR-0066 显式接受官方政策披露的中国处理/存储、可能训练、
+未承诺固定 API 正文保留期以及无 DPA；这些事实不再是准入阻塞项。产品仍必须向用户透明披露，
+secret/protected credential 在网络调用前一律拒绝，换模型、换 endpoint、URL 携带凭据/查询参数或
+policy 过期都 fail closed。该批准不允许 remote MCP 正文外发，也不允许 secondary reviewer 使用
+production content；真实评估仍需要凭据、authenticated live run 和 retained evidence。
 
 MCP 默认配置只有两个规范位置：项目级 `<project>/.kite-code/mcp.json` 与用户级 `~/.kite-code/mcp.json`，同名 Server 按 `project > user` 选择。`/mcp` 的 Current project 与 All projects 分别写入这两个文件；项目声明必须在 Server Detail 的 Review 页面显式批准。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 仅只读兼容与显式迁移，不再作为写入目标。
 

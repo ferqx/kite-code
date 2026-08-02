@@ -8,6 +8,8 @@ import {
 } from '../../src/core/config/release-capabilities';
 
 const profilePaths = [
+  'auto-compaction-v1.json',
+  'manual-compaction-v1.json',
   'mcp-write-v1.json',
   'skills-effectful-v1.json',
   'skills-readonly-v1.json',
@@ -26,6 +28,8 @@ describe('capability profile contract', () => {
   test('ships every local capability track off without maturity evidence', () => {
     const profiles = profilePaths.map(loadProfile);
     expect(profiles.map(({ capability }) => capability).sort()).toEqual([
+      'auto_compaction',
+      'manual_compaction',
       'mcp_write',
       'skills_effectful',
       'skills_readonly',

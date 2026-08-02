@@ -178,7 +178,11 @@ export async function* runRuntimeAgent(
   let cancellationIncomplete = false;
   const executionAbortController = new AbortController();
   const providerDataAdmission = getFeatureFlags(input.config).providerDataPolicyV1
-    ? createApprovedProviderDataAdmissionV1(input.config)
+    ? createApprovedProviderDataAdmissionV1(
+        input.config,
+        new Date(),
+        sessionLoggingContentInspector,
+      )
     : undefined;
   const forwardExternalAbort = () => executionAbortController.abort(input.signal?.reason);
   if (input.signal?.aborted) forwardExternalAbort();

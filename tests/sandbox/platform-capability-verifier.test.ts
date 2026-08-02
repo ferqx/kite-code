@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { parseCanonicalJson } from '../../scripts/release/canonical-json';
 import {
   computePlatformCapabilityEvidenceDigestV1,
+  encodePlatformCapabilityEvidenceV1,
   type GithubHostedRunnerClassV1,
   githubEvidenceSource,
   type PlatformCapabilityEvidenceV1,
@@ -43,6 +45,10 @@ describe('independent platform capability artifact verifier', () => {
       ...withoutDigest,
       digest: computePlatformCapabilityEvidenceDigestV1(withoutDigest),
     };
+
+    const encoded = encodePlatformCapabilityEvidenceV1(evidence);
+    expect(parseCanonicalJson(encoded)).toEqual(evidence);
+    expect(new TextDecoder().decode(encoded)).not.toEndWith('\n');
 
     expect(verifyPlatformCapabilityEvidenceV1({ evidence, expectedSource: source })).toMatchObject({
       status: 'verified_non_production_candidate',

@@ -140,7 +140,9 @@ describe('model Provider data admission', () => {
         failure: expect.objectContaining({ kind: 'mandatory_policy_unavailable' }),
       }),
     );
-    expect(APPROVED_PROVIDER_DATA_POLICY_REVISION_V1).toBe('m0-empty-2026-07-30');
+    expect(APPROVED_PROVIDER_DATA_POLICY_REVISION_V1).toBe(
+      'd14-deepseek-owner-accepted-2026-08-02.3',
+    );
     expect(APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(createApprovedProviderDataAdmissionV1(config)([], 'primary_model')).toMatchObject({
       admitted: false,
@@ -179,6 +181,51 @@ describe('model Provider data admission', () => {
       }),
     ).rejects.toThrow('provider_secret_denied');
     expect(model.callCount.count).toBe(0);
+  });
+
+  test('reuses the Runtime secret inspector so opaque known secrets never reach DeepSeek', async () => {
+    const model = createMockModel([]);
+    const opaqueSecret = 'opaque-credential-without-a-known-shape';
+    const deepseekConfig: AgentConfig = {
+      apiKey: 'configured-provider-key',
+      baseURL: 'https://api.deepseek.com/v1',
+      modelName: 'deepseek-v4-flash',
+      providerName: 'deepseek',
+      providerType: 'deepseek',
+      features: { providerDataPolicyV1: true },
+      sandbox: { enabled: false },
+    };
+    const events = [];
+
+    for await (const event of runRuntimeAgent(
+      {
+        task: `analyze ${opaqueSecret}`,
+        userId: 'u',
+        threadId: `provider-known-secret-${crypto.randomUUID()}`,
+        workspace: '/workspace',
+        runtimeStorePath: ':memory:',
+        config: deepseekConfig,
+        model,
+        sandboxBackend: 'unknown',
+        sessionLoggingContentInspector: ({ text }) => ({
+          schemaVersion: 1,
+          detector: 'runtime_secret_detector',
+          verdict: text.includes(opaqueSecret) ? 'secret' : 'clear',
+        }),
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event);
+    }
+
+    expect(model.callCount.count).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'run.error',
+        message: expect.stringContaining('provider_secret_denied'),
+        failure: expect.objectContaining({ kind: 'policy_denied' }),
+      }),
+    );
   });
 
   test('fails closed before dispatch when the enabled gate is unavailable', async () => {

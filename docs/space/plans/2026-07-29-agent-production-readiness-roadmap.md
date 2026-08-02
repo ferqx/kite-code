@@ -39,8 +39,10 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
 - Phase 1A（Task 1A.1–1A.7）已完成，由
   [Task 1A.7 完成记录](../execution/completed/2026-07-30-agent-production-local-data-privacy.md)
   唯一产生 `MS:1A-DONE`。该 milestone 不产生 production-qualified route 或
-  production artifact；当前 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
-  route 集合也为空。
+  production artifact。Phase 1A closure 当时 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
+  route 集合也为空。D-14.3/ADR-0066 后 ProviderDataPolicy bundle 才只加入官方 DeepSeek
+  `deepseek-v4-flash` 精确 model Route；MCP route 集合仍为空，该后续风险接受不改写 Phase 1A
+  milestone 的历史完成结论。
 - Phase 1B（Task 1B.0–1B.9）已完成。D-04 以空支持集关闭；1B.2/1B.3 的完成结论是三平台候选
   均明确 `excluded`。两路最终整体 Review 均为 GO 且 P0/P1/P2=`0/0/0`；默认分支
   [Execution Boundary Artifact Conformance run 30739946155](https://github.com/ferqx/kite-code/actions/runs/30739946155)
@@ -83,7 +85,10 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   但等待真实 authenticated evaluator
   workflow 与 attestation。其余 Task 按正式依赖保持未绑定。所有
   route/profile/cohort 均 off/empty/0；本地 synthetic/blocked fixture 不产生 manual stable、能力
-  stable、GA、canary、maturity 或第三方评审 evidence。
+  stable、GA、canary、maturity 或第三方评审 evidence。后续本地预构建还增加了四条 Phase 5
+  production-owned retained evidence verifier、Compaction internal rollout/external shadow Gate、
+  manual/auto compaction off profile 与统一 canary→beta→stable maturity Gate；所有 production authority
+  registry 仍为空，因此没有新 Task binding 或 milestone。
 - 本批 authenticated evidence 整体 Review 的架构/治理 Reviewer 与安全/对抗 Reviewer 最终均为 GO，
   P0/P1/P2=`0/0/0`；该结论只覆盖本地 diff 和完成声明，不是 external release 所需的真人第三方安全评审。
 - 整体 Review 发现的 Release 第三方评审/production admission、Limited SLO、D-07、GA/Auto、

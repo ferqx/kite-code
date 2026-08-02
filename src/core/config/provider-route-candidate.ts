@@ -11,7 +11,8 @@ export const providerRouteCandidateV1Schema = z
     version: z.literal(1),
     candidateId: z.string().trim().min(1),
     decisionId: z.literal('D-14'),
-    status: z.literal('blocked_policy_evidence'),
+    status: z.literal('promoted_to_approved'),
+    approvedPolicyId: z.literal('deepseek-official-api-v4-flash'),
     route: providerRouteIdentityV1Schema,
     endpointIdentityDigest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
     modelIds: z.array(z.string().trim().min(1)).min(1),
@@ -75,24 +76,18 @@ export const providerRouteCandidateV1Schema = z
       }),
     assessment: z
       .object({
-        processingRegion: z.literal('unknown'),
-        fixedContentRetention: z.literal('not_published'),
-        trainingUse: z.literal('not_prohibited_by_published_policy'),
-        dpa: z.literal('not_verified'),
-        downstreamDisclosure: z.literal('required_not_implemented'),
-        productionContentAllowed: z.literal(false),
+        routeDeploymentRegion: z.literal('unspecified'),
+        personalDataProcessingRegion: z.literal('people_republic_of_china'),
+        fixedApiContentRetention: z.literal('not_contractually_bounded'),
+        trainingUse: z.literal('published_policy_allows_training'),
+        apiContentTrainingOptOut: z.literal('not_required_for_admission'),
+        dpa: z.literal('owner_accepted_not_required'),
+        downstreamPrivacyScope: z.literal('developer_controller_policy_required'),
+        downstreamDisclosure: z.literal('documented_release_disclosure'),
+        productionContentAllowed: z.literal(true),
       })
       .strict(),
-    blockers: z
-      .array(
-        z.enum([
-          'api_content_retention_not_contractually_bounded',
-          'api_training_opt_out_not_verified',
-          'dpa_not_verified',
-          'end_user_disclosure_not_implemented',
-        ]),
-      )
-      .length(4),
+    blockers: z.array(z.never()).length(0),
   })
   .strict()
   .superRefine((candidate, context) => {

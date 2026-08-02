@@ -21,6 +21,7 @@ import {
 } from '../../src/core/sandbox/process-tree-capability';
 import { generateSandboxProfile } from '../../src/core/sandbox/profile';
 import { findApplySeccomp } from '../../src/core/sandbox/seccomp';
+import { canonicalJsonBytes } from './canonical-json';
 
 export type NativeProbeVerdict = 'enforced' | 'unsupported' | 'unavailable';
 export type PlatformSupportOutcome = 'supported' | 'read_only_only' | 'excluded';
@@ -1062,27 +1063,23 @@ export function collectLimitations(
   return limitations;
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
-}
-
 export function computePlatformCapabilityEvidenceDigestV1(
   evidence: Omit<PlatformCapabilityEvidenceV1, 'digest'>,
 ): string {
-  return `sha256:${createHash('sha256').update(canonicalJson(evidence)).digest('hex')}`;
+  return `sha256:${createHash('sha256').update(canonicalJsonBytes(evidence)).digest('hex')}`;
+}
+
+export function encodePlatformCapabilityEvidenceV1(
+  evidence: PlatformCapabilityEvidenceV1,
+): Uint8Array {
+  platformCapabilityEvidenceV1Schema.parse(evidence);
+  return canonicalJsonBytes(evidence);
 }
 
 if (import.meta.main) {
   const evidence = await runPlatformCapabilityProbe();
-  const serialized = `${JSON.stringify(evidence, null, 2)}\n`;
+  const encoded = encodePlatformCapabilityEvidenceV1(evidence);
   const outputPath = process.argv[2];
-  if (outputPath) writeFileSync(resolve(outputPath), serialized, 'utf8');
-  process.stdout.write(serialized);
+  if (outputPath) writeFileSync(resolve(outputPath), encoded, { flag: 'wx', mode: 0o600 });
+  process.stdout.write(`${new TextDecoder().decode(encoded)}\n`);
 }

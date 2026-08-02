@@ -2,10 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
+  APPROVED_PROVIDER_DATA_POLICY_REVISION_V1,
   createProviderDataPolicyRegistryV1,
   evaluateProviderDataAdmissionV1,
+  loadApprovedProviderDataPolicyRegistryV1,
   loadProviderDataPolicyRegistryV1,
   providerPayloadFromModelPromptV1,
+  providerRouteIdentityFromAgentConfigV1,
 } from '@/core/config/provider-data-admission';
 import {
   computeProviderDataPolicyBundleDigest,
@@ -153,30 +157,55 @@ describe('ProviderDataPolicyV1', () => {
     ).toThrow();
   });
 
-  test('ships an explicitly empty M0-approved route bundle with stable digest', () => {
+  test('ships the owner-accepted DeepSeek route bundle with a stable release pin', () => {
     const path = join(process.cwd(), 'release/provider-data-policies/approved-v1.json');
     const bundle = parseProviderDataPolicyBundleV1(JSON.parse(readFileSync(path, 'utf8')));
-    expect(bundle).toEqual({
-      version: 1,
-      decisionId: 'D-14',
-      revision: 'm0-empty-2026-07-30',
-      policies: [],
+    expect(bundle).toMatchObject({
+      revision: APPROVED_PROVIDER_DATA_POLICY_REVISION_V1,
+      policies: [
+        {
+          policyId: 'deepseek-official-api-v4-flash',
+          approvedRevision: 'D-14.3',
+          endpointOrigin: 'https://api.deepseek.com',
+          region: 'unspecified',
+          maxWorkspaceDataClassification: 'confidential',
+          trainingUse: 'contract_defined',
+          dpaOrAdminApproval: 'not_required',
+          allowRemoteMcpContentEgress: false,
+          allowProductionContentEvaluation: false,
+        },
+      ],
     });
     expect(computeProviderDataPolicyBundleDigest(bundle)).toBe(
-      computeProviderDataPolicyBundleDigest(structuredClone(bundle)),
+      APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
+    );
+    expect(computeProviderDataPolicyBundleDigest(structuredClone(bundle))).toBe(
+      APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1,
     );
   });
 
-  test('records DeepSeek as a non-admissible candidate without widening the approved bundle', () => {
+  test('records the DeepSeek candidate promotion without weakening source or freshness checks', () => {
     const candidates = loadProviderRouteCandidateBundleV1(new Date('2026-08-02T12:00:00.000Z'));
-    expect(candidates.revision).toBe('d14-candidates-2026-08-02.1');
+    expect(candidates.revision).toBe('d14-candidates-2026-08-02.3');
     expect(candidates.candidates).toHaveLength(1);
     expect(candidates.candidates[0]).toMatchObject({
-      candidateId: 'deepseek-official-region-unknown-v4-flash',
-      status: 'blocked_policy_evidence',
+      candidateId: 'deepseek-official-v4-flash',
+      status: 'promoted_to_approved',
+      approvedPolicyId: 'deepseek-official-api-v4-flash',
       modelIds: ['deepseek-v4-flash'],
-      route: { region: 'unknown' },
-      assessment: { processingRegion: 'unknown', productionContentAllowed: false },
+      route: { region: 'unspecified' },
+      assessment: {
+        routeDeploymentRegion: 'unspecified',
+        personalDataProcessingRegion: 'people_republic_of_china',
+        fixedApiContentRetention: 'not_contractually_bounded',
+        trainingUse: 'published_policy_allows_training',
+        apiContentTrainingOptOut: 'not_required_for_admission',
+        dpa: 'owner_accepted_not_required',
+        downstreamPrivacyScope: 'developer_controller_policy_required',
+        downstreamDisclosure: 'documented_release_disclosure',
+        productionContentAllowed: true,
+      },
+      blockers: [],
     });
     const approved = parseProviderDataPolicyBundleV1(
       JSON.parse(
@@ -186,7 +215,10 @@ describe('ProviderDataPolicyV1', () => {
         ),
       ),
     );
-    expect(approved.policies).toEqual([]);
+    expect(approved.policies[0]?.policyId).toBe(candidates.candidates[0]?.approvedPolicyId);
+    expect(approved.policies[0]?.endpointIdentityDigest).toBe(
+      candidates.candidates[0]?.endpointIdentityDigest,
+    );
     expect(() => loadProviderRouteCandidateBundleV1(new Date('2026-09-01T00:00:00.000Z'))).toThrow(
       'stale',
     );
@@ -323,10 +355,10 @@ describe('ProviderDataPolicyV1', () => {
   test('loads the release warehouse without allowing config overlays', () => {
     const registry = loadProviderDataPolicyRegistryV1(
       join(process.cwd(), 'release/provider-data-policies/approved-v1.json'),
-      new Date('2026-07-30T00:00:00Z'),
+      new Date('2026-08-02T12:00:00Z'),
     );
-    expect(registry.revision).toBe('m0-empty-2026-07-30');
-    expect(registry.policiesByRouteDigest).toEqual({});
+    expect(registry.revision).toBe(APPROVED_PROVIDER_DATA_POLICY_REVISION_V1);
+    expect(Object.keys(registry.policiesByRouteDigest)).toHaveLength(1);
     expect(
       evaluateProviderDataAdmissionV1({
         featureEnabled: true,
@@ -336,6 +368,75 @@ describe('ProviderDataPolicyV1', () => {
         payload: [],
       }),
     ).toMatchObject({ admitted: false, reason: 'provider_policy_missing' });
+
+    const approvedConfig = {
+      apiKey: 'unused',
+      baseURL: 'https://api.deepseek.com/v1',
+      modelName: 'deepseek-v4-flash',
+      providerName: 'deepseek',
+      providerType: 'deepseek' as const,
+      features: { providerDataPolicyV1: true },
+      sandbox: { enabled: false },
+    };
+    const approvedRoute = providerRouteIdentityFromAgentConfigV1(approvedConfig);
+    expect(approvedRoute).toMatchObject({
+      operatorId: 'hangzhou-deepseek-ai',
+      endpointOrigin: 'https://api.deepseek.com',
+      deploymentId: 'deepseek-api',
+      region: 'unspecified',
+    });
+    expect(
+      evaluateProviderDataAdmissionV1({
+        featureEnabled: true,
+        profile: 'limited',
+        registry: loadApprovedProviderDataPolicyRegistryV1(new Date('2026-08-02T12:00:00Z')),
+        route: approvedRoute,
+        now: new Date('2026-08-02T12:00:00Z'),
+        payload: [
+          {
+            kind: 'file_snippet',
+            text: 'confidential source without a secret',
+            label: {
+              classification: 'confidential',
+              source: 'artifact',
+              provenance: 'workspace_file',
+            },
+          },
+        ],
+      }),
+    ).toMatchObject({
+      admitted: true,
+      reason: 'admitted',
+      policyId: 'deepseek-official-api-v4-flash',
+    });
+    for (const drift of [
+      { ...approvedConfig, modelName: 'deepseek-chat' },
+      { ...approvedConfig, baseURL: 'https://attacker.example/v1' },
+    ]) {
+      expect(
+        evaluateProviderDataAdmissionV1({
+          featureEnabled: true,
+          profile: 'limited',
+          registry,
+          route: providerRouteIdentityFromAgentConfigV1(drift),
+          now: new Date('2026-08-02T12:00:00Z'),
+          payload: [],
+        }),
+      ).toMatchObject({ admitted: false, reason: 'provider_policy_missing' });
+    }
+    expect(() =>
+      evaluateProviderDataAdmissionV1({
+        featureEnabled: true,
+        profile: 'limited',
+        registry,
+        route: providerRouteIdentityFromAgentConfigV1({
+          ...approvedConfig,
+          baseURL: 'https://api.deepseek.com/v1?proxy=true',
+        }),
+        now: new Date('2026-08-02T12:00:00Z'),
+        payload: [],
+      }),
+    ).toThrow('query parameters');
     expect(
       evaluateProviderDataAdmissionV1({
         featureEnabled: true,

@@ -175,7 +175,8 @@ Docker 或 self-hosted 结果不能伪装成上述 class。
 
 workflow 还绑定 numeric repository ID，并在上传 artifact 前调用独立 verifier；expected source 来自
 GitHub workflow 环境，不从待验证 JSON 自报。verifier 对 top-level、source 和每个嵌套对象执行 exact-key
-检查，重建 digest、outcome 与 limitations，并固定拒绝 `productionSupported=true`。当前 foreground CLI/TUI
+检查；producer 以 exclusive-create 写入无尾随空白的 canonical JSON bytes，verifier 再重建 digest、outcome
+与 limitations，并固定拒绝 `productionSupported=true`。当前 foreground CLI/TUI
 入口探针固定 `unavailable`，直到入口拥有的真实集成测试能注入断连/取消并证明同一 composition root；
 普通函数调用不能伪造该 evidence。cgroup TasksMax 只能投影 hard-count，cleanup 在 unit-owned cgroup
 empty/populated verifier 完成前固定不通过，process group 自然退出或 `setsid` 逃逸不能当作零 residual 证明。

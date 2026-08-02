@@ -43,6 +43,7 @@
       ],
       "documents": [
         "docs/active/runtime-resilience-qualification.md",
+        "docs/active/model-provider-boundary.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/tui-e2e-testing-limits.md"
       ]
@@ -56,6 +57,7 @@
         "docs/active/failure-classification.md",
         "docs/active/tool-gated-autonomy.md",
         "docs/active/session-logging-policy.md",
+        "docs/active/model-provider-boundary.md",
         "docs/book/04-Agent引擎.md",
         "docs/book/06-多Agent协作.md",
         "docs/book/10-持久化与会话管理.md"
@@ -279,6 +281,7 @@
         "tests/skills/effect-classification.test.ts",
         "tests/skills/workflow-contract.test.ts",
         "tests/evals/capabilities/**",
+        "scripts/evals/contracts/capability-*.ts",
         "release/capability-profiles/**"
       ],
       "documents": [
