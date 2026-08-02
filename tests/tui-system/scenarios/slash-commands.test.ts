@@ -215,8 +215,16 @@ describe('TUI PTY System — Slash Commands', () => {
     '/mcp opens the server panel and Esc closes it',
     async () => {
       await submitCommand(tui, '/mcp');
-      await waitForText(() => tui.viewport(), 'MCP Servers', 10_000);
-      expect(screenContains(tui.viewport(), 'Add MCP server')).toBe(true);
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenContains(viewport, 'MCP Servers') && screenContains(viewport, 'Add MCP server')
+          );
+        },
+        'MCP server panel actions to become visible',
+        10_000,
+      );
       tui.write('\x1b');
       await waitForTuiReady(tui);
     },

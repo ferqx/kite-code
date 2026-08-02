@@ -230,6 +230,8 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
     选中项、全部选项和 footer，其他场景至少等待该交互独有的最后一个选项或操作，再发送方向键、
     Enter 或 Escape；后续 canned continuation 还必须校验同
     `tool_call_id` 的实际选择或取消结果，不能只因问题文本可见就判定交互就绪。
+    `/mcp` 面板必须在同一 viewport 同时出现 `MCP Servers` 标题和 `Add MCP server` 操作项后，
+    才能发送 Escape 或继续断言面板行为。
 25. 最终回答文本可见不等于上一轮已回到稳定 idle。跨轮发送新消息、slash command 或 `/exit` 前，
     场景必须等待完整 main readiness（空输入、无 loading/modal 且输出稳定）；不得把回答尾部文本
     当作下一次键盘输入已可接受的信号。
