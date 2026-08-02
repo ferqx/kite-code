@@ -37,6 +37,9 @@ Owner 不可联系时 cohort=0 且恢复批准 blocked。external release 前仍
 安全评审。
 
 本地 incident rehearsal 固定为 `synthetic_contract_only`，其 G4 adapter 为 `not_run`，不能代替真实
-detection/containment/credential rotation 演练。Limited SLO verifier 会绑定 artifact/profile/route/
-cohort/run identity，并在无数据、样本/窗口不足、G0/G1、Owner/kill switch 不可用、阈值未批准或 error
-budget 超限时 blocked；只有真实观察记录通过才可产生 `MS:LIMITED-SLO`。
+detection/containment/credential rotation 演练。当前 Limited SLO 只实现 `contract_only` qualifier：
+schema 要求 `MS:LIM-APPROVED`、artifact/profile/route/cohort、repository/head/ref/workflow/run-attempt、
+report/verifier/sample-ledger digest，并把 policy、observation 和完整 input identity 都纳入输出 digest；
+但 authenticated observation verifier/retained-sample 重建尚未实现，所以 shape-valid fixture 也固定
+blocked、`evidenceEligible=false`、`milestone=null`。只有未来独立 verifier 从真实 retained samples
+重建指标并验证 provenance 后，才允许产生 `MS:LIMITED-SLO`。

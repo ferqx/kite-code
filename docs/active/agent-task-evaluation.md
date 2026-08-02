@@ -12,10 +12,30 @@ ledger、统计重建、adversarial contract、Plan/恢复 UX mapper、人工验
 registry、nightly dry-run 与 Release Evidence adapter。本地资产只使用 synthetic fixture，不访问真实
 Provider，不收集用户正文，也不能成为产品 Gate 的通过证据。
 
-D-07 尚未关闭：目标用户、代表性仓库/任务比例、真实 route、重复次数和非 G0 阈值都未获批准。
-因此 suite registry 固定为 `unconfigured`，nightly 只能生成 `dry_run_only`/`blocked` 计划，live route
-即使提供 opt-in token 也拒绝执行；Evidence adapter 没有 `passed` variant。当前这些实现是后续真实
-评估的 fail-closed contract，不产生 `MS:2B-DONE`。
+D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发者，入口只包含 TUI 与用户在场的
+前台 Headless CLI；托管、多租户、无人值守 writer 和共享 checkout 被排除。批准 suite 固定为
+12 case：8 类任务、4/6/2 simple/medium/complex、4 long、3 read-only/9 workspace-write、
+4 TUI/8 CLI，语言范围是 TypeScript/JavaScript Bun/Node 加语言无关 research/documentation。
+
+PR 只跑一次确定性 contract，route/baseline 变化的非确定性 case 运行 8 次，RC 非确定性 case
+运行 20 次；确定性 case 始终 1 次。G0 与 false completion
+必须为 0，总成功率至少 90%，每 case 至少 80%；非 G0 p95 指标只有真实 baseline 冻结后才应用
+25% regression ceiling。当前 live route 仍未批准，因此执行/evidence adapter 保持 blocked，不能因
+D-07 关闭就制造通过结果。
+
+本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 12 个 case ID 和固定
+determinism；缺失、额外、重复或重分类 case 全部拒绝。它没有 Provider/participant/attempt-ledger
+认证 authority，因此输出固定 `evidenceClass=contract_only`、`evidenceEligible=false`，即使调用者把
+`executionClass` 写成 `real_run` 也不能升级为产品 evidence。
+
+批准 suite 当前是 immutable definition；Phase 2B 下游 registry/nightly/evidence adapter 在 2B.2–2B.9
+依赖和真实 route 满足前仍使用 local blocked 路径，不能把旧 `unconfigured` fixture 改名为正式 run。
+
+`github:@ferqx` 的授权 dogfood 可以记录真实 internal acceptance metadata，但不能算 external cohort
+或独立第三方安全评审。External limited 的产品 contract 至少需要 3 名不同 opt-in 用户、每人至少
+4 个任务；当前本地 participant/sample constructor 无独立 consent、identity 或 run-receipt 认证，
+所以即使构造达到该数量也保持 `contract_only`、blocked/not_observed、evidenceEligible=false。
+真实 adapter 未落地前不产生 `MS:2B-DONE` 或 external milestone。
 
 ## Evidence 规则
 

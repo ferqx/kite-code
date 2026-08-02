@@ -88,6 +88,11 @@ Phase 5 与 Phase 6 的本地 schema/conformance/profile/selection/Gate contract
 建立 `in_progress` binding；route/profile/cohort 仍为 off/empty/0，formal task/live/canary/maturity/
 GA/第三方评审 evidence 缺失时不得完成后续 Task 或产生 stable/GA milestone。
 
+Revision 26 按用户批准关闭 D-07，锁定 single-maintainer-first 的 12-case 精确分层、确定性单次与
+非确定性 route-change=8/RC=20、G0/false-completion 零容忍、90% aggregate/80% per-case 门槛，
+并激活 2B.1。维护者 dogfood 仅是 internal evidence；external 仍需至少 3 名 opt-in 用户、每人 4
+tasks，且不替代独立第三方安全评审。真实 route/样本缺失时 Gate 继续 blocked/not_observed。
+
 Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
 case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的
 正式资源证据已由手动 `Runtime Resilience Qualification` workflow 的 Ubuntu

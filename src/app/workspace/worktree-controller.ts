@@ -2,7 +2,9 @@ import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   closeSync,
+  constants,
   existsSync,
+  fstatSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -13,13 +15,19 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 
 const IDENTITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const OPAQUE_IDENTITY_PATTERN = /^wt_[0-9a-f]{32}$/;
 const MAX_GIT_OUTPUT_BYTES = 16 * 1024 * 1024;
+const MAX_UNTRACKED_REVIEW_FILE_BYTES = 1024 * 1024;
+const MAX_UNTRACKED_REVIEW_TOTAL_BYTES = 4 * 1024 * 1024;
+const MAX_BASELINE_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_BASELINE_TOTAL_BYTES = 128 * 1024 * 1024;
+const MAX_BASELINE_FILE_COUNT = 10_000;
+const MAX_REPOSITORY_CONTROL_BYTES = 1024 * 1024;
 
 export type WriterExecutionModeV1 =
   | 'foreground_tui'
@@ -177,8 +185,90 @@ export interface WorktreeHandoffEvidenceV1 extends OwnedWorktreeSnapshotV1 {
   readonly uncommitted: string;
   readonly trackedPaths: string;
   readonly untrackedPaths: string;
+  readonly untrackedReview: string;
   readonly diff: string;
   readonly currentCommit: string;
+}
+
+function collectUntrackedReview(root: string, nulPaths: string): string {
+  const paths = nulPaths === '' ? [] : nulPaths.split('\0').filter(Boolean);
+  let total = 0;
+  const records: string[] = [];
+  for (const path of paths.sort()) {
+    const absolute = resolve(root, path);
+    if (!isInside(root, absolute) || relative(root, absolute).split(sep).join('/') !== path) {
+      throw new WorktreeControllerErrorV1(
+        'identity_mismatch',
+        'Untracked review path escaped or changed identity.',
+      );
+    }
+    const before = lstatSync(absolute);
+    const ownerMismatch = process.platform !== 'win32' && before.uid !== process.getuid?.();
+    if (
+      !before.isFile() ||
+      before.isSymbolicLink() ||
+      before.nlink !== 1 ||
+      ownerMismatch ||
+      before.size > MAX_UNTRACKED_REVIEW_FILE_BYTES
+    ) {
+      throw new WorktreeControllerErrorV1(
+        'identity_mismatch',
+        'Untracked review accepts only bounded, owned regular files.',
+      );
+    }
+    total += before.size;
+    if (total > MAX_UNTRACKED_REVIEW_TOTAL_BYTES) {
+      throw new WorktreeControllerErrorV1(
+        'identity_mismatch',
+        'Untracked review content exceeds the bounded handoff limit.',
+      );
+    }
+    let fd: number | undefined;
+    try {
+      const flags =
+        constants.O_RDONLY |
+        (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      fd = openSync(absolute, flags);
+      const opened = fstatSync(fd);
+      if (
+        !opened.isFile() ||
+        opened.dev !== before.dev ||
+        opened.ino !== before.ino ||
+        opened.size !== before.size
+      ) {
+        throw new WorktreeControllerErrorV1(
+          'identity_mismatch',
+          'Untracked review file changed during secure open.',
+        );
+      }
+      const content = readFileSync(fd);
+      const after = fstatSync(fd);
+      if (
+        after.dev !== opened.dev ||
+        after.ino !== opened.ino ||
+        after.size !== opened.size ||
+        after.mtimeMs !== opened.mtimeMs ||
+        content.byteLength !== opened.size
+      ) {
+        throw new WorktreeControllerErrorV1(
+          'identity_mismatch',
+          'Untracked review file changed while being read.',
+        );
+      }
+      records.push(
+        `KITE_UNTRACKED_FILE_V1 ${JSON.stringify({
+          path,
+          size: content.byteLength,
+          sha256: `sha256:${createHash('sha256').update(content).digest('hex')}`,
+          encoding: 'base64',
+          content: content.toString('base64'),
+        })}`,
+      );
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
+  return records.join('\n');
 }
 
 function isInside(parent: string, candidate: string): boolean {
@@ -228,17 +318,26 @@ function opaqueIdentity(value: string): string {
 }
 
 function safeGitEnvironment(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
+  const env: NodeJS.ProcessEnv = {};
   for (const key of [
-    'GIT_DIR',
-    'GIT_WORK_TREE',
-    'GIT_INDEX_FILE',
-    'GIT_OBJECT_DIRECTORY',
-    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'PATH',
+    'TMPDIR',
+    'TMP',
+    'TEMP',
+    'SystemRoot',
+    'WINDIR',
+    'ComSpec',
+    'PATHEXT',
   ]) {
-    delete env[key];
+    if (process.env[key] !== undefined) env[key] = process.env[key];
   }
   env.GIT_TERMINAL_PROMPT = '0';
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  env.GIT_CONFIG_GLOBAL = process.platform === 'win32' ? 'NUL' : '/dev/null';
+  env.GIT_ATTR_NOSYSTEM = '1';
+  env.GIT_NO_REPLACE_OBJECTS = '1';
+  env.GCM_INTERACTIVE = 'Never';
+  env.SSH_ASKPASS_REQUIRE = 'never';
   env.LC_ALL = 'C';
   return env;
 }
@@ -355,6 +454,10 @@ export class WorktreeControllerV1 {
         'Controller state and worktrees must be outside the baseline repository.',
       );
     }
+    // This preflight must precede every worktree-aware Git command. In
+    // particular, `git status` may invoke a configured clean/process filter
+    // for a stat-dirty tracked file even when the checkout is content-clean.
+    this.assertBaselineHasNoExternalFilters(repository, input.baselineCommit);
     const resolvedCommit = this.git(repository.repoRoot, [
       'rev-parse',
       '--verify',
@@ -434,20 +537,23 @@ export class WorktreeControllerV1 {
       this.git(repository.repoRoot, [
         'worktree',
         'add',
+        '--no-checkout',
         '--no-track',
         '-b',
         targetBranch,
         targetRoot,
         input.baselineCommit,
       ]);
+      this.materializeBaselineWithoutCheckout(targetRoot, input.baselineCommit);
+      this.assertBaselineHasNoExternalFilters(repository, input.baselineCommit);
       this.assertRecordBinding(record);
       const activeRecord = { ...record, state: 'active' as const };
       replacePrivateRecord(recordPath, activeRecord);
       return this.leaseFromRecord(activeRecord);
     } catch (error) {
       // Keep the ownership record and lease lock. A partial Git operation or
-      // disk failure must remain blocked and recoverable, never fall back to
-      // the shared checkout or trigger broad deletion.
+      // disk failure must remain blocked for operator diagnosis, never become
+      // active, fall back to the shared checkout, or trigger broad deletion.
       if (error instanceof WorktreeControllerErrorV1) throw error;
       throw new WorktreeControllerErrorV1(
         'git_failure',
@@ -461,10 +567,15 @@ export class WorktreeControllerV1 {
     return this.withOperationLock(worktreeIdentity, () => {
       const record = this.readRecord(worktreeIdentity);
       this.assertLeaseLock(record);
+      if (record.state !== 'active') {
+        throw new WorktreeControllerErrorV1(
+          'record_unavailable',
+          'Provisioning worktree cannot be recovered automatically; discard and recreate it explicitly.',
+        );
+      }
       this.assertRecordBinding(record);
       const recoveredRecord = {
         ...record,
-        state: 'active' as const,
         ownershipNonce: randomUUID(),
       };
       try {
@@ -595,6 +706,7 @@ export class WorktreeControllerV1 {
       '-z',
       '--',
     ]).stdout;
+    const untrackedReview = collectUntrackedReview(snapshot.workspaceRoot, untrackedPaths);
     const diff = this.git(snapshot.workspaceRoot, [
       'diff',
       '--binary',
@@ -634,6 +746,10 @@ export class WorktreeControllerV1 {
       '-z',
       '--',
     ]).stdout;
+    const finalUntrackedReview = collectUntrackedReview(
+      snapshot.workspaceRoot,
+      finalUntrackedPaths,
+    );
     const finalDiff = this.git(snapshot.workspaceRoot, [
       'diff',
       '--binary',
@@ -648,6 +764,7 @@ export class WorktreeControllerV1 {
       currentCommit !== finalCommit ||
       trackedPaths !== finalTrackedPaths ||
       untrackedPaths !== finalUntrackedPaths ||
+      untrackedReview !== finalUntrackedReview ||
       diff !== finalDiff
     ) {
       throw new WorktreeControllerErrorV1(
@@ -662,7 +779,8 @@ export class WorktreeControllerV1 {
       uncommitted,
       trackedPaths,
       untrackedPaths,
-      diff,
+      untrackedReview,
+      diff: [diff.trimEnd(), untrackedReview].filter(Boolean).join('\n'),
       currentCommit,
     };
   }
@@ -853,6 +971,231 @@ export class WorktreeControllerV1 {
     return resolve(this.recordsRoot, `${identity}.json`);
   }
 
+  private assertBaselineHasNoExternalFilters(
+    repository: RepositoryIdentityV1,
+    commit: string,
+  ): void {
+    // Replacement refs are disabled in every subprocess too, but reject their
+    // repository-local presence so an immutable baseline never has two
+    // competing interpretations at the controller boundary.
+    const replacementRefsPath = resolve(repository.commonGitDirectory, 'refs', 'replace');
+    if (existsSync(replacementRefsPath)) {
+      throw new WorktreeControllerErrorV1(
+        'invalid_baseline',
+        'Repository replacement refs are present; immutable baseline admission is blocked.',
+      );
+    }
+    const graftsPath = resolve(repository.commonGitDirectory, 'info', 'grafts');
+    if (existsSync(graftsPath)) {
+      throw new WorktreeControllerErrorV1(
+        'invalid_baseline',
+        'Repository legacy grafts are present; immutable baseline admission is blocked.',
+      );
+    }
+    const packedRefsPath = resolve(repository.commonGitDirectory, 'packed-refs');
+    if (existsSync(packedRefsPath)) {
+      const packedRefs = this.readRepositoryControlFile(
+        repository.commonGitDirectory,
+        packedRefsPath,
+        'Repository packed refs are unsafe.',
+      );
+      if (/^[0-9a-f]{40} refs\/replace\//mu.test(packedRefs)) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Repository packed replacement refs are present; immutable baseline admission is blocked.',
+        );
+      }
+    }
+
+    const paths = this.git(repository.repoRoot, [
+      'ls-tree',
+      '-r',
+      '--name-only',
+      '-z',
+      commit,
+      '--',
+    ])
+      .stdout.split('\0')
+      .filter((path) => path === '.gitattributes' || path.endsWith('/.gitattributes'));
+    for (const path of paths) {
+      const contents = this.git(repository.repoRoot, ['show', `${commit}:${path}`]).stdout;
+      if (this.attributesDeclareFilter(contents)) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Baseline declares a Git content filter and cannot be materialized safely.',
+        );
+      }
+    }
+
+    const configPath = resolve(repository.commonGitDirectory, 'config');
+    if (existsSync(configPath)) {
+      const config = this.readRepositoryControlFile(
+        repository.commonGitDirectory,
+        configPath,
+        'Repository Git config is unsafe.',
+      );
+      if (/^\s*\[(?:filter\b|include\b|includeif\b)/imu.test(config)) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Repository Git config declares a filter or include and cannot be materialized safely.',
+        );
+      }
+    }
+
+    const infoAttributesPath = resolve(repository.commonGitDirectory, 'info', 'attributes');
+    if (existsSync(infoAttributesPath)) {
+      const attributes = this.readRepositoryControlFile(
+        repository.commonGitDirectory,
+        infoAttributesPath,
+        'Repository info attributes are unsafe.',
+      );
+      if (this.attributesDeclareFilter(attributes)) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Repository info attributes declare a Git content filter.',
+        );
+      }
+    }
+  }
+
+  private materializeBaselineWithoutCheckout(worktreeRoot: string, commit: string): void {
+    // Populate the index without running checkout, then materialize exact blob
+    // bytes ourselves. This structurally prevents Git smudge/process filters,
+    // credential helpers, and checkout-time external drivers from executing.
+    this.git(worktreeRoot, ['read-tree', '--reset', commit]);
+    const listing = this.gitBytes(worktreeRoot, [
+      'ls-tree',
+      '-r',
+      '-z',
+      '--full-tree',
+      commit,
+      '--',
+    ]);
+    let total = 0;
+    let fileCount = 0;
+    let decodedListing: string;
+    try {
+      decodedListing = new TextDecoder('utf-8', { fatal: true }).decode(
+        listing.subarray(0, Math.max(0, listing.length - 1)),
+      );
+    } catch (error) {
+      throw new WorktreeControllerErrorV1(
+        'invalid_baseline',
+        'Baseline contains a non-UTF-8 path that cannot be materialized safely.',
+        { cause: error },
+      );
+    }
+    for (const rawEntry of decodedListing.split('\0')) {
+      if (rawEntry === '') continue;
+      const match = /^(100644|100755) blob ([a-f0-9]{40})\t(.+)$/u.exec(rawEntry);
+      if (!match) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Baseline contains a non-regular or unsupported Git tree entry.',
+        );
+      }
+      const [, mode, objectId, path] = match;
+      fileCount += 1;
+      if (fileCount > MAX_BASELINE_FILE_COUNT) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Baseline contains too many files for bounded materialization.',
+        );
+      }
+      const absolute = resolve(worktreeRoot, path!);
+      if (
+        !isInside(worktreeRoot, absolute) ||
+        relative(worktreeRoot, absolute).split(sep).join('/') !== path
+      ) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Baseline tree path escaped the controller worktree.',
+        );
+      }
+      const content = this.gitBytes(worktreeRoot, ['cat-file', 'blob', objectId!]);
+      if (content.byteLength > MAX_BASELINE_FILE_BYTES) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Baseline file exceeds the bounded materialization limit.',
+        );
+      }
+      total += content.byteLength;
+      if (total > MAX_BASELINE_TOTAL_BYTES) {
+        throw new WorktreeControllerErrorV1(
+          'invalid_baseline',
+          'Baseline exceeds the bounded materialization limit.',
+        );
+      }
+      mkdirSync(dirname(absolute), { recursive: true, mode: 0o700 });
+      let fd: number | undefined;
+      try {
+        fd = openSync(absolute, 'wx', mode === '100755' ? 0o700 : 0o600);
+        writeFileSync(fd, content);
+      } finally {
+        if (fd !== undefined) closeSync(fd);
+      }
+    }
+  }
+
+  private attributesDeclareFilter(contents: string): boolean {
+    return contents.split(/\r?\n/u).some((line) => {
+      const trimmed = line.trim();
+      if (trimmed === '' || trimmed.startsWith('#')) return false;
+      return trimmed
+        .split(/\s+/u)
+        .slice(1)
+        .some((attribute) => /^(?:-|!)?filter(?:=|$)/u.test(attribute));
+    });
+  }
+
+  private readRepositoryControlFile(root: string, path: string, message: string): string {
+    const absolute = resolve(path);
+    if (!isInside(root, absolute)) {
+      throw new WorktreeControllerErrorV1('identity_mismatch', message);
+    }
+    const before = lstatSync(absolute);
+    const ownerMismatch = process.platform !== 'win32' && before.uid !== process.getuid?.();
+    if (
+      !before.isFile() ||
+      before.isSymbolicLink() ||
+      before.nlink !== 1 ||
+      ownerMismatch ||
+      before.size > MAX_REPOSITORY_CONTROL_BYTES
+    ) {
+      throw new WorktreeControllerErrorV1('identity_mismatch', message);
+    }
+    let fd: number | undefined;
+    try {
+      const flags =
+        constants.O_RDONLY |
+        (process.platform === 'win32' ? 0 : constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      fd = openSync(absolute, flags);
+      const opened = fstatSync(fd);
+      if (
+        !opened.isFile() ||
+        opened.dev !== before.dev ||
+        opened.ino !== before.ino ||
+        opened.size !== before.size
+      ) {
+        throw new WorktreeControllerErrorV1('identity_mismatch', message);
+      }
+      const contents = readFileSync(fd, 'utf8');
+      const after = fstatSync(fd);
+      if (
+        opened.dev !== after.dev ||
+        opened.ino !== after.ino ||
+        opened.size !== after.size ||
+        opened.mtimeMs !== after.mtimeMs ||
+        Buffer.byteLength(contents, 'utf8') !== opened.size
+      ) {
+        throw new WorktreeControllerErrorV1('identity_mismatch', message);
+      }
+      return contents;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+  }
+
   private lockPath(key: string): string {
     return resolve(this.locksRoot, `${key}.json`);
   }
@@ -880,7 +1223,20 @@ export class WorktreeControllerV1 {
   private git(cwd: string, args: readonly string[], accepted = [0]): GitResult {
     const result = spawnSync(
       this.gitBinary,
-      ['--no-pager', '-c', `core.hooksPath=${this.hooksRoot}`, ...args],
+      [
+        '--no-pager',
+        '-c',
+        `core.hooksPath=${this.hooksRoot}`,
+        '-c',
+        'credential.helper=',
+        '-c',
+        'core.askPass=',
+        '-c',
+        'core.fsmonitor=false',
+        '-c',
+        `core.attributesFile=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+        ...args,
+      ],
       {
         cwd,
         encoding: 'utf8',
@@ -902,5 +1258,44 @@ export class WorktreeControllerV1 {
       );
     }
     return { status, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+  }
+
+  private gitBytes(cwd: string, args: readonly string[]): Buffer {
+    const result = spawnSync(
+      this.gitBinary,
+      [
+        '--no-pager',
+        '-c',
+        `core.hooksPath=${this.hooksRoot}`,
+        '-c',
+        'credential.helper=',
+        '-c',
+        'core.askPass=',
+        '-c',
+        'core.fsmonitor=false',
+        '-c',
+        `core.attributesFile=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`,
+        ...args,
+      ],
+      {
+        cwd,
+        env: safeGitEnvironment(),
+        maxBuffer: MAX_GIT_OUTPUT_BYTES,
+        timeout: 30_000,
+        windowsHide: true,
+      },
+    );
+    const status = result.status ?? -1;
+    if (result.error || status !== 0 || !Buffer.isBuffer(result.stdout)) {
+      const stderr = Buffer.isBuffer(result.stderr)
+        ? result.stderr.toString('utf8')
+        : String(result.stderr ?? result.error?.message ?? 'unknown Git failure');
+      throw new WorktreeControllerErrorV1(
+        'git_failure',
+        `Git command failed closed: ${stderr.trim().slice(0, 1_000)}`,
+        { cause: result.error },
+      );
+    }
+    return result.stdout;
   }
 }

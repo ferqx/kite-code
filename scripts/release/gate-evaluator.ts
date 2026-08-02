@@ -14,6 +14,12 @@ import {
 const GATE_POLICY_SCHEMA = 'ReleaseGatePolicyV1' as const;
 const GATE_POLICY_DIGEST_DOMAIN = 'release-gate-policy-v1';
 const GATE_DECISION_DIGEST_DOMAIN = 'release-gate-decision-v1';
+const SINGLE_MAINTAINER_IDENTITY = 'github:@ferqx';
+const THIRD_PARTY_SECURITY_APPROVAL = 'independent_third_party_security_review';
+// No independent reviewer signing identity has been approved yet. External
+// review records remain blocked until a real reviewer and verifier trust root
+// are registered through the release governance process.
+const TRUSTED_THIRD_PARTY_REVIEWER_IDENTITIES = new Set<string>();
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const nonEmptySchema = z.string().trim().min(1);
 
@@ -77,6 +83,34 @@ export const releaseGatePolicyV1Schema = z
           code: 'custom',
           path: ['requirements', index, 'capability'],
           message: 'Requirement capability must be declared by the policy.',
+        });
+      }
+    }
+    if (value.mode === 'github_release') {
+      const securityRequirements = value.requirements.filter(
+        (requirement) => requirement.kind === 'third_party_security_review',
+      );
+      if (securityRequirements.length !== 1) {
+        context.addIssue({
+          code: 'custom',
+          path: ['requirements'],
+          message:
+            'GitHub release policies require exactly one third-party security review requirement.',
+        });
+      }
+      const securityRequirement = securityRequirements[0];
+      if (securityRequirement?.capability !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['requirements'],
+          message: 'The third-party security review must be a global requirement.',
+        });
+      }
+      if (securityRequirement?.maxAgeSeconds === undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['requirements'],
+          message: 'The third-party security review must declare a maximum evidence age.',
         });
       }
     }
@@ -172,6 +206,14 @@ export function evaluateReleaseGateV1(input: {
   }
 
   const resultsById = new Map(evidence.results.map((result) => [result.evidenceId, result]));
+  const requiredEvidenceIds = new Set(
+    policy.requirements.map((requirement) => requirement.evidenceId),
+  );
+  for (const result of evidence.results) {
+    if (!requiredEvidenceIds.has(result.evidenceId)) {
+      globalReasons.push(`unexpected_evidence:${result.evidenceId}`);
+    }
+  }
   const requirements = policy.requirements.map((requirement): ReleaseGateDecisionItemV1 => {
     const result = resultsById.get(requirement.evidenceId);
     const reasons: string[] = [];
@@ -190,7 +232,8 @@ export function evaluateReleaseGateV1(input: {
     if (result.status !== 'passed') reasons.push(`evidence_${result.status}`);
 
     const exception = matchingException(evidence, result, evaluatedAtMs);
-    const waivable = result.gate !== 'G0' && result.gate !== 'G1';
+    const waivable =
+      result.kind !== 'third_party_security_review' && result.gate !== 'G0' && result.gate !== 'G1';
     const status =
       reasons.length === 0
         ? 'passed'
@@ -211,23 +254,38 @@ export function evaluateReleaseGateV1(input: {
     if (risk.status === 'open')
       globalReasons.push(`open_${risk.severity.toLowerCase()}_risk:${risk.riskId}`);
   }
-  const requiredManualApprovals = collectRequiredManualApprovals(policy, evidence);
+  const requiredManualApprovals = collectRequiredManualApprovals(
+    policy,
+    requirements,
+    globalReasons,
+  );
   if (requiredManualApprovals.length > 0) {
     globalReasons.push(
       ...requiredManualApprovals.map((approval) => `manual_approval_missing:${approval}`),
     );
   }
 
+  const globalRequirementFailures = requirements.filter(
+    (item) => item.capability === undefined && item.status === 'blocked',
+  );
   const capabilities = policy.capabilities.map((capability) => {
-    const blocked = requirements.filter(
-      (item) => item.capability === capability && item.status === 'blocked',
-    );
-    return {
-      capability,
-      status: blocked.length === 0 ? ('enabled' as const) : ('disabled' as const),
-      reasons: blocked.flatMap((item) =>
+    const capabilityRequirements = requirements.filter((item) => item.capability === capability);
+    const blocked = capabilityRequirements.filter((item) => item.status === 'blocked');
+    const globalCapabilityReasons = [
+      ...globalReasons,
+      ...globalRequirementFailures.flatMap((item) =>
         item.reasons.map((reason) => `${item.requirementId}:${reason}`),
       ),
+    ];
+    const reasons = [
+      ...globalCapabilityReasons,
+      ...(capabilityRequirements.length === 0 ? ['no_applicable_requirement'] : []),
+      ...blocked.flatMap((item) => item.reasons.map((reason) => `${item.requirementId}:${reason}`)),
+    ];
+    return {
+      capability,
+      status: reasons.length === 0 ? ('enabled' as const) : ('disabled' as const),
+      reasons: [...new Set(reasons)].sort(),
     };
   });
 
@@ -316,6 +374,12 @@ function validateRequirementIdentity(input: {
   if (result.kind === 'third_party_security_review') {
     if (result.executionIdentity.source !== 'external') {
       reasons.push('security_review_requires_external_identity');
+    } else if (result.executionIdentity.reviewerIdentity === SINGLE_MAINTAINER_IDENTITY) {
+      reasons.push('security_review_requires_independent_reviewer');
+    } else if (
+      !TRUSTED_THIRD_PARTY_REVIEWER_IDENTITIES.has(result.executionIdentity.reviewerIdentity)
+    ) {
+      reasons.push('security_review_trust_root_unconfigured');
     }
     return;
   }
@@ -353,13 +417,19 @@ function matchingException(
 
 function collectRequiredManualApprovals(
   policy: ReleaseGatePolicyV1,
-  evidence: ReleaseEvidenceV1,
+  requirements: ReleaseGateDecisionItemV1[],
+  globalReasons: string[],
 ): string[] {
   if (policy.mode === 'synthetic_foundation') return [];
-  const review = evidence.results.find(
-    (result) => result.kind === 'third_party_security_review' && result.status === 'passed',
+  const securityRequirement = policy.requirements.find(
+    (requirement) => requirement.kind === 'third_party_security_review',
   );
-  return review ? [] : ['independent_third_party_security_review'];
+  const securityDecision = requirements.find(
+    (requirement) => requirement.requirementId === securityRequirement?.requirementId,
+  );
+  return securityDecision?.status === 'passed' && globalReasons.length === 0
+    ? []
+    : [THIRD_PARTY_SECURITY_APPROVAL];
 }
 
 function sameArtifactIdentity(

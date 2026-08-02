@@ -2,13 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { parseArgs } from '../../src/app/cli/index';
 import {
   createReleaseControlledAgentConfigV1,
+  type ReleaseCompositionV1,
   resolveReleaseCompositionV1,
 } from '../../src/app/release/composition-root';
 import {
   formatReleaseStatusV1,
   projectReleaseStatusV1,
 } from '../../src/app/release/status-projection';
-import type { AgentConfig } from '../../src/core/config';
+import { type AgentConfig, EMBEDDED_RELEASE_PROFILES_V1 } from '../../src/core/config';
 
 function config(releaseProfileV1 = false): AgentConfig {
   return {
@@ -73,6 +74,7 @@ describe('App release composition and status projection', () => {
       artifactReleaseProfileV1Enabled: true,
       profileId: 'limited-production',
       production: true,
+      productionSupportIdentity: 'future-supported-target',
     });
     expect(composition).toEqual({
       version: 1,
@@ -82,6 +84,79 @@ describe('App release composition and status projection', () => {
     });
     expect(() =>
       createReleaseControlledAgentConfigV1({ config: config(true), composition }),
+    ).toThrow('production_support_set_empty');
+  });
+
+  test('rejects production without a support identity and production with an internal profile', () => {
+    expect(
+      resolveReleaseCompositionV1({
+        config: config(true),
+        artifactReleaseProfileV1Enabled: true,
+        profileId: 'limited-production',
+        production: true,
+      }),
+    ).toEqual({
+      version: 1,
+      active: false,
+      production: true,
+      reason: 'production_support_identity_missing',
+    });
+    expect(
+      resolveReleaseCompositionV1({
+        config: config(true),
+        artifactReleaseProfileV1Enabled: true,
+        profileId: 'internal-dogfood',
+        production: true,
+        productionSupportIdentity: 'future-supported-target',
+      }),
+    ).toEqual({
+      version: 1,
+      active: false,
+      production: true,
+      reason: 'production_internal_profile',
+    });
+  });
+
+  test('controlled config revalidates forged active production compositions', () => {
+    const forgedInternal = {
+      version: 1,
+      active: true,
+      production: true,
+      productionSupportIdentity: 'future-supported-target',
+      profile: EMBEDDED_RELEASE_PROFILES_V1['internal-dogfood'],
+    } as const satisfies ReleaseCompositionV1;
+    expect(() =>
+      createReleaseControlledAgentConfigV1({
+        config: config(true),
+        composition: forgedInternal,
+      }),
+    ).toThrow('production_internal_profile');
+
+    const forgedMissingIdentity = {
+      version: 1,
+      active: true,
+      production: true,
+      profile: EMBEDDED_RELEASE_PROFILES_V1['limited-production'],
+    } as unknown as ReleaseCompositionV1;
+    expect(() =>
+      createReleaseControlledAgentConfigV1({
+        config: config(true),
+        composition: forgedMissingIdentity,
+      }),
+    ).toThrow('production_support_identity_missing');
+
+    const forgedUnsupportedIdentity = {
+      version: 1,
+      active: true,
+      production: true,
+      productionSupportIdentity: 'future-supported-target',
+      profile: EMBEDDED_RELEASE_PROFILES_V1['limited-production'],
+    } as const satisfies ReleaseCompositionV1;
+    expect(() =>
+      createReleaseControlledAgentConfigV1({
+        config: config(true),
+        composition: forgedUnsupportedIdentity,
+      }),
     ).toThrow('production_support_set_empty');
   });
 

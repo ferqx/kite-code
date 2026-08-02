@@ -8,6 +8,7 @@ import {
   readFileSync,
   rmSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -192,8 +193,23 @@ describe('App-owned worktree controller', () => {
     ]);
     expect(handoff.diff).toContain('-baseline');
     expect(handoff.diff).toContain('+changed');
+    expect(handoff.diff).toContain('KITE_UNTRACKED_FILE_V1');
+    expect(handoff.diff).toContain('"path":"new.txt"');
+    expect(handoff.diff).toContain('"content":"bmV3Cg=="');
     expect(handoff.status).toContain('tracked.txt');
     expect(handoff.status).toContain('new.txt');
+  });
+
+  test('rejects symlinked untracked files instead of reviewing their targets', () => {
+    if (process.platform === 'win32') return;
+    const item = fixture();
+    const lease = acquire(item, { runIdentity: 'run-untracked-symlink' });
+    const outside = join(item.root, 'outside-secret.txt');
+    writeFileSync(outside, 'must-not-leak\n');
+    symlinkSync(outside, join(lease.workspaceRoot, 'linked.txt'));
+    expect(() => createChangeHandoffV1({ controller: item.controller, lease })).toThrow(
+      'bounded, owned regular files',
+    );
   });
 
   test('supports crash recovery and clean cleanup while retaining the controller branch', () => {
@@ -387,6 +403,12 @@ describe('App-owned worktree controller', () => {
     ).toThrow('no space left on device');
     expect(readdirSync(join(item.state, 'records'))).toHaveLength(1);
     expect(readdirSync(join(item.state, 'locks'))).toHaveLength(1);
+    const recordName = readdirSync(join(item.state, 'records'))[0];
+    if (!recordName) throw new Error('expected retained provisioning record');
+    const worktreeIdentity = recordName.replace(/\.json$/u, '');
+    expect(() => controller.recover(worktreeIdentity)).toThrow(
+      'Provisioning worktree cannot be recovered automatically',
+    );
     expect(git(item.repo, ['worktree', 'list', '--porcelain']).match(/^worktree /gm)).toHaveLength(
       1,
     );
@@ -402,6 +424,118 @@ describe('App-owned worktree controller', () => {
     chmodSync(hook, 0o700);
 
     acquire(item, { runIdentity: 'run-hooks-disabled' });
+    expect(existsSync(sentinel)).toBe(false);
+  });
+
+  test('rejects baseline content filters before checkout can execute them', () => {
+    if (process.platform === 'win32') return;
+    const item = fixture();
+    const sentinel = join(item.root, 'filter-ran');
+    writeFileSync(join(item.repo, '.gitattributes'), '*.txt filter=hostile\n');
+    git(item.repo, ['config', 'filter.hostile.smudge', `sh -c 'printf ran > "${sentinel}"'`]);
+    git(item.repo, ['add', '.gitattributes']);
+    git(item.repo, [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-m',
+      'hostile attributes',
+    ]);
+    const baselineCommit = git(item.repo, ['rev-parse', 'HEAD']);
+    git(item.repo, ['config', 'filter.hostile.clean', `sh -c 'printf ran > "${sentinel}"'`]);
+    const trackedPath = join(item.repo, 'tracked.txt');
+    const future = new Date(Date.now() + 2_000);
+    utimesSync(trackedPath, future, future);
+    expect(() => acquire(item, { baselineCommit, runIdentity: 'run-filter-rejected' })).toThrow(
+      'content filter',
+    );
+    expect(existsSync(sentinel)).toBe(false);
+  });
+
+  test('rejects common-dir info attributes and local filters before materialization', () => {
+    if (process.platform === 'win32') return;
+    const item = fixture();
+    const sentinel = join(item.root, 'info-filter-ran');
+    writeFileSync(join(item.repo, '.git', 'info', 'attributes'), '*.txt filter=hostile\n');
+    git(item.repo, ['config', 'filter.hostile.smudge', `sh -c 'printf ran > "${sentinel}"'`]);
+    expect(() => acquire(item, { runIdentity: 'run-info-filter-rejected' })).toThrow(
+      'filter or include',
+    );
+    expect(existsSync(sentinel)).toBe(false);
+  });
+
+  test('rejects a symlinked common-dir attributes control file', () => {
+    if (process.platform === 'win32') return;
+    const item = fixture();
+    const outside = join(item.root, 'outside-attributes');
+    writeFileSync(outside, '*.txt filter=hostile\n');
+    symlinkSync(outside, join(item.repo, '.git', 'info', 'attributes'));
+    expect(() => acquire(item, { runIdentity: 'run-info-symlink-rejected' })).toThrow(
+      'info attributes are unsafe',
+    );
+  });
+
+  test('rejects replacement refs and legacy grafts at the immutable baseline boundary', () => {
+    const replacement = fixture();
+    writeFileSync(join(replacement.repo, 'tracked.txt'), 'replacement commit\n');
+    git(replacement.repo, ['add', 'tracked.txt']);
+    git(replacement.repo, [
+      '-c',
+      'user.name=Fixture',
+      '-c',
+      'user.email=fixture@example.invalid',
+      'commit',
+      '-m',
+      'replacement target',
+    ]);
+    const replacementCommit = git(replacement.repo, ['rev-parse', 'HEAD']);
+    git(replacement.repo, ['replace', replacement.baselineCommit, replacementCommit]);
+    expect(() => acquire(replacement, { runIdentity: 'run-replace-rejected' })).toThrow(
+      'replacement refs are present',
+    );
+
+    const graft = fixture();
+    writeFileSync(join(graft.repo, '.git', 'info', 'grafts'), `${graft.baselineCommit}\n`);
+    expect(() => acquire(graft, { runIdentity: 'run-graft-rejected' })).toThrow(
+      'legacy grafts are present',
+    );
+  });
+
+  test('does not inherit arbitrary host credential variables into Git subprocesses', () => {
+    if (process.platform === 'win32') return;
+    const item = fixture();
+    const sentinel = join(item.root, 'credential-leaked');
+    const wrapper = join(item.root, 'git-wrapper.sh');
+    const realGit = Bun.which('git');
+    if (!realGit) throw new Error('git executable is unavailable');
+    writeFileSync(
+      wrapper,
+      `#!/bin/sh\nif [ -n "$KITE_TEST_CREDENTIAL_SECRET" ]; then printf leaked > '${sentinel}'; fi\nexec '${realGit}' "$@"\n`,
+      { mode: 0o700 },
+    );
+    chmodSync(wrapper, 0o700);
+    const isolatedState = join(item.root, 'isolated-state');
+    mkdirSync(isolatedState, { mode: 0o700 });
+    const previous = process.env.KITE_TEST_CREDENTIAL_SECRET;
+    process.env.KITE_TEST_CREDENTIAL_SECRET = 'must-not-cross-boundary';
+    try {
+      const controller = new WorktreeControllerV1({
+        stateRoot: isolatedState,
+        gitBinary: wrapper,
+      });
+      controller.acquire({
+        baselineRepoRoot: item.repo,
+        baselineCommit: item.baselineCommit,
+        taskIdentity: 'task-1b.6',
+        runIdentity: 'run-minimal-env',
+        writerIdentity: 'writer-001',
+      });
+    } finally {
+      if (previous === undefined) delete process.env.KITE_TEST_CREDENTIAL_SECRET;
+      else process.env.KITE_TEST_CREDENTIAL_SECRET = previous;
+    }
     expect(existsSync(sentinel)).toBe(false);
   });
 });

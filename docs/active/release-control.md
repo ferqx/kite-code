@@ -14,7 +14,9 @@
   它设为 true 会在 Runtime、MCP、Skill 或 Provider 创建前拒绝，只允许 false 收紧。
 - App composition root 同时要求 release artifact ceiling 与 rollout flag。当前 D-04
   production-supported platform 集合为空，因此 `limited/canary/ga` profile admission、production
-  payload assembly 和 production Runtime 创建全部 fail closed。
+  payload assembly 和 production Runtime 创建全部 fail closed。`production=true` 还必须携带非空、
+  registry 接受的 production support identity，并直接拒绝 internal profile；controlled config 会对
+  composition 结果二次校验，调用者不能用 `production + internal-dogfood` 绕过空支持集。
 - 四个 embedded profile 只是严格 schema/组合 fixture：所有 capability rollout=`off`、资源预算为
   0、network/logging/telemetry/route 全部关闭。它们不表示可分发产品配置。
 - CLI `--release-status` 与 TUI `/release` 只显示脱敏 profile/capability/rollout/execution/logging/
@@ -60,6 +62,15 @@ platform（适用时）及带 digest URI；strict schema 不接收 transcript �
 bundle digest mismatch 都是 blocked。G0/G1 不可普通 waiver；G3 capability-specific failure 只关闭
 对应 capability；未在 policy 要求的 G2–G5 显示 `not_applicable`，不得显示为 passed。
 
+GitHub release policy 必须恰好包含一个全局、不可 waiver 且带 freshness 的
+`third_party_security_review` requirement。Manual approval 只能由该 requirement 的已验证 decision
+满足；额外 result、synthetic/local source、过期或 candidate identity mismatch 均全局阻塞，
+`github:@ferqx` 不得作为自己的第三方 reviewer。任一全局 identity/risk/approval failure 都把所有
+capability 关闭；没有适用且通过 requirement 的 capability 也默认 disabled。
+当前没有批准的独立 reviewer signing identity/trust root，因此即使本地构造 candidate-bound
+external review record 也会以 `security_review_trust_root_unconfigured` blocked；登记真实第三方
+reviewer 和独立 verifier 前不能产生 `approved_candidate`。
+
 `release:gate:foundation` 只产生固定 synthetic/non-production、可供 `MS:2A-F` 完成记录引用的
 contract fixture；命令本身不写计划 milestone。其 G0/G1 验证 canonical/pre-exec/Gate replay，
 不能替代 RC 的供应链、平台、运营、产品、canary SLO 或第三方评审 evidence。
@@ -91,9 +102,13 @@ D-03 仍 open，真实 rollout service/signing 未启用，因此该实现不产
 forced off。validator 要求每个 selected capability 绑定精确且 fresh 的 stable decision，并要求 selected/
 forced-off 对全集做无重叠分区。当前 GA Gate 因 `MS:LIM-APPROVED`、`MS:LIMITED-SLO`、
 `MS:2A-RC`、`MS:3-OPS-READY`、第三方安全评审、非空 production support set 与 stable selection
-全部缺失而 blocked；它不能 assemble 或 publish artifact。
+全部缺失而 blocked；它不能 assemble 或 publish artifact。GA 前置不再接受调用者布尔值，而要求
+artifact/profile/route/cohort 一致的 typed decision records；当前 authenticated dependency verifier
+未配置，因此即使提供 shape-valid fixture 也固定 `gaEligible=false`。
 
-Auto Compaction admission contract 只校验 identity 和前置 Gate，输出 profile diff；评估自身固定零
-summary dispatch、零 checkpoint write。前置缺失时 `auto_compaction` 为 off/cohort 0。GA compatibility
+Auto Compaction admission contract 消费同一 candidate identity 的 typed dependency decisions 与
+G0/G1 ledger digest，所有前置 identity 都进入 decision digest；本地 authenticated verifier 未配置，
+所以 fixture 永远 blocked、`auto_compaction` 为 off/cohort 0。评估自身固定零 summary dispatch、零
+checkpoint write。GA compatibility
 replay 只使用 `synthetic_contract_only` fixture，验证 transcript/Plan/Receipt/Verification/checkpoint
 事实不被删除、unknown external effect 不重放；`productionEvidence=false`，不能作为发布或观察证据。

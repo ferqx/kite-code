@@ -1732,14 +1732,14 @@ for (const [label, source, expected] of [
   if (!source.includes(expected)) fail(`${label}: local contract plan must be active`);
 }
 for (const evidence of [
-  'D-07 仍 open',
-  'Evidence adapter 只有 `blocked/not_green`',
+  'D-07 已按 single-maintainer-first 推荐方案关闭',
+  'Evidence adapter 仍只有 `blocked/not_green`',
   '不产生 `MS:2B-DONE`',
 ]) {
   if (!evaluationPlan.includes(evidence))
     fail(`2B local-contract boundary must identify ${evidence}`);
 }
-for (const evidence of ['D-07/2B 依赖', 'D-03', '`MS:3-OPS-READY`', '`MS:LIMITED-SLO`']) {
+for (const evidence of ['2B 正式证据依赖', 'D-03', '`MS:3-OPS-READY`', '`MS:LIMITED-SLO`']) {
   if (!operationsPlan.includes(evidence))
     fail(`Phase 3 local-contract boundary must identify ${evidence}`);
 }
@@ -1815,6 +1815,75 @@ if (
   )
 ) {
   fail('decision register must contain exact Revision 25 Phase 4/5/6 evidence boundary ratchet');
+}
+
+const d07 = decisionSections.find((match) => match[1] === 'D-07')?.[2] ?? '';
+for (const expected of [
+  '- status: `closed`',
+  '12 个 case',
+  '4 simple/6 medium/2 complex',
+  '3 read-only/9 workspace-write',
+  '4 TUI/8 Headless CLI',
+  '运行 8 次',
+  '运行 20 次',
+  '总成功率至少 90%',
+  '每个 case 至少 80%',
+  '只算 internal',
+  '至少 3 名不同的 opt-in 用户',
+  '回归上限为 25%',
+  '- approvedAt: `2026-08-02`',
+]) {
+  if (!d07.includes(expected)) fail(`D-07 approved product scope must contain ${expected}`);
+}
+
+const evaluationScopeBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 2B.1 |'));
+if (!evaluationScopeBinding) {
+  fail('2B.1: approved D-07 scope must have an execution binding');
+} else {
+  const cells = parsePipeRow(evaluationScopeBinding);
+  if (cells[2]?.replaceAll('`', '') !== '494858769bfb8436d721e1d0d8cd0426454a601d') {
+    fail('2B.1: binding must use the D-07 approval recovery-point baseline');
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'in_progress') {
+    fail('2B.1: binding must remain in_progress until targeted validation and whole-diff review');
+  }
+  if (!cells[5]?.includes('12-case suite')) {
+    fail('2B.1: binding must identify the approved 12-case suite contract');
+  }
+  if (cells[6]?.replaceAll('`', '') !== '—') {
+    fail('2B.1: completionRecordPath must remain empty before completion');
+  }
+}
+
+const evaluationScopeRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 26 |'));
+if (
+  evaluationScopeRevision.length !== 1 ||
+  !evaluationScopeRevision[0]?.includes('关闭 D-07') ||
+  !evaluationScopeRevision[0]?.includes('激活 2B.1') ||
+  !evaluationScopeRevision[0]?.includes('非确定性 PR=禁止/route-change=8/RC=20、确定性=1') ||
+  !evaluationScopeRevision[0]?.includes('维护者 dogfood 仅 internal') ||
+  !evaluationScopeRevision[0]?.includes('第三方安全评审边界不变')
+) {
+  fail('decision register must contain exact Revision 26 D-07 approval ratchet');
+}
+const wholeReviewRepairRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 27 |'));
+if (
+  wholeReviewRepairRevision.length !== 1 ||
+  !wholeReviewRepairRevision[0]?.includes('首轮整体 Review 为 NO-GO') ||
+  !wholeReviewRepairRevision[0]?.includes('第三方评审 Gate') ||
+  !wholeReviewRepairRevision[0]?.includes('Limited SLO') ||
+  !wholeReviewRepairRevision[0]?.includes('GA/Auto') ||
+  !wholeReviewRepairRevision[0]?.includes('worktree handoff/Git 环境') ||
+  !wholeReviewRepairRevision[0]?.includes('evidenceEligible=false') ||
+  !wholeReviewRepairRevision[0]?.includes('等待两路最终 GO')
+) {
+  fail('decision register must contain exact Revision 27 whole-review repair ratchet');
 }
 requireReachableCommit(releaseFoundationCommit, '2A.0–2A.7');
 

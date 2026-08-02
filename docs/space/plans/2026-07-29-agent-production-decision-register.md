@@ -145,17 +145,27 @@
 
 ### D-07
 
-- status: `open`
+- status: `closed`
 - owner: `github:@ferqx`（Evaluation/Product + Release）
 - backup: `none (single-maintainer)`
 - dueMilestone: `MS:2A-F`
 - blockingPhase: `Phase 2B`
 - default: 未预注册人群、任务、重复次数和阈值时所有产品 Gate 为 unknown/blocked
-- decision: benchmark 人群、任务集、重复次数与成功阈值待 baseline
+- decision: 首批目标是单一维护者或本地开发者在可信 Workspace 中使用 TUI 或用户在场的前台
+  Headless CLI；托管、多租户、无人值守 CI writer 与共享 checkout 不在首批范围。正式 suite 固定
+  12 个 case，覆盖全部 8 类任务，并精确包含 4 simple/6 medium/2 complex、4 long context、
+  3 read-only/9 workspace-write、4 TUI/8 Headless CLI；语言范围是 TypeScript/JavaScript 的
+  Bun/Node repository 加语言无关 research/documentation。MCP write 与 effectful Skills 不进入首批
+  正向 suite。PR 只跑确定性 contract 一次；route/baseline 变化每个非确定性 case 运行 8 次；RC
+  的非确定性 case 运行 20 次，确定性 case 仍为 1 次。G0 与 false completion 必须为 0，
+  总成功率至少 90%，每个 case 至少 80%。维护者
+  `github:@ferqx` 的真实 dogfood 只算 internal；external limited 至少 3 名不同的 opt-in 用户且每人
+  至少 4 个任务，缺失时保持 `not_observed`。非 G0 p95 latency/token/user-correction 只有在真实
+  baseline 冻结后才使用，回归上限为 25%
 - evidence: [Phase 2B 计划](2026-07-29-agent-production-evaluation.md)；
-  [ADR-0058](../../adr/0058-agent-task-product-acceptance.md)；2B.1–2B.9 本地 contract 34 pass，
-  live/human/formal adversarial evidence 全部 `not_observed`
-- approvedAt: `null`
+  [ADR-0058](../../adr/0058-agent-task-product-acceptance.md)；用户于 2026-08-02 批准单维护者优先
+  推荐方案；live/external/formal adversarial evidence 仍为 `not_observed`
+- approvedAt: `2026-08-02`
 
 ### D-08
 
@@ -311,7 +321,7 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1B.3 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-08-01-agent-production-platform-exclusions.md` | `2026-07-31` |
 | 1B.4 | `github:@ferqx` | `3ada4246b149444ce27ed713cd5425090367c1fc` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-08-01-agent-production-network-boundary.md` | `2026-07-31` |
 | 1B.5 | `github:@ferqx` | `c9e0dccdaad4cc6a6db57b54d80e0074e3bf8aa4` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-08-01-agent-production-protected-path.md` | `2026-08-01` |
-| 1B.6 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `in_progress` | 最终整体 Review 与恢复点 commit 待后续本地方案共同收敛 | — | `2026-08-02` |
+| 1B.6 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `in_progress` | 首轮 Review 的 untracked handoff 与 Git credential/filter P1/P2 已修复；等待两路最终整体复核和恢复点 commit | — | `2026-08-02` |
 | 1B.7 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `in_progress` | 最终整体 Review 与恢复点 commit 待后续本地方案共同收敛 | — | `2026-08-02` |
 | 1B.8 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `in_progress` | 最终整体 Review 与恢复点 commit 待后续本地方案共同收敛 | — | `2026-08-02` |
 | 1B.9 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 negative artifact conformance 已通过；等待最终整体 Review 与默认分支三平台 workflow artifact | — | `2026-08-02` |
@@ -333,9 +343,10 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 2A.7 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
 | 2A.8 | `github:@ferqx` | `2e98681c800a2f1f745bc18e41ac682d9c09e84b` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 supply-chain/platform contract 已通过；D-04 支持集为空，等待真实 audit、签名、provenance、actual artifact 与三平台 evidence | — | `2026-08-02` |
 | 5.1 | `github:@ferqx` | `2e98681c800a2f1f745bc18e41ac682d9c09e84b` | `codex/agent-production-readiness-docs` | `in_progress` | D-10 已关闭且本地 Capability Profile/Gate contract 已通过；等待最终整体 Review，所有 capability 仍 off | — | `2026-08-02` |
+| 2B.1 | `github:@ferqx` | `494858769bfb8436d721e1d0d8cd0426454a601d` | `codex/agent-production-readiness-docs` | `in_progress` | D-07 已关闭；12-case suite/determinism/digest 已精确绑定，本地 evaluator/external sample 固定 contract-only；等待最终整体 Review | — | `2026-08-02` |
 
 除已完成的 1A.1–1A.7、1B.0–1B.5、1C.1–1C.8、2A.0–2A.7 与已绑定 `in_progress` 的
-1B.6–1B.9、2A.8、5.1 外，
+1B.6–1B.9、2A.8、2B.1、5.1 外，
 其他非 Phase 0 Task 尚未创建 execution binding。
 
 ## Revision history
@@ -367,3 +378,5 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 23 | 2026-08-02 | 完成 2A.0–2A.7 Release Contract Foundation；Task 2A.7 唯一产生 `MS:2A-F`，解锁 2B/3 本地实施 | `2e98681c800a2f1f745bc18e41ac682d9c09e84b`、[完成记录](../execution/completed/2026-07-30-agent-production-release-control.md)；53 release tests、synthetic build/verify/bootstrap、foundation Gate replay 全绿；G2–G5 N/A、真实 signing/release disabled、D-04 空支持集与第三方安全评审硬门禁不变 |
 | 24 | 2026-08-02 | 完成本批 2A.8/2A.9、2B.1–2B.9、3.1–3.8/3.10 本地 fail-closed contract；仅依赖就绪的 2A.8 绑定 `in_progress`，不产生后续 milestone | supply-chain 12 pass、rollout 16 pass、Agent evaluation 34 pass、observability/operations 71 pass、TUI `/telemetry` 4 pass；D-03/D-07 open、`MS:1B-DONE` 缺失、D-04 空支持集；formal platform/adversarial/human/incident/SLO/signing evidence 均未伪造 |
 | 25 | 2026-08-02 | 关闭 D-10 并锁定 unknown/effect/dependency drift 的保守分类；完成 Phase 4/5/6 本地 fail-closed contract，只有 dependency-ready 的 5.1 绑定 `in_progress` | ADR-0064；compaction 41 pass、Phase 5 profile/Verification 27 pass、MCP write/Skills 38 pass、GA/auto/compatibility 9 pass；所有 profile/route/cohort 保持 off/empty/0，formal task/live/canary/maturity/GA/第三方评审 evidence 均未产生 |
+| 26 | 2026-08-02 | 用户批准并关闭 D-07 的 single-maintainer-first 产品评估范围；激活 2B.1，external/live evidence 保持等待 | 12-case 精确分层、非确定性 PR=禁止/route-change=8/RC=20、确定性=1、G0/false-completion=0、aggregate≥90%/per-case≥80%；维护者 dogfood 仅 internal，external 至少 3 人×4 tasks，第三方安全评审边界不变 |
+| 27 | 2026-08-02 | 首轮整体 Review 为 NO-GO（A: P1=5；B: P1=4/P2=2），进入统一安全修复且不提升 Task/milestone | 第三方评审 Gate、production/internal admission、Limited SLO、D-07、GA/Auto、worktree handoff/Git 环境、immutable workflow Actions 均改为 fail-closed；最终复核追加发现的 common-dir attributes/filter、pre-status clean filter、replacement/graft identity 与 provisioning recovery 旁路已通过 pre-worktree-command 检查、no-checkout blob materialization、最小 Git 环境、显式拒绝和 active-only recovery 关闭；所有 shape-valid synthetic/contract fixture 继续 evidenceEligible=false，等待两路最终 GO |

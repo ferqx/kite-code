@@ -6,24 +6,40 @@ const input = {
   schema: 'AutoCompactionAdmissionInputV1',
   artifactDigest: digest,
   profileDigest: digest,
-  routeQualificationDigest: digest,
-  internalAutoEvidenceDigest: digest,
-  manualStableDecisionDigest: digest,
-  limitedSloEvidenceDigest: digest,
-  incidentRehearsalDigest: digest,
-  dependencies: {
-    msManualStable: false,
-    msInternalAutoFresh: false,
-    msLimitedApproved: false,
-    msLimitedSlo: false,
-    externalShadowPassed: false,
-    ownerApprovalValid: false,
-    killSwitchAvailable: false,
-    consentAndProviderPolicyValid: false,
+  routeDigest: digest,
+  cohortDigest: digest,
+  dependencies: [],
+  safetyObservation: {
     g0Count: 0,
     g1Count: 0,
+    ledgerDigest: digest,
   },
 } as const;
+
+const dependencyIds = [
+  'manual_stable',
+  'internal_auto_fresh',
+  'limited_approved',
+  'limited_slo',
+  'external_shadow',
+  'owner_approval',
+  'kill_switch',
+  'consent_provider_policy',
+  'incident_rehearsal',
+] as const;
+
+const dependencies = dependencyIds.map((dependency) => ({
+  schema: 'AutoCompactionDependencyDecisionV1' as const,
+  dependency,
+  status: 'passed' as const,
+  artifactDigest: digest,
+  profileDigest: digest,
+  routeDigest: digest,
+  cohortDigest: digest,
+  verifiedAt: '2026-08-02T00:00:00.000Z',
+  verifierIdentity: 'fixture:contract-only',
+  decisionDigest: digest,
+}));
 
 describe('external auto-compaction admission contract', () => {
   test('keeps auto off with zero model/checkpoint effects while evidence is absent', () => {
@@ -39,36 +55,27 @@ describe('external auto-compaction admission contract', () => {
     expect(result.reasonCodes).toContain('external_shadow_missing');
   });
 
-  test('tests the admission-only pass branch without invoking a live canary', () => {
+  test('keeps shape-valid dependency fixtures contract-only and live-off', () => {
     const result = evaluateAutoCompactionAdmissionV1({
       ...input,
-      dependencies: {
-        msManualStable: true,
-        msInternalAutoFresh: true,
-        msLimitedApproved: true,
-        msLimitedSlo: true,
-        externalShadowPassed: true,
-        ownerApprovalValid: true,
-        killSwitchAvailable: true,
-        consentAndProviderPolicyValid: true,
-        g0Count: 0,
-        g1Count: 0,
-      },
+      dependencies,
     });
     expect(result).toMatchObject({
-      status: 'passed',
-      liveAdmissionEligible: true,
+      status: 'blocked',
+      liveAdmissionEligible: false,
       summaryDispatches: 0,
       checkpointWrites: 0,
-      profileDiff: { maxRollout: 'canary', cohortMaximum: 1 },
+      profileDiff: { maxRollout: 'off', cohortMaximum: 0 },
     });
+    expect(result.reasonCodes).toEqual(['authenticated_auto_compaction_verifier_not_configured']);
+    expect(result.dependencyDecisionDigests).toHaveLength(dependencyIds.length);
   });
 
   test('G0/G1 and unknown fields fail closed', () => {
     expect(
       evaluateAutoCompactionAdmissionV1({
         ...input,
-        dependencies: { ...input.dependencies, g0Count: 1, g1Count: 1 },
+        safetyObservation: { ...input.safetyObservation, g0Count: 1, g1Count: 1 },
       }).reasonCodes,
     ).toEqual(expect.arrayContaining(['g0_observed', 'g1_observed']));
     expect(() => evaluateAutoCompactionAdmissionV1({ ...input, hiddenGrant: true })).toThrow();

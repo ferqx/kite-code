@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from '../release/canonical-json';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const commitSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const rateSchema = z.number().finite().min(0).max(1);
 const g0Schema = z
   .object({
@@ -29,6 +30,7 @@ export const approvedLimitedSloPolicyV1Schema = z
     schema: z.literal('AgentProductionSloV1'),
     policyId: z.string().min(1),
     status: z.literal('approved'),
+    approvalMilestone: z.literal('MS:LIM-APPROVED'),
     noData: z.literal('blocked'),
     minimumSamples: z.number().int().positive(),
     observationWindowSeconds: z.number().int().positive(),
@@ -60,7 +62,20 @@ export const limitedCohortObservationV1Schema = z
     profileDigest: digestSchema,
     routeDigest: digestSchema,
     cohortDigest: digestSchema,
-    sourceRunId: z.string().min(1).max(128),
+    source: z
+      .object({
+        repository: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/),
+        headSha: commitSchema,
+        ref: z.string().startsWith('refs/'),
+        workflowRef: z.string().includes('/.github/workflows/'),
+        workflowSha: commitSchema,
+        runId: z.string().regex(/^[1-9][0-9]*$/),
+        runAttempt: z.number().int().positive(),
+        reportDigest: digestSchema,
+        verifierDigest: digestSchema,
+        sampleLedgerDigest: digestSchema,
+      })
+      .strict(),
     startedAt: z.iso.datetime({ offset: true }),
     endedAt: z.iso.datetime({ offset: true }),
     sampleCount: z.number().int().nonnegative(),
@@ -81,14 +96,19 @@ export type LimitedCohortObservationV1 = z.infer<typeof limitedCohortObservation
 export interface LimitedSloGateRecordV1 {
   schema: 'LimitedSloGateRecordV1';
   gate: 'limited_slo';
-  status: 'passed' | 'blocked';
-  milestone: 'MS:LIMITED-SLO' | null;
+  status: 'blocked';
+  milestone: null;
+  evidenceClass: 'contract_only';
+  evidenceEligible: false;
   policyId: string | null;
   artifactDigest: `sha256:${string}`;
   profileDigest: `sha256:${string}`;
   routeDigest: `sha256:${string}`;
   cohortDigest: `sha256:${string}`;
   sourceRunId: string;
+  policyDigest: `sha256:${string}` | null;
+  observationDigest: `sha256:${string}`;
+  inputDigest: `sha256:${string}`;
   reasonCodes: string[];
   recordDigest: `sha256:${string}`;
 }
@@ -104,6 +124,7 @@ export function qualifyLimitedSloV1(input: {
   const observation = limitedCohortObservationV1Schema.parse(input.observation);
   const policyResult = approvedLimitedSloPolicyV1Schema.safeParse(input.policy);
   const reasons = new Set<string>();
+  reasons.add('authenticated_observation_verifier_not_configured');
   if (!policyResult.success) reasons.add('baseline_unconfigured_or_unapproved');
   const policy = policyResult.success ? policyResult.data : null;
 
@@ -142,18 +163,33 @@ export function qualifyLimitedSloV1(input: {
     }
   }
 
-  const status: LimitedSloGateRecordV1['status'] = reasons.size === 0 ? 'passed' : 'blocked';
+  const policyDigest = policy
+    ? sha256DomainSeparated('kite.operations.limited-slo-policy.v1', canonicalJson(policy))
+    : null;
+  const observationDigest = sha256DomainSeparated(
+    'kite.operations.limited-slo-observation.v1',
+    canonicalJson(observation),
+  );
+  const inputDigest = sha256DomainSeparated(
+    'kite.operations.limited-slo-input.v1',
+    canonicalJson({ observationDigest, policyDigest }),
+  );
   const withoutDigest: Omit<LimitedSloGateRecordV1, 'recordDigest'> = {
     schema: 'LimitedSloGateRecordV1' as const,
     gate: 'limited_slo' as const,
-    status,
-    milestone: status === 'passed' ? ('MS:LIMITED-SLO' as const) : null,
+    status: 'blocked' as const,
+    milestone: null,
+    evidenceClass: 'contract_only' as const,
+    evidenceEligible: false as const,
     policyId: policy?.policyId ?? null,
     artifactDigest: observation.artifactDigest as `sha256:${string}`,
     profileDigest: observation.profileDigest as `sha256:${string}`,
     routeDigest: observation.routeDigest as `sha256:${string}`,
     cohortDigest: observation.cohortDigest as `sha256:${string}`,
-    sourceRunId: observation.sourceRunId,
+    sourceRunId: observation.source.runId,
+    policyDigest,
+    observationDigest,
+    inputDigest,
     reasonCodes: [...reasons].sort(),
   };
   return {

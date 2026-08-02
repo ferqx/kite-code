@@ -26,6 +26,18 @@ artifact conformance 实现：actual synthetic bundle 经过 bootstrap verifier�
 [Task 1B.5 完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md)，规范 binding 见
 [decision register](2026-07-29-agent-production-decision-register.md)。
 
+整体 Review 后，1B.6 的 handoff 已把 untracked regular file 的有界、digest-bound、binary-safe 内容
+纳入前后快照，symlink/special/hardlink/超限与竞态均拒绝；controller Git 子进程改用最小环境并
+隔离 global/system config、credential/askpass。worktree 改为 no-checkout + 有界 regular blob 直接
+materialization，tracked/common-info attributes 与 repo-local filter/include 配置全部拒绝，避免
+smudge/process filter 在宿主执行。Git replacement objects 在子进程环境固定禁用，common-dir
+replacement/packed replacement refs 与 legacy grafts 均拒绝，物化同时限制单文件、总字节和文件
+数量。首次 filter/config/attribute 预检位于任何 worktree-aware `status`/`diff` 之前，防止
+stat-dirty tracked file 在拒绝前触发 clean/process filter。多步物化留下的 `provisioning` 记录只能用于 operator 诊断，`recover()` 不会把它提升为
+`active`；只有已完成 activation 的记录可以轮换 recovery lease。
+Execution conformance workflow 的第三方 Actions 全部固定 immutable SHA。状态仍保持
+`in_progress`，等待最终复核与 1B.9 默认分支 artifact。
+
 ## 目标
 
 把 `workspace_write`、network allowlist、protected path 和 writer worktree 从产品文案变成

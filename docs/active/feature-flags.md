@@ -82,7 +82,9 @@ authority、embedded profile 和 deny-wins rollout/restriction layers；project/
 普通 CLI 的 `--feature releaseProfileV1=true` 立即拒绝，false 只会收紧。当前 D-04 支持集为空，
 所以即使 foundation fixture 同时打开 artifact/rollout，production profile 仍以
 `production_support_set_empty` 拒绝；internal fixture 的 capability、预算、route、logging 和
-telemetry 也全部关闭。
+telemetry 也全部关闭。production composition 必须携带 registry 接受的非空外部 support identity，
+不能使用 internal profile；controlled config 在 Runtime 创建前再次验证该身份，调用者不能用
+`production + internal-dogfood` 绕过空支持集。
 
 `observabilityMetricsV1` 不是 remote telemetry 的单一授权。有效 exporter 同时要求 release artifact
 明确允许、flag=true、用户 consent 有效和 exporter 已配置；project 配置只能关闭。普通 CLI 的

@@ -158,3 +158,20 @@ smoke：三个 target 只能输出 `excluded`，八类 adversarial contract 只�
 `excluded_not_admitted`，report 固定 `productionSupported=false`、supported count=0、
 `distributable=false`。这是一条负向 conformance 路径；三平台默认分支 artifact 未实际产生前，
 不得完成 1B.9 或产生 `MS:1B-DONE`。
+
+上述 workflow 的第三方 Actions 全部固定到 immutable commit SHA，并由 release workflow contract
+test 阻止 tag 回退。App worktree controller 的 Git 子进程使用最小环境，不继承宿主 credential/
+askpass/SSH/proxy 等任意变量，隔离 system/global config，并禁用 hooks、fsmonitor、external diff/
+textconv。controller 以 `worktree add --no-checkout` 建立 worktree，再从 Git tree 读取有界 regular blob
+并直接写入，结构上不调用 smudge/process filter；tracked `.gitattributes`、common-dir
+`info/attributes`、repo-local `filter.*` 或 config include 声明都会在 materialization 前后拒绝。
+首次拒绝检查发生在任何 `status`/`diff` 等 worktree-aware Git 命令之前，避免 stat-dirty tracked
+file 让 Git clean/process filter 在 admission 失败前执行。
+Git replacement objects 在最小环境中固定禁用；common-dir replacement refs、packed replacement refs
+或 legacy grafts 存在时 baseline admission 直接拒绝。单文件、总字节与文件数量都有显式上限。
+`provisioning` 记录只保留给 operator 诊断，不能经 `recover()` 自动提升为 `active`；必须显式丢弃并
+重新创建，只有已经 active 的 worktree 才能轮换 recovery lease。
+
+Review handoff 对 tracked 内容使用 binary diff，对 untracked owned regular file 生成有界、SHA-256
+绑定、base64 binary-safe 的 `KITE_UNTRACKED_FILE_V1` 内容记录。symlink、特殊文件、硬链接、超限、
+owner/path/前后快照变化全部 fail closed；changed-files 只有文件名而没有内容的 handoff 不再成立。

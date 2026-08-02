@@ -181,10 +181,22 @@ export type EmbeddedReleaseProfileIdV1 =
   | 'general-availability';
 
 export class ProductionReleaseProfileAdmissionError extends Error {
-  readonly reason: 'feature_disabled' | 'production_support_set_empty' | 'profile_not_embedded';
+  readonly reason:
+    | 'feature_disabled'
+    | 'production_support_set_empty'
+    | 'production_support_identity_missing'
+    | 'production_support_identity_unsupported'
+    | 'production_internal_profile'
+    | 'profile_not_embedded';
 
   constructor(
-    reason: 'feature_disabled' | 'production_support_set_empty' | 'profile_not_embedded',
+    reason:
+      | 'feature_disabled'
+      | 'production_support_set_empty'
+      | 'production_support_identity_missing'
+      | 'production_support_identity_unsupported'
+      | 'production_internal_profile'
+      | 'profile_not_embedded',
   ) {
     super(`Production release profile admission denied: ${reason}`);
     this.name = 'ProductionReleaseProfileAdmissionError';
@@ -333,16 +345,65 @@ export function parseReleaseProfileV1(value: unknown): ReleaseProfileV1 {
   return releaseProfileV1Schema.parse(value);
 }
 
+/**
+ * Bind a production composition to one release-supported target identity.
+ * The controlled-config boundary calls this again so an in-memory forged
+ * composition cannot bypass the release profile admission decision.
+ */
+export function admitProductionReleaseSupportIdentityV1(input: {
+  profile: ReleaseProfileV1;
+  production: true;
+  productionSupportIdentity?: string;
+}): string;
+export function admitProductionReleaseSupportIdentityV1(input: {
+  profile: ReleaseProfileV1;
+  production: false;
+  productionSupportIdentity?: string;
+}): undefined;
+export function admitProductionReleaseSupportIdentityV1(input: {
+  profile: ReleaseProfileV1;
+  production: boolean;
+  productionSupportIdentity?: string;
+}): string | undefined;
+export function admitProductionReleaseSupportIdentityV1(input: {
+  profile: ReleaseProfileV1;
+  production: boolean;
+  productionSupportIdentity?: string;
+}): string | undefined {
+  if (!input.production) return undefined;
+  if (input.profile.channel === 'internal') {
+    throw new ProductionReleaseProfileAdmissionError('production_internal_profile');
+  }
+  const identity = input.productionSupportIdentity?.trim();
+  if (!identity) {
+    throw new ProductionReleaseProfileAdmissionError('production_support_identity_missing');
+  }
+  if (SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1.length === 0) {
+    throw new ProductionReleaseProfileAdmissionError('production_support_set_empty');
+  }
+  if (!SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1.includes(identity)) {
+    throw new ProductionReleaseProfileAdmissionError('production_support_identity_unsupported');
+  }
+  return identity;
+}
+
 /** Admission must run before any production Runtime/provider/transport exists. */
 export function admitEmbeddedReleaseProfileV1(input: {
   profileId: EmbeddedReleaseProfileIdV1;
   releaseProfileV1Enabled: boolean;
+  production?: boolean;
+  productionSupportIdentity?: string;
 }): ReleaseProfileV1 {
   if (!input.releaseProfileV1Enabled) {
     throw new ProductionReleaseProfileAdmissionError('feature_disabled');
   }
   const profile = EMBEDDED_RELEASE_PROFILES_V1[input.profileId];
   if (!profile) throw new ProductionReleaseProfileAdmissionError('profile_not_embedded');
+  admitProductionReleaseSupportIdentityV1({
+    profile,
+    production: input.production ?? false,
+    productionSupportIdentity: input.productionSupportIdentity,
+  });
   if (profile.channel !== 'internal' && SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1.length === 0) {
     throw new ProductionReleaseProfileAdmissionError('production_support_set_empty');
   }

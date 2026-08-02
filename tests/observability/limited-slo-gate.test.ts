@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { qualifyLimitedSloV1 } from '../../scripts/operations/qualify-limited-slo';
 
 const digest = `sha256:${'a'.repeat(64)}` as const;
+const commit = 'a'.repeat(40);
 const metrics = {
   task_checks_passed: 0.99,
   human_accepted: 0.9,
@@ -17,7 +18,18 @@ const observation = {
   profileDigest: digest,
   routeDigest: digest,
   cohortDigest: digest,
-  sourceRunId: 'fixture-run-1',
+  source: {
+    repository: 'ferqx/kite-code',
+    headSha: commit,
+    ref: 'refs/heads/main',
+    workflowRef: 'ferqx/kite-code/.github/workflows/limited-slo.yml@refs/heads/main',
+    workflowSha: commit,
+    runId: '1',
+    runAttempt: 1,
+    reportDigest: digest,
+    verifierDigest: digest,
+    sampleLedgerDigest: digest,
+  },
   startedAt: '2026-08-01T00:00:00.000Z',
   endedAt: '2026-08-02T00:00:00.000Z',
   sampleCount: 100,
@@ -40,6 +52,7 @@ const approvedPolicy = {
   schema: 'AgentProductionSloV1',
   policyId: 'agent-production-v1',
   status: 'approved',
+  approvalMilestone: 'MS:LIM-APPROVED',
   noData: 'blocked',
   minimumSamples: 50,
   observationWindowSeconds: 3600,
@@ -83,7 +96,10 @@ describe('limited cohort SLO Gate', () => {
       status: 'blocked',
       milestone: null,
       policyId: null,
-      reasonCodes: ['baseline_unconfigured_or_unapproved'],
+      reasonCodes: [
+        'authenticated_observation_verifier_not_configured',
+        'baseline_unconfigured_or_unapproved',
+      ],
     });
   });
 
@@ -104,6 +120,7 @@ describe('limited cohort SLO Gate', () => {
     expect(result.status).toBe('blocked');
     expect(result.milestone).toBeNull();
     expect(result.reasonCodes).toEqual([
+      'authenticated_observation_verifier_not_configured',
       'g0_observed',
       'g1_observed',
       'kill_switch_unavailable',
@@ -114,11 +131,20 @@ describe('limited cohort SLO Gate', () => {
     ]);
   });
 
-  test('has a deterministic pass path for verifier fixtures without creating external evidence', () => {
+  test('keeps a deterministic fixture contract-only without minting external evidence', () => {
     const first = qualifyLimitedSloV1({ policy: approvedPolicy, observation });
     const second = qualifyLimitedSloV1({ policy: approvedPolicy, observation });
     expect(first).toEqual(second);
-    expect(first).toMatchObject({ status: 'passed', milestone: 'MS:LIMITED-SLO' });
+    expect(first).toMatchObject({
+      status: 'blocked',
+      milestone: null,
+      evidenceClass: 'contract_only',
+      evidenceEligible: false,
+      reasonCodes: ['authenticated_observation_verifier_not_configured'],
+    });
+    expect(first.inputDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(first.observationDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(first.policyDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(first.recordDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
   });
 });

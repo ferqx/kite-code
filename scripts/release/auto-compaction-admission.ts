@@ -2,29 +2,46 @@ import { z } from 'zod';
 import { canonicalJson, sha256DomainSeparated } from './canonical-json';
 
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
+const AUTO_COMPACTION_DEPENDENCIES_V1 = [
+  'manual_stable',
+  'internal_auto_fresh',
+  'limited_approved',
+  'limited_slo',
+  'external_shadow',
+  'owner_approval',
+  'kill_switch',
+  'consent_provider_policy',
+  'incident_rehearsal',
+] as const;
 
 export const autoCompactionAdmissionInputV1Schema = z
   .object({
     schema: z.literal('AutoCompactionAdmissionInputV1'),
     artifactDigest: digestSchema,
     profileDigest: digestSchema,
-    routeQualificationDigest: digestSchema,
-    internalAutoEvidenceDigest: digestSchema,
-    manualStableDecisionDigest: digestSchema,
-    limitedSloEvidenceDigest: digestSchema,
-    incidentRehearsalDigest: digestSchema,
-    dependencies: z
+    routeDigest: digestSchema,
+    cohortDigest: digestSchema,
+    dependencies: z.array(
+      z
+        .object({
+          schema: z.literal('AutoCompactionDependencyDecisionV1'),
+          dependency: z.enum(AUTO_COMPACTION_DEPENDENCIES_V1),
+          status: z.literal('passed'),
+          artifactDigest: digestSchema,
+          profileDigest: digestSchema,
+          routeDigest: digestSchema,
+          cohortDigest: digestSchema,
+          verifiedAt: z.iso.datetime({ offset: true }),
+          verifierIdentity: z.string().min(1).max(256),
+          decisionDigest: digestSchema,
+        })
+        .strict(),
+    ),
+    safetyObservation: z
       .object({
-        msManualStable: z.boolean(),
-        msInternalAutoFresh: z.boolean(),
-        msLimitedApproved: z.boolean(),
-        msLimitedSlo: z.boolean(),
-        externalShadowPassed: z.boolean(),
-        ownerApprovalValid: z.boolean(),
-        killSwitchAvailable: z.boolean(),
-        consentAndProviderPolicyValid: z.boolean(),
         g0Count: z.number().int().nonnegative(),
         g1Count: z.number().int().nonnegative(),
+        ledgerDigest: digestSchema,
       })
       .strict(),
   })
@@ -43,7 +60,11 @@ export interface AutoCompactionAdmissionDecisionV1 {
   };
   reasonCodes: string[];
   artifactDigest: `sha256:${string}`;
-  routeQualificationDigest: `sha256:${string}`;
+  profileDigest: `sha256:${string}`;
+  routeDigest: `sha256:${string}`;
+  cohortDigest: `sha256:${string}`;
+  dependencyDecisionDigests: `sha256:${string}`[];
+  safetyLedgerDigest: `sha256:${string}`;
   decisionDigest: `sha256:${string}`;
 }
 
@@ -52,37 +73,60 @@ export function evaluateAutoCompactionAdmissionV1(
   rawInput: unknown,
 ): AutoCompactionAdmissionDecisionV1 {
   const input = autoCompactionAdmissionInputV1Schema.parse(rawInput);
-  const reasons: string[] = [];
-  const required = [
-    ['ms_manual_stable_missing', input.dependencies.msManualStable],
-    ['ms_internal_auto_fresh_missing', input.dependencies.msInternalAutoFresh],
-    ['ms_limited_approved_missing', input.dependencies.msLimitedApproved],
-    ['ms_limited_slo_missing', input.dependencies.msLimitedSlo],
-    ['external_shadow_missing', input.dependencies.externalShadowPassed],
-    ['owner_approval_missing', input.dependencies.ownerApprovalValid],
-    ['kill_switch_unavailable', input.dependencies.killSwitchAvailable],
-    ['consent_or_provider_policy_invalid', input.dependencies.consentAndProviderPolicyValid],
-  ] as const;
-  for (const [reason, present] of required) if (!present) reasons.push(reason);
-  if (input.dependencies.g0Count !== 0) reasons.push('g0_observed');
-  if (input.dependencies.g1Count !== 0) reasons.push('g1_observed');
+  const reasons: string[] = ['authenticated_auto_compaction_verifier_not_configured'];
+  const decisions = new Map<string, (typeof input.dependencies)[number]>();
+  for (const dependency of input.dependencies) {
+    if (decisions.has(dependency.dependency)) {
+      throw new Error(`Auto-compaction dependency ${dependency.dependency} is duplicated.`);
+    }
+    decisions.set(dependency.dependency, dependency);
+    if (
+      dependency.artifactDigest !== input.artifactDigest ||
+      dependency.profileDigest !== input.profileDigest ||
+      dependency.routeDigest !== input.routeDigest ||
+      dependency.cohortDigest !== input.cohortDigest
+    ) {
+      reasons.push(`dependency_identity_mismatch:${dependency.dependency}`);
+    }
+  }
+  const missingReason: Record<(typeof AUTO_COMPACTION_DEPENDENCIES_V1)[number], string> = {
+    manual_stable: 'ms_manual_stable_missing',
+    internal_auto_fresh: 'ms_internal_auto_fresh_missing',
+    limited_approved: 'ms_limited_approved_missing',
+    limited_slo: 'ms_limited_slo_missing',
+    external_shadow: 'external_shadow_missing',
+    owner_approval: 'owner_approval_missing',
+    kill_switch: 'kill_switch_unavailable',
+    consent_provider_policy: 'consent_or_provider_policy_invalid',
+    incident_rehearsal: 'incident_rehearsal_missing',
+  };
+  for (const dependency of AUTO_COMPACTION_DEPENDENCIES_V1) {
+    if (!decisions.has(dependency)) reasons.push(missingReason[dependency]);
+  }
+  if (input.safetyObservation.g0Count !== 0) reasons.push('g0_observed');
+  if (input.safetyObservation.g1Count !== 0) reasons.push('g1_observed');
   reasons.sort();
-  const status: AutoCompactionAdmissionDecisionV1['status'] =
-    reasons.length === 0 ? 'passed' : 'blocked';
+  const status: AutoCompactionAdmissionDecisionV1['status'] = 'blocked';
   const withoutDigest: Omit<AutoCompactionAdmissionDecisionV1, 'decisionDigest'> = {
     schema: 'AutoCompactionAdmissionDecisionV1',
     status,
-    liveAdmissionEligible: status === 'passed',
+    liveAdmissionEligible: false,
     summaryDispatches: 0,
     checkpointWrites: 0,
     profileDiff: {
       capability: 'auto_compaction',
-      maxRollout: status === 'passed' ? 'canary' : 'off',
-      cohortMaximum: status === 'passed' ? 1 : 0,
+      maxRollout: 'off',
+      cohortMaximum: 0,
     },
     reasonCodes: reasons,
     artifactDigest: input.artifactDigest as `sha256:${string}`,
-    routeQualificationDigest: input.routeQualificationDigest as `sha256:${string}`,
+    profileDigest: input.profileDigest as `sha256:${string}`,
+    routeDigest: input.routeDigest as `sha256:${string}`,
+    cohortDigest: input.cohortDigest as `sha256:${string}`,
+    dependencyDecisionDigests: input.dependencies
+      .map((dependency) => dependency.decisionDigest as `sha256:${string}`)
+      .sort(),
+    safetyLedgerDigest: input.safetyObservation.ledgerDigest as `sha256:${string}`,
   };
   return {
     ...withoutDigest,

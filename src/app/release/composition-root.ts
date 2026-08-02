@@ -1,6 +1,7 @@
 import {
   type AgentConfig,
   admitEmbeddedReleaseProfileV1,
+  admitProductionReleaseSupportIdentityV1,
   composeReleaseProfileV1,
   type EmbeddedReleaseProfileIdV1,
   ProductionReleaseProfileAdmissionError,
@@ -12,7 +13,10 @@ import { getFeatureFlags } from '@/core/config/features';
 export type ReleaseCompositionInactiveReasonV1 =
   | 'artifact_disabled'
   | 'rollout_disabled'
-  | 'production_support_set_empty';
+  | 'production_support_set_empty'
+  | 'production_support_identity_missing'
+  | 'production_support_identity_unsupported'
+  | 'production_internal_profile';
 
 export type ReleaseCompositionV1 =
   | {
@@ -24,16 +28,30 @@ export type ReleaseCompositionV1 =
   | {
       version: 1;
       active: true;
-      production: boolean;
+      production: false;
+      profile: ReleaseProfileV1;
+    }
+  | {
+      version: 1;
+      active: true;
+      production: true;
+      productionSupportIdentity: string;
       profile: ReleaseProfileV1;
     };
 
 export interface ReleaseControlledAgentConfigV1 extends AgentConfig {
-  readonly releaseControl: {
-    readonly version: 1;
-    readonly production: boolean;
-    readonly effectiveProfile: ReleaseProfileV1;
-  };
+  readonly releaseControl:
+    | {
+        readonly version: 1;
+        readonly production: false;
+        readonly effectiveProfile: ReleaseProfileV1;
+      }
+    | {
+        readonly version: 1;
+        readonly production: true;
+        readonly productionSupportIdentity: string;
+        readonly effectiveProfile: ReleaseProfileV1;
+      };
 }
 
 /**
@@ -45,6 +63,7 @@ export function resolveReleaseCompositionV1(input: {
   artifactReleaseProfileV1Enabled: boolean;
   profileId: EmbeddedReleaseProfileIdV1;
   production: boolean;
+  productionSupportIdentity?: string;
   restrictionLayers?: readonly ReleaseProfileRestrictionLayerV1[];
 }): ReleaseCompositionV1 {
   if (!input.artifactReleaseProfileV1Enabled) {
@@ -57,22 +76,41 @@ export function resolveReleaseCompositionV1(input: {
     const embedded = admitEmbeddedReleaseProfileV1({
       profileId: input.profileId,
       releaseProfileV1Enabled: true,
+      production: input.production,
+      productionSupportIdentity: input.productionSupportIdentity,
     });
     const profile = composeReleaseProfileV1({
       embedded,
       layers: input.restrictionLayers,
     });
-    return { version: 1, active: true, production: input.production, profile };
+    if (input.production) {
+      const productionSupportIdentity = admitProductionReleaseSupportIdentityV1({
+        profile,
+        production: true,
+        productionSupportIdentity: input.productionSupportIdentity,
+      });
+      return {
+        version: 1,
+        active: true,
+        production: true,
+        productionSupportIdentity,
+        profile,
+      };
+    }
+    return { version: 1, active: true, production: false, profile };
   } catch (error) {
     if (
       error instanceof ProductionReleaseProfileAdmissionError &&
-      error.reason === 'production_support_set_empty'
+      (error.reason === 'production_support_set_empty' ||
+        error.reason === 'production_support_identity_missing' ||
+        error.reason === 'production_support_identity_unsupported' ||
+        error.reason === 'production_internal_profile')
     ) {
       return {
         version: 1,
         active: false,
         production: input.production,
-        reason: 'production_support_set_empty',
+        reason: error.reason,
       };
     }
     throw error;
@@ -87,11 +125,31 @@ export function createReleaseControlledAgentConfigV1(input: {
   if (!input.composition.active) {
     throw new Error(`Release-controlled Runtime creation denied: ${input.composition.reason}.`);
   }
+  if (input.composition.production) {
+    const productionSupportIdentity = admitProductionReleaseSupportIdentityV1({
+      profile: input.composition.profile,
+      production: true,
+      productionSupportIdentity: input.composition.productionSupportIdentity,
+    });
+    return {
+      ...input.config,
+      releaseControl: Object.freeze({
+        version: 1 as const,
+        production: true as const,
+        productionSupportIdentity,
+        effectiveProfile: input.composition.profile,
+      }),
+    };
+  }
+  admitProductionReleaseSupportIdentityV1({
+    profile: input.composition.profile,
+    production: false,
+  });
   return {
     ...input.config,
     releaseControl: Object.freeze({
       version: 1 as const,
-      production: input.composition.production,
+      production: false as const,
       effectiveProfile: input.composition.profile,
     }),
   };

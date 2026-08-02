@@ -110,6 +110,32 @@ describe('ReleaseProfileV1', () => {
     expect(internal.channel).toBe('internal');
   });
 
+  test('requires production to use a supported non-internal identity', () => {
+    expect(() =>
+      admitEmbeddedReleaseProfileV1({
+        profileId: 'internal-dogfood',
+        releaseProfileV1Enabled: true,
+        production: true,
+        productionSupportIdentity: 'future-supported-target',
+      }),
+    ).toThrow('production_internal_profile');
+    expect(() =>
+      admitEmbeddedReleaseProfileV1({
+        profileId: 'limited-production',
+        releaseProfileV1Enabled: true,
+        production: true,
+      }),
+    ).toThrow('production_support_identity_missing');
+    expect(() =>
+      admitEmbeddedReleaseProfileV1({
+        profileId: 'limited-production',
+        releaseProfileV1Enabled: true,
+        production: true,
+        productionSupportIdentity: 'future-supported-target',
+      }),
+    ).toThrow('production_support_set_empty');
+  });
+
   test('allows no unknown embedded profile identity', () => {
     expect(() =>
       admitEmbeddedReleaseProfileV1({

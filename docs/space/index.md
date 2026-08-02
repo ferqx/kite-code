@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-07-30（完成 Agent 生产化 Task 1A.2/1C.3）
+最后更新：2026-08-02（Agent 生产化 Release/Evaluation/Operations/Capability 当前规则收敛）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -60,6 +60,11 @@
 | `../active/mcp-project-approval.md` | active | 项目 MCP 来源、config digest、本地决定、transport 前置门禁与 TUI 审批 | 修改 MCP 配置发现、项目来源、连接启动或 `/mcp` 审批交互时必读。 |
 | `../active/verification-governance.md` | active | Runtime 分级验证、VerificationSpec、required 完成门禁、repair/waive/compensation | 修改验证策略、事件、效果、Scheduler 完成语义、Skill/MCP verifier 或 reviewer 时必读。 |
 | `../active/capability-progressive-disclosure.md` | active | MCP/Skill 大目录按预算披露、metadata 搜索、下一轮有限 binding 与 fail-closed | 修改 capability catalog、模型工具上下文、`capability_search`、MCP binding 或 Skill activation 可见性时必读。 |
+| `../active/release-control.md` | active | Release Profile、canonical artifact/evidence、Gate replay 与 disabled production 边界 | 修改 release manifest/profile、artifact verifier、Gate 或 rollout 时必读。 |
+| `../active/agent-task-evaluation.md` | active | Agent task suite、oracle、重复运行、dogfood 与产品验收证据 | 修改 Agent task case、fixture、threshold、human review 或 evaluation adapter 时必读。 |
+| `../active/observability-privacy-operations.md` | active | 无正文 metric、consent、dashboard/SLO、alert、incident 与单维护者运营 | 修改 observability、telemetry status、SLO/alert 或 incident rehearsal 时必读。 |
+| `../active/compaction-release-qualification.md` | active | Compaction 结构/语义/continuation/route qualification 与 no-compaction handoff | 修改 compaction evaluator、route qualification、rollout 或 handoff 时必读。 |
+| `../active/capability-release-tracks.md` | active | Verification、MCP write、Skills readonly/effectful profile、admission 与 maturity 边界 | 修改 capability profile、Verification release、MCP write 或 Skill effect 分类时必读。 |
 
 ## 理解记录
 

@@ -19,21 +19,18 @@ describe('GA capability selection contract', () => {
     expect(validation.selection.forcedOffCapabilities).toEqual([...RELEASE_CAPABILITIES].sort());
     const gate = evaluateGaSelectionGateV1({
       validation,
-      dependencies: {
-        msLimitedApproved: false,
-        msLimitedSlo: false,
-        ms2aRc: false,
-        ms3OpsReady: false,
-        d03Closed: false,
-        d05Closed: false,
-        d10Closed: false,
-        thirdPartySecurityReview: false,
-        productionSupportSetNonEmpty: false,
+      candidate: {
+        artifactDigest: digest,
+        profileDigest: digest,
+        routeDigest: digest,
+        cohortDigest: digest,
       },
+      dependencies: [],
     });
     expect(gate.status).toBe('blocked');
     expect(gate.gaEligible).toBeFalse();
     expect(gate.reasonCodes).toEqual([
+      'authenticated_ga_dependency_verifier_not_configured',
       'ms_2a_rc_missing',
       'ms_3_ops_ready_missing',
       'ms_limited_approved_missing',

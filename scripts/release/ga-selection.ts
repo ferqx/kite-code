@@ -75,10 +75,59 @@ export interface GAGateRecordV1 {
   status: 'blocked' | 'passed';
   gaEligible: boolean;
   selectionDigest: `sha256:${string}`;
+  candidate: GACandidateIdentityV1;
+  dependencyDecisionDigests: `sha256:${string}`[];
   reasonCodes: string[];
   forcedOffCapabilities: ReleaseCapability[];
   recordDigest: `sha256:${string}`;
 }
+
+const GA_DEPENDENCY_IDS_V1 = [
+  'ms_limited_approved',
+  'ms_limited_slo',
+  'ms_2a_rc',
+  'ms_3_ops_ready',
+  'd03_closed',
+  'd05_closed',
+  'd10_closed',
+  'third_party_security_review',
+  'production_support_set',
+] as const;
+type GADependencyIdV1 = (typeof GA_DEPENDENCY_IDS_V1)[number];
+
+export interface GACandidateIdentityV1 {
+  artifactDigest: `sha256:${string}`;
+  profileDigest: `sha256:${string}`;
+  routeDigest: `sha256:${string}`;
+  cohortDigest: `sha256:${string}`;
+}
+
+export interface GADependencyDecisionV1 extends GACandidateIdentityV1 {
+  schema: 'GADependencyDecisionV1';
+  dependency: GADependencyIdV1;
+  status: 'passed';
+  verifierIdentity: string;
+  verifiedAt: string;
+  decisionDigest: `sha256:${string}`;
+}
+
+const gaCandidateIdentityV1Schema = z
+  .object({
+    artifactDigest: digestSchema,
+    profileDigest: digestSchema,
+    routeDigest: digestSchema,
+    cohortDigest: digestSchema,
+  })
+  .strict();
+
+const gaDependencyDecisionV1Schema = gaCandidateIdentityV1Schema.extend({
+  schema: z.literal('GADependencyDecisionV1'),
+  dependency: z.enum(GA_DEPENDENCY_IDS_V1),
+  status: z.literal('passed'),
+  verifierIdentity: z.string().min(1).max(256),
+  verifiedAt: z.iso.datetime({ offset: true }),
+  decisionDigest: digestSchema,
+});
 
 export function validateGaSelectionV1(
   rawSelection: unknown,
@@ -146,52 +195,63 @@ export function validateGaSelectionV1(
 /** Gate-only projection. It cannot assemble or publish an artifact. */
 export function evaluateGaSelectionGateV1(input: {
   validation: GASelectionValidationV1;
-  dependencies: {
-    msLimitedApproved: boolean;
-    msLimitedSlo: boolean;
-    ms2aRc: boolean;
-    ms3OpsReady: boolean;
-    d03Closed: boolean;
-    d05Closed: boolean;
-    d10Closed: boolean;
-    thirdPartySecurityReview: boolean;
-    productionSupportSetNonEmpty: boolean;
-  };
+  candidate: GACandidateIdentityV1;
+  dependencies: readonly GADependencyDecisionV1[];
 }): GAGateRecordV1 {
-  const reasons: string[] = [];
-  if (!input.dependencies.msLimitedApproved) reasons.push('ms_limited_approved_missing');
-  if (!input.dependencies.msLimitedSlo) reasons.push('ms_limited_slo_missing');
-  if (!input.dependencies.ms2aRc) reasons.push('ms_2a_rc_missing');
-  if (!input.dependencies.ms3OpsReady) reasons.push('ms_3_ops_ready_missing');
+  const candidate = gaCandidateIdentityV1Schema.parse(input.candidate) as GACandidateIdentityV1;
+  const dependencies = z.array(gaDependencyDecisionV1Schema).parse(input.dependencies);
+  const reasons: string[] = ['authenticated_ga_dependency_verifier_not_configured'];
+  const decisions = new Map<GADependencyIdV1, GADependencyDecisionV1>();
+  for (const dependency of dependencies) {
+    if (decisions.has(dependency.dependency)) {
+      throw new Error(`GA dependency ${dependency.dependency} is duplicated.`);
+    }
+    decisions.set(dependency.dependency, dependency as GADependencyDecisionV1);
+    if (
+      dependency.artifactDigest !== candidate.artifactDigest ||
+      dependency.profileDigest !== candidate.profileDigest ||
+      dependency.routeDigest !== candidate.routeDigest ||
+      dependency.cohortDigest !== candidate.cohortDigest
+    ) {
+      reasons.push(`dependency_identity_mismatch:${dependency.dependency}`);
+    }
+  }
+  const requireDependency = (dependency: GADependencyIdV1, missingReason: string): void => {
+    if (!decisions.has(dependency)) reasons.push(missingReason);
+  };
+  requireDependency('ms_limited_approved', 'ms_limited_approved_missing');
+  requireDependency('ms_limited_slo', 'ms_limited_slo_missing');
+  requireDependency('ms_2a_rc', 'ms_2a_rc_missing');
+  requireDependency('ms_3_ops_ready', 'ms_3_ops_ready_missing');
+  requireDependency('third_party_security_review', 'third_party_security_review_missing');
+  requireDependency('production_support_set', 'production_support_set_empty');
   const selected = new Set(
     input.validation.selection.selectedCapabilities.map((entry) => entry.capability),
   );
-  if (selected.has('remote_telemetry') && !input.dependencies.d03Closed) reasons.push('d03_open');
-  if (selected.has('full_interaction_mode') && !input.dependencies.d05Closed) {
-    reasons.push('d05_open');
-  }
+  if (selected.has('remote_telemetry')) requireDependency('d03_closed', 'd03_open');
+  if (selected.has('full_interaction_mode')) requireDependency('d05_closed', 'd05_open');
   if (
     (selected.has('skills_readonly') || selected.has('skills_effectful')) &&
-    !input.dependencies.d10Closed
+    !decisions.has('d10_closed')
   ) {
     reasons.push('d10_open');
   }
-  if (!input.dependencies.thirdPartySecurityReview)
-    reasons.push('third_party_security_review_missing');
-  if (!input.dependencies.productionSupportSetNonEmpty)
-    reasons.push('production_support_set_empty');
   if (input.validation.selection.selectedCapabilities.length === 0) {
     reasons.push('no_stable_capability_selected');
   }
   if (input.validation.selection.approvedBy.length === 0)
     reasons.push('selection_approval_missing');
   reasons.sort();
-  const status: GAGateRecordV1['status'] = reasons.length === 0 ? 'passed' : 'blocked';
+  const status: GAGateRecordV1['status'] = 'blocked';
   const withoutDigest: Omit<GAGateRecordV1, 'recordDigest'> = {
     schema: 'GAGateRecordV1',
     status,
-    gaEligible: status === 'passed',
+    gaEligible: false,
     selectionDigest: input.validation.selectionDigest,
+    candidate,
+    dependencyDecisionDigests: dependencies
+      .map((dependency) => dependency.decisionDigest as `sha256:${string}`)
+      .sort(),
     reasonCodes: reasons,
     forcedOffCapabilities: [...input.validation.selection.forcedOffCapabilities],
   };

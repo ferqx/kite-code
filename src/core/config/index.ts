@@ -149,6 +149,7 @@ export type {
 } from './release-profile';
 export {
   admitEmbeddedReleaseProfileV1,
+  admitProductionReleaseSupportIdentityV1,
   EMBEDDED_RELEASE_PROFILES_V1,
   ProductionReleaseProfileAdmissionError,
   parseReleaseProfileV1,
