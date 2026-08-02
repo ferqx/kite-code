@@ -67,4 +67,23 @@ describe('TUI PTY System — Sandbox Mode', () => {
     },
     TIMEOUT,
   );
+
+  test(
+    '/release reports that the development entry has no artifact authority',
+    async () => {
+      await typeText(tui, '/release');
+      tui.write('\r');
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Release control: inactive (artifact_disabled)',
+        10000,
+      );
+
+      expect(screenContains(tui.viewport(), 'Release control: inactive (artifact_disabled)')).toBe(
+        true,
+      );
+      expect(screenContains(tui.viewport(), 'Capabilities: unavailable until artifact')).toBe(true);
+    },
+    TIMEOUT,
+  );
 });

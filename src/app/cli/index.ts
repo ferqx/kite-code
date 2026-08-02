@@ -1,9 +1,11 @@
 import { resolve } from 'node:path';
+import { resolveReleaseCompositionV1 } from '@/app/release/composition-root';
 import {
   formatExecutionStatusV1,
   formatUnadmittedExecutionStatusV1,
   tryProjectAdmittedExecutionStatusV1,
 } from '@/app/release/execution-status';
+import { formatReleaseStatusV1, projectReleaseStatusV1 } from '@/app/release/status-projection';
 import { type FeatureFlags, getFeatureFlags } from '@/core/config/features';
 import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
@@ -45,6 +47,7 @@ export interface ParsedArgs {
   traceTurn?: number;
   traceFormat?: 'text' | 'json';
   executionStatus: boolean;
+  releaseStatus: boolean;
 }
 
 export async function main(): Promise<void> {
@@ -100,10 +103,22 @@ export async function main(): Promise<void> {
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
   });
+  const executionStatus = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+  if (args.releaseStatus) {
+    const composition = resolveReleaseCompositionV1({
+      config,
+      artifactReleaseProfileV1Enabled: false,
+      profileId: 'internal-dogfood',
+      production: false,
+    });
+    console.log(formatReleaseStatusV1(projectReleaseStatusV1({ composition, executionStatus })));
+    return;
+  }
   if (args.executionStatus) {
-    const status = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
     console.log(
-      status ? formatExecutionStatusV1(status) : formatUnadmittedExecutionStatusV1(sandboxRuntime),
+      executionStatus
+        ? formatExecutionStatusV1(executionStatus)
+        : formatUnadmittedExecutionStatusV1(sandboxRuntime),
     );
     return;
   }
@@ -441,7 +456,11 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const featureOverrides: Partial<FeatureFlags> = {};
   for (const feature of multi('--feature')) {
     const override = parseFeatureOverride(feature);
-    if (override.executionBoundaryV1 === true || override.networkBoundaryV1 === true) {
+    if (
+      override.executionBoundaryV1 === true ||
+      override.networkBoundaryV1 === true ||
+      override.releaseProfileV1 === true
+    ) {
       throw new Error(
         `Feature flag '${feature.split('=', 1)[0]}' is release-controlled and cannot be enabled by the CLI.`,
       );
@@ -471,6 +490,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     traceTurn,
     traceFormat: optionalValue('--format') === 'json' ? 'json' : 'text',
     executionStatus: argv.includes('--execution-status'),
+    releaseStatus: argv.includes('--release-status'),
   };
 }
 
@@ -541,6 +561,7 @@ Options:
   --skill <name>         Activate a skill (repeatable)
   --feature <name[=bool]> Temporarily override a registered feature flag (repeatable)
   --execution-status     Print the effective production execution boundary and exit
+  --release-status       Print the effective release profile and Gate status and exit
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
   --approve              Approve tool call on resume

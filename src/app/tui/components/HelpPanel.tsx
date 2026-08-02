@@ -57,6 +57,7 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
         ['/effort', '设置推理深度（low/medium/high/max）'],
         ['/theme', '切换色彩主题（teal/blue/purple/cyan/mono）'],
         ['/permissions', modeHelp],
+        ['/release', 'Show effective release profile, capability and Gate status'],
         ['/plan', '切换规划模式'],
         ['/mcp', '管理 MCP Server'],
         ['/compact', '压缩对话上下文（支持自定义指令）'],

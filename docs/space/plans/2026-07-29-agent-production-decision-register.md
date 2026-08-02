@@ -119,18 +119,27 @@
 
 ### D-06
 
-- status: `open`
+- status: `closed`
 - owner: `github:@ferqx`（Release + Security & Privacy）
 - backup: `none (single-maintainer)`
 - dueMilestone: `MS:2A-F`
 - blockingPhase: `Phase 2A`
 - default: 未验证 signature/provenance/托管 identity 时不分发 artifact；rollout signing 不阻塞首个
   limited，但未实现时 rollout 服务保持 disabled
-- decision: artifact/evidence 的具体签名、provenance 与托管后端待定
+- decision: 开源发布使用 GitHub Actions OIDC 与 keyless Sigstore/Cosign 对 canonical
+  `ReleaseManifestV1` bytes 生成 detached bundle；GitHub artifact attestation 绑定 payload、
+  manifest、SBOM 和构建 provenance，GitHub Releases 托管可分发 bundle。Verifier 固定 canonical
+  repository `ferqx/kite-code`、repository ID `R_kgDOSKbi8g`、release workflow path、OIDC issuer、
+  protected tag/ref、commit、workflow SHA、run ID/attempt 与 artifact digest。PR、fork、普通 branch
+  与本机不得签名或发布；仓库公开前只允许 `nonDistributable` synthetic trust root，真实 signing/
+  attestation/release workflow disabled。远程 rollout signing 暂不启用；平台原生签名、正式
+  qualification 和第三方安全评审仍是独立硬门禁
 - evidence: [Phase 2A 计划](2026-07-29-agent-production-release-control.md)；
   [ADR-0052](../../adr/0052-release-evidence-and-behavior-identity.md)；
-  [ADR-0059](../../adr/0059-optional-disable-only-signed-rollout.md)
-- approvedAt: `null`
+  [ADR-0059](../../adr/0059-optional-disable-only-signed-rollout.md)；
+  [ADR-0062](../../adr/0062-keyless-release-signing-and-github-hosting.md)；用户于 2026-08-02
+  批准推荐方案
+- approvedAt: `2026-08-02`
 
 ### D-07
 
@@ -294,6 +303,7 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1B.6 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `in_progress` | 最终整体 Review 与恢复点 commit 待后续本地方案共同收敛 | — | `2026-08-02` |
 | 1B.7 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `in_progress` | 最终整体 Review 与恢复点 commit 待后续本地方案共同收敛 | — | `2026-08-02` |
 | 1B.8 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `in_progress` | 最终整体 Review 与恢复点 commit 待后续本地方案共同收敛 | — | `2026-08-02` |
+| 1B.9 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 negative artifact conformance 已通过；等待最终整体 Review 与默认分支三平台 workflow artifact | — | `2026-08-02` |
 | 1C.1 | `github:@ferqx` | `4be8735b29ec0fe3951bf7a0876f7b5e722c846a` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.2 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
 | 1C.4 | `github:@ferqx` | `4b8eec058df0af545675fc0e1c4135ee855848fd` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-30` |
@@ -302,8 +312,17 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1C.6 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-31` |
 | 1C.7 | `github:@ferqx` | `dfd8f209f89b4980b9c3905d3e73c166b33bea2b` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-08-01` |
 | 1C.8 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-08-02` |
+| 2A.0 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
+| 2A.1 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
+| 2A.2 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
+| 2A.3 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
+| 2A.4 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
+| 2A.5 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
+| 2A.6 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
+| 2A.7 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
 
-除已完成的 1A.1–1A.7、1B.0–1B.5、1C.1–1C.8 与已绑定 `in_progress` 的 1B.6–1B.8 外，
+除已完成的 1A.1–1A.7、1B.0–1B.5、1C.1–1C.8 与已绑定 `in_progress` 的
+1B.6–1B.9、2A.0–2A.7 外，
 其他非 Phase 0 Task 尚未创建 execution binding。
 
 ## Revision history
@@ -330,3 +349,5 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 18 | 2026-08-01 | 完成 1B.5 shared protected-path policy；1B.6/1B.8 变为 ready 但保持未绑定；D-04 空支持集不变且不产生 `MS:1B-DONE` | `138fee19d7ce9f9622f1e32ea1d7cfdd2076bf8c`、`512e2c3582bdd2bea2e7f670213f7616f545084c`、qualification head `e6e0ffb51115c3380a1dcc340dd1627b3bdd0970`、[Required run 30705493952](https://github.com/ferqx/kite-code/actions/runs/30705493952) 六个 job 全部通过、[Platform Capability Probe run 30705493919](https://github.com/ferqx/kite-code/actions/runs/30705493919) 三平台全绿、[完成记录](../execution/completed/2026-08-01-agent-production-protected-path.md)、两路独立复核最终 GO 且无剩余 P0/P1/P2 |
 | 19 | 2026-08-02 | 完成 1C.7 正式 Ubuntu qualification 与 1C.8 文档/迁移收口；唯一产生 `MS:1C-DONE`，不生成 production artifact | qualification head `e23b81b1087a7cdea5f4d9c5d419f5d040b67702`、[run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064) attempt 1、artifact `runtime-resilience-qualification-30710906064`（ID `8822010140`）、canonical digest `sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694`、7 case/56 probe/72 actual Runtime ledger receipts、独立 verifier 通过、[完成记录](../execution/completed/2026-07-30-agent-production-runtime-resilience.md) |
 | 20 | 2026-08-02 | 激活 1B.6–1B.8 并完成本地实现/定向验证；按统一 Review 策略保持 `in_progress`，不产生 `MS:1B-DONE` | baseline `e23b81b1087a7cdea5f4d9c5d419f5d040b67702`；worktree controller 14 pass、MCP/边界组合 84 pass、status/config/CLI 22 pass、TUI sandbox-mode 2 pass；D-09 foreground Headless CLI writer 保持只读，local stdio 与无 App receipt controller 的 production TUI 保持关闭 |
+| 21 | 2026-08-02 | 用户批准 D-06：开源发布采用 GitHub OIDC/keyless Sigstore、artifact attestation 与 GitHub Releases；private 阶段仅 synthetic，正式 signing/release disabled | 用户直接批准、ADR-0062；canonical repository `ferqx/kite-code` / ID `R_kgDOSKbi8g`；D-04 空支持集与 ADR-0060 第三方安全评审门禁保持不变 |
+| 22 | 2026-08-02 | 激活 2A.0–2A.7 与 1B.9；本地 Release Contract Foundation、synthetic Gate replay 和 negative artifact conformance 收敛，等待恢复点/最终整体 Review/default-branch artifact 的各自 ratchet | baseline `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0`；release tests 53 pass、boundary/adversarial 90 pass、TUI `/release` 3 pass；foundation decision `approved_foundation` 仅 G0/G1，G2–G5=`not_applicable`；D-04 空支持集、真实 signing disabled、`MS:1B-DONE`/正式 `MS:2A-F` 均未产生 |

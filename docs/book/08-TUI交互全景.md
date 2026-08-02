@@ -38,6 +38,10 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 
 `/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“管理 MCP Servers”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令，管理动作只在 Overlay 的可见 Select 中执行。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
 
+`/release` 是只读发布状态入口。普通开发 TUI 没有 artifact authority，因此固定显示
+`artifact_disabled` 与 capability unavailable；该输出不启用 Release Profile，也不能作为
+Sigstore、平台 qualification 或 production Gate 证据。
+
 ## 8.4 Session 与恢复点
 
 会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。

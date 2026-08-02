@@ -28,6 +28,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | `terminalOutcomeV1` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
 | `executionBoundaryV1` | `false` | 允许 composition root 消费 release-pinned `ExecutionBoundaryV1`；开启本身不产生平台资格或边界 artifact |
 | `networkBoundaryV1` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
+| `releaseProfileV1` | `false` | 请求使用 artifact-pinned Release Profile；没有独立 artifact authority 时 true 不生效且 CLI 拒绝抬高 |
 
 `providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
 前者仍要求批准 registry/gate，且当前 route 集合为空；后者只允许新 run 建立 limited preset
@@ -68,6 +69,13 @@ network-off。开启允许 `web_fetch` 与具备 App receipt controller 的 remo
 boundary 的精确 host allowlist；每个请求/redirect hop 独立解析并把 socket 固定到已批准 IP。
 当前 production TUI 没有该 MCP controller，因此 remote transport 仍关闭；local stdio 无条件排除。
 该 flag 不提供 URL path 级隔离，也不产生平台资格。
+
+`releaseProfileV1` 不是普通功能开关。有效 Release composition 同时要求 App 注入的 artifact
+authority、embedded profile 和 deny-wins rollout/restriction layers；project/user 不能提供前两项。
+普通 CLI 的 `--feature releaseProfileV1=true` 立即拒绝，false 只会收紧。当前 D-04 支持集为空，
+所以即使 foundation fixture 同时打开 artifact/rollout，production profile 仍以
+`production_support_set_empty` 拒绝；internal fixture 的 capability、预算、route、logging 和
+telemetry 也全部关闭。
 
 上下文压缩的 flag 术语（功能开关）真值如下：
 

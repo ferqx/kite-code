@@ -101,9 +101,15 @@ CLI：
 bun run agent run --thread demo --workspace . --task "检查并修复测试"
 bun run agent resume --thread demo --approve
 bun run agent trace events.jsonl --turn 1
+bun run agent run --release-status
 ```
 
 常用参数以 `bun run agent --help` 输出和 `src/app/cli/index.ts` 为准。`--checkpoints` 是保留的 CLI 参数名，当前数据由 Runtime Store 管理。
+
+Release control 当前只提供不可分发的 contract foundation：`--release-status` 与 TUI `/release`
+显示脱敏状态，普通入口为 `artifact_disabled`。`releaseProfileV1`、`executionBoundaryV1` 和
+`networkBoundaryV1` 不能由 CLI 打开。D-04 production platform 支持集为空，真实 Sigstore/
+attestation/GitHub Release 与平台签名均未启用，因此没有 production artifact。
 
 ## 安全边界
 
@@ -146,6 +152,11 @@ bun run test:tui:smoke:native
 bun run test:all
 bun run test:mcp:live
 bun run test:model:live
+bun test tests/release
+bun run release:build
+bun run release:verify
+bun run release:gate:foundation
+bun run release:smoke:execution
 bun run typecheck
 bun run check:core-boundary
 bun run check:compaction-legacy

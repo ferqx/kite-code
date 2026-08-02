@@ -15,8 +15,11 @@ Task 1B.5 已以 `e6e0ffb51115c3380a1dcc340dd1627b3bdd0970` 的全绿 Required/P
 证据与独立复核完成。Task 1B.6–1B.8 已绑定到 `e23b81b1087a7cdea5f4d9c5d419f5d040b67702`
 并完成本地实现与定向验证，保持 `in_progress` 等待路线图约定的最终整体 Review；其中 foreground
 Headless CLI writer 按 D-09 保持只读，remote HTTP MCP 只完成强制 transport 基础设施，local
-stdio 与缺少 App receipt controller 的 production TUI 均保持关闭。1B.9 仍等待 2A.0 与最终
-platform/adversarial artifact conformance，因此不产生 `MS:1B-DONE`。既有完成证据见
+stdio 与缺少 App receipt controller 的 production TUI 均保持关闭。1B.9 已完成本地 negative
+artifact conformance 实现：actual synthetic bundle 经过 bootstrap verifier，三平台 support target
+继续显式 `excluded`，八类 adversarial contract 为 `excluded_not_admitted`。它仍等待路线图约定的
+最终整体 Review 与默认分支三平台 workflow artifact，因此保持 `in_progress`，不产生
+`MS:1B-DONE`。既有完成证据见
 [Task 1B.1 完成记录](../execution/completed/2026-07-31-agent-production-execution-boundary.md)与
 [Task 1B.2/1B.3 完成记录](../execution/completed/2026-08-01-agent-production-platform-exclusions.md)、
 [Task 1B.4 完成记录](../execution/completed/2026-08-01-agent-production-network-boundary.md)与

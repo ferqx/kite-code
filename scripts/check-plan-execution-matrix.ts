@@ -749,9 +749,9 @@ const phase1ExecutionPlanIndexRow = plansIndex
   );
 if (
   !phase1ExecutionPlanIndexRow?.includes('Task 1B.0–1B.5 completed') ||
-  !phase1ExecutionPlanIndexRow.includes('1B.6–1B.8 本地实现/定向验证收敛') ||
-  !phase1ExecutionPlanIndexRow.includes('保持 `in_progress` 等待最终整体 Review') ||
-  !phase1ExecutionPlanIndexRow.includes('1B.9 等待 2A.0/conformance') ||
+  !phase1ExecutionPlanIndexRow.includes('1B.6–1B.9 本地实现/定向验证收敛') ||
+  !phase1ExecutionPlanIndexRow.includes('保持 `in_progress`，等待最终整体 Review') ||
+  !phase1ExecutionPlanIndexRow.includes('1B.9 另等默认分支三平台 artifact') ||
   !phase1ExecutionPlanIndexRow.includes(
     '../execution/completed/2026-08-01-agent-production-protected-path.md',
   )
@@ -805,7 +805,9 @@ if (
   !/1B\.2\/1B\.3 的完成结论是\s+三平台候选均明确 `excluded`/.test(roadmap) ||
   !/1B\.0–1B\.5 与 1C\.1–1C\.8 已完成/.test(roadmap) ||
   !/1B\.6–1B\.8 已完成本地实现和\s+定向验证并保持 `in_progress`/.test(roadmap) ||
-  !/1B\.9 仍等待 2A\.0 和正式 conformance/.test(roadmap) ||
+  !/1B\.9 已完成本地 negative\s+conformance，仍等待默认分支三平台 workflow artifact 与最终整体 Review/.test(
+    roadmap,
+  ) ||
   !/Task 1C\.8 唯一产生 `MS:1C-DONE`/.test(roadmap) ||
   !/该 milestone 不生成\s+production artifact/.test(roadmap)
 ) {

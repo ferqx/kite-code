@@ -10,7 +10,7 @@ bun run agent resume --thread <thread-id>
 bun run agent trace <events.jsonl> --turn 1
 ```
 
-CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。CLI 不能把 release-controlled `executionBoundaryV1` 或 `networkBoundaryV1` 打开，只能用显式 false 收紧。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
+CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；普通开发入口显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundaryV1`、`networkBoundaryV1` 或 `releaseProfileV1` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions` 与 `/release`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
 
 ## 9.2 Interaction mode
 
@@ -115,8 +115,8 @@ Engine/Lifecycle 迁移由注册表中的 feature flags 控制。Flag 关闭时�
 ToolSpec Registry 的六个计算原语已按 ADR-0027 完成单路径切换；旧迁移 flag 未接入运行时并已删除，不再接受 `toolSpecRegistryV1` 配置。
 
 生产治理的 `sessionLoggingPolicyV1`、`providerDataPolicyV1`、`remoteMcpEgressPolicyV1`、`resourceBudgetV1`、
-`boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1` 和
-`networkBoundaryV1` 均默认关闭。Logger flag 开启时 Runtime 只写
+`boundedCancellationV1`、`terminalOutcomeV1`、`executionBoundaryV1`、
+`networkBoundaryV1` 和 `releaseProfileV1` 均默认关闭。Logger flag 开启时 Runtime 只写
 显式 allowlist metadata，关闭时不创建日志目录。Provider flag 启用后从固定 release asset
 加载并校验 revision/digest，所有普通模型、压缩、Sub-agent 和 reviewer dispatch 共用最终
 gate；当前
@@ -126,6 +126,11 @@ deadline、统一 AbortSignal 与进程树清理；Resource 开启但该 flag �
 child capability。Terminal flag 只控制 CLI 派生 presentation，原始结构化 outcome 始终保留，
 不能把 unknown/blocked/budget/saturation 回退成普通完成。单独启用任一 flag 都不授予
 production 资格。
+
+`releaseProfileV1` 还要求独立的 artifact authority；user/project/CLI 的 true 不能创建该 authority。
+当前 embedded profile 是 non-distributable foundation fixture，D-04 production 支持集为空，因此
+所有 production profile 都拒绝。Release status 不显示完整 profile、credential、Workspace path、
+route 名称或 cohort identity。
 
 `networkBoundaryV1` 关闭时 production network 收紧为 off，不能恢复旧 `allow_all`。开启时只
 使密封 boundary 内的 `web_fetch` 获得逐 invocation DNS/redirect/endpoint admission；Shell/Skill

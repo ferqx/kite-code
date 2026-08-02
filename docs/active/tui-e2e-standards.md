@@ -188,6 +188,8 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
     `sandbox-mode` 中 `/permissions` 无参数场景只证明开发 composition 显示 production boundary
     `not admitted`，带参数场景只证明 sandbox 关闭时 Full 不可选；两者都不是 native sandbox、
     release admission 或 production platform qualification 证据。
+    同一 scenario 的 `/release` 只证明普通开发入口显示 `artifact_disabled`，不代表 embedded
+    profile、Sigstore、artifact attestation、平台制品或任一 production Gate 已通过。
 18. 远程 HTTP MCP 正文调用不得沿用旧的隐式外发前置条件。验证默认边界时使用生产 TUI
     组合根，并断言 `remoteMcpEgressPolicyV1=false` 产生零 `tools/call` 请求；验证认证恢复、
     失败隔离等需要成功外发的其他主题时，场景必须在同一个 Bun test 内显式开启该 flag，

@@ -43,10 +43,14 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   route 集合也为空。
 - 1B.0–1B.5 与 1C.1–1C.8 已完成；D-04 以空支持集关闭。1B.2/1B.3 的完成结论是
   三平台候选均明确 `excluded`，不产生 production qualification；1B.6–1B.8 已完成本地实现和
-  定向验证并保持 `in_progress`，等待约定的最终整体 Review。1B.9 仍等待 2A.0 和正式 conformance。
+  定向验证并保持 `in_progress`，等待约定的最终整体 Review。1B.9 已完成本地 negative
+  conformance，仍等待默认分支三平台 workflow artifact 与最终整体 Review。
 - Phase 1C 已由默认分支 [Ubuntu qualification run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064)
   的正式 artifact 与独立 verifier 收口；Task 1C.8 唯一产生 `MS:1C-DONE`。该 milestone 不生成
   production artifact，其他后续 milestone 仍为 pending。
+- D-06 已按 ADR-0062 关闭；2A.0–2A.7 Release Contract Foundation 已完成本地实现和 synthetic
+  Gate replay，保持 `in_progress` 等待本批恢复点 commit 后正式产生 `MS:2A-F`。该结果不包含
+  G2–G5、真实 signing/attestation、production platform、RC 或 external release 结论。
 
 ## 首发支持边界
 

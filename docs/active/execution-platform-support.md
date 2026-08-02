@@ -151,3 +151,10 @@ CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enab
 canonical digest。静态 support matrix 当前为 `accepted_empty_support_set`。任一 backend、
 profile、composition root、runner image 或边界实现变化都需要新 evidence；只有新的追加 ADR
 与独立 release gate 才能加入非空生产支持项。
+
+`scripts/release/execution-boundary-smoke.ts` 与
+`.github/workflows/execution-boundary-conformance.yml` 把当前空支持集带入 actual synthetic artifact
+smoke：三个 target 只能输出 `excluded`，八类 adversarial contract 只能输出
+`excluded_not_admitted`，report 固定 `productionSupported=false`、supported count=0、
+`distributable=false`。这是一条负向 conformance 路径；三平台默认分支 artifact 未实际产生前，
+不得完成 1B.9 或产生 `MS:1B-DONE`。

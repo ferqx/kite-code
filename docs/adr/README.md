@@ -63,3 +63,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0059](0059-optional-disable-only-signed-rollout.md)   | accepted   | 远程 rollout manifest 可选且只能签名降级                                           |
 | [0060](0060-single-maintainer-release-governance.md)   | accepted   | 单人维护模式以 external release 前第三方安全评审替代 Phase 0 双人签署               |
 | [0061](0061-production-platform-capability-admission.md) | accepted | 生产平台能力必须由原生探针逐项准入，当前支持集合为空                              |
+| [0062](0062-keyless-release-signing-and-github-hosting.md) | accepted | 开源发布使用 GitHub OIDC、keyless Sigstore 与 GitHub Releases；private 阶段仅 synthetic |

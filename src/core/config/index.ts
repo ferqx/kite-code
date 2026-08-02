@@ -113,6 +113,53 @@ export {
   workspaceDataLabelV1Schema,
 } from './provider-data-policy';
 export type {
+  CapabilityMaturity,
+  CapabilityReleaseState,
+  ReleaseCapability,
+  RolloutStage,
+} from './release-capabilities';
+export {
+  CAPABILITY_MATURITIES,
+  CAPABILITY_MATURITY_RANK,
+  capabilityMaturitySchema,
+  capabilityReleaseStateSchema,
+  isCapabilityReleaseStateValid,
+  parseCapabilityReleaseState,
+  RELEASE_CAPABILITIES,
+  ROLLOUT_STAGE_RANK,
+  ROLLOUT_STAGES,
+  releaseCapabilitySchema,
+  rolloutStageSchema,
+} from './release-capabilities';
+export type {
+  EmbeddedReleaseProfileIdV1,
+  ReleaseChannelV1,
+  ReleaseProfileApprovalRequirementV1,
+  ReleaseProfileV1,
+  ReleaseProfileVerificationRequirementV1,
+} from './release-profile';
+export {
+  admitEmbeddedReleaseProfileV1,
+  EMBEDDED_RELEASE_PROFILES_V1,
+  ProductionReleaseProfileAdmissionError,
+  parseReleaseProfileV1,
+  RELEASE_PROFILE_VERSION,
+  releaseCapabilityStatesSchema,
+  releaseProfileV1Schema,
+  SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1,
+} from './release-profile';
+export type {
+  ReleaseProfileRestrictionLayerV1,
+  ReleaseProfileRestrictionSourceV1,
+  ReleaseProfileRestrictionV1,
+} from './release-profile-composer';
+export {
+  composeReleaseProfileV1,
+  ReleaseProfileEscalationError,
+  releaseProfileRestrictionLayerV1Schema,
+  releaseProfileRestrictionV1Schema,
+} from './release-profile-composer';
+export type {
   SessionLoggingMode,
   SessionLoggingPolicyTightening,
   SessionLoggingPolicyV1,
@@ -210,6 +257,7 @@ const featuresSchema = z
     boundedCancellationV1: z.boolean().optional(),
     executionBoundaryV1: z.boolean().optional(),
     networkBoundaryV1: z.boolean().optional(),
+    releaseProfileV1: z.boolean().optional(),
   })
   .strict()
   .optional();

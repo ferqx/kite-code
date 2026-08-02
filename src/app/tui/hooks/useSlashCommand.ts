@@ -14,6 +14,7 @@ export type SlashAction =
   | { type: 'sessions'; id?: string }
   | { type: 'plan'; task?: string }
   | { type: 'permissions'; mode?: string }
+  | { type: 'release' }
   | { type: 'clear' }
   | { type: 'help' }
   | { type: 'new' }
@@ -45,6 +46,8 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'plan', task: arg || undefined };
     case 'permissions':
       return { type: 'permissions', mode: arg || undefined };
+    case 'release':
+      return args.length === 0 ? { type: 'release' } : { type: 'unknown', raw: input };
     case 'clear':
     case 'c':
       return { type: 'clear' };
@@ -101,6 +104,7 @@ export function useSlashCommand(
   onContext?: () => void,
   onCompactReset?: () => void,
   executionStatusText?: string,
+  releaseStatusText?: string,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -170,6 +174,9 @@ export function useSlashCommand(
           dispatch({ type: 'SET_INTERACTION_MODE', mode: admission.mode });
           break;
         }
+        case 'release':
+          if (releaseStatusText) dispatch({ type: 'LOCAL_TEXT', text: releaseStatusText });
+          break;
         case 'clear':
           dispatch({ type: 'CLEAR_OUTPUT' });
           break;
@@ -246,6 +253,7 @@ export function useSlashCommand(
       onContext,
       onCompactReset,
       executionStatusText,
+      releaseStatusText,
     ],
   );
 }

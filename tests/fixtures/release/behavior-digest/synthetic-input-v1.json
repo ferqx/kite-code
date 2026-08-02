@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "inputClass": "synthetic_non_production",
+  "components": {
+    "agentSystemContract": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.agent-system-contract.v1",
+      "canonicalInput": {
+        "agentContract": { "terminalStates": ["completed", "blocked", "failed"] },
+        "systemPrompt": "Synthetic prompt for canonicalizer qualification only.\n"
+      }
+    },
+    "askUserContract": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.ask-user-contract.v1",
+      "canonicalInput": {
+        "rejection": "unknown_fields_fail_closed",
+        "schema": {
+          "required": ["questions"],
+          "questions": { "minItems": 1, "maxItems": 3 },
+          "additionalProperties": false
+        }
+      }
+    },
+    "compactionPolicy": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.compaction-policy.v1",
+      "canonicalInput": {
+        "summaryPrompt": "Synthetic summary policy.\nPreserve unsettled effects.",
+        "thresholds": { "warningRatio": 0.7, "compactRatio": 0.8, "hardRatio": 0.9 }
+      }
+    },
+    "toolRegistry": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.model-visible-tool-registry.v1",
+      "canonicalInput": {
+        "tools": [
+          {
+            "name": "read_file",
+            "schema": { "type": "object", "required": ["path"] },
+            "effects": { "filesystem": "read", "network": "none", "externalState": "none" }
+          },
+          {
+            "name": "ask_user",
+            "schema": { "type": "object", "required": ["questions"] },
+            "effects": { "filesystem": "none", "network": "none", "externalState": "none" }
+          }
+        ]
+      }
+    },
+    "runtimeSchedulingPolicy": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.runtime-scheduling-policy.v1",
+      "canonicalInput": {
+        "version": 1,
+        "parallelRead": {
+          "allowlist": ["read_file", "search_files"],
+          "ceiling": 4,
+          "barrier": "interaction_write_or_unknown"
+        },
+        "shellOverlap": {
+          "scope": "same_task_and_model_message",
+          "approval": "per_invocation",
+          "rejection": "stop_undispatched_siblings"
+        },
+        "concurrencyAdmission": {
+          "queue": "fifo_per_resource",
+          "compoundPermits": "atomic_all_or_none",
+          "deadline": "min_wait_deadline_and_run_deadline",
+          "permits": ["tool", "shell_invocation"]
+        },
+        "lateEventPolicy": "diagnostic_or_reconciliation_only"
+      }
+    },
+    "skillsContracts": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.builtin-skills-contracts.v1",
+      "canonicalInput": {
+        "skills": [
+          {
+            "name": "synthetic-readonly",
+            "description": "Synthetic fixture; not a production skill.",
+            "capabilities": ["builtin:read_file"],
+            "outputSchema": { "type": "object" }
+          }
+        ]
+      }
+    },
+    "defaultConfiguration": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.default-configuration.v1",
+      "canonicalInput": {
+        "features": { "productionRelease": false, "networkBoundaryV1": false },
+        "budgets": { "maxTurns": 30, "maxToolInvocations": 250 },
+        "permissions": { "filesystem": "workspace", "network": "off" },
+        "config": { "approvalMode": "default" }
+      }
+    },
+    "providerDataPolicy": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.provider-data-policy-bundle.v1",
+      "canonicalInput": {
+        "version": 1,
+        "decisionId": "D-14",
+        "revision": "synthetic-none",
+        "policies": []
+      }
+    },
+    "releaseProfile": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.release-profile.v1",
+      "canonicalInput": {
+        "version": 1,
+        "profile": "limited",
+        "productionSupportSet": [],
+        "capabilities": { "remoteMcp": false, "skills": false }
+      }
+    },
+    "gatePolicy": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.release-gate-policy.v1",
+      "canonicalInput": {
+        "version": 1,
+        "unknownEvidence": "blocked",
+        "requiredGates": ["G0", "G1"]
+      }
+    },
+    "buildRecipe": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.build-recipe.v1",
+      "canonicalInput": {
+        "packageDefaultTest": "bun run scripts/run-default-tests.ts",
+        "runnerSource": "// synthetic runner\nrunMain();\nrunIsolated();\n",
+        "processIsolatedTests": [
+          "tests/runtime/capability-artifacts.test.ts",
+          "tests/runtime/plan-artifacts.test.ts"
+        ]
+      }
+    },
+    "lockfile": {
+      "schemaVersion": 1,
+      "inputIdentity": "kite.bun-lockfile.v1",
+      "canonicalInput": {
+        "format": "bun.lock/jsonc-parsed-v1",
+        "resolved": { "dependencies": { "zod": "4.3.6" } },
+        "source": "{\n  synthetic: true\n}\n"
+      }
+    }
+  }
+}

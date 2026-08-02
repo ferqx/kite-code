@@ -203,6 +203,27 @@
       ]
     },
     {
+      "id": "release-control",
+      "sources": [
+        "scripts/release/**",
+        "src/core/config/release-*.ts",
+        "src/app/release/**",
+        "tests/release/**",
+        "tests/fixtures/release/**",
+        "release/platform-capabilities/**",
+        ".github/workflows/execution-boundary-conformance.yml"
+      ],
+      "documents": [
+        "docs/active/release-control.md",
+        "docs/active/feature-flags.md",
+        "docs/active/execution-platform-support.md",
+        "docs/book/09-CLI模式与配置.md",
+        "docs/book/12-测试体系.md",
+        "docs/adr/0062-keyless-release-signing-and-github-hosting.md",
+        "README.md"
+      ]
+    },
+    {
       "id": "model-and-context",
       "sources": [
         "src/core/model/**",

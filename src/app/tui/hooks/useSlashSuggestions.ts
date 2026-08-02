@@ -29,6 +29,7 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
     args: '[custom summarization instructions]',
   },
   { name: 'permissions', aliases: [], description: 'Set permissions', args: 'ask|auto|full' },
+  { name: 'release', aliases: [], description: 'Show release profile and Gate status' },
   {
     name: 'mcp',
     aliases: [],

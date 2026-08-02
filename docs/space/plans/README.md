@@ -63,7 +63,8 @@ raw candidate artifact、明确 `excluded` 负向结论、D-04 空支持集不�
 ratchet 锁定 shared evaluator、Registry/Harness/Sub-agent/native projection evidence、最终独立
 复核、空支持集、完成记录以及 Revision 18 当时 1B.6/1B.8 仅 ready 未绑定的历史边界；Revision 20
 进一步锁定 1B.6–1B.8 的 `in_progress` binding、本地定向证据、D-09 Headless 只读与 MCP 负向
-开放边界，但在最终整体 Review 前不把这些 Task 或 `MS:1B-DONE` 写成完成；1C.5 completion
+开放边界；Revision 22 再锁定 1B.9 的本地 negative conformance 与默认分支三平台 artifact 等待项，
+但在最终整体 Review 前不把 1B.6–1B.9 或 `MS:1B-DONE` 写成完成；1C.5 completion
 ratchet 则锁定激活基线、实现与 qualification commit、全绿 CI、execution binding、完成记录及
 1C.7 激活历史；1C closure ratchet 进一步锁定默认分支 Ubuntu run 的 source identity、正式 artifact、
 7 case/56 probe、资源样本、72 条 actual Runtime ledger receipt、零 orphan/residual、canonical
