@@ -43,3 +43,13 @@ Required CI 固定分为 `quality`、`unit`、`compaction-contract`、`runtime-e
 7. 完成记录应注明 provider、模型、日期、网络条件和实际运行命令。
 
 真实套件不存在或未运行时，只能报告本地 mock/contract 验证结果。
+
+`tests/evals/agent-tasks/` 当前同样属于本地 synthetic contract。D-07 未批准时 suite registry、重复次数、
+真实 route 和阈值保持 unconfigured；nightly dry-run 零 network dispatch，Evidence adapter 只有 blocked
+结果。它即使覆盖 adversarial、human-review schema 和统计重建，也不能表述为真实 Provider、产品用户或
+正式 Agent task benchmark 已运行。
+
+`tests/evals/compaction/` 也只验证 synthetic schema/matcher/blocked Gate。semantic score、uncertainty、
+continuation non-inferiority 和 route qualification 都保持 unconfigured/not_observed。只有显式 opt-in
+live runner 绑定真实 Provider route、artifact、suite/scorer 和 freshness 后，才可作为 Phase 4 evidence；
+本地 4.9 blocked adapter 不产生 internal rollout milestone。

@@ -32,6 +32,7 @@ describe('feature flags', () => {
     expect(getFeatureFlags().terminalOutcomeV1).toBe(false);
     expect(getFeatureFlags().executionBoundaryV1).toBe(false);
     expect(getFeatureFlags().networkBoundaryV1).toBe(false);
+    expect(getFeatureFlags().observabilityMetricsV1).toBe(false);
     expect(
       getFeatureFlags({ features: { boundedCancellationV1: true } }).boundedCancellationV1,
     ).toBe(true);
@@ -93,6 +94,13 @@ describe('feature flags', () => {
     expect(parseArgs(['run', '--feature', 'networkBoundaryV1=false']).featureOverrides).toEqual({
       networkBoundaryV1: false,
     });
+    expect(() => parseArgs(['run', '--feature', 'observabilityMetricsV1=true'])).toThrow(
+      'release-controlled',
+    );
+    expect(
+      parseArgs(['run', '--feature', 'observabilityMetricsV1=false']).featureOverrides,
+    ).toEqual({ observabilityMetricsV1: false });
+    expect(parseArgs(['run', '--telemetry-status']).telemetryStatus).toBe(true);
   });
 
   test('keeps the legacy reviewer timeout until autoReviewV2 is enabled', () => {

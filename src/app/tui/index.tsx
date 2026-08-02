@@ -3,6 +3,7 @@ import React from 'react';
 import {
   type AgentConfig,
   type ConfigProbeResult,
+  getFeatureFlags,
   loadAgentConfig,
   loadColorPreset,
   loadTheme,
@@ -17,6 +18,8 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
 import type { AgentPhase } from '../../protocol/events.js';
+import { resolveTelemetryConsentV1 } from '../observability/consent';
+import { formatObservabilityStatusV1, projectObservabilityStatusV1 } from '../observability/status';
 import { resolveReleaseCompositionV1 } from '../release/composition-root';
 import {
   formatExecutionStatusV1,
@@ -273,6 +276,21 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     });
     return formatReleaseStatusV1(projectReleaseStatusV1({ composition, executionStatus }));
   }, [config, sandboxRuntime]);
+  const telemetryStatusText = React.useMemo(() => {
+    const consent = resolveTelemetryConsentV1({
+      releaseChannel: 'development',
+      user: config.telemetry?.user,
+      project: config.telemetry?.project,
+    });
+    return formatObservabilityStatusV1(
+      projectObservabilityStatusV1({
+        artifactTelemetryAllowed: false,
+        featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
+        consent,
+        remoteExporterConfigured: false,
+      }),
+    );
+  }, [config]);
 
   // Reset conversation history and thread on new session
   React.useEffect(() => {
@@ -783,6 +801,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     },
     executionStatusText,
     releaseStatusText,
+    telemetryStatusText,
   );
 
   // Stable reference — avoids re-creating the object on every render and causing

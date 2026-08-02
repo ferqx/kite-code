@@ -48,3 +48,11 @@ stateDiagram-v2
 - compensation 只有在用户结构化请求后执行。Compensation 成功不等于原结果已验证，仍须 replan/reverify 或用户 waive。
 
 验证命令与 compensation 通过既有 Shell executor 执行并关闭网络；相对 cwd 必须位于 workspace。Skill 的声明脚本位于 workspace 外时会 fail closed 为 `inconclusive`。
+
+## Release Track 边界
+
+Verification release profile 当前为 `under_development/off`。Profile 文本不能自证 feature、依赖或
+证据；admission 使用实际 resolved flag、dependency revision、platform、evidence age 和 G3/G4/G5
+outcome。Agent final、Runtime terminal、Plan completed、checks executed 与 Verification outcome 分开
+投影；failed、inconclusive、repair pending、budget exhausted 或 compensated 不能显示为 passed。
+本地 completion/lifecycle conformance 不是 internal dogfood、canary 或 maturity evidence。

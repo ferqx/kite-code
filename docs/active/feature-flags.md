@@ -29,6 +29,13 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | `executionBoundaryV1` | `false` | 允许 composition root 消费 release-pinned `ExecutionBoundaryV1`；开启本身不产生平台资格或边界 artifact |
 | `networkBoundaryV1` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
 | `releaseProfileV1` | `false` | 请求使用 artifact-pinned Release Profile；没有独立 artifact authority 时 true 不生效且 CLI 拒绝抬高 |
+| `observabilityMetricsV1` | `false` | 允许 artifact-authorized、用户已 consent 的无正文 metric exporter；普通 CLI 只能设为 false |
+
+Phase 5 的 `verificationV1`、`mcpExecutionRecordV1`、`mcpProviderActionV1`、
+`skillActivationV2` 与 `skillWorkflowV1` 也全部默认关闭。Release admission 不接受 profile 自报开关：
+它验证实际 resolved flags，MCP write 同时要求两个 MCP flag 与 Verification，Skill 同时要求
+activation/workflow，并继续检查 dependency revision、route/platform 和实际 G3–G5 freshness。
+当前四条 capability profile 全部 `under_development/off`。
 
 `providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
 前者仍要求批准 registry/gate，且当前 route 集合为空；后者只允许新 run 建立 limited preset
@@ -76,6 +83,11 @@ authority、embedded profile 和 deny-wins rollout/restriction layers；project/
 所以即使 foundation fixture 同时打开 artifact/rollout，production profile 仍以
 `production_support_set_empty` 拒绝；internal fixture 的 capability、预算、route、logging 和
 telemetry 也全部关闭。
+
+`observabilityMetricsV1` 不是 remote telemetry 的单一授权。有效 exporter 同时要求 release artifact
+明确允许、flag=true、用户 consent 有效和 exporter 已配置；project 配置只能关闭。普通 CLI 的
+`--feature observabilityMetricsV1=true` 会拒绝，false 只收紧。关闭时注入 no-op reporter，不回退到
+历史通用 OTel serializer，也不创建磁盘 spool。
 
 上下文压缩的 flag 术语（功能开关）真值如下：
 

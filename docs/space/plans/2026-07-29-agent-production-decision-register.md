@@ -82,7 +82,9 @@
 - default: remote telemetry=`off`；没有预注册且可观测的 SLO 数据时 external canary 保持 blocked
 - decision: 尚未决定 external canary 是否强制匿名结构化 telemetry
 - evidence: [Phase 3 计划](2026-07-29-agent-production-observability-operations.md)；
-  [ADR-0056](../../adr/0056-metadata-first-data-boundaries.md)
+  [ADR-0056](../../adr/0056-metadata-first-data-boundaries.md)；
+  [ADR-0063](../../adr/0063-no-content-observability-and-single-maintainer-operations.md)；本地实现仅
+  `artifact_disabled`/no-op、baseline unconfigured 与 synthetic G4=`not_run`
 - approvedAt: `null`
 
 ### D-04
@@ -151,7 +153,8 @@
 - default: 未预注册人群、任务、重复次数和阈值时所有产品 Gate 为 unknown/blocked
 - decision: benchmark 人群、任务集、重复次数与成功阈值待 baseline
 - evidence: [Phase 2B 计划](2026-07-29-agent-production-evaluation.md)；
-  [ADR-0058](../../adr/0058-agent-task-product-acceptance.md)
+  [ADR-0058](../../adr/0058-agent-task-product-acceptance.md)；2B.1–2B.9 本地 contract 34 pass，
+  live/human/formal adversarial evidence 全部 `not_observed`
 - approvedAt: `null`
 
 ### D-08
@@ -190,16 +193,24 @@
 
 ### D-10
 
-- status: `open`
+- status: `closed`
 - owner: `github:@ferqx`（Capability + Security & Privacy）
 - backup: `none (single-maintainer)`
 - dueMilestone: `MS:LIMITED-SLO`
 - blockingPhase: `Phase 5`
 - default: `skills_readonly` 和 `skills_effectful` 均为 `off`；未知 effect/provenance 一律归
   effectful 且不得执行
-- decision: 精确 effects/provenance classifier 待 Phase 5 conformance
-- evidence: [Phase 5 计划](2026-07-29-agent-production-capability-rollout.md)
-- approvedAt: `null`
+- decision: 只有自身和全部 dependency 的 effective effects 均明确为 `none|read`，且来源满足
+  builtin/admin allowlist 或受信任 Workspace 的 project provenance 时才归 `skills_readonly`。
+  write、destructive、unknown、解析失败、dependency/revision drift 一律归
+  `skills_effectful` 并保持 off；manifest/allowed-tools 只表达 ceiling，不构成预批准。
+  effectful Skill 必须 required Verification。Capability admission 还必须同时验证全部 feature
+  flags、dependency revision、route/platform、实际 evidence freshness 与 G3/G4/G5；任一缺失、
+  unknown、stale 或 failed 均 blocked
+- evidence: [Phase 5 计划](2026-07-29-agent-production-capability-rollout.md)；
+  [ADR-0064](../../adr/0064-conservative-skill-effects-and-capability-profile-admission.md)；
+  `tests/skills/effect-classification.test.ts`、`tests/release/capability-profile.test.ts`
+- approvedAt: `2026-08-02`
 
 ### D-11
 
@@ -312,17 +323,19 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 1C.6 | `github:@ferqx` | `2e1a2721b1c7e3c17a483a3d33bcd503a6a777ee` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-07-31` |
 | 1C.7 | `github:@ferqx` | `dfd8f209f89b4980b9c3905d3e73c166b33bea2b` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-08-01` |
 | 1C.8 | `github:@ferqx` | `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md` | `2026-08-02` |
-| 2A.0 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
-| 2A.1 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
-| 2A.2 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
-| 2A.3 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
-| 2A.4 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
-| 2A.5 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
-| 2A.6 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
-| 2A.7 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 implementation/Gate 已通过；等待本批恢复点 commit 后写 completion ratchet | — | `2026-08-02` |
+| 2A.0 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
+| 2A.1 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
+| 2A.2 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
+| 2A.3 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
+| 2A.4 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
+| 2A.5 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
+| 2A.6 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
+| 2A.7 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
+| 2A.8 | `github:@ferqx` | `2e98681c800a2f1f745bc18e41ac682d9c09e84b` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 supply-chain/platform contract 已通过；D-04 支持集为空，等待真实 audit、签名、provenance、actual artifact 与三平台 evidence | — | `2026-08-02` |
+| 5.1 | `github:@ferqx` | `2e98681c800a2f1f745bc18e41ac682d9c09e84b` | `codex/agent-production-readiness-docs` | `in_progress` | D-10 已关闭且本地 Capability Profile/Gate contract 已通过；等待最终整体 Review，所有 capability 仍 off | — | `2026-08-02` |
 
-除已完成的 1A.1–1A.7、1B.0–1B.5、1C.1–1C.8 与已绑定 `in_progress` 的
-1B.6–1B.9、2A.0–2A.7 外，
+除已完成的 1A.1–1A.7、1B.0–1B.5、1C.1–1C.8、2A.0–2A.7 与已绑定 `in_progress` 的
+1B.6–1B.9、2A.8、5.1 外，
 其他非 Phase 0 Task 尚未创建 execution binding。
 
 ## Revision history
@@ -351,3 +364,6 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 20 | 2026-08-02 | 激活 1B.6–1B.8 并完成本地实现/定向验证；按统一 Review 策略保持 `in_progress`，不产生 `MS:1B-DONE` | baseline `e23b81b1087a7cdea5f4d9c5d419f5d040b67702`；worktree controller 14 pass、MCP/边界组合 84 pass、status/config/CLI 22 pass、TUI sandbox-mode 2 pass；D-09 foreground Headless CLI writer 保持只读，local stdio 与无 App receipt controller 的 production TUI 保持关闭 |
 | 21 | 2026-08-02 | 用户批准 D-06：开源发布采用 GitHub OIDC/keyless Sigstore、artifact attestation 与 GitHub Releases；private 阶段仅 synthetic，正式 signing/release disabled | 用户直接批准、ADR-0062；canonical repository `ferqx/kite-code` / ID `R_kgDOSKbi8g`；D-04 空支持集与 ADR-0060 第三方安全评审门禁保持不变 |
 | 22 | 2026-08-02 | 激活 2A.0–2A.7 与 1B.9；本地 Release Contract Foundation、synthetic Gate replay 和 negative artifact conformance 收敛，等待恢复点/最终整体 Review/default-branch artifact 的各自 ratchet | baseline `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0`；release tests 53 pass、boundary/adversarial 90 pass、TUI `/release` 3 pass；foundation decision `approved_foundation` 仅 G0/G1，G2–G5=`not_applicable`；D-04 空支持集、真实 signing disabled、`MS:1B-DONE`/正式 `MS:2A-F` 均未产生 |
+| 23 | 2026-08-02 | 完成 2A.0–2A.7 Release Contract Foundation；Task 2A.7 唯一产生 `MS:2A-F`，解锁 2B/3 本地实施 | `2e98681c800a2f1f745bc18e41ac682d9c09e84b`、[完成记录](../execution/completed/2026-07-30-agent-production-release-control.md)；53 release tests、synthetic build/verify/bootstrap、foundation Gate replay 全绿；G2–G5 N/A、真实 signing/release disabled、D-04 空支持集与第三方安全评审硬门禁不变 |
+| 24 | 2026-08-02 | 完成本批 2A.8/2A.9、2B.1–2B.9、3.1–3.8/3.10 本地 fail-closed contract；仅依赖就绪的 2A.8 绑定 `in_progress`，不产生后续 milestone | supply-chain 12 pass、rollout 16 pass、Agent evaluation 34 pass、observability/operations 71 pass、TUI `/telemetry` 4 pass；D-03/D-07 open、`MS:1B-DONE` 缺失、D-04 空支持集；formal platform/adversarial/human/incident/SLO/signing evidence 均未伪造 |
+| 25 | 2026-08-02 | 关闭 D-10 并锁定 unknown/effect/dependency drift 的保守分类；完成 Phase 4/5/6 本地 fail-closed contract，只有 dependency-ready 的 5.1 绑定 `in_progress` | ADR-0064；compaction 41 pass、Phase 5 profile/Verification 27 pass、MCP write/Skills 38 pass、GA/auto/compatibility 9 pass；所有 profile/route/cohort 保持 off/empty/0，formal task/live/canary/maturity/GA/第三方评审 evidence 均未产生 |

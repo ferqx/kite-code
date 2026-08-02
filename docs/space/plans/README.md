@@ -73,6 +73,21 @@ digest、1C.7/1C.8 完成 binding 与 `MS:1C-DONE`。上述门禁在 Pull Reques
 `HEAD` 到达；squash/rebase 合入后的 push 仍校验记录字段，但不把被历史重写替换的原 SHA 强制
 当作新主干祖先。`bun run check:docs` 已包含该门禁。
 
+Revision 23 进一步锁定 D-06/ADR-0062、2A.0–2A.7 completed binding、真实恢复点、逐 Task 完成记录、
+53 个 release 测试与 foundation policy/evidence/decision digest；它只允许 Task 2A.7 产生
+`MS:2A-F`，并同时锁定 G2–G5 N/A、真实 signing/release disabled、D-04 空支持集和 production
+capability 全部 off/excluded，防止 synthetic fixture 被升级为 production release claim。
+
+Revision 24 锁定 2A.8、2A.9、2B.1–2B.9、3.1–3.8/3.10 的本地 fail-closed contract 与
+evidence-waiting 边界；只有依赖已满足的 2A.8 建立 `in_progress` binding。D-03/D-07、
+`MS:1B-DONE`、正式平台/供应链、human/adversarial/incident/SLO/signing evidence 缺失时，门禁
+禁止把本地 synthetic/blocked 测试升级为 Task completion 或后续 milestone。
+
+Revision 25 关闭 D-10 并锁定 Skill unknown/effect/dependency drift 的保守分类，同时锁定 Phase 4、
+Phase 5 与 Phase 6 的本地 schema/conformance/profile/selection/Gate contract。只有依赖已满足的 5.1
+建立 `in_progress` binding；route/profile/cohort 仍为 off/empty/0，formal task/live/canary/maturity/
+GA/第三方评审 evidence 缺失时不得完成后续 Task 或产生 stable/GA milestone。
+
 Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
 case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的
 正式资源证据已由手动 `Runtime Resilience Qualification` workflow 的 Ubuntu

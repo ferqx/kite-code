@@ -1,6 +1,6 @@
 # Agent 生产化 Phase 2B：Agent 任务评估与产品验收计划
 
-状态：draft
+状态：active
 创建：2026-07-29
 优先级：P0
 依赖：
@@ -9,6 +9,12 @@ Contract 依赖：
 [`Phase 2A Release Control`](2026-07-29-agent-production-release-control.md) 的 `2A-F`
 执行 fixture/adversarial 依赖：Phase 1B、1C；涉及真实 data route/human review 时再依赖 Phase 1A
 设计依据：RFC §10、§15.4、§16、§23.2
+
+2026-08-02：2B.1–2B.9 的本地 synthetic/blocked contract 已实现，定向 suite 34 pass；
+formal adversarial G0、human accepted/integrated/reverted 和 live route 全部保持 `not_observed`，
+Evidence adapter 只有 `blocked/not_green`。D-07 仍 open，`MS:1B-DONE` 也尚未产生，因此这些 Task
+不标记 completed、不产生 `MS:2B-DONE`；真实 suite、重复次数、阈值、route 与人工样本等待批准和
+外部运行。
 
 ## 目标
 

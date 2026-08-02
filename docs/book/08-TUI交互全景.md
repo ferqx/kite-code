@@ -42,6 +42,10 @@ Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可
 `artifact_disabled` 与 capability unavailable；该输出不启用 Release Profile，也不能作为
 Sigstore、平台 qualification 或 production Gate 证据。
 
+`/telemetry` 同样只读，显示 artifact authority、metrics flag、consent、endpoint policy、exporter
+和 disk-spool 状态，不显示 endpoint secret。普通开发 TUI 固定为 `artifact_disabled`，该命令不能
+开启 telemetry、授予 consent 或创建 exporter。
+
 ## 8.4 Session 与恢复点
 
 会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。

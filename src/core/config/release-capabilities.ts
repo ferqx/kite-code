@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { type FeatureFlagName, isFeatureFlagName } from './features';
 
 /** Stable release-governance capability identifiers. Do not reorder or rename. */
 export const RELEASE_CAPABILITIES = Object.freeze([
@@ -87,4 +88,245 @@ export type CapabilityReleaseState = z.infer<typeof capabilityReleaseStateSchema
 
 export function parseCapabilityReleaseState(value: unknown): CapabilityReleaseState {
   return capabilityReleaseStateSchema.parse(value);
+}
+
+export const CAPABILITY_PROFILE_VERSION_V1 = 1 as const;
+export const CAPABILITY_PROFILE_GATES_V1 = Object.freeze(['G3', 'G4', 'G5'] as const);
+
+const capabilityProfileIdentitySchema = z
+  .string()
+  .min(1)
+  .max(160)
+  .refine((value) => value === value.trim(), 'identities must not contain surrounding whitespace');
+const capabilityProfileSortedIdentityListSchema = z
+  .array(capabilityProfileIdentitySchema)
+  .max(64)
+  .superRefine((values, context) => {
+    const normalized = [...new Set(values)].sort(compareCapabilityIdentityV1);
+    if (
+      normalized.length !== values.length ||
+      normalized.some((value, index) => value !== values[index])
+    ) {
+      context.addIssue({
+        code: 'custom',
+        message: 'identity lists must be unique and sorted by code unit',
+      });
+    }
+  });
+
+const capabilityProfileDependencyV1Schema = z
+  .object({
+    dependencyId: capabilityProfileIdentitySchema,
+    expectedRevision: capabilityProfileIdentitySchema,
+  })
+  .strict();
+
+/**
+ * Capability-specific release ceiling. This is a contract, not evidence that
+ * the capability has passed an internal, canary, beta, or stable Gate.
+ */
+export const capabilityProfileV1Schema = z
+  .object({
+    schemaVersion: z.literal(CAPABILITY_PROFILE_VERSION_V1),
+    profileId: capabilityProfileIdentitySchema,
+    capability: releaseCapabilitySchema,
+    requiredFeatureFlags: capabilityProfileSortedIdentityListSchema.min(1),
+    state: capabilityReleaseStateSchema,
+    dependencies: z.array(capabilityProfileDependencyV1Schema).max(32),
+    routeAllowlist: capabilityProfileSortedIdentityListSchema,
+    platformAllowlist: capabilityProfileSortedIdentityListSchema,
+    evidence: z
+      .object({
+        freshnessSeconds: z.number().finite().int().nonnegative(),
+        requiredGates: z.tuple([
+          z.literal(CAPABILITY_PROFILE_GATES_V1[0]),
+          z.literal(CAPABILITY_PROFILE_GATES_V1[1]),
+          z.literal(CAPABILITY_PROFILE_GATES_V1[2]),
+        ]),
+      })
+      .strict(),
+    rollback: z
+      .object({
+        disableNewAdmission: z.literal(true),
+        preserveReceipts: z.literal(true),
+        preserveRequiredVerification: z.literal(true),
+        cohortPercent: z.literal(0),
+      })
+      .strict(),
+  })
+  .strict()
+  .superRefine((profile, context) => {
+    const dependencyIds = profile.dependencies.map(({ dependencyId }) => dependencyId);
+    const sorted = [...new Set(dependencyIds)].sort(compareCapabilityIdentityV1);
+    if (
+      sorted.length !== dependencyIds.length ||
+      sorted.some((dependencyId, index) => dependencyId !== dependencyIds[index])
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['dependencies'],
+        message: 'dependencies must be unique and sorted by dependencyId',
+      });
+    }
+    if (profile.state.maxRollout !== 'off') {
+      if (profile.platformAllowlist.length === 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['platformAllowlist'],
+          message: 'enabled capability profiles require an explicit platform allowlist',
+        });
+      }
+      if (profile.evidence.freshnessSeconds === 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['evidence', 'freshnessSeconds'],
+          message: 'enabled capability profiles require a non-zero evidence freshness window',
+        });
+      }
+      if (profile.capability === 'mcp_write' && profile.routeAllowlist.length === 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['routeAllowlist'],
+          message: 'enabled MCP write profiles require an explicit route allowlist',
+        });
+      }
+    }
+    for (const [index, featureFlag] of profile.requiredFeatureFlags.entries()) {
+      if (!isFeatureFlagName(featureFlag)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['requiredFeatureFlags', index],
+          message: `unknown feature flag ${featureFlag}`,
+        });
+      }
+    }
+  });
+
+export type CapabilityProfileV1 = z.infer<typeof capabilityProfileV1Schema>;
+
+export interface CapabilityProfileDependencyStateV1 {
+  status: 'ready' | 'blocked';
+  revision: string;
+}
+
+export type CapabilityProfileAdmissionReasonV1 =
+  | 'dependency_blocked'
+  | 'dependency_revision_mismatch'
+  | 'dependency_unknown'
+  | 'embedded_ceiling_off'
+  | 'evidence_stale'
+  | 'evidence_unknown'
+  | 'feature_disabled'
+  | 'feature_unknown'
+  | 'maturity_exceeds_embedded_ceiling'
+  | 'platform_not_admitted'
+  | 'platform_unknown'
+  | 'profile_rollout_off'
+  | 'rollout_exceeds_embedded_ceiling'
+  | 'required_gate_not_passed'
+  | 'route_not_admitted'
+  | 'route_unknown';
+
+export interface CapabilityProfileAdmissionDecisionV1 {
+  admitted: boolean;
+  capability: ReleaseCapability;
+  maturity: CapabilityMaturity;
+  rollout: RolloutStage;
+  reasons: readonly CapabilityProfileAdmissionReasonV1[];
+  unknownDependencies: readonly string[];
+}
+
+export function parseCapabilityProfileV1(value: unknown): CapabilityProfileV1 {
+  return capabilityProfileV1Schema.parse(value);
+}
+
+/**
+ * Admission is a pure intersection with the already admitted embedded
+ * ceiling. Missing dependency, platform, or route facts never become grants.
+ */
+export function evaluateCapabilityProfileAdmissionV1(input: {
+  profile: CapabilityProfileV1;
+  embeddedCeiling: CapabilityReleaseState;
+  features: Readonly<Partial<Record<FeatureFlagName, boolean>>>;
+  dependencies: Readonly<Record<string, CapabilityProfileDependencyStateV1 | undefined>>;
+  evidence?: {
+    ageSeconds: number;
+    gates: Readonly<
+      Record<(typeof CAPABILITY_PROFILE_GATES_V1)[number], 'passed' | 'failed' | 'not_observed'>
+    >;
+  };
+  platform?: string;
+  route?: string;
+}): CapabilityProfileAdmissionDecisionV1 {
+  const profile = parseCapabilityProfileV1(input.profile);
+  const ceiling = parseCapabilityReleaseState(input.embeddedCeiling);
+  const reasons = new Set<CapabilityProfileAdmissionReasonV1>();
+  const unknownDependencies: string[] = [];
+
+  for (const featureFlag of profile.requiredFeatureFlags as FeatureFlagName[]) {
+    const enabled = input.features[featureFlag];
+    if (enabled === undefined) reasons.add('feature_unknown');
+    else if (!enabled) reasons.add('feature_disabled');
+  }
+  if (profile.state.maxRollout === 'off') reasons.add('profile_rollout_off');
+  if (ceiling.maxRollout === 'off') reasons.add('embedded_ceiling_off');
+  if (
+    CAPABILITY_MATURITY_RANK[profile.state.maturity] > CAPABILITY_MATURITY_RANK[ceiling.maturity]
+  ) {
+    reasons.add('maturity_exceeds_embedded_ceiling');
+  }
+  if (ROLLOUT_STAGE_RANK[profile.state.maxRollout] > ROLLOUT_STAGE_RANK[ceiling.maxRollout]) {
+    reasons.add('rollout_exceeds_embedded_ceiling');
+  }
+  if (profile.state.maxRollout !== 'off') {
+    if (!input.evidence) reasons.add('evidence_unknown');
+    else {
+      if (
+        !Number.isFinite(input.evidence.ageSeconds) ||
+        input.evidence.ageSeconds < 0 ||
+        input.evidence.ageSeconds > profile.evidence.freshnessSeconds
+      ) {
+        reasons.add('evidence_stale');
+      }
+      if (profile.evidence.requiredGates.some((gate) => input.evidence?.gates[gate] !== 'passed')) {
+        reasons.add('required_gate_not_passed');
+      }
+    }
+  }
+
+  for (const dependency of profile.dependencies) {
+    const actual = input.dependencies[dependency.dependencyId];
+    if (!actual) {
+      reasons.add('dependency_unknown');
+      unknownDependencies.push(dependency.dependencyId);
+    } else if (actual.status !== 'ready') {
+      reasons.add('dependency_blocked');
+    } else if (actual.revision !== dependency.expectedRevision) {
+      reasons.add('dependency_revision_mismatch');
+    }
+  }
+
+  if (profile.platformAllowlist.length > 0) {
+    if (!input.platform) reasons.add('platform_unknown');
+    else if (!profile.platformAllowlist.includes(input.platform))
+      reasons.add('platform_not_admitted');
+  }
+  if (profile.routeAllowlist.length > 0) {
+    if (!input.route) reasons.add('route_unknown');
+    else if (!profile.routeAllowlist.includes(input.route)) reasons.add('route_not_admitted');
+  }
+
+  const normalizedReasons = [...reasons].sort(compareCapabilityIdentityV1);
+  return Object.freeze({
+    admitted: normalizedReasons.length === 0,
+    capability: profile.capability,
+    maturity: profile.state.maturity,
+    rollout: profile.state.maxRollout,
+    reasons: Object.freeze(normalizedReasons),
+    unknownDependencies: Object.freeze(unknownDependencies.sort(compareCapabilityIdentityV1)),
+  });
+}
+
+function compareCapabilityIdentityV1(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
 }

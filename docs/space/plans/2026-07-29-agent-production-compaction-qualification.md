@@ -32,6 +32,12 @@
 - 当前 live suite 不验证目标、约束、错误、验证、Plan 和下一步；
 - manual 默认 flag 当前为 true，但 limited profile 将由 2A ceiling 关闭。
 
+本批已提前落地 `tests/evals/compaction/` 的本地 schema、结构/replay、确定性 fact matcher、blind
+semantic contract、control/treatment、空 route registry、no-compaction handoff 与 blocked evidence
+adapter。结果全部为 synthetic/nonDistributable/evidenceEligible=false；由于 4.1 仍等待 2B.1 的正式
+完成，没有 Task execution binding，也不产生 route qualification、manual canary 或
+`MS:4-MANUAL-STABLE`。
+
 ## 主要改动范围
 
 - 新增 `tests/evals/compaction/`

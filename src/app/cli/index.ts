@@ -1,4 +1,9 @@
 import { resolve } from 'node:path';
+import { resolveTelemetryConsentV1 } from '@/app/observability/consent';
+import {
+  formatObservabilityStatusV1,
+  projectObservabilityStatusV1,
+} from '@/app/observability/status';
 import { resolveReleaseCompositionV1 } from '@/app/release/composition-root';
 import {
   formatExecutionStatusV1,
@@ -48,6 +53,7 @@ export interface ParsedArgs {
   traceFormat?: 'text' | 'json';
   executionStatus: boolean;
   releaseStatus: boolean;
+  telemetryStatus: boolean;
 }
 
 export async function main(): Promise<void> {
@@ -104,6 +110,24 @@ export async function main(): Promise<void> {
     enabled: args.sandbox && config.sandbox.enabled,
   });
   const executionStatus = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+  if (args.telemetryStatus) {
+    const consent = resolveTelemetryConsentV1({
+      releaseChannel: 'development',
+      user: config.telemetry?.user,
+      project: config.telemetry?.project,
+    });
+    console.log(
+      formatObservabilityStatusV1(
+        projectObservabilityStatusV1({
+          artifactTelemetryAllowed: false,
+          featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
+          consent,
+          remoteExporterConfigured: false,
+        }),
+      ),
+    );
+    return;
+  }
   if (args.releaseStatus) {
     const composition = resolveReleaseCompositionV1({
       config,
@@ -459,7 +483,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (
       override.executionBoundaryV1 === true ||
       override.networkBoundaryV1 === true ||
-      override.releaseProfileV1 === true
+      override.releaseProfileV1 === true ||
+      override.observabilityMetricsV1 === true
     ) {
       throw new Error(
         `Feature flag '${feature.split('=', 1)[0]}' is release-controlled and cannot be enabled by the CLI.`,
@@ -491,6 +516,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     traceFormat: optionalValue('--format') === 'json' ? 'json' : 'text',
     executionStatus: argv.includes('--execution-status'),
     releaseStatus: argv.includes('--release-status'),
+    telemetryStatus: argv.includes('--telemetry-status'),
   };
 }
 
@@ -562,6 +588,7 @@ Options:
   --feature <name[=bool]> Temporarily override a registered feature flag (repeatable)
   --execution-status     Print the effective production execution boundary and exit
   --release-status       Print the effective release profile and Gate status and exit
+  --telemetry-status     Print redacted telemetry consent/export status and exit
   --turn <n>             Limit trace output to a turn
   --format json          Emit a trace as JSON
   --approve              Approve tool call on resume

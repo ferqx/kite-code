@@ -48,9 +48,19 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
 - Phase 1C 已由默认分支 [Ubuntu qualification run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064)
   的正式 artifact 与独立 verifier 收口；Task 1C.8 唯一产生 `MS:1C-DONE`。该 milestone 不生成
   production artifact，其他后续 milestone 仍为 pending。
-- D-06 已按 ADR-0062 关闭；2A.0–2A.7 Release Contract Foundation 已完成本地实现和 synthetic
-  Gate replay，保持 `in_progress` 等待本批恢复点 commit 后正式产生 `MS:2A-F`。该结果不包含
-  G2–G5、真实 signing/attestation、production platform、RC 或 external release 结论。
+- D-06 已按 ADR-0062 关闭；2A.0–2A.7 Release Contract Foundation 已由
+  `2e98681c800a2f1f745bc18e41ac682d9c09e84b` 与
+  [完成记录](../execution/completed/2026-07-30-agent-production-release-control.md)收口，Task 2A.7
+  唯一产生 `MS:2A-F`。该结果不包含 G2–G5、真实 signing/attestation、production platform、RC
+  或 external release 结论。
+- 2A.8、2A.9、2B.1–2B.9、3.1–3.8/3.10 已完成各自本地 fail-closed contract，但只有 2A.8
+  满足形式依赖并绑定为 `in_progress`。D-07、D-03、`MS:1B-DONE`、正式平台/供应链、真实人工/
+  incident/SLO evidence 未满足；这些 Task 不标记 completed，`MS:2B-DONE`、`MS:3-OPS-READY`、
+  `MS:2A-RC` 和 `MS:LIMITED-SLO` 均未产生。
+- Phase 4–6 的本地 schema、conformance、profile、selection 与 Gate contract 已提前实现；D-10 已按
+  ADR-0064 关闭，只有形式依赖已满足的 5.1 绑定为 `in_progress`。其余 Task 保持未绑定，所有
+  route/profile/cohort 均 off/empty/0；本地 synthetic/blocked fixture 不产生 manual stable、能力
+  stable、GA、canary、maturity 或第三方评审 evidence。
 
 ## 首发支持边界
 

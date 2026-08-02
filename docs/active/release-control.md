@@ -71,3 +71,29 @@ contract fixture；命令本身不写计划 milestone。其 G0/G1 验证 canonic
 运行；其 outcome 是 `excluded_not_admitted`，不是平台支持。任何脚本、profile 或 support matrix
 出现非空 production support 都立即失败。默认分支三平台 workflow artifact 尚未产生前，1B.9
 保持 `in_progress`，`MS:1B-DONE` 不产生。
+
+## Supply chain 与 disable-only rollout 的当前边界
+
+`release-candidate.yml` 当前只有手动、无发布权限的 contract workflow；所有 Actions 固定 immutable
+commit，production signing job 永不运行。SBOM、provenance 与三平台 launcher smoke 只能生成或校验
+`nonDistributable=true` synthetic fixture；registry vulnerability/license audit、真实平台签名、实际制品
+smoke、OIDC Sigstore/attestation 和 GitHub Release 尚未发生。D-04 支持集为空，因此 2A.8 仍 blocked。
+
+disable-only rollout loader/cache 已实现严格 canonical/signature/identity/sequence/expiry/replay 与 0600、
+no-follow、atomic cache contract。fixture trust root 是公开 synthetic key，
+`realRolloutSigningEnabled=false`。远程 manifest 只能关闭能力、降低 cohort 和缩 allowlist，再由 profile
+composer 二次拒绝扩大；invalid/unavailable 回 embedded ceiling，mandatory admin 无有效 cache 时 denied。
+D-03 仍 open，真实 rollout service/signing 未启用，因此该实现不产生远程控制能力或 2A-RC evidence。
+
+## Phase 6 本地 Gate contract
+
+`release/ga-selection-v1.json` 当前 selected capability 为空，并显式把全部 15 个 Release Capability
+forced off。validator 要求每个 selected capability 绑定精确且 fresh 的 stable decision，并要求 selected/
+forced-off 对全集做无重叠分区。当前 GA Gate 因 `MS:LIM-APPROVED`、`MS:LIMITED-SLO`、
+`MS:2A-RC`、`MS:3-OPS-READY`、第三方安全评审、非空 production support set 与 stable selection
+全部缺失而 blocked；它不能 assemble 或 publish artifact。
+
+Auto Compaction admission contract 只校验 identity 和前置 Gate，输出 profile diff；评估自身固定零
+summary dispatch、零 checkpoint write。前置缺失时 `auto_compaction` 为 off/cohort 0。GA compatibility
+replay 只使用 `synthetic_contract_only` fixture，验证 transcript/Plan/Receipt/Verification/checkpoint
+事实不被删除、unknown external effect 不重放；`productionEvidence=false`，不能作为发布或观察证据。

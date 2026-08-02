@@ -44,3 +44,8 @@ inventory/resource 和动态 Tool 继续 fail closed。local stdio 在 native co
 MCP Resources 不进入 `tool_search`、session-loaded Tool set 或 turn-scoped binding。`list_mcp_resources` 与 `read_mcp_resource` 是稳定内置只读工具：前者从 Runtime Resource Directory 枚举静态 URI，后者只读取当前 discovery snapshot 中存在的 URI。Resource discovery 与 Tool progressive disclosure 保持独立。
 
 三类 MCP 暴露概念必须正交：Provider != Tool != Resource。任何一个为空不自动推出另外两个为空。
+
+Disclosure/search 仍只表示发现，不表示 release admission。Phase 5 profile 即使列出 capability，也必须
+重新验证实际 feature flags、dependency revision、embedded ceiling、route/platform allowlist 和实际
+G3/G4/G5 freshness；unknown/stale/failed 全部 blocked。当前 MCP write 与 Skills production route/
+profile 均为空或 off。

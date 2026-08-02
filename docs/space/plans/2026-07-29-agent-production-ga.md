@@ -10,6 +10,11 @@ framework，以及拟进入 GA profile capability 的独立 stable milestone
 共同依赖：`MS:LIM-APPROVED`、`MS:LIMITED-SLO`
 设计依据：RFC §8、§11.4、§16、§20 Phase 6
 
+2026-08-02：已提前实现 GA selection/blocked Gate、Auto admission 与 upgrade/rollback 的本地 strict
+contract。当前 selection 为空且全部 capability forced off；compatibility report 固定
+`synthetic_contract_only`/`productionEvidence=false`。本计划仍为 draft，6A/6B Task 均未激活或完成，
+所有 external milestone、真实 artifact、发布和观察前置保持缺失。
+
 ## 目标
 
 把 Phase 6 拆成两个解耦轨道：

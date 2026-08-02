@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "profileId": "skills-readonly-v1",
+  "capability": "skills_readonly",
+  "requiredFeatureFlags": ["skillActivationV2", "skillWorkflowV1"],
+  "state": {
+    "maturity": "under_development",
+    "maxRollout": "off"
+  },
+  "dependencies": [
+    {
+      "dependencyId": "runtime.skill-workflow",
+      "expectedRevision": "v1"
+    }
+  ],
+  "routeAllowlist": [],
+  "platformAllowlist": [],
+  "evidence": {
+    "freshnessSeconds": 0,
+    "requiredGates": ["G3", "G4", "G5"]
+  },
+  "rollback": {
+    "disableNewAdmission": true,
+    "preserveReceipts": true,
+    "preserveRequiredVerification": true,
+    "cohortPercent": 0
+  }
+}

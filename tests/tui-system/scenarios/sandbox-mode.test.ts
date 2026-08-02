@@ -86,4 +86,22 @@ describe('TUI PTY System — Sandbox Mode', () => {
     },
     TIMEOUT,
   );
+
+  test(
+    '/telemetry reports that the development entry has no artifact authority',
+    async () => {
+      await typeText(tui, '/telemetry');
+      tui.write('\r');
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Observability: inactive (artifact_disabled)',
+        10000,
+      );
+
+      expect(screenContains(tui.viewport(), 'Artifact authority: absent')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Remote exporter: not configured')).toBe(true);
+      expect(screenContains(tui.viewport(), 'Disk spool: disabled')).toBe(true);
+    },
+    TIMEOUT,
+  );
 });

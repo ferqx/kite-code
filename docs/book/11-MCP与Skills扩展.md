@@ -92,3 +92,11 @@ factory、argv/runtime pinning 与 native child inheritance conformance 完成�
 配置都不能重新打开。Tool Search/discovery 只处理元数据，也不会触发正文许可。
 
 完整规则见 [`../active/mcp-runtime-governance.md`](../active/mcp-runtime-governance.md)、[`../active/mcp-control-plane.md`](../active/mcp-control-plane.md)、[`../active/mcp-authentication.md`](../active/mcp-authentication.md) 与 [`../active/capability-progressive-disclosure.md`](../active/capability-progressive-disclosure.md)。
+
+## 11.7 分能力发布
+
+Verification、MCP write、Skills readonly 与 Skills effectful 使用独立 strict profile。Profile 不能自行
+开启能力；admission 还要核对实际 flags、dependency revision、route/platform、evidence freshness 和
+G3–G5。MCP write 要求 execution record、Provider Action 与 stable Verification；Skill 的 unknown/
+write/destructive dependency 一律进入 effectful，并要求 Verification。当前四条 profile 全部
+`under_development/off`，production MCP write route 为空，本地 conformance 不代表 canary 或 stable。

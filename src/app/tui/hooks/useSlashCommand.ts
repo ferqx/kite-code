@@ -15,6 +15,7 @@ export type SlashAction =
   | { type: 'plan'; task?: string }
   | { type: 'permissions'; mode?: string }
   | { type: 'release' }
+  | { type: 'telemetry' }
   | { type: 'clear' }
   | { type: 'help' }
   | { type: 'new' }
@@ -48,6 +49,8 @@ export function parseSlashCommand(input: string): SlashAction | null {
       return { type: 'permissions', mode: arg || undefined };
     case 'release':
       return args.length === 0 ? { type: 'release' } : { type: 'unknown', raw: input };
+    case 'telemetry':
+      return args.length === 0 ? { type: 'telemetry' } : { type: 'unknown', raw: input };
     case 'clear':
     case 'c':
       return { type: 'clear' };
@@ -105,6 +108,7 @@ export function useSlashCommand(
   onCompactReset?: () => void,
   executionStatusText?: string,
   releaseStatusText?: string,
+  telemetryStatusText?: string,
 ) {
   return useCallback(
     (input: string): boolean => {
@@ -176,6 +180,9 @@ export function useSlashCommand(
         }
         case 'release':
           if (releaseStatusText) dispatch({ type: 'LOCAL_TEXT', text: releaseStatusText });
+          break;
+        case 'telemetry':
+          if (telemetryStatusText) dispatch({ type: 'LOCAL_TEXT', text: telemetryStatusText });
           break;
         case 'clear':
           dispatch({ type: 'CLEAR_OUTPUT' });
@@ -254,6 +261,7 @@ export function useSlashCommand(
       onCompactReset,
       executionStatusText,
       releaseStatusText,
+      telemetryStatusText,
     ],
   );
 }

@@ -1,6 +1,6 @@
 # Agent 生产化 Phase 3：无正文可观测性与生产运营计划
 
-状态：draft
+状态：active
 创建：2026-07-29
 优先级：P0
 依赖：
@@ -14,6 +14,12 @@ Evidence 绑定依赖：
 [`2026-06-18-opentelemetry-observability.md`](2026-06-18-opentelemetry-observability.md)、
 [`2026-06-18-kite-code-telemetry-collection.md`](2026-06-18-kite-code-telemetry-collection.md)
 设计依据：RFC §13–§17
+
+2026-08-02：3.1–3.8 与 3.10 的本地 fail-closed contract 已实现，包含无正文 metric/reporter、
+consent/status、dashboard/SLO schema、alert/disable-only containment、runbook、synthetic rehearsal
+和 Limited SLO verifier。D-07/2B 依赖、D-03、真实 baseline、incident rehearsal 与 external
+observation 尚未满足，因此 Task 3.1–3.10 均不标记 completed；`MS:3-OPS-READY` 和
+`MS:LIMITED-SLO` 都未产生。
 
 ## 目标
 

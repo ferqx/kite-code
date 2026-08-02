@@ -9,11 +9,17 @@ Foundation 依赖：仅 Phase 0
 RC Assembly 依赖：Phase 1A、1B、1C、Phase 2B 和 Phase 3
 设计依据：RFC §8–§10、§15、§20
 
-2026-08-02：D-06 已按 ADR-0062 关闭。Task 2A.0–2A.7 的本地 contract implementation、
-53 个 release 定向测试、synthetic build/verify/bootstrap、deterministic foundation Gate replay 已
-收敛；真实 Sigstore/attestation/GitHub Release 保持 disabled，D-04 production support set 为空。
-这些 Task 当前绑定为 `in_progress`，等待本批恢复点 commit 后再写 completion record 与正式
-`MS:2A-F` ratchet。Task 2A.8–2A.11 尚未完成。
+2026-08-02：D-06 已按 ADR-0062 关闭。Task 2A.0–2A.7 已由恢复点
+`2e98681c800a2f1f745bc18e41ac682d9c09e84b` 收口；53 个 release 定向测试、synthetic
+build/verify/bootstrap 与 deterministic foundation Gate replay 全部通过，Task 2A.7 唯一产生
+`MS:2A-F`。真实 Sigstore/attestation/GitHub Release 保持 disabled，D-04 production support set
+为空；Task 2A.8–2A.11 尚未完成。完成证据见
+[Release Contract Foundation 完成记录](../execution/completed/2026-07-30-agent-production-release-control.md)。
+
+同日 2A.8 的 manual-only/no-publish workflow、synthetic SBOM/provenance/platform smoke contract
+已经本地实现，但 D-04 支持集为空且真实 audit、平台签名、actual artifact smoke、Sigstore 与 attestation
+均未发生，所以保持 `in_progress`。2A.9 的 disable-only loader/cache 也仅完成公开 synthetic key
+contract；D-03 仍 open，真实 rollout signing/service 保持 disabled。2A.10/2A.11 尚未完成。
 
 ## 目标
 

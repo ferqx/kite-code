@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "profileId": "verification-v1",
+  "capability": "verification",
+  "requiredFeatureFlags": ["verificationV1"],
+  "state": {
+    "maturity": "under_development",
+    "maxRollout": "off"
+  },
+  "dependencies": [
+    {
+      "dependencyId": "runtime.required-verification",
+      "expectedRevision": "v1"
+    },
+    {
+      "dependencyId": "runtime.schema",
+      "expectedRevision": "21"
+    }
+  ],
+  "routeAllowlist": [],
+  "platformAllowlist": [],
+  "evidence": {
+    "freshnessSeconds": 0,
+    "requiredGates": ["G3", "G4", "G5"]
+  },
+  "rollback": {
+    "disableNewAdmission": true,
+    "preserveReceipts": true,
+    "preserveRequiredVerification": true,
+    "cohortPercent": 0
+  }
+}

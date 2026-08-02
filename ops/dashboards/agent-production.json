@@ -1,0 +1,47 @@
+{
+  "schema": "AgentProductionDashboardV1",
+  "dashboardId": "agent-production-v1",
+  "defaultState": "unknown",
+  "noDataState": "blocked",
+  "contentFieldsAllowed": false,
+  "panels": [
+    { "id": "run-turn-outcomes", "metrics": ["run_total", "turn_total", "run_duration_ms"] },
+    {
+      "id": "model-health",
+      "metrics": ["model_request_total", "model_duration_ms", "model_tokens_total"]
+    },
+    { "id": "tool-mcp-health", "metrics": ["tool_total", "mcp_total"] },
+    { "id": "skill-lifecycle", "metrics": ["skill_total"] },
+    { "id": "plan-progress", "metrics": ["plan_total"] },
+    { "id": "verification", "metrics": ["verification_total"] },
+    { "id": "compaction", "metrics": ["compaction_total", "compaction_duration_ms"] },
+    {
+      "id": "runtime-recovery",
+      "metrics": [
+        "runtime_hard_block_total",
+        "runtime_late_terminal_rejection_total",
+        "runtime_recovery_total",
+        "budget_exhausted_total"
+      ]
+    },
+    {
+      "id": "resource-governance",
+      "metrics": [
+        "concurrency_saturation_total",
+        "process_tree_limit_termination_total",
+        "runtime_cancel_incomplete_total",
+        "runtime_orphan_total",
+        "runtime_rss_bytes",
+        "runtime_event_loop_lag_ms",
+        "runtime_fd_count",
+        "runtime_listener_count",
+        "runtime_handle_count"
+      ]
+    },
+    {
+      "id": "artifact-logging",
+      "metrics": ["artifact_bytes_total", "session_log_bytes_total", "telemetry_dropped_total"]
+    },
+    { "id": "agent-task-product", "metrics": ["agent_task_stage_total"] }
+  ]
+}

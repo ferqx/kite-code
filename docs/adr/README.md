@@ -64,3 +64,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0060](0060-single-maintainer-release-governance.md)   | accepted   | 单人维护模式以 external release 前第三方安全评审替代 Phase 0 双人签署               |
 | [0061](0061-production-platform-capability-admission.md) | accepted | 生产平台能力必须由原生探针逐项准入，当前支持集合为空                              |
 | [0062](0062-keyless-release-signing-and-github-hosting.md) | accepted | 开源发布使用 GitHub OIDC、keyless Sigstore 与 GitHub Releases；private 阶段仅 synthetic |
+| [0063](0063-no-content-observability-and-single-maintainer-operations.md) | accepted | 生产遥测无正文且默认关闭；单维护者运营无数据/Owner 不可用时 fail closed |
+| [0064](0064-conservative-skill-effects-and-capability-profile-admission.md) | accepted | Skill unknown effect 保守归 effectful；Capability Profile 同时验证 flags、依赖、identity 与 G3–G5 |

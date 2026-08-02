@@ -9,6 +9,9 @@
 
 相关：`model-provider-boundary.md`、`feature-flags.md`、`docs/space/plans/2026-07-29-agent-production-local-data-privacy.md`。
 
+Session Logger 与 remote observability 是独立通道。启用本地 metadata/content logging 不授予 remote
+telemetry consent；remote consent 也不改变本地 logger mode、retention 或正文排除规则。
+
 ## 模式与组合
 
 `SessionLogCollector` 只接受 `off | metadata | content` 三种已解析模式。App 配置加载边界先

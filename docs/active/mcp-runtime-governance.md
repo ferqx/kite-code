@@ -123,3 +123,16 @@ When the MCP provider directory contains unavailable entries, `tool_search` may 
 The E2E contract uses real MCP transports and real on-disk scope resolution. It covers user-level authenticated HTTP MCP with environment-expanded bearer headers, invalid-token fail-closed behavior, project-level authenticated stdio MCP after production approval, absence of stdio process and HTTP requests before approval, project-over-user precedence, plus user/project Skill discovery, shadowing, tool execution and frame closure. Credentials must not appear in Runtime or persisted events. OAuth/interactive `authProvider` is implemented through the same Manager/SDK path and has a local HTTP integration covering discovery, dynamic registration, PKCE/state, code exchange and post-auth discovery. TUI PTY Login/Cancel/opener failure and macOS Keychain, Windows Credential Manager and Linux Secret Service native smoke have passed. See [`mcp-authentication.md`](mcp-authentication.md).
 
 Builtin skill/tool catalog (`src/core/skills/catalog.ts`) tracks known agent tools. `apply_patch` was removed — it had a contract (`TOOL_CONTRACTS`) but was never registered as an agent tool.
+
+## Production Capability Release 边界
+
+MCP write profile 当前 `under_development/off`，production route registry 为空。未来 admission 必须同时
+验证 `mcpExecutionRecordV1`、`mcpProviderActionV1`、stable Verification dependency、精确
+provider/server/tool schema/revision、Provider Data/egress/network policy、route qualification 与实际
+G3–G5 freshness。外部写入先写 intent；只有同 invocation 的可信 idempotency replay 可以返回已有
+receipt，unknown external effect 只能 reconciliation，Provider Action 不能重放业务调用。
+
+Skill readonly/effectful 按 ADR-0064 保守分类：只有自身和全部 dependency 的 effective effects 均为
+`none|read` 且 provenance 允许时才是 readonly；write、destructive、unknown、解析或 revision drift
+一律 effectful/off，并要求 Verification。当前两个 Skill profile 均 off，本地 conformance 与 blocked
+adapter 不构成 internal/canary/maturity evidence。
