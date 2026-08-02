@@ -51,7 +51,7 @@ function historyState(): RuntimeState {
     turnId: `turn-${index}`,
     ordinal: index,
     createdAt: `2026-07-22T00:00:0${index}.000Z`,
-    content: `Historical goal ${index}: preserve decisions, failures, and next steps. ${'Implementation context. '.repeat(300)}`,
+    content: `Historical goal ${index}: preserve decisions, failures, and next steps. ${'Implementation context. '.repeat(700)}`,
   }));
   return state;
 }
@@ -101,7 +101,7 @@ try {
       turnId: 'turn-7',
       ordinal: 7,
       createdAt: '2026-07-22T00:00:07.000Z',
-      content: `New settled work: ${'incremental context '.repeat(300)}`,
+      content: `New settled work: ${'incremental context '.repeat(700)}`,
     },
     {
       kind: 'user',

@@ -121,16 +121,25 @@ ToolSpec Registry 的六个计算原语已按 ADR-0027 完成单路径切换；�
 显式 allowlist metadata，关闭时不创建日志目录。Provider flag 启用后从固定 release asset
 加载并校验 revision/digest，所有普通模型、压缩、Sub-agent 和 reviewer dispatch 共用最终
 gate；当前
-route 集合为空，因此 limited profile 全部 fail closed。Resource flag 只为新 run 建立 Runtime
+只有官方 DeepSeek `deepseek-v4-flash` 的精确 Route 可匹配，其他 route 在 limited profile 全部
+fail closed。Resource flag 只为新 run 建立 Runtime
 v19 limited preset ledger，并拒绝 legacy snapshot 热补余额。Bounded cancellation flag 提供
 deadline、统一 AbortSignal 与进程树清理；Resource 开启但该 flag 关闭时不披露 writer/Shell/
 child capability。Terminal flag 只控制 CLI 派生 presentation，原始结构化 outcome 始终保留，
 不能把 unknown/blocked/budget/saturation 回退成普通完成。单独启用任一 flag 都不授予
 production 资格。
 
+DeepSeek 官方 API 的 `deepseek-v4-flash` 已按 D-14.3/ADR-0066 进入 approved bundle；只接受
+`type=deepseek`、该精确 model 和 `https://api.deepseek.com[/v1]`。single owner 已接受官方披露的
+中国处理/存储、可能训练、无固定 API 正文保留期和无 DPA，这些不再阻塞；CLI/产品仍需透明披露，
+secret/protected credential 永远拒绝，policy 过期或 route 漂移即 fail closed。该批准不授权 remote
+MCP 正文外发或 production secondary evaluation，真实评估仍需 API credential 和 retained evidence。
+
 Remote observability 还要求 artifact authority、用户 consent 与真实 exporter；flag 单独开启不生效。
 项目 telemetry 配置只保留 `enabled=false` 的收紧语义，不能提供 endpoint secret 或 consent。Reporter
-只有有界内存 queue，无磁盘 spool；content logging consent 和 Provider consent 都不隐含 telemetry。
+只有有界内存 queue，无磁盘 spool；最终 export 会按 release-owned alias registry 折叠未知 route/capability
+并执行每 metric series budget。content logging consent 和 Provider consent 都不隐含 telemetry。
+External canary 还要求独立 canary opt-in；缺少任一 authority/consent/exporter 条件时 cohort blocked。
 
 `releaseProfileV1` 还要求独立的 artifact authority；user/project/CLI 的 true 不能创建该 authority。
 当前 embedded profile 是 non-distributable foundation fixture，D-04 production 支持集为空，因此

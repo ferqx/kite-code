@@ -87,6 +87,12 @@ export interface ProductionExecutionQualificationV1 {
   evidenceDigest: string;
   evidenceCommit: string;
   backendCapabilities: ExecutionBackendCapabilitiesV1;
+  /** Exact process-backed capabilities admitted by this native evidence. */
+  processCapabilitySurface: {
+    shell: boolean;
+    skillChild: boolean;
+    localStdioMcp: boolean;
+  };
   inProcessReadOnlyTools: InProcessReadOnlyToolCatalogV1;
 }
 
@@ -164,6 +170,8 @@ export interface SandboxOptions {
   runtimeReadOnlyRoots?: readonly string[];
   /** 自定义资源限制（覆盖默认值）/ Custom resource limits (overrides defaults) */
   resourceLimits?: Partial<ResourceLimits>;
+  /** Release-owned cgroup-v2 task ceiling for the complete invocation tree. */
+  maxProcessTreeTasks?: number;
   /** Network access policy inside the sandbox. Defaults to disabled. */
   network?: {
     mode: ShellNetworkMode;

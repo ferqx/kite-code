@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpRuntimeProvider, RemoteMcpEgressPermitResolverV1 } from '@/core/mcp';
@@ -31,7 +32,7 @@ import { decideNextEffect } from '@/core/runtime/scheduler';
 import type { RuntimeState } from '@/core/runtime/state';
 import { getActivePlanning, getActiveTask, getAgentPhase } from '@/core/runtime/state';
 import { defaultRuntimeJournalMode, runtimeStorePathFor } from '@/core/runtime/store';
-import { createSandboxExecutor, resolveSandboxRuntime } from '@/core/sandbox/index';
+import { resolveSandboxRuntime } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentPhase } from '@/protocol/events';
@@ -252,9 +253,10 @@ export class SessionRuntime {
       });
       return;
     }
-    const shellExecutor = createSandboxExecutor({
-      enabled: sandboxRuntime.enabled,
+    const shellExecutor = composeAppSandboxExecutorV1({
+      entrypoint: 'tui',
       workspace: this.workspace,
+      config: deps.config,
     });
 
     const abortController = new AbortController();

@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { createRuntimeSecretDetectorV1 } from '../session-logger/content-inspector';
+import type { SessionLoggingContentInspectorV1 } from '../session-logger/types';
 import type { AgentConfig } from './index';
 import {
   computeProviderDataPolicyBundleDigest,
@@ -44,6 +46,7 @@ export type ProviderDataAdmissionReasonV1 =
   | 'provider_payload_kind_denied'
   | 'provider_data_classification_denied'
   | 'provider_content_evaluation_denied'
+  | 'provider_content_inspection_unknown'
   | 'provider_secret_denied';
 
 export interface ProviderDataAdmissionDecisionV1 {
@@ -66,6 +69,7 @@ export interface ProviderDataAdmissionInputV1 {
   purpose?: ProviderDispatchPurposeV1;
   now?: Date;
   expectedRegistryDigest?: string;
+  contentInspector?: SessionLoggingContentInspectorV1;
 }
 
 const CLASSIFICATION_RANK: Readonly<Record<WorkspaceDataLabelV1['classification'], number>> =
@@ -138,9 +142,9 @@ export function loadProviderDataPolicyRegistryV1(
   return createProviderDataPolicyRegistryV1(parseProviderDataPolicyBundleV1(source), loadedAt);
 }
 
-export const APPROVED_PROVIDER_DATA_POLICY_REVISION_V1 = 'm0-empty-2026-07-30';
+export const APPROVED_PROVIDER_DATA_POLICY_REVISION_V1 = 'd14-deepseek-owner-accepted-2026-08-02.3';
 export const APPROVED_PROVIDER_DATA_POLICY_DIGEST_V1 =
-  'sha256:e99df35ca2163eb0d0b1ebc22181c013d6f301051e1e92faa5490689859704b5';
+  'sha256:6d1a0c29d135e4cd6cee3a4ecb8b9e567078c2d2c530c6217fe1710dc5e3cb39';
 
 /**
  * Production loader for the repository-controlled, release-pinned policy
@@ -167,6 +171,16 @@ export function loadApprovedProviderDataPolicyRegistryV1(
 export function providerRouteIdentityFromAgentConfigV1(
   config: AgentConfig,
 ): ProviderRouteIdentityV1 {
+  if (isApprovedDeepSeekV4FlashRoute(config)) {
+    return {
+      providerType: 'deepseek',
+      operatorId: 'hangzhou-deepseek-ai',
+      endpointOrigin: 'https://api.deepseek.com',
+      endpointClass: 'official_api',
+      deploymentId: 'deepseek-api',
+      region: 'unspecified',
+    };
+  }
   return {
     providerType: config.providerType,
     operatorId: config.providerName,
@@ -176,6 +190,25 @@ export function providerRouteIdentityFromAgentConfigV1(
     deploymentId: config.modelName,
     region: 'unspecified',
   };
+}
+
+function isApprovedDeepSeekV4FlashRoute(config: AgentConfig): boolean {
+  if (config.providerType !== 'deepseek' || config.modelName !== 'deepseek-v4-flash') return false;
+  try {
+    const endpoint = new URL(config.baseURL);
+    const path = endpoint.pathname.replace(/\/+$/, '');
+    return (
+      endpoint.protocol === 'https:' &&
+      endpoint.username === '' &&
+      endpoint.password === '' &&
+      endpoint.origin === 'https://api.deepseek.com' &&
+      (path === '' || path === '/v1') &&
+      endpoint.search === '' &&
+      endpoint.hash === ''
+    );
+  } catch {
+    return false;
+  }
 }
 
 export type ProviderDataAdmissionGateV1 = (
@@ -190,6 +223,9 @@ export type ProviderDataAdmissionGateV1 = (
 export function createApprovedProviderDataAdmissionV1(
   config: AgentConfig,
   loadedAt = new Date(),
+  contentInspector: SessionLoggingContentInspectorV1 = createRuntimeSecretDetectorV1({
+    knownSecrets: [config.apiKey],
+  }),
 ): ProviderDataAdmissionGateV1 {
   const registry = loadApprovedProviderDataPolicyRegistryV1(loadedAt);
   const route = providerRouteIdentityFromAgentConfigV1(config);
@@ -202,6 +238,7 @@ export function createApprovedProviderDataAdmissionV1(
       route,
       payload,
       purpose,
+      contentInspector,
     });
 }
 
@@ -228,6 +265,32 @@ export function evaluateProviderDataAdmissionV1(
       routeAlias,
       registryDigest: input.registry.digest,
     };
+  }
+  if (input.contentInspector) {
+    for (const part of input.payload) {
+      let verdict: 'clear' | 'secret' | 'unknown' = 'unknown';
+      try {
+        const inspection = input.contentInspector({
+          text: part.text,
+          provenance:
+            part.label.provenance === 'generated_summary' ? 'model_visible_answer' : 'user_message',
+        });
+        if (inspection.schemaVersion === 1 && inspection.detector === 'runtime_secret_detector') {
+          verdict = inspection.verdict;
+        }
+      } catch {
+        verdict = 'unknown';
+      }
+      if (verdict !== 'clear') {
+        return {
+          admitted: false,
+          reason:
+            verdict === 'secret' ? 'provider_secret_denied' : 'provider_content_inspection_unknown',
+          routeAlias,
+          registryDigest: input.registry.digest,
+        };
+      }
+    }
   }
   const routeDigest = computeProviderEndpointIdentityDigest(input.route);
   const policy = input.registry.policiesByRouteDigest[routeDigest];

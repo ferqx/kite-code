@@ -3,12 +3,14 @@ import { composeObservabilityV1 } from '../../src/app/observability/composition'
 import {
   projectTelemetryStatusV1,
   resolveTelemetryConsentV1,
+  TELEMETRY_METRICS_BY_CATEGORY_V1,
   type TelemetryConsentGrantV1,
 } from '../../src/app/observability/consent';
 import {
   formatObservabilityStatusV1,
   projectObservabilityStatusV1,
 } from '../../src/app/observability/status';
+import { METRIC_DEFINITIONS_V1 } from '../../src/core/observability/metrics';
 
 const grant: TelemetryConsentGrantV1 = {
   state: 'granted',
@@ -20,6 +22,14 @@ const grant: TelemetryConsentGrantV1 = {
 };
 
 describe('telemetry consent and composition', () => {
+  test('maps every metric to exactly one consent category', () => {
+    const categorized = Object.values(TELEMETRY_METRICS_BY_CATEGORY_V1).flat();
+    expect(Array.from(categorized, String).sort()).toEqual(
+      Object.keys(METRIC_DEFINITIONS_V1).sort(),
+    );
+    expect(new Set(categorized).size).toBe(categorized.length);
+  });
+
   test('is remote-off by default and project configuration can never enable it', () => {
     expect(resolveTelemetryConsentV1({ releaseChannel: 'limited' })).toMatchObject({
       enabled: false,
@@ -134,6 +144,15 @@ describe('telemetry consent and composition', () => {
       capacity: 2,
       diskSpool: false,
     });
+
+    const auditDenied = composeObservabilityV1({
+      artifactTelemetryAllowed: true,
+      featureEnabled: true,
+      consent: { ...consent, managedSessionAdmission: 'denied' },
+      exporter,
+    });
+    expect(auditDenied.telemetryEnabled).toBeFalse();
+    expect(auditDenied.reporter.status().enabled).toBeFalse();
   });
 
   test('status keeps ordinary entrypoints inactive and redacts endpoint material', () => {

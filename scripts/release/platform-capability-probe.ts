@@ -10,6 +10,8 @@ import {
 } from 'node:fs';
 import { networkInterfaces, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { z } from 'zod';
+import { composeAppSandboxExecutorV1 } from '../../src/app/sandbox/composition';
 import { generateBwrapArgs } from '../../src/core/sandbox/bwrap';
 import { readExecutionEnvironmentIdentityV1 } from '../../src/core/sandbox/environment-identity';
 import { detectSandboxBackend, type SandboxBackend } from '../../src/core/sandbox/platform';
@@ -19,9 +21,127 @@ import {
 } from '../../src/core/sandbox/process-tree-capability';
 import { generateSandboxProfile } from '../../src/core/sandbox/profile';
 import { findApplySeccomp } from '../../src/core/sandbox/seccomp';
+import { canonicalJsonBytes } from './canonical-json';
 
 export type NativeProbeVerdict = 'enforced' | 'unsupported' | 'unavailable';
 export type PlatformSupportOutcome = 'supported' | 'read_only_only' | 'excluded';
+export type GithubHostedRunnerClassV1 =
+  | 'macos-15-arm64-github-hosted'
+  | 'ubuntu-24.04-x64-github-hosted'
+  | 'windows-2025-x64-github-hosted';
+
+const GITHUB_HOSTED_RUNNER_CLASSES_V1 = new Set<GithubHostedRunnerClassV1>([
+  'macos-15-arm64-github-hosted',
+  'ubuntu-24.04-x64-github-hosted',
+  'windows-2025-x64-github-hosted',
+]);
+
+const nativeProbeVerdictSchema = z.enum(['enforced', 'unsupported', 'unavailable']);
+const boundedIdentitySchema = z.string().trim().min(1).max(512);
+export const platformCapabilitySourceV1Schema = z
+  .object({
+    repository: z.literal('ferqx/kite-code'),
+    repositoryId: z.literal('1218896626'),
+    headSha: z.string().regex(/^[a-f0-9]{40}$/),
+    ref: z.string().regex(/^refs\/(?:heads|tags|pull)\/[A-Za-z0-9._/-]{1,240}$/),
+    workflow: z.literal('.github/workflows/platform-capability-probe.yml'),
+    workflowRef: z
+      .string()
+      .regex(
+        /^ferqx\/kite-code\/\.github\/workflows\/platform-capability-probe\.yml@refs\/(?:heads|tags|pull)\/[A-Za-z0-9._/-]{1,240}$/,
+      ),
+    workflowSha: z.string().regex(/^[a-f0-9]{40}$/),
+    runId: z.string().regex(/^[1-9][0-9]*$/),
+    runAttempt: z.string().regex(/^[1-9][0-9]*$/),
+    runnerClass: z.enum([
+      'macos-15-arm64-github-hosted',
+      'ubuntu-24.04-x64-github-hosted',
+      'windows-2025-x64-github-hosted',
+    ]),
+  })
+  .strict()
+  .superRefine((source, context) => {
+    if (source.workflowRef !== `${source.repository}/${source.workflow}@${source.ref}`) {
+      context.addIssue({
+        code: 'custom',
+        path: ['workflowRef'],
+        message: 'workflowRef must bind the canonical workflow to the exact source ref',
+      });
+    }
+  });
+
+const filesystemEvidenceSchema = z
+  .object({
+    workspaceRead: nativeProbeVerdictSchema,
+    workspaceWrite: nativeProbeVerdictSchema,
+    workspaceReadOnly: nativeProbeVerdictSchema,
+    workspaceOutsideReadDeny: nativeProbeVerdictSchema,
+    workspaceOutsideWriteDeny: nativeProbeVerdictSchema,
+    protectedGitReadDeny: nativeProbeVerdictSchema,
+    protectedGitWriteDeny: nativeProbeVerdictSchema,
+    protectedAgentConfigReadDeny: nativeProbeVerdictSchema,
+    protectedAgentConfigWriteDeny: nativeProbeVerdictSchema,
+    protectedCredentialReadDeny: nativeProbeVerdictSchema,
+    protectedCredentialWriteDeny: nativeProbeVerdictSchema,
+    protectedShellProfileReadDeny: nativeProbeVerdictSchema,
+    protectedShellProfileWriteDeny: nativeProbeVerdictSchema,
+    symlinkEscapeReadDeny: nativeProbeVerdictSchema,
+    symlinkEscapeWriteDeny: nativeProbeVerdictSchema,
+    inProcessReadOnly: nativeProbeVerdictSchema,
+  })
+  .strict();
+
+export const platformCapabilityEvidenceV1Schema = z
+  .object({
+    version: z.literal(1),
+    evidenceId: z.string().uuid(),
+    capturedAt: z.iso.datetime({ offset: true }),
+    platform: z.enum(['darwin', 'linux', 'win32']),
+    osRelease: boundedIdentitySchema,
+    osVersion: boundedIdentitySchema,
+    arch: z.enum(['arm64', 'x64']),
+    bunVersion: z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/),
+    backend: z.enum(['seatbelt', 'bubblewrap', 'none']),
+    selectedNetworkMode: z.enum(['off', 'allowlist']),
+    processCapabilitySurface: z
+      .object({ shell: z.boolean(), forkedSkill: z.boolean(), localStdioMcp: z.boolean() })
+      .strict(),
+    source: platformCapabilitySourceV1Schema.optional(),
+    environmentIdentity: z.object({ exactOsVersion: nativeProbeVerdictSchema }).strict(),
+    backendIsolation: z.object({ syscallFilter: nativeProbeVerdictSchema }).strict(),
+    entrypoints: z
+      .object({ tui: nativeProbeVerdictSchema, foregroundCli: nativeProbeVerdictSchema })
+      .strict(),
+    filesystem: filesystemEvidenceSchema,
+    network: z
+      .object({ off: nativeProbeVerdictSchema, allowlist: nativeProbeVerdictSchema })
+      .strict(),
+    processTree: z
+      .object({
+        hardCountMechanism: z.enum([
+          'none',
+          'cgroup_pids',
+          'windows_job_active_process_limit',
+          'accepted_equivalent',
+        ]),
+        hardCountLimit: z.enum(['enforced', 'unsupported']),
+        killWithoutResidualDescendants: z.enum(['enforced', 'unsupported']),
+      })
+      .strict(),
+    inheritance: z
+      .object({
+        shellDescendant: nativeProbeVerdictSchema,
+        shellGrandchild: nativeProbeVerdictSchema,
+        forkedSkill: nativeProbeVerdictSchema,
+        localStdioMcp: nativeProbeVerdictSchema,
+      })
+      .strict(),
+    outcome: z.enum(['supported', 'read_only_only', 'excluded']),
+    productionSupported: z.literal(false),
+    limitations: z.array(z.string().trim().min(1).max(512)).max(128),
+    digest: z.string().regex(/^sha256:[a-f0-9]{64}$/),
+  })
+  .strict();
 
 export interface PlatformCapabilityEvidenceV1 {
   version: 1;
@@ -34,6 +154,23 @@ export interface PlatformCapabilityEvidenceV1 {
   bunVersion: string;
   backend: SandboxBackend;
   selectedNetworkMode: 'off' | 'allowlist';
+  processCapabilitySurface: {
+    shell: boolean;
+    forkedSkill: boolean;
+    localStdioMcp: boolean;
+  };
+  source?: {
+    repository: string;
+    repositoryId: string;
+    headSha: string;
+    ref: string;
+    workflow: string;
+    workflowRef: string;
+    workflowSha: string;
+    runId: string;
+    runAttempt: string;
+    runnerClass: GithubHostedRunnerClassV1;
+  };
   environmentIdentity: {
     exactOsVersion: NativeProbeVerdict;
   };
@@ -116,6 +253,8 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
     );
     const networkOff = await probeNetworkOff(backend, workspace);
     const processTree = await probeProcessTree(backend, workspace);
+    const entrypoints = await probeEntrypoints(backend, workspace);
+    const syscallFilter = await probeSyscallFilter(backend, workspace);
     const partial: Omit<EvidenceWithoutDigest, 'outcome' | 'productionSupported' | 'limitations'> =
       {
         version: 1,
@@ -128,16 +267,19 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
         bunVersion: environmentIdentity.bunVersion,
         backend,
         selectedNetworkMode: 'off',
+        processCapabilitySurface: {
+          shell: true,
+          forkedSkill: false,
+          localStdioMcp: false,
+        },
+        ...githubEvidenceSource(environmentIdentity),
         environmentIdentity: {
           exactOsVersion: environmentIdentity.exactOsVersionAvailable ? 'enforced' : 'unavailable',
         },
         backendIsolation: {
-          syscallFilter: currentSyscallFilterVerdict(backend),
+          syscallFilter,
         },
-        // This spike exercises the concrete backend generator directly. Task
-        // 1B.7 must prove that both production composition roots install the
-        // identical boundary before either entrypoint can be admitted.
-        entrypoints: { tui: 'unavailable', foregroundCli: 'unavailable' },
+        entrypoints,
         filesystem: {
           ...filesystem,
           // Task 1B.1 must separately prove the no-process fallback allowlist.
@@ -152,9 +294,8 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
         inheritance: {
           shellDescendant: filesystem.workspaceOutsideWriteDeny,
           shellGrandchild: shellGrandchildDeny,
-          // Forked Skill shares shellExecutor but lacks an independent native fixture;
-          // local stdio MCP currently spawns outside the sandbox executor.
-          forkedSkill: 'unavailable',
+          // These capabilities are deliberately outside the first platform surface.
+          forkedSkill: 'unsupported',
           localStdioMcp: 'unsupported',
         },
       };
@@ -170,7 +311,7 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
     };
     return {
       ...withoutDigest,
-      digest: `sha256:${createHash('sha256').update(canonicalJson(withoutDigest)).digest('hex')}`,
+      digest: computePlatformCapabilityEvidenceDigestV1(withoutDigest),
     };
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -207,11 +348,14 @@ export function evaluatePlatformSupport(
     evidence.processTree.killWithoutResidualDescendants,
     evidence.inheritance.shellDescendant,
     evidence.inheritance.shellGrandchild,
-    evidence.inheritance.forkedSkill,
-    evidence.inheritance.localStdioMcp,
+    ...(evidence.processCapabilitySurface.forkedSkill ? [evidence.inheritance.forkedSkill] : []),
+    ...(evidence.processCapabilitySurface.localStdioMcp
+      ? [evidence.inheritance.localStdioMcp]
+      : []),
     ...(evidence.backend === 'bubblewrap' ? [syscallFilterVerdict(evidence)] : []),
   ];
   if (
+    evidence.processCapabilitySurface.shell === true &&
     evidence.backend !== 'none' &&
     hardCountMechanism !== 'none' &&
     processCapabilities.every((verdict) => verdict === 'enforced')
@@ -528,15 +672,66 @@ async function probeProcessTree(
   backend: SandboxBackend,
   workspace: string,
 ): Promise<PlatformCapabilityEvidenceV1['processTree']> {
-  if (backend !== 'none') {
-    await runSandboxCommand(
-      backend,
-      workspace,
-      'sleep 0.2 & sleep 0.2 & sleep 0.2 & sleep 0.2 & wait',
-      {},
-    );
+  if (backend !== 'bubblewrap') {
+    const projection = currentProcessTreeCapabilityV1(backend);
+    return {
+      hardCountMechanism: projection.hardCountMechanism,
+      hardCountLimit: projection.hardCountLimit,
+      killWithoutResidualDescendants: projection.terminationCleanup,
+    };
   }
-  const projection = currentProcessTreeCapabilityV1(backend);
+  const python = Bun.which('python3');
+  if (!python) {
+    const projection = currentProcessTreeCapabilityV1(backend);
+    return {
+      hardCountMechanism: projection.hardCountMechanism,
+      hardCountLimit: projection.hardCountLimit,
+      killWithoutResidualDescendants: projection.terminationCleanup,
+    };
+  }
+  const maxTasks = 16;
+  const fixturePath = join(workspace, 'cgroup-pids-conformance.py');
+  writeFileSync(
+    fixturePath,
+    [
+      'import errno, os, time',
+      `expected = ${maxTasks}`,
+      "path = next((line.split(':', 2)[2].strip() for line in open('/proc/self/cgroup') if line.startswith('0::')), '')",
+      'if not path: raise SystemExit(21)',
+      "if open('/sys/fs/cgroup' + path + '/pids.max').read().strip() != str(expected): raise SystemExit(22)",
+      'children = []',
+      'limited = False',
+      'for _ in range(expected * 4):',
+      '    try:',
+      '        pid = os.fork()',
+      '    except OSError as error:',
+      '        if error.errno == errno.EAGAIN:',
+      '            limited = True',
+      '            break',
+      '        raise',
+      '    if pid == 0:',
+      '        time.sleep(0.2)',
+      '        os._exit(0)',
+      '    children.append(pid)',
+      'for pid in children:',
+      '    os.waitpid(pid, 0)',
+      'if not limited: raise SystemExit(23)',
+    ].join('\n'),
+  );
+  const executor = technicalAppExecutor('foreground_cli', workspace, maxTasks);
+  const hardLimit = await executor({
+    workspace,
+    command: `${python} cgroup-pids-conformance.py`,
+    timeoutMs: 5_000,
+  });
+  const projection = currentProcessTreeCapabilityV1(backend, {
+    hardLimitMechanism: 'cgroup_pids',
+    hardLimitConformancePassed: hardLimit.ok,
+    // A POSIX process-group receipt cannot prove that a setsid/double-fork
+    // descendant left the transient cgroup. Keep cleanup unsupported until a
+    // unit-owned cgroup empty/populated verifier is wired into the executor.
+    terminationCleanupConformancePassed: false,
+  });
   return {
     hardCountMechanism: projection.hardCountMechanism,
     hardCountLimit: projection.hardCountLimit,
@@ -544,12 +739,148 @@ async function probeProcessTree(
   };
 }
 
-function currentSyscallFilterVerdict(backend: SandboxBackend): NativeProbeVerdict {
+async function probeSyscallFilter(
+  backend: SandboxBackend,
+  workspace: string,
+): Promise<NativeProbeVerdict> {
   if (backend === 'none') return 'unavailable';
   if (backend !== 'bubblewrap') return 'unsupported';
-  // Binary presence is not syscall-denial conformance. Keep the verdict
-  // unavailable until a native negative syscall fixture proves enforcement.
-  return findApplySeccomp() ? 'unavailable' : 'unsupported';
+  const python = Bun.which('python3');
+  if (!python || !findApplySeccomp()) return 'unavailable';
+  const control = Bun.spawnSync(
+    [python, '-c', 'import socket; socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)'],
+    { stdout: 'ignore', stderr: 'ignore' },
+  );
+  if (control.exitCode !== 0) return 'unavailable';
+  const executor = technicalAppExecutor('foreground_cli', workspace, 32);
+  const positive = await executor({
+    workspace,
+    command: `${python} -c 'import socket; print(socket.AF_UNIX)'`,
+  });
+  if (!positive.ok) return 'unavailable';
+  const denied = await executor({
+    workspace,
+    command: `${python} -c 'import errno,socket,sys\ntry: socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)\nexcept OSError as error: sys.exit(77 if error.errno in (errno.EPERM, errno.EACCES) else 78)\nsys.exit(0)'`,
+  });
+  return denied.exitCode === 77 || denied.exitCode === 159 ? 'enforced' : 'unsupported';
+}
+
+async function probeEntrypoints(
+  backend: SandboxBackend,
+  _workspace: string,
+): Promise<PlatformCapabilityEvidenceV1['entrypoints']> {
+  if (backend === 'none') return { tui: 'unavailable', foregroundCli: 'unavailable' };
+  // Importing the shared composition helper is not evidence that both real App
+  // roots still install it. Keep both verdicts unavailable until the workflow
+  // executes entrypoint-owned integration probes with a negative disconnect
+  // control for each root.
+  return {
+    tui: 'unavailable',
+    foregroundCli: 'unavailable',
+  };
+}
+
+function technicalAppExecutor(
+  entrypoint: 'tui' | 'foreground_cli',
+  workspace: string,
+  maxProcessTreeTasks: number,
+) {
+  return composeAppSandboxExecutorV1({
+    entrypoint,
+    workspace,
+    config: {
+      sandbox: { enabled: true },
+      executionBoundary: {
+        filesystemScope: 'workspace_write',
+        workspaceRoot: workspace,
+        networkMode: 'off',
+        networkAllowlist: [],
+        allowLocalAndPrivateNetwork: false,
+        protectedPathPolicy: 'deny',
+        maxProcessTreeSizePerShellInvocation: maxProcessTreeTasks,
+        sandboxRequired: true,
+        sandboxUnavailable: 'fail',
+      },
+      executionCapabilitySurface: {
+        inProcessReadOnlyTools: null,
+        network: false,
+        process: true,
+        write: true,
+        workspaceWrite: true,
+        shell: true,
+        skillChild: false,
+        localStdioMcp: false,
+      },
+    },
+  });
+}
+
+export function githubEvidenceSource(
+  environment: { platform: NodeJS.Platform; arch: string },
+  env: NodeJS.ProcessEnv = process.env,
+): { source?: PlatformCapabilityEvidenceV1['source'] } {
+  const values = {
+    repository: env.QUALIFICATION_REPOSITORY,
+    repositoryId: env.QUALIFICATION_REPOSITORY_ID,
+    headSha: env.QUALIFICATION_HEAD_SHA,
+    ref: env.QUALIFICATION_REF,
+    workflow: env.QUALIFICATION_WORKFLOW,
+    workflowRef: env.QUALIFICATION_WORKFLOW_REF,
+    workflowSha: env.QUALIFICATION_WORKFLOW_SHA,
+    runId: env.QUALIFICATION_RUN_ID,
+    runAttempt: env.QUALIFICATION_RUN_ATTEMPT,
+    runnerClass: env.QUALIFICATION_RUNNER_CLASS,
+  };
+  if (Object.values(values).every((value) => value === undefined)) return {};
+  if (Object.values(values).some((value) => !value?.trim())) {
+    throw new Error('Formal platform qualification source identity is incomplete.');
+  }
+  if (!GITHUB_HOSTED_RUNNER_CLASSES_V1.has(values.runnerClass as GithubHostedRunnerClassV1)) {
+    throw new Error('Formal platform qualification runner class is not recognized.');
+  }
+  if (values.repository !== 'ferqx/kite-code' || values.repositoryId !== '1218896626') {
+    throw new Error('Formal platform qualification repository identity is not canonical.');
+  }
+  if (!/^[a-f0-9]{40}$/.test(values.headSha!) || !/^[a-f0-9]{40}$/.test(values.workflowSha!)) {
+    throw new Error('Formal platform qualification source SHA is invalid.');
+  }
+  if (!/^refs\/(?:heads|tags|pull)\/[A-Za-z0-9._/-]{1,240}$/.test(values.ref!)) {
+    throw new Error('Formal platform qualification ref is invalid.');
+  }
+  if (values.workflow !== '.github/workflows/platform-capability-probe.yml') {
+    throw new Error('Formal platform qualification workflow path is invalid.');
+  }
+  if (
+    !/^ferqx\/kite-code\/\.github\/workflows\/platform-capability-probe\.yml@refs\/(?:heads|tags|pull)\/[A-Za-z0-9._/-]{1,240}$/.test(
+      values.workflowRef!,
+    )
+  ) {
+    throw new Error('Formal platform qualification workflow ref is invalid.');
+  }
+  if (values.workflowRef !== `${values.repository}/${values.workflow}@${values.ref}`) {
+    throw new Error('Formal platform qualification workflow ref does not match the source ref.');
+  }
+  if (!/^[1-9][0-9]*$/.test(values.runId!) || !/^[1-9][0-9]*$/.test(values.runAttempt!)) {
+    throw new Error('Formal platform qualification run identity is invalid.');
+  }
+  const expectedEnvironment: Record<
+    GithubHostedRunnerClassV1,
+    { platform: NodeJS.Platform; arch: string }
+  > = {
+    'macos-15-arm64-github-hosted': { platform: 'darwin', arch: 'arm64' },
+    'ubuntu-24.04-x64-github-hosted': { platform: 'linux', arch: 'x64' },
+    'windows-2025-x64-github-hosted': { platform: 'win32', arch: 'x64' },
+  };
+  const expected = expectedEnvironment[values.runnerClass as GithubHostedRunnerClassV1];
+  if (environment.platform !== expected.platform || environment.arch !== expected.arch) {
+    throw new Error('Formal platform qualification runner class does not match the runtime.');
+  }
+  return {
+    source: {
+      ...(values as Record<keyof typeof values, string>),
+      runnerClass: values.runnerClass as GithubHostedRunnerClassV1,
+    },
+  };
 }
 
 function syscallFilterVerdict(evidence: PlatformCapabilityProbeInputV1): NativeProbeVerdict {
@@ -664,7 +995,7 @@ function deniedUnchangedVerdict(
   }
 }
 
-function collectLimitations(
+export function collectLimitations(
   evidence: Omit<EvidenceWithoutDigest, 'outcome' | 'productionSupported' | 'limitations'>,
 ): string[] {
   const limitations: string[] = [];
@@ -719,28 +1050,36 @@ function collectLimitations(
     limitations.push('process_tree_cleanup_not_proven');
   if (evidence.inheritance.shellGrandchild !== 'enforced')
     limitations.push('shell_grandchild_inheritance_not_proven');
-  if (evidence.inheritance.forkedSkill !== 'enforced')
+  if (
+    evidence.processCapabilitySurface.forkedSkill &&
+    evidence.inheritance.forkedSkill !== 'enforced'
+  )
     limitations.push('forked_skill_inheritance_not_proven');
-  if (evidence.inheritance.localStdioMcp !== 'enforced')
+  if (
+    evidence.processCapabilitySurface.localStdioMcp &&
+    evidence.inheritance.localStdioMcp !== 'enforced'
+  )
     limitations.push('local_stdio_mcp_bypasses_boundary');
   return limitations;
 }
 
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.entries(value)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
+export function computePlatformCapabilityEvidenceDigestV1(
+  evidence: Omit<PlatformCapabilityEvidenceV1, 'digest'>,
+): string {
+  return `sha256:${createHash('sha256').update(canonicalJsonBytes(evidence)).digest('hex')}`;
+}
+
+export function encodePlatformCapabilityEvidenceV1(
+  evidence: PlatformCapabilityEvidenceV1,
+): Uint8Array {
+  platformCapabilityEvidenceV1Schema.parse(evidence);
+  return canonicalJsonBytes(evidence);
 }
 
 if (import.meta.main) {
   const evidence = await runPlatformCapabilityProbe();
-  const serialized = `${JSON.stringify(evidence, null, 2)}\n`;
+  const encoded = encodePlatformCapabilityEvidenceV1(evidence);
   const outputPath = process.argv[2];
-  if (outputPath) writeFileSync(resolve(outputPath), serialized, 'utf8');
-  process.stdout.write(serialized);
+  if (outputPath) writeFileSync(resolve(outputPath), encoded, { flag: 'wx', mode: 0o600 });
+  process.stdout.write(`${new TextDecoder().decode(encoded)}\n`);
 }

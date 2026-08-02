@@ -43,6 +43,7 @@
       ],
       "documents": [
         "docs/active/runtime-resilience-qualification.md",
+        "docs/active/model-provider-boundary.md",
         "docs/active/six-concept-runtime-architecture.md",
         "docs/active/tui-e2e-testing-limits.md"
       ]
@@ -56,6 +57,7 @@
         "docs/active/failure-classification.md",
         "docs/active/tool-gated-autonomy.md",
         "docs/active/session-logging-policy.md",
+        "docs/active/model-provider-boundary.md",
         "docs/book/04-Agent引擎.md",
         "docs/book/06-多Agent协作.md",
         "docs/book/10-持久化与会话管理.md"
@@ -154,10 +156,12 @@
     {
       "id": "app-execution-boundary",
       "sources": [
+        "src/app/sandbox/**",
         "src/app/workspace/**",
         "src/app/release/execution-status.ts",
         "src/app/cli/index.ts",
         "src/app/tui/index.tsx",
+        "src/app/tui/session-manager.ts",
         "src/app/tui/hooks/useSlashCommand.ts",
         "tests/workspace/**",
         "tests/sandbox/status-projection.test.ts",
@@ -181,6 +185,8 @@
         "tests/sandbox-executor.test.ts",
         "tests/sandbox-bwrap-executor.test.ts",
         "tests/sandbox/platform-backends.test.ts",
+        "tests/sandbox/cgroup-pids.test.ts",
+        "tests/sandbox/app-sandbox-composition.test.ts",
         "tests/sandbox/process-tree-limit.test.ts",
         "tests/sandbox/platform-capability-probe.test.ts",
         "tests/policies/protected-path.test.ts",
@@ -205,6 +211,7 @@
         "docs/active/file-reading-shared-boundary.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/adr/0061-production-platform-capability-admission.md",
+        "docs/adr/0065-cross-platform-distribution-and-capability-admission.md",
         "docs/adr/0049-effect-aware-read-scheduling.md"
       ]
     },
@@ -218,6 +225,7 @@
         "tests/fixtures/release/**",
         "release/platform-capabilities/**",
         ".github/workflows/execution-boundary-conformance.yml",
+        ".github/workflows/platform-capability-probe.yml",
         ".github/workflows/release-candidate.yml"
       ],
       "documents": [
@@ -232,7 +240,13 @@
     },
     {
       "id": "agent-task-evaluation",
-      "sources": ["tests/evals/agent-tasks/**"],
+      "sources": [
+        "tests/evals/agent-tasks/**",
+        "scripts/evals/agent-task-evidence-*.ts",
+        "scripts/evals/verify-agent-task-evidence.ts",
+        "scripts/evals/contracts/agent-task-*.ts",
+        ".github/workflows/agent-task-evidence.yml"
+      ],
       "documents": [
         "docs/active/agent-task-evaluation.md",
         "docs/active/real-model-test-boundary.md",
@@ -242,7 +256,13 @@
     },
     {
       "id": "compaction-evaluation",
-      "sources": ["tests/evals/compaction/**"],
+      "sources": [
+        "tests/evals/compaction/**",
+        "scripts/evals/*compaction-semantic-evidence.ts",
+        "scripts/evals/snapshot-tracked-semantic-input.ts",
+        "scripts/evals/contracts/compaction-*.ts",
+        ".github/workflows/compaction-semantic-evaluation.yml"
+      ],
       "documents": [
         "docs/active/compaction-release-qualification.md",
         "docs/active/real-model-test-boundary.md",
@@ -261,6 +281,7 @@
         "tests/skills/effect-classification.test.ts",
         "tests/skills/workflow-contract.test.ts",
         "tests/evals/capabilities/**",
+        "scripts/evals/contracts/capability-*.ts",
         "release/capability-profiles/**"
       ],
       "documents": [
@@ -331,6 +352,7 @@
       "sources": [
         "src/core/config/provider-data-policy.ts",
         "src/core/config/provider-data-admission.ts",
+        "src/core/config/provider-route-candidate.ts",
         "src/core/config/session-logging-policy.ts",
         "release/provider-data-policies/**"
       ],

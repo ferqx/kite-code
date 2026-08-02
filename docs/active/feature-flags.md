@@ -21,7 +21,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | 开关 | 默认值 | 当前职责 |
 | --- | --- | --- |
 | `sessionLoggingPolicyV1` | `false` | App 注入 resolved logging policy；关闭时为 `off`，开启时默认 metadata-only |
-| `providerDataPolicyV1` | `false` | 所有模型 dispatch 使用 release-pinned Provider 数据 gate；当前批准 route bundle 为空 |
+| `providerDataPolicyV1` | `false` | 所有模型 dispatch 使用 release-pinned Provider 数据 gate；当前只批准官方 DeepSeek `deepseek-v4-flash` 精确 Route |
 | `remoteMcpEgressPolicyV1` | `false` | 开启远程 HTTP MCP 单 invocation 内容许可；关闭时 remote content=no-egress |
 | `resourceBudgetV1` | `false` | 启用 Runtime v19 累计预算 admission、FIFO/compound permit 与恢复语义 |
 | `boundedCancellationV1` | `false` | 启用 run deadline、统一 AbortSignal 与 descendant/process-tree 有界清理 |
@@ -35,10 +35,11 @@ Phase 5 的 `verificationV1`、`mcpExecutionRecordV1`、`mcpProviderActionV1`、
 `skillActivationV2` 与 `skillWorkflowV1` 也全部默认关闭。Release admission 不接受 profile 自报开关：
 它验证实际 resolved flags，MCP write 同时要求两个 MCP flag 与 Verification，Skill 同时要求
 activation/workflow，并继续检查 dependency revision、route/platform 和实际 G3–G5 freshness。
-当前四条 capability profile 全部 `under_development/off`。
+当前六条 capability profile（Verification、MCP write、Skills readonly/effectful、manual/auto
+Compaction）全部 `under_development/off`。
 
 `providerDataPolicyV1` 或 `resourceBudgetV1` 单独打开不会让 production run 自动获得资格：
-前者仍要求批准 registry/gate，且当前 route 集合为空；后者只允许新 run 建立 limited preset
+前者仍要求批准 registry/gate，且只有精确 DeepSeek Route 可匹配；后者只允许新 run 建立 limited preset
 ledger，v17 及更早 snapshot 的 `legacy_unconfigured` 状态仍拒绝热迁移。关闭任一开关时，
 production profile 必须 fail closed；开发 profile 才可显式使用旧路径。用户、项目和 CLI 覆盖
 不能放宽批准 policy/budget。`terminalOutcomeV1=false` 只用于 rollout 回退，不允许 production

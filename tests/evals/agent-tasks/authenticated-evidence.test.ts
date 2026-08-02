@@ -66,7 +66,11 @@ describe('authenticated Agent task evidence contract', () => {
       productionAuthenticationModel: 'github_actions_oidc_keyless_sigstore',
       formalAdversarialPassed: true,
       d07PolicyPassed: true,
-      reasonCodes: ['production_route_unconfigured', 'production_sigstore_verifier_unconfigured'],
+      reasonCodes: [
+        'contract_conformance_not_production',
+        'production_route_unconfigured',
+        'production_sigstore_verifier_unconfigured',
+      ],
     });
     expect(result.perCase).toHaveLength(12);
     expect(result.perCase.every((entry) => entry.successRate === 1)).toBeTrue();
@@ -252,6 +256,7 @@ describe('authenticated Agent task evidence contract', () => {
       fixtureRouteMatched: true,
       productionAuthenticationModel: 'github_actions_oidc_keyless_sigstore',
       reasonCodes: [
+        'contract_conformance_not_production',
         'fixture_ed25519_not_production',
         'production_route_unconfigured',
         'production_sigstore_verifier_unconfigured',
@@ -268,6 +273,9 @@ describe('authenticated Agent task evidence contract', () => {
     );
 
     const signatureDrift = buildEvidence('pinned_route_or_baseline_change');
+    if (signatureDrift.signature.kind !== 'fixture_ed25519') {
+      throw new Error('fixture evidence lost its fixture signature');
+    }
     signatureDrift.signature.valueBase64 = Buffer.alloc(64).toString('base64');
     expect(() =>
       verifyAuthenticatedAgentTaskEvidenceV1(signatureDrift, {
@@ -383,6 +391,7 @@ function buildEvidence(
   };
   const evidence: AuthenticatedAgentTaskEvidenceV1 = {
     schema: 'AuthenticatedAgentTaskEvidenceV1',
+    executionClass: 'contract_conformance',
     source,
     candidate,
     caseLedgers,

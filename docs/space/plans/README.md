@@ -110,6 +110,13 @@ blind semantic item/receipt/aggregate，并绑定逐项 candidate commitment 与
 三者都复用完整 Release artifact identity，production OIDC/Sigstore/attestation verifier/route registry 仍为空，
 因此不关闭 Task、不产生 milestone，也不替代真实 run。
 
+Revision 33 修复 production-admission 整体 Review 的 telemetry、供应链与输入身份问题：remote reporter
+在最终边界消费 release-owned alias registry 并执行实际 series cardinality budget；2A.8 verifier 使用
+immutable snapshots、archive/native-launcher/manifest 传递绑定、五 subject attestation、pinned toolchain、
+平台 signer identity 与不可 `not_applicable` 的 G5 独立真人签名 evidence；4.4 只消费 `GITHUB_SHA`
+tracked blob snapshot；platform workflow/ref 与 DeepSeek official origin 都精确闭合。真实 authority/evidence
+仍缺失，所以本 revision 不提升 Task 或 milestone。
+
 Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
 case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的
 正式资源证据已由手动 `Runtime Resilience Qualification` workflow 的 Ubuntu

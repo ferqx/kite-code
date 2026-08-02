@@ -3,7 +3,7 @@
 状态：active
 读取时机：修改 capability profile/admission/status、Verification completion、MCP write recovery/route
 或 Skill readonly/effectful 分类与 conformance 时。
-验证：`bun test tests/release/capability-profile.test.ts tests/capabilities/status-projection.test.ts
+验证：`bun test tests/release/capability-profile.test.ts tests/release/capability-maturity-gate.test.ts tests/capabilities/status-projection.test.ts
 tests/verification tests/mcp/write-*.test.ts tests/skills/effect-classification.test.ts
 tests/skills/workflow-contract.test.ts tests/evals/capabilities`、`bun run typecheck`。
 相关：ADR-0008、ADR-0051、ADR-0064、D-10、Phase 5。
@@ -20,6 +20,21 @@ embedded ceiling、实际 evidence age 与 G3/G4/G5 passed。MCP write 还必须
 都不能模糊成另一项。Rollback 只关闭新 admission/cohort=0，并保留 Receipt 与已有 required
 Verification。Task 5.1/5.2 的本地 Profile、admission 与状态 foundation 已完成；当前 profile/Gate
 仍不产生 internal/canary/maturity evidence。
+
+`scripts/evals/contracts/capability-evaluation-evidence.ts` 是四条轨道共用的 production-owned retained
+evidence schema/verifier。它逐项绑定 Release artifact、route、profile、evaluator、repository/head/ref、
+workflow ref/SHA、run/attempt/job 与 retained artifact ID，重建 digest-chained receipt ledger，并针对
+Verification false pass/fabrication/bypass、MCP duplicate/unauthorized/data violation，以及 Skill
+malicious instruction/shadowing/dependency/reference/effect violation 执行 capability-specific G0。
+production OIDC/keyless Sigstore authority registry 当前固定为空，所以即使本地 ledger 全部通过也只能
+`blocked/evidenceEligible=false`；本地失败则为 `failed`，不能被 authority 缺失掩盖。
+
+`scripts/release/capability-maturity-gate.ts` 预构建统一 canary → beta → stable Gate：每阶段使用不同
+decision/window ID，绑定相同 payload/profile/route/platform/contract/evaluator identity，并验证预注册
+时间窗、样本、error budget、G3–G5、真人 approval、用户理解度、回滚和 freshness。production
+authentication verifier 明确未实现；受信 evidence authority、已验证前序 maturity decision 与已验证真人
+approval 三个 registry 也分别固定为空。任何单一 registry 或 shape-valid fixture 都不能补齐另外三类
+认证事实并触发 promotion。该预构建不绑定新 Task，不产生 internal/canary/stable milestone。
 
 ## Verification
 

@@ -9,7 +9,11 @@ import {
   formatReleaseStatusV1,
   projectReleaseStatusV1,
 } from '../../src/app/release/status-projection';
-import { type AgentConfig, EMBEDDED_RELEASE_PROFILES_V1 } from '../../src/core/config';
+import {
+  type AgentConfig,
+  EMBEDDED_RELEASE_PROFILES_V1,
+  SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1,
+} from '../../src/core/config';
 
 function config(releaseProfileV1 = false): AgentConfig {
   return {
@@ -68,26 +72,24 @@ describe('App release composition and status projection', () => {
     ).toBe(true);
   });
 
-  test('blocks production composition while D-04 support remains empty', () => {
+  test('keeps distribution candidates separate from artifact authority and execution support', () => {
     const composition = resolveReleaseCompositionV1({
       config: config(true),
       artifactReleaseProfileV1Enabled: true,
       profileId: 'limited-production',
       production: true,
-      productionSupportIdentity: 'future-supported-target',
+      distributionTargetIdentity: 'ubuntu-24.04-x64',
     });
     expect(composition).toEqual({
       version: 1,
       active: false,
       production: true,
-      reason: 'production_support_set_empty',
+      reason: 'production_artifact_authority_unconfigured',
     });
-    expect(() =>
-      createReleaseControlledAgentConfigV1({ config: config(true), composition }),
-    ).toThrow('production_support_set_empty');
+    expect(SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1).toEqual([]);
   });
 
-  test('rejects production without a support identity and production with an internal profile', () => {
+  test('rejects every production profile before an authenticated artifact receipt exists', () => {
     expect(
       resolveReleaseCompositionV1({
         config: config(true),
@@ -99,7 +101,7 @@ describe('App release composition and status projection', () => {
       version: 1,
       active: false,
       production: true,
-      reason: 'production_support_identity_missing',
+      reason: 'production_artifact_authority_unconfigured',
     });
     expect(
       resolveReleaseCompositionV1({
@@ -107,13 +109,13 @@ describe('App release composition and status projection', () => {
         artifactReleaseProfileV1Enabled: true,
         profileId: 'internal-dogfood',
         production: true,
-        productionSupportIdentity: 'future-supported-target',
+        distributionTargetIdentity: 'macos-15-arm64',
       }),
     ).toEqual({
       version: 1,
       active: false,
       production: true,
-      reason: 'production_internal_profile',
+      reason: 'production_artifact_authority_unconfigured',
     });
   });
 
@@ -122,7 +124,7 @@ describe('App release composition and status projection', () => {
       version: 1,
       active: true,
       production: true,
-      productionSupportIdentity: 'future-supported-target',
+      distributionTargetIdentity: 'macos-15-arm64',
       profile: EMBEDDED_RELEASE_PROFILES_V1['internal-dogfood'],
     } as const satisfies ReleaseCompositionV1;
     expect(() =>
@@ -130,7 +132,7 @@ describe('App release composition and status projection', () => {
         config: config(true),
         composition: forgedInternal,
       }),
-    ).toThrow('production_internal_profile');
+    ).toThrow('production_artifact_authority_unconfigured');
 
     const forgedMissingIdentity = {
       version: 1,
@@ -143,21 +145,41 @@ describe('App release composition and status projection', () => {
         config: config(true),
         composition: forgedMissingIdentity,
       }),
-    ).toThrow('production_support_identity_missing');
+    ).toThrow('production_artifact_authority_unconfigured');
 
     const forgedUnsupportedIdentity = {
       version: 1,
       active: true,
       production: true,
-      productionSupportIdentity: 'future-supported-target',
+      distributionTargetIdentity: 'future-supported-target',
       profile: EMBEDDED_RELEASE_PROFILES_V1['limited-production'],
-    } as const satisfies ReleaseCompositionV1;
+    } as unknown as ReleaseCompositionV1;
     expect(() =>
       createReleaseControlledAgentConfigV1({
         config: config(true),
         composition: forgedUnsupportedIdentity,
       }),
-    ).toThrow('production_support_set_empty');
+    ).toThrow('production_artifact_authority_unconfigured');
+
+    const forgedEnabledCapability = structuredClone(
+      EMBEDDED_RELEASE_PROFILES_V1['limited-production'],
+    );
+    forgedEnabledCapability.capabilities.shell = {
+      maturity: 'experimental',
+      maxRollout: 'canary',
+    };
+    expect(() =>
+      createReleaseControlledAgentConfigV1({
+        config: config(true),
+        composition: {
+          version: 1,
+          active: true,
+          production: true,
+          distributionTargetIdentity: 'ubuntu-24.04-x64',
+          profile: forgedEnabledCapability,
+        },
+      }),
+    ).toThrow('production_artifact_authority_unconfigured');
   });
 
   test('status reveals release decisions but no credentials, paths, or route identities', () => {

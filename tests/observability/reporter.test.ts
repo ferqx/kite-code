@@ -77,6 +77,43 @@ describe('bounded metric reporter', () => {
     expect(exported).toEqual([]);
   });
 
+  test('folds unknown aliases and enforces the per-metric series budget at export', async () => {
+    const exported: Array<ReturnType<typeof createMetricSampleV1>> = [];
+    const aliases = Array.from({ length: 65 }, (_, index) => `route-${index}`);
+    const reporter = new BufferedMetricReporterV1({
+      enabled: true,
+      capacity: 128,
+      exporter: {
+        export: async (samples) => {
+          exported.push(...samples);
+        },
+      },
+      controlledAliases: { route: new Set(aliases) },
+    });
+    for (const route of aliases) {
+      reporter.report(
+        createMetricSampleV1({
+          name: 'model_request_total',
+          observedAt: NOW,
+          attributes: { outcome: 'success', route },
+        }),
+      );
+    }
+    for (let index = 0; index < 1_000; index += 1) {
+      reporter.report(
+        createMetricSampleV1({
+          name: 'model_request_total',
+          observedAt: NOW,
+          attributes: { outcome: 'failed', route: `secret-customer-${index}` },
+        }),
+      );
+    }
+    await reporter.flush(100);
+    expect(exported).toHaveLength(64);
+    expect(exported.some((entry) => entry.attributes.route === 'secret-customer-0')).toBeFalse();
+    expect(reporter.status().dropped).toBe(1_001);
+  });
+
   test('no-op reporter has no storage, exporter, or failure path', async () => {
     const reporter = new NoopMetricReporterV1();
     reporter.report(sample('runtime_hard_block_total'));

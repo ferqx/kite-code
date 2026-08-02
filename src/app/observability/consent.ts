@@ -1,3 +1,5 @@
+import type { MetricNameV1 } from '@/core/observability/metrics';
+
 export const TELEMETRY_METRIC_CATEGORIES_V1 = [
   'run_turn',
   'model_usage',
@@ -6,6 +8,52 @@ export const TELEMETRY_METRIC_CATEGORIES_V1 = [
   'release_rollout',
 ] as const;
 export type TelemetryMetricCategoryV1 = (typeof TELEMETRY_METRIC_CATEGORIES_V1)[number];
+
+export const TELEMETRY_METRICS_BY_CATEGORY_V1 = Object.freeze({
+  run_turn: Object.freeze(['run_total', 'run_duration_ms', 'turn_total']),
+  model_usage: Object.freeze(['model_request_total', 'model_duration_ms', 'model_tokens_total']),
+  tool_mcp_skill: Object.freeze([
+    'tool_total',
+    'mcp_total',
+    'skill_total',
+    'plan_total',
+    'verification_total',
+    'agent_task_stage_total',
+  ]),
+  runtime_resource: Object.freeze([
+    'compaction_total',
+    'compaction_duration_ms',
+    'runtime_hard_block_total',
+    'runtime_late_terminal_rejection_total',
+    'runtime_cancel_incomplete_total',
+    'runtime_orphan_total',
+    'runtime_recovery_total',
+    'runtime_rss_bytes',
+    'runtime_event_loop_lag_ms',
+    'runtime_listener_count',
+    'runtime_fd_count',
+    'runtime_handle_count',
+    'resource_active_invocations',
+    'resource_reserved_invocations',
+    'process_tree_high_water',
+    'process_tree_limit_termination_total',
+    'read_batch_size',
+    'concurrency_wait_ms',
+    'concurrency_saturation_total',
+    'approval_sibling_total',
+    'budget_exhausted_total',
+    'artifact_bytes_total',
+    'session_log_bytes_total',
+    'telemetry_dropped_total',
+  ]),
+  release_rollout: Object.freeze(['release_rollout_total']),
+} satisfies Readonly<Record<TelemetryMetricCategoryV1, readonly MetricNameV1[]>>);
+
+export function allowedMetricNamesForConsentV1(
+  categories: readonly TelemetryMetricCategoryV1[],
+): ReadonlySet<MetricNameV1> {
+  return new Set(categories.flatMap((category) => TELEMETRY_METRICS_BY_CATEGORY_V1[category]));
+}
 export type TelemetryEndpointPolicyV1 = 'disabled' | 'vendor_managed' | 'admin_managed';
 
 export interface TelemetryConsentGrantV1 {

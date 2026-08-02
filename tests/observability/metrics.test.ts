@@ -4,6 +4,7 @@ import {
   MAX_METRIC_SAMPLE_BYTES_V1,
   METRIC_ATTRIBUTE_KEYS,
   METRIC_DEFINITIONS_V1,
+  parseMetricSampleV1,
 } from '../../src/core/observability/metrics';
 
 const NOW = '2026-08-02T00:00:00.000Z';
@@ -92,6 +93,27 @@ describe('production metric schema v1', () => {
         attributes: { outcome: 'success', route: 'SECRET_ROUTE' },
       }),
     ).toThrow('not a controlled alias');
+  });
+
+  test('reporter-boundary parsing rejects unknown fields and forged definition fields', () => {
+    const sample = createMetricSampleV1({ name: 'run_total', observedAt: NOW });
+    expect(() => parseMetricSampleV1({ ...sample, prompt: 'SECRET' })).toThrow('unknown fields');
+    expect(() => parseMetricSampleV1({ ...sample, kind: 'gauge' })).toThrow(
+      'does not match its definition',
+    );
+  });
+
+  test('reporter-boundary parsing folds lowercase content-bearing aliases without a release registry', () => {
+    const sample = createMetricSampleV1({
+      name: 'model_request_total',
+      observedAt: NOW,
+      attributes: { outcome: 'success', route: 'secret-customer-acme-token' },
+    });
+    expect(parseMetricSampleV1(sample).attributes.route).toBe('custom/unknown');
+    expect(
+      parseMetricSampleV1(sample, { route: new Set(['secret-customer-acme-token']) }).attributes
+        .route,
+    ).toBe('secret-customer-acme-token');
   });
 
   test('sample construction rejects invalid numeric and temporal data', () => {

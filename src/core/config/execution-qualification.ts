@@ -52,6 +52,23 @@ const inProcessReadOnlyToolContractV1Schema = z
   })
   .strict();
 
+const processCapabilitySurfaceV1Schema = z
+  .object({
+    shell: z.boolean(),
+    skillChild: z.boolean(),
+    localStdioMcp: z.boolean(),
+  })
+  .strict()
+  .superRefine((surface, context) => {
+    if (!surface.shell && (surface.skillChild || surface.localStdioMcp)) {
+      context.addIssue({
+        code: 'custom',
+        path: ['shell'],
+        message: 'child process capabilities require the qualified shell process boundary',
+      });
+    }
+  });
+
 const inProcessReadOnlyToolCatalogObjectV1Schema = z
   .object({
     version: z.literal(1),
@@ -123,6 +140,7 @@ const qualificationSchema = z
     evidenceDigest: digestSchema,
     evidenceCommit: z.string().regex(/^[a-f0-9]{40}$/),
     backendCapabilities: executionBackendCapabilitiesV1Schema,
+    processCapabilitySurface: processCapabilitySurfaceV1Schema,
     inProcessReadOnlyTools: inProcessReadOnlyToolCatalogV1Schema,
   })
   .strict()
@@ -229,6 +247,11 @@ function registryCanonicalValue(
           processTreeLimit: qualification.backendCapabilities.processTreeLimit,
           childProcessInheritance: qualification.backendCapabilities.childProcessInheritance,
           verifiedInProcessReadOnly: qualification.backendCapabilities.verifiedInProcessReadOnly,
+        },
+        processCapabilitySurface: {
+          shell: qualification.processCapabilitySurface.shell,
+          skillChild: qualification.processCapabilitySurface.skillChild,
+          localStdioMcp: qualification.processCapabilitySurface.localStdioMcp,
         },
         inProcessReadOnlyTools: {
           version: qualification.inProcessReadOnlyTools.version,

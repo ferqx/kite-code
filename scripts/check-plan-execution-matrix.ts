@@ -1830,6 +1830,83 @@ if (!releaseSupplyChainBinding) {
   if (cells[6]?.replaceAll('`', '') !== '—') {
     fail('2A.8: completionRecordPath must remain empty before real evidence');
   }
+  if (
+    !cells[5]?.includes('G5 真人签名 evidence') ||
+    !cells[5]?.includes('D-04 空集合只阻止 effectful execution')
+  ) {
+    fail('2A.8: binding must preserve the independent security review and distribution boundary');
+  }
+}
+
+const productionAdmissionBaseline = 'f38d819226aeceaa549e2466c35ed26fe642a6c9';
+const releaseRolloutBinding = decisionRegister
+  .split('\n')
+  .find((line) => line.startsWith('| 2A.9 |'));
+if (!releaseRolloutBinding) {
+  fail('2A.9: dependency-ready disable-only rollout contract must have an execution binding');
+} else {
+  const cells = parsePipeRow(releaseRolloutBinding);
+  if (cells[2]?.replaceAll('`', '') !== productionAdmissionBaseline) {
+    fail('2A.9: binding must preserve the production-admission activation baseline');
+  }
+  if (cells[3]?.replaceAll('`', '') !== 'codex/production-admission') {
+    fail('2A.9: binding must identify the production-admission implementation branch');
+  }
+  if (cells[4]?.replaceAll('`', '') !== 'in_progress') {
+    fail('2A.9: binding must remain in_progress until real rollout authority/evidence exists');
+  }
+  if (
+    !cells[5]?.includes('authenticated artifact authority') ||
+    !cells[5]?.includes('exporter') ||
+    cells[6]?.replaceAll('`', '') !== '—'
+  ) {
+    fail('2A.9: binding must retain the real authority/exporter evidence-waiting boundary');
+  }
+}
+requireReachableCommit(productionAdmissionBaseline, '2A.9');
+
+const d03Body = decisionSections.find((match) => match[1] === 'D-03')?.[2] ?? '';
+if (
+  !/^- status: `closed`$/m.test(d03Body) ||
+  !d03Body.includes('与普通 telemetry consent 分离的显式 opt-in') ||
+  !d03Body.includes('匿名且无 prompt/response/file/path/command/error 正文')
+) {
+  fail('D-03 must remain closed on the explicit opt-in, no-content telemetry decision');
+}
+const adr0065 = readFileSync(
+  join(root, 'docs/adr/0065-cross-platform-distribution-and-capability-admission.md'),
+  'utf8',
+);
+if (
+  !/^状态：accepted$/m.test(adr0065) ||
+  !adr0065.includes('跨平台发行与执行能力资格正交') ||
+  !decisionRegister.includes('Revision D-04.1') ||
+  !decisionRegister.includes('Revision D-14.1')
+) {
+  fail('ADR-0065 and D-04.1/D-14.1 append-only revisions must remain ratcheted');
+}
+
+const productionAdmissionRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 32 |'));
+if (
+  productionAdmissionRevision.length !== 1 ||
+  !productionAdmissionRevision[0]?.includes('distribution identity') ||
+  !productionAdmissionRevision[0]?.includes('platform artifact') ||
+  !productionAdmissionRevision[0]?.includes('不产生 milestone 或真实 evidence')
+) {
+  fail('decision register must contain exact Revision 32 production-admission ratchet');
+}
+const productionAdmissionHardeningRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 33 |'));
+if (
+  productionAdmissionHardeningRevision.length !== 1 ||
+  !productionAdmissionHardeningRevision[0]?.includes('G5 独立真人签名') ||
+  !productionAdmissionHardeningRevision[0]?.includes('tracked Git blob snapshot') ||
+  !productionAdmissionHardeningRevision[0]?.includes('不提升 Task 或 milestone')
+) {
+  fail('decision register must contain exact Revision 33 production-admission hardening ratchet');
 }
 
 const evaluationPlan = sources.get('2B') ?? '';

@@ -17,9 +17,19 @@ build/verify/bootstrap 与 deterministic foundation Gate replay 全部通过，T
 [Release Contract Foundation 完成记录](../execution/completed/2026-07-30-agent-production-release-control.md)。
 
 同日 2A.8 的 manual-only/no-publish workflow、synthetic SBOM/provenance/platform smoke contract
-已经本地实现，但 D-04 支持集为空且真实 audit、平台签名、actual artifact smoke、Sigstore 与 attestation
-均未发生，所以保持 `in_progress`。2A.9 的 disable-only loader/cache 也仅完成公开 synthetic key
-contract；D-03 仍 open，真实 rollout signing/service 保持 disabled。2A.10/2A.11 尚未完成。
+已经本地实现；禁用的 production verifier 已补齐 immutable input snapshot、OS-protected pinned
+toolchain、canonical USTAR 与
+archive/native-launcher membership、macOS 完整 app bundle seal/notarization、canonical manifest、五
+subject attestation、pinned toolchain、平台发布者身份与带真人签名 evidence 的全 G0–G5 Gate contract。
+真实 build/audit、平台签名/notarization、actual artifact smoke、
+Sigstore/attestation 和第三方安全评审均未发生，所以保持 `in_progress`；D-04 空支持集仅阻止 effectful
+execution，不是普通 distribution blocker。2A.9 的 disable-only loader/cache 也仅完成公开 synthetic key
+contract；D-03 已关闭后，2A.9 已在 baseline `f38d819226aeceaa549e2466c35ed26fe642a6c9`
+绑定 `in_progress`。external canary 只能消费 release composition 中 production canary profile 的
+capability/telemetry ceiling，调用者布尔值不能取得 authority；当前 production composition 因没有
+authenticated artifact receipt 固定 blocked，embedded ceiling 也全部 off，且真实
+rollout signing/service、authenticated artifact authority、exporter 和 observation 保持 disabled/缺失。
+2A.10/2A.11 尚未完成。
 
 ## 目标
 
@@ -318,6 +328,14 @@ Gate：
   process-isolated tests；入口或隔离清单变化必须改变 build recipe digest；
 - dependency vulnerability、license、SBOM；
 - artifact provenance 和签名/校验；
+- tool receipt 必须指向 OS 管理且普通 runner 不可写的完整安装树，并在执行前后校验 digest；不得从
+  user-writable cache 或孤立复制的 PowerShell apphost 执行；
+- verifier 必须运行在从未执行 candidate source/dependency 的新 hosted VM，只 checkout protected
+  commit 的 verifier，并把 build artifact 当作 opaque input 下载；build/verify 不得共享进程边界；
+- trusted verifier commit 必须绑定 expected identity、第三方 security-review evidence、Gate artifact
+  identity 和最终 verifier identity；protected variable 漂移必须使既有证据失效；
+- archive 只接受无扩展/链接/等价路径覆盖的 canonical USTAR；macOS 必须安全重建并验证完整
+  `Kite.app` bundle/resource seal/Gatekeeper notarization，同时保持内部 launcher byte binding；
 - Linux/macOS/Windows artifact build/smoke；
 - tampered payload、manifest、launcher/platform signature 三类负向 smoke；
 - 启动、Workspace trust、文件、shell、sandbox、session recovery、MCP auth、TUI/CLI；

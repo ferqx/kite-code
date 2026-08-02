@@ -39,6 +39,11 @@ stat-dirty tracked file 在拒绝前触发 clean/process filter。多步物化�
 Execution conformance workflow 的第三方 Actions 全部固定 immutable SHA。默认分支 run 与独立
 artifact verification 已完成；D-04 空支持集和所有 capability exclusion 保持不变。
 
+2026-08-02 的后续 admission 加固按 ADR-0065 把普通三平台发行与 effectful execution capability
+分开：现有 GitHub-hosted matrix 吸收 TUI/foreground CLI 共享 composition、精确 process surface
+和 Linux cgroup pids 候选探针；撤回未提交的 self-hosted Ubuntu 常规发行要求。该后续工作不重开
+或改写已完成的 Phase 1B，也不把本地实现登记为 production support。
+
 ## 目标
 
 把 `workspace_write`、network allowlist、protected path 和 writer worktree 从产品文案变成

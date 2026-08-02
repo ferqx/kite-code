@@ -42,8 +42,108 @@ jobs:
           console.log('nonDistributable=true productionCandidate=false');"
 
   production-signing-disabled:
-    name: production-signing-disabled-private-empty-support-set
-    if: ${{ false }}
-    runs-on: ubuntu-24.04
+    name: production-signing-disabled-${{ matrix.platform }}
+    if: ${{ false && github.workflow_sha == vars.KITE_RELEASE_EXPECTED_WORKFLOW_SHA }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: macos-arm64
+            launcher: native/macos/Kite.app/Contents/MacOS/kite
+            platform_verifier: /usr/bin/codesign
+            policy_verifier: /usr/sbin/spctl
+          - os: ubuntu-24.04
+            platform: linux-x64
+            launcher: native/linux/kite
+            platform_verifier: ""
+            policy_verifier: ""
+          - os: windows-2025
+            platform: windows-x64
+            launcher: native/windows/kite.exe
+            platform_verifier: C:\Program Files\PowerShell\7\pwsh.exe
+            policy_verifier: ""
+    runs-on: ${{ matrix.os }}
+    env:
+      # Deliberately invalid until a protected producer supplies the exact
+      # signer/tool/reviewer receipts and approved-candidate Gate digest.
+      # Tool receipts must resolve inside an OS-protected installation tree;
+      # macOS signing subject is safely rebuilt as the full app from payload.
+      # Enabling the job alone still fails closed.
+      KITE_RELEASE_GATE_DECISION_DIGEST: disabled-unconfigured
+      KITE_RELEASE_SECURITY_REVIEWER_IDENTITY: disabled-unconfigured
+      KITE_RELEASE_SECURITY_REVIEWER_PUBLIC_KEY_SHA256: disabled-unconfigured
+      KITE_RELEASE_GH_PATH: ${{ vars.KITE_RELEASE_GH_PATH }}
+      KITE_RELEASE_GH_SHA256: ${{ vars.KITE_RELEASE_GH_SHA256 }}
+      KITE_RELEASE_COSIGN_PATH: ${{ vars.KITE_RELEASE_COSIGN_PATH }}
+      KITE_RELEASE_COSIGN_SHA256: ${{ vars.KITE_RELEASE_COSIGN_SHA256 }}
+      KITE_RELEASE_PLATFORM_VERIFIER_PATH: ${{ matrix.platform_verifier }}
+      KITE_RELEASE_PLATFORM_VERIFIER_SHA256: ${{ vars.KITE_RELEASE_PLATFORM_VERIFIER_SHA256 }}
+      KITE_RELEASE_MACOS_POLICY_VERIFIER_PATH: ${{ matrix.policy_verifier }}
+      KITE_RELEASE_MACOS_POLICY_VERIFIER_SHA256: ${{ vars.KITE_RELEASE_MACOS_POLICY_VERIFIER_SHA256 }}
+      KITE_RELEASE_MACOS_TEAM_ID: ${{ vars.KITE_RELEASE_MACOS_TEAM_ID }}
+      KITE_RELEASE_MACOS_CERTIFICATE_SHA256: ${{ vars.KITE_RELEASE_MACOS_CERTIFICATE_SHA256 }}
+      KITE_RELEASE_WINDOWS_SIGNER_CERTIFICATE_SHA256: ${{ vars.KITE_RELEASE_WINDOWS_SIGNER_CERTIFICATE_SHA256 }}
+      KITE_RELEASE_WINDOWS_SIGNER_SPKI_SHA256: ${{ vars.KITE_RELEASE_WINDOWS_SIGNER_SPKI_SHA256 }}
+      KITE_RELEASE_WINDOWS_ROOT_CERTIFICATE_SHA256: ${{ vars.KITE_RELEASE_WINDOWS_ROOT_CERTIFICATE_SHA256 }}
+      KITE_RELEASE_WINDOWS_TIMESTAMP_CERTIFICATE_SHA256: ${{ vars.KITE_RELEASE_WINDOWS_TIMESTAMP_CERTIFICATE_SHA256 }}
     steps:
-      - run: exit 1
+      # Fresh hosted VM: never checkout or execute candidate source here.
+      - name: Checkout protected verifier implementation only
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ vars.KITE_TRUSTED_VERIFIER_COMMIT }}
+          path: trusted-verifier
+          persist-credentials: false
+      - name: Download opaque candidate from the isolated build job
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: production-candidate-${{ matrix.platform }}
+          path: candidate
+      - name: Prove protected verifier ref is one exact commit
+        shell: bash
+        env:
+          TRUSTED_VERIFIER_COMMIT: ${{ vars.KITE_TRUSTED_VERIFIER_COMMIT }}
+        run: |
+          if [[ ! "$TRUSTED_VERIFIER_COMMIT" =~ ^[a-f0-9]{40}$ ]]; then
+            echo "KITE_TRUSTED_VERIFIER_COMMIT must be one full lowercase SHA" >&2
+            exit 1
+          fi
+          actual="$(git -C trusted-verifier rev-parse --verify HEAD)"
+          if [[ "$actual" != "$TRUSTED_VERIFIER_COMMIT" ]]; then
+            echo "protected verifier checkout does not equal the expected commit" >&2
+            exit 1
+          fi
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+        working-directory: trusted-verifier
+      - name: Future production supply-chain admission chain (still unreachable)
+        working-directory: trusted-verifier
+        run: >-
+          bun run scripts/release/verify-production-supply-chain.ts
+          --repository "${{ github.repository }}"
+          --repository-id "${{ github.repository_id }}"
+          --repository-node-id "R_kgDOSKbi8g"
+          --workflow-path ".github/workflows/release-candidate.yml"
+          --workflow-ref "${{ github.workflow_ref }}"
+          --workflow-sha "${{ vars.KITE_RELEASE_EXPECTED_WORKFLOW_SHA }}"
+          --trusted-verifier-commit "${{ vars.KITE_TRUSTED_VERIFIER_COMMIT }}"
+          --ref "${{ github.ref }}"
+          --commit "${{ github.sha }}"
+          --run-id "${{ github.run_id }}"
+          --run-attempt "${{ github.run_attempt }}"
+          --platform "${{ matrix.platform }}"
+          --payload "../candidate/kite-${{ matrix.platform }}.tar.gz"
+          --native-launcher "../candidate/${{ matrix.launcher }}"
+          --manifest "../candidate/manifest.json"
+          --sbom "../candidate/sbom.spdx.json"
+          --provenance "../candidate/provenance.json"
+          --sigstore-bundle "../candidate/manifest.sigstore.json"
+          --attestation-bundle "../candidate/attestations.jsonl"
+          --platform-signature-bundle "../candidate/kite-${{ matrix.platform }}.sigstore.json"
+          --gate-decision "../candidate/release-gate-decision.json"
+          --security-review-evidence "../candidate/security-review.json"
+          --security-review-bundle "../candidate/security-review.sigstore.json"
+          --security-reviewer-public-key "../candidate/security-reviewer.pub"

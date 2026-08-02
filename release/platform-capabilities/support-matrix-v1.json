@@ -52,7 +52,7 @@
     "selected network mode (off by default) and its matching native enforcement",
     "DNS/redirect-safe allowlist only when allowlist is selected or claimed as a capability",
     "hard process-tree count limit plus kill with no residual descendants",
-    "shell, nested descendant, forked Skill, and local stdio MCP inheritance",
+    "shell and nested descendant inheritance, plus forked Skill/local stdio MCP only when declared true in processCapabilitySurface",
     "TUI and foreground CLI composition identity"
   ]
 }

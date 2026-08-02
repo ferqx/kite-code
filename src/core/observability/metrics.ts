@@ -19,6 +19,13 @@ export const METRIC_ATTRIBUTE_KEYS = [
 ] as const;
 export type MetricAttributeKeyV1 = (typeof METRIC_ATTRIBUTE_KEYS)[number];
 export type MetricAttributesV1 = Readonly<Partial<Record<MetricAttributeKeyV1, string>>>;
+export type MetricDynamicAliasKeyV1 = 'route' | 'capability';
+export type MetricControlledAliasRegistryV1 = Readonly<
+  Partial<Record<MetricDynamicAliasKeyV1, ReadonlySet<string>>>
+>;
+
+const CONTROLLED_ALIAS_PATTERN_V1 = /^[a-z0-9][a-z0-9._:-]{0,47}$/;
+const FIXED_DYNAMIC_ALIASES_V1 = new Set(['custom/unknown', 'other']);
 
 const FINITE_ATTRIBUTE_VALUES: Readonly<
   Partial<Record<MetricAttributeKeyV1, ReadonlySet<string>>>
@@ -374,6 +381,65 @@ export interface MetricSampleV1 {
   attributes: MetricAttributesV1;
 }
 
+const METRIC_SAMPLE_KEYS_V1 = [
+  'attributes',
+  'kind',
+  'name',
+  'observedAt',
+  'value',
+  'version',
+] as const;
+
+/**
+ * Rebuild an untrusted sample at the reporter boundary. TypeScript types are
+ * not a privacy boundary, so unknown fields and caller-supplied kind/version
+ * values must be rejected before anything reaches an exporter.
+ */
+export function parseMetricSampleV1(
+  value: unknown,
+  controlledAliases: MetricControlledAliasRegistryV1 = {},
+): MetricSampleV1 {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error('Metric sample must be an object.');
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  if (
+    keys.length !== METRIC_SAMPLE_KEYS_V1.length ||
+    keys.some((key, index) => key !== METRIC_SAMPLE_KEYS_V1[index])
+  ) {
+    throw new Error('Metric sample has missing or unknown fields.');
+  }
+  if (typeof record.name !== 'string' || !Object.hasOwn(METRIC_DEFINITIONS_V1, record.name)) {
+    throw new Error('Metric sample name is not allowlisted.');
+  }
+  if (
+    !record.attributes ||
+    typeof record.attributes !== 'object' ||
+    Array.isArray(record.attributes)
+  ) {
+    throw new Error('Metric sample attributes must be an object.');
+  }
+  const normalizedAttributes = Object.fromEntries(
+    Object.entries(record.attributes).map(([key, entry]) => {
+      if (key !== 'route' && key !== 'capability') return [key, entry];
+      if (typeof entry !== 'string') return [key, entry];
+      if (FIXED_DYNAMIC_ALIASES_V1.has(entry)) return [key, entry];
+      return [key, controlledAliases[key]?.has(entry) ? entry : 'custom/unknown'];
+    }),
+  ) as MetricAttributesV1;
+  const rebuilt = createMetricSampleV1({
+    name: record.name as MetricNameV1,
+    value: record.value as number,
+    observedAt: record.observedAt as string,
+    attributes: normalizedAttributes,
+  });
+  if (record.version !== rebuilt.version || record.kind !== rebuilt.kind) {
+    throw new Error('Metric sample version or kind does not match its definition.');
+  }
+  return rebuilt;
+}
+
 export function createMetricSampleV1(input: {
   name: MetricNameV1;
   value?: number;
@@ -410,7 +476,7 @@ export function createMetricSampleV1(input: {
       (key === 'route' || key === 'capability') &&
       entry !== 'custom/unknown' &&
       entry !== 'other' &&
-      !/^[a-z0-9][a-z0-9._:-]{0,47}$/.test(entry)
+      !CONTROLLED_ALIAS_PATTERN_V1.test(entry)
     ) {
       throw new Error(`Metric ${input.name} attribute ${key} is not a controlled alias.`);
     }

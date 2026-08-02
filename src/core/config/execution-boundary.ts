@@ -348,6 +348,9 @@ export function evaluateExecutionBoundaryQualificationV1(
     return denied('backend_child_inheritance_unsupported');
   }
 
+  const processSurface = qualification.processCapabilitySurface;
+  if (!processSurface.shell) return denied('qualification_boundary_mismatch');
+
   return {
     allowed: true,
     admissionKind: 'technical_evaluation',
@@ -357,12 +360,12 @@ export function evaluateExecutionBoundaryQualificationV1(
     surface: {
       inProcessReadOnlyTools: qualification.inProcessReadOnlyTools,
       network: boundary.networkMode === 'allowlist',
-      process: true,
+      process: processSurface.shell || processSurface.skillChild || processSurface.localStdioMcp,
       write: boundary.filesystemScope === 'workspace_write',
       workspaceWrite: boundary.filesystemScope === 'workspace_write',
-      shell: true,
-      skillChild: true,
-      localStdioMcp: true,
+      shell: processSurface.shell,
+      skillChild: processSurface.skillChild,
+      localStdioMcp: processSurface.localStdioMcp,
     },
   };
 }

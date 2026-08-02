@@ -113,6 +113,15 @@ export {
   workspaceDataLabelV1Schema,
 } from './provider-data-policy';
 export type {
+  ProviderRouteCandidateBundleV1,
+  ProviderRouteCandidateV1,
+} from './provider-route-candidate';
+export {
+  loadProviderRouteCandidateBundleV1,
+  providerRouteCandidateBundleV1Schema,
+  providerRouteCandidateV1Schema,
+} from './provider-route-candidate';
+export type {
   CapabilityMaturity,
   CapabilityProfileAdmissionDecisionV1,
   CapabilityProfileAdmissionReasonV1,
@@ -142,6 +151,8 @@ export {
 } from './release-capabilities';
 export type {
   EmbeddedReleaseProfileIdV1,
+  ProductionDistributionTargetIdentityV1,
+  ProductionDistributionTargetV1,
   ReleaseChannelV1,
   ReleaseProfileApprovalRequirementV1,
   ReleaseProfileV1,
@@ -149,14 +160,17 @@ export type {
 } from './release-profile';
 export {
   admitEmbeddedReleaseProfileV1,
-  admitProductionReleaseSupportIdentityV1,
+  admitProductionDistributionTargetIdentityV1,
   EMBEDDED_RELEASE_PROFILES_V1,
+  PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1,
+  PRODUCTION_DISTRIBUTION_TARGETS_V1,
   ProductionReleaseProfileAdmissionError,
+  parseProductionDistributionTargetIdentityV1,
   parseReleaseProfileV1,
   RELEASE_PROFILE_VERSION,
   releaseCapabilityStatesSchema,
   releaseProfileV1Schema,
-  SUPPORTED_PRODUCTION_RELEASE_TARGETS_V1,
+  SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1,
 } from './release-profile';
 export type {
   ReleaseProfileRestrictionLayerV1,

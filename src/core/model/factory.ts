@@ -19,7 +19,22 @@ export type SupportedChatModel = {
   /** Explicit false makes progressive capability disclosure fail closed. */
   supportsToolCalls?: boolean;
   capabilityMetadata?: ModelCapabilityMetadata;
+  /** Provider-owned request options for deterministic internal summaries. */
+  compactionProviderOptions?: ModelProviderOptions;
 };
+
+type ModelProviderOptionValue =
+  | null
+  | string
+  | number
+  | boolean
+  | { [key: string]: ModelProviderOptionValue | undefined }
+  | ModelProviderOptionValue[];
+
+export type ModelProviderOptions = Record<
+  string,
+  { [key: string]: ModelProviderOptionValue | undefined }
+>;
 
 /** 根据配置创建 AI SDK 聊天模型 / Create an AI SDK chat model from config */
 export function createChatModel(config: AgentConfig): SupportedChatModel {
@@ -56,6 +71,9 @@ export function createChatModel(config: AgentConfig): SupportedChatModel {
   return {
     model,
     supportsToolCalls: config.modelKwargs?.supportsToolCalls !== false,
+    ...(config.providerType === 'deepseek' && config.modelName.startsWith('deepseek-v4-')
+      ? { compactionProviderOptions: { deepseek: { thinking: { type: 'disabled' } } } }
+      : {}),
     setRetryListener: (fn) => {
       retryListener = fn;
     },

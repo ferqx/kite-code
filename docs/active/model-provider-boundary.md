@@ -6,7 +6,7 @@
 
 验证：`bun test tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
 
-相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、`real-model-test-boundary.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
+相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、`real-model-test-boundary.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
 ## 规则
 
@@ -22,9 +22,9 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
 
 `ProviderDataPolicyV1` 是 production route 数据边界的版本化 schema。资格绑定
 provider type、operator、规范化 endpoint origin、endpoint class、deployment 和 region 的
-canonical identity digest，不绑定 model name。仓库受控 snapshot 位于
-`release/provider-data-policies/`；当前 D-14 批准 bundle 明确为空，因此还没有任何
-production-qualified model/MCP route。`providerDataPolicyV1` 默认关闭；启用后 Model
+canonical identity digest；具体批准项还可在 resolved config 映射边界收紧 model 和 URL。
+仓库受控 snapshot 位于 `release/provider-data-policies/`；当前 D-14.3 bundle 只批准 DeepSeek
+官方 API 的 `deepseek-v4-flash` model route。`providerDataPolicyV1` 默认关闭；启用后 Model
 Controller 必须在 Provider dispatch 前取得由受控 bundle 构造的 registry/gate，缺失、
 未生效、过期、digest/route identity 漂移、payload kind 越权或数据分类越权全部 fail closed。
 `limited` profile 的 unknown route 一律拒绝；自定义 endpoint 只能进入显式
@@ -45,10 +45,31 @@ Subagent 等已建立 child attempt 的路径若在最终本地门禁被拒绝�
 reservation 必须转为 `unknown` 并进入 reconciliation，不能整体退款。
 
 Provider admission payload 为每段正文保留 `user_prompt | file_snippet | tool_result | summary`
-provenance 和 Workspace data label。`secret` label、runtime secret detector、credential marker
-或 protected-path marker 在 mocked/real Provider 收到请求前独立阻断。状态投影只暴露 route
+provenance 和 Workspace data label。Runtime 组合根把与 session logging 相同的 content inspector
+实例注入 admission，避免两条外发边界出现 detector drift；每段正文都必须得到 `clear`，inspector
+抛错或返回 `unknown` 与返回 `secret` 一样在 dispatch 前 fail closed。`secret` label、runtime secret
+detector、credential marker 或 protected-path marker 在 mocked/real Provider 收到请求前独立阻断。状态投影只暴露 route
 alias、允许分类、retention/training/logging 用途和 policy/registry revision，不暴露 endpoint
 origin。用户、项目或 CLI 配置不能向 registry 增加 policy，也不能放宽仓库批准 bundle。
+
+首个候选已按 D-14.3 提升为批准项：只接受 resolved config 中 `providerType=deepseek`、
+`modelName=deepseek-v4-flash` 和 `https://api.deepseek.com` 或其 `/v1` path；canonical route 记录
+`operatorId=hangzhou-deepseek-ai`、`deploymentId=deepseek-api`、`region=unspecified`。其他模型、
+其他 host、HTTP、非默认端口、URL credentials/query/fragment 都不会映射到批准 identity，因而
+fail closed。2026-02-10 官方隐私政策披露的中华人民共和国处理/存储、可能用于训练和个人数据训练
+opt-out，以及未承诺固定 API 正文 retention、未提供 DPA 和 deployment region，均由 single owner
+在 ADR-0066 中显式接受，不再作为该精确 Route 的 admission blocker。下游产品仍是自身数据控制者，
+必须用 `deepseek-route-disclosure-d14.3` 在 README/active/book 发行文档透明披露；当前 pre-release
+single-maintainer 决策不要求 per-run acknowledgement，也不把 disclosure receipt 作为 admission
+前置。policy 于 2026-09-01 失效，复核缺失时自动拒绝。
+
+只读治理资产 `release/provider-data-policies/candidates-v1.json` 保留 promotion 与官方来源记录，
+production admission 仍只读取 `approved-v1.json`，不能把模型存在或本地可调用解释为生产数据资格。
+candidate loader 要求
+四种治理目的各恰好一个 official source，并固定 HTTPS origin：model catalog/context cache 只能来自
+`api-docs.deepseek.com`，terms/privacy 只能来自 `cdn.deepseek.com`；credentials、非默认端口、HTTP、
+其他 hostname、重复 purpose、来源缺失或过期都 fail closed。域名约束只证明来源入口正确；生产资格
+来自 owner 的 D-14.3 风险接受、精确 Route identity、披露和新鲜 approved policy 的共同约束。
 
 Model Provider admission 与 remote HTTP MCP content egress 是两个独立授权域。模型 route 的
 policy/consent 即使允许 `confidential` payload，也不能签发、复用或替代

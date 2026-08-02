@@ -1,7 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { generateReleaseManifestV1 } from '../../scripts/release/generate-manifest';
+import {
+  assembleReleaseManifestV1,
+  generateReleaseManifestV1,
+  PRODUCTION_RELEASE_ASSEMBLY_ENABLED,
+} from '../../scripts/release/generate-manifest';
 import { loadReleaseManifestConsistencyV1 } from '../../src/app/release/manifest-loader';
 
 const COMMIT = 'a'.repeat(40);
@@ -143,5 +147,51 @@ describe('ReleaseManifestV1 generation and Runtime consistency loader', () => {
         production: true,
       }),
     ).toThrow('rejects synthetic');
+  });
+
+  test('binds production manifest admission to one closed distribution identity while assembly stays disabled', () => {
+    const { manifest } = fixture();
+    const { version: _version, payloadSha256: _payloadSha256, ...fields } = manifest;
+    expect(PRODUCTION_RELEASE_ASSEMBLY_ENABLED).toBe(false);
+
+    expect(() =>
+      assembleReleaseManifestV1({
+        payloadBytes: new TextEncoder().encode('not distributable'),
+        fields: { ...fields, supportedPlatforms: ['ubuntu-24.04-x64'] },
+        distributionMode: 'production',
+        distributionTargetIdentity: 'ubuntu-24.04-x64',
+      }),
+    ).toThrow('real signing and distribution qualification');
+
+    expect(() =>
+      assembleReleaseManifestV1({
+        payloadBytes: new TextEncoder().encode('not distributable'),
+        fields: { ...fields, supportedPlatforms: ['macos-15-arm64'] },
+        distributionMode: 'production',
+        distributionTargetIdentity: 'future-supported-target',
+      }),
+    ).toThrow('distribution_target_identity_unsupported');
+
+    expect(() =>
+      assembleReleaseManifestV1({
+        payloadBytes: new TextEncoder().encode('not distributable'),
+        fields: { ...fields, supportedPlatforms: ['macos-15-arm64'] },
+        distributionMode: 'production',
+        distributionTargetIdentity: 'windows-2025-x64',
+      }),
+    ).toThrow('must equal its admitted distribution target');
+  });
+
+  test('rejects attaching a production distribution identity to a synthetic manifest', () => {
+    const { manifest } = fixture();
+    const { version: _version, payloadSha256: _payloadSha256, ...fields } = manifest;
+    expect(() =>
+      assembleReleaseManifestV1({
+        payloadBytes: new TextEncoder().encode('synthetic'),
+        fields,
+        distributionMode: 'synthetic_non_distributable',
+        distributionTargetIdentity: 'macos-15-arm64',
+      }),
+    ).toThrow('Synthetic release assembly cannot consume');
   });
 });

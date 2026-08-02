@@ -44,6 +44,13 @@ Required CI 固定分为 `quality`、`unit`、`compaction-contract`、`runtime-e
 
 真实套件不存在或未运行时，只能报告本地 mock/contract 验证结果。
 
+2026-08-02 已用用户本机隔离配置显式运行一次 DeepSeek 官方 API 的
+`deepseek-v4-flash` direct/incremental compaction smoke，两种场景均返回非空且减少上下文的 summary。
+DeepSeek V4 在内部 summary 请求中显式设置 provider option 关闭 thinking，避免 reasoning token 消耗
+summary 输出预算；普通 Agent 请求行为不变。该运行只证明当次真实 API 兼容性，不含 GitHub
+run/artifact/attestation、正式 suite ledger 或 authenticated evaluator，因此不能登记为 2B.4、4.4 或
+route qualification evidence。输出只保留 provider alias、model 与场景名，不记录 key、请求正文或 summary。
+
 `tests/evals/agent-tasks/` 当前同样属于本地 synthetic contract。D-07 已批准 12-case suite、1/8/20
 重复策略与阈值；本地 authenticated verifier 能重建 96/240 receipts 的 D-07 Gate 和精确 21-case
 adversarial ledger，但 production route/Sigstore authority 仍 unconfigured。nightly dry-run 零 network

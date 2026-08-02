@@ -22,8 +22,10 @@ verifier/sample-ledger identity，并已增加 digest-chained admissions/termina
 terminal completeness、时间单调性、纯 aggregate 重建、共享 Release artifact identity 和完整 GitHub
 OIDC/job/artifact identity verifier；outer observation/candidate/report splice、orphan、duplicate、drop、
 reorder 或自报 aggregate mismatch 均 fail closed。production producer/attestation trust
-registry 仍为空，任何本地 fixture 都不能产生 milestone。2B 正式证据依赖、D-03、真实 baseline、
-incident rehearsal 与 external
+registry 仍为空，任何本地 fixture 都不能产生 milestone。D-03 已关闭为独立 external-canary
+opt-in 与匿名无正文 telemetry；reporter 最终边界现消费 release-owned alias registry、折叠未知动态标签、
+执行每 metric series cardinality budget，并在 mandatory audit admission denied 时固定 no-op。2B 正式证据依赖、
+真实 exporter/baseline、incident rehearsal 与 external
 observation 尚未满足，因此 Task 3.1–3.10 均不标记 completed；`MS:3-OPS-READY` 和
 `MS:LIMITED-SLO` 都未产生。
 

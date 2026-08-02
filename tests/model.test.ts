@@ -294,6 +294,21 @@ describe('model provider factory', () => {
     expect(typeof binding.setRetryListener).toBe('function');
   });
 
+  test('disables DeepSeek V4 thinking only for bounded compaction summary calls', () => {
+    const binding = createChatModel({
+      providerName: 'deepseek',
+      providerType: 'deepseek',
+      apiKey: 'sk-test',
+      baseURL: 'https://api.deepseek.com/v1',
+      modelName: 'deepseek-v4-flash',
+      sandbox: { enabled: true },
+    });
+
+    expect(binding.compactionProviderOptions).toEqual({
+      deepseek: { thinking: { type: 'disabled' } },
+    });
+  });
+
   test('creates a SupportedChatModel for OpenAI-compatible providers', () => {
     const config: AgentConfig = {
       providerName: 'siliconflow',

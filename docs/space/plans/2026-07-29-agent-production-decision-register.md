@@ -28,7 +28,7 @@
 | Capability Owner | `github:@ferqx` | `none (single-maintainer)` | capability plan、ADR 和 PR review | 维护者不可用时 capability 晋级 fail closed |
 | Release Owner | `github:@ferqx` | `none (single-maintainer)` | release plan、Gate record 和 PR review | external 前必须补独立第三方安全评审 |
 | Security & Privacy Owner | `github:@ferqx` | `none (single-maintainer)` | security/privacy ADR、G0 record 和 PR review | 不能自批 G0 例外 |
-| Platform Owner | `github:@ferqx` | `none (single-maintainer)` | platform matrix、sandbox evidence 和 PR review | native 支持矩阵尚未关闭 |
+| Platform Owner | `github:@ferqx` | `none (single-maintainer)` | platform matrix、sandbox evidence 和 PR review | 非空 production execution support 尚未批准 |
 | Evaluation/Product Owner | `github:@ferqx` | `none (single-maintainer)` | evaluation plan、threshold record 和 PR review | 用户样本与 benchmark 尚未预注册 |
 | Incident Commander | `github:@ferqx` | `none (single-maintainer)` | incident record、runbook revision 和 PR review | 维护者不可联系时 cohort=0，恢复批准 blocked |
 
@@ -74,18 +74,22 @@
 
 ### D-03
 
-- status: `open`
+- status: `closed`
 - owner: `github:@ferqx`（Security & Privacy + Release）
 - backup: `none (single-maintainer)`
 - dueMilestone: `MS:3-OPS-READY`
 - blockingPhase: `Phase 3`
 - default: remote telemetry=`off`；没有预注册且可观测的 SLO 数据时 external canary 保持 blocked
-- decision: 尚未决定 external canary 是否强制匿名结构化 telemetry
+- decision: external canary 强制使用与普通 telemetry consent 分离的显式 opt-in；只允许版本化、
+  低基数、匿名且无 prompt/response/file/path/command/error 正文的结构化 telemetry。artifact authority、
+  release flag、用户 consent、canary opt-in 与真实 exporter 任一缺失时 cohort admission blocked；无数据
+  保持 unknown/blocked，不能显示绿色。普通安装的 remote telemetry 继续默认关闭
 - evidence: [Phase 3 计划](2026-07-29-agent-production-observability-operations.md)；
   [ADR-0056](../../adr/0056-metadata-first-data-boundaries.md)；
-  [ADR-0063](../../adr/0063-no-content-observability-and-single-maintainer-operations.md)；本地实现仅
-  `artifact_disabled`/no-op、baseline unconfigured 与 synthetic G4=`not_run`
-- approvedAt: `null`
+  [ADR-0063](../../adr/0063-no-content-observability-and-single-maintainer-operations.md)；
+  `src/app/observability/external-canary.ts`；用户于 2026-08-02 批准显式 opt-in、匿名无正文方案。
+  当前 exporter/baseline/真实 observation 仍未配置
+- approvedAt: `2026-08-02`
 
 ### D-04
 
@@ -105,6 +109,14 @@
   [ADR-0061](../../adr/0061-production-platform-capability-admission.md)；
   [原生证据 run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)
 - approvedAt: `2026-07-31`
+
+Revision D-04.1（2026-08-02）：澄清 Windows、Linux、macOS 是 Bun 本地 TUI/CLI 的发行目标，
+发行可运行性与 effectful execution capability 分开准入。三平台原生候选验证优先使用
+GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`；不要求维护者为常规发行维护
+self-hosted Ubuntu。Docker/WSL2 仅作开发预检。该修订不改变空 production execution support set，
+也不开放任何 Shell/writer/Skill/MCP 能力；后者仍按精确 capability surface、原生 evidence 与独立
+release gate fail closed。依据：[ADR-0065](../../adr/0065-cross-platform-distribution-and-capability-admission.md)
+及用户于 2026-08-02 的范围澄清。
 
 ### D-05
 
@@ -294,6 +306,33 @@
   [ADR-0056](../../adr/0056-metadata-first-data-boundaries.md)
 - approvedAt: `2026-07-30`
 
+Revision D-14.1（2026-08-02）：记录首个 model route 候选为 DeepSeek 官方 API、
+`deepseek-v4-flash`，canonical endpoint origin 为 `https://api.deepseek.com`，实际 OpenAI-compatible
+base URL 保持 `https://api.deepseek.com/v1`；region 明确为 `unknown`。公开政策没有提供可登记的
+API 正文固定 retention、已验证 training opt-out、DPA 和产品下游披露实现，因此候选固定
+`productionContentAllowed=false`，`approved-v1.json` 继续为空。候选只进入
+`release/provider-data-policies/candidates-v1.json`，production admission 不读取它。用户批准候选选择，
+但没有把未知政策事实批准为通过。
+
+Revision D-14.2（2026-08-02）：复核 DeepSeek 2026-02-10 官方隐私政策和 2026-04-22 Open
+Platform Terms。政策明确个人数据直接在中华人民共和国处理/存储、可能用于训练并提供个人数据训练
+opt-out 权利；同时明确开发者下游系统最终用户的数据处理不在该隐私政策覆盖范围内，开发者仍是控制者
+并负责披露。route deployment region 仍未公布，API 正文固定 retention、API 级 opt-out 落地、DPA
+和产品披露仍未验证。因此仅更新 candidate assessment，不改变 route identity digest、空 approved bundle
+或 `productionContentAllowed=false`。证据：
+https://cdn.deepseek.com/policies/en-US/deepseek-privacy-policy.html；
+https://cdn.deepseek.com/policies/en-US/deepseek-open-platform-terms-of-service.html。
+
+Revision D-14.3（2026-08-02）：single owner `github:@ferqx` 明确接受 DeepSeek 官方 API 对该首发
+Route 的已披露数据风险：中国处理/存储、可能用于训练、未承诺固定 API 正文 retention、无 DPA，且
+deployment region 记为 `unspecified`；这些事实不再作为 admission blocker。批准项只绑定
+`providerType=deepseek`、`modelName=deepseek-v4-flash`、`https://api.deepseek.com[/v1]` 与 canonical
+operator/deployment identity，换模型、换 endpoint、URL credentials/query/fragment、policy 过期或
+digest 漂移均 fail closed。下游披露当前固定在 README/active/book release 文档，不要求 pre-release
+per-run acknowledgement；secret/protected credential 拦截、独立 remote MCP egress、
+`allowProductionContentEvaluation=false` 和真实 live evidence 要求保持不变。该风险接受不构成 2B.4
+真实评估通过，也不替代 external release 前真人第三方安全评审。架构记录：[ADR-0066](../../adr/0066-deepseek-owner-accepted-provider-data-policy.md)。
+
 ## Execution bindings
 
 Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提交是路线图复核
@@ -341,7 +380,8 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 2A.5 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
 | 2A.6 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
 | 2A.7 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
-| 2A.8 | `github:@ferqx` | `2e98681c800a2f1f745bc18e41ac682d9c09e84b` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 supply-chain/platform contract 已通过；D-04 支持集为空，等待真实 audit、签名、provenance、actual artifact 与三平台 evidence | — | `2026-08-02` |
+| 2A.8 | `github:@ferqx` | `2e98681c800a2f1f745bc18e41ac682d9c09e84b` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 supply-chain/platform verifier 已绑定 immutable input snapshot、OS-protected pinned toolchain、canonical USTAR、archive/native launcher、macOS 完整 app bundle seal/notarization、manifest、五 subject attestation、平台发布者身份与 G5 真人签名 evidence；等待真实 build/audit、签名/notarization、provenance/attestation、actual artifact smoke 与三平台 run，D-04 空集合只阻止 effectful execution | — | `2026-08-02` |
+| 2A.9 | `github:@ferqx` | `f38d819226aeceaa549e2466c35ed26fe642a6c9` | `codex/production-admission` | `in_progress` | D-03/D-06/D-13 与 2A.7 已满足；本地 disable-only loader/cache 和 release-owned canary admission 已 fail closed，但真实 rollout signing/service、authenticated artifact authority、exporter 与 observation 均缺失 | — | `2026-08-02` |
 | 2B.1 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-evaluation-foundation.md` | `2026-08-02` |
 | 2B.2 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-evaluation-foundation.md` | `2026-08-02` |
 | 2B.3 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-evaluation-foundation.md` | `2026-08-02` |
@@ -351,7 +391,7 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 4.1 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-compaction-foundation.md` | `2026-08-02` |
 | 4.2 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-compaction-foundation.md` | `2026-08-02` |
 | 4.3 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-compaction-foundation.md` | `2026-08-02` |
-| 4.4 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `in_progress` | 本地 opaque blind item/candidate commitment/receipt/aggregate/identity verifier 已通过且受信 deterministic safety 不可被 semantic 覆盖；authenticated scoring authority、production evaluator attestation 与真实分数缺失时保持 blocked | — | `2026-08-02` |
+| 4.4 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `in_progress` | 本地 opaque blind item/candidate commitment/receipt/aggregate/identity verifier 已通过，输入绑定 GITHUB_SHA tracked blob snapshot，且受信 deterministic safety 不可被 semantic 覆盖；authenticated scoring authority、production evaluator attestation 与真实分数缺失时保持 blocked | — | `2026-08-02` |
 | 4.6 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-compaction-foundation.md` | `2026-08-02` |
 | 4.8 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-compaction-foundation.md` | `2026-08-02` |
 | 5.1 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-capability-foundation.md` | `2026-08-02` |
@@ -364,7 +404,7 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 
 除已完成的 1A.1–1A.7、1B.0–1B.9、1C.1–1C.8、2A.0–2A.7、2B.1–2B.3、2B.8、
 4.1–4.3、4.6、4.8、5.1、5.2、5A.1、5A.2、5C.1、5C.2、5.4 与已绑定 `in_progress` 的
-2A.8、2B.4、2B.5、4.4 外，
+2A.8、2A.9、2B.4、2B.5、4.4 外，
 其他非 Phase 0 Task 尚未创建 execution binding。
 
 ## Revision history
@@ -401,3 +441,9 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 28 | 2026-08-02 | 两路最终整体 Review 均为 GO（P0/P1/P2=`0/0/0`）；完成 1B.6–1B.9，Task 1B.9 唯一产生 `MS:1B-DONE` | [PR #21](https://github.com/ferqx/kite-code/pull/21) 合并 head `dc64d25d67c9e40330676668b5f039872d04269a`；默认分支 [run 30739946155](https://github.com/ferqx/kite-code/actions/runs/30739946155) attempt 1 三个平台 job 全绿，artifact ID `8830927216`/`8830930305`/`8830937470`；3 个 excluded target、8 个 excluded_not_admitted case、canonical/report digest 与 actual synthetic bundle 经独立 verifier 重建一致；D-04 保持空支持集、productionSupported=false、distributable=false、真实 signing 和第三方安全评审仍未发生；[完成记录](../execution/completed/2026-08-02-agent-production-phase-1b.md) |
 | 29 | 2026-08-02 | 依赖解锁后批量完成 2B/4/5 的本地 foundation；仅把真实 evidence 缺口保留为 `in_progress`，不产生新 release/maturity milestone | 2B.1–2B.3/2B.8 completed，2B.4/2B.5 等待 authenticated live/attempt/adversarial evidence，[63-test 评估基础记录](../execution/completed/2026-08-02-agent-production-evaluation-foundation.md)；4.1–4.3/4.6/4.8 completed，4.4 等待 authenticated semantic evaluator，[36-test Compaction Foundation 记录](../execution/completed/2026-08-02-agent-production-compaction-foundation.md)；5.1/5.2/5A.1/5A.2/5C.1/5C.2/5.4 completed，[29-test Capability Foundation 记录](../execution/completed/2026-08-02-agent-production-capability-foundation.md)；所有 route/profile/cohort 仍 off/empty/0，`MS:2B-DONE`/`MS:4-INTERNAL-AUTO-FRESH`/所有 `MS:5*-STABLE` 均未产生 |
 | 30 | 2026-08-02 | 加固 2B.4/2B.5、3.10、4.4 的本地 retained evidence 与独立重建边界；修复整体 Review 的全部 P1/P2，保持 Task 状态和 milestone 不变 | Agent/Observability/Compaction 155 pass；2B 精确 96/240 receipts+D-07 Gate+21 adversarial、Limited SLO shared artifact/exactly-one terminal/time/splice、Compaction opaque blind item/candidate/deterministic precedence/repository cross-binding 均 fail closed；两路最终 agent Review GO、P0/P1/P2=`0/0/0`，不替代真人第三方评审；production OIDC/Sigstore/attestation trust/route 为空，未伪造真实 run 或 evidence |
+| 31 | 2026-08-02 | 关闭 D-03；追加 D-04.1 跨平台发行/能力准入正交澄清与 D-14.1 DeepSeek blocked candidate；撤回未提交的 Ubuntu self-hosted 常规发行要求 | 用户直接决策；ADR-0065；GitHub-hosted 三平台 probe contract；external canary 60-test 定向批次中的 consent/admission contract；DeepSeek candidate policy 保持 productionContentAllowed=false、approved route bundle 为空 |
+| 32 | 2026-08-02 | 绑定 2A.9 `in_progress`；把三平台 distribution identity 与空 execution support registry 独立建模；加固 platform artifact、telemetry、DeepSeek candidate 与 external canary authority；补齐 2A.8/2B.4–2B.5/4.4 的本地正式 producer/verifier 骨架 | baseline `f38d819226aeceaa549e2466c35ed26fe642a6c9`；定向 platform/release/telemetry/provider/evaluation tests 与 typecheck；新增 workflow 均 manual/no-publish 或不可达，unsigned/unconfigured 结果固定 blocked；所有 production capability 仍 off、production assembly/signing/route/exporter 仍 disabled，不产生 milestone 或真实 evidence |
+| 33 | 2026-08-02 | 修复整体 Review 的 telemetry、supply-chain 与输入身份 P1/P2，不提升 Task 或 milestone | reporter release-owned alias/cardinality 与 audit no-op；2A.8 isolated verifier VM/protected verifier commit、immutable input snapshot、OS-protected pinned toolchain、canonical USTAR、archive launcher、macOS 完整 app bundle、manifest、G5 独立真人签名、timeout、macOS/Windows signer identity；platform workflow/ref exact binding；4.4 tracked Git blob snapshot；DeepSeek purpose-specific official origin；production authority 与所有真实 evidence 继续 disabled/waiting |
+| 34 | 2026-08-02 | 追加 D-14.3：single owner 接受官方 DeepSeek 精确 Route 的中国处理/存储、可能训练、无固定 retention 与无 DPA；不把这些政策事实作为阻塞 | ADR-0066；approved policy 仅绑定 `deepseek-v4-flash` + `api.deepseek.com[/v1]`，透明披露与 secret denial 保留；2B.4 仍等待真实 credential/live retained evidence，Task/milestone 不提升 |
+| 35 | 2026-08-02 | 预构建 Phase 4/5 的 production-owned retained evidence、Compaction rollout/shadow 与统一 capability maturity Gate；不提前绑定下游 Task | 61-test 定向批次；所有 authority registry 为空、manual/auto compaction 与四条 Phase 5 profile 均 `under_development/off`，完整 fixture 仍 blocked/evidenceEligible=false；Task 状态和 milestone 不变 |
+| 36 | 2026-08-02 | 修复本批整体 Review 的 secret inspection、maturity 认证、rollout 时间/consent/dependency 绑定与旧 adapter 回归；完成一次 DeepSeek V4 真实 compaction compatibility smoke，不提升 Task 或 milestone | Provider admission 复用 Runtime inspector 且 unknown fail closed；maturity authentication verifier/authority/previous decision/human approval 四门独立关闭；rollout 绑定三项 dependency digest、严格 stage window 与不可伪造 consent authority；DeepSeek direct/incremental smoke 通过但不具备正式 artifact/ledger/attestation，2B.4/2B.5/4.4 与所有 rollout/maturity milestone 保持等待 |

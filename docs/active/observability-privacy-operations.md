@@ -14,13 +14,26 @@ incident runbook 或运营 Gate 时。
 缺失都注入 no-op reporter。project 配置只能关闭，不能开启、提供 endpoint secret 或代替用户 consent；
 admin 可以强制关闭。canary 还要求独立 opt-in。
 
-生产 metric 由版本化 allowlist 构造，只接受有限 metric/attribute 枚举和有限数值；单样本 canonical
+D-03 已关闭：`composeExternalCanaryObservabilityV1()` 固定 consent 的 `releaseChannel=canary`，且
+只从 active production release composition 读取 canary channel、单一 canary capability rollout 与
+artifact telemetry ceiling；调用者布尔值不能签发 authority。它再检查用户 telemetry consent、独立
+canary opt-in 与真实 exporter。任一缺失都
+返回 blocked cohort 和 no-op reporter；mandatory audit 不可用时也必须拒绝 cohort，普通项目配置不能
+开启或代替 consent。该 contract 不代表
+当前已有 exporter、真实 cohort 或 SLO 数据。
+
+生产 metric 在创建和 reporter/export 边界都会由严格 schema 重建，拒绝未知 top-level 字段与伪造
+definition；consent category 通过穷举 category-to-metric registry 变成 exporter allowlist，未授权类别
+即使构造成功也会丢弃。版本化 allowlist 只接受有限 metric/attribute 枚举和有限数值；单样本 canonical
 JSON 上限 1024 bytes。prompt、正文、路径、命令、自由错误、secret 和任意 user/project identity 都不在
-schema 中。route/capability 使用受控 alias，超出 cardinality budget 合并到固定 overflow alias。
+schema 中。reporter 最终出口只保留 release-owned route/capability alias，未知值折叠为
+`custom/unknown`；每个 metric 按完整 attribute series 实际执行 `cardinalityLimit`，达到预算后的新 series
+直接丢弃并计入本地 drop，而不是仅依赖 producer 自律。
 
 Reporter 使用有界内存 queue，无磁盘 spool；满时丢弃最旧低优先级样本并记录本地 drop。export、flush、
 shutdown 或序列化失败不传播到 Runtime。consent 撤回立即清空 queue 并停止新样本。mandatory enterprise
-audit 与普通 telemetry 分离；mandatory audit 不可用时受管 session 拒绝。
+audit 与普通 telemetry 分离；`managedSessionAdmission=denied` 直接使 composition 注入 no-op reporter，
+mandatory audit 不可用时不能出现“cohort blocked 但 exporter 仍启用”的分裂状态。
 
 CLI `--telemetry-status` 与 TUI `/telemetry` 只显示 artifact/flag/consent/endpoint policy/exporter 的
 脱敏状态，不显示 endpoint secret。普通开发入口固定显示 `artifact_disabled`。

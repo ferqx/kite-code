@@ -39,14 +39,19 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
 - Phase 1A（Task 1A.1–1A.7）已完成，由
   [Task 1A.7 完成记录](../execution/completed/2026-07-30-agent-production-local-data-privacy.md)
   唯一产生 `MS:1A-DONE`。该 milestone 不产生 production-qualified route 或
-  production artifact；当前 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
-  route 集合也为空。
+  production artifact。Phase 1A closure 当时 ProviderDataPolicy approved bundle 仍为空，D-14 批准的 MCP
+  route 集合也为空。D-14.3/ADR-0066 后 ProviderDataPolicy bundle 才只加入官方 DeepSeek
+  `deepseek-v4-flash` 精确 model Route；MCP route 集合仍为空，该后续风险接受不改写 Phase 1A
+  milestone 的历史完成结论。
 - Phase 1B（Task 1B.0–1B.9）已完成。D-04 以空支持集关闭；1B.2/1B.3 的完成结论是三平台候选
   均明确 `excluded`。两路最终整体 Review 均为 GO 且 P0/P1/P2=`0/0/0`；默认分支
   [Execution Boundary Artifact Conformance run 30739946155](https://github.com/ferqx/kite-code/actions/runs/30739946155)
   的三个 negative artifact 经独立 verifier 收口。Task 1B.9 唯一产生 `MS:1B-DONE`；该 milestone
   不产生 production qualification、非空平台支持或可分发制品。证据见
   [Phase 1B 完成记录](../execution/completed/2026-08-02-agent-production-phase-1b.md)。
+  ADR-0065 进一步澄清 Windows/Linux/macOS 是 Bun TUI/CLI 的发行目标，而 effectful execution
+  capability 仍逐平台准入；常规验证使用 GitHub-hosted 三平台矩阵，不要求 self-hosted Ubuntu，
+  也不改变当前空 production execution support set。
 - Phase 1C（Task 1C.1–1C.8）已完成，并由默认分支 [Ubuntu qualification run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064)
   的正式 artifact 与独立 verifier 收口；Task 1C.8 唯一产生 `MS:1C-DONE`。该 milestone 不生成
   production artifact，其他后续 milestone 仍为 pending。
@@ -56,20 +61,34 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   唯一产生 `MS:2A-F`。该结果不包含 G2–G5、真实 signing/attestation、production platform、RC
   或 external release 结论。
 - 2A.8、2A.9、2B.1–2B.9、3.1–3.8/3.10 已完成各自本地 fail-closed contract。依赖与整体复核
-  满足后，2B.1–2B.3/2B.8 已完成，2B.4/2B.5 保持 `in_progress`；2A.8 仍等待真实供应链/平台
+  满足后，2B.1–2B.3/2B.8 已完成，2B.4/2B.5 保持 `in_progress`；D-03 关闭后 2A.9 已绑定
+  `in_progress`，与 2A.8 一同等待真实供应链/平台、rollout signing/service、authenticated artifact authority
   evidence。2B 现可从 12 case × 8/20 authenticated fixture ledger 重建 D-07 Gate，并校验同 identity
   的精确 21-case adversarial contract；Phase 3 可从时间单调的 admissions/terminal receipts 独立重建
   Limited SLO aggregate 并拒绝 outer identity splice，但两者的 production
-  OIDC/Sigstore/attestation trust registry 均为空。D-03、authenticated live route/baseline/attempt、真实
-  人工/incident/SLO evidence 未满足，
+  evidence。2B production OIDC/Sigstore/attestation trust registry 仍为空。D-03 已关闭为 external canary 独立 opt-in、匿名
+  无正文 telemetry，但 exporter、authenticated live route/baseline/attempt、真实人工/incident/SLO
+  evidence 未满足，
   `MS:2B-DONE`、`MS:3-OPS-READY`、`MS:2A-RC` 和 `MS:LIMITED-SLO` 均未产生。
+  2A.8、2B.4/2B.5 与 4.4 已新增 manual/no-publish 或不可达的 producer/verifier workflow 骨架；它们
+  使用真实 GitHub upload artifact ID 或严格 CLI expected identity，但在 route/Sigstore/attestation/Gate
+  未配置时固定 blocked、`evidenceEligible=false`，不把 contract artifact 计为真实外部 evidence。
+  整体 Review 加固后，2A.8 还要求 immutable input snapshot、OS-protected pinned toolchain、拒绝扩展/link/等价覆盖的 canonical
+  USTAR、archive 内 native launcher 与 canonical manifest 传递绑定、macOS 完整 app bundle seal 与
+  notarization、五 subject attestation、pinned toolchain、平台 signer identity 和带独立真人签名 evidence
+  的全 G0–G5 Gate；verifier 使用不执行 candidate code 的独立新 VM，只消费 protected verifier commit
+  和 opaque downloaded artifact。4.4 只消费 `GITHUB_SHA` tracked blob snapshot。D-04 空 execution support set 不再被
+  解释为普通 TUI/CLI distribution blocker。
 - Phase 4–6 的本地 schema、conformance、profile、selection 与 Gate contract 已提前实现；D-10 已按
   ADR-0064 关闭。4.1–4.3/4.6/4.8 与 5.1/5.2/5A.1/5A.2/5C.1/5C.2/5.4 已完成，4.4 保持
   `in_progress`；其 opaque blind item/candidate commitment/receipt/identity/aggregate verifier 已实现，
   但等待真实 authenticated evaluator
   workflow 与 attestation。其余 Task 按正式依赖保持未绑定。所有
   route/profile/cohort 均 off/empty/0；本地 synthetic/blocked fixture 不产生 manual stable、能力
-  stable、GA、canary、maturity 或第三方评审 evidence。
+  stable、GA、canary、maturity 或第三方评审 evidence。后续本地预构建还增加了四条 Phase 5
+  production-owned retained evidence verifier、Compaction internal rollout/external shadow Gate、
+  manual/auto compaction off profile 与统一 canary→beta→stable maturity Gate；所有 production authority
+  registry 仍为空，因此没有新 Task binding 或 milestone。
 - 本批 authenticated evidence 整体 Review 的架构/治理 Reviewer 与安全/对抗 Reviewer 最终均为 GO，
   P0/P1/P2=`0/0/0`；该结论只覆盖本地 diff 和完成声明，不是 external release 所需的真人第三方安全评审。
 - 整体 Review 发现的 Release 第三方评审/production admission、Limited SLO、D-07、GA/Auto、
@@ -86,6 +105,9 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
 - 本地 TUI；
 - 由同一用户启动、用户在场的前台 Headless CLI；
 - 固定 platform、sandbox backend 和 provider route 支持矩阵。
+
+这里的固定矩阵只控制 production execution capability；Windows、Linux、macOS 的普通 TUI/CLI
+发行兼容性由独立 GitHub-hosted matrix 验证。平台可发行不等于其 Shell/writer 能力已获准。
 
 以下形态保持 No-Go，不属于本路线图的交付：
 

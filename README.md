@@ -2,6 +2,10 @@
 
 Kite Code 是一个基于 Bun、TypeScript 和事件化 Runtime Kernel 的多模型代码 Agent。模型、工具、审批、恢复与验收统一由 Kernel 调度；TUI 和 CLI 共享相同的 Core 行为。TUI 支持文件 diff 染色和代码语法高亮（`ink-syntax-highlight` / highlight.js）。
 
+正式发行目标为 Windows、Linux 与 macOS。跨平台可安装/运行与 Shell、writer 等 effectful
+capability 的原生隔离资格分开验证；某平台缺少强隔离时对应能力保持关闭，不把整个 TUI 伪装成
+不支持或把未验证能力伪装成可用。
+
 ## 当前能力
 
 - React Ink 主屏缓冲区 TUI（保留终端 scrollback）与 Headless CLI；
@@ -51,10 +55,17 @@ bun install
 会话日志治理默认关闭：`features.sessionLoggingPolicyV1=false` 时 mode 为 `off` 且不创建日志目录；开启时默认只记录 allowlist metadata。`content` 需要 release artifact 允许和用户配置显式 opt-in，项目配置不能开启；即使 opt-in 也不记录 reasoning、工具/文件正文、审批命令、Plan/Sub-agent 正文或 credential。日志目录/文件使用 owner-only 权限或 ACL、拒绝 link/reparse point，并通过 durable active-session lease、bounded retention/容量与 fail-closed quarantine 保护；TUI/CLI 会显示 resolved mode，logger 不可用时 Agent 继续运行且不使用不安全 fallback。
 
 生产模型数据门禁与远程 HTTP MCP 正文外发是两个独立授权域。`providerDataPolicyV1` 开启后，
-模型、压缩、Sub-agent 和 reviewer 都必须匹配仓库固定的 route/data policy；当前批准 bundle 为空，
-因此没有 production-qualified model route。`remoteMcpEgressPolicyV1` 开启后，非空 MCP 参数仍需
+模型、压缩、Sub-agent 和 reviewer 都必须匹配仓库固定的 route/data policy；当前只批准
+DeepSeek 官方 API 的精确 `deepseek-v4-flash` Route。`remoteMcpEgressPolicyV1` 开启后，非空 MCP 参数仍需
 逐 invocation、短时、route/tool/参数 digest/nonce 精确绑定的独立许可；关闭时保持 no-egress，
 Tool Approval、read-only annotation、模型 Provider consent 或 network allowlist 都不能替代该许可。
+
+该 Route 固定为 `type=deepseek`、`model=deepseek-v4-flash` 与
+`https://api.deepseek.com[/v1]`，并按 ADR-0066 显式接受官方政策披露的中国处理/存储、可能训练、
+未承诺固定 API 正文保留期以及无 DPA；这些事实不再是准入阻塞项。产品仍必须向用户透明披露，
+secret/protected credential 在网络调用前一律拒绝，换模型、换 endpoint、URL 携带凭据/查询参数或
+policy 过期都 fail closed。该批准不允许 remote MCP 正文外发，也不允许 secondary reviewer 使用
+production content；真实评估仍需要凭据、authenticated live run 和 retained evidence。
 
 MCP 默认配置只有两个规范位置：项目级 `<project>/.kite-code/mcp.json` 与用户级 `~/.kite-code/mcp.json`，同名 Server 按 `project > user` 选择。`/mcp` 的 Current project 与 All projects 分别写入这两个文件；项目声明必须在 Server Detail 的 Review 页面显式批准。旧 hash workspace 文件、`.mcp.json` 和 `kite-code.jsonc#mcpServers` 仅只读兼容与显式迁移，不再作为写入目标。
 
@@ -109,13 +120,22 @@ bun run agent run --telemetry-status
 
 Release control 当前只提供不可分发的 contract foundation：`--release-status` 与 TUI `/release`
 显示脱敏状态，普通入口为 `artifact_disabled`。`releaseProfileV1`、`executionBoundaryV1` 和
-`networkBoundaryV1` 不能由 CLI 打开。D-04 production platform 支持集为空，真实 Sigstore/
-attestation/GitHub Release 与平台签名均未启用，因此没有 production artifact。
+`networkBoundaryV1` 不能由 CLI 打开。D-04 effectful execution 支持集为空；它不阻止普通三平台
+TUI/CLI distribution，但真实 build/audit、Sigstore/attestation/GitHub Release、平台发布者签名和真人
+第三方安全评审尚未完成，因此当前仍没有 production artifact。
+
+常规跨平台验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025` matrix，不要求维护
+self-hosted Ubuntu。平台 probe 固定输出 `productionSupported=false`，只有后续新鲜原生 evidence、
+追加决策与独立 Gate 才能开放具体 execution capability。
 
 Remote observability 默认关闭。`--telemetry-status` 与 TUI `/telemetry` 只显示脱敏的 artifact、flag、
 consent、endpoint policy 和 exporter 状态；普通入口为 `artifact_disabled`。project 配置不能开启或
 授予 consent，Reporter 无磁盘 spool。当前 SLO baseline 未配置，本地 incident rehearsal 也只证明
 contract，不是 external operations evidence。
+
+External canary 还必须取得与普通 telemetry consent 分离的显式 opt-in，并且只允许匿名、低基数、
+无 prompt/response/file/path/command/error 正文的结构化 telemetry；缺 exporter 或真实数据时保持
+blocked，不显示绿色。
 
 ## 安全边界
 
