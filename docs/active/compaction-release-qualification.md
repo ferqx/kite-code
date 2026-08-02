@@ -18,9 +18,18 @@ revision、lease/environment drift、summary rejection 和 system/tool/Plan/Veri
 失败保持原状态；invalid checkpoint、orphan tool result 或状态损坏为 G0。
 
 deterministic matcher 优先 exact/normalized；critical loss、forbidden claim、approval/Verification/Plan
-反转都不能被 semantic score 覆盖。blind semantic contract 当前 route/evaluator 未配置，score 与
-uncertainty 固定 `not_observed`。control/treatment continuation 在阈值、样本和 route 未预注册时
-blocked，不能用单次 synthetic pass 宣称非劣。
+反转都不能被 semantic score 覆盖。原 blind semantic contract 继续把未配置 route/evaluator 的 score
+与 uncertainty 固定为 `not_observed`。新增的 formal evidence verifier 只接受固定 opaque 格式的 blind
+ID、逐项 case/reference/candidate-content commitment、完整 receipt chain 和确定性重建的 score/uncertainty
+aggregate；它绑定完整 `ReleaseArtifactIdentityV1`、repository/repository ID、head/ref、workflow
+path/ref/SHA、run/attempt、job/artifact、route/config、suite/scorer、candidate set/fixture 与受信
+deterministic safety report+outcome。分组标签、缺失、重复、重排、aggregate/payload/candidate splice 全部
+拒绝，critical deterministic failure 始终覆盖 semantic pass。
+
+GitHub OIDC/attestation verifier 当前未配置，formal workflow 与真实 evaluator receipt 也未执行，因此
+结构完整的本地 fixture 仍为 blocked、`evidenceEligible=false`、milestone=null。uncertainty 超限保持
+inconclusive/blocked，低于阈值或 deterministic safety 失败为 failed。control/treatment continuation
+在阈值、样本和 route 未预注册时同样 blocked，不能用单次 synthetic pass 宣称非劣。
 
 ## Route、handoff 与 Gate
 

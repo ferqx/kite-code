@@ -6,6 +6,7 @@ import {
   verifyReleaseEvidenceBundleV1,
 } from '../../scripts/release/evidence-bundle';
 import {
+  RELEASE_EVIDENCE_KINDS,
   RELEASE_EVIDENCE_SCHEMA,
   type ReleaseArtifactIdentityV1,
   releaseEvidenceV1Schema,
@@ -69,6 +70,11 @@ function input(): ReleaseEvidenceBundleInputV1 {
 }
 
 describe('ReleaseEvidenceV1', () => {
+  test('keeps limited cohort SLO distinct from later capability canary SLO evidence', () => {
+    expect(RELEASE_EVIDENCE_KINDS).toContain('limited_slo');
+    expect(RELEASE_EVIDENCE_KINDS).toContain('canary_slo');
+  });
+
   test('builds and independently verifies a canonical identity-bound bundle', () => {
     const bundle = buildReleaseEvidenceBundleV1(input());
     expect(bundle.bundleDigest).toMatch(/^sha256:[a-f0-9]{64}$/);

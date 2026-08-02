@@ -39,6 +39,10 @@ adapter。2B.1 正式完成后，4.1–4.3、4.6 与 4.8 的 dependency-ready lo
 synthetic/nonDistributable/evidenceEligible=false；空 route registry 不产生 route qualification、
 manual canary 或 `MS:4-MANUAL-STABLE`。证据见
 [本地 Compaction Foundation 记录](../execution/completed/2026-08-02-agent-production-compaction-foundation.md)。
+4.4 现已增加 opaque blind item、逐项 candidate commitment/receipt chain、aggregate 重建、共享 Release
+artifact 与完整 GitHub/evaluator identity，以及受信 deterministic outcome precedence verifier；它只能
+证明本地 contract 拒绝 label leak/splice/tamper，production
+OIDC/attestation verifier 与真实 evaluator workflow 仍未配置，因此 4.4 继续 `in_progress`。
 
 ## 主要改动范围
 

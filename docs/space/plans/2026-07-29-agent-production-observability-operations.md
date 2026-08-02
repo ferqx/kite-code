@@ -18,8 +18,12 @@ Evidence 绑定依赖：
 2026-08-02：3.1–3.8 与 3.10 的本地 fail-closed contract 已实现，包含无正文 metric/reporter、
 consent/status、dashboard/SLO schema、alert/disable-only containment、runbook、synthetic rehearsal
 和 Limited SLO contract-only qualifier。该 qualifier 已绑定 policy/candidate/workflow/run/report/
-verifier/sample-ledger identity，但 authenticated verifier 与 retained-sample 重建未实现，任何本地
-fixture 都不能产生 milestone。2B 正式证据依赖、D-03、真实 baseline、incident rehearsal 与 external
+verifier/sample-ledger identity，并已增加 digest-chained admissions/terminal receipts、exactly-one
+terminal completeness、时间单调性、纯 aggregate 重建、共享 Release artifact identity 和完整 GitHub
+OIDC/job/artifact identity verifier；outer observation/candidate/report splice、orphan、duplicate、drop、
+reorder 或自报 aggregate mismatch 均 fail closed。production producer/attestation trust
+registry 仍为空，任何本地 fixture 都不能产生 milestone。2B 正式证据依赖、D-03、真实 baseline、
+incident rehearsal 与 external
 observation 尚未满足，因此 Task 3.1–3.10 均不标记 completed；`MS:3-OPS-READY` 和
 `MS:LIMITED-SLO` 都未产生。
 
