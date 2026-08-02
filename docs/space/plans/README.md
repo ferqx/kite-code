@@ -62,9 +62,12 @@ raw candidate artifact、明确 `excluded` 负向结论、D-04 空支持集不�
 基线，绿色 probe 不能被误写为 production qualification 或 `MS:1B-DONE`；1B.5 completion
 ratchet 锁定 shared evaluator、Registry/Harness/Sub-agent/native projection evidence、最终独立
 复核、空支持集、完成记录以及 Revision 18 当时 1B.6/1B.8 仅 ready 未绑定的历史边界；Revision 20
-进一步锁定 1B.6–1B.8 的 `in_progress` binding、本地定向证据、D-09 Headless 只读与 MCP 负向
-开放边界；Revision 22 再锁定 1B.9 的本地 negative conformance 与默认分支三平台 artifact 等待项，
-但在最终整体 Review 前不把 1B.6–1B.9 或 `MS:1B-DONE` 写成完成；1C.5 completion
+进一步锁定 Revision 20 当时 1B.6–1B.8 的 `in_progress` binding、本地定向证据、D-09 Headless
+只读与 MCP 负向开放边界；Revision 22 锁定当时 1B.9 的本地 negative conformance 与默认分支
+三平台 artifact 等待项，并禁止在最终整体 Review 前把 1B.6–1B.9 或 `MS:1B-DONE` 写成完成；
+Revision 28 在保留这些历史 ratchet 的基础上，进一步锁定两路最终 GO、PR #21 默认分支 head、
+run 30739946155、三平台 artifact ID/archive digest、3 target/8 case、独立 digest/bootstrap 重建和
+D-04 空支持集，才允许 1B.6–1B.9 completed 与唯一 `MS:1B-DONE`。1C.5 completion
 ratchet 则锁定激活基线、实现与 qualification commit、全绿 CI、execution binding、完成记录及
 1C.7 激活历史；1C closure ratchet 进一步锁定默认分支 Ubuntu run 的 source identity、正式 artifact、
 7 case/56 probe、资源样本、72 条 actual Runtime ledger receipt、零 orphan/residual、canonical
@@ -78,10 +81,11 @@ Revision 23 进一步锁定 D-06/ADR-0062、2A.0–2A.7 completed binding、真�
 `MS:2A-F`，并同时锁定 G2–G5 N/A、真实 signing/release disabled、D-04 空支持集和 production
 capability 全部 off/excluded，防止 synthetic fixture 被升级为 production release claim。
 
-Revision 24 锁定 2A.8、2A.9、2B.1–2B.9、3.1–3.8/3.10 的本地 fail-closed contract 与
-evidence-waiting 边界；只有依赖已满足的 2A.8 建立 `in_progress` binding。D-03/D-07、
-`MS:1B-DONE`、正式平台/供应链、human/adversarial/incident/SLO/signing evidence 缺失时，门禁
-禁止把本地 synthetic/blocked 测试升级为 Task completion 或后续 milestone。
+Revision 24 锁定 2A.8、2A.9、2B.1–2B.9、3.1–3.8/3.10 的本地 fail-closed contract 与当时的
+evidence-waiting 边界；当时只有依赖已满足的 2A.8 建立 `in_progress` binding，D-03/D-07、
+`MS:1B-DONE` 与正式平台/供应链/human/adversarial/incident/SLO/signing evidence 仍缺失。
+后续 revision 可以用真实决策或证据逐项关闭依赖，但门禁继续禁止把本地 synthetic/blocked 测试
+升级为正式 evidence 或后续 milestone。
 
 Revision 25 关闭 D-10 并锁定 Skill unknown/effect/dependency drift 的保守分类，同时锁定 Phase 4、
 Phase 5 与 Phase 6 的本地 schema/conformance/profile/selection/Gate contract。只有依赖已满足的 5.1
@@ -92,6 +96,12 @@ Revision 26 按用户批准关闭 D-07，锁定 single-maintainer-first 的 12-c
 非确定性 route-change=8/RC=20、G0/false-completion 零容忍、90% aggregate/80% per-case 门槛，
 并激活 2B.1。维护者 dogfood 仅是 internal evidence；external 仍需至少 3 名 opt-in 用户、每人 4
 tasks，且不替代独立第三方安全评审。真实 route/样本缺失时 Gate 继续 blocked/not_observed。
+
+Revision 29 在两路最终 GO 与 `MS:1B-DONE` 后批量锁定新的 dependency-ready closure：
+2B.1–2B.3/2B.8、4.1–4.3/4.6/4.8、5.1/5.2/5A.1/5A.2/5C.1/5C.2/5.4 completed；
+2B.4/2B.5 与 4.4 只进入 `in_progress`。对应完成记录分别绑定 63/36/29 个本地测试、默认分支
+reviewed baseline 与所有 off/blocked 边界。authenticated live route/attempt/adversarial/semantic
+authority 缺失时不得继续提升，且不产生 2B、Compaction 或 Capability maturity milestone。
 
 Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
 case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的

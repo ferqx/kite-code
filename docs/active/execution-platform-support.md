@@ -156,8 +156,14 @@ profile、composition root、runner image 或边界实现变化都需要新 evid
 `.github/workflows/execution-boundary-conformance.yml` 把当前空支持集带入 actual synthetic artifact
 smoke：三个 target 只能输出 `excluded`，八类 adversarial contract 只能输出
 `excluded_not_admitted`，report 固定 `productionSupported=false`、supported count=0、
-`distributable=false`。这是一条负向 conformance 路径；三平台默认分支 artifact 未实际产生前，
-不得完成 1B.9 或产生 `MS:1B-DONE`。
+`distributable=false`。默认分支
+[run 30739946155](https://github.com/ferqx/kite-code/actions/runs/30739946155) 已在 head
+`dc64d25d67c9e40330676668b5f039872d04269a` 生成 macOS 15、Ubuntu 24.04 与 Windows 2025
+三个 artifact；独立 verifier 重建 canonical/report digest、检查 3 target/8 case，并对三个实际
+synthetic bundle 完成 bootstrap verification。Task 1B.9 因此以负向 conformance 完成并唯一产生
+`MS:1B-DONE`。该 milestone 只证明 exclusion 和 fail-closed contract，不改变 D-04 空支持集，也不
+产生 production qualification 或可分发制品。完整身份见
+[Phase 1B 完成记录](../space/execution/completed/2026-08-02-agent-production-phase-1b.md)。
 
 三平台 conformance 的测试夹具必须只依赖 runner 上可移植、可规范化的身份：临时路径按
 canonical native path 比较，不假定 POSIX `/tmp` 或未规范化的短路径；需要生成提交或 merge

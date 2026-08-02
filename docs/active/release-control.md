@@ -80,8 +80,12 @@ contract fixture；命令本身不写计划 milestone。其 G0/G1 验证 canonic
 `release:smoke:execution` 对实际 synthetic bundle 执行 bootstrap verification，再把 D-04 的三个
 候选逐项投影为 `excluded`。报告的八类 adversarial contract 只证明测试来源存在并随 workflow
 运行；其 outcome 是 `excluded_not_admitted`，不是平台支持。任何脚本、profile 或 support matrix
-出现非空 production support 都立即失败。默认分支三平台 workflow artifact 尚未产生前，1B.9
-保持 `in_progress`，`MS:1B-DONE` 不产生。
+出现非空 production support 都立即失败。默认分支
+[run 30739946155](https://github.com/ferqx/kite-code/actions/runs/30739946155) 的 macOS 15、Ubuntu
+24.04、Windows 2025 artifact 已通过独立 canonical/report digest 重建和 bootstrap verification，
+因此 1B.9 以 negative conformance 完成并唯一产生 `MS:1B-DONE`。结果仍固定
+`productionSupported=false`、supported count=0、`distributable=false`、真实 signing disabled；
+它不满足 2A.8 的 production platform、供应链或第三方安全评审证据。
 
 ## Supply chain 与 disable-only rollout 的当前边界
 

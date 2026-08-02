@@ -18,10 +18,10 @@ Capability 分别评估、canary、回滚，避免实现存在被误认为生产
 
 ## 当前本地 Contract 边界
 
-D-10 已由 ADR-0064 关闭；5.1 的 strict Capability Profile/admission contract 已满足形式依赖并
-绑定为 `in_progress`，等待最终整体 Review。5.2、5A.1–5A.2、5B.1–5B.3、5C.1–5C.2 与
-5.3B/5.3C 的本地 schema/conformance/evidence adapter 已提前实现，但各自正式 dependsOn 尚未全部
-满足，因此没有新增 execution binding，也不标记 Task completed。
+D-10 已由 ADR-0064 关闭；两路最终整体 Review 均为 GO 后，Task 5.1、5.2、5A.1、5A.2、5C.1、
+5C.2 与 5.4 的 dependency-ready 本地 foundation 已完成。5.3A/5.3C 等 task evidence 仍等待
+`MS:2B-DONE`；5B.1–5B.3 仍受 stable Verification/route 依赖阻塞。本地完成证据见
+[Phase 5 Capability Foundation 记录](../execution/completed/2026-08-02-agent-production-capability-foundation.md)。
 
 四个 profile 均为 `under_development/off`，production MCP write route 为空，Skills cohort 为 0；
 本地 adapter 固定 `local_contract_only`/blocked。formal Agent task、真实 Provider route、internal
