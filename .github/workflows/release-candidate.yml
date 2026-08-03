@@ -32,7 +32,12 @@ jobs:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
       - name: Supply-chain schema and negative tamper contracts
-        run: bun test tests/release/supply-chain*.test.ts
+        run: >-
+          bun test
+          tests/release/supply-chain-sbom.test.ts
+          tests/release/supply-chain-workflow.test.ts
+          tests/release/supply-chain-provenance.test.ts
+          tests/release/supply-chain-platform-smoke.test.ts
       - name: Type safety
         run: bun run typecheck
       - name: Confirm this run cannot produce a candidate

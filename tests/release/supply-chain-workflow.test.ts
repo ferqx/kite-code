@@ -19,6 +19,18 @@ describe('non-production release candidate workflow skeleton', () => {
     expect(workflow).toContain('inputs.acknowledge_non_distributable == true');
   });
 
+  test('uses a shell-independent explicit test list on every hosted platform', () => {
+    expect(workflow).not.toContain('supply-chain*.test.ts');
+    for (const testPath of [
+      'tests/release/supply-chain-sbom.test.ts',
+      'tests/release/supply-chain-workflow.test.ts',
+      'tests/release/supply-chain-provenance.test.ts',
+      'tests/release/supply-chain-platform-smoke.test.ts',
+    ]) {
+      expect(workflow).toContain(testPath);
+    }
+  });
+
   test('pins actions and makes the production job unreachable', () => {
     expect(workflow).toContain('actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
     expect(workflow).toContain('oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6');

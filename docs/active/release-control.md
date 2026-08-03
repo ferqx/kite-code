@@ -99,6 +99,8 @@ smoke、OIDC Sigstore/attestation 和 GitHub Release 尚未发生。2A.8 因真�
 平台原生签名/notarization、provenance/attestation、actual artifact smoke 与真人第三方安全评审均缺失而
 保持 blocked；D-04 空 support set 只阻止 effectful execution capability，不阻止普通跨平台 TUI/CLI
 artifact 的构建与资格验证。
+三平台 contract 命令必须使用显式、Workspace-relative 测试路径；不得依赖 Bash glob 展开，因为
+Windows PowerShell 会把未展开的 wildcard 原样交给 Bun，造成测试未执行而不是有效的负向证据。
 
 禁用的 production job 已具备独立 verifier 骨架：canonical repo 的 numeric ID `1218896626` 用于
 GitHub/OIDC certificate identity，GraphQL node ID `R_kgDOSKbi8g` 用于 Release Gate artifact identity；
