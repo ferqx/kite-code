@@ -52,8 +52,9 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   ADR-0065 进一步澄清 Windows/Linux/macOS 是 Bun TUI/CLI 的发行目标，而 effectful execution
   capability 仍逐平台准入；常规验证使用 GitHub-hosted 三平台矩阵，不要求 self-hosted Ubuntu，
   也不改变当前空 production execution support set。
-- Phase 1C（Task 1C.1–1C.8）已完成，并由默认分支 [Ubuntu qualification run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064)
-  的正式 artifact 与独立 verifier 收口；Task 1C.8 唯一产生 `MS:1C-DONE`。该 milestone 不生成
+- Phase 1C（Task 1C.1–1C.8）已完成，并由默认分支 [Ubuntu qualification run 30816605986](https://github.com/ferqx/kite-code/actions/runs/30816605986)
+  的当前代码正式 artifact 与独立 verifier 重新收口；Task 1C.8 唯一产生 `MS:1C-DONE`，
+  再认证不重复产生 milestone。该 milestone 不生成
   production artifact，其他后续 milestone 仍为 pending。
 - D-06 已按 ADR-0062 关闭；2A.0–2A.7 Release Contract Foundation 已由
   `2e98681c800a2f1f745bc18e41ac682d9c09e84b` 与

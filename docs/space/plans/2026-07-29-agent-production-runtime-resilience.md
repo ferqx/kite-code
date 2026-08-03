@@ -15,12 +15,13 @@ Task 1C.1 已由 `4b8eec058df0af545675fc0e1c4135ee855848fd` 完成；Task 1C.2 �
 `dfd8f209f89b4980b9c3905d3e73c166b33bea2b` 的全绿 Required qualification 完成；
 Task 1C.7 的 runner、workflow、report/verifier 与 Ubuntu 稳定性加固已由
 `23f8fe8427fc9c6bc3fa6c55cf0eef4892d915e3`、
-`ff683b12cbe78f478a5a6b31be7627412e3ed372` 实现，并由默认分支
-`e23b81b1087a7cdea5f4d9c5d419f5d040b67702` 的正式 Ubuntu
-[run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064) 完成 8 轮
-qualification。保留 artifact `runtime-resilience-qualification-30710906064` 为
+`ff683b12cbe78f478a5a6b31be7627412e3ed372` 实现，随后由
+`05312896bb689b1da9d9c0861cddd32e50ce0bf0` 完成当前代码的 bounded allocator/JIT
+preconditioning 加固。默认分支 `7def7b15b998d0f5d4eb141bec78506f6ed21df6` 的正式
+Ubuntu [run 30816605986](https://github.com/ferqx/kite-code/actions/runs/30816605986) 完成 8 轮
+qualification。保留 artifact `runtime-resilience-qualification-30816605986` 为
 `status=passed`，独立 verifier 重建 canonical digest
-`sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694`，确认 7 case、
+`sha256:cd1b96bbc40ce1f94300835a7c817c667562b927ed5537cdb1914aa7397fba6b`，确认 7 case、
 56/56 probe、72 条 actual Runtime ledger receipt、完整资源样本与零 orphan/residual。
 Task 1C.7/1C.8 因此完成，Task 1C.8 唯一产生 `MS:1C-DONE`。规范记录见
 [decision register](2026-07-29-agent-production-decision-register.md)。
@@ -447,6 +448,19 @@ approval viewport，并只在重复 Bun lifecycle 的同进程 preload 采样边
 repository/head/ref/workflow ref/workflow SHA/run ID/attempt 并重建 retained attempts 后通过；报告
 包含 7 case、56/56 probe，long-runtime 每项资源 128 samples、其他 case 每项 64 samples、
 72 条 `actual_runtime_ledger` receipt，全部 case 的 orphan PID、orphan worktree 与 residual path 为 0。
+
+2026-08-03 对当前代码重新 qualification 时，两个失败 artifact 先后暴露 Bun
+allocator/JIT 的持续斜率与单 lifecycle 回升；两者都只作诊断，未登记为通过。
+`05312896bb689b1da9d9c0861cddd32e50ce0bf0` 保留 32 MiB 上限、报告 schema、样本数和
+72 条 receipt 不变，只为 dedicated long-replay 增加两次不进入证据的 bounded prewarm。
+默认分支 [run 30816605986](https://github.com/ferqx/kite-code/actions/runs/30816605986)
+随后以 `seed=1729`、`iterations=8` 通过；artifact
+`runtime-resilience-qualification-30816605986`（ID `8857539694`）、ZIP digest
+`sha256:15f1cd93022aa8619313dc711ba7f79d5ea00b5e584d618411b747fbef694380`，报告
+canonical digest `sha256:cd1b96bbc40ce1f94300835a7c817c667562b927ed5537cdb1914aa7397fba6b`。
+独立 verifier 重建后确认 7 case/56 probe/72 actual Runtime ledger receipts、long-runtime
+每项资源 128 samples、其他 case 每项 64 samples 与零 orphan/residual。该再认证替换
+当前代码的证据指针，不重复产生 `MS:1C-DONE`。
 
 ### Task 1C.8：active 文档和迁移
 

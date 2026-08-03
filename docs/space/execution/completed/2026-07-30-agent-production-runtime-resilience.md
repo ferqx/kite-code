@@ -2,7 +2,7 @@
 
 状态：completed
 日期：2026-07-30
-更新：2026-08-02（完成 Task 1C.7/1C.8）
+更新：2026-08-03（当前代码重新 qualification；不重复产生 milestone）
 计划：
 [`2026-07-29-agent-production-runtime-resilience.md`](../../plans/2026-07-29-agent-production-runtime-resilience.md)
 执行者：`github:@ferqx`
@@ -15,7 +15,9 @@
 `1C.5 qualification=dfd8f209f89b4980b9c3905d3e73c166b33bea2b`；
 `1C.7=23f8fe8427fc9c6bc3fa6c55cf0eef4892d915e3`；
 `1C.7 hardening=ff683b12cbe78f478a5a6b31be7627412e3ed372`；
-`1C.7 qualification/1C.8 baseline=e23b81b1087a7cdea5f4d9c5d419f5d040b67702`
+`1C.7 qualification/1C.8 baseline=e23b81b1087a7cdea5f4d9c5d419f5d040b67702`；
+`1C.7 current-code requalification hardening=05312896bb689b1da9d9c0861cddd32e50ce0bf0`；
+`1C.7 current-code requalification head=7def7b15b998d0f5d4eb141bec78506f6ed21df6`
 
 ## Task 1C.1
 
@@ -95,7 +97,13 @@
   的失败 artifact 只作为诊断；没有登记为通过。后续加固没有放宽 32 MiB RSS 上限、8 轮或样本数。
 - 默认分支 `e23b81b1087a7cdea5f4d9c5d419f5d040b67702` 的正式
   [run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064) attempt 1
-  通过，artifact `runtime-resilience-qualification-30710906064`（ID `8822010140`）保留正式证据。
+  通过，artifact `runtime-resilience-qualification-30710906064`（ID `8822010140`）保留当时正式证据，
+  canonical digest 为 `sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694`。
+- 后续 runner 与 release foundation 加固使当前代码需要重新 qualification；默认分支
+  `7def7b15b998d0f5d4eb141bec78506f6ed21df6` 的
+  [run 30816605986](https://github.com/ferqx/kite-code/actions/runs/30816605986) attempt 1 通过，
+  artifact `runtime-resilience-qualification-30816605986`（ID `8857539694`）取代旧 artifact
+  作为当前代码的正式证据。该再认证不重复产生 `MS:1C-DONE`。
 
 ## Task 1C.8
 
@@ -131,12 +139,12 @@
   long-runtime 的 RSS/active resource/FD/listener/handle 各 128 samples，其他每个 case 各 64
   samples；72 条 `actual_runtime_ledger` receipts；所有 case orphan PID/worktree/residual path 为 0；
 - source identity：repository `ferqx/kite-code`、head/workflow SHA
-  `e23b81b1087a7cdea5f4d9c5d419f5d040b67702`、ref `refs/heads/main`、workflow ref
+  `7def7b15b998d0f5d4eb141bec78506f6ed21df6`、ref `refs/heads/main`、workflow ref
   `ferqx/kite-code/.github/workflows/runtime-resilience-qualification.yml@refs/heads/main`、run ID
-  `30710906064`、attempt `1`；
-- artifact ZIP digest `sha256:f0c3ba98f85285c10919103bbc9f38029186a9e72b6a072893774dbfdf67fd4d`；
+  `30816605986`、attempt `1`；
+- artifact ZIP digest `sha256:15f1cd93022aa8619313dc711ba7f79d5ea00b5e584d618411b747fbef694380`；
   独立 verifier 重建 canonical digest
-  `sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694` 并通过。
+  `sha256:cd1b96bbc40ce1f94300835a7c817c667562b927ed5537cdb1914aa7397fba6b` 并通过。
 
 ## 回滚、风险与未完成项
 
