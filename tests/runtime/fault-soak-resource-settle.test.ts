@@ -13,7 +13,9 @@ async function runRepeatCountFixture(mode: 'single' | 'repeated' | 'prewarmed'):
       '--repeat-count',
       '2',
       ...(mode === 'single' ? [] : ['--repeat-file', 'fault-soak-repeat-count.fixture.ts']),
-      ...(mode === 'prewarmed' ? ['--prewarm-file', 'fault-soak-repeat-count.fixture.ts'] : []),
+      ...(mode === 'prewarmed'
+        ? ['--prewarm-count', '2', '--prewarm-file', 'fault-soak-repeat-count.fixture.ts']
+        : []),
       '--',
       fixture,
     ],
@@ -23,7 +25,7 @@ async function runRepeatCountFixture(mode: 'single' | 'repeated' | 'prewarmed'):
         ...process.env,
         KITE_FAULT_SOAK_REPEAT_COUNT: '9',
         KITE_FAULT_SOAK_EXPECTED_REPEAT_COUNT:
-          mode === 'single' ? '1' : mode === 'prewarmed' ? '3' : '2',
+          mode === 'single' ? '1' : mode === 'prewarmed' ? '4' : '2',
       },
       stdout: 'pipe',
       stderr: 'pipe',

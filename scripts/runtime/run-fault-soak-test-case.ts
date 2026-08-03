@@ -33,6 +33,15 @@ const repeatedFiles = new Set(
 const prewarmFiles = new Set(
   readOptions(args.slice(0, separator), '--prewarm-file').filter(Boolean),
 );
+const prewarmCount = prewarmFiles.size
+  ? positiveInteger(
+      readOption(args.slice(0, separator), '--prewarm-count') ?? '1',
+      '--prewarm-count',
+    )
+  : 0;
+if (prewarmFiles.size === 0 && readOption(args.slice(0, separator), '--prewarm-count')) {
+  throw new Error('--prewarm-count requires at least one --prewarm-file');
+}
 for (const file of prewarmFiles) {
   if (!repeatedFiles.has(file)) {
     throw new Error(`--prewarm-file must also be declared as --repeat-file: ${file}`);
@@ -49,7 +58,7 @@ for (const file of files) {
   const lifecycleGroupNonce = randomUUID();
   const fileName = basename(file);
   const fileRepeatCount = repeatedFiles.has(fileName)
-    ? repeatCount + (prewarmFiles.has(fileName) ? 1 : 0)
+    ? repeatCount + (prewarmFiles.has(fileName) ? prewarmCount : 0)
     : 1;
   console.log(`[fault-soak-case] ${file}`);
   const proc = Bun.spawn(
