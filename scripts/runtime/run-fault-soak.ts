@@ -27,6 +27,7 @@ import {
 import { readOsProcessStartIdentity } from './process-start-identity';
 
 const QUALIFICATION_REPEAT_COUNT = 9;
+const QUALIFICATION_PREWARM_COUNT = 2;
 const MAX_CAPTURED_OUTPUT_BYTES = 256 * 1024;
 const CAPTURE_DRAIN_TIMEOUT_MS = 2_000;
 const PROCESS_REAP_TIMEOUT_MS = 5_000;
@@ -281,7 +282,12 @@ export function buildFaultSoakProbeArgs(
         String(profile === 'qualification' ? QUALIFICATION_REPEAT_COUNT : 1),
         ...qualificationLifecycleFiles.flatMap((file) => ['--repeat-file', basename(file)]),
         ...(profile === 'qualification'
-          ? qualificationPrewarmFiles.flatMap((file) => ['--prewarm-file', basename(file)])
+          ? [
+              ...(qualificationPrewarmFiles.length > 0
+                ? ['--prewarm-count', String(QUALIFICATION_PREWARM_COUNT)]
+                : []),
+              ...qualificationPrewarmFiles.flatMap((file) => ['--prewarm-file', basename(file)]),
+            ]
           : []),
         '--',
         ...args.slice(1),
@@ -603,8 +609,8 @@ interface QualificationTelemetryOptions {
  * Converts file reruns into a post-warmup same-process sample. Each group of
  * repeatCount records is one test file executed repeatedly in one PID. The
  * first accepted run warms module/JIT/fixture state; only the remaining eight
- * runs contribute lifecycle points. A declared prewarm lifecycle executes one
- * additional allocator/JIT preconditioning run before that retained warm-up.
+ * runs contribute lifecycle points. A declared prewarm lifecycle executes two
+ * additional allocator/JIT preconditioning runs before that retained warm-up.
  * Every file group is retained so a stable file cannot mask a leaking sibling.
  */
 export function qualificationTelemetryMetric(
@@ -655,7 +661,10 @@ export function qualificationTelemetryMetric(
   for (const group of groups.values()) {
     group.sort((left, right) => left.sequence - right.sequence);
     const lifecycleId = group[0]?.lifecycleId;
-    const prewarmRuns = lifecycleId && options.prewarmLifecycleIds?.has(lifecycleId) ? 1 : 0;
+    const prewarmRuns =
+      lifecycleId && options.prewarmLifecycleIds?.has(lifecycleId)
+        ? QUALIFICATION_PREWARM_COUNT
+        : 0;
     const actualRepeatCount = options.repeatCount + prewarmRuns;
     if (group.length % actualRepeatCount !== 0) {
       return unsupported('same-process lifecycle telemetry ended with an incomplete rerun group');
