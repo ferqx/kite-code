@@ -100,3 +100,8 @@ Verification、MCP write、Skills readonly 与 Skills effectful 使用独立 str
 G3–G5。MCP write 要求 execution record、Provider Action 与 stable Verification；Skill 的 unknown/
 write/destructive dependency 一律进入 effectful，并要求 Verification。当前四条 profile 全部
 `under_development/off`，production MCP write route 为空，本地 conformance 不代表 canary 或 stable。
+MCP write 的 admission、intent/receipt、unknown-effect reconciliation、compensation 与 route drift 规则
+已经进入 production core；Manager 也能在 sealed production dispatch 前强制 durable guard，并在调用后只
+保存结果 digest 或 unknown outcome。guard 绑定实际 server/endpoint/tool schema/policy、approval、Provider
+Data 与 transport/egress receipts；缺事实时零 Provider call，MCP `isError=true` 也只能记为 unknown。
+source-owned route registry 仍显式为空，实际 dispatch 不会因此自动开启。

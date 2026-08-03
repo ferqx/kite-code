@@ -50,6 +50,12 @@ export interface McpCapabilityInvocation {
   arguments: Record<string, unknown>;
   remoteEgress?: RemoteMcpEgressInvocationPolicyV1;
   transportBoundary?: McpTransportInvocationBindingV1;
+  /** Durable release-owned facts required before any production MCP write dispatch. */
+  writeGovernance?: Readonly<{
+    userApprovalReceiptDigest: string;
+    providerDataPolicyRevision: string;
+    providerDataPolicyReceiptDigest: string;
+  }>;
   signal?: AbortSignal;
 }
 

@@ -16,7 +16,14 @@ contract。当前 selection 为空且全部 capability forced off；compatibilit
 所有 external milestone、真实 artifact、发布和观察前置保持缺失。
 整体 Review 后，GA/Auto admission 已移除调用者布尔前置，改为绑定同一 artifact/profile/route/
 cohort 的 typed decision records，并把全部 dependency 与 safety-ledger identity 纳入最终 digest；
-authenticated verifier 未配置前两者都固定 blocked/off，shape-valid fixture 不产生 GA/canary 权限。
+source-owned exact dependency-record lookup 已实现但不是密码学 verifier，registry 为空，两者都固定 blocked/off，
+shape-valid fixture 不产生 GA/canary 权限。
+
+2026-08-03 的 implementation-first 批次增加纯 `assemble-ga.ts`，要求 exact candidate/artifact/profile/
+route/cohort dependency、canonical stable selection、rollback/compatibility replay 与独立第三方评审共同
+绑定。当前 replay schema 只接受 `synthetic_contract_only`/`productionEvidence=false`，因此即使未来误填
+authority 也会以 `*_production_evidence_missing` 阻断。assembler 不写文件、不联网、不发布；production assembly authority 缺失时固定
+`distributable=false`、`milestone=null`。6A/6B Task 仍未绑定，真实 GA evidence 与观察窗口未发生。
 
 ## 目标
 

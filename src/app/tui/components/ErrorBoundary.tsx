@@ -5,19 +5,20 @@ import { darkTheme } from '../theme';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
+  onExit?: () => void;
 }
 
 interface ErrorBoundaryState {
   error: Error | null;
 }
 
-function ErrorFallback({ error }: { error: Error }) {
+function ErrorFallback({ error, onExit }: { error: Error; onExit?: () => void }) {
   useInput((_input, key: { escape?: boolean; return?: boolean }) => {
     // Exit on Escape or Return — user explicitly chooses to exit.
     // Not using process.exit(1) on any key because in test environments
     // it would kill the suite.
     if (key.escape || key.return) {
-      process.exit(1);
+      onExit?.();
     }
   });
 
@@ -64,7 +65,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   override render() {
     if (this.state.error) {
-      return <ErrorFallback error={this.state.error} />;
+      return <ErrorFallback error={this.state.error} onExit={this.props.onExit} />;
     }
 
     return this.props.children;

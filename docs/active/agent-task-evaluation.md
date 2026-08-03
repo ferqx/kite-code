@@ -12,6 +12,13 @@ ledger、统计重建、adversarial contract、Plan/恢复 UX mapper、人工验
 registry、nightly dry-run 与 Release Evidence adapter。本地资产只使用 synthetic fixture，不访问真实
 Provider，不收集用户正文，也不能成为产品 Gate 的通过证据。
 
+产品验收现在另有 `AgentTaskProductEvidenceV1` companion ledger。它把 Tool Search 的 expected/
+selected/outcome/latency、MCP/Skill 非预期触发、`ask_user` 结果与问题 digest、Plan/恢复/Verification/
+review handoff/correction/approval，以及人工 accepted/integrated/reverted/understanding/burden 收据，逐项
+绑定到同一个 source、candidate、case 和 attempt identity。人工收据只保存显式 opt-in、可退出状态、
+匿名 participant/reviewer digest 与无正文 outcome；raw prompt、response、diff 或 reviewer 评语不进入
+bundle。exact attempt coverage、receipt chain、canonical digest 或 identity 任一不一致均 fail closed。
+
 D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发者，入口只包含 TUI 与用户在场的
 前台 Headless CLI；托管、多租户、无人值守 writer 和共享 checkout 被排除。批准 suite 固定为
 12 case：8 类任务、4/6/2 simple/medium/complex、4 long、3 read-only/9 workspace-write、
@@ -43,9 +50,12 @@ input 重建 12 个 ledger、96/240 attempts、21 个 adversarial receipts 和�
 repository/head/ref/workflow/run/attempt/job/artifact expected identity 来自 workflow/CLI，不从 evidence
 自报。signature 明确为 `unconfigured/none`，最终必须为 blocked、`evidenceEligible=false`。
 
-该 contract 的 Ed25519 只允许 `fixture_ed25519`，不能由调用者标成 production。ADR-0062 要求的
-GitHub Actions OIDC/keyless Sigstore verifier 与 production route registry 仍为空，因此所有本地重建
-固定 blocked、`evidenceEligible=false`。2B.4/2B.5 继续保持 `in_progress`，等待真实 approved route、
+该 contract 的 Ed25519 只允许 `fixture_ed25519`，不能由调用者标成 production。Production schema 会把
+OIDC/Sigstore subject、attestation、verification receipt、authority/workflow 与 route 作为不可拆分的
+exact tuple，并且只允许匹配源码内预登记的“已由外部密码学 verifier 验证”记录；仓库代码本身不执行
+Sigstore 密码学验证，两个 registry 也仍为空，因此当前本地重建固定 blocked、
+`evidenceEligible=false`。只有真实 verifier receipt 先被审查并精确登记、`production_route_run`、route 与
+全部 D-07/对抗 Gate 同时通过才可能增加正向路径。2B.4/2B.5 继续保持 `in_progress`，等待真实 approved route、
 route-matched baseline、完整正式 attempts、同 identity adversarial run 与认证 attestation；不能把本地
 fixture 改名为正式 run。
 
@@ -54,6 +64,18 @@ fixture 改名为正式 run。
 4 个任务；当前本地 participant/sample constructor 无独立 consent、identity 或 run-receipt 认证，
 所以即使构造达到该数量也保持 `contract_only`、blocked/not_observed、evidenceEligible=false。
 真实 adapter 未落地前不产生 `MS:2B-DONE` 或 external milestone。
+
+上述 product companion 已有可独立重建的 producer/verifier contract；它强制 formal attempt→case 精确
+映射、consent material digest、accepted/integrated/not-reverted，并由 D-07 源码策略固定 external 3 人×每人
+4 tasks，不能用 CLI 的 human count 降低。D-07 尚未批准 understanding、review burden 与 consent freshness
+阈值，因此 production product policy 和 exact verified-attestation registry 都保持未配置，本地完美 fixture
+也只会 `blocked`。旧
+`nightly-dry-run.ts` 仍只是历史 contract helper，不是 authenticated nightly/RC evidence producer。
+
+`agent-task-evidence.yml` 现同时生成与 formal evidence 同 source/candidate 的 product companion，并由
+独立 verifier 从完整 96/240 retained attempts 重建 exact UX coverage。Contract run 不伪造真人结果，
+human receipt count 固定为 0；因此它只证明 2B.6 产品 receipt 接线，不能满足 2B.7 external participant
+或人工 accepted/integrated evidence。
 
 ## Evidence 规则
 

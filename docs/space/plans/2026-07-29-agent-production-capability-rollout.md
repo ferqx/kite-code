@@ -28,6 +28,18 @@ D-10 已由 ADR-0064 关闭；两路最终整体 Review 均为 GO 后，Task 5.1
 dogfood、external canary、beta/stable maturity 与第三方评审 evidence 均未发生，不产生任何
 `MS:5*-STABLE`。
 
+2026-08-03 的 implementation-first 批次将 MCP write admission、intent/receipt、unknown-effect recovery、
+compensation 与 route qualification 从测试 fixture 提升为 production core，并增加 strict source-owned
+route registry；registry 当前显式为空，实际 MCP dispatch 仍未取得 write admission。统一 capability
+rollout admission 也已实现 exact candidate/dependency/G0–G1/effect/Verification/freshness 检查，authority
+缺失时固定 off/cohort=0。Capability retained evidence 已支持 production authentication shape、bundle
+subject binding 与 source-owned authority lookup，但 registry 仍为空。以上不满足 `MS:5A-STABLE` 或真实 route/evidence 依赖，故 5B.1–5B.3 仍不
+提前绑定，所有 capability milestone 不变。
+
+同批增加四轨共用的 manual/no-publish `capability-evaluation.yml`、retained input producer 与 independent
+expected-source verifier。该 workflow 没有 OIDC/发布权限并显式要求 blocked，只用于本地/默认分支
+contract 接线验证；未运行的 workflow 或其 blocked artifact 不算正式 capability evidence。
+
 ## 非目标
 
 - 不同时首次放行三个能力；

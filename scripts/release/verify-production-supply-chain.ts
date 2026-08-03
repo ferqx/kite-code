@@ -40,7 +40,17 @@ import {
   productionReleaseRunInvocationUriV1,
 } from './production-supply-chain-commands';
 
-export const PRODUCTION_SUPPLY_CHAIN_ADMISSION_ENABLED = false as const;
+interface TrustedProductionSupplyChainVerifierV1 {
+  trustedVerifierCommit: string;
+  workflowPath: string;
+}
+
+// Enabling production admission is a governed source change. Runtime input
+// cannot inject a verifier commit or turn this registry on.
+const TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_V1: readonly TrustedProductionSupplyChainVerifierV1[] =
+  Object.freeze([]);
+export const PRODUCTION_SUPPLY_CHAIN_ADMISSION_ENABLED =
+  TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_V1.length > 0;
 const RELEASE_GATE_DECISION_DIGEST_DOMAIN = 'release-gate-decision-v1';
 const RELEASE_GATE_IDS = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5'] as const;
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -709,25 +719,50 @@ export function verifyProductionSupplyChainAdmissionV1(
       }
     }
 
+    const trustedVerifier = TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_V1.find(
+      (candidate) =>
+        candidate.trustedVerifierCommit === parsedIdentity.data.trustedVerifierCommit &&
+        candidate.workflowPath === parsedIdentity.data.workflowPath,
+    );
+    const productionAccepted =
+      PRODUCTION_SUPPLY_CHAIN_ADMISSION_ENABLED && trustedVerifier !== undefined;
+    const checks = Object.freeze({
+      immutableSnapshots: 'verified' as const,
+      archiveLauncherBinding: 'verified' as const,
+      canonicalManifestBinding: 'verified' as const,
+      independentSecurityReview: 'verified' as const,
+      pinnedToolchain: 'verified' as const,
+      cosignKeylessManifestSignature: 'verified' as const,
+      githubArtifactAttestations: 'verified' as const,
+      platformSignature: 'verified' as const,
+      releaseGate: 'verified' as const,
+    });
+    const receiptMaterial = productionAccepted
+      ? {
+          schema: 'ProductionSupplyChainAdmissionReceiptV1' as const,
+          identity: parsedIdentity.data,
+          platform: input.platform,
+          subjects: subjectDigests,
+          checks,
+        }
+      : null;
     return Object.freeze({
-      status: 'blocked' as const,
-      reason: 'production_workflow_disabled' as const,
-      productionAccepted: false as const,
-      productionReceipt: null,
+      status: productionAccepted ? ('passed' as const) : ('blocked' as const),
+      reason: productionAccepted ? null : ('production_workflow_disabled' as const),
+      productionAccepted,
+      productionReceipt: receiptMaterial
+        ? Object.freeze({
+            ...receiptMaterial,
+            receiptDigest: sha256DomainSeparated(
+              'kite.release.production-supply-chain-admission-receipt.v1',
+              canonicalJsonBytes(receiptMaterial),
+            ),
+          })
+        : null,
       identity: Object.freeze({ ...parsedIdentity.data }),
       subjects: Object.freeze({ ...subjectDigests }),
       nativeLayout: Object.freeze({ launcherArchivePath }),
-      checks: Object.freeze({
-        immutableSnapshots: 'verified' as const,
-        archiveLauncherBinding: 'verified' as const,
-        canonicalManifestBinding: 'verified' as const,
-        independentSecurityReview: 'verified' as const,
-        pinnedToolchain: 'verified' as const,
-        cosignKeylessManifestSignature: 'verified' as const,
-        githubArtifactAttestations: 'verified' as const,
-        platformSignature: 'verified' as const,
-        releaseGate: 'verified' as const,
-      }),
+      checks,
     });
   } finally {
     restoreOwnedDirectoryPermissions(snapshots.root);

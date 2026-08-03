@@ -53,4 +53,28 @@ describe('production-owned Verification evaluation evidence', () => {
       'route identity',
     );
   });
+
+  test('accepts the production authentication shape but cannot trust it from caller input', () => {
+    const fixture = buildCapabilityEvidenceFixtureV1('verification');
+    fixture.evidence.authentication = {
+      kind: 'github_oidc_sigstore_v1',
+      algorithm: 'sigstore-keyless',
+      oidcIssuer: 'https://token.actions.githubusercontent.com',
+      signerIdentity: 'github-actions:ferqx/kite-code',
+      certificateIdentity: 'workflow:capability-evaluation',
+      verifierIdentity: 'protected-capability-verifier-v1',
+      bundleSubjectDigest: fixture.evidence.bundleDigest,
+      verificationReceiptDigest: `sha256:${'8'.repeat(64)}`,
+      rekorLogIndex: '1',
+    };
+    const result = verifyCapabilityEvaluationEvidenceV1(fixture.evidence, fixture.expected);
+    expect(result.status).toBe('blocked');
+    expect(result.authenticatedAuthorityConfigured).toBeFalse();
+    expect(result.reasonCodes).toContain('production_oidc_sigstore_authority_unconfigured');
+
+    fixture.evidence.authentication.bundleSubjectDigest = `sha256:${'9'.repeat(64)}`;
+    expect(() => verifyCapabilityEvaluationEvidenceV1(fixture.evidence, fixture.expected)).toThrow(
+      'authentication subject',
+    );
+  });
 });

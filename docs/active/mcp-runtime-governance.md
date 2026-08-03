@@ -137,6 +137,14 @@ provider/server/tool schema/revision、Provider Data/egress/network policy、rou
 G3–G5 freshness。外部写入先写 intent；只有同 invocation 的可信 idempotency replay 可以返回已有
 receipt，unknown external effect 只能 reconciliation，Provider Action 不能重放业务调用。
 
+Manager 现有独立 production write dispatch guard 接线：对 write/destructive/unknown external effect，
+sealed production 配置在 SDK/transport dispatch 前强制要求 guard；缺 guard、admission/intent 持久化失败
+或明确拒绝均产生零 Provider call。guard 只接收实际 discovery/route 的 server、endpoint、tool revision、
+schema/policy/effects、approval 与 Provider Data receipt、transport/remote-egress receipt 和 arguments digest，
+不接收正文；这些 invocation facts 任一缺失即拒绝。成功 dispatch 后记录 provider result digest，调用异常或
+MCP `isError=true` 都记录 `unknown`，receipt 持久化失败继续 fail closed。普通
+未启用 production requirement 的开发组合保持现有用户审批行为；该接线不会把空 route registry 打开。
+
 Skill readonly/effectful 按 ADR-0064 保守分类：只有自身和全部 dependency 的 effective effects 均为
 `none|read` 且 provenance 允许时才是 readonly；write、destructive、unknown、解析或 revision drift
 一律 effectful/off，并要求 Verification。当前两个 Skill profile 均 off，本地 conformance 与 blocked

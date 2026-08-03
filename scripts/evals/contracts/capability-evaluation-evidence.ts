@@ -167,13 +167,28 @@ export const capabilityEvaluationEvidenceV1Schema = z
     freshnessSeconds: z.number().int().positive().max(2_592_000),
     expiresAt: timestampSchema,
     bundleDigest: digestSchema,
-    authentication: z
-      .object({
-        kind: z.literal('unconfigured'),
-        algorithm: z.literal('none'),
-        reason: z.literal('production_oidc_sigstore_authority_unconfigured'),
-      })
-      .strict(),
+    authentication: z.discriminatedUnion('kind', [
+      z
+        .object({
+          kind: z.literal('unconfigured'),
+          algorithm: z.literal('none'),
+          reason: z.literal('production_oidc_sigstore_authority_unconfigured'),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal('github_oidc_sigstore_v1'),
+          algorithm: z.literal('sigstore-keyless'),
+          oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
+          signerIdentity: identitySchema,
+          certificateIdentity: identitySchema,
+          verifierIdentity: identitySchema,
+          bundleSubjectDigest: digestSchema,
+          verificationReceiptDigest: digestSchema,
+          rekorLogIndex: z.string().regex(/^[1-9][0-9]*$/),
+        })
+        .strict(),
+    ]),
   })
   .strict();
 
@@ -198,10 +213,10 @@ export interface CapabilityEvaluationExpectedIdentityV1 {
 export interface CapabilityEvaluationEvidenceVerificationV1 {
   schema: 'CapabilityEvaluationEvidenceVerificationV1';
   capability: CapabilityEvaluationCapabilityV1;
-  status: 'blocked' | 'failed';
-  evidenceEligible: false;
+  status: 'passed' | 'blocked' | 'failed';
+  evidenceEligible: boolean;
   productionAuthenticationModel: 'github_actions_oidc_keyless_sigstore';
-  authenticatedAuthorityConfigured: false;
+  authenticatedAuthorityConfigured: boolean;
   sourceDigest: `sha256:${string}`;
   artifactIdentityDigest: `sha256:${string}`;
   evaluatorIdentityDigest: `sha256:${string}`;
@@ -212,10 +227,24 @@ export interface CapabilityEvaluationEvidenceVerificationV1 {
 }
 
 /**
- * Production trust is intentionally empty. A future authority must be wired to
- * GitHub OIDC/keyless Sigstore and cannot be supplied by a caller.
+ * Production trust is source-owned and intentionally empty. A future reviewed
+ * entry must identify the protected signer, verifier and exact workflow SHA;
+ * callers cannot inject an authority into the verification function.
  */
-export const PRODUCTION_CAPABILITY_EVALUATION_AUTHORITIES_V1: readonly never[] = Object.freeze([]);
+export interface ProductionCapabilityEvaluationAuthorityV1 {
+  authorityId: string;
+  signerIdentity: string;
+  certificateIdentity: string;
+  verifierIdentity: string;
+  workflowSha: string;
+  allowedCapabilities: readonly CapabilityEvaluationCapabilityV1[];
+  bundleSubjectDigest: `sha256:${string}`;
+  verificationReceiptDigest: `sha256:${string}`;
+  rekorLogIndex: string;
+}
+
+export const PRODUCTION_CAPABILITY_EVALUATION_AUTHORITIES_V1: readonly ProductionCapabilityEvaluationAuthorityV1[] =
+  Object.freeze([]);
 
 export function computeCapabilityEvaluationSourceDigestV1(
   source: CapabilityEvaluationSourceV1,
@@ -333,7 +362,7 @@ export function verifyCapabilityEvaluationEvidenceV1(
     throw new Error('Capability evaluation expiry does not match its freshness policy.');
   }
 
-  const reasons = new Set<string>(['production_oidc_sigstore_authority_unconfigured']);
+  const reasons = new Set<string>();
   if (evidence.executionClass === 'contract_conformance') {
     reasons.add('contract_conformance_not_production');
   }
@@ -385,18 +414,31 @@ export function verifyCapabilityEvaluationEvidenceV1(
     throw new Error('Capability evaluation bundle digest does not rebuild from retained evidence.');
   }
 
+  const authenticatedAuthority = authenticateProductionCapabilityEvidenceV1(
+    evidence,
+    rebuiltBundleDigest,
+  );
+  if (PRODUCTION_CAPABILITY_EVALUATION_AUTHORITIES_V1.length === 0) {
+    reasons.add('production_oidc_sigstore_authority_unconfigured');
+  } else if (!authenticatedAuthority) {
+    reasons.add('production_oidc_sigstore_authority_not_trusted');
+  }
+
   const localFailure = [...reasons].some(
     (reason) =>
       reason !== 'production_oidc_sigstore_authority_unconfigured' &&
+      reason !== 'production_oidc_sigstore_authority_not_trusted' &&
       reason !== 'contract_conformance_not_production',
   );
+  const evidenceEligible =
+    !localFailure && authenticatedAuthority && evidence.executionClass === 'production_route_run';
   return {
     schema: 'CapabilityEvaluationEvidenceVerificationV1',
     capability: evidence.capability,
-    status: localFailure ? 'failed' : 'blocked',
-    evidenceEligible: false,
+    status: localFailure ? 'failed' : evidenceEligible ? 'passed' : 'blocked',
+    evidenceEligible,
     productionAuthenticationModel: 'github_actions_oidc_keyless_sigstore',
-    authenticatedAuthorityConfigured: false,
+    authenticatedAuthorityConfigured: PRODUCTION_CAPABILITY_EVALUATION_AUTHORITIES_V1.length > 0,
     sourceDigest,
     artifactIdentityDigest,
     evaluatorIdentityDigest,
@@ -405,6 +447,28 @@ export function verifyCapabilityEvaluationEvidenceV1(
     retainedReceiptCount: evidence.receipts.length,
     reasonCodes: [...reasons].sort(),
   };
+}
+
+function authenticateProductionCapabilityEvidenceV1(
+  evidence: CapabilityEvaluationEvidenceV1,
+  rebuiltBundleDigest: `sha256:${string}`,
+): boolean {
+  const authentication = evidence.authentication;
+  if (authentication.kind === 'unconfigured') return false;
+  if (authentication.bundleSubjectDigest !== rebuiltBundleDigest) {
+    throw new Error('Capability evaluation authentication subject does not bind the bundle.');
+  }
+  return PRODUCTION_CAPABILITY_EVALUATION_AUTHORITIES_V1.some(
+    (authority) =>
+      authority.signerIdentity === authentication.signerIdentity &&
+      authority.certificateIdentity === authentication.certificateIdentity &&
+      authority.verifierIdentity === authentication.verifierIdentity &&
+      authority.workflowSha === evidence.source.workflowSha &&
+      authority.allowedCapabilities.includes(evidence.capability) &&
+      authority.bundleSubjectDigest === authentication.bundleSubjectDigest &&
+      authority.verificationReceiptDigest === authentication.verificationReceiptDigest &&
+      authority.rekorLogIndex === authentication.rekorLogIndex,
+  );
 }
 
 function addReceiptFailureReasons(

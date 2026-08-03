@@ -67,7 +67,10 @@ describe('external auto-compaction admission contract', () => {
       checkpointWrites: 0,
       profileDiff: { maxRollout: 'off', cohortMaximum: 0 },
     });
-    expect(result.reasonCodes).toEqual(['authenticated_auto_compaction_verifier_not_configured']);
+    expect(result.reasonCodes).toEqual([
+      'authenticated_auto_compaction_safety_observation_not_configured',
+      'authenticated_auto_compaction_verifier_not_configured',
+    ]);
     expect(result.dependencyDecisionDigests).toHaveLength(dependencyIds.length);
   });
 

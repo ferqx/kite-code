@@ -221,6 +221,31 @@ describe('authenticated compaction semantic evidence contract', () => {
     expect(verification.sigstoreTrustConfigured).toBeFalse();
   });
 
+  test('accepts the production authentication shape without trusting caller-supplied authority', () => {
+    const input = fixture();
+    input.evidence.source.source = 'github_actions_oidc_sigstore_v1';
+    input.evidence.source.signature = {
+      kind: 'github_oidc_sigstore_v1',
+      algorithm: 'sigstore-keyless',
+      oidcIssuer: 'https://token.actions.githubusercontent.com',
+      authorityIdentity: 'github-actions:ferqx/kite-code:semantic-evaluator',
+      verifierIdentity: 'protected-semantic-verifier-v1',
+      evaluatorRouteDigest: input.evidence.request.evaluatorRouteDigest,
+      subjectDigest: input.evidence.payloadDigest,
+      attestationDigest: D('8'),
+      verificationReceiptDigest: D('9'),
+      verifiedAt: '2026-08-02T01:00:01.000Z',
+    };
+    const result = verifySemanticEvaluationEvidenceV1(input);
+    expect(result.status).toBe('blocked');
+    expect(result.evidenceEligible).toBeFalse();
+    expect(result.authenticatedEvaluatorRoute).toBeFalse();
+    expect(result.sigstoreTrustConfigured).toBeFalse();
+
+    input.evidence.source.signature.subjectDigest = D('0');
+    expect(() => verifySemanticEvaluationEvidenceV1(input)).toThrow('identity_mismatch');
+  });
+
   test('CLI verifier takes source expectations from its environment, not from evidence', () => {
     const input = fixture();
     const producerInput = producerInputFrom(input.evidence);

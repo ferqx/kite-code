@@ -151,6 +151,7 @@ const maturityAuthenticationV1Schema = z.discriminatedUnion('kind', [
       verifierIdentity: identitySchema,
       subjectDigest: digestSchema,
       attestationDigest: digestSchema,
+      verificationReceiptDigest: digestSchema,
       verifiedAt: timestampSchema,
     })
     .strict(),
@@ -169,7 +170,17 @@ export type CapabilityMaturityEvidenceV1 = z.infer<typeof capabilityMaturityEvid
 
 // No production maturity producer/attestation authority has been approved. This
 // registry is deliberately source-owned and cannot be injected by a caller.
-const TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1: readonly string[] = Object.freeze([]);
+interface TrustedCapabilityMaturityAuthorityV1 {
+  authorityIdentity: string;
+  verifierIdentity: string;
+  capabilities: readonly ReleaseCapability[];
+  subjectDigest: `sha256:${string}`;
+  attestationDigest: `sha256:${string}`;
+  verificationReceiptDigest: `sha256:${string}`;
+  verifiedAt: string;
+}
+const TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1: readonly TrustedCapabilityMaturityAuthorityV1[] =
+  Object.freeze([]);
 /**
  * Deliberately empty until independent prior-decision and human-approval
  * artifact verifiers exist. Populating only the authority allowlist above can
@@ -177,12 +188,12 @@ const TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1: readonly string[] = Object.fre
  */
 const VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1: readonly string[] = Object.freeze([]);
 const VERIFIED_CAPABILITY_MATURITY_HUMAN_APPROVALS_V1: readonly string[] = Object.freeze([]);
-const PRODUCTION_CAPABILITY_MATURITY_AUTHENTICATION_VERIFIER_IMPLEMENTED_V1 = false as const;
+const PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_V1 = true as const;
 
 export interface CapabilityMaturityGateDecisionV1 {
   schema: 'CapabilityMaturityGateDecisionV1';
-  status: 'blocked';
-  promotionEligible: false;
+  status: 'passed' | 'blocked';
+  promotionEligible: boolean;
   targetStage: CapabilityMaturityStageV1;
   identity: CapabilityMaturityIdentityV1;
   decisionId: string | null;
@@ -217,7 +228,10 @@ export function verifyCapabilityMaturityEvidenceV1(
 
 /**
  * Gate-only projection. It never writes capability decisions or changes a
- * profile. Until a governed authority is registered it always returns blocked.
+ * profile. The exact-record lookup path is implemented, but it is not a
+ * cryptographic attestation verifier. The source-owned authority,
+ * prior-decision and human-approval registries remain empty until real signed
+ * evidence is independently verified and reviewed.
  */
 export function evaluateCapabilityMaturityGateV1(input: {
   targetStage: CapabilityMaturityStageV1;
@@ -234,14 +248,14 @@ export function evaluateCapabilityMaturityGateV1(input: {
       authorities: TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1,
       previousDecisions: VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1,
       humanApprovals: VERIFIED_CAPABILITY_MATURITY_HUMAN_APPROVALS_V1,
-      authenticationVerifierImplemented:
-        PRODUCTION_CAPABILITY_MATURITY_AUTHENTICATION_VERIFIER_IMPLEMENTED_V1,
+      exactRecordLookupImplemented:
+        PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_V1,
     }),
   );
-  const reasons = new Set<string>([
-    'authenticated_maturity_authority_not_configured',
-    'production_maturity_authentication_verifier_not_implemented',
-  ]);
+  const reasons = new Set<string>();
+  if (TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1.length === 0) {
+    reasons.add('authenticated_maturity_authority_not_configured');
+  }
   let evidence: CapabilityMaturityEvidenceV1 | undefined;
 
   if (input.evidence === undefined) {
@@ -251,10 +265,11 @@ export function evaluateCapabilityMaturityGateV1(input: {
     evaluateEvidence({ evidence, expectedIdentity, targetStage, evaluatedAtMs, reasons });
   }
 
+  const promotionEligible = reasons.size === 0;
   const withoutDigest = {
     schema: 'CapabilityMaturityGateDecisionV1' as const,
-    status: 'blocked' as const,
-    promotionEligible: false as const,
+    status: promotionEligible ? ('passed' as const) : ('blocked' as const),
+    promotionEligible,
     targetStage,
     identity: expectedIdentity,
     decisionId: evidence?.material.decisionId ?? null,
@@ -287,7 +302,16 @@ function evaluateEvidence(input: {
   if (authentication.kind === 'unconfigured') {
     input.reasons.add('evidence_authentication_unconfigured');
   } else if (
-    !TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1.includes(authentication.authorityIdentity)
+    !TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1.some(
+      (authority) =>
+        authority.authorityIdentity === authentication.authorityIdentity &&
+        authority.verifierIdentity === authentication.verifierIdentity &&
+        authority.capabilities.includes(material.identity.capability) &&
+        authority.subjectDigest === authentication.subjectDigest &&
+        authority.attestationDigest === authentication.attestationDigest &&
+        authority.verificationReceiptDigest === authentication.verificationReceiptDigest &&
+        authority.verifiedAt === authentication.verifiedAt,
+    )
   ) {
     input.reasons.add('evidence_authority_untrusted');
   }

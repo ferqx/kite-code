@@ -20,8 +20,8 @@ export const PINNED_AGENT_TASK_WORKFLOW_PATH_V1 =
 
 export interface FormalAgentTaskEvidenceVerificationV1 {
   schema: 'FormalAgentTaskEvidenceVerificationV1';
-  status: 'failed' | 'blocked';
-  evidenceEligible: false;
+  status: 'passed' | 'failed' | 'blocked';
+  evidenceEligible: boolean;
   expectedSource: AgentTaskEvidenceSourceV1;
   sourceIdentityVerified: true;
   retainedArtifactIdentity: {
@@ -52,7 +52,7 @@ export function verifyFormalAgentTaskEvidenceV1(input: {
   const material = {
     schema: 'FormalAgentTaskEvidenceVerificationV1' as const,
     status: verification.status,
-    evidenceEligible: false as const,
+    evidenceEligible: verification.evidenceEligible,
     expectedSource,
     sourceIdentityVerified: true as const,
     retainedArtifactIdentity: {

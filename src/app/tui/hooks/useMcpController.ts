@@ -82,18 +82,21 @@ function createSupervisor(config: AgentConfig, workspace: string): DefaultMcpSup
 
 function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) {
   if (!config.executionBoundary) return {};
-  if (!config.executionCapabilitySurface) {
-    return { transportBoundaryRequired: true as const };
-  }
-  const networkPolicy = networkBoundaryPolicyFromExecutionBoundaryV1(
-    config.executionBoundary,
-    config.features?.networkBoundaryV1 === true,
-  );
   const productionExecution = (
     config as AgentConfig & {
       productionExecution?: { qualificationId?: string };
     }
   ).productionExecution;
+  if (!config.executionCapabilitySurface) {
+    return {
+      transportBoundaryRequired: true as const,
+      ...(productionExecution ? { mcpWriteGovernanceRequired: true as const } : {}),
+    };
+  }
+  const networkPolicy = networkBoundaryPolicyFromExecutionBoundaryV1(
+    config.executionBoundary,
+    config.features?.networkBoundaryV1 === true,
+  );
   const identity = createMcpTransportBoundaryIdentityV1({
     workspaceRoot: workspace,
     executionBoundary: config.executionBoundary,
@@ -104,6 +107,7 @@ function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) 
   });
   return {
     transportBoundaryRequired: true as const,
+    ...(productionExecution ? { mcpWriteGovernanceRequired: true as const } : {}),
     transportBoundary: {
       identity,
       async admit(): Promise<never> {

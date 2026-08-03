@@ -12,6 +12,11 @@ bun run agent trace <events.jsonl> --turn 1
 
 CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundaryV1`、`networkBoundaryV1`、`releaseProfileV1` 或 `observabilityMetricsV1` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions`、`/release` 与 `/telemetry`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
 
+CLI 把实际经过公共 Runtime event 入口的 metadata-only 指标送入同一个 bounded reporter，并在命令结束的
+`finally` 路径等待有界 shutdown；mapper、flush 或 exporter shutdown 失败不改变 Runtime 的结构化终态。
+开发入口没有 artifact authority 或 governed transport 时 reporter 为 no-op，不会因此创建网络请求或磁盘
+spool。该生命周期与 session logging 相互独立，任一 consent 都不能替代另一方。
+
 ## 9.2 Interaction mode
 
 | 模式 | 目标 |

@@ -18,6 +18,7 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
 import type { AgentPhase } from '../../protocol/events.js';
+import { composeObservabilityV1 } from '../observability/composition';
 import { resolveTelemetryConsentV1 } from '../observability/consent';
 import { formatObservabilityStatusV1, projectObservabilityStatusV1 } from '../observability/status';
 import { resolveReleaseCompositionV1 } from '../release/composition-root';
@@ -33,6 +34,7 @@ import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
 import FirstRunFlow from './components/first-run/FirstRunFlow';
 import InputLine, { type SlashSuggestionData } from './components/InputLine';
 import WorkspaceTrustGate from './components/WorkspaceTrustGate';
+import { createTuiExitCoordinatorV1 } from './exit-coordinator';
 import { useMcpController } from './hooks/useMcpController';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
 import { useSkillsLoader } from './hooks/useSkillsLoader';
@@ -45,7 +47,7 @@ import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } f
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
-let _unmountForExit: (() => void) | null = null;
+let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
 function resolveModelForResume(currentConfig: AgentConfig, persistedModelName: string): string {
   return persistedModelName || currentConfig.modelName;
@@ -239,6 +241,20 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     return p;
   }, []);
 
+  const observability = React.useMemo(
+    () =>
+      composeObservabilityV1({
+        artifactTelemetryAllowed: false,
+        featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
+        consent: resolveTelemetryConsentV1({
+          releaseChannel: 'development',
+          user: config.telemetry?.user,
+          project: config.telemetry?.project,
+        }),
+      }),
+    [config],
+  );
+
   const sessionManager = React.useMemo(() => {
     const mgr = new SessionManager({
       config,
@@ -248,13 +264,22 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       mcpManager: mcpRuntimeProviderRef.current,
       remoteMcpEgressPermitResolver,
       checkpointPath: defaultCheckpointPath(),
+      observabilityBridge: observability.bridge,
     });
     mgr.setSnapshotCallback((threadId) => {
       dispatch({ type: 'SESSION_INTERRUPT_PENDING', threadId });
     });
     _sessionManagerForExit = mgr;
     return mgr;
-  }, [config, provider, dispatch, remoteMcpEgressPermitResolver]);
+  }, [config, provider, dispatch, remoteMcpEgressPermitResolver, observability.bridge]);
+  React.useEffect(
+    () => () => {
+      sessionManager.abortAll();
+      sessionManager.dispose();
+      if (_sessionManagerForExit === sessionManager) _sessionManagerForExit = null;
+    },
+    [sessionManager],
+  );
   const sandboxRuntime = React.useMemo(
     () => resolveSandboxRuntime({ enabled: config.sandbox.enabled }),
     [config.sandbox.enabled],
@@ -315,11 +340,9 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
   // Exit when exitRequested flag is set (double Ctrl+C when not running)
   React.useEffect(() => {
     if (state.exitRequested) {
-      sessionManager.abortAll();
-      _unmountForExit?.();
-      process.exit(0);
+      void _requestTuiExit?.();
     }
-  }, [state.exitRequested, sessionManager]);
+  }, [state.exitRequested]);
 
   // Rewind: checkpoint list + revert/fork execution
   useRewindCheckpoints(state, dispatch, threadIdRef);
@@ -390,13 +413,8 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
 
   const handleExit = React.useCallback(() => {
     dispatch({ type: 'LOCAL_TEXT', text: '👋 Goodbye!' });
-    sessionManager.abortAll();
-    sessionManager.dispose();
-    setTimeout(() => {
-      _unmountForExit?.();
-      process.exit(0);
-    }, 300);
-  }, [dispatch, sessionManager]);
+    void _requestTuiExit?.();
+  }, [dispatch]);
 
   // Load historical sessions from DB on startup, but always start fresh.
   React.useEffect(() => {
@@ -1023,7 +1041,7 @@ export function runTui(props: TuiBootstrapProps = {}): void {
   // The manual approach enabled Kitty at the terminal level but Ink's parser didn't
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
   const { unmount } = render(
-    <ErrorBoundary>
+    <ErrorBoundary onExit={() => void _requestTuiExit?.(1)}>
       <TuiBootstrap {...props} />
     </ErrorBoundary>,
     {
@@ -1038,21 +1056,18 @@ export function runTui(props: TuiBootstrapProps = {}): void {
     },
   );
 
-  // Expose unmount so exit handlers inside the component tree can properly
-  // tear down kitty keyboard protocol before terminating the process.
-  _unmountForExit = unmount;
+  const exitCoordinator = createTuiExitCoordinatorV1({
+    getSessionLifecycle: () => _sessionManagerForExit,
+    unmount,
+    exit: (code) => process.exit(code),
+  });
+  _requestTuiExit = (code) => exitCoordinator.requestExit(code);
 
   process.on('SIGINT', () => {
-    _sessionManagerForExit?.abortAll();
-    _sessionManagerForExit?.dispose();
-    unmount();
-    process.exit(0);
+    void exitCoordinator.requestExit();
   });
   process.on('SIGTERM', () => {
-    _sessionManagerForExit?.abortAll();
-    _sessionManagerForExit?.dispose();
-    unmount();
-    process.exit(0);
+    void exitCoordinator.requestExit();
   });
 }
 

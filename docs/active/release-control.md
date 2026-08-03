@@ -78,6 +78,16 @@ reviewer 和独立 verifier 前不能产生 `approved_candidate`。
 contract fixture；命令本身不写计划 milestone。其 G0/G1 验证 canonical/pre-exec/Gate replay，
 不能替代 RC 的供应链、平台、运营、产品、canary SLO 或第三方评审 evidence。
 
+RC 本地控制面现补齐三个独立 contract：`gate-replay.ts` 对 retained decision 做 byte-equivalent
+deterministic replay；`schema-rollback.ts` 用 synthetic fixture 验证 durable fact 保留、unknown external
+effect 永不盲重放；`assemble-rc.ts` 要求 MS:1A/1B/1C/2B/3、2A.8/2A.10、Gate replay、rollback 与
+第三方评审全部绑定 exact candidate identity；detached manifest、evidence bundle、release Gate、supply-chain、
+Gate replay 与 rollback 六项关键输入还必须各自绑定 digest/artifact/verification receipt，并进入 assembly
+digest。assembler 是纯 Gate，不写 bundle、不发布；它只消费源码中预登记的 exact verified statements，
+本身不是密码学 verifier。当前 registry 为空，因此尚不存在 `passed/distributable` 路径；Task 2A.11 未来仍是
+`MS:2A-RC` 的唯一 producer。source-owned RC authority 与任一真实 dependency evidence 缺失时固定 blocked、
+`distributable=false`、`milestone=null`。
+
 ## Execution artifact conformance
 
 `release:smoke:execution` 对实际 synthetic bundle 执行 bootstrap verification，再把 D-04 的三个
@@ -138,7 +148,8 @@ public-key digest 和真实 cosign signature，`not_applicable` 不能绕过第�
 当前 job 固定 `if: false && github.workflow_sha == protected expected workflow SHA`、无
 OIDC/attestation/write 权限、trusted verifier commit/expected workflow SHA 未配置且 Gate digest 故意
 无效；即使误删一个条件也会
-fail closed。完整真实验证前 verifier 只返回 blocked、`productionReceipt=null`。
+fail closed。verifier 已有源码内 exact trusted-verifier-commit registry 驱动的条件式 production receipt；
+registry 当前为空，所以完整真实验证前仍只返回 blocked、`productionReceipt=null`。
 
 Windows、Linux 与 macOS 是发行目标，但这不把任一平台自动加入 production execution support
 set。普通跨平台 launcher/TUI contract 使用 GitHub-hosted matrix；Shell/writer 等 effectful
@@ -163,8 +174,10 @@ service/signing、exporter、baseline 和 observation 仍未启用，因此该�
 
 跨 capability maturity Gate 已预构建 canary → beta → stable 的严格顺序与 exact identity chain，要求
 预注册 observation window/sample/error budget、G3–G5、独立真人 approval、用户理解度、rollback 和
-freshness。当前 production authentication verifier 未实现；受信 evidence authority、已验证前序 decision
-与已验证真人 approval registry 各自固定为空。shape-valid production observation 或只填充其中一个身份
+freshness。production authentication subject、attestation/verifier identity 与 source-owned exact
+verified-record lookup 已实现；仓库代码不执行 attestation 密码学验证，受信 evidence authority、已验证
+前序 decision 与已验证真人 approval registry 各自固定为空。
+shape-valid production observation 或只填充其中一个身份
 集合仍只能 blocked，不能产生 promotion 或被 Phase 6 selection 当作 stable decision。
 
 `release/ga-selection-v1.json` 当前 selected capability 为空，并显式把全部 15 个 Release Capability
@@ -172,12 +185,18 @@ forced off。validator 要求每个 selected capability 绑定精确且 fresh �
 forced-off 对全集做无重叠分区。当前 GA Gate 因 `MS:LIM-APPROVED`、`MS:LIMITED-SLO`、
 `MS:2A-RC`、`MS:3-OPS-READY`、第三方安全评审、非空 production support set 与 stable selection
 全部缺失而 blocked；它不能 assemble 或 publish artifact。GA 前置不再接受调用者布尔值，而要求
-artifact/profile/route/cohort 一致的 typed decision records；当前 authenticated dependency verifier
-未配置，因此即使提供 shape-valid fixture 也固定 `gaEligible=false`。
+artifact/profile/route/cohort 一致的 typed decision records；source-owned exact dependency record 还绑定
+完整 canonical selection digest（包含 capability set、stable decision digest 与 approval）。它不是密码学
+verifier 且 registry 为空，因此即使提供 shape-valid fixture 也固定 `gaEligible=false`。
 
 Auto Compaction admission contract 消费同一 candidate identity 的 typed dependency decisions 与
-G0/G1 ledger digest，所有前置 identity 都进入 decision digest；本地 authenticated verifier 未配置，
+G0/G1 ledger digest，所有前置 identity 都进入 decision digest；dependency statement 与 safety observation
+分别要求源码内 exact verified record，不能只认证 dependency 后由调用者自报零事故；两个 registry 都为空，
 所以 fixture 永远 blocked、`auto_compaction` 为 off/cohort 0。评估自身固定零 summary dispatch、零
 checkpoint write。GA compatibility
 replay 只使用 `synthetic_contract_only` fixture，验证 transcript/Plan/Receipt/Verification/checkpoint
 事实不被删除、unknown external effect 不重放；`productionEvidence=false`，不能作为发布或观察证据。
+
+`assemble-ga.ts` 现提供纯 GA assembly/replay Gate，绑定 candidate/artifact/profile/route/cohort、canonical
+selection、rollback/compatibility replay 与独立第三方评审。它没有 filesystem、network 或 publish 路径；
+production assembly authority 为空时固定不写 bundle、不发布、`milestone=null`。

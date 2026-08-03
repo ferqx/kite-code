@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import type { RuntimeMetricBridgeV1 } from '@/app/observability/runtime-bridge';
 import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
@@ -85,6 +86,8 @@ export interface SessionDeps {
   mcpRecoveryController?: Pick<McpController, 'recover'> | null;
   /** checkpoint DB 路径，用于持久化 token 统计 / Checkpoint DB path for persisting token stats */
   checkpointPath: string;
+  /** One shared metadata-only reporter for foreground, background and subagent Runtime events. */
+  observabilityBridge?: RuntimeMetricBridgeV1;
 }
 
 export interface ContextCompactionCommandResult {
@@ -139,6 +142,7 @@ export class SessionRuntime {
   private _activeDispatch: ((action: Action) => void) | null = null;
   private _contentLoggingDisclosureShown = false;
   private _sessionLoggingStatusShown = false;
+  private readonly _observabilityBridge: RuntimeMetricBridgeV1 | undefined;
   /**
    * Remains pending while the previous generator is unwinding after abort().
    * abort() clears the user-visible running flag immediately, but a new run
@@ -161,6 +165,7 @@ export class SessionRuntime {
     this.mcpManager = deps.mcpManager;
     this.mcpRecoveryController = deps.mcpRecoveryController ?? null;
     this.remoteMcpEgressPermitResolver = deps.remoteMcpEgressPermitResolver;
+    this._observabilityBridge = deps.observabilityBridge;
     this.interactionMode = deps.config.interactionMode ?? 'accept_edits';
 
     this._proxyProvider = this._createProxyProvider();
@@ -449,6 +454,7 @@ export class SessionRuntime {
 
   /** Route the public RuntimeEvent stream directly to the foreground or buffer. */
   private _routeRuntimeEvent(event: RuntimeEvent, dispatch: (action: Action) => void): void {
+    this._observabilityBridge?.observeRuntimeEvent(event, new Date().toISOString());
     if (event.type === 'model.text_delta' || event.type === 'model.reasoning_delta') {
       this._bufferModelDelta(event, dispatch);
       return;
@@ -802,6 +808,7 @@ export class SessionManager {
   >();
   /** 复用的 DB 连接，避免每次 saveTokenStats 开新连接 / Reusable DB connection to avoid opening a new one on every save */
   private _statsDb: Database | null = null;
+  private _observabilityShutdown: Promise<void> | null = null;
   /** 防抖定时器：合并高频 token 统计变更为批量写入，避免每个 stream chunk 都写 DB
    *  Debounce timers: batch high-frequency token stat changes into fewer writes */
   private _statsDebounceTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1575,6 +1582,19 @@ export class SessionManager {
       }
       this._statsDb = null;
     }
+    // Telemetry is non-critical and bounded: start a best-effort flush without
+    // delaying synchronous React cleanup. Explicit process exit paths also
+    // retain a short settle window for this promise.
+    void this.shutdownObservability(250);
+  }
+
+  /** Idempotent bounded shutdown used by every TUI process-exit path. */
+  shutdownObservability(timeoutMs = 250): Promise<void> {
+    if (!this.deps.observabilityBridge) return Promise.resolve();
+    this._observabilityShutdown ??= this.deps.observabilityBridge.shutdown(timeoutMs).catch(() => {
+      // Observability never changes Runtime or process-exit outcome semantics.
+    });
+    return this._observabilityShutdown;
   }
 
   /** 同步 skills 到所有现有运行时（skills 扫描完成后调用）/ Sync skill manifests to all existing runtimes (called after skill scan completes) */

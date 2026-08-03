@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { resolveMcpToolPolicy } from '@/core/mcp/tool-policy';
 import {
   type McpWriteRouteContractV1,
+  parseMcpWriteRouteRegistryV1,
   qualifyMcpWriteRouteV1,
   routeContractDigestV1,
 } from './write-contract-fixtures';
@@ -44,6 +46,17 @@ function route(): McpWriteRouteContractV1 {
 }
 
 describe('MCP write production route matrix contract', () => {
+  test('loads the source-owned registry as an explicit empty support set', () => {
+    const registry = parseMcpWriteRouteRegistryV1(
+      JSON.parse(readFileSync('release/mcp-write-routes-v1.json', 'utf8')),
+    );
+    expect(registry).toEqual({
+      version: 1,
+      registryId: 'mcp-write-routes-unconfigured-v1',
+      routes: [],
+    });
+  });
+
   test('the repository-local matrix is empty and formal evidence is not observed', () => {
     expect(
       qualifyMcpWriteRouteV1({
@@ -89,5 +102,35 @@ describe('MCP write production route matrix contract', () => {
       now: new Date('2026-08-02T00:00:00.000Z'),
     });
     expect(decision).toEqual({ status: 'off', reasonCodes: ['hard_safety_violation'] });
+  });
+
+  test('rejects malformed nested effects and retry/reconciliation enums at runtime', () => {
+    const contract = route();
+    expect(() =>
+      parseMcpWriteRouteRegistryV1({
+        version: 1,
+        registryId: 'invalid-effects',
+        routes: [
+          {
+            ...contract,
+            effects: { filesystem: 'root', externalState: 'write' },
+          },
+        ],
+      }),
+    ).toThrow('exact EffectProfile');
+    expect(() =>
+      parseMcpWriteRouteRegistryV1({
+        version: 1,
+        registryId: 'invalid-idempotency',
+        routes: [{ ...contract, idempotency: 'blind-retry' }],
+      }),
+    ).toThrow('idempotency policy');
+    expect(() =>
+      parseMcpWriteRouteRegistryV1({
+        version: 1,
+        registryId: 'invalid-reconciliation',
+        routes: [{ ...contract, reconciliation: 'unsupported' }],
+      }),
+    ).toThrow('explicit reconciliation');
   });
 });

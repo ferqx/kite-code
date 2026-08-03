@@ -90,12 +90,23 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   production-owned retained evidence verifier、Compaction internal rollout/external shadow Gate、
   manual/auto compaction off profile 与统一 canary→beta→stable maturity Gate；所有 production authority
   registry 仍为空，因此没有新 Task binding 或 milestone。
-- 本批 authenticated evidence 整体 Review 的架构/治理 Reviewer 与安全/对抗 Reviewer 最终均为 GO，
-  P0/P1/P2=`0/0/0`；该结论只覆盖本地 diff 和完成声明，不是 external release 所需的真人第三方安全评审。
-- 整体 Review 发现的 Release 第三方评审/production admission、Limited SLO、D-07、GA/Auto、
-  worktree handoff/Git 环境和 workflow pin 问题均已 fail-closed 修复；两路最终复核均为 GO 且
-  P0/P1/P2=`0/0/0`。第三方 reviewer trust root 仍为空，本地 external review fixture 不能产生
-  approved candidate；该最终复核不替代 external release 前的真实第三方安全评审。
+- 2026-08-03 的 implementation-first 批次进一步补齐 RC assembly/Gate replay/schema rollback、Agent task
+  产品 companion ledger、governed observability exporter/Runtime bridge、production-shaped incident ledger、
+  capability rollout admission 与 production-owned MCP write governance/空 route registry。该批只减少本地
+  实现缺口；execution binding 仍为 54 completed、5 in_progress、49 unbound，所有真实 external/live/
+  participant/incident/SLO/signing/maturity/第三方评审 evidence 继续等待，不产生新 milestone。
+  后续同批又补齐 production-shaped baseline、Compaction continuation/route production ownership、
+  capability manual retained workflow、maturity/GA/Auto source-owned verifier lookup、纯 GA assembly，以及
+  sealed production MCP write durable dispatch guard；随后补齐 Agent task/Limited SLO/Compaction/RC 的
+  production-shaped exact-record lookup。所有 production registry 仍为空，且仓库内不把该 lookup 冒充
+  Sigstore 密码学 verifier，结论与计数不变。
+- Decision Register Revision 30 的历史批次两路最终 Review 为 GO、P0/P1/P2=`0/0/0`；它不覆盖本次
+  implementation-first diff，也不替代 external release 所需的真人第三方安全评审。
+- 本次 diff 的首轮整体 Review 为 NO-GO（架构/治理 P1=5/P2=1；安全/对抗 P1=7/P2=2）；统一修复
+  exact attestation trust、RC critical digest、D-07 产品证据、GA synthetic evidence、MCP write outcome/
+  dispatch facts、schema rollback、TUI bounded shutdown 与文档 overclaim 后，两路最终复核均为 GO，
+  P0/P1/P2=`0/0/0`。该 GO 只覆盖当前完整本地 diff 与完成声明，不替代 external release 前的真人
+  第三方安全评审。
 
 ## 首发支持边界
 

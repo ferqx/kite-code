@@ -78,6 +78,7 @@ jobs:
             --mode=produce \
             --input=agent-task-retained-input.json \
             --output=agent-task-evidence.json \
+            --product-output=agent-task-product-evidence.json \
             --repository="$AGENT_TASK_REPOSITORY" \
             --repository-id="$AGENT_TASK_REPOSITORY_ID" \
             --head-sha="$AGENT_TASK_HEAD_SHA" \
@@ -91,6 +92,11 @@ jobs:
             --artifact-id="${{ steps.retained-upload.outputs.artifact-id }}" \
             --artifact-name="$RETAINED_ARTIFACT_NAME" \
             --signed-at="$signed_at"
+      - name: Build independent expected product source
+        env:
+          RETAINED_ARTIFACT_ID: ${{ steps.retained-upload.outputs.artifact-id }}
+        run: |
+          bun -e 'const retained=await Bun.file("agent-task-retained-input.json").json(); await Bun.write("agent-task-expected-source.json", JSON.stringify({schema:"AgentTaskEvidenceSourceV1",repository:process.env.AGENT_TASK_REPOSITORY,repositoryId:process.env.AGENT_TASK_REPOSITORY_ID,headSha:process.env.AGENT_TASK_HEAD_SHA,ref:process.env.AGENT_TASK_REF,workflowPath:process.env.AGENT_TASK_WORKFLOW_PATH,workflowRef:process.env.AGENT_TASK_WORKFLOW_REF,workflowSha:process.env.AGENT_TASK_WORKFLOW_SHA,runId:process.env.AGENT_TASK_RUN_ID,runAttempt:Number(process.env.AGENT_TASK_RUN_ATTEMPT),job:process.env.AGENT_TASK_JOB,artifactId:process.env.RETAINED_ARTIFACT_ID,artifactName:process.env.RETAINED_ARTIFACT_NAME,startedAt:retained.startedAt,endedAt:retained.endedAt}))'
       - name: Independently verify expected identity and complete ledgers
         run: |
           bun run scripts/evals/verify-agent-task-evidence.ts \
@@ -118,6 +124,20 @@ jobs:
              (.verification.reasonCodes | index("production_route_unconfigured")) != null and
              (.verification.reasonCodes | index("production_sigstore_verifier_unconfigured")) != null' \
             agent-task-evidence-verification.json
+          bun run scripts/evals/verify-agent-task-product-evidence.ts \
+            --formal-evidence=agent-task-evidence.json \
+            --product-evidence=agent-task-product-evidence.json \
+            --expected-source=agent-task-expected-source.json \
+            --required-human-receipt-count=0 \
+            --output=agent-task-product-evidence-verification.json \
+            --require-blocked=true
+          jq -e \
+            '.status == "blocked" and .evidenceEligible == false and
+             .productVerification.verifiedUxReceiptCount == .expectedAttemptCount and
+             .productVerification.verifiedHumanReceiptCount == 0 and
+             (.productVerification.reasonCodes | index("contract_conformance_not_production")) != null and
+             (.productVerification.reasonCodes | index("production_product_evidence_authority_unconfigured")) != null' \
+            agent-task-product-evidence-verification.json
       - name: Upload blocked evidence and independent verification
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
@@ -125,5 +145,7 @@ jobs:
           path: |
             agent-task-evidence.json
             agent-task-evidence-verification.json
+            agent-task-product-evidence.json
+            agent-task-product-evidence-verification.json
           if-no-files-found: error
           retention-days: 14

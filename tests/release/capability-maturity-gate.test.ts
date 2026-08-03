@@ -117,6 +117,7 @@ function evidence(
             verifierIdentity: 'sigstore-policy:kite-capability-maturity-v1',
             subjectDigest: materialDigest,
             attestationDigest: digest('c'),
+            verificationReceiptDigest: digest('d'),
             verifiedAt: '2026-08-03T03:00:00.000Z',
           }
         : {
@@ -150,11 +151,7 @@ describe('capability maturity Gate', () => {
       decisionId: null,
       windowId: null,
       evidenceDigest: null,
-      reasonCodes: [
-        'authenticated_maturity_authority_not_configured',
-        'maturity_evidence_missing',
-        'production_maturity_authentication_verifier_not_implemented',
-      ],
+      reasonCodes: ['authenticated_maturity_authority_not_configured', 'maturity_evidence_missing'],
     });
     expect(second.decisionDigest).toBe(first.decisionDigest);
   });
@@ -169,7 +166,6 @@ describe('capability maturity Gate', () => {
       reasonCodes: [
         'authenticated_maturity_authority_not_configured',
         'evidence_authority_untrusted',
-        'production_maturity_authentication_verifier_not_implemented',
         'verified_human_approval_not_configured',
         'verified_previous_maturity_decision_not_configured',
       ],
@@ -238,7 +234,6 @@ describe('capability maturity Gate', () => {
 
     expect(evaluate(evidence(candidate)).reasonCodes).toEqual(
       expect.arrayContaining([
-        'production_maturity_authentication_verifier_not_implemented',
         'verified_previous_maturity_decision_not_configured',
         'verified_human_approval_not_configured',
       ]),

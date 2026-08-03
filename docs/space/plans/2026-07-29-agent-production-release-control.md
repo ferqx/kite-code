@@ -31,6 +31,17 @@ authenticated artifact receipt 固定 blocked，embedded ceiling 也全部 off�
 rollout signing/service、authenticated artifact authority、exporter 和 observation 保持 disabled/缺失。
 2A.10/2A.11 尚未完成。
 
+2026-08-03 的 implementation-first 批次已补齐 2A.11 的本地 RC assembly、deterministic Gate replay
+和 schema rollback contract。assembler 只消费 exact candidate-bound dependency decisions，不写 bundle、
+不发布，也不把 synthetic rollback/replay 提升为 evidence；六项关键输入必须各自提供 exact digest、artifact
+identity 与 verification receipt，并全部进入 assembly digest。源码 registry 只允许匹配预先独立验证的 exact
+dependency/critical-input statement，仓库内尚无密码学 verifier，因此当前不存在可认证的 `MS:2A-RC`
+正向路径。production supply-chain verifier 同样只在源码登记 exact verifier commit 后，
+并且 immutable snapshot、签名/attestation、平台身份、完整 Gate 与真人第三方评审全部验证时才可返回
+production receipt；当前 registry 为空。`MS:2B-DONE`、`MS:3-OPS-READY`、2A.8/
+2A.10 正式 evidence、第三方安全评审与 source-owned RC authority 尚未满足，因此 2A.11 继续未绑定，
+`MS:2A-RC` 未产生。
+
 ## 目标
 
 建立独立于 Runtime 的发布控制面，使每个可分发制品都能回答：

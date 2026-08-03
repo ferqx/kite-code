@@ -13,7 +13,20 @@ const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 // No production observation producer or attestation verifier has been approved.
 // This registry is deliberately not injectable by a caller: a future non-empty
 // revision requires governed source code and release-policy changes.
-const TRUSTED_LIMITED_SLO_PRODUCERS_V1: readonly string[] = Object.freeze([]);
+interface TrustedLimitedSloProducerV1 {
+  producerId: string;
+  repositoryId: string;
+  workflowPath: string;
+  oidcIssuer: string;
+  verifierDigest: `sha256:${string}`;
+  sourceIdentityDigest: `sha256:${string}`;
+  attestationSubjectDigest: `sha256:${string}`;
+  ledgerDigest: `sha256:${string}`;
+  rebuildDigest: `sha256:${string}`;
+  reportDigest: `sha256:${string}`;
+}
+
+const TRUSTED_LIMITED_SLO_PRODUCERS_V1: readonly TrustedLimitedSloProducerV1[] = Object.freeze([]);
 
 export const limitedSloQualificationExpectationV1Schema = z
   .object({
@@ -34,9 +47,9 @@ export type LimitedSloQualificationExpectationV1 = z.infer<
 
 export interface LimitedSloQualificationVerificationV1 {
   schema: 'LimitedSloQualificationVerificationV1';
-  status: 'blocked';
-  productionEvidenceEligible: false;
-  trustRegistryConfigured: false;
+  status: 'passed' | 'blocked';
+  productionEvidenceEligible: boolean;
+  trustRegistryConfigured: boolean;
   ledgerDigest: `sha256:${string}`;
   rebuildDigest: `sha256:${string}`;
   expectationDigest: `sha256:${string}`;
@@ -58,7 +71,24 @@ export function verifyLimitedSloQualificationV1(input: {
   const ledger = verifyLimitedSloSampleLedgerV1(input.ledger);
   const expected = limitedSloQualificationExpectationV1Schema.parse(input.expected);
   const rebuild = rebuildLimitedSloObservationV1(ledger);
-  const reasons = new Set<string>(['authenticated_observation_verifier_not_configured']);
+  const reasons = new Set<string>();
+  const sourceIdentityDigest = sha256DomainSeparated(
+    'kite.operations.limited-slo-source-identity.v1',
+    canonicalJson(expected.source),
+  );
+  const trustedProducer = TRUSTED_LIMITED_SLO_PRODUCERS_V1.find(
+    (producer) =>
+      producer.repositoryId === expected.source.repositoryId &&
+      producer.workflowPath === expected.source.workflowPath &&
+      producer.oidcIssuer === expected.source.oidcIssuer &&
+      producer.verifierDigest === expected.verifierDigest &&
+      producer.sourceIdentityDigest === sourceIdentityDigest &&
+      producer.attestationSubjectDigest === expected.source.attestationSubjectDigest &&
+      producer.ledgerDigest === ledger.ledgerDigest &&
+      producer.rebuildDigest === rebuild.rebuildDigest &&
+      producer.reportDigest === expected.reportDigest,
+  );
+  if (!trustedProducer) reasons.add('authenticated_observation_verifier_not_configured');
 
   for (const field of [
     'policyDigest',
@@ -126,11 +156,12 @@ export function verifyLimitedSloQualificationV1(input: {
     'kite.operations.limited-slo-trust-registry.v1',
     canonicalJson(TRUSTED_LIMITED_SLO_PRODUCERS_V1),
   );
+  const productionEvidenceEligible = reasons.size === 0 && trustedProducer !== undefined;
   const withoutDigest = {
     schema: 'LimitedSloQualificationVerificationV1' as const,
-    status: 'blocked' as const,
-    productionEvidenceEligible: false as const,
-    trustRegistryConfigured: false as const,
+    status: productionEvidenceEligible ? ('passed' as const) : ('blocked' as const),
+    productionEvidenceEligible,
+    trustRegistryConfigured: trustedProducer !== undefined,
     ledgerDigest: ledger.ledgerDigest as `sha256:${string}`,
     rebuildDigest: rebuild.rebuildDigest,
     expectationDigest,

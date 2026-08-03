@@ -65,6 +65,11 @@ import {
   type McpTransportOperationV1,
 } from './transport-boundary';
 import type { McpPrompt, McpResource, McpServerConfig, McpServerState } from './types';
+import {
+  type McpWriteDispatchAdmissionV1,
+  type McpWriteDispatchGuardV1,
+  McpWriteGovernanceErrorV1,
+} from './write-governance';
 
 const MCP_STARTUP_TIMEOUT = 5000;
 const MCP_TOOL_CALL_TIMEOUT = 30_000;
@@ -122,6 +127,9 @@ export interface McpConnectionManagerOptions {
   transportRecordNetworkDecision?: NetworkDecisionRecorderV1;
   /** Test-only pinned request adapter; production omits it for the native implementation. */
   transportPinnedRequest?: PinnedNetworkRequestV1;
+  /** Release profiles can require a durable production write admission guard. */
+  mcpWriteGovernanceRequired?: boolean;
+  mcpWriteDispatchGuard?: McpWriteDispatchGuardV1;
 }
 
 /**
@@ -143,6 +151,8 @@ export class McpConnectionManager {
   private readonly transportNetworkResolver: NetworkResolverV1 | undefined;
   private readonly transportRecordNetworkDecision: NetworkDecisionRecorderV1 | undefined;
   private readonly transportPinnedRequest: PinnedNetworkRequestV1 | undefined;
+  private readonly mcpWriteGovernanceRequired: boolean;
+  private readonly mcpWriteDispatchGuard: McpWriteDispatchGuardV1 | undefined;
   private readonly transportHttpContext = new AsyncLocalStorage<McpTransportAdmissionReceiptV1>();
   private servers = new Map<string, McpServerState>();
   private promptRegistry = new Map<string, PromptEntry>();
@@ -175,6 +185,8 @@ export class McpConnectionManager {
     this.transportNetworkResolver = options.transportNetworkResolver;
     this.transportRecordNetworkDecision = options.transportRecordNetworkDecision;
     this.transportPinnedRequest = options.transportPinnedRequest;
+    this.mcpWriteGovernanceRequired = options.mcpWriteGovernanceRequired === true;
+    this.mcpWriteDispatchGuard = options.mcpWriteDispatchGuard;
   }
 
   assertTransportBoundaryWorkspace(workspace: string): void {
@@ -683,6 +695,7 @@ export class McpConnectionManager {
       });
     }
     const args = argumentSnapshot.ok ? argumentSnapshot.arguments : Object.freeze({});
+    let remoteEgressReceiptDigest: string | null = null;
     if (argumentSnapshot.ok) {
       const argumentError = validateCapabilityArguments(descriptor.inputSchema, args);
       if (argumentError) {
@@ -756,6 +769,7 @@ export class McpConnectionManager {
         );
       }
       if (!receipt.admitted) throw new RemoteMcpEgressDeniedError(receipt);
+      remoteEgressReceiptDigest = receipt.receiptDigest;
     }
     if (!argumentSnapshot.ok) {
       throw new McpProviderError({
@@ -780,24 +794,119 @@ export class McpConnectionManager {
     if (!this.isCurrent(server, client, state.generation)) {
       throw capabilityChangedProviderError(server);
     }
+    const writeAdmission = await this.admitMcpWriteDispatch({
+      descriptor,
+      toolName,
+      args,
+      route,
+      transportAdmission,
+      remoteEgressReceiptDigest,
+      governance: invocation.writeGovernance,
+    });
+    let result: CallToolResult;
     try {
-      const result = (await this.withTransportReceipt(transportAdmission, () =>
+      result = (await this.withTransportReceipt(transportAdmission, () =>
         client.callTool({ name: toolName, arguments: args }, undefined, {
           timeout: state.config.timeout ?? MCP_TOOL_CALL_TIMEOUT,
           signal: invocation.signal,
         }),
       )) as CallToolResult;
-      state.consecutiveCallFailures = 0;
-      state.retryAt = undefined;
-      state.health = 'ready';
-      state.diagnostic = undefined;
-      this.publish();
-      // The SDK's task-enabled overload includes an indirection result. P0 uses
-      // synchronous tool calls only; the protocol result is validated by the server.
-      return result;
     } catch (error) {
+      if (writeAdmission) {
+        await this.recordMcpWriteOutcome(writeAdmission, 'unknown', null);
+      }
       this.noteCallFailure(state, error);
       throw providerErrorFromDiagnostic(server, state.diagnostic);
+    }
+    if (writeAdmission) {
+      await this.recordMcpWriteOutcome(
+        writeAdmission,
+        result.isError ? 'unknown' : 'succeeded',
+        digestCapability(result),
+      );
+    }
+    state.consecutiveCallFailures = 0;
+    state.retryAt = undefined;
+    state.health = 'ready';
+    state.diagnostic = undefined;
+    this.publish();
+    // The SDK's task-enabled overload includes an indirection result. P0 uses
+    // synchronous tool calls only; the protocol result is validated by the server.
+    return result;
+  }
+
+  private async admitMcpWriteDispatch(input: {
+    descriptor: CapabilityDescriptor;
+    toolName: string;
+    args: Readonly<Record<string, unknown>>;
+    route: McpCapabilityRouteV1 | undefined;
+    transportAdmission: McpTransportAdmissionReceiptV1 | undefined;
+    remoteEgressReceiptDigest: string | null;
+    governance: McpCapabilityInvocation['writeGovernance'];
+  }): Promise<Extract<McpWriteDispatchAdmissionV1, { admitted: true }> | null> {
+    const { descriptor } = input;
+    const writeClass = ['write', 'destructive', 'unknown'].includes(
+      descriptor.effectiveEffects.externalState,
+    );
+    if (!writeClass) return null;
+    const guard = this.mcpWriteDispatchGuard;
+    if (!guard) {
+      if (this.mcpWriteGovernanceRequired) {
+        throw new McpWriteGovernanceErrorV1('production_write_guard_unconfigured');
+      }
+      return null;
+    }
+    if (!input.governance || !input.route) {
+      throw new McpWriteGovernanceErrorV1('write_governance_facts_missing');
+    }
+    let admission: McpWriteDispatchAdmissionV1;
+    try {
+      admission = await guard.beforeDispatch({
+        capabilityId: descriptor.capabilityId,
+        capabilityRevision: descriptor.revision,
+        providerIdentity: descriptor.provider.id,
+        serverIdentity: input.route.serverIdentity,
+        endpointRevision: input.route.endpointRevision,
+        toolName: input.toolName,
+        schemaDigest: digestCapability(descriptor.inputSchema),
+        policyDigest: digestCapability({
+          effects: descriptor.effectiveEffects,
+          policy: descriptor.policy,
+          execution: descriptor.execution,
+        }),
+        effects: descriptor.effectiveEffects,
+        minimumApproval: descriptor.policy.minimumApproval,
+        retry: descriptor.execution?.retry ?? 'never',
+        ...(descriptor.execution?.idempotencyKeyArgument
+          ? { idempotencyKeyArgument: descriptor.execution.idempotencyKeyArgument }
+          : {}),
+        userApprovalReceiptDigest: input.governance.userApprovalReceiptDigest,
+        providerDataPolicyRevision: input.governance.providerDataPolicyRevision,
+        providerDataPolicyReceiptDigest: input.governance.providerDataPolicyReceiptDigest,
+        transportAdmissionReceiptDigest: input.transportAdmission?.receiptDigest ?? null,
+        remoteEgressReceiptDigest: input.remoteEgressReceiptDigest,
+        argumentsDigest: remoteMcpArgumentDigestV1(input.args),
+      });
+    } catch {
+      throw new McpWriteGovernanceErrorV1('write_admission_persistence_failed');
+    }
+    if (!admission.admitted) throw new McpWriteGovernanceErrorV1(admission.reasonCode);
+    return admission;
+  }
+
+  private async recordMcpWriteOutcome(
+    admission: Extract<McpWriteDispatchAdmissionV1, { admitted: true }>,
+    outcome: 'succeeded' | 'unknown',
+    providerReceiptDigest: string | null,
+  ): Promise<void> {
+    try {
+      await this.mcpWriteDispatchGuard?.recordOutcome({
+        admission,
+        outcome,
+        providerReceiptDigest,
+      });
+    } catch {
+      throw new McpWriteGovernanceErrorV1('write_receipt_persistence_failed');
     }
   }
 

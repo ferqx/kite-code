@@ -21,7 +21,7 @@ export const compactionRolloutIdentityV1Schema = z
 
 export const compactionRolloutSourceV1Schema = z
   .object({
-    sourceKind: z.literal('github_actions_unsigned_contract'),
+    sourceKind: z.enum(['github_actions_unsigned_contract', 'github_actions_oidc_sigstore_v1']),
     repository: z.literal('ferqx/kite-code'),
     repositoryId: z.literal('R_kgDOSKbi8g'),
     headSha: commitSchema,
@@ -37,12 +37,25 @@ export const compactionRolloutSourceV1Schema = z
     artifactDigest: digestSchema,
     startedAt: timestampSchema,
     endedAt: timestampSchema,
-    authentication: z
-      .object({
-        kind: z.literal('unconfigured'),
-        reason: z.literal('production_compaction_rollout_authority_not_configured'),
-      })
-      .strict(),
+    authentication: z.discriminatedUnion('kind', [
+      z
+        .object({
+          kind: z.literal('unconfigured'),
+          reason: z.literal('production_compaction_rollout_authority_not_configured'),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal('github_oidc_sigstore_v1'),
+          authorityIdentity: z.string().min(1).max(256),
+          verifierIdentity: z.string().min(1).max(256),
+          subjectDigest: digestSchema,
+          attestationDigest: digestSchema,
+          verificationReceiptDigest: digestSchema,
+          verifiedAt: timestampSchema,
+        })
+        .strict(),
+    ]),
   })
   .strict()
   .superRefine((source, context) => {
@@ -61,7 +74,45 @@ export const compactionRolloutSourceV1Schema = z
         message: 'source endedAt precedes startedAt.',
       });
     }
+    if (
+      (source.sourceKind === 'github_actions_unsigned_contract') !==
+      (source.authentication.kind === 'unconfigured')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['authentication'],
+        message: 'sourceKind and authentication kind must agree.',
+      });
+    }
   });
+
+interface TrustedCompactionRolloutAuthorityV1 {
+  authorityIdentity: string;
+  verifierIdentity: string;
+  workflowPath: string;
+  scopes: readonly ('internal_rollout' | 'external_shadow')[];
+  subjectDigest: `sha256:${string}`;
+  attestationDigest: `sha256:${string}`;
+  verificationReceiptDigest: `sha256:${string}`;
+  verifiedAt: string;
+}
+
+interface TrustedExternalShadowConsentAuthorityV1 {
+  authorityIdentity: string;
+  verifierIdentity: string;
+  policyRevision: string;
+  subjectDigest: `sha256:${string}`;
+  attestationDigest: `sha256:${string}`;
+  verificationReceiptDigest: `sha256:${string}`;
+  verifiedAt: string;
+}
+
+// Production authorities remain a governed, source-owned choice. A caller
+// cannot inject trust through evidence input or verifier arguments.
+const TRUSTED_COMPACTION_ROLLOUT_AUTHORITIES_V1: readonly TrustedCompactionRolloutAuthorityV1[] =
+  Object.freeze([]);
+const TRUSTED_EXTERNAL_SHADOW_CONSENT_AUTHORITIES_V1: readonly TrustedExternalShadowConsentAuthorityV1[] =
+  Object.freeze([]);
 
 const compactionGateCheckSchema = z.enum([
   'continuation_non_inferiority',
@@ -235,11 +286,11 @@ export interface CompactionRolloutExpectedIdentityV1 {
 
 export interface InternalCompactionRolloutVerificationV1 {
   schema: 'InternalCompactionRolloutVerificationV1';
-  status: 'blocked';
-  evidenceEligible: false;
-  authenticatedAuthorityConfigured: false;
-  effectiveStage: 'off';
-  milestone: null;
+  status: 'passed' | 'blocked';
+  evidenceEligible: boolean;
+  authenticatedAuthorityConfigured: boolean;
+  effectiveStage: 'off' | 'internal_auto_live';
+  milestone: 'MS:4-INTERNAL-AUTO-FRESH' | null;
   evidenceDigest: `sha256:${string}`;
   gateLedgerDigest: `sha256:${string}`;
   reasonCodes: string[];
@@ -253,10 +304,7 @@ export function buildInternalCompactionRolloutEvidenceV1(
   verifyGateLedger(material.gateLedger, material.startedAt, material.endedAt);
   return internalCompactionRolloutEvidenceV1Schema.parse({
     ...material,
-    evidenceDigest: sha256DomainSeparated(
-      'kite.compaction.internal-rollout-evidence.v1',
-      canonicalJson(material),
-    ),
+    evidenceDigest: internalRolloutEvidenceDigest(material),
   });
 }
 
@@ -270,15 +318,27 @@ export function verifyInternalCompactionRolloutEvidenceV1(input: {
   assertExpectedIdentity(evidence, input.expected);
   const { evidenceDigest: _evidenceDigest, ...materialInput } = evidence;
   const material = internalRolloutMaterialV1Schema.parse(materialInput);
-  const rebuiltEvidenceDigest = sha256DomainSeparated(
-    'kite.compaction.internal-rollout-evidence.v1',
-    canonicalJson(material),
-  );
+  const rebuiltEvidenceDigest = internalRolloutEvidenceDigest(material);
   if (rebuiltEvidenceDigest !== evidence.evidenceDigest)
     throw new Error('evidence_digest_mismatch');
   verifyGateLedger(evidence.gateLedger, evidence.startedAt, evidence.endedAt);
 
-  const reasons = new Set<string>(['authenticated_internal_rollout_authority_not_configured']);
+  const reasons = new Set<string>();
+  const authority = findRolloutAuthority(evidence.source, 'internal_rollout');
+  if (!authority) reasons.add('authenticated_internal_rollout_authority_not_configured');
+  if (
+    evidence.source.authentication.kind === 'github_oidc_sigstore_v1' &&
+    evidence.source.authentication.subjectDigest !== evidence.evidenceDigest
+  ) {
+    reasons.add('internal_rollout_attestation_subject_mismatch');
+  }
+  if (
+    evidence.source.authentication.kind === 'github_oidc_sigstore_v1' &&
+    (Date.parse(evidence.source.authentication.verifiedAt) < Date.parse(evidence.endedAt) ||
+      Date.parse(evidence.source.authentication.verifiedAt) > Date.parse(input.verifiedAt))
+  ) {
+    reasons.add('internal_rollout_authentication_time_invalid');
+  }
   for (const stage of evidence.stages) {
     if (stage.outcome !== 'passed' || stage.sampleCount === 0) {
       reasons.add(`${stage.stage}_not_passed`);
@@ -294,13 +354,14 @@ export function verifyInternalCompactionRolloutEvidenceV1(input: {
     'rollback_rehearsal',
   ]);
   addFreshnessReason(evidence.endedAt, input.verifiedAt, input.maximumAgeSeconds, reasons);
+  const evidenceEligible = authority !== undefined && reasons.size === 0;
   const withoutDigest = {
     schema: 'InternalCompactionRolloutVerificationV1' as const,
-    status: 'blocked' as const,
-    evidenceEligible: false as const,
-    authenticatedAuthorityConfigured: false as const,
-    effectiveStage: 'off' as const,
-    milestone: null,
+    status: evidenceEligible ? ('passed' as const) : ('blocked' as const),
+    evidenceEligible,
+    authenticatedAuthorityConfigured: authority !== undefined,
+    effectiveStage: evidenceEligible ? ('internal_auto_live' as const) : ('off' as const),
+    milestone: evidenceEligible ? ('MS:4-INTERNAL-AUTO-FRESH' as const) : null,
     evidenceDigest: evidence.evidenceDigest as `sha256:${string}`,
     gateLedgerDigest: evidence.gateLedger.ledgerDigest as `sha256:${string}`,
     reasonCodes: [...reasons].sort(),
@@ -331,12 +392,25 @@ const externalShadowMaterialV1Schema = z
         granted: z.boolean(),
         grantedAt: timestampSchema,
         receiptDigest: digestSchema,
-        authentication: z
-          .object({
-            kind: z.literal('unconfigured'),
-            reason: z.literal('external_shadow_consent_authority_not_configured'),
-          })
-          .strict(),
+        authentication: z.discriminatedUnion('kind', [
+          z
+            .object({
+              kind: z.literal('unconfigured'),
+              reason: z.literal('external_shadow_consent_authority_not_configured'),
+            })
+            .strict(),
+          z
+            .object({
+              kind: z.literal('github_oidc_sigstore_v1'),
+              authorityIdentity: z.string().min(1).max(256),
+              verifierIdentity: z.string().min(1).max(256),
+              subjectDigest: digestSchema,
+              attestationDigest: digestSchema,
+              verificationReceiptDigest: digestSchema,
+              verifiedAt: timestampSchema,
+            })
+            .strict(),
+        ]),
       })
       .strict(),
     observations: z
@@ -389,9 +463,9 @@ export const externalCompactionShadowEvidenceV1Schema = externalShadowMaterialV1
 
 export interface ExternalCompactionShadowGateV1 {
   schema: 'ExternalCompactionShadowGateV1';
-  status: 'blocked';
-  evidenceEligible: false;
-  authenticatedAuthorityConfigured: false;
+  status: 'passed' | 'blocked';
+  evidenceEligible: boolean;
+  authenticatedAuthorityConfigured: boolean;
   permittedSummaryDispatches: 0;
   permittedCheckpointWrites: 0;
   observedSummaryDispatches: number;
@@ -410,10 +484,7 @@ export function buildExternalCompactionShadowEvidenceV1(
   verifyGateLedger(material.gateLedger, material.startedAt, material.endedAt);
   return externalCompactionShadowEvidenceV1Schema.parse({
     ...material,
-    evidenceDigest: sha256DomainSeparated(
-      'kite.compaction.external-shadow-evidence.v1',
-      canonicalJson(material),
-    ),
+    evidenceDigest: externalShadowEvidenceDigest(material),
   });
 }
 
@@ -427,16 +498,43 @@ export function evaluateExternalCompactionShadowGateV1(input: {
   assertExpectedIdentity(evidence, input.expected);
   const { evidenceDigest: _evidenceDigest, ...materialInput } = evidence;
   const material = externalShadowMaterialV1Schema.parse(materialInput);
-  const rebuiltEvidenceDigest = sha256DomainSeparated(
-    'kite.compaction.external-shadow-evidence.v1',
-    canonicalJson(material),
-  );
+  const rebuiltEvidenceDigest = externalShadowEvidenceDigest(material);
   if (rebuiltEvidenceDigest !== evidence.evidenceDigest)
     throw new Error('evidence_digest_mismatch');
   verifyGateLedger(evidence.gateLedger, evidence.startedAt, evidence.endedAt);
 
-  const reasons = new Set<string>(['authenticated_external_shadow_authority_not_configured']);
-  reasons.add('external_shadow_consent_authority_not_configured');
+  const reasons = new Set<string>();
+  const authority = findRolloutAuthority(evidence.source, 'external_shadow');
+  if (!authority) reasons.add('authenticated_external_shadow_authority_not_configured');
+  if (
+    evidence.source.authentication.kind === 'github_oidc_sigstore_v1' &&
+    evidence.source.authentication.subjectDigest !== evidence.evidenceDigest
+  ) {
+    reasons.add('external_shadow_attestation_subject_mismatch');
+  }
+  if (
+    evidence.source.authentication.kind === 'github_oidc_sigstore_v1' &&
+    (Date.parse(evidence.source.authentication.verifiedAt) < Date.parse(evidence.endedAt) ||
+      Date.parse(evidence.source.authentication.verifiedAt) > Date.parse(input.verifiedAt))
+  ) {
+    reasons.add('external_shadow_authentication_time_invalid');
+  }
+  const consentAuthority = findConsentAuthority(evidence.consent);
+  if (!consentAuthority) reasons.add('external_shadow_consent_authority_not_configured');
+  if (
+    evidence.consent.authentication.kind === 'github_oidc_sigstore_v1' &&
+    evidence.consent.authentication.subjectDigest !== evidence.consent.receiptDigest
+  ) {
+    reasons.add('external_shadow_consent_subject_mismatch');
+  }
+  if (
+    evidence.consent.authentication.kind === 'github_oidc_sigstore_v1' &&
+    (Date.parse(evidence.consent.authentication.verifiedAt) <
+      Date.parse(evidence.consent.grantedAt) ||
+      Date.parse(evidence.consent.authentication.verifiedAt) > Date.parse(evidence.startedAt))
+  ) {
+    reasons.add('external_shadow_consent_authentication_time_invalid');
+  }
   const observation = evidence.observations;
   if (!evidence.consent.granted) reasons.add('external_shadow_consent_missing');
   if (observation.eligibilityEvaluationCount === 0) reasons.add('eligibility_not_observed');
@@ -454,11 +552,13 @@ export function evaluateExternalCompactionShadowGateV1(input: {
   }
   addGateReasons(evidence.gateLedger, reasons, ['false_trigger_bound', 'resource_bound']);
   addFreshnessReason(evidence.endedAt, input.verifiedAt, input.maximumAgeSeconds, reasons);
+  const evidenceEligible =
+    authority !== undefined && consentAuthority !== undefined && reasons.size === 0;
   const withoutDigest = {
     schema: 'ExternalCompactionShadowGateV1' as const,
-    status: 'blocked' as const,
-    evidenceEligible: false as const,
-    authenticatedAuthorityConfigured: false as const,
+    status: evidenceEligible ? ('passed' as const) : ('blocked' as const),
+    evidenceEligible,
+    authenticatedAuthorityConfigured: authority !== undefined && consentAuthority !== undefined,
     permittedSummaryDispatches: 0 as const,
     permittedCheckpointWrites: 0 as const,
     observedSummaryDispatches: observation.summaryDispatchCount,
@@ -479,6 +579,62 @@ export function evaluateExternalCompactionShadowGateV1(input: {
       canonicalJson(withoutDigest),
     ),
   };
+}
+
+function internalRolloutEvidenceDigest(
+  material: z.infer<typeof internalRolloutMaterialV1Schema>,
+): `sha256:${string}` {
+  const { authentication: _authentication, ...sourceIdentity } = material.source;
+  return sha256DomainSeparated(
+    'kite.compaction.internal-rollout-evidence.v1',
+    canonicalJson({ ...material, source: sourceIdentity }),
+  );
+}
+
+function externalShadowEvidenceDigest(
+  material: z.infer<typeof externalShadowMaterialV1Schema>,
+): `sha256:${string}` {
+  const { authentication: _authentication, ...sourceIdentity } = material.source;
+  return sha256DomainSeparated(
+    'kite.compaction.external-shadow-evidence.v1',
+    canonicalJson({ ...material, source: sourceIdentity }),
+  );
+}
+
+function findRolloutAuthority(
+  source: z.infer<typeof compactionRolloutSourceV1Schema>,
+  scope: 'internal_rollout' | 'external_shadow',
+): TrustedCompactionRolloutAuthorityV1 | undefined {
+  const authentication = source.authentication;
+  if (authentication.kind !== 'github_oidc_sigstore_v1') return undefined;
+  return TRUSTED_COMPACTION_ROLLOUT_AUTHORITIES_V1.find(
+    (authority) =>
+      authority.authorityIdentity === authentication.authorityIdentity &&
+      authority.verifierIdentity === authentication.verifierIdentity &&
+      authority.workflowPath === source.workflowPath &&
+      authority.scopes.includes(scope) &&
+      authority.subjectDigest === authentication.subjectDigest &&
+      authority.attestationDigest === authentication.attestationDigest &&
+      authority.verificationReceiptDigest === authentication.verificationReceiptDigest &&
+      authority.verifiedAt === authentication.verifiedAt,
+  );
+}
+
+function findConsentAuthority(
+  consent: z.infer<typeof externalShadowMaterialV1Schema>['consent'],
+): TrustedExternalShadowConsentAuthorityV1 | undefined {
+  const authentication = consent.authentication;
+  if (authentication.kind !== 'github_oidc_sigstore_v1') return undefined;
+  return TRUSTED_EXTERNAL_SHADOW_CONSENT_AUTHORITIES_V1.find(
+    (authority) =>
+      authority.authorityIdentity === authentication.authorityIdentity &&
+      authority.verifierIdentity === authentication.verifierIdentity &&
+      authority.policyRevision === consent.policyRevision &&
+      authority.subjectDigest === authentication.subjectDigest &&
+      authority.attestationDigest === authentication.attestationDigest &&
+      authority.verificationReceiptDigest === authentication.verificationReceiptDigest &&
+      authority.verifiedAt === authentication.verifiedAt,
+  );
 }
 
 function verifyReceiptChain(

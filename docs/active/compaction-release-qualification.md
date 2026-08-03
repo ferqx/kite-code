@@ -35,11 +35,17 @@ Git tree 精确解析 normalized repository-relative path，只接受 `100644/10
 真实 retained artifact ID；
 source 明确为 `github_actions_unsigned_contract`，signature 固定 `unconfigured/none`，不得使用调用者提供的
 伪 artifact/attestation identity。verifier 的 repository/head/ref/workflow/run/attempt 与 retained artifact
-expected identity 来自 workflow 环境，并重建完整 ledger/digest。GitHub OIDC/attestation verifier、受信
-evaluator route 与真实 evaluator receipt 仍未配置，因此结构完整的 contract artifact 仍为 blocked、
+expected identity 来自 workflow 环境，并重建完整 ledger/digest。Production authentication shape、
+payload subject、Sigstore authority/verifier/workflow 与 evaluator-route exact tuple lookup 已实现；它只消费
+预先由外部 verifier 认证并在源码中精确登记的 subject/attestation/verification receipt，不执行 Sigstore
+密码学验证；source-owned
+authority 和 evaluator route registry 仍为空，真实 evaluator receipt 也未发生，因此结构完整的 contract artifact 仍为 blocked、
 `evidenceEligible=false`、milestone=null。uncertainty 超限保持
 inconclusive/blocked，低于阈值或 deterministic safety 失败为 failed。control/treatment continuation
-在阈值、样本和 route 未预注册时同样 blocked，不能用单次 synthetic pass 宣称非劣。
+在阈值、样本和 route 未预注册时同样 blocked，不能用单次 synthetic pass 宣称非劣。continuation 与
+route qualification 规则现由 `scripts/evals/contracts/` production-owned 模块拥有；测试文件只保留薄
+fixture/re-export。它们使用 domain-separated digest、strict registry 和 drift invalidation，本地 qualified
+route set 仍不可变为空。
 
 ## Route、handoff 与 Gate
 
@@ -58,9 +64,13 @@ route qualification/live-provider matrix decision digest 与 GitHub source/artif
 decision/window ID 和严格包含、单调不重叠的起止时间，G3/G4 receipt 也必须落在总 observation window
 内；Gate 同时检查 continuation non-inferiority、false-trigger、资源界限、rollback rehearsal 和 freshness。
 external shadow consent 绑定 schema、policy revision、cohort digest、签发时间和 receipt digest，且必须早于
-观察窗口；真实 consent authentication authority 当前明确未配置。shadow 的 summary dispatch 与 checkpoint
-write 都严格为零；观察到任一 effect 仍保持 profile `off/cohort=0`。production rollout authority 当前
-固定未配置，因此完整 fixture 也只能 blocked、`evidenceEligible=false`，不产生 rollout milestone。
+观察窗口。internal/external source 已支持 GitHub OIDC/Sigstore authority、verifier、subject、receipt 和认证
+时间，subject 绑定去除 authentication 字段后重建的 retained evidence digest；consent authentication 另行
+绑定 consent receipt。两类 registry 都要求匹配预登记的 exact subject/attestation/verification receipt，
+不能仅凭调用者自报 verifier 字符串取得 trust；registry 当前为空。shadow 的 summary dispatch 与 checkpoint
+write 都严格为零；观察到任一 effect 仍保持 profile `off/cohort=0`。只有 authority、content binding、时间、
+G3/G4 和 freshness 全部通过才可产生 eligible internal/shadow evidence；当前 fixture 仍只能 blocked，
+不产生 rollout milestone。
 
 `manual-compaction-v1.json` 与 `auto-compaction-v1.json` 现与其他 capability profile 一样固定
 `under_development/off`、空 route/platform allowlist、freshness=0；auto 还依赖 stable manual、fresh

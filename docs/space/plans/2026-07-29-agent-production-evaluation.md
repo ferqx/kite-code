@@ -25,10 +25,23 @@ determinism；本地 `real_run` discriminator 和 participant/sample constructor
 随后本地 authenticated evidence contract 已补齐 12 case × 8/20 的 96/240 receipt 全量重建、共享
 Release artifact/frozen baseline identity、D-07 success/G0/p95 Gate、精确有序 21-case formal adversarial
 receipts 与 fixture signature 校验。本地 Gate 失败独立标为 failed；调用者不能把 fixture key/route 注入为
-production。ADR-0062 Sigstore verifier 和 production route registry 仍为空，所以 2B.4/2B.5 状态与上述
+production。`github_oidc_sigstore_v1` schema 会把 subject/attestation/verification receipt/authority/workflow
+作为 exact tuple 与源码预登记记录匹配，但 ADR-0062 Sigstore 密码学 verifier 尚未实现、registry 与 route
+registry 仍为空，所以 2B.4/2B.5 状态与上述
 真实 evidence 缺口不变。新增 manual/no-publish workflow 已能用真实 GitHub artifact ID 生成并独立验证
 `contract_conformance` retained bundle，但 signature 固定 unconfigured、route 未配置、结果固定 blocked；
 它补齐本地 producer/verifier，不把 contract run 升格为 production route run。
+
+2026-08-03 的 implementation-first 批次增加 production-shaped product companion ledger，把 Tool Search、
+MCP/Skill 非预期触发、`ask_user`、Plan/恢复/Verification/review handoff/correction 与 opt-in 人工 outcome
+逐 attempt 绑定到 authenticated evidence 的同一 source/candidate identity。该实现补齐 2B.6/2B.7 的
+本地 schema、producer/rebuild/verifier 边界，但 source-owned production authority、真实 participant/
+consent、live route 与 formal attempts 仍缺失；2B.4/2B.5 状态不变，2B.6/2B.7 不提前绑定，
+`MS:2B-DONE` 未产生。
+
+Formal Agent task workflow 已把 companion producer/verifier 接到完整 96/240 retained attempt bundle；
+contract artifact 的 UX coverage 可独立重建，human receipts 明确为 0。该接线不制造 participant/consent/
+accepted/integrated 事实，所以 2B.7 与 external 产品 Gate 仍等待真实流程。
 
 ## 目标
 
