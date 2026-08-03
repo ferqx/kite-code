@@ -76,7 +76,7 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   未配置时固定 blocked、`evidenceEligible=false`，不把 contract artifact 计为真实外部 evidence。
   整体 Review 加固后，2A.8 还要求 immutable input snapshot、OS-protected pinned toolchain、拒绝扩展/link/等价覆盖的 canonical
   USTAR、archive 内 native launcher 与 canonical manifest 传递绑定、macOS 完整 app bundle seal 与
-  notarization、五 subject attestation、pinned toolchain、平台 signer identity 和带独立真人签名 evidence
+  notarization、十一 subject attestation（含 Gate policy/evidence/decision、maintainer review 与实际 rollback/compatibility replay reports）、pinned toolchain、平台 signer identity 和候选绑定维护者安全复核 evidence
   的全 G0–G5 Gate；verifier 使用不执行 candidate code 的独立新 VM，只消费 protected verifier commit
   和 opaque downloaded artifact。4.4 只消费 `GITHUB_SHA` tracked blob snapshot。D-04 空 execution support set 不再被
   解释为普通 TUI/CLI distribution blocker。
@@ -90,12 +90,23 @@ Evidence；不得用本说明把尚未完成的 Task 标为完成。
   production-owned retained evidence verifier、Compaction internal rollout/external shadow Gate、
   manual/auto compaction off profile 与统一 canary→beta→stable maturity Gate；所有 production authority
   registry 仍为空，因此没有新 Task binding 或 milestone。
-- 本批 authenticated evidence 整体 Review 的架构/治理 Reviewer 与安全/对抗 Reviewer 最终均为 GO，
-  P0/P1/P2=`0/0/0`；该结论只覆盖本地 diff 和完成声明，不是 external release 所需的真人第三方安全评审。
-- 整体 Review 发现的 Release 第三方评审/production admission、Limited SLO、D-07、GA/Auto、
-  worktree handoff/Git 环境和 workflow pin 问题均已 fail-closed 修复；两路最终复核均为 GO 且
-  P0/P1/P2=`0/0/0`。第三方 reviewer trust root 仍为空，本地 external review fixture 不能产生
-  approved candidate；该最终复核不替代 external release 前的真实第三方安全评审。
+- 2026-08-03 的 implementation-first 批次进一步补齐 RC assembly/Gate replay/schema rollback、Agent task
+  产品 companion ledger、governed observability exporter/Runtime bridge、production-shaped incident ledger、
+  capability rollout admission 与 production-owned MCP write governance/空 route registry。该批只减少本地
+  实现缺口；execution binding 仍为 54 completed、5 in_progress、49 unbound，所有真实 external/live/
+  participant/incident/SLO/signing/maturity/candidate-bound maintainer review evidence 继续等待，不产生新 milestone。
+  后续同批又补齐 production-shaped baseline、Compaction continuation/route production ownership、
+  capability manual retained workflow、maturity/GA/Auto source-owned verifier lookup、纯 GA assembly，以及
+  sealed production MCP write durable dispatch guard；随后补齐 Agent task/Limited SLO/Compaction/RC 的
+  production-shaped exact-record lookup。所有 production registry 仍为空，且仓库内不把该 lookup 冒充
+  Sigstore 密码学 verifier，结论与计数不变。
+- Decision Register Revision 30 的历史批次两路最终 Review 为 GO、P0/P1/P2=`0/0/0`；它不覆盖本次
+  implementation-first diff，也不替代 external release 所需的 candidate-bound maintainer review。
+- 本次 diff 的首轮整体 Review 为 NO-GO（架构/治理 P1=5/P2=1；安全/对抗 P1=7/P2=2）；统一修复
+  exact attestation trust、RC critical digest、D-07 产品证据、GA synthetic evidence、MCP write outcome/
+  dispatch facts、schema rollback、TUI bounded shutdown 与文档 overclaim 后，两路最终复核均为 GO，
+  P0/P1/P2=`0/0/0`。该 GO 只覆盖当前完整本地 diff 与完成声明，不替代 external release 前的
+  candidate-bound maintainer review。ADR-0067 将第三方评审改为可选增强。
 
 ## 首发支持边界
 
@@ -256,7 +267,7 @@ Task 区间。
 | `MS:3-OPS-READY` | Task 3.9 运营就绪记录 |
 | `MS:2A-RC` | Task 2A.11 RC Gate |
 | `MS:M2-CANDIDATE` | M2 candidate Gate |
-| `MS:LIM-APPROVED` | M2 后人工发布评审记录；single-maintainer 模式必须包含独立第三方安全评审 |
+| `MS:LIM-APPROVED` | M2 后候选绑定维护者安全复核（ADR-0067）；第三方评审为可选增强 |
 | `MS:LIMITED-SLO` | Task 3.10 limited cohort SLO Gate |
 | `MS:4-INTERNAL-AUTO-FRESH` | Task 4.9 internal rollout evidence |
 | `MS:4-MANUAL-STABLE` | Task 4.11 manual maturity Gate |
@@ -377,9 +388,10 @@ M1 只授权团队内部 dogfood，不产生外部发布结论。
 - 所有适用 G0–G4 通过且无普通 waiver。
 
 M2 只产生 `MS:M2-CANDIDATE`，允许提交 `limited-production` 人工发布评审。该评审验证
-artifact identity、Owner、支持矩阵、已知限制和 cohort 联系方式；single-maintainer 模式还
-必须包含由不同真人完成的第三方安全评审，绑定 candidate payload/manifest/profile、平台、
-route、安全边界和 findings。维护者不能自批 G0 例外。完整批准记录产生
+artifact identity、Owner、支持矩阵、已知限制和 cohort 联系方式；single-maintainer 模式由
+`github:@ferqx` 完成绑定 candidate payload/manifest/profile、平台、route、安全边界和 findings 的
+具名安全自审。第三方评审为可选增强。维护者不能自批 G0/G1 例外，不能覆盖失败 Gate 或未关闭
+P0/P1。完整批准记录产生
 `MS:LIM-APPROVED`；没有该记录不得进入任何 external cohort。
 
 ### M2.5：Limited SLO 资格

@@ -10,6 +10,7 @@ on:
         type: boolean
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
@@ -49,6 +50,7 @@ jobs:
   production-signing-disabled:
     name: production-signing-disabled-${{ matrix.platform }}
     if: ${{ false && github.workflow_sha == vars.KITE_RELEASE_EXPECTED_WORKFLOW_SHA }}
+    environment: production-release
     strategy:
       fail-fast: false
       matrix:
@@ -71,13 +73,12 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       # Deliberately invalid until a protected producer supplies the exact
-      # signer/tool/reviewer receipts and approved-candidate Gate digest.
+      # signer/tool receipts and approved-candidate Gate digest.
       # Tool receipts must resolve inside an OS-protected installation tree;
       # macOS signing subject is safely rebuilt as the full app from payload.
       # Enabling the job alone still fails closed.
       KITE_RELEASE_GATE_DECISION_DIGEST: disabled-unconfigured
-      KITE_RELEASE_SECURITY_REVIEWER_IDENTITY: disabled-unconfigured
-      KITE_RELEASE_SECURITY_REVIEWER_PUBLIC_KEY_SHA256: disabled-unconfigured
+      GH_TOKEN: ${{ github.token }}
       KITE_RELEASE_GH_PATH: ${{ vars.KITE_RELEASE_GH_PATH }}
       KITE_RELEASE_GH_SHA256: ${{ vars.KITE_RELEASE_GH_SHA256 }}
       KITE_RELEASE_COSIGN_PATH: ${{ vars.KITE_RELEASE_COSIGN_PATH }}
@@ -101,10 +102,14 @@ jobs:
           path: trusted-verifier
           persist-credentials: false
       - name: Download opaque candidate from the isolated build job
+        # A separate completed producer/review run is the authenticated source;
+        # the current admission run never claims that it is already completed.
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           name: production-candidate-${{ matrix.platform }}
           path: candidate
+          run-id: ${{ vars.KITE_RELEASE_SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
       - name: Prove protected verifier ref is one exact commit
         shell: bash
         env:
@@ -137,8 +142,8 @@ jobs:
           --trusted-verifier-commit "${{ vars.KITE_TRUSTED_VERIFIER_COMMIT }}"
           --ref "${{ github.ref }}"
           --commit "${{ github.sha }}"
-          --run-id "${{ github.run_id }}"
-          --run-attempt "${{ github.run_attempt }}"
+          --run-id "${{ vars.KITE_RELEASE_SOURCE_RUN_ID }}"
+          --run-attempt "${{ vars.KITE_RELEASE_SOURCE_RUN_ATTEMPT }}"
           --platform "${{ matrix.platform }}"
           --payload "../candidate/kite-${{ matrix.platform }}.tar.gz"
           --native-launcher "../candidate/${{ matrix.launcher }}"
@@ -148,7 +153,9 @@ jobs:
           --sigstore-bundle "../candidate/manifest.sigstore.json"
           --attestation-bundle "../candidate/attestations.jsonl"
           --platform-signature-bundle "../candidate/kite-${{ matrix.platform }}.sigstore.json"
+          --gate-policy "../candidate/release-gate-policy.json"
+          --evidence-bundle "../candidate/release-evidence.json"
           --gate-decision "../candidate/release-gate-decision.json"
           --security-review-evidence "../candidate/security-review.json"
-          --security-review-bundle "../candidate/security-review.sigstore.json"
-          --security-reviewer-public-key "../candidate/security-reviewer.pub"
+          --rollback-report "../candidate/rollback-report.json"
+          --compatibility-report "../candidate/compatibility-report.json"

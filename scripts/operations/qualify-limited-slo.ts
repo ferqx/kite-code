@@ -94,10 +94,10 @@ export type LimitedCohortObservationV1 = z.infer<typeof limitedCohortObservation
 export interface LimitedSloGateRecordV1 {
   schema: 'LimitedSloGateRecordV1';
   gate: 'limited_slo';
-  status: 'blocked';
-  milestone: null;
-  evidenceClass: 'contract_only';
-  evidenceEligible: false;
+  status: 'passed' | 'blocked';
+  milestone: 'MS:LIMITED-SLO' | null;
+  evidenceClass: 'production' | 'contract_only';
+  evidenceEligible: boolean;
   policyId: string | null;
   artifactDigest: `sha256:${string}`;
   profileDigest: `sha256:${string}`;
@@ -127,7 +127,6 @@ export function qualifyLimitedSloV1(input: {
   const observation = limitedCohortObservationV1Schema.parse(input.observation);
   const policyResult = approvedLimitedSloPolicyV1Schema.safeParse(input.policy);
   const reasons = new Set<string>();
-  reasons.add('authenticated_observation_verifier_not_configured');
   let verification: LimitedSloQualificationVerificationV1 | null = null;
   if (input.retainedLedger === undefined) reasons.add('retained_sample_ledger_missing');
   if (input.expectedSource === undefined) reasons.add('trusted_source_expectation_missing');
@@ -217,6 +216,7 @@ export function qualifyLimitedSloV1(input: {
       reasons.add('observation_source_identity_mismatch:verifierDigest');
     }
   }
+  if (!verification) reasons.add('authenticated_observation_verifier_not_configured');
   if (!policyResult.success) reasons.add('baseline_unconfigured_or_unapproved');
   const policy = policyResult.success ? policyResult.data : null;
 
@@ -278,13 +278,14 @@ export function qualifyLimitedSloV1(input: {
       retainedVerificationDigest,
     }),
   );
+  const evidenceEligible = verification?.productionEvidenceEligible === true && reasons.size === 0;
   const withoutDigest: Omit<LimitedSloGateRecordV1, 'recordDigest'> = {
     schema: 'LimitedSloGateRecordV1' as const,
     gate: 'limited_slo' as const,
-    status: 'blocked' as const,
-    milestone: null,
-    evidenceClass: 'contract_only' as const,
-    evidenceEligible: false as const,
+    status: evidenceEligible ? 'passed' : 'blocked',
+    milestone: evidenceEligible ? 'MS:LIMITED-SLO' : null,
+    evidenceClass: evidenceEligible ? 'production' : 'contract_only',
+    evidenceEligible,
     policyId: policy?.policyId ?? null,
     artifactDigest: observation.artifactIdentity.payloadSha256 as `sha256:${string}`,
     profileDigest: observation.artifactIdentity.profileDigest as `sha256:${string}`,

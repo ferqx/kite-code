@@ -18,6 +18,7 @@ export function buildSyntheticFoundationGateRecordV1() {
     canonicalRepository: 'ferqx/kite-code',
     repositoryId: 'R_kgDOSKbi8g',
     releaseWorkflowPath: '.github/workflows/release-candidate.yml',
+    releaseWorkflowSha: SYNTHETIC_COMMIT,
     oidcIssuer: 'https://token.actions.githubusercontent.com',
     allowedRefPrefixes: ['refs/tags/v'],
     capabilities: [],

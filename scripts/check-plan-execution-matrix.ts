@@ -391,11 +391,36 @@ if (decisionRegister.includes('single-maintainer')) {
   if (!/^状态：accepted$/m.test(governanceAdr)) {
     fail('ADR-0060 must be accepted for single-maintainer governance');
   }
+  const maintainerReviewAdr = readFileSync(
+    join(root, 'docs', 'adr', '0067-single-maintainer-candidate-security-review.md'),
+    'utf8',
+  );
+  if (!/^状态：accepted$/m.test(maintainerReviewAdr)) {
+    fail('ADR-0067 must be accepted for single-maintainer candidate review');
+  }
+  if (
+    !maintainerReviewAdr.includes('本 ADR 取代 ADR-0060 决策 4–7') ||
+    !maintainerReviewAdr.includes('ADR-0062 决策 8')
+  ) {
+    fail('ADR-0067 must retain its exact ADR-0060/0062 supersession boundary');
+  }
+  if (!decisionRegister.includes('| 42 | 2026-08-03 |')) {
+    fail('decision register must retain Revision 42 for ADR-0067');
+  }
+  if (
+    !decisionRegister.includes('| 43 | 2026-08-03 |') ||
+    !decisionRegister.includes('GitHub run/actor/真实时间验证与十一 subject attestation')
+  ) {
+    fail('decision register must retain Revision 43 single-maintainer review hardening');
+  }
   const limitedApprovalRow = roadmap
     .split('\n')
     .find((line) => line.startsWith('|') && line.includes('`MS:LIM-APPROVED`'));
-  if (!limitedApprovalRow?.includes('第三方安全评审')) {
-    fail('MS:LIM-APPROVED must require third-party security review');
+  if (
+    !limitedApprovalRow?.includes('候选绑定维护者安全复核') ||
+    !limitedApprovalRow?.includes('ADR-0067')
+  ) {
+    fail('MS:LIM-APPROVED must require the ADR-0067 candidate-bound maintainer review');
   }
 }
 
@@ -1878,10 +1903,10 @@ if (!releaseSupplyChainBinding) {
     fail('2A.8: completionRecordPath must remain empty before real evidence');
   }
   if (
-    !cells[5]?.includes('G5 真人签名 evidence') ||
+    !cells[5]?.includes('G5 候选绑定维护者安全复核 evidence') ||
     !cells[5]?.includes('D-04 空集合只阻止 effectful execution')
   ) {
-    fail('2A.8: binding must preserve the independent security review and distribution boundary');
+    fail('2A.8: binding must preserve the maintainer security review and distribution boundary');
   }
 }
 

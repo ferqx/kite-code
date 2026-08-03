@@ -240,6 +240,7 @@
         "docs/book/09-CLI模式与配置.md",
         "docs/book/12-测试体系.md",
         "docs/adr/0062-keyless-release-signing-and-github-hosting.md",
+        "docs/adr/0067-single-maintainer-candidate-security-review.md",
         "README.md"
       ]
     },
@@ -249,6 +250,7 @@
         "tests/evals/agent-tasks/**",
         "scripts/evals/agent-task-evidence-*.ts",
         "scripts/evals/verify-agent-task-evidence.ts",
+        "scripts/evals/verify-agent-task-product-evidence.ts",
         "scripts/evals/contracts/agent-task-*.ts",
         ".github/workflows/agent-task-evidence.yml"
       ],
@@ -282,11 +284,16 @@
         "tests/capabilities/**",
         "tests/mcp/write-*.test.ts",
         "tests/mcp/write-contract-fixtures.ts",
+        "src/core/mcp/write-governance.ts",
+        "release/mcp-write-routes-v1.json",
         "tests/skills/conformance-fixtures.ts",
         "tests/skills/effect-classification.test.ts",
         "tests/skills/workflow-contract.test.ts",
         "tests/evals/capabilities/**",
         "scripts/evals/contracts/capability-*.ts",
+        "scripts/evals/capability-evidence-producer.ts",
+        "scripts/evals/verify-capability-evidence.ts",
+        ".github/workflows/capability-evaluation.yml",
         "release/capability-profiles/**"
       ],
       "documents": [
@@ -305,6 +312,9 @@
       "sources": [
         "src/core/observability/**",
         "src/app/observability/**",
+        "src/app/cli/index.ts",
+        "src/app/tui/index.tsx",
+        "src/app/tui/session-manager.ts",
         "src/app/release/capability-kill-switch.ts",
         "ops/**",
         "scripts/operations/**",

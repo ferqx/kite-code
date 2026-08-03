@@ -35,6 +35,17 @@ shutdown 或序列化失败不传播到 Runtime。consent 撤回立即清空 que
 audit 与普通 telemetry 分离；`managedSessionAdmission=denied` 直接使 composition 注入 no-op reporter，
 mandatory audit 不可用时不能出现“cohort blocked 但 exporter 仍启用”的分裂状态。
 
+真实 exporter 的代码边界已经落地，但没有默认网络 authority：它只接受 release 批准的 endpoint alias
+和由应用组合根注入的 `GovernedMetricTransportV1`，发送 canonical、bounded、metadata-only envelope；
+不能自行调用全局 `fetch`、读取任意 URL 或绕过受治理 transport。CLI/TUI 当前只把实际经过其公共事件
+入口的结构化 Runtime event 送入同一 bounded reporter；bridge 对 execution receipt、model 与 resource
+metadata 的 mapper 仅有 contract test，尚未接入生产 caller。mapper/exporter 异常不改变 Runtime outcome，
+CLI 退出执行有界 shutdown；TUI 的 `/exit`、双 Ctrl+C、SIGINT、SIGTERM 与 fatal ErrorBoundary 共用幂等 exit coordinator，
+在 unmount/process exit 前等待两个各最多 250ms 的 flush/exporter-shutdown 阶段（整体最多约 500ms），
+manager replacement 也会 dispose。
+当前开发 composition 没有
+artifact authority 与 transport，因而该链路实际仍是 no-op。
+
 CLI `--telemetry-status` 与 TUI `/telemetry` 只显示 artifact/flag/consent/endpoint policy/exporter 的
 脱敏状态，不显示 endpoint secret。普通开发入口固定显示 `artifact_disabled`。
 
@@ -44,10 +55,18 @@ Dashboard 覆盖 run/model/tool/MCP/Skill/Plan/Verification/compaction/Runtime/r
 指标；无数据固定 `blocked`，不能显示绿色。当前 SLO 是 `baseline_unconfigured`，最小样本、观察窗口、
 error budget 和非 G0 阈值均为 `null`，因此不会产生 SLO pass。
 
+Baseline control plane 已有 production-shaped retained ledger、producer 和 independent verifier：它绑定
+Release artifact、route、Provider policy、预注册 baseline policy 与完整 GitHub workflow/run/job/artifact/
+OIDC/attestation source identity，并从 digest-chained metadata receipts 重建七项产品指标及 G0/G1。无样本
+或无 denominator 的指标保持 `unknown`；aggregate、receipt、source、route 或 policy splice 均拒绝。
+source-owned lookup 只匹配预先外部验证并精确登记的 source identity/subject/attestation receipt 与实际
+ledger/rebuild/report digest；它不是 Sigstore 密码学 verifier，registry 为空，所以当前报告仍 blocked，不能
+把该 contract 改写为已冻结的真实 baseline。
+
 Alert Owner 为 `github:@ferqx`，backup 为 `none (single-maintainer)`。控制动作只能关闭 capability、
 cohort 归零或回滚完整 artifact identity，并保留 metadata evidence；没有 remote automatic kill switch。
-Owner 不可联系时 cohort=0 且恢复批准 blocked。external release 前仍需要不同真人、绑定 candidate 的第三方
-安全评审。
+Owner 不可联系时 cohort=0 且恢复批准 blocked。external release 使用 ADR-0067 的 candidate-bound
+single-maintainer security review；第三方评审为可选增强，不再是 cohort 或 milestone 的硬依赖。
 
 本地 incident rehearsal 固定为 `synthetic_contract_only`，其 G4 adapter 为 `not_run`，不能代替真实
 detection/containment/credential rotation 演练。Limited SLO qualifier 现已具备 retained evidence
@@ -59,6 +78,13 @@ Verifier 绑定 `MS:LIM-APPROVED` policy、完整 `ReleaseArtifactIdentityV1`、
 repository 与 repository ID、head/ref、workflow path/ref/SHA、run/attempt、job/artifact、GitHub OIDC
 issuer 和 attestation subject。Outer observation、retained ledger 与 expected identity 必须逐字段一致，
 report/verifier digest 不能跨 candidate 拼接；admission 与 terminal 两条 ledger 的时间分别非递减。
-当前 production producer/attestation trust registry 仍硬编码为空，也没有真实 observation window，因而
-所有本地 fixture 固定 blocked、`evidenceEligible=false`、`milestone=null`。只有真实 retained ledger、
-approved policy 和独立认证 verifier 共同通过后，才允许产生 `MS:LIMITED-SLO`。
+production schema 的 exact verified-statement 同时绑定 source、ledger、rebuild 与 report digest；密码学
+verifier 未实现且源码 registry 仍为空，
+也没有真实 observation window，因而所有当前 fixture 固定 blocked、`evidenceEligible=false`、
+`milestone=null`。只有真实 retained ledger、approved policy、候选/Workflow identity、全部阈值和独立认证
+verifier 共同通过后，Gate 才会以 production evidence 唯一产生 `MS:LIMITED-SLO`。
+
+事故演练另有 production-shaped retained ledger：它绑定 GitHub source、artifact、route/cohort，并要求
+八个预注册 scenario 的有序 digest chain、action receipt、零正文与 fresh terminal state。缺失、重排、
+source splice、failed action 或 stale state 均失败；production rehearsal authority registry 当前为空，
+所以该 ledger 只补齐本地 producer/verifier contract，不替代真实 incident 演练或 G4 evidence。

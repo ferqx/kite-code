@@ -4,7 +4,17 @@ import { linkSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { canonicalJsonBytes, sha256DomainSeparated } from '../../scripts/release/canonical-json';
+import { canonicalJsonBytes } from '../../scripts/release/canonical-json';
+import { buildReleaseEvidenceBundleV1 } from '../../scripts/release/evidence-bundle';
+import {
+  buildMaintainerSecurityReviewRecordV1,
+  buildProductionReleaseReplayEvidenceRecordV1,
+  type ReleaseEvidenceResultV1,
+} from '../../scripts/release/evidence-schema';
+import {
+  buildReleaseGatePolicyV1,
+  evaluateReleaseGateV1,
+} from '../../scripts/release/gate-evaluator';
 import {
   buildCosignKeylessBlobVerificationCommandV1,
   buildGithubArtifactAttestationVerificationCommandV1,
@@ -31,7 +41,7 @@ import {
 const COMMIT = '1'.repeat(40);
 const WORKFLOW_SHA = '2'.repeat(40);
 const TRUSTED_VERIFIER_COMMIT = '3'.repeat(40);
-const REVIEWER = 'github:@independent-reviewer';
+const REVIEWER = 'github:@ferqx';
 
 function identity(): ProductionReleaseExpectedIdentityV1 {
   const ref = 'refs/tags/v1.0.0';
@@ -103,10 +113,12 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     provenance: join(root, 'provenance.json'),
     sigstoreBundle: join(root, 'manifest.sigstore.json'),
     githubAttestationBundle: join(root, 'attestations.jsonl'),
+    gatePolicy: join(root, 'gate-policy.json'),
+    evidenceBundle: join(root, 'release-evidence.json'),
     gateDecision: join(root, 'gate.json'),
     securityReviewEvidence: join(root, 'security-review.json'),
-    securityReviewBundle: join(root, 'security-review.sigstore.json'),
-    securityReviewerPublicKey: join(root, 'security-reviewer.pub'),
+    rollbackReport: join(root, 'rollback-report.json'),
+    compatibilityReport: join(root, 'compatibility-report.json'),
     platformSignatureBundle: join(root, 'launcher.sigstore.json'),
   };
   const launcher = new TextEncoder().encode('signed-launcher-bytes');
@@ -133,6 +145,38 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
       : []),
   ]);
   writeFileSync(paths.payload, payload);
+  const gatePolicy = buildReleaseGatePolicyV1({
+    schema: 'ReleaseGatePolicyV1',
+    policyId: 'production-release-policy-v1',
+    mode: 'github_release',
+    canonicalRepository: PRODUCTION_RELEASE_REPOSITORY,
+    repositoryId: PRODUCTION_RELEASE_REPOSITORY_NODE_ID,
+    releaseWorkflowPath: PRODUCTION_RELEASE_WORKFLOW_PATH,
+    releaseWorkflowSha: WORKFLOW_SHA,
+    oidcIssuer: 'https://token.actions.githubusercontent.com',
+    allowedRefPrefixes: ['refs/tags/v'],
+    capabilities: ['builtin_read_tools'],
+    requirements: [
+      { requirementId: 'g0', evidenceId: 'g0', kind: 'execution_conformance', gate: 'G0' },
+      { requirementId: 'g1', evidenceId: 'g1', kind: 'required_ci', gate: 'G1' },
+      { requirementId: 'g2', evidenceId: 'g2', kind: 'dependency_audit', gate: 'G2' },
+      { requirementId: 'g3', evidenceId: 'g3', kind: 'agent_task_suite', gate: 'G3' },
+      { requirementId: 'g4', evidenceId: 'g4', kind: 'incident_rehearsal', gate: 'G4' },
+      {
+        requirementId: 'g5',
+        evidenceId: 'g5',
+        kind: 'maintainer_security_review',
+        gate: 'G5',
+        maxAgeSeconds: 3_600,
+        requiredRouteIdentity: sha256('provider-policy'),
+        requiredPlatformIdentity: {
+          'linux-x64': 'ubuntu-24.04-x64',
+          'macos-arm64': 'macos-15-arm64',
+          'windows-x64': 'windows-2025-x64',
+        }[platform],
+      },
+    ],
+  });
   const manifest = {
     version: 1,
     productVersion: '1.0.0',
@@ -146,7 +190,7 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     modelVisibleToolRegistryDigest: sha256('tool-registry'),
     defaultConfigDigest: sha256('default-config'),
     providerDataPolicyDigest: sha256('provider-policy'),
-    releaseGatePolicyDigest: sha256('gate-policy'),
+    releaseGatePolicyDigest: gatePolicy.policyDigest,
     runtimeSchedulingPolicyDigest: sha256('scheduling-policy'),
     buildRecipeDigest: sha256('build-recipe'),
     behaviorDigest: sha256('behavior'),
@@ -166,21 +210,69 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
   writeFileSync(paths.sigstoreBundle, '{"bundle":true}');
   writeFileSync(paths.githubAttestationBundle, '{"bundle":true}');
   writeFileSync(paths.platformSignatureBundle, '{"bundle":true}');
-  writeFileSync(paths.securityReviewBundle, '{"bundle":true}');
-  writeFileSync(paths.securityReviewerPublicKey, 'independent-public-key');
-  const securityReview = {
-    schema: 'IndependentSecurityReviewEvidenceV1',
+  const candidate = {
+    canonicalRepository: PRODUCTION_RELEASE_REPOSITORY,
+    repositoryId: PRODUCTION_RELEASE_REPOSITORY_NODE_ID,
+    commit: COMMIT,
+    payloadSha256: sha256(payload),
+    canonicalManifestDigest: sha256(canonicalJsonBytes(manifest)),
+    behaviorDigest: manifest.behaviorDigest,
+    profileDigest: manifest.releaseProfileDigest,
+    gatePolicyDigest: manifest.releaseGatePolicyDigest,
+  };
+  const rollbackReport = buildProductionReleaseReplayEvidenceRecordV1({
+    schema: 'ProductionReleaseReplayEvidenceRecordV1',
+    kind: 'schema_rollback',
+    productionEvidence: true,
+    status: 'passed',
+    candidate,
+    completedAt: '2026-08-02T00:40:00.000Z',
+    trustedVerifierCommit: TRUSTED_VERIFIER_COMMIT,
+    reportDigest: sha256('rollback-report'),
+    verificationReceiptDigest: sha256('rollback-verification-receipt'),
+  });
+  const compatibilityReport = buildProductionReleaseReplayEvidenceRecordV1({
+    schema: 'ProductionReleaseReplayEvidenceRecordV1',
+    kind: 'ga_compatibility',
+    productionEvidence: true,
+    status: 'passed',
+    candidate,
+    completedAt: '2026-08-02T00:42:00.000Z',
+    trustedVerifierCommit: TRUSTED_VERIFIER_COMMIT,
+    reportDigest: sha256('compatibility-report'),
+    verificationReceiptDigest: sha256('compatibility-verification-receipt'),
+  });
+  writeFileSync(paths.rollbackReport, JSON.stringify(rollbackReport));
+  writeFileSync(paths.compatibilityReport, JSON.stringify(compatibilityReport));
+  const reviewExecution = {
+    canonicalRepository: PRODUCTION_RELEASE_REPOSITORY,
+    repositoryId: PRODUCTION_RELEASE_REPOSITORY_NODE_ID,
+    workflowPath: PRODUCTION_RELEASE_WORKFLOW_PATH,
+    workflowRef: `${PRODUCTION_RELEASE_REPOSITORY}/${PRODUCTION_RELEASE_WORKFLOW_PATH}@${identity().ref}`,
+    workflowSha: WORKFLOW_SHA,
+    oidcIssuer: 'https://token.actions.githubusercontent.com' as const,
+    ref: identity().ref,
+    runId: identity().runId,
+    runAttempt: identity().runAttempt,
+    actorIdentity: REVIEWER,
+  };
+  const securityReview = buildMaintainerSecurityReviewRecordV1({
+    schema: 'MaintainerSecurityReviewRecordV1',
+    reviewMode: 'single_maintainer',
     reviewerIdentity: REVIEWER,
-    independentFromMaintainer: true,
     reviewedAt: '2026-08-02T01:00:00.000Z',
     outcome: 'passed',
-    repository: PRODUCTION_RELEASE_REPOSITORY,
+    candidate,
+    execution: reviewExecution,
     ref: identity().ref,
-    commit: COMMIT,
     trustedVerifierCommit: TRUSTED_VERIFIER_COMMIT,
-    payloadSha256: sha256(payload),
-    nativeLauncherSha256: sha256(launcher),
-    canonicalManifestDigest: sha256(canonicalJsonBytes(manifest)),
+    routeIdentity: manifest.providerDataPolicyDigest,
+    platformIdentity: manifest.supportedPlatforms[0]!,
+    rollbackReportDigest: rollbackReport.recordDigest,
+    compatibilityReportDigest: compatibilityReport.recordDigest,
+    unresolvedP0: 0,
+    unresolvedP1: 0,
+    p2Dispositions: [],
     scope: [
       'architecture',
       'security_boundaries',
@@ -188,41 +280,91 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
       'rollback',
       'adversarial_bypass',
     ],
-  };
+  });
   writeFileSync(paths.securityReviewEvidence, JSON.stringify(securityReview));
-  const gateMaterial = {
-    schema: 'ReleaseGateDecisionV1' as const,
-    overall: 'approved_candidate' as const,
-    artifactIdentity: {
-      canonicalRepository: PRODUCTION_RELEASE_REPOSITORY,
-      repositoryId: PRODUCTION_RELEASE_REPOSITORY_NODE_ID,
-      commit: COMMIT,
-      trustedVerifierCommit: TRUSTED_VERIFIER_COMMIT,
-      payloadSha256: sha256(payload),
-      nativeLauncherSha256: sha256(launcher),
-      nativeLauncherArchivePath: PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1[platform],
-      canonicalManifestDigest: sha256(canonicalJsonBytes(manifest)),
-      securityReviewEvidenceDigest: sha256(JSON.stringify(securityReview)),
+  const githubExecution = (job: string): ReleaseEvidenceResultV1['executionIdentity'] => ({
+    source: 'github_actions',
+    canonicalRepository: PRODUCTION_RELEASE_REPOSITORY,
+    repositoryId: PRODUCTION_RELEASE_REPOSITORY_NODE_ID,
+    workflowPath: PRODUCTION_RELEASE_WORKFLOW_PATH,
+    workflowRef: `${PRODUCTION_RELEASE_REPOSITORY}/${PRODUCTION_RELEASE_WORKFLOW_PATH}@${identity().ref}`,
+    workflowSha: WORKFLOW_SHA,
+    oidcIssuer: 'https://token.actions.githubusercontent.com',
+    ref: identity().ref,
+    runId: identity().runId,
+    runAttempt: identity().runAttempt,
+    job,
+    commit: COMMIT,
+    startedAt: '2026-08-02T00:00:00.000Z',
+    endedAt: '2026-08-02T00:30:00.000Z',
+  });
+  const automaticKinds = [
+    ['g0', 'execution_conformance', 'G0'],
+    ['g1', 'required_ci', 'G1'],
+    ['g2', 'dependency_audit', 'G2'],
+    ['g3', 'agent_task_suite', 'G3'],
+    ['g4', 'incident_rehearsal', 'G4'],
+  ] as const;
+  const results: ReleaseEvidenceResultV1[] = automaticKinds.map(([evidenceId, kind, gate]) => ({
+    evidenceId,
+    kind,
+    gate,
+    status: 'passed',
+    artifactIdentity: securityReview.candidate,
+    executionIdentity: githubExecution(evidenceId),
+    suiteIdentity: `${evidenceId}-suite-v1`,
+    record: {
+      uri: `https://github.com/${PRODUCTION_RELEASE_REPOSITORY}/actions/runs/${identity().runId}`,
+      digest: sha256(`${evidenceId}-record`),
     },
-    gates: (['G0', 'G1', 'G2', 'G3', 'G4', 'G5'] as const).map((gate) => ({
-      gate,
-      status: 'passed' as const,
-      reasons: [],
-    })),
-    capabilities: [
-      { capability: 'builtin_read_tools', status: 'enabled', reasons: [] },
-      { capability: 'shell', status: 'disabled', reasons: ['execution_support_unavailable'] },
-    ],
-    requiredManualApprovals: [],
-  };
-  const gateDecisionDigest = sha256DomainSeparated(
-    'release-gate-decision-v1',
-    canonicalJsonBytes(gateMaterial),
-  );
-  writeFileSync(
-    paths.gateDecision,
-    JSON.stringify({ ...gateMaterial, decisionDigest: gateDecisionDigest }),
-  );
+    summary: `${gate} production evidence fixture.`,
+  }));
+  results.push({
+    evidenceId: 'g5',
+    kind: 'maintainer_security_review',
+    gate: 'G5',
+    status: 'passed',
+    artifactIdentity: securityReview.candidate,
+    executionIdentity: {
+      source: 'github_maintainer_review',
+      ...reviewExecution,
+      reviewerIdentity: REVIEWER,
+      recordIdentity: 'maintainer-review-record-v1',
+      commit: COMMIT,
+      startedAt: '2026-08-02T00:45:00.000Z',
+      endedAt: securityReview.reviewedAt,
+    },
+    routeIdentity: securityReview.routeIdentity,
+    platformIdentity: securityReview.platformIdentity,
+    suiteIdentity: 'maintainer-security-review-v1',
+    record: {
+      uri: `https://github.com/${PRODUCTION_RELEASE_REPOSITORY}/actions/runs/${identity().runId}`,
+      digest: securityReview.recordDigest,
+    },
+    summary: 'Candidate-bound single-maintainer security review.',
+    maintainerReview: securityReview,
+  });
+  const evidenceBundle = buildReleaseEvidenceBundleV1({
+    schema: 'ReleaseEvidenceV1',
+    evidenceBundleId: 'production-release-evidence-v1',
+    generatedAt: '2026-08-02T01:05:00.000Z',
+    artifactIdentity: securityReview.candidate,
+    nonDistributable: false,
+    syntheticTrustRoot: false,
+    results,
+    risks: [],
+    exceptions: [],
+  });
+  const gateDecision = evaluateReleaseGateV1({
+    policy: gatePolicy,
+    evidence: evidenceBundle,
+    artifactIdentity: securityReview.candidate,
+    evaluatedAt: '2026-08-02T01:05:00.000Z',
+  });
+  const gateDecisionDigest = gateDecision.decisionDigest;
+  writeFileSync(paths.gatePolicy, JSON.stringify(gatePolicy));
+  writeFileSync(paths.evidenceBundle, JSON.stringify(evidenceBundle));
+  writeFileSync(paths.gateDecision, JSON.stringify(gateDecision));
   const toolPaths =
     process.platform === 'win32'
       ? {
@@ -287,8 +429,6 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
           : {}),
     },
     nativeSigner,
-    expectedSecurityReviewerIdentity: REVIEWER,
-    expectedSecurityReviewerPublicKeySha256: sha256('independent-public-key'),
     expectedGateDecisionDigest: gateDecisionDigest,
   };
   return { root, paths, input, toolPaths };
@@ -412,7 +552,7 @@ describe('production supply-chain command builders', () => {
     expect(windows[0]).toContain('D'.repeat(64));
   });
 
-  test('accepts expected identity only from explicit CLI/env and rejects branch or maintainer review', () => {
+  test('accepts expected identity only from explicit CLI/env and rejects branch refs', () => {
     const value = fixture();
     try {
       const expected = identity();
@@ -436,13 +576,12 @@ describe('production supply-chain command builders', () => {
         KITE_RELEASE_PROVENANCE: value.paths.provenance,
         KITE_RELEASE_SIGSTORE_BUNDLE: value.paths.sigstoreBundle,
         KITE_RELEASE_ATTESTATION_BUNDLE: value.paths.githubAttestationBundle,
+        KITE_RELEASE_GATE_POLICY: value.paths.gatePolicy,
+        KITE_RELEASE_EVIDENCE_BUNDLE: value.paths.evidenceBundle,
         KITE_RELEASE_GATE_DECISION: value.paths.gateDecision,
         KITE_RELEASE_SECURITY_REVIEW_EVIDENCE: value.paths.securityReviewEvidence,
-        KITE_RELEASE_SECURITY_REVIEW_BUNDLE: value.paths.securityReviewBundle,
-        KITE_RELEASE_SECURITY_REVIEWER_PUBLIC_KEY: value.paths.securityReviewerPublicKey,
-        KITE_RELEASE_SECURITY_REVIEWER_PUBLIC_KEY_SHA256:
-          value.input.expectedSecurityReviewerPublicKeySha256,
-        KITE_RELEASE_SECURITY_REVIEWER_IDENTITY: REVIEWER,
+        KITE_RELEASE_ROLLBACK_REPORT: value.paths.rollbackReport,
+        KITE_RELEASE_COMPATIBILITY_REPORT: value.paths.compatibilityReport,
         KITE_RELEASE_GH_PATH: value.toolPaths.gh,
         KITE_RELEASE_GH_SHA256: value.input.tools.gh.sha256,
         KITE_RELEASE_COSIGN_PATH: value.toolPaths.cosign,
@@ -456,12 +595,6 @@ describe('production supply-chain command builders', () => {
           KITE_RELEASE_REF: 'refs/heads/main',
         }),
       ).toThrow(ProductionSupplyChainVerificationError);
-      expect(() =>
-        parseProductionSupplyChainCliInputV1([], {
-          ...env,
-          KITE_RELEASE_SECURITY_REVIEWER_IDENTITY: 'github:@ferqx',
-        }),
-      ).toThrow(/independent/);
     } finally {
       rmSync(value.root, { recursive: true, force: true });
     }
@@ -476,6 +609,7 @@ function dependencies(value: ReturnType<typeof fixture>, commands: string[][]) {
   }[value.input.platform];
   return {
     runtime,
+    now: () => new Date('2026-08-02T01:10:00.000Z'),
     execute(command: readonly string[]) {
       commands.push([...command]);
       const extractIndex = command.indexOf('--extract-certificates');
@@ -494,6 +628,26 @@ function dependencies(value: ReturnType<typeof fixture>, commands: string[][]) {
           stderr: '',
         };
       }
+      if (command.includes('api')) {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify({
+            id: Number(value.input.expected.runId),
+            event: 'workflow_dispatch',
+            head_sha: value.input.expected.commit,
+            run_attempt: value.input.expected.runAttempt,
+            status: 'completed',
+            conclusion: 'success',
+            created_at: '2026-08-01T23:59:00.000Z',
+            run_started_at: '2026-08-02T00:00:00.000Z',
+            updated_at: '2026-08-02T01:06:00.000Z',
+            actor: { login: 'ferqx' },
+            triggering_actor: { login: 'ferqx' },
+            repository: { full_name: value.input.expected.repository },
+          }),
+          stderr: '',
+        };
+      }
       if (command.includes('--assess')) {
         return {
           exitCode: 0,
@@ -508,7 +662,7 @@ function dependencies(value: ReturnType<typeof fixture>, commands: string[][]) {
 }
 
 describe('production supply-chain admission verifier skeleton', () => {
-  test('verifies five immutable subjects and remains non-admitting', () => {
+  test('verifies eleven immutable subjects and remains non-admitting', () => {
     const value = fixture();
     const commands: string[][] = [];
     try {
@@ -526,14 +680,14 @@ describe('production supply-chain admission verifier skeleton', () => {
           immutableSnapshots: 'verified',
           archiveLauncherBinding: 'verified',
           canonicalManifestBinding: 'verified',
-          independentSecurityReview: 'verified',
+          maintainerSecurityReview: 'verified',
           pinnedToolchain: 'verified',
           platformSignature: 'verified',
           releaseGate: 'verified',
         },
       });
-      expect(commands.filter((command) => command.includes('attestation'))).toHaveLength(5);
-      expect(commands.filter((command) => command.includes('verify-blob'))).toHaveLength(3);
+      expect(commands.filter((command) => command.includes('attestation'))).toHaveLength(11);
+      expect(commands.filter((command) => command.includes('verify-blob'))).toHaveLength(2);
       expect(commands.flat().join(' ')).toContain('/nativeLauncher/kite');
       expect(commands.flat().join(' ')).not.toContain(value.paths.nativeLauncher);
     } finally {
@@ -558,6 +712,29 @@ describe('production supply-chain admission verifier skeleton', () => {
         ),
       ).toThrow(/verifier_binary_mismatch/);
       expect(() =>
+        verifyProductionSupplyChainAdmissionV1(value.input, {
+          ...base,
+          execute(command) {
+            if (command.includes('api')) {
+              return {
+                exitCode: 0,
+                stdout: JSON.stringify({
+                  id: Number(value.input.expected.runId),
+                  event: 'workflow_dispatch',
+                  head_sha: value.input.expected.commit,
+                  run_attempt: value.input.expected.runAttempt,
+                  actor: { login: 'attacker' },
+                  triggering_actor: { login: 'attacker' },
+                  repository: { full_name: value.input.expected.repository },
+                }),
+                stderr: '',
+              };
+            }
+            return base.execute(command);
+          },
+        }),
+      ).toThrow(/security_review_unverified/);
+      expect(() =>
         verifyProductionSupplyChainAdmissionV1(
           {
             ...value.input,
@@ -565,7 +742,7 @@ describe('production supply-chain admission verifier skeleton', () => {
           },
           base,
         ),
-      ).toThrow(/security_review_unverified/);
+      ).toThrow(/gate_not_approved/);
       expect(() =>
         verifyProductionSupplyChainAdmissionV1(
           {
@@ -617,6 +794,39 @@ describe('production supply-chain admission verifier skeleton', () => {
           },
         }),
       ).toThrow(/platform_signature_unverified/);
+    } finally {
+      rmSync(value.root, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects stale review time, run splicing, and unattested replay-record mutation', () => {
+    const value = fixture();
+    try {
+      const base = dependencies(value, []);
+      expect(() =>
+        verifyProductionSupplyChainAdmissionV1(value.input, {
+          ...base,
+          now: () => new Date('2026-08-02T02:01:00.001Z'),
+        }),
+      ).toThrow(/security_review_unverified/);
+      expect(() =>
+        verifyProductionSupplyChainAdmissionV1(
+          {
+            ...value.input,
+            expected: { ...value.input.expected, runId: '654321' },
+          },
+          base,
+        ),
+      ).toThrow(/gate_not_approved/);
+
+      const rollback = JSON.parse(readFileSync(value.paths.rollbackReport, 'utf8'));
+      writeFileSync(
+        value.paths.rollbackReport,
+        JSON.stringify({ ...rollback, reportDigest: sha256('spliced-rollback-report') }),
+      );
+      expect(() => verifyProductionSupplyChainAdmissionV1(value.input, base)).toThrow(
+        /gate_not_approved/,
+      );
     } finally {
       rmSync(value.root, { recursive: true, force: true });
     }

@@ -179,7 +179,7 @@ export type SemanticEvaluationSourceIdentityV1 = z.infer<
 const semanticSourceSchema = z
   .object({
     version: z.literal(1),
-    source: z.literal('github_actions_unsigned_contract'),
+    source: z.enum(['github_actions_unsigned_contract', 'github_actions_oidc_sigstore_v1']),
     canonicalRepository: z.literal(PINNED_SEMANTIC_REPOSITORY),
     repositoryId: z.literal(PINNED_SEMANTIC_REPOSITORY_ID),
     repositoryNumericId: z.literal(PINNED_SEMANTIC_REPOSITORY_NUMERIC_ID),
@@ -199,13 +199,29 @@ const semanticSourceSchema = z
     startedAt: timestampSchema,
     endedAt: timestampSchema,
     boundPayloadDigest: digestSchema,
-    signature: z
-      .object({
-        kind: z.literal('unconfigured'),
-        algorithm: z.literal('none'),
-        reason: z.literal('production_sigstore_unconfigured'),
-      })
-      .strict(),
+    signature: z.discriminatedUnion('kind', [
+      z
+        .object({
+          kind: z.literal('unconfigured'),
+          algorithm: z.literal('none'),
+          reason: z.literal('production_sigstore_unconfigured'),
+        })
+        .strict(),
+      z
+        .object({
+          kind: z.literal('github_oidc_sigstore_v1'),
+          algorithm: z.literal('sigstore-keyless'),
+          oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
+          authorityIdentity: z.string().min(1).max(256),
+          verifierIdentity: z.string().min(1).max(256),
+          evaluatorRouteDigest: digestSchema,
+          subjectDigest: digestSchema,
+          attestationDigest: digestSchema,
+          verificationReceiptDigest: digestSchema,
+          verifiedAt: timestampSchema,
+        })
+        .strict(),
+    ]),
   })
   .strict()
   .superRefine((source, context) => {
@@ -215,6 +231,16 @@ const semanticSourceSchema = z
         code: 'custom',
         path: ['workflowRef'],
         message: 'workflowRef must bind the pinned workflow path to the exact ref.',
+      });
+    }
+    if (
+      (source.source === 'github_actions_unsigned_contract') !==
+      (source.signature.kind === 'unconfigured')
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['signature'],
+        message: 'Semantic evidence source class and authentication kind must agree.',
       });
     }
   });
@@ -273,18 +299,33 @@ export interface SemanticEvidenceExpectedIdentityV1 {
 export interface SemanticEvidenceVerificationV1 {
   version: 1;
   kind: 'compaction_semantic_evidence_verification';
-  status: 'blocked' | 'failed';
+  status: 'passed' | 'blocked' | 'failed';
   semanticOutcome: 'passed' | 'failed' | 'inconclusive';
   deterministicOutcome: 'passed' | 'failed';
-  evidenceEligible: false;
-  authenticatedEvaluatorRoute: false;
-  sigstoreTrustConfigured: false;
+  evidenceEligible: boolean;
+  authenticatedEvaluatorRoute: boolean;
+  sigstoreTrustConfigured: boolean;
   milestone: null;
   rebuiltPayloadDigest: `sha256:${string}`;
   rebuiltReceiptLedgerDigest: `sha256:${string}`;
   reasonCodes: string[];
   verificationDigest: `sha256:${string}`;
 }
+
+interface TrustedSemanticEvidenceAuthorityV1 {
+  authorityIdentity: string;
+  verifierIdentity: string;
+  workflowSha: string;
+  subjectDigest: `sha256:${string}`;
+  attestationDigest: `sha256:${string}`;
+  verificationReceiptDigest: `sha256:${string}`;
+  evaluatorRouteDigest: `sha256:${string}`;
+  verifiedAt: string;
+}
+
+const TRUSTED_SEMANTIC_EVIDENCE_AUTHORITIES_V1: readonly TrustedSemanticEvidenceAuthorityV1[] =
+  Object.freeze([]);
+const TRUSTED_SEMANTIC_EVALUATOR_ROUTES_V1: readonly `sha256:${string}`[] = Object.freeze([]);
 
 export class SemanticEvidenceVerificationError extends Error {
   readonly code: 'evidence_invalid' | 'identity_mismatch' | 'ledger_mismatch';
@@ -496,8 +537,9 @@ export function verifyTrackedSemanticInputSnapshotV1(
 
 /**
  * Rebuilds every retained fact from the blinded ledger. It deliberately cannot
- * authenticate Sigstore/GitHub attestations yet, so a structurally valid pass
- * remains blocked and evidence-ineligible.
+ * authenticate only against source-owned Sigstore and evaluator-route
+ * registries. Both registries are empty until a real evaluator is reviewed, so
+ * repository-local fixtures remain blocked and evidence-ineligible.
  */
 export function verifySemanticEvaluationEvidenceV1(input: {
   evidence: unknown;
@@ -576,19 +618,61 @@ export function verifySemanticEvaluationEvidenceV1(input: {
     throw new SemanticEvidenceVerificationError('identity_mismatch');
   }
 
-  const reasonCodes = [
-    'authenticated_semantic_evaluator_not_configured',
-    'sigstore_attestation_trust_not_configured',
-  ];
+  const reasonCodes: string[] = [];
+  let sigstoreTrustConfigured = false;
+  let authenticatedEvaluatorRoute = false;
+  const signature = evidence.source.signature;
+  if (signature.kind === 'unconfigured') {
+    reasonCodes.push('authenticated_semantic_evaluator_not_configured');
+    reasonCodes.push('sigstore_attestation_trust_not_configured');
+  } else {
+    if (signature.subjectDigest !== rebuiltPayloadDigest) {
+      throw new SemanticEvidenceVerificationError('identity_mismatch');
+    }
+    sigstoreTrustConfigured = TRUSTED_SEMANTIC_EVIDENCE_AUTHORITIES_V1.some(
+      (authority) =>
+        authority.authorityIdentity === signature.authorityIdentity &&
+        authority.verifierIdentity === signature.verifierIdentity &&
+        authority.workflowSha === evidence.source.workflowSha &&
+        authority.subjectDigest === signature.subjectDigest &&
+        authority.attestationDigest === signature.attestationDigest &&
+        authority.verificationReceiptDigest === signature.verificationReceiptDigest &&
+        authority.evaluatorRouteDigest === signature.evaluatorRouteDigest &&
+        authority.verifiedAt === signature.verifiedAt,
+    );
+    authenticatedEvaluatorRoute =
+      signature.evaluatorRouteDigest === evidence.request.evaluatorRouteDigest &&
+      TRUSTED_SEMANTIC_EVALUATOR_ROUTES_V1.includes(
+        signature.evaluatorRouteDigest as `sha256:${string}`,
+      );
+    if (!sigstoreTrustConfigured) reasonCodes.push('sigstore_attestation_trust_not_configured');
+    if (!authenticatedEvaluatorRoute) {
+      reasonCodes.push('authenticated_semantic_evaluator_not_configured');
+    }
+    const verifiedAt = Date.parse(signature.verifiedAt);
+    if (verifiedAt < Date.parse(evidence.source.endedAt) || !Number.isFinite(verifiedAt)) {
+      reasonCodes.push('semantic_authentication_time_invalid');
+    }
+  }
   if (semanticOutcome === 'failed') reasonCodes.push('semantic_threshold_failed');
   if (semanticOutcome === 'inconclusive') reasonCodes.push('semantic_uncertainty_exceeded');
   if (evidence.deterministicSafety.outcome === 'failed') {
     reasonCodes.push('deterministic_safety_failed');
   }
   reasonCodes.sort();
-  const status =
-    semanticOutcome === 'failed' || evidence.deterministicSafety.outcome === 'failed'
-      ? ('failed' as const)
+  const localFailure =
+    semanticOutcome === 'failed' ||
+    evidence.deterministicSafety.outcome === 'failed' ||
+    reasonCodes.includes('semantic_authentication_time_invalid');
+  const evidenceEligible =
+    !localFailure &&
+    semanticOutcome === 'passed' &&
+    sigstoreTrustConfigured &&
+    authenticatedEvaluatorRoute;
+  const status = localFailure
+    ? ('failed' as const)
+    : evidenceEligible
+      ? ('passed' as const)
       : ('blocked' as const);
   const withoutDigest = {
     version: 1 as const,
@@ -596,9 +680,9 @@ export function verifySemanticEvaluationEvidenceV1(input: {
     status,
     semanticOutcome,
     deterministicOutcome: evidence.deterministicSafety.outcome,
-    evidenceEligible: false as const,
-    authenticatedEvaluatorRoute: false as const,
-    sigstoreTrustConfigured: false as const,
+    evidenceEligible,
+    authenticatedEvaluatorRoute,
+    sigstoreTrustConfigured,
     milestone: null,
     rebuiltPayloadDigest,
     rebuiltReceiptLedgerDigest,

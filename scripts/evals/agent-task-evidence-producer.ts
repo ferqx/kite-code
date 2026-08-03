@@ -33,6 +33,12 @@ import {
   computeAuthenticatedAgentTaskBundleDigestV1,
   verifyAuthenticatedAgentTaskEvidenceV1,
 } from './contracts/agent-task-authenticated-evidence';
+import {
+  type AgentTaskProductEvidenceV1,
+  buildAgentTaskProductEvidenceV1,
+  buildAgentTaskUxReceiptV1,
+  verifyAgentTaskProductEvidenceV1,
+} from './contracts/agent-task-product-evidence';
 
 const timestampSchema = z.iso.datetime({ offset: true });
 const rawAttemptSchema = agentTaskRetainedAttemptV1Schema.omit({
@@ -220,6 +226,75 @@ export function produceUnsignedAgentTaskEvidenceV1(input: {
   return evidence;
 }
 
+export function produceContractAgentTaskProductEvidenceV1(input: {
+  retainedInput: unknown;
+  formalEvidence: unknown;
+}): AgentTaskProductEvidenceV1 {
+  const retained = formalAgentTaskRetainedInputV1Schema.parse(input.retainedInput);
+  const formal = authenticatedAgentTaskEvidenceV1Schema.parse(input.formalEvidence);
+  const sourceDigest = computeAgentTaskSourceDigestV1(formal.source);
+  const candidateDigest = computeAgentTaskCandidateDigestV1(formal.candidate);
+  const caseDefinitions = new Map(
+    APPROVED_AGENT_TASK_SUITE_V1.cases.map((definition) => [definition.caseId, definition]),
+  );
+  let previousReceiptDigest: `sha256:${string}` | null = null;
+  let sequence = 0;
+  const uxReceipts = retained.caseLedgers.flatMap((ledger) => {
+    const definition = caseDefinitions.get(ledger.caseId);
+    if (!definition) throw new Error(`Approved Agent task definition is missing: ${ledger.caseId}`);
+    return ledger.attempts.map((attempt) => {
+      sequence += 1;
+      const receipt = buildAgentTaskUxReceiptV1({
+        schema: 'AgentTaskUxReceiptV1',
+        sequence,
+        caseId: ledger.caseId,
+        attemptId: attempt.attemptId,
+        sourceDigest,
+        candidateDigest,
+        entrypoint: definition.expectedInteractions.entrypoint,
+        plan: definition.expectedInteractions.plan === 'required' ? 'reviewed' : 'not_required',
+        toolSearch: {
+          required: false,
+          expectedCapabilityAlias: null,
+          selectedCapabilityAlias: null,
+          outcome: 'not_needed',
+          latencyMs: 0,
+        },
+        unintendedDiscovery: { mcpTriggerCount: 0, skillTriggerCount: 0 },
+        askUser: { expected: false, outcome: 'not_needed', canonicalQuestionDigest: null },
+        recovery: definition.category === 'failure_recovery' ? 'recovered' : 'not_needed',
+        verification: 'passed',
+        reviewHandoff: 'ready',
+        claimedComplete: false,
+        userCorrections: 0,
+        approvalCount: definition.accessMode === 'workspace_write' ? 1 : 0,
+        observedAt: attempt.endedAt,
+        previousReceiptDigest,
+      });
+      previousReceiptDigest = receipt.receiptDigest as `sha256:${string}`;
+      return receipt;
+    });
+  });
+  const product = buildAgentTaskProductEvidenceV1({
+    executionClass: retained.executionClass,
+    source: formal.source,
+    candidate: formal.candidate,
+    uxReceipts,
+    humanReceipts: [],
+  });
+  verifyAgentTaskProductEvidenceV1({
+    evidence: product,
+    expectedSource: formal.source,
+    expectedCandidate: formal.candidate,
+    expectedAttempts: uxReceipts.map((receipt) => ({
+      attemptId: receipt.attemptId,
+      caseId: receipt.caseId,
+    })),
+    requiredHumanReceiptCount: 0,
+  });
+  return product;
+}
+
 function contractArtifactIdentity(
   repository: string,
   repositoryId: string,
@@ -314,6 +389,14 @@ if (import.meta.main) {
       signedAt: required(args, 'signed-at'),
     });
     writeFileSync(output, canonicalJsonBytes(evidence));
+    const productOutput = args.get('product-output');
+    if (productOutput) {
+      const product = produceContractAgentTaskProductEvidenceV1({
+        retainedInput,
+        formalEvidence: evidence,
+      });
+      writeFileSync(resolve(productOutput), canonicalJsonBytes(product));
+    }
   } else {
     throw new Error(`Unknown producer mode: ${mode}`);
   }

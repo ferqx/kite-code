@@ -6,7 +6,7 @@
 验证：`bun test tests/release`、`bun run release:build`、`bun run release:verify`、
 `bun run release:smoke`、`bun run release:gate:foundation`、
 `bun run release:smoke:execution`。
-相关：ADR-0051、ADR-0052、ADR-0059、ADR-0060、ADR-0062、D-04、D-06、Phase 2A。
+相关：ADR-0051、ADR-0052、ADR-0059、ADR-0060、ADR-0062、ADR-0067、D-04、D-06、Phase 2A。
 
 ## 当前发布边界
 
@@ -44,7 +44,8 @@ tamper 和 pre-exec 顺序，不能产生 production artifact。公开后的目�
 - PR、fork、普通 branch 与维护者本机无签名/发布 authority。
 
 真实 Sigstore、attestation、GitHub Release workflow、平台代码签名与 remote rollout signing 当前均
-未启用。平台原生签名/launcher qualification 和 external 第三方安全评审仍分别是硬门禁。
+未启用。平台原生签名/launcher qualification 仍是硬门禁。ADR-0067 已把另一位真人的第三方安全
+评审改为可选增强；发布仍必须有绑定不可变 candidate 的 single-maintainer security review。
 
 ## Behavior、Evidence 与 Gate
 
@@ -66,17 +67,27 @@ Evidence kind 明确区分 Phase 3 limited cohort 的 `limited_slo` 与后续 ca
 `canary_slo`；二者不能互相替代或复用 milestone。
 
 GitHub release policy 必须恰好包含一个全局、不可 waiver 且带 freshness 的
-`third_party_security_review` requirement。Manual approval 只能由该 requirement 的已验证 decision
-满足；额外 result、synthetic/local source、过期或 candidate identity mismatch 均全局阻塞，
-`github:@ferqx` 不得作为自己的第三方 reviewer。任一全局 identity/risk/approval failure 都把所有
-capability 关闭；没有适用且通过 requirement 的 capability 也默认 disabled。
-当前没有批准的独立 reviewer signing identity/trust root，因此即使本地构造 candidate-bound
-external review record 也会以 `security_review_trust_root_unconfigured` blocked；登记真实第三方
-reviewer 和独立 verifier 前不能产生 `approved_candidate`。
+`maintainer_security_review` requirement。Manual approval 只由绑定同一 candidate 的具名维护者 review
+满足；过期、identity mismatch、未覆盖五个固定安全范围、存在未关闭 P0/P1 或任一适用自动 Gate 非
+passed 都全局阻塞。review execution identity 还必须绑定 canonical repository/ID、release workflow
+path/ref/SHA、tag、run/attempt 和 GitHub OIDC issuer，且 workflow actor 与 reviewer 都必须精确为
+`github:@ferqx`。维护者可以按 ADR-0067 承担该 review，但不能自批 G0/G1 例外，也不能把
+结果声明为 independent/third-party reviewed。第三方 review 可作为附加 evidence，不是
+`approved_candidate` 的必需 trust root。
 
 `release:gate:foundation` 只产生固定 synthetic/non-production、可供 `MS:2A-F` 完成记录引用的
 contract fixture；命令本身不写计划 milestone。其 G0/G1 验证 canonical/pre-exec/Gate replay，
-不能替代 RC 的供应链、平台、运营、产品、canary SLO 或第三方评审 evidence。
+不能替代 RC 的供应链、平台、运营、产品、canary SLO 或 candidate-bound maintainer review。
+
+RC 本地控制面现补齐三个独立 contract：`gate-replay.ts` 对 retained decision 做 byte-equivalent
+deterministic replay；`schema-rollback.ts` 用 synthetic fixture 验证 durable fact 保留、unknown external
+effect 永不盲重放；`assemble-rc.ts` 要求 MS:1A/1B/1C/2B/3、2A.8/2A.10、Gate replay、rollback 与
+candidate-bound maintainer review 全部绑定 exact candidate identity；detached manifest、evidence bundle、release Gate、supply-chain、
+Gate replay 与 rollback 六项关键输入还必须各自绑定 digest/artifact/verification receipt，并进入 assembly
+digest。assembler 是纯 Gate，不写 bundle、不发布；它只消费源码中预登记的 exact verified statements，
+本身不是密码学 verifier。当前 registry 为空，因此尚不存在 `passed/distributable` 路径；Task 2A.11 未来仍是
+`MS:2A-RC` 的唯一 producer。source-owned RC authority 与任一真实 dependency evidence 缺失时固定 blocked、
+`distributable=false`、`milestone=null`。
 
 ## Execution artifact conformance
 
@@ -88,7 +99,7 @@ contract fixture；命令本身不写计划 milestone。其 G0/G1 验证 canonic
 24.04、Windows 2025 artifact 已通过独立 canonical/report digest 重建和 bootstrap verification，
 因此 1B.9 以 negative conformance 完成并唯一产生 `MS:1B-DONE`。结果仍固定
 `productionSupported=false`、supported count=0、`distributable=false`、真实 signing disabled；
-它不满足 2A.8 的 production platform、供应链或第三方安全评审证据。
+它不满足 2A.8 的 production platform、供应链或 candidate-bound maintainer review 证据。
 
 ## Supply chain 与 disable-only rollout 的当前边界
 
@@ -96,7 +107,7 @@ contract fixture；命令本身不写计划 milestone。其 G0/G1 验证 canonic
 commit，production signing job 永不运行。SBOM、provenance 与三平台 launcher smoke 只能生成或校验
 `nonDistributable=true` synthetic fixture；registry vulnerability/license audit、真实平台签名、实际制品
 smoke、OIDC Sigstore/attestation 和 GitHub Release 尚未发生。2A.8 因真实 build/audit、发布者身份、
-平台原生签名/notarization、provenance/attestation、actual artifact smoke 与真人第三方安全评审均缺失而
+平台原生签名/notarization、provenance/attestation、actual artifact smoke 与 candidate-bound maintainer review 均缺失而
 保持 blocked；D-04 空 support set 只阻止 effectful execution capability，不阻止普通跨平台 TUI/CLI
 artifact 的构建与资格验证。
 三平台 contract 命令必须使用显式、Workspace-relative 测试路径；不得依赖 Bash glob 展开，因为
@@ -120,25 +131,38 @@ path+SHA-256 tool receipt、执行前后 digest 一致和命令超时；Windows 
 opaque input 下载。候选代码即使在
 build job 启动 sudo/admin 同权限后台进程也不能跨 VM 进入 verifier；缺失 protected verifier commit、
 下载 artifact 或任一 receipt 时直接失败。
-该 exact verifier commit 同时进入 expected identity、真人 security-review evidence、Gate artifact
-identity 与 verifier 返回 identity；修改 protected variable 会使既有 review/Gate digest 全部失效，
+该 exact verifier commit 同时进入 expected identity、maintainer security-review record 与 verifier 返回
+identity；Gate decision 通过 evidence bundle digest 绑定该 review。修改 protected variable 会使既有
+review/Gate digest 全部失效，
 不能在 workflow SHA 不变时静默更换判定实现。
 
 外层 `tar.gz` 只接受 canonical USTAR regular/directory entry、精确双零块终止与零 padding；拒绝
 PAX/GNU long-name/global metadata、link、`.`/`..`/空路径段、非规范 UTF-8/NUL padding 和规范化后的
 重复路径。payload 必须包含固定平台路径的精确 native launcher，提取成员 bytes 与独立签名对象
 digest 一致；canonical manifest 再绑定 archive digest、commit 与单一 distribution identity。GitHub
-attestation 覆盖 payload/native launcher/manifest/SBOM/provenance 五个 subject。Linux launcher 使用
+attestation 覆盖 payload/native launcher/manifest/SBOM/provenance/Gate policy/evidence bundle/Gate
+decision/maintainer review/rollback replay report/compatibility replay report 十一个 subject。后两项必须是
+strict、candidate-bound、带 verifier receipt 的实际文件；review 绑定其 canonical record digest，不能用
+命令行传入的裸 digest 代替。Linux launcher 使用
 keyless Sigstore；macOS 从同一受控 archive 安全重建完整 `Kite.app`，要求 launcher、`Info.plist` 与
 `_CodeSignature/CodeResources`，对 app bundle 执行 deep/strict external requirement、固定 Developer ID
 Team ID、leaf certificate SHA-256 与 Gatekeeper notarization assessment，而不是只验证内部 executable；
 Windows 固定 Authenticode signer certificate/SPKI、trusted root 与 timestamp certificate。
-G0–G5 必须全部 `passed`，G5 还必须绑定不同于 `github:@ferqx` 的真人 review evidence、受保护 reviewer
-public-key digest 和真实 cosign signature，`not_applicable` 不能绕过第三方安全评审。
+G0–G5 必须全部 `passed`，G5 还必须绑定 `github:@ferqx` 的 candidate-bound maintainer review evidence；
+verifier 会从受保护 Gate policy 和完整 evidence bundle 重放 exact Gate decision，并通过 GitHub Actions
+run API 验证 `actor`/`triggering_actor=ferqx`、run/attempt、成功终态和真实
+`created_at/run_started_at/updated_at`。review/Gate/evidence 时间必须落入该认证 run 窗口且相对 verifier
+当前时间未过 freshness。producer/review run 必须先结束并产出绑定自身 run ID/attempt 的候选；后续独立
+admission run 使用 protected source run ID/attempt 下载该前序 artifact 并查询其成功终态，不能在当前
+run 尚未结束时把当前 run 伪装为 completed。workflow 使用只读 `actions: read` 与 `github.token` 查询该记录。review 进入
+Gate/evidence digest，但不再要求独立
+reviewer public key 或单独 Cosign signature。`not_applicable`
+不能绕过 maintainer security review，review 也不能覆盖 G0/G1 或未关闭 P0/P1。
 当前 job 固定 `if: false && github.workflow_sha == protected expected workflow SHA`、无
 OIDC/attestation/write 权限、trusted verifier commit/expected workflow SHA 未配置且 Gate digest 故意
 无效；即使误删一个条件也会
-fail closed。完整真实验证前 verifier 只返回 blocked、`productionReceipt=null`。
+fail closed。verifier 已有源码内 exact trusted-verifier-commit registry 驱动的条件式 production receipt；
+registry 当前为空，所以完整真实验证前仍只返回 blocked、`productionReceipt=null`。
 
 Windows、Linux 与 macOS 是发行目标，但这不把任一平台自动加入 production execution support
 set。普通跨平台 launcher/TUI contract 使用 GitHub-hosted matrix；Shell/writer 等 effectful
@@ -162,22 +186,34 @@ service/signing、exporter、baseline 和 observation 仍未启用，因此该�
 ## Phase 6 本地 Gate contract
 
 跨 capability maturity Gate 已预构建 canary → beta → stable 的严格顺序与 exact identity chain，要求
-预注册 observation window/sample/error budget、G3–G5、独立真人 approval、用户理解度、rollback 和
-freshness。当前 production authentication verifier 未实现；受信 evidence authority、已验证前序 decision
-与已验证真人 approval registry 各自固定为空。shape-valid production observation 或只填充其中一个身份
+预注册 observation window/sample/error budget、G3–G5、`github:@ferqx` 具名单维护者 approval、用户理解度、rollback 和
+freshness。production authentication subject、attestation/verifier identity 与 source-owned exact
+verified-record lookup 已实现；仓库代码不执行 attestation 密码学验证，受信 evidence authority、已验证
+前序 decision 与已验证维护者 approval registry 各自固定为空。
+shape-valid production observation 或只填充其中一个身份
 集合仍只能 blocked，不能产生 promotion 或被 Phase 6 selection 当作 stable decision。
 
 `release/ga-selection-v1.json` 当前 selected capability 为空，并显式把全部 15 个 Release Capability
 forced off。validator 要求每个 selected capability 绑定精确且 fresh 的 stable decision，并要求 selected/
 forced-off 对全集做无重叠分区。当前 GA Gate 因 `MS:LIM-APPROVED`、`MS:LIMITED-SLO`、
-`MS:2A-RC`、`MS:3-OPS-READY`、第三方安全评审、非空 production support set 与 stable selection
+`MS:2A-RC`、`MS:3-OPS-READY`、candidate-bound maintainer review、非空 production support set 与 stable selection
 全部缺失而 blocked；它不能 assemble 或 publish artifact。GA 前置不再接受调用者布尔值，而要求
-artifact/profile/route/cohort 一致的 typed decision records；当前 authenticated dependency verifier
-未配置，因此即使提供 shape-valid fixture 也固定 `gaEligible=false`。
+artifact/profile/route/cohort 一致的 typed decision records；source-owned exact dependency record 还绑定
+完整 canonical selection digest（包含 capability set、stable decision digest 与 approval）。它不是密码学
+verifier 且 registry 为空，因此即使提供 shape-valid fixture 也固定 `gaEligible=false`。
 
 Auto Compaction admission contract 消费同一 candidate identity 的 typed dependency decisions 与
-G0/G1 ledger digest，所有前置 identity 都进入 decision digest；本地 authenticated verifier 未配置，
+G0/G1 ledger digest，所有前置 identity 都进入 decision digest；dependency statement 与 safety observation
+分别要求源码内 exact verified record，不能只认证 dependency 后由调用者自报零事故；两个 registry 都为空，
 所以 fixture 永远 blocked、`auto_compaction` 为 off/cohort 0。评估自身固定零 summary dispatch、零
 checkpoint write。GA compatibility
 replay 只使用 `synthetic_contract_only` fixture，验证 transcript/Plan/Receipt/Verification/checkpoint
 事实不被删除、unknown external effect 不重放；`productionEvidence=false`，不能作为发布或观察证据。
+
+`assemble-ga.ts` 现提供纯 GA assembly/replay Gate，绑定 candidate/artifact/profile/route/cohort、canonical
+selection、rollback/compatibility replay 与 candidate-bound maintainer review。它没有 filesystem、network 或 publish 路径；
+replay wrapper 必须携带 verifier identity、completion time 与 verification receipt digest，review 必须晚于
+dependency verification 和两项 replay completion；未来 source-owned authority 必须用不可拆分的 exact
+kind/verifier/receipt/candidate/selection/report record 固定 replay，不能分别维护 verifier/receipt allowlist
+或只信任调用方时间。
+production assembly authority 为空时固定不写 bundle、不发布、`milestone=null`。

@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { sha256Digest } from '../../scripts/release/canonical-json';
 import { buildReleaseEvidenceBundleV1 } from '../../scripts/release/evidence-bundle';
-import type {
-  ReleaseArtifactIdentityV1,
-  ReleaseEvidenceResultV1,
+import {
+  buildMaintainerSecurityReviewRecordV1,
+  type ReleaseArtifactIdentityV1,
+  type ReleaseEvidenceResultV1,
 } from '../../scripts/release/evidence-schema';
 import { buildSyntheticFoundationGateRecordV1 } from '../../scripts/release/foundation-gate';
 import {
@@ -29,6 +30,7 @@ function policy(
     canonicalRepository: 'ferqx/kite-code',
     repositoryId: 'R_kgDOSKbi8g',
     releaseWorkflowPath: '.github/workflows/release-candidate.yml',
+    releaseWorkflowSha: COMMIT,
     oidcIssuer: 'https://token.actions.githubusercontent.com',
     allowedRefPrefixes: ['refs/tags/v'],
     capabilities: ['verification'],
@@ -58,11 +60,13 @@ function policy(
       ...(mode === 'github_release'
         ? [
             {
-              requirementId: 'g5-independent-security-review',
-              evidenceId: 'independent-security-review',
-              kind: 'third_party_security_review' as const,
+              requirementId: 'g5-maintainer-security-review',
+              evidenceId: 'maintainer-security-review',
+              kind: 'maintainer_security_review' as const,
               gate: 'G5' as const,
               maxAgeSeconds: 3600,
+              requiredRouteIdentity: 'route:deepseek-v4-flash',
+              requiredPlatformIdentity: 'ubuntu-24.04-x64',
             },
           ]
         : []),
@@ -158,7 +162,9 @@ function githubResult(
     Partial<Pick<ReleaseEvidenceResultV1, 'capability' | 'status'>> & {
       endedAt?: string;
       startedAt?: string;
+      actorIdentity?: string;
       reviewerIdentity?: string;
+      workflowSha?: string;
     },
 ): ReleaseEvidenceResultV1 {
   const common = {
@@ -175,16 +181,63 @@ function githubResult(
     },
     summary: 'Candidate-bound release evidence.',
   };
-  if (input.kind === 'third_party_security_review') {
+  if (input.kind === 'maintainer_security_review') {
+    const reviewerIdentity = input.reviewerIdentity ?? 'github:@ferqx';
+    const reviewedAt = input.endedAt ?? '2026-08-02T00:45:00.000Z';
+    const reviewExecution = {
+      canonicalRepository: 'ferqx/kite-code',
+      repositoryId: 'R_kgDOSKbi8g',
+      workflowPath: '.github/workflows/release-candidate.yml',
+      workflowRef: 'ferqx/kite-code/.github/workflows/release-candidate.yml@refs/tags/v1.0.0',
+      workflowSha: input.workflowSha ?? COMMIT,
+      oidcIssuer: 'https://token.actions.githubusercontent.com' as const,
+      ref: 'refs/tags/v1.0.0',
+      runId: '12345',
+      runAttempt: 1,
+      actorIdentity: input.actorIdentity ?? reviewerIdentity,
+    };
+    const maintainerReview = buildMaintainerSecurityReviewRecordV1({
+      schema: 'MaintainerSecurityReviewRecordV1',
+      reviewMode: 'single_maintainer',
+      reviewerIdentity,
+      reviewedAt,
+      outcome: input.status === 'failed' ? 'failed' : 'passed',
+      candidate: identity,
+      execution: reviewExecution,
+      ref: 'refs/tags/v1.0.0',
+      trustedVerifierCommit: COMMIT,
+      routeIdentity: 'route:deepseek-v4-flash',
+      platformIdentity: 'ubuntu-24.04-x64',
+      rollbackReportDigest: digest('rollback-report'),
+      compatibilityReportDigest: digest('compatibility-report'),
+      scope: [
+        'architecture',
+        'security_boundaries',
+        'artifact_identity',
+        'rollback',
+        'adversarial_bypass',
+      ],
+      unresolvedP0: 0,
+      unresolvedP1: 0,
+      p2Dispositions: [],
+    });
     return {
       ...common,
+      routeIdentity: maintainerReview.routeIdentity,
+      platformIdentity: maintainerReview.platformIdentity,
+      record: {
+        ...common.record,
+        digest: maintainerReview.recordDigest,
+      },
+      maintainerReview,
       executionIdentity: {
-        source: 'external',
-        reviewerIdentity: input.reviewerIdentity ?? 'security-reviewer:independent-firm',
+        source: 'github_maintainer_review',
+        ...reviewExecution,
+        reviewerIdentity,
         recordIdentity: 'security-review-record-2026-08-02',
         commit: COMMIT,
         startedAt: input.startedAt ?? '2026-08-02T00:30:00.000Z',
-        endedAt: input.endedAt ?? '2026-08-02T00:45:00.000Z',
+        endedAt: reviewedAt,
       },
     };
   }
@@ -212,6 +265,8 @@ function githubResult(
 function githubFixture(options?: {
   omitSecurityReview?: boolean;
   securityReviewer?: string;
+  securityActor?: string;
+  securityWorkflowSha?: string;
   securityEndedAt?: string;
   securityStartedAt?: string;
   securityStatus?: 'passed' | 'failed';
@@ -246,10 +301,12 @@ function githubFixture(options?: {
   if (!options?.omitSecurityReview) {
     results.push(
       githubResult(identity, {
-        evidenceId: 'independent-security-review',
-        kind: 'third_party_security_review',
+        evidenceId: 'maintainer-security-review',
+        kind: 'maintainer_security_review',
         gate: 'G5',
         reviewerIdentity: options?.securityReviewer,
+        actorIdentity: options?.securityActor,
+        workflowSha: options?.securityWorkflowSha,
         startedAt: options?.securityStartedAt,
         endedAt: options?.securityEndedAt,
         status: options?.securityStatus,
@@ -260,7 +317,7 @@ function githubFixture(options?: {
     results.push(
       githubResult(identity, {
         evidenceId: 'unrequired-security-claim',
-        kind: 'third_party_security_review',
+        kind: 'maintainer_security_review',
         gate: 'G5',
       }),
     );
@@ -278,7 +335,7 @@ function githubFixture(options?: {
       ? [
           {
             exceptionId: 'attempted-security-review-waiver',
-            evidenceId: 'independent-security-review',
+            evidenceId: 'maintainer-security-review',
             gate: 'G5',
             approvedBy: 'github:@ferqx',
             reason: 'A release security review is not waivable.',
@@ -394,11 +451,13 @@ describe('deterministic release Gate evaluator', () => {
       evaluatedAt: EVALUATED_AT,
     });
     expect(decision.overall).toBe('blocked');
-    expect(decision.requiredManualApprovals).toEqual(['independent_third_party_security_review']);
+    expect(decision.requiredManualApprovals).toEqual([
+      'candidate_bound_maintainer_security_review',
+    ]);
     expect(decision.gates[0]?.reasons).toContain('github_release_rejects_synthetic_evidence');
   });
 
-  test('requires exactly one fresh global third-party security review policy item', () => {
+  test('requires exactly one fresh global maintainer security review policy item', () => {
     const material = {
       schema: 'ReleaseGatePolicyV1' as const,
       policyId: 'invalid-github-policy',
@@ -406,6 +465,7 @@ describe('deterministic release Gate evaluator', () => {
       canonicalRepository: 'ferqx/kite-code',
       repositoryId: 'R_kgDOSKbi8g',
       releaseWorkflowPath: '.github/workflows/release-candidate.yml',
+      releaseWorkflowSha: COMMIT,
       oidcIssuer: 'https://token.actions.githubusercontent.com' as const,
       allowedRefPrefixes: ['refs/tags/v'],
       capabilities: ['verification'],
@@ -428,23 +488,27 @@ describe('deterministic release Gate evaluator', () => {
           {
             requirementId: 'security-a',
             evidenceId: 'security-a',
-            kind: 'third_party_security_review',
+            kind: 'maintainer_security_review',
             gate: 'G5',
             maxAgeSeconds: 3600,
+            requiredRouteIdentity: 'route:deepseek-v4-flash',
+            requiredPlatformIdentity: 'ubuntu-24.04-x64',
           },
           {
             requirementId: 'security-b',
             evidenceId: 'security-b',
-            kind: 'third_party_security_review',
+            kind: 'maintainer_security_review',
             gate: 'G5',
             maxAgeSeconds: 3600,
+            requiredRouteIdentity: 'route:deepseek-v4-flash',
+            requiredPlatformIdentity: 'ubuntu-24.04-x64',
           },
         ],
       }),
     ).toThrow('exactly one');
   });
 
-  test('keeps a candidate-bound external review blocked until a real reviewer trust root exists', () => {
+  test('accepts a fresh candidate-bound single-maintainer review', () => {
     const valid = githubFixture();
     const decision = evaluateReleaseGateV1({
       policy: valid.gatePolicy,
@@ -452,12 +516,9 @@ describe('deterministic release Gate evaluator', () => {
       artifactIdentity: valid.identity,
       evaluatedAt: EVALUATED_AT,
     });
-    expect(decision.overall).toBe('blocked');
-    expect(decision.requiredManualApprovals).toEqual(['independent_third_party_security_review']);
-    expect(decision.requirements.at(-1)?.status).toBe('blocked');
-    expect(decision.requirements.at(-1)?.reasons).toContain(
-      'security_review_trust_root_unconfigured',
-    );
+    expect(decision.overall).toBe('approved_candidate');
+    expect(decision.requiredManualApprovals).toEqual([]);
+    expect(decision.requirements.at(-1)?.status).toBe('passed');
 
     const missing = githubFixture({ omitSecurityReview: true });
     const missingDecision = evaluateReleaseGateV1({
@@ -468,7 +529,7 @@ describe('deterministic release Gate evaluator', () => {
     });
     expect(missingDecision.overall).toBe('blocked');
     expect(missingDecision.requiredManualApprovals).toEqual([
-      'independent_third_party_security_review',
+      'candidate_bound_maintainer_security_review',
     ]);
 
     const mismatchedIdentity = { ...valid.identity, behaviorDigest: digest('other-behavior') };
@@ -480,15 +541,23 @@ describe('deterministic release Gate evaluator', () => {
     });
     expect(mismatchedDecision.overall).toBe('blocked');
     expect(mismatchedDecision.requiredManualApprovals).toEqual([
-      'independent_third_party_security_review',
+      'candidate_bound_maintainer_security_review',
     ]);
   });
 
-  test('rejects maintainer self-review and stale external review evidence', () => {
+  test('rejects a non-maintainer identity and stale maintainer review evidence', () => {
     for (const [fixtureValue, reason] of [
       [
-        githubFixture({ securityReviewer: 'github:@ferqx' }),
-        'security_review_requires_independent_reviewer',
+        githubFixture({ securityReviewer: 'github:@someone-else' }),
+        'security_review_maintainer_identity_mismatch',
+      ],
+      [
+        githubFixture({ securityActor: 'github:@someone-else' }),
+        'security_review_maintainer_identity_mismatch',
+      ],
+      [
+        githubFixture({ securityWorkflowSha: '2'.repeat(40) }),
+        'security_review_github_identity_mismatch',
       ],
       [
         githubFixture({
@@ -506,7 +575,9 @@ describe('deterministic release Gate evaluator', () => {
       });
       expect(decision.overall).toBe('blocked');
       expect(decision.requirements.at(-1)?.reasons).toContain(reason);
-      expect(decision.requiredManualApprovals).toEqual(['independent_third_party_security_review']);
+      expect(decision.requiredManualApprovals).toEqual([
+        'candidate_bound_maintainer_security_review',
+      ]);
     }
   });
 
@@ -525,11 +596,37 @@ describe('deterministic release Gate evaluator', () => {
     expect(decision.requirements.at(-1)).toMatchObject({
       status: 'blocked',
     });
-    expect(decision.requirements.at(-1)?.reasons).toEqual([
-      'security_review_trust_root_unconfigured',
-      'evidence_failed',
+    expect(decision.requirements.at(-1)?.reasons).toEqual(['evidence_failed']);
+    expect(decision.requiredManualApprovals).toEqual([
+      'candidate_bound_maintainer_security_review',
     ]);
-    expect(decision.requiredManualApprovals).toEqual(['independent_third_party_security_review']);
+  });
+
+  test('does not allow maintainer acceptance to close a P0 or P1 risk', () => {
+    const valid = githubFixture();
+    const { bundleDigest: _bundleDigest, ...material } = valid.evidence;
+    const evidence = buildReleaseEvidenceBundleV1({
+      ...material,
+      risks: [
+        {
+          riskId: 'candidate-auth-bypass',
+          severity: 'P1',
+          status: 'accepted',
+          summary: 'The maintainer cannot accept an unresolved P1 for release.',
+        },
+      ],
+    });
+    const decision = evaluateReleaseGateV1({
+      policy: valid.gatePolicy,
+      evidence,
+      artifactIdentity: valid.identity,
+      evaluatedAt: EVALUATED_AT,
+    });
+    expect(decision.overall).toBe('blocked');
+    expect(decision.gates[0]?.reasons).toContain('unresolved_p1_risk:candidate-auth-bypass');
+    expect(decision.requiredManualApprovals).toEqual([
+      'candidate_bound_maintainer_security_review',
+    ]);
   });
 
   test('rejects extra unrequired results instead of treating them as approval', () => {
@@ -541,7 +638,9 @@ describe('deterministic release Gate evaluator', () => {
       evaluatedAt: EVALUATED_AT,
     });
     expect(decision.overall).toBe('blocked');
-    expect(decision.requiredManualApprovals).toEqual(['independent_third_party_security_review']);
+    expect(decision.requiredManualApprovals).toEqual([
+      'candidate_bound_maintainer_security_review',
+    ]);
     expect(decision.gates[0]?.reasons).toContain('unexpected_evidence:unrequired-security-claim');
   });
 
@@ -558,11 +657,7 @@ describe('deterministic release Gate evaluator', () => {
       {
         capability: 'verification',
         status: 'disabled',
-        reasons: [
-          'g0-execution:missing_evidence',
-          'g5-independent-security-review:security_review_trust_root_unconfigured',
-          'manual_approval_missing:independent_third_party_security_review',
-        ],
+        reasons: ['g0-execution:missing_evidence'],
       },
     ]);
   });
@@ -575,6 +670,7 @@ describe('deterministic release Gate evaluator', () => {
       canonicalRepository: 'ferqx/kite-code',
       repositoryId: 'R_kgDOSKbi8g',
       releaseWorkflowPath: '.github/workflows/release-candidate.yml',
+      releaseWorkflowSha: COMMIT,
       oidcIssuer: 'https://token.actions.githubusercontent.com',
       allowedRefPrefixes: ['refs/tags/v'],
       capabilities: ['verification'],

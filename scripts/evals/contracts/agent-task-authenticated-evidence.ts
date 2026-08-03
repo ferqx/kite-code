@@ -164,6 +164,19 @@ export const authenticatedAgentTaskEvidenceV1Schema = z
           reason: z.literal('production_sigstore_unconfigured'),
         })
         .strict(),
+      z
+        .object({
+          kind: z.literal('github_oidc_sigstore_v1'),
+          algorithm: z.literal('sigstore-keyless'),
+          oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
+          authorityIdentity: identitySchema,
+          verifierIdentity: identitySchema,
+          subjectDigest: digestSchema,
+          attestationDigest: digestSchema,
+          verificationReceiptDigest: digestSchema,
+          verifiedAt: timestampSchema,
+        })
+        .strict(),
     ]),
   })
   .strict();
@@ -205,8 +218,26 @@ export interface AgentTaskFixtureRouteV1 {
  * not a caller-provided public key. These compile-time registries intentionally
  * remain empty until a reviewed Sigstore verifier and a real route are approved.
  */
-export const PRODUCTION_AGENT_TASK_SIGSTORE_VERIFIERS_V1: readonly never[] = Object.freeze([]);
-export const PRODUCTION_AGENT_TASK_APPROVED_ROUTES_V1: readonly never[] = Object.freeze([]);
+interface ProductionAgentTaskSigstoreVerifierV1 {
+  authorityIdentity: string;
+  verifierIdentity: string;
+  repositoryId: string;
+  workflowPath: string;
+  subjectDigest: `sha256:${string}`;
+  attestationDigest: `sha256:${string}`;
+  verificationReceiptDigest: `sha256:${string}`;
+  verifiedAt: string;
+}
+
+interface ProductionAgentTaskApprovedRouteV1 {
+  routeIdentity: string;
+  routeDigest: `sha256:${string}`;
+}
+
+export const PRODUCTION_AGENT_TASK_SIGSTORE_VERIFIERS_V1: readonly ProductionAgentTaskSigstoreVerifierV1[] =
+  Object.freeze([]);
+export const PRODUCTION_AGENT_TASK_APPROVED_ROUTES_V1: readonly ProductionAgentTaskApprovedRouteV1[] =
+  Object.freeze([]);
 
 export const AGENT_TASK_ADVERSARIAL_CATALOG_DIGEST_V1 = sha256Digest(
   canonicalJsonBytes(ADVERSARIAL_CONTRACT_CATALOG_V1),
@@ -234,8 +265,8 @@ export interface AgentTaskCasePolicyResultV1 {
 
 export interface AuthenticatedAgentTaskEvidenceVerificationV1 {
   schema: 'AuthenticatedAgentTaskEvidenceVerificationV1';
-  status: 'failed' | 'blocked';
-  evidenceEligible: false;
+  status: 'passed' | 'failed' | 'blocked';
+  evidenceEligible: boolean;
   executionClass: AuthenticatedAgentTaskEvidenceV1['executionClass'];
   sourceDigest: `sha256:${string}`;
   candidateDigest: `sha256:${string}`;
@@ -359,12 +390,7 @@ export function verifyAuthenticatedAgentTaskEvidenceV1(
     throw new Error('Authenticated Agent task bundle digest does not rebuild from retained data.');
   }
 
-  const reasons = new Set<string>([
-    'production_route_unconfigured',
-    'production_sigstore_verifier_unconfigured',
-    ...policy.reasonCodes,
-    ...adversarialReasons,
-  ]);
+  const reasons = new Set<string>([...policy.reasonCodes, ...adversarialReasons]);
   if (evidence.executionClass === 'contract_conformance') {
     reasons.add('contract_conformance_not_production');
   }
@@ -389,8 +415,37 @@ export function verifyAuthenticatedAgentTaskEvidenceV1(
         throw new Error('Authenticated Agent task evidence signature is invalid.');
       reasons.add('fixture_ed25519_not_production');
     }
-  } else {
+    reasons.add('production_sigstore_verifier_unconfigured');
+  } else if (evidence.signature.kind === 'unconfigured') {
     reasons.add('unsigned_formal_bundle_not_production');
+    reasons.add('production_sigstore_verifier_unconfigured');
+  } else {
+    const productionSignature = evidence.signature;
+    const productionVerifier = PRODUCTION_AGENT_TASK_SIGSTORE_VERIFIERS_V1.find(
+      (candidate) =>
+        candidate.authorityIdentity === productionSignature.authorityIdentity &&
+        candidate.verifierIdentity === productionSignature.verifierIdentity &&
+        candidate.repositoryId === evidence.source.repositoryId &&
+        candidate.workflowPath === evidence.source.workflowPath &&
+        candidate.subjectDigest === productionSignature.subjectDigest &&
+        candidate.attestationDigest === productionSignature.attestationDigest &&
+        candidate.verificationReceiptDigest === productionSignature.verificationReceiptDigest &&
+        candidate.verifiedAt === productionSignature.verifiedAt,
+    );
+    if (!productionVerifier) reasons.add('production_sigstore_verifier_unconfigured');
+    if (productionSignature.subjectDigest !== evidence.bundleDigest) {
+      reasons.add('production_attestation_subject_mismatch');
+    }
+    if (
+      evidence.signerIdentity !== productionSignature.authorityIdentity ||
+      evidence.keyId !== productionSignature.verifierIdentity
+    ) {
+      reasons.add('production_authentication_identity_mismatch');
+    }
+    if (Date.parse(productionSignature.verifiedAt) < Date.parse(evidence.signedAt)) {
+      reasons.add('production_authentication_time_invalid');
+    }
+    signatureVerified = productionVerifier !== undefined;
   }
 
   const fixtureRouteMatched = fixtureRoutes.some(
@@ -398,12 +453,25 @@ export function verifyAuthenticatedAgentTaskEvidenceV1(
       candidate.routeIdentity === evidence.candidate.routeIdentity &&
       candidate.routeDigest === evidence.candidate.routeDigest,
   );
+  const productionRouteMatched = PRODUCTION_AGENT_TASK_APPROVED_ROUTES_V1.some(
+    (candidate) =>
+      candidate.routeIdentity === evidence.candidate.routeIdentity &&
+      candidate.routeDigest === evidence.candidate.routeDigest,
+  );
+  if (!productionRouteMatched) reasons.add('production_route_unconfigured');
   const localGateFailed = policy.reasonCodes.length > 0 || adversarialReasons.length > 0;
   const normalizedReasons = [...reasons].sort();
+  const evidenceEligible =
+    !localGateFailed &&
+    evidence.executionClass === 'production_route_run' &&
+    evidence.signature.kind === 'github_oidc_sigstore_v1' &&
+    signatureVerified &&
+    productionRouteMatched &&
+    normalizedReasons.length === 0;
   return {
     schema: 'AuthenticatedAgentTaskEvidenceVerificationV1',
-    status: localGateFailed ? 'failed' : 'blocked',
-    evidenceEligible: false,
+    status: localGateFailed ? 'failed' : evidenceEligible ? 'passed' : 'blocked',
+    evidenceEligible,
     executionClass: evidence.executionClass,
     sourceDigest,
     candidateDigest,

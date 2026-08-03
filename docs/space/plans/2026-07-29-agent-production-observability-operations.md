@@ -21,13 +21,23 @@ consent/status、dashboard/SLO schema、alert/disable-only containment、runbook
 verifier/sample-ledger identity，并已增加 digest-chained admissions/terminal receipts、exactly-one
 terminal completeness、时间单调性、纯 aggregate 重建、共享 Release artifact identity 和完整 GitHub
 OIDC/job/artifact identity verifier；outer observation/candidate/report splice、orphan、duplicate、drop、
-reorder 或自报 aggregate mismatch 均 fail closed。production producer/attestation trust
-registry 仍为空，任何本地 fixture 都不能产生 milestone。D-03 已关闭为独立 external-canary
+reorder 或自报 aggregate mismatch 均 fail closed。production schema 只允许匹配源码预登记的 exact source
+identity/subject/attestation verification receipt；密码学 verifier 尚未实现且 registry 为空，任何当前本地 fixture 都不能产生
+milestone。D-03 已关闭为独立 external-canary
 opt-in 与匿名无正文 telemetry；reporter 最终边界现消费 release-owned alias registry、折叠未知动态标签、
 执行每 metric series cardinality budget，并在 mandatory audit admission denied 时固定 no-op。2B 正式证据依赖、
 真实 exporter/baseline、incident rehearsal 与 external
 observation 尚未满足，因此 Task 3.1–3.10 均不标记 completed；`MS:3-OPS-READY` 和
 `MS:LIMITED-SLO` 都未产生。
+
+2026-08-03 的 implementation-first 批次已把 governed exporter 与 Runtime bridge 接入 CLI/TUI composition：
+只允许 release-owned endpoint alias 和注入的 governed transport，metadata envelope 有界且无正文，开发
+入口因无 artifact authority/transport 继续 no-op。另补 production-shaped 八场景 incident retained
+ledger 与独立 rebuild contract，以及 artifact/route/Provider policy/预注册 policy/GitHub source 全绑定的
+baseline retained ledger、producer 与 independent verifier；production baseline/rehearsal authority registry
+仍为空。真实 baseline/exporter
+route、incident run 和 observation window 尚未发生，所以 Task 状态与 `MS:3-OPS-READY`/
+`MS:LIMITED-SLO` 均不改变。
 
 ## 目标
 

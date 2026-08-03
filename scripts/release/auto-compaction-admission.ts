@@ -13,6 +13,34 @@ const AUTO_COMPACTION_DEPENDENCIES_V1 = [
   'consent_provider_policy',
   'incident_rehearsal',
 ] as const;
+type AutoCompactionDependencyV1 = (typeof AUTO_COMPACTION_DEPENDENCIES_V1)[number];
+
+interface TrustedAutoCompactionVerifierV1 {
+  dependency: AutoCompactionDependencyV1;
+  verifierIdentity: string;
+  decisionDigest: `sha256:${string}`;
+  artifactDigest: `sha256:${string}`;
+  profileDigest: `sha256:${string}`;
+  routeDigest: `sha256:${string}`;
+  cohortDigest: `sha256:${string}`;
+  verifiedAt: string;
+}
+
+const TRUSTED_AUTO_COMPACTION_VERIFIERS_V1: readonly TrustedAutoCompactionVerifierV1[] =
+  Object.freeze([]);
+
+interface TrustedAutoCompactionSafetyObservationV1 {
+  artifactDigest: `sha256:${string}`;
+  profileDigest: `sha256:${string}`;
+  routeDigest: `sha256:${string}`;
+  cohortDigest: `sha256:${string}`;
+  g0Count: 0;
+  g1Count: 0;
+  ledgerDigest: `sha256:${string}`;
+}
+
+const TRUSTED_AUTO_COMPACTION_SAFETY_OBSERVATIONS_V1: readonly TrustedAutoCompactionSafetyObservationV1[] =
+  Object.freeze([]);
 
 export const autoCompactionAdmissionInputV1Schema = z
   .object({
@@ -73,13 +101,45 @@ export function evaluateAutoCompactionAdmissionV1(
   rawInput: unknown,
 ): AutoCompactionAdmissionDecisionV1 {
   const input = autoCompactionAdmissionInputV1Schema.parse(rawInput);
-  const reasons: string[] = ['authenticated_auto_compaction_verifier_not_configured'];
+  const reasons: string[] = [];
+  if (TRUSTED_AUTO_COMPACTION_VERIFIERS_V1.length === 0) {
+    reasons.push('authenticated_auto_compaction_verifier_not_configured');
+  }
+  const trustedSafetyObservation = TRUSTED_AUTO_COMPACTION_SAFETY_OBSERVATIONS_V1.some(
+    (trusted) =>
+      trusted.artifactDigest === input.artifactDigest &&
+      trusted.profileDigest === input.profileDigest &&
+      trusted.routeDigest === input.routeDigest &&
+      trusted.cohortDigest === input.cohortDigest &&
+      trusted.g0Count === input.safetyObservation.g0Count &&
+      trusted.g1Count === input.safetyObservation.g1Count &&
+      trusted.ledgerDigest === input.safetyObservation.ledgerDigest,
+  );
+  if (!trustedSafetyObservation) {
+    reasons.push('authenticated_auto_compaction_safety_observation_not_configured');
+  }
   const decisions = new Map<string, (typeof input.dependencies)[number]>();
   for (const dependency of input.dependencies) {
     if (decisions.has(dependency.dependency)) {
       throw new Error(`Auto-compaction dependency ${dependency.dependency} is duplicated.`);
     }
     decisions.set(dependency.dependency, dependency);
+    if (
+      TRUSTED_AUTO_COMPACTION_VERIFIERS_V1.length > 0 &&
+      !TRUSTED_AUTO_COMPACTION_VERIFIERS_V1.some(
+        (trusted) =>
+          trusted.dependency === dependency.dependency &&
+          trusted.verifierIdentity === dependency.verifierIdentity &&
+          trusted.decisionDigest === dependency.decisionDigest &&
+          trusted.artifactDigest === dependency.artifactDigest &&
+          trusted.profileDigest === dependency.profileDigest &&
+          trusted.routeDigest === dependency.routeDigest &&
+          trusted.cohortDigest === dependency.cohortDigest &&
+          trusted.verifiedAt === dependency.verifiedAt,
+      )
+    ) {
+      reasons.push(`dependency_verifier_untrusted:${dependency.dependency}`);
+    }
     if (
       dependency.artifactDigest !== input.artifactDigest ||
       dependency.profileDigest !== input.profileDigest ||
@@ -106,17 +166,18 @@ export function evaluateAutoCompactionAdmissionV1(
   if (input.safetyObservation.g0Count !== 0) reasons.push('g0_observed');
   if (input.safetyObservation.g1Count !== 0) reasons.push('g1_observed');
   reasons.sort();
-  const status: AutoCompactionAdmissionDecisionV1['status'] = 'blocked';
+  const status: AutoCompactionAdmissionDecisionV1['status'] =
+    reasons.length === 0 ? 'passed' : 'blocked';
   const withoutDigest: Omit<AutoCompactionAdmissionDecisionV1, 'decisionDigest'> = {
     schema: 'AutoCompactionAdmissionDecisionV1',
     status,
-    liveAdmissionEligible: false,
+    liveAdmissionEligible: status === 'passed',
     summaryDispatches: 0,
     checkpointWrites: 0,
     profileDiff: {
       capability: 'auto_compaction',
-      maxRollout: 'off',
-      cohortMaximum: 0,
+      maxRollout: status === 'passed' ? 'canary' : 'off',
+      cohortMaximum: status === 'passed' ? 1 : 0,
     },
     reasonCodes: reasons,
     artifactDigest: input.artifactDigest as `sha256:${string}`,

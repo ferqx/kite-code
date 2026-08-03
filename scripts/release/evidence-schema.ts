@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
 
 export const RELEASE_EVIDENCE_SCHEMA = 'ReleaseEvidenceV1' as const;
 
@@ -26,7 +27,7 @@ export const RELEASE_EVIDENCE_KINDS = [
   'incident_rehearsal',
   'limited_slo',
   'canary_slo',
-  'third_party_security_review',
+  'maintainer_security_review',
 ] as const;
 export type ReleaseEvidenceKindV1 = (typeof RELEASE_EVIDENCE_KINDS)[number];
 
@@ -47,6 +48,169 @@ export const releaseArtifactIdentityV1Schema = z
     gatePolicyDigest: digestSchema,
   })
   .strict();
+
+const maintainerReviewScopeV1Schema = z.tuple([
+  z.literal('architecture'),
+  z.literal('security_boundaries'),
+  z.literal('artifact_identity'),
+  z.literal('rollback'),
+  z.literal('adversarial_bypass'),
+]);
+
+const maintainerReviewExecutionV1Schema = z
+  .object({
+    canonicalRepository: nonEmptySchema,
+    repositoryId: nonEmptySchema,
+    workflowPath: nonEmptySchema,
+    workflowRef: nonEmptySchema,
+    workflowSha: commitSchema,
+    oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
+    ref: nonEmptySchema,
+    runId: z.string().regex(/^[1-9][0-9]*$/),
+    runAttempt: z.number().int().positive(),
+    actorIdentity: nonEmptySchema,
+  })
+  .strict();
+
+const maintainerSecurityReviewMaterialV1Schema = z
+  .object({
+    schema: z.literal('MaintainerSecurityReviewRecordV1'),
+    reviewMode: z.literal('single_maintainer'),
+    reviewerIdentity: nonEmptySchema,
+    reviewedAt: isoTimestampSchema,
+    outcome: z.enum(['passed', 'failed']),
+    candidate: releaseArtifactIdentityV1Schema,
+    execution: maintainerReviewExecutionV1Schema,
+    ref: nonEmptySchema,
+    trustedVerifierCommit: commitSchema,
+    routeIdentity: nonEmptySchema,
+    platformIdentity: nonEmptySchema,
+    rollbackReportDigest: digestSchema,
+    compatibilityReportDigest: digestSchema,
+    scope: maintainerReviewScopeV1Schema,
+    unresolvedP0: z.literal(0),
+    unresolvedP1: z.literal(0),
+    p2Dispositions: z
+      .array(
+        z
+          .object({
+            riskId: nonEmptySchema,
+            disposition: z.enum(['mitigated', 'accepted']),
+            impact: nonEmptySchema.max(512),
+            rollbackCondition: nonEmptySchema.max(512),
+            recordDigest: digestSchema,
+          })
+          .strict(),
+      )
+      .max(256),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    if (
+      new Set(value.p2Dispositions.map(({ riskId }) => riskId)).size !== value.p2Dispositions.length
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['p2Dispositions'],
+        message: 'P2 risk dispositions must have unique risk IDs.',
+      });
+    }
+  });
+
+export const maintainerSecurityReviewRecordV1Schema = maintainerSecurityReviewMaterialV1Schema
+  .extend({ recordDigest: digestSchema })
+  .strict()
+  .superRefine((value, context) => {
+    const { recordDigest, ...material } = value;
+    const expected = computeMaintainerSecurityReviewDigestV1(material);
+    if (recordDigest !== expected) {
+      context.addIssue({
+        code: 'custom',
+        path: ['recordDigest'],
+        message: `Maintainer security review digest mismatch: expected ${expected}.`,
+      });
+    }
+  });
+
+export type MaintainerSecurityReviewRecordV1 = z.infer<
+  typeof maintainerSecurityReviewRecordV1Schema
+>;
+export type MaintainerSecurityReviewMaterialV1 = z.infer<
+  typeof maintainerSecurityReviewMaterialV1Schema
+>;
+
+export function computeMaintainerSecurityReviewDigestV1(
+  material: MaintainerSecurityReviewMaterialV1,
+): `sha256:${string}` {
+  return sha256DomainSeparated(
+    'maintainer-security-review-record-v1',
+    canonicalJsonBytes(maintainerSecurityReviewMaterialV1Schema.parse(material)),
+  );
+}
+
+export function buildMaintainerSecurityReviewRecordV1(
+  material: MaintainerSecurityReviewMaterialV1,
+): MaintainerSecurityReviewRecordV1 {
+  return maintainerSecurityReviewRecordV1Schema.parse({
+    ...material,
+    recordDigest: computeMaintainerSecurityReviewDigestV1(material),
+  });
+}
+
+const productionReleaseReplayEvidenceMaterialV1Schema = z
+  .object({
+    schema: z.literal('ProductionReleaseReplayEvidenceRecordV1'),
+    kind: z.enum(['schema_rollback', 'ga_compatibility']),
+    productionEvidence: z.literal(true),
+    status: z.literal('passed'),
+    candidate: releaseArtifactIdentityV1Schema,
+    completedAt: isoTimestampSchema,
+    trustedVerifierCommit: commitSchema,
+    reportDigest: digestSchema,
+    verificationReceiptDigest: digestSchema,
+  })
+  .strict();
+
+export const productionReleaseReplayEvidenceRecordV1Schema =
+  productionReleaseReplayEvidenceMaterialV1Schema
+    .extend({ recordDigest: digestSchema })
+    .strict()
+    .superRefine((value, context) => {
+      const { recordDigest, ...material } = value;
+      const expected = computeProductionReleaseReplayEvidenceDigestV1(material);
+      if (recordDigest !== expected) {
+        context.addIssue({
+          code: 'custom',
+          path: ['recordDigest'],
+          message: `Production replay evidence digest mismatch: expected ${expected}.`,
+        });
+      }
+    });
+
+export type ProductionReleaseReplayEvidenceRecordV1 = z.infer<
+  typeof productionReleaseReplayEvidenceRecordV1Schema
+>;
+export type ProductionReleaseReplayEvidenceMaterialV1 = z.infer<
+  typeof productionReleaseReplayEvidenceMaterialV1Schema
+>;
+
+export function computeProductionReleaseReplayEvidenceDigestV1(
+  material: ProductionReleaseReplayEvidenceMaterialV1,
+): `sha256:${string}` {
+  return sha256DomainSeparated(
+    'production-release-replay-evidence-record-v1',
+    canonicalJsonBytes(productionReleaseReplayEvidenceMaterialV1Schema.parse(material)),
+  );
+}
+
+export function buildProductionReleaseReplayEvidenceRecordV1(
+  material: ProductionReleaseReplayEvidenceMaterialV1,
+): ProductionReleaseReplayEvidenceRecordV1 {
+  return productionReleaseReplayEvidenceRecordV1Schema.parse({
+    ...material,
+    recordDigest: computeProductionReleaseReplayEvidenceDigestV1(material),
+  });
+}
 
 const githubExecutionIdentityV1Schema = z
   .object({
@@ -89,10 +253,32 @@ const externalExecutionIdentityV1Schema = z
   })
   .strict();
 
+const githubMaintainerReviewExecutionIdentityV1Schema = z
+  .object({
+    source: z.literal('github_maintainer_review'),
+    canonicalRepository: nonEmptySchema,
+    repositoryId: nonEmptySchema,
+    workflowPath: nonEmptySchema,
+    workflowRef: nonEmptySchema,
+    workflowSha: commitSchema,
+    oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
+    ref: nonEmptySchema,
+    runId: z.string().regex(/^[1-9][0-9]*$/),
+    runAttempt: z.number().int().positive(),
+    actorIdentity: nonEmptySchema,
+    reviewerIdentity: nonEmptySchema,
+    recordIdentity: nonEmptySchema,
+    commit: commitSchema,
+    startedAt: isoTimestampSchema,
+    endedAt: isoTimestampSchema,
+  })
+  .strict();
+
 export const releaseEvidenceExecutionIdentityV1Schema = z.discriminatedUnion('source', [
   githubExecutionIdentityV1Schema,
   localSyntheticExecutionIdentityV1Schema,
   externalExecutionIdentityV1Schema,
+  githubMaintainerReviewExecutionIdentityV1Schema,
 ]);
 
 export const releaseEvidenceResultV1Schema = z
@@ -115,6 +301,7 @@ export const releaseEvidenceResultV1Schema = z
       .strict(),
     expiresAt: isoTimestampSchema.optional(),
     summary: nonEmptySchema.max(512),
+    maintainerReview: maintainerSecurityReviewRecordV1Schema.optional(),
   })
   .strict()
   .superRefine((value, context) => {
@@ -132,6 +319,77 @@ export const releaseEvidenceResultV1Schema = z
         code: 'custom',
         path: ['executionIdentity', 'endedAt'],
         message: 'Evidence end time cannot precede its start time.',
+      });
+    }
+    if (value.kind === 'maintainer_security_review') {
+      const review = value.maintainerReview;
+      if (!review) {
+        context.addIssue({
+          code: 'custom',
+          path: ['maintainerReview'],
+          message: 'Maintainer security review evidence requires its canonical review record.',
+        });
+      } else {
+        if (!sameArtifactIdentity(review.candidate, value.artifactIdentity)) {
+          context.addIssue({
+            code: 'custom',
+            path: ['maintainerReview', 'candidate'],
+            message: 'Maintainer review must bind the exact evidence artifact identity.',
+          });
+        }
+        if (
+          review.routeIdentity !== value.routeIdentity ||
+          review.platformIdentity !== value.platformIdentity
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['maintainerReview'],
+            message: 'Maintainer review route and platform must match the evidence result.',
+          });
+        }
+        if (
+          value.executionIdentity.source === 'github_maintainer_review' &&
+          (review.reviewerIdentity !== value.executionIdentity.reviewerIdentity ||
+            review.reviewedAt !== value.executionIdentity.endedAt ||
+            review.ref !== value.executionIdentity.ref ||
+            review.execution.canonicalRepository !== value.executionIdentity.canonicalRepository ||
+            review.execution.repositoryId !== value.executionIdentity.repositoryId ||
+            review.execution.workflowPath !== value.executionIdentity.workflowPath ||
+            review.execution.workflowRef !== value.executionIdentity.workflowRef ||
+            review.execution.workflowSha !== value.executionIdentity.workflowSha ||
+            review.execution.oidcIssuer !== value.executionIdentity.oidcIssuer ||
+            review.execution.ref !== value.executionIdentity.ref ||
+            review.execution.runId !== value.executionIdentity.runId ||
+            review.execution.runAttempt !== value.executionIdentity.runAttempt ||
+            review.execution.actorIdentity !== value.executionIdentity.actorIdentity)
+        ) {
+          context.addIssue({
+            code: 'custom',
+            path: ['maintainerReview'],
+            message: 'Maintainer review identity and timestamp must match its execution identity.',
+          });
+        }
+        if (value.record.digest !== review.recordDigest) {
+          context.addIssue({
+            code: 'custom',
+            path: ['record', 'digest'],
+            message: 'Maintainer review evidence URI must bind the canonical review digest.',
+          });
+        }
+        const expectedStatus = review.outcome === 'passed' ? 'passed' : 'failed';
+        if (value.status !== expectedStatus) {
+          context.addIssue({
+            code: 'custom',
+            path: ['status'],
+            message: 'Maintainer review result status must match its canonical record outcome.',
+          });
+        }
+      }
+    } else if (value.maintainerReview !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['maintainerReview'],
+        message: 'Only maintainer security review evidence may carry a review record.',
       });
     }
   });

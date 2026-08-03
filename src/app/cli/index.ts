@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { composeObservabilityV1 } from '@/app/observability/composition';
 import { resolveTelemetryConsentV1 } from '@/app/observability/consent';
 import {
   formatObservabilityStatusV1,
@@ -165,6 +166,15 @@ export async function main(): Promise<void> {
     config,
     sandboxEnabled: sandboxRuntime.enabled,
   });
+  const observability = composeObservabilityV1({
+    artifactTelemetryAllowed: false,
+    featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
+    consent: resolveTelemetryConsentV1({
+      releaseChannel: 'development',
+      user: config.telemetry?.user,
+      project: config.telemetry?.project,
+    }),
+  });
 
   const task = args.task ?? '';
   const skillOptions = skillDirs(args.workspace);
@@ -209,10 +219,15 @@ export async function main(): Promise<void> {
     provider,
   );
 
-  for await (const event of generator) {
-    console.log(
-      JSON.stringify(projectCliRuntimeEventV1(event, getFeatureFlags(config).terminalOutcomeV1)),
-    );
+  try {
+    for await (const event of generator) {
+      observability.bridge.observeRuntimeEvent(event, new Date().toISOString());
+      console.log(
+        JSON.stringify(projectCliRuntimeEventV1(event, getFeatureFlags(config).terminalOutcomeV1)),
+      );
+    }
+  } finally {
+    await observability.bridge.shutdown(250);
   }
 }
 

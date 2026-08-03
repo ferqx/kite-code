@@ -68,3 +68,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0064](0064-conservative-skill-effects-and-capability-profile-admission.md) | accepted | Skill unknown effect 保守归 effectful；Capability Profile 同时验证 flags、依赖、identity 与 G3–G5 |
 | [0065](0065-cross-platform-distribution-and-capability-admission.md) | accepted | Windows/Linux/macOS 发行与 effectful execution capability 分开准入 |
 | [0066](0066-deepseek-owner-accepted-provider-data-policy.md) | accepted | 单维护者接受官方 DeepSeek 精确 Route 的已披露数据政策风险 |
+| [0067](0067-single-maintainer-candidate-security-review.md) | accepted | 单维护者以 candidate-bound 自审批准发布；第三方评审为可选增强 |

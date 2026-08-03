@@ -48,6 +48,15 @@ evaluator route 仍未配置，因此 4.4 继续 `in_progress`。
 workflow 输入现从 `GITHUB_SHA` 的 exact tracked blob 生成只读 snapshot，并把 tracked path、Git blob ID、
 SHA-256 写入 source identity；retained upload、producer 与 verifier 不再读取可变 worktree 路径。
 
+2026-08-03 的 implementation-first 批次又把 continuation non-inferiority 与 route qualification 从测试
+fixture 提升到 production-owned contract，增加 domain-separated digest、strict registry 与 route drift
+失效。Semantic evidence 已支持 production authentication shape、payload subject、source-owned Sigstore
+authority/verifier/workflow 和 evaluator-route lookup；internal/external rollout 也补齐 OIDC/Sigstore
+authority、去 authentication 后的 evidence subject binding、独立 consent authority、认证时间和条件式
+`MS:4-INTERNAL-AUTO-FRESH` 条件式 contract。所有 registry 当前为空，仓库内也没有 Sigstore 密码学
+verifier；以上仅补齐本地 exact-record lookup 与 Gate 代码，4.4 的
+真实 evaluator receipt/attestation 与 4.5/4.7/4.9 依赖仍未满足，不新增 Task binding 或 milestone。
+
 ## 主要改动范围
 
 - 新增 `tests/evals/compaction/`

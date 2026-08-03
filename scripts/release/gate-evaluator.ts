@@ -9,17 +9,14 @@ import {
   type ReleaseEvidenceResultV1,
   type ReleaseEvidenceV1,
   type ReleaseGateV1,
+  releaseArtifactIdentityV1Schema,
 } from './evidence-schema';
 
 const GATE_POLICY_SCHEMA = 'ReleaseGatePolicyV1' as const;
 const GATE_POLICY_DIGEST_DOMAIN = 'release-gate-policy-v1';
 const GATE_DECISION_DIGEST_DOMAIN = 'release-gate-decision-v1';
 const SINGLE_MAINTAINER_IDENTITY = 'github:@ferqx';
-const THIRD_PARTY_SECURITY_APPROVAL = 'independent_third_party_security_review';
-// No independent reviewer signing identity has been approved yet. External
-// review records remain blocked until a real reviewer and verifier trust root
-// are registered through the release governance process.
-const TRUSTED_THIRD_PARTY_REVIEWER_IDENTITIES = new Set<string>();
+const MAINTAINER_SECURITY_APPROVAL = 'candidate_bound_maintainer_security_review';
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const nonEmptySchema = z.string().trim().min(1);
 
@@ -44,6 +41,7 @@ export const releaseGatePolicyV1Schema = z
     canonicalRepository: nonEmptySchema,
     repositoryId: nonEmptySchema,
     releaseWorkflowPath: nonEmptySchema,
+    releaseWorkflowSha: z.string().regex(/^[a-f0-9]{40}$/),
     oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
     allowedRefPrefixes: z.array(nonEmptySchema).min(1),
     capabilities: z.array(nonEmptySchema),
@@ -88,14 +86,14 @@ export const releaseGatePolicyV1Schema = z
     }
     if (value.mode === 'github_release') {
       const securityRequirements = value.requirements.filter(
-        (requirement) => requirement.kind === 'third_party_security_review',
+        (requirement) => requirement.kind === 'maintainer_security_review',
       );
       if (securityRequirements.length !== 1) {
         context.addIssue({
           code: 'custom',
           path: ['requirements'],
           message:
-            'GitHub release policies require exactly one third-party security review requirement.',
+            'GitHub release policies require exactly one maintainer security review requirement.',
         });
       }
       const securityRequirement = securityRequirements[0];
@@ -103,14 +101,24 @@ export const releaseGatePolicyV1Schema = z
         context.addIssue({
           code: 'custom',
           path: ['requirements'],
-          message: 'The third-party security review must be a global requirement.',
+          message: 'The maintainer security review must be a global requirement.',
         });
       }
       if (securityRequirement?.maxAgeSeconds === undefined) {
         context.addIssue({
           code: 'custom',
           path: ['requirements'],
-          message: 'The third-party security review must declare a maximum evidence age.',
+          message: 'The maintainer security review must declare a maximum evidence age.',
+        });
+      }
+      if (
+        securityRequirement?.requiredRouteIdentity === undefined ||
+        securityRequirement.requiredPlatformIdentity === undefined
+      ) {
+        context.addIssue({
+          code: 'custom',
+          path: ['requirements'],
+          message: 'The maintainer security review must bind exact route and platform identities.',
         });
       }
     }
@@ -148,6 +156,61 @@ export interface ReleaseGateDecisionV1 {
   requirements: ReleaseGateDecisionItemV1[];
   requiredManualApprovals: string[];
   decisionDigest: string;
+}
+
+export const releaseGateDecisionV1Schema = z
+  .object({
+    schema: z.literal('ReleaseGateDecisionV1'),
+    evaluatedAt: z.iso.datetime({ offset: true }),
+    policyDigest: digestSchema,
+    evidenceBundleDigest: digestSchema,
+    artifactIdentity: releaseArtifactIdentityV1Schema,
+    overall: z.enum(['approved_foundation', 'approved_candidate', 'blocked']),
+    gates: z
+      .array(
+        z
+          .object({
+            gate: z.enum(RELEASE_GATES),
+            status: z.enum(['passed', 'blocked', 'not_applicable']),
+            reasons: z.array(nonEmptySchema),
+          })
+          .strict(),
+      )
+      .length(RELEASE_GATES.length),
+    capabilities: z.array(
+      z
+        .object({
+          capability: nonEmptySchema,
+          status: z.enum(['enabled', 'disabled']),
+          reasons: z.array(nonEmptySchema),
+        })
+        .strict(),
+    ),
+    requirements: z.array(
+      z
+        .object({
+          requirementId: nonEmptySchema,
+          evidenceId: nonEmptySchema,
+          gate: z.enum(RELEASE_GATES),
+          capability: nonEmptySchema.optional(),
+          status: z.enum(['passed', 'blocked', 'waived']),
+          reasons: z.array(nonEmptySchema),
+        })
+        .strict(),
+    ),
+    requiredManualApprovals: z.array(nonEmptySchema),
+    decisionDigest: digestSchema,
+  })
+  .strict();
+
+export function verifyReleaseGateDecisionV1(value: unknown): ReleaseGateDecisionV1 {
+  const parsed = releaseGateDecisionV1Schema.parse(value);
+  const { decisionDigest, ...material } = parsed;
+  const expected = sha256DomainSeparated(GATE_DECISION_DIGEST_DOMAIN, canonicalJsonBytes(material));
+  if (decisionDigest !== expected) {
+    throw new Error(`Release Gate decision digest mismatch: expected ${expected}.`);
+  }
+  return parsed as ReleaseGateDecisionV1;
 }
 
 export function computeReleaseGatePolicyDigestV1(
@@ -233,7 +296,7 @@ export function evaluateReleaseGateV1(input: {
 
     const exception = matchingException(evidence, result, evaluatedAtMs);
     const waivable =
-      result.kind !== 'third_party_security_review' && result.gate !== 'G0' && result.gate !== 'G1';
+      result.kind !== 'maintainer_security_review' && result.gate !== 'G0' && result.gate !== 'G1';
     const status =
       reasons.length === 0
         ? 'passed'
@@ -250,9 +313,29 @@ export function evaluateReleaseGateV1(input: {
     };
   });
 
+  const maintainerReview = evidence.results.find(
+    (result) => result.kind === 'maintainer_security_review',
+  )?.maintainerReview;
+  const p2Dispositions = new Map(
+    maintainerReview?.p2Dispositions.map((disposition) => [disposition.riskId, disposition]) ?? [],
+  );
   for (const risk of evidence.risks) {
-    if (risk.status === 'open')
+    if (risk.status === 'open') {
       globalReasons.push(`open_${risk.severity.toLowerCase()}_risk:${risk.riskId}`);
+    } else if (risk.status === 'accepted' && (risk.severity === 'P0' || risk.severity === 'P1')) {
+      globalReasons.push(`unresolved_${risk.severity.toLowerCase()}_risk:${risk.riskId}`);
+    } else if (risk.severity === 'P2' && risk.status === 'accepted') {
+      const disposition = p2Dispositions.get(risk.riskId);
+      if (disposition?.disposition !== 'accepted') {
+        globalReasons.push(`p2_disposition_missing:${risk.riskId}`);
+      }
+    }
+  }
+  for (const disposition of p2Dispositions.values()) {
+    const risk = evidence.risks.find((candidate) => candidate.riskId === disposition.riskId);
+    if (risk?.severity !== 'P2' || risk.status !== disposition.disposition) {
+      globalReasons.push(`p2_disposition_mismatch:${disposition.riskId}`);
+    }
   }
   const requiredManualApprovals = collectRequiredManualApprovals(
     policy,
@@ -371,15 +454,28 @@ function validateRequirementIdentity(input: {
     }
     return;
   }
-  if (result.kind === 'third_party_security_review') {
-    if (result.executionIdentity.source !== 'external') {
-      reasons.push('security_review_requires_external_identity');
-    } else if (result.executionIdentity.reviewerIdentity === SINGLE_MAINTAINER_IDENTITY) {
-      reasons.push('security_review_requires_independent_reviewer');
-    } else if (
-      !TRUSTED_THIRD_PARTY_REVIEWER_IDENTITIES.has(result.executionIdentity.reviewerIdentity)
-    ) {
-      reasons.push('security_review_trust_root_unconfigured');
+  if (result.kind === 'maintainer_security_review') {
+    if (result.executionIdentity.source !== 'github_maintainer_review') {
+      reasons.push('security_review_requires_maintainer_identity');
+    } else {
+      const execution = result.executionIdentity;
+      if (
+        execution.reviewerIdentity !== SINGLE_MAINTAINER_IDENTITY ||
+        execution.actorIdentity !== SINGLE_MAINTAINER_IDENTITY
+      ) {
+        reasons.push('security_review_maintainer_identity_mismatch');
+      }
+      if (!matchesGithubReleaseExecutionIdentity(execution, policy)) {
+        reasons.push('security_review_github_identity_mismatch');
+      }
+      const latestAutomaticEvidenceEnd = Math.max(
+        ...evidence.results
+          .filter((candidate) => candidate.kind !== 'maintainer_security_review')
+          .map((candidate) => Date.parse(candidate.executionIdentity.endedAt)),
+      );
+      if (Number.isFinite(latestAutomaticEvidenceEnd) && endedAtMs < latestAutomaticEvidenceEnd) {
+        reasons.push('security_review_precedes_automatic_evidence');
+      }
     }
     return;
   }
@@ -388,16 +484,28 @@ function validateRequirementIdentity(input: {
     return;
   }
   const execution = result.executionIdentity;
-  if (
-    execution.canonicalRepository !== policy.canonicalRepository ||
-    execution.repositoryId !== policy.repositoryId ||
-    execution.workflowPath !== policy.releaseWorkflowPath ||
-    execution.oidcIssuer !== policy.oidcIssuer ||
-    execution.workflowSha !== execution.commit ||
-    !policy.allowedRefPrefixes.some((prefix) => execution.ref.startsWith(prefix))
-  ) {
+  if (!matchesGithubReleaseExecutionIdentity(execution, policy)) {
     reasons.push('github_release_identity_mismatch');
   }
+}
+
+function matchesGithubReleaseExecutionIdentity(
+  execution: Extract<
+    ReleaseEvidenceResultV1['executionIdentity'],
+    { source: 'github_actions' | 'github_maintainer_review' }
+  >,
+  policy: ReleaseGatePolicyV1,
+): boolean {
+  return (
+    execution.canonicalRepository === policy.canonicalRepository &&
+    execution.repositoryId === policy.repositoryId &&
+    execution.workflowPath === policy.releaseWorkflowPath &&
+    execution.workflowRef ===
+      `${execution.canonicalRepository}/${execution.workflowPath}@${execution.ref}` &&
+    execution.oidcIssuer === policy.oidcIssuer &&
+    execution.workflowSha === policy.releaseWorkflowSha &&
+    policy.allowedRefPrefixes.some((prefix) => execution.ref.startsWith(prefix))
+  );
 }
 
 function matchingException(
@@ -422,14 +530,14 @@ function collectRequiredManualApprovals(
 ): string[] {
   if (policy.mode === 'synthetic_foundation') return [];
   const securityRequirement = policy.requirements.find(
-    (requirement) => requirement.kind === 'third_party_security_review',
+    (requirement) => requirement.kind === 'maintainer_security_review',
   );
   const securityDecision = requirements.find(
     (requirement) => requirement.requirementId === securityRequirement?.requirementId,
   );
   return securityDecision?.status === 'passed' && globalReasons.length === 0
     ? []
-    : [THIRD_PARTY_SECURITY_APPROVAL];
+    : [MAINTAINER_SECURITY_APPROVAL];
 }
 
 function sameArtifactIdentity(

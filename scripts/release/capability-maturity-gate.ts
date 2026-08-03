@@ -15,6 +15,7 @@ const identitySchema = z
   .refine((value) => value === value.trim(), 'identity must not contain surrounding whitespace');
 const recordIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,127}$/);
 const timestampSchema = z.iso.datetime({ offset: true });
+const SINGLE_MAINTAINER_IDENTITY = 'github:@ferqx';
 
 export const CAPABILITY_MATURITY_STAGES_V1 = Object.freeze(['canary', 'beta', 'stable'] as const);
 export type CapabilityMaturityStageV1 = (typeof CAPABILITY_MATURITY_STAGES_V1)[number];
@@ -66,7 +67,7 @@ const preregistrationV1Schema = z
     maximumErrorBudgetBps: z.number().int().min(0).max(10_000),
     minimumUserUnderstandingSamples: z.number().int().positive(),
     minimumUserUnderstandingBps: z.number().int().min(1).max(10_000),
-    requiredHumanApprovalCount: z.number().int().positive(),
+    requiredHumanApprovalCount: z.literal(1),
     freshnessSeconds: z.number().int().positive(),
   })
   .strict();
@@ -74,10 +75,10 @@ const preregistrationV1Schema = z
 const humanApprovalV1Schema = z
   .object({
     approvalId: recordIdSchema,
-    approverIdentity: z.string().regex(/^github:@[A-Za-z0-9](?:[A-Za-z0-9-]{0,37})$/),
+    approverIdentity: z.literal(SINGLE_MAINTAINER_IDENTITY),
     approvedAt: timestampSchema,
     outcome: z.literal('approved'),
-    independentFromEvidenceProducer: z.literal(true),
+    reviewMode: z.literal('single_maintainer'),
     recordDigest: digestSchema,
   })
   .strict();
@@ -98,7 +99,7 @@ const maturityObservationV1Schema = z
         G5: z.enum(['passed', 'failed', 'blocked', 'not_run']),
       })
       .strict(),
-    humanApprovals: z.array(humanApprovalV1Schema),
+    humanApprovals: z.array(humanApprovalV1Schema).length(1),
     userUnderstanding: z
       .object({
         responseCount: z.number().int().nonnegative(),
@@ -151,6 +152,7 @@ const maturityAuthenticationV1Schema = z.discriminatedUnion('kind', [
       verifierIdentity: identitySchema,
       subjectDigest: digestSchema,
       attestationDigest: digestSchema,
+      verificationReceiptDigest: digestSchema,
       verifiedAt: timestampSchema,
     })
     .strict(),
@@ -169,20 +171,30 @@ export type CapabilityMaturityEvidenceV1 = z.infer<typeof capabilityMaturityEvid
 
 // No production maturity producer/attestation authority has been approved. This
 // registry is deliberately source-owned and cannot be injected by a caller.
-const TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1: readonly string[] = Object.freeze([]);
+interface TrustedCapabilityMaturityAuthorityV1 {
+  authorityIdentity: string;
+  verifierIdentity: string;
+  capabilities: readonly ReleaseCapability[];
+  subjectDigest: `sha256:${string}`;
+  attestationDigest: `sha256:${string}`;
+  verificationReceiptDigest: `sha256:${string}`;
+  verifiedAt: string;
+}
+const TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1: readonly TrustedCapabilityMaturityAuthorityV1[] =
+  Object.freeze([]);
 /**
- * Deliberately empty until independent prior-decision and human-approval
+ * Deliberately empty until prior-decision and maintainer-approval
  * artifact verifiers exist. Populating only the authority allowlist above can
  * never make caller-authored chain or approval summaries eligible.
  */
 const VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1: readonly string[] = Object.freeze([]);
-const VERIFIED_CAPABILITY_MATURITY_HUMAN_APPROVALS_V1: readonly string[] = Object.freeze([]);
-const PRODUCTION_CAPABILITY_MATURITY_AUTHENTICATION_VERIFIER_IMPLEMENTED_V1 = false as const;
+const VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1: readonly string[] = Object.freeze([]);
+const PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_V1 = true as const;
 
 export interface CapabilityMaturityGateDecisionV1 {
   schema: 'CapabilityMaturityGateDecisionV1';
-  status: 'blocked';
-  promotionEligible: false;
+  status: 'passed' | 'blocked';
+  promotionEligible: boolean;
   targetStage: CapabilityMaturityStageV1;
   identity: CapabilityMaturityIdentityV1;
   decisionId: string | null;
@@ -217,7 +229,10 @@ export function verifyCapabilityMaturityEvidenceV1(
 
 /**
  * Gate-only projection. It never writes capability decisions or changes a
- * profile. Until a governed authority is registered it always returns blocked.
+ * profile. The exact-record lookup path is implemented, but it is not a
+ * cryptographic attestation verifier. The source-owned authority,
+ * prior-decision and maintainer-approval registries remain empty until real signed
+ * evidence is verified and reviewed.
  */
 export function evaluateCapabilityMaturityGateV1(input: {
   targetStage: CapabilityMaturityStageV1;
@@ -233,15 +248,15 @@ export function evaluateCapabilityMaturityGateV1(input: {
     canonicalJson({
       authorities: TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1,
       previousDecisions: VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1,
-      humanApprovals: VERIFIED_CAPABILITY_MATURITY_HUMAN_APPROVALS_V1,
-      authenticationVerifierImplemented:
-        PRODUCTION_CAPABILITY_MATURITY_AUTHENTICATION_VERIFIER_IMPLEMENTED_V1,
+      maintainerApprovals: VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1,
+      exactRecordLookupImplemented:
+        PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_V1,
     }),
   );
-  const reasons = new Set<string>([
-    'authenticated_maturity_authority_not_configured',
-    'production_maturity_authentication_verifier_not_implemented',
-  ]);
+  const reasons = new Set<string>();
+  if (TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1.length === 0) {
+    reasons.add('authenticated_maturity_authority_not_configured');
+  }
   let evidence: CapabilityMaturityEvidenceV1 | undefined;
 
   if (input.evidence === undefined) {
@@ -251,10 +266,11 @@ export function evaluateCapabilityMaturityGateV1(input: {
     evaluateEvidence({ evidence, expectedIdentity, targetStage, evaluatedAtMs, reasons });
   }
 
+  const promotionEligible = reasons.size === 0;
   const withoutDigest = {
     schema: 'CapabilityMaturityGateDecisionV1' as const,
-    status: 'blocked' as const,
-    promotionEligible: false as const,
+    status: promotionEligible ? ('passed' as const) : ('blocked' as const),
+    promotionEligible,
     targetStage,
     identity: expectedIdentity,
     decisionId: evidence?.material.decisionId ?? null,
@@ -287,7 +303,16 @@ function evaluateEvidence(input: {
   if (authentication.kind === 'unconfigured') {
     input.reasons.add('evidence_authentication_unconfigured');
   } else if (
-    !TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1.includes(authentication.authorityIdentity)
+    !TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1.some(
+      (authority) =>
+        authority.authorityIdentity === authentication.authorityIdentity &&
+        authority.verifierIdentity === authentication.verifierIdentity &&
+        authority.capabilities.includes(material.identity.capability) &&
+        authority.subjectDigest === authentication.subjectDigest &&
+        authority.attestationDigest === authentication.attestationDigest &&
+        authority.verificationReceiptDigest === authentication.verificationReceiptDigest &&
+        authority.verifiedAt === authentication.verifiedAt,
+    )
   ) {
     input.reasons.add('evidence_authority_untrusted');
   }
@@ -371,10 +396,11 @@ function evaluateEvidence(input: {
     input.reasons.add('human_approval_count_below_preregistered_minimum');
   if (
     observation.humanApprovals.some(
-      ({ recordDigest }) => !VERIFIED_CAPABILITY_MATURITY_HUMAN_APPROVALS_V1.includes(recordDigest),
+      ({ recordDigest }) =>
+        !VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1.includes(recordDigest),
     )
   ) {
-    input.reasons.add('verified_human_approval_not_configured');
+    input.reasons.add('verified_maintainer_approval_not_configured');
   }
   if (
     observation.humanApprovals.some(
@@ -382,6 +408,13 @@ function evaluateEvidence(input: {
     )
   ) {
     input.reasons.add('human_approval_precedes_observation_completion');
+  }
+  if (
+    observation.humanApprovals.some(
+      ({ approvedAt }) => parseTimestamp(approvedAt, 'Approval time') > input.evaluatedAtMs,
+    )
+  ) {
+    input.reasons.add('human_approval_time_in_future');
   }
 
   const understanding = observation.userUnderstanding;
