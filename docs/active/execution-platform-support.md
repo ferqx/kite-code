@@ -8,6 +8,7 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/cgroup-pids.test.ts tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/process-tree-limit.test.ts
 tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
 tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、
+`bun test tests/postinstall.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
@@ -25,6 +26,13 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标。发行/�
 但其 Shell、writer、Skill child 或 local stdio MCP 仍可因原生隔离证据不足而关闭。常规三平台
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
 Docker、WSL2 和架构模拟只作开发预检。
+
+跨平台安装仍以 Bun 为包管理器，但 `postinstall` 由 package script 显式通过系统 `node` 启动。
+该 bootstrap 必须只使用 Node 18 可初始化的 ESM 路径/加载 API；导入模块不得安装 Hook，只有直接
+执行脚本才可尝试通过已保证存在的 `bun x` 安装 lefthook，不得额外假设系统提供 npm/npx。
+lefthook 安装失败继续是非关键开发工具故障，不能阻断依赖安装。
+Ubuntu 24.04 默认 Node 18 的 Docker x64 预检负责捕获误用 `import.meta.dirname` 等较新全局属性；
+该预检不替代 GitHub-hosted 原生平台 artifact。
 
 | runner 候选 | backend 候选 | 当前结论 | 主要缺口 |
 | --- | --- | --- | --- |
