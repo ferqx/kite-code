@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { resolve } from 'node:path';
 import { settleSameProcessResourceSample } from './harness/fault-soak-resource-settle';
 
-async function runRepeatCountFixture(repeated: boolean): Promise<void> {
+async function runRepeatCountFixture(mode: 'single' | 'repeated' | 'prewarmed'): Promise<void> {
   const fixture = resolve('tests/runtime/harness/fault-soak-repeat-count.fixture.ts');
   const proc = Bun.spawn(
     [
@@ -12,7 +12,8 @@ async function runRepeatCountFixture(repeated: boolean): Promise<void> {
       'tests/runtime/harness/fault-soak-telemetry-preload.ts',
       '--repeat-count',
       '2',
-      ...(repeated ? ['--repeat-file', 'fault-soak-repeat-count.fixture.ts'] : []),
+      ...(mode === 'single' ? [] : ['--repeat-file', 'fault-soak-repeat-count.fixture.ts']),
+      ...(mode === 'prewarmed' ? ['--prewarm-file', 'fault-soak-repeat-count.fixture.ts'] : []),
       '--',
       fixture,
     ],
@@ -21,7 +22,8 @@ async function runRepeatCountFixture(repeated: boolean): Promise<void> {
       env: {
         ...process.env,
         KITE_FAULT_SOAK_REPEAT_COUNT: '9',
-        KITE_FAULT_SOAK_EXPECTED_REPEAT_COUNT: repeated ? '2' : '1',
+        KITE_FAULT_SOAK_EXPECTED_REPEAT_COUNT:
+          mode === 'single' ? '1' : mode === 'prewarmed' ? '3' : '2',
       },
       stdout: 'pipe',
       stderr: 'pipe',
@@ -71,7 +73,8 @@ describe('fault-soak resource sample settling', () => {
   });
 
   test('passes the selected file repeat count explicitly to each child', async () => {
-    await runRepeatCountFixture(true);
-    await runRepeatCountFixture(false);
+    await runRepeatCountFixture('repeated');
+    await runRepeatCountFixture('prewarmed');
+    await runRepeatCountFixture('single');
   });
 });

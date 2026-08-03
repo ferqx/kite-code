@@ -125,6 +125,8 @@ describe('runtime fault soak runner', () => {
     const qualification = buildFaultSoakProbeArgs(
       ['test', 'tests/runtime/stability.test.ts'],
       'qualification',
+      ['tests/runtime/stability.test.ts'],
+      ['tests/runtime/stability.test.ts'],
     );
     const tui = buildFaultSoakProbeArgs(
       ['run', 'scripts/run-tui-system-tests.ts'],
@@ -135,6 +137,7 @@ describe('runtime fault soak runner', () => {
     expect(qualification).not.toContain('--seed');
     expect(qualification).toContain('--repeat-count');
     expect(qualification).toContain('9');
+    expect(qualification).toContain('--prewarm-file');
     expect(qualification[0]).toBe('run');
     expect(tui).toEqual(['run', 'scripts/run-tui-system-tests.ts']);
   });
@@ -234,6 +237,39 @@ describe('runtime fault soak runner', () => {
     });
   });
 
+  test('excludes a declared allocator prewarm while retaining eight measured reruns', () => {
+    const records = Array.from({ length: 10 }, (_, index) =>
+      telemetryRecord(index + 1, 100 + index * 10),
+    );
+
+    const metric = qualificationTelemetryMetric(records, 'rssBytes', {
+      caseId: 'long_runtime_replay',
+      repeatCount: 9,
+      expectedLifecycleIds: new Set(['bun-test-probe']),
+      prewarmLifecycleIds: new Set(['bun-test-probe']),
+      attemptNonce: 'attempt-nonce',
+    });
+    if (!metric.supported || metric.value.kind !== 'same_process_lifecycle') {
+      throw new Error('Expected prewarmed same-process lifecycle telemetry');
+    }
+    expect(metric.value.series[0]?.warmup).toMatchObject({
+      sequence: 0,
+      before: 110,
+      after: 110,
+    });
+    expect(metric.value.series[0]?.lifecycles).toHaveLength(8);
+    expect(metric.value.series[0]?.lifecycles[0]).toMatchObject({
+      sequence: 1,
+      before: 120,
+      after: 120,
+    });
+    expect(metric.value.series[0]?.lifecycles[7]).toMatchObject({
+      sequence: 8,
+      before: 190,
+      after: 190,
+    });
+  });
+
   test('rejects incomplete or cross-process qualification telemetry', () => {
     const incomplete = Array.from({ length: 8 }, (_, index) =>
       telemetryRecord(index + 1, 100 + index),
@@ -287,7 +323,7 @@ describe('runtime fault soak runner', () => {
 
   test('retains both declared long-runtime lifecycle groups for 16 samples per attempt', () => {
     const records = [
-      ...Array.from({ length: 9 }, (_, index) =>
+      ...Array.from({ length: 10 }, (_, index) =>
         telemetryRecord(index + 1, 100 + index, {
           pid: 42,
           lifecycleId: 'fault-soak-long-runtime-lifecycle.test.ts',
@@ -307,6 +343,7 @@ describe('runtime fault soak runner', () => {
         'fault-soak-long-runtime-lifecycle.test.ts',
         'fault-soak-runtime-budget.test.ts',
       ]),
+      prewarmLifecycleIds: new Set(['fault-soak-long-runtime-lifecycle.test.ts']),
       attemptNonce: 'attempt-nonce',
     });
     expect(metric).toMatchObject({ supported: true });

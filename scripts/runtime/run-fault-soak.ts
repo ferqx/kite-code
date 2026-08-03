@@ -50,6 +50,7 @@ interface ProbeDefinition {
   id: RuntimeFaultSoakCaseId;
   args: readonly string[];
   qualificationLifecycleFiles: readonly string[];
+  qualificationPrewarmFiles?: readonly string[];
   terminalEvidence: Readonly<Record<string, RegExp>>;
   invariantEvidence: RegExp;
 }
@@ -68,6 +69,7 @@ const PROBES: readonly ProbeDefinition[] = [
       'tests/runtime/fault-soak-long-runtime-lifecycle.test.ts',
       'tests/runtime/fault-soak-runtime-budget.test.ts',
     ],
+    qualificationPrewarmFiles: ['tests/runtime/fault-soak-long-runtime-lifecycle.test.ts'],
     terminalEvidence: {
       completed: /\(pass\).*replays a long deterministic event stream without violating invariants/,
     },
@@ -267,6 +269,7 @@ export function buildFaultSoakProbeArgs(
   qualificationLifecycleFiles: readonly string[] = args.filter((argument) =>
     argument.endsWith('.test.ts'),
   ),
+  qualificationPrewarmFiles: readonly string[] = [],
 ): string[] {
   return args[0] === 'test'
     ? [
@@ -277,6 +280,9 @@ export function buildFaultSoakProbeArgs(
         '--repeat-count',
         String(profile === 'qualification' ? QUALIFICATION_REPEAT_COUNT : 1),
         ...qualificationLifecycleFiles.flatMap((file) => ['--repeat-file', basename(file)]),
+        ...(profile === 'qualification'
+          ? qualificationPrewarmFiles.flatMap((file) => ['--prewarm-file', basename(file)])
+          : []),
         '--',
         ...args.slice(1),
       ]
@@ -589,15 +595,17 @@ interface QualificationTelemetryOptions {
   caseId: RuntimeFaultSoakCaseId;
   repeatCount: number;
   expectedLifecycleIds: ReadonlySet<string>;
+  prewarmLifecycleIds?: ReadonlySet<string>;
   attemptNonce: string;
 }
 
 /**
  * Converts file reruns into a post-warmup same-process sample. Each group of
  * repeatCount records is one test file executed repeatedly in one PID. The
- * first run warms module/JIT/fixture state; only the remaining eight runs
- * contribute lifecycle points. Every file group is retained so a stable file
- * cannot mask a leaking sibling.
+ * first accepted run warms module/JIT/fixture state; only the remaining eight
+ * runs contribute lifecycle points. A declared prewarm lifecycle executes one
+ * additional allocator/JIT preconditioning run before that retained warm-up.
+ * Every file group is retained so a stable file cannot mask a leaking sibling.
  */
 export function qualificationTelemetryMetric(
   records: readonly TelemetryRecord[],
@@ -646,17 +654,20 @@ export function qualificationTelemetryMetric(
   >['series'][number][] = [];
   for (const group of groups.values()) {
     group.sort((left, right) => left.sequence - right.sequence);
-    if (group.length % options.repeatCount !== 0) {
+    const lifecycleId = group[0]?.lifecycleId;
+    const prewarmRuns = lifecycleId && options.prewarmLifecycleIds?.has(lifecycleId) ? 1 : 0;
+    const actualRepeatCount = options.repeatCount + prewarmRuns;
+    if (group.length % actualRepeatCount !== 0) {
       return unsupported('same-process lifecycle telemetry ended with an incomplete rerun group');
     }
-    for (let offset = 0; offset < group.length; offset += options.repeatCount) {
-      const chunk = group.slice(offset, offset + options.repeatCount);
+    for (let offset = 0; offset < group.length; offset += actualRepeatCount) {
+      const chunk = group.slice(offset, offset + actualRepeatCount);
       const first = chunk[0];
       const last = chunk.at(-1);
       if (
         !first ||
         !last ||
-        last.sequence - first.sequence !== options.repeatCount - 1 ||
+        last.sequence - first.sequence !== actualRepeatCount - 1 ||
         chunk.some(
           (record) =>
             record.pid !== first.pid ||
@@ -669,7 +680,12 @@ export function qualificationTelemetryMetric(
       ) {
         return unsupported('same-process lifecycle telemetry sequence was discontinuous');
       }
-      const values = chunk.map((record) => ({
+      const accepted = chunk.slice(prewarmRuns);
+      const retainedWarmup = accepted[0];
+      if (!retainedWarmup || accepted.length !== options.repeatCount) {
+        return unsupported('same-process lifecycle did not retain one warm-up and eight reruns');
+      }
+      const values = accepted.map((record) => ({
         before: record.before[key],
         after: record.after[key],
       }));
@@ -691,14 +707,14 @@ export function qualificationTelemetryMetric(
       });
       series.push({
         process: {
-          pid: first.pid,
-          startNonce: first.processStartNonce,
-          osProcessStartIdentity: first.osProcessStartIdentity!,
-          lifecycleId: first.lifecycleId,
-          lifecycleGroupNonce: first.lifecycleGroupNonce,
+          pid: retainedWarmup.pid,
+          startNonce: retainedWarmup.processStartNonce,
+          osProcessStartIdentity: retainedWarmup.osProcessStartIdentity!,
+          lifecycleId: retainedWarmup.lifecycleId,
+          lifecycleGroupNonce: retainedWarmup.lifecycleGroupNonce,
         },
-        warmup: point(first, 0),
-        lifecycles: chunk.slice(1).map((record, index) => point(record, index + 1)),
+        warmup: point(retainedWarmup, 0),
+        lifecycles: accepted.slice(1).map((record, index) => point(record, index + 1)),
       });
     }
   }
@@ -814,6 +830,7 @@ async function runProbe(
     definition.args,
     options.profile,
     definition.qualificationLifecycleFiles,
+    definition.qualificationPrewarmFiles,
   );
   const attemptNonce = randomUUID();
   const proc = Bun.spawn([process.execPath, ...args], {
@@ -926,6 +943,9 @@ async function runProbe(
         caseId: definition.id,
         repeatCount: QUALIFICATION_REPEAT_COUNT,
         expectedLifecycleIds: expectedQualificationLifecycleIds(definition),
+        prewarmLifecycleIds: new Set(
+          (definition.qualificationPrewarmFiles ?? []).map((file) => basename(file)),
+        ),
         attemptNonce,
       });
     }
