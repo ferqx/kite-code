@@ -459,6 +459,15 @@ const phase1RuntimeQualificationArtifact = 'runtime-resilience-qualification-307
 const phase1RuntimeQualificationArtifactId = '8822010140';
 const phase1RuntimeQualificationDigest =
   'sha256:5b6146bd7fe0aff44595791c83307aa09fb15e40a09ca2fcdef7f8c7e3b34694';
+const phase1RuntimeRequalificationCommit = '05312896bb689b1da9d9c0861cddd32e50ce0bf0';
+const phase1RuntimeRequalificationHead = '7def7b15b998d0f5d4eb141bec78506f6ed21df6';
+const phase1RuntimeRequalificationRun = '30816605986';
+const phase1RuntimeRequalificationArtifact = 'runtime-resilience-qualification-30816605986';
+const phase1RuntimeRequalificationArtifactId = '8857539694';
+const phase1RuntimeRequalificationDigest =
+  'sha256:cd1b96bbc40ce1f94300835a7c817c667562b927ed5537cdb1914aa7397fba6b';
+const phase1RuntimeRequalificationZipDigest =
+  'sha256:15f1cd93022aa8619313dc711ba7f79d5ea00b5e584d618411b747fbef694380';
 const phase1RuntimeCompletionPath =
   'docs/space/execution/completed/2026-07-30-agent-production-runtime-resilience.md';
 const phase1ExecutionCompletionCommit = 'dc64d25d67c9e40330676668b5f039872d04269a';
@@ -954,6 +963,13 @@ for (const evidence of [
   phase1RuntimeQualificationArtifact,
   phase1RuntimeQualificationArtifactId,
   phase1RuntimeQualificationDigest,
+  phase1RuntimeRequalificationCommit,
+  phase1RuntimeRequalificationHead,
+  `run ${phase1RuntimeRequalificationRun}`,
+  phase1RuntimeRequalificationArtifact,
+  phase1RuntimeRequalificationArtifactId,
+  phase1RuntimeRequalificationDigest,
+  phase1RuntimeRequalificationZipDigest,
   '7 case、56/56 probe',
   '72 条 `actual_runtime_ledger` receipts',
   '`MS:1C-DONE` 已由 Task 1C.8 产生',
@@ -1042,6 +1058,37 @@ if (phase1RuntimeClosureRevision.length !== 1) {
 requireReachableCommit(phase1RuntimeQualificationCommit, '1C.7 qualification implementation');
 requireReachableCommit(phase1RuntimeQualificationHardening, '1C.7 qualification hardening');
 requireReachableCommit(phase1RuntimeQualificationHead, '1C.7 formal qualification head');
+requireReachableCommit(
+  phase1RuntimeRequalificationCommit,
+  '1C.7 current-code requalification hardening',
+);
+
+const phase1RuntimeRequalificationRevision = decisionRegister
+  .split('\n')
+  .filter((line) => line.startsWith('| 37 |'));
+if (phase1RuntimeRequalificationRevision.length !== 1) {
+  fail(
+    `decision register must contain Revision 37 exactly once; found ${phase1RuntimeRequalificationRevision.length}`,
+  );
+} else {
+  for (const evidence of [
+    '重新认证 Phase 1C 当前代码',
+    '不重复产生 `MS:1C-DONE`',
+    phase1RuntimeRequalificationCommit,
+    phase1RuntimeRequalificationHead,
+    `run ${phase1RuntimeRequalificationRun}`,
+    phase1RuntimeRequalificationArtifact,
+    phase1RuntimeRequalificationArtifactId,
+    phase1RuntimeRequalificationDigest,
+    phase1RuntimeRequalificationZipDigest,
+    '7 case/56 probe/72 actual Runtime ledger receipts',
+    '独立 verifier 通过',
+  ]) {
+    if (!phase1RuntimeRequalificationRevision[0]?.includes(evidence)) {
+      fail(`decision register Revision 37 must identify ${evidence}`);
+    }
+  }
+}
 
 for (const [description, pattern] of [
   ['Phase 1A completion', /Phase 1A（Task 1A\.1–1A\.7）已完成/],

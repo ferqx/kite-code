@@ -120,7 +120,7 @@ tracked blob snapshot；platform workflow/ref 与 DeepSeek official origin 都�
 Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
 case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的
 正式资源证据已由手动 `Runtime Resilience Qualification` workflow 的 Ubuntu
-[run 30710906064](https://github.com/ferqx/kite-code/actions/runs/30710906064) 运行 8 轮并以独立
+[run 30816605986](https://github.com/ferqx/kite-code/actions/runs/30816605986) 对当前代码运行 8 轮并以独立
 verifier 收口；后续回归仍须保持上传 artifact 为 `status=passed`，`failed`/`inconclusive` 不能按
 通过处理。
 
