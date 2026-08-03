@@ -122,7 +122,8 @@ Release control 当前只提供不可分发的 contract foundation：`--release-
 显示脱敏状态，普通入口为 `artifact_disabled`。`releaseProfileV1`、`executionBoundaryV1` 和
 `networkBoundaryV1` 不能由 CLI 打开。D-04 effectful execution 支持集为空；它不阻止普通三平台
 TUI/CLI distribution，但真实 build/audit、Sigstore/attestation/GitHub Release、平台发布者签名和真人
-第三方安全评审尚未完成，因此当前仍没有 production artifact。
+candidate-bound 单维护者安全评审尚未完成，因此当前仍没有 production artifact。另一位真人或第三方
+评审按 ADR-0067 为可选增强，不再是发布硬门禁。
 
 常规跨平台验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025` matrix，不要求维护
 self-hosted Ubuntu。平台 probe 固定输出 `productionSupported=false`，只有后续新鲜原生 evidence、

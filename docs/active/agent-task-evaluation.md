@@ -60,7 +60,7 @@ route-matched baseline、完整正式 attempts、同 identity adversarial run �
 fixture 改名为正式 run。
 
 `github:@ferqx` 的授权 dogfood 可以记录真实 internal acceptance metadata，但不能算 external cohort
-或独立第三方安全评审。External limited 的产品 contract 至少需要 3 名不同 opt-in 用户、每人至少
+或独立第三方评审；ADR-0067 不再要求用该独立评审解锁发布。External limited 的产品 contract 至少需要 3 名不同 opt-in 用户、每人至少
 4 个任务；当前本地 participant/sample constructor 无独立 consent、identity 或 run-receipt 认证，
 所以即使构造达到该数量也保持 `contract_only`、blocked/not_observed、evidenceEligible=false。
 真实 adapter 未落地前不产生 `MS:2B-DONE` 或 external milestone。

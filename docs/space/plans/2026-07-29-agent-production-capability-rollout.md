@@ -25,7 +25,7 @@ D-10 已由 ADR-0064 关闭；两路最终整体 Review 均为 GO 后，Task 5.1
 
 四个 profile 均为 `under_development/off`，production MCP write route 为空，Skills cohort 为 0；
 本地 adapter 固定 `local_contract_only`/blocked。formal Agent task、真实 Provider route、internal
-dogfood、external canary、beta/stable maturity 与第三方评审 evidence 均未发生，不产生任何
+dogfood、external canary、beta/stable maturity 与 candidate-bound maintainer review evidence 均未发生，不产生任何
 `MS:5*-STABLE`。
 
 2026-08-03 的 implementation-first 批次将 MCP write admission、intent/receipt、unknown-effect recovery、
@@ -134,7 +134,7 @@ UI/CLI 不显示单一模糊“完成”状态。
 覆盖：
 
 - risk-derived required mode；
-- request/evidence/reviewer；
+- request/evidence/maintainer approver；
 - repair/replan；
 - structured user waive；
 - compensation；
@@ -142,7 +142,7 @@ UI/CLI 不显示单一模糊“完成”状态。
 - replay/recovery；
 - capability rollback 后已有 required 状态继续收敛。
 
-模型无生成 waiver 的入口，reviewer 消费 receipt/evidence 而不是模型 final。
+模型无生成 waiver 的入口，maintainer approver 消费 receipt/evidence 而不是模型 final。
 
 ### Task 5A.3：Verification internal dogfood
 
@@ -364,7 +364,7 @@ Skill `allowed-tools`/dependencies 只表达 ceiling，不预批准工具。
 
 - representative write/destructive/unknown tasks；
 - false completion/false pass/required bypass；
-- reviewer/provider outage；
+- maintainer/provider outage；
 - repair、waive、compensation、cancel 和 resource budget。
 
 ### Task 5.3B：MCP write Agent task/adversarial evaluation

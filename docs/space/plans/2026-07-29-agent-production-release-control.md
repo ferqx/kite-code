@@ -20,9 +20,9 @@ build/verify/bootstrap 与 deterministic foundation Gate replay 全部通过，T
 已经本地实现；禁用的 production verifier 已补齐 immutable input snapshot、OS-protected pinned
 toolchain、canonical USTAR 与
 archive/native-launcher membership、macOS 完整 app bundle seal/notarization、canonical manifest、五
-subject attestation、pinned toolchain、平台发布者身份与带真人签名 evidence 的全 G0–G5 Gate contract。
+subject attestation、pinned toolchain、平台发布者身份与 candidate-bound maintainer review 的全 G0–G5 Gate contract。
 真实 build/audit、平台签名/notarization、actual artifact smoke、
-Sigstore/attestation 和第三方安全评审均未发生，所以保持 `in_progress`；D-04 空支持集仅阻止 effectful
+Sigstore/attestation 和 maintainer security review 均未发生，所以保持 `in_progress`；D-04 空支持集仅阻止 effectful
 execution，不是普通 distribution blocker。2A.9 的 disable-only loader/cache 也仅完成公开 synthetic key
 contract；D-03 已关闭后，2A.9 已在 baseline `f38d819226aeceaa549e2466c35ed26fe642a6c9`
 绑定 `in_progress`。external canary 只能消费 release composition 中 production canary profile 的
@@ -37,9 +37,9 @@ rollout signing/service、authenticated artifact authority、exporter 和 observ
 identity 与 verification receipt，并全部进入 assembly digest。源码 registry 只允许匹配预先独立验证的 exact
 dependency/critical-input statement，仓库内尚无密码学 verifier，因此当前不存在可认证的 `MS:2A-RC`
 正向路径。production supply-chain verifier 同样只在源码登记 exact verifier commit 后，
-并且 immutable snapshot、签名/attestation、平台身份、完整 Gate 与真人第三方评审全部验证时才可返回
+并且 immutable snapshot、签名/attestation、平台身份、完整 Gate 与 candidate-bound maintainer review 全部验证时才可返回
 production receipt；当前 registry 为空。`MS:2B-DONE`、`MS:3-OPS-READY`、2A.8/
-2A.10 正式 evidence、第三方安全评审与 source-owned RC authority 尚未满足，因此 2A.11 继续未绑定，
+2A.10 正式 evidence、maintainer security review 与 source-owned RC authority 尚未满足，因此 2A.11 继续未绑定，
 `MS:2A-RC` 未产生。
 
 ## 目标
@@ -343,8 +343,9 @@ Gate：
   user-writable cache 或孤立复制的 PowerShell apphost 执行；
 - verifier 必须运行在从未执行 candidate source/dependency 的新 hosted VM，只 checkout protected
   commit 的 verifier，并把 build artifact 当作 opaque input 下载；build/verify 不得共享进程边界；
-- trusted verifier commit 必须绑定 expected identity、第三方 security-review evidence、Gate artifact
-  identity 和最终 verifier identity；protected variable 漂移必须使既有证据失效；
+- trusted verifier commit 必须绑定 expected identity、candidate-bound maintainer security-review record
+  和最终 verifier identity；Gate decision 通过 evidence bundle digest 绑定 review，protected variable 漂移
+  必须使既有证据失效；
 - archive 只接受无扩展/链接/等价路径覆盖的 canonical USTAR；macOS 必须安全重建并验证完整
   `Kite.app` bundle/resource seal/Gatekeeper notarization，同时保持内部 launcher byte binding；
 - Linux/macOS/Windows artifact build/smoke；
@@ -418,8 +419,8 @@ producer；任一前置 Task 或 foundation Gate 失败时不得写入。
 
 Task 2A.8、2A.10、2A.11 完成；Task 2A.9 只有在决策要求分钟级远程 kill switch 时才进入
 该里程碑。Task 2A.11 是 `MS:2A-RC` 的唯一 producer。该 milestone 只表示 candidate
-assembly，不产生 `MS:LIM-APPROVED`；ADR-0060 的 single-maintainer 模式必须在后续人工发布
-评审中附加由不同真人完成、绑定 candidate identity 的第三方安全评审。
+assembly，不产生 `MS:LIM-APPROVED`；ADR-0067 要求在后续人工发布评审中完成绑定 candidate
+identity 的 maintainer security review，另一位真人或第三方评审为可选 assurance evidence。
 
 ## 验收条件
 
@@ -436,8 +437,8 @@ assembly，不产生 `MS:LIM-APPROVED`；ADR-0060 的 single-maintainer 模式�
 - [ ] dependency/license/SBOM/provenance 与三平台 artifact smoke 完成；
 - [ ] schema upgrade/rollback rehearsal 在 1C 完成后的 RC 阶段通过；
 - [ ] limited artifact 只在 Phase 1A–3 与 2B Gate 全部满足后由 Task 2A.11 生成。
-- [ ] single-maintainer external release 在 `MS:LIM-APPROVED` 前有有效第三方安全评审，且
-  维护者没有自批 G0 例外。
+- [ ] single-maintainer external release 在 `MS:LIM-APPROVED` 前有有效 candidate-bound maintainer
+  security review，且维护者没有自批 G0/G1 例外、覆盖失败 Gate 或接受未关闭 P0/P1。
 
 ## 回滚
 

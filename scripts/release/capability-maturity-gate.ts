@@ -15,6 +15,7 @@ const identitySchema = z
   .refine((value) => value === value.trim(), 'identity must not contain surrounding whitespace');
 const recordIdSchema = z.string().regex(/^[a-z0-9][a-z0-9._:-]{0,127}$/);
 const timestampSchema = z.iso.datetime({ offset: true });
+const SINGLE_MAINTAINER_IDENTITY = 'github:@ferqx';
 
 export const CAPABILITY_MATURITY_STAGES_V1 = Object.freeze(['canary', 'beta', 'stable'] as const);
 export type CapabilityMaturityStageV1 = (typeof CAPABILITY_MATURITY_STAGES_V1)[number];
@@ -66,7 +67,7 @@ const preregistrationV1Schema = z
     maximumErrorBudgetBps: z.number().int().min(0).max(10_000),
     minimumUserUnderstandingSamples: z.number().int().positive(),
     minimumUserUnderstandingBps: z.number().int().min(1).max(10_000),
-    requiredHumanApprovalCount: z.number().int().positive(),
+    requiredHumanApprovalCount: z.literal(1),
     freshnessSeconds: z.number().int().positive(),
   })
   .strict();
@@ -74,10 +75,10 @@ const preregistrationV1Schema = z
 const humanApprovalV1Schema = z
   .object({
     approvalId: recordIdSchema,
-    approverIdentity: z.string().regex(/^github:@[A-Za-z0-9](?:[A-Za-z0-9-]{0,37})$/),
+    approverIdentity: z.literal(SINGLE_MAINTAINER_IDENTITY),
     approvedAt: timestampSchema,
     outcome: z.literal('approved'),
-    independentFromEvidenceProducer: z.literal(true),
+    reviewMode: z.literal('single_maintainer'),
     recordDigest: digestSchema,
   })
   .strict();
@@ -98,7 +99,7 @@ const maturityObservationV1Schema = z
         G5: z.enum(['passed', 'failed', 'blocked', 'not_run']),
       })
       .strict(),
-    humanApprovals: z.array(humanApprovalV1Schema),
+    humanApprovals: z.array(humanApprovalV1Schema).length(1),
     userUnderstanding: z
       .object({
         responseCount: z.number().int().nonnegative(),
@@ -182,12 +183,12 @@ interface TrustedCapabilityMaturityAuthorityV1 {
 const TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1: readonly TrustedCapabilityMaturityAuthorityV1[] =
   Object.freeze([]);
 /**
- * Deliberately empty until independent prior-decision and human-approval
+ * Deliberately empty until prior-decision and maintainer-approval
  * artifact verifiers exist. Populating only the authority allowlist above can
  * never make caller-authored chain or approval summaries eligible.
  */
 const VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1: readonly string[] = Object.freeze([]);
-const VERIFIED_CAPABILITY_MATURITY_HUMAN_APPROVALS_V1: readonly string[] = Object.freeze([]);
+const VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1: readonly string[] = Object.freeze([]);
 const PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_V1 = true as const;
 
 export interface CapabilityMaturityGateDecisionV1 {
@@ -230,8 +231,8 @@ export function verifyCapabilityMaturityEvidenceV1(
  * Gate-only projection. It never writes capability decisions or changes a
  * profile. The exact-record lookup path is implemented, but it is not a
  * cryptographic attestation verifier. The source-owned authority,
- * prior-decision and human-approval registries remain empty until real signed
- * evidence is independently verified and reviewed.
+ * prior-decision and maintainer-approval registries remain empty until real signed
+ * evidence is verified and reviewed.
  */
 export function evaluateCapabilityMaturityGateV1(input: {
   targetStage: CapabilityMaturityStageV1;
@@ -247,7 +248,7 @@ export function evaluateCapabilityMaturityGateV1(input: {
     canonicalJson({
       authorities: TRUSTED_CAPABILITY_MATURITY_AUTHORITIES_V1,
       previousDecisions: VERIFIED_CAPABILITY_MATURITY_PREVIOUS_DECISIONS_V1,
-      humanApprovals: VERIFIED_CAPABILITY_MATURITY_HUMAN_APPROVALS_V1,
+      maintainerApprovals: VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1,
       exactRecordLookupImplemented:
         PRODUCTION_CAPABILITY_MATURITY_EXACT_RECORD_LOOKUP_IMPLEMENTED_V1,
     }),
@@ -395,10 +396,11 @@ function evaluateEvidence(input: {
     input.reasons.add('human_approval_count_below_preregistered_minimum');
   if (
     observation.humanApprovals.some(
-      ({ recordDigest }) => !VERIFIED_CAPABILITY_MATURITY_HUMAN_APPROVALS_V1.includes(recordDigest),
+      ({ recordDigest }) =>
+        !VERIFIED_CAPABILITY_MATURITY_MAINTAINER_APPROVALS_V1.includes(recordDigest),
     )
   ) {
-    input.reasons.add('verified_human_approval_not_configured');
+    input.reasons.add('verified_maintainer_approval_not_configured');
   }
   if (
     observation.humanApprovals.some(
@@ -406,6 +408,13 @@ function evaluateEvidence(input: {
     )
   ) {
     input.reasons.add('human_approval_precedes_observation_completion');
+  }
+  if (
+    observation.humanApprovals.some(
+      ({ approvedAt }) => parseTimestamp(approvedAt, 'Approval time') > input.evaluatedAtMs,
+    )
+  ) {
+    input.reasons.add('human_approval_time_in_future');
   }
 
   const understanding = observation.userUnderstanding;

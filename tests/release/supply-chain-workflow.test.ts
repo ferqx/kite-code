@@ -35,6 +35,7 @@ describe('non-production release candidate workflow skeleton', () => {
     expect(workflow).toContain('actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
     expect(workflow).toContain('oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6');
     expect(workflow).toContain('production-signing-disabled:');
+    expect(workflow).toContain('environment: production-release');
     expect(workflow).toContain(
       [
         'if: ',
@@ -53,9 +54,18 @@ describe('non-production release candidate workflow skeleton', () => {
     expect(workflow).toContain(
       ['--trusted-verifier-commit "', '$', '{{ vars.KITE_TRUSTED_VERIFIER_COMMIT }}', '"'].join(''),
     );
-    expect(workflow).toContain(['--run-attempt "', '$', '{{ github.run_attempt }}', '"'].join(''));
+    expect(workflow).toContain(
+      ['--run-id "', '$', '{{ vars.KITE_RELEASE_SOURCE_RUN_ID }}', '"'].join(''),
+    );
+    expect(workflow).toContain(
+      ['--run-attempt "', '$', '{{ vars.KITE_RELEASE_SOURCE_RUN_ATTEMPT }}', '"'].join(''),
+    );
+    expect(workflow).not.toContain(['--run-id "', '$', '{{ github.run_id }}', '"'].join(''));
     expect(workflow).toContain('KITE_RELEASE_GATE_DECISION_DIGEST: disabled-unconfigured');
-    expect(workflow).toContain('KITE_RELEASE_SECURITY_REVIEWER_IDENTITY: disabled-unconfigured');
+    expect(workflow).toContain('actions: read');
+    expect(workflow).toContain(['GH_TOKEN: ', '$', '{{ github.token }}'].join(''));
+    expect(workflow).not.toContain('KITE_RELEASE_SECURITY_REVIEWER_IDENTITY');
+    expect(workflow).not.toContain('KITE_RELEASE_SECURITY_REVIEWER_PUBLIC_KEY_SHA256');
     expect(workflow).toContain('KITE_RELEASE_GH_SHA256:');
     expect(workflow).toContain('KITE_RELEASE_COSIGN_SHA256:');
     expect(workflow).toContain(['ref: ', '$', '{{ vars.KITE_TRUSTED_VERIFIER_COMMIT }}'].join(''));
@@ -70,12 +80,18 @@ describe('non-production release candidate workflow skeleton', () => {
     expect(workflow).toContain(
       ['name: production-candidate-', '$', '{{ matrix.platform }}'].join(''),
     );
+    expect(workflow).toContain(['run-id: ', '$', '{{ vars.KITE_RELEASE_SOURCE_RUN_ID }}'].join(''));
+    expect(workflow).toContain(['github-token: ', '$', '{{ github.token }}'].join(''));
     expect(workflow).toContain('working-directory: trusted-verifier');
     expect(workflow).toContain(
       ['--native-launcher "../candidate/', '$', '{{ matrix.launcher }}', '"'].join(''),
     );
     expect(workflow).toContain('--security-review-evidence');
-    expect(workflow).toContain('--security-reviewer-public-key');
+    expect(workflow).toContain('--gate-policy');
+    expect(workflow).toContain('--evidence-bundle');
+    expect(workflow).toContain('--rollback-report');
+    expect(workflow).toContain('--compatibility-report');
+    expect(workflow).not.toContain('--security-reviewer-public-key');
     expect(workflow).toContain('platform: macos-arm64');
     expect(workflow).toContain('platform: linux-x64');
     expect(workflow).toContain('platform: windows-x64');

@@ -65,8 +65,8 @@ ledger/rebuild/report digest；它不是 Sigstore 密码学 verifier，registry 
 
 Alert Owner 为 `github:@ferqx`，backup 为 `none (single-maintainer)`。控制动作只能关闭 capability、
 cohort 归零或回滚完整 artifact identity，并保留 metadata evidence；没有 remote automatic kill switch。
-Owner 不可联系时 cohort=0 且恢复批准 blocked。external release 前仍需要不同真人、绑定 candidate 的第三方
-安全评审。
+Owner 不可联系时 cohort=0 且恢复批准 blocked。external release 使用 ADR-0067 的 candidate-bound
+single-maintainer security review；第三方评审为可选增强，不再是 cohort 或 milestone 的硬依赖。
 
 本地 incident rehearsal 固定为 `synthetic_contract_only`，其 G4 adapter 为 `not_run`，不能代替真实
 detection/containment/credential rotation 演练。Limited SLO qualifier 现已具备 retained evidence

@@ -90,7 +90,7 @@ const GA_DEPENDENCY_IDS_V1 = [
   'd03_closed',
   'd05_closed',
   'd10_closed',
-  'third_party_security_review',
+  'maintainer_security_review',
   'production_support_set',
 ] as const;
 type GADependencyIdV1 = (typeof GA_DEPENDENCY_IDS_V1)[number];
@@ -259,7 +259,7 @@ export function evaluateGaSelectionGateV1(input: {
   requireDependency('ms_limited_slo', 'ms_limited_slo_missing');
   requireDependency('ms_2a_rc', 'ms_2a_rc_missing');
   requireDependency('ms_3_ops_ready', 'ms_3_ops_ready_missing');
-  requireDependency('third_party_security_review', 'third_party_security_review_missing');
+  requireDependency('maintainer_security_review', 'maintainer_security_review_missing');
   requireDependency('production_support_set', 'production_support_set_empty');
   const selected = new Set(
     input.validation.selection.selectedCapabilities.map((entry) => entry.capability),

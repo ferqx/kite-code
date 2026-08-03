@@ -31,6 +31,7 @@ describe('GA capability selection contract', () => {
     expect(gate.gaEligible).toBeFalse();
     expect(gate.reasonCodes).toEqual([
       'authenticated_ga_dependency_verifier_not_configured',
+      'maintainer_security_review_missing',
       'ms_2a_rc_missing',
       'ms_3_ops_ready_missing',
       'ms_limited_approved_missing',
@@ -38,7 +39,6 @@ describe('GA capability selection contract', () => {
       'no_stable_capability_selected',
       'production_support_set_empty',
       'selection_approval_missing',
-      'third_party_security_review_missing',
     ]);
   });
 

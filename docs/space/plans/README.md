@@ -117,6 +117,21 @@ immutable snapshots、archive/native-launcher/manifest 传递绑定、五 subjec
 tracked blob snapshot；platform workflow/ref 与 DeepSeek official origin 都精确闭合。真实 authority/evidence
 仍缺失，所以本 revision 不提升 Task 或 milestone。
 
+Revision 42 按 ADR-0067 把 external release 前的第三方真人评审从硬门禁改为可选 assurance evidence，
+并要求 `github:@ferqx` 对不可变 candidate 完成具名、可重放的 maintainer security review。该治理调整
+不放宽 G0/G1、真实 evidence、artifact/signature/attestation identity、P0/P1、rollback 或 fail-closed
+门禁，也不因删除组织性依赖自动完成任何 Task 或产生 milestone。
+
+Revision 43 把该治理决定收紧为可执行的正向 contract：Gate 与 production verifier 共用
+canonical maintainer review record，绑定 exact candidate/route/platform/ref/verifier/rollback/
+compatibility/scope/P0–P2；production verifier 重放 strict Gate policy/evidence/decision，校验 GitHub
+workflow_dispatch run/attempt、actor/triggering actor 与真实 run 时间，并把 Gate 三件套、review 及 strict
+candidate-bound rollback/compatibility replay reports 加入十一 subject attestation。GA review 还要求
+canonical digest、exact authority record、freshness、authenticated replay receipt 与 ordering；producer/review
+run 与 admission run 分离，后者只验证已完成前序 run；GA replay authority 使用不可拆分的 exact
+kind/verifier/receipt/candidate/selection/report record；maturity approval 拒绝未来时间。
+所有 production authority registry 仍为空，本 revision 不关闭 Task 或产生 milestone。
+
 Required CI 的 `runtime-fault-soak` job 只运行 fault contract 与 bounded CI profile，负责阻止
 case、状态不变量、终态分类、清理或报告 schema 回归。它不替代 release qualification：1C.7 的
 正式资源证据已由手动 `Runtime Resilience Qualification` workflow 的 Ubuntu

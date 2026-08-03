@@ -75,10 +75,10 @@ function material(
       humanApprovals: [
         {
           approvalId: 'approval-001',
-          approverIdentity: 'github:@release-reviewer',
+          approverIdentity: 'github:@ferqx',
           approvedAt: '2026-08-03T01:00:00.000Z',
           outcome: 'approved',
-          independentFromEvidenceProducer: true,
+          reviewMode: 'single_maintainer',
           recordDigest: digest('9'),
         },
       ],
@@ -166,7 +166,7 @@ describe('capability maturity Gate', () => {
       reasonCodes: [
         'authenticated_maturity_authority_not_configured',
         'evidence_authority_untrusted',
-        'verified_human_approval_not_configured',
+        'verified_maintainer_approval_not_configured',
         'verified_previous_maturity_decision_not_configured',
       ],
     });
@@ -235,7 +235,7 @@ describe('capability maturity Gate', () => {
     expect(evaluate(evidence(candidate)).reasonCodes).toEqual(
       expect.arrayContaining([
         'verified_previous_maturity_decision_not_configured',
-        'verified_human_approval_not_configured',
+        'verified_maintainer_approval_not_configured',
       ]),
     );
   });
@@ -314,18 +314,31 @@ describe('capability maturity Gate', () => {
     );
   });
 
-  test('requires unique human approvals and explicit authentication configuration', () => {
+  test('requires exactly one authenticated single-maintainer approval', () => {
     const duplicate = material();
-    duplicate.preregistration.requiredHumanApprovalCount = 2;
     const approval = duplicate.observation.humanApprovals[0];
     if (!approval) throw new Error('Fixture approval missing.');
     duplicate.observation.humanApprovals.push(structuredClone(approval));
-    expect(evaluate(evidence(duplicate, 'unconfigured')).reasonCodes).toEqual(
+    expect(() => evidence(duplicate)).toThrow();
+
+    const impostor = material() as unknown as Record<string, unknown>;
+    const observation = impostor.observation as {
+      humanApprovals: Array<{ approverIdentity: string }>;
+    };
+    observation.humanApprovals[0]!.approverIdentity = 'github:@someone-else';
+    expect(() => evidence(impostor as unknown as CapabilityMaturityEvidenceMaterialV1)).toThrow();
+
+    expect(evaluate(evidence(material(), 'unconfigured')).reasonCodes).toEqual(
       expect.arrayContaining([
         'evidence_authentication_unconfigured',
-        'human_approval_not_unique',
-        'human_approval_count_below_preregistered_minimum',
+        'verified_maintainer_approval_not_configured',
       ]),
     );
+  });
+
+  test('rejects a maintainer approval timestamp in the future', () => {
+    const candidate = material();
+    candidate.observation.humanApprovals[0]!.approvedAt = '2026-08-03T05:00:00.000Z';
+    expect(evaluate(evidence(candidate)).reasonCodes).toContain('human_approval_time_in_future');
   });
 });

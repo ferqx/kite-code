@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
+  computeGaMaintainerReviewDecisionDigestV1,
   evaluateGaAssemblyV1,
   GA_ASSEMBLY_DEPENDENCIES_V1,
 } from '../../scripts/release/assemble-ga';
@@ -113,18 +114,24 @@ const rollbackReplay = {
   schema: 'GAAssemblyRollbackReplayV1' as const,
   candidate,
   selectionDigest,
+  verifierIdentity: 'fixture:rollback-verifier',
+  completedAt: '2026-08-03T00:15:00.000Z',
+  verificationReceiptDigest: digest('a'),
   report: rollbackReport,
 };
 const compatibilityReplay = {
   schema: 'GAAssemblyCompatibilityReplayV1' as const,
   candidate,
   selectionDigest,
+  verifierIdentity: 'fixture:compatibility-verifier',
+  completedAt: '2026-08-03T00:30:00.000Z',
+  verificationReceiptDigest: digest('b'),
   report: compatibilityReport,
 };
-const thirdPartyReview = {
-  schema: 'GAAssemblyThirdPartyReviewV1' as const,
+const maintainerReviewMaterial = {
+  schema: 'GAAssemblyMaintainerReviewV1' as const,
   status: 'passed' as const,
-  independent: true,
+  reviewMode: 'single_maintainer' as const,
   candidate,
   selectionDigest,
   rollbackReportDigest: rollbackReport.reportDigest,
@@ -139,19 +146,23 @@ const thirdPartyReview = {
     'rollback',
     'compatibility',
   ] as const,
-  releaseOwnerIdentity: 'github:release-owner',
-  reviewerIdentity: 'github:independent-security-reviewer',
+  releaseOwnerIdentity: 'github:@ferqx',
+  reviewerIdentity: 'github:@ferqx',
   reviewedAt: '2026-08-03T01:00:00.000Z',
-  decisionDigest: digest('f'),
+};
+const maintainerReview = {
+  ...maintainerReviewMaterial,
+  decisionDigest: computeGaMaintainerReviewDecisionDigestV1(maintainerReviewMaterial),
 };
 const input = {
   schema: 'GAAssemblyInputV1' as const,
   assemblyId: 'ga-assembly-001',
+  assembledAt: '2026-08-03T02:00:00.000Z',
   candidate,
   selection,
   stableCapabilityDecisions: [stableDecision],
   dependencies,
-  thirdPartyReview,
+  maintainerReview,
   rollbackReplay,
   compatibilityReplay,
 };
@@ -168,7 +179,7 @@ describe('GA pure assembly and replay contract', () => {
       candidate,
       selectionDigest,
       dependencyDecisionDigests: dependencies.map((entry) => entry.decisionDigest).sort(),
-      thirdPartyReviewDecisionDigest: thirdPartyReview.decisionDigest,
+      maintainerReviewDecisionDigest: maintainerReview.decisionDigest,
       rollbackReportDigest: rollbackReport.reportDigest,
       compatibilityReportDigest: compatibilityReport.reportDigest,
       reasonCodes: [
@@ -183,7 +194,7 @@ describe('GA pure assembly and replay contract', () => {
     const result = evaluateGaAssemblyV1({
       ...input,
       dependencies: [],
-      thirdPartyReview: null,
+      maintainerReview: null,
       rollbackReplay: null,
       compatibilityReplay: null,
     });
@@ -194,7 +205,7 @@ describe('GA pure assembly and replay contract', () => {
         'dependency_missing:profile_decision',
         'dependency_missing:route_decision',
         'dependency_missing:cohort_decision',
-        'third_party_security_review_missing',
+        'maintainer_security_review_missing',
         'rollback_replay_missing',
         'compatibility_replay_missing',
       ]),
@@ -202,7 +213,14 @@ describe('GA pure assembly and replay contract', () => {
     expect(result).toMatchObject({ distributable: false, milestone: null });
   });
 
-  test('detects identity, selection, independent-review, and replay cross-splicing', () => {
+  test('detects identity, selection, maintainer-review, and replay cross-splicing', () => {
+    const splicedReviewMaterial = {
+      ...maintainerReviewMaterial,
+      reviewerIdentity: 'github:@someone-else',
+      selectionDigest: digest('8'),
+      rollbackReportDigest: digest('9'),
+      compatibilityReportDigest: digest('9'),
+    };
     const result = evaluateGaAssemblyV1({
       ...input,
       dependencies: dependencies.map((entry) =>
@@ -214,18 +232,15 @@ describe('GA pure assembly and replay contract', () => {
         ...rollbackReplay,
         candidate: { ...candidate, artifactDigest: digest('9') },
         selectionDigest: digest('8'),
+        completedAt: '2026-08-03T01:30:00.000Z',
       },
       compatibilityReplay: {
         ...compatibilityReplay,
         candidate: { ...candidate, cohortDigest: digest('9') },
       },
-      thirdPartyReview: {
-        ...thirdPartyReview,
-        independent: false,
-        reviewerIdentity: thirdPartyReview.releaseOwnerIdentity,
-        selectionDigest: digest('8'),
-        rollbackReportDigest: digest('9'),
-        compatibilityReportDigest: digest('9'),
+      maintainerReview: {
+        ...splicedReviewMaterial,
+        decisionDigest: computeGaMaintainerReviewDecisionDigestV1(splicedReviewMaterial),
       },
     });
     expect(result.reasonCodes).toEqual(
@@ -235,10 +250,11 @@ describe('GA pure assembly and replay contract', () => {
         'rollback_replay_candidate_identity_mismatch',
         'rollback_replay_selection_mismatch',
         'compatibility_replay_candidate_identity_mismatch',
-        'third_party_security_review_not_independent',
-        'third_party_security_review_selection_mismatch',
-        'third_party_security_review_rollback_mismatch',
-        'third_party_security_review_compatibility_mismatch',
+        'maintainer_security_review_identity_mismatch',
+        'maintainer_security_review_selection_mismatch',
+        'maintainer_security_review_rollback_mismatch',
+        'maintainer_security_review_compatibility_mismatch',
+        'maintainer_security_review_precedes_replay_verification',
       ]),
     );
   });

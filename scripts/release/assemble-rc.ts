@@ -15,7 +15,7 @@ export const RC_DEPENDENCIES_V1 = Object.freeze([
   'task_2a10_docs',
   'gate_replay',
   'schema_rollback',
-  'third_party_security_review',
+  'maintainer_security_review',
 ] as const);
 
 export const RC_CRITICAL_INPUTS_V1 = Object.freeze([

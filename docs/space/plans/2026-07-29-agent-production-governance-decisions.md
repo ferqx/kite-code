@@ -112,7 +112,8 @@
 7. compaction 离线质量门禁与 route qualification；
 8. Agent task/diff/test/review 作为产品验收结果；
 9. 可选 disable-only signed rollout manifest。
-10. single-maintainer 角色合并、显式无 backup 和 external release 前第三方安全评审。
+10. single-maintainer 角色合并、显式无 backup 和 external release 前 candidate-bound maintainer review；
+    第三方评审按 ADR-0067 为可选增强。
 
 实施约束：
 
@@ -203,8 +204,9 @@ milestone producer。
 - Evaluation/Product Owner。
 
 ADR-0060 的 single-maintainer 模式允许上述角色由 `github:@ferqx` 同一人承担；签署必须按角色
-逐项留下结论，不能把一次笼统批准复制成五份。M0 只允许内部实现。独立第三方安全评审延后到
-`MS:LIM-APPROVED` 前，且仍是 external release 的硬门禁。
+逐项留下结论，不能把一次笼统批准复制成五份。M0 只允许内部实现。ADR-0067 后，
+`MS:LIM-APPROVED` 使用绑定不可变 candidate 的具名 maintainer security review；独立第三方评审为
+可选增强，不再是 external release 的硬门禁。
 
 必须逐项确认：
 

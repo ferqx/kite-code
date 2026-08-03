@@ -240,6 +240,7 @@
         "docs/book/09-CLI模式与配置.md",
         "docs/book/12-测试体系.md",
         "docs/adr/0062-keyless-release-signing-and-github-hosting.md",
+        "docs/adr/0067-single-maintainer-candidate-security-review.md",
         "README.md"
       ]
     },

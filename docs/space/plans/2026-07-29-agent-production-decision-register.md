@@ -15,26 +15,26 @@
   revision/ADR，不覆盖旧结论。
 - 仓库 identity 只使用可从提交或 ADR 追溯的公开标识。私人联系方式保留在维护者控制的非仓库
   系统。
-- 项目按 ADR-0060 使用 `single-maintainer` 模式：所有 owner 为 `github:@ferqx`，没有真实
+- 项目按 ADR-0060/ADR-0067 使用 `single-maintainer` 模式：所有 owner 为 `github:@ferqx`，没有真实
   backup 时显式登记 `none (single-maintainer)`，不得虚构第二身份。
 - `MS:M0` 只能由 Task 0.5 的角色逐项评审记录产生。本文不存在 `MS:M0` producer。
-- `MS:LIM-APPROVED` 前必须取得由不同真人完成、绑定 candidate identity 的第三方安全评审；
-  维护者不能自批 G0 例外。
+- `MS:LIM-APPROVED` 前必须完成绑定 candidate identity 的具名 maintainer security review；第三方安全
+  评审为可选增强。维护者不能自批 G0/G1 例外，也不能把自审声明为独立评审。
 
 ## Owner 与升级路径
 
 | 角色 | Primary | Backup | 仓库内职责入口 | 当前限制 |
 | --- | --- | --- | --- | --- |
 | Capability Owner | `github:@ferqx` | `none (single-maintainer)` | capability plan、ADR 和 PR review | 维护者不可用时 capability 晋级 fail closed |
-| Release Owner | `github:@ferqx` | `none (single-maintainer)` | release plan、Gate record 和 PR review | external 前必须补独立第三方安全评审 |
+| Release Owner | `github:@ferqx` | `none (single-maintainer)` | release plan、Gate record 和 PR review | external 前完成 candidate-bound maintainer review |
 | Security & Privacy Owner | `github:@ferqx` | `none (single-maintainer)` | security/privacy ADR、G0 record 和 PR review | 不能自批 G0 例外 |
 | Platform Owner | `github:@ferqx` | `none (single-maintainer)` | platform matrix、sandbox evidence 和 PR review | 非空 production execution support 尚未批准 |
 | Evaluation/Product Owner | `github:@ferqx` | `none (single-maintainer)` | evaluation plan、threshold record 和 PR review | 用户样本与 benchmark 尚未预注册 |
 | Incident Commander | `github:@ferqx` | `none (single-maintainer)` | incident record、runbook revision 和 PR review | 维护者不可联系时 cohort=0，恢复批准 blocked |
 
-升级顺序为 `Owner → Incident Commander → external third-party security reviewer`。维护者不可
-联系或第三方评审缺失时，严格默认值是停止发布/扩 cohort、cohort=0、禁止高风险 capability
-晋级。limited cohort 的直接联系入口保留在维护者控制的非仓库系统；仓库只保存
+升级顺序为 `Owner → Incident Commander`；可选 external reviewer 只提供额外 assurance，不承担常驻
+backup 或恢复 authority。维护者不可联系时，严格默认值是停止发布/扩 cohort、cohort=0、禁止高风险
+capability 晋级。limited cohort 的直接联系入口保留在维护者控制的非仓库系统；仓库只保存
 `github:@ferqx` 和安全的 review record URI/digest。
 
 ## 决策字段
@@ -146,13 +146,14 @@ release gate fail closed。依据：[ADR-0065](../../adr/0065-cross-platform-dis
   repository `ferqx/kite-code`、repository ID `R_kgDOSKbi8g`、release workflow path、OIDC issuer、
   protected tag/ref、commit、workflow SHA、run ID/attempt 与 artifact digest。PR、fork、普通 branch
   与本机不得签名或发布；仓库公开前只允许 `nonDistributable` synthetic trust root，真实 signing/
-  attestation/release workflow disabled。远程 rollout signing 暂不启用；平台原生签名、正式
-  qualification 和第三方安全评审仍是独立硬门禁
+  attestation/release workflow disabled。远程 rollout signing 暂不启用；平台原生签名与正式
+  qualification 仍是独立硬门禁；ADR-0067 以 candidate-bound maintainer review 取代强制第三方评审
 - evidence: [Phase 2A 计划](2026-07-29-agent-production-release-control.md)；
   [ADR-0052](../../adr/0052-release-evidence-and-behavior-identity.md)；
   [ADR-0059](../../adr/0059-optional-disable-only-signed-rollout.md)；
-  [ADR-0062](../../adr/0062-keyless-release-signing-and-github-hosting.md)；用户于 2026-08-02
-  批准推荐方案
+  [ADR-0062](../../adr/0062-keyless-release-signing-and-github-hosting.md)；
+  [ADR-0067](../../adr/0067-single-maintainer-candidate-security-review.md)；用户于 2026-08-02
+  批准签名方案并于 2026-08-03 调整 single-maintainer review 模型
 - approvedAt: `2026-08-02`
 
 ### D-07
@@ -279,13 +280,14 @@ release gate fail closed。依据：[ADR-0065](../../adr/0065-cross-platform-dis
 - backup: `none (single-maintainer)`
 - dueMilestone: `MS:M0`
 - blockingPhase: `Phase 0`
-- default: 维护者不可联系时停止发布/恢复批准并将 external cohort 置 0；缺少有效第三方安全评审
-  时不得产生 `MS:LIM-APPROVED`
-- decision: 采用 ADR-0060 single-maintainer 模式；六类角色由 `github:@ferqx` 承担，backup
+- default: 维护者不可联系时停止发布/恢复批准并将 external cohort 置 0；缺少有效 candidate-bound
+  maintainer security review 时不得产生 `MS:LIM-APPROVED`
+- decision: 采用 ADR-0060/ADR-0067 single-maintainer 模式；六类角色由 `github:@ferqx` 承担，backup
   显式为 none。limited 用户使用维护者控制的非仓库直接联系入口；Phase 3 按预注册 table-top
   流程演练检测、cohort=0/能力关闭、证据保全、通知、credential rotation、恢复和复盘。
-  external release 前由不同真人完成第三方安全评审
+  external release 前由维护者完成绑定不可变 candidate 的具名安全自审；第三方评审为可选增强
 - evidence: 本文 Owner 表；[ADR-0060](../../adr/0060-single-maintainer-release-governance.md)；
+  [ADR-0067](../../adr/0067-single-maintainer-candidate-security-review.md)；
   [Phase 3 计划](2026-07-29-agent-production-observability-operations.md)
 - approvedAt: `2026-07-30`
 
@@ -331,7 +333,9 @@ operator/deployment identity，换模型、换 endpoint、URL credentials/query/
 digest 漂移均 fail closed。下游披露当前固定在 README/active/book release 文档，不要求 pre-release
 per-run acknowledgement；secret/protected credential 拦截、独立 remote MCP egress、
 `allowProductionContentEvaluation=false` 和真实 live evidence 要求保持不变。该风险接受不构成 2B.4
-真实评估通过，也不替代 external release 前真人第三方安全评审。架构记录：[ADR-0066](../../adr/0066-deepseek-owner-accepted-provider-data-policy.md)。
+真实评估通过，也不替代 external release 前 candidate-bound maintainer review。架构记录：
+[ADR-0066](../../adr/0066-deepseek-owner-accepted-provider-data-policy.md)、
+[ADR-0067](../../adr/0067-single-maintainer-candidate-security-review.md)。
 
 ## Execution bindings
 
@@ -380,7 +384,7 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 2A.5 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
 | 2A.6 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
 | 2A.7 | `github:@ferqx` | `d07d6d01f822e7afa95f1c98bd90f8780c6ca1d0` | `codex/agent-production-readiness-docs` | `completed` | — | `docs/space/execution/completed/2026-07-30-agent-production-release-control.md` | `2026-08-02` |
-| 2A.8 | `github:@ferqx` | `2e98681c800a2f1f745bc18e41ac682d9c09e84b` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 supply-chain/platform verifier 已绑定 immutable input snapshot、OS-protected pinned toolchain、canonical USTAR、archive/native launcher、macOS 完整 app bundle seal/notarization、manifest、五 subject attestation、平台发布者身份与 G5 真人签名 evidence；等待真实 build/audit、签名/notarization、provenance/attestation、actual artifact smoke 与三平台 run，D-04 空集合只阻止 effectful execution | — | `2026-08-02` |
+| 2A.8 | `github:@ferqx` | `2e98681c800a2f1f745bc18e41ac682d9c09e84b` | `codex/agent-production-readiness-docs` | `in_progress` | 本地 supply-chain/platform verifier 已绑定 immutable input snapshot、OS-protected pinned toolchain、canonical USTAR、archive/native launcher、macOS 完整 app bundle seal/notarization、manifest、十一 subject attestation、Gate policy/evidence/decision replay、GitHub run identity/freshness 与 G5 候选绑定维护者安全复核 evidence；rollback/compatibility 使用 strict candidate-bound report + verifier receipt，不接受裸 digest；等待真实 build/audit、签名/notarization、provenance/attestation、actual artifact smoke 与三平台 run，D-04 空集合只阻止 effectful execution | — | `2026-08-02` |
 | 2A.9 | `github:@ferqx` | `f38d819226aeceaa549e2466c35ed26fe642a6c9` | `codex/production-admission` | `in_progress` | D-03/D-06/D-13 与 2A.7 已满足；本地 disable-only loader/cache 和 release-owned canary admission 已 fail closed，但真实 rollout signing/service、authenticated artifact authority、exporter 与 observation 均缺失 | — | `2026-08-02` |
 | 2B.1 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-evaluation-foundation.md` | `2026-08-02` |
 | 2B.2 | `github:@ferqx` | `dc64d25d67c9e40330676668b5f039872d04269a` | `main` | `completed` | — | `docs/space/execution/completed/2026-08-02-agent-production-evaluation-foundation.md` | `2026-08-02` |
@@ -452,3 +456,5 @@ Phase 0 artifact 基线为 `4be8735b29ec0fe3951bf7a0876f7b5e722c846a`。该提�
 | 39 | 2026-08-03 | 为本批 production-shaped evidence 增加 source-owned exact verified-record lookup，不改变当前 Gate 结果 | lookup 精确绑定 subject/attestation/verification receipt/route/dependency，不再只匹配调用者自报 authority 字符串；仓库内 Sigstore/attestation 密码学 verifier 仍未实现，所有 registry 继续为空，当前 fixture 固定 blocked/off，54 completed/5 in_progress/49 unbound 与 milestone 状态不变 |
 | 40 | 2026-08-03 | 本次 implementation-first diff 首轮整体 Review 为 NO-GO，进入一次性根因修复且不提升 Task/milestone | 架构/治理 Reviewer P0/P1/P2=`0/5/1`，安全/对抗 Reviewer=`0/7/2`；统一修复 exact attestation trust、RC 六项关键输入、D-07 product receipt、GA synthetic replay、MCP write outcome/dispatch facts、schema rollback 与文档 overclaim；最终复核尚未完成 |
 | 41 | 2026-08-03 | 本次 implementation-first 完整 diff 两路最终复核均为 GO，不提升 evidence-bound Task/milestone | 架构/治理与安全/对抗 Reviewer 最终 P0/P1/P2 均为 `0/0/0`；补齐 exact Gate-material trust、TUI 全退出路径 bounded shutdown/fault isolation；该 agent Review 不替代 external release 前真实第三方安全评审，54 completed/5 in_progress/49 unbound 与 milestone 状态不变 |
+| 42 | 2026-08-03 | 按单人开源维护现实采用 candidate-bound maintainer security review；第三方评审由硬门禁改为可选增强 | 用户直接决策、ADR-0067；G0/G1、artifact/signature/attestation identity、真实 evidence、P0/P1、rollback 与 fail-closed 门禁保持不变；Task/milestone 计数不因治理规则调整自动提升 |
+| 43 | 2026-08-03 | 收紧单维护者复核正向路径：共享 canonical review record、strict Gate policy/evidence/decision replay、GitHub run/actor/真实时间验证与十一 subject attestation | 复核绑定 exact candidate/route/platform/ref/workflow/run/attempt/verifier/rollback/compatibility/scope/P0–P2；rollback/compatibility 消费 strict candidate-bound report + verifier receipt；producer/review 与 admission 分 run，后者只验证已完成前序 run；GA replay authority 使用不可拆分 exact record；review digest/freshness/replay ordering 与 maturity approval time 继续 fail closed；production authority registry 仍为空，不产生 Task/milestone |

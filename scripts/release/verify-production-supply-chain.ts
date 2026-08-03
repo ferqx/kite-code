@@ -22,9 +22,20 @@ import { gunzipSync } from 'node:zlib';
 import { z } from 'zod';
 import { decodeReleaseManifest } from './artifact-layout';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
+import { verifyReleaseEvidenceBundleV1 } from './evidence-bundle';
+import {
+  type MaintainerSecurityReviewRecordV1,
+  maintainerSecurityReviewRecordV1Schema,
+  type ProductionReleaseReplayEvidenceRecordV1,
+  productionReleaseReplayEvidenceRecordV1Schema,
+} from './evidence-schema';
+import {
+  evaluateReleaseGateV1,
+  verifyReleaseGateDecisionV1,
+  verifyReleaseGatePolicyV1,
+} from './gate-evaluator';
 import {
   buildCosignKeylessBlobVerificationCommandV1,
-  buildCosignKeyVerificationCommandV1,
   buildGithubArtifactAttestationVerificationCommandV1,
   buildPlatformSignatureVerificationCommandsV1,
   GITHUB_ACTIONS_OIDC_ISSUER,
@@ -51,7 +62,6 @@ const TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_V1: readonly TrustedProductionSu
   Object.freeze([]);
 export const PRODUCTION_SUPPLY_CHAIN_ADMISSION_ENABLED =
   TRUSTED_PRODUCTION_SUPPLY_CHAIN_VERIFIERS_V1.length > 0;
-const RELEASE_GATE_DECISION_DIGEST_DOMAIN = 'release-gate-decision-v1';
 const RELEASE_GATE_IDS = ['G0', 'G1', 'G2', 'G3', 'G4', 'G5'] as const;
 const COMMAND_TIMEOUT_MS = 30_000;
 const MAINTAINER_REVIEW_IDENTITY = 'github:@ferqx';
@@ -61,7 +71,6 @@ const uppercaseDigestSchema = z.string().regex(/^[A-F0-9]{64}$/);
 const commitSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const refSchema = z.string().regex(/^refs\/tags\/v[0-9][0-9A-Za-z._-]*$/);
 const nonEmptySchema = z.string().trim().min(1);
-const reviewerIdentitySchema = z.string().regex(/^github:@[A-Za-z0-9](?:[A-Za-z0-9-]{0,37})$/);
 
 const expectedIdentitySchema = z
   .object({
@@ -88,69 +97,6 @@ const expectedIdentitySchema = z
       });
     }
   });
-
-const securityReviewEvidenceSchema = z
-  .object({
-    schema: z.literal('IndependentSecurityReviewEvidenceV1'),
-    reviewerIdentity: reviewerIdentitySchema,
-    independentFromMaintainer: z.literal(true),
-    reviewedAt: z.string().datetime({ offset: false }),
-    outcome: z.literal('passed'),
-    repository: z.literal(PRODUCTION_RELEASE_REPOSITORY),
-    ref: refSchema,
-    commit: commitSchema,
-    trustedVerifierCommit: commitSchema,
-    payloadSha256: digestSchema,
-    nativeLauncherSha256: digestSchema,
-    canonicalManifestDigest: digestSchema,
-    scope: z
-      .array(
-        z.enum([
-          'architecture',
-          'security_boundaries',
-          'artifact_identity',
-          'rollback',
-          'adversarial_bypass',
-        ]),
-      )
-      .length(5)
-      .refine((scope) => new Set(scope).size === 5, 'security review scope must be exact'),
-  })
-  .strict();
-
-const gateDecisionSchema = z
-  .object({
-    schema: z.literal('ReleaseGateDecisionV1'),
-    decisionDigest: digestSchema,
-    overall: z.literal('approved_candidate'),
-    artifactIdentity: z
-      .object({
-        canonicalRepository: z.literal(PRODUCTION_RELEASE_REPOSITORY),
-        repositoryId: z.literal(PRODUCTION_RELEASE_REPOSITORY_NODE_ID),
-        commit: commitSchema,
-        trustedVerifierCommit: commitSchema,
-        payloadSha256: digestSchema,
-        nativeLauncherSha256: digestSchema,
-        nativeLauncherArchivePath: nonEmptySchema,
-        canonicalManifestDigest: digestSchema,
-        securityReviewEvidenceDigest: digestSchema,
-      })
-      .passthrough(),
-    gates: z
-      .array(
-        z.object({ gate: z.enum(RELEASE_GATE_IDS), status: z.literal('passed') }).passthrough(),
-      )
-      .length(RELEASE_GATE_IDS.length),
-    capabilities: z
-      .array(
-        z
-          .object({ capability: nonEmptySchema, status: z.enum(['enabled', 'disabled']) })
-          .passthrough(),
-      )
-      .min(1),
-    requiredManualApprovals: z.array(nonEmptySchema).length(0),
-  })
-  .passthrough();
 
 const githubAttestationOutputSchema = z
   .array(
@@ -198,10 +144,12 @@ export interface ProductionSupplyChainCliInputV1 {
     provenance: string;
     sigstoreBundle: string;
     githubAttestationBundle: string;
+    gatePolicy: string;
+    evidenceBundle: string;
     gateDecision: string;
     securityReviewEvidence: string;
-    securityReviewBundle: string;
-    securityReviewerPublicKey: string;
+    rollbackReport: string;
+    compatibilityReport: string;
     platformSignatureBundle?: string;
   };
   tools: {
@@ -211,8 +159,6 @@ export interface ProductionSupplyChainCliInputV1 {
     macosPolicyVerifier?: TrustedToolReceiptV1;
   };
   nativeSigner: ProductionNativeSignerExpectationV1;
-  expectedSecurityReviewerIdentity: string;
-  expectedSecurityReviewerPublicKeySha256: `sha256:${string}`;
   expectedGateDecisionDigest: string;
 }
 
@@ -255,10 +201,12 @@ const productionSupplyChainInputSchema = z
         provenance: nonEmptySchema,
         sigstoreBundle: nonEmptySchema,
         githubAttestationBundle: nonEmptySchema,
+        gatePolicy: nonEmptySchema,
+        evidenceBundle: nonEmptySchema,
         gateDecision: nonEmptySchema,
         securityReviewEvidence: nonEmptySchema,
-        securityReviewBundle: nonEmptySchema,
-        securityReviewerPublicKey: nonEmptySchema,
+        rollbackReport: nonEmptySchema,
+        compatibilityReport: nonEmptySchema,
         platformSignatureBundle: nonEmptySchema.optional(),
       })
       .strict(),
@@ -271,8 +219,6 @@ const productionSupplyChainInputSchema = z
       })
       .strict(),
     nativeSigner: nativeSignerExpectationSchema,
-    expectedSecurityReviewerIdentity: reviewerIdentitySchema,
-    expectedSecurityReviewerPublicKeySha256: digestSchema,
     expectedGateDecisionDigest: digestSchema,
   })
   .strict()
@@ -320,6 +266,7 @@ export interface CommandExecutionResultV1 {
 export interface ProductionSupplyChainVerifierDependenciesV1 {
   execute(command: readonly string[], timeoutMs: number): CommandExecutionResultV1;
   runtime: { platform: NodeJS.Platform; arch: string };
+  now(): Date;
 }
 
 export class ProductionSupplyChainVerificationError extends Error {
@@ -461,19 +408,6 @@ export function parseProductionSupplyChainCliInputV1(
     path: required(`--${name}-path`, `KITE_RELEASE_${envName}_PATH`),
     sha256: parseDigest(`--${name}-sha256`, `KITE_RELEASE_${envName}_SHA256`),
   });
-  const reviewerIdentity = required(
-    '--security-reviewer-identity',
-    'KITE_RELEASE_SECURITY_REVIEWER_IDENTITY',
-  );
-  if (
-    !reviewerIdentitySchema.safeParse(reviewerIdentity).success ||
-    reviewerIdentity.toLowerCase() === MAINTAINER_REVIEW_IDENTITY.toLowerCase()
-  ) {
-    throw new ProductionSupplyChainVerificationError(
-      'expected_identity_invalid',
-      'security reviewer must be a configured independent GitHub identity',
-    );
-  }
   return {
     expected: parsedIdentity.data,
     platform: typedPlatform,
@@ -485,19 +419,15 @@ export function parseProductionSupplyChainCliInputV1(
       provenance: required('--provenance', 'KITE_RELEASE_PROVENANCE'),
       sigstoreBundle: required('--sigstore-bundle', 'KITE_RELEASE_SIGSTORE_BUNDLE'),
       githubAttestationBundle: required('--attestation-bundle', 'KITE_RELEASE_ATTESTATION_BUNDLE'),
+      gatePolicy: required('--gate-policy', 'KITE_RELEASE_GATE_POLICY'),
+      evidenceBundle: required('--evidence-bundle', 'KITE_RELEASE_EVIDENCE_BUNDLE'),
       gateDecision: required('--gate-decision', 'KITE_RELEASE_GATE_DECISION'),
       securityReviewEvidence: required(
         '--security-review-evidence',
         'KITE_RELEASE_SECURITY_REVIEW_EVIDENCE',
       ),
-      securityReviewBundle: required(
-        '--security-review-bundle',
-        'KITE_RELEASE_SECURITY_REVIEW_BUNDLE',
-      ),
-      securityReviewerPublicKey: required(
-        '--security-reviewer-public-key',
-        'KITE_RELEASE_SECURITY_REVIEWER_PUBLIC_KEY',
-      ),
+      rollbackReport: required('--rollback-report', 'KITE_RELEASE_ROLLBACK_REPORT'),
+      compatibilityReport: required('--compatibility-report', 'KITE_RELEASE_COMPATIBILITY_REPORT'),
       ...(value('--platform-signature-bundle', 'KITE_RELEASE_PLATFORM_SIGNATURE_BUNDLE')
         ? {
             platformSignatureBundle: value(
@@ -520,11 +450,6 @@ export function parseProductionSupplyChainCliInputV1(
           : {}),
     },
     nativeSigner,
-    expectedSecurityReviewerIdentity: reviewerIdentity,
-    expectedSecurityReviewerPublicKeySha256: parseDigest(
-      '--security-reviewer-public-key-sha256',
-      'KITE_RELEASE_SECURITY_REVIEWER_PUBLIC_KEY_SHA256',
-    ),
     expectedGateDecisionDigest: required(
       '--gate-decision-digest',
       'KITE_RELEASE_GATE_DECISION_DIGEST',
@@ -546,23 +471,10 @@ export function verifyProductionSupplyChainAdmissionV1(
   input = parsedInput.data as ProductionSupplyChainCliInputV1;
   const parsedIdentity = expectedIdentitySchema.safeParse(input.expected);
   const parsedGateDigest = digestSchema.safeParse(input.expectedGateDecisionDigest);
-  const parsedReviewerKeyDigest = digestSchema.safeParse(
-    input.expectedSecurityReviewerPublicKeySha256,
-  );
-  if (!parsedIdentity.success || !parsedGateDigest.success || !parsedReviewerKeyDigest.success) {
+  if (!parsedIdentity.success || !parsedGateDigest.success) {
     throw new ProductionSupplyChainVerificationError(
       'expected_identity_invalid',
-      'identity, reviewer key, or expected Gate digest is invalid',
-    );
-  }
-  if (
-    !reviewerIdentitySchema.safeParse(input.expectedSecurityReviewerIdentity).success ||
-    input.expectedSecurityReviewerIdentity.toLowerCase() ===
-      MAINTAINER_REVIEW_IDENTITY.toLowerCase()
-  ) {
-    throw new ProductionSupplyChainVerificationError(
-      'expected_identity_invalid',
-      'security reviewer identity is missing, malformed, or not independent',
+      'identity or expected Gate digest is invalid',
     );
   }
   assertNativePlatform(input.platform, dependencies.runtime);
@@ -575,6 +487,12 @@ export function verifyProductionSupplyChainAdmissionV1(
       manifest: snapshots.digests.manifest,
       sbom: snapshots.digests.sbom,
       provenance: snapshots.digests.provenance,
+      gatePolicy: snapshots.digests.gatePolicy,
+      evidenceBundle: snapshots.digests.evidenceBundle,
+      gateDecision: snapshots.digests.gateDecision,
+      securityReview: snapshots.digests.securityReviewEvidence,
+      rollbackReport: snapshots.digests.rollbackReport,
+      compatibilityReport: snapshots.digests.compatibilityReport,
     };
     const launcherArchivePath = PRODUCTION_NATIVE_LAUNCHER_ARCHIVE_PATH_V1[input.platform];
     const platformSigningSubject = verifyArchiveLayout(
@@ -590,29 +508,42 @@ export function verifyProductionSupplyChainAdmissionV1(
       platform: input.platform,
       payloadDigest: subjectDigests.payload,
     });
-    verifySecurityReviewEvidence({
-      path: paths.securityReviewEvidence,
+    const rollbackReport = verifyProductionReplayEvidence({
+      path: paths.rollbackReport,
+      kind: 'schema_rollback',
       expected: parsedIdentity.data,
-      expectedReviewerIdentity: input.expectedSecurityReviewerIdentity,
+      manifestPath: paths.manifest,
       payloadDigest: subjectDigests.payload,
-      nativeLauncherDigest: subjectDigests.nativeLauncher,
       manifestDigest: subjectDigests.manifest,
     });
-    if (snapshots.digests.securityReviewerPublicKey !== parsedReviewerKeyDigest.data) {
-      throw new ProductionSupplyChainVerificationError(
-        'security_review_unverified',
-        'independent reviewer public key digest does not match the protected expectation',
-      );
-    }
-    verifyGateDecision({
+    const compatibilityReport = verifyProductionReplayEvidence({
+      path: paths.compatibilityReport,
+      kind: 'ga_compatibility',
+      expected: parsedIdentity.data,
+      manifestPath: paths.manifest,
+      payloadDigest: subjectDigests.payload,
+      manifestDigest: subjectDigests.manifest,
+    });
+    const securityReview = verifySecurityReviewEvidence({
+      path: paths.securityReviewEvidence,
+      expected: parsedIdentity.data,
+      manifestPath: paths.manifest,
+      platform: input.platform,
+      payloadDigest: subjectDigests.payload,
+      manifestDigest: subjectDigests.manifest,
+      rollbackReport,
+      compatibilityReport,
+    });
+    const gateContext = verifyGateDecision({
       path: paths.gateDecision,
+      policyPath: paths.gatePolicy,
+      evidenceBundlePath: paths.evidenceBundle,
+      securityReviewPath: paths.securityReviewEvidence,
       expected: parsedIdentity.data,
       expectedDecisionDigest: parsedGateDigest.data,
       payloadDigest: subjectDigests.payload,
-      nativeLauncherDigest: subjectDigests.nativeLauncher,
-      nativeLauncherArchivePath: launcherArchivePath,
       manifestDigest: subjectDigests.manifest,
-      securityReviewEvidenceDigest: snapshots.digests.securityReviewEvidence,
+      manifestPath: paths.manifest,
     });
 
     const trustedTools = new Map<string, `sha256:${string}`>();
@@ -625,17 +556,15 @@ export function verifyProductionSupplyChainAdmissionV1(
       ? requireTrustedTool('macOS policy verifier', input.tools.macosPolicyVerifier, trustedTools)
       : undefined;
 
-    runRequiredCommand(
-      buildCosignKeyVerificationCommandV1({
-        cosignPath,
-        subjectPath: paths.securityReviewEvidence,
-        bundlePath: paths.securityReviewBundle,
-        publicKeyPath: paths.securityReviewerPublicKey,
-      }),
+    verifyGithubMaintainerReviewActor({
+      ghPath,
+      expected: parsedIdentity.data,
+      securityReview,
+      gateContext,
       dependencies,
       trustedTools,
-      'security_review_unverified',
-    );
+    });
+
     runRequiredCommand(
       buildCosignKeylessBlobVerificationCommandV1({
         cosignPath,
@@ -654,6 +583,12 @@ export function verifyProductionSupplyChainAdmissionV1(
       manifest: paths.manifest,
       sbom: paths.sbom,
       provenance: paths.provenance,
+      gatePolicy: paths.gatePolicy,
+      evidenceBundle: paths.evidenceBundle,
+      gateDecision: paths.gateDecision,
+      securityReview: paths.securityReviewEvidence,
+      rollbackReport: paths.rollbackReport,
+      compatibilityReport: paths.compatibilityReport,
     })) {
       const result = runRequiredCommand(
         buildGithubArtifactAttestationVerificationCommandV1({
@@ -730,7 +665,10 @@ export function verifyProductionSupplyChainAdmissionV1(
       immutableSnapshots: 'verified' as const,
       archiveLauncherBinding: 'verified' as const,
       canonicalManifestBinding: 'verified' as const,
-      independentSecurityReview: 'verified' as const,
+      rollbackReplayEvidence: 'verified' as const,
+      compatibilityReplayEvidence: 'verified' as const,
+      maintainerSecurityReview: 'verified' as const,
+      maintainerReviewActor: 'verified' as const,
       pinnedToolchain: 'verified' as const,
       cosignKeylessManifestSignature: 'verified' as const,
       githubArtifactAttestations: 'verified' as const,
@@ -812,10 +750,12 @@ const SNAPSHOT_LIMITS: Readonly<Record<SnapshotRole, number>> = Object.freeze({
   provenance: 8 * 1024 * 1024,
   sigstoreBundle: 8 * 1024 * 1024,
   githubAttestationBundle: 32 * 1024 * 1024,
+  gatePolicy: 2 * 1024 * 1024,
+  evidenceBundle: 16 * 1024 * 1024,
   gateDecision: 2 * 1024 * 1024,
   securityReviewEvidence: 2 * 1024 * 1024,
-  securityReviewBundle: 8 * 1024 * 1024,
-  securityReviewerPublicKey: 64 * 1024,
+  rollbackReport: 2 * 1024 * 1024,
+  compatibilityReport: 2 * 1024 * 1024,
   platformSignatureBundle: 8 * 1024 * 1024,
 });
 
@@ -1167,28 +1107,170 @@ function verifyCanonicalManifest(input: {
   }
 }
 
+function expectedArtifactIdentity(input: {
+  expected: ProductionReleaseExpectedIdentityV1;
+  manifestPath: string;
+  payloadDigest: string;
+  manifestDigest: string;
+}) {
+  const manifest = decodeReleaseManifest(readFileSync(input.manifestPath));
+  return {
+    canonicalRepository: input.expected.repository,
+    repositoryId: input.expected.repositoryNodeId,
+    commit: input.expected.commit,
+    payloadSha256: input.payloadDigest,
+    canonicalManifestDigest: input.manifestDigest,
+    behaviorDigest: manifest.behaviorDigest,
+    profileDigest: manifest.releaseProfileDigest,
+    gatePolicyDigest: manifest.releaseGatePolicyDigest,
+  };
+}
+
+function verifyProductionReplayEvidence(input: {
+  path: string;
+  kind: 'schema_rollback' | 'ga_compatibility';
+  expected: ProductionReleaseExpectedIdentityV1;
+  manifestPath: string;
+  payloadDigest: string;
+  manifestDigest: string;
+}): ProductionReleaseReplayEvidenceRecordV1 {
+  try {
+    const parsed = productionReleaseReplayEvidenceRecordV1Schema.parse(
+      JSON.parse(readFileSync(input.path, 'utf8')),
+    );
+    const candidate = expectedArtifactIdentity(input);
+    if (
+      parsed.kind !== input.kind ||
+      parsed.trustedVerifierCommit !== input.expected.trustedVerifierCommit ||
+      !Buffer.from(canonicalJsonBytes(parsed.candidate)).equals(
+        Buffer.from(canonicalJsonBytes(candidate)),
+      )
+    ) {
+      throw new Error(`${input.kind} replay evidence does not bind the expected candidate`);
+    }
+    return parsed;
+  } catch (error) {
+    throw new ProductionSupplyChainVerificationError(
+      'gate_not_approved',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
 function verifySecurityReviewEvidence(input: {
   path: string;
   expected: ProductionReleaseExpectedIdentityV1;
-  expectedReviewerIdentity: string;
+  manifestPath: string;
+  platform: ProductionArtifactPlatformV1;
   payloadDigest: string;
-  nativeLauncherDigest: string;
   manifestDigest: string;
-}): void {
+  rollbackReport: ProductionReleaseReplayEvidenceRecordV1;
+  compatibilityReport: ProductionReleaseReplayEvidenceRecordV1;
+}): MaintainerSecurityReviewRecordV1 {
   try {
-    const parsed = securityReviewEvidenceSchema.parse(JSON.parse(readFileSync(input.path, 'utf8')));
+    const parsed = maintainerSecurityReviewRecordV1Schema.parse(
+      JSON.parse(readFileSync(input.path, 'utf8')),
+    );
+    const manifest = decodeReleaseManifest(readFileSync(input.manifestPath));
+    const platformIdentity = {
+      'linux-x64': 'ubuntu-24.04-x64',
+      'macos-arm64': 'macos-15-arm64',
+      'windows-x64': 'windows-2025-x64',
+    }[input.platform];
+    const candidate = expectedArtifactIdentity(input);
     if (
-      parsed.reviewerIdentity !== input.expectedReviewerIdentity ||
-      parsed.reviewerIdentity.toLowerCase() === MAINTAINER_REVIEW_IDENTITY.toLowerCase() ||
-      parsed.repository !== input.expected.repository ||
+      parsed.reviewerIdentity !== MAINTAINER_REVIEW_IDENTITY ||
+      parsed.outcome !== 'passed' ||
       parsed.ref !== input.expected.ref ||
-      parsed.commit !== input.expected.commit ||
       parsed.trustedVerifierCommit !== input.expected.trustedVerifierCommit ||
-      parsed.payloadSha256 !== input.payloadDigest ||
-      parsed.nativeLauncherSha256 !== input.nativeLauncherDigest ||
-      parsed.canonicalManifestDigest !== input.manifestDigest
+      !Buffer.from(canonicalJsonBytes(parsed.candidate)).equals(
+        Buffer.from(canonicalJsonBytes(candidate)),
+      ) ||
+      parsed.routeIdentity !== manifest.providerDataPolicyDigest ||
+      parsed.platformIdentity !== platformIdentity ||
+      parsed.rollbackReportDigest !== input.rollbackReport.recordDigest ||
+      parsed.compatibilityReportDigest !== input.compatibilityReport.recordDigest ||
+      Date.parse(parsed.reviewedAt) < Date.parse(input.rollbackReport.completedAt) ||
+      Date.parse(parsed.reviewedAt) < Date.parse(input.compatibilityReport.completedAt)
     ) {
-      throw new Error('security review identity or reviewed artifact identity is mismatched');
+      throw new Error('maintainer security review or reviewed artifact identity is mismatched');
+    }
+    return parsed;
+  } catch (error) {
+    throw new ProductionSupplyChainVerificationError(
+      'security_review_unverified',
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+}
+
+interface VerifiedReleaseGateContextV1 {
+  evaluatedAt: string;
+  reviewMaxAgeSeconds: number;
+  executionWindows: ReadonlyArray<{ startedAt: string; endedAt: string }>;
+}
+
+function verifyGithubMaintainerReviewActor(input: {
+  ghPath: string;
+  expected: ProductionReleaseExpectedIdentityV1;
+  securityReview: MaintainerSecurityReviewRecordV1;
+  gateContext: VerifiedReleaseGateContextV1;
+  dependencies: ProductionSupplyChainVerifierDependenciesV1;
+  trustedTools: ReadonlyMap<string, `sha256:${string}`>;
+}): void {
+  const result = runRequiredCommand(
+    [
+      input.ghPath,
+      'api',
+      `repos/${input.expected.repository}/actions/runs/${input.expected.runId}`,
+      '--method',
+      'GET',
+    ],
+    input.dependencies,
+    input.trustedTools,
+    'security_review_unverified',
+  );
+  try {
+    const run = z
+      .object({
+        id: z.number().int().positive(),
+        event: z.literal('workflow_dispatch'),
+        head_sha: z.literal(input.expected.commit),
+        run_attempt: z.literal(input.expected.runAttempt),
+        status: z.literal('completed'),
+        conclusion: z.literal('success'),
+        created_at: z.iso.datetime({ offset: true }),
+        run_started_at: z.iso.datetime({ offset: true }),
+        updated_at: z.iso.datetime({ offset: true }),
+        actor: z.object({ login: z.literal('ferqx') }).passthrough(),
+        triggering_actor: z.object({ login: z.literal('ferqx') }).passthrough(),
+        repository: z.object({ full_name: z.literal(input.expected.repository) }).passthrough(),
+      })
+      .passthrough()
+      .parse(JSON.parse(result.stdout));
+    if (String(run.id) !== input.expected.runId) {
+      throw new Error('GitHub run ID does not match the reviewed release run');
+    }
+    const nowMs = input.dependencies.now().getTime();
+    const createdAtMs = Date.parse(run.created_at);
+    const runStartedAtMs = Date.parse(run.run_started_at);
+    const updatedAtMs = Date.parse(run.updated_at);
+    const reviewedAtMs = Date.parse(input.securityReview.reviewedAt);
+    const evaluatedAtMs = Date.parse(input.gateContext.evaluatedAt);
+    if (!Number.isFinite(nowMs)) throw new Error('Verifier current time is invalid');
+    if (
+      createdAtMs > runStartedAtMs ||
+      runStartedAtMs > reviewedAtMs ||
+      reviewedAtMs > evaluatedAtMs ||
+      evaluatedAtMs > updatedAtMs ||
+      updatedAtMs > nowMs ||
+      nowMs - reviewedAtMs > input.gateContext.reviewMaxAgeSeconds * 1000 ||
+      input.gateContext.executionWindows.some(
+        ({ startedAt, endedAt }) =>
+          Date.parse(startedAt) < runStartedAtMs || Date.parse(endedAt) > updatedAtMs,
+      )
+    ) {
+      throw new Error('Maintainer review is stale or outside the authenticated GitHub run window');
     }
   } catch (error) {
     throw new ProductionSupplyChainVerificationError(
@@ -1200,50 +1282,108 @@ function verifySecurityReviewEvidence(input: {
 
 function verifyGateDecision(input: {
   path: string;
+  policyPath: string;
+  evidenceBundlePath: string;
+  securityReviewPath: string;
   expected: ProductionReleaseExpectedIdentityV1;
   expectedDecisionDigest: string;
   payloadDigest: string;
-  nativeLauncherDigest: string;
-  nativeLauncherArchivePath: string;
   manifestDigest: string;
-  securityReviewEvidenceDigest: string;
-}): void {
-  let parsed: z.infer<typeof gateDecisionSchema>;
+  manifestPath: string;
+}): VerifiedReleaseGateContextV1 {
   try {
-    parsed = gateDecisionSchema.parse(JSON.parse(readFileSync(input.path, 'utf8')));
+    const policy = verifyReleaseGatePolicyV1(JSON.parse(readFileSync(input.policyPath, 'utf8')));
+    const evidence = verifyReleaseEvidenceBundleV1(
+      JSON.parse(readFileSync(input.evidenceBundlePath, 'utf8')),
+    );
+    const parsed = verifyReleaseGateDecisionV1(JSON.parse(readFileSync(input.path, 'utf8')));
+    const reviewRecord = maintainerSecurityReviewRecordV1Schema.parse(
+      JSON.parse(readFileSync(input.securityReviewPath, 'utf8')),
+    );
+    const replayed = evaluateReleaseGateV1({
+      policy,
+      evidence,
+      artifactIdentity: parsed.artifactIdentity,
+      evaluatedAt: parsed.evaluatedAt,
+    });
+    const expectedArtifactIdentityValue = expectedArtifactIdentity(input);
+    const exactGateSet =
+      new Set(parsed.gates.map((gate) => gate.gate)).size === RELEASE_GATE_IDS.length &&
+      RELEASE_GATE_IDS.every((gate) => parsed.gates.some((entry) => entry.gate === gate));
+    const securityResults = evidence.results.filter(
+      (result) => result.kind === 'maintainer_security_review',
+    );
+    const reviewRequirement = policy.requirements.find(
+      (requirement) => requirement.kind === 'maintainer_security_review',
+    );
+    if (
+      parsed.decisionDigest !== input.expectedDecisionDigest ||
+      replayed.decisionDigest !== parsed.decisionDigest ||
+      parsed.overall !== 'approved_candidate' ||
+      parsed.evidenceBundleDigest !== evidence.bundleDigest ||
+      policy.releaseWorkflowSha !== input.expected.workflowSha ||
+      !Buffer.from(canonicalJsonBytes(parsed.artifactIdentity)).equals(
+        Buffer.from(canonicalJsonBytes(expectedArtifactIdentityValue)),
+      ) ||
+      !exactGateSet ||
+      parsed.gates.some((gate) => gate.status !== 'passed') ||
+      parsed.requirements.some((requirement) => requirement.status !== 'passed') ||
+      parsed.requiredManualApprovals.length !== 0 ||
+      securityResults.length !== 1 ||
+      securityResults[0]?.maintainerReview?.recordDigest !== reviewRecord.recordDigest ||
+      reviewRequirement?.maxAgeSeconds === undefined ||
+      evidence.results.some((result) => !matchesExpectedReleaseExecution(result, input.expected))
+    ) {
+      throw new Error(
+        'Gate decision is incomplete, identity-mismatched, or not approved by every required Gate',
+      );
+    }
+    return {
+      evaluatedAt: parsed.evaluatedAt,
+      reviewMaxAgeSeconds: reviewRequirement.maxAgeSeconds,
+      executionWindows: evidence.results.map(({ executionIdentity }) => ({
+        startedAt: executionIdentity.startedAt,
+        endedAt: executionIdentity.endedAt,
+      })),
+    };
   } catch (error) {
     throw new ProductionSupplyChainVerificationError(
       'gate_not_approved',
       error instanceof Error ? error.message : String(error),
     );
   }
-  const { decisionDigest, ...gateMaterial } = parsed;
-  const reconstructedDecisionDigest = sha256DomainSeparated(
-    RELEASE_GATE_DECISION_DIGEST_DOMAIN,
-    canonicalJsonBytes(gateMaterial),
-  );
-  const exactGateSet =
-    new Set(parsed.gates.map((gate) => gate.gate)).size === RELEASE_GATE_IDS.length &&
-    RELEASE_GATE_IDS.every((gate) => parsed.gates.some((entry) => entry.gate === gate));
+}
+
+function matchesExpectedReleaseExecution(
+  result: ReturnType<typeof verifyReleaseEvidenceBundleV1>['results'][number],
+  expected: ProductionReleaseExpectedIdentityV1,
+): boolean {
+  const execution = result.executionIdentity;
   if (
-    decisionDigest !== input.expectedDecisionDigest ||
-    reconstructedDecisionDigest !== decisionDigest ||
-    parsed.artifactIdentity.commit !== input.expected.commit ||
-    parsed.artifactIdentity.trustedVerifierCommit !== input.expected.trustedVerifierCommit ||
-    parsed.artifactIdentity.payloadSha256 !== input.payloadDigest ||
-    parsed.artifactIdentity.nativeLauncherSha256 !== input.nativeLauncherDigest ||
-    parsed.artifactIdentity.nativeLauncherArchivePath !== input.nativeLauncherArchivePath ||
-    parsed.artifactIdentity.canonicalManifestDigest !== input.manifestDigest ||
-    parsed.artifactIdentity.securityReviewEvidenceDigest !== input.securityReviewEvidenceDigest ||
-    parsed.artifactIdentity.canonicalRepository !== input.expected.repository ||
-    parsed.artifactIdentity.repositoryId !== input.expected.repositoryNodeId ||
-    !exactGateSet
+    result.kind === 'maintainer_security_review'
+      ? execution.source !== 'github_maintainer_review'
+      : execution.source !== 'github_actions'
   ) {
-    throw new ProductionSupplyChainVerificationError(
-      'gate_not_approved',
-      'Gate decision is incomplete, identity-mismatched, or not approved by every required Gate',
-    );
+    return false;
   }
+  if (execution.source !== 'github_actions' && execution.source !== 'github_maintainer_review') {
+    return false;
+  }
+  return (
+    execution.canonicalRepository === expected.repository &&
+    execution.repositoryId === expected.repositoryNodeId &&
+    execution.workflowPath === expected.workflowPath &&
+    execution.workflowRef === expected.workflowRef &&
+    execution.workflowSha === expected.workflowSha &&
+    execution.oidcIssuer === GITHUB_ACTIONS_OIDC_ISSUER &&
+    execution.ref === expected.ref &&
+    execution.runId === expected.runId &&
+    execution.runAttempt === expected.runAttempt &&
+    execution.commit === expected.commit &&
+    (execution.source !== 'github_maintainer_review' ||
+      (execution.actorIdentity === MAINTAINER_REVIEW_IDENTITY &&
+        execution.reviewerIdentity === MAINTAINER_REVIEW_IDENTITY))
+  );
 }
 
 function runRequiredCommand(
@@ -1357,6 +1497,7 @@ if (import.meta.main) {
   const result = verifyProductionSupplyChainAdmissionV1(input, {
     execute: executeCommand,
     runtime: { platform: process.platform, arch: process.arch },
+    now: () => new Date(),
   });
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
   if (!result.productionAccepted || !PRODUCTION_SUPPLY_CHAIN_ADMISSION_ENABLED) {
