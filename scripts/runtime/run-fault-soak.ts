@@ -59,13 +59,13 @@ const PROBES: readonly ProbeDefinition[] = [
     id: 'long_runtime_replay',
     args: [
       'test',
-      'tests/runtime/stability.test.ts',
+      'tests/runtime/fault-soak-long-runtime-lifecycle.test.ts',
       'tests/runtime/agent.integration.test.ts',
       'tests/runtime/context-compaction.test.ts',
       'tests/runtime/fault-soak-runtime-budget.test.ts',
     ],
     qualificationLifecycleFiles: [
-      'tests/runtime/stability.test.ts',
+      'tests/runtime/fault-soak-long-runtime-lifecycle.test.ts',
       'tests/runtime/fault-soak-runtime-budget.test.ts',
     ],
     terminalEvidence: {

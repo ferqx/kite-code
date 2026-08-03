@@ -236,7 +236,11 @@ describe('Runtime run deadline', () => {
           type: 'resource_budget.configured',
           runId: 'deadline-completed-budget',
           startedAt: startedAt.toISOString(),
-          deadlineAt: new Date(startedAt.getTime() + 300).toISOString(),
+          // The model must finish before the deadline, while the consumer
+          // intentionally remains slow after run.completed. Keep the same CI
+          // scheduling margin as the other deadline fixtures so host load
+          // cannot turn this into an admission-race test.
+          deadlineAt: new Date(startedAt.getTime() + 1_500).toISOString(),
           budget: LIMITED_RESOURCE_BUDGET_V1,
         },
       );
@@ -274,7 +278,7 @@ describe('Runtime run deadline', () => {
       )) {
         events.push(event);
         if (event.type === 'run.completed') {
-          await new Promise((resolve) => setTimeout(resolve, 400));
+          await new Promise((resolve) => setTimeout(resolve, 1_600));
         }
       }
 

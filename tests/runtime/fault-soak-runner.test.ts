@@ -264,14 +264,19 @@ describe('runtime fault soak runner', () => {
 
   test('rejects telemetry when any declared qualification lifecycle is omitted', () => {
     const records = Array.from({ length: 9 }, (_, index) =>
-      telemetryRecord(index + 1, 100 + index, { lifecycleId: 'stability.test.ts' }),
+      telemetryRecord(index + 1, 100 + index, {
+        lifecycleId: 'fault-soak-long-runtime-lifecycle.test.ts',
+      }),
     );
 
     expect(
       qualificationTelemetryMetric(records, 'rssBytes', {
         caseId: 'long_runtime_replay',
         repeatCount: 9,
-        expectedLifecycleIds: new Set(['stability.test.ts', 'fault-soak-runtime-budget.test.ts']),
+        expectedLifecycleIds: new Set([
+          'fault-soak-long-runtime-lifecycle.test.ts',
+          'fault-soak-runtime-budget.test.ts',
+        ]),
         attemptNonce: 'attempt-nonce',
       }),
     ).toMatchObject({
@@ -285,7 +290,7 @@ describe('runtime fault soak runner', () => {
       ...Array.from({ length: 9 }, (_, index) =>
         telemetryRecord(index + 1, 100 + index, {
           pid: 42,
-          lifecycleId: 'stability.test.ts',
+          lifecycleId: 'fault-soak-long-runtime-lifecycle.test.ts',
         }),
       ),
       ...Array.from({ length: 9 }, (_, index) =>
@@ -298,7 +303,10 @@ describe('runtime fault soak runner', () => {
     const metric = qualificationTelemetryMetric(records, 'rssBytes', {
       caseId: 'long_runtime_replay',
       repeatCount: 9,
-      expectedLifecycleIds: new Set(['stability.test.ts', 'fault-soak-runtime-budget.test.ts']),
+      expectedLifecycleIds: new Set([
+        'fault-soak-long-runtime-lifecycle.test.ts',
+        'fault-soak-runtime-budget.test.ts',
+      ]),
       attemptNonce: 'attempt-nonce',
     });
     expect(metric).toMatchObject({ supported: true });

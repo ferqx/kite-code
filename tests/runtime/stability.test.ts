@@ -5,19 +5,9 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { assertRuntimeStateInvariants, RuntimeInvariantError } from '@/core/runtime/invariants';
 import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
-
-function queuedEvent(index: number): RuntimeEvent {
-  return {
-    type: 'tool.queued',
-    toolCallId: `read-${index}`,
-    name: 'read_file',
-    args: { path: `file-${index}.ts` },
-  };
-}
 
 describe('Runtime stability invariants', () => {
   test('rejects duplicate tool references and terminal scheduled tools', () => {
@@ -157,16 +147,6 @@ describe('Runtime stability invariants', () => {
     }
     kernel.close();
   });
-
-  test('replays a long deterministic event stream without violating invariants', () => {
-    let state = createInitialRuntimeState({ threadId: 'stress', userId: 'u', workspace: '/' });
-    for (let index = 0; index < 10_000; index++) {
-      state = reduceRuntimeState(state, queuedEvent(index));
-      if (index % 100 === 0) assertRuntimeStateInvariants(state);
-    }
-    expect(Object.keys(state.tools.calls)).toHaveLength(10_000);
-    expect(state.tools.queue).toHaveLength(10_000);
-  }, 15_000);
 
   test('replays durable events after the snapshot position during recovery', () => {
     const directory = mkdtempSync(join('/tmp', 'kite-runtime-tail-'));
