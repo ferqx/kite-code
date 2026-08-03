@@ -7,6 +7,11 @@
       "documents": ["docs/space/plans/README.md"]
     },
     {
+      "id": "install-platform-compatibility",
+      "sources": ["scripts/postinstall.js", "tests/postinstall.test.ts"],
+      "documents": ["docs/active/execution-platform-support.md"]
+    },
+    {
       "id": "runtime-kernel",
       "sources": ["src/core/runtime/**"],
       "excludeSources": ["src/core/runtime/agent.ts"],

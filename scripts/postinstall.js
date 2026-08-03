@@ -5,22 +5,29 @@
 // This script downloads the Windows lefthook binary as a fallback and patches
 // get-exe.js to find it when the platform-specific package is missing.
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const LEFTHOOK_VERSION = '2.1.9';
-const LEFTHOOK_DIR = import.meta.dirname.replace(/\\/g, '/');
+const MODULE_PATH = fileURLToPath(import.meta.url);
+const LEFTHOOK_DIR = dirname(MODULE_PATH).replace(/\\/g, '/');
 const NODE_MODULES = resolve(LEFTHOOK_DIR, '..', 'node_modules');
 const GET_EXE_PATH = resolve(NODE_MODULES, 'lefthook', 'get-exe.js');
 const WIN_EXE_PATH = resolve(NODE_MODULES, 'lefthook_win.exe');
+const require = createRequire(import.meta.url);
 
 async function main() {
   // Only needed on Windows
   if (process.platform !== 'win32') {
     // Still run lefthook install
     try {
-      execSync('npx lefthook install -f', { stdio: 'inherit', cwd: resolve(NODE_MODULES, '..') });
+      execFileSync('bun', ['x', 'lefthook', 'install', '-f'], {
+        stdio: 'inherit',
+        cwd: resolve(NODE_MODULES, '..'),
+      });
     } catch {}
     return;
   }
@@ -65,10 +72,17 @@ async function main() {
   // Run lefthook install via patched get-exe
   try {
     const exe = require(GET_EXE_PATH).getExePath();
-    execSync(`"${exe}" install -f`, { stdio: 'inherit', cwd: resolve(NODE_MODULES, '..') });
+    execFileSync(exe, ['install', '-f'], {
+      stdio: 'inherit',
+      cwd: resolve(NODE_MODULES, '..'),
+    });
   } catch {
     // Non-critical — user can run manually
   }
 }
 
-main().catch(() => {});
+// Importing the module is a side-effect-free compatibility check. Package
+// managers execute the file directly, which is the only path that installs hooks.
+if (process.argv[1] && resolve(process.argv[1]) === MODULE_PATH) {
+  main().catch(() => {});
+}
