@@ -39,6 +39,11 @@ seed 只决定每轮 case 的旋转顺序；不能减少固定 case 集，也不
 
 qualification 必需指标为 child RSS、active resource、FD、process listener、active handle、owned descendant PID、Git worktree inspection，以及 long-runtime attempt 的 actual Runtime budget ledger receipt。只有 warm-up 后在同一 PID、同一 process start nonce 内执行 bounded repeated lifecycle 的资源样本才能标记 `qualificationEligible: true`；每个 case 的 attempt iteration 必须精确覆盖 `1..8`。由 fault-soak telemetry preload 采集的 Bun test repeated lifecycle 在 before/after 采样边界各执行两次强制 GC，并在 GC 前、两次 GC 之间及末次 GC 后各让出一个 event-loop turn，使第一轮 finalizer 安排的清理先完成；这只移除不可达的 fixture/JIT 临时对象，不改变仍被 Runtime 活引用保留的对象，GC/settle 失败必须使 probe 失败。CI fresh-process diagnostic 与使用独立采样 fixture 的 TUI Ink lifecycle 不执行该 preload settle。warm-up point 固定 `sequence=0`，before/after 必须为有限数、duration 非负、deadline 为正且 cleanup 已确认；8 个 measured lifecycle point 必须携带 before/after、连续 `sequence=1..8`、正 deadline 和 cleanup receipt。跨 metric 的 lifecycle/process provenance 使用结构化字段比较，不能用允许字段边界碰撞的分隔符拼接。每个 attempt 的 `after - before` 超过下列阈值就是 hard failure，不能由跨轮或跨进程样本形状掩盖；此外，最后 8 个 `after` 样本中至少 6 个相邻步骤增长且首尾增长超过同一阈值时，也视为持续正斜率：
 
+long-runtime 的 repeated resource lifecycle 固定使用只包含 10,000-event replay 的
+`fault-soak-long-runtime-lifecycle.test.ts`，并与 actual Runtime budget lifecycle 分组保留。其他
+SQLite corruption/recovery stability tests 仍进入默认功能门禁，但不得混入 long-replay RSS lifecycle；
+这样资源门禁测量的是已声明工作负载，而不是同文件中无关 fixture 的 allocator 叠加。
+
 - RSS：32 MiB；
 - active resource、FD、listener、handle：2。
 
@@ -64,3 +69,5 @@ Runtime 韧性结论，仍必须绑定上文默认分支 run、独立 verifier �
 专门验证下游统一取消信号的 wall-clock deadline fixture 必须给 provider 或 interaction 留出在繁忙
 CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若 deadline 在 provider admission 前
 到期，这是另一条合法的 fail-closed 路径，不能用来否定取消传播，也不能与 in-flight 断言混为一谈。
+验证“原子完成后慢 consumer 不得反向 abort”的 fixture 同样先保留该调度余量，再让 consumer 明确
+跨过 deadline；不得使用会在 hosted runner 负载下先于 `run.completed` 到期的亚秒窗口制造竞态。

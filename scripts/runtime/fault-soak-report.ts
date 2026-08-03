@@ -25,7 +25,10 @@ export const RUNTIME_FAULT_SOAK_CASE_IDS = [
 export const RUNTIME_FAULT_SOAK_QUALIFICATION_LIFECYCLE_IDS: Readonly<
   Record<RuntimeFaultSoakCaseId, readonly string[]>
 > = Object.freeze({
-  long_runtime_replay: ['stability.test.ts', 'fault-soak-runtime-budget.test.ts'],
+  long_runtime_replay: [
+    'fault-soak-long-runtime-lifecycle.test.ts',
+    'fault-soak-runtime-budget.test.ts',
+  ],
   subagent_cancel_recovery: ['cancel-resume.test.ts'],
   model_transient_stream: ['agent-deadline.test.ts'],
   mcp_churn: ['mcp-supervisor.test.ts'],
