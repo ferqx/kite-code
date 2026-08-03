@@ -30,6 +30,14 @@ const repeatCount = positiveInteger(
 const repeatedFiles = new Set(
   readOptions(args.slice(0, separator), '--repeat-file').filter(Boolean),
 );
+const prewarmFiles = new Set(
+  readOptions(args.slice(0, separator), '--prewarm-file').filter(Boolean),
+);
+for (const file of prewarmFiles) {
+  if (!repeatedFiles.has(file)) {
+    throw new Error(`--prewarm-file must also be declared as --repeat-file: ${file}`);
+  }
+}
 const testArgs = args.slice(separator + 1);
 const patternIndex = testArgs.indexOf('-t');
 const files = (patternIndex >= 0 ? testArgs.slice(0, patternIndex) : testArgs).filter(Boolean);
@@ -39,7 +47,10 @@ if (files.length === 0) throw new Error('fault soak test case requires at least 
 for (const file of files) {
   const absoluteFile = resolve(file);
   const lifecycleGroupNonce = randomUUID();
-  const fileRepeatCount = repeatedFiles.has(basename(file)) ? repeatCount : 1;
+  const fileName = basename(file);
+  const fileRepeatCount = repeatedFiles.has(fileName)
+    ? repeatCount + (prewarmFiles.has(fileName) ? 1 : 0)
+    : 1;
   console.log(`[fault-soak-case] ${file}`);
   const proc = Bun.spawn(
     [
