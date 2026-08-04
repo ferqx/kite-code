@@ -54,13 +54,27 @@ export type ActiveInput = {
 };
 
 function currentPromptInput(lines: readonly string[]): string | undefined {
-  let promptLine = -1;
+  const promptLines: number[] = [];
   for (let index = lines.length - 1; index >= 0; index--) {
-    if (/^\s*❯(?:\s|$)/.test(lines[index]!)) {
-      promptLine = index;
-      break;
-    }
+    if (!/^\s*❯(?:\s|$)/.test(lines[index]!)) continue;
+    promptLines.push(index);
   }
+  // Choice overlays also use `❯` for their selected row. Prefer a prompt whose
+  // logical input rows lead directly into InputLine's bottom separator. Keep a
+  // last-prompt fallback for lightweight harness fixtures without full chrome.
+  const promptLine =
+    promptLines.find((index) => {
+      const promptPrefix = /^\s*❯\s?/.exec(lines[index]!)?.[0] ?? '❯ ';
+      const continuationIndent = ' '.repeat(stringWidth(promptPrefix));
+      for (let lineIndex = index + 1; lineIndex < lines.length; lineIndex++) {
+        const line = lines[lineIndex]!;
+        if (/^[─━═]/u.test(line.trim())) return true;
+        if (!line.startsWith(continuationIndent) || line.trim().length === 0) return false;
+      }
+      return false;
+    }) ??
+    promptLines[0] ??
+    -1;
   if (promptLine < 0) return undefined;
 
   const promptPrefix = /^\s*❯\s?/.exec(lines[promptLine]!)?.[0] ?? '❯ ';
@@ -114,10 +128,27 @@ export function activeInput(viewport: string): ActiveInput | undefined {
     }
   }
 
-  for (const [marker, kind] of [
-    ['命令匹配 ', 'slash-query'],
-    ['文件匹配 ', 'file-query'],
+  for (const [title, command] of [
+    ['模型选项', '/model '],
+    ['推理深度', '/effort '],
+    ['主题选项', '/theme '],
+    ['权限模式', '/permissions '],
   ] as const) {
+    if (!lines.some((line) => line.includes(title))) continue;
+    const promptInput = currentPromptInput(lines);
+    if (promptInput?.startsWith(command)) {
+      return { kind: 'slash-argument-query', value: promptInput };
+    }
+  }
+
+  if (lines.some((line) => line.includes('命令匹配'))) {
+    const promptInput = currentPromptInput(lines);
+    if (promptInput !== undefined) {
+      return { kind: 'slash-query', value: promptInput };
+    }
+  }
+
+  for (const [marker, kind] of [['文件匹配 ', 'file-query']] as const) {
     const queryLine = lines.find((line) => line.includes(marker));
     if (queryLine) {
       const value = queryLine
@@ -136,6 +167,9 @@ export function activeInput(viewport: string): ActiveInput | undefined {
         .replace(/\|?\s*│?\s*$/, '')
         .replace(/_$/, '')
         .trim();
+      if (value === '—' && !searchLine.slice(0, searchLine.indexOf('搜索:')).includes('❯')) {
+        return undefined;
+      }
       return { kind: 'session-search', value: normalizeInputEcho(value) };
     }
   }
@@ -164,9 +198,11 @@ async function waitForInputEcho(
 ): Promise<void> {
   const effectiveTimeout = tuiWaitTimeout(timeoutMs);
   const start = Date.now();
+  let lastInput: ActiveInput | undefined;
   while (Date.now() - start < effectiveTimeout) {
     await tui.settleScreen();
     const current = activeInput(tui.inputViewport());
+    lastInput = current;
     if (
       current?.value === expectedValue &&
       (current.kind === expectedKind || (allowFocusTransfer && expectedValue.length > 0))
@@ -176,7 +212,8 @@ async function waitForInputEcho(
     await sleep(tuiPollInterval(25));
   }
   throw new Error(
-    `Timeout (${effectiveTimeout}ms) waiting for active input value ${JSON.stringify(expectedValue)}`,
+    `Timeout (${effectiveTimeout}ms) waiting for active input value ${JSON.stringify(expectedValue)}; ` +
+      `last active input was ${JSON.stringify(lastInput)}. Input viewport:\n${tui.inputViewport().slice(-1_000)}`,
   );
 }
 

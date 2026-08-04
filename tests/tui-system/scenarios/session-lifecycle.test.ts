@@ -181,7 +181,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   // ── SessionSelector: D-key delete confirm ───────────────
 
   step(
-    'D key triggers delete confirmation, Enter confirms deletion',
+    'D key opens a safe-default confirmation, Down then Enter deletes',
     async () => {
       // Open session selector
       await submitCommand(tui, '/sessions');
@@ -213,15 +213,14 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // then clear it and wait for the final full-list reload. D is deliberately
       // disabled while search is non-empty, so navigation happens only after
       // that reload has no pending query transition left.
+      tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), '❯ 搜索:', 5_000);
       await typeText(tui, 'session A');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
           return (
-            screenHasSessionRow(viewport, 'Message in session A', {
-              selected: true,
-              active: false,
-            }) &&
+            screenHasSessionRow(viewport, 'Message in session A', { active: false }) &&
             !screenHasSessionRow(viewport, 'Message in session B') &&
             !screenContains(viewport, 'Loading...')
           );
@@ -235,10 +234,8 @@ describe('TUI PTY System — Session Lifecycle', () => {
           const viewport = tui.viewport();
           return (
             screenHasSessionRow(viewport, 'Message in session A', { active: false }) &&
-            screenHasSessionRow(viewport, 'Message in session B', {
-              selected: true,
-              active: true,
-            }) &&
+            screenHasSessionRow(viewport, 'Message in session B', { active: true }) &&
+            screenContains(viewport, '❯ 搜索:') &&
             !screenContains(viewport, 'Loading...')
           );
         },
@@ -246,6 +243,16 @@ describe('TUI PTY System — Session Lifecycle', () => {
         10_000,
       );
 
+      tui.write('\x1b[B');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui.viewport(), 'Message in session B', {
+            selected: true,
+            active: true,
+          }),
+        'active session B row to become selected after leaving search',
+        5_000,
+      );
       tui.write('\x1b[B');
       await waitForCondition(
         () =>
@@ -263,10 +270,15 @@ describe('TUI PTY System — Session Lifecycle', () => {
 
       const confirmOutput = tui.viewport();
       // Confirmation dialog should appear
-      expect(screenContains(confirmOutput, '确认')).toBe(true);
-      expect(screenContains(confirmOutput, 'Enter')).toBe(true);
+      expect(screenContains(confirmOutput, '删除确认')).toBe(true);
+      expect(screenContains(confirmOutput, '❯ 保留会话')).toBe(true);
+      expect(screenContains(confirmOutput, '永久删除')).toBe(true);
+      expect(screenContains(confirmOutput, 'Enter 确认')).toBe(true);
 
-      // Press Enter to confirm deletion
+      // Move away from the safe default before confirming deletion.
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '❯ 永久删除', 5_000);
+
       tui.write('\r');
       await waitForTuiReady(tui);
       const deletedSessionId = sessionIdsBeforeNew[0]!;
@@ -318,7 +330,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
   // ── SessionSelector: D-key Esc cancel ─────────────────
 
   step(
-    'D key then Escape cancels deletion, session remains',
+    'Enter on the safe default and Escape both cancel deletion',
     async () => {
       // The previous test deleted one session, so only 1 remains.
       // Attempt to delete the active (only) session but cancel.
@@ -333,12 +345,21 @@ describe('TUI PTY System — Session Lifecycle', () => {
       await waitForText(() => tui.viewport(), '确认', 5000);
 
       const confirmOutput = tui.viewport();
-      expect(screenContains(confirmOutput, '确认')).toBe(true);
+      expect(screenContains(confirmOutput, '删除确认')).toBe(true);
+      expect(screenContains(confirmOutput, '❯ 保留会话')).toBe(true);
 
-      // Press Escape to cancel deletion
+      // Enter confirms the selected safe default, returning to the list.
+      tui.write('\r');
+      await waitForCondition(
+        () => screenContains(tui.viewport(), '搜索') && !screenContains(tui.viewport(), '删除确认'),
+        'safe default to retain the session and return to the selector',
+        5_000,
+      );
+
+      // Escape is also always safe.
+      tui.write('D');
+      await waitForText(() => tui.viewport(), '删除确认', 5_000);
       tui.write('\x1b');
-      await waitForTuiReady(tui);
-      await submitCommand(tui, '/sessions');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
@@ -352,7 +373,7 @@ describe('TUI PTY System — Session Lifecycle', () => {
             !screenContains(viewport, 'Loading...')
           );
         },
-        'session selector to reload the retained session after cancel',
+        'session selector to remain open with the retained session after cancel',
         5_000,
       );
 

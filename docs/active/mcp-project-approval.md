@@ -39,7 +39,7 @@ Approval Store 和项目配置信任决定属于 MCP control plane，不写入�
 
 ## TUI 行为
 
-`/mcp` 注册在 TUI 的静态斜杠命令表中。输入 `/m`、`/mc` 或完整命令时，候选面板显示 `/mcp` 及“管理 MCP Servers”说明；Tab、右方向键和 Enter 遵循通用补全行为。命令只接受无参数形式。
+`/mcp` 注册在 TUI 的静态斜杠命令表中。输入 `/m`、`/mc` 或完整命令时，候选面板显示 `/mcp` 及“管理 MCP Server”说明；Tab、右方向键和 Enter 遵循通用补全行为。命令只接受无参数形式。
 
 Supervisor 发布 effective `pending_approval` 或 `rejected` 项目条目后，它出现在 Server List。用户进入 Detail 并选择 Review server/Review decision 后，Review 页面只展示 Server 名称、transport、stdio command 或 HTTP origin 和固定信任警告；不会展示 URL path/query/fragment/userinfo、env、header 或参数内容。Select 默认 Decide later，并提供 Approve and connect 与 Reject server：
 

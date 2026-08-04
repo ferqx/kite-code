@@ -906,6 +906,12 @@ test('runRuntimeLoop persists and yields a durable terminal output event', async
     type: 'turn.completed',
     turnId: kernel.getState().turn.turnId,
   });
+  const recoveryPoints = store.listNamedSnapshots('final');
+  expect(recoveryPoints).toHaveLength(1);
+  expect(recoveryPoints[0]?.eventPosition).toBe(store.getLastEventPosition('final'));
+  expect(
+    store.loadNamedSnapshot<RuntimeState>('final', recoveryPoints[0]!.snapshotId)?.turn.status,
+  ).toBe('completed');
   kernel.close();
 });
 

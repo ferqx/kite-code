@@ -20,7 +20,7 @@ RuntimeState
 | `runtime/kernel.ts` | Effect lease、事件提交、状态权威 |
 | `runtime/scheduler.ts` | 根据 State 决定下一 Effect |
 | `runtime/reducer.ts` | 将 Event 归纳为新 State |
-| `runtime/executor.ts` | 把 Effect 路由到模型、工具、验证或交互边界；持有 RuntimeStore 引用，供工具写入前记录文件原像（ADR-0025 §4） |
+| `runtime/executor.ts` | 把 Effect 路由到模型、工具、验证或交互边界；持有 RuntimeStore 引用，供工具写入前记录文件原像（ADR-0042 §4） |
 | `runtime/runner.ts` | 驱动 Kernel 直至暂停或完成 |
 | `runtime/store.ts` | 事件、快照、恢复点与文件原像 |
 

@@ -44,11 +44,7 @@ const SESSION_ACTIONS: ReadonlySet<string> = new Set([
   'SET_THINKING_LEVEL',
 ]);
 
-const CHECKPOINT_ACTIONS: ReadonlySet<string> = new Set([
-  'REVERT_TO_CHECKPOINT',
-  'FORK_FROM_CHECKPOINT',
-  'SET_CHECKPOINTS',
-]);
+const CHECKPOINT_ACTIONS: ReadonlySet<string> = new Set(['EXECUTE_REWIND', 'SET_CHECKPOINTS']);
 
 const SKILL_ACTIONS: ReadonlySet<string> = new Set(['SET_SKILL_MANIFESTS', 'LIST_SKILLS']);
 

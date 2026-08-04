@@ -86,6 +86,12 @@ describe('parseSlashCommand', () => {
     });
   });
 
+  test('parses diagnostic and session utility commands exposed by completion', () => {
+    expect(parseSlashCommand('/rewind')).toEqual({ type: 'rewind' });
+    expect(parseSlashCommand('/export')).toEqual({ type: 'export' });
+    expect(parseSlashCommand('/context')).toEqual({ type: 'context' });
+  });
+
   // ── /clear ──
   test('parses /clear', () => {
     expect(parseSlashCommand('/clear')).toEqual({ type: 'clear' });
@@ -98,6 +104,10 @@ describe('parseSlashCommand', () => {
   // ── /help ──
   test('parses /help', () => {
     expect(parseSlashCommand('/help')).toEqual({ type: 'help' });
+  });
+
+  test('parses command names case-insensitively like the suggestion matcher', () => {
+    expect(parseSlashCommand('/HELP')).toEqual({ type: 'help' });
   });
 
   test('parses shorthand /h', () => {

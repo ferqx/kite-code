@@ -50,6 +50,30 @@ describe('headless terminal screen', () => {
     wrappedScreen.dispose();
   });
 
+  test('input projection omits a slash completion ghost suffix', async () => {
+    const screen = createHeadlessTerminalScreen(20, 3);
+    screen.append(new TextEncoder().encode('❯ /mc\x1b[7mp\x1b[27m'));
+    await screen.settled();
+
+    expect(screen.viewport()).toBe('❯ /mcp');
+    expect(screen.inputViewport()).toBe('❯ /mc');
+    screen.dispose();
+  });
+
+  test('input projection uses the real prompt when a choice overlay also has a selected row', async () => {
+    const screen = createHeadlessTerminalScreen(40, 8);
+    screen.append(
+      new TextEncoder().encode(
+        '❯ /mc\x1b[7mp\x1b[27m\r\n────────\r\nmock-model · [接受编辑]\r\n\r\n── 命令匹配 ──\r\n\r\n  ❯ /mcp    MCP 控制面板\r\n ↑↓ 导航  Enter 确认',
+      ),
+    );
+    await screen.settled();
+
+    expect(screen.inputViewport()).toContain('❯ /mc\n────────');
+    expect(screen.inputViewport()).toContain('  ❯ /mcp    MCP 控制面板');
+    screen.dispose();
+  });
+
   test('input projection follows Ink continuation rows but leaves modal chrome unchanged', async () => {
     const screen = createHeadlessTerminalScreen(20, 5);
     screen.append(
@@ -151,6 +175,26 @@ describe('terminal condition helpers', () => {
       false,
     );
     expect(screenHasSessionRow('│ Loading... │\n会话列表', 'Message in session B')).toBe(false);
+
+    const unifiedSelector = [
+      '❯ Message in session B',
+      '── 会话列表 ───────────────── 2 / 2 ──',
+      '  Message in session A                         2026-08-04 09:30:00',
+      '❯ Message in session B               当前      2026-08-04 09:31:00',
+      '↑↓ 导航  Enter 选择  D 删除  Esc 关闭',
+    ].join('\n');
+    expect(
+      screenHasSessionRow(unifiedSelector, 'Message in session B', {
+        selected: true,
+        active: true,
+      }),
+    ).toBe(true);
+    expect(screenHasSessionRow(unifiedSelector, 'Message in session A', { active: false })).toBe(
+      true,
+    );
+    expect(screenHasSessionRow('会话列表\n❯ Message in session B', 'Message in session B')).toBe(
+      false,
+    );
   });
 
   test('waits for a non-terminal condition', async () => {

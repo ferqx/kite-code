@@ -159,6 +159,14 @@ MCP Provider Action 也遵循同一边界。typed provider failure 先把原 Too
 
 RuntimeStore 的所有连接必须使用同一 journal 策略。默认在 Linux/macOS 使用 WAL；Windows 使用 DELETE journal，规避 Bun 在关闭 WAL 数据库后仍持有 WAL/SHM 文件锁的问题。连接必须在设置 journal mode 或执行 schema 写入前先安装 5000 ms `busy_timeout`，使 journal、schema 与事件写竞争都受有界等待约束。TUI 的长期 stats 连接与 AgentKernel 的 RuntimeStore 连接必须从同一策略函数取值，禁止分别硬编码 journal mode。关闭 Store 时先 finalize 缓存 statement，再执行适用的 WAL cleanup/checkpoint，最后关闭数据库。测试可通过 `faultInjectionMaxPageCount` 构造确定性 `SQLITE_FULL`；生产组合根不得设置该选项，详见 `runtime-resilience-qualification.md`。
 
+RuntimeStore 的 rewind sidecar 在每个检查点窗口保存最早文件原像和最后一次 Kite 成功写入后的
+内容指纹；恢复只有在当前内容仍匹配该指纹时才能覆盖文件。`forkSession()` 严格解析源事件，复制
+选中边界及更早的 named snapshot 和文件原像，并把 event position 重映射到新 thread；源会话保持
+不变。`restoreRuntimeStateFromStore()` 只负责严格读取、迁移和 event-tail replay，不执行持久化或
+reconciliation 副作用；`createAgentKernel()` 才保存迁移快照，并把未终结 invocation、reservation
+和 waiter 收敛为可审计的 unknown/released/cancelled 事实。这样 Session 列表读取不会因观察历史
+会话而改写 Runtime Store，真正恢复执行时仍保持保守收敛。
+
 Runtime fault/soak 的正式资格证据不是任意本地测试输出。qualification 报告必须把 GitHub repository、head SHA、ref、`workflow_ref`/`workflow_sha`、run ID/run attempt 与固定 seed/iteration 写入 canonical digest，保留逐 attempt 资源结构和 Runtime ledger receipt provenance，并由独立 verifier 重建 case/aggregate 摘要；缺少来源身份只能得到 `inconclusive`。digest 本身不提供真实性，Release Gate 还必须绑定成功的 GitHub Actions run 与被审查 head。这一证据边界不改变 Runtime 的运行时 schema，但约束哪些测试结果可以进入 Release Gate。
 
 Safe boundary 只覆盖从最旧消息开始的完整、settled、身份稳定 turn；assistant tool call 必须在边界内恰好有一个 result，非终态 tool、交错 turn、缺失或重复 pair 都会 fail closed。候选 before/after 都经统一 `buildContextProjection()` 构建，且不修改持久 transcript。`ContextHardBlock` 只通过要求 invariant reason、source digest、turn 和非空诊断证据的 correctness factory 创建；恢复事件必须精确匹配原 reason 与 source digest 才能清除。

@@ -2843,20 +2843,17 @@ describe('eventReducer (blocks model)', () => {
     });
   });
 
-  describe('REVERT_TO_CHECKPOINT / FORK_FROM_CHECKPOINT', () => {
-    test('REVERT_TO_CHECKPOINT closes panel and increments rewindCounter', () => {
+  describe('EXECUTE_REWIND', () => {
+    test('closes the panel and schedules the selected rewind scope', () => {
       let s = fresh();
-      s = { ...s, showRewind: true, rewindCounter: 0 };
-      s = dispatch(s, { type: 'REVERT_TO_CHECKPOINT', checkpointId: 'ck1' });
+      s = { ...s, showRewind: true };
+      s = dispatch(s, {
+        type: 'EXECUTE_REWIND',
+        checkpointId: 'ck1',
+        scope: 'code_and_conversation',
+      });
       expect(s.showRewind).toBe(false);
-      expect(s.rewindCounter).toBe(1);
-    });
-    test('FORK_FROM_CHECKPOINT closes panel and increments rewindCounter', () => {
-      let s = fresh();
-      s = { ...s, showRewind: true, rewindCounter: 5 };
-      s = dispatch(s, { type: 'FORK_FROM_CHECKPOINT', checkpointId: 'ck1' });
-      expect(s.showRewind).toBe(false);
-      expect(s.rewindCounter).toBe(6);
+      expect(s.checkpoints).toEqual([]);
     });
   });
 
@@ -3824,6 +3821,45 @@ describe('eventReducer (blocks model)', () => {
       const reviewState = dispatch(fresh(), { type: 'RUNTIME_EVENT', event: reviewEvent });
       expect(reviewState.interrupt?.kind).toBe('plan_review');
       expect(reviewState.status.pendingPlan?.name).toBe('Plan');
+    });
+
+    test('durable approval grant clears the Footer interrupt during replay', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-1',
+        toolCallId: 'shell-1',
+        approval: approval(),
+      });
+
+      const granted = handleRuntimeEventAction(requested, {
+        type: 'approval.granted',
+        interactionId: 'approval-1',
+        grant: 'same_command',
+      });
+
+      expect(requested.interrupt?.kind).toBe('approval');
+      expect(granted.interrupt).toBeNull();
+    });
+
+    test('a stale approval grant cannot clear a different active approval', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-current',
+        toolCallId: 'shell-current',
+        approval: approval(),
+      });
+
+      const unchanged = handleRuntimeEventAction(requested, {
+        type: 'approval.granted',
+        interactionId: 'approval-stale',
+        grant: 'approve_once',
+      });
+
+      expect(unchanged.interrupt).toEqual(requested.interrupt);
+      expect(unchanged.interrupt).toMatchObject({
+        kind: 'approval',
+        interactionId: 'approval-current',
+      });
     });
 
     test('plan review cancellation has identical live and replay projections without a banner', () => {

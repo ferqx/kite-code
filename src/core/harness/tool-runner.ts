@@ -17,6 +17,7 @@ import {
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '@/core/sandbox/execution-capability-surface';
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
@@ -77,7 +78,7 @@ function resultContentDigest(stdout: string, stderr: string, exitCode: number): 
  * Best-effort pre-image capture: a throwing recorder must never fail the tool.
  */
 function safeRecordPreimage(
-  recorder: ((path: string, content: string | null, existed: boolean) => void) | undefined,
+  recorder: FilePreimageRecorder | undefined,
   path: string,
   content: string | null,
   existed: boolean,
@@ -85,6 +86,21 @@ function safeRecordPreimage(
   if (!recorder) return;
   try {
     recorder(path, content, existed);
+  } catch {
+    /* best-effort */
+  }
+}
+
+/** 记录最后一次 Kite 写入结果，供 rewind 在覆盖前识别后续手动/Bash 修改。 */
+function safeRecordPostimage(
+  recorder: FilePreimageRecorder | undefined,
+  path: string,
+  content: string | null,
+  existed: boolean,
+): void {
+  if (!recorder?.recordPostimage) return;
+  try {
+    recorder.recordPostimage(path, content, existed);
   } catch {
     /* best-effort */
   }
@@ -163,7 +179,7 @@ export interface RunApprovedToolInput {
    * File pre-image recorder invoked before workspace writes (ADR-0042 §4),
    * enabling /rewind to restore files. Best-effort by contract.
    */
-  recordFilePreimage?: (path: string, content: string | null, existed: boolean) => void;
+  recordFilePreimage?: FilePreimageRecorder;
   /** Persists one network decision before the admitted socket can be opened. */
   recordNetworkDecision?: NetworkDecisionRecorderV1;
   /** 当前模型轮次的工具可用性快照，用于 Registry effects 分类。省略时回退到仅 workspace/threadId。 */
@@ -567,6 +583,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     );
     const result = dispatched.output;
     if (result.ok && result.content !== undefined) {
+      safeRecordPostimage(input.recordFilePreimage, editPath, result.content, true);
       tracker.record(canonicalPath, fileContentHash(result.content));
     }
     return withFailureGuidance(request, {
@@ -629,6 +646,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     const result = dispatched.output;
     if (result.ok) {
+      safeRecordPostimage(input.recordFilePreimage, filePath, normalizeEOL(content), true);
       // ADR-0042 §1 读取状态记录：写入成功后模型持有全部内容，等价于一次读取。
       // 哈希取换行正规化后的文本，与后续 read_file 回读指纹一致。
       sessionReadTracker(threadId || workspace).record(

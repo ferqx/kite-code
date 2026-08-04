@@ -69,10 +69,10 @@ describe('TUI PTY System — Approval Escape', () => {
       await submitUserMessage(tui, server, 'Create a directory', { timeout: 15000 });
 
       // Wait for approval block to render
-      await waitForText(() => tui.viewport(), '› 允许一次', 15000);
+      await waitForText(() => tui.viewport(), '工具授权', 15000);
 
       const beforeOutput = tui.viewport();
-      expect(screenContains(beforeOutput, '授权执行命令')).toBe(true);
+      expect(screenContains(beforeOutput, '工具授权')).toBe(true);
       expect(screenContains(beforeOutput, '允许一次')).toBe(true);
       expect(screenContains(beforeOutput, '拒绝')).toBe(true);
 

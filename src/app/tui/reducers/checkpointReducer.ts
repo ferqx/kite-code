@@ -5,19 +5,11 @@ import type { Action } from './actions';
 
 export function checkpointReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
-    case 'REVERT_TO_CHECKPOINT':
+    case 'EXECUTE_REWIND':
       return {
         ...state,
         showRewind: false,
         checkpoints: [],
-        rewindCounter: state.rewindCounter + 1,
-      };
-    case 'FORK_FROM_CHECKPOINT':
-      return {
-        ...state,
-        showRewind: false,
-        checkpoints: [],
-        rewindCounter: state.rewindCounter + 1,
       };
     case 'SET_CHECKPOINTS':
       return { ...state, checkpoints: action.checkpoints };

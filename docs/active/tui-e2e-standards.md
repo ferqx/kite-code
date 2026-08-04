@@ -244,6 +244,11 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 27. `submitCommand()` 不得以“命令字符已回显”作为提交完成。共享 helper 必须在发送 Enter 后确认
     active input 已离开该命令或进程已退出；若输入仍由原命令占有，只能在固定次数内重送 Enter，
     耗尽后明确失败。场景不得自行用 sleep 或无回执的单次 `write('\\r')` 替代。
+28. 共享 choice overlay 的场景必须验证当前 viewport 中的完整标题、全部可见选项、默认选中项和
+    footer，再发送导航或确认键。删除等破坏性确认必须覆盖安全默认项，先等待目标选中 marker 再
+    提交；Enter 选择安全默认和 Esc 都要证明持久状态未变。具有 browse/confirm 两层的 overlay
+    必须证明 Esc 先返回内层而不是关闭整个面板。`/rewind` 的状态化 journey 还要同时验证文件内容、
+    fork 后的 Runtime Store session 数和新会话继续回退的恢复点链，不能只依赖成功提示文本。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 

@@ -309,6 +309,35 @@ describe('TUI input helpers', () => {
     }
   });
 
+  test('activeInput ignores a slash overlay selected row below the real prompt', () => {
+    const viewport = [
+      '────────────────────',
+      '❯ /rewind',
+      '────────────────────',
+      'mock-model · [接受编辑]',
+      '',
+      '── 命令匹配 ── 1 / 1 ──',
+      '',
+      '  ❯ /rewind    回退检查点并恢复文件',
+      '',
+      ' ↑↓ 导航  Enter 确认',
+    ].join('\n');
+
+    expect(activeInput(viewport)).toEqual({ kind: 'slash-query', value: '/rewind' });
+  });
+
+  test('activeInput recognizes a unified empty slash-argument selector', () => {
+    const viewport = [
+      '❯ /theme ',
+      '────────────────────',
+      '── 主题选项 ── 1 / 5 ──',
+      '  ❯ teal',
+      '    purple',
+    ].join('\n');
+
+    expect(activeInput(viewport)).toEqual({ kind: 'slash-argument-query', value: '/theme ' });
+  });
+
   test('typeText restores a non-empty append baseline after partial delivery', async () => {
     let suffix = '';
     let transcript = '';
@@ -360,6 +389,18 @@ describe('TUI input helpers', () => {
     expect(searchInput).toBe('session 1');
   }, 10_000);
 
+  test('activeInput does not treat the inactive session-search placeholder as editable text', () => {
+    const viewport = [
+      '❯ stale main prompt',
+      '────────',
+      '── 会话列表 ── 1 / 1 ──',
+      '    搜索: —',
+      '  ❯ session 1                     2026-08-04 09:30:00',
+    ].join('\n');
+
+    expect(activeInput(viewport)).toBeUndefined();
+  });
+
   test('typeText does not accept a long message already present in history', async () => {
     const message =
       'This is a very long test message that exceeds one hundred characters and already appears in history';
@@ -408,7 +449,7 @@ describe('TUI input helpers', () => {
         return `❯ ${actual}${'auto'.slice(partial.length)}\n────────\n╭────╮\n│ 权限模式匹配 "${partial}"\n│ auto\n╰────╯`;
       }
       if (actual.startsWith('/')) {
-        return `❯ ${actual}\n────────\n╭────╮\n│ 命令匹配 ${actual}\n│ /permissions\n╰────╯`;
+        return `❯ ${actual}\n────────\n╭────╮\n│ 命令匹配\n│ /permissions\n╰────╯`;
       }
       return '❯ ';
     };

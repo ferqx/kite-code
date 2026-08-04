@@ -222,7 +222,6 @@ export interface TuiState {
   showMcp: boolean;
   showRewind: boolean;
   checkpoints: import('@/core/runtime/store').RuntimeSnapshotEntry[];
-  rewindCounter: number;
   skillManifests: import('@/core/skills/types').SkillManifest[];
   ctrlCPressed: boolean;
   sessionKey: number;
@@ -259,9 +258,13 @@ export interface TuiState {
   };
 }
 
+export type RewindScope = 'code_and_conversation' | 'conversation_only' | 'code_only';
+
 export type InterruptState =
   | {
       kind: 'approval';
+      /** Durable Runtime interaction identity, when projected from RuntimeEvent replay. */
+      interactionId?: string;
       /** Active Footer payload; absent only in legacy restored UI snapshots. */
       approval?: ToolApprovalPayload;
       /** Compatibility pointer for sessions created before approvals moved off-screen. */

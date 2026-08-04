@@ -36,11 +36,11 @@ describe('TUI PTY System — Startup', () => {
   test(
     'renders the prompt, footer, and Kite Code branding in a CI-backed PTY',
     async () => {
-      await waitForText(() => tui.viewport(), 'shortcuts', 10000);
-      const output = await waitForText(() => tui.viewport(), 'Kite Code', 5000);
+      const output = await waitForText(() => tui.viewport(), 'workspace', 10_000);
       expect(screenContains(output, '❯')).toBe(true);
-      expect(screenContains(output, 'shortcuts')).toBe(true);
       expect(screenContains(output, 'Kite Code')).toBe(true);
+      expect(screenContains(output, 'mock-model')).toBe(true);
+      expect(screenContains(output, '/model')).toBe(false);
     },
     TIMEOUT,
   );

@@ -62,13 +62,25 @@ function bufferText(
   }
 
   if (options.omitPromptCursor) {
-    let promptLineIndex = -1;
+    const promptLineCandidates: number[] = [];
     for (let index = logicalLines.length - 1; index >= 0; index--) {
       if (/^\s*❯(?:\s|$)/.test(logicalLines[index]!.text)) {
-        promptLineIndex = index;
-        break;
+        promptLineCandidates.push(index);
       }
     }
+    const promptLineIndex =
+      promptLineCandidates.find((index) => {
+        const promptPrefix = /^\s*❯\s?/.exec(logicalLines[index]!.text)?.[0] ?? '❯ ';
+        const continuationIndent = ' '.repeat(promptPrefix.length);
+        for (let lineIndex = index + 1; lineIndex < logicalLines.length; lineIndex++) {
+          const line = logicalLines[lineIndex]!.text;
+          if (/^[─━═]/u.test(line.trim())) return true;
+          if (!line.startsWith(continuationIndent) || line.trim().length === 0) return false;
+        }
+        return false;
+      }) ??
+      promptLineCandidates[0] ??
+      -1;
 
     if (promptLineIndex >= 0) {
       let inputEndLineIndex = promptLineIndex;
@@ -80,19 +92,30 @@ function bufferText(
 
       for (let index = inputEndLineIndex; index >= promptLineIndex; index--) {
         const projectionLine = logicalLines[index]!;
-        const finalPhysicalRow = projectionLine.physicalRows.at(-1);
-        const finalLine =
-          finalPhysicalRow === undefined ? undefined : buffer.getLine(finalPhysicalRow);
-        if (!projectionLine.text.endsWith(' ') || !finalLine) continue;
-        for (let column = terminal.cols - 1; column >= 0; column--) {
-          const cell = finalLine.getCell(column);
-          if (!cell || cell.getCode() === 0) continue;
-          if (cell.getChars() === ' ' && cell.isInverse()) {
-            projectionLine.text = projectionLine.text.slice(0, -1);
+        let projected = '';
+        let foundInputBoundary = false;
+        for (const physicalRow of projectionLine.physicalRows) {
+          const physicalLine = buffer.getLine(physicalRow);
+          if (!physicalLine) continue;
+          for (let column = 0; column < terminal.cols; column++) {
+            const cell = physicalLine.getCell(column);
+            if (!cell || cell.getCode() === 0) continue;
+            if (cell.isInverse()) {
+              foundInputBoundary = true;
+              break;
+            }
+            projected += cell.getChars();
           }
+          if (foundInputBoundary) break;
+        }
+        if (foundInputBoundary) {
+          // CtrlSafeTextInput renders either an inverse blank end cursor or the
+          // first character of a dimmed slash-completion suffix in inverse.
+          // Harness-owned input actions keep the logical cursor at the end, so
+          // both forms mark the boundary after the actual user input.
+          projectionLine.text = projected;
           break;
         }
-        break;
       }
     }
   }
@@ -267,17 +290,30 @@ export function screenHasSessionRow(
   if (!screenContains(raw, '会话列表')) return false;
 
   for (const line of stripAnsi(raw).split(/\r?\n/)) {
-    const borderedLine = line.trimStart();
-    if (!borderedLine.startsWith('│')) continue;
-    const nameIndex = borderedLine.indexOf(name, 1);
+    const trimmedLine = line.trim();
+    const legacyBordered = trimmedLine.startsWith('│');
+    const row = legacyBordered ? trimmedLine.slice(1, -1).trim() : trimmedLine;
+    const nameIndex = row.indexOf(name);
     if (nameIndex < 0) continue;
 
-    const prefix = borderedLine.slice(1, nameIndex);
-    const rowPrefix = /^\s*(?<cursor>>|⏳)?\s*(?<active>●)?\s*$/.exec(prefix);
+    const prefix = row.slice(0, nameIndex);
+    const suffix = row.slice(nameIndex + name.length);
+    const rowPrefix = /^\s*(?<cursor>>|❯|◌|⏳)?\s*(?<active>●)?\s*$/.exec(prefix);
     if (!rowPrefix) continue;
 
-    const selected = rowPrefix.groups?.cursor === '>';
-    const active = rowPrefix.groups?.active === '●';
+    // The current unified overlay has no side borders, so require its stable
+    // right-hand timestamp/loading column. This prevents conversation history
+    // with the same name from being mistaken for a selector row.
+    if (
+      !legacyBordered &&
+      !/\b\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b/u.test(suffix) &&
+      !suffix.includes('Loading...')
+    ) {
+      continue;
+    }
+
+    const selected = ['>', '❯', '◌', '⏳'].includes(rowPrefix.groups?.cursor ?? '');
+    const active = rowPrefix.groups?.active === '●' || /(?:^|\s)当前(?:\s|$)/u.test(suffix);
     if (expected.selected !== undefined && selected !== expected.selected) continue;
     if (expected.active !== undefined && active !== expected.active) continue;
     return true;

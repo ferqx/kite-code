@@ -125,7 +125,7 @@ export class AgentKernel {
     ]);
     this.state = nextState;
     this.appliedEventIds.add(envelope.eventId);
-    if (envelope.payload.type === 'run.completed') {
+    if (envelope.payload.type === 'turn.completed') {
       this.store.saveNamedSnapshot(
         this.state.session.threadId,
         `turn-${envelope.payload.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
@@ -162,14 +162,16 @@ export class AgentKernel {
     this.store.appendEventsAndSnapshot(this.state.session.threadId, payloads, nextState, metadata);
     this.state = nextState;
     for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
-    for (const payload of payloads) {
-      if (payload.type === 'run.completed') {
-        this.store.saveNamedSnapshot(
-          this.state.session.threadId,
-          `turn-${payload.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
-          this.state,
-        );
-      }
+    let completedTurn: RuntimeEvent | undefined;
+    for (const event of payloads) {
+      if (event.type === 'turn.completed') completedTurn = event;
+    }
+    if (completedTurn?.type === 'turn.completed') {
+      this.store.saveNamedSnapshot(
+        this.state.session.threadId,
+        `turn-${completedTurn.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
+        this.state,
+      );
     }
   }
 
@@ -591,6 +593,69 @@ export function createAgentKernel(params: {
   sandboxAvailable?: boolean;
 }): AgentKernel {
   const store = createRuntimeStore(params.storePath);
+  const restored = restoreRuntimeStateFromStore({ ...params, store });
+  if (restored.migratedSnapshot) {
+    store.saveSnapshot(params.threadId, restored.migratedSnapshot);
+  }
+
+  const kernel = new AgentKernel({
+    store,
+    initialState: restored.state,
+    interactionMode: params.interactionMode ?? 'accept_edits',
+    sandboxAvailable: params.sandboxAvailable,
+  });
+  // A persisted intent without a terminal provider result is deliberately not
+  // replayed.  Record the uncertainty durably so a later reconciliation/user
+  // decision can resolve it without issuing a duplicate external write.
+  for (const invocation of Object.values(kernel.getState().capabilities.invocations)) {
+    if (invocation.status !== 'recorded' && invocation.status !== 'running') continue;
+    kernel.processEvent({
+      type: 'capability.execution_unknown',
+      invocationId: invocation.invocationId,
+      reason: 'Runtime recovered after invocation intent was persisted without a terminal result.',
+      finishedAt: new Date().toISOString(),
+    });
+  }
+  const recoveredBudget = kernel.getState().resourceBudget;
+  if (recoveredBudget.status === 'active') {
+    for (const reservation of Object.values(recoveredBudget.reservations)) {
+      if (reservation.state === 'reserved') {
+        kernel.processEvent({
+          type: 'resource_budget.released',
+          reservationId: reservation.reservationId,
+        });
+      } else if (reservation.state === 'dispatch_started') {
+        kernel.processEvent({
+          type: 'resource_budget.unknown',
+          reservationId: reservation.reservationId,
+        });
+      }
+    }
+    if (kernel.getState().turn.status !== 'active') {
+      for (const waiter of Object.values(recoveredBudget.waiters ?? {})) {
+        if (waiter.state !== 'waiting') continue;
+        kernel.processEvent({
+          type: 'resource_budget.waiter_cancelled',
+          invocationId: waiter.invocationId,
+        });
+      }
+    }
+  }
+  return kernel;
+}
+
+/** Strictly restore Runtime state without executing reconciliation side effects. */
+export function restoreRuntimeStateFromStore(params: {
+  store: RuntimeStore;
+  threadId: string;
+  userId: string;
+  workspace: string;
+  interactionMode?: InteractionMode;
+  authorizationMode?: AuthorizationMode;
+  authorizationSource?: AuthorizationSource;
+  phase?: 'planning' | 'building';
+}): { state: RuntimeState; migratedSnapshot: RuntimeState | null } {
+  const store = params.store;
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
     userId: params.userId,
@@ -674,54 +739,13 @@ export function createAgentKernel(params: {
             }
           : freshState;
 
-  if (migratedState && migratedState !== restoredState && initialState === migratedState) {
-    store.saveSnapshot(params.threadId, migratedState);
-  }
-
-  const kernel = new AgentKernel({
-    store,
-    initialState,
-    interactionMode: params.interactionMode ?? 'accept_edits',
-    sandboxAvailable: params.sandboxAvailable,
-  });
-  // A persisted intent without a terminal provider result is deliberately not
-  // replayed.  Record the uncertainty durably so a later reconciliation/user
-  // decision can resolve it without issuing a duplicate external write.
-  for (const invocation of Object.values(kernel.getState().capabilities.invocations)) {
-    if (invocation.status !== 'recorded' && invocation.status !== 'running') continue;
-    kernel.processEvent({
-      type: 'capability.execution_unknown',
-      invocationId: invocation.invocationId,
-      reason: 'Runtime recovered after invocation intent was persisted without a terminal result.',
-      finishedAt: new Date().toISOString(),
-    });
-  }
-  const recoveredBudget = kernel.getState().resourceBudget;
-  if (recoveredBudget.status === 'active') {
-    for (const reservation of Object.values(recoveredBudget.reservations)) {
-      if (reservation.state === 'reserved') {
-        kernel.processEvent({
-          type: 'resource_budget.released',
-          reservationId: reservation.reservationId,
-        });
-      } else if (reservation.state === 'dispatch_started') {
-        kernel.processEvent({
-          type: 'resource_budget.unknown',
-          reservationId: reservation.reservationId,
-        });
-      }
-    }
-    if (kernel.getState().turn.status !== 'active') {
-      for (const waiter of Object.values(recoveredBudget.waiters ?? {})) {
-        if (waiter.state !== 'waiting') continue;
-        kernel.processEvent({
-          type: 'resource_budget.waiter_cancelled',
-          invocationId: waiter.invocationId,
-        });
-      }
-    }
-  }
-  return kernel;
+  return {
+    state: initialState,
+    migratedSnapshot:
+      migratedState && migratedState !== restoredState && initialState === migratedState
+        ? migratedState
+        : null,
+  };
 }
 
 function replayPersistedTail(

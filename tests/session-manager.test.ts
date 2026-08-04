@@ -12,6 +12,7 @@ import {
   SessionRuntime,
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
+import { loadSession } from '../src/core/persistence/sessions';
 import { createAgentKernel } from '../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../src/core/runtime/state';
@@ -108,6 +109,56 @@ describe('interaction mode admission', () => {
 });
 
 describe('SessionManager', () => {
+  test('does not restore an approval resolved after the rolling snapshot', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-resolved-approval-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const threadId = 'resolved-approval';
+    const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
+    try {
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'tui',
+        workspace: '/tmp/ws',
+      });
+      state.interactions = {
+        kind: 'awaiting_tool_approval',
+        interactionId: 'approval-1',
+        toolCallId: 'shell-1',
+        approval: {
+          scope: 'once',
+          cwd: '/tmp/ws',
+          threadId,
+          tool: 'shell_execute',
+          command: 'git status --short',
+          risk: 'execute_code',
+          approvalHash: 'hash',
+          summary: 'Check status',
+          reason: 'Inspect the workspace.',
+          expectedEffects: [],
+          grantOptions: ['approve_once'],
+          recommendedGrant: 'approve_once',
+        },
+      };
+      store.saveSnapshot(threadId, state);
+      store.appendEvents(threadId, [
+        {
+          type: 'approval.granted',
+          interactionId: 'approval-1',
+          grant: 'approve_once',
+        },
+      ]);
+    } finally {
+      store.close();
+    }
+
+    try {
+      const restored = await loadSession(checkpointPath, threadId);
+      expect(restored?.interrupt).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('queues manual compaction through a live Kernel control plane', async () => {
     const deps = makeDeps();
     deps.config = {

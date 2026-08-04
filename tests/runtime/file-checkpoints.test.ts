@@ -8,10 +8,12 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
 import {
   createFilePreimageRecorder,
+  previewFilesToCheckpoint,
   restoreFilesToCheckpoint,
 } from '../../src/core/runtime/file-checkpoints';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
 import { createRuntimeStore } from '../../src/core/runtime/store.js';
+import { fileContentHash } from '../../src/core/tools/read-state';
 
 let root: string;
 let workspace: string;
@@ -34,6 +36,56 @@ function appendEvent(threadId: string, toolCallId: string): void {
 }
 
 describe('restoreFilesToCheckpoint', () => {
+  test('previews exact line changes and the most affected path before restoring', () => {
+    writeFileSync(join(workspace, 'notes.md'), 'before\nkeep\n', 'utf8');
+    appendEvent('th-preview', 'a');
+    store.saveNamedSnapshot('th-preview', 'cp', { version: 1 });
+
+    appendEvent('th-preview', 'turn-2-tool');
+    store.recordFilePreimage('th-preview', 'notes.md', 'before\nkeep\n', true);
+    store.recordFilePreimage('th-preview', 'scratch.md', null, false);
+    writeFileSync(join(workspace, 'notes.md'), 'after\nkeep\nextra\n', 'utf8');
+    writeFileSync(join(workspace, 'scratch.md'), 'scratch\n', 'utf8');
+    store.recordFilePostimage(
+      'th-preview',
+      'notes.md',
+      fileContentHash('after\nkeep\nextra\n'),
+      true,
+    );
+    store.recordFilePostimage('th-preview', 'scratch.md', fileContentHash('scratch\n'), true);
+
+    expect(previewFilesToCheckpoint(store, 'th-preview', 'cp', workspace)).toEqual({
+      files: [
+        { path: 'notes.md', addedLines: 1, removedLines: 2 },
+        { path: 'scratch.md', addedLines: 0, removedLines: 1 },
+      ],
+      lineStatsAvailable: true,
+      addedLines: 1,
+      removedLines: 3,
+      conflictCount: 0,
+      failureCount: 0,
+    });
+  });
+
+  test('excludes manually changed files from the restore preview', () => {
+    writeFileSync(join(workspace, 'notes.md'), 'before\n', 'utf8');
+    appendEvent('th-preview-conflict', 'a');
+    store.saveNamedSnapshot('th-preview-conflict', 'cp', { version: 1 });
+    appendEvent('th-preview-conflict', 'turn-2-tool');
+    store.recordFilePreimage('th-preview-conflict', 'notes.md', 'before\n', true);
+    writeFileSync(join(workspace, 'notes.md'), 'manual\n', 'utf8');
+    store.recordFilePostimage('th-preview-conflict', 'notes.md', fileContentHash('kite\n'), true);
+
+    expect(previewFilesToCheckpoint(store, 'th-preview-conflict', 'cp', workspace)).toEqual({
+      files: [],
+      lineStatsAvailable: true,
+      addedLines: 0,
+      removedLines: 0,
+      conflictCount: 1,
+      failureCount: 0,
+    });
+  });
+
   test('restores overwritten files and deletes files created after the checkpoint', () => {
     writeFileSync(join(workspace, 'notes.md'), 'v1 content\n', 'utf8');
     appendEvent('th', 'a');
@@ -45,17 +97,20 @@ describe('restoreFilesToCheckpoint', () => {
     store.recordFilePreimage('th', 'scratch.md', null, false);
     writeFileSync(join(workspace, 'notes.md'), 'v2 content\n', 'utf8');
     writeFileSync(join(workspace, 'scratch.md'), 'scratch\n', 'utf8');
+    store.recordFilePostimage('th', 'notes.md', fileContentHash('v2 content\n'), true);
+    store.recordFilePostimage('th', 'scratch.md', fileContentHash('scratch\n'), true);
 
     const outcome = restoreFilesToCheckpoint(store, 'th', 'cp', workspace);
 
     expect(outcome.restored).toEqual(['notes.md']);
     expect(outcome.deleted).toEqual(['scratch.md']);
     expect(outcome.failed).toEqual([]);
+    expect(outcome.conflicts).toEqual([]);
     expect(readFileSync(join(workspace, 'notes.md'), 'utf8')).toBe('v1 content\n');
     expect(existsSync(join(workspace, 'scratch.md'))).toBe(false);
   });
 
-  test('recreates missing parent directories when restoring', () => {
+  test('protects a file that was removed after the last Kite write', () => {
     mkdirSync(join(workspace, 'src', 'deep'), { recursive: true });
     writeFileSync(join(workspace, 'src', 'deep', 'app.ts'), 'old\n', 'utf8');
     appendEvent('th-nested', 'a');
@@ -63,34 +118,74 @@ describe('restoreFilesToCheckpoint', () => {
 
     appendEvent('th-nested', 'turn-2-tool');
     store.recordFilePreimage('th-nested', 'src/deep/app.ts', 'old\n', true);
+    writeFileSync(join(workspace, 'src', 'deep', 'app.ts'), 'kite\n', 'utf8');
+    store.recordFilePostimage('th-nested', 'src/deep/app.ts', fileContentHash('kite\n'), true);
     rmSync(join(workspace, 'src'), { recursive: true, force: true });
 
     const outcome = restoreFilesToCheckpoint(store, 'th-nested', 'cp', workspace);
 
-    expect(outcome.restored).toEqual(['src/deep/app.ts']);
-    expect(readFileSync(join(workspace, 'src', 'deep', 'app.ts'), 'utf8')).toBe('old\n');
+    expect(outcome.restored).toEqual([]);
+    expect(outcome.conflicts).toEqual([
+      { path: 'src/deep/app.ts', reason: 'modified_after_kite_write' },
+    ]);
+    expect(existsSync(join(workspace, 'src', 'deep', 'app.ts'))).toBe(false);
   });
 
   test('returns an empty outcome for an unknown checkpoint', () => {
     const outcome = restoreFilesToCheckpoint(store, 'th-missing', 'nope', workspace);
-    expect(outcome).toEqual({ restored: [], deleted: [], failed: [] });
+    expect(outcome).toEqual({ restored: [], deleted: [], failed: [], conflicts: [] });
   });
 
   test('collects per-file failures without aborting the remaining restores', () => {
     appendEvent('th-fail', 'a');
     store.saveNamedSnapshot('th-fail', 'cp', { version: 1 });
     appendEvent('th-fail', 'turn-2-tool');
-    store.recordFilePreimage('th-fail', 'blocked/nested.md', 'x', true);
+    store.recordFilePreimage('th-fail', 'blocked', 'x', true);
     store.recordFilePreimage('th-fail', 'ok.md', 'fine\n', true);
-    // 'blocked' 是文件而非目录 → 恢复 blocked/nested.md 必然失败
-    writeFileSync(join(workspace, 'blocked'), 'i am a file, not a dir', 'utf8');
+    // 目录无法按 UTF-8 文件读取，冲突检查把它归入逐文件失败。
+    mkdirSync(join(workspace, 'blocked'));
     writeFileSync(join(workspace, 'ok.md'), 'changed\n', 'utf8');
+    store.recordFilePostimage('th-fail', 'blocked', fileContentHash('changed\n'), true);
+    store.recordFilePostimage('th-fail', 'ok.md', fileContentHash('changed\n'), true);
 
     const outcome = restoreFilesToCheckpoint(store, 'th-fail', 'cp', workspace);
 
     expect(outcome.restored).toEqual(['ok.md']);
-    expect(outcome.failed.map((f) => f.path)).toEqual(['blocked/nested.md']);
+    expect(outcome.failed.map((f) => f.path)).toEqual(['blocked']);
     expect(readFileSync(join(workspace, 'ok.md'), 'utf8')).toBe('fine\n');
+  });
+
+  test('skips a path changed manually after the last Kite write', () => {
+    writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
+    appendEvent('th-conflict', 'a');
+    store.saveNamedSnapshot('th-conflict', 'cp', { version: 1 });
+    appendEvent('th-conflict', 'turn-2-tool');
+    store.recordFilePreimage('th-conflict', 'notes.md', 'v1\n', true);
+    writeFileSync(join(workspace, 'notes.md'), 'kite-v2\n', 'utf8');
+    store.recordFilePostimage('th-conflict', 'notes.md', fileContentHash('kite-v2\n'), true);
+
+    // 模拟随后发生的手动或 Bash 修改。
+    writeFileSync(join(workspace, 'notes.md'), 'manual-v3\n', 'utf8');
+
+    const outcome = restoreFilesToCheckpoint(store, 'th-conflict', 'cp', workspace);
+
+    expect(outcome.restored).toEqual([]);
+    expect(outcome.conflicts).toEqual([{ path: 'notes.md', reason: 'modified_after_kite_write' }]);
+    expect(readFileSync(join(workspace, 'notes.md'), 'utf8')).toBe('manual-v3\n');
+  });
+
+  test('fails closed for legacy pre-images without a post-write fingerprint', () => {
+    writeFileSync(join(workspace, 'legacy.md'), 'before\n', 'utf8');
+    appendEvent('th-legacy', 'a');
+    store.saveNamedSnapshot('th-legacy', 'cp', { version: 1 });
+    appendEvent('th-legacy', 'turn-2-tool');
+    store.recordFilePreimage('th-legacy', 'legacy.md', 'before\n', true);
+    writeFileSync(join(workspace, 'legacy.md'), 'current\n', 'utf8');
+
+    const outcome = restoreFilesToCheckpoint(store, 'th-legacy', 'cp', workspace);
+
+    expect(outcome.conflicts).toEqual([{ path: 'legacy.md', reason: 'unverified_postimage' }]);
+    expect(readFileSync(join(workspace, 'legacy.md'), 'utf8')).toBe('current\n');
   });
 });
 
@@ -109,5 +204,6 @@ describe('createFilePreimageRecorder', () => {
     const recorder = createFilePreimageRecorder(throwing, 'th');
     expect(recorder).toBeDefined();
     expect(() => recorder?.('a.md', 'x', true)).not.toThrow();
+    expect(() => recorder?.recordPostimage?.('a.md', 'y', true)).not.toThrow();
   });
 });

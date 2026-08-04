@@ -8,6 +8,10 @@
 
 TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 VS Code 打开新项目时的 "Do you trust the authors of the files in this folder?"。门禁在 `TuiBootstrap` 中同步求值，并先于 FirstRunFlow 与 `TuiApp` 挂载：未通过门禁时不会创建会话、连接 MCP、扫描 skill 或发起模型调用。CLI `run` 命令执行同一门禁（见下文 CLI 入口），共享同一用户级信任存储。
 
+`src/app/tui/index.tsx` 中的主应用 action 路由（包括会话切换、Rewind 和其他 Overlay 操作）
+全部位于 `TuiApp` 内，只能在 `TuiBootstrap` 已通过 workspace 信任检查后挂载。
+修改这些 action 接线不得把会话存储、RuntimeStore 或工具初始化上移到信任分支之前。
+
 ## 判定流程（`shouldPromptWorkspaceTrust`）
 
 1. 读取 `workspaceTrustPath()` 存储，`workspaceKey = canonicalWorkspaceKey(workspace)`（canonical realpath 的 sha256，与 MCP 项目批准复用同一摘要函数）命中记录 → 放行。
@@ -65,3 +69,4 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - TUI 与 CLI `run` 均执行门禁；web 前端当前不做 workspace 信任检查。
 - workspace 信任是目录级一次性决定，不是逐工具授权；工具级授权仍由 `docs/active/authorization.md` 与 approval policy 管理，项目 MCP 来源仍单独受 `docs/active/mcp-project-approval.md` 门禁约束。
 - 门禁求值前只读取惰性配置（JSONC 解析，不执行项目代码）；skill 扫描、MCP 连接与 shell 执行全部发生在门禁通过之后。
+- 通过门禁后才挂载的 `TuiApp` 可将 workspace 传给会话 Header 作为展示快照；该传递不得改变门禁判定顺序，亦不得在未信任分支挂载 Header 或读取会话状态。

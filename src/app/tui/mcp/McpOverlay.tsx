@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { projectMcpConfigPath, userMcpConfigPath, validateMcpServerName } from '@/core/config';
 import type { McpServerControlState, McpServerKey } from '@/core/mcp';
+import OverlayFrame, { type OverlayShortcut, OverlayShortcutBar } from '../components/OverlayFrame';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTheme } from '../theme';
 import McpSelect from './McpSelect';
@@ -535,16 +536,14 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
           ? `${view.draft.name} MCP Server`
           : overlayTitle(view);
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={t.primary}
-      paddingX={1}
-      marginY={1}
+    <OverlayFrame
+      title={title}
+      footer={
+        <OverlayShortcutBar
+          shortcuts={footer(view, inputActive, detailActions.length, genericOptions.length)}
+        />
+      }
     >
-      <Text bold color={t.primary}>
-        {title}
-      </Text>
       <Box marginTop={1} flexDirection="column">
         {view.kind === 'server_list' && (
           <>
@@ -624,10 +623,7 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
             ? operationMessage(pendingOperation, activityDotCount)
             : (snapshot.message ?? ' ')}
       </Text>
-      <Text color={t.dim}>
-        {footer(view, inputActive, detailActions.length, genericOptions.length)}
-      </Text>
-    </Box>
+    </OverlayFrame>
   );
 }
 
@@ -1194,20 +1190,50 @@ function footer(
   inputActive: boolean,
   detailActionCount: number,
   genericActionCount: number,
-): string {
-  if (inputActive) return 'Enter Continue    Esc Back';
-  if (view.kind === 'server_list') return '↑↓ Select    Enter Open    Esc Close';
-  if (view.kind === 'adding_server') return 'Please wait';
+): OverlayShortcut[] {
+  if (inputActive) {
+    return [
+      { keys: 'Enter', label: '继续' },
+      { keys: 'Esc', label: '返回' },
+    ];
+  }
+  if (view.kind === 'server_list') {
+    return [
+      { keys: '↑↓', label: '选择' },
+      { keys: 'Enter', label: '打开' },
+      { keys: 'Esc', label: '关闭' },
+    ];
+  }
+  if (view.kind === 'adding_server') return [{ keys: '', label: '请稍候' }];
   if (view.kind === 'server_tools') {
-    return '↑/↓ to navigate · Enter to select · Esc to back';
+    return [
+      { keys: '↑↓', label: '导航' },
+      { keys: 'Enter', label: '选择' },
+      { keys: 'Esc', label: '返回' },
+    ];
   }
-  if (view.kind === 'tool_detail') return '↑/↓ to scroll · Esc to go back';
+  if (view.kind === 'tool_detail') {
+    return [
+      { keys: '↑↓', label: '滚动' },
+      { keys: 'Esc', label: '返回' },
+    ];
+  }
   if (view.kind === 'server_detail') {
-    if (detailActionCount === 0) return 'Esc to back';
-    return '↑/↓ to navigate · Enter to select · Esc to back';
+    if (detailActionCount === 0) return [{ keys: 'Esc', label: '返回' }];
+    return [
+      { keys: '↑↓', label: '导航' },
+      { keys: 'Enter', label: '选择' },
+      { keys: 'Esc', label: '返回' },
+    ];
   }
-  if (view.kind === 'authenticate' && genericActionCount === 0) return 'Esc to back';
-  return '↑↓ Select    Enter Confirm    Esc Back';
+  if (view.kind === 'authenticate' && genericActionCount === 0) {
+    return [{ keys: 'Esc', label: '返回' }];
+  }
+  return [
+    { keys: '↑↓', label: '选择' },
+    { keys: 'Enter', label: '确认' },
+    { keys: 'Esc', label: '返回' },
+  ];
 }
 
 function sourceLabel(source: string): string {

@@ -4,6 +4,8 @@ import { useState } from 'react';
 import { useTheme } from '@/app/tui/theme';
 import type { SandboxBackend } from '@/core/sandbox';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
+import { SLASH_COMMAND_DEFS } from '../hooks/useSlashSuggestions';
+import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
 interface HelpPanelProps {
   onClose: () => void;
@@ -21,8 +23,12 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
   const maxContentHeight = useOverlayHeight(8);
   const modeHelp =
     sandboxBackend === 'none'
-      ? '设置审核模式（ask/auto；Full 未启用沙箱）'
-      : '设置审核模式（ask/auto/full）';
+      ? '设置权限模式（accept_edits/auto；Full 未启用沙箱）'
+      : '设置权限模式（accept_edits/auto/full）';
+  const commandShortcuts: [string, string][] = SLASH_COMMAND_DEFS.map((command) => [
+    `/${command.name}`,
+    command.name === 'permissions' ? modeHelp : command.description,
+  ]);
 
   const groups: ShortcutGroup[] = [
     {
@@ -49,24 +55,7 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
     },
     {
       title: '斜杠命令',
-      shortcuts: [
-        ['/model', '切换模型'],
-        ['/sessions', '浏览会话历史'],
-        ['/new', '新建会话'],
-        ['/clear', '清空输出'],
-        ['/effort', '设置推理深度（low/medium/high/max）'],
-        ['/theme', '切换色彩主题（teal/blue/purple/cyan/mono）'],
-        ['/permissions', modeHelp],
-        ['/release', 'Show effective release profile, capability and Gate status'],
-        ['/telemetry', 'Show redacted telemetry consent and export status'],
-        ['/plan', '切换规划模式'],
-        ['/mcp', '管理 MCP Server'],
-        ['/compact', '压缩对话上下文（支持自定义指令）'],
-        ['/rewind', '回退检查点并恢复文件'],
-        ['/export', '导出会话'],
-        ['/help', '帮助面板'],
-        ['/exit', '退出'],
-      ],
+      shortcuts: commandShortcuts,
     },
   ];
 
@@ -101,17 +90,17 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
   });
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={t.primary}
-      paddingX={1}
-      marginY={1}
+    <OverlayFrame
+      title="快捷键"
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: '滚动' },
+            { keys: 'Esc', label: '关闭' },
+          ]}
+        />
+      }
     >
-      <Text bold color={t.primary}>
-        快捷键
-      </Text>
-
       <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={scrollOffset} scrollAlignment="auto">
           {flatRows.map((row, i) => {
@@ -133,10 +122,6 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
           })}
         </ScrollList>
       </Box>
-
-      <Box marginTop={1}>
-        <Text color={t.dim}>Esc 关闭 ↑↓ 滚动</Text>
-      </Box>
-    </Box>
+    </OverlayFrame>
   );
 }

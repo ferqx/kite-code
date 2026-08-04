@@ -11,34 +11,42 @@ export interface SlashCommandDef {
 }
 
 export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
-  { name: 'effort', aliases: [], description: 'Set reasoning effort', args: 'low|medium|high|max' },
-  { name: 'model', aliases: [], description: 'Switch model', args: '[name]' },
+  { name: 'effort', aliases: [], description: '设置推理深度', args: 'low|medium|high|max' },
+  { name: 'model', aliases: [], description: '切换模型', args: '[name]' },
   {
     name: 'theme',
     aliases: [],
-    description: 'Switch color theme',
+    description: '切换色彩主题',
     args: 'teal|blue|purple|cyan|mono',
   },
-  { name: 'sessions', aliases: [], description: 'Show sessions' },
-  { name: 'new', aliases: [], description: 'Start a new session' },
-  { name: 'plan', aliases: [], description: 'Enter planning mode' },
+  { name: 'sessions', aliases: [], description: '浏览会话历史' },
+  { name: 'new', aliases: [], description: '新建会话' },
+  { name: 'plan', aliases: [], description: '进入规划模式', args: '[任务]' },
   {
     name: 'compact',
     aliases: [],
-    description: 'Compact conversation context for the model',
-    args: '[custom summarization instructions]',
+    description: '压缩对话上下文',
+    args: '[reset|自定义摘要指令]',
   },
-  { name: 'permissions', aliases: [], description: 'Set permissions', args: 'ask|auto|full' },
+  {
+    name: 'permissions',
+    aliases: [],
+    description: '设置权限模式',
+    args: 'accept_edits|auto|full',
+  },
   { name: 'release', aliases: [], description: 'Show release profile and Gate status' },
   { name: 'telemetry', aliases: [], description: 'Show telemetry consent and export status' },
   {
     name: 'mcp',
     aliases: [],
-    description: 'Manage MCP servers',
+    description: '管理 MCP Server',
   },
-  { name: 'clear', aliases: ['c'], description: 'Clear output' },
-  { name: 'help', aliases: ['h'], description: 'Show help' },
-  { name: 'exit', aliases: ['quit', 'q'], description: 'Exit Kite Code' },
+  { name: 'rewind', aliases: [], description: '回退检查点并恢复文件' },
+  { name: 'export', aliases: [], description: '导出当前会话' },
+  { name: 'context', aliases: [], description: '显示上下文用量' },
+  { name: 'clear', aliases: ['c'], description: '清空输出' },
+  { name: 'help', aliases: ['h'], description: '打开帮助面板' },
+  { name: 'exit', aliases: ['quit', 'q'], description: '退出 Kite Code' },
 ];
 
 export const SLASH_COMMANDS = SLASH_COMMAND_DEFS.map((c) => c.name);
@@ -66,6 +74,10 @@ export interface SlashSuggestionsResult {
   kind: 'command' | 'model' | 'effort' | 'theme' | 'permissions';
   partial: string;
   items: SuggestionItem[];
+}
+
+export interface SlashSuggestionData extends SlashSuggestionsResult {
+  selectedIndex: number;
 }
 
 export interface ActiveSelections {

@@ -1,8 +1,8 @@
 # 当前规则：TUI 输出区域 Static/dynamic 分割渲染
 
 状态：active
-最后更新：2026-07-26（流式 Markdown 按安全组件边界渐进冻结）
-最后验证：2026-07-26
+最后更新：2026-07-30（会话虚拟列表隐藏组件默认溢出文案）
+最后验证：2026-07-30
 范围：
 
 - `src/app/tui/index.tsx` — Ink 终端渲染选项
@@ -91,9 +91,13 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
   keyExtractor={(s) => s.threadId}
   height={maxContentHeight}
   itemHeight={1}
-  showOverflowIndicators={true}
+  showOverflowIndicators={false}
 />
 ```
+
+会话面板自己在标题栏显示当前位置/总数，方向键导航会自动调整虚拟列表窗口，因此不得再展示
+`ink-virtual-list` 的 `N more` 默认溢出行。默认文案会挤占内容高度、与标题栏计数重复，并造成
+中英文视觉不一致；隐藏文案不改变虚拟滚动和 O(visibleCount) 的性能边界。
 
 **renderItem 性能规则**：
 - `stringWidth` / `truncateByDisplayWidth` 等 Unicode 字符串计算应在 renderItem 内做 —— VirtualList 只对可见行调用 renderItem，天然 O(visibleCount)

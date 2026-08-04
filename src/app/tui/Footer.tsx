@@ -11,6 +11,7 @@ interface FooterProps {
   running: boolean;
   timerKey: number;
   interactionMode?: 'accept_edits' | 'auto' | 'full';
+  hideGlobalStatus?: boolean;
   children?: ReactNode;
 }
 
@@ -20,20 +21,25 @@ export default function Footer({
   running,
   timerKey,
   interactionMode,
+  hideGlobalStatus = false,
   children,
 }: FooterProps) {
   return (
     <Box flexDirection="column">
-      <StatusBar status={status} runStatus={runStatus} running={running} timerKey={timerKey} />
+      {!hideGlobalStatus && (
+        <StatusBar status={status} runStatus={runStatus} running={running} timerKey={timerKey} />
+      )}
       {children}
-      <StatsLine
-        status={status}
-        running={running}
-        modelProvider={status.modelProvider}
-        modelName={status.modelName}
-        interactionMode={interactionMode}
-        planMode={status.phase === 'planning'}
-      />
+      {!hideGlobalStatus && (
+        <StatsLine
+          status={status}
+          running={running}
+          modelProvider={status.modelProvider}
+          modelName={status.modelName}
+          interactionMode={interactionMode}
+          planMode={status.phase === 'planning'}
+        />
+      )}
     </Box>
   );
 }

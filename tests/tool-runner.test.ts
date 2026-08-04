@@ -2,12 +2,13 @@
  * tool-runner 单元测试 — 覆盖 runApprovedTool 各工具分发分支
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
+import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
 
 // ── Helpers ──
@@ -539,31 +540,64 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
     return result.request;
   }
 
+  function checkpointRecorder(
+    captured: Array<[string, string | null, boolean]>,
+    postimages: Array<[string, string | null, boolean]>,
+  ): FilePreimageRecorder {
+    const recorder: FilePreimageRecorder = (path, content, existed) => {
+      captured.push([path, content, existed]);
+    };
+    recorder.recordPostimage = (path, content, existed) => {
+      postimages.push([path, content, existed]);
+    };
+    return recorder;
+  }
+
   it('captures the pre-image before write_file overwrites an existing file', async () => {
     writeFileSync(join(workspace, 'notes.md'), 'v1\n', 'utf8');
     const captured: Array<[string, string | null, boolean]> = [];
+    const postimages: Array<[string, string | null, boolean]> = [];
     const result = await runApprovedTool({
       workspace,
       request: requestOf('write_file', { path: 'notes.md', content: 'v2\n' }),
-      recordFilePreimage: (path, content, existed) => {
-        captured.push([path, content, existed]);
-      },
+      recordFilePreimage: checkpointRecorder(captured, postimages),
     });
     expect(result.ok).toBe(true);
     expect(captured).toEqual([['notes.md', 'v1\n', true]]);
+    expect(postimages).toEqual([['notes.md', 'v2\n', true]]);
   });
 
   it('records existed=false when write_file creates a new file', async () => {
     const captured: Array<[string, string | null, boolean]> = [];
+    const postimages: Array<[string, string | null, boolean]> = [];
     const result = await runApprovedTool({
       workspace,
       request: requestOf('write_file', { path: 'fresh.md', content: 'hi\n' }),
-      recordFilePreimage: (path, content, existed) => {
-        captured.push([path, content, existed]);
-      },
+      recordFilePreimage: checkpointRecorder(captured, postimages),
     });
     expect(result.ok).toBe(true);
     expect(captured).toEqual([['fresh.md', null, false]]);
+    expect(postimages).toEqual([['fresh.md', 'hi\n', true]]);
+  });
+
+  it('does not record a post-image when write_file fails', async () => {
+    const lockedDirectory = join(workspace, 'locked');
+    mkdirSync(lockedDirectory);
+    chmodSync(lockedDirectory, 0o500);
+    const captured: Array<[string, string | null, boolean]> = [];
+    const postimages: Array<[string, string | null, boolean]> = [];
+    try {
+      const result = await runApprovedTool({
+        workspace,
+        request: requestOf('write_file', { path: 'locked/notes.md', content: 'v2\n' }),
+        recordFilePreimage: checkpointRecorder(captured, postimages),
+      });
+      expect(result.ok).toBe(false);
+      expect(captured).toEqual([['locked/notes.md', null, false]]);
+      expect(postimages).toEqual([]);
+    } finally {
+      chmodSync(lockedDirectory, 0o700);
+    }
   });
 
   it('captures the pre-image before edit_file replaces content', async () => {
@@ -574,6 +608,7 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
       request: requestOf('read_file', { path: 'code.ts' }),
     });
     const captured: Array<[string, string | null, boolean]> = [];
+    const postimages: Array<[string, string | null, boolean]> = [];
     const result = await runApprovedTool({
       workspace,
       request: requestOf('edit_file', {
@@ -581,12 +616,11 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
         old_string: 'const a = 1;',
         new_string: 'const a = 2;',
       }),
-      recordFilePreimage: (path, content, existed) => {
-        captured.push([path, content, existed]);
-      },
+      recordFilePreimage: checkpointRecorder(captured, postimages),
     });
     expect(result.ok).toBe(true);
     expect(captured).toEqual([['code.ts', 'const a = 1;\n', true]]);
+    expect(postimages).toEqual([['code.ts', 'const a = 2;\n', true]]);
   });
 
   it('a throwing recorder never fails the tool', async () => {

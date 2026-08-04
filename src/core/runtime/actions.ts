@@ -321,6 +321,7 @@ export function eventsForRuntimeAction(
 
   if (interaction.kind === 'awaiting_tool_approval') {
     if (action.type === 'approve') {
+      if (!interaction.approval.grantOptions.includes(action.grant)) return [];
       if (action.grant === 'full_access') {
         try {
           assertAuthorizationElevation({

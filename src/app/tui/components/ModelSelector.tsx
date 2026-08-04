@@ -1,10 +1,10 @@
 import { Box, Text, useInput } from 'ink';
 import { ScrollList } from 'ink-scroll-list';
 import { useRef, useState } from 'react';
-import { ACTIVE_DOT, INACTIVE_DOT } from '@/app/tui/constants';
 import { useTheme } from '@/app/tui/theme';
 import { type AvailableModel, listAvailableModels } from '@/core/config';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
+import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
 
 export interface ModelOption {
   id: string;
@@ -60,53 +60,66 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
 
   if (models.length === 0) {
     return (
-      <Box
-        flexDirection="column"
-        borderStyle="round"
-        borderColor={t.primary}
-        paddingX={1}
-        marginY={1}
+      <OverlayFrame
+        title="选择模型"
+        footer={<OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: '关闭' }]} />}
       >
-        <Text bold color={t.primary}>
-          选择模型
-        </Text>
         <Box marginY={1}>
           <Text color={t.muted}>没有可用模型，请在 kite-code.jsonc 中配置 models 列表</Text>
         </Box>
-        <Text color={t.dim}>Esc 关闭</Text>
-      </Box>
+      </OverlayFrame>
     );
   }
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={t.primary}
-      paddingX={1}
-      marginY={1}
+    <OverlayFrame
+      title="选择模型"
+      meta={
+        <Text color={t.dim}>
+          {selected + 1} / {models.length}
+        </Text>
+      }
+      footer={
+        <OverlayShortcutBar
+          shortcuts={[
+            { keys: '↑↓', label: '导航' },
+            { keys: 'Enter', label: '选择' },
+            { keys: 'Esc', label: '取消' },
+          ]}
+        />
+      }
     >
-      <Text bold color={t.primary}>
-        选择模型
-      </Text>
       <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
           {models.map((model, i) => {
-            const activeDot = model.id === currentModel ? ACTIVE_DOT : INACTIVE_DOT;
+            const isSelected = i === selected;
+            const isActive = model.id === currentModel;
             return (
-              <Box key={model.id}>
-                <Text color={i === selected ? t.primary : t.muted}>
-                  {i === selected ? '❯' : ' '} {activeDot}
-                  {model.name}
-                </Text>
-                {model.description ? <Text color={t.dim}> — {model.description}</Text> : null}
+              <Box
+                key={model.id}
+                width="100%"
+                paddingX={1}
+                backgroundColor={isSelected ? t.userMsgBg : undefined}
+              >
+                <Box width={2} flexShrink={0}>
+                  <Text bold color={isSelected ? t.primary : t.dim}>
+                    {isSelected ? '❯ ' : '  '}
+                  </Text>
+                </Box>
+                <Box flexGrow={1}>
+                  <Text bold={isSelected} color={isSelected ? t.primary : t.muted}>
+                    {model.name}
+                  </Text>
+                </Box>
+                <OverlayStatusColumn active={isActive} />
+                <Box width={9} justifyContent="flex-end" flexShrink={0}>
+                  <Text color={t.dim}>{model.description}</Text>
+                </Box>
               </Box>
             );
           })}
         </ScrollList>
       </Box>
-      <Box height={1} />
-      <Text color={t.dim}>上/下 导航 Enter 选择 Esc 取消</Text>
-    </Box>
+    </OverlayFrame>
   );
 }

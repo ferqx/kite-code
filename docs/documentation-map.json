@@ -136,7 +136,6 @@
         "src/core/mcp/manager.ts",
         "src/core/mcp/runtime-provider.ts",
         "src/core/mcp/supervisor.ts",
-        "src/app/tui/App.tsx",
         "src/app/tui/components/HelpPanel.tsx",
         "src/app/tui/hooks/useMcpController.ts",
         "src/app/tui/hooks/useSlashCommand.ts",
@@ -187,7 +186,9 @@
         "docs/active/execution-boundary.md",
         "docs/active/execution-platform-support.md",
         "docs/active/feature-flags.md",
+        "docs/active/cancel-resume-cleanup.md",
         "docs/book/05-工具系统与安全策略.md",
+        "docs/book/08-TUI交互全景.md",
         "docs/book/09-CLI模式与配置.md"
       ]
     },
@@ -509,7 +510,6 @@
         "src/core/config/paths.ts",
         "src/app/cli/index.ts",
         "src/app/tui/components/WorkspaceTrustGate.tsx",
-        "src/app/tui/index.tsx",
         "tests/workspace-trust.test.ts",
         "tests/cli-workspace-trust.test.ts"
       ],
@@ -524,7 +524,9 @@
         "docs/active/workspace-trust.md",
         "docs/active/cancel-resume-cleanup.md",
         "docs/active/thought-pre-consolidation.md",
+        "docs/active/tui-footer-resize-stability.md",
         "docs/active/tui-run-status-bar.md",
+        "docs/active/tui-session-startup-card.md",
         "docs/book/07-TUI结构.md",
         "docs/book/08-TUI交互全景.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",

@@ -1,12 +1,16 @@
 import { Box, Text, useInput, useStdout } from 'ink';
 import { VirtualList } from 'ink-virtual-list';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { type MutableRefObject, useCallback, useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
-import { ACTIVE_DOT, INACTIVE_DOT } from '@/app/tui/constants';
 import { useTheme } from '@/app/tui/theme';
 import type { SessionInfo } from '@/core/persistence/sessions.js';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useSessionList } from '../hooks/useSessionList.js';
+import OverlayChoiceList, { type OverlayChoiceOption } from './OverlayChoiceList';
+import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
+import OverlaySearchInput from './OverlaySearchInput';
+
+type DeleteChoice = 'keep' | 'delete';
 
 function truncateByDisplayWidth(text: string, maxCols: number): string {
   if (maxCols <= 0) return '';
@@ -30,6 +34,7 @@ interface SessionSelectorProps {
   initialQuery?: string;
   loadingSessionId?: string | null;
   activeSessionId?: string | null;
+  layeredEscRef?: MutableRefObject<boolean>;
 }
 
 export default function SessionSelector({
@@ -39,17 +44,21 @@ export default function SessionSelector({
   initialQuery,
   loadingSessionId,
   activeSessionId,
+  layeredEscRef,
 }: SessionSelectorProps) {
   const t = useTheme();
   const { stdout } = useStdout();
-  const { sessions, loading, error, refresh, search } = useSessionList();
+  const { sessions, loading, error, search } = useSessionList();
   const [selected, setSelected] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [deleteChoice, setDeleteChoice] = useState<DeleteChoice>('keep');
   const [searchInput, setSearchInput] = useState(initialQuery ?? '');
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const deleteConfirmRef = useRef(deleteConfirm);
   deleteConfirmRef.current = deleteConfirm;
+  const deleteChoiceRef = useRef(deleteChoice);
+  deleteChoiceRef.current = deleteChoice;
   const searchInputRef = useRef(searchInput);
   searchInputRef.current = searchInput;
   const sessionsRef = useRef(sessions);
@@ -62,21 +71,29 @@ export default function SessionSelector({
   onSelectRef.current = onSelect;
   const activeSessionRef = useRef(activeSessionId);
   activeSessionRef.current = activeSessionId;
+  const searchInitializedRef = useRef(false);
   const isSearching = searchInput.length > 0;
+  const searchSelected = selected === -1;
+  if (layeredEscRef) {
+    layeredEscRef.current = deleteConfirm || searchSelected || isSearching;
+  }
 
   const maxContentHeight = useOverlayHeight(12);
 
+  useEffect(
+    () => () => {
+      if (layeredEscRef) layeredEscRef.current = false;
+    },
+    [layeredEscRef],
+  );
+
   useEffect(() => {
+    if (!searchInitializedRef.current) {
+      searchInitializedRef.current = true;
+      if (!initialQuery) return;
+    }
     search(searchInput);
-  }, [searchInput, search]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  useEffect(() => {
-    if (initialQuery) setSearchInput(initialQuery);
-  }, [initialQuery]);
+  }, [searchInput, initialQuery, search]);
 
   const handleInput = useCallback(
     (
@@ -86,18 +103,28 @@ export default function SessionSelector({
         downArrow?: boolean;
         return?: boolean;
         escape?: boolean;
-        backspace?: boolean;
-        ctrl?: boolean;
-        meta?: boolean;
       },
     ) => {
       const s = sessionsRef.current;
       if (deleteConfirmRef.current) {
         if (key.escape) {
           setDeleteConfirm(false);
+          setDeleteChoice('keep');
+          return;
+        }
+        if (key.upArrow) {
+          setDeleteChoice('keep');
+          return;
+        }
+        if (key.downArrow) {
+          setDeleteChoice('delete');
           return;
         }
         if (key.return && s.length > 0) {
+          if (deleteChoiceRef.current === 'keep') {
+            setDeleteConfirm(false);
+            return;
+          }
           const session = s[selectedRef.current];
           if (session) {
             onDeleteRef.current?.(session.threadId);
@@ -108,6 +135,10 @@ export default function SessionSelector({
         return;
       }
       if (key.escape) {
+        if (selectedRef.current === -1 && searchInputRef.current.length === 0) {
+          setSelected(0);
+          return;
+        }
         if (searchInputRef.current.length > 0) {
           setSearchInput('');
           return;
@@ -115,46 +146,37 @@ export default function SessionSelector({
         onCloseRef.current();
         return;
       }
-      if (key.return && s.length > 0) {
-        const session = s[selectedRef.current];
-        if (session && session.threadId !== activeSessionRef.current) {
-          onSelectRef.current(session.threadId);
+      if (key.return) {
+        if (selectedRef.current === -1) {
+          if (s.length > 0) setSelected(0);
+          return;
+        }
+        if (s.length > 0) {
+          const session = s[selectedRef.current];
+          if (session && session.threadId !== activeSessionRef.current) {
+            onSelectRef.current(session.threadId);
+          }
         }
         return;
       }
       if (key.upArrow) {
-        setSelected((p) => Math.max(0, p - 1));
+        setSelected((p) => Math.max(-1, p - 1));
         return;
       }
       if (key.downArrow) {
         setSelected((p) => Math.min(s.length - 1, p + 1));
         return;
       }
-      if (key.backspace || input === '\x7f') {
-        setSearchInput((prev) => prev.slice(0, -1));
-        return;
-      }
       if (
         (input === 'd' || input === 'D') &&
+        selectedRef.current >= 0 &&
         searchInputRef.current.length === 0 &&
         s.length > 0 &&
         onDeleteRef.current
       ) {
+        setDeleteChoice('keep');
         setDeleteConfirm(true);
         return;
-      }
-      if (input && !key.ctrl && !key.meta) {
-        let text = input;
-        const prev = searchInputRef.current;
-        if (
-          text.length >= 2 &&
-          text[0] === ' ' &&
-          text[1] !== ' ' &&
-          (prev.length === 0 || prev[prev.length - 1] !== ' ')
-        ) {
-          text = text.slice(1);
-        }
-        setSearchInput((p) => p + text);
       }
     },
     [],
@@ -162,98 +184,175 @@ export default function SessionSelector({
 
   useInput(handleInput);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reset selection when search results change
   useEffect(() => {
-    setSelected(0);
-  }, [sessions]);
+    setSelected((current) => {
+      if (sessions.length === 0) return loading ? current : -1;
+      return Math.min(Math.max(-1, current), sessions.length - 1);
+    });
+  }, [sessions, loading]);
 
-  const selectedSession = sessions[selected];
+  const selectedSession = selected >= 0 ? sessions[selected] : undefined;
+  const deleteOptions: readonly OverlayChoiceOption<DeleteChoice>[] = selectedSession
+    ? [
+        {
+          id: 'keep',
+          label: '保留会话',
+          description: '返回会话列表，不做任何更改',
+        },
+        {
+          id: 'delete',
+          label: '永久删除',
+          description:
+            activeSessionId === selectedSession.threadId
+              ? '删除当前会话并自动创建新会话；此操作不可撤销'
+              : '移除这条会话历史；此操作不可撤销',
+          destructive: true,
+          separatorBefore: true,
+        },
+      ]
+    : [];
 
   // Precompute display strings — NOT dependent on `selected`, so arrow keys
   // don't re-trigger expensive stringWidth / truncation.
   const cols = stdout?.columns ?? 80;
-  const maxWidth = cols - 6;
-  const rightColWidth = 21;
-  const nameMaxCols = Math.max(4, maxWidth - 4 - rightColWidth);
+  const maxWidth = Math.max(20, cols - 4);
+  const statusColWidth = 6;
+  const metadataGap = 3;
+  const rightColWidth = 19 + metadataGap;
+  const nameMaxCols = Math.max(4, maxWidth - 4 - statusColWidth - rightColWidth);
 
   const renderItem = useCallback(
-    ({ index, isSelected }: { item: SessionInfo; index: number; isSelected: boolean }) => {
+    ({ index }: { item: SessionInfo; index: number; isSelected: boolean }) => {
       const session = sessions[index];
       if (!session) return null;
 
+      const isSelected = index === selected;
       const isLoading = loadingSessionId === session.threadId;
       const isActive = activeSessionId === session.threadId;
-      const cursor = isLoading ? '⏳' : isSelected ? '>' : ' ';
-      const activeDot = isActive ? ACTIVE_DOT : INACTIVE_DOT;
-      const rightCol = isLoading ? '  Loading...        ' : `  ${session.updatedAt}`;
+      const rightCol = isLoading ? 'Loading...' : session.updatedAt;
       const rawName = session.name.replace(/\n/g, ' ');
       const displayName = truncateByDisplayWidth(rawName, nameMaxCols);
-      const namePad = Math.max(0, nameMaxCols - stringWidth(displayName));
-      const paddedName = displayName + ' '.repeat(namePad);
       const lineColor = isLoading ? t.warning : isSelected ? t.primary : t.muted;
       const dimColor = isLoading ? t.warning : t.dim;
 
       return (
-        <Box width={maxWidth} flexShrink={0} flexGrow={0}>
-          <Text color={lineColor}>
-            {cursor} {activeDot}
-            {paddedName}
-          </Text>
-          <Text color={dimColor}>{rightCol}</Text>
+        <Box
+          width={maxWidth}
+          flexShrink={0}
+          flexGrow={0}
+          paddingX={1}
+          backgroundColor={isSelected ? t.userMsgBg : undefined}
+        >
+          <Box width={2} flexShrink={0}>
+            <Text bold color={lineColor}>
+              {isLoading ? '◌ ' : isSelected ? '❯ ' : '  '}
+            </Text>
+          </Box>
+          <Box width={nameMaxCols} flexShrink={0}>
+            <Text bold={isSelected} color={lineColor} wrap="truncate-end">
+              {displayName}
+            </Text>
+          </Box>
+          <OverlayStatusColumn active={isActive} width={statusColWidth} />
+          <Box width={rightColWidth} paddingLeft={metadataGap} flexShrink={0}>
+            <Text color={dimColor}>{rightCol}</Text>
+          </Box>
         </Box>
       );
     },
-    [sessions, loadingSessionId, activeSessionId, nameMaxCols, maxWidth, t],
+    [
+      sessions,
+      selected,
+      loadingSessionId,
+      activeSessionId,
+      nameMaxCols,
+      maxWidth,
+      rightColWidth,
+      t,
+    ],
   );
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={t.primary}
-      paddingX={1}
-      marginY={1}
-    >
-      <Text bold color={t.primary}>
-        会话列表
-      </Text>
-      <Box marginTop={1}>
-        <Text color={t.muted}>搜索: </Text>
-        <Text color={t.primary}>{searchInput}</Text>
-        <Text color={t.muted}>_</Text>
-      </Box>
-      {deleteConfirm && selectedSession && (
-        <Box marginTop={1} flexDirection="column">
-          <Text color={activeSessionId === selectedSession.threadId ? t.error : t.warning}>
-            删除 "{selectedSession.name}"? Enter 确认 Esc 取消
+    <OverlayFrame
+      title="会话列表"
+      meta={
+        deleteConfirm ? (
+          <Text color={t.error}>删除确认</Text>
+        ) : searchSelected ? (
+          <Text color={t.dim}>搜索</Text>
+        ) : sessions.length > 0 ? (
+          <Text color={t.dim}>
+            {selected + 1} / {sessions.length}
           </Text>
-          {activeSessionId === selectedSession.threadId && (
-            <Text color={t.warning}>注意：这是当前活跃会话，删除后将自动创建新会话</Text>
-          )}
-        </Box>
-      )}
-      <Box flexDirection="column" marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
-        {loading && <Text color={t.muted}>Loading...</Text>}
-        {error && <Text color={t.error}>Error: {error}</Text>}
-        {!loading && !error && sessions.length === 0 && (
-          <Text color={t.muted}>{isSearching ? '未找到匹配的会话' : '暂无历史会话'}</Text>
-        )}
-        <VirtualList<SessionInfo>
-          items={sessions}
-          selectedIndex={selected}
-          renderItem={renderItem}
-          keyExtractor={(s) => s.threadId}
-          height={maxContentHeight}
-          itemHeight={1}
-          showOverflowIndicators={true}
+        ) : undefined
+      }
+      footer={
+        <OverlayShortcutBar
+          shortcuts={
+            deleteConfirm
+              ? [
+                  { keys: '↑↓', label: '选择' },
+                  { keys: 'Enter', label: '确认' },
+                  { keys: 'Esc', label: '返回' },
+                ]
+              : searchSelected
+                ? [
+                    { keys: '输入', label: '搜索' },
+                    { keys: 'Enter / ↓', label: '会话列表' },
+                    { keys: 'Esc', label: searchInput ? '清空' : '退出搜索' },
+                  ]
+                : [
+                    { keys: '↑↓', label: '导航' },
+                    { keys: 'Enter', label: '选择' },
+                    ...(onDelete ? [{ keys: 'D', label: '删除' }] : []),
+                    { keys: 'Esc', label: '关闭' },
+                  ]
+          }
         />
-      </Box>
-      <Box height={1} />
-      <Text color={t.dim}>
-        {onDelete
-          ? '输入搜索  上/下 导航  Enter 选择  D 删除  Esc 关闭'
-          : '输入搜索  上/下 导航  Enter 选择  Esc 关闭'}
-      </Text>
-    </Box>
+      }
+    >
+      {deleteConfirm && selectedSession ? (
+        <Box marginTop={1} flexDirection="column">
+          <Box paddingX={2} flexDirection="column">
+            <Box width="100%">
+              <Text bold color={t.muted} wrap="truncate-end">
+                “{selectedSession.name.replace(/\n/g, ' ')}”
+              </Text>
+            </Box>
+          </Box>
+          <Box marginTop={1}>
+            <OverlayChoiceList
+              options={deleteOptions}
+              selectedId={deleteChoice}
+              selectionBackground={false}
+            />
+          </Box>
+        </Box>
+      ) : (
+        <>
+          <OverlaySearchInput
+            value={searchInput}
+            onChange={setSearchInput}
+            active={searchSelected}
+          />
+          <Box flexDirection="column" marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+            {loading && <Text color={t.muted}>Loading...</Text>}
+            {error && <Text color={t.error}>Error: {error}</Text>}
+            {!loading && !error && sessions.length === 0 && (
+              <Text color={t.muted}>{isSearching ? '未找到匹配的会话' : '暂无历史会话'}</Text>
+            )}
+            <VirtualList<SessionInfo>
+              items={sessions}
+              selectedIndex={Math.max(0, selected)}
+              renderItem={renderItem}
+              keyExtractor={(s) => s.threadId}
+              height={maxContentHeight}
+              itemHeight={1}
+              showOverflowIndicators={false}
+            />
+          </Box>
+        </>
+      )}
+    </OverlayFrame>
   );
 }

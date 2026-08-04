@@ -99,6 +99,11 @@ TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeA
 有效 sandbox/filesystem/network/protected-path/worktree/capability 状态。该状态文本不是 grant，
 不能扩大 capability surface。
 
+`/rewind` 从恢复点 fork 新 thread 时不继承源 thread 的授权。Fork 必须把
+`authorization.mode` 重置为 `default`，删除 `modeSource` / `modeGrantedAt` 和全部 command
+grant，并把 `mode=full` 降为 `accept_edits`；同时清除 turn-scoped capability
+binding/disclosure 与 Provider session waiver。用户需要 full access 时必须在新会话中重新显式授予。
+
 ## 测试
 
 ```bash

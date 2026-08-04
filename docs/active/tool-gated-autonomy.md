@@ -4,7 +4,7 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test tests/runtime/tool-controller.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、`bun run typecheck`。
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049。
 
@@ -139,12 +139,28 @@ sandbox profile 为权威，`checkDangerousPaths()` 只作 defense-in-depth。
 
 ## 文件原像与可逆性（ADR-0042 §4）
 
-`write_file` / `edit_file` 改动工作区文件前，工具执行链捕获目标文件原像存入 RuntimeStore。这是 `accept_edits` 等模式自动放行工作区写入的可逆性底牌：`/rewind` 回退到恢复点时先按原像恢复文件，再截断会话。约束：
+`write_file` / `edit_file` 改动工作区文件前，工具执行链捕获目标文件原像，成功写入后记录
+最后一次 Kite 写入结果的内容指纹，一并存入 RuntimeStore。这是 `accept_edits` 等模式
+自动放行工作区写入的可逆性底牌：`/rewind` 可以独立恢复代码，或在保留源会话的前提下
+fork 恢复会话并恢复代码。约束：
 
-1. 捕获是 best-effort：同一检查点窗口（上一次 turn 快照之后）内每个 path 只记录最早一份原像；捕获失败不得中断工具执行。
+1. 捕获是 best-effort：同一检查点窗口（上一次 turn 快照之后）内每个 path 只保留最早
+   原像，并持续更新最新成功写入的后像指纹；捕获失败不得中断工具执行。
 2. 子 agent（task）的工具写入经同一条记录链捕获。
-3. 恢复顺序不可颠倒：`restoreNamedSnapshot` 会截断检查点之后的原像，文件恢复必须先于它执行。
-4. Fork 只复制 fork 点之前的原像行，不改动共享工作区文件。
+3. TUI 的会话恢复默认使用 `forkSession`，不截断源会话；“代码和会话”先确保 fork
+   成功，再按源 thread 的恢复计划修改共享工作区。
+4. “仅恢复代码”不改变 transcript；“仅恢复会话”不改变共享工作区。
+5. Core 调用方若直接使用破坏性的 `restoreNamedSnapshot`，文件恢复仍必须先于它执行，
+   因为该原语会截断检查点之后的原像。
+6. Fork 复制选中恢复点及其之前的命名恢复点与原像行，并把二者的事件位置重映射到新
+   thread 的事件 ID；本身不改动共享工作区文件，恢复后的会话仍可继续向更早边界回退。
+7. 文件恢复必须先确认当前内容仍等于最后一次 Kite 写入结果；后续手动/Bash 修改或删除
+   形成冲突并跳过。旧数据库中没有后像指纹的记录不得盲目恢复。
+8. Fork 的事件复制保留原始时间和 envelope metadata；事件日志损坏时在目标 thread 写入前
+   fail closed。新 thread 清除 full access、命令 grant、turn-scoped capability、Provider
+   session waiver 及所有待处理交互/执行，不把源会话授权扩大到恢复出的会话。
+9. 自动命名恢复点在 `turn.completed` 后创建；TUI 对恢复确认和执行双层防重，并在所有范围
+   执行前验证恢复点存在且快照可解析。
 
 ## 动态 Capability
 

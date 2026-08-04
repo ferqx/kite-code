@@ -28,7 +28,13 @@
 | Subagent 审批 | 保存 continuation，用户决策后恢复 |
 | 取消 | AbortSignal 传播并形成一致的终止/恢复状态 |
 
-工具的 `tool.queued` 只在 reducer 中保存 name/args，不进入消息列表；收到 `tool.started` 后才物化 Tool Card。待审批命令只显示在 Footer 的 `授权执行命令（…）` 标题中，未获准调用不得提前出现在消息列表。多个 Shell 调用分别审批，任一调用获准后立即进入执行，不等待其他 sibling 审批完成。
+工具的 `tool.queued` 只在 reducer 中保存 name/args，不进入消息列表；收到 `tool.started`
+后才物化 Tool Card。待审批调用只显示在 Footer 的“工具类型 · 工具授权”中：命令或工具直接作为独立引用块，
+决策使用“主标签 + 影响说明”的等距列表；未获准调用不得提前出现在消息列表。多个 Shell
+调用分别审批，任一调用获准后立即进入执行，不等待其他 sibling 审批完成。
+
+工具授权、用户提问和方案审核可见时，Footer 暂时隐藏模型、思考级别、cache、context/token
+和权限模式等全局状态，只保留当前交互与快捷键；交互结束后按最新状态恢复，统计数据不重置。
 
 Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根据当前交互类型显式处理。工具审批或 plan review 被拒绝/取消时，Runtime 取消尚未终结的 sibling 与正在执行的调用，写入 `turn.aborted(cause=user)`，本轮不再调用模型；`ask_user` 的 Esc 只形成该工具的取消结果，模型可以在同一 turn 继续。
 
@@ -36,7 +42,9 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 
 Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。
 
-`/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“管理 MCP Servers”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令，管理动作只在 Overlay 的可见 Select 中执行。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
+内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/sessions`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions` 的显式参数是 `accept_edits|auto|full`，其中没有沙箱后端时 `full` 在候选中禁用。
+
+`/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“管理 MCP Server”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令，管理动作只在 Overlay 的可见 Select 中执行。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
 
 `/release` 是只读发布状态入口。普通开发 TUI 没有 artifact authority，因此固定显示
 `artifact_disabled` 与 capability unavailable；该输出不启用 Release Profile，也不能作为
@@ -52,7 +60,17 @@ Sigstore、平台 qualification 或 production Gate 证据。
 
 `/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无参数连续压缩直接提示 `No new messages to compact.`，不再次调用摘要模型，显式自定义指令仍可重写已有 narrative。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 
-`/rewind` 打开检查点面板（命名恢复点，按创建时间倒序），Enter/R 回退、F 分叉、Esc 关闭、方向键导航。回退先按文件原像把工作区文件恢复到检查点时刻状态（当时不存在的文件删除），再截断会话事件与后续恢复点；单个文件恢复失败不阻断会话回退，但会逐个提示。Fork 只复制 fork 点之前的文件原像行，不改动共享工作区文件（ADR-0025 §4）。
+`/rewind` 使用“选择边界 → 确认范围”两阶段面板。列表以恢复点之后的第一条用户消息描述
+“发送这条消息之前”，显示消息摘要、绝对时间和已记录文件数，不暴露 event / snapshot ID。
+Enter 只进入确认层；确认层默认选择“返回检查点列表”，并提供“恢复代码和会话”
+“仅恢复会话”“仅恢复代码”。会话恢复统一 fork 新 thread 并保留源会话；代码恢复按文件
+原像修改共享工作区，当时不存在的文件删除。单个文件失败会逐个提示；手动或 Bash 修改
+同一路径后，当前内容不再匹配 Kite 最后写入指纹，恢复会跳过该路径并提示冲突。缺少后像
+指纹的旧记录同样不会盲目覆盖。Fork 会保留选中边界及其之前的恢复点，因此进入恢复出的
+新会话后可以再次 `/rewind`，继续向更早的消息边界回退。恢复点必须对应完整结束的 turn；
+确认提交和异步执行分别防重，任一恢复范围在修改会话或文件前都验证恢复点存在且快照可解析。
+恢复出的新会话回到默认授权，不继承 full access、命令 grant、瞬时 capability binding 或
+Provider session waiver。
 正常完成的 `run.completed + turn.completed` 即使以 batch 原子提交，也必须生成同一个命名恢复点。
 
 `/context` 是只读诊断命令，显示 system、当前工具 schema、checkpoint summary、live transcript、动态 Runtime 和 provider framing 的同源 token 投影。它与正常模型调用和 compaction acceptance 术语（压缩验收）共用 Runtime 的 projection environment resolver 术语（投影环境解析器）及当前 adapter metadata 术语（适配器元数据）解析出的模型能力，因此当前 MCP binding、tool search、workflow skill、active inline skill instructions 和真实模型窗口必须计入估算。`/compact reset` 不以本地 hard threshold 术语（硬比例阈值）做容量门禁；重置后下一次真实调用是否被接受由 Provider 术语（模型供应商）决定。

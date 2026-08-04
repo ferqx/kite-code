@@ -112,14 +112,14 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
       });
 
       // Wait for the sub-agent to start and the external write to trigger approval
-      await waitForText(() => tui.viewport(), '› 允许一次', TIMEOUT);
+      await waitForText(() => tui.viewport(), '工具授权', TIMEOUT);
 
       const beforeApprove = tui.viewport();
       const clean = stripAnsi(beforeApprove);
       console.log('  output during approval:', clean.slice(-2000));
 
       // Verify approval dialog content
-      expect(screenContains(beforeApprove, '授权执行命令')).toBe(true);
+      expect(screenContains(beforeApprove, '工具授权')).toBe(true);
       // The terminal truncates long absolute paths to fit the viewport. Prove
       // the fixture target is external separately, then assert the stable file
       // identity that remains visible in the approval card.
@@ -259,7 +259,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
       // Sub-agent should have completed without cancellation
       expect(screenContains(output, 'Sub-agent read completed successfully.')).toBe(true);
       // No approval dialog should have appeared
-      expect(screenContains(output, '授权执行命令')).toBe(false);
+      expect(screenContains(output, '工具授权')).toBe(false);
       // TUI prompt should be visible
       expect(screenContains(output, '❯')).toBe(true);
     },

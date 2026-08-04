@@ -2525,14 +2525,26 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         data: providerAdmissionInput(event.providerId, event.providerStatus, event.retryable),
       });
     case 'approval.requested': {
-      return handleEventAction(state, {
+      const next = handleEventAction(state, {
         type: 'need_approval',
         data: {
           ...event.approval,
           callId: event.approval.callId ?? event.toolCallId,
         },
       });
+      return next.interrupt?.kind === 'approval'
+        ? { ...next, interrupt: { ...next.interrupt, interactionId: event.interactionId } }
+        : next;
     }
+    case 'approval.granted':
+      // Live approval is cleared by the local UI action before this durable
+      // event arrives. Replay has no local action, so it must clear the same
+      // Footer interrupt explicitly instead of reviving an approved request.
+      return state.interrupt?.kind === 'approval' &&
+        (state.interrupt.interactionId == null ||
+          state.interrupt.interactionId === event.interactionId)
+        ? { ...state, interrupt: null }
+        : state;
     case 'approval.rejected': {
       const approvalBlock =
         state.interrupt?.kind === 'approval' && state.interrupt.blockId

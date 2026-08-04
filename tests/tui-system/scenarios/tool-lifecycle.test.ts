@@ -253,11 +253,11 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
         () => {
           const viewport = tui.viewport();
           return (
-            screenContains(viewport, '授权执行命令') &&
-            screenContains(viewport, '› 允许一次') &&
+            screenContains(viewport, '工具授权') &&
+            screenContains(viewport, '❯ 允许一次') &&
             screenContains(viewport, '本次会话允许') &&
             screenContains(viewport, '拒绝') &&
-            screenContains(viewport, '↑↓ 选择 Enter 确认 Esc 取消')
+            screenContains(viewport, '↑↓ 选择  Enter 确认  Esc 取消')
           );
         },
         'complete approval modal to become interactive',
@@ -266,19 +266,19 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
 
       // ── 2. 验证中断显示 / Verify interrupt display ──
       let output = tui.viewport();
-      expect(screenContains(output, '授权执行命令')).toBe(true);
+      expect(screenContains(output, '工具授权')).toBe(true);
       expect(screenContains(output, '允许一次')).toBe(true);
       expect(screenContains(output, '拒绝')).toBe(true);
 
       // ── 3. 验证渲染顺序：模型文字在审批块之前 / Verify order: text before approval ──
-      const order = assertOrder(output, 'I will run a command', '授权执行命令');
+      const order = assertOrder(output, 'I will run a command', '工具授权');
       expect(order.pass).toBe(true);
 
       // ── 4. 拒绝：导航到 Deny 确认 / Deny: navigate to Deny and confirm ──
       tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '› 本次会话允许', 5000);
+      await waitForText(() => tui.viewport(), '❯ 本次会话允许', 5000);
       tui.write('\x1b[B');
-      await waitForText(() => tui.viewport(), '› 拒绝', 5000);
+      await waitForText(() => tui.viewport(), '❯ 拒绝', 5000);
       const rejectionFrames = tui.markScreen();
       tui.write('\r');
       await waitForTuiReady(tui);
@@ -290,7 +290,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       // ── 5. 用户拒绝审批会中止当前 turn，不再执行工具或调用模型 ──
       // Rejecting approval aborts the current turn without executing the tool
       // or asking the model for a continuation.
-      expect(screenContains(afterRejection, '授权执行命令')).toBe(false);
+      expect(screenContains(afterRejection, '工具授权')).toBe(false);
       expect(screenContains(afterRejection, 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION')).toBe(
         false,
       );
@@ -347,7 +347,7 @@ describe('TUI PTY System — Tool Lifecycle: auto-approved', () => {
       const output = tui.viewport();
 
       // ── 2. 验证无审批块出现 / Verify no approval block ──
-      expect(screenContains(output, '授权执行命令')).toBe(false);
+      expect(screenContains(output, '工具授权')).toBe(false);
 
       // ── 3. 验证渲染顺序：模型文字在工具之前 / Verify order: text before tool ──
       const order = assertOrder(output, 'Let me search for files', 'Search complete');

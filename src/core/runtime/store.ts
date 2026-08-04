@@ -72,6 +72,12 @@ export interface RuntimeSnapshotEntry {
   snapshotId: string;
   eventPosition: number;
   createdAt: number;
+  /** First user message after this recovery point, used to describe its boundary. */
+  targetMessage?: string;
+  /** Persisted event timestamp for the boundary message (Unix seconds). */
+  targetMessageCreatedAt?: number;
+  /** Number of recorded file paths that would be affected by a code rewind. */
+  affectedFileCount?: number;
 }
 
 /** Derive the runtime sidecar path without turning SQLite's memory sentinel into a file. */
@@ -130,11 +136,27 @@ export interface RuntimeStore {
     content: string | null,
     existed: boolean,
   ): void;
+  /**
+   * 记录同一检查点窗口内该 path 最近一次成功写入后的内容指纹。
+   * Record the latest post-write fingerprint for conflict-safe rewind.
+   */
+  recordFilePostimage(
+    threadId: string,
+    path: string,
+    contentHash: string | null,
+    existed: boolean,
+  ): void;
   /** 计算回退到某事件位置时的文件恢复计划 / Compute the file restore plan for rewinding to an event position. */
   fileRestorePlan(
     threadId: string,
     eventPosition: number,
-  ): Array<{ path: string; content: string | null; existed: boolean }>;
+  ): Array<{
+    path: string;
+    content: string | null;
+    existed: boolean;
+    postHash: string | null;
+    postExisted: boolean | null;
+  }>;
   /** 关闭数据库连接 / Close the database */
   close(): void;
 }
@@ -169,6 +191,50 @@ function checksum(value: string): string {
     hash = Math.imul(hash, 16777619);
   }
   return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function rebindForkState(
+  sourceState: Record<string, unknown>,
+  targetThreadId: string,
+): Record<string, unknown> {
+  const forkState = structuredClone(sourceState);
+  const session = forkState.session as Record<string, unknown> | undefined;
+  if (session) session.threadId = targetThreadId;
+
+  const authorization = forkState.authorization as Record<string, unknown> | undefined;
+  if (authorization) {
+    authorization.mode = 'default';
+    authorization.commandGrants = {};
+    delete authorization.modeSource;
+    delete authorization.modeGrantedAt;
+  }
+  if (forkState.mode === 'full') forkState.mode = 'accept_edits';
+
+  const capabilities = forkState.capabilities as Record<string, unknown> | undefined;
+  if (capabilities) {
+    capabilities.bindings = {};
+    capabilities.disclosures = {};
+    delete capabilities.pendingSearch;
+  }
+
+  const providerAdmission = forkState.providerAdmission as Record<string, unknown> | undefined;
+  if (providerAdmission) {
+    providerAdmission.pending = [];
+    providerAdmission.waivers = {};
+  }
+
+  if ('interactions' in forkState) forkState.interactions = { kind: 'idle' };
+  const tools = forkState.tools as Record<string, unknown> | undefined;
+  if (tools) {
+    tools.queue = [];
+    tools.active = [];
+  }
+  if ('suspendedSubagents' in forkState) forkState.suspendedSubagents = {};
+  return forkState;
 }
 
 /**
@@ -281,6 +347,8 @@ export function createRuntimeStore(
       event_position INTEGER NOT NULL DEFAULT 0,
       content        TEXT,
       existed        INTEGER NOT NULL DEFAULT 1,
+      post_hash      TEXT,
+      post_existed   INTEGER,
       created_at     INTEGER DEFAULT (unixepoch()),
       PRIMARY KEY (thread_id, path, event_position)
     )
@@ -307,6 +375,8 @@ export function createRuntimeStore(
     ['runtime_snapshots', 'state_revision', 'INTEGER NOT NULL DEFAULT 0'],
     ['runtime_snapshots', 'state_checksum', "TEXT NOT NULL DEFAULT ''"],
     ['runtime_snapshots', 'schema_version', 'INTEGER NOT NULL DEFAULT 0'],
+    ['runtime_file_preimages', 'post_hash', 'TEXT'],
+    ['runtime_file_preimages', 'post_existed', 'INTEGER'],
   ] as const) {
     const columns = db
       .query<{ name: string }, []>(`PRAGMA table_info(${table})`)
@@ -346,6 +416,9 @@ export function createRuntimeStore(
   const deleteExpiredMcpEgressNonces = db.query(
     'DELETE FROM runtime_mcp_egress_nonces WHERE expires_at <= ?',
   );
+  const insertForkEvent = db.query(
+    'INSERT INTO runtime_events (thread_id, event_json, event_id, revision, causation_id, occurred_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+  );
   const selectEvents = db.query<EventRow, [string, number]>(
     'SELECT id, thread_id, event_json, event_id, revision, causation_id, occurred_at, created_at FROM runtime_events WHERE thread_id = ? AND id > ? ORDER BY id ASC',
   );
@@ -361,8 +434,17 @@ export function createRuntimeStore(
   const upsertNamedSnapshot = db.query(
     'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, created_at) VALUES (?, ?, ?, ?, unixepoch())',
   );
+  const insertForkNamedSnapshot = db.query(
+    'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, created_at) VALUES (?, ?, ?, ?, ?)',
+  );
   const selectNamedSnapshot = db.query<{ state_json: string }, [string, string]>(
     'SELECT state_json FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
+  );
+  const selectNamedSnapshotsForFork = db.query<
+    { name: string; event_position: number; state_json: string; created_at: number },
+    [string, number]
+  >(
+    'SELECT name, event_position, state_json, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND event_position <= ? ORDER BY event_position ASC, name ASC',
   );
   const selectLastEventPosition = db.query<{ id: number | null }, [string]>(
     'SELECT MAX(id) AS id FROM runtime_events WHERE thread_id = ?',
@@ -397,6 +479,17 @@ export function createRuntimeStore(
   const selectFilePreimageInWindow = db.query<{ path: string }, [string, string, number]>(
     'SELECT path FROM runtime_file_preimages WHERE thread_id = ? AND path = ? AND event_position > ? LIMIT 1',
   );
+  const updateFilePostimageInWindow = db.query(
+    `UPDATE runtime_file_preimages
+     SET post_hash = ?, post_existed = ?
+     WHERE rowid = (
+       SELECT rowid
+       FROM runtime_file_preimages
+       WHERE thread_id = ? AND path = ? AND event_position > ?
+       ORDER BY event_position DESC
+       LIMIT 1
+     )`,
+  );
   const selectLatestSnapshotPosition = db.query<{ event_position: number | null }, [string]>(
     'SELECT MAX(event_position) AS event_position FROM runtime_named_snapshots WHERE thread_id = ?',
   );
@@ -407,46 +500,111 @@ export function createRuntimeStore(
     'SELECT name, event_position, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
   );
   const selectFileRestorePlan = db.query<
-    { path: string; content: string | null; existed: number },
-    [string, number, string]
+    {
+      path: string;
+      content: string | null;
+      existed: number;
+      post_hash: string | null;
+      post_existed: number | null;
+    },
+    [string, number]
   >(
-    `SELECT p.path AS path, p.content AS content, p.existed AS existed
-     FROM runtime_file_preimages p
-     JOIN (SELECT path, MIN(event_position) AS min_position
-           FROM runtime_file_preimages
-           WHERE thread_id = ? AND event_position > ?
-           GROUP BY path) m ON p.path = m.path AND p.event_position = m.min_position
-     WHERE p.thread_id = ?`,
+    `WITH bounds AS (
+       SELECT thread_id, path,
+              MIN(event_position) AS min_position,
+              MAX(event_position) AS max_position
+       FROM runtime_file_preimages
+       WHERE thread_id = ? AND event_position > ?
+       GROUP BY thread_id, path
+     )
+     SELECT first.path AS path,
+            first.content AS content,
+            first.existed AS existed,
+            last.post_hash AS post_hash,
+            last.post_existed AS post_existed
+     FROM bounds
+     JOIN runtime_file_preimages first
+       ON first.thread_id = bounds.thread_id
+      AND first.path = bounds.path
+      AND first.event_position = bounds.min_position
+     JOIN runtime_file_preimages last
+       ON last.thread_id = bounds.thread_id
+      AND last.path = bounds.path
+      AND last.event_position = bounds.max_position`,
   );
   const deleteFilePreimages = db.query('DELETE FROM runtime_file_preimages WHERE thread_id = ?');
   const deleteFilePreimagesAfter = db.query(
     'DELETE FROM runtime_file_preimages WHERE thread_id = ? AND event_position > ?',
   );
-  const copyFilePreimages = db.query(
-    `INSERT OR REPLACE INTO runtime_file_preimages
-       (thread_id, path, event_position, content, existed, created_at)
-     SELECT ?, path, event_position, content, existed, created_at
+  const selectFilePreimagesForFork = db.query<
+    {
+      path: string;
+      event_position: number;
+      content: string | null;
+      existed: number;
+      post_hash: string | null;
+      post_existed: number | null;
+      created_at: number;
+    },
+    [string, number]
+  >(
+    `SELECT path, event_position, content, existed, post_hash, post_existed, created_at
      FROM runtime_file_preimages
-     WHERE thread_id = ? AND event_position <= ?`,
+     WHERE thread_id = ? AND event_position <= ?
+     ORDER BY event_position ASC, path ASC`,
+  );
+  const insertForkFilePreimage = db.query(
+    `INSERT OR REPLACE INTO runtime_file_preimages
+       (thread_id, path, event_position, content, existed, post_hash, post_existed, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const deleteSession = db.query('DELETE FROM runtime_sessions WHERE thread_id = ?');
   const listNamedSnapshots = db.query<
-    { name: string; event_position: number; created_at: number },
+    {
+      name: string;
+      event_position: number;
+      created_at: number;
+      target_message: string | null;
+      target_message_created_at: number | null;
+      affected_file_count: number;
+    },
     [string]
   >(
-    'SELECT name, event_position, created_at FROM runtime_named_snapshots WHERE thread_id = ? ORDER BY created_at DESC, name DESC',
+    `SELECT s.name, s.event_position, s.created_at,
+       (SELECT json_extract(e.event_json, '$.content')
+        FROM runtime_events e
+        WHERE e.thread_id = s.thread_id
+          AND e.id > s.event_position
+          AND json_extract(e.event_json, '$.type') = 'user.message_appended'
+        ORDER BY e.id ASC LIMIT 1) AS target_message,
+       (SELECT e.created_at
+        FROM runtime_events e
+        WHERE e.thread_id = s.thread_id
+          AND e.id > s.event_position
+          AND json_extract(e.event_json, '$.type') = 'user.message_appended'
+        ORDER BY e.id ASC LIMIT 1) AS target_message_created_at,
+       (SELECT COUNT(DISTINCT p.path)
+        FROM runtime_file_preimages p
+        WHERE p.thread_id = s.thread_id
+          AND p.event_position > s.event_position) AS affected_file_count
+     FROM runtime_named_snapshots s
+     WHERE s.thread_id = ?
+     ORDER BY s.created_at DESC, s.name DESC`,
   );
   const statements = [
     insertEvent,
     insertEventWithMetadata,
     insertMcpEgressNonce,
     deleteExpiredMcpEgressNonces,
+    insertForkEvent,
     selectEvents,
     selectAllEvents,
     upsertSnapshot,
     selectSnapshot,
     upsertNamedSnapshot,
+    insertForkNamedSnapshot,
     selectNamedSnapshot,
+    selectNamedSnapshotsForFork,
     selectLastEventPosition,
     upsertSession,
     setSessionName,
@@ -458,12 +616,14 @@ export function createRuntimeStore(
     deleteNamedSnapshotsAfter,
     insertFilePreimage,
     selectFilePreimageInWindow,
+    updateFilePostimageInWindow,
     selectLatestSnapshotPosition,
     selectNamedSnapshotEntry,
     selectFileRestorePlan,
     deleteFilePreimages,
     deleteFilePreimagesAfter,
-    copyFilePreimages,
+    selectFilePreimagesForFork,
+    insertForkFilePreimage,
     deleteSession,
     listNamedSnapshots,
   ] as const;
@@ -735,6 +895,9 @@ export function createRuntimeStore(
         snapshotId: row.name,
         eventPosition: row.event_position,
         createdAt: row.created_at,
+        targetMessage: row.target_message ?? undefined,
+        targetMessageCreatedAt: row.target_message_created_at ?? undefined,
+        affectedFileCount: row.affected_file_count,
       }));
     },
 
@@ -765,14 +928,40 @@ export function createRuntimeStore(
       }
     },
 
+    recordFilePostimage(
+      threadId: string,
+      path: string,
+      contentHash: string | null,
+      existed: boolean,
+    ): void {
+      if (isClosed || !threadId || !path) return;
+      try {
+        const boundary = selectLatestSnapshotPosition.get(threadId)?.event_position ?? -1;
+        updateFilePostimageInWindow.run(contentHash, existed ? 1 : 0, threadId, path, boundary);
+      } catch {
+        // best-effort：后像指纹记录失败不得影响工具执行
+        // best-effort: post-image capture failure must never break tool execution
+      }
+    },
+
     fileRestorePlan(
       threadId: string,
       eventPosition: number,
-    ): Array<{ path: string; content: string | null; existed: boolean }> {
+    ): Array<{
+      path: string;
+      content: string | null;
+      existed: boolean;
+      postHash: string | null;
+      postExisted: boolean | null;
+    }> {
       if (isClosed) return [];
-      return selectFileRestorePlan
-        .all(threadId, eventPosition, threadId)
-        .map((row) => ({ path: row.path, content: row.content, existed: row.existed === 1 }));
+      return selectFileRestorePlan.all(threadId, eventPosition).map((row) => ({
+        path: row.path,
+        content: row.content,
+        existed: row.existed === 1,
+        postHash: row.post_hash,
+        postExisted: row.post_existed == null ? null : row.post_existed === 1,
+      }));
     },
 
     restoreNamedSnapshot(threadId: string, snapshotId: string): boolean {
@@ -802,20 +991,22 @@ export function createRuntimeStore(
 
     forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean {
       if (isClosed) return false;
-      const snapshot = store.loadNamedSnapshot<Record<string, unknown>>(sourceThreadId, snapshotId);
-      if (!snapshot) return false;
-      const sourceEvents = store.loadEvents(sourceThreadId);
+      const snapshot = store.loadNamedSnapshot(sourceThreadId, snapshotId);
+      if (!isRecord(snapshot)) return false;
       const position =
         listNamedSnapshots.all(sourceThreadId).find((entry) => entry.name === snapshotId)
           ?.event_position ?? 0;
-      const events = sourceEvents
-        .filter((entry) => entry.id <= position)
-        .map((entry) => entry.event);
-      const forkState = structuredClone(snapshot);
-      const session = forkState.session as Record<string, unknown> | undefined;
-      if (session) session.threadId = targetThreadId;
-      const authorization = forkState.authorization as Record<string, unknown> | undefined;
-      if (authorization) authorization.commandGrants = {};
+      let sourceEvents: StoredEvent[];
+      try {
+        sourceEvents = store
+          .loadEventsStrict(sourceThreadId)
+          .filter((entry) => entry.id <= position);
+      } catch {
+        return false;
+      }
+      const sourceNamedSnapshots = selectNamedSnapshotsForFork.all(sourceThreadId, position);
+      const sourceFilePreimages = selectFilePreimagesForFork.all(sourceThreadId, position);
+      const forkState = rebindForkState(snapshot, targetThreadId);
       db.transaction(() => {
         deleteEvents.run(targetThreadId);
         deleteSnapshot.run(targetThreadId);
@@ -823,11 +1014,40 @@ export function createRuntimeStore(
         deleteFilePreimages.run(targetThreadId);
         deleteSession.run(targetThreadId);
         upsertSession.run(targetThreadId);
-        for (const event of events) insertEvent.run(targetThreadId, JSON.stringify(event));
-        // ADR-0042 §4：复制 fork 点之前的文件原像（fork 复用源事件序列，
-        // 事件位置一一对应），fork 出的会话内 /rewind 同样可以恢复文件。
-        copyFilePreimages.run(targetThreadId, sourceThreadId, position);
-        const targetPosition = selectLastEventPosition.get(targetThreadId)?.id ?? 0;
+        const positionMap = new Map<number, number>();
+        for (const entry of sourceEvents) {
+          const inserted = insertForkEvent.run(
+            targetThreadId,
+            JSON.stringify(entry.event),
+            entry.event_id ?? null,
+            entry.revision ?? 0,
+            entry.causation_id ?? null,
+            entry.occurred_at ?? null,
+            entry.created_at,
+          );
+          positionMap.set(entry.id, Number(inserted.lastInsertRowid));
+        }
+        const remapPosition = (sourcePosition: number): number => {
+          let targetPosition = 0;
+          for (const entry of sourceEvents) {
+            if (entry.id > sourcePosition) break;
+            targetPosition = positionMap.get(entry.id) ?? targetPosition;
+          }
+          return targetPosition;
+        };
+        for (const preimage of sourceFilePreimages) {
+          insertForkFilePreimage.run(
+            targetThreadId,
+            preimage.path,
+            remapPosition(preimage.event_position),
+            preimage.content,
+            preimage.existed,
+            preimage.post_hash,
+            preimage.post_existed,
+            preimage.created_at,
+          );
+        }
+        const targetPosition = remapPosition(position);
         const serialized = JSON.stringify(forkState);
         const state = forkState as { revision?: number; schemaVersion?: number };
         upsertSnapshot.run(
@@ -838,12 +1058,23 @@ export function createRuntimeStore(
           checksum(serialized),
           state.schemaVersion ?? 0,
         );
-        upsertNamedSnapshot.run(
-          targetThreadId,
-          snapshotId,
-          targetPosition,
-          JSON.stringify(forkState),
-        );
+        for (const namedSnapshot of sourceNamedSnapshots) {
+          try {
+            const namedState = rebindForkState(
+              JSON.parse(namedSnapshot.state_json) as Record<string, unknown>,
+              targetThreadId,
+            );
+            insertForkNamedSnapshot.run(
+              targetThreadId,
+              namedSnapshot.name,
+              remapPosition(namedSnapshot.event_position),
+              JSON.stringify(namedState),
+              namedSnapshot.created_at,
+            );
+          } catch {
+            // Earlier corrupt recovery points are omitted; the selected point was validated above.
+          }
+        }
       })();
       return true;
     },

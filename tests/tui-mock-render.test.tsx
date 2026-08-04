@@ -40,14 +40,30 @@ function fakeRunStatus(overrides: Partial<RunStatusSnapshot> = {}): RunStatusSna
 }
 
 describe('Header', () => {
-  test('shows working cat face when running', () => {
-    const { lastFrame } = render(React.createElement(Header, { running: true }));
-    expect(lastFrame()).toContain('( ^ ^ )');
+  test('shows the model snapshot in the startup card', () => {
+    const { lastFrame } = render(
+      React.createElement(Header, {
+        modelName: 'gpt-5.6',
+        thinkingMode: 'low',
+        workspace: '/tmp/kite-code',
+        columns: 60,
+      }),
+    );
+    expect(lastFrame()).toContain('gpt-5.6 · low');
   });
 
-  test('shows idle cat face when not running', () => {
-    const { lastFrame } = render(React.createElement(Header, { running: false }));
-    expect(lastFrame()).toContain('( = = )');
+  test('uses the kite wordmark instead of the former cat mascot', () => {
+    const { lastFrame } = render(
+      React.createElement(Header, {
+        modelName: 'gpt-5.6',
+        workspace: '/tmp/kite-code',
+        columns: 60,
+      }),
+    );
+    expect(lastFrame()).toContain('──◆ Kite Code');
+    expect(lastFrame()).toContain('╭');
+    expect(lastFrame()).toContain('╰');
+    expect(lastFrame()).not.toContain('/\\_/\\');
   });
 });
 

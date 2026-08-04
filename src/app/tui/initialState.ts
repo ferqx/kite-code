@@ -39,7 +39,6 @@ export const initialState: TuiState = {
   showMcp: false,
   showRewind: false,
   checkpoints: [],
-  rewindCounter: 0,
   ctrlCPressed: false,
   sessionKey: 0,
   exitRequested: false,

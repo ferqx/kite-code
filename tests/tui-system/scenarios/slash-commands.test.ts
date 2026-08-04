@@ -148,6 +148,18 @@ describe('TUI PTY System — Slash Commands', () => {
         'populated session selector to become visible',
         10_000,
       );
+      expect(screenContains(tui.viewport(), '搜索: —')).toBe(true);
+
+      tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), '❯ 搜索:', 5_000);
+
+      tui.write('hello');
+      await waitForText(() => tui.viewport(), '搜索: hello', 5_000);
+      await clearInput(tui, 'hello'.length);
+      await waitForText(() => tui.viewport(), '❯ 搜索:', 5_000);
+
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '搜索: —', 5_000);
       tui.write('\x1b');
       await waitForTuiReady(tui);
     },
@@ -203,9 +215,13 @@ describe('TUI PTY System — Slash Commands', () => {
     'partial /mc input suggests /mcp and can be explicitly cleared',
     async () => {
       await typeText(tui, '/mc');
-      await waitForText(() => tui.viewport(), 'Manage MCP servers', 10_000);
-      expect(screenContains(tui.viewport(), '命令匹配 /mc')).toBe(true);
-      expect(screenContains(tui.viewport(), '/mcp')).toBe(true);
+      await waitForText(() => tui.viewport(), '管理 MCP Server', 10000);
+
+      const output = tui.viewport();
+      expect(screenContains(output, '命令匹配')).toBe(true);
+      expect(screenContains(output, '命令匹配 /mc')).toBe(false);
+      expect(screenContains(output, '/mcp')).toBe(true);
+      expect(screenContains(output, '管理 MCP Server')).toBe(true);
       await clearInput(tui, '/mc'.length);
     },
     TIMEOUT,

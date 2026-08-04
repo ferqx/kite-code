@@ -4,6 +4,8 @@ import { type MutableRefObject, useState } from 'react';
 import type { TuiUserInputProvider } from '@/app/tui/provider';
 import { useTheme } from '@/app/tui/theme';
 import type { AgentPlan, PlanArtifactRef } from '@/protocol/events';
+import OverlayChoiceList from './OverlayChoiceList';
+import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
 interface PlanReviewBlockProps {
   plan: AgentPlan;
@@ -30,21 +32,26 @@ export default function PlanReviewBlock({
 
   const options = [
     {
-      label: 'Approve and start in Auto',
-      desc: 'Run non-destructive work with automatic review',
+      label: '在 Auto 模式下开始执行',
+      desc: '自动审核非破坏性操作',
       action: 'approved_auto',
     },
     {
-      label: 'Approve and accept edits',
-      desc: 'Apply workspace file edits without prompting',
+      label: '在接受编辑模式下开始执行',
+      desc: '工作区文件编辑无需逐次确认',
       action: 'approved_accept_edits',
     },
     {
-      label: 'Keep planning with feedback',
-      desc: 'Provide feedback to revise the plan',
+      label: '携带反馈继续规划',
+      desc: '输入反馈，让方案继续调整',
       action: 'supplemented',
     },
   ];
+  const choiceOptions = options.map((option, index) => ({
+    id: option.action,
+    label: `${option.label}${index === 0 ? '（推荐）' : ''}`,
+    description: option.desc,
+  }));
 
   function resolve(action: string, feedback?: string) {
     switch (action) {
@@ -99,9 +106,6 @@ export default function PlanReviewBlock({
           setMode('options');
           return;
         }
-        if (key.return) {
-          handleSupplementSubmit(supplementText);
-        }
         return;
       }
 
@@ -130,28 +134,43 @@ export default function PlanReviewBlock({
   // 方案内容已在 OutputArea 以 Markdown tool_card 渲染，Footer 只显示确认操作条
   // Plan content is rendered in OutputArea as Markdown tool_card; Footer only shows the confirmation bar
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={t.primary} paddingX={1}>
+    <OverlayFrame
+      title="方案审核"
+      footer={
+        <OverlayShortcutBar
+          shortcuts={
+            mode === 'options'
+              ? [
+                  { keys: '↑↓', label: '选择' },
+                  { keys: 'Enter', label: '确认' },
+                  { keys: 'Esc', label: '取消' },
+                ]
+              : [
+                  { keys: 'Enter', label: '提交' },
+                  { keys: 'Esc', label: '返回' },
+                ]
+          }
+        />
+      }
+    >
       {mode === 'options' ? (
         <>
-          <Text color={t.primary}>Review the plan above and choose:</Text>
-          {options.map((o, i) => {
-            const isSelected = i === selectedIndex;
-            const isRec = i === 0;
-            return (
-              <Box key={o.action} flexDirection="column">
-                <Text color={isSelected ? t.primary : t.muted}>
-                  {isSelected ? '▶' : ' '} {i + 1}. {o.label}
-                  {isRec ? <Text color={t.dim}> (Recommended)</Text> : null}
-                </Text>
-                {o.desc && <Text color={t.dim}> {o.desc}</Text>}
-              </Box>
-            );
-          })}
-          <Text color={t.dim}>↑↓ select Enter confirm Esc cancel</Text>
+          <Box marginTop={1}>
+            <Text color={t.primary}>请审核上方方案并选择后续操作：</Text>
+          </Box>
+          <Box marginTop={1}>
+            <OverlayChoiceList
+              options={choiceOptions}
+              selectedId={choiceOptions[selectedIndex]?.id}
+              numbered
+            />
+          </Box>
         </>
       ) : (
         <>
-          <Text color={t.primary}>Enter your feedback for the plan:</Text>
+          <Box marginTop={1}>
+            <Text color={t.primary}>请输入对方案的反馈：</Text>
+          </Box>
           <Box marginY={1}>
             <Text color={t.primary}>{'> '}</Text>
             <TextInput
@@ -160,10 +179,9 @@ export default function PlanReviewBlock({
               onSubmit={handleSupplementSubmit}
             />
           </Box>
-          {showEmptyHint && <Text color={t.error}>Feedback cannot be empty.</Text>}
-          <Text color={t.dim}>Enter submit Esc back</Text>
+          {showEmptyHint && <Text color={t.error}>反馈不能为空。</Text>}
         </>
       )}
-    </Box>
+    </OverlayFrame>
   );
 }

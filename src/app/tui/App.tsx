@@ -1,5 +1,4 @@
-import { Box, Text, useWindowSize } from 'ink';
-import { ScrollList } from 'ink-scroll-list';
+import { Box, useWindowSize } from 'ink';
 import React, {
   type Dispatch,
   type ReactNode,
@@ -16,7 +15,7 @@ import InputBlock from './components/InputBlock';
 import ModelSelector from './components/ModelSelector';
 import PlanReviewBlock from './components/PlanReviewBlock';
 import SessionSelector from './components/SessionSelector.js';
-import { ACTIVE_DOT, INACTIVE_DOT } from './constants';
+import SlashSuggestionOverlay from './components/SlashSuggestionOverlay';
 import Footer from './Footer';
 import Header from './Header';
 import { useGlobalKeys } from './hooks/useGlobalKeys';
@@ -27,7 +26,6 @@ import type { McpController } from './mcp/types';
 import OutputArea, { useStaticContent } from './OutputArea';
 import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
-import { useTheme } from './theme';
 import type { TuiState } from './types';
 
 export type { Action } from './reducers';
@@ -50,11 +48,15 @@ export interface AppProps {
   dispatch: Dispatch<Action>;
   onToggleReason: (id: number) => void;
   provider: import('./provider').TuiUserInputProvider;
+  workspace?: string;
   mcpController?: McpController;
   availableModels?: import('@/core/config').AvailableModel[];
-  slashSuggestion?: import('./components/InputLine').SlashSuggestionData | null;
+  slashSuggestion?: import('./hooks/useSlashSuggestions').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
   onTogglePlanMode?: () => void;
+  getRewindPreview?: (
+    checkpointId: string,
+  ) => import('@/core/runtime/file-checkpoints').FileRestorePreview | null;
   resizeGeneration?: number;
   children?: ReactNode;
 }
@@ -86,15 +88,16 @@ export default function App({
   dispatch,
   onToggleReason,
   provider,
+  workspace = process.cwd(),
   mcpController,
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
+  getRewindPreview,
   resizeGeneration,
   children,
 }: AppProps) {
-  const theme = useTheme();
-  const slashMaxHeight = useOverlayHeight(7);
+  const slashListHeight = useOverlayHeight(7);
   const { columns } = useWindowSize();
   const overlayOrInterrupt =
     state.showHelp ||
@@ -128,12 +131,9 @@ export default function App({
   const hideSessions = useCallback(() => dispatch({ type: 'HIDE_SESSIONS' }), [dispatch]);
   const hideMcp = useCallback(() => dispatch({ type: 'HIDE_MCP' }), [dispatch]);
   const hideRewind = useCallback(() => dispatch({ type: 'HIDE_REWIND' }), [dispatch]);
-  const handleRevert = useCallback(
-    (checkpointId: string) => dispatch({ type: 'REVERT_TO_CHECKPOINT', checkpointId }),
-    [dispatch],
-  );
-  const handleFork = useCallback(
-    (checkpointId: string) => dispatch({ type: 'FORK_FROM_CHECKPOINT', checkpointId }),
+  const executeRewind = useCallback(
+    (checkpointId: string, scope: import('./types').RewindScope) =>
+      dispatch({ type: 'EXECUTE_REWIND', checkpointId, scope }),
     [dispatch],
   );
   const onToggleToolExpand = useCallback(
@@ -224,9 +224,34 @@ export default function App({
   // ── Static content computation ──
   // <Static> is rendered at ROOT LEVEL (outside any layout Box) so its
   // scrollback writes never compete with the dynamic tree's Yoga layout.
+  const activeWorkspace =
+    state.sessions.find((session) => session.threadId === state.activeSessionId)?.workspace ??
+    workspace;
+  const headerSnapshotRef = useRef({
+    sessionKey: state.sessionKey,
+    modelName: state.status.modelName,
+    thinkingMode: state.status.thinkingMode,
+    workspace: activeWorkspace,
+  });
+  if (headerSnapshotRef.current.sessionKey !== state.sessionKey) {
+    headerSnapshotRef.current = {
+      sessionKey: state.sessionKey,
+      modelName: state.status.modelName,
+      thinkingMode: state.status.thinkingMode,
+      workspace: activeWorkspace,
+    };
+  }
+  const headerSnapshot = headerSnapshotRef.current;
   const header = useMemo(
-    () => <MemoHeader running={state.running} error={state.sessionError} />,
-    [state.running, state.sessionError],
+    () => (
+      <MemoHeader
+        modelName={headerSnapshot.modelName}
+        thinkingMode={headerSnapshot.thinkingMode}
+        workspace={headerSnapshot.workspace}
+        columns={columns}
+      />
+    ),
+    [columns, headerSnapshot],
   );
 
   const {
@@ -282,6 +307,7 @@ export default function App({
         running={showRunStatus}
         timerKey={state.runCount}
         interactionMode={state.interactionMode}
+        hideGlobalStatus={Boolean(state.interrupt)}
       >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}
         {!state.interrupt && children}
@@ -318,6 +344,7 @@ export default function App({
           onSelect={selectSession}
           onClose={hideSessions}
           onDelete={deleteSessionAction}
+          layeredEscRef={layeredOverlayEscRef}
           loadingSessionId={state.loadingSessionId}
           activeSessionId={state.activeSessionId}
         />
@@ -339,68 +366,19 @@ export default function App({
       {state.showRewind && (
         <CheckpointSelector
           checkpoints={state.checkpoints}
-          onRevert={handleRevert}
-          onFork={handleFork}
+          onConfirm={executeRewind}
           onClose={hideRewind}
+          getRewindPreview={getRewindPreview}
+          layeredEscRef={layeredOverlayEscRef}
         />
       )}
-      {slashSuggestion &&
-        (() => {
-          const listHeight = Math.max(3, slashMaxHeight - 2);
-          return (
-            <Box
-              flexDirection="column"
-              borderStyle="round"
-              borderColor={theme.primary}
-              paddingX={1}
-              marginTop={1}
-            >
-              <Text bold color={theme.primary}>
-                {slashSuggestion.kind === 'model'
-                  ? `模型匹配 "${slashSuggestion.partial}"`
-                  : slashSuggestion.kind === 'effort'
-                    ? `推理深度匹配 "${slashSuggestion.partial}"`
-                    : slashSuggestion.kind === 'theme'
-                      ? `主题匹配 "${slashSuggestion.partial}"`
-                      : slashSuggestion.kind === 'permissions'
-                        ? `权限模式匹配 "${slashSuggestion.partial}"`
-                        : `命令匹配 /${slashSuggestion.partial}`}
-              </Text>
-              <Box height={Math.min(slashSuggestion.items.length, listHeight)}>
-                <ScrollList selectedIndex={slashSuggestion.selectedIndex} scrollAlignment="auto">
-                  {slashSuggestion.items.map((item, i) => {
-                    const isSelected = i === slashSuggestion.selectedIndex;
-                    const aliasStr =
-                      slashSuggestion.kind === 'command' && item.aliases.length > 0
-                        ? ` (${item.aliases.join(', ')})`
-                        : '';
-                    const argsStr = item.args ? ` ${item.args}` : '';
-                    const activeDot = item.isActive ? ACTIVE_DOT : INACTIVE_DOT;
-                    const displayName =
-                      slashSuggestion.kind === 'permissions' ? item.command : `/${item.command}`;
-                    const itemColor = item.disabled
-                      ? theme.dim
-                      : isSelected
-                        ? theme.primary
-                        : theme.muted;
-                    return (
-                      <Box key={item.command}>
-                        <Text color={itemColor}>
-                          {isSelected ? '❯' : ' '} {activeDot}
-                          {displayName}
-                          {argsStr}
-                        </Text>
-                        <Text color={theme.dim}>{aliasStr}</Text>
-                        {item.description && <Text color={theme.dim}> — {item.description}</Text>}
-                      </Box>
-                    );
-                  })}
-                </ScrollList>
-              </Box>
-              <Text color={theme.dim}>↑↓ 导航 Tab/→ 补全 Enter 提交 Esc 关闭</Text>
-            </Box>
-          );
-        })()}
+      {slashSuggestion && (
+        <SlashSuggestionOverlay
+          suggestion={slashSuggestion}
+          maxVisibleItems={slashListHeight}
+          width={columns}
+        />
+      )}
     </Box>
   );
 }

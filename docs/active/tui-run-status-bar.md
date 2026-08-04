@@ -114,4 +114,8 @@ Runtime v19 的新终态通过共享 `projectTerminalOutcomeV1` 投影。TUI 只
 
 `StatsLine` 只读取 Core `ContextStatusSnapshot` 的 utilization；模型名称和累计 usage 不能推导 context 百分比。没有可信窗口但已有 snapshot 时，绝对 token 数必须显示同一 snapshot 的 `estimate.totalInputTokens`，与 `/context` 和压缩前后估算保持同一口径；仅在尚无 snapshot 时才兼容回退到累计 usage。`context.compaction_completed` 到达 App 后必须立即用 checkpoint 的 `inputTokensAfter` 刷新 snapshot 总量，并在窗口可信时重算 utilization，不能保留压缩前的 Footer 数字等待下一次模型调用。状态栏不持久展示历史压缩率（例如 `91% compacted`）；压缩收益只在一次性终态提示和诊断数据中保留。Completed、failed、cancelled 统一通过 Core 脱敏映射生成提示；TUI 以 `compactionId` 去重，每个压缩恰好显示一个不进入 transcript 的终态提示。Summary Provider 失败提示用户检查所选模型的 `contextWindowTokens` 或执行 `/clear`，不得展示 Provider 原始错误正文。
 
+工具授权、用户提问或方案审核 interrupt 可见时，Footer 同时隐藏 `StatusBar` 与 `StatsLine`，
+避免全局运行/模型状态和当前阻塞决策形成两条竞争底栏。统计数据继续保存在 State 中，
+interrupt 结束后恢复展示，不得因临时隐藏而重置 cache、context 或 token 数。
+
 进入或切换历史会话时，App 必须从恢复后的 RuntimeState、active checkpoint 和当前 projection environment 本地重建一次 `ContextStatusSnapshot`；该过程不得调用 Provider。重建只替换 Footer 的 context snapshot，不重置或改写持久化的累计 cache hit/miss 与 usage 统计。若工具、MCP 或 Skill 环境随后变化，下一次标准 `model.context_metrics` 继续以 fresh projection 覆盖该快照。

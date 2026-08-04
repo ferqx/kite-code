@@ -33,13 +33,14 @@ import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
 import FirstRunFlow from './components/first-run/FirstRunFlow';
-import InputLine, { type SlashSuggestionData } from './components/InputLine';
+import InputLine from './components/InputLine';
 import WorkspaceTrustGate from './components/WorkspaceTrustGate';
 import { createTuiExitCoordinatorV1 } from './exit-coordinator';
 import { useMcpController } from './hooks/useMcpController';
 import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
 import { useSkillsLoader } from './hooks/useSkillsLoader';
 import { useSlashCommand } from './hooks/useSlashCommand';
+import type { SlashSuggestionData } from './hooks/useSlashSuggestions';
 import { shouldCancelClearedInterrupt } from './interrupt-clear';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
@@ -368,7 +369,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     }),
     [dispatch, provider, config, workspace, sessionManager],
   );
-  const { runRewind, dispatchSessionLoadInterceptor } = useRunRewind(state, rewindDeps);
+  const { runRewind, previewRewind } = useRunRewind(rewindDeps);
   const runRewindRef = React.useRef(runRewind);
   runRewindRef.current = runRewind;
 
@@ -575,8 +576,11 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         await loadSessionById(action.threadId);
         return;
       }
-      // Intercept REVERT/FORK to store pending action before reducer closes panel
-      dispatchSessionLoadInterceptor(action);
+      if (action.type === 'EXECUTE_REWIND') {
+        dispatch(action);
+        void runRewindRef.current(action.scope, action.checkpointId);
+        return;
+      }
       // ── 多会话：SWITCH_SESSION 拦截，缓冲回放 ──
       if (action.type === 'SWITCH_SESSION') {
         const oldId = sessionManager.getActiveId();
@@ -687,13 +691,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       }
       dispatch(action);
     },
-    [
-      dispatch,
-      sessionManager,
-      workspace,
-      loadSessionById, // Intercept REVERT/FORK to store pending action before reducer closes panel
-      dispatchSessionLoadInterceptor,
-    ],
+    [dispatch, sessionManager, workspace, loadSessionById],
   );
 
   const runTaskBridge = React.useCallback(
@@ -984,10 +982,12 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         dispatch={dispatchSessionLoad}
         onToggleReason={onToggleReason}
         provider={provider}
+        workspace={workspace}
         mcpController={mcpController}
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
+        getRewindPreview={previewRewind}
         resizeGeneration={resizeKey}
       >
         <InputLine
