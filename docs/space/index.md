@@ -61,6 +61,7 @@
 | `../active/verification-governance.md` | active | Runtime 分级验证、VerificationSpec、required 完成门禁、repair/waive/compensation | 修改验证策略、事件、效果、Scheduler 完成语义、Skill/MCP verifier 或 reviewer 时必读。 |
 | `../active/capability-progressive-disclosure.md` | active | MCP/Skill 大目录按预算披露、metadata 搜索、下一轮有限 binding 与 fail-closed | 修改 capability catalog、模型工具上下文、`capability_search`、MCP binding 或 Skill activation 可见性时必读。 |
 | `../active/release-control.md` | active | Release Profile、canonical artifact/evidence、Gate replay 与 disabled production 边界 | 修改 release manifest/profile、artifact verifier、Gate 或 rollout 时必读。 |
+| `../active/open-source-first-release.md` | active | 单维护者开源首发的 G0/G1、候选包、真实 Provider smoke、能力默认关闭与状态权威 | 修改首发 Gate、候选 workflow、安装器、真实 Provider smoke 或 108 Task 状态时必读。 |
 | `../active/agent-task-evaluation.md` | active | Agent task suite、oracle、重复运行、dogfood 与产品验收证据 | 修改 Agent task case、fixture、threshold、human review 或 evaluation adapter 时必读。 |
 | `../active/observability-privacy-operations.md` | active | 无正文 metric、consent、dashboard/SLO、alert、incident 与单维护者运营 | 修改 observability、telemetry status、SLO/alert 或 incident rehearsal 时必读。 |
 | `../active/compaction-release-qualification.md` | active | Compaction 结构/语义/continuation/route qualification 与 no-compaction handoff | 修改 compaction evaluator、route qualification、rollout 或 handoff 时必读。 |
@@ -108,7 +109,7 @@
 | --- | --- | --- |
 | `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
-| `plans/2026-07-29-agent-production-readiness-roadmap.md` | draft | 已批准生产就绪 RFC 的统一实施入口：10 个子计划、M0–M4 Gate、共享证据和回滚依赖。 |
+| `plans/2026-07-29-agent-production-readiness-roadmap.md` | archived | ADR-0069 首发路线图已收口：G0/G1、83 completed、25 superseded、0 optional。 |
 | `plans/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
 | `plans/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 ✅，Phase3 ✅。 |
 | `plans/2026-05-22-production-gaps-phase1.md` | archived | Phase 1 实施记录（8 commits）。MCP + 事件闭环 + 错误分类。 |
@@ -136,6 +137,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-04-single-maintainer-open-source-first-release.md` | completed | 记录单维护者开源首发路线图 G0/G1、统一 Review、真实 Provider、三平台候选与 83/25/0 终态收口。 |
 | `execution/completed/2026-08-02-agent-production-admission-strategy-correction.md` | completed | 记录三平台发行与 effectful capability 正交准入、D-03 关闭和 DeepSeek blocked candidate；不提升 Task/milestone。 |
 | `execution/completed/2026-04-26-plan-state-reminder.md` | completed | 记录把计划状态移动到尾部合成用户侧提醒的实现和验证。 |
 | `execution/completed/2026-04-26-remove-stop-check.md` | completed | 记录移除最终答案 stop-check 和非危险模式确认门。 |

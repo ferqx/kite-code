@@ -1,6 +1,9 @@
 # Agent 生产化 Phase 0：治理、决策与 ADR 计划
 
-状态：archived
+状态：superseded
+
+终态范围（ADR-0069）：本计划的 5 个 Task 均记为 `completed`。旧双人/独立 authority 设计只保留
+历史参考；当前权威状态见 `release/oss-first-release/task-status-v2.json`。
 创建：2026-07-29
 优先级：P0
 依赖：

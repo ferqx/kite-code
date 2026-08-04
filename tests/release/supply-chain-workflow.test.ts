@@ -4,96 +4,66 @@ import { resolve } from 'node:path';
 
 const workflow = readFileSync(resolve('.github/workflows/release-candidate.yml'), 'utf8');
 
-describe('non-production release candidate workflow skeleton', () => {
-  test('has no automatic contribution trigger or release authority', () => {
+describe('ordinary open-source release candidate workflow', () => {
+  test('runs hosted macOS, Ubuntu, and Windows without publish authority', () => {
+    expect(workflow).toContain('pull_request:');
+    expect(workflow).toMatch(/\n\s+push:/);
     expect(workflow).toContain('workflow_dispatch:');
-    expect(workflow).not.toContain('pull_request:');
-    expect(workflow).not.toMatch(/\n\s+push:/);
-    expect(workflow).not.toContain('id-token: write');
-    expect(workflow).not.toContain('attestations: write');
-    expect(workflow).not.toContain('contents: write');
-    expect(workflow).not.toContain('packages: write');
-    expect(workflow).not.toContain('upload-artifact');
-    expect(workflow).not.toContain('gh release');
-    expect(workflow).toContain("github.repository == 'ferqx/kite-code'");
-    expect(workflow).toContain('inputs.acknowledge_non_distributable == true');
-  });
-
-  test('uses a shell-independent explicit test list on every hosted platform', () => {
-    expect(workflow).not.toContain('supply-chain*.test.ts');
-    for (const testPath of [
-      'tests/release/supply-chain-sbom.test.ts',
-      'tests/release/supply-chain-workflow.test.ts',
-      'tests/release/supply-chain-provenance.test.ts',
-      'tests/release/supply-chain-platform-smoke.test.ts',
-    ]) {
-      expect(workflow).toContain(testPath);
+    for (const runner of ['macos-15', 'ubuntu-24.04', 'windows-2025']) {
+      expect(workflow).toContain(`os: ${runner}`);
     }
+    for (const forbidden of [
+      'id-token: write',
+      'attestations: write',
+      'contents: write',
+      'packages: write',
+      'environment: production-release',
+      'gh release',
+      'npm publish',
+      'sigstore',
+      'notarization',
+      'authenticode',
+    ]) {
+      expect(workflow.toLowerCase()).not.toContain(forbidden);
+    }
+    expect(workflow).toContain('permissions:\n  contents: read');
   });
 
-  test('pins actions and makes the production job unreachable', () => {
+  test('builds, verifies, installs, starts, rolls back, and uploads each native candidate', () => {
+    for (const command of [
+      'bun run release:build',
+      'bun run release:verify -- --require-clean-source',
+      'bun run release:smoke',
+      'bun run scripts/run-tui-system-tests.ts startup',
+    ]) {
+      expect(workflow).toContain(command);
+    }
+    expect(workflow).toContain('actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02');
+    expect(workflow).toContain('retention-days: 14');
+    expect(workflow).toContain('persist-credentials: false');
+    expect(workflow).toContain(
+      `KITE_EXPECTED_CANDIDATE_COMMIT: \${{ github.event.pull_request.head.sha || github.sha }}`,
+    );
+    expect(workflow).toContain(
+      `KITE_CANDIDATE_REPOSITORY: \${{ github.event.pull_request.head.repo.full_name || github.repository }}`,
+    );
+    expect(workflow).toContain(`ref: \${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}`);
+    expect(workflow).toContain(`repository: \${{ env.KITE_CANDIDATE_REPOSITORY }}`);
+  });
+
+  test('keeps real Provider calls explicit, low-volume, and artifact-free', () => {
+    expect(workflow).toContain('run_live_provider_smoke');
+    expect(workflow).toContain("github.event_name == 'workflow_dispatch'");
+    expect(workflow).toContain('DEEPSEEK_API_KEY:');
+    expect(workflow).toContain('DASHSCOPE_API_KEY:');
+    expect(workflow).toContain('bun run test:provider:smoke -- --provider all');
+    const liveJob = workflow.slice(workflow.indexOf('  live-provider-smoke:'));
+    expect(liveJob).not.toContain('upload-artifact');
+  });
+
+  test('pins all third-party Actions to immutable commits', () => {
     expect(workflow).toContain('actions/checkout@11d5960a326750d5838078e36cf38b85af677262');
     expect(workflow).toContain('oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6');
-    expect(workflow).toContain('production-signing-disabled:');
-    expect(workflow).toContain('environment: production-release');
-    expect(workflow).toContain(
-      [
-        'if: ',
-        '$',
-        '{{ false && github.workflow_sha == vars.KITE_RELEASE_EXPECTED_WORKFLOW_SHA }}',
-      ].join(''),
-    );
-    expect(workflow).toContain('nonDistributable=true productionCandidate=false');
-    expect(workflow).toContain('scripts/release/verify-production-supply-chain.ts');
-    expect(workflow).toContain(
-      ['--repository-id "', '$', '{{ github.repository_id }}', '"'].join(''),
-    );
-    expect(workflow).toContain(
-      ['--workflow-sha "', '$', '{{ vars.KITE_RELEASE_EXPECTED_WORKFLOW_SHA }}', '"'].join(''),
-    );
-    expect(workflow).toContain(
-      ['--trusted-verifier-commit "', '$', '{{ vars.KITE_TRUSTED_VERIFIER_COMMIT }}', '"'].join(''),
-    );
-    expect(workflow).toContain(
-      ['--run-id "', '$', '{{ vars.KITE_RELEASE_SOURCE_RUN_ID }}', '"'].join(''),
-    );
-    expect(workflow).toContain(
-      ['--run-attempt "', '$', '{{ vars.KITE_RELEASE_SOURCE_RUN_ATTEMPT }}', '"'].join(''),
-    );
-    expect(workflow).not.toContain(['--run-id "', '$', '{{ github.run_id }}', '"'].join(''));
-    expect(workflow).toContain('KITE_RELEASE_GATE_DECISION_DIGEST: disabled-unconfigured');
-    expect(workflow).toContain('actions: read');
-    expect(workflow).toContain(['GH_TOKEN: ', '$', '{{ github.token }}'].join(''));
-    expect(workflow).not.toContain('KITE_RELEASE_SECURITY_REVIEWER_IDENTITY');
-    expect(workflow).not.toContain('KITE_RELEASE_SECURITY_REVIEWER_PUBLIC_KEY_SHA256');
-    expect(workflow).toContain('KITE_RELEASE_GH_SHA256:');
-    expect(workflow).toContain('KITE_RELEASE_COSIGN_SHA256:');
-    expect(workflow).toContain(['ref: ', '$', '{{ vars.KITE_TRUSTED_VERIFIER_COMMIT }}'].join(''));
-    expect(workflow).toContain('persist-credentials: false');
-    expect(workflow).toContain('TRUSTED_VERIFIER_COMMIT:');
-    expect(workflow).toContain('^[a-f0-9]{40}$');
-    expect(workflow).toContain('git -C trusted-verifier rev-parse --verify HEAD');
-    expect(workflow).toContain('actual" != "$TRUSTED_VERIFIER_COMMIT');
-    expect(workflow).toContain(
-      'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
-    );
-    expect(workflow).toContain(
-      ['name: production-candidate-', '$', '{{ matrix.platform }}'].join(''),
-    );
-    expect(workflow).toContain(['run-id: ', '$', '{{ vars.KITE_RELEASE_SOURCE_RUN_ID }}'].join(''));
-    expect(workflow).toContain(['github-token: ', '$', '{{ github.token }}'].join(''));
-    expect(workflow).toContain('working-directory: trusted-verifier');
-    expect(workflow).toContain(
-      ['--native-launcher "../candidate/', '$', '{{ matrix.launcher }}', '"'].join(''),
-    );
-    expect(workflow).toContain('--security-review-evidence');
-    expect(workflow).toContain('--gate-policy');
-    expect(workflow).toContain('--evidence-bundle');
-    expect(workflow).toContain('--rollback-report');
-    expect(workflow).toContain('--compatibility-report');
-    expect(workflow).not.toContain('--security-reviewer-public-key');
-    expect(workflow).toContain('platform: macos-arm64');
-    expect(workflow).toContain('platform: linux-x64');
-    expect(workflow).toContain('platform: windows-x64');
+    expect(workflow).not.toMatch(/uses:\s+[^\s]+@v\d+/);
   });
 });

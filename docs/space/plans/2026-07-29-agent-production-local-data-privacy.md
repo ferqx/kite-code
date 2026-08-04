@@ -1,6 +1,10 @@
 # Agent 生产化 Phase 1A：本地日志、Provider 数据与隐私计划
 
-状态：completed
+状态：superseded
+
+终态范围（ADR-0069）：1A.1–1A.7 的 metadata-only、secret 与 Provider/MCP egress fail-closed 边界全部
+保留并记为 `completed`；企业式外部 evidence 不再是本计划的完成条件。当前状态见
+`release/oss-first-release/task-status-v2.json`。
 创建：2026-07-29
 优先级：P0
 依赖：

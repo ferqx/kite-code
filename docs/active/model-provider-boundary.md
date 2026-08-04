@@ -2,11 +2,11 @@
 
 状态：active
 
-读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文或缓存指标时。
+读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文、缓存指标或真实 Provider smoke 时。
 
 验证：`bun test tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
 
-相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、`real-model-test-boundary.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
+相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
 ## 规则
 
@@ -19,6 +19,17 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
 - `model.responded` 事件必须把模型调用时长（`kite_code.model.duration_ms`，来自 `model.responded.durationMs`）持久化进会话日志属性；TUI 阶段块的 `Thought for Xs` 计时（thought-pre-consolidation.md 规则 11/22）依赖此字段，缺失时回放回退墙钟。
 - Provider 是否支持 tool calling 与上下文预算会影响 Capability disclosure，但不能改变授权语义。
 - API key、base URL 和本地模型配置不得写入测试 fixture、日志或文档。
+
+首发 G1 使用 `scripts/evals/live-provider-smoke.ts` 做两次独立低成本调用：DeepSeek 固定
+`deepseek-v4-flash`，千问通过 `openai-compatible` adapter 调用。runner 只从环境变量或本机配置读取
+credential，不自动读取项目 `.env`；输出只含 provider alias、model、耗时、usage 和布尔结果，不含
+prompt、response、key、完整 endpoint 或错误 response body。缺 credential/非空 response/超时任一条件
+都以非零退出，不得由 mock 结果替代。DeepSeek 调用复用模型绑定的 bounded-summary provider option，
+显式关闭 thinking，避免 16-token smoke 预算被 reasoning 消耗而产生空正文。
+千问环境凭据与本机配置路径都必须使用阿里云 Token Plan 北京
+`token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` 端点；模型默认为 `qwen3.6-flash`，
+`KITE_QWEN_MODEL` 只允许切换 Qwen 模型。其他 DashScope 区域端点、任意域名、HTTP、非默认端口、
+query/fragment 都 fail closed，不能接收该 smoke 的 credential。
 
 `ProviderDataPolicyV1` 是 production route 数据边界的版本化 schema。资格绑定
 provider type、operator、规范化 endpoint origin、endpoint class、deployment 和 region 的

@@ -117,6 +117,27 @@ describe('resolveTuiLaunchPaths', () => {
       entryPath: '/project/tests/tui-system/fixtures/remote-mcp-egress-tui.tsx',
     });
   });
+
+  test('uses an installed standalone executable without the Bun source launcher', () => {
+    const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;
+
+    expect(
+      resolveTuiLaunchPaths(
+        { workspace, executablePath: '/opt/kite-code/bin/kite-tui' },
+        '/project',
+      ),
+    ).toEqual({
+      cwd: '/tmp/kite-code-workspace',
+      entryPath: '/opt/kite-code/bin/kite-tui',
+    });
+    expect(() =>
+      resolveTuiLaunchPaths({
+        workspace,
+        executablePath: '/opt/kite-code/bin/kite-tui',
+        remoteMcpEgressPermitResolver: 'allow-each-invocation',
+      }),
+    ).toThrow('cannot replace');
+  });
 });
 
 describe('PTY output checkpoints', () => {

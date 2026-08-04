@@ -3,8 +3,19 @@
   "rules": [
     {
       "id": "plan-execution-governance",
-      "sources": ["scripts/check-plan-execution-matrix.ts", ".github/workflows/required.yml"],
-      "documents": ["docs/space/plans/README.md"]
+      "sources": [
+        "scripts/check-plan-execution-matrix.ts",
+        ".github/workflows/required.yml",
+        "release/oss-first-release/task-status-v2.json"
+      ],
+      "documents": [
+        "docs/active/open-source-first-release.md",
+        "docs/space/plans/2026-07-29-agent-production-readiness-roadmap.md",
+        "docs/space/plans/README.md",
+        "docs/space/plans/index.md",
+        "docs/space/index.md",
+        "release/oss-first-release/MAINTAINER_CHECKLIST.md"
+      ]
     },
     {
       "id": "install-platform-compatibility",
@@ -234,6 +245,7 @@
         ".github/workflows/release-candidate.yml"
       ],
       "documents": [
+        "docs/active/open-source-first-release.md",
         "docs/active/release-control.md",
         "docs/active/feature-flags.md",
         "docs/active/execution-platform-support.md",
@@ -241,6 +253,23 @@
         "docs/book/12-测试体系.md",
         "docs/adr/0062-keyless-release-signing-and-github-hosting.md",
         "docs/adr/0067-single-maintainer-candidate-security-review.md",
+        "docs/adr/0068-single-maintainer-open-source-first-release.md",
+        "docs/adr/0069-first-release-terminal-scope.md",
+        "README.md"
+      ]
+    },
+    {
+      "id": "live-provider-smoke",
+      "sources": [
+        "scripts/evals/live-provider-smoke.ts",
+        "tests/evals/live-provider-smoke.test.ts",
+        ".github/workflows/release-candidate.yml"
+      ],
+      "documents": [
+        "docs/active/open-source-first-release.md",
+        "docs/active/model-provider-boundary.md",
+        "docs/active/real-model-test-boundary.md",
+        "docs/book/12-测试体系.md",
         "README.md"
       ]
     },

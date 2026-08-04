@@ -6,7 +6,13 @@
 验证：`bun test tests/release/capability-profile.test.ts tests/release/capability-maturity-gate.test.ts tests/capabilities/status-projection.test.ts
 tests/verification tests/mcp/write-*.test.ts tests/skills/effect-classification.test.ts
 tests/skills/workflow-contract.test.ts tests/evals/capabilities`、`bun run typecheck`。
-相关：ADR-0008、ADR-0051、ADR-0064、D-10、Phase 5。
+相关：ADR-0008、ADR-0051、ADR-0064、ADR-0068、ADR-0069、D-10、Phase 5。
+
+当前只要求 Verification、MCP write、Skills readonly/effectful 的本地 profile、status、conformance、
+recovery 与 adversarial Gate。旧 internal dogfood、external canary、beta/stable maturity 和 authority
+路线已由 ADR-0069 取代，不再形成发布阶段或未来 Task。四条 capability 继续默认 off；只有本机用户可
+显式开启，且配置不能扩大 embedded ceiling。unknown/destructive/MCP write/Verification false pass 的
+fail-closed 语义不变。
 
 ## 通用 Profile 与状态
 
@@ -17,9 +23,8 @@ platform、非零 freshness，并在 admission 时验证全部 required feature 
 embedded ceiling、实际 evidence age 与 G3/G4/G5 passed。MCP write 还必须有非空 route allowlist。
 
 状态投影分别展示 Agent final、Runtime terminal、Plan lifecycle、check counts 与 Verification；任何一项
-都不能模糊成另一项。Rollback 只关闭新 admission/cohort=0，并保留 Receipt 与已有 required
-Verification。Task 5.1/5.2 的本地 Profile、admission 与状态 foundation 已完成；当前 profile/Gate
-仍不产生 internal/canary/maturity evidence。
+都不能模糊成另一项。Rollback 只关闭新 admission 并保留 Receipt 与已有 required Verification。
+Task 5.1/5.2 的本地 Profile、admission 与状态 foundation 已完成。
 
 `scripts/evals/contracts/capability-evaluation-evidence.ts` 是四条轨道共用的 production-owned retained
 evidence schema/verifier。它逐项绑定 Release artifact、route、profile、evaluator、repository/head/ref、
@@ -32,23 +37,9 @@ production OIDC/keyless Sigstore authentication shape 与 bundle subject binding
 ledger 全部通过也只能 `blocked/evidenceEligible=false`。本地失败仍为 `failed`，不能被 authority 缺失
 掩盖，调用者提供 production-looking authentication 也不能注入 trust root。
 
-`capability-evaluation.yml` 提供四轨共用的 manual/no-publish producer + independent verifier workflow。
-它先上传 retained input 获得真实 GitHub artifact ID，再从 workflow facts 构造独立 expected source，
-完整重建 receipt/bundle digest。workflow 没有 OIDC 或发布权限且要求 `status=blocked`；因此只证明
-contract 可执行，不能替代 Verification/MCP/Skills 的真实 task、route 或 maturity evidence。
-
-`scripts/release/capability-maturity-gate.ts` 预构建统一 canary → beta → stable Gate：每阶段使用不同
-decision/window ID，绑定相同 payload/profile/route/platform/contract/evaluator identity，并验证预注册
-时间窗、样本、error budget、G3–G5、真人 approval、用户理解度、回滚和 freshness。production
-authentication subject、attestation/verifier identity 与 source-owned exact verified-record lookup 已实现；受信 evidence
-authority、已验证前序 maturity decision 与已验证真人 approval 三个 registry 仍分别固定为空。任何单一
-registry 或 shape-valid fixture 都不能补齐另外三类
-认证事实并触发 promotion。该预构建不绑定新 Task，不产生 internal/canary/stable milestone。
-
-`scripts/release/capability-rollout-admission.ts` 提供各轨道共用的严格 rollout admission：每个 decision
-必须绑定 exact candidate、profile、route、platform、G0/G1、effect/Verification 与 freshness，并逐项
-验证 internal/external dependency。source-owned authority 未登记时结果固定 off、cohort=0、blocked；
-调用者不能用 shape-valid decision 或布尔值取得发布 authority。
+`capability-evaluation.yml` 及旧 rollout/maturity verifier 没有 OIDC、发布权限或 authority registry；它们
+固定证明伪造身份、越级和 shape-only 输入不能取得 capability。ADR-0069 后这些模块只是不可达路径的
+负向安全资产，不绑定 Task、不产生阶段或 milestone，也不是启用本地 capability 的前置路线图。
 
 ## Verification
 
@@ -69,7 +60,8 @@ admission、intent/receipt/idempotency/reconciliation/compensation、route quali
 现由 production-owned `src/core/mcp/write-governance.ts` 实现，不再由测试 fixture 拥有规则；测试只复用
 该模块。`release/mcp-write-routes-v1.json` 是 source-owned strict registry，当前显式为空。实际 MCP
 dispatch 尚未获得非空 production route 或 stable Verification evidence，因此任何 write capability 仍
-保持 off，不能把本地 conformance 解读为 5B 完成。
+保持 off。旧 production stable milestone 已被取代；5B 本地 conformance、安全 Gate 与默认关闭状态
+已经完成。
 
 MCP Manager 已接入可选且在 sealed production 中强制的 durable write dispatch guard。生产配置缺 guard
 会在 Provider 调用前拒绝；admission/intent 或 receipt 持久化失败同样拒绝，provider 异常只记录 unknown
@@ -85,5 +77,5 @@ SKILL.md 正文直接注入模型的旧路径。Task 5C.1/5C.2 的分类与 Work
 conformance 已完成。
 
 本地 5.3B/5.3C adapter 固定 `local_contract_only`/blocked；duplicate/unauthorized/data violation 或
-effect/reference drift 使 capability off。真实 route、formal task evidence、internal/canary 运行和
-maturity producer 未发生，所有 Phase 5 stable milestone 均未产生。
+effect/reference drift 使 capability off。旧 rollout 与 stable milestone 已被取代，不存在待完成的
+Phase 5 promotion Task。

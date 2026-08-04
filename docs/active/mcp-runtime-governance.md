@@ -147,5 +147,5 @@ MCP `isError=true` 都记录 `unknown`，receipt 持久化失败继续 fail clos
 
 Skill readonly/effectful 按 ADR-0064 保守分类：只有自身和全部 dependency 的 effective effects 均为
 `none|read` 且 provenance 允许时才是 readonly；write、destructive、unknown、解析或 revision drift
-一律 effectful/off，并要求 Verification。当前两个 Skill profile 均 off，本地 conformance 与 blocked
-adapter 不构成 internal/canary/maturity evidence。
+一律 effectful/off，并要求 Verification。当前两个 Skill profile 均 off；本地 conformance 是当前路线
+终态，旧 rollout/promotion adapter 只保留为 fail-closed 负向资产。

@@ -444,7 +444,7 @@ export function findTypedInputLifecycleViolations(source: string, file = 'fixtur
   const violations: string[] = [];
 
   const helperBindings = (
-    importedName: 'clearInput' | 'submitCommand' | 'submitCurrentInput' | 'typeText',
+    importedName: 'clearInput' | 'pasteText' | 'submitCommand' | 'submitCurrentInput' | 'typeText',
   ): Set<string> => {
     const bindings = new Set<string>([importedName]);
     for (const statement of sourceFile.statements) {
@@ -482,7 +482,9 @@ export function findTypedInputLifecycleViolations(source: string, file = 'fixtur
   };
 
   const clearInputBindings = helperBindings('clearInput');
+  const pasteTextBindings = helperBindings('pasteText');
   const typeTextBindings = helperBindings('typeText');
+  const inputCompositionBindings = new Set([...pasteTextBindings, ...typeTextBindings]);
   const submitCommandBindings = helperBindings('submitCommand');
   const submitCurrentInputBindings = helperBindings('submitCurrentInput');
 
@@ -559,7 +561,9 @@ export function findTypedInputLifecycleViolations(source: string, file = 'fixtur
       for (let index = 0; index < statements.length; index++) {
         const current = statements[index];
         if (!current) continue;
-        const typedInputs = callsIn(current).filter((call) => isHelperCall(call, typeTextBindings));
+        const typedInputs = callsIn(current).filter((call) =>
+          isHelperCall(call, inputCompositionBindings),
+        );
 
         for (const typedInput of typedInputs) {
           const expectedRoot = inputRoot(typedInput);
@@ -582,9 +586,13 @@ export function findTypedInputLifecycleViolations(source: string, file = 'fixtur
                 completedSafely = true;
                 break scan;
               }
-              if (isHelperCall(call, typeTextBindings) && inputRoot(call) === expectedRoot) {
+              if (
+                isHelperCall(call, inputCompositionBindings) &&
+                inputRoot(call) === expectedRoot
+              ) {
                 const options = call.arguments[2];
                 if (
+                  isHelperCall(call, typeTextBindings) &&
                   options &&
                   ts.isObjectLiteralExpression(options) &&
                   options.properties.some(
@@ -827,6 +835,14 @@ describe('TUI system scenario contract', () => {
     expect(
       findTypedInputLifecycleViolations(
         "await typeText(tui, 'hello');\nawait submitCurrentInput(tui);",
+      ),
+    ).toEqual([]);
+    expect(findTypedInputLifecycleViolations("await pasteText(tui, 'Line1\\nLine2');")).not.toEqual(
+      [],
+    );
+    expect(
+      findTypedInputLifecycleViolations(
+        "await pasteText(tui, 'Line1\\nLine2');\nawait submitCurrentInput(tui);",
       ),
     ).toEqual([]);
     expect(

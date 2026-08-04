@@ -99,7 +99,8 @@ Verification、MCP write、Skills readonly 与 Skills effectful 使用独立 str
 开启能力；admission 还要核对实际 flags、dependency revision、route/platform、evidence freshness 和
 G3–G5。MCP write 要求 execution record、Provider Action 与 stable Verification；Skill 的 unknown/
 write/destructive dependency 一律进入 effectful，并要求 Verification。当前四条 profile 全部
-`under_development/off`，production MCP write route 为空，本地 conformance 不代表 canary 或 stable。
+`under_development/off`，production MCP write route 为空。本地 conformance 是当前路线终态；旧 rollout/
+promotion 阶段已被取代。
 MCP write 的 admission、intent/receipt、unknown-effect reconciliation、compensation 与 route drift 规则
 已经进入 production core；Manager 也能在 sealed production dispatch 前强制 durable guard，并在调用后只
 保存结果 digest 或 unknown outcome。guard 绑定实际 server/endpoint/tool schema/policy、approval、Provider

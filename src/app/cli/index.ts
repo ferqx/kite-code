@@ -30,6 +30,7 @@ import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-lo
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
 import type { UserInputProvider } from '@/protocol/provider';
+import packageJson from '../../../package.json' with { type: 'json' };
 
 export interface ParsedArgs {
   command: 'run' | 'resume' | 'trace' | 'help';
@@ -624,6 +625,10 @@ Options:
 }
 
 if (import.meta.main) {
+  if (process.argv.includes('--version')) {
+    console.log(`Kite Code ${packageJson.version}`);
+    process.exit(0);
+  }
   main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;

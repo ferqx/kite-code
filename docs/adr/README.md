@@ -69,3 +69,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0065](0065-cross-platform-distribution-and-capability-admission.md) | accepted | Windows/Linux/macOS 发行与 effectful execution capability 分开准入 |
 | [0066](0066-deepseek-owner-accepted-provider-data-policy.md) | accepted | 单维护者接受官方 DeepSeek 精确 Route 的已披露数据政策风险 |
 | [0067](0067-single-maintainer-candidate-security-review.md) | accepted | 单维护者以 candidate-bound 自审批准发布；第三方评审为可选增强 |
+| [0068](0068-single-maintainer-open-source-first-release.md) | accepted | 首个开源版本只使用 G0 本地安全与 G1 普通三平台/真实 Provider Gate；企业认证和长期 maturity 转为发布后可选 |
+| [0069](0069-first-release-terminal-scope.md) | accepted | 首发路线以 G0/G1 为终态；取消 cohort/SLO/rollout/promotion 后续资格，108 Task 收敛为 83 completed、25 superseded |

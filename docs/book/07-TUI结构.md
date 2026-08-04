@@ -16,6 +16,8 @@ App.tsx
 └── render/         静态内容与终端输出稳定性
 ```
 
+TUI 入口在创建 Runtime、读取配置或挂载 Ink 前处理 `--version`，只输出 `package.json` 中的产品版本并退出；候选包的启动 smoke 使用这一无副作用入口验证独立 executable 可运行。
+
 ## 7.2 状态边界
 
 - RuntimeState：Kernel 的持久事实；

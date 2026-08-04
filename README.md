@@ -20,9 +20,37 @@ capability 的原生隔离资格分开验证；某平台缺少强隔离时对应
 
 ## 安装
 
+从源码运行：
+
 ```bash
 bun install
 ```
+
+构建并验证当前平台的 unsigned 开源候选包：
+
+```bash
+bun run release:build
+bun run release:verify
+bun run release:smoke
+```
+
+`release:smoke` 会在临时目录完成真实候选包的安装、CLI/TUI 启动、第二候选安装、回滚和卸载。手动安装
+到显式 managed prefix 的示例：
+
+```bash
+bun run release:install -- install \
+  --archive dist/oss-candidate/kite-code-macos-arm64.tar.gz \
+  --prefix "$HOME/.local/share/kite-code"
+
+bun run release:install -- rollback --prefix "$HOME/.local/share/kite-code"
+bun run release:install -- uninstall --prefix "$HOME/.local/share/kite-code"
+```
+
+Windows、Linux、macOS 的 archive 名称分别使用 `windows-x64`、`linux-x64` 与 `macos-arm64`（实际
+architecture 以 manifest 为准）。安装器拒绝 filesystem root、用户 home、仓库 root、symlink/reparse
+point 和没有 Kite Code marker 的非空目录。候选包只有 SHA-256 完整性校验，没有平台签名或
+notarization；完整限制见
+[`KNOWN_LIMITATIONS.md`](release/oss-first-release/KNOWN_LIMITATIONS.md)。
 
 用户配置位于 `~/.kite-code/kite-code.jsonc`，项目可用 `<workspace>/.kite-code/kite-code.jsonc` 覆盖。最小示例：
 
@@ -118,25 +146,31 @@ bun run agent run --telemetry-status
 
 常用参数以 `bun run agent --help` 输出和 `src/app/cli/index.ts` 为准。`--checkpoints` 是保留的 CLI 参数名，当前数据由 Runtime Store 管理。
 
-Release control 当前只提供不可分发的 contract foundation：`--release-status` 与 TUI `/release`
-显示脱敏状态，普通入口为 `artifact_disabled`。`releaseProfileV1`、`executionBoundaryV1` 和
-`networkBoundaryV1` 不能由 CLI 打开。D-04 effectful execution 支持集为空；它不阻止普通三平台
-TUI/CLI distribution，但真实 build/audit、Sigstore/attestation/GitHub Release、平台发布者签名和真人
-candidate-bound 单维护者安全评审尚未完成，因此当前仍没有 production artifact。另一位真人或第三方
-评审按 ADR-0067 为可选增强，不再是发布硬门禁。
+ADR-0068/ADR-0069 采用单维护者开源首发终态模型。发布只保留两个 Gate：G0 验证本地正确性、安全边界、P0/P1
+和安装/回滚；G1 验证 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025` 的构建/安装/启动、
+TUI/CLI smoke、DeepSeek `deepseek-v4-flash` 与阿里千问 OpenAI-compatible route 的真实最小调用，以及
+准确的 release notes/known limitations。
 
-常规跨平台验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025` matrix，不要求维护
-self-hosted Ubuntu。平台 probe 固定输出 `productionSupported=false`，只有后续新鲜原生 evidence、
-追加决策与独立 Gate 才能开放具体 execution capability。
+候选 workflow 只有 `contents: read`，会上传 unsigned CI artifact，但不会创建 GitHub Release、发布
+npm 包、申请 OIDC/attestation 或执行其他公开发布。Sigstore、SLSA/provenance、macOS Developer ID/
+notarization、Windows Authenticode、企业 SBOM attestation、第三方评审、external cohort、长期
+服务等级/error-budget 和 canary/maturity promotion 已明确移出路线图，也不会被表述为已经取得。
+唯一维护者检查清单位于
+[`MAINTAINER_CHECKLIST.md`](release/oss-first-release/MAINTAINER_CHECKLIST.md)。
 
-Remote observability 默认关闭。`--telemetry-status` 与 TUI `/telemetry` 只显示脱敏的 artifact、flag、
-consent、endpoint policy 和 exporter 状态；普通入口为 `artifact_disabled`。project 配置不能开启或
-授予 consent，Reporter 无磁盘 spool。当前 SLO baseline 未配置，本地 incident rehearsal 也只证明
-contract，不是 external operations evidence。
+D-04 effectful execution 支持集仍为空，但它只关闭缺少本机强隔离资格的 Shell、writer、MCP write 或
+effectful Skill，不阻止普通三平台 TUI/CLI 候选包。`releaseProfileV1`、`executionBoundaryV1` 和
+`networkBoundaryV1` 仍不能由 CLI 放宽；capability profile 不能扩大 embedded ceiling。
 
-External canary 还必须取得与普通 telemetry consent 分离的显式 opt-in，并且只允许匿名、低基数、
-无 prompt/response/file/path/command/error 正文的结构化 telemetry；缺 exporter 或真实数据时保持
-blocked，不显示绿色。
+原 108 个生产 Task 已收敛为 83 `completed`、25 `superseded`、0 optional，权威状态见
+[`task-status-v2.json`](release/oss-first-release/task-status-v2.json)。Web、多租户 SaaS、托管 runner、
+服务端 credential custody、无人值守共享 writer 和 enterprise promotion/authority service 明确不在首版
+支持范围。
+
+Remote observability 不属于当前产品路线。`--telemetry-status` 与 TUI `/telemetry` 只显示脱敏的本地
+状态；普通入口为 `artifact_disabled`。project 配置不能开启网络发送，Reporter 无磁盘 spool。所有
+结构化状态都禁止 prompt/response/file/path/command/error 正文与 secret；本地 incident rehearsal
+只证明合成 contract，不冒充真实事故或外部运营证据。
 
 ## 安全边界
 
@@ -179,6 +213,8 @@ bun run test:tui:smoke:native
 bun run test:all
 bun run test:mcp:live
 bun run test:model:live
+bun run test:provider:smoke -- --provider deepseek
+bun run test:provider:smoke -- --provider qwen
 bun test tests/release
 bun test tests/evals/agent-tasks
 bun test tests/observability
@@ -194,4 +230,10 @@ bun run check:docs
 bun run check:docs-impact
 ```
 
-默认测试不访问真实模型或公网 MCP，也不运行依赖宿主机 Seatbelt/bubblewrap 的正向用例。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`。`test:runtime:fault` 运行确定性的 SIGKILL/SQLite/report contract，`test:runtime:soak` 运行固定 7-case CI profile；后者不是 release qualification，资源指标不完整时正式资格结果必须保持 `inconclusive`。`test:sandbox:smoke:native` 显式运行当前宿主机的原生 sandbox executor smoke。快速 TUI harness 单元测试进入默认 `unit` 门禁，也可用 `test:tui:harness` 单独运行；真实 TUI PTY scenarios 只由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时，不重复运行 harness。first-run provider 探测使用本地 mock `/v1/models`。`test:tui:smoke:native` 是依赖宿主机真实 sandbox backend 的显式 opt-in PTY smoke，不属于默认门禁；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 与原生平台文件，不是仓库规范的全量入口。Agent task、Limited SLO 与 Compaction semantic 的本地证据测试可以重建 retained ledger、digest 和完整 identity，但 production OIDC/Sigstore/attestation trust registry 仍为空，不能生成正式 milestone。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。
+`test:provider:smoke` 是显式真实网络调用：DeepSeek 固定使用 `deepseek-v4-flash`并关闭 thinking；千问使用
+OpenAI-compatible adapter，默认读取 `DASHSCOPE_API_KEY`，调用阿里云 Token Plan 北京
+`token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` endpoint 的 `qwen3.6-flash`；环境变量和
+本机配置都必须使用该 endpoint，`KITE_QWEN_MODEL` 只允许切换 Qwen 模型。runner 只输出 provider/model/usage/耗时和布尔结果，不输出
+prompt、response、credential 或完整 endpoint；缺 key 或调用失败时非零退出，mock 不得替代 G1。
+
+默认测试不访问真实模型或公网 MCP，也不运行依赖宿主机 Seatbelt/bubblewrap 的正向用例。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`。`test:runtime:fault` 运行确定性的 SIGKILL/SQLite/report contract，`test:runtime:soak` 运行固定 7-case CI profile；资源指标不完整时仍保持 `inconclusive`，不能包装成成功。`test:sandbox:smoke:native` 显式运行当前宿主机的原生 sandbox executor smoke。快速 TUI harness 单元测试进入默认 `unit` 门禁，也可用 `test:tui:harness` 单独运行；真实 TUI PTY scenarios 只由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时，不重复运行 harness。first-run provider 探测使用本地 mock `/v1/models`。`test:tui:smoke:native` 是依赖宿主机真实 sandbox backend 的显式 opt-in PTY smoke，不属于默认门禁；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 与原生平台文件，不是仓库规范的全量入口。旧 production-shaped authority contract 只作为 fail-closed 负向测试保留；registry 为空时不得生成外部认证或 promotion 结论，且不再绑定任何路线图 Task。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。

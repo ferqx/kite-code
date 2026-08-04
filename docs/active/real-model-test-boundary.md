@@ -1,18 +1,28 @@
 # 当前规则：真实模型测试边界
 
 状态：active
-最后更新：2026-08-01
-最后验证：2026-08-01
+最后更新：2026-08-04
+最后验证：2026-08-04
 
 读取时机：新增真实网络/模型测试、修改测试发现规则、package scripts 或声明 provider 端到端验证结果时。
 
-验证：`bun test tests/test-discovery.test.ts`、`bun run typecheck`。
+验证：`bun test tests/test-discovery.test.ts tests/evals/live-provider-smoke.test.ts`、`bun run typecheck`。
 
-相关：`model-provider-boundary.md`。
+相关：ADR-0068、ADR-0069、`model-provider-boundary.md`、`open-source-first-release.md`。
 
 ## 当前状态
 
 仓库注册了显式 opt-in 的 `test:model:live` package script，用于真实 Provider 的 context compaction direct/incremental summary 验证。默认 `bun run test` 通过 `scripts/run-default-tests.ts` 只运行确定性的本地/mock 测试：主 suite 使用 `--max-concurrency=1 --only-failures` 限制 Bun 共享进程中的测试和输出资源竞争，并包含快速 `tests/tui-system/harness/` 单元测试，但排除真实 PTY `scenarios/`、TUI/native sandbox smoke 与 spike；`tests/shell-exec.test.ts` 在默认门禁显式关闭 native sandbox，只验证统一 executor 的 Shell/进程树语义。Seatbelt/bubblewrap 正向执行由 `test:sandbox:smoke:native` 与 platform capability workflow 单独运行。每个 test process 都获得独立临时 `HOME`/`KITE_CODE_HOME`（Windows 同步 `USERPROFILE`），不得读取或修改开发机真实 Kite 配置、Plan 或 Session Log。会临时修改进程级 cwd 或 `KITE_CODE_HOME` 的少量路径测试还会逐文件启动独立 Bun 进程，避免进程级状态互相污染。不得改用 Bun per-file isolate；当前 Ink/Yoga ESM 在该模式下不能稳定初始化。`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。未实际执行 live runner 时，文档、PR 或完成记录不得表述为真实 provider 已验证。
+
+ADR-0068/ADR-0069 注册 `test:provider:smoke` 作为 G1 的最小真实调用入口。它不进入默认测试：DeepSeek
+固定 `deepseek-v4-flash`；千问使用 `openai-compatible` adapter，默认路由为阿里云 Token Plan
+北京 `token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` 的 `qwen3.6-flash`。环境变量和显式
+本机配置都必须精确使用该 endpoint；其他 DashScope 区域端点、任意域名、HTTP、非默认端口、
+query/fragment 或非 Qwen 模型均 fail closed。每条 route 只调用一次、限制 16 output tokens
+和 60 秒 deadline；DeepSeek 复用 bounded-summary provider option 显式关闭 thinking，使非空正文断言
+不依赖上游 reasoning token 分配。runner 只输出 provider alias、model、耗时、usage、response non-empty 与
+credential source，不输出 prompt、response、key、完整 endpoint、stack 或远端 error body。缺 key、超时、
+空 response 或网络失败均非零退出；本地 mock 单元测试只证明不泄密 contract，不能替代真实 G1。
 
 TUI system 使用 `@xterm/headless` 只在测试进程内解析本地 PTY 控制序列；它不会建立 Provider
 连接，也不会改变 live test 发现边界。`tests/tui-system/scenarios/` 仍只连接隔离的本地 mock
@@ -34,13 +44,13 @@ Required CI 固定分为 `quality`、`unit`、`compaction-contract`、`runtime-e
 
 ## 新增真实套件的要求
 
-1. 文件必须放在 `tests/e2e/live/model/`，并使用不会被 Bun 默认发现的 `*.live.ts` 名称；不得使用 `*.test.*` 或 `*.spec.*`。
+1. 多场景/语义套件必须放在 `tests/e2e/live/model/` 并使用 `*.live.ts`；首发单调用 runner 允许放在 `scripts/evals/`，其 mock contract 才使用 `*.test.ts`。
 2. 必须提供使用 `bun run` 的显式 package script/wrapper，且默认测试不能调用它。
-3. Wrapper 必须限制并发和超时，不得硬编码 provider、密钥或代理清理策略。
+3. Wrapper 必须限制并发和超时，不得硬编码密钥或代理清理策略；ADR 批准的精确首发 route/model 可以固定。
 4. Provider/model 可显式选择，连接信息来自用户环境或隔离配置。
 5. 测试输出不得记录 API key、完整请求、敏感 prompt 或用户配置。
 6. 必须更新 `tests/test-discovery.test.ts` 防止真实套件进入默认发现。
-7. 完成记录应注明 provider、模型、日期、网络条件和实际运行命令。
+7. 完成记录应注明 provider、模型、日期、网络条件和实际运行命令，但不保存 response 正文。
 
 真实套件不存在或未运行时，只能报告本地 mock/contract 验证结果。
 
@@ -51,16 +61,13 @@ summary 输出预算；普通 Agent 请求行为不变。该运行只证明当�
 run/artifact/attestation、正式 suite ledger 或 authenticated evaluator，因此不能登记为 2B.4、4.4 或
 route qualification evidence。输出只保留 provider alias、model 与场景名，不记录 key、请求正文或 summary。
 
-`tests/evals/agent-tasks/` 当前同样属于本地 synthetic contract。D-07 已批准 12-case suite、1/8/20
-重复策略与阈值；本地 authenticated verifier 能重建 96/240 receipts 的 D-07 Gate 和精确 21-case
-adversarial ledger，但 production route/Sigstore authority 仍 unconfigured。nightly dry-run 零 network
-dispatch，Evidence adapter 只有 blocked/failed 结果。它即使覆盖 human-review schema，也不能表述为真实
-Provider、external 产品用户或正式 Agent task benchmark 已运行。
+`tests/evals/agent-tasks/` 当前同样属于本地 synthetic contract。它覆盖确定性 suite、adversarial ledger、
+false completion 与 identity/digest 篡改拒绝；旧重复运行、external participant 与 authenticated promotion
+schema 只作为 blocked/failed 负向资产，不再对应产品路线或待完成 Task。nightly dry-run 零 network
+dispatch，不能表述为真实 Provider、external 产品用户或正式 Agent task benchmark 已运行。
 
 `tests/evals/compaction/` 也只验证 synthetic schema/matcher/blocked Gate；其中 formal semantic evidence
 测试会重建 opaque blind item/receipt ledger、逐项 candidate commitment 和完整 Release/GitHub identity，
-但 production OIDC/attestation verifier
-为空，不能把 fixture 升级为正式证据。真实 semantic score、uncertainty、
-continuation non-inferiority 和 route qualification 都保持 unconfigured/not_observed。只有显式 opt-in
-live runner 绑定真实 Provider route、artifact、suite/scorer 和 freshness 后，才可作为 Phase 4 evidence；
-本地 4.9 blocked adapter 不产生 internal rollout milestone。
+但 production OIDC/attestation verifier 为空，不能把 fixture 升级为正式证据。显式 opt-in live runner
+只能证明当次 Provider 兼容和 compaction 语义；旧 Phase 4 rollout/promotion adapter 已被取代，不产生
+milestone 或后续路线图状态。

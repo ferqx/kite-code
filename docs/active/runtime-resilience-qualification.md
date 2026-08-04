@@ -53,10 +53,14 @@ CI profile 的普通 Bun test probe 通过 preload 采集 fresh child 的 `befor
 
 本机或 CI 若不能确认 `ps` 进程树、Git worktree registry、完整 same-process series 或上述 TUI child ownership，正式 qualification 必须返回 `inconclusive`。Task 1C.7 只有 workflow 已存在于默认分支、Ubuntu 手动 run 在被审查 head 上完成、verifier 通过且上传 `status=passed` artifact 后才可关闭；两轮本地 CI profile 通过只证明 smoke 可重复，不等于 release qualification。
 
-`package.json` 中的 `release:build`、`release:verify`、`release:smoke` 与
+`package.json` 中的 `release:contract:build`、`release:contract:verify`、`release:contract:smoke` 与
 `release:gate:foundation` 只运行 non-production synthetic Release Contract fixture；它们不重跑、
 替代或升级本节的正式 Ubuntu fault/soak qualification artifact。后续 release evidence 若引用
 Runtime 韧性结论，仍必须绑定上文默认分支 run、独立 verifier 与完整 retained attempts identity。
+
+ADR-0068/ADR-0069 的 G0/G1 不以该深度 qualification artifact 为门禁；当前 `release:build`、
+`release:verify`、`release:smoke` 是普通开源候选包构建、校验与安装/启动/回滚 smoke。上文
+qualification 流程只保留为按需诊断工具，不是发布后 Task 或 milestone；未运行时不得登记为已通过。
 
 ## 持久化故障边界
 
