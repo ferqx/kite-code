@@ -5,6 +5,7 @@ import { useTheme } from '@/app/tui/theme';
 import { type AvailableModel, listAvailableModels } from '@/core/config';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
+import { OverlayEmptyState, OverlayList, OverlayListRow } from './OverlayPrimitives';
 
 export interface ModelOption {
   id: string;
@@ -64,9 +65,7 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
         title="选择模型"
         footer={<OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: '关闭' }]} />}
       >
-        <Box marginY={1}>
-          <Text color={t.muted}>没有可用模型，请在 kite-code.jsonc 中配置 models 列表</Text>
-        </Box>
+        <OverlayEmptyState>没有可用模型，请在 kite-code.jsonc 中配置 models 列表</OverlayEmptyState>
       </OverlayFrame>
     );
   }
@@ -84,40 +83,34 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
           shortcuts={[
             { keys: '↑↓', label: '导航' },
             { keys: 'Enter', label: '选择' },
-            { keys: 'Esc', label: '取消' },
+            { keys: 'Esc', label: '关闭' },
           ]}
         />
       }
     >
-      <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+      <Box flexGrow={1} maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
-          {models.map((model, i) => {
-            const isSelected = i === selected;
-            const isActive = model.id === currentModel;
-            return (
-              <Box
-                key={model.id}
-                width="100%"
-                paddingX={1}
-                backgroundColor={isSelected ? t.userMsgBg : undefined}
-              >
-                <Box width={2} flexShrink={0}>
-                  <Text bold color={isSelected ? t.primary : t.dim}>
-                    {isSelected ? '❯ ' : '  '}
-                  </Text>
-                </Box>
-                <Box flexGrow={1}>
-                  <Text bold={isSelected} color={isSelected ? t.primary : t.muted}>
-                    {model.name}
-                  </Text>
-                </Box>
-                <OverlayStatusColumn active={isActive} />
-                <Box width={9} justifyContent="flex-end" flexShrink={0}>
-                  <Text color={t.dim}>{model.description}</Text>
-                </Box>
-              </Box>
-            );
-          })}
+          <OverlayList>
+            {models.map((model, i) => {
+              const isSelected = i === selected;
+              const isActive = model.id === currentModel;
+              return (
+                <OverlayListRow
+                  key={model.id}
+                  selected={isSelected}
+                  primary={model.name}
+                  trailing={
+                    <Box>
+                      <OverlayStatusColumn active={isActive} />
+                      <Box width={9} justifyContent="flex-end">
+                        <Text color={t.dim}>{model.description}</Text>
+                      </Box>
+                    </Box>
+                  }
+                />
+              );
+            })}
+          </OverlayList>
         </ScrollList>
       </Box>
     </OverlayFrame>

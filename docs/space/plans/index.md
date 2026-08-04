@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-04-tui-overlay-design-system.md`](2026-08-04-tui-overlay-design-system.md) | archived | P1 | 现有 Overlay primitives | [完成记录](../execution/completed/2026-08-05-tui-overlay-design-system.md) | Overlay contract、MCP、通用选择页、交互页与文档回归全部完成 |
 | [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | archived | P0 | ADR-0069 | [完成记录](../execution/completed/2026-08-04-single-maintainer-open-source-first-release.md) | G0/G1、候选构建/安装、真实 Provider 与 108 Task 终态全部收口 |
 | [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | superseded | P0 | ADR-0068 | 历史 Phase 0 | 5 Task completed；旧 authority/milestone 只作历史 |
 | [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | superseded | P0 | ADR-0068 | 历史 Phase 1A | 7 Task completed；metadata/secret/egress 边界保留 |

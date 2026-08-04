@@ -8,6 +8,7 @@ import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useSessionList } from '../hooks/useSessionList.js';
 import OverlayChoiceList, { type OverlayChoiceOption } from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
+import { OverlayEmptyState, OverlayListRow } from './OverlayPrimitives';
 import OverlaySearchInput from './OverlaySearchInput';
 
 type DeleteChoice = 'keep' | 'delete';
@@ -236,27 +237,24 @@ export default function SessionSelector({
       const dimColor = isLoading ? t.warning : t.dim;
 
       return (
-        <Box
-          width={maxWidth}
-          flexShrink={0}
-          flexGrow={0}
-          paddingX={1}
-          backgroundColor={isSelected ? t.userMsgBg : undefined}
-        >
-          <Box width={2} flexShrink={0}>
-            <Text bold color={lineColor}>
-              {isLoading ? '◌ ' : isSelected ? '❯ ' : '  '}
-            </Text>
-          </Box>
-          <Box width={nameMaxCols} flexShrink={0}>
-            <Text bold={isSelected} color={lineColor} wrap="truncate-end">
-              {displayName}
-            </Text>
-          </Box>
-          <OverlayStatusColumn active={isActive} width={statusColWidth} />
-          <Box width={rightColWidth} paddingLeft={metadataGap} flexShrink={0}>
-            <Text color={dimColor}>{rightCol}</Text>
-          </Box>
+        <Box width={maxWidth} flexShrink={0} flexGrow={0}>
+          <OverlayListRow
+            selected={isSelected}
+            primary={displayName}
+            indicator={
+              <Text bold color={lineColor}>
+                {isLoading ? '◌ ' : isSelected ? '❯ ' : '  '}
+              </Text>
+            }
+            trailing={
+              <Box>
+                <OverlayStatusColumn active={isActive} width={statusColWidth} />
+                <Box width={rightColWidth} paddingLeft={metadataGap}>
+                  <Text color={dimColor}>{rightCol}</Text>
+                </Box>
+              </Box>
+            }
+          />
         </Box>
       );
     },
@@ -312,7 +310,7 @@ export default function SessionSelector({
       }
     >
       {deleteConfirm && selectedSession ? (
-        <Box marginTop={1} flexDirection="column">
+        <Box flexDirection="column">
           <Box paddingX={2} flexDirection="column">
             <Box width="100%">
               <Text bold color={t.muted} wrap="truncate-end">
@@ -335,11 +333,13 @@ export default function SessionSelector({
             onChange={setSearchInput}
             active={searchSelected}
           />
-          <Box flexDirection="column" marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+          <Box flexDirection="column" flexGrow={1} maxHeight={maxContentHeight}>
             {loading && <Text color={t.muted}>Loading...</Text>}
             {error && <Text color={t.error}>Error: {error}</Text>}
             {!loading && !error && sessions.length === 0 && (
-              <Text color={t.muted}>{isSearching ? '未找到匹配的会话' : '暂无历史会话'}</Text>
+              <OverlayEmptyState>
+                {isSearching ? '未找到匹配的会话' : '暂无历史会话'}
+              </OverlayEmptyState>
             )}
             <VirtualList<SessionInfo>
               items={sessions}

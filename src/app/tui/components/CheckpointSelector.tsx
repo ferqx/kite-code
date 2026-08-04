@@ -10,6 +10,7 @@ import { useTheme } from '../theme';
 import type { RewindScope } from '../types';
 import OverlayChoiceList, { type OverlayChoiceOption } from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
+import { OverlayEmptyState, OverlayList, OverlayListRow } from './OverlayPrimitives';
 
 export type { RuntimeSnapshotEntry };
 
@@ -178,9 +179,7 @@ export default function CheckpointSelector({
         title="回退"
         footer={<OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: '关闭' }]} />}
       >
-        <Box marginTop={1}>
-          <Text color={t.muted}>当前会话暂无可回退的检查点。</Text>
-        </Box>
+        <OverlayEmptyState>当前会话暂无可回退的检查点。</OverlayEmptyState>
       </OverlayFrame>
     );
   }
@@ -214,7 +213,7 @@ export default function CheckpointSelector({
           />
         }
       >
-        <Box flexDirection="column" marginTop={1}>
+        <Box flexDirection="column">
           <Box
             marginLeft={1}
             paddingLeft={1}
@@ -283,51 +282,34 @@ export default function CheckpointSelector({
           shortcuts={[
             { keys: '↑↓', label: '导航' },
             { keys: 'Enter', label: '继续' },
-            { keys: 'Esc', label: '取消' },
+            { keys: 'Esc', label: '关闭' },
           ]}
         />
       }
     >
-      <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+      <Box flexGrow={1} maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
-          {actionableCheckpoints.map((checkpoint, index) => {
-            const isSelected = index === selected;
-            const message = truncateByDisplayWidth(
-              normalizeMessage(checkpoint.targetMessage),
-              messageWidth * 2,
-            );
-            const messageTime = formatLocalDateTime(
-              checkpoint.targetMessageCreatedAt ?? checkpoint.createdAt,
-            );
+          <OverlayList>
+            {actionableCheckpoints.map((checkpoint, index) => {
+              const isSelected = index === selected;
+              const message = truncateByDisplayWidth(
+                normalizeMessage(checkpoint.targetMessage),
+                messageWidth * 2,
+              );
+              const messageTime = formatLocalDateTime(
+                checkpoint.targetMessageCreatedAt ?? checkpoint.createdAt,
+              );
 
-            return (
-              <Box
-                key={checkpoint.snapshotId}
-                width="100%"
-                paddingX={1}
-                flexDirection="column"
-                backgroundColor={isSelected ? t.userMsgBg : undefined}
-              >
-                <Box>
-                  <Box width={2} flexShrink={0}>
-                    <Text bold color={isSelected ? t.primary : t.dim}>
-                      {isSelected ? '❯ ' : '  '}
-                    </Text>
-                  </Box>
-                  <Box flexGrow={1} flexShrink={1}>
-                    <Text bold={isSelected} color={isSelected ? t.primary : t.muted}>
-                      {message}
-                    </Text>
-                  </Box>
-                </Box>
-                <Box paddingLeft={2} gap={1}>
-                  <Text color={t.dim}>{messageTime}</Text>
-                  <Text color={t.dim}>·</Text>
-                  <Text color={t.dim}>{fileImpactLabel(checkpoint.affectedFileCount ?? 0)}</Text>
-                </Box>
-              </Box>
-            );
-          })}
+              return (
+                <OverlayListRow
+                  key={checkpoint.snapshotId}
+                  selected={isSelected}
+                  primary={message}
+                  secondary={`${messageTime} · ${fileImpactLabel(checkpoint.affectedFileCount ?? 0)}`}
+                />
+              );
+            })}
+          </OverlayList>
         </ScrollList>
       </Box>
     </OverlayFrame>

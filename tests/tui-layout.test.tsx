@@ -839,7 +839,7 @@ describe('ModelSelector', () => {
       <ModelSelector currentModel="deepseek-v4" onSelect={noop} onClose={noop} />,
     );
     expect(lastFrame()).toContain('导航');
-    expect(lastFrame()).toContain('Esc 取消');
+    expect(lastFrame()).toContain('Esc 关闭');
   });
 });
 
@@ -932,7 +932,7 @@ describe('ApprovalBlock', () => {
     const allowOnce = lines.findIndex((line) => line.includes('❯ 允许一次'));
     const allowSession = lines.findIndex((line) => line.includes('本次会话允许'));
     const deny = lines.findIndex((line) => line.trim() === '拒绝');
-    const shortcuts = lines.findIndex((line) => line.includes('↑↓ 选择'));
+    const shortcuts = lines.findIndex((line) => line.includes('↑↓ 导航'));
 
     expect(lines[command + 1]?.trim()).toBe('');
     expect(lines[allowOnce + 2]?.trim()).toBe('');
@@ -1175,7 +1175,7 @@ describe('PlanReviewBlock', () => {
     const { lastFrame } = render(
       <PlanReviewBlock plan={plan} provider={fakeProvider()} onResolved={onResolved} />,
     );
-    expect(lastFrame()).toContain('↑↓ 选择');
+    expect(lastFrame()).toContain('↑↓ 导航');
     expect(lastFrame()).toContain('Enter 确认');
     expect(lastFrame()).toContain('Esc 取消');
   });

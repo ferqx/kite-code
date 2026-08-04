@@ -36,6 +36,8 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 工具授权、用户提问和方案审核可见时，Footer 暂时隐藏模型、思考级别、cache、context/token
 和权限模式等全局状态，只保留当前交互与快捷键；交互结束后按最新状态恢复，统计数据不重置。
 
+交互 Overlay 使用统一四区骨架和词汇：列表移动为“导航”，列表进入子页为“打开”，操作菜单为“选择”，产生决定或副作用为“确认”，多步表单推进为“继续”，子页退出为“返回”，根 Overlay 退出为“关闭”。业务取消仍明确显示“取消”，不能用“关闭”掩盖审批拒绝、问答取消或 turn 中止语义。
+
 Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根据当前交互类型显式处理。工具审批或 plan review 被拒绝/取消时，Runtime 取消尚未终结的 sibling 与正在执行的调用，写入 `turn.aborted(cause=user)`，本轮不再调用模型；`ask_user` 的 Esc 只形成该工具的取消结果，模型可以在同一 turn 继续。
 
 ## 8.3 斜杠命令
@@ -81,7 +83,7 @@ TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 
 
 ## 8.5 MCP 与 Skill 交互
 
-MCP Overlay 订阅 Core control snapshot。Server List 只显示 effective Server、状态和 Add 入口，只负责 selection/navigation；Enter 打开只读 Detail，操作菜单按 config/auth/health/diagnostic 动态生成。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
+MCP Overlay 订阅 Core control snapshot。Server List 只显示 effective Server、状态和 Add 入口，只负责 selection/navigation；名称与连接状态为主行，配置路径与 capability 数量为次级行。Enter 打开只读 Detail，操作菜单按 config/auth/health/diagnostic 动态生成。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
 
 项目 Server 尚未批准时出现在 `/mcp` 的 Approval required 状态行。Detail 的 Review server 进入脱敏审批页，默认选择 Decide later，并提供 Approve and connect 与 Reject server；决定继续绑定当前 config digest 并执行 TOCTOU 复核。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
 

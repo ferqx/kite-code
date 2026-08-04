@@ -4,6 +4,7 @@ import stringWidth from 'string-width';
 import type { SlashSuggestionData, SuggestionItem } from '@/app/tui/hooks/useSlashSuggestions';
 import { useTheme } from '@/app/tui/theme';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
+import { OverlayList, OverlayListRow } from './OverlayPrimitives';
 
 interface SlashSuggestionOverlayProps {
   suggestion: SlashSuggestionData;
@@ -87,54 +88,55 @@ export default function SlashSuggestionOverlay({
         />
       }
     >
-      <Box height={visibleHeight} marginTop={1}>
+      <Box height={visibleHeight}>
         <ScrollList selectedIndex={suggestion.selectedIndex} scrollAlignment="auto">
-          {suggestion.items.map((item, index) => {
-            const isSelected = index === suggestion.selectedIndex;
-            const command = displayCommand(item, suggestion.kind);
-            const details = displayDetails(item);
-            const commandColor = item.disabled ? t.dim : isSelected ? t.primary : t.muted;
+          <OverlayList>
+            {suggestion.items.map((item, index) => {
+              const isSelected = index === suggestion.selectedIndex;
+              const command = displayCommand(item, suggestion.kind);
+              const details = displayDetails(item);
+              const commandColor = item.disabled ? t.dim : isSelected ? t.primary : t.muted;
 
-            return (
-              <Box
-                key={item.command}
-                width="100%"
-                paddingX={1}
-                backgroundColor={isSelected ? t.userMsgBg : undefined}
-              >
-                <Box width={indicatorWidth} flexShrink={0}>
-                  <Text bold color={isSelected ? t.primary : t.dim}>
-                    {isSelected ? '❯ ' : '  '}
-                  </Text>
-                </Box>
-                <Box width={commandColumnWidth} flexShrink={0}>
-                  <Text wrap="truncate-end" bold={isSelected} color={commandColor}>
-                    {command}
-                  </Text>
-                </Box>
-                <Box width={detailsColumnWidth} flexShrink={0}>
-                  <Text wrap="truncate-end" color={t.dim}>
-                    {details}
-                  </Text>
-                </Box>
-                {showDescriptions && (
-                  <Box flexGrow={1}>
-                    <Text wrap="truncate-end" color={t.dim}>
-                      {item.disabled ? '不可用 · ' : ''}
-                      {item.description}
-                    </Text>
-                    {isSelected && item.warning && (
-                      <Text wrap="truncate-end" color={t.error}>
-                        {'  '}
-                        {item.warning}
-                      </Text>
-                    )}
-                  </Box>
-                )}
-                {showActiveMarkers && <OverlayStatusColumn active={!!item.isActive} />}
-              </Box>
-            );
-          })}
+              return (
+                <OverlayListRow
+                  key={item.command}
+                  selected={isSelected}
+                  disabled={item.disabled}
+                  content={
+                    <>
+                      <Box width={commandColumnWidth} flexShrink={0}>
+                        <Text wrap="truncate-end" bold={isSelected} color={commandColor}>
+                          {command}
+                        </Text>
+                      </Box>
+                      <Box width={detailsColumnWidth} flexShrink={0}>
+                        <Text wrap="truncate-end" color={t.dim}>
+                          {details}
+                        </Text>
+                      </Box>
+                      {showDescriptions && (
+                        <Box flexGrow={1}>
+                          <Text wrap="truncate-end" color={t.dim}>
+                            {item.disabled ? '不可用 · ' : ''}
+                            {item.description}
+                          </Text>
+                          {isSelected && item.warning && (
+                            <Text wrap="truncate-end" color={t.error}>
+                              {'  '}
+                              {item.warning}
+                            </Text>
+                          )}
+                        </Box>
+                      )}
+                    </>
+                  }
+                  trailing={
+                    showActiveMarkers ? <OverlayStatusColumn active={!!item.isActive} /> : undefined
+                  }
+                />
+              );
+            })}
+          </OverlayList>
         </ScrollList>
       </Box>
     </OverlayFrame>

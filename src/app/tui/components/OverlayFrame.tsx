@@ -53,10 +53,17 @@ interface OverlayFrameProps {
   title: string;
   meta?: ReactNode;
   children: ReactNode;
+  message?: ReactNode;
   footer?: ReactNode;
 }
 
-export default function OverlayFrame({ title, meta, children, footer }: OverlayFrameProps) {
+export default function OverlayFrame({
+  title,
+  meta,
+  children,
+  message,
+  footer,
+}: OverlayFrameProps) {
   const t = useTheme();
   return (
     <Box flexDirection="column" marginTop={1} width="100%">
@@ -87,7 +94,10 @@ export default function OverlayFrame({ title, meta, children, footer }: OverlayF
         )}
       </Box>
       <Box flexDirection="column" paddingX={1}>
-        {children}
+        <Box marginTop={1} flexDirection="column">
+          {children}
+        </Box>
+        {message && <Box marginTop={1}>{message}</Box>}
         {footer && <Box marginTop={1}>{footer}</Box>}
       </Box>
     </Box>

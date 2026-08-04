@@ -155,6 +155,31 @@
       ]
     },
     {
+      "id": "tui-overlay-design-system",
+      "sources": [
+        "src/app/tui/components/OverlayFrame.tsx",
+        "src/app/tui/components/OverlayPrimitives.tsx",
+        "src/app/tui/components/OverlayChoiceList.tsx",
+        "src/app/tui/components/OverlaySearchInput.tsx",
+        "src/app/tui/components/ModelSelector.tsx",
+        "src/app/tui/components/SessionSelector.tsx",
+        "src/app/tui/components/CheckpointSelector.tsx",
+        "src/app/tui/components/SlashSuggestionOverlay.tsx",
+        "src/app/tui/components/HelpPanel.tsx",
+        "src/app/tui/components/ApprovalBlock.tsx",
+        "src/app/tui/components/PlanReviewBlock.tsx",
+        "src/app/tui/components/InputBlock.tsx",
+        "src/app/tui/components/InputLine.tsx",
+        "src/app/tui/mcp/McpOverlay.tsx",
+        "src/app/tui/mcp/McpViews.tsx"
+      ],
+      "documents": [
+        "docs/active/tui-overlay-design-system.md",
+        "docs/book/07-TUI结构.md",
+        "docs/book/08-TUI交互全景.md"
+      ]
+    },
+    {
       "id": "verification",
       "sources": [
         "src/core/verification/**",

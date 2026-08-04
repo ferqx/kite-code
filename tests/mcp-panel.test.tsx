@@ -163,9 +163,9 @@ describe('MCP management overlay', () => {
 
     await Bun.sleep(5);
     expect(lastFrame()).not.toContain('◆ Kite Code');
-    expect(lastFrame()).toContain('1 server');
-    expect(lastFrame()).toContain('Project MCPs (/workspace/.kite-code/mcp.json)');
-    expect(lastFrame()).toContain('❯ github · ✔ connected · 5 tools');
+    expect(lastFrame()).toContain('Project MCPs');
+    expect(lastFrame()).toContain('❯ github · ✔ connected');
+    expect(lastFrame()).toContain('/workspace/.kite-code/mcp.json · 5 tools');
     expect(lastFrame()).toContain('Add MCP server');
     expect(lastFrame()).not.toContain('A Add');
     expect(lastFrame()).not.toContain('L Login');
@@ -195,8 +195,10 @@ describe('MCP management overlay', () => {
     const controller = new FakeController([server(), userServer]);
     const { lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
-    expect(lastFrame()).toContain('Project MCPs (/workspace/.kite-code/mcp.json)');
-    expect(lastFrame()).toContain('User MCPs (/home/user/.kite-code/mcp.json)');
+    expect(lastFrame()).toContain('Project MCPs');
+    expect(lastFrame()).toContain('/workspace/.kite-code/mcp.json · 5 tools');
+    expect(lastFrame()).toContain('User MCPs');
+    expect(lastFrame()).toContain('/home/user/.kite-code/mcp.json · 5 tools');
     expect(lastFrame()).toContain('github · ✔ connected');
     expect(lastFrame()).toContain('docs · ✔ connected');
   });
@@ -242,8 +244,10 @@ describe('MCP management overlay', () => {
     const controller = new FakeController([legacyProject, legacyUser]);
     const { lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
-    expect(lastFrame()).toContain('Project MCPs (/workspace/.mcp.json)');
-    expect(lastFrame()).toContain('User MCPs (/home/user/.kite-code/kite-code.jsonc)');
+    expect(lastFrame()).toContain('Project MCPs');
+    expect(lastFrame()).toContain('/workspace/.mcp.json · 5 tools');
+    expect(lastFrame()).toContain('User MCPs');
+    expect(lastFrame()).toContain('/home/user/.kite-code/kite-code.jsonc · 5 tools');
     expect(lastFrame()).not.toContain('Legacy MCPs');
   });
 
@@ -255,8 +259,7 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('Tools for github');
-    expect(lastFrame()).toContain('5 tools');
+    expect(lastFrame()).toContain('5 tools for github');
     expect(lastFrame()).toContain('❯ 1. click');
     expect(lastFrame()).toContain('2. close_page');
     stdin.write('\r');
@@ -270,7 +273,7 @@ describe('MCP management overlay', () => {
     expect(lastFrame()).toContain('dblClick: boolean');
     stdin.write('\x1b');
     await Bun.sleep(30);
-    expect(lastFrame()).toContain('Tools for github');
+    expect(lastFrame()).toContain('5 tools for github');
     stdin.write('\x1b');
     await Bun.sleep(30);
     expect(lastFrame()).toContain('github MCP Server');
@@ -405,7 +408,7 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('Project  ');
+    expect(lastFrame()).toContain('❯ Project');
     expect(lastFrame()).toContain('.kite-code/mcp.json');
     stdin.write('\r');
     await Bun.sleep(5);
