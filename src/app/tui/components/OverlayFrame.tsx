@@ -88,7 +88,11 @@ export default function OverlayFrame({
         {meta && (
           <>
             <Text color={t.dim}> </Text>
-            {meta}
+            {typeof meta === 'string' || typeof meta === 'number' ? (
+              <Text color={t.dim}>{meta}</Text>
+            ) : (
+              meta
+            )}
             <Text color={t.dim}> ──</Text>
           </>
         )}
@@ -98,7 +102,19 @@ export default function OverlayFrame({
           {children}
         </Box>
         {message && <Box marginTop={1}>{message}</Box>}
-        {footer && <Box marginTop={1}>{footer}</Box>}
+        {footer && (
+          <Box
+            marginTop={1}
+            borderStyle="single"
+            borderTop
+            borderBottom={false}
+            borderLeft={false}
+            borderRight={false}
+            borderColor={t.dim}
+          >
+            {footer}
+          </Box>
+        )}
       </Box>
     </Box>
   );

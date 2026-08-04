@@ -1,4 +1,5 @@
-import { Box } from 'ink';
+import { Box, Text } from 'ink';
+import { useTheme } from '@/app/tui/theme';
 import { OverlayList, OverlayListRow, OverlaySection } from './OverlayPrimitives';
 
 export interface OverlayChoiceOption<T extends string = string> {
@@ -9,6 +10,9 @@ export interface OverlayChoiceOption<T extends string = string> {
   destructive?: boolean;
   heading?: boolean;
   separatorBefore?: boolean;
+  trailing?: string;
+  trailingTone?: 'success' | 'warning' | 'error' | 'muted';
+  action?: boolean;
 }
 
 export default function OverlayChoiceList<T extends string>({
@@ -22,6 +26,7 @@ export default function OverlayChoiceList<T extends string>({
   numbered?: boolean;
   selectionBackground?: boolean;
 }) {
+  const t = useTheme();
   return (
     <OverlayList>
       {options.map((option, index) => {
@@ -48,6 +53,24 @@ export default function OverlayChoiceList<T extends string>({
               selectionBackground={selectionBackground}
               primary={`${numbered ? `${index + 1}. ` : ''}${option.label}${option.disabled ? ' (unavailable)' : ''}`}
               secondary={option.description}
+              primaryColor={option.action ? t.primary : undefined}
+              trailing={
+                option.trailing ? (
+                  <Text
+                    color={
+                      option.trailingTone === 'success'
+                        ? t.success
+                        : option.trailingTone === 'warning'
+                          ? t.warning
+                          : option.trailingTone === 'error'
+                            ? t.error
+                            : t.dim
+                    }
+                  >
+                    {option.trailing}
+                  </Text>
+                ) : undefined
+              }
             />
           </Box>
         );

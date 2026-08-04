@@ -11,10 +11,29 @@ export function OverlaySection({
 }) {
   const t = useTheme();
   return (
-    <Box marginTop={first ? 0 : 1} paddingX={1}>
+    <Box
+      marginTop={first ? 0 : 1}
+      paddingX={1}
+      borderStyle="single"
+      borderTop={false}
+      borderLeft={false}
+      borderRight={false}
+      borderBottom
+      borderColor={t.dim}
+    >
       <Text bold color={t.muted}>
         {children}
       </Text>
+    </Box>
+  );
+}
+
+export function OverlaySummary({ left, right }: { left: ReactNode; right?: ReactNode }) {
+  const t = useTheme();
+  return (
+    <Box width="100%" paddingX={1} justifyContent="space-between">
+      <Text color={t.muted}>{left}</Text>
+      {right && <Text color={t.dim}>{right}</Text>}
     </Box>
   );
 }
@@ -33,6 +52,7 @@ export function OverlayListRow({
   trailing,
   indicator,
   selectionBackground = true,
+  primaryColor,
 }: {
   selected?: boolean;
   disabled?: boolean;
@@ -43,6 +63,7 @@ export function OverlayListRow({
   trailing?: ReactNode;
   indicator?: ReactNode;
   selectionBackground?: boolean;
+  primaryColor?: string;
 }) {
   const t = useTheme();
   const color = disabled ? t.dim : destructive ? t.error : selected ? t.primary : t.muted;
@@ -63,7 +84,7 @@ export function OverlayListRow({
         </Box>
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           {content ?? (
-            <Text bold={selected} color={color} wrap="truncate-end">
+            <Text bold={selected} color={primaryColor ?? color} wrap="truncate-end">
               {primary}
             </Text>
           )}
@@ -121,14 +142,29 @@ export function OverlayDetailList({
 export function OverlayMessage({
   children,
   tone = 'info',
+  callout = false,
 }: {
   children: ReactNode;
   tone?: 'info' | 'warning' | 'error' | 'busy';
+  callout?: boolean;
 }) {
   const t = useTheme();
   const color =
     tone === 'error' ? t.error : tone === 'warning' || tone === 'busy' ? t.warning : t.muted;
-  return <Text color={color}>{children}</Text>;
+  if (!callout) return <Text color={color}>{children}</Text>;
+  return (
+    <Box
+      paddingLeft={1}
+      borderStyle="single"
+      borderTop={false}
+      borderRight={false}
+      borderBottom={false}
+      borderLeft
+      borderColor={color}
+    >
+      <Text color={color}>{children}</Text>
+    </Box>
+  );
 }
 
 export function OverlayEmptyState({ children }: { children: ReactNode }) {

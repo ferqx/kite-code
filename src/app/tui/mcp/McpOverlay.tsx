@@ -10,7 +10,7 @@ import {
 import { validateMcpServerName } from '@/core/config';
 import type { McpServerControlState, McpServerKey } from '@/core/mcp';
 import OverlayFrame, { type OverlayShortcut, OverlayShortcutBar } from '../components/OverlayFrame';
-import { OverlayEmptyState, OverlayMessage } from '../components/OverlayPrimitives';
+import { OverlayEmptyState, OverlayMessage, OverlaySummary } from '../components/OverlayPrimitives';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import McpSelect from './McpSelect';
 import {
@@ -37,7 +37,6 @@ import {
   type McpServerAction,
   moveSelection,
   serverIdentity,
-  statusLabel,
   validSelection,
 } from './model';
 import type { McpController } from './types';
@@ -108,7 +107,8 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
       ...serverListOptions(servers, animatedDots(activityDotCount)),
       {
         id: 'add',
-        label: '＋ Add MCP server',
+        label: '＋ 添加 MCP 服务器',
+        action: true,
         separatorBefore: servers.length > 0,
       },
     ],
@@ -536,15 +536,16 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
 
   const title =
     view.kind === 'server_detail' && currentServer
-      ? `${currentServer.key.name} MCP Server`
+      ? currentServer.key.name
       : view.kind === 'tool_detail'
         ? view.toolName
         : view.kind === 'adding_server'
-          ? `${view.draft.name} MCP Server`
+          ? view.draft.name
           : overlayTitle(view);
   return (
     <OverlayFrame
       title={title}
+      meta={overlayMeta(view, servers, listSelectedId)}
       message={
         view.kind === 'add_server' && (busy || snapshot.message) ? (
           <OverlayMessage tone={busy ? 'busy' : 'info'}>
@@ -561,9 +562,11 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
       <Box flexDirection="column">
         {view.kind === 'server_list' && (
           <>
-            {servers.length === 0 && (
-              <OverlayEmptyState>No MCP servers configured.</OverlayEmptyState>
-            )}
+            <OverlaySummary
+              left={`${servers.length} 个服务器`}
+              right={serverScopeSummary(servers)}
+            />
+            {servers.length === 0 && <OverlayEmptyState>尚未配置 MCP 服务器。</OverlayEmptyState>}
             <McpSelect options={visibleListOptions} selectedId={listSelectedId} />
           </>
         )}
@@ -632,12 +635,12 @@ function serverListOptions(
   const groups = [
     {
       id: 'project',
-      title: 'Project MCPs',
+      title: '项目',
       servers: servers.filter((server) => server.source.startsWith('project')),
     },
     {
       id: 'user',
-      title: 'User MCPs',
+      title: '用户',
       servers: servers.filter((server) => !server.source.startsWith('project')),
     },
   ];
@@ -652,13 +655,19 @@ function serverListOptions(
       },
       ...group.servers.map((server) => {
         const status = derivePrimaryStatus(server);
-        const icon = status === 'ready' ? '✔' : status === 'connecting' ? '◌' : '✘';
-        const statusText =
-          status === 'connecting' ? `connecting${dots}` : statusLabel(server).toLowerCase();
+        const icon = status === 'ready' ? '●' : status === 'connecting' ? '◌' : '●';
+        const statusText = status === 'connecting' ? `连接中${dots}` : localizedStatus(server);
         return {
           id: serverIdentity(server.key),
-          label: `${server.key.name} · ${icon} ${statusText}`,
-          description: `${server.sourcePath}${server.toolCount > 0 ? ` · ${server.toolCount} tools` : ''}`,
+          label: server.key.name,
+          trailing: `${icon} ${statusText}`,
+          trailingTone:
+            status === 'ready'
+              ? ('success' as const)
+              : status === 'connecting'
+                ? ('warning' as const)
+                : ('error' as const),
+          description: `${server.sourcePath}${server.toolCount > 0 ? ` · ${server.toolCount} 个工具` : ''}`,
         };
       }),
     ];
@@ -677,39 +686,86 @@ function operationMessage(
 ): string {
   const verb =
     operation === 'disable'
-      ? 'Disabling'
+      ? '正在禁用'
       : operation === 'remove'
-        ? 'Removing'
+        ? '正在移除'
         : operation === 'add'
-          ? 'Adding and connecting'
+          ? '正在添加并连接'
           : operation === 'connect'
-            ? 'Connecting'
-            : 'Working';
+            ? '正在连接'
+            : '处理中';
   return `${verb}${animatedDots(dotCount)}`;
+}
+
+function overlayMeta(
+  view: View,
+  servers: readonly Readonly<McpServerControlState>[],
+  selectedId: string,
+): string | undefined {
+  if (view.kind === 'server_detail') return 'MCP 服务器';
+  if (view.kind !== 'server_list' || servers.length === 0) return undefined;
+  const selected = servers.findIndex((server) => serverIdentity(server.key) === selectedId);
+  return `${selected < 0 ? servers.length : selected + 1} / ${servers.length}`;
+}
+
+function serverScopeSummary(servers: readonly Readonly<McpServerControlState>[]): string {
+  const hasProject = servers.some((server) => server.source.startsWith('project'));
+  const hasUser = servers.some((server) => !server.source.startsWith('project'));
+  if (hasProject && hasUser) return '项目与用户配置';
+  if (hasProject) return '项目配置';
+  if (hasUser) return '用户配置';
+  return '无配置';
+}
+
+function localizedStatus(server: Readonly<McpServerControlState>): string {
+  switch (derivePrimaryStatus(server)) {
+    case 'approval_required':
+      return '需要审批';
+    case 'rejected':
+      return '已拒绝';
+    case 'disabled':
+      return '已禁用';
+    case 'configuration_unavailable':
+      return '配置不可用';
+    case 'authenticating':
+      return '认证中';
+    case 'login_required':
+      return '需要登录';
+    case 'auth_failed':
+      return '认证失败';
+    case 'connecting':
+      return '连接中';
+    case 'ready':
+      return '已连接';
+    case 'failed':
+      return '连接失败';
+    case 'disconnected':
+      return '未连接';
+  }
 }
 
 function overlayTitle(view: View): string {
   switch (view.kind) {
     case 'server_list':
-      return 'MCP Servers';
+      return 'MCP 服务器';
     case 'server_detail':
-      return 'MCP Server';
+      return 'MCP 服务器';
     case 'server_tools':
-      return 'MCP Tools';
+      return 'MCP 工具';
     case 'tool_detail':
-      return 'MCP Tool';
+      return 'MCP 工具';
     case 'adding_server':
-      return 'Add MCP Server';
+      return '添加 MCP 服务器';
     case 'add_server': {
       const order: AddStep[] = ['transport', 'name', 'target', 'scope', 'review'];
-      return `Add MCP Server · ${order.indexOf(view.step) + 1}/5`;
+      return `添加 MCP 服务器 · ${order.indexOf(view.step) + 1}/5`;
     }
     case 'authenticate':
-      return 'Authenticate MCP Server';
+      return '认证 MCP 服务器';
     case 'project_approval':
-      return 'Review Project MCP Server';
+      return '审核项目 MCP 服务器';
     case 'confirm':
-      return `${view.action === 'disable' ? 'Disable' : 'Remove'} MCP Server`;
+      return `${view.action === 'disable' ? '禁用' : '移除'} MCP 服务器`;
   }
 }
 
@@ -727,7 +783,7 @@ function footer(
   }
   if (view.kind === 'server_list') {
     return [
-      { keys: '↑↓', label: '选择' },
+      { keys: '↑↓', label: '导航' },
       { keys: 'Enter', label: '打开' },
       { keys: 'Esc', label: '关闭' },
     ];
@@ -758,7 +814,7 @@ function footer(
     return [{ keys: 'Esc', label: '返回' }];
   }
   return [
-    { keys: '↑↓', label: '选择' },
+    { keys: '↑↓', label: '导航' },
     { keys: 'Enter', label: '确认' },
     { keys: 'Esc', label: '返回' },
   ];

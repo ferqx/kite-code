@@ -33,6 +33,9 @@ export interface McpSelectOption<T extends string = string> {
   description?: string;
   disabled?: boolean;
   destructive?: boolean;
+  trailing?: string;
+  trailingTone?: 'success' | 'warning' | 'error' | 'muted';
+  action?: boolean;
 }
 
 export function serverIdentity(key: Readonly<McpServerKey>): string {

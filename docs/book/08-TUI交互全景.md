@@ -83,11 +83,11 @@ TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 
 
 ## 8.5 MCP 与 Skill 交互
 
-MCP Overlay 订阅 Core control snapshot。Server List 只显示 effective Server、状态和 Add 入口，只负责 selection/navigation；名称与连接状态为主行，配置路径与 capability 数量为次级行。Enter 打开只读 Detail，操作菜单按 config/auth/health/diagnostic 动态生成。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
+MCP Overlay 订阅 Core control snapshot。Server List 按“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加入口 → 分隔后的快捷键”展示 effective Server；名称与带语义色的连接状态位于同一主行，配置路径与 capability 数量位于次级行。Enter 打开只读 Detail，先展示状态、传输方式、能力和配置位置，再展示按 config/auth/health/diagnostic 动态生成的操作区。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
 
-项目 Server 尚未批准时出现在 `/mcp` 的 Approval required 状态行。Detail 的 Review server 进入脱敏审批页，默认选择 Decide later，并提供 Approve and connect 与 Reject server；决定继续绑定当前 config digest 并执行 TOCTOU 复核。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
+项目 Server 尚未批准时出现在 `/mcp` 的“需要审批”状态行。Detail 的“审核服务器”进入脱敏审批页，默认选择“稍后决定”，并提供“批准并连接”与“拒绝服务器”；决定继续绑定当前 config digest 并执行 TOCTOU 复核。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
 
-HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，Detail 提供 Authenticate。认证页只有选择 Open browser 才启动 loopback callback 并调用系统 browser opener；authorizing 时 Esc/Cancel authentication 取消当前 flow。页面不显示 token、scope、authorization code 或 secret，成功认证只影响后续 discovery 与新 model turn，不重放旧 Tool Call。
+HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，Detail 提供“认证”。认证页只有选择“打开浏览器”才启动 loopback callback 并调用系统 browser opener；authorizing 时 Esc/“取消认证”取消当前 flow。页面不显示 token、scope、authorization code 或 secret，成功认证只影响后续 discovery 与新 model turn，不重放旧 Tool Call。
 
 开启 `mcpProviderActionV1` 后，Runtime 可在 Tool 失败后请求固定的 Login、Approve 或 Retry Provider Action。TUI 复用既有 input interrupt 收集决定并委托 MCP controller；成功恢复只开始新 turn，Later 或恢复失败都不会重放旧 Tool Call。新任务首次模型调用前还会对 unavailable required Provider 逐个显示 Retry、Session Waive 或 Cancel Run，waiver 只解除当前 session 的准入门禁。
 

@@ -938,7 +938,8 @@ describe('ApprovalBlock', () => {
     expect(lines[allowOnce + 2]?.trim()).toBe('');
     expect(lines[allowSession + 2]?.trim()).toBe('');
     expect(lines[deny + 2]?.trim()).toBe('');
-    expect(shortcuts).toBe(deny + 3);
+    expect(lines[deny + 3]).toContain('─');
+    expect(shortcuts).toBe(deny + 4);
   });
 
   test('uses a simple top divider instead of a rounded border', () => {

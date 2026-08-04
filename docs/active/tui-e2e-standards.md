@@ -27,6 +27,11 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 能力说明并显示环境警告，默认 metadata session logging 不显示普通 mode 状态；测试同时验证 Full
 准入仍被拒绝、content logging 披露没有被普通 metadata 路径误触发。
 
+MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：列表通过“状态 + 选中行 +
+添加入口”组合确认数据已加载，详情通过操作区确认已经打开；项目审批与 OAuth 恢复分别等待
+“需要审批/稍后决定”和“需要登录/打开浏览器”。不得继续依赖旧英文标签或把题头单独当作
+列表数据、选择状态或业务操作已经就绪的回执。
+
 ## 编写规则
 
 1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。

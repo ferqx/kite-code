@@ -7,7 +7,7 @@ import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTheme } from '../theme';
 import McpSelect from './McpSelect';
 import type { McpSelectOption, McpServerAction } from './model';
-import { derivePrimaryStatus, statusLabel } from './model';
+import { derivePrimaryStatus } from './model';
 
 export type AddStep = 'transport' | 'name' | 'target' | 'scope' | 'review';
 export interface AddDraft {
@@ -29,11 +29,6 @@ export function ServerDetail({
   statusMessage?: string;
 }) {
   const t = useTheme();
-  const command = server.configuration.command ?? server.approval?.review.command;
-  const endpoint = displayEndpoint(
-    server.configuration.endpoint ?? server.approval?.review.endpoint,
-  );
-  const argumentCount = server.configuration.argumentCount ?? server.approval?.review.argumentCount;
   const primaryStatus = derivePrimaryStatus(server);
   const connected = primaryStatus === 'ready';
   const capabilities = [
@@ -46,10 +41,10 @@ export function ServerDetail({
       <OverlayDetailList
         items={[
           {
-            label: 'Status:',
+            label: '状态',
             value:
               statusMessage ??
-              `${connected ? '✔' : primaryStatus === 'connecting' ? '◌' : '✘'} ${statusLabel(server).toLowerCase()}`,
+              `${connected ? '●' : primaryStatus === 'connecting' ? '◌' : '●'} ${localizedStatus(server)}`,
             valueColor: statusMessage?.includes('ing.')
               ? t.warning
               : connected
@@ -58,26 +53,16 @@ export function ServerDetail({
                   ? t.warning
                   : t.error,
           },
-          ...(command ? [{ label: 'Command:', value: command }] : []),
-          ...(argumentCount !== undefined
-            ? [
-                {
-                  label: 'Args:',
-                  value: `${argumentCount} configured argument${argumentCount === 1 ? '' : 's'}`,
-                },
-              ]
-            : []),
-          ...(endpoint ? [{ label: 'Endpoint:', value: endpoint }] : []),
-          { label: 'Config location:', value: server.sourcePath, truncate: true },
+          { label: '传输方式', value: server.transport },
           {
-            label: 'Capabilities:',
-            value: capabilities.length > 0 ? capabilities.join(', ') : '—',
+            label: '能力',
+            value: capabilitySummary(server, capabilities),
           },
-          { label: 'Tools:', value: server.toolCount > 0 ? `${server.toolCount} tools` : '—' },
+          { label: '配置位置', value: server.sourcePath, truncate: true },
         ]}
       />
-      <OverlaySection>Actions</OverlaySection>
-      <McpSelect options={options} selectedId={selectedId} numbered />
+      <OverlaySection>操作</OverlaySection>
+      <McpSelect options={localizeActions(options)} selectedId={selectedId} />
     </Box>
   );
 }
@@ -94,19 +79,19 @@ export function AddingServerView({
     <OverlayDetailList
       items={[
         {
-          label: 'Status:',
-          value: `Adding and connecting${animatedDots(dotCount)}`,
+          label: '状态',
+          value: `正在添加并连接${animatedDots(dotCount)}`,
           valueColor: t.warning,
         },
         {
-          label: draft.transport === 'http' ? 'Endpoint:' : 'Command:',
+          label: draft.transport === 'http' ? '端点' : '命令',
           value:
             draft.transport === 'http'
               ? (displayEndpoint(draft.target) ?? draft.target)
               : draft.target,
         },
         {
-          label: 'Config location:',
+          label: '配置位置',
           value: draft.scope === 'project' ? projectMcpConfigPath() : userMcpConfigPath(),
           truncate: true,
         },
@@ -226,14 +211,14 @@ export function AddServer({
     return (
       <Box flexDirection="column">
         <Text bold>
-          {target ? (draft.transport === 'http' ? 'MCP server URL' : 'Command') : 'Server name'}
+          {target ? (draft.transport === 'http' ? 'MCP 服务器 URL' : '命令') : '服务器名称'}
         </Text>
         <TextInput
           value={target ? draft.target : draft.name}
           onChange={target ? onTargetChange : onNameChange}
           onSubmit={onSubmit}
         />
-        {!target && <Text color={t.dim}>Letters, numbers, ".", "-" and "_" only.</Text>}
+        {!target && <Text color={t.dim}>仅支持字母、数字、点、连字符和下划线。</Text>}
         {inputError && <OverlayMessage tone="error">{inputError}</OverlayMessage>}
       </Box>
     );
@@ -243,33 +228,29 @@ export function AddServer({
       <Box flexDirection="column">
         <OverlayDetailList
           items={[
-            { label: 'Name:', value: draft.name },
+            { label: '名称', value: draft.name },
             {
-              label: draft.transport === 'http' ? 'Endpoint:' : 'Command:',
+              label: draft.transport === 'http' ? '端点' : '命令',
               value:
                 draft.transport === 'http'
                   ? (displayEndpoint(draft.target) ?? draft.target)
                   : draft.target,
             },
-            { label: 'Available:', value: draft.scope === 'project' ? 'Project' : 'User' },
+            { label: '可用范围', value: draft.scope === 'project' ? '当前项目' : '所有项目' },
             {
-              label: 'Config location:',
+              label: '配置位置',
               value: draft.scope === 'project' ? projectMcpConfigPath() : userMcpConfigPath(),
               truncate: true,
             },
           ]}
         />
-        <OverlaySection>Action</OverlaySection>
+        <OverlaySection>操作</OverlaySection>
         <McpSelect options={addOptions(step, draft)} selectedId={selectedId} />
       </Box>
     );
   return (
     <Box flexDirection="column">
-      <Text bold>
-        {step === 'transport'
-          ? 'How does the server run?'
-          : 'Where should this server be available?'}
-      </Text>
+      <Text bold>{step === 'transport' ? '服务器如何运行？' : '服务器应在哪些范围可用？'}</Text>
       <McpSelect options={addOptions(step, draft)} selectedId={selectedId} />
     </Box>
   );
@@ -294,21 +275,21 @@ export function AuthenticationView({
           : 'prompt';
   const message =
     phase === 'prompt'
-      ? `${server.key.name} requires authentication.`
+      ? `${server.key.name} 需要认证。`
       : phase === 'waiting'
-        ? 'Complete sign-in in your browser.'
+        ? '请在浏览器中完成登录。'
         : phase === 'success'
-          ? 'Authentication complete.'
-          : `Authentication failed${server.authErrorCode ? `: ${server.authErrorCode}` : '.'}`;
+          ? '认证完成。'
+          : `认证失败${server.authErrorCode ? `：${server.authErrorCode}` : '。'}`;
   return (
     <Box flexDirection="column">
       <OverlayMessage tone={phase === 'failed' ? 'error' : phase === 'waiting' ? 'busy' : 'info'}>
         {message}
       </OverlayMessage>
       {phase === 'waiting' && server.authErrorCode && (
-        <OverlayMessage tone="error">Authentication warning: {server.authErrorCode}</OverlayMessage>
+        <OverlayMessage tone="error">认证警告：{server.authErrorCode}</OverlayMessage>
       )}
-      <OverlaySection>Action</OverlaySection>
+      <OverlaySection>操作</OverlaySection>
       <McpSelect options={authOptions(server, starting)} selectedId={selectedId} />
     </Box>
   );
@@ -329,15 +310,17 @@ export function ProjectApprovalView({
     <Box flexDirection="column">
       <OverlayDetailList
         items={[
-          { label: 'Name:', value: server.key.name },
-          ...(command ? [{ label: 'Command:', value: command }] : []),
-          ...(endpoint ? [{ label: 'Endpoint:', value: endpoint }] : []),
-          { label: 'Source:', value: 'Project' },
-          { label: 'Config location:', value: server.sourcePath, truncate: true },
+          { label: '名称', value: server.key.name },
+          ...(command ? [{ label: '命令', value: command }] : []),
+          ...(endpoint ? [{ label: '端点', value: endpoint }] : []),
+          { label: '来源', value: '项目' },
+          { label: '配置位置', value: server.sourcePath, truncate: true },
         ]}
       />
-      <OverlaySection>Decision</OverlaySection>
-      <OverlayMessage tone="warning">Only approve projects you trust.</OverlayMessage>
+      <OverlaySection>决定</OverlaySection>
+      <OverlayMessage tone="warning" callout>
+        只批准你信任的项目。
+      </OverlayMessage>
       <McpSelect options={approvalOptions} selectedId={selectedId} />
     </Box>
   );
@@ -352,22 +335,19 @@ export function ConfirmView({
   action: 'disable' | 'remove';
   selectedId?: string;
 }) {
+  const remove = action === 'remove';
   return (
     <Box flexDirection="column">
-      <Text bold>
-        {action === 'disable' ? 'Disable' : 'Remove'} "{server.key.name}"?
-      </Text>
-      <OverlayMessage tone={action === 'remove' ? 'warning' : 'info'}>
-        {action === 'disable'
-          ? 'The configuration and credentials will be kept. Its tools will no longer be available to the agent.'
-          : 'This removes the selected configuration and stored credentials.'}
+      <OverlayMessage tone={remove ? 'warning' : 'info'} callout>
+        {remove
+          ? `将从${sourceDescription(server.source)}中移除“${server.key.name}”。此操作不会删除远程数据。`
+          : `将禁用“${server.key.name}”。配置和凭据会保留，但工具将不再可用。`}
       </OverlayMessage>
-      {action === 'remove' && server.fallbackSource && (
-        <OverlayMessage tone="warning">
-          A {sourceLabel(server.fallbackSource)} configuration with the same name may become active.
+      {remove && server.fallbackSource && (
+        <OverlayMessage tone="warning" callout>
+          同名的{sourceDescription(server.fallbackSource)}可能随后生效。
         </OverlayMessage>
       )}
-      <OverlaySection>Decision</OverlaySection>
       <McpSelect options={confirmOptions(action)} selectedId={selectedId} />
     </Box>
   );
@@ -381,10 +361,10 @@ export function addOptions(step: AddStep, draft: AddDraft): McpSelectOption[] {
     ];
   if (step === 'scope')
     return [
-      { id: 'project', label: 'Project', description: projectMcpConfigPath() },
-      { id: 'user', label: 'User', description: userMcpConfigPath() },
+      { id: 'project', label: '当前项目', description: projectMcpConfigPath() },
+      { id: 'user', label: '所有项目', description: userMcpConfigPath() },
     ];
-  if (step === 'review') return [{ id: 'add', label: 'Add and connect' }];
+  if (step === 'review') return [{ id: 'add', label: '添加并连接' }];
   return [{ id: draft.transport, label: draft.transport.toUpperCase() }];
 }
 
@@ -394,22 +374,22 @@ export function authOptions(
 ): McpSelectOption[] {
   if (!server || server.authStatus === 'authenticated') return [];
   if (server.authStatus === 'authorizing' || starting)
-    return [{ id: 'cancel_auth', label: 'Cancel authentication' }];
-  if (server.authStatus === 'error') return [{ id: 'retry', label: 'Try again' }];
-  return [{ id: 'open_browser', label: 'Open browser' }];
+    return [{ id: 'cancel_auth', label: '取消认证' }];
+  if (server.authStatus === 'error') return [{ id: 'retry', label: '重试' }];
+  return [{ id: 'open_browser', label: '打开浏览器' }];
 }
 
 export const approvalOptions: McpSelectOption[] = [
-  { id: 'later', label: 'Decide later' },
-  { id: 'approve', label: 'Approve and connect' },
-  { id: 'reject', label: 'Reject server', destructive: true },
+  { id: 'later', label: '稍后决定' },
+  { id: 'approve', label: '批准并连接' },
+  { id: 'reject', label: '拒绝服务器', destructive: true },
 ];
 export function confirmOptions(action: 'disable' | 'remove'): McpSelectOption[] {
   return [
-    { id: 'cancel', label: 'Cancel' },
+    { id: 'cancel', label: '取消' },
     {
       id: 'confirm',
-      label: action === 'disable' ? 'Disable server' : 'Remove server',
+      label: action === 'disable' ? '禁用服务器' : '移除服务器',
       destructive: true,
     },
   ];
@@ -425,10 +405,70 @@ export function displayEndpoint(value: string | undefined): string | undefined {
 export function animatedDots(count: number): string {
   return `${'.'.repeat(count)}${' '.repeat(3 - count)}`;
 }
-function sourceLabel(source: string): string {
-  if (source === 'project') return 'Current project';
-  if (source === 'local') return 'Legacy local';
-  if (source === 'user') return 'All projects';
-  if (source.startsWith('project')) return 'Project configuration';
-  return source;
+function localizedStatus(server: Readonly<McpServerControlState>): string {
+  switch (derivePrimaryStatus(server)) {
+    case 'approval_required':
+      return '需要审批';
+    case 'rejected':
+      return '已拒绝';
+    case 'disabled':
+      return '已禁用';
+    case 'configuration_unavailable':
+      return '配置不可用';
+    case 'authenticating':
+      return '认证中';
+    case 'login_required':
+      return '需要登录';
+    case 'auth_failed':
+      return '认证失败';
+    case 'connecting':
+      return '连接中';
+    case 'ready':
+      return '已连接';
+    case 'failed':
+      return '连接失败';
+    case 'disconnected':
+      return '未连接';
+  }
+}
+
+function capabilitySummary(
+  server: Readonly<McpServerControlState>,
+  capabilities: readonly unknown[],
+): string {
+  const parts = [
+    server.toolCount > 0 ? `${server.toolCount} 个工具` : undefined,
+    server.resourceCount > 0 ? `${server.resourceCount} 个资源` : undefined,
+    server.promptCount > 0 ? `${server.promptCount} 个提示词` : undefined,
+  ].filter(Boolean);
+  return parts.length > 0
+    ? parts.join(' · ')
+    : capabilities.length > 0
+      ? `${capabilities.length} 项`
+      : '—';
+}
+
+function localizeActions(
+  options: readonly McpSelectOption<McpServerAction>[],
+): McpSelectOption<McpServerAction>[] {
+  const labels: Record<McpServerAction, string> = {
+    view_tools: '查看工具',
+    connect: '连接',
+    reconnect: '重新连接',
+    retry: '重试连接',
+    authenticate: '认证',
+    enable: '启用服务器',
+    disable: '禁用服务器',
+    remove: '移除服务器',
+    review_project_server: '审核服务器',
+    review_decision: '查看审核决定',
+  };
+  return options.map((option) => ({ ...option, label: labels[option.id] }));
+}
+
+function sourceDescription(source: string): string {
+  if (source === 'user' || source.includes('user')) return '用户配置';
+  if (source.startsWith('project')) return '项目配置';
+  if (source === 'local') return '旧版本地配置';
+  return '配置';
 }

@@ -163,27 +163,37 @@ describe('MCP management overlay', () => {
 
     await Bun.sleep(5);
     expect(lastFrame()).not.toContain('◆ Kite Code');
-    expect(lastFrame()).toContain('Project MCPs');
-    expect(lastFrame()).toContain('❯ github · ✔ connected');
-    expect(lastFrame()).toContain('/workspace/.kite-code/mcp.json · 5 tools');
-    expect(lastFrame()).toContain('Add MCP server');
+    expect(lastFrame()).toContain('1 个服务器');
+    expect(lastFrame()).toContain('项目配置');
+    expect(lastFrame()).toContain('❯ github');
+    expect(lastFrame()).toContain('● 已连接');
+    expect(lastFrame()).toContain('/workspace/.kite-code/mcp.json · 5 个工具');
+    expect(lastFrame()).toContain('添加 MCP 服务器');
     expect(lastFrame()).not.toContain('A Add');
     expect(lastFrame()).not.toContain('L Login');
+    const listFrame = lastFrame() ?? '';
+    expect(listFrame.indexOf('1 个服务器')).toBeLessThan(listFrame.indexOf('项目'));
+    expect(listFrame.indexOf('项目')).toBeLessThan(listFrame.indexOf('❯ github'));
+    expect(listFrame.indexOf('❯ github')).toBeLessThan(listFrame.indexOf('＋ 添加 MCP 服务器'));
+    expect(listFrame.indexOf('＋ 添加 MCP 服务器')).toBeLessThan(listFrame.indexOf('↑↓ 导航'));
 
     stdin.write('\r');
     await Bun.sleep(10);
-    expect(lastFrame()).toContain('github MCP Server');
-    expect(lastFrame()).toContain('Status:');
-    expect(lastFrame()).toContain('connected');
-    expect(lastFrame()).toContain('Endpoint:');
-    expect(lastFrame()).not.toContain('Transport:');
-    expect(lastFrame()).toContain('Config location:');
-    expect(lastFrame()).toContain('Capabilities:');
-    expect(lastFrame()).toContain('❯ 1. View tools');
-    expect(lastFrame()).toContain('Reconnect');
-    expect(lastFrame()).toContain('Disable server');
-    expect(lastFrame()).toContain('Remove server');
+    expect(lastFrame()).toContain('── github');
+    expect(lastFrame()).toContain('MCP 服务器');
+    expect(lastFrame()).toContain('状态');
+    expect(lastFrame()).toContain('已连接');
+    expect(lastFrame()).toContain('传输方式');
+    expect(lastFrame()).toContain('配置位置');
+    expect(lastFrame()).toContain('能力');
+    expect(lastFrame()).toContain('❯ 查看工具');
+    expect(lastFrame()).toContain('重新连接');
+    expect(lastFrame()).toContain('禁用服务器');
+    expect(lastFrame()).toContain('移除服务器');
     expect(lastFrame()).not.toContain('. Back');
+    const detailFrame = lastFrame() ?? '';
+    expect(detailFrame.indexOf('状态')).toBeLessThan(detailFrame.indexOf('操作'));
+    expect(detailFrame.indexOf('操作')).toBeLessThan(detailFrame.indexOf('❯ 查看工具'));
   });
 
   test('groups project and user servers under their configuration paths', async () => {
@@ -195,12 +205,12 @@ describe('MCP management overlay', () => {
     const controller = new FakeController([server(), userServer]);
     const { lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
-    expect(lastFrame()).toContain('Project MCPs');
-    expect(lastFrame()).toContain('/workspace/.kite-code/mcp.json · 5 tools');
-    expect(lastFrame()).toContain('User MCPs');
-    expect(lastFrame()).toContain('/home/user/.kite-code/mcp.json · 5 tools');
-    expect(lastFrame()).toContain('github · ✔ connected');
-    expect(lastFrame()).toContain('docs · ✔ connected');
+    expect(lastFrame()).toContain('项目');
+    expect(lastFrame()).toContain('/workspace/.kite-code/mcp.json · 5 个工具');
+    expect(lastFrame()).toContain('用户');
+    expect(lastFrame()).toContain('/home/user/.kite-code/mcp.json · 5 个工具');
+    expect(lastFrame()).toContain('github');
+    expect(lastFrame()).toContain('docs');
   });
 
   test('uses the shared connecting animation copy during automatic connection', () => {
@@ -208,7 +218,7 @@ describe('MCP management overlay', () => {
     const controller = new FakeController([connecting]);
     const { lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
-    expect(lastFrame()).toContain('◌ connecting...');
+    expect(lastFrame()).toContain('◌ 连接中...');
   });
 
   test('keeps connecting progress visible when enabling completes immediately', async () => {
@@ -226,7 +236,7 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('\r');
     await Bun.sleep(20);
-    expect(lastFrame()).toContain('Connecting...');
+    expect(lastFrame()).toContain('正在连接...');
     expect(controller.enabled).toEqual(['github:true']);
   });
 
@@ -244,10 +254,10 @@ describe('MCP management overlay', () => {
     const controller = new FakeController([legacyProject, legacyUser]);
     const { lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
-    expect(lastFrame()).toContain('Project MCPs');
-    expect(lastFrame()).toContain('/workspace/.mcp.json · 5 tools');
-    expect(lastFrame()).toContain('User MCPs');
-    expect(lastFrame()).toContain('/home/user/.kite-code/kite-code.jsonc · 5 tools');
+    expect(lastFrame()).toContain('项目');
+    expect(lastFrame()).toContain('/workspace/.mcp.json · 5 个工具');
+    expect(lastFrame()).toContain('用户');
+    expect(lastFrame()).toContain('/home/user/.kite-code/kite-code.jsonc · 5 个工具');
     expect(lastFrame()).not.toContain('Legacy MCPs');
   });
 
@@ -276,7 +286,7 @@ describe('MCP management overlay', () => {
     expect(lastFrame()).toContain('5 tools for github');
     stdin.write('\x1b');
     await Bun.sleep(30);
-    expect(lastFrame()).toContain('github MCP Server');
+    expect(lastFrame()).toContain('── github');
   });
 
   test('renders controller feedback in the detail status row instead of below the actions', async () => {
@@ -286,9 +296,9 @@ describe('MCP management overlay', () => {
     stdin.write('\r');
     await Bun.sleep(5);
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Status:');
+    expect(frame).toContain('状态');
     expect(frame).toContain('Retried MCP server github.');
-    expect(frame.indexOf('Retried MCP server github.')).toBeLessThan(frame.indexOf('Reconnect'));
+    expect(frame.indexOf('Retried MCP server github.')).toBeLessThan(frame.indexOf('重新连接'));
   });
 
   test('does not leak detail operation feedback into the server list', () => {
@@ -333,7 +343,7 @@ describe('MCP management overlay', () => {
     stdin.write('\r');
     await Bun.sleep(5);
     const lines = (lastFrame() ?? '').split('\n');
-    expect(lines.filter((line) => line.includes('Config location:'))).toHaveLength(1);
+    expect(lines.filter((line) => line.includes('配置位置'))).toHaveLength(1);
     expect(lines.filter((line) => line.includes('nested/'))).toHaveLength(1);
   });
 
@@ -352,10 +362,10 @@ describe('MCP management overlay', () => {
 
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ 1. Authenticate');
+    expect(lastFrame()).toContain('❯ 认证');
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ Open browser');
+    expect(lastFrame()).toContain('❯ 打开浏览器');
     stdin.write('l');
     await Bun.sleep(5);
     expect(controller.logins).toEqual([]);
@@ -384,9 +394,9 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ Decide later');
-    expect(lastFrame()).toContain('Approve and connect');
-    expect(lastFrame()).toContain('Reject server');
+    expect(lastFrame()).toContain('❯ 稍后决定');
+    expect(lastFrame()).toContain('批准并连接');
+    expect(lastFrame()).toContain('拒绝服务器');
     expect(controller.decisions).toEqual([]);
   });
 
@@ -394,10 +404,10 @@ describe('MCP management overlay', () => {
     const controller = new FakeController([]);
     const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
 
-    expect(lastFrame()).toContain('❯ ＋ Add MCP server');
+    expect(lastFrame()).toContain('❯ ＋ 添加 MCP 服务器');
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('Add MCP Server · 1/5');
+    expect(lastFrame()).toContain('添加 MCP 服务器 · 1/5');
     stdin.write('\r');
     await Bun.sleep(5);
     stdin.write('docs');
@@ -408,11 +418,11 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ Project');
+    expect(lastFrame()).toContain('❯ 当前项目');
     expect(lastFrame()).toContain('.kite-code/mcp.json');
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ Add and connect');
+    expect(lastFrame()).toContain('❯ 添加并连接');
     expect(lastFrame()).not.toContain('  Back');
     expect(lastFrame()).not.toContain('  Cancel');
     stdin.write('\r');
@@ -441,7 +451,7 @@ describe('MCP management overlay', () => {
     stdin.write('\r');
     await Bun.sleep(10);
 
-    expect(lastFrame()).toContain('Adding and connecting...');
+    expect(lastFrame()).toContain('正在添加并连接...');
     expect(lastFrame()).toContain('请稍候');
   });
 
@@ -454,10 +464,10 @@ describe('MCP management overlay', () => {
     stdin.write('\x1b[B');
     stdin.write('\x1b[B');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ 3. Disable server');
+    expect(lastFrame()).toContain('❯ 禁用服务器');
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ Cancel');
+    expect(lastFrame()).toContain('❯ 取消');
     expect(controller.enabled).toEqual([]);
     stdin.write('\x1b[B');
     await Bun.sleep(5);
