@@ -123,6 +123,12 @@ export default function SlashSuggestionOverlay({
                       {item.disabled ? '不可用 · ' : ''}
                       {item.description}
                     </Text>
+                    {isSelected && item.warning && (
+                      <Text wrap="truncate-end" color={t.error}>
+                        {'  '}
+                        {item.warning}
+                      </Text>
+                    )}
                   </Box>
                 )}
                 {showActiveMarkers && <OverlayStatusColumn active={!!item.isActive} />}

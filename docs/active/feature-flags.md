@@ -8,7 +8,7 @@ Runtime feature flags are registered in `src/core/config/features.ts`. Configura
 
 Use `bun run agent run --feature autoReviewV2` for a one-run override. A value can be explicit, for example `--feature autoReviewV2=false`. Unknown names fail fast.
 
-New flags must default to `false`, include tests for both values, and retain the old path for at least two weeks before it is removed. Flags may default to `true` only after their migration ADR is accepted and the production TUI path has end-to-end coverage. `planLifecycleV2` and `interactionControllerV2` are established migrations and default to `true`.
+New flags must default to `false`, include tests for both values, and retain the old path for at least two weeks before it is removed. Flags may default to `true` only after their migration ADR is accepted and the production TUI path has end-to-end coverage. `planLifecycleV2`, `interactionControllerV2`, and `sessionLoggingPolicyV1` are established migrations and default to `true`.
 
 Exception: ADR-0007 explicitly replaces the old MCP adapter, and ADR-0020 completes stable on-demand loading. `capabilityCatalogV1`、`mcpRuntimeBindingV1` and `toolSearchV1` therefore default to `true`; disabling any of them remains a fail-closed diagnostic override and must never re-enable a legacy MCP execution path.
 
@@ -20,7 +20,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 
 | 开关 | 默认值 | 当前职责 |
 | --- | --- | --- |
-| `sessionLoggingPolicyV1` | `false` | App 注入 resolved logging policy；关闭时为 `off`，开启时默认 metadata-only |
+| `sessionLoggingPolicyV1` | `true` | App 注入 resolved logging policy；默认 metadata-only，显式关闭时为 `off` |
 | `providerDataPolicyV1` | `false` | 所有模型 dispatch 使用 release-pinned Provider 数据 gate；当前只批准官方 DeepSeek `deepseek-v4-flash` 精确 Route |
 | `remoteMcpEgressPolicyV1` | `false` | 开启远程 HTTP MCP 单 invocation 内容许可；关闭时 remote content=no-egress |
 | `resourceBudgetV1` | `false` | 启用 Runtime v19 累计预算 admission、FIFO/compound permit 与恢复语义 |

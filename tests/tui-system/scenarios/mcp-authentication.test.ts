@@ -168,7 +168,7 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     });
     await waitForText(() => tui!.outputSinceLastAction(), "Required MCP provider 'oauth'", 15_000);
     expect(modelServer.getRequestCount()).toBe(0);
-    await waitForText(() => tui!.viewport(), '▶ 1. Session Waive', 5_000);
+    await waitForText(() => tui!.viewport(), '❯ 1. Session Waive', 5_000);
     tui.write('\r');
     await waitForText(
       () => tui!.outputSinceLastAction(),
@@ -314,9 +314,9 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     );
     expect(toolCalls).toBe(1);
     expect(modelServer.getRequestCount()).toBe(2);
-    await waitForText(() => tui!.viewport(), '▶ 1. Run login', 5_000);
+    await waitForText(() => tui!.viewport(), '❯ 1. Run login', 5_000);
     tui.write('\x1b[B');
-    await waitForText(() => tui!.viewport(), '▶ 2. Later', 5_000);
+    await waitForText(() => tui!.viewport(), '❯ 2. Later', 5_000);
     tui.write('\r');
     await waitForText(
       () => tui!.outputSinceLastAction(),

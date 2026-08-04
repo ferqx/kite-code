@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import {
+  activateSessionSearch,
   submitCommand,
   submitCurrentInput,
   submitUserMessage,
@@ -86,15 +87,25 @@ describe('TUI PTY System — /compact persistence', () => {
         10_000,
       );
 
+      await activateSessionSearch(tui);
       await typeText(tui, sessionSearchIdentity);
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui.viewport(), targetSession!.name, {
+            active: false,
+          }),
+        'filtered command-bearing session row to load',
+        10_000,
+      );
+      tui.write('\x1b[B');
       await waitForCondition(
         () =>
           screenHasSessionRow(tui.viewport(), targetSession!.name, {
             selected: true,
             active: false,
           }),
-        'filtered command-bearing session row to become selectable',
-        10_000,
+        'filtered command-bearing session row to become selected',
+        5_000,
       );
       await submitCurrentInput(tui);
       await waitForCondition(

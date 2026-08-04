@@ -14,7 +14,7 @@
 
 多行输入、粘贴、软换行、宽字符和终端 resize 由 InputLine 与专用 hooks 处理；这些行为不进入 Core。
 
-每个 SessionRuntime 首次运行会显示 resolved session logging mode；`content` 另显示 artifact
+Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；只有 `content` 显示 artifact
 许可与用户显式 opt-in 的披露。Logger 失败只显示一次脱敏诊断，不改变当前 Agent run。
 
 ## 8.2 运行中的结构化交互
@@ -42,7 +42,7 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 
 Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。
 
-内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/sessions`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions` 的显式参数是 `accept_edits|auto|full`，其中没有沙箱后端时 `full` 在候选中禁用。
+内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/sessions`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions` 的显式参数是 `accept_edits|auto|full`。没有沙箱后端时，`full` 仍显示正常能力说明并允许光标选中，同时以红色文案提示“当前未在沙箱环境开启”；确认后仍由授权准入拒绝，不能切换到 Full。
 
 `/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“管理 MCP Server”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令，管理动作只在 Overlay 的可见 Select 中执行。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
 

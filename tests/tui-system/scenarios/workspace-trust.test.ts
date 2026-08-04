@@ -107,8 +107,8 @@ describe('TUI PTY System — Workspace Trust', () => {
     async () => {
       const proc = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
       restarted = proc;
-      await waitForText(() => proc.outputSinceLastAction(), 'shortcuts', 15000);
       expect(screenContains(proc.viewport(), GATE_TEXT)).toBe(false);
+      expect(screenContains(proc.viewport(), 'Kite Code')).toBe(true);
       await proc.killAndWait();
       restarted = undefined;
       console.log('  Restart skipped the gate');

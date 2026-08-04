@@ -23,6 +23,10 @@ tests/tui-system/
 Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动真实 TUI 的文件属于串行
 `tui-system` job。两者不得在 system runner 中重复执行。
 
+权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions full` 保留正常
+能力说明并显示环境警告，默认 metadata session logging 不显示普通 mode 状态；测试同时验证 Full
+准入仍被拒绝、content logging 披露没有被普通 metadata 路径误触发。
+
 ## 编写规则
 
 1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。
@@ -97,6 +101,11 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    `clearInput()` 清空，等待最终 full-list reload 的 rows/selection/active/`!Loading`
    组合状态后才能导航或操作。连续 resize 的交互探针必须在每次断言后清空，不能让前一次未提交
    输入参与下一次 resize 的 readiness 基线。
+   SessionSelector 初始焦点属于首个会话行，scenario 必须通过 `activateSessionSearch()` 取得搜索框的
+   活动输入回执后才能调用 `typeText()`；不得把非活动态的 `搜索: —` 当作可编辑输入。过滤完成后焦点仍
+   属于搜索框，scenario 必须发送 Down 并取得目标 row 的 selected receipt 后才能提交。Overlay 标题中的
+   `数量 / 总数` 属于 frame metadata，file query projection 必须剔除该后缀。choice row 的选中标记以
+   当前共享组件输出的 `❯` 为准。
    确实验证“某文本在时间窗内不出现”时使用 `expectTextAbsentFor()` 明示时间语义。清空输入统一
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
    普通输入使用默认 DEL 编码。只有 `typeText()` 已确认输入片段未完整交付的内部恢复路径可以显式

@@ -14,14 +14,7 @@ describe('TUI PTY System — session logging status', () => {
   beforeAll(async () => {
     modelServer = createMockModelServer();
     modelServer.setResponses([{ message: { content: 'Logging status checked.' } }]);
-    workspace = createTestWorkspace({
-      configOverrides: {
-        features: { sessionLoggingPolicyV1: true },
-      },
-      projectConfigOverrides: {
-        features: { sessionLoggingPolicyV1: true },
-      },
-    });
+    workspace = createTestWorkspace();
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
   });
 
@@ -33,12 +26,14 @@ describe('TUI PTY System — session logging status', () => {
     });
   });
 
-  test('shows the resolved metadata mode without a content disclosure', async () => {
+  test('keeps the default metadata mode silent without a content disclosure', async () => {
     const conversationFrames = tui.markScreen();
     await submitUserMessage(tui, modelServer, 'Report logging status', { timeout: 15_000 });
-    await waitForText(() => tui.outputSinceLastAction(), 'Session logging mode: metadata.', 15_000);
     await waitForText(() => tui.outputSinceLastAction(), 'Logging status checked.', 15_000);
 
+    expect(
+      screenContains(tui.screenFramesSince(conversationFrames).join('\n'), 'Session logging mode:'),
+    ).toBe(false);
     expect(
       screenContains(
         tui.screenFramesSince(conversationFrames).join('\n'),

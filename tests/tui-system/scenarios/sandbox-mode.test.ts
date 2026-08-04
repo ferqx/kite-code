@@ -33,13 +33,15 @@ describe('TUI PTY System — Sandbox Mode', () => {
     'keeps development execution, release, and telemetry boundaries inactive',
     async () => {
       await typeText(tui, '/permissions f');
-      await waitForText(() => tui.outputSinceLastAction(), '未启用沙箱，Full 不可用', 10000);
+      await waitForText(() => tui.outputSinceLastAction(), '当前未在沙箱环境开启', 10000);
 
       const suggestionOutput = stripAnsi(tui.viewport());
-      expect(suggestionOutput).toContain('未启用沙箱，Full 不可用');
+      expect(suggestionOutput).toContain('❯ full');
+      expect(suggestionOutput).toContain('完全自主，全部放行，不询问用户');
+      expect(suggestionOutput).toContain('当前未在沙箱环境开启');
 
       const output = tui.viewport();
-      expect(screenContains(output, '未启用沙箱，Full 不可用')).toBe(true);
+      expect(screenContains(output, '当前未在沙箱环境开启')).toBe(true);
       expect(screenContains(output, '完全权限')).toBe(false);
       await clearInput(tui, '/permissions f'.length);
 

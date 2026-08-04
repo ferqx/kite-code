@@ -48,7 +48,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   contextCompactionV2: true,
   contextCompactionAutoV1: false,
   contextCompactionManualV1: true,
-  sessionLoggingPolicyV1: false,
+  sessionLoggingPolicyV1: true,
   providerDataPolicyV1: false,
   remoteMcpEgressPolicyV1: false,
   resourceBudgetV1: false,

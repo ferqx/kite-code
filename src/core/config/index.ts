@@ -9,7 +9,7 @@ import type {
   ProductionExecutionEntrypointV1,
 } from '@/core/sandbox/types';
 import { admitProductionExecutionBoundaryV1 } from './execution-boundary';
-import type { FeatureFlags } from './features';
+import { type FeatureFlags, getFeatureFlags } from './features';
 import { mcpServerSchema } from './mcp-server-config';
 import { defaultConfigPath, projectConfigPath } from './paths';
 import {
@@ -42,6 +42,7 @@ export {
   productionExecutionQualificationRegistryV1Schema,
   qualificationMatchesExecutionEnvironmentV1,
 } from './execution-qualification';
+
 export {
   DEFAULT_FEATURE_FLAGS,
   getFeatureFlags,
@@ -605,7 +606,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     ? undefined
     : readConfigFile(projectConfigPath(workspace))?.telemetry;
   const sessionLoggingPolicy = resolveSessionLoggingPolicyV1({
-    enabled: cfg.features?.sessionLoggingPolicyV1 ?? false,
+    enabled: getFeatureFlags(cfg).sessionLoggingPolicyV1,
     artifactPolicy: options.artifactSessionLoggingPolicy,
     user: userSessionLogging,
     project: projectSessionLogging,
