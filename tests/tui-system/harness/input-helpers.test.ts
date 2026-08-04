@@ -3,6 +3,7 @@ import type { MockModelServer } from './fixtures';
 import {
   activeInput,
   clearInput,
+  pasteText,
   submitCommand,
   submitCurrentInput,
   submitUserMessage,
@@ -58,6 +59,45 @@ function fakePty(onWrite: (data: string) => void, output: () => string): PtyProc
 }
 
 describe('TUI input helpers', () => {
+  test('pasteText retries only when the entire PTY transaction is dropped', async () => {
+    let currentInput = '';
+    let attempts = 0;
+    const tui = fakePty(
+      (data) => {
+        if (!data.startsWith('\x1b[200~')) return;
+        attempts++;
+        if (attempts >= 2) currentInput = 'Line1\nLine2';
+      },
+      () => currentInput,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await pasteText(tui, 'Line1\nLine2', { echoTimeoutMs: 20, settleMs: 0 });
+
+    expect(attempts).toBe(2);
+    expect(currentInput).toBe('Line1\nLine2');
+  });
+
+  test('pasteText refuses to replay a partial transaction', async () => {
+    let currentInput = '';
+    let attempts = 0;
+    const tui = fakePty(
+      (data) => {
+        if (!data.startsWith('\x1b[200~')) return;
+        attempts++;
+        currentInput = 'Line1';
+      },
+      () => currentInput,
+    );
+    tui.viewport = () => `❯ ${currentInput}`;
+
+    await expect(
+      pasteText(tui, 'Line1\nLine2', { echoTimeoutMs: 20, settleMs: 0 }),
+    ).rejects.toThrow('refusing replay');
+
+    expect(attempts).toBe(1);
+  });
+
   test('typeText retries when the first PTY delivery is not rendered', async () => {
     let rendered = '';
     let attempt = 0;

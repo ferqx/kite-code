@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-02（Phase 1C/2A-F 完成；Phase 2A.8–6 本地 fail-closed contract 收敛）
+最后更新：2026-08-04（单维护者开源首发路线图完成并归档）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,17 +19,17 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
-| [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | active | P0 | 已批准 Agent 生产就绪 RFC | Phase 0–6 总入口 | `MS:M0` 已完成；首发拓扑、依赖图、后续 Gate、共享证据与回滚规则 |
-| [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | archived | P0 | 生产就绪 roadmap | RFC Phase 0 | single-maintainer 治理与 M0 已完成；[完成记录](../execution/completed/2026-07-30-agent-production-governance.md) |
-| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | completed | P0 | `MS:M0` | RFC Phase 1A | Task 1A.1–1A.7 completed；`MS:1A-DONE` 已产生；[完成记录](../execution/completed/2026-07-30-agent-production-local-data-privacy.md) |
-| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | completed | P0 | `MS:M0` | RFC Phase 1B | Task 1B.0–1B.9 completed；默认分支三平台 negative artifact 与两路最终整体 Review 收口，`MS:1B-DONE` 已产生；D-04 保持空支持集且不产生 production artifact；[Phase 1B 完成记录](../execution/completed/2026-08-02-agent-production-phase-1b.md) |
-| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | completed | P0 | `MS:M0` | RFC Phase 1C | Task 1C.1–1C.8 completed；`MS:1C-DONE` 已产生；[完成记录](../execution/completed/2026-07-30-agent-production-runtime-resilience.md) |
-| [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) | active | P0 | 2A-F 依赖 Phase 0；2A-RC 依赖 1A–1C/2B/3 | RFC Phase 2A | D-06 已关闭；2A.0–2A.7 completed，`MS:2A-F` 已产生；2A.8/2A.9 in_progress；RC assembly/Gate replay/schema rollback 与 source-owned supply-chain/RC 正向 lookup 已实现，registry 为空、真实 release disabled，RC evidence 未满足；[完成记录](../execution/completed/2026-07-30-agent-production-release-control.md) |
-| [`2026-07-29-agent-production-evaluation.md`](2026-07-29-agent-production-evaluation.md) | active | P0 | Phase 0、2A-F；正式执行依赖 1B/1C 与真实 route | RFC Phase 2B | D-07 closed；2B.1–2B.3/2B.8 completed，2B.4/2B.5 in_progress；96/240 attempts、21-case adversarial 与无正文 product companion verifier 已实现，production Sigstore/route/participant evidence 待满足，不产生 `MS:2B-DONE`；[本地评估基础记录](../execution/completed/2026-08-02-agent-production-evaluation-foundation.md) |
-| [`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md) | active | P0 | 1A、1C、`MS:2A-F`、2B metrics contract | 替代两份 2026-06-18 telemetry 草案 | 3.1–3.8/3.10 local fail-closed contract；governed exporter/Runtime bridge、Limited SLO ledger/rebuild 与八场景 incident retained ledger 已实现，production attestation/2B/真实 baseline/incident/SLO evidence 待满足，不产生运营 milestone |
-| [`2026-07-29-agent-production-compaction-qualification.md`](2026-07-29-agent-production-compaction-qualification.md) | active | P1 | 2A、2B、3、ADR-0021/22/24；external 等待 LIM/SLO | RFC Phase 4 | 4.1–4.3/4.6/4.8 local foundation completed，4.4 in_progress；semantic、internal rollout/external shadow authentication lookup 与 production-owned continuation/route contract 已实现，authority/route/consent registry 为空，无 live/manual/stable evidence；[本地 Compaction Foundation 记录](../execution/completed/2026-08-02-agent-production-compaction-foundation.md) |
-| [`2026-07-29-agent-production-capability-rollout.md`](2026-07-29-agent-production-capability-rollout.md) | active | P1 | 1A–1C、2A、2B、3；external 等待 LIM/SLO | RFC Phase 5 | D-10 closed；5.1/5.2/5A.1/5A.2/5C.1/5C.2/5.4 completed；四轨 producer/verifier/workflow、maturity lookup、MCP write production governance/空 route registry、durable dispatch guard 与统一 rollout admission 已实现，真实 task/live/canary/maturity evidence 待满足，所有 capability off；[本地 Capability Foundation 记录](../execution/completed/2026-08-02-agent-production-capability-foundation.md) |
-| [`2026-07-29-agent-production-ga.md`](2026-07-29-agent-production-ga.md) | draft | P1 | `MS:LIM-APPROVED`、`MS:LIMITED-SLO`、manual stable；只等待拟入 GA capability | RFC Phase 6A/6B | local selection/auto admission/compatibility/GA assembly 与 source-owned verifier lookup 已实现且 registry 为空；无 GA/canary/maturity evidence |
+| [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | archived | P0 | ADR-0069 | [完成记录](../execution/completed/2026-08-04-single-maintainer-open-source-first-release.md) | G0/G1、候选构建/安装、真实 Provider 与 108 Task 终态全部收口 |
+| [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | superseded | P0 | ADR-0068 | 历史 Phase 0 | 5 Task completed；旧 authority/milestone 只作历史 |
+| [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | superseded | P0 | ADR-0068 | 历史 Phase 1A | 7 Task completed；metadata/secret/egress 边界保留 |
+| [`2026-07-29-agent-production-execution-isolation.md`](2026-07-29-agent-production-execution-isolation.md) | superseded | P0 | ADR-0068 | 历史 Phase 1B | 10 Task completed；effectful capability 与普通发行分离 |
+| [`2026-07-29-agent-production-runtime-resilience.md`](2026-07-29-agent-production-runtime-resilience.md) | superseded | P0 | ADR-0068 | 历史 Phase 1C | 8 Task completed；fault/soak fail-closed 保留 |
+| [`2026-07-29-agent-production-release-control.md`](2026-07-29-agent-production-release-control.md) | superseded | P0 | ADR-0068 | 历史 Phase 2A | 11 completed、1 superseded；普通 unsigned RC 取代企业签名链 |
+| [`2026-07-29-agent-production-evaluation.md`](2026-07-29-agent-production-evaluation.md) | superseded | P0 | ADR-0068 | 历史 Phase 2B | 9 completed、1 superseded；小规模真实 smoke 取代 external cohort |
+| [`2026-07-29-agent-production-observability-operations.md`](2026-07-29-agent-production-observability-operations.md) | superseded | P0 | ADR-0069 | 历史 Phase 3 | 9 completed、1 superseded；无 cohort/SLO 路线 |
+| [`2026-07-29-agent-production-compaction-qualification.md`](2026-07-29-agent-production-compaction-qualification.md) | superseded | P1 | ADR-0069 | 历史 Phase 4 | 9 completed、3 superseded；Auto 不受首版支持 |
+| [`2026-07-29-agent-production-capability-rollout.md`](2026-07-29-agent-production-capability-rollout.md) | superseded | P1 | ADR-0069 | 历史 Phase 5 | 13 completed、12 superseded；capability 默认 off |
+| [`2026-07-29-agent-production-ga.md`](2026-07-29-agent-production-ga.md) | superseded | P1 | ADR-0069 | 历史 Phase 6 | 2 completed、7 superseded；无后续 GA promotion 路线 |
 | [`2026-07-26-tool-spec-registry-phase-2.md`](2026-07-26-tool-spec-registry-phase-2.md) | archived | P0 | ADR-0026、ADR-0027 | 延续已归档阶段 0/1 | coordination、interrupt、runtime_action 工具全部迁入 Registry |
 | [`2026-05-20-tui-production-roadmap.md`](2026-05-20-tui-production-roadmap.md) | archived | P0 | — | — | Step2 感知闭环：流式指示器 + Plan 连线 + Phase 确认<br>Step3 防御纵深：Error Boundary + Checkpoint 关闭 + Temp 清理<br>Step4 功能补齐：手动 Compaction |<!-- replaced by 2026-05-22-production-gaps-closure.md for remaining gaps -->|
 | [`2026-05-22-production-gaps-closure.md`](2026-05-22-production-gaps-closure.md) | archived | P0 | — | 替代 2026-05-20 路线图中未完成项 | Phase1 ✅ MCP + 事件闭环<br>Phase2 ✅ Rewind + MCP Resources<br>Phase3 ✅ Skills 系统<br>Hooks + 自定义命令延后 |

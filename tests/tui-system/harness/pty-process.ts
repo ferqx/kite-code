@@ -43,6 +43,8 @@ export interface PtyProcessOptions {
   noPreConfig?: boolean;
   /** Use the test-only composition root that issues one permit per remote MCP invocation. */
   remoteMcpEgressPermitResolver?: 'allow-each-invocation';
+  /** Launch an already-built standalone executable instead of the source entrypoint. */
+  executablePath?: string;
 }
 
 export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust';
@@ -282,15 +284,22 @@ export async function terminateOwnedProcessTree(
 }
 
 export function resolveTuiLaunchPaths(
-  opts: Pick<PtyProcessOptions, 'cwd' | 'workspace' | 'remoteMcpEgressPermitResolver'>,
+  opts: Pick<
+    PtyProcessOptions,
+    'cwd' | 'workspace' | 'remoteMcpEgressPermitResolver' | 'executablePath'
+  >,
   projectRoot = process.cwd(),
 ): { cwd: string; entryPath: string } {
+  if (opts.executablePath && opts.remoteMcpEgressPermitResolver) {
+    throw new Error('Standalone TUI launch cannot replace the remote MCP test composition root.');
+  }
   return {
     cwd: opts.cwd ?? opts.workspace?.workspace ?? projectRoot,
     entryPath:
-      opts.remoteMcpEgressPermitResolver === 'allow-each-invocation'
+      opts.executablePath ??
+      (opts.remoteMcpEgressPermitResolver === 'allow-each-invocation'
         ? join(projectRoot, 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx')
-        : join(projectRoot, 'src/app/tui/index.tsx'),
+        : join(projectRoot, 'src/app/tui/index.tsx')),
   };
 }
 
@@ -421,7 +430,7 @@ export function spawnTui(opts: PtyProcessOptions = {}): PtyProcess {
   const inheritsFaultSoakProcessGroup = process.platform !== 'win32' && !detachTuiProcess;
 
   const proc = Bun.spawn({
-    cmd: [process.execPath, 'run', entryPath],
+    cmd: opts.executablePath ? [entryPath] : [process.execPath, 'run', entryPath],
     cwd,
     env: childEnv,
     detached: detachTuiProcess,

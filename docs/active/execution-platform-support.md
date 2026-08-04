@@ -13,13 +13,14 @@ tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrenc
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、ADR-0065、`release/platform-capabilities/support-matrix-v1.json`、
+相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、`release/platform-capabilities/support-matrix-v1.json`、
 `docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
 
 ## 当前支持集合
 
-当前 production-supported platform/backend 集合为空，D-04 已按“空支持集”关闭，不得生成
-production artifact。候选组合不是支持声明：
+当前 effectful execution 的 production-supported platform/backend 集合为空，D-04 已按“空支持集”
+关闭。ADR-0068 明确该空集合只阻止对应 Shell、writer、MCP write、effectful Skill 等能力，不再阻止
+生成和安装普通开源 TUI/CLI 候选包。候选包与 effectful capability 支持声明是两个独立结论：
 
 Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标。发行/启动/PTY/路径/ACL/keyring
 兼容性与 effectful execution capability 是两个 Gate：某个平台可以通过普通 TUI/CLI 发行验证，
@@ -27,7 +28,8 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标。发行/�
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
 Docker、WSL2 和架构模拟只作开发预检。
 
-跨平台安装仍以 Bun 为包管理器，但 `postinstall` 由 package script 显式通过系统 `node` 启动。
+源码安装仍以 Bun 为包管理器；候选版本另使用 Bun standalone executable、manifest/checksum 和安全
+安装器，不要求目标机预装 Node。开发依赖安装的 `postinstall` 仍由 package script 显式通过系统 `node` 启动。
 该 bootstrap 必须只使用 Node 18 可初始化的 ESM 路径/加载 API；导入模块不得安装 Hook，只有直接
 执行脚本才可尝试通过已保证存在的 `bun x` 安装 lefthook，不得额外假设系统提供 npm/npx。
 lefthook 安装失败继续是非关键开发工具故障，不能阻断依赖安装。

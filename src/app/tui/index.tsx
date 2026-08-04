@@ -15,6 +15,7 @@ import { shouldPromptWorkspaceTrust } from '@/core/config/workspace-trust';
 import type { McpRuntimeProvider, RemoteMcpEgressPermitResolverV1 } from '@/core/mcp';
 import { resolveSandboxRuntime } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import packageJson from '../../../package.json' with { type: 'json' };
 import { defaultCheckpointPath } from '../../core/config/paths.js';
 import { deleteSession, listSessions, loadSession } from '../../core/persistence/sessions.js';
 import type { AgentPhase } from '../../protocol/events.js';
@@ -1071,4 +1072,10 @@ export function runTui(props: TuiBootstrapProps = {}): void {
   });
 }
 
-if (import.meta.main) runTui();
+if (import.meta.main) {
+  if (process.argv.includes('--version')) {
+    console.log(`Kite Code TUI ${packageJson.version}`);
+  } else {
+    runTui();
+  }
+}

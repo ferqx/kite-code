@@ -17,6 +17,11 @@ CLI 把实际经过公共 Runtime event 入口的 metadata-only 指标送入同�
 开发入口没有 artifact authority 或 governed transport 时 reporter 为 no-op，不会因此创建网络请求或磁盘
 spool。该生命周期与 session logging 相互独立，任一 consent 都不能替代另一方。
 
+开源候选的安装状态与 capability Release Profile 状态分开：`--release-status` 和 TUI `/release` 继续
+投影 fail-closed capability ceiling，不判断某个 tar 是否已经安装。候选安装、回滚和卸载由
+`bun run release:install -- <install|rollback|uninstall|status>` 管理；installer 只接受带自身 marker 的
+显式 prefix。ADR-0068/ADR-0069 的 G0/G1、候选 manifest/checksum 和普通维护者检查清单是发布状态权威。
+
 ## 9.2 Interaction mode
 
 | 模式 | 目标 |
@@ -140,16 +145,14 @@ DeepSeek 官方 API 的 `deepseek-v4-flash` 已按 D-14.3/ADR-0066 进入 approv
 secret/protected credential 永远拒绝，policy 过期或 route 漂移即 fail closed。该批准不授权 remote
 MCP 正文外发或 production secondary evaluation，真实评估仍需 API credential 和 retained evidence。
 
-Remote observability 还要求 artifact authority、用户 consent 与真实 exporter；flag 单独开启不生效。
-项目 telemetry 配置只保留 `enabled=false` 的收紧语义，不能提供 endpoint secret 或 consent。Reporter
-只有有界内存 queue，无磁盘 spool；最终 export 会按 release-owned alias registry 折叠未知 route/capability
-并执行每 metric series budget。content logging consent 和 Provider consent 都不隐含 telemetry。
-External canary 还要求独立 canary opt-in；缺少任一 authority/consent/exporter 条件时 cohort blocked。
+Remote observability 不属于当前产品路线；flag 单独开启不生效。项目 telemetry 配置只保留
+`enabled=false` 的收紧语义，不能提供 endpoint secret、network transport 或发布 authority。Reporter 只有
+有界内存 queue，无磁盘 spool；正文和 secret 永远不进入结构化状态。
 
-`releaseProfileV1` 还要求独立的 artifact authority；user/project/CLI 的 true 不能创建该 authority。
-当前 embedded profile 是 non-distributable foundation fixture，D-04 production 支持集为空，因此
-所有 production profile 都拒绝。Release status 不显示完整 profile、credential、Workspace path、
-route 名称或 cohort identity。
+`releaseProfileV1` 仍要求独立的 capability artifact authority；user/project/CLI 的 true 不能创建该
+authority。当前 embedded effectful profile 保持关闭，D-04 effectful execution 支持集为空，因此 Shell、
+writer、MCP write 与 effectful Skill 不会因普通候选包存在而开放。这不阻止 unsigned TUI/CLI tar 的
+构建、安装或启动。Release status 不显示完整 profile、credential、Workspace path 或 route 名称。
 
 `networkBoundaryV1` 关闭时 production network 收紧为 off，不能恢复旧 `allow_all`。开启时只
 使密封 boundary 内的 `web_fetch` 获得逐 invocation DNS/redirect/endpoint admission；Shell/Skill

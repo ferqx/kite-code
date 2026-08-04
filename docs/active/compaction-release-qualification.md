@@ -5,7 +5,7 @@
 无压缩 handoff 或 compaction release Gate 时。
 验证：`bun test tests/evals/compaction tests/runtime/context-compaction-e2e.test.ts tests/runtime/context-compaction-shadow-gate.test.ts tests/release/capability-profile.test.ts`、
 `bun run typecheck`。
-相关：ADR-0021、ADR-0022、ADR-0024、ADR-0057、Phase 4。
+相关：ADR-0021、ADR-0022、ADR-0024、ADR-0057、ADR-0069、Phase 4。
 
 ## 当前本地 contract
 
@@ -55,26 +55,11 @@ policy/estimator、Tool/Skill、Provider Data Policy、suite/scorer 和 artifact
 
 无资格时 manual/auto 都关闭，禁止 silent compact；handoff contract 要求保留 transcript 并可保存
 diff、Plan、checks、pending，超长任务明确 unsupported，`/clear`/新 session 不能冒充成功压缩。
-4.9 adapter 固定 `synthetic`/`nonDistributable`/`evidenceEligible=false`/blocked，effective stage=off、
-cohort=0、milestone=null，不产生 `MS:4-INTERNAL-AUTO-FRESH`。
-
-production-owned `compaction-rollout-evidence.ts` 已预构建 internal manual → auto shadow → auto live
-顺序证据和 external shadow Gate。证据绑定完整 artifact/route/prompt/policy/evaluator、Operations readiness/
-route qualification/live-provider matrix decision digest 与 GitHub source/artifact identity。每阶段使用唯一
-decision/window ID 和严格包含、单调不重叠的起止时间，G3/G4 receipt 也必须落在总 observation window
-内；Gate 同时检查 continuation non-inferiority、false-trigger、资源界限、rollback rehearsal 和 freshness。
-external shadow consent 绑定 schema、policy revision、cohort digest、签发时间和 receipt digest，且必须早于
-观察窗口。internal/external source 已支持 GitHub OIDC/Sigstore authority、verifier、subject、receipt 和认证
-时间，subject 绑定去除 authentication 字段后重建的 retained evidence digest；consent authentication 另行
-绑定 consent receipt。两类 registry 都要求匹配预登记的 exact subject/attestation/verification receipt，
-不能仅凭调用者自报 verifier 字符串取得 trust；registry 当前为空。shadow 的 summary dispatch 与 checkpoint
-write 都严格为零；观察到任一 effect 仍保持 profile `off/cohort=0`。只有 authority、content binding、时间、
-G3/G4 和 freshness 全部通过才可产生 eligible internal/shadow evidence；当前 fixture 仍只能 blocked，
-不产生 rollout milestone。
+旧 4.9–4.11 adapter 和 `compaction-rollout-evidence.ts` 固定保持
+`synthetic`/`nonDistributable`/`evidenceEligible=false`/blocked。它们只作为伪造 authority、source splice、
+时间重排和 shadow 意外副作用的负向 contract，不再产生 rollout stage、milestone 或未来 Task。
 
 `manual-compaction-v1.json` 与 `auto-compaction-v1.json` 现与其他 capability profile 一样固定
-`under_development/off`、空 route/platform allowlist、freshness=0；auto 还依赖 stable manual、fresh
-internal rollout 和 Runtime v2。它们只是后续 Gate 的 fail-closed ceiling，不开放现有 Runtime 行为。
-
-真实 live Provider matrix、预注册 continuation、CLI/TUI handoff、internal rollout freshness、external
-manual canary 和 maturity 都必须等待实际 run/evidence；本地 contract 不替代它们。
+`under_development/off`、空 route/platform allowlist、freshness=0。Manual 只按当前本地 route/handoff
+contract 工作；Auto Compaction 首版不受支持并默认关闭。以后若要支持 Auto 必须重新立项，不能继承
+旧 rollout 或 promotion 记录。

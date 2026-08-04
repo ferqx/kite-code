@@ -10,6 +10,7 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import {
   clearInput,
+  pasteText,
   submitCurrentInput,
   submitUserMessage,
   typeText,
@@ -77,9 +78,7 @@ describe('TUI PTY System — Input & Message', () => {
     async () => {
       server.setResponses([{ message: { content: 'I received your message!' }, delay: 50 }]);
       const requestBaseline = server.getRequestCount();
-      tui.write('\x1b[200~Line1\nLine2\x1b[201~');
-      await waitForText(() => tui.viewport(), 'Line1', 5000);
-      await waitForText(() => tui.viewport(), 'Line2', 5000);
+      await pasteText(tui, 'Line1\nLine2');
 
       await submitCurrentInput(tui);
       await waitForRequestMessage(server, 'Line1\nLine2', 15000, {

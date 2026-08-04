@@ -92,6 +92,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     对 Kitty Shift+Enter 的协议协商。Shift+Enter 到软换行的键解析由 Ink 组件测试覆盖；PTY 默认
     场景用 bracketed paste 验证多行值从输入控件进入真实 model request 的端到端语义。不得发送一个
     未被协商的 CSI-u 序列、只检查两段文本仍可见，就声称已经验证软换行。
+    Harness 通过 `pasteText()` 验证完整活动输入回执；仅当整次 PTY 写入丢失且字段仍为空时
+    有界重试，任何部分交付都拒绝重放。
 19. Mock request 回执只在显式 request baseline 之后匹配最新真实 user turn；Kernel 注入的
     `<runtime-state ...>` 消息不属于用户输入。输入提交的 Enter 重试必须在活动字段离开提交值、
     新 request 或新 modal 出现时停止，避免同一个重试跨过焦点边界执行下一层操作。普通模型消息

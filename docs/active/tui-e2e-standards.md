@@ -40,6 +40,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    持久事件等 semantic receipt 的场景预算必须分离；慢 CI 不能因输入框先清空而把后者缩短到
    delivery budget。跨进程回放场景的 test deadline 还必须覆盖独立的持久事件预算和后续 restart/
    selector replay，不得让外层测试先于其语义阶段超时。
+   Bracketed paste 必须使用 `pasteText()` 取得当前活动输入的精确回执；只有整个 PTY
+   transaction 丢失且输入仍可证明为空时才能有界重试。部分、变形或 focus 改变后的
+   delivery 必须 fail closed，不得重放并冒险重复用户内容。
    需要执行的 slash command 必须使用 `submitCommand()`，由该 helper 等待完整命令帧
    的语义回执后发送 Enter；`typeText()` 只用于不提交的补全或禁用态断言，之后必须通过
    `clearInput()` 清理，不允许在 scenario 中再单独发送 Enter。输入回执必须来自
@@ -253,5 +256,7 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
   fault-soak 专用组合，显式追加一个 lifecycle harness；不是常规 PTY suite 入口。
 - `bun run test:tui:smoke:native`：
   在已安装 `sandbox-exec` 或 `bwrap` 的宿主机上显式验证 Full 模式真实 PTY 链路。
+- `bun run release:smoke`：在隔离 managed prefix 中直接以真实 PTY 启动已安装的 standalone
+  `kite-tui`；不得用源码入口 startup 或单独 `--version` 代替候选 executable 的启动证据。
 - `bun run test:all`：先运行默认门禁，再运行完整 PTY suite。
 - 裸 `bun test` 会按 Bun 默认发现规则包含高成本 PTY 文件，不是仓库规范的全量入口。
