@@ -53,13 +53,14 @@ describe('slash mode suggestions', () => {
     );
   });
 
-  test('marks full as disabled when sandbox is unavailable', () => {
+  test('keeps full selectable and attaches a sandbox warning when unavailable', () => {
     const items = buildModeSuggestionItems('', 'accept_edits', 'none');
     const full = items.find((item) => item.command === 'full');
 
     expect(full).toBeDefined();
-    expect(full?.disabled).toBe(true);
-    expect(full?.description).toContain('未启用沙箱');
+    expect(full?.disabled).toBe(false);
+    expect(full?.description).toBe('完全自主，全部放行，不询问用户');
+    expect(full?.warning).toBe('当前未在沙箱环境开启');
   });
 
   test('keeps full selectable when sandbox backend is available', () => {
@@ -68,5 +69,6 @@ describe('slash mode suggestions', () => {
 
     expect(full).toBeDefined();
     expect(full?.disabled).toBe(false);
+    expect(full?.warning).toBeUndefined();
   });
 });

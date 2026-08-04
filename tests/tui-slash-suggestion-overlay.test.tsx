@@ -111,4 +111,28 @@ describe('SlashSuggestionOverlay', () => {
     expect(frame).toContain('❯ purple');
     expect(frame).not.toContain('/purple');
   });
+
+  test('shows the selected unavailable permission warning beside the normal description', () => {
+    const suggestion: SlashSuggestionData = {
+      kind: 'permissions',
+      partial: 'f',
+      selectedIndex: 0,
+      items: [
+        {
+          command: 'full',
+          aliases: [],
+          description: '完全自主，全部放行，不询问用户',
+          warning: '当前未在沙箱环境开启',
+        },
+      ],
+    };
+    const { lastFrame } = render(
+      <SlashSuggestionOverlay suggestion={suggestion} maxVisibleItems={5} width={100} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('❯ full');
+    expect(frame).toContain('完全自主，全部放行，不询问用户');
+    expect(frame).toContain('当前未在沙箱环境开启');
+  });
 });

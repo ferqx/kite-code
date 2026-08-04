@@ -68,6 +68,7 @@ export interface SuggestionItem {
   /** Whether this item is the currently active selection (e.g. active theme preset) */
   isActive?: boolean;
   disabled?: boolean;
+  warning?: string;
 }
 
 export interface SlashSuggestionsResult {
@@ -92,7 +93,7 @@ export function buildModeSuggestionItems(
   activeInteractionMode: string | undefined,
   sandboxBackend: SandboxBackend,
 ): SuggestionItem[] {
-  const fullDisabled = sandboxBackend === 'none';
+  const fullUnavailable = sandboxBackend === 'none';
   const modes = [
     {
       command: 'accept_edits',
@@ -102,8 +103,9 @@ export function buildModeSuggestionItems(
     { command: 'auto', description: '模型自动审核，不确定时询问', disabled: false },
     {
       command: 'full',
-      description: fullDisabled ? '未启用沙箱，Full 不可用' : '完全自主，全部放行，不询问用户',
-      disabled: fullDisabled,
+      description: '完全自主，全部放行，不询问用户',
+      disabled: false,
+      warning: fullUnavailable ? '当前未在沙箱环境开启' : undefined,
     },
   ];
 
@@ -115,6 +117,7 @@ export function buildModeSuggestionItems(
       description: m.description,
       isActive: m.command === activeInteractionMode,
       disabled: m.disabled,
+      warning: m.warning,
     }));
 }
 

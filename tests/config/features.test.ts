@@ -24,7 +24,7 @@ describe('feature flags', () => {
     expect(getFeatureFlags().contextCompactionManualV1).toBe(true);
     expect(getFeatureFlags().verificationV1).toBe(false);
     expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
-    expect(getFeatureFlags().sessionLoggingPolicyV1).toBe(false);
+    expect(getFeatureFlags().sessionLoggingPolicyV1).toBe(true);
     expect(getFeatureFlags().providerDataPolicyV1).toBe(false);
     expect(getFeatureFlags().remoteMcpEgressPolicyV1).toBe(false);
     expect(getFeatureFlags().resourceBudgetV1).toBe(false);
@@ -72,9 +72,11 @@ describe('feature flags', () => {
         configPath,
         '{ "features": { "autoReviewV2": true }, "provider": { "ollama": {} } }',
       );
-      expect(loadAgentConfig({ configPath, providerName: 'ollama' }).features).toEqual({
+      const loaded = loadAgentConfig({ configPath, providerName: 'ollama' });
+      expect(loaded.features).toEqual({
         autoReviewV2: true,
       });
+      expect(loaded.sessionLoggingPolicy?.mode).toBe('metadata');
       expect(
         parseArgs(['run', '--feature', 'autoReviewV2=false', '--feature', 'loopMode'])
           .featureOverrides,

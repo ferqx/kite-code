@@ -16,13 +16,13 @@ telemetry consent；remote consent 也不改变本地 logger mode、retention �
 
 `SessionLogCollector` 只接受 `off | metadata | content` 三种已解析模式。App 配置加载边界先
 合并 artifact policy、用户配置和项目配置，再把 resolved policy 注入 Runtime；Runtime 不从
-展示层配置重新推导 mode。`sessionLoggingPolicyV1=false` 时强制为 `off`；开启且 artifact
-policy 未放宽时为 `metadata`。
+展示层配置重新推导 mode。`sessionLoggingPolicyV1` 默认开启，artifact policy 未放宽时为
+`metadata`；用户显式设置为 `false` 时强制为 `off`。
 
 `off` 不创建 writer、目录或正文缓存，也不能回退到旧 content serializer。`content` 必须同时
 满足 artifact policy 允许和用户/管理员在用户配置中显式设置 `mode: content`；artifact 单独
 允许不能代表用户同意。项目配置不得开启 `content`，也不得把 artifact/用户限制放宽。TUI
-每个 session 首次运行显示 resolved mode，CLI 每次运行把 mode 写到 stderr；进入 `content`
+TUI 对 `off` 与 `metadata` 不显示状态提示；CLI 每次运行仍把 mode 写到 stderr。进入 `content`
 时两端都显示独立披露。
 
 ## Metadata allowlist

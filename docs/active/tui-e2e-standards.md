@@ -23,6 +23,10 @@ tests/tui-system/
 Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动真实 TUI 的文件属于串行
 `tui-system` job。两者不得在 system runner 中重复执行。
 
+权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions full` 保留正常
+能力说明并显示环境警告，默认 metadata session logging 不显示普通 mode 状态；测试同时验证 Full
+准入仍被拒绝、content logging 披露没有被普通 metadata 路径误触发。
+
 ## 编写规则
 
 1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。

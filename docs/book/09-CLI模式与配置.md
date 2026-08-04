@@ -85,14 +85,14 @@ TUI 启动时执行 workspace 信任门禁：首次打开未信任目录会显�
 
 ### Session logging
 
-`sessionLogging.mode` 只允许 `off | metadata | content`。`sessionLoggingPolicyV1` 关闭时 resolved
-mode 恒为 `off`；开启时默认使用 release artifact 的 metadata policy。用户和项目配置只能收紧
+`sessionLogging.mode` 只允许 `off | metadata | content`。`sessionLoggingPolicyV1` 默认开启并使用
+release artifact 的 metadata policy；显式关闭时 resolved mode 恒为 `off`。用户和项目配置只能收紧
 retention/容量与 mode，项目配置不得开启 `content`。
 
 `content` 需要 release artifact 允许并由用户/管理员在用户配置显式 opt-in，两者缺一不可；
 即使开启仍不记录 reasoning、工具/文件正文、审批命令、Plan/Sub-agent 正文、secret 或
-credential。TUI 每个 session 首次运行显示 resolved mode，CLI 把 mode 写到 stderr；content
-另有显式披露。Logger 不可用时两端只显示一次固定脱敏诊断，Agent 继续运行且不使用 fallback。
+credential。TUI 不显示普通 resolved mode，CLI 把 mode 写到 stderr；content 另有显式披露。
+Logger 不可用时两端只显示一次固定脱敏诊断，Agent 继续运行且不使用 fallback。
 
 日志存储使用 owner-only 权限：POSIX 目录 `0700`、文件 `0600`，Windows 使用禁继承的
 owner-only ACL，并拒绝 symlink/reparse point。活动 session 通过绑定 PID/start identity、

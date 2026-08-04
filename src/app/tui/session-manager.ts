@@ -141,7 +141,6 @@ export class SessionRuntime {
   private _pendingResolve: ((action: UserAction) => void) | null = null;
   private _activeDispatch: ((action: Action) => void) | null = null;
   private _contentLoggingDisclosureShown = false;
-  private _sessionLoggingStatusShown = false;
   private readonly _observabilityBridge: RuntimeMetricBridgeV1 | undefined;
   /**
    * Remains pending while the previous generator is unwinding after abort().
@@ -317,13 +316,6 @@ export class SessionRuntime {
       sessionLoggingPolicy: runAgentParams.sessionLoggingPolicy,
       sessionLoggingContentInspector: runAgentParams.sessionLoggingContentInspector,
       onSessionLoggingStatus: ({ mode }) => {
-        if (!this._sessionLoggingStatusShown) {
-          this._sessionLoggingStatusShown = true;
-          deps.dispatch({
-            type: 'LOCAL_TEXT',
-            text: `  ⎿  Session logging mode: ${mode}.`,
-          });
-        }
         if (mode === 'content' && !this._contentLoggingDisclosureShown) {
           this._contentLoggingDisclosureShown = true;
           deps.dispatch({
