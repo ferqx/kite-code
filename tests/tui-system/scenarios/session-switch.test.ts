@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import {
+  activateSessionSearch,
   submitCommand,
   submitCurrentInput,
   submitUserMessage,
@@ -186,13 +187,13 @@ describe('TUI PTY System — Session Switching', () => {
       expect(screenContains(output, '导航')).toBe(true);
 
       // Filter to one stable target instead of depending on timestamp order.
+      await activateSessionSearch(tui);
       await typeText(tui, 'session 1');
       await waitForCondition(
         () => {
           const viewport = tui.viewport();
           return (
             screenHasSessionRow(viewport, 'Message in session 1', {
-              selected: true,
               active: false,
             }) &&
             !screenHasSessionRow(viewport, 'Message in session 2') &&
@@ -201,6 +202,16 @@ describe('TUI PTY System — Session Switching', () => {
         },
         'session 1 filter results to replace the unfiltered selector rows',
         10_000,
+      );
+      tui.write('\x1b[B');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui.viewport(), 'Message in session 1', {
+            selected: true,
+            active: false,
+          }),
+        'filtered session 1 row to become selected',
+        5_000,
       );
 
       // Press Enter to switch to session 1
@@ -257,7 +268,6 @@ describe('TUI PTY System — Session Switching', () => {
             screenContains(viewport, '搜索') &&
             screenHasSessionRow(viewport, 'Message in session 1', { active: true }) &&
             screenHasSessionRow(viewport, 'Message in session 2', {
-              selected: true,
               active: false,
             }) &&
             !screenContains(viewport, 'Loading...')
@@ -270,26 +280,8 @@ describe('TUI PTY System — Session Switching', () => {
       let output = tui.viewport();
       console.log('  output after second /sessions:', stripAnsi(output).slice(-500));
 
-      // Filter to one stable target instead of depending on timestamp order.
-      await typeText(tui, 'session 2');
-      await waitForCondition(
-        () => {
-          const viewport = tui.viewport();
-          return (
-            screenHasSessionRow(viewport, 'Message in session 2', {
-              selected: true,
-              active: false,
-            }) &&
-            !screenHasSessionRow(viewport, 'Message in session 1') &&
-            !screenContains(viewport, 'Loading...')
-          );
-        },
-        'session 2 filter results to replace the unfiltered selector rows',
-        10_000,
-      );
-
       console.log('  pressing Enter to switch to session 2...');
-      await submitCurrentInput(tui);
+      tui.write('\r');
 
       // Wait for session 2 content to be replayed
       await waitForCondition(

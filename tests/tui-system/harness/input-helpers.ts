@@ -153,6 +153,7 @@ export function activeInput(viewport: string): ActiveInput | undefined {
     if (queryLine) {
       const value = queryLine
         .slice(queryLine.indexOf(marker) + marker.length)
+        .replace(/\s+─+\s+\d+\s*\/\s*\d+\s*─+.*$/, '')
         .replace(/\s*│?\s*$/, '')
         .trim();
       return { kind, value: normalizeInputEcho(value) };
@@ -187,6 +188,27 @@ export function activeInput(viewport: string): ActiveInput | undefined {
 
   const promptInput = currentPromptInput(lines);
   return promptInput === undefined ? undefined : { kind: 'main', value: promptInput };
+}
+
+export async function activateSessionSearch(tui: PtyProcess, timeoutMs = 5_000): Promise<void> {
+  await tui.settleScreen();
+  if (activeInput(tui.inputViewport())?.kind === 'session-search') return;
+  if (!stripAnsi(tui.viewport()).includes('会话列表')) {
+    throw new Error('Cannot activate session search because the session selector is not visible.');
+  }
+
+  tui.write('\x1b[A');
+  const effectiveTimeout = tuiWaitTimeout(timeoutMs);
+  const start = Date.now();
+  while (Date.now() - start < effectiveTimeout) {
+    await tui.settleScreen();
+    const input = activeInput(tui.inputViewport());
+    if (input?.kind === 'session-search' && input.value === '') return;
+    await sleep(tuiPollInterval(25));
+  }
+  throw new Error(
+    `Timeout (${effectiveTimeout}ms) activating session search. Input viewport:\n${tui.inputViewport().slice(-1_000)}`,
+  );
 }
 
 async function waitForInputEcho(

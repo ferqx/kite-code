@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { MockModelServer } from './fixtures';
 import {
+  activateSessionSearch,
   activeInput,
   clearInput,
   pasteText,
@@ -399,6 +400,34 @@ describe('TUI input helpers', () => {
     ].join('\n');
 
     expect(activeInput(viewport)).toBeUndefined();
+    expect(activeInput(viewport.replace('    搜索: —', '  ❯ 搜索:'))).toEqual({
+      kind: 'session-search',
+      value: '',
+    });
+  });
+
+  test('activeInput excludes overlay result metadata from a file query', () => {
+    expect(activeInput('── 文件匹配 package ── 1 / 1 ──')).toEqual({
+      kind: 'file-query',
+      value: 'package',
+    });
+  });
+
+  test('activateSessionSearch moves selection from the first session row to search', async () => {
+    let active = false;
+    const tui = fakePty(
+      (data) => {
+        if (data === '\x1b[A') active = true;
+      },
+      () => '',
+    );
+    tui.viewport = () =>
+      `── 会话列表 ── 1 / 1 ──\n${active ? '  ❯ 搜索:' : '    搜索: —'}\n  ❯ session 1`;
+    tui.inputViewport = tui.viewport;
+
+    await activateSessionSearch(tui, 100);
+
+    expect(active).toBe(true);
   });
 
   test('typeText does not accept a long message already present in history', async () => {
