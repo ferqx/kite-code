@@ -216,11 +216,13 @@ export function AddServer({
         <Text bold>
           {target ? (draft.transport === 'http' ? 'MCP 服务器 URL' : '命令') : '服务器名称'}
         </Text>
-        <TextInput
-          value={target ? draft.target : draft.name}
-          onChange={target ? onTargetChange : onNameChange}
-          onSubmit={onSubmit}
-        />
+        <Box marginTop={1}>
+          <TextInput
+            value={target ? draft.target : draft.name}
+            onChange={target ? onTargetChange : onNameChange}
+            onSubmit={onSubmit}
+          />
+        </Box>
         {!target && <Text color={t.dim}>仅支持字母、数字、点、连字符和下划线。</Text>}
         {inputError && <OverlayMessage tone="error">{inputError}</OverlayMessage>}
       </Box>
@@ -326,7 +328,9 @@ export function ProjectApprovalView({
       <OverlayMessage tone="warning" callout>
         只批准你信任的项目。
       </OverlayMessage>
-      <McpSelect options={approvalOptions} selectedId={selectedId} />
+      <Box marginTop={1}>
+        <McpSelect options={approvalOptions} selectedId={selectedId} />
+      </Box>
     </Box>
   );
 }
@@ -349,11 +353,15 @@ export function ConfirmView({
           : `将禁用“${server.key.name}”。配置和凭据会保留，但工具将不再可用。`}
       </OverlayMessage>
       {remove && server.fallbackSource && (
-        <OverlayMessage tone="warning" callout>
-          同名的{sourceDescription(server.fallbackSource)}可能随后生效。
-        </OverlayMessage>
+        <Box marginTop={1}>
+          <OverlayMessage tone="warning" callout>
+            同名的{sourceDescription(server.fallbackSource)}可能随后生效。
+          </OverlayMessage>
+        </Box>
       )}
-      <McpSelect options={confirmOptions(action)} selectedId={selectedId} />
+      <Box marginTop={1}>
+        <McpSelect options={confirmOptions(action)} selectedId={selectedId} />
+      </Box>
     </Box>
   );
 }

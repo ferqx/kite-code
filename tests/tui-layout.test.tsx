@@ -1011,6 +1011,11 @@ describe('InputBlock', () => {
     const frame = lastFrame();
     expect(frame).toContain('Proceed');
     expect(frame).toContain('Abort');
+    const lines = (frame ?? '').split('\n');
+    const questionRow = lines.findIndex((line) => line.includes('? Which approach do you prefer?'));
+    const firstOption = lines.findIndex((line) => line.includes('❯ 1. Proceed'));
+    expect(firstOption).toBe(questionRow + 2);
+    expect(lines[questionRow + 1]?.trim()).toBe('');
   });
 
   test('shows free text input when no options', () => {
@@ -1079,6 +1084,12 @@ describe('InputBlock', () => {
     const { lastFrame, stdin } = render(
       <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
     );
+
+    const initialLines = (lastFrame() ?? '').split('\n');
+    const divider = initialLines.findIndex((line) => line.trim() === '─'.repeat(40));
+    const firstOption = initialLines.findIndex((line) => line.includes('❯ 1. Small'));
+    expect(firstOption).toBe(divider + 2);
+    expect(initialLines[divider + 1]?.trim()).toBe('');
 
     stdin.write('\t');
     await new Promise((resolve) => setTimeout(resolve, 10));

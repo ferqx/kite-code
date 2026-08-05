@@ -403,9 +403,17 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ 稍后决定');
+    const approvalFrame = lastFrame() ?? '';
+    expect(approvalFrame).toContain('❯ 稍后决定');
     expect(lastFrame()).toContain('批准并连接');
     expect(lastFrame()).toContain('拒绝服务器');
+    const approvalLines = approvalFrame.split('\n');
+    const approvalWarning = approvalLines.findIndex((line) =>
+      line.includes('只批准你信任的项目。'),
+    );
+    const approvalOption = approvalLines.findIndex((line) => line.includes('❯ 稍后决定'));
+    expect(approvalOption).toBe(approvalWarning + 2);
+    expect(approvalLines[approvalWarning + 1]?.trim()).toBe('');
     expect(controller.decisions).toEqual([]);
   });
 
@@ -426,6 +434,11 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('docs');
     await Bun.sleep(5);
+    const nameLines = (lastFrame() ?? '').split('\n');
+    const nameLabel = nameLines.findIndex((line) => line.includes('服务器名称'));
+    const nameInput = nameLines.findIndex((line) => line.trim() === 'docs');
+    expect(nameInput).toBe(nameLabel + 2);
+    expect(nameLines[nameLabel + 1]?.trim()).toBe('');
     stdin.write('\r');
     await Bun.sleep(5);
     stdin.write('https://mcp.example.com/mcp');
@@ -486,7 +499,13 @@ describe('MCP management overlay', () => {
     expect(lastFrame()).toContain('❯ 禁用服务器');
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ 取消');
+    const confirmFrame = lastFrame() ?? '';
+    expect(confirmFrame).toContain('❯ 取消');
+    const confirmLines = confirmFrame.split('\n');
+    const confirmWarning = confirmLines.findIndex((line) => line.includes('将禁用“github”'));
+    const cancelOption = confirmLines.findIndex((line) => line.includes('❯ 取消'));
+    expect(cancelOption).toBe(confirmWarning + 2);
+    expect(confirmLines[confirmWarning + 1]?.trim()).toBe('');
     expect(controller.enabled).toEqual([]);
     stdin.write('\x1b[B');
     await Bun.sleep(5);

@@ -157,7 +157,7 @@ function SingleQuestion({
       </Box>
 
       {mode === 'select' && options.length > 0 ? (
-        <Box flexDirection="column">
+        <Box flexDirection="column" marginTop={1}>
           <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
         </Box>
       ) : (
@@ -506,21 +506,23 @@ function MultiQuestionWizard({
         <Text color={t.primary}>{cur.question}</Text>
         <Text color={t.dim}>{'─'.repeat(40)}</Text>
 
-        {mode === 'select' && options.length > 0 ? (
-          <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
-        ) : (
-          <Box flexDirection="column">
-            <Box>
-              <Text color={t.primary}>{'> '}</Text>
-              <TextInput
-                value={freeText}
-                onChange={setFreeText}
-                onSubmit={handleFreeSubmit}
-                placeholder="type your answer..."
-              />
+        <Box marginTop={1} flexDirection="column">
+          {mode === 'select' && options.length > 0 ? (
+            <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
+          ) : (
+            <Box flexDirection="column">
+              <Box>
+                <Text color={t.primary}>{'> '}</Text>
+                <TextInput
+                  value={freeText}
+                  onChange={setFreeText}
+                  onSubmit={handleFreeSubmit}
+                  placeholder="type your answer..."
+                />
+              </Box>
             </Box>
-          </Box>
-        )}
+          )}
+        </Box>
       </Box>
     </OverlayFrame>
   );

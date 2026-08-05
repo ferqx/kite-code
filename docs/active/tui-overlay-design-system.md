@@ -28,6 +28,8 @@
 
 选择式表单把问题或说明视为独立区域：问题与首个选项之间固定保留一个空白行，同一组内的选项行保持紧凑。多步表单的每个选择步骤都遵循同一节奏，不得仅修补某个 route。
 
+问答、审批和确认页遵循相同边界：问题/上下文、分隔线或 warning callout 与后续选项之间保留一个空白行；连续 callout 之间也保留一个空白行。带显式字段标题的文本输入在标题与输入行之间保留一个空白行，输入值与其辅助说明仍属于同一字段组。
+
 ## 页面与状态边界
 
 List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime/Core 事实仍由各 Overlay 宿主拥有。
