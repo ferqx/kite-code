@@ -14,7 +14,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
 import { ActiveSessionLease, SESSION_LOG_LEASE_FILE } from '@/core/session-logger';
 import { runSessionLogMaintenance } from '@/core/session-logger/retention';
@@ -46,6 +46,10 @@ function createSession(root: string, name: string, contents = 'event\n'): string
   mkdirSync(session, { mode: 0o700 });
   writeFileSync(join(session, 'events.jsonl'), contents, { mode: 0o600 });
   return session;
+}
+
+function quarantineRoot(root: string): string {
+  return join(dirname(root), `${basename(root)}-quarantine`);
 }
 
 afterEach(() => {
@@ -127,7 +131,7 @@ describe('session log retention and migration', () => {
   test('quarantines a legacy session containing a symlink without following it', async () => {
     if (process.platform === 'win32') return;
     const root = createRoot();
-    const target = join(root, 'outside.txt');
+    const target = join(dirname(root), 'outside.txt');
     writeFileSync(target, 'must remain');
     const frontend = join(root, 'tui');
     const session = join(frontend, 'linked');
@@ -137,18 +141,18 @@ describe('session log retention and migration', () => {
     const report = runSessionLogMaintenance(POLICY, { root, reserveBytes: 0 });
 
     expect(report.quarantinedSessions).toBe(1);
-    expect(report.capacitySatisfied).toBe(false);
+    expect(report.capacitySatisfied).toBe(true);
     expect(existsSync(session)).toBe(false);
     await expect(Bun.file(target).text()).resolves.toBe('must remain');
-    expect(readdirSync(join(root, '_quarantine'))).toHaveLength(1);
+    expect(readdirSync(quarantineRoot(root))).toHaveLength(1);
 
     const second = runSessionLogMaintenance(POLICY, { root, reserveBytes: 0 });
-    expect(second.capacitySatisfied).toBe(false);
+    expect(second.capacitySatisfied).toBe(true);
   });
 
   test('quarantines a legacy session containing a hardlinked log file', () => {
     const root = createRoot();
-    const target = join(root, 'sensitive.txt');
+    const target = join(dirname(root), 'sensitive.txt');
     writeFileSync(target, 'must remain');
     const session = createSession(root, 'hardlinked');
     rmSync(join(session, 'events.jsonl'));
@@ -157,8 +161,56 @@ describe('session log retention and migration', () => {
     const report = runSessionLogMaintenance(POLICY, { root, reserveBytes: 0 });
 
     expect(report.quarantinedSessions).toBe(1);
-    expect(report.capacitySatisfied).toBe(false);
+    expect(report.capacitySatisfied).toBe(true);
     expect(readFileSync(target, 'utf8')).toBe('must remain');
+  });
+
+  test('moves a legacy in-root quarantine aside without scanning its contents', () => {
+    const root = createRoot();
+    const legacy = join(root, '_quarantine');
+    mkdirSync(legacy, { mode: 0o700 });
+    for (let index = 0; index < 600; index++) {
+      mkdirSync(join(legacy, `legacy-${index}`), { mode: 0o700 });
+    }
+
+    const report = runSessionLogMaintenance(POLICY, {
+      root,
+      maxEntries: 4,
+      reserveBytes: 0,
+    });
+
+    expect(report.capacitySatisfied).toBe(true);
+    expect(report.bounded).toBe(false);
+    expect(report.quarantinedSessions).toBe(1);
+    expect(existsSync(legacy)).toBe(false);
+    expect(readdirSync(quarantineRoot(root))).toHaveLength(1);
+  });
+
+  test('moves unknown root entries aside so they do not permanently block logging', () => {
+    const root = createRoot();
+    writeFileSync(join(root, '.DS_Store'), 'metadata');
+
+    const first = runSessionLogMaintenance(POLICY, { root, reserveBytes: 0 });
+    const second = runSessionLogMaintenance(POLICY, { root, reserveBytes: 0 });
+
+    expect(first.quarantinedSessions).toBe(1);
+    expect(first.capacitySatisfied).toBe(true);
+    expect(second.capacitySatisfied).toBe(true);
+    expect(existsSync(join(root, '.DS_Store'))).toBe(false);
+    expect(readdirSync(quarantineRoot(root))).toHaveLength(1);
+  });
+
+  test('moves macOS metadata out of frontend directories', () => {
+    const root = createRoot();
+    const frontend = join(root, 'tui');
+    mkdirSync(frontend, { mode: 0o700 });
+    writeFileSync(join(frontend, '.DS_Store'), 'metadata');
+
+    const report = runSessionLogMaintenance(POLICY, { root, reserveBytes: 0 });
+
+    expect(report.quarantinedSessions).toBe(1);
+    expect(report.capacitySatisfied).toBe(true);
+    expect(existsSync(join(frontend, '.DS_Store'))).toBe(false);
   });
 
   test('returns a fail-closed capacity result when the scan budget is exhausted', () => {
