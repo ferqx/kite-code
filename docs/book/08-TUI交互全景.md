@@ -83,7 +83,7 @@ TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 
 
 ## 8.5 MCP 与 Skill 交互
 
-MCP Overlay 订阅 Core control snapshot。Server List 按“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加入口 → 分隔后的快捷键”展示 effective Server；名称与带语义色的连接状态位于同一主行，配置路径与 capability 数量位于次级行。Enter 打开只读 Detail，先展示状态、传输方式、能力和配置位置，再展示按 config/auth/health/diagnostic 动态生成的操作区。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
+MCP Overlay 订阅 Core control snapshot。Server List 按“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加入口 → 分隔后的快捷键”展示 effective Server；名称与带语义色的连接状态位于同一主行，配置路径与 capability 数量位于次级行。Enter 打开只读 Detail，先展示状态、传输方式、能力和配置位置，再展示按 config/auth/health/diagnostic 动态生成的操作区。工具子页以工具数量和 Server 名称组成摘要，摘要与编号列表间留一行，选择前缀不改变编号列对齐。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
 
 项目 Server 尚未批准时出现在 `/mcp` 的“需要审批”状态行。Detail 的“审核服务器”进入脱敏审批页，默认选择“稍后决定”，并提供“批准并连接”与“拒绝服务器”；决定继续绑定当前 config digest 并执行 TOCTOU 复核。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
 

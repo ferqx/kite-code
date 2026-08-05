@@ -2,7 +2,12 @@ import { Box, Text } from 'ink';
 import TextInput from 'ink-text-input';
 import { projectMcpConfigPath, userMcpConfigPath } from '@/core/config';
 import type { McpServerControlState } from '@/core/mcp';
-import { OverlayDetailList, OverlayMessage, OverlaySection } from '../components/OverlayPrimitives';
+import {
+  OverlayDetailList,
+  OverlayMessage,
+  OverlaySection,
+  OverlaySummary,
+} from '../components/OverlayPrimitives';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTheme } from '../theme';
 import McpSelect from './McpSelect';
@@ -123,14 +128,14 @@ export function ServerTools({
   );
   return (
     <Box flexDirection="column">
-      <Text color={useTheme().muted}>
-        {options.length} tools for {server.key.name}
-      </Text>
-      <McpSelect
-        options={options.slice(start, start + visibleCount)}
-        selectedId={selectedId}
-        numbered
-      />
+      <OverlaySummary left={`${options.length} 个工具`} right={server.key.name} />
+      <Box marginTop={1}>
+        <McpSelect
+          options={options.slice(start, start + visibleCount)}
+          selectedId={selectedId}
+          numbered
+        />
+      </Box>
     </Box>
   );
 }

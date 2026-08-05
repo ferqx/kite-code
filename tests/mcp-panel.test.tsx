@@ -269,9 +269,18 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     stdin.write('\r');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('5 tools for github');
+    expect(lastFrame()).toContain('5 个工具');
+    const toolListLines = (lastFrame() ?? '').split('\n');
+    const toolSummary = toolListLines.findIndex(
+      (line) => line.includes('5 个工具') && line.includes('github'),
+    );
+    const firstTool = toolListLines.findIndex((line) => line.includes('❯ 1. click'));
+    const secondTool = toolListLines.findIndex((line) => line.includes('2. close_page'));
+    expect(toolSummary).toBeGreaterThanOrEqual(0);
+    expect(firstTool).toBe(toolSummary + 2);
     expect(lastFrame()).toContain('❯ 1. click');
     expect(lastFrame()).toContain('2. close_page');
+    expect(toolListLines[firstTool]?.indexOf('1.')).toBe(toolListLines[secondTool]?.indexOf('2.'));
     stdin.write('\r');
     await Bun.sleep(5);
     expect(lastFrame()).toContain('Tool name:');
@@ -283,7 +292,7 @@ describe('MCP management overlay', () => {
     expect(lastFrame()).toContain('dblClick: boolean');
     stdin.write('\x1b');
     await Bun.sleep(30);
-    expect(lastFrame()).toContain('5 tools for github');
+    expect(lastFrame()).toContain('5 个工具');
     stdin.write('\x1b');
     await Bun.sleep(30);
     expect(lastFrame()).toContain('── github');

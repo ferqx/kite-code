@@ -28,6 +28,6 @@
 
 List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime/Core 事实仍由各 Overlay 宿主拥有。
 
-MCP Overlay 的纯视图位于 `McpViews.tsx`，宿主 `McpOverlay.tsx` 保留订阅、路由、键盘和 controller 编排。Server 列表固定采用“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加动作 → 分隔后的快捷键”顺序；详情固定先展示状态、传输方式、能力和配置位置，再展示操作区；破坏性确认使用 warning callout，并默认选择“取消”。布局迁移不得改变 config revision、审批 digest、认证 flow、credential cleanup、catalog binding 或后台连接语义。
+MCP Overlay 的纯视图位于 `McpViews.tsx`，宿主 `McpOverlay.tsx` 保留订阅、路由、键盘和 controller 编排。Server 列表固定采用“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加动作 → 分隔后的快捷键”顺序；工具列表使用“工具数量 / Server 名称”摘要，摘要与首项之间保留一行，所有编号共享同一文本起始列；详情固定先展示状态、传输方式、能力和配置位置，再展示操作区；破坏性确认使用 warning callout，并默认选择“取消”。布局迁移不得改变 config revision、审批 digest、认证 flow、credential cleanup、catalog binding 或后台连接语义。
 
 First-run/setup wizard 继续使用独立 `FirstRunShell`，不属于本 contract。
