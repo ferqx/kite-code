@@ -8,7 +8,7 @@ import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useSessionList } from '../hooks/useSessionList.js';
 import OverlayChoiceList, { type OverlayChoiceOption } from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
-import { OverlayEmptyState, OverlayListRow } from './OverlayPrimitives';
+import { OverlayEmptyState, OverlayImpactNotice, OverlayListRow } from './OverlayPrimitives';
 import OverlaySearchInput from './OverlaySearchInput';
 
 type DeleteChoice = 'keep' | 'delete';
@@ -325,6 +325,13 @@ export default function SessionSelector({
               selectionBackground={false}
             />
           </Box>
+          <OverlayImpactNotice tone={deleteChoice === 'delete' ? 'warning' : 'info'}>
+            {deleteChoice === 'delete'
+              ? activeSessionId === selectedSession.threadId
+                ? '将永久删除当前本地会话并创建新会话。工作区文件不会被删除。'
+                : '将永久删除这条本地会话历史。工作区文件不会被删除。'
+              : '将保留当前会话并返回列表。不会更改任何数据。'}
+          </OverlayImpactNotice>
         </Box>
       ) : (
         <>

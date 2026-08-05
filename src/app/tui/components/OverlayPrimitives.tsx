@@ -168,6 +168,22 @@ export function OverlayMessage({
   );
 }
 
+export function OverlayImpactNotice({
+  children,
+  tone = 'info',
+}: {
+  children: ReactNode;
+  tone?: 'info' | 'warning';
+}) {
+  return (
+    <Box marginTop={1} paddingX={1}>
+      <OverlayMessage tone={tone} callout>
+        {children}
+      </OverlayMessage>
+    </Box>
+  );
+}
+
 export function OverlayEmptyState({ children }: { children: ReactNode }) {
   const t = useTheme();
   return <Text color={t.muted}>{children}</Text>;

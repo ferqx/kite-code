@@ -4,6 +4,7 @@ import { projectMcpConfigPath, userMcpConfigPath } from '@/core/config';
 import type { McpServerControlState } from '@/core/mcp';
 import {
   OverlayDetailList,
+  OverlayImpactNotice,
   OverlayMessage,
   OverlaySection,
   OverlaySummary,
@@ -67,7 +68,16 @@ export function ServerDetail({
         ]}
       />
       <OverlaySection>操作</OverlaySection>
-      <McpSelect options={localizeActions(options)} selectedId={selectedId} />
+      <McpSelect
+        options={localizeActions(options)}
+        selectedId={selectedId}
+        selectionBackground={false}
+      />
+      {selectedId && actionImpact(server, selectedId) && (
+        <OverlayImpactNotice tone={selectedId === 'remove' ? 'warning' : 'info'}>
+          {actionImpact(server, selectedId)}
+        </OverlayImpactNotice>
+      )}
     </Box>
   );
 }
@@ -250,7 +260,15 @@ export function AddServer({
           ]}
         />
         <OverlaySection>操作</OverlaySection>
-        <McpSelect options={addOptions(step, draft)} selectedId={selectedId} />
+        <McpSelect
+          options={addOptions(step, draft)}
+          selectedId={selectedId}
+          selectionBackground={false}
+        />
+        <OverlayImpactNotice>
+          将把“{draft.name}”写入{draft.scope === 'project' ? '当前项目' : '用户'}配置并立即连接。
+          远程服务端数据不会改变。
+        </OverlayImpactNotice>
       </Box>
     );
   return (
@@ -297,7 +315,16 @@ export function AuthenticationView({
         <OverlayMessage tone="error">认证警告：{server.authErrorCode}</OverlayMessage>
       )}
       <OverlaySection>操作</OverlaySection>
-      <McpSelect options={authOptions(server, starting)} selectedId={selectedId} />
+      <McpSelect
+        options={authOptions(server, starting)}
+        selectedId={selectedId}
+        selectionBackground={false}
+      />
+      {selectedId === 'open_browser' && (
+        <OverlayImpactNotice>
+          将在浏览器中授权“{server.key.name}”。Kite Code 不会读取或保存你的登录密码。
+        </OverlayImpactNotice>
+      )}
     </Box>
   );
 }
@@ -329,8 +356,17 @@ export function ProjectApprovalView({
         只批准你信任的项目。
       </OverlayMessage>
       <Box marginTop={1}>
-        <McpSelect options={approvalOptions} selectedId={selectedId} />
+        <McpSelect options={approvalOptions} selectedId={selectedId} selectionBackground={false} />
       </Box>
+      {selectedId && (
+        <OverlayImpactNotice tone={selectedId === 'reject' ? 'warning' : 'info'}>
+          {selectedId === 'approve'
+            ? `将批准并连接“${server.key.name}”。该项目声明的 MCP 进程或端点将获得运行权限。`
+            : selectedId === 'reject'
+              ? `将拒绝“${server.key.name}”。项目配置不会被删除，服务器也不会连接。`
+              : '将保留待审核状态并返回。不会连接或修改服务器配置。'}
+        </OverlayImpactNotice>
+      )}
     </Box>
   );
 }
@@ -347,11 +383,13 @@ export function ConfirmView({
   const remove = action === 'remove';
   return (
     <Box flexDirection="column">
-      <OverlayMessage tone={remove ? 'warning' : 'info'} callout>
-        {remove
-          ? `将从${sourceDescription(server.source)}中移除“${server.key.name}”。此操作不会删除远程数据。`
-          : `将禁用“${server.key.name}”。配置和凭据会保留，但工具将不再可用。`}
-      </OverlayMessage>
+      <Box paddingX={1}>
+        <OverlayMessage tone={remove ? 'warning' : 'info'} callout>
+          {remove
+            ? `将从${sourceDescription(server.source)}中移除“${server.key.name}”。此操作不会删除远程数据。`
+            : `将禁用“${server.key.name}”。配置和凭据会保留，但工具将不再可用。`}
+        </OverlayMessage>
+      </Box>
       {remove && server.fallbackSource && (
         <Box marginTop={1}>
           <OverlayMessage tone="warning" callout>
@@ -360,7 +398,11 @@ export function ConfirmView({
         </Box>
       )}
       <Box marginTop={1}>
-        <McpSelect options={confirmOptions(action)} selectedId={selectedId} />
+        <McpSelect
+          options={confirmOptions(action)}
+          selectedId={selectedId}
+          selectionBackground={false}
+        />
       </Box>
     </Box>
   );
@@ -476,7 +518,15 @@ function localizeActions(
     review_project_server: '审核服务器',
     review_decision: '查看审核决定',
   };
-  return options.map((option) => ({ ...option, label: labels[option.id] }));
+  return options.map((option, index) => ({
+    ...option,
+    label: labels[option.id],
+    separatorBefore:
+      option.separatorBefore ||
+      ((option.id === 'disable' || option.id === 'remove') &&
+        index > 0 &&
+        options[index - 1]?.id !== 'disable'),
+  }));
 }
 
 function sourceDescription(source: string): string {
@@ -484,4 +534,30 @@ function sourceDescription(source: string): string {
   if (source.startsWith('project')) return '项目配置';
   if (source === 'local') return '旧版本地配置';
   return '配置';
+}
+
+function actionImpact(
+  server: Readonly<McpServerControlState>,
+  action: McpServerAction,
+): string | undefined {
+  switch (action) {
+    case 'reconnect':
+      return `将断开并重新连接“${server.key.name}”。正在进行的工具调用可能中断。`;
+    case 'connect':
+    case 'retry':
+      return `将连接“${server.key.name}”并重新发现能力。现有配置不会改变。`;
+    case 'authenticate':
+      return `将开始“${server.key.name}”的认证流程。Kite Code 不会读取或保存你的登录密码。`;
+    case 'enable':
+      return `将启用并连接“${server.key.name}”。现有配置和凭据会继续使用。`;
+    case 'disable':
+      return `将禁用“${server.key.name}”。配置和凭据会保留，可随时重新启用。`;
+    case 'remove':
+      return `将从${sourceDescription(server.source)}中移除“${server.key.name}”。此操作不会删除远程数据。`;
+    case 'review_project_server':
+    case 'review_decision':
+      return '将打开服务器审核信息。确认前不会连接或修改配置。';
+    case 'view_tools':
+      return undefined;
+  }
 }

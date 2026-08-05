@@ -10,7 +10,12 @@ import { useTheme } from '../theme';
 import type { RewindScope } from '../types';
 import OverlayChoiceList, { type OverlayChoiceOption } from './OverlayChoiceList';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
-import { OverlayEmptyState, OverlayList, OverlayListRow } from './OverlayPrimitives';
+import {
+  OverlayEmptyState,
+  OverlayImpactNotice,
+  OverlayList,
+  OverlayListRow,
+} from './OverlayPrimitives';
 
 export type { RuntimeSnapshotEntry };
 
@@ -264,6 +269,13 @@ export default function CheckpointSelector({
               selectionBackground={false}
             />
           </Box>
+          <OverlayImpactNotice>
+            {confirmChoice === 'code_and_conversation'
+              ? '将创建新会话并恢复已记录的工作区文件。当前会话会保留。'
+              : confirmChoice === 'conversation_only'
+                ? '将创建新会话。当前工作区代码不会改变。'
+                : '将恢复已记录的工作区文件。当前会话不会改变。'}
+          </OverlayImpactNotice>
         </Box>
       </OverlayFrame>
     );

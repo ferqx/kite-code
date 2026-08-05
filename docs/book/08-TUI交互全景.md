@@ -58,14 +58,14 @@ Sigstore、平台 qualification 或 production Gate 证据。
 
 ## 8.4 Session 与恢复点
 
-会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。会话选择器把搜索行作为独立区域，与紧凑的结果列表之间保留一个空白行。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
+会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。会话选择器把搜索行作为独立区域，与紧凑的结果列表之间保留一个空白行；删除确认在选项下方动态说明会删除的本地会话范围及不会删除的工作区文件。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
 
 `/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无参数连续压缩直接提示 `No new messages to compact.`，不再次调用摘要模型，显式自定义指令仍可重写已有 narrative。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 
 `/rewind` 使用“选择边界 → 确认范围”两阶段面板。列表以恢复点之后的第一条用户消息描述
 “发送这条消息之前”，显示消息摘要、绝对时间和已记录文件数，不暴露 event / snapshot ID。
-Enter 只进入确认层；确认层默认选择“返回检查点列表”，并提供“恢复代码和会话”
-“仅恢复会话”“仅恢复代码”。会话恢复统一 fork 新 thread 并保留源会话；代码恢复按文件
+Enter 只进入确认层；确认层默认选择“恢复代码和会话”，并提供“仅恢复会话”“仅恢复代码”。
+当前范围下方动态说明会创建或保留的会话及工作区代码边界。会话恢复统一 fork 新 thread 并保留源会话；代码恢复按文件
 原像修改共享工作区，当时不存在的文件删除。单个文件失败会逐个提示；手动或 Bash 修改
 同一路径后，当前内容不再匹配 Kite 最后写入指纹，恢复会跳过该路径并提示冲突。缺少后像
 指纹的旧记录同样不会盲目覆盖。Fork 会保留选中边界及其之前的恢复点，因此进入恢复出的
@@ -83,7 +83,7 @@ TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 
 
 ## 8.5 MCP 与 Skill 交互
 
-MCP Overlay 订阅 Core control snapshot。Server List 按“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加入口 → 分隔后的快捷键”展示 effective Server；名称与带语义色的连接状态位于同一主行，配置路径与 capability 数量位于次级行。Enter 打开只读 Detail，先展示状态、传输方式、能力和配置位置，再展示按 config/auth/health/diagnostic 动态生成的操作区。工具子页以工具数量和 Server 名称组成摘要，摘要与编号列表间留一行，选择前缀不改变编号列对齐。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
+MCP Overlay 订阅 Core control snapshot。Server List 按“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加入口 → 分隔后的快捷键”展示 effective Server；名称与带语义色的连接状态位于同一主行，配置路径与 capability 数量位于次级行。Enter 打开只读 Detail，先展示状态、传输方式、能力和配置位置，再展示按 config/auth/health/diagnostic 动态生成的操作区。操作区在普通连接动作与禁用/移除组之间留一行，并在选项下方动态说明连接中断、配置保留、认证隐私或远程数据不受影响等边界。工具子页以工具数量和 Server 名称组成摘要，摘要与编号列表间留一行，选择前缀不改变编号列对齐。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
 
 项目 Server 尚未批准时出现在 `/mcp` 的“需要审批”状态行。Detail 的“审核服务器”进入脱敏审批页，默认选择“稍后决定”，并提供“批准并连接”与“拒绝服务器”；决定继续绑定当前 config digest 并执行 TOCTOU 复核。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
 

@@ -194,6 +194,17 @@ describe('MCP management overlay', () => {
     const detailFrame = lastFrame() ?? '';
     expect(detailFrame.indexOf('状态')).toBeLessThan(detailFrame.indexOf('操作'));
     expect(detailFrame.indexOf('操作')).toBeLessThan(detailFrame.indexOf('❯ 查看工具'));
+
+    stdin.write('\x1b[B');
+    await Bun.sleep(5);
+    const reconnectFrame = lastFrame() ?? '';
+    expect(reconnectFrame).toContain('❯ 重新连接');
+    expect(reconnectFrame).toContain('将断开并重新连接“github”。正在进行的工具调用可能中断。');
+    const reconnectLines = reconnectFrame.split('\n');
+    const reconnectOption = reconnectLines.findIndex((line) => line.includes('❯ 重新连接'));
+    const disableOption = reconnectLines.findIndex((line) => line.includes('禁用服务器'));
+    expect(disableOption).toBe(reconnectOption + 2);
+    expect(reconnectLines[reconnectOption + 1]?.trim()).toBe('');
   });
 
   test('groups project and user servers under their configuration paths', async () => {
