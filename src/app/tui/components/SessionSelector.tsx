@@ -79,7 +79,7 @@ export default function SessionSelector({
     layeredEscRef.current = deleteConfirm || searchSelected || isSearching;
   }
 
-  const maxContentHeight = useOverlayHeight(12);
+  const maxContentHeight = useOverlayHeight(13);
 
   useEffect(
     () => () => {
@@ -333,7 +333,7 @@ export default function SessionSelector({
             onChange={setSearchInput}
             active={searchSelected}
           />
-          <Box flexDirection="column" flexGrow={1} maxHeight={maxContentHeight}>
+          <Box marginTop={1} flexDirection="column" flexGrow={1} maxHeight={maxContentHeight}>
             {loading && <Text color={t.muted}>Loading...</Text>}
             {error && <Text color={t.error}>Error: {error}</Text>}
             {!loading && !error && sessions.length === 0 && (

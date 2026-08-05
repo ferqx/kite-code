@@ -149,6 +149,10 @@ describe('TUI PTY System — Slash Commands', () => {
         10_000,
       );
       expect(screenContains(tui.viewport(), '搜索: —')).toBe(true);
+      const selectorLines = stripAnsi(tui.viewport()).split('\n');
+      const searchRow = selectorLines.findIndex((line) => line.includes('搜索: —'));
+      expect(searchRow).toBeGreaterThanOrEqual(0);
+      expect(selectorLines[searchRow + 1]?.trim()).toBe('');
 
       tui.write('\x1b[A');
       await waitForText(() => tui.viewport(), '❯ 搜索:', 5_000);

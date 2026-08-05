@@ -58,7 +58,7 @@ Sigstore、平台 qualification 或 production Gate 证据。
 
 ## 8.4 Session 与恢复点
 
-会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
+会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。会话选择器把搜索行作为独立区域，与紧凑的结果列表之间保留一个空白行。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
 
 `/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无参数连续压缩直接提示 `No new messages to compact.`，不再次调用摘要模型，显式自定义指令仍可重写已有 narrative。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 

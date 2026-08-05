@@ -24,6 +24,8 @@
 
 列表主行放对象名称，并在同一行尾部放带语义色的关键状态；次级行放路径、时间、来源和数量。选中项默认使用主题背景；危险项保持相同选择语法并用 error 色表达危险。heading 不可选择，也不参与可操作项编号。长字段必须保留选择指示和状态列，使用 display-width 感知的截断或安全换行。
 
+带搜索的选择器把搜索行视为独立区域：搜索行与结果列表之间固定保留一个空白行，并把该行计入 Overlay 高度预算。结果行之间保持紧凑，不得通过增大每项高度模拟区域间距。
+
 ## 页面与状态边界
 
 List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime/Core 事实仍由各 Overlay 宿主拥有。
