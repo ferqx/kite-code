@@ -13,8 +13,8 @@
 
 ## 内容 primitive
 
-- `OverlaySummary` 负责列表总量与配置范围等页级摘要，位于标题和第一个分组之间；
-- `OverlaySection` 负责分组标题、组间距和标题下分隔线；
+- `OverlaySummary` 负责列表总量与配置范围等页级摘要，位于标题和第一个分组之间，并在后续内容前保留一个空白行；
+- `OverlaySection` 负责分组标题、组间距和标题下分隔线，分隔线与组内容之间保留一个空白行；
 - `OverlayList`/`OverlayListRow` 负责统一选择指示、选中背景、主次文案和尾部状态；
 - `OverlayChoiceList` 是 action list preset，不建立第二套行样式；
 - `OverlayDetailList` 负责 label/value 对齐、换行和截断；

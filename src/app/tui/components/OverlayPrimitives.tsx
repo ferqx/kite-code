@@ -13,6 +13,7 @@ export function OverlaySection({
   return (
     <Box
       marginTop={first ? 0 : 1}
+      marginBottom={1}
       paddingX={1}
       borderStyle="single"
       borderTop={false}
@@ -31,7 +32,7 @@ export function OverlaySection({
 export function OverlaySummary({ left, right }: { left: ReactNode; right?: ReactNode }) {
   const t = useTheme();
   return (
-    <Box width="100%" paddingX={1} justifyContent="space-between">
+    <Box width="100%" paddingX={1} marginBottom={1} justifyContent="space-between">
       <Text color={t.muted}>{left}</Text>
       {right && <Text color={t.dim}>{right}</Text>}
     </Box>

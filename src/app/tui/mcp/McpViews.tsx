@@ -129,13 +129,11 @@ export function ServerTools({
   return (
     <Box flexDirection="column">
       <OverlaySummary left={`${options.length} 个工具`} right={server.key.name} />
-      <Box marginTop={1}>
-        <McpSelect
-          options={options.slice(start, start + visibleCount)}
-          selectedId={selectedId}
-          numbered
-        />
-      </Box>
+      <McpSelect
+        options={options.slice(start, start + visibleCount)}
+        selectedId={selectedId}
+        numbered
+      />
     </Box>
   );
 }

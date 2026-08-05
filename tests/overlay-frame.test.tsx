@@ -15,11 +15,16 @@ describe('OverlayFrame contract', () => {
       </OverlayFrame>,
     );
     const lines = (lastFrame() ?? '').split('\n');
+    const title = lines.findIndex((line) => line.includes('── 示例'));
     const content = lines.findIndex((line) => line.includes('暂无内容'));
     const message = lines.findIndex((line) => line.includes('处理中'));
     const footer = lines.findIndex((line) => line.includes('Esc 关闭'));
     expect(lines.some((line) => line.includes('── 示例'))).toBe(true);
+    expect(lines[title + 1]?.trim()).toBe('');
+    expect(content).toBe(title + 2);
+    expect(lines[content + 1]?.trim()).toBe('');
     expect(message).toBeGreaterThan(content);
+    expect(lines[message + 1]?.trim()).toBe('');
     expect(footer).toBeGreaterThan(message);
   });
 
