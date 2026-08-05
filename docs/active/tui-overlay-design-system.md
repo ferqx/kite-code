@@ -26,6 +26,8 @@
 
 带搜索的选择器把搜索行视为独立区域：搜索行与结果列表之间固定保留一个空白行，并把该行计入 Overlay 高度预算。结果行之间保持紧凑，不得通过增大每项高度模拟区域间距。
 
+选择式表单把问题或说明视为独立区域：问题与首个选项之间固定保留一个空白行，同一组内的选项行保持紧凑。多步表单的每个选择步骤都遵循同一节奏，不得仅修补某个 route。
+
 ## 页面与状态边界
 
 List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime/Core 事实仍由各 Overlay 宿主拥有。

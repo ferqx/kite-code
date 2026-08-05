@@ -254,7 +254,9 @@ export function AddServer({
   return (
     <Box flexDirection="column">
       <Text bold>{step === 'transport' ? '服务器如何运行？' : '服务器应在哪些范围可用？'}</Text>
-      <McpSelect options={addOptions(step, draft)} selectedId={selectedId} />
+      <Box marginTop={1}>
+        <McpSelect options={addOptions(step, draft)} selectedId={selectedId} />
+      </Box>
     </Box>
   );
 }

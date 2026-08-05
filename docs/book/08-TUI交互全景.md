@@ -91,7 +91,7 @@ HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，Detail 提
 
 开启 `mcpProviderActionV1` 后，Runtime 可在 Tool 失败后请求固定的 Login、Approve 或 Retry Provider Action。TUI 复用既有 input interrupt 收集决定并委托 MCP controller；成功恢复只开始新 turn，Later 或恢复失败都不会重放旧 Tool Call。新任务首次模型调用前还会对 unavailable required Provider 逐个显示 Retry、Session Waive 或 Cancel Run，waiver 只解除当前 session 的准入门禁。
 
-Add Wizard 只收集 transport、name、URL/command 和 availability：Current project 写 `<project>/.kite-code/mcp.json`，All projects 写 `~/.kite-code/mcp.json`。Detail 可 retry/reconnect、enable/disable 和 remove；disable/remove 使用安全默认确认，remove 同时尝试清理对应本地 OAuth credential。高级配置、legacy migrate、Tool policy 和手动 reload 不进入 TUI。
+Add Wizard 只收集 transport、name、URL/command 和 availability；选择式步骤的问题与首个选项之间保留一个空白行，选项组内部保持紧凑。Current project 写 `<project>/.kite-code/mcp.json`，All projects 写 `~/.kite-code/mcp.json`。Detail 可 retry/reconnect、enable/disable 和 remove；disable/remove 使用安全默认确认，remove 同时尝试清理对应本地 OAuth credential。高级配置、legacy migrate、Tool policy 和手动 reload 不进入 TUI。
 
 Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。
 

@@ -417,6 +417,11 @@ describe('MCP management overlay', () => {
     stdin.write('\r');
     await Bun.sleep(5);
     expect(lastFrame()).toContain('添加 MCP 服务器 · 1/5');
+    const transportLines = (lastFrame() ?? '').split('\n');
+    const transportQuestion = transportLines.findIndex((line) => line.includes('服务器如何运行？'));
+    const httpOption = transportLines.findIndex((line) => line.includes('❯ HTTP'));
+    expect(httpOption).toBe(transportQuestion + 2);
+    expect(transportLines[transportQuestion + 1]?.trim()).toBe('');
     stdin.write('\r');
     await Bun.sleep(5);
     stdin.write('docs');
@@ -429,6 +434,11 @@ describe('MCP management overlay', () => {
     await Bun.sleep(5);
     expect(lastFrame()).toContain('❯ 当前项目');
     expect(lastFrame()).toContain('.kite-code/mcp.json');
+    const scopeLines = (lastFrame() ?? '').split('\n');
+    const scopeQuestion = scopeLines.findIndex((line) => line.includes('服务器应在哪些范围可用？'));
+    const projectOption = scopeLines.findIndex((line) => line.includes('❯ 当前项目'));
+    expect(projectOption).toBe(scopeQuestion + 2);
+    expect(scopeLines[scopeQuestion + 1]?.trim()).toBe('');
     stdin.write('\r');
     await Bun.sleep(5);
     expect(lastFrame()).toContain('❯ 添加并连接');
