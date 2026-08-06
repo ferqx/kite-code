@@ -32,7 +32,7 @@ synthetic fixture 与 mock/scripted model，不读取 Provider credential、不�
 dispatch，更不会发布、保留或上传 AQ-8 observation、release admission 或生产 Provider 兼容结论。
 
 已接受的 ADR-0072 另设手动的 `agent-live-evaluation.yml`。无密钥 preflight 可以输出脱敏的 context-blocked report；只有
-canonical protected `main`、外部 `agent-live-eval` Environment 审核和 step-level secret 均成立时，live job 才会一次取得
+canonical `ferqx/kite-code` protected `main`、外部 `agent-live-eval` Environment 审核和 step-level secret 均成立时，live job 才会一次取得
 opaque lease，并按固定顺序运行真实 `runRuntimeAgent` synthetic `read_file`、automatic-compaction success 与
 after-Provider-fetch client-abort 三个 case。AQ-10 只聚合同一次 workflow 中 fresh-verified 的 public-safe child report：
 固定 `diagnostic` / `evidenceEligible=false`，无 artifact、ledger 或跨 run 保留，且不能被 formal qualification、
@@ -156,7 +156,7 @@ identity 原语及 canonical digest primitive，绝不解释 artifact 中继承�
 ## ADR-0072 GitHub Actions real-Agent diagnostic report（public-safe only）
 
 `.github/workflows/agent-live-evaluation.yml` 是 manual-only、无 inputs、`contents: read` 的独立 workflow；它固定
-canonical repository、`refs/heads/main` 和 `github.sha`，不接受 PR、tag、fork、caller-selected ref/SHA、fixture、route 或
+canonical `ferqx/kite-code` repository、`refs/heads/main` 和 `github.sha`，不接受 PR、tag、fork、caller-selected ref/SHA、fixture、route 或
 command。preflight 不读取 secret；live job 还要求 `github.ref_protected=true` 与专用 Environment。Actions 日志只是
 public-safe transport，不能被当作 ADR-0070 的 ACL、retention、deletion 或 quota-ledger witness，workflow 也不会上传
 artifact、写 Issue/PR comment 或接入 release bundle。

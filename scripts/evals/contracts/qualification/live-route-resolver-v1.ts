@@ -397,7 +397,7 @@ export const L3_QWEN_LIVE_ROUTE_IDENTITY_V1 = buildLiveRouteDiagnosticIdentityV1
 
 const L3_LIVE_COMPATIBILITY_MATRIX_ID_V1 = 'source-owned-agent-feature-qualification-matrix-v1';
 const L3_LIVE_COMPATIBILITY_MATRIX_DIGEST_V1 =
-  'sha256:4e78afddb242d5ae6b36003a25cfe6c21831430e3e50a161e7c445661e6b9a0d' as const;
+  'sha256:c3ad9d993e6238f2a7c683c02577a7bc144c03c9941fe293e8ba485be1bfeaf2' as const;
 const L3_LIVE_COMPATIBILITY_SOURCE_SURFACE_ID_V1 = 'provider:route-policy';
 const L3_LIVE_COMPATIBILITY_FEATURE_ID_V1 = 'MODEL_CONTEXT-ROUTE_POLICY-001';
 const L3_LIVE_COMPATIBILITY_ASSERTION_ID_V1 = 'assertion:provider/route-policy';

@@ -51,7 +51,7 @@ function githubEnvironment(
 
 describe('GitHub Actions real-Agent diagnostic run report', () => {
   test('pins the reviewed repository rather than accepting a caller-provided repository', () => {
-    expect(GITHUB_ACTIONS_AGENT_EVALUATION_CANONICAL_REPOSITORY_V1).toBe('ferqx/openpx-new');
+    expect(GITHUB_ACTIONS_AGENT_EVALUATION_CANONICAL_REPOSITORY_V1).toBe('ferqx/kite-code');
   });
 
   test('exposes exactly the sealed read_file capability to the model', () => {

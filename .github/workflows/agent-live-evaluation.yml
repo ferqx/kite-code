@@ -16,7 +16,7 @@ jobs:
   preflight:
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      github.repository == 'ferqx/openpx-new' &&
+      github.repository == 'ferqx/kite-code' &&
       github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -45,7 +45,7 @@ jobs:
     needs: preflight
     if: >-
       github.event_name == 'workflow_dispatch' &&
-      github.repository == 'ferqx/openpx-new' &&
+      github.repository == 'ferqx/kite-code' &&
       github.ref == 'refs/heads/main' &&
       github.ref_protected == true
     environment:

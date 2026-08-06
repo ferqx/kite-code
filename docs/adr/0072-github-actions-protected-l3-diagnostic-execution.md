@@ -45,7 +45,7 @@ GitHub Actions stdout/log 是 public-safe transport，不是 evidence storage、
 
 独立 workflow 只能以 `workflow_dispatch` 启动，且没有 inputs。真实 job 必须同时满足：
 
-1. 无密钥 preflight 只在 fixed canonical repository 的 `refs/heads/main` 运行，用于在缺保护前提时写出脱敏
+1. 无密钥 preflight 只在 fixed canonical `ferqx/kite-code` repository 的 `refs/heads/main` 运行，用于在缺保护前提时写出脱敏
    `blocked/github_context_invalid` report；live job 额外固定 `github.ref_protected == true`。PR、
    `pull_request_target`、push、tag、fork、arbitrary SHA/ref、用户 fixture/command/route 选择均无入口。
 2. checkout 固定 `github.sha`、`persist-credentials: false`；Actions 使用 commit pin；权限仅 `contents: read`。

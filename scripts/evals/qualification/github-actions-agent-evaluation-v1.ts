@@ -50,7 +50,7 @@ export const GITHUB_ACTIONS_AGENT_EVALUATION_REPORT_SCHEMA_V1 =
 export const GITHUB_ACTIONS_AGENT_EVALUATION_WORKFLOW_PATH_V1 =
   '.github/workflows/agent-live-evaluation.yml' as const;
 /** Fixed to this reviewed repository's origin; it is never workflow input. */
-export const GITHUB_ACTIONS_AGENT_EVALUATION_CANONICAL_REPOSITORY_V1 = 'ferqx/openpx-new' as const;
+export const GITHUB_ACTIONS_AGENT_EVALUATION_CANONICAL_REPOSITORY_V1 = 'ferqx/kite-code' as const;
 
 const MAX_PROVIDER_ATTEMPTS = 2;
 const MAX_TOTAL_INPUT_TOKENS = 4_096;

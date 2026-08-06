@@ -307,7 +307,7 @@ const L3_LIVE_AUTO_COMPACTION_SOURCE_OWNED_IDENTITY_MATERIAL_V1 = Object.freeze(
   // registry/verifier requires a test to reconstruct this value from the
   // source collector; it is not a manually-maintained feature inventory.
   matrixDigest:
-    'sha256:4e78afddb242d5ae6b36003a25cfe6c21831430e3e50a161e7c445661e6b9a0d' as `sha256:${string}`,
+    'sha256:c3ad9d993e6238f2a7c683c02577a7bc144c03c9941fe293e8ba485be1bfeaf2' as `sha256:${string}`,
   sourceSurfaceId: 'model-context:auto-compaction-failure',
   featureId: 'MODEL_CONTEXT-AUTO_COMPACTION_FAILURE-001',
   assertionId: 'assertion:model-context/auto-compaction-failure',

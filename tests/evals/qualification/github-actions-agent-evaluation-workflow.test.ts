@@ -29,7 +29,7 @@ describe('GitHub Actions live Agent diagnostic workflow', () => {
     expect(workflow).not.toMatch(
       /^ {2}(?:actions|attestations|checks|deployments|id-token|issues|packages|pull-requests|statuses):/m,
     );
-    expect(workflow).toContain("github.repository == 'ferqx/openpx-new'");
+    expect(workflow).toContain("github.repository == 'ferqx/kite-code'");
     expect(workflow).toContain("github.ref == 'refs/heads/main'");
     expect(preflight).not.toContain('github.ref_protected == true');
     expect(live).toContain('github.ref_protected == true');
