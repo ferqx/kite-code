@@ -9,7 +9,7 @@ import {
   statSync,
   unlinkSync,
 } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { sessionLogRoot } from '@/core/config/paths';
 import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
 import {
@@ -94,15 +94,7 @@ export function runSessionLogMaintenance(
     capacitySatisfied: true,
   };
   ensureRoot(root, options);
-  const quarantine = join(root, '_quarantine');
-  if (existsSync(quarantine)) {
-    try {
-      ensureSecureSessionLogDirectory(quarantine, options);
-      if (directoryHasAnyEntry(quarantine)) report.capacitySatisfied = false;
-    } catch {
-      report.capacitySatisfied = false;
-    }
-  }
+  migrateLegacyQuarantine(root, options, report);
   const candidates: SessionCandidate[] = [];
   let activeReservationBytes = 0;
   const scanBudget: ScanBudget = { deadlineAt, maxEntries, report };
@@ -118,10 +110,7 @@ export function runSessionLogMaintenance(
         stopScan = true;
         break;
       }
-      if (
-        frontendEntry.name === '_quarantine' ||
-        frontendEntry.name === SESSION_LOG_ADMISSION_LOCK_FILE
-      ) {
+      if (frontendEntry.name === SESSION_LOG_ADMISSION_LOCK_FILE) {
         frontendEntry = rootDirectory.readSync();
         continue;
       }
@@ -139,7 +128,16 @@ export function runSessionLogMaintenance(
       }
       const frontendPath = join(root, frontendEntry.name);
       if (!isSafeDirectoryEntry(frontendEntry.name, frontendPath, options)) {
-        report.capacitySatisfied = false;
+        if (frontendEntry.name === '.DS_Store' && frontendEntry.isFile()) {
+          try {
+            quarantineRootEntry(root, frontendPath, options);
+            report.quarantinedSessions++;
+          } catch {
+            report.capacitySatisfied = false;
+          }
+        } else {
+          report.capacitySatisfied = false;
+        }
         frontendEntry = rootDirectory.readSync();
         continue;
       }
@@ -155,7 +153,16 @@ export function runSessionLogMaintenance(
           }
           const sessionPath = join(frontendPath, sessionEntry.name);
           if (!isSafeDirectoryEntry(sessionEntry.name, sessionPath, options)) {
-            report.capacitySatisfied = false;
+            if (sessionEntry.name === '.DS_Store' && sessionEntry.isFile()) {
+              try {
+                quarantineRootEntry(root, sessionPath, options);
+                report.quarantinedSessions++;
+              } catch {
+                report.capacitySatisfied = false;
+              }
+            } else {
+              report.capacitySatisfied = false;
+            }
             sessionEntry = frontendDirectory.readSync();
             continue;
           }
@@ -204,7 +211,6 @@ export function runSessionLogMaintenance(
                     options,
                   );
                   report.quarantinedSessions++;
-                  report.capacitySatisfied = false;
                 }
               } else {
                 candidates.push({ path: sessionPath, ...inspected });
@@ -363,15 +369,6 @@ function consumeScanBudget(budget: ScanBudget): boolean {
   return true;
 }
 
-function directoryHasAnyEntry(path: string): boolean {
-  const handle = opendirSync(path);
-  try {
-    return handle.readSync() != null;
-  } finally {
-    handle.closeSync();
-  }
-}
-
 function quarantineSession(
   root: string,
   frontend: string,
@@ -409,8 +406,32 @@ function moveAndRemoveSession(
 }
 
 function ensureQuarantine(root: string, options: SecureSessionStorageOptions): string {
-  const quarantine = join(root, '_quarantine');
+  const quarantine = join(dirname(root), `${basename(root)}-quarantine`);
   if (!existsSync(quarantine)) mkdirSync(quarantine, { mode: 0o700 });
   ensureSecureSessionLogDirectory(quarantine, options);
   return quarantine;
+}
+
+function migrateLegacyQuarantine(
+  root: string,
+  options: SecureSessionStorageOptions,
+  report: SessionLogMaintenanceReport,
+): void {
+  const legacy = join(root, '_quarantine');
+  if (!existsSync(legacy)) return;
+  try {
+    ensureSecureSessionLogDirectory(legacy, options);
+    renameSync(legacy, join(ensureQuarantine(root, options), `legacy-${randomUUID()}`));
+    report.quarantinedSessions++;
+  } catch {
+    report.capacitySatisfied = false;
+  }
+}
+
+function quarantineRootEntry(
+  root: string,
+  source: string,
+  options: SecureSessionStorageOptions,
+): void {
+  renameSync(source, join(ensureQuarantine(root, options), `root-entry-${randomUUID()}`));
 }

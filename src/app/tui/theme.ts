@@ -2,6 +2,7 @@ import { createContext, useContext } from 'react';
 
 export interface Theme {
   primary: string;
+  accent: string;
   success: string;
   error: string;
   warning: string;
@@ -27,6 +28,7 @@ export const THEME_PRESET_NAMES: ThemePreset[] = ['teal', 'blue', 'purple', 'cya
 /** ANSI palette index for each theme role — OSC 4 reprogrammable slots */
 export const PALETTE_INDEX: Record<keyof Theme, number | undefined> = {
   primary: 6, // ANSI cyan
+  accent: undefined, // direct hex secondary accent
   success: 2, // ANSI green
   error: 1, // ANSI red
   warning: 3, // ANSI yellow
@@ -46,6 +48,7 @@ export const PALETTE_INDEX: Record<keyof Theme, number | undefined> = {
 const presetRGB: Record<ThemePreset, Record<string, string>> = {
   teal: {
     primary: '#4EC9B0', // VS Code type teal
+    accent: '#C586C0', // secondary categorical accent
     success: '#6A9955', // comment green
     error: '#E03A3A',
     warning: '#CCA700',
@@ -59,6 +62,7 @@ const presetRGB: Record<ThemePreset, Record<string, string>> = {
   },
   blue: {
     primary: '#569CD6', // VS Code keyword blue
+    accent: '#C586C0',
     success: '#6A9955',
     error: '#E03A3A',
     warning: '#CCA700',
@@ -72,6 +76,7 @@ const presetRGB: Record<ThemePreset, Record<string, string>> = {
   },
   purple: {
     primary: '#C586C0', // VS Code-ish purple
+    accent: '#4EC9B0',
     success: '#6A9955',
     error: '#E03A3A',
     warning: '#CCA700',
@@ -85,6 +90,7 @@ const presetRGB: Record<ThemePreset, Record<string, string>> = {
   },
   cyan: {
     primary: '#11A8CD', // VS Code terminal cyan
+    accent: '#D16D9E',
     success: '#6A9955',
     error: '#E03A3A',
     warning: '#CCA700',
@@ -98,6 +104,7 @@ const presetRGB: Record<ThemePreset, Record<string, string>> = {
   },
   mono: {
     primary: '#E0E0E0',
+    accent: '#C0C0C0',
     success: '#A0A0A0',
     error: '#D01C1C',
     warning: '#CCA700',
@@ -169,6 +176,7 @@ function buildTheme(_p: ThemePreset): Theme {
   };
   return {
     primary: fg('primary'),
+    accent: colors.accent!,
     success: fg('success'),
     error: fg('error'),
     warning: fg('warning'),
@@ -209,6 +217,7 @@ export const darkTheme = darkPresets.blue;
 
 export const lightTheme: Theme = {
   primary: '#007ACC', // VS Code blue
+  accent: '#A315E0',
   success: '#388A34',
   error: '#D01C1C',
   warning: '#AD8A00',

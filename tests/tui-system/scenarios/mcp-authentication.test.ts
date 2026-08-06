@@ -56,14 +56,14 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     expect(mcpRequests).toBeGreaterThan(0);
     expect(authorizationRequests).toBe(0);
     await submitCommand(tui, '/mcp');
-    await waitForText(() => tui!.viewport(), 'oauth · ✘ login required', 10_000);
+    await waitForText(() => tui!.viewport(), '● 需要登录', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.viewport(), 'Authenticate', 10_000);
+    await waitForText(() => tui!.viewport(), '认证', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.viewport(), 'Open browser', 10_000);
+    await waitForText(() => tui!.viewport(), '打开浏览器', 10_000);
     expect(authorizationRequests).toBe(0);
     tui.write('\x1b');
-    await waitForText(() => tui!.viewport(), 'Authenticate', 10_000);
+    await waitForText(() => tui!.viewport(), '认证', 10_000);
     expect(authorizationRequests).toBe(0);
   }, 40_000);
 
@@ -124,11 +124,11 @@ describe('TUI PTY System — MCP authentication recovery', () => {
     workspace.env.KITE_TEST_MCP_CREDENTIAL_STORE = 'memory';
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: modelServer, workspace });
     await submitCommand(tui, '/mcp');
-    await waitForText(() => tui!.viewport(), 'oauth · ✘ login required', 10_000);
+    await waitForText(() => tui!.viewport(), '● 需要登录', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.viewport(), 'Authenticate', 10_000);
+    await waitForText(() => tui!.viewport(), '认证', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.viewport(), 'Open browser', 10_000);
+    await waitForText(() => tui!.viewport(), '打开浏览器', 10_000);
     const openerFrames = tui.markScreen();
     tui.write('\r');
     await waitForText(() => tui!.viewport(), 'browser_open_failed', 15_000);

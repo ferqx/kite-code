@@ -11,12 +11,12 @@ import {
 } from '@/app/tui/hooks/useSlashSuggestions';
 import { useWindowSize } from '@/app/tui/hooks/useWindowSizeSig';
 import { useTheme } from '@/app/tui/theme';
-import { listAvailableModels } from '@/core/config';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTerminalFocus } from '../hooks/useTerminalFocus';
 import type { AtomicBlock } from './CtrlSafeTextInput';
 import CtrlSafeTextInput from './CtrlSafeTextInput';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
+import { OverlayEmptyState, OverlayList, OverlayListRow } from './OverlayPrimitives';
 
 export const PASTE_THRESHOLD = 100;
 const MAX_INPUT_LENGTH = 100_000; // 100KB — reject input exceeding this to prevent DOS
@@ -44,7 +44,7 @@ interface InputLineProps {
   planMode?: boolean;
   /** Plan name — 方案名称，显示在顶部边框中 */
   planName?: string;
-  /** Active selections for slash suggestion kind → value mapping (theme preset, model name, etc.) */
+  /** Active selections for slash suggestion kind → value mapping. */
   activeSelections?: import('../hooks/useSlashSuggestions').ActiveSelections;
 }
 
@@ -77,17 +77,6 @@ function completeSlash(input: string): string | null {
       if (prefix.length > partial.length) return `/${prefix}`;
     }
     return null;
-  }
-
-  if (cmd === 'model' && rest.length >= 1) {
-    const partial = rest[0]!.toLowerCase();
-    const available = listAvailableModels().map((m) => m.name);
-    const matches = available.filter((m) => m.startsWith(partial));
-    if (matches.length === 1) return `/model ${matches[0]}`;
-    if (matches.length > 1) {
-      const prefix = commonPrefix(matches);
-      if (prefix.length > partial.length) return `/model ${prefix}`;
-    }
   }
 
   return null;
@@ -402,15 +391,13 @@ export default function InputLine({
           const prefix = commonPrefix(names);
           if (prefix.length > ss.result.partial.length) {
             commitValue(
-              ss.result.kind === 'model'
-                ? `/model ${prefix}`
-                : ss.result.kind === 'effort'
-                  ? `/effort ${prefix}`
-                  : ss.result.kind === 'theme'
-                    ? `/theme ${prefix}`
-                    : ss.result.kind === 'permissions'
-                      ? `/permissions ${prefix}`
-                      : `/${prefix}`,
+              ss.result.kind === 'effort'
+                ? `/effort ${prefix}`
+                : ss.result.kind === 'theme'
+                  ? `/theme ${prefix}`
+                  : ss.result.kind === 'permissions'
+                    ? `/permissions ${prefix}`
+                    : `/${prefix}`,
             );
           } else {
             // No common prefix extension — commit the selected item directly
@@ -567,9 +554,7 @@ export default function InputLine({
                 title={`文件匹配 @${fileSearch.query}`}
                 footer={<OverlayShortcutBar shortcuts={[{ keys: 'Esc', label: '关闭' }]} />}
               >
-                <Box marginTop={1}>
-                  <Text color={t.dim}>No matching files</Text>
-                </Box>
+                <OverlayEmptyState>No matching files</OverlayEmptyState>
               </OverlayFrame>
             );
           }
@@ -593,37 +578,35 @@ export default function InputLine({
                 />
               }
             >
-              <Box marginTop={1} flexGrow={1} maxHeight={listHeight}>
+              <Box flexGrow={1} maxHeight={listHeight}>
                 <ScrollList selectedIndex={fileSearch.selectedIndex} scrollAlignment="auto">
-                  {fileSearch.results.map((f, i) => {
-                    const isSelected = i === fileSearch.selectedIndex;
-                    return (
-                      <Box
-                        key={f.path}
-                        width="100%"
-                        paddingX={1}
-                        backgroundColor={isSelected ? t.userMsgBg : undefined}
-                      >
-                        <Box width={2} flexShrink={0}>
-                          <Text bold color={isSelected ? t.primary : t.dim}>
-                            {isSelected ? '❯ ' : '  '}
-                          </Text>
-                        </Box>
-                        <Box width={fileNameWidth} flexShrink={0}>
-                          <Text
-                            bold={isSelected}
-                            color={isSelected ? t.primary : t.muted}
-                            wrap="truncate-end"
-                          >
-                            {f.name}
-                          </Text>
-                        </Box>
-                        <Text color={t.dim} wrap="truncate-end">
-                          {f.path}
-                        </Text>
-                      </Box>
-                    );
-                  })}
+                  <OverlayList>
+                    {fileSearch.results.map((f, i) => {
+                      const isSelected = i === fileSearch.selectedIndex;
+                      return (
+                        <OverlayListRow
+                          key={f.path}
+                          selected={isSelected}
+                          content={
+                            <>
+                              <Box width={fileNameWidth} flexShrink={0}>
+                                <Text
+                                  bold={isSelected}
+                                  color={isSelected ? t.primary : t.muted}
+                                  wrap="truncate-end"
+                                >
+                                  {f.name}
+                                </Text>
+                              </Box>
+                              <Text color={t.dim} wrap="truncate-end">
+                                {f.path}
+                              </Text>
+                            </>
+                          }
+                        />
+                      );
+                    })}
+                  </OverlayList>
                 </ScrollList>
               </Box>
             </OverlayFrame>

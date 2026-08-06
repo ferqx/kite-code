@@ -1,5 +1,6 @@
 import { Box, Text } from 'ink';
 import { useTheme } from '@/app/tui/theme';
+import { OverlayList, OverlayListRow, OverlaySection } from './OverlayPrimitives';
 
 export interface OverlayChoiceOption<T extends string = string> {
   id: T;
@@ -9,6 +10,9 @@ export interface OverlayChoiceOption<T extends string = string> {
   destructive?: boolean;
   heading?: boolean;
   separatorBefore?: boolean;
+  trailing?: string;
+  trailingTone?: 'success' | 'warning' | 'error' | 'muted';
+  action?: boolean;
 }
 
 export default function OverlayChoiceList<T extends string>({
@@ -23,60 +27,54 @@ export default function OverlayChoiceList<T extends string>({
   selectionBackground?: boolean;
 }) {
   const t = useTheme();
-
   return (
-    <Box flexDirection="column">
+    <OverlayList>
       {options.map((option, index) => {
         if (option.heading) {
           return (
-            <Box key={option.id} marginTop={index === 0 ? 0 : 1} paddingLeft={2}>
-              <Text bold color={t.muted}>
-                {option.label}
-              </Text>
-            </Box>
+            <OverlaySection key={option.id} first={index === 0}>
+              {option.label}
+            </OverlaySection>
           );
         }
 
         const selected = option.id === selectedId;
-        const color = option.disabled
-          ? t.dim
-          : option.destructive
-            ? t.error
-            : selected
-              ? t.primary
-              : t.muted;
-
         return (
           <Box
             key={option.id}
-            flexDirection="column"
             marginTop={
               option.separatorBefore || (index > 0 && options[index - 1]?.description) ? 1 : 0
             }
-            paddingX={1}
-            width="100%"
-            backgroundColor={selected && selectionBackground ? t.userMsgBg : undefined}
           >
-            <Box>
-              <Box width={2} flexShrink={0}>
-                <Text bold color={selected ? t.primary : t.dim}>
-                  {selected ? '❯ ' : '  '}
-                </Text>
-              </Box>
-              <Text bold={selected} color={color}>
-                {numbered ? `${index + 1}. ` : ''}
-                {option.label}
-                {option.disabled ? ' (unavailable)' : ''}
-              </Text>
-            </Box>
-            {option.description && (
-              <Box paddingLeft={2}>
-                <Text color={t.dim}>{option.description}</Text>
-              </Box>
-            )}
+            <OverlayListRow
+              selected={selected}
+              disabled={option.disabled}
+              destructive={option.destructive}
+              selectionBackground={selectionBackground}
+              primary={`${numbered ? `${index + 1}. ` : ''}${option.label}${option.disabled ? ' (unavailable)' : ''}`}
+              secondary={option.description}
+              primaryColor={option.action ? t.primary : undefined}
+              trailing={
+                option.trailing ? (
+                  <Text
+                    color={
+                      option.trailingTone === 'success'
+                        ? t.success
+                        : option.trailingTone === 'warning'
+                          ? t.warning
+                          : option.trailingTone === 'error'
+                            ? t.error
+                            : t.dim
+                    }
+                  >
+                    {option.trailing}
+                  </Text>
+                ) : undefined
+              }
+            />
           </Box>
         );
       })}
-    </Box>
+    </OverlayList>
   );
 }

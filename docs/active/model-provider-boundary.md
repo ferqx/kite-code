@@ -19,6 +19,13 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
 - `model.responded` 事件必须把模型调用时长（`kite_code.model.duration_ms`，来自 `model.responded.durationMs`）持久化进会话日志属性；TUI 阶段块的 `Thought for Xs` 计时（thought-pre-consolidation.md 规则 11/22）依赖此字段，缺失时回放回退墙钟。
 - Provider 是否支持 tool calling 与上下文预算会影响 Capability disclosure，但不能改变授权语义。
 - API key、base URL 和本地模型配置不得写入测试 fixture、日志或文档。
+- TUI 模型选择把不含 credential 的 route 以 `model: "provider:model name"` 写入用户配置；只按
+  第一个 `:` 分隔，允许 model name 自身包含冒号。加载器继续兼容旧的 `model.default` 对象格式。
+  该个人选择优先于项目提供的初始默认值，重启后继续使用。若 route 已从有效 provider/model
+  列表移除，加载器忽略陈旧选择并按现有 provider 默认规则回退。
+- 同一选择还必须以完整 `provider + model name` route 绑定到当前会话。普通模型调用、上下文投影和
+  压缩均读取该会话配置，而不是 TUI 启动时的静态默认值；切换会话、重启后恢复历史会话或从检查点
+  派生会话时恢复各自 route。新会话使用最近一次全局选择，已有会话之间不得互相覆盖模型配置。
 
 首发 G1 使用 `scripts/evals/live-provider-smoke.ts` 做两次独立低成本调用：DeepSeek 固定
 `deepseek-v4-flash`，千问通过 `openai-compatible` adapter 调用。runner 只从环境变量或本机配置读取

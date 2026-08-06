@@ -96,6 +96,21 @@ describe('createRuntimeStore', () => {
     store.close();
   });
 
+  test('persists a provider:model route for each session', () => {
+    const store = createRuntimeStore(dbPath);
+    store.setSessionModelRoute('thread-model', {
+      provider: 'ollama',
+      name: 'qwen2.5-coder:7b',
+    });
+
+    expect(store.getSessionModelRoute('thread-model')).toEqual({
+      provider: 'ollama',
+      name: 'qwen2.5-coder:7b',
+    });
+    expect(store.getSessionModelRoute('missing')).toBeNull();
+    store.close();
+  });
+
   test('supports DELETE journal mode for immediate portable close and reopen', () => {
     const store = createRuntimeStore(dbPath, { journalMode: 'delete' });
     store.close();
@@ -149,6 +164,25 @@ describe('createRuntimeStore', () => {
 
     expect(columns).toContain('post_hash');
     expect(columns).toContain('post_existed');
+  });
+
+  test('adds session model-route columns to an existing current-format store', () => {
+    createRuntimeStore(dbPath).close();
+    const legacy = new Database(dbPath);
+    legacy.run('ALTER TABLE runtime_sessions DROP COLUMN model_provider');
+    legacy.run('ALTER TABLE runtime_sessions DROP COLUMN model_name');
+    legacy.close();
+
+    createRuntimeStore(dbPath).close();
+    const reopened = new Database(dbPath);
+    const columns = reopened
+      .query<{ name: string }, []>('PRAGMA table_info(runtime_sessions)')
+      .all()
+      .map((column) => column.name);
+    reopened.close();
+
+    expect(columns).toContain('model_provider');
+    expect(columns).toContain('model_name');
   });
 });
 
@@ -942,6 +976,10 @@ describe('persistence edge cases', () => {
   test('forkSession rebinds the persisted state to the target thread', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('source', [makeEvent({ toolCallId: 'source-call' })]);
+    store.setSessionModelRoute('source', {
+      provider: 'opencode_go',
+      name: 'deepseek-v4-flash',
+    });
     store.saveNamedSnapshot('source', 'safe', {
       session: { threadId: 'source', userId: 'u', workspace: '/workspace' },
       authorization: {
@@ -973,6 +1011,10 @@ describe('persistence edge cases', () => {
     });
 
     expect(store.forkSession('source', 'safe', 'fork')).toBe(true);
+    expect(store.getSessionModelRoute('fork')).toEqual({
+      provider: 'opencode_go',
+      name: 'deepseek-v4-flash',
+    });
     const fork = store.loadSnapshot<{
       session: { threadId: string };
       authorization: {

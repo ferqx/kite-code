@@ -29,7 +29,7 @@ export default function OverlaySearchInput({
   const t = useTheme();
 
   return (
-    <Box marginTop={1} width="100%" paddingX={1} backgroundColor={active ? t.userMsgBg : undefined}>
+    <Box width="100%" paddingX={1} backgroundColor={active ? t.userMsgBg : undefined}>
       <Box width={2} flexShrink={0}>
         <Text bold color={active ? t.primary : t.dim}>
           {active ? '❯ ' : '  '}

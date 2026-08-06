@@ -31,22 +31,13 @@ describe('parseSlashCommand', () => {
 
   // ── /model ──
   test('parses /model without args', () => {
-    expect(parseSlashCommand('/model')).toEqual({ type: 'model', name: undefined });
+    expect(parseSlashCommand('/model')).toEqual({ type: 'model' });
   });
 
-  test('parses /model with name', () => {
-    expect(parseSlashCommand('/model deepseek-v4')).toEqual({ type: 'model', name: 'deepseek-v4' });
-  });
-
-  test('parses /model with multi-word name', () => {
-    expect(parseSlashCommand('/model claude sonnet 4')).toEqual({
-      type: 'model',
-      name: 'claude sonnet 4',
-    });
-  });
-
-  test('parses /model name', () => {
-    expect(parseSlashCommand('/model deepseek-v4')).toEqual({ type: 'model', name: 'deepseek-v4' });
+  test('accepts only argument-free /model', () => {
+    for (const input of ['/model deepseek-v4', '/model claude sonnet 4']) {
+      expect(parseSlashCommand(input)).toEqual({ type: 'unknown', raw: input });
+    }
   });
 
   // ── /sessions ──

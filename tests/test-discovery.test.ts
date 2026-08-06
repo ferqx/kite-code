@@ -60,6 +60,10 @@ describe('test discovery boundaries', () => {
       scripts?: Record<string, string>;
     };
     const defaultRunner = readFileSync(join(repoRoot, 'scripts', 'run-default-tests.ts'), 'utf8');
+    const writerTests = readFileSync(
+      join(repoRoot, 'tests', 'session-logger', 'writer.test.ts'),
+      'utf8',
+    );
 
     expect(pkg.scripts?.test).toContain('scripts/run-default-tests.ts');
     expect(defaultRunner).not.toContain("'tests/tui-system/**'");
@@ -72,6 +76,8 @@ describe('test discovery boundaries', () => {
     expect(defaultRunner).toContain("'tests/runtime/plan-artifacts.test.ts'");
     expect(defaultRunner).toContain('KITE_CODE_HOME: testHome');
     expect(defaultRunner).toContain('HOME: testHome');
+    expect(writerTests).toContain('process.env.KITE_CODE_HOME = isolatedHome');
+    expect(writerTests).toContain("mkdtempSync(join(tmpdir(), 'kite-code-writer-test-'))");
     expect(pkg.scripts?.['test:all']).toBe('bun run test && bun run test:tui:system');
     expect(pkg.scripts?.['test:e2e']).toContain('tests/e2e/local/');
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/tui-system/');

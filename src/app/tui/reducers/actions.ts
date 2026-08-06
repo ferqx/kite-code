@@ -61,7 +61,7 @@ export type Action =
       modelName: string;
       thinkingLevel: string | null;
     }
-  | { type: 'SELECT_MODEL'; modelId: string }
+  | { type: 'SELECT_MODEL'; provider: string; modelName: string }
   | { type: 'NEW_SESSION'; threadId: string }
   | { type: 'USER_MESSAGE'; text: string }
   | { type: 'SHOW_MCP' }

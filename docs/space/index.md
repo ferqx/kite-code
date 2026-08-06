@@ -38,6 +38,7 @@
 | `../active/tui-dec-synchronized-output.md` | active | TUI DEC 同步输出缓冲 — `\x1B[?2026h/l` 帧刷新，消除 resize/会话切换的空白期和抖动 | 修改 `useStaticContent`、TUI 屏切换逻辑、缓冲/渲染时序时必读。 |
 | `../active/cancel-resume-cleanup.md` | active | Cancel/Resume、Effect lease、工具消息对与 Subagent continuation | 修改取消、恢复、消息清理或 continuation 时。 |
 | `../active/tui-no-viewport-culling.md` | active | TUI OutputArea 渲染逻辑、App 布局、block 可见性 | 修改 OutputArea.tsx 或 App.tsx 的渲染/overflow 逻辑，讨论视口剔除或虚拟滚动。 |
+| `../active/tui-overlay-design-system.md` | active | TUI Overlay 四区骨架、内容 primitive、列表层级与交互词汇 | 修改通用 Overlay、MCP 管理页、选择器、帮助、审批、问答或方案审核表面时。 |
 | `../active/tui-reference-stability.md` | active | TUI useStaticContent 引用稳定性 — ref+fingerprint 替代 useMemo 的缓存层，消除 timer/spinner 引发的引用级联和重复渲染 | 修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。 |
 | `../active/tui-e2e-testing-limits.md` | active | PTY 能力、平台差异与测试分层边界 | 编写 TUI E2E、处理 PTY flaky 或选择测试层次时。 |
 | `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
@@ -111,6 +112,7 @@
 | `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
 | `plans/2026-07-29-agent-production-readiness-roadmap.md` | archived | ADR-0069 首发路线图已收口：G0/G1、83 completed、25 superseded、0 optional。 |
+| `plans/2026-08-04-tui-overlay-design-system.md` | archived | Overlay contract、MCP、通用选择页、交互页及文档验证已完成。 |
 | `plans/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
 | `plans/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 ✅，Phase3 ✅。 |
 | `plans/2026-05-22-production-gaps-phase1.md` | archived | Phase 1 实施记录（8 commits）。MCP + 事件闭环 + 错误分类。 |
@@ -139,6 +141,7 @@
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
 | `execution/completed/2026-08-04-single-maintainer-open-source-first-release.md` | completed | 记录单维护者开源首发路线图 G0/G1、统一 Review、真实 Provider、三平台候选与 83/25/0 终态收口。 |
+| `execution/completed/2026-08-05-tui-overlay-design-system.md` | completed | 记录统一 Overlay primitives、MCP 视图拆分、选择器迁移和 component/PTY 验证。 |
 | `execution/completed/2026-08-02-agent-production-admission-strategy-correction.md` | completed | 记录三平台发行与 effectful capability 正交准入、D-03 关闭和 DeepSeek blocked candidate；不提升 Task/milestone。 |
 | `execution/completed/2026-04-26-plan-state-reminder.md` | completed | 记录把计划状态移动到尾部合成用户侧提醒的实现和验证。 |
 | `execution/completed/2026-04-26-remove-stop-check.md` | completed | 记录移除最终答案 stop-check 和非危险模式确认门。 |

@@ -62,6 +62,6 @@ Auth 与 connection health 分离：`not_required`、`login_required`、`authori
 
 ## TUI 边界
 
-`/mcp` 的 Server Detail 在 login/reauth required 或 auth error 时提供 Authenticate。认证 route 默认选择 Open browser；只有 Enter 确认后才调用 Login，`l` 等字符无业务含义。authorizing 时只提供 Cancel authentication，Esc 同样取消 callback 并返回 Detail；success/failure 原地刷新。页面不显示 token、authorization code、PKCE、scope、完整 authorization URL/query 或 credential material。
+`/mcp` 的 Server Detail 在 login/reauth required 或 auth error 时提供“认证”。认证 route 默认选择“打开浏览器”；只有 Enter 确认后才调用 Login，`l` 等字符无业务含义。authorizing 时只提供“取消认证”，Esc 同样取消 callback 并返回 Detail；success/failure 原地刷新。页面不显示 token、authorization code、PKCE、scope、完整 authorization URL/query 或 credential material。
 
 Phase 3 已完成：TUI PTY 的 Login、Cancel、opener failure 和输入恢复场景通过；macOS Keychain、Windows Credential Manager 与 Linux Secret Service 的原生 write/read/delete smoke 均通过。完成证据见 [`../space/execution/completed/2026-07-16-mcp-auth-phase3.md`](../space/execution/completed/2026-07-16-mcp-auth-phase3.md)。

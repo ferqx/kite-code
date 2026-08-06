@@ -39,6 +39,7 @@ Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者
 ```jsonc
 {
   "provider": {},
+  "model": "deepseek:deepseek-v4-flash",
   "theme": "dark",
   "colorPreset": "default",
   "interactionMode": "auto",
@@ -51,6 +52,8 @@ Mode 不等于 authorization grant，authorization 也不等于 sandbox。三者
   "features": {}
 }
 ```
+
+顶层 `model` 使用 `provider:model name` 简写，解析时只按第一个 `:` 分隔，因此模型名自身可以包含冒号，例如 `ollama:qwen2.5-coder:7b`。兼容读取旧的 `{ "default": { "provider": "...", "name": "..." } }` 对象格式；TUI 模型选择统一将新值写成简写，作为下次启动和新会话的默认 route，同时把完整 route 持久化到当前会话。恢复历史会话时优先使用其会话级 route；若对应 provider 或 model 已从有效配置移除，则忽略陈旧选择并回退到当前默认规则。
 
 Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统一通过 AI SDK 模型边界调用。API key 和配置字符串支持环境变量展开。
 

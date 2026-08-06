@@ -62,8 +62,7 @@ describe('SlashSuggestionOverlay', () => {
         {
           command: 'model',
           aliases: [],
-          args: '[name]',
-          description: 'Switch model',
+          description: 'Open model selector',
         },
         {
           command: 'theme',
@@ -83,10 +82,10 @@ describe('SlashSuggestionOverlay', () => {
 
     expect(effort.indexOf('/effort')).toBe(model.indexOf('/model'));
     expect(model.indexOf('/model')).toBe(theme.indexOf('/theme'));
-    expect(effort.indexOf('low|')).toBe(model.indexOf('[name]'));
-    expect(model.indexOf('[name]')).toBe(theme.indexOf('teal|'));
-    expect(effort.indexOf('Set reasoning effort')).toBe(model.indexOf('Switch model'));
-    expect(model.indexOf('Switch model')).toBe(theme.indexOf('Switch color theme'));
+    expect(model).not.toContain('[name]');
+    expect(effort.indexOf('low|')).toBe(theme.indexOf('teal|'));
+    expect(effort.indexOf('Set reasoning effort')).toBe(model.indexOf('Open model selector'));
+    expect(model.indexOf('Open model selector')).toBe(theme.indexOf('Switch color theme'));
   });
 
   test('renders mode values without a misleading slash and marks active state', () => {
@@ -134,5 +133,37 @@ describe('SlashSuggestionOverlay', () => {
     expect(frame).toContain('❯ full');
     expect(frame).toContain('完全自主，全部放行，不询问用户');
     expect(frame).toContain('当前未在沙箱环境开启');
+  });
+
+  test('scrolls a long command list to keep the selected command visible', () => {
+    const suggestion: SlashSuggestionData = {
+      kind: 'command',
+      partial: '',
+      selectedIndex: 7,
+      items: Array.from({ length: 8 }, (_, index) => ({
+        command: `command-${index}`,
+        aliases: [],
+        description: `Command ${index}`,
+      })),
+    };
+    const { lastFrame, rerender } = render(
+      <SlashSuggestionOverlay suggestion={suggestion} maxVisibleItems={3} width={88} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('8 / 8');
+    expect(frame).toContain('❯ /command-7');
+    expect(frame).not.toContain('/command-0');
+
+    rerender(
+      <SlashSuggestionOverlay
+        suggestion={{ ...suggestion, selectedIndex: 0 }}
+        maxVisibleItems={3}
+        width={88}
+      />,
+    );
+    const returnedFrame = lastFrame() ?? '';
+    expect(returnedFrame).toContain('❯ /command-0');
+    expect(returnedFrame).not.toContain('/command-7');
   });
 });

@@ -27,6 +27,11 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 能力说明并显示环境警告，默认 metadata session logging 不显示普通 mode 状态；测试同时验证 Full
 准入仍被拒绝、content logging 披露没有被普通 metadata 路径误触发。
 
+MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：列表通过“状态 + 选中行 +
+添加入口”组合确认数据已加载，详情通过操作区确认已经打开；项目审批与 OAuth 恢复分别等待
+“需要审批/稍后决定”和“需要登录/打开浏览器”。不得继续依赖旧英文标签或把题头单独当作
+列表数据、选择状态或业务操作已经就绪的回执。
+
 ## 编写规则
 
 1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。
@@ -105,7 +110,8 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
    活动输入回执后才能调用 `typeText()`；不得把非活动态的 `搜索: —` 当作可编辑输入。过滤完成后焦点仍
    属于搜索框，scenario 必须发送 Down 并取得目标 row 的 selected receipt 后才能提交。Overlay 标题中的
    `数量 / 总数` 属于 frame metadata，file query projection 必须剔除该后缀。choice row 的选中标记以
-   当前共享组件输出的 `❯` 为准。
+   当前共享组件输出的 `❯` 为准。验证搜索区布局时直接断言 `搜索: —` 后一行为空；不得用可能同时出现在
+   背景对话区的会话名称定位结果列表行。
    确实验证“某文本在时间窗内不出现”时使用 `expectTextAbsentFor()` 明示时间语义。清空输入统一
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
    普通输入使用默认 DEL 编码。只有 `typeText()` 已确认输入片段未完整交付的内部恢复路径可以显式
@@ -209,7 +215,7 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
     为每个 invocation 签发独立短时 permit，不得由全局 harness、环境变量或生产入口自动放行。
     scenario contract 会拒绝只配置 flag 或只注入 permit issuer 的半配置场景。自动重试与
     permit replay 属于 MCP policy/integration 层；不以重试为主题的 PTY 场景应配置 `retry: never`。
-19. selector 型 slash command（`/model`、`/effort`、`/theme`、`/permissions`）输入空格后，
+19. 带参数 selector 的 slash command（`/effort`、`/theme`、`/permissions`）输入空格后，
     共享输入 helper 必须等待 argument selector 的语义 frame，再发送第一个参数字符；随后仍需
     等待完整 query frame 才能按 Enter。场景不得用固定 sleep 修补 command selector 到 argument
     selector 的 React commit 竞争。argument focus 回执失败必须进入与字符交付相同的有界重试事务，
@@ -242,8 +248,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
     选中项、全部选项和 footer，其他场景至少等待该交互独有的最后一个选项或操作，再发送方向键、
     Enter 或 Escape；后续 canned continuation 还必须校验同
     `tool_call_id` 的实际选择或取消结果，不能只因问题文本可见就判定交互就绪。
-    `/mcp` 面板必须在同一 viewport 同时出现 `MCP Servers` 标题和 `Add MCP server` 操作项后，
-    才能发送 Escape 或继续断言面板行为。
+    `/mcp` 面板必须在同一 viewport 同时出现当前本地化的 `MCP 服务器` 标题和
+    `添加 MCP 服务器` 操作项后，才能发送 Escape 或继续断言面板行为。共享 Overlay footer
+    的 readiness 断言必须使用当前词汇（例如列表移动为“导航”），不得保留过时文案。
 25. 最终回答文本可见不等于上一轮已回到稳定 idle。跨轮发送新消息、slash command 或 `/exit` 前，
     场景必须等待完整 main readiness（空输入、无 loading/modal 且输出稳定）；不得把回答尾部文本
     当作下一次键盘输入已可接受的信号。
@@ -258,6 +265,9 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
     提交；Enter 选择安全默认和 Esc 都要证明持久状态未变。具有 browse/confirm 两层的 overlay
     必须证明 Esc 先返回内层而不是关闭整个面板。`/rewind` 的状态化 journey 还要同时验证文件内容、
     fork 后的 Runtime Store session 数和新会话继续回退的恢复点链，不能只依赖成功提示文本。
+29. 只为观察 selector 或补全结果而调用 `typeText()` 的场景，若不提交该输入，必须在测试结束前
+    用 `clearInput()` 显式清空并等待输入投影收敛。不得依赖 afterAll 关闭 PTY 来掩盖未收敛的
+    typed-input lifecycle；scenario contract 必须在静态扫描中拒绝这类场景。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 

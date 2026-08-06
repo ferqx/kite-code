@@ -61,14 +61,14 @@ describe('TUI PTY System — project MCP approval', () => {
     expect(existsSync(markerPath)).toBe(false);
 
     await submitCommand(tui, '/mcp', 20);
-    await waitForText(() => tui!.viewport(), 'project_stdio · ✘ approval required', 10_000);
+    await waitForText(() => tui!.viewport(), '● 需要审批', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.viewport(), 'Review server', 10_000);
+    await waitForText(() => tui!.viewport(), '审核服务器', 10_000);
     tui.write('\r');
-    await waitForText(() => tui!.viewport(), '❯ Decide later', 10_000);
+    await waitForText(() => tui!.viewport(), '❯ 稍后决定', 10_000);
     expect(existsSync(markerPath)).toBe(false);
     tui.write('\x1b[B');
-    await waitForText(() => tui!.viewport(), '❯ Approve and connect', 10_000);
+    await waitForText(() => tui!.viewport(), '❯ 批准并连接', 10_000);
     tui.write('\r');
     await waitForFile(markerPath);
     await waitForText(

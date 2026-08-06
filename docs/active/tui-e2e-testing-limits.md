@@ -72,7 +72,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 14. 测试 permit issuer 位于 `tests/tui-system/fixtures/`，只能由单个 `spawnReadyTui()` 调用显式选择。
     它不是生产授权实现，也不通过可被 workspace `.env` 伪造的环境开关启用；默认拒绝与允许
     外发必须写成不同、隔离的 test 语义。
-15. `/model`、`/effort`、`/theme`、`/permissions` 的命令前缀和参数属于两个 React 输入阶段。
+15. `/effort`、`/theme`、`/permissions` 的命令前缀和参数属于两个 React 输入阶段；`/model`
+    无参数并直接打开模型选择器。
     PTY helper 输入分隔空格后必须先观察 argument selector 的语义 frame，再发送首个参数字符；
     只在命令行看到空格或累计 transcript 中出现字符不能证明 selector handler 已完成 focus transfer。
     focus-transfer 回执超时与最终 query 回执超时使用同一完整输入重试和基线恢复语义。

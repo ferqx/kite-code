@@ -7,6 +7,7 @@ import React, {
   useReducer,
   useRef,
 } from 'react';
+import { saveModelSelection } from '@/core/config';
 import type { SandboxBackend } from '@/core/sandbox';
 import ApprovalBlock from './components/ApprovalBlock';
 import CheckpointSelector from './components/CheckpointSelector';
@@ -51,6 +52,7 @@ export interface AppProps {
   workspace?: string;
   mcpController?: McpController;
   availableModels?: import('@/core/config').AvailableModel[];
+  persistModelSelection?: (provider: string, modelName: string) => boolean;
   slashSuggestion?: import('./hooks/useSlashSuggestions').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
   onTogglePlanMode?: () => void;
@@ -90,6 +92,8 @@ export default function App({
   provider,
   workspace = process.cwd(),
   mcpController,
+  availableModels,
+  persistModelSelection = saveModelSelection,
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
@@ -125,8 +129,18 @@ export default function App({
     [dispatch],
   );
   const selectModel = useCallback(
-    (modelId: string) => dispatch({ type: 'SELECT_MODEL', modelId }),
-    [dispatch],
+    (model: import('@/core/config').AvailableModel) => {
+      const persisted = persistModelSelection(model.provider, model.name);
+      dispatch({ type: 'SELECT_MODEL', provider: model.provider, modelName: model.name });
+      if (!persisted) {
+        dispatch({
+          type: 'LOCAL_TEXT',
+          text: '模型已切换，但无法保存为下次启动的默认模型。',
+          isError: true,
+        });
+      }
+    },
+    [dispatch, persistModelSelection],
   );
   const hideSessions = useCallback(() => dispatch({ type: 'HIDE_SESSIONS' }), [dispatch]);
   const hideMcp = useCallback(() => dispatch({ type: 'HIDE_MCP' }), [dispatch]);
@@ -352,6 +366,8 @@ export default function App({
       {state.showModelSelector && (
         <ModelSelector
           currentModel={state.status.modelName}
+          currentProvider={state.status.modelProvider}
+          models={availableModels}
           onSelect={selectModel}
           onClose={hideModelSelector}
         />

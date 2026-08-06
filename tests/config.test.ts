@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { defaultConfigPath, loadAgentConfig } from '../src/core/config/index';
+import { defaultConfigPath, loadAgentConfig, saveModelSelection } from '../src/core/config/index';
 
 // 验证 loadAgentConfig 配置加载功能 / Verify loadAgentConfig configuration loading
 describe('loadAgentConfig', () => {
@@ -70,6 +70,119 @@ describe('loadAgentConfig', () => {
       expect(config.modelName).toBe('Qwen/Qwen3-Coder');
       expect(config.providerName).toBe('siliconflow');
       expect(config.providerType).toBe('openai-compatible');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('persists the selected provider and model route for the next startup', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'model-selection.jsonc');
+      writeFileSync(
+        configPath,
+        `{
+          "model": {
+            "default": { "provider": "deepseek", "name": "deepseek-v4-flash" }
+          },
+          "provider": {
+            "deepseek": {
+              "apiKey": "sk-test",
+              "models": ["deepseek-v4-flash", "deepseek-v4-pro"]
+            },
+            "opencode_go": {
+              "type": "openai-compatible",
+              "apiKey": "sk-compatible",
+              "baseURL": "https://models.example.test/v1",
+              "models": ["deepseek-v4-flash"]
+            }
+          }
+        }`,
+      );
+
+      expect(saveModelSelection('opencode_go', 'deepseek-v4-flash', configPath)).toBe(true);
+      expect(readFileSync(configPath, 'utf8')).toContain(
+        '"model": "opencode_go:deepseek-v4-flash"',
+      );
+      const restarted = loadAgentConfig({ configPath });
+
+      expect(restarted.providerName).toBe('opencode_go');
+      expect(restarted.modelName).toBe('deepseek-v4-flash');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('loads provider:model shorthand and preserves colons in the model name', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'compact-model-selection.jsonc');
+      writeFileSync(
+        configPath,
+        `{
+          "model": "ollama:qwen2.5-coder:7b",
+          "provider": {
+            "ollama": {
+              "model": "qwen2.5-coder:14b",
+              "models": ["qwen2.5-coder:7b", "qwen2.5-coder:14b"]
+            }
+          }
+        }`,
+      );
+
+      const config = loadAgentConfig({ configPath });
+      expect(config.providerName).toBe('ollama');
+      expect(config.modelName).toBe('qwen2.5-coder:7b');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('continues to load the legacy model.default object format', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'legacy-model-selection.jsonc');
+      writeFileSync(
+        configPath,
+        `{
+          "model": {
+            "default": { "provider": "ollama", "name": "legacy-local" }
+          },
+          "provider": {
+            "ollama": { "models": ["legacy-local", "fallback-local"] }
+          }
+        }`,
+      );
+
+      const config = loadAgentConfig({ configPath });
+      expect(config.providerName).toBe('ollama');
+      expect(config.modelName).toBe('legacy-local');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('ignores a persisted model route that is no longer configured', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'stale-model-selection.jsonc');
+      writeFileSync(
+        configPath,
+        `{
+          "model": {
+            "default": { "provider": "removed", "name": "removed-model" }
+          },
+          "provider": {
+            "ollama": {
+              "models": [{ "name": "local-model", "default": true }]
+            }
+          }
+        }`,
+      );
+
+      const restarted = loadAgentConfig({ configPath });
+      expect(restarted.providerName).toBe('ollama');
+      expect(restarted.modelName).toBe('local-model');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -12,7 +12,7 @@ App.tsx
 ├── hooks/          键盘、窗口、会话、MCP controller、Skill、slash command
 ├── mcp/            MCP Select 管理 overlay、ViewModel 与 controller
 ├── reducers/       AgentEvent → UI state
-├── components/     Block、审批、计划、子 Agent、模型选择
+├── components/     Block、Overlay primitives、审批、计划、子 Agent、模型选择
 └── render/         静态内容与终端输出稳定性
 ```
 
@@ -32,6 +32,10 @@ TUI 不应根据展示文本反推工具是否成功，也不能自行构造 ver
 listener warning。
 
 MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 的 list、detail、add、authenticate、project approval 和 confirm route，以及 selection、draft 和动态操作菜单都属于 App。业务键只产生 move/confirm/back，再由 controller 调用 Core retry、typed mutation、摘要决定和 auth flow；Core 不依赖 Select 或 TUI 展示类型。
+
+普通交互 Overlay 共用 `OverlayFrame` 与 `OverlayPrimitives`。Frame 统一标题、正文、可选消息、带整行分隔线的浅色非粗体快捷键及外层间距；Summary、Section、ListRow、DetailList、Message、ImpactNotice 和 EmptyState 统一内容层级。标题与正文、摘要与后续区域、分组线与组内容、问题或警告与选项、字段标题与输入行、正文与消息/快捷键之间各保留一个空白行；页面不得复制选择箭头、选中背景或用空白 Text 固定高度。副作用选择通过共享 ImpactNotice 说明直接结果和不受影响的边界。MCP 宿主保留 route/input/controller 编排，`McpViews` 只负责纯视图。完整当前 contract 见 [`../active/tui-overlay-design-system.md`](../active/tui-overlay-design-system.md)。
+
+模型选择器的展示身份是 `provider + model name`，不能仅以 model name 作为 React key、当前项或 reducer action 的标识；这样配置中的同名跨-provider route 不会被合并或误选。
 
 ## 7.3 事件渲染
 

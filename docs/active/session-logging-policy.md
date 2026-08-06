@@ -117,8 +117,12 @@ retention/migration 使用逐条 directory iterator，在固定时间与条目�
 frontend、session 内的每个观察条目都计入预算，不先把任意目录整体载入内存。只有完整扫描后
 才按 `(mtime, path)` 稳定最旧优先删除超过 retention/总容量的非活动 session；部分扫描不会
 基于局部候选执行删除。每次删除前在 session operation lock 内重验 lease 与目录 identity。
-含未知文件/link/hardlink 的 session 移入 owner-only `_quarantine`，并使容量 admission fail
-closed，直到人工处理。扫描超预算、容量不可证明或不安全存储存在时，新 writer 不建立。
+含未知文件/link/hardlink 的 session 原子移入 sessions root 之外的 owner-only
+`sessions-quarantine` 恢复区；迁移本身不遍历、不删除隔离内容，完整扫描仍可证明受管 root 容量时
+允许新 writer 建立。旧版 root 内 `_quarantine` 首次 maintenance 整体原子迁出，避免隔离数据
+超过扫描预算后永久自锁；macOS 自动生成在 root 或 frontend 层的 `.DS_Store` 同样移入恢复区。
+其他未知 root/frontend 条目、扫描超预算、容量不可证明或隔离迁移失败仍 fail closed，新 writer 不建立。恢复区不属于
+session retention 自动删除范围，需要人工审计或清理。
 POSIX maintenance 默认时间预算为 50ms；Windows 因 owner-only ACL 需要启动系统 PowerShell，
 默认使用 30 秒预算。两者都保留 512 个观察条目的独立硬上限，显式配置可进一步收紧预算。
 
@@ -130,8 +134,13 @@ POSIX maintenance 默认时间预算为 50ms；Windows 因 owner-only ACL 需要
 
 归档的 `2026-06-18-session-logger.md` 只记录旧实现历史，其中“全量本地日志”的结论不再代表
 当前行为。Phase 1A 迁移先收紧可识别旧目录和文件的 owner-only 权限，再按本节 lease、容量与
-retention 规则接管；存在未知条目、link/hardlink、损坏 lease 或无法证明完整扫描时只隔离并
-拒绝建立新 writer，不读取或复制旧正文，也不把旧全量 serializer 作为兼容 fallback。
+retention 规则接管；session 内未知条目、link/hardlink 只做可恢复隔离，不读取或复制旧正文；
+损坏 lease、未知 root 条目或无法证明完整扫描时拒绝建立新 writer，也不把旧全量 serializer
+作为兼容 fallback。
+
+默认测试 runner 同时隔离 `HOME` 与 `KITE_CODE_HOME`。直接执行 session writer 定向测试时，
+测试文件自身也必须创建并清理临时 `KITE_CODE_HOME`，不得依赖 runner 包装层，避免开发者的真实
+`~/.kite-code/sessions` 被测试 session 污染。
 
 单 session 使用 UTF-8 byte 计数；达到 `maxSessionBytes` 时最多写一条无正文
 `session.logging_limited` metadata，停止后续记录，并为 bounded terminal marker 预留空间。
