@@ -56,8 +56,28 @@ import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } f
 let _sessionManagerForExit: SessionManager | null = null;
 let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
-function resolveModelForResume(currentConfig: AgentConfig, persistedModelName: string): string {
-  return persistedModelName || currentConfig.modelName;
+function resolveConfigForResume(
+  currentConfig: AgentConfig,
+  persistedProvider: string,
+  persistedModelName: string,
+): AgentConfig {
+  if (!persistedProvider || !persistedModelName) return currentConfig;
+  try {
+    return loadAgentConfig({
+      providerName: persistedProvider,
+      modelName: persistedModelName,
+    });
+  } catch {
+    return currentConfig;
+  }
+}
+
+function hasModelConversation(state: import('./types').TuiState): boolean {
+  return state.turns.some((turn) =>
+    turn.blocks.some(
+      (block) => block.kind === 'user' && !block.content.trimStart().startsWith('/'),
+    ),
+  );
 }
 
 export interface TuiBootstrapProps {
@@ -509,7 +529,12 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           return;
         }
 
-        const modelName = resolveModelForResume(config, result.modelName);
+        const resumedConfig = resolveConfigForResume(
+          sessionManager.getDefaultConfig(),
+          result.modelProvider,
+          result.modelName,
+        );
+        sessionManager.setSessionConfig(threadId, resumedConfig);
         const thinkingLevel = result.thinkingLevel ?? 'max';
         thinkingLevelRef.current = thinkingLevel;
 
@@ -520,14 +545,16 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           blocks,
           interrupt,
           pendingToolCalls,
-          modelProvider: result.modelProvider,
-          modelName,
+          modelProvider: resumedConfig.providerName,
+          modelName: resumedConfig.modelName,
           thinkingLevel,
         });
-        const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
-        if (loadGenerationRef.current !== gen) return;
-        if (contextSnapshot) {
-          dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
+        if (result.runtimeEvents.some((event) => event.type === 'user.message_appended')) {
+          const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
+          if (loadGenerationRef.current !== gen) return;
+          if (contextSnapshot) {
+            dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
+          }
         }
       } catch (e: any) {
         if (loadGenerationRef.current !== gen) return;
@@ -549,7 +576,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         });
       }
     },
-    [dispatch, config, sessionManager, workspace],
+    [dispatch, sessionManager, workspace],
   );
 
   const dispatchSessionLoad = React.useCallback(
@@ -585,6 +612,33 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       }
       if (action.type === 'EXECUTE_REWIND') {
         void dispatchTuiRewindRequest(dispatch, action, runRewindRef.current);
+        return;
+      }
+      if (action.type === 'SELECT_MODEL') {
+        try {
+          const selectedConfig = loadAgentConfig({
+            providerName: action.provider,
+            modelName: action.modelName,
+          });
+          const threadId = sessionManager.getActiveId();
+          sessionManager.setSessionConfig(threadId, selectedConfig, {
+            persist: true,
+            asDefault: true,
+          });
+          dispatch(action);
+          if (hasModelConversation(stateRef.current)) {
+            const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
+            if (contextSnapshot) {
+              dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
+            }
+          }
+        } catch (error) {
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: `无法切换模型：${error instanceof Error ? error.message : String(error)}`,
+            isError: true,
+          });
+        }
         return;
       }
       // ── 多会话：SWITCH_SESSION 拦截，缓冲回放 ──
@@ -832,11 +886,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
   const activeSelections = React.useMemo(
     () => ({
       theme: themePreset,
-      model: state.status.modelName,
       interactionMode: state.interactionMode,
       sandboxBackend,
     }),
-    [themePreset, state.status.modelName, state.interactionMode, sandboxBackend],
+    [themePreset, state.interactionMode, sandboxBackend],
   );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
@@ -902,7 +955,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           {
             dispatch,
             provider,
-            config,
+            config: rt.config,
             model: injectModel,
           },
           requestedPhase,
@@ -945,7 +998,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         })();
       }
     },
-    [provider, config, dispatch, sessionManager, injectModel],
+    [provider, dispatch, sessionManager, injectModel],
   );
   // Keep ref in sync so slash-command bridge can invoke latest runTask
   runTaskRef.current = runTask;

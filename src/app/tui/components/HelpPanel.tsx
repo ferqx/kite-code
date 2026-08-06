@@ -6,6 +6,7 @@ import type { SandboxBackend } from '@/core/sandbox';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { SLASH_COMMAND_DEFS } from '../public-surface';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
+import { OverlaySection } from './OverlayPrimitives';
 
 interface HelpPanelProps {
   onClose: () => void;
@@ -101,16 +102,14 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
         />
       }
     >
-      <Box marginTop={1} flexGrow={1} maxHeight={maxContentHeight}>
+      <Box flexGrow={1} maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={scrollOffset} scrollAlignment="auto">
           {flatRows.map((row, i) => {
             if (row.type === 'header') {
               return (
-                <Box key={row.id} marginTop={i === 0 ? 0 : 1}>
-                  <Text bold color={t.warning}>
-                    {row.title}
-                  </Text>
-                </Box>
+                <OverlaySection key={row.id} first={i === 0}>
+                  {row.title}
+                </OverlaySection>
               );
             }
             return (

@@ -399,7 +399,10 @@ export function collectSourceOwnedQualificationSurfacesV1(
     );
   }
 
-  const configSchemaJson = jsonSnapshot(z.toJSONSchema(configSchema));
+  // Snapshot the source-owned on-disk configuration contract. Runtime parsing
+  // may canonically decode fields such as model routes, which is intentionally
+  // not a second diagnostic schema or a lossy `unrepresentable: 'any'` view.
+  const configSchemaJson = jsonSnapshot(z.toJSONSchema(configSchema, { io: 'input' }));
   for (const entry of configSchemaPointers(configSchemaJson)) {
     const sourceSurfaceId = `config-schema:${entry.pointer.replaceAll('*', 'wildcard')}`;
     surfaces.push(

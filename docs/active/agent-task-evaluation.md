@@ -67,10 +67,12 @@ ADR-0070 的 AQ-1 已增加 `AgentFeatureQualificationSpecV1` 和由 source owne
 当前 G0/G1、现有 DeepSeek 和 Qwen `qwen3.6-flash` G1 smoke 的语义及唯一发布权威均不改变。
 
 - generator 位于 `release/qualification/source-owned-surface-v1.ts`，只投影真实 Builtin Tool registry、
-  Feature Flag 定义、递归 `configSchema` JSON pointer、CLI command/option 声明、TUI data-only command surface、
+  Feature Flag 定义、递归 `configSchema` **input-side** JSON pointer、CLI command/option 声明、TUI data-only command surface、
   Release Profile/capability/target，以及 owning module 相邻 `@qualification-surface-v1` JSDoc 声明的公开
   operation。collector 只发现、校验并投影这些声明，不维护第二份 operation map；annotation 必须紧邻真实 AST
-  declaration，source fragment 也必须解析到 AST declaration。公共文档不使用 qualification-side 路径清单：
+  declaration，source fragment 也必须解析到 AST declaration。对于会把 on-disk config 规范化为 runtime output 的
+  source-owned Zod codec，Matrix 只快照同一 codec 的 input side，不使用 `unrepresentable: 'any'`、输出侧或平行 schema；
+  因而 compact model route 与 legacy object form 都保持可审计的输入约束。公共文档不使用 qualification-side 路径清单：
   root `README.md` 加全部 `docs/active/**/*.md` 和 `docs/book/**/*.md` 都由固定的公开文档发现契约生成通用
   disclosure surface；缺文件、symlink 或仓库外路径均 fail closed。source owner 的增删、默认值、schema、实际
   profile ceiling、public declaration、公共文档或 suite identity 漂移都会改变 digest。

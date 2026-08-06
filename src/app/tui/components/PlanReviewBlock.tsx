@@ -141,7 +141,7 @@ export default function PlanReviewBlock({
           shortcuts={
             mode === 'options'
               ? [
-                  { keys: '↑↓', label: '选择' },
+                  { keys: '↑↓', label: '导航' },
                   { keys: 'Enter', label: '确认' },
                   { keys: 'Esc', label: '取消' },
                 ]
@@ -155,7 +155,7 @@ export default function PlanReviewBlock({
     >
       {mode === 'options' ? (
         <>
-          <Box marginTop={1}>
+          <Box>
             <Text color={t.primary}>请审核上方方案并选择后续操作：</Text>
           </Box>
           <Box marginTop={1}>

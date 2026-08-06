@@ -52,9 +52,9 @@ Resource directory 从 Manager 最近成功的 `resources/list` 缓存投影，�
 
 ## TUI 行为
 
-`/mcp` 只接受无参数形式并打开 Select 管理 Overlay。Server List 过滤 effective Server，并固定追加 Add MCP server；列表只负责 selection/navigation，Enter 打开只读 Server Detail 或 Add flow。带参数的 `/mcp ...` 仍作为 unknown command，动态 `/mcp__<server>__<prompt>` 不受影响。MCP 管理 Overlay 的题头只显示当前标题（如 `── MCP Servers ──`），不得重复会话 Header 已展示的 `Kite Code` 品牌。
+`/mcp` 只接受无参数形式并打开 Select 管理 Overlay。Server List 过滤 effective Server，并固定追加 Add MCP server；标题右侧显示当前位置，总量与配置范围形成页级摘要，随后按项目/用户分组。名称与带语义色的连接状态位于同一主行，配置路径和 Tool 数量位于次级行，列表只负责 selection/navigation，Enter 打开只读 Server Detail 或 Add flow。带参数的 `/mcp ...` 仍作为 unknown command，动态 `/mcp__<server>__<prompt>` 不受影响。MCP 管理 Overlay 的题头只显示当前标题（如 `── MCP 服务器 ──`），不得重复会话 Header 已展示的 `Kite Code` 品牌。`McpOverlay` 保留 snapshot、route、input 和 controller 编排，纯 list/detail/form/confirm 视图位于 `McpViews` 并使用统一 Overlay primitive。
 
-Detail 从 control snapshot 展示 name、主状态、transport、source label、auth、tool count、项目审批的脱敏 command/origin 和 typed diagnostic。它不展示 raw config、env/header value、完整 OAuth URL/query、token 或 raw error。操作菜单由 configStatus、authStatus、health 和 diagnostic 派生，覆盖 connect/reconnect/retry、authenticate、enable/disable、remove、project review 和 back；connecting/discovering 期间只允许 back，后台工作不因离开详情而取消。
+Detail 以 Server 名称为标题，依次展示主状态、transport、capability 汇总和配置位置，再进入独立的操作分组；项目审批仍只展示脱敏 command/origin 和 typed diagnostic。它不展示 raw config、env/header value、完整 OAuth URL/query、token 或 raw error。操作菜单由 configStatus、authStatus、health 和 diagnostic 派生，覆盖 connect/reconnect/retry、authenticate、enable/disable、remove、project review 和 back；connecting/discovering 期间只允许 back，后台工作不因离开详情而取消。disable/remove 等破坏性确认使用 warning callout、危险色动作和默认选中的取消项。
 
 MCP 业务输入只使用 Up/Down、Enter、Esc 和 Add 文本字段，不使用 `A/L/R/D/Space/C/Y/N` 功能键。list、detail 和通用 Select 分别维护稳定 option/server id；snapshot 变化保持原选择，目标消失时返回列表。disable/remove/project review 使用安全默认确认。
 

@@ -1,13 +1,16 @@
 // tests/session-logger/writer.test.ts
 // 验证 SessionLogWriter 写入 → finalize → 文件内容完整性
 
-import { afterEach, describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { sessionLogDir } from '@/core/config/paths';
 
 const TEST_FRONTEND = 'test';
 const TEST_THREAD = 'test-session-logger-writer';
+const originalHome = process.env.KITE_CODE_HOME;
+let isolatedHome = '';
 
 function testDir(): string {
   return sessionLogDir(TEST_FRONTEND, TEST_THREAD);
@@ -21,7 +24,18 @@ function cleanup() {
 }
 
 describe('SessionLogWriter', () => {
+  beforeAll(() => {
+    isolatedHome = mkdtempSync(join(tmpdir(), 'kite-code-writer-test-'));
+    process.env.KITE_CODE_HOME = isolatedHome;
+  });
+
   afterEach(cleanup);
+
+  afterAll(() => {
+    if (originalHome == null) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = originalHome;
+    if (isolatedHome) rmSync(isolatedHome, { recursive: true, force: true });
+  });
 
   test('单条写入 + finalize 后文件内容正确', async () => {
     // 动态导入以隔离模块状态

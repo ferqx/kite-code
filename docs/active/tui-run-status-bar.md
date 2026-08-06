@@ -118,4 +118,4 @@ Runtime v19 的新终态通过共享 `projectTerminalOutcomeV1` 投影。TUI 只
 避免全局运行/模型状态和当前阻塞决策形成两条竞争底栏。统计数据继续保存在 State 中，
 interrupt 结束后恢复展示，不得因临时隐藏而重置 cache、context 或 token 数。
 
-进入或切换历史会话时，App 必须从恢复后的 RuntimeState、active checkpoint 和当前 projection environment 本地重建一次 `ContextStatusSnapshot`；该过程不得调用 Provider。重建只替换 Footer 的 context snapshot，不重置或改写持久化的累计 cache hit/miss 与 usage 统计。若工具、MCP 或 Skill 环境随后变化，下一次标准 `model.context_metrics` 继续以 fresh projection 覆盖该快照。
+进入或切换已有真实用户对话的历史会话时，App 必须从恢复后的 RuntimeState、active checkpoint 和当前 projection environment 本地重建一次 `ContextStatusSnapshot`；该过程不得调用 Provider。只包含 slash command 或没有 `user.message_appended` 的空会话不生成快照，避免把 system prompt 和工具目录估算显示成已有上下文。重建只替换 Footer 的 context snapshot，不重置或改写持久化的累计 cache hit/miss 与 usage 统计。若工具、MCP 或 Skill 环境随后变化，下一次标准 `model.context_metrics` 继续以 fresh projection 覆盖该快照。

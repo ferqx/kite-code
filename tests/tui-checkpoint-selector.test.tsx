@@ -87,6 +87,7 @@ describe('CheckpointSelector', () => {
     expect(confirmFrame).toContain('❯ 恢复代码和会话');
     expect(confirmFrame).toContain('仅恢复会话');
     expect(confirmFrame).toContain('仅恢复代码');
+    expect(confirmFrame).toContain('将创建新会话并恢复已记录的工作区文件。当前会话会保留。');
     expect(confirmFrame).not.toContain('返回检查点列表');
     expect(layeredEscRef.current).toBe(true);
 

@@ -524,7 +524,7 @@ describe('source-owned Agent Feature Matrix', () => {
       expect(sourceIds.has(`config-schema:/features/${flag}`)).toBe(true);
     }
     const expectedConfigIds = new Set(
-      configSchemaPointers(z.toJSONSchema(configSchema)).map(
+      configSchemaPointers(z.toJSONSchema(configSchema, { io: 'input' })).map(
         ({ pointer }) => `config-schema:${pointer.replaceAll('*', 'wildcard')}`,
       ),
     );

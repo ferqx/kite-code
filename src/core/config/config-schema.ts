@@ -38,6 +38,49 @@ const legacyModelEntrySchema = z.object({
 });
 
 const interactionModeSchema = z.enum(['accept_edits', 'auto', 'full']);
+const modelRouteObjectSchema = z
+  .object({
+    provider: z.string().trim().min(1),
+    name: z.string().trim().min(1),
+  })
+  .strict();
+const compactModelRouteSchema = z
+  .string()
+  .trim()
+  .regex(/^[^:]+:[\s\S]+$/, 'Expected model route in provider:model format');
+const modelRouteInputSchema = z.union([compactModelRouteSchema, modelRouteObjectSchema]);
+const modelSelectionInputSchema = z.union([
+  compactModelRouteSchema,
+  z.object({ default: modelRouteInputSchema }).strict(),
+]);
+const modelSelectionOutputSchema = z.object({ default: modelRouteObjectSchema }).strict();
+
+function decodeModelRoute(
+  value: z.input<typeof modelRouteInputSchema>,
+): z.output<typeof modelRouteObjectSchema> {
+  if (typeof value !== 'string') return value;
+  const separator = value.indexOf(':');
+  return {
+    provider: value.slice(0, separator).trim(),
+    name: value.slice(separator + 1).trim(),
+  };
+}
+
+/**
+ * One source-owned codec covers the on-disk `provider:model` shorthand and
+ * legacy object form while exposing the canonical route to runtime callers.
+ * Qualification snapshots its JSON-Schema input side, never a hand-maintained
+ * parallel config surface.
+ */
+const modelSelectionSchema = z
+  .codec(modelSelectionInputSchema, modelSelectionOutputSchema, {
+    decode: (value) =>
+      typeof value === 'string'
+        ? { default: decodeModelRoute(value) }
+        : { default: decodeModelRoute(value.default) },
+    encode: (value) => value,
+  })
+  .optional();
 const sandboxSchema = z
   .object({
     enabled: z.boolean().optional(),
@@ -79,6 +122,8 @@ const telemetryConfigSchema = z
 /** Narrow config schema module: safe for diagnostic inventory imports. */
 export const configSchema = z.object({
   provider: z.record(z.string(), providerSchema).optional().default({}),
+  /** Last model route explicitly selected by the user. */
+  model: modelSelectionSchema,
   /** @deprecated Use provider[name].models instead */
   models: z.array(legacyModelEntrySchema).optional(),
   theme: z.enum(['dark', 'light']).optional(),

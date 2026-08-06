@@ -257,7 +257,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
             screenContains(viewport, '❯ 允许一次') &&
             screenContains(viewport, '本次会话允许') &&
             screenContains(viewport, '拒绝') &&
-            screenContains(viewport, '↑↓ 选择  Enter 确认  Esc 取消')
+            screenContains(viewport, '↑↓ 导航  Enter 确认  Esc 取消')
           );
         },
         'complete approval modal to become interactive',

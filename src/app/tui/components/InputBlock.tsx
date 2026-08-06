@@ -135,7 +135,7 @@ function SingleQuestion({
           shortcuts={
             mode === 'select'
               ? [
-                  { keys: '↑↓', label: '选择' },
+                  { keys: '↑↓', label: '导航' },
                   { keys: 'Enter', label: '确认' },
                   ...(hasCustom ? [{ keys: 'Tab', label: '自定义输入' }] : []),
                   { keys: 'Esc', label: '取消' },
@@ -149,7 +149,7 @@ function SingleQuestion({
         />
       }
     >
-      <Box marginTop={1} flexDirection="column">
+      <Box flexDirection="column">
         <Text bold color={t.primary}>
           ? {question.question}
         </Text>
@@ -157,7 +157,7 @@ function SingleQuestion({
       </Box>
 
       {mode === 'select' && options.length > 0 ? (
-        <Box marginTop={1} flexDirection="column">
+        <Box flexDirection="column" marginTop={1}>
           <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
         </Box>
       ) : (
@@ -474,7 +474,7 @@ function MultiQuestionWizard({
           shortcuts={
             mode === 'select'
               ? [
-                  { keys: '↑↓', label: '选择' },
+                  { keys: '↑↓', label: '导航' },
                   { keys: 'Enter', label: step < total - 1 ? '下一题' : '提交' },
                   ...(hasCustom ? [{ keys: 'Tab', label: '自定义输入' }] : []),
                   { keys: 'Esc', label: step > 0 ? '上一题' : '取消' },
@@ -489,7 +489,7 @@ function MultiQuestionWizard({
       }
     >
       {/* 主问题 + 上下文 / Main question + context */}
-      <Box marginTop={1} flexDirection="column">
+      <Box flexDirection="column">
         <Text bold color={t.primary}>
           ? {question.question}
         </Text>
@@ -506,21 +506,23 @@ function MultiQuestionWizard({
         <Text color={t.primary}>{cur.question}</Text>
         <Text color={t.dim}>{'─'.repeat(40)}</Text>
 
-        {mode === 'select' && options.length > 0 ? (
-          <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
-        ) : (
-          <Box flexDirection="column">
-            <Box>
-              <Text color={t.primary}>{'> '}</Text>
-              <TextInput
-                value={freeText}
-                onChange={setFreeText}
-                onSubmit={handleFreeSubmit}
-                placeholder="type your answer..."
-              />
+        <Box marginTop={1} flexDirection="column">
+          {mode === 'select' && options.length > 0 ? (
+            <OverlayChoiceList options={choiceOptions} selectedId={String(selected)} />
+          ) : (
+            <Box flexDirection="column">
+              <Box>
+                <Text color={t.primary}>{'> '}</Text>
+                <TextInput
+                  value={freeText}
+                  onChange={setFreeText}
+                  onSubmit={handleFreeSubmit}
+                  placeholder="type your answer..."
+                />
+              </Box>
             </Box>
-          </Box>
-        )}
+          )}
+        </Box>
       </Box>
     </OverlayFrame>
   );

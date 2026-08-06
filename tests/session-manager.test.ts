@@ -147,6 +147,10 @@ describe('SessionManager', () => {
           grant: 'approve_once',
         },
       ]);
+      store.setSessionModelRoute(threadId, {
+        provider: 'ollama',
+        name: 'qwen2.5-coder:7b',
+      });
     } finally {
       store.close();
     }
@@ -154,9 +158,49 @@ describe('SessionManager', () => {
     try {
       const restored = await loadSession(checkpointPath, threadId);
       expect(restored?.interrupt).toBeNull();
+      expect(restored?.modelProvider).toBe('ollama');
+      expect(restored?.modelName).toBe('qwen2.5-coder:7b');
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  test('keeps model configurations isolated per session while updating new-session default', () => {
+    const deps = makeDeps();
+    deps.config = {
+      ...deps.config,
+      providerName: 'deepseek',
+      modelName: 'deepseek-v4-flash',
+    };
+    const mgr = new SessionManager(deps);
+    const firstId = mgr.createSession('/tmp/ws');
+    const selected = {
+      ...deps.config,
+      providerName: 'ollama',
+      modelName: 'qwen2.5-coder:7b',
+    };
+    expect(mgr.setSessionConfig(firstId, selected, { asDefault: true })).toBe(true);
+
+    const secondId = mgr.createSession('/tmp/ws');
+    const secondOnly = {
+      ...deps.config,
+      providerName: 'opencode_go',
+      modelName: 'deepseek-v4-pro',
+    };
+    expect(mgr.setSessionConfig(secondId, secondOnly)).toBe(true);
+
+    expect(mgr.getRuntime(firstId)?.config).toMatchObject({
+      providerName: 'ollama',
+      modelName: 'qwen2.5-coder:7b',
+    });
+    expect(mgr.getRuntime(secondId)?.config).toMatchObject({
+      providerName: 'opencode_go',
+      modelName: 'deepseek-v4-pro',
+    });
+    expect(mgr.getDefaultConfig()).toMatchObject({
+      providerName: 'ollama',
+      modelName: 'qwen2.5-coder:7b',
+    });
   });
 
   test('queues manual compaction through a live Kernel control plane', async () => {

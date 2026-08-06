@@ -149,6 +149,10 @@ describe('TUI PTY System — Slash Commands', () => {
         10_000,
       );
       expect(screenContains(tui.viewport(), '搜索: —')).toBe(true);
+      const selectorLines = stripAnsi(tui.viewport()).split('\n');
+      const searchRow = selectorLines.findIndex((line) => line.includes('搜索: —'));
+      expect(searchRow).toBeGreaterThanOrEqual(0);
+      expect(selectorLines[searchRow + 1]?.trim()).toBe('');
 
       tui.write('\x1b[A');
       await waitForText(() => tui.viewport(), '❯ 搜索:', 5_000);
@@ -181,7 +185,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await submitCommand(tui, '/model');
       await waitForText(() => tui.viewport(), 'mock-model', 10_000);
-      expect(screenContains(tui.viewport(), 'default')).toBe(true);
+      expect(screenContains(tui.viewport(), 'default')).toBe(false);
       tui.write('\x1b');
       await waitForTuiReady(tui);
     },
@@ -228,6 +232,25 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
+    'a scrolled command palette can navigate back to its first command',
+    async () => {
+      tui.resize(120, 16);
+      await typeText(tui, '/');
+      await waitForText(() => tui.viewport(), '1 / 17', 10_000);
+
+      for (let index = 0; index < 16; index++) tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '17 / 17', 10_000);
+      expect(screenContains(tui.viewport(), '/exit')).toBe(true);
+
+      for (let index = 0; index < 16; index++) tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), '1 / 17', 10_000);
+      expect(screenContains(tui.viewport(), '/effort')).toBe(true);
+      await clearInput(tui, 1);
+    },
+    TIMEOUT,
+  );
+
+  test(
     '/mcp opens the server panel and Esc closes it',
     async () => {
       await submitCommand(tui, '/mcp');
@@ -235,7 +258,7 @@ describe('TUI PTY System — Slash Commands', () => {
         () => {
           const viewport = tui.viewport();
           return (
-            screenContains(viewport, 'MCP Servers') && screenContains(viewport, 'Add MCP server')
+            screenContains(viewport, 'MCP 服务器') && screenContains(viewport, '添加 MCP 服务器')
           );
         },
         'MCP server panel actions to become visible',

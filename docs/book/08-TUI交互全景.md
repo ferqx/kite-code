@@ -36,6 +36,8 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 工具授权、用户提问和方案审核可见时，Footer 暂时隐藏模型、思考级别、cache、context/token
 和权限模式等全局状态，只保留当前交互与快捷键；交互结束后按最新状态恢复，统计数据不重置。
 
+交互 Overlay 使用统一四区骨架和词汇：列表移动为“导航”，列表进入子页为“打开”，操作菜单为“选择”，产生决定或副作用为“确认”，多步表单推进为“继续”，子页退出为“返回”，根 Overlay 退出为“关闭”。标题、摘要、分组、问题/警告、字段标题、正文、选项、输入行、消息和快捷键之间的区域间距由共享 contract 统一约束；所有快捷键提示统一使用浅色非粗体文本，页面不得用空白 `Text` 修补。业务取消仍明确显示“取消”，不能用“关闭”掩盖审批拒绝、问答取消或 turn 中止语义。
+
 Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根据当前交互类型显式处理。工具审批或 plan review 被拒绝/取消时，Runtime 取消尚未终结的 sibling 与正在执行的调用，写入 `turn.aborted(cause=user)`，本轮不再调用模型；`ask_user` 的 Esc 只形成该工具的取消结果，模型可以在同一 turn 继续。
 
 ## 8.3 斜杠命令
@@ -43,6 +45,8 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。
 
 内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/sessions`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions` 的显式参数是 `accept_edits|auto|full`。没有沙箱后端时，`full` 仍显示正常能力说明并允许光标选中，同时以红色文案提示“当前未在沙箱环境开启”；确认后仍由授权准入拒绝，不能切换到 Full。
+
+模型选择器以 provider 与 model name 的组合区分 route；选择器将 provider 作为使用独立 accent 色的加粗标题行，并与 model name 文本列对齐；标题与首项紧邻，不同分组之间留一行间距，模型行不重复 provider 或显示 `default`。`/model` 不接受模型名参数，确认命令后始终打开该选择器，由用户明确选择 provider 与 model；选择结果绑定到当前会话，并以 `model: "provider:model name"` 简写写入用户配置作为新会话默认值。切换或恢复会话时还原各自 route；空会话切换模型不显示系统提示或工具目录产生的 context token 估算，新会话清空上一会话的 context snapshot。加载用户配置时仍兼容旧 `model.default` 对象格式。
 
 `/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“管理 MCP Server”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令，管理动作只在 Overlay 的可见 Select 中执行。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
 
@@ -56,14 +60,14 @@ Sigstore、平台 qualification 或 production Gate 证据。
 
 ## 8.4 Session 与恢复点
 
-会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
+会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。会话选择器把搜索行作为独立区域，与紧凑的结果列表之间保留一个空白行；删除确认在选项下方动态说明会删除的本地会话范围及不会删除的工作区文件。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
 
 `/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无参数连续压缩直接提示 `No new messages to compact.`，不再次调用摘要模型，显式自定义指令仍可重写已有 narrative。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 
 `/rewind` 使用“选择边界 → 确认范围”两阶段面板。列表以恢复点之后的第一条用户消息描述
 “发送这条消息之前”，显示消息摘要、绝对时间和已记录文件数，不暴露 event / snapshot ID。
-Enter 只进入确认层；确认层默认选择“返回检查点列表”，并提供“恢复代码和会话”
-“仅恢复会话”“仅恢复代码”。会话恢复统一 fork 新 thread 并保留源会话；代码恢复按文件
+Enter 只进入确认层；确认层默认选择“恢复代码和会话”，并提供“仅恢复会话”“仅恢复代码”。
+当前范围下方动态说明会创建或保留的会话及工作区代码边界。会话恢复统一 fork 新 thread 并保留源会话；代码恢复按文件
 原像修改共享工作区，当时不存在的文件删除。单个文件失败会逐个提示；手动或 Bash 修改
 同一路径后，当前内容不再匹配 Kite 最后写入指纹，恢复会跳过该路径并提示冲突。缺少后像
 指纹的旧记录同样不会盲目覆盖。Fork 会保留选中边界及其之前的恢复点，因此进入恢复出的
@@ -81,15 +85,15 @@ TUI 的 token stats 连接与 RuntimeStore 共用同一数据库时必须采用 
 
 ## 8.5 MCP 与 Skill 交互
 
-MCP Overlay 订阅 Core control snapshot。Server List 只显示 effective Server、状态和 Add 入口，只负责 selection/navigation；Enter 打开只读 Detail，操作菜单按 config/auth/health/diagnostic 动态生成。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
+MCP Overlay 订阅 Core control snapshot。Server List 按“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加入口 → 分隔后的快捷键”展示 effective Server；名称与带语义色的连接状态位于同一主行，配置路径与 capability 数量位于次级行。Enter 打开只读 Detail，先展示状态、传输方式、能力和配置位置，再展示按 config/auth/health/diagnostic 动态生成的操作区。操作区在普通连接动作与禁用/移除组之间留一行，并在选项下方动态说明连接中断、配置保留、认证隐私或远程数据不受影响等边界。工具子页以工具数量和 Server 名称组成摘要，摘要与编号列表间留一行，选择前缀不改变编号列对齐。所有 MCP 业务流程统一使用 `↑/↓/Enter/Esc`，不使用 `A/L/R/D/Space` 等功能键。模型可调用能力仍来自 revisioned catalog/binding，而不是 UI 选中状态。
 
-项目 Server 尚未批准时出现在 `/mcp` 的 Approval required 状态行。Detail 的 Review server 进入脱敏审批页，默认选择 Decide later，并提供 Approve and connect 与 Reject server；决定继续绑定当前 config digest 并执行 TOCTOU 复核。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
+项目 Server 尚未批准时出现在 `/mcp` 的“需要审批”状态行。Detail 的“审核服务器”进入脱敏审批页，默认选择“稍后决定”，并提供“批准并连接”与“拒绝服务器”；决定继续绑定当前 config digest 并执行 TOCTOU 复核。批准属于 MCP control plane，不是任务 Runtime Tool Approval。
 
-HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，Detail 提供 Authenticate。认证页只有选择 Open browser 才启动 loopback callback 并调用系统 browser opener；authorizing 时 Esc/Cancel authentication 取消当前 flow。页面不显示 token、scope、authorization code 或 secret，成功认证只影响后续 discovery 与新 model turn，不重放旧 Tool Call。
+HTTP Server 真实进入 `login_required` 或 `reauth_required` 时，Detail 提供“认证”。认证页只有选择“打开浏览器”才启动 loopback callback 并调用系统 browser opener；authorizing 时 Esc/“取消认证”取消当前 flow。页面不显示 token、scope、authorization code 或 secret，成功认证只影响后续 discovery 与新 model turn，不重放旧 Tool Call。
 
 开启 `mcpProviderActionV1` 后，Runtime 可在 Tool 失败后请求固定的 Login、Approve 或 Retry Provider Action。TUI 复用既有 input interrupt 收集决定并委托 MCP controller；成功恢复只开始新 turn，Later 或恢复失败都不会重放旧 Tool Call。新任务首次模型调用前还会对 unavailable required Provider 逐个显示 Retry、Session Waive 或 Cancel Run，waiver 只解除当前 session 的准入门禁。
 
-Add Wizard 只收集 transport、name、URL/command 和 availability：Current project 写 `<project>/.kite-code/mcp.json`，All projects 写 `~/.kite-code/mcp.json`。Detail 可 retry/reconnect、enable/disable 和 remove；disable/remove 使用安全默认确认，remove 同时尝试清理对应本地 OAuth credential。高级配置、legacy migrate、Tool policy 和手动 reload 不进入 TUI。
+Add Wizard 只收集 transport、name、URL/command 和 availability；选择式步骤的问题与首个选项之间保留一个空白行，选项组内部保持紧凑。Current project 写 `<project>/.kite-code/mcp.json`，All projects 写 `~/.kite-code/mcp.json`。Detail 可 retry/reconnect、enable/disable 和 remove；disable/remove 使用安全默认确认，remove 同时尝试清理对应本地 OAuth credential。高级配置、legacy migrate、Tool policy 和手动 reload 不进入 TUI。
 
 Skill 命令触发正式 activation，不能把 SKILL.md 正文直接拼接到用户任务。
 

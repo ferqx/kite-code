@@ -44,15 +44,15 @@ describe('TUI PTY System — MCP Select management', () => {
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
 
     await submitCommand(tui, '/mcp', 20);
-    await waitForText(() => tui!.viewport(), 'MCP Servers', 15_000);
-    await waitForText(() => tui!.viewport(), 'fixture · ✔ connected', 15_000);
-    expect(screenContains(tui.viewport(), 'Add MCP server')).toBe(true);
+    await waitForText(() => tui!.viewport(), 'MCP 服务器', 15_000);
+    await waitForText(() => tui!.viewport(), '● 已连接', 15_000);
+    expect(screenContains(tui.viewport(), '＋ 添加 MCP 服务器')).toBe(true);
     expect(screenContains(tui.viewport(), 'echo')).toBe(false);
 
     tui.write('\r');
-    await waitForText(() => tui!.viewport(), 'Reconnect', 10_000);
-    expect(screenContains(tui.viewport(), 'Disable server')).toBe(true);
-    expect(screenContains(tui.viewport(), 'Remove server')).toBe(true);
+    await waitForText(() => tui!.viewport(), '重新连接', 10_000);
+    expect(screenContains(tui.viewport(), '禁用服务器')).toBe(true);
+    expect(screenContains(tui.viewport(), '移除服务器')).toBe(true);
     expect(screenContains(tui.viewport(), 'A Add')).toBe(false);
     expect(screenContains(tui.viewport(), 'R Retry')).toBe(false);
   }, 40_000);

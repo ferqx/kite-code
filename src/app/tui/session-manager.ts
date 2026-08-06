@@ -32,7 +32,11 @@ import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import type { RuntimeState } from '@/core/runtime/state';
 import { getActivePlanning, getActiveTask, getAgentPhase } from '@/core/runtime/state';
-import { defaultRuntimeJournalMode, runtimeStorePathFor } from '@/core/runtime/store';
+import {
+  createRuntimeStore,
+  defaultRuntimeJournalMode,
+  runtimeStorePathFor,
+} from '@/core/runtime/store';
 import { resolveSandboxRuntime } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -118,6 +122,7 @@ export class SessionRuntime {
   conversationHistory: string[] = [];
   thinkingLevel: string | null = null;
   interactionMode: 'accept_edits' | 'auto' | 'full';
+  config: AgentConfig;
   phase: AgentPhase = 'building';
   name: string;
 
@@ -166,6 +171,7 @@ export class SessionRuntime {
     this.remoteMcpEgressPermitResolver = deps.remoteMcpEgressPermitResolver;
     this._observabilityBridge = deps.observabilityBridge;
     this.interactionMode = deps.config.interactionMode ?? 'accept_edits';
+    this.config = deps.config;
 
     this._proxyProvider = this._createProxyProvider();
   }
@@ -808,9 +814,11 @@ export class SessionManager {
   private static readonly STATS_DEBOUNCE_MS = 1000;
 
   private deps: SessionDeps;
+  private defaultConfig: AgentConfig;
 
   constructor(deps: SessionDeps) {
     this.deps = deps;
+    this.defaultConfig = deps.config;
     // Central bridge: when UI components (ApprovalBlock, InputBlock) call submitAction
     // on the real provider, route to the active runtime's resolveInterrupt.
     // This runs once, avoiding the chain-wrapping anti-pattern of per-runtime bridges.
@@ -900,7 +908,10 @@ export class SessionManager {
       oldRt.pendingInterrupt = false;
     }
     const threadId = `tui-${Date.now().toString(36)}-${SessionManager.sessionCounter++}`;
-    const rt = new SessionRuntime(threadId, workspace, this.deps);
+    const rt = new SessionRuntime(threadId, workspace, {
+      ...this.deps,
+      config: this.defaultConfig,
+    });
     rt.notifyInterrupt = () => {
       this.snapshotCallback?.(rt.threadId);
     };
@@ -911,6 +922,42 @@ export class SessionManager {
 
   getRuntime(threadId: string): SessionRuntime | undefined {
     return this.runtimes.get(threadId);
+  }
+
+  getDefaultConfig(): AgentConfig {
+    return this.defaultConfig;
+  }
+
+  /** Bind a complete provider/model configuration to one TUI session. */
+  setSessionConfig(
+    threadId: string,
+    config: AgentConfig,
+    options: { persist?: boolean; asDefault?: boolean } = {},
+  ): boolean {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return false;
+    rt.config = config;
+    if (options.asDefault) this.defaultConfig = config;
+    if (options.persist) {
+      try {
+        const store = createRuntimeStore(runtimeStorePathFor(this.deps.checkpointPath));
+        try {
+          store.setSessionModelRoute(threadId, {
+            provider: config.providerName,
+            name: config.modelName,
+          });
+        } finally {
+          store.close();
+        }
+      } catch (error) {
+        console.warn(
+          `[SessionManager] Failed to persist model route for ${threadId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+    return true;
   }
 
   /** Execute or queue a manual compaction command through the durable Kernel boundary. */
@@ -925,7 +972,8 @@ export class SessionManager {
   ): Promise<ContextCompactionCommandResult> {
     const rt = this.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
-    const flags = getFeatureFlags(this.deps.config);
+    const config = rt.config;
+    const flags = getFeatureFlags(config);
     if (!flags.contextCompactionV2 || !flags.contextCompactionManualV1) {
       return {
         events: [],
@@ -944,12 +992,12 @@ export class SessionManager {
         commandId: crypto.randomUUID(),
         command: customInstructions ? `/compact ${customInstructions}` : '/compact',
       });
-      const model = createChatModel(this.deps.config);
+      const model = createChatModel(config);
       const capabilities = resolveModelCapabilities({
-        config: this.deps.config,
+        config,
         adapter: model.capabilityMetadata,
       });
-      const status = inspectManualContextCompaction(state, this.deps.config, capabilities);
+      const status = inspectManualContextCompaction(state, config, capabilities);
 
       // Reject early — emit events so the rejection text persists across TUI restart
       // (replayed through handleRuntimeEventAction during session load).
@@ -1022,7 +1070,7 @@ export class SessionManager {
 
       const event = manualContextCompactionEvent({
         state,
-        config: this.deps.config,
+        config,
         customInstructions,
         capabilities,
       });
@@ -1095,16 +1143,16 @@ export class SessionManager {
               : scheduled;
           if (effect.type !== 'compact_context' || !effect.compactionId) return [];
           const executor = createRuntimeEffectExecutor({
-            config: this.deps.config,
-            model: createChatModel(this.deps.config),
+            config,
+            model: createChatModel(config),
             mcpManager: rt.mcpManager ?? undefined,
             skills: rt.skillManifests,
             skillOptions: rt.skillOptions ?? undefined,
             onCompactionProgress: onProgress,
-            compactionReporter: this.deps.config.compaction?.localDebug?.enabled
+            compactionReporter: config.compaction?.localDebug?.enabled
               ? createLocalCompactionDebugReporter({
                   enabled: true,
-                  directory: this.deps.config.compaction.localDebug.directory,
+                  directory: config.compaction.localDebug.directory,
                   sessionId: threadId,
                 })
               : undefined,
@@ -1123,6 +1171,7 @@ export class SessionManager {
   handleContextDisplay(threadId: string): string {
     const rt = this.runtimes.get(threadId);
     if (!rt) return 'Session is unavailable.';
+    const config = rt.config;
     const kernel = createAgentKernel({
       threadId,
       userId: 'tui',
@@ -1133,10 +1182,10 @@ export class SessionManager {
     });
     try {
       const state = kernel.getState();
-      const model = createChatModel(this.deps.config);
+      const model = createChatModel(config);
       const environment = resolveRuntimeContextProjectionEnvironment(
         {
-          config: this.deps.config,
+          config,
           model,
           mcpManager: rt.mcpManager ?? undefined,
           skills: rt.skillManifests,
@@ -1145,10 +1194,10 @@ export class SessionManager {
         state,
       );
       const capabilities = resolveModelCapabilities({
-        config: this.deps.config,
+        config,
         adapter: model.capabilityMetadata,
       });
-      const status = buildContextStatusReport(state, this.deps.config, environment, capabilities);
+      const status = buildContextStatusReport(state, config, environment, capabilities);
       return `\n${status.text}`;
     } finally {
       kernel.close();
@@ -1159,6 +1208,7 @@ export class SessionManager {
   buildContextStatusSnapshot(threadId: string): ContextStatusSnapshot | undefined {
     const rt = this.runtimes.get(threadId);
     if (!rt) return undefined;
+    const config = rt.config;
     const kernel = rt.runtimeControl
       ? undefined
       : createAgentKernel({
@@ -1171,10 +1221,10 @@ export class SessionManager {
         });
     try {
       const state = rt.runtimeControl?.getState() ?? kernel!.getState();
-      const model = createChatModel(this.deps.config);
+      const model = createChatModel(config);
       const environment = resolveRuntimeContextProjectionEnvironment(
         {
-          config: this.deps.config,
+          config,
           model,
           mcpManager: rt.mcpManager ?? undefined,
           skills: rt.skillManifests,
@@ -1183,12 +1233,12 @@ export class SessionManager {
         state,
       );
       const capabilities = resolveModelCapabilities({
-        config: this.deps.config,
+        config,
         adapter: model.capabilityMetadata,
       });
       const { projection, preflight } = buildContextStatusReport(
         state,
-        this.deps.config,
+        config,
         environment,
         capabilities,
       );
@@ -1224,7 +1274,8 @@ export class SessionManager {
   async handleContextReset(threadId: string): Promise<ContextCompactionCommandResult> {
     const rt = this.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
-    const flags = getFeatureFlags(this.deps.config);
+    const config = rt.config;
+    const flags = getFeatureFlags(config);
     if (!flags.contextCompactionV2 || !flags.contextCompactionManualV1) {
       return {
         events: [],
@@ -1242,10 +1293,10 @@ export class SessionManager {
       if (!checkpoint) {
         return { events: [], text: 'No active checkpoint to reset.' };
       }
-      const model = createChatModel(this.deps.config);
+      const model = createChatModel(config);
       const environment = resolveRuntimeContextProjectionEnvironment(
         {
-          config: this.deps.config,
+          config,
           model,
           mcpManager: rt.mcpManager ?? undefined,
           skills: rt.skillManifests,
@@ -1254,10 +1305,10 @@ export class SessionManager {
         state,
       );
       const capabilities = resolveModelCapabilities({
-        config: this.deps.config,
+        config,
         adapter: model.capabilityMetadata,
       });
-      const preflight = compactResetPreflight(state, this.deps.config, environment, capabilities);
+      const preflight = compactResetPreflight(state, config, environment, capabilities);
       if (!preflight.safe) {
         return { events: [], text: `Cannot reset: ${preflight.reason}`, isError: true };
       }
@@ -1289,10 +1340,10 @@ export class SessionManager {
         return { events: [], text: 'No active checkpoint to reset.' };
       }
 
-      const model = createChatModel(this.deps.config);
+      const model = createChatModel(config);
       const environment = resolveRuntimeContextProjectionEnvironment(
         {
-          config: this.deps.config,
+          config,
           model,
           mcpManager: rt.mcpManager ?? undefined,
           skills: rt.skillManifests,
@@ -1301,10 +1352,10 @@ export class SessionManager {
         state,
       );
       const capabilities = resolveModelCapabilities({
-        config: this.deps.config,
+        config,
         adapter: model.capabilityMetadata,
       });
-      const preflight = compactResetPreflight(state, this.deps.config, environment, capabilities);
+      const preflight = compactResetPreflight(state, config, environment, capabilities);
       if (!preflight.safe) {
         return {
           events: [],
@@ -1517,7 +1568,10 @@ export class SessionManager {
 
   /** 注册一个由外部创建的 threadId（如 FORK） */
   registerSession(threadId: string, workspace: string): SessionRuntime {
-    const rt = new SessionRuntime(threadId, workspace, this.deps);
+    const rt = new SessionRuntime(threadId, workspace, {
+      ...this.deps,
+      config: this.defaultConfig,
+    });
     rt.notifyInterrupt = () => {
       this.snapshotCallback?.(rt.threadId);
     };

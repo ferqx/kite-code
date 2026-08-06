@@ -340,6 +340,9 @@ function readConfigFile(path: string): KiteCodeConfig | null {
 function mergeConfigs(user: KiteCodeConfig, project: KiteCodeConfig): KiteCodeConfig {
   return {
     provider: { ...user.provider, ...project.provider },
+    // The last route selected by this user is a personal UI preference and
+    // intentionally takes precedence over a project-provided initial default.
+    model: user.model ?? project.model,
     models: project.models ?? user.models,
     theme: project.theme ?? user.theme,
     colorPreset: project.colorPreset ?? user.colorPreset,
@@ -386,6 +389,9 @@ function defaultKiteCodeConfig(): KiteCodeConfig {
         models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
       },
     },
+    model: {
+      default: { provider: 'deepseek', name: 'deepseek-v4-flash' },
+    },
     theme: 'dark',
     interactionMode: 'accept_edits',
     features: {},
@@ -431,8 +437,10 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
 
   const reasoningEffort = provider.effort ?? null;
   const reasoning = provider.reasoning ?? inferReasoningDefault(providerType);
+  const selectedDefaultName =
+    defaultModel?.provider === providerName ? defaultModel.name : undefined;
   const modelName =
-    options.modelName ?? provider.model ?? defaultModel?.name ?? 'deepseek-v4-flash';
+    options.modelName ?? selectedDefaultName ?? provider.model ?? 'deepseek-v4-flash';
   const selectedModel = provider.models?.find((entry) => modelEntryName(entry) === modelName);
   const selected = selectedModel && typeof selectedModel === 'object' ? selectedModel : undefined;
 
@@ -674,13 +682,17 @@ function modelEntryObject(entry: unknown): {
 /**
  * Find the default model from config.
  * Priority:
- * 1. Provider with apiKey + model set (first found)
- * 2. Provider with apiKey + default:true model
- * 3. Provider with apiKey + first model
- * 4. Provider with model + apiKey from env var
- * 5. Fall through all providers regardless of apiKey
+ * 1. Persisted top-level model route, when still configured
+ * 2. Provider with apiKey + model set (first found)
+ * 3. Provider with apiKey + default:true model
+ * 4. Provider with apiKey + first model
+ * 5. Provider with model + apiKey from env var
+ * 6. Fall through all providers regardless of apiKey
  */
 function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string } | null {
+  const persisted = cfg.model?.default;
+  if (persisted && isConfiguredModelRoute(cfg, persisted)) return persisted;
+
   // Pass 1: providers with an explicit apiKey
   for (const [provName, prov] of Object.entries(cfg.provider)) {
     if (!prov.apiKey) continue;
@@ -715,6 +727,30 @@ function findDefaultModel(cfg: KiteCodeConfig): { provider: string; name: string
     }
   }
   return null;
+}
+
+function isConfiguredModelRoute(
+  cfg: KiteCodeConfig,
+  route: { provider: string; name: string },
+): boolean {
+  if (cfg.models?.some((model) => model.provider === route.provider && model.name === route.name)) {
+    return true;
+  }
+
+  const provider = cfg.provider[route.provider];
+  if (!provider) return false;
+  if (provider.model === route.name) return true;
+  if (provider.models?.some((model) => modelEntryName(model) === route.name)) return true;
+
+  const hasConfiguredModels = Object.values(cfg.provider).some((candidate) =>
+    Boolean(candidate.models?.length),
+  );
+  return (
+    !hasConfiguredModels &&
+    DEFAULT_DEEPSEEK_MODELS.some(
+      (model) => model.provider === route.provider && model.name === route.name,
+    )
+  );
 }
 
 function resolveProviderApiKey(
@@ -835,6 +871,27 @@ export function saveColorPreset(preset: string): void {
     writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
   } catch {
     // Non-critical — silently ignore write failures
+  }
+}
+
+/** Persist the model route selected in the TUI to the user-level config. */
+export function saveModelSelection(
+  provider: string,
+  name: string,
+  configPath: string = defaultConfigPath(),
+): boolean {
+  if (!provider.trim() || !name.trim()) return false;
+  try {
+    const dir = resolve(configPath, '..');
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    let text = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '{}';
+    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+    const route = `${provider.trim()}:${name.trim()}`;
+    text = applyEdits(text, modify(text, ['model'], route, fmt));
+    writeFileSync(configPath, text, { encoding: 'utf-8', mode: 0o600 });
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -1,5 +1,4 @@
-import { Box, Text, useInput } from 'ink';
-import TextInput from 'ink-text-input';
+import { Box, useInput } from 'ink';
 import {
   type MutableRefObject,
   useCallback,
@@ -8,12 +7,29 @@ import {
   useState,
   useSyncExternalStore,
 } from 'react';
-import { projectMcpConfigPath, userMcpConfigPath, validateMcpServerName } from '@/core/config';
+import { validateMcpServerName } from '@/core/config';
 import type { McpServerControlState, McpServerKey } from '@/core/mcp';
 import OverlayFrame, { type OverlayShortcut, OverlayShortcutBar } from '../components/OverlayFrame';
+import { OverlayEmptyState, OverlayMessage, OverlaySummary } from '../components/OverlayPrimitives';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
-import { useTheme } from '../theme';
 import McpSelect from './McpSelect';
+import {
+  type AddDraft,
+  AddingServerView,
+  AddServer,
+  type AddStep,
+  AuthenticationView,
+  addOptions,
+  animatedDots,
+  approvalOptions,
+  authOptions,
+  ConfirmView,
+  confirmOptions,
+  ProjectApprovalView,
+  ServerDetail,
+  ServerTools,
+  ToolDetail,
+} from './McpViews';
 import {
   buildServerActions,
   derivePrimaryStatus,
@@ -21,7 +37,6 @@ import {
   type McpServerAction,
   moveSelection,
   serverIdentity,
-  statusLabel,
   validSelection,
 } from './model';
 import type { McpController } from './types';
@@ -30,14 +45,6 @@ export interface McpOverlayProps {
   controller: McpController;
   layeredEscRef?: MutableRefObject<boolean>;
   onClose: () => void;
-}
-
-type AddStep = 'transport' | 'name' | 'target' | 'scope' | 'review';
-interface AddDraft {
-  transport: 'http' | 'stdio';
-  name: string;
-  target: string;
-  scope: 'project' | 'user';
 }
 
 type View =
@@ -60,7 +67,6 @@ const INITIAL_DRAFT: AddDraft = {
 const MIN_OPERATION_VISIBLE_MS = 600;
 
 export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOverlayProps) {
-  const t = useTheme();
   const maxListHeight = useOverlayHeight(8);
   const snapshot = useSyncExternalStore(
     controller.subscribe,
@@ -101,7 +107,8 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
       ...serverListOptions(servers, animatedDots(activityDotCount)),
       {
         id: 'add',
-        label: '＋ Add MCP server',
+        label: '＋ 添加 MCP 服务器',
+        action: true,
         separatorBefore: servers.length > 0,
       },
     ],
@@ -529,33 +536,38 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
 
   const title =
     view.kind === 'server_detail' && currentServer
-      ? `${currentServer.key.name} MCP Server`
+      ? currentServer.key.name
       : view.kind === 'tool_detail'
         ? view.toolName
         : view.kind === 'adding_server'
-          ? `${view.draft.name} MCP Server`
+          ? view.draft.name
           : overlayTitle(view);
   return (
     <OverlayFrame
       title={title}
+      meta={overlayMeta(view, servers, listSelectedId)}
+      message={
+        view.kind === 'add_server' && (busy || snapshot.message) ? (
+          <OverlayMessage tone={busy ? 'busy' : 'info'}>
+            {busy ? operationMessage(pendingOperation, activityDotCount) : snapshot.message}
+          </OverlayMessage>
+        ) : undefined
+      }
       footer={
         <OverlayShortcutBar
           shortcuts={footer(view, inputActive, detailActions.length, genericOptions.length)}
         />
       }
     >
-      <Box marginTop={1} flexDirection="column">
+      <Box flexDirection="column">
         {view.kind === 'server_list' && (
           <>
-            {servers.length === 0 && <Text color={t.muted}>No MCP servers configured.</Text>}
-            {servers.length > 0 && (
-              <Text color={t.muted}>
-                {servers.length} {servers.length === 1 ? 'server' : 'servers'}
-              </Text>
-            )}
-            <Box marginTop={servers.length > 0 ? 1 : 0}>
-              <McpSelect options={visibleListOptions} selectedId={listSelectedId} />
-            </Box>
+            <OverlaySummary
+              left={`${servers.length} 个服务器`}
+              right={serverScopeSummary(servers)}
+            />
+            {servers.length === 0 && <OverlayEmptyState>尚未配置 MCP 服务器。</OverlayEmptyState>}
+            <McpSelect options={visibleListOptions} selectedId={listSelectedId} />
           </>
         )}
         {view.kind === 'server_detail' && currentServer && (
@@ -612,17 +624,6 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
           <ConfirmView server={currentServer} action={view.action} selectedId={selectSelectedId} />
         )}
       </Box>
-      <Text color={busy ? t.warning : t.muted}>
-        {view.kind === 'server_detail' ||
-        view.kind === 'server_list' ||
-        view.kind === 'server_tools' ||
-        view.kind === 'tool_detail' ||
-        view.kind === 'adding_server'
-          ? ' '
-          : busy
-            ? operationMessage(pendingOperation, activityDotCount)
-            : (snapshot.message ?? ' ')}
-      </Text>
     </OverlayFrame>
   );
 }
@@ -634,246 +635,43 @@ function serverListOptions(
   const groups = [
     {
       id: 'project',
-      title: 'Project MCPs',
+      title: '项目',
       servers: servers.filter((server) => server.source.startsWith('project')),
     },
     {
       id: 'user',
-      title: 'User MCPs',
+      title: '用户',
       servers: servers.filter((server) => !server.source.startsWith('project')),
     },
   ];
   return groups.flatMap((group) => {
     if (group.servers.length === 0) return [];
-    const paths = [...new Set(group.servers.map((server) => server.sourcePath))];
-    const pathLabel = paths.length === 1 ? ` (${paths[0]})` : '';
     return [
       {
         id: `heading:${group.id}`,
-        label: `${group.title}${pathLabel}`,
+        label: group.title,
         heading: true,
         disabled: true,
       },
       ...group.servers.map((server) => {
         const status = derivePrimaryStatus(server);
-        const icon = status === 'ready' ? '✔' : status === 'connecting' ? '◌' : '✘';
-        const statusText =
-          status === 'connecting' ? `connecting${dots}` : statusLabel(server).toLowerCase();
+        const icon = status === 'ready' ? '●' : status === 'connecting' ? '◌' : '●';
+        const statusText = status === 'connecting' ? `连接中${dots}` : localizedStatus(server);
         return {
           id: serverIdentity(server.key),
-          label: `${server.key.name} · ${icon} ${statusText}${
-            server.toolCount > 0 ? ` · ${server.toolCount} tools` : ''
-          }`,
+          label: server.key.name,
+          trailing: `${icon} ${statusText}`,
+          trailingTone:
+            status === 'ready'
+              ? ('success' as const)
+              : status === 'connecting'
+                ? ('warning' as const)
+                : ('error' as const),
+          description: `${server.sourcePath}${server.toolCount > 0 ? ` · ${server.toolCount} 个工具` : ''}`,
         };
       }),
     ];
   });
-}
-
-function ServerDetail({
-  server,
-  options,
-  selectedId,
-  statusMessage,
-}: {
-  server: Readonly<McpServerControlState>;
-  options: readonly McpSelectOption<McpServerAction>[];
-  selectedId?: McpServerAction;
-  statusMessage?: string;
-}) {
-  const t = useTheme();
-  const command = server.configuration.command ?? server.approval?.review.command;
-  const endpoint = displayEndpoint(
-    server.configuration.endpoint ?? server.approval?.review.endpoint,
-  );
-  const argumentCount = server.configuration.argumentCount ?? server.approval?.review.argumentCount;
-  const primaryStatus = derivePrimaryStatus(server);
-  const connected = primaryStatus === 'ready';
-  const capabilities = [
-    server.toolCount > 0 && 'tools',
-    server.resourceCount > 0 && 'resources',
-    server.promptCount > 0 && 'prompts',
-  ].filter(Boolean);
-  return (
-    <Box flexDirection="column">
-      <Box flexDirection="column" paddingLeft={2}>
-        <DetailRow
-          label="Status:"
-          value={
-            statusMessage ??
-            `${connected ? '✔' : primaryStatus === 'connecting' ? '◌' : '✘'} ${statusLabel(server).toLowerCase()}`
-          }
-          valueColor={
-            statusMessage?.includes('ing.')
-              ? t.warning
-              : connected
-                ? t.success
-                : primaryStatus === 'connecting'
-                  ? t.warning
-                  : t.error
-          }
-        />
-        {command && <DetailRow label="Command:" value={command} />}
-        {argumentCount !== undefined && (
-          <DetailRow
-            label="Args:"
-            value={`${argumentCount} configured argument${argumentCount === 1 ? '' : 's'}`}
-          />
-        )}
-        {endpoint && <DetailRow label="Endpoint:" value={endpoint} />}
-        <DetailRow label="Config location:" value={server.sourcePath} singleLine />
-        <DetailRow
-          label="Capabilities:"
-          value={capabilities.length > 0 ? capabilities.join(', ') : '—'}
-        />
-        <DetailRow
-          label="Tools:"
-          value={server.toolCount > 0 ? `${server.toolCount} tools` : '—'}
-        />
-      </Box>
-
-      <Box marginTop={1} paddingLeft={2} flexDirection="column">
-        <McpSelect options={options} selectedId={selectedId} numbered />
-      </Box>
-    </Box>
-  );
-}
-
-function AddingServerView({ draft, dotCount }: { draft: Readonly<AddDraft>; dotCount: number }) {
-  return (
-    <Box flexDirection="column" paddingLeft={2}>
-      <AnimatedAddingStatus dotCount={dotCount} />
-      {draft.transport === 'http' ? (
-        <DetailRow label="Endpoint:" value={displayEndpoint(draft.target) ?? draft.target} />
-      ) : (
-        <DetailRow label="Command:" value={draft.target} />
-      )}
-      <DetailRow
-        label="Config location:"
-        value={draft.scope === 'project' ? projectMcpConfigPath() : userMcpConfigPath()}
-        singleLine
-      />
-    </Box>
-  );
-}
-
-function ServerTools({
-  server,
-  options,
-  selectedId,
-}: {
-  server: Readonly<McpServerControlState>;
-  options: readonly McpSelectOption[];
-  selectedId?: string;
-}) {
-  const maxHeight = useOverlayHeight(10);
-  const visibleCount = Number.isFinite(maxHeight)
-    ? Math.max(1, Math.floor(maxHeight))
-    : options.length;
-  const selectedIndex = Math.max(
-    0,
-    options.findIndex((option) => option.id === selectedId),
-  );
-  const start = Math.min(
-    Math.max(0, selectedIndex - Math.floor(visibleCount / 2)),
-    Math.max(0, options.length - visibleCount),
-  );
-  const visibleOptions = options.slice(start, start + visibleCount);
-
-  return (
-    <Box flexDirection="column" paddingLeft={2}>
-      <Text bold>Tools for {server.key.name}</Text>
-      <Text>{options.length} tools</Text>
-      <Box marginTop={1}>
-        <McpSelect options={visibleOptions} selectedId={selectedId} numbered />
-      </Box>
-    </Box>
-  );
-}
-
-function ToolDetail({
-  server,
-  tool,
-  offset,
-}: {
-  server: Readonly<McpServerControlState>;
-  tool: McpServerControlState['tools'][number] | undefined;
-  offset: number;
-}) {
-  const t = useTheme();
-  const maxHeight = useOverlayHeight(18);
-  if (!tool) return <Text color={t.error}>Tool is no longer available.</Text>;
-  const visibleParameterCount = Number.isFinite(maxHeight)
-    ? Math.max(1, Math.floor(maxHeight))
-    : tool.parameters.length;
-  const maxOffset = Math.max(0, tool.parameters.length - visibleParameterCount);
-  const visibleParameters = tool.parameters.slice(
-    Math.min(offset, maxOffset),
-    Math.min(offset, maxOffset) + visibleParameterCount,
-  );
-  return (
-    <Box flexDirection="column" paddingLeft={2}>
-      <Text color={t.muted}>{server.key.name}</Text>
-
-      <Box marginTop={1} flexDirection="column">
-        <DetailRow label="Tool name:" value={tool.name} />
-        <DetailRow label="Full name:" value={`mcp__${server.key.name}__${tool.name}`} />
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Description:</Text>
-        <Box marginTop={1} paddingLeft={2} width="100%">
-          <Text wrap="wrap">{tool.description ?? 'No description provided.'}</Text>
-        </Box>
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text bold>Parameters:</Text>
-        <Box marginTop={1} flexDirection="column" paddingLeft={2}>
-          {tool.parameters.length === 0 ? (
-            <Text color={t.muted}>No parameters.</Text>
-          ) : (
-            visibleParameters.map((parameter) => (
-              <Box key={parameter.name} width="100%">
-                <Box width={2} flexShrink={0}>
-                  <Text>● </Text>
-                </Box>
-                <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Text wrap="wrap">
-                    {parameter.name}
-                    {parameter.required ? ' (required)' : ''}: {parameter.type}
-                    {parameter.description ? ` - ${parameter.description}` : ''}
-                  </Text>
-                </Box>
-              </Box>
-            ))
-          )}
-        </Box>
-      </Box>
-    </Box>
-  );
-}
-
-function AnimatedAddingStatus({ dotCount }: { dotCount: number }) {
-  const t = useTheme();
-
-  return (
-    <Box width="100%">
-      <Box width={18} flexShrink={0}>
-        <Text color={t.dim}>Status:</Text>
-      </Box>
-      <Text color={t.warning}>Adding and connecting</Text>
-      {[0, 1, 2].map((index) => (
-        <Text key={index} color={index < dotCount ? t.warning : t.dim}>
-          .
-        </Text>
-      ))}
-    </Box>
-  );
-}
-
-function animatedDots(count: number): string {
-  return `${'.'.repeat(count)}${' '.repeat(3 - count)}`;
 }
 
 async function waitForMinimumOperationTime(startedAt: number): Promise<void> {
@@ -888,300 +686,86 @@ function operationMessage(
 ): string {
   const verb =
     operation === 'disable'
-      ? 'Disabling'
+      ? '正在禁用'
       : operation === 'remove'
-        ? 'Removing'
+        ? '正在移除'
         : operation === 'add'
-          ? 'Adding and connecting'
+          ? '正在添加并连接'
           : operation === 'connect'
-            ? 'Connecting'
-            : 'Working';
+            ? '正在连接'
+            : '处理中';
   return `${verb}${animatedDots(dotCount)}`;
 }
 
-function displayEndpoint(value: string | undefined): string | undefined {
-  if (!value) return undefined;
-  try {
-    return new URL(value).origin;
-  } catch {
-    return undefined;
-  }
+function overlayMeta(
+  view: View,
+  servers: readonly Readonly<McpServerControlState>[],
+  selectedId: string,
+): string | undefined {
+  if (view.kind === 'server_detail') return 'MCP 服务器';
+  if (view.kind !== 'server_list' || servers.length === 0) return undefined;
+  const selected = servers.findIndex((server) => serverIdentity(server.key) === selectedId);
+  return `${selected < 0 ? servers.length : selected + 1} / ${servers.length}`;
 }
 
-function DetailRow({
-  label,
-  value,
-  valueColor,
-  singleLine = false,
-}: {
-  label: string;
-  value: string;
-  valueColor?: string;
-  singleLine?: boolean;
-}) {
-  const t = useTheme();
-  return (
-    <Box width="100%">
-      <Box width={18} flexShrink={0}>
-        <Text color={t.dim}>{label}</Text>
-      </Box>
-      <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text color={valueColor} wrap={singleLine ? 'truncate-end' : 'wrap'}>
-          {value}
-        </Text>
-      </Box>
-    </Box>
-  );
+function serverScopeSummary(servers: readonly Readonly<McpServerControlState>[]): string {
+  const hasProject = servers.some((server) => server.source.startsWith('project'));
+  const hasUser = servers.some((server) => !server.source.startsWith('project'));
+  if (hasProject && hasUser) return '项目与用户配置';
+  if (hasProject) return '项目配置';
+  if (hasUser) return '用户配置';
+  return '无配置';
 }
 
-function AddServer({
-  step,
-  draft,
-  selectedId,
-  inputError,
-  onNameChange,
-  onTargetChange,
-  onSubmit,
-}: {
-  step: AddStep;
-  draft: AddDraft;
-  selectedId?: string;
-  inputError?: string;
-  onNameChange(value: string): void;
-  onTargetChange(value: string): void;
-  onSubmit(value: string): void;
-}) {
-  const t = useTheme();
-  if (step === 'name' || step === 'target') {
-    const target = step === 'target';
-    return (
-      <Box flexDirection="column">
-        <Text bold>
-          {target ? (draft.transport === 'http' ? 'MCP server URL' : 'Command') : 'Server name'}
-        </Text>
-        <TextInput
-          value={target ? draft.target : draft.name}
-          onChange={target ? onTargetChange : onNameChange}
-          onSubmit={onSubmit}
-        />
-        {!target && <Text color={t.dim}>Letters, numbers, ".", "-" and "_" only.</Text>}
-        {inputError && <Text color={t.error}>{inputError}</Text>}
-      </Box>
-    );
+function localizedStatus(server: Readonly<McpServerControlState>): string {
+  switch (derivePrimaryStatus(server)) {
+    case 'approval_required':
+      return '需要审批';
+    case 'rejected':
+      return '已拒绝';
+    case 'disabled':
+      return '已禁用';
+    case 'configuration_unavailable':
+      return '配置不可用';
+    case 'authenticating':
+      return '认证中';
+    case 'login_required':
+      return '需要登录';
+    case 'auth_failed':
+      return '认证失败';
+    case 'connecting':
+      return '连接中';
+    case 'ready':
+      return '已连接';
+    case 'failed':
+      return '连接失败';
+    case 'disconnected':
+      return '未连接';
   }
-  if (step === 'review') {
-    return (
-      <Box flexDirection="column" paddingLeft={2}>
-        <DetailRow label="Name:" value={draft.name} />
-        {draft.transport === 'http' ? (
-          <DetailRow label="Endpoint:" value={displayEndpoint(draft.target) ?? draft.target} />
-        ) : (
-          <DetailRow label="Command:" value={draft.target} />
-        )}
-        <DetailRow label="Available:" value={draft.scope === 'project' ? 'Project' : 'User'} />
-        <DetailRow
-          label="Config location:"
-          value={draft.scope === 'project' ? projectMcpConfigPath() : userMcpConfigPath()}
-          singleLine
-        />
-        <Box marginTop={1}>
-          <McpSelect options={addOptions(step, draft)} selectedId={selectedId} />
-        </Box>
-      </Box>
-    );
-  }
-  return (
-    <Box flexDirection="column">
-      <Text bold>
-        {step === 'transport'
-          ? 'How does the server run?'
-          : 'Where should this server be available?'}
-      </Text>
-      <McpSelect options={addOptions(step, draft)} selectedId={selectedId} />
-    </Box>
-  );
-}
-
-function AuthenticationView({
-  server,
-  starting,
-  selectedId,
-}: {
-  server: Readonly<McpServerControlState>;
-  starting: boolean;
-  selectedId?: string;
-}) {
-  const t = useTheme();
-  const phase =
-    server.authStatus === 'authenticated'
-      ? 'success'
-      : server.authStatus === 'error'
-        ? 'failed'
-        : server.authStatus === 'authorizing' || starting
-          ? 'waiting'
-          : 'prompt';
-  return (
-    <Box flexDirection="column">
-      {phase === 'prompt' && <Text>{server.key.name} requires authentication.</Text>}
-      {phase === 'waiting' && <Text>Complete sign-in in your browser.</Text>}
-      {phase === 'waiting' && server.authErrorCode && (
-        <Text color={t.error}>Authentication warning: {server.authErrorCode}</Text>
-      )}
-      {phase === 'success' && <Text color={t.success}>Authentication complete.</Text>}
-      {phase === 'failed' && (
-        <Text color={t.error}>
-          Authentication failed{server.authErrorCode ? `: ${server.authErrorCode}` : '.'}
-        </Text>
-      )}
-      <Box marginTop={1}>
-        <McpSelect options={authOptions(server, starting)} selectedId={selectedId} />
-      </Box>
-    </Box>
-  );
-}
-
-function ProjectApprovalView({
-  server,
-  selectedId,
-}: {
-  server: Readonly<McpServerControlState>;
-  selectedId?: string;
-}) {
-  const t = useTheme();
-  const command = server.configuration.command ?? server.approval?.review.command;
-  const endpoint = displayEndpoint(
-    server.configuration.endpoint ?? server.approval?.review.endpoint,
-  );
-  return (
-    <Box flexDirection="column" paddingLeft={2}>
-      <DetailRow label="Name:" value={server.key.name} />
-      {command && <DetailRow label="Command:" value={command} />}
-      {endpoint && <DetailRow label="Endpoint:" value={endpoint} />}
-      <DetailRow label="Source:" value="Project" />
-      <DetailRow label="Config location:" value={server.sourcePath} singleLine />
-      <Box marginTop={1}>
-        <Text color={t.warning}>Only approve projects you trust.</Text>
-      </Box>
-      <Box marginTop={1}>
-        <McpSelect options={approvalOptions} selectedId={selectedId} />
-      </Box>
-    </Box>
-  );
-}
-
-function ConfirmView({
-  server,
-  action,
-  selectedId,
-}: {
-  server: Readonly<McpServerControlState>;
-  action: 'disable' | 'remove';
-  selectedId?: string;
-}) {
-  const t = useTheme();
-  return (
-    <Box flexDirection="column">
-      <Text bold>
-        {action === 'disable' ? 'Disable' : 'Remove'} "{server.key.name}"?
-      </Text>
-      {action === 'disable' ? (
-        <>
-          <Text>The configuration and credentials will be kept.</Text>
-          <Text>Its tools will no longer be available to the agent.</Text>
-        </>
-      ) : (
-        <>
-          <Text color={t.warning}>
-            This removes the selected configuration and stored credentials.
-          </Text>
-          {server.fallbackSource && (
-            <Text color={t.warning}>
-              A {sourceLabel(server.fallbackSource)} configuration with the same name may become
-              active.
-            </Text>
-          )}
-        </>
-      )}
-      <Box marginTop={1}>
-        <McpSelect options={confirmOptions(action)} selectedId={selectedId} />
-      </Box>
-    </Box>
-  );
-}
-
-function addOptions(step: AddStep, draft: AddDraft): McpSelectOption[] {
-  if (step === 'transport') {
-    return [
-      { id: 'http', label: 'HTTP' },
-      { id: 'stdio', label: 'STDIO' },
-    ];
-  }
-  if (step === 'scope') {
-    return [
-      { id: 'project', label: `Project  ${projectMcpConfigPath()}` },
-      { id: 'user', label: `User     ${userMcpConfigPath()}` },
-    ];
-  }
-  if (step === 'review') {
-    return [{ id: 'add', label: 'Add and connect' }];
-  }
-  return [{ id: draft.transport, label: draft.transport.toUpperCase() }];
-}
-
-function authOptions(
-  server: Readonly<McpServerControlState> | undefined,
-  starting: boolean,
-): McpSelectOption[] {
-  if (!server) return [];
-  if (server.authStatus === 'authenticated') return [];
-  if (server.authStatus === 'authorizing' || starting) {
-    return [{ id: 'cancel_auth', label: 'Cancel authentication' }];
-  }
-  if (server.authStatus === 'error') {
-    return [{ id: 'retry', label: 'Try again' }];
-  }
-  return [{ id: 'open_browser', label: 'Open browser' }];
-}
-
-const approvalOptions: McpSelectOption[] = [
-  { id: 'later', label: 'Decide later' },
-  { id: 'approve', label: 'Approve and connect' },
-  { id: 'reject', label: 'Reject server', destructive: true },
-];
-
-function confirmOptions(action: 'disable' | 'remove'): McpSelectOption[] {
-  return [
-    { id: 'cancel', label: 'Cancel' },
-    {
-      id: 'confirm',
-      label: action === 'disable' ? 'Disable server' : 'Remove server',
-      destructive: true,
-    },
-  ];
 }
 
 function overlayTitle(view: View): string {
   switch (view.kind) {
     case 'server_list':
-      return 'MCP Servers';
+      return 'MCP 服务器';
     case 'server_detail':
-      return 'MCP Server';
+      return 'MCP 服务器';
     case 'server_tools':
-      return 'MCP Tools';
+      return 'MCP 工具';
     case 'tool_detail':
-      return 'MCP Tool';
+      return 'MCP 工具';
     case 'adding_server':
-      return 'Add MCP Server';
+      return '添加 MCP 服务器';
     case 'add_server': {
       const order: AddStep[] = ['transport', 'name', 'target', 'scope', 'review'];
-      return `Add MCP Server · ${order.indexOf(view.step) + 1}/5`;
+      return `添加 MCP 服务器 · ${order.indexOf(view.step) + 1}/5`;
     }
     case 'authenticate':
-      return 'Authenticate MCP Server';
+      return '认证 MCP 服务器';
     case 'project_approval':
-      return 'Review Project MCP Server';
+      return '审核项目 MCP 服务器';
     case 'confirm':
-      return `${view.action === 'disable' ? 'Disable' : 'Remove'} MCP Server`;
+      return `${view.action === 'disable' ? '禁用' : '移除'} MCP 服务器`;
   }
 }
 
@@ -1199,7 +783,7 @@ function footer(
   }
   if (view.kind === 'server_list') {
     return [
-      { keys: '↑↓', label: '选择' },
+      { keys: '↑↓', label: '导航' },
       { keys: 'Enter', label: '打开' },
       { keys: 'Esc', label: '关闭' },
     ];
@@ -1230,16 +814,8 @@ function footer(
     return [{ keys: 'Esc', label: '返回' }];
   }
   return [
-    { keys: '↑↓', label: '选择' },
+    { keys: '↑↓', label: '导航' },
     { keys: 'Enter', label: '确认' },
     { keys: 'Esc', label: '返回' },
   ];
-}
-
-function sourceLabel(source: string): string {
-  if (source === 'project') return 'Current project';
-  if (source === 'local') return 'Legacy local';
-  if (source === 'user') return 'All projects';
-  if (source.startsWith('project')) return 'Project configuration';
-  return source;
 }

@@ -2295,9 +2295,29 @@ describe('eventReducer (blocks model)', () => {
     });
     test('SELECT_MODEL sets modelName and closes selector', () => {
       let s = fresh();
-      s = { ...s, showModelSelector: true };
-      s = dispatch(s, { type: 'SELECT_MODEL', modelId: 'gpt-4o' });
+      s = {
+        ...s,
+        showModelSelector: true,
+        status: {
+          ...s.status,
+          contextSnapshot: {
+            estimate: {
+              systemTokens: 1,
+              toolSchemaTokens: 1,
+              transcriptTokens: 1,
+              summaryTokens: 0,
+              dynamicRuntimeTokens: 0,
+              framingTokens: 0,
+              totalInputTokens: 3,
+            },
+            status: 'normal',
+          },
+        },
+      };
+      s = dispatch(s, { type: 'SELECT_MODEL', provider: 'openai', modelName: 'gpt-4o' });
       expect(s.status.modelName).toBe('gpt-4o');
+      expect(s.status.modelProvider).toBe('openai');
+      expect(s.status.contextSnapshot).toBeUndefined();
       expect(s.showModelSelector).toBe(false);
     });
     test('USER_MESSAGE appends user block', () => {
@@ -2317,6 +2337,18 @@ describe('eventReducer (blocks model)', () => {
         status: {
           ...s.status,
           phase: 'planning',
+          contextSnapshot: {
+            estimate: {
+              systemTokens: 4_000,
+              toolSchemaTokens: 5_800,
+              transcriptTokens: 0,
+              summaryTokens: 0,
+              dynamicRuntimeTokens: 0,
+              framingTokens: 0,
+              totalInputTokens: 9_800,
+            },
+            status: 'normal',
+          },
           pendingPlan: {
             name: 'Outgoing draft',
             description: 'Must stay with the outgoing session',
@@ -2344,6 +2376,7 @@ describe('eventReducer (blocks model)', () => {
       expect(s.sessions[0]!.active).toBe(true);
       expect(s.status.phase).toBe('building');
       expect(s.status.pendingPlan).toBeNull();
+      expect(s.status.contextSnapshot).toBeUndefined();
       expect(s.sessions[0]!.status.phase).toBe('building');
       expect(s.sessions[0]!.status.pendingPlan).toBeNull();
     });

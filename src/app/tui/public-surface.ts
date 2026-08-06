@@ -14,7 +14,7 @@ export interface SlashCommandDef {
 
 export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'effort', aliases: [], description: '设置推理深度', args: 'low|medium|high|max' },
-  { name: 'model', aliases: [], description: '切换模型', args: '[name]' },
+  { name: 'model', aliases: [], description: '打开模型选择器' },
   {
     name: 'theme',
     aliases: [],
@@ -64,7 +64,7 @@ export function findSlashCommandDefs(partial: string): SlashCommandDef[] {
 
 export type SlashAction =
   | { type: 'effort'; level: string }
-  | { type: 'model'; name?: string }
+  | { type: 'model' }
   | { type: 'theme'; preset?: string }
   | { type: 'sessions'; id?: string }
   | { type: 'plan'; task?: string }
@@ -100,7 +100,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case 'effort':
       return { type: 'effort', level: arg || 'max' };
     case 'model':
-      return { type: 'model', name: arg || undefined };
+      return args.length === 0 ? { type: 'model' } : { type: 'unknown', raw: input };
     case 'theme':
       return { type: 'theme', preset: arg || undefined };
     case 'sessions':

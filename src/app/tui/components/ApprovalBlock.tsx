@@ -104,7 +104,7 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       footer={
         <OverlayShortcutBar
           shortcuts={[
-            { keys: '↑↓', label: '选择' },
+            { keys: '↑↓', label: '导航' },
             { keys: 'Enter', label: '确认' },
             { keys: 'Esc', label: '取消' },
           ]}
@@ -112,7 +112,6 @@ export default function ApprovalBlock({ approval, provider, onResolved }: Approv
       }
     >
       <Box
-        marginTop={1}
         marginLeft={1}
         paddingLeft={1}
         width="100%"

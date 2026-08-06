@@ -13,11 +13,7 @@ export function OverlayShortcutBar({ shortcuts }: { shortcuts: readonly OverlayS
     <Box gap={2} flexWrap="wrap">
       {shortcuts.map((shortcut) => (
         <Box key={`${shortcut.keys}:${shortcut.label}`}>
-          {shortcut.keys && (
-            <Text bold color={t.primary}>
-              {shortcut.keys}
-            </Text>
-          )}
+          {shortcut.keys && <Text color={t.dim}>{shortcut.keys}</Text>}
           <Text color={t.dim}>
             {shortcut.keys ? ' ' : ''}
             {shortcut.label}
@@ -53,10 +49,17 @@ interface OverlayFrameProps {
   title: string;
   meta?: ReactNode;
   children: ReactNode;
+  message?: ReactNode;
   footer?: ReactNode;
 }
 
-export default function OverlayFrame({ title, meta, children, footer }: OverlayFrameProps) {
+export default function OverlayFrame({
+  title,
+  meta,
+  children,
+  message,
+  footer,
+}: OverlayFrameProps) {
   const t = useTheme();
   return (
     <Box flexDirection="column" marginTop={1} width="100%">
@@ -81,14 +84,33 @@ export default function OverlayFrame({ title, meta, children, footer }: OverlayF
         {meta && (
           <>
             <Text color={t.dim}> </Text>
-            {meta}
+            {typeof meta === 'string' || typeof meta === 'number' ? (
+              <Text color={t.dim}>{meta}</Text>
+            ) : (
+              meta
+            )}
             <Text color={t.dim}> ──</Text>
           </>
         )}
       </Box>
       <Box flexDirection="column" paddingX={1}>
-        {children}
-        {footer && <Box marginTop={1}>{footer}</Box>}
+        <Box marginTop={1} flexDirection="column">
+          {children}
+        </Box>
+        {message && <Box marginTop={1}>{message}</Box>}
+        {footer && (
+          <Box
+            marginTop={1}
+            borderStyle="single"
+            borderTop
+            borderBottom={false}
+            borderLeft={false}
+            borderRight={false}
+            borderColor={t.dim}
+          >
+            {footer}
+          </Box>
+        )}
       </Box>
     </Box>
   );

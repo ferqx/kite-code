@@ -1,6 +1,5 @@
 import type { Dispatch } from 'react';
 import { useCallback } from 'react';
-import { listAvailableModels } from '@/core/config';
 import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { AgentPhase } from '@/protocol/events';
@@ -49,19 +48,7 @@ export function useSlashCommand(
           dispatch({ type: 'SET_THINKING_LEVEL', level: action.level });
           break;
         case 'model':
-          if (action.name) {
-            const available = listAvailableModels();
-            const matched = available.find(
-              (m) => m.name.toLowerCase() === action.name?.toLowerCase(),
-            );
-            if (matched) {
-              dispatch({ type: 'SELECT_MODEL', modelId: matched.name });
-            } else {
-              dispatch({ type: 'SHOW_MODEL_SELECTOR' });
-            }
-          } else {
-            dispatch({ type: 'SHOW_MODEL_SELECTOR' });
-          }
+          dispatch({ type: 'SHOW_MODEL_SELECTOR' });
           break;
         case 'theme':
           if (onTheme && action.preset) {

@@ -1,5 +1,6 @@
 import type { Dispatch } from 'react';
 import React from 'react';
+import { loadAgentConfig } from '@/core/config';
 import { defaultCheckpointPath } from '@/core/config/paths';
 import { loadSession } from '@/core/persistence/sessions';
 import {
@@ -191,6 +192,18 @@ export function useRunRewind(deps: RewindDeps) {
           const data = recoveredData;
           if (!data) throw new Error('Recovered session could not be loaded.');
           const fork = deps.sessionManager.registerSession(targetThreadId, deps.workspace);
+          let resumedConfig = deps.sessionManager.getDefaultConfig();
+          if (data.modelProvider && data.modelName) {
+            try {
+              resumedConfig = loadAgentConfig({
+                providerName: data.modelProvider,
+                modelName: data.modelName,
+              });
+            } catch {
+              // The saved route may have been removed from the current provider config.
+            }
+          }
+          deps.sessionManager.setSessionConfig(targetThreadId, resumedConfig);
           fork.setForeground(true);
           deps.sessionManager.switchSession(sourceThreadId, targetThreadId);
           deps.threadIdRef.current = targetThreadId;
@@ -203,8 +216,8 @@ export function useRunRewind(deps: RewindDeps) {
             blocks: ui.blocks,
             interrupt: ui.interrupt,
             pendingToolCalls: ui.pendingToolCalls,
-            modelProvider: data.modelProvider,
-            modelName: data.modelName,
+            modelProvider: resumedConfig.providerName,
+            modelName: resumedConfig.modelName,
             thinkingLevel: data.thinkingLevel,
           });
           deps.dispatch({ type: 'SET_EXITED' });

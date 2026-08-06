@@ -43,13 +43,13 @@ Provider directory 让 Agent 区分不存在、等待项目批准、被拒绝、
 
 同一 flag 让 `required` 获得任务准入语义。新 Agent run 在模型执行前接受 ready/degraded，其他 required Provider 进入稳定排序的持久 gate。Retry 由 App shell 执行；用户可以为当前 session 记录 waiver，或取消 run。Waiver 包含 provider/source/固定 reason/time，但不使任何 Tool 可见或可调用。
 
-`/mcp` 使用 Select 驱动的 list/detail 管理 Overlay：列表只导航，详情只读展示安全投影，动态菜单可 retry/reconnect、认证、启停、移除和 review 项目摘要。最小 Add flow 只写 project/user 两个规范位置，配置变化仍通过 Repository 与 Supervisor reconcile 生效。changed/removed/disabled 先撤销未来 capability，provider version 变化使旧 binding fail closed，未变化连接继续保留。
+`/mcp` 使用 Select 驱动的 list/detail 管理 Overlay：列表按摘要、分组、同行状态和次级路径组织，详情依次展示状态、传输方式、能力、配置位置与操作区；动态菜单可 retry/reconnect、认证、启停、移除和 review 项目摘要。最小 Add flow 只写 project/user 两个规范位置，配置变化仍通过 Repository 与 Supervisor reconcile 生效。changed/removed/disabled 先撤销未来 capability，provider version 变化使旧 binding fail closed，未变化连接继续保留。
 
 ## 11.4 MCP 凭据与 OAuth
 
 HTTP 静态认证在配置中只保存环境变量名或 credential profile。生产 `McpCredentialStore` 使用原生 OS vault，不存在 JSON、加密文件或 keychain CLI fallback。Supervisor 在连接时附加 workspace/source/Server/profile 身份；Manager 只在 transport 构造期间把 secret 解析为 header。inline client secret 被拒绝，client secret 也必须通过独立 profile 引用。
 
-HTTP 401 与 connection health 分开投影为 `login_required`。后台连接不打开浏览器；用户从 Server Detail 进入认证页并选择 Open browser 后，Coordinator 才绑定 127.0.0.1 随机端口并驱动 SDK discovery、dynamic registration、PKCE 和 state-bound callback。成功 code exchange 后 Manager 创建新连接并重新 discovery；已有 token 可在重启时静默恢复。callback timeout/cancel 关闭 listener，refresh 失败进入 `reauth_required`，任何恢复都不自动重放旧 Tool Call。
+HTTP 401 与 connection health 分开投影为 `login_required`。后台连接不打开浏览器；用户从 Server Detail 进入认证页并选择“打开浏览器”后，Coordinator 才绑定 127.0.0.1 随机端口并驱动 SDK discovery、dynamic registration、PKCE 和 state-bound callback。成功 code exchange 后 Manager 创建新连接并重新 discovery；已有 token 可在重启时静默恢复。callback timeout/cancel 关闭 listener，refresh 失败进入 `reauth_required`，任何恢复都不自动重放旧 Tool Call。
 
 ADR-0018 替代 ADR-0012 的 UI 结论：`/mcp` 承担显式 Login 恢复，但不展示或编辑 credential material，也不提供 logout/revoke、多账号或 auth metadata 表单。
 
