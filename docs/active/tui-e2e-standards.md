@@ -248,8 +248,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     选中项、全部选项和 footer，其他场景至少等待该交互独有的最后一个选项或操作，再发送方向键、
     Enter 或 Escape；后续 canned continuation 还必须校验同
     `tool_call_id` 的实际选择或取消结果，不能只因问题文本可见就判定交互就绪。
-    `/mcp` 面板必须在同一 viewport 同时出现 `MCP Servers` 标题和 `Add MCP server` 操作项后，
-    才能发送 Escape 或继续断言面板行为。
+    `/mcp` 面板必须在同一 viewport 同时出现当前本地化的 `MCP 服务器` 标题和
+    `添加 MCP 服务器` 操作项后，才能发送 Escape 或继续断言面板行为。共享 Overlay footer
+    的 readiness 断言必须使用当前词汇（例如列表移动为“导航”），不得保留过时文案。
 25. 最终回答文本可见不等于上一轮已回到稳定 idle。跨轮发送新消息、slash command 或 `/exit` 前，
     场景必须等待完整 main readiness（空输入、无 loading/modal 且输出稳定）；不得把回答尾部文本
     当作下一次键盘输入已可接受的信号。
@@ -264,6 +265,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     提交；Enter 选择安全默认和 Esc 都要证明持久状态未变。具有 browse/confirm 两层的 overlay
     必须证明 Esc 先返回内层而不是关闭整个面板。`/rewind` 的状态化 journey 还要同时验证文件内容、
     fork 后的 Runtime Store session 数和新会话继续回退的恢复点链，不能只依赖成功提示文本。
+29. 只为观察 selector 或补全结果而调用 `typeText()` 的场景，若不提交该输入，必须在测试结束前
+    用 `clearInput()` 显式清空并等待输入投影收敛。不得依赖 afterAll 关闭 PTY 来掩盖未收敛的
+    typed-input lifecycle；scenario contract 必须在静态扫描中拒绝这类场景。
 
 组件级 Ink 测试适合布局和 reducer 细节，但不能替代 PTY E2E 的真实终端覆盖。
 

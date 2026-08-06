@@ -245,6 +245,7 @@ describe('TUI PTY System — Slash Commands', () => {
       for (let index = 0; index < 16; index++) tui.write('\x1b[A');
       await waitForText(() => tui.viewport(), '1 / 17', 10_000);
       expect(screenContains(tui.viewport(), '/effort')).toBe(true);
+      await clearInput(tui, 1);
     },
     TIMEOUT,
   );
@@ -257,7 +258,7 @@ describe('TUI PTY System — Slash Commands', () => {
         () => {
           const viewport = tui.viewport();
           return (
-            screenContains(viewport, 'MCP Servers') && screenContains(viewport, 'Add MCP server')
+            screenContains(viewport, 'MCP 服务器') && screenContains(viewport, '添加 MCP 服务器')
           );
         },
         'MCP server panel actions to become visible',
