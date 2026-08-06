@@ -1,5 +1,4 @@
 import { type SetStateAction, useMemo, useState } from 'react';
-import { listAvailableModels } from '@/core/config';
 import { detectSandboxBackend, type SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
 
@@ -12,7 +11,7 @@ export interface SlashCommandDef {
 
 export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
   { name: 'effort', aliases: [], description: '设置推理深度', args: 'low|medium|high|max' },
-  { name: 'model', aliases: [], description: '切换模型', args: '[name]' },
+  { name: 'model', aliases: [], description: '打开模型选择器' },
   {
     name: 'theme',
     aliases: [],
@@ -61,6 +60,7 @@ export function findSlashCommandDefs(partial: string): SlashCommandDef[] {
 }
 
 export interface SuggestionItem {
+  id?: string;
   command: string;
   aliases: string[];
   description: string;
@@ -72,7 +72,7 @@ export interface SuggestionItem {
 }
 
 export interface SlashSuggestionsResult {
-  kind: 'command' | 'model' | 'effort' | 'theme' | 'permissions';
+  kind: 'command' | 'effort' | 'theme' | 'permissions';
   partial: string;
   items: SuggestionItem[];
 }
@@ -83,7 +83,6 @@ export interface SlashSuggestionData extends SlashSuggestionsResult {
 
 export interface ActiveSelections {
   theme?: string;
-  model?: string;
   interactionMode?: string;
   sandboxBackend?: SandboxBackend;
 }
@@ -148,27 +147,6 @@ export function useSlashSuggestions(
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const result = useMemo((): SlashSuggestionsResult | null => {
-    // /model <partial-model-name>
-    const modelMatch = inputValue.match(/^\/model\s+(\S*)$/i);
-    if (modelMatch) {
-      const partial = modelMatch[1]!.toLowerCase();
-      const available = listAvailableModels();
-      const models = available
-        .map((m) => m.name)
-        .filter((n) => n.toLowerCase().startsWith(partial));
-      if (models.length === 0) return null;
-      return {
-        kind: 'model',
-        partial,
-        items: models.map((m) => ({
-          command: m,
-          aliases: [],
-          description: '',
-          isActive: m === activeSelections?.model,
-        })),
-      };
-    }
-
     // /effort <partial-level>
     const effortMatch = inputValue.match(/^\/effort\s+(\S*)$/i);
     if (effortMatch) {
@@ -272,11 +250,8 @@ export function useSlashSuggestions(
 
   const replaceCommand = (
     item: SuggestionItem,
-    kind: 'command' | 'model' | 'effort' | 'theme' | 'permissions',
+    kind: 'command' | 'effort' | 'theme' | 'permissions',
   ): string => {
-    if (kind === 'model') {
-      return inputValue.replace(/\/model\s+\S*$/, `/model ${item.command}`);
-    }
     if (kind === 'effort') {
       return inputValue.replace(/\/effort\s+\S*$/, `/effort ${item.command}`);
     }

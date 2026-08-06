@@ -11,7 +11,6 @@ import {
 } from '@/app/tui/hooks/useSlashSuggestions';
 import { useWindowSize } from '@/app/tui/hooks/useWindowSizeSig';
 import { useTheme } from '@/app/tui/theme';
-import { listAvailableModels } from '@/core/config';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { useTerminalFocus } from '../hooks/useTerminalFocus';
 import type { AtomicBlock } from './CtrlSafeTextInput';
@@ -45,7 +44,7 @@ interface InputLineProps {
   planMode?: boolean;
   /** Plan name — 方案名称，显示在顶部边框中 */
   planName?: string;
-  /** Active selections for slash suggestion kind → value mapping (theme preset, model name, etc.) */
+  /** Active selections for slash suggestion kind → value mapping. */
   activeSelections?: import('../hooks/useSlashSuggestions').ActiveSelections;
 }
 
@@ -78,17 +77,6 @@ function completeSlash(input: string): string | null {
       if (prefix.length > partial.length) return `/${prefix}`;
     }
     return null;
-  }
-
-  if (cmd === 'model' && rest.length >= 1) {
-    const partial = rest[0]!.toLowerCase();
-    const available = listAvailableModels().map((m) => m.name);
-    const matches = available.filter((m) => m.startsWith(partial));
-    if (matches.length === 1) return `/model ${matches[0]}`;
-    if (matches.length > 1) {
-      const prefix = commonPrefix(matches);
-      if (prefix.length > partial.length) return `/model ${prefix}`;
-    }
   }
 
   return null;
@@ -403,15 +391,13 @@ export default function InputLine({
           const prefix = commonPrefix(names);
           if (prefix.length > ss.result.partial.length) {
             commitValue(
-              ss.result.kind === 'model'
-                ? `/model ${prefix}`
-                : ss.result.kind === 'effort'
-                  ? `/effort ${prefix}`
-                  : ss.result.kind === 'theme'
-                    ? `/theme ${prefix}`
-                    : ss.result.kind === 'permissions'
-                      ? `/permissions ${prefix}`
-                      : `/${prefix}`,
+              ss.result.kind === 'effort'
+                ? `/effort ${prefix}`
+                : ss.result.kind === 'theme'
+                  ? `/theme ${prefix}`
+                  : ss.result.kind === 'permissions'
+                    ? `/permissions ${prefix}`
+                    : `/${prefix}`,
             );
           } else {
             // No common prefix extension — commit the selected item directly

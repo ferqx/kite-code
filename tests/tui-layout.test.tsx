@@ -12,7 +12,7 @@ import MarkdownBlock, {
   groupLines,
   updateMarkdownParseCache,
 } from '../src/app/tui/components/MarkdownBlock';
-import ModelSelector from '../src/app/tui/components/ModelSelector';
+import ModelSelector, { modelOptionId } from '../src/app/tui/components/ModelSelector';
 import PlanReviewBlock from '../src/app/tui/components/PlanReviewBlock';
 import { SPINNER, spinnerIndexForElapsed } from '../src/app/tui/components/render-utils';
 import StartupScreen from '../src/app/tui/components/StartupScreen';
@@ -24,7 +24,7 @@ import Header, { formatHeaderWorkspace } from '../src/app/tui/Header';
 import { createInitialState } from '../src/app/tui/initialState';
 import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
-import { eventReducer } from '../src/app/tui/reducers';
+import { type Action, eventReducer } from '../src/app/tui/reducers';
 import type { RunStatusSnapshot } from '../src/app/tui/run-status';
 import StatsLine from '../src/app/tui/StatsLine';
 import StatusBar from '../src/app/tui/StatusBar';
@@ -269,7 +269,7 @@ describe('StatusBar', () => {
       />,
     );
     // StatusBar returns null when idle and not in a special phase
-    const frame = lastFrame();
+    const frame = lastFrame() ?? '';
     expect(frame).not.toContain('Shift+Tab');
     expect(frame).not.toContain('*');
   });
@@ -818,7 +818,12 @@ describe('HelpPanel', () => {
 describe('ModelSelector', () => {
   test('renders title and model list', () => {
     const { lastFrame } = render(
-      <ModelSelector currentModel="deepseek-chat" onSelect={noop} onClose={noop} />,
+      <ModelSelector
+        currentModel="deepseek-chat"
+        currentProvider="deepseek"
+        onSelect={noop}
+        onClose={noop}
+      />,
     );
     const frame = lastFrame();
     expect(frame).toContain('── 选择模型');
@@ -829,14 +834,104 @@ describe('ModelSelector', () => {
 
   test('marks the current model in the fixed status column', () => {
     const { lastFrame } = render(
-      <ModelSelector currentModel="deepseek-v4-flash" onSelect={noop} onClose={noop} />,
+      <ModelSelector
+        currentModel="deepseek-v4-flash"
+        currentProvider="deepseek"
+        onSelect={noop}
+        onClose={noop}
+      />,
     );
     expect(lastFrame()).toContain('当前');
   });
 
+  test('distinguishes same-named models from different providers', () => {
+    const models = [
+      { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
+      { provider: 'gateway', name: 'deepseek-v4-flash', isDefault: false },
+    ];
+    expect(new Set(models.map(modelOptionId)).size).toBe(models.length);
+
+    const { lastFrame } = render(
+      <ModelSelector
+        currentModel="deepseek-v4-flash"
+        currentProvider="gateway"
+        models={models}
+        onSelect={noop}
+        onClose={noop}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('deepseek');
+    expect(frame).toContain('gateway');
+    expect(frame).toContain('deepseek-v4-flash');
+    expect(frame).not.toContain('default');
+    expect(frame).toContain('当前');
+    const lines = frame.split('\n');
+    const deepseekLine = lines.findIndex((line) => line.trim() === 'deepseek');
+    const gatewayLine = lines.findIndex((line) => line.trim() === 'gateway');
+    const deepseekModelLine = lines[deepseekLine + 1] ?? '';
+    const gatewayModelLine = lines[gatewayLine + 1] ?? '';
+    expect(deepseekModelLine).toContain('deepseek-v4-flash');
+    expect(lines[deepseekLine]?.indexOf('deepseek')).toBe(
+      deepseekModelLine.indexOf('deepseek-v4-flash'),
+    );
+    expect(lines[gatewayLine - 1]?.trim()).toBe('');
+    expect(gatewayModelLine).toContain('deepseek-v4-flash');
+    expect(lines[gatewayLine]?.indexOf('gateway')).toBe(
+      gatewayModelLine.indexOf('deepseek-v4-flash'),
+    );
+  });
+
+  test('keeps model navigation reversible after scrolling through provider groups', async () => {
+    const models = Array.from({ length: 20 }, (_, index) => ({
+      provider: `provider-${Math.floor(index / 2)}`,
+      name: `model-${index}`,
+      isDefault: false,
+    }));
+    const selected: string[] = [];
+    const { lastFrame, stdin } = render(
+      <ModelSelector
+        currentModel="model-0"
+        currentProvider="provider-0"
+        models={models}
+        onSelect={(model) => selected.push(model.name)}
+        onClose={noop}
+      />,
+    );
+
+    for (let index = 0; index < 19; index++) stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(lastFrame()).toContain('model-19');
+    stdin.write('\r');
+    expect(selected).toEqual(['model-19']);
+
+    const secondSelection: string[] = [];
+    const secondRender = render(
+      <ModelSelector
+        currentModel="model-0"
+        currentProvider="provider-0"
+        models={models}
+        onSelect={(model) => secondSelection.push(model.name)}
+        onClose={noop}
+      />,
+    );
+    for (let index = 0; index < 19; index++) secondRender.stdin.write('\u001b[B');
+    for (let index = 0; index < 19; index++) secondRender.stdin.write('\u001b[A');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(secondRender.lastFrame()).toContain('provider-0');
+    secondRender.stdin.write('\r');
+
+    expect(secondSelection).toEqual(['model-0']);
+  });
+
   test('shows navigation hints', () => {
     const { lastFrame } = render(
-      <ModelSelector currentModel="deepseek-v4" onSelect={noop} onClose={noop} />,
+      <ModelSelector
+        currentModel="deepseek-v4"
+        currentProvider="deepseek"
+        onSelect={noop}
+        onClose={noop}
+      />,
     );
     expect(lastFrame()).toContain('导航');
     expect(lastFrame()).toContain('Esc 关闭');
@@ -3523,6 +3618,43 @@ describe('App', () => {
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
     );
     expect(lastFrame()).toContain('选择模型');
+  });
+
+  test('persists a model selection before applying it to the current TUI state', async () => {
+    const state = fakeState({
+      showModelSelector: true,
+      status: fakeStatus({ modelProvider: 'deepseek', modelName: 'deepseek-v4-flash' }),
+    });
+    const persisted: Array<[string, string]> = [];
+    const actions: Action[] = [];
+    const { stdin } = render(
+      <App
+        state={state}
+        dispatch={(action) => actions.push(action)}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        availableModels={[
+          { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
+          { provider: 'opencode_go', name: 'deepseek-v4-flash', isDefault: false },
+        ]}
+        persistModelSelection={(provider, modelName) => {
+          persisted.push([provider, modelName]);
+          return true;
+        }}
+      />,
+    );
+
+    stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(persisted).toEqual([['opencode_go', 'deepseek-v4-flash']]);
+    expect(actions).toContainEqual({
+      type: 'SELECT_MODEL',
+      provider: 'opencode_go',
+      modelName: 'deepseek-v4-flash',
+    });
   });
 
   test('shows ApprovalBlock when interrupt is approval', () => {

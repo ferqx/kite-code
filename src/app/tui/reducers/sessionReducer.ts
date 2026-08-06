@@ -1,6 +1,4 @@
 // ── 会话管理（登录/切换/删除）、用户消息、模型选择 ──
-
-import { listAvailableModels } from '@/core/config';
 import type { OutputBlock, SessionSnapshot, TuiState } from '../types';
 import type { Action } from './actions';
 import { appendBlock, maxBlockIdInTurns, reconstructTurns } from './helpers';
@@ -33,6 +31,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         cacheMissTokens: 0,
         totalTokens: 0,
         cacheHitRate: 0,
+        contextSnapshot: undefined,
         currentNode: null,
         plan: null,
         pendingPlan: null,
@@ -108,6 +107,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
                 modelProvider: action.modelProvider || s.status.modelProvider,
                 modelName: action.modelName || s.status.modelName,
                 thinkingMode: action.thinkingLevel || s.status.thinkingMode,
+                contextSnapshot: undefined,
               },
             }
           : s,
@@ -153,6 +153,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
           modelName: action.modelName || target?.status.modelName || state.status.modelName,
           thinkingMode:
             action.thinkingLevel || target?.status.thinkingMode || state.status.thinkingMode,
+          contextSnapshot: undefined,
         },
       };
     }
@@ -243,15 +244,14 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         status: { ...state.status, thinkingMode: action.level },
       };
     case 'SELECT_MODEL': {
-      const models = listAvailableModels();
-      const found = models.find((m) => m.name === action.modelId);
       return {
         ...state,
         showModelSelector: false,
         status: {
           ...state.status,
-          modelName: action.modelId,
-          modelProvider: found?.provider ?? state.status.modelProvider,
+          modelName: action.modelName,
+          modelProvider: action.provider,
+          contextSnapshot: undefined,
         },
       };
     }

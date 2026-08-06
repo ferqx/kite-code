@@ -112,7 +112,6 @@ export function activeInput(viewport: string): ActiveInput | undefined {
   const lines = stripAnsi(viewport).split(/\r?\n/);
 
   for (const [marker, command] of [
-    ['模型匹配 "', '/model '],
     ['推理深度匹配 "', '/effort '],
     ['主题匹配 "', '/theme '],
     ['权限模式匹配 "', '/permissions '],
@@ -129,7 +128,6 @@ export function activeInput(viewport: string): ActiveInput | undefined {
   }
 
   for (const [title, command] of [
-    ['模型选项', '/model '],
     ['推理深度', '/effort '],
     ['主题选项', '/theme '],
     ['权限模式', '/permissions '],

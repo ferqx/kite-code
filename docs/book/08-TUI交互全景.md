@@ -36,7 +36,7 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 工具授权、用户提问和方案审核可见时，Footer 暂时隐藏模型、思考级别、cache、context/token
 和权限模式等全局状态，只保留当前交互与快捷键；交互结束后按最新状态恢复，统计数据不重置。
 
-交互 Overlay 使用统一四区骨架和词汇：列表移动为“导航”，列表进入子页为“打开”，操作菜单为“选择”，产生决定或副作用为“确认”，多步表单推进为“继续”，子页退出为“返回”，根 Overlay 退出为“关闭”。标题、摘要、分组、问题/警告、字段标题、正文、选项、输入行、消息和快捷键之间的区域间距由共享 contract 统一约束，页面不得用空白 `Text` 修补。业务取消仍明确显示“取消”，不能用“关闭”掩盖审批拒绝、问答取消或 turn 中止语义。
+交互 Overlay 使用统一四区骨架和词汇：列表移动为“导航”，列表进入子页为“打开”，操作菜单为“选择”，产生决定或副作用为“确认”，多步表单推进为“继续”，子页退出为“返回”，根 Overlay 退出为“关闭”。标题、摘要、分组、问题/警告、字段标题、正文、选项、输入行、消息和快捷键之间的区域间距由共享 contract 统一约束；所有快捷键提示统一使用浅色非粗体文本，页面不得用空白 `Text` 修补。业务取消仍明确显示“取消”，不能用“关闭”掩盖审批拒绝、问答取消或 turn 中止语义。
 
 Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根据当前交互类型显式处理。工具审批或 plan review 被拒绝/取消时，Runtime 取消尚未终结的 sibling 与正在执行的调用，写入 `turn.aborted(cause=user)`，本轮不再调用模型；`ask_user` 的 Esc 只形成该工具的取消结果，模型可以在同一 turn 继续。
 
@@ -45,6 +45,8 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。
 
 内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/sessions`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions` 的显式参数是 `accept_edits|auto|full`。没有沙箱后端时，`full` 仍显示正常能力说明并允许光标选中，同时以红色文案提示“当前未在沙箱环境开启”；确认后仍由授权准入拒绝，不能切换到 Full。
+
+模型选择器以 provider 与 model name 的组合区分 route；选择器将 provider 作为使用独立 accent 色的加粗标题行，并与 model name 文本列对齐；标题与首项紧邻，不同分组之间留一行间距，模型行不重复 provider 或显示 `default`。`/model` 不接受模型名参数，确认命令后始终打开该选择器，由用户明确选择 provider 与 model；选择结果绑定到当前会话，并以 `model: "provider:model name"` 简写写入用户配置作为新会话默认值。切换或恢复会话时还原各自 route；空会话切换模型不显示系统提示或工具目录产生的 context token 估算，新会话清空上一会话的 context snapshot。加载用户配置时仍兼容旧 `model.default` 对象格式。
 
 `/mcp` 是静态候选命令；输入 `/m` 或 `/mc` 时，候选面板显示“管理 MCP Server”，并支持 Tab、右方向键和 Enter 补全。命令不接受 Server 参数或管理子命令，管理动作只在 Overlay 的可见 Select 中执行。MCP Prompt 使用独立的动态 `/mcp__<server>__<prompt>` 命令。
 

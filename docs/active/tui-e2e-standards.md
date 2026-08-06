@@ -215,7 +215,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     为每个 invocation 签发独立短时 permit，不得由全局 harness、环境变量或生产入口自动放行。
     scenario contract 会拒绝只配置 flag 或只注入 permit issuer 的半配置场景。自动重试与
     permit replay 属于 MCP policy/integration 层；不以重试为主题的 PTY 场景应配置 `retry: never`。
-19. selector 型 slash command（`/model`、`/effort`、`/theme`、`/permissions`）输入空格后，
+19. 带参数 selector 的 slash command（`/effort`、`/theme`、`/permissions`）输入空格后，
     共享输入 helper 必须等待 argument selector 的语义 frame，再发送第一个参数字符；随后仍需
     等待完整 query frame 才能按 Enter。场景不得用固定 sleep 修补 command selector 到 argument
     selector 的 React commit 竞争。argument focus 回执失败必须进入与字符交付相同的有界重试事务，

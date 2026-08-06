@@ -13,11 +13,7 @@ export function OverlayShortcutBar({ shortcuts }: { shortcuts: readonly OverlayS
     <Box gap={2} flexWrap="wrap">
       {shortcuts.map((shortcut) => (
         <Box key={`${shortcut.keys}:${shortcut.label}`}>
-          {shortcut.keys && (
-            <Text bold color={t.primary}>
-              {shortcut.keys}
-            </Text>
-          )}
+          {shortcut.keys && <Text color={t.dim}>{shortcut.keys}</Text>}
           <Text color={t.dim}>
             {shortcut.keys ? ' ' : ''}
             {shortcut.label}

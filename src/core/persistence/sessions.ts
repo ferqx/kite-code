@@ -120,13 +120,14 @@ export async function loadSession(
       planState?.kind === 'executing' || planState?.kind === 'completed'
         ? planDocumentToAgentPlan(planState.document)
         : null;
+    const modelRoute = store.getSessionModelRoute(threadId);
     return {
       threadId,
       messages: [],
       runtimeEvents: events,
       interrupt,
-      modelProvider: '',
-      modelName: '',
+      modelProvider: modelRoute?.provider ?? '',
+      modelName: modelRoute?.name ?? '',
       thinkingLevel: null,
       plan,
       planAuthMode: state?.authorization.mode ?? null,

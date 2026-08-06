@@ -185,7 +185,7 @@ describe('TUI PTY System — Slash Commands', () => {
     async () => {
       await submitCommand(tui, '/model');
       await waitForText(() => tui.viewport(), 'mock-model', 10_000);
-      expect(screenContains(tui.viewport(), 'default')).toBe(true);
+      expect(screenContains(tui.viewport(), 'default')).toBe(false);
       tui.write('\x1b');
       await waitForTuiReady(tui);
     },
@@ -227,6 +227,24 @@ describe('TUI PTY System — Slash Commands', () => {
       expect(screenContains(output, '/mcp')).toBe(true);
       expect(screenContains(output, '管理 MCP Server')).toBe(true);
       await clearInput(tui, '/mc'.length);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'a scrolled command palette can navigate back to its first command',
+    async () => {
+      tui.resize(120, 16);
+      await typeText(tui, '/');
+      await waitForText(() => tui.viewport(), '1 / 17', 10_000);
+
+      for (let index = 0; index < 16; index++) tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '17 / 17', 10_000);
+      expect(screenContains(tui.viewport(), '/exit')).toBe(true);
+
+      for (let index = 0; index < 16; index++) tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), '1 / 17', 10_000);
+      expect(screenContains(tui.viewport(), '/effort')).toBe(true);
     },
     TIMEOUT,
   );

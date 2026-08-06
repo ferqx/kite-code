@@ -41,6 +41,16 @@ describe('slash command suggestions', () => {
   test('shows the actual permissions values instead of the obsolete ask label', () => {
     expect(findSlashCommandDefs('permissions')[0]?.args).toBe('accept_edits|auto|full');
   });
+
+  test('exposes /model as a selector command without a model-name argument', () => {
+    expect(findSlashCommandDefs('model')).toEqual([
+      {
+        name: 'model',
+        aliases: [],
+        description: '打开模型选择器',
+      },
+    ]);
+  });
 });
 
 describe('slash mode suggestions', () => {

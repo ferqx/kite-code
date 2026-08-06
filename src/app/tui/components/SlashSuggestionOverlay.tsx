@@ -4,7 +4,7 @@ import stringWidth from 'string-width';
 import type { SlashSuggestionData, SuggestionItem } from '@/app/tui/hooks/useSlashSuggestions';
 import { useTheme } from '@/app/tui/theme';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
-import { OverlayList, OverlayListRow } from './OverlayPrimitives';
+import { OverlayListRow } from './OverlayPrimitives';
 
 interface SlashSuggestionOverlayProps {
   suggestion: SlashSuggestionData;
@@ -14,8 +14,6 @@ interface SlashSuggestionOverlayProps {
 
 function suggestionTitle(suggestion: SlashSuggestionData): string {
   switch (suggestion.kind) {
-    case 'model':
-      return suggestion.partial ? `模型匹配 "${suggestion.partial}"` : '模型选项';
     case 'effort':
       return suggestion.partial ? `推理深度匹配 "${suggestion.partial}"` : '推理深度';
     case 'theme':
@@ -90,53 +88,51 @@ export default function SlashSuggestionOverlay({
     >
       <Box height={visibleHeight}>
         <ScrollList selectedIndex={suggestion.selectedIndex} scrollAlignment="auto">
-          <OverlayList>
-            {suggestion.items.map((item, index) => {
-              const isSelected = index === suggestion.selectedIndex;
-              const command = displayCommand(item, suggestion.kind);
-              const details = displayDetails(item);
-              const commandColor = item.disabled ? t.dim : isSelected ? t.primary : t.muted;
+          {suggestion.items.map((item, index) => {
+            const isSelected = index === suggestion.selectedIndex;
+            const command = displayCommand(item, suggestion.kind);
+            const details = displayDetails(item);
+            const commandColor = item.disabled ? t.dim : isSelected ? t.primary : t.muted;
 
-              return (
-                <OverlayListRow
-                  key={item.command}
-                  selected={isSelected}
-                  disabled={item.disabled}
-                  content={
-                    <>
-                      <Box width={commandColumnWidth} flexShrink={0}>
-                        <Text wrap="truncate-end" bold={isSelected} color={commandColor}>
-                          {command}
-                        </Text>
-                      </Box>
-                      <Box width={detailsColumnWidth} flexShrink={0}>
+            return (
+              <OverlayListRow
+                key={item.id ?? item.command}
+                selected={isSelected}
+                disabled={item.disabled}
+                content={
+                  <>
+                    <Box width={commandColumnWidth} flexShrink={0}>
+                      <Text wrap="truncate-end" bold={isSelected} color={commandColor}>
+                        {command}
+                      </Text>
+                    </Box>
+                    <Box width={detailsColumnWidth} flexShrink={0}>
+                      <Text wrap="truncate-end" color={t.dim}>
+                        {details}
+                      </Text>
+                    </Box>
+                    {showDescriptions && (
+                      <Box flexGrow={1}>
                         <Text wrap="truncate-end" color={t.dim}>
-                          {details}
+                          {item.disabled ? '不可用 · ' : ''}
+                          {item.description}
                         </Text>
-                      </Box>
-                      {showDescriptions && (
-                        <Box flexGrow={1}>
-                          <Text wrap="truncate-end" color={t.dim}>
-                            {item.disabled ? '不可用 · ' : ''}
-                            {item.description}
+                        {isSelected && item.warning && (
+                          <Text wrap="truncate-end" color={t.error}>
+                            {'  '}
+                            {item.warning}
                           </Text>
-                          {isSelected && item.warning && (
-                            <Text wrap="truncate-end" color={t.error}>
-                              {'  '}
-                              {item.warning}
-                            </Text>
-                          )}
-                        </Box>
-                      )}
-                    </>
-                  }
-                  trailing={
-                    showActiveMarkers ? <OverlayStatusColumn active={!!item.isActive} /> : undefined
-                  }
-                />
-              );
-            })}
-          </OverlayList>
+                        )}
+                      </Box>
+                    )}
+                  </>
+                }
+                trailing={
+                  showActiveMarkers ? <OverlayStatusColumn active={!!item.isActive} /> : undefined
+                }
+              />
+            );
+          })}
         </ScrollList>
       </Box>
     </OverlayFrame>

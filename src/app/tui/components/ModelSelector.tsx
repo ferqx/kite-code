@@ -5,32 +5,49 @@ import { useTheme } from '@/app/tui/theme';
 import { type AvailableModel, listAvailableModels } from '@/core/config';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import OverlayFrame, { OverlayShortcutBar, OverlayStatusColumn } from './OverlayFrame';
-import { OverlayEmptyState, OverlayList, OverlayListRow } from './OverlayPrimitives';
+import { OverlayEmptyState, OverlayListRow } from './OverlayPrimitives';
 
-export interface ModelOption {
+export interface ModelOption extends AvailableModel {
   id: string;
-  name: string;
-  description: string;
 }
 
-function toModelOption(m: AvailableModel): ModelOption {
-  return { id: m.name, name: m.name, description: m.isDefault ? 'default' : '' };
+export function modelOptionId(model: Pick<AvailableModel, 'provider' | 'name'>): string {
+  return `${model.provider}:${model.name}`;
+}
+
+export function toModelOption(model: AvailableModel): ModelOption {
+  return { ...model, id: modelOptionId(model) };
 }
 
 interface ModelSelectorProps {
   currentModel: string;
-  onSelect: (modelId: string) => void;
+  currentProvider: string;
+  models?: readonly AvailableModel[];
+  onSelect: (model: AvailableModel) => void;
   onClose: () => void;
 }
 
-export default function ModelSelector({ currentModel, onSelect, onClose }: ModelSelectorProps) {
+export default function ModelSelector({
+  currentModel,
+  currentProvider,
+  models: availableModels,
+  onSelect,
+  onClose,
+}: ModelSelectorProps) {
   const t = useTheme();
-  const models: ModelOption[] = listAvailableModels().map(toModelOption);
+  const models: ModelOption[] = (availableModels ?? listAvailableModels()).map(toModelOption);
+  const providerGroups = new Map<string, ModelOption[]>();
+  for (const model of models) {
+    const group = providerGroups.get(model.provider);
+    if (group) group.push(model);
+    else providerGroups.set(model.provider, [model]);
+  }
+  const groupedModels = [...providerGroups.values()].flat();
   const [selected, setSelected] = useState(
-    models.length > 0
+    groupedModels.length > 0
       ? Math.max(
           0,
-          models.findIndex((m) => m.id === currentModel),
+          groupedModels.findIndex((m) => m.name === currentModel && m.provider === currentProvider),
         )
       : 0,
   );
@@ -48,18 +65,18 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
         onClose();
         return;
       }
-      if (models.length === 0) return;
+      if (groupedModels.length === 0) return;
       if (key.upArrow) setSelected((s) => Math.max(0, s - 1));
-      if (key.downArrow) setSelected((s) => Math.min(models.length - 1, s + 1));
+      if (key.downArrow) setSelected((s) => Math.min(groupedModels.length - 1, s + 1));
       if (key.return) {
-        const model = models[selectedRef.current];
-        if (model) onSelect(model.id);
+        const model = groupedModels[selectedRef.current];
+        if (model) onSelect(model);
         onClose();
       }
     },
   );
 
-  if (models.length === 0) {
+  if (groupedModels.length === 0) {
     return (
       <OverlayFrame
         title="选择模型"
@@ -75,7 +92,7 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
       title="选择模型"
       meta={
         <Text color={t.dim}>
-          {selected + 1} / {models.length}
+          {selected + 1} / {groupedModels.length}
         </Text>
       }
       footer={
@@ -90,27 +107,36 @@ export default function ModelSelector({ currentModel, onSelect, onClose }: Model
     >
       <Box flexGrow={1} maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
-          <OverlayList>
-            {models.map((model, i) => {
-              const isSelected = i === selected;
-              const isActive = model.id === currentModel;
-              return (
+          {[...providerGroups].flatMap(([provider, providerModels], providerIndex) =>
+            providerModels.map((model, providerModelIndex) => {
+              const index = groupedModels.indexOf(model);
+              const isSelected = index === selected;
+              const isActive = model.name === currentModel && model.provider === currentProvider;
+              const modelRow = (
                 <OverlayListRow
-                  key={model.id}
                   selected={isSelected}
                   primary={model.name}
-                  trailing={
-                    <Box>
-                      <OverlayStatusColumn active={isActive} />
-                      <Box width={9} justifyContent="flex-end">
-                        <Text color={t.dim}>{model.description}</Text>
-                      </Box>
-                    </Box>
-                  }
+                  trailing={<OverlayStatusColumn active={isActive} />}
                 />
               );
-            })}
-          </OverlayList>
+
+              if (providerModelIndex === 0) {
+                return (
+                  <Box key={`model:${model.id}`} flexDirection="column">
+                    {providerIndex > 0 && <Box height={1} />}
+                    <Box paddingLeft={3} paddingRight={1}>
+                      <Text bold color={t.accent}>
+                        {provider}
+                      </Text>
+                    </Box>
+                    {modelRow}
+                  </Box>
+                );
+              }
+
+              return <Box key={`model:${model.id}`}>{modelRow}</Box>;
+            }),
+          )}
         </ScrollList>
       </Box>
     </OverlayFrame>

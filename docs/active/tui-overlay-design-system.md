@@ -22,11 +22,13 @@
 - `OverlayImpactNotice` 负责副作用选择的“将做什么 / 不会做什么”动态提示，统一使用左侧竖线、
   水平 inset，并与前一组选项固定间隔一行；
 - `OverlayEmptyState` 负责空态，不自行补外层留白；
-- `OverlayShortcutBar` 只渲染当前 handler 已支持的动作。
+- `OverlayShortcutBar` 只渲染当前 handler 已支持的动作，并将按键与说明统一显示为不加粗的浅色文本，不使用主题主色抢占内容层级。
 
 列表主行放对象名称，并在同一行尾部放带语义色的关键状态；次级行放路径、时间、来源和数量。对象浏览列表的选中项默认使用主题背景；紧凑 action/confirm list 只使用 `❯`、粗体或语义色，不铺整行背景。危险项保持相同选择语法并用 error 色表达危险。heading 不可选择，也不参与可操作项编号。长字段必须保留选择指示和状态列，使用 display-width 感知的截断或安全换行。
 
 带搜索的选择器把搜索行视为独立区域：搜索行与结果列表之间固定保留一个空白行，并把该行计入 Overlay 高度预算。结果行之间保持紧凑，不得通过增大每项高度模拟区域间距。
+
+使用 `ScrollList` 的可选择列表必须把每个可选择行作为它的直接子项；不得用单个列表容器包裹所有行，否则 `selectedIndex` 无法定位到实际行，长列表不会随键盘选择滚动。
 
 选择式表单把问题或说明视为独立区域：问题与首个选项之间固定保留一个空白行，同一组内的选项行保持紧凑。多步表单的每个选择步骤都遵循同一节奏，不得仅修补某个 route。
 
@@ -40,6 +42,14 @@
 ## 页面与状态边界
 
 List、Detail、Form、Confirm、Empty 五类页面分别复用上述 primitive。页面组件只解释展示状态；route、selection、input draft、controller command 和 Runtime/Core 事实仍由各 Overlay 宿主拥有。
+
+模型选择器以 `provider + model name` 作为选项 identity 和当前项判定，而不是只使用 model
+name；每个 provider 都占独立的加粗 accent 色标题行，并与 model name 文本列对齐；标题与首项紧邻，不同分组之间固定保留一行间距，标题下的选项只展示 model name，
+不显示配置的 `default` 标记。
+因此不同 provider 可以配置同名模型，列表 key 仍稳定唯一，选择 action 也会保留用户选中的 provider。
+向上回到某分组的首个模型时，滚动锚点必须是该 provider 标题，确保标题与首项一同回到视口。
+`/model` 不接受 model name 参数；确认命令后始终打开按 provider 分组的模型选择器，由用户明确选择 route。
+确认模型后，TUI 将所选 route 绑定并持久化到当前会话，同时把它保存为用户级 `model: "provider:model name"` 简写供新会话使用；会话切换和历史恢复必须还原各自 route，实际模型调用与上下文功能使用当前会话配置。没有真实用户对话的空会话不得因切换模型而生成或显示 context token 估算，新会话也不得继承上一会话的 context snapshot。分隔只使用第一个 `:`，加载器兼容旧 `model.default` 对象；用户配置写入失败时本次会话切换仍生效并显示错误提示。
 
 MCP Overlay 的纯视图位于 `McpViews.tsx`，宿主 `McpOverlay.tsx` 保留订阅、路由、键盘和 controller 编排。Server 列表固定采用“数量/配置范围摘要 → 项目或用户分组 → Server 主次行 → 添加动作 → 分隔后的快捷键”顺序；工具列表使用“工具数量 / Server 名称”摘要，摘要与首项之间保留一行，所有编号共享同一文本起始列；详情固定先展示状态、传输方式、能力和配置位置，再展示操作区及当前副作用提示；普通连接动作与禁用/移除组之间留一行。破坏性确认使用 warning callout，并默认选择“取消”。布局迁移不得改变 config revision、审批 digest、认证 flow、credential cleanup、catalog binding 或后台连接语义。
 

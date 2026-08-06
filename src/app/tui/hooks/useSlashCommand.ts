@@ -1,6 +1,5 @@
 import type { Dispatch } from 'react';
 import { useCallback } from 'react';
-import { listAvailableModels } from '@/core/config';
 import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { AgentPhase } from '@/protocol/events';
@@ -10,7 +9,7 @@ import { SLASH_COMMAND_DEFS } from './useSlashSuggestions';
 
 export type SlashAction =
   | { type: 'effort'; level: string }
-  | { type: 'model'; name?: string }
+  | { type: 'model' }
   | { type: 'theme'; preset?: string }
   | { type: 'sessions'; id?: string }
   | { type: 'plan'; task?: string }
@@ -46,7 +45,7 @@ export function parseSlashCommand(input: string): SlashAction | null {
     case 'effort':
       return { type: 'effort', level: arg || 'max' };
     case 'model':
-      return { type: 'model', name: arg || undefined };
+      return args.length === 0 ? { type: 'model' } : { type: 'unknown', raw: input };
     case 'theme':
       return { type: 'theme', preset: arg || undefined };
     case 'sessions':
@@ -124,19 +123,7 @@ export function useSlashCommand(
           dispatch({ type: 'SET_THINKING_LEVEL', level: action.level });
           break;
         case 'model':
-          if (action.name) {
-            const available = listAvailableModels();
-            const matched = available.find(
-              (m) => m.name.toLowerCase() === action.name?.toLowerCase(),
-            );
-            if (matched) {
-              dispatch({ type: 'SELECT_MODEL', modelId: matched.name });
-            } else {
-              dispatch({ type: 'SHOW_MODEL_SELECTOR' });
-            }
-          } else {
-            dispatch({ type: 'SHOW_MODEL_SELECTOR' });
-          }
+          dispatch({ type: 'SHOW_MODEL_SELECTOR' });
           break;
         case 'theme':
           if (onTheme && action.preset) {

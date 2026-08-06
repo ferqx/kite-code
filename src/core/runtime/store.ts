@@ -68,6 +68,11 @@ export interface RuntimeSessionInfo {
   needsSmartName: boolean;
 }
 
+export interface RuntimeSessionModelRoute {
+  provider: string;
+  name: string;
+}
+
 export interface RuntimeSnapshotEntry {
   snapshotId: string;
   eventPosition: number;
@@ -117,6 +122,8 @@ export interface RuntimeStore {
   getLastEventPosition(threadId: string): number;
   listSessions(query?: string, limit?: number): RuntimeSessionInfo[];
   setSessionName(threadId: string, name: string): void;
+  getSessionModelRoute(threadId: string): RuntimeSessionModelRoute | null;
+  setSessionModelRoute(threadId: string, route: RuntimeSessionModelRoute): void;
   deleteSession(threadId: string): void;
   listNamedSnapshots(threadId: string): RuntimeSnapshotEntry[];
   restoreNamedSnapshot(threadId: string, snapshotId: string): boolean;
@@ -301,6 +308,8 @@ export function createRuntimeStore(
     CREATE TABLE IF NOT EXISTS runtime_sessions (
       thread_id  TEXT PRIMARY KEY,
       name       TEXT NOT NULL DEFAULT '',
+      model_provider TEXT,
+      model_name TEXT,
       updated_at INTEGER NOT NULL DEFAULT (unixepoch())
     )
   `);
@@ -375,6 +384,8 @@ export function createRuntimeStore(
     ['runtime_snapshots', 'state_revision', 'INTEGER NOT NULL DEFAULT 0'],
     ['runtime_snapshots', 'state_checksum', "TEXT NOT NULL DEFAULT ''"],
     ['runtime_snapshots', 'schema_version', 'INTEGER NOT NULL DEFAULT 0'],
+    ['runtime_sessions', 'model_provider', 'TEXT'],
+    ['runtime_sessions', 'model_name', 'TEXT'],
     ['runtime_file_preimages', 'post_hash', 'TEXT'],
     ['runtime_file_preimages', 'post_existed', 'INTEGER'],
   ] as const) {
@@ -454,6 +465,13 @@ export function createRuntimeStore(
   );
   const setSessionName = db.query(
     'UPDATE runtime_sessions SET name = ?, updated_at = unixepoch() WHERE thread_id = ?',
+  );
+  const selectSessionModelRoute = db.query<
+    { model_provider: string | null; model_name: string | null },
+    [string]
+  >('SELECT model_provider, model_name FROM runtime_sessions WHERE thread_id = ?');
+  const updateSessionModelRoute = db.query(
+    'UPDATE runtime_sessions SET model_provider = ?, model_name = ?, updated_at = unixepoch() WHERE thread_id = ?',
   );
   const listSessions = db.query<
     { thread_id: string; name: string; updated_at: number; first_message: string | null },
@@ -608,6 +626,8 @@ export function createRuntimeStore(
     selectLastEventPosition,
     upsertSession,
     setSessionName,
+    selectSessionModelRoute,
+    updateSessionModelRoute,
     listSessions,
     deleteEvents,
     deleteEventsAfter,
@@ -878,6 +898,19 @@ export function createRuntimeStore(
       setSessionName.run(name, threadId);
     },
 
+    getSessionModelRoute(threadId: string): RuntimeSessionModelRoute | null {
+      if (isClosed) return null;
+      const row = selectSessionModelRoute.get(threadId);
+      if (!row?.model_provider || !row.model_name) return null;
+      return { provider: row.model_provider, name: row.model_name };
+    },
+
+    setSessionModelRoute(threadId: string, route: RuntimeSessionModelRoute): void {
+      if (isClosed || !threadId || !route.provider.trim() || !route.name.trim()) return;
+      upsertSession.run(threadId);
+      updateSessionModelRoute.run(route.provider.trim(), route.name.trim(), threadId);
+    },
+
     deleteSession(threadId: string): void {
       if (isClosed) return;
       db.transaction(() => {
@@ -1006,6 +1039,7 @@ export function createRuntimeStore(
       }
       const sourceNamedSnapshots = selectNamedSnapshotsForFork.all(sourceThreadId, position);
       const sourceFilePreimages = selectFilePreimagesForFork.all(sourceThreadId, position);
+      const sourceModelRoute = store.getSessionModelRoute(sourceThreadId);
       const forkState = rebindForkState(snapshot, targetThreadId);
       db.transaction(() => {
         deleteEvents.run(targetThreadId);
@@ -1014,6 +1048,13 @@ export function createRuntimeStore(
         deleteFilePreimages.run(targetThreadId);
         deleteSession.run(targetThreadId);
         upsertSession.run(targetThreadId);
+        if (sourceModelRoute) {
+          updateSessionModelRoute.run(
+            sourceModelRoute.provider,
+            sourceModelRoute.name,
+            targetThreadId,
+          );
+        }
         const positionMap = new Map<number, number>();
         for (const entry of sourceEvents) {
           const inserted = insertForkEvent.run(
