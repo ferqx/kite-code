@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-04（单维护者开源首发路线图完成并归档）
+最后更新：2026-08-06（Agent 发布资格化：ADR-0072 GitHub Actions AQ-8–AQ-10 实现已收敛，尚未实际 dispatch；formal L3 保持安全停用）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,6 +19,7 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-05-agent-release-qualification.md`](2026-08-05-agent-release-qualification.md) | active | P0 | accepted qualification RFC、ADR-0070、ADR-0072；真实 dispatch 仍需外部 main protection/Environment 配置；formal L3 另需 persistent-supervisor/deletion proof | 不替代当前 G0/G1 | AQ-0–AQ-7 与 ADR-0072 AQ-8–AQ-10 的 public-safe workflow 实现已收敛，尚未实际 dispatch；formal ADR-0071 L3 继续 safe-disabled，均不进入 Gate |
 | [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | archived | P0 | ADR-0069 | [完成记录](../execution/completed/2026-08-04-single-maintainer-open-source-first-release.md) | G0/G1、候选构建/安装、真实 Provider 与 108 Task 终态全部收口 |
 | [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | superseded | P0 | ADR-0068 | 历史 Phase 0 | 5 Task completed；旧 authority/milestone 只作历史 |
 | [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | superseded | P0 | ADR-0068 | 历史 Phase 1A | 7 Task completed；metadata/secret/egress 边界保留 |

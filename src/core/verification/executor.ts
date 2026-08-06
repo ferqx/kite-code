@@ -34,6 +34,7 @@ export interface VerificationExecutorDependencies {
   signal?: AbortSignal;
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"verification:required-completion","featureId":"VERIFICATION-REQUIRED_COMPLETION-001","domain":"verification","observableContract":"verification_completion","risk":"p0","riskRationale":"verification_bypass_risk","owner":"core-verification","entrypoints":["runtime"],"sourceKind":"contract","symbol":"executeVerificationEffect","l1Bindings":[{"adapterId":"runtime-required-verification-v1","assertionId":"l1.runtime.required-verification-blocks-completion.v1"}]} */
 export async function executeVerificationEffect(
   effect: Extract<
     RuntimeEffect,

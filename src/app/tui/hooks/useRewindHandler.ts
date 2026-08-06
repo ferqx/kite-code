@@ -8,7 +8,7 @@ import {
   previewFilesToCheckpoint,
   restoreFilesToCheckpoint,
 } from '@/core/runtime/file-checkpoints';
-import { createRuntimeStore } from '@/core/runtime/store';
+import { createRuntimeStore, runtimeStorePathFor } from '@/core/runtime/store';
 import type { Action } from '../reducers/actions';
 import { sessionDataToUI } from '../replay-blocks';
 import type { SessionManager } from '../session-manager';
@@ -19,6 +19,8 @@ export interface RewindDeps {
   sessionManager: SessionManager;
   workspace: string;
   threadIdRef: React.MutableRefObject<string>;
+  /** App-owned checkpoint root. Tests may provide an isolated synthetic path. */
+  checkpointPath?: string;
 }
 
 interface RewindNote {
@@ -72,8 +74,8 @@ export function rewindFileOutcomeNotes(
   return notes;
 }
 
-function storePath(): string {
-  return `${defaultCheckpointPath().replace(/\.sqlite$/, '')}.runtime.db`;
+function storePath(checkpointPath: string): string {
+  return runtimeStorePathFor(checkpointPath);
 }
 
 export function isRewindCheckpointAvailable(
@@ -89,15 +91,30 @@ export function isRewindCheckpointAvailable(
   return typeof snapshot === 'object' && snapshot !== null && !Array.isArray(snapshot);
 }
 
+/**
+ * Preserve the TUI's reducer-first rewind transition, then start the durable
+ * RuntimeStore fork. This is the same bridge used by the production TUI
+ * dispatch path, so callers can await the complete fork/replay operation.
+ */
+export function dispatchTuiRewindRequest(
+  dispatch: Dispatch<Action>,
+  action: Extract<Action, { type: 'EXECUTE_REWIND' }>,
+  runRewind: (scope: RewindScope, snapshotId: string) => Promise<void>,
+): Promise<void> {
+  dispatch(action);
+  return runRewind(action.scope, action.checkpointId);
+}
+
 /** RuntimeStore-backed recovery-point list. */
 export function useRewindCheckpoints(
   state: { showRewind: boolean },
   dispatch: Dispatch<Action>,
   threadIdRef: React.MutableRefObject<string>,
+  checkpointPath = defaultCheckpointPath(),
 ) {
   React.useEffect(() => {
     if (!state.showRewind || !threadIdRef.current) return;
-    const store = createRuntimeStore(storePath());
+    const store = createRuntimeStore(storePath(checkpointPath));
     try {
       dispatch({
         type: 'SET_CHECKPOINTS',
@@ -106,16 +123,18 @@ export function useRewindCheckpoints(
     } finally {
       store.close();
     }
-  }, [state.showRewind, dispatch, threadIdRef]);
+  }, [state.showRewind, dispatch, threadIdRef, checkpointPath]);
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"tui:rewind-control","featureId":"TUI-REWIND_CONTROL-001","domain":"tui","observableContract":"runtime_fork_rewind","risk":"p0","riskRationale":"recovery_authorization_boundary","owner":"app-tui","entrypoints":["tui"],"sourceKind":"public_surface","symbol":"useRunRewind","l1TuiRewindForkProjectionBindings":[{"adapterId":"tui-rewind-fork-projection-v1","assertionId":"l1.projection.tui.rewind-fork-tightening.v1"}]} */
 export function useRunRewind(deps: RewindDeps) {
   const rewindInProgressRef = React.useRef(false);
   const previewRewind = React.useCallback(
     (snapshotId: string): FileRestorePreview | null => {
       const threadId = deps.threadIdRef.current;
       if (!threadId) return null;
-      const store = createRuntimeStore(storePath());
+      const checkpointPath = deps.checkpointPath ?? defaultCheckpointPath();
+      const store = createRuntimeStore(storePath(checkpointPath));
       try {
         if (!isRewindCheckpointAvailable(store, threadId, snapshotId)) return null;
         return previewFilesToCheckpoint(store, threadId, snapshotId, deps.workspace);
@@ -123,7 +142,7 @@ export function useRunRewind(deps: RewindDeps) {
         store.close();
       }
     },
-    [deps.threadIdRef, deps.workspace],
+    [deps.threadIdRef, deps.workspace, deps.checkpointPath],
   );
   const runRewind = React.useCallback(
     async (scope: RewindScope, snapshotId: string) => {
@@ -136,7 +155,8 @@ export function useRunRewind(deps: RewindDeps) {
       let recoveredData: Awaited<ReturnType<typeof loadSession>> = null;
       const localNotes: RewindNote[] = [];
       try {
-        store = createRuntimeStore(storePath());
+        const checkpointPath = deps.checkpointPath ?? defaultCheckpointPath();
+        store = createRuntimeStore(storePath(checkpointPath));
         const restoresConversation =
           scope === 'code_and_conversation' || scope === 'conversation_only';
         const restoresCode = scope === 'code_and_conversation' || scope === 'code_only';
@@ -149,7 +169,7 @@ export function useRunRewind(deps: RewindDeps) {
           if (!store.forkSession(sourceThreadId, snapshotId, targetThreadId)) {
             throw new Error('Recovery point is unavailable or corrupted.');
           }
-          recoveredData = await loadSession(defaultCheckpointPath(), targetThreadId);
+          recoveredData = await loadSession(checkpointPath, targetThreadId);
           if (!recoveredData) throw new Error('Recovered session could not be loaded.');
         }
 

@@ -195,6 +195,7 @@ export function evaluateMcpWriteAdmissionV1(input: {
   });
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"mcp:write-recovery","featureId":"MCP-WRITE_RECOVERY-001","domain":"mcp","observableContract":"mcp_open_world_protocol","risk":"p0","riskRationale":"open_world_mcp_risk","owner":"core-mcp","entrypoints":["runtime"],"sourceKind":"contract","symbol":"classifyMcpWriteRecoveryV1","l1SkillMcpBindings":[{"adapterId":"mcp-unknown-write-reconciliation-v1","assertionId":"l1.mcp.unknown-write-reconciliation.v1"}]} */
 export function classifyMcpWriteRecoveryV1(input: {
   intent?: McpWriteIntentV1;
   receipt?: McpWriteReceiptV1;

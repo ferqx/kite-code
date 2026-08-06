@@ -1,5 +1,17 @@
 import { z } from 'zod';
 import { canonicalJsonBytes, sha256DomainSeparated } from './canonical-json';
+import {
+  type ReleaseArtifactIdentityV1,
+  releaseArtifactIdentityV1Schema,
+  releaseEvidenceExecutionIdentityV1Schema,
+} from './evidence-identity-primitives';
+
+export {
+  type ReleaseArtifactIdentityV1,
+  type ReleaseEvidenceExecutionIdentityV1,
+  releaseArtifactIdentityV1Schema,
+  releaseEvidenceExecutionIdentityV1Schema,
+} from './evidence-identity-primitives';
 
 export const RELEASE_EVIDENCE_SCHEMA = 'ReleaseEvidenceV1' as const;
 
@@ -35,19 +47,6 @@ const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const commitSchema = z.string().regex(/^[a-f0-9]{40}$/);
 const isoTimestampSchema = z.iso.datetime({ offset: true });
 const nonEmptySchema = z.string().trim().min(1);
-
-export const releaseArtifactIdentityV1Schema = z
-  .object({
-    canonicalRepository: nonEmptySchema,
-    repositoryId: nonEmptySchema,
-    commit: commitSchema,
-    payloadSha256: digestSchema,
-    canonicalManifestDigest: digestSchema,
-    behaviorDigest: digestSchema,
-    profileDigest: digestSchema,
-    gatePolicyDigest: digestSchema,
-  })
-  .strict();
 
 const maintainerReviewScopeV1Schema = z.tuple([
   z.literal('architecture'),
@@ -211,75 +210,6 @@ export function buildProductionReleaseReplayEvidenceRecordV1(
     recordDigest: computeProductionReleaseReplayEvidenceDigestV1(material),
   });
 }
-
-const githubExecutionIdentityV1Schema = z
-  .object({
-    source: z.literal('github_actions'),
-    canonicalRepository: nonEmptySchema,
-    repositoryId: nonEmptySchema,
-    workflowPath: nonEmptySchema,
-    workflowRef: nonEmptySchema,
-    workflowSha: commitSchema,
-    oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
-    ref: nonEmptySchema,
-    runId: z.string().regex(/^[1-9][0-9]*$/),
-    runAttempt: z.number().int().positive(),
-    job: nonEmptySchema,
-    commit: commitSchema,
-    startedAt: isoTimestampSchema,
-    endedAt: isoTimestampSchema,
-  })
-  .strict();
-
-const localSyntheticExecutionIdentityV1Schema = z
-  .object({
-    source: z.literal('local_synthetic'),
-    fixtureId: nonEmptySchema,
-    runner: nonEmptySchema,
-    commit: commitSchema,
-    startedAt: isoTimestampSchema,
-    endedAt: isoTimestampSchema,
-  })
-  .strict();
-
-const externalExecutionIdentityV1Schema = z
-  .object({
-    source: z.literal('external'),
-    reviewerIdentity: nonEmptySchema,
-    recordIdentity: nonEmptySchema,
-    commit: commitSchema,
-    startedAt: isoTimestampSchema,
-    endedAt: isoTimestampSchema,
-  })
-  .strict();
-
-const githubMaintainerReviewExecutionIdentityV1Schema = z
-  .object({
-    source: z.literal('github_maintainer_review'),
-    canonicalRepository: nonEmptySchema,
-    repositoryId: nonEmptySchema,
-    workflowPath: nonEmptySchema,
-    workflowRef: nonEmptySchema,
-    workflowSha: commitSchema,
-    oidcIssuer: z.literal('https://token.actions.githubusercontent.com'),
-    ref: nonEmptySchema,
-    runId: z.string().regex(/^[1-9][0-9]*$/),
-    runAttempt: z.number().int().positive(),
-    actorIdentity: nonEmptySchema,
-    reviewerIdentity: nonEmptySchema,
-    recordIdentity: nonEmptySchema,
-    commit: commitSchema,
-    startedAt: isoTimestampSchema,
-    endedAt: isoTimestampSchema,
-  })
-  .strict();
-
-export const releaseEvidenceExecutionIdentityV1Schema = z.discriminatedUnion('source', [
-  githubExecutionIdentityV1Schema,
-  localSyntheticExecutionIdentityV1Schema,
-  externalExecutionIdentityV1Schema,
-  githubMaintainerReviewExecutionIdentityV1Schema,
-]);
 
 export const releaseEvidenceResultV1Schema = z
   .object({
@@ -490,10 +420,6 @@ export const releaseEvidenceV1Schema = z
     }
   });
 
-export type ReleaseArtifactIdentityV1 = z.infer<typeof releaseArtifactIdentityV1Schema>;
-export type ReleaseEvidenceExecutionIdentityV1 = z.infer<
-  typeof releaseEvidenceExecutionIdentityV1Schema
->;
 export type ReleaseEvidenceResultV1 = z.infer<typeof releaseEvidenceResultV1Schema>;
 export type ReleaseEvidenceRiskV1 = z.infer<typeof releaseEvidenceRiskV1Schema>;
 export type ReleaseEvidenceExceptionV1 = z.infer<typeof releaseEvidenceExceptionV1Schema>;

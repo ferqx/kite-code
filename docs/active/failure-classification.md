@@ -67,6 +67,12 @@ tree 超限仅在 cleanup 有明确正向证据时以
 `turn.aborted` 与带 outcome 的 `run.error`，并保留 recovery hard block。`cancel_incomplete`
 表示 descendant 退出未确认，external effects 固定为 unknown，不能与普通 cancelled 合并。
 
+Subagent continuation 的 schema v22 resume claim 使用单独的 Scheduler effect
+`subagent.recovery_unavailable`，不是可自动 retry 的普通 tool failure。若恢复时看到已持久化的
+claim 而没有 child terminal，或迁移到 v22 的旧 continuation 无法证明 claim 边界，executor 只能写
+`subagent.failed` 与失败的 parent `tool.finished`；不得 dispatch child、把 unknown 降为 completed，
+或从本地 claim 推断外部 exactly-once。
+
 `terminalOutcomeV1=false` 只关闭 CLI 派生的 `terminalPresentation`；Runtime 仍规范化和持久化
 outcome，因此 rollback 客户端仍可直接读取 status/reasonCode，不能把 unknown 当 completed。
 

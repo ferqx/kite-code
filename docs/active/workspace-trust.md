@@ -35,6 +35,11 @@ TUI 首次打开未信任目录时显示 workspace 授权确认，逻辑类似 V
 - `--trust-workspace` → 调用方显式背书，写入 `source: 'config'` 的信任记录后继续；语义与 `--full-access` 的 `source: 'config'` 授权一致（见 `docs/active/authorization.md`）。记录写入失败时同样报错退出。CI/自动化应使用该旗标或预写信任存储。
 - `trace`、`help` 命令不执行项目代码，不做门禁。
 
+CLI command/option 的公开声明由 parser 与 help renderer 共用；这确保 `--trust-workspace` 的展示和解析保持同一
+source owner。该 flag 只属于 `run` grammar，其他 command 会在读取 flag value、加载配置或触发信任路径前拒绝。
+该 declaration 同时提供诊断性 public-surface inventory，但不提供环境变量、project overlay 或其他 workspace
+信任旁路。
+
 ## 存储格式
 
 `workspaceTrustPath()` = `~/.kite-code/workspace-trust.jsonc`（`KITE_CODE_HOME` 可覆盖 home 根目录）：

@@ -82,6 +82,25 @@ The Runtime provider also exposes a redacted provider directory so pending appro
 
 `mcpProviderActionV1` is registered and defaults to false. When enabled, auth-required, approval-required and retryable-unavailable failures first terminate the old Tool Call as `failed`, then open a persisted Provider Action interaction for fixed `login`、`approve` or `retry`. The interaction contains no old arguments, binding, approval, URL, token, authorization code or raw error. Its originating Tool must remain terminal and unscheduled. The App shell owns the actual control-plane action; Runtime only records required/started/completed/deferred/failed facts. Completion atomically starts a new turn so only the current catalog can issue later bindings. Deferred and failed actions clear the interaction and remain explicit transcript facts. `provider_capability_changed` stays model-fixable and never creates an external recovery action. TUI maps the interrupt through its existing foreground/background input routing and delegates the selected action to `TuiMcpController`; CLI without an interactive recovery controller safely defers.
 
+ADR-0070 AQ-1 在 MCP transport/lifecycle source 上的 qualification annotation 只供离线 source-owned
+collector 校验相邻声明、guard 与 digest；它们不是 MCP config、control snapshot、effective effect、permit
+或 transport admission 的输入。Matrix structural assertion 不会让 Provider/Tool 变为 callable，不会改变
+stdio/HTTP egress、credential、approval 或 recovery 边界，也不能把本地 structural result 写成
+Verification、production content admission 或 G0/G1 结论。
+
+AQ-5 的 `qualification-l1-skill-mcp-v1` 只在独立 sealed diagnostic harness 中调用当前 MCP 边界：
+`DefaultMcpSupervisor` 仅接收 in-memory repository/control plane/auth coordination，Provider 为进程内 fake；
+没有默认 config loader、真实 config/project overlay、credential/keyring、HTTP/stdio transport、网络或 child
+process。它以 metadata-only receipt 验证 pending project approval/catalog churn 不能让 Provider callable、
+invalid auth 先终结原 Tool 后才可能提出 Provider Action、unknown write 只可 reconciliation。该 suite 的
+source-owned binding、fixture/runner、candidate/execution/governance identity 或 receipt 任一漂移都为
+`blocked`，不改变本节的 config、approval、effective effects、egress、replay 或 recovery 语义。
+
+完整的 MCP auth-invalid → Provider Action → login → fresh-turn journey 当前没有一个覆盖全部阶段的公开 CLI/TUI
+projection receipt，故 AQ-5 Sentinel V2 对完整 J6 使用 source-owned `entrypoint_not_exposed` N/A。
+`tui-provider-action-projection-v1` 只验证实际 `provider.action_required` prompt；它不能替代 login completion
+或 new-turn state，不能被拼接成 J6 的端到端 public coverage。
+
 The same flag gates required-provider admission. Before the first model request, effective required providers in `ready` or `degraded` state are admitted; every other required provider is queued in stable provider-id order. Scheduler exposes one admission interaction at a time and cannot call the model until all are resolved. Retry records a control-plane attempt outcome, Session Waive persists provider/source/fixed reason/time, and Cancel records task/turn cancellation and stops the run. A waiver only releases admission: it never changes availability, creates a descriptor, disclosure or binding, and the model receives an explicit Runtime fact that the capability remains unavailable. Schema 12 persists the queue and session waivers. TUI presents Retry/Session Waive/Cancel Run through the existing interrupt surface. PTY coverage proves that no model request occurs before the gate and that Session Waive releases the run without exposing the unavailable capability.
 
 For auditable trust, prefer `trust: { provenance: 'admin' | 'user' | 'project', allowAnnotations: 'read_only' }`. This local decision only permits a server's `readOnlyHint` to classify a tool as read-only; it cannot lower an explicit per-tool `minimumApproval` or grant new effects. The legacy `trust: 'trusted'` form remains a user-configured compatibility spelling and records no elevated provenance.

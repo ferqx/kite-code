@@ -82,6 +82,8 @@ const BOUNDED_CANCELLATION_REQUIRED_TOOLS = new Set([
   'update_plan',
 ]);
 
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"resourceBudgetV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"boundedCancellationTools"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"boundedCancellationV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"boundedCancellationTools"} */
 function boundedCancellationTools<T extends Record<string, unknown>>(
   tools: T,
   config: AgentConfig,
@@ -251,6 +253,9 @@ function positiveConfigNumber(value: unknown): number | undefined {
  * facts required by the reducer, including transient retry events captured
  * from the model's built-in retry listener.
  */
+/** @qualification-surface-v1 {"sourceSurfaceId":"model-context:auto-compaction-failure","featureId":"MODEL_CONTEXT-AUTO_COMPACTION_FAILURE-001","domain":"model_context","observableContract":"runtime_effect_terminality","risk":"p0","riskRationale":"governed_runtime_boundary","owner":"core-model","entrypoints":["runtime"],"sourceKind":"contract","symbol":"invokeRuntimeModel","l1AutoCompactionFailureBindings":[{"adapterId":"auto-compaction-provider-failure-v1","assertionId":"l1.auto-compaction.provider-failure.v1"},{"adapterId":"auto-compaction-provider-network-failure-v1","assertionId":"l1.auto-compaction.provider-network-failure.v1"},{"adapterId":"auto-compaction-summary-failure-v1","assertionId":"l1.auto-compaction.summary-failure.v1"}]} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"contextCompactionAutoV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"invokeRuntimeModel"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"providerDataPolicyV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"invokeRuntimeModel"} */
 export async function invokeRuntimeModel(params: {
   model: SupportedChatModel;
   state: RuntimeState;

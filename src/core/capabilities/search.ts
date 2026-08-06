@@ -79,6 +79,7 @@ export function estimateCapabilityCatalogTokens(descriptors: CapabilityDescripto
 /** Maximum number of MCP tools directly bound without requiring search. */
 const MAX_DIRECT_BIND_TOOL_COUNT = 20;
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"capability-catalog:disclosure","featureId":"CAPABILITY-CATALOG_DISCLOSURE-001","domain":"runtime","observableContract":"capability_catalog_protocol","risk":"p0","riskRationale":"governed_runtime_boundary","owner":"core-capabilities","entrypoints":["runtime"],"sourceKind":"contract","symbol":"chooseCapabilityDisclosure"} */
 export function chooseCapabilityDisclosure(input: {
   featureEnabled: boolean;
   providerSupportsToolCalls: boolean;
@@ -233,6 +234,7 @@ export function checkInventoryRedirect(query: string): CapabilitySearchInventory
   return null;
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"capability-catalog:search","featureId":"CAPABILITY-CATALOG_SEARCH-001","domain":"runtime","observableContract":"capability_catalog_protocol","risk":"p0","riskRationale":"governed_runtime_boundary","owner":"core-capabilities","entrypoints":["runtime"],"sourceKind":"contract","symbol":"searchCapabilities"} */
 export function searchCapabilities(input: {
   snapshot: CapabilitySnapshot;
   query: string;

@@ -75,6 +75,7 @@ export class McpTransportBoundaryErrorV1 extends Error {
   }
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"mcp:open-world-contract","featureId":"MCP-OPEN_WORLD_CONTRACT-001","domain":"mcp","observableContract":"mcp_open_world_protocol","risk":"p0","riskRationale":"open_world_mcp_risk","owner":"core-mcp","entrypoints":["cli","runtime","tui"],"sourceKind":"contract","symbol":"createMcpTransportBoundaryIdentityV1"} */
 export function createMcpTransportBoundaryIdentityV1(input: {
   workspaceRoot: string;
   executionBoundary: ExecutionBoundaryV1;

@@ -1709,6 +1709,35 @@ function recoveryUnavailableState(threadId: string): RuntimeState {
   };
 }
 
+function suspendedSubagentContinuationState(threadId: string): RuntimeState {
+  const state = createInitialRuntimeState({ threadId, userId: 'u', workspace: '/workspace' });
+  state.tools.calls['task-call'] = {
+    toolCallId: 'task-call',
+    modelMessageId: 'message-1',
+    name: 'task',
+    args: { task: 'continue safely' },
+    status: 'running',
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.tools.active.push('task-call');
+  state.suspendedSubagents['task-call'] = {
+    subagentId: 'subagent-claimed',
+    role: 'code',
+    task: 'continue safely',
+    messages: [],
+    toolCallCount: 1,
+    steps: [],
+    blockedTool: {
+      toolCallId: 'child-shell',
+      toolName: 'shell_execute',
+      args: { command: 'pwd' },
+      command: 'pwd',
+    },
+  };
+  state.transcript.final = 'recovery complete';
+  return state;
+}
+
 function createBatchTrackingStore() {
   const store = createRuntimeStore(':memory:');
   const batches: RuntimeEvent[][] = [];
@@ -1734,6 +1763,122 @@ test('AgentKernel.run persists legacy recovery failure events as one atomic batc
     ['subagent.failed', 'tool.finished'],
   ]);
   kernel.close();
+});
+
+test('recovery fails closed after a durable subagent resume claim instead of redispatching the child', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-subagent-claim-recovery-'));
+  const storePath = join(workspace, 'runtime.db');
+  const threadId = 'claimed-subagent-recovery';
+  try {
+    const store = createRuntimeStore(storePath);
+    const claimed = suspendedSubagentContinuationState(threadId);
+    claimed.subagentResumeClaims['task-call'] = {
+      claimId: 'claim-1',
+      subagentId: 'subagent-claimed',
+      childToolCallId: 'child-shell',
+      claimedAt: '2026-08-06T00:00:00.000Z',
+    };
+    store.saveSnapshot(threadId, claimed);
+    store.close();
+
+    const kernel = createAgentKernel({ threadId, userId: 'u', workspace, storePath });
+    const recoveryMarker = kernel.getState().legacyUnrecoverableSubagentApproval;
+    expect(recoveryMarker?.toolCallId).toBe('task-call');
+    expect(recoveryMarker?.subagentId).toBe('subagent-claimed');
+    expect(recoveryMarker?.reason).toContain('outcome is unknown');
+    expect(decideNextEffect(kernel.getState())).toMatchObject({
+      type: 'subagent.recovery_unavailable',
+      toolCallId: 'task-call',
+    });
+
+    await kernel.run(createRecoveryExecutor());
+    expect(kernel.getState().tools.calls['task-call']?.status).toBe('failed');
+    expect(kernel.getState().suspendedSubagents).toEqual({});
+    expect(kernel.getState().subagentResumeClaims).toEqual({});
+    expect(kernel.loadEvents(threadId).map(({ event }) => event.type)).toEqual([
+      'subagent.failed',
+      'tool.finished',
+    ]);
+    kernel.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('recovery fails closed when the durable subagent resume claim is in the event tail', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-subagent-claim-tail-'));
+  const storePath = join(workspace, 'runtime.db');
+  const threadId = 'claimed-subagent-tail-recovery';
+  try {
+    const store = createRuntimeStore(storePath);
+    const beforeClaim = suspendedSubagentContinuationState(threadId);
+    beforeClaim.tools.calls['task-call'] = {
+      ...beforeClaim.tools.calls['task-call']!,
+      status: 'approved',
+    };
+    beforeClaim.tools.active = [];
+    store.saveSnapshot(threadId, beforeClaim);
+    store.appendEvents(
+      threadId,
+      [
+        {
+          type: 'subagent.resume_claimed',
+          toolCallId: 'task-call',
+          claim: {
+            claimId: 'claim-tail-1',
+            subagentId: 'subagent-claimed',
+            childToolCallId: 'child-shell',
+            claimedAt: '2026-08-06T00:00:00.000Z',
+          },
+        },
+      ],
+      [
+        {
+          eventId: 'claim-tail-event-1',
+          revision: beforeClaim.revision + 1,
+          occurredAt: '2026-08-06T00:00:00.000Z',
+        },
+      ],
+    );
+    store.close();
+
+    const kernel = createAgentKernel({ threadId, userId: 'u', workspace, storePath });
+    expect(kernel.getState().tools.calls['task-call']?.status).toBe('running');
+    expect(kernel.getState().subagentResumeClaims['task-call']?.claimId).toBe('claim-tail-1');
+    expect(kernel.getState().legacyUnrecoverableSubagentApproval?.reason).toContain(
+      'outcome is unknown',
+    );
+    expect(decideNextEffect(kernel.getState())).toMatchObject({
+      type: 'subagent.recovery_unavailable',
+      toolCallId: 'task-call',
+    });
+    kernel.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('migrates a pre-claim suspended continuation to recovery-unavailable rather than replaying it', () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-subagent-legacy-claim-'));
+  const storePath = join(workspace, 'runtime.db');
+  const threadId = 'legacy-unclaimed-subagent';
+  try {
+    const store = createRuntimeStore(storePath);
+    const legacy = suspendedSubagentContinuationState(threadId);
+    legacy.schemaVersion = RUNTIME_STATE_SCHEMA_VERSION - 1;
+    store.saveSnapshot(threadId, legacy);
+    store.close();
+
+    const kernel = createAgentKernel({ threadId, userId: 'u', workspace, storePath });
+    const recoveryMarker = kernel.getState().legacyUnrecoverableSubagentApproval;
+    expect(recoveryMarker?.toolCallId).toBe('task-call');
+    expect(recoveryMarker?.subagentId).toBe('subagent-claimed');
+    expect(recoveryMarker?.reason).toContain('before durable resume claims');
+    expect(decideNextEffect(kernel.getState()).type).toBe('subagent.recovery_unavailable');
+    kernel.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
 });
 
 test('migrates a persisted v2 subagent approval and fails it without requesting approval again', async () => {

@@ -26,10 +26,33 @@ function normalize(path: string): string {
 export function matchesDocumentationPattern(path: string, pattern: string): boolean {
   const candidate = normalize(path);
   const normalizedPattern = normalize(pattern);
-  if (normalizedPattern.endsWith('/**')) {
-    return candidate.startsWith(normalizedPattern.slice(0, -2));
+  let expression = '^';
+  for (let index = 0; index < normalizedPattern.length; index += 1) {
+    const character = normalizedPattern[index]!;
+    if (character === '*') {
+      if (normalizedPattern[index + 1] === '*') {
+        if (normalizedPattern[index + 2] === '/') {
+          expression += '(?:.*/)?';
+          index += 2;
+        } else {
+          expression += '.*';
+          index += 1;
+        }
+      } else {
+        expression += '[^/]*';
+      }
+      continue;
+    }
+    if (character === '?') {
+      expression += '[^/]';
+      continue;
+    }
+    if ('\\^$+.[()|{}]'.includes(character)) {
+      expression += '\\';
+    }
+    expression += character;
   }
-  return candidate === normalizedPattern;
+  return new RegExp(`${expression}$`).test(candidate);
 }
 
 export function evaluateDocumentationImpact(

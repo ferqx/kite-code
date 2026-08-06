@@ -17,6 +17,18 @@ Verification executor 通过 Runtime 中立的 `McpRuntimeProvider` 查找当前
 
 所有验证状态变更只通过 `verification.*` Runtime events 进入 reducer。状态包含 attempts、repairAttempts、逐项 evidence digest、waiver 和 compensation 结果；Runtime schema 9 为旧 snapshot 补充空验证投影。
 
+ADR-0070 AQ-1 的 source-owned qualification Matrix/structural assertion 是独立的 diagnostic inventory，
+不是 `VerificationSpecV1`、`ExecutionReceipt`、`verification.*` Runtime event 或 Verification outcome。
+它不能写出 `passed`、触发 waiver/repair/compensation，不能进入现有 release evidence/bundle/evaluator，
+也不能作为 G0/G1 或 production content admission 的证据。既有 required Verification 与发布门禁的
+fail-closed 语义不因诊断性 source binding 而改变。
+
+AQ-4 的 L1 scripted-runtime fixture 复用当前 `executeVerificationEffect` 仅为观察 `required` Verification
+阻止 false completion 的既有语义；fixture reviewer 是短暂 in-memory synthetic adapter，不是生产 reviewer，L1
+receipt 也不是 `ExecutionReceipt` 或 `verification.*` event。source-owned L1 verifier 只能验证自身独立的
+diagnostic candidate-bound record；它不能创建 waiver/repair/compensation，不能把 V2 Sentinel `observed` 投影成
+Verification passed，更不能影响 release admission。
+
 ## 完成与恢复语义
 
 ```mermaid

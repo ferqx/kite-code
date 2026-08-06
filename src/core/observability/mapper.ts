@@ -684,6 +684,7 @@ export class ProductionMetricMapperV1 {
       case 'subagent.failed':
       case 'subagent.cache_metrics':
       case 'subagent.suspended':
+      case 'subagent.resume_claimed':
         return [];
       default: {
         const exhaustive: never = event;

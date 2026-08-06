@@ -187,6 +187,7 @@ export interface RunApprovedToolInput {
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"networkBoundaryV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"runApprovedTool"} */
 export async function runApprovedTool(input: RunApprovedToolInput): Promise<ToolExecutionResult> {
   const {
     workspace,

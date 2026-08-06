@@ -13,6 +13,7 @@ import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
 import { getRoleConfig } from '@/core/subagent/roles';
@@ -84,6 +85,7 @@ describe('executeRuntimeTools', () => {
         sandbox: { enabled: false },
       };
 
+      let persistedState = state;
       const events = await executeRuntimeTools({
         state,
         toolCallIds: ['task'],
@@ -118,9 +120,18 @@ describe('executeRuntimeTools', () => {
             order.push('released');
           },
         },
+        persistSubagentResumeClaim: async (event) => {
+          order.push('resume-claim');
+          persistedState = reduceRuntimeState(persistedState, event);
+          return (
+            persistedState.subagentResumeClaims[event.toolCallId]?.claimId === event.claim.claimId
+          );
+        },
+        getRuntimeState: () => persistedState,
       });
 
       expect(order).toEqual([
+        'resume-claim',
         'reserve-tool',
         'tool-dispatch',
         'reconcile-tool',
@@ -131,6 +142,93 @@ describe('executeRuntimeTools', () => {
       expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
       expect(events).toContainEqual(
         expect.objectContaining({ type: 'tool.finished', toolCallId: 'task' }),
+      );
+      expect(persistedState.subagentResumeClaims.task).toMatchObject({
+        subagentId: 'child',
+        childToolCallId: 'child-shell',
+      });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('fails closed before child dispatch when a subagent resume claim is not durably acquired', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-subagent-resume-claim-denied-'));
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'subagent-resume-claim-denied',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'model',
+        name: 'task',
+        args: { subagent_type: 'code', task: 'Run pwd and finish.' },
+        status: 'approved',
+        approvalGrant: 'approve_once',
+        sideEffect: true,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.active.push('task');
+      state.suspendedSubagents.task = serializeSubagentContinuation(
+        {
+          id: 'child',
+          role: getRoleConfig('code'),
+          task: 'Run pwd and finish.',
+          messages: [
+            aiMessage({
+              content: 'I need to inspect the directory.',
+              tool_calls: [{ id: 'child-shell', name: 'shell_execute', args: { command: 'pwd' } }],
+            }),
+          ],
+          toolCallCount: 1,
+          steps: [
+            {
+              toolName: 'shell_execute',
+              toolArgs: { command: 'pwd' },
+              status: 'awaiting_approval',
+            },
+          ],
+        },
+        {
+          toolCallId: 'child-shell',
+          toolName: 'shell_execute',
+          args: { command: 'pwd' },
+          command: 'pwd',
+        },
+      );
+
+      let childDispatches = 0;
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          modelName: 'fixture',
+          providerName: 'fixture',
+          providerType: 'openai-compatible',
+          sandbox: { enabled: false },
+        },
+        taskModel: createMockModel([]),
+        subagentEventSink: () => {},
+        shellExecutor: async () => {
+          childDispatches += 1;
+          return { ok: true, command: 'pwd', exitCode: 0, stdout: workspace, stderr: '' };
+        },
+        persistSubagentResumeClaim: async () => false,
+        getRuntimeState: () => state,
+      });
+
+      expect(childDispatches).toBe(0);
+      expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.failed' }));
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'tool.failed',
+          toolCallId: 'task',
+          failure: expect.objectContaining({ kind: 'unknown' }),
+        }),
       );
     } finally {
       rmSync(workspace, { recursive: true, force: true });

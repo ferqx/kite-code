@@ -122,6 +122,10 @@ export interface RuntimeKernelControl {
 }
 
 /** Start a fresh RuntimeStore-backed session without LangGraph/checkpoint state. */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"providerDataPolicyV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"runRuntimeAgent"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"mcpProviderActionV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"runRuntimeAgent"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"resourceBudgetV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"runRuntimeAgent"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"boundedCancellationV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"runRuntimeAgent"} */
 export async function* runRuntimeAgent(
   input: RunRuntimeAgentInput,
   provider: RuntimeActionProvider,
@@ -200,6 +204,7 @@ export async function* runRuntimeAgent(
     executionAbortController.abort(reason);
     return events;
   };
+  /** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"boundedCancellationV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"scheduleRunDeadline"} */
   const scheduleRunDeadline = (deadlineAt: string) => {
     if (!getFeatureFlags(input.config).boundedCancellationV1 || runDeadlineTimer) return;
     const remainingMs = Math.max(0, Date.parse(deadlineAt) - Date.now());

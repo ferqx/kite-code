@@ -59,6 +59,7 @@ export interface ReleaseControlledAgentConfigV1 extends AgentConfig {
  * App-owned release composition gate. Artifact authority is independent from
  * project/user config; ordinary config and CLI layers can only tighten it.
  */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"releaseProfileV1","outcome":"safe_disable","disabledResult":"inactive","sourceKind":"contract","symbol":"resolveReleaseCompositionV1"} */
 export function resolveReleaseCompositionV1(input: {
   config: AgentConfig;
   artifactReleaseProfileV1Enabled: boolean;

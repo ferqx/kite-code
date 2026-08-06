@@ -58,7 +58,7 @@ export type RuntimeEffect =
   | { type: 'repair_verification'; verificationId: string }
   /** Execute a user-requested compensation after verification cannot establish success. */
   | { type: 'run_verification_compensation'; verificationId: string }
-  /** Terminate a legacy subagent approval that cannot safely be resumed after recovery. */
+  /** Terminate a legacy or already-claimed subagent continuation that cannot safely resume after recovery. */
   | {
       type: 'subagent.recovery_unavailable';
       toolCallId: string;

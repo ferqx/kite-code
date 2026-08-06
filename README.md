@@ -1,5 +1,6 @@
 # Kite Code
 
+
 Kite Code 是一个基于 Bun、TypeScript 和事件化 Runtime Kernel 的多模型代码 Agent。模型、工具、审批、恢复与验收统一由 Kernel 调度；TUI 和 CLI 共享相同的 Core 行为。TUI 支持文件 diff 染色和代码语法高亮（`ink-syntax-highlight` / highlight.js）。
 
 正式发行目标为 Windows、Linux 与 macOS。跨平台可安装/运行与 Shell、writer 等 effectful
@@ -138,12 +139,13 @@ CLI：
 
 ```bash
 bun run agent run --thread demo --workspace . --task "检查并修复测试"
-bun run agent resume --thread demo --approve
 bun run agent trace events.jsonl --turn 1
 bun run agent run --release-status
 bun run agent run --telemetry-status
 ```
 
+`resume` 只保留为可识别的历史命令：它始终返回 Runtime Kernel 不兼容错误，不是可运行的恢复入口。每个已声明
+CLI flag 在解析值前校验所属 command；例如 `run --approve`、`trace --task` 和 `trace --full-access` 会拒绝。
 常用参数以 `bun run agent --help` 输出和 `src/app/cli/index.ts` 为准。`--checkpoints` 是保留的 CLI 参数名，当前数据由 Runtime Store 管理。
 
 ADR-0068/ADR-0069 采用单维护者开源首发终态模型。发布只保留两个 Gate：G0 验证本地正确性、安全边界、P0/P1
@@ -236,4 +238,17 @@ OpenAI-compatible adapter，默认读取 `DASHSCOPE_API_KEY`，调用阿里云 T
 本机配置都必须使用该 endpoint，`KITE_QWEN_MODEL` 只允许切换 Qwen 模型。runner 只输出 provider/model/usage/耗时和布尔结果，不输出
 prompt、response、credential 或完整 endpoint；缺 key 或调用失败时非零退出，mock 不得替代 G1。
 
-默认测试不访问真实模型或公网 MCP，也不运行依赖宿主机 Seatbelt/bubblewrap 的正向用例。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`。`test:runtime:fault` 运行确定性的 SIGKILL/SQLite/report contract，`test:runtime:soak` 运行固定 7-case CI profile；资源指标不完整时仍保持 `inconclusive`，不能包装成成功。`test:sandbox:smoke:native` 显式运行当前宿主机的原生 sandbox executor smoke。快速 TUI harness 单元测试进入默认 `unit` 门禁，也可用 `test:tui:harness` 单独运行；真实 TUI PTY scenarios 只由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时，不重复运行 harness。first-run provider 探测使用本地 mock `/v1/models`。`test:tui:smoke:native` 是依赖宿主机真实 sandbox backend 的显式 opt-in PTY smoke，不属于默认门禁；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 与原生平台文件，不是仓库规范的全量入口。旧 production-shaped authority contract 只作为 fail-closed 负向测试保留；registry 为空时不得生成外部认证或 promotion 结论，且不再绑定任何路线图 Task。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。
+AQ-8 的 `test:model:live` 保留独立 diagnostic candidate closure，但**当前安全停用**：fixed source-byte binding 后
+checked-in `activation=false` 在读取 caller environment/ledger 或创建 resolver、credential lease、scratch/child 前
+零网络 `blocked`。它只返回脱敏、有界的 blocked run report，不产生 observation、receipt、retained/observed report 或
+evidence；health JSON 也不能激活它。ADR-0071 已接受 Linux protected-supervisor 架构；只有其 persistent supervisor/control-plane identity、native isolation 和
+normal-exit/crash deletion proof 完成后才可重新审查 live branch。即使未来运行，它也只闭合 local-synthetic execution、
+scope profile、source-owned identity、runner、governance/retention 与 observation record/report digest，不是 candidate
+aggregate、repository revision、G0/G1 结论或发布输入。
+
+已接受 ADR-0072 另有 GitHub Actions 的 manual-only `Agent Live Evaluation` workflow，用于在受保护 `main` 和专用
+Environment 已由管理员配置时，以一次 opaque lease 运行真实 Agent read-file、自动压缩 success 与 client-abort 三个 fixed
+synthetic task，并只输出无 secret/正文的 `GitHubActionsAgentDiagnosticAggregateReportV1`。它不是 formal L3 observation、
+release evidence、G0/G1 或发布准入；没有实际 workflow run 时，不能声称真实 Provider 已验证。
+
+默认测试不访问真实模型或公网 MCP，也不运行依赖宿主机 Seatbelt/bubblewrap 的正向用例。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`。`test:runtime:fault` 运行确定性的 SIGKILL/SQLite/report contract，`test:runtime:soak` 运行固定 7-case CI profile；资源指标不完整时仍保持 `inconclusive`，不能包装成成功。`test:sandbox:smoke:native` 显式运行当前宿主机的原生 sandbox executor smoke。快速 TUI harness 单元测试进入默认 `unit` 门禁，也可用 `test:tui:harness` 单独运行；真实 TUI PTY scenarios 只由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时，不重复运行 harness。first-run provider 探测使用本地 mock `/v1/models`。`test:tui:smoke:native` 是依赖宿主机真实 sandbox backend 的显式 opt-in PTY smoke，不属于默认门禁；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 与原生平台文件，不是仓库规范的全量入口。旧 production-shaped authority contract 只作为 fail-closed 负向测试保留；registry 为空时不得生成外部认证或 promotion 结论，且不再绑定任何路线图 Task。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是 AQ-8 sealed、显式 opt-in 的 L3 diagnostic compatibility **保留接口**，当前由 checked-in `activation=false` 在 environment/ledger/resolver/credential lease/scratch/child 前零网络阻断。它仅返回脱敏、有界的 blocked run report，不能产生 L3 observation/receipt/evidence；future live branch 才会使用 synthetic input、临时 HOME/config/cwd、owner-only metadata ledger 和零 retry transport，且仍不属于 G1、release Gate 或 production content admission。现有 `test:provider:smoke` 的 DeepSeek/Qwen `qwen3.6-flash` G1 语义不变。未实际运行对应 live runner 时，不得把 mock、本地 E2E 或同 route 的 G1 结果表述为 L3 真实 Provider 验证。

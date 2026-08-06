@@ -8,15 +8,17 @@ import type {
   ExecutionCapabilitySurfaceV1,
   ProductionExecutionEntrypointV1,
 } from '@/core/sandbox/types';
+import { configSchema, type KiteCodeConfig } from './config-schema';
 import { admitProductionExecutionBoundaryV1 } from './execution-boundary';
 import { type FeatureFlags, getFeatureFlags } from './features';
-import { mcpServerSchema } from './mcp-server-config';
 import { defaultConfigPath, projectConfigPath } from './paths';
 import {
   resolveSessionLoggingPolicyV1,
   type SessionLoggingPolicyV1,
 } from './session-logging-policy';
 
+export type { KiteCodeConfig } from './config-schema';
+export { configSchema } from './config-schema';
 export type {
   ExecutionBoundaryAdmissionInputV1,
   ExecutionBoundaryQualificationEvaluationInputV1,
@@ -42,7 +44,6 @@ export {
   productionExecutionQualificationRegistryV1Schema,
   qualificationMatchesExecutionEnvironmentV1,
 } from './execution-qualification';
-
 export {
   DEFAULT_FEATURE_FLAGS,
   getFeatureFlags,
@@ -197,200 +198,6 @@ export {
   tightenSessionLoggingPolicyV1,
 } from './session-logging-policy';
 
-// ── Zod schemas ──
-
-const modelEntrySchema = z.union([
-  z.string().min(1),
-  z
-    .object({
-      name: z.string().min(1),
-      default: z.boolean().optional(),
-      contextWindow: z.number().int().positive().optional(),
-      /** @deprecated Use contextWindow. */
-      tokens: z.number().int().positive().optional(),
-      maxOutputTokens: z.number().int().positive().optional(),
-      tokenizerFamily: z.string().min(1).optional(),
-      supportsUsageMetadata: z.boolean().optional(),
-      supportsPromptCache: z.boolean().optional(),
-      streaming: z.boolean().optional(),
-    })
-    .strict(),
-]);
-
-const providerSchema = z.object({
-  type: z.enum(['deepseek', 'openai', 'openai-compatible', 'ollama']).optional(),
-  apiKey: z.string().optional(),
-  baseURL: z.string().url().optional(),
-  /** Default model name */
-  model: z.string().optional(),
-  /** Reasoning effort (low | medium | high | xhigh | max) */
-  effort: z.string().optional(),
-  /** Whether to pass reasoning_effort to the API. Default: deepseek=true, others=false. */
-  reasoning: z.boolean().optional(),
-  /** Extra kwargs passed through to the LangChain model constructor */
-  modelKwargs: z.record(z.string(), z.any()).optional(),
-  /** Available model names (string[]) */
-  models: z.array(modelEntrySchema).optional(),
-});
-
-// Deprecated: kept for backward compatibility with old top-level models array
-const legacyModelEntrySchema = z.object({
-  provider: z.string().min(1),
-  name: z.string().min(1),
-  default: z.boolean().optional(),
-});
-
-const interactionModeSchema = z.enum(['accept_edits', 'auto', 'full']);
-const sandboxSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-  })
-  .optional();
-const sessionLoggingTighteningSchema = z
-  .object({
-    mode: z.enum(['off', 'metadata', 'content']).optional(),
-    retentionDays: z.number().int().positive().optional(),
-    maxTotalBytes: z.number().int().positive().optional(),
-    maxSessionBytes: z.number().int().positive().optional(),
-  })
-  .strict()
-  .optional();
-const telemetryConsentGrantSchema = z
-  .object({
-    state: z.enum(['granted', 'withdrawn']),
-    metricCategories: z.array(
-      z.enum(['run_turn', 'model_usage', 'tool_mcp_skill', 'runtime_resource', 'release_rollout']),
-    ),
-    receiver: z.string().trim().min(1).max(128),
-    retentionDays: z.number().int().nonnegative(),
-    withdrawalMethod: z.string().trim().min(1).max(256),
-    canaryOptIn: z.boolean(),
-  })
-  .strict();
-const telemetryConfigSchema = z
-  .object({
-    enabled: z.boolean().optional(),
-    endpointPolicy: z.enum(['disabled', 'vendor_managed', 'admin_managed']).optional(),
-    endpointSecret: z.string().min(1).optional(),
-    consent: telemetryConsentGrantSchema.optional(),
-    contentLoggingConsent: z.boolean().optional(),
-    modelProviderConsent: z.boolean().optional(),
-  })
-  .strict()
-  .optional();
-
-const featuresSchema = z
-  .object({
-    planLifecycleV2: z.boolean().optional(),
-    interactionControllerV2: z.boolean().optional(),
-    autoReviewV2: z.boolean().optional(),
-    nativeLoopEngine: z.boolean().optional(),
-    loopMode: z.boolean().optional(),
-    capabilityCatalogV1: z.boolean().optional(),
-    mcpRuntimeBindingV1: z.boolean().optional(),
-    mcpExecutionRecordV1: z.boolean().optional(),
-    mcpProviderActionV1: z.boolean().optional(),
-    skillActivationV2: z.boolean().optional(),
-    skillWorkflowV1: z.boolean().optional(),
-    verificationV1: z.boolean().optional(),
-    toolSearchV1: z.boolean().optional(),
-    contextCompactionV2: z.boolean().optional(),
-    contextCompactionAutoV1: z.boolean().optional(),
-    contextCompactionManualV1: z.boolean().optional(),
-    sessionLoggingPolicyV1: z.boolean().optional(),
-    providerDataPolicyV1: z.boolean().optional(),
-    remoteMcpEgressPolicyV1: z.boolean().optional(),
-    resourceBudgetV1: z.boolean().optional(),
-    terminalOutcomeV1: z.boolean().optional(),
-    boundedCancellationV1: z.boolean().optional(),
-    executionBoundaryV1: z.boolean().optional(),
-    networkBoundaryV1: z.boolean().optional(),
-    releaseProfileV1: z.boolean().optional(),
-    observabilityMetricsV1: z.boolean().optional(),
-  })
-  .strict()
-  .optional();
-
-export const configSchema = z.object({
-  provider: z.record(z.string(), providerSchema).optional().default({}),
-  /** @deprecated Use provider[name].models instead */
-  models: z.array(legacyModelEntrySchema).optional(),
-  theme: z.enum(['dark', 'light']).optional(),
-  colorPreset: z.string().optional(),
-  interactionMode: interactionModeSchema.optional(),
-  features: featuresSchema,
-  sessionLogging: sessionLoggingTighteningSchema,
-  telemetry: telemetryConfigSchema,
-  sandbox: sandboxSchema,
-  autoReview: z
-    .object({
-      provider: z.string().optional(),
-      model: z.string().optional(),
-      timeoutMs: z.number().int().positive().optional(),
-      failOpen: z.boolean().optional(),
-      doomLoopRepeatThreshold: z.number().int().positive().optional(),
-      circuitBreakerMaxRejections: z.number().int().positive().optional(),
-      circuitBreakerWindowMs: z.number().int().positive().optional(),
-    })
-    .optional(),
-  compaction: z
-    .object({
-      autoMode: z.enum(['off', 'shadow', 'live']).optional(),
-      cohortSalt: z.string().min(1).optional(),
-      livePercentage: z.number().min(0).max(100).optional(),
-      localDebug: z
-        .object({ enabled: z.boolean(), directory: z.string().min(1) })
-        .strict()
-        .optional(),
-      triggerRatio: z.number().positive().max(1).optional(),
-      compactAfterEstimatedTokens: z.number().int().positive().optional(),
-      maxSummaryTokens: z.number().int().positive().optional(),
-      maxSummaryInputTokens: z.number().int().positive().optional(),
-      maxNarrativeTokens: z.number().int().positive().optional(),
-      compactRatio: z.number().positive().max(1).optional(),
-      hardRatio: z.number().positive().max(1).optional(),
-      warningRatio: z.number().positive().max(1).optional(),
-      minimumReductionRatio: z.number().nonnegative().max(1).optional(),
-      cooldownTurns: z.number().int().nonnegative().optional(),
-      providerSafetyRatio: z.number().positive().max(0.2).optional(),
-    })
-    .strict()
-    .superRefine((val, ctx) => {
-      if (
-        val.maxSummaryTokens != null &&
-        val.maxNarrativeTokens != null &&
-        val.maxSummaryTokens > val.maxNarrativeTokens
-      ) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: 'maxSummaryTokens must not exceed maxNarrativeTokens',
-          path: ['maxSummaryTokens'],
-        });
-      }
-      const warning = val.warningRatio ?? 0.8;
-      const compact = val.compactRatio ?? 0.9;
-      const hard = val.hardRatio ?? 0.94;
-      if (warning >= compact) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `warningRatio (${warning}) must be less than compactRatio (${compact})`,
-          path: ['warningRatio'],
-        });
-      }
-      if (compact >= hard) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: `compactRatio (${compact}) must be less than hardRatio (${hard})`,
-          path: ['compactRatio'],
-        });
-      }
-    })
-    .optional(),
-  mcpServers: z.record(z.string(), mcpServerSchema).optional().default({}),
-});
-
-export type KiteCodeConfig = z.infer<typeof configSchema>;
-
 // ── Types ──
 
 export type ModelProviderType = 'deepseek' | 'openai' | 'openai-compatible' | 'ollama';
@@ -422,7 +229,7 @@ export interface AgentConfig {
     supportsPromptCache?: boolean;
     streaming?: boolean;
   };
-  interactionMode?: z.infer<typeof interactionModeSchema>;
+  interactionMode?: KiteCodeConfig['interactionMode'];
   features?: Partial<FeatureFlags>;
   /** Release-pinned execution boundary; never sourced from project/user config. */
   executionBoundary?: ExecutionBoundaryV1;
@@ -684,6 +491,8 @@ export class ProductionExecutionAdmissionError extends Error {
  * returns no runnable config unless both release and rollout flags are enabled
  * and the sealed native qualification registry admits this exact environment.
  */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"executionBoundaryV1","outcome":"legacy_fallback","sourceKind":"config","symbol":"loadProductionAgentConfig"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"networkBoundaryV1","outcome":"legacy_fallback","sourceKind":"config","symbol":"loadProductionAgentConfig"} */
 export function loadProductionAgentConfig(
   options: LoadProductionAgentConfigOptions,
 ): ProductionAgentConfigV1 {
@@ -829,7 +638,9 @@ function inferReasoningDefault(type: ModelProviderType): boolean {
   return type === 'deepseek';
 }
 
-function builtInProvider(providerName: string): z.infer<typeof providerSchema> | null {
+type ConfigProvider = NonNullable<KiteCodeConfig['provider']>[string];
+
+function builtInProvider(providerName: string): ConfigProvider | null {
   if (providerName === 'ollama') return { type: 'ollama' };
   if (providerName === 'deepseek')
     return { type: 'deepseek', baseURL: 'https://api.deepseek.com/v1' };

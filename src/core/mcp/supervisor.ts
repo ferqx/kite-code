@@ -118,6 +118,7 @@ export interface McpSupervisorOptions {
   now?: () => number;
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"mcp:supervisor-control","featureId":"MCP-SUPERVISOR_CONTROL-001","domain":"mcp","observableContract":"mcp_open_world_protocol","risk":"p0","riskRationale":"open_world_mcp_risk","owner":"core-mcp","entrypoints":["cli","runtime","tui"],"sourceKind":"contract","symbol":"DefaultMcpSupervisor","l1SkillMcpBindings":[{"adapterId":"mcp-project-approval-catalog-churn-v1","assertionId":"l1.mcp.project-approval-catalog-churn.v1"}]} */
 export class DefaultMcpSupervisor implements McpSupervisor, McpRuntimeProvider {
   private readonly manager: McpConnectionManagerControlPlane;
   private readonly repository: McpConfigRepository;

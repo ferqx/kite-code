@@ -5,86 +5,11 @@ import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { AgentPhase } from '@/protocol/events';
 import { admitInteractionModeTarget, resolveInteractionModeTarget } from '../interaction-mode';
+import { parseSlashCommand } from '../public-surface';
 import type { Action } from '../reducers/actions';
-import { SLASH_COMMAND_DEFS } from './useSlashSuggestions';
 
-export type SlashAction =
-  | { type: 'effort'; level: string }
-  | { type: 'model'; name?: string }
-  | { type: 'theme'; preset?: string }
-  | { type: 'sessions'; id?: string }
-  | { type: 'plan'; task?: string }
-  | { type: 'permissions'; mode?: string }
-  | { type: 'release' }
-  | { type: 'telemetry' }
-  | { type: 'clear' }
-  | { type: 'help' }
-  | { type: 'new' }
-  | { type: 'exit' }
-  | { type: 'mcp' }
-  | { type: 'rewind' }
-  | { type: 'export' }
-  | { type: 'context' }
-  | { type: 'compact'; customInstructions?: string }
-  | { type: 'compact_reset' }
-  | { type: 'unknown'; raw: string };
-
-export function parseSlashCommand(input: string): SlashAction | null {
-  if (!input.startsWith('/')) return null;
-  const trimmed = input.slice(1).trim();
-  const [rawCommand, ...args] = trimmed.split(/\s+/);
-  const normalizedCommand = rawCommand?.toLowerCase();
-  const cmd =
-    SLASH_COMMAND_DEFS.find(
-      (definition) =>
-        definition.name === normalizedCommand ||
-        definition.aliases.includes(normalizedCommand ?? ''),
-    )?.name ?? normalizedCommand;
-  const arg = args.join(' ');
-
-  switch (cmd) {
-    case 'effort':
-      return { type: 'effort', level: arg || 'max' };
-    case 'model':
-      return { type: 'model', name: arg || undefined };
-    case 'theme':
-      return { type: 'theme', preset: arg || undefined };
-    case 'sessions':
-      return { type: 'sessions' };
-    case 'plan':
-      return { type: 'plan', task: arg || undefined };
-    case 'permissions':
-      return { type: 'permissions', mode: arg || undefined };
-    case 'release':
-      return args.length === 0 ? { type: 'release' } : { type: 'unknown', raw: input };
-    case 'telemetry':
-      return args.length === 0 ? { type: 'telemetry' } : { type: 'unknown', raw: input };
-    case 'clear':
-      return { type: 'clear' };
-    case 'help':
-      return { type: 'help' };
-    case 'new':
-      return { type: 'new' };
-    case 'mcp':
-      return args.length === 0 ? { type: 'mcp' } : { type: 'unknown', raw: input };
-    case 'rewind':
-      return { type: 'rewind' };
-    case 'export':
-      return { type: 'export' };
-    case 'context':
-      return { type: 'context' };
-    case 'compact':
-      // PR 9: /compact reset is a distinct action, not a compaction with customInstructions="reset"
-      if (args[0] === 'reset' && args.length === 1) {
-        return { type: 'compact_reset' };
-      }
-      return { type: 'compact', ...(arg ? { customInstructions: arg } : {}) };
-    case 'exit':
-      return { type: 'exit' };
-    default:
-      return { type: 'unknown', raw: input };
-  }
-}
+export type { SlashAction } from '../public-surface';
+export { parseSlashCommand } from '../public-surface';
 
 export function useSlashCommand(
   dispatch: Dispatch<Action>,

@@ -31,6 +31,7 @@ export function descriptorRevision(input: Omit<CapabilityDescriptor, 'revision'>
   return digestCapability(input);
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"capability-catalog:snapshot","featureId":"CAPABILITY-CATALOG_SNAPSHOT-001","domain":"runtime","observableContract":"capability_catalog_protocol","risk":"p0","riskRationale":"governed_runtime_boundary","owner":"core-capabilities","entrypoints":["runtime"],"sourceKind":"contract","symbol":"createSnapshot"} */
 export function createSnapshot(descriptors: CapabilityDescriptor[]): CapabilitySnapshot {
   const ordered = [...descriptors].sort((left, right) =>
     left.capabilityId.localeCompare(right.capabilityId),
@@ -46,6 +47,7 @@ export function createSnapshot(descriptors: CapabilityDescriptor[]): CapabilityS
   };
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"capability-catalog:binding","featureId":"CAPABILITY-CATALOG_BINDING-001","domain":"runtime","observableContract":"capability_catalog_protocol","risk":"p0","riskRationale":"governed_runtime_boundary","owner":"core-capabilities","entrypoints":["runtime"],"sourceKind":"contract","symbol":"createBinding","l0Binding":{"adapterId":"capability-catalog-binding-v1","assertionId":"l0.capability-catalog.binding-v1"}} */
 export function createBinding(input: {
   descriptor: CapabilityDescriptor;
   exposedToolName: string;

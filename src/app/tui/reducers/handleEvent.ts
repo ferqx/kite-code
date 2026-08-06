@@ -1940,6 +1940,7 @@ function materializePendingTool(
   return consume ? withoutPendingTool(materialized, toolCallId) : materialized;
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"tui:runtime-event-projection","featureId":"TUI-RUNTIME_EVENT_PROJECTION-001","domain":"tui","observableContract":"tui_runtime_event_projection","risk":"p1","riskRationale":"tui_control_surface","owner":"app-tui","entrypoints":["tui"],"sourceKind":"public_surface","symbol":"handleRuntimeEventAction","l1ProjectionBindings":[{"adapterId":"tui-invalid-arguments-projection-v1","assertionId":"l1.projection.tui.invalid-arguments.v1"},{"adapterId":"tui-provider-action-projection-v1","assertionId":"l1.projection.tui.provider-action.v1"},{"adapterId":"tui-tool-approval-projection-v1","assertionId":"l1.projection.tui.tool-approval.v1"}]} */
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
   switch (event.type) {
     case 'subagent.started':

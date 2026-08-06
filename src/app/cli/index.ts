@@ -13,7 +13,11 @@ import {
 } from '@/app/release/execution-status';
 import { formatReleaseStatusV1, projectReleaseStatusV1 } from '@/app/release/status-projection';
 import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
-import { type FeatureFlags, getFeatureFlags } from '@/core/config/features';
+import {
+  type FeatureFlags,
+  featureFlagAllowsCliEnablementV1,
+  getFeatureFlags,
+} from '@/core/config/features';
 import { defaultCheckpointPath, loadAgentConfig, parseFeatureOverride } from '@/core/config/index';
 import { skillDirs } from '@/core/config/paths';
 import { shouldPromptWorkspaceTrust, trustWorkspace } from '@/core/config/workspace-trust';
@@ -23,7 +27,6 @@ import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { runtimeStorePathFor } from '@/core/runtime/store';
-import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
 import { resolveSandboxRuntime } from '@/core/sandbox/index';
 import { createRuntimeSecretDetectorV1 } from '@/core/session-logger';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
@@ -31,6 +34,18 @@ import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentEvent, ShellApprovalGrant, WorkspaceAccessRequest } from '@/protocol/events';
 import type { UserInputProvider } from '@/protocol/provider';
 import packageJson from '../../../package.json' with { type: 'json' };
+import {
+  assertCliOptionApplicabilityV1,
+  CLI_OPTION_SPECS_V1,
+  type CliOptionIdV1,
+  cliCommandSpecV1,
+  cliOptionFlagV1,
+  formatCliHelpV1,
+  resolveCliCommandV1,
+} from './public-surface';
+import { projectCliRuntimeEventV1 } from './runtime-event-projection';
+
+export { projectCliRuntimeEventV1 } from './runtime-event-projection';
 
 export interface ParsedArgs {
   command: 'run' | 'resume' | 'trace' | 'help';
@@ -59,6 +74,8 @@ export interface ParsedArgs {
   telemetryStatus: boolean;
 }
 
+/** @qualification-entry-rejection-v1 {"entrypointId":"cli","denialFamily":"legacy_resume_rejected","sourceKind":"public_surface","symbol":"main"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"cli","flagId":"observabilityMetricsV1","outcome":"legacy_fallback","sourceKind":"public_surface","symbol":"main"} */
 export async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.command === 'help') {
@@ -79,10 +96,9 @@ export async function main(): Promise<void> {
     }
     return;
   }
-  if (args.command === 'resume') {
-    throw new Error(
-      'Legacy checkpoint sessions are not compatible with the Runtime Kernel. Start a new task.',
-    );
+  const commandSpec = cliCommandSpecV1(args.command);
+  if (commandSpec.supportState === 'unsupported') {
+    throw new Error(commandSpec.rejectionMessage ?? `Unsupported CLI command: ${args.command}`);
   }
 
   // Workspace trust gate (docs/active/workspace-trust.md). `run` executes
@@ -223,35 +239,23 @@ export async function main(): Promise<void> {
   try {
     for await (const event of generator) {
       observability.bridge.observeRuntimeEvent(event, new Date().toISOString());
-      console.log(
-        JSON.stringify(projectCliRuntimeEventV1(event, getFeatureFlags(config).terminalOutcomeV1)),
-      );
+      console.log(JSON.stringify(projectCliRuntimeEventForConfigV1(event, config)));
     }
   } finally {
     await observability.bridge.shutdown(250);
   }
 }
 
-export function projectCliRuntimeEventV1(
+/** @qualification-default-off-guard-v1 {"entrypointId":"cli","flagId":"terminalOutcomeV1","outcome":"safe_disable","disabledResult":"identity","closedValueParameter":"event","sourceKind":"public_surface","symbol":"projectCliRuntimeEventForConfigV1"} */
+function projectCliRuntimeEventForConfigV1(
   event: RuntimeEvent,
-  terminalOutcomeEnabled = true,
-):
-  | RuntimeEvent
-  | (RuntimeEvent & {
-      terminalPresentation: ReturnType<typeof projectTerminalOutcomeV1>;
-    }) {
-  if (
-    terminalOutcomeEnabled &&
-    (event.type === 'run.completed' || event.type === 'run.error') &&
-    event.outcome
-  ) {
-    return {
-      ...event,
-      terminalPresentation: projectTerminalOutcomeV1(event.outcome),
-    };
-  }
-  return event;
+  config: FeatureFlagsInput,
+): RuntimeEvent {
+  if (!getFeatureFlags(config).terminalOutcomeV1) return event;
+  return projectCliRuntimeEventV1(event, true);
 }
+
+type FeatureFlagsInput = Parameters<typeof getFeatureFlags>[0];
 
 function createCliRuntimeProvider(): RuntimeActionProvider {
   return {
@@ -445,46 +449,41 @@ function readStdin(): Promise<string> {
 // ── Argument parsing (unchanged from original cli.ts) ──
 
 export function parseArgs(argv: string[]): ParsedArgs {
-  const command =
-    argv[0] === 'resume'
-      ? 'resume'
-      : argv[0] === 'run'
-        ? 'run'
-        : argv[0] === 'trace'
-          ? 'trace'
-          : 'help';
+  const command = resolveCliCommandV1(argv[0]);
+  assertCliOptionApplicabilityV1(argv, command);
   const cwd = process.cwd();
-  const value = (name: string, fallback: string) => {
-    const index = argv.indexOf(name);
+  const value = (optionId: CliOptionIdV1, fallback: string) => {
+    const index = argv.indexOf(cliOptionFlagV1(optionId));
     const next = index >= 0 ? argv[index + 1] : undefined;
     return next || fallback;
   };
-  const optionalValue = (name: string) => {
-    const index = argv.indexOf(name);
+  const optionalValue = (optionId: CliOptionIdV1) => {
+    const index = argv.indexOf(cliOptionFlagV1(optionId));
     return index >= 0 ? (argv[index + 1] ?? '') : undefined;
   };
-  const noSandbox = argv.includes('--no-sandbox');
-  const interactionMode = argv.includes('--full')
+  const noSandbox = argv.includes(cliOptionFlagV1('noSandbox'));
+  const interactionMode = argv.includes(cliOptionFlagV1('full'))
     ? 'full'
-    : argv.includes('--auto')
+    : argv.includes(cliOptionFlagV1('auto'))
       ? 'auto'
-      : argv.includes('--ask')
+      : argv.includes(cliOptionFlagV1('ask'))
         ? 'accept_edits'
         : undefined;
-  const explicitThread = value('--thread', '');
-  const mode = parseMode(value('--mode', 'auto'));
-  const authorizationMode = parseAuthorizationMode(optionalValue('--authorization-mode') ?? '');
-  const answer = optionalValue('--answer');
-  const approvalHash = optionalValue('--approval-hash');
-  const replacementCommand = optionalValue('--replace-command');
+  const explicitThread = value('thread', '');
+  const mode = parseMode(value('mode', 'auto'));
+  const authorizationMode = parseAuthorizationMode(optionalValue('authorizationMode') ?? '');
+  const answer = optionalValue('answer');
+  const approvalHash = optionalValue('approvalHash');
+  const replacementCommand = optionalValue('replaceCommand');
   const approvalGrant = parseApprovalGrant(argv);
-  const traceTurnValue = optionalValue('--turn');
+  const traceTurnValue = optionalValue('turn');
   const traceTurn = traceTurnValue === undefined ? undefined : Number(traceTurnValue);
   if (traceTurn !== undefined && (!Number.isSafeInteger(traceTurn) || traceTurn < 1)) {
     throw new Error('--turn must be a positive integer.');
   }
 
-  const multi = (flag: string): string[] => {
+  const multi = (optionId: CliOptionIdV1): string[] => {
+    const flag = cliOptionFlagV1(optionId);
     const values: string[] = [];
     for (let i = 0; i < argv.length; i++) {
       if (argv[i] === flag && i + 1 < argv.length) {
@@ -497,27 +496,26 @@ export function parseArgs(argv: string[]): ParsedArgs {
   };
 
   const featureOverrides: Partial<FeatureFlags> = {};
-  for (const feature of multi('--feature')) {
+  for (const feature of multi('feature')) {
     const override = parseFeatureOverride(feature);
-    if (
-      override.executionBoundaryV1 === true ||
-      override.networkBoundaryV1 === true ||
-      override.releaseProfileV1 === true ||
-      override.observabilityMetricsV1 === true
-    ) {
+    const enabledFlag = Object.entries(override).find(
+      ([name, enabled]) =>
+        enabled === true && !featureFlagAllowsCliEnablementV1(name as keyof FeatureFlags),
+    );
+    if (enabledFlag) {
       throw new Error(
-        `Feature flag '${feature.split('=', 1)[0]}' is release-controlled and cannot be enabled by the CLI.`,
+        `Feature flag '${enabledFlag[0]}' is release-controlled and cannot be enabled by the CLI.`,
       );
     }
     Object.assign(featureOverrides, override);
   }
   return {
     command,
-    task: command === 'run' ? value('--task', positionalTask(argv)) : '',
+    task: command === 'run' ? value('task', positionalTask(argv)) : '',
     threadId: explicitThread || (command === 'run' ? freshThreadId() : 'default-thread'),
-    userId: value('--user', 'default-user'),
-    workspace: resolve(value('--workspace', cwd)),
-    checkpointPath: resolve(value('--checkpoints', defaultCheckpointPath())),
+    userId: value('user', 'default-user'),
+    workspace: resolve(value('workspace', cwd)),
+    checkpointPath: resolve(value('checkpoints', defaultCheckpointPath())),
     mode,
     authorizationMode,
     approve: approvalGrant !== undefined,
@@ -525,42 +523,32 @@ export function parseArgs(argv: string[]): ParsedArgs {
     approvalHash,
     replacementCommand,
     answer,
-    trustWorkspace: argv.includes('--trust-workspace'),
+    trustWorkspace: argv.includes(cliOptionFlagV1('trustWorkspace')),
     sandbox: !noSandbox,
     interactionMode,
-    skills: multi('--skill'),
+    skills: multi('skill'),
     featureOverrides,
     tracePath: command === 'trace' ? argv[1] : undefined,
     traceTurn,
-    traceFormat: optionalValue('--format') === 'json' ? 'json' : 'text',
-    executionStatus: argv.includes('--execution-status'),
-    releaseStatus: argv.includes('--release-status'),
-    telemetryStatus: argv.includes('--telemetry-status'),
+    traceFormat: optionalValue('format') === 'json' ? 'json' : 'text',
+    executionStatus: argv.includes(cliOptionFlagV1('executionStatus')),
+    releaseStatus: argv.includes(cliOptionFlagV1('releaseStatus')),
+    telemetryStatus: argv.includes(cliOptionFlagV1('telemetryStatus')),
   };
 }
 
 function parseApprovalGrant(argv: string[]): ShellApprovalGrant | undefined {
-  if (argv.includes('--full-access')) return 'full_access';
-  if (argv.includes('--approve-same-command')) return 'same_command';
-  if (argv.includes('--approve')) return 'approve_once';
+  if (argv.includes(cliOptionFlagV1('fullAccess'))) return 'full_access';
+  if (argv.includes(cliOptionFlagV1('approveSameCommand'))) return 'same_command';
+  if (argv.includes(cliOptionFlagV1('approve'))) return 'approve_once';
   return undefined;
 }
 
 function positionalTask(argv: string[]): string {
   if (argv[0] !== 'run') return '';
-  const optionNamesWithValues = new Set([
-    '--task',
-    '--thread',
-    '--user',
-    '--workspace',
-    '--checkpoints',
-    '--mode',
-    '--answer',
-    '--approval-hash',
-    '--replace-command',
-    '--skill',
-    '--feature',
-  ]);
+  const optionNamesWithValues = new Set<string>(
+    CLI_OPTION_SPECS_V1.filter((option) => option.takesValue).map((option) => option.flag),
+  );
   const parts: string[] = [];
   for (let index = 1; index < argv.length; index++) {
     const item = argv[index];
@@ -591,41 +579,11 @@ function freshThreadId(): string {
 }
 
 function printHelp(): void {
-  console.log(`Usage:
-  bun run agent run --task "Create hello.txt"
-  bun run agent resume --thread default-thread --approve
-
-Options:
-  --task <text>          Task for run
-  trace <events.jsonl>   Replay a runtime trace
-  --thread <id>          LangGraph thread id
-  --user <id>            User id
-  --workspace <path>     Tool workspace
-  --checkpoints <path>   SQLite checkpoint path
-  --mode <mode>          auto, write, or builder
-  --skill <name>         Activate a skill (repeatable)
-  --feature <name[=bool]> Temporarily override a registered feature flag (repeatable)
-  --execution-status     Print the effective production execution boundary and exit
-  --release-status       Print the effective release profile and Gate status and exit
-  --telemetry-status     Print redacted telemetry consent/export status and exit
-  --turn <n>             Limit trace output to a turn
-  --format json          Emit a trace as JSON
-  --approve              Approve tool call on resume
-  --approve-same-command Approve same future commands
-  --full-access          Start with full authorization (requires sandbox; source=config)
-  --trust-workspace      Record trust for --workspace and continue (source=config)
-  --approval-hash <hash> Approval hash
-  --replace-command <cmd> Replace pending command
-  --answer <text>        Answer user input interrupt
-  --authorization-mode <mode>  default or full-access
-  --ask                  Ask before every tool (default)
-  --auto                 Auto-review tools, ask when uncertain
-  --full           Run with full permissions, never ask
-  --no-sandbox           Disable sandbox`);
+  console.log(formatCliHelpV1());
 }
 
 if (import.meta.main) {
-  if (process.argv.includes('--version')) {
+  if (process.argv.includes(cliOptionFlagV1('version'))) {
     console.log(`Kite Code ${packageJson.version}`);
     process.exit(0);
   }

@@ -43,6 +43,18 @@ function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: stri
 
 type ToolTranscriptMessage = Extract<TranscriptMessage, { kind: 'tool' }>;
 
+const TERMINAL_TOOL_STATUSES = new Set<ToolCallRecord['status']>([
+  'succeeded',
+  'failed',
+  'rejected',
+  'cancelled',
+  'exhausted',
+]);
+
+function isTerminalToolStatus(status: ToolCallRecord['status']): boolean {
+  return TERMINAL_TOOL_STATUSES.has(status);
+}
+
 /**
  * Runtime events remain chronological, but the canonical transcript keeps
  * sibling Tool Results in assistant declaration order. This makes model
@@ -52,6 +64,16 @@ function appendToolTranscriptMessage(
   state: RuntimeState,
   message: ToolTranscriptMessage,
 ): RuntimeState['transcript'] {
+  // A Tool Call has one canonical consumption receipt in model context. Event
+  // envelopes deduplicate identical payloads, but a late result may have a
+  // different payload; never let that create a second ToolMessage.
+  if (
+    state.transcript.messages.some(
+      (candidate) => candidate.kind === 'tool' && candidate.toolCallId === message.toolCallId,
+    )
+  ) {
+    return state.transcript;
+  }
   const messages: TranscriptMessage[] = [...state.transcript.messages, message];
   const sourceCall = state.tools.calls[message.toolCallId];
   if (sourceCall?.modelMessageId) {
@@ -140,6 +162,7 @@ function toolResultMeta(
  * @param event - 要应用的运行时事件 / Runtime event to apply
  * @returns 新的不可变运行时状态 / New immutable runtime state
  */
+/** @qualification-surface-v1 {"sourceSurfaceId":"runtime:reducer-terminality","featureId":"RUNTIME-REDUCER_TERMINALITY-001","domain":"runtime","observableContract":"runtime_effect_terminality","risk":"p0","riskRationale":"recovery_authorization_boundary","owner":"core-runtime","entrypoints":["runtime"],"sourceKind":"contract","symbol":"reduceRuntimeState","l1SubagentRecoveryBindings":[{"adapterId":"runtime-subagent-terminal-consumption-v1","assertionId":"l1.runtime.subagent-terminal-consumption.v1"}]} */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
   event = normalizeTerminalRuntimeEventV1(event);
   switch (event.type) {
@@ -882,6 +905,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.started': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      if (isTerminalToolStatus(existingCall.status)) return state;
       const next = {
         ...state,
         tools: {
@@ -905,6 +929,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.finished': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      if (isTerminalToolStatus(existingCall.status)) return state;
       const isTaskCall = existingCall.name === 'task';
       const clearsMatchingApproval =
         isTaskCall &&
@@ -953,6 +978,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           resultMeta: toolResultMeta(existingCall, event),
         }),
         suspendedSubagents: clearSuspendedSubagent(state, event.toolCallId, isTaskCall),
+        subagentResumeClaims: clearSubagentResumeClaim(state, event.toolCallId, isTaskCall),
         interactions:
           clearsMatchingApproval || clearsMatchingUserInput ? { kind: 'idle' } : state.interactions,
       };
@@ -961,7 +987,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.failed': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
-      if (existingCall.status === 'failed') return state;
+      if (isTerminalToolStatus(existingCall.status)) return state;
       const failure =
         event.failure ??
         classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
@@ -1005,13 +1031,18 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           event.toolCallId,
           existingCall.name === 'task',
         ),
+        subagentResumeClaims: clearSubagentResumeClaim(
+          state,
+          event.toolCallId,
+          existingCall.name === 'task',
+        ),
       };
     }
 
     case 'tool.rejected': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (existingCall) {
-        if (existingCall.status === 'rejected') return state;
+        if (isTerminalToolStatus(existingCall.status)) return state;
         const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
         const deferredUntilBuilding = failure.kind === 'phase_deferred';
         const deniedByPlanningPhase = failure.kind === 'phase_denied';
@@ -1080,6 +1111,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             event.toolCallId,
             existingCall.name === 'task',
           ),
+          subagentResumeClaims: clearSubagentResumeClaim(
+            state,
+            event.toolCallId,
+            existingCall.name === 'task',
+          ),
         };
       }
       return {
@@ -1095,15 +1131,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.cancelled': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
-      if (
-        existingCall.status === 'succeeded' ||
-        existingCall.status === 'failed' ||
-        existingCall.status === 'rejected' ||
-        existingCall.status === 'cancelled' ||
-        existingCall.status === 'exhausted'
-      ) {
-        return state;
-      }
+      if (isTerminalToolStatus(existingCall.status)) return state;
       const clearsMatchingInteraction =
         state.interactions.kind !== 'idle' &&
         state.interactions.kind !== 'awaiting_provider_action' &&
@@ -1133,18 +1161,56 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           event.toolCallId,
           existingCall.name === 'task',
         ),
+        subagentResumeClaims: clearSubagentResumeClaim(
+          state,
+          event.toolCallId,
+          existingCall.name === 'task',
+        ),
         interactions: clearsMatchingInteraction ? { kind: 'idle' } : state.interactions,
       };
     }
 
     case 'subagent.suspended': {
       const existingCall = state.tools.calls[event.toolCallId];
-      if (existingCall?.name !== 'task') return state;
+      if (existingCall?.name !== 'task' || isTerminalToolStatus(existingCall.status)) return state;
       return {
         ...state,
         suspendedSubagents: {
           ...state.suspendedSubagents,
           [event.toolCallId]: event.snapshot,
+        },
+        subagentResumeClaims: clearSubagentResumeClaim(state, event.toolCallId, true),
+      };
+    }
+
+    case 'subagent.resume_claimed': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      const snapshot = state.suspendedSubagents[event.toolCallId];
+      const claim = event.claim;
+      if (
+        existingCall?.name !== 'task' ||
+        existingCall.status !== 'approved' ||
+        !snapshot ||
+        state.subagentResumeClaims[event.toolCallId] ||
+        !claim.claimId ||
+        !claim.claimedAt ||
+        claim.subagentId !== snapshot.subagentId ||
+        claim.childToolCallId !== snapshot.blockedTool.toolCallId
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: { ...existingCall, status: 'running' as const },
+          },
+        },
+        subagentResumeClaims: {
+          ...state.subagentResumeClaims,
+          [event.toolCallId]: claim,
         },
       };
     }
@@ -1236,7 +1302,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     // ── 工具审批交互 / Approval interaction ──
 
-    case 'approval.requested':
+    case 'approval.requested': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (existingCall && isTerminalToolStatus(existingCall.status)) return state;
       return {
         ...state,
         tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_approval'),
@@ -1247,6 +1315,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           approval: event.approval,
         },
       };
+    }
 
     case 'approval.granted':
       if (
@@ -1316,6 +1385,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ok: false,
         }),
         suspendedSubagents: clearSuspendedSubagent(
+          state,
+          toolCallId,
+          state.tools.calls[toolCallId]?.name === 'task',
+        ),
+        subagentResumeClaims: clearSubagentResumeClaim(
           state,
           toolCallId,
           state.tools.calls[toolCallId]?.name === 'task',
@@ -1986,6 +2060,18 @@ function clearSuspendedSubagent(
 ): RuntimeState['suspendedSubagents'] {
   if (!isTaskCall || !state.suspendedSubagents[toolCallId]) return state.suspendedSubagents;
   const { [toolCallId]: _snapshot, ...remaining } = state.suspendedSubagents;
+  return remaining;
+}
+
+function clearSubagentResumeClaim(
+  state: RuntimeState,
+  toolCallId: string,
+  isTaskCall: boolean,
+): RuntimeState['subagentResumeClaims'] {
+  if (!isTaskCall || !state.subagentResumeClaims[toolCallId]) {
+    return state.subagentResumeClaims;
+  }
+  const { [toolCallId]: _claim, ...remaining } = state.subagentResumeClaims;
   return remaining;
 }
 

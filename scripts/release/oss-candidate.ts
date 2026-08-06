@@ -266,39 +266,7 @@ async function compileExecutable(entrypoint: string, outfile: string): Promise<v
     minify: true,
     sourcemap: 'none',
     define: { 'process.env.NODE_ENV': JSON.stringify('production') },
-    plugins: [
-      {
-        name: 'standalone-release-stubs',
-        setup(builder) {
-          builder.onResolve({ filter: /^react-devtools-core$/ }, () => ({
-            path: 'react-devtools-core',
-            namespace: 'kite-release-stub',
-          }));
-          builder.onResolve({ filter: /^@napi-rs\/keyring$/ }, () => ({
-            path: '@napi-rs/keyring',
-            namespace: 'kite-keyring-stub',
-          }));
-          builder.onLoad({ filter: /.*/, namespace: 'kite-release-stub' }, () => ({
-            contents: 'export default { initialize() {}, connectToDevTools() {} };',
-            loader: 'js',
-          }));
-          builder.onLoad({ filter: /.*/, namespace: 'kite-keyring-stub' }, () => ({
-            contents: `
-              const unavailable = () => {
-                throw new Error('Native credential store is unavailable in the standalone candidate.');
-              };
-              export class AsyncEntry {
-                async getSecret() { return unavailable(); }
-                async setSecret() { return unavailable(); }
-                async deleteCredential() { return unavailable(); }
-              }
-              export const findCredentialsAsync = async () => unavailable();
-            `,
-            loader: 'js',
-          }));
-        },
-      },
-    ],
+    plugins: createStandaloneReleaseStubsV1(),
   });
   if (!result.success) {
     const summary = result.logs.map((entry) => entry.message).join('; ');
@@ -307,6 +275,39 @@ async function compileExecutable(entrypoint: string, outfile: string): Promise<v
   if (!existsSync(outfile) || !statSync(outfile).isFile()) {
     throw new Error(`Bun compile did not create ${outfile}.`);
   }
+}
+
+/**
+ * Candidate-only stubs. The keyring replacement is a source-owned module so
+ * its complete fail-closed API is testable; any candidate executable that
+ * reaches the MCP credential store bundles it, and the archive digest then
+ * binds those executable bytes.
+ */
+export function createStandaloneReleaseStubsV1(): Bun.BunPlugin[] {
+  const standaloneKeyringStubPath = resolve('src/app/release/standalone-keyring-unavailable.ts');
+  return [
+    {
+      name: 'standalone-release-stubs',
+      setup(builder) {
+        builder.onResolve({ filter: /^react-devtools-core$/ }, () => ({
+          path: 'react-devtools-core',
+          namespace: 'kite-release-stub',
+        }));
+        builder.onResolve({ filter: /^@napi-rs\/keyring$/ }, () => ({
+          path: standaloneKeyringStubPath,
+          namespace: 'kite-keyring-stub',
+        }));
+        builder.onLoad({ filter: /.*/, namespace: 'kite-release-stub' }, () => ({
+          contents: 'export default { initialize() {}, connectToDevTools() {} };',
+          loader: 'js',
+        }));
+        builder.onLoad({ filter: /.*/, namespace: 'kite-keyring-stub' }, () => ({
+          contents: readFileSync(standaloneKeyringStubPath, 'utf8'),
+          loader: 'ts',
+        }));
+      },
+    },
+  ];
 }
 
 export async function writeOssCandidateArchive(input: {

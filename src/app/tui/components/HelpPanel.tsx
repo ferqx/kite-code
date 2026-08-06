@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useTheme } from '@/app/tui/theme';
 import type { SandboxBackend } from '@/core/sandbox';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
-import { SLASH_COMMAND_DEFS } from '../hooks/useSlashSuggestions';
+import { SLASH_COMMAND_DEFS } from '../public-surface';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 
 interface HelpPanelProps {

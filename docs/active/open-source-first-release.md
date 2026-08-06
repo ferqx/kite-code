@@ -23,6 +23,12 @@ TUI/CLI smoke 通过；DeepSeek `deepseek-v4-flash` 与阿里千问 OpenAI-compa
 只能包含 provider alias、model、耗时、usage 与布尔结果，不包含 key、endpoint query、prompt 或
 response 正文。
 
+已接受 ADR-0072 的手动 `agent-live-evaluation.yml` 不属于 `release-candidate.yml`、G0 或 G1。它可在受保护 main 的
+专用 Environment 中一次取得 opaque lease，执行受限真实 Agent read-file、automatic-compaction success 与 client-abort
+synthetic diagnostics，并只输出同一 workflow 内 fresh-verified 的 public-safe aggregate report；它没有 candidate artifact、
+release evidence、Gate 输入或 production-content admission authority，也不改变 DeepSeek 与 Qwen `qwen3.6-flash` 的既有 G1
+smoke。未发生实际 workflow run 时，不能把其 contract/preflight 记为真实 Provider 结果。
+
 ## 制品与安装
 
 `bun run release:build` 为当前平台编译独立的 `kite` CLI 与 `kite-tui`，生成 gzip tar、严格 manifest、
@@ -54,6 +60,20 @@ upgrade 与 rollback 会先完整验证既有 managed tree；upgrade 还拒绝�
 - Auto Compaction 首版不受支持并默认关闭；未来若要启用必须重新立项。
 - Web、多租户、托管 runner、服务端 credential custody、无人值守共享 writer 和远程发布控制面明确
   不受首版支持。
+
+## AQ-7 native diagnostics
+
+`.github/workflows/native-conformance-qualification.yml` 是 ADR-0070 的独立 diagnostic workflow，不是本文件的
+release-candidate workflow，也不修改首发 G0/G1。当前它在治理预检时停住：没有可审计的 protected-CI quota ledger、
+维护者 authorization 与 protected-ref witness 时，只上传 metadata-only blocked transport，不构建、验证或启动候选。
+该 transport 不属于候选 artifact、release evidence 或发布准入。
+
+未来的 standalone keyring disabled observation 必须同时闭合 exact candidate payload marker（从已验证 archive 的
+native binary 实测）、candidate resolver、source-owned unavailable module 的 credential API fail-closed contract，以及
+公开 known-limitations/release-notes disclosure；在治理控制面审核就绪前不存在该 observation，更不能形成发布结论。
+该 runtime Feature 保持 `supported/default_on/runtime`：只有 collector 重建公开 CLI commands/options 与 TUI slash
+registry，确认不存在 credential/keyring-specific public entrypoint 后，CLI/TUI scope 才各自记录
+`entrypoint_not_exposed`，而非把整个 Feature 改写为 unsupported。现有候选/安装/rollback 语义保持不变。
 
 ## 明确移出路线图
 

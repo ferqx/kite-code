@@ -86,6 +86,16 @@ import type { InteractionMode } from '@/protocol/events';
 
 type SubagentEvent = Parameters<SubAgentEventSink>[0];
 
+class SubagentResumeClaimError extends Error {
+  readonly subagentId: string;
+
+  constructor(subagentId: string, message: string) {
+    super(message);
+    this.name = 'SubagentResumeClaimError';
+    this.subagentId = subagentId;
+  }
+}
+
 function appendProjectedRuntimeEvents(
   events: RuntimeEvent[],
   projected: ProjectedToolResult,
@@ -326,6 +336,12 @@ async function handleSubAgentResume(params: {
   emitSubagentEvent: SubAgentEventSink;
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorderV1;
+  /** Persists the one-time continuation claim before the blocked child dispatches. */
+  persistSubagentResumeClaim?: (
+    event: Extract<RuntimeEvent, { type: 'subagent.resume_claimed' }>,
+  ) => Promise<boolean>;
+  /** Reads the state after the claim persistence boundary has committed. */
+  getRuntimeState?: () => Readonly<RuntimeState>;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
   const { continuation } = params;
@@ -360,6 +376,30 @@ async function handleSubAgentResume(params: {
     const resumedBinding = call?.bindingId
       ? params.state.capabilities.bindings[call.bindingId]
       : undefined;
+    const claim = {
+      claimId: crypto.randomUUID(),
+      subagentId: continuation.id,
+      childToolCallId: continuation.blockedTool.toolCallId,
+      claimedAt: new Date().toISOString(),
+    };
+    const claimPersisted = await params.persistSubagentResumeClaim?.({
+      type: 'subagent.resume_claimed',
+      toolCallId: params.toolCallId,
+      claim,
+    });
+    const committedClaim = params.getRuntimeState?.().subagentResumeClaims[params.toolCallId];
+    if (
+      !claimPersisted ||
+      !committedClaim ||
+      committedClaim.claimId !== claim.claimId ||
+      committedClaim.subagentId !== claim.subagentId ||
+      committedClaim.childToolCallId !== claim.childToolCallId
+    ) {
+      throw new SubagentResumeClaimError(
+        continuation.id,
+        'The sub-agent continuation resume claim was not durably acquired; the blocked child tool was not dispatched.',
+      );
+    }
     let childReservation:
       | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
       | undefined;
@@ -546,6 +586,13 @@ async function handleSubAgentResume(params: {
  * persisted call record and returns facts only; it never creates a ToolMessage
  * or mutates a graph channel.
  */
+/** @qualification-surface-v1 {"sourceSurfaceId":"runtime:tool-lifecycle","featureId":"RUNTIME-TOOL_LIFECYCLE-001","domain":"runtime","observableContract":"runtime_tool_lifecycle","risk":"p0","riskRationale":"governed_runtime_boundary","owner":"core-runtime","entrypoints":["runtime"],"sourceKind":"contract","symbol":"executeRuntimeTools","l1Bindings":[{"adapterId":"runtime-approved-parallel-tools-v1","assertionId":"l1.runtime.approved-parallel-tools.v1"},{"adapterId":"runtime-invalid-tool-correction-v1","assertionId":"l1.runtime.invalid-tool-correction.v1"},{"adapterId":"runtime-tool-approval-verification-v1","assertionId":"l1.runtime.tool-approval-verification.v1"}],"l1SkillMcpBindings":[{"adapterId":"mcp-auth-invalid-provider-action-v1","assertionId":"l1.mcp.auth-invalid-provider-action.v1"}]} */
+/** @qualification-surface-v1 {"sourceSurfaceId":"subagent:tool-controller","featureId":"SUBAGENT-TOOL_CONTROLLER-001","domain":"subagent","observableContract":"subagent_runtime_protocol","risk":"p0","riskRationale":"subagent_authority_boundary","owner":"core-subagent","entrypoints":["runtime"],"sourceKind":"contract","symbol":"executeRuntimeTools","l1SubagentRecoveryBindings":[{"adapterId":"subagent-approval-resume-claim-v1","assertionId":"l1.subagent.approval-resume-claim.v1"}]} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"mcpProviderActionV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"executeRuntimeTools"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"verificationV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"executeRuntimeTools"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"remoteMcpEgressPolicyV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"executeRuntimeTools"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"resourceBudgetV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"executeRuntimeTools"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"boundedCancellationV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"executeRuntimeTools"} */
 export async function executeRuntimeTools(params: {
   state: RuntimeState;
   toolCallIds: string[];
@@ -569,6 +616,12 @@ export async function executeRuntimeTools(params: {
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorderV1;
+  /** Runtime-owned durable boundary for a one-time subagent continuation claim. */
+  persistSubagentResumeClaim?: (
+    event: Extract<RuntimeEvent, { type: 'subagent.resume_claimed' }>,
+  ) => Promise<boolean>;
+  /** Current Runtime state after a durable streaming event has committed. */
+  getRuntimeState?: () => Readonly<RuntimeState>;
 }): Promise<RuntimeEvent[]> {
   const approvedParallelShellBatch =
     params.toolCallIds.length > 1 &&
@@ -1310,25 +1363,51 @@ export async function executeRuntimeTools(params: {
       // execute the blocked tool with the approved grant and resume.
       const suspended = params.state.suspendedSubagents[toolCallId];
       if (suspended && call.status === 'approved') {
-        const restored = deserializeSubagentContinuation(suspended);
-        const resumeEvents = await handleSubAgentResume({
-          state: params.state,
-          toolCallId,
-          continuation: restored,
-          shellExecutor: params.shellExecutor,
-          mcpManager: params.mcpManager,
-          skillManifests: params.skillManifests,
-          skillOptions: params.skillOptions,
-          signal: params.signal,
-          taskConfig: params.taskConfig,
-          taskModel: params.taskModel,
-          providerDataAdmission: params.providerDataAdmission,
-          descendantResourceAdmission: params.descendantResourceAdmission,
-          emitSubagentEvent,
-          recordFilePreimage: params.recordFilePreimage,
-          recordNetworkDecision: params.recordNetworkDecision,
-        });
-        events.push(...resumeEvents);
+        try {
+          const restored = deserializeSubagentContinuation(suspended);
+          const resumeEvents = await handleSubAgentResume({
+            state: params.state,
+            toolCallId,
+            continuation: restored,
+            shellExecutor: params.shellExecutor,
+            mcpManager: params.mcpManager,
+            skillManifests: params.skillManifests,
+            skillOptions: params.skillOptions,
+            signal: params.signal,
+            taskConfig: params.taskConfig,
+            taskModel: params.taskModel,
+            providerDataAdmission: params.providerDataAdmission,
+            descendantResourceAdmission: params.descendantResourceAdmission,
+            emitSubagentEvent,
+            recordFilePreimage: params.recordFilePreimage,
+            recordNetworkDecision: params.recordNetworkDecision,
+            persistSubagentResumeClaim: params.persistSubagentResumeClaim,
+            getRuntimeState: params.getRuntimeState,
+          });
+          events.push(...resumeEvents);
+        } catch (error) {
+          if (error instanceof DescendantResourceAdmissionError) throw error;
+          if (error instanceof SubagentResumeClaimError) {
+            events.push({
+              type: 'subagent.failed',
+              subagent: {
+                id: error.subagentId,
+                error: error.message,
+                summary: error.message,
+                toolCallCount: 0,
+                durationMs: 0,
+              },
+            });
+          }
+          events.push({
+            type: 'tool.failed',
+            toolCallId,
+            failure: classifyFailure(
+              error instanceof SubagentResumeClaimError ? 'unknown' : 'tool_runtime_error',
+              error instanceof Error ? error.message : String(error),
+            ),
+          });
+        }
         continue;
       }
 
@@ -1439,11 +1518,23 @@ export async function executeRuntimeTools(params: {
         });
       } catch (error) {
         if (error instanceof DescendantResourceAdmissionError) throw error;
+        if (error instanceof SubagentResumeClaimError) {
+          events.push({
+            type: 'subagent.failed',
+            subagent: {
+              id: error.subagentId,
+              error: error.message,
+              summary: error.message,
+              toolCallCount: 0,
+              durationMs: 0,
+            },
+          });
+        }
         events.push({
           type: 'tool.failed',
           toolCallId,
           failure: classifyFailure(
-            'tool_runtime_error',
+            error instanceof SubagentResumeClaimError ? 'unknown' : 'tool_runtime_error',
             error instanceof Error ? error.message : String(error),
           ),
         });
@@ -1842,6 +1933,7 @@ export async function executeRuntimeTools(params: {
   return events;
 }
 
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"mcpExecutionRecordV1","outcome":"safe_disable","disabledResult":"empty","sourceKind":"contract","symbol":"createMcpInvocationRecord"} */
 function createMcpInvocationRecord(params: {
   state: RuntimeState;
   call: RuntimeState['tools']['calls'][string];

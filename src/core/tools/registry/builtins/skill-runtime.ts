@@ -54,6 +54,8 @@ const effects = () => ({
   classificationReason: 'Operates on the active governed Skill frame.',
 });
 
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillActivationV2","outcome":"legacy_fallback","sourceKind":"registry","symbol":"activateSkillSpec"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillWorkflowV1","outcome":"legacy_fallback","sourceKind":"registry","symbol":"activateSkillSpec"} */
 export const activateSkillSpec = defineExecutableTool({
   name: 'activate_skill',
   kind: 'coordination',

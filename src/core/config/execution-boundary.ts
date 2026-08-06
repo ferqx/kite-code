@@ -84,6 +84,7 @@ const executionBoundaryObjectV1Schema = z
   );
 
 /** Strict parser for the release-owned execution boundary. */
+/** @qualification-surface-v1 {"sourceSurfaceId":"sandbox:execution-boundary","featureId":"SANDBOX-EXECUTION_BOUNDARY-001","domain":"sandbox","observableContract":"sandbox_execution_boundary","risk":"p0","riskRationale":"execution_isolation","owner":"core-execution","entrypoints":["cli","runtime","tui"],"sourceKind":"config","symbol":"executionBoundaryV1Schema","l0Binding":{"adapterId":"execution-boundary-schema-v1","assertionId":"l0.sandbox-execution-boundary.schema-v1"}} */
 export const executionBoundaryV1Schema = executionBoundaryObjectV1Schema;
 
 export { executionBackendCapabilitiesV1Schema } from './execution-qualification';

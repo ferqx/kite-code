@@ -4,7 +4,7 @@
 
 读取时机：修改 abort/cancel、Runtime 恢复、Effect lease、消息工具对清理、工具参数异常、Subagent continuation 或 TUI 取消行为时。
 
-验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/tool-controller.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts tests/tui-rewind-path.test.tsx tests/evals/qualification/runtime-subagent-recovery.test.ts tests/evals/qualification/tui-rewind-projection.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run typecheck`。
 
 ## Runtime 取消语义
 
@@ -64,6 +64,16 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
 
+Runtime schema v22 为已批准的 Subagent continuation 增加 durable
+`subagent.resume_claimed` / `subagentResumeClaims` 边界。v22 snapshot 中只有 suspended continuation
+仍在、而对应 claim 尚不存在时，才可在原 approval 后继续；Controller 必须先把与 parent task、
+subagent 和原 `blockedTool.toolCallId` 精确匹配的单次 claim 持久化，并读取已提交 state 验证，再允许
+child tool dispatch。claim 写入失败或不匹配时 child 不得 dispatch。若重启发现已持久化 claim 而没有
+durable child terminal，Kernel 只产生 `subagent.recovery_unavailable`，由 executor 形成失败的 task
+terminal，不能自动 resume/replay；pre-v22 的 suspended continuation 同样 fail closed，因为它无法证明
+claim 前后的真实边界。这是本地恢复/消费不变量，不是对任何 Provider、Tool 或外部系统的分布式
+exactly-once 承诺。
+
 ## Rewind 文件恢复（ADR-0042 §4）
 
 `/rewind` 的 TUI 默认恢复不再截断源会话。检查点列表把命名恢复点解释为其后第一条用户消息
@@ -78,7 +88,7 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 5. Fork 复制事件时必须保留原始 `created_at` 与 envelope metadata；源事件 JSON 无法严格
    解析时必须在修改目标 thread 前 fail closed，不能创建空会话。新 thread 必须回到默认
    authorization，并清除命令 grant、full interaction mode、turn-scoped binding/disclosure、
-   Provider waiver/pending、待处理交互、活动工具队列与 suspended subagent；稳定的已加载
+   Provider waiver/pending、待处理交互、活动工具队列、suspended subagent 与 resume claim；稳定的已加载
    capability 与历史 invocation 事实可以保留。
 6. 自动恢复点只在 `turn.completed` 已持久化后创建，快照必须投影 completed turn；不得在
    `run.completed` 与 `turn.completed` 之间暴露 active turn 恢复点。
@@ -114,6 +124,12 @@ Core 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性�
 ## Subagent continuation
 
 子 Agent 因审批暂停时，continuation 必须可序列化并绑定原 tool call、消息、步骤与 journal。恢复前重新校验批准内容和能力边界；用户拒绝或取消该审批时，清除 continuation，并按上述规则中止整个当前 turn，不再恢复子 Agent 生成后续结果。
+
+approved continuation 不能仅凭内存 callback 或已批准状态重新执行。`handleSubAgentResume` 必须在
+blocked child tool 的实际 dispatch 前取得上述单次 durable claim；`tool.finished`、`tool.failed`、
+`tool.rejected`、`tool.cancelled` 和新的 suspension 都清除已关联的 continuation/claim。reducer 对已终态
+task call 忽略 duplicate 或不同 payload 的 late terminal，transcript 对同一 task tool call 只保留一个
+canonical ToolMessage；这防止本地第二次消费，却不把未知外部 child effect 声明为成功。
 
 Resource budget 为每次 continuation/resume 创建新的 parent attempt reservation；每个子模型及
 工具、Shell/MCP 调用再创建链接到 parent 的独立 reservation，artifact bytes 由产出它的调用一并

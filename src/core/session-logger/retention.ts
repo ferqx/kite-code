@@ -10,8 +10,8 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { sessionLogRoot } from '@/core/config/paths';
-import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
+import { sessionLogRoot } from '../config/paths';
+import type { SessionLoggingPolicyV1 } from '../config/session-logging-policy';
 import {
   type ActiveSessionLeaseOptions,
   inspectSessionLogLease,

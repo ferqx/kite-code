@@ -18,6 +18,7 @@ const TERMINAL_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
  * The active task remains resumable. Every unfinished tool call receives a
  * result-pairing cancellation event before the turn is marked aborted.
  */
+/** @qualification-surface-v1 {"sourceSurfaceId":"runtime:cancellation-boundary","featureId":"RUNTIME-CANCELLATION_BOUNDARY-001","domain":"runtime","observableContract":"runtime_effect_terminality","risk":"p0","riskRationale":"recovery_authorization_boundary","owner":"core-runtime","entrypoints":["runtime"],"sourceKind":"contract","symbol":"eventsForRunCancellation","l1Bindings":[{"adapterId":"runtime-bounded-cleanup-v1","assertionId":"l1.runtime.bounded-cleanup-retains-unknown.v1"}],"l1SubagentRecoveryBindings":[{"adapterId":"runtime-parallel-cancel-convergence-v1","assertionId":"l1.runtime.parallel-cancel-convergence.v1"}]} */
 export function eventsForRunCancellation(
   state: Readonly<RuntimeState>,
   reason = 'Cancelled by user.',
@@ -230,6 +231,7 @@ export type RuntimeActionResult =
   | { status: 'rejected'; reason: string; telemetry: RuntimeEvent };
 
 /** Convert a validated user action to facts.  An invalid action intentionally has no effects. */
+/** @qualification-surface-v1 {"sourceSurfaceId":"runtime:interaction-action","featureId":"RUNTIME-INTERACTION_ACTION-001","domain":"runtime","observableContract":"runtime_interaction_action","risk":"p0","riskRationale":"authorization_boundary","owner":"core-runtime","entrypoints":["runtime"],"sourceKind":"contract","symbol":"eventsForRuntimeAction","l1Bindings":[{"adapterId":"runtime-approval-rejection-v1","assertionId":"l1.runtime.approval-rejection-aborts-turn.v1"}],"l1SkillMcpBindings":[{"adapterId":"runtime-provider-action-new-turn-v1","assertionId":"l1.runtime.provider-action-new-turn.v1"}]} */
 export function eventsForRuntimeAction(
   state: RuntimeState,
   action: RuntimeUserAction,

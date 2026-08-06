@@ -7,52 +7,28 @@ import {
   RELEASE_CAPABILITIES,
   type ReleaseCapability,
 } from './release-capabilities';
+import {
+  EMBEDDED_RELEASE_PROFILE_DECLARATIONS_V1,
+  type EmbeddedReleaseProfileIdV1,
+  PRODUCTION_DISTRIBUTION_TARGETS_V1,
+  type ProductionDistributionTargetIdentityV1,
+} from './release-surface-registry';
+
+export type {
+  EmbeddedReleaseProfileDeclarationV1,
+  EmbeddedReleaseProfileIdV1,
+  ProductionDistributionTargetIdentityV1,
+  ProductionDistributionTargetV1,
+} from './release-surface-registry';
+export {
+  EMBEDDED_RELEASE_PROFILE_DECLARATIONS_V1,
+  EMBEDDED_RELEASE_PROFILE_IDS_V1,
+  PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1,
+  PRODUCTION_DISTRIBUTION_TARGETS_V1,
+  SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1,
+} from './release-surface-registry';
 
 export const RELEASE_PROFILE_VERSION = 1 as const;
-
-export const PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1 = [
-  'macos-15-arm64',
-  'ubuntu-24.04-x64',
-  'windows-2025-x64',
-] as const;
-export type ProductionDistributionTargetIdentityV1 =
-  (typeof PRODUCTION_DISTRIBUTION_TARGET_IDENTITIES_V1)[number];
-export type ProductionDistributionTargetV1 = Readonly<{
-  identity: ProductionDistributionTargetIdentityV1;
-  platform: 'macos' | 'linux' | 'windows';
-  arch: 'arm64' | 'x64';
-  nativeRunner: 'macos-15' | 'ubuntu-24.04' | 'windows-2025';
-}>;
-
-/**
- * Release-owned, closed distribution target registry. Membership admits only
- * a TUI/CLI artifact identity; it does not admit any effectful capability.
- */
-export const PRODUCTION_DISTRIBUTION_TARGETS_V1: Readonly<
-  Record<ProductionDistributionTargetIdentityV1, ProductionDistributionTargetV1>
-> = Object.freeze({
-  'macos-15-arm64': Object.freeze({
-    identity: 'macos-15-arm64',
-    platform: 'macos',
-    arch: 'arm64',
-    nativeRunner: 'macos-15',
-  }),
-  'ubuntu-24.04-x64': Object.freeze({
-    identity: 'ubuntu-24.04-x64',
-    platform: 'linux',
-    arch: 'x64',
-    nativeRunner: 'ubuntu-24.04',
-  }),
-  'windows-2025-x64': Object.freeze({
-    identity: 'windows-2025-x64',
-    platform: 'windows',
-    arch: 'x64',
-    nativeRunner: 'windows-2025',
-  }),
-});
-
-/** D-04 effectful execution support remains independently empty. */
-export const SUPPORTED_PRODUCTION_EXECUTION_TARGETS_V1: readonly string[] = Object.freeze([]);
 
 export function parseProductionDistributionTargetIdentityV1(
   value: unknown,
@@ -230,12 +206,6 @@ export type ReleaseChannelV1 = ReleaseProfileV1['channel'];
 export type ReleaseProfileApprovalRequirementV1 = CapabilityApproval;
 export type ReleaseProfileVerificationRequirementV1 = VerificationMode;
 
-export type EmbeddedReleaseProfileIdV1 =
-  | 'internal-dogfood'
-  | 'limited-production'
-  | 'capability-canary'
-  | 'general-availability';
-
 export class ProductionReleaseProfileAdmissionError extends Error {
   readonly reason:
     | 'feature_disabled'
@@ -308,6 +278,7 @@ function deepFreeze<T>(value: T): T {
   return value;
 }
 
+/** @qualification-entry-rejection-v1 {"entrypointId":"runtime","denialFamily":"capability_ceiling_off","sourceKind":"contract","symbol":"allCapabilitiesOff"} */
 function allCapabilitiesOff(): Record<ReleaseCapability, CapabilityReleaseState> {
   return Object.fromEntries(
     RELEASE_CAPABILITIES.map((capability) => [
@@ -317,6 +288,8 @@ function allCapabilitiesOff(): Record<ReleaseCapability, CapabilityReleaseState>
   ) as Record<ReleaseCapability, CapabilityReleaseState>;
 }
 
+/** @qualification-entry-rejection-v1 {"entrypointId":"runtime","denialFamily":"capability_ceiling_off","sourceKind":"contract","symbol":"failClosedEmbeddedProfile"} */
+/** @qualification-entry-rejection-v1 {"entrypointId":"runtime","denialFamily":"release_profile_closed","sourceKind":"contract","symbol":"failClosedEmbeddedProfile"} */
 function failClosedEmbeddedProfile(
   profileId: EmbeddedReleaseProfileIdV1,
   channel: ReleaseChannelV1,
@@ -386,16 +359,18 @@ function failClosedEmbeddedProfile(
  */
 export const EMBEDDED_RELEASE_PROFILES_V1: Readonly<
   Record<EmbeddedReleaseProfileIdV1, ReleaseProfileV1>
-> = deepFreeze({
-  'internal-dogfood': failClosedEmbeddedProfile('internal-dogfood', 'internal'),
-  'limited-production': failClosedEmbeddedProfile('limited-production', 'limited'),
-  'capability-canary': failClosedEmbeddedProfile(
-    'capability-canary',
-    'canary',
-    'builtin_read_tools',
-  ),
-  'general-availability': failClosedEmbeddedProfile('general-availability', 'ga'),
-});
+> = deepFreeze(
+  Object.fromEntries(
+    EMBEDDED_RELEASE_PROFILE_DECLARATIONS_V1.map((declaration) => [
+      declaration.profileId,
+      failClosedEmbeddedProfile(
+        declaration.profileId,
+        declaration.channel,
+        declaration.canaryCapability,
+      ),
+    ]),
+  ) as Record<EmbeddedReleaseProfileIdV1, ReleaseProfileV1>,
+);
 
 export function parseReleaseProfileV1(value: unknown): ReleaseProfileV1 {
   return releaseProfileV1Schema.parse(value);
@@ -406,6 +381,7 @@ export function parseReleaseProfileV1(value: unknown): ReleaseProfileV1 {
  * The controlled-config boundary calls this again so an in-memory forged
  * composition cannot bypass the release profile admission decision.
  */
+/** @qualification-entry-rejection-v1 {"entrypointId":"runtime","denialFamily":"unadmitted_execution_target","sourceKind":"contract","symbol":"admitProductionDistributionTargetIdentityV1"} */
 export function admitProductionDistributionTargetIdentityV1(input: {
   profile: ReleaseProfileV1;
   production: true;
@@ -436,6 +412,7 @@ export function admitProductionDistributionTargetIdentityV1(input: {
   return parseProductionDistributionTargetIdentityV1(input.distributionTargetIdentity);
 }
 
+/** @qualification-entry-rejection-v1 {"entrypointId":"runtime","denialFamily":"release_profile_closed","sourceKind":"contract","symbol":"admitEmbeddedReleaseProfileV1"} */
 /** Admission must run before any production Runtime/provider/transport exists. */
 export function admitEmbeddedReleaseProfileV1(input: {
   profileId: EmbeddedReleaseProfileIdV1;

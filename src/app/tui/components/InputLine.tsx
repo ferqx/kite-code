@@ -3,13 +3,9 @@ import { ScrollList } from 'ink-scroll-list';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import { useFileSearch } from '@/app/tui/hooks/useFileSearch';
-import {
-  SLASH_COMMAND_DEFS,
-  SLASH_COMMANDS,
-  type SlashSuggestionData,
-  useSlashSuggestions,
-} from '@/app/tui/hooks/useSlashSuggestions';
+import { type SlashSuggestionData, useSlashSuggestions } from '@/app/tui/hooks/useSlashSuggestions';
 import { useWindowSize } from '@/app/tui/hooks/useWindowSizeSig';
+import { SLASH_COMMAND_DEFS, SLASH_COMMANDS } from '@/app/tui/public-surface';
 import { useTheme } from '@/app/tui/theme';
 import { listAvailableModels } from '@/core/config';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';

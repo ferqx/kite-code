@@ -249,6 +249,7 @@ function denyForPlanningPhase(params: {
  * Uses the SAME classification logic as evaluateToolPolicy in tool-policy.ts,
  * but accepts explicit parameters, decoupled from LangGraph's PendingToolRequest.
  */
+/** @qualification-surface-v1 {"sourceSurfaceId":"authorization:approval","featureId":"AUTHORIZATION-APPROVAL-001","domain":"authorization","observableContract":"approval_workspace_trust","risk":"p0","riskRationale":"authorization_boundary","owner":"core-policy","entrypoints":["cli","runtime","tui"],"sourceKind":"contract","symbol":"evaluateToolApproval","l0Binding":{"adapterId":"approval-policy-decision-v1","assertionId":"l0.authorization-approval.decision-v1"}} */
 export function evaluateToolApproval(params: EvaluateToolApprovalParams): ApprovalDecision {
   const { toolName, toolArgs, phase, workspace = '', threadId = '' } = params;
   const capability = params.capability ?? classifyToolCapability(toolName, toolArgs);

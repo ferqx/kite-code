@@ -23,6 +23,8 @@ export type SkillActivationEvaluation =
  * body: Runtime is still responsible for binding every capability in the
  * frame and for applying the normal policy/approval gateway to each call.
  */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillActivationV2","outcome":"safe_disable","disabledResult":"deny","sourceKind":"contract","symbol":"evaluateSkillActivation"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillWorkflowV1","outcome":"safe_disable","disabledResult":"deny","sourceKind":"contract","symbol":"evaluateSkillActivation"} */
 export function evaluateSkillActivation(input: {
   state: Readonly<RuntimeState>;
   catalog: SkillCatalogSnapshot;

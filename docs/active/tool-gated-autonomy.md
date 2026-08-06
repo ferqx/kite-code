@@ -25,6 +25,25 @@
 
 工具声明只让模型表达意图。模型侧不得直接执行工具，TUI 不得绕过 Tool Controller 调用 provider。
 
+ADR-0070 AQ-1 的 source-owned qualification annotation 不是这条执行链的一个步骤。它们只由离线
+collector 对真实 source declaration、default-off guard 和 canonical digest 做结构校验，不能成为
+Capability discovery/binding、Policy、approval、sandbox、adapter dispatch、`ExecutionReceipt` 或
+required Verification 的输入。即使 diagnostic Matrix 的 structural suite 通过，也不得改变既有产品
+行为、获得 production content admission，或替代、削弱、接入 G0/G1 门禁。
+
+AQ-4 的 L1 fixture 仅从测试侧调用当前 Kernel、Tool Controller、Runtime action、Verification executor 和
+CLI/TUI projection；它不会被 production dispatch 调用，也不会反向给 Policy、approval、sandbox、effect terminal
+或 TUI reducer 提供授权。fixture 的 synthetic MCP/reviewer/Shell 只在进程内存中存在，synthetic root 在每次 run
+结束删除，结果只保留状态 token 和 digest。`unknown`、late terminal、用户 approval rejection 与 required
+Verification 的 Runtime fail-closed 行为仍由本文件的产品链路定义；L1 receipt 或 Sentinel V2 observation 不能改变它。
+
+AQ-5 的独立 Skill/MCP L1 suite 同样不参与 production dispatch。它只对六个 source-owned Runtime/MCP/Skill
+symbol 作 sealed synthetic observation：invalid auth 必须终结旧 Tool，Provider Action 完成只可开启新 turn，
+unknown write 不得 replay/success，project approval/catalog churn 不得暴露 callable Provider，Skill output 和
+Skill→MCP revision drift 继续受 contract/binding 约束。fixture 不接收 Provider credential、workspace/project/session
+内容或 child environment；其 receipt 不能授权 Tool、扩大 Capability、改变 approval/sandbox/effect terminal，或
+将局部 TUI `provider.action_required` 投影升级为完整 auth/login/new-turn journey。
+
 `resourceBudgetV1` 启用时，策略/审批仍先于 child reservation；只有调用已经可执行时才原子写入
 reservation，再单独写入 `dispatch_started`，最后进入 adapter。Subagent parent 只代表一次
 lifecycle attempt，child 模型及工具/Shell/MCP 调用各自链接独立 reservation；artifact bytes
@@ -197,3 +216,10 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 ## 子 Agent 阻塞审批请求构造
 
 子 Agent 因工具审批阻塞时，Controller 通过 `buildBlockedToolRequest` 构造 `PendingToolRequest`：优先走 `toolRequestFromCall`（Registry → request adapter）获得类型化请求；仅在工具未注册时 fallback 到最小构造（builtin 或 MCP 取决于 `mcp__` 前缀）。不再手工 `as PendingToolRequest` 强转。失败分类的 `parseFailureCode`（`unknown_tool` | `tool_unavailable` | `invalid_arguments`）通过 `InvalidToolRequest` 透传到 `ClassifiedFailure`，保留 Registry 结构化失败码用于诊断。
+
+approval 本身不是对 blocked child 的重放许可。Runtime schema v22 要求 `handleSubAgentResume` 在
+`runApprovedTool` 前写入并复读精确绑定 parent task、Subagent 和原 child tool call 的
+`subagent.resume_claimed`。claim 未持久化、重复、或与 suspended snapshot 不匹配时，Controller 必须
+停止且不 dispatch child。已 claim 的 continuation 在重启后只允许 `subagent.recovery_unavailable` 的
+fail-closed terminal；它不能被普通 approval、Tool Result 或 UI state 重新唤醒。该局部 claim 不能
+降低 capability/policy/approval 边界，也不构成外部 effect 的 exactly-once 保证。

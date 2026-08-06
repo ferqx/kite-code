@@ -404,6 +404,7 @@ function buildDescriptor(input: {
 }
 
 /** Compile a complete, immutable Workflow Contract. Invalid skills are returned as diagnostics, never skipped. */
+/** @qualification-surface-v1 {"sourceSurfaceId":"skill:workflow-contract","featureId":"SKILL-WORKFLOW_CONTRACT-001","domain":"skill","observableContract":"skill_open_world_protocol","risk":"p0","riskRationale":"open_world_skill_risk","owner":"core-skills","entrypoints":["runtime"],"sourceKind":"contract","symbol":"compileSkillWorkflow","l1SkillMcpBindings":[{"adapterId":"skill-mcp-dependency-revision-drift-v1","assertionId":"l1.skill.mcp-dependency-revision-drift.v1"}]} */
 export function compileSkillWorkflow(input: CompileSkillWorkflowInput): CompiledSkillWorkflow {
   const diagnostics: SkillDiagnostic[] = [];
   const files = readSkillFiles(input.skillDir, diagnostics);

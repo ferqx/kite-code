@@ -17,10 +17,10 @@
 // 子 Agent 事件通过 subagentEventSink → emitAndRecord() 写入，
 // parentSpanId 使用当前活跃的 node span，归入主日志文件（子 agent 不创建独立日志）。
 
-import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
-import { genSpanId, genTraceId } from '@/core/id-utils';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import type { AgentEvent } from '@/protocol/events';
+import type { AgentEvent } from '../../protocol/events';
+import type { SessionLoggingPolicyV1 } from '../config/session-logging-policy';
+import { genSpanId, genTraceId } from '../id-utils';
+import type { RuntimeEvent } from '../runtime/events';
 import { mapRuntimeMetadataV1, mapSessionBoundaryMetadataV1 } from './metadata-mapper';
 import { recordContentRuntimeEvent, recordEvent } from './recorder';
 import type {

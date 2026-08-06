@@ -305,6 +305,7 @@ export class AgentKernel {
     });
   }
 
+  /** @qualification-surface-v1 {"sourceSurfaceId":"runtime:late-event-terminality","featureId":"RUNTIME-LATE_EVENT_TERMINALITY-001","domain":"runtime","observableContract":"runtime_effect_terminality","risk":"p0","riskRationale":"recovery_authorization_boundary","owner":"core-runtime","entrypoints":["runtime"],"sourceKind":"contract","symbol":"applyEffectEvent","l1Bindings":[{"adapterId":"runtime-unknown-late-terminal-v1","assertionId":"l1.runtime.unknown-and-late-terminal.v1"}],"l1SubagentRecoveryBindings":[{"adapterId":"runtime-late-terminal-convergence-v1","assertionId":"l1.runtime.late-terminal-convergence.v1"}]} */
   /**
    * Apply one event produced while an effect is still running.
    * Streaming events advance the lease revision so the final effect result
@@ -540,6 +541,7 @@ export class AgentKernel {
   }
 
   /** Restore a named RuntimeStore recovery point into this Kernel. */
+  /** @qualification-surface-v1 {"sourceSurfaceId":"runtime:kernel-resume","featureId":"RUNTIME-KERNEL_RESUME-001","domain":"runtime","observableContract":"runtime_snapshot_recovery","risk":"p1","riskRationale":"recovery_authorization_boundary","owner":"core-runtime","entrypoints":["runtime","tui"],"sourceKind":"contract","symbol":"restoreNamedSnapshot"} */
   restoreNamedSnapshot(name: string): boolean {
     const snapshot = this.store.loadNamedSnapshot<RuntimeState>(this.state.session.threadId, name);
     if (!snapshot) return false;
@@ -580,6 +582,7 @@ export class AgentKernel {
  * @param sandboxAvailable - 沙箱是否可用 / Whether sandbox is available
  * @returns 初始化的 AgentKernel 实例 / Initialized AgentKernel instance
  */
+/** @qualification-surface-v1 {"sourceSurfaceId":"runtime:kernel-recovery","featureId":"RUNTIME-KERNEL_RECOVERY-001","domain":"runtime","observableContract":"runtime_snapshot_recovery","risk":"p0","riskRationale":"recovery_authorization_boundary","owner":"core-runtime","entrypoints":["runtime"],"sourceKind":"contract","symbol":"createAgentKernel","l1SubagentRecoveryBindings":[{"adapterId":"runtime-subagent-restart-unknown-v1","assertionId":"l1.runtime.subagent-restart-unknown.v1"}]} */
 export function createAgentKernel(params: {
   threadId: string;
   userId: string;
@@ -690,7 +693,9 @@ export function restoreRuntimeStateFromStore(params: {
             allEvents.filter((entry) => entry.id <= snapshotPosition),
           );
         }
-        migratedState = replayPersistedTail(migratedState, tail, params.threadId);
+        migratedState = markClaimedSubagentContinuationForRecovery(
+          replayPersistedTail(migratedState, tail, params.threadId),
+        );
       }
     } catch (error) {
       recoveryReason = error instanceof Error ? error.message : String(error);
@@ -802,7 +807,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   const normalizedSnapshot = snapshot;
 
   if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION)
-    return normalizeRuntimeMetadata(normalizedSnapshot);
+    return markClaimedSubagentContinuationForRecovery(normalizeRuntimeMetadata(normalizedSnapshot));
   if (snapshot.schemaVersion < 2 || snapshot.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
     return null;
 
@@ -811,13 +816,15 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     normalizedSnapshot.interactions.kind === 'awaiting_tool_approval'
       ? normalizedSnapshot.interactions
       : undefined;
-  const legacyMarker = legacyApprovalInteraction?.approval.subagentId
-    ? {
-        toolCallId: legacyApprovalInteraction.toolCallId,
-        subagentId: legacyApprovalInteraction.approval.subagentId,
-        reason: 'A legacy sub-agent approval cannot be resumed after recovery.',
-      }
-    : undefined;
+  const legacyMarker =
+    legacyUnclaimedSubagentContinuationMarker(normalizedSnapshot) ??
+    (legacyApprovalInteraction?.approval.subagentId
+      ? {
+          toolCallId: legacyApprovalInteraction.toolCallId,
+          subagentId: legacyApprovalInteraction.approval.subagentId,
+          reason: 'A legacy sub-agent approval cannot be resumed after recovery.',
+        }
+      : undefined);
   // Build the migrated state before upgrading the version so all v2 fields are
   // preserved and the recovery marker is durable with the schema transition.
   let migratedState: RuntimeState = {
@@ -837,6 +844,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
       waivers: {},
     },
     suspendedSubagents: snapshot.suspendedSubagents ?? {},
+    subagentResumeClaims: snapshot.schemaVersion >= 22 ? (snapshot.subagentResumeClaims ?? {}) : {},
     capabilities: {
       catalogRevision: snapshot.capabilities?.catalogRevision ?? '',
       bindings: snapshot.capabilities?.bindings ?? {},
@@ -884,7 +892,51 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     };
   }
 
-  return materializeLegacyPlanArtifacts(migratedState);
+  return markClaimedSubagentContinuationForRecovery(materializeLegacyPlanArtifacts(migratedState));
+}
+
+function legacyUnclaimedSubagentContinuationMarker(
+  snapshot: RuntimeState,
+): RuntimeState['legacyUnrecoverableSubagentApproval'] | undefined {
+  // Schema v22 is the first version that records an explicit resume claim.
+  // A persisted older continuation cannot safely prove whether its blocked
+  // child was consumed, so recovery must finish it as unavailable rather than
+  // re-dispatching it.
+  if (snapshot.schemaVersion >= 22) return undefined;
+  for (const [toolCallId, continuation] of Object.entries(snapshot.suspendedSubagents ?? {})) {
+    const call = snapshot.tools?.calls[toolCallId];
+    if (call?.name !== 'task' || !continuation?.subagentId) continue;
+    return {
+      toolCallId,
+      subagentId: continuation.subagentId,
+      reason:
+        'A legacy sub-agent continuation was persisted before durable resume claims; it cannot be resumed after recovery.',
+    };
+  }
+  return undefined;
+}
+
+function markClaimedSubagentContinuationForRecovery(state: RuntimeState): RuntimeState {
+  if (state.legacyUnrecoverableSubagentApproval || state.turn.status !== 'active') return state;
+  for (const [toolCallId, claim] of Object.entries(state.subagentResumeClaims ?? {})) {
+    const call = state.tools.calls[toolCallId];
+    if (
+      call?.name !== 'task' ||
+      ['succeeded', 'failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status)
+    ) {
+      continue;
+    }
+    return {
+      ...state,
+      legacyUnrecoverableSubagentApproval: {
+        toolCallId,
+        subagentId: claim.subagentId,
+        reason:
+          'A sub-agent continuation resume claim was persisted without a durable child result; its outcome is unknown and it cannot be resumed after recovery.',
+      },
+    };
+  }
+  return state;
 }
 
 function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
@@ -938,6 +990,7 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
         : {}),
       invocations: state.capabilities?.invocations ?? {},
     },
+    subagentResumeClaims: state.subagentResumeClaims ?? {},
   };
 }
 

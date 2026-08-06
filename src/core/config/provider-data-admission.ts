@@ -242,6 +242,7 @@ export function createApprovedProviderDataAdmissionV1(
     });
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"provider:open-world-contract","featureId":"MODEL_CONTEXT-CUSTOM_PROVIDER_CONTRACT-001","domain":"model_context","observableContract":"provider_open_world_protocol","risk":"p0","riskRationale":"provider_egress_boundary","owner":"core-model","entrypoints":["runtime"],"sourceKind":"contract","symbol":"evaluateProviderDataAdmissionV1"} */
 export function evaluateProviderDataAdmissionV1(
   input: ProviderDataAdmissionInputV1,
 ): ProviderDataAdmissionDecisionV1 {

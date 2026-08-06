@@ -4,7 +4,7 @@
 
 读取时机：修改模型配置、Model Controller、provider adapter、reasoning、模型上下文、缓存指标或真实 Provider smoke 时。
 
-验证：`bun test tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
+验证：`bun test tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts tests/evals/qualification/github-actions-agent-evaluation.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
 
 相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
@@ -30,6 +30,79 @@ prompt、response、key、完整 endpoint 或错误 response body。缺 credenti
 `token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` 端点；模型默认为 `qwen3.6-flash`，
 `KITE_QWEN_MODEL` 只允许切换 Qwen 模型。其他 DashScope 区域端点、任意域名、HTTP、非默认端口、
 query/fragment 都 fail closed，不能接收该 smoke 的 credential。
+
+ADR-0071 的 **formal AQ-8 L3** qualification route 不属于上述 G1 或 production `ProviderDataPolicyV1`。它预先定义
+`LiveSuitePolicyV1` 与独立 `DiagnosticProviderDataPolicyV1`，但**当前 formal public runner 没有可用 live transport**：固定
+source-byte binding 后，checked-in `liveScratchSupervisorActivationIsImplementedV1() === false` 在读取 parent environment
+或 ledger、调用 source-owned resolver、创建 credential lease、reservation、scratch 或 child 前 fail closed。opt-in、
+credential、base URL、ledger root 和任意 health JSON 都不能绕过此 gate。`hasFreshLiveScratchSupervisorHealthV1` 仅为将来
+persistent scratch supervisor 校验有界 no-secret wire shape/freshness；它不是 authorization、protected-ref proof、
+durable deletion witness 或 supervisor identity，且 literal 为 false 时不会被公共 runner 读取。
+
+ADR-0071 已接受的 installation/native-boundary contract 已将 Linux systemd/manifest/native-helper 交接约束为不可执行、
+无密钥的 source-owned data；native helper 仅有 root-supervisor private one-shot channel 的 internal-frame descriptor，
+`not_public` / `authorization_not_representable`，不提供可由 caller parse/submit 的 request admission。它不安装、不启动、
+不读取 host state，也不是 protected-supervisor implementation/proof。尚未实现的
+protected-supervisor branch 仍必须让 qualification credential 仅经 source-owned resolver/model boundary 交给
+固定 transport；普通 config loader、resolved `AgentConfig`、workspace/project/session overlay 与产品 Model Controller
+不得进入该路径。transport retry 固定为零，fixture/corpus 只读且安全 synthetic，临时 HOME/config/cwd 与 child environment
+必须重建为 allowlist；Tool、Skill、Subagent 只能为 in-process fake，MCP、stdio 与 shell child 默认拒绝。届时成功或受控
+取消最多形成 `authority='diagnostic'`、`evidenceEligible=false` 的 metadata-only observation，并以 diagnostic candidate
+closure 精确绑定 local-synthetic execution、scope profile、runner 与 source-owned identity；该 closure 不构成 candidate
+aggregate 或 repository revision。它不扩大 production data admission、不改变 DeepSeek/Qwen G1 smoke，也不成为发布结论。
+`L3ProtectedScratchSupervisorDeploymentV1` 只固定 Linux host 预期对象与禁止自动特权操作；它不是 service identity、credential
+authority 或 activation input。补充的 manifest/canonical-Ed25519-SPKI attestation/root-private atomic nonce-consumption
+index/pre-allocation commitment/signed lifecycle-receipt contract 校验无密钥 metadata binding、opaque service/UUIDv4 IDs、nonce
+single-use、service epoch、signature chain；私钥 PEM、endpoint/path/content-shaped ID 均拒绝。binding 同时固定 ADR-0070
+`ephemeral_local` profile ID/digest、retention/storage/audit/authorizer、quota/retention witness 与 owner-only projection-policy
+digest，terminal receipt 再绑定 owner-only projection digest。commitment 必须直接续接 nonce-consumption journal record，且严格在
+allocation 与 attestation expiry 之前；normal-exit reaping/scrub/delete 从 worker exit 起一秒内完成，crash receipt deadline 为
+86,400 秒。index 只为 root-private verifier input，receipt 只携带其 digest；这一 cryptographic shape 不被误当 native service
+proof，且当前不会进入 resolver、transport 或 observation verifier。L3
+secret job 在可审计 persistent-supervisor/protected-ref/control-plane/retention proof 未具备前保持不创建，CI 只能执行零网络 contract。
+
+已接受 ADR-0072 的 GitHub Actions real-Agent diagnostic report 是与上述 formal L3 平行、较低保证的执行面：它只在 manual
+protected-main workflow 的 Environment-secret step 内由 AQ-10 aggregate 一次取得 opaque one-shot lease，并固定分发
+`agent_read`、auto-compaction success、auto-compaction cancel 三个 case binding。lease 在取得时捕获唯一 Qwen
+`openai-compatible` fetch，逐 case 限制为 `2 + 2 + 1` 次调用和全 job 5 次总上限；SDK retry 为零、每 case 的 output
+上限与 60 秒 deadline 均 fail closed。AQ-8 在每个 concrete `doGenerate` 上同时传递 AbortSignal 并 race deadline；不响应
+取消的 late Promise 会被观察但不能恢复 Runtime、工具或后续 dispatch。credential 只在 SDK model closure 中读取，随即从 process environment 删除；Runtime config 使用不可用占位值，sealed surface 仅允许
+in-process `read_file`，并使 Tool/Skill/Subagent controller 不接收 `taskModel`。它不调用普通 config loader、不读取
+workspace/project/session overlay、不创建 shell/MCP/Skill/Subagent/stdio child，也关闭 session content logging。usage 缺失、token
+overage、deadline、路径越界或任一非预注册 tool 都只产生脱敏 `blocked`/`failed` report；`costBucket` 固定 `not_observed`，不声称
+priced cost accounting。该 report 不使用或扩大 production `ProviderDataPolicyV1`，不改变 DeepSeek/Qwen G1 smoke，也不产生
+formal observation、release/G0/G1 或 production-content 结论。
+
+ADR-0072 AQ-9B 使用单独的 `GitHubActionsAutoCompactionDiagnosticReportV1`，不复用 AQ-8 policy、report 或 verifier。它不
+取得 credential，也不接收 raw key/base URL；AQ-10 只能把一次已取得的 opaque fixed-case binding 交给固定 success/cancel cases。每个
+case 自己以 zero SDK retry、60 秒 hard deadline、无 tools/children 的 sealed Runtime config 运行。success 的 Provider
+envelope 固定为 summary input/output `7,800/600` 加 primary `3,229/600`；cancel 只允许一次 summary request，并只在模型
+boundary 收到 captured Provider fetch 的 ordinal acknowledgement 后触发 client abort。usage/attempt/cap/terminal 任一不可信都 blocked；只有这个
+harness-proven abort 可保守按 summary reservation 计账而标为 `conservative_abort_charge`，它不是 endpoint/Provider 的取消确认。
+报告没有 route credential、完整 endpoint、prompt、response、reasoning、source/workspace body 或 child output；它也不使用或
+扩大 `ProviderDataPolicyV1`、DeepSeek/Qwen G1 smoke、formal observation 或 release/G0/G1 admission。AQ-10 aggregate 已接入
+该 workflow；在实际 manual live job dispatch 前，runner 的 mock/local contract test 不是实际 Provider dispatch。
+
+L3 runner 的依赖闭包只允许最小 diagnostic observation schema、source-owned execution/observation registry、
+governance、canonical identity primitive 与 sealed resolver/transport；metafile contract 明确拒绝普通 config、MCP、
+Tool/Skill/Subagent、session logger、runtime agent、source-owned public-surface 和 release evidence/bundle/gate。
+reservation 已成功后，任何 dispatcher/cleanup exception 或不可置信 terminal 都按 policy 的完整 request quota 对账，
+并以 `providerDispatchCount='unknown'` 返回 diagnostic `blocked/not_observed`；不得伪称 zero dispatch、success、
+cancelled 或 production admission。
+
+AQ-9B 只复用 AQ-8 的 future sealed resolver/ledger/environment primitive，不复用 AQ-8 policy、single-dispatch
+observation 或 verifier。它的 public `:success` / `:cancel` wrapper 当前受同一个 source-literal gate 安全停用，故不会
+读取 parent environment 或 ledger、调用 resolver、创建 model lease/reservation、创建 scratch 或 dispatch。当前 product-chain
+coverage 仅来自 zero-credential `runSyntheticAutoCompactionContractV1`：它没有 environment、ledger、resolver、lease 或
+real provider/model boundary 输入，也不产生 receipt、observation、report 或 evidence。它只验证固定 success/cancel synthetic
+chain；未来 implementation/proof 的 two-phase route 才可要求 model boundary 为受控 text，并在 Tool/Skill/MCP/Subagent child executor 前
+拒绝未广告 tool-call/non-allowed scheduler effect。
+
+AQ-9B runner 只在内存中使用 8,192 token absolute threshold，**不得读取、设置或推断**产品 `contextWindowTokens`；source
+registry 对它固定 `unknown/not_declared`。它不改变普通 config loader、G1 route 或 production provider admission。未来的
+diagnostic output 也只能是脱敏 semantic metadata、digest 和 coarse duration bucket，不含 raw duration、key、完整 endpoint、
+prompt、response、reasoning、source/workspace body 或 child output；其独立 receipt/observation 若获授权产生，仍固定
+`authority='diagnostic'`、`evidenceEligible=false`，不成为 release/G0/G1/production-content 结论。
 
 `ProviderDataPolicyV1` 是 production route 数据边界的版本化 schema。资格绑定
 provider type、operator、规范化 endpoint origin、endpoint class、deployment 和 region 的

@@ -314,6 +314,7 @@ function approvalReview(
  * Current sources: project .kite-code/mcp.json > user ~/.kite-code/mcp.json.
  * Older sources remain read-only at lower precedence for explicit migration.
  */
+/** @qualification-surface-v1 {"sourceSurfaceId":"mcp:config-catalog","featureId":"MCP-CONFIG_CATALOG-001","domain":"mcp","observableContract":"mcp_open_world_protocol","risk":"p0","riskRationale":"open_world_mcp_risk","owner":"core-mcp","entrypoints":["cli","runtime","tui"],"sourceKind":"config","symbol":"loadMcpConfigCatalog"} */
 export function loadMcpConfigCatalog(
   options: { workspace?: string; configPath?: string } = {},
 ): McpConfigCatalog {

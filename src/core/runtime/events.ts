@@ -55,7 +55,7 @@ import type {
   ResourceBudgetWaiterPromotedEvent,
   ResourceBudgetWaiterTimedOutEvent,
 } from './resource-budget';
-import type { SkillActivation } from './state';
+import type { SkillActivation, SubagentResumeClaim } from './state';
 import type { RunTerminalOutcomeV1 } from './terminal-outcome';
 
 /** Runtime event metadata used for idempotency, tracing and stale-result checks. */
@@ -936,6 +936,17 @@ export interface SubagentSuspendedEvent {
   snapshot: SuspendedSubagentSnapshot;
 }
 
+/**
+ * Atomically claims one approved subagent continuation before its blocked
+ * child tool may be dispatched. A duplicate or recovered claim is not a
+ * permission to replay that child effect.
+ */
+export interface SubagentResumeClaimedEvent {
+  type: 'subagent.resume_claimed';
+  toolCallId: string;
+  claim: SubagentResumeClaim;
+}
+
 // ── 运行时事件联合类型 / Runtime event discriminated union ──
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
@@ -1045,4 +1056,5 @@ export type RuntimeEvent =
   | SubagentCompletedEvent
   | SubagentFailedEvent
   | SubagentCacheMetricsEvent
-  | SubagentSuspendedEvent;
+  | SubagentSuspendedEvent
+  | SubagentResumeClaimedEvent;

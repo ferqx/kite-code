@@ -3,9 +3,9 @@
 状态：active
 读取时机：修改 compaction case、事实 matcher、semantic/continuation evaluator、route qualification、
 无压缩 handoff 或 compaction release Gate 时。
-验证：`bun test tests/evals/compaction tests/runtime/context-compaction-e2e.test.ts tests/runtime/context-compaction-shadow-gate.test.ts tests/release/capability-profile.test.ts`、
+验证：`bun test tests/evals/compaction tests/evals/qualification/auto-compaction-failure-contract.test.ts tests/evals/qualification/github-actions-auto-compaction.test.ts tests/evals/qualification/github-actions-agent-diagnostic-aggregate.test.ts tests/evals/qualification/live-auto-compaction-runner.test.ts tests/evals/qualification/auto-compaction-live-evidence.test.ts tests/runtime/context-compaction-e2e.test.ts tests/runtime/context-compaction-shadow-gate.test.ts tests/release/capability-profile.test.ts`、
 `bun run typecheck`。
-相关：ADR-0021、ADR-0022、ADR-0024、ADR-0057、ADR-0069、Phase 4。
+相关：ADR-0021、ADR-0022、ADR-0024、ADR-0057、ADR-0069、ADR-0070、Phase 4。
 
 ## 当前本地 contract
 
@@ -16,6 +16,76 @@ exact/normalized/semantic matcher、forbidden claim 和可选 continuation。fac
 结构 adapter 覆盖 direct/incremental/reset、tool pair、transcript immutability、checkpoint digest/replay/
 revision、lease/environment drift、summary rejection 和 system/tool/Plan/Verification/Runtime 权威重注入。
 失败保持原状态；invalid checkpoint、orphan tool result 或状态损坏为 G0。
+
+AQ-9A 另有一条 source-owned 的本地 L1 自动压缩失败 contract。它只用无 route、credential、endpoint 或网络路径的
+scripted transport，经真实 `AgentKernel → ModelController → Runtime executor/scheduler → runner` 运行三种确定性
+fault injection：`summary_failure`、`provider_failure` 与 `provider_network_failure`。每一种仍收敛到既有
+`context.compaction_failed(summary_model_failed)`；产品 error schema、默认 flag 与 `contextWindowTokens` 均未改变。
+它已在 ADR-0072 AQ-8 independent review 后完成 ordered re-validation，只是 public-safe AQ-9B 的 deterministic
+前置，不解除 ADR-0071 formal L3 的 safe-disabled 状态。
+fixture 通过当前 projection/token estimator 构造 9–12K 的安全 synthetic context，并且只在内存中使用 8,192 的
+自动压缩阈值。它断言失败当前 turn 停止、没有普通 primary model dispatch，late completion 不能建立 checkpoint
+或复活该 turn，而下一条实际 user message 开启的新 turn 才重新 preflight/retry。
+
+该 contract 只产生 metadata-only `L1AutoCompactionFailureReceiptV1`；每份 receipt 与 source binding、Matrix、
+suite/corpus/oracle/evaluator/verifier/runner、candidate/execution、governance/retention 及 report digest 重新闭合，
+并固定 `authority='diagnostic'`、`evidenceEligible=false`。它不是 route qualification、真实模型结果或发布准入，
+不输入现有 Gate/G0/G1，也不改变 DeepSeek 或 Qwen `qwen3.6-flash` 的 G1 smoke。
+
+AQ-9B 的 L3 auto-compaction runner 与 AQ-9A、AQ-8 和 G1 分离，但当前 public
+`test:model:auto-compaction:live:success` / `:cancel` wrapper 都由 checked-in persistent-supervisor activation literal
+安全停用。它们在 fixed source-byte check 后、读取 caller environment/ledger 或创建 resolver、credential lease、reservation、
+scratch/child 之前返回 `blocked/governance_reservation_unavailable`；独立 opt-in、credential、ledger root 或 forged health
+record 都不能开启真实 dispatch。health parser 只验证 future no-secret wire shape/freshness，绝不是 authorization、durable
+deletion witness 或 supervisor identity。
+
+ADR-0072 的 GitHub Actions AQ-9B case 是另一个、较低保证且 public-safe 的 runner，不是上段 formal AQ-9B 的 activation。
+`GitHubActionsAutoCompactionDiagnosticReportV1` 只接收由 AQ-10 同一 job 一次取得的 opaque、one-shot fixed-case
+model lease binding；它不接收 raw model、key、base URL 或 generic fetch。只有 lease 中 captured Provider fetch 已实际被调用并
+返回 operation 的 ordinal acknowledgement，才可把 success/cancel 写为 `provider_fetch_entered`；本地 contract binding 只能
+`blocked/transport_proof_unavailable`。runner 本身不读取 credential、parent config、workspace/project/session overlay 或 formal L3
+resolver。case 在临时 HOME/config/data/state/cwd、memory store 与空的 read-only synthetic root 内运行产品
+`AgentKernel → ModelController → Runtime executor/scheduler → compactor`，tool surface 全关，因而没有 Shell、MCP、Skill、
+Subagent、stdio child、workspace I/O 或 session-content logging。固定 9–10K safe context 只在内存中以 8,192 threshold
+触发 automatic compaction；不读取、设置或推断 `contextWindowTokens`，不改变产品 flag/default。
+
+success 固定一次 summary 和一次 post-checkpoint primary，两个 phase 分别受 summary `7,800/600` 和 primary `3,229/600`
+input/output cap、zero SDK retry 与 60 秒 deadline 约束。cancel 只在 bound model 的 captured Provider fetch acknowledgement
+确认 summary transport entry 后由 harness client-abort；
+它必须产生 `summary_aborted`、停止 current turn、零 primary dispatch，并让 next user turn 到达 retry preflight。该 preflight
+会观察到第二个 automatic request，但 runner 在其 summary dispatch 前停止，所以 cancel 的真实 Provider 调用仍精确为一次。
+它不是 remote-cancel confirmation。成功必须有 usage；usage 缺失或任一 cap drift 为 blocked。唯一例外是这种已证明的 abort：其
+未返回 usage 以保守 phase reservation 计入 `conservative_abort_charge`，绝不冒充 observed usage。输出只有 digest、有限 count/
+bucket/reason code；不记录 key、endpoint、prompt、response、reasoning、safe corpus 或路径，并由独立 verifier 拒绝 formal
+qualification、`LiveCompatibilityObservationV1` 和 release evidence shape。AQ-10 已在同一 manual protected-main job
+内 fresh-verify AQ-8、AQ-9B success 与 AQ-9B cancel 的固定顺序和 `2 + 2 + 1` Provider cap；没有实际 GitHub job run 时，
+所有本地 AQ-9B test 仍只是 zero-network contract，不是已发生的真实 Provider 成功或取消。
+
+AQ-9B 依赖的 ADR-0071 installation/native-boundary contract 仅固定 future Linux systemd/manifest/native-helper 的
+source-owned metadata interface；native helper frame 是 `not_public` / `authorization_not_representable` 的 root-supervisor
+internal descriptor，不是 caller request admission。它不安装或启动服务，不能证明 native isolation、nonce/index atomicity、实际
+reaping/scrub/deletion 或 owner-only projection。因此它既不改变 AQ-9B 的 safe-disabled 状态，也不把任何 synthetic result 升格为 L3 receipt。
+
+因此当前 AQ-9B product-chain coverage 只由 `runSyntheticAutoCompactionContractV1` 的 test-only、zero-credential driver
+提供。它经真实 `AgentKernel → ModelController → Runtime executor/scheduler → runner` 运行固定 success/cancel synthetic
+scenario；它不接收 environment、ledger、resolver、model lease、caller model function 或 real provider boundary，且不产生
+reservation、semantic receipt、observation、report 或 evidence。cancel contract 只验证当前 synthetic turn 停止、同一 runner
+以 scheduler preflight 验证下一 user turn；AQ-9A 的 injected summary/provider/network failure 仍只属于 L1 failure contract。
+
+AQ-9B runner 只在内存中设置 8,192 automatic threshold 与 source-owned 9–10K safe synthetic projection，**不会读取、设置或
+推断**产品 `contextWindowTokens`（source registry 固定 `unknown/not_declared`），也不改变默认 flag。未来在 ADR-0071 已接受的 implementation/proof branch、
+maintainer authorization 和 persistent-supervisor control plane 启用的 two-phase path 才必须通过独立 policy、route、sealed
+root、allowlist environment、JIT phase cap 与 owner-only reservation；它还必须有 root-private signed atomic nonce-consumption
+index（恰一个 nonce consumption/一个 allocation）、直接续接的 commitment journal sequence、
+`committedAt < allocatedAt < attestation.expiresAt`，以及从 worker exit 起一秒内 reaping/scrub/delete 的 signed lifecycle
+receipt。binding 还固定 ADR-0070 `ephemeral_local` governance/retention/storage/audit/authorizer 与 quota/retention-witness
+digest，receipt 再绑定 owner-only projection digest；可变 ID 仅为 L3 UUIDv4 opaque token，attestation 仅接受 canonical
+Ed25519 SPKI public key。index 只能在受保护 verifier 内读取，receipt 只绑定其 digest。summary input/output 加 post-checkpoint primary
+input/output 总计 12,229。届时 drift、未知 terminal、cleanup failure 或未广告 model tool-call/non-allowed effect 仍必须在
+Tool/Skill/MCP/Subagent child executor 前 `blocked` 并 full-charge。任何未来独立
+`LiveAutoCompactionSemanticReceiptV1` 加 outer `LiveCompatibilityObservationV1` 仍固定 `authority='diagnostic'` /
+`evidenceEligible=false`，不进入 current release Gate、G0/G1 或 production content admission；当前也绝不能被写成真实
+provider compatibility。当前没有 L3 runner、semantic receipt 或 observation 消费该 schema，activation 仍为 false。
 
 deterministic matcher 优先 exact/normalized；critical loss、forbidden claim、approval/Verification/Plan
 反转都不能被 semantic score 覆盖。原 blind semantic contract 继续把未配置 route/evaluator 的 score

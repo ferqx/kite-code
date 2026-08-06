@@ -18,7 +18,7 @@ const map: DocumentationMap = {
 };
 
 describe('documentation impact gate', () => {
-  it('matches directory and exact-file patterns across path separators', () => {
+  it('matches directory, glob, and exact-file patterns across path separators', () => {
     expect(
       matchesDocumentationPattern('src\\core\\runtime\\kernel.ts', 'src/core/runtime/**'),
     ).toBe(true);
@@ -26,6 +26,50 @@ describe('documentation impact gate', () => {
     expect(matchesDocumentationPattern('./src/protocol/events.ts', 'src/protocol/events.ts')).toBe(
       true,
     );
+    expect(
+      matchesDocumentationPattern(
+        'scripts/evals/contracts/qualification/l2-native-conformance-schema-v1.ts',
+        'scripts/evals/contracts/qualification/l2-native-*.ts',
+      ),
+    ).toBe(true);
+    expect(
+      matchesDocumentationPattern(
+        'tests/evals/qualification/l2-evidence.test.ts',
+        'tests/evals/qualification/l2-*.test.ts',
+      ),
+    ).toBe(true);
+    expect(
+      matchesDocumentationPattern(
+        'tests/evals/qualification/nested/l2-evidence.test.ts',
+        'tests/evals/qualification/l2-*.test.ts',
+      ),
+    ).toBe(false);
+  });
+
+  it('enforces documentation for a source selected by an in-file glob', () => {
+    const globMap: DocumentationMap = {
+      version: 1,
+      rules: [
+        {
+          id: 'globbed-runtime',
+          sources: ['scripts/evals/contracts/qualification/l2-native-*.ts'],
+          documents: ['docs/active/agent-task-evaluation.md'],
+        },
+      ],
+    };
+
+    expect(
+      evaluateDocumentationImpact(
+        ['scripts/evals/contracts/qualification/l2-native-conformance-schema-v1.ts'],
+        globMap,
+      ),
+    ).toEqual([
+      {
+        ruleId: 'globbed-runtime',
+        sources: ['scripts/evals/contracts/qualification/l2-native-conformance-schema-v1.ts'],
+        expectedDocuments: ['docs/active/agent-task-evaluation.md'],
+      },
+    ]);
   });
 
   it('requires an affected document for matching implementation changes', () => {

@@ -230,6 +230,7 @@ function artifactSizeAfterTool(
   }
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"subagent:open-world-contract","featureId":"SUBAGENT-RUNTIME_CONTRACT-001","domain":"subagent","observableContract":"subagent_runtime_protocol","risk":"p0","riskRationale":"subagent_authority_boundary","owner":"core-subagent","entrypoints":["runtime"],"sourceKind":"contract","symbol":"runSubAgent","l1SubagentRecoveryBindings":[{"adapterId":"subagent-parent-child-reservation-v1","assertionId":"l1.subagent.parent-child-reservation.v1"}]} */
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
   const id = nextSubAgentId();
   const normalizedInput = { ...input, role: normalizeRoleConfig(input.role) };
@@ -309,6 +310,7 @@ export async function resumeSubAgent(
   });
 }
 
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"providerDataPolicyV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"runSubAgentLoop"} */
 async function runSubAgentLoop(
   input: SubAgentRunnerInput,
   state: {

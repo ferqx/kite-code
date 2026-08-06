@@ -22,6 +22,15 @@ import {
 import { generateSandboxProfile } from '../../src/core/sandbox/profile';
 import { findApplySeccomp } from '../../src/core/sandbox/seccomp';
 import { canonicalJsonBytes } from './canonical-json';
+import {
+  PLATFORM_CAPABILITY_CANONICAL_REPOSITORY_ID_V1,
+  PLATFORM_CAPABILITY_CANONICAL_REPOSITORY_V1,
+} from './platform-capability-identity';
+
+export {
+  PLATFORM_CAPABILITY_CANONICAL_REPOSITORY_ID_V1,
+  PLATFORM_CAPABILITY_CANONICAL_REPOSITORY_V1,
+} from './platform-capability-identity';
 
 export type NativeProbeVerdict = 'enforced' | 'unsupported' | 'unavailable';
 export type PlatformSupportOutcome = 'supported' | 'read_only_only' | 'excluded';
@@ -40,8 +49,8 @@ const nativeProbeVerdictSchema = z.enum(['enforced', 'unsupported', 'unavailable
 const boundedIdentitySchema = z.string().trim().min(1).max(512);
 export const platformCapabilitySourceV1Schema = z
   .object({
-    repository: z.literal('ferqx/kite-code'),
-    repositoryId: z.literal('1218896626'),
+    repository: z.literal(PLATFORM_CAPABILITY_CANONICAL_REPOSITORY_V1),
+    repositoryId: z.literal(PLATFORM_CAPABILITY_CANONICAL_REPOSITORY_ID_V1),
     headSha: z.string().regex(/^[a-f0-9]{40}$/),
     ref: z.string().regex(/^refs\/(?:heads|tags|pull)\/[A-Za-z0-9._/-]{1,240}$/),
     workflow: z.literal('.github/workflows/platform-capability-probe.yml'),
@@ -838,7 +847,10 @@ export function githubEvidenceSource(
   if (!GITHUB_HOSTED_RUNNER_CLASSES_V1.has(values.runnerClass as GithubHostedRunnerClassV1)) {
     throw new Error('Formal platform qualification runner class is not recognized.');
   }
-  if (values.repository !== 'ferqx/kite-code' || values.repositoryId !== '1218896626') {
+  if (
+    values.repository !== PLATFORM_CAPABILITY_CANONICAL_REPOSITORY_V1 ||
+    values.repositoryId !== PLATFORM_CAPABILITY_CANONICAL_REPOSITORY_ID_V1
+  ) {
     throw new Error('Formal platform qualification repository identity is not canonical.');
   }
   if (!/^[a-f0-9]{40}$/.test(values.headSha!) || !/^[a-f0-9]{40}$/.test(values.workflowSha!)) {

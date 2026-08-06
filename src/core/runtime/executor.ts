@@ -45,6 +45,7 @@ import {
   createDescendantResourceAdmissionV1,
   DescendantResourceAdmissionError,
 } from '@/core/runtime/resource-budget-admission';
+import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '@/core/sandbox/execution-capability-surface';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
@@ -52,6 +53,7 @@ import {
 } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { executeVerificationEffect } from '@/core/verification';
 import { createFilePreimageRecorder } from './file-checkpoints';
@@ -82,11 +84,39 @@ export interface RuntimeExecutorDependencies {
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
 }
 
+/**
+ * A sealed read-only surface has no model-powered tool path. Do not carry the
+ * bound Provider model into the generic Tool/Skill/Subagent controller in
+ * that case: this narrows the in-process credential reachability even though
+ * the Runtime itself still owns the model boundary.
+ */
+function taskModelForAdmittedToolSurfaceV1(
+  dependencies: RuntimeExecutorDependencies,
+): SupportedChatModel | undefined {
+  const surface = dependencies.config.executionCapabilitySurface;
+  if (!surface) return dependencies.model;
+  for (const toolName of ['task', 'activate_skill']) {
+    const spec = builtinToolRegistry.get(toolName);
+    if (
+      spec &&
+      isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
+        surface,
+        descriptor: builtinToolRegistry.descriptorOf(spec),
+      })
+    ) {
+      return dependencies.model;
+    }
+  }
+  return undefined;
+}
+
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"autoReviewV2","outcome":"legacy_fallback","sourceKind":"contract","symbol":"resolveAutoReviewTimeout"} */
 export function resolveAutoReviewTimeout(config: AgentConfig): number {
   return getFeatureFlags(config).autoReviewV2 ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
 }
 
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"providerDataPolicyV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"reviewerProviderDataAdmission"} */
 function reviewerProviderDataAdmission(
   dependencies: RuntimeExecutorDependencies,
   reviewerConfig: AgentConfig,
@@ -102,6 +132,8 @@ function reviewerProviderDataAdmission(
     : createApprovedProviderDataAdmissionV1(reviewerConfig);
 }
 
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillActivationV2","outcome":"legacy_fallback","sourceKind":"contract","symbol":"resolveRuntimeContextProjectionEnvironment"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillWorkflowV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"resolveRuntimeContextProjectionEnvironment"} */
 export function resolveRuntimeContextProjectionEnvironment(
   dependencies: RuntimeExecutorDependencies,
   state: import('./state').RuntimeState,
@@ -128,6 +160,7 @@ export function resolveRuntimeContextProjectionEnvironment(
 }
 
 /** Prepare the exact model input and bounded output before Runtime reservation. */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"providerDataPolicyV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"prepareRuntimeEffectForBudgetV1"} */
 export function prepareRuntimeEffectForBudgetV1(
   effect: import('./effects').RuntimeEffect,
   state: import('./state').RuntimeState,
@@ -195,6 +228,9 @@ export function prepareRuntimeEffectForBudgetV1(
 }
 
 /** Build the production executor for Kernel effects. */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"providerDataPolicyV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"createRuntimeEffectExecutor"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillActivationV2","outcome":"legacy_fallback","sourceKind":"contract","symbol":"createRuntimeEffectExecutor"} */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillWorkflowV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"createRuntimeEffectExecutor"} */
 export function createRuntimeEffectExecutor(
   dependencies: RuntimeExecutorDependencies,
 ): RuntimeEffectExecutor {
@@ -202,6 +238,8 @@ export function createRuntimeEffectExecutor(
   // executeRuntimeTools converts the real lifecycle callbacks into durable
   // RuntimeEvents, so this fallback is only a capability marker.
   const subagentEventSink: SubAgentEventSink = dependencies.subagentEventSink ?? (() => {});
+  /** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillActivationV2","outcome":"legacy_fallback","sourceKind":"contract","symbol":"currentSkillCatalog"} */
+  /** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"skillWorkflowV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"currentSkillCatalog"} */
   const currentSkillCatalog = (): SkillCatalogSnapshot | undefined =>
     dependencies.skillOptions &&
     getFeatureFlags(dependencies.config).skillWorkflowV1 &&
@@ -322,7 +360,7 @@ export function createRuntimeEffectExecutor(
             skillCatalog: currentSkillCatalog(),
             signal: dependencies.signal,
             taskConfig: dependencies.config,
-            taskModel: dependencies.model,
+            taskModel: taskModelForAdmittedToolSurfaceV1(dependencies),
             providerDataAdmission: dependencies.providerDataAdmission,
             remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
             descendantResourceAdmission,
@@ -334,6 +372,11 @@ export function createRuntimeEffectExecutor(
             ),
             ...(executionContext
               ? {
+                  // The continuation claim is an explicit durable boundary:
+                  // handleSubAgentResume awaits this commit before it can
+                  // dispatch the previously blocked child tool.
+                  persistSubagentResumeClaim: executionContext.persistEvent,
+                  getRuntimeState: () => executionContext.getState?.() ?? state,
                   recordNetworkDecision: async (
                     decision: import('@/core/sandbox/network-enforcer').NetworkDecisionReceiptV1,
                   ) => {
@@ -472,6 +515,7 @@ export function createRuntimeEffectExecutor(
 }
 
 /** Execute auto-review for a pending tool call. */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"providerDataPolicyV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"executeAutoReview"} */
 async function executeAutoReview(
   effect: Extract<import('./effects').RuntimeEffect, { type: 'run_auto_review' }>,
   state: Readonly<import('./state').RuntimeState>,

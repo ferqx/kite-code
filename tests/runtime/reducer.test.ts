@@ -1138,6 +1138,72 @@ describe('reduceRuntimeState — suspended subagents', () => {
     expect(next).toMatchObject({ suspendedSubagents: {} });
   });
 
+  test('claims an approved subagent continuation once and rejects duplicate or late parent results', () => {
+    const snapshot = makeSuspendedSubagentSnapshot();
+    let state = reduceRuntimeState(queueTaskCall(makeInitialState()), {
+      type: 'subagent.suspended',
+      toolCallId: 'task-1',
+      snapshot,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'approval.requested',
+      interactionId: 'approval-claim',
+      toolCallId: 'task-1',
+      approval: makeToolApproval('pwd'),
+    });
+    state = reduceRuntimeState(state, {
+      type: 'approval.granted',
+      interactionId: 'approval-claim',
+      grant: 'approve_once',
+    });
+    const claim: RuntimeEvent = {
+      type: 'subagent.resume_claimed',
+      toolCallId: 'task-1',
+      claim: {
+        claimId: 'claim-1',
+        subagentId: snapshot.subagentId,
+        childToolCallId: snapshot.blockedTool.toolCallId,
+        claimedAt: '2026-08-06T00:00:00.000Z',
+      },
+    };
+
+    const claimed = reduceRuntimeState(state, claim);
+    const duplicateClaim = reduceRuntimeState(claimed, {
+      ...claim,
+      claim: { ...claim.claim, claimId: 'claim-2' },
+    });
+    expect(claimed.tools.calls['task-1']?.status).toBe('running');
+    expect(claimed.subagentResumeClaims['task-1']).toEqual(claim.claim);
+    expect(duplicateClaim).toEqual(claimed);
+
+    const consumed = reduceRuntimeState(claimed, {
+      type: 'tool.finished',
+      toolCallId: 'task-1',
+      name: 'task',
+      result: { ok: true, command: 'task', exitCode: 0, stdout: 'first', stderr: '' },
+    });
+    const lateDifferentSuccess = reduceRuntimeState(consumed, {
+      type: 'tool.finished',
+      toolCallId: 'task-1',
+      name: 'task',
+      result: { ok: true, command: 'task', exitCode: 0, stdout: 'late mutation', stderr: '' },
+    });
+    const lateFailure = reduceRuntimeState(consumed, {
+      type: 'tool.failed',
+      toolCallId: 'task-1',
+      failure: classifyFailure('unknown', 'late child result must not replace the consumed result'),
+    });
+
+    expect(consumed.tools.calls['task-1']?.status).toBe('succeeded');
+    expect(consumed.suspendedSubagents).toEqual({});
+    expect(consumed.subagentResumeClaims).toEqual({});
+    expect(consumed.transcript.messages.filter((message) => message.kind === 'tool')).toHaveLength(
+      1,
+    );
+    expect(lateDifferentSuccess).toEqual(consumed);
+    expect(lateFailure).toEqual(consumed);
+  });
+
   test('approval.rejected clears the suspended snapshot for its task call', () => {
     const snapshot = makeSuspendedSubagentSnapshot();
     const suspended = reduceRuntimeState(queueTaskCall(makeInitialState()), {

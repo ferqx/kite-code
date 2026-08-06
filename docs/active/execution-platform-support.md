@@ -173,6 +173,22 @@ CLI/App 的 rollout 与 sandbox restriction 按 deny-wins 组合。`sandbox.enab
 
 ## Evidence 生命周期
 
+### L2 native diagnostic transport
+
+`.github/workflows/native-conformance-qualification.yml` 不是 D-04 production evidence producer，也不改变
+`release/platform-capabilities/approved-execution-qualifications-v1.json`。它仅为 AQ-7 的 diagnostic
+`platform × capability` contract 保留三个 source-owned runner target；D-04 当前空支持集继续使所有 effectful execution
+surface 关闭。workflow 固定 canonical repository/main、无 credential、串行且十分钟上限，当前在任何 native candidate、
+probe、install/PTY smoke 或 child dispatch 之前结束于 governance preflight。原因是尚未有可审计的 atomic quota ledger、
+maintainer authorization 与 protected-ref witness；输出只是一份无 candidate/execution/observation/retention **assertion** 的
+blocked transport。它仅携带 requested protected-CI profile reference，并不声称该 profile 已完成 quota reservation、
+retention witness 或 artifact retention；它不是 platform evidence、qualification 或 release admission。
+
+未来若另行建立并审核该治理控制面，仍须逐 target 重建 archive/manifest、L2-local opaque platform projection、runner identity
+与 source-owned matrix closure；该 projection 不输入或复用现有 `PlatformCapabilityEvidenceV1`/verifier。成功 smoke 或
+projection 永远不能自行把 D-04 empty support set 改成 supported。任何生产
+support 变更仍需要新的追加 ADR、fresh evidence 与独立 release decision。
+
 探针 JSON 记录实际 OS release/version、architecture、Bun、backend、逐项 verdict、限制和
 canonical digest。静态 support matrix 当前为 `accepted_empty_support_set`。任一 backend、
 profile、composition root、runner image 或边界实现变化都需要新 evidence；只有新的追加 ADR

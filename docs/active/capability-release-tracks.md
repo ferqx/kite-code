@@ -14,6 +14,12 @@ recovery 与 adversarial Gate。旧 internal dogfood、external canary、beta/st
 显式开启，且配置不能扩大 embedded ceiling。unknown/destructive/MCP write/Verification false pass 的
 fail-closed 语义不变。
 
+AQ-7 L2 native conformance 不属于上述 capability admission tracks。它对 standalone candidate、platform probe 与
+keyring unavailable surface 生成独立 diagnostic scope，不能为 Verification、MCP write、Skills 或其他 capability
+增加 route/platform allowlist、freshness、authority 或 enabled state。当前 workflow 因 protected-CI governance control
+plane 不可审计而只输出 metadata-only blocked transport；这不构成 capability evidence，也不会影响本文件的 off/blocked
+结论。
+
 ## 通用 Profile 与状态
 
 四个本地 profile（Verification、MCP write、Skills readonly/effectful）固定

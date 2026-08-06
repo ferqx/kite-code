@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from '@/core/runtime/events';
+import type { RuntimeEvent } from '../runtime/events';
 import type { MetadataEventRecordV1, MetadataFieldsV1, SessionMetadataContextV1 } from './types';
 
 const BUILTIN_TOOL_KINDS = new Set([

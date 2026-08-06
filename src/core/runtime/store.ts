@@ -234,6 +234,7 @@ function rebindForkState(
     tools.active = [];
   }
   if ('suspendedSubagents' in forkState) forkState.suspendedSubagents = {};
+  if ('subagentResumeClaims' in forkState) forkState.subagentResumeClaims = {};
   return forkState;
 }
 
@@ -836,6 +837,7 @@ export function createRuntimeStore(
       }
     },
 
+    /** @qualification-surface-v1 {"sourceSurfaceId":"runtime:session-resume","featureId":"RUNTIME-SESSION_RESUME-001","domain":"runtime","observableContract":"runtime_snapshot_recovery","risk":"p1","riskRationale":"recovery_authorization_boundary","owner":"core-runtime","entrypoints":["cli","runtime","tui"],"sourceKind":"contract","symbol":"loadNamedSnapshot"} */
     loadNamedSnapshot<T = unknown>(threadId: string, name: string): T | null {
       if (isClosed) return null;
       const row = selectNamedSnapshot.get(threadId, name);
@@ -964,6 +966,7 @@ export function createRuntimeStore(
       }));
     },
 
+    /** @qualification-surface-v1 {"sourceSurfaceId":"runtime:session-fork-rewind","featureId":"RUNTIME-SESSION_FORK_REWIND-001","domain":"runtime","observableContract":"runtime_fork_rewind","risk":"p0","riskRationale":"recovery_authorization_boundary","owner":"core-runtime","entrypoints":["runtime","tui"],"sourceKind":"contract","symbol":"restoreNamedSnapshot"} */
     restoreNamedSnapshot(threadId: string, snapshotId: string): boolean {
       if (isClosed) return false;
       const snapshot = store.loadNamedSnapshot(threadId, snapshotId);
@@ -989,6 +992,7 @@ export function createRuntimeStore(
       return true;
     },
 
+    /** @qualification-surface-v1 {"sourceSurfaceId":"runtime:session-fork","featureId":"RUNTIME-SESSION_FORK-001","domain":"runtime","observableContract":"runtime_fork_rewind","risk":"p0","riskRationale":"recovery_authorization_boundary","owner":"core-runtime","entrypoints":["runtime","tui"],"sourceKind":"contract","symbol":"forkSession","l1SubagentRecoveryBindings":[{"adapterId":"runtime-rewind-fork-tightening-v1","assertionId":"l1.runtime.rewind-fork-tightening.v1"}]} */
     forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean {
       if (isClosed) return false;
       const snapshot = store.loadNamedSnapshot(sourceThreadId, snapshotId);

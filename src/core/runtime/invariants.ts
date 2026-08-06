@@ -121,6 +121,28 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
     );
   }
 
+  for (const [toolCallId, claim] of Object.entries(state.subagentResumeClaims)) {
+    const call = state.tools.calls[toolCallId];
+    const snapshot = state.suspendedSubagents[toolCallId];
+    assert(
+      call?.name === 'task',
+      `subagent resume claim ${toolCallId} must belong to a task call.`,
+    );
+    assert(
+      call.status === 'running',
+      `subagent resume claim ${toolCallId} must keep its parent task running.`,
+    );
+    assert(
+      snapshot != null,
+      `subagent resume claim ${toolCallId} is missing its continuation snapshot.`,
+    );
+    assert(
+      snapshot.subagentId === claim.subagentId &&
+        snapshot.blockedTool.toolCallId === claim.childToolCallId,
+      `subagent resume claim ${toolCallId} does not match its continuation identity.`,
+    );
+  }
+
   const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
   const activeTaskIds = Object.values(state.tasks)
     .filter((task) => task.status === 'active')

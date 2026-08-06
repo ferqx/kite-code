@@ -1,16 +1,16 @@
 # 第九章 CLI、模式与配置
 
+
 ## 9.1 CLI
 
 入口为 `src/app/cli/index.ts`：
 
 ```bash
 bun run agent run --task "检查并修复测试"
-bun run agent resume --thread <thread-id>
 bun run agent trace <events.jsonl> --turn 1
 ```
 
-CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、授权恢复参数、Skill activation、feature override 和 trace 输出。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundaryV1`、`networkBoundaryV1`、`releaseProfileV1` 或 `observabilityMetricsV1` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions`、`/release` 与 `/telemetry`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
+CLI 支持 workspace、thread、Runtime 数据库路径、interaction mode、Skill activation、feature override 和 trace 输出。`resume` 只为返回稳定的 Runtime Kernel 不兼容错误而保留识别，不能执行恢复；其历史 approval 参数也不构成公开可运行 surface。每个已声明 flag 在读取值前按 command grammar 校验，不能静默跨入其他命令。`--execution-status` 在 Runtime/MCP/Skill 创建前输出有效 production boundary；普通开发入口会明确显示 `not admitted`。`--release-status` 输出脱敏的 artifact/profile/capability/Gate 投影；`--telemetry-status` 输出 artifact/flag/consent/endpoint/exporter 的脱敏状态，普通开发入口均显示 `artifact_disabled`。CLI 不能把 release-controlled `executionBoundaryV1`、`networkBoundaryV1`、`releaseProfileV1` 或 `observabilityMetricsV1` 打开，只能用显式 false 收紧。TUI 的对应入口是无参数 `/permissions`、`/release` 与 `/telemetry`。帮助文本中的历史参数名可能为兼容入口，架构语义以 Runtime mode/policy 为准。
 
 CLI 把实际经过公共 Runtime event 入口的 metadata-only 指标送入同一个 bounded reporter，并在命令结束的
 `finally` 路径等待有界 shutdown；mapper、flush 或 exporter shutdown 失败不改变 Runtime 的结构化终态。

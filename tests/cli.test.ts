@@ -92,6 +92,21 @@ describe('cli argument parsing', () => {
     expect(args.approvalHash).toBe('hash-a');
   });
 
+  test('rejects declared flags outside their command grammar before parsing values', () => {
+    expect(() => parseArgs(['run', '--approve'])).toThrow(
+      'Option --approve is not available for command run.',
+    );
+    expect(() => parseArgs(['run', '--turn', '1'])).toThrow(
+      'Option --turn is not available for command run.',
+    );
+    expect(() => parseArgs(['trace', '--task', 'ignored'])).toThrow(
+      'Option --task is not available for command trace.',
+    );
+    expect(() => parseArgs(['trace', '--full-access'])).toThrow(
+      'Option --full-access is not available for command trace.',
+    );
+  });
+
   // 验证 run 命令的 --mode 参数（read-only/plan 已移除，退回 auto）/ Verify run --mode accepts write/builder, others default to auto
   test('run accepts explicit workspace access mode values', () => {
     const args = parseArgs(['run', '--mode', 'read-only', '--task', 'Create hello.txt']);

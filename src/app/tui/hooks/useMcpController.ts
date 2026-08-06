@@ -80,6 +80,7 @@ function createSupervisor(config: AgentConfig, workspace: string): DefaultMcpSup
   return new DefaultMcpSupervisor({ connectionManagerOptions: transportBoundaryOptions });
 }
 
+/** @qualification-default-off-guard-v1 {"entrypointId":"tui","flagId":"networkBoundaryV1","outcome":"legacy_fallback","sourceKind":"public_surface","symbol":"sealedTransportBoundaryOptions"} */
 function sealedTransportBoundaryOptions(config: AgentConfig, workspace: string) {
   if (!config.executionBoundary) return {};
   const productionExecution = (

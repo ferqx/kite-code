@@ -6,6 +6,7 @@ const ISO_DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z
 
 export const PROVIDER_DATA_POLICY_VERSION = 1 as const;
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"provider:route-policy","featureId":"MODEL_CONTEXT-ROUTE_POLICY-001","domain":"model_context","observableContract":"provider_open_world_protocol","risk":"p0","riskRationale":"provider_egress_boundary","owner":"core-model","entrypoints":["runtime"],"sourceKind":"contract","symbol":"providerRouteIdentityV1Schema"} */
 export const providerRouteIdentityV1Schema = z
   .object({
     providerType: z.string().trim().min(1),

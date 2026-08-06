@@ -1,12 +1,16 @@
 /** Provider-neutral capability contracts persisted by the Runtime Kernel. */
 
-export type CapabilityKind =
-  | 'builtin_tool'
-  | 'mcp_tool'
-  | 'mcp_resource'
-  | 'mcp_prompt'
-  | 'skill'
-  | 'subagent';
+/** Closed protocol kinds; dynamic providers remain instances of this contract. */
+/** @qualification-surface-v1 {"sourceSurfaceId":"capability-catalog:protocol","featureId":"CAPABILITY-CATALOG_PROTOCOL-001","domain":"runtime","observableContract":"capability_catalog_protocol","risk":"p0","riskRationale":"governed_runtime_boundary","owner":"core-capabilities","entrypoints":["cli","runtime","tui"],"sourceKind":"contract","symbol":"CAPABILITY_KINDS_V1"} */
+export const CAPABILITY_KINDS_V1 = [
+  'builtin_tool',
+  'mcp_tool',
+  'mcp_resource',
+  'mcp_prompt',
+  'skill',
+  'subagent',
+] as const;
+export type CapabilityKind = (typeof CAPABILITY_KINDS_V1)[number];
 export type CapabilityAvailability = 'available' | 'degraded' | 'unavailable' | 'quarantined';
 export type CapabilityApproval = 'none' | 'auto_review' | 'user';
 export type CapabilityEffectLevel = 'none' | 'read' | 'write' | 'destructive' | 'unknown';

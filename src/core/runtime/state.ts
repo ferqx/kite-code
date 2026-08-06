@@ -423,7 +423,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 21;
+export const RUNTIME_STATE_SCHEMA_VERSION = 22;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -518,7 +518,13 @@ export interface RuntimeState {
   providerAdmission: ProviderAdmissionState;
   /** Paused subagents keyed by their parent task tool call. */
   suspendedSubagents: Record<string, SuspendedSubagentSnapshot>;
-  /** One-shot notice for a legacy subagent approval that cannot be resumed. */
+  /**
+   * Durable, single-use claims for approved subagent continuations. A claim is
+   * written before dispatching the previously blocked child tool; therefore a
+   * recovered claim is never replayed automatically.
+   */
+  subagentResumeClaims: Record<string, SubagentResumeClaim>;
+  /** One-shot notice for a legacy or already-claimed subagent continuation that cannot be resumed. */
   legacyUnrecoverableSubagentApproval?: {
     toolCallId: string;
     subagentId: string;
@@ -543,6 +549,14 @@ export interface RuntimeState {
   autoReview: AutoReviewState;
   /** doom-loop 重复调用追踪 / Doom-loop repeat call tracker */
   doomLoop: Record<string, { count: number; lastSeenAt: number }>;
+}
+
+/** A one-time claim binding a parent task continuation to its blocked child tool. */
+export interface SubagentResumeClaim {
+  claimId: string;
+  subagentId: string;
+  childToolCallId: string;
+  claimedAt: string;
 }
 
 // ── 工厂函数 / Factory functions ──
@@ -622,6 +636,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     verification: { records: {} },
     providerAdmission: { pending: [], waivers: {} },
     suspendedSubagents: {},
+    subagentResumeClaims: {},
     authorization: {
       mode: input.authorizationMode ?? 'default',
       ...(input.authorizationMode === 'full_access'

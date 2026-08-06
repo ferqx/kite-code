@@ -14,9 +14,9 @@ import {
   sessionLogFrontendDir,
   sessionLogRoot,
   userKiteCodeDir,
-} from '@/core/config/paths';
-import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
-import { DEFAULT_SESSION_LOGGING_POLICY_V1 } from '@/core/config/session-logging-policy';
+} from '../config/paths';
+import type { SessionLoggingPolicyV1 } from '../config/session-logging-policy';
+import { DEFAULT_SESSION_LOGGING_POLICY_V1 } from '../config/session-logging-policy';
 import {
   ActiveSessionLease,
   type ActiveSessionLeaseOptions,

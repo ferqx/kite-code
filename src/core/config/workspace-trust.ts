@@ -193,6 +193,7 @@ export function getWorkspaceTrustStatus(
  * prompt) only when the workspace is already trusted; unknown, corrupt and
  * unavailable states all prompt (fail closed).
  */
+/** @qualification-surface-v1 {"sourceSurfaceId":"authorization:workspace-trust","featureId":"AUTHORIZATION-WORKSPACE_TRUST-001","domain":"authorization","observableContract":"approval_workspace_trust","risk":"p0","riskRationale":"authorization_boundary","owner":"core-config","entrypoints":["cli","runtime","tui"],"sourceKind":"config","symbol":"shouldPromptWorkspaceTrust"} */
 export function shouldPromptWorkspaceTrust(workspace: string, storePath = workspaceTrustPath()) {
   return getWorkspaceTrustStatus(workspace, storePath) !== 'trusted';
 }

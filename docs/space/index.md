@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-02（Agent 生产准入跨平台策略修正）
+最后更新：2026-08-06（Agent 发布资格化：ADR-0072 GitHub Actions AQ-8–AQ-10 实现已收敛，尚未实际 dispatch；formal L3 保持安全停用）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -9,6 +9,7 @@
 状态含义：
 
 - `active`：当前有效规则，会约束其范围内的改动。
+- `blocked`：记录仍有效，但因明确依赖/授权未满足而不能推进。
 - `completed`：历史实现记录和验证证据。
 - `understanding`：设计背景或理由。
 - `reference`：外部资料摘要。
@@ -110,6 +111,7 @@
 | --- | --- | --- |
 | `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
+| `plans/2026-08-05-agent-release-qualification.md` | active | AQ-0–AQ-7 与 ADR-0072 AQ-8–AQ-10 的 public-safe workflow 实现已收敛，尚未实际 dispatch；formal ADR-0071 L3 仍需 protected supervisor、控制面与删除证明并保持 safe-disabled；二者均不改变当前 G0/G1。 |
 | `plans/2026-07-29-agent-production-readiness-roadmap.md` | archived | ADR-0069 首发路线图已收口：G0/G1、83 completed、25 superseded、0 optional。 |
 | `plans/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
 | `plans/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 ✅，Phase3 ✅。 |

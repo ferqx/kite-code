@@ -1,24 +1,9 @@
 import { z } from 'zod';
+import { RELEASE_CAPABILITY_IDS_V1 } from './capability-ids';
 import { type FeatureFlagName, isFeatureFlagName } from './features';
 
 /** Stable release-governance capability identifiers. Do not reorder or rename. */
-export const RELEASE_CAPABILITIES = Object.freeze([
-  'builtin_read_tools',
-  'builtin_write_tools',
-  'shell',
-  'plan',
-  'tool_search',
-  'mcp_read',
-  'mcp_write',
-  'skills_readonly',
-  'skills_effectful',
-  'verification',
-  'manual_compaction',
-  'auto_compaction',
-  'full_interaction_mode',
-  'content_session_logging',
-  'remote_telemetry',
-] as const);
+export const RELEASE_CAPABILITIES = RELEASE_CAPABILITY_IDS_V1;
 
 export const CAPABILITY_MATURITIES = Object.freeze([
   'under_development',

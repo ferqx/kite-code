@@ -71,3 +71,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0067](0067-single-maintainer-candidate-security-review.md) | accepted | 单维护者以 candidate-bound 自审批准发布；第三方评审为可选增强 |
 | [0068](0068-single-maintainer-open-source-first-release.md) | accepted | 首个开源版本只使用 G0 本地安全与 G1 普通三平台/真实 Provider Gate；企业认证和长期 maturity 转为发布后可选 |
 | [0069](0069-first-release-terminal-scope.md) | accepted | 首发路线以 G0/G1 为终态；取消 cohort/SLO/rollout/promotion 后续资格，108 Task 收敛为 83 completed、25 superseded |
+| [0070](0070-agent-release-qualification-framework.md) | accepted | Agent 资格化只产生诊断证据，并冻结 evidence 治理、配额、受保护 ref 与凭据隔离 |
+| [0071](0071-l3-protected-scratch-supervisor-control-plane.md) | accepted | L3 activation 需要受保护 Linux scratch supervisor、实际删除证明与 OS 级隔离；当前保持安全停用 |
+| [0072](0072-github-actions-protected-l3-diagnostic-execution.md) | accepted | GitHub-hosted public-safe real-Agent diagnostic report；不启用 ADR-0071 formal L3，也不进入 G0/G1 |

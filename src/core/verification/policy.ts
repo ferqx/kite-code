@@ -27,6 +27,7 @@ export function resolveVerificationMode(input: VerificationPolicyInput): Verific
   );
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"verification:policy","featureId":"VERIFICATION-POLICY_REQUIREMENT-001","domain":"verification","observableContract":"verification_completion","risk":"p0","riskRationale":"verification_bypass_risk","owner":"core-verification","entrypoints":["runtime"],"sourceKind":"contract","symbol":"requiresVerification","l0Binding":{"adapterId":"verification-policy-requirement-v1","assertionId":"l0.verification-policy.requirement-v1"}} */
 export function requiresVerification(effects: EffectProfile): boolean {
   return [effects.filesystem, effects.network, effects.externalState].some(
     (effect) => effect === 'write' || effect === 'destructive' || effect === 'unknown',

@@ -120,6 +120,7 @@ export function manualContextCompactionEvent(input: {
  * Build a human-readable context usage summary for `/context`.
  * Returns a formatted string suitable for TUI display.
  */
+/** @qualification-default-off-guard-v1 {"entrypointId":"runtime","flagId":"contextCompactionAutoV1","outcome":"legacy_fallback","sourceKind":"contract","symbol":"buildContextStatusReport"} */
 export function buildContextStatusReport(
   state: Readonly<RuntimeState>,
   config: AgentConfig,

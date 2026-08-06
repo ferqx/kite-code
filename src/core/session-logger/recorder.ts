@@ -4,9 +4,9 @@
 // 截断策略：content 模式保留允许的用户/模型可见正文，同时控制文件体积。
 // reasoning、工具输入输出、计划和子 Agent 正文不进入记录；允许正文仍执行脱敏。
 
-import { genSpanId } from '@/core/id-utils';
-import type { RuntimeEvent } from '@/core/runtime/events';
-import type { AgentEvent } from '@/protocol/events';
+import type { AgentEvent } from '../../protocol/events';
+import { genSpanId } from '../id-utils';
+import type { RuntimeEvent } from '../runtime/events';
 import { classifyToolFailure } from './classifier';
 import type { TraceRecord } from './types';
 

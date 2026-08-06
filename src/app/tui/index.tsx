@@ -37,7 +37,12 @@ import InputLine from './components/InputLine';
 import WorkspaceTrustGate from './components/WorkspaceTrustGate';
 import { createTuiExitCoordinatorV1 } from './exit-coordinator';
 import { useMcpController } from './hooks/useMcpController';
-import { type RewindDeps, useRewindCheckpoints, useRunRewind } from './hooks/useRewindHandler';
+import {
+  dispatchTuiRewindRequest,
+  type RewindDeps,
+  useRewindCheckpoints,
+  useRunRewind,
+} from './hooks/useRewindHandler';
 import { useSkillsLoader } from './hooks/useSkillsLoader';
 import { useSlashCommand } from './hooks/useSlashCommand';
 import type { SlashSuggestionData } from './hooks/useSlashSuggestions';
@@ -140,6 +145,7 @@ export function TuiBootstrap({
   );
 }
 
+/** @qualification-default-off-guard-v1 {"entrypointId":"tui","flagId":"observabilityMetricsV1","outcome":"legacy_fallback","sourceKind":"public_surface","symbol":"TuiApp"} */
 function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppProps) {
   const workspace = process.cwd();
   const { state, dispatch, onToggleReason } = useTuiState(
@@ -347,7 +353,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
   }, [state.exitRequested]);
 
   // Rewind: checkpoint list + revert/fork execution
-  useRewindCheckpoints(state, dispatch, threadIdRef);
+  useRewindCheckpoints(state, dispatch, threadIdRef, defaultCheckpointPath());
 
   const rewindDeps: RewindDeps = React.useMemo(
     () => ({
@@ -357,6 +363,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       workspace,
       sessionManager,
       threadIdRef,
+      checkpointPath: defaultCheckpointPath(),
       loadGenerationRef,
       conversationHistoryRef,
       thinkingLevelRef,
@@ -577,8 +584,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         return;
       }
       if (action.type === 'EXECUTE_REWIND') {
-        dispatch(action);
-        void runRewindRef.current(action.scope, action.checkpointId);
+        void dispatchTuiRewindRequest(dispatch, action, runRewindRef.current);
         return;
       }
       // ── 多会话：SWITCH_SESSION 拦截，缓冲回放 ──

@@ -53,6 +53,70 @@ describe('test discovery boundaries', () => {
     expect(e2eFiles).toContain('tests/e2e/live/mcp/langchain-docs.live.ts');
     expect(e2eFiles).toContain('tests/e2e/live/model/README.md');
     expect(e2eFiles).toContain('tests/e2e/live/model/context-compaction.live.ts');
+    expect(e2eFiles).toContain('tests/e2e/live/model/auto-compaction-success.live.ts');
+    expect(e2eFiles).toContain('tests/e2e/live/model/auto-compaction-cancel.live.ts');
+  });
+
+  test('keeps the live-model package wrapper on the sealed diagnostic path', () => {
+    const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const wrapper = readFileSync(
+      join(repoRoot, 'tests/e2e/live/model/context-compaction.live.ts'),
+      'utf8',
+    );
+    expect(pkg.scripts?.['test:model:live']).toBe(
+      'bun run tests/e2e/live/model/context-compaction.live.ts',
+    );
+    expect(wrapper).toContain('runL3LiveCompatibilityV1');
+    expect(wrapper).toContain('KITE_RUN_QUALIFICATION_LIVE_V1');
+    expect(wrapper).toContain('KITE_QUALIFICATION_LEDGER_DIR');
+    for (const forbidden of [
+      'KITE_LIVE_MODEL_API_KEY',
+      'KITE_LIVE_MODEL_BASE_URL',
+      'KITE_LIVE_MODEL_NAME',
+      'createChatModel',
+      'loadAgentConfig',
+      'runRuntimeAgent',
+      'console.error',
+    ]) {
+      expect(wrapper).not.toContain(forbidden);
+    }
+  });
+
+  test('keeps AQ-9B success and operator-cancel wrappers independently opt-in and out of AQ-8/G1', () => {
+    const pkg = JSON.parse(readFileSync(join(repoRoot, 'package.json'), 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+    const successWrapper = readFileSync(
+      join(repoRoot, 'tests/e2e/live/model/auto-compaction-success.live.ts'),
+      'utf8',
+    );
+    const cancelWrapper = readFileSync(
+      join(repoRoot, 'tests/e2e/live/model/auto-compaction-cancel.live.ts'),
+      'utf8',
+    );
+    expect(pkg.scripts?.['test:model:auto-compaction:live:success']).toBe(
+      'bun run tests/e2e/live/model/auto-compaction-success.live.ts',
+    );
+    expect(pkg.scripts?.['test:model:auto-compaction:live:cancel']).toBe(
+      'bun run tests/e2e/live/model/auto-compaction-cancel.live.ts',
+    );
+    for (const wrapper of [successWrapper, cancelWrapper]) {
+      expect(wrapper).toContain('runL3LiveAutoCompactionV1');
+      expect(wrapper).toContain('KITE_RUN_QUALIFICATION_AUTO_COMPACTION_LIVE_V1');
+      expect(wrapper).toContain('KITE_QUALIFICATION_AUTO_COMPACTION_LEDGER_DIR');
+      expect(wrapper).not.toContain('runL3LiveCompatibilityV1');
+      expect(wrapper).not.toContain('test:provider:smoke');
+      expect(wrapper).not.toContain('createChatModel');
+      expect(wrapper).not.toContain('loadAgentConfig');
+      expect(wrapper).not.toContain('runRuntimeAgent');
+      expect(wrapper).not.toContain('console.error');
+    }
+    expect(cancelWrapper).toContain("process.once('SIGINT'");
+    expect(cancelWrapper).toContain('signal: cancellation.signal');
+    expect(successWrapper).toContain("report.outcome !== 'success'");
+    expect(cancelWrapper).toContain("report.outcome !== 'cancelled'");
   });
 
   test('keeps real-agent and PTY scenarios out while admitting deterministic TUI harness tests', () => {
@@ -80,6 +144,12 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
     expect(pkg.scripts?.['test:model:live']).toContain('tests/e2e/live/model/');
     expect(pkg.scripts?.['test:model:live']).toContain('bun run');
+    expect(pkg.scripts?.['test:model:auto-compaction:live:success']).toContain(
+      'tests/e2e/live/model/',
+    );
+    expect(pkg.scripts?.['test:model:auto-compaction:live:cancel']).toContain(
+      'tests/e2e/live/model/',
+    );
     expect(pkg.scripts?.['test:tui:system']).toContain('scripts/run-tui-system-tests.ts');
     expect(pkg.scripts?.['test:tui:harness']).toContain('tests/tui-system/harness/');
     expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain('tests/sandbox-executor.test.ts');

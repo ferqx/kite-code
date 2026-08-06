@@ -23,6 +23,7 @@ export function verificationRequestForUser(input: {
   };
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"verification:capability-request","featureId":"VERIFICATION-CAPABILITY_REQUEST-001","domain":"verification","observableContract":"verification_completion","risk":"p0","riskRationale":"verification_bypass_risk","owner":"core-verification","entrypoints":["runtime"],"sourceKind":"contract","symbol":"verificationRequestForCapability"} */
 export function verificationRequestForCapability(input: {
   invocationId: string;
   capabilityId: string;

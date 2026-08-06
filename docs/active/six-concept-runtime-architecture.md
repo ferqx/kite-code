@@ -103,6 +103,15 @@ claim nonce digest；Runtime 只有在该 durable claim 成功后才允许请求
 不能复用仍有效 permit。迁移 v20 snapshot 不为历史调用虚构 egress decision，receipt 不持久化
 raw arguments、正文或 nonce。
 
+Runtime schema v22 为 Subagent approval continuation 增加 `subagent.resume_claimed` 事实和
+`subagentResumeClaims` 状态。`handleSubAgentResume` 只可在已批准 parent task、suspended snapshot、
+subagent ID 与原 blocked child tool ID 都精确匹配时，把 claim 先提交到 Runtime Store；提交后才可
+进入 child dispatch。v22 恢复时无 claim 的 suspended continuation 仍可按其原批准路径处理；已有 claim
+而无 child terminal 则由 `createAgentKernel()` 标记为 recovery-unavailable/unknown，Scheduler 不会 replay。
+pre-v22 continuation 因没有可证明的 claim 边界也走同一 fail-closed recovery path。该 schema 只建立
+Runtime 内部的一次 claim/terminal consumption 边界，不声称 Provider、Tool 或其他外部 effect 的
+分布式 exactly-once。
+
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
 dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
 `legacy_unconfigured`，不会伪造余额；v18 ledger 保留 reservation，并补齐空 waiter queue。
@@ -166,6 +175,11 @@ RuntimeStore 的 rewind sidecar 在每个检查点窗口保存最早文件原像
 reconciliation 副作用；`createAgentKernel()` 才保存迁移快照，并把未终结 invocation、reservation
 和 waiter 收敛为可审计的 unknown/released/cancelled 事实。这样 Session 列表读取不会因观察历史
 会话而改写 Runtime Store，真正恢复执行时仍保持保守收敛。
+
+fork 是新的授权边界，不是 resume。`rebindForkState()` 除去 elevation、command grant、binding、
+Provider waiver/pending、交互、queue/active 和 suspended continuation 外，也必须清空
+`subagentResumeClaims`；因此源会话的 approved/claimed child 不会在 fork session 获得可执行的
+恢复权。
 
 Runtime fault/soak 的正式资格证据不是任意本地测试输出。qualification 报告必须把 GitHub repository、head SHA、ref、`workflow_ref`/`workflow_sha`、run ID/run attempt 与固定 seed/iteration 写入 canonical digest，保留逐 attempt 资源结构和 Runtime ledger receipt provenance，并由独立 verifier 重建 case/aggregate 摘要；缺少来源身份只能得到 `inconclusive`。digest 本身不提供真实性，Release Gate 还必须绑定成功的 GitHub Actions run 与被审查 head。这一证据边界不改变 Runtime 的运行时 schema，但约束哪些测试结果可以进入 Release Gate。
 
@@ -376,3 +390,18 @@ VerificationExecutor --> RuntimeEvent
 5. 外部副作用必须先记录 invocation intent。
 6. Execution success 不等于目标完成。
 7. Required verification 不能被 final response、feature flag 关闭或模型声明绕过。
+
+## 11. 诊断性资格化 source binding
+
+ADR-0070 的 AQ-1 source-owned qualification annotations（`@qualification-surface-v1`、
+`@qualification-entry-rejection-v1` 与 `@qualification-default-off-guard-v1`）是离线 collector
+读取的审计元数据。collector 只校验 annotation 与相邻真实 AST declaration、source reference 和
+canonical digest 的一致性；这些注解不是 Runtime 配置、不会被模型读取，也不参与
+`RuntimeState`、`RuntimeEvent`、`RuntimeEffect`、Capability binding、Policy、ExecutionReceipt 或
+`VerificationSpecV1`。
+
+由此生成的 `AgentFeatureQualificationMatrixV1` 及其 structural assertion 只证明 source-owned
+inventory/guard contract 已被绑定。它们不能形成 `ReleaseEvidenceV1`、Verification `passed`、
+`run.completed`、production content admission 或任何 Release Gate 结论，且没有回流到既有 release
+bundle/evaluator 的路径。现有 G0/G1（包括 DeepSeek 与 Qwen `qwen3.6-flash` 的 G1 smoke）保持其
+原有语义和唯一发布权威；诊断性资格化不能替代、放宽或接入这些门禁。

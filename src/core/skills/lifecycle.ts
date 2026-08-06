@@ -63,6 +63,7 @@ function parseForkOutput(
     : { ok: true, output: output as Record<string, unknown> };
 }
 
+/** @qualification-surface-v1 {"sourceSurfaceId":"skill:open-world-contract","featureId":"SKILL-OPEN_WORLD_CONTRACT-001","domain":"skill","observableContract":"skill_open_world_protocol","risk":"p0","riskRationale":"open_world_skill_risk","owner":"core-skills","entrypoints":["cli","runtime","tui"],"sourceKind":"contract","symbol":"activateSkillLifecycle","l1SkillMcpBindings":[{"adapterId":"skill-discovery-activation-output-v1","assertionId":"l1.skill.discovery-activation-output.v1"}]} */
 export async function activateSkillLifecycle(
   runtime: SkillActivationContext,
   input: { skill_id: string; input: Record<string, unknown> },

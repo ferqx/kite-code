@@ -6,6 +6,25 @@
 
 Runtime feature flags are registered in `src/core/config/features.ts`. Configuration is read from the optional `features` object in user and project `kite-code.jsonc`; project values override user values.
 
+`FEATURE_FLAG_DEFINITIONS_V1` 是默认值、config override schema、CLI `--feature` parser 和 diagnostic
+source inventory 共用的唯一注册表。该声明只让公开 surface 的名称/默认值可审计；qualification Matrix
+仅产生 diagnostic digest，不能把 flag 状态变成发布准入、改变 G0/G1 或扩大任何 Provider data policy。
+每个定义同时声明 `cliOverridePolicy`：CLI 永远可以请求更严格的 `false`，但 `deny_enable` 的 release-controlled
+flag 在 CLI 请求 `true` 时立即拒绝；不再由 CLI parser 维护另一份硬编码名单。`--feature` 只属于 `run` command
+grammar，其他命令会在读取 override 前拒绝。
+
+每个定义还必须声明 `implementationState` 和 source-owned `configurationEntrypoints`。默认关闭的
+`implemented` flag 会以其实际 verified guard entrypoints 覆盖该 registry scope；默认开启或 `declared_only`
+注册项则保留 configuration surface 的 applicability。每个实际产品 consumer declaration/symbol（包含从
+`getFeatureFlags()` 或 feature carrier 解构的 alias）都必须有相邻 `@qualification-default-off-guard-v1`
+注解；同一文件的另一个注解不构成覆盖，缺失或注解没有读取该 flag 时 diagnostic Matrix 构建直接失败。
+`outcome=safe_disable` 必须用解析器可验证的直接 false guard 闭合返回；`identity` 只能返回注解指定的同一
+函数参数，`!flag && extra`、任意局部值或兼容 fallback 都被拒绝。只有所有 consumer 都为 verified
+`safe_disable` 时，Matrix 才标为 `experimental_default_off`；任何 `legacy_fallback` 都为
+`unsupported/default_off_legacy_fallback`。`entry_rejection` 仅保留给真实的入口拒绝，不能表示 flag 的关闭
+路径。`declared_only` 只可用于没有任何产品 consumer 的注册占位，Matrix 将它标为
+`unsupported/source_not_supported`，不能作为可启用、可资格化或发布准入的功能。
+
 Use `bun run agent run --feature autoReviewV2` for a one-run override. A value can be explicit, for example `--feature autoReviewV2=false`. Unknown names fail fast.
 
 New flags must default to `false`, include tests for both values, and retain the old path for at least two weeks before it is removed. Flags may default to `true` only after their migration ADR is accepted and the production TUI path has end-to-end coverage. `planLifecycleV2`, `interactionControllerV2`, and `sessionLoggingPolicyV1` are established migrations and default to `true`.

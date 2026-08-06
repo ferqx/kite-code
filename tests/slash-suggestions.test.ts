@@ -1,9 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  buildModeSuggestionItems,
-  findSlashCommandDefs,
-  SLASH_COMMANDS,
-} from '../src/app/tui/hooks/useSlashSuggestions';
+import { buildModeSuggestionItems } from '../src/app/tui/hooks/useSlashSuggestions';
+import { findSlashCommandDefs, SLASH_COMMANDS } from '../src/app/tui/public-surface';
 
 describe('slash command suggestions', () => {
   test('suggests /mcp with its management hint', () => {
