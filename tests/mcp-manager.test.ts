@@ -419,6 +419,34 @@ describe('McpConnectionManager governance fixture', () => {
     expect(manager.getServerStates().has('oauth')).toBe(false);
   });
 
+  test('requests authorization when OAuth discovery requires authentication', async () => {
+    const provider = {} as OAuthClientProvider;
+    const config = { type: 'http' as const, url: 'https://mcp.example.com/mcp' };
+    const manager = new McpConnectionManager({
+      createClient: () =>
+        ({
+          connect: async () => {},
+          close: async () => {},
+          listTools: async () => {
+            throw new UnauthorizedError('Login required');
+          },
+          listPrompts: async () => ({ prompts: [] }),
+          listResources: async () => ({ resources: [] }),
+          setNotificationHandler: () => {},
+        }) as unknown as Client,
+      createTransport: (_config, authProvider) => {
+        expect(authProvider).toBeDefined();
+        return { finishAuth: async (_code: string) => {} } as never;
+      },
+    });
+
+    await expect(manager.beginOAuth('oauth', config, 9, provider)).resolves.toBe(
+      'authorization_required',
+    );
+    await manager.clearOAuth('oauth');
+    expect(manager.getServerStates().get('oauth')?.health).toBeUndefined();
+  });
+
   test('records explicit local provenance when trusting read-only annotations', async () => {
     await manager.connect('trusted-fixture', {
       type: 'stdio',

@@ -4,8 +4,6 @@ export class TuiUserInputProvider {
   private pendingResolve: ((action: UserAction) => void) | null = null;
   private pendingInterrupt: InterruptPayload | null = null;
 
-  constructor(_legacyDispatch?: unknown) {}
-
   /** 获取当前待处理的中断负载 / Get current pending interrupt payload */
   getPendingInterrupt(): InterruptPayload | null {
     return this.pendingInterrupt;

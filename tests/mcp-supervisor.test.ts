@@ -668,6 +668,8 @@ describe('McpSupervisor', () => {
     current.health = 'disconnected';
     current.diagnostic = diagnoseMcpError(manager.reconnectFailure);
     manager.emit();
+    const server = supervisor.getSnapshot().servers.find((entry) => entry.key.name === 'login');
+    expect(server?.authStatus).toBe('login_required');
     const before = manager.reconnects.length;
 
     await expect(supervisor.ensureProviderReady('login', 60_000)).rejects.toMatchObject({
@@ -772,6 +774,16 @@ describe('McpSupervisor', () => {
     expect(auth.message).not.toContain('super-secret');
     expect(auth.message).not.toContain('user:pass');
     expect(auth.message).not.toContain('token=x');
+  });
+
+  test('maps numeric error code to auth-required when code is 401', () => {
+    const auth = diagnoseMcpError(
+      Object.assign(new Error('Streamable HTTP error: Error POSTing to endpoint'), { code: 401 }),
+      { phase: 'connect' },
+    );
+    expect(auth.code).toBe('auth_required');
+    expect(auth.retryable).toBe(false);
+    expect(auth.technical?.status).toBe(401);
   });
 });
 

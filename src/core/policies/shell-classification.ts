@@ -220,7 +220,7 @@ function isCriticalSystemPath(target: string): boolean {
   // rm -rf / or rm -rf C:\ is always denied
   if (normalized === '/' || /^[a-z]:\/$/.test(normalized)) return true;
   return CRITICAL_SYSTEM_PREFIXES.some(
-    (prefix) => normalized === prefix || normalized.startsWith(prefix + '/'),
+    (prefix) => normalized === prefix || normalized.startsWith(`${prefix}/`),
   );
 }
 

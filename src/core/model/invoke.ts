@@ -251,8 +251,14 @@ function toModelMessages(messages: BaseMessage[]): ModelMessage[] {
 }
 
 function toAssistantModelMessage(msg: AIMessage): ModelMessage {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AI SDK content union is broad
-  const parts: Array<any> = [];
+  // Structural subset of the AI SDK AssistantContent parts (TextPart, ToolCallPart,
+  // ReasoningPart) so the pushed shapes are assignable without importing provider
+  // part types from different SDK entrypoints.
+  const parts: Array<
+    | { type: 'text'; text: string }
+    | { type: 'tool-call'; toolCallId: string; toolName: string; input: unknown }
+    | { type: 'reasoning'; text: string }
+  > = [];
 
   // Text content
   const text = contentAsString(msg.content);

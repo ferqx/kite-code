@@ -532,6 +532,9 @@ export class McpConnectionManager {
     this.oauthProviders.set(name, provider);
     try {
       await this.connect(name, config, generation);
+      if (this.servers.get(name)?.diagnostic?.code === 'auth_required') {
+        return 'authorization_required';
+      }
       return 'connected';
     } catch (error) {
       if (error instanceof UnauthorizedError || diagnoseMcpError(error).code === 'auth_required') {

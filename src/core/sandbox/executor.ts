@@ -91,6 +91,10 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
         filesystemScope: options.filesystemScope,
         sandboxRuntimeDir,
         runtimeReadOnlyRoots,
+        // Permit git commands to access the Workspace `.git` directory inside the
+        // sandbox (see ADR-0070). Linux bubblewrap already binds the full Workspace,
+        // so this aligns the macOS Seatbelt boundary with that behavior.
+        gitAccess: 'allow',
       });
       return {
         cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],

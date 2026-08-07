@@ -120,7 +120,7 @@ export function mergeConsecutiveTextBlocksInLastTurn(state: TuiState): TuiState 
     if (b.kind === 'text') {
       if (textBuffer) {
         // Append to existing text buffer with \n separator
-        textBuffer.content += '\n' + b.content;
+        textBuffer.content += `\n${b.content}`;
         changed = true;
       } else {
         textBuffer = { id: b.id, content: b.content };

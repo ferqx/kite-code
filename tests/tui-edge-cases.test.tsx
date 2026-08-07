@@ -7,7 +7,12 @@ async function wait(ms = 30) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-async function pressKeys(stdin: any, seq: string, count = 1, ms = 30) {
+async function pressKeys(
+  stdin: { write: (data: string) => void },
+  seq: string,
+  count = 1,
+  ms = 30,
+) {
   for (let i = 0; i < count; i++) {
     stdin.write(seq);
     await wait(ms);

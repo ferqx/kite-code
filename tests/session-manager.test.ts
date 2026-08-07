@@ -2,28 +2,70 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { TuiUserInputProvider } from '../src/app/tui/provider';
 import type { Action } from '../src/app/tui/reducers/actions';
 import {
   admitInteractionModeTarget,
   fullModeUnavailableReason,
   isSilentCancellationMismatch,
   resolveInteractionModeTarget,
+  type SessionDeps,
   SessionManager,
   SessionRuntime,
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
+import type { AgentConfig } from '../src/core/config';
 import { loadSession } from '../src/core/persistence/sessions';
 import { createAgentKernel } from '../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
+import type { UserAction } from '../src/protocol/actions';
+
+// ── Test-only structural access to private members (casts are erased at runtime) ──
+
+type RuntimeWithPendingResolve = { _pendingResolve: ((action: unknown) => void) | null };
+type RuntimeWithForegroundWake = { _foregroundWake: () => void };
+type RuntimeWithForeground = { _foreground: boolean };
+type RuntimeWithProxyProvider = {
+  _proxyProvider: {
+    requestAction: (payload: unknown) => Promise<unknown>;
+    submitAction: (action: unknown) => void;
+    reset: () => void;
+  };
+};
+type RuntimeWithRuntimeAction = {
+  _requestRuntimeAction: (effect: unknown, state: unknown) => Promise<unknown>;
+};
+type RuntimeWithRouteRuntimeEvent = {
+  _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
+};
+type RuntimeWithPushToBuffer = { _pushToBuffer: (event: unknown) => void };
+type ManagerWithTokenStatsCache = {
+  tokenStatsCache: Map<
+    string,
+    { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number }
+  >;
+};
 
 // ── Helpers ──
 
-function makeDeps(): any {
+function makeDeps(): SessionDeps {
+  const config: AgentConfig = {
+    apiKey: 'unused',
+    baseURL: 'https://example.invalid',
+    modelName: 'test-model',
+    providerName: 'deepseek',
+    providerType: 'openai-compatible',
+    features: {
+      resourceBudgetV1: true,
+      boundedCancellationV1: true,
+    },
+    sandbox: { enabled: true },
+  };
   return {
-    config: { sandbox: { enabled: true } },
-    provider: {},
+    config,
+    provider: {} as unknown as TuiUserInputProvider,
     skillManifests: [],
     skillOptions: null,
     mcpManager: null,
@@ -608,7 +650,9 @@ describe('SessionManager', () => {
     const id1 = mgr.createSession('/tmp/ws');
     const rt1 = mgr.getRuntime(id1)!;
     // Set up a pending interrupt on the old session
-    (rt1 as any)._pendingResolve = (_action: any) => {};
+    (rt1 as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = (
+      _action: unknown,
+    ) => {};
     rt1.pendingInterrupt = true;
 
     // Create new session — should deactivate old one
@@ -686,7 +730,9 @@ describe('SessionManager', () => {
     const id1 = mgr.createSession('/tmp/ws');
     const id2 = mgr.createSession('/tmp/ws');
     const rt1 = mgr.getRuntime(id1)!;
-    (rt1 as any)._pendingResolve = (_action: any) => {};
+    (rt1 as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = (
+      _action: unknown,
+    ) => {};
 
     mgr.switchSession(id1, id2);
 
@@ -999,7 +1045,7 @@ describe('SessionManager', () => {
     const newId = mgr.createSession('/tmp/ws');
 
     // Old session's stats are still in the cache (we saved explicitly before)
-    const oldStats = (mgr as any).tokenStatsCache.get(oldId);
+    const oldStats = (mgr as unknown as ManagerWithTokenStatsCache).tokenStatsCache.get(oldId)!;
     expect(oldStats).toBeDefined();
     expect(oldStats.totalTokens).toBe(75);
 
@@ -1019,7 +1065,7 @@ describe('SessionManager', () => {
     );
 
     // Verify stats exist before removal
-    expect((mgr as any).tokenStatsCache.has(id)).toBe(true);
+    expect((mgr as unknown as ManagerWithTokenStatsCache).tokenStatsCache.has(id)).toBe(true);
 
     // removeRuntime clears the runtime but does NOT save stats
     mgr.removeRuntime(id);
@@ -1120,7 +1166,7 @@ describe('SessionRuntime', () => {
       };
     }
 
-    const actionPromise = (rt as any)._requestRuntimeAction(
+    const actionPromise = (rt as unknown as RuntimeWithRuntimeAction)._requestRuntimeAction(
       { type: effectType, interactionId, toolCallId },
       state,
     );
@@ -1155,7 +1201,7 @@ describe('SessionRuntime', () => {
       repairAttempts: 0,
       checkResults: {},
     };
-    const actionPromise = (rt as any)._requestRuntimeAction(
+    const actionPromise = (rt as unknown as RuntimeWithRuntimeAction)._requestRuntimeAction(
       {
         type: 'request_verification_decision',
         interactionId: 'verification',
@@ -1181,7 +1227,7 @@ describe('SessionRuntime', () => {
       }),
     };
     const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
-    const actionPromise = (rt as any)._requestRuntimeAction(
+    const actionPromise = (rt as unknown as RuntimeWithRuntimeAction)._requestRuntimeAction(
       {
         type: 'request_provider_action',
         interactionId: 'provider-action',
@@ -1214,7 +1260,7 @@ describe('SessionRuntime', () => {
       },
     };
     const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
-    const actionPromise = (rt as any)._requestRuntimeAction(
+    const actionPromise = (rt as unknown as RuntimeWithRuntimeAction)._requestRuntimeAction(
       {
         type: 'request_provider_admission',
         interactionId: 'provider-admission',
@@ -1242,7 +1288,7 @@ describe('SessionRuntime', () => {
     rt.abortController = ac;
 
     let resolved = false;
-    (rt as any)._pendingResolve = () => {
+    (rt as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = () => {
       resolved = true;
     };
 
@@ -1301,14 +1347,14 @@ describe('SessionRuntime', () => {
   test('abort wakes foregroundWake promise', () => {
     const rt = makeRuntime();
     let woken = false;
-    (rt as any)._foregroundWake = () => {
+    (rt as unknown as { _foregroundWake: () => void })._foregroundWake = () => {
       woken = true;
     };
 
     rt.abort();
 
     expect(woken).toBe(true);
-    expect((rt as any)._foregroundWake).toBeNull();
+    expect((rt as unknown as { _foregroundWake: () => void })._foregroundWake).toBeNull();
   });
 
   test('abort is safe to call when no AbortController', () => {
@@ -1366,23 +1412,23 @@ describe('SessionRuntime', () => {
   test('setForeground(true) wakes foregroundWake promise', () => {
     const rt = makeRuntime();
     let woken = false;
-    (rt as any)._foregroundWake = () => {
+    (rt as unknown as { _foregroundWake: () => void })._foregroundWake = () => {
       woken = true;
     };
-    (rt as any)._foreground = false;
+    (rt as unknown as { _foreground: boolean })._foreground = false;
 
     rt.setForeground(true);
 
     expect(woken).toBe(true);
-    expect((rt as any)._foregroundWake).toBeNull();
-    expect((rt as any)._foreground).toBe(true);
+    expect((rt as unknown as { _foregroundWake: () => void })._foregroundWake).toBeNull();
+    expect((rt as unknown as { _foreground: boolean })._foreground).toBe(true);
   });
 
   test('setForeground(false) only changes flag', () => {
     const rt = makeRuntime();
-    (rt as any)._foreground = true;
+    (rt as unknown as { _foreground: boolean })._foreground = true;
     rt.setForeground(false);
-    expect((rt as any)._foreground).toBe(false);
+    expect((rt as unknown as { _foreground: boolean })._foreground).toBe(false);
   });
 
   // ── clearBuffer ──
@@ -1404,45 +1450,59 @@ describe('SessionRuntime', () => {
 
   test('resolveInterrupt resolves the pending promise with action', () => {
     const rt = makeRuntime();
-    let resolvedAction: any = null;
-    (rt as any)._pendingResolve = (action: any) => {
+    let resolvedAction: unknown = null;
+    (rt as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = (
+      action: unknown,
+    ) => {
       resolvedAction = action;
     };
 
-    rt.resolveInterrupt({ type: 'approve' as any });
+    rt.resolveInterrupt({ type: 'approve' } as unknown as UserAction);
 
     expect(resolvedAction).toEqual({ type: 'approve' });
-    expect((rt as any)._pendingResolve).toBeNull();
+    expect(
+      (rt as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve,
+    ).toBeNull();
   });
 
   test('resolveInterrupt is no-op when no pending resolve', () => {
     const rt = makeRuntime();
     // should not throw
-    rt.resolveInterrupt({ type: 'cancel' as any });
+    rt.resolveInterrupt({ type: 'cancel' } as unknown as UserAction);
   });
 
   // ── _pushToBuffer (via private access) ──
 
   test('pushToBuffer adds event to buffer', () => {
     const rt = makeRuntime();
-    (rt as any)._pushToBuffer({ type: 'model.responded', messageId: 'm1', text: 'hello' });
+    (rt as unknown as RuntimeWithPushToBuffer)._pushToBuffer({
+      type: 'model.responded',
+      messageId: 'm1',
+      text: 'hello',
+    });
     expect(rt.eventBuffer.length).toBe(1);
   });
 
   test('pushToBuffer discards disposable events on overflow', () => {
     const rt = makeRuntime();
     // Fill buffer to max
-    for (let i = 0; i < (SessionRuntime as any).MAX_BUFFER; i++) {
+    for (let i = 0; i < (SessionRuntime as unknown as { MAX_BUFFER: number }).MAX_BUFFER; i++) {
       rt.eventBuffer.push({ type: 'model.responded', messageId: `m${i}`, text: `msg${i}` });
     }
     // Push one more — should discard a disposable event
-    (rt as any)._pushToBuffer({ type: 'model.responded', messageId: 'overflow', text: 'overflow' });
-    expect(rt.eventBuffer.length).toBeLessThanOrEqual((SessionRuntime as any).MAX_BUFFER);
+    (rt as unknown as RuntimeWithPushToBuffer)._pushToBuffer({
+      type: 'model.responded',
+      messageId: 'overflow',
+      text: 'overflow',
+    });
+    expect(rt.eventBuffer.length).toBeLessThanOrEqual(
+      (SessionRuntime as unknown as { MAX_BUFFER: number }).MAX_BUFFER,
+    );
   });
 
   test('pushToBuffer shifts oldest when no disposable events on overflow', () => {
     const rt = makeRuntime();
-    const MAX = (SessionRuntime as any).MAX_BUFFER;
+    const MAX = (SessionRuntime as unknown as { MAX_BUFFER: number }).MAX_BUFFER;
     // Fill buffer with non-disposable events (tool_call, tool_done are not in DISPOSABLE_EVENT_TYPES)
     for (let i = 0; i < MAX; i++) {
       rt.eventBuffer.push({
@@ -1452,7 +1512,7 @@ describe('SessionRuntime', () => {
         result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
       });
     }
-    (rt as any)._pushToBuffer({
+    (rt as unknown as RuntimeWithPushToBuffer)._pushToBuffer({
       type: 'tool.finished',
       toolCallId: 'c_new',
       name: 'read_file',
@@ -1464,17 +1524,33 @@ describe('SessionRuntime', () => {
 
   test('coalesces cumulative model deltas to the latest value per frame', async () => {
     const rt = makeRuntime();
-    const actions: any[] = [];
-    const dispatch = (action: any) => actions.push(action);
+    const actions: unknown[] = [];
+    const dispatch = (action: unknown) => actions.push(action);
 
-    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'a' }, dispatch);
-    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'answer' }, dispatch);
-    (rt as any)._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'r' }, dispatch);
-    (rt as any)._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'reasoning' }, dispatch);
+    (
+      rt as unknown as {
+        _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
+      }
+    )._routeRuntimeEvent({ type: 'model.text_delta', text: 'a' }, dispatch);
+    (
+      rt as unknown as {
+        _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
+      }
+    )._routeRuntimeEvent({ type: 'model.text_delta', text: 'answer' }, dispatch);
+    (
+      rt as unknown as {
+        _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
+      }
+    )._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'r' }, dispatch);
+    (
+      rt as unknown as {
+        _routeRuntimeEvent: (event: unknown, dispatch: (action: unknown) => void) => void;
+      }
+    )._routeRuntimeEvent({ type: 'model.reasoning_delta', text: 'reasoning' }, dispatch);
     expect(actions).toEqual([]);
 
     await new Promise((resolve) => setTimeout(resolve, 70));
-    expect(actions.map((action) => action.event)).toEqual([
+    expect(actions.map((action) => (action as { event: unknown }).event)).toEqual([
       { type: 'model.reasoning_delta', text: 'reasoning' },
       { type: 'model.text_delta', text: 'answer' },
     ]);
@@ -1482,11 +1558,14 @@ describe('SessionRuntime', () => {
 
   test('flushes buffered deltas before a non-delta event', () => {
     const rt = makeRuntime();
-    const events: any[] = [];
-    const dispatch = (action: any) => events.push(action.event);
+    const events: unknown[] = [];
+    const dispatch = (action: unknown) => events.push((action as { event: unknown }).event);
 
-    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'answer' }, dispatch);
-    (rt as any)._routeRuntimeEvent(
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
+      { type: 'model.text_delta', text: 'answer' },
+      dispatch,
+    );
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
       { type: 'model.responded', messageId: 'final', text: 'answer' },
       dispatch,
     );
@@ -1499,14 +1578,14 @@ describe('SessionRuntime', () => {
 
   test('flushes a reasoning delta before its explicit segment completion event', () => {
     const rt = makeRuntime();
-    const events: any[] = [];
-    const dispatch = (action: any) => events.push(action.event);
+    const events: unknown[] = [];
+    const dispatch = (action: unknown) => events.push((action as { event: unknown }).event);
 
-    (rt as any)._routeRuntimeEvent(
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
       { type: 'model.reasoning_delta', segmentId: 'r1', text: 'complete reasoning' },
       dispatch,
     );
-    (rt as any)._routeRuntimeEvent(
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
       { type: 'model.reasoning_completed', segmentId: 'r1', text: 'complete reasoning' },
       dispatch,
     );
@@ -1519,9 +1598,10 @@ describe('SessionRuntime', () => {
 
   test('clearBuffer cancels a pending delta frame', async () => {
     const rt = makeRuntime();
-    const actions: any[] = [];
-    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'discarded' }, (action: any) =>
-      actions.push(action),
+    const actions: unknown[] = [];
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
+      { type: 'model.text_delta', text: 'discarded' },
+      (action: unknown) => actions.push(action),
     );
 
     rt.clearBuffer();
@@ -1532,10 +1612,10 @@ describe('SessionRuntime', () => {
 
   test('abort flushes the latest delta before cancelling the run', () => {
     const rt = makeRuntime();
-    const events: any[] = [];
-    (rt as any)._routeRuntimeEvent(
+    const events: unknown[] = [];
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
       { type: 'model.text_delta', text: 'partial answer' },
-      (action: any) => events.push(action.event),
+      (action: unknown) => events.push((action as { event: unknown }).event),
     );
 
     rt.abort();
@@ -1544,10 +1624,10 @@ describe('SessionRuntime', () => {
 
   test('switching to background flushes a pending foreground delta first', () => {
     const rt = makeRuntime();
-    const events: any[] = [];
-    (rt as any)._routeRuntimeEvent(
+    const events: unknown[] = [];
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
       { type: 'model.text_delta', text: 'before switch' },
-      (action: any) => events.push(action.event),
+      (action: unknown) => events.push((action as { event: unknown }).event),
     );
 
     rt.setForeground(false);
@@ -1558,9 +1638,12 @@ describe('SessionRuntime', () => {
   test('switching to foreground preserves a background delta for replay', () => {
     const rt = makeRuntime();
     rt.setForeground(false);
-    (rt as any)._routeRuntimeEvent({ type: 'model.text_delta', text: 'background update' }, () => {
-      throw new Error('background delta must not dispatch directly');
-    });
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
+      { type: 'model.text_delta', text: 'background update' },
+      () => {
+        throw new Error('background delta must not dispatch directly');
+      },
+    );
 
     rt.setForeground(true);
     expect(rt.eventBuffer).toEqual([{ type: 'model.text_delta', text: 'background update' }]);
@@ -1570,8 +1653,8 @@ describe('SessionRuntime', () => {
 
   test('proxy requestAction auto-cancels input in background', async () => {
     const rt = makeRuntime();
-    const proxy = (rt as any)._proxyProvider;
-    (rt as any)._foreground = false;
+    const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
+    (rt as unknown as RuntimeWithForeground)._foreground = false;
 
     const result = await proxy.requestAction({ kind: 'input', prompt: 'question?' });
     expect(result).toEqual({ type: 'cancel' });
@@ -1585,18 +1668,18 @@ describe('SessionRuntime', () => {
     };
     // Set a non-null abortController so the proxy continues past the cancel guard
     rt.abortController = new AbortController();
-    const proxy = (rt as any)._proxyProvider;
-    (rt as any)._foreground = false;
+    const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
+    (rt as unknown as RuntimeWithForeground)._foreground = false;
 
     // Start the requestAction — it will block on _foregroundWake
     proxy.requestAction({ kind: 'tool_approval', toolRequests: [] });
 
     expect(rt.pendingInterrupt).toBe(true);
     expect(notified).toBe(true);
-    expect((rt as any)._foregroundWake).toBeDefined();
+    expect((rt as unknown as RuntimeWithForegroundWake)._foregroundWake).toBeDefined();
 
     // Resolve the foreground wake
-    (rt as any)._foregroundWake();
+    (rt as unknown as RuntimeWithForegroundWake)._foregroundWake();
 
     // After wake, pendingInterrupt should be cleared (line 252 in session-manager.ts)
     // Then the proxy continues to the foreground path which waits on _pendingResolve
@@ -1607,11 +1690,11 @@ describe('SessionRuntime', () => {
 
   test('proxy submitAction delegates to resolveInterrupt', () => {
     const rt = makeRuntime();
-    let resolved: any = null;
-    (rt as any)._pendingResolve = (action: any) => {
+    let resolved: unknown = null;
+    (rt as unknown as RuntimeWithPendingResolve)._pendingResolve = (action: unknown) => {
       resolved = action;
     };
-    const proxy = (rt as any)._proxyProvider;
+    const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
 
     proxy.submitAction({ type: 'cancel' });
     expect(resolved).toEqual({ type: 'cancel' });
@@ -1619,11 +1702,11 @@ describe('SessionRuntime', () => {
 
   test('proxy reset cancels any pending interrupt', () => {
     const rt = makeRuntime();
-    let resolved: any = null;
-    (rt as any)._pendingResolve = (action: any) => {
+    let resolved: unknown = null;
+    (rt as unknown as RuntimeWithPendingResolve)._pendingResolve = (action: unknown) => {
       resolved = action;
     };
-    const proxy = (rt as any)._proxyProvider;
+    const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
 
     proxy.reset();
     expect(resolved).toEqual({ type: 'cancel' });

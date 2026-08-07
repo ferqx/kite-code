@@ -12,6 +12,11 @@ import { getErrorActions, PROVIDERS } from './types';
 interface FirstRunFlowProps {
   onComplete: (result: { modelName: string }) => void;
 }
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
   const [state, setState] = useState<FirstRunState>({
     phase: 'provider',
@@ -134,17 +139,15 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
             selectedAction: 0,
           });
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         clearTimeout(stageTimer);
         if (controller.signal.aborted || cancelledRef.current) return;
-        const message =
-          err instanceof Error
-            ? err.message.includes('requires apiKey')
-              ? 'The API key was rejected.'
-              : err.message.includes('baseURL')
-                ? 'Check the endpoint address.'
-                : err.message
-            : 'Connection failed';
+        const messageText = toErrorMessage(err);
+        const message = messageText.includes('requires apiKey')
+          ? 'The API key was rejected.'
+          : messageText.includes('baseURL')
+            ? 'Check the endpoint address.'
+            : messageText;
         transition({
           phase: 'error',
           provider: cur.provider,
@@ -227,13 +230,13 @@ export default function FirstRunFlow({ onComplete }: FirstRunFlowProps) {
       try {
         const cfg = loadAgentConfig({ modelName: name });
         onComplete({ modelName: cfg.modelName });
-      } catch (err: any) {
+      } catch (err: unknown) {
         transition({
           phase: 'error',
           provider: cur.provider,
           error: {
             kind: 'generic',
-            message: err?.message ?? 'Configuration error',
+            message: toErrorMessage(err) || 'Configuration error',
           },
           selectedAction: 0,
         });

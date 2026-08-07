@@ -69,15 +69,15 @@ export function ServerDetail({
       />
       <OverlaySection>操作</OverlaySection>
       <McpSelect
-        options={localizeActions(options)}
+        options={localizeActions(
+          options,
+          selectedId,
+          selectedId ? actionImpact(server, selectedId) : undefined,
+        )}
         selectedId={selectedId}
         selectionBackground={false}
+        compact
       />
-      {selectedId && actionImpact(server, selectedId) && (
-        <OverlayImpactNotice tone={selectedId === 'remove' ? 'warning' : 'info'}>
-          {actionImpact(server, selectedId)}
-        </OverlayImpactNotice>
-      )}
     </Box>
   );
 }
@@ -444,7 +444,7 @@ export function confirmOptions(action: 'disable' | 'remove'): McpSelectOption[] 
     { id: 'cancel', label: '取消' },
     {
       id: 'confirm',
-      label: action === 'disable' ? '禁用服务器' : '移除服务器',
+      label: action === 'disable' ? '禁用' : '移除',
       destructive: true,
     },
   ];
@@ -505,6 +505,8 @@ function capabilitySummary(
 
 function localizeActions(
   options: readonly McpSelectOption<McpServerAction>[],
+  selectedId?: McpServerAction,
+  selectedActionImpact?: string,
 ): McpSelectOption<McpServerAction>[] {
   const labels: Record<McpServerAction, string> = {
     view_tools: '查看工具',
@@ -513,19 +515,16 @@ function localizeActions(
     retry: '重试连接',
     authenticate: '认证',
     enable: '启用服务器',
-    disable: '禁用服务器',
-    remove: '移除服务器',
+    disable: '禁用',
+    remove: '移除',
     review_project_server: '审核服务器',
     review_decision: '查看审核决定',
   };
-  return options.map((option, index) => ({
+  return options.map((option) => ({
     ...option,
     label: labels[option.id],
-    separatorBefore:
-      option.separatorBefore ||
-      ((option.id === 'disable' || option.id === 'remove') &&
-        index > 0 &&
-        options[index - 1]?.id !== 'disable'),
+    description: option.id === selectedId ? selectedActionImpact : option.description,
+    separatorBefore: option.separatorBefore,
   }));
 }
 

@@ -29,7 +29,9 @@ deterministic safety report+outcome。分组标签、缺失、重复、重排、
 `compaction-semantic-evaluation.yml` 现提供手动、无发布/OIDC 权限的 contract producer/verifier。
 workflow 不读取可变 worktree 输入：它禁用 replacement objects、确认 `GITHUB_SHA` 为 commit，再从该
 Git tree 精确解析 normalized repository-relative path，只接受 `100644/100755` blob，并由 `git cat-file`
-写入 runner temp 的只读 snapshot。原始 worktree
+写入 runner temp 的只读 snapshot。semantic evidence 测试显式断言 workflow 不含
+`path: ${{ env.* }}` 这类环境表达式身份替换，producer 输入路径必须来自 Git tree 中的真实文件。
+原始 worktree
 即使被修改或生成 untracked 文件也不会进入 producer；tracked path、Git blob ID 与 snapshot SHA-256
 进入 source identity，上传、producer 和独立 verifier 全部消费同一 snapshot，并使用 upload action 返回的
 真实 retained artifact ID；

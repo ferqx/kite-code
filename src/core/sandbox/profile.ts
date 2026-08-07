@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from 'node:fs';
-import { dirname, parse, resolve } from 'node:path';
+import { dirname, join, parse, resolve } from 'node:path';
 import {
   PROTECTED_WORKSPACE_DIRECTORIES_V1,
   PROTECTED_WORKSPACE_FILE_PREFIXES_V1,
@@ -7,11 +7,22 @@ import {
 } from '@/core/policies/protected-path';
 import type { FilesystemScope } from './types';
 
+/** Whether the native profile permits git command access to the Workspace `.git` directory. */
+export type SandboxGitAccess = 'deny' | 'allow';
+
 export interface SandboxProfileOptions {
   network?: 'disabled' | 'allow_all';
   filesystemScope?: Exclude<FilesystemScope, 'full_access'>;
   sandboxRuntimeDir?: string;
   runtimeReadOnlyRoots?: readonly string[];
+  /**
+   * When `'allow'`, the profile exempts the Workspace `.git` directory from the
+   * protected-path deny and reads the user's git config so git commands can run
+   * under the sandbox. Direct `.git` access (file tools, command text) remains
+   * blocked by the tool-policy and `checkDangerousPaths` layers. Defaults to
+   * `'deny'` so callers opt in explicitly (see ADR-0070).
+   */
+  gitAccess?: SandboxGitAccess;
 }
 
 /**
@@ -28,12 +39,13 @@ export function generateSandboxProfile(
     : undefined;
   const filesystemScope = options.filesystemScope ?? 'workspace_write';
   const runtimeReadOnlyRoots = canonicalizeReadOnlyRoots(options.runtimeReadOnlyRoots ?? []);
+  const gitAccess = options.gitAccess ?? 'deny';
 
   return [
     SEATBELT_BASE_POLICY,
-    fileReadPolicy(workspaceRoot, runtimeRoot, runtimeReadOnlyRoots),
+    fileReadPolicy(workspaceRoot, runtimeRoot, runtimeReadOnlyRoots, gitAccess),
     fileWritePolicy(workspaceRoot, runtimeRoot, filesystemScope),
-    protectedPathPolicy(workspaceRoot),
+    protectedPathPolicy(workspaceRoot, gitAccess),
     networkPolicy(options.network ?? 'disabled'),
   ]
     .filter(Boolean)
@@ -193,12 +205,27 @@ const SYSTEM_EXECUTABLE_ROOTS = [
   '/opt/local/lib',
 ];
 
-const SYSTEM_READ_FILES = ['/private/var/select/sh'];
+const SYSTEM_READ_FILES = [
+  '/private/var/select/sh',
+  // Apple CLT shims (/usr/bin/git, /usr/bin/clang, …) resolve the active
+  // developer directory through this symlink via xcode-select/xcrun. Without
+  // it the seatbelt `(deny default)` makes git fail with a misleading
+  // "unable to read data link at '/var/select/developer_dir'" error.
+  '/private/var/select/developer_dir',
+];
+
+/** Existing user git config files (global + XDG) git reads under the sandbox. */
+function discoverGitConfigReadFiles(): string[] {
+  const home = process.env.HOME;
+  if (!home) return [];
+  return [join(home, '.gitconfig'), join(home, '.config', 'git', 'config')].filter(existsSync);
+}
 
 function fileReadPolicy(
   workspaceRoot: string,
   runtimeRoot: string | undefined,
   runtimeReadOnlyRoots: readonly string[],
+  gitAccess: SandboxGitAccess,
 ): string {
   const canonicalSystemReadRoots = SYSTEM_READ_ROOTS.filter(existsSync).map(canonicalExistingPath);
   const canonicalSystemExecutableRoots =
@@ -206,9 +233,14 @@ function fileReadPolicy(
   const roots = [
     ...new Set([workspaceRoot, runtimeRoot, ...runtimeReadOnlyRoots, ...canonicalSystemReadRoots]),
   ].filter((path): path is string => path !== undefined);
+  const gitConfigReadFiles = gitAccess === 'allow' ? discoverGitConfigReadFiles() : [];
   const readFilters = [
     ...roots.map(subpathFilter),
     ...SYSTEM_READ_FILES.filter(existsSync).flatMap((path) => [
+      literalFilter(resolve(path)),
+      literalFilter(canonicalExistingPath(path)),
+    ]),
+    ...gitConfigReadFiles.flatMap((path) => [
       literalFilter(resolve(path)),
       literalFilter(canonicalExistingPath(path)),
     ]),
@@ -259,8 +291,17 @@ function fileWritePolicy(
   ${filters.join('\n  ')})`;
 }
 
-function protectedPathPolicy(workspaceRoot: string): string {
-  const directoryFilters = PROTECTED_WORKSPACE_DIRECTORIES_V1.map((path) =>
+function protectedPathPolicy(workspaceRoot: string, gitAccess: SandboxGitAccess): string {
+  // When git access is allowed, `.git` is exempted from the native deny so the
+  // git binary can operate on the repository. Other protected identities (Agent
+  // config, credentials, shell profiles, …) stay denied; direct `.git` access
+  // through file tools and shell command text remains blocked by the
+  // tool-policy evaluator and `checkDangerousPaths()` respectively.
+  const protectedDirectories =
+    gitAccess === 'allow'
+      ? PROTECTED_WORKSPACE_DIRECTORIES_V1.filter((name) => name !== '.git')
+      : PROTECTED_WORKSPACE_DIRECTORIES_V1;
+  const directoryFilters = protectedDirectories.map((path) =>
     subpathFilter(resolve(workspaceRoot, path)),
   );
   const fileFilters = PROTECTED_WORKSPACE_FILES_V1.map((path) =>
@@ -274,7 +315,7 @@ function protectedPathPolicy(workspaceRoot: string): string {
   // ASCII-case-insensitive filters so `.GIT`, `.Agents`, and `.ENV.*` cannot
   // bypass the native deny even on a differently configured Darwin volume.
   const caseAliasFilters = [
-    ...PROTECTED_WORKSPACE_DIRECTORIES_V1.map((path) =>
+    ...protectedDirectories.map((path) =>
       regexFilterForCaseInsensitiveIdentity(resolve(workspaceRoot, path), '(/.*)?'),
     ),
     ...PROTECTED_WORKSPACE_FILES_V1.map((path) =>

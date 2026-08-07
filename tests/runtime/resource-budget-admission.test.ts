@@ -87,8 +87,11 @@ describe('runtime resource budget admission', () => {
     };
     const model = createMockModel([{ message: aiMessage({ content: 'done' }) }]);
     let providerMaxOutputTokens: number | undefined;
-    const originalGenerate = model.model.doGenerate.bind(model.model);
-    model.model.doGenerate = async (options: { maxOutputTokens?: number }) => {
+    const rawModel = model.model as unknown as {
+      doGenerate: (options: { maxOutputTokens?: number }) => Promise<unknown>;
+    };
+    const originalGenerate = rawModel.doGenerate.bind(rawModel);
+    rawModel.doGenerate = async (options: { maxOutputTokens?: number }) => {
       providerMaxOutputTokens = options.maxOutputTokens;
       return originalGenerate(options);
     };

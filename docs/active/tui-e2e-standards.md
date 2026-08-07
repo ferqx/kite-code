@@ -251,6 +251,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     `/mcp` 面板必须在同一 viewport 同时出现当前本地化的 `MCP 服务器` 标题和
     `添加 MCP 服务器` 操作项后，才能发送 Escape 或继续断言面板行为。共享 Overlay footer
     的 readiness 断言必须使用当前词汇（例如列表移动为“导航”），不得保留过时文案。
+    `/mcp` select 管理只读场景断言精简后的操作标签（`禁用`、`移除`），随 Overlay 文案收敛保持一致。
 25. 最终回答文本可见不等于上一轮已回到稳定 idle。跨轮发送新消息、slash command 或 `/exit` 前，
     场景必须等待完整 main readiness（空输入、无 loading/modal 且输出稳定）；不得把回答尾部文本
     当作下一次键盘输入已可接受的信号。

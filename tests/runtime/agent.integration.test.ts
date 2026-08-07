@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { McpConnectionManager } from '@/core/mcp/manager';
+import type { SupportedChatModel } from '@/core/model/factory';
 import { requiredProviderAdmissionEvents, runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
@@ -47,7 +48,7 @@ test('cancelling any shell approval aborts the current turn and its running sibl
         userId: 'test',
         workspace,
         runtimeStorePath: join(workspace, 'runtime.db'),
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         shellExecutor: async (input) => {
           if (input.command !== 'node task-1.js') {
             throw new Error(`Unexpected shell execution: ${input.command}`);
@@ -148,7 +149,7 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         mcpManager: manager,
         config: {
           providerName: 'test',
@@ -271,7 +272,7 @@ test('Runtime Kernel persists a direct model answer as a completed turn', async 
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -329,7 +330,7 @@ test('Runtime Kernel executes a read tool before completing the answer', async (
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -424,7 +425,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         mcpManager: manager,
         config: {
           providerName: 'test',
@@ -484,7 +485,7 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         phase: 'planning',
         config: {
           providerName: 'test',
@@ -549,7 +550,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
         workspace,
         runtimeStorePath: storePath,
         phase: 'planning',
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -599,7 +600,7 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
         workspace,
         runtimeStorePath: storePath,
         phase: 'planning',
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -662,7 +663,7 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
         userId: 'test',
         workspace,
         runtimeStorePath: join(workspace, 'runtime.db'),
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -729,7 +730,7 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
         userId: 'test',
         workspace,
         runtimeStorePath: storePath,
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',
@@ -812,7 +813,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
         workspace,
         runtimeStorePath: join(workspace, 'runtime.db'),
         phase: 'planning',
-        model: mockModel as any,
+        model: mockModel as SupportedChatModel,
         config: {
           providerName: 'test',
           providerType: 'openai-compatible',

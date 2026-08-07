@@ -886,7 +886,9 @@ function projectServer(
   const diagnostic = currentRuntimeState?.diagnostic ?? configDiagnostic(entry);
   const status = configStatus(entry);
   const authStatus =
-    auth?.status === 'not_required' && diagnostic?.code === 'auth_required'
+    diagnostic?.code === 'auth_required' &&
+    auth?.status !== 'authorizing' &&
+    auth?.status !== 'refreshing'
       ? 'login_required'
       : (auth?.status ?? 'not_required');
   const capabilityRevision =

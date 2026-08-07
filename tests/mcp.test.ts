@@ -107,31 +107,31 @@ describe('expandEnvVars', () => {
     expect(expandEnvVars('hello world')).toBe('hello world');
   });
 
-  it('expands ${VAR} from process.env', () => {
+  it('expands environment variable from process.env', () => {
     process.env.TEST_MCP_VAR = 'expanded_value';
-    expect(expandEnvVars('prefix_${TEST_MCP_VAR}_suffix')).toBe('prefix_expanded_value_suffix');
+    expect(expandEnvVars(`prefix_\${TEST_MCP_VAR}_suffix`)).toBe('prefix_expanded_value_suffix');
   });
 
   it('returns empty string for unset variable', () => {
-    expect(expandEnvVars('${NONEXISTENT_VAR_12345}')).toBe('');
+    expect(expandEnvVars(`\${NONEXISTENT_VAR_12345}`)).toBe('');
   });
 
-  it('uses default value with ${VAR:-default} syntax when unset', () => {
-    expect(expandEnvVars('${NONEXISTENT_VAR_12345:-fallback}')).toBe('fallback');
+  it('uses default fallback syntax when variable is unset', () => {
+    expect(expandEnvVars(`\${NONEXISTENT_VAR_12345:-fallback}`)).toBe('fallback');
   });
 
   it('uses env value over default when set', () => {
     process.env.TEST_MCP_VAR = 'real_value';
-    expect(expandEnvVars('${TEST_MCP_VAR:-fallback}')).toBe('real_value');
+    expect(expandEnvVars(`\${TEST_MCP_VAR:-fallback}`)).toBe('real_value');
   });
 
   it('uses default value when env var is empty string', () => {
     process.env.TEST_MCP_EMPTY = '';
-    expect(expandEnvVars('${TEST_MCP_EMPTY:-default_val}')).toBe('default_val');
+    expect(expandEnvVars(`\${TEST_MCP_EMPTY:-default_val}`)).toBe('default_val');
   });
 
   it('handles multiple variables in one string', () => {
     process.env.TEST_MCP_VAR = 'alpha';
-    expect(expandEnvVars('${TEST_MCP_VAR}_${MISSING:-beta}')).toBe('alpha_beta');
+    expect(expandEnvVars(`\${TEST_MCP_VAR}_\${MISSING:-beta}`)).toBe('alpha_beta');
   });
 });

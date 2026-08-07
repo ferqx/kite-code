@@ -5,6 +5,21 @@ import { buildServerActions, derivePrimaryStatus, moveSelection } from '@/app/tu
 import type { McpController, McpControllerSnapshot } from '@/app/tui/mcp/types';
 import type { McpAuthResult, McpServerControlState, McpServerKey } from '@/core/mcp';
 
+/** Poll the latest rendered frame until the predicate holds, so async effect
+ *  timing (auth→detail return) does not depend on a fixed sleep across hosts. */
+async function waitForFrame(
+  getFrame: () => string | undefined,
+  predicate: (frame: string) => boolean,
+  timeoutMs = 1000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate(getFrame() ?? '')) return;
+    await Bun.sleep(10);
+  }
+  throw new Error('waitForFrame: timed out waiting for expected frame content');
+}
+
 function server(overrides: Partial<McpServerControlState> = {}): Readonly<McpServerControlState> {
   const tools = ['click', 'close_page', 'drag', 'emulate', 'evaluate_script'].map(
     (name) =>
@@ -128,6 +143,110 @@ class FakeController implements McpController {
   };
 }
 
+class AutoReturnAuthController implements McpController {
+  readonly logins: string[] = [];
+  readonly decisions: string[] = [];
+  readonly cancelledFlows: string[] = [];
+  readonly retries: string[] = [];
+  readonly enabled: string[] = [];
+  readonly added: string[] = [];
+  readonly removed: string[] = [];
+  private readonly listeners = new Set<() => void>();
+  private snapshot: McpControllerSnapshot;
+
+  constructor(servers: readonly Readonly<McpServerControlState>[] = [server()], message?: string) {
+    this.snapshot = Object.freeze({
+      control: Object.freeze({
+        revision: 'snapshot-1',
+        generation: 1,
+        servers: Object.freeze([...servers]),
+        sourceRevisions: Object.freeze({ local: 'local-1', project: 'project-1', user: 'user-1' }),
+      }),
+      ...(message ? { message } : {}),
+    });
+  }
+
+  getSnapshot = () => this.snapshot;
+
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  private emit() {
+    for (const listener of this.listeners) listener();
+  }
+
+  private updateServer = (key: McpServerKey, update: Partial<McpServerControlState>) => {
+    const servers = this.snapshot.control.servers.map((current) => {
+      if (current.key.name === key.name && current.key.source === key.source) {
+        return Object.freeze({ ...current, ...update });
+      }
+      return current;
+    });
+    this.snapshot = Object.freeze({
+      ...this.snapshot,
+      control: Object.freeze({
+        ...this.snapshot.control,
+        servers: Object.freeze(servers),
+      }),
+    });
+    this.emit();
+  };
+
+  decide = async (key: McpServerKey, decision: 'approved' | 'rejected') => {
+    this.decisions.push(`${key.name}:${decision}`);
+    return true;
+  };
+
+  login = async (key: McpServerKey): Promise<McpAuthResult> => {
+    this.logins.push(key.name);
+    this.updateServer(key, {
+      authStatus: 'authorizing',
+      authFlowId: 'flow-1',
+      diagnostic: undefined,
+    });
+    void (async () => {
+      await Bun.sleep(10);
+      this.updateServer(key, {
+        authStatus: 'authenticated',
+        authFlowId: undefined,
+        health: 'ready',
+      });
+    })();
+    return { status: 'authorization_required', flowId: 'flow-1', authorizationUrl: 'https://x' };
+  };
+
+  cancelAuth = async (flowId: string) => {
+    this.cancelledFlows.push(flowId);
+    const entries = [...this.snapshot.control.servers];
+    const entry = entries.find((candidate) => candidate.authFlowId === flowId);
+    if (entry) {
+      this.updateServer(entry.key, { authStatus: 'login_required', authFlowId: undefined });
+    }
+  };
+
+  retry = async (key: McpServerKey) => {
+    this.retries.push(key.name);
+    return true;
+  };
+
+  setEnabled = async (key: McpServerKey, expectedRevision: string, enabled: boolean) => {
+    this.enabled.push(`${key.name}:${expectedRevision}:${enabled}`);
+    return true;
+  };
+
+  add = async () => {
+    this.added.push('noop');
+    return null;
+  };
+
+  remove = async (key: McpServerKey) => {
+    this.removed.push(key.name);
+    return true;
+  };
+}
+
 describe('MCP Select model', () => {
   test('derives status priority and complete rejected actions', () => {
     const rejected = server({
@@ -188,8 +307,8 @@ describe('MCP management overlay', () => {
     expect(lastFrame()).toContain('能力');
     expect(lastFrame()).toContain('❯ 查看工具');
     expect(lastFrame()).toContain('重新连接');
-    expect(lastFrame()).toContain('禁用服务器');
-    expect(lastFrame()).toContain('移除服务器');
+    expect(lastFrame()).toContain('禁用');
+    expect(lastFrame()).toContain('移除');
     expect(lastFrame()).not.toContain('. Back');
     const detailFrame = lastFrame() ?? '';
     expect(detailFrame.indexOf('状态')).toBeLessThan(detailFrame.indexOf('操作'));
@@ -202,9 +321,12 @@ describe('MCP management overlay', () => {
     expect(reconnectFrame).toContain('将断开并重新连接“github”。正在进行的工具调用可能中断。');
     const reconnectLines = reconnectFrame.split('\n');
     const reconnectOption = reconnectLines.findIndex((line) => line.includes('❯ 重新连接'));
-    const disableOption = reconnectLines.findIndex((line) => line.includes('禁用服务器'));
+    const disableOption = reconnectLines.findIndex((line) => line.includes('禁用'));
     expect(disableOption).toBe(reconnectOption + 2);
-    expect(reconnectLines[reconnectOption + 1]?.trim()).toBe('');
+    expect(reconnectLines[reconnectOption + 1]?.trim()).toBe(
+      '将断开并重新连接“github”。正在进行的工具调用可能中断。',
+    );
+    expect(reconnectLines[reconnectOption + 2]?.trim()).toBe('禁用');
   });
 
   test('groups project and user servers under their configuration paths', async () => {
@@ -394,6 +516,90 @@ describe('MCP management overlay', () => {
     expect(controller.logins).toEqual(['github']);
   });
 
+  test('returns to server detail when sample MCP endpoint authentication completes', async () => {
+    const controller = new AutoReturnAuthController([
+      server({
+        key: Object.freeze({ name: 'example-server', source: 'project' }),
+        source: 'project',
+        configuration: Object.freeze({
+          endpoint: 'https://example-server.modelcontextprotocol.io/mcp',
+        }),
+        authStatus: 'login_required',
+        health: 'disconnected',
+        diagnostic: Object.freeze({
+          code: 'auth_required',
+          retryable: false,
+          message: 'Login required.',
+        }),
+      }),
+    ]);
+    const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
+
+    stdin.write('\r');
+    await Bun.sleep(5);
+    expect(lastFrame()).toContain('── example-server');
+    stdin.write('\r');
+    await Bun.sleep(5);
+    stdin.write('\r');
+    await Bun.sleep(10);
+    expect(controller.logins).toEqual(['example-server']);
+    await waitForFrame(
+      lastFrame,
+      (f) => f.includes('❯ 查看工具') && !f.includes('认证 MCP 服务器'),
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('── example-server');
+    expect(frame).toContain('状态');
+    expect(frame).toContain('已连接');
+    expect(frame).toContain('操作');
+    expect(frame).toContain('❯ 查看工具');
+    expect(frame).not.toContain('认证 MCP 服务器');
+  });
+
+  test('returns to server detail automatically after auth is marked authenticated', async () => {
+    const controller = new AutoReturnAuthController([
+      server({
+        key: Object.freeze({ name: 'sample', source: 'project' }),
+        source: 'project',
+        configuration: Object.freeze({
+          endpoint: 'https://example-server.modelcontextprotocol.io/mcp',
+        }),
+        authStatus: 'login_required',
+        health: 'disconnected',
+        diagnostic: Object.freeze({
+          code: 'auth_required',
+          retryable: false,
+          message: 'Login required.',
+        }),
+      }),
+    ]);
+    const { stdin, lastFrame } = render(<McpOverlay controller={controller} onClose={() => {}} />);
+
+    stdin.write('\r');
+    await Bun.sleep(5);
+    expect(lastFrame()).toContain('── sample');
+    expect(lastFrame()).toContain('❯ 认证');
+    stdin.write('\r');
+    await Bun.sleep(5);
+    expect(lastFrame()).toContain('认证 MCP 服务器');
+    expect(lastFrame()).toContain('❯ 打开浏览器');
+    stdin.write('\r');
+    await Bun.sleep(5);
+    expect(controller.logins).toEqual(['sample']);
+
+    const authenticatingFrame = lastFrame() ?? '';
+    expect(authenticatingFrame).toContain('认证 MCP 服务器');
+    expect(authenticatingFrame).toContain('请在浏览器中完成登录。');
+    await waitForFrame(lastFrame, (f) => f.includes('── sample') && !f.includes('认证 MCP 服务器'));
+    const finalFrame = lastFrame() ?? '';
+    expect(finalFrame).toContain('── sample');
+    expect(finalFrame).toContain('MCP 服务器');
+    expect(finalFrame).toContain('状态');
+    expect(finalFrame).toContain('已连接');
+    expect(finalFrame).toContain('操作');
+    expect(finalFrame).not.toContain('认证 MCP 服务器');
+  });
+
   test('reviews project approval through a safe-default Select', async () => {
     const pending = server({
       key: Object.freeze({ name: 'project-tools', source: 'project' }),
@@ -507,7 +713,7 @@ describe('MCP management overlay', () => {
     stdin.write('\x1b[B');
     stdin.write('\x1b[B');
     await Bun.sleep(5);
-    expect(lastFrame()).toContain('❯ 禁用服务器');
+    expect(lastFrame()).toContain('❯ 禁用');
     stdin.write('\r');
     await Bun.sleep(5);
     const confirmFrame = lastFrame() ?? '';

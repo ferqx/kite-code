@@ -69,8 +69,11 @@ describe('executeRuntimeTools', () => {
 
       const order: string[] = [];
       const model = createMockModel([{ message: aiMessage({ content: 'Done.' }) }]);
-      const generate = model.model.doGenerate.bind(model.model);
-      model.model.doGenerate = async (...args: unknown[]) => {
+      const mockModel = model.model as typeof model.model & {
+        doGenerate: (...args: unknown[]) => Promise<unknown>;
+      };
+      const generate = mockModel.doGenerate.bind(mockModel);
+      mockModel.doGenerate = async (...args: unknown[]) => {
         order.push('model-dispatch');
         return generate(...args);
       };

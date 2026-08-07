@@ -6,7 +6,9 @@ import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
-import { aiMessage } from '../src/core/messages';
+import type { AgentConfig } from '../src/core/config/index';
+import { type AIMessage, aiMessage } from '../src/core/messages';
+import type { SupportedChatModel } from '../src/core/model/factory';
 import { StreamingMockModel } from './mock-model';
 
 function mockEventSink() {
@@ -23,18 +25,20 @@ describe('SubAgentRunner integration', () => {
   test('explore role: emits start→done events in order', async () => {
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
-      responses: [{ message: { content: 'Found auth.ts, middleware.ts' } as any, delay: 5 }],
-    }) as any;
+      responses: [
+        { message: { content: 'Found auth.ts, middleware.ts' } as unknown as AIMessage, delay: 5 },
+      ],
+    }) as unknown as SupportedChatModel;
 
     const result = await runSubAgent({
-      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: '/tmp/test',
       role: getRoleConfig('explore'),
       task: 'search for UserService',
       timeoutMs: 5000,
       signal: new AbortController().signal,
       eventSink: sink,
-      model: model as any,
+      model: model,
     });
 
     expect(result.ok).toBe(true);
@@ -62,22 +66,22 @@ describe('SubAgentRunner integration', () => {
             message: {
               content: 'let me read',
               tool_calls: [{ id: 'tc1', name: 'read_file', args: { path: 'test.txt' } }],
-            } as any,
+            } as unknown as AIMessage,
             delay: 5,
           },
-          { message: { content: 'File read, done.' } as any, delay: 5 },
+          { message: { content: 'File read, done.' } as unknown as AIMessage, delay: 5 },
         ],
-      }) as any;
+      }) as unknown as SupportedChatModel;
 
       const result = await runSubAgent({
-        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
         workspace: ws,
         role: getRoleConfig('code'),
         task: 'read test.txt',
         timeoutMs: 5000,
         signal: new AbortController().signal,
         eventSink: sink,
-        model: model as any,
+        model: model,
       });
 
       // The runner should complete with either success or failure
@@ -118,7 +122,7 @@ describe('SubAgentRunner integration', () => {
           },
           { message: aiMessage({ content: 'done' }) },
         ],
-      }) as any;
+      }) as unknown as SupportedChatModel;
 
       await runTaskSubAgent(
         {
@@ -136,10 +140,10 @@ describe('SubAgentRunner integration', () => {
               sandboxRequired: true,
               sandboxUnavailable: 'fail',
             },
-          } as any,
+          } as unknown as AgentConfig,
           workspace: ws,
           eventSink: sink,
-          model: model as any,
+          model: model,
         },
         { subagent_type: 'code', task: 'write protected skill config' },
       );
@@ -173,17 +177,17 @@ describe('SubAgentRunner integration', () => {
           },
           { message: aiMessage({ content: 'done' }) },
         ],
-      }) as any;
+      }) as unknown as SupportedChatModel;
 
       const result = await runSubAgent({
-        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
         workspace: ws,
         role: getRoleConfig('code'),
         task: 'read package.json',
         timeoutMs: 5000,
         signal: new AbortController().signal,
         eventSink: sink,
-        model: model as any,
+        model: model,
       });
 
       expect(result.ok).toBe(true);
@@ -222,17 +226,17 @@ describe('SubAgentRunner integration', () => {
           },
           { message: aiMessage({ content: 'done' }) },
         ],
-      }) as any;
+      }) as unknown as SupportedChatModel;
 
       const result = await runSubAgent({
-        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
         workspace: ws,
         role: getRoleConfig('code'),
         task: 'run verification',
         timeoutMs: 5000,
         signal: new AbortController().signal,
         eventSink: sink,
-        model: model as any,
+        model: model,
         authorization: { ...defaultAuthorizationState(), mode: 'full_access' },
         shellExecutor: async (input) => ({
           ok: true,
@@ -278,17 +282,17 @@ describe('SubAgentRunner integration', () => {
           },
           { message: aiMessage({ content: 'done' }) },
         ],
-      }) as any;
+      }) as unknown as SupportedChatModel;
 
       const result = await runSubAgent({
-        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
         workspace: ws,
         role: getRoleConfig('code'),
         task: 'run verification',
         timeoutMs: 5000,
         signal: new AbortController().signal,
         eventSink: sink,
-        model: model as any,
+        model: model,
         shellExecutor: async (input) => {
           shellExecutions++;
           return {
@@ -350,17 +354,17 @@ describe('SubAgentRunner integration', () => {
           },
           { message: aiMessage({ content: 'saw typecheck ok' }) },
         ],
-      }) as any;
+      }) as unknown as SupportedChatModel;
 
       const input = {
-        config: { providerName: 'deepseek', modelName: 'test' } as any,
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
         workspace: ws,
         role: getRoleConfig('code'),
         task: 'run verification',
         timeoutMs: 5000,
         signal: new AbortController().signal,
         eventSink: sink,
-        model: model as any,
+        model: model,
         shellExecutor: async (toolInput: { command: string }) => {
           shellExecutions++;
           return {
@@ -404,18 +408,18 @@ describe('SubAgentRunner integration', () => {
   test('review role: correct role in start event', async () => {
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
-      responses: [{ message: { content: 'No issues found.' } as any, delay: 5 }],
-    }) as any;
+      responses: [{ message: { content: 'No issues found.' } as unknown as AIMessage, delay: 5 }],
+    }) as unknown as SupportedChatModel;
 
     const result = await runSubAgent({
-      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: '/tmp/test',
       role: getRoleConfig('review'),
       task: 'review auth.ts',
       timeoutMs: 5000,
       signal: new AbortController().signal,
       eventSink: sink,
-      model: model as any,
+      model: model,
     });
 
     expect(result.ok).toBe(true);
@@ -430,18 +434,18 @@ describe('SubAgentRunner integration', () => {
     // The timeout integration is tested indirectly via the timeoutMs parameter in other tests.
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
-      responses: [{ message: { content: 'done' } as any, delay: 5 }],
-    }) as any;
+      responses: [{ message: { content: 'done' } as unknown as AIMessage, delay: 5 }],
+    }) as unknown as SupportedChatModel;
 
     const result = await runSubAgent({
-      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: '/tmp/test',
       role: getRoleConfig('explore'),
       task: 'quick task',
       timeoutMs: 5000,
       signal: new AbortController().signal,
       eventSink: sink,
-      model: model as any,
+      model: model,
     });
 
     // Should complete successfully with mock model
@@ -457,26 +461,26 @@ describe('SubAgentRunner integration', () => {
     let _invokeCount = 0;
     const model = {
       bindTools: () => model,
-      invoke: async (_msgs: any, _opts?: any) => {
+      invoke: async (_msgs: unknown, _opts?: unknown) => {
         _invokeCount++;
         // Delay 300ms on first invoke; abort fires at 100ms
         await new Promise((r) => setTimeout(r, 300));
         return { content: 'done' };
       },
-    } as any;
+    } as unknown as SupportedChatModel;
 
     // Abort after 100ms — during first model invoke
     setTimeout(() => ac.abort(), 100);
 
     const result = await runSubAgent({
-      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: '/tmp/test',
       role: getRoleConfig('explore'),
       task: 'task',
       timeoutMs: 5000,
       signal: ac.signal,
       eventSink: sink,
-      model: model as any,
+      model: model,
     });
 
     // The abort should cause the subagent to fail
@@ -495,7 +499,7 @@ describe('SubAgentRunner integration', () => {
           }),
         },
       ],
-    }) as any;
+    }) as unknown as SupportedChatModel;
     let observedSignal: AbortSignal | undefined;
     const descendantResourceAdmission = {
       reserveModel: async () => ({ reservationId: 'model-reservation' }),
@@ -523,14 +527,14 @@ describe('SubAgentRunner integration', () => {
     >;
 
     const result = await runSubAgent({
-      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: process.cwd(),
       role: getRoleConfig('code'),
       task: 'wait for descendant admission',
       timeoutMs: 25,
       signal: new AbortController().signal,
       eventSink: sink,
-      model: model as any,
+      model: model,
       descendantResourceAdmission,
     });
 
@@ -545,18 +549,18 @@ describe('SubAgentRunner integration', () => {
     ac.abort(); // Abort before calling runSubAgent
 
     const model = new StreamingMockModel({
-      responses: [{ message: { content: 'done' } as any, delay: 5 }],
-    }) as any;
+      responses: [{ message: { content: 'done' } as unknown as AIMessage, delay: 5 }],
+    }) as unknown as SupportedChatModel;
 
     const result = await runSubAgent({
-      config: { providerName: 'deepseek', modelName: 'test' } as any,
+      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: '/tmp/test',
       role: getRoleConfig('explore'),
       task: 'task',
       timeoutMs: 5000,
       signal: ac.signal,
       eventSink: sink,
-      model: model as any,
+      model: model,
     });
 
     expect(result.ok).toBe(false);

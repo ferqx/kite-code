@@ -334,7 +334,7 @@ describe('authenticated compaction semantic evidence contract', () => {
     expect(workflow).toContain('--input "$SEMANTIC_PRODUCER_INPUT_PATH"');
     expect(workflow).toContain('--input "$SEMANTIC_SNAPSHOT_PATH"');
     expect(workflow).toContain('--expectation-input "$SEMANTIC_SNAPSHOT_PATH"');
-    expect(workflow).not.toContain('path: ${{ env.SEMANTIC_PRODUCER_INPUT_PATH }}');
+    expect(workflow).not.toContain(`path: \${{ env.SEMANTIC_PRODUCER_INPUT_PATH }}`);
   });
 
   test('rejects source, route, config, artifact and deterministic identity substitution', () => {

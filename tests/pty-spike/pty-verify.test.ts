@@ -44,7 +44,6 @@ function concatChunks(chunks: Uint8Array[]): string {
 }
 
 /** Strip ANSI escape sequences, including CSI private modes with ? prefix. */
-// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape sequence stripping requires control char regex
 function stripAnsi(s: string): string {
   return (
     s
@@ -79,8 +78,7 @@ async function spawnWithTerminal(
   opts?: {
     rows?: number;
     cols?: number;
-    // biome-ignore lint/suspicious/noExplicitAny: PTY terminal type from Bun is opaque
-    onReady?: (terminal: any) => void | Promise<void>;
+    onReady?: (terminal: Bun.Terminal) => void | Promise<void>;
   },
 ): Promise<{ output: string }> {
   const dir = makeTempDir();
@@ -89,28 +87,26 @@ async function spawnWithTerminal(
 
   const chunks: Uint8Array[] = [];
 
-  // biome-ignore lint/suspicious/noExplicitAny: Bun.spawn process type is opaque
-  let proc: any;
+  let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn({
       cmd: [process.execPath, 'run', scriptPath],
       terminal: {
         rows: opts?.rows ?? 24,
         cols: opts?.cols ?? 80,
-        // biome-ignore lint/suspicious/noExplicitAny: Bun.terminal callback signature
-        data(_terminal: any, chunk: Uint8Array) {
+        data(_terminal: unknown, chunk: Uint8Array) {
           chunks.push(chunk);
         },
       },
       env: { ...process.env },
     });
-    // biome-ignore lint/suspicious/noExplicitAny: error type in catch clause
-  } catch (err: any) {
+  } catch (err: unknown) {
     try {
       rmSync(dir, { recursive: true, force: true });
     } catch {}
+    const message = err instanceof Error ? err.message : String(err);
     throw new Error(
-      `Bun.spawn() with 'terminal' option threw: ${err.message}\n` +
+      `Bun.spawn() with 'terminal' option threw: ${message}\n` +
         `The 'terminal' option may not be supported in this Bun version.`,
     );
   }
@@ -119,14 +115,14 @@ async function spawnWithTerminal(
 
   if (opts?.onReady) {
     try {
-      await opts.onReady(proc.terminal);
-      // biome-ignore lint/suspicious/noExplicitAny: error type in catch clause
-    } catch (err: any) {
+      await opts.onReady(proc.terminal as Bun.Terminal);
+    } catch (err: unknown) {
       proc.kill();
+      const message = err instanceof Error ? err.message : String(err);
       try {
         rmSync(dir, { recursive: true, force: true });
       } catch {}
-      throw new Error(`onReady callback failed: ${err.message}`);
+      throw new Error(`onReady callback failed: ${message}`);
     }
   }
 
@@ -169,9 +165,7 @@ describe('PTY Capability Verification (Bun.spawn terminal)', () => {
       const lines = extractAllPrefixed(output, 'R:');
 
       if (lines.length === 0) {
-        fail(
-          `No R: lines in output.\n` + `Clean: ${JSON.stringify(stripAnsi(output).slice(0, 400))}`,
-        );
+        fail(`No R: lines in output.\nClean: ${JSON.stringify(stripAnsi(output).slice(0, 400))}`);
       }
 
       const vals: Record<string, string> = {};
@@ -180,11 +174,11 @@ describe('PTY Capability Verification (Bun.spawn terminal)', () => {
         if (eq > 0) vals[line.slice(0, eq)] = line.slice(eq + 1);
       }
 
-      const si = vals['si'] === '1';
-      const so = vals['so'] === '1';
-      const se = vals['se'] === '1';
-      const cols = parseInt(vals['c'] ?? '0', 10);
-      const rows = parseInt(vals['r'] ?? '0', 10);
+      const si = vals.si === '1';
+      const so = vals.so === '1';
+      const se = vals.se === '1';
+      const cols = parseInt(vals.c ?? '0', 10);
+      const rows = parseInt(vals.r ?? '0', 10);
 
       console.log(`  isTTY: stdin=${si} stdout=${so} stderr=${se}  dims=${cols}x${rows}`);
 
@@ -223,7 +217,9 @@ describe('PTY Capability Verification (Bun.spawn terminal)', () => {
       `;
 
       const { output } = await spawnWithTerminal(script, {
-        onReady: (t) => t.write(MSG + '\r\n'),
+        onReady: (t) => {
+          t.write(`${MSG}\r\n`);
+        },
       });
 
       const echoVal = extractFirstPrefixed(output, 'ECHO:');

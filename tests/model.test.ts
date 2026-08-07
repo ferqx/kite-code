@@ -285,8 +285,11 @@ describe('model provider factory', () => {
       sandbox: { enabled: true },
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LanguageModel union type; V4 fields accessed via any
-    const m = binding.model as any;
+    const m = binding.model as unknown as {
+      specificationVersion: string;
+      provider: string;
+      modelId: string;
+    };
     expect(binding.model).toBeDefined();
     expect(m.specificationVersion).toBe('v4');
     expect(m.provider).toBeDefined();
@@ -321,8 +324,11 @@ describe('model provider factory', () => {
 
     const binding = createChatModel(config);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LanguageModel union type
-    const m = binding.model as any;
+    const m = binding.model as unknown as {
+      specificationVersion: string;
+      provider: string;
+      modelId: string;
+    };
     expect(binding.model).toBeDefined();
     expect(m.specificationVersion).toBe('v4');
     expect(m.provider).toBeDefined();
@@ -342,8 +348,11 @@ describe('model provider factory', () => {
 
     const binding = createChatModel(config);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- LanguageModel union type
-    const m = binding.model as any;
+    const m = binding.model as unknown as {
+      specificationVersion: string;
+      provider: string;
+      modelId: string;
+    };
     expect(binding.model).toBeDefined();
     expect(m.specificationVersion).toBe('v4');
     expect(m.provider).toBeDefined();

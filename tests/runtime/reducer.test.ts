@@ -1559,8 +1559,8 @@ describe('reduceRuntimeState — runtime environment', () => {
 
     const next = reduceRuntimeState(state, event);
     expect(next.authorization.mode).toBe('full_access');
-    expect(next.authorization.commandGrants['key1']).toBeDefined();
-    expect(next.authorization.commandGrants['key1']!.command).toBe('ls');
+    expect(next.authorization.commandGrants.key1).toBeDefined();
+    expect(next.authorization.commandGrants.key1!.command).toBe('ls');
   });
 
   test('authorization.changed can persist replacement command grants', () => {
@@ -2047,14 +2047,9 @@ describe('reduceRuntimeState — auto-review events', () => {
       name: 'shell_execute',
       args: { command: 'npm test' },
     });
-    const approval = {
-      risk: 'execute_code',
-      summary: 'Run npm test',
+    const approval: ToolApprovalPayload = {
+      ...makeToolApproval('npm test'),
       reason: 'testing',
-      command: 'npm test',
-      expectedEffects: [],
-      grantOptions: ['approve_once'],
-      recommendedGrant: 'approve_once',
     };
     const event: RuntimeEvent = {
       type: 'auto_review.requested',
@@ -2062,7 +2057,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
       reason: 'auto-review for tool approval',
-      approval: approval as any,
+      approval,
     };
     const next = reduceRuntimeState(withTool, event);
     expect(next.interactions.kind).toBe('awaiting_auto_review');
@@ -2077,14 +2072,9 @@ describe('reduceRuntimeState — auto-review events', () => {
   test('auto_review.completed approves tool when ok and approved', () => {
     const state = makeInitialState();
     // Set up state as if auto_review.requested was already processed
-    const approval = {
-      risk: 'execute_code',
-      summary: 'Run npm test',
+    const approval: ToolApprovalPayload = {
+      ...makeToolApproval('npm test'),
       reason: 'testing',
-      command: 'npm test',
-      expectedEffects: [],
-      grantOptions: ['approve_once'],
-      recommendedGrant: 'approve_once',
     };
     const withTool = reduceRuntimeState(state, {
       type: 'tool.queued',
@@ -2098,7 +2088,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
       reason: 'auto-review for tool approval',
-      approval: approval as any,
+      approval,
     });
     const event: RuntimeEvent = {
       type: 'auto_review.completed',
@@ -2125,14 +2115,9 @@ describe('reduceRuntimeState — auto-review events', () => {
 
   test('auto_review.completed rejects tool when not approved', () => {
     const state = makeInitialState();
-    const approval = {
-      risk: 'execute_code',
-      summary: 'Run npm test',
+    const approval: ToolApprovalPayload = {
+      ...makeToolApproval('npm test'),
       reason: 'testing',
-      command: 'npm test',
-      expectedEffects: [],
-      grantOptions: ['approve_once'],
-      recommendedGrant: 'approve_once',
     };
     const withTool = reduceRuntimeState(state, {
       type: 'tool.queued',
@@ -2146,7 +2131,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
       reason: 'auto-review for tool approval',
-      approval: approval as any,
+      approval,
     });
     const event: RuntimeEvent = {
       type: 'auto_review.completed',
@@ -2172,14 +2157,9 @@ describe('reduceRuntimeState — auto-review events', () => {
 
   test('auto_review.completed ignores mismatched reviewId', () => {
     const state = makeInitialState();
-    const approval = {
-      risk: 'execute_code',
-      summary: 'Run npm test',
+    const approval: ToolApprovalPayload = {
+      ...makeToolApproval('npm test'),
       reason: 'testing',
-      command: 'npm test',
-      expectedEffects: [],
-      grantOptions: ['approve_once'],
-      recommendedGrant: 'approve_once',
     };
     const withTool = reduceRuntimeState(state, {
       type: 'tool.queued',
@@ -2193,7 +2173,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
       reason: 'auto-review for tool approval',
-      approval: approval as any,
+      approval,
     });
     const event: RuntimeEvent = {
       type: 'auto_review.completed',
@@ -2215,33 +2195,29 @@ describe('reduceRuntimeState — auto-review events', () => {
 
   test('circuit breaker trips after consecutive auto_review rejections', () => {
     const state = makeInitialState();
-    const approval = {
-      risk: 'execute_code',
+    const approval: ToolApprovalPayload = {
+      ...makeToolApproval('cmd'),
       summary: 'Run cmd',
       reason: 'testing',
-      command: 'cmd',
-      expectedEffects: [],
-      grantOptions: ['approve_once'],
-      recommendedGrant: 'approve_once',
     };
     // Pre-set consecutive rejects at 2 (one below threshold of 3)
-    let s: any = {
+    const withRejectHistory: RuntimeState = {
       ...state,
       autoReview: { ...state.autoReview, consecutiveRejects: 2, rejectionHistory: [] },
     };
-    const withTool = reduceRuntimeState(s, {
+    const withTool = reduceRuntimeState(withRejectHistory, {
       type: 'tool.queued',
       toolCallId: 'tool-99',
       name: 'shell_execute',
       args: { command: 'cmd' },
     });
-    s = reduceRuntimeState(withTool, {
+    const awaiting = reduceRuntimeState(withTool, {
       type: 'auto_review.requested',
       reviewId: 'rev-1',
       toolCallId: 'tool-99',
       toolName: 'shell_execute',
       reason: 'test',
-      approval: approval as any,
+      approval,
     });
     // Third consecutive rejection → should trip
     const event: RuntimeEvent = {
@@ -2256,7 +2232,7 @@ describe('reduceRuntimeState — auto-review events', () => {
         durationMs: 100,
       },
     };
-    const next = reduceRuntimeState(s, event);
+    const next = reduceRuntimeState(awaiting, event);
     expect(next.tools.calls['tool-99']!.status).toBe('rejected');
     expect(next.autoReview.consecutiveRejects).toBe(3);
     expect(next.autoReview.circuitBreakerTripped).toBe(true);
