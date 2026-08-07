@@ -5,6 +5,21 @@ import { buildServerActions, derivePrimaryStatus, moveSelection } from '@/app/tu
 import type { McpController, McpControllerSnapshot } from '@/app/tui/mcp/types';
 import type { McpAuthResult, McpServerControlState, McpServerKey } from '@/core/mcp';
 
+/** Poll the latest rendered frame until the predicate holds, so async effect
+ *  timing (auth→detail return) does not depend on a fixed sleep across hosts. */
+async function waitForFrame(
+  getFrame: () => string | undefined,
+  predicate: (frame: string) => boolean,
+  timeoutMs = 1000,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (predicate(getFrame() ?? '')) return;
+    await Bun.sleep(10);
+  }
+  throw new Error('waitForFrame: timed out waiting for expected frame content');
+}
+
 function server(overrides: Partial<McpServerControlState> = {}): Readonly<McpServerControlState> {
   const tools = ['click', 'close_page', 'drag', 'emulate', 'evaluate_script'].map(
     (name) =>
@@ -528,7 +543,10 @@ describe('MCP management overlay', () => {
     stdin.write('\r');
     await Bun.sleep(10);
     expect(controller.logins).toEqual(['example-server']);
-    await Bun.sleep(20);
+    await waitForFrame(
+      lastFrame,
+      (f) => f.includes('❯ 查看工具') && !f.includes('认证 MCP 服务器'),
+    );
     const frame = lastFrame() ?? '';
     expect(frame).toContain('── example-server');
     expect(frame).toContain('状态');
@@ -572,7 +590,7 @@ describe('MCP management overlay', () => {
     const authenticatingFrame = lastFrame() ?? '';
     expect(authenticatingFrame).toContain('认证 MCP 服务器');
     expect(authenticatingFrame).toContain('请在浏览器中完成登录。');
-    await Bun.sleep(25);
+    await waitForFrame(lastFrame, (f) => f.includes('── sample') && !f.includes('认证 MCP 服务器'));
     const finalFrame = lastFrame() ?? '';
     expect(finalFrame).toContain('── sample');
     expect(finalFrame).toContain('MCP 服务器');
