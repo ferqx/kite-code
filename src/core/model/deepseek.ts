@@ -163,8 +163,9 @@ export function transientRetryMiddleware(options: {
 export function createDeepSeekMiddleware(): LanguageModelMiddleware {
   return {
     transformParams: async ({ params }: { params: Record<string, unknown> }) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- params shape is flexible across providers
-      const prompt = (params as any).prompt as Array<Record<string, unknown>> | undefined;
+      const prompt = (params as Record<string, unknown>).prompt as
+        | Array<Record<string, unknown>>
+        | undefined;
       if (!prompt || !Array.isArray(prompt)) return params;
       // Walk messages, partition by user-message boundaries, and collect
       // reasoning_content per turn. The logic mirrors the old

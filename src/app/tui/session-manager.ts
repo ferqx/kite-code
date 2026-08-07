@@ -55,6 +55,46 @@ function isRecoverableError(error: unknown): boolean {
   return /timeout|timed out|rate limit|overloaded|\b429\b|\b5\d\d\b/.test(message);
 }
 
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+type ModelRetry = {
+  attempt?: unknown;
+  maxAttempts?: unknown;
+  error?: unknown;
+  delayMs?: unknown;
+};
+
+function asNumber(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function asModelRetry(value: unknown): {
+  attempt: number;
+  maxAttempts: number;
+  error: string;
+  delayMs: number;
+} {
+  if (!value || typeof value !== 'object') {
+    return {
+      attempt: 0,
+      maxAttempts: 0,
+      error: String(value),
+      delayMs: 0,
+    };
+  }
+
+  const retry = value as ModelRetry;
+  const error = toErrorMessage(retry.error);
+  return {
+    attempt: asNumber(retry.attempt),
+    maxAttempts: asNumber(retry.maxAttempts),
+    error: error === '' ? String(value) : error,
+    delayMs: asNumber(retry.delayMs),
+  };
+}
+
 /** 取消竞态不应作为用户可见错误输出。 */
 export function isSilentCancellationMismatch(event: RuntimeEvent): boolean {
   return (
@@ -374,39 +414,44 @@ export class SessionRuntime {
       if (!aborted && this._foreground) {
         deps.dispatch({ type: 'SET_EXITED' });
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       // Emit any accumulated retry events before the fatal error.
       // In the Kernel architecture, model retries are normally emitted
       // through the runtime event pipeline.  This catch block handles
       // retries that were accumulated on the error object before the
       // pipeline could emit them.
-      if (Array.isArray(e.modelRetries)) {
-        for (const retry of e.modelRetries) {
+      const modelRetries =
+        e && typeof e === 'object' && 'modelRetries' in e
+          ? (e as { modelRetries?: unknown }).modelRetries
+          : [];
+      if (Array.isArray(modelRetries)) {
+        for (const retry of modelRetries) {
+          const parsedRetry = asModelRetry(retry);
           if (this._foreground) {
             deps.dispatch({
               type: 'RUNTIME_EVENT',
               event: {
                 type: 'model.retry',
-                attempt: (retry as any).attempt ?? 0,
-                maxAttempts: (retry as any).maxAttempts ?? 0,
-                error: (retry as any).error ?? String(retry),
-                delayMs: (retry as any).delayMs ?? 0,
+                attempt: parsedRetry.attempt,
+                maxAttempts: parsedRetry.maxAttempts,
+                error: parsedRetry.error,
+                delayMs: parsedRetry.delayMs,
               },
             });
           } else {
             this._pushToBuffer({
               type: 'model.retry',
-              attempt: (retry as any).attempt ?? 0,
-              maxAttempts: (retry as any).maxAttempts ?? 0,
-              error: (retry as any).error ?? String(retry),
-              delayMs: (retry as any).delayMs ?? 0,
+              attempt: parsedRetry.attempt,
+              maxAttempts: parsedRetry.maxAttempts,
+              error: parsedRetry.error,
+              delayMs: parsedRetry.delayMs,
             });
           }
         }
       }
       const errorEvent: RuntimeEvent = {
         type: 'run.error',
-        message: e?.message ?? String(e),
+        message: toErrorMessage(e),
         recoverable: isRecoverableError(e),
       };
       if (this._foreground) {

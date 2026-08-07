@@ -20,11 +20,13 @@ export default function OverlayChoiceList<T extends string>({
   selectedId,
   numbered = false,
   selectionBackground = true,
+  compact = false,
 }: {
   options: readonly OverlayChoiceOption<T>[];
   selectedId?: T;
   numbered?: boolean;
   selectionBackground?: boolean;
+  compact?: boolean;
 }) {
   const t = useTheme();
   return (
@@ -43,7 +45,9 @@ export default function OverlayChoiceList<T extends string>({
           <Box
             key={option.id}
             marginTop={
-              option.separatorBefore || (index > 0 && options[index - 1]?.description) ? 1 : 0
+              option.separatorBefore || (!compact && index > 0 && options[index - 1]?.description)
+                ? 1
+                : 0
             }
           >
             <OverlayListRow

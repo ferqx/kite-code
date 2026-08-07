@@ -9,6 +9,12 @@ import { join } from 'node:path';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
 import { createRuntimeStore, runtimeStorePathFor } from '../../src/core/runtime/store.js';
+import type {
+  AgentPlan,
+  ShellApprovalGrant,
+  ToolApprovalPayload,
+  UserInputPayload,
+} from '../../src/protocol/events.js';
 
 // ── helpers ──
 
@@ -219,7 +225,9 @@ describe('appendEvents + loadEvents round-trip', () => {
     expect(loaded.length).toBe(1);
     expect(loaded[0]!.thread_id).toBe('thread-a');
     expect(loaded[0]!.event.type).toBe('tool.started');
-    expect((loaded[0]!.event as any).toolCallId).toBe('call-1');
+    expect((loaded[0]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
+      'call-1',
+    );
     expect(loaded[0]!.created_at).toBeGreaterThan(0);
   });
 
@@ -347,8 +355,12 @@ describe('loadEvents with since parameter', () => {
     // 从第 1 个 ID 之后加载，应返回剩余 2 个 / Load since first ID, should return remaining 2
     const since = store.loadEvents('thread-d', firstId);
     expect(since.length).toBe(2);
-    expect((since[0]!.event as any).toolCallId).toBe('second');
-    expect((since[1]!.event as any).toolCallId).toBe('third');
+    expect((since[0]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
+      'second',
+    );
+    expect((since[1]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
+      'third',
+    );
   });
 
   // 验证 since 大于所有事件 ID 时返回空数组 / Verify since > max id returns empty
@@ -574,7 +586,7 @@ describe('edge cases', () => {
         type: 'user_input.requested',
         interactionId: 'i1',
         toolCallId: 'c4',
-        request: { question: 'What next?' } as any,
+        request: { question: 'What next?' } as unknown as UserInputPayload,
       },
       {
         type: 'user_input.answered',
@@ -585,7 +597,7 @@ describe('edge cases', () => {
         type: 'plan.review_requested',
         interactionId: 'i2',
         toolCallId: 'c5',
-        plan: { name: 'p1' } as any,
+        plan: { name: 'p1' } as unknown as AgentPlan,
         planSummary: 'summary',
       },
       { type: 'plan.approved', interactionId: 'i2', executionMode: 'auto' },
@@ -595,12 +607,12 @@ describe('edge cases', () => {
         type: 'approval.requested',
         interactionId: 'i3',
         toolCallId: 'c6',
-        approval: { toolName: 'shell' } as any,
+        approval: { toolName: 'shell' } as unknown as ToolApprovalPayload,
       },
       {
         type: 'approval.granted',
         interactionId: 'i3',
-        grant: { mode: 'once' } as any,
+        grant: { mode: 'once' } as unknown as ShellApprovalGrant,
       },
       {
         type: 'approval.rejected',
@@ -668,8 +680,12 @@ describe('persistence across close/reopen', () => {
     const s2 = createRuntimeStore(dbPath);
     const loaded = s2.loadEvents('thread-p');
     expect(loaded.length).toBe(2);
-    expect((loaded[0]!.event as any).toolCallId).toBe('evt-1');
-    expect((loaded[1]!.event as any).toolCallId).toBe('evt-2');
+    expect((loaded[0]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
+      'evt-1',
+    );
+    expect((loaded[1]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
+      'evt-2',
+    );
     s2.close();
   });
 
@@ -701,7 +717,9 @@ describe('persistence across close/reopen', () => {
 
     expect(all.length).toBe(2);
     expect(all[1]!.id).toBeGreaterThan(ids1[0]!);
-    expect((all[1]!.event as any).toolCallId).toBe('batch2');
+    expect((all[1]!.event as Extract<RuntimeEvent, { type: 'tool.started' }>).toolCallId).toBe(
+      'batch2',
+    );
   });
 });
 
@@ -804,7 +822,7 @@ describe('persistence edge cases', () => {
 
     const loaded = store.loadEvents('thread-special');
     expect(loaded.length).toBe(1);
-    const loadedEvent = loaded[0]!.event as any;
+    const loadedEvent = loaded[0]!.event as Extract<RuntimeEvent, { type: 'tool.finished' }>;
     expect(loadedEvent.type).toBe('tool.finished');
     expect(loadedEvent.result.stdout).toBe('Unicode: hello world');
     expect(loadedEvent.result.stderr).toBe('emoji test');

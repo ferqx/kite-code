@@ -43,7 +43,10 @@ describe('Runtime run deadline', () => {
       const model = createMockModel([]);
       let providerObservedAbort = false;
       let providerCalls = 0;
-      model.model.doGenerate = async (options: { abortSignal?: AbortSignal }) => {
+      const rawModel = model.model as unknown as {
+        doGenerate: (options: { abortSignal?: AbortSignal }) => Promise<unknown>;
+      };
+      rawModel.doGenerate = async (options: { abortSignal?: AbortSignal }) => {
         providerCalls += 1;
         return new Promise((_, reject) => {
           const abort = () => {

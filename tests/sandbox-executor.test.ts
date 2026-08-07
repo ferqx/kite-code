@@ -297,18 +297,33 @@ describe('sandbox executor integration', () => {
 
   test('denies protected paths inside workspace', async () => {
     const ws = setupWorkspace();
-    mkdirSync(join(ws, '.GIT'));
-    writeFileSync(join(ws, '.GIT', 'config'), 'protected');
+    mkdirSync(join(ws, '.SSH'));
+    writeFileSync(join(ws, '.SSH', 'config'), 'protected');
     writeFileSync(join(ws, '.ENV.TEST'), 'keep');
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       // Split the literal so checkDangerousPaths cannot be the mechanism under test.
-      const read = await executor({ workspace: ws, command: 'cat .G"IT/config"' });
+      const read = await executor({ workspace: ws, command: 'cat .S"SH/config"' });
       const write = await executor({ workspace: ws, command: 'echo changed > .E"NV.TEST"' });
       expect(read.ok).toBe(false);
       expect(read.stdout).not.toContain('protected');
       expect(write.ok).toBe(false);
       expect(await Bun.file(join(ws, '.ENV.TEST')).text()).toBe('keep');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('allows git access to workspace .git inside the sandbox', async () => {
+    const ws = setupWorkspace();
+    mkdirSync(join(ws, '.GIT'));
+    writeFileSync(join(ws, '.GIT', 'config'), 'repo-config');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      // Split the literal so checkDangerousPaths cannot be the mechanism under test.
+      const result = await executor({ workspace: ws, command: 'cat .g"it/config"' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('repo-config');
     } finally {
       cleanupWorkspace(ws);
     }

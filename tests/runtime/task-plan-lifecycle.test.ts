@@ -301,7 +301,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       },
       tasks: {
         ...state.tasks,
-        ['task-1']: {
+        'task-1': {
           ...state.tasks['task-1']!,
           planning: {
             kind: 'executing',
@@ -366,7 +366,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       },
       tasks: {
         ...state.tasks,
-        ['task-1']: {
+        'task-1': {
           ...state.tasks['task-1']!,
           planning: {
             kind: 'executing',

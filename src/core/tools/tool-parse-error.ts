@@ -41,7 +41,7 @@ export function formatToolParseError(
   parseError: string,
 ): string {
   const schemaHint = getToolSchemaHint(toolName);
-  const truncatedArgs = rawArgs.length > 1200 ? rawArgs.slice(0, 1200) + '...' : rawArgs;
+  const truncatedArgs = rawArgs.length > 1200 ? `${rawArgs.slice(0, 1200)}...` : rawArgs;
 
   return [
     `**Tool**: \`${toolName}\``,

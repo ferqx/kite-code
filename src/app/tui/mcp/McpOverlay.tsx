@@ -98,6 +98,12 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
   const [activityDotCount, setActivityDotCount] = useState(3);
   const [authStarting, setAuthStarting] = useState(false);
 
+  const returnToDetail = useCallback((key: McpServerKey) => {
+    setView({ kind: 'server_detail', key });
+    setSelectSelectedId(undefined);
+    setAuthStarting(false);
+  }, []);
+
   const currentServer =
     'key' in view
       ? servers.find((server) => serverIdentity(server.key) === serverIdentity(view.key))
@@ -185,15 +191,17 @@ export default function McpOverlay({ controller, layeredEscRef, onClose }: McpOv
   }, [detailActions, view.kind]);
 
   useEffect(() => {
+    if (view.kind !== 'authenticate') return;
+    if (!currentServer) return;
+    if (currentServer.authStatus === 'authenticated') {
+      returnToDetail(view.key);
+    }
+  }, [currentServer, returnToDetail, view]);
+
+  useEffect(() => {
     if (genericOptions.length === 0) return;
     setSelectSelectedId((current) => validSelection(genericOptions, current));
   }, [genericOptions]);
-
-  const returnToDetail = useCallback((key: McpServerKey) => {
-    setView({ kind: 'server_detail', key });
-    setSelectSelectedId(undefined);
-    setAuthStarting(false);
-  }, []);
 
   const back = useCallback(() => {
     if (busy) return;

@@ -130,6 +130,10 @@ function asRecord(value: unknown): Record<string, unknown> {
 }
 
 function numericStatus(record: Record<string, unknown>): number | undefined {
-  const value = record.status ?? record.statusCode;
-  return typeof value === 'number' ? value : undefined;
+  const value = record.status ?? record.statusCode ?? record.code;
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string' && /^\d+$/.test(value)) {
+    return Number.parseInt(value, 10);
+  }
+  return undefined;
 }

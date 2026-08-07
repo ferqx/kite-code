@@ -51,8 +51,8 @@ describe('TUI PTY System — MCP Select management', () => {
 
     tui.write('\r');
     await waitForText(() => tui!.viewport(), '重新连接', 10_000);
-    expect(screenContains(tui.viewport(), '禁用服务器')).toBe(true);
-    expect(screenContains(tui.viewport(), '移除服务器')).toBe(true);
+    expect(screenContains(tui.viewport(), '禁用')).toBe(true);
+    expect(screenContains(tui.viewport(), '移除')).toBe(true);
     expect(screenContains(tui.viewport(), 'A Add')).toBe(false);
     expect(screenContains(tui.viewport(), 'R Retry')).toBe(false);
   }, 40_000);

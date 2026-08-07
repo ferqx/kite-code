@@ -42,6 +42,33 @@ interface SetupWizardProps {
   onComplete: (result: { modelName: string }) => void;
 }
 
+type SetupWizardModelPayload = {
+  models?: unknown;
+  data?: unknown;
+};
+
+type SetupWizardModelItem = {
+  name?: unknown;
+  id?: unknown;
+};
+
+function getModelNamesFromPayload(payload: unknown, isOllama: boolean): string[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const body = payload as SetupWizardModelPayload;
+  const rawItems = isOllama ? body.models : body.data;
+  if (!Array.isArray(rawItems)) return [];
+
+  return rawItems
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const candidate = isOllama
+        ? (item as SetupWizardModelItem).name
+        : (item as SetupWizardModelItem).id;
+      return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+    })
+    .filter((name): name is string => name !== null);
+}
+
 export default function SetupWizard({ onComplete }: SetupWizardProps) {
   const t = useTheme();
 
@@ -109,11 +136,8 @@ export default function SetupWizard({ onComplete }: SetupWizardProps) {
     setModelsLoading(true);
     fetch(endpoint, { headers, signal: AbortSignal.timeout(8000) })
       .then((res) => res.json())
-      .then((data: any) => {
-        const items: any[] = isOllama ? (data?.models ?? []) : (data?.data ?? []);
-        const names = items
-          .map((it) => (isOllama ? it?.name : it?.id))
-          .filter((n): n is string => typeof n === 'string' && n.length > 0);
+      .then((data: unknown) => {
+        const names = getModelNamesFromPayload(data, isOllama);
         setRemoteModels(names);
       })
       .catch(() => setRemoteModels([]))

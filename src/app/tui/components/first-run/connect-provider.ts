@@ -8,6 +8,37 @@ import type {
 } from './types';
 import { chooseInitialModel, classifyError } from './types';
 
+type ModelListResponse = {
+  models?: unknown;
+  data?: unknown;
+};
+
+type ProviderModelItem = {
+  name?: unknown;
+  id?: unknown;
+};
+
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function extractModelNames(response: unknown, isOllama: boolean): string[] {
+  if (!response || typeof response !== 'object') return [];
+  const body = response as ModelListResponse;
+  const rawItems = isOllama ? body.models : body.data;
+  if (!Array.isArray(rawItems)) return [];
+
+  return rawItems
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const candidate = isOllama
+        ? (item as ProviderModelItem).name
+        : (item as ProviderModelItem).id;
+      return typeof candidate === 'string' && candidate.length > 0 ? candidate : null;
+    })
+    .filter((name): name is string => name !== null);
+}
+
 async function fetchModels(
   provider: ProviderDefinition,
   baseURL: string,
@@ -51,17 +82,14 @@ async function fetchModels(
       }
     }
 
-    const data: any = await res.json();
-    const items: any[] = isOllama ? (data?.models ?? []) : (data?.data ?? []);
+    const data = await res.json();
+    const items = extractModelNames(data, isOllama);
     const names: AvailableModel[] = [];
-    for (const it of items) {
-      const rawName = isOllama ? it?.name : it?.id;
-      if (typeof rawName === 'string' && rawName.length > 0) {
-        names.push({ name: rawName, default: false });
-      }
+    for (const name of items) {
+      names.push({ name, default: false });
     }
 
-    if (names.length === 0 && isOllama && data?.models === undefined) {
+    if (names.length === 0 && isOllama && (!data || !('models' in (data as ModelListResponse)))) {
       return {
         models: null,
         error: { kind: 'incompatible', message: 'Could not read model list' },
@@ -74,14 +102,14 @@ async function fetchModels(
     }
 
     return { models: names };
-  } catch (err: any) {
+  } catch (err: unknown) {
     // User-initiated abort — silently bail, caller handles cancellation
     if (signal?.aborted) {
       return { models: null, error: { kind: 'generic', message: 'Cancelled' } };
     }
     return {
       models: null,
-      error: classifyError(null, err?.message ?? String(err), url),
+      error: classifyError(null, toErrorMessage(err), url),
     };
   }
 }
@@ -103,10 +131,10 @@ async function validateCredentials(
         };
       }
       return { valid: true };
-    } catch (err: any) {
+    } catch (err: unknown) {
       return {
         valid: false,
-        error: classifyError(null, err?.message ?? String(err), url),
+        error: classifyError(null, toErrorMessage(err), url),
       };
     }
   }
@@ -133,10 +161,10 @@ async function validateCredentials(
     }
 
     return { valid: true };
-  } catch (err: any) {
+  } catch (err: unknown) {
     return {
       valid: false,
-      error: classifyError(null, err?.message ?? String(err), url),
+      error: classifyError(null, toErrorMessage(err), url),
     };
   }
 }

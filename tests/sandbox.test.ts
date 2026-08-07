@@ -102,6 +102,35 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(deny file-read* file-map-executable file-write*');
   });
 
+  test('profile default keeps git access denied', () => {
+    const profile = generateSandboxProfile(workspace);
+    expect(profile).toContain(`(subpath "${join(canonicalWorkspace, '.git')}")`);
+    expect(profile).toContain('[gG][iI][tT](/.*)?$');
+  });
+
+  test('git access allows CLT developer dir and user git config reads', () => {
+    const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
+    if (existsSync('/private/var/select/developer_dir')) {
+      expect(profile).toContain('(literal "/private/var/select/developer_dir")');
+    }
+    const home = process.env.HOME;
+    if (home && existsSync(join(home, '.gitconfig'))) {
+      expect(profile).toContain(`(literal "${join(home, '.gitconfig')}")`);
+    }
+  });
+
+  test('git access exempts .git but keeps other protected paths denied', () => {
+    const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
+    // .git directory is readable/writable so git commands can operate.
+    expect(profile).not.toContain(`(subpath "${join(canonicalWorkspace, '.git')}")`);
+    expect(profile).not.toContain('[gG][iI][tT](/.*)');
+    // Other protected identities stay denied: shell profiles, credentials, …
+    expect(profile).toContain(`(subpath "${join(canonicalWorkspace, '.ssh')}")`);
+    expect(profile).toContain(`(literal "${join(canonicalWorkspace, '.git-credentials')}")`);
+    expect(profile).toContain(`(literal "${join(canonicalWorkspace, '.env')}")`);
+    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+  });
+
   test('read-only scope omits workspace from writable filters', () => {
     const profile = generateSandboxProfile(workspace, { filesystemScope: 'read_only' });
     const writeSection = profile.slice(profile.indexOf(';; Writes are limited'));

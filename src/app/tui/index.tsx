@@ -51,6 +51,10 @@ import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } f
 let _sessionManagerForExit: SessionManager | null = null;
 let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function resolveConfigForResume(
   currentConfig: AgentConfig,
   persistedProvider: string,
@@ -549,7 +553,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
             dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
           }
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
         if (loadGenerationRef.current !== gen) return;
         // Roll back SessionManager: if we switched to a different session and the
         // load failed, revert the switch and remove the orphaned runtime.
@@ -561,7 +565,9 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         dispatch({
           type: 'LOAD_SESSION',
           threadId,
-          blocks: [{ id: 1, kind: 'text', content: `Failed to load session: ${e?.message ?? e}` }],
+          blocks: [
+            { id: 1, kind: 'text', content: `Failed to load session: ${toErrorMessage(e)}` },
+          ],
           interrupt: null,
           modelProvider: '',
           modelName: '',
@@ -734,10 +740,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           mkdirSync(dir, { recursive: true });
           await fs.writeFile(filename, header + body, { encoding: 'utf-8', mode: 0o600 });
           dispatch({ type: 'EXPORT_SESSION_DONE', filename });
-        } catch (e: any) {
+        } catch (e: unknown) {
           dispatch({
             type: 'LOCAL_TEXT',
-            text: `Export failed: ${e?.message ?? e}`,
+            text: `Export failed: ${toErrorMessage(e)}`,
             isError: true,
           });
         }

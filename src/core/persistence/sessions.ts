@@ -167,7 +167,7 @@ export async function enrichSessionNames(
   for (const session of sessions.filter((entry) => entry.needsSmartName)) {
     const data = await loadSession(checkpointPath, session.threadId);
     const first = data?.runtimeEvents.find((event) => event.type === 'user.message_appended');
-    if (!first || first.type !== 'user.message_appended') continue;
+    if (first?.type !== 'user.message_appended') continue;
     const name = await generateSessionName(first.content);
     if (!name) continue;
     await persistSessionName(checkpointPath, session.threadId, name);

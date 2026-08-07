@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentConfig } from '../src/core/config';
 import { exposedMcpToolName } from '../src/core/mcp';
 import { isReadOnlyShellCommand } from '../src/core/policies/shell-classification';
 import { clearToolCache, createAgentTools } from '../src/core/tools/definitions';
@@ -17,6 +18,30 @@ import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/ca
 // Helper: AI SDK tools are in a ToolSet (Record<string, Tool>), not an array.
 // Tool names are the Record keys; tool lookup is `tools[name]`.
 // tool.execute() replaces the old tool.invoke().
+
+// AI SDK Schema 的结构化投影。schema-only 工具的 inputSchema 在运行时是
+// zodSchema() 包装后的 Schema：jsonSchema 可等待解析为 JSON Schema，
+// validate 返回 { success } 校验结果。
+interface ToolSchemaLike {
+  jsonSchema: { type?: string } | PromiseLike<{ type?: string }>;
+  validate: (value: unknown) => { success: boolean } | PromiseLike<{ success: boolean }>;
+}
+
+// ask_user 规范 questions-only JSON Schema 的窄结构投影（min/max 约束）。
+interface AskUserJsonSchema {
+  required?: string[];
+  properties: {
+    questions: {
+      minItems?: number;
+      maxItems?: number;
+      items: {
+        properties: {
+          options: { minItems?: number; maxItems?: number };
+        };
+      };
+    };
+  };
+}
 
 function toolNames(tools: Record<string, unknown>): string[] {
   return Object.keys(tools);
@@ -139,7 +164,7 @@ describe('code agent tool definitions', () => {
 
   test('write_plan schema requires a complete save document', async () => {
     const tools = createAgentTools({ workspace: '/tmp' });
-    const schema = (tools.write_plan as any).inputSchema;
+    const schema = (tools.write_plan as unknown as { inputSchema: ToolSchemaLike }).inputSchema;
     const jsonSchema = await schema.jsonSchema;
 
     // OpenAI-compatible function tools require an object at the schema root;
@@ -171,7 +196,7 @@ describe('code agent tool definitions', () => {
 
   test('ask_user exposes one canonical questions-only model schema', async () => {
     const tools = createAgentTools({ workspace: '/tmp' });
-    const schema = (tools.ask_user as any).inputSchema;
+    const schema = (tools.ask_user as unknown as { inputSchema: ToolSchemaLike }).inputSchema;
     const validQuestion = {
       question: 'What scope should be covered?',
       options: [
@@ -225,7 +250,7 @@ describe('code agent tool definitions', () => {
         .success,
     ).toBe(false);
 
-    const json = schema.jsonSchema as Record<string, any>;
+    const json = schema.jsonSchema as unknown as AskUserJsonSchema;
     expect(Object.keys(json.properties)).toEqual(['questions']);
     expect(json.required).toEqual(['questions']);
     expect(json.properties.questions.minItems).toBe(1);
@@ -396,7 +421,9 @@ describe('code agent tool definitions', () => {
   test('exposes activate_skill only with a compiled catalog and both feature flags', () => {
     const tools = createAgentTools({
       workspace: '/tmp',
-      config: { features: { skillWorkflowV1: true, skillActivationV2: true } } as any,
+      config: {
+        features: { skillWorkflowV1: true, skillActivationV2: true },
+      } as unknown as AgentConfig,
       skillCatalog: {
         revision: 'skills-r1',
         capabilities: {

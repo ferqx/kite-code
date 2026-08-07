@@ -112,7 +112,7 @@ function fakeQuestion(overrides: Partial<UserInputPayload> = {}): UserInputPaylo
 }
 
 function fakeProvider(): TuiUserInputProvider {
-  return new TuiUserInputProvider(() => {});
+  return new TuiUserInputProvider();
 }
 
 const onResolved = () => {};

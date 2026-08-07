@@ -4,12 +4,18 @@
 
 import type { LanguageModel } from 'ai';
 import type { AIMessage, BaseMessage } from '../src/core/messages';
+import type { SupportedChatModel } from '../src/core/model/factory';
 
 export interface MockResponse {
   message?: AIMessage;
   delay?: number;
   error?: string;
 }
+
+type MockModelFixture = SupportedChatModel & {
+  _responses: MockResponse[];
+  callCount: { count: number };
+};
 
 /**
  * Create a mock model compatible with SupportedChatModel.
@@ -19,7 +25,7 @@ export interface MockResponse {
  * and error injection — same semantics as the old StreamingMockModel.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- internal mock shape
-export function createMockModel(responses: MockResponse[]): any {
+export function createMockModel(responses: MockResponse[]): MockModelFixture {
   const callCount = { count: 0 };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- mock model implements doGenerate via any cast
@@ -29,7 +35,7 @@ export function createMockModel(responses: MockResponse[]): any {
     modelId: 'mock-model',
     supportedUrls: {},
 
-    async doGenerate(): Promise<any> {
+    async doGenerate(): Promise<unknown> {
       const idx = callCount.count % responses.length;
       callCount.count++;
       const response = responses[idx];
@@ -52,7 +58,7 @@ export function createMockModel(responses: MockResponse[]): any {
 
       const msg = response.message;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const content: Array<any> = [];
+      const content: Array<unknown> = [];
 
       // Text content
       const text = typeof msg.content === 'string' ? msg.content : '';
@@ -85,7 +91,7 @@ export function createMockModel(responses: MockResponse[]): any {
       };
     },
 
-    async doStream(): Promise<any> {
+    async doStream(): Promise<never> {
       throw new Error('Streaming not supported in mock model');
     },
   };
@@ -95,12 +101,10 @@ export function createMockModel(responses: MockResponse[]): any {
     // This legacy fixture implements doGenerate only. Advertise that boundary
     // explicitly so production's default-on streaming does not call doStream.
     capabilityMetadata: { streaming: false },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    setRetryListener: (_fn: any) => {
+    setRetryListener: (_fn: unknown) => {
       // no-op in mock
     },
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- accessed by StreamingMockModel compat
-    _responses: responses as any,
+    _responses: responses,
     get callCount() {
       return callCount;
     },
@@ -113,7 +117,7 @@ export function createMockModel(responses: MockResponse[]): any {
 /** @deprecated Use createMockModel() instead */
 export class StreamingMockModel {
   // Delegate to createMockModel for AI SDK compatibility
-  private _binding: ReturnType<typeof createMockModel>;
+  private _binding: MockModelFixture;
 
   constructor(params: { responses: MockResponse[] }) {
     // Reuse shared counter if provided (for multi-turn tests)
@@ -138,12 +142,9 @@ export class StreamingMockModel {
   }
 
   get responses(): BaseMessage[] {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- backward compat stub
-    return (
-      ((this._binding as any)._responses
-        ?.map((r: MockResponse) => r.message)
-        .filter((m: unknown) => m != null) as BaseMessage[]) ?? []
-    );
+    return this._binding._responses
+      .map((response) => response.message)
+      .filter((message): message is AIMessage => message != null);
   }
 
   get callCount(): number {

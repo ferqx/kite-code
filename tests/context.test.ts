@@ -500,7 +500,7 @@ describe('sanitizeToolCallPairs', () => {
         additional_kwargs: {
           tool_calls: [{ id: 'c1', name: 'shell_execute', args: { command: 'ls' } }],
         },
-      } as any),
+      }),
       humanMessage('next'),
     ];
     const result = sanitizeToolCallPairs(msgs);
@@ -519,7 +519,7 @@ describe('sanitizeToolCallPairs', () => {
         additional_kwargs: {
           reasoning_content: 'deep analysis',
           custom_field: 'should_be_preserved',
-        } as any,
+        } as Record<string, unknown>,
         response_metadata: { model: 'deepseek', usage: { total_tokens: 100 } },
       }),
       humanMessage('next'),
@@ -529,10 +529,11 @@ describe('sanitizeToolCallPairs', () => {
     const ai = result[0] as AIMessage;
     expect(ai.tool_calls).toHaveLength(0);
     // Non-tool additional_kwargs preserved
-    expect((ai.additional_kwargs as any).reasoning_content).toBe('deep analysis');
-    expect((ai.additional_kwargs as any).custom_field).toBe('should_be_preserved');
+    const extra = ai.additional_kwargs as Record<string, unknown>;
+    expect(extra.reasoning_content).toBe('deep analysis');
+    expect(extra.custom_field).toBe('should_be_preserved');
     // Only tool_calls is removed
-    expect((ai.additional_kwargs as any).tool_calls).toBeUndefined();
+    expect(extra.tool_calls).toBeUndefined();
     // response_metadata preserved
     expect(ai.response_metadata).toEqual({ model: 'deepseek', usage: { total_tokens: 100 } });
   });
@@ -554,7 +555,7 @@ describe('sanitizeToolCallPairs', () => {
               function: { name: 'shell_execute', arguments: '{broken' },
             },
           ],
-        } as any,
+        } as Record<string, unknown>,
         response_metadata: {},
       }),
     ];

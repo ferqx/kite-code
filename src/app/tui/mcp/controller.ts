@@ -135,6 +135,7 @@ export class TuiMcpController implements McpController {
     name: string;
     config: Pick<McpServerConfig, 'type' | 'url' | 'command'>;
   }): Promise<McpServerKey | null> {
+    this.setMessage(undefined);
     try {
       await this.supervisor.mutate({
         type: 'add',
@@ -235,8 +236,11 @@ export class TuiMcpController implements McpController {
     });
   }
 
-  private setMessage(message: string): void {
-    this.snapshot = Object.freeze({ control: this.snapshot.control, message });
+  private setMessage(message: string | undefined): void {
+    this.snapshot =
+      message === undefined
+        ? Object.freeze({ control: this.snapshot.control })
+        : Object.freeze({ control: this.snapshot.control, message });
     this.emit();
   }
 

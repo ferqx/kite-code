@@ -13,7 +13,7 @@ tests/mcp-transport-boundary-concurrency.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0051、ADR-0054、ADR-0061、`execution-platform-support.md`。
+相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、`execution-platform-support.md`。
 
 ## Schema ownership
 
@@ -127,9 +127,11 @@ process group，未确认退出时结果 fail closed 并保留 runtime，确认�
 遍历恢复 hostile mode/BSD immutable flag 并删除该目录，删除不能确认时同样 fail closed。并发调用不能共享该目录，writable temp 也不进入 executable-map
 allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；`read_only` 不允许 Workspace 写入。系统与当前 Bun/Node runtime 依赖只有
 显式只读 root；除此之外的 Workspace 外 read/write/create/unlink、指向外部的 symlink，以及
-Workspace 内 `.git`、Agent/MCP 配置、credential、shell profile 等 protected path 均由
-Seatbelt deny，`checkDangerousPaths()` 只保留为 defense-in-depth。Shell child 会继承相同
-profile。共享规则除 exact literal/subpath 外，还编译 ASCII 大小写不敏感的 anchored regex；因此
+Workspace 内 Agent/MCP 配置、credential、shell profile 等 protected path 均由 Seatbelt deny，
+`checkDangerousPaths()` 只保留为 defense-in-depth。ADR-0070 起，seatbelt executor 对 git 命令
+豁免 Workspace `.git` 目录的原生 deny，并放行用户 git config 与 `/var/select/developer_dir`
+CLT shim 解析（详见下文 Git access）；直接 `.git` 访问仍由 tool-policy evaluator 与
+`checkDangerousPaths()` 拒绝。Shell child 会继承相同 profile。共享规则除 exact literal/subpath 外，还编译 ASCII 大小写不敏感的 anchored regex；因此
 case-insensitive APFS/HFS+ 上的 `.GIT`、`.Agents`、`.ENV.*` alias，以及 case-sensitive volume
 上按混合大小写实际创建的同名 identity，都会由原生边界拒绝。
 Seatbelt 的 `#"..."` regex literal 直接消费正则反斜杠；profile generator 必须只转义该 literal
@@ -161,7 +163,28 @@ protected/outside cwd 与 path-like executable，再把 canonical cwd 和 path-l
 交给 transport factory。sealed transport identity 固定把 `localStdioMcp=false`：在存在真实
 sandbox-backed stdio factory、argv/runtime pinning 与 native child inheritance conformance 前，
 即使 capability surface bit 被错误设为 true 也以 `transport_denied` 拒绝，生产不会构造本地 child。
-typed Git/worktree controller 走独立 App 授权，不能借此向模型 Shell 或通用文件工具开放 `.git`。
+typed Git/worktree controller 仍是共享 checkout / worktree 写操作的唯一 App 授权主体；seatbelt
+边界（ADR-0070）放行 git 命令对 Workspace `.git` 的原生访问，但不会向模型通用文件工具或裸
+shell 命令文本开放 `.git`（tool-policy evaluator 与 `checkDangerousPaths()` 仍拒绝）。
+
+### Git access（ADR-0070）
+
+seatbelt profile 新增 `gitAccess: 'deny' | 'allow'`，profile 函数默认 `'deny'`，seatbelt executor
+显式选择 `'allow'`。允许时：
+
+- `/private/var/select/developer_dir` 进入 `SYSTEM_READ_FILES`。Apple CLT shim
+  （`/usr/bin/git`、`/usr/bin/clang`、`/usr/bin/make`）经 `xcode-select`/`xcrun` 解析真实二进制，
+  消除误导性的 `unable to read data link at '/var/select/developer_dir'` 错误；
+- 存在的用户 git config（`~/.gitconfig`、`$XDG_CONFIG_HOME/git/config`）可读；
+- Workspace `.git` 目录从原生 protected-path deny 中豁免（读与写），git 命令可操作仓库；
+  `.git-credentials`、`.gitmodules`、`.env*` 等 protected file 仍被 deny。
+
+直接 `.git` 访问不随之开放：模型文件工具走 protected-path evaluator（`.git` 仍在
+`PROTECTED_WORKSPACE_DIRECTORIES_V1`，返回 deny），shell 命令文本命中 `checkDangerousPaths()`
+的 `.git/config`、`.git/hooks/`、`.gitmodules`、`.git-credentials` 等模式仍被拒绝。因此开放的
+是「git 二进制管理 `.git`」，不是「shell 任意读写 `.git`」。
+
+Linux bubblewrap 早已绑定完整 Workspace（含 `.git`），本变更使 macOS Seatbelt 与之一致。
 
 `createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
 production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，
