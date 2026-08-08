@@ -44,6 +44,7 @@ export const initialState: TuiState = {
   exitRequested: false,
   sessionError: false,
   loadingSessionId: null,
+  sessionServiceUnavailable: false,
   explorationSummaryIds: {},
   pendingToolCalls: {},
   currentThoughtSummaryId: undefined,

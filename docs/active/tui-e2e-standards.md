@@ -130,7 +130,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    PTY exit wait 都必须消费 step-local `AbortSignal`。忽略取消的自定义 Promise 不能无限突破
    journey deadline，必须以具名的 non-settling failure 返回；禁止超时 Promise 在后台继续访问
    已关闭的 PTY、server 或 workspace。
-5. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。
+5. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。fixture 中的
+   `ask_user` 选项必须包含显式 `recommended` 布尔值，且恰好一个为 true，避免测试依赖隐式的
+   首项推荐。验证内部 sandbox、session logging 或历史会话加载失败时，同时断言用户可见的受控
+   恢复文案与原始诊断/存储细节不出现在对话或 Overlay 中。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
    同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生
    Runtime event 后必须校验 Runtime Store 中出现不同 thread ID；切换回放先用 Enter checkpoint

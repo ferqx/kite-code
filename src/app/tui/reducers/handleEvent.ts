@@ -11,7 +11,13 @@ import {
 } from '../components/render-utils';
 import { MAX_TOOL_LINES } from '../components/ToolCardBlock';
 import { providerActionInput, providerAdmissionInput } from '../mcp/runtime-interrupts';
-import type { ConsolidatedToolEntry, FileChangeRecord, OutputBlock, TuiState } from '../types';
+import type {
+  ConsolidatedToolEntry,
+  FileChangeRecord,
+  InterruptState,
+  OutputBlock,
+  TuiState,
+} from '../types';
 import { cancelRunningBlocks } from './agentReducer';
 import {
   buildToolSummaryLine,
@@ -89,6 +95,46 @@ const TIMEOUT_RE = /(?:^|\r?\n)Command timed out after (\d+)ms\./;
 function parseTimeoutMs(summary: string): number | undefined {
   const match = summary.match(TIMEOUT_RE);
   return match ? Number(match[1]) : undefined;
+}
+
+function interactionMatches(
+  state: TuiState,
+  kind: InterruptState['kind'],
+  interactionId: string,
+): boolean {
+  const interrupt = state.interrupt;
+  if (!interrupt) return true;
+  if (interrupt.kind !== kind) return false;
+  return interrupt.interactionId == null || interrupt.interactionId === interactionId;
+}
+
+function clearInteractionInterrupt(
+  state: TuiState,
+  kind: 'input' | 'plan_review',
+  interactionId: string,
+): TuiState {
+  if (!interactionMatches(state, kind, interactionId)) return state;
+  return state.interrupt?.kind === kind ? { ...state, interrupt: null } : state;
+}
+
+function planReviewMatches(
+  state: TuiState,
+  event: Extract<
+    RuntimeEvent,
+    {
+      type: 'plan.approved' | 'plan.revision_requested' | 'plan.rejected' | 'plan.review_cancelled';
+    }
+  >,
+): boolean {
+  const interrupt = state.interrupt;
+  return (
+    interrupt?.kind === 'plan_review' &&
+    interrupt.interactionId === event.interactionId &&
+    interrupt.toolCallId === event.toolCallId &&
+    interrupt.planId === event.planId &&
+    interrupt.version === event.version &&
+    interrupt.structuralDigest === event.structuralDigest
+  );
 }
 
 function isTableSepLine(line: string): boolean {
@@ -1147,9 +1193,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
                   status:
                     event.data.status === 'exhausted'
                       ? ('exhausted' as const)
-                      : event.data.ok
-                        ? ('done' as const)
-                        : ('error' as const),
+                      : event.data.status === 'cancelled'
+                        ? ('cancelled' as const)
+                        : event.data.ok
+                          ? ('done' as const)
+                          : ('error' as const),
                   reviewFailure: event.data.reviewFailure ?? t.reviewFailure,
                 }
               : t,
@@ -1263,7 +1311,8 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         }
       }
 
-      const cancelled = !event.data.ok && summaryText === 'Cancelled';
+      const cancelled =
+        event.data.status === 'cancelled' || (!event.data.ok && summaryText === 'Cancelled');
       const exhaustedStatus = event.data.status === 'exhausted';
       const timedOut =
         !event.data.ok &&
@@ -2494,6 +2543,25 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         },
       });
     }
+    case 'auto_review.completed': {
+      // Auto-review is not a user-facing interaction. Only an explicit
+      // automatic rejection becomes a visible tool result; technical failure
+      // is followed by approval.requested and must not be rendered as a deny.
+      if (!event.result.ok || event.result.approved) return state;
+      const name = visibleToolName(state, event.toolCallId);
+      if (!name) return withoutPendingTool(state, event.toolCallId);
+      const materialized = materializePendingTool(state, event.toolCallId, 'queued', true);
+      return handleEventAction(materialized, {
+        type: 'tool_done',
+        data: {
+          call_id: event.toolCallId,
+          name,
+          ok: false,
+          summary: event.result.reason ?? '自动审查拒绝执行',
+          status: 'error',
+        },
+      });
+    }
     case 'tool.file_change':
       return handleEventAction(state, {
         type: 'file_change',
@@ -2506,25 +2574,126 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         },
       });
     case 'user_input.requested': {
+      // Runtime has one active interaction at a time. A delayed duplicate must
+      // not replace the current interaction or overwrite its durable identity.
+      if (
+        !interactionMatches(state, 'input', event.interactionId) ||
+        state.interrupt?.kind === 'input'
+      ) {
+        return state;
+      }
       const materialized = materializePendingTool(state, event.toolCallId, 'queued', false);
-      return handleEventAction(materialized, {
+      const next = handleEventAction(materialized, {
         type: 'need_input',
         data: event.request,
         toolCallId: event.toolCallId,
       });
+      return next.interrupt?.kind === 'input'
+        ? {
+            ...next,
+            interrupt: {
+              ...next.interrupt,
+              interactionId: event.interactionId,
+              toolCallId: event.toolCallId,
+            },
+          }
+        : next;
     }
-    case 'provider.action_required':
-      return handleEventAction(state, {
+    case 'user_input.answered': {
+      // Replay receives the durable answer event after the request event.
+      // Clear the restored ask overlay and mark its question block resolved so
+      // reopening a session does not resurrect an already answered prompt.
+      const active = state.interrupt;
+      if (active?.kind !== 'input') return state;
+      if (active.interactionId !== event.interactionId || active.toolCallId !== event.toolCallId) {
+        return state;
+      }
+
+      const block = findBlockById(state, active.blockId);
+      if (block?.kind !== 'question') return { ...state, interrupt: null };
+      const resolved = event.answers
+        ? { text: event.answer, answers: event.answers }
+        : event.answer;
+      return { ...replaceBlockById(state, block.id, { ...block, resolved }), interrupt: null };
+    }
+    case 'user_input.cancelled': {
+      const active = state.interrupt;
+      if (active?.kind !== 'input') return state;
+      if (active.interactionId !== event.interactionId || active.toolCallId !== event.toolCallId) {
+        return state;
+      }
+      const block = findBlockById(state, active.blockId);
+      if (block?.kind !== 'question') return { ...state, interrupt: null };
+      return {
+        ...replaceBlockById(state, block.id, {
+          ...block,
+          resolved: '用户取消执行',
+        }),
+        interrupt: null,
+      };
+    }
+    case 'provider.action_required': {
+      if (
+        !interactionMatches(state, 'input', event.interactionId) ||
+        state.interrupt?.kind === 'input'
+      ) {
+        return state;
+      }
+      const next = handleEventAction(state, {
         type: 'need_input',
         data: providerActionInput(event.providerId, event.action),
         toolCallId: event.originatingToolCallId,
       });
-    case 'provider.admission_required':
-      return handleEventAction(state, {
+      return next.interrupt?.kind === 'input'
+        ? {
+            ...next,
+            interrupt: {
+              ...next.interrupt,
+              interactionId: event.interactionId,
+              toolCallId: event.originatingToolCallId,
+            },
+          }
+        : next;
+    }
+    case 'provider.action_completed':
+    case 'provider.action_deferred':
+    case 'provider.action_failed':
+      return state.interrupt?.kind === 'input' &&
+        state.interrupt.interactionId === event.interactionId &&
+        state.interrupt.toolCallId === event.originatingToolCallId
+        ? { ...state, interrupt: null }
+        : state;
+    // `provider.action_started` is durable lifecycle metadata, not a user
+    // terminal decision. The UI still needs the provider-action input while
+    // the App waits for the user to choose whether to recover or defer.
+    case 'provider.action_started':
+      return state;
+    case 'provider.admission_required': {
+      if (
+        !interactionMatches(state, 'input', event.interactionId) ||
+        state.interrupt?.kind === 'input'
+      ) {
+        return state;
+      }
+      const next = handleEventAction(state, {
         type: 'need_input',
         data: providerAdmissionInput(event.providerId, event.providerStatus, event.retryable),
       });
+      return next.interrupt?.kind === 'input'
+        ? { ...next, interrupt: { ...next.interrupt, interactionId: event.interactionId } }
+        : next;
+    }
+    case 'provider.admission_satisfied':
+    case 'provider.admission_waived':
+    case 'provider.admission_cancelled':
+      return clearInteractionInterrupt(state, 'input', event.interactionId);
     case 'approval.requested': {
+      if (
+        !interactionMatches(state, 'approval', event.interactionId) ||
+        state.interrupt?.kind === 'approval'
+      ) {
+        return state;
+      }
       const next = handleEventAction(state, {
         type: 'need_approval',
         data: {
@@ -2541,22 +2710,33 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       // event arrives. Replay has no local action, so it must clear the same
       // Footer interrupt explicitly instead of reviving an approved request.
       return state.interrupt?.kind === 'approval' &&
-        (state.interrupt.interactionId == null ||
-          state.interrupt.interactionId === event.interactionId)
+        state.interrupt.interactionId === event.interactionId &&
+        state.interrupt.approval?.callId === event.toolCallId
         ? { ...state, interrupt: null }
         : state;
     case 'approval.rejected': {
+      if (
+        state.interrupt?.kind !== 'approval' ||
+        state.interrupt.interactionId !== event.interactionId ||
+        state.interrupt.approval?.callId !== event.toolCallId
+      ) {
+        return state;
+      }
       const approvalBlock =
         state.interrupt?.kind === 'approval' && state.interrupt.blockId
           ? findBlockById(state, state.interrupt.blockId)
           : undefined;
       const activeApproval = approvalBlock?.kind === 'approval' ? approvalBlock : undefined;
-      const interruptApproval =
-        state.interrupt?.kind === 'approval' ? state.interrupt.approval : undefined;
-      const toolCallId =
-        event.toolCallId ?? interruptApproval?.callId ?? activeApproval?.approval.callId;
-      const visibleName = toolCallId ? visibleToolName(state, toolCallId) : undefined;
-      let next = toolCallId ? withoutPendingTool(state, toolCallId) : state;
+      const toolCallId = event.toolCallId;
+      // Approval requests stay off-screen while pending, but a rejected or
+      // cancelled request is an execution fact that must remain in the message
+      // list. Materialize the queued call before closing it so live rendering
+      // matches replay and the user can see why the turn stopped.
+      const materialized = toolCallId
+        ? materializePendingTool(state, toolCallId, 'queued', true)
+        : state;
+      const visibleName = toolCallId ? visibleToolName(materialized, toolCallId) : undefined;
+      let next = toolCallId ? withoutPendingTool(materialized, toolCallId) : materialized;
       if (toolCallId && visibleName) {
         next = handleEventAction(next, {
           type: 'tool_done',
@@ -2582,15 +2762,36 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
     case 'planning.exited':
       return { ...state, status: { ...state.status, phase: 'building' } };
     case 'plan.review_requested': {
+      if (
+        !interactionMatches(state, 'plan_review', event.interactionId) ||
+        state.interrupt?.kind === 'plan_review'
+      ) {
+        return state;
+      }
       const materialized = materializePendingTool(state, event.toolCallId, 'queued', false);
-      return handleEventAction(materialized, {
+      const next = handleEventAction(materialized, {
         type: 'need_plan_review',
         data: { plan: event.plan, ...(event.artifact ? { artifact: event.artifact } : {}) },
       });
+      return next.interrupt?.kind === 'plan_review'
+        ? {
+            ...next,
+            interrupt: {
+              ...next.interrupt,
+              interactionId: event.interactionId,
+              toolCallId: event.toolCallId,
+              planId: event.planId,
+              version: event.version,
+              structuralDigest: event.structuralDigest,
+            },
+          }
+        : next;
     }
     case 'plan.approved':
+      if (!planReviewMatches(state, event)) return state;
       return {
         ...state,
+        interrupt: null,
         status: {
           ...state.status,
           phase: 'building',
@@ -2608,6 +2809,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         status: { ...state.status, plan: event.plan },
       };
     case 'plan.revision_requested':
+      if (!planReviewMatches(state, event)) return state;
       return {
         ...state,
         interrupt: null,
@@ -2617,14 +2819,17 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         },
       };
     case 'plan.review_cancelled':
+      if (!planReviewMatches(state, event)) return state;
       return {
         ...state,
         interrupt: null,
         status: { ...state.status, pendingPlan: null },
       };
     case 'plan.rejected':
+      if (!planReviewMatches(state, event)) return state;
       return {
         ...state,
+        interrupt: null,
         status: { ...state.status, pendingPlan: null },
       };
     case 'task.completed':

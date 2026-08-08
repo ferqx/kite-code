@@ -189,6 +189,8 @@ Linux bubblewrap 早已绑定完整 Workspace（含 `.git`），本变更使 mac
 `createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
 production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，
 但它们不通过 production composition root，不能形成 production qualification。
+裸 shell fallback 的说明只通过可选的 non-UI diagnostic sink 输出；TUI 不提供该 sink，避免
+`[sandbox]` 等内部诊断污染正常终端渲染。需要命令行诊断时由 CLI 显式接收并写入 stderr。
 
 Linux bubblewrap 使用同一 `filesystemScope` 投影 canonical Workspace 的 rw/ro bind，并显式
 绑定 invocation runtime。Linux runtime 清理另起只包含该 runtime 与只读系统工具的 mount

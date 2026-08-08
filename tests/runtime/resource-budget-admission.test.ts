@@ -3,6 +3,7 @@ import type { AgentConfig } from '@/core/config';
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import { invokeRuntimeModel } from '@/core/controllers/model-controller';
 import { aiMessage } from '@/core/messages';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import {
   createRuntimeEffectExecutor,
   prepareRuntimeEffectForBudgetV1,
@@ -967,7 +968,7 @@ describe('runtime resource budget admission', () => {
     );
   });
 
-  test('releases an auto-review reservation when the final local Provider gate denies dispatch', async () => {
+  test('falls back to user approval when the final auto-review Provider gate denies dispatch', async () => {
     let state = configuredState();
     if (state.resourceBudget.status === 'active') {
       const now = Date.now();
@@ -1029,19 +1030,25 @@ describe('runtime resource budget admission', () => {
         routeAlias: 'fixture:denied',
       }),
     });
-    let thrown: unknown;
-    try {
-      for await (const _event of runRuntimeLoop(kernel, executor, {
-        requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
-      })) {
-        // Drain until the governed local denial terminates execution.
-      }
-    } catch (error) {
-      thrown = error;
+    const emitted: RuntimeEvent[] = [];
+    for await (const event of runRuntimeLoop(kernel, executor, {
+      requestAction: async (effect) => {
+        expect(effect.type).toBe('request_tool_approval');
+        return { type: 'reject', interactionId: effect.interactionId };
+      },
+    })) {
+      emitted.push(event);
     }
 
-    expect(thrown).toBeInstanceOf(ProviderDataAdmissionError);
     expect(model.callCount.count).toBe(0);
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: 'auto_review.completed',
+        result: expect.objectContaining({ ok: false, failureType: 'technical' }),
+      }),
+    );
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'approval.requested' }));
+    expect(emitted).toContainEqual(expect.objectContaining({ type: 'approval.rejected' }));
     expect(
       Object.values(
         kernel.getState().resourceBudget.status === 'active'
@@ -1051,7 +1058,7 @@ describe('runtime resource budget admission', () => {
     ).toEqual([
       expect.objectContaining({
         resourceKind: 'verification',
-        state: 'released',
+        state: 'reconciled',
       }),
     ]);
     kernel.close();

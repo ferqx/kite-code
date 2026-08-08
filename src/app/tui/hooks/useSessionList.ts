@@ -64,9 +64,9 @@ export function useSessionList(): UseSessionListResult {
           setLoading(false);
           setError(null);
         }
-      } catch (e) {
+      } catch {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load sessions');
+          setError('无法加载历史会话，请稍后重试。');
           setLoading(false);
         }
       }

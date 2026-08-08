@@ -504,6 +504,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     }
 
     case 'CTRL_C': {
+      // The UI submits the cancel action before dispatching this key event.
+      // Keep the pending interaction visible until its durable Runtime
+      // terminal event is streamed back; clearing it locally would re-open the
+      // prompt if the process exits between those two steps.
+      if (state.interrupt) return { ...state, ctrlCPressed: true };
       if (state.running) return cancelInterrupt(state, true);
       if (state.ctrlCPressed) return { ...state, exitRequested: true };
       return { ...state, ctrlCPressed: true };
@@ -511,49 +516,11 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
     case 'RESET_CTRL_C':
       return state.ctrlCPressed ? { ...state, ctrlCPressed: false } : state;
     case 'ESCAPE': {
-      // Locally clear the interaction first. The provider then submits a
-      // durable cancel action. Tool approval and plan review cancellation come
-      // back as turn.aborted; ask_user keeps its per-interaction semantics.
+      // Escape submits the Runtime cancel action from the App shell before
+      // this reducer runs. Keep the interrupt until the durable terminal event
+      // arrives so replay cannot observe a UI-only resolution.
       if (state.interrupt) {
-        if (state.interrupt.kind === 'plan_review') {
-          return { ...finalizeLastTurnStreaming(state), interrupt: null };
-        }
-        if (!state.interrupt.blockId) {
-          const turns = state.turns.map((turn) => ({
-            blocks: turn.blocks.map((block) =>
-              block.kind === 'subagent' && block.status === 'running'
-                ? { ...block, awaitingApproval: false }
-                : block,
-            ),
-          }));
-          return { ...state, turns, interrupt: null };
-        }
-        const b = findBlockById(state, state.interrupt.blockId);
-        if (b) {
-          if (b.kind === 'approval') {
-            const withResolved = replaceBlockById(state, b.id, {
-              ...b,
-              resolved: { action: 'cancelled' },
-            });
-            // 清除子 agent 的 waiting 状态 / Clear sub-agent awaiting state on Escape
-            const updatedTurns = withResolved.turns.map((turn) => {
-              let changed = false;
-              const blocks = turn.blocks.map((blk) => {
-                if (blk.kind === 'subagent' && blk.status === 'running') {
-                  changed = true;
-                  return { ...blk, awaitingApproval: false };
-                }
-                return blk;
-              });
-              return changed ? { blocks } : turn;
-            });
-            return { ...withResolved, turns: updatedTurns, interrupt: null };
-          } else if (b.kind === 'question') {
-            const finalized = finalizeLastTurnStreaming(state);
-            return { ...cancelAskUserToolCard(finalized, b.id), interrupt: null };
-          }
-        }
-        return { ...state, interrupt: null };
+        return state;
       }
       // 非审批（思考/回复中）→ 停止本轮会话 / Agent running → stop this session
       if (state.running) {

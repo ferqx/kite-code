@@ -1107,10 +1107,46 @@ describe('InputBlock', () => {
     expect(frame).toContain('Proceed');
     expect(frame).toContain('Abort');
     const lines = (frame ?? '').split('\n');
-    const questionRow = lines.findIndex((line) => line.includes('? Which approach do you prefer?'));
+    const titleRow = lines.findIndex((line) =>
+      line.includes('── 需要你的回答 · Which approach do you prefer?'),
+    );
     const firstOption = lines.findIndex((line) => line.includes('❯ 1. Proceed'));
-    expect(firstOption).toBe(questionRow + 2);
-    expect(lines[questionRow + 1]?.trim()).toBe('');
+    expect(firstOption).toBe(titleRow + 2);
+    expect(lines[titleRow + 1]?.trim()).toBe('');
+    expect(frame).not.toContain('? Which approach do you prefer?');
+  });
+
+  test('keeps the options list while rendering inline input for Other', async () => {
+    const question = fakeQuestion({ allow_free_text: true });
+    let resolved: string | undefined;
+    const { lastFrame, stdin } = render(
+      <InputBlock
+        question={question}
+        provider={fakeProvider()}
+        onResolved={(answer) => {
+          resolved = answer;
+        }}
+      />,
+    );
+
+    stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(lastFrame()).toContain('Option A');
+    expect(lastFrame()).toContain('Option B');
+    expect(lastFrame()).toContain('其他（自定义输入）');
+
+    stdin.write('my custom answer');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lastFrame()).toContain('my custom answer');
+    expect(lastFrame()).toContain('Option A');
+    expect(lastFrame()).toContain('Option B');
+
+    stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(resolved).toBe('my custom answer');
   });
 
   test('shows free text input when no options', () => {
@@ -1150,7 +1186,7 @@ describe('InputBlock', () => {
     expect(frame).not.toContain('╰');
   });
 
-  test('returns from free-text mode to options with Tab', async () => {
+  test('moves the inline custom input selection with Tab', async () => {
     const question = fakeQuestion({ allow_free_text: true });
     const { lastFrame, stdin } = render(
       <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
@@ -1159,13 +1195,135 @@ describe('InputBlock', () => {
     stdin.write('\t');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(lastFrame()).toContain('Tab 返回选项');
+    expect(lastFrame()).toContain('其他（自定义输入）');
+    expect(lastFrame()).toContain('Option A');
 
     stdin.write('\t');
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(lastFrame()).toContain('Tab 自定义输入');
+    expect(lastFrame()).toContain('❯ 1. Option A');
   });
 
-  test('returns from multi-question free-text mode to options with Tab', async () => {
+  test('renders a single structured question without a step bar', () => {
+    const question = fakeQuestion({
+      questions: [
+        {
+          id: 'scope',
+          question: 'Choose a scope',
+          options: [{ id: 'small', label: 'Small' }],
+          allow_free_text: true,
+        },
+      ],
+    });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('── 需要你的回答 · Choose a scope');
+    expect(frame).toContain('❯ 1. Small');
+    expect(frame).not.toContain('1/1');
+    expect(frame).not.toContain('✔ Submit');
+    expect(frame.match(/Choose a scope/g)).toHaveLength(1);
+  });
+
+  test('hides the multi-question test prefix from the current title', () => {
+    const question = fakeQuestion({
+      questions: [
+        {
+          id: 'purpose',
+          question: '多问题测试 2：当前项目 kite-code 的主要用途是什么？',
+          options: [
+            { id: 'dev', label: '软件开发', description: '用于开发软件。' },
+            { id: 'docs', label: '文档管理', description: '用于管理文档。' },
+          ],
+          allow_free_text: true,
+        },
+      ],
+    });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('── 需要你的回答 · 当前项目 kite-code 的主要用途是什么？');
+    expect(frame).not.toContain('多问题测试 2：');
+  });
+
+  test('puts the current multi-question title in the frame and omits the step bar', () => {
+    const question = fakeQuestion({
+      question: 'Batch questions',
+      questions: [
+        {
+          id: 'language',
+          question: 'Choose language',
+          options: [
+            { id: 'ts', label: 'TypeScript', description: 'Use TypeScript.' },
+            { id: 'py', label: 'Python', description: 'Use Python.' },
+          ],
+          allow_free_text: true,
+        },
+        {
+          id: 'framework',
+          question: 'Choose framework',
+          options: [
+            { id: 'react', label: 'React', description: 'Use React.' },
+            { id: 'vue', label: 'Vue', description: 'Use Vue.' },
+          ],
+          allow_free_text: true,
+        },
+      ],
+    });
+    const { lastFrame } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('── 需要你的回答 · Choose language');
+    expect(frame).toContain('1 / 2');
+    expect(frame).not.toContain('? Batch questions');
+    expect(frame).not.toContain('← ☐');
+    expect(frame.match(/Choose language/g)).toHaveLength(1);
+  });
+
+  test('keeps the multi-question options list while entering inline custom input', async () => {
+    const question = fakeQuestion({
+      questions: [
+        {
+          id: 'first',
+          question: 'First question',
+          options: [{ id: 'one', label: 'First option' }],
+          allow_free_text: true,
+        },
+        {
+          id: 'second',
+          question: 'Second question',
+          options: [{ id: 'two', label: 'Second option' }],
+          allow_free_text: true,
+        },
+      ],
+    });
+    const { lastFrame, stdin } = render(
+      <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
+    );
+
+    stdin.write('\u001b[B');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lastFrame()).toContain('First option');
+    expect(lastFrame()).toContain('其他（自定义输入）');
+
+    stdin.write('custom first answer');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lastFrame()).toContain('First option');
+    expect(lastFrame()).toContain('custom first answer');
+
+    stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(lastFrame()).toContain('需要你的回答 · Second question');
+    expect(lastFrame()).toContain('Second option');
+  });
+
+  test('returns from single-question free-text mode to options with Tab', async () => {
     const question = fakeQuestion({
       questions: [
         {
@@ -1180,11 +1338,9 @@ describe('InputBlock', () => {
       <InputBlock question={question} provider={fakeProvider()} onResolved={onResolved} />,
     );
 
-    const initialLines = (lastFrame() ?? '').split('\n');
-    const divider = initialLines.findIndex((line) => line.trim() === '─'.repeat(40));
-    const firstOption = initialLines.findIndex((line) => line.includes('❯ 1. Small'));
-    expect(firstOption).toBe(divider + 2);
-    expect(initialLines[divider + 1]?.trim()).toBe('');
+    expect(lastFrame()).toContain('── 需要你的回答 · Choose a scope');
+    expect(lastFrame()).not.toContain('1/1');
+    expect(lastFrame()).not.toContain('✔ Submit');
 
     stdin.write('\t');
     await new Promise((resolve) => setTimeout(resolve, 10));
@@ -1638,6 +1794,8 @@ describe('BlockRenderer', () => {
       expect(frame).toContain(label);
     }
     expect(frame).not.toContain('(no answer)');
+    expect(frame).not.toContain('Step1');
+    expect(frame).not.toContain('Step2');
   });
 
   test('uses question indexes for structured ask_user answers without explicit IDs', () => {
@@ -1666,6 +1824,31 @@ describe('BlockRenderer', () => {
     expect(frame).toContain('First answer');
     expect(frame).toContain('Second answer');
     expect(frame).not.toContain('(no answer)');
+    expect(frame).not.toContain('Step1');
+    expect(frame).not.toContain('Step2');
+  });
+
+  test('renders a single structured ask_user answer without a step prefix', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'ask-single',
+      name: 'ask_user',
+      args: { questions: [{ id: 'scope', question: 'Scope?' }] },
+      status: 'done',
+      summary: '',
+      expanded: true,
+      userInput: { answer: 'Small scope', answers: { scope: 'Small scope' } },
+    };
+
+    const { lastFrame } = render(
+      <BlockRenderer columns={120} block={block} isFocused={false} index={0} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Scope?');
+    expect(frame).toContain('Small scope');
+    expect(frame).not.toContain('Step1');
   });
 
   test('retains plain-text summary fallback for ask_user answers', () => {
@@ -3578,6 +3761,7 @@ describe('App', () => {
       exitRequested: false,
       sessionError: false,
       loadingSessionId: null,
+      sessionServiceUnavailable: false,
       explorationSummaryIds: {},
       pendingToolCalls: {},
       interactionMode: 'accept_edits',

@@ -74,10 +74,10 @@ with one item. Do not use top-level `question`, `options`, `recommended`, or
 
 **Providing options is NOT optional** — most users are NOT professional developers.
 Every question MUST include 2-3 concrete options so the user can choose rather than
-having to invent an answer from scratch. Each option needs a clear `label` and
-`description`. Put the recommended option first; the Runtime generates stable IDs and
-the TUI marks the first option with a ⭐. Do not add an "Other" option — the TUI always
-provides free-text input automatically.
+having to invent an answer from scratch. Every option MUST include a clear `label`,
+`description`, and `recommended` boolean: set `recommended: true` on exactly one option
+and `recommended: false` on all other options so the TUI highlights one choice with a ⭐.
+Do not add an "Other" option — the TUI provides free-text input automatically.
 
 When explaining why you recommend an option, keep trade-offs actionable and practical
 (e.g. "faster build, less flexible" or "full feature set, longer setup"). Use the

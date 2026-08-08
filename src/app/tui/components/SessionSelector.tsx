@@ -36,6 +36,7 @@ interface SessionSelectorProps {
   loadingSessionId?: string | null;
   activeSessionId?: string | null;
   layeredEscRef?: MutableRefObject<boolean>;
+  onAvailabilityChange?: (available: boolean) => void;
 }
 
 export default function SessionSelector({
@@ -46,10 +47,15 @@ export default function SessionSelector({
   loadingSessionId,
   activeSessionId,
   layeredEscRef,
+  onAvailabilityChange,
 }: SessionSelectorProps) {
   const t = useTheme();
   const { stdout } = useStdout();
   const { sessions, loading, error, search } = useSessionList();
+
+  useEffect(() => {
+    if (!loading) onAvailabilityChange?.(!error);
+  }, [error, loading, onAvailabilityChange]);
   const [selected, setSelected] = useState(0);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [deleteChoice, setDeleteChoice] = useState<DeleteChoice>('keep');

@@ -158,8 +158,8 @@ describe('Runtime run deadline', () => {
                     {
                       question: 'Continue waiting?',
                       options: [
-                        { label: 'Continue', description: 'Continue the run.' },
-                        { label: 'Stop', description: 'Stop the run.' },
+                        { label: 'Continue', description: 'Continue the run.', recommended: true },
+                        { label: 'Stop', description: 'Stop the run.', recommended: false },
                       ],
                     },
                   ],

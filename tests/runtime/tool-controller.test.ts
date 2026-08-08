@@ -387,8 +387,16 @@ describe('executeRuntimeTools', () => {
           {
             question: 'Continue with the migration?',
             options: [
-              { label: 'Continue', description: 'Proceed with the migration now.' },
-              { label: 'Pause', description: 'Keep the current state and stop here.' },
+              {
+                label: 'Continue',
+                description: 'Proceed with the migration now.',
+                recommended: true,
+              },
+              {
+                label: 'Pause',
+                description: 'Keep the current state and stop here.',
+                recommended: false,
+              },
             ],
           },
         ],
@@ -936,8 +944,16 @@ describe('executeRuntimeTools', () => {
           {
             question: 'What scope should be covered?',
             options: [
-              { label: 'Focused', description: 'Cover only the critical path.' },
-              { label: 'Complete', description: 'Cover the full production rollout.' },
+              {
+                label: 'Focused',
+                description: 'Cover only the critical path.',
+                recommended: true,
+              },
+              {
+                label: 'Complete',
+                description: 'Cover the full production rollout.',
+                recommended: false,
+              },
             ],
           },
         ],

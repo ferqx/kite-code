@@ -18,6 +18,7 @@ export function useGlobalKeys(
   wizardEscBackRef?: MutableRefObject<boolean>,
   layeredOverlayEscRef?: MutableRefObject<boolean>,
   onTogglePlanMode?: () => void,
+  onCancelInterrupt?: () => void,
 ) {
   const overlayActiveRef = useRef(overlayActive);
   overlayActiveRef.current = overlayActive;
@@ -44,6 +45,7 @@ export function useGlobalKeys(
       }
       // Ctrl+C 始终生效
       if (key.ctrl && input === 'c') {
+        if (overlayActiveRef.current) onCancelInterrupt?.();
         dispatch({ type: 'CTRL_C' });
         if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
         ctrlCTimerRef.current = setTimeout(() => {
@@ -59,6 +61,7 @@ export function useGlobalKeys(
         if (supplementEscRef?.current) return;
         if (wizardEscBackRef?.current) return;
         if (layeredOverlayEscRef?.current) return;
+        if (overlayActiveRef.current) onCancelInterrupt?.();
         dispatch({ type: 'ESCAPE' });
         return;
       }

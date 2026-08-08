@@ -591,6 +591,7 @@ describe('edge cases', () => {
       {
         type: 'user_input.answered',
         interactionId: 'i1',
+        toolCallId: 'c4',
         answer: 'continue',
       },
       {
@@ -1072,6 +1073,46 @@ describe('persistence edge cases', () => {
     expect(store.loadEvents('fork')).toHaveLength(1);
     expect(store.listNamedSnapshots('fork')[0]!.eventPosition).toBe(
       store.getLastEventPosition('fork'),
+    );
+    store.close();
+  });
+
+  test('forkCurrentSession omits only its active pending interaction request', () => {
+    const store = createRuntimeStore(dbPath);
+    const approval = { toolName: 'shell_execute' } as unknown as ToolApprovalPayload;
+    store.appendEvents('source', [
+      { type: 'tool.queued', toolCallId: 'shell-1', name: 'shell_execute', args: {} },
+      {
+        type: 'approval.requested',
+        interactionId: 'approval-1',
+        toolCallId: 'shell-1',
+        approval,
+      },
+    ]);
+    store.saveSnapshot('source', {
+      session: { threadId: 'source' },
+      interactions: {
+        kind: 'awaiting_tool_approval',
+        interactionId: 'approval-1',
+        toolCallId: 'shell-1',
+        approval,
+      },
+      tools: { calls: {}, queue: ['shell-1'], active: [] },
+    });
+
+    expect(store.forkCurrentSession('source', 'recovery')).toBe(true);
+    expect(store.loadEvents('source').map((entry) => entry.event.type)).toEqual([
+      'tool.queued',
+      'approval.requested',
+    ]);
+    expect(store.loadEvents('recovery').map((entry) => entry.event.type)).toEqual(['tool.queued']);
+    expect(
+      store.loadSnapshot<{ session: { threadId: string }; interactions: unknown }>('recovery'),
+    ).toEqual(
+      expect.objectContaining({
+        session: { threadId: 'recovery' },
+        interactions: { kind: 'idle' },
+      }),
     );
     store.close();
   });

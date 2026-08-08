@@ -4,7 +4,7 @@
 
 读取时机：修改 abort/cancel、Runtime 恢复、Effect lease、消息工具对清理、工具参数异常、Subagent continuation 或 TUI 取消行为时。
 
-验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run typecheck`。
 
 ## Runtime 取消语义
 
@@ -14,7 +14,7 @@
 
 方案执行确认（`request_plan_review`）也是执行授权屏障。用户选择取消或按 Esc 时，Kernel 在同一 action batch 中写入 `plan.review_cancelled`，将触发确认的方案工具及其余未终结 sibling 全部写为 `tool.cancelled`，最后写入 `turn.aborted(cause=user)`；方案文档保留为可继续修改的 draft，但当前 turn 立即结束，Runner 不得再次调用模型或进入执行阶段。
 
-`ask_user` 是用户输入交互，不是执行授权审批。用户拒答或按 Esc 时，Kernel 只为该 `ask_user` 写入 `tool.finished(ok=false, stdout=Cancelled)`，清除 `awaiting_user_input`，不得写入 `approval.rejected`、`tool.cancelled` 或 `turn.aborted`，也不得 abort 本轮执行信号。Runner 随后继续调度；模型在同一 turn 中看到拒答 Tool Result 后继续回答或调整方案。
+`ask_user` 是用户输入交互，不是执行授权审批。用户拒答或按 Esc 时，Kernel 先写入携带 `interactionId` 与 `toolCallId` 的 `user_input.cancelled`，再为该 `ask_user` 写入 `tool.finished(ok=false, stdout=Cancelled)`，清除 `awaiting_user_input`；不得写入 `approval.rejected`、`tool.cancelled` 或 `turn.aborted`，也不得 abort 本轮执行信号。Runner 随后继续调度；模型在同一 turn 中看到拒答 Tool Result 后继续回答或调整方案。
 
 TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名称、关键参数和已有输出并显示 `cancelled`；从未开始的 queued 探索工具不计入 `read N files` 等统计；不追加独立的整轮取消提示。实时取消和 event-log replay 必须得到相同投影。
 
@@ -124,3 +124,13 @@ dispatch 后抛错时 child reservation 转为 unknown，不得只结算 parent 
 网络 dispatch 时，只能携带 `local_provider_admission_denied` 证明释放 reservation。取消后迟到的
 child actual usage 只能经 Kernel 的 resource-only late reconciliation 入口提交；该入口不接受
 child tool/model terminal event，不能复活 turn、permit 或后继调用。
+
+## 交互终态与 TUI 回放
+
+所有人工交互（`ask_user`、工具审批、Plan review、Provider action、Provider admission、子 Agent 工具审批）都必须先持久化用户终态，再清除 TUI。用户回答 `ask_user` 写入 `user_input.answered`；用户取消写入同时携带 `interactionId` 与 `toolCallId` 的 `user_input.cancelled`，随后写入对应的 `tool.finished`。工具审批的批准/拒绝、Plan review 的批准/修订/取消以及 Provider 终态必须校验当前交互身份；Plan review 还校验 `planId`、`version` 和 `structuralDigest`。迟到或重复的旧交互事件不得清除新的交互。
+
+Runtime canonical event store 只记录真实用户操作。TUI 从事件日志回放时，如果发现 `awaiting_user_input`、`awaiting_tool_approval`、`awaiting_review`、`awaiting_provider_action` 或 `awaiting_provider_admission` 仍未形成终态，只在 TUI 本地投影 `用户取消执行（会话恢复时交互未完成）`，清除 Footer interrupt、pending tool、Plan `pendingPlan` 和子 Agent `awaitingApproval`；不得伪造 `approval.rejected`、`plan.rejected` 或其他用户操作事件写回 Runtime。回放后的 TUI 不得显示 pending interaction。
+
+用户在这种本地恢复投影上首次继续新工作时，TUI 必须 fork 一个清理后的恢复会话：源会话及其 canonical pending 事实保持不变，fork 的 Runtime snapshot 清除待交互状态、活动队列和临时授权，并只从 fork 的回放事件历史中排除造成当前 pending 的那一条请求事件。这样新的 TUI 工作不会重新进入旧 interaction，也不会把本地投影伪装成源会话里的用户拒绝；当前 TUI 继续使用已投影的取消结果。
+
+回放本地取消仅适用于尚未开始执行的交互等待工具。已经产生 `tool.started`、外部副作用、未知 Capability invocation 或未知资源 reservation 的事实必须保留为 `unknown`，进入 reconciliation，禁止自动重试或重复执行。`auto_review` 不属于人工交互：明确通过继续执行，明确拒绝终止工具；技术异常（包括超时、Provider 不可用、网络/格式/Admission 错误）先记录带 `failureType` 的 `auto_review.completed` 失败，再生成新的 `approval.requested`。缺少 `failureType` 的历史 `ok=false` 记录按未完成技术异常保守处理，TUI 只做本地取消投影，既不自动执行也不伪造成明确拒绝。用户显式取消自动审查时，Runtime 将工具持久化为 `tool.cancelled(reason=user_cancelled)`；仅进程在审查完成前退出时才在 TUI 本地投影取消，不自动通过，也不转人工审批。

@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, submitCommand, typeText } from '../harness/input-helpers';
+import { clearInput, submitCommand, submitUserMessage, typeText } from '../harness/input-helpers';
+import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -9,6 +10,8 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30000;
 
 describe('TUI PTY System — Sandbox Mode', () => {
+  const journey = createTuiSystemJourney();
+  const step = journey.step;
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -29,7 +32,7 @@ describe('TUI PTY System — Sandbox Mode', () => {
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
-  test(
+  step(
     'keeps development execution, release, and telemetry boundaries inactive',
     async () => {
       await typeText(tui, '/permissions f');
@@ -85,4 +88,25 @@ describe('TUI PTY System — Sandbox Mode', () => {
     },
     TIMEOUT,
   );
+
+  step(
+    'does not write the bare-shell fallback diagnostic into the TUI terminal',
+    async () => {
+      server.setResponses([{ message: { content: 'Sandbox fallback stayed internal.' } }]);
+      const conversationFrames = tui.markScreen();
+      await submitUserMessage(tui, server, 'Run without a sandbox', { timeout: 15_000 });
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Sandbox fallback stayed internal.',
+        15_000,
+      );
+
+      const rendered = tui.screenFramesSince(conversationFrames).join('\n');
+      expect(rendered).not.toContain('[sandbox]');
+      expect(rendered).not.toContain('Shell commands will run without isolation');
+    },
+    TIMEOUT,
+  );
+
+  test('runs the complete stateful journey', () => journey.run());
 });

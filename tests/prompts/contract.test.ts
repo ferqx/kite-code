@@ -21,6 +21,7 @@ test('the runtime injects the plan lifecycle contract into every model prompt', 
 test('the runtime injects the ask-user option contract into every model prompt', () => {
   const prompt = buildStaticSystemPrompt('agent');
   expect(prompt).toContain('Every question MUST include 2-3 concrete options');
-  expect(prompt).toContain('Put the recommended option first');
+  expect(prompt).toContain('Every option MUST include a clear `label`,');
+  expect(prompt).toContain('and `recommended: false` on all other options');
   expect(prompt).toContain('Do not use top-level `question`');
 });

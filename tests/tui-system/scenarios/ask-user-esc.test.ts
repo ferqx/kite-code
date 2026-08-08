@@ -39,8 +39,16 @@ describe('TUI PTY System — ask_user Escape', () => {
                   {
                     question: 'What is your preferred programming language?',
                     options: [
-                      { label: 'TypeScript', description: 'Use static types and Bun tooling.' },
-                      { label: 'Python', description: 'Use the Python runtime and ecosystem.' },
+                      {
+                        label: 'TypeScript',
+                        description: 'Use static types and Bun tooling.',
+                        recommended: true,
+                      },
+                      {
+                        label: 'Python',
+                        description: 'Use the Python runtime and ecosystem.',
+                        recommended: false,
+                      },
                     ],
                   },
                 ],

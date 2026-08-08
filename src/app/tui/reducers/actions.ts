@@ -75,6 +75,7 @@ export type Action =
   | { type: 'SET_SKILL_MANIFESTS'; manifests: import('@/core/skills/types').SkillManifest[] }
   | { type: 'SWITCH_SESSION'; threadId: string }
   | { type: 'SET_SESSIONS'; sessions: TuiState['sessions'] }
+  | { type: 'SET_SESSION_SERVICE_UNAVAILABLE'; unavailable: boolean }
   | { type: 'SESSION_INTERRUPT_PENDING'; threadId: string }
   | { type: 'DELETE_SESSION'; threadId: string }
   | { type: 'SET_INTERACTION_MODE'; mode: 'accept_edits' | 'auto' | 'full' | 'toggle' }

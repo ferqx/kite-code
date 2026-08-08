@@ -1,4 +1,5 @@
 import { Box, Text } from 'ink';
+import type { ReactNode } from 'react';
 import { useTheme } from '@/app/tui/theme';
 import { OverlayList, OverlayListRow, OverlaySection } from './OverlayPrimitives';
 
@@ -13,6 +14,8 @@ export interface OverlayChoiceOption<T extends string = string> {
   trailing?: string;
   trailingTone?: 'success' | 'warning' | 'error' | 'muted';
   action?: boolean;
+  /** Render custom content in place of the selected option label. */
+  selectedContent?: ReactNode;
 }
 
 export default function OverlayChoiceList<T extends string>({
@@ -56,7 +59,8 @@ export default function OverlayChoiceList<T extends string>({
               destructive={option.destructive}
               selectionBackground={selectionBackground}
               primary={`${numbered ? `${index + 1}. ` : ''}${option.label}${option.disabled ? ' (unavailable)' : ''}`}
-              secondary={option.description}
+              content={selected ? option.selectedContent : undefined}
+              secondary={option.selectedContent ? undefined : option.description}
               primaryColor={option.action ? t.primary : undefined}
               trailing={
                 option.trailing ? (

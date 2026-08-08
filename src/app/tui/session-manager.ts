@@ -157,6 +157,8 @@ export class SessionRuntime {
   eventBuffer: RuntimeEvent[] = [];
   /** true if loaded from DB and state not yet hydrated / 从 DB 加载但尚未加载完整状态 */
   dormant = false;
+  /** TUI-only recovery projection hid an unfinished canonical interaction. */
+  localReplayRecovery = false;
   static readonly MAX_BUFFER = 1000;
 
   conversationHistory: string[] = [];
@@ -371,12 +373,6 @@ export class SessionRuntime {
               'Reasoning, tool/file content, secrets, and credentials remain excluded.',
           });
         }
-      },
-      onSessionLoggingDiagnostic: (message) => {
-        deps.dispatch({
-          type: 'LOCAL_TEXT',
-          text: `  ⎿  ${message}`,
-        });
       },
       onKernelControl: (control) => {
         this.runtimeControl = control;
@@ -935,10 +931,9 @@ export class SessionManager {
          values (?, ?, ?, ?, datetime('now'))`,
         [threadId, stats.cacheHitTokens, stats.cacheMissTokens, stats.totalTokens],
       );
-    } catch (e) {
-      console.warn(
-        `[SessionManager] Failed to persist token stats for ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
-      );
+    } catch {
+      // Token statistics are best-effort and internal persistence failures must
+      // never write raw diagnostics into the TUI terminal.
     }
   }
 
@@ -994,15 +989,39 @@ export class SessionManager {
         } finally {
           store.close();
         }
-      } catch (error) {
-        console.warn(
-          `[SessionManager] Failed to persist model route for ${threadId}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+      } catch {
+        // Model-route persistence is best-effort and stays out of the TUI stream.
       }
     }
     return true;
+  }
+
+  /**
+   * Continue a session whose TUI replay intentionally hid a crashed pending
+   * interaction. The source event store remains untouched: user work resumes
+   * from a sanitized, durable fork so it can never reopen the old prompt.
+   */
+  forkRecoveredSessionForContinuation(threadId: string): SessionRuntime | undefined {
+    const source = this.runtimes.get(threadId);
+    if (!source?.localReplayRecovery) return source;
+    const targetThreadId = `tui-${Date.now().toString(36)}-recovery-${SessionManager.sessionCounter++}`;
+    const store = createRuntimeStore(runtimeStorePathFor(this.deps.checkpointPath));
+    try {
+      if (!store.forkCurrentSession(threadId, targetThreadId)) return undefined;
+    } finally {
+      store.close();
+    }
+    const target = this.registerSession(targetThreadId, source.workspace);
+    target.config = source.config;
+    target.thinkingLevel = source.thinkingLevel;
+    target.interactionMode = source.interactionMode;
+    target.conversationHistory = [...source.conversationHistory];
+    target.name = source.name;
+    target.setForeground(true);
+    source.setForeground(false);
+    source.localReplayRecovery = false;
+    this.activeId = targetThreadId;
+    return target;
   }
 
   /** Execute or queue a manual compaction command through the durable Kernel boundary. */
@@ -1303,12 +1322,8 @@ export class SessionManager {
             }
           : {}),
       };
-    } catch (error) {
-      console.warn(
-        `[SessionManager] Failed to rebuild context status for ${threadId}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+    } catch {
+      // Context status is advisory; internal rebuild failures stay out of TUI output.
       return undefined;
     } finally {
       kernel?.close();
@@ -1544,10 +1559,8 @@ export class SessionManager {
           totalTokens: r.total_tokens,
         });
       }
-    } catch (e) {
-      console.warn(
-        `[SessionManager] Failed to load token stats from DB: ${e instanceof Error ? e.message : String(e)}`,
-      );
+    } catch {
+      // Token statistics are advisory; internal load failures stay out of TUI output.
     }
   }
 

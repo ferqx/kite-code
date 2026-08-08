@@ -851,6 +851,7 @@ describe('eventReducer (blocks model)', () => {
         event: {
           type: 'plan.approved',
           interactionId: 'review-1',
+          toolCallId: 'reviewed-plan',
           executionMode: 'auto',
         },
       });
@@ -1596,6 +1597,38 @@ describe('eventReducer (blocks model)', () => {
       expect(cards.map((card) => card.status)).toEqual(['running', 'running']);
       expect(cards.map((card) => card.userInput)).toEqual([undefined, undefined]);
     });
+    test('replay clears an answered ask_user interrupt', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('ask-replay', 'ask_user', { question: 'What color?' }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user_input.requested',
+          interactionId: 'input-replay',
+          toolCallId: 'ask-replay',
+          request: question({ question: 'What color?' }),
+        },
+      });
+      expect(s.interrupt?.kind).toBe('input');
+
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user_input.answered',
+          interactionId: 'input-replay',
+          toolCallId: 'ask-replay',
+          answer: 'Blue',
+        },
+      });
+
+      expect(s.interrupt).toBeNull();
+      const questionBlock = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'question' }> =>
+          block.kind === 'question' && block.toolCallId === 'ask-replay',
+      );
+      expect(questionBlock?.resolved).toBe('Blue');
+    });
+
     test('tool_done after RESOLVE_INTERRUPT preserves ask_user answer in userInput', () => {
       // Verify that when tool.finished arrives AFTER the optimistic RESOLVE_INTERRUPT,
       // the answer (userInput) is preserved and the tool_card renders correctly.
@@ -2011,17 +2044,17 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'CLEAR_OUTPUT' });
       expect(flatBlocks(s)).toHaveLength(0);
     });
-    test('ESCAPE clears interrupt without stopping session', () => {
+    test('ESCAPE keeps interrupt until durable Runtime cancellation arrives', () => {
       let s = fresh();
       s = { ...s, interrupt: { kind: 'approval', blockId: 99 } };
       s = dispatch(s, { type: 'ESCAPE' });
-      expect(s.interrupt).toBeNull();
+      expect(s.interrupt).not.toBeNull();
     });
-    test('ESCAPE when running with interrupt cancels interrupt, keeps running', () => {
+    test('ESCAPE when running with interrupt keeps the durable interaction visible', () => {
       let s = fresh();
       s = { ...s, running: true, interrupt: { kind: 'approval', blockId: 99 } };
       s = dispatch(s, { type: 'ESCAPE' });
-      expect(s.interrupt).toBeNull();
+      expect(s.interrupt).not.toBeNull();
       expect(s.running).toBe(true);
     });
     test('ESCAPE when running without interrupt stops the session', () => {
@@ -2170,11 +2203,13 @@ describe('eventReducer (blocks model)', () => {
       s = handleRuntimeEventAction(s, {
         type: 'plan.approved',
         interactionId: 'review-1',
+        toolCallId: 'plan-call',
         executionMode: 'auto',
       });
 
       expect(s.status.plan).toEqual(plan);
       expect(s.status.pendingPlan).toBeNull();
+      expect(s.interrupt).toBeNull();
 
       s = handleRuntimeEventAction(s, {
         type: 'tool.queued',
@@ -2186,6 +2221,30 @@ describe('eventReducer (blocks model)', () => {
       expect(
         flatBlocks(s).some((block) => block.kind === 'tool_card' && block.name === 'update_plan'),
       ).toBe(false);
+    });
+
+    test('replay clears a rejected plan review', () => {
+      const plan = {
+        name: 'Rejected plan',
+        description: 'Plan from runtime events',
+        status: 'pending' as const,
+        steps: [],
+      };
+      let s = handleRuntimeEventAction(fresh(), {
+        type: 'plan.review_requested',
+        interactionId: 'review-rejected',
+        toolCallId: 'plan-rejected',
+        plan,
+        planSummary: plan.description,
+      });
+      expect(s.interrupt?.kind).toBe('plan_review');
+      s = handleRuntimeEventAction(s, {
+        type: 'plan.rejected',
+        interactionId: 'review-rejected',
+        toolCallId: 'plan-rejected',
+        reason: 'User rejected the plan.',
+      });
+      expect(s.interrupt).toBeNull();
     });
 
     test('projects a provider recovery requirement into the shared TUI input surface', () => {
@@ -2207,6 +2266,48 @@ describe('eventReducer (blocks model)', () => {
           allow_free_text: false,
         },
       });
+    });
+
+    test('replay clears completed provider recovery interactions', () => {
+      let actionState = handleRuntimeEventAction(fresh(), {
+        type: 'provider.action_required',
+        interactionId: 'provider-action',
+        providerId: 'github',
+        action: 'login',
+        originatingToolCallId: 'mcp-call',
+      });
+      expect(actionState.interrupt?.kind).toBe('input');
+      actionState = handleRuntimeEventAction(actionState, {
+        type: 'provider.action_started',
+        interactionId: 'provider-action',
+      });
+      expect(actionState.interrupt?.kind).toBe('input');
+
+      actionState = handleRuntimeEventAction(actionState, {
+        type: 'provider.action_completed',
+        interactionId: 'provider-action',
+        originatingToolCallId: 'mcp-call',
+      });
+      expect(actionState.interrupt).toBeNull();
+
+      let admissionState = handleRuntimeEventAction(fresh(), {
+        type: 'provider.admission_required',
+        interactionId: 'provider-admission',
+        providerId: 'github',
+        source: 'user',
+        providerStatus: 'login_required',
+        retryable: false,
+      });
+      expect(admissionState.interrupt?.kind).toBe('input');
+      admissionState = handleRuntimeEventAction(admissionState, {
+        type: 'provider.admission_waived',
+        interactionId: 'provider-admission',
+        providerId: 'github',
+        source: 'user',
+        reason: 'user_session_waiver',
+        waivedAt: '2026-08-07T00:00:00.000Z',
+      });
+      expect(admissionState.interrupt).toBeNull();
     });
 
     test('projects required provider admission without offering an unavailable retry', () => {
@@ -2328,6 +2429,13 @@ describe('eventReducer (blocks model)', () => {
       expect((flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'text' }>).content).toBe(
         'Hello, AI',
       );
+    });
+    test('SET_SESSION_SERVICE_UNAVAILABLE blocks only the session service state', () => {
+      let s = fresh();
+      s = dispatch(s, { type: 'SET_SESSION_SERVICE_UNAVAILABLE', unavailable: true });
+      expect(s.sessionServiceUnavailable).toBe(true);
+      s = dispatch(s, { type: 'SET_SESSION_SERVICE_UNAVAILABLE', unavailable: false });
+      expect(s.sessionServiceUnavailable).toBe(false);
     });
     test('NEW_SESSION clears blocks, resets state, increments sessionKey', () => {
       let s = fresh();
@@ -3867,6 +3975,7 @@ describe('eventReducer (blocks model)', () => {
       const granted = handleRuntimeEventAction(requested, {
         type: 'approval.granted',
         interactionId: 'approval-1',
+        toolCallId: 'shell-1',
         grant: 'same_command',
       });
 
@@ -3885,6 +3994,7 @@ describe('eventReducer (blocks model)', () => {
       const unchanged = handleRuntimeEventAction(requested, {
         type: 'approval.granted',
         interactionId: 'approval-stale',
+        toolCallId: 'shell-stale',
         grant: 'approve_once',
       });
 
@@ -3893,6 +4003,97 @@ describe('eventReducer (blocks model)', () => {
         kind: 'approval',
         interactionId: 'approval-current',
       });
+    });
+
+    test('a delayed approval terminal with the same interaction but another tool cannot clear it', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-current',
+        toolCallId: 'shell-current',
+        approval: approval(),
+      });
+
+      const unchanged = handleRuntimeEventAction(requested, {
+        type: 'approval.granted',
+        interactionId: 'approval-current',
+        toolCallId: 'shell-stale',
+        grant: 'approve_once',
+      });
+
+      expect(unchanged).toEqual(requested);
+    });
+
+    test('a stale approval rejection cannot clear or mutate a different active approval', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-current',
+        toolCallId: 'shell-current',
+        approval: approval(),
+      });
+
+      const unchanged = handleRuntimeEventAction(requested, {
+        type: 'approval.rejected',
+        interactionId: 'approval-stale',
+        toolCallId: 'shell-stale',
+        reason: 'Stale rejection.',
+      });
+
+      expect(unchanged).toEqual(requested);
+    });
+
+    test('delayed input requests cannot overwrite the active interaction identity', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'user_input.requested',
+        interactionId: 'input-current',
+        toolCallId: 'ask-current',
+        request: question(),
+      });
+
+      const unchanged = handleRuntimeEventAction(requested, {
+        type: 'user_input.requested',
+        interactionId: 'input-stale',
+        toolCallId: 'ask-stale',
+        request: question(),
+      });
+
+      expect(unchanged).toEqual(requested);
+    });
+
+    test('a delayed ask_user terminal with a different tool cannot resolve the active question', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'user_input.requested',
+        interactionId: 'input-current',
+        toolCallId: 'ask-current',
+        request: question(),
+      });
+
+      const unchanged = handleRuntimeEventAction(requested, {
+        type: 'user_input.cancelled',
+        interactionId: 'input-current',
+        toolCallId: 'ask-stale',
+        reason: 'Stale cancellation.',
+      });
+
+      expect(unchanged).toEqual(requested);
+    });
+
+    test('stale plan terminal events cannot mutate the current plan review', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'plan.review_requested',
+        interactionId: 'plan-current',
+        toolCallId: 'plan-current-call',
+        plan: { name: 'Current', description: 'Current plan', status: 'pending', steps: [] },
+        planSummary: 'Current plan',
+      });
+
+      const unchanged = handleRuntimeEventAction(requested, {
+        type: 'plan.rejected',
+        interactionId: 'plan-stale',
+        toolCallId: 'plan-stale-call',
+        reason: 'Stale rejection.',
+      });
+
+      expect(unchanged).toEqual(requested);
     });
 
     test('plan review cancellation has identical live and replay projections without a banner', () => {
@@ -3918,6 +4119,7 @@ describe('eventReducer (blocks model)', () => {
         {
           type: 'plan.review_cancelled',
           interactionId: 'plan-review',
+          toolCallId: 'plan-call',
           reason: 'Plan execution confirmation cancelled by user.',
         },
         {
@@ -3958,7 +4160,7 @@ describe('eventReducer (blocks model)', () => {
       );
     });
 
-    test('approval rejection removes the queued shell without a message card', () => {
+    test('approval rejection keeps the queued shell as an error message card', () => {
       let state = dispatch(fresh(), {
         type: 'RUNTIME_EVENT',
         event: {
@@ -3994,7 +4196,12 @@ describe('eventReducer (blocks model)', () => {
       const approvalBlock = flatBlocks(state).find(
         (block): block is Extract<OutputBlock, { kind: 'approval' }> => block.kind === 'approval',
       );
-      expect(card).toBeUndefined();
+      expect(card).toMatchObject({
+        callId: 'shell-rejected',
+        name: 'shell_execute',
+        status: 'error',
+        summary: 'Rejected by user.',
+      });
       expect(approvalBlock).toBeUndefined();
       expect(state.pendingToolCalls['shell-rejected']).toBeUndefined();
       expect(state.interrupt).toBeNull();
@@ -4093,7 +4300,7 @@ describe('eventReducer (blocks model)', () => {
       expect(state.pendingToolCalls).toEqual({});
     });
 
-    test('approval cancellation keeps only started siblings visible and ends the current turn', () => {
+    test('approval cancellation keeps the rejected target and started siblings visible', () => {
       let state = dispatch(fresh(), { type: 'SET_RUNNING' });
       for (const event of [
         {
@@ -4146,11 +4353,14 @@ describe('eventReducer (blocks model)', () => {
           status: 'cancelled',
         }),
       );
-      expect(
-        flatBlocks(state).some(
-          (block) => block.kind === 'tool_card' && block.callId === 'shell-rejected',
-        ),
-      ).toBe(false);
+      expect(flatBlocks(state)).toContainEqual(
+        expect.objectContaining({
+          kind: 'tool_card',
+          callId: 'shell-rejected',
+          status: 'error',
+          summary: 'Approval cancelled by user.',
+        }),
+      );
       expect(
         flatBlocks(state).some(
           (block) => block.kind === 'text' && block.content.includes('Run cancelled'),

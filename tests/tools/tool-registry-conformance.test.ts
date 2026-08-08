@@ -234,8 +234,16 @@ describe('ToolSpec kind union', () => {
             {
               question: 'Continue?',
               options: [
-                { label: 'Yes', description: 'Continue with the current approach.' },
-                { label: 'No', description: 'Stop and reconsider the approach.' },
+                {
+                  label: 'Yes',
+                  description: 'Continue with the current approach.',
+                  recommended: true,
+                },
+                {
+                  label: 'No',
+                  description: 'Stop and reconsider the approach.',
+                  recommended: false,
+                },
               ],
             },
           ],

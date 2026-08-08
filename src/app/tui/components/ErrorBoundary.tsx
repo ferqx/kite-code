@@ -56,13 +56,6 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     return { error };
   }
 
-  override componentDidCatch(error: Error, _info: React.ErrorInfo): void {
-    // Log the error so it appears in stderr even if TUI is broken
-    console.error('[ErrorBoundary] Caught render error name:', error.name);
-    console.error('[ErrorBoundary] Caught render error message:', error.message);
-    console.error('[ErrorBoundary] Caught render error stack:', error.stack?.slice(0, 500));
-  }
-
   override render() {
     if (this.state.error) {
       return <ErrorFallback error={this.state.error} onExit={this.props.onExit} />;

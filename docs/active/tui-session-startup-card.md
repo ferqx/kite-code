@@ -2,7 +2,7 @@
 
 状态：active
 
-最后更新：2026-07-31
+最后更新：2026-08-07
 
 范围：`src/app/tui/Header.tsx`、`src/app/tui/App.tsx`、`src/app/tui/index.tsx`、`tests/tui-layout.test.tsx`、`tests/tui-mock-render.test.tsx`、`tests/tui-system/scenarios/startup.test.ts`
 
@@ -36,6 +36,18 @@
 Header 是**会话启动快照**，不是持续更新的状态面板。`App` 在当前 `sessionKey` 首次渲染时冻结模型、推理强度和工作区；同一会话中的 `/model` 切换不得重绘已经写入 scrollback 的卡片。当前模型仍由 Footer/StatsLine 展示。
 
 新会话、会话切换或恢复导致 `sessionKey` 变化时，Header 使用该会话当时的状态建立新快照；`useStaticContent` 负责清屏并按既有 Static 规则重新输出。
+
+## 历史会话加载失败
+
+启动时读取历史会话索引失败，不得让 TUI 挂载失败，也不得通过 `console.error`、裸 `stderr` 或其他终端日志通道暴露数据库错误、路径、堆栈或内部异常文本。当前界面进入历史会话服务不可用状态，只允许用户显式执行 `/sessions` 重试；不得提供 `/new` 作为绕过，因为它的首次 Kernel 持久化仍会命中同一个不可用 Store。普通任务输入必须被阻止，避免在没有可用 RuntimeStore 时静默丢失用户消息。
+
+正常的 `LOCAL_TEXT` 提示为：
+
+```text
+  ⎿  历史会话服务不可用，请输入 /sessions 重试。
+```
+
+`/sessions` 加载成功后清除该状态；加载失败则继续显示会话服务错误。用户手动打开某个历史会话失败时，同样只显示脱敏的 TUI 提示；不得把底层异常原文拼接到渲染文本中。
 
 ## 边界
 

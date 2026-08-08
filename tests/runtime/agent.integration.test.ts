@@ -641,8 +641,16 @@ test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', a
                 {
                   question: 'What is your name?',
                   options: [
-                    { label: 'Ada', description: 'Use Ada as the display name.' },
-                    { label: 'Grace', description: 'Use Grace as the display name.' },
+                    {
+                      label: 'Ada',
+                      description: 'Use Ada as the display name.',
+                      recommended: true,
+                    },
+                    {
+                      label: 'Grace',
+                      description: 'Use Grace as the display name.',
+                      recommended: false,
+                    },
                   ],
                 },
               ],
@@ -708,8 +716,16 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
                 {
                   question: 'What is your name?',
                   options: [
-                    { label: 'Ada', description: 'Use Ada as the display name.' },
-                    { label: 'Grace', description: 'Use Grace as the display name.' },
+                    {
+                      label: 'Ada',
+                      description: 'Use Ada as the display name.',
+                      recommended: true,
+                    },
+                    {
+                      label: 'Grace',
+                      description: 'Use Grace as the display name.',
+                      recommended: false,
+                    },
                   ],
                 },
               ],

@@ -66,6 +66,7 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['stat
     case 'turn.aborted':
     case 'task.cancelled':
     case 'plan.review_cancelled':
+    case 'user_input.cancelled':
     case 'provider.admission_cancelled':
     case 'resource_budget.waiter_cancelled':
       return 'cancelled';

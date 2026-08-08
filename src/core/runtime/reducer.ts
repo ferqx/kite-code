@@ -436,9 +436,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const planning = getActivePlanning(state);
       if (planning.kind !== 'awaiting_review') return state;
       if (
-        state.interactions.kind !== 'idle' &&
-        (state.interactions.kind !== 'awaiting_review' ||
-          state.interactions.interactionId !== event.interactionId)
+        state.interactions.kind !== 'awaiting_review' ||
+        state.interactions.interactionId !== event.interactionId ||
+        event.toolCallId !== state.interactions.toolCallId ||
+        event.planId !== state.interactions.planId ||
+        event.version !== state.interactions.version ||
+        event.structuralDigest !== state.interactions.structuralDigest
       ) {
         return state;
       }
@@ -461,9 +464,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const planning = getActivePlanning(state);
       if (planning.kind !== 'awaiting_review') return state;
       if (
-        state.interactions.kind !== 'idle' &&
-        (state.interactions.kind !== 'awaiting_review' ||
-          state.interactions.interactionId !== event.interactionId)
+        state.interactions.kind !== 'awaiting_review' ||
+        state.interactions.interactionId !== event.interactionId ||
+        event.toolCallId !== state.interactions.toolCallId ||
+        event.planId !== state.interactions.planId ||
+        event.version !== state.interactions.version ||
+        event.structuralDigest !== state.interactions.structuralDigest
       ) {
         return state;
       }
@@ -481,9 +487,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const planning = getActivePlanning(state);
       if (planning.kind !== 'awaiting_review') return state;
       if (
-        state.interactions.kind !== 'idle' &&
-        (state.interactions.kind !== 'awaiting_review' ||
-          state.interactions.interactionId !== event.interactionId)
+        state.interactions.kind !== 'awaiting_review' ||
+        state.interactions.interactionId !== event.interactionId ||
+        event.toolCallId !== state.interactions.toolCallId ||
+        event.planId !== state.interactions.planId ||
+        event.version !== state.interactions.version ||
+        event.structuralDigest !== state.interactions.structuralDigest
       )
         return state;
       return {
@@ -516,9 +525,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
 
     case 'plan.rejected': {
       if (
-        state.interactions.kind !== 'idle' &&
-        (state.interactions.kind !== 'awaiting_review' ||
-          state.interactions.interactionId !== event.interactionId)
+        state.interactions.kind !== 'awaiting_review' ||
+        state.interactions.interactionId !== event.interactionId ||
+        event.toolCallId !== state.interactions.toolCallId ||
+        event.planId !== state.interactions.planId ||
+        event.version !== state.interactions.version ||
+        event.structuralDigest !== state.interactions.structuralDigest
       ) {
         return state;
       }
@@ -1225,7 +1237,21 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'user_input.answered':
       if (
         state.interactions.kind !== 'awaiting_user_input' ||
-        state.interactions.interactionId !== event.interactionId
+        state.interactions.interactionId !== event.interactionId ||
+        state.interactions.toolCallId !== event.toolCallId
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        interactions: { kind: 'idle' },
+      };
+
+    case 'user_input.cancelled':
+      if (
+        state.interactions.kind !== 'awaiting_user_input' ||
+        state.interactions.interactionId !== event.interactionId ||
+        state.interactions.toolCallId !== event.toolCallId
       ) {
         return state;
       }
@@ -1251,7 +1277,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'approval.granted':
       if (
         state.interactions.kind !== 'awaiting_tool_approval' ||
-        state.interactions.interactionId !== event.interactionId
+        state.interactions.interactionId !== event.interactionId ||
+        event.toolCallId !== state.interactions.toolCallId
       ) {
         return state;
       }
@@ -1275,7 +1302,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (
         state.interactions.kind !== 'awaiting_tool_approval' ||
         state.interactions.interactionId !== event.interactionId ||
-        (event.toolCallId != null && event.toolCallId !== state.interactions.toolCallId)
+        event.toolCallId !== state.interactions.toolCallId
       ) {
         return state;
       }
@@ -1495,7 +1522,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'provider.action_failed': {
       if (
         state.interactions.kind !== 'awaiting_provider_action' ||
-        state.interactions.interactionId !== event.interactionId
+        state.interactions.interactionId !== event.interactionId ||
+        event.originatingToolCallId !== state.interactions.originatingToolCallId
       ) {
         return state;
       }
@@ -1787,11 +1815,16 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'auto_review.completed': {
       if (
         state.interactions.kind !== 'awaiting_auto_review' ||
-        state.interactions.interactionId !== event.reviewId
+        state.interactions.interactionId !== event.reviewId ||
+        state.interactions.toolCallId !== event.toolCallId
       ) {
         return state;
       }
       const result = event.result;
+      // A failed automatic review is not a rejection.  The executor emits a
+      // following approval.requested event with a fresh interaction id. Keep
+      // the current interaction coherent until that event is reduced.
+      if (!result.ok) return state;
       if (result.ok && result.approved) {
         const call = state.tools.calls[state.interactions.toolCallId];
         // Reset circuit breaker on successful auto-review

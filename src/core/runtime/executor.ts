@@ -491,7 +491,10 @@ async function executeAutoReview(
         reviewId: effect.reviewId,
         toolCallId: effect.toolCallId,
         result: {
-          ok: false,
+          // An invalid/unsupported tool is an explicit policy decision, not a
+          // reviewer transport failure. It must not be escalated to a user
+          // approval prompt.
+          ok: true,
           approved: false,
           reason: 'Unsupported or invalid tool',
           reviewerModelName: '',
@@ -519,23 +522,43 @@ async function executeAutoReview(
       providerDataPolicyRequired: getFeatureFlags(dependencies.config).providerDataPolicyV1,
     });
 
-    return [
-      {
-        type: 'auto_review.completed',
-        reviewId: effect.reviewId,
-        toolCallId: effect.toolCallId,
-        result: {
-          ok: result.ok,
-          approved: result.suggestion?.approved ?? false,
-          grant: result.suggestion?.grant,
-          reason: result.suggestion?.reason ?? result.reason,
-          reviewerModelName: reviewerConfig.modelName ?? reviewerConfig.providerName ?? 'unknown',
-          durationMs: Date.now() - startTime,
+    const completed: RuntimeEvent = {
+      type: 'auto_review.completed',
+      reviewId: effect.reviewId,
+      toolCallId: effect.toolCallId,
+      result: result.ok
+        ? {
+            ok: true,
+            approved: result.suggestion?.approved ?? false,
+            grant: result.suggestion?.grant,
+            reason: result.suggestion?.reason ?? result.reason,
+            reviewerModelName: reviewerConfig.modelName ?? reviewerConfig.providerName ?? 'unknown',
+            durationMs: Date.now() - startTime,
+          }
+        : {
+            // Treat a malformed reviewer result without a classified failure
+            // conservatively. It is never an implicit review rejection.
+            ok: false,
+            approved: false,
+            failureType: result.failureType ?? 'technical',
+            reason: result.reason,
+            reviewerModelName: reviewerConfig.modelName ?? reviewerConfig.providerName ?? 'unknown',
+            durationMs: Date.now() - startTime,
+          },
+    };
+    if (!result.ok) {
+      return [
+        completed,
+        {
+          type: 'approval.requested',
+          interactionId: crypto.randomUUID(),
+          toolCallId: effect.toolCallId,
+          approval: state.interactions.approval,
         },
-      },
-    ];
+      ];
+    }
+    return [completed];
   } catch (error) {
-    if (error instanceof ProviderDataAdmissionError) throw error;
     return [
       {
         type: 'auto_review.completed',
@@ -544,10 +567,17 @@ async function executeAutoReview(
         result: {
           ok: false,
           approved: false,
+          failureType: 'technical',
           reason: error instanceof Error ? error.message : String(error),
           reviewerModelName: dependencies.config.modelName ?? 'unknown',
           durationMs: Date.now() - startTime,
         },
+      },
+      {
+        type: 'approval.requested',
+        interactionId: crypto.randomUUID(),
+        toolCallId: effect.toolCallId,
+        approval: state.interactions.approval,
       },
     ];
   }

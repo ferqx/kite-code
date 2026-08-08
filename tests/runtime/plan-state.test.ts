@@ -6,6 +6,7 @@ import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
+  type RuntimeState,
 } from '../../src/core/runtime/state';
 import type { AgentPlan } from '../../src/protocol/events';
 
@@ -36,6 +37,19 @@ function makeDigestInput(plan: AgentPlan) {
       title: s.step.slice(0, 160),
       status: 'pending' as const,
     })),
+  };
+}
+
+function reviewIdentity(state: RuntimeState) {
+  if (state.interactions.kind !== 'awaiting_review') {
+    throw new Error('Expected an active plan review');
+  }
+  return {
+    interactionId: state.interactions.interactionId,
+    toolCallId: state.interactions.toolCallId,
+    planId: state.interactions.planId,
+    version: state.interactions.version,
+    structuralDigest: state.interactions.structuralDigest,
   };
 }
 
@@ -121,7 +135,7 @@ describe('PlanningState lifecycle transitions', () => {
 
     const e3: RuntimeEvent = {
       type: 'plan.approved',
-      interactionId: 'inter-2',
+      ...reviewIdentity(s2),
       executionMode: 'auto',
     };
     const s3 = reduceRuntimeState(s2, e3);
@@ -157,7 +171,7 @@ describe('PlanningState lifecycle transitions', () => {
 
     const e3: RuntimeEvent = {
       type: 'plan.revision_requested',
-      interactionId: 'inter-3',
+      ...reviewIdentity(s2),
       feedback: 'Add more detail to step 1',
     };
     const s3 = reduceRuntimeState(s2, e3);
@@ -195,7 +209,7 @@ describe('PlanningState lifecycle transitions', () => {
 
     const e3: RuntimeEvent = {
       type: 'plan.rejected',
-      interactionId: 'inter-4',
+      ...reviewIdentity(s2),
       reason: 'Not needed',
     };
     const s3 = reduceRuntimeState(s2, e3);
@@ -228,7 +242,7 @@ describe('PlanningState lifecycle transitions', () => {
     const s2 = reduceRuntimeState(s1, e2);
     const e3: RuntimeEvent = {
       type: 'plan.approved',
-      interactionId: 'inter-5',
+      ...reviewIdentity(s2),
       executionMode: 'accept_edits',
     };
     const s3 = reduceRuntimeState(s2, e3);
@@ -408,7 +422,7 @@ describe('plan.approved sets runtime mode', () => {
     const state = makeAwaitingReviewState();
     const next = reduceRuntimeState(state, {
       type: 'plan.approved',
-      interactionId: 'inter-mode',
+      ...reviewIdentity(state),
       executionMode: 'auto',
     });
     expect(next.mode).toBe('auto');
@@ -419,7 +433,7 @@ describe('plan.approved sets runtime mode', () => {
     const state = makeAwaitingReviewState();
     const next = reduceRuntimeState(state, {
       type: 'plan.approved',
-      interactionId: 'inter-mode',
+      ...reviewIdentity(state),
       executionMode: 'accept_edits',
     });
     expect(next.mode).toBe('accept_edits');
@@ -430,7 +444,7 @@ describe('plan.approved sets runtime mode', () => {
     const state = makeAwaitingReviewState();
     const next = reduceRuntimeState(state, {
       type: 'plan.approved',
-      interactionId: 'inter-mode',
+      ...reviewIdentity(state),
       executionMode: 'accept_edits',
     });
     expect(next.mode).toBe('accept_edits');

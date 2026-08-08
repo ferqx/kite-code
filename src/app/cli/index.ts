@@ -166,6 +166,7 @@ export async function main(): Promise<void> {
     workspace: args.workspace,
     config,
     sandboxEnabled: sandboxRuntime.enabled,
+    onDiagnostic: (message) => console.warn(`[sandbox] ${message}`),
   });
   const observability = composeObservabilityV1({
     artifactTelemetryAllowed: false,

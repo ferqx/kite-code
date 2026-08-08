@@ -22,8 +22,8 @@ telemetry consent；remote consent 也不改变本地 logger mode、retention �
 `off` 不创建 writer、目录或正文缓存，也不能回退到旧 content serializer。`content` 必须同时
 满足 artifact policy 允许和用户/管理员在用户配置中显式设置 `mode: content`；artifact 单独
 允许不能代表用户同意。项目配置不得开启 `content`，也不得把 artifact/用户限制放宽。TUI
-TUI 对 `off` 与 `metadata` 不显示状态提示；CLI 每次运行仍把 mode 写到 stderr。进入 `content`
-时两端都显示独立披露。
+对 `off` 与 `metadata` 不显示状态提示；TUI 不把 session logger 的内部 diagnostic 注入正常
+对话渲染；CLI 每次运行仍把 mode 写到 stderr。进入 `content` 时两端都显示独立披露。
 
 ## Metadata allowlist
 
@@ -106,7 +106,9 @@ directory identity、nonce、创建时间和 heartbeat。正常/失败/容量终
 `terminal.json`，再释放匹配 nonce 的 lease。另一个 TUI/CLI 进程不能取得同一 session；
 heartbeat 未过期、进程 identity 仍匹配、wall-clock 回拨、PID identity 不可确认或 lease
 损坏时，cleanup 都保守保护目录。只有 heartbeat 超过 stale window 且 PID/start identity
-不匹配时才可回收。macOS writer 为当前进程使用带 `darwin:fallback` 标签的稳定
+不匹配时才可回收；如果持久化的 dev/inode 因 macOS volume remount 或恢复而漂移，仍要求
+owner identity 匹配且记录 PID 已确认死亡，才允许在 session operation lock 内回收该 lease，
+随后使用当前目录身份创建新 lease。macOS writer 为当前进程使用带 `darwin:fallback` 标签的稳定
 `performance.timeOrigin` identity，
 不得把能否启动 `ps` 作为建立本进程 lease 的前置条件；检查其他 PID 时仍使用系统进程信息，
 `darwin:fallback` 与 `darwin:ps` 明确不可比较：只要记录 PID 仍存活，身份不同或无法读取都必须

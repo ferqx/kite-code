@@ -94,6 +94,7 @@ describe('runtime user actions', () => {
     expect(events[0]).toEqual({
       type: 'provider.action_completed',
       interactionId: 'provider-action',
+      originatingToolCallId: 'mcp',
       providerDirectoryRevision: 'directory-r2',
     });
     expect(events[1]).toMatchObject({ type: 'turn.started' });
@@ -118,7 +119,13 @@ describe('runtime user actions', () => {
         interactionId: 'provider-action',
         reason: 'contains no durable payload',
       }),
-    ).toEqual([{ type: 'provider.action_deferred', interactionId: 'provider-action' }]);
+    ).toEqual([
+      {
+        type: 'provider.action_deferred',
+        interactionId: 'provider-action',
+        originatingToolCallId: 'mcp',
+      },
+    ]);
   });
 
   test('ignores an action whose interaction id does not match', () => {
@@ -222,12 +229,66 @@ describe('runtime user actions', () => {
 
     expect(events).toContainEqual(
       expect.objectContaining({
+        type: 'user_input.cancelled',
+        interactionId: 'input-1',
+        toolCallId: 'ask-1',
+      }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({
         type: 'tool.finished',
         toolCallId: 'ask-1',
         name: 'ask_user',
         result: expect.objectContaining({ ok: false, stdout: 'Cancelled' }),
       }),
     );
+  });
+
+  test('cancelling auto_review durably cancels the tool without escalating to approval', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.interactions = {
+      kind: 'awaiting_auto_review',
+      interactionId: 'review-1',
+      toolCallId: 'tool-1',
+      toolName: 'shell_execute',
+      reason: 'review',
+      approval: {} as never,
+    };
+    const events = eventsForRuntimeAction(state, {
+      type: 'cancel',
+      interactionId: 'review-1',
+      reason: 'user_cancelled',
+    });
+    expect(events).toEqual([
+      { type: 'tool.cancelled', toolCallId: 'tool-1', reason: 'user_cancelled' },
+    ]);
+    expect(events.some((event) => event.type === 'approval.requested')).toBe(false);
+  });
+
+  test('a process-level user cancellation records auto_review as user_cancelled', () => {
+    const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
+    state.tools.calls['tool-1'] = {
+      toolCallId: 'tool-1',
+      modelMessageId: 'model-1',
+      name: 'shell_execute',
+      args: { command: 'npm test' },
+      status: 'awaiting_auto_review',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.interactions = {
+      kind: 'awaiting_auto_review',
+      interactionId: 'review-1',
+      toolCallId: 'tool-1',
+      toolName: 'shell_execute',
+      reason: 'review',
+      approval: {} as never,
+    };
+
+    expect(eventsForRunCancellation(state)).toContainEqual({
+      type: 'tool.cancelled',
+      toolCallId: 'tool-1',
+      reason: 'user_cancelled',
+    });
   });
 
   test.each([

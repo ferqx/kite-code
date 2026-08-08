@@ -298,18 +298,18 @@ export const ASK_USER_CONTRACT: ToolContract = {
     whenToUse:
       'Ask the user focused questions when progress is blocked by uncertainty only the user can resolve. ' +
       'Use one `questions` array to batch all unknowns into ONE call; a single question is an array with one item. ' +
-      'Each question has 2-3 concrete options, and the first option is the recommended choice. ' +
+      'Each question has 2-3 concrete options; every option must include a `recommended` boolean, with exactly one `recommended: true` and all others `recommended: false`. ' +
       'In plan mode: batch all pre-plan clarifications into one ask_user call before calling write_plan.',
     commonMistakes:
       'Making multiple ask_user calls in sequence instead of batching into one `questions` array. ' +
       'Using the removed top-level `question`, `options`, `recommended`, or `allow_free_text` fields instead of `questions`. ' +
       'Adding an "Other" option — the client always adds free-text input automatically, so provide only 2-3 substantive choices. ' +
       'Using ask_user for questions the model could answer by reading workspace files. ' +
-      'Omitting an option description or putting the recommended choice anywhere except first.',
+      'Omitting an option description or `recommended`, or failing to set exactly one `recommended: true` and all other options to `recommended: false`.',
     outputFormat:
       'This tool triggers a user_input interrupt handled by the harness. It returns ok: false (the harness intercepts it). ' +
-      '`questions` contains 1-3 items shaped as `{question, options}`; each `options` array contains 2-3 `{label, description}` objects. ' +
-      'The Runtime generates stable IDs, marks the first option as recommended, and enables free text before emitting user_input.requested.',
+      '`questions` contains 1-3 items shaped as `{question, options}`; each `options` array contains 2-3 `{label, description, recommended}` objects, with exactly one `recommended: true` and all other options `recommended: false`. ' +
+      'The Runtime generates question and option ids, derives the internal recommended option, and enables free text before emitting user_input.requested.',
     failureHandling:
       'This tool always triggers an interrupt — ok: false is expected and not an error. ' +
       "The user's response will be injected as the next message in the conversation. " +

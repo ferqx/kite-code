@@ -229,6 +229,8 @@ export interface TuiState {
   sessionError: boolean;
   /** 正在从 DB 加载的会话 ID，null 表示未在加载 / ID of the session being loaded from DB, null when not loading */
   loadingSessionId: string | null;
+  /** 历史会话服务不可用时阻塞新工作，仅保留 /sessions 重试。 */
+  sessionServiceUnavailable: boolean;
   /** 探索工具 callId → tool_summary block ID 映射，用于 tool_done 精确定位 */
   explorationSummaryIds: Record<string, number>;
   /**
@@ -270,9 +272,16 @@ export type InterruptState =
       /** Compatibility pointer for sessions created before approvals moved off-screen. */
       blockId?: number;
     }
-  | { kind: 'input'; blockId: number }
+  | { kind: 'input'; blockId: number; interactionId?: string; toolCallId?: string }
   | {
       kind: 'plan_review';
+      /** Durable Runtime interaction identity, when projected from RuntimeEvent replay. */
+      interactionId?: string;
+      /** Tool call that owns the plan review, when available from Runtime replay. */
+      toolCallId?: string;
+      planId?: string;
+      version?: number;
+      structuralDigest?: string;
       plan?: import('@/protocol/events').AgentPlan;
       artifact?: import('@/protocol/events').PlanArtifactRef;
     };
