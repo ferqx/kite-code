@@ -103,6 +103,7 @@ export type RenderEvent =
 
 const TABLE_PIPE = /[|│]/;
 const TIMEOUT_RE = /(?:^|\r?\n)Command timed out after (\d+)ms\./;
+const USER_REJECTED_APPROVAL_RE = /^Tool approval (?:rejected|cancelled) by user\.$/;
 
 function parseTimeoutMs(summary: string): number | undefined {
   const match = summary.match(TIMEOUT_RE);
@@ -1367,8 +1368,14 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         }
       }
 
+      // The Runtime normally supplies a cancelled status for an approval denial.
+      // Accept its durable user-facing text as the same terminal fact too: older
+      // event streams can omit `status`, and treating that form as an error makes
+      // live Ink rendering disagree with replay.
       const cancelled =
-        event.data.status === 'cancelled' || (!event.data.ok && summaryText === 'Cancelled');
+        event.data.status === 'cancelled' ||
+        (!event.data.ok &&
+          (summaryText === 'Cancelled' || USER_REJECTED_APPROVAL_RE.test(summaryText)));
       const exhaustedStatus = event.data.status === 'exhausted';
       const timedOut =
         !event.data.ok &&
@@ -2086,6 +2093,16 @@ function materializePendingTool(
   return consume ? withoutPendingTool(materialized, toolCallId) : materialized;
 }
 
+/** A durable terminal tool event proves that any matching approval is no longer
+ * pending. Older journals can omit the intervening approval decision event;
+ * leaving its UI projection active would suppress a later approval during
+ * replay. */
+function clearTerminalToolApproval(state: TuiState, toolCallId: string): TuiState {
+  return state.interrupt?.kind === 'approval' && state.interrupt.approval?.callId === toolCallId
+    ? { ...state, interrupt: null }
+    : state;
+}
+
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
   switch (event.type) {
     case 'subagent.started':
@@ -2598,10 +2615,14 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       };
     case 'tool.started': {
       const materialized = materializePendingTool(state, event.toolCallId, 'running', true);
-      return handleEventAction(materialized, {
+      const started = handleEventAction(materialized, {
         type: 'tool_started',
         data: { call_id: event.toolCallId },
       });
+      // Some older persisted streams record an approval request followed
+      // directly by tool.started, without an approval.granted event. Once the
+      // tool has crossed that boundary, its approval can no longer be pending.
+      return clearTerminalToolApproval(started, event.toolCallId);
     }
     case 'tool.execution_ready':
       // Legacy replay compatibility: the former shell batch barrier persisted
@@ -2620,18 +2641,25 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       });
     case 'tool.finished': {
       const materialized = materializePendingTool(state, event.toolCallId, 'running', true);
-      return handleEventAction(materialized, {
-        type: 'tool_done',
-        data: {
-          call_id: event.toolCallId,
-          name: event.name,
-          ok: event.result.ok,
-          summary: formatToolResultForDisplay(event.name, event.result.stdout, event.result.stderr),
-          exitCode: event.result.exitCode,
-          status: event.result.status,
-          userInput: event.result.userInput,
-        },
-      });
+      return clearTerminalToolApproval(
+        handleEventAction(materialized, {
+          type: 'tool_done',
+          data: {
+            call_id: event.toolCallId,
+            name: event.name,
+            ok: event.result.ok,
+            summary: formatToolResultForDisplay(
+              event.name,
+              event.result.stdout,
+              event.result.stderr,
+            ),
+            exitCode: event.result.exitCode,
+            status: event.result.status,
+            userInput: event.result.userInput,
+          },
+        }),
+        event.toolCallId,
+      );
     }
     case 'tool.failed': {
       const pendingName =
@@ -2639,15 +2667,18 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         visibleToolName(state, event.toolCallId) ??
         '';
       const materialized = materializePendingTool(state, event.toolCallId, 'queued', true);
-      return handleEventAction(materialized, {
-        type: 'tool_done',
-        data: {
-          call_id: event.toolCallId,
-          name: pendingName,
-          ok: false,
-          summary: event.failure?.message ?? event.error ?? 'Tool failed.',
-        },
-      });
+      return clearTerminalToolApproval(
+        handleEventAction(materialized, {
+          type: 'tool_done',
+          data: {
+            call_id: event.toolCallId,
+            name: pendingName,
+            ok: false,
+            summary: event.failure?.message ?? event.error ?? 'Tool failed.',
+          },
+        }),
+        event.toolCallId,
+      );
     }
     case 'tool.rejected': {
       if (event.failure?.kind === 'phase_deferred') {
@@ -2668,15 +2699,18 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         visibleToolName(state, event.toolCallId) ??
         '';
       const materialized = materializePendingTool(state, event.toolCallId, 'queued', true);
-      return handleEventAction(materialized, {
-        type: 'tool_done',
-        data: {
-          call_id: event.toolCallId,
-          name: pendingName,
-          ok: false,
-          summary: event.reason,
-        },
-      });
+      return clearTerminalToolApproval(
+        handleEventAction(materialized, {
+          type: 'tool_done',
+          data: {
+            call_id: event.toolCallId,
+            name: pendingName,
+            ok: false,
+            summary: event.reason,
+          },
+        }),
+        event.toolCallId,
+      );
     }
     case 'tool.cancelled': {
       const wasPending = state.pendingToolCalls[event.toolCallId] != null;
@@ -2702,7 +2736,10 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       const materialized = wasPending
         ? materializePendingTool(state, event.toolCallId, 'queued', true)
         : state;
-      return projectToolCancelled(materialized, event.toolCallId);
+      return clearTerminalToolApproval(
+        projectToolCancelled(materialized, event.toolCallId),
+        event.toolCallId,
+      );
     }
     case 'auto_review.completed': {
       // Auto-review is not a user-facing interaction. Only an explicit
@@ -2921,7 +2958,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
             name: visibleName,
             ok: false,
             summary: event.reason,
-            status: 'error',
+            status: 'cancelled',
           },
         });
       }

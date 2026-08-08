@@ -106,9 +106,12 @@ describe('isBlockSettledInRun', () => {
     expect(blocks.slice(split).map((block) => block.id)).toEqual([102]);
   });
 
-  test('user block is settled', () => {
+  test('a newly submitted user block stays dynamic until a following block arrives', () => {
     const blocks: OutputBlock[] = [{ id: 1, kind: 'user', content: 'hi' }];
-    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+
+    const withResponse = [...blocks, textBlock(2, 'answer')];
+    expect(isBlockSettledInRun(withResponse[0]!, withResponse, 0)).toBe(true);
   });
 
   test('completed subagent is settled and cannot pin later answer text', () => {

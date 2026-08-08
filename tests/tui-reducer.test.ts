@@ -1002,6 +1002,13 @@ describe('eventReducer (blocks model)', () => {
       const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
       expect(t.status).toBe('error');
     });
+    test('tool_done recognizes a user-rejected approval when a legacy result omits status', () => {
+      let s = fresh();
+      s = dispatch(s, tcEvt('c1', 'shell_execute'));
+      s = dispatch(s, tdEvt('c1', 'shell_execute', false, 'Tool approval cancelled by user.'));
+      const t = flatBlocks(s)[0] as Extract<OutputBlock, { kind: 'tool_card' }>;
+      expect(t.status).toBe('cancelled');
+    });
     test('tool_done marks intentional shell timeout separately from errors', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'shell_execute'));
@@ -4377,7 +4384,7 @@ describe('eventReducer (blocks model)', () => {
       );
     });
 
-    test('approval rejection keeps the queued shell as an error message card', () => {
+    test('approval rejection keeps the queued shell as a cancelled message card', () => {
       let state = dispatch(fresh(), {
         type: 'RUNTIME_EVENT',
         event: {
@@ -4416,7 +4423,7 @@ describe('eventReducer (blocks model)', () => {
       expect(card).toMatchObject({
         callId: 'shell-rejected',
         name: 'shell_execute',
-        status: 'error',
+        status: 'cancelled',
         summary: 'Rejected by user.',
       });
       expect(approvalBlock).toBeUndefined();
@@ -4574,7 +4581,7 @@ describe('eventReducer (blocks model)', () => {
         expect.objectContaining({
           kind: 'tool_card',
           callId: 'shell-rejected',
-          status: 'error',
+          status: 'cancelled',
           summary: 'Approval cancelled by user.',
         }),
       );

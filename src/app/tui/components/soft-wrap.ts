@@ -25,16 +25,6 @@ export function isASCIILetter(char: string): boolean {
   return (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
 }
 
-// ── Width computation on code-point arrays ──
-
-function computeWidth(chars: string[], start: number, end: number): number {
-  let width = 0;
-  for (let k = start; k < end && k < chars.length; k++) {
-    width += stringWidth(chars[k]!);
-  }
-  return width;
-}
-
 /** Split a string into Unicode code points (preserving surrogates). */
 function toCodePoints(text: string): string[] {
   const chars: string[] = [];
@@ -70,6 +60,15 @@ export function softWrapLine(text: string, maxWidth: number): WrappedLine[] {
   }
 
   const chars = toCodePoints(text);
+  // All break selection happens inside this code-point array. Keeping prefix
+  // widths makes each candidate range lookup O(1): long pasted lines used to
+  // rescan the same terminal-width window for every wrap and became O(n*w²).
+  const widths = chars.map((char) => stringWidth(char));
+  const prefixWidths = [0];
+  for (const width of widths) {
+    prefixWidths.push(prefixWidths[prefixWidths.length - 1]! + width);
+  }
+  const rangeWidth = (start: number, end: number) => prefixWidths[end]! - prefixWidths[start]!;
   const indices: number[] = [];
   let pos = 0;
   for (const char of chars) {
@@ -84,7 +83,7 @@ export function softWrapLine(text: string, maxWidth: number): WrappedLine[] {
   let lineWidth = 0;
 
   for (let i = 0; i < chars.length; i++) {
-    const charWidth = stringWidth(chars[i]!);
+    const charWidth = widths[i]!;
 
     if (lineWidth + charWidth > maxWidth && i > lineStart) {
       let breakAt = -1;
@@ -100,7 +99,7 @@ export function softWrapLine(text: string, maxWidth: number): WrappedLine[] {
           const prevChar = p >= lineStart ? chars[p] : undefined;
           const nextChar = n < chars.length ? chars[n] : undefined;
           if (prevChar && nextChar && isASCIILetter(prevChar) && isASCIILetter(nextChar)) {
-            const contentWidth = computeWidth(chars, lineStart, j);
+            const contentWidth = rangeWidth(lineStart, j);
             if (contentWidth <= maxWidth) {
               breakAt = j;
               excludeBreakChar = true;
@@ -114,8 +113,8 @@ export function softWrapLine(text: string, maxWidth: number): WrappedLine[] {
       if (breakAt < 0) {
         for (let j = i - 1; j >= lineStart; j--) {
           if (j + 1 < chars.length && isCJK(chars[j]!) !== isCJK(chars[j + 1]!)) {
-            const widthUpToJ = computeWidth(chars, lineStart, j + 1);
-            const nextCharWidth = stringWidth(chars[j + 1]!);
+            const widthUpToJ = rangeWidth(lineStart, j + 1);
+            const nextCharWidth = widths[j + 1]!;
             if (widthUpToJ <= maxWidth && maxWidth - widthUpToJ < nextCharWidth) {
               breakAt = j;
               excludeBreakChar = false;
@@ -128,7 +127,7 @@ export function softWrapLine(text: string, maxWidth: number): WrappedLine[] {
       // 3. Hard break at the last character that still fits.
       if (breakAt < 0) {
         for (let j = i - 1; j >= lineStart; j--) {
-          if (computeWidth(chars, lineStart, j + 1) <= maxWidth) {
+          if (rangeWidth(lineStart, j + 1) <= maxWidth) {
             breakAt = j;
             excludeBreakChar = false;
             break;

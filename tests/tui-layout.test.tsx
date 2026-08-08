@@ -4,7 +4,10 @@ import { render } from 'ink-testing-library';
 import stringWidth from 'string-width';
 import App from '../src/app/tui/App';
 import ApprovalBlock from '../src/app/tui/components/ApprovalBlock';
-import BlockRenderer from '../src/app/tui/components/BlockRenderer';
+import BlockRenderer, {
+  MAX_USER_MESSAGE_LINES,
+  visibleUserMessageLines,
+} from '../src/app/tui/components/BlockRenderer';
 import HelpPanel from '../src/app/tui/components/HelpPanel';
 import InputBlock from '../src/app/tui/components/InputBlock';
 import InputLine from '../src/app/tui/components/InputLine';
@@ -1738,6 +1741,48 @@ describe('BlockRenderer', () => {
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
     expect(lastFrame()).toContain('ls -la');
+  });
+
+  test('renders a rejected shell approval as one cancelled status line', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-rejected',
+      name: 'shell_execute',
+      args: { command: 'echo should-not-run' },
+      status: 'cancelled',
+      summary: 'Tool approval cancelled by user.',
+      expanded: true,
+    };
+    const frame =
+      render(
+        <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+      ).lastFrame() ?? '';
+
+    expect(frame).toContain('Tool approval cancelled by user.');
+    expect(frame).not.toContain('exit:');
+    expect(frame.split('Tool approval cancelled by user.')).toHaveLength(2);
+  });
+
+  test('limits a large user message to thirty content lines while keeping both ends', () => {
+    const content = Array.from({ length: 40 }, (_, index) => `line-${index}`).join('\n');
+    const block: OutputBlock = { id: 1, kind: 'user', content };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const lines = visibleUserMessageLines(content, 80);
+    expect(lines).toHaveLength(MAX_USER_MESSAGE_LINES + 1);
+    expect(lines.filter((line) => !line.startsWith('【已省略 '))).toHaveLength(
+      MAX_USER_MESSAGE_LINES,
+    );
+    expect(lines[0]).toContain('line-0');
+    expect(lines.at(-1)).toBe('line-39');
+    expect(lines).toContain('【已省略 10 行】');
+    expect(lines).not.toContain('');
+    expect(lastFrame()).toContain('❯ line-0');
+    expect(lastFrame()).toContain('【已省略 10 行】');
+    expect(lastFrame()).toContain('line-39');
   });
 
   test('renders reason block as null (hidden)', () => {

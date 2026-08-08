@@ -259,7 +259,13 @@ export function sessionDataToUI(data: SessionData): {
     // auto-review behind in this TUI replay.
     return !completed || (!completed.result.ok && !completed.result.failureType);
   });
-  const recoveredPendingInteraction = state.interrupt != null || unfinishedAutoReview;
+  // RuntimeState is authoritative for whether an interaction is still pending.
+  // A historical approval.requested may be followed directly by tool.started
+  // (for example after an already-persisted grant) without a separate
+  // approval.granted event in the replay slice. Its UI projection can remain
+  // stale, but it must not create another recovery fork of an otherwise
+  // completed session.
+  const recoveredPendingInteraction = data.interrupt != null || unfinishedAutoReview;
   state = recoverPendingInteractionsForTui(state, data.runtimeEvents);
   // Replay uses the same event reducer as the live stream, with only the
   // explicit local recovery projection above for process-crash interactions.

@@ -19,12 +19,15 @@ const approval = {
   recommendedGrant: 'approve_once',
 } as unknown as ToolApprovalPayload;
 
-function data(runtimeEvents: RuntimeEvent[]): SessionData {
+function data(
+  runtimeEvents: RuntimeEvent[],
+  interrupt: SessionData['interrupt'] = null,
+): SessionData {
   return {
     threadId: 'thread',
     messages: [],
     runtimeEvents,
-    interrupt: null,
+    interrupt,
     modelProvider: 'test',
     modelName: 'test',
     thinkingLevel: null,
@@ -43,15 +46,23 @@ function cards(result: ReturnType<typeof sessionDataToUI>) {
 describe('TUI replay interaction recovery', () => {
   test('does not replay a pending tool approval and projects local cancellation', () => {
     const result = sessionDataToUI(
-      data([
-        {
-          type: 'tool.queued',
-          toolCallId: 'tool-1',
-          name: 'shell_execute',
-          args: { command: 'echo ok' },
-        },
-        { type: 'approval.requested', interactionId: 'approval-1', toolCallId: 'tool-1', approval },
-      ]),
+      data(
+        [
+          {
+            type: 'tool.queued',
+            toolCallId: 'tool-1',
+            name: 'shell_execute',
+            args: { command: 'echo ok' },
+          },
+          {
+            type: 'approval.requested',
+            interactionId: 'approval-1',
+            toolCallId: 'tool-1',
+            approval,
+          },
+        ],
+        { kind: 'approval', callId: 'tool-1' },
+      ),
     );
 
     expect(result.interrupt).toBeNull();
@@ -292,7 +303,111 @@ describe('TUI replay interaction recovery', () => {
     expect(cards(rejected)).toContainEqual(
       expect.objectContaining({
         callId: 'rejected-tool',
-        status: 'error',
+        status: 'cancelled',
+        summary: 'Tool approval cancelled by user.',
+      }),
+    );
+  });
+
+  test('does not fork a completed session when tool start clears a replay-only approval', () => {
+    const result = sessionDataToUI(
+      data([
+        { type: 'tool.queued', toolCallId: 'started-tool', name: 'shell_execute', args: {} },
+        {
+          type: 'approval.requested',
+          interactionId: 'approval-started',
+          toolCallId: 'started-tool',
+          approval,
+        },
+        { type: 'tool.started', toolCallId: 'started-tool' },
+        {
+          type: 'tool.finished',
+          toolCallId: 'started-tool',
+          name: 'shell_execute',
+          result: { ok: true, command: 'echo done', exitCode: 0, stdout: 'done', stderr: '' },
+        },
+      ]),
+    );
+
+    expect(result.interrupt).toBeNull();
+    expect(result.recoveredPendingInteraction).toBe(false);
+    expect(cards(result).some((card) => card.summary === TUI_REPLAY_CANCELLED_TEXT)).toBe(false);
+  });
+
+  test('renders a later rejected approval after an earlier approval crossed the started boundary', () => {
+    const result = sessionDataToUI(
+      data([
+        { type: 'tool.queued', toolCallId: 'started-tool', name: 'shell_execute', args: {} },
+        {
+          type: 'approval.requested',
+          interactionId: 'stale-approval',
+          toolCallId: 'started-tool',
+          approval: { ...approval, callId: 'started-tool' },
+        },
+        { type: 'tool.started', toolCallId: 'started-tool' },
+        { type: 'tool.queued', toolCallId: 'rejected-tool', name: 'shell_execute', args: {} },
+        {
+          type: 'approval.requested',
+          interactionId: 'rejected-approval',
+          toolCallId: 'rejected-tool',
+          approval: { ...approval, callId: 'rejected-tool' },
+        },
+        {
+          type: 'approval.rejected',
+          interactionId: 'rejected-approval',
+          toolCallId: 'rejected-tool',
+          reason: 'Tool approval cancelled by user.',
+        },
+      ]),
+    );
+
+    expect(result.interrupt).toBeNull();
+    expect(cards(result)).toContainEqual(
+      expect.objectContaining({
+        callId: 'rejected-tool',
+        status: 'cancelled',
+        summary: 'Tool approval cancelled by user.',
+      }),
+    );
+  });
+
+  test('renders a later rejected approval when an older journal jumps straight to tool completion', () => {
+    const result = sessionDataToUI(
+      data([
+        { type: 'tool.queued', toolCallId: 'finished-tool', name: 'shell_execute', args: {} },
+        {
+          type: 'approval.requested',
+          interactionId: 'stale-completed-approval',
+          toolCallId: 'finished-tool',
+          approval: { ...approval, callId: 'finished-tool' },
+        },
+        {
+          type: 'tool.finished',
+          toolCallId: 'finished-tool',
+          name: 'shell_execute',
+          result: { ok: true, command: 'echo done', exitCode: 0, stdout: 'done', stderr: '' },
+        },
+        { type: 'tool.queued', toolCallId: 'rejected-tool', name: 'shell_execute', args: {} },
+        {
+          type: 'approval.requested',
+          interactionId: 'rejected-approval',
+          toolCallId: 'rejected-tool',
+          approval: { ...approval, callId: 'rejected-tool' },
+        },
+        {
+          type: 'approval.rejected',
+          interactionId: 'rejected-approval',
+          toolCallId: 'rejected-tool',
+          reason: 'Tool approval cancelled by user.',
+        },
+      ]),
+    );
+
+    expect(result.interrupt).toBeNull();
+    expect(cards(result)).toContainEqual(
+      expect.objectContaining({
+        callId: 'rejected-tool',
+        status: 'cancelled',
         summary: 'Tool approval cancelled by user.',
       }),
     );
