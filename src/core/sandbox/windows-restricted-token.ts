@@ -195,20 +195,22 @@ export function resolveWindowsRestrictedTokenNetworkModeV1(input: {
 }
 
 const WINDOWS_PACKAGE_MANAGER_SHIM_PRELUDE = [
-  'npm() { npm.cmd "$@"; }',
-  'npx() { npx.cmd "$@"; }',
-  'pnpm() { pnpm.cmd "$@"; }',
-  'pnpx() { pnpx.cmd "$@"; }',
-  'yarn() { yarn.cmd "$@"; }',
-  'yarnpkg() { yarnpkg.cmd "$@"; }',
-  'corepack() { corepack.cmd "$@"; }',
+  'npm() { cmd.exe /d /c npm.cmd "$@"; }',
+  'npx() { cmd.exe /d /c npx.cmd "$@"; }',
+  'pnpm() { cmd.exe /d /c pnpm.cmd "$@"; }',
+  'pnpx() { cmd.exe /d /c pnpx.cmd "$@"; }',
+  'yarn() { cmd.exe /d /c yarn.cmd "$@"; }',
+  'yarnpkg() { cmd.exe /d /c yarnpkg.cmd "$@"; }',
+  'corepack() { cmd.exe /d /c corepack.cmd "$@"; }',
 ].join('; ');
 
 /**
  * The verified POSIX runtime does not apply Windows PATHEXT during bare-name
  * lookup and otherwise selects npm's extensionless Unix shim. Route standard
- * package-manager names through their Windows command shims without changing
- * the command recorded for approval or receipts.
+ * package-manager names through cmd.exe and their Windows command shims. The
+ * explicit batch host also preserves PATH entries such as `C:\Program Files`
+ * that isksh cannot launch as a `.cmd` file directly. This does not change the
+ * command recorded for approval or receipts.
  */
 export function wrapWindowsRestrictedTokenCommandV1(command: string): string {
   return `${WINDOWS_PACKAGE_MANAGER_SHIM_PRELUDE};\n${normalizeMsys2DrivePathsInShellCommand(command)}`;

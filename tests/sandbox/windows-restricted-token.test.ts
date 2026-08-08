@@ -181,7 +181,7 @@ describe('Windows restricted-token network capability', () => {
 describe('Windows restricted-token package-manager command normalization', () => {
   test('routes bare package-manager names through Windows command shims', () => {
     const wrapped = wrapWindowsRestrictedTokenCommandV1('npm --version');
-    expect(wrapped).toContain('npm() { npm.cmd "$@"; }');
+    expect(wrapped).toContain('npm() { cmd.exe /d /c npm.cmd "$@"; }');
     expect(wrapped).toEndWith('\nnpm --version');
   });
 

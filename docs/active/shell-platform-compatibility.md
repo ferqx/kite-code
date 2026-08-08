@@ -109,7 +109,8 @@ ACL 操作全部成功后提交。
 POSIX runtime 继续由 manifest 固定。verified Bun executable 可在可用时通过受控 child PATH 提供；
 这只是 runtime resolution，不是 repository copy，也不自动授予 Full/network authority。裸
 npm/npx/pnpm/pnpx/yarn/yarnpkg/corepack 在 restricted child 中固定转发到 Windows `.cmd` shim，避免
-POSIX lookup 命中 Windows 无法执行的 extensionless Unix shim。command 可以显式调用 bash、cmd.exe、
+POSIX lookup 命中 Windows 无法执行的 extensionless Unix shim；adapter 显式经 `cmd.exe /d /c` 承载
+batch shim，不能让 isksh 直接启动 `.cmd` 并把 `C:\Program Files` 等 PATH identity 拆词。command 可以显式调用 bash、cmd.exe、
 pwsh 或 powershell.exe。
 
 isksh 本身不提供 MSYS2 drive mount。为保持共享 Shell contract，restricted-token adapter 在送入 runner
