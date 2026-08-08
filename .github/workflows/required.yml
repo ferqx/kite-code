@@ -80,10 +80,14 @@ jobs:
       - run: bun run test:runtime:fault
       - run: bun run test:runtime:soak
 
-  tui-system:
-    name: tui-system
+  tui-system-shard:
+    name: tui-system (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -91,3 +95,17 @@ jobs:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
       - run: bun run test:tui:system
+        env:
+          KITE_TUI_SYSTEM_SHARD: ${{ matrix.shard }}/4
+
+  # Keep the established required-check name while making every isolated PTY
+  # shard visible and independently retryable in the Actions UI.
+  tui-system:
+    name: tui-system
+    needs: tui-system-shard
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify all TUI PTY shards passed
+        run: test "${{ needs.tui-system-shard.result }}" = "success"

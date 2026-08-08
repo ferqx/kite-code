@@ -27,9 +27,12 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
    协议；涉及 HTTP 正文调用时必须显式注入每 invocation 的测试 permit，生产组合根仍保持
    no-egress。平台能力的正向场景必须在测试入口确认真实后端存在；默认门禁只保留可固定能力
    状态的降级路径，不能按 runner 恰好安装的软件改变断言。
-6. PTY 测试成本高，不应用来穷举纯 reducer、policy 或 schema 分支。
-7. 完整 PTY suite 按文件隔离执行并设置单文件硬超时；因此失败会定位到具体
-   scenario，且不会因一个遗留 TUI 子进程无限占用整套测试。
+6. PTY 测试成本高，不应用来穷举纯 reducer、policy、schema 或仅由本地组件状态决定的表单/菜单分支。
+   provider/form 的静态内容、焦点、遮罩和错误选项应使用 Ink 组件测试；只有真实 TUI、HTTP、持久化或
+   跨进程边界进入默认 PTY suite。
+7. 完整 PTY suite 在单个 runner 内按文件隔离、串行执行并设置单文件硬超时；因此失败会定位到具体
+   scenario，且不会因一个遗留 TUI 子进程无限占用整套测试。Required CI 可按稳定索引将默认清单分到
+   独立 runner，但每个分片继续保持这一串行和隔离边界。
 8. suite runner 只负责编排按文件隔离的功能场景，不从协调进程或跨 scenario child 的 RSS/
    active-resource/FD 差值推导 leak 结论；fault-soak CI fresh child before/after 也只用于冷启动诊断。
    正式 1C.7 qualification 另外启动一个受 outer runner ownership 约束的真实 Ink child，在同一
@@ -110,8 +113,10 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
     确定性删除已尝试字符与 bounded 隐藏空白，避免残留空格改变下一次输入类别。Enter delivery
     与 semantic receipt 使用独立 timeout；后者继续使用 request/event 场景预算。持久事件加进程重启
     的复合场景还要让 test deadline 覆盖完整 event receipt 与 restart replay，两者不能争用短输入预算。
-20. suite runner 默认在进程隔离和串行顺序不变的前提下运行所有选中 scenario，末尾一次性汇总失败；
-    `KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required 的默认证据模式。
+20. suite runner 默认在进程隔离和单 runner 串行顺序不变的前提下运行所有选中 scenario，末尾一次性汇总失败；
+    Required 可通过 `KITE_TUI_SYSTEM_SHARD=<index>/<count>` 在独立 runner 间稳定分片，所有分片通过后
+    才能使汇总 `tui-system` 门禁成功。`KITE_TUI_TEST_FAIL_FAST=1` 只用于本地快速复现，不属于 Required
+    的默认证据模式。
 
 ## 分层选择
 

@@ -14,6 +14,10 @@
 destructive/unknown effect 与 Verification false pass 继续 fail closed；P0/P1 为零；安装、卸载与回滚
 smoke 通过。
 
+日常 PR 的 Required workflow 是首发候选前的合并门禁。其中真实 TUI PTY suite 仅在单个 runner 内串行；
+CI 将默认 scenario 清单稳定分到四个相互独立的 runner，并由同名 `tui-system` 汇总 gate 在所有分片成功后
+才报告成功。这不会将 PTY 并发或单个分片通过误作完整 G0 证据。
+
 `G1` 只判断普通发布可用性：GitHub-hosted macOS、Ubuntu、Windows 原生构建、安装、启动和
 TUI/CLI smoke 通过；DeepSeek `deepseek-v4-flash` 与阿里千问 OpenAI-compatible route 各完成一次
 低成本真实调用；release notes 与已知限制和候选内容一致。

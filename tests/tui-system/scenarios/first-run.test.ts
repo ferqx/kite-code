@@ -1,9 +1,9 @@
 /**
- * First-run / setup wizard comprehensive PTY system tests.
+ * First-run PTY boundaries.
  *
- * Covers: provider selection, API key form, custom endpoint form,
- * connection flow, error recovery, manual model entry, and full success path.
- * Config is fully isolated via KITE_CODE_HOME — user-level files are never touched.
+ * Screen-local provider/form navigation is covered by tests/first-run-ui.test.tsx.
+ * This file keeps the production-flow boundaries that require a real TUI, local
+ * HTTP model discovery, cancellation, and persisted configuration.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -20,21 +20,15 @@ import {
 } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
-const TIMEOUT = 60000;
+const TIMEOUT = 60_000;
 const DEFAULT_CUSTOM_ENDPOINT = 'http://localhost:8080/v1';
 
-describe('first-run — comprehensive flow', () => {
+describe('first-run — connection boundaries', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
 
-  function getOutput(): string {
-    return stripAnsi(tui.viewport());
-  }
-
-  function getOutputSinceLastAction(): string {
-    // Keep the existing call-site name while making readiness semantic: the
-    // current VT viewport, not an erased action delta, authorizes the next key.
+  function output(): string {
     return stripAnsi(tui.viewport());
   }
 
@@ -42,6 +36,7 @@ describe('first-run — comprehensive flow', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace({
       configOverrides: {
+        sandbox: { enabled: false },
         provider: {
           deepseek: {
             type: 'deepseek' as const,
@@ -60,8 +55,7 @@ describe('first-run — comprehensive flow', () => {
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
-  async function spawnFirstRun() {
-    await tui?.killAndWait();
+  async function openCustomEndpointForm(): Promise<void> {
     tui = await spawnReadyTui({
       cols: 100,
       rows: 40,
@@ -70,33 +64,19 @@ describe('first-run — comprehensive flow', () => {
       noPreConfig: true,
       readiness: 'first-run-provider',
     });
-  }
-
-  async function openDeepSeekForm(): Promise<void> {
-    await spawnFirstRun();
-    const selectMark = tui.markOutput();
-    tui.write('\r');
-    await waitForText(() => getOutput(), 'Connect to DeepSeek', 5000);
-    await waitForText(() => getOutput(), 'API key', 5000);
-    await waitForOutputQuiescence(() => tui.outputSince(selectMark));
-  }
-
-  async function openCustomEndpointForm(): Promise<void> {
-    await spawnFirstRun();
-    await waitForText(() => getOutput(), '› DeepSeek', 5000);
+    await waitForText(() => output(), '› DeepSeek', 5_000);
     tui.write('\x1b[B');
-    await waitForText(() => getOutputSinceLastAction(), '› OpenAI', 5000);
+    await waitForText(() => output(), '› OpenAI', 5_000);
     tui.write('\x1b[B');
-    await waitForText(() => getOutputSinceLastAction(), '› Custom endpoint', 5000);
+    await waitForText(() => output(), '› Custom endpoint', 5_000);
     tui.write('\r');
-    await waitForText(() => getOutputSinceLastAction(), 'Connect to a custom endpoint', 5000);
+    await waitForText(() => output(), 'Connect to a custom endpoint', 5_000);
   }
 
   async function connectCustomEndpoint(baseURL: string): Promise<void> {
     await openCustomEndpointForm();
-
     tui.write('\r');
-    await waitForText(() => getOutputSinceLastAction(), '█', 5000);
+    await waitForText(() => output(), '█', 5_000);
     await clearInput(tui, Array.from(DEFAULT_CUSTOM_ENDPOINT).length, { backspace: 'ascii' });
     const editMark = tui.markOutput();
     await typeText(tui, baseURL);
@@ -105,297 +85,68 @@ describe('first-run — comprehensive flow', () => {
     await submitCurrentInput(tui);
   }
 
-  // ─── Provider Selection ───
-
   test(
-    'provider screen renders all providers',
+    'cancels a pending local model-discovery request and restores the connection form',
     async () => {
-      await spawnFirstRun();
-      const out = getOutput();
-      expect(screenContains(out, 'Choose a model provider')).toBe(true);
-      expect(screenContains(out, 'DeepSeek')).toBe(true);
-      expect(screenContains(out, 'OpenAI')).toBe(true);
-      expect(screenContains(out, 'Custom endpoint')).toBe(true);
-      expect(screenContains(out, 'Setup 1 of 2')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'provider screen: arrow down moves selection',
-    async () => {
-      await spawnFirstRun();
-      tui.write('\x1b[B'); // down to OpenAI
-      await waitForText(() => getOutputSinceLastAction(), '› OpenAI', 5000);
-      // OpenAI should now be highlighted (we can't easily check highlight in stripped output,
-      // but we can verify by selecting it)
-      tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), 'Connect to OpenAI', 5000);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'provider screen: Esc exits process',
-    async () => {
-      await spawnFirstRun();
-      tui.write('\x1b');
-      const code = await tui.waitForExit();
-      expect(code).toBe(0);
-    },
-    TIMEOUT,
-  );
-
-  // ─── API Key Form (DeepSeek) ───
-
-  test(
-    'DeepSeek: shows API key form with mask',
-    async () => {
-      await openDeepSeekForm();
-      expect(screenContains(getOutput(), 'API key')).toBe(true);
-      expect(screenContains(getOutput(), 'Setup 2 of 2')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'DeepSeek: empty key + Enter stays on form',
-    async () => {
-      await openDeepSeekForm();
-      tui.write('\r'); // Enter with empty key
-      await waitForText(() => getOutputSinceLastAction(), 'API key cannot be empty', 5000);
-      // Should still be on the form
-      expect(screenContains(getOutput(), 'Connect to DeepSeek')).toBe(true);
-      expect(screenContains(getOutput(), 'API key')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'DeepSeek: Esc returns to provider selection',
-    async () => {
-      await openDeepSeekForm();
-      tui.write('\x1b'); // Esc
-      await waitForText(() => getOutputSinceLastAction(), 'Choose a model provider', 5000);
-      expect(screenContains(getOutput(), 'Setup 1 of 2')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'DeepSeek: typing key shows masked characters',
-    async () => {
-      await openDeepSeekForm();
-      await typeMaskedText(tui, 'sk-test', 50);
-      await waitForText(() => getOutputSinceLastAction(), '*******', 5000);
-      // With mask="*", output should show asterisks not the actual key
-      const out = getOutput();
-      expect(screenContains(out, 'sk-test')).toBe(false);
-      expect(screenContains(out, '*******')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  // ─── Custom Endpoint Form ───
-
-  test(
-    'custom endpoint: shows Base URL and API key fields',
-    async () => {
-      await openCustomEndpointForm();
-      expect(screenContains(getOutput(), 'Base URL')).toBe(true);
-      expect(screenContains(getOutput(), 'API key')).toBe(true);
-      expect(screenContains(getOutput(), 'Optional')).toBe(true);
-      expect(screenContains(getOutput(), 'http://localhost:8080/v1')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'custom endpoint: Enter enters edit mode, typing modifies URL',
-    async () => {
-      await openCustomEndpointForm();
-
-      // Press Enter to edit Base URL (default focus is baseURL)
-      tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), '█', 5000);
-
-      await clearInput(tui, Array.from(DEFAULT_CUSTOM_ENDPOINT).length, { backspace: 'ascii' });
-
-      // Type a short test string
-      await typeText(tui, 'http://x.co', 20);
-
-      // Verify the typed text appears
-      expect(screenContains(getOutput(), 'http://x.co')).toBe(true);
-      await clearInput(tui, Array.from('http://x.co').length, { backspace: 'ascii' });
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'custom endpoint: Esc in edit mode cancels edit and restores value',
-    async () => {
-      await openCustomEndpointForm();
-
-      // Enter edit mode
-      tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), '█', 5000);
-      // Type something
-      tui.write('x');
-      await waitForText(() => getOutputSinceLastAction(), 'http://localhost:8080/v1x', 5000);
-      // Esc to cancel edit
-      tui.write('\x1b');
-      await waitForCondition(
-        () => {
-          const viewport = getOutput();
-          return (
-            !viewport.includes('█') &&
-            viewport.split('\n').some((line) => line.trim() === DEFAULT_CUSTOM_ENDPOINT)
-          );
-        },
-        'custom endpoint edit to cancel and restore the exact original URL',
-        5000,
-      );
-
-      // Re-enter edit mode — the value should be the original (cancel restored it)
-      tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), '█', 5000);
-      // Type a different char to verify we're editing the restored value
-      tui.write('z');
-      await waitForText(() => getOutputSinceLastAction(), 'http://localhost:8080/v1z', 5000);
-      // Should show original URL + 'z', not 'x' + 'z'
-      expect(screenContains(getOutput(), 'http://localhost:8080/v1z')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'custom endpoint: arrow down moves to API key field',
-    async () => {
-      await openCustomEndpointForm();
-
-      // Arrow down to API key
-      tui.write('\x1b[B');
-      await waitForText(() => getOutputSinceLastAction(), '› API key', 5000);
-      // Press Enter to edit API key
-      tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), '█', 5000);
-      // Type a character
-      await typeMaskedText(tui, 'k');
-      await waitForText(() => getOutputSinceLastAction(), '*', 5000);
-      // Should show masked character for API key
-      expect(screenContains(getOutput(), '*')).toBe(true);
-    },
-    TIMEOUT,
-  );
-
-  test(
-    'custom endpoint: Esc in navigation mode goes back to providers',
-    async () => {
-      await openCustomEndpointForm();
-
-      // Esc in navigation mode
-      tui.write('\x1b');
-      await waitForText(() => getOutputSinceLastAction(), 'Choose a model provider', 5000);
-    },
-    TIMEOUT,
-  );
-
-  // ─── Connecting Screen ───
-
-  test(
-    'connecting screen uses the local model fixture and Esc cancels',
-    async () => {
-      server.setModelsResponse({ delay: 5000 });
+      server.setModelsResponse({ delay: 5_000 });
       await connectCustomEndpoint(server.baseURL);
-      await waitForText(() => getOutputSinceLastAction(), 'Connecting to Custom endpoint', 5000);
+      await waitForText(() => output(), 'Connecting to Custom endpoint', 5_000);
 
       tui.write('\x1b');
-      await waitForText(() => getOutputSinceLastAction(), 'Connect to a custom endpoint', 5000);
+      await waitForText(() => output(), 'Connect to a custom endpoint', 5_000);
       expect(screenContains(tui.viewport(), 'Base URL')).toBe(true);
-      server.setModelsResponse({});
-    },
-    TIMEOUT,
-  );
-
-  // ─── Error Screen ───
-
-  test(
-    'error screen: local incompatible response shows actionable options',
-    async () => {
-      server.setModelsResponse({ status: 500 });
-      await connectCustomEndpoint(server.baseURL);
-      await waitForText(() => getOutputSinceLastAction(), 'The endpoint is reachable', 30000);
-
-      // Error screen should show options
-      const out = getOutput();
-      expect(screenContains(out, 'Enter a model name')).toBe(true);
-      expect(screenContains(out, 'Edit connection settings')).toBe(true);
-      expect(screenContains(out, 'Choose another provider')).toBe(true);
-      server.setModelsResponse({});
     },
     TIMEOUT,
   );
 
   test(
-    'error screen: arrow down + Enter on Choose another provider',
+    'routes an incompatible local model list back to provider selection',
     async () => {
       server.setModelsResponse({ status: 500 });
       await connectCustomEndpoint(server.baseURL);
-      await waitForText(() => getOutputSinceLastAction(), 'The endpoint is reachable', 30000);
+      await waitForText(() => output(), 'The endpoint is reachable', 30_000);
 
-      // Arrow down to "Choose another provider"
       tui.write('\x1b[B');
-      await waitForText(() => getOutputSinceLastAction(), '› Edit connection settings', 5000);
+      await waitForText(() => output(), '› Edit connection settings', 5_000);
       tui.write('\x1b[B');
-      await waitForText(() => getOutputSinceLastAction(), '› Choose another provider', 5000);
-      // Confirm
+      await waitForText(() => output(), '› Choose another provider', 5_000);
       tui.write('\r');
-      await waitForText(() => getOutputSinceLastAction(), 'Choose a model provider', 5000);
-
-      // Should be back on provider selection
-      expect(screenContains(tui.viewport(), 'Choose a model provider')).toBe(true);
-      server.setModelsResponse({});
+      await waitForText(() => output(), 'Choose a model provider', 5_000);
     },
     TIMEOUT,
   );
 
   test(
-    'custom endpoint: local model discovery saves the full list and completes setup',
+    'discovers local models, persists the full list, and completes setup',
     async () => {
       server.setModelsResponse({ models: ['local-model-a', 'local-model-b'] });
       const modelRequestBaseline = server.getModelRequests().length;
       await connectCustomEndpoint(server.baseURL);
 
-      // The runtime still requires a non-empty key when it boots the saved
-      // openai-compatible provider. Exercise the recovery path explicitly
-      // instead of conditionally falling back after any loosely matched error.
-      await waitForText(() => getOutputSinceLastAction(), 'The API key was rejected.', 30000);
-      await waitForText(() => getOutput(), '› Edit connection settings', 5000);
+      await waitForText(() => output(), 'The API key was rejected.', 30_000);
+      await waitForText(() => output(), '› Edit connection settings', 5_000);
       tui.write('\r');
-      await waitForText(() => getOutput(), '█', 5000);
+      await waitForText(() => output(), '█', 5_000);
       tui.write('\x1b');
       await waitForCondition(
-        () => !getOutput().includes('█') && screenContains(getOutput(), '› Base URL'),
-        'restored custom endpoint navigation after cancelling the automatic base URL edit',
-        5000,
+        () => !output().includes('█') && screenContains(output(), '› Base URL'),
+        'restored custom endpoint navigation after cancelling automatic base URL edit',
+        5_000,
       );
       tui.write('\x1b[B');
-      await waitForText(() => getOutput(), '› API key', 5000);
+      await waitForText(() => output(), '› API key', 5_000);
       tui.write('\r');
-      await waitForText(() => getOutput(), '█', 5000);
+      await waitForText(() => output(), '█', 5_000);
       await typeMaskedText(tui, 'local-key');
-      await waitForText(() => getOutput(), '*********', 5000);
+      await waitForText(() => output(), '*********', 5_000);
       await submitCurrentInput(tui, {
         acceptWhen: (viewport) =>
           screenContains(viewport, 'Connecting to Custom endpoint') ||
           screenContains(viewport, 'local-model-a'),
       });
-      await waitForText(() => getOutputSinceLastAction(), 'local-model-a', 30000);
-      const terminalOutput = getOutput();
-      expect(
-        screenContains(terminalOutput, 'local-model-a'),
-        `model requests: ${server.getModelRequests().join(', ')}`,
-      ).toBe(true);
+      await waitForText(() => output(), 'local-model-a', 30_000);
+
+      expect(screenContains(tui.viewport(), 'local-model-a')).toBe(true);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
 
       const savedConfig = readFileSync(workspace.configPath, 'utf8');

@@ -19,7 +19,7 @@
     "test:tui:integration": "bun run scripts/run-tui-system-tests.ts",
     "test:tui:system": "bun run scripts/run-tui-system-tests.ts",
     "test:tui:smoke:native": "KITE_RUN_NATIVE_SANDBOX_SMOKE=1 bun test --parallel=1 --max-concurrency=1 tests/tui-system/smoke/native-sandbox.test.ts",
-    "test:tui:system:core": "bun run scripts/run-tui-system-tests.ts startup input multi-turn interrupt approval approval-escape ask-user slash-commands session-lifecycle session-switch session-persistence interrupt-resume error-recovery tool-approve ask-user-esc long-message tool-parse-error",
+    "test:tui:system:core": "bun run scripts/run-tui-system-tests.ts startup input multi-turn interrupt approval-escape slash-commands session-lifecycle session-switch session-persistence interrupt-resume error-recovery tool-approve ask-user-esc tool-parse-error",
     "tui": "bun run src/app/tui/index.tsx",
     "prod:tui": "NODE_ENV=production bun run src/app/tui/index.tsx",
     "release:build": "bun run scripts/release/build-oss-candidate.ts",

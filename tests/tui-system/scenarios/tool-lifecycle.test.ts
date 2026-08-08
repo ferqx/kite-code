@@ -277,6 +277,7 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       expect(screenContains(output, '工具授权')).toBe(true);
       expect(screenContains(output, '允许一次')).toBe(true);
       expect(screenContains(output, '拒绝')).toBe(true);
+      expect(screenContains(output, '[接受编辑]')).toBe(false);
 
       // ── 3. 验证渲染顺序：模型文字在审批块之前 / Verify order: text before approval ──
       const order = assertOrder(output, 'I will run a command', '工具授权');

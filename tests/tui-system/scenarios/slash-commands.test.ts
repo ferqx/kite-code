@@ -171,11 +171,17 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
-    '/permissions auto selects automatic approval mode',
+    '/permissions switches automatic approval to accept edits',
     async () => {
       await submitCommand(tui, '/permissions auto', 80);
       await waitForText(() => tui.viewport(), '自动审批', 5_000);
       expect(screenContains(tui.viewport(), '自动审批')).toBe(true);
+
+      await submitCommand(tui, '/permissions accept_edits', 80);
+      await waitForText(() => tui.viewport(), '接受编辑', 5_000);
+      await waitForOutputQuiescence(() => tui.outputSinceLastAction());
+      expect(screenContains(tui.viewport(), '自动审批')).toBe(false);
+      expect(screenContains(tui.viewport(), '接受编辑')).toBe(true);
     },
     TIMEOUT,
   );

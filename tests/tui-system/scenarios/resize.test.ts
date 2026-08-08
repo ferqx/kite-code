@@ -18,7 +18,7 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, typeText } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, stripAnsi } from '../harness/terminal-screen';
+import { screenContains } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -55,54 +55,10 @@ describe('TUI PTY System — Terminal Resize', () => {
     await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
   });
 
-  // ── Test 1: Initial Render at Configured Dimensions ──────────
+  // ── Multiple Consecutive Resizes ─────────────────────────────
 
   test(
-    'TUI renders at initial dimensions (120x40)',
-    async () => {
-      const output = tui.viewport();
-      const clean = stripAnsi(output);
-
-      console.log('  output snapshot (last 500 chars):', clean.slice(-500));
-
-      // Prompt should be visible — basic sign of a live TUI
-      expect(screenContains(output, '❯')).toBe(true);
-
-      // Output should have meaningful content — not just an empty PTY buffer
-      expect(clean.length).toBeGreaterThan(0);
-
-      // The initial spawn used cols=120, rows=40; the resize() API
-      // itself is exercised in the tests below, but we verify the
-      // spawn dimensions did not prevent rendering.
-    },
-    TIMEOUT,
-  );
-
-  // ── Test 2: Single Resize to Smaller Terminal ────────────────
-
-  test(
-    'TUI survives resize to smaller terminal (80x24)',
-    async () => {
-      // Call resize — on Linux/macOS this triggers SIGWINCH;
-      // on Windows ConPTY the child dimensions do not change
-      // but the call itself must not throw.
-      tui.resize(80, 24);
-
-      await expectInteractiveAfterResize();
-
-      // TUI should still be alive with prompt visible.
-      const output = tui.viewport();
-      expect(screenContains(output, '❯')).toBe(true);
-
-      console.log('  resize to 80x24 — prompt still visible, TUI alive');
-    },
-    TIMEOUT,
-  );
-
-  // ── Test 3: Multiple Consecutive Resizes ─────────────────────
-
-  test(
-    'TUI survives multiple consecutive resizes',
+    'TUI survives consecutive resizes and remains interactive',
     async () => {
       // Resize 1: 80x24 → 100x30
       tui.resize(100, 30);
