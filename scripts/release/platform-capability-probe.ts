@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -248,10 +249,16 @@ type FilesystemProbeResult = PlatformCapabilityEvidenceV1['filesystem'] & {
 export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEvidenceV1> {
   const backend = detectSandboxBackend();
   const root = mkdtempSync(join(tmpdir(), 'kite-platform-capability-probe-'));
-  const workspace = join(root, 'workspace');
-  const outside = join(root, 'outside');
-  mkdirSync(join(workspace, '.git'), { recursive: true });
-  mkdirSync(outside);
+  const lexicalWorkspace = join(root, 'workspace');
+  const lexicalOutside = join(root, 'outside');
+  mkdirSync(join(lexicalWorkspace, '.git'), { recursive: true });
+  mkdirSync(lexicalOutside);
+  // Windows hosted runners can expose TMP through an 8.3 path while native
+  // ACL APIs persist the equivalent long path. Use one canonical identity for
+  // the probe, ledger, and finally repair so cleanup cannot reject its own
+  // protected-path snapshots as outside the Workspace.
+  const workspace = realpathSync.native(lexicalWorkspace);
+  const outside = realpathSync.native(lexicalOutside);
   symlinkSync(
     outside,
     join(workspace, 'escape'),

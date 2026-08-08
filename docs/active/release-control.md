@@ -83,6 +83,8 @@ release notes 中披露，解除前预构建候选不声称支持持久 MCP 凭�
 `.github/workflows/release-candidate.yml` 在 pull request、`main` push 和手动触发时运行
 `macos-15`、`ubuntu-24.04`、`windows-2025` 矩阵。每个 job 安装锁定 Bun 版本，执行定向 release
 tests、native build/verify/smoke 和 TUI startup scenario，然后上传候选 artifact。
+Platform Capability Probe 的 Windows 临时 Workspace 在采集前固定 canonical path identity，并在
+写出 evidence artifact 前以同一 identity repair persistent ACL ledger；8.3 alias 不能分裂采集与清理。
 
 workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestations: write`、`contents: write` 或
 `packages: write`，不得调用 `gh release` 或 npm publish。上传 artifact 是 CI 交付，不是公开 Release。

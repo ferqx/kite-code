@@ -143,7 +143,8 @@ environment。token、ACL 与 Job conformance 通过也不能提升 strict netwo
 
 正式 Platform Capability Probe 的 Windows 命令使用正常 persistent Workspace capability，而不是
 startup probe 的 ephemeral Workspace SID，因此 protected-path write 结论必须经过真实 ledger/DACL
-刷新路径。probe Workspace 仍是临时目录；采集结束时先调用 runner repair 恢复 snapshot、撤销 root ACE
+刷新路径。probe Workspace 创建后立即固定 canonical identity，采集与 finally repair 必须共用该值，
+不能让 Windows 8.3/长路径 alias 分裂 ledger。probe Workspace 仍是临时目录；采集结束时先调用 runner repair 恢复 snapshot、撤销 root ACE
 并删除 ledger，再删除临时目录。资格 workflow 的 paths gate 必须覆盖 native runner、`vendor/isksh`、
 Windows adapter 使用的 Core tool/runtime 文件以及 evidence scripts，不能让这些依赖单独变更而跳过原生
 E2E/probe。
