@@ -3,7 +3,7 @@
 状态：active
 范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/tools/search.ts`、`src/core/harness/tool-runner.ts`、`src/core/model/runtime-context.ts`、`src/core/runtime/agent.ts`、`src/core/subagent/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
 读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
-验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx`
+验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`
 
 ## 设计目标
 
@@ -18,7 +18,9 @@ Shell: bash — use bash syntax, use POSIX paths (e.g. /d/work, not D:\work)
 Workspace: /d/work/my-project
 ```
 
-模型忠实地对所有工具使用 POSIX 路径。这对 `shell_execute` 正确（MSYS2 bash 理解 `/d/...`），但对 `read_file` 致命（Node.js `fs` 无法解析）。
+模型忠实地对所有工具使用 POSIX 路径。host MSYS2 bash 原生理解 `/d/...`；Windows restricted-token
+使用的 isksh 不提供 drive mount，因此其 adapter 把字面量 shell path token 转为 `D:/...` 后执行。
+这两种 `shell_execute` 路径都有效，但 `read_file` 直接调用 Node.js `fs`，无法解析 `/d/...`。
 
 ## 架构
 
@@ -131,7 +133,7 @@ pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 p
 
 ### 工具输出截断（`src/core/tools/registry/projection.ts`）
 
-`truncateProjectedOutput` 对单路超过 4000 字符的输出做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。仅截断不改写（零幻觉），保留首尾信息。失败时两路输出都保留，Runner 只消费投影，不再自带第二份截断实现。
+Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内存 head+tail capture 持续 drain stdout/stderr，防止最终投影前出现无界完整输出副本；capture 超限会写入明确 omission marker。其后 `truncateProjectedOutput` 对单路超过 4000 字符的模型输出继续做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。失败时两路输出都保留，Runner 只消费该模型投影，不再自带第二份模型截断实现。
 
 ### rg exit code 1 ≠ error（`tool-contracts.ts`、`system-prompt.txt`）
 
@@ -151,6 +153,9 @@ subagent CWD 使用 `process.cwd()` 原生格式，不再通过 `toPosixPath` �
 
 - `msys2ToWindowsPath(path)` — 单个路径精确转换，`/d/foo` → `D:\foo`，用于 `file.ts` 防御纵深
 - `normalizeMsys2PathsInText(text)` — 正则匹配全部 `/X/...` 模式并转换，用于 `shell.ts`
+- `normalizeMsys2DrivePathsInShellCommand(command)` — 只把 Windows shell token boundary 上的字面量
+  `/X/...` 前缀转换为保留正斜杠的 `X:/...`，供 restricted-token isksh adapter 使用；不转换 URL、
+  `/dev/null` 或相对路径
 - `canonicalPathForComparison(path)` / `isPathInsideWorkspace(workspace, target)` — 对已存在的最近祖先调用 `realpath`，再拼回尚未创建的后缀；Approval Policy、file 边界与 search 遍历共同使用，确保 macOS `/var` 与 `/private/var`、符号链接 workspace 等文件系统别名不会被误判为外部路径，同时仍能识别通过符号链接逃逸工作区的目标。
 
 前两个 MSYS2 转换函数均以 `process.platform !== "win32"` 短路，Linux/macOS 完全透传。

@@ -40,9 +40,9 @@
     {
       "runner": "windows-2025",
       "expectedArch": "x64",
-      "candidateBackend": "none",
+      "candidateBackend": "windows_restricted_token",
       "currentOutcome": "excluded",
-      "reason": "no filesystem/network sandbox backend is implemented"
+      "reason": "restricted-token + Job Object development backend lacks structural offline network enforcement, dynamic protected-name interception, and production entrypoint evidence"
     }
   ],
   "requiredEvidence": [

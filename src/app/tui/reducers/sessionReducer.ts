@@ -1,7 +1,7 @@
 // ── 会话管理（登录/切换/删除）、用户消息、模型选择 ──
 import type { OutputBlock, SessionSnapshot, TuiState } from '../types';
 import type { Action } from './actions';
-import { appendBlock, maxBlockIdInTurns, reconstructTurns } from './helpers';
+import { appendUserMessage, maxBlockIdInTurns, reconstructTurns } from './helpers';
 
 export function sessionReducer(state: TuiState, action: Action): TuiState | null {
   switch (action.type) {
@@ -262,7 +262,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
     }
     case 'USER_MESSAGE': {
       const block: OutputBlock = { id: state.nextBlockId, kind: 'user', content: action.text };
-      return appendBlock(state, block);
+      return appendUserMessage(state, block);
     }
     default:
       return null;

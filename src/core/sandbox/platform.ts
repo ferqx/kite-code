@@ -1,7 +1,8 @@
 import { existsSync } from 'node:fs';
+import { resolveWindowsSandboxRunnerV1 } from './windows-runner';
 
 /** 沙箱后端类型 / Sandbox backend type */
-export type SandboxBackend = 'seatbelt' | 'bubblewrap' | 'none';
+export type SandboxBackend = 'seatbelt' | 'bubblewrap' | 'windows_restricted_token' | 'none';
 
 export interface SandboxRuntime {
   /** Whether sandboxing is enabled by configuration/runtime flags. */
@@ -15,6 +16,15 @@ export interface SandboxRuntime {
 export interface ResolveSandboxRuntimeOptions {
   enabled?: boolean;
   detectBackend?: () => SandboxBackend;
+}
+
+/**
+ * Full mode needs the stronger production-qualified autonomy boundary. The
+ * direct Windows restricted-token backend is usable for normal shell work but
+ * intentionally is not Full-qualified.
+ */
+export function sandboxSupportsFullModeV1(backend: SandboxBackend): boolean {
+  return backend === 'seatbelt' || backend === 'bubblewrap';
 }
 
 let cachedBubblewrapPath: string | null | undefined;
@@ -47,9 +57,14 @@ export function selectSandboxBackend(input: {
   platform: NodeJS.Platform;
   seatbeltAvailable: boolean;
   usableBubblewrapPath: string | null;
+  /** Verified direct-workspace runner for the restricted-token backend. */
+  windowsRestrictedTokenRunner?: boolean;
 }): SandboxBackend {
   if (input.platform === 'darwin' && input.seatbeltAvailable) return 'seatbelt';
   if (input.platform === 'linux' && input.usableBubblewrapPath) return 'bubblewrap';
+  if (input.platform === 'win32' && input.windowsRestrictedTokenRunner === true) {
+    return 'windows_restricted_token';
+  }
   return 'none';
 }
 
@@ -66,10 +81,13 @@ export function findUsableBubblewrap(): string | null {
 
 /** 检测当前平台可用的沙箱后端 / Detect available sandbox backend on current platform */
 export function detectSandboxBackend(): SandboxBackend {
+  const windowsRunnerAvailable =
+    process.platform === 'win32' && resolveWindowsSandboxRunnerV1() !== null;
   return selectSandboxBackend({
     platform: process.platform,
     seatbeltAvailable: existsSync('/usr/bin/sandbox-exec'),
     usableBubblewrapPath: process.platform === 'linux' ? findUsableBubblewrap() : null,
+    windowsRestrictedTokenRunner: windowsRunnerAvailable,
   });
 }
 

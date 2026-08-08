@@ -340,12 +340,14 @@ export interface ToolExecutionReadyEvent {
   toolCallId: string;
 }
 
-/** 工具执行过程中产生进度数据（如 shell 逐行输出） */
+/** 工具执行过程中的瞬态展示数据；可按 stream 合并多行，不属于可恢复事实。 */
 export interface ToolProgressEvent {
   type: 'tool.progress';
   toolCallId: string;
   chunk: string;
   stream: 'stdout' | 'stderr';
+  /** Logical lines represented by this bounded batch, including omitted lines. */
+  lineCount?: number;
 }
 
 /** Durable allow/deny fact persisted before an admitted network socket opens. */

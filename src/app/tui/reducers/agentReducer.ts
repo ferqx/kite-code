@@ -1,125 +1,16 @@
 // ── Agent 生命周期（运行/空闲/退出）、中断、授权、Ctrl+C/Esc ──
 
 import { InteractionMode } from '@/protocol/events';
-import { getToolDetail } from '../components/render-utils';
 import type { OutputBlock, TuiState } from '../types';
 import type { Action } from './actions';
-import { buildToolSummaryLine } from './consolidateTools';
+import { projectUserCancelledTurn } from './cancellation-projection';
 import {
   appendBlock,
   finalizeLastTurnStreaming,
   findBlock,
   findBlockById,
-  lastTurn,
   replaceBlockById,
 } from './helpers';
-
-/** 将最后 turn 中所有 queued/running 状态的 subagent/tool_card/tool_summary 标记为 cancelled。
- *  Esc 取消后 running→false，所有 block 移入 Static 冻结。必须在 render
- *  之前同步收尾，否则 spinner 状态被写入 scrollback 后永远不可恢复。
- *  Mark all queued/running subagent/tool_card/tool_summary blocks in the last turn as cancelled
- *  before running flips to false, so they don't get frozen into Static. */
-export function cancelRunningBlocks(s: TuiState): TuiState {
-  const last = lastTurn(s);
-  if (!last) return s;
-  const now = Date.now();
-  let changed = false;
-  let nextBlockId = s.nextBlockId;
-  const blocks = last.blocks.flatMap((b): OutputBlock[] => {
-    if (b.kind === 'subagent' && b.status === 'running') {
-      changed = true;
-      return [
-        {
-          ...b,
-          status: 'cancelled' as const,
-          summary: 'Cancelled',
-          error: 'Cancelled',
-          toolCallCount: b.steps.length,
-          durationMs: s.runStartTime ? now - s.runStartTime : 0,
-          expanded: false,
-        },
-      ];
-    }
-    if (b.kind === 'tool_card' && (b.status === 'queued' || b.status === 'running')) {
-      changed = true;
-      return [
-        {
-          ...b,
-          status: 'cancelled' as const,
-          summary: 'Cancelled',
-          detail: b.detail ?? getToolDetail(b.name, b.args),
-        },
-      ];
-    }
-    if (b.kind === 'tool_summary') {
-      // Queued exploration calls never started, so they must not become
-      // completed-looking "read N files" statistics when the run is cancelled.
-      const tools = b.tools.flatMap((t) => {
-        if (t.status === 'queued') return [];
-        return [
-          t.status === 'running' ? { ...t, status: 'cancelled' as const, summary: 'Cancelled' } : t,
-        ];
-      });
-      const removedQueuedTools = tools.length !== b.tools.length;
-      if (
-        removedQueuedTools ||
-        tools.some((t, i) => t.status !== b.tools[i]!.status) ||
-        b.active ||
-        b.pendingCaption
-      ) {
-        changed = true;
-        if (tools.length === 0 && b.hasThinking !== true) {
-          const narration = [
-            ...(b.captions ?? []),
-            ...(b.pendingCaption ? [b.pendingCaption] : []),
-          ].join('\n\n');
-          return narration ? [{ id: b.id, kind: 'text' as const, content: narration }] : [];
-        }
-        // 取消/中断 settle 时按工具状态重算 result（阶段块可能横跨多轮工具，
-        // 残留的旧 result 会误导结算状态）。规则 15。
-        // Recompute result from tool states at cancel/interrupt settle (rule 15).
-        const hasError = tools.some(
-          (t) => t.status === 'error' || t.status === 'timeout' || t.status === 'exhausted',
-        );
-        const anyCancelled = tools.some(
-          (t) => t.status === 'cancelled' || t.status === 'queued' || t.status === 'running',
-        );
-        const result = hasError
-          ? ('error' as const)
-          : anyCancelled
-            ? ('cancelled' as const)
-            : ('done' as const);
-        const settled: OutputBlock = {
-          ...b,
-          tools,
-          summaryLine: buildToolSummaryLine(tools),
-          active: false,
-          latestActivity: undefined,
-          totalElapsedMs: b.modelMs ?? now - b.createdAt,
-          pendingCaption: undefined,
-          result,
-        };
-        // ADR-0030 / 规则 24：取消/中断时未确认旁白脱离为独立文本块
-        // Unconfirmed captions detach on cancel/interrupt too
-        if (b.pendingCaption != null) {
-          return [settled, { id: nextBlockId++, kind: 'text' as const, content: b.pendingCaption }];
-        }
-        return [settled];
-      }
-    }
-    return [b];
-  });
-  if (!changed) return s;
-  const turns = s.turns.slice();
-  turns[turns.length - 1] = { blocks };
-  return {
-    ...s,
-    turns,
-    nextBlockId,
-    currentThoughtSummaryId: undefined,
-    thoughtPhaseStatus: undefined,
-  };
-}
 
 function settleActiveThought(s: TuiState): TuiState {
   if (s.currentThoughtSummaryId == null) return s;
@@ -203,6 +94,9 @@ function cancelAskUserToolCard(s: TuiState, questionBlockId: number): TuiState {
 /** Shared helper: cancel a running interrupt during Ctrl+C or Escape */
 function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
   let next = finalizeLastTurnStreaming(s);
+  if (!s.interrupt && s.running) {
+    next = projectUserCancelledTurn(next);
+  }
   if (s.interrupt) {
     // The reviewed plan card already contains the persisted draft. Runtime
     // cancellation events settle the turn; do not add a local-only banner.
@@ -291,7 +185,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
         status: { ...state.status, currentNode: null, plan: null, retryState: null },
       };
     case 'SET_IDLE': {
-      const s = settleActiveThought(cancelRunningBlocks(state));
+      const s = settleActiveThought(projectUserCancelledTurn(state));
       return {
         ...finalizeLastTurnStreaming(s),
         running: false,
@@ -524,7 +418,7 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       }
       // 非审批（思考/回复中）→ 停止本轮会话 / Agent running → stop this session
       if (state.running) {
-        const s = cancelRunningBlocks(state);
+        const s = projectUserCancelledTurn(state);
         return { ...finalizeLastTurnStreaming(s), running: false, exited: false };
       }
       return state;

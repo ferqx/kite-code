@@ -25,11 +25,20 @@ describe('TUI PTY System — Sandbox Mode', () => {
     });
 
     server.setResponses([]);
-    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      mockServer: server,
+      workspace,
+    });
   });
 
   afterAll(async () => {
-    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+    await cleanupTuiSystemFixtures({
+      tuis: [tui],
+      mockServers: [server],
+      workspaces: [workspace],
+    });
   });
 
   step(
@@ -94,7 +103,9 @@ describe('TUI PTY System — Sandbox Mode', () => {
     async () => {
       server.setResponses([{ message: { content: 'Sandbox fallback stayed internal.' } }]);
       const conversationFrames = tui.markScreen();
-      await submitUserMessage(tui, server, 'Run without a sandbox', { timeout: 15_000 });
+      await submitUserMessage(tui, server, 'Run without a sandbox', {
+        timeout: 15_000,
+      });
       await waitForText(
         () => tui.outputSinceLastAction(),
         'Sandbox fallback stayed internal.',

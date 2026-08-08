@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   deniedReadVerdict,
   evaluatePlatformSupport,
@@ -79,6 +81,22 @@ describe('platform capability probe admission', () => {
     QUALIFICATION_RUN_ATTEMPT: '1',
     QUALIFICATION_RUNNER_CLASS: 'ubuntu-24.04-x64-github-hosted',
   };
+
+  test('qualification workflow watches the complete Windows runtime inputs', () => {
+    const workflow = readFileSync(
+      join(process.cwd(), '.github', 'workflows', 'platform-capability-probe.yml'),
+      'utf8',
+    );
+    for (const path of [
+      'src/core/tools/path-utils.ts',
+      'src/core/tools/shell.ts',
+      'src/core/tools/stream-output.ts',
+      'src/core/types.ts',
+      'vendor/isksh/**',
+    ]) {
+      expect(workflow).toContain(`- "${path}"`);
+    }
+  });
 
   test('binds source evidence to a closed GitHub-hosted runner class', () => {
     expect(
@@ -163,6 +181,33 @@ describe('platform capability probe admission', () => {
           inheritance: {
             ...evidence().inheritance,
             forkedSkill: 'unsupported',
+          },
+        }),
+      ),
+    ).toBe('excluded');
+  });
+
+  test('admits the Windows restricted-token backend with a named Job hard-count mechanism', () => {
+    expect(
+      evaluatePlatformSupport(
+        evidence({
+          backend: 'windows_restricted_token',
+          processTree: {
+            hardCountMechanism: 'windows_job_active_process_limit',
+            hardCountLimit: 'enforced',
+            killWithoutResidualDescendants: 'enforced',
+          },
+        }),
+      ),
+    ).toBe('supported');
+    expect(
+      evaluatePlatformSupport(
+        evidence({
+          backend: 'windows_restricted_token',
+          processTree: {
+            hardCountMechanism: 'windows_job_active_process_limit',
+            hardCountLimit: 'unsupported',
+            killWithoutResidualDescendants: 'enforced',
           },
         }),
       ),

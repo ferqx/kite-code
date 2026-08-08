@@ -14,6 +14,9 @@
 
 多行输入、粘贴、软换行、宽字符和终端 resize 由 InputLine 与专用 hooks 处理；这些行为不进入 Core。
 
+Windows 启用沙箱时，TUI 在主输入界面挂载前只读检查受管联网身份。首次安装会显示独立的 sandbox
+setup/exit onboarding；只有用户确认 setup 才请求 UAC。进入主界面后的普通 Shell invocation 不负责安装。
+
 Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；只有 `content` 显示 artifact
 许可与用户显式 opt-in 的披露。Logger 失败只显示一次脱敏诊断，不改变当前 Agent run。
 

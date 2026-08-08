@@ -4,7 +4,7 @@
 
 读取时机：修改 abort/cancel、Runtime 恢复、Effect lease、消息工具对清理、工具参数异常、Subagent continuation 或 TUI 取消行为时。
 
-验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run scripts/run-tui-system-tests.ts cancel-successor-render`、`bun run typecheck`。
 
 ## Runtime 取消语义
 
@@ -16,7 +16,11 @@
 
 `ask_user` 是用户输入交互，不是执行授权审批。用户拒答或按 Esc 时，Kernel 先写入携带 `interactionId` 与 `toolCallId` 的 `user_input.cancelled`，再为该 `ask_user` 写入 `tool.finished(ok=false, stdout=Cancelled)`，清除 `awaiting_user_input`；不得写入 `approval.rejected`、`tool.cancelled` 或 `turn.aborted`，也不得 abort 本轮执行信号。Runner 随后继续调度；模型在同一 turn 中看到拒答 Tool Result 后继续回答或调整方案。
 
-TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名称、关键参数和已有输出并显示 `cancelled`；从未开始的 queued 探索工具不计入 `read N files` 等统计；不追加独立的整轮取消提示。实时取消和 event-log replay 必须得到相同投影。
+TUI 只可在实时运行中按文本识别“乐观渲染 prompt + 随后 durable `user.message_appended`”这一对副本。event-log replay 不得按文本去重；两个 `messageId` 不同但内容相同的连续用户消息仍是两个独立 turn，后续模型回答必须归入各自 turn。
+
+SessionRuntime 在 sandbox `prepare()` 尚未完成时收到取消，必须同时中止该 executor 的 preparation，使 native preflight 进入 cancel/EOF cleanup；cleanup barrier 随后才允许保留的一条 successor prompt 继续。已经完成 preparation 并进入 agent loop 后的普通取消不得无条件使共享 startup decision 失效。
+
+TUI 对用户取消的终态投影遵循：已实际开始的工具保留原名称、关键参数和已有输出并显示 `cancelled`；从未开始的 queued 探索工具不计入 `read N files` 等统计；不追加独立的整轮取消提示。实时 Ctrl+C/Esc、durable `tool.cancelled` 与 `turn.aborted(cause=user)` 必须共用同一套纯函数取消投影；该投影必须幂等，且晚到取消不得覆盖 `done/error/timeout/exhausted` 等既有终态。运行中的独立工具卡可能显式携带 `expanded=false`；`expanded` 只控制 Shell/Web Fetch 输出正文，`⎿ cancelled` 等 terminal footer 必须独立于折叠状态始终可见，本地取消不得再通过强制展开正文来换取 footer 可见性。实时取消和 event-log replay 必须得到相同视觉状态与渲染结果。取消后的旧 TUI run 仍可能在后台完成清理；键盘取消必须在 ESC/Ctrl+C 同一输入轮同步触达 SessionRuntime，不能等待 reducer 的 `running=false` effect，否则下一条 prompt 可能在旧 run 仍被视为活动时被静默拒绝。旧 run 的 finally 不得把新 run 的 `running` 状态重置为 idle，下一条 prompt 必须立即显示在消息列表中，并在清理完成后继续执行；RuntimeStore 的单飞等待不得隐藏用户已经提交的消息。正常完成已发出终态 `SET_EXITED` 后，不得再由停止 effect 反向 abort 已完成的 run。取消已请求但清理尚未完成时，输入层必须接受至多一条 successor prompt 并排队等待同一 cleanup barrier；普通仍在运行的 turn 不能借此接受并丢弃并发 prompt，successor run 获得 runtime lease 后必须继续进入模型调度并产生可见响应。 实时 reducer 在插入用户 prompt 时必须同步建立新的 turn 边界，不能把 successor 追加到已取消 turn；输入层先进入 running 再插入 prompt，避免短暂 idle 渲染把旧 turn 与 successor 一起提交到 Ink 的不可变 Static 区。取消后的 successor 若快速连续收到 reasoning completed 与回答增量，仍必须遵守 Thought presentation boundary：在消费回答前等待 Ink 已把运行态 Thought 单独提交并写入终端，不能让取消恢复路径重新把 Thought 与最终文本合并到同一帧。最新 turn 必须整体保留在 dynamic 区，且在收到终态进入 idle 后仍保留为 live tail，直到下一条用户消息建立更新的 turn（或会话 remount）；即使其中的用户消息或文本前缀看似已稳定，也可能被 durable user event、tool progress/result、`model.responded` 或 `run.completed` 继续协调，而在终态同一帧把 dynamic tail 提升到 append-only Static 会在 Windows 主屏 scrollback 留下旧帧，造成重复行并冻结工具卡更新。 运行时事件循环在每次路由前检查本轮 AbortSignal；取消后由 provider 或 generator 排出的迟到 model/tool 事件不得投影到 successor。generator 自己产生 `turn.aborted(cause=user)` 时必须视为已取消；即使 generator 在 AbortSignal 触发后没有再 yield 取消事件、而是直接正常关闭，该 run 的 signal 仍是权威取消事实，必须跳过 `SET_EXITED`，避免旧 run 的终态投影覆盖新 run 的 running 状态。终态响应如果只比已流式文本多出标点或短后缀，必须并回已有文本 block，不得新增一个可见的重复行。只要当前 `model.requested` 的 request ID 仍有效，`model.text_delta` 就必须继续按流式累计事件处理，即使旧 run 的终态竞态曾把全局 `running` 短暂置为 false；不得把 cumulative delta 降级为普通文本事件逐条追加，否则终态协调虽能收敛 reducer 状态，Ink 主屏仍会留下已发布的重复帧。
 
 `boundedCancellationV1` 启用后，持久化 ResourceBudget deadline 触发同一 execution
 AbortSignal；普通模型、compaction、tool/MCP、Subagent 和 Verification 都继承该信号。deadline
@@ -34,9 +38,7 @@ failure/reason=`cancel_incomplete`。
 它必须先有界排空后台 effect，转发工具 terminal 与 `runtime.cancellation_diagnostic`，确认
 process-tree cleanup 已完成后才能关闭 RuntimeStore/logger 并形成 deadline terminal。
 
-Shell 取消由 process-tree guard 独占：POSIX 对独立 process group 先发 SIGTERM，等待 500ms，
-再以 SIGKILL 强制终止并进行 2 秒有界确认；Windows 先尝试 root graceful，再通过 Job Object
-或 `taskkill /T /F` 清理整棵树。结果必须携带 confirmed/forced/unconfirmed count。无法确认
+Shell 取消由 process-tree guard 独占：POSIX 对独立 process group 先发 SIGTERM，并立即轮询退出状态，最多等待 500ms；仍未退出时再以 SIGKILL 强制终止并进行 2 秒有界确认。Windows 先尝试 root graceful，并立即轮询退出状态，再通过 Job Object 或 `taskkill /T /F` 清理整棵树。正常退出不得因为固定 sleep 人为延迟；结果必须携带 confirmed/forced/unconfirmed count。无法确认
 descendant 退出时发出结构化 `runtime.cancellation_diagnostic(cancel_incomplete)`，终态为
 `unknown` 且进入 reconciliation，不能降级为普通 cancelled。
 

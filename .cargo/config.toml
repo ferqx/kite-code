@@ -1,0 +1,5 @@
+[target.x86_64-pc-windows-gnu]
+# GNU ld otherwise stamps each PE with the build wall clock. The runner digest
+# is committed before GitHub Actions packages it, so the PE must be byte-stable
+# across clean builds and checkout locations.
+rustflags = ["-C", "link-arg=-Wl,--no-insert-timestamp"]

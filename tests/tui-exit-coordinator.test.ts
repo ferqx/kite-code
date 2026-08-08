@@ -69,6 +69,50 @@ describe('TUI exit coordinator', () => {
     expect(order).toEqual(['abort', 'shutdown', 'dispose', 'unmount', 'exit:1']);
   });
 
+  test('aborts the in-flight startup prewarm after session abort and before shutdown', async () => {
+    const order: string[] = [];
+    const coordinator = createTuiExitCoordinatorV1({
+      getSessionLifecycle: () => ({
+        abortAll: () => order.push('abort'),
+        shutdownObservability: async () => {
+          order.push('shutdown');
+        },
+        dispose: () => order.push('dispose'),
+      }),
+      getShellExecutor: () => ({
+        abortPreparation: () => order.push('abort-preparation'),
+      }),
+      unmount: () => order.push('unmount'),
+      exit: () => order.push('exit'),
+    });
+
+    await coordinator.requestExit();
+    expect(order).toEqual(['abort', 'abort-preparation', 'shutdown', 'dispose', 'unmount', 'exit']);
+  });
+
+  test('a failing prewarm abort cannot strand terminal teardown', async () => {
+    const order: string[] = [];
+    const coordinator = createTuiExitCoordinatorV1({
+      getSessionLifecycle: () => ({
+        abortAll: () => order.push('abort'),
+        shutdownObservability: async () => {
+          order.push('shutdown');
+        },
+        dispose: () => order.push('dispose'),
+      }),
+      getShellExecutor: () => ({
+        abortPreparation: () => {
+          throw new Error('prewarm abort failed');
+        },
+      }),
+      unmount: () => order.push('unmount'),
+      exit: () => order.push('exit'),
+    });
+
+    await coordinator.requestExit(1);
+    expect(order).toEqual(['abort', 'shutdown', 'dispose', 'unmount', 'exit']);
+  });
+
   test('still attempts telemetry shutdown when abort fails', async () => {
     const order: string[] = [];
     const coordinator = createTuiExitCoordinatorV1({

@@ -311,9 +311,7 @@ export class AgentKernel {
    * remains subject to the same stale-result check as a batch result.
    */
   applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
-    if (!this.isEffectLeaseCurrent(lease) && !this.isConcurrentShellEventCurrent(lease, event)) {
-      return false;
-    }
+    if (!this.isEffectEventCurrent(lease, event)) return false;
     this.processEvent(event);
     lease.expectedRevision = this.state.revision;
     return true;
@@ -374,6 +372,16 @@ export class AgentKernel {
     return (
       lease.expectedRevision === this.state.revision && lease.turnId === this.state.turn.turnId
     );
+  }
+
+  /**
+   * Validate one in-flight effect event without reducing or persisting it.
+   * Ephemeral presentation events use this path so concurrent Shell progress
+   * retains the same ownership checks as durable effect events without
+   * advancing the Runtime revision.
+   */
+  isEffectEventCurrent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
+    return this.isEffectLeaseCurrent(lease) || this.isConcurrentShellEventCurrent(lease, event);
   }
 
   /**

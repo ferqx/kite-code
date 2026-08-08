@@ -7,17 +7,20 @@ import {
 
 describe('platform backend exclusion projection', () => {
   test.each([
-    ['darwin', true, null, 'seatbelt'],
-    ['darwin', false, '/usr/bin/bwrap', 'none'],
-    ['linux', true, '/usr/bin/bwrap', 'bubblewrap'],
-    ['linux', true, null, 'none'],
-    ['win32', true, '/usr/bin/bwrap', 'none'],
-  ] as const)('%s selects only its accepted candidate backend', (platform, seatbeltAvailable, bubblewrapPath, expected) => {
+    ['darwin', true, null, false, 'seatbelt'],
+    ['darwin', false, '/usr/bin/bwrap', false, 'none'],
+    ['linux', true, '/usr/bin/bwrap', false, 'bubblewrap'],
+    ['linux', true, null, false, 'none'],
+    ['win32', true, '/usr/bin/bwrap', false, 'none'],
+    ['win32', true, '/usr/bin/bwrap', true, 'windows_restricted_token'],
+    ['linux', true, null, true, 'none'],
+  ] as const)('%s selects only its accepted candidate backend', (platform, seatbeltAvailable, bubblewrapPath, windowsRestrictedTokenRunner, expected) => {
     expect(
       selectSandboxBackend({
         platform,
         seatbeltAvailable,
         usableBubblewrapPath: bubblewrapPath,
+        windowsRestrictedTokenRunner,
       }),
     ).toBe(expected);
   });

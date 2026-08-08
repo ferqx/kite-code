@@ -34,6 +34,7 @@ describe('TUI PTY System — model streaming', () => {
           },
         },
         model: { default: { provider: 'mock', name: 'mock-model' } },
+        sandbox: { enabled: false },
       },
     });
     server.setResponses([

@@ -86,8 +86,7 @@ export function guardProcessTree(proc: KillableProcess): ProcessTreeGuard {
         } catch {
           // Root may already be gone; the descendant sweep still runs.
         }
-        await Bun.sleep(GRACEFUL_TERMINATION_MS);
-        if (!isProcessAlive(proc.pid)) {
+        if (await waitForPidExit(proc.pid, GRACEFUL_TERMINATION_MS)) {
           return {
             rootPid: proc.pid,
             gracefulRequested: true,
@@ -109,11 +108,10 @@ export function guardProcessTree(proc: KillableProcess): ProcessTreeGuard {
 
       try {
         proc.kill('SIGTERM');
-        await Bun.sleep(GRACEFUL_TERMINATION_MS);
       } catch {
         // The root process may already have exited.
       }
-      if (!isProcessAlive(proc.pid)) {
+      if (await waitForPidExit(proc.pid, GRACEFUL_TERMINATION_MS)) {
         return {
           rootPid: proc.pid,
           gracefulRequested: true,
@@ -259,12 +257,22 @@ function createWindowsJobGuard(proc: KillableProcess): ProcessTreeGuard | null {
       return null;
     }
 
+    // Capture descendants that may have started before the root was assigned
+    // to this Job. Job assignment is not retroactive, and once the root exits
+    // those processes can be reparented before a later Toolhelp snapshot.
+    const knownTree = new Set([proc.pid]);
+    extendWindowsProcessTree(api, knownTree);
+    const preAssignmentTree = new Set(knownTree);
+
     const assigned = api.AssignProcessToJobObject(job, processHandle);
     api.CloseHandle(processHandle);
     if (!assigned) {
       api.CloseHandle(job);
       return null;
     }
+    // Keep the full tree for the fallback path. Processes created after this
+    // point are inside the Job and do not belong to preAssignmentTree.
+    extendWindowsProcessTree(api, knownTree);
 
     let active = true;
     const close = () => {
@@ -284,35 +292,47 @@ function createWindowsJobGuard(proc: KillableProcess): ProcessTreeGuard | null {
             unconfirmedPids: isProcessAlive(proc.pid) ? [proc.pid] : [],
           };
         }
+        extendWindowsProcessTree(api, knownTree);
         try {
           proc.kill();
         } catch {
           // Root may already be gone.
         }
-        await Bun.sleep(GRACEFUL_TERMINATION_MS);
-        if (!isProcessAlive(proc.pid)) {
-          close();
+        const rootExitedGracefully = await waitForPidExit(proc.pid, GRACEFUL_TERMINATION_MS);
+        let jobTerminated = false;
+        if (!rootExitedGracefully) {
+          jobTerminated = api.TerminateJobObject(job, 124);
+        }
+        close();
+        const rootTerminated =
+          rootExitedGracefully || jobTerminated || (await terminateWindowsProcess(api, proc.pid));
+        // TerminateJobObject already stops every process created after the Job
+        // was attached. Sweeping those descendants again is both redundant and
+        // potentially slow because a just-terminated Windows process may take
+        // the per-process confirmation timeout to become observable. Only
+        // descendants captured before assignment can have escaped the Job.
+        const descendantsToSweep = jobTerminated ? preAssignmentTree : knownTree;
+        const descendantTerminated = await terminateKnownWindowsDescendants(
+          api,
+          descendantsToSweep,
+          proc.pid,
+        );
+        if (!rootTerminated) await terminateWindowsProcessTree(proc.pid);
+        const unconfirmedPids = [...knownTree].filter((pid) => isProcessAlive(pid));
+        if (unconfirmedPids.length === 0) {
           return {
             rootPid: proc.pid,
             gracefulRequested: true,
-            forced: false,
+            forced: !rootExitedGracefully || descendantTerminated,
             confirmedExited: true,
             unconfirmedPids: [],
           };
         }
-        const knownTree = new Set([proc.pid]);
-        extendWindowsProcessTree(api, knownTree);
-        const terminated = api.TerminateJobObject(job, 124);
-        close();
-        const rootTerminated = terminated || (await terminateWindowsProcess(api, proc.pid));
-        await terminateKnownWindowsDescendants(api, knownTree, proc.pid);
-        if (!rootTerminated) await terminateWindowsProcessTree(proc.pid);
-        const unconfirmedPids = [...knownTree].filter((pid) => isProcessAlive(pid));
         return {
           rootPid: proc.pid,
           gracefulRequested: true,
-          forced: true,
-          confirmedExited: unconfirmedPids.length === 0,
+          forced: !rootExitedGracefully || descendantTerminated,
+          confirmedExited: false,
           unconfirmedPids,
         };
       },

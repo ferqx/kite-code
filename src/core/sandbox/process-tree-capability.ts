@@ -52,6 +52,16 @@ export function currentProcessTreeCapabilityV1(
       terminationCleanupConformancePassed: conformance.terminationCleanupConformancePassed === true,
     });
   }
+  if (
+    backend === 'windows_restricted_token' &&
+    conformance.hardLimitMechanism === 'windows_job_active_process_limit'
+  ) {
+    return projectProcessTreeCapabilityV1({
+      hardLimitMechanism: 'windows_job_active_process_limit',
+      hardLimitConformancePassed: conformance.hardLimitConformancePassed === true,
+      terminationCleanupConformancePassed: conformance.terminationCleanupConformancePassed === true,
+    });
+  }
   return projectProcessTreeCapabilityV1({
     hardLimitMechanism: 'none',
     hardLimitConformancePassed: false,

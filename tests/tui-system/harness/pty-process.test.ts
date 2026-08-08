@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { join } from 'node:path';
 import { runWithTuiSystemStepSignal } from './cancellation';
 import {
   createPtyOutputBuffer,
@@ -100,7 +101,7 @@ describe('resolveTuiLaunchPaths', () => {
 
     expect(resolveTuiLaunchPaths({ workspace }, '/project')).toEqual({
       cwd: '/tmp/kite-code-workspace',
-      entryPath: '/project/src/app/tui/index.tsx',
+      entryPath: join('/project', 'src/app/tui/index.tsx'),
     });
   });
 
@@ -114,7 +115,7 @@ describe('resolveTuiLaunchPaths', () => {
       ),
     ).toEqual({
       cwd: '/tmp/kite-code-workspace',
-      entryPath: '/project/tests/tui-system/fixtures/remote-mcp-egress-tui.tsx',
+      entryPath: join('/project', 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx'),
     });
   });
 
@@ -136,7 +137,17 @@ describe('resolveTuiLaunchPaths', () => {
         executablePath: '/opt/kite-code/bin/kite-tui',
         remoteMcpEgressPermitResolver: 'allow-each-invocation',
       }),
-    ).toThrow('cannot replace');
+    ).toThrow('only one explicit');
+  });
+  test('uses a test-owned TypeScript composition root', () => {
+    const workspace = { workspace: '/tmp/kite-code-workspace' } as TestWorkspace;
+
+    expect(
+      resolveTuiLaunchPaths({ workspace, entryPath: '/project/tests/fixture.tsx' }, '/project'),
+    ).toEqual({
+      cwd: '/tmp/kite-code-workspace',
+      entryPath: '/project/tests/fixture.tsx',
+    });
   });
 });
 

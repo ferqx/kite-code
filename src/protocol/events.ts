@@ -247,12 +247,14 @@ export interface UserInputResult {
   answers?: Record<string, string>;
 }
 
-/** Shell 工具实时输出负载 — 进程运行期间逐行推送 / Per-line progress payload emitted during shell execution */
+/** Shell 工具实时输出负载 — 进程运行期间按展示帧批量推送 / Batched progress payload emitted during shell execution */
 export interface ToolProgressPayload {
   call_id: string;
   name: string;
-  /** 单行文本（不含换行符）/ Single line of output (no newline) */
+  /** 一条或多条完整行；批内以 LF 连接 / One or more complete lines joined by LF */
   chunk: string;
+  /** 批次代表的逻辑行总数，可能大于 chunk 中保留的尾部行数 */
+  line_count?: number;
   /** 来源流 / Source stream */
   stream: 'stdout' | 'stderr';
 }

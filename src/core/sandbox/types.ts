@@ -164,7 +164,7 @@ export interface SandboxOptions {
   workspace: string;
   /** Native filesystem ceiling. full_access is never a sandbox profile. */
   filesystemScope?: Exclude<FilesystemScope, 'full_access'>;
-  /** Legacy app entries may opt into bare shell; production callers must use fail. */
+  /** App composition may opt into host Shell availability; it is never sandbox qualification. */
   unavailableFallback?: 'bare_shell' | 'fail';
   /** Optional non-UI diagnostic sink. Omitted callers stay silent. */
   onDiagnostic?: (message: string) => void;
@@ -174,6 +174,10 @@ export interface SandboxOptions {
   resourceLimits?: Partial<ResourceLimits>;
   /** Release-owned cgroup-v2 task ceiling for the complete invocation tree. */
   maxProcessTreeTasks?: number;
+  /** Internal Windows direct-token startup probe; never creates staging. */
+  startupProbe?: boolean;
+  /** Trusted composition selection; avoids redetecting after asynchronous preflight. */
+  selectedBackend?: SandboxBackend;
   /** Network access policy inside the sandbox. Defaults to disabled. */
   network?: {
     mode: ShellNetworkMode;

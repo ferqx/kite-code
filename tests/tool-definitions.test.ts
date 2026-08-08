@@ -359,6 +359,9 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('cat package.json | head -n 20')).toBe(true);
     expect(isReadOnlyShellCommand('git status --short')).toBe(true);
     expect(isReadOnlyShellCommand('git diff -- src/app/runner.ts')).toBe(true);
+    expect(isReadOnlyShellCommand('node --version')).toBe(true);
+    expect(isReadOnlyShellCommand('npm.cmd -v')).toBe(true);
+    expect(isReadOnlyShellCommand('bun.exe --version')).toBe(true);
     // /dev/null 重定向用于抑制输出，应视为只读安全 / /dev/null redirects for output suppression are read-only safe
     expect(isReadOnlyShellCommand('ls -la src tests 2>/dev/null')).toBe(true);
     expect(isReadOnlyShellCommand("find . -name '*.ts' >/dev/null 2>&1")).toBe(true);
@@ -376,6 +379,8 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand("sed -i 's/a/b/' src/a.ts")).toBe(false);
     expect(isReadOnlyShellCommand('rm -rf src')).toBe(false);
     expect(isReadOnlyShellCommand('bun test')).toBe(false);
+    expect(isReadOnlyShellCommand('node script.js')).toBe(false);
+    expect(isReadOnlyShellCommand('npm run build')).toBe(false);
     expect(isReadOnlyShellCommand('git add -A')).toBe(false);
     expect(isReadOnlyShellCommand('mkdir -p tmp')).toBe(false);
     expect(isReadOnlyShellCommand('find . -exec rm {} ;')).toBe(false);

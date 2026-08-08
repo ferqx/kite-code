@@ -310,6 +310,8 @@ const READ_ONLY_GIT_SUBCOMMANDS = new Set([
   'status',
 ]);
 
+const LOCAL_RUNTIME_VERSION_COMMANDS = new Set(['bun', 'node', 'npm', 'pnpm', 'yarn']);
+
 /** Conservative command-shape classifier used by shell approval and ToolSpec effects. */
 export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = (command ?? '').trim();
@@ -333,6 +335,10 @@ function isReadOnlySegment(segment: string): boolean {
   const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
   const command = stripShellQuotes(tokens[0] ?? '').toLowerCase();
   if (!command) return false;
+  const portableCommand = command.replace(/\.(?:cmd|exe)$/i, '');
+  if (LOCAL_RUNTIME_VERSION_COMMANDS.has(portableCommand)) {
+    return tokens.length === 2 && ['--version', '-v'].includes(stripShellQuotes(tokens[1] ?? ''));
+  }
   if (command === 'git') {
     return READ_ONLY_GIT_SUBCOMMANDS.has(stripShellQuotes(tokens[1] ?? '').toLowerCase());
   }

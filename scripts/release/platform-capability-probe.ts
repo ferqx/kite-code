@@ -21,6 +21,20 @@ import {
 } from '../../src/core/sandbox/process-tree-capability';
 import { generateSandboxProfile } from '../../src/core/sandbox/profile';
 import { findApplySeccomp } from '../../src/core/sandbox/seccomp';
+import {
+  cleanupSandboxRuntimeDir,
+  createSandboxRuntimeDir,
+} from '../../src/core/sandbox/shell-wrapper';
+import {
+  buildWindowsRestrictedTokenEnvForTest,
+  createWindowsRestrictedTokenDirectWorkspaceV1,
+  createWindowsRestrictedTokenInvocationName,
+  wrapWindowsRestrictedTokenCommandV1,
+} from '../../src/core/sandbox/windows-restricted-token';
+import {
+  resolveWindowsSandboxRunnerV1,
+  WINDOWS_SANDBOX_PROTOCOL_VERSION,
+} from '../../src/core/sandbox/windows-runner';
 import { canonicalJsonBytes } from './canonical-json';
 
 export type NativeProbeVerdict = 'enforced' | 'unsupported' | 'unavailable';
@@ -101,7 +115,7 @@ export const platformCapabilityEvidenceV1Schema = z
     osVersion: boundedIdentitySchema,
     arch: z.enum(['arm64', 'x64']),
     bunVersion: z.string().regex(/^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/),
-    backend: z.enum(['seatbelt', 'bubblewrap', 'none']),
+    backend: z.enum(['seatbelt', 'bubblewrap', 'windows_restricted_token', 'none']),
     selectedNetworkMode: z.enum(['off', 'allowlist']),
     processCapabilitySurface: z
       .object({ shell: z.boolean(), forkedSkill: z.boolean(), localStdioMcp: z.boolean() })
@@ -314,7 +328,27 @@ export async function runPlatformCapabilityProbe(): Promise<PlatformCapabilityEv
       digest: computePlatformCapabilityEvidenceDigestV1(withoutDigest),
     };
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    try {
+      if (backend === 'windows_restricted_token') {
+        repairWindowsRestrictedTokenProbeWorkspace(workspace);
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+}
+
+function repairWindowsRestrictedTokenProbeWorkspace(workspace: string): void {
+  const runner = resolveWindowsSandboxRunnerV1();
+  if (!runner) return;
+  const repair = Bun.spawnSync([runner.path, '--repair-restricted-token', workspace], {
+    stdout: 'ignore',
+    stderr: 'pipe',
+  });
+  if (repair.exitCode !== 0) {
+    throw new Error(
+      `Windows platform probe ACL repair failed: ${Buffer.from(repair.stderr).toString('utf8').trim()}`,
+    );
   }
 }
 
@@ -537,13 +571,13 @@ async function probeFilesystem(
   const grandchildResult = await runSandboxCommand(
     backend,
     workspace,
-    `/bin/sh -c 'printf denied > "$PROBE_GRANDCHILD_TARGET"'`,
+    `(printf denied > "$PROBE_GRANDCHILD_TARGET")`,
     baseEnv,
   );
   const grandchildControl = await runSandboxCommand(
     backend,
     workspace,
-    `/bin/sh -c 'printf allowed > "$PROBE_GRANDCHILD_WORKSPACE_TARGET"'`,
+    `(printf allowed > "$PROBE_GRANDCHILD_WORKSPACE_TARGET")`,
     baseEnv,
   );
   const workspaceWrite =
@@ -672,6 +706,46 @@ async function probeProcessTree(
   backend: SandboxBackend,
   workspace: string,
 ): Promise<PlatformCapabilityEvidenceV1['processTree']> {
+  if (backend === 'windows_restricted_token') {
+    const runner = resolveWindowsSandboxRunnerV1();
+    if (!runner) {
+      const projection = currentProcessTreeCapabilityV1(backend);
+      return {
+        hardCountMechanism: projection.hardCountMechanism,
+        hardCountLimit: projection.hardCountLimit,
+        killWithoutResidualDescendants: projection.terminationCleanup,
+      };
+    }
+    const maxProcesses = 4;
+    const executor = technicalAppExecutor('foreground_cli', workspace, maxProcesses);
+    const hardLimit = await executor({
+      workspace,
+      // Run directly in the release-pinned isksh. The static Coreutils
+      // companion supplies seq/sleep; using host bash here would test an
+      // ambient runtime instead of the Windows sandbox surface.
+      command: [
+        `N=${maxProcesses}`,
+        'for i in $(seq 1 $((N - 1))); do (sleep 30) & done',
+        'sleep 30 &',
+        'extra=$!',
+        'sleep 0.3',
+        'if kill -0 "$extra" 2>/dev/null; then echo unlimited; else echo limited; fi',
+      ].join('; '),
+      timeoutMs: 5_000,
+    });
+    const projection = currentProcessTreeCapabilityV1(backend, {
+      hardLimitMechanism: 'windows_job_active_process_limit',
+      hardLimitConformancePassed:
+        hardLimit.ok && hardLimit.stdout.split('\n').some((line) => line.trim() === 'limited'),
+      terminationCleanupConformancePassed:
+        hardLimit.ok && hardLimit.processCleanup?.confirmedExited === true,
+    });
+    return {
+      hardCountMechanism: projection.hardCountMechanism,
+      hardCountLimit: projection.hardCountLimit,
+      killWithoutResidualDescendants: projection.terminationCleanup,
+    };
+  }
   if (backend !== 'bubblewrap') {
     const projection = currentProcessTreeCapabilityV1(backend);
     return {
@@ -889,6 +963,15 @@ function syscallFilterVerdict(evidence: PlatformCapabilityProbeInputV1): NativeP
   return evidence.backendIsolation?.syscallFilter ?? 'unsupported';
 }
 
+interface SandboxInvocation {
+  cmd: string[];
+  stdin?: Uint8Array;
+  runtimeDir?: string;
+  runnerProtocol?: boolean;
+  /** The runner consumes later cancellation frames on this stream. */
+  keepStdinOpen?: boolean;
+}
+
 async function runSandboxCommand(
   backend: SandboxBackend,
   workspace: string,
@@ -896,17 +979,25 @@ async function runSandboxCommand(
   env: Record<string, string>,
   options: { filesystemScope?: 'read_only' | 'workspace_write' } = {},
 ): Promise<{ available: boolean; code: number }> {
-  const invocation = sandboxInvocation(backend, workspace, command, options);
+  const invocation = sandboxInvocation(backend, workspace, command, env, options);
   if (!invocation) return { available: false, code: -1 };
   try {
     const child = Bun.spawn({
-      cmd: invocation,
+      cmd: invocation.cmd,
       cwd: workspace,
       env: { ...process.env, ...env },
-      stdout: 'ignore',
+      stdin: invocation.stdin !== undefined ? 'pipe' : 'inherit',
+      stdout: invocation.runnerProtocol ? 'pipe' : 'ignore',
       stderr: 'ignore',
     });
+    if (invocation.stdin !== undefined && child.stdin) {
+      child.stdin.write(invocation.stdin);
+      if (!invocation.keepStdinOpen) child.stdin.end();
+    }
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    const receipt = invocation.runnerProtocol
+      ? readWindowsRunnerReceipt(child.stdout as ReadableStream<Uint8Array>)
+      : undefined;
     const code = await Promise.race([
       child.exited,
       new Promise<number>((resolveTimeout) => {
@@ -919,9 +1010,16 @@ async function runSandboxCommand(
     ]).finally(() => {
       if (timeout) clearTimeout(timeout);
     });
-    return { available: true, code };
+    if (!invocation.runnerProtocol) return { available: true, code };
+    const runnerReceipt = await receipt?.catch(() => undefined);
+    if (runnerReceipt === undefined) return { available: false, code: -1 };
+    return { available: true, code: runnerReceipt };
   } catch {
     return { available: false, code: -1 };
+  } finally {
+    if (invocation.runtimeDir) {
+      cleanupSandboxRuntimeDir(invocation.runtimeDir);
+    }
   }
 }
 
@@ -929,37 +1027,127 @@ function sandboxInvocation(
   backend: SandboxBackend,
   workspace: string,
   command: string,
+  env: Record<string, string>,
   options: { filesystemScope?: 'read_only' | 'workspace_write' },
-): string[] | undefined {
+): SandboxInvocation | undefined {
   if (backend === 'seatbelt') {
-    return [
-      '/usr/bin/sandbox-exec',
-      '-p',
-      generateSandboxProfile(workspace, {
-        network: 'disabled',
-        filesystemScope: options.filesystemScope,
-      }),
-      '/bin/sh',
-      '-c',
-      command,
-    ];
+    return {
+      cmd: [
+        '/usr/bin/sandbox-exec',
+        '-p',
+        generateSandboxProfile(workspace, {
+          network: 'disabled',
+          filesystemScope: options.filesystemScope,
+        }),
+        '/bin/sh',
+        '-c',
+        command,
+      ],
+    };
   }
   if (backend === 'bubblewrap') {
     const bwrap = Bun.which('bwrap');
     if (!bwrap) return undefined;
-    return [
-      bwrap,
-      ...generateBwrapArgs(workspace, {
-        network: 'disabled',
-        filesystemScope: options.filesystemScope,
-      }),
-      '--',
-      '/bin/sh',
-      '-c',
-      command,
-    ];
+    return {
+      cmd: [
+        bwrap,
+        ...generateBwrapArgs(workspace, {
+          network: 'disabled',
+          filesystemScope: options.filesystemScope,
+        }),
+        '--',
+        '/bin/sh',
+        '-c',
+        command,
+      ],
+    };
+  }
+  if (backend === 'windows_restricted_token') {
+    const runner = resolveWindowsSandboxRunnerV1();
+    if (!runner) return undefined;
+    const runtimeRoot = createSandboxRuntimeDir(workspace);
+    const sandboxEnv = buildWindowsRestrictedTokenEnvForTest(
+      process.env,
+      runtimeRoot,
+      runner.shellRuntimePath,
+    );
+    for (const [key, value] of Object.entries(env)) {
+      sandboxEnv[key] = value;
+    }
+    const request = {
+      version: WINDOWS_SANDBOX_PROTOCOL_VERSION,
+      // Formal capability evidence must exercise the same persistent
+      // Workspace ledger and protected-path DACL refresh path as user commands.
+      // runPlatformCapabilityProbe repairs this temporary ledger before cleanup.
+      directWorkspace: createWindowsRestrictedTokenDirectWorkspaceV1({ startupProbe: false }),
+      invocationName: createWindowsRestrictedTokenInvocationName(),
+      commandLine: wrapWindowsRestrictedTokenCommandV1(command),
+      cwd: workspace,
+      env: sandboxEnv,
+      filesystemScope: options.filesystemScope ?? 'workspace_write',
+      workspaceRoot: workspace,
+      runtimeRoot,
+      shellRuntimeRoot: runner.shellRuntimePath,
+      shellRuntime: runner.shellRuntime,
+      shellRuntimeDigest: runner.shellRuntimeDigest,
+      coreutilsDigest: runner.coreutilsDigest,
+      maxProcesses: 31,
+      timeoutMs: 5_000,
+      networkMode: 'off',
+    };
+    return {
+      cmd: [runner.path],
+      stdin: encodeProbeFrame(request),
+      runtimeDir: runtimeRoot,
+      runnerProtocol: true,
+      keepStdinOpen: true,
+    };
   }
   return undefined;
+}
+
+/** Return the child command's exit code from the native runner's exit frame. */
+async function readWindowsRunnerReceipt(
+  stream: ReadableStream<Uint8Array>,
+): Promise<number | undefined> {
+  const reader = stream.getReader();
+  let buffer = Buffer.alloc(0);
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return undefined;
+      buffer = Buffer.concat([buffer, Buffer.from(value)]);
+      while (buffer.length >= 4) {
+        const length = buffer.readUInt32LE(0);
+        if (length > 16 * 1024 * 1024) return undefined;
+        if (buffer.length < 4 + length) break;
+        const payload = buffer.subarray(4, 4 + length);
+        buffer = buffer.subarray(4 + length);
+        try {
+          const frame = JSON.parse(payload.toString('utf8'));
+          if (
+            frame?.type === 'exit' &&
+            typeof frame.receipt?.exitCode === 'number' &&
+            Number.isInteger(frame.receipt.exitCode)
+          ) {
+            return frame.receipt.exitCode;
+          }
+        } catch {
+          return undefined;
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function encodeProbeFrame(value: unknown): Uint8Array {
+  const payload = new TextEncoder().encode(JSON.stringify(value));
+  const frame = new Uint8Array(4 + payload.length);
+  new DataView(frame.buffer).setUint32(0, payload.length, true);
+  frame.set(payload, 4);
+  return frame;
 }
 
 function deniedVerdict(

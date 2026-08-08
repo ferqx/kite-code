@@ -4,6 +4,10 @@ export interface TuiExitSessionLifecycleV1 {
   dispose(): void;
 }
 
+export interface TuiExitShellExecutorV1 {
+  abortPreparation?(): void;
+}
+
 export interface TuiExitCoordinatorV1 {
   requestExit(code?: number): Promise<void>;
 }
@@ -15,6 +19,8 @@ export interface TuiExitCoordinatorV1 {
  */
 export function createTuiExitCoordinatorV1(input: {
   getSessionLifecycle: () => TuiExitSessionLifecycleV1 | null;
+  /** Optional App Shell executor whose in-flight startup prewarm is aborted. */
+  getShellExecutor?: () => TuiExitShellExecutorV1 | null;
   unmount: () => void;
   exit: (code: number) => void;
   observabilityTimeoutMs?: number;
@@ -34,6 +40,15 @@ export function createTuiExitCoordinatorV1(input: {
           lifecycle?.abortAll();
         } catch {
           // Runtime cancellation failure must not skip telemetry shutdown.
+        }
+        try {
+          // Exit during the silent startup prewarm must not leave the probe
+          // running: the abort reaches the native runner through the cancel
+          // frame/EOF path, which empties its Job and revokes the ephemeral
+          // ACL before exit.
+          input.getShellExecutor?.()?.abortPreparation?.();
+        } catch {
+          // Prewarm cancellation failure must not strand terminal teardown.
         }
         try {
           if (lifecycle) await lifecycle.shutdownObservability(input.observabilityTimeoutMs ?? 250);

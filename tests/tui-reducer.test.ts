@@ -1,6 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import type { Action } from '../src/app/tui/App';
 import { createInitialState, eventReducer } from '../src/app/tui/App';
+import {
+  projectToolCancelled,
+  projectUserCancelledTurn,
+} from '../src/app/tui/reducers/cancellation-projection';
 import { buildToolSummaryLine } from '../src/app/tui/reducers/consolidateTools';
 import {
   handleEventAction,
@@ -684,9 +688,109 @@ describe('eventReducer (blocks model)', () => {
         status: 'cancelled',
         detail: 'Ran: bun test --dry-run 2>&1 | tail -20',
       });
+      expect(shell?.expanded).not.toBe(true);
       expect(blocks.some((block) => block.kind === 'tool_summary')).toBe(false);
     });
 
+    test('live and durable cancellation share one visual projection', () => {
+      const realNow = Date.now;
+      Date.now = () => 10_000;
+      try {
+        let active = dispatch(fresh(), { type: 'SET_RUNNING' });
+        active = dispatch(
+          active,
+          tcEvt('shell-1', 'shell_execute', { command: 'curl https://example.test' }),
+        );
+        active = dispatch(active, tcEvt('read-running', 'read_file', { path: 'src/runtime.ts' }));
+        active = dispatch(
+          active,
+          tcEvt('read-queued', 'read_file', { path: 'src/queued.ts' }, 'queued'),
+        );
+
+        const live = dispatch(active, { type: 'ESCAPE' });
+        let replay = dispatch(active, {
+          type: 'RUNTIME_EVENT',
+          event: {
+            type: 'tool.cancelled',
+            toolCallId: 'shell-1',
+            reason: 'Cancelled by user.',
+          },
+        });
+        replay = dispatch(replay, {
+          type: 'RUNTIME_EVENT',
+          event: {
+            type: 'tool.cancelled',
+            toolCallId: 'read-running',
+            reason: 'Cancelled by user.',
+          },
+        });
+        replay = dispatch(replay, {
+          type: 'RUNTIME_EVENT',
+          event: {
+            type: 'tool.cancelled',
+            toolCallId: 'read-queued',
+            reason: 'Cancelled by user.',
+          },
+        });
+        replay = dispatch(replay, {
+          type: 'RUNTIME_EVENT',
+          event: {
+            type: 'turn.aborted',
+            turnId: 'turn-1',
+            reason: 'Cancelled by user.',
+            cause: 'user',
+          },
+        });
+
+        expect(flatBlocks(replay)).toEqual(flatBlocks(live));
+        expect(replay.pendingToolCalls).toEqual(live.pendingToolCalls);
+        expect(replay.currentThoughtSummaryId).toBe(live.currentThoughtSummaryId);
+        expect(replay.thoughtPhaseStatus).toBe(live.thoughtPhaseStatus);
+      } finally {
+        Date.now = realNow;
+      }
+    });
+
+    test('whole-turn cancellation projection is idempotent', () => {
+      let active = dispatch(fresh(), { type: 'SET_RUNNING' });
+      active = dispatch(active, tcEvt('shell-1', 'shell_execute', { command: 'bun test' }));
+
+      const once = projectUserCancelledTurn(active, { now: 20_000 });
+      const twice = projectUserCancelledTurn(once, { now: 30_000 });
+
+      expect(twice).toBe(once);
+    });
+
+    test('durable tool cancellation marks a running exploration entry cancelled, not error', () => {
+      let active = dispatch(fresh(), { type: 'SET_RUNNING' });
+      active = dispatch(active, tcEvt('read-1', 'read_file', { path: 'src/runtime.ts' }));
+
+      const cancelled = projectToolCancelled(active, 'read-1', { now: 20_000 });
+      const summary = flatBlocks(cancelled).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_summary' }> =>
+          block.kind === 'tool_summary',
+      );
+
+      expect(summary?.tools[0]).toMatchObject({
+        callId: 'read-1',
+        status: 'cancelled',
+        summary: 'Cancelled',
+      });
+      expect(summary?.result).toBe('cancelled');
+    });
+
+    test('late cancellation never overwrites an existing terminal tool result', () => {
+      let state = dispatch(fresh(), tcEvt('shell-1', 'shell_execute', { command: 'echo done' }));
+      state = dispatch(state, tdEvt('shell-1', 'shell_execute', true, 'done'));
+
+      const cancelled = projectToolCancelled(state, 'shell-1', { now: 20_000 });
+      const card = flatBlocks(cancelled).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'shell-1',
+      );
+
+      expect(card).toMatchObject({ status: 'done', summary: 'done' });
+    });
     test('replayed user cancellation matches live cleanup without a turn notice', () => {
       let s = dispatch(fresh(), { type: 'SET_RUNNING' });
       s = dispatch(
@@ -3833,6 +3937,119 @@ describe('eventReducer (blocks model)', () => {
       expect(state.pendingToolCalls['future-read']).toBeUndefined();
     });
 
+    test('renders a successor response after a cancelled turn without losing the prompt', () => {
+      let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+      state = dispatch(state, { type: 'USER_MESSAGE', text: '原始请求' });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'user.message_appended', messageId: 'user-1', content: '原始请求' },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.queued',
+          toolCallId: 'shell-1',
+          name: 'shell_execute',
+          args: { command: 'curl' },
+        },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'tool.cancelled', toolCallId: 'shell-1', reason: 'Cancelled by user.' },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'turn.aborted',
+          turnId: 'turn-1',
+          reason: 'Cancelled by user.',
+          cause: 'user',
+        },
+      });
+      state = dispatch(state, { type: 'USER_MESSAGE', text: '请继续' });
+      state = dispatch(state, { type: 'SET_RUNNING' });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'user.message_appended', messageId: 'user-2', content: '请继续' },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'turn.started', turnId: 'turn-2' },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.requested', requestId: 'request-2' },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'model.responded', messageId: 'answer-2', text: '继续完成' },
+      });
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: { type: 'run.completed', turnId: 'turn-2', output: '继续完成' },
+      });
+      state = dispatch(state, { type: 'SET_IDLE' });
+
+      expect(flatBlocks(state)).toContainEqual(
+        expect.objectContaining({ kind: 'user', content: '请继续' }),
+      );
+      expect(flatBlocks(state)).toContainEqual(
+        expect.objectContaining({ kind: 'text', content: '继续完成' }),
+      );
+      expect(state.turns).toHaveLength(2);
+      expect(state.turns[0]!.blocks[0]).toMatchObject({ kind: 'user', content: '原始请求' });
+      expect(state.turns[1]!.blocks[0]).toMatchObject({ kind: 'user', content: '请继续' });
+      expect(state.running).toBe(false);
+    });
+    test('does not duplicate an optimistically rendered prompt when its durable event arrives', () => {
+      let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+      state = dispatch(state, { type: 'USER_MESSAGE', text: '继续测试' });
+      // Runtime diagnostics can arrive between the optimistic prompt and its
+      // durable user.message_appended event. Deduplication must cover the
+      // active turn rather than only its final block.
+      state = dispatch(state, { type: 'LOCAL_TEXT', text: 'Session logging mode: off.' });
+
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user.message_appended',
+          messageId: 'u-continue',
+          content: '继续测试',
+        },
+      });
+
+      const userBlocks = flatBlocks(state).filter((block) => block.kind === 'user');
+      expect(userBlocks).toHaveLength(1);
+      expect(userBlocks[0]).toMatchObject({ kind: 'user', content: '继续测试' });
+    });
+    test('replays identical consecutive prompts as distinct turns', () => {
+      const events: import('../src/core/runtime/events').RuntimeEvent[] = [
+        { type: 'user.message_appended', messageId: 'u-1', content: '继续' },
+        { type: 'turn.started', turnId: 'turn-1' },
+        { type: 'model.requested', requestId: 'request-1' },
+        { type: 'model.responded', messageId: 'm-1', text: '第一轮回答' },
+        { type: 'run.completed', turnId: 'turn-1', output: '第一轮回答' },
+        { type: 'user.message_appended', messageId: 'u-2', content: '继续' },
+        { type: 'turn.started', turnId: 'turn-2' },
+        { type: 'model.requested', requestId: 'request-2' },
+        { type: 'model.responded', messageId: 'm-2', text: '第二轮回答' },
+        { type: 'run.completed', turnId: 'turn-2', output: '第二轮回答' },
+      ];
+
+      const state = events.reduce(handleRuntimeEventAction, fresh());
+
+      expect(state.turns).toHaveLength(2);
+      expect(state.turns.map((turn) => turn.blocks[0])).toEqual([
+        expect.objectContaining({ kind: 'user', content: '继续' }),
+        expect.objectContaining({ kind: 'user', content: '继续' }),
+      ]);
+      expect(state.turns[0]!.blocks).toContainEqual(
+        expect.objectContaining({ kind: 'text', content: '第一轮回答' }),
+      );
+      expect(state.turns[1]!.blocks).toContainEqual(
+        expect.objectContaining({ kind: 'text', content: '第二轮回答' }),
+      );
+    });
     test('retains every structured multi-question answer when ask_user finishes with oversized stdout', () => {
       const answers = {
         intent: 'implement',
@@ -4509,6 +4726,27 @@ describe('model streaming RuntimeEvent rendering', () => {
     expect(blocks.some((block) => block.kind === 'text')).toBe(false);
   });
 
+  test('preserves state identity for hidden streamed tail updates after the first answer delta', () => {
+    let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.requested',
+      requestId: 'hidden-tail',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'unfinished',
+    });
+    const firstAnswerState = state;
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: 'unfinished paragraph still growing',
+    });
+
+    expect(state).toBe(firstAnswerState);
+    expect(flatBlocks(state).filter((block) => block.kind === 'text')).toHaveLength(0);
+  });
+
   test('keeps reasoning deltas hidden until the reasoning stream completes', () => {
     let state = handleRuntimeEventAction(fresh(), {
       type: 'model.responded',
@@ -4756,6 +4994,9 @@ describe('model streaming RuntimeEvent rendering', () => {
     });
     expect(state.thoughtPhaseStatus).toBe('awaiting_terminal');
     expect(flatBlocks(state).filter((block) => block.kind === 'tool_summary')).toHaveLength(0);
+    const publishedPrefix = flatBlocks(state).find(
+      (block) => block.kind === 'text' && block.content === 'Project overview.\n\n',
+    );
 
     state = handleRuntimeEventAction(state, {
       type: 'model.responded',
@@ -4779,6 +5020,7 @@ describe('model streaming RuntimeEvent rendering', () => {
       thoughtElapsedMs: expect.any(Number),
       thoughtContent: 'complete project reasoning',
     });
+    expect(blocks[prefixIndex]).toBe(publishedPrefix);
   });
 
   test('keeps one Thought across multiple exploration calls when a complete late reasoning paragraph follows answer text', () => {
@@ -5209,6 +5451,35 @@ describe('model streaming RuntimeEvent rendering', () => {
     ).toBe(true);
   });
 
+  test('keeps an idle-race stream delta transient and publishes one terminal line', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'model.requested',
+      requestId: 'answer-request',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'model.text_delta',
+      text: '好的，继续测试网络请求',
+    });
+    expect(flatBlocks(state).filter((block) => block.kind === 'text')).toHaveLength(0);
+
+    state = handleRuntimeEventAction(state, {
+      type: 'model.responded',
+      messageId: 'answer',
+      text: '好的，继续测试网络请求。',
+    });
+    state = handleRuntimeEventAction(state, {
+      type: 'run.completed',
+      turnId: 'turn-1',
+      output: '好的，继续测试网络请求。',
+    });
+
+    expect(
+      flatBlocks(state).filter(
+        (block) => block.kind === 'text' && block.content === '好的，继续测试网络请求。',
+      ),
+    ).toHaveLength(1);
+    expect(flatBlocks(state).filter((block) => block.kind === 'text')).toHaveLength(1);
+  });
   test('settles a streamed final answer without duplicating the terminal text', () => {
     let state = handleRuntimeEventAction(fresh(), {
       type: 'model.responded',

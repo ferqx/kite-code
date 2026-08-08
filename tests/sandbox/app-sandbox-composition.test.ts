@@ -1,9 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
+import {
+  composeAppSandboxExecutorV1,
+  createPreparedAppShellExecutorV1,
+  SANDBOX_PREPARATION_ABORTED_REASON,
+  sweepOwnedSandboxPreflightWorkspaces,
+} from '@/app/sandbox/composition';
 import type { ExecutionBoundaryV1, ExecutionCapabilitySurfaceV1 } from '@/core/sandbox/types';
+import type { ShellExecutor } from '@/core/tools/shell';
 
 const shellSurface: ExecutionCapabilitySurfaceV1 = {
   inProcessReadOnlyTools: null,
@@ -97,7 +103,7 @@ describe('App sandbox composition', () => {
     }
   });
 
-  test('does not let the development sandbox override disable a release boundary', async () => {
+  test('falls back to the host Bash when the sandbox is explicitly unavailable', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
     try {
       const executor = composeAppSandboxExecutorV1({
@@ -111,10 +117,292 @@ describe('App sandbox composition', () => {
         sandboxEnabled: false,
       });
       const result = await executor({ workspace, command: 'printf bypass' });
-      expect(result.ok).toBe(false);
-      expect(result.stderr).toContain('refusing unsandboxed shell execution');
+      expect(result).toMatchObject({ ok: true, exitCode: 0, stdout: 'bypass' });
     } finally {
       rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('TUI falls back to the host Shell when the sandbox is unavailable', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-'));
+    try {
+      const executor = composeAppSandboxExecutorV1({
+        entrypoint: 'tui',
+        workspace,
+        config: { sandbox: { enabled: true } },
+        sandboxEnabled: false,
+      });
+      const decision = await executor.prepare();
+      const result = await executor({ workspace, command: 'printf bypass' });
+      expect(decision).toMatchObject({ mode: 'host_shell', backend: 'none' });
+      expect(result).toMatchObject({ ok: true, exitCode: 0, stdout: 'bypass' });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('defers backend resolution and makes user commands await the same preparation', async () => {
+    let releaseYield!: () => void;
+    const yieldGate = new Promise<void>((resolvePromise) => {
+      releaseYield = resolvePromise;
+    });
+    let backendResolutions = 0;
+    const hostCommands: string[] = [];
+    const executor = createPreparedAppShellExecutorV1({
+      workspace: '/workspace',
+      sandboxEnabled: true,
+      fallbackAllowed: true,
+      yieldBeforeResolve: () => yieldGate,
+      resolveBackend: () => {
+        backendResolutions += 1;
+        return 'none';
+      },
+      createNativeExecutor: () => {
+        throw new Error('native executor must not be constructed without a backend');
+      },
+      hostExecutor: async (input) => {
+        hostCommands.push(input.command);
+        return { ok: true, command: input.command, exitCode: 0, stdout: 'host', stderr: '' };
+      },
+    });
+
+    const preparation = executor.prepare();
+    const execution = executor({ workspace: '/workspace', command: 'user-command' });
+    expect(backendResolutions).toBe(0);
+    expect(hostCommands).toEqual([]);
+
+    releaseYield();
+    const [decision, result] = await Promise.all([preparation, execution]);
+    expect(backendResolutions).toBe(1);
+    expect(decision).toMatchObject({ mode: 'host_shell', backend: 'none' });
+    expect(hostCommands).toEqual(['user-command']);
+    expect(result.stdout).toBe('host');
+  });
+
+  test('preserves the Windows runner availability reason when it selects the host before a script', async () => {
+    const hostCommands: string[] = [];
+    const executor = createPreparedAppShellExecutorV1({
+      workspace: 'C:/workspace',
+      sandboxEnabled: true,
+      fallbackAllowed: true,
+      yieldBeforeResolve: async () => {},
+      resolveBackend: async () => ({
+        backend: 'none',
+        unavailableReason: 'windows_restricted_token_runner_unavailable',
+      }),
+      createNativeExecutor: () => {
+        throw new Error('native executor must not be constructed');
+      },
+      hostExecutor: async (input) => {
+        hostCommands.push(input.command);
+        return { ok: true, command: input.command, exitCode: 0, stdout: 'host', stderr: '' };
+      },
+    });
+
+    const decision = await executor.prepare();
+    const result = await executor({ workspace: 'C:/workspace', command: 'user-command' });
+
+    expect(decision).toMatchObject({
+      mode: 'host_shell',
+      backend: 'none',
+      reason: 'windows_restricted_token_runner_unavailable',
+    });
+    expect(hostCommands).toEqual(['user-command']);
+    expect(result.stdout).toBe('host');
+  });
+
+  test('probes in a disposable minimal workspace before binding the real executor', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-app-sandbox-real-'));
+    const constructedWorkspaces: string[] = [];
+    const calls: Array<{ boundWorkspace: string; inputWorkspace: string; command: string }> = [];
+    try {
+      const executor = createPreparedAppShellExecutorV1({
+        workspace,
+        sandboxEnabled: true,
+        fallbackAllowed: true,
+        yieldBeforeResolve: async () => {},
+        resolveBackend: () => 'windows_restricted_token',
+        createNativeExecutor: (boundWorkspace) => {
+          constructedWorkspaces.push(boundWorkspace);
+          return async (input) => {
+            calls.push({
+              boundWorkspace,
+              inputWorkspace: input.workspace,
+              command: input.command,
+            });
+            return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+          };
+        },
+      });
+
+      const decision = await executor.prepare();
+      expect(decision).toMatchObject({ mode: 'sandbox', backend: 'windows_restricted_token' });
+      expect(constructedWorkspaces).toHaveLength(2);
+      const probeWorkspace = constructedWorkspaces[0]!;
+      expect(probeWorkspace).not.toBe(workspace);
+      expect(existsSync(probeWorkspace)).toBe(false);
+      expect(constructedWorkspaces[1]).toBe(workspace);
+      expect(calls).toEqual([
+        { boundWorkspace: probeWorkspace, inputWorkspace: probeWorkspace, command: ':' },
+      ]);
+
+      await executor({ workspace, command: 'user-command' });
+      expect(calls[1]).toEqual({
+        boundWorkspace: workspace,
+        inputWorkspace: workspace,
+        command: 'user-command',
+      });
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('runs one preflight and caches the host fallback before user commands', async () => {
+    const nativeCommands: string[] = [];
+    const hostCommands: string[] = [];
+    const hostExecutor: ShellExecutor = async (input) => {
+      hostCommands.push(input.command);
+      return {
+        ok: true,
+        command: input.command,
+        exitCode: 0,
+        stdout: 'host',
+        stderr: '',
+      };
+    };
+    const executor = createPreparedAppShellExecutorV1({
+      hostExecutor,
+      workspace: 'C:/workspace',
+      sandboxEnabled: true,
+      fallbackAllowed: true,
+      resolveBackend: () => 'windows_restricted_token',
+      createNativeExecutor: () => async (input) => {
+        nativeCommands.push(input.command);
+        return {
+          ok: false,
+          command: input.command,
+          exitCode: -1,
+          stdout: '',
+          stderr: 'sandbox startup failed',
+        };
+      },
+    });
+
+    const [first, second] = await Promise.all([executor.prepare(), executor.prepare()]);
+    const result = await executor({ workspace: 'C:/workspace', command: 'user-command' });
+
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({ mode: 'host_shell', backend: 'none' });
+    expect(nativeCommands).toEqual([':']);
+    expect(hostCommands).toEqual(['user-command']);
+    expect(result.stdout).toBe('host');
+  });
+
+  test('never replays a user command in the host after sandbox preflight succeeds', async () => {
+    const nativeCommands: string[] = [];
+    let hostCalls = 0;
+    const hostExecutor: ShellExecutor = async (input) => {
+      hostCalls += 1;
+      return { ok: true, command: input.command, exitCode: 0, stdout: 'replayed', stderr: '' };
+    };
+    const executor = createPreparedAppShellExecutorV1({
+      hostExecutor,
+      workspace: '/workspace',
+      sandboxEnabled: true,
+      fallbackAllowed: true,
+      resolveBackend: () => 'bubblewrap',
+      createNativeExecutor: () => async (input) => {
+        nativeCommands.push(input.command);
+        return input.command === ':'
+          ? { ok: true, command: ':', exitCode: 0, stdout: '', stderr: '' }
+          : {
+              ok: false,
+              command: input.command,
+              exitCode: 7,
+              stdout: '',
+              stderr: 'script failed',
+            };
+      },
+    });
+
+    const result = await executor({ workspace: '/workspace', command: 'exit 7' });
+
+    expect(result).toMatchObject({ ok: false, exitCode: 7, stderr: 'script failed' });
+    expect(nativeCommands).toEqual([':', 'exit 7']);
+    expect(hostCalls).toBe(0);
+  });
+
+  test('aborting an in-flight preparation rejects it and the next prepare retries fresh', async () => {
+    let probeMode: 'hang-until-abort' | 'fast-success' = 'hang-until-abort';
+    const executor = createPreparedAppShellExecutorV1({
+      workspace: '/workspace',
+      sandboxEnabled: true,
+      fallbackAllowed: false,
+      resolveBackend: () => 'bubblewrap',
+      createNativeExecutor: (_workspace, purpose) =>
+        purpose === 'preflight'
+          ? async (input) => {
+              if (probeMode === 'fast-success') {
+                return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+              }
+              await new Promise<void>((resolveAwait) => {
+                if (input.signal?.aborted) return resolveAwait();
+                input.signal?.addEventListener('abort', () => resolveAwait(), { once: true });
+              });
+              return {
+                ok: false,
+                command: input.command,
+                exitCode: 130,
+                stdout: '',
+                stderr: 'Command cancelled by user.',
+              };
+            }
+          : async (input) => ({
+              ok: true,
+              command: input.command,
+              exitCode: 0,
+              stdout: 'executed',
+              stderr: '',
+            }),
+    });
+
+    const attempt = executor.prepare();
+    // Let the attempt reach the hanging probe before aborting it.
+    await new Promise((resolveWait) => setTimeout(resolveWait, 10));
+    executor.abortPreparation?.();
+    await expect(attempt).rejects.toThrow(SANDBOX_PREPARATION_ABORTED_REASON);
+
+    // The aborted attempt must not be cached: a fresh prepare() re-probes and
+    // succeeds once the probe is fast.
+    probeMode = 'fast-success';
+    await expect(executor.prepare()).resolves.toMatchObject({
+      mode: 'sandbox',
+      backend: 'bubblewrap',
+    });
+  });
+
+  test('startup sweep removes only aged, owned preflight workspaces', async () => {
+    const tempDirectory = tmpdir();
+    const aged = join(tempDirectory, 'kite-code-sandbox-preflight-sweep-aged-test');
+    const fresh = join(tempDirectory, 'kite-code-sandbox-preflight-sweep-fresh-test');
+    const unrelated = join(tempDirectory, 'kite-code-sandbox-sweep-unrelated-test');
+    mkdirSync(aged, { recursive: true });
+    mkdirSync(fresh, { recursive: true });
+    mkdirSync(unrelated, { recursive: true });
+    const agedTime = new Date(Date.now() - 60 * 60_000);
+    utimesSync(aged, agedTime, agedTime);
+    try {
+      await sweepOwnedSandboxPreflightWorkspaces();
+      expect(existsSync(aged)).toBe(false);
+      // A concurrently running TUI's live probe directory is younger than
+      // the sweep bound and must survive.
+      expect(existsSync(fresh)).toBe(true);
+      // Directories outside the owned preflight contract are never touched.
+      expect(existsSync(unrelated)).toBe(true);
+    } finally {
+      rmSync(aged, { recursive: true, force: true });
+      rmSync(fresh, { recursive: true, force: true });
+      rmSync(unrelated, { recursive: true, force: true });
     }
   });
 });

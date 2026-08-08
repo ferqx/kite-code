@@ -30,6 +30,27 @@ import {
 import { DEFAULT_RESOURCE_LIMITS } from '../src/core/sandbox/types';
 import { shellTool } from '../src/core/tools/shell';
 
+function seatbeltString(path: string): string {
+  return path.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+}
+
+function seatbeltSubpath(path: string): string {
+  return `(subpath "${seatbeltString(path)}")`;
+}
+
+function seatbeltLiteral(path: string): string {
+  return `(literal "${seatbeltString(path)}")`;
+}
+
+function seatbeltLiteralPrefixRegex(path: string): string {
+  const regex = `^${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}.*$`;
+  return `(regex #"${regex.replaceAll('"', '\\"')}")`;
+}
+
+function directoryLinkType(): 'dir' | 'junction' {
+  return process.platform === 'win32' ? 'junction' : 'dir';
+}
+
 // 验证沙箱 profile 结构 / Validate sandbox profile structure
 describe('sandbox profile generation', () => {
   const workspace = mkdtempSync(join(tmpdir(), 'sandbox-profile-test-'));
@@ -54,7 +75,7 @@ describe('sandbox profile generation', () => {
 
   test('profile writes are limited to the canonical workspace', () => {
     const profile = generateSandboxProfile(workspace);
-    expect(profile).toContain(`(subpath "${canonicalWorkspace}")`);
+    expect(profile).toContain(seatbeltSubpath(canonicalWorkspace));
     expect(profile).not.toContain('(subpath "/")');
   });
 
@@ -76,7 +97,7 @@ describe('sandbox profile generation', () => {
   test('profile limits reads to workspace and explicit system runtime roots', () => {
     const profile = generateSandboxProfile(workspace);
     if (existsSync('/System')) expect(profile).toContain('(subpath "/System")');
-    expect(profile).toContain('(subpath "/usr/bin")');
+    if (existsSync('/usr/bin')) expect(profile).toContain('(subpath "/usr/bin")');
     expect(profile).not.toContain('(subpath "/usr")');
     expect(profile).not.toContain('(subpath "/")');
   });
@@ -94,17 +115,20 @@ describe('sandbox profile generation', () => {
 
   test('profile denies protected workspace paths', () => {
     const profile = generateSandboxProfile(workspace);
-    expect(profile).toContain(`(subpath "${join(canonicalWorkspace, '.git')}")`);
-    expect(profile).toContain(`(literal "${join(canonicalWorkspace, '.env')}")`);
-    expect(profile).toContain(`(regex #"^${join(canonicalWorkspace, '\\.env\\.')}.*$")`);
-    expect(profile).toContain('/\\.[eE][nN][vV]\\..*$")');
-    expect(profile).not.toContain('\\\\.[eE][nN][vV]');
+    expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
+    expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
+    expect(profile).toContain(seatbeltLiteralPrefixRegex(join(canonicalWorkspace, '.env.')));
+    expect(profile).toContain('[eE][nN][vV]\\..*$")');
+    if (process.platform === 'darwin') {
+      expect(profile).toContain('/\\.[eE][nN][vV]\\..*$")');
+      expect(profile).not.toContain('\\\\.[eE][nN][vV]');
+    }
     expect(profile).toContain('(deny file-read* file-map-executable file-write*');
   });
 
   test('profile default keeps git access denied', () => {
     const profile = generateSandboxProfile(workspace);
-    expect(profile).toContain(`(subpath "${join(canonicalWorkspace, '.git')}")`);
+    expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
     expect(profile).toContain('[gG][iI][tT](/.*)?$');
   });
 
@@ -122,29 +146,29 @@ describe('sandbox profile generation', () => {
   test('git access exempts .git but keeps other protected paths denied', () => {
     const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
     // .git directory is readable/writable so git commands can operate.
-    expect(profile).not.toContain(`(subpath "${join(canonicalWorkspace, '.git')}")`);
+    expect(profile).not.toContain(seatbeltSubpath(join(canonicalWorkspace, '.git')));
     expect(profile).not.toContain('[gG][iI][tT](/.*)');
     // Other protected identities stay denied: shell profiles, credentials, …
-    expect(profile).toContain(`(subpath "${join(canonicalWorkspace, '.ssh')}")`);
-    expect(profile).toContain(`(literal "${join(canonicalWorkspace, '.git-credentials')}")`);
-    expect(profile).toContain(`(literal "${join(canonicalWorkspace, '.env')}")`);
+    expect(profile).toContain(seatbeltSubpath(join(canonicalWorkspace, '.ssh')));
+    expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.git-credentials')));
+    expect(profile).toContain(seatbeltLiteral(join(canonicalWorkspace, '.env')));
     expect(profile).toContain('(deny file-read* file-map-executable file-write*');
   });
 
   test('read-only scope omits workspace from writable filters', () => {
     const profile = generateSandboxProfile(workspace, { filesystemScope: 'read_only' });
     const writeSection = profile.slice(profile.indexOf(';; Writes are limited'));
-    expect(writeSection).not.toContain(`(subpath "${canonicalWorkspace}")`);
+    expect(writeSection).not.toContain(seatbeltSubpath(canonicalWorkspace));
   });
 
   test('canonicalizes a symlinked workspace before emitting rules', () => {
     const parent = mkdtempSync(join(tmpdir(), 'sandbox-profile-link-test-'));
     const link = join(parent, 'workspace-link');
-    symlinkSync(workspace, link);
+    symlinkSync(workspace, link, directoryLinkType());
     try {
       const profile = generateSandboxProfile(link);
-      expect(profile).toContain(`(subpath "${canonicalWorkspace}")`);
-      expect(profile).not.toContain(`(subpath "${link}")`);
+      expect(profile).toContain(seatbeltSubpath(canonicalWorkspace));
+      expect(profile).not.toContain(seatbeltSubpath(link));
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
@@ -212,8 +236,10 @@ describe('shell wrapper utilities', () => {
     const second = createSandboxRuntimeDir(ws);
     try {
       expect(first).not.toBe(second);
-      expect(statSync(first).mode & 0o777).toBe(0o700);
-      expect(statSync(second).mode & 0o777).toBe(0o700);
+      if (process.platform !== 'win32') {
+        expect(statSync(first).mode & 0o777).toBe(0o700);
+        expect(statSync(second).mode & 0o777).toBe(0o700);
+      }
     } finally {
       rmSync(first, { recursive: true, force: true });
       rmSync(second, { recursive: true, force: true });
@@ -221,52 +247,52 @@ describe('shell wrapper utilities', () => {
     }
   });
 
-  test.skipIf(process.platform === 'linux' && detectSandboxBackend() !== 'bubblewrap')(
-    'runtime cleanup recovers nested hostile modes without following symlinks',
-    () => {
-      const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-cleanup-test-'));
-      const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-external-test-'));
-      const runtimeDir = createSandboxRuntimeDir(ws);
-      const nested = join(runtimeDir, 'nested');
-      const deeper = join(nested, 'deeper');
-      const flagged = join(deeper, 'flagged');
-      mkdirSync(deeper, { recursive: true });
-      writeFileSync(flagged, 'flagged');
-      chmodSync(external, 0o755);
-      symlinkSync(external, join(deeper, 'external-link'));
-      if (process.platform === 'darwin') {
-        expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', flagged]).exitCode).toBe(0);
-      }
-      chmodSync(deeper, 0o000);
-      expect(statSync(deeper).mode & 0o777).toBe(0o000);
-      if (process.platform === 'darwin') {
-        expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', deeper]).exitCode).toBe(0);
-      }
-      chmodSync(nested, 0o000);
-      expect(statSync(nested).mode & 0o777).toBe(0o000);
-      if (process.platform === 'darwin') {
-        expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', nested]).exitCode).toBe(0);
-      }
-      chmodSync(runtimeDir, 0o000);
-      try {
-        expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
-        expect(existsSync(runtimeDir)).toBe(false);
-        expect(existsSync(external)).toBe(true);
-        expect(statSync(external).mode & 0o777).toBe(0o755);
-      } finally {
-        cleanupSandboxRuntimeDir(runtimeDir);
-        rmSync(external, { recursive: true, force: true });
-        rmSync(ws, { recursive: true, force: true });
-      }
-    },
-  );
+  test.skipIf(
+    process.platform === 'win32' ||
+      (process.platform === 'linux' && detectSandboxBackend() !== 'bubblewrap'),
+  )('runtime cleanup recovers nested hostile modes without following symlinks', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-cleanup-test-'));
+    const external = mkdtempSync(join(tmpdir(), 'sandbox-runtime-external-test-'));
+    const runtimeDir = createSandboxRuntimeDir(ws);
+    const nested = join(runtimeDir, 'nested');
+    const deeper = join(nested, 'deeper');
+    const flagged = join(deeper, 'flagged');
+    mkdirSync(deeper, { recursive: true });
+    writeFileSync(flagged, 'flagged');
+    chmodSync(external, 0o755);
+    symlinkSync(external, join(deeper, 'external-link'), directoryLinkType());
+    if (process.platform === 'darwin') {
+      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', flagged]).exitCode).toBe(0);
+    }
+    chmodSync(deeper, 0o000);
+    expect(statSync(deeper).mode & 0o777).toBe(0o000);
+    if (process.platform === 'darwin') {
+      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', deeper]).exitCode).toBe(0);
+    }
+    chmodSync(nested, 0o000);
+    expect(statSync(nested).mode & 0o777).toBe(0o000);
+    if (process.platform === 'darwin') {
+      expect(Bun.spawnSync(['/usr/bin/chflags', 'uchg,uappnd', nested]).exitCode).toBe(0);
+    }
+    chmodSync(runtimeDir, 0o000);
+    try {
+      expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
+      expect(existsSync(runtimeDir)).toBe(false);
+      expect(existsSync(external)).toBe(true);
+      expect(statSync(external).mode & 0o777).toBe(0o755);
+    } finally {
+      cleanupSandboxRuntimeDir(runtimeDir);
+      rmSync(external, { recursive: true, force: true });
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
 
   test('runtime cleanup unlinks a dangling root symlink without touching its former target', () => {
     const ws = mkdtempSync(join(tmpdir(), 'sandbox-runtime-link-cleanup-test-'));
     const external = join(tmpdir(), `sandbox-runtime-missing-target-${process.pid}-${Date.now()}`);
     const runtimeDir = createSandboxRuntimeDir(ws);
     rmSync(runtimeDir, { recursive: true, force: true });
-    symlinkSync(external, runtimeDir);
+    symlinkSync(external, runtimeDir, directoryLinkType());
     try {
       expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
       expect(existsSync(runtimeDir)).toBe(false);
@@ -285,12 +311,14 @@ describe('shell wrapper utilities', () => {
     writeFileSync(marker, 'keep');
     chmodSync(external, 0o755);
     rmSync(runtimeDir, { recursive: true, force: true });
-    symlinkSync(external, runtimeDir);
+    symlinkSync(external, runtimeDir, directoryLinkType());
     try {
       expect(cleanupSandboxRuntimeDir(runtimeDir)).toBe(true);
       expect(existsSync(runtimeDir)).toBe(false);
       expect(existsSync(marker)).toBe(true);
-      expect(statSync(external).mode & 0o777).toBe(0o755);
+      if (process.platform !== 'win32') {
+        expect(statSync(external).mode & 0o777).toBe(0o755);
+      }
     } finally {
       rmSync(runtimeDir, { recursive: true, force: true });
       rmSync(external, { recursive: true, force: true });
@@ -356,6 +384,7 @@ describe('dangerous path detection', () => {
   test('detects credential file access', () => {
     expect(checkDangerousPaths('cat .env')).toBe('.env');
     expect(checkDangerousPaths('cp .env .env.local')).toBe('.env');
+    expect(checkDangerousPaths('printf secret > .env.staging')).toBe('.env.staging');
     expect(checkDangerousPaths('cat ~/.aws/credentials')).toBe('.aws/credentials');
     expect(checkDangerousPaths('cat .npmrc')).toBe('.npmrc');
   });
@@ -426,7 +455,7 @@ describe('dangerous path detection', () => {
 describe('sandbox platform detection', () => {
   test('detectSandboxBackend returns a valid backend type', () => {
     const backend = detectSandboxBackend();
-    expect(['seatbelt', 'bubblewrap', 'none']).toContain(backend);
+    expect(['seatbelt', 'bubblewrap', 'windows_restricted_token', 'none']).toContain(backend);
   });
 
   test('detectSandboxBackend matches platform', () => {
@@ -436,7 +465,7 @@ describe('sandbox platform detection', () => {
     } else if (process.platform === 'linux') {
       expect(['bubblewrap', 'none']).toContain(backend);
     } else {
-      expect(backend).toBe('none');
+      expect(['none', 'windows_restricted_token']).toContain(backend);
     }
   });
 
@@ -460,7 +489,7 @@ describe('bwrap argument generation', () => {
   test('uses a canonical read-only workspace bind when requested', () => {
     const parent = mkdtempSync(join(tmpdir(), 'bwrap-link-test-'));
     const link = join(parent, 'workspace-link');
-    symlinkSync(workspace, link);
+    symlinkSync(workspace, link, directoryLinkType());
     try {
       const args = generateBwrapArgs(link, { filesystemScope: 'read_only' });
       const bindIndex = args.findIndex(

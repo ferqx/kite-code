@@ -27,6 +27,13 @@ release notes/known limitations。缺任何真实结果时保持 blocked 或未�
 - archive SHA-256 sidecar；
 - release notes、known limitations 与普通维护者检查清单。
 
+Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
+`isksh`/Coreutils runtime（含许可文件）。安装后的 launcher 通过 managed-install marker 从当前
+candidate payload 解析这些文件；缺失、替换或 digest 不匹配时仍 fail closed，不会把 native runner
+替换为未验证程序。Windows GNU Rust 构建通过仓库级 target rustflags 禁止 PE linker 写入墙钟时间戳；
+因此固定 toolchain 的 clean build 可在本地与 GitHub-hosted Windows runner 上生成同一 runner digest，
+workflow 才能在打包前用 committed manifest pin 执行 `git diff --exit-code`。
+
 build 不读取 Provider secret，不自动加载 `.env`/`bunfig`，也不把环境变量内联到 executable。
 manifest/checksum 是完整性数据，不是代码签名、notarization、provenance 或身份认证。
 归档 writer 规范化 tar entry 时间戳并重算 header checksum；同一 target、manifest 与 payload

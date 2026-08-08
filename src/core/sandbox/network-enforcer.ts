@@ -18,6 +18,7 @@ export type NetworkBoundaryFailureCode =
   | 'endpoint_revision_mismatch'
   | 'redirect_denied'
   | 'request_body_too_large'
+  | 'response_body_too_large'
   | 'controller_unavailable';
 
 export class NetworkBoundaryError extends Error {
@@ -595,7 +596,19 @@ async function requestPinnedNetworkEndpoint(
       {
         method: input.method,
         headers: Object.fromEntries(requestHeaders.entries()),
-        lookup: (_hostname, _options, callback) => {
+        // The boundary deliberately returns only the admitted address. Bun's
+        // Node-compatible client asks custom lookups for an `all: true` result,
+        // while Node may ask for the ordinary scalar form.
+        lookup: (_hostname, lookupOptions, callback) => {
+          if (lookupOptions.all) {
+            (
+              callback as unknown as (
+                error: Error | null,
+                addresses: { address: string; family: number }[],
+              ) => void
+            )(null, [{ address: input.admission.address, family: input.admission.family }]);
+            return;
+          }
           callback(null, input.admission.address, input.admission.family);
         },
       },

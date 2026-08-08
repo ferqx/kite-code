@@ -18,7 +18,7 @@ import type {
   OutputBlock,
   TuiState,
 } from '../types';
-import { cancelRunningBlocks } from './agentReducer';
+import { projectToolCancelled, projectUserCancelledTurn } from './cancellation-projection';
 import {
   buildToolSummaryLine,
   isExplorationToolByName,
@@ -27,6 +27,7 @@ import {
 } from './consolidateTools';
 import {
   appendBlock,
+  appendUserMessage,
   finalizeLastTurnStreaming,
   findBlock,
   findBlockById,
@@ -39,7 +40,10 @@ import {
 /** Internal rendering vocabulary shared by RuntimeEvent rendering paths.
  * RuntimeEvent remains the only streamed action accepted by the TUI reducer. */
 export type RenderEvent =
-  | { type: 'step_begin'; data: { node: string; spanId: string; internal?: boolean } }
+  | {
+      type: 'step_begin';
+      data: { node: string; spanId: string; internal?: boolean };
+    }
   | { type: 'step_end'; data: { node: string; spanId: string } }
   | {
       type: 'reason' | 'text';
@@ -68,7 +72,12 @@ export type RenderEvent =
   | { type: 'interrupt' | 'update'; data: unknown }
   | {
       type: 'model_retry';
-      data: { attempt: number; maxAttempts: number; error: string; delayMs: number };
+      data: {
+        attempt: number;
+        maxAttempts: number;
+        error: string;
+        delayMs: number;
+      };
     }
   | { type: 'final'; data: string }
   | { type: 'subagent_start'; data: Protocol.SubAgentStartPayload }
@@ -76,7 +85,10 @@ export type RenderEvent =
   | { type: 'subagent_tool_result'; data: Protocol.SubAgentToolResultPayload }
   | { type: 'subagent_done'; data: Protocol.SubAgentDonePayload }
   | { type: 'subagent_error'; data: Protocol.SubAgentErrorPayload }
-  | { type: 'subagent_cache_metrics'; data: Protocol.SubAgentCacheMetricsPayload }
+  | {
+      type: 'subagent_cache_metrics';
+      data: Protocol.SubAgentCacheMetricsPayload;
+    }
   | { type: 'tool_progress'; data: Protocol.ToolProgressPayload }
   | { type: 'turn_begin'; data: { index: number; spanId: string } }
   | { type: 'turn_end'; data: { index: number } }
@@ -219,7 +231,10 @@ function splitStreamingMarkdown(content: string): {
   }
 
   if (boundary > 0) {
-    return { committed: content.slice(0, boundary), tail: content.slice(boundary) };
+    return {
+      committed: content.slice(0, boundary),
+      tail: content.slice(boundary),
+    };
   }
 
   const lines = content.split('\n');
@@ -753,7 +768,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
   ) {
     const reasonBlock = findBlockById(state, state.currentRunReasonId);
     if (reasonBlock?.kind === 'reason' && reasonBlock.folded) {
-      state = replaceBlockById(state, state.currentRunReasonId, { ...reasonBlock, folded: false });
+      state = replaceBlockById(state, state.currentRunReasonId, {
+        ...reasonBlock,
+        folded: false,
+      });
     }
     state = { ...state, currentRunReasonId: undefined };
   }
@@ -765,6 +783,12 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       // Blank/whitespace-only text is ignored entirely under the phase model.
       if (!/\S/u.test(event.data.text)) return state;
 
+      // model.requested is the stream-ownership boundary. A cancelled
+      // predecessor may transiently clear the global running flag while the
+      // successor request is already active; cumulative deltas must not fall
+      // through to the legacy append path during that window.
+      const hasRuntimeStreamOwnership =
+        event.data.streamingDelta && (state.running || state.currentModelRequestId != null);
       // ADR-0030 / 规则 24：旁白文本吸收。阶段块活跃时，文本吸收为
       // pendingCaption（渲染于块顶），等随后到来的只读工具确认（确认 →
       // captions，永久留在块内）；阶段结束时仍未确认的由 closeCurrentThought
@@ -779,7 +803,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       // accumulate chronologically; streaming providers resend the full text
       // each event — startsWith detects growth and replaces instead of
       // duplicating.
-      if (state.running && event.data.streamingDelta) {
+      if (hasRuntimeStreamOwnership) {
         // The first answer delta is the only reliable stream-level signal that
         // the reasoning channel is complete. Publish its cached full value in
         // one update, then visually settle the Thought while it retains
@@ -797,7 +821,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
                 ? (block.nextTimelineSeq ?? timeline.length)
                 : (block.nextTimelineSeq ?? timeline.length) + 1;
               if (!alreadyPublished) {
-                timeline.push({ seq, kind: 'thinking', text: completedReasoning });
+                timeline.push({
+                  seq,
+                  kind: 'thinking',
+                  text: completedReasoning,
+                });
               }
               return {
                 ...block,
@@ -892,7 +920,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         );
       }
 
-      if (state.running && event.data.streamingDelta) {
+      if (hasRuntimeStreamOwnership) {
         const committedLength = currentModelResponseTextParts(state)
           .filter((part) => part.streamingSource == null)
           .reduce((length, part) => length + part.text.length, 0);
@@ -968,8 +996,16 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       // Finalize streaming text so it doesn't enter <Static> with cursor
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
-      const block: OutputBlock = { id, kind: 'reason', content: event.data.text, folded: true };
-      const withReason = { ...appendBlock(finalized, block), currentRunReasonId: id };
+      const block: OutputBlock = {
+        id,
+        kind: 'reason',
+        content: event.data.text,
+        folded: true,
+      };
+      const withReason = {
+        ...appendBlock(finalized, block),
+        currentRunReasonId: id,
+      };
       return updateCurrentThoughtActivity(
         withReason,
         { kind: 'thinking', text: event.data.text },
@@ -1041,7 +1077,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           // The Thought activity window is mutually exclusive: a tool event
           // immediately replaces the reasoning view; a later reasoning delta
           // may switch it back again.
-          const latestActivity = { kind: 'tool', callId: event.data.call_id } as const;
+          const latestActivity = {
+            kind: 'tool',
+            callId: event.data.call_id,
+          } as const;
           const seq = (currentThought.nextTimelineSeq ?? currentThought.timeline?.length ?? 0) + 1;
           const updated: Extract<OutputBlock, { kind: 'tool_summary' }> = {
             ...currentThought,
@@ -1100,7 +1139,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         return {
           ...appendBlock(finalized, block),
           toolStartTimes: times,
-          explorationSummaryIds: { ...finalized.explorationSummaryIds, [event.data.call_id]: id },
+          explorationSummaryIds: {
+            ...finalized.explorationSummaryIds,
+            [event.data.call_id]: id,
+          },
           currentThoughtSummaryId: id,
           thoughtPhaseStatus: 'running',
         };
@@ -1137,7 +1179,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
             status: 'running' as const,
             startedAt: now,
           }),
-          toolStartTimes: { ...state.toolStartTimes, [event.data.call_id]: now },
+          toolStartTimes: {
+            ...state.toolStartTimes,
+            [event.data.call_id]: now,
+          },
         };
       }
 
@@ -1161,7 +1206,9 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       };
       const turnsCopy = state.turns.map((t, ti) => {
         if (ti !== turnIndex) return t;
-        return { blocks: t.blocks.map((b, bi) => (bi === blockIndex ? updatedSummary : b)) };
+        return {
+          blocks: t.blocks.map((b, bi) => (bi === blockIndex ? updatedSummary : b)),
+        };
       });
       return {
         ...state,
@@ -1231,7 +1278,9 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           };
           const turnsCopy = state.turns.map((t, ti) => {
             if (ti !== turnIndex) return t;
-            return { blocks: t.blocks.map((b, bi) => (bi === blockIndex ? updatedSummary : b)) };
+            return {
+              blocks: t.blocks.map((b, bi) => (bi === blockIndex ? updatedSummary : b)),
+            };
           });
           let next = { ...state, turns: turnsCopy, toolStartTimes: nextTimes };
           if (event.data.toolTokenCount && event.data.toolTokenCount > 0) {
@@ -1279,8 +1328,15 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       }
       // update_plan declined
       if (matched.name === 'update_plan' && !event.data.ok) {
-        const declined: OutputBlock = { ...matched, status: 'done' as const, expanded: true };
-        return { ...replaceBlockById(state, matched.id, declined), toolStartTimes: nextTimes };
+        const declined: OutputBlock = {
+          ...matched,
+          status: 'done' as const,
+          expanded: true,
+        };
+        return {
+          ...replaceBlockById(state, matched.id, declined),
+          toolStartTimes: nextTimes,
+        };
       }
 
       // ask_user summary extraction
@@ -1386,7 +1442,11 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         const consolidated = maybeConsolidateLastTurnBlocks(turn2.blocks, result.nextBlockId);
         const tCopy = result.turns.slice();
         tCopy[tCopy.length - 1] = { blocks: consolidated.blocks };
-        result = { ...result, turns: tCopy, nextBlockId: consolidated.nextBlockId };
+        result = {
+          ...result,
+          turns: tCopy,
+          nextBlockId: consolidated.nextBlockId,
+        };
       }
 
       // Exhaustion is rendered by the tool_card itself (amber dot + status footer
@@ -1425,7 +1485,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       };
     }
     case 'step_begin': {
-      return { ...state, status: { ...state.status, currentNode: event.data.node } };
+      return {
+        ...state,
+        status: { ...state.status, currentNode: event.data.node },
+      };
     }
     case 'step_end': {
       return { ...state, status: { ...state.status, currentNode: null } };
@@ -1482,10 +1545,29 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         .map((block) => block.content)
         .join(hasOwnedStreamingSegments ? '' : '\n');
       if (fullText === event.data) return finalized;
-      // final 可能比最后一个 text 事件多几个字符 → 只追加增量，不创建全文 block 避免重复
+      // final 可能比最后一个 text 事件多几个字符。把增量并回最后一个
+      // 已有文本块；如果另起 block，像补一个句号这种情况会在 TUI 中
+      // 变成两行，看起来像模型重复回答。
       if (fullText.length > 0 && event.data.startsWith(fullText)) {
         const delta = event.data.slice(fullText.length);
         if (delta.length === 0 || !/\S/u.test(delta)) return finalized;
+        const lastTextBlock = textBlocks.at(-1);
+        if (
+          lastTextBlock &&
+          textBlocks.length === 1 &&
+          !hasOwnedStreamingSegments &&
+          !lastTextBlock.content.includes('\n') &&
+          !delta.includes('\n')
+        ) {
+          return mergeStructuralTextBlocks(
+            replaceBlockById(finalized, lastTextBlock.id, {
+              ...lastTextBlock,
+              content: `${lastTextBlock.content}${delta}`,
+              streaming: false,
+              responsePending: false,
+            }),
+          );
+        }
         const id = finalized.nextBlockId;
         const block: OutputBlock = { id, kind: 'text', content: delta };
         const appended = appendBlock(finalized, block);
@@ -1582,7 +1664,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         question: event.data,
         toolCallId: event.toolCallId,
       };
-      return { ...appendBlock(finalized, block), interrupt: { kind: 'input', blockId: block.id } };
+      return {
+        ...appendBlock(finalized, block),
+        interrupt: { kind: 'input', blockId: block.id },
+      };
     }
     case 'need_plan_review': {
       // Dedup: side-channel + stream interrupt can both emit need_plan_review for the same request.
@@ -1635,7 +1720,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         content: `${prefix}: ${event.data.message}`,
         isError: !event.data.recoverable,
       };
-      return { ...appendBlock(finalized, block), sessionError: !event.data.recoverable };
+      return {
+        ...appendBlock(finalized, block),
+        sessionError: !event.data.recoverable,
+      };
     }
     case 'file_change': {
       const change: FileChangeRecord = {
@@ -1648,7 +1736,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const last = lastTurn(state);
       const lastBlock = last?.blocks.at(-1);
       if (lastBlock?.kind === 'file_change') {
-        return updateLastBlock(state, { ...lastBlock, changes: [...lastBlock.changes, change] });
+        return updateLastBlock(state, {
+          ...lastBlock,
+          changes: [...lastBlock.changes, change],
+        });
       }
       const finalized = finalizeLastTurnStreaming(state);
       const id = finalized.nextBlockId;
@@ -1747,7 +1838,12 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           : 'error';
       const steps = matched.steps.map((s, i) => {
         if (i !== lastMatchIdx) return s;
-        return { ...s, status: stepStatus, ok: event.data.ok, totalLines: event.data.totalLines };
+        return {
+          ...s,
+          status: stepStatus,
+          ok: event.data.ok,
+          totalLines: event.data.totalLines,
+        };
       });
       if (steps.every((s, i) => s === matched.steps[i]!)) return state;
       const next: OutputBlock = {
@@ -1828,21 +1924,22 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
 
       const prev = matched.liveOutput ?? '';
       const line = event.data.chunk;
-      const next = prev ? `${prev}\n${line}` : line;
+      const hasPreviousOutput = matched.liveTotalLines != null;
+      const next = hasPreviousOutput ? `${prev}\n${line}` : line;
 
       // Tail-follow：固定窗口，保留最近 N 行（与 ToolCardBlock.MAX_TOOL_LINES 一致）
       const lines = next.split('\n');
       const capped = lines.length > MAX_TOOL_LINES ? lines.slice(-MAX_TOOL_LINES).join('\n') : next;
 
-      // 累计总行数：基于上一次的 total + 新行数（非完整行不计数）
+      // Progress chunks may contain a coalesced batch of logical lines. Count
+      // the incoming batch directly; the displayed tail is already capped.
       const prevTotal = matched.liveTotalLines ?? 0;
-      const prevLineCount = prev ? prev.split('\n').length : 0;
-      const newCompleteLines = lines.length - prevLineCount;
+      const newCompleteLines = event.data.line_count ?? line.split('\n').length;
 
       return replaceBlockById(state, matched.id, {
         ...matched,
         liveOutput: capped,
-        liveTotalLines: prevTotal + Math.max(0, newCompleteLines),
+        liveTotalLines: prevTotal + newCompleteLines,
       });
     }
     // Raw passthrough events — intentionally no-op for UI consumers
@@ -1992,25 +2089,54 @@ function materializePendingTool(
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
   switch (event.type) {
     case 'subagent.started':
-      return handleEventAction(state, { type: 'subagent_start', data: event.subagent });
+      return handleEventAction(state, {
+        type: 'subagent_start',
+        data: event.subagent,
+      });
     case 'subagent.step':
-      return handleEventAction(state, { type: 'subagent_step', data: event.subagent });
+      return handleEventAction(state, {
+        type: 'subagent_step',
+        data: event.subagent,
+      });
     case 'subagent.tool_result':
-      return handleEventAction(state, { type: 'subagent_tool_result', data: event.subagent });
+      return handleEventAction(state, {
+        type: 'subagent_tool_result',
+        data: event.subagent,
+      });
     case 'subagent.completed':
-      return handleEventAction(state, { type: 'subagent_done', data: event.subagent });
+      return handleEventAction(state, {
+        type: 'subagent_done',
+        data: event.subagent,
+      });
     case 'subagent.failed':
-      return handleEventAction(state, { type: 'subagent_error', data: event.subagent });
+      return handleEventAction(state, {
+        type: 'subagent_error',
+        data: event.subagent,
+      });
     case 'subagent.cache_metrics':
-      return handleEventAction(state, { type: 'subagent_cache_metrics', data: event.subagent });
-    case 'user.message_appended':
-      return appendBlock(state, {
+      return handleEventAction(state, {
+        type: 'subagent_cache_metrics',
+        data: event.subagent,
+      });
+    case 'user.message_appended': {
+      const content = event.content.replace(/^User:\s*/, '');
+      // TUI optimistically renders a submitted prompt before RuntimeStore
+      // persistence. Diagnostics such as the session-logging notice may be
+      // appended to the same active turn before this durable event arrives, so
+      // checking only the final block is insufficient. While a run is active,
+      // the existing user block in the current turn is the optimistic copy.
+      const alreadyRendered =
+        state.running &&
+        lastTurn(state)?.blocks.some((block) => block.kind === 'user' && block.content === content);
+      if (alreadyRendered) return state;
+      return appendUserMessage(state, {
         id: state.nextBlockId,
         kind: 'user',
-        content: event.content.replace(/^User:\s*/, ''),
+        content,
       });
+    }
     case 'user.command_invoked':
-      return appendBlock(state, {
+      return appendUserMessage(state, {
         id: state.nextBlockId,
         kind: 'user',
         content: event.command,
@@ -2030,7 +2156,9 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       );
     case 'model.text_delta':
       return handleEventAction(
-        { ...state, status: { ...state.status, retryState: null } },
+        state.status.retryState == null
+          ? state
+          : { ...state, status: { ...state.status, retryState: null } },
         { type: 'text', data: { text: event.text, streamingDelta: true } },
       );
     case 'model.reasoning_delta': {
@@ -2086,7 +2214,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         (renderedBeforeTerminalText.join('') === event.text ||
           renderedBeforeTerminalText.join('\n') === event.text);
       const activeStreamedThought = findThoughtSummary(next, next.currentThoughtSummaryId);
-      const settledStreamedThought = terminalTextAlreadyRendered
+      const latestStreamedThought = terminalTextAlreadyRendered
         ? ([...(lastTurn(next)?.blocks ?? [])]
             .reverse()
             .find(
@@ -2097,7 +2225,14 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
                   block.modelRequestId === next.currentModelRequestId),
             ) ?? null)
         : null;
-      const streamedThought = activeStreamedThought ?? settledStreamedThought;
+      const streamedThought = activeStreamedThought ?? latestStreamedThought;
+      const streamedThoughtPublished =
+        streamedThought != null &&
+        !streamedThought.active &&
+        !streamedThought.responsePending &&
+        streamedThought.tools.every(
+          (tool) => tool.status !== 'queued' && tool.status !== 'running',
+        );
       const streamedThoughtHeader = terminalTextAlreadyRendered
         ? ([...(lastTurn(next)?.blocks ?? [])]
             .reverse()
@@ -2108,12 +2243,15 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         : null;
       const reasoningText = event.reasoningText ?? state.currentModelReasoningText;
       if (reasoningText) {
-        if (streamedThought) {
+        if (streamedThought && !streamedThoughtPublished) {
           next = updateToolSummaryById(next, streamedThought.id, (block) => {
             const timeline = [...(block.timeline ?? [])];
             const lastEntry = timeline.at(-1);
             if (lastEntry?.kind === 'thinking') {
-              timeline[timeline.length - 1] = { ...lastEntry, text: reasoningText };
+              timeline[timeline.length - 1] = {
+                ...lastEntry,
+                text: reasoningText,
+              };
             } else {
               timeline.push({
                 seq: (block.nextTimelineSeq ?? timeline.length) + 1,
@@ -2127,33 +2265,26 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
               ...block,
               hasThinking: true,
               ...(block.active
-                ? { latestActivity: { kind: 'thinking' as const, text: reasoningText } }
+                ? {
+                    latestActivity: {
+                      kind: 'thinking' as const,
+                      text: reasoningText,
+                    },
+                  }
                 : {}),
               timeline,
               nextTimelineSeq: timeline.at(-1)?.seq ?? block.nextTimelineSeq,
               ...(modelMs != null ? { modelMs, totalElapsedMs: modelMs } : {}),
             };
           });
-        } else if (streamedThoughtHeader) {
-          next = replaceBlockById(next, streamedThoughtHeader.id, {
-            ...streamedThoughtHeader,
-            ...(event.durationMs != null ? { thoughtElapsedMs: event.durationMs } : {}),
-          });
+        } else if (streamedThoughtPublished || streamedThoughtHeader) {
+          // The first complete answer component already published this visual
+          // Thought to Ink <Static>. Runtime ownership survives until the
+          // terminal event, but terminal duration/reasoning must not rewrite an
+          // append-only terminal row (ADR-0045 / active rule 25).
         } else if (terminalTextAlreadyRendered && next.currentModelReasoningStreamed) {
-          const streamedText = [...(lastTurn(next)?.blocks ?? [])]
-            .reverse()
-            .find(
-              (block): block is Extract<OutputBlock, { kind: 'text' }> =>
-                block.kind === 'text' &&
-                (!next.currentModelRequestId ||
-                  block.modelRequestId === next.currentModelRequestId),
-            );
-          if (streamedText && event.durationMs != null) {
-            next = replaceBlockById(next, streamedText.id, {
-              ...streamedText,
-              thoughtElapsedMs: event.durationMs,
-            });
-          }
+          // Complete streamed text is already append-only terminal output.
+          // Keep the terminal reasoning as ownership metadata only.
         } else if (
           next.thoughtPhaseStatus === 'awaiting_terminal' &&
           next.currentModelReasoningStreamed
@@ -2185,17 +2316,40 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           if (event.text.startsWith(renderedPrefix)) {
             const remainder = event.text.slice(renderedPrefix.length);
             if (remainder.length > 0) {
-              const closed = closeCurrentThought(next, 'text');
-              next = mergePureThoughtHeader(
-                appendBlock(closed, {
-                  id: closed.nextBlockId,
+              const currentBlocks = lastTurn(next)?.blocks ?? [];
+              const lastTextBlock = [...currentBlocks]
+                .reverse()
+                .find(
+                  (block): block is Extract<OutputBlock, { kind: 'text' }> =>
+                    block.kind === 'text' &&
+                    (!next.currentModelRequestId ||
+                      block.modelRequestId === next.currentModelRequestId),
+                );
+              if (
+                lastTextBlock &&
+                renderedTextParts.length === 1 &&
+                !lastTextBlock.content.includes('\n') &&
+                !remainder.includes('\n')
+              ) {
+                next = replaceBlockById(next, lastTextBlock.id, {
+                  ...lastTextBlock,
+                  content: `${lastTextBlock.content}${remainder}`,
+                  streaming: false,
+                  responsePending: undefined,
+                  streamingSource: undefined,
+                  streamingComponent: undefined,
+                });
+              } else {
+                next = appendBlock(next, {
+                  id: next.nextBlockId,
                   kind: 'text',
                   content: remainder,
-                  ...(closed.currentModelRequestId
-                    ? { modelRequestId: closed.currentModelRequestId }
+                  ...(next.currentModelRequestId
+                    ? { modelRequestId: next.currentModelRequestId }
                     : {}),
-                }),
-              );
+                });
+              }
+              next = mergePureThoughtHeader(closeCurrentThought(next, 'text'));
             }
           }
           // Divergent reconnect: the retry produced text that does not match
@@ -2222,7 +2376,10 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
             };
             next = appendBlock({ ...next, turns }, finalBlock);
           } else {
-            next = handleEventAction(next, { type: 'text', data: { text: event.text } });
+            next = handleEventAction(next, {
+              type: 'text',
+              data: { text: event.text },
+            });
           }
         }
       }
@@ -2413,7 +2570,9 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         },
         {
           type: 'text',
-          data: { text: 'Context checkpoint reset; using the original transcript.' },
+          data: {
+            text: 'Context checkpoint reset; using the original transcript.',
+          },
         },
       );
     case 'run.error':
@@ -2451,7 +2610,13 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
     case 'tool.progress':
       return handleEventAction(state, {
         type: 'tool_progress',
-        data: { call_id: event.toolCallId, name: '', chunk: event.chunk, stream: event.stream },
+        data: {
+          call_id: event.toolCallId,
+          name: '',
+          chunk: event.chunk,
+          stream: event.stream,
+          ...(event.lineCount != null ? { line_count: event.lineCount } : {}),
+        },
       });
     case 'tool.finished': {
       const materialized = materializePendingTool(state, event.toolCallId, 'running', true);
@@ -2520,9 +2685,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         (block) => block.kind === 'tool_card' && block.callId === event.toolCallId,
       );
       const name = visibleToolName(state, event.toolCallId);
-      const next = withoutPendingTool(state, event.toolCallId);
-      if (wasPending && !name) return next;
-      if (!name) return next;
+      if (!name) return withoutPendingTool(state, event.toolCallId);
       // plan.review_requested already rendered the durable draft and marked its
       // card done. Cancelling execution authorization must not replace that
       // document with a synthetic Cancelled result.
@@ -2531,17 +2694,15 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         visibleCard.status === 'done' &&
         (visibleCard.name === 'write_plan' || visibleCard.name === 'update_plan')
       ) {
-        return next;
+        return withoutPendingTool(state, event.toolCallId);
       }
-      return handleEventAction(next, {
-        type: 'tool_done',
-        data: {
-          call_id: event.toolCallId,
-          name,
-          ok: false,
-          summary: 'Cancelled',
-        },
-      });
+      // Preserve the durable interaction projection from main by materializing
+      // an approval-pending call, then apply the shared cancelled terminal
+      // projection so it is not rendered as a generic error.
+      const materialized = wasPending
+        ? materializePendingTool(state, event.toolCallId, 'queued', true)
+        : state;
+      return projectToolCancelled(materialized, event.toolCallId);
     }
     case 'auto_review.completed': {
       // Auto-review is not a user-facing interaction. Only an explicit
@@ -2614,7 +2775,10 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       const resolved = event.answers
         ? { text: event.answer, answers: event.answers }
         : event.answer;
-      return { ...replaceBlockById(state, block.id, { ...block, resolved }), interrupt: null };
+      return {
+        ...replaceBlockById(state, block.id, { ...block, resolved }),
+        interrupt: null,
+      };
     }
     case 'user_input.cancelled': {
       const active = state.interrupt;
@@ -2680,7 +2844,13 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         data: providerAdmissionInput(event.providerId, event.providerStatus, event.retryable),
       });
       return next.interrupt?.kind === 'input'
-        ? { ...next, interrupt: { ...next.interrupt, interactionId: event.interactionId } }
+        ? {
+            ...next,
+            interrupt: {
+              ...next.interrupt,
+              interactionId: event.interactionId,
+            },
+          }
         : next;
     }
     case 'provider.admission_satisfied':
@@ -2702,7 +2872,13 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         },
       });
       return next.interrupt?.kind === 'approval'
-        ? { ...next, interrupt: { ...next.interrupt, interactionId: event.interactionId } }
+        ? {
+            ...next,
+            interrupt: {
+              ...next.interrupt,
+              interactionId: event.interactionId,
+            },
+          }
         : next;
     }
     case 'approval.granted':
@@ -2771,7 +2947,10 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       const materialized = materializePendingTool(state, event.toolCallId, 'queued', false);
       const next = handleEventAction(materialized, {
         type: 'need_plan_review',
-        data: { plan: event.plan, ...(event.artifact ? { artifact: event.artifact } : {}) },
+        data: {
+          plan: event.plan,
+          ...(event.artifact ? { artifact: event.artifact } : {}),
+        },
       });
       return next.interrupt?.kind === 'plan_review'
         ? {
@@ -2835,15 +3014,13 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
     case 'task.completed':
       return { ...state, status: { ...state.status, phase: 'building' } };
     case 'task.cancelled':
-      return { ...state, status: { ...state.status, phase: 'building', pendingPlan: null } };
+      return {
+        ...state,
+        status: { ...state.status, phase: 'building', pendingPlan: null },
+      };
     case 'turn.aborted': {
       if (event.cause !== 'user') return state;
-      const cancelled = finalizeLastTurnStreaming(
-        cancelRunningBlocks({
-          ...state,
-          pendingToolCalls: {},
-        }),
-      );
+      const cancelled = finalizeLastTurnStreaming(projectUserCancelledTurn(state));
       return {
         ...cancelled,
         running: false,

@@ -62,22 +62,42 @@ authorization: {
 
 ## 硬规则（mode-policy.ts）
 
-在 `assertAuthorizationElevation()` 中强制执行：
+在 assertAuthorizationElevation() 中强制执行：
 
-1. **`full_access` 需要沙箱可用** — `mode === 'full_access' && !sandboxAvailable` → 拒绝
-2. **auto-review 不能授予 `full_access`** — `source === 'system' && autoReview` → 拒绝
-3. **loop-mode 不能自动提升授权** — `source === 'system' && loopMode` → 拒绝
+1. full_access 需要 Full-qualified sandbox — mode === full_access 且 Full capability 不可用时拒绝；
+2. auto-review 不能授予 full_access — source === system 且 autoReview 时拒绝；
+3. loop-mode 不能自动提升授权 — source === system 且 loopMode 时拒绝。
 
-`full_access` 只描述审批/authorization mode，不提升 native execution ceiling。macOS Seatbelt
-仍把 Shell 文件权限限制为 canonical Workspace 与受控 runtime temp；审批不能恢复 Workspace
-外读写或 protected path。production sandbox 不可用时必须选择 fail-closed executor，不能使用
-开发入口的裸 Shell fallback。
+TUI 的 permissions 选择使用同一不变量：由 sandboxSupportsFullModeV1() 而不是单纯的
+backend !== none 决定 Full 是否可选。effective backend 为 none、pending qualification，以及
+Windows windows_restricted_token 都必须将 full 建议项置灰，键盘选择跳过它。直接 backend 虽然是
+一个 development sandbox，也没有 strict network、动态 protected-glob 或 production Full 资格；因此
+不能把它当成 Full-qualified sandbox。
+
+host Shell 只在用户脚本前的 sandbox environment/essential startup capability unavailable 决策后选择。
+
+直接 /permissions full 会在 mode dispatch 前被拒绝，回到 accept_edits 并显示
+非沙箱环境无法开启full；Help 只显示可用的 mode。full_access 只描述审批/authorization mode，
+不提升 native execution ceiling。production consumer 的 sandbox 不具备 Full qualification 时必须使用
+fail-closed executor，不能借开发入口的 host fallback 或 restricted-token backend 获得 Full。
 
 ## MCP Tool 策略边界
 
 MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive effect 变成无审批调用。只有 effective effects 全部为 `none|read` 且 `minimumApproval: none` 时，Approval Policy 才把它当作只读；`minimumApproval: user` 始终要求单次用户批准。远端 annotation 不直接进入该判断，project 配置也不能降低 minimum approval 或 effect 风险。Tool filter 只决定 catalog 可见性，不产生 authorization grant。
 
 ## Shell 逐项审批与重叠执行
+
+Shell 网络授权按 invocation 投影。精确的 `node|npm|pnpm|yarn|bun --version|-v` 与其他可证明本地
+命令使用 network-disabled，不因 executable 名称本身触发网络审批；明确网络命令及无法证明
+local-only 的 arbitrary script 使用 `effects.network` 或 `uncertainEffects` 进入现有审批。批准后只为该
+调用产生 development `allow_all`，拒绝则命令不启动。macOS/Linux native sandbox 消费该模式；Windows
+Windows hybrid backend 的 protocol V5 要求批准结果切换到受管 Online 非管理员登录会话；为支持
+Schannel direct TLS，该 approved child 使用 ACL lease 而不是 constrained restricted token。账户安装是与 Shell 审批分离的
+首次 TUI onboarding/显式 CLI setup；只有该 control-plane 选择可以请求 UAC，普通 invocation 从不提权。
+setup 还串行配置 Online identity 的非敏感 profile read roots；read roots 不产生写授权，凭据目录保持排除，
+且命令期 ACL lease 不得把 profile 祖先权限扩展为临时写权限。
+工具审批被拒绝或 setup readiness 缺失时命令都不得启动。这仍不构成结构性 network-off evidence，不能提升 Full 或
+production qualification。
 
 同一条模型消息产生多个连续的 `shell_execute` 调用时，每个调用独立完成参数解析、策略预检和用户审批。某一调用收到 `approval.granted` 后立即成为 Scheduler 术语（运行时调度器）的下一项，不能等待 sibling 的审批决定共同收敛。Runtime Runner 术语（运行时执行循环）在该调用发出 `tool.started` 后继续处理同组下一个 Shell；因此前一个命令可以一边运行，Footer 一边展示后一个命令的审批，后一个获批后也立即启动。TUI 同一时刻仍只展示一个审批交互；解决后一个审批时只能重置对应等待项或 Subagent 的审批等待计时，不得重置已经运行的 sibling Shell 的 `startedAt` 或累计耗时。
 

@@ -27,6 +27,7 @@
 // stable refs, so references are constant between genuine state transitions.
 
 import { type ReactNode, useEffect, useMemo, useRef } from 'react';
+import { isExplorationTool } from '../reducers/consolidateTools';
 import type { OutputBlock, Turn } from '../types';
 
 export { changePrefix } from '../components/BlockRenderer';
@@ -36,49 +37,77 @@ export { toolColor } from '../components/render-utils';
 const HEADER_SENTINEL = { __header: true } as const;
 
 /**
- * A block is "settled" if its visual output will never change again.
- * Only settled blocks may enter <Static>, because Ink's <Static> never
- * re-renders or updates previously written items.
+ * 判定运行中（activeTurn）的 block 是否已绝对不可变，可以提前进入 Ink <Static>。
+ *
+ * Ink <Static> 是 append-only 的（items.slice(index) 只渲染新增项，已渲染项内容
+ * 变化不会被更新）。因此只有保证 reducer 后续事件绝不再修改的 block 才能离开
+ * 动态树。判定故意保守——宁可多留在动态树，也不允许 Static 中出现陈旧行。
+ *
+ * - user：永不修改。
+ * - text：只有流式 / 待终态调和 / 仍持有活动结构组件 source 的块不稳定。
+ *   Runtime delta 路径只把完整 Markdown 组件追加为新的 text block；已经提交的
+ *   相邻 text 是 append-only 前缀，必须立即冻结，否则长回答会整体滞留在 Ink
+ *   dynamic tree，并让每帧布局与终端输出成本随全文长度增长。
+ * - tool_card：只有终态（done/error/cancelled/timeout/exhausted）稳定；探索工具
+ *   仍可能被 maybeConsolidateLastTurnBlocks 合并为 tool_summary，必须留在动态树。
+ * - 其余 kind（tool_summary / subagent / approval / question / reason）在 run 期间
+ *   仍可能被后续事件修改（consolidate 重建、cache_metrics 迟到、resolved 回写、
+ *   folded toggle 等），保守地留在动态树。
  */
-function isSettled(block: OutputBlock): boolean {
+export function isBlockSettledInRun(
+  block: OutputBlock,
+  _blocks: OutputBlock[],
+  _index: number,
+): boolean {
   switch (block.kind) {
     case 'user':
-      return true; // never changes
-    case 'text':
-      return !block.streaming && !block.responsePending;
-    case 'reason':
-      return true; // content is final once emitted
-    case 'tool_card':
-      return (
-        block.status === 'done' ||
-        block.status === 'error' ||
-        block.status === 'cancelled' ||
-        block.status === 'timeout' ||
-        block.status === 'exhausted'
-      );
+      return true;
+    case 'text': {
+      if (
+        block.streaming ||
+        block.responsePending ||
+        block.streamingSource != null ||
+        block.streamingComponent != null
+      ) {
+        return false;
+      }
+      return true;
+    }
+    case 'tool_card': {
+      if (
+        block.status !== 'done' &&
+        block.status !== 'error' &&
+        block.status !== 'cancelled' &&
+        block.status !== 'timeout' &&
+        block.status !== 'exhausted'
+      ) {
+        return false;
+      }
+      return !isExplorationTool(block);
+    }
     case 'tool_summary':
       return (
-        !block.responsePending &&
         !block.active &&
+        !block.responsePending &&
         block.tools.every(
-          (t) =>
-            t.status === 'done' ||
-            t.status === 'error' ||
-            t.status === 'cancelled' ||
-            t.status === 'timeout' ||
-            t.status === 'exhausted',
+          (tool) =>
+            tool.status === 'done' ||
+            tool.status === 'error' ||
+            tool.status === 'cancelled' ||
+            tool.status === 'timeout' ||
+            tool.status === 'exhausted',
         )
       );
+    case 'reason':
+    case 'file_change':
+      return true;
     case 'subagent':
       return block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
     case 'approval':
-      return block.resolved !== undefined;
     case 'question':
       return block.resolved !== undefined;
-    case 'file_change':
-      return true; // immutable once created
     default:
-      return true;
+      return false;
   }
 }
 
@@ -146,7 +175,7 @@ export interface StaticContentResult {
   staticKey: string;
   /** Header element rendered as the first Static item */
   header: ReactNode;
-  /** All static blocks (settled turns + settled blocks from active turn) */
+  /** Static blocks from turns older than the live tail. */
   mergedStaticBlocks: OutputBlock[];
   /** Blocks kept in the dynamic tree (may still mutate) */
   activeDynamicBlocks: OutputBlock[];
@@ -168,13 +197,14 @@ export function useStaticContent({
   header,
   resizeGeneration,
 }: UseStaticContentOptions): StaticContentResult {
-  // ── Two-level Static/Dynamic split ──
-  const settledTurns = running ? turns.slice(0, -1) : turns;
-  const activeTurn = running ? turns.at(-1) : undefined;
-
   // ── Session / resize lifecycle ──
   const prevSessionKeyRef = useRef<number | undefined>(undefined);
   const syncOutputRef = useRef(false);
+  // 会话重挂载后历史（含最后 turn）整体进 Static；新 run 开始时恢复活跃尾。
+  // After a session remount the whole history (including the last turn) is
+  // immutable; a new run (SET_RUNNING) restores the live-tail split.
+  const prevRunningRef = useRef(running);
+  const allSettledRef = useRef(false);
 
   const needsClear = sessionKey !== prevSessionKeyRef.current;
   const isResize = (resizeGeneration ?? 0) > 0;
@@ -182,6 +212,15 @@ export function useStaticContent({
 
   if (needsClear) {
     prevSessionKeyRef.current = sessionKey;
+
+    // Session switch / remount with an idle session: promote the ENTIRE
+    // conversation (including the last turn) to <Static>. The screen was
+    // cleared below, so this cannot duplicate Windows scrollback frames the
+    // way a live model.responded promotion would. Keeping the last turn
+    // dynamic here would leave the whole history in the dynamic tree and
+    // re-render it on every keystroke. A session that is still running keeps
+    // its live tail dynamic so streamed content stays updateable.
+    allSettledRef.current = !running;
 
     if (isResize || !isInitialMount) {
       // Resize / session switch: scroll to bottom, enable sync, clear.
@@ -195,6 +234,25 @@ export function useStaticContent({
       process.stdout.write('\x1B[2J\x1B[3J\x1B[H');
     }
   }
+
+  // A new run (SET_RUNNING fires before USER_MESSAGE in the same tick) ends
+  // the remount all-settled window: the freshly appended user turn becomes the
+  // live tail and older turns remain immutable.
+  if (running && !prevRunningRef.current) {
+    allSettledRef.current = false;
+  }
+  prevRunningRef.current = running;
+
+  // ── Stable-history / live-tail split ──
+  // Keep the latest turn dynamic while a run is live or while it remains the
+  // latest turn after an idle run. Promoting it to Ink <Static> in the same
+  // terminal frame as model.responded/SET_EXITED leaves earlier dynamic frames
+  // in Windows scrollback and visibly duplicates the terminal answer. The turn
+  // becomes immutable history when a newer user turn is appended or the
+  // session is remounted (handled above via allSettledRef).
+  const allSettled = allSettledRef.current;
+  const settledTurns = allSettled ? turns : turns.slice(0, -1);
+  const activeTurn = allSettled ? undefined : turns.at(-1);
 
   // Disable synchronized output after the first render commits.
   useEffect(() => {
@@ -239,9 +297,9 @@ export function useStaticContent({
     staticBlocksRef.current = settledTurns.flatMap((t) => t.blocks);
   }
 
-  // ── Active turn Static/Dynamic split: cache by fingerprint ──
+  // ── Active turn dynamic cache: cache by fingerprint ──
   // The fingerprint captures block identity, kind, status, and step count —
-  // everything that affects the Static/Dynamic split and visual output.
+  // everything that affects the active turn visual output.
   const prevFingerprintRef = useRef('');
   const activeSettledRef = useRef<OutputBlock[]>([]);
   const activeDynamicRef = useRef<OutputBlock[]>([]);
@@ -258,26 +316,18 @@ export function useStaticContent({
     let nextDynamic: OutputBlock[];
 
     if (activeTurn && activeTurn.blocks.length > 0) {
-      // Find the LEFTMOST unsettled block. Everything BEFORE it goes to Static,
-      // everything from it onwards stays dynamic.
-      //
-      // Example: [user, text(done), tool(ls,running), tool(find,running)]
-      // → leftmost=2, static=[user, text], dynamic=[tool(ls), tool(find)]
-      let leftmostUnsettled = activeTurn.blocks.length;
-      for (let i = 0; i < activeTurn.blocks.length; i++) {
-        if (!isSettled(activeTurn.blocks[i]!)) {
-          leftmostUnsettled = i;
-          break;
-        }
+      // 运行中就把已完成（绝对不可变）的连续前缀提升进 <Static>，只把活跃
+      // 后缀留在动态树。Ink <Static> 是 append-only 的（items.slice(index) 只
+      // 渲染新增项），所以只有 isBlockSettledInRun 判定的、后续事件绝不再
+      // 修改的 block 才能离开动态树；一旦遇到第一个仍可变的块，其后的块
+      // 全部留在动态树（保证 Static→动态的渲染顺序）。
+      const blocks = activeTurn.blocks;
+      let split = 0;
+      while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
+        split++;
       }
-
-      if (leftmostUnsettled === activeTurn.blocks.length) {
-        nextSettled = activeTurn.blocks;
-        nextDynamic = [];
-      } else {
-        nextSettled = activeTurn.blocks.slice(0, leftmostUnsettled);
-        nextDynamic = activeTurn.blocks.slice(leftmostUnsettled);
-      }
+      nextSettled = blocks.slice(0, split);
+      nextDynamic = blocks.slice(split);
     } else {
       nextSettled = [];
       nextDynamic = [];

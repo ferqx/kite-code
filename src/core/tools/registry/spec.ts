@@ -24,7 +24,7 @@ import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { ToolContractSection } from '@/core/tools/tool-contracts';
-import type { ShellNetworkMode } from '@/core/types';
+import type { ShellNetworkBrokerV1, ShellNetworkMode } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 
 /**
@@ -57,6 +57,8 @@ export interface ToolExecutionContext extends ToolContext {
   signal?: AbortSignal;
   shellExecutor?: ShellExecutor;
   shellNetworkMode?: ShellNetworkMode;
+  /** Explicit host-broker capability for sandboxed shell HTTP. */
+  shellNetworkBroker?: ShellNetworkBrokerV1;
   /** Per-invocation network ceiling derived from the sealed execution boundary. */
   networkBoundaryPolicy?: NetworkBoundaryPolicyV1;
   /** Durable pre-dispatch sink. A governed socket cannot open until it resolves. */

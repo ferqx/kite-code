@@ -3,6 +3,11 @@ import { parseArgs } from '../src/app/cli/index';
 
 // 测试 CLI 命令行参数解析逻辑 / Test CLI argument parsing logic
 describe('cli argument parsing', () => {
+  test('recognizes explicit Windows sandbox control-plane commands', () => {
+    expect(parseArgs(['sandbox', 'status']).command).toBe('sandbox-status');
+    expect(parseArgs(['sandbox', 'setup']).command).toBe('sandbox-setup');
+  });
+
   // 验证 run 命令默认使用新线程，避免恢复过期的中断 / Verify run defaults to fresh thread to avoid stale interrupt resume
   test('run uses a fresh thread by default to avoid resuming stale interrupts', () => {
     const args = parseArgs(['run', '--task', '你当前是什么模型？上下文有多长']);

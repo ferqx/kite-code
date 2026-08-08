@@ -507,13 +507,17 @@ export default function ToolCardBlock({
   startedAtRef.current = block.startedAt;
 
   useEffect(() => {
+    // 只有工具真正执行时才计时。等待审批/输入、queued、done 状态下
+    // 输出不依赖 liveElapsed，继续跑定时器只会每 200ms 触发一次
+    // 组件重渲染，驱动整个 TUI 持续刷新。
     if (!showElapsed) return;
+    if (block.status !== 'running' || awaitingApproval) return;
     const timer = setInterval(() => {
       const at = startedAtRef.current;
       if (at != null) setLiveElapsed(Date.now() - at);
     }, 200);
     return () => clearInterval(timer);
-  }, [showElapsed]);
+  }, [showElapsed, block.status, awaitingApproval]);
 
   const isShell = block.name === 'shell_execute';
 
@@ -596,6 +600,11 @@ export default function ToolCardBlock({
       block.status === 'timeout' ||
       block.status === 'exhausted');
   const hasSummary = block.summary ? block.summary.trimEnd().length > 0 : false;
+  const shellOutput =
+    block.status === 'cancelled' && block.summary === 'Cancelled'
+      ? block.liveOutput
+      : block.summary;
+  const hasShellOutput = shellOutput ? shellOutput.trimEnd().length > 0 : false;
   const toolSearch =
     block.name === 'tool_search' ? parseToolSearchResult(block.summary) : undefined;
   const searchCandidates = toolSearch?.candidates?.filter(
@@ -696,21 +705,24 @@ export default function ToolCardBlock({
           )}
         </Box>
       )}
-      {/* Shell + Web Fetch 工具：统一渲染 / Shell + Web Fetch: unified rendering */}
-      {isExpanded && (isShell || isWebFetch) && (
+      {/* Shell + Web Fetch：expanded 仅控制正文，terminal footer 始终可见。
+          Shell + Web Fetch: expanded controls output only; terminal footer is always visible. */}
+      {(isShell || isWebFetch) && (
         <Box paddingLeft={2} flexDirection="column">
-          {block.status === 'cancelled' && block.summary === 'Cancelled' ? null : hasSummary ? (
-            renderShellLines(
-              block.summary!,
-              dt.dim,
-              columns - 2,
-              undefined,
-              isWebFetch || block.status === 'timeout' ? 'head-tail' : 'tail',
-            )
-          ) : (
-            <Text color={dt.dim}>⎿ (No output)</Text>
-          )}
-          {/* 状态尾行 / Status footer */}
+          {isExpanded &&
+            (block.status === 'cancelled' && !hasShellOutput ? null : hasShellOutput ? (
+              renderShellLines(
+                shellOutput!,
+                dt.dim,
+                columns - 2,
+                undefined,
+                isWebFetch || block.status === 'timeout' ? 'head-tail' : 'tail',
+              )
+            ) : (
+              <Text color={dt.dim}>⎿ (No output)</Text>
+            ))}
+          {/* 状态尾行不依赖 expanded；折叠正文也不能隐藏终态。
+              Status footer is independent from expanded. */}
           <Text color={dt.dim}>
             {SHELL_PREFIX}
             {block.status === 'exhausted'

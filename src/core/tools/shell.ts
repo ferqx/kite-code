@@ -3,6 +3,7 @@ import type { ShellInput, ShellResult } from '@/core/types';
 import { findBashBinary, findSystemBash } from './bash-path';
 import { normalizeMsys2PathsInText } from './path-utils';
 import { guardProcessTree, processTreeSpawnOptions } from './process-tree';
+import { BoundedOutputBuffer, BoundedProgressLineBuffer } from './stream-output';
 
 /** Shell 执行器函数签名 / Shell executor function signature */
 export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;
@@ -15,6 +16,96 @@ export function resolveShellTimeoutMs(timeoutMs?: number): number {
   return timeoutMs != null && Number.isFinite(timeoutMs) && timeoutMs > 0
     ? timeoutMs
     : DEFAULT_SHELL_TIMEOUT_MS;
+}
+
+export type HostShellKindV1 = 'bash' | 'cmd' | 'powershell' | 'posix';
+
+export interface HostShellInvocationV1 {
+  kind: HostShellKindV1;
+  argv: string[];
+}
+
+export interface HostShellResolutionDepsV1 {
+  platform: NodeJS.Platform;
+  systemRoot: string;
+  configuredShell?: string;
+  systemBash?: string | null;
+  vendoredBash?: string | null;
+  which: (name: string) => string | null;
+}
+
+/**
+ * Resolve host interpreters in a stable cross-platform order. A later
+ * candidate is attempted only when the previous interpreter could not start;
+ * a user command that starts and exits non-zero is never replayed.
+ */
+export function buildHostShellInvocationsV1(
+  command: string,
+  deps: HostShellResolutionDepsV1 = {
+    platform: process.platform,
+    systemRoot: process.env.SystemRoot || 'C:\\Windows',
+    configuredShell: process.env.SHELL,
+    systemBash: process.platform === 'win32' ? findSystemBash() : null,
+    vendoredBash: process.platform === 'win32' ? findBashBinary() : null,
+    which: (name) => Bun.which(name),
+  },
+): HostShellInvocationV1[] {
+  const candidates: HostShellInvocationV1[] = [];
+  const seen = new Set<string>();
+  const add = (kind: HostShellKindV1, argv: string[]) => {
+    const executable = argv[0];
+    if (!executable) return;
+    const key = deps.platform === 'win32' ? executable.toLowerCase() : executable;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push({ kind, argv });
+  };
+
+  if (deps.platform === 'win32') {
+    for (const bash of [deps.systemBash, deps.vendoredBash]) {
+      if (bash) {
+        add('bash', [bash, '-c', `export PATH="/usr/bin:$PATH" && ${command}`]);
+      }
+    }
+    add('cmd', [`${deps.systemRoot}\\System32\\cmd.exe`, '/d', '/c', command]);
+    for (const powershell of [
+      deps.which('pwsh'),
+      deps.which('powershell.exe'),
+      deps.which('powershell'),
+    ]) {
+      if (powershell) {
+        add('powershell', [
+          powershell,
+          '-NoLogo',
+          '-NoProfile',
+          '-NonInteractive',
+          '-Command',
+          command,
+        ]);
+      }
+    }
+    return candidates;
+  }
+
+  const bash = deps.which('bash');
+  if (bash) add('bash', [bash, '-lc', command]);
+  if (deps.configuredShell) add('posix', [deps.configuredShell, '-lc', command]);
+  const cmd = deps.which('cmd') ?? deps.which('cmd.exe');
+  if (cmd) add('cmd', [cmd, '/d', '/c', command]);
+  for (const powershell of [deps.which('pwsh'), deps.which('powershell')]) {
+    if (powershell) {
+      add('powershell', [
+        powershell,
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        command,
+      ]);
+    }
+  }
+  add('posix', ['/bin/sh', '-lc', command]);
+  return candidates;
 }
 
 /** 断言目标路径在工作区范围内 / Assert target path is inside workspace */
@@ -33,9 +124,9 @@ export function assertInsideWorkspace(workspace: string, targetPath: string): st
   return absoluteTarget;
 }
 
-/** 逐行读取 ReadableStream，每行触发 onLine，返回完整文本。
+/** 逐行读取 ReadableStream，每行触发 onLine，返回有界的 head+tail 文本。
  *  Line-by-line stream reader — emits per-line callbacks as data arrives,
- *  returns accumulated full text when stream closes. */
+ *  returns a bounded head+tail capture when stream closes. */
 export async function readWithProgress(
   stream: ReadableStream<Uint8Array>,
   onLine?: (line: string) => void,
@@ -43,8 +134,8 @@ export async function readWithProgress(
 ): Promise<string> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
-  let result = '';
-  let buffer = '';
+  const output = new BoundedOutputBuffer();
+  const progressLines = new BoundedProgressLineBuffer();
   let stopped = false;
   const stop = () => {
     stopped = true;
@@ -57,26 +148,21 @@ export async function readWithProgress(
       if (done) break;
       if (stopped) break;
       const text = decoder.decode(value, { stream: true });
-      result += text;
-      buffer += text;
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) onLine?.(line);
+      output.append(text);
+      if (onLine) progressLines.push(text, onLine);
     }
     // Flush partial multi-byte sequences from TextDecoder internal buffer
-    if (!stopped && buffer.length > 0) {
+    if (!stopped) {
       const flushed = decoder.decode();
       if (flushed) {
-        buffer += flushed;
-        result += flushed;
+        output.append(flushed);
+        if (onLine) progressLines.push(flushed, onLine);
       }
-      onLine?.(buffer);
+      if (onLine) progressLines.flush(onLine);
     }
   } catch {
     // Stream interrupted (e.g. process killed) — return what we have
-    if (!stopped && buffer.length > 0) {
-      onLine?.(buffer);
-    }
+    if (!stopped && onLine) progressLines.flush(onLine);
   } finally {
     stopSignal?.removeEventListener('abort', stop);
     // Release reader lock to avoid leaks
@@ -86,7 +172,7 @@ export async function readWithProgress(
       /* already released */
     }
   }
-  return result;
+  return output.value();
 }
 
 /** 通过 Bun.spawn 执行 Shell 命令，返回结构化结果 / Execute shell command via Bun.spawn, return structured result */
@@ -113,12 +199,26 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
     terminate('cancelled');
   };
   try {
-    const proc = Bun.spawn(buildShellInvocation(input.command), {
-      cwd: input.workspace,
-      stdout: 'pipe',
-      stderr: 'pipe',
-      ...processTreeSpawnOptions(),
-    });
+    let proc: ReturnType<typeof Bun.spawn> | undefined;
+    let lastSpawnError: unknown;
+    for (const candidate of buildHostShellInvocationsV1(input.command)) {
+      try {
+        proc = Bun.spawn(candidate.argv, {
+          cwd: input.workspace,
+          stdout: 'pipe',
+          stderr: 'pipe',
+          ...processTreeSpawnOptions(),
+        });
+        break;
+      } catch (error) {
+        lastSpawnError = error;
+      }
+    }
+    if (!proc) {
+      throw lastSpawnError instanceof Error
+        ? lastSpawnError
+        : new Error('No Bash, cmd, PowerShell, or POSIX shell could be started.');
+    }
     processTree = guardProcessTree(proc);
 
     timeoutId = setTimeout(() => terminate('timeout'), timeoutMs);
@@ -129,12 +229,12 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
     // the no-progress path from hanging on inherited pipes as well.
     const [stdout, rawStderr] = await Promise.all([
       readWithProgress(
-        proc.stdout,
+        proc.stdout as ReadableStream<Uint8Array>,
         input.onProgress ? (line) => input.onProgress!(line, 'stdout') : undefined,
         outputStop.signal,
       ),
       readWithProgress(
-        proc.stderr,
+        proc.stderr as ReadableStream<Uint8Array>,
         input.onProgress ? (line) => input.onProgress!(line, 'stderr') : undefined,
         outputStop.signal,
       ),
@@ -206,31 +306,6 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
     input.signal?.removeEventListener('abort', cancel);
     processTree?.dispose();
   }
-}
-
-/** 构建平台特定的 Shell 调用参数 / Build platform-specific shell invocation arguments */
-function buildShellInvocation(command: string): string[] {
-  if (process.platform === 'win32') {
-    // Prefer system bash (Git for Windows) — full MSYS2 env, no DLL issues
-    // PATH fix: ensures GNU coreutils (find, grep, sort, etc.) take priority
-    // over Windows System32 equivalents that shadow them on MSYS2 PATH
-    const systemBash = findSystemBash();
-    if (systemBash) {
-      return [systemBash, '-c', `export PATH="/usr/bin:$PATH" && ${command}`];
-    }
-
-    // Fallback to vendored bash with PATH fix for coreutils
-    const vendoredBash = findBashBinary();
-    if (vendoredBash) {
-      return [vendoredBash, '-c', `export PATH="/usr/bin:$PATH" && ${command}`];
-    }
-
-    // Last resort: cmd.exe
-    const systemRoot = process.env.SystemRoot || 'C:\\Windows';
-    return [`${systemRoot}\\System32\\cmd.exe`, '/d', '/c', command];
-  }
-
-  return [process.env.SHELL || '/bin/sh', '-lc', command];
 }
 
 /** 过滤 MSYS2 启动时的无害噪音（/tmp 警告等） */

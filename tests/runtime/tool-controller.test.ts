@@ -1567,6 +1567,48 @@ describe('executeRuntimeTools', () => {
     ]);
   });
 
+  test('does not retain high-volume shell progress in the returned event array', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-shell-high-volume-stream',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.authorization.mode = 'full_access';
+    state.tools.calls.stream = {
+      toolCallId: 'stream',
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command: 'high-volume-output' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('stream');
+    let progressEvents = 0;
+
+    const returned = await executeRuntimeTools({
+      state,
+      toolCallIds: ['stream'],
+      shellExecutor: async (input) => {
+        for (let index = 0; index < 10_000; index += 1) {
+          input.onProgress?.(`line-${index}`, 'stdout');
+        }
+        return {
+          ok: true,
+          command: input.command,
+          exitCode: 0,
+          stdout: 'bounded terminal result',
+          stderr: '',
+        };
+      },
+      emitRuntimeEvent: (event) => {
+        if (event.type === 'tool.progress') progressEvents += 1;
+      },
+    });
+
+    expect(progressEvents).toBe(10_000);
+    expect(returned).toEqual([]);
+  });
+
   test('requires approval for a network read in accept_edits mode', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-accept-edits-network',

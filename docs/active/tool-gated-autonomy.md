@@ -4,7 +4,7 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049。
 
@@ -50,7 +50,7 @@ permit；read-only effects、Tool Approval、`full_access`、Provider consent �
 前原子消费 nonce 并等待 durable `mcp.egress_decided` receipt。stdio 与空参数 HTTP 调用不消费
 remote content permit；项目配置不能降低保守分类。
 
-Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运行中）状态时直接发布 `tool.progress`，Runtime event sink术语（运行时事件接收器）随即把增量交给 TUI；不得先缓存在 Controller 私有数组中等待终态结果。同一批并发 Shell 的增量允许按真实到达顺序交错，但每条事件必须保留各自 `toolCallId`。未提供 event sink术语（事件接收器）的直接调用兼容路径仍在返回数组中收集事件。
+Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运行中）状态时直接发布 `tool.progress`，不得在 Controller 私有数组中无界累积并等待终态结果。`tool.progress` 是仅供当前进程展示的 ephemeral event术语（瞬态事件）：Runner 按 `toolCallId + stream` 合并尚未消费的批次并保留有界 tail，不写入 Runtime event store 或 snapshot，也不推进 revision；任何 started/terminal/durable event 都是顺序屏障，必须先交付此前 progress，终态事件不得被 progress 淘汰。批次可携带仅保留的完整行和原始 `lineCount`，TUI 因而能在丢弃中间展示帧后继续显示准确总行数。前台 Session 以 50ms presentation frame 合并，同一 call/stream 内保序；一个 frame 内 stdout/stderr 不承诺跨 stream 全序。后台 Session 同样只保留每个 call/stream 的有界聚合 tail，缓冲容量是 presentation soft limit，不能通过 `shift oldest` 丢弃 terminal/lifecycle fact。未提供 event sink术语（事件接收器）的直接调用兼容路径仍在返回数组中收集事件。
 
 ## 工具名单单一事实源（ADR-0043）
 

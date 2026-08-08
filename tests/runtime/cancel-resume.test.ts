@@ -4,17 +4,132 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveContextProjectionEnvironment } from '@/core/controllers/model-controller';
 import { eventsForRunCancellation } from '@/core/runtime/actions';
+import { runRuntimeAgent } from '@/core/runtime/agent';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
 import {
   createZeroResourceUsageV1,
   LIMITED_RESOURCE_BUDGET_V1,
 } from '@/core/runtime/resource-budget';
 import { runRuntimeLoop } from '@/core/runtime/runner';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { aiMessage } from '../../src/core/messages';
 import { createMockModel } from '../mock-model';
 
 describe('bounded Runtime cancellation', () => {
+  test('reopens an aborted turn for the next user prompt', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-cancel-successor-'));
+    const storePath = join(workspace, 'runtime.db');
+    const threadId = 'cancel-successor';
+    const kernelControl: { current: import('@/core/runtime/agent').RuntimeKernelControl | null } = {
+      current: null,
+    };
+    let reportShellStarted!: () => void;
+    const shellStarted = new Promise<void>((resolve) => {
+      reportShellStarted = resolve;
+    });
+    const model = createMockModel([
+      {
+        message: aiMessage({
+          content: '',
+          tool_calls: [
+            { id: 'cancel-shell', name: 'shell_execute', args: { command: 'wait-for-cancel' } },
+          ],
+        }),
+      },
+      { message: aiMessage({ content: '继续测试已完成。' }) },
+    ]);
+    const config = {
+      providerName: 'test',
+      providerType: 'openai-compatible' as const,
+      apiKey: 'test',
+      baseURL: 'http://localhost:1',
+      modelName: 'test',
+      sandbox: { enabled: false },
+    };
+
+    try {
+      const firstPromise = (async () => {
+        const events: RuntimeEvent[] = [];
+        for await (const event of runRuntimeAgent(
+          {
+            task: '测试 shell 取消',
+            threadId,
+            userId: 'test',
+            workspace,
+            runtimeStorePath: storePath,
+            model: model as any,
+            config,
+            onKernelControl: (control) => {
+              kernelControl.current = control;
+            },
+            shellExecutor: async (input) => {
+              reportShellStarted();
+              await new Promise<void>((resolve) => {
+                const finish = () => resolve();
+                if (input.signal?.aborted) finish();
+                else input.signal?.addEventListener('abort', finish, { once: true });
+              });
+              return {
+                ok: false,
+                command: input.command,
+                exitCode: 130,
+                stdout: '',
+                stderr: 'cancelled',
+              };
+            },
+          },
+          {
+            requestAction: async (effect) => ({
+              type: 'approve',
+              interactionId: effect.interactionId,
+              grant: 'approve_once',
+            }),
+          },
+        )) {
+          events.push(event);
+        }
+        return events;
+      })();
+
+      await shellStarted;
+      if (!kernelControl.current) throw new Error('Expected live kernel control');
+      kernelControl.current.cancelRun('cancelled by test');
+      const firstEvents = await firstPromise;
+      expect(firstEvents.map((event) => event.type)).toContain('tool.started');
+      const cancelledStore = createRuntimeStore(storePath);
+      expect(cancelledStore.loadSnapshot<RuntimeState>(threadId)?.turn.status).toBe('aborted');
+      cancelledStore.close();
+
+      const secondEvents: RuntimeEvent[] = [];
+      for await (const event of runRuntimeAgent(
+        {
+          task: '继续测试',
+          threadId,
+          userId: 'test',
+          workspace,
+          runtimeStorePath: storePath,
+          model: model as any,
+          config,
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      )) {
+        secondEvents.push(event);
+      }
+
+      expect(model.callCount.count).toBe(2);
+      expect(secondEvents).toContainEqual(
+        expect.objectContaining({ type: 'user.message_appended', content: '继续测试' }),
+      );
+      expect(secondEvents).toContainEqual(
+        expect.objectContaining({ type: 'model.responded', text: '继续测试已完成。' }),
+      );
+      expect(secondEvents.at(-1)?.type).toBe('turn.completed');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
   test('withholds writer, shell, and child capabilities until bounded cancellation is enabled', () => {
     const state = createInitialRuntimeState({
       threadId: 'bounded-capabilities',

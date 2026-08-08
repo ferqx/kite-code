@@ -970,11 +970,20 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'shell_execute') {
     const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant, networkBoundaryPolicy);
+    const shellNetworkBroker =
+      networkBoundaryPolicy && hasExecutionGrant && input.recordNetworkDecision && request.id
+        ? {
+            policy: networkBoundaryPolicy,
+            toolCallId: request.id,
+            recordDecision: input.recordNetworkDecision,
+          }
+        : undefined;
     const dispatched = await dispatchRegisteredTool(shellExecuteSpec, request.args, {
       workspace,
       signal,
       shellExecutor,
       shellNetworkMode: networkMode,
+      shellNetworkBroker,
       onShellProgress: input.onShellProgress,
       protectedPathEvaluator,
     });

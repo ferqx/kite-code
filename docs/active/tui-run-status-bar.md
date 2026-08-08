@@ -3,7 +3,7 @@
 状态：active
 范围：`src/app/tui/run-status.ts`、`src/app/tui/StatusBar.tsx`、`src/app/tui/App.tsx`、`src/app/tui/Footer.tsx`、`src/app/tui/reducers/handleEvent.ts`、`tests/run-status.test.ts`、`tests/tui-mock-render.test.tsx`、`tests/runtime/failure-taxonomy.test.ts`
 读取时机：修改 StatusBar 渲染、run-status 推导逻辑、状态行动画、阶段切换规则时必读。
-验证：`bun test tests/run-status.test.ts tests/tui-mock-render.test.tsx tests/runtime/failure-taxonomy.test.ts`
+验证：`bun test tests/run-status.test.ts tests/tui-mock-render.test.tsx tests/runtime/failure-taxonomy.test.ts tests/tui.test.ts tests/session-manager.test.ts`、`bun run scripts/run-tui-system-tests.ts cancel-successor-render`
 
 ## 设计原则
 
@@ -44,6 +44,8 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 4. `derivePhase()`：finishing（兼容路径仍有 streaming text）→ working（有 tool 活动）→ thinking。Runtime `model.text_delta` 的未闭合 Markdown 尾部不进入 block 树；完整块一旦提交即由 `shouldShowRunStatus` 按可见正常文本隐藏状态行。
 5. 在 phase 内用 `currentVerb()` 推导具体动词
 6. `formatRunStatusLine(snapshot, columns)` 做宽度自适配格式化
+
+取消后的 successor 可在旧 run cleanup 期间先乐观进入 `running=true`。旧 run 的 generator 若在 AbortSignal 后无事件地正常关闭，仍不得派发 `SET_EXITED`；只有未取消、前台且正常完成的本轮 run 可以投影该终态。否则 successor 的 Bash/tool card 虽继续运行，StatusBar 会因 `running=false` 消失。PTY 回归要求 successor Shell 输出首帧出现时同时可见 Working · Running。
 
 ## Timer 性能架构
 

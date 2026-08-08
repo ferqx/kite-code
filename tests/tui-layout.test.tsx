@@ -807,6 +807,16 @@ describe('HelpPanel', () => {
     expect(frame).not.toContain('ask/auto');
   });
 
+  test('keeps full unavailable for the restricted-token backend', () => {
+    const { lastFrame } = render(
+      <HelpPanel onClose={noop} sandboxBackend="windows_restricted_token" />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('accept_edits/auto');
+    expect(frame).not.toContain('accept_edits/auto/full');
+  });
+
   test('shows close hint', () => {
     const { lastFrame } = render(<HelpPanel onClose={noop} />);
     expect(lastFrame()).toContain('Esc 关闭');
@@ -1648,6 +1658,71 @@ function OutputAreaTestWrap({
   );
 }
 
+describe('successor turn rendering', () => {
+  test('keeps a successor shell card dynamic after the previous turn was cancelled', () => {
+    const cancelled: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'cancelled-shell',
+      name: 'shell_execute',
+      args: { command: 'curl old' },
+      status: 'cancelled',
+      summary: 'Cancelled',
+    };
+    const successor: OutputBlock = {
+      id: 3,
+      kind: 'tool_card',
+      callId: 'successor-shell',
+      name: 'shell_execute',
+      args: { command: 'curl new' },
+      status: 'running',
+      summary: '',
+      preview: 'curl new',
+      startedAt: Date.now(),
+      liveOutput: 'first live line',
+    };
+    const view = render(
+      <OutputAreaTestWrap
+        running={false}
+        turns={[{ blocks: [cancelled] }]}
+        onToggleReason={noop}
+      />,
+    );
+
+    view.rerender(
+      <OutputAreaTestWrap
+        running={true}
+        turns={[
+          { blocks: [cancelled] },
+          { blocks: [{ id: 2, kind: 'user', content: '请继续' }, successor] },
+        ]}
+        onToggleReason={noop}
+      />,
+    );
+
+    expect(view.lastFrame()).toContain('first live line');
+
+    view.rerender(
+      <OutputAreaTestWrap
+        running={true}
+        turns={[
+          { blocks: [cancelled] },
+          {
+            blocks: [
+              { id: 2, kind: 'user', content: '请继续' },
+              { ...successor, liveOutput: 'second live line' },
+            ],
+          },
+        ]}
+        onToggleReason={noop}
+      />,
+    );
+
+    expect(view.lastFrame()).toContain('second live line');
+    expect(view.lastFrame()).not.toContain('first live line');
+  });
+});
+
 describe('BlockRenderer', () => {
   test('renders text block', () => {
     const block: OutputBlock = { id: 1, kind: 'text', content: 'Hello world' };
@@ -1950,6 +2025,103 @@ describe('BlockRenderer', () => {
     expect(frame.match(/Cancelled/g) ?? []).toHaveLength(0);
   });
 
+  test('collapsed cancelled shell keeps its terminal footer visible without expanding output', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'curl https://example.test' },
+      status: 'cancelled',
+      summary: 'Cancelled',
+      detail: 'Ran: curl https://example.test',
+      liveOutput: 'partial response body',
+      expanded: false,
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Ran: curl https://example.test');
+    expect(frame).toContain('cancelled');
+    expect(frame).not.toContain('partial response body');
+  });
+
+  test('expanded cancelled shell retains live output above its terminal footer', () => {
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'c1',
+      name: 'shell_execute',
+      args: { command: 'curl https://example.test' },
+      status: 'cancelled',
+      summary: 'Cancelled',
+      detail: 'Ran: curl https://example.test',
+      liveOutput: 'partial response body',
+      expanded: true,
+    };
+    const { lastFrame } = render(
+      <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('partial response body');
+    expect(frame).toContain('cancelled');
+  });
+
+  test('live and replay cancellation render the same collapsed shell outcome', () => {
+    const activeCard: OutputBlock = {
+      id: 1,
+      kind: 'tool_card',
+      callId: 'shell-1',
+      name: 'shell_execute',
+      args: { command: 'curl https://example.test' },
+      status: 'running',
+      summary: '',
+      detail: 'Ran: curl https://example.test',
+      liveOutput: 'partial response body',
+      expanded: false,
+    };
+    const initial: TuiState = {
+      ...createInitialState(),
+      running: true,
+      turns: [{ blocks: [activeCard] }],
+      nextBlockId: 2,
+    };
+
+    const live = eventReducer(initial, { type: 'ESCAPE' });
+    let replay = eventReducer(initial, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'tool.cancelled',
+        toolCallId: 'shell-1',
+        reason: 'Cancelled by user.',
+      },
+    });
+    replay = eventReducer(replay, {
+      type: 'RUNTIME_EVENT',
+      event: {
+        type: 'turn.aborted',
+        turnId: 'turn-1',
+        reason: 'Cancelled by user.',
+        cause: 'user',
+      },
+    });
+
+    const liveCard = live.turns[0]!.blocks[0]!;
+    const replayCard = replay.turns[0]!.blocks[0]!;
+    expect(replayCard).toEqual(liveCard);
+    const liveRender = render(
+      <BlockRenderer columns={80} block={liveCard} isFocused={false} index={0} />,
+    );
+    const replayRender = render(
+      <BlockRenderer columns={80} block={replayCard} isFocused={false} index={0} />,
+    );
+
+    expect(replayRender.lastFrame()).toBe(liveRender.lastFrame());
+    expect(liveRender.lastFrame()).toContain('cancelled');
+  });
   test('file_change block is rendered by tool_card, not BlockRenderer', () => {
     // sandbox 合并后 file_change 由 tool_card 渲染，BlockRenderer 返回 null
     const block: OutputBlock = {
@@ -2734,7 +2906,7 @@ describe('Block spacing', () => {
         args: {},
         status: 'done',
         summary: 'result',
-        _marker: 'Bash',
+        _marker: 'exit: 0',
       } as unknown as OutputBlock,
       {
         id: 2,
