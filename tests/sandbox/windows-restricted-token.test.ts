@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
@@ -266,7 +273,9 @@ try {
           exitCode: 0,
           processCleanup: { confirmedExited: true },
         });
-        expect(normal.stdout).toContain(`PWD:${workspace}`);
+        expect(normal.stdout.toLowerCase()).toContain(
+          `PWD:${realpathSync.native(workspace)}`.toLowerCase(),
+        );
         expect(normal.stdout).toContain('POSIX_PATH_OK');
         expect(normal.stdout).toContain('DIRECT_OK');
         expect(normal.stdout).toMatch(/\d+\.\d+\.\d+/);

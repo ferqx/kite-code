@@ -21,6 +21,8 @@ tests/sandbox/windows-restricted-token.test.ts`。需要实际创建/复用 Onli
 Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 physical Win10 conformance。
 GitHub-hosted native E2E 的组合 runtime smoke 必须给 Defender 下的 Node/npm/Bun/cmd/PowerShell 冷启动
 保留独立预算；该测试预算不改变产品 Shell 的默认或调用方显式 timeout。
+Windows 临时 Workspace 的原生断言比较 canonical、大小写不敏感的 path identity，不把 8.3 短路径与
+同一目录的长路径 spelling 差异误报为 cwd 越界。
 runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，并通过
 `bun run scripts/release/build-windows-runner.ts` 固定 toolchain 内置 `rust-lld`、重映射
 checkout/Cargo cache 路径并清除 PE 时间戳；
