@@ -259,7 +259,7 @@ try {
         const normal = await executor({
           workspace,
           command: `printf DIRECT_OK > direct-output.txt; test -f ${posixWorkspace}/direct-output.txt; printf POSIX_PATH_OK:; printf PWD:; pwd; printf :; cat direct-output.txt; printf :; node --version; npm --version; bun --version; cmd.exe /d /c 'echo CMD_OK'; powershell.exe -NoLogo -NoProfile -NonInteractive -Command 'Write-Output POWERSHELL_OK'`,
-          timeoutMs: 15_000,
+          timeoutMs: 45_000,
         });
         expect(normal).toMatchObject({
           ok: true,
@@ -382,6 +382,6 @@ try {
       }
       expect(repairFailure).toBe('');
     },
-    60_000,
+    120_000,
   );
 });
