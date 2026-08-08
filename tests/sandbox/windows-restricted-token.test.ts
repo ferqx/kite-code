@@ -265,8 +265,8 @@ try {
         });
         const normal = await executor({
           workspace,
-          command: `printf DIRECT_OK > direct-output.txt; test -f ${posixWorkspace}/direct-output.txt; printf POSIX_PATH_OK:; printf PWD:; pwd; printf :; cat direct-output.txt; printf :; node --version; npm --version; bun --version; cmd.exe /d /c 'echo CMD_OK'; powershell.exe -NoLogo -NoProfile -NonInteractive -Command 'Write-Output POWERSHELL_OK'`,
-          timeoutMs: 45_000,
+          command: `printf DIRECT_OK > direct-output.txt; test -f ${posixWorkspace}/direct-output.txt; printf POSIX_PATH_OK:; printf PWD:; pwd; printf :; cat direct-output.txt`,
+          timeoutMs: 60_000,
         });
         expect(normal).toMatchObject({
           ok: true,
@@ -278,10 +278,32 @@ try {
         );
         expect(normal.stdout).toContain('POSIX_PATH_OK');
         expect(normal.stdout).toContain('DIRECT_OK');
-        expect(normal.stdout).toMatch(/\d+\.\d+\.\d+/);
-        expect(normal.stdout).toContain('CMD_OK');
-        expect(normal.stdout).toContain('POWERSHELL_OK');
         expect(readFileSync(join(workspace, 'direct-output.txt'), 'utf8')).toBe('DIRECT_OK');
+
+        const runtimeSmokes = [
+          { command: 'node --version', output: /\d+\.\d+\.\d+/ },
+          { command: 'npm --version', output: /\d+\.\d+\.\d+/ },
+          { command: 'bun --version', output: /\d+\.\d+\.\d+/ },
+          { command: "cmd.exe /d /c 'echo CMD_OK'", output: /CMD_OK/ },
+          {
+            command:
+              "powershell.exe -NoLogo -NoProfile -NonInteractive -Command 'Write-Output POWERSHELL_OK'",
+            output: /POWERSHELL_OK/,
+          },
+        ];
+        for (const smoke of runtimeSmokes) {
+          const result = await executor({
+            workspace,
+            command: smoke.command,
+            timeoutMs: 60_000,
+          });
+          expect(result).toMatchObject({
+            ok: true,
+            exitCode: 0,
+            processCleanup: { confirmedExited: true },
+          });
+          expect(result.stdout).toMatch(smoke.output);
+        }
 
         const protectedWriteBeforeReplace = await executor({
           workspace,
@@ -391,6 +413,6 @@ try {
       }
       expect(repairFailure).toBe('');
     },
-    120_000,
+    360_000,
   );
 });

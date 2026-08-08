@@ -19,8 +19,9 @@ script 指定的 Win11 native E2E/probe。direct backend E2E 为
 tests/sandbox/windows-restricted-token.test.ts`。需要实际创建/复用 Online 账户时，先通过 TUI onboarding
 或 `bun run agent sandbox setup` 显式设置，再设置 `KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E=1`。
 Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 physical Win10 conformance。
-GitHub-hosted native E2E 的组合 runtime smoke 必须给 Defender 下的 Node/npm/Bun/cmd/PowerShell 冷启动
-保留独立预算；该测试预算不改变产品 Shell 的默认或调用方显式 timeout。
+GitHub-hosted native E2E 的 runtime smoke 必须把 Node/npm/Bun/cmd/PowerShell 拆为独立调用，并给
+Defender 下的各次冷启动保留各自的有界预算；不得用一条共享 timeout 的组合命令把累计启动时间误判为
+backend 失败。该测试预算不改变产品 Shell 的默认或调用方显式 timeout。
 Windows 临时 Workspace 的原生断言比较 canonical、大小写不敏感的 path identity，不把 8.3 短路径与
 同一目录的长路径 spelling 差异误报为 cwd 越界。
 runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，并通过
