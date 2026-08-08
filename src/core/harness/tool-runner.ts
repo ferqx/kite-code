@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { isAbsolute } from 'node:path';
+import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
 import {
@@ -10,6 +11,10 @@ import {
   type RemoteMcpEgressInvocationPolicyV1,
 } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
+import {
+  type ProjectInstructionSnapshot,
+  resolveProjectInstructionSnapshot,
+} from '@/core/model/project-instructions';
 import {
   evaluateToolApproval,
   isReadOnlyMcpPolicy,
@@ -184,6 +189,8 @@ export interface RunApprovedToolInput {
   recordNetworkDecision?: NetworkDecisionRecorderV1;
   /** 当前模型轮次的工具可用性快照，用于 Registry effects 分类。省略时回退到仅 workspace/threadId。 */
   availabilityContext?: ToolAvailabilityContext;
+  /** Project instructions visible to the model that issued this request. */
+  projectInstructionSnapshot?: ProjectInstructionSnapshot;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -213,6 +220,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     beforeDispatch,
     subagentEventSink,
     availabilityContext,
+    projectInstructionSnapshot,
   } = input;
 
   const executionSurface = taskConfig?.executionCapabilitySurface;
@@ -223,6 +231,37 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       })
     : undefined;
   const builtinSpec = builtinToolRegistry.get(request.name);
+  if (taskConfig && getFeatureFlags(taskConfig).promptContractV2 && projectInstructionSnapshot) {
+    const args = request.args as Record<string, unknown>;
+    const target =
+      request.name === 'edit_file' || request.name === 'write_file'
+        ? typeof args.path === 'string'
+          ? args.path
+          : '.'
+        : request.name === 'shell_execute' ||
+            (request.name === 'task' && args.subagent_type === 'code')
+          ? '.'
+          : undefined;
+    if (target) {
+      const current = resolveProjectInstructionSnapshot({ workspace, targetPaths: [target] });
+      const visible = new Map(
+        projectInstructionSnapshot.documents.map((document) => [document.path, document.digest]),
+      );
+      const changed = current.documents.find(
+        (document) => visible.get(document.path) !== document.digest,
+      );
+      if (changed) {
+        return withFailureGuidance(request, {
+          ok: false,
+          command: request.protectedCommand,
+          exitCode: -1,
+          stdout: '',
+          stderr: `project_instructions_changed: read ${changed.path} in the refreshed model context before retrying this side effect.`,
+          status: 'rejected',
+        });
+      }
+    }
+  }
   if (
     taskConfig &&
     'productionExecution' in taskConfig &&
@@ -406,6 +445,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
                   authorization: normalizeAuthorizationState(authorization),
                   workspaceAccess,
                   phase,
+                  projectInstructions: projectInstructionSnapshot,
                   threadId,
                   eventSink: subagentEventSink,
                   signal,

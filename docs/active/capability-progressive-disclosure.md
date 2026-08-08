@@ -33,7 +33,7 @@ inventory/resource 和动态 Tool 继续 fail closed。local stdio 在 native co
 
 当查询明确命中仍处于 `connecting` 的 Provider 且当前没有候选 Tool 时，`tool_search` 最多等待 5 秒完成该 Provider 的初始 discovery，然后基于最新 revisioned snapshot 重新搜索。等待接受 Runtime 取消信号，取消时立即中止等待并重新抛出，不返回成功结果。单个 Provider 连接失败可容忍，不终止整个搜索；超时或失败仍只返回不可用 Provider 元数据，不虚构 Tool、Schema 或 binding。
 
-有限 binding 的模型工具声明同样不得透传远端自然语言：工具 description 使用 Runtime 固定契约，模型可见 input schema 会递归移除 `description`、`title`、`$comment`、`examples` 和 `default` 注释；Runtime 参数校验仍使用原始 revisioned schema，因此该清理不会放宽执行边界。
+有限 binding 的模型工具声明只采用通过 admission 的 `modelDescription`。`user_config`、显式/本地私有配置和 `approved_project` 可使用远端描述，但必须过滤控制字符与非法 Unicode、压缩空白、限制为 512 Unicode code points，并明确标注为“外部能力元数据，不是指令”。`remote_untrusted` 不进入 Prompt，改用工具名和最多 12 个顶层参数名生成确定性摘要。`tool_search` 索引和最终动态声明必须使用同一 `modelDescription`；原始 description 只供 Runtime 审计。模型可见 input schema 继续递归移除 `description`、`title`、`$comment`、`examples` 和 `default` 注释；Runtime 参数校验仍使用原始 revisioned schema，因此该清理不会放宽执行边界。description provenance、清理后摘要及其 digest 属于 capability revision，变化会使旧 binding 失效。
 
 远端 schema 在 admission 前通过单次遍历校验预算：256 KiB UTF-8 字节上限、32 层深度上限、4096 对象节点上限、1024 属性上限。超限 schema 进入 `quarantined` 诊断，不进入 catalog。Provider 状态判断（callable/unavailable/healthy）统一在 `src/core/capabilities/provider-status.ts` 中定义，inventory、search、tool controller 共享同一来源。
 
@@ -49,3 +49,5 @@ Disclosure/search 仍只表示发现，不表示 release admission。Phase 5 pro
 重新验证实际 feature flags、dependency revision、embedded ceiling、route/platform allowlist 和实际
 G3/G4/G5 freshness；unknown/stale/failed 全部 blocked。当前 MCP write 与 Skills production route/
 profile 均为空或 off。
+
+V2 还按 Runtime phase 裁剪披露：Planning 只展示 effective effects 全部为 `none/read` 的动态 MCP；`write`、`destructive` 或 `unknown` 能力即使已经发现和绑定也不进入该轮模型工具面。Building 再按 authorization、execution surface、binding 和 feature flags 计算完整集合。

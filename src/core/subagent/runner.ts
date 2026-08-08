@@ -20,6 +20,10 @@ import { estimateContextTokens } from '@/core/model/context-budget';
 import { serializeToolDescriptors } from '@/core/model/context-projection';
 import { createChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
+import {
+  formatProjectInstructionSnapshot,
+  resolveProjectInstructionSnapshot,
+} from '@/core/model/project-instructions';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
@@ -163,12 +167,23 @@ ${input.task}`;
     systemPrompt += [
       '',
       '## Available Skills',
-      'Use the Skill tool to invoke a skill when its description matches your task.',
+      'Use activate_skill only for a disclosed matching workflow; use read_skill_reference and complete_skill for its lifecycle.',
       ...skillLines,
     ].join('\n');
   }
   systemPrompt += `\n\n${cacheableRuntimeCtx}`;
-  return [systemMessage(systemPrompt), humanMessage(taskWithCwd)];
+  const projectContext = getFeatureFlags(input.config).promptContractV2
+    ? (input.projectInstructions ??
+      resolveProjectInstructionSnapshot({ workspace: input.workspace }))
+    : undefined;
+  return [
+    systemMessage(systemPrompt),
+    ...(projectContext &&
+    (projectContext.documents.length > 0 || projectContext.warnings.length > 0)
+      ? [humanMessage(formatProjectInstructionSnapshot(projectContext))]
+      : []),
+    humanMessage(taskWithCwd),
+  ];
 }
 
 function normalizeRoleConfig(role: SubAgentRoleConfig): SubAgentRoleConfig {
@@ -232,7 +247,14 @@ function artifactSizeAfterTool(
 
 export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentResult> {
   const id = nextSubAgentId();
-  const normalizedInput = { ...input, role: normalizeRoleConfig(input.role) };
+  const normalizedInput = {
+    ...input,
+    role: normalizeRoleConfig(input.role),
+    projectInstructions: getFeatureFlags(input.config).promptContractV2
+      ? (input.projectInstructions ??
+        resolveProjectInstructionSnapshot({ workspace: input.workspace }))
+      : undefined,
+  };
   input.eventSink({
     type: 'start',
     data: { id, role: normalizedInput.role.role, task: normalizedInput.task },
@@ -256,7 +278,11 @@ export async function resumeSubAgent(
     result: ToolExecutionResult;
   },
 ): Promise<SubAgentResult> {
-  const normalizedInput = { ...input, role: normalizeRoleConfig(input.role) };
+  const normalizedInput = {
+    ...input,
+    role: normalizeRoleConfig(input.role),
+    projectInstructions: continuation.projectInstructions ?? input.projectInstructions,
+  };
   const toolOutput = JSON.stringify(toolResult.result);
   const actualOk = toolResult.result.ok !== false;
   normalizedInput.eventSink({
@@ -676,6 +702,7 @@ async function runSubAgentLoop(
             signal: combinedSignal,
             interactionMode: 'accept_edits',
             taskConfig: input.config,
+            projectInstructionSnapshot: input.projectInstructions,
             taskModel: model,
             providerDataAdmission: input.providerDataAdmission,
             subagentEventSink: input.eventSink,
@@ -714,6 +741,7 @@ async function runSubAgentLoop(
                 Object.keys(exhaustedFingerprints).length > 0
                   ? { ...exhaustedFingerprints }
                   : undefined,
+              projectInstructions: input.projectInstructions,
             },
           );
           if (blocked) {

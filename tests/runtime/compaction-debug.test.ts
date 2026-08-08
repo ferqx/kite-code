@@ -11,6 +11,7 @@ import {
 describe('local compaction debug', () => {
   test('is opt-in, atomic, redacted, owner-only, and session-isolated', () => {
     const root = mkdtempSync(join(tmpdir(), 'compaction-debug-'));
+    const windowsAcl = process.platform === 'win32' ? secureWindowsOwnerOnlyPath : undefined;
     try {
       expect(
         writeLocalCompactionDebugRecord({
@@ -24,6 +25,7 @@ describe('local compaction debug', () => {
         enabled: true,
         directory: join(root, 'enabled'),
         sessionId: 'session-a',
+        secureWindowsPath: windowsAcl,
         record: {
           compactionId: 'c',
           reason: 'manual',
@@ -36,6 +38,7 @@ describe('local compaction debug', () => {
         enabled: true,
         directory: join(root, 'enabled'),
         sessionId: 'session-b',
+        secureWindowsPath: windowsAcl,
         record: { compactionId: 'd', reason: 'auto', outcome: 'failed' },
       })!;
       expect(first).not.toBe(second);
@@ -58,6 +61,7 @@ describe('local compaction debug', () => {
         enabled: true,
         directory: real,
         sessionId: 'session',
+        secureWindowsPath: process.platform === 'win32' ? secureWindowsOwnerOnlyPath : undefined,
         record: { compactionId: 'c', reason: 'manual', outcome: 'completed' },
       });
       symlinkSync(real, link, process.platform === 'win32' ? 'junction' : 'dir');

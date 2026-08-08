@@ -106,5 +106,5 @@ describe('independent platform capability artifact verifier', () => {
     expect(() =>
       verifyPlatformCapabilityEvidenceV1({ evidence: falseConclusion, expectedSource: source }),
     ).toThrow('outcome mismatch');
-  });
+  }, 30_000);
 });

@@ -369,10 +369,10 @@ function fixture(platform: ProductionArtifactPlatformV1 = 'linux-x64') {
     process.platform === 'win32'
       ? {
           gh: 'C:\\Program Files\\GitHub CLI\\gh.exe',
-          cosign: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+          cosign: 'C:\\Program Files\\GitHub CLI\\gh.exe',
           codesign: 'C:\\Program Files\\GitHub CLI\\gh.exe',
-          spctl: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
-          pwsh: 'C:\\Program Files\\PowerShell\\7\\pwsh.exe',
+          spctl: 'C:\\Program Files\\GitHub CLI\\GH.exe',
+          pwsh: 'C:\\Program Files\\GitHub CLI\\gh.exe',
         }
       : {
           gh: '/usr/bin/true',
@@ -688,7 +688,7 @@ describe('production supply-chain admission verifier skeleton', () => {
       });
       expect(commands.filter((command) => command.includes('attestation'))).toHaveLength(11);
       expect(commands.filter((command) => command.includes('verify-blob'))).toHaveLength(2);
-      expect(commands.flat().join(' ')).toContain('/nativeLauncher/kite');
+      expect(commands.flat().join(' ')).toContain(join('nativeLauncher', 'kite'));
       expect(commands.flat().join(' ')).not.toContain(value.paths.nativeLauncher);
     } finally {
       rmSync(value.root, { recursive: true, force: true });
@@ -938,52 +938,57 @@ describe('production supply-chain admission verifier skeleton', () => {
     }
   });
 
-  test('verifies the extracted macOS leaf certificate and notarization policy separately', () => {
-    const value = fixture('macos-arm64');
-    try {
-      const commands: string[][] = [];
-      expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, dependencies(value, commands)),
-      ).not.toThrow();
-      expect(commands.filter((command) => command.includes('--extract-certificates'))).toHaveLength(
-        1,
-      );
-      expect(commands.filter((command) => command.includes('--test-requirement'))).toHaveLength(1);
-      expect(commands.filter((command) => command.includes('--assess'))).toHaveLength(1);
-      for (const command of commands.filter((entry) =>
-        entry.some((argument) =>
-          ['--test-requirement', '--extract-certificates', '--assess'].includes(argument),
-        ),
-      )) {
-        expect(command.at(-1)).toContain('/archive-extraction/Kite.app');
-        expect(command.at(-1)).not.toContain('/Contents/MacOS/kite');
+  test.skipIf(process.platform === 'win32')(
+    'verifies the extracted macOS leaf certificate and notarization policy separately',
+    () => {
+      const value = fixture('macos-arm64');
+      try {
+        const commands: string[][] = [];
+        expect(() =>
+          verifyProductionSupplyChainAdmissionV1(value.input, dependencies(value, commands)),
+        ).not.toThrow();
+        expect(
+          commands.filter((command) => command.includes('--extract-certificates')),
+        ).toHaveLength(1);
+        expect(commands.filter((command) => command.includes('--test-requirement'))).toHaveLength(
+          1,
+        );
+        expect(commands.filter((command) => command.includes('--assess'))).toHaveLength(1);
+        for (const command of commands.filter((entry) =>
+          entry.some((argument) =>
+            ['--test-requirement', '--extract-certificates', '--assess'].includes(argument),
+          ),
+        )) {
+          expect(command.at(-1)).toContain('/archive-extraction/Kite.app');
+          expect(command.at(-1)).not.toContain('/Contents/MacOS/kite');
+        }
+        expect(() =>
+          verifyProductionSupplyChainAdmissionV1(
+            {
+              ...value.input,
+              nativeSigner: {
+                ...value.input.nativeSigner,
+                certificateSha256: 'F'.repeat(64),
+              } as never,
+            },
+            dependencies(value, []),
+          ),
+        ).toThrow('leaf certificate digest');
+        const base = dependencies(value, []);
+        expect(() =>
+          verifyProductionSupplyChainAdmissionV1(value.input, {
+            ...base,
+            execute(command) {
+              const result = base.execute(command);
+              return command.includes('--assess')
+                ? { ...result, stderr: 'source=Developer ID\norigin=local override' }
+                : result;
+            },
+          }),
+        ).toThrow('pinned notarized Developer ID origin');
+      } finally {
+        rmSync(value.root, { recursive: true, force: true });
       }
-      expect(() =>
-        verifyProductionSupplyChainAdmissionV1(
-          {
-            ...value.input,
-            nativeSigner: {
-              ...value.input.nativeSigner,
-              certificateSha256: 'F'.repeat(64),
-            } as never,
-          },
-          dependencies(value, []),
-        ),
-      ).toThrow('leaf certificate digest');
-      const base = dependencies(value, []);
-      expect(() =>
-        verifyProductionSupplyChainAdmissionV1(value.input, {
-          ...base,
-          execute(command) {
-            const result = base.execute(command);
-            return command.includes('--assess')
-              ? { ...result, stderr: 'source=Developer ID\norigin=local override' }
-              : result;
-          },
-        }),
-      ).toThrow('pinned notarized Developer ID origin');
-    } finally {
-      rmSync(value.root, { recursive: true, force: true });
-    }
-  });
+    },
+  );
 });

@@ -151,22 +151,19 @@ describe('model context protocol', () => {
       final: '',
     });
 
-    // 消息顺序：system(merged), human(user), human(mode snapshot), human(synthetic plan reminder)
-    expect(messages).toHaveLength(4);
+    // 消息顺序：system(merged), human(user), human(single runtime snapshot)
+    expect(messages).toHaveLength(3);
     expect(messages[0]!.type).toBe('system');
     expect(messages[1]!.type).toBe('human');
     expect(String(messages[1]!.content)).toBe('Create dark mode');
     expect(messages[2]!.type).toBe('human');
     expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
-    expect(messages[3]!.type).toBe('human');
-    expect(String(messages[3]!.content)).toContain('<runtime-state source="runtime.kernel">');
-    expect(String(messages[3]!.content)).toContain('lifecycle: executing');
-    expect(String(messages[3]!.content)).toContain('plan_id: plan-dark-mode');
-    expect(String(messages[3]!.content)).toContain('version: 2');
-    expect(String(messages[3]!.content)).toContain('title: Add dark mode');
-    expect(String(messages[3]!.content)).toContain('- toggle-component: completed');
-    expect(String(messages[3]!.content)).toContain('- update-styles: in_progress');
-    expect(String(messages[3]!.content)).toContain('- run-tests: pending');
+    expect(String(messages[2]!.content)).toContain('lifecycle: executing');
+    expect(String(messages[2]!.content)).toContain('plan_id: plan-dark-mode');
+    expect(String(messages[2]!.content)).toContain('version: 2');
+    expect(String(messages[2]!.content)).toContain('- toggle-component: completed');
+    expect(String(messages[2]!.content)).toContain('- update-styles: in_progress');
+    expect(String(messages[2]!.content)).toContain('- run-tests: pending');
 
     expect(String(messages[0]!.content)).not.toContain('Add dark mode');
     expect(String(messages[0]!.content)).not.toContain('Create toggle component');
@@ -234,14 +231,12 @@ describe('model context protocol', () => {
       final: '',
     });
 
-    expect(messages.map((message) => message.type)).toEqual(['system', 'human', 'human', 'human']);
+    expect(messages.map((message) => message.type)).toEqual(['system', 'human', 'human']);
     expect(messages[2]!.type).toBe('human');
-    expect(messages[3]!.type).toBe('human');
     expect(String(messages[1]!.content)).toBe('/plan inspect cache behavior');
     expect(String(messages[2]!.content)).toContain('<runtime-state source="runtime.kernel">');
-    expect(String(messages[3]!.content)).toContain('<runtime-state source="runtime.kernel">');
-    expect(String(messages[3]!.content)).toContain('lifecycle: executing');
-    expect(String(messages[3]!.content)).toContain('Inspect cache layout');
+    expect(String(messages[2]!.content)).toContain('lifecycle: executing');
+    expect(String(messages[2]!.content)).toContain('sandbox_backend: unknown');
     expect(String(messages[0]!.content)).not.toContain('Inspect cache layout');
   });
 });
@@ -272,7 +267,8 @@ describe('buildStaticSystemPrompt with skills', () => {
     expect(prompt).toContain('## Available Skills');
     expect(prompt).toContain('- tdd: Use when writing tests');
     expect(prompt).toContain('- debugging: Use when debugging');
-    expect(prompt).toContain('`Skill`');
+    expect(prompt).toContain('`activate_skill`');
+    expect(prompt).not.toContain('Use the `Skill` tool');
   });
 
   test('does not include section when skills empty', () => {

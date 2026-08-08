@@ -320,7 +320,7 @@ export async function typeText(
       for (const [index, ch] of characters.entries()) {
         tui.write(ch);
         delivered += ch;
-        await sleep(delayMs);
+        if (delayMs > 0) await sleep(delayMs);
         if (SELECTOR_COMMAND_PREFIX.test(delivered) && index < characters.length - 1) {
           // Ink first commits the command match and only then installs the
           // argument selector's key handlers. On slower CI hosts, sending the
@@ -336,7 +336,8 @@ export async function typeText(
           );
         }
       }
-      await sleep(options.testTiming?.settleMs ?? INPUT_SETTLE_MS);
+      const settleMs = options.testTiming?.settleMs ?? INPUT_SETTLE_MS;
+      if (settleMs > 0) await sleep(settleMs);
 
       // Confirm that Ink rendered the final input value before a following
       // control key is sent. The current VT viewport is authoritative here:
@@ -374,7 +375,8 @@ export async function typeText(
         // baseline, so only remove the visible attempted suffix.
         initial = await clearActiveInputTo(tui, baselineValue, initial.kind, options.testTiming);
       }
-      await sleep(options.testTiming?.settleMs ?? INPUT_SETTLE_MS);
+      const retrySettleMs = options.testTiming?.settleMs ?? INPUT_SETTLE_MS;
+      if (retrySettleMs > 0) await sleep(retrySettleMs);
     }
   }
 
@@ -453,7 +455,8 @@ export async function clearInput(
   const backspace = options.backspace === 'ascii' ? '\x08' : '\x7f';
   for (let i = 0; i < length; i++) {
     tui.write(backspace);
-    await sleep(options.delayMs ?? 50);
+    const delayMs = options.delayMs ?? 50;
+    if (delayMs > 0) await sleep(delayMs);
   }
   await waitForOutputQuiescence(
     () => tui.outputSince(outputMark),

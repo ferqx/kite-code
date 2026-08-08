@@ -241,6 +241,9 @@ export function createNarrativeContextCompactor(options: {
       serializedTools: input.projectionEnvironment?.serializedTools,
       activeSkillInstructions: input.projectionEnvironment?.activeSkillInstructions,
       workflowSkills: input.projectionEnvironment?.workflowSkills,
+      promptContractVersion: input.projectionEnvironment?.promptContractVersion,
+      projectInstructions: input.projectionEnvironment?.projectInstructions,
+      sandboxBackend: input.projectionEnvironment?.sandboxBackend,
     };
     const before = buildContextProjection(projectionInput).estimate.totalInputTokens;
     const last = narrativeOnly ? undefined : messages.at(-1);

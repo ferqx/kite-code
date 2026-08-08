@@ -10,6 +10,12 @@ export type CapabilityKind =
 export type CapabilityAvailability = 'available' | 'degraded' | 'unavailable' | 'quarantined';
 export type CapabilityApproval = 'none' | 'auto_review' | 'user';
 export type CapabilityEffectLevel = 'none' | 'read' | 'write' | 'destructive' | 'unknown';
+export type CapabilityDescriptionProvenance =
+  | 'builtin'
+  | 'user_config'
+  | 'approved_project'
+  | 'generated'
+  | 'remote_untrusted';
 
 export interface EffectProfile {
   filesystem: CapabilityEffectLevel;
@@ -23,6 +29,10 @@ export interface CapabilityDescriptor {
   kind: CapabilityKind;
   displayName: string;
   description: string;
+  /** Sanitized, bounded summary admitted to the model surface. */
+  modelDescription?: string;
+  /** Optional for backward-compatible persisted descriptors. */
+  descriptionProvenance?: CapabilityDescriptionProvenance;
   provider: {
     type: 'builtin' | 'mcp' | 'skill' | 'subagent';
     id: string;

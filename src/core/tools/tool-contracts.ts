@@ -1,4 +1,16 @@
 export interface ToolContractSection {
+  summary: string;
+  useWhen: string;
+  returns: {
+    format: 'text' | 'json' | 'interrupt';
+    description: string;
+    fields?: readonly string[];
+  };
+  constraints?: string;
+  recovery?: string;
+}
+
+export interface LegacyToolContractSection {
   /** When to use this tool, AND when to use an alternative tool instead */
   whenToUse: string;
   /** Common failure patterns the model should avoid */
@@ -12,10 +24,60 @@ export interface ToolContractSection {
 export interface ToolContract {
   name: string;
   description: string;
-  sections: ToolContractSection;
+  sections: LegacyToolContractSection;
 }
 
-export function buildDescription(sections: ToolContractSection): string {
+export type ToolContractSource = ToolContractSection | LegacyToolContractSection;
+export type ToolDescriptionVersion = 'legacy' | 'v2';
+
+function isStructuredContract(sections: ToolContractSource): sections is ToolContractSection {
+  return 'summary' in sections;
+}
+
+function conciseSentence(value: string, maximum = 260): string {
+  const normalized = value.replace(/\s+/g, ' ').trim();
+  const first = normalized.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? normalized;
+  return Array.from(first).slice(0, maximum).join('');
+}
+
+export function normalizeToolContract(sections: ToolContractSource): ToolContractSection {
+  if (isStructuredContract(sections)) return sections;
+  const output = sections.outputFormat.trim();
+  const format = /^(?:JSON|Returns JSON|Structured JSON)/i.test(output) ? 'json' : 'text';
+  return {
+    summary: conciseSentence(sections.whenToUse),
+    useWhen: conciseSentence(sections.whenToUse, 360),
+    returns: { format, description: output.replace(/^JSON:\s*/i, '') },
+    constraints: conciseSentence(sections.commonMistakes),
+    recovery: conciseSentence(sections.failureHandling),
+  };
+}
+
+export function buildDescription(
+  sections: ToolContractSource,
+  version: ToolDescriptionVersion = 'legacy',
+): string {
+  if (version === 'v2') {
+    const contract = normalizeToolContract(sections);
+    return [
+      contract.summary,
+      contract.useWhen !== contract.summary ? `Use when: ${contract.useWhen}` : '',
+      `Returns ${contract.returns.format}: ${contract.returns.description}`,
+      contract.constraints ? `Constraint: ${contract.constraints}` : '',
+      contract.recovery ? `On failure: ${contract.recovery}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+  if (isStructuredContract(sections)) {
+    return [
+      sections.summary,
+      `\nUse when: ${sections.useWhen}`,
+      `\nOutput: ${sections.returns.description}`,
+      sections.constraints ? `\nConstraints: ${sections.constraints}` : '',
+      sections.recovery ? `\nFailure: ${sections.recovery}` : '',
+    ].join('');
+  }
   return [
     sections.whenToUse,
     `\nCommon mistakes: ${sections.commonMistakes}`,
@@ -38,8 +100,7 @@ export const READ_FILE_CONTRACT: ToolContract = {
       'Reading large files without offset/limit, wasting context. ' +
       'Using an absolute path when a relative workspace path is expected.',
     outputFormat:
-      "JSON: ok (boolean), content (line-numbered text: '  1|line content'), error (empty on success). " +
-      'File not found: ok: false with error message.',
+      "Text containing line-numbered file content such as '  1|line content'. Failures return an error message as text.",
     failureHandling:
       'If file not found: use search_files to locate the correct path, then retry. ' +
       'If offset is beyond file length: reduce or remove offset. ' +
@@ -94,8 +155,7 @@ export const EDIT_FILE_CONTRACT: ToolContract = {
       'Making multiple edit_file calls to the same file in one turn — each edit changes the file, ' +
       'causing subsequent old_string values to fail. Combine into one call instead.',
     outputFormat:
-      'JSON: ok (boolean), replacements (count), fromLine/toLine (line range), error (empty on success). ' +
-      "Success: 'Replaced N occurrence(s) at line L1-L2'.",
+      'Text containing the applied unified diff on success. Failures return a precise error and recovery guidance as text.',
     failureHandling:
       'If old_string not found: matching is exact including whitespace — re-read the file with read_file and retry with the exact current content. ' +
       'If the file has not been read in this session: read_file is required before edit_file. ' +
@@ -123,9 +183,7 @@ export const WRITE_FILE_CONTRACT: ToolContract = {
       'Overwriting an existing file without first calling read_file to verify its current content. ' +
       'Forgetting that write_file replaces the entire file — every omitted line is lost.',
     outputFormat:
-      'JSON: ok (boolean), lines (lines written), error (empty on success). ' +
-      "Success: 'Wrote N line(s) to path/to/file'. " +
-      'Parent directories are created automatically.',
+      'Text containing the created or replaced file diff/content on success. Failures return an error message as text.',
     failureHandling:
       'If write fails: verify the path is a valid relative workspace path. ' +
       'If permission or boundary error: verify the path is inside the workspace. ' +
@@ -477,10 +535,7 @@ export const WEB_FETCH_CONTRACT: ToolContract = {
       'if the user is in mainland China, prefer domestic sites (Baidu, Zhihu, CSDN) when equivalent content exists. ' +
       'For very large pages like Wikipedia or detailed docs, set timeout_ms higher (e.g. 20000).',
     outputFormat:
-      'JSON: ok (boolean), url (requested URL), finalUrl (after redirects), ' +
-      'title (extracted page title, HTML only), content (Markdown for HTML, raw text for JSON/XML/CSV/plain), ' +
-      'contentType (MIME type), truncated (boolean). ' +
-      'On error: ok: false with error field explaining why.',
+      'Formatted text with URL, status, content type, optional title, cleaned content, links, truncation details, and fetch time. Failures return formatted error text.',
     failureHandling:
       'If HTTP 403 (Forbidden): the site likely has anti-bot protection (e.g., Zhihu articles) — do NOT retry the same URL, find the same information from a different source. ' +
       'If HTTP 429 (Rate Limited): the site is throttling requests — wait a few seconds or switch to a different domain. ' +

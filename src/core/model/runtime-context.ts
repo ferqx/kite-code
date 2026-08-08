@@ -103,6 +103,7 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     `phase: ${input.phase}`,
     `interaction_mode: ${input.interactionMode}`,
     `authorization_mode: ${input.authorizationMode}`,
+    `sandbox_backend: ${input.sandboxBackend}`,
     ...(input.taskId ? [`task_id: ${input.taskId}`] : []),
     ...(input.sideEffectsStarted != null
       ? [`side_effects_started: ${input.sideEffectsStarted}`]
@@ -196,36 +197,5 @@ export function buildCacheableRuntimeContext(input: CacheableRuntimeContextInput
       `Note: for shell_execute commands, convert Windows paths to POSIX: replace backslashes with /, and change D:\\ to /d/. Example: ${workspace} → ${posixWorkspace}. File tools (read_file, edit_file, write_file) require paths relative to the workspace.`,
     );
   }
-  return lines.join('\n');
-}
-
-/** 将计划格式化为运行时状态提醒文本。使用 PlanningState。
- *  Format plan as runtime state reminder text. Uses PlanningState. */
-export function formatPlanStateReminder(planning: PlanningState): string {
-  const lines = ['<runtime-state source="runtime.kernel">', `lifecycle: ${planning.kind}`];
-  if (
-    planning.kind === 'planning_draft' ||
-    planning.kind === 'replanning_draft' ||
-    planning.kind === 'awaiting_review' ||
-    planning.kind === 'executing' ||
-    planning.kind === 'completed'
-  ) {
-    lines.push(`plan_id: ${planning.document.planId}`);
-    lines.push(`version: ${planning.document.version}`);
-    lines.push(`title: ${planning.document.title}`);
-  }
-  if (planning.kind === 'executing') {
-    lines.push('steps:');
-    for (const step of planning.document.steps) {
-      lines.push(`  - ${step.id}: ${step.status}`);
-    }
-  }
-  if (
-    (planning.kind === 'planning_draft' || planning.kind === 'replanning_draft') &&
-    planning.revisionFeedback
-  ) {
-    lines.push(`revision_feedback: ${planning.revisionFeedback}`);
-  }
-  lines.push('</runtime-state>');
   return lines.join('\n');
 }

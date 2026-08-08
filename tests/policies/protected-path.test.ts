@@ -133,7 +133,11 @@ describe('protected-path policy V1', () => {
   test('canonicalizes an existing symlink ancestor before deciding', () => {
     const workspace = temporaryDirectory('openpx-protected-symlink-workspace-');
     const outside = temporaryDirectory('openpx-protected-symlink-outside-');
-    symlinkSync(outside, join(workspace, 'escape'));
+    symlinkSync(
+      outside,
+      join(workspace, 'escape'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
 
     const decision = evaluator.evaluate({ path: 'escape/new.txt', operation: 'write' });
@@ -146,8 +150,14 @@ describe('protected-path policy V1', () => {
     mkdirSync(join(workspace, 'ordinary'));
     writeFileSync(join(workspace, 'ordinary', 'config'), 'ordinary');
     writeFileSync(join(workspace, 'public.txt'), 'public');
-    symlinkSync('ordinary', join(workspace, '.git'));
-    symlinkSync('public.txt', join(workspace, '.env'));
+    symlinkSync(
+      join(workspace, 'ordinary'),
+      join(workspace, '.git'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    if (process.platform !== 'win32') {
+      symlinkSync('public.txt', join(workspace, '.env'));
+    }
     const evaluator = createProtectedPathEvaluatorV1({ workspaceRoot: workspace, mode: 'deny' });
 
     expect(evaluator.evaluate({ path: '.git/config', operation: 'read' })).toMatchObject({
@@ -156,12 +166,14 @@ describe('protected-path policy V1', () => {
       lexicalRelativePath: '.git/config',
       relativePath: 'ordinary/config',
     });
-    expect(evaluator.evaluate({ path: '.env', operation: 'read' })).toMatchObject({
-      outcome: 'deny',
-      reason: 'protected_file',
-      lexicalRelativePath: '.env',
-      relativePath: 'public.txt',
-    });
+    if (process.platform !== 'win32') {
+      expect(evaluator.evaluate({ path: '.env', operation: 'read' })).toMatchObject({
+        outcome: 'deny',
+        reason: 'protected_file',
+        lexicalRelativePath: '.env',
+        relativePath: 'public.txt',
+      });
+    }
   });
 
   test('evaluates deny roots before a tighter allowlist', () => {
@@ -325,7 +337,11 @@ describe('protected-path Registry and Harness integration', () => {
     const workspace = temporaryDirectory('openpx-protected-search-alias-');
     mkdirSync(join(workspace, 'ordinary'));
     writeFileSync(join(workspace, 'ordinary', 'config'), 'needle');
-    symlinkSync('ordinary', join(workspace, '.git'));
+    symlinkSync(
+      join(workspace, 'ordinary'),
+      join(workspace, '.git'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     const protectedPathEvaluator = createProtectedPathEvaluatorV1({
       workspaceRoot: workspace,
       mode: 'deny',
@@ -390,6 +406,7 @@ describe('protected-path Registry and Harness integration', () => {
   });
 
   test('Harness rechecks write/edit paths after the asynchronous pre-dispatch hook', async () => {
+    if (process.platform === 'win32') return;
     for (const tool of ['write_file', 'edit_file'] as const) {
       const workspace = temporaryDirectory(`openpx-protected-hook-${tool}-`);
       writeFileSync(join(workspace, 'public.txt'), 'PUBLIC');

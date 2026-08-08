@@ -103,6 +103,15 @@ export function createAgentTools(
     if (descriptor.kind !== 'mcp_tool' || descriptor.availability !== 'available') continue;
     if (!descriptor.inputSchema) continue;
     if (
+      ctx.featureFlags?.promptContractV2 &&
+      ctx.phase === 'planning' &&
+      Object.values(descriptor.effectiveEffects).some(
+        (effect) => effect !== 'none' && effect !== 'read',
+      )
+    ) {
+      continue;
+    }
+    if (
       executionSurface &&
       !isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
         surface: executionSurface,
@@ -117,8 +126,9 @@ export function createAgentTools(
       modelVisibleCapabilitySchema(descriptor.inputSchema) as Parameters<typeof jsonSchema>[0],
     );
     mcpTools[binding.exposedToolName] = dynamicTool({
-      description:
-        'Runtime-bound MCP capability. The Runtime validates its current revision, arguments, policy, approval, execution receipt, and verification before use.',
+      description: ctx.featureFlags?.promptContractV2
+        ? (descriptor.modelDescription ?? `MCP capability ${descriptor.displayName}.`)
+        : 'Runtime-bound MCP capability. The Runtime validates its current revision, arguments, policy, approval, execution receipt, and verification before use.',
       inputSchema,
     });
   }

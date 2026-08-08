@@ -152,7 +152,9 @@ const recordSchema = z
     repoRoot: z.string().min(1),
     commonGitDirectory: z.string().min(1),
     commonGitDirectoryDevice: z.number().int().nonnegative(),
-    commonGitDirectoryInode: z.number().int().nonnegative(),
+    // Windows may expose a stable file identity above Number.MAX_SAFE_INTEGER.
+    // The value is compared opaquely within one process; it is not arithmetic data.
+    commonGitDirectoryInode: z.number().nonnegative(),
     baselineCommit: z.string().regex(COMMIT_PATTERN),
     branchName: z.string().min(1),
     worktreeRoot: z.string().min(1),

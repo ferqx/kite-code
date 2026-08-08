@@ -28,6 +28,7 @@ import {
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
+import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -38,6 +39,7 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import type { SandboxBackend } from '@/core/sandbox/platform';
 import { skillFrameInvalidationReason } from '@/core/skills/activation';
 import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
@@ -170,7 +172,9 @@ export function resolveContextProjectionEnvironment(input: {
     descriptor: import('@/protocol/capabilities').CapabilityDescriptor;
   }>;
   disclosedDescriptors?: import('@/protocol/capabilities').CapabilityDescriptor[];
+  sandboxBackend?: SandboxBackend | 'unknown';
 }): ContextProjectionEnvironment {
+  const flags = getFeatureFlags(input.config);
   const descriptors = [
     ...(input.mcpManager?.getCapabilitySnapshot().descriptors ?? []),
     ...(input.skillCatalog?.capabilities.descriptors ?? []),
@@ -227,6 +231,14 @@ export function resolveContextProjectionEnvironment(input: {
         capabilityId: descriptor.capabilityId,
         description: descriptor.description,
       })),
+    promptContractVersion: flags.promptContractV2 ? 'v2' : 'legacy',
+    projectInstructions: flags.promptContractV2
+      ? resolveProjectInstructionSnapshot({
+          workspace: input.state.session.workspace,
+          state: input.state,
+        })
+      : undefined,
+    sandboxBackend: input.sandboxBackend ?? 'unknown',
     leaseMetadata: {
       providerName: input.config.providerName,
       modelName: input.config.modelName,
@@ -256,6 +268,7 @@ export async function invokeRuntimeModel(params: {
   state: RuntimeState;
   config: AgentConfig;
   shellExecutor?: ShellExecutor;
+  sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -476,6 +489,7 @@ export async function invokeRuntimeModel(params: {
       signal: params.signal,
       mcpBindings,
       disclosedDescriptors,
+      sandboxBackend: params.sandboxBackend,
     });
     const { serializedTools, activeSkillInstructions: activeSkillInstr } = projectionEnvironment;
     const workflowSkillDescriptors = projectionEnvironment.workflowSkills;
@@ -487,6 +501,9 @@ export async function invokeRuntimeModel(params: {
       activeSkillInstructions: activeSkillInstr,
       skills: undefined,
       workflowSkills: workflowSkillDescriptors,
+      promptContractVersion: projectionEnvironment.promptContractVersion,
+      projectInstructions: projectionEnvironment.projectInstructions,
+      sandboxBackend: projectionEnvironment.sandboxBackend,
     });
     const preflight = preflightModelContext({
       estimate: projection.estimate,

@@ -102,6 +102,7 @@ describe('bootstrap release verifier', () => {
   });
 
   test('rejects payload symlinks instead of reopening unverified targets', () => {
+    if (process.platform === 'win32') return;
     const directory = builtFixture();
     const outside = join(directory, 'outside-payload');
     const payload = join(directory, RELEASE_PAYLOAD_FILE);

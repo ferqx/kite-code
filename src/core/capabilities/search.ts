@@ -68,7 +68,7 @@ export function estimateCapabilityCatalogTokens(descriptors: CapabilityDescripto
       JSON.stringify({
         id: descriptor.capabilityId,
         name: descriptor.displayName,
-        description: descriptor.description,
+        description: descriptor.modelDescription ?? descriptor.description,
         input: descriptor.inputSchema,
       }).length,
     0,
@@ -253,7 +253,7 @@ export function searchCapabilities(input: {
       const searchable = [
         descriptor.capabilityId,
         descriptor.displayName,
-        descriptor.description,
+        descriptor.modelDescription ?? descriptor.description,
         descriptor.provider.id,
         descriptor.kind,
       ]

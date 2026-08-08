@@ -13,6 +13,8 @@ import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import { createMockModel } from '../mock-model';
 
+const DEADLINE_TEST_MARGIN_MS = process.platform === 'win32' ? 15_000 : 1_500;
+
 describe('Runtime run deadline', () => {
   test('aborts the unified execution signal and persists an error-caused turn abort', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'openpx-runtime-deadline-'));
@@ -25,7 +27,7 @@ describe('Runtime run deadline', () => {
       // CI worker has descheduled this process, which only proves admission
       // stopped before the provider call. Match the interaction fixture's
       // scheduling margin so the intended boundary is deterministic.
-      const deadlineAt = new Date(startedAt.getTime() + 1_500);
+      const deadlineAt = new Date(startedAt.getTime() + DEADLINE_TEST_MARGIN_MS);
       const state = reduceRuntimeState(
         createInitialRuntimeState({ threadId, userId: 'u', workspace: directory }),
         {
@@ -118,7 +120,7 @@ describe('Runtime run deadline', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test('wakes a pending interaction wait and emits one deadline terminal', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'openpx-runtime-deadline-interaction-'));
@@ -130,7 +132,7 @@ describe('Runtime run deadline', () => {
       // full suite runs files concurrently on CI, so a 300ms wall-clock window
       // could expire while the process was descheduled and only prove the
       // earlier model-stage deadline path covered by the previous test.
-      const deadlineAt = new Date(startedAt.getTime() + 1_500);
+      const deadlineAt = new Date(startedAt.getTime() + DEADLINE_TEST_MARGIN_MS);
       const state = reduceRuntimeState(
         createInitialRuntimeState({ threadId, userId: 'u', workspace: directory }),
         {
@@ -209,7 +211,10 @@ describe('Runtime run deadline', () => {
       await Promise.race([
         consume(),
         new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Interaction deadline did not terminate.')), 5_000),
+          setTimeout(
+            () => reject(new Error('Interaction deadline did not terminate.')),
+            DEADLINE_TEST_MARGIN_MS + 10_000,
+          ),
         ),
       ]);
 
@@ -225,7 +230,7 @@ describe('Runtime run deadline', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test('does not let a slow consumer abort an atomically completed turn', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'openpx-runtime-deadline-complete-'));
@@ -243,7 +248,7 @@ describe('Runtime run deadline', () => {
           // intentionally remains slow after run.completed. Keep the same CI
           // scheduling margin as the other deadline fixtures so host load
           // cannot turn this into an admission-race test.
-          deadlineAt: new Date(startedAt.getTime() + 1_500).toISOString(),
+          deadlineAt: new Date(startedAt.getTime() + DEADLINE_TEST_MARGIN_MS).toISOString(),
           budget: LIMITED_RESOURCE_BUDGET_V1,
         },
       );
@@ -281,7 +286,7 @@ describe('Runtime run deadline', () => {
       )) {
         events.push(event);
         if (event.type === 'run.completed') {
-          await new Promise((resolve) => setTimeout(resolve, 1_600));
+          await new Promise((resolve) => setTimeout(resolve, DEADLINE_TEST_MARGIN_MS + 100));
         }
       }
 
@@ -292,5 +297,5 @@ describe('Runtime run deadline', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });

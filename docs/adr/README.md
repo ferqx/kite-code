@@ -91,3 +91,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0087](0087-tui-silent-startup-prewarm.md) | accepted | TUI 启动期静默沙箱预热：trust/config 解析后即触发，退出可中止、并发无残留 |
 | [0088](0088-remove-windows-appcontainer-backend.md) | accepted | 移除 Windows AppContainer、私有仓库 staging 与 reconciliation，只保留 direct restricted-token backend |
 | [0089](0089-windows-online-loopback-proxy-inheritance.md) | accepted | Windows 已审批 Online Shell 安全继承发起用户的无凭据 loopback WinINet 代理 |
+| [0090](0090-prompt-contract-v2.md) | accepted | 模型上下文分层加载项目指令、投影真实 Runtime 状态，并仅采用可信 Capability 描述 |

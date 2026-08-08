@@ -285,9 +285,19 @@ function conservativeProjectConfig(config: McpServerConfig): McpServerConfig {
   return {
     ...config,
     trust: 'untrusted',
+    modelDescriptionTrust: 'trusted_remote',
+    modelDescriptionProvenance: 'approved_project',
     ...(config.enabledTools ? { enabledTools: [...config.enabledTools] } : {}),
     ...(config.disabledTools ? { disabledTools: [...config.disabledTools] } : {}),
     tools: Object.keys(tools).length > 0 ? tools : undefined,
+  };
+}
+
+function admittedUserDescriptionConfig(config: McpServerConfig): McpServerConfig {
+  return {
+    ...config,
+    modelDescriptionTrust: 'trusted_remote',
+    modelDescriptionProvenance: 'user_config',
   };
 }
 
@@ -374,7 +384,9 @@ export function loadMcpConfigCatalog(
       entry.approvalStatus = 'invalid';
     } else if (!isProjectEntry(entry)) {
       entry.approvalStatus = 'not_required';
-      if (entry.enabled) connectableServers[entry.name] = entry.normalizedConfig;
+      if (entry.enabled) {
+        connectableServers[entry.name] = admittedUserDescriptionConfig(entry.normalizedConfig);
+      }
     } else if (!workspaceKey) {
       entry.approvalStatus = 'store_unavailable';
     } else if (store.status === 'corrupt') {

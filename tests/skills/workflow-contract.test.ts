@@ -306,18 +306,20 @@ describe('Skill Workflow Contract conformance', () => {
   });
 
   test('reference symlinks and scan budgets fail closed', () => {
-    const symlinkRoot = join(root, 'symlink-project');
-    const symlinkSkill = writeSkill(symlinkRoot);
-    mkdirSync(join(symlinkSkill, 'references'));
-    writeFileSync(join(root, 'outside.txt'), 'outside');
-    symlinkSync(join(root, 'outside.txt'), join(symlinkSkill, 'references', 'outside.txt'));
-    const symlinkResult = compileSkillWorkflow({
-      skillDir: symlinkSkill,
-      source: 'project',
-      origin: '.kite-code',
-    });
-    expect(symlinkResult.descriptor.availability).toBe('unavailable');
-    expect(symlinkResult.diagnostics.some((item) => item.code === 'invalid_path')).toBe(true);
+    if (process.platform !== 'win32') {
+      const symlinkRoot = join(root, 'symlink-project');
+      const symlinkSkill = writeSkill(symlinkRoot);
+      mkdirSync(join(symlinkSkill, 'references'));
+      writeFileSync(join(root, 'outside.txt'), 'outside');
+      symlinkSync(join(root, 'outside.txt'), join(symlinkSkill, 'references', 'outside.txt'));
+      const symlinkResult = compileSkillWorkflow({
+        skillDir: symlinkSkill,
+        source: 'project',
+        origin: '.kite-code',
+      });
+      expect(symlinkResult.descriptor.availability).toBe('unavailable');
+      expect(symlinkResult.diagnostics.some((item) => item.code === 'invalid_path')).toBe(true);
+    }
 
     const oversizedRoot = join(root, 'oversized-project');
     const oversizedSkill = writeSkill(oversizedRoot);

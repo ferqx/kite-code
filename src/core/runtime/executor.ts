@@ -45,6 +45,7 @@ import {
   createDescendantResourceAdmissionV1,
   DescendantResourceAdmissionError,
 } from '@/core/runtime/resource-budget-admission';
+import type { SandboxBackend } from '@/core/sandbox/platform';
 import {
   createSkillCapabilityResolver,
   refreshSkillCatalog,
@@ -64,6 +65,7 @@ export interface RuntimeExecutorDependencies {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
+  sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -124,6 +126,7 @@ export function resolveRuntimeContextProjectionEnvironment(
     skillCatalog,
     subagentEventSink: dependencies.subagentEventSink,
     signal: dependencies.signal,
+    sandboxBackend: dependencies.sandboxBackend,
   });
 }
 
@@ -141,6 +144,9 @@ export function prepareRuntimeEffectForBudgetV1(
     serializedTools: environment.serializedTools,
     activeSkillInstructions: environment.activeSkillInstructions,
     workflowSkills: environment.workflowSkills,
+    promptContractVersion: environment.promptContractVersion,
+    projectInstructions: environment.projectInstructions,
+    sandboxBackend: environment.sandboxBackend,
   });
   if (getFeatureFlags(dependencies.config).providerDataPolicyV1) {
     const decision = dependencies.providerDataAdmission?.(
@@ -242,6 +248,7 @@ export function createRuntimeEffectExecutor(
         state,
         config: dependencies.config,
         shellExecutor: dependencies.shellExecutor,
+        sandboxBackend: dependencies.sandboxBackend,
         mcpManager: dependencies.mcpManager,
         skills: dependencies.skills,
         skillOptions: dependencies.skillOptions,

@@ -119,7 +119,9 @@ describe('project MCP approval', () => {
       },
     });
     const storePath = join(home, '.kite-code', 'mcp-project-approvals.jsonc');
-    expect(statSync(storePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(statSync(storePath).mode & 0o777).toBe(0o600);
+    }
     expect(readFileSync(storePath, 'utf8')).not.toContain('server.js');
 
     writeProjectConfig({ command: 'node', args: ['changed.js'] });

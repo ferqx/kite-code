@@ -78,6 +78,7 @@ describe('buildRuntimeContext', () => {
     expect(snapshot).toContain('phase: planning');
     expect(snapshot).toContain('interaction_mode: auto');
     expect(snapshot).toContain('authorization_mode: default');
+    expect(snapshot).toContain('sandbox_backend: seatbelt');
     expect(snapshot).toContain('plan_id: p1');
     expect(snapshot).toContain('version: 2');
     expect(snapshot).toContain('write_plan_allowed: true');

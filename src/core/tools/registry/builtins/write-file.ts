@@ -17,6 +17,8 @@ export const writeFileSpec = defineExecutableTool({
   kind: 'computer',
   contract: WRITE_FILE_CONTRACT.sections,
   inputSchema: writeFileInputSchema,
+  availability: (context) =>
+    !(context.featureFlags?.promptContractV2 && context.phase === 'planning'),
   declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
   governanceRevision: 'protected-path-v1',

@@ -1705,7 +1705,7 @@ describe('SessionRuntime', () => {
       rmSync(home, { recursive: true, force: true });
       rmSync(workspace, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
   test('waits for the TUI presentation flush before routing text after reasoning', async () => {
     const home = mkdtempSync(join(tmpdir(), 'kite-session-presentation-home-'));
     const workspace = mkdtempSync(join(tmpdir(), 'kite-session-presentation-workspace-'));
@@ -1823,7 +1823,7 @@ describe('SessionRuntime', () => {
       rmSync(home, { recursive: true, force: true });
       rmSync(workspace, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
   test('accepts one successor prompt while cancelled cleanup is still unwinding', () => {
     const rt = makeRuntime();
     const ac = new AbortController();

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { sep } from 'node:path';
 import { render } from 'ink-testing-library';
 import McpOverlay from '@/app/tui/mcp/McpOverlay';
 import { buildServerActions, derivePrimaryStatus, moveSelection } from '@/app/tui/mcp/model';
@@ -663,7 +664,7 @@ describe('MCP management overlay', () => {
     stdin.write('\r');
     await Bun.sleep(5);
     expect(lastFrame()).toContain('❯ 当前项目');
-    expect(lastFrame()).toContain('.kite-code/mcp.json');
+    expect(lastFrame()).toContain(`.kite-code${sep}mcp.json`);
     const scopeLines = (lastFrame() ?? '').split('\n');
     const scopeQuestion = scopeLines.findIndex((line) => line.includes('服务器应在哪些范围可用？'));
     const projectOption = scopeLines.findIndex((line) => line.includes('❯ 当前项目'));

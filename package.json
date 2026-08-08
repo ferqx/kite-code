@@ -32,6 +32,7 @@
     "release:smoke:execution": "bun run scripts/release/execution-boundary-smoke.ts",
     "release:gate:foundation": "bun run scripts/release/foundation-gate.ts",
     "test:provider:smoke": "bun run scripts/evals/live-provider-smoke.ts",
+    "test:prompt:live": "bun run scripts/evals/prompt-contract-ab.ts",
     "typecheck": "tsc --noEmit",
     "format": "biome check --write .",
     "format:check": "biome check .",

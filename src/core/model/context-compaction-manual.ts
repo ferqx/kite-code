@@ -137,6 +137,9 @@ export function buildContextStatusReport(
     serializedTools: environment?.serializedTools,
     activeSkillInstructions: environment?.activeSkillInstructions,
     workflowSkills: environment?.workflowSkills,
+    promptContractVersion: environment?.promptContractVersion,
+    projectInstructions: environment?.projectInstructions,
+    sandboxBackend: environment?.sandboxBackend,
   });
   const preflight = preflightModelContext({
     estimate: projection.estimate,
