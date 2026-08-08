@@ -60,11 +60,13 @@ useMemo 的问题是它用 `Object.is` 比依赖——reducer 每帧产新引用
 
 ### 两级缓存
 
-**1. Settled turn blocks — 按 fingerprint 缓存**
+**1. Settled turn blocks — 按 Turn 身份和 fingerprint 缓存**
 
 ```
 settledTurns.map(t => t.blocks.map(blockFingerprint).join(",")).join("|")
 ```
+
+`turns.slice(0, -1)` 每次都会产生新数组，但未变的历史 `Turn` 保持引用身份。实现必须先逐项比较 Turn 引用；只有历史发生变化时才计算 fingerprint，并用 `WeakMap<Turn, string>` 缓存每个不可变 Turn 的 block walk。这样输入、状态栏和局部动画更新不会重新扫描整段历史的大文本、工具输出或 Thought caption。
 
 最新 turn 在 run 结束时仍保留为 live tail，直到下一条用户消息建立新 turn；会话重挂载且空闲时才一次性把完整历史纳入 settled turns。live tail 内的不可变连续前缀仍逐块进入 Static。若尚未冻结的 block 之后发生状态变更（如取消投影将 subagent/running→error），fingerprint 变化 → ref 更新 → dynamic 投影正确重渲染。
 
@@ -109,7 +111,7 @@ L3: React.memo(BlockRenderer)  → 拦截未变化 block 的 React 子树渲染
 | 场景 | L1 | L2 | L3 | 结果 |
 |------|:--|:--|:--|------|
 | subagent timer tick (200ms) | 命中（fingerprint 不变） | — | — | 仅 SubAgentBlock 内 Text 更新 |
-| tool spinner tick (80ms) | 命中 | — | — | 仅 ToolCardBlock 内 Text 更新 |
+| tool spinner / elapsed tick | 命中 | — | — | 仅 memo 的运行态 ToolCard 标题更新 |
 | C running→done, A/B running | 不命中 → split 重算 | 命中（settled 组相同） | C block 引用变 → 渲染；A/B 引用不变 → 跳过 | 仅 C 重渲染 |
 | 新 block 追加 | 不命中 → split 重算 | 不命中 | 新 block 渲染 | 新 block 渲染 |
 

@@ -34,6 +34,25 @@ export function changePrefix(
 const BLOCK_GAP = 1;
 /** Agent text 内容的左缩进量，与工具卡片 `● 工具名` 中工具名起始列对齐 */
 const TEXT_INDENT = 2;
+/** Maximum visible content rows. The omission marker is not counted. */
+export const MAX_USER_MESSAGE_LINES = 30;
+const OMITTED_USER_MESSAGE_LINES_PREFIX = '【已省略 ';
+
+/** Keep the beginning and end of a large prompt visible without letting one
+ * message create an unbounded number of terminal layout nodes. */
+export function visibleUserMessageLines(content: string, columns: number): string[] {
+  const lines = wrapDisplayLines(`❯ ${content}`, Math.max(20, columns));
+  if (lines.length <= MAX_USER_MESSAGE_LINES) return lines;
+
+  const headCount = Math.ceil(MAX_USER_MESSAGE_LINES / 2);
+  const tailCount = MAX_USER_MESSAGE_LINES - headCount;
+  const omitted = lines.length - headCount - tailCount;
+  return [
+    ...lines.slice(0, headCount),
+    `${OMITTED_USER_MESSAGE_LINES_PREFIX}${omitted} 行】`,
+    ...lines.slice(lines.length - tailCount),
+  ];
+}
 
 /** 每个 block 自己负责与上一个 block 的间距（marginTop），而非依赖前一个 block 的 marginBottom。
  *  这样避免了 Static/Dynamic 边界和 block 状态转换时 marginBottom 在 Ink Yoga 布局中被丢失的问题。
@@ -94,19 +113,14 @@ const BlockRenderer = React.memo(function BlockRenderer({
 
   switch (block.kind) {
     case 'user': {
-      const prompt = '❯ ';
-      // 参照 InputLine: inputMaxWidth = columns - promptWidth*2，安全边距远大于 1
-      // 这里的 wrapWidth 至少留 3 列 slack，防止 process.stdout.columns 与 Yoga 实际宽度
-      // 不一致导致的边界换行（"空白行"和"单行变两行 bg"）
-      const wrapWidth = Math.max(20, columns);
-      const fullText = prompt + block.content;
-      const wrappedLines = wrapDisplayLines(fullText, wrapWidth);
-
+      const displayLines = visibleUserMessageLines(block.content, columns);
       return (
-        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={0}>
-          {wrappedLines.map((displayLine, i) => (
-            <Box key={i} backgroundColor={dt.userMsgBg} width={columns}>
-              <Text>{displayLine}</Text>
+        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={0} flexDirection="column">
+          {displayLines.map((line, index) => (
+            <Box key={index} backgroundColor={dt.userMsgBg} width={columns}>
+              <Text color={line.startsWith(OMITTED_USER_MESSAGE_LINES_PREFIX) ? dt.dim : undefined}>
+                {line || ' '}
+              </Text>
             </Box>
           ))}
         </Box>

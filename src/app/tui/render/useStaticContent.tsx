@@ -43,7 +43,8 @@ const HEADER_SENTINEL = { __header: true } as const;
  * 变化不会被更新）。因此只有保证 reducer 后续事件绝不再修改的 block 才能离开
  * 动态树。判定故意保守——宁可多留在动态树，也不允许 Static 中出现陈旧行。
  *
- * - user：永不修改。
+ * - user：永不修改；但作为当前 turn 唯一 block 时暂留 dynamic，避免提交长消息时
+ *   立即触发 Static/dynamic 交接清屏。首个后续 block 到达后再提升。
  * - text：只有流式 / 待终态调和 / 仍持有活动结构组件 source 的块不稳定。
  *   Runtime delta 路径只把完整 Markdown 组件追加为新的 text block；已经提交的
  *   相邻 text 是 append-only 前缀，必须立即冻结，否则长回答会整体滞留在 Ink
@@ -61,7 +62,7 @@ export function isBlockSettledInRun(
 ): boolean {
   switch (block.kind) {
     case 'user':
-      return true;
+      return _index < _blocks.length - 1;
     case 'text': {
       if (
         block.streaming ||
@@ -161,6 +162,32 @@ export function blockFingerprint(b: OutputBlock): string {
 
 /** Element-by-element reference identity comparison. */
 function blocksIdentical(a: OutputBlock[], b: OutputBlock[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
+/**
+ * `turns.slice(0, -1)` creates a new array on every App render, while the
+ * immutable history turns themselves retain their identity.  Recomputing each
+ * block fingerprint for that history on a status/spinner tick made typing
+ * cost proportional to the whole conversation. Cache the expensive per-turn
+ * walk by immutable Turn identity instead.
+ */
+const turnFingerprintCache = new WeakMap<Turn, string>();
+
+function turnFingerprint(turn: Turn): string {
+  const cached = turnFingerprintCache.get(turn);
+  if (cached !== undefined) return cached;
+  const fingerprint = turn.blocks.map(blockFingerprint).join(',');
+  turnFingerprintCache.set(turn, fingerprint);
+  return fingerprint;
+}
+
+/** Compare history turn identities without rebuilding their block fingerprints. */
+function turnsIdentical(a: Turn[], b: Turn[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) {
     if (a[i] !== b[i]) return false;
@@ -288,9 +315,17 @@ export function useStaticContent({
   // sub-agent receives subagent_error, tool_card receives tool_done), the
   // count stays the same but the content differs. Fingerprint catches this.
   const prevSettledFpRef = useRef('');
+  const prevSettledTurnsRef = useRef<Turn[]>([]);
   const staticBlocksRef = useRef<OutputBlock[]>([]);
 
-  const settledFp = settledTurns.map((t) => t.blocks.map(blockFingerprint).join(',')).join('|');
+  // Most renders are input/status updates. Their `turns` container may be
+  // recreated, but settled Turn identities are unchanged, so avoid walking
+  // every historical block (and especially large text/caption fingerprints).
+  let settledFp = prevSettledFpRef.current;
+  if (!turnsIdentical(prevSettledTurnsRef.current, settledTurns)) {
+    settledFp = settledTurns.map(turnFingerprint).join('|');
+    prevSettledTurnsRef.current = settledTurns;
+  }
 
   if (settledFp !== prevSettledFpRef.current) {
     prevSettledFpRef.current = settledFp;

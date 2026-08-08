@@ -60,9 +60,11 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 
 未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。Core 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
 
+工具授权被用户拒绝时，TUI 必须将该工具卡投影为 `cancelled` 而非 `error`；即使旧事件只携带用户拒绝文本而没有 `cancelled` status，也必须同样归一。对 Shell/Web Fetch 卡，只显示一行拒绝说明，不再附加 `exit: error` 等 terminal footer。
+
 ## Resume 语义
 
-恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。App 读取会话时必须把 rolling snapshot 之后的持久化事件尾部归并后再投影交互；已经出现 `approval.granted` 或 `approval.rejected` 的审批不得从旧快照或事件重放中复活。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。
+恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。App 读取会话时必须把 rolling snapshot 之后的持久化事件尾部归并后再投影交互；已经出现 `approval.granted` 或 `approval.rejected` 的审批不得从旧快照或事件重放中复活。回放层留下的 `approval.requested` 展示投影也不能单独判定为 pending：若持久化 RuntimeState 已无 interaction（例如后续已有 `tool.started`），不得 fork 一份重复的 recovery 会话。`tool.started` 必须同步清理同一 call 的旧审批投影，否则它会阻塞后续 `approval.requested`，使真实的 `approval.rejected` 工具卡在回放中丢失。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
 

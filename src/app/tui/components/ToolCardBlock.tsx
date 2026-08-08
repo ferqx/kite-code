@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink';
 import SyntaxHighlight from 'ink-syntax-highlight';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import stringWidth from 'string-width';
 import type { UserInputResult } from '@/protocol/events';
 import type { Theme } from '../theme';
@@ -484,6 +484,64 @@ interface ToolCardBlockProps {
   columns?: number;
 }
 
+/**
+ * Keep the running-card clock and blink state below the card boundary. A tool
+ * can have a live-output tail below this header; updating the clock every
+ * 200ms must not make Ink re-layout that unchanged tail.
+ */
+const RunningToolHeader = memo(function RunningToolHeader({
+  block,
+  awaitingApproval,
+  awaitingInput,
+}: Pick<ToolCardBlockProps, 'block' | 'awaitingApproval' | 'awaitingInput'>) {
+  const dt = useTheme();
+  const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
+  const spinnerActive =
+    block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
+  const spinnerFrame = useBlinkDot(spinnerActive);
+  const [liveElapsed, setLiveElapsed] = useState(() =>
+    block.startedAt ? Date.now() - block.startedAt : 0,
+  );
+  const startedAtRef = useRef(block.startedAt);
+  startedAtRef.current = block.startedAt;
+
+  useEffect(() => {
+    if (!showElapsed || block.status !== 'running' || awaitingApproval) return;
+    const timer = setInterval(() => {
+      const at = startedAtRef.current;
+      if (at != null) setLiveElapsed(Date.now() - at);
+    }, 200);
+    return () => clearInterval(timer);
+  }, [showElapsed, block.status, awaitingApproval]);
+
+  const isWaiting = awaitingApproval || block.name === 'ask_user';
+  const spinner = isWaiting ? '○ ' : spinnerFrame;
+  const displayName =
+    block.name === 'tool_search'
+      ? 'Searching for tools…'
+      : block.name === 'list_mcp_resources'
+        ? 'Listing MCP resources…'
+        : block.name === 'list_mcp_tools'
+          ? 'Listing MCP tools…'
+          : block.name === 'write_file'
+            ? writeFileActionName(block.summary, block.args)
+            : mcpToolDisplayName(block.name);
+  return (
+    <Box>
+      <Text>{spinner}</Text>
+      <Text>{displayName}</Text>
+      {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
+      {awaitingApproval ? (
+        <Text color={dt.dim}> (awaiting approval)</Text>
+      ) : awaitingInput && block.name === 'ask_user' ? (
+        <Text color={dt.dim}> (awaiting input)</Text>
+      ) : showElapsed ? (
+        <Text color={dt.dim}> ({formatElapsed(liveElapsed)})</Text>
+      ) : null}
+    </Box>
+  );
+});
+
 export default function ToolCardBlock({
   block,
   awaitingApproval,
@@ -493,31 +551,6 @@ export default function ToolCardBlock({
   const dt = useTheme();
   const showElapsed = block.name === 'shell_execute' || block.name === 'web_fetch';
   const isWebFetch = block.name === 'web_fetch';
-
-  // ── 闪烁圆点：统一 hook ──
-  const spinnerActive =
-    block.status === 'running' && !awaitingApproval && block.name !== 'ask_user';
-  const spinnerFrame = useBlinkDot(spinnerActive);
-
-  // ── 计时器：ref 驱动，基于绝对时间，免疫重复渲染 ──
-  const [liveElapsed, setLiveElapsed] = useState(() =>
-    block.status === 'running' && block.startedAt ? Date.now() - block.startedAt : 0,
-  );
-  const startedAtRef = useRef(block.startedAt);
-  startedAtRef.current = block.startedAt;
-
-  useEffect(() => {
-    // 只有工具真正执行时才计时。等待审批/输入、queued、done 状态下
-    // 输出不依赖 liveElapsed，继续跑定时器只会每 200ms 触发一次
-    // 组件重渲染，驱动整个 TUI 持续刷新。
-    if (!showElapsed) return;
-    if (block.status !== 'running' || awaitingApproval) return;
-    const timer = setInterval(() => {
-      const at = startedAtRef.current;
-      if (at != null) setLiveElapsed(Date.now() - at);
-    }, 200);
-    return () => clearInterval(timer);
-  }, [showElapsed, block.status, awaitingApproval]);
 
   const isShell = block.name === 'shell_execute';
 
@@ -541,34 +574,13 @@ export default function ToolCardBlock({
   }
 
   if (block.status === 'running') {
-    // 等待审批/输入时用静态 ○ 代替轮播 spinner / Static dot for tools awaiting approval or input
-    const isWaiting = awaitingApproval || block.name === 'ask_user';
-    const spinner = isWaiting ? '○ ' : spinnerFrame;
-    const displayName =
-      block.name === 'tool_search'
-        ? 'Searching for tools…'
-        : block.name === 'list_mcp_resources'
-          ? 'Listing MCP resources…'
-          : block.name === 'list_mcp_tools'
-            ? 'Listing MCP tools…'
-            : block.name === 'write_file'
-              ? writeFileActionName(block.summary, block.args)
-              : mcpToolDisplayName(block.name);
-    // isAskUserRunning 已移除：running 状态的问题由 Footer InputBlock 渲染，scrollback 不重复
     return (
       <Box flexDirection="column">
-        <Box>
-          <Text>{spinner}</Text>
-          <Text>{displayName}</Text>
-          {block.preview ? <Text color={dt.muted}> {block.preview}</Text> : null}
-          {awaitingApproval ? (
-            <Text color={dt.dim}> (awaiting approval)</Text>
-          ) : awaitingInput && block.name === 'ask_user' ? (
-            <Text color={dt.dim}> (awaiting input)</Text>
-          ) : showElapsed ? (
-            <Text color={dt.dim}> ({formatElapsed(liveElapsed)})</Text>
-          ) : null}
-        </Box>
+        <RunningToolHeader
+          block={block}
+          awaitingApproval={awaitingApproval}
+          awaitingInput={awaitingInput}
+        />
         {/* ask_user 运行时问题由 Footer InputBlock 渲染，scrollback 不重复展示 */}
         {/* Shell 实时输出 — tail-follow 最近 5 行，与 renderShellSummary 保持视觉一致 */}
         {isShell && block.liveOutput && (
@@ -605,6 +617,9 @@ export default function ToolCardBlock({
       ? block.liveOutput
       : block.summary;
   const hasShellOutput = shellOutput ? shellOutput.trimEnd().length > 0 : false;
+  const approvalCancelled =
+    block.status === 'cancelled' &&
+    /^Tool approval (?:rejected|cancelled) by user\.$/.test(block.summary ?? '');
   const toolSearch =
     block.name === 'tool_search' ? parseToolSearchResult(block.summary) : undefined;
   const searchCandidates = toolSearch?.candidates?.filter(
@@ -709,47 +724,56 @@ export default function ToolCardBlock({
           Shell + Web Fetch: expanded controls output only; terminal footer is always visible. */}
       {(isShell || isWebFetch) && (
         <Box paddingLeft={2} flexDirection="column">
-          {isExpanded &&
-            (block.status === 'cancelled' && !hasShellOutput ? null : hasShellOutput ? (
-              renderShellLines(
-                shellOutput!,
-                dt.dim,
-                columns - 2,
-                undefined,
-                isWebFetch || block.status === 'timeout' ? 'head-tail' : 'tail',
-              )
-            ) : (
-              <Text color={dt.dim}>⎿ (No output)</Text>
-            ))}
-          {/* 状态尾行不依赖 expanded；折叠正文也不能隐藏终态。
-              Status footer is independent from expanded. */}
-          <Text color={dt.dim}>
-            {SHELL_PREFIX}
-            {block.status === 'exhausted'
-              ? 'blocked (too many repeated failures)'
-              : isWebFetch
-                ? block.status === 'cancelled'
-                  ? 'cancelled'
-                  : block.status === 'error'
-                    ? 'fetch failed'
-                    : block.status === 'timeout'
-                      ? `timed out after ${block.timeoutMs ?? 15000}ms`
-                      : 'fetched'
-                : block.status === 'cancelled' ||
-                    block.summary?.startsWith('Command cancelled') ||
-                    block.summary?.includes('"cancelled":true')
-                  ? 'cancelled'
-                  : block.status === 'timeout'
-                    ? block.timeoutMs != null
-                      ? `timed out after ${block.timeoutMs}ms`
-                      : 'timed out'
-                    : `exit: ${block.status === 'error' ? 'error' : '0'}`}
-          </Text>
-          {'reviewFailure' in block && block.reviewFailure ? (
-            <Text color={dt.error}>
-              {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
+          {approvalCancelled ? (
+            <Text color={dt.dim}>
+              {SHELL_PREFIX}
+              {block.summary}
             </Text>
-          ) : null}
+          ) : (
+            <>
+              {isExpanded &&
+                (block.status === 'cancelled' && !hasShellOutput ? null : hasShellOutput ? (
+                  renderShellLines(
+                    shellOutput!,
+                    dt.dim,
+                    columns - 2,
+                    undefined,
+                    isWebFetch || block.status === 'timeout' ? 'head-tail' : 'tail',
+                  )
+                ) : (
+                  <Text color={dt.dim}>⎿ (No output)</Text>
+                ))}
+              {/* 状态尾行不依赖 expanded；折叠正文也不能隐藏终态。
+                  Status footer is independent from expanded. */}
+              <Text color={dt.dim}>
+                {SHELL_PREFIX}
+                {block.status === 'exhausted'
+                  ? 'blocked (too many repeated failures)'
+                  : isWebFetch
+                    ? block.status === 'cancelled'
+                      ? 'cancelled'
+                      : block.status === 'error'
+                        ? 'fetch failed'
+                        : block.status === 'timeout'
+                          ? `timed out after ${block.timeoutMs ?? 15000}ms`
+                          : 'fetched'
+                    : block.status === 'cancelled' ||
+                        block.summary?.startsWith('Command cancelled') ||
+                        block.summary?.includes('"cancelled":true')
+                      ? 'cancelled'
+                      : block.status === 'timeout'
+                        ? block.timeoutMs != null
+                          ? `timed out after ${block.timeoutMs}ms`
+                          : 'timed out'
+                        : `exit: ${block.status === 'error' ? 'error' : '0'}`}
+              </Text>
+              {'reviewFailure' in block && block.reviewFailure ? (
+                <Text color={dt.error}>
+                  {SHELL_PREFIX}⚠ auto-review: {block.reviewFailure}
+                </Text>
+              ) : null}
+            </>
+          )}
         </Box>
       )}
       {/* 文件工具 / File tools — 无 summary 时展示文件路径（如工具被取消无 ToolMessage） */}
