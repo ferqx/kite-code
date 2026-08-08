@@ -66,6 +66,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         exitRequested: false,
         sessionError: false,
         loadingSessionId: null,
+        sessionServiceUnavailable: false,
         showHelp: false,
         showModelSelector: false,
         showSessions: false,
@@ -139,6 +140,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
         loadingSessionId: null,
+        sessionServiceUnavailable: false,
         sessionKey: state.sessionKey + 1,
         sessionError: false,
         ctrlCPressed: false,
@@ -198,6 +200,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         exitRequested: false,
         sessionError: false,
         loadingSessionId: null,
+        sessionServiceUnavailable: false,
         showHelp: false,
         showModelSelector: false,
         showSessions: false,
@@ -230,6 +233,8 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         activeSessionId: activeIncoming?.threadId ?? state.activeSessionId,
       };
     }
+    case 'SET_SESSION_SERVICE_UNAVAILABLE':
+      return { ...state, sessionServiceUnavailable: action.unavailable };
     case 'SESSION_INTERRUPT_PENDING': {
       const sessions = state.sessions.map((s) =>
         s.threadId === action.threadId ? { ...s, pendingInterrupt: true } : s,

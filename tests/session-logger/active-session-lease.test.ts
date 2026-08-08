@@ -99,6 +99,48 @@ describe('active session log lease', () => {
     ).toBe('stale');
   });
 
+  test('reclaims a dead stale lease after persistent directory identity drift', async () => {
+    if (process.platform === 'win32') return;
+    const session = createSessionDir();
+    const directory = statSync(session);
+    const startedAt = new Date('2026-07-31T00:00:00.000Z');
+    writeFileSync(
+      join(session, SESSION_LOG_LEASE_FILE),
+      `${JSON.stringify({
+        version: 1,
+        pid: 2_147_483_647,
+        processStartIdentity: 'darwin:ps:dead',
+        ownerIdentity: `uid:${directory.uid}`,
+        // Simulate a persisted macOS device id changing across a remount.
+        sessionDirectoryIdentity: `${directory.dev + 1}:${directory.ino}`,
+        nonce: 'abandoned-lease',
+        createdAt: startedAt.toISOString(),
+        heartbeatAt: startedAt.toISOString(),
+      })}\n`,
+      { mode: 0o600 },
+    );
+
+    expect(
+      inspectSessionLogLease(session, {
+        now: () => new Date(startedAt.getTime() + 2_000),
+        processIdentity: () => undefined,
+        staleAfterMs: 1_000,
+      }).status,
+    ).toBe('stale');
+
+    const lease = ActiveSessionLease.acquire(session, {
+      now: () => new Date(startedAt.getTime() + 2_000),
+      processIdentity: () => 'new-process',
+      heartbeatIntervalMs: 0,
+      staleAfterMs: 1_000,
+    });
+
+    expect(JSON.parse(readFileSync(join(session, SESSION_LOG_LEASE_FILE), 'utf8')).nonce).not.toBe(
+      'abandoned-lease',
+    );
+    await lease.release('closed');
+  });
+
   test('never reclaims a live Darwin fallback lease using an incomparable ps identity', () => {
     const session = createSessionDir();
     const startedAt = new Date('2026-07-31T00:00:00.000Z');

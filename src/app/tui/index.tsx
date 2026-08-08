@@ -55,6 +55,10 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const HISTORICAL_SESSION_LIST_FAILURE_TEXT = '  ⎿  历史会话服务不可用，请输入 /sessions 重试。';
+const HISTORICAL_SESSION_LOAD_FAILURE_TEXT =
+  '  ⎿  历史会话打开失败，当前会话未受影响；请稍后通过 /sessions 重试。';
+
 function resolveConfigForResume(
   currentConfig: AgentConfig,
   persistedProvider: string,
@@ -259,9 +263,9 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     const p = new TuiUserInputProvider();
     const submitAction = p.submitAction.bind(p);
     p.submitAction = (action) => {
-      if (action.type !== 'cancel') {
-        interruptClearedByResolutionRef.current = true;
-      }
+      // Every UI action, including Esc/Ctrl+C cancellation, is submitted to
+      // Runtime before the durable terminal event clears the footer.
+      interruptClearedByResolutionRef.current = true;
       submitAction(action);
     };
     return p;
@@ -461,16 +465,12 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
 
         dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
       })
-      .catch((e) => {
-        console.error(
-          `[TUI] Failed to list historical sessions: ${e instanceof Error ? e.message : String(e)}`,
-        );
-        // DB may not exist yet (first run) — auto-create
-        if (!sessionManager.getActiveId()) {
-          const newId = sessionManager.createSession(workspace);
-          threadIdRef.current = newId;
-          dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
-        }
+      .catch(() => {
+        // Historical session failures stay inside the TUI render contract. Do not
+        // create a replacement session or write raw diagnostics to stderr.
+        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+        dispatch({ type: 'SET_SESSION_SERVICE_UNAVAILABLE', unavailable: true });
+        dispatch({ type: 'LOCAL_TEXT', text: HISTORICAL_SESSION_LIST_FAILURE_TEXT });
       });
   }, [
     sessionManager.registerSession,
@@ -479,7 +479,6 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     sessionManager.createSession,
     workspace,
     sessionManager.getSnapshot,
-    sessionManager.getActiveId,
     dispatch,
   ]);
 
@@ -535,7 +534,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         const thinkingLevel = result.thinkingLevel ?? 'max';
         thinkingLevelRef.current = thinkingLevel;
 
-        const { blocks, interrupt, pendingToolCalls } = sessionDataToUI(result);
+        const { blocks, interrupt, pendingToolCalls, recoveredPendingInteraction } =
+          sessionDataToUI(result);
+        const runtime = sessionManager.getRuntime(threadId);
+        if (runtime) runtime.localReplayRecovery = recoveredPendingInteraction;
         dispatch({
           type: 'LOAD_SESSION',
           threadId,
@@ -553,7 +555,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
             dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
           }
         }
-      } catch (e: unknown) {
+      } catch {
         if (loadGenerationRef.current !== gen) return;
         // Roll back SessionManager: if we switched to a different session and the
         // load failed, revert the switch and remove the orphaned runtime.
@@ -561,13 +563,18 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           sessionManager.switchSession(threadId, oldId);
           threadIdRef.current = oldId;
           sessionManager.removeRuntime(threadId);
+          // Keep the previously active TUI projection intact. LOAD_SESSION would
+          // make the failed target appear active again even though SessionManager
+          // has already rolled back to oldId.
+          dispatch({ type: 'HIDE_SESSIONS' });
+          dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+          dispatch({ type: 'LOCAL_TEXT', text: HISTORICAL_SESSION_LOAD_FAILURE_TEXT });
+          return;
         }
         dispatch({
           type: 'LOAD_SESSION',
           threadId,
-          blocks: [
-            { id: 1, kind: 'text', content: `Failed to load session: ${toErrorMessage(e)}` },
-          ],
+          blocks: [{ id: 1, kind: 'text', content: HISTORICAL_SESSION_LOAD_FAILURE_TEXT }],
           interrupt: null,
           modelProvider: '',
           modelName: '',
@@ -582,8 +589,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     async (action: Action) => {
       // Intercept NEW_SESSION to create runtime via SessionManager
       if (action.type === 'NEW_SESSION') {
-        // Ignore /new if the current session has no user messages yet
-        if (stateRef.current.turns.length === 0) return;
+        // Ignore /new for an already-active empty session. User input is
+        // separately blocked while historical storage is unavailable because
+        // an in-memory session could not make its first durable Kernel write.
+        if (stateRef.current.turns.length === 0 && sessionManager.getActiveId()) return;
         // Prevent concurrent NEW_SESSION from creating ghost sessions
         if (creatingSessionRef.current) return;
         creatingSessionRef.current = true;
@@ -596,6 +605,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         threadIdRef.current = newId;
         // The reducer will use this threadId to create the snapshot
         dispatch({ type: 'NEW_SESSION', threadId: newId });
+        dispatch({ type: 'SET_SESSION_SERVICE_UNAVAILABLE', unavailable: false });
         dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
         // Release the lock after the reducer processes the session change.
         // The next render (triggered by the dispatches above) will reset this.
@@ -934,9 +944,35 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       requestedPhase?: AgentPhase,
       initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
     ) => {
-      const threadId = threadIdRef.current;
-      const rt = sessionManager.getRuntime(threadId);
+      let threadId = threadIdRef.current;
+      let rt = sessionManager.getRuntime(threadId);
       if (!rt || rt.agentLoopActive) return;
+
+      if (rt.localReplayRecovery) {
+        const continued = sessionManager.forkRecoveredSessionForContinuation(threadId);
+        if (!continued) {
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: '  ⎿  无法创建恢复会话；原始未完成交互未被重新执行。',
+            isError: true,
+          });
+          return;
+        }
+        threadId = continued.threadId;
+        threadIdRef.current = threadId;
+        rt = continued;
+        const current = stateRef.current;
+        dispatch({
+          type: 'LOAD_SESSION',
+          threadId,
+          blocks: current.turns.flatMap((turn) => turn.blocks),
+          interrupt: null,
+          pendingToolCalls: current.pendingToolCalls,
+          modelProvider: rt.config.providerName,
+          modelName: rt.config.modelName,
+          thinkingLevel: thinkingLevelRef.current,
+        });
+      }
 
       // 将 React 层 per-session 状态同步到 Runtime / Sync React-layer per-session state to runtime
       rt.thinkingLevel = thinkingLevelRef.current;
@@ -1014,6 +1050,11 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         handleSlashCommandRef.current(value);
         return;
       }
+
+      // Historical storage failure blocks new work until the backing Runtime
+      // Store can be reopened. A new in-memory TUI session would still fail on
+      // its first durable Kernel write, so only /sessions retry is available.
+      if (stateRef.current.sessionServiceUnavailable && value.trim() !== '/sessions') return;
 
       // 检查当前活跃会话的运行状态，不阻塞其他会话
       const activeRt = sessionManager.getRuntime(threadIdRef.current);

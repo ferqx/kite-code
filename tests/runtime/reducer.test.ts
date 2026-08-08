@@ -280,6 +280,43 @@ function makePlanDoc(
   };
 }
 
+function attachPlanReviewInteraction(
+  state: RuntimeState,
+  plan: AgentPlan,
+  planSummary = 'Review this plan',
+): RuntimeState {
+  if (state.planning.kind !== 'awaiting_review') {
+    throw new Error('Expected an awaiting plan review');
+  }
+  const { document, interactionId, exitToolCallId } = state.planning;
+  return {
+    ...state,
+    interactions: {
+      kind: 'awaiting_review',
+      interactionId,
+      toolCallId: exitToolCallId,
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan,
+      planSummary,
+    },
+  };
+}
+
+function planReviewIdentity(state: RuntimeState) {
+  if (state.interactions.kind !== 'awaiting_review') {
+    throw new Error('Expected an active plan review interaction');
+  }
+  return {
+    interactionId: state.interactions.interactionId,
+    toolCallId: state.interactions.toolCallId,
+    planId: state.interactions.planId,
+    version: state.interactions.version,
+    structuralDigest: state.interactions.structuralDigest,
+  };
+}
+
 // ── 方案生命周期 / Plan lifecycle ──
 
 describe('reduceRuntimeState — plan lifecycle', () => {
@@ -380,18 +417,21 @@ describe('reduceRuntimeState — plan lifecycle', () => {
   test('plan.approved transitions awaiting_review to approved', () => {
     const plan = makePlan('Approval Plan', ['step 1']);
     const structuralHash = computePlanStructuralDigest(planToDigestInput(plan));
-    const state: RuntimeState = {
-      ...makeInitialState(),
-      planning: {
-        kind: 'awaiting_review',
-        document: makePlanDoc(plan, { planId: 'plan-99', version: 2 }),
-        interactionId: 'inter-99',
-        exitToolCallId: 'call-99',
+    const state = attachPlanReviewInteraction(
+      {
+        ...makeInitialState(),
+        planning: {
+          kind: 'awaiting_review',
+          document: makePlanDoc(plan, { planId: 'plan-99', version: 2 }),
+          interactionId: 'inter-99',
+          exitToolCallId: 'call-99',
+        },
       },
-    };
+      plan,
+    );
     const event: RuntimeEvent = {
       type: 'plan.approved',
-      interactionId: 'inter-99',
+      ...planReviewIdentity(state),
       executionMode: 'auto',
     };
 
@@ -429,18 +469,21 @@ describe('reduceRuntimeState — plan lifecycle', () => {
   // 验证 plan.revision_requested 转为 needs_revision
   test('plan.revision_requested transitions to needs_revision', () => {
     const plan = makePlan('Needs Fix', ['bad step']);
-    const state: RuntimeState = {
-      ...makeInitialState(),
-      planning: {
-        kind: 'awaiting_review',
-        document: makePlanDoc(plan, { planId: 'plan-fix', version: 1 }),
-        interactionId: 'inter-fix',
-        exitToolCallId: 'call-fix',
+    const state = attachPlanReviewInteraction(
+      {
+        ...makeInitialState(),
+        planning: {
+          kind: 'awaiting_review',
+          document: makePlanDoc(plan, { planId: 'plan-fix', version: 1 }),
+          interactionId: 'inter-fix',
+          exitToolCallId: 'call-fix',
+        },
       },
-    };
+      plan,
+    );
     const event: RuntimeEvent = {
       type: 'plan.revision_requested',
-      interactionId: 'inter-fix',
+      ...planReviewIdentity(state),
       feedback: 'Please add more detail to step 1',
     };
 
@@ -461,18 +504,21 @@ describe('reduceRuntimeState — plan lifecycle', () => {
   // 验证 plan.rejected 重置 plan 为 none
   test('plan.rejected keeps a draft and clears interactions', () => {
     const plan = makePlan('Rejected Plan', ['doom']);
-    const state: RuntimeState = {
-      ...makeInitialState(),
-      planning: {
-        kind: 'awaiting_review',
-        document: makePlanDoc(plan, { planId: 'plan-doom', version: 1 }),
-        interactionId: 'inter-doom',
-        exitToolCallId: 'call-doom',
+    const state = attachPlanReviewInteraction(
+      {
+        ...makeInitialState(),
+        planning: {
+          kind: 'awaiting_review',
+          document: makePlanDoc(plan, { planId: 'plan-doom', version: 1 }),
+          interactionId: 'inter-doom',
+          exitToolCallId: 'call-doom',
+        },
       },
-    };
+      plan,
+    );
     const event: RuntimeEvent = {
       type: 'plan.rejected',
-      interactionId: 'inter-doom',
+      ...planReviewIdentity(state),
       reason: 'Not what I want',
     };
 
@@ -1286,12 +1332,41 @@ describe('reduceRuntimeState — interaction state', () => {
     const event: RuntimeEvent = {
       type: 'user_input.answered',
       interactionId: 'ui-1',
+      toolCallId: 'ask-1',
       answer: 'file A',
     };
 
     const next = reduceRuntimeState(state, event);
 
     expect(next.interactions.kind).toBe('idle');
+  });
+
+  test('user_input.cancelled requires both interaction and tool identity', () => {
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      interactions: {
+        kind: 'awaiting_user_input',
+        interactionId: 'ui-1',
+        toolCallId: 'ask-1',
+        request: { question: 'Q?', options: [], allow_free_text: true },
+      },
+    };
+    expect(
+      reduceRuntimeState(state, {
+        type: 'user_input.cancelled',
+        interactionId: 'ui-1',
+        toolCallId: 'ask-other',
+        reason: 'user_cancelled',
+      }),
+    ).toBe(state);
+    expect(
+      reduceRuntimeState(state, {
+        type: 'user_input.cancelled',
+        interactionId: 'ui-1',
+        toolCallId: 'ask-1',
+        reason: 'user_cancelled',
+      }).interactions.kind,
+    ).toBe('idle');
   });
 
   test('a mismatched user_input answer cannot resolve the active interaction', () => {
@@ -1308,6 +1383,7 @@ describe('reduceRuntimeState — interaction state', () => {
     const next = reduceRuntimeState(state, {
       type: 'user_input.answered',
       interactionId: 'ui-replayed',
+      toolCallId: 'ask-1',
       answer: 'answer',
     });
 
@@ -1375,6 +1451,7 @@ describe('reduceRuntimeState — interaction state', () => {
     const event: RuntimeEvent = {
       type: 'approval.granted',
       interactionId: 'approval-1',
+      toolCallId: 'tool-10',
       grant: 'approve_once',
     };
 
@@ -1410,6 +1487,7 @@ describe('reduceRuntimeState — interaction state', () => {
     const event: RuntimeEvent = {
       type: 'approval.rejected',
       interactionId: 'approval-2',
+      toolCallId: 'tool-11',
       reason: 'too dangerous',
     };
 
@@ -1510,6 +1588,7 @@ describe('reduceRuntimeState — immutability', () => {
     const e2: RuntimeEvent = {
       type: 'user_input.answered',
       interactionId: 'chain-1',
+      toolCallId: 'chain-tool',
       answer: 'chain answer',
     };
     const s2 = reduceRuntimeState(s1, e2);
@@ -2155,6 +2234,49 @@ describe('reduceRuntimeState — auto-review events', () => {
     expect(next.autoReview.circuitBreakerTripped).toBe(false); // not tripped yet (threshold=3)
   });
 
+  test('auto_review technical failure remains non-terminal until approval.requested follows', () => {
+    const state = makeInitialState();
+    const approval: ToolApprovalPayload = { ...makeToolApproval('npm test'), reason: 'testing' };
+    const withTool = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'tool-technical',
+      name: 'shell_execute',
+      args: { command: 'npm test' },
+    });
+    const awaiting = reduceRuntimeState(withTool, {
+      type: 'auto_review.requested',
+      reviewId: 'rev-technical',
+      toolCallId: 'tool-technical',
+      toolName: 'shell_execute',
+      reason: 'auto-review for tool approval',
+      approval,
+    });
+    const failed = reduceRuntimeState(awaiting, {
+      type: 'auto_review.completed',
+      reviewId: 'rev-technical',
+      toolCallId: 'tool-technical',
+      result: {
+        ok: false,
+        approved: false,
+        failureType: 'technical',
+        reason: 'provider timeout',
+        reviewerModelName: 'haiku',
+        durationMs: 100,
+      },
+    });
+    expect(failed.interactions.kind).toBe('awaiting_auto_review');
+    expect(failed.tools.calls['tool-technical']!.status).toBe('awaiting_auto_review');
+
+    const escalated = reduceRuntimeState(failed, {
+      type: 'approval.requested',
+      interactionId: 'approval-after-review-failure',
+      toolCallId: 'tool-technical',
+      approval,
+    });
+    expect(escalated.interactions.kind).toBe('awaiting_tool_approval');
+    expect(escalated.tools.calls['tool-technical']!.status).toBe('awaiting_approval');
+  });
+
   test('auto_review.completed ignores mismatched reviewId', () => {
     const state = makeInitialState();
     const approval: ToolApprovalPayload = {
@@ -2189,6 +2311,44 @@ describe('reduceRuntimeState — auto-review events', () => {
     };
     const next = reduceRuntimeState(awaiting, event);
     // Should NOT transition — interactionId mismatch
+    expect(next.interactions.kind).toBe('awaiting_auto_review');
+    expect(next.tools.calls['tool-99']!.status).toBe('awaiting_auto_review');
+  });
+
+  test('auto_review.completed ignores a mismatched tool identity', () => {
+    const state = makeInitialState();
+    const approval: ToolApprovalPayload = {
+      ...makeToolApproval('npm test'),
+      reason: 'testing',
+    };
+    const withTool = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'tool-99',
+      name: 'shell_execute',
+      args: { command: 'npm test' },
+    });
+    const awaiting = reduceRuntimeState(withTool, {
+      type: 'auto_review.requested',
+      reviewId: 'rev-1',
+      toolCallId: 'tool-99',
+      toolName: 'shell_execute',
+      reason: 'auto-review for tool approval',
+      approval,
+    });
+
+    const next = reduceRuntimeState(awaiting, {
+      type: 'auto_review.completed',
+      reviewId: 'rev-1',
+      toolCallId: 'other-tool',
+      result: {
+        ok: true,
+        approved: false,
+        reason: 'stale result',
+        reviewerModelName: 'haiku',
+        durationMs: 100,
+      },
+    });
+
     expect(next.interactions.kind).toBe('awaiting_auto_review');
     expect(next.tools.calls['tool-99']!.status).toBe('awaiting_auto_review');
   });

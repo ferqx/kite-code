@@ -480,6 +480,7 @@ describe('decideNextEffect', () => {
     state = reduceRuntimeState(state, {
       type: 'approval.granted',
       interactionId: 'approval-1',
+      toolCallId: 'shell-1',
       grant: 'approve_once',
     });
     expect(decideNextEffect(state)).toEqual({
@@ -500,6 +501,7 @@ describe('decideNextEffect', () => {
     state = reduceRuntimeState(state, {
       type: 'approval.rejected',
       interactionId: 'approval-2',
+      toolCallId: 'shell-2',
       reason: 'Rejected by user.',
     });
     expect(decideNextEffect(state)).toEqual({
@@ -516,6 +518,7 @@ describe('decideNextEffect', () => {
     state = reduceRuntimeState(state, {
       type: 'approval.granted',
       interactionId: 'approval-3',
+      toolCallId: 'shell-3',
       grant: 'approve_once',
     });
     expect(decideNextEffect(state)).toEqual({

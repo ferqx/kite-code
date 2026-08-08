@@ -1,4 +1,4 @@
-import { Box, useWindowSize } from 'ink';
+import { Box, Text, useWindowSize } from 'ink';
 import React, {
   type Dispatch,
   type ReactNode,
@@ -27,6 +27,7 @@ import type { McpController } from './mcp/types';
 import OutputArea, { useStaticContent } from './OutputArea';
 import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
+import { useTheme } from './theme';
 import type { TuiState } from './types';
 
 export type { Action } from './reducers';
@@ -101,6 +102,7 @@ export default function App({
   resizeGeneration,
   children,
 }: AppProps) {
+  const t = useTheme();
   const slashListHeight = useOverlayHeight(7);
   const { columns } = useWindowSize();
   const overlayOrInterrupt =
@@ -120,6 +122,9 @@ export default function App({
     wizardEscBackRef,
     layeredOverlayEscRef,
     onTogglePlanMode,
+    () => {
+      if (state.interrupt) provider.submitAction({ type: 'cancel' });
+    },
   );
 
   // Stabilized callbacks for React.memo children
@@ -167,6 +172,12 @@ export default function App({
     },
     [dispatch],
   );
+  const onSessionAvailabilityChange = useCallback(
+    (available: boolean) => {
+      dispatch({ type: 'SET_SESSION_SERVICE_UNAVAILABLE', unavailable: !available });
+    },
+    [dispatch],
+  );
   const deleteSessionAction = useCallback(
     (threadId: string) => {
       dispatch({ type: 'DELETE_SESSION', threadId });
@@ -201,39 +212,14 @@ export default function App({
     return undefined;
   }, [state.interrupt, state.turns]);
 
-  const resolveApproval = useCallback(
-    (action: string, grant?: string) => {
-      if (state.interrupt?.kind !== 'approval') return;
-      dispatch({
-        type: 'RESOLVE_INTERRUPT',
-        blockId: state.interrupt.blockId,
-        resolution: { action, grant },
-      });
-    },
-    [dispatch, state.interrupt],
-  );
+  const resolveApproval = useCallback((_action: string, _grant?: string) => undefined, []);
 
   const resolveInput = useCallback(
-    (answer: string, answers?: Record<string, string>) => {
-      if (!interruptBlock) return;
-      dispatch({
-        type: 'RESOLVE_INTERRUPT',
-        blockId: interruptBlock.id,
-        resolution: answers ? { action: 'input', text: answer, answers } : answer,
-      });
-    },
-    [dispatch, interruptBlock],
+    (_answer: string, _answers?: Record<string, string>) => undefined,
+    [],
   );
 
-  const resolvePlanReview = useCallback(
-    (action: string, feedback?: string) => {
-      dispatch({
-        type: 'RESOLVE_PLAN_REVIEW',
-        resolution: { action, feedback },
-      });
-    },
-    [dispatch],
-  );
+  const resolvePlanReview = useCallback((_action: string, _feedback?: string) => undefined, []);
 
   // ── Static content computation ──
   // <Static> is rendered at ROOT LEVEL (outside any layout Box) so its
@@ -324,7 +310,14 @@ export default function App({
         hideGlobalStatus={Boolean(state.interrupt)}
       >
         {/* Interaction row: input line or approval/input UI, mutually exclusive */}
-        {!state.interrupt && children}
+        {!state.interrupt && (
+          <>
+            {state.sessionServiceUnavailable && !state.showSessions && (
+              <Text color={t.warning}>历史会话服务不可用，请输入 /sessions 重试。</Text>
+            )}
+            {children}
+          </>
+        )}
         {activeApproval && (
           <ApprovalBlock
             approval={activeApproval}
@@ -361,6 +354,7 @@ export default function App({
           layeredEscRef={layeredOverlayEscRef}
           loadingSessionId={state.loadingSessionId}
           activeSessionId={state.activeSessionId}
+          onAvailabilityChange={onSessionAvailabilityChange}
         />
       )}
       {state.showModelSelector && (

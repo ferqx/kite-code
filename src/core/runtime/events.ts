@@ -427,8 +427,17 @@ export interface UserInputRequestedEvent {
 export interface UserInputAnsweredEvent {
   type: 'user_input.answered';
   interactionId: string;
+  toolCallId: string;
   answer: string;
   answers?: Record<string, string>;
+}
+
+/** 用户取消输入交互；这是用户真实操作产生的 durable 终态。 */
+export interface UserInputCancelledEvent {
+  type: 'user_input.cancelled';
+  interactionId: string;
+  toolCallId: string;
+  reason: string;
 }
 
 // ── 方案审核交互事件 / Plan review interaction events ──
@@ -451,6 +460,11 @@ export interface PlanReviewRequestedEvent {
 export interface PlanApprovedEvent {
   type: 'plan.approved';
   interactionId: string;
+  /** Required for current events; absent legacy records are ignored by the reducer. */
+  toolCallId?: string;
+  planId?: string;
+  version?: number;
+  structuralDigest?: string;
   /** 执行模式: accept_edits=接受编辑, auto=自动执行 */
   executionMode: 'accept_edits' | 'auto';
 }
@@ -459,6 +473,11 @@ export interface PlanApprovedEvent {
 export interface PlanRevisionRequestedEvent {
   type: 'plan.revision_requested';
   interactionId: string;
+  /** Required for current events; absent legacy records are ignored by the reducer. */
+  toolCallId?: string;
+  planId?: string;
+  version?: number;
+  structuralDigest?: string;
   feedback: string;
 }
 
@@ -466,6 +485,11 @@ export interface PlanRevisionRequestedEvent {
 export interface PlanRejectedEvent {
   type: 'plan.rejected';
   interactionId: string;
+  /** Required for current events; absent legacy records are ignored by the reducer. */
+  toolCallId?: string;
+  planId?: string;
+  version?: number;
+  structuralDigest?: string;
   reason: string;
 }
 
@@ -473,6 +497,11 @@ export interface PlanRejectedEvent {
 export interface PlanReviewCancelledEvent {
   type: 'plan.review_cancelled';
   interactionId: string;
+  /** Required for current events; absent legacy records are ignored by the reducer. */
+  toolCallId?: string;
+  planId?: string;
+  version?: number;
+  structuralDigest?: string;
   reason: string;
 }
 
@@ -530,6 +559,8 @@ export interface ApprovalRequestedEvent {
 export interface ApprovalGrantedEvent {
   type: 'approval.granted';
   interactionId: string;
+  /** Required for current events; absent legacy records are ignored by the reducer. */
+  toolCallId?: string;
   grant: ShellApprovalGrant;
 }
 
@@ -537,7 +568,7 @@ export interface ApprovalGrantedEvent {
 export interface ApprovalRejectedEvent {
   type: 'approval.rejected';
   interactionId: string;
-  /** Tool call whose approval was rejected; optional for legacy replay. */
+  /** Tool call whose approval was rejected; absent legacy records are ignored. */
   toolCallId?: string;
   reason: string;
   failure?: ClassifiedFailure;
@@ -564,6 +595,8 @@ export interface ProviderActionStartedEvent {
 export interface ProviderActionCompletedEvent {
   type: 'provider.action_completed';
   interactionId: string;
+  /** Required for current events; absent legacy records are ignored by the reducer. */
+  originatingToolCallId?: string;
   providerDirectoryRevision?: string;
 }
 
@@ -571,12 +604,16 @@ export interface ProviderActionCompletedEvent {
 export interface ProviderActionDeferredEvent {
   type: 'provider.action_deferred';
   interactionId: string;
+  /** Required for current events; absent legacy records are ignored by the reducer. */
+  originatingToolCallId?: string;
 }
 
 /** The App shell attempted recovery but could not complete it. */
 export interface ProviderActionFailedEvent {
   type: 'provider.action_failed';
   interactionId: string;
+  /** Required for current events; absent legacy records are ignored by the reducer. */
+  originatingToolCallId?: string;
   failureCode: 'authentication_failed' | 'approval_denied' | 'provider_unavailable' | 'unknown';
 }
 
@@ -653,19 +690,35 @@ export interface AutoReviewRequestedEvent {
   approval: import('@/protocol/events').ToolApprovalPayload;
 }
 
+export type AutoReviewFailureType = 'technical' | 'invalid_response';
+
 /** 自动审查完成 / Auto-review completed */
 export interface AutoReviewCompletedEvent {
   type: 'auto_review.completed';
   reviewId: string;
   toolCallId: string;
-  result: {
-    ok: boolean;
-    approved: boolean;
-    grant?: string;
-    reason?: string;
-    reviewerModelName: string;
-    durationMs: number;
-  };
+  /**
+   * `ok: true` is an actual reviewer decision; only that path can approve or
+   * reject a tool. `ok: false` is a technical failure and must be escalated
+   * to the normal user-approval interaction.
+   */
+  result:
+    | {
+        ok: true;
+        approved: boolean;
+        grant?: string;
+        reason?: string;
+        reviewerModelName: string;
+        durationMs: number;
+      }
+    | {
+        ok: false;
+        approved: false;
+        failureType: AutoReviewFailureType;
+        reason?: string;
+        reviewerModelName: string;
+        durationMs: number;
+      };
 }
 
 // ── Turn 生命周期事件 / Turn lifecycle events ──
@@ -988,6 +1041,7 @@ export type RuntimeEvent =
   | ToolCancelledEvent
   | UserInputRequestedEvent
   | UserInputAnsweredEvent
+  | UserInputCancelledEvent
   | PlanReviewRequestedEvent
   | PlanApprovedEvent
   | PlanRevisionRequestedEvent

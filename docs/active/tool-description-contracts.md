@@ -74,9 +74,9 @@
 
 ### `ask_user` 模型输入边界
 
-`ask_user` 的模型参数只有一种规范形态：顶层必须且只能使用 `questions` 数组，单问题也是长度为 1 的数组。每次调用包含 1-3 个问题，每个问题包含 `question` 与 2-3 个 `{label, description}` 选项；第一个选项表示推荐项。模型不得提交顶层 `question`/`options`、问题或选项 ID、`recommended`、`allow_free_text`，也不得显式添加 `Other` 选项。
+`ask_user` 的模型参数只有一种规范形态：顶层必须且只能使用 `questions` 数组，单问题也是长度为 1 的数组。每次调用包含 1-3 个问题，每个问题包含 `question` 和 2-3 个 `{label, description, recommended}` 选项，且必须有且仅有一个选项设置 `recommended: true`，其余选项设置为 `recommended: false`。模型不得提交顶层 `question`/`options`、`recommended` 或 `allow_free_text`，也不得显式添加 `Other` 选项。
 
-ToolSpec 的输入 Schema 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`createInterrupt()` 在 Schema 校验后生成稳定问题/选项 ID，将第一项标记为推荐，并为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
+ToolSpec 的输入 Schema 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`createInterrupt()` 在 Schema 校验后生成稳定的问题/选项 ID，并根据选项上的 `recommended: true` 派生内部推荐项，再为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
 
 ## 不要做
 

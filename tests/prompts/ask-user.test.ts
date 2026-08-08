@@ -4,8 +4,8 @@ import { buildStaticSystemPrompt } from '@/core/model/context';
 /**
  * Contract: ask_user uses one canonical questions array.
  *
- * Every question includes 2-3 concrete options. The first option is recommended,
- * and the TUI supplies free text without a model-generated "Other" option.
+ * Every question includes 2-3 concrete options and exactly one option marked
+ * recommended: true. The TUI supplies free text without a model-generated "Other" option.
  */
 test('system prompt requires the canonical questions array and 2-3 options', () => {
   const prompt = buildStaticSystemPrompt('agent');
@@ -14,9 +14,10 @@ test('system prompt requires the canonical questions array and 2-3 options', () 
   expect(prompt).toContain('Every question MUST include 2-3 concrete options');
 });
 
-test('system prompt makes the first option recommended', () => {
+test('system prompt requires exactly one recommended option marker', () => {
   const prompt = buildStaticSystemPrompt('agent');
-  expect(prompt).toContain('Put the recommended option first');
+  expect(prompt).toContain('Every option MUST include a clear `label`,');
+  expect(prompt).toContain('and `recommended: false` on all other options');
 });
 
 test('system prompt reserves Other for the TUI', () => {

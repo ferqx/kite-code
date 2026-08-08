@@ -7,6 +7,9 @@ const optionSchema = z
   .object({
     label: z.string().trim().min(1),
     description: z.string().trim().min(1),
+    /** Marks this option as the single recommended choice shown by the TUI. */
+    /** Every option declares its marker; exactly one option per question must be true. */
+    recommended: z.boolean(),
   })
   .strict();
 const questionSchema = z
@@ -14,7 +17,17 @@ const questionSchema = z
     question: z.string().trim().min(1),
     options: z.array(optionSchema).min(2).max(3),
   })
-  .strict();
+  .strict()
+  .superRefine((value, context) => {
+    const recommendedCount = value.options.filter((option) => option.recommended === true).length;
+    if (recommendedCount !== 1) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['options'],
+        message: 'Exactly one option must set recommended to true',
+      });
+    }
+  });
 
 export const askUserInputSchema = z
   .object({
@@ -29,13 +42,16 @@ export function normalizeAskUserInput(input: AskUserInput): UserInputRequest {
     const id = `q${questionIndex + 1}`;
     const options = question.options.map((option, optionIndex) => ({
       id: `${id}-o${optionIndex + 1}`,
-      ...option,
+      label: option.label,
+      description: option.description,
     }));
+    const recommendedIndex = question.options.findIndex((option) => option.recommended === true);
+    const recommended = options[recommendedIndex]!.id;
     return {
       id,
       question: question.question,
       options,
-      recommended: options[0]!.id,
+      recommended,
       allow_free_text: true,
     };
   });

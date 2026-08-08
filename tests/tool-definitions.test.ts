@@ -35,6 +35,7 @@ interface AskUserJsonSchema {
       minItems?: number;
       maxItems?: number;
       items: {
+        required?: string[];
         properties: {
           options: { minItems?: number; maxItems?: number };
         };
@@ -200,26 +201,37 @@ describe('code agent tool definitions', () => {
     const validQuestion = {
       question: 'What scope should be covered?',
       options: [
-        { label: 'Focused', description: 'Cover only the critical path.' },
-        { label: 'Complete', description: 'Cover the full production rollout.' },
+        { label: 'Focused', description: 'Cover only the critical path.', recommended: true },
+        {
+          label: 'Complete',
+          description: 'Cover the full production rollout.',
+          recommended: false,
+        },
       ],
     };
 
     expect((await schema.validate({ questions: [validQuestion] })).success).toBe(true);
-    expect((await schema.validate({})).success).toBe(false);
-    expect((await schema.validate({ question: validQuestion.question })).success).toBe(false);
     expect(
       (
         await schema.validate({
-          questions: [validQuestion],
-          question: validQuestion.question,
+          questions: [
+            {
+              ...validQuestion,
+              options: validQuestion.options.map((option) => ({ ...option, recommended: false })),
+            },
+          ],
         })
       ).success,
     ).toBe(false);
     expect(
       (
         await schema.validate({
-          questions: [{ ...validQuestion, id: 'legacy-question-id' }],
+          questions: [
+            {
+              ...validQuestion,
+              options: validQuestion.options.map((option) => ({ ...option, recommended: true })),
+            },
+          ],
         })
       ).success,
     ).toBe(false);
@@ -235,6 +247,23 @@ describe('code agent tool definitions', () => {
               ],
             },
           ],
+        })
+      ).success,
+    ).toBe(false);
+    expect((await schema.validate({})).success).toBe(false);
+    expect((await schema.validate({ question: validQuestion.question })).success).toBe(false);
+    expect(
+      (
+        await schema.validate({
+          questions: [validQuestion],
+          question: validQuestion.question,
+        })
+      ).success,
+    ).toBe(false);
+    expect(
+      (
+        await schema.validate({
+          questions: [{ ...validQuestion, id: 'legacy-question-id' }],
         })
       ).success,
     ).toBe(false);
@@ -257,6 +286,13 @@ describe('code agent tool definitions', () => {
     expect(json.properties.questions.maxItems).toBe(3);
     expect(json.properties.questions.items.properties.options.minItems).toBe(2);
     expect(json.properties.questions.items.properties.options.maxItems).toBe(3);
+    expect(json.properties.questions.items.required).toEqual(['question', 'options']);
+    const optionSchema = (
+      json.properties.questions.items.properties.options as unknown as {
+        items: { required?: string[] };
+      }
+    ).items;
+    expect(optionSchema.required).toEqual(['label', 'description', 'recommended']);
   });
 
   test('ask_user input schema remains capability-descriptor representable', () => {
@@ -623,7 +659,7 @@ describe('tool contracts (ACI)', () => {
     expect(contract.sections.commonMistakes).toMatch(/removed top-level `question`/);
     expect(contract.sections.commonMistakes).toMatch(/client always adds free-text input/);
     expect(contract.sections.outputFormat).toContain('`questions` contains 1-3 items');
-    expect(contract.sections.outputFormat).toContain('2-3 `{label, description}`');
+    expect(contract.sections.outputFormat).toContain('2-3 `{label, description, recommended}`');
     expect(contract.sections.failureHandling).toMatch(
       /canonical `questions` array.*never pass stringified JSON/,
     );

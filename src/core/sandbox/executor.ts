@@ -47,7 +47,7 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
     if (options.unavailableFallback === 'fail') {
       return createUnavailableExecutor('sandbox_disabled');
     }
-    warn('Sandbox disabled by flag. Shell commands will run without isolation.');
+    options.onDiagnostic?.('Sandbox disabled by flag. Shell commands will run without isolation.');
     return shellTool;
   }
 
@@ -62,7 +62,9 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
       if (options.unavailableFallback === 'fail') {
         return createUnavailableExecutor('sandbox_backend_unavailable');
       }
-      warn('No supported sandbox backend. Shell commands will run without isolation.');
+      options.onDiagnostic?.(
+        'No supported sandbox backend. Shell commands will run without isolation.',
+      );
       return shellTool;
   }
 }
@@ -346,12 +348,4 @@ function createWrappedExecutor(
       }
     }
   };
-}
-
-let sandboxWarned = false;
-
-function warn(message: string): void {
-  if (sandboxWarned) return;
-  sandboxWarned = true;
-  console.warn(`[sandbox] ${message}`);
 }

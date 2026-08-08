@@ -58,8 +58,16 @@ describe('TUI PTY System — Tool Lifecycle: ask_user', () => {
                   {
                     question: 'What is your favorite color?',
                     options: [
-                      { label: 'Blue', description: 'Choose a calm primary color.' },
-                      { label: 'Red', description: 'Choose a warm primary color.' },
+                      {
+                        label: 'Blue',
+                        description: 'Choose a calm primary color.',
+                        recommended: true,
+                      },
+                      {
+                        label: 'Red',
+                        description: 'Choose a warm primary color.',
+                        recommended: false,
+                      },
                     ],
                   },
                 ],
@@ -294,7 +302,9 @@ describe('TUI PTY System — Tool Lifecycle: approval', () => {
       expect(screenContains(afterRejection, 'UNEXPECTED_MODEL_CONTINUATION_AFTER_REJECTION')).toBe(
         false,
       );
-      expect(screenContains(afterRejection, 'node -e "1+1"')).toBe(false);
+      // The rejected tool call remains in the message list as a settled fact.
+      expect(screenContains(afterRejection, 'node -e "1+1"')).toBe(true);
+      expect(screenContains(afterRejection, 'Tool approval rejected by user.')).toBe(true);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,

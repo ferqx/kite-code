@@ -293,12 +293,18 @@ export function inspectSessionLogLease(
   if (!existsSync(leasePath)) return { status: 'absent' };
   const record = readLeaseRecord(leasePath);
   if (!record) return { status: 'unknown', reason: 'malformed_lease' };
-  if (
-    record.ownerIdentity !== readOwnerIdentity(sessionDir) ||
-    record.sessionDirectoryIdentity !== readDirectoryIdentity(sessionDir)
-  ) {
+  if (record.ownerIdentity !== readOwnerIdentity(sessionDir)) {
     return { status: 'unknown', reason: 'lease_directory_identity_changed' };
   }
+  // A persistent dev/inode pair can drift after a macOS volume remount or a
+  // restore, even when the owner and the directory object are otherwise still
+  // valid. Do not let that alone make an abandoned lease permanent; the
+  // process-liveness checks below still protect live or unverifiable writers.
+  const currentDirectoryIdentity = readDirectoryIdentity(sessionDir);
+  if (!currentDirectoryIdentity) {
+    return { status: 'unknown', reason: 'lease_directory_identity_changed' };
+  }
+  const directoryIdentityChanged = record.sessionDirectoryIdentity !== currentDirectoryIdentity;
   const nowMs = (options.now ?? (() => new Date()))().getTime();
   const createdMs = Date.parse(record.createdAt);
   const heartbeatMs = Date.parse(record.heartbeatAt);
@@ -313,10 +319,14 @@ export function inspectSessionLogLease(
   const staleAfterMs = options.staleAfterMs ?? 120_000;
   const stale = nowMs - heartbeatMs > staleAfterMs;
   const identity = (options.processIdentity ?? readProcessStartIdentity)(record.pid);
+  const processAlive = isProcessAlive(record.pid);
+  if (directoryIdentityChanged && processAlive) {
+    return { status: 'unknown', reason: 'lease_directory_identity_changed' };
+  }
   if (identity === record.processStartIdentity) return { status: 'active', record };
   if (!stale) return { status: 'active', record };
   if (
-    isProcessAlive(record.pid) &&
+    processAlive &&
     (identity === undefined ||
       !areProcessStartIdentitiesComparable(identity, record.processStartIdentity))
   ) {

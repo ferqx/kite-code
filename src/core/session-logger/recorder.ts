@@ -498,6 +498,13 @@ export function recordRuntimeEvent(
       base.attributes['kite_code.interaction_id'] = event.interactionId;
       base.attributes['kite_code.input.question'] = trunc(event.request.question, TRUNC_QUESTION);
       break;
+    case 'user_input.cancelled':
+      base.name = 'user_input.cancelled';
+      base.attributes['kite_code.interaction_id'] = event.interactionId;
+      base.attributes['kite_code.tool.call_id'] = event.toolCallId;
+      base.attributes['kite_code.input.cancel_reason'] = trunc(event.reason, TRUNC_SUMMARY);
+      base.status = { code: 'OK', message: 'user cancelled input' };
+      break;
     case 'approval.requested':
       base.name = 'approval.requested';
       base.attributes['kite_code.interaction_id'] = event.interactionId;

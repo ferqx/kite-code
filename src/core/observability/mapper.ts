@@ -664,6 +664,7 @@ export class ProductionMetricMapperV1 {
       case 'authorization.changed':
       case 'auto_review.requested':
       case 'auto_review.completed':
+      case 'user_input.cancelled':
       case 'turn.started':
       case 'user.message_appended':
       case 'user.command_invoked':

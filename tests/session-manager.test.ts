@@ -186,6 +186,7 @@ describe('SessionManager', () => {
         {
           type: 'approval.granted',
           interactionId: 'approval-1',
+          toolCallId: 'shell-1',
           grant: 'approve_once',
         },
       ]);

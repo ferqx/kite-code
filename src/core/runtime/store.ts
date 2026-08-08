@@ -128,6 +128,8 @@ export interface RuntimeStore {
   listNamedSnapshots(threadId: string): RuntimeSnapshotEntry[];
   restoreNamedSnapshot(threadId: string, snapshotId: string): boolean;
   forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean;
+  /** Fork the latest rolling snapshot without modifying the source session. */
+  forkCurrentSession(sourceThreadId: string, targetThreadId: string): boolean;
   /** Resolve a named recovery point entry (position + timestamp), or null when absent. */
   getNamedSnapshotEntry(threadId: string, snapshotId: string): RuntimeSnapshotEntry | null;
   /**
@@ -242,6 +244,38 @@ function rebindForkState(
   }
   if ('suspendedSubagents' in forkState) forkState.suspendedSubagents = {};
   return forkState;
+}
+
+/**
+ * A TUI recovery fork has an intentionally sanitized snapshot. Do not copy
+ * the one unfinished request that produced its source interaction into the
+ * fork's event history, otherwise TUI transcript replay would recreate the
+ * hidden prompt even though the fork's Runtime state is idle.
+ */
+function isCurrentPendingInteractionRequest(
+  sourceState: Record<string, unknown>,
+  event: RuntimeEvent,
+): boolean {
+  const interaction = sourceState.interactions;
+  if (!isRecord(interaction) || typeof interaction.kind !== 'string') return false;
+  const interactionId = interaction.interactionId;
+  if (typeof interactionId !== 'string') return false;
+  switch (interaction.kind) {
+    case 'awaiting_user_input':
+      return event.type === 'user_input.requested' && event.interactionId === interactionId;
+    case 'awaiting_tool_approval':
+      return event.type === 'approval.requested' && event.interactionId === interactionId;
+    case 'awaiting_review':
+      return event.type === 'plan.review_requested' && event.interactionId === interactionId;
+    case 'awaiting_provider_action':
+      return event.type === 'provider.action_required' && event.interactionId === interactionId;
+    case 'awaiting_provider_admission':
+      return event.type === 'provider.admission_required' && event.interactionId === interactionId;
+    case 'awaiting_auto_review':
+      return event.type === 'auto_review.requested' && event.reviewId === interactionId;
+    default:
+      return false;
+  }
 }
 
 /**
@@ -1024,16 +1058,27 @@ export function createRuntimeStore(
 
     forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean {
       if (isClosed) return false;
-      const snapshot = store.loadNamedSnapshot(sourceThreadId, snapshotId);
+      const rolling =
+        snapshotId === '__runtime_current__'
+          ? store.loadSnapshotRecord<Record<string, unknown>>(sourceThreadId)
+          : null;
+      const snapshot = rolling?.state ?? store.loadNamedSnapshot(sourceThreadId, snapshotId);
       if (!isRecord(snapshot)) return false;
       const position =
+        rolling?.metadata.eventPosition ??
         listNamedSnapshots.all(sourceThreadId).find((entry) => entry.name === snapshotId)
-          ?.event_position ?? 0;
+          ?.event_position ??
+        0;
       let sourceEvents: StoredEvent[];
       try {
         sourceEvents = store
           .loadEventsStrict(sourceThreadId)
-          .filter((entry) => entry.id <= position);
+          .filter(
+            (entry) =>
+              entry.id <= position &&
+              (snapshotId !== '__runtime_current__' ||
+                !isCurrentPendingInteractionRequest(snapshot, entry.event)),
+          );
       } catch {
         return false;
       }
@@ -1118,6 +1163,13 @@ export function createRuntimeStore(
         }
       })();
       return true;
+    },
+
+    forkCurrentSession(sourceThreadId: string, targetThreadId: string): boolean {
+      // Keep the source's canonical pending interaction intact. The reserved
+      // selector is private to this implementation and reuses the same
+      // atomic event/snapshot copy path as named rewind forks.
+      return store.forkSession(sourceThreadId, '__runtime_current__', targetThreadId);
     },
 
     close(): void {

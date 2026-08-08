@@ -23,8 +23,15 @@ export function eventsForRunCancellation(
   reason = 'Cancelled by user.',
   cause: 'user' | 'error' = 'user',
 ): RuntimeEvent[] {
+  // auto_review is never a human approval surface. If a user aborts while it
+  // is running, preserve that precise durable reason instead of pretending an
+  // approval was rejected or silently escalating it.
+  const toolReason =
+    cause === 'user' && state.interactions.kind === 'awaiting_auto_review'
+      ? 'user_cancelled'
+      : reason;
   return [
-    ...unfinishedToolCancellationEvents(state, reason),
+    ...unfinishedToolCancellationEvents(state, toolReason),
     ...resourceReservationCancellationEvents(state),
     ...resourceWaiterCancellationEvents(state),
     {
@@ -117,6 +124,10 @@ function planReviewCancelledEvents(
     {
       type: 'plan.review_cancelled',
       interactionId: interaction.interactionId,
+      toolCallId: interaction.toolCallId,
+      planId: interaction.planId,
+      version: interaction.version,
+      structuralDigest: interaction.structuralDigest,
       reason: cancellationReason,
     },
     {
@@ -142,6 +153,12 @@ function userInputCancelledEvents(
   reason?: string,
 ): RuntimeEvent[] {
   return [
+    {
+      type: 'user_input.cancelled',
+      interactionId: interaction.interactionId,
+      toolCallId: interaction.toolCallId,
+      reason: reason ?? 'User input cancelled by user.',
+    },
     {
       type: 'tool.finished',
       toolCallId: interaction.toolCallId,
@@ -300,6 +317,7 @@ export function eventsForRuntimeAction(
       {
         type: 'user_input.answered',
         interactionId: action.interactionId,
+        toolCallId: interaction.toolCallId,
         answer: action.text,
         answers: action.answers,
       },
@@ -360,7 +378,12 @@ export function eventsForRuntimeAction(
         },
       });
       return [
-        { type: 'approval.granted', interactionId: action.interactionId, grant: action.grant },
+        {
+          type: 'approval.granted',
+          interactionId: action.interactionId,
+          toolCallId: interaction.toolCallId,
+          grant: action.grant,
+        },
         {
           type: 'authorization.changed',
           mode: nextAuthorization.mode,
@@ -383,9 +406,26 @@ export function eventsForRuntimeAction(
     return [];
   }
 
+  if (interaction.kind === 'awaiting_auto_review') {
+    if (action.type !== 'cancel') return [];
+    return [
+      {
+        type: 'tool.cancelled',
+        toolCallId: interaction.toolCallId,
+        reason: action.reason ?? 'user_cancelled',
+      },
+    ];
+  }
+
   if (interaction.kind === 'awaiting_provider_action') {
     if (action.type === 'cancel') {
-      return [{ type: 'provider.action_deferred', interactionId: interaction.interactionId }];
+      return [
+        {
+          type: 'provider.action_deferred',
+          interactionId: interaction.interactionId,
+          originatingToolCallId: interaction.originatingToolCallId,
+        },
+      ];
     }
     if (action.type !== 'provider_action_result') return [];
     if (action.outcome === 'completed') {
@@ -393,6 +433,7 @@ export function eventsForRuntimeAction(
         {
           type: 'provider.action_completed',
           interactionId: interaction.interactionId,
+          originatingToolCallId: interaction.originatingToolCallId,
           ...(action.providerDirectoryRevision
             ? { providerDirectoryRevision: action.providerDirectoryRevision }
             : {}),
@@ -401,12 +442,19 @@ export function eventsForRuntimeAction(
       ];
     }
     if (action.outcome === 'deferred') {
-      return [{ type: 'provider.action_deferred', interactionId: interaction.interactionId }];
+      return [
+        {
+          type: 'provider.action_deferred',
+          interactionId: interaction.interactionId,
+          originatingToolCallId: interaction.originatingToolCallId,
+        },
+      ];
     }
     return [
       {
         type: 'provider.action_failed',
         interactionId: interaction.interactionId,
+        originatingToolCallId: interaction.originatingToolCallId,
         failureCode: action.failureCode ?? 'unknown',
       },
     ];
@@ -505,6 +553,10 @@ export function eventsForRuntimeAction(
         {
           type: 'plan.approved',
           interactionId: action.interactionId,
+          toolCallId: interaction.toolCallId,
+          planId: interaction.planId,
+          version: interaction.version,
+          structuralDigest: interaction.structuralDigest,
           executionMode: decision.nextMode,
         },
         {
@@ -533,6 +585,10 @@ export function eventsForRuntimeAction(
         {
           type: 'plan.revision_requested',
           interactionId: action.interactionId,
+          toolCallId: interaction.toolCallId,
+          planId: interaction.planId,
+          version: interaction.version,
+          structuralDigest: interaction.structuralDigest,
           feedback: decision.feedback,
         },
         {

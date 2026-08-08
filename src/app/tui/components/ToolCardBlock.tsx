@@ -164,7 +164,7 @@ function parseAskUserAnswers(
 /** ask_user 紧凑摘要渲染：每行 ⎿ 前缀，单行答案，仿 shell_execute 布局
  *  Compact ask_user summary: ⎿-prefixed single-line answers, shell_execute style.
  *  单问题：⎿   User: answer
- *  多步骤：⎿  Step1 sub_q User: answer / ⎿  Step2 sub_q User: answer */
+ *  多问题：⎿  sub_q User: answer / ⎿  sub_q User: answer */
 function renderAskUserSummary(
   args: Record<string, unknown>,
   summary: string,
@@ -183,7 +183,7 @@ function renderAskUserSummary(
       return (
         <>
           {questions.map((q, i) => {
-            const prefix = `⎿ Step${i + 1} `;
+            const prefix = '⎿ ';
             const suffix = ` Cancelled`;
             const qMax = Math.max(0, maxLine - stringWidth(prefix) - stringWidth(suffix));
             const qShort = clip(q.question, qMax);
@@ -221,7 +221,7 @@ function renderAskUserSummary(
         {questions.map((q, i) => {
           const id = q.id ?? String(i);
           const raw = answerMap[id] ?? '';
-          const prefix = `⎿ Step${i + 1} `;
+          const prefix = '⎿ ';
           const midfix = ` User: `;
           const contentWidth = maxLine - stringWidth(prefix) - stringWidth(midfix);
           // 确保 qMax + aMax = contentWidth，窄终端不会溢出 / Guarantee sum fits contentWidth

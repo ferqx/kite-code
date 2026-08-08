@@ -18,6 +18,8 @@ export function composeAppSandboxExecutorV1(input: {
   config: AppSandboxCompositionConfigV1;
   /** Effective App-level switch after CLI/config composition. */
   sandboxEnabled?: boolean;
+  /** Optional diagnostic sink for non-TUI callers. */
+  onDiagnostic?: (message: string) => void;
 }) {
   const boundary = input.config.executionBoundary;
   const surface = input.config.executionCapabilitySurface;
@@ -26,6 +28,7 @@ export function composeAppSandboxExecutorV1(input: {
       enabled: false,
       workspace: input.workspace,
       unavailableFallback: 'fail',
+      onDiagnostic: input.onDiagnostic,
     });
   }
   if (boundary?.filesystemScope === 'full_access') {
@@ -33,6 +36,7 @@ export function composeAppSandboxExecutorV1(input: {
       enabled: false,
       workspace: input.workspace,
       unavailableFallback: 'fail',
+      onDiagnostic: input.onDiagnostic,
     });
   }
   if (boundary?.networkMode === 'allowlist') {
@@ -40,11 +44,13 @@ export function composeAppSandboxExecutorV1(input: {
       enabled: false,
       workspace: input.workspace,
       unavailableFallback: 'fail',
+      onDiagnostic: input.onDiagnostic,
     });
   }
   return createSandboxExecutor({
     enabled: input.sandboxEnabled ?? input.config.sandbox.enabled,
     workspace: input.workspace,
+    onDiagnostic: input.onDiagnostic,
     ...(boundary
       ? {
           filesystemScope: boundary.filesystemScope,
