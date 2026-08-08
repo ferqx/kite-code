@@ -29,7 +29,9 @@ const rustFlags = [
   `--remap-path-prefix=${cargoHome}=C:\\kite-cargo`,
   `--remap-path-prefix=${projectRoot}=C:\\kite-source`,
   '-C',
-  'link-arg=-Wl,--no-insert-timestamp',
+  'linker=rust-lld',
+  '-C',
+  'link-arg=--no-insert-timestamp',
 ];
 const build = Bun.spawn(['cargo', ...cargoArgs], {
   cwd: projectRoot,

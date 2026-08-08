@@ -66,7 +66,8 @@ describe('ordinary open-source release candidate workflow', () => {
     expect(windowsRunnerBuilder).toContain(
       '--remap-path-prefix=$' + '{projectRoot}=C:\\\\kite-source',
     );
-    expect(windowsRunnerBuilder).toContain('link-arg=-Wl,--no-insert-timestamp');
+    expect(windowsRunnerBuilder).toContain("'linker=rust-lld'");
+    expect(windowsRunnerBuilder).toContain("'link-arg=--no-insert-timestamp'");
     const orderedSteps = [
       'rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal',
       'bun run scripts/release/build-windows-runner.ts',
