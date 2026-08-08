@@ -78,7 +78,7 @@ notarization；完整限制见
 
 自动 M2 上下文压缩默认关闭，需要同时开启 `features.contextCompactionAutoV1` 并把 `compaction.autoMode` 配置为 `live`；`shadow` 只观察触发资格，不调用摘要模型。自动阈值可使用已知可信窗口下的 `triggerRatio`，或显式的 `compactAfterEstimatedTokens` 绝对策略；压缩原因只有 `manual | auto`。本地 token ratio 术语（文本计量比例）、Provider 术语（模型供应商）错误或压缩失败都不会阻断会话；自动压缩保留原始 transcript 术语（消息记录）。
 
-启用 `features.contextCompactionManualV1`（默认开启）后可使用 `/compact` 命令，支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。运行中请求会排队到安全边界；消息不足时提示 `Not enough messages to compact.`，active checkpoint 后没有新增消息时，无参数连续压缩提示 `No new messages to compact.` 且不会再次调用摘要模型。进入有真实用户对话的历史会话时，TUI 会基于恢复的 checkpoint 和当前投影环境在本地重算 Footer context token，不产生模型请求；空会话不显示 system prompt 或工具目录估算。
+启用 `features.contextCompactionManualV1`（默认开启）后可使用 `/compact` 命令，支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。运行中请求会排队到安全边界；消息不足时提示 `Not enough messages to compact.`。Core 会先用当前完整投影计算理论最大缩减，连最小 narrative 都无法节省 1024 tokens 时提示 `Not enough reducible context to compact`，且不调用摘要模型。active checkpoint 后没有新增消息时，无论是否带自定义指令都提示 `No new messages to compact.`；自定义指令只改变新一轮压缩的侧重点，不把 `/compact` 变成已有 narrative 编辑器。同一 session 的手动压缩完整串行，stale 投影以可重试终态收敛，不会留下永久 pending。进入有真实用户对话的历史会话时，TUI 会基于恢复的 checkpoint 和当前投影环境在本地重算 Footer context token，不产生模型请求；空会话不显示 system prompt 或工具目录估算。
 
 会话日志治理默认开启并只记录 allowlist metadata；显式设置 `features.sessionLoggingPolicyV1=false` 时 mode 为 `off` 且不创建日志目录。`content` 需要 release artifact 允许和用户配置显式 opt-in，项目配置不能开启；即使 opt-in 也不记录 reasoning、工具/文件正文、审批命令、Plan/Sub-agent 正文或 credential。日志目录/文件使用 owner-only 权限或 ACL、拒绝 link/reparse point，并通过 durable active-session lease、bounded retention/容量和 sessions root 外的可恢复 quarantine 保护；无法证明容量或安全迁移时仍 fail closed。TUI 不显示普通 mode 状态，CLI 仍显示 resolved mode，logger 不可用时 Agent 继续运行且不使用不安全 fallback。
 

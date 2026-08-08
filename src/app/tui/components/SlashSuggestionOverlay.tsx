@@ -12,21 +12,12 @@ interface SlashSuggestionOverlayProps {
   width: number;
 }
 
-function suggestionTitle(suggestion: SlashSuggestionData): string {
-  switch (suggestion.kind) {
-    case 'effort':
-      return suggestion.partial ? `推理深度匹配 "${suggestion.partial}"` : '推理深度';
-    case 'theme':
-      return suggestion.partial ? `主题匹配 "${suggestion.partial}"` : '主题选项';
-    case 'permissions':
-      return suggestion.partial ? `权限模式匹配 "${suggestion.partial}"` : '权限模式';
-    default:
-      return '命令匹配';
-  }
+function suggestionTitle(_suggestion: SlashSuggestionData): string {
+  return '命令匹配';
 }
 
-function displayCommand(item: SuggestionItem, kind: SlashSuggestionData['kind']): string {
-  return kind === 'command' ? `/${item.command}` : item.command;
+function displayCommand(item: SuggestionItem): string {
+  return `/${item.command}`;
 }
 
 function displayAliases(item: SuggestionItem): string {
@@ -50,7 +41,7 @@ export default function SlashSuggestionOverlay({
   const indicatorWidth = 2;
   const statusColumnWidth = showActiveMarkers ? 6 : 0;
   const longestCommand = Math.max(
-    ...suggestion.items.map((item) => stringWidth(displayCommand(item, suggestion.kind))),
+    ...suggestion.items.map((item) => stringWidth(displayCommand(item))),
   );
   const longestDetails = Math.max(
     ...suggestion.items.map((item) => stringWidth(displayDetails(item))),
@@ -90,7 +81,7 @@ export default function SlashSuggestionOverlay({
         <ScrollList selectedIndex={suggestion.selectedIndex} scrollAlignment="auto">
           {suggestion.items.map((item, index) => {
             const isSelected = index === suggestion.selectedIndex;
-            const command = displayCommand(item, suggestion.kind);
+            const command = displayCommand(item);
             const details = displayDetails(item);
             const commandColor = item.disabled ? t.dim : isSelected ? t.primary : t.muted;
 

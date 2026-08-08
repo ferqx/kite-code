@@ -1,7 +1,5 @@
 import { type SetStateAction, useMemo, useState } from 'react';
-import { detectSandboxBackend, type SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
-import { sandboxSupportsFullModeV1 } from '../interaction-mode';
 
 export interface SlashCommandDef {
   name: string;
@@ -11,19 +9,9 @@ export interface SlashCommandDef {
 }
 
 export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
-  {
-    name: 'effort',
-    aliases: [],
-    description: '设置推理深度',
-    args: 'low|medium|high|max',
-  },
+  { name: 'effort', aliases: [], description: '设置推理深度' },
   { name: 'model', aliases: [], description: '打开模型选择器' },
-  {
-    name: 'theme',
-    aliases: [],
-    description: '切换色彩主题',
-    args: 'teal|blue|purple|cyan|mono',
-  },
+  { name: 'theme', aliases: [], description: '切换色彩主题' },
   { name: 'sessions', aliases: [], description: '浏览会话历史' },
   { name: 'new', aliases: [], description: '新建会话' },
   { name: 'plan', aliases: [], description: '进入规划模式', args: '[任务]' },
@@ -37,7 +25,6 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
     name: 'permissions',
     aliases: [],
     description: '设置权限模式',
-    args: 'accept_edits|auto|full',
   },
   {
     name: 'release',
@@ -86,56 +73,13 @@ export interface SuggestionItem {
 }
 
 export interface SlashSuggestionsResult {
-  kind: 'command' | 'effort' | 'theme' | 'permissions';
+  kind: 'command';
   partial: string;
   items: SuggestionItem[];
 }
 
 export interface SlashSuggestionData extends SlashSuggestionsResult {
   selectedIndex: number;
-}
-
-export interface ActiveSelections {
-  theme?: string;
-  interactionMode?: string;
-  sandboxBackend?: SandboxBackend;
-}
-
-export function buildModeSuggestionItems(
-  partial: string,
-  activeInteractionMode: string | undefined,
-  sandboxBackend: SandboxBackend,
-): SuggestionItem[] {
-  const fullDisabled = !sandboxSupportsFullModeV1(sandboxBackend);
-  const modes = [
-    {
-      command: 'accept_edits',
-      description: '本地工作区操作自动执行；出网、外部写入和未知副作用需确认',
-      disabled: false,
-    },
-    {
-      command: 'auto',
-      description: '模型自动审核，不确定时询问',
-      disabled: false,
-    },
-    {
-      command: 'full',
-      description: '完全自主，全部放行，不询问用户',
-      disabled: fullDisabled,
-      warning: fullDisabled ? '当前未在沙箱环境开启' : undefined,
-    },
-  ];
-
-  return modes
-    .filter((m) => m.command.startsWith(partial))
-    .map((m) => ({
-      command: m.command,
-      aliases: [],
-      description: m.description,
-      isActive: m.command === activeInteractionMode,
-      disabled: m.disabled,
-      warning: m.warning,
-    }));
 }
 
 function nearestEnabledIndex(
@@ -157,68 +101,10 @@ function nearestEnabledIndex(
   return clamped;
 }
 
-export function useSlashSuggestions(
-  inputValue: string,
-  skillManifests?: SkillManifest[],
-  activeSelections?: ActiveSelections,
-) {
+export function useSlashSuggestions(inputValue: string, skillManifests?: SkillManifest[]) {
   const [selectedIndex, setSelectedIndex] = useState(0);
 
   const result = useMemo((): SlashSuggestionsResult | null => {
-    // /effort <partial-level>
-    const effortMatch = inputValue.match(/^\/effort\s+(\S*)$/i);
-    if (effortMatch) {
-      const partial = effortMatch[1]!;
-      const levels = ['low', 'medium', 'high', 'max'];
-      const matched = levels.filter((l) => l.startsWith(partial));
-      if (matched.length === 0) return null;
-      return {
-        kind: 'effort',
-        partial,
-        items: matched.map((l) => ({
-          command: l,
-          aliases: [],
-          description: '',
-        })),
-      };
-    }
-
-    // /theme <partial-preset>
-    const themeMatch = inputValue.match(/^\/theme\s+(\S*)$/i);
-    if (themeMatch) {
-      const partial = themeMatch[1]!.toLowerCase();
-      const presets = ['teal', 'blue', 'purple', 'cyan', 'mono'];
-      const matched = presets.filter((p) => p.startsWith(partial));
-      if (matched.length === 0) return null;
-      return {
-        kind: 'theme',
-        partial,
-        items: matched.map((p) => ({
-          command: p,
-          aliases: [],
-          description: '',
-          isActive: p === activeSelections?.theme,
-        })),
-      };
-    }
-
-    // /permissions <partial-mode>
-    const modeMatch = inputValue.match(/^\/permissions\s+(\S*)$/i);
-    if (modeMatch) {
-      const partial = modeMatch[1]!.toLowerCase();
-      const matched = buildModeSuggestionItems(
-        partial,
-        activeSelections?.interactionMode,
-        activeSelections?.sandboxBackend ?? detectSandboxBackend(),
-      );
-      if (matched.length === 0) return null;
-      return {
-        kind: 'permissions',
-        partial,
-        items: matched,
-      };
-    }
-
     // /<partial-command>
     const cmdMatch = inputValue.match(/^\/(\S*)$/);
     if (!cmdMatch) return null;
@@ -253,7 +139,7 @@ export function useSlashSuggestions(
         args: c.args,
       })),
     };
-  }, [inputValue, skillManifests, activeSelections]);
+  }, [inputValue, skillManifests]);
 
   // Reset selection when results change
   const active = result !== null && result.items.length > 0;
@@ -270,19 +156,7 @@ export function useSlashSuggestions(
     });
   };
 
-  const replaceCommand = (
-    item: SuggestionItem,
-    kind: 'command' | 'effort' | 'theme' | 'permissions',
-  ): string => {
-    if (kind === 'effort') {
-      return inputValue.replace(/\/effort\s+\S*$/, `/effort ${item.command}`);
-    }
-    if (kind === 'permissions') {
-      return inputValue.replace(/\/permissions\s+\S*$/, `/permissions ${item.command}`);
-    }
-    if (kind === 'theme') {
-      return inputValue.replace(/\/theme\s+\S*$/, `/theme ${item.command}`);
-    }
+  const replaceCommand = (item: SuggestionItem): string => {
     return `/${item.command}`;
   };
 

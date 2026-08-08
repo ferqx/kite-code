@@ -13,7 +13,7 @@ import {
 } from './context-projection';
 import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
 
-// TODO(PR5): replace with buildContextProjection() when candidateCheckpoint is wired in.
+// Legacy callers without a live projection environment retain a conservative fallback.
 function fallbackEstimate(state: Readonly<RuntimeState>): ContextTokenEstimate {
   const checkpoint = state.context.activeCheckpoint;
   // When a checkpoint is active, only count transcript messages past the checkpoint;
@@ -43,9 +43,18 @@ export function currentContextPreflight(
   state: Readonly<RuntimeState>,
   config: AgentConfig,
   capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
+  environment?: ContextProjectionEnvironment,
 ) {
   return preflightModelContext({
-    estimate: fallbackEstimate(state),
+    estimate: environment
+      ? buildContextProjection({
+          role: 'agent',
+          state,
+          serializedTools: environment.serializedTools,
+          activeSkillInstructions: environment.activeSkillInstructions,
+          workflowSkills: environment.workflowSkills,
+        }).estimate
+      : fallbackEstimate(state),
     capabilities,
     requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
     providerSafetyRatio: config.compaction?.providerSafetyRatio,
@@ -70,10 +79,11 @@ export function inspectManualContextCompaction(
   state: Readonly<RuntimeState>,
   config: AgentConfig,
   capabilities?: ResolvedModelCapabilities,
+  environment?: ContextProjectionEnvironment,
 ): ManualCompactionStatus {
   const checkpoint = state.context.activeCheckpoint;
   return {
-    preflight: currentContextPreflight(state, config, capabilities),
+    preflight: currentContextPreflight(state, config, capabilities, environment),
     safeBoundary: findSafeCompactionBoundary(state),
     ...(state.context.pendingCompaction
       ? { pendingCompactionId: state.context.pendingCompaction.compactionId }
@@ -90,18 +100,13 @@ export function inspectManualContextCompaction(
   };
 }
 
-// TODO: manual compaction path doesn't have access to live tool schemas
-// (tools are created at model-invocation time). Candidate projection
-// in the compactor will use whatever tools are stored in pendingCompaction.
-// This means manual compaction's post-compaction estimate may slightly
-// underestimate context size (missing tool schema tokens). Acceptable for
-// manual use; the user can see actual usage via /context.
 export function manualContextCompactionEvent(input: {
   state: Readonly<RuntimeState>;
   config: AgentConfig;
   /** Optional user-supplied instructions for the summary model. */
   customInstructions?: string;
   capabilities?: ResolvedModelCapabilities;
+  projectionEnvironment?: ContextProjectionEnvironment;
 }): RuntimeEvent | null {
   if (input.state.context.pendingCompaction) return null;
   return {
@@ -111,7 +116,12 @@ export function manualContextCompactionEvent(input: {
     requestedAtRevision: input.state.revision,
     requestedAtTurnId: input.state.turn.turnId,
     force: false,
-    estimate: currentContextPreflight(input.state, input.config, input.capabilities).estimate,
+    estimate: currentContextPreflight(
+      input.state,
+      input.config,
+      input.capabilities,
+      input.projectionEnvironment,
+    ).estimate,
     ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
   };
 }

@@ -114,7 +114,11 @@ Runtime v19 的新终态通过共享 `projectTerminalOutcomeV1` 投影。TUI 只
 反推。没有 outcome 的历史事件继续按原 `recoverable` 字段回放。Headless CLI 对带 outcome 的
 同一事件调用同一 mapper，并在 JSON 行中附加 `terminalPresentation`。
 
-`StatsLine` 只读取 Core `ContextStatusSnapshot` 的 utilization；模型名称和累计 usage 不能推导 context 百分比。没有可信窗口但已有 snapshot 时，绝对 token 数必须显示同一 snapshot 的 `estimate.totalInputTokens`，与 `/context` 和压缩前后估算保持同一口径；仅在尚无 snapshot 时才兼容回退到累计 usage。`context.compaction_completed` 到达 App 后必须立即用 checkpoint 的 `inputTokensAfter` 刷新 snapshot 总量，并在窗口可信时重算 utilization，不能保留压缩前的 Footer 数字等待下一次模型调用。状态栏不持久展示历史压缩率（例如 `91% compacted`）；压缩收益只在一次性终态提示和诊断数据中保留。Completed、failed、cancelled 统一通过 Core 脱敏映射生成提示；TUI 以 `compactionId` 去重，每个压缩恰好显示一个不进入 transcript 的终态提示。Summary Provider 失败提示用户检查所选模型的 `contextWindowTokens` 或执行 `/clear`，不得展示 Provider 原始错误正文。
+`StatsLine` 只读取 Core `ContextStatusSnapshot` 的 utilization；模型名称和累计 usage 不能推导 context 百分比。没有可信窗口但已有 snapshot 时，绝对 token 数必须显示同一 snapshot 的 `estimate.totalInputTokens`，与 `/context` 和压缩前后估算保持同一口径；仅在尚无 snapshot 时才兼容回退到累计 usage。`context.compaction_completed` 到达 App 后必须立即用 checkpoint 的 `inputTokensAfter` 刷新 snapshot 总量，并在窗口可信时重算 utilization，不能保留压缩前的 Footer 数字等待下一次模型调用。状态栏不持久展示历史压缩率（例如 `91% compacted`）；压缩收益只在一次性终态提示和诊断数据中保留。Completed、failed、cancelled 统一通过 Core 脱敏映射生成提示；TUI 以 `compactionId` 去重，每个压缩恰好显示一个不进入 transcript 的终态提示。低收益 manual rejection 作为普通提示，不渲染为通用 `Recoverable error`；stale、输入过大、输出不可用、checkpoint validation 和 Provider 请求失败使用各自的脱敏建议。Provider 请求失败不得展示原始错误正文，也不得只假设 `contextWindowTokens` 是唯一原因。
+
+缓存命中率的数值和 `cache` 单位标签必须使用同一随命中率变化的颜色，作为一个完整指标；二者之间不得因颜色不同产生视觉断裂。
+
+除非所选模型配置显式设定 `reasoning: false`，否则只要 `status.thinkingMode` 已设置，`StatsLine` 必须在宽度允许时紧跟模型名显示该强度；不得以 provider 标识（例如 `deepseek`）作为显示条件，因为兼容端点或自定义路由也可以承载同一模型和推理强度。
 
 工具授权、用户提问或方案审核 interrupt 可见时，Footer 同时隐藏 `StatusBar` 与 `StatsLine`，
 避免全局运行/模型状态和当前阻塞决策形成两条竞争底栏。统计数据继续保存在 State 中，

@@ -222,19 +222,56 @@ export function createRuntimeEffectExecutor(
       maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
       maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
       maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
+      modelContextWindowTokens: resolveModelCapabilities({
+        config: dependencies.config,
+        adapter: dependencies.model.capabilityMetadata,
+      }).contextWindowTokens,
+      modelMaxOutputTokens: resolveModelCapabilities({
+        config: dependencies.config,
+        adapter: dependencies.model.capabilityMetadata,
+      }).maxOutputTokens,
     });
   return async (effect, state, emit, executionContext) => {
     if (effect.type === 'compact_context') {
+      const leaseOwner = crypto.randomUUID();
+      const durableLease = dependencies.runtimeStore;
+      const leaseTtlMs = 10 * 60_000;
+      if (
+        durableLease &&
+        !durableLease.tryAcquireEffectLease(
+          state.session.threadId,
+          effect.compactionId,
+          leaseOwner,
+          Date.now() + leaseTtlMs,
+        )
+      ) {
+        return [];
+      }
+      const heartbeat = durableLease
+        ? setInterval(() => {
+            durableLease.renewEffectLease(
+              state.session.threadId,
+              effect.compactionId,
+              leaseOwner,
+              Date.now() + leaseTtlMs,
+            );
+          }, 30_000)
+        : undefined;
       const resolveProjectionEnvironment = () =>
         resolveRuntimeContextProjectionEnvironment({ ...dependencies, subagentEventSink }, state);
-      return executeContextCompaction({
-        state,
-        compactionId: effect.compactionId,
-        compact: contextCompactor,
-        resolveProjectionEnvironment,
-        reporter: dependencies.compactionReporter,
-        onProgress: dependencies.onCompactionProgress,
-      });
+      try {
+        return await executeContextCompaction({
+          state,
+          compactionId: effect.compactionId,
+          compact: contextCompactor,
+          resolveProjectionEnvironment,
+          reporter: dependencies.compactionReporter,
+          onProgress: dependencies.onCompactionProgress,
+        });
+      } finally {
+        if (heartbeat) clearInterval(heartbeat);
+        durableLease?.releaseEffectLease(state.session.threadId, effect.compactionId, leaseOwner);
+      }
     }
     if (effect.type === 'call_model') {
       return invokeRuntimeModel({

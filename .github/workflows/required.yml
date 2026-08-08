@@ -3,12 +3,29 @@ name: Required
 on:
   pull_request:
   push:
-    branches: [main, compact]
+    branches: [main, compact, man]
 
 permissions:
   contents: read
 
 jobs:
+  protected-branch:
+    name: protected-branch
+    if: github.ref == 'refs/heads/man'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Reject direct commits to man
+        run: |
+          parents=$(git rev-list --parents -n 1 "$GITHUB_SHA")
+          count=$(printf '%s\n' "$parents" | wc -w | tr -d ' ')
+          if [ "$count" -lt 3 ]; then
+            echo "拒绝直接提交到 man；请通过 Pull Request 合并。"
+            exit 1
+          fi
+
   quality:
     name: quality
     runs-on: ubuntu-latest

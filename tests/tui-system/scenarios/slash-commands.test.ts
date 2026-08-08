@@ -19,6 +19,7 @@ import {
   waitForCondition,
   waitForOutputQuiescence,
   waitForText,
+  waitForTextGone,
 } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
@@ -33,11 +34,20 @@ describe('TUI PTY System — Slash Commands', () => {
     server = createMockModelServer();
     workspace = createTestWorkspace();
     server.setResponses([]);
-    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+    tui = await spawnReadyTui({
+      cols: 120,
+      rows: 40,
+      mockServer: server,
+      workspace,
+    });
   });
 
   afterEach(async () => {
-    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+    await cleanupTuiSystemFixtures({
+      tuis: [tui],
+      mockServers: [server],
+      workspaces: [workspace],
+    });
   });
 
   test(
@@ -67,7 +77,12 @@ describe('TUI PTY System — Slash Commands', () => {
 
       await submitCommand(tui, '/clear');
       await waitForTuiReady(tui);
-      await submitCommand(tui, '/theme purple');
+      await submitCommand(tui, '/theme');
+      await waitForText(() => tui.viewport(), '选择色彩主题', 10_000);
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '❯ 紫', 10_000);
+      tui.write('\r');
+      await waitForTextGone(() => tui.viewport(), '选择色彩主题', 10_000);
       await waitForText(() => tui.viewport(), 'Theme set to purple', 10_000);
       await waitForTuiReady(tui);
       await submitCommand(tui, '/export');
@@ -88,13 +103,20 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
-    '/theme applies a preset once and deduplicates the same status message',
+    '/theme opens a selector and deduplicates the same preset status message',
     async () => {
-      await submitCommand(tui, '/theme purple');
-      await waitForText(() => tui.viewport(), 'Theme set to purple', 10_000);
+      await submitCommand(tui, '/theme');
+      await waitForText(() => tui.viewport(), '选择色彩主题', 10_000);
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '❯ 紫', 10_000);
+      tui.write('\r');
+      await waitForTextGone(() => tui.viewport(), '选择色彩主题', 10_000);
       const beforeCount = stripAnsi(tui.viewport()).split('Theme set to purple').length - 1;
 
-      await submitCommand(tui, '/theme purple');
+      await submitCommand(tui, '/theme');
+      await waitForText(() => tui.viewport(), '选择色彩主题', 10_000);
+      tui.write('\r');
+      await waitForTextGone(() => tui.viewport(), '选择色彩主题', 10_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       const afterCount = stripAnsi(tui.viewport()).split('Theme set to purple').length - 1;
       expect(afterCount).toBe(beforeCount);
@@ -123,10 +145,17 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
-    '/effort max keeps a non-reasoning model interactive',
+    '/effort refreshes the static Header and keeps a non-reasoning model interactive',
     async () => {
-      await submitCommand(tui, '/effort max');
+      await submitCommand(tui, '/effort');
+      await waitForText(() => tui.viewport(), '选择推理深度', 10_000);
+      tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), '❯ 高', 10_000);
+      tui.write('\r');
+      await waitForTextGone(() => tui.viewport(), '选择推理深度', 10_000);
+      await waitForText(() => tui.viewport(), 'mock-model high', 10_000);
       await waitForTuiReady(tui);
+      expect(tui.viewport().match(/high/g) ?? []).toHaveLength(2);
       expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
@@ -171,13 +200,21 @@ describe('TUI PTY System — Slash Commands', () => {
   );
 
   test(
-    '/permissions switches automatic approval to accept edits',
+    '/permissions opens the selector and switches automatic approval to accept edits',
     async () => {
-      await submitCommand(tui, '/permissions auto', 80);
+      await submitCommand(tui, '/permissions', 80);
+      await waitForText(() => tui.viewport(), '选择权限模式', 5_000);
+      tui.write('\x1b[B');
+      await waitForText(() => tui.viewport(), '❯ 自动审批', 5_000);
+      tui.write('\r');
       await waitForText(() => tui.viewport(), '自动审批', 5_000);
       expect(screenContains(tui.viewport(), '自动审批')).toBe(true);
 
-      await submitCommand(tui, '/permissions accept_edits', 80);
+      await submitCommand(tui, '/permissions', 80);
+      await waitForText(() => tui.viewport(), '选择权限模式', 5_000);
+      tui.write('\x1b[A');
+      await waitForText(() => tui.viewport(), '❯ 接受编辑', 5_000);
+      tui.write('\r');
       await waitForText(() => tui.viewport(), '接受编辑', 5_000);
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       expect(screenContains(tui.viewport(), '自动审批')).toBe(false);

@@ -70,6 +70,37 @@ describe('loadAgentConfig', () => {
       expect(config.modelName).toBe('Qwen/Qwen3-Coder');
       expect(config.providerName).toBe('siliconflow');
       expect(config.providerType).toBe('openai-compatible');
+      expect(config.reasoningExplicitlyDisabled).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('distinguishes an explicit reasoning disable from the provider default', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'reasoning-disabled.jsonc');
+      writeFileSync(
+        configPath,
+        `{
+          "model": {
+            "default": { "provider": "compatible", "name": "plain-chat-model" }
+          },
+          "provider": {
+            "compatible": {
+              "type": "openai-compatible",
+              "apiKey": "sk-compatible",
+              "baseURL": "https://models.example.test/v1",
+              "model": "plain-chat-model",
+              "reasoning": false
+            }
+          }
+        }`,
+      );
+
+      const config = loadAgentConfig({ configPath });
+      expect(config.reasoning).toBe(false);
+      expect(config.reasoningExplicitlyDisabled).toBe(true);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

@@ -1,12 +1,15 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { executeContextCompaction } from '../../src/core/controllers/compaction-controller';
+import { expectedCompactionSourceDigest } from '../../src/core/model/compaction-summary';
 import type { ContextTokenEstimate } from '../../src/core/model/context-budget';
 import {
+  buildContextProjection,
   type ContextProjectionEnvironment,
   digestProjectionEnvironment,
   serializeToolDescriptors,
 } from '../../src/core/model/context-projection';
+import type { ContextCompactionCheckpoint } from '../../src/core/runtime/context-compaction';
 import {
   createContextCorrectnessBlock,
   normalizeContextRuntimeState,
@@ -42,10 +45,18 @@ function requestedState() {
     {
       kind: 'user',
       messageId: 'message-1',
-      turnId: initial.turn.turnId,
+      turnId: 'turn-historical',
       ordinal: 0,
       createdAt: '2026-07-20T00:00:00.000Z',
-      content: 'retain this fact',
+      content: 'retain this fact '.repeat(1_200),
+    },
+    {
+      kind: 'user',
+      messageId: 'message-2',
+      turnId: initial.turn.turnId,
+      ordinal: 1,
+      createdAt: '2026-07-20T00:00:01.000Z',
+      content: 'current live work',
     },
   ];
   return reduceRuntimeState(initial, {
@@ -57,6 +68,36 @@ function requestedState() {
     force: false,
     estimate,
   });
+}
+
+function validCheckpoint(
+  state: ReturnType<typeof requestedState>,
+  reason: ContextCompactionCheckpoint['reason'],
+  sourceRevision: number,
+  summaryText = 'A compact narrative.',
+): ContextCompactionCheckpoint {
+  const before = buildContextProjection({ role: 'agent', state }).estimate.totalInputTokens;
+  const checkpoint: ContextCompactionCheckpoint = {
+    compactionId: 'compact-1',
+    version: 1,
+    sourceRevision,
+    sourceDigest: expectedCompactionSourceDigest(undefined, [state.transcript.messages[0]!]),
+    coveredThroughMessageId: 'message-1',
+    coveredThroughTurnId: 'turn-historical',
+    summary: summaryText,
+    inputTokensBefore: before,
+    inputTokensAfter: 0,
+    reason,
+    createdAt: '2026-07-20T00:00:01.000Z',
+  };
+  return {
+    ...checkpoint,
+    inputTokensAfter: buildContextProjection({
+      role: 'agent',
+      state,
+      candidateCheckpoint: checkpoint,
+    }).estimate.totalInputTokens,
+  };
 }
 
 describe('eventized context compaction', () => {
@@ -94,19 +135,8 @@ describe('eventized context compaction', () => {
       state,
       compactionId: 'compact-1',
       onProgress: (phase) => progress.push(phase),
-      compact: async ({ sourceRevision, pending }) => ({
-        compactionId: pending.compactionId,
-        version: 1,
-        sourceRevision,
-        sourceDigest: 'sha256:source',
-        coveredThroughMessageId: 'message-1',
-        coveredThroughTurnId: state.turn.turnId,
-        summary: summary('sha256:source'),
-        inputTokensBefore: 2_000,
-        inputTokensAfter: 400,
-        reason: pending.reason,
-        createdAt: '2026-07-20T00:00:01.000Z',
-      }),
+      compact: async ({ sourceRevision, pending }) =>
+        validCheckpoint(state, pending.reason, sourceRevision, summary('sha256:source')),
     });
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('context.compaction_completed');
@@ -143,25 +173,14 @@ describe('eventized context compaction', () => {
       state,
       compactionId: 'compact-1',
       onProgress: (phase) => progress.push(phase),
-      compact: async ({ sourceRevision, pending }) => ({
-        compactionId: pending.compactionId,
-        version: 1,
-        sourceRevision,
-        sourceDigest: 'sha256:progress',
-        coveredThroughMessageId: 'message-1',
-        coveredThroughTurnId: state.turn.turnId,
-        summary: 'A compact narrative.',
-        inputTokensBefore: 2_000,
-        inputTokensAfter: 500,
-        reason: pending.reason,
-        createdAt: '2026-07-22T00:00:01.000Z',
-      }),
+      compact: async ({ sourceRevision, pending }) =>
+        validCheckpoint(state, pending.reason, sourceRevision),
     });
     expect(events[0]?.type).toBe('context.compaction_completed');
     expect(progress).toEqual(['preparing', 'summarizing', 'validating', undefined]);
   });
 
-  test('environment-stale model results emit no lifecycle event', async () => {
+  test('environment-stale model results terminate the durable request without a checkpoint', async () => {
     const state = requestedState();
     let generation = 0;
     const progress: Array<string | undefined> = [];
@@ -190,7 +209,16 @@ describe('eventized context compaction', () => {
         };
       },
     });
-    expect(events).toEqual([]);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'context.compaction_failed',
+        errorKind: 'stale_context',
+        retryable: true,
+      }),
+    ]);
+    const failedState = reduceRuntimeState(state, events[0]!);
+    expect(failedState.context.pendingCompaction).toBeUndefined();
+    expect(failedState.context.activeCheckpoint).toBeUndefined();
     expect(progress).toEqual(['preparing', 'summarizing', 'validating', undefined]);
   });
 
@@ -279,6 +307,24 @@ describe('eventized context compaction', () => {
         }),
       }),
     ).toMatchObject([{ type: 'context.compaction_failed', errorKind: 'unsafe_boundary' }]);
+  });
+
+  test('rejects a checkpoint with fabricated token savings', async () => {
+    const state = requestedState();
+    const checkpoint = validCheckpoint(state, 'auto', state.revision);
+    const events = await executeContextCompaction({
+      state,
+      compactionId: 'compact-1',
+      compact: async () => ({
+        ...checkpoint,
+        inputTokensBefore: checkpoint.inputTokensBefore + 10_000,
+        inputTokensAfter: checkpoint.inputTokensAfter,
+      }),
+    });
+
+    expect(events).toMatchObject([
+      { type: 'context.compaction_failed', errorKind: 'invalid_candidate', retryable: false },
+    ]);
   });
 });
 
@@ -747,6 +793,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
       recentAutomaticCompactions: [{ turnIndex: 1, reductionRatio: 0.05, tokensAfter: 9_000 }],
       consecutiveLowGain: 2,
       disabledUntilManualAction: true,
+      recoveryAttempted: true,
     };
     const checkpoint = {
       compactionId: 'compact-1',
@@ -771,6 +818,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
       recentAutomaticCompactions: [],
       consecutiveLowGain: 0,
       disabledUntilManualAction: false,
+      recoveryAttempted: false,
     });
   });
 

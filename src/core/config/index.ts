@@ -440,6 +440,8 @@ export interface AgentConfig {
   reasoningEffort?: string | null;
   /** 是否启用思考字段回传。缺省时按 providerType 推断：deepseek=true，其他=false。 */
   reasoning?: boolean;
+  /** True only when the provider configuration explicitly sets `reasoning: false`. */
+  reasoningExplicitlyDisabled?: boolean;
   /** 透传给 LangChain 模型构造器的额外参数 */
   modelKwargs?: Record<string, unknown>;
   /** Explicit capabilities from the selected model entry, before catalog fallback resolution. */
@@ -674,6 +676,7 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
     providerType,
     reasoningEffort,
     reasoning,
+    reasoningExplicitlyDisabled: provider.reasoning === false,
     modelKwargs: provider.modelKwargs as Record<string, unknown> | undefined,
     ...(selected
       ? {

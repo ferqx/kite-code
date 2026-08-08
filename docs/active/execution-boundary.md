@@ -256,6 +256,6 @@ hooks。
 sandbox backend/availability/fallback、filesystem scope、network mode 与 host 数量、protected-path
 policy、controller worktree 状态以及 capability 的 typed disabled reasons。它不暴露 Workspace
 路径、host 名、process limit、qualification proof 或完整安全 profile，也不产生 capability。
-普通 TUI 的 `/permissions` 明确显示 `not admitted`；CLI `--execution-status` 在创建 Runtime、MCP 或
-Skill 前输出状态并退出。CLI 直接启用 `executionBoundaryV1`/`networkBoundaryV1` 会在参数解析阶段
-拒绝，显式 `false` 仍可单调收紧。
+TUI 的 `/permissions` 只用于选择 interaction mode，不显示或授予 production boundary；CLI
+`--execution-status` 在创建 Runtime、MCP 或 Skill 前输出状态并退出。CLI 直接启用
+`executionBoundaryV1`/`networkBoundaryV1` 会在参数解析阶段拒绝，显式 `false` 仍可单调收紧。

@@ -58,6 +58,8 @@
 
 ## 分支合并策略
 
+`man` 是受保护分支：本地 Lefthook 的 `pre-commit` 会拒绝普通直接提交，CI 也会拒绝推送到 `man` 的单父提交。变更必须先在独立分支提交，再通过 Pull Request 合并；合并提交和 cherry-pick 由本地守卫允许，远端仓库仍应将 `man` 配置为禁止直接 push、要求 Pull Request。
+
 合并远程分支到当前工作分支时，使用 `-X theirs` 确保远程代码不被本地代码覆盖：
 
 ```bash

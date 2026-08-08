@@ -49,7 +49,7 @@ describe('Header', () => {
         columns: 60,
       }),
     );
-    expect(lastFrame()).toContain('gpt-5.6 · low');
+    expect(lastFrame()).toContain('gpt-5.6 low');
   });
 
   test('uses the kite wordmark instead of the former cat mascot', () => {

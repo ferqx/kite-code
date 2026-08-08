@@ -15,7 +15,10 @@ exact/normalized/semantic matcher、forbidden claim 和可选 continuation。fac
 
 结构 adapter 覆盖 direct/incremental/reset、tool pair、transcript immutability、checkpoint digest/replay/
 revision、lease/environment drift、summary rejection 和 system/tool/Plan/Verification/Runtime 权威重注入。
-失败保持原状态；invalid checkpoint、orphan tool result 或状态损坏为 G0。
+Controller 必须从 source projection 重新计算 checkpoint 的 before/after token estimate，不能信任 compactor
+自报的缩减值；RuntimeStore effect lease 保证同一 `thread_id + compaction_id` 跨连接只 dispatch 一次
+Provider，snapshot revision CAS 拒绝 stale writer 和删除后的晚到写入。失败保持原状态；invalid checkpoint、
+orphan tool result 或状态损坏为 G0。
 
 deterministic matcher 优先 exact/normalized；critical loss、forbidden claim、approval/Verification/Plan
 反转都不能被 semantic score 覆盖。原 blind semantic contract 继续把未配置 route/evaluator 的 score

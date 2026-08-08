@@ -95,6 +95,10 @@ bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/
 
 浏览型选择列表（命令、模型、会话、文件与检查点）统一使用主题背景高亮当前行，并以 `❯` 作为唯一焦点标识。主文本紧跟焦点列；
 当前生效项在独立的右侧状态列显示 `当前`，时间、`default` 等信息进入更右侧的元数据列。
+列表的 `maxHeight` 只用于限制长列表并允许其滚动；内容不足该上限时，列表容器不得使用
+`flexGrow` 撑满剩余终端行，浮层的快捷键栏必须紧跟最后一项，避免底部出现无意义空白。
+进入或退出二级浮层时，App 必须以独立的 presentation key 重挂载并全屏重绘；这会清除一级命令匹配或旧浮层
+留下的终端行，再按当前内容高度投影；不得为浮层人为填充终端剩余高度。
 状态列与元数据列之间至少保留两个终端列；会话和检查点时间固定使用本地时区
 `YYYY-MM-DD HH:mm:ss`，不得依赖 locale 格式。不得在主文本前预留状态列，也不得增加重复的圆点或竖线选中标记。命令、参数和说明等结构化内容必须按终端显示宽度
 使用显式列布局，并在窄终端中截断或隐藏低优先级说明，不得撑破全宽外框。
@@ -151,6 +155,18 @@ bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/
 所有底部浮层和运行中操作条的标准快捷键说明使用中文动词：`选择`、`导航`、`确认`、
 `提交`、`返回`、`取消`、`关闭`。MCP 专有名词和 Server/Tool 内容可以保留英文，但通用
 键盘动作不得另起一套英文文案。
+
+斜杠命令的持久化 `user.command_invoked` 是命令行的唯一展示来源，不得再用乐观 `USER_MESSAGE`
+重复插入。命令结果可紧贴命令显示；但连续两条用户命令必须保留普通块间距。已显示最终回复而
+后台 Runtime 尚在 finally 清理时，`/compact` 必须先等待该 cleanup，再从独立 Kernel 执行。
+独立 Kernel 已处于终态时，只要存在 manual pending compaction 就必须直接调度 `compact_context`；
+不得向即将停止或已停止的执行循环留下 pending compaction。若旧版本已经留下该类 durable pending，
+下一条 `/compact` 必须接管并完成它；同一 checkpoint 同时只能有一个 compaction effect 在执行。
+这个唯一性由 RuntimeStore 的跨连接 effect lease 保证，不能只依赖单个 `SessionRuntime` 的 Promise。
+删除 session 前必须关闭 manual compaction 队列、取消 active summary 并等待全部 writer；排队命令不得在
+删除完成后重新启动，晚到 snapshot 还必须由 revision CAS 拒绝。
+手动压缩至少需要两个完整 settled turn；一轮问答必须直接显示“消息不足”，不得调用摘要模型、
+制造可恢复错误或留下 pending 请求。
 
 工具授权、用户提问和方案审核是阻塞式 Footer 交互。任一 interrupt 可见时，Footer 必须
 隐藏全局 `StatusBar` 与 `StatsLine`，包括模型、思考级别、cache、context/token 和权限模式；

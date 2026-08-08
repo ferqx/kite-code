@@ -19,12 +19,14 @@ import type { StatusState } from '../src/app/tui/types';
 import type { AgentConfig } from '../src/core/config';
 import { aiMessage } from '../src/core/messages';
 import { loadSession } from '../src/core/persistence/sessions';
+import type { RuntimeEvent } from '../src/core/runtime/events';
 import { createAgentKernel } from '../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
 import type { UserAction } from '../src/protocol/actions';
 import { createMockModel } from './mock-model';
+import { createMockModelServer } from './tui-system/harness/fixtures';
 
 // ── Test-only structural access to private members (casts are erased at runtime) ──
 
@@ -164,21 +166,10 @@ describe('fullModeUnavailableReason', () => {
 });
 
 describe('interaction mode admission', () => {
-  test('resolves slash mode toggle without delegating full entry to reducer', () => {
-    expect(resolveInteractionModeTarget(undefined, 'accept_edits')).toBe('auto');
-    expect(resolveInteractionModeTarget(undefined, 'auto')).toBe('full');
-    expect(resolveInteractionModeTarget(undefined, 'full')).toBe('accept_edits');
-    expect(resolveInteractionModeTarget('f', 'accept_edits')).toBe('full');
-    expect(resolveInteractionModeTarget('au', 'accept_edits')).toBe('auto');
-  });
-
-  test('skips full when slash mode toggles without sandbox backend', () => {
-    expect(resolveInteractionModeTarget(undefined, 'accept_edits', 'none')).toBe('auto');
-    expect(resolveInteractionModeTarget(undefined, 'auto', 'none')).toBe('accept_edits');
-    expect(resolveInteractionModeTarget(undefined, 'auto', 'seatbelt')).toBe('full');
-    expect(resolveInteractionModeTarget(undefined, 'auto', 'windows_restricted_token')).toBe(
-      'accept_edits',
-    );
+  test('requires an explicit mode; the TUI opens a selector for /permissions', () => {
+    expect(resolveInteractionModeTarget(undefined)).toBeNull();
+    expect(resolveInteractionModeTarget('f')).toBe('full');
+    expect(resolveInteractionModeTarget('au')).toBe('auto');
   });
 
   test('rejects full admission before dispatch when sandbox is unavailable', () => {
@@ -348,7 +339,7 @@ describe('SessionManager', () => {
     expect(result.text).toContain('queued');
   });
 
-  test('returns "not enough messages" when session has no transcript', async () => {
+  test('retries manual compaction after a terminal run releases its live control', async () => {
     const deps = makeDeps();
     deps.config = {
       apiKey: 'test',
@@ -367,25 +358,197 @@ describe('SessionManager', () => {
       userId: 'tui',
       workspace: '/tmp/ws',
     });
-    // transcript has only 2 messages (default initial state), not enough for safe boundary
-    const persisted: unknown[] = [];
-    runtime.runtimeControl = {
+    state.turn = { ...state.turn, status: 'completed' };
+    const control = {
       getState: () => state,
-      processEvent: (event) => persisted.push(event),
+      processEvent: () => undefined,
       cancelRun: () => [],
     };
+    runtime.runtimeControl = control;
+    const completion = Promise.resolve().then(() => {
+      runtime.runtimeControl = null;
+    });
+    Reflect.set(runtime, '_runCompletion', completion);
 
     const result = await mgr.handleContextCompaction(threadId);
-    expect(persisted.map((event) => (event as { type: string }).type)).toEqual([
-      'user.command_invoked',
-      'context.compaction_requested',
-      'context.compaction_failed',
-    ]);
+    expect(result.text).not.toContain('queued');
+    expect(result.text).toBe('Not enough messages to compact.');
+  });
+
+  test('returns "not enough messages" when session has no transcript', async () => {
+    const deps = makeDeps();
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+    const mgr = new SessionManager(deps);
+    const threadId = mgr.createSession('/tmp/ws');
+    const result = await mgr.handleContextCompaction(threadId);
     expect(result.events.map((event) => event.type)).toEqual([
       'context.compaction_requested',
       'context.compaction_failed',
     ]);
     expect(result.text).toBe('Not enough messages to compact.');
+  });
+
+  test('does not compact a single settled turn', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-compact-small-'));
+    const deps = makeDeps();
+    deps.checkpointPath = join(root, 'checkpoints.sqlite');
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+    try {
+      const mgr = new SessionManager(deps);
+      const threadId = mgr.createSession('/tmp/ws');
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'tui',
+        workspace: '/tmp/ws',
+      });
+      state.transcript.messages = [
+        {
+          kind: 'user',
+          messageId: 'user-1',
+          turnId: 'turn-1',
+          ordinal: 0,
+          createdAt: '2026-08-08T00:00:00.000Z',
+          content: 'Hello',
+        },
+        {
+          kind: 'assistant',
+          messageId: 'assistant-1',
+          turnId: 'turn-1',
+          ordinal: 1,
+          createdAt: '2026-08-08T00:00:01.000Z',
+          content: 'Hello!',
+          toolCalls: [],
+        },
+      ];
+      const store = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
+      try {
+        store.saveSnapshot(threadId, state);
+      } finally {
+        store.close();
+      }
+
+      const result = await mgr.handleContextCompaction(threadId);
+
+      expect(result.text).toContain('Not enough reducible context');
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: 'context.compaction_failed',
+          errorKind: 'insufficient_reduction',
+          retryable: false,
+        }),
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('projects the durable compact command once as it is persisted', async () => {
+    const deps = makeDeps();
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+    const mgr = new SessionManager(deps);
+    const threadId = mgr.createSession('/tmp/ws');
+    const projected: RuntimeEvent[] = [];
+
+    await mgr.handleContextCompaction(threadId, undefined, undefined, (event) => {
+      projected.push(event);
+    });
+
+    expect(projected).toEqual([
+      expect.objectContaining({ type: 'user.command_invoked', command: '/compact' }),
+    ]);
+  });
+
+  test('recovers a historical manual compaction pending instead of leaving it forever', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-compact-recovery-'));
+    const checkpointPath = join(root, 'checkpoints.sqlite');
+    const deps = makeDeps();
+    deps.checkpointPath = checkpointPath;
+    deps.config = {
+      apiKey: 'test',
+      baseURL: 'http://localhost',
+      modelName: 'mock',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+    };
+
+    try {
+      const mgr = new SessionManager(deps);
+      const threadId = mgr.createSession('/tmp/ws');
+      const kernel = createAgentKernel({
+        threadId,
+        userId: 'tui',
+        workspace: '/tmp/ws',
+        storePath: runtimeStorePathFor(checkpointPath),
+        interactionMode: 'accept_edits',
+        phase: 'building',
+      });
+      try {
+        const state = kernel.getState();
+        kernel.processEvent({
+          type: 'context.compaction_requested',
+          compactionId: 'stuck-manual-request',
+          reason: 'manual',
+          requestedAtRevision: state.revision,
+          requestedAtTurnId: state.turn.turnId,
+          force: false,
+          estimate: {
+            systemTokens: 0,
+            toolSchemaTokens: 0,
+            transcriptTokens: 0,
+            summaryTokens: 0,
+            dynamicRuntimeTokens: 0,
+            framingTokens: 0,
+            totalInputTokens: 0,
+          },
+        });
+      } finally {
+        kernel.close();
+      }
+
+      const result = await mgr.handleContextCompaction(threadId);
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: 'context.compaction_failed',
+          compactionId: 'stuck-manual-request',
+        }),
+      );
+
+      const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
+      try {
+        const state = store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>(threadId);
+        expect(state?.context.pendingCompaction).toBeUndefined();
+      } finally {
+        store.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('a second consecutive /compact returns a non-error no-new-messages result', async () => {
@@ -475,7 +638,7 @@ describe('SessionManager', () => {
     expect(result.isError).toBeUndefined();
   });
 
-  test('custom instructions may rework a fully covered checkpoint', async () => {
+  test('custom instructions do not rework a fully covered checkpoint without new source', async () => {
     const deps = makeDeps();
     deps.config = {
       apiKey: 'test',
@@ -528,17 +691,11 @@ describe('SessionManager', () => {
 
     expect(persisted).toContainEqual(
       expect.objectContaining({
-        type: 'context.compaction_requested',
-        customInstructions: 'focus on unfinished work',
-      }),
-    );
-    expect(persisted).not.toContainEqual(
-      expect.objectContaining({
         type: 'context.compaction_failed',
         message: 'No new messages to compact.',
       }),
     );
-    expect(result.text).toContain('queued');
+    expect(result.text).toBe('No new messages to compact.');
   });
 
   test('rebuilds context status from the restored checkpoint when entering a session', () => {
@@ -647,7 +804,7 @@ describe('SessionManager', () => {
     }
   });
 
-  test('normal compaction succeeds when session has enough messages', async () => {
+  test('queues compaction with enough messages while a live interaction is pending', async () => {
     const deps = makeDeps();
     deps.config = {
       apiKey: 'test',
@@ -704,6 +861,137 @@ describe('SessionManager', () => {
       force: false,
     });
     expect(result.text).toContain('queued');
+  });
+
+  test('executes standalone manual compaction and persists the completed checkpoint', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-compact-success-'));
+    const server = createMockModelServer();
+    const deps = makeDeps();
+    deps.checkpointPath = join(root, 'checkpoints.sqlite');
+    deps.config = {
+      apiKey: 'test',
+      baseURL: server.baseURL,
+      modelName: 'mock-model',
+      providerName: 'mock',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true },
+      compaction: { maxSummaryTokens: 200, maxNarrativeTokens: 200 },
+    };
+    server.setResponses([
+      {
+        message: { content: 'Preserve the user goals, completed work, and pending verification.' },
+      },
+    ]);
+
+    try {
+      const mgr = new SessionManager(deps);
+      const threadId = mgr.createSession('/tmp/ws');
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'tui',
+        workspace: '/tmp/ws',
+      });
+      state.transcript.messages = Array.from({ length: 3 }, (_, index) => ({
+        kind: 'user' as const,
+        messageId: `message-${index}`,
+        turnId: `turn-${index}`,
+        ordinal: index,
+        createdAt: `2026-08-08T00:0${index}:00.000Z`,
+        content: `Historical goal ${index}: ${'important context '.repeat(1_000)}`,
+      }));
+      const store = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
+      try {
+        store.saveSnapshot(threadId, state);
+      } finally {
+        store.close();
+      }
+
+      const result = await mgr.handleContextCompaction(threadId);
+
+      expect(server.getRequestCount()).toBe(1);
+      expect(result.events).toContainEqual(
+        expect.objectContaining({ type: 'context.compaction_completed' }),
+      );
+      const restored = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
+      try {
+        expect(
+          restored.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>(threadId)?.context
+            .activeCheckpoint,
+        ).toMatchObject({ coveredThroughMessageId: 'message-2' });
+      } finally {
+        restored.close();
+      }
+      server.assertComplete();
+    } finally {
+      server.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('standalone compaction fails closed through Provider data admission', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-compact-policy-'));
+    const server = createMockModelServer();
+    const deps = makeDeps();
+    deps.checkpointPath = join(root, 'checkpoints.sqlite');
+    deps.config = {
+      apiKey: 'test',
+      baseURL: server.baseURL,
+      modelName: 'unapproved-model',
+      providerName: 'unapproved-provider',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: true },
+      features: { contextCompactionManualV1: true, providerDataPolicyV1: true },
+      compaction: { maxSummaryTokens: 200, maxNarrativeTokens: 200 },
+    };
+
+    try {
+      const mgr = new SessionManager(deps);
+      const threadId = mgr.createSession('/tmp/ws');
+      const state = createInitialRuntimeState({
+        threadId,
+        userId: 'tui',
+        workspace: '/tmp/ws',
+      });
+      state.transcript.messages = Array.from({ length: 3 }, (_, index) => ({
+        kind: 'user' as const,
+        messageId: `message-${index}`,
+        turnId: `turn-${index}`,
+        ordinal: index,
+        createdAt: `2026-08-08T00:0${index}:00.000Z`,
+        content: `Historical goal ${index}: ${'important context '.repeat(1_000)}`,
+      }));
+      const store = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
+      try {
+        store.saveSnapshot(threadId, state);
+      } finally {
+        store.close();
+      }
+
+      const result = await mgr.handleContextCompaction(threadId);
+
+      expect(server.getRequestCount()).toBe(0);
+      expect(result.events).toContainEqual(
+        expect.objectContaining({
+          type: 'context.compaction_failed',
+          errorKind: 'provider_admission_denied',
+          retryable: false,
+        }),
+      );
+      expect(result.isError).toBe(true);
+      const restored = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
+      try {
+        expect(
+          restored.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>(threadId)?.context
+            .pendingCompaction,
+        ).toBeUndefined();
+      } finally {
+        restored.close();
+      }
+    } finally {
+      server.stop();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   // ── createSession ──
@@ -1205,6 +1493,61 @@ describe('SessionManager', () => {
 // ── SessionRuntime ──
 
 describe('SessionRuntime', () => {
+  test('serializes manual compaction operations for one session', async () => {
+    const runtime = makeRuntime();
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const first = runtime.runManualCompactionExclusive(async () => {
+      order.push('first:start');
+      await firstGate;
+      order.push('first:end');
+    });
+    const second = runtime.runManualCompactionExclusive(async () => {
+      order.push('second:start');
+      order.push('second:end');
+    });
+
+    await Promise.resolve();
+    expect(order).toEqual(['first:start']);
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end']);
+  });
+
+  test('closing a session aborts the active compaction and rejects queued writers', async () => {
+    const runtime = makeRuntime();
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    let queuedRan = false;
+    const first = runtime.runManualCompactionExclusive(async (signal) => {
+      markStarted();
+      await new Promise<void>((resolve) => {
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+    });
+    const queued = runtime.runManualCompactionExclusive(async () => {
+      queuedRan = true;
+    });
+    const queuedResult = queued.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    await started;
+    await runtime.cancelManualCompaction(true);
+    await first;
+
+    const error = await queuedResult;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).toBe('AbortError');
+    expect(queuedRan).toBe(false);
+  });
+
   test('suppresses the stale cancellation mismatch from user-visible runtime events', () => {
     expect(
       isSilentCancellationMismatch({

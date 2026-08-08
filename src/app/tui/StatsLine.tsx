@@ -27,7 +27,9 @@ function fullWidth(
 ): number {
   let w = status.modelName.length;
   const isDS = status.modelProvider === 'deepseek';
-  if (isDS && status.thinkingMode) w += 3 + String(status.thinkingMode).length; // " · medium"
+  if (status.reasoningEnabled !== false && status.thinkingMode) {
+    w += 1 + String(status.thinkingMode).length; // " medium"
+  }
   if (isDS && status.totalTokens > 0) w += 3 + 7 + 3; // " · cache: 0%"
   if (contextPct)
     w += 3 + contextPct.length + 8; // " · 30% context"
@@ -60,7 +62,10 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
         : t.muted;
 
   const isDeepSeek = status.modelProvider === 'deepseek';
-  const showThink = isDeepSeek && !!status.thinkingMode;
+  // The routed provider may be a compatible/custom endpoint even when the
+  // selected model supports reasoning. The persisted thinking mode is the
+  // authoritative presentation state, not the provider identifier.
+  const showThink = status.reasoningEnabled !== false && !!status.thinkingMode;
   const showCache = isDeepSeek && status.totalTokens > 0;
 
   const contextPct =
@@ -82,7 +87,7 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
       <Text color={t.muted}>{status.modelName}</Text>
       {!compact && showThink && (
         <>
-          <Text color={t.dim}> · </Text>
+          <Text> </Text>
           <Text color={t.success}>{status.thinkingMode}</Text>
         </>
       )}
@@ -90,7 +95,7 @@ export default function StatsLine({ status, interactionMode, planMode }: StatsLi
         <>
           <Text color={t.dim}> · </Text>
           <Text color={cacheColor}>{cachePct.toFixed(0)}%</Text>
-          <Text color={t.muted}> cache</Text>
+          <Text color={cacheColor}> cache</Text>
         </>
       )}
       {!compact && contextPct && (

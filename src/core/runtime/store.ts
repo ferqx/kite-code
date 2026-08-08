@@ -31,6 +31,15 @@ export class RemoteMcpEgressNonceConflictError extends Error {
   }
 }
 
+export class RuntimeRevisionConflictError extends Error {
+  constructor(threadId: string, expected: number, actual: number | null) {
+    super(
+      `Runtime revision conflict for ${threadId}: expected ${expected}, found ${actual ?? 'deleted'}.`,
+    );
+    this.name = 'RuntimeRevisionConflictError';
+  }
+}
+
 export interface RuntimeEventMetadata {
   eventId: string;
   revision: number;
@@ -125,6 +134,19 @@ export interface RuntimeStore {
   getSessionModelRoute(threadId: string): RuntimeSessionModelRoute | null;
   setSessionModelRoute(threadId: string, route: RuntimeSessionModelRoute): void;
   deleteSession(threadId: string): void;
+  tryAcquireEffectLease(
+    threadId: string,
+    effectId: string,
+    ownerId: string,
+    expiresAtMs: number,
+  ): boolean;
+  renewEffectLease(
+    threadId: string,
+    effectId: string,
+    ownerId: string,
+    expiresAtMs: number,
+  ): boolean;
+  releaseEffectLease(threadId: string, effectId: string, ownerId: string): void;
   listNamedSnapshots(threadId: string): RuntimeSnapshotEntry[];
   restoreNamedSnapshot(threadId: string, snapshotId: string): boolean;
   forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean;
@@ -407,6 +429,15 @@ export function createRuntimeStore(
       PRIMARY KEY (nonce_digest)
     )
   `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS runtime_effect_leases (
+      thread_id TEXT NOT NULL,
+      effect_id TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      expires_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (thread_id, effect_id)
+    )
+  `);
 
   // Additive metadata upgrades for stores created before runtime tracing was added.
   for (const [table, column, definition] of [
@@ -475,6 +506,27 @@ export function createRuntimeStore(
   );
   const selectSnapshot = db.query<SnapshotRow, [string]>(
     'SELECT thread_id, state_json, event_position, state_revision, state_checksum, schema_version, created_at FROM runtime_snapshots WHERE thread_id = ? ORDER BY created_at DESC LIMIT 1',
+  );
+  const selectSnapshotRevision = db.query<{ state_revision: number }, [string]>(
+    'SELECT state_revision FROM runtime_snapshots WHERE thread_id = ?',
+  );
+  const deleteExpiredEffectLease = db.query(
+    'DELETE FROM runtime_effect_leases WHERE thread_id = ? AND effect_id = ? AND expires_at_ms <= ?',
+  );
+  const insertEffectLease = db.query(
+    'INSERT OR IGNORE INTO runtime_effect_leases (thread_id, effect_id, owner_id, expires_at_ms) VALUES (?, ?, ?, ?)',
+  );
+  const selectEffectLeaseOwner = db.query<{ owner_id: string }, [string, string]>(
+    'SELECT owner_id FROM runtime_effect_leases WHERE thread_id = ? AND effect_id = ?',
+  );
+  const renewEffectLease = db.query(
+    'UPDATE runtime_effect_leases SET expires_at_ms = ? WHERE thread_id = ? AND effect_id = ? AND owner_id = ?',
+  );
+  const releaseEffectLease = db.query(
+    'DELETE FROM runtime_effect_leases WHERE thread_id = ? AND effect_id = ? AND owner_id = ?',
+  );
+  const deleteEffectLeasesForThread = db.query(
+    'DELETE FROM runtime_effect_leases WHERE thread_id = ?',
   );
   const upsertNamedSnapshot = db.query(
     'INSERT OR REPLACE INTO runtime_named_snapshots (thread_id, name, event_position, state_json, created_at) VALUES (?, ?, ?, ?, unixepoch())',
@@ -680,6 +732,13 @@ export function createRuntimeStore(
     insertForkFilePreimage,
     deleteSession,
     listNamedSnapshots,
+    selectSnapshotRevision,
+    deleteExpiredEffectLease,
+    insertEffectLease,
+    selectEffectLeaseOwner,
+    renewEffectLease,
+    releaseEffectLease,
+    deleteEffectLeasesForThread,
   ] as const;
 
   const claimMcpEgressNonce = (threadId: string, event: RuntimeEvent): void => {
@@ -761,6 +820,17 @@ export function createRuntimeStore(
       if (isClosed) return;
       try {
         db.transaction(() => {
+          const firstRevision = metadata?.[0]?.revision;
+          if (firstRevision != null) {
+            const expectedRevision = firstRevision - 1;
+            const actualRevision = selectSnapshotRevision.get(threadId)?.state_revision ?? null;
+            if (
+              (actualRevision == null && expectedRevision !== 0) ||
+              (actualRevision != null && actualRevision !== expectedRevision)
+            ) {
+              throw new RuntimeRevisionConflictError(threadId, expectedRevision, actualRevision);
+            }
+          }
           upsertSession.run(threadId);
           for (const [index, event] of events.entries()) {
             claimMcpEgressNonce(threadId, event);
@@ -790,12 +860,36 @@ export function createRuntimeStore(
           );
         })();
       } catch (e) {
-        if (e instanceof RemoteMcpEgressNonceConflictError) throw e;
+        if (
+          e instanceof RemoteMcpEgressNonceConflictError ||
+          e instanceof RuntimeRevisionConflictError
+        )
+          throw e;
         throw new Error(
           `Failed to appendEventsAndSnapshot for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
           { cause: e },
         );
       }
+    },
+
+    tryAcquireEffectLease(threadId, effectId, ownerId, expiresAtMs): boolean {
+      if (isClosed) return false;
+      return db.transaction(() => {
+        deleteExpiredEffectLease.run(threadId, effectId, Date.now());
+        insertEffectLease.run(threadId, effectId, ownerId, expiresAtMs);
+        return selectEffectLeaseOwner.get(threadId, effectId)?.owner_id === ownerId;
+      })();
+    },
+
+    renewEffectLease(threadId, effectId, ownerId, expiresAtMs): boolean {
+      if (isClosed) return false;
+      renewEffectLease.run(expiresAtMs, threadId, effectId, ownerId);
+      return selectEffectLeaseOwner.get(threadId, effectId)?.owner_id === ownerId;
+    },
+
+    releaseEffectLease(threadId, effectId, ownerId): void {
+      if (isClosed) return;
+      releaseEffectLease.run(threadId, effectId, ownerId);
     },
 
     loadEvents(threadId: string, since?: number): StoredEvent[] {
@@ -952,6 +1046,7 @@ export function createRuntimeStore(
         deleteSnapshot.run(threadId);
         deleteNamedSnapshots.run(threadId);
         deleteFilePreimages.run(threadId);
+        deleteEffectLeasesForThread.run(threadId);
         deleteSession.run(threadId);
       })();
     },

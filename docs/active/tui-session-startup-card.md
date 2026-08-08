@@ -18,7 +18,7 @@
 ╭──────────────────────────────────────────────────────────╮
 │ ──◆ Kite Code                                             │
 │                                                          │
-│ model      gpt-5.6 · low                                  │
+│ model      gpt-5.6 low                                    │
 │ workspace  ~/Code/ai/kite-code                            │
 ╰──────────────────────────────────────────────────────────╯
 
@@ -26,14 +26,14 @@
 
 - Header 使用主题 `dim` 色的圆角四周边框，弱于品牌色与正文；边框内左右各留一列内边距，品牌行、`model` 和 `workspace` 在内边距之后从同一列开始左对齐，通过品牌行后的空行建立层级。
 - `──` 与字段名使用弱化色；`◆` 使用普通字重品牌色，以便与细横线保持字形视觉中心；`Kite Code` 使用品牌色和粗体。线与菱形之间不得插入空格，保留“风筝线连接风筝”的字标语义。
-- `model` 展示会话启动时的模型；有推理强度且终端至少 40 列时追加 ` · <thinkingMode>`。
+- `model` 展示会话启动时的模型；终端至少 40 列且模型配置未显式设定 `reasoning: false` 时追加 ` <thinkingMode>`。缺省配置和 `reasoning: true` 都必须显示该强度。
 - `workspace` 将用户 home 前缀收缩为 `~`，路径或模型超出可用列时从中部截断，保留首尾辨识信息。
 - Header 外框默认最大宽度为 60 列，不占满宽终端；终端不足 60 列时随窗口收缩，最小布局宽度为 20 列。边框与两侧内边距共占用四列、边框占用两行，内部文字据此扣除可用宽度。终端 resize 继续通过 App remount 和 Static 全量重建适配新宽度，不为 Header 建立独立 resize 监听。
 - Header 不再显示猫咪 ASCII、working/error 表情或帮助快捷键；运行状态属于 Footer/StatusBar。`Kite Code` 品牌只在会话 Header 展示，Overlay 题头仅显示 `── <标题> ──`。
 
 ## 状态语义
 
-Header 是**会话启动快照**，不是持续更新的状态面板。`App` 在当前 `sessionKey` 首次渲染时冻结模型、推理强度和工作区；同一会话中的 `/model` 切换不得重绘已经写入 scrollback 的卡片。当前模型仍由 Footer/StatsLine 展示。
+Header 使用 Ink `Static` 写入 scrollback，但模型或推理强度切换后，`TuiApp` 必须通过已有的同步清屏重挂载路径原子重绘，以免会话 Header 保留旧配置；会话和当前输入状态不得因此重置。当前模型和推理强度也由 Footer/StatsLine 展示。
 
 新会话、会话切换或恢复导致 `sessionKey` 变化时，Header 使用该会话当时的状态建立新快照；`useStaticContent` 负责清屏并按既有 Static 规则重新输出。
 

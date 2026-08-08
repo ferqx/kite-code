@@ -91,3 +91,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0087](0087-tui-silent-startup-prewarm.md) | accepted | TUI 启动期静默沙箱预热：trust/config 解析后即触发，退出可中止、并发无残留 |
 | [0088](0088-remove-windows-appcontainer-backend.md) | accepted | 移除 Windows AppContainer、私有仓库 staging 与 reconciliation，只保留 direct restricted-token backend |
 | [0089](0089-windows-online-loopback-proxy-inheritance.md) | accepted | Windows 已审批 Online Shell 安全继承发起用户的无凭据 loopback WinINet 代理 |
+| [0090](0090-manual-compaction-convergence-and-viability.md) | accepted | 手动压缩在 Provider 前验证最大收益、串行同 session lifecycle，并以 stale 终态收敛 |
+| [0091](0091-runtime-store-compaction-ownership.md) | accepted | RuntimeStore effect lease 与 revision CAS 阻止重复压缩、stale 覆盖和删除后复活 |
