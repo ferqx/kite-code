@@ -24,7 +24,12 @@ import type { RuntimeEvent } from '@/core/runtime/events';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { runtimeStorePathFor } from '@/core/runtime/store';
 import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
-import { resolveSandboxRuntime } from '@/core/sandbox/index';
+import {
+  resolveSandboxRuntime,
+  resolveWindowsManagedNetworkSetupStatusV1,
+  sandboxSupportsFullModeV1,
+  setupWindowsManagedNetworkV1,
+} from '@/core/sandbox/index';
 import { createRuntimeSecretDetectorV1 } from '@/core/session-logger';
 import { filterTraceTurn, formatTrace, parseTraceJsonl } from '@/core/session-logger/replay';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
@@ -33,7 +38,7 @@ import type { UserInputProvider } from '@/protocol/provider';
 import packageJson from '../../../package.json' with { type: 'json' };
 
 export interface ParsedArgs {
-  command: 'run' | 'resume' | 'trace' | 'help';
+  command: 'run' | 'resume' | 'trace' | 'help' | 'sandbox-setup' | 'sandbox-status';
   task?: string;
   threadId: string;
   userId: string;
@@ -74,9 +79,21 @@ export async function main(): Promise<void> {
       console.log(JSON.stringify(selected, null, 2));
     } else {
       console.log(
-        formatTrace(records, { turn: args.traceTurn, color: Boolean(process.stdout.isTTY) }),
+        formatTrace(records, {
+          turn: args.traceTurn,
+          color: Boolean(process.stdout.isTTY),
+        }),
       );
     }
+    return;
+  }
+  if (args.command === 'sandbox-status') {
+    console.log(JSON.stringify(await resolveWindowsManagedNetworkSetupStatusV1(), null, 2));
+    return;
+  }
+  if (args.command === 'sandbox-setup') {
+    const status = await setupWindowsManagedNetworkV1();
+    console.log(`Windows network sandbox is ${status.state}.`);
     return;
   }
   if (args.command === 'resume') {
@@ -97,7 +114,10 @@ export async function main(): Promise<void> {
           'or pass --trust-workspace to record trust explicitly from this entry point.',
       );
     }
-    const decision = trustWorkspace({ workspace: args.workspace, source: 'config' });
+    const decision = trustWorkspace({
+      workspace: args.workspace,
+      source: 'config',
+    });
     if (decision.status !== 'recorded') {
       throw new Error(`Workspace trust could not be recorded: ${decision.message}`);
     }
@@ -112,7 +132,10 @@ export async function main(): Promise<void> {
   const sandboxRuntime = resolveSandboxRuntime({
     enabled: args.sandbox && config.sandbox.enabled,
   });
-  const executionStatus = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+  const executionStatus = tryProjectAdmittedExecutionStatusV1({
+    config,
+    sandboxRuntime,
+  });
   if (args.telemetryStatus) {
     const consent = resolveTelemetryConsentV1({
       releaseChannel: 'development',
@@ -149,18 +172,6 @@ export async function main(): Promise<void> {
     );
     return;
   }
-  if (interactionMode === 'full' && !sandboxRuntime.available) {
-    throw new Error('full mode requires an available workspace sandbox.');
-  }
-  const authorizationMode =
-    args.authorizationMode ?? (args.approvalGrant === 'full_access' ? 'full_access' : undefined);
-  if (authorizationMode) {
-    assertAuthorizationElevation({
-      mode: authorizationMode,
-      source: 'config',
-      sandboxAvailable: sandboxRuntime.available,
-    });
-  }
   const shellExecutor = composeAppSandboxExecutorV1({
     entrypoint: 'foreground_cli',
     workspace: args.workspace,
@@ -168,6 +179,29 @@ export async function main(): Promise<void> {
     sandboxEnabled: sandboxRuntime.enabled,
     onDiagnostic: (message) => console.warn(`[sandbox] ${message}`),
   });
+  const shellRuntime = await shellExecutor.prepare();
+  const effectiveSandboxRuntime =
+    shellRuntime.mode === 'sandbox'
+      ? { enabled: true, backend: shellRuntime.backend, available: true }
+      : { enabled: false, backend: 'none' as const, available: false };
+  if (shellRuntime.mode === 'host_shell') {
+    console.error(
+      '[sandbox] Native sandbox unavailable; using host Shell (Bash/cmd/PowerShell). Full remains unavailable.',
+    );
+  }
+  const fullModeAvailable = sandboxSupportsFullModeV1(effectiveSandboxRuntime.backend);
+  if (interactionMode === 'full' && !fullModeAvailable) {
+    throw new Error('非沙箱环境无法开启full');
+  }
+  const authorizationMode =
+    args.authorizationMode ?? (args.approvalGrant === 'full_access' ? 'full_access' : undefined);
+  if (authorizationMode) {
+    assertAuthorizationElevation({
+      mode: authorizationMode,
+      source: 'config',
+      sandboxAvailable: fullModeAvailable,
+    });
+  }
   const observability = composeObservabilityV1({
     artifactTelemetryAllowed: false,
     featureEnabled: getFeatureFlags(config).observabilityMetricsV1,
@@ -198,7 +232,7 @@ export async function main(): Promise<void> {
       interactionMode,
       authorizationMode,
       authorizationSource: authorizationMode === 'full_access' ? 'config' : undefined,
-      sandboxBackend: sandboxRuntime.backend,
+      sandboxBackend: effectiveSandboxRuntime.backend,
       frontend: 'cli',
       sessionLoggingPolicy: config.sessionLoggingPolicy,
       sessionLoggingContentInspector: createRuntimeSecretDetectorV1({
@@ -320,9 +354,17 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
         console.error('Type y/yes to approve, n to reject, f/full_access for full access:');
         const value = (await readStdin()).toLowerCase();
         if (value === 'f' || value === 'full_access')
-          return { type: 'approve', interactionId: effect.interactionId, grant: 'full_access' };
+          return {
+            type: 'approve',
+            interactionId: effect.interactionId,
+            grant: 'full_access',
+          };
         if (value === 'y' || value === 'yes')
-          return { type: 'approve', interactionId: effect.interactionId, grant: 'approve_once' };
+          return {
+            type: 'approve',
+            interactionId: effect.interactionId,
+            grant: 'approve_once',
+          };
         return { type: 'reject', interactionId: effect.interactionId };
       }
       if (state.interactions.kind === 'awaiting_review') {
@@ -340,16 +382,27 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
         if (value === 'a' || value === 'auto')
           return {
             ...review,
-            decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+            decision: {
+              kind: 'approve',
+              nextMode: 'auto',
+              clearPlanningContext: false,
+            },
           };
         if (value === 'e' || value === 'accept-edits')
           return {
             ...review,
-            decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+            decision: {
+              kind: 'approve',
+              nextMode: 'accept_edits',
+              clearPlanningContext: false,
+            },
           };
         if (value === 'f' || value === 'feedback') {
           console.error('Enter your feedback:');
-          return { ...review, decision: { kind: 'revise', feedback: await readStdin() } };
+          return {
+            ...review,
+            decision: { kind: 'revise', feedback: await readStdin() },
+          };
         }
         return { ...review, decision: { kind: 'cancel' } };
       }
@@ -361,7 +414,11 @@ function createCliRuntimeProvider(): RuntimeActionProvider {
       request.options.forEach((option, index) => {
         console.error(`  ${index + 1}. ${option.label}`);
       });
-      return { type: 'input', interactionId: effect.interactionId, text: await readStdin() };
+      return {
+        type: 'input',
+        interactionId: effect.interactionId,
+        text: await readStdin(),
+      };
     },
   };
 }
@@ -412,17 +469,28 @@ export function createCliProvider(_args: ParsedArgs): UserInputProvider {
         if (lower === 'a' || lower === 'auto')
           return {
             type: 'plan_review_decision',
-            decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+            decision: {
+              kind: 'approve',
+              nextMode: 'auto',
+              clearPlanningContext: false,
+            },
           };
         if (lower === 'e' || lower === 'accept-edits')
           return {
             type: 'plan_review_decision',
-            decision: { kind: 'approve', nextMode: 'accept_edits', clearPlanningContext: false },
+            decision: {
+              kind: 'approve',
+              nextMode: 'accept_edits',
+              clearPlanningContext: false,
+            },
           };
         if (lower === 'f' || lower === 'feedback') {
           console.error('Enter your feedback:');
           const feedback = await readStdin();
-          return { type: 'plan_review_decision', decision: { kind: 'revise', feedback } };
+          return {
+            type: 'plan_review_decision',
+            decision: { kind: 'revise', feedback },
+          };
         }
         return { type: 'plan_review_decision', decision: { kind: 'cancel' } };
       }
@@ -447,13 +515,17 @@ function readStdin(): Promise<string> {
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const command =
-    argv[0] === 'resume'
-      ? 'resume'
-      : argv[0] === 'run'
-        ? 'run'
-        : argv[0] === 'trace'
-          ? 'trace'
-          : 'help';
+    argv[0] === 'sandbox' && argv[1] === 'setup'
+      ? 'sandbox-setup'
+      : argv[0] === 'sandbox' && argv[1] === 'status'
+        ? 'sandbox-status'
+        : argv[0] === 'resume'
+          ? 'resume'
+          : argv[0] === 'run'
+            ? 'run'
+            : argv[0] === 'trace'
+              ? 'trace'
+              : 'help';
   const cwd = process.cwd();
   const value = (name: string, fallback: string) => {
     const index = argv.indexOf(name);
@@ -595,6 +667,8 @@ function printHelp(): void {
   console.log(`Usage:
   bun run agent run --task "Create hello.txt"
   bun run agent resume --thread default-thread --approve
+  bun run agent sandbox status
+  bun run agent sandbox setup
 
 Options:
   --task <text>          Task for run

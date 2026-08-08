@@ -3,7 +3,7 @@
 状态：active
 范围：TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界
 读取时机：修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done/text/model_requested）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks/settleActiveThought）、`compaction.ts`（折叠引擎）时必读。
-验证：`bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/runtime/agent.integration.test.ts tests/model-invoke.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`
+验证：`bun test tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/runtime/agent.integration.test.ts tests/model-invoke.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle cancel-successor-render`
 最后更新：2026-07-30
 
 ## 约束
@@ -56,7 +56,7 @@
 
 24. **探索阶段块与旁白字幕（ADR-0030）**：一段只读探索阶段 = 单个 `tool_summary` 块，跨模型调用存活：`model.requested` 不关闭（规则 21），`reason` 累加时长并更新预览（规则 4/11），探索 `tool_call` 并入同块（统计标签实时刷新）。圆点整个阶段持续闪烁，运行态不显示 footer（规则 13）；阶段边界（规则 1/3）关闭后 Thought 移除圆点、折叠工具步骤、保留已确认旁白字幕（`captions`），仅移除 reasoning 预览和运行态指示器。**旁白文本吸收**：阶段块活跃时，可见文本（非流式一次完整到达）不建独立块，写入 `pendingCaption`，渲染于标题行下、步骤树之上（Markdown 原样，缩进与标题文字列对齐）；随后到来只读工具将其确认为 `captions`（永久留在块内，多段按 `\n\n` 时序累积）；阶段结束时仍未确认的 `pendingCaption` 脱离为块后独立文本块（最终回答 / 写入前旁白）；纯思考块的 pendingCaption 被文本路径关闭时并入题头（规则 19）。流式增量文本（事件携带累积全文）以 `startsWith` 识别替换，避免重复。**纯空白文本整体忽略**（不关闭、不建块）。折叠阈值（`MAX_VISIBLE_STEPS=5`）作用于阶段块的合并步骤总数。
 
-25. **模型流式增量与重复思考段（ADR-0045）**：Runtime 为每段连续 reasoning 分配稳定 `segmentId`，依次发出累计语义的 `model.reasoning_delta` 和一次 `model.reasoning_completed`；一次模型请求或 Agent 执行可包含任意多个 `reasoning → tool → reasoning` 段。Provider 缺少显式 start/end 时，模型适配层在 reasoning→text/tool/流结束边界合成 completed。Thought 阶段使用显式 `running | awaiting_terminal` 生命周期：delta 期间只缓存、不渲染；completed 把该段完整 reasoning 一次性放入活动窗口，后续工具活动可替换它，下一段 completed 又可替换工具活动，整个探索过程仍聚合为同一个 Thought。第一条 `model.text_delta` 使 Thought 停止圆点、立即隐藏 reasoning 与工具活动明细，并转为 `awaiting_terminal`；该内部状态只用于保留终态归属、阻止迟到事件创建第二个 Thought，不得继续表现为详情展开。第一段完整回答组件进入渲染树时，Thought 以当时已知耗时冻结并进入 Static。之后每个完整回答组件也立即进入 Static/终端 scrollback，不等待 `model.responded`，因此流式期间向上滚动始终能看到全部已提交内容。`model.responded` 只结束内部归属并补齐未提交尾部，不回写已经输出到 Static 的视觉块。事件派发固定 delta 先于对应 completed；这些瞬态事件不进入 Runtime store、events.jsonl 或回放。
+25. **模型流式增量与重复思考段（ADR-0045）**：Runtime 为每段连续 reasoning 分配稳定 `segmentId`，依次发出累计语义的 `model.reasoning_delta` 和一次 `model.reasoning_completed`；一次模型请求或 Agent 执行可包含任意多个 `reasoning → tool → reasoning` 段。Provider 缺少显式 start/end 时，模型适配层在 reasoning→text/tool/流结束边界合成 completed。Thought 阶段使用显式 `running | awaiting_terminal` 生命周期：delta 期间只缓存、不渲染；completed 把该段完整 reasoning 一次性放入活动窗口，后续工具活动可替换它，下一段 completed 又可替换工具活动，整个探索过程仍聚合为同一个 Thought。第一条 `model.text_delta` 使 Thought 停止圆点、立即隐藏 reasoning 与工具活动明细，并转为 `awaiting_terminal`；该内部状态只用于保留终态归属、阻止迟到事件创建第二个 Thought，不得继续表现为详情展开。第一段完整回答组件进入渲染树时，Thought 以当时已知耗时冻结并进入 Static。之后每个完整回答组件也立即进入 Static/终端 scrollback，不等待 `model.responded`，因此流式期间向上滚动始终能看到全部已提交内容。`model.responded` 只结束内部归属并补齐未提交尾部，不回写已经输出到 Static 的视觉块。事件派发固定 delta 先于对应 completed；这些瞬态事件不进入 Runtime store、events.jsonl 或回放。前台 TUI 把 `model.reasoning_completed` 视为 presentation boundary：投影 completed 后，必须等待 Ink 的实际 React commit、节流渲染队列与 stdout 写入共同 flush，再继续消费紧随其后的 `model.text_delta`、工具或模型终态事件；因此快速 Provider 也至少产生一个“已有 Thought、尚无最终回答”的独立终端帧。该屏障等待真实输出完成，不得用固定几十毫秒延迟猜测渲染时序；后台会话不等待前台展示屏障。
 
 26. **流式断线重连（ADR-0032 / ADR-0033）**：`model.retry` 冻结断线前已经提交的完整 Markdown 块；尚未闭合的文本尾部和 reasoning delta 从未进入渲染树，因此断线时仍保持隐藏。重连后的累计文本按新的提交边界继续处理；终态 `model.responded` 以权威全文补齐或在分歧时替换当前请求的文本块，并清除 retry 状态。partial tool call 不创建卡片或 summary，只有完整成功流的终态工具调用进入 Runtime。
 
@@ -66,7 +66,7 @@
 
 29. **文件与独立工具卡渲染**：`renderFileSummary` 自动区分 diff 格式（删除行红底 `diffRemovedBg`、新增行绿底 `diffAddedBg`、上下文行无背景）和纯内容格式。write_file 新建/追加时所有内容行视为新增全绿底，内容未变覆写保持 dim。文件内容行自动语法高亮：行号前缀（`LINE_RE`）走普通 `<Text>`，代码正文走 `<SyntaxHighlight code=... language=.../>`，语言由 `detectLanguage(path)` 从扩展名推断。`...` 分隔符不做高亮。独立工具卡展开长输出时不追加 `Enter 折叠` 尾部提示；既有 Enter 展开/折叠交互保持不变。
 
-30. **取消时只统计实际开始的探索项**：TUI 取消收尾时，仍为 `queued`、从未收到 `tool.started` 的探索项从聚合投影移除，不得转成看似已完成的 `read N files` 等统计；纯工具聚合因此为空时整块移除，已有 reasoning 或旁白仍保留。已进入 `running` 的探索项保留并标记为 cancelled。独立工具卡取消时必须从原始参数补齐终态 `detail`，Bash 卡片不得丢失原执行指令，也不得把取消误渲染为 `exit: 0`；纯取消摘要不重复充当命令输出。带 `cause=user` 的 `turn.aborted` 必须复用同一清理投影、清空 interrupt 并把 TUI 切到 idle，不追加独立的整轮取消提示，保证实时界面与事件重放一致。
+30. **取消时只统计实际开始的探索项**：TUI 取消收尾时，仍为 `queued`、从未收到 `tool.started` 的探索项从聚合投影移除，不得转成看似已完成的 `read N files` 等统计；纯工具聚合因此为空时整块移除，已有 reasoning 或旁白仍保留。已进入 `running` 的探索项保留并标记为 cancelled。独立工具卡取消时必须从原始参数补齐终态 `detail`，Bash 卡片不得丢失原执行指令，也不得把取消误渲染为 `exit: 0`；纯取消摘要不重复充当命令输出。运行卡片通常显式携带 `expanded=false`，本地 Ctrl+C/Esc 收尾必须把取消终态强制设为 `expanded=true`，使 `⎿ cancelled` 在当前会话立即可见，并与 durable `tool.cancelled` 重放结果一致。带 `cause=user` 的 `turn.aborted` 必须复用同一清理投影、清空 interrupt 并把 TUI 切到 idle，不追加独立的整轮取消提示，保证实时界面与事件重放一致。
 
 
 ## 设计文档

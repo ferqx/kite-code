@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-04（单维护者开源首发路线图完成并归档）
+最后更新：2026-08-08（合并 TUI 交互恢复、取消投影与 Windows 沙箱决策；AppContainer 计划由 ADR-0088 取代）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -20,6 +20,8 @@
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
 | [`2026-08-04-tui-overlay-design-system.md`](2026-08-04-tui-overlay-design-system.md) | archived | P1 | 现有 Overlay primitives | [完成记录](../execution/completed/2026-08-05-tui-overlay-design-system.md) | Overlay contract、MCP、通用选择页、交互页与文档回归全部完成 |
+| [2026-08-07-tui-cancellation-projection-convergence.md](2026-08-07-tui-cancellation-projection-convergence.md) | completed | P0 | 当前 TUI 取消/恢复规则 | 两入口、一投影、一渲染 | shared projection、footer 解耦、live/replay 等价测试 |
+| [2026-08-04-windows-shell-sandbox.md](2026-08-04-windows-shell-sandbox.md) | superseded | P1 | ADR-0072、0073、0077、0078、0079、0080、0081 | ADR-0088 移除 AppContainer；direct restricted-token 规则转入 active 文档 | 历史实现记录 |
 | [`2026-07-29-agent-production-readiness-roadmap.md`](2026-07-29-agent-production-readiness-roadmap.md) | archived | P0 | ADR-0069 | [完成记录](../execution/completed/2026-08-04-single-maintainer-open-source-first-release.md) | G0/G1、候选构建/安装、真实 Provider 与 108 Task 终态全部收口 |
 | [`2026-07-29-agent-production-governance-decisions.md`](2026-07-29-agent-production-governance-decisions.md) | superseded | P0 | ADR-0068 | 历史 Phase 0 | 5 Task completed；旧 authority/milestone 只作历史 |
 | [`2026-07-29-agent-production-local-data-privacy.md`](2026-07-29-agent-production-local-data-privacy.md) | superseded | P0 | ADR-0068 | 历史 Phase 1A | 7 Task completed；metadata/secret/egress 边界保留 |

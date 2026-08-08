@@ -14,8 +14,15 @@ on:
       - "src/app/cli/index.ts"
       - "src/app/tui/session-manager.ts"
       - "src/core/tools/process-tree.ts"
+      - "src/core/tools/path-utils.ts"
+      - "src/core/tools/shell.ts"
+      - "src/core/tools/stream-output.ts"
+      - "src/core/types.ts"
       - "scripts/release/platform-capability-probe.ts"
       - "scripts/release/verify-platform-capability-evidence.ts"
+      - "scripts/release/windows-runner-evidence.ts"
+      - "native/windows-sandbox-runner/**"
+      - "vendor/isksh/**"
       - "release/platform-capabilities/**"
       - "tests/sandbox.test.ts"
       - "tests/sandbox-executor.test.ts"
@@ -27,6 +34,7 @@ on:
       - "tests/sandbox/platform-capability-probe.test.ts"
       - "tests/sandbox/platform-capability-verifier.test.ts"
       - "tests/sandbox/execution-boundary.test.ts"
+      - "tests/sandbox/windows-restricted-token.test.ts"
       - ".github/workflows/platform-capability-probe.yml"
 
 permissions:
@@ -66,6 +74,11 @@ jobs:
       - run: bun install --frozen-lockfile
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install --yes bubblewrap curl
+      - if: runner.os == 'Windows'
+        name: Select reproducible Windows GNU Rust toolchain
+        run: |
+          rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal
+          rustup override set 1.97.1-x86_64-pc-windows-gnu
       - name: Cross-platform exclusion contracts
         run: >-
           bun test
@@ -76,12 +89,33 @@ jobs:
           tests/sandbox/platform-capability-probe.test.ts
           tests/sandbox/platform-capability-verifier.test.ts
           tests/sandbox/execution-boundary.test.ts
+          tests/sandbox/windows-restricted-token.test.ts
       - if: runner.os == 'macOS'
         name: macOS native Seatbelt executor
         run: bun test tests/sandbox.test.ts tests/sandbox-executor.test.ts
       - if: runner.os == 'Linux'
         name: Linux native bubblewrap candidate
         run: bun test tests/sandbox.test.ts tests/sandbox-bwrap-executor.test.ts
+      - if: runner.os == 'Windows'
+        name: Build Windows sandbox runner
+        run: bun run scripts/release/build-windows-runner.ts
+      - if: runner.os == 'Windows'
+        name: Test Windows sandbox runner
+        run: cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml
+      - if: runner.os == 'Windows'
+        run: bun run scripts/release/windows-runner-evidence.ts
+      - if: runner.os == 'Windows'
+        name: Verify committed Windows runner pin
+        run: git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json
+      - if: runner.os == 'Windows'
+        name: Provision Windows managed-network test identity
+        run: .\native\windows-sandbox-runner\target\release\kite-windows-runner.exe --setup-managed-network
+      - if: runner.os == 'Windows'
+        name: Windows restricted-token and managed-network native E2E
+        env:
+          KITE_RUN_WINDOWS_RESTRICTED_TOKEN_E2E: '1'
+          KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E: '1'
+        run: bun test --max-concurrency=1 tests/sandbox/windows-restricted-token.test.ts
       - run: bun run scripts/release/platform-capability-probe.ts platform-capability-evidence.json
       - run: >-
           bun run scripts/release/verify-platform-capability-evidence.ts

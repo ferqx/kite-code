@@ -73,3 +73,21 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0069](0069-first-release-terminal-scope.md) | accepted | 首发路线以 G0/G1 为终态；取消 cohort/SLO/rollout/promotion 后续资格，108 Task 收敛为 83 completed、25 superseded |
 | [0070](0070-sandbox-git-access.md) | accepted | seatbelt 沙箱仅对 git 命令放行 Workspace `.git`，直接访问仍受保护 |
 | [0071](0071-tui-local-interaction-recovery-projection.md) | accepted | TUI 对崩溃遗留交互使用本地恢复投影，源 Runtime canonical state 保持真实 |
+| [0072](0072-windows-shell-appcontainer-sandbox.md) | accepted | Windows Shell 候选采用 Classic AppContainer、Job Object 与 native launcher |
+| [0073](0073-windows-shell-private-workspace-staging.md) | accepted | Windows Shell 仅运行于私有 Workspace staging，并以拒绝式差异回写保护动态敏感路径 |
+| [0074](0074-windows-10-api-compatibility-baseline.md) | accepted | Windows Shell makes Win10 22H2 an API/build baseline and prioritizes Win11 native evidence |
+| [0075](0075-app-shell-availability-downgrade.md) | accepted | App Shell uses host Bash when its native sandbox backend is unavailable |
+| [0076](0076-tui-sandbox-startup-and-fail-closed-shell.md) | accepted | TUI preflights native sandbox at startup and never downgrades Shell to host execution |
+| [0077](0077-unified-sandbox-startup-downgrade.md) | accepted | TUI and CLI cache one sandbox preflight decision and fall back to Bash/cmd/PowerShell without replaying user scripts |
+| [0078](0078-responsive-appcontainer-staging-and-private-bun-runtime.md) | accepted | AppContainer staging runs off the TUI thread and Bun is copied into each private invocation runtime |
+| [0079](0079-windows-managed-restricted-token-sandbox.md) | accepted | Windows Shell adopts a managed restricted-token backend while retaining dynamic protected-path safeguards |
+| [0080](0080-sandbox-environment-only-host-fallback.md) | accepted | Host Shell fallback is limited to sandbox-environment unavailability, not staging admission rejection |
+| [0081](0081-codex-style-unelevated-direct-workspace-backend.md) | accepted | Windows 默认开发 Shell 使用无 UAC restricted-token 直接 Workspace 后端；严格配置仍未获资格 |
+| [0082](0082-windows-development-network-authorization-parity.md) | accepted | Windows development Shell 对齐逐调用网络审批，并保持 restricted-token 为低保证后端 |
+| [0083](0083-windows-approved-network-managed-logon.md) | accepted | Windows 已审批联网调用切换到专用登录会话，保持 restricted token 并修复 Schannel |
+| [0084](0084-windows-sandbox-explicit-onboarding.md) | accepted | Windows 受管联网身份采用显式首次 onboarding；普通 Shell invocation 不触发 UAC |
+| [0085](0085-windows-schannel-online-acl-lease.md) | accepted | Windows Schannel 联网调用使用 Online 非管理员令牌、protected-path deny 与临时 ACL lease |
+| [0086](0086-windows-managed-online-read-roots.md) | accepted | Windows Online 身份在显式 setup 中配置非敏感 profile read roots，命令期不改写祖先 ACL |
+| [0087](0087-tui-silent-startup-prewarm.md) | accepted | TUI 启动期静默沙箱预热：trust/config 解析后即触发，退出可中止、并发无残留 |
+| [0088](0088-remove-windows-appcontainer-backend.md) | accepted | 移除 Windows AppContainer、私有仓库 staging 与 reconciliation，只保留 direct restricted-token backend |
+| [0089](0089-windows-online-loopback-proxy-inheritance.md) | accepted | Windows 已审批 Online Shell 安全继承发起用户的无凭据 loopback WinINet 代理 |

@@ -1,4 +1,4 @@
-import type { SandboxBackend } from '@/core/sandbox/index';
+import { type SandboxBackend, sandboxSupportsFullModeV1 } from '@/core/sandbox/index';
 import { InteractionMode } from '@/protocol/events';
 
 export type TuiInteractionMode =
@@ -12,13 +12,15 @@ export interface InteractionModeAdmission {
   reason: string | null;
 }
 
+export { sandboxSupportsFullModeV1 };
+
 export function fullModeUnavailableReason(
   interactionMode: TuiInteractionMode,
   sandboxBackend: SandboxBackend,
 ): string | null {
   if (interactionMode !== InteractionMode.Full) return null;
-  if (sandboxBackend !== 'none') return null;
-  return '未启用沙箱，Full 不可用';
+  if (sandboxSupportsFullModeV1(sandboxBackend)) return null;
+  return '非沙箱环境无法开启full';
 }
 
 export function resolveInteractionModeTarget(
@@ -29,7 +31,11 @@ export function resolveInteractionModeTarget(
   const normalized = (requested ?? '').toLowerCase();
   if (!normalized) {
     if (current === InteractionMode.AcceptEdits) return InteractionMode.Auto;
-    if (current === InteractionMode.Auto && sandboxBackend === 'none')
+    if (
+      current === InteractionMode.Auto &&
+      sandboxBackend !== undefined &&
+      !sandboxSupportsFullModeV1(sandboxBackend)
+    )
       return InteractionMode.AcceptEdits;
     if (current === InteractionMode.Auto) return InteractionMode.Full;
     return InteractionMode.AcceptEdits;

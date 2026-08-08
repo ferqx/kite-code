@@ -1,4 +1,4 @@
-import { render } from 'ink';
+import { render, useApp } from 'ink';
 import React from 'react';
 import {
   type AgentConfig,
@@ -13,7 +13,7 @@ import {
 import { sessionExportPath } from '@/core/config/paths';
 import { shouldPromptWorkspaceTrust } from '@/core/config/workspace-trust';
 import type { McpRuntimeProvider, RemoteMcpEgressPermitResolverV1 } from '@/core/mcp';
-import { resolveSandboxRuntime } from '@/core/sandbox';
+import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import packageJson from '../../../package.json' with { type: 'json' };
 import { defaultCheckpointPath } from '../../core/config/paths.js';
@@ -29,10 +29,16 @@ import {
   tryProjectAdmittedExecutionStatusV1,
 } from '../release/execution-status';
 import { formatReleaseStatusV1, projectReleaseStatusV1 } from '../release/status-projection';
+import {
+  type AppShellExecutorV1,
+  composeAppSandboxExecutorV1,
+  sweepOwnedSandboxPreflightWorkspaces,
+} from '../sandbox/composition';
 import App, { type Action, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
 import FirstRunFlow from './components/first-run/FirstRunFlow';
+import WindowsSandboxSetupGate from './components/first-run/WindowsSandboxSetupGate';
 import InputLine from './components/InputLine';
 import WorkspaceTrustGate from './components/WorkspaceTrustGate';
 import { createTuiExitCoordinatorV1 } from './exit-coordinator';
@@ -44,11 +50,14 @@ import type { SlashSuggestionData } from './hooks/useSlashSuggestions';
 import { shouldCancelClearedInterrupt } from './interrupt-clear';
 import { TuiUserInputProvider } from './provider';
 import { sessionDataToUI } from './replay-blocks.js';
+import { shouldAbortStoppedRun, shouldSetIdleAfterRun } from './run-lifecycle';
 import { SessionManager } from './session-manager';
 import { getDarkTheme, lightTheme, osc4Apply, ThemeContext, type ThemePreset } from './theme';
 
 /** 模块级引用，供退出时中止所有会话 / Module-level reference for aborting all sessions on exit */
 let _sessionManagerForExit: SessionManager | null = null;
+/** 退出时用于中止静默启动预热的执行器引用 / Executor reference used to abort the silent startup prewarm on exit */
+let _appShellExecutorForExit: AppShellExecutorV1 | null = null;
 let _requestTuiExit: ((code?: number) => Promise<void>) | null = null;
 
 function toErrorMessage(error: unknown): string {
@@ -88,6 +97,8 @@ export interface TuiBootstrapProps {
   model?: import('@/core/model/factory').SupportedChatModel;
   /** App-owned authorization source; omitted production composition remains fail closed. */
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
+  /** Optional App-owned Shell runtime injection used by composition and system tests. */
+  shellExecutor?: AppShellExecutorV1;
 }
 
 interface TuiAppProps {
@@ -95,11 +106,13 @@ interface TuiAppProps {
   /** 可选的自定义模型实例（用于测试注入）/ Optional custom model instance (for test injection) */
   injectModel?: import('@/core/model/factory').SupportedChatModel;
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
+  shellExecutor?: AppShellExecutorV1;
 }
 
 export function TuiBootstrap({
   model: injectModel,
   remoteMcpEgressPermitResolver,
+  shellExecutor,
 }: TuiBootstrapProps = {}) {
   const workspace = process.cwd();
   // Workspace trust is checked first — no project-level config is read before trust.
@@ -109,6 +122,9 @@ export function TuiBootstrap({
   // Config is probed after trust is established.
   const [probeResult, setProbeResult] = React.useState<ConfigProbeResult | null>(() =>
     workspaceTrusted ? probeAgentConfig() : null,
+  );
+  const [windowsSandboxReady, setWindowsSandboxReady] = React.useState(
+    () => process.platform !== 'win32' || shellExecutor !== undefined,
   );
 
   const handleTrusted = React.useCallback(() => {
@@ -124,6 +140,52 @@ export function TuiBootstrap({
 
   const handleConfigRetry = React.useCallback(() => {
     setProbeResult(probeAgentConfig());
+  }, []);
+
+  // The executor is created as soon as workspace trust and config are
+  // resolved, ahead of the main-UI mount, so the silent startup prewarm can
+  // begin paying the one-time structural cost (backend probe) before the gate
+  // or the first command. Test-injected executors keep precedence.
+  const readyConfig = probeResult?.status === 'ready' ? probeResult.config : null;
+  const bootstrapShellExecutor = React.useMemo(() => {
+    if (shellExecutor) return shellExecutor;
+    if (!readyConfig) return undefined;
+    return composeAppSandboxExecutorV1({
+      entrypoint: 'tui',
+      workspace,
+      config: readyConfig,
+    });
+  }, [shellExecutor, readyConfig, workspace]);
+
+  // The setup gate mounts before TuiApp creates a SessionManager. Register the
+  // bootstrap executor at this boundary so every early exit can still cancel
+  // the silent native prewarm through the shared exit coordinator.
+  React.useEffect(() => {
+    if (!bootstrapShellExecutor) return;
+    _appShellExecutorForExit = bootstrapShellExecutor;
+    return () => {
+      if (_appShellExecutorForExit === bootstrapShellExecutor) {
+        _appShellExecutorForExit = null;
+      }
+    };
+  }, [bootstrapShellExecutor]);
+
+  // Silent startup prewarm: success is deliberately invisible. Availability
+  // decisions (host-shell downgrade / denial) are still projected by TuiApp's
+  // prepare consumer; this kick only moves the wait earlier.
+  React.useEffect(() => {
+    if (!bootstrapShellExecutor) return;
+    void bootstrapShellExecutor.prepare().catch(() => {
+      // Aborted (exit during warmup) or superseded preparation is re-resolved
+      // by the next prepare() consumer; the silent kick never surfaces.
+    });
+  }, [bootstrapShellExecutor]);
+
+  // Remove preflight workspaces orphaned by an earlier TUI that exited mid
+  // probe. Best effort, age-bounded, and safe against concurrent TUI
+  // instances (their live probe directories are younger than the bound).
+  React.useEffect(() => {
+    void sweepOwnedSandboxPreflightWorkspaces();
   }, []);
 
   if (!workspaceTrusted) {
@@ -159,17 +221,35 @@ export function TuiBootstrap({
     );
   }
 
+  if (process.platform === 'win32' && probeResult.config.sandbox.enabled && !windowsSandboxReady) {
+    return (
+      <ThemeContext.Provider value={getDarkTheme('blue')}>
+        <WindowsSandboxSetupGate
+          onComplete={() => setWindowsSandboxReady(true)}
+          onExit={() => void _requestTuiExit?.()}
+        />
+      </ThemeContext.Provider>
+    );
+  }
+
   return (
     <TuiApp
       config={probeResult.config}
       injectModel={injectModel}
       remoteMcpEgressPermitResolver={remoteMcpEgressPermitResolver}
+      shellExecutor={bootstrapShellExecutor}
     />
   );
 }
 
-function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppProps) {
+function TuiApp({
+  config,
+  injectModel,
+  remoteMcpEgressPermitResolver,
+  shellExecutor,
+}: TuiAppProps) {
   const workspace = process.cwd();
+  const { waitUntilRenderFlush } = useApp();
   const { state, dispatch, onToggleReason } = useTuiState(
     config.modelName,
     config.providerName,
@@ -211,6 +291,9 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
   const loadGenerationRef = React.useRef(0);
   // Prevent concurrent NEW_SESSION from creating ghost sessions
   const creatingSessionRef = React.useRef(false);
+  // A cancelled run may still be unwinding while the next prompt has already
+  // been accepted. Older run finalizers must not clear the newer run's state.
+  const runGenerationRef = React.useRef(0);
   const inputValueRef = React.useRef('');
   const handleInputValueChange = React.useCallback((v: string) => {
     inputValueRef.current = v;
@@ -253,7 +336,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     (
       task: string,
       requestedPhase?: AgentPhase,
-      initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+      initialSkillActivations?: Array<{
+        skillId: string;
+        input: Record<string, unknown>;
+      }>,
     ) => Promise<void>
   >(async () => {});
   const [slashSuggestion, setSlashSuggestion] = React.useState<SlashSuggestionData | null>(null);
@@ -284,6 +370,16 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       }),
     [config],
   );
+  const appShellExecutor = React.useMemo(
+    () =>
+      shellExecutor ??
+      composeAppSandboxExecutorV1({
+        entrypoint: 'tui',
+        workspace,
+        config,
+      }),
+    [config, shellExecutor, workspace],
+  );
 
   const sessionManager = React.useMemo(() => {
     const mgr = new SessionManager({
@@ -295,13 +391,23 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       remoteMcpEgressPermitResolver,
       checkpointPath: defaultCheckpointPath(),
       observabilityBridge: observability.bridge,
+      shellExecutor: appShellExecutor,
+      flushPresentation: waitUntilRenderFlush,
     });
     mgr.setSnapshotCallback((threadId) => {
       dispatch({ type: 'SESSION_INTERRUPT_PENDING', threadId });
     });
     _sessionManagerForExit = mgr;
     return mgr;
-  }, [config, provider, dispatch, remoteMcpEgressPermitResolver, observability.bridge]);
+  }, [
+    config,
+    provider,
+    dispatch,
+    remoteMcpEgressPermitResolver,
+    observability.bridge,
+    appShellExecutor,
+    waitUntilRenderFlush,
+  ]);
   React.useEffect(
     () => () => {
       sessionManager.abortAll();
@@ -310,19 +416,59 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     },
     [sessionManager],
   );
-  const sandboxRuntime = React.useMemo(
-    () => resolveSandboxRuntime({ enabled: config.sandbox.enabled }),
-    [config.sandbox.enabled],
+  // Pending qualification is deliberately projected as unavailable. This keeps
+  // Full disabled without synchronously probing the platform in React render.
+  const [sandboxBackend, setSandboxBackend] = React.useState<SandboxBackend>('none');
+  React.useEffect(() => {
+    let disposed = false;
+    setSandboxBackend('none');
+    void appShellExecutor
+      .prepare()
+      .then((decision) => {
+        if (disposed) return;
+        setSandboxBackend(decision.mode === 'sandbox' ? decision.backend : 'none');
+        if (decision.mode === 'host_shell') {
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: 'Sandbox unavailable; using host Shell (Bash/cmd/PowerShell). Full remains unavailable.',
+          });
+        } else if (decision.mode === 'denied') {
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: `Shell unavailable: ${decision.reason ?? 'execution policy denied Shell'}`,
+            isError: true,
+          });
+        }
+      })
+      .catch(() => {
+        // Preparation aborted during exit; nothing left to project.
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [appShellExecutor, dispatch]);
+  const effectiveSandboxRuntime = React.useMemo(
+    () => ({
+      enabled: sandboxBackend !== 'none',
+      backend: sandboxBackend,
+      available: sandboxBackend !== 'none',
+    }),
+    [sandboxBackend],
   );
-  const sandboxBackend = sandboxRuntime.backend;
   const executionStatusText = React.useMemo(() => {
-    const status = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+    const status = tryProjectAdmittedExecutionStatusV1({
+      config,
+      sandboxRuntime: effectiveSandboxRuntime,
+    });
     return status
       ? formatExecutionStatusV1(status)
-      : formatUnadmittedExecutionStatusV1(sandboxRuntime);
-  }, [config, sandboxRuntime]);
+      : formatUnadmittedExecutionStatusV1(effectiveSandboxRuntime);
+  }, [config, effectiveSandboxRuntime]);
   const releaseStatusText = React.useMemo(() => {
-    const executionStatus = tryProjectAdmittedExecutionStatusV1({ config, sandboxRuntime });
+    const executionStatus = tryProjectAdmittedExecutionStatusV1({
+      config,
+      sandboxRuntime: effectiveSandboxRuntime,
+    });
     const composition = resolveReleaseCompositionV1({
       config,
       artifactReleaseProfileV1Enabled: false,
@@ -330,7 +476,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       production: false,
     });
     return formatReleaseStatusV1(projectReleaseStatusV1({ composition, executionStatus }));
-  }, [config, sandboxRuntime]);
+  }, [config, effectiveSandboxRuntime]);
   const telemetryStatusText = React.useMemo(() => {
     const consent = resolveTelemetryConsentV1({
       releaseChannel: 'development',
@@ -463,14 +609,26 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         const newId = sessionManager.createSession(workspace);
         threadIdRef.current = newId;
 
-        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+        dispatch({
+          type: 'SET_SESSIONS',
+          sessions: sessionManager.getSnapshot(),
+        });
       })
       .catch(() => {
         // Historical session failures stay inside the TUI render contract. Do not
         // create a replacement session or write raw diagnostics to stderr.
-        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
-        dispatch({ type: 'SET_SESSION_SERVICE_UNAVAILABLE', unavailable: true });
-        dispatch({ type: 'LOCAL_TEXT', text: HISTORICAL_SESSION_LIST_FAILURE_TEXT });
+        dispatch({
+          type: 'SET_SESSIONS',
+          sessions: sessionManager.getSnapshot(),
+        });
+        dispatch({
+          type: 'SET_SESSION_SERVICE_UNAVAILABLE',
+          unavailable: true,
+        });
+        dispatch({
+          type: 'LOCAL_TEXT',
+          text: HISTORICAL_SESSION_LIST_FAILURE_TEXT,
+        });
       });
   }, [
     sessionManager.registerSession,
@@ -515,7 +673,11 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
             type: 'LOAD_SESSION',
             threadId,
             blocks: [
-              { id: 1, kind: 'text', content: `Session ${threadId} has no saved checkpoints.` },
+              {
+                id: 1,
+                kind: 'text',
+                content: `Session ${threadId} has no saved checkpoints.`,
+              },
             ],
             interrupt: null,
             modelProvider: '',
@@ -552,7 +714,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
           if (loadGenerationRef.current !== gen) return;
           if (contextSnapshot) {
-            dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
+            dispatch({
+              type: 'SET_CONTEXT_SNAPSHOT',
+              snapshot: contextSnapshot,
+            });
           }
         }
       } catch {
@@ -567,14 +732,26 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           // make the failed target appear active again even though SessionManager
           // has already rolled back to oldId.
           dispatch({ type: 'HIDE_SESSIONS' });
-          dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
-          dispatch({ type: 'LOCAL_TEXT', text: HISTORICAL_SESSION_LOAD_FAILURE_TEXT });
+          dispatch({
+            type: 'SET_SESSIONS',
+            sessions: sessionManager.getSnapshot(),
+          });
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: HISTORICAL_SESSION_LOAD_FAILURE_TEXT,
+          });
           return;
         }
         dispatch({
           type: 'LOAD_SESSION',
           threadId,
-          blocks: [{ id: 1, kind: 'text', content: HISTORICAL_SESSION_LOAD_FAILURE_TEXT }],
+          blocks: [
+            {
+              id: 1,
+              kind: 'text',
+              content: HISTORICAL_SESSION_LOAD_FAILURE_TEXT,
+            },
+          ],
           interrupt: null,
           modelProvider: '',
           modelName: '',
@@ -605,8 +782,14 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         threadIdRef.current = newId;
         // The reducer will use this threadId to create the snapshot
         dispatch({ type: 'NEW_SESSION', threadId: newId });
-        dispatch({ type: 'SET_SESSION_SERVICE_UNAVAILABLE', unavailable: false });
-        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+        dispatch({
+          type: 'SET_SESSION_SERVICE_UNAVAILABLE',
+          unavailable: false,
+        });
+        dispatch({
+          type: 'SET_SESSIONS',
+          sessions: sessionManager.getSnapshot(),
+        });
         // Release the lock after the reducer processes the session change.
         // The next render (triggered by the dispatches above) will reset this.
         setTimeout(() => {
@@ -639,7 +822,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           if (hasModelConversation(stateRef.current)) {
             const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
             if (contextSnapshot) {
-              dispatch({ type: 'SET_CONTEXT_SNAPSHOT', snapshot: contextSnapshot });
+              dispatch({
+                type: 'SET_CONTEXT_SNAPSHOT',
+                snapshot: contextSnapshot,
+              });
             }
           }
         } catch (error) {
@@ -686,7 +872,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
 
         // 回放目标会话的缓冲事件
         if (incomingRt && incomingRt.eventBuffer.length > 0) {
-          dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+          dispatch({
+            type: 'SET_SESSIONS',
+            sessions: sessionManager.getSnapshot(),
+          });
           for (const event of incomingRt.eventBuffer) {
             dispatch({
               type: 'RUNTIME_EVENT',
@@ -724,7 +913,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         } else {
           dispatch(action);
         }
-        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+        dispatch({
+          type: 'SET_SESSIONS',
+          sessions: sessionManager.getSnapshot(),
+        });
         return;
       }
       // ── EXPORT_SESSION：执行文件写入（取代 reducer 内的 fire-and-forget）──
@@ -748,7 +940,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           const { mkdirSync } = await import('node:fs');
           const dir = filename.split('/').slice(0, -1).join('/') || '.';
           mkdirSync(dir, { recursive: true });
-          await fs.writeFile(filename, header + body, { encoding: 'utf-8', mode: 0o600 });
+          await fs.writeFile(filename, header + body, {
+            encoding: 'utf-8',
+            mode: 0o600,
+          });
           dispatch({ type: 'EXPORT_SESSION_DONE', filename });
         } catch (e: unknown) {
           dispatch({
@@ -768,7 +963,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     (
       task: string,
       requestedPhase?: AgentPhase,
-      initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+      initialSkillActivations?: Array<{
+        skillId: string;
+        input: Record<string, unknown>;
+      }>,
     ) => {
       runTaskRef.current?.(task, requestedPhase, initialSkillActivations);
     },
@@ -806,7 +1004,11 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
     void sessionManager
       .handleContextCompaction(targetThreadId, customInstructions, (phase) => {
         if (threadIdRef.current === targetThreadId) {
-          dispatchSessionLoad({ type: 'SET_COMPACTION_PROGRESS', phase, placement: 'inline' });
+          dispatchSessionLoad({
+            type: 'SET_COMPACTION_PROGRESS',
+            phase,
+            placement: 'inline',
+          });
         }
       })
       .then((result) => {
@@ -854,7 +1056,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         process.stdout.write(osc4Apply(p));
         saveColorPreset(p);
         dispatchSessionLoad({ type: 'USER_MESSAGE', text: `/theme ${p}` });
-        dispatchSessionLoad({ type: 'LOCAL_TEXT', text: `  ⎿  Theme set to ${p}` });
+        dispatchSessionLoad({
+          type: 'LOCAL_TEXT',
+          text: `  ⎿  Theme set to ${p}`,
+        });
       }
       // Invalid preset — silently ignored
     },
@@ -932,21 +1137,40 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
   React.useEffect(() => {
     const wasRunning = prevRunningRef.current;
     prevRunningRef.current = state.running;
-    if (wasRunning && !state.running && !state.ctrlCPressed) {
+    if (
+      shouldAbortStoppedRun({
+        wasRunning,
+        running: state.running,
+        ctrlCPressed: state.ctrlCPressed,
+        exited: state.exited,
+      })
+    ) {
       const rt = sessionManager.getRuntime(threadIdRef.current);
       rt?.abort();
     }
-  }, [state.running, state.ctrlCPressed, sessionManager]);
+  }, [state.running, state.ctrlCPressed, state.exited, sessionManager]);
+
+  // Keyboard cancellation must reach SessionRuntime in the same input turn as
+  // ESC/Ctrl+C. Waiting for the reducer-driven running=false effect leaves a
+  // race where the next prompt is submitted while the old runtime still looks
+  // active, so tryReservePrompt() rejects it as an ordinary concurrent prompt.
+  const abortForegroundRun = React.useCallback(() => {
+    if (stateRef.current.interrupt || !stateRef.current.running) return;
+    sessionManager.getRuntime(threadIdRef.current)?.abort();
+  }, [sessionManager]);
 
   const runTask = React.useCallback(
     async (
       task: string,
       requestedPhase?: AgentPhase,
-      initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+      initialSkillActivations?: Array<{
+        skillId: string;
+        input: Record<string, unknown>;
+      }>,
     ) => {
       let threadId = threadIdRef.current;
       let rt = sessionManager.getRuntime(threadId);
-      if (!rt || rt.agentLoopActive) return;
+      if (!rt) return;
 
       if (rt.localReplayRecovery) {
         const continued = sessionManager.forkRecoveredSessionForContinuation(threadId);
@@ -974,16 +1198,32 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         });
       }
 
+      // Recover first so the reservation belongs to the continuation runtime,
+      // not the immutable source session left by an interrupted interaction.
+      if (!rt.tryReservePrompt()) return;
+      const runGeneration = ++runGenerationRef.current;
+
       // 将 React 层 per-session 状态同步到 Runtime / Sync React-layer per-session state to runtime
       rt.thinkingLevel = thinkingLevelRef.current;
       rt.interactionMode = interactionModeRef.current;
       rt.conversationHistory = [...conversationHistoryRef.current];
 
+      // Establish the new active turn before inserting the prompt. This keeps
+      // the prompt out of the idle/static transition window between a
+      // cancelled predecessor and its successor; otherwise Ink can commit the
+      // combined old+new turn to <Static> before the successor tool starts.
       dispatch({ type: 'SET_RUNNING' });
+      // Render the submitted prompt immediately. Runtime persistence may wait
+      // for the cancelled predecessor to finish cleanup, but the user's message must
+      // not be hidden behind that internal single-flight barrier.
+      dispatch({ type: 'USER_MESSAGE', text: task });
 
       // Update running state — agentLoopActive is managed by SessionRuntime.runTask internally
       sessionManager.onStatusChange(threadId);
-      dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+      dispatch({
+        type: 'SET_SESSIONS',
+        sessions: sessionManager.getSnapshot(),
+      });
 
       try {
         await rt.runTask(
@@ -1006,8 +1246,11 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
           conversationHistoryRef.current = [...rt.conversationHistory];
         }
         sessionManager.onStatusChange(threadId);
-        dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
-        if (stillActive) {
+        dispatch({
+          type: 'SET_SESSIONS',
+          sessions: sessionManager.getSnapshot(),
+        });
+        if (shouldSetIdleAfterRun(stillActive, runGeneration, runGenerationRef.current)) {
           dispatch({ type: 'SET_IDLE' });
         }
 
@@ -1026,7 +1269,10 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
             if (name && threadIdRef.current === threadId) {
               await persistSessionName(defaultCheckpointPath(), threadId, name);
               sessionManager.setName(threadId, name);
-              dispatch({ type: 'SET_SESSIONS', sessions: sessionManager.getSnapshot() });
+              dispatch({
+                type: 'SET_SESSIONS',
+                sessions: sessionManager.getSnapshot(),
+              });
             }
           } catch {
             /* non-critical */
@@ -1055,17 +1301,12 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
       // Store can be reopened. A new in-memory TUI session would still fail on
       // its first durable Kernel write, so only /sessions retry is available.
       if (stateRef.current.sessionServiceUnavailable && value.trim() !== '/sessions') return;
-
-      // 检查当前活跃会话的运行状态，不阻塞其他会话
-      const activeRt = sessionManager.getRuntime(threadIdRef.current);
-      if (activeRt?.agentLoopActive) return;
-
       // Plan mode is a sticky TUI input policy across completed conversations.
       // Pass it explicitly for every plain prompt so the new Core Task cannot
       // silently fall back to building while the Footer still says plan.
       runTask(value, stateRef.current.status.phase);
     },
-    [runTask, sessionManager],
+    [runTask],
   );
 
   React.useEffect(() => {
@@ -1087,6 +1328,7 @@ function TuiApp({ config, injectModel, remoteMcpEgressPermitResolver }: TuiAppPr
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
+        onAbort={abortForegroundRun}
         getRewindPreview={previewRewind}
         resizeGeneration={resizeKey}
       >
@@ -1130,7 +1372,9 @@ export function runTui(props: TuiBootstrapProps = {}): void {
   function disableEchoAndClear() {
     try {
       // Unix: stty -echo disables terminal echo at the TTY level
-      Bun.spawnSync(['stty', '-echo'], { stdio: ['inherit', 'inherit', 'inherit'] });
+      Bun.spawnSync(['stty', '-echo'], {
+        stdio: ['inherit', 'inherit', 'inherit'],
+      });
     } catch {
       // Windows / unsupported platforms: stty not available, skip
     }
@@ -1141,6 +1385,15 @@ export function runTui(props: TuiBootstrapProps = {}): void {
   // Use Ink's built-in kittyKeyboard option instead of manual enableKittyKeyboardProtocol().
   // The manual approach enabled Kitty at the terminal level but Ink's parser didn't
   // know about it, causing arrow keys (CSI 1u/2u) to be mis-parsed as Enter.
+  let unmountTui: (() => void) | null = null;
+  const exitCoordinator = createTuiExitCoordinatorV1({
+    getSessionLifecycle: () => _sessionManagerForExit,
+    getShellExecutor: () => _appShellExecutorForExit,
+    unmount: () => unmountTui?.(),
+    exit: (code) => process.exit(code),
+  });
+  _requestTuiExit = (code) => exitCoordinator.requestExit(code);
+
   const { unmount } = render(
     <ErrorBoundary onExit={() => void _requestTuiExit?.(1)}>
       <TuiBootstrap {...props} />
@@ -1156,13 +1409,7 @@ export function runTui(props: TuiBootstrapProps = {}): void {
       interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
     },
   );
-
-  const exitCoordinator = createTuiExitCoordinatorV1({
-    getSessionLifecycle: () => _sessionManagerForExit,
-    unmount,
-    exit: (code) => process.exit(code),
-  });
-  _requestTuiExit = (code) => exitCoordinator.requestExit(code);
+  unmountTui = unmount;
 
   process.on('SIGINT', () => {
     void exitCoordinator.requestExit();

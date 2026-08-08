@@ -2,7 +2,9 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { TuiUserInputProvider } from '../src/app/tui/provider';
+import type { AppShellExecutorV1, AppShellRuntimeDecisionV1 } from '../src/app/sandbox/composition';
+import { sandboxSupportsFullModeV1 } from '../src/app/tui/interaction-mode';
+import { TuiUserInputProvider } from '../src/app/tui/provider';
 import type { Action } from '../src/app/tui/reducers/actions';
 import {
   admitInteractionModeTarget,
@@ -15,16 +17,20 @@ import {
 } from '../src/app/tui/session-manager';
 import type { StatusState } from '../src/app/tui/types';
 import type { AgentConfig } from '../src/core/config';
+import { aiMessage } from '../src/core/messages';
 import { loadSession } from '../src/core/persistence/sessions';
 import { createAgentKernel } from '../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../src/core/runtime/state';
 import { createRuntimeStore, runtimeStorePathFor } from '../src/core/runtime/store';
 import type { UserAction } from '../src/protocol/actions';
+import { createMockModel } from './mock-model';
 
 // ── Test-only structural access to private members (casts are erased at runtime) ──
 
-type RuntimeWithPendingResolve = { _pendingResolve: ((action: unknown) => void) | null };
+type RuntimeWithPendingResolve = {
+  _pendingResolve: ((action: unknown) => void) | null;
+};
 type RuntimeWithForegroundWake = { _foregroundWake: () => void };
 type RuntimeWithForeground = { _foreground: boolean };
 type RuntimeWithProxyProvider = {
@@ -81,6 +87,37 @@ function makeRuntime(threadId = 't1', workspace = '/tmp/ws') {
   return new SessionRuntime(threadId, workspace, makeDeps());
 }
 
+function createDeferredShellExecutor() {
+  let resolvePreparation!: (decision: AppShellRuntimeDecisionV1) => void;
+  const preparation = new Promise<AppShellRuntimeDecisionV1>((resolve) => {
+    resolvePreparation = resolve;
+  });
+  let prepareCalls = 0;
+  let executionCalls = 0;
+
+  const executor = (async (input: Parameters<AppShellExecutorV1>[0]) => {
+    executionCalls += 1;
+    return {
+      ok: false,
+      command: input.command,
+      exitCode: -1,
+      stdout: '',
+      stderr: 'unexpected shell execution',
+    };
+  }) as AppShellExecutorV1;
+  executor.prepare = () => {
+    prepareCalls += 1;
+    return preparation;
+  };
+
+  return {
+    executor,
+    resolvePreparation,
+    prepareCalls: () => prepareCalls,
+    executionCalls: () => executionCalls,
+  };
+}
+
 function makeStatus(overrides: Partial<StatusState> = {}): StatusState {
   return {
     phase: 'building',
@@ -105,7 +142,14 @@ function makeStatus(overrides: Partial<StatusState> = {}): StatusState {
 
 describe('fullModeUnavailableReason', () => {
   test('rejects full mode when no sandbox backend is available', () => {
-    expect(fullModeUnavailableReason('full', 'none')).toContain('未启用沙箱');
+    expect(fullModeUnavailableReason('full', 'none')).toBe('非沙箱环境无法开启full');
+  });
+
+  test('keeps full mode unavailable with the direct Windows restricted-token backend', () => {
+    expect(sandboxSupportsFullModeV1('windows_restricted_token')).toBe(false);
+    expect(fullModeUnavailableReason('full', 'windows_restricted_token')).toBe(
+      fullModeUnavailableReason('full', 'none'),
+    );
   });
 
   test('allows non-full modes without a sandbox', () => {
@@ -132,13 +176,24 @@ describe('interaction mode admission', () => {
     expect(resolveInteractionModeTarget(undefined, 'accept_edits', 'none')).toBe('auto');
     expect(resolveInteractionModeTarget(undefined, 'auto', 'none')).toBe('accept_edits');
     expect(resolveInteractionModeTarget(undefined, 'auto', 'seatbelt')).toBe('full');
+    expect(resolveInteractionModeTarget(undefined, 'auto', 'windows_restricted_token')).toBe(
+      'accept_edits',
+    );
   });
 
   test('rejects full admission before dispatch when sandbox is unavailable', () => {
     const decision = admitInteractionModeTarget('full', 'none');
     expect(decision.allowed).toBe(false);
     expect(decision.mode).toBe('accept_edits');
-    expect(decision.reason).toContain('未启用沙箱');
+    expect(decision.reason).toBe('非沙箱环境无法开启full');
+  });
+
+  test('rejects full admission for the direct Windows restricted-token backend', () => {
+    expect(admitInteractionModeTarget('full', 'windows_restricted_token')).toEqual({
+      allowed: false,
+      mode: 'accept_edits',
+      reason: fullModeUnavailableReason('full', 'none'),
+    });
   });
 
   test('allows full admission with sandbox backend', () => {
@@ -281,7 +336,10 @@ describe('SessionManager', () => {
     };
 
     const result = await mgr.handleContextCompaction(threadId);
-    expect(persisted[0]).toMatchObject({ type: 'user.command_invoked', command: '/compact' });
+    expect(persisted[0]).toMatchObject({
+      type: 'user.command_invoked',
+      command: '/compact',
+    });
     expect(persisted[1]).toMatchObject({
       type: 'context.compaction_requested',
       reason: 'manual',
@@ -304,7 +362,11 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    const state = createInitialRuntimeState({
+      threadId,
+      userId: 'tui',
+      workspace: '/tmp/ws',
+    });
     // transcript has only 2 messages (default initial state), not enough for safe boundary
     const persisted: unknown[] = [];
     runtime.runtimeControl = {
@@ -340,7 +402,11 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    let state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    let state = createInitialRuntimeState({
+      threadId,
+      userId: 'tui',
+      workspace: '/tmp/ws',
+    });
     state.transcript.messages = Array.from({ length: 3 }, (_, index) => ({
       kind: 'user' as const,
       messageId: `msg-${index}`,
@@ -423,7 +489,11 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    const state = createInitialRuntimeState({
+      threadId,
+      userId: 'tui',
+      workspace: '/tmp/ws',
+    });
     state.transcript.messages = [
       {
         kind: 'user',
@@ -485,7 +555,11 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    const state = createInitialRuntimeState({
+      threadId,
+      userId: 'tui',
+      workspace: '/tmp/ws',
+    });
     state.transcript.messages = [
       {
         kind: 'user',
@@ -588,7 +662,11 @@ describe('SessionManager', () => {
     const mgr = new SessionManager(deps);
     const threadId = mgr.createSession('/tmp/ws');
     const runtime = mgr.getRuntime(threadId)!;
-    const state = createInitialRuntimeState({ threadId, userId: 'tui', workspace: '/tmp/ws' });
+    const state = createInitialRuntimeState({
+      threadId,
+      userId: 'tui',
+      workspace: '/tmp/ws',
+    });
     // Add transcript messages spanning several turns
     state.transcript.messages = Array.from({ length: 6 }, (_, i) => ({
       kind: 'user' as const,
@@ -616,7 +694,10 @@ describe('SessionManager', () => {
     };
 
     const result = await mgr.handleContextCompaction(threadId);
-    expect(persisted[0]).toMatchObject({ type: 'user.command_invoked', command: '/compact' });
+    expect(persisted[0]).toMatchObject({
+      type: 'user.command_invoked',
+      command: '/compact',
+    });
     expect(persisted[1]).toMatchObject({
       type: 'context.compaction_requested',
       reason: 'manual',
@@ -815,7 +896,11 @@ describe('SessionManager', () => {
     const mgr = makeManager();
     const id = mgr.createSession('/tmp/ws');
     const rt = mgr.getRuntime(id)!;
-    rt.eventBuffer.push({ type: 'model.responded', messageId: 'm1', text: 'hello' });
+    rt.eventBuffer.push({
+      type: 'model.responded',
+      messageId: 'm1',
+      text: 'hello',
+    });
 
     mgr.removeRuntime(id);
 
@@ -969,7 +1054,12 @@ describe('SessionManager', () => {
     const tid = mgr.createSession('/tmp/ws');
     mgr.saveTokenStats(
       tid,
-      makeStatus({ cacheHitTokens: 10, cacheMissTokens: 5, totalTokens: 15, cacheHitRate: 66.7 }),
+      makeStatus({
+        cacheHitTokens: 10,
+        cacheMissTokens: 5,
+        totalTokens: 15,
+        cacheHitRate: 66.7,
+      }),
     );
 
     const snapshots = mgr.getSnapshot();
@@ -1022,7 +1112,12 @@ describe('SessionManager', () => {
     const tid = mgr.createSession('/tmp/ws');
     mgr.saveTokenStats(
       tid,
-      makeStatus({ cacheHitTokens: 0, cacheMissTokens: 0, totalTokens: 0, cacheHitRate: 0 }),
+      makeStatus({
+        cacheHitTokens: 0,
+        cacheMissTokens: 0,
+        totalTokens: 0,
+        cacheHitRate: 0,
+      }),
       true,
     );
     const snapshots = mgr.getSnapshot();
@@ -1038,7 +1133,12 @@ describe('SessionManager', () => {
     // Simulate stats accumulation on old session
     mgr.saveTokenStats(
       oldId,
-      makeStatus({ cacheHitTokens: 50, cacheMissTokens: 25, totalTokens: 75, cacheHitRate: 66.7 }),
+      makeStatus({
+        cacheHitTokens: 50,
+        cacheMissTokens: 25,
+        totalTokens: 75,
+        cacheHitRate: 66.7,
+      }),
       true,
     );
 
@@ -1061,7 +1161,12 @@ describe('SessionManager', () => {
     const id = mgr.createSession('/tmp/ws');
     mgr.saveTokenStats(
       id,
-      makeStatus({ cacheHitTokens: 88, cacheMissTokens: 22, totalTokens: 110, cacheHitRate: 80 }),
+      makeStatus({
+        cacheHitTokens: 88,
+        cacheMissTokens: 22,
+        totalTokens: 110,
+        cacheHitRate: 80,
+      }),
       true,
     );
 
@@ -1123,7 +1228,11 @@ describe('SessionRuntime', () => {
     'request_plan_review',
   ] as const)('binds a raw UI cancel to the active %s interaction id', async (effectType) => {
     const rt = makeRuntime();
-    const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
+    const state = createInitialRuntimeState({
+      threadId: 't1',
+      userId: 'u',
+      workspace: '/tmp/ws',
+    });
     const interactionId = `${effectType}-interaction`;
     const toolCallId = `${effectType}-tool`;
 
@@ -1173,12 +1282,19 @@ describe('SessionRuntime', () => {
     );
     rt.resolveInterrupt({ type: 'cancel' });
 
-    await expect(actionPromise).resolves.toEqual({ type: 'cancel', interactionId });
+    await expect(actionPromise).resolves.toEqual({
+      type: 'cancel',
+      interactionId,
+    });
   });
 
   test('maps the verification decision prompt to an explicit user waiver', async () => {
     const rt = makeRuntime();
-    const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
+    const state = createInitialRuntimeState({
+      threadId: 't1',
+      userId: 'u',
+      workspace: '/tmp/ws',
+    });
     state.verification.records.verification = {
       verificationId: 'verification',
       mode: 'required',
@@ -1227,7 +1343,11 @@ describe('SessionRuntime', () => {
         providerStatus: 'ready',
       }),
     };
-    const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
+    const state = createInitialRuntimeState({
+      threadId: 't1',
+      userId: 'u',
+      workspace: '/tmp/ws',
+    });
     const actionPromise = (rt as unknown as RuntimeWithRuntimeAction)._requestRuntimeAction(
       {
         type: 'request_provider_action',
@@ -1260,7 +1380,11 @@ describe('SessionRuntime', () => {
         };
       },
     };
-    const state = createInitialRuntimeState({ threadId: 't1', userId: 'u', workspace: '/tmp/ws' });
+    const state = createInitialRuntimeState({
+      threadId: 't1',
+      userId: 'u',
+      workspace: '/tmp/ws',
+    });
     const actionPromise = (rt as unknown as RuntimeWithRuntimeAction)._requestRuntimeAction(
       {
         type: 'request_provider_admission',
@@ -1281,6 +1405,120 @@ describe('SessionRuntime', () => {
   });
 
   // ── abort ──
+
+  test('claims one run while sandbox preparation is pending', async () => {
+    const deferred = createDeferredShellExecutor();
+    const deps = makeDeps();
+    deps.shellExecutor = deferred.executor;
+    const rt = new SessionRuntime('prepare-single-flight', '/tmp/ws', deps);
+    const actions: Action[] = [];
+    const runDeps = {
+      dispatch: (action: Action) => actions.push(action),
+      provider: deps.provider,
+      config: deps.config,
+    };
+
+    const first = rt.runTask('first task', runDeps);
+    expect(rt.agentLoopActive).toBe(true);
+    expect(rt.abortController).not.toBeNull();
+    expect(deferred.prepareCalls()).toBe(1);
+
+    let secondSettled = false;
+    const second = rt.runTask('second task', runDeps).then(() => {
+      secondSettled = true;
+    });
+    await Promise.resolve();
+    expect(secondSettled).toBe(true);
+    expect(deferred.prepareCalls()).toBe(1);
+    expect(deferred.executionCalls()).toBe(0);
+
+    rt.abort();
+    deferred.resolvePreparation({
+      mode: 'sandbox',
+      backend: 'seatbelt',
+    });
+    await Promise.all([first, second]);
+    expect(rt.agentLoopActive).toBe(false);
+    expect(Reflect.get(rt, '_runCompletion')).toBeNull();
+  });
+
+  test('abort during sandbox preparation prevents the agent from starting', async () => {
+    const deferred = createDeferredShellExecutor();
+    const deps = makeDeps();
+    deps.shellExecutor = deferred.executor;
+    const rt = new SessionRuntime('prepare-abort', '/tmp/ws', deps);
+    const actions: Action[] = [];
+    let modelTouched = false;
+    const model = new Proxy(
+      {},
+      {
+        get() {
+          modelTouched = true;
+          throw new Error('agent must not inspect the model after prepare was aborted');
+        },
+      },
+    ) as import('../src/core/model/factory').SupportedChatModel;
+
+    const run = rt.runTask('must not start', {
+      dispatch: (action) => actions.push(action),
+      provider: deps.provider,
+      config: deps.config,
+      model,
+    });
+    const controller = rt.abortController!;
+    expect(controller.signal.aborted).toBe(false);
+    expect(rt.agentLoopActive).toBe(true);
+
+    rt.abort();
+    expect(controller.signal.aborted).toBe(true);
+    deferred.resolvePreparation({
+      mode: 'sandbox',
+      backend: 'seatbelt',
+    });
+    await run;
+
+    expect(modelTouched).toBe(false);
+    expect(actions).toEqual([]);
+    expect(deferred.executionCalls()).toBe(0);
+    expect(rt.generator).toBeNull();
+    expect(rt.agentLoopActive).toBe(false);
+    expect(Reflect.get(rt, '_runCompletion')).toBeNull();
+  });
+
+  test('abort during sandbox preparation cancels the executor preflight', async () => {
+    let rejectPreparation!: (error: Error) => void;
+    const preparation = new Promise<AppShellRuntimeDecisionV1>((_resolve, reject) => {
+      rejectPreparation = reject;
+    });
+    let abortPreparationCalls = 0;
+    const executor = (async (input: Parameters<AppShellExecutorV1>[0]) => ({
+      ok: false,
+      command: input.command,
+      exitCode: -1,
+      stdout: '',
+      stderr: 'unexpected shell execution',
+    })) as AppShellExecutorV1;
+    executor.prepare = () => preparation;
+    executor.abortPreparation = () => {
+      abortPreparationCalls += 1;
+      rejectPreparation(new Error('sandbox_preparation_aborted'));
+    };
+    const deps = makeDeps();
+    deps.shellExecutor = executor;
+    const rt = new SessionRuntime('prepare-preflight-abort', '/tmp/ws', deps);
+
+    const run = rt.runTask('must stop preparing', {
+      dispatch: () => {},
+      provider: deps.provider,
+      config: deps.config,
+    });
+    rt.abort();
+    await run;
+
+    expect(abortPreparationCalls).toBe(1);
+    expect(rt.agentLoopActive).toBe(false);
+    expect(Reflect.get(rt, '_runCompletion')).toBeNull();
+  });
 
   test('abort resolves pending interrupt and signals AbortController', () => {
     const rt = makeRuntime();
@@ -1377,6 +1615,229 @@ describe('SessionRuntime', () => {
     expect(rt.agentLoopActive).toBe(false);
   });
 
+  test('runs a successor prompt after cancelling an in-flight shell turn', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'kite-session-successor-home-'));
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-session-successor-workspace-'));
+    const previousHome = process.env.KITE_CODE_HOME;
+    process.env.KITE_CODE_HOME = home;
+    const model = createMockModel([
+      {
+        message: aiMessage({
+          content: '好的，继续测试网络请求',
+          tool_calls: [
+            {
+              id: 'cancel-shell',
+              name: 'shell_execute',
+              args: { command: 'pwd' },
+            },
+          ],
+        }),
+      },
+      { message: aiMessage({ content: '继续测试已完成。' }) },
+    ]);
+    let reportShellStarted!: () => void;
+    const shellStarted = new Promise<void>((resolve) => {
+      reportShellStarted = resolve;
+    });
+    const shellExecutor = (async (input: Parameters<AppShellExecutorV1>[0]) => {
+      reportShellStarted();
+      await new Promise<void>((resolve) => {
+        const finish = () => resolve();
+        if (input.signal?.aborted) finish();
+        else input.signal?.addEventListener('abort', finish, { once: true });
+      });
+      return {
+        ok: false,
+        command: input.command,
+        exitCode: 130,
+        stdout: '',
+        stderr: 'cancelled',
+      };
+    }) as AppShellExecutorV1;
+    shellExecutor.prepare = async () => ({
+      mode: 'host_shell',
+      backend: 'none',
+    });
+    const deps = {
+      ...makeDeps(),
+      config: {
+        apiKey: 'test',
+        baseURL: 'http://localhost:1',
+        modelName: 'test',
+        providerName: 'test',
+        providerType: 'openai-compatible' as const,
+        interactionMode: 'auto' as const,
+        sandbox: { enabled: false },
+      },
+      provider: new TuiUserInputProvider(),
+      shellExecutor,
+    };
+    const rt = new SessionRuntime('session-successor', workspace, deps);
+    const actions: Action[] = [];
+    const runDeps = {
+      dispatch: (action: Action) => actions.push(action),
+      provider: deps.provider,
+      config: deps.config,
+      model: model as any,
+    };
+
+    try {
+      const first = rt.runTask('先运行一个 shell', runDeps);
+      await shellStarted;
+      rt.abort();
+      const successor = rt.runTask('继续测试', runDeps);
+      await Promise.all([first, successor]);
+      expect(model.callCount.count).toBe(2);
+      expect(actions.filter((action) => action.type === 'SET_EXITED')).toHaveLength(1);
+      expect(actions).toContainEqual(
+        expect.objectContaining({
+          type: 'RUNTIME_EVENT',
+          event: expect.objectContaining({
+            type: 'model.responded',
+            text: '继续测试已完成。',
+          }),
+        }),
+      );
+      expect(rt.agentLoopActive).toBe(false);
+    } finally {
+      if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+      else process.env.KITE_CODE_HOME = previousHome;
+      rmSync(home, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+  test('waits for the TUI presentation flush before routing text after reasoning', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'kite-session-presentation-home-'));
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-session-presentation-workspace-'));
+    const previousHome = process.env.KITE_CODE_HOME;
+    process.env.KITE_CODE_HOME = home;
+
+    let reportFlushStarted!: () => void;
+    const flushStarted = new Promise<void>((resolve) => {
+      reportFlushStarted = resolve;
+    });
+    let releaseFlush!: () => void;
+    const flushReleased = new Promise<void>((resolve) => {
+      releaseFlush = resolve;
+    });
+    const eventOrder: string[] = [];
+
+    const streamingModel = {
+      specificationVersion: 'v4' as const,
+      provider: 'mock',
+      modelId: 'presentation-boundary',
+      supportedUrls: {},
+      async doGenerate() {
+        throw new Error('presentation-boundary fixture requires streaming');
+      },
+      async doStream() {
+        return {
+          stream: new ReadableStream({
+            start(controller) {
+              controller.enqueue({ type: 'stream-start', warnings: [] });
+              controller.enqueue({
+                type: 'reasoning-start',
+                id: 'reasoning-1',
+              });
+              controller.enqueue({
+                type: 'reasoning-delta',
+                id: 'reasoning-1',
+                delta: 'Checking lifecycle.',
+              });
+              controller.enqueue({ type: 'reasoning-end', id: 'reasoning-1' });
+              controller.enqueue({ type: 'text-start', id: 'text-1' });
+              controller.enqueue({
+                type: 'text-delta',
+                id: 'text-1',
+                delta: 'Final answer.',
+              });
+              controller.enqueue({ type: 'text-end', id: 'text-1' });
+              controller.enqueue({
+                type: 'finish',
+                finishReason: { unified: 'stop', raw: 'stop' },
+                usage: {
+                  inputTokens: { total: 1, noCache: 1 },
+                  outputTokens: { total: 1 },
+                  totalTokens: 2,
+                },
+              });
+              controller.close();
+            },
+          }),
+        };
+      },
+    };
+    const model = {
+      model: streamingModel,
+      capabilityMetadata: { streaming: true },
+      setRetryListener: () => {},
+    } as import('../src/core/model/factory').SupportedChatModel;
+    const deps = {
+      ...makeDeps(),
+      config: {
+        apiKey: 'test',
+        baseURL: 'http://localhost:1',
+        modelName: 'test',
+        providerName: 'test',
+        providerType: 'openai-compatible' as const,
+        interactionMode: 'auto' as const,
+        sandbox: { enabled: false },
+      },
+      provider: new TuiUserInputProvider(),
+      flushPresentation: async () => {
+        eventOrder.push('flush-started');
+        reportFlushStarted();
+        await flushReleased;
+        eventOrder.push('flush-finished');
+      },
+    };
+    const rt = new SessionRuntime('presentation-boundary', workspace, deps);
+    const actions: Action[] = [];
+
+    try {
+      const run = rt.runTask('answer quickly', {
+        dispatch: (action) => {
+          actions.push(action);
+          if (action.type === 'RUNTIME_EVENT') eventOrder.push(action.event.type);
+        },
+        provider: deps.provider,
+        config: deps.config,
+        model,
+      });
+
+      await flushStarted;
+      expect(eventOrder).toContain('model.reasoning_completed');
+      expect(eventOrder).not.toContain('model.text_delta');
+      expect(eventOrder).not.toContain('model.responded');
+
+      releaseFlush();
+      await run;
+
+      expect(eventOrder.indexOf('flush-finished')).toBeLessThan(
+        eventOrder.indexOf('model.text_delta'),
+      );
+      expect(eventOrder).toContain('model.responded');
+    } finally {
+      if (previousHome === undefined) delete process.env.KITE_CODE_HOME;
+      else process.env.KITE_CODE_HOME = previousHome;
+      rmSync(home, { recursive: true, force: true });
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+  test('accepts one successor prompt while cancelled cleanup is still unwinding', () => {
+    const rt = makeRuntime();
+    const ac = new AbortController();
+    rt.agentLoopActive = true;
+    rt.abortController = ac;
+    Reflect.set(rt, '_runCompletion', new Promise<void>(() => {}));
+
+    rt.abort();
+
+    expect(rt.tryReservePrompt()).toBe(true);
+    expect(rt.tryReservePrompt()).toBe(false);
+    expect(rt.agentLoopActive).toBe(false);
+  });
+
   test('a successor run waits until the aborted generator finishes cleanup', async () => {
     const rt = makeRuntime();
     const ac = new AbortController();
@@ -1436,7 +1897,11 @@ describe('SessionRuntime', () => {
 
   test('clearBuffer empties event buffer, history, and interrupt flag', () => {
     const rt = makeRuntime();
-    rt.eventBuffer.push({ type: 'model.responded', messageId: 'm1', text: 'hello' });
+    rt.eventBuffer.push({
+      type: 'model.responded',
+      messageId: 'm1',
+      text: 'hello',
+    });
     rt.conversationHistory = ['cmd1', 'cmd2'];
     rt.pendingInterrupt = true;
 
@@ -1484,24 +1949,66 @@ describe('SessionRuntime', () => {
     expect(rt.eventBuffer.length).toBe(1);
   });
 
-  test('pushToBuffer discards disposable events on overflow', () => {
+  test('pushToBuffer drops incoming progress when the soft limit contains only durable events', () => {
     const rt = makeRuntime();
-    // Fill buffer to max
-    for (let i = 0; i < (SessionRuntime as unknown as { MAX_BUFFER: number }).MAX_BUFFER; i++) {
-      rt.eventBuffer.push({ type: 'model.responded', messageId: `m${i}`, text: `msg${i}` });
+    const MAX = (SessionRuntime as unknown as { MAX_BUFFER: number }).MAX_BUFFER;
+    for (let i = 0; i < MAX; i++) {
+      rt.eventBuffer.push({
+        type: 'model.responded',
+        messageId: `m${i}`,
+        text: `msg${i}`,
+      });
     }
-    // Push one more — should discard a disposable event
     (rt as unknown as RuntimeWithPushToBuffer)._pushToBuffer({
-      type: 'model.responded',
-      messageId: 'overflow',
-      text: 'overflow',
+      type: 'tool.progress',
+      toolCallId: 'overflow',
+      chunk: 'disposable',
+      stream: 'stdout',
     });
-    expect(rt.eventBuffer.length).toBeLessThanOrEqual(
-      (SessionRuntime as unknown as { MAX_BUFFER: number }).MAX_BUFFER,
-    );
+
+    expect(rt.eventBuffer.length).toBe(MAX);
+    expect(rt.eventBuffer.some((event) => event.type === 'tool.progress')).toBe(false);
   });
 
-  test('pushToBuffer shifts oldest when no disposable events on overflow', () => {
+  test('pushToBuffer evicts buffered progress before admitting a terminal event', () => {
+    const rt = makeRuntime();
+    const MAX = (SessionRuntime as any).MAX_BUFFER;
+    rt.eventBuffer.push({
+      type: 'tool.progress',
+      toolCallId: 'shell-old',
+      chunk: 'old progress',
+      stream: 'stdout',
+    });
+    for (let i = 1; i < MAX; i++) {
+      rt.eventBuffer.push({
+        type: 'model.responded',
+        messageId: `m${i}`,
+        text: `msg${i}`,
+      });
+    }
+    (rt as any)._pushToBuffer({
+      type: 'tool.finished',
+      toolCallId: 'shell-new',
+      name: 'shell_execute',
+      result: {
+        ok: true,
+        command: 'echo',
+        exitCode: 0,
+        stdout: '',
+        stderr: '',
+      },
+    });
+
+    expect(rt.eventBuffer.length).toBe(MAX);
+    expect(rt.eventBuffer.some((event) => event.type === 'tool.progress')).toBe(false);
+    expect(
+      rt.eventBuffer.some(
+        (event) => event.type === 'tool.finished' && event.toolCallId === 'shell-new',
+      ),
+    ).toBe(true);
+  });
+
+  test('pushToBuffer preserves durable events when the soft limit has no disposable entries', () => {
     const rt = makeRuntime();
     const MAX = (SessionRuntime as unknown as { MAX_BUFFER: number }).MAX_BUFFER;
     // Fill buffer with non-disposable events (tool_call, tool_done are not in DISPOSABLE_EVENT_TYPES)
@@ -1519,8 +2026,13 @@ describe('SessionRuntime', () => {
       name: 'read_file',
       result: { ok: true, command: '', exitCode: 0, stdout: '', stderr: '' },
     });
-    // Should have shifted oldest
-    expect(rt.eventBuffer.length).toBe(MAX);
+    expect(rt.eventBuffer.length).toBe(MAX + 1);
+    expect(rt.eventBuffer[0]?.type).toBe('tool.finished');
+    expect(
+      rt.eventBuffer.some(
+        (event) => event.type === 'tool.finished' && event.toolCallId === 'c_new',
+      ),
+    ).toBe(true);
   });
 
   test('coalesces cumulative model deltas to the latest value per frame', async () => {
@@ -1577,23 +2089,163 @@ describe('SessionRuntime', () => {
     ]);
   });
 
+  test('coalesces tool progress per call and stream before dispatch', async () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    const dispatch = (action: any) => events.push(action.event);
+
+    (rt as any)._routeRuntimeEvent(
+      {
+        type: 'tool.progress',
+        toolCallId: 'shell-1',
+        chunk: 'one',
+        stream: 'stdout',
+      },
+      dispatch,
+    );
+    (rt as any)._routeRuntimeEvent(
+      {
+        type: 'tool.progress',
+        toolCallId: 'shell-1',
+        chunk: 'two',
+        stream: 'stdout',
+      },
+      dispatch,
+    );
+    expect(events).toEqual([]);
+
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(events).toEqual([
+      {
+        type: 'tool.progress',
+        toolCallId: 'shell-1',
+        chunk: 'one\ntwo',
+        stream: 'stdout',
+        lineCount: 2,
+      },
+    ]);
+  });
+
+  test('bounds one oversized progress line without changing its logical line count', async () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    const dispatch = (action: any) => events.push(action.event);
+
+    (rt as any)._routeRuntimeEvent(
+      {
+        type: 'tool.progress',
+        toolCallId: 'shell-large',
+        chunk: 'x'.repeat(32 * 1024),
+        stream: 'stdout',
+      },
+      dispatch,
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(events).toHaveLength(1);
+    expect(events[0].chunk.length).toBeLessThanOrEqual(16 * 1024);
+    expect(events[0].chunk).toStartWith('… progress truncated … ');
+    expect(events[0].chunk).not.toContain('\n');
+    expect(events[0].lineCount).toBe(1);
+  });
+
+  test('flushes tool progress before its terminal event', () => {
+    const rt = makeRuntime();
+    const events: any[] = [];
+    const dispatch = (action: any) => events.push(action.event);
+
+    (rt as any)._routeRuntimeEvent(
+      {
+        type: 'tool.progress',
+        toolCallId: 'shell-1',
+        chunk: 'tail',
+        stream: 'stdout',
+      },
+      dispatch,
+    );
+    (rt as any)._routeRuntimeEvent(
+      {
+        type: 'tool.finished',
+        toolCallId: 'shell-1',
+        name: 'shell_execute',
+        result: {
+          ok: true,
+          command: 'echo tail',
+          exitCode: 0,
+          stdout: 'tail',
+          stderr: '',
+        },
+      },
+      dispatch,
+    );
+
+    expect(events.map((event) => event.type)).toEqual(['tool.progress', 'tool.finished']);
+  });
+
+  test('background progress stays coalesced and never displaces a terminal event', () => {
+    const rt = makeRuntime();
+    rt.setForeground(false);
+    for (let i = 0; i < 100; i++) {
+      (rt as any)._pushToBuffer({
+        type: 'tool.progress',
+        toolCallId: 'shell-1',
+        chunk: `line-${i}`,
+        stream: 'stdout',
+      });
+    }
+    (rt as any)._pushToBuffer({
+      type: 'tool.finished',
+      toolCallId: 'shell-1',
+      name: 'shell_execute',
+      result: {
+        ok: true,
+        command: 'echo',
+        exitCode: 0,
+        stdout: 'done',
+        stderr: '',
+      },
+    });
+
+    expect(rt.eventBuffer).toHaveLength(2);
+    expect(rt.eventBuffer[0]?.type).toBe('tool.progress');
+    expect(rt.eventBuffer[1]?.type).toBe('tool.finished');
+    const progress = rt.eventBuffer[0];
+    expect(progress?.type === 'tool.progress' ? progress.chunk : '').toContain('line-99');
+  });
+
   test('flushes a reasoning delta before its explicit segment completion event', () => {
     const rt = makeRuntime();
     const events: unknown[] = [];
     const dispatch = (action: unknown) => events.push((action as { event: unknown }).event);
 
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
-      { type: 'model.reasoning_delta', segmentId: 'r1', text: 'complete reasoning' },
+      {
+        type: 'model.reasoning_delta',
+        segmentId: 'r1',
+        text: 'complete reasoning',
+      },
       dispatch,
     );
     (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
-      { type: 'model.reasoning_completed', segmentId: 'r1', text: 'complete reasoning' },
+      {
+        type: 'model.reasoning_completed',
+        segmentId: 'r1',
+        text: 'complete reasoning',
+      },
       dispatch,
     );
 
     expect(events).toEqual([
-      { type: 'model.reasoning_delta', segmentId: 'r1', text: 'complete reasoning' },
-      { type: 'model.reasoning_completed', segmentId: 'r1', text: 'complete reasoning' },
+      {
+        type: 'model.reasoning_delta',
+        segmentId: 'r1',
+        text: 'complete reasoning',
+      },
+      {
+        type: 'model.reasoning_completed',
+        segmentId: 'r1',
+        text: 'complete reasoning',
+      },
     ]);
   });
 
@@ -1657,7 +2309,10 @@ describe('SessionRuntime', () => {
     const proxy = (rt as unknown as RuntimeWithProxyProvider)._proxyProvider;
     (rt as unknown as RuntimeWithForeground)._foreground = false;
 
-    const result = await proxy.requestAction({ kind: 'input', prompt: 'question?' });
+    const result = await proxy.requestAction({
+      kind: 'input',
+      prompt: 'question?',
+    });
     expect(result).toEqual({ type: 'cancel' });
   });
 

@@ -48,17 +48,68 @@ async function waitForPromiseOrAbort<T>(
   });
 }
 
-function isEphemeralModelDelta(
-  event: RuntimeEvent,
-): event is Extract<
+const MAX_PENDING_TOOL_PROGRESS_CHARS = 16 * 1024;
+const TOOL_PROGRESS_TRUNCATED_MARKER = '… progress truncated … ';
+type BufferedToolProgressEvent = Extract<RuntimeEvent, { type: 'tool.progress' }> & {
+  lineCount?: number;
+};
+
+function isEphemeralEffectEvent(event: RuntimeEvent): event is Extract<
   RuntimeEvent,
-  { type: 'model.reasoning_delta' | 'model.reasoning_completed' | 'model.text_delta' }
+  {
+    type:
+      | 'model.reasoning_delta'
+      | 'model.reasoning_completed'
+      | 'model.text_delta'
+      | 'tool.progress';
+  }
 > {
   return (
     event.type === 'model.reasoning_delta' ||
     event.type === 'model.reasoning_completed' ||
-    event.type === 'model.text_delta'
+    event.type === 'model.text_delta' ||
+    event.type === 'tool.progress'
   );
+}
+
+function toolProgressKey(event: Extract<RuntimeEvent, { type: 'tool.progress' }>): string {
+  return `${event.toolCallId}\0${event.stream}`;
+}
+
+function boundToolProgressChunk(chunk: string): string {
+  if (chunk.length <= MAX_PENDING_TOOL_PROGRESS_CHARS) return chunk;
+  const available = Math.max(
+    1,
+    MAX_PENDING_TOOL_PROGRESS_CHARS - TOOL_PROGRESS_TRUNCATED_MARKER.length,
+  );
+  let tail = chunk.slice(-available);
+  const firstBoundary = tail.indexOf('\n');
+  if (firstBoundary >= 0) tail = tail.slice(firstBoundary + 1);
+  return `${TOOL_PROGRESS_TRUNCATED_MARKER}${tail}`;
+}
+
+function normalizeToolProgress(event: BufferedToolProgressEvent): BufferedToolProgressEvent {
+  return {
+    ...event,
+    chunk: boundToolProgressChunk(event.chunk),
+    lineCount: event.lineCount ?? event.chunk.split('\n').length,
+  };
+}
+
+function mergeToolProgress(
+  previous: BufferedToolProgressEvent,
+  next: BufferedToolProgressEvent,
+): BufferedToolProgressEvent {
+  const combined = `${previous.chunk}\n${next.chunk}`;
+  return {
+    ...next,
+    // Progress is an ephemeral tail-follow surface. Keep the pending producer
+    // queue bounded; tool.finished remains the authoritative complete result.
+    chunk: boundToolProgressChunk(combined),
+    lineCount:
+      (previous.lineCount ?? previous.chunk.split('\n').length) +
+      (next.lineCount ?? next.chunk.split('\n').length),
+  };
 }
 
 /** Execute an effect while forwarding events produced during the effect. */
@@ -74,6 +125,7 @@ async function* executeEffectWithStreaming(
     resolve?: (applied: boolean) => void;
     reject?: (error: unknown) => void;
   }> = [];
+  const pendingToolProgress = new Map<string, (typeof pending)[number]>();
   let wake: (() => void) | null = null;
   let settled = false;
   let result: RuntimeEvent[] = [];
@@ -85,7 +137,24 @@ async function* executeEffectWithStreaming(
     reject?: (error: unknown) => void,
     mode?: 'late_resource_reconciliation',
   ) => {
-    pending.push({ events, resolve, reject, mode });
+    const event = events.length === 1 ? events[0] : undefined;
+    if (!resolve && !reject && !mode && event?.type === 'tool.progress') {
+      const key = toolProgressKey(event);
+      const existing = pendingToolProgress.get(key);
+      const existingEvent = existing?.events[0];
+      if (existing && existingEvent?.type === 'tool.progress') {
+        existing.events[0] = mergeToolProgress(existingEvent, event);
+        return;
+      }
+      const entry = { events: [normalizeToolProgress(event)] };
+      pending.push(entry);
+      pendingToolProgress.set(key, entry);
+    } else {
+      // Durable/lifecycle events are ordering barriers. Progress emitted after
+      // one of these facts must occupy a new queue slot.
+      pendingToolProgress.clear();
+      pending.push({ events, resolve, reject, mode });
+    }
     wake?.();
     wake = null;
   };
@@ -142,6 +211,10 @@ async function* executeEffectWithStreaming(
         pendingEvent.resolve?.(true);
         continue;
       }
+      if (event.type === 'tool.progress') {
+        const key = toolProgressKey(event);
+        if (pendingToolProgress.get(key) === pendingEvent) pendingToolProgress.delete(key);
+      }
       emitted = true;
       if (pendingEvent.mode === 'late_resource_reconciliation') {
         try {
@@ -152,8 +225,8 @@ async function* executeEffectWithStreaming(
           if (!pendingEvent.reject) throw error;
           pendingEvent.reject(error);
         }
-      } else if (events.length === 1 && isEphemeralModelDelta(event)) {
-        const applied = kernel.isEffectLeaseCurrent(lease);
+      } else if (events.length === 1 && isEphemeralEffectEvent(event)) {
+        const applied = kernel.isEffectEventCurrent(lease, event);
         pendingEvent.resolve?.(applied);
         if (applied) yield event;
       } else {

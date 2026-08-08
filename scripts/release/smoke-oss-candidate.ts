@@ -90,7 +90,10 @@ async function runInstalledSmokes(prefix: string, windows: boolean): Promise<voi
 
 async function runInstalledTuiStartupSmoke(executablePath: string): Promise<void> {
   const server = createMockModelServer();
-  const workspace = createTestWorkspace();
+  // This is a standalone startup smoke, not Windows managed-network
+  // onboarding coverage. Keep its fixture independent from any local account
+  // setup that a packaged native runner now makes discoverable.
+  const workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
   workspace.env.CI = 'true';
   server.setResponses([]);
   let tui: Awaited<ReturnType<typeof spawnReadyTui>> | undefined;

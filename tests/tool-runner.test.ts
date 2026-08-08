@@ -399,6 +399,31 @@ describe('runApprovedTool — shell_execute timeout', () => {
     expect(capturedNetworkMode).toBe('disabled');
   });
 
+  it('runs exact local runtime version queries with networking disabled', async () => {
+    const capturedNetworkModes: string[] = [];
+
+    for (const command of ['node --version', 'npm --version', 'bun --version']) {
+      const result = await runApprovedTool({
+        workspace: '/ws',
+        request: {
+          id: `call-runtime-version-${command}`,
+          name: 'shell_execute',
+          args: { command },
+          reason: 'Inspect the local runtime version',
+          protectedCommand: command,
+        } as PendingToolRequest,
+        interactionMode: 'accept_edits',
+        shellExecutor: async (input) => {
+          capturedNetworkModes.push(input.networkMode ?? 'missing');
+          return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+        },
+      });
+      expect(result.ok).toBe(true);
+    }
+
+    expect(capturedNetworkModes).toEqual(['disabled', 'disabled', 'disabled']);
+  });
+
   it('opens networking only for an approved network shell command', async () => {
     let capturedNetworkMode: string | undefined;
 

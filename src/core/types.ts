@@ -1,3 +1,5 @@
+import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
+import type { NetworkBoundaryPolicyV1 } from '@/core/sandbox/network-policy';
 import type { ShellNetworkMode } from '@/core/sandbox/types';
 import type { AuthorizationMode, ShellApprovalGrant } from '@/protocol/events';
 
@@ -32,6 +34,15 @@ export interface ShellInput {
   onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** 本次调用的网络权限；未指定时使用执行器默认值 / Network permission for this call */
   networkMode?: ShellNetworkMode;
+  /** Capability-token host broker for an explicit `kite-http` request inside
+   * the Windows sandbox. This does not enable descendant direct networking. */
+  networkBroker?: ShellNetworkBrokerV1;
+}
+
+export interface ShellNetworkBrokerV1 {
+  policy: NetworkBoundaryPolicyV1;
+  toolCallId: string;
+  recordDecision: NetworkDecisionRecorderV1;
 }
 
 export interface ShellResult {

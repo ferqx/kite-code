@@ -15,7 +15,7 @@ import type { RemoteMcpEgressPermitResolverV1 } from '@/core/mcp/egress-permit';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
-import type { SandboxBackend } from '@/core/sandbox';
+import { type SandboxBackend, sandboxSupportsFullModeV1 } from '@/core/sandbox/platform';
 import {
   createRuntimeSecretDetectorV1,
   SessionLogCollector,
@@ -143,7 +143,10 @@ export async function* runRuntimeAgent(
     // Plan entry is a persisted event below; initialPhase is no longer the
     // source of truth for the task lifecycle.
     phase: 'building',
-    sandboxAvailable: input.sandboxBackend === 'seatbelt' || input.sandboxBackend === 'bubblewrap',
+    sandboxAvailable:
+      input.sandboxBackend === 'unknown'
+        ? false
+        : sandboxSupportsFullModeV1(input.sandboxBackend ?? 'none'),
   });
   const sessionLoggingPolicy =
     input.sessionLoggingPolicy ??

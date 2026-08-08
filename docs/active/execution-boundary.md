@@ -110,8 +110,8 @@ observer 不可用时返回 typed `controller_unavailable`；并发 sibling 不�
 冲突会先保存 `permit_replayed` denial，不会悬挂执行循环或退化为协议请求。该内容许可仍不替代
 下述 transport admission；两者必须同时允许，任一缺失都发送零请求。
 
-当前原生 backend 尚不能对任意 Shell/Skill descendant 实现无旁路 host allowlist，因此 sealed
-boundary 下 Shell 网络固定为 disabled。Remote HTTP MCP 现在具有独立的 transport boundary：
+当前原生 backend 不向任意 Shell/Skill descendant 授予结构性直连网络边界。Remote HTTP MCP
+具有独立的 transport boundary：
 connection、inventory、resource、Tool、OAuth 操作均绑定 canonical Workspace、execution boundary
 digest、run/profile identity、network policy revision、canonical endpoint/endpoint revision 与单次
 invocation/tool-call receipt；实际 SDK fetch 对每个请求和 redirect hop 复用 network enforcer 的
@@ -192,6 +192,35 @@ production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式
 裸 shell fallback 的说明只通过可选的 non-UI diagnostic sink 输出；TUI 不提供该 sink，避免
 `[sandbox]` 等内部诊断污染正常终端渲染。需要命令行诊断时由 CLI 显式接收并写入 stderr。
 
+
+### Unified sandbox startup downgrade
+
+ADR-0077 and ADR-0080 give TUI and foreground CLI the same startup state machine on Windows,
+macOS, and Linux. For sandbox-enabled flows, it caches a host Shell only when the unified resolver
+finds the selected sandbox environment or a required enforcement capability unavailable before any
+user script; ordinary preparation errors are not availability results. Host execution projects
+backend `none`, keeps Full unavailable, and never counts as native evidence or production
+qualification.
+
+ADR-0081 将 windows_restricted_token 设为 digest-verified runner 可用时的默认 Windows development
+backend。它遵循无 UAC 的 Codex 式路径：current-user WRITE_RESTRICTED token、capability-SID ACL 与 Job
+Object 直接操作 canonical 真实 Workspace，不 staging/copy repository，normal path 不显示 UAC prompt。
+它的 Bash/cmd/PowerShell fallback 仍受“sandbox environment 或必要 capability unavailable”的 startup-only
+规则约束。
+
+direct route 不是 ADR-0079 的 strict managed profile。它没有 structural descendant-safe network boundary，
+也不能保证 dynamic root .env.* creation；因此永远不具备 Full qualification、不是 production supported，
+也不能把请求的 full_access surface 变为 allowed。future elevated managed/projection profile 是独立
+qualification 的更强 configuration。
+
+A user script is executed exactly once. Non-zero exit, timeout, cancellation, cleanup failure,
+or later runner failure never retries unsandboxed. A sealed
+surface without Shell or with unsupported `full_access` remains a policy denial and cannot
+downgrade.
+
+Qualification is background work, not an input gate. The TUI projects pending qualification as
+backend `none`, keeps Full unavailable, and accepts prompt input. Raw native execution remains
+fail closed.
 Linux bubblewrap 使用同一 `filesystemScope` 投影 canonical Workspace 的 rw/ro bind，并显式
 绑定 invocation runtime。Linux runtime 清理另起只包含该 runtime 与只读系统工具的 mount
 namespace；这只收紧开发实现，不构成 Linux production qualification。protected path、seccomp、
@@ -203,10 +232,13 @@ backend 直接视为 unavailable，production 拒绝执行，cleanup 也保留�
 `src/core/sandbox/process-tree-capability.ts` 是 native process-tree evidence 的分离投影：
 `hardCountLimit` 需要具名 limiter mechanism 与 native conformance；`terminationCleanup` 只表达
 终止后残留确认。process group、PID namespace、Windows Job termination 或清理成功都不能单独
-产生 `processTreeLimit=enforced`，所以当前 Seatbelt、bubblewrap 与 Windows `none` 均保持
-hard-count `unsupported`，production surface 在 admission 阶段全关闭。raw artifact 同时保留
-`hardCountMechanism`；旧 V1 artifact 缺失时按 `none` 解释，不能从 verdict 反推机制。通用布尔
-projector 不从 sandbox barrel 导出，release producer 只能读取当前保守投影。
+产生 `processTreeLimit=enforced`，所以 Seatbelt、bubblewrap 与 Windows `none` 均保持
+hard-count `unsupported`，production surface 在 admission 阶段全关闭。Windows
+`windows_restricted_token` 只在 `JOB_OBJECT_LIMIT_ACTIVE_PROCESS` 真实生效（第 N+1 个进程创建
+失败）且 Job 清空确认后投影 `windows_job_active_process_limit=enforced`；这不改变空支持集。
+raw artifact 同时保留 `hardCountMechanism`；旧 V1 artifact 缺失时按 `none` 解释，
+不能从 verdict 反推机制。通用布尔 projector 不从 sandbox barrel 导出，release producer 只能
+读取当前保守投影。
 
 ## App-owned writer placement and status
 

@@ -3,7 +3,7 @@
 状态：active
 范围：`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/App.tsx`、`src/app/tui/OutputArea.tsx`、`src/app/tui/components/BlockRenderer.tsx`
 读取时机：修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。
-验证：`bun test tests/tui-layout.test.tsx`（验证 Static/Dynamic 分界和重复渲染防重）
+验证：`bun test tests/tui-layout.test.tsx tests/tui-static-promote.test.tsx tests/tui-static-content.test.tsx tests/tui-scroll-reset.test.tsx`（验证 Static/Dynamic 分界、长回答渐进冻结和重复渲染防重）
 
 ## 问题
 
@@ -66,7 +66,7 @@ useMemo 的问题是它用 `Object.is` 比依赖——reducer 每帧产新引用
 settledTurns.map(t => t.blocks.map(blockFingerprint).join(",")).join("|")
 ```
 
-当 `running` 从 true 翻转为 false 时，active turn 移入 settled turns。若其中 block 之后发生状态变更（如 `cancelRunningBlocks` 将 subagent/running→error），turn count 不变但 fingerprint 变化 → ref 更新 → `<Static>` 正确重渲染。
+最新 turn 在 run 结束时仍保留为 live tail，直到下一条用户消息建立新 turn；会话重挂载且空闲时才一次性把完整历史纳入 settled turns。live tail 内的不可变连续前缀仍逐块进入 Static。若尚未冻结的 block 之后发生状态变更（如取消投影将 subagent/running→error），fingerprint 变化 → ref 更新 → dynamic 投影正确重渲染。
 
 原来用 turn count 作为缓存键，bug 是在取消场景下 block 状态变化但 count 不变，导致 `<Static>` 冻结 stale 数据。
 

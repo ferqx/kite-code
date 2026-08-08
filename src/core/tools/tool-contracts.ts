@@ -197,8 +197,10 @@ export const SHELL_EXECUTE_CONTRACT: ToolContract = {
   sections: {
     whenToUse:
       'Execute a shell command in the workspace. ' +
-      'On Windows the shell is bash (Git Bash / MSYS2), NOT PowerShell or cmd.exe — always use Unix/shell syntax, never PowerShell cmdlets. ' +
-      'Use forward-slashed POSIX paths (e.g. /d/app/src, not D:\\app\\src) — backslashes are bash escape characters and will break paths. ' +
+      'Commands default to portable Bash/POSIX syntax. If the native sandbox cannot start, the host resolver uses an available Bash, cmd, PowerShell, or POSIX shell without replaying a command that already started. ' +
+      'To require cmd or PowerShell semantics from the default Bash command language, invoke the interpreter explicitly (for example `cmd.exe //d //c ...` or `pwsh -NoProfile -Command ...`); availability depends on the host OS. ' +
+      'Windows, macOS, and Linux use the same sandbox-first and host-fallback decision logic. ' +
+      'When using Bash on Windows, use forward-slashed POSIX paths (e.g. /d/app/src, not D:\\app\\src) because backslashes are Bash escape characters. ' +
       'Prefer search_content and search_files over `grep`, `rg`, `find`, and `ls` — they apply .gitignore rules and return structured results; shell_execute remains available when you need shell-specific behavior. ' +
       'Do NOT use shell_execute for: searching file contents (use search_content), finding files (use search_files), reading files (use read_file), editing files (use edit_file), writing files (use write_file). ' +
       'Use shell_execute ONLY for: tests, typecheck, builds, installs, git operations, and other terminal-only tasks. ' +

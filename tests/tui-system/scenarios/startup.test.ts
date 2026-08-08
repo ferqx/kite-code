@@ -28,7 +28,7 @@ describe('TUI PTY System — Startup', () => {
 
   beforeAll(async () => {
     server = createMockModelServer();
-    workspace = createTestWorkspace();
+    workspace = createTestWorkspace({ configOverrides: { sandbox: { enabled: false } } });
     workspace.env.CI = 'true';
 
     // Seed an incompatible Runtime Store so startup listSessions() fails in a

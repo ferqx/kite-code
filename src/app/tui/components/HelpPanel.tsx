@@ -5,6 +5,7 @@ import { useTheme } from '@/app/tui/theme';
 import type { SandboxBackend } from '@/core/sandbox';
 import { useOverlayHeight } from '../hooks/useOverlayHeight';
 import { SLASH_COMMAND_DEFS } from '../hooks/useSlashSuggestions';
+import { sandboxSupportsFullModeV1 } from '../interaction-mode';
 import OverlayFrame, { OverlayShortcutBar } from './OverlayFrame';
 import { OverlaySection } from './OverlayPrimitives';
 
@@ -22,10 +23,9 @@ export default function HelpPanel({ onClose, sandboxBackend = 'none' }: HelpPane
   const t = useTheme();
   const [scrollOffset, setScrollOffset] = useState(0);
   const maxContentHeight = useOverlayHeight(8);
-  const modeHelp =
-    sandboxBackend === 'none'
-      ? '设置权限模式（accept_edits/auto；Full 未启用沙箱）'
-      : '设置权限模式（accept_edits/auto/full）';
+  const modeHelp = !sandboxSupportsFullModeV1(sandboxBackend)
+    ? '设置权限模式（accept_edits/auto；非沙箱环境无法开启full）'
+    : '设置权限模式（accept_edits/auto/full）';
   const commandShortcuts: [string, string][] = SLASH_COMMAND_DEFS.map((command) => [
     `/${command.name}`,
     command.name === 'permissions' ? modeHelp : command.description,

@@ -392,3 +392,10 @@ const DANGEROUS_PATH_PATTERNS: RegExp[] = DANGEROUS_PATHS.map((path) => {
   // 文件模式：要求路径边界，防止部分匹配（如 .ssh/authorized_keys 不匹配 authorized_keys2）
   return new RegExp(`${prefix}(${escaped})(?:\\s|'|"|$|/|>)`, 'i');
 });
+
+// Dynamic dotenv variants such as `.env.test` are as sensitive as the fixed
+// names above. Keep this separate from DANGEROUS_PATHS because it is a pattern,
+// not a literal path that can be safely escaped into the generic matcher.
+DANGEROUS_PATH_PATTERNS.push(
+  /(?:\s|>|>>|'|"|\/|~|^)(\.env(?:\.[A-Za-z0-9_-]+)+)(?=\s|'|"|$|\/|>)/i,
+);

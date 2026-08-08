@@ -3,6 +3,12 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const workflow = readFileSync(resolve('.github/workflows/release-candidate.yml'), 'utf8');
+const candidateBuilder = readFileSync(resolve('scripts/release/oss-candidate.ts'), 'utf8');
+const windowsRunnerBuilder = readFileSync(
+  resolve('scripts/release/build-windows-runner.ts'),
+  'utf8',
+);
+const cargoConfig = readFileSync(resolve('.cargo/config.toml'), 'utf8');
 
 describe('ordinary open-source release candidate workflow', () => {
   test('runs hosted macOS, Ubuntu, and Windows without publish authority', () => {
@@ -49,6 +55,44 @@ describe('ordinary open-source release candidate workflow', () => {
     );
     expect(workflow).toContain(`ref: \${{ env.KITE_EXPECTED_CANDIDATE_COMMIT }}`);
     expect(workflow).toContain(`repository: \${{ env.KITE_CANDIDATE_REPOSITORY }}`);
+  });
+
+  test('builds and pins the Windows sandbox runner before packaging every required asset', () => {
+    expect(cargoConfig).toContain('[target.x86_64-pc-windows-gnu]');
+    expect(cargoConfig).toContain('link-arg=-Wl,--no-insert-timestamp');
+    expect(windowsRunnerBuilder).toContain(
+      '--remap-path-prefix=$' + '{cargoHome}=C:\\\\kite-cargo',
+    );
+    expect(windowsRunnerBuilder).toContain(
+      '--remap-path-prefix=$' + '{projectRoot}=C:\\\\kite-source',
+    );
+    expect(windowsRunnerBuilder).toContain("'linker=rust-lld'");
+    expect(windowsRunnerBuilder).toContain("'link-arg=--no-insert-timestamp'");
+    const orderedSteps = [
+      'rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal',
+      'bun run scripts/release/build-windows-runner.ts',
+      'bun run scripts/release/windows-runner-evidence.ts',
+      'git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json',
+      'bun run release:build',
+    ];
+    let previousIndex = -1;
+    for (const step of orderedSteps) {
+      const index = workflow.indexOf(step);
+      expect(index).toBeGreaterThan(previousIndex);
+      previousIndex = index;
+    }
+
+    for (const asset of [
+      'release/platform-capabilities/windows-runner-v1.json',
+      'native/windows-sandbox-runner/target/release/kite-windows-runner.exe',
+      'vendor/isksh/isksh.exe',
+      'vendor/isksh/coreutils.exe',
+      'vendor/isksh/LICENSE-APACHE',
+      'vendor/isksh/LICENSE-MIT',
+      'vendor/isksh/LICENSE.coreutils',
+    ]) {
+      expect(candidateBuilder).toContain(asset);
+    }
   });
 
   test('keeps real Provider calls explicit, low-volume, and artifact-free', () => {

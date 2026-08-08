@@ -155,12 +155,16 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   startedAtRef.current = block.startedAt;
 
   useEffect(() => {
+    // 只有子 agent 真正执行时才计时。等待审批、done/error/cancelled
+    // 状态下输出不依赖 liveElapsed，继续跑定时器只会每 200ms 触发
+    // 一次组件重渲染，驱动整个 TUI 持续刷新。
+    if (block.status !== 'running' || block.awaitingApproval) return;
     const timer = setInterval(() => {
       const at = startedAtRef.current;
       if (at != null) setLiveElapsed(Date.now() - at);
     }, 200);
     return () => clearInterval(timer);
-  }, []);
+  }, [block.status, block.awaitingApproval]);
 
   // ── Status flags ──
   const isRunning = block.status === 'running';

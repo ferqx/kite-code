@@ -23,6 +23,7 @@ import {
   createSandboxRuntimeDir,
 } from './shell-wrapper';
 import type { SandboxOptions } from './types';
+import { createWindowsRestrictedTokenExecutor } from './windows-restricted-token';
 
 export function resolveSandboxExitCode(
   exitCode: number,
@@ -51,13 +52,15 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
     return shellTool;
   }
 
-  const backend = detectSandboxBackend();
+  const backend = options.selectedBackend ?? detectSandboxBackend();
 
   switch (backend) {
     case 'seatbelt':
       return createSeatbeltExecutor(options);
     case 'bubblewrap':
       return createBwrapExecutor(options);
+    case 'windows_restricted_token':
+      return createWindowsRestrictedTokenExecutor(options);
     default:
       if (options.unavailableFallback === 'fail') {
         return createUnavailableExecutor('sandbox_backend_unavailable');

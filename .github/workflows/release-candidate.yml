@@ -44,6 +44,19 @@ jobs:
         with:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
+      - if: runner.os == 'Windows'
+        name: Select reproducible Windows GNU Rust toolchain
+        run: |
+          rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal
+          rustup override set 1.97.1-x86_64-pc-windows-gnu
+      - if: runner.os == 'Windows'
+        name: Build pinned Windows sandbox runner
+        run: bun run scripts/release/build-windows-runner.ts
+      - if: runner.os == 'Windows'
+        name: Verify Windows runner manifest pin
+        run: |
+          bun run scripts/release/windows-runner-evidence.ts
+          git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json
       - name: Release and Provider contract tests
         run: >-
           bun test

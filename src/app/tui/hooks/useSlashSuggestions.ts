@@ -1,6 +1,7 @@
 import { type SetStateAction, useMemo, useState } from 'react';
 import { detectSandboxBackend, type SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
+import { sandboxSupportsFullModeV1 } from '../interaction-mode';
 
 export interface SlashCommandDef {
   name: string;
@@ -10,7 +11,12 @@ export interface SlashCommandDef {
 }
 
 export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
-  { name: 'effort', aliases: [], description: '设置推理深度', args: 'low|medium|high|max' },
+  {
+    name: 'effort',
+    aliases: [],
+    description: '设置推理深度',
+    args: 'low|medium|high|max',
+  },
   { name: 'model', aliases: [], description: '打开模型选择器' },
   {
     name: 'theme',
@@ -33,8 +39,16 @@ export const SLASH_COMMAND_DEFS: SlashCommandDef[] = [
     description: '设置权限模式',
     args: 'accept_edits|auto|full',
   },
-  { name: 'release', aliases: [], description: 'Show release profile and Gate status' },
-  { name: 'telemetry', aliases: [], description: 'Show telemetry consent and export status' },
+  {
+    name: 'release',
+    aliases: [],
+    description: 'Show release profile and Gate status',
+  },
+  {
+    name: 'telemetry',
+    aliases: [],
+    description: 'Show telemetry consent and export status',
+  },
   {
     name: 'mcp',
     aliases: [],
@@ -92,19 +106,23 @@ export function buildModeSuggestionItems(
   activeInteractionMode: string | undefined,
   sandboxBackend: SandboxBackend,
 ): SuggestionItem[] {
-  const fullUnavailable = sandboxBackend === 'none';
+  const fullDisabled = !sandboxSupportsFullModeV1(sandboxBackend);
   const modes = [
     {
       command: 'accept_edits',
       description: '本地工作区操作自动执行；出网、外部写入和未知副作用需确认',
       disabled: false,
     },
-    { command: 'auto', description: '模型自动审核，不确定时询问', disabled: false },
+    {
+      command: 'auto',
+      description: '模型自动审核，不确定时询问',
+      disabled: false,
+    },
     {
       command: 'full',
       description: '完全自主，全部放行，不询问用户',
-      disabled: false,
-      warning: fullUnavailable ? '当前未在沙箱环境开启' : undefined,
+      disabled: fullDisabled,
+      warning: fullDisabled ? '当前未在沙箱环境开启' : undefined,
     },
   ];
 
@@ -157,7 +175,11 @@ export function useSlashSuggestions(
       return {
         kind: 'effort',
         partial,
-        items: matched.map((l) => ({ command: l, aliases: [], description: '' })),
+        items: matched.map((l) => ({
+          command: l,
+          aliases: [],
+          description: '',
+        })),
       };
     }
 

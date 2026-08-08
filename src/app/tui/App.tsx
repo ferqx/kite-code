@@ -57,6 +57,8 @@ export interface AppProps {
   slashSuggestion?: import('./hooks/useSlashSuggestions').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
   onTogglePlanMode?: () => void;
+  /** Abort the foreground runtime synchronously before reducer-only cancel actions. */
+  onAbort?: () => void;
   getRewindPreview?: (
     checkpointId: string,
   ) => import('@/core/runtime/file-checkpoints').FileRestorePreview | null;
@@ -69,7 +71,11 @@ export function useTuiState(
   initialProviderName?: string,
   initialThinkingMode?: string | null,
   initialInteractionMode?: 'accept_edits' | 'auto' | 'full',
-): { state: TuiState; dispatch: Dispatch<Action>; onToggleReason: (id: number) => void } {
+): {
+  state: TuiState;
+  dispatch: Dispatch<Action>;
+  onToggleReason: (id: number) => void;
+} {
   const statusOverrides: Partial<TuiState['status']> = {};
   if (initialModelName) statusOverrides.modelName = initialModelName;
   if (initialProviderName) statusOverrides.modelProvider = initialProviderName;
@@ -98,6 +104,7 @@ export default function App({
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
+  onAbort,
   getRewindPreview,
   resizeGeneration,
   children,
@@ -125,6 +132,7 @@ export default function App({
     () => {
       if (state.interrupt) provider.submitAction({ type: 'cancel' });
     },
+    onAbort,
   );
 
   // Stabilized callbacks for React.memo children
@@ -136,7 +144,11 @@ export default function App({
   const selectModel = useCallback(
     (model: import('@/core/config').AvailableModel) => {
       const persisted = persistModelSelection(model.provider, model.name);
-      dispatch({ type: 'SELECT_MODEL', provider: model.provider, modelName: model.name });
+      dispatch({
+        type: 'SELECT_MODEL',
+        provider: model.provider,
+        modelName: model.name,
+      });
       if (!persisted) {
         dispatch({
           type: 'LOCAL_TEXT',
@@ -174,7 +186,10 @@ export default function App({
   );
   const onSessionAvailabilityChange = useCallback(
     (available: boolean) => {
-      dispatch({ type: 'SET_SESSION_SERVICE_UNAVAILABLE', unavailable: !available });
+      dispatch({
+        type: 'SET_SESSION_SERVICE_UNAVAILABLE',
+        unavailable: !available,
+      });
     },
     [dispatch],
   );

@@ -1,6 +1,6 @@
 import { Database } from 'bun:sqlite';
 import type { RuntimeMetricBridgeV1 } from '@/app/observability/runtime-bridge';
-import { composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
+import { type AppShellExecutorV1, composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import type { McpRuntimeProvider, RemoteMcpEgressPermitResolverV1 } from '@/core/mcp';
@@ -37,7 +37,6 @@ import {
   defaultRuntimeJournalMode,
   runtimeStorePathFor,
 } from '@/core/runtime/store';
-import { resolveSandboxRuntime } from '@/core/sandbox/index';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { InterruptPayload, UserAction } from '@/protocol/actions';
 import type { AgentPhase } from '@/protocol/events';
@@ -47,6 +46,7 @@ import { providerActionInput, providerAdmissionInput } from './mcp/runtime-inter
 import type { McpController } from './mcp/types';
 import type { TuiUserInputProvider } from './provider';
 import { buildRunAgentParams } from './run-agent';
+import { shouldProjectRunExited } from './run-lifecycle';
 import type { SessionSnapshot, StatusState } from './types';
 
 function isRecoverableError(error: unknown): boolean {
@@ -102,7 +102,6 @@ export function isSilentCancellationMismatch(event: RuntimeEvent): boolean {
     event.message === 'Runtime action does not match the active interaction.'
   );
 }
-
 export {
   admitInteractionModeTarget,
   fullModeUnavailableReason,
@@ -116,7 +115,54 @@ const DISPOSABLE_EVENT_TYPES = new Set([
   'model.text_delta',
   'model.reasoning_delta',
   'model.reasoning_completed',
+  'tool.progress',
 ]);
+
+const PRESENTATION_FRAME_MS = 50;
+const MAX_BUFFERED_TOOL_PROGRESS_CHARS = 16 * 1024;
+const TOOL_PROGRESS_TRUNCATED_MARKER = '… progress truncated … ';
+
+type ToolProgressEvent = Extract<RuntimeEvent, { type: 'tool.progress' }> & {
+  lineCount?: number;
+};
+
+function toolProgressKey(event: ToolProgressEvent): string {
+  return `${event.toolCallId}\0${event.stream}`;
+}
+
+function boundToolProgressChunk(chunk: string): string {
+  if (chunk.length <= MAX_BUFFERED_TOOL_PROGRESS_CHARS) return chunk;
+  const available = Math.max(
+    1,
+    MAX_BUFFERED_TOOL_PROGRESS_CHARS - TOOL_PROGRESS_TRUNCATED_MARKER.length,
+  );
+  let tail = chunk.slice(-available);
+  const firstBoundary = tail.indexOf('\n');
+  if (firstBoundary >= 0) tail = tail.slice(firstBoundary + 1);
+  return `${TOOL_PROGRESS_TRUNCATED_MARKER}${tail}`;
+}
+
+function normalizeToolProgress(event: ToolProgressEvent): ToolProgressEvent {
+  return {
+    ...event,
+    chunk: boundToolProgressChunk(event.chunk),
+    lineCount: event.lineCount ?? event.chunk.split('\n').length,
+  };
+}
+
+function mergeToolProgress(
+  previous: ToolProgressEvent,
+  next: ToolProgressEvent,
+): ToolProgressEvent {
+  const combined = `${previous.chunk}\n${next.chunk}`;
+  return {
+    ...next,
+    chunk: boundToolProgressChunk(combined),
+    lineCount:
+      (previous.lineCount ?? previous.chunk.split('\n').length) +
+      (next.lineCount ?? next.chunk.split('\n').length),
+  };
+}
 
 /** 工厂依赖：注入到每个 SessionRuntime */
 export interface SessionDeps {
@@ -132,6 +178,10 @@ export interface SessionDeps {
   checkpointPath: string;
   /** One shared metadata-only reporter for foreground, background and subagent Runtime events. */
   observabilityBridge?: RuntimeMetricBridgeV1;
+  /** TUI-owned startup decision reused by every session and Shell invocation. */
+  shellExecutor?: AppShellExecutorV1;
+  /** Wait until Ink has committed and written the current presentation frame. */
+  flushPresentation?: () => Promise<void>;
 }
 
 export interface ContextCompactionCommandResult {
@@ -189,18 +239,31 @@ export class SessionRuntime {
   private _activeDispatch: ((action: Action) => void) | null = null;
   private _contentLoggingDisclosureShown = false;
   private readonly _observabilityBridge: RuntimeMetricBridgeV1 | undefined;
+  private readonly _shellExecutor: AppShellExecutorV1 | undefined;
+  /** Executor whose prepare() promise currently owns this run's startup boundary. */
+  private _preparingShellExecutor: AppShellExecutorV1 | null = null;
+  private readonly _flushPresentation: (() => Promise<void>) | undefined;
   /**
    * Remains pending while the previous generator is unwinding after abort().
    * abort() clears the user-visible running flag immediately, but a new run
    * must not enter the same RuntimeStore until the old loop has closed.
    */
   private _runCompletion: Promise<void> | null = null;
+  /** True after the visible run has been cancelled but before its async cleanup is complete. */
+  private _cancellationRequested = false;
+  /** Prevents multiple prompts from being optimistically accepted for one cancelled run. */
+  private _successorPromptReserved = false;
   private _deltaBuffer: {
     dispatch: ((action: Action) => void) | null;
     text?: Extract<RuntimeEvent, { type: 'model.text_delta' }>;
     reasoning?: Extract<RuntimeEvent, { type: 'model.reasoning_delta' }>;
     timer: ReturnType<typeof setTimeout> | null;
   } = { dispatch: null, timer: null };
+  private _toolProgressBuffer: {
+    dispatch: ((action: Action) => void) | null;
+    events: Map<string, ToolProgressEvent>;
+    timer: ReturnType<typeof setTimeout> | null;
+  } = { dispatch: null, events: new Map(), timer: null };
 
   constructor(threadId: string, workspace: string, deps: SessionDeps) {
     this.threadId = threadId;
@@ -212,6 +275,8 @@ export class SessionRuntime {
     this.mcpRecoveryController = deps.mcpRecoveryController ?? null;
     this.remoteMcpEgressPermitResolver = deps.remoteMcpEgressPermitResolver;
     this._observabilityBridge = deps.observabilityBridge;
+    this._shellExecutor = deps.shellExecutor;
+    this._flushPresentation = deps.flushPresentation;
     this.interactionMode = deps.config.interactionMode ?? 'accept_edits';
     this.config = deps.config;
 
@@ -220,8 +285,19 @@ export class SessionRuntime {
 
   // ── 公开 API ──
 
+  /** Reserve the only successor prompt allowed while a cancelled run is unwinding. */
+  tryReservePrompt(): boolean {
+    if (this._successorPromptReserved) return false;
+    if (this.agentLoopActive && !this._cancellationRequested) return false;
+    this._successorPromptReserved = true;
+    return true;
+  }
+
   abort(): void {
-    this._flushModelDeltas();
+    this._flushBufferedPresentation();
+    if (this.agentLoopActive || this._runCompletion) {
+      this._cancellationRequested = true;
+    }
     try {
       const cancellationEvents = this.runtimeControl?.cancelRun('Cancelled by user.') ?? [];
       for (const event of cancellationEvents) {
@@ -245,6 +321,7 @@ export class SessionRuntime {
       // Resolve a suspended interaction before aborting so the generator can
       // leave requestAction and close its RuntimeStore handle.
       this.resolveInterrupt({ type: 'cancel' as const });
+      this._preparingShellExecutor?.abortPreparation?.();
       this.abortController?.abort();
       this.abortController = null;
       this.agentLoopActive = false;
@@ -256,6 +333,7 @@ export class SessionRuntime {
 
   clearBuffer(): void {
     this._clearModelDeltas();
+    this._clearToolProgress();
     this.eventBuffer = [];
     this.conversationHistory = [];
     this.pendingInterrupt = false;
@@ -263,7 +341,7 @@ export class SessionRuntime {
 
   /** 切换到前台：新事件路由到 provider.onEvent，唤醒挂起的后台中断 */
   setForeground(foreground: boolean): void {
-    this._flushModelDeltas();
+    this._flushBufferedPresentation();
     this._foreground = foreground;
     if (foreground) {
       this._foregroundWake?.();
@@ -283,134 +361,204 @@ export class SessionRuntime {
       model?: import('@/core/model/factory').SupportedChatModel;
     },
     requestedPhase?: AgentPhase,
-    initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
+    initialSkillActivations?: Array<{
+      skillId: string;
+      input: Record<string, unknown>;
+    }>,
   ): Promise<void> {
-    if (this.agentLoopActive) return;
+    if (this.agentLoopActive && !this._cancellationRequested && !this._successorPromptReserved)
+      return;
+    if (this.agentLoopActive && !this._successorPromptReserved) {
+      this._successorPromptReserved = true;
+    }
     const previousRun = this._runCompletion;
     if (previousRun) await previousRun;
     // Several callers may have waited for the same cancelled run. Only the
     // first continuation may claim the session for a new loop.
-    if (this.agentLoopActive) return;
-
-    const shellContext =
-      this.conversationHistory.length > 0 ? `\n${this.conversationHistory.join('\n')}` : '';
-    const sandboxRuntime = resolveSandboxRuntime({ enabled: deps.config.sandbox.enabled });
-    const fullModeReason = fullModeUnavailableReason(this.interactionMode, sandboxRuntime.backend);
-    if (fullModeReason) {
-      this.interactionMode = 'accept_edits';
-      deps.dispatch({ type: 'SET_INTERACTION_MODE', mode: 'accept_edits' });
-      deps.dispatch({
-        type: 'RUNTIME_EVENT',
-        event: { type: 'run.error', message: fullModeReason, recoverable: true },
-      });
+    if (this.agentLoopActive) {
+      this._successorPromptReserved = false;
       return;
     }
-    const shellExecutor = composeAppSandboxExecutorV1({
-      entrypoint: 'tui',
-      workspace: this.workspace,
-      config: deps.config,
-    });
 
+    this._successorPromptReserved = false;
+    this._cancellationRequested = false;
+
+    // Claim the session before sandbox preparation. Native startup may
+    // remain pending for a while; during that window a second prompt must not
+    // open a concurrent RuntimeStore-backed loop. Establish cancellation at
+    // the same boundary so abort() can also cancel a run that has not reached
+    // the agent generator yet.
     const abortController = new AbortController();
-
-    const authMode =
-      this.interactionMode === 'full' ? ('full_access' as const) : ('default' as const);
-
-    const runAgentParams = buildRunAgentParams({
-      task,
-      threadId: this.threadId,
-      workspace: this.workspace,
-      config: deps.config,
-      shellExecutor,
-      signal: abortController.signal,
-      thinkingLevel: this.thinkingLevel,
-      skills: this.skillManifests,
-      skillOptions: this.skillOptions,
-      initialSkillActivations,
-      mcpManager: this.mcpManager,
-      remoteMcpEgressPermitResolver: this.remoteMcpEgressPermitResolver,
-      shellContext,
-      interactionMode: this.interactionMode,
-      authorizationMode: authMode,
-      phase: requestedPhase ?? 'building',
-      sandboxBackend: sandboxRuntime.backend,
-      model: deps.model,
-      // 后台会话不再默认注入 full_access；中断会挂起到该会话，等待切回前台处理。
-    });
-
-    // 始终使用代理提供器 — 事件路由由 _foreground 控制
-    const runtimeInput: RunRuntimeAgentInput = {
-      task: runAgentParams.task,
-      userId: runAgentParams.userId,
-      threadId: runAgentParams.threadId,
-      workspace: runAgentParams.workspace,
-      runtimeStorePath: runtimeStorePathFor(runAgentParams.checkpointPath),
-      config: runAgentParams.config,
-      model: runAgentParams.model,
-      shellExecutor: runAgentParams.shellExecutor,
-      mcpManager: runAgentParams.mcpManager,
-      remoteMcpEgressPermitResolver: runAgentParams.remoteMcpEgressPermitResolver,
-      skills: runAgentParams.skills,
-      skillOptions: runAgentParams.skillOptions,
-      initialSkillActivations: runAgentParams.initialSkillActivations,
-      interactionMode: runAgentParams.interactionMode,
-      authorizationMode: runAgentParams.authorizationMode,
-      authorizationSource: runAgentParams.authorizationSource,
-      phase: runAgentParams.phase,
-      thinkingLevel: runAgentParams.thinkingLevel,
-      sandboxBackend: runAgentParams.sandboxBackend,
-      signal: runAgentParams.signal,
-      frontend: 'tui',
-      sessionLoggingPolicy: runAgentParams.sessionLoggingPolicy,
-      sessionLoggingContentInspector: runAgentParams.sessionLoggingContentInspector,
-      onSessionLoggingStatus: ({ mode }) => {
-        if (mode === 'content' && !this._contentLoggingDisclosureShown) {
-          this._contentLoggingDisclosureShown = true;
-          deps.dispatch({
-            type: 'LOCAL_TEXT',
-            text:
-              '  ⎿  Session content logging is enabled by the release artifact and your explicit opt-in. ' +
-              'Reasoning, tool/file content, secrets, and credentials remain excluded.',
-          });
-        }
-      },
-      onKernelControl: (control) => {
-        this.runtimeControl = control;
-      },
-      onCompactionProgress: (phase) => {
-        deps.dispatch({ type: 'SET_COMPACTION_PROGRESS', phase });
-      },
-    };
-    const runtimeProvider: RuntimeActionProvider = {
-      requestAction: (effect, state) => this._requestRuntimeAction(effect, state),
-    };
-    const generator = runRuntimeAgent(runtimeInput, runtimeProvider);
     let resolveRunCompletion!: () => void;
     const runCompletion = new Promise<void>((resolve) => {
       resolveRunCompletion = resolve;
     });
     this._runCompletion = runCompletion;
+    this.agentLoopActive = true;
+    this.abortController = abortController;
+    this._activeDispatch = deps.dispatch;
 
-    // 所有状态变更必须在 try 块内，防止 buildRunAgentParams/runAgent 抛出时
-    // agentLoopActive 和 abortController 泄漏导致会话永久冻结
     let aborted = false;
+    let generatorStarted = false;
     try {
-      this.agentLoopActive = true;
-      this.abortController = abortController;
+      const shellContext =
+        this.conversationHistory.length > 0 ? `\n${this.conversationHistory.join('\n')}` : '';
+      const shellExecutor =
+        this._shellExecutor ??
+        composeAppSandboxExecutorV1({
+          entrypoint: 'tui',
+          workspace: this.workspace,
+          config: deps.config,
+        });
+      this._preparingShellExecutor = shellExecutor;
+      let shellRuntime: Awaited<ReturnType<AppShellExecutorV1['prepare']>>;
+      try {
+        shellRuntime = await shellExecutor.prepare();
+      } finally {
+        if (this._preparingShellExecutor === shellExecutor) {
+          this._preparingShellExecutor = null;
+        }
+      }
+      if (abortController.signal.aborted) {
+        aborted = true;
+        return;
+      }
+      const effectiveBackend = shellRuntime.mode === 'sandbox' ? shellRuntime.backend : 'none';
+      const fullModeReason = fullModeUnavailableReason(this.interactionMode, effectiveBackend);
+      if (fullModeReason) {
+        this.interactionMode = 'accept_edits';
+        deps.dispatch({ type: 'SET_INTERACTION_MODE', mode: 'accept_edits' });
+        deps.dispatch({
+          type: 'RUNTIME_EVENT',
+          event: {
+            type: 'run.error',
+            message: fullModeReason,
+            recoverable: true,
+          },
+        });
+        return;
+      }
+
+      const authMode =
+        this.interactionMode === 'full' ? ('full_access' as const) : ('default' as const);
+
+      const runAgentParams = buildRunAgentParams({
+        task,
+        threadId: this.threadId,
+        workspace: this.workspace,
+        config: deps.config,
+        shellExecutor,
+        signal: abortController.signal,
+        thinkingLevel: this.thinkingLevel,
+        skills: this.skillManifests,
+        skillOptions: this.skillOptions,
+        initialSkillActivations,
+        mcpManager: this.mcpManager,
+        remoteMcpEgressPermitResolver: this.remoteMcpEgressPermitResolver,
+        shellContext,
+        interactionMode: this.interactionMode,
+        authorizationMode: authMode,
+        phase: requestedPhase ?? 'building',
+        sandboxBackend: effectiveBackend,
+        model: deps.model,
+        // 后台会话不再默认注入 full_access；中断会挂起到该会话，等待切回前台处理。
+      });
+
+      // 始终使用代理提供器 — 事件路由由 _foreground 控制
+      const runtimeInput: RunRuntimeAgentInput = {
+        task: runAgentParams.task,
+        userId: runAgentParams.userId,
+        threadId: runAgentParams.threadId,
+        workspace: runAgentParams.workspace,
+        runtimeStorePath: runtimeStorePathFor(runAgentParams.checkpointPath),
+        config: runAgentParams.config,
+        model: runAgentParams.model,
+        shellExecutor: runAgentParams.shellExecutor,
+        mcpManager: runAgentParams.mcpManager,
+        remoteMcpEgressPermitResolver: runAgentParams.remoteMcpEgressPermitResolver,
+        skills: runAgentParams.skills,
+        skillOptions: runAgentParams.skillOptions,
+        initialSkillActivations: runAgentParams.initialSkillActivations,
+        interactionMode: runAgentParams.interactionMode,
+        authorizationMode: runAgentParams.authorizationMode,
+        authorizationSource: runAgentParams.authorizationSource,
+        phase: runAgentParams.phase,
+        thinkingLevel: runAgentParams.thinkingLevel,
+        sandboxBackend: runAgentParams.sandboxBackend,
+        signal: runAgentParams.signal,
+        frontend: 'tui',
+        sessionLoggingPolicy: runAgentParams.sessionLoggingPolicy,
+        sessionLoggingContentInspector: runAgentParams.sessionLoggingContentInspector,
+        onSessionLoggingStatus: ({ mode }) => {
+          if (mode === 'content' && !this._contentLoggingDisclosureShown) {
+            this._contentLoggingDisclosureShown = true;
+            deps.dispatch({
+              type: 'LOCAL_TEXT',
+              text:
+                '  ⎿  Session content logging is enabled by the release artifact and your explicit opt-in. ' +
+                'Reasoning, tool/file content, secrets, and credentials remain excluded.',
+            });
+          }
+        },
+        onKernelControl: (control) => {
+          this.runtimeControl = control;
+        },
+        onCompactionProgress: (phase) => {
+          deps.dispatch({ type: 'SET_COMPACTION_PROGRESS', phase });
+        },
+      };
+      const runtimeProvider: RuntimeActionProvider = {
+        requestAction: (effect, state) => this._requestRuntimeAction(effect, state),
+      };
+      const generator = runRuntimeAgent(runtimeInput, runtimeProvider);
+
+      // 所有状态变更必须在 try 块内，防止 buildRunAgentParams/runAgent 抛出时
+      // agentLoopActive 和 abortController 泄漏导致会话永久冻结
       this.generator = generator;
-      this._activeDispatch = deps.dispatch;
+      generatorStarted = true;
       for await (const event of generator) {
-        if (isSilentCancellationMismatch(event)) continue;
-        this._routeRuntimeEvent(event, deps.dispatch);
+        // abort() projects the cancellation events synchronously and then
+        // aborts the controller. A provider/generator can still resolve one
+        // more queued event after that point; never let that late event bleed
+        // into a successor prompt that may already be visible in the TUI.
         if (abortController.signal.aborted) {
           aborted = true;
           break;
         }
+        if (isSilentCancellationMismatch(event)) continue;
+        if (event.type === 'turn.aborted' && event.cause === 'user') {
+          aborted = true;
+        }
+        this._routeRuntimeEvent(event, deps.dispatch);
+        if (
+          event.type === 'model.reasoning_completed' &&
+          this._foreground &&
+          this._flushPresentation
+        ) {
+          // reasoning_completed is a user-visible lifecycle boundary. Fast
+          // providers can otherwise emit text + model.responded before Ink's
+          // throttled renderer writes the running Thought frame. Wait on Ink's
+          // actual commit/output barrier rather than guessing with a fixed delay.
+          await this._flushPresentation();
+        }
+        if (aborted) {
+          break;
+        }
       }
-      if (!aborted && this._foreground) {
+      if (
+        shouldProjectRunExited({
+          aborted,
+          signalAborted: abortController.signal.aborted,
+          foreground: this._foreground,
+        })
+      ) {
         deps.dispatch({ type: 'SET_EXITED' });
       }
     } catch (e: unknown) {
+      if (abortController.signal.aborted) {
+        aborted = true;
+        return;
+      }
       // Emit any accumulated retry events before the fatal error.
       // In the Kernel architecture, model retries are normally emitted
       // through the runtime event pipeline.  This catch block handles
@@ -464,13 +612,15 @@ export class SessionRuntime {
       this.abortController = null;
       this.generator = null;
       this._activeDispatch = null;
+      // The cleanup barrier covers provider teardown too. A successor must not
+      // start while the predecessor can still clear a shared pending action.
+      if (generatorStarted && this._foreground) {
+        deps.provider.reset();
+      }
       if (this._runCompletion === runCompletion) {
         this._runCompletion = null;
       }
       resolveRunCompletion();
-      if (this._foreground) {
-        deps.provider.reset();
-      }
     }
   }
 
@@ -478,15 +628,38 @@ export class SessionRuntime {
 
   /** 推送事件到缓冲，溢出时优先丢弃非关键事件 */
   private _pushToBuffer(event: RuntimeEvent): void {
+    if (event.type === 'tool.progress') {
+      event = normalizeToolProgress(event);
+      for (let index = this.eventBuffer.length - 1; index >= 0; index -= 1) {
+        const candidate = this.eventBuffer[index]!;
+        if (
+          'toolCallId' in candidate &&
+          candidate.toolCallId === event.toolCallId &&
+          (candidate.type === 'tool.finished' ||
+            candidate.type === 'tool.failed' ||
+            candidate.type === 'tool.rejected' ||
+            candidate.type === 'tool.cancelled')
+        ) {
+          break;
+        }
+        if (
+          candidate.type === 'tool.progress' &&
+          candidate.toolCallId === event.toolCallId &&
+          candidate.stream === event.stream
+        ) {
+          this.eventBuffer[index] = mergeToolProgress(candidate, event);
+          return;
+        }
+      }
+    }
     if (this.eventBuffer.length >= SessionRuntime.MAX_BUFFER) {
       // 查找第一个可丢弃事件的下标
       const dropIdx = this.eventBuffer.findIndex((e) => DISPOSABLE_EVENT_TYPES.has(e.type));
       if (dropIdx >= 0) {
         this.eventBuffer.splice(dropIdx, 1);
-      } else {
-        // 无可丢弃事件，移除最老的
-        this.eventBuffer.shift();
-      }
+      } else if (DISPOSABLE_EVENT_TYPES.has(event.type)) return;
+      // MAX_BUFFER is a soft presentation limit. Durable/lifecycle events may
+      // temporarily exceed it rather than evict an earlier terminal fact.
     }
     this.eventBuffer.push(event);
   }
@@ -495,10 +668,16 @@ export class SessionRuntime {
   private _routeRuntimeEvent(event: RuntimeEvent, dispatch: (action: Action) => void): void {
     this._observabilityBridge?.observeRuntimeEvent(event, new Date().toISOString());
     if (event.type === 'model.text_delta' || event.type === 'model.reasoning_delta') {
+      this._flushToolProgress();
       this._bufferModelDelta(event, dispatch);
       return;
     }
-    this._flushModelDeltas();
+    if (event.type === 'tool.progress') {
+      this._flushModelDeltas();
+      this._bufferToolProgress(event, dispatch);
+      return;
+    }
+    this._flushBufferedPresentation();
     if (this._foreground) {
       dispatch({ type: 'RUNTIME_EVENT', event });
       return;
@@ -521,7 +700,7 @@ export class SessionRuntime {
     if (event.type === 'model.text_delta') this._deltaBuffer.text = event;
     else this._deltaBuffer.reasoning = event;
     if (this._deltaBuffer.timer) return;
-    this._deltaBuffer.timer = setTimeout(() => this._flushModelDeltas(), 50);
+    this._deltaBuffer.timer = setTimeout(() => this._flushModelDeltas(), PRESENTATION_FRAME_MS);
   }
 
   private _flushModelDeltas(): void {
@@ -541,6 +720,50 @@ export class SessionRuntime {
   private _clearModelDeltas(): void {
     if (this._deltaBuffer.timer) clearTimeout(this._deltaBuffer.timer);
     this._deltaBuffer = { dispatch: null, timer: null };
+  }
+
+  private _bufferToolProgress(event: ToolProgressEvent, dispatch: (action: Action) => void): void {
+    const buffered = this._toolProgressBuffer;
+    buffered.dispatch = dispatch;
+    const key = toolProgressKey(event);
+    const previous = buffered.events.get(key);
+    buffered.events.set(
+      key,
+      previous ? mergeToolProgress(previous, event) : normalizeToolProgress(event),
+    );
+    if (buffered.timer) return;
+    buffered.timer = setTimeout(() => this._flushToolProgress(), PRESENTATION_FRAME_MS);
+  }
+
+  private _flushToolProgress(): void {
+    const buffered = this._toolProgressBuffer;
+    if (buffered.timer) clearTimeout(buffered.timer);
+    this._toolProgressBuffer = {
+      dispatch: null,
+      events: new Map(),
+      timer: null,
+    };
+    for (const event of buffered.events.values()) {
+      if (this._foreground && buffered.dispatch) {
+        buffered.dispatch({ type: 'RUNTIME_EVENT', event });
+      } else {
+        this._pushToBuffer(event);
+      }
+    }
+  }
+
+  private _clearToolProgress(): void {
+    if (this._toolProgressBuffer.timer) clearTimeout(this._toolProgressBuffer.timer);
+    this._toolProgressBuffer = {
+      dispatch: null,
+      events: new Map(),
+      timer: null,
+    };
+  }
+
+  private _flushBufferedPresentation(): void {
+    this._flushModelDeltas();
+    this._flushToolProgress();
   }
 
   /** Adapt existing Ink button actions at the UI edge and bind the persisted interaction id. */
@@ -753,7 +976,11 @@ export class SessionRuntime {
               interactionId: effect.interactionId,
               reason: 'No approval grant selected.',
             }
-          : { type: 'approve', interactionId: effect.interactionId, grant: action.grant };
+          : {
+              type: 'approve',
+              interactionId: effect.interactionId,
+              grant: action.grant,
+            };
       case 'reject':
         return { type: 'reject', interactionId: effect.interactionId };
       case 'plan_review_decision':
@@ -923,7 +1150,11 @@ export class SessionManager {
   /** 立即写入 DB（绕过防抖）/ Immediate DB write (bypasses debounce) */
   private _flushTokenStatsNow(
     threadId: string,
-    stats: { cacheHitTokens: number; cacheMissTokens: number; totalTokens: number },
+    stats: {
+      cacheHitTokens: number;
+      cacheMissTokens: number;
+      totalTokens: number;
+    },
   ): void {
     try {
       this.statsDb.run(
@@ -1370,7 +1601,11 @@ export class SessionManager {
       });
       const preflight = compactResetPreflight(state, config, environment, capabilities);
       if (!preflight.safe) {
-        return { events: [], text: `Cannot reset: ${preflight.reason}`, isError: true };
+        return {
+          events: [],
+          text: `Cannot reset: ${preflight.reason}`,
+          isError: true,
+        };
       }
       const resetEvent: RuntimeEvent = {
         type: 'context.compaction_reset',
@@ -1509,8 +1744,16 @@ export class SessionManager {
         return { events: [], phase };
       }
       const events: RuntimeEvent[] = [
-        { type: 'planning.exited', taskId: active.taskId, reason: 'Exited Plan Mode.' },
-        { type: 'task.cancelled', taskId: active.taskId, reason: 'Exited Plan Mode.' },
+        {
+          type: 'planning.exited',
+          taskId: active.taskId,
+          reason: 'Exited Plan Mode.',
+        },
+        {
+          type: 'task.cancelled',
+          taskId: active.taskId,
+          reason: 'Exited Plan Mode.',
+        },
       ];
       kernel.processEventBatch(events);
       return { events, phase: 'building' };

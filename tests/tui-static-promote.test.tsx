@@ -1,0 +1,229 @@
+import { describe, expect, test } from 'bun:test';
+import { Text } from 'ink';
+import { render } from 'ink-testing-library';
+import React from 'react';
+import OutputArea from '../src/app/tui/OutputArea';
+import { isBlockSettledInRun } from '../src/app/tui/render/useStaticContent';
+import { getDarkTheme, ThemeContext } from '../src/app/tui/theme';
+import type { OutputBlock } from '../src/app/tui/types';
+
+type ToolStatus = 'queued' | 'running' | 'done' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
+
+function textBlock(
+  id: number,
+  content: string,
+  extra: Partial<Extract<OutputBlock, { kind: 'text' }>> = {},
+): OutputBlock {
+  return { id, kind: 'text', content, streaming: false, ...extra };
+}
+function toolBlock(id: number, status: ToolStatus): OutputBlock {
+  return {
+    id,
+    kind: 'tool_card',
+    callId: `c${id}`,
+    name: 'write_file',
+    args: { path: '/tmp/x.txt' },
+    status,
+    summary: status === 'done' ? 'Wrote /tmp/x.txt' : '',
+  } as OutputBlock;
+}
+
+function renderArea(staticBlocks: OutputBlock[], dynamicBlocks: OutputBlock[]) {
+  return render(
+    React.createElement(
+      ThemeContext.Provider,
+      { value: getDarkTheme('blue') },
+      React.createElement(OutputArea, {
+        staticItems: [{ __header: true }, ...staticBlocks],
+        staticKey: 's-1',
+        staticHeader: React.createElement(Text, null, 'HEADER'),
+        mergedStaticBlocks: staticBlocks,
+        activeDynamicBlocks: dynamicBlocks,
+        onToggleReason: () => {},
+        onToggleToolExpand: () => {},
+        onToggleSubagentExpand: () => {},
+        overlayActive: false,
+        awaitingApproval: false,
+        awaitingInput: false,
+        columns: 100,
+      }),
+    ),
+  );
+}
+
+describe('isBlockSettledInRun', () => {
+  test('finished non-exploration tool card is settled', () => {
+    const blocks = [toolBlock(1, 'done') as OutputBlock, textBlock(2, 'answer')];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
+  });
+
+  test('running tool card is NOT settled', () => {
+    const blocks = [toolBlock(1, 'running') as OutputBlock];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+  });
+
+  test('queued tool card is NOT settled', () => {
+    const blocks = [toolBlock(1, 'queued') as OutputBlock];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+  });
+
+  test('streaming text is NOT settled', () => {
+    const blocks = [textBlock(1, 'partial', { streaming: true })];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+  });
+
+  test('finished text followed by non-text is settled', () => {
+    const blocks = [textBlock(1, 'done'), toolBlock(2, 'done') as OutputBlock];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
+  });
+
+  test('finished text followed by another text is settled as an append-only prefix', () => {
+    const blocks = [textBlock(1, 'a'), textBlock(2, 'b')];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
+  });
+
+  test('finished text as last block is settled while an unfinished tail stays outside state', () => {
+    const blocks = [textBlock(1, 'a'), textBlock(2, 'b')];
+    expect(isBlockSettledInRun(blocks[1]!, blocks, 1)).toBe(true);
+  });
+
+  test('keeps only mutable text in the dynamic suffix of a long streamed answer', () => {
+    const blocks: OutputBlock[] = [
+      { id: 1, kind: 'user', content: 'long answer' },
+      ...Array.from({ length: 100 }, (_, index) => textBlock(index + 2, `paragraph ${index}\n\n`)),
+      textBlock(102, '```ts\nconst partial = true;\n', {
+        streaming: true,
+        streamingComponent: 'code',
+        streamingSource: '```ts\nconst partial = true;\nconst unfinished',
+      }),
+    ];
+    let split = 0;
+    while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
+      split += 1;
+    }
+
+    expect(blocks.slice(0, split)).toHaveLength(101);
+    expect(blocks.slice(split).map((block) => block.id)).toEqual([102]);
+  });
+
+  test('user block is settled', () => {
+    const blocks: OutputBlock[] = [{ id: 1, kind: 'user', content: 'hi' }];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
+  });
+
+  test('completed subagent is settled and cannot pin later answer text', () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1,
+        kind: 'subagent',
+        subagentId: 's1',
+        role: 'explore',
+        task: 't',
+        status: 'done',
+        summary: '',
+        toolCallCount: 1,
+        durationMs: 5,
+        steps: [],
+      },
+      ...Array.from({ length: 100 }, (_, index) => textBlock(index + 2, `paragraph ${index}`)),
+    ];
+    let split = 0;
+    while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
+      split += 1;
+    }
+    expect(split).toBe(blocks.length);
+  });
+
+  test('resolved approval is settled and cannot pin later answer text', () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1,
+        kind: 'approval',
+        approval: {
+          scope: 'once',
+          cwd: '/tmp',
+          threadId: 'thread-1',
+          tool: 'shell_execute',
+          command: 'echo ok',
+          risk: 'execute_code',
+          approvalHash: 'approval-1',
+          summary: 'Run command',
+          reason: 'test',
+          expectedEffects: ['prints output'],
+          grantOptions: ['approve_once'],
+          recommendedGrant: 'approve_once',
+        },
+        resolved: { action: 'approved' },
+      },
+      ...Array.from({ length: 100 }, (_, index) => textBlock(index + 2, `paragraph ${index}`)),
+    ];
+    let split = 0;
+    while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
+      split += 1;
+    }
+    expect(split).toBe(blocks.length);
+  });
+
+  test('active tool_summary is NOT settled', () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1,
+        kind: 'tool_summary',
+        tools: [],
+        totalElapsedMs: 5,
+        createdAt: 1,
+        summaryLine: 'x',
+        active: true,
+        hasThought: false,
+      },
+    ];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+  });
+
+  test('settled Thought summary no longer pins following answer text in dynamic output', () => {
+    const blocks: OutputBlock[] = [
+      {
+        id: 1,
+        kind: 'tool_summary',
+        tools: [],
+        totalElapsedMs: 5,
+        createdAt: 1,
+        summaryLine: 'x',
+        active: false,
+        hasThought: true,
+      },
+      textBlock(2, 'complete answer'),
+    ];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(true);
+    expect(isBlockSettledInRun(blocks[1]!, blocks, 1)).toBe(true);
+  });
+});
+
+describe('promotion does not duplicate output', () => {
+  test('dynamic tool card moved to Static renders once', () => {
+    const doneTool = toolBlock(7, 'done') as OutputBlock;
+    // Before promotion: tool card is in dynamic tree
+    const before = renderArea([], [doneTool]);
+    const beforeFrame = before.lastFrame() ?? '';
+    const countBefore = beforeFrame.split('Create').length - 1;
+
+    // After promotion: tool card moved to Static
+    const after = renderArea([doneTool], []);
+    const afterFrame = after.lastFrame() ?? '';
+    const countAfter = afterFrame.split('Create').length - 1;
+
+    expect(countBefore).toBe(1);
+    expect(countAfter).toBe(1);
+  });
+
+  test('mixed turn: settled prefix + live tail render in order', () => {
+    const settled = [textBlock(1, '已完成段落')];
+    const live = [textBlock(2, '流式内容', { streaming: true })];
+    const { lastFrame } = renderArea(settled, live);
+    const frame = lastFrame() ?? '';
+    const idxDone = frame.indexOf('已完成段落');
+    const idxLive = frame.indexOf('流式内容');
+    expect(idxDone).toBeGreaterThan(0);
+    expect(idxLive).toBeGreaterThan(idxDone);
+  });
+});

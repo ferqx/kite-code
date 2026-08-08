@@ -19,7 +19,7 @@ const enforcementSchema = z.enum(['enforced', 'unsupported']);
 
 export const executionBackendCapabilitiesV1Schema = z
   .object({
-    backend: z.enum(['seatbelt', 'bubblewrap', 'none']),
+    backend: z.enum(['seatbelt', 'bubblewrap', 'windows_restricted_token', 'none']),
     filesystem: z
       .object({
         read_only: enforcementSchema,
@@ -134,7 +134,7 @@ const qualificationSchema = z
     osVersion: z.string().trim().min(1),
     arch: z.string().trim().min(1),
     bunVersion: z.string().trim().min(1),
-    backend: z.enum(['seatbelt', 'bubblewrap', 'none']),
+    backend: z.enum(['seatbelt', 'bubblewrap', 'windows_restricted_token', 'none']),
     selectedNetworkMode: z.enum(['off', 'allowlist']),
     entrypoints: z.array(z.enum(['tui', 'foreground_cli'])).min(1),
     evidenceDigest: digestSchema,

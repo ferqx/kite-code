@@ -22,7 +22,12 @@ export {
   networkBoundaryPolicyFromExecutionBoundaryV1,
 } from './network-policy';
 export type { ResolveSandboxRuntimeOptions, SandboxBackend, SandboxRuntime } from './platform';
-export { detectSandboxBackend, isSandboxAvailable, resolveSandboxRuntime } from './platform';
+export {
+  detectSandboxBackend,
+  isSandboxAvailable,
+  resolveSandboxRuntime,
+  sandboxSupportsFullModeV1,
+} from './platform';
 export {
   currentProcessTreeCapabilityV1,
   type ProcessTreeCapabilityEvidenceV1,
@@ -49,3 +54,20 @@ export type {
   SandboxUnavailablePolicy,
   ShellNetworkMode,
 } from './types';
+export {
+  resolveWindowsManagedNetworkSetupStatusV1,
+  setupWindowsManagedNetworkV1,
+  type WindowsManagedNetworkSetupDependenciesV1,
+  type WindowsManagedNetworkSetupStateV1,
+  type WindowsManagedNetworkSetupStatusV1,
+} from './windows-network-setup';
+export { createWindowsRestrictedTokenExecutor } from './windows-restricted-token';
+export {
+  clearWindowsSandboxRunnerCacheV1,
+  parseWindowsSandboxRunnerManifestV1,
+  type ResolveWindowsSandboxRunnerOptionsV1,
+  resolveWindowsSandboxRunnerV1,
+  WINDOWS_SANDBOX_PROTOCOL_VERSION,
+  type WindowsSandboxRunnerManifestV1,
+  type WindowsSandboxRunnerV1,
+} from './windows-runner';

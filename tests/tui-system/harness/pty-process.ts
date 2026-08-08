@@ -45,6 +45,8 @@ export interface PtyProcessOptions {
   remoteMcpEgressPermitResolver?: 'allow-each-invocation';
   /** Launch an already-built standalone executable instead of the source entrypoint. */
   executablePath?: string;
+  /** Launch a test-owned TypeScript composition root through Bun. */
+  entryPath?: string;
 }
 
 export type TuiReadiness = 'main' | 'first-run-provider' | 'workspace-trust';
@@ -286,17 +288,23 @@ export async function terminateOwnedProcessTree(
 export function resolveTuiLaunchPaths(
   opts: Pick<
     PtyProcessOptions,
-    'cwd' | 'workspace' | 'remoteMcpEgressPermitResolver' | 'executablePath'
+    'cwd' | 'workspace' | 'remoteMcpEgressPermitResolver' | 'executablePath' | 'entryPath'
   >,
   projectRoot = process.cwd(),
 ): { cwd: string; entryPath: string } {
-  if (opts.executablePath && opts.remoteMcpEgressPermitResolver) {
-    throw new Error('Standalone TUI launch cannot replace the remote MCP test composition root.');
+  const explicitRoots = [
+    opts.executablePath,
+    opts.entryPath,
+    opts.remoteMcpEgressPermitResolver,
+  ].filter(Boolean);
+  if (explicitRoots.length > 1) {
+    throw new Error('A TUI launch can select only one explicit test composition root.');
   }
   return {
     cwd: opts.cwd ?? opts.workspace?.workspace ?? projectRoot,
     entryPath:
       opts.executablePath ??
+      opts.entryPath ??
       (opts.remoteMcpEgressPermitResolver === 'allow-each-invocation'
         ? join(projectRoot, 'tests/tui-system/fixtures/remote-mcp-egress-tui.tsx')
         : join(projectRoot, 'src/app/tui/index.tsx')),

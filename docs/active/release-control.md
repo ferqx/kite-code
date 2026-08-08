@@ -27,6 +27,17 @@ release notes/known limitations。缺任何真实结果时保持 blocked 或未�
 - archive SHA-256 sidecar；
 - release notes、known limitations 与普通维护者检查清单。
 
+Windows candidate 还包含 pinned `kite-windows-runner.exe`、runner manifest 和 vendored
+`isksh`/Coreutils runtime（含许可文件）。安装后的 launcher 通过 managed-install marker 从当前
+candidate payload 解析这些文件；缺失、替换或 digest 不匹配时仍 fail closed，不会把 native runner
+替换为未验证程序。Windows GNU Rust 构建必须经过
+`bun run scripts/release/build-windows-runner.ts`：该入口把 checkout 与 Cargo cache 的绝对路径映射到
+固定虚拟路径，固定使用 Rust toolchain 自带的 `rust-lld`，并禁止 PE linker 写入墙钟时间戳。因此
+固定 toolchain 的 clean build 可在本地与 GitHub-hosted Windows runner 上生成同一 runner digest，workflow 才能在打包前用 committed
+manifest pin 执行 `git diff --exit-code`。直接调用 Cargo 不得用于生成或验证 release pin。
+`tests/release/supply-chain-workflow.test.ts` 固定 workflow 对该入口的调用顺序，并校验路径重映射与
+linker、路径重映射与时间戳清除参数不会被后续 Actions 修改静默移除。
+
 build 不读取 Provider secret，不自动加载 `.env`/`bunfig`，也不把环境变量内联到 executable。
 manifest/checksum 是完整性数据，不是代码签名、notarization、provenance 或身份认证。
 归档 writer 规范化 tar entry 时间戳并重算 header checksum；同一 target、manifest 与 payload
@@ -72,6 +83,8 @@ release notes 中披露，解除前预构建候选不声称支持持久 MCP 凭�
 `.github/workflows/release-candidate.yml` 在 pull request、`main` push 和手动触发时运行
 `macos-15`、`ubuntu-24.04`、`windows-2025` 矩阵。每个 job 安装锁定 Bun 版本，执行定向 release
 tests、native build/verify/smoke 和 TUI startup scenario，然后上传候选 artifact。
+Platform Capability Probe 的 Windows 临时 Workspace 在采集前固定 canonical path identity，并在
+写出 evidence artifact 前以同一 identity repair persistent ACL ledger；8.3 alias 不能分裂采集与清理。
 
 workflow 只有 `contents: read`；不得申请 `id-token: write`、`attestations: write`、`contents: write` 或
 `packages: write`，不得调用 `gh release` 或 npm publish。上传 artifact 是 CI 交付，不是公开 Release。

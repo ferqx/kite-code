@@ -9,6 +9,7 @@ import {
   isWslStubPath,
 } from '../src/core/tools/bash-path';
 import { guardProcessTree } from '../src/core/tools/process-tree';
+import { buildHostShellInvocationsV1 } from '../src/core/tools/shell';
 
 describe('shell execute integration', () => {
   const workspace = join(tmpdir(), 'kite-code-e2e-shell');
@@ -213,7 +214,9 @@ describe('shell live output', () => {
       });
 
       expect(cancelledAt).toBeDefined();
-      expect(Date.now() - cancelledAt!).toBeLessThan(3_000);
+      // Graceful cancellation should return as soon as the process tree exits;
+      // the 500ms bound is a deadline, not a mandatory sleep.
+      expect(Date.now() - cancelledAt!).toBeLessThan(500);
       expect(result.ok).toBe(false);
       expect(result.exitCode).toBe(130);
       expect(result.stderr).toContain('cancelled by user');
@@ -338,5 +341,74 @@ describe('findSystemBash — candidate selection logic', () => {
       expect(isWslStubPath(bashPath, process.env.SystemRoot || 'C:\\Windows')).toBe(false);
     }
     // If null, no bash available — vendored or cmd.exe will be used (valid)
+  });
+});
+
+describe('host Shell candidate resolution', () => {
+  test('Windows uses Bash, cmd, then PowerShell candidates', () => {
+    const candidates = buildHostShellInvocationsV1('echo ok', {
+      platform: 'win32',
+      systemRoot: 'C:\\Windows',
+      systemBash: 'C:\\Git\\bin\\bash.exe',
+      vendoredBash: 'D:\\app\\vendor\\bash.exe',
+      which: (name) => (name === 'pwsh' ? 'C:\\Program Files\\PowerShell\\7\\pwsh.exe' : null),
+    });
+
+    expect(candidates.map((candidate) => candidate.kind)).toEqual([
+      'bash',
+      'bash',
+      'cmd',
+      'powershell',
+    ]);
+    expect(candidates[2]?.argv).toEqual(['C:\\Windows\\System32\\cmd.exe', '/d', '/c', 'echo ok']);
+    expect(candidates[3]?.argv).toContain('-NoProfile');
+  });
+
+  test('macOS and Linux use the same ordered resolver with available interpreters', () => {
+    for (const platform of ['darwin', 'linux'] as const) {
+      const candidates = buildHostShellInvocationsV1('echo ok', {
+        platform,
+        systemRoot: '',
+        configuredShell: '/bin/zsh',
+        which: (name) =>
+          name === 'bash' ? '/usr/bin/bash' : name === 'pwsh' ? '/usr/local/bin/pwsh' : null,
+      });
+
+      expect(candidates.map((candidate) => candidate.kind)).toEqual([
+        'bash',
+        'posix',
+        'powershell',
+        'posix',
+      ]);
+      expect(candidates[2]?.argv).toEqual([
+        '/usr/local/bin/pwsh',
+        '-NoLogo',
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        'echo ok',
+      ]);
+    }
+  });
+
+  test('Windows host Shell can explicitly execute cmd and PowerShell commands', async () => {
+    if (process.platform !== 'win32') return;
+
+    const shell = createSandboxExecutor({ enabled: false, workspace: process.cwd() });
+    const cmdResult = await shell({
+      workspace: process.cwd(),
+      command: 'cmd.exe //d //c "echo CMD_OK"',
+    });
+    expect(cmdResult).toMatchObject({ ok: true });
+    expect(cmdResult.stdout).toContain('CMD_OK');
+
+    const powershell = Bun.which('pwsh') ?? Bun.which('powershell.exe');
+    if (!powershell) return;
+    const psResult = await shell({
+      workspace: process.cwd(),
+      command: 'powershell.exe -NoLogo -NoProfile -NonInteractive -Command "Write-Output PS_OK"',
+    });
+    expect(psResult).toMatchObject({ ok: true });
+    expect(psResult.stdout).toContain('PS_OK');
   });
 });

@@ -38,9 +38,68 @@ Ubuntu 24.04 默认 Node 18 的 Docker x64 预检负责捕获误用 `import.meta
 
 | runner 候选 | backend 候选 | 当前结论 | 主要缺口 |
 | --- | --- | --- | --- |
-| macOS 15 | Seatbelt | `excluded` | fresh candidate artifact 证明 filesystem 与 network-off，但没有硬 process-tree 上限、cleanup、Skill/MCP 继承与入口组合证据 |
-| Ubuntu 24.04 | none（bubblewrap namespace probe 不可用） | `excluded` | runner 不能启动所需 namespace；没有 filesystem、process-tree、继承与入口组合证据 |
-| Windows Server 2025 | none | `excluded` | 没有 filesystem/network sandbox backend |
+| macOS 15 | Seatbelt | excluded | fresh candidate artifact 证明 filesystem 与 network-off，但没有硬 process-tree 上限、cleanup、Skill/MCP 继承与入口组合证据 |
+| Ubuntu 24.04 | none（bubblewrap namespace probe 不可用） | excluded | runner 不能启动所需 namespace；没有 filesystem、process-tree、继承与入口组合证据 |
+| Windows 10 22H2+（Win11 为主要原生证据） | windows_restricted_token（默认开发 backend） | excluded | direct token 缺少结构性网络、动态 root .env.* 与 strict production 资格 |
+
+ADR-0081 的 windows_restricted_token 是 Windows 默认开发路径：固定 runner 可用时，它在无需 UAC、
+普通 `networkMode=off` 调用无需创建本地账号或安装防火墙规则，以 restricted current-user token、
+capability-SID ACL 和 Job Object 直接运行 canonical 真实 Workspace。它不创建整个仓库的 staging 副本。
+已审批 `allow_all` 调用则按 ADR-0083/ADR-0085 切换到 `KiteSandboxOnline` 的真实非管理员登录令牌与
+临时 ACL lease；Schannel 不在 constrained restricted token 中运行。按 ADR-0084，账户由
+首次 TUI onboarding 或显式 `sandbox setup` 一次性安装，不要求安装者手工预建。普通 Shell invocation
+从不请求 UAC；setup 缺失时返回稳定错误。提权 helper 以 machine-scope DPAPI 把凭据写入 DACL 限定的
+原始用户 state root，并为 Online SID 配置排除凭据目录的 profile read/execute roots，最后提交 readiness
+marker；普通 invocation 不修改 profile 祖先 ACL。两条路径都不是 D-04 或 Full qualification。
+按 ADR-0089，受信 native parent 还可在身份切换前把发起用户无凭据的 loopback WinINet proxy
+投影到 Online child；没有可接受代理时继续 direct。这只改善已审批 `allow_all` 的本地代理兼容性，
+不产生 allowlist 证据，也不把代理变成运行前提。
+
+direct token 是 lower-assurance backend。WRITE_RESTRICTED 只限制相应 SID 的写入检查；它不能证明
+Workspace 外普通读取全部被拒绝，不能为任意 descendant 提供结构性 network-off/allowlist，也不能用已有
+ACL deny 代替未来 root .env.* 的动态保护。因此 windows_restricted_token 的 Full 必须不可选，
+productionSupported 仍为 false，outcome 仍为 excluded。用户界面在该 backend 和 host backend none
+上均以 非沙箱环境无法开启full 说明 Full 不可用。
+
+ADR-0082/ADR-0083/ADR-0085 对齐 development 权限交互与 Windows TLS 可执行性：protocol V5 接受 Tool Policy
+在单次审批后产生的 `allow_all`，并要求它使用受管 Online 登录身份；精确 runtime version query 等可证明
+本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
+verdict 或 D-04 空支持集。ADR-0088 已删除 AppContainer、private staging 与 repository reconciliation。
+
+### Unified startup downgrade
+
+ADR-0077、ADR-0080 与 ADR-0081 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
+startup state machine。允许 host fallback 的开发入口只在用户脚本前确认 selected sandbox environment
+或 essential structural startup capability unavailable 时缓存 host Bash/cmd/PowerShell/POSIX，effective
+backend=none 且 Full 不可用。缺失或损坏的 pinned runner、低于 API baseline 的系统、或 initial restricted
+child/token verification failure 都属于这种 startup availability 情形。
+
+windows_restricted_token 的正常 probe 和执行不扫描、复制或 hash 用户 repository；TUI 在首个可编辑
+render 后异步启动 probe。
+
+正式 Windows capability evidence 使用临时 Workspace 运行正常 persistent capability ledger 路径，
+而不是 application startup 的 ephemeral preflight 模式；这样 static protected-path write 与 ledger
+refresh 才是运行时同构证据。证据采集结束必须显式 repair 临时 Workspace 的 DACL snapshot/root ACE/ledger
+后再删除目录。`.github/workflows/platform-capability-probe.yml` 的 paths gate 同时覆盖 native source、
+vendored `isksh`、Windows sandbox 直接依赖的 Core tool/runtime 文件和 release evidence scripts。
+
+backend 选中后，user command 绝不跨 environment replay。script failure、timeout、cancellation、runner
+failure、ACL cleanup failure、reconciliation failure 和 process-tree cleanup failure 都是 selected backend 的
+fail-closed result。host fallback 不是 isolation evidence，也不能改变 excluded production-support outcome。
+
+### Windows 10 API 兼容性基线
+
+ADR-0074 保留 Windows 10 22H2 (10.0.19045) 作为 API/build baseline。native startup gate 与 release
+manifest 会在低于该 baseline 时 fail closed。Win11 是 priority native-E2E environment；不得声称未经测试的
+physical Win10 behavior。该 baseline 不会让任一 Windows development backend 成为 production-qualified profile。
+
+### native protocol 兼容性
+
+ADR-0088 将 native invocation protocol 提升到 V5。adapter 与 runner 必须以 manifest 内固定的
+`protocolVersion=5` 相互校验；V5 只描述 direct restricted-token invocation，显式携带 development
+`off | allow_all` authorization projection，并删除 backend mode、AppContainer identity 与 staging
+字段。`allow_all` 必须切换受管 Online 登录身份。V1-V4 runner 必须在 user script 前 fail closed。
+`windows-runner-v1.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
 
 固定证据来自
 [Platform Capability Probe run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)，
@@ -100,12 +159,13 @@ Seatbelt 没有实现并
 production composition entrypoint 也尚未形成 native evidence，因此 outcome 仍必须是
 `excluded`、`productionSupported=false`。
 
-Task 1B.4 的进程内网络控制器已能对 `web_fetch` 逐 invocation/hop 执行精确 host allowlist、
+Task 1B.4 的进程内网络控制器已能对 `web_fetch`
+逐 invocation/hop 执行精确 host allowlist、
 DNS 实际地址检查、manual redirect 复查、endpoint revision 与 pinned socket，并在 dispatch 前
 持久化 allow/deny receipt。该控制器不依赖 proxy environment，但也不能约束任意 descendant。
-因此所有候选平台在 sealed boundary 下仍把 Shell/Skill 网络收紧为 off。Remote HTTP MCP 已有
-逐 invocation transport/endpoint admission 实现，但当前 production TUI 未提供 receipt controller，
-local stdio 也因缺少 native child conformance 明确排除；没有平台因此进入支持集。
+因此所有候选平台的 Shell/Skill descendant 仍无直连网络。Remote HTTP MCP 已有逐 invocation
+transport/endpoint admission 实现，但当前 production TUI 未提供 receipt controller，local stdio 也因
+缺少 native child conformance 明确排除；没有平台因此进入支持集。
 
 Linux bubblewrap 的开发边界现已把 canonical Workspace 按 `workspace_write` 或 `read_only`
 分别投影为 rw/ro bind，并把逐 invocation runtime 显式 rw bind；runtime 清理在只暴露该 runtime
@@ -122,8 +182,8 @@ Linux 候选加入 `systemd-run --user --scope` + cgroup v2 `TasksMax` 的 argv-
 及独立 hard-count/cleanup 投影。候选 capability surface 只声明 Shell；forked Skill 和 local stdio
 MCP 明确为 false。GitHub-hosted Ubuntu 是否同时允许 bubblewrap、seccomp、user systemd scope 和
 cgroup pids 必须由更新后的三平台 workflow 真实运行后决定；本地测试或代码存在不能提前改变
-`excluded`/空支持集结论。allowlist 目前没有 descendant-safe backend，App composition 对其直接
-fail closed，绝不映射为 `allow_all`。
+`excluded`/空支持集结论。allowlist 不会映射为 `allow_all`；App composition 对 descendant
+allowlist 继续 fail closed。
 
 ## ExecutionBoundaryV1 schema 与 composition gate
 

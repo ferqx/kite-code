@@ -61,3 +61,21 @@ export function normalizeMsys2PathsInText(text: string): string {
       `${prefix}${drive.toUpperCase()}:${path.replace(/\//g, '\\')}`,
   );
 }
+
+/**
+ * Convert literal MSYS2/Cygwin drive-path tokens in a Windows shell command to
+ * the mixed path form understood by native Windows executables.
+ *
+ * This intentionally rewrites only a drive prefix at a shell-token boundary:
+ * `/d/work` becomes `D:/work`, while URLs, `/dev/null`, relative paths, and
+ * ordinary word fragments remain unchanged. Forward slashes are retained so
+ * the transformed command remains safe to parse as POSIX shell syntax.
+ */
+export function normalizeMsys2DrivePathsInShellCommand(command: string): string {
+  if (process.platform !== 'win32') return command;
+  const boundary = String.raw`[\s"'([{;=<>|&]`;
+  return command.replace(
+    new RegExp(`(^|${boundary})/([a-zA-Z])(?=/)`, 'g'),
+    (_full, prefix: string, drive: string) => `${prefix}${drive.toUpperCase()}:`,
+  );
+}

@@ -7,7 +7,7 @@ import { z } from 'zod';
 const digestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/);
 const releaseFileSchema = z
   .object({
-    path: z.string().regex(/^(bin|docs)\/[A-Za-z0-9._-]+$/),
+    path: z.string().regex(/^(?:bin|docs|native|release|vendor)(?:\/[A-Za-z0-9._-]+)+$/),
     sha256: digestSchema,
     size: z.number().int().nonnegative(),
   })
@@ -65,6 +65,28 @@ const RELEASE_ASSETS = [
   ['docs/MAINTAINER_CHECKLIST.md', 'release/oss-first-release/MAINTAINER_CHECKLIST.md'],
   ['docs/KNOWN_LIMITATIONS.md', 'release/oss-first-release/KNOWN_LIMITATIONS.md'],
   ['docs/RELEASE_NOTES.md', 'release/oss-first-release/RELEASE_NOTES.md'],
+] as const;
+
+/**
+ * The Windows restricted-token executor validates these files at runtime.
+ * They must travel with a standalone candidate: source-relative lookup is
+ * deliberately unavailable after the Bun executable has been installed.
+ */
+const WINDOWS_SANDBOX_RELEASE_ASSETS = [
+  [
+    'release/platform-capabilities/windows-runner-v1.json',
+    'release/platform-capabilities/windows-runner-v1.json',
+  ],
+  [
+    'native/windows-sandbox-runner/target/release/kite-windows-runner.exe',
+    'native/windows-sandbox-runner/target/release/kite-windows-runner.exe',
+  ],
+  ['vendor/isksh/isksh.exe', 'vendor/isksh/isksh.exe'],
+  ['vendor/isksh/coreutils.exe', 'vendor/isksh/coreutils.exe'],
+  ['vendor/isksh/COREUTILS.md', 'vendor/isksh/COREUTILS.md'],
+  ['vendor/isksh/LICENSE-APACHE', 'vendor/isksh/LICENSE-APACHE'],
+  ['vendor/isksh/LICENSE-MIT', 'vendor/isksh/LICENSE-MIT'],
+  ['vendor/isksh/LICENSE.coreutils', 'vendor/isksh/LICENSE.coreutils'],
 ] as const;
 
 export function currentOssReleaseTarget(): OssReleaseTarget {
@@ -142,6 +164,11 @@ export async function buildOssCandidate(
   archiveFiles.set(`bin/kite-tui${executableSuffix}`, readBytes(tuiPath));
   for (const [archiveName, sourcePath] of RELEASE_ASSETS) {
     archiveFiles.set(archiveName, readBytes(resolve(sourcePath)));
+  }
+  if (releaseTarget.os === 'win32') {
+    for (const [archiveName, sourcePath] of WINDOWS_SANDBOX_RELEASE_ASSETS) {
+      archiveFiles.set(archiveName, readBytes(resolve(sourcePath)));
+    }
   }
   const releaseFiles = [...archiveFiles]
     .map(([path, bytes]) => ({ path, sha256: sha256(bytes), size: bytes.byteLength }))

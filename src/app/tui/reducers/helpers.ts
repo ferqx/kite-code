@@ -46,6 +46,31 @@ export function appendBlock(state: TuiState, block: OutputBlock): TuiState {
   return trimTurns({ ...state, turns, nextBlockId: state.nextBlockId + 1 });
 }
 
+/**
+ * Append a user prompt as a new conversation turn.
+ *
+ * A live reducer used to append every prompt to the previous turn and only
+ * recover the turn boundaries during session replay. That made a cancelled
+ * turn and its successor share one active turn. When the visible run briefly
+ * became idle, useStaticContent could commit the whole combined turn to Ink's
+ * immutable <Static> tree; the successor's tool then appeared frozen or was
+ * rendered twice when the next run became active.
+ *
+ * User prompts are the authoritative turn boundary in both live rendering and
+ * replay, so preserve that boundary at insertion time as well.
+ */
+export function appendUserMessage(state: TuiState, block: OutputBlock): TuiState {
+  if (state.turns.length === 0 || state.turns.at(-1)!.blocks.length === 0) {
+    return appendBlock(state, block);
+  }
+
+  return trimTurns({
+    ...state,
+    turns: [...state.turns, { blocks: [block] }],
+    nextBlockId: state.nextBlockId + 1,
+  });
+}
+
 /** 按 id 查找 block（跨所有 turns） */
 export function findBlockById(state: TuiState, blockId: number): OutputBlock | undefined {
   for (const turn of state.turns) {

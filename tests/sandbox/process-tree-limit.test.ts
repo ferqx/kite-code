@@ -77,6 +77,7 @@ describe('native process-tree hard-limit projection', () => {
   test.each([
     'seatbelt',
     'bubblewrap',
+    'windows_restricted_token',
     'none',
   ] as const)('keeps the current %s backend hard limit unsupported', (backend) => {
     expect(currentProcessTreeCapabilityV1(backend)).toEqual({
@@ -105,6 +106,27 @@ describe('native process-tree hard-limit projection', () => {
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
+  });
+
+  test('projects windows Job active-process limit only from native conformance', () => {
+    expect(
+      currentProcessTreeCapabilityV1('windows_restricted_token', {
+        hardLimitMechanism: 'windows_job_active_process_limit',
+        hardLimitConformancePassed: true,
+        terminationCleanupConformancePassed: true,
+      }),
+    ).toEqual({
+      hardCountMechanism: 'windows_job_active_process_limit',
+      hardCountLimit: 'enforced',
+      terminationCleanup: 'enforced',
+    });
+    expect(
+      currentProcessTreeCapabilityV1('windows_restricted_token', {
+        hardLimitMechanism: 'windows_job_active_process_limit',
+        hardLimitConformancePassed: false,
+        terminationCleanupConformancePassed: true,
+      }).hardCountLimit,
+    ).toBe('unsupported');
   });
 
   test('projects cgroup pids only from separate hard-limit and cleanup conformance', () => {

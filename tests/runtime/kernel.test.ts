@@ -933,7 +933,7 @@ test('runRuntimeLoop applies streamed tool events before the effect completes', 
     args: { command: 'printf live' },
   });
 
-  const events: string[] = [];
+  const events: RuntimeEvent[] = [];
   for await (const event of runRuntimeLoop(
     kernel,
     async (effect, _state, emit) => {
@@ -942,7 +942,13 @@ test('runRuntimeLoop applies streamed tool events before the effect completes', 
       emit?.({
         type: 'tool.progress',
         toolCallId: 'shell-1',
-        chunk: 'live',
+        chunk: 'live 1',
+        stream: 'stdout',
+      });
+      emit?.({
+        type: 'tool.progress',
+        toolCallId: 'shell-1',
+        chunk: 'live 2',
         stream: 'stdout',
       });
       return [
@@ -962,13 +968,30 @@ test('runRuntimeLoop applies streamed tool events before the effect completes', 
     },
     { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
   )) {
-    events.push(event.type);
+    events.push(event);
     if (event.type === 'tool.progress') {
       expect(kernel.getState().tools.calls['shell-1']?.status).toBe('running');
     }
   }
 
-  expect(events.slice(0, 3)).toEqual(['tool.started', 'tool.progress', 'tool.finished']);
+  expect(events.slice(0, 3).map((event) => event.type)).toEqual([
+    'tool.started',
+    'tool.progress',
+    'tool.finished',
+  ]);
+  expect(events.find((event) => event.type === 'tool.progress')).toEqual({
+    type: 'tool.progress',
+    toolCallId: 'shell-1',
+    chunk: 'live 1\nlive 2',
+    stream: 'stdout',
+    lineCount: 2,
+  });
+  expect(
+    store.loadEvents('streamed-tool').some(({ event }) => event.type === 'tool.progress'),
+  ).toBe(false);
+  expect(
+    store.loadEvents('streamed-tool').some(({ event }) => event.type === 'tool.finished'),
+  ).toBe(true);
   expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
   expect(kernel.getState().tools.queue).not.toContain('shell-1');
   expect(kernel.getState().tools.active).not.toContain('shell-1');
@@ -1382,6 +1405,62 @@ test('a stale concurrent shell lease accepts one ordered started-to-finished res
         },
       },
     ]),
+  ).toBe(true);
+  expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
+  kernel.close();
+});
+
+test('a stale concurrent shell lease forwards ephemeral progress without advancing revision', () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'concurrent-shell-progress',
+    userId: 'u',
+    workspace: '/',
+  });
+  initial.tools.queue.push('shell-1');
+  initial.tools.calls['shell-1'] = {
+    toolCallId: 'shell-1',
+    modelMessageId: 'parallel-shell-message',
+    name: 'shell_execute',
+    args: { command: 'node task.js' },
+    status: 'approved',
+    approvalGrant: 'approve_once',
+    createdAtTurnId: initial.turn.turnId,
+  };
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const lease = kernel.beginEffect({ type: 'run_tools', toolCallIds: ['shell-1'] });
+  expect(kernel.applyEffectEvent(lease, { type: 'tool.started', toolCallId: 'shell-1' })).toBe(
+    true,
+  );
+  kernel.processEvent({
+    type: 'run.error',
+    message: 'A sibling advanced the revision.',
+    recoverable: true,
+  });
+  const revisionBeforeProgress = kernel.getState().revision;
+  const progress: RuntimeEvent = {
+    type: 'tool.progress',
+    toolCallId: 'shell-1',
+    chunk: 'still running',
+    stream: 'stdout',
+  };
+
+  expect(kernel.isEffectEventCurrent(lease, progress)).toBe(true);
+  expect(kernel.getState().revision).toBe(revisionBeforeProgress);
+  expect(store.loadEvents('concurrent-shell-progress').at(-1)?.event.type).toBe('run.error');
+  expect(
+    kernel.applyEffectEvent(lease, {
+      type: 'tool.finished',
+      toolCallId: 'shell-1',
+      name: 'shell_execute',
+      result: {
+        ok: true,
+        command: 'node task.js',
+        exitCode: 0,
+        stdout: 'still running',
+        stderr: '',
+      },
+    }),
   ).toBe(true);
   expect(kernel.getState().tools.calls['shell-1']?.status).toBe('succeeded');
   kernel.close();
