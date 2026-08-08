@@ -150,9 +150,12 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    session 删除确认必须同时验证被选 thread ID 已从 Runtime Store 消失且 active thread 保留；取消
    删除必须验证 thread ID 集合不变，不能只依赖 selector 列表缓存。
 7. 改动 Runtime 多轮语义时同时运行 `tests/runtime/agent.integration.test.ts`、`tests/runtime/store.test.ts` 和相应 PTY scenario。
-8. PTY suite 必须串行运行，避免终端尺寸、端口和全局环境相互污染。
+8. 在同一 runner 内 PTY suite 必须串行运行，避免终端尺寸、端口和全局环境相互污染。
    Harness 单元测试由默认 `bun run test` 或显式 `bun run test:tui:harness` 执行；
    `scripts/run-tui-system-tests.ts` 只按 scenario 文件逐个启动独立 `bun test` 进程。
+   Required CI 可以通过 `KITE_TUI_SYSTEM_SHARD=<zero-based-index>/<count>` 将默认 scenario 清单按
+   排序后的稳定索引分配到互相独立的 GitHub-hosted runner；分片不得共享 workspace、HOME、端口或
+   进程树，并且每个分片内部仍按文件串行。显式 scenario 参数是本地定向复现入口，不受分片过滤。
    runner 的显式 scenario 参数按完整文件名匹配；未知名称和重复名称必须在启动前失败并列出
    可用文件，不能静默少跑。默认运行会串行完成全部隔离文件并在末尾汇总所有失败，避免首错遮住
    后续不稳定场景；本地只需快速复现首错时可显式设置 `KITE_TUI_TEST_FAIL_FAST=1`。每个文件都输出
@@ -198,7 +201,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     替代输入回显、请求 baseline 和 modal/命令结果条件。失败诊断必须包含最近 mock request
     与终端输出尾部。
 16. 默认 scenario 不得访问公网 provider。first-run 的 `/v1/models` 成功、延迟、错误和模型列表
-    必须由本地 `MockModelServer` 固定；真实模型只允许进入独立 live runner。
+    必须由本地 `MockModelServer` 固定；真实模型只允许进入独立 live runner。provider/form 的静态显示、
+    焦点移动、密码遮罩和错误菜单属于快速 first-run 组件测试；PTY scenario 只保留真实 TUI 与本地 HTTP
+    连接、取消、错误路由及配置持久化的边界。
 17. 依赖宿主机原生能力的正向场景不得进入默认 PTY 门禁。sandbox、keyring、外部编辑器等
     场景应使用显式 opt-in smoke，并在运行时确认后端存在；默认 suite 只验证可人为固定的
     负向/降级路径。授权、policy 和 reducer 的完整分支必须由注入能力状态的确定性单元或

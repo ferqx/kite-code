@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import ts from 'typescript';
 import {
+  parseTuiSystemTestShard,
   selectTuiSystemTestFiles,
   TUI_LIFECYCLE_HARNESS_FLAG,
 } from '../../../scripts/run-tui-system-tests';
@@ -651,6 +652,34 @@ describe('TUI system scenario contract', () => {
       'session-switch.test.ts',
       'tool-lifecycle.test.ts',
     ]);
+  });
+
+  test('selects deterministic CI shards without changing focused scenario runs', () => {
+    const firstShard = parseTuiSystemTestShard('0/4');
+    const secondShard = parseTuiSystemTestShard('1/4');
+    expect(firstShard).toEqual({ index: 0, count: 4 });
+    expect(secondShard).toEqual({ index: 1, count: 4 });
+
+    const defaultSelection = selectTuiSystemTestFiles([]).scenarioFiles.map((file) =>
+      basename(file),
+    );
+    const allShards = Array.from({ length: 4 }, (_, index) =>
+      selectTuiSystemTestFiles([], { index, count: 4 }).scenarioFiles.map((file) => basename(file)),
+    );
+    const first = allShards[0]!;
+    const second = allShards[1]!;
+    expect(first).not.toEqual([]);
+    expect(second).not.toEqual([]);
+    expect(first.some((file) => second.includes(file))).toBe(false);
+    expect(allShards.flat().sort()).toEqual(defaultSelection);
+    expect(
+      selectTuiSystemTestFiles(['session-switch'], firstShard).scenarioFiles.map((file) =>
+        basename(file),
+      ),
+    ).toEqual(['session-switch.test.ts']);
+
+    expect(() => parseTuiSystemTestShard('4/4')).toThrow('0 <= index < count');
+    expect(() => parseTuiSystemTestShard('one/four')).toThrow('zero-based index/count');
   });
 
   test('condition waits cannot be satisfied by cumulative output from an earlier action', () => {

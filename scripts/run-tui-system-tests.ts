@@ -12,6 +12,7 @@ const DEFAULT_JOURNEY_DEADLINE_MS = 165_000;
 const FILE_TEARDOWN_MARGIN_MS = 10_000;
 const TEST_TEARDOWN_MARGIN_MS = 5_000;
 export const TUI_LIFECYCLE_HARNESS_FLAG = '--with-lifecycle-harness';
+export const TUI_SYSTEM_SHARD_ENV = 'KITE_TUI_SYSTEM_SHARD';
 const harnessDir = join(process.cwd(), 'tests', 'tui-system', 'harness');
 const scenariosDir = join(process.cwd(), 'tests', 'tui-system', 'scenarios');
 const faultSoakRepeatCount = positiveInteger(process.env.KITE_FAULT_SOAK_REPEAT_COUNT, 1);
@@ -30,7 +31,35 @@ export interface TuiSystemTestSelection {
   scenarioFiles: string[];
 }
 
-export function selectTuiSystemTestFiles(args: readonly string[]): TuiSystemTestSelection {
+export interface TuiSystemTestShard {
+  index: number;
+  count: number;
+}
+
+export function parseTuiSystemTestShard(value: string | undefined): TuiSystemTestShard | undefined {
+  if (value === undefined || value.trim() === '') return undefined;
+  const match = /^(\d+)\/(\d+)$/.exec(value.trim());
+  if (!match) {
+    throw new Error(
+      `${TUI_SYSTEM_SHARD_ENV} must use zero-based index/count form (for example 0/4); received ${JSON.stringify(value)}`,
+    );
+  }
+  const index = Number(match[1]);
+  const count = Number(match[2]);
+  if (!Number.isSafeInteger(index) || !Number.isSafeInteger(count) || count < 1 || index >= count) {
+    throw new Error(
+      `${TUI_SYSTEM_SHARD_ENV} must have 0 <= index < count; received ${JSON.stringify(value)}`,
+    );
+  }
+  return { index, count };
+}
+
+export function selectTuiSystemTestFiles(
+  args: readonly string[],
+  shard: TuiSystemTestShard | undefined = parseTuiSystemTestShard(
+    process.env[TUI_SYSTEM_SHARD_ENV],
+  ),
+): TuiSystemTestSelection {
   const available = readdirSync(scenariosDir)
     .filter((name) => name.endsWith('.test.ts'))
     .sort();
@@ -55,11 +84,17 @@ export function selectTuiSystemTestFiles(args: readonly string[]): TuiSystemTest
     normalizedRequested.length === 0
       ? available
       : available.filter((name) => normalizedRequested.includes(name));
+  // Explicit scenario names are for focused local reproduction and must not be
+  // silently dropped by a CI shard inherited from the environment.
+  const shardedSelected =
+    shard && normalizedRequested.length === 0
+      ? selected.filter((_, index) => index % shard.count === shard.index)
+      : selected;
   return {
     harnessFiles: includeLifecycleHarness
       ? [join(harnessDir, 'tui-lifecycle-resource.test.ts')]
       : [],
-    scenarioFiles: selected.map((name) => join(scenariosDir, name)),
+    scenarioFiles: shardedSelected.map((name) => join(scenariosDir, name)),
   };
 }
 
@@ -136,7 +171,8 @@ async function main(): Promise<void> {
     process.env.KITE_TUI_TEST_FILE_TIMEOUT_MS,
     tuiWaitTimeout(DEFAULT_FILE_TIMEOUT_MS),
   );
-  const selection = selectTuiSystemTestFiles(process.argv.slice(2));
+  const shard = parseTuiSystemTestShard(process.env[TUI_SYSTEM_SHARD_ENV]);
+  const selection = selectTuiSystemTestFiles(process.argv.slice(2), shard);
   const failures: Array<{ file: string; exitCode: number }> = [];
   const failFast = process.env.KITE_TUI_TEST_FAIL_FAST === '1';
 
@@ -158,7 +194,7 @@ async function main(): Promise<void> {
   }
 
   console.log(
-    `\n[tui-system] passed ${selection.harnessFiles.length} explicit harness files and ${selection.scenarioFiles.length} isolated PTY scenario files`,
+    `\n[tui-system] passed ${selection.harnessFiles.length} explicit harness files and ${selection.scenarioFiles.length} isolated PTY scenario files${shard ? ` in shard ${shard.index}/${shard.count}` : ''}`,
   );
 }
 
