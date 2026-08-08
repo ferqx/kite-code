@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, win32 } from 'node:path';
 import { z } from 'zod';
 
 /** Matches the native runner's `PROTOCOL_VERSION`. */
@@ -80,14 +80,14 @@ export function resolveInstalledWindowsRunnerManifestLocationV1(
   input: { executablePath?: string; readFile?: (path: string, encoding: 'utf8') => string } = {},
 ): RunnerManifestLocationV1 | null {
   const executablePath = input.executablePath ?? process.execPath;
-  const executable = basename(executablePath).toLowerCase();
+  const executable = win32.basename(executablePath).toLowerCase();
   if (!['kite.exe', 'kite', 'kite-tui.exe', 'kite-tui'].includes(executable)) {
     return null;
   }
-  const installRoot = dirname(dirname(executablePath));
+  const installRoot = win32.dirname(win32.dirname(executablePath));
   try {
     const marker = JSON.parse(
-      (input.readFile ?? readFileSync)(join(installRoot, INSTALLED_CANDIDATE_MARKER), 'utf8'),
+      (input.readFile ?? readFileSync)(win32.join(installRoot, INSTALLED_CANDIDATE_MARKER), 'utf8'),
     ) as { currentCandidateId?: unknown };
     if (
       typeof marker.currentCandidateId !== 'string' ||
@@ -95,8 +95,8 @@ export function resolveInstalledWindowsRunnerManifestLocationV1(
     ) {
       return null;
     }
-    const base = join(installRoot, 'releases', marker.currentCandidateId);
-    return { path: join(base, MANIFEST_RELATIVE_PATH), base };
+    const base = win32.join(installRoot, 'releases', marker.currentCandidateId);
+    return { path: win32.join(base, MANIFEST_RELATIVE_PATH), base };
   } catch {
     return null;
   }

@@ -98,7 +98,7 @@ jobs:
         run: bun test tests/sandbox.test.ts tests/sandbox-bwrap-executor.test.ts
       - if: runner.os == 'Windows'
         name: Build Windows sandbox runner
-        run: cargo build --release --manifest-path native/windows-sandbox-runner/Cargo.toml
+        run: bun run scripts/release/build-windows-runner.ts
       - if: runner.os == 'Windows'
         name: Test Windows sandbox runner
         run: cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml

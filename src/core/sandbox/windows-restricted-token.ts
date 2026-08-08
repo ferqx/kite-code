@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { realpathSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
+import { win32 } from 'node:path';
 import { normalizeMsys2DrivePathsInShellCommand } from '@/core/tools/path-utils';
 import type { ShellExecutor } from '@/core/tools/shell';
 import {
@@ -680,9 +680,9 @@ export function buildWindowsRestrictedTokenEnvForTest(
   env.TEMP = runtimeRoot;
   env.TMP = runtimeRoot;
   env.HOME = runtimeRoot;
-  env.BUN_INSTALL_CACHE_DIR = join(runtimeRoot, 'bun-cache');
-  const pathEntries = [runtimeRoot, join(runtimeRoot, 'kite-coreutils'), shellRuntimePath];
-  if (bunExecutablePath) pathEntries.push(dirname(bunExecutablePath));
+  env.BUN_INSTALL_CACHE_DIR = win32.join(runtimeRoot, 'bun-cache');
+  const pathEntries = [runtimeRoot, win32.join(runtimeRoot, 'kite-coreutils'), shellRuntimePath];
+  if (bunExecutablePath) pathEntries.push(win32.dirname(bunExecutablePath));
   if (env.PATH) pathEntries.push(env.PATH);
   env.PATH = pathEntries.join(';');
   return env;
@@ -708,7 +708,7 @@ export function resolveBunExecutableForWindowsRestrictedTokenV1(
     if (!candidate) continue;
     try {
       const canonical = canonicalize(candidate);
-      const executableName = basename(canonical).toLowerCase();
+      const executableName = win32.basename(canonical).toLowerCase();
       if (executableName === 'bun.exe' || executableName === 'bun') return canonical;
     } catch {
       // Try the next independently validated candidate.

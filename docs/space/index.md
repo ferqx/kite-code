@@ -49,7 +49,6 @@
 | `../active/execution-platform-support.md` | active | 生产执行平台的原生能力探针、技术结论与治理准入矩阵 | 修改 sandbox backend、process-tree/network 边界、TUI/CLI 入口组合或平台发布支持声明时必读。 |
 | `../active/execution-boundary.md` | active | Release-pinned ExecutionBoundaryV1、sealed qualification registry 与 production composition gate | 修改生产执行边界、sandbox capability projection、只读 fallback catalog 或 executionBoundaryV1 flag 时必读。 |
 | `../active/windows-shell-sandbox.md` | active | Windows Shell 沙箱 — direct restricted-token、受管 Online 身份与 strict qualification 边界 | 修改 Windows execution backend、native runner、ACL/Job/ledger、受管身份、native 协议或 Windows filesystem/network/Full/fallback 边界时必读。 |
-| `../active/tui-session-startup-card.md` | active | TUI 会话启动卡片 — 启动时的会话/工作区状态概览与交互 | 修改 TUI 启动渲染、会话状态卡片或启动流程展示时必读。 |
 | `../active/file-reading-shared-boundary.md` | active | 文件读取共享边界 — `readTextContent` 单入口、BOM/编码检测、`isTextByte` 字节分类、换行正规化、MSYS2 路径双层转换 | 修改 `file.ts`/`shell.ts`/`path-utils.ts`、二进制检测、编码处理、文件读取失败排查时必读。 |
 | `../active/authorization.md` | active | 授权溯源 — AuthorizationSource、ToolGrant.source/grantedAt、modeSource/modeGrantedAt、mode-policy 硬规则 | 修改授权状态类型、full_access 提升逻辑、mode-policy 时必读。 |
 | `../active/workspace-trust.md` | active | Workspace 信任门禁 — TUI 启动授权确认、CLI `run` 门禁与 `--trust-workspace`、`~/.kite-code/workspace-trust.jsonc` 信任存储、无 env 旁路安全不变量 | 修改 TUI 启动流程、CLI 入口门禁、workspace 信任存储或测试 harness 信任预写时必读。 |

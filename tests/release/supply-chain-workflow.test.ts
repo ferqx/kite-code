@@ -4,6 +4,10 @@ import { resolve } from 'node:path';
 
 const workflow = readFileSync(resolve('.github/workflows/release-candidate.yml'), 'utf8');
 const candidateBuilder = readFileSync(resolve('scripts/release/oss-candidate.ts'), 'utf8');
+const windowsRunnerBuilder = readFileSync(
+  resolve('scripts/release/build-windows-runner.ts'),
+  'utf8',
+);
 const cargoConfig = readFileSync(resolve('.cargo/config.toml'), 'utf8');
 
 describe('ordinary open-source release candidate workflow', () => {
@@ -56,9 +60,16 @@ describe('ordinary open-source release candidate workflow', () => {
   test('builds and pins the Windows sandbox runner before packaging every required asset', () => {
     expect(cargoConfig).toContain('[target.x86_64-pc-windows-gnu]');
     expect(cargoConfig).toContain('link-arg=-Wl,--no-insert-timestamp');
+    expect(windowsRunnerBuilder).toContain(
+      '--remap-path-prefix=$' + '{cargoHome}=C:\\\\kite-cargo',
+    );
+    expect(windowsRunnerBuilder).toContain(
+      '--remap-path-prefix=$' + '{projectRoot}=C:\\\\kite-source',
+    );
+    expect(windowsRunnerBuilder).toContain('link-arg=-Wl,--no-insert-timestamp');
     const orderedSteps = [
       'rustup toolchain install 1.97.1-x86_64-pc-windows-gnu --profile minimal',
-      'cargo build --release --manifest-path native/windows-sandbox-runner/Cargo.toml',
+      'bun run scripts/release/build-windows-runner.ts',
       'bun run scripts/release/windows-runner-evidence.ts',
       'git diff --exit-code -- release/platform-capabilities/windows-runner-v1.json',
       'bun run release:build',

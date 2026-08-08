@@ -19,8 +19,9 @@ script 指定的 Win11 native E2E/probe。direct backend E2E 为
 tests/sandbox/windows-restricted-token.test.ts`。需要实际创建/复用 Online 账户时，先通过 TUI onboarding
 或 `bun run agent sandbox setup` 显式设置，再设置 `KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E=1`。
 Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 physical Win10 conformance。
-runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain；重新生成 manifest 后必须以
-`git diff --exit-code` 证明提交的 runner pin 与构建产物一致。
+runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，并通过
+`bun run scripts/release/build-windows-runner.ts` 重映射 checkout/Cargo cache 路径、清除 PE 时间戳；
+重新生成 manifest 后必须以 `git diff --exit-code` 证明提交的 runner pin 与构建产物一致。
 
 相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089，
 `release/platform-capabilities/windows-runner-v1.json`。

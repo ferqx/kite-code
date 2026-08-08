@@ -51,7 +51,7 @@ jobs:
           rustup override set 1.97.1-x86_64-pc-windows-gnu
       - if: runner.os == 'Windows'
         name: Build pinned Windows sandbox runner
-        run: cargo build --release --manifest-path native/windows-sandbox-runner/Cargo.toml
+        run: bun run scripts/release/build-windows-runner.ts
       - if: runner.os == 'Windows'
         name: Verify Windows runner manifest pin
         run: |

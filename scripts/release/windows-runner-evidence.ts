@@ -11,7 +11,7 @@ import {
  * from the actual built artifact — never hand-written. In CI the runner is
  * built by the workflow before this script runs; locally it can be built with:
  *
- *   cargo build --release --manifest-path native/windows-sandbox-runner/Cargo.toml
+ *   bun run scripts/release/build-windows-runner.ts
  *
  * The manifest anchors the runner binary and the vendored Shell runtime
  * digest. A stale digest fails closed (backend resolves to `none`).
