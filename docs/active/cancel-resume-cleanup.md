@@ -125,7 +125,7 @@ dispatch 后抛错时 child reservation 转为 unknown，不得只结算 parent 
 child actual usage 只能经 Kernel 的 resource-only late reconciliation 入口提交；该入口不接受
 child tool/model terminal event，不能复活 turn、permit 或后继调用。
 
-## 交互终态与 TUI 回放
+## 交互终态与 TUI 回放（ADR-0071）
 
 所有人工交互（`ask_user`、工具审批、Plan review、Provider action、Provider admission、子 Agent 工具审批）都必须先持久化用户终态，再清除 TUI。用户回答 `ask_user` 写入 `user_input.answered`；用户取消写入同时携带 `interactionId` 与 `toolCallId` 的 `user_input.cancelled`，随后写入对应的 `tool.finished`。工具审批的批准/拒绝、Plan review 的批准/修订/取消以及 Provider 终态必须校验当前交互身份；Plan review 还校验 `planId`、`version` 和 `structuralDigest`。迟到或重复的旧交互事件不得清除新的交互。
 
