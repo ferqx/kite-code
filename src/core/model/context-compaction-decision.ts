@@ -60,7 +60,15 @@ export function decideAutomaticContextCompaction(input: {
   const guard = input.state.context.autoGuard;
   const retryingPreviousTurnFailure =
     input.state.context.lastFailure?.reason === 'auto' &&
-    input.state.context.lastFailure.requestedAtTurnId !== input.state.turn.turnId;
+    input.state.context.lastFailure.retryable &&
+    input.state.context.lastFailure.requestedAtTurnId !== input.state.turn.turnId &&
+    !guard.recoveryAttempted;
+  if (
+    input.state.context.lastFailure?.reason === 'auto' &&
+    (!input.state.context.lastFailure.retryable || guard.recoveryAttempted)
+  ) {
+    return { action: 'invoke' };
+  }
   if (guard.disabledUntilManualAction && !retryingPreviousTurnFailure) {
     return { action: 'invoke' };
   }
@@ -122,6 +130,7 @@ export function updateAutoCompactionGuard(
       recentAutomaticCompactions: [],
       consecutiveLowGain: 0,
       disabledUntilManualAction: false,
+      recoveryAttempted: false,
     };
   }
 
@@ -153,5 +162,6 @@ export function updateAutoCompactionGuard(
     recentAutomaticCompactions: recent,
     consecutiveLowGain: 0, // reset on successful compaction
     disabledUntilManualAction: tooFrequent || refilledFast,
+    recoveryAttempted: false,
   };
 }

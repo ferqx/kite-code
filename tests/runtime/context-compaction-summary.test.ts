@@ -178,6 +178,61 @@ describe('narrative context compaction', () => {
     expect(boundary.protectedMessageIds).toEqual([]);
   });
 
+  test('rejects low-gain history before invoking the summary Provider', async () => {
+    const state = stateWithHistory(2);
+    for (const message of state.transcript.messages) {
+      if (message.kind === 'user') message.content = 'hello';
+    }
+    let calls = 0;
+    const compact = createNarrativeContextCompactor({
+      generate: async () => {
+        calls++;
+        return 'unreachable';
+      },
+    });
+
+    await expect(
+      compact({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({ kind: 'insufficient_reduction' });
+    expect(calls).toBe(0);
+  });
+
+  test('does not use custom instructions to rewrite an already-covered checkpoint', async () => {
+    const state = stateWithHistory(3);
+    state.context.activeCheckpoint = {
+      compactionId: 'base',
+      version: 1,
+      sourceRevision: 0,
+      sourceDigest: 'base-digest',
+      coveredThroughMessageId: 'message-2',
+      coveredThroughTurnId: 'turn-2',
+      summary: 'Existing narrative.',
+      inputTokensBefore: 8_000,
+      inputTokensAfter: 2_000,
+      reason: 'manual',
+      createdAt: '2026-07-22T00:00:00.000Z',
+    };
+    let calls = 0;
+    const compact = createNarrativeContextCompactor({
+      generate: async () => {
+        calls++;
+        return 'unreachable';
+      },
+    });
+
+    await expect(
+      compact({
+        state,
+        pending: pending(state, 'focus on unfinished work'),
+        sourceRevision: state.revision,
+      }),
+    ).rejects.toMatchObject({
+      kind: 'insufficient_reduction',
+      message: 'No new messages to compact.',
+    });
+    expect(calls).toBe(0);
+  });
+
   test('an explicit summary input limit fails instead of silently compacting a prefix', async () => {
     const state = stateWithHistory();
     let calls = 0;
@@ -192,5 +247,59 @@ describe('narrative context compaction', () => {
       compact({ state, pending: pending(state), sourceRevision: state.revision }),
     ).rejects.toMatchObject({ kind: 'oversized_turn' });
     expect(calls).toBe(0);
+  });
+
+  test('protects the current active manual turn and compacts only settled history', async () => {
+    const state = stateWithHistory(3);
+    state.turn.turnId = 'turn-2';
+    let request = '';
+    const compact = createNarrativeContextCompactor({
+      generate: async (value) => {
+        request = value.input;
+        return 'Settled historical narrative.';
+      },
+    });
+    const checkpoint = await compact({
+      state,
+      pending: pending(state),
+      sourceRevision: state.revision,
+    });
+    expect(request).toContain('message-1');
+    expect(request).not.toContain('message-2');
+    expect(checkpoint.coveredThroughMessageId).toBe('message-1');
+  });
+
+  test('rejects a summary request that cannot fit the selected model window', async () => {
+    const state = stateWithHistory();
+    let calls = 0;
+    const compact = createNarrativeContextCompactor({
+      modelContextWindowTokens: 2_000,
+      maxSummaryTokens: 1_000,
+      generate: async () => {
+        calls++;
+        return 'unreachable';
+      },
+    });
+    await expect(
+      compact({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({ kind: 'oversized_turn' });
+    expect(calls).toBe(0);
+  });
+
+  test('classifies ordinary AbortError instances as cancellation', async () => {
+    const compact = createNarrativeContextCompactor({
+      generate: async () => {
+        const error = new Error('cancelled');
+        error.name = 'AbortError';
+        throw error;
+      },
+    });
+    await expect(
+      compact({
+        state: stateWithHistory(),
+        pending: pending(stateWithHistory()),
+        sourceRevision: 0,
+      }),
+    ).rejects.toMatchObject({ kind: 'summary_aborted' });
   });
 });

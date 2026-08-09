@@ -17,7 +17,7 @@ const INPUT_RETRY_BACKSPACE_DELAY_MS = 50;
 const INPUT_RETRY_EMPTY_BASELINE_MARGIN = 8;
 const INPUT_SUBMIT_ATTEMPTS = 3;
 const INPUT_SUBMIT_RECEIPT_TIMEOUT_MS = 1_500;
-const SELECTOR_COMMAND_PREFIX = /^\/(?:model|effort|theme|permissions)\s$/;
+const SELECTOR_COMMAND_PREFIX = /^\/(?:model|effort|theme)\s$/;
 
 interface InputDeliveryTestTiming {
   /** Harness-unit-test override. PTY scenarios must use production-like defaults. */
@@ -114,7 +114,6 @@ export function activeInput(viewport: string): ActiveInput | undefined {
   for (const [marker, command] of [
     ['推理深度匹配 "', '/effort '],
     ['主题匹配 "', '/theme '],
-    ['权限模式匹配 "', '/permissions '],
   ] as const) {
     const queryLine = lines.find((line) => line.includes(marker));
     if (queryLine) {
@@ -130,7 +129,6 @@ export function activeInput(viewport: string): ActiveInput | undefined {
   for (const [title, command] of [
     ['推理深度', '/effort '],
     ['主题选项', '/theme '],
-    ['权限模式', '/permissions '],
   ] as const) {
     if (!lines.some((line) => line.includes(title))) continue;
     const promptInput = currentPromptInput(lines);
@@ -325,8 +323,8 @@ export async function typeText(
           // Ink first commits the command match and only then installs the
           // argument selector's key handlers. On slower CI hosts, sending the
           // first argument character in that gap can make the selector consume
-          // the separating space and produce `/permissionsf`. Treat the focus
-          // transfer as part of the retryable PTY delivery transaction.
+          // the separating space. Treat the focus transfer as part of the
+          // retryable PTY delivery transaction.
           await waitForInputEcho(
             tui,
             normalizeInputEcho(delivered),
@@ -598,12 +596,13 @@ export async function submitCommand(
   },
 ): Promise<void> {
   await typeText(tui, command, delayMs);
-  const expectedKind: ActiveInput['kind'] | undefined =
-    /^\/(?:model|effort|theme|permissions)\s+\S/.test(command)
-      ? 'slash-argument-query'
-      : /^\/\S+$/.test(command)
-        ? undefined
-        : 'main';
+  const expectedKind: ActiveInput['kind'] | undefined = /^\/(?:model|effort|theme)\s+\S/.test(
+    command,
+  )
+    ? 'slash-argument-query'
+    : /^\/\S+$/.test(command)
+      ? undefined
+      : 'main';
   // A plain input echo can precede the React commit that updates the slash
   // suggestion refs consumed by Enter. Argument selectors require their exact
   // semantic suggestion frame; free-form arguments require the settled main

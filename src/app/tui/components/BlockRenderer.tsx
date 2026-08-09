@@ -77,8 +77,10 @@ function listBlockIdentity(
 
 function gapFrom(prevBlock?: OutputBlock, block?: OutputBlock) {
   if (!prevBlock) return { marginTop: 0, marginBottom: 0 } as const;
-  // 斜杠命令结果紧跟命令，无间距 / Slash command results follow commands directly, no gap
-  if (prevBlock.kind === 'user' && prevBlock.content.startsWith('/')) {
+  // 斜杠命令结果紧跟命令，无间距；连续用户命令仍须作为独立操作分隔。
+  // Slash command results follow commands directly, but consecutive user
+  // commands remain distinct operations with the normal block gap.
+  if (prevBlock.kind === 'user' && prevBlock.content.startsWith('/') && block?.kind !== 'user') {
     return { marginTop: 0, marginBottom: 0 } as const;
   }
   const previousList = listBlockIdentity(prevBlock, 'last');
@@ -115,7 +117,11 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case 'user': {
       const displayLines = visibleUserMessageLines(block.content, columns);
       return (
-        <Box marginTop={gapFrom(prevBlock).marginTop} marginBottom={0} flexDirection="column">
+        <Box
+          marginTop={gapFrom(prevBlock, block).marginTop}
+          marginBottom={0}
+          flexDirection="column"
+        >
           {displayLines.map((line, index) => (
             <Box key={index} backgroundColor={dt.userMsgBg} width={columns}>
               <Text color={line.startsWith(OMITTED_USER_MESSAGE_LINES_PREFIX) ? dt.dim : undefined}>

@@ -457,8 +457,8 @@ describe('TUI input helpers', () => {
   }, 10_000);
 
   test('typeText rejects slash argument ghost text as an input receipt', async () => {
-    const requested = '/permissions auto';
-    const delivered = '/permissions a';
+    const requested = '/theme blue';
+    const delivered = '/theme b';
     let actual = '';
     let transcript = '';
     const tui = fakePty(
@@ -473,12 +473,12 @@ describe('TUI input helpers', () => {
       () => transcript,
     );
     tui.viewport = () => {
-      if (actual.startsWith('/permissions ')) {
-        const partial = actual.slice('/permissions '.length);
-        return `❯ ${actual}${'auto'.slice(partial.length)}\n────────\n╭────╮\n│ 权限模式匹配 "${partial}"\n│ auto\n╰────╯`;
+      if (actual.startsWith('/theme ')) {
+        const partial = actual.slice('/theme '.length);
+        return `❯ ${actual}${'blue'.slice(partial.length)}\n────────\n╭────╮\n│ 主题匹配 "${partial}"\n│ blue\n╰────╯`;
       }
       if (actual.startsWith('/')) {
-        return `❯ ${actual}\n────────\n╭────╮\n│ 命令匹配\n│ /permissions\n╰────╯`;
+        return `❯ ${actual}\n────────\n╭────╮\n│ 命令匹配\n│ /theme\n╰────╯`;
       }
       return '❯ ';
     };
@@ -688,7 +688,7 @@ describe('TUI input helpers', () => {
   });
 
   test('submitCommand waits for the slash suggestion frame before pressing Enter', async () => {
-    const command = '/permissions f';
+    const command = '/theme p';
     let currentInput = '';
     let rendered = '';
     let argumentReady = false;
@@ -702,28 +702,28 @@ describe('TUI input helpers', () => {
           if (submitted) currentInput = '';
           return;
         }
-        if (currentInput === '/permissions ' && !argumentReady) {
+        if (currentInput === '/theme ' && !argumentReady) {
           argumentArrivedBeforeFocusTransfer = true;
         }
         currentInput += data;
         rendered += data;
-        if (currentInput === '/permissions ') {
+        if (currentInput === '/theme ') {
           setTimeout(() => {
             argumentReady = true;
-            rendered += '<permissions-argument-ready>';
+            rendered += '<theme-argument-ready>';
           }, 100);
         }
         if (currentInput === command) {
           suggestionReady = true;
-          rendered += '<permissions-suggestion>';
+          rendered += '<theme-suggestion>';
         }
       },
       () => rendered,
     );
     tui.viewport = () => {
-      if (argumentReady && currentInput.startsWith('/permissions ')) {
-        const query = currentInput.slice('/permissions '.length);
-        return `❯ ${currentInput}\n╭────╮\n│ 权限模式匹配 "${query}"\n│ ${suggestionReady ? 'full' : ''}\n╰────╯`;
+      if (argumentReady && currentInput.startsWith('/theme ')) {
+        const query = currentInput.slice('/theme '.length);
+        return `❯ ${currentInput}\n╭────╮\n│ 主题匹配 "${query}"\n│ ${suggestionReady ? 'purple' : ''}\n╰────╯`;
       }
       return `❯ ${currentInput}`;
     };
@@ -759,7 +759,7 @@ describe('TUI input helpers', () => {
   });
 
   test('typeText retries the complete selector transaction when focus transfer is missed', async () => {
-    const command = '/permissions f';
+    const command = '/theme p';
     let currentInput = '';
     let deliveries = 0;
     let argumentReady = false;
@@ -778,8 +778,8 @@ describe('TUI input helpers', () => {
       () => currentInput,
     );
     tui.viewport = () =>
-      argumentReady && currentInput.startsWith('/permissions ')
-        ? `❯ ${currentInput}\n╭────╮\n│ 权限模式匹配 "${currentInput.slice('/permissions '.length)}"\n│ full\n╰────╯`
+      argumentReady && currentInput.startsWith('/theme ')
+        ? `❯ ${currentInput}\n╭────╮\n│ 主题匹配 "${currentInput.slice('/theme '.length)}"\n│ purple\n╰────╯`
         : `❯ ${currentInput}`;
 
     await typeText(tui, command, FAST_RETRY);

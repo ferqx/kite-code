@@ -23,11 +23,7 @@ import { composeObservabilityV1 } from '../observability/composition';
 import { resolveTelemetryConsentV1 } from '../observability/consent';
 import { formatObservabilityStatusV1, projectObservabilityStatusV1 } from '../observability/status';
 import { resolveReleaseCompositionV1 } from '../release/composition-root';
-import {
-  formatExecutionStatusV1,
-  formatUnadmittedExecutionStatusV1,
-  tryProjectAdmittedExecutionStatusV1,
-} from '../release/execution-status';
+import { tryProjectAdmittedExecutionStatusV1 } from '../release/execution-status';
 import { formatReleaseStatusV1, projectReleaseStatusV1 } from '../release/status-projection';
 import {
   type AppShellExecutorV1,
@@ -90,6 +86,18 @@ function hasModelConversation(state: import('./types').TuiState): boolean {
       (block) => block.kind === 'user' && !block.content.trimStart().startsWith('/'),
     ),
   );
+}
+
+function overlaySurfaceKey(state: import('./types').TuiState): string {
+  if (state.showHelp) return 'help';
+  if (state.showModelSelector) return 'model';
+  if (state.showPermissionSelector) return 'permissions';
+  if (state.showEffortSelector) return 'effort';
+  if (state.showThemeSelector) return 'theme';
+  if (state.showSessions) return 'sessions';
+  if (state.showMcp) return 'mcp';
+  if (state.showRewind) return 'rewind';
+  return 'main';
 }
 
 export interface TuiBootstrapProps {
@@ -255,6 +263,7 @@ function TuiApp({
     config.providerName,
     config.reasoningEffort,
     config.interactionMode,
+    config.reasoningExplicitlyDisabled !== true,
   );
   const stateRef = React.useRef(state);
   stateRef.current = state;
@@ -322,6 +331,22 @@ function TuiApp({
       process.stdout.off('resize', handler);
     };
   }, []);
+
+  // Header is intentionally rendered through Ink <Static> so completed output
+  // enters terminal scrollback exactly once. Static items cannot be updated in
+  // place, therefore a visible model/effort change needs the same atomic
+  // clear-and-remount path used for a shrinking terminal. The TUI state lives
+  // above <App>, so the redraw does not reset the active session.
+  const headerPresentationRef = React.useRef(
+    `${state.status.modelName}\u0000${state.status.reasoningEnabled}\u0000${state.status.thinkingMode}`,
+  );
+  React.useEffect(() => {
+    const presentation = `${state.status.modelName}\u0000${state.status.reasoningEnabled}\u0000${state.status.thinkingMode}`;
+    if (headerPresentationRef.current === presentation) return;
+    headerPresentationRef.current = presentation;
+    setResizeKey((n) => n + 1);
+  }, [state.status.modelName, state.status.reasoningEnabled, state.status.thinkingMode]);
+
   const thinkingLevelRef = React.useRef<string | null>(config.reasoningEffort ?? null);
   const interactionModeRef = React.useRef<'accept_edits' | 'auto' | 'full'>(
     config.interactionMode ?? 'accept_edits',
@@ -455,15 +480,6 @@ function TuiApp({
     }),
     [sandboxBackend],
   );
-  const executionStatusText = React.useMemo(() => {
-    const status = tryProjectAdmittedExecutionStatusV1({
-      config,
-      sandboxRuntime: effectiveSandboxRuntime,
-    });
-    return status
-      ? formatExecutionStatusV1(status)
-      : formatUnadmittedExecutionStatusV1(effectiveSandboxRuntime);
-  }, [config, effectiveSandboxRuntime]);
   const releaseStatusText = React.useMemo(() => {
     const executionStatus = tryProjectAdmittedExecutionStatusV1({
       config,
@@ -709,6 +725,7 @@ function TuiApp({
           modelProvider: resumedConfig.providerName,
           modelName: resumedConfig.modelName,
           thinkingLevel,
+          reasoningEnabled: resumedConfig.reasoningExplicitlyDisabled !== true,
         });
         if (result.runtimeEvents.some((event) => event.type === 'user.message_appended')) {
           const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
@@ -818,7 +835,10 @@ function TuiApp({
             persist: true,
             asDefault: true,
           });
-          dispatch(action);
+          dispatch({
+            ...action,
+            reasoningEnabled: selectedConfig.reasoningExplicitlyDisabled !== true,
+          });
           if (hasModelConversation(stateRef.current)) {
             const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);
             if (contextSnapshot) {
@@ -835,6 +855,13 @@ function TuiApp({
             isError: true,
           });
         }
+        return;
+      }
+      if (action.type === 'SET_THINKING_LEVEL') {
+        // Keep the next prompt on the newly selected effort even if the user
+        // starts typing before React has run the state-to-ref synchronization effect.
+        thinkingLevelRef.current = action.level;
+        dispatch(action);
         return;
       }
       // ── 多会话：SWITCH_SESSION 拦截，缓冲回放 ──
@@ -894,6 +921,7 @@ function TuiApp({
         // Invalidate any in-flight loadSessionById for this threadId to prevent
         // stale load from restoring the deleted session.
         loadGenerationRef.current++;
+        await sessionManager.cancelRuntimeOperations(threadId);
         try {
           await deleteSession(defaultCheckpointPath(), threadId);
         } catch {
@@ -999,24 +1027,44 @@ function TuiApp({
   const onCompactRef = React.useRef<(customInstructions?: string) => void>(() => {});
   onCompactRef.current = (customInstructions?: string) => {
     const targetThreadId = threadIdRef.current;
-    const label = customInstructions ? `/compact ${customInstructions}` : '/compact';
-    dispatchSessionLoad({ type: 'USER_MESSAGE', text: label });
-    void sessionManager
-      .handleContextCompaction(targetThreadId, customInstructions, (phase) => {
-        if (threadIdRef.current === targetThreadId) {
-          dispatchSessionLoad({
-            type: 'SET_COMPACTION_PROGRESS',
-            phase,
-            placement: 'inline',
-          });
-        }
-      })
+    const submittedAfterVisibleCompletion = !stateRef.current.running;
+    void (async () => {
+      // SET_EXITED makes the prompt visible before the previous generator has
+      // necessarily released its Kernel. A compact command submitted from that
+      // prompt must use the standalone executor after cleanup, rather than
+      // adding a pending request to a loop that will no longer schedule it.
+      if (submittedAfterVisibleCompletion) {
+        await sessionManager.getRuntime(targetThreadId)?.waitForRunCompletion();
+      }
+      return sessionManager.handleContextCompaction(
+        targetThreadId,
+        customInstructions,
+        (phase) => {
+          if (threadIdRef.current === targetThreadId) {
+            dispatchSessionLoad({
+              type: 'SET_COMPACTION_PROGRESS',
+              phase,
+              placement: 'inline',
+            });
+          }
+        },
+        (event) => {
+          if (threadIdRef.current === targetThreadId) {
+            dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+          }
+        },
+      );
+    })()
       .then((result) => {
         // Runtime events are already durable in targetThreadId. If the user
         // switched sessions while compaction was running, let the target
         // session pick them up through normal replay instead of rendering
         // them in the newly active session.
-        if (threadIdRef.current !== targetThreadId) return;
+        if (threadIdRef.current !== targetThreadId) {
+          const target = sessionManager.getRuntime(targetThreadId);
+          for (const event of result.events) target?.eventBuffer.push(event);
+          return;
+        }
         for (const event of result.events) {
           dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
         }
@@ -1035,8 +1083,34 @@ function TuiApp({
             ...(result.isError ? { isError: true } : {}),
           });
         }
+      })
+      .catch(() => {
+        if (threadIdRef.current !== targetThreadId) return;
+        dispatchSessionLoad({
+          type: 'LOCAL_TEXT',
+          text: '  ⎿  Context compaction failed unexpectedly; the original conversation was preserved.',
+          isError: true,
+        });
+        dispatchSessionLoad({ type: 'SET_COMPACTION_PROGRESS', phase: undefined });
       });
   };
+
+  const applyThemePreset = React.useCallback(
+    (preset: string) => {
+      const p = preset.toLowerCase();
+      if (p !== 'teal' && p !== 'blue' && p !== 'purple' && p !== 'cyan' && p !== 'mono') return;
+      if (p === themePreset) return;
+      setThemePreset(p);
+      process.stdout.write(osc4Apply(p));
+      saveColorPreset(p);
+      dispatchSessionLoad({ type: 'USER_MESSAGE', text: `/theme ${p}` });
+      dispatchSessionLoad({
+        type: 'LOCAL_TEXT',
+        text: `  ⎿  Theme set to ${p}`,
+      });
+    },
+    [dispatchSessionLoad, themePreset],
+  );
 
   const handleSlashCommand = useSlashCommand(
     dispatchSessionLoad,
@@ -1046,25 +1120,6 @@ function TuiApp({
     skillOptionsRef.current ?? undefined,
     runTaskBridge,
     enterPlanMode,
-    (preset) => {
-      const p = preset.toLowerCase();
-      if (p === 'teal' || p === 'blue' || p === 'purple' || p === 'cyan' || p === 'mono') {
-        // No-op if already the active theme — avoids duplicate messages
-        if (p === themePreset) return;
-        setThemePreset(p);
-        // OSC 4 reprograms terminal palette — existing Static content changes instantly, no clear needed
-        process.stdout.write(osc4Apply(p));
-        saveColorPreset(p);
-        dispatchSessionLoad({ type: 'USER_MESSAGE', text: `/theme ${p}` });
-        dispatchSessionLoad({
-          type: 'LOCAL_TEXT',
-          text: `  ⎿  Theme set to ${p}`,
-        });
-      }
-      // Invalid preset — silently ignored
-    },
-    state.interactionMode,
-    sandboxBackend,
     (customInstructions) => {
       onCompactRef.current(customInstructions);
     },
@@ -1079,32 +1134,34 @@ function TuiApp({
     () => {
       const targetThreadId = threadIdRef.current;
       dispatchSessionLoad({ type: 'USER_MESSAGE', text: '/compact reset' });
-      void sessionManager.handleContextReset(targetThreadId).then((result) => {
-        if (threadIdRef.current !== targetThreadId) return;
-        for (const event of result.events) {
-          dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
-        }
-        dispatchSessionLoad({
-          type: 'LOCAL_TEXT',
-          text: `  ⎿  ${result.text}`,
-          ...(result.isError ? { isError: true } : {}),
+      void sessionManager
+        .handleContextReset(targetThreadId)
+        .then((result) => {
+          if (threadIdRef.current !== targetThreadId) {
+            const target = sessionManager.getRuntime(targetThreadId);
+            for (const event of result.events) target?.eventBuffer.push(event);
+            return;
+          }
+          for (const event of result.events) {
+            dispatchSessionLoad({ type: 'RUNTIME_EVENT', event });
+          }
+          dispatchSessionLoad({
+            type: 'LOCAL_TEXT',
+            text: `  ⎿  ${result.text}`,
+            ...(result.isError ? { isError: true } : {}),
+          });
+        })
+        .catch(() => {
+          if (threadIdRef.current !== targetThreadId) return;
+          dispatchSessionLoad({
+            type: 'LOCAL_TEXT',
+            text: '  ⎿  Context reset failed; the active checkpoint was preserved.',
+            isError: true,
+          });
         });
-      });
     },
-    executionStatusText,
     releaseStatusText,
     telemetryStatusText,
-  );
-
-  // Stable reference — avoids re-creating the object on every render and causing
-  // an infinite re-render loop through useSlashSuggestions → setSlashSuggestion.
-  const activeSelections = React.useMemo(
-    () => ({
-      theme: themePreset,
-      interactionMode: state.interactionMode,
-      sandboxBackend,
-    }),
-    [themePreset, state.interactionMode, sandboxBackend],
   );
 
   // When interrupt is cleared externally (ESC, Ctrl+C, etc.), cancel the pending promise
@@ -1195,6 +1252,7 @@ function TuiApp({
           modelProvider: rt.config.providerName,
           modelName: rt.config.modelName,
           thinkingLevel: thinkingLevelRef.current,
+          reasoningEnabled: rt.config.reasoningExplicitlyDisabled !== true,
         });
       }
 
@@ -1315,10 +1373,12 @@ function TuiApp({
     };
   }, [provider]);
 
+  const appPresentationKey = `${resizeKey}:${overlaySurfaceKey(state)}`;
+
   return (
     <ThemeContext.Provider value={theme}>
       <App
-        key={resizeKey}
+        key={appPresentationKey}
         state={state}
         dispatch={dispatchSessionLoad}
         onToggleReason={onToggleReason}
@@ -1328,6 +1388,8 @@ function TuiApp({
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
+        themePreset={themePreset}
+        onThemeSelect={applyThemePreset}
         onAbort={abortForegroundRun}
         getRewindPreview={previewRewind}
         resizeGeneration={resizeKey}
@@ -1342,11 +1404,14 @@ function TuiApp({
                 : 'prompt'
           }
           onSubmit={handleInput}
-          disabled={!!state.interrupt}
+          disabled={!!state.interrupt || state.compactionProgress?.placement === 'inline'}
           workspace={workspace}
           overlayActive={
             state.showHelp ||
             state.showModelSelector ||
+            state.showPermissionSelector ||
+            state.showEffortSelector ||
+            state.showThemeSelector ||
             state.showSessions ||
             state.showMcp ||
             state.showRewind ||
@@ -1357,7 +1422,6 @@ function TuiApp({
           onValueChange={handleInputValueChange}
           planMode={state.status.phase === 'planning'}
           planName={state.status.plan?.name}
-          activeSelections={activeSelections}
         />
       </App>
     </ThemeContext.Provider>

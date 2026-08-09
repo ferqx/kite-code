@@ -76,8 +76,8 @@ Windows windows_restricted_token 都必须将 full 建议项置灰，键盘选�
 
 host Shell 只在用户脚本前的 sandbox environment/essential startup capability unavailable 决策后选择。
 
-直接 /permissions full 会在 mode dispatch 前被拒绝，回到 accept_edits 并显示
-非沙箱环境无法开启full；Help 只显示可用的 mode。full_access 只描述审批/authorization mode，
+`/permissions` 不接受 mode 参数；它只能打开选择器。无可用 Full backend 时选择器禁用 `full` 并显示
+非沙箱环境无法开启full；Help 不提供手动 mode 参数。full_access 只描述审批/authorization mode，
 不提升 native execution ceiling。production consumer 的 sandbox 不具备 Full qualification 时必须使用
 fail-closed executor，不能借开发入口的 host fallback 或 restricted-token backend 获得 Full。
 
@@ -108,16 +108,16 @@ Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling
 | 入口 | source 值 | 位置 |
 | ---- | --------- | ---- |
 | CLI `--full-access` | `'config'` | `src/app/cli/index.ts:121` |
-| TUI `/permissions full` | `'user'` | `src/core/runtime/actions.ts:94` |
+| TUI 权限选择器确认 Full | `'user'` | `src/core/runtime/actions.ts:94` |
 | 测试注入 | `'test'` | `tests/policies/authorization-elevation.test.ts` |
 | System (禁止) | `'system'` | `src/core/policies/mode-policy.ts:23,26` |
 
-TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前请求值覆盖恢复态，确保 `/permissions full` 在新轮次立即生效。
+TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前选择器确认值覆盖恢复态，并在新轮次立即生效。
 
-`/permissions` 无参数不改变 mode 或 authorization；它只显示 App 的 execution-status 投影。普通
-开发 TUI 明确显示 production boundary `not admitted`，已经通过 production gate 的配置才显示
-有效 sandbox/filesystem/network/protected-path/worktree/capability 状态。该状态文本不是 grant，
-不能扩大 capability surface。
+`/permissions` 只接受无参数形式并打开可用模式选择器，确认某一项后才改变 mode；任何附加参数都不
+触发模式切换。当前 backend 不支持 `full` 时选择器禁用该项。
+这不会把模式选择伪装成 production capability admission。production execution-status 只可由 CLI
+`--execution-status` 查询；它不是 grant，不能扩大 capability surface。
 
 `/rewind` 从恢复点 fork 新 thread 时不继承源 thread 的授权。Fork 必须把
 `authorization.mode` 重置为 `default`，删除 `modeSource` / `modeGrantedAt` 和全部 command

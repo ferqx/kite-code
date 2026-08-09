@@ -3,8 +3,10 @@ import type { RuntimeMetricBridgeV1 } from '@/app/observability/runtime-bridge';
 import { type AppShellExecutorV1, composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
+import { createApprovedProviderDataAdmissionV1 } from '@/core/config/provider-data-admission';
 import type { McpRuntimeProvider, RemoteMcpEgressPermitResolverV1 } from '@/core/mcp';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
+import { findSafeCompactionBoundary } from '@/core/model/compaction-v2';
 import {
   buildContextStatusReport,
   compactResetPreflight,
@@ -226,6 +228,8 @@ export class SessionRuntime {
 
   generator: AsyncGenerator<RuntimeEvent> | null = null;
   runtimeControl: RuntimeKernelControl | null = null;
+  /** Prevent repeated `/compact` commands from concurrently executing one pending checkpoint. */
+  manualCompactionInFlightId: string | null = null;
   /** 当后台会话命中中断时通知 Manager 刷新快照 / Callback to notify Manager on background interrupt */
   notifyInterrupt: (() => void) | null = null;
 
@@ -249,6 +253,12 @@ export class SessionRuntime {
    * must not enter the same RuntimeStore until the old loop has closed.
    */
   private _runCompletion: Promise<void> | null = null;
+  /** Serializes every manual compaction mutation for this RuntimeStore thread. */
+  private _manualCompactionBarrier: Promise<void> = Promise.resolve();
+  private _manualCompactionAbortController: AbortController | null = null;
+  private _manualCompactionCompletion: Promise<void> | null = null;
+  private _manualCompactionClosed = false;
+  private _manualCompactionQueueDepth = 0;
   /** True after the visible run has been cancelled but before its async cleanup is complete. */
   private _cancellationRequested = false;
   /** Prevents multiple prompts from being optimistically accepted for one cancelled run. */
@@ -293,12 +303,82 @@ export class SessionRuntime {
     return true;
   }
 
+  /** Wait for an already-terminal run to release its live Kernel control plane. */
+  async waitForRunCompletion(): Promise<void> {
+    await this._runCompletion;
+  }
+
+  async runManualCompactionExclusive<T>(
+    operation: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> {
+    this._manualCompactionQueueDepth += 1;
+    const previous = this._manualCompactionBarrier;
+    let release!: () => void;
+    this._manualCompactionBarrier = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous;
+    if (this._manualCompactionClosed) {
+      this._manualCompactionQueueDepth -= 1;
+      release();
+      const error = new Error('Session operation cancelled.');
+      error.name = 'AbortError';
+      throw error;
+    }
+    const controller = new AbortController();
+    let complete!: () => void;
+    const completion = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    this._manualCompactionAbortController = controller;
+    this._manualCompactionCompletion = completion;
+    try {
+      return await operation(controller.signal);
+    } finally {
+      if (this._manualCompactionAbortController === controller) {
+        this._manualCompactionAbortController = null;
+      }
+      if (this._manualCompactionCompletion === completion) {
+        this._manualCompactionCompletion = null;
+      }
+      complete();
+      this._manualCompactionQueueDepth -= 1;
+      release();
+    }
+  }
+
+  async waitForManualCompactionCompletion(): Promise<void> {
+    if (this._manualCompactionQueueDepth > 0) await this._manualCompactionBarrier;
+  }
+
+  async cancelManualCompaction(close = false): Promise<void> {
+    if (close) this._manualCompactionClosed = true;
+    this._manualCompactionAbortController?.abort('Session operation cancelled.');
+    await this._manualCompactionBarrier;
+  }
+
   abort(): void {
     this._flushBufferedPresentation();
+    this._manualCompactionAbortController?.abort('Cancelled by user.');
     if (this.agentLoopActive || this._runCompletion) {
       this._cancellationRequested = true;
     }
     try {
+      const pending = this.runtimeControl?.getState().context.pendingCompaction;
+      if (pending?.reason === 'manual') {
+        const failed: RuntimeEvent = {
+          type: 'context.compaction_failed',
+          compactionId: pending.compactionId,
+          sourceRevision: this.runtimeControl!.getState().revision,
+          errorKind: 'summary_aborted',
+          message: 'Summary was aborted.',
+          retryable: false,
+          requestedAtTurnId: pending.requestedAtTurnId,
+        };
+        this.runtimeControl!.processEvent(failed);
+        if (this._activeDispatch) this._routeRuntimeEvent(failed, this._activeDispatch);
+        else this._pushToBuffer(failed);
+      }
       const cancellationEvents = this.runtimeControl?.cancelRun('Cancelled by user.') ?? [];
       for (const event of cancellationEvents) {
         if (this._activeDispatch) {
@@ -366,6 +446,7 @@ export class SessionRuntime {
       input: Record<string, unknown>;
     }>,
   ): Promise<void> {
+    if (this._manualCompactionQueueDepth > 0) await this._manualCompactionBarrier;
     if (this.agentLoopActive && !this._cancellationRequested && !this._successorPromptReserved)
       return;
     if (this.agentLoopActive && !this._successorPromptReserved) {
@@ -1264,6 +1345,31 @@ export class SessionManager {
         | import('@/core/model/context-compaction-presentation').ContextCompactionProgressPhase
         | undefined,
     ) => void,
+    onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
+  ): Promise<ContextCompactionCommandResult> {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
+    return rt.runManualCompactionExclusive((signal) =>
+      this.handleContextCompactionUnlocked(
+        threadId,
+        customInstructions,
+        onProgress,
+        onCommand,
+        signal,
+      ),
+    );
+  }
+
+  private async handleContextCompactionUnlocked(
+    threadId: string,
+    customInstructions?: string,
+    onProgress?: (
+      phase:
+        | import('@/core/model/context-compaction-presentation').ContextCompactionProgressPhase
+        | undefined,
+    ) => void,
+    onCommand?: (event: Extract<RuntimeEvent, { type: 'user.command_invoked' }>) => void,
+    signal?: AbortSignal,
   ): Promise<ContextCompactionCommandResult> {
     const rt = this.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
@@ -1280,26 +1386,121 @@ export class SessionManager {
     const runWithState = async (
       state: Readonly<RuntimeState>,
       processEvent: (event: RuntimeEvent) => void,
-      execute?: (event: RuntimeEvent) => Promise<RuntimeEvent[]>,
+      execute?: () => Promise<RuntimeEvent[]>,
     ): Promise<ContextCompactionCommandResult> => {
-      processEvent({
+      const commandEvent: Extract<RuntimeEvent, { type: 'user.command_invoked' }> = {
         type: 'user.command_invoked',
         commandId: crypto.randomUUID(),
         command: customInstructions ? `/compact ${customInstructions}` : '/compact',
-      });
+      };
+      processEvent(commandEvent);
+      onCommand?.(commandEvent);
+
+      const executeManualCompaction = async (
+        compactionId: string,
+      ): Promise<RuntimeEvent[] | undefined> => {
+        if (!execute || rt.manualCompactionInFlightId === compactionId) return undefined;
+        rt.manualCompactionInFlightId = compactionId;
+        try {
+          return await execute();
+        } finally {
+          if (rt.manualCompactionInFlightId === compactionId) {
+            rt.manualCompactionInFlightId = null;
+          }
+        }
+      };
+
+      // A previous client version could persist a manual request after the
+      // turn had stopped, but never schedule its effect. Once the session is
+      // terminal, the next `/compact` must recover that durable request rather
+      // than repeatedly reporting it as pending forever.
+      const existingPending = state.context.pendingCompaction;
+      if (existingPending?.reason === 'manual') {
+        const boundary = findSafeCompactionBoundary(state);
+        if (!boundary.eligible) {
+          if (!execute) {
+            return {
+              events: [],
+              text: 'A context compaction request is already pending.',
+            };
+          }
+          const boundaryMessage =
+            boundary.reason === 'No settled historical turn is old enough to compact.'
+              ? 'Not enough messages to compact.'
+              : (boundary.reason ?? 'Not enough messages to compact.');
+          const failedEvent: RuntimeEvent = {
+            type: 'context.compaction_failed',
+            compactionId: existingPending.compactionId,
+            sourceRevision: state.revision,
+            errorKind: 'unsafe_boundary',
+            message: boundaryMessage,
+            retryable: false,
+          };
+          processEvent(failedEvent);
+          return {
+            events: [failedEvent],
+            text: boundaryMessage,
+          };
+        }
+        const produced = await executeManualCompaction(existingPending.compactionId);
+        if (!produced) {
+          return {
+            events: [],
+            text: 'A context compaction request is already pending.',
+          };
+        }
+        const completed = produced.find(
+          (candidate) => candidate.type === 'context.compaction_completed',
+        );
+        if (completed?.type === 'context.compaction_completed') {
+          return {
+            events: produced,
+            text: contextCompactionTerminalNotice(completed).message,
+          };
+        }
+        const failed = produced.find((candidate) => candidate.type === 'context.compaction_failed');
+        const notice =
+          failed?.type === 'context.compaction_failed'
+            ? contextCompactionTerminalNotice(failed)
+            : undefined;
+        return {
+          events: produced,
+          text:
+            notice?.message ??
+            'Compaction queued; it will run when the Runtime reaches a safe boundary.',
+          ...(notice?.isError ? { isError: true } : {}),
+        };
+      }
+
       const model = createChatModel(config);
       const capabilities = resolveModelCapabilities({
         config,
         adapter: model.capabilityMetadata,
       });
-      const status = inspectManualContextCompaction(state, config, capabilities);
+      const projectionEnvironment = resolveRuntimeContextProjectionEnvironment(
+        {
+          config,
+          model,
+          mcpManager: rt.mcpManager ?? undefined,
+          skills: rt.skillManifests,
+          skillOptions: rt.skillOptions ?? undefined,
+        },
+        state,
+      );
+      const status = inspectManualContextCompaction(
+        state,
+        config,
+        capabilities,
+        projectionEnvironment,
+      );
 
       // Reject early — emit events so the rejection text persists across TUI restart
       // (replayed through handleRuntimeEventAction during session load).
-      if (
-        !status.safeBoundary.eligible &&
-        status.safeBoundary.reason === 'No settled historical turn is old enough to compact.'
-      ) {
+      if (execute && !status.safeBoundary.eligible) {
+        const boundaryMessage =
+          status.safeBoundary.reason === 'No settled historical turn is old enough to compact.'
+            ? 'Not enough messages to compact.'
+            : (status.safeBoundary.reason ?? 'Not enough messages to compact.');
         const compactId = crypto.randomUUID();
         const reqEvent: RuntimeEvent = {
           type: 'context.compaction_requested',
@@ -1317,23 +1518,21 @@ export class SessionManager {
           compactionId: compactId,
           sourceRevision: state.revision,
           errorKind: 'unsafe_boundary',
-          message: 'Not enough messages to compact.',
+          message: boundaryMessage,
           retryable: false,
         };
         processEvent(failedEvent);
         return {
           events: [reqEvent, failedEvent],
-          text: 'Not enough messages to compact.',
+          text: boundaryMessage,
         };
       }
 
       // A plain repeated /compact has no new source material once the active
-      // checkpoint already covers the latest safe message. Do not spend a
-      // provider request re-summarizing the same narrative only to fail the
-      // minimum-reduction check. Explicit custom instructions still opt into
-      // reworking the existing narrative.
+      // checkpoint already covers the latest safe message. Custom summary
+      // preferences apply only when there is new source material; /compact is
+      // a capacity operation, not a general-purpose narrative editor.
       if (
-        !customInstructions &&
         status.coveredThroughMessageId &&
         status.safeBoundary.lastMessageId === status.coveredThroughMessageId
       ) {
@@ -1368,7 +1567,8 @@ export class SessionManager {
         config,
         customInstructions,
         capabilities,
-      });
+        projectionEnvironment,
+      }) as Extract<RuntimeEvent, { type: 'context.compaction_requested' }> | null;
       if (!event) {
         return {
           events: [],
@@ -1382,7 +1582,13 @@ export class SessionManager {
           text: 'Compaction queued; it will run after the current interaction reaches a settled boundary.',
         };
       }
-      const produced = await execute(event);
+      const produced = await executeManualCompaction(event.compactionId);
+      if (!produced) {
+        return {
+          events: [event],
+          text: 'A context compaction request is already pending.',
+        };
+      }
       const completed = produced.find(
         (candidate) => candidate.type === 'context.compaction_completed',
       );
@@ -1408,7 +1614,26 @@ export class SessionManager {
     };
 
     if (rt.runtimeControl) {
-      return runWithState(rt.runtimeControl.getState(), rt.runtimeControl.processEvent);
+      const control = rt.runtimeControl;
+      const liveState = control.getState();
+      // `SET_IDLE` is rendered after the runtime emits its terminal event but
+      // can precede the generator's final cleanup by one React turn. Waiting
+      // for that cleanup lets the manual request use the standalone Kernel
+      // immediately instead of being injected into a loop that has already
+      // stopped scheduling effects.
+      if (liveState.turn.status === 'completed' && liveState.interactions.kind === 'idle') {
+        await rt.waitForRunCompletion();
+        if (rt.runtimeControl !== control) {
+          return this.handleContextCompactionUnlocked(
+            threadId,
+            customInstructions,
+            onProgress,
+            onCommand,
+            signal,
+          );
+        }
+      }
+      return runWithState(control.getState(), control.processEvent);
     }
 
     const kernel = createAgentKernel({
@@ -1429,21 +1654,35 @@ export class SessionManager {
           const scheduled = decideNextEffect(kernel.getState());
           const pending = kernel.getState().context.pendingCompaction;
           const effect =
-            scheduled.type === 'compact_context' ||
-            (scheduled.type === 'emit_final' && pending?.reason === 'manual')
+            pending?.reason === 'manual'
               ? {
                   type: 'compact_context' as const,
                   compactionId: pending?.compactionId ?? '',
                 }
               : scheduled;
           if (effect.type !== 'compact_context' || !effect.compactionId) return [];
+          let providerDataAdmission:
+            | import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1
+            | undefined;
+          if (getFeatureFlags(config).providerDataPolicyV1) {
+            try {
+              providerDataAdmission = createApprovedProviderDataAdmissionV1(config);
+            } catch {
+              // Leave the required gate absent so the final dispatch boundary
+              // fails closed and the Controller persists a typed terminal event.
+              providerDataAdmission = undefined;
+            }
+          }
           const executor = createRuntimeEffectExecutor({
             config,
             model: createChatModel(config),
+            runtimeStore: kernel.runtimeStore,
             mcpManager: rt.mcpManager ?? undefined,
             skills: rt.skillManifests,
             skillOptions: rt.skillOptions ?? undefined,
             onCompactionProgress: onProgress,
+            signal,
+            providerDataAdmission,
             compactionReporter: config.compaction?.localDebug?.enabled
               ? createLocalCompactionDebugReporter({
                   enabled: true,
@@ -1565,6 +1804,14 @@ export class SessionManager {
   async handleContextReset(threadId: string): Promise<ContextCompactionCommandResult> {
     const rt = this.runtimes.get(threadId);
     if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
+    return rt.runManualCompactionExclusive(() => this.handleContextResetUnlocked(threadId));
+  }
+
+  private async handleContextResetUnlocked(
+    threadId: string,
+  ): Promise<ContextCompactionCommandResult> {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return { events: [], text: 'Session is unavailable.', isError: true };
     const config = rt.config;
     const flags = getFeatureFlags(config);
     if (!flags.contextCompactionV2 || !flags.contextCompactionManualV1) {
@@ -1575,11 +1822,13 @@ export class SessionManager {
       };
     }
 
-    // REVIEW-FIX: When the model is running, route through the live kernel's
-    // processEvent to avoid kernel-racing issues (events lost on snapshot replay).
-    // Match the pattern used by handleCompact (line 865-866).
+    // When a model run owns the live Kernel, route the reset through that same
+    // control plane so its eventual snapshot cannot overwrite the reset.
     if (rt.runtimeControl) {
       const state = rt.runtimeControl.getState();
+      if (state.context.pendingCompaction) {
+        return { events: [], text: 'Wait for the pending compaction to finish before reset.' };
+      }
       const checkpoint = state.context.activeCheckpoint;
       if (!checkpoint) {
         return { events: [], text: 'No active checkpoint to reset.' };
@@ -1630,6 +1879,9 @@ export class SessionManager {
     });
     try {
       const state = kernel.getState();
+      if (state.context.pendingCompaction) {
+        return { events: [], text: 'Wait for the pending compaction to finish before reset.' };
+      }
       const checkpoint = state.context.activeCheckpoint;
       if (!checkpoint) {
         return { events: [], text: 'No active checkpoint to reset.' };
@@ -1897,6 +2149,15 @@ export class SessionManager {
     if (this.activeId === threadId) {
       this.activeId = '';
     }
+  }
+
+  /** Cancel and await every writer before durable session deletion. */
+  async cancelRuntimeOperations(threadId: string): Promise<void> {
+    const rt = this.runtimes.get(threadId);
+    if (!rt) return;
+    rt.abort();
+    await rt.cancelManualCompaction(true);
+    await rt.waitForRunCompletion();
   }
 
   /** 中止所有运行中的会话（退出时调用）/ Abort all running sessions (called on exit) */

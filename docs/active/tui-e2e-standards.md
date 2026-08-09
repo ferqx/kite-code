@@ -23,9 +23,9 @@ tests/tui-system/
 Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动真实 TUI 的文件属于串行
 `tui-system` job。两者不得在 system runner 中重复执行。
 
-权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions full` 保留正常
+权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions` 选择器保留 Full
 能力说明并显示环境警告，默认 metadata session logging 不显示普通 mode 状态；测试同时验证 Full
-准入仍被拒绝、content logging 披露没有被普通 metadata 路径误触发。
+不可选择、content logging 披露没有被普通 metadata 路径误触发。
 
 MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：列表通过“状态 + 选中行 +
 添加入口”组合确认数据已加载，详情通过操作区确认已经打开；项目审批与 OAuth 恢复分别等待
@@ -211,8 +211,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     scenario 需要验证 Shell 审批或展示链路，必须在隔离 workspace 配置中显式关闭 native sandbox，
     运行只依赖测试 Runtime 的受控命令，并从真实 Tool result 校验唯一 marker；不得让
     `sandbox_apply`/`bwrap` 失败后仍靠模型固定回答通过。
-    `sandbox-mode` 中 `/permissions` 无参数场景只证明开发 composition 显示 production boundary
-    `not admitted`，带参数场景只证明 sandbox 关闭时 Full 不可选；两者都不是 native sandbox、
+    `sandbox-mode` 中 `/permissions` 无参数场景只证明开发 composition 打开 interaction mode 选择器，
+    选择器中的 Full 不可选场景只证明 sandbox 关闭时 Full 不可选；两者都不是 native sandbox、
     release admission 或 production platform qualification 证据。
     同一 scenario 的 `/release` 只证明普通开发入口显示 `artifact_disabled`，不代表 embedded
     profile、Sigstore、artifact attestation、平台制品或任一 production Gate 已通过。
@@ -223,11 +223,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     为每个 invocation 签发独立短时 permit，不得由全局 harness、环境变量或生产入口自动放行。
     scenario contract 会拒绝只配置 flag 或只注入 permit issuer 的半配置场景。自动重试与
     permit replay 属于 MCP policy/integration 层；不以重试为主题的 PTY 场景应配置 `retry: never`。
-19. 带参数 selector 的 slash command（`/effort`、`/theme`、`/permissions`）输入空格后，
-    共享输入 helper 必须等待 argument selector 的语义 frame，再发送第一个参数字符；随后仍需
-    等待完整 query frame 才能按 Enter。场景不得用固定 sleep 修补 command selector 到 argument
-    selector 的 React commit 竞争。argument focus 回执失败必须进入与字符交付相同的有界重试事务，
-    先恢复动作前输入基线再重送完整命令，不能在重试边界外直接超时。
+19. selector command（`/permissions`、`/effort`、`/theme`、`/model`）不得通过空格和二级参数
+    选择值。PTY 场景以选择器标题为确认回执，在选择器关闭前不得发送下一条命令；场景不得用固定
+    sleep 修补命令提交到 Overlay mount 的 React commit 竞争。
 20. HTTP 429/5xx 属于模型 transient retry 场景。验证终态错误恢复时，mock 必须连续返回足够次数的
     transient failure 以耗尽 production bounded retry budget，并断言 retry UI、实际请求次数、终态错误
     与下一用户 turn 恢复；不得用一次 500 后的默认成功响应声称已经验证错误终态。只验证“不重试”时

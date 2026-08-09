@@ -25,21 +25,9 @@ export function fullModeUnavailableReason(
 
 export function resolveInteractionModeTarget(
   requested: string | undefined,
-  current: TuiInteractionMode,
-  sandboxBackend?: SandboxBackend,
 ): TuiInteractionMode | null {
   const normalized = (requested ?? '').toLowerCase();
-  if (!normalized) {
-    if (current === InteractionMode.AcceptEdits) return InteractionMode.Auto;
-    if (
-      current === InteractionMode.Auto &&
-      sandboxBackend !== undefined &&
-      !sandboxSupportsFullModeV1(sandboxBackend)
-    )
-      return InteractionMode.AcceptEdits;
-    if (current === InteractionMode.Auto) return InteractionMode.Full;
-    return InteractionMode.AcceptEdits;
-  }
+  if (!normalized) return null;
   if (normalized === 'a' || normalized === InteractionMode.AcceptEdits)
     return InteractionMode.AcceptEdits;
   if (normalized === 'au' || normalized === InteractionMode.Auto) return InteractionMode.Auto;

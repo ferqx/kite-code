@@ -22,6 +22,9 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         ...state,
         showHelp: true,
         showModelSelector: false,
+        showPermissionSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
         showSessions: false,
         showMcp: false,
         showRewind: false,
@@ -32,6 +35,9 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       return {
         ...state,
         showModelSelector: true,
+        showPermissionSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
         showHelp: false,
         showSessions: false,
         showMcp: false,
@@ -39,12 +45,57 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       };
     case 'HIDE_MODEL_SELECTOR':
       return { ...state, showModelSelector: false };
+    case 'SHOW_PERMISSION_SELECTOR':
+      return {
+        ...state,
+        showPermissionSelector: true,
+        showHelp: false,
+        showModelSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
+        showSessions: false,
+        showMcp: false,
+        showRewind: false,
+      };
+    case 'HIDE_PERMISSION_SELECTOR':
+      return { ...state, showPermissionSelector: false };
+    case 'SHOW_EFFORT_SELECTOR':
+      return {
+        ...state,
+        showEffortSelector: true,
+        showThemeSelector: false,
+        showHelp: false,
+        showModelSelector: false,
+        showPermissionSelector: false,
+        showSessions: false,
+        showMcp: false,
+        showRewind: false,
+      };
+    case 'HIDE_EFFORT_SELECTOR':
+      return { ...state, showEffortSelector: false };
+    case 'SHOW_THEME_SELECTOR':
+      return {
+        ...state,
+        showThemeSelector: true,
+        showEffortSelector: false,
+        showHelp: false,
+        showModelSelector: false,
+        showPermissionSelector: false,
+        showSessions: false,
+        showMcp: false,
+        showRewind: false,
+      };
+    case 'HIDE_THEME_SELECTOR':
+      return { ...state, showThemeSelector: false };
     case 'SHOW_SESSIONS':
       return {
         ...state,
         showSessions: true,
         showHelp: false,
         showModelSelector: false,
+        showPermissionSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
         showMcp: false,
         showRewind: false,
       };
@@ -56,6 +107,9 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         showMcp: true,
         showHelp: false,
         showModelSelector: false,
+        showPermissionSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
         showSessions: false,
         showRewind: false,
       };
@@ -67,6 +121,9 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
         showRewind: true,
         showHelp: false,
         showModelSelector: false,
+        showPermissionSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
         showSessions: false,
         showMcp: false,
       };
@@ -116,6 +173,9 @@ export function uiReducer(state: TuiState, action: Action): TuiState | null {
       if (state.showHelp) return { ...state, showHelp: false };
       if (state.showSessions) return { ...state, showSessions: false };
       if (state.showModelSelector) return { ...state, showModelSelector: false };
+      if (state.showPermissionSelector) return { ...state, showPermissionSelector: false };
+      if (state.showEffortSelector) return { ...state, showEffortSelector: false };
+      if (state.showThemeSelector) return { ...state, showThemeSelector: false };
       if (state.showMcp) return { ...state, showMcp: false };
       if (state.showRewind) return { ...state, showRewind: false, checkpoints: [] };
       return null;

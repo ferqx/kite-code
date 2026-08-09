@@ -61,18 +61,25 @@ export function formatHeaderWorkspace(workspace: string, homeDirectory = homedir
 export interface HeaderProps {
   modelName: string;
   thinkingMode?: string | null;
+  reasoningEnabled?: boolean;
   workspace: string;
   columns?: number;
 }
 
-export default function Header({ modelName, thinkingMode, workspace, columns }: HeaderProps) {
+export default function Header({
+  modelName,
+  thinkingMode,
+  reasoningEnabled,
+  workspace,
+  columns,
+}: HeaderProps) {
   const t = useTheme();
   const terminalWidth = columns ?? process.stdout.columns ?? 80;
   const width = Math.max(MIN_HEADER_WIDTH, Math.min(MAX_HEADER_WIDTH, terminalWidth));
   const innerWidth = Math.max(1, width - 2 - HEADER_PADDING_X * 2);
-  const showEffort = width >= EFFORT_MIN_WIDTH && !!thinkingMode;
+  const showEffort = width >= EFFORT_MIN_WIDTH && reasoningEnabled !== false && !!thinkingMode;
   const valueWidth = Math.max(1, innerWidth - LABEL_WIDTH);
-  const modelSummary = showEffort ? `${modelName} · ${thinkingMode}` : modelName;
+  const modelSummary = showEffort ? `${modelName} ${thinkingMode}` : modelName;
   const workspaceSummary = formatHeaderWorkspace(workspace);
 
   return (

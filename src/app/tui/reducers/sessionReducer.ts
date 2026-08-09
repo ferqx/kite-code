@@ -65,10 +65,14 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
+        compactionProgress: undefined,
         loadingSessionId: null,
         sessionServiceUnavailable: false,
         showHelp: false,
         showModelSelector: false,
+        showPermissionSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
         showSessions: false,
         showMcp: false,
         currentRunReasonId: undefined,
@@ -108,6 +112,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
                 modelProvider: action.modelProvider || s.status.modelProvider,
                 modelName: action.modelName || s.status.modelName,
                 thinkingMode: action.thinkingLevel || s.status.thinkingMode,
+                reasoningEnabled: action.reasoningEnabled ?? s.status.reasoningEnabled,
                 contextSnapshot: undefined,
               },
             }
@@ -128,6 +133,9 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         showHelp: false,
         showSessions: false,
         showModelSelector: false,
+        showPermissionSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
         showMcp: false,
         showRewind: false,
         checkpoints: [],
@@ -155,6 +163,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
           modelName: action.modelName || target?.status.modelName || state.status.modelName,
           thinkingMode:
             action.thinkingLevel || target?.status.thinkingMode || state.status.thinkingMode,
+          reasoningEnabled:
+            action.reasoningEnabled ??
+            target?.status.reasoningEnabled ??
+            state.status.reasoningEnabled,
           contextSnapshot: undefined,
         },
       };
@@ -199,10 +211,14 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         ctrlCPressed: false,
         exitRequested: false,
         sessionError: false,
+        compactionProgress: undefined,
         loadingSessionId: null,
         sessionServiceUnavailable: false,
         showHelp: false,
         showModelSelector: false,
+        showPermissionSelector: false,
+        showEffortSelector: false,
+        showThemeSelector: false,
         showSessions: false,
         showMcp: false,
         showRewind: false,
@@ -256,6 +272,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
           ...state.status,
           modelName: action.modelName,
           modelProvider: action.provider,
+          reasoningEnabled: action.reasoningEnabled ?? state.status.reasoningEnabled,
           contextSnapshot: undefined,
         },
       };

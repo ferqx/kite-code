@@ -163,6 +163,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (pending && pending.compactionId !== event.compactionId) return state;
       const reason = normalizeContextCompactionReason(event.reason);
       if (!reason) return state;
+      const consumesRecovery =
+        reason === 'auto' &&
+        state.context.lastFailure?.reason === 'auto' &&
+        state.context.lastFailure.retryable &&
+        state.context.lastFailure.requestedAtTurnId !== event.requestedAtTurnId;
       return {
         ...state,
         context: {
@@ -177,6 +182,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...(event.customInstructions ? { customInstructions: event.customInstructions } : {}),
           },
           lastFailure: undefined,
+          autoGuard: consumesRecovery
+            ? { ...state.context.autoGuard, recoveryAttempted: true }
+            : state.context.autoGuard,
         },
       };
     }

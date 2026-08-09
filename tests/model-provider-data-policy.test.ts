@@ -289,7 +289,13 @@ describe('model Provider data admission', () => {
           throw new ProviderDataAdmissionError(deny());
         },
       }),
-    ).rejects.toThrow('mandatory_policy_unavailable');
+    ).resolves.toEqual([
+      expect.objectContaining({
+        type: 'context.compaction_failed',
+        errorKind: 'provider_admission_denied',
+        retryable: false,
+      }),
+    ]);
 
     const subagentModel = createMockModel([]);
     const descendantTransitions: string[] = [];

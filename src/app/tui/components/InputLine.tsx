@@ -44,8 +44,6 @@ interface InputLineProps {
   planMode?: boolean;
   /** Plan name — 方案名称，显示在顶部边框中 */
   planName?: string;
-  /** Active selections for slash suggestion kind → value mapping. */
-  activeSelections?: import('../hooks/useSlashSuggestions').ActiveSelections;
 }
 
 function commonPrefix(strings: string[]): string {
@@ -94,7 +92,6 @@ export default function InputLine({
   onValueChange,
   planMode = false,
   planName,
-  activeSelections,
 }: InputLineProps) {
   const t = useTheme();
   const { columns } = useWindowSize();
@@ -123,7 +120,7 @@ export default function InputLine({
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const fileSearch = useFileSearch(value, workspace);
-  const slashSuggestions = useSlashSuggestions(value, undefined, activeSelections);
+  const slashSuggestions = useSlashSuggestions(value);
   // Refs for useInput to avoid Ink 7 stale closure (read latest values)
   const slashSuggestionsRef = useRef(slashSuggestions);
   slashSuggestionsRef.current = slashSuggestions;
@@ -390,20 +387,12 @@ export default function InputLine({
           const names = enabledItems.map((item) => item.command);
           const prefix = commonPrefix(names);
           if (prefix.length > ss.result.partial.length) {
-            commitValue(
-              ss.result.kind === 'effort'
-                ? `/effort ${prefix}`
-                : ss.result.kind === 'theme'
-                  ? `/theme ${prefix}`
-                  : ss.result.kind === 'permissions'
-                    ? `/permissions ${prefix}`
-                    : `/${prefix}`,
-            );
+            commitValue(`/${prefix}`);
           } else {
             // No common prefix extension — commit the selected item directly
             const selected = ss.result.items[ss.selectedIndex];
             if (selected && !selected.disabled) {
-              commitValue(ss.replaceCommand(selected, ss.result.kind));
+              commitValue(ss.replaceCommand(selected));
             }
           }
           return;
@@ -414,7 +403,7 @@ export default function InputLine({
           // slashActiveRef in handleSubmit.
           const selected = ss.result.items[ss.selectedIndex];
           if (selected && !selected.disabled) {
-            const fullCmd = ss.replaceCommand(selected, ss.result.kind);
+            const fullCmd = ss.replaceCommand(selected);
             onValueChange?.(''); // clear ref BEFORE onSubmit so remount sees empty value
             commitValue(fullCmd);
             setHistory((prev) => [...prev, fullCmd]);

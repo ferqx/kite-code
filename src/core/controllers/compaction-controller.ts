@@ -1,8 +1,14 @@
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { CompactionReporter } from '@/core/model/compaction-metrics';
-import { ContextCompactionValidationError } from '@/core/model/compaction-summary';
+import {
+  ContextCompactionValidationError,
+  expectedCompactionSourceDigest,
+  normalizeCompactionSummary,
+} from '@/core/model/compaction-summary';
+import { findSafeCompactionBoundary } from '@/core/model/compaction-v2';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import {
+  buildContextProjection,
   type ContextProjectionEnvironment,
   digestProjectionEnvironment,
 } from '@/core/model/context-projection';
@@ -101,15 +107,33 @@ export async function executeContextCompaction(input: {
       ? digestProjectionEnvironment(completedEnvironment)
       : undefined;
     if (completedEnvironmentDigest !== leasedEnvironmentDigest) {
-      // Environment freshness is part of the effect lease. A stale result must
-      // not create a failure event, checkpoint, or correctness block.
-      return [];
+      // Environment freshness is part of the effect lease. The generated
+      // checkpoint must not be accepted, but the durable request still needs a
+      // terminal fact so an idle manual command cannot remain pending forever.
+      return failure(
+        pending,
+        sourceRevision,
+        'stale_context',
+        'The context projection changed while compaction was running.',
+        true,
+        input.reporter,
+        elapsed(),
+      );
     }
     if (
       checkpoint.compactionId !== pending.compactionId ||
-      checkpoint.sourceRevision !== sourceRevision
+      checkpoint.sourceRevision !== sourceRevision ||
+      checkpoint.reason !== pending.reason
     ) {
-      return [];
+      return failure(
+        pending,
+        sourceRevision,
+        'invalid_candidate',
+        'The compaction checkpoint does not match its durable request.',
+        false,
+        input.reporter,
+        elapsed(),
+      );
     }
     const coveredMessage = input.state.transcript.messages.find(
       (message) => message.messageId === checkpoint.coveredThroughMessageId,
@@ -125,12 +149,57 @@ export async function executeContextCompaction(input: {
         elapsed(),
       );
     }
+    const currentTurnHasMessages = input.state.transcript.messages.some(
+      (message) => message.turnId === input.state.turn.turnId,
+    );
+    const boundary = findSafeCompactionBoundary(input.state, {
+      protectLatestTurn:
+        pending.reason === 'auto' ||
+        (input.state.turn.status === 'active' && currentTurnHasMessages),
+    });
+    const base = input.state.context.activeCheckpoint;
+    const baseIndex = base
+      ? input.state.transcript.messages.findIndex(
+          (message) => message.messageId === base.coveredThroughMessageId,
+        )
+      : -1;
+    const sourceMessages = base
+      ? boundary.coveredMessages.filter(
+          (message) =>
+            input.state.transcript.messages.findIndex(
+              (candidate) => candidate.messageId === message.messageId,
+            ) > baseIndex,
+        )
+      : boundary.coveredMessages;
+    if (
+      !boundary.eligible ||
+      checkpoint.coveredThroughMessageId !== boundary.lastMessageId ||
+      checkpoint.coveredThroughTurnId !== boundary.coveredThroughTurnId ||
+      (base ? checkpoint.baseCheckpointId !== base.compactionId : checkpoint.baseCheckpointId) ||
+      sourceMessages.length === 0 ||
+      checkpoint.sourceDigest !== expectedCompactionSourceDigest(base?.sourceDigest, sourceMessages)
+    ) {
+      return failure(
+        pending,
+        sourceRevision,
+        'invalid_candidate',
+        'The compaction checkpoint does not match the safe source boundary.',
+        false,
+        input.reporter,
+        elapsed(),
+      );
+    }
     if (
       checkpoint.version !== 1 ||
       typeof checkpoint.summary !== 'string' ||
       checkpoint.summary.trim().length === 0 ||
+      checkpoint.summary !== normalizeCompactionSummary(checkpoint.summary) ||
       !checkpoint.sourceDigest ||
-      checkpoint.inputTokensAfter >= checkpoint.inputTokensBefore
+      !Number.isFinite(checkpoint.inputTokensBefore) ||
+      !Number.isFinite(checkpoint.inputTokensAfter) ||
+      checkpoint.inputTokensBefore <= 0 ||
+      checkpoint.inputTokensAfter < 0 ||
+      !Number.isFinite(Date.parse(checkpoint.createdAt))
     ) {
       return failure(
         pending,
@@ -142,7 +211,33 @@ export async function executeContextCompaction(input: {
         elapsed(),
       );
     }
-    const reductionFailed = checkpoint.inputTokensBefore - checkpoint.inputTokensAfter < 1_024;
+    const projectionInput = {
+      role: 'agent' as const,
+      state: input.state,
+      serializedTools: leasedEnvironment?.serializedTools,
+      activeSkillInstructions: leasedEnvironment?.activeSkillInstructions,
+      workflowSkills: leasedEnvironment?.workflowSkills,
+    };
+    const expectedBefore = buildContextProjection(projectionInput).estimate.totalInputTokens;
+    const expectedAfter = buildContextProjection({
+      ...projectionInput,
+      candidateCheckpoint: checkpoint,
+    }).estimate.totalInputTokens;
+    if (
+      checkpoint.inputTokensBefore !== expectedBefore ||
+      checkpoint.inputTokensAfter !== expectedAfter
+    ) {
+      return failure(
+        pending,
+        sourceRevision,
+        'invalid_candidate',
+        'The compaction checkpoint token estimates do not match the source projection.',
+        false,
+        input.reporter,
+        elapsed(),
+      );
+    }
+    const reductionFailed = expectedBefore - expectedAfter < 1_024;
     if (reductionFailed) {
       return failure(
         pending,
@@ -176,14 +271,25 @@ export async function executeContextCompaction(input: {
       },
     ];
   } catch (error) {
-    if (error instanceof ProviderDataAdmissionError) throw error;
+    if (error instanceof ProviderDataAdmissionError) {
+      return failure(
+        pending,
+        sourceRevision,
+        'provider_admission_denied',
+        'Provider data admission denied the compaction request.',
+        false,
+        input.reporter,
+        elapsed(),
+      );
+    }
     if (error instanceof ContextCompactionValidationError) {
       return failure(
         pending,
         sourceRevision,
         error.kind,
         error.message,
-        error.kind === 'insufficient_reduction',
+        error.kind === 'stale_context' ||
+          (error.kind === 'insufficient_reduction' && pending.reason === 'auto'),
         input.reporter,
         elapsed(),
       );

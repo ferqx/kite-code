@@ -232,6 +232,51 @@ describe('automatic context compaction', () => {
     ).toMatchObject({ action: 'request_compaction', reason: 'auto' });
   });
 
+  test('consumes the single new-turn recovery and does not retry forever', () => {
+    let state = historicalState();
+    state.context.lastFailure = {
+      compactionId: 'first-failure',
+      sourceRevision: 1,
+      errorKind: 'summary_model_failed',
+      message: 'provider failed',
+      retryable: true,
+      reason: 'auto',
+      requestedAtTurnId: 'previous-turn',
+    };
+    const retry = decideAutomaticContextCompaction({
+      state,
+      preflight: preflight('compact_due'),
+      mode: 'live',
+    });
+    expect(retry).toMatchObject({ action: 'request_compaction' });
+    if (retry.action !== 'request_compaction') throw new Error('expected retry');
+    state = reduceRuntimeState(state, {
+      type: 'context.compaction_requested',
+      compactionId: retry.compactionId,
+      reason: 'auto',
+      requestedAtRevision: state.revision,
+      requestedAtTurnId: state.turn.turnId,
+      force: false,
+      estimate: estimate(9_000),
+    });
+    state = reduceRuntimeState(state, {
+      type: 'context.compaction_failed',
+      compactionId: retry.compactionId,
+      sourceRevision: state.revision,
+      errorKind: 'summary_model_failed',
+      message: 'provider failed again',
+      retryable: true,
+    });
+    state = reduceRuntimeState(state, { type: 'turn.started', turnId: 'later-turn' });
+    expect(
+      decideAutomaticContextCompaction({
+        state,
+        preflight: preflight('compact_due'),
+        mode: 'live',
+      }),
+    ).toEqual({ action: 'invoke' });
+  });
+
   test('does not infer compaction or hard block from a provider 400-style failure', async () => {
     const state = historicalState();
     const mock = createMockModel([

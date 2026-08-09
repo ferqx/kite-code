@@ -72,7 +72,11 @@ describe('TUI PTY native sandbox smoke', () => {
     async () => {
       expect(detectSandboxBackend()).not.toBe('none');
 
-      await submitCommand(tui, '/permissions full');
+      await submitCommand(tui, '/permissions');
+      await waitForText(() => tui.outputSinceLastAction(), '选择权限模式', 10_000);
+      tui.write('\x1b[B\x1b[B');
+      await waitForText(() => tui.outputSinceLastAction(), '❯ 完全权限', 10_000);
+      tui.write('\r');
       await waitForText(() => tui.outputSinceLastAction(), '完全权限', 10_000);
       const executionFrames = tui.markScreen();
       await submitUserMessage(tui, server, 'Full access test', { timeout: 15_000 });
