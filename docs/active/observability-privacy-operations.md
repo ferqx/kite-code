@@ -29,6 +29,12 @@ Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低�
 双 Ctrl+C、SIGINT、SIGTERM 与 fatal ErrorBoundary 共用幂等 exit coordinator，并在退出前执行两个各
 不超过 250ms 的 flush/shutdown 阶段。当前开发 composition 没有 transport，因此链路实际为 no-op。
 
+`ReclaimShadowReporter` 是独立的、可选注入的严格 DTO 接口，不得复用 compaction local-debug reporter 或
+通用 observability exporter。默认 collector 只在进程内保留固定上限样本并支持 clear；记录字段仅含固定
+policy/version/mode、估算 token/count/saving、拒绝原因计数和 duration。它不得接收正文、path/pattern/args、
+call/message/frame ID、任何 digest、plan、selected entries 或 stub，不写 event、snapshot、session trace 或
+磁盘。序列化或 reporter 异常不得改变模型调用结果。
+
 CLI `--telemetry-status` 与 TUI `/telemetry` 只显示脱敏的本地启用状态，不显示 endpoint、secret、
 Workspace path 或正文。普通开发入口固定显示 `artifact_disabled`。
 

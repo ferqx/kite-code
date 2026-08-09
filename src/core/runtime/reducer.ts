@@ -120,12 +120,13 @@ function toolResultMeta(
     contentDigest: supplied.contentDigest ?? supplied.modelContentDigest ?? fallbackModelDigest,
     modelContentDigest:
       supplied.modelContentDigest ?? supplied.contentDigest ?? fallbackModelDigest,
-    rawResultDigest:
-      supplied.rawResultDigest ??
-      (supplied.truncated ? undefined : (supplied.contentDigest ?? fallbackModelDigest)),
+    ...(supplied.rawResultDigest ? { rawResultDigest: supplied.rawResultDigest } : {}),
+    // A digest without an explicit producer provenance is legacy data. In
+    // particular, an old contentDigest must never be promoted to a raw digest.
     digestScope:
-      supplied.digestScope ??
-      (supplied.truncated ? 'projected' : supplied.contentDigest ? 'raw' : 'legacy_unknown'),
+      supplied.digestScope === 'raw' || supplied.digestScope === 'projected'
+        ? supplied.digestScope
+        : 'legacy_unknown',
   };
 }
 

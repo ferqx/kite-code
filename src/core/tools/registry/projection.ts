@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
+import { TOOL_RESULT_BUDGET_POLICY_V1 } from '@/core/tools/result-budget';
 
 export function projectionDigest(stdout: string, stderr: string, exitCode: number): string {
   return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
+}
+
+/** Digest the exact string projected into the model-visible ToolMessage. */
+export function projectedModelContentDigest(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 export function truncateProjectedLines(
@@ -22,7 +28,10 @@ export function truncateProjectedLines(
   };
 }
 
-export function truncateProjectedOutput(output: string, maxLen = 4000): string {
+export function truncateProjectedOutput(
+  output: string,
+  maxLen: number = TOOL_RESULT_BUDGET_POLICY_V1.shellSearchStreamMaxChars,
+): string {
   if (output.length <= maxLen) return output;
   const keep = Math.floor(maxLen / 2);
   const head = output.slice(0, keep);
@@ -44,7 +53,7 @@ export function truncateProjectedOutput(output: string, maxLen = 4000): string {
 export function truncateProjectedStreams(
   stdout: string,
   stderr: string,
-  maxLen = 4000,
+  maxLen: number = TOOL_RESULT_BUDGET_POLICY_V1.shellSearchStreamMaxChars,
 ): {
   stdout: string;
   stderr: string;

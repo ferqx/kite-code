@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { buildMcpInventory, isMcpProviderError } from '@/core/mcp';
+import { TOOL_RESULT_BUDGET_POLICY_V1 } from '@/core/tools/result-budget';
 import {
   LIST_MCP_RESOURCES_CONTRACT,
   LIST_MCP_TOOLS_CONTRACT,
@@ -7,8 +8,6 @@ import {
 } from '@/core/tools/tool-contracts';
 import { projectionDigest } from '../projection';
 import { defineExecutableTool } from '../spec';
-
-const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;
 
 export const listMcpResourcesInputSchema = z.object({
   server: z.string().min(1).optional().describe('Optional exact MCP server name'),
@@ -173,14 +172,14 @@ export const readMcpResourceSpec = defineExecutableTool({
         input.uri,
         context.signal,
       );
-      if (content.length <= MAX_MODEL_MCP_RESULT_CHARS) {
+      if (content.length <= TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars) {
         return { ok: true, stdout: content, stderr: '', rawContent: content, truncated: false };
       }
       return {
         ok: true,
         stdout: JSON.stringify({
           status: 'partial',
-          content: content.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+          content: content.slice(0, TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars),
           truncated: true,
           original_characters: content.length,
           message: 'The MCP resource exceeded the model-facing output limit.',

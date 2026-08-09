@@ -23,8 +23,16 @@ import { resolveContextCompactionRollout } from '@/core/model/context-compaction
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
+  digestProjectionEnvironment,
   serializeToolDescriptors,
 } from '@/core/model/context-projection';
+import {
+  digestRawContextProjection,
+  planContextReclaim,
+  RECLAIM_POLICY_V1,
+  resolveContextReclaimModeV1,
+} from '@/core/model/context-reclaim';
+import type { ReclaimShadowReporter } from '@/core/model/context-reclaim-shadow';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
@@ -247,7 +255,19 @@ export function resolveContextProjectionEnvironment(input: {
         adapter: input.model.capabilityMetadata,
       }),
       estimator: 'countTokens:v1',
-      summaryPolicy: input.config.compaction ?? {},
+      summaryPolicy: {
+        ...(input.config.compaction ?? {}),
+        contextReclaimV1: {
+          featureEnabled: flags.contextReclaimV1,
+          effectiveMode: resolveContextReclaimModeV1({
+            featureEnabled: flags.contextReclaimV1,
+            configuredMode: input.config.compaction?.reclaimMode,
+          }),
+          policyId: RECLAIM_POLICY_V1.policyId,
+          policyVersion: RECLAIM_POLICY_V1.version,
+          estimatorId: RECLAIM_POLICY_V1.estimatorId,
+        },
+      },
     },
   };
 }
@@ -278,6 +298,8 @@ export async function invokeRuntimeModel(params: {
   /** Persists bindings before the model can emit a dynamic MCP tool call. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
   compactionReporter?: CompactionReporter;
+  /** Optional process-local shadow sink. Without it reclaim planning is skipped. */
+  reclaimShadowReporter?: ReclaimShadowReporter;
   /** Production composition must supply the immutable route-policy gate. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
@@ -536,6 +558,57 @@ export async function invokeRuntimeModel(params: {
       status: preflight.status,
       estimate: preflight.estimate,
     };
+    const reclaimMode = resolveContextReclaimModeV1({
+      featureEnabled: flags.contextReclaimV1,
+      configuredMode: params.config.compaction?.reclaimMode,
+    });
+    if (
+      reclaimMode === 'shadow' &&
+      params.reclaimShadowReporter &&
+      preflight.status !== 'unknown' &&
+      preflight.status !== 'normal'
+    ) {
+      const startedAt = Date.now();
+      try {
+        const environmentDigest = digestProjectionEnvironment(projectionEnvironment);
+        const checkpointBoundary = state.context.activeCheckpoint?.coveredThroughMessageId;
+        const rawProjectionDigest = digestRawContextProjection({
+          providerMessages: projection.providerMessages,
+          estimate: projection.estimate,
+          environmentDigest,
+          pressure: {
+            status: preflight.status,
+            ...(preflight.utilization != null ? { utilization: preflight.utilization } : {}),
+            ...(preflight.usableInputTokens != null
+              ? { usableInputTokens: preflight.usableInputTokens }
+              : {}),
+          },
+          ...(checkpointBoundary ? { checkpointBoundary } : {}),
+        });
+        const reclaimPlan = planContextReclaim({
+          frames: projection.frames,
+          rawProjectionDigest,
+          environmentDigest,
+          pressure: preflight.status,
+          ...(checkpointBoundary ? { checkpointBoundary } : {}),
+          ...(state.turn.status === 'active' ? { activeTurnId: state.turn.turnId } : {}),
+        });
+        params.reclaimShadowReporter.record({
+          policyId: RECLAIM_POLICY_V1.policyId,
+          policyVersion: RECLAIM_POLICY_V1.version,
+          mode: 'shadow',
+          rawInputTokens: preflight.estimate.totalInputTokens,
+          candidateBlockCount: reclaimPlan.selectedBlockCount,
+          candidateCallCount: reclaimPlan.selected.length,
+          estimatedSavedChars: reclaimPlan.estimatedSavedChars,
+          estimatedSavedTokens: reclaimPlan.estimatedSavedTokens,
+          rejectionCounts: reclaimPlan.rejectionCounts,
+          durationMs: Date.now() - startedAt,
+        });
+      } catch {
+        // Shadow evidence must never change scheduling, payload, or Provider dispatch.
+      }
+    }
     params.compactionReporter?.recordContextFollowUp?.(
       state.turn.turnIndex,
       preflight.estimate.totalInputTokens,

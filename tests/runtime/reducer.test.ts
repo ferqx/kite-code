@@ -1777,6 +1777,11 @@ describe('PR 3 — structured transcript and tool result metadata', () => {
       resourceRevision: 'sha256:resource-1',
     });
     expect(next.tools.calls['read-1']?.result?.resultMeta?.contentDigest).toHaveLength(64);
+    expect(next.tools.calls['read-1']?.result?.resultMeta).toMatchObject({
+      digestScope: 'legacy_unknown',
+      modelContentDigest: expect.any(String),
+    });
+    expect(next.tools.calls['read-1']?.result?.resultMeta?.rawResultDigest).toBeUndefined();
     expect(next.transcript.messages.at(-1)).toMatchObject({
       kind: 'tool',
       messageId: 'tool-read-1',

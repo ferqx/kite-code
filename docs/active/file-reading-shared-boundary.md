@@ -133,7 +133,7 @@ pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 p
 
 ### 工具输出截断（`src/core/tools/registry/projection.ts`）
 
-Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内存 head+tail capture 持续 drain stdout/stderr，防止最终投影前出现无界完整输出副本；capture 超限会写入明确 omission marker。其后 `truncateProjectedOutput` 对单路超过 4000 字符的模型输出继续做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。失败时两路输出都保留，Runner 只消费该模型投影，不再自带第二份模型截断实现。
+Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内存 head+tail capture 持续 drain stdout/stderr，防止最终投影前出现无界完整输出副本；capture 超限会写入明确 omission marker。其后 `truncateProjectedOutput` 对单路超过 4000 字符的模型输出继续做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。失败时两路输出都保留，Runner 只消费该模型投影，不再自带第二份模型截断实现。4000 字符与 MCP 128 KiB 现值统一登记在 `ToolResultBudgetPolicyV1`；该登记不改变任何截断字节。`read_file`、`search_content`、`search_files` 在模型投影前产生可信 raw/model digest provenance；缺少 pre-projection 证明的恢复数据必须标记 `legacy_unknown`，不能升级为 raw。
 
 ### rg exit code 1 ≠ error（`tool-contracts.ts`、`system-prompt.txt`）
 

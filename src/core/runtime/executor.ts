@@ -36,6 +36,7 @@ import {
 import { preflightModelContext } from '@/core/model/context-budget';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import { buildContextProjection } from '@/core/model/context-projection';
+import type { ReclaimShadowReporter } from '@/core/model/context-reclaim-shadow';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -75,6 +76,8 @@ export interface RuntimeExecutorDependencies {
   contextCompactor?: ContextCompactor;
   /** Owned and flushed by the application composition root. */
   compactionReporter?: CompactionReporter;
+  /** Independent, bounded in-memory L2 shadow reporter. */
+  reclaimShadowReporter?: ReclaimShadowReporter;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   /** 用于记录文件写入前原像（ADR-0042 §4），缺省时工具写入不留原像。 */
   runtimeStore?: RuntimeStore;
@@ -294,6 +297,7 @@ export function createRuntimeEffectExecutor(
         signal: dependencies.signal,
         emitRuntimeEvent: emit,
         compactionReporter: dependencies.compactionReporter,
+        reclaimShadowReporter: dependencies.reclaimShadowReporter,
         providerDataAdmission: dependencies.providerDataAdmission,
         resourceAdmission: effect.resourceEstimate,
       });

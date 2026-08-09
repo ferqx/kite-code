@@ -5,7 +5,11 @@
 import { z } from 'zod';
 import { searchContent } from '@/core/tools/search';
 import { SEARCH_CONTENT_CONTRACT } from '@/core/tools/tool-contracts';
-import { projectionDigest, truncateProjectedStreams } from '../projection';
+import {
+  projectedModelContentDigest,
+  projectionDigest,
+  truncateProjectedStreams,
+} from '../projection';
 import { defineExecutableTool } from '../spec';
 
 export const searchContentInputSchema = z.object({
@@ -46,15 +50,18 @@ export const searchContentSpec = defineExecutableTool({
   projectResult: (output, context) => {
     const input = context.invocationInput;
     const streams = truncateProjectedStreams(output.stdout, output.stderr);
+    const modelContent = output.ok ? streams.stdout : streams.stderr || streams.stdout;
     return {
       ok: output.ok,
-      modelContent: output.ok ? streams.stdout : streams.stderr || streams.stdout,
+      modelContent,
       streams,
       resultMeta: {
         path: input.path ?? '.',
         matchCount: output.stdout.split('\n').filter(Boolean).length,
         truncated: streams.truncated,
         rawResultDigest: projectionDigest(output.stdout, output.stderr, output.exitCode),
+        modelContentDigest: projectedModelContentDigest(modelContent),
+        digestScope: streams.truncated ? 'projected' : 'raw',
       },
       display: { verb: 'Search' },
     };

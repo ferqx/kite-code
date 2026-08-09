@@ -9,6 +9,7 @@ import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harnes
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
 import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints';
+import { TOOL_RESULT_BUDGET_POLICY_V1 } from '../src/core/tools/result-budget';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
 
 // ── Helpers ──
@@ -179,6 +180,21 @@ describe('runApprovedTool — read_mcp_resource', () => {
     });
   });
 
+  it('preserves MCP resource content at the exact 128 KiB model boundary', async () => {
+    const content = 'x'.repeat(TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars);
+    const manager = mockMcpManager(async () => content);
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: makeReadMcpResourceRequest(),
+      mcpManager: manager,
+      approvedGrant: 'approve_once',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.stdout).toBe(content);
+    expect(result.resultMeta).toMatchObject({ truncated: false });
+  });
+
   it('returns error when mcpManager is not available', async () => {
     const request = makeReadMcpResourceRequest();
 
@@ -227,7 +243,8 @@ describe('runApprovedTool — read_mcp_resource', () => {
   });
 
   it('bounds oversized resource content without silently truncating it', async () => {
-    const manager = mockMcpManager(async () => 'x'.repeat(128 * 1024 + 20));
+    const originalCharacters = TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars + 1;
+    const manager = mockMcpManager(async () => 'x'.repeat(originalCharacters));
     const result = await runApprovedTool({
       workspace: '/ws',
       request: makeReadMcpResourceRequest(),
@@ -238,7 +255,8 @@ describe('runApprovedTool — read_mcp_resource', () => {
 
     expect(output.status).toBe('partial');
     expect(output.truncated).toBe(true);
-    expect(output.original_characters).toBe(128 * 1024 + 20);
+    expect(output.original_characters).toBe(originalCharacters);
+    expect(output.content).toBe('x'.repeat(TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars));
     expect(result.resultMeta).toMatchObject({
       truncated: true,
       rawResultDigest: expect.any(String),
@@ -299,6 +317,53 @@ describe('runApprovedTool — bound MCP policy', () => {
     expect(result.ok, result.stderr).toBe(true);
     expect(result.stdout).toContain('authenticated read');
     expect(called).toBe(true);
+  });
+
+  it('preserves the exact serialized boundary and emits the existing partial marker at +1', async () => {
+    const runTextResult = async (textLength: number) => {
+      const manager = {
+        callCapability: async () => ({
+          content: [{ type: 'text' as const, text: 'x'.repeat(textLength) }],
+        }),
+        findCapability: () => undefined,
+      } as unknown as McpRuntimeProvider;
+      return runApprovedTool({
+        workspace: '/ws',
+        request: {
+          source: 'mcp',
+          id: `call-boundary-${textLength}`,
+          name: 'mcp__boundary__read',
+          args: {},
+          reason: 'Exercise MCP model-result boundary',
+          protectedCommand: 'mcp__boundary__read',
+        } as PendingToolRequest,
+        mcpManager: manager,
+        mcpInvocation: { capabilityId: 'mcp:boundary/read', expectedRevision: 'revision' },
+        mcpPolicy: {
+          effects: { filesystem: 'none', network: 'read', externalState: 'read' },
+          minimumApproval: 'none',
+        },
+      });
+    };
+
+    const empty = await runTextResult(0);
+    const exactTextLength =
+      TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars - empty.stdout.length;
+    const exact = await runTextResult(exactTextLength);
+    expect(exact.stdout).toHaveLength(TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars);
+    expect(exact.resultMeta).toMatchObject({ truncated: false });
+
+    const oversized = await runTextResult(exactTextLength + 1);
+    const partial = JSON.parse(oversized.stdout);
+    expect(partial).toMatchObject({
+      status: 'partial',
+      truncated: true,
+      original_characters: TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars + 1,
+    });
+    expect(partial.content[0].text).toHaveLength(
+      TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars,
+    );
+    expect(oversized.resultMeta).toMatchObject({ truncated: true });
   });
 });
 
@@ -544,6 +609,8 @@ describe('runApprovedTool 鈥?search_content', () => {
       matchCount: 1,
       truncated: false,
       rawResultDigest: expect.any(String),
+      modelContentDigest: expect.any(String),
+      digestScope: 'raw',
     });
   });
 });

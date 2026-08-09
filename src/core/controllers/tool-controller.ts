@@ -130,14 +130,16 @@ function computeToolResultDigest(input: {
   exitCode: number;
   status?: string;
   rawResultDigest?: string;
+  modelContentDigest?: string;
+  digestScope?: 'raw' | 'projected' | 'legacy_unknown';
   truncated?: boolean;
 }): {
   contentDigest: string;
   rawResultDigest?: string;
   modelContentDigest: string;
-  digestScope: 'raw' | 'projected';
+  digestScope: 'raw' | 'projected' | 'legacy_unknown';
 } {
-  const modelContentDigest = createHash('sha256')
+  const computedModelContentDigest = createHash('sha256')
     .update(
       JSON.stringify({
         stdout: input.stdout,
@@ -147,9 +149,12 @@ function computeToolResultDigest(input: {
       }),
     )
     .digest('hex');
+  const modelContentDigest = input.modelContentDigest ?? computedModelContentDigest;
   const rawResultDigest =
-    input.rawResultDigest ?? (input.truncated ? undefined : modelContentDigest);
-  const digestScope = input.truncated ? ('projected' as const) : ('raw' as const);
+    input.rawResultDigest ??
+    (input.digestScope === 'legacy_unknown' || input.truncated ? undefined : modelContentDigest);
+  const digestScope =
+    input.digestScope ?? (input.truncated ? ('projected' as const) : ('raw' as const));
   return {
     contentDigest: modelContentDigest,
     ...(rawResultDigest ? { rawResultDigest } : {}),
@@ -1442,6 +1447,8 @@ export async function executeRuntimeTools(params: {
                 exitCode: result.exitCode ?? 0,
                 status: result.status,
                 rawResultDigest: result.resultMeta?.rawResultDigest,
+                modelContentDigest: result.resultMeta?.modelContentDigest,
+                digestScope: result.resultMeta?.digestScope,
                 truncated: result.resultMeta?.truncated,
               }),
             },
@@ -1808,6 +1815,8 @@ export async function executeRuntimeTools(params: {
               exitCode: result.exitCode ?? 0,
               status: result.status,
               rawResultDigest: result.resultMeta?.rawResultDigest,
+              modelContentDigest: result.resultMeta?.modelContentDigest,
+              digestScope: result.resultMeta?.digestScope,
               truncated: result.resultMeta?.truncated,
             }),
           },

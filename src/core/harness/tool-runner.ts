@@ -58,6 +58,7 @@ import {
   evaluateRegisteredToolProtectedPaths,
 } from '@/core/tools/registry/dispatch';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
+import { TOOL_RESULT_BUDGET_POLICY_V1 } from '@/core/tools/result-budget';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type {
   AuthorizationOverride,
@@ -1102,11 +1103,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   };
 }
 
-const MAX_MODEL_MCP_RESULT_CHARS = 128 * 1024;
-
 function serializeMcpResultForModel(result: import('@/core/capabilities/result').CapabilityResult) {
   const serialized = JSON.stringify(result);
-  if (serialized.length <= MAX_MODEL_MCP_RESULT_CHARS) {
+  if (serialized.length <= TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars) {
     return { modelContent: serialized, truncated: false };
   }
   return {
@@ -1115,7 +1114,7 @@ function serializeMcpResultForModel(result: import('@/core/capabilities/result')
       content: [
         {
           type: 'text',
-          text: serialized.slice(0, MAX_MODEL_MCP_RESULT_CHARS),
+          text: serialized.slice(0, TOOL_RESULT_BUDGET_POLICY_V1.mcpModelResultMaxChars),
         },
       ],
       truncated: true,

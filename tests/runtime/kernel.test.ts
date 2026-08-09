@@ -24,6 +24,113 @@ import {
 } from '../../src/core/runtime/store';
 
 describe('AgentKernel durability', () => {
+  test('normalizes legacy tool digest provenance in call records and transcript messages', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-result-provenance-'));
+    const storePath = join(dir, 'runtime.db');
+    try {
+      const legacy = createInitialRuntimeState({
+        threadId: 'result-provenance',
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      legacy.tools.calls['read-legacy'] = {
+        toolCallId: 'read-legacy',
+        modelMessageId: 'assistant-legacy',
+        name: 'read_file',
+        args: { path: 'src/legacy.ts' },
+        status: 'succeeded',
+        createdAtTurnId: 'legacy-turn',
+        result: {
+          ok: true,
+          summary: 'legacy read',
+          resultMeta: { path: 'src/legacy.ts', contentDigest: 'a'.repeat(64) },
+        },
+      };
+      legacy.tools.calls['read-trusted'] = {
+        toolCallId: 'read-trusted',
+        modelMessageId: 'assistant-trusted',
+        name: 'read_file',
+        args: { path: 'src/trusted.ts' },
+        status: 'succeeded',
+        createdAtTurnId: 'trusted-turn',
+        result: {
+          ok: true,
+          summary: 'trusted read',
+          resultMeta: {
+            path: 'src/trusted.ts',
+            rawResultDigest: 'b'.repeat(64),
+            modelContentDigest: 'c'.repeat(64),
+            digestScope: 'raw',
+          },
+        },
+      };
+      legacy.transcript.messages = [
+        {
+          kind: 'tool',
+          messageId: 'tool-read-legacy',
+          turnId: 'legacy-turn',
+          ordinal: 0,
+          createdAt: '2026-08-09T00:00:00.000Z',
+          toolCallId: 'read-legacy',
+          name: 'read_file',
+          content: 'legacy output',
+          ok: true,
+          resultMeta: { path: 'src/legacy.ts', contentDigest: 'a'.repeat(64) },
+        },
+        {
+          kind: 'tool',
+          messageId: 'tool-read-trusted',
+          turnId: 'trusted-turn',
+          ordinal: 1,
+          createdAt: '2026-08-09T00:00:01.000Z',
+          toolCallId: 'read-trusted',
+          name: 'read_file',
+          content: 'trusted output',
+          ok: true,
+          resultMeta: {
+            path: 'src/trusted.ts',
+            rawResultDigest: 'b'.repeat(64),
+            modelContentDigest: 'c'.repeat(64),
+            digestScope: 'raw',
+          },
+        },
+      ];
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(legacy.session.threadId, legacy);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId: legacy.session.threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().tools.calls['read-legacy']?.result?.resultMeta?.digestScope).toBe(
+        'legacy_unknown',
+      );
+      expect(restored.getState().transcript.messages[0]).toMatchObject({
+        kind: 'tool',
+        resultMeta: { digestScope: 'legacy_unknown' },
+      });
+      expect(restored.getState().tools.calls['read-trusted']?.result?.resultMeta).toMatchObject({
+        rawResultDigest: 'b'.repeat(64),
+        modelContentDigest: 'c'.repeat(64),
+        digestScope: 'raw',
+      });
+      expect(restored.getState().transcript.messages[1]).toMatchObject({
+        kind: 'tool',
+        resultMeta: {
+          rawResultDigest: 'b'.repeat(64),
+          modelContentDigest: 'c'.repeat(64),
+          digestScope: 'raw',
+        },
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('replays the context compaction crash matrix from snapshot plus event tail', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-compaction-crash-'));
     const storePath = join(dir, 'runtime.db');

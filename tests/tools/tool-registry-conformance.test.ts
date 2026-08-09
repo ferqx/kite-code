@@ -36,9 +36,11 @@ import {
 } from '@/core/tools/registry/builtins/write-file';
 import type { writePlanInputSchema } from '@/core/tools/registry/builtins/write-plan';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
+import { truncateProjectedOutput } from '@/core/tools/registry/projection';
 import { createToolRegistry } from '@/core/tools/registry/registry';
 import type { ToolContext } from '@/core/tools/registry/spec';
 import { defineExecutableTool } from '@/core/tools/registry/spec';
+import { TOOL_RESULT_BUDGET_POLICY_V1 } from '@/core/tools/result-budget';
 import type { ShellExecutor } from '@/core/tools/shell';
 import {
   buildDescription,
@@ -124,6 +126,21 @@ function sampleRegistry() {
 }
 
 describe('ToolSpec Registry — registration behavior', () => {
+  test('registers existing L1 limits without changing the 4000-character projection bytes', () => {
+    expect(TOOL_RESULT_BUDGET_POLICY_V1).toEqual({
+      version: 1,
+      policyId: 'tool-result-budget:v1',
+      shellSearchStreamMaxChars: 4_000,
+      mcpModelResultMaxChars: 128 * 1_024,
+    });
+    expect(truncateProjectedOutput('a'.repeat(3_999))).toBe('a'.repeat(3_999));
+    expect(truncateProjectedOutput('a'.repeat(4_000))).toBe('a'.repeat(4_000));
+    const projected = truncateProjectedOutput('a'.repeat(4_001));
+    expect(projected).toBe(
+      `${'a'.repeat(2_000)}\n... [1 lines omitted, 1 total chars truncated]\n${'a'.repeat(2_000)}`,
+    );
+  });
+
   test('rejects duplicate registration', () => {
     expect(() => sampleRegistry().register(sampleReadSpec)).toThrow('already registered');
   });

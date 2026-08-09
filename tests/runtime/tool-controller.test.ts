@@ -20,6 +20,61 @@ import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { createMockModel } from '../mock-model';
 
 describe('executeRuntimeTools', () => {
+  test('produces matching trusted provenance for reclaim-whitelisted read and search tools', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-reclaim-provenance-'));
+    try {
+      writeFileSync(join(workspace, 'example.ts'), 'export const needle = true;\n');
+      const state = createInitialRuntimeState({
+        threadId: 'runtime-reclaim-provenance',
+        userId: 'user',
+        workspace,
+      });
+      const calls = [
+        { id: 'read', name: 'read_file', args: { path: 'example.ts' } },
+        {
+          id: 'content',
+          name: 'search_content',
+          args: { path: '.', pattern: 'needle', glob: '*.ts' },
+        },
+        { id: 'files', name: 'search_files', args: { path: '.', pattern: '*.ts' } },
+      ];
+      for (const [ordinal, call] of calls.entries()) {
+        state.tools.calls[call.id] = {
+          toolCallId: call.id,
+          modelMessageId: 'assistant-tools',
+          ordinal,
+          name: call.name,
+          args: call.args,
+          status: 'queued',
+          createdAtTurnId: state.turn.turnId,
+          effectClass: 'read_only',
+          sideEffect: false,
+        };
+        state.tools.queue.push(call.id);
+      }
+
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: calls.map((call) => call.id),
+      });
+      const finished = events.filter(
+        (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>
+          event.type === 'tool.finished',
+      );
+      expect(finished).toHaveLength(3);
+      for (const event of finished) {
+        expect(event.result.resultMeta).toMatchObject({
+          path: event.toolCallId === 'read' ? 'example.ts' : '.',
+          rawResultDigest: expect.any(String),
+          modelContentDigest: expect.any(String),
+          digestScope: 'raw',
+        });
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('reserves and reconciles the actual child tool when a suspended Sub-agent resumes', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-subagent-resume-budget-'));
     try {

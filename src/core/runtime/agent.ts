@@ -14,6 +14,7 @@ import type { McpRuntimeProvider } from '@/core/mcp';
 import type { RemoteMcpEgressPermitResolverV1 } from '@/core/mcp/egress-permit';
 import { createLocalCompactionDebugReporter } from '@/core/model/compaction-debug';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
+import type { ReclaimShadowReporter } from '@/core/model/context-reclaim-shadow';
 import { createChatModel, type SupportedChatModel } from '@/core/model/factory';
 import { type SandboxBackend, sandboxSupportsFullModeV1 } from '@/core/sandbox/platform';
 import {
@@ -112,6 +113,8 @@ export interface RunRuntimeAgentInput {
   /** App-shell control plane for injecting durable user commands into a live Kernel. */
   onKernelControl?: (control: RuntimeKernelControl | null) => void;
   onCompactionProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
+  /** Optional process-local context-reclaim shadow evidence sink. */
+  reclaimShadowReporter?: ReclaimShadowReporter;
 }
 
 /** Durable control surface exposed to an app shell while a Kernel run is live. */
@@ -450,6 +453,7 @@ export async function* runRuntimeAgent(
             sessionId: input.threadId,
           })
         : undefined,
+      reclaimShadowReporter: input.reclaimShadowReporter,
       providerDataAdmission,
       remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
     });

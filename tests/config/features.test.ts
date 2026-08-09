@@ -22,6 +22,7 @@ describe('feature flags', () => {
     expect(getFeatureFlags().contextCompactionV2).toBe(true);
     expect(getFeatureFlags().contextCompactionAutoV1).toBe(false);
     expect(getFeatureFlags().contextCompactionManualV1).toBe(true);
+    expect(getFeatureFlags().contextReclaimV1).toBe(false);
     expect(getFeatureFlags().verificationV1).toBe(false);
     expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
     expect(getFeatureFlags().sessionLoggingPolicyV1).toBe(true);
@@ -53,6 +54,7 @@ describe('feature flags', () => {
     expect(parseFeatureOverride('contextCompactionAutoV1')).toEqual({
       contextCompactionAutoV1: true,
     });
+    expect(parseFeatureOverride('contextReclaimV1')).toEqual({ contextReclaimV1: true });
     expect(parseFeatureOverride('resourceBudgetV1')).toEqual({ resourceBudgetV1: true });
     expect(parseFeatureOverride('boundedCancellationV1')).toEqual({
       boundedCancellationV1: true,

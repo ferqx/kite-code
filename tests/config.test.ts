@@ -269,6 +269,7 @@ describe('loadAgentConfig', () => {
           },
           "compaction": {
             "autoMode": "shadow",
+            "reclaimMode": "shadow",
             "triggerRatio": 0.68,
             "compactAfterEstimatedTokens": 12000,
             "maxSummaryTokens": 5000,
@@ -283,6 +284,7 @@ describe('loadAgentConfig', () => {
       );
       expect(loadAgentConfig({ configPath }).compaction).toEqual({
         autoMode: 'shadow',
+        reclaimMode: 'shadow',
         triggerRatio: 0.68,
         compactAfterEstimatedTokens: 12000,
         maxSummaryTokens: 5000,
@@ -305,6 +307,20 @@ describe('loadAgentConfig', () => {
       writeFileSync(
         configPath,
         `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "autoMode": "soft_hard" } }`,
+      );
+      expect(() => loadAgentConfig({ configPath })).toThrow();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects live context reclaim before the shadow foundation is promoted', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
+    try {
+      const configPath = join(dir, 'bad-reclaim-mode.jsonc');
+      writeFileSync(
+        configPath,
+        `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "reclaimMode": "live" } }`,
       );
       expect(() => loadAgentConfig({ configPath })).toThrow();
     } finally {

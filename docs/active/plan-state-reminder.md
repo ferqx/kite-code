@@ -32,7 +32,15 @@ Synthetic runtime-state message(exactly one)
 
 Runtime schema v15 起，持久 transcript 的每条消息都由 reducer 或 snapshot migration 补齐 `messageId`、`turnId`、`ordinal` 与 `createdAt`。Tool Result 的 `path`、`totalLines`、`command`、`intent`、`contentDigest`、resource revision 和 workspace mutation scope 等结构化事实同时保存在 `ToolCallRecord.result.resultMeta` 与 tool transcript message；模型上下文投影必须读取这些字段，不得通过解析 stdout 正文恢复领域元数据。v13 及更早快照恢复时使用稳定的 legacy identity 和 epoch 时间占位，不能猜测原始时间或结果事实。
 
-模型上下文不再执行工具结果投影折叠。正式压缩只有会话总结这一条路径：manual 覆盖全部安全、完整、已结算 turn；auto 仅保护当前尚未完成的最新 turn。原始 transcript 保持持久化，工具 call/result 配对仍在总结边界与最终投影两处 fail closed 校验。
+模型上下文当前不执行 live 工具结果投影折叠。默认关闭的 `contextReclaimV1` 只允许
+`compaction.reclaimMode=off|shadow`：仅在可信窗口的 warning pressure 下，对规范
+`ContextProjection` 运行纯 planner，并把严格脱敏、固定容量的候选计数交给可选的进程内 reporter；它不应用
+plan、不改 Provider payload/admission、模型调用次数、Runtime event、transcript 或 checkpoint。缺 reporter、
+flag 关闭、mode=off、窗口 unknown/normal 时均为零副作用。旧 metadata 在恢复时归一为
+`digestScope=legacy_unknown`，不得成为 reclaim 候选。正式生效的压缩仍只有会话总结这一条路径：manual
+覆盖全部安全、完整、已结算 turn；auto 仅保护当前尚未完成的最新 turn。原始 transcript 保持持久化，工具
+call/result 配对仍在总结边界与最终投影两处 fail closed 校验。任何 live reclaim 或 L3 source identity
+变更都需要新的 ADR、计划和 payload golden。
 
 每次模型调用前必须估算完整请求的 system、tool schema、transcript、checkpoint summary、dynamic runtime 和 framing token 分项。可用输入预算由 resolved context window 减去请求/模型的 max output reservation 与配置的 provider safety margin 得出；preflight 默认使用 80% warning、90% compact 和 94% hard 阈值，并产生 `model.context_metrics` telemetry，但瞬时 preflight 不进入 RuntimeState。模型窗口 unknown 时 utilization 必须保持 unknown，不能用虚构默认值触发或绕过压缩。正常模型调用、compaction 与 `/context` 必须共用同一个 projection environment resolver 术语（投影环境解析器）和包含 adapter metadata 术语（适配器元数据）的 `ResolvedModelCapabilities`，不得让正式验收读取旧 preflight 术语（调用前预检）的 estimate 术语（估算值）。`/compact reset` 不以本地比例或窗口估算做容量门禁，重置后的下一次真实请求由 Provider admission 术语（模型供应商接纳）决定。
 

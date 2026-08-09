@@ -102,7 +102,13 @@ telemetry 也全部关闭。production composition 必须携带 registry 接受�
 | `contextCompactionV2` | `true` | 启用 checkpoint 术语（检查点）、统一投影与压缩基础契约 |
 | `contextCompactionAutoV1` | `false` | 允许 `compaction.autoMode` 进入 `shadow` 或 `live`；不解释 Provider 术语（模型供应商）错误 |
 | `contextCompactionManualV1` | `true` | 允许 `/compact` 产生 `manual` |
+| `contextReclaimV1` | `false` | 允许 `compaction.reclaimMode=shadow` 评估确定性工具结果回收候选；当前不接受 `live` |
 
 压缩原因固定为 `manual | auto`。自动模式固定为 `off | shadow | live`：`off` 不判断，`shadow` 只计算 trigger eligibility 术语（触发资格）且不调用摘要模型、不写 checkpoint 术语（检查点），`live` 命中阈值后产生 `reason=auto`。默认 flag 术语（功能开关）为 `false`，且未配置 `autoMode` 时按 `off` 处理。
+
+工具结果 reclaim 与自动 summary 的 shadow 是两个独立控制面。`compaction.reclaimMode` 只允许
+`off | shadow`，未配置或 `contextReclaimV1=false` 时 effective mode 恒为 off。reclaim shadow 仅在 warning
+pressure、可信窗口且 Runtime 组合根显式注入 bounded in-memory reporter 时运行；不调用模型、不写
+checkpoint/event/snapshot/disk，也不改变 Provider payload。任何 `live` 配置都在 schema 边界拒绝。
 
 通用 HTTP 400、其他 Provider 术语（模型供应商）失败、token ratio 术语（文本计量比例）或压缩失败都不会创建 hard block 术语（硬阻断）；用户可在会话恢复交互后自行执行 `/compact`。

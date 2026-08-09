@@ -324,6 +324,7 @@ const featuresSchema = z
     contextCompactionV2: z.boolean().optional(),
     contextCompactionAutoV1: z.boolean().optional(),
     contextCompactionManualV1: z.boolean().optional(),
+    contextReclaimV1: z.boolean().optional(),
     sessionLoggingPolicyV1: z.boolean().optional(),
     providerDataPolicyV1: z.boolean().optional(),
     remoteMcpEgressPolicyV1: z.boolean().optional(),
@@ -366,6 +367,7 @@ export const configSchema = z.object({
   compaction: z
     .object({
       autoMode: z.enum(['off', 'shadow', 'live']).optional(),
+      reclaimMode: z.enum(['off', 'shadow']).optional(),
       cohortSalt: z.string().min(1).optional(),
       livePercentage: z.number().min(0).max(100).optional(),
       localDebug: z

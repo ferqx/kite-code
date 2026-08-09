@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { readFile } from '@/core/tools/file';
 import { READ_FILE_CONTRACT } from '@/core/tools/tool-contracts';
+import { projectedModelContentDigest, projectionDigest } from '../projection';
 import { defineExecutableTool } from '../spec';
 
 export const readFileInputSchema = z.object({
@@ -65,10 +66,22 @@ export const readFileSpec = defineExecutableTool({
       rawContent: result.rawContent,
     };
   },
-  projectResult: (output) => ({
-    ok: output.ok,
-    modelContent: output.ok ? (output.content ?? '') : (output.error ?? ''),
-    resultMeta: { path: output.path, totalLines: output.totalLines },
-    display: { verb: 'Read', preview: output.path },
-  }),
+  projectResult: (output) => {
+    const modelContent = output.ok ? (output.content ?? '') : (output.error ?? '');
+    return {
+      ok: output.ok,
+      modelContent,
+      resultMeta: {
+        path: output.path,
+        totalLines: output.totalLines,
+        ...(output.rawContent !== undefined
+          ? { rawResultDigest: projectionDigest(output.rawContent, '', 0) }
+          : {}),
+        modelContentDigest: projectedModelContentDigest(modelContent),
+        digestScope:
+          output.rawContent !== undefined ? ('raw' as const) : ('legacy_unknown' as const),
+      },
+      display: { verb: 'Read', preview: output.path },
+    };
+  },
 });

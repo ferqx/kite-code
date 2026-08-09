@@ -111,7 +111,7 @@ HTTP connection uses up to three initial transient attempts. When an already loa
 
 Model-visible MCP Tool names preserve the legacy `mcp__<provider>__<tool>` spelling when it already satisfies strict model-provider limits. Unsafe or overlong remote names are normalized to a deterministic ASCII identifier of at most 64 characters with a collision-resistant suffix. The turn binding remains authoritative, and execution maps that identifier back to the original Provider and remote Tool name rather than parsing the normalized alias as an executable identity.
 
-MCP protocol results retain their complete governed `capabilityResult` for execution receipts and artifacts, while the model-facing serialized Tool output is bounded to 128 KiB. Oversized output becomes an explicit `partial` result with a truncation marker and original character count; it must not expand the transcript without limit.
+MCP protocol results retain their complete governed `capabilityResult` for execution receipts and artifacts, while the model-facing serialized Tool output is bounded to 128 KiB. This existing limit and the Shell/Search 4000-character limit share the versioned `ToolResultBudgetPolicyV1` identity; the policy registration does not alter projection bytes. Oversized output becomes an explicit `partial` result with a truncation marker and original character count; it must not expand the transcript without limit. MCP remains outside the initial context-reclaim whitelist, so its metadata cannot produce an off/shadow reclaim candidate.
 
 MCP 对模型暴露三个正交概念，各自有独立的发现工具：
 

@@ -937,19 +937,44 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
           ? raw.turn.status
           : 'active',
     },
+    tools: {
+      ...state.tools,
+      calls: Object.fromEntries(
+        Object.entries(state.tools.calls).map(([toolCallId, call]) => [
+          toolCallId,
+          call.result
+            ? {
+                ...call,
+                result: {
+                  ...call.result,
+                  resultMeta: normalizeToolResultMetaProvenance(call.result.resultMeta),
+                },
+              }
+            : call,
+        ]),
+      ),
+    },
     transcript: {
       ...state.transcript,
-      messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({
-        ...message,
-        messageId:
-          message.messageId ??
-          (message.kind === 'tool'
-            ? `tool-${message.toolCallId}`
-            : `legacy-${state.session.threadId}-${ordinal}`),
-        turnId: message.turnId ?? state.turn.turnId,
-        ordinal: Number.isInteger(message.ordinal) ? message.ordinal : ordinal,
-        createdAt: message.createdAt ?? new Date(0).toISOString(),
-      })),
+      messages: (state.transcript?.messages ?? []).map((message, ordinal) => {
+        const normalized = {
+          ...message,
+          messageId:
+            message.messageId ??
+            (message.kind === 'tool'
+              ? `tool-${message.toolCallId}`
+              : `legacy-${state.session.threadId}-${ordinal}`),
+          turnId: message.turnId ?? state.turn.turnId,
+          ordinal: Number.isInteger(message.ordinal) ? message.ordinal : ordinal,
+          createdAt: message.createdAt ?? new Date(0).toISOString(),
+        };
+        return message.kind === 'tool'
+          ? {
+              ...normalized,
+              resultMeta: normalizeToolResultMetaProvenance(message.resultMeta),
+            }
+          : normalized;
+      }),
     },
     capabilities: {
       catalogRevision: state.capabilities?.catalogRevision ?? '',
@@ -961,6 +986,18 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
         : {}),
       invocations: state.capabilities?.invocations ?? {},
     },
+  };
+}
+
+function normalizeToolResultMetaProvenance(
+  resultMeta: import('./state').ToolResultMeta | undefined,
+): import('./state').ToolResultMeta {
+  return {
+    ...(resultMeta ?? {}),
+    digestScope:
+      resultMeta?.digestScope === 'raw' || resultMeta?.digestScope === 'projected'
+        ? resultMeta.digestScope
+        : 'legacy_unknown',
   };
 }
 

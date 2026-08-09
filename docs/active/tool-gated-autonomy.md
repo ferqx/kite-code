@@ -196,7 +196,7 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 
 ## 工具结果结构化元数据
 
-工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）从 `harness/tool-runner.ts` 写入 `ToolCallRecord`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在 MCP normalization、serialization 和任何模型可见截断前计算 raw digest，并显式传播截断状态；Controller 对模型可见内容计算 model digest，不能把 projected digest 标记成 raw。这些字段用于审计、恢复和摘要输入中的结构化事实；当前模型上下文不执行工具结果投影折叠。行为上不改变权限决策或审批路由。
+工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）从 ToolSpec projection/Runner 写入 `ToolCallRecord`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在 MCP normalization、serialization 和任何模型可见截断前计算 raw digest，并显式传播截断状态；Controller 保留工具提供的可信 model digest，不能把 projected digest 标记成 raw。旧 snapshot/transcript 缺少 provenance 时统一归一为 `legacy_unknown`，不得猜测。`read_file`、`search_content`、`search_files` 是首批 reclaim 白名单，但当前只由默认关闭的 off/shadow planner 读取这些结构化事实；不执行 live 工具结果折叠，不改变 Provider payload、权限决策或审批路由。Shell/Search 4000 字符与 MCP 128 KiB 模型边界统一登记为 `ToolResultBudgetPolicyV1`，输出字节保持既有行为。
 
 ## 子 Agent 阻塞审批请求构造
 
