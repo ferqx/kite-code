@@ -125,7 +125,7 @@ export default function App({
   const t = useTheme();
   const slashListHeight = useOverlayHeight(7);
   const { columns } = useWindowSize();
-  const overlayOrInterrupt =
+  const modalOverlayActive =
     state.showHelp ||
     state.showModelSelector ||
     state.showPermissionSelector ||
@@ -133,8 +133,8 @@ export default function App({
     state.showThemeSelector ||
     state.showSessions ||
     state.showMcp ||
-    state.showRewind ||
-    !!state.interrupt;
+    state.showRewind;
+  const overlayOrInterrupt = modalOverlayActive || !!state.interrupt;
   const supplementEscRef = useRef(false);
   const wizardEscBackRef = useRef(false);
   const layeredOverlayEscRef = useRef(false);
@@ -310,15 +310,9 @@ export default function App({
     resizeGeneration,
   });
 
-  const overlayActive =
-    state.showHelp ||
-    state.showModelSelector ||
-    state.showPermissionSelector ||
-    state.showEffortSelector ||
-    state.showThemeSelector ||
-    state.showSessions ||
-    state.showMcp ||
-    state.showRewind;
+  // Runtime decisions supersede any stale local selector state while the
+  // reducer transitions the UI to its single interrupt surface.
+  const overlayActive = modalOverlayActive && !state.interrupt;
   const showRunStatus = shouldShowRunStatus(state);
   const runStatus = showRunStatus ? deriveRunStatusSnapshot(state) : undefined;
 
@@ -392,8 +386,10 @@ export default function App({
       )}
 
       {/* ── Overlay: panels below Footer ── */}
-      {state.showHelp && <HelpPanel onClose={hideHelp} sandboxBackend={sandboxBackend} />}
-      {state.showSessions && (
+      {!state.interrupt && state.showHelp && (
+        <HelpPanel onClose={hideHelp} sandboxBackend={sandboxBackend} />
+      )}
+      {!state.interrupt && state.showSessions && (
         <SessionSelector
           onSelect={selectSession}
           onClose={hideSessions}
@@ -404,7 +400,7 @@ export default function App({
           onAvailabilityChange={onSessionAvailabilityChange}
         />
       )}
-      {state.showModelSelector && (
+      {!state.interrupt && state.showModelSelector && (
         <ModelSelector
           currentModel={state.status.modelName}
           currentProvider={state.status.modelProvider}
@@ -413,7 +409,7 @@ export default function App({
           onClose={hideModelSelector}
         />
       )}
-      {state.showPermissionSelector && (
+      {!state.interrupt && state.showPermissionSelector && (
         <PermissionSelector
           currentMode={state.interactionMode}
           sandboxBackend={sandboxBackend}
@@ -421,7 +417,7 @@ export default function App({
           onClose={hidePermissionSelector}
         />
       )}
-      {state.showEffortSelector && (
+      {!state.interrupt && state.showEffortSelector && (
         <PreferenceSelector
           title="选择推理深度"
           currentValue={state.status.thinkingMode}
@@ -435,7 +431,7 @@ export default function App({
           onClose={hideEffortSelector}
         />
       )}
-      {state.showThemeSelector && (
+      {!state.interrupt && state.showThemeSelector && (
         <PreferenceSelector
           title="选择色彩主题"
           currentValue={themePreset ?? 'teal'}
@@ -450,14 +446,14 @@ export default function App({
           onClose={hideThemeSelector}
         />
       )}
-      {state.showMcp && mcpController && (
+      {!state.interrupt && state.showMcp && mcpController && (
         <McpOverlay
           controller={mcpController}
           layeredEscRef={layeredOverlayEscRef}
           onClose={hideMcp}
         />
       )}
-      {state.showRewind && (
+      {!state.interrupt && state.showRewind && (
         <CheckpointSelector
           checkpoints={state.checkpoints}
           onConfirm={executeRewind}

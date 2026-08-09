@@ -1532,6 +1532,46 @@ describe('eventReducer (blocks model)', () => {
   });
 
   describe('EVENT.need_approval / need_input + RESOLVE_INTERRUPT', () => {
+    function withAllSelectorsOpen(state: TuiState): TuiState {
+      return {
+        ...state,
+        showHelp: true,
+        showModelSelector: true,
+        showPermissionSelector: true,
+        showEffortSelector: true,
+        showThemeSelector: true,
+        showSessions: true,
+        showMcp: true,
+        showRewind: true,
+      };
+    }
+
+    function expectSelectorsClosed(state: TuiState) {
+      expect(state.showHelp).toBe(false);
+      expect(state.showModelSelector).toBe(false);
+      expect(state.showPermissionSelector).toBe(false);
+      expect(state.showEffortSelector).toBe(false);
+      expect(state.showThemeSelector).toBe(false);
+      expect(state.showSessions).toBe(false);
+      expect(state.showMcp).toBe(false);
+      expect(state.showRewind).toBe(false);
+    }
+
+    test('gives every interrupt priority over open selectors', () => {
+      const plan = { name: 'Review', description: 'Check', status: 'pending' as const, steps: [] };
+      const events: Array<{ event: RenderEvent; kind: InterruptState['kind'] }> = [
+        { event: { type: 'need_approval', data: approval() }, kind: 'approval' },
+        { event: { type: 'need_input', data: question() }, kind: 'input' },
+        { event: { type: 'need_plan_review', data: { plan } }, kind: 'plan_review' },
+      ];
+
+      for (const { event, kind } of events) {
+        const state = handleEventAction(withAllSelectorsOpen(fresh()), event);
+        expect(state.interrupt?.kind).toBe(kind);
+        expectSelectorsClosed(state);
+      }
+    });
+
     test('keeps approval in the Footer interrupt without appending a message block', () => {
       const a = approval({ command: 'rm -rf /' });
       const s = dispatch(fresh(), { type: 'EVENT', event: { type: 'need_approval', data: a } });

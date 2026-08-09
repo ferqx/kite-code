@@ -45,7 +45,7 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 
 ## 8.3 斜杠命令
 
-Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。任何 `approval`、`input` 或 `plan_review` interrupt 可见时，slash 候选面板必须隐藏，避免它与当前决策界面同时占用键盘焦点。
+Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。任何 `approval`、`input` 或 `plan_review` interrupt 可见时，slash 候选面板必须隐藏；已经打开的帮助、模型、权限、推理、主题、会话、MCP 或回退选择器也必须关闭。interrupt 是唯一的决策界面，避免它与其他界面同时占用键盘焦点。
 
 内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/sessions`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions`、`/effort` 和 `/theme` 不接受显式选择参数，直接确认命令后打开各自选择器；没有沙箱后端时，权限选择器显示 `full` 的能力说明但禁用它，不能切换到 Full。
 

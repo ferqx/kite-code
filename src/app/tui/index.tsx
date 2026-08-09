@@ -89,6 +89,7 @@ function hasModelConversation(state: import('./types').TuiState): boolean {
 }
 
 function overlaySurfaceKey(state: import('./types').TuiState): string {
+  if (state.interrupt) return 'interrupt';
   if (state.showHelp) return 'help';
   if (state.showModelSelector) return 'model';
   if (state.showPermissionSelector) return 'permissions';

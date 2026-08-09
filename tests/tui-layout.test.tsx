@@ -4277,6 +4277,18 @@ describe('App', () => {
     expect(lastFrame()).not.toContain('命令匹配');
   });
 
+  test('gives an interrupt priority over a stale selector', () => {
+    const state = fakeState({
+      showPermissionSelector: true,
+      interrupt: { kind: 'approval', approval: fakeApproval() },
+    });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    expect(lastFrame()).toContain('工具授权');
+    expect(lastFrame()).not.toContain('选择权限模式');
+  });
+
   test('persists a model selection before applying it to the current TUI state', async () => {
     const state = fakeState({
       showModelSelector: true,

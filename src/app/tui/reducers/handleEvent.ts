@@ -130,6 +130,22 @@ function clearInteractionInterrupt(
   return state.interrupt?.kind === kind ? { ...state, interrupt: null } : state;
 }
 
+/** A Runtime interrupt is the single active decision surface. */
+function closeTransientOverlaysForInterrupt(state: TuiState): TuiState {
+  return {
+    ...state,
+    showHelp: false,
+    showModelSelector: false,
+    showPermissionSelector: false,
+    showEffortSelector: false,
+    showThemeSelector: false,
+    showSessions: false,
+    showMcp: false,
+    showRewind: false,
+    checkpoints: [],
+  };
+}
+
 function planReviewMatches(
   state: TuiState,
   event: Extract<
@@ -1592,8 +1608,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
     }
     case 'need_approval': {
       // Dedup: side-channel + stream interrupt can both emit need_approval for the same request.
-      if (state.interrupt?.kind === 'approval') return state;
-      const finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait'));
+      if (state.interrupt?.kind === 'approval') return closeTransientOverlaysForInterrupt(state);
+      const finalized = closeTransientOverlaysForInterrupt(
+        finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait')),
+      );
       let next: TuiState = {
         ...finalized,
         interrupt: { kind: 'approval' as const, approval: event.data },
@@ -1648,8 +1666,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
     case 'need_input': {
       // Dedup: side-channel + stream interrupt can both emit need_input for the same request.
       // Skip if a question block is already active (interrupt pending).
-      if (state.interrupt?.kind === 'input') return state;
-      let finalized = finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait'));
+      if (state.interrupt?.kind === 'input') return closeTransientOverlaysForInterrupt(state);
+      let finalized = closeTransientOverlaysForInterrupt(
+        finalizeLastTurnStreaming(closeCurrentThought(state, 'human_wait')),
+      );
       const askCard = findBlock(
         finalized,
         (candidate) =>
@@ -1678,7 +1698,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
     }
     case 'need_plan_review': {
       // Dedup: side-channel + stream interrupt can both emit need_plan_review for the same request.
-      if (state.interrupt?.kind === 'plan_review') return state;
+      if (state.interrupt?.kind === 'plan_review') return closeTransientOverlaysForInterrupt(state);
       // 方案内容在 OutputArea 以 Markdown tool_card 渲染，同时 Footer PlanReviewBlock
       // 展示确认操作条。填充 summary + expanded 以便 MarkdownBlock 展开渲染。
       // Plan content rendered in OutputArea as Markdown tool_card; Footer PlanReviewBlock
@@ -1695,7 +1715,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const planSummary = plan.description
         ? `${plan.description}\n\nSteps:\n${stepsText}`
         : `Steps:\n${stepsText}`;
-      let next = closeCurrentThought(state, 'human_wait');
+      let next = closeTransientOverlaysForInterrupt(closeCurrentThought(state, 'human_wait'));
       if (planCard?.kind === 'tool_card') {
         next = replaceBlockById(next, planCard.id, {
           ...planCard,
