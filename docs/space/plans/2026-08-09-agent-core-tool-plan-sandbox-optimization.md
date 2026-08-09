@@ -66,6 +66,15 @@ Git broker 可先在不向模型暴露的 shadow profile 中验证；正式切�
 | `ACORE-EVAL-POLICY-01` | `ACORE-EVAL-01` | 冻结 suite/scorer/report、case floor、样本与统计规则 | policy self-check；manifest immutability | 必须在候选结果前冻结，修改即产生新 revision |
 | `ACORE-RC-01` | `ACORE-PLAN-02`、`ACORE-TOOL-02`、`ACORE-CONTRACT-01`、`ACORE-GIT-03`、`ACORE-AGENT-01`、`ACORE-EVAL-POLICY-01` | OpenCode Go 最终候选完整 Journey A/B 与发布证据 | Required/RC CI；live paired matrix | V2 默认关闭；独立迁移 ADR 决定默认值 |
 
+## 当前执行状态
+
+| Task | 状态 | 已收敛范围 |
+| --- | --- | --- |
+| `ACORE-DOC-01` | completed | ADR-0095/0096/0097 已接受、ADR-0070 历史状态已取代、三方向 Review closure 已记录。 |
+| `ACORE-EVAL-00` | completed | `ACORE-EVAL-00-v1` scripted Runtime Journey 与 metadata-only privacy assertion 已建立。 |
+| `ACORE-PLAN-01` | completed (V1) | CompletionGuard 在 scheduler/runner/reducer 三层阻止虚假完成，一次 correction 后 blocked terminal；后续 evidence/typed failure gate 由 `ACORE-PLAN-02`/`ACORE-TOOL-02` 承接。 |
+| `ACORE-EVAL-POLICY-01` | frozen (r1) | first-decision candidate `300e11a4`、OpenCode Go、十轮 paired sample 和 Go usage privacy boundary 已冻结；完整 Journey candidate 仍待后续 scope 收敛。 |
+
 ## `ACORE-DOC-01`：文档冻结与 Review
 
 1. 总计划说明问题证据、依赖顺序、非目标、指标、平台矩阵和回滚。
@@ -86,6 +95,11 @@ Git broker 可先在不向模型暴露的 shadow profile 中验证；正式切�
   缺失字段猜测为 typed 事实。
 - live 分支必须闭合严格 route、credential source、model attempt、实际 HTTP dispatch/response、usage/token 与唯一 Provider
   response ID 覆盖；证据不全时非零退出。账户侧 Go usage 可作人工补充证据，但 Zen credit balance 不是订阅调用的必需变化。
+
+2026-08-10 已建立 deterministic `ACORE-EVAL-00-v1`：scripted model 通过真实 Kernel/scheduler/runner 执行
+`model → read_file → model → run.completed → turn.completed`，记录两个 model attempt、一个 queue/start/finish 对和
+metadata-only event counts。fixture 只断言报告不含 path 或内容，作为 ToolOutcome/Journey 后续改动的基线；它不执行
+真实 Provider，也不把 first-decision A/B 冒充整轮 Journey。
 
 ## `ACORE-PLAN-01`：CompletionGuard 与完成事件防线
 

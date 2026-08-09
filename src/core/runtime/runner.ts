@@ -1,5 +1,6 @@
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { RuntimeUserAction } from './actions';
+import { decideCompletionV1 } from './completion-guard';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
@@ -486,10 +487,13 @@ export async function* runRuntimeLoop(
       }
       if (effect.type === 'emit_final') {
         count += 1;
+        const decision = decideCompletionV1(kernel.getState());
+        if (decision.status !== 'accepted') continue;
         const completed: RuntimeEvent = {
           type: 'run.completed',
           turnId: kernel.getState().turn.turnId,
           output: kernel.getState().transcript.final ?? '',
+          completionGuardVersion: decision.version,
           outcome: completedTerminalOutcomeV1(),
         };
         const turnCompleted: RuntimeEvent = {
@@ -502,6 +506,43 @@ export async function* runRuntimeLoop(
         kernel.processEventBatch([completed, turnCompleted]);
         yield completed;
         yield turnCompleted;
+        return;
+      }
+      if (effect.type === 'completion_blocked') {
+        count += 1;
+        const blocked: RuntimeEvent = {
+          type: 'completion.blocked',
+          turnId: kernel.getState().turn.turnId,
+          guardVersion: effect.decision.version,
+          code: effect.decision.code,
+          nextAction: effect.decision.nextAction,
+          planning: effect.decision.planning,
+          correctionAttempt: effect.decision.correctionAttempt,
+        };
+        kernel.processEvent(blocked);
+        yield blocked;
+        if (effect.decision.canCorrect) continue;
+        const failure = classifyFailure(
+          'unknown',
+          `Completion blocked by ${effect.decision.code}; next action: ${effect.decision.nextAction}.`,
+        );
+        const aborted: RuntimeEvent = {
+          type: 'turn.aborted',
+          turnId: kernel.getState().turn.turnId,
+          reason: failure.message,
+          cause: 'error',
+        };
+        const terminal: RuntimeEvent = {
+          type: 'run.error',
+          message: failure.message,
+          recoverable: false,
+          failure,
+          turnId: kernel.getState().turn.turnId,
+          outcome: failedTerminalOutcomeV1({ ...failure, kind: 'unknown' }),
+        };
+        kernel.processEventBatch([aborted, terminal]);
+        yield aborted;
+        yield terminal;
         return;
       }
       let reservationIds: string[] = [];

@@ -44,6 +44,11 @@ OpenCode Go 的 first-decision/Journey live 评测还必须遵守版本化 `ACOR
 [`opencode-go-journey-evaluation-policy.md`](opencode-go-journey-evaluation-policy.md)。该政策不授权运行真实模型，
 也不改变 ADR-0094 的 `promptContractV2=false` 默认值。
 
+`ACORE-EVAL-00-v1` 是在上述 live 政策之前建立的完整 Runtime Journey 基线：它用 synthetic workspace 驱动
+Kernel 的 `model → tool → model → run.completed → turn.completed` 闭环，只断言 canonical event 类型与计数，
+并固定 `contentLogged=false`。该基线不触发 Provider，也不记录 prompt、工具正文或路径；它仅验证后续 live
+证据需要经过的运行时路径仍可达。
+
 - case、suite、oracle、contract、artifact、config 和 route identity 必须全部绑定；任一 mismatch 拒绝。
 - 每次运行保留完整结构化 attempt，不能只保留最好一次。缺失指标使用 `null`/`not_observed`，不能补零。
 - G0 固定为未授权副作用、secret/正文外传、sandbox escape 和 required Verification bypass 零容忍。

@@ -67,6 +67,8 @@ export type RuntimeEffect =
     }
   /** 发出最终事件并终止 / Emit final event and terminate */
   | { type: 'emit_final' }
+  /** A completion candidate needs one model correction or a blocked terminal. */
+  | { type: 'completion_blocked'; decision: import('./completion-guard').CompletionGuardBlocked }
   /** 停止执行 / Stop execution */
   | { type: 'stop' }
   /** 第二个 runner 被拒绝 / A second runner was rejected */

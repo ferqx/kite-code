@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { eventsForRuntimeAction } from '@/core/runtime/actions';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
@@ -57,6 +60,21 @@ function startTask(state: ReturnType<typeof createInitialRuntimeState>, taskId =
 }
 
 describe('Task-scoped Plan Mode lifecycle', () => {
+  let home: string;
+  let previousHome: string | undefined;
+
+  beforeEach(() => {
+    previousHome = process.env.KITE_CODE_HOME;
+    home = mkdtempSync(join(tmpdir(), 'kite-code-task-plan-lifecycle-'));
+    process.env.KITE_CODE_HOME = home;
+  });
+
+  afterEach(() => {
+    if (previousHome == null) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  });
+
   test('/plan enters through durable RuntimeEvents and creates an active task', () => {
     const state = reduceRuntimeState(
       startTask(createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/tmp' })),
@@ -396,7 +414,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     expect(events).not.toContainEqual(expect.objectContaining({ type: 'plan.completed' }));
   });
 
-  test('task completion clears execution mode before the next task starts', () => {
+  test('an incomplete planning task cannot be cleared by a bypassed completion event', () => {
     let state = startTask(
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/tmp' }),
     );
@@ -410,8 +428,8 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       interactionId: 'missing',
       executionMode: 'auto',
     });
-    // The task-scoped value is explicitly cleared by task completion even when
-    // the old compatibility mirror is still present in the snapshot.
+    // CompletionGuard rejects the old shortcut: the Plan lifecycle is still
+    // incomplete, so this is not task completion.
     state = reduceRuntimeState(state, {
       type: 'run.completed',
       turnId: state.turn.turnId,
@@ -422,7 +440,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       messageId: 'message-2',
       content: 'Start a fresh task',
     });
-    expect(state.activeTaskId).not.toBe('task-1');
+    expect(state.activeTaskId).toBe('task-1');
     expect(state.tasks['task-1']?.executionMode).toBeUndefined();
   });
 
@@ -508,6 +526,6 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       content: 'Start a fresh task',
     });
     expect(getEffectiveInteractionMode(state)).toBe('accept_edits');
-    expect(state.tasks[state.activeTaskId ?? '']?.taskId).not.toBe('task-1');
+    expect(state.tasks[state.activeTaskId ?? '']?.taskId).toBe('task-1');
   });
 });

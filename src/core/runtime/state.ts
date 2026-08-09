@@ -420,6 +420,11 @@ export interface TranscriptState {
   final?: string;
 }
 
+/** Durable, per-turn CompletionGuard V1 correction ceiling. */
+export interface CompletionGuardRuntimeStateV1 {
+  correctionAttempts: number;
+}
+
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
@@ -505,6 +510,8 @@ export interface RuntimeState {
   resourceBudget: ResourceBudgetRuntimeStateV1;
   /** Durable structured terminal projection; absent only on legacy/pre-flag runs. */
   terminalOutcome?: RunTerminalOutcomeV1;
+  /** Completion correction state; absent snapshots are legacy zero-attempt state. */
+  completionGuard?: CompletionGuardRuntimeStateV1;
   /** 方案生命周期状态（v2: PlanningState 取代 PlanLifecycleState）/ Plan lifecycle state */
   planning: PlanningState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
@@ -603,6 +610,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       },
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),
+    completionGuard: { correctionAttempts: 0 },
     planning: initialPlanning,
     activeTaskId: null,
     tasks: {},

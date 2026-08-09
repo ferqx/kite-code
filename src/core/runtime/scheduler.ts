@@ -1,4 +1,5 @@
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
+import { decideCompletionV1 } from './completion-guard';
 import type { RuntimeEffect } from './effects';
 import { getActivePlanning, getAgentPhase, type RuntimeState, type ToolCallRecord } from './state';
 
@@ -232,7 +233,12 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     const activeSkill = Object.values(state.skills.frames).some(
       (frame) => frame.status === 'active',
     );
-    if (!activeSkill) return { type: 'emit_final' };
+    if (!activeSkill) {
+      const decision = decideCompletionV1(state);
+      return decision.status === 'accepted'
+        ? { type: 'emit_final' }
+        : { type: 'completion_blocked', decision };
+    }
   }
 
   if (state.context.pendingCompaction) {

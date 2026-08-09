@@ -37,6 +37,7 @@
       "excludeSources": ["src/core/runtime/agent.ts"],
       "documents": [
         "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/completion-guard.md",
         "docs/active/plan-mode-implementation.md",
         "docs/active/cancel-resume-cleanup.md",
         "docs/active/failure-classification.md",
@@ -348,6 +349,7 @@
       "id": "agent-task-evaluation",
       "sources": [
         "tests/evals/agent-tasks/**",
+        "tests/evals/runtime-journey-baseline.test.ts",
         "scripts/evals/agent-task-evidence-*.ts",
         "scripts/evals/verify-agent-task-evidence.ts",
         "scripts/evals/verify-agent-task-product-evidence.ts",
@@ -356,6 +358,7 @@
       ],
       "documents": [
         "docs/active/agent-task-evaluation.md",
+        "docs/active/opencode-go-journey-evaluation-policy.md",
         "docs/active/real-model-test-boundary.md",
         "docs/book/12-测试体系.md",
         "README.md"

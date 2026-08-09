@@ -11,6 +11,7 @@ import { updateAutoCompactionGuard } from '@/core/model/context-compaction-decis
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
+import { decideCompletionV1 } from './completion-guard';
 import {
   createContextCorrectnessBlock,
   isContextHardBlockReason,
@@ -1607,6 +1608,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'turn.started':
       return {
         ...state,
+        completionGuard: { correctionAttempts: 0 },
         turn: {
           turnId: event.turnId,
           turnIndex: state.turn.turnIndex + 1,
@@ -1696,6 +1698,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.context_metrics':
       return state;
     case 'run.completed': {
+      const decision = decideCompletionV1(state);
+      if (decision.status !== 'accepted') return state;
       const active = getActiveTask(state);
       if (!active) return state;
       const completed = {
@@ -1712,6 +1716,14 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         planning: completed.planning,
       };
     }
+    case 'completion.blocked':
+      return event.turnId === state.turn.turnId
+        ? {
+            ...state,
+            completionGuard: { correctionAttempts: event.correctionAttempt },
+            transcript: { ...state.transcript, final: undefined },
+          }
+        : state;
     case 'run.error':
       return event.outcome ? { ...state, terminalOutcome: event.outcome } : state;
     case 'runtime.action_ignored':

@@ -864,7 +864,20 @@ export interface RunCompletedEvent {
   type: 'run.completed';
   turnId: string;
   output: string;
+  /** New emissions bind the accepted CompletionGuard decision version. */
+  completionGuardVersion?: 'completion_guard_v1';
   outcome?: RunTerminalOutcomeV1;
+}
+
+/** A final-text candidate was rejected before it could become durable completion truth. */
+export interface CompletionBlockedEvent {
+  type: 'completion.blocked';
+  turnId: string;
+  guardVersion: 'completion_guard_v1';
+  code: import('./completion-guard').CompletionBlockerCode;
+  nextAction: import('./completion-guard').CompletionNextAction;
+  planning: import('@/protocol/events').PlanningState['kind'];
+  correctionAttempt: number;
 }
 
 /** A recoverable or terminal runtime failure exposed on the public protocol. */
@@ -1097,6 +1110,7 @@ export type RuntimeEvent =
   | ModelCacheMetricsEvent
   | ModelContextMetricsEvent
   | RunCompletedEvent
+  | CompletionBlockedEvent
   | RunErrorEvent
   | RuntimeActionIgnoredEvent
   | RuntimeCancellationDiagnosticEvent

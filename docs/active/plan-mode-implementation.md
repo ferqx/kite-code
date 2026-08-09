@@ -4,7 +4,7 @@
 
 读取时机：修改 Plan Artifact、plan_review、planning/building 阶段、计划工具、计划恢复或 TUI 计划交互时。
 
-验证：`bun test tests/runtime/agent.integration.test.ts tests/runtime/plan-actions.test.ts tests/runtime/plan-artifacts.test.ts tests/runtime/plan-persistence.test.ts tests/runtime/plan-state.test.ts tests/runtime/plan-tools.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/agent.integration.test.ts tests/runtime/completion-guard.test.ts tests/runtime/plan-actions.test.ts tests/runtime/plan-artifacts.test.ts tests/runtime/plan-persistence.test.ts tests/runtime/plan-state.test.ts tests/runtime/plan-tools.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
 
 相关：ADR-0002、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
 
@@ -43,6 +43,8 @@ effects 与结果投影。模型 Schema、Artifact 格式、事件 discriminant 
 3. 审核后的内容不得通过 transcript 或 UI 状态静默替换。
 4. Plan Artifact 写入失败时不得宣布计划已保存或已批准。
 5. 恢复和 fork 必须从 Runtime Store/Artifact Store 重建计划事实。
+6. 模型 final 不能越过 Plan lifecycle：`planning_empty`、draft、awaiting review、executing 与 cancelled 都不能产生
+   `run.completed`。CompletionGuard V1 的完整规则见 `completion-guard.md`。
 
 ## 工具与策略
 

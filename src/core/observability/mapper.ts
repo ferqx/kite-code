@@ -676,6 +676,7 @@ export class ProductionMetricMapperV1 {
       case 'model.cache_metrics':
       case 'model.context_metrics':
       case 'provider.data_policy_status':
+      case 'completion.blocked':
       case 'plan.progress_updated':
       case 'approval.command_replaced':
       case 'tool.file_change':

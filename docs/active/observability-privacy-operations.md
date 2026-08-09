@@ -23,6 +23,9 @@ allowlist 只接受有限 metric/attribute 枚举与有限数值；单样本 can
 metric、日志、报告或 artifact。未知 route/capability 只能折叠为固定低基数 alias，不能携带原值。
 运行时权限切换的 `interaction_mode.changed` 是 Runtime Store 审计事实，不产生 observability metric 或
 属性；其 user source 与时间戳不得通过观测通道外发。
+`completion.blocked` 同样只保留为 Runtime Store 的 completion lifecycle 审计事实；observability mapper
+不得为它创建 metric 或属性。事件只包含固定低基数的 blocker code、next action、计划阶段与 correction attempt，
+不得包含 prompt、模型或工具正文、路径、命令、自由错误或身份信息。
 
 Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低优先级样本并只记录本地 drop 计数。
 序列化、flush 或 shutdown 失败不得改变 Runtime outcome。CLI 退出执行有界 shutdown；TUI 的 `/exit`、
