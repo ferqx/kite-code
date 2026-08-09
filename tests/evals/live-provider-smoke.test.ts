@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { resolveQwenConfig, runLiveProviderSmoke } from '../../scripts/evals/live-provider-smoke';
+import {
+  resolveOpenCodeGoConfig,
+  runLiveProviderSmoke,
+} from '../../scripts/evals/live-provider-smoke';
 import { createMockModelServer } from '../tui-system/harness/fixtures';
 
 const servers: Array<ReturnType<typeof createMockModelServer>> = [];
@@ -9,7 +12,7 @@ afterEach(() => {
 });
 
 describe('low-cost live Provider smoke contract', () => {
-  for (const provider of ['deepseek', 'qwen-openai-compatible'] as const) {
+  for (const provider of ['deepseek', 'opencode-go'] as const) {
     test(`reports metadata only for ${provider}`, async () => {
       const server = createMockModelServer();
       const modelName = provider === 'deepseek' ? 'deepseek-v4-flash' : 'mock-model';
@@ -45,52 +48,50 @@ describe('low-cost live Provider smoke contract', () => {
       expect(serialized).not.toContain(server.baseURL);
       expect(server.getRequests()[0]?.body).toMatchObject({
         ...(provider === 'deepseek' ? { thinking: { type: 'disabled' } } : {}),
-        max_tokens: 16,
+        max_tokens: provider === 'opencode-go' ? 128 : 16,
       });
-      if (provider === 'qwen-openai-compatible') {
+      if (provider === 'opencode-go') {
         expect(server.getRequests()[0]?.body.thinking).toBeUndefined();
       }
     });
   }
 
-  test('accepts the Aliyun Token Plan route and refuses arbitrary compatible routes', () => {
+  test('accepts the exact OpenCode Go route and refuses arbitrary compatible routes', () => {
     const original = {
-      key: process.env.DASHSCOPE_API_KEY,
-      endpoint: process.env.KITE_QWEN_BASE_URL,
-      model: process.env.KITE_QWEN_MODEL,
+      key: process.env.OPENCODE_API_KEY,
+      endpoint: process.env.KITE_OPENCODE_GO_BASE_URL,
+      model: process.env.KITE_OPENCODE_GO_MODEL,
     };
     try {
-      process.env.DASHSCOPE_API_KEY = 'secret-test-key';
-      delete process.env.KITE_QWEN_BASE_URL;
-      delete process.env.KITE_QWEN_MODEL;
-      expect(resolveQwenConfig()).toMatchObject({
+      process.env.OPENCODE_API_KEY = 'secret-test-key';
+      delete process.env.KITE_OPENCODE_GO_BASE_URL;
+      delete process.env.KITE_OPENCODE_GO_MODEL;
+      expect(resolveOpenCodeGoConfig()).toMatchObject({
         credentialSource: 'environment',
         config: {
-          baseURL: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1',
-          modelName: 'qwen3.6-flash',
+          baseURL: 'https://opencode.ai/zen/go/v1',
+          modelName: 'deepseek-v4-flash',
         },
       });
 
-      process.env.KITE_QWEN_BASE_URL = 'https://example.com/compatible-mode/v1';
-      process.env.KITE_QWEN_MODEL = 'qwen3.6-flash';
-      expect(() => resolveQwenConfig()).toThrow('provider_endpoint_unsafe');
+      process.env.KITE_OPENCODE_GO_BASE_URL = 'https://example.com/zen/go/v1';
+      process.env.KITE_OPENCODE_GO_MODEL = 'deepseek-v4-flash';
+      expect(() => resolveOpenCodeGoConfig()).toThrow('provider_endpoint_unsafe');
 
-      process.env.KITE_QWEN_BASE_URL =
-        'https://token-plan.cn-beijing.maas.aliyuncs.com.example.com/compatible-mode/v1';
-      expect(() => resolveQwenConfig()).toThrow('provider_endpoint_unsafe');
+      process.env.KITE_OPENCODE_GO_BASE_URL = 'https://opencode.ai.example.com/zen/go/v1';
+      expect(() => resolveOpenCodeGoConfig()).toThrow('provider_endpoint_unsafe');
 
-      process.env.KITE_QWEN_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
-      process.env.KITE_QWEN_MODEL = 'qwen3.6-flash';
-      expect(() => resolveQwenConfig()).toThrow('provider_endpoint_unsafe');
+      process.env.KITE_OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/v1';
+      process.env.KITE_OPENCODE_GO_MODEL = 'deepseek-v4-flash';
+      expect(() => resolveOpenCodeGoConfig()).toThrow('provider_endpoint_unsafe');
 
-      process.env.KITE_QWEN_BASE_URL =
-        'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1';
-      process.env.KITE_QWEN_MODEL = 'not-a-qwen-model';
-      expect(() => resolveQwenConfig()).toThrow('qwen_model_mismatch');
+      process.env.KITE_OPENCODE_GO_BASE_URL = 'https://opencode.ai/zen/go/v1';
+      process.env.KITE_OPENCODE_GO_MODEL = 'qwen3-coder';
+      expect(() => resolveOpenCodeGoConfig()).toThrow('opencode_go_model_mismatch');
     } finally {
-      restoreEnvironment('DASHSCOPE_API_KEY', original.key);
-      restoreEnvironment('KITE_QWEN_BASE_URL', original.endpoint);
-      restoreEnvironment('KITE_QWEN_MODEL', original.model);
+      restoreEnvironment('OPENCODE_API_KEY', original.key);
+      restoreEnvironment('KITE_OPENCODE_GO_BASE_URL', original.endpoint);
+      restoreEnvironment('KITE_OPENCODE_GO_MODEL', original.model);
     }
   });
 });

@@ -49,7 +49,6 @@
     {
       "id": "runtime-resilience-qualification",
       "sources": [
-        "package.json",
         ".github/workflows/required.yml",
         ".github/workflows/runtime-resilience-qualification.yml",
         "scripts/run-tui-system-tests.ts",
@@ -334,9 +333,14 @@
       ],
       "documents": [
         "docs/active/open-source-first-release.md",
+        "docs/active/release-control.md",
         "docs/active/model-provider-boundary.md",
         "docs/active/real-model-test-boundary.md",
+        "docs/active/agent-task-evaluation.md",
         "docs/book/12-测试体系.md",
+        "docs/adr/0093-opencode-go-release-provider-smoke.md",
+        "release/oss-first-release/MAINTAINER_CHECKLIST.md",
+        "release/oss-first-release/RELEASE_NOTES.md",
         "README.md"
       ]
     },
@@ -433,12 +437,18 @@
       "sources": [
         "src/core/model/**",
         "src/core/prompts/system-prompt.txt",
+        "src/core/prompts/system-prompt-v2.txt",
         "src/core/controllers/tool-controller.ts",
         "src/core/controllers/model-controller.ts",
         "src/core/controllers/compaction-controller.ts",
         "src/core/session-logger/recorder.ts",
         "src/core/harness/tool-runner.ts",
-        "src/core/runtime/context-compaction.ts"
+        "src/core/runtime/context-compaction.ts",
+        "scripts/evals/prompt-contract-ab.ts",
+        "tests/tui-system/scenarios/prompt-contract-v2-production.test.ts",
+        "tests/prompts/prompt-contract-budget.test.ts",
+        "tests/evals/prompt-contract-ab.test.ts",
+        "tests/project-instructions.test.ts"
       ],
       "documents": [
         "docs/active/model-provider-boundary.md",
@@ -446,7 +456,17 @@
         "docs/active/plan-state-reminder.md",
         "docs/active/file-reading-shared-boundary.md",
         "docs/active/thought-pre-consolidation.md",
+        "docs/active/tool-description-contracts.md",
+        "docs/active/capability-progressive-disclosure.md",
+        "docs/active/mcp-runtime-governance.md",
+        "docs/active/feature-flags.md",
+        "docs/active/real-model-test-boundary.md",
         "docs/book/04-Agent引擎.md",
+        "docs/book/05-工具系统与安全策略.md",
+        "docs/book/11-MCP与Skills扩展.md",
+        "docs/book/12-测试体系.md",
+        "docs/adr/0092-prompt-contract-v2.md",
+        "docs/space/plans/2026-08-08-prompt-contract-v2.md",
         "docs/adr/0021-context-compaction-checkpoint.md",
         "docs/adr/0022-context-compaction-single-narrative.md",
         "docs/adr/0023-model-capabilities-no-builtin-catalog.md",

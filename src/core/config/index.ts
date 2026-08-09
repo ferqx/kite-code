@@ -334,6 +334,7 @@ const featuresSchema = z
     networkBoundaryV1: z.boolean().optional(),
     releaseProfileV1: z.boolean().optional(),
     observabilityMetricsV1: z.boolean().optional(),
+    promptContractV2: z.boolean().optional(),
   })
   .strict()
   .optional();

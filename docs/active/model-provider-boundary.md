@@ -6,7 +6,7 @@
 
 验证：`bun test tests/config.test.ts tests/config/provider-data-policy.test.ts tests/model.test.ts tests/model-invoke.test.ts tests/model-provider-data-policy.test.ts tests/model-capabilities.test.ts tests/runtime/model-controller-failures.test.ts tests/runtime/context-compaction-auto.test.ts tests/runtime-context.test.ts tests/tui-reducer.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`、`bun run scripts/run-tui-system-tests.ts model-streaming thought-lifecycle`、`bun run typecheck`。
 
-相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
+相关：ADR-0022、ADR-0023、ADR-0024、ADR-0031、ADR-0066、ADR-0068、ADR-0069、ADR-0093、`real-model-test-boundary.md`、`open-source-first-release.md`、`plan-state-reminder.md`、`docs/space/plans/2026-07-21-context-compaction-production-rollout.md`。
 
 ## 规则
 
@@ -34,15 +34,15 @@ Kite Code 是 provider-neutral 系统。`deepseek`、`openai`、`openai-compatib
   派生会话时恢复各自 route。新会话使用最近一次全局选择，已有会话之间不得互相覆盖模型配置。
 
 首发 G1 使用 `scripts/evals/live-provider-smoke.ts` 做两次独立低成本调用：DeepSeek 固定
-`deepseek-v4-flash`，千问通过 `openai-compatible` adapter 调用。runner 只从环境变量或本机配置读取
+`deepseek-v4-flash`，OpenCode Go 通过 `openai-compatible` adapter 调用。runner 只从环境变量或本机配置读取
 credential，不自动读取项目 `.env`；输出只含 provider alias、model、耗时、usage 和布尔结果，不含
 prompt、response、key、完整 endpoint 或错误 response body。缺 credential/非空 response/超时任一条件
 都以非零退出，不得由 mock 结果替代。DeepSeek 调用复用模型绑定的 bounded-summary provider option，
 显式关闭 thinking，避免 16-token smoke 预算被 reasoning 消耗而产生空正文。
-千问环境凭据与本机配置路径都必须使用阿里云 Token Plan 北京
-`token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` 端点；模型默认为 `qwen3.6-flash`，
-`KITE_QWEN_MODEL` 只允许切换 Qwen 模型。其他 DashScope 区域端点、任意域名、HTTP、非默认端口、
-query/fragment 都 fail closed，不能接收该 smoke 的 credential。
+OpenCode Go 环境凭据与本机配置路径都必须使用 `https://opencode.ai/zen/go/v1` 端点和
+`deepseek-v4-flash` 模型。其他域名/path、HTTP、非默认端口、query/fragment 或模型都 fail closed，
+不能接收该 smoke 的 credential。该 reasoning 模型使用 128 output token 上限，既保持低成本，又为
+非空正文保留足够预算。
 
 `ProviderDataPolicyV1` 是 production route 数据边界的版本化 schema。资格绑定
 provider type、operator、规范化 endpoint origin、endpoint class、deployment 和 region 的

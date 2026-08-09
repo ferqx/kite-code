@@ -4,7 +4,7 @@
 读取时机：修改 Agent task case、fixture、oracle、重复运行、人工验收或产品 Release Evidence 时。
 验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
-`bun run test:provider:smoke -- --provider qwen`、`bun run typecheck`。
+`bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
 相关：ADR-0058、ADR-0068、ADR-0069、D-07、Phase 2B。
 
 ## 当前状态
@@ -21,7 +21,7 @@ review handoff/correction/approval，以及人工 accepted/integrated/reverted/u
 匿名 participant/reviewer digest 与无正文 outcome；raw prompt、response、diff 或 reviewer 评语不进入
 bundle。exact attempt coverage、receipt chain、canonical digest 或 identity 任一不一致均 fail closed。
 
-当前 2B 范围以 DeepSeek/千问各一次低成本真实调用、确定性核心 correctness、安全与 adversarial case
+当前 2B 范围以 DeepSeek/OpenCode Go 各一次低成本真实调用、确定性核心 correctness、安全与 adversarial case
 为准，不要求正式重复运行、external participant 或 product evidence authority。2B.4/2B.5 已按本地范围
 完成，2B.7 已被取代。旧 retained product/evaluator schema 只保留为伪造、缺失、重排和 identity splice
 的负向 contract，不构成发布后增强路线或产品 milestone。

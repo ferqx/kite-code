@@ -6,7 +6,7 @@
 
 验证：`bun test tests/release/oss-candidate.test.ts tests/release/oss-install.test.ts tests/release/supply-chain-workflow.test.ts tests/evals/live-provider-smoke.test.ts`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs`。
 
-相关：ADR-0068、ADR-0069、`release/oss-first-release/task-status-v2.json`、`.github/workflows/release-candidate.yml`。
+相关：ADR-0068、ADR-0069、ADR-0093、`release/oss-first-release/task-status-v2.json`、`.github/workflows/release-candidate.yml`。
 
 ## 首发 Gate
 
@@ -22,7 +22,7 @@ Required workflow 同时覆盖 `main`、`compact` 与 `man`；其中 `man` 的�
 Pull Request 产生的合并提交。本地 pre-commit 守卫提供更早的反馈，远端分支保护仍是最终写入控制面。
 
 `G1` 只判断普通发布可用性：GitHub-hosted macOS、Ubuntu、Windows 原生构建、安装、启动和
-TUI/CLI smoke 通过；DeepSeek `deepseek-v4-flash` 与阿里千问 OpenAI-compatible route 各完成一次
+TUI/CLI smoke 通过；DeepSeek `deepseek-v4-flash` 与 OpenCode Go OpenAI-compatible route 各完成一次
 低成本真实调用；release notes 与已知限制和候选内容一致。
 
 任一测试失败、缺失真实 Provider 凭据或缺失三平台 run 时，结果保持未验证或 blocked，不得包装成

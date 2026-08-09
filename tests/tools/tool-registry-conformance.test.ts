@@ -40,7 +40,11 @@ import { createToolRegistry } from '@/core/tools/registry/registry';
 import type { ToolContext } from '@/core/tools/registry/spec';
 import { defineExecutableTool } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
-import { buildDescription, KNOWN_TOOL_NAMES } from '@/core/tools/tool-contracts';
+import {
+  buildDescription,
+  KNOWN_TOOL_NAMES,
+  normalizeToolContract,
+} from '@/core/tools/tool-contracts';
 
 /**
  * ToolSpec Registry 一致性测试（ADR-0043 §5 / RFC §5）。
@@ -687,11 +691,12 @@ describe('invariant i9 — descriptor projection is deterministic', () => {
     expect(first.provider).toEqual({ type: 'builtin', id: 'kite-code', provenance: 'builtin' });
     expect(first.revision).toBe(second.revision);
 
+    const normalized = normalizeToolContract(sampleReadSpec.contract);
     const mutated: typeof sampleReadSpec = {
       ...sampleReadSpec,
       contract: {
-        ...sampleReadSpec.contract,
-        whenToUse: `${sampleReadSpec.contract.whenToUse} (edited)`,
+        ...normalized,
+        summary: `${normalized.summary} (edited)`,
       },
     };
     expect(registry.descriptorOf(mutated).revision).not.toBe(first.revision);

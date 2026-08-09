@@ -18,10 +18,7 @@ import { join } from 'node:path';
 import { sessionLogDir, sessionLogFrontendDir, sessionLogRoot } from '@/core/config/paths';
 import type { SessionLoggingPolicyV1 } from '@/core/config/session-logging-policy';
 import { SessionLogCollector } from '@/core/session-logger/collector';
-import {
-  WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
-  windowsPowerShellEnvironment,
-} from '@/core/session-logger/secure-storage';
+import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '@/core/session-logger/secure-storage';
 import { SessionLogWriter } from '@/core/session-logger/writer';
 
 const POLICY: SessionLoggingPolicyV1 = {
@@ -59,21 +56,7 @@ afterEach(() => {
 });
 
 describe('secure session log writer', () => {
-  test('isolates Windows PowerShell 5.1 from an inherited PowerShell 7 module path', () => {
-    const environment = windowsPowerShellEnvironment(
-      {
-        SystemRoot: 'C:\\Windows',
-        PSModulePath: 'C:\\Program Files\\PowerShell\\Modules',
-        KEEP_ME: 'yes',
-      },
-      { KITE_SESSION_LOG_ACL_PATH: 'fixture' },
-    );
-
-    expect(environment.PSModulePath).toBe(
-      'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\Modules',
-    );
-    expect(environment.KEEP_ME).toBe('yes');
-    expect(environment.KITE_SESSION_LOG_ACL_PATH).toBe('fixture');
+  test('bounds the native Windows ACL operation', () => {
     expect(WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS).toBe(10_000);
   });
 
@@ -290,6 +273,7 @@ describe('secure session log writer', () => {
       cmd: [process.execPath, 'tests/session-logger/fixtures/lease-holder.ts'],
       cwd: process.cwd(),
       env: { ...process.env },
+      stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'inherit',
     });
@@ -306,7 +290,7 @@ describe('secure session log writer', () => {
           }),
       ).toThrow('active or unverifiable writer lease');
     } finally {
-      child.kill('SIGTERM');
+      child.stdin.end();
       expect(await child.exited).toBe(0);
     }
     expect(existsSync(join(sessionLogDir('tui', 'cross-process-thread'), 'terminal.json'))).toBe(
@@ -320,6 +304,7 @@ describe('secure session log writer', () => {
       cmd: [process.execPath, 'tests/session-logger/fixtures/lease-holder.ts'],
       cwd: process.cwd(),
       env: { ...process.env, KITE_TEST_BOUNDED_POLICY: '1' },
+      stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'inherit',
     });
@@ -337,7 +322,7 @@ describe('secure session log writer', () => {
           }),
       ).toThrow('total capacity');
     } finally {
-      child.kill('SIGTERM');
+      child.stdin.end();
       expect(await child.exited).toBe(0);
     }
     expect(existsSync(sessionLogDir('cli', 'different-thread'))).toBe(false);

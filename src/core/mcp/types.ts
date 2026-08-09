@@ -59,6 +59,10 @@ export interface McpServerConfig {
   timeout?: number;
   /** Internal digest that makes descriptors change when provider config/source changes. */
   providerVersion?: string;
+  /** Internal model-description admission; derived from config source, never serialized. */
+  modelDescriptionTrust?: 'trusted_remote' | 'generated_only';
+  /** Internal source identity for model-visible descriptions. */
+  modelDescriptionProvenance?: 'user_config' | 'approved_project' | 'remote_untrusted';
 }
 
 export type McpAuthConfig =

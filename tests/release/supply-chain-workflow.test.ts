@@ -99,7 +99,8 @@ describe('ordinary open-source release candidate workflow', () => {
     expect(workflow).toContain('run_live_provider_smoke');
     expect(workflow).toContain("github.event_name == 'workflow_dispatch'");
     expect(workflow).toContain('DEEPSEEK_API_KEY:');
-    expect(workflow).toContain('DASHSCOPE_API_KEY:');
+    expect(workflow).toContain('OPENCODE_API_KEY:');
+    expect(workflow).not.toContain('DASHSCOPE_API_KEY:');
     expect(workflow).toContain('bun run test:provider:smoke -- --provider all');
     const liveJob = workflow.slice(workflow.indexOf('  live-provider-smoke:'));
     expect(liveJob).not.toContain('upload-artifact');

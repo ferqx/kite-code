@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
+import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
@@ -92,6 +93,54 @@ describe('SubAgentRunner integration', () => {
       const stepEvents = events.filter((e) => e.type === 'step');
       expect(stepEvents.length).toBeGreaterThanOrEqual(1);
       expect(stepEvents[0]!.data.toolName).toBe('read_file');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('code role preserves the parent project-instruction snapshot for write admission', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-instructions-'));
+    mkdirSync(join(ws, 'nested'));
+    writeFileSync(join(ws, 'AGENTS.md'), 'root rule', 'utf8');
+    writeFileSync(join(ws, 'nested', 'AGENTS.md'), 'nested rule', 'utf8');
+    try {
+      const { sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: {
+              content: 'write',
+              tool_calls: [
+                {
+                  id: 'write-nested',
+                  name: 'write_file',
+                  args: { path: 'nested/new.ts', content: 'export {};' },
+                },
+              ],
+            } as unknown as AIMessage,
+          },
+          { message: { content: 'Nested instructions must be refreshed.' } as AIMessage },
+        ],
+      }) as unknown as SupportedChatModel;
+      const result = await runSubAgent({
+        config: {
+          providerName: 'deepseek',
+          modelName: 'test',
+          features: { promptContractV2: true },
+        } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'write nested/new.ts',
+        projectInstructions: resolveProjectInstructionSnapshot({ workspace: ws }),
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      });
+      expect(result.ok).toBe(false);
+      expect(result.summary).toContain('refreshed');
+      expect(result.executionJournal?.[0]?.stderrDigest).toContain('project_instructions_changed');
+      expect(() => readFileSync(join(ws, 'nested', 'new.ts'), 'utf8')).toThrow();
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

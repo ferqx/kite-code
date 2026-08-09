@@ -1,8 +1,8 @@
 # 当前规则：工具描述即契约
 
 状态：active
-最后更新：2026-07-30
-最后验证：2026-07-30
+最后更新：2026-08-08
+最后验证：2026-08-08
 范围：
 
 - `src/core/tools/tool-contracts.ts`
@@ -36,39 +36,29 @@
 
 ### 契约结构
 
-每个工具的契约必须包含四个 section：
+ToolSpec 的规范契约是 `ToolContractSection`：`summary`、`useWhen`、`returns`，以及按需提供的 `constraints`、`recovery`。`returns.format` 必须是模型实际看到的 `text | json | interrupt`，其 description 和 fields 必须与 `projectResult()` 或 `createInterrupt()` 一致；禁止为了统一外观虚构 `{ok, content, error}`。
 
-1. **whenToUse** — 何时使用此工具，以及何时应改用其他工具。必须至少提及一个替代工具名称。
-2. **commonMistakes** — 模型常见的误用模式，描述具体的错误行为和后果。
-3. **outputFormat** — 期望的 JSON 返回格式，包括关键字段名和成功/失败时的典型值。
-4. **failureHandling** — 失败后应如何解读错误信息、采取什么恢复步骤。
+迁移期仍可读取旧的四段式 `LegacyToolContractSection`。`normalizeToolContract()` 是唯一兼容层，将旧事实确定性归一为结构化契约；不得维护 legacy/V2 两套互相独立的工具事实。
 
 ### 契约存放与绑定
 
-- 所有契约定义在 `src/tools/tool-contracts.ts` 中，以 `export const XXX_CONTRACT` 形式导出。
-- 契约通过 `TOOL_CONTRACTS` Map 注册，key 为工具名称。
-- `definitions.ts` 中的 `tool()` 调用必须使用对应契约的 `.description` 字段，不得硬编码 description 字符串。
-- 契约的 `description` 字段由 `buildDescription()` 从四个 section 拼接生成，格式为：
-
-  ```
-  [whenToUse]
-  Common mistakes: [commonMistakes]
-  Output: [outputFormat]
-  Failure: [failureHandling]
-  ```
+- 契约跟随 ToolSpec 存放；尚未迁移的常量继续集中在 `src/core/tools/tool-contracts.ts`。
+- `buildDescription(contract, version)` 从同一契约生成 legacy 或 V2 concise 文本。`promptContractV2=false` 保持 wire-compatible legacy 表达；V2 使用有界的摘要、使用条件、真实返回格式和必要约束/恢复说明。
+- `definitions.ts` 只能投影 Registry，不得硬编码另一份 description。
+- V2 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
 
 ### Registry 迁移边界（ADR-0043）
 
 工具契约的单一事实源正从 `tool-contracts.ts` 迁移到 ToolSpec Registry（`src/core/tools/registry/`）。迁移期规则：
 
-- 未迁移工具：契约继续写在 `tool-contracts.ts`，本节规则不变。
-- 已迁移工具：契约移入 `spec.contract`，`description` 仍由 `buildDescription()` 生成，四个 section 的质量要求不变。
+- 未迁移工具：契约继续写在 `tool-contracts.ts`，由归一化兼容层消费。
+- 已迁移工具：契约移入 `spec.contract`，`description` 仍由 `buildDescription()` 生成。
 - 新增工具一律直接注册到 Registry；模型表面 description 的确定性由 `tests/tools/tool-registry-conformance.test.ts` 守护。
 
 ### 契约与实现的同步
 
-- 修改工具实现行为时必须同步更新对应契约的四个 section。
-- 修改 `tool-runner.ts` 中的执行结果格式、错误信息或 `toolUsageGuidance()` 时，必须检查契约的 `outputFormat` 和 `failureHandling` 是否一致。
+- 修改工具实现行为时必须同步更新对应结构化事实。
+- 修改执行结果格式、错误信息或恢复语义时，必须检查 `returns`、`constraints` 和 `recovery` 是否一致。
 - 修改静态工具的模型结果、截断、diff 或结构化元数据时，必须在对应 `spec.projectResult()` 中完成；Runner/Controller 只消费投影。
 - 新增工具时必须先创建 ToolSpec 契约，再在生产 Registry 中注册；`definitions.ts` 只投影 Registry，不得再次枚举静态工具名。
 
@@ -80,22 +70,19 @@ ToolSpec 的输入 Schema 只描述并校验上述模型形态，不得使用无
 
 ## 不要做
 
-- 不要在 `definitions.ts` 中硬编码 description 字符串；必须引用契约的 `.description`。
-- 不要把契约 section 视为自由文本；它们必须反映实际工具行为，不能美化或隐藏限制。
+- 不要在 `definitions.ts` 中硬编码第二份 description。
+- 不要把契约字段视为营销文案；它们必须反映实际模型投影，不能美化或隐藏限制。
 - 不要修改工具实现后不同步更新契约。
 - 不要新增工具却不创建对应契约。
-- 不要让契约测试只检查"非空"；测试必须验证四个 section 各自满足质量标准（替代工具引用、失败模式关键词、JSON 字段提及、恢复步骤可操作性）。
+- 不要用“必须提及替代工具”“必须出现失败关键词”“必须声明 ok JSON”等膨胀启发式代替真实性测试。
 
 ## 测试期望
 
 `tests/tool-definitions.test.ts` 中 `tool contracts (ACI)` describe 块应断言：
 
-- 每个注册工具都有对应契约。
-- 每个契约的四个 section 长度均大于合理阈值。
-- 每个契约的 `description` 包含所有 section 内容（部分验证一致性）。
-- `definitions.ts` 中 `tool().description` 必须完全等于对应契约的 `description`。
-- 每个工具的 `whenToUse` 至少提及一个其他工具名称。
-- 每个工具的 `commonMistakes` 包含可识别的失败模式关键词。
-- 每个工具的 `outputFormat` 提及 `ok` 字段。
-- 每个工具的 `failureHandling` 包含可执行的恢复动作。
+- 每个注册工具都有可归一化的结构化契约。
+- legacy/V2 description 都由同一事实生成，V2 保持在预算内。
+- 每个 ToolSpec 的 `projectResult()` 与 `returns.format`、字段声明一致；interrupt 工具与内部请求协议一致。
+- context-sensitive schema 的模型投影和调用解析使用同一个 resolved schema。
+- Planning/Building 工具集合与 task 子类型差异被确定性覆盖。
 - `shell_execute` 契约专项覆盖纯命令形态驱动的审批拒绝与恢复场景；契约不得再要求模型提交 `intent`、授权建议或 prefix rule。

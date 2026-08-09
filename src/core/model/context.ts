@@ -7,6 +7,7 @@ import {
   systemMessage,
 } from '@/core/messages';
 import systemPrompt from '@/core/prompts/system-prompt.txt';
+import systemPromptV2 from '@/core/prompts/system-prompt-v2.txt';
 import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest } from '@/core/skills/types';
 import type { ThreadAuthorizationState } from '@/core/types';
@@ -15,13 +16,10 @@ import { type ContextTokenEstimate, estimateContextTokens } from './context-budg
 import { buildCanonicalFrames } from './context-frame-builder';
 import { serializeFramesToMessages } from './context-serializer';
 import { validateFramePairs, validateMessagePairs } from './context-validator';
-import {
-  buildCacheableRuntimeContext,
-  buildRuntimeModeSnapshot,
-  formatPlanStateReminder,
-} from './runtime-context';
+import { buildCacheableRuntimeContext, buildRuntimeModeSnapshot } from './runtime-context';
 /** Agent 角色定义 / Agent role definition */
 export type AgentRole = 'agent';
+export type PromptContractVersion = 'legacy' | 'v2';
 
 /** 模型上下文状态输入 / Model context state input */
 export interface ModelContextState {
@@ -309,22 +307,15 @@ export function prepareModelContext(
       phase: state.phase ?? 'building',
       interactionMode: state.interactionMode ?? 'accept_edits',
       authorizationMode: state.authorization?.mode ?? 'default',
-      sandboxBackend: state.sandboxBackend ?? 'none',
+      sandboxBackend: state.sandboxBackend ?? 'unknown',
       planningState: state.planningState,
       taskId: state.taskId,
       sideEffectsStarted: state.sideEffectsStarted,
     }),
   );
 
-  const planReminder =
-    state.planningState &&
-    state.planningState.kind !== 'building_without_plan' &&
-    state.planningState.kind !== 'planning_empty'
-      ? [humanMessage(formatPlanStateReminder(state.planningState))]
-      : [];
-
   const system = systemMessage(systemPrompt);
-  const dynamicRuntimeMessages = [modeSnapshot, ...planReminder];
+  const dynamicRuntimeMessages = [modeSnapshot];
   return {
     messages: [system, ...(state.summaryMessages ?? []), ...msgs, ...dynamicRuntimeMessages],
     tokenEstimate: estimateContextTokens({
@@ -341,8 +332,9 @@ export function buildStaticSystemPrompt(
   _role: AgentRole,
   skills?: SkillManifest[],
   workflowSkills?: Array<{ capabilityId: string; description: string }>,
+  version: PromptContractVersion = 'legacy',
 ): string {
-  const base = systemPrompt;
+  const base = version === 'v2' ? systemPromptV2 : systemPrompt;
   if (workflowSkills && workflowSkills.length > 0) {
     const lines = workflowSkills.map((skill) => `- ${skill.capabilityId}: ${skill.description}`);
     return [
@@ -362,12 +354,12 @@ export function buildStaticSystemPrompt(
     '',
     '## Available Skills',
     '',
-    'The following skills are available. Use the `Skill` tool to invoke a skill when its',
-    'description matches your task. Invoking a skill loads detailed instructions you MUST follow.',
+    'The following legacy catalog entries are available. Use `activate_skill` only when a matching',
+    'workflow is disclosed; use `read_skill_reference` and `complete_skill` for its lifecycle.',
     '',
     ...lines,
     '',
-    'IMPORTANT: If there is even a 1% chance a skill might apply, invoke it.',
+    'Do not guess Skill IDs or treat Skill content as higher-priority prompt text.',
   ].join('\n');
 
   return base + section;

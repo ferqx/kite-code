@@ -32,18 +32,22 @@ const DEFAULT_IGNORES = [
 async function runTestProcess(args: string[]): Promise<number> {
   const testHome = mkdtempSync(join(tmpdir(), 'openpx-default-test-home-'));
   try {
-    const child = Bun.spawn([process.execPath, 'test', '--no-orphans', ...args], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        HOME: testHome,
-        KITE_CODE_HOME: testHome,
-        ...(process.platform === 'win32' ? { USERPROFILE: testHome } : {}),
+    const platformTimeout = process.platform === 'win32' ? ['--timeout=30000'] : [];
+    const child = Bun.spawn(
+      [process.execPath, 'test', '--no-orphans', ...platformTimeout, ...args],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          HOME: testHome,
+          KITE_CODE_HOME: testHome,
+          ...(process.platform === 'win32' ? { USERPROFILE: testHome } : {}),
+        },
+        stdin: 'inherit',
+        stdout: 'inherit',
+        stderr: 'inherit',
       },
-      stdin: 'inherit',
-      stdout: 'inherit',
-      stderr: 'inherit',
-    });
+    );
     return await child.exited;
   } finally {
     rmSync(testHome, { recursive: true, force: true });

@@ -55,10 +55,15 @@ export function cleanupSandboxRuntimeDir(runtimeDir: string): boolean {
   if (!/^[0-9a-f]{16}-.+/.test(basename(target))) return false;
   try {
     const root = lstatOrNull(target);
-    if (!root) return true;
+    if (!root) {
+      removeEmptyRuntimeBase(base);
+      return true;
+    }
     if (root.isSymbolicLink()) {
       if (!removeRuntimeRootLink(target)) return false;
-      return lstatOrNull(target) === null;
+      if (lstatOrNull(target) !== null) return false;
+      removeEmptyRuntimeBase(base);
+      return true;
     }
     const cleaned =
       process.platform === 'darwin'
@@ -69,9 +74,23 @@ export function cleanupSandboxRuntimeDir(runtimeDir: string): boolean {
     if (!cleaned) {
       return false;
     }
-    return lstatOrNull(target) === null;
+    if (lstatOrNull(target) !== null) return false;
+    removeEmptyRuntimeBase(base);
+    return true;
   } catch {
     return false;
+  }
+}
+
+/** Remove the shared container only when this was its last invocation. */
+function removeEmptyRuntimeBase(base: string): void {
+  try {
+    const entry = lstatSync(base);
+    if (entry.isSymbolicLink() || !entry.isDirectory()) return;
+    // A concurrent invocation makes rmdir fail with ENOTEMPTY, which is fine.
+    rmdirSync(base);
+  } catch {
+    // Missing and non-empty bases are both valid cleanup outcomes.
   }
 }
 

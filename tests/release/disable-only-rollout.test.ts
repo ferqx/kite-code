@@ -340,7 +340,9 @@ describe('disable-only signed rollout', () => {
     const cachePath = join(root, 'cache', 'rollout.json');
     writeRolloutCacheFileV1(cachePath, applied.cacheRecord);
     expect(loadRolloutCacheFileV1(cachePath)).toEqual(applied.cacheRecord);
-    expect(statSync(cachePath).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect(statSync(cachePath).mode & 0o777).toBe(0o600);
+    }
     writeRolloutCacheFileV1(cachePath, applied.cacheRecord);
 
     const newer = resolveDisableOnlyRolloutV1({
@@ -358,12 +360,14 @@ describe('disable-only signed rollout', () => {
       new RolloutCacheError('cache_invalid'),
     );
 
-    const symlinkPath = join(root, 'rollout-link.json');
-    symlinkSync(cachePath, symlinkPath);
-    expect(() => writeRolloutCacheFileV1(symlinkPath, applied.cacheRecord)).toThrow(
-      new RolloutCacheError('cache_io'),
-    );
-    expect(() => loadRolloutCacheFileV1(symlinkPath)).toThrow(new RolloutCacheError('cache_io'));
+    if (process.platform !== 'win32') {
+      const symlinkPath = join(root, 'rollout-link.json');
+      symlinkSync(cachePath, symlinkPath);
+      expect(() => writeRolloutCacheFileV1(symlinkPath, applied.cacheRecord)).toThrow(
+        new RolloutCacheError('cache_io'),
+      );
+      expect(() => loadRolloutCacheFileV1(symlinkPath)).toThrow(new RolloutCacheError('cache_io'));
+    }
   });
 });
 

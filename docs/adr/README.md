@@ -93,3 +93,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0089](0089-windows-online-loopback-proxy-inheritance.md) | accepted | Windows 已审批 Online Shell 安全继承发起用户的无凭据 loopback WinINet 代理 |
 | [0090](0090-manual-compaction-convergence-and-viability.md) | accepted | 手动压缩在 Provider 前验证最大收益、串行同 session lifecycle，并以 stale 终态收敛 |
 | [0091](0091-runtime-store-compaction-ownership.md) | accepted | RuntimeStore effect lease 与 revision CAS 阻止重复压缩、stale 覆盖和删除后复活 |
+| [0092](0092-prompt-contract-v2.md) | accepted | 模型上下文分层加载项目指令、投影真实 Runtime 状态，并仅采用可信 Capability 描述 |
+| [0093](0093-opencode-go-release-provider-smoke.md) | accepted | G1 第二条真实 Provider smoke 从阿里千问 Token Plan 迁移到固定 OpenCode Go route |

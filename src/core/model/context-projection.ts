@@ -20,11 +20,13 @@ import {
   getActiveTask,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import type { SandboxBackend } from '@/core/sandbox/platform';
 import type { SkillManifest } from '@/core/skills/types';
 import { getAgentPhase } from '@/protocol/events';
 import { serializeCompactionSummary } from './compaction-summary-frame';
 import {
   buildStaticSystemPrompt,
+  type PromptContractVersion,
   reorderInterleavedMessages,
   sanitizeToolCallPairs,
 } from './context';
@@ -34,10 +36,10 @@ import { buildCanonicalFrames } from './context-frame-builder';
 import { serializeFramesToMessages } from './context-serializer';
 import { validateFramePairs, validateMessagePairs } from './context-validator';
 import {
-  buildCacheableRuntimeContext,
-  buildRuntimeModeSnapshot,
-  formatPlanStateReminder,
-} from './runtime-context';
+  formatProjectInstructionSnapshot,
+  type ProjectInstructionSnapshot,
+} from './project-instructions';
+import { buildCacheableRuntimeContext, buildRuntimeModeSnapshot } from './runtime-context';
 
 // ── Types ──
 
@@ -69,6 +71,9 @@ export interface ContextProjectionEnvironment {
     capabilityId: string;
     description: string;
   }>;
+  promptContractVersion?: PromptContractVersion;
+  projectInstructions?: ProjectInstructionSnapshot;
+  sandboxBackend?: SandboxBackend | 'unknown';
   /** Inputs that can change projection/summary semantics without changing tool schemas. */
   leaseMetadata?: {
     providerName: string;
@@ -137,6 +142,9 @@ export function digestProjectionEnvironment(env: ContextProjectionEnvironment): 
             description: workflow.description,
           }))
           .sort((left, right) => left.capabilityId.localeCompare(right.capabilityId)),
+        promptContractVersion: env.promptContractVersion ?? 'legacy',
+        projectInstructionRevision: env.projectInstructions?.revision ?? null,
+        sandboxBackend: env.sandboxBackend ?? 'unknown',
         leaseMetadata: env.leaseMetadata ?? null,
       }),
     )
@@ -158,6 +166,9 @@ export interface BuildContextProjectionInput {
   skills?: SkillManifest[];
   /** Workflow skill descriptors for the system prompt. */
   workflowSkills?: Array<{ capabilityId: string; description: string }>;
+  promptContractVersion?: PromptContractVersion;
+  projectInstructions?: ProjectInstructionSnapshot;
+  sandboxBackend?: SandboxBackend | 'unknown';
 }
 
 /** Complete context projection — all components assembled and validated. */
@@ -302,15 +313,28 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
   validateMessagePairs(msgs);
 
   // ── 6. Build system messages ──
-  const systemPrompt =
-    buildStaticSystemPrompt(input.role, input.skills, input.workflowSkills) +
-    '\n\n' +
+  const promptContractVersion = input.promptContractVersion ?? 'legacy';
+  const staticPrompt = buildStaticSystemPrompt(
+    input.role,
+    input.skills,
+    input.workflowSkills,
+    promptContractVersion,
+  );
+  const cacheableEnvironment =
     buildCacheableRuntimeContext({ workspace: input.state.session.workspace }) +
     (input.activeSkillInstructions
       ? `\n\n## Active Workflow Instructions\n\n${input.activeSkillInstructions}`
       : '');
-
-  const system = systemMessage(systemPrompt);
+  const systemMessages =
+    promptContractVersion === 'v2'
+      ? [systemMessage(staticPrompt), systemMessage(cacheableEnvironment)]
+      : [systemMessage(`${staticPrompt}\n\n${cacheableEnvironment}`)];
+  const projectInstructionMessages =
+    input.projectInstructions &&
+    (input.projectInstructions.documents.length > 0 ||
+      input.projectInstructions.warnings.length > 0)
+      ? [humanMessage(formatProjectInstructionSnapshot(input.projectInstructions))]
+      : [];
 
   // ── 7. Build dynamic runtime messages ──
   const planning = getActivePlanning(input.state);
@@ -323,24 +347,19 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
       phase,
       interactionMode,
       authorizationMode: input.state.authorization?.mode ?? 'default',
-      sandboxBackend: 'none' as const,
+      sandboxBackend: input.sandboxBackend ?? 'unknown',
       planningState: planning.kind !== 'planning_empty' ? planning : undefined,
       taskId: activeTask?.taskId,
       sideEffectsStarted: activeTask?.sideEffectsStarted,
     }),
   );
 
-  const planReminder =
-    planning.kind !== 'building_without_plan' && planning.kind !== 'planning_empty'
-      ? [humanMessage(formatPlanStateReminder(planning))]
-      : [];
-
-  const dynamicRuntimeMessages = [modeSnapshot, ...planReminder];
+  const dynamicRuntimeMessages = [modeSnapshot];
 
   // ── 8. Compute complete token estimate (including tool schemas) ──
   const estimate = estimateContextTokens({
-    systemMessages: [system],
-    transcriptMessages: msgs,
+    systemMessages,
+    transcriptMessages: [...projectInstructionMessages, ...msgs],
     summaryMessages,
     dynamicRuntimeMessages,
     serializedTools: input.serializedTools,
@@ -348,14 +367,15 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
 
   // ── 9. Assemble final provider-ready messages ──
   const providerMessages: BaseMessage[] = [
-    system,
+    ...systemMessages,
+    ...projectInstructionMessages,
     ...summaryMessages,
     ...msgs,
     ...dynamicRuntimeMessages,
   ];
 
   return {
-    systemMessages: [system],
+    systemMessages,
     summaryMessages,
     transcriptMessages: msgs,
     dynamicRuntimeMessages,

@@ -23,6 +23,13 @@ tests/tui-system/
 Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动真实 TUI 的文件属于串行
 `tui-system` job。两者不得在 system runner 中重复执行。
 
+Prompt Contract 迁移必须有 production-mode PTY scenario：通过正常 layered config 显式开启候选
+flag，以 `NODE_ENV=production` 启动真实 TUI composition root，并从本地 mock Provider 收到的实际
+HTTP request 验证 stable System（adapter 可合并相邻 System frame）/project/user/runtime 消息顺序、
+cacheable context、唯一 Runtime block 和 phase-resolved 工具声明。该 scenario 是 production TUI
+链路证据，但仍是本地确定性 Provider，不能表述为真实模型
+A/B、release artifact 或平台资格证据。
+
 权限与隐私状态的可见性必须由真实 PTY scenario 覆盖：无沙箱时 `/permissions` 选择器保留 Full
 能力说明并显示环境警告，默认 metadata session logging 不显示普通 mode 状态；测试同时验证 Full
 不可选择、content logging 披露没有被普通 metadata 路径误触发。

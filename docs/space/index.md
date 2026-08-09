@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-02（Agent 生产准入跨平台策略修正）
+最后更新：2026-08-09（归档 Prompt Contract V2）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -114,6 +114,7 @@
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
 | `plans/2026-07-29-agent-production-readiness-roadmap.md` | archived | ADR-0069 首发路线图已收口：G0/G1、83 completed、25 superseded、0 optional。 |
 | `plans/2026-08-04-tui-overlay-design-system.md` | archived | Overlay contract、MCP、通用选择页、交互页及文档验证已完成。 |
+| `plans/2026-08-08-prompt-contract-v2.md` | archived | Prompt Contract V2：项目指令分层、真实 Runtime 状态、准确工具契约、可信 MCP 描述与 token/live A/B 门禁已完成。 |
 | `plans/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
 | `plans/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 ✅，Phase3 ✅。 |
 | `plans/2026-05-22-production-gaps-phase1.md` | archived | Phase 1 实施记录（8 commits）。MCP + 事件闭环 + 错误分类。 |
@@ -141,6 +142,7 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-09-prompt-contract-v2.md` | completed | 记录 Prompt Contract V2 四层投影、项目指令、工具/MCP 契约、59.85% token 降幅、真实模型 A/B 与完整 Windows 门禁。 |
 | `execution/completed/2026-08-04-single-maintainer-open-source-first-release.md` | completed | 记录单维护者开源首发路线图 G0/G1、统一 Review、真实 Provider、三平台候选与 83/25/0 终态收口。 |
 | `execution/completed/2026-08-05-tui-overlay-design-system.md` | completed | 记录统一 Overlay primitives、MCP 视图拆分、选择器迁移和 component/PTY 验证。 |
 | `execution/completed/2026-08-02-agent-production-admission-strategy-correction.md` | completed | 记录三平台发行与 effectful capability 正交准入、D-03 关闭和 DeepSeek blocked candidate；不提升 Task/milestone。 |

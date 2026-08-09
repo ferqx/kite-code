@@ -95,8 +95,11 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
     const toolset: Record<string, SchemaOnlyModelTool> = {};
     for (const spec of this.availableIn(context)) {
       toolset[spec.name] = tool({
-        description: buildDescription(spec.contract),
-        inputSchema: zodSchema(spec.inputSchema),
+        description: buildDescription(
+          spec.contract,
+          context.featureFlags?.promptContractV2 ? 'v2' : 'legacy',
+        ),
+        inputSchema: zodSchema(spec.modelInputSchema?.(context) ?? spec.inputSchema),
       }) as unknown as SchemaOnlyModelTool;
     }
     return toolset;
@@ -132,7 +135,7 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
         error: `Tool '${call.name}' is not available in this context`,
       };
     }
-    const parsed = spec.inputSchema.safeParse(call.args);
+    const parsed = (spec.modelInputSchema?.(context) ?? spec.inputSchema).safeParse(call.args);
     if (!parsed.success) {
       const issue = parsed.error.issues[0];
       const path = issue && issue.path.length > 0 ? `${issue.path.join('.')}: ` : '';
@@ -157,7 +160,7 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
   effectsOf(name: string, args: unknown, context: ToolContext): ToolCapability | undefined {
     const spec = this.#specs.get(name);
     if (!spec || spec.availability?.(context) === false) return undefined;
-    const parsed = spec.inputSchema.safeParse(args);
+    const parsed = (spec.modelInputSchema?.(context) ?? spec.inputSchema).safeParse(args);
     return parsed.success ? spec.effects(parsed.data, context) : undefined;
   }
 
@@ -172,6 +175,8 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
       kind: 'builtin_tool' as const,
       displayName: spec.name,
       description: buildDescription(spec.contract),
+      modelDescription: buildDescription(spec.contract, 'v2'),
+      descriptionProvenance: 'builtin' as const,
       inputSchema: z.toJSONSchema(spec.inputSchema) as Record<string, unknown>,
       provider: { type: 'builtin' as const, id: 'kite-code', provenance: 'builtin' as const },
       declaredEffects: spec.declaredEffects,

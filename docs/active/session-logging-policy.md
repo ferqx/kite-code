@@ -90,10 +90,11 @@ smoke 定位；collector 不把该技术细节投影给 App。
 
 App/Runtime 把完整 resolved policy 注入 writer。POSIX 上 `.kite-code`、sessions root、
 frontend 和 session 目录收紧为 `0700`，日志与 lease/terminal metadata 为 `0600`；Windows
-对同一路径应用 owner-only、禁继承 ACL；调用系统 Windows PowerShell 5.1 时固定其系统
-`PSModulePath`，不继承 PowerShell 7 的不兼容模块路径。路径 segment 使用封闭格式并拒绝 Windows reserved
-名称；每次 ACL 设置与 smoke 验证的 PowerShell 子进程有 10 秒硬 timeout，超时即 fail
-closed。任何 user data/session root、session 目录或目标文件 symlink/reparse point 都 fail
+对同一路径应用 owner-only、禁继承 ACL；helper 只调用 `System32` 下的 `whoami.exe` 与
+`icacls.exe`，首次解析当前用户 SID 后在进程内缓存，并对每个目标依次 reset ACL、设置 owner、
+关闭继承且只授予该 SID FullControl。路径 segment 使用封闭格式并拒绝 Windows reserved 名称；
+每个原生 ACL 子进程有 10 秒硬 timeout，任一步失败或超时即 fail closed。任何 user data/session
+root、session 目录或目标文件 symlink/reparse point 都 fail
 closed。JSON metadata 使用同目录 exclusive temp、fsync、rename 和目录 fsync；JSONL append
 在 writer 构造期以 no-follow descriptor 立即打开并固定，不延迟到首批事件。所有受管文件必须
 是 `nlink=1` 的 owner-owned regular file；构造、每批 append 与 retention 都拒绝 symlink、
@@ -125,7 +126,7 @@ frontend、session 内的每个观察条目都计入预算，不先把任意目�
 超过扫描预算后永久自锁；macOS 自动生成在 root 或 frontend 层的 `.DS_Store` 同样移入恢复区。
 其他未知 root/frontend 条目、扫描超预算、容量不可证明或隔离迁移失败仍 fail closed，新 writer 不建立。恢复区不属于
 session retention 自动删除范围，需要人工审计或清理。
-POSIX maintenance 默认时间预算为 50ms；Windows 因 owner-only ACL 需要启动系统 PowerShell，
+POSIX maintenance 默认时间预算为 50ms；Windows 因 owner-only ACL 需要运行原生身份与权限工具，
 默认使用 30 秒预算。两者都保留 512 个观察条目的独立硬上限，显式配置可进一步收紧预算。
 
 不同 session 的 maintenance 与 lease 创建还由 sessions root 的跨进程 admission record
@@ -148,4 +149,6 @@ retention 规则接管；session 内未知条目、link/hardlink 只做可恢复
 `session.logging_limited` metadata，停止后续记录，并为 bounded terminal marker 预留空间。
 总容量 maintenance 为新 session 预留其完整上限。原生 ACL smoke 在 macOS、Ubuntu 和 Windows
 runner 验证权限、link/reparse rejection 与 terminal 原子落盘，并分别上传带 OS/Bun
-身份的 `session-log-acl-<runner>` JSON 证据。
+身份的 `session-log-acl-<runner>` JSON 证据。Windows smoke 的独立只读验证固定调用 `System32` 下的
+Windows PowerShell 5.1，并把 `PSModulePath` 固定到同一系统目录；它不复用已移除的生产 ACL
+environment helper，因此任一平台都能在模块加载阶段完成当前 smoke 入口解析。

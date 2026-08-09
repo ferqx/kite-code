@@ -33,6 +33,8 @@ describe('feature flags', () => {
     expect(getFeatureFlags().executionBoundaryV1).toBe(false);
     expect(getFeatureFlags().networkBoundaryV1).toBe(false);
     expect(getFeatureFlags().observabilityMetricsV1).toBe(false);
+    expect(getFeatureFlags().promptContractV2).toBe(false);
+    expect(getFeatureFlags({ features: { promptContractV2: true } }).promptContractV2).toBe(true);
     expect(
       getFeatureFlags({ features: { boundedCancellationV1: true } }).boundedCancellationV1,
     ).toBe(true);
@@ -61,6 +63,8 @@ describe('feature flags', () => {
     expect(parseFeatureOverride('remoteMcpEgressPolicyV1')).toEqual({
       remoteMcpEgressPolicyV1: true,
     });
+    expect(parseFeatureOverride('promptContractV2=true')).toEqual({ promptContractV2: true });
+    expect(parseFeatureOverride('promptContractV2=false')).toEqual({ promptContractV2: false });
     expect(() => parseFeatureOverride('typo=true')).toThrow('Unknown feature flag');
   });
 
@@ -70,11 +74,12 @@ describe('feature flags', () => {
       const configPath = join(dir, 'kite-code.jsonc');
       writeFileSync(
         configPath,
-        '{ "features": { "autoReviewV2": true }, "provider": { "ollama": {} } }',
+        '{ "features": { "autoReviewV2": true, "promptContractV2": true }, "provider": { "ollama": {} } }',
       );
       const loaded = loadAgentConfig({ configPath, providerName: 'ollama' });
       expect(loaded.features).toEqual({
         autoReviewV2: true,
+        promptContractV2: true,
       });
       expect(loaded.sessionLoggingPolicy?.mode).toBe('metadata');
       expect(

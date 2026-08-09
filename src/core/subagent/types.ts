@@ -43,6 +43,8 @@ export interface SubAgentRunnerInput {
   authorization?: import('@/core/types').ThreadAuthorizationState;
   workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
   phase?: import('@/protocol/events').AgentPhase;
+  /** Project instructions visible to the parent model when this sub-agent was dispatched. */
+  projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
   threadId?: string;
   model?: import('@/core/model/factory').SupportedChatModel;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
@@ -68,6 +70,7 @@ export interface SubAgentContinuation {
   /** Phase 5: journal state preserved across approval round-trips */
   executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;
+  projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
 }
 
 /** 已暂停子 agent 的待执行工具 / Pending tool preserved with a suspended continuation */

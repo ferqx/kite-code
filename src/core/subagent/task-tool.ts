@@ -22,6 +22,7 @@ export interface TaskToolDeps {
   authorization?: import('@/core/types').ThreadAuthorizationState;
   workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
   phase?: import('@/protocol/events').AgentPhase;
+  projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
   threadId?: string;
   eventSink: SubAgentEventSink;
   signal?: AbortSignal;
@@ -74,6 +75,7 @@ export async function runTaskSubAgent(
       authorization: deps.authorization,
       workspaceAccess: deps.workspaceAccess,
       phase: deps.phase,
+      projectInstructions: deps.projectInstructions,
       threadId: deps.threadId,
       timeoutMs: 30 * 60 * 1000,
       signal: deps.signal ?? new AbortController().signal,

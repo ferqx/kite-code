@@ -14,6 +14,10 @@ export const taskInputSchema = z.object({
     ),
 });
 
+const planningTaskInputSchema = taskInputSchema.extend({
+  subagent_type: z.enum(['explore', 'plan']),
+});
+
 export type TaskInput = z.infer<typeof taskInputSchema>;
 
 export const taskSpec = defineExecutableTool({
@@ -21,6 +25,10 @@ export const taskSpec = defineExecutableTool({
   kind: 'coordination',
   contract: TASK_CONTRACT.sections,
   inputSchema: taskInputSchema,
+  modelInputSchema: (context) =>
+    context.featureFlags?.promptContractV2 && context.phase === 'planning'
+      ? planningTaskInputSchema
+      : taskInputSchema,
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'none' },
   minimumApproval: 'user',
   availability: (context) => context.hasTaskAdapter === true,

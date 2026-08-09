@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { activateSkillLifecycle, completeSkillLifecycle, readSkillReference } from '@/core/skills';
-import type { ToolContractSection } from '@/core/tools/tool-contracts';
+import type { LegacyToolContractSection } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
-const readContract: ToolContractSection = {
+const readContract: LegacyToolContractSection = {
   whenToUse:
     'Read a declared supporting file from the active Skill Workflow. Use read_file for workspace files outside the Skill contract.',
   commonMistakes:
@@ -12,7 +12,7 @@ const readContract: ToolContractSection = {
   failureHandling:
     'If rejected, verify the active activation id and choose an exact path declared by its Workflow Contract.',
 };
-const completeContract: ToolContractSection = {
+const completeContract: LegacyToolContractSection = {
   whenToUse:
     'Complete an active inline Skill Workflow with structured output. Use task for unrelated delegated work.',
   commonMistakes:
@@ -21,7 +21,7 @@ const completeContract: ToolContractSection = {
   failureHandling:
     'Fix the structured output to match the active Workflow Contract schema, then retry once.',
 };
-const activateContract: ToolContractSection = {
+const activateContract: LegacyToolContractSection = {
   whenToUse:
     'Activate a disclosed compiled Skill Workflow Contract. Use tool_search first when the capability is not disclosed.',
   commonMistakes:

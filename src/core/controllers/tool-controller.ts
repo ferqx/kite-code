@@ -33,6 +33,7 @@ import {
   snapshotRemoteMcpArgumentsV1,
 } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
+import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import {
   type CapabilityArtifactStore,
   defaultCapabilityArtifactStore,
@@ -393,6 +394,11 @@ async function handleSubAgentResume(params: {
         descendantResourceAdmission: params.descendantResourceAdmission,
         subagentEventSink: params.emitSubagentEvent,
         availabilityContext: availCtx,
+        projectInstructionSnapshot: visibleProjectInstructions(
+          params.state,
+          call?.modelMessageId,
+          params.taskConfig,
+        ),
         beforeDispatch: params.descendantResourceAdmission
           ? async () => {
               childReservation = await params.descendantResourceAdmission!.reserveTool({
@@ -906,6 +912,11 @@ export async function executeRuntimeTools(params: {
                   authorization: params.state.authorization,
                   workspaceAccess: params.state.workspaceAccess,
                   phase: getAgentPhase(getActivePlanning(params.state)),
+                  projectInstructions: visibleProjectInstructions(
+                    params.state,
+                    call.modelMessageId,
+                    params.taskConfig!,
+                  ),
                   threadId: params.state.session.threadId,
                   eventSink: emitSubagentEvent,
                   signal: params.signal,
@@ -1357,6 +1368,11 @@ export async function executeRuntimeTools(params: {
           descendantResourceAdmission: params.descendantResourceAdmission,
           subagentEventSink: emitSubagentEvent,
           availabilityContext: availCtx,
+          projectInstructionSnapshot: visibleProjectInstructions(
+            params.state,
+            call.modelMessageId,
+            params.taskConfig,
+          ),
           onShellProgress: (chunk, stream) =>
             events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
         });
@@ -1695,6 +1711,11 @@ export async function executeRuntimeTools(params: {
             taskModel: params.taskModel,
             subagentEventSink: emitSubagentEvent,
             availabilityContext: availCtx,
+            projectInstructionSnapshot: visibleProjectInstructions(
+              params.state,
+              call.modelMessageId,
+              params.taskConfig,
+            ),
             onShellProgress: (chunk, stream) =>
               events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
           });
@@ -1970,4 +1991,16 @@ function invocationTerminalEvent(
     ...(artifact ? { artifact } : {}),
     ...(externalReferences.length > 0 ? { externalReferences } : {}),
   };
+}
+function visibleProjectInstructions(
+  state: RuntimeState,
+  modelMessageId: string | undefined,
+  config: AgentConfig | undefined,
+) {
+  if (!config || !getFeatureFlags(config).promptContractV2) return undefined;
+  return resolveProjectInstructionSnapshot({
+    workspace: state.session.workspace,
+    state,
+    excludeModelMessageId: modelMessageId,
+  });
 }

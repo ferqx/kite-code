@@ -20,7 +20,5 @@ const writer = new SessionLogWriter('tui', 'cross-process-thread', 'events', und
 });
 
 process.stdout.write('lease-acquired\n');
-await new Promise<void>((resolve) => {
-  process.once('SIGTERM', resolve);
-});
+await Bun.stdin.text();
 await writer.finalize();

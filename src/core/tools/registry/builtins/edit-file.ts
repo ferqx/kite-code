@@ -32,6 +32,8 @@ export const editFileSpec = defineExecutableTool({
   kind: 'computer',
   contract: EDIT_FILE_CONTRACT.sections,
   inputSchema: editFileInputSchema,
+  availability: (context) =>
+    !(context.featureFlags?.promptContractV2 && context.phase === 'planning'),
   declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
   governanceRevision: 'protected-path-v1',

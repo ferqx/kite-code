@@ -200,7 +200,7 @@ describe('ExecutionBoundaryV1 schema', () => {
     const nested = join(workspace, 'nested');
     mkdirSync(nested);
     const alias = join(workspace, 'workspace-alias');
-    symlinkSync(workspace, alias, 'dir');
+    symlinkSync(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
 
     const parsed = parseExecutionBoundaryV1(
       boundary(join(alias, 'nested', '..'), {
@@ -238,7 +238,7 @@ describe('ExecutionBoundaryV1 schema', () => {
   test('produces a stable digest across path aliases, host order, and duplicates', () => {
     const workspace = temporaryWorkspace();
     const alias = join(workspace, 'alias');
-    symlinkSync(workspace, alias, 'dir');
+    symlinkSync(workspace, alias, process.platform === 'win32' ? 'junction' : 'dir');
     const first = boundary(workspace, {
       networkMode: 'allowlist',
       networkAllowlist: ['b.example.com', 'a.example.com'],
@@ -704,7 +704,11 @@ describe('production execution admission', () => {
     }
 
     const outsideWorkspace = temporaryWorkspace();
-    symlinkSync(outsideWorkspace, join(workspace, 'escape'), 'dir');
+    symlinkSync(
+      outsideWorkspace,
+      join(workspace, 'escape'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
     for (const path of [
       join(workspace, '..', 'outside.txt'),
       '../outside.txt',

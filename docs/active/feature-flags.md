@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：新增、删除或调整 runtime feature flag、配置合并、CLI 覆盖或灰度策略时。
-验证：`bun test tests/config/features.test.ts`。
+验证：`bun test tests/config/features.test.ts`、`bun run test:tui:system prompt-contract-v2-production`。
 
 Runtime feature flags are registered in `src/core/config/features.ts`. Configuration is read from the optional `features` object in user and project `kite-code.jsonc`; project values override user values.
 
@@ -13,6 +13,8 @@ New flags must default to `false`, include tests for both values, and retain the
 Exception: ADR-0007 explicitly replaces the old MCP adapter, and ADR-0020 completes stable on-demand loading. `capabilityCatalogV1`、`mcpRuntimeBindingV1` and `toolSearchV1` therefore default to `true`; disabling any of them remains a fail-closed diagnostic override and must never re-enable a legacy MCP execution path.
 
 With `toolSearchV1` enabled, MCP schemas are always loaded on demand through metadata-only search and retained in the session while revisions match; Skill disclosure still uses provider support and context budget.
+
+`promptContractV2` defaults to `false` and may be enabled per run with `--feature promptContractV2=true`. It switches Prompt layering, concise tool formatting, project-instruction projection, phase-aware tool disclosure and trusted MCP semantic projection. It does not gate correctness fixes: both paths use the real sandbox state, corrected Skill tool names and truthful tool result contracts. Rollback is only the flag change; project instruction/capability revisions and Runtime history remain valid. The production-mode TUI path has deterministic PTY E2E coverage with V2 explicitly enabled, including outbound role ordering, project context, one Runtime block and the planning tool surface. Changing the default to `true` still requires at least two weeks of dual-path availability, a live A/B run bound to the final candidate commit, and a separate migration ADR.
 
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.
 
@@ -30,6 +32,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | `networkBoundaryV1` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
 | `releaseProfileV1` | `false` | 请求使用 artifact-pinned Release Profile；没有独立 artifact authority 时 true 不生效且 CLI 拒绝抬高 |
 | `observabilityMetricsV1` | `false` | 允许 artifact-authorized、用户已 consent 的无正文 metric exporter；普通 CLI 只能设为 false |
+| `promptContractV2` | `false` | 灰度分层 Prompt、项目指令快照、简洁工具契约、按 phase 裁剪和 MCP 描述 admission |
 
 Phase 5 的 `verificationV1`、`mcpExecutionRecordV1`、`mcpProviderActionV1`、
 `skillActivationV2` 与 `skillWorkflowV1` 也全部默认关闭。Release admission 不接受 profile 自报开关：

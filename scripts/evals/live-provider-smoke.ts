@@ -3,14 +3,15 @@ import type { AgentConfig } from '../../src/core/config';
 import { loadAgentConfig } from '../../src/core/config';
 import { createChatModel } from '../../src/core/model/factory';
 
-const QWEN_DEFAULT_BASE_URL = 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1';
-const QWEN_DEFAULT_MODEL = 'qwen3.6-flash';
-const QWEN_REQUIRED_HOST = 'token-plan.cn-beijing.maas.aliyuncs.com';
+const OPENCODE_GO_DEFAULT_BASE_URL = 'https://opencode.ai/zen/go/v1';
+const OPENCODE_GO_DEFAULT_MODEL = 'deepseek-v4-flash';
+const OPENCODE_GO_DEFAULT_PROVIDER_NAME = 'opencode_go';
+const OPENCODE_GO_REQUIRED_HOST = 'opencode.ai';
 
 export interface LiveProviderSmokeReportV1 {
   schema: 'LiveProviderSmokeReportV1';
   status: 'passed';
-  provider: 'deepseek' | 'qwen-openai-compatible';
+  provider: 'deepseek' | 'opencode-go';
   providerType: 'deepseek' | 'openai-compatible';
   model: string;
   durationMs: number;
@@ -34,19 +35,16 @@ export async function runLiveProviderSmoke(input: {
   if (input.provider === 'deepseek' && input.config.providerType !== 'deepseek') {
     throw new Error('deepseek_provider_type_mismatch');
   }
-  if (
-    input.provider === 'qwen-openai-compatible' &&
-    input.config.providerType !== 'openai-compatible'
-  ) {
-    throw new Error('qwen_provider_type_mismatch');
+  if (input.provider === 'opencode-go' && input.config.providerType !== 'openai-compatible') {
+    throw new Error('opencode_go_provider_type_mismatch');
   }
   const startedAt = performance.now();
   const binding = createChatModel(input.config);
   const result = await generateText({
     model: binding.model,
-    prompt: 'Reply with one short acknowledgement.',
+    prompt: 'Reply with exactly OK.',
     temperature: 0,
-    maxOutputTokens: 16,
+    maxOutputTokens: input.provider === 'opencode-go' ? 128 : 16,
     providerOptions: binding.compactionProviderOptions,
     abortSignal: AbortSignal.timeout(input.timeoutMs ?? 60_000),
   });
@@ -98,19 +96,19 @@ function resolveDeepSeekConfig(): {
   return { config, credentialSource: 'local_config' };
 }
 
-export function resolveQwenConfig(): {
+export function resolveOpenCodeGoConfig(): {
   config: AgentConfig;
   credentialSource: LiveProviderSmokeReportV1['credentialSource'];
 } {
-  const environmentKey = process.env.DASHSCOPE_API_KEY;
+  const environmentKey = process.env.OPENCODE_API_KEY;
   if (environmentKey) {
-    const baseURL = process.env.KITE_QWEN_BASE_URL ?? QWEN_DEFAULT_BASE_URL;
-    const modelName = process.env.KITE_QWEN_MODEL ?? QWEN_DEFAULT_MODEL;
-    assertQwenRoute(baseURL, modelName);
+    const baseURL = process.env.KITE_OPENCODE_GO_BASE_URL ?? OPENCODE_GO_DEFAULT_BASE_URL;
+    const modelName = process.env.KITE_OPENCODE_GO_MODEL ?? OPENCODE_GO_DEFAULT_MODEL;
+    assertOpenCodeGoRoute(baseURL, modelName);
     return {
       credentialSource: 'environment',
       config: {
-        providerName: 'qwen-openai-compatible',
+        providerName: OPENCODE_GO_DEFAULT_PROVIDER_NAME,
         providerType: 'openai-compatible',
         apiKey: environmentKey,
         baseURL,
@@ -119,11 +117,13 @@ export function resolveQwenConfig(): {
       },
     };
   }
-  const providerName = process.env.KITE_QWEN_PROVIDER_NAME;
-  if (!providerName) throw new Error('qwen_credential_missing');
-  const config = loadAgentConfig({ providerName });
-  if (config.providerType !== 'openai-compatible') throw new Error('qwen_provider_type_mismatch');
-  assertQwenRoute(config.baseURL, config.modelName);
+  const providerName =
+    process.env.KITE_OPENCODE_GO_PROVIDER_NAME ?? OPENCODE_GO_DEFAULT_PROVIDER_NAME;
+  const config = loadAgentConfig({ providerName, modelName: OPENCODE_GO_DEFAULT_MODEL });
+  if (config.providerType !== 'openai-compatible') {
+    throw new Error('opencode_go_provider_type_mismatch');
+  }
+  assertOpenCodeGoRoute(config.baseURL, config.modelName);
   return { config, credentialSource: 'local_config' };
 }
 
@@ -145,20 +145,24 @@ function isExactDeepSeekEndpoint(value: string): boolean {
   }
 }
 
-function assertQwenRoute(endpoint: string, modelName: string): void {
-  if (!/^qwen[-a-z0-9.]*$/i.test(modelName)) throw new Error('qwen_model_mismatch');
-  const value = endpoint;
-  const url = new URL(value);
-  if (
-    url.protocol !== 'https:' ||
-    url.port !== '' ||
-    url.hostname !== QWEN_REQUIRED_HOST ||
-    !['/compatible-mode/v1', '/compatible-mode/v1/'].includes(url.pathname) ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash
-  ) {
+function assertOpenCodeGoRoute(endpoint: string, modelName: string): void {
+  if (modelName !== OPENCODE_GO_DEFAULT_MODEL) throw new Error('opencode_go_model_mismatch');
+  try {
+    const url = new URL(endpoint);
+    if (
+      url.protocol !== 'https:' ||
+      url.port !== '' ||
+      url.hostname !== OPENCODE_GO_REQUIRED_HOST ||
+      !['/zen/go/v1', '/zen/go/v1/'].includes(url.pathname) ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    ) {
+      throw new Error('provider_endpoint_unsafe');
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message === 'provider_endpoint_unsafe') throw error;
     throw new Error('provider_endpoint_unsafe');
   }
 }
@@ -170,7 +174,7 @@ function finiteOrNull(value: number | undefined): number | null {
 async function main(): Promise<void> {
   const providerIndex = process.argv.indexOf('--provider');
   const selected = providerIndex >= 0 ? process.argv[providerIndex + 1] : 'all';
-  if (selected !== 'all' && selected !== 'deepseek' && selected !== 'qwen') {
+  if (selected !== 'all' && selected !== 'deepseek' && selected !== 'opencode-go') {
     throw new Error('provider_selection_invalid');
   }
   const reports: LiveProviderSmokeReportV1[] = [];
@@ -178,9 +182,9 @@ async function main(): Promise<void> {
     const resolved = resolveDeepSeekConfig();
     reports.push(await runLiveProviderSmoke({ provider: 'deepseek', ...resolved }));
   }
-  if (selected === 'all' || selected === 'qwen') {
-    const resolved = resolveQwenConfig();
-    reports.push(await runLiveProviderSmoke({ provider: 'qwen-openai-compatible', ...resolved }));
+  if (selected === 'all' || selected === 'opencode-go') {
+    const resolved = resolveOpenCodeGoConfig();
+    reports.push(await runLiveProviderSmoke({ provider: 'opencode-go', ...resolved }));
   }
   for (const report of reports) console.log(JSON.stringify(report));
 }

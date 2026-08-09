@@ -23,7 +23,7 @@ import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
 import type { ShellExecutor } from '@/core/tools/shell';
-import type { ToolContractSection } from '@/core/tools/tool-contracts';
+import type { ToolContractSource } from '@/core/tools/tool-contracts';
 import type { ShellNetworkBrokerV1, ShellNetworkMode } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 
@@ -161,12 +161,14 @@ export interface BaseToolSpec<Name extends string = string, Input = unknown> {
   readonly name: Name;
   readonly kind: ToolKind;
   /** 契约文本唯一来源；description 由 buildDescription(sections) 派生，不存在第二份手写描述。 */
-  readonly contract: ToolContractSection;
+  readonly contract: ToolContractSource;
   /**
    * 模型参数 Schema。execute 接收的对象恒等于该 Schema 的解析结果
    * （一致性不变量 i1），请求解析层不得逐字段重映射。
    */
   readonly inputSchema: z.ZodType<Input>;
+  /** Optional phase-specific schema. Projection and parsing resolve this same schema. */
+  modelInputSchema?(context: ToolContext): z.ZodType<Input>;
   /** 静态声明效果 — CapabilityDescriptor 投影输入。 */
   readonly declaredEffects: EffectProfile;
   /** 静态最低审批 — CapabilityDescriptor 投影输入。 */

@@ -57,18 +57,7 @@ export interface SecureSessionLogDirectoryBinding {
   ino: number;
 }
 
-export function windowsPowerShellEnvironment(
-  source: NodeJS.ProcessEnv = process.env,
-  extra: NodeJS.ProcessEnv = {},
-): NodeJS.ProcessEnv {
-  const environment = { ...source, ...extra };
-  for (const key of Object.keys(environment)) {
-    if (key.toLowerCase() === 'psmodulepath') delete environment[key];
-  }
-  const systemRoot = environment.SystemRoot ?? environment.SYSTEMROOT ?? 'C:\\Windows';
-  environment.PSModulePath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\Modules`;
-  return environment;
-}
+let cachedWindowsUserSid: string | undefined;
 
 export function assertSafeSessionLogSegment(value: string, label: string): void {
   const windowsBase = value.split('.')[0]?.toLowerCase() ?? '';
@@ -84,50 +73,62 @@ export function assertSafeSessionLogSegment(value: string, label: string): void 
 }
 
 export function secureWindowsOwnerOnlyPath(path: string): void {
-  const script = `
-$item = Get-Item -LiteralPath $env:KITE_SESSION_LOG_ACL_PATH -Force
-if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { exit 41 }
-$acl = Get-Acl -LiteralPath $item.FullName
-$identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
-$acl.SetAccessRuleProtection($true, $false)
-foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleAll($rule) }
-$inheritance = if ($item.PSIsContainer) {
-  [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-} else {
-  [System.Security.AccessControl.InheritanceFlags]::None
+  const target = lstatSync(path);
+  if (target.isSymbolicLink() || (!target.isDirectory() && !target.isFile())) {
+    throw new Error('Windows owner-only ACL targets must be regular files or directories.');
+  }
+  const sid = resolveCurrentWindowsUserSid();
+  runWindowsAclCommand(path, ['/reset']);
+  runWindowsAclCommand(path, ['/setowner', `*${sid}`]);
+  runWindowsAclCommand(path, [
+    '/inheritance:r',
+    '/grant:r',
+    target.isDirectory() ? `*${sid}:(OI)(CI)F` : `*${sid}:F`,
+  ]);
 }
-$rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
-  $identity,
-  [System.Security.AccessControl.FileSystemRights]::FullControl,
-  $inheritance,
-  [System.Security.AccessControl.PropagationFlags]::None,
-  [System.Security.AccessControl.AccessControlType]::Allow
-)
-$acl.SetOwner($identity)
-$acl.AddAccessRule($rule)
-Set-Acl -LiteralPath $item.FullName -AclObject $acl
-`;
-  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+
+function resolveCurrentWindowsUserSid(): string {
+  if (cachedWindowsUserSid) return cachedWindowsUserSid;
+  const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
   const result = spawnSync(
-    'powershell.exe',
-    ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+    join(systemRoot, 'System32', 'whoami.exe'),
+    ['/user', '/fo', 'csv', '/nh'],
     {
       encoding: 'utf8',
       windowsHide: true,
       timeout: WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
       killSignal: 'SIGKILL',
-      env: windowsPowerShellEnvironment(process.env, { KITE_SESSION_LOG_ACL_PATH: path }),
     },
   );
-  if (result.status !== 0) {
-    const detail = `${result.error?.message ?? ''}\n${result.stderr}\n${result.stdout}`
-      .trim()
-      .replaceAll(/\s+/g, ' ')
-      .slice(0, 512);
-    throw new Error(
-      `Failed to apply an owner-only, non-inheriting session-log ACL (status ${result.status ?? 'unknown'}${detail ? `: ${detail}` : ''}).`,
-    );
+  const sid = result.stdout.match(/\bS-\d+(?:-\d+)+\b/iu)?.[0];
+  if (result.status !== 0 || !sid) {
+    throw windowsAclError('resolve the current Windows user SID', result);
   }
+  cachedWindowsUserSid = sid;
+  return sid;
+}
+
+function runWindowsAclCommand(path: string, args: readonly string[]): void {
+  const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
+  const result = spawnSync(join(systemRoot, 'System32', 'icacls.exe'), [path, ...args], {
+    encoding: 'utf8',
+    windowsHide: true,
+    timeout: WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
+    killSignal: 'SIGKILL',
+  });
+  if (result.status !== 0) {
+    throw windowsAclError('apply an owner-only, non-inheriting session-log ACL', result);
+  }
+}
+
+function windowsAclError(action: string, result: ReturnType<typeof spawnSync>): Error {
+  const detail = `${result.error?.message ?? ''}\n${result.stderr}\n${result.stdout}`
+    .trim()
+    .replaceAll(/\s+/g, ' ')
+    .slice(0, 512);
+  return new Error(
+    `Failed to ${action} (status ${result.status ?? 'unknown'}${detail ? `: ${detail}` : ''}).`,
+  );
 }
 
 export function ensureSecureSessionLogDirectory(

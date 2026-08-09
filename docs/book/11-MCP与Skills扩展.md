@@ -12,7 +12,9 @@ Manager 保留完整原始 discovery，`CapabilitySnapshot` 只包含 enabled �
 
 ## 11.2 安全与执行
 
-远端 description 和 annotation 不可信。Control snapshot 可以同时记录 declared 与 effective effects，但只有显式本地 trust 配置可让 read-only hint 参与 effective 分类，而且不能降低本地 `minimumApproval`。无效 schema、disabled Tool 和配置引用但未 discovery 的 Tool 可诊断但不可绑定或执行。
+远端 annotation 不可信。Control snapshot 可以同时记录 declared 与 effective effects，但只有显式本地 trust 配置可让 read-only hint 参与 effective 分类，而且不能降低本地 `minimumApproval`。无效 schema、disabled Tool 和配置引用但未 discovery 的 Tool 可诊断但不可绑定或执行。
+
+自然语言 description 使用独立 provenance admission：用户/显式/本地私有配置与已批准项目 Server 可采用清理并截断到 512 code points 的远端描述，模型可见文本明确标为外部元数据而非指令；未批准来源改用工具名和最多 12 个顶层参数名生成摘要。搜索索引与动态声明共享该 `modelDescription`，schema 的 description/title/examples 等注释仍剥离；原始 description 仅留作 Runtime 审计。
 
 项目配置在 discovery 之前还有独立的 transport 门禁。规范 `<workspace>/.kite-code/mcp.json` 与只读 legacy project 声明只有匹配本地 config digest 批准后才进入 `McpManager`；配置变化、拒绝或 Approval Store 异常均 fail closed。默认优先级为 `project > user > legacy`，legacy 只能显式迁移。此批准不产生 annotation trust。项目 Tool 可以用 allowlist、denylist 或精确 disable 收紧可见性，但精确 enable、effect/minimum-approval 降级和 retry 放宽被忽略，保守基线仍是 unknown/user/never。
 
@@ -65,6 +67,8 @@ Kite Skill 是严格 YAML frontmatter 加正文/资源组成的版本化 Workflo
 - verification 与 recovery。
 
 激活产生 Runtime `SkillActivation`/frame。Inline Skill 在当前上下文执行；fork Skill 在隔离 Subagent 中执行。Skill 只能调用 ceiling 内、仍通过 Runtime Policy 的能力。
+
+模型只使用 `activate_skill`、`read_skill_reference`、`complete_skill` 生命周期；不存在返回正文的旧 `Skill` 工具。Plan Subagent 可以做任务相关的只读探索，所有 Subagent 接收主 Agent 同一适用项目指令 snapshot，但能力 ceiling 更窄。审批暂停/拒绝服从 Runtime interaction state，不得通过 Shell 或替代路径规避。
 
 Supporting `scripts/`、`references/`、`assets/`、`evals/` 不会整体注入模型。活动 frame 只能通过 `read_skill_reference` 读取声明过、路径安全且大小受限的文件。
 
