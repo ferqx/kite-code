@@ -2,7 +2,7 @@
 
 状态：archived
 日期：2026-08-08
-关联：ADR-0090、`docs/active/tool-description-contracts.md`、`docs/active/plan-state-reminder.md`、`docs/active/capability-progressive-disclosure.md`
+关联：ADR-0092、`docs/active/tool-description-contracts.md`、`docs/active/plan-state-reminder.md`、`docs/active/capability-progressive-disclosure.md`
 
 ## 目标
 

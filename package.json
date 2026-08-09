@@ -41,6 +41,7 @@
     "check:compaction-legacy": "bun run scripts/check-compaction-legacy.ts",
     "check:docs": "bun run scripts/check-docs.ts",
     "check:docs-impact": "bun run scripts/check-docs-impact.ts",
+    "check:protected-branch": "bun run scripts/check-protected-branch.ts",
     "web": "bun run src/web-server/index.tsx",
     "web:dev": "BUN_ENV=development bun --watch run src/web-server/index.tsx",
     "web:seed": "bun run src/web-server/index.tsx --seed",

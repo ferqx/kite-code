@@ -22,14 +22,14 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 
 ## 8.2 运行中的结构化交互
 
-| 交互 | Runtime 行为 |
-| --- | --- |
-| 工具审批 | `approval` interrupt → approve/reject/cancel → RuntimeUserAction；批准单个调用后立即执行 |
-| 用户问答 | `input` interrupt → 文本/结构化 answers → 恢复 Agent；Esc 只取消本次回答 |
-| 计划审核 | `plan_review` interrupt → approve/revise/cancel；cancel 中止当前 turn 并保留 draft |
-| Verification 决策 | replan、compensation 或带理由 waiver |
-| Subagent 审批 | 保存 continuation，用户决策后恢复 |
-| 取消 | AbortSignal 传播并形成一致的终止/恢复状态 |
+| 交互              | Runtime 行为                                                                             |
+| ----------------- | ---------------------------------------------------------------------------------------- |
+| 工具审批          | `approval` interrupt → approve/reject/cancel → RuntimeUserAction；批准单个调用后立即执行 |
+| 用户问答          | `input` interrupt → 文本/结构化 answers → 恢复 Agent；Esc 只取消本次回答                 |
+| 计划审核          | `plan_review` interrupt → approve/revise/cancel；cancel 中止当前 turn 并保留 draft       |
+| Verification 决策 | replan、compensation 或带理由 waiver                                                     |
+| Subagent 审批     | 保存 continuation，用户决策后恢复                                                        |
+| 取消              | AbortSignal 传播并形成一致的终止/恢复状态                                                |
 
 工具的 `tool.queued` 只在 reducer 中保存 name/args，不进入消息列表；收到 `tool.started`
 后才物化 Tool Card。待审批调用只显示在 Footer 的“工具类型 · 工具授权”中：命令或工具直接作为独立引用块，
@@ -47,7 +47,7 @@ Esc 不等价于静默成功：overlay 关闭、审批拒绝和任务取消根�
 
 Slash command 由 `useSlashCommand`、suggestions 和 reducer 协作完成，可进入会话、模型、模式、MCP、Skill、帮助等产品功能。命令只是 App 入口；涉及 Runtime 状态的操作仍通过正式 action/event 边界执行。
 
-内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/sessions`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions` 的显式参数是 `accept_edits|auto|full`。没有沙箱后端时，`full` 仍显示正常能力说明并允许光标选中，同时以红色文案提示“当前未在沙箱环境开启”；确认后仍由授权准入拒绝，不能切换到 Full。
+内置命令的候选、参数提示和帮助清单共用 `SLASH_COMMAND_DEFS`，当前覆盖 `/effort`、`/model`、`/theme`、`/sessions`、`/new`、`/plan`、`/compact`、`/permissions`、`/mcp`、`/rewind`、`/export`、`/context`、`/clear`、`/help` 和 `/exit`；别名附着在同一条定义上。命令名执行不区分大小写。`/permissions`、`/effort` 和 `/theme` 不接受显式选择参数，直接确认命令后打开各自选择器；没有沙箱后端时，权限选择器显示 `full` 的能力说明但禁用它，不能切换到 Full。
 
 模型选择器以 provider 与 model name 的组合区分 route；选择器将 provider 作为使用独立 accent 色的加粗标题行，并与 model name 文本列对齐；标题与首项紧邻，不同分组之间留一行间距，模型行不重复 provider 或显示 `default`。`/model` 不接受模型名参数，确认命令后始终打开该选择器，由用户明确选择 provider 与 model；选择结果绑定到当前会话，并以 `model: "provider:model name"` 简写写入用户配置作为新会话默认值。切换或恢复会话时还原各自 route；空会话切换模型不显示系统提示或工具目录产生的 context token 估算，新会话清空上一会话的 context snapshot。加载用户配置时仍兼容旧 `model.default` 对象格式。
 
@@ -65,7 +65,7 @@ Sigstore、平台 qualification 或 production Gate 证据。
 
 会话选择、删除、重命名、恢复点 restore 和 fork 基于 Runtime Store，而不是旧图 checkpoint。会话选择器把搜索行作为独立区域，与紧凑的结果列表之间保留一个空白行；删除确认在选项下方动态说明会删除的本地会话范围及不会删除的工作区文件。切换会话不会把一个 thread 的授权、pending approval 或 transient binding 隐式复制到另一个 thread。TUI 的交互模型把切换/新建会话视为取消当前可见 turn：先持久化取消事实并等待旧生成器清理，再切换展示；其他客户端可以按 ADR-0050 保留后台运行语义。
 
-`/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无参数连续压缩直接提示 `No new messages to compact.`，不再次调用摘要模型，显式自定义指令仍可重写已有 narrative。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
+`/compact` 触发上下文压缩并支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。手动压缩的 preparing/summarizing/validating 动画紧跟命令显示，不占用通用会话 StatusBar；active checkpoint 已覆盖最新安全消息时，无论是否带自定义指令都直接提示 `No new messages to compact.`，不再次调用摘要模型。自定义指令只改变包含新 safe history 的压缩侧重点。连最小 narrative 都无法节省 1024 tokens 时显示 `Not enough reducible context to compact` 且 Provider call count 为零。命令本身通过不进入模型 transcript 的 RuntimeEvent 持久化；压缩成功、失败或历史不足的结果同样由 RuntimeEvent 保存，因此退出并重新进入 TUI 后仍可重放。同一 session 的手动压缩完整串行；stale projection 产生明确可重试终态，不会留下 pending。压缩期间 prompt 与 reset 等同 session 写操作等待同一 barrier；切换 session 会清除当前 inline progress，并把晚到 terminal 缓冲到命令所属 session。删除 session 前必须取消并等待 standalone compaction，RuntimeStore CAS 同时拒绝删除后的晚到写入。会话切换期间，`onCompactRef`、`handleSlashCommandRef` 和 `mountedRef` 保持 handler 最新；异步结果只更新发起命令的 thread，不得写入后来切换到的会话。
 
 `/rewind` 使用“选择边界 → 确认范围”两阶段面板。列表以恢复点之后的第一条用户消息描述
 “发送这条消息之前”，显示消息摘要、绝对时间和已记录文件数，不暴露 event / snapshot ID。
@@ -111,6 +111,9 @@ Runtime、等待 reporter flush 与 exporter shutdown（两个阶段各最多 25
 unmount Ink 并退出；任一清理阶段失败都不能跳过后续终端恢复。正常退出使用状态码 0，fatal path 使用
 状态码 1。开发 composition 没有 telemetry authority 时 reporter 仍为 no-op，但沿用相同生命周期。
 
-`/permissions` 带参数时切换 interaction mode；无参数时只显示当前执行边界。未通过 production
-composition gate 的开发入口显示 `not admitted`，不会从普通配置推断 release capability。状态
-投影不包含 Workspace path、host 名、qualification proof 或 credential，也不产生授权。
+`/permissions`、`/effort` 与 `/theme` 直接确认时分别打开 interaction mode、推理深度和主题选择器，
+确认某一项后才改变值；三者都不接受选择参数。所有 slash command 打开的 Overlay 显示时隐藏底部
+状态栏和输入提示。推理深度确认后会立即刷新 Header 和 Footer，并作为下一次模型调用的 reasoning
+effort。当前 sandbox backend 不支持 Full 时权限选择器禁用该项。
+production execution status 只由 CLI `--execution-status` 查询，避免把普通开发 TUI 的模式选择误解为
+release capability 或授权。

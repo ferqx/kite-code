@@ -24,10 +24,7 @@ import {
 } from '../../src/core/config/paths';
 import type { SessionLoggingPolicyV1 } from '../../src/core/config/session-logging-policy';
 import { SESSION_LOG_LEASE_FILE } from '../../src/core/session-logger/active-session-lease';
-import {
-  WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
-  windowsPowerShellEnvironment,
-} from '../../src/core/session-logger/secure-storage';
+import { WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS } from '../../src/core/session-logger/secure-storage';
 import { SessionLogWriter } from '../../src/core/session-logger/writer';
 
 const SMOKE_POLICY: SessionLoggingPolicyV1 = {
@@ -255,6 +252,7 @@ async function verifyFailedFileWriter(
 }
 
 function verifyWindowsAcl(paths: readonly string[]): void {
+  const systemRoot = process.env.SystemRoot ?? process.env.SYSTEMROOT ?? 'C:\\Windows';
   const script = `
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().User
 $paths = $env:KITE_SESSION_LOG_ACL_SMOKE_PATHS | ConvertFrom-Json
@@ -282,16 +280,18 @@ foreach ($path in $paths) {
 `;
   const encoded = Buffer.from(script, 'utf16le').toString('base64');
   const result = spawnSync(
-    'powershell.exe',
+    join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'),
     ['-NoLogo', '-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
     {
       encoding: 'utf8',
       windowsHide: true,
       timeout: WINDOWS_SESSION_LOG_ACL_TIMEOUT_MS,
       killSignal: 'SIGKILL',
-      env: windowsPowerShellEnvironment(process.env, {
+      env: {
+        ...process.env,
+        PSModulePath: join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
         KITE_SESSION_LOG_ACL_SMOKE_PATHS: JSON.stringify(paths),
-      }),
+      },
     },
   );
   if (result.status !== 0) {

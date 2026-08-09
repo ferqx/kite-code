@@ -149,4 +149,6 @@ retention 规则接管；session 内未知条目、link/hardlink 只做可恢复
 `session.logging_limited` metadata，停止后续记录，并为 bounded terminal marker 预留空间。
 总容量 maintenance 为新 session 预留其完整上限。原生 ACL smoke 在 macOS、Ubuntu 和 Windows
 runner 验证权限、link/reparse rejection 与 terminal 原子落盘，并分别上传带 OS/Bun
-身份的 `session-log-acl-<runner>` JSON 证据。
+身份的 `session-log-acl-<runner>` JSON 证据。Windows smoke 的独立只读验证固定调用 `System32` 下的
+Windows PowerShell 5.1，并把 `PSModulePath` 固定到同一系统目录；它不复用已移除的生产 ACL
+environment helper，因此任一平台都能在模块加载阶段完成当前 smoke 入口解析。

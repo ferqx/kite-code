@@ -82,7 +82,7 @@ Runtime schema v15 将 transcript message identity、结构化 Tool Result 和 M
 
 `createAgentKernel` 优先从 RuntimeStore 恢复 snapshot；恢复态若有旧 `mode` 或 `authorization.mode` 与显式请求参数不同，Kernel 使用当前请求值覆盖恢复态，防止上一轮次的 `accept_edits` 模式残留到当前 `full` 或 `auto` 轮次。
 
-`RuntimeState.context` 保存 active checkpoint、pending compaction、最近失败与有界历史，不保存 `lastPreflight`、请求环境 digest 或 Effect lease。压缩通过 `context.compaction_requested/completed/failed/reset` 事件和 `compact_context` effect 进入同一个 State → Effect → Event → State 循环。Effect 开始和模型返回后分别解析实际 projection environment；环境变化使结果按 stale 丢弃。Runtime 恢复按 snapshot event position 严格重放 event tail；损坏 active checkpoint fail closed 为 `unrecoverable_checkpoint` correctness block，已完成事件不会重复激活。
+`RuntimeState.context` 保存 active checkpoint、pending compaction、最近失败与有界历史，不保存 `lastPreflight`、请求环境 digest 或 Effect lease。压缩通过 `context.compaction_requested/completed/failed/reset` 事件和 `compact_context` effect 进入同一个 State → Effect → Event → State 循环。Effect 开始和模型返回后分别解析实际 projection environment；环境变化产生 `stale_context` failed 终态、清除 pending 并拒绝 checkpoint。Runtime 恢复按 snapshot event position 严格重放 event tail；损坏 active checkpoint fail closed 为 `unrecoverable_checkpoint` correctness block，已完成事件不会重复激活。
 
 Runtime schema v17 将当前 turn 的 `active/completed/aborted` 生命周期和 abort 诊断持久化。Scheduler 对 completed 或 aborted turn 始终返回 `stop`，只有新的 `turn.started` 才能重新开放调度。迁移旧 snapshot 时，Kernel 从 snapshot position 之前已经落盘的 `turn.completed` / `turn.aborted` 恢复终态，避免进程恢复后把已取消 turn 误判为可继续并再次调用模型。
 

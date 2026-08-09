@@ -2,6 +2,15 @@
   "version": 1,
   "rules": [
     {
+      "id": "protected-branch-governance",
+      "sources": [
+        "lefthook.yml",
+        "scripts/check-protected-branch.ts",
+        ".github/workflows/required.yml"
+      ],
+      "documents": ["docs/active/project-conventions.md"]
+    },
+    {
       "id": "plan-execution-governance",
       "sources": [
         "scripts/check-plan-execution-matrix.ts",
@@ -431,6 +440,7 @@
         "src/core/harness/tool-runner.ts",
         "src/core/runtime/context-compaction.ts",
         "scripts/evals/prompt-contract-ab.ts",
+        "tests/tui-system/scenarios/prompt-contract-v2-production.test.ts",
         "tests/prompts/prompt-contract-budget.test.ts",
         "tests/evals/prompt-contract-ab.test.ts",
         "tests/project-instructions.test.ts"
@@ -450,7 +460,7 @@
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/11-MCP与Skills扩展.md",
         "docs/book/12-测试体系.md",
-        "docs/adr/0090-prompt-contract-v2.md",
+        "docs/adr/0092-prompt-contract-v2.md",
         "docs/space/plans/2026-08-08-prompt-contract-v2.md",
         "docs/adr/0021-context-compaction-checkpoint.md",
         "docs/adr/0022-context-compaction-single-narrative.md",
@@ -460,7 +470,9 @@
         "docs/space/plans/2026-07-21-context-compaction-production-rollout.md",
         "docs/space/plans/2026-07-26-tool-spec-registry.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
-        "docs/adr/0045-streaming-render-complete-block-commit.md"
+        "docs/adr/0045-streaming-render-complete-block-commit.md",
+        "docs/adr/0090-manual-compaction-convergence-and-viability.md",
+        "docs/adr/0091-runtime-store-compaction-ownership.md"
       ]
     },
     {

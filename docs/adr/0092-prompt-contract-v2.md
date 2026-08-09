@@ -1,4 +1,4 @@
-# ADR-0090：Prompt Contract V2 分层、项目指令与可信 Capability 描述
+# ADR-0092：Prompt Contract V2 分层、项目指令与可信 Capability 描述
 
 **Status**: accepted
 **Date**: 2026-08-08

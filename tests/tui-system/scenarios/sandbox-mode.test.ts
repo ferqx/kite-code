@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
-import { clearInput, submitCommand, submitUserMessage, typeText } from '../harness/input-helpers';
+import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
+import { screenContains, waitForText, waitForTextGone } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -44,33 +44,15 @@ describe('TUI PTY System — Sandbox Mode', () => {
   step(
     'keeps development execution, release, and telemetry boundaries inactive',
     async () => {
-      await typeText(tui, '/permissions f');
-      await waitForText(() => tui.outputSinceLastAction(), '当前未在沙箱环境开启', 10000);
-
-      const suggestionOutput = stripAnsi(tui.viewport());
-      expect(suggestionOutput).toContain('❯ full');
-      expect(suggestionOutput).toContain('完全自主，全部放行，不询问用户');
-      expect(suggestionOutput).toContain('当前未在沙箱环境开启');
-
-      const output = tui.viewport();
-      expect(screenContains(output, '当前未在沙箱环境开启')).toBe(true);
-      expect(screenContains(output, '完全权限')).toBe(false);
-      await clearInput(tui, '/permissions f'.length);
-
-      await submitCommand(tui, '/permissions');
-      await waitForText(
-        () => tui.outputSinceLastAction(),
-        'Execution boundary: not admitted',
-        10000,
-      );
-
-      expect(screenContains(tui.viewport(), 'Execution boundary: not admitted')).toBe(true);
-      expect(
-        screenContains(
-          tui.viewport(),
-          'Filesystem/network/protected-path/worktree/capability status: unavailable',
-        ),
-      ).toBe(true);
+      await submitCommand(tui, '/permissions', undefined, {
+        requireAcceptWhen: true,
+        acceptWhen: (viewport) => screenContains(viewport, '选择权限模式'),
+      });
+      await waitForText(() => tui.viewport(), '选择权限模式', 10000);
+      await waitForText(() => tui.viewport(), '当前未在沙箱环境开启', 10000);
+      expect(screenContains(tui.viewport(), 'Execution boundary: not admitted')).toBe(false);
+      tui.write('\u001b');
+      await waitForTextGone(() => tui.viewport(), '选择权限模式', 10_000);
 
       await submitCommand(tui, '/release');
       await waitForText(
@@ -119,5 +101,5 @@ describe('TUI PTY System — Sandbox Mode', () => {
     TIMEOUT,
   );
 
-  test('runs the complete stateful journey', () => journey.run());
+  test('runs the complete stateful journey', () => journey.run(), TIMEOUT);
 });

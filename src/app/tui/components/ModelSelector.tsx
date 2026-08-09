@@ -105,7 +105,7 @@ export default function ModelSelector({
         />
       }
     >
-      <Box flexGrow={1} maxHeight={maxContentHeight}>
+      <Box maxHeight={maxContentHeight}>
         <ScrollList selectedIndex={selected} scrollAlignment="auto">
           {[...providerGroups].flatMap(([provider, providerModels], providerIndex) =>
             providerModels.map((model, providerModelIndex) => {

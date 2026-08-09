@@ -48,6 +48,12 @@ export type Action =
   | { type: 'EXPORT_SESSION_DONE'; filename: string }
   | { type: 'SHOW_MODEL_SELECTOR' }
   | { type: 'HIDE_MODEL_SELECTOR' }
+  | { type: 'SHOW_PERMISSION_SELECTOR' }
+  | { type: 'HIDE_PERMISSION_SELECTOR' }
+  | { type: 'SHOW_EFFORT_SELECTOR' }
+  | { type: 'HIDE_EFFORT_SELECTOR' }
+  | { type: 'SHOW_THEME_SELECTOR' }
+  | { type: 'HIDE_THEME_SELECTOR' }
   | { type: 'SHOW_SESSIONS' }
   | { type: 'HIDE_SESSIONS' }
   | { type: 'LOAD_SESSION_PENDING'; threadId: string }
@@ -60,8 +66,9 @@ export type Action =
       modelProvider: string;
       modelName: string;
       thinkingLevel: string | null;
+      reasoningEnabled?: boolean;
     }
-  | { type: 'SELECT_MODEL'; provider: string; modelName: string }
+  | { type: 'SELECT_MODEL'; provider: string; modelName: string; reasoningEnabled?: boolean }
   | { type: 'NEW_SESSION'; threadId: string }
   | { type: 'USER_MESSAGE'; text: string }
   | { type: 'SHOW_MCP' }

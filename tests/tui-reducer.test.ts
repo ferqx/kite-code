@@ -2120,6 +2120,15 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, { type: 'SET_THINKING_LEVEL', level: 'high' });
       expect(s.status.thinkingMode).toBe('high');
     });
+    test('SELECT_MODEL records whether the selected configuration disables reasoning', () => {
+      const s = dispatch(fresh(), {
+        type: 'SELECT_MODEL',
+        provider: 'openai-compatible',
+        modelName: 'plain-chat-model',
+        reasoningEnabled: false,
+      });
+      expect(s.status.reasoningEnabled).toBe(false);
+    });
     test('SET_CONTEXT_SNAPSHOT refreshes context without resetting cumulative cache usage', () => {
       const state = {
         ...fresh(),
@@ -2504,6 +2513,24 @@ describe('eventReducer (blocks model)', () => {
       expect(s.showModelSelector).toBe(true);
       s = dispatch(s, { type: 'HIDE_MODEL_SELECTOR' });
       expect(s.showModelSelector).toBe(false);
+    });
+    test('SHOW_PERMISSION_SELECTOR / HIDE_PERMISSION_SELECTOR', () => {
+      let s = fresh();
+      s = dispatch(s, { type: 'SHOW_PERMISSION_SELECTOR' });
+      expect(s.showPermissionSelector).toBe(true);
+      expect(s.showModelSelector).toBe(false);
+      s = dispatch(s, { type: 'HIDE_PERMISSION_SELECTOR' });
+      expect(s.showPermissionSelector).toBe(false);
+    });
+    test('SHOW_EFFORT_SELECTOR and SHOW_THEME_SELECTOR keep one selector active', () => {
+      let s = fresh();
+      s = dispatch(s, { type: 'SHOW_EFFORT_SELECTOR' });
+      expect(s.showEffortSelector).toBe(true);
+      s = dispatch(s, { type: 'SHOW_THEME_SELECTOR' });
+      expect(s.showThemeSelector).toBe(true);
+      expect(s.showEffortSelector).toBe(false);
+      s = dispatch(s, { type: 'HIDE_THEME_SELECTOR' });
+      expect(s.showThemeSelector).toBe(false);
     });
     test('SELECT_MODEL sets modelName and closes selector', () => {
       let s = fresh();
@@ -5582,6 +5609,21 @@ describe('model streaming RuntimeEvent rendering', () => {
 });
 
 describe('context compaction RuntimeEvent rendering', () => {
+  test('renders manual low-gain rejection as a benign actionable notice', () => {
+    const state = handleRuntimeEventAction(fresh(), {
+      type: 'context.compaction_failed',
+      compactionId: 'low-gain',
+      sourceRevision: 1,
+      errorKind: 'insufficient_reduction',
+      message: 'Not enough reducible context to compact.',
+      retryable: false,
+    });
+    const output = JSON.stringify(flatBlocks(state));
+    expect(output).toContain('Not enough reducible context');
+    expect(output).not.toContain('Recoverable error');
+    expect(state.sessionError).toBe(false);
+  });
+
   test('renders failure and reset feedback without exposing summary content', () => {
     let state = handleRuntimeEventAction(fresh(), {
       type: 'context.compaction_failed',
@@ -5600,6 +5642,29 @@ describe('context compaction RuntimeEvent rendering', () => {
       reason: 'manual',
     });
     expect(JSON.stringify(flatBlocks(state))).toContain('original transcript');
+  });
+
+  test.each([
+    ['stale_context', 'retry /compact', false],
+    ['oversized_turn', 'maxSummaryInputTokens', true],
+    ['empty_summary', 'unusable compaction summary', true],
+    ['truncated_summary', 'unusable compaction summary', true],
+    ['unexpected_tool_call', 'unusable compaction summary', true],
+    ['provider_admission_denied', 'Provider data policy', true],
+    ['summary_aborted', 'was cancelled', false],
+  ] as const)('renders typed %s guidance', (errorKind, expected, isError) => {
+    const state = handleRuntimeEventAction(fresh(), {
+      type: 'context.compaction_failed',
+      compactionId: `typed-${errorKind}`,
+      sourceRevision: 1,
+      errorKind,
+      message: 'private Provider detail',
+      retryable: errorKind === 'stale_context',
+    });
+    const output = JSON.stringify(flatBlocks(state));
+    expect(output).toContain(expected);
+    expect(output).not.toContain('private Provider detail');
+    expect(state.sessionError).toBe(isError);
   });
 
   test('compaction_completed reports token savings without persisting a StatsLine percentage', () => {
@@ -5641,7 +5706,8 @@ describe('context compaction RuntimeEvent rendering', () => {
     const twice = handleRuntimeEventAction(once, event);
     expect(flatBlocks(twice)).toEqual(flatBlocks(once));
     expect(JSON.stringify(flatBlocks(twice))).not.toContain('secret provider detail');
-    expect(JSON.stringify(flatBlocks(twice))).toContain('contextWindowTokens');
+    expect(JSON.stringify(flatBlocks(twice))).toContain('credentials');
+    expect(JSON.stringify(flatBlocks(twice))).toContain('context/output limits');
     expect(JSON.stringify(flatBlocks(twice))).toContain('/clear');
   });
 

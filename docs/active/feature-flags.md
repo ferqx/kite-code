@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：新增、删除或调整 runtime feature flag、配置合并、CLI 覆盖或灰度策略时。
-验证：`bun test tests/config/features.test.ts`。
+验证：`bun test tests/config/features.test.ts`、`bun run test:tui:system prompt-contract-v2-production`。
 
 Runtime feature flags are registered in `src/core/config/features.ts`. Configuration is read from the optional `features` object in user and project `kite-code.jsonc`; project values override user values.
 
@@ -14,7 +14,7 @@ Exception: ADR-0007 explicitly replaces the old MCP adapter, and ADR-0020 comple
 
 With `toolSearchV1` enabled, MCP schemas are always loaded on demand through metadata-only search and retained in the session while revisions match; Skill disclosure still uses provider support and context budget.
 
-`promptContractV2` defaults to `false` and may be enabled per run with `--feature promptContractV2=true`. It switches Prompt layering, concise tool formatting, project-instruction projection, phase-aware tool disclosure and trusted MCP semantic projection. It does not gate correctness fixes: both paths use the real sandbox state, corrected Skill tool names and truthful tool result contracts. Rollback is only the flag change; project instruction/capability revisions and Runtime history remain valid. Changing the default to `true` requires separate live A/B evidence, production TUI E2E and this document's update after at least two weeks of dual-path availability.
+`promptContractV2` defaults to `false` and may be enabled per run with `--feature promptContractV2=true`. It switches Prompt layering, concise tool formatting, project-instruction projection, phase-aware tool disclosure and trusted MCP semantic projection. It does not gate correctness fixes: both paths use the real sandbox state, corrected Skill tool names and truthful tool result contracts. Rollback is only the flag change; project instruction/capability revisions and Runtime history remain valid. The production-mode TUI path has deterministic PTY E2E coverage with V2 explicitly enabled, including outbound role ordering, project context, one Runtime block and the planning tool surface. Changing the default to `true` still requires at least two weeks of dual-path availability, a live A/B run bound to the final candidate commit, and a separate migration ADR.
 
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.
 

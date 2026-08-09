@@ -148,6 +148,35 @@ describe('manual context compaction service', () => {
     expect(preflight.usableInputTokens).toBe(28_976);
   });
 
+  test('uses the full projection environment for durable manual request estimates', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'manual-projection',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    const projectionEnvironment = {
+      serializedTools: [
+        {
+          name: 'large_tool',
+          description: 'tool schema '.repeat(400),
+          inputSchema: { type: 'object', properties: { value: { type: 'string' } } },
+          schemaDigest: 'digest',
+        },
+      ],
+      workflowSkills: [],
+    };
+    const event = manualContextCompactionEvent({
+      state,
+      config,
+      projectionEnvironment,
+    });
+    expect(event).toMatchObject({ type: 'context.compaction_requested' });
+    if (event?.type !== 'context.compaction_requested') throw new Error('request expected');
+    expect(event.estimate.systemTokens).toBeGreaterThan(0);
+    expect(event.estimate.toolSchemaTokens).toBeGreaterThan(0);
+    expect(event.estimate.totalInputTokens).toBeGreaterThan(event.estimate.transcriptTokens);
+  });
+
   test('reset is not blocked by local token pressure', () => {
     const state = createInitialRuntimeState({
       threadId: 'reset-capacity',

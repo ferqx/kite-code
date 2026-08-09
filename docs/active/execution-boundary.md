@@ -124,7 +124,9 @@ DNS/private/allowlist/pinned-address 检查，并忽略环境 proxy。并发 sib
 macOS Seatbelt profile 在生成任何 allow rule 前 canonicalize Workspace 与受控 runtime temp。
 每次 invocation 使用独立的 `0700` runtime directory；executor 在返回前先请求终止已跟踪的
 process group，未确认退出时结果 fail closed 并保留 runtime，确认后再以不跟随 symlink 的物理
-遍历恢复 hostile mode/BSD immutable flag 并删除该目录，删除不能确认时同样 fail closed。并发调用不能共享该目录，writable temp 也不进入 executable-map
+遍历恢复 hostile mode/BSD immutable flag 并删除该目录，删除不能确认时同样 fail closed。最后一个
+invocation 还会用不递归的 `rmdir` 回收空的共享 runtime 容器；并发 invocation 使容器非空时该步骤
+安全跳过。并发调用不能共享 invocation 目录，writable temp 也不进入 executable-map
 allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；`read_only` 不允许 Workspace 写入。系统与当前 Bun/Node runtime 依赖只有
 显式只读 root；除此之外的 Workspace 外 read/write/create/unlink、指向外部的 symlink，以及
 Workspace 内 Agent/MCP 配置、credential、shell profile 等 protected path 均由 Seatbelt deny，
@@ -256,6 +258,6 @@ hooks。
 sandbox backend/availability/fallback、filesystem scope、network mode 与 host 数量、protected-path
 policy、controller worktree 状态以及 capability 的 typed disabled reasons。它不暴露 Workspace
 路径、host 名、process limit、qualification proof 或完整安全 profile，也不产生 capability。
-普通 TUI 的 `/permissions` 明确显示 `not admitted`；CLI `--execution-status` 在创建 Runtime、MCP 或
-Skill 前输出状态并退出。CLI 直接启用 `executionBoundaryV1`/`networkBoundaryV1` 会在参数解析阶段
-拒绝，显式 `false` 仍可单调收紧。
+TUI 的 `/permissions` 只用于选择 interaction mode，不显示或授予 production boundary；CLI
+`--execution-status` 在创建 Runtime、MCP 或 Skill 前输出状态并退出。CLI 直接启用
+`executionBoundaryV1`/`networkBoundaryV1` 会在参数解析阶段拒绝，显式 `false` 仍可单调收紧。

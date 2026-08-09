@@ -61,10 +61,12 @@ export type ContextCompactionErrorKind =
   | 'unsafe_boundary'
   | 'oversized_turn'
   | 'summary_model_failed'
+  | 'provider_admission_denied'
   | 'summary_aborted'
   | 'empty_summary'
   | 'truncated_summary'
   | 'unexpected_tool_call'
+  | 'stale_context'
   | 'invalid_candidate'
   | 'insufficient_reduction';
 
@@ -127,6 +129,8 @@ export interface AutoCompactionGuard {
   }>;
   consecutiveLowGain: number;
   disabledUntilManualAction: boolean;
+  /** Only one new-turn recovery may bypass cooldown/breaker after an auto failure. */
+  recoveryAttempted: boolean;
 }
 
 export interface ContextRuntimeState {
@@ -152,6 +156,7 @@ export function normalizeContextRuntimeState(
     recentAutomaticCompactions: [],
     consecutiveLowGain: 0,
     disabledUntilManualAction: false,
+    recoveryAttempted: false,
   };
   if (!context) return { history: [], autoGuard: fallbackGuard };
 
@@ -236,6 +241,9 @@ export function normalizeContextRuntimeState(
             createdAtTurnId: hardBlock.createdAtTurnId,
           }
         : undefined,
-    autoGuard: context.autoGuard ?? fallbackGuard,
+    autoGuard: {
+      ...fallbackGuard,
+      ...(context.autoGuard ?? {}),
+    },
   };
 }

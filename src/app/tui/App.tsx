@@ -14,7 +14,9 @@ import CheckpointSelector from './components/CheckpointSelector';
 import HelpPanel from './components/HelpPanel';
 import InputBlock from './components/InputBlock';
 import ModelSelector from './components/ModelSelector';
+import PermissionSelector from './components/PermissionSelector';
 import PlanReviewBlock from './components/PlanReviewBlock';
+import PreferenceSelector from './components/PreferenceSelector';
 import SessionSelector from './components/SessionSelector.js';
 import SlashSuggestionOverlay from './components/SlashSuggestionOverlay';
 import Footer from './Footer';
@@ -27,6 +29,7 @@ import type { McpController } from './mcp/types';
 import OutputArea, { useStaticContent } from './OutputArea';
 import { type Action, eventReducer } from './reducers';
 import { deriveRunStatusSnapshot } from './run-status';
+import type { ThemePreset } from './theme';
 import { useTheme } from './theme';
 import type { TuiState } from './types';
 
@@ -57,6 +60,8 @@ export interface AppProps {
   slashSuggestion?: import('./hooks/useSlashSuggestions').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
   onTogglePlanMode?: () => void;
+  themePreset?: ThemePreset;
+  onThemeSelect?: (preset: ThemePreset) => void;
   /** Abort the foreground runtime synchronously before reducer-only cancel actions. */
   onAbort?: () => void;
   getRewindPreview?: (
@@ -71,6 +76,7 @@ export function useTuiState(
   initialProviderName?: string,
   initialThinkingMode?: string | null,
   initialInteractionMode?: 'accept_edits' | 'auto' | 'full',
+  initialReasoningEnabled?: boolean,
 ): {
   state: TuiState;
   dispatch: Dispatch<Action>;
@@ -80,6 +86,9 @@ export function useTuiState(
   if (initialModelName) statusOverrides.modelName = initialModelName;
   if (initialProviderName) statusOverrides.modelProvider = initialProviderName;
   if (initialThinkingMode) statusOverrides.thinkingMode = initialThinkingMode;
+  if (initialReasoningEnabled !== undefined) {
+    statusOverrides.reasoningEnabled = initialReasoningEnabled;
+  }
   const initState = { ...initialState };
   if (Object.keys(statusOverrides).length > 0) {
     initState.status = { ...initialState.status, ...statusOverrides };
@@ -104,6 +113,8 @@ export default function App({
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
+  themePreset,
+  onThemeSelect,
   onAbort,
   getRewindPreview,
   resizeGeneration,
@@ -115,6 +126,9 @@ export default function App({
   const overlayOrInterrupt =
     state.showHelp ||
     state.showModelSelector ||
+    state.showPermissionSelector ||
+    state.showEffortSelector ||
+    state.showThemeSelector ||
     state.showSessions ||
     state.showMcp ||
     state.showRewind ||
@@ -139,6 +153,22 @@ export default function App({
   const hideHelp = useCallback(() => dispatch({ type: 'HIDE_HELP' }), [dispatch]);
   const hideModelSelector = useCallback(
     () => dispatch({ type: 'HIDE_MODEL_SELECTOR' }),
+    [dispatch],
+  );
+  const hidePermissionSelector = useCallback(
+    () => dispatch({ type: 'HIDE_PERMISSION_SELECTOR' }),
+    [dispatch],
+  );
+  const hideEffortSelector = useCallback(
+    () => dispatch({ type: 'HIDE_EFFORT_SELECTOR' }),
+    [dispatch],
+  );
+  const hideThemeSelector = useCallback(
+    () => dispatch({ type: 'HIDE_THEME_SELECTOR' }),
+    [dispatch],
+  );
+  const selectInteractionMode = useCallback(
+    (mode: 'accept_edits' | 'auto' | 'full') => dispatch({ type: 'SET_INTERACTION_MODE', mode }),
     [dispatch],
   );
   const selectModel = useCallback(
@@ -242,31 +272,23 @@ export default function App({
   const activeWorkspace =
     state.sessions.find((session) => session.threadId === state.activeSessionId)?.workspace ??
     workspace;
-  const headerSnapshotRef = useRef({
-    sessionKey: state.sessionKey,
-    modelName: state.status.modelName,
-    thinkingMode: state.status.thinkingMode,
-    workspace: activeWorkspace,
-  });
-  if (headerSnapshotRef.current.sessionKey !== state.sessionKey) {
-    headerSnapshotRef.current = {
-      sessionKey: state.sessionKey,
-      modelName: state.status.modelName,
-      thinkingMode: state.status.thinkingMode,
-      workspace: activeWorkspace,
-    };
-  }
-  const headerSnapshot = headerSnapshotRef.current;
   const header = useMemo(
     () => (
       <MemoHeader
-        modelName={headerSnapshot.modelName}
-        thinkingMode={headerSnapshot.thinkingMode}
-        workspace={headerSnapshot.workspace}
+        modelName={state.status.modelName}
+        thinkingMode={state.status.thinkingMode}
+        reasoningEnabled={state.status.reasoningEnabled}
+        workspace={activeWorkspace}
         columns={columns}
       />
     ),
-    [columns, headerSnapshot],
+    [
+      activeWorkspace,
+      columns,
+      state.status.modelName,
+      state.status.reasoningEnabled,
+      state.status.thinkingMode,
+    ],
   );
 
   const {
@@ -286,6 +308,9 @@ export default function App({
   const overlayActive =
     state.showHelp ||
     state.showModelSelector ||
+    state.showPermissionSelector ||
+    state.showEffortSelector ||
+    state.showThemeSelector ||
     state.showSessions ||
     state.showMcp ||
     state.showRewind;
@@ -316,48 +341,50 @@ export default function App({
       />
 
       {/* ── Footer: 3-row interaction zone ── */}
-      <Footer
-        status={state.status}
-        runStatus={runStatus}
-        running={showRunStatus}
-        timerKey={state.runCount}
-        interactionMode={state.interactionMode}
-        hideGlobalStatus={Boolean(state.interrupt)}
-      >
-        {/* Interaction row: input line or approval/input UI, mutually exclusive */}
-        {!state.interrupt && (
-          <>
-            {state.sessionServiceUnavailable && !state.showSessions && (
-              <Text color={t.warning}>历史会话服务不可用，请输入 /sessions 重试。</Text>
-            )}
-            {children}
-          </>
-        )}
-        {activeApproval && (
-          <ApprovalBlock
-            approval={activeApproval}
-            provider={provider}
-            onResolved={resolveApproval}
-          />
-        )}
-        {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (
-          <InputBlock
-            question={interruptBlock.question}
-            provider={provider}
-            onResolved={resolveInput}
-            wizardEscBackRef={wizardEscBackRef}
-          />
-        )}
-        {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
-          <PlanReviewBlock
-            plan={state.interrupt.plan}
-            artifact={state.interrupt.artifact}
-            provider={provider}
-            onResolved={resolvePlanReview}
-            supplementEscRef={supplementEscRef}
-          />
-        )}
-      </Footer>
+      {!overlayActive && (
+        <Footer
+          status={state.status}
+          runStatus={runStatus}
+          running={showRunStatus}
+          timerKey={state.runCount}
+          interactionMode={state.interactionMode}
+          hideGlobalStatus={Boolean(state.interrupt)}
+        >
+          {/* Interaction row: input line or approval/input UI, mutually exclusive */}
+          {!state.interrupt && (
+            <>
+              {state.sessionServiceUnavailable && !state.showSessions && (
+                <Text color={t.warning}>历史会话服务不可用，请输入 /sessions 重试。</Text>
+              )}
+              {children}
+            </>
+          )}
+          {activeApproval && (
+            <ApprovalBlock
+              approval={activeApproval}
+              provider={provider}
+              onResolved={resolveApproval}
+            />
+          )}
+          {interruptBlock?.kind === 'question' && !interruptBlock.resolved && (
+            <InputBlock
+              question={interruptBlock.question}
+              provider={provider}
+              onResolved={resolveInput}
+              wizardEscBackRef={wizardEscBackRef}
+            />
+          )}
+          {state.interrupt?.kind === 'plan_review' && state.interrupt.plan && (
+            <PlanReviewBlock
+              plan={state.interrupt.plan}
+              artifact={state.interrupt.artifact}
+              provider={provider}
+              onResolved={resolvePlanReview}
+              supplementEscRef={supplementEscRef}
+            />
+          )}
+        </Footer>
+      )}
 
       {/* ── Overlay: panels below Footer ── */}
       {state.showHelp && <HelpPanel onClose={hideHelp} sandboxBackend={sandboxBackend} />}
@@ -381,6 +408,43 @@ export default function App({
           onClose={hideModelSelector}
         />
       )}
+      {state.showPermissionSelector && (
+        <PermissionSelector
+          currentMode={state.interactionMode}
+          sandboxBackend={sandboxBackend}
+          onSelect={selectInteractionMode}
+          onClose={hidePermissionSelector}
+        />
+      )}
+      {state.showEffortSelector && (
+        <PreferenceSelector
+          title="选择推理深度"
+          currentValue={state.status.thinkingMode}
+          options={[
+            { value: 'low', label: '低', description: '更快地完成简单任务' },
+            { value: 'medium', label: '中', description: '平衡速度与推理深度' },
+            { value: 'high', label: '高', description: '为复杂任务投入更多推理' },
+            { value: 'max', label: '最大', description: '使用可用的最高推理深度' },
+          ]}
+          onSelect={(level) => dispatch({ type: 'SET_THINKING_LEVEL', level })}
+          onClose={hideEffortSelector}
+        />
+      )}
+      {state.showThemeSelector && (
+        <PreferenceSelector
+          title="选择色彩主题"
+          currentValue={themePreset ?? 'teal'}
+          options={[
+            { value: 'teal', label: '青绿', description: '默认深色主题' },
+            { value: 'blue', label: '蓝', description: '蓝色强调主题' },
+            { value: 'purple', label: '紫', description: '紫色强调主题' },
+            { value: 'cyan', label: '青', description: '青色强调主题' },
+            { value: 'mono', label: '单色', description: '低饱和单色主题' },
+          ]}
+          onSelect={(preset) => onThemeSelect?.(preset as ThemePreset)}
+          onClose={hideThemeSelector}
+        />
+      )}
       {state.showMcp && mcpController && (
         <McpOverlay
           controller={mcpController}
@@ -397,7 +461,7 @@ export default function App({
           layeredEscRef={layeredOverlayEscRef}
         />
       )}
-      {slashSuggestion && (
+      {!overlayActive && slashSuggestion && (
         <SlashSuggestionOverlay
           suggestion={slashSuggestion}
           maxVisibleItems={slashListHeight}

@@ -18,6 +18,9 @@ smoke 通过。
 CI 将默认 scenario 清单稳定分到四个相互独立的 runner，并由同名 `tui-system` 汇总 gate 在所有分片成功后
 才报告成功。这不会将 PTY 并发或单个分片通过误作完整 G0 证据。
 
+Required workflow 同时覆盖 `main`、`compact` 与 `man`；其中 `man` 的单父直接推送会失败，只接受通过
+Pull Request 产生的合并提交。本地 pre-commit 守卫提供更早的反馈，远端分支保护仍是最终写入控制面。
+
 `G1` 只判断普通发布可用性：GitHub-hosted macOS、Ubuntu、Windows 原生构建、安装、启动和
 TUI/CLI smoke 通过；DeepSeek `deepseek-v4-flash` 与阿里千问 OpenAI-compatible route 各完成一次
 低成本真实调用；release notes 与已知限制和候选内容一致。

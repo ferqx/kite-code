@@ -8,7 +8,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
-import { createRuntimeStore, runtimeStorePathFor } from '../../src/core/runtime/store.js';
+import {
+  createRuntimeStore,
+  RuntimeRevisionConflictError,
+  runtimeStorePathFor,
+} from '../../src/core/runtime/store.js';
 import type {
   AgentPlan,
   ShellApprovalGrant,
@@ -1390,5 +1394,54 @@ describe('persistence edge cases', () => {
     expect(entry?.eventPosition).toBeGreaterThan(0);
     expect(store.getNamedSnapshotEntry('preimg-entry', 'missing')).toBeNull();
     store.close();
+  });
+
+  test('effect leases are exclusive across RuntimeStore connections and recover after release', () => {
+    const first = createRuntimeStore(dbPath);
+    const second = createRuntimeStore(dbPath);
+    expect(
+      first.tryAcquireEffectLease('lease-thread', 'compact-1', 'owner-a', Date.now() + 60_000),
+    ).toBe(true);
+    expect(
+      second.tryAcquireEffectLease('lease-thread', 'compact-1', 'owner-b', Date.now() + 60_000),
+    ).toBe(false);
+    first.releaseEffectLease('lease-thread', 'compact-1', 'owner-a');
+    expect(
+      second.tryAcquireEffectLease('lease-thread', 'compact-1', 'owner-b', Date.now() + 60_000),
+    ).toBe(true);
+    first.close();
+    second.close();
+  });
+
+  test('rejects stale snapshot writers and late writes after deletion', () => {
+    const first = createRuntimeStore(dbPath);
+    const second = createRuntimeStore(dbPath);
+    first.saveSnapshot('cas-thread', { revision: 0, schemaVersion: 1 });
+    first.appendEventsAndSnapshot(
+      'cas-thread',
+      [makeEvent({ toolCallId: 'first' })],
+      { revision: 1, schemaVersion: 1 },
+      [{ eventId: 'event-1', revision: 1 }],
+    );
+    expect(() =>
+      second.appendEventsAndSnapshot(
+        'cas-thread',
+        [makeEvent({ toolCallId: 'stale' })],
+        { revision: 1, schemaVersion: 1 },
+        [{ eventId: 'event-stale', revision: 1 }],
+      ),
+    ).toThrow(RuntimeRevisionConflictError);
+    first.deleteSession('cas-thread');
+    expect(() =>
+      second.appendEventsAndSnapshot(
+        'cas-thread',
+        [makeEvent({ toolCallId: 'late' })],
+        { revision: 2, schemaVersion: 1 },
+        [{ eventId: 'event-late', revision: 2 }],
+      ),
+    ).toThrow(RuntimeRevisionConflictError);
+    expect(second.listSessions().some((session) => session.threadId === 'cas-thread')).toBe(false);
+    first.close();
+    second.close();
   });
 });

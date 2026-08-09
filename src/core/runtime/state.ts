@@ -599,6 +599,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
         recentAutomaticCompactions: [],
         consecutiveLowGain: 0,
         disabledUntilManualAction: false,
+        recoveryAttempted: false,
       },
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),

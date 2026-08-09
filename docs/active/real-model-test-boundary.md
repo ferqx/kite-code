@@ -30,7 +30,10 @@ credential source，不输出 prompt、response、key、完整 endpoint、stack 
 
 TUI system 使用 `@xterm/headless` 只在测试进程内解析本地 PTY 控制序列；它不会建立 Provider
 连接，也不会改变 live test 发现边界。`tests/tui-system/scenarios/` 仍只连接隔离的本地 mock
-model server，不能据此声明真实模型或公网 Provider 已验证。
+model server，不能据此声明真实模型或公网 Provider 已验证。Prompt Contract V2 的
+`prompt-contract-v2-production` scenario 以 production 环境设置和正常配置显式启用 V2，验证真实
+TUI 到 outbound request 的分层与工具面；它补足 production TUI E2E，但不替代最终候选提交上的
+真实模型 A/B。
 
 ## E2E 目录归类
 

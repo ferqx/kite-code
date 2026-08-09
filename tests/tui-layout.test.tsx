@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { Text } from 'ink';
+import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
 import stringWidth from 'string-width';
 import App from '../src/app/tui/App';
@@ -170,7 +170,7 @@ describe('Header', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('──◆ Kite Code');
-    expect(frame).toContain('gpt-5.6 · low');
+    expect(frame).toContain('gpt-5.6 low');
     expect(frame).not.toContain('/model');
     expect(frame).toContain('/tmp/kite-code');
     expect(frame).toContain('│ model');
@@ -216,10 +216,23 @@ describe('Header', () => {
     const frame = lastFrame() ?? '';
 
     expect(frame).toContain('gpt-5.6');
-    expect(frame).not.toContain('· low');
+    expect(frame).not.toContain(' low');
     expect(frame).not.toContain('/model');
     expect(frame).toContain('…');
     expect(frame.split('\n').every((line) => stringWidth(line) <= 36)).toBe(true);
+  });
+
+  test('hides thinking mode only when model configuration disables reasoning', () => {
+    const { lastFrame } = render(
+      <Header
+        modelName="gpt-5.6"
+        thinkingMode="low"
+        reasoningEnabled={false}
+        workspace="/tmp/kite-code"
+        columns={60}
+      />,
+    );
+    expect(lastFrame()).not.toContain(' low');
   });
 });
 
@@ -295,13 +308,35 @@ describe('StatsLine', () => {
   });
 
   test('shows thinking mode', () => {
-    const status = fakeStatus({ modelProvider: 'deepseek', thinkingMode: 'detailed' });
+    const status = fakeStatus({
+      modelProvider: 'deepseek',
+      thinkingMode: 'detailed',
+    });
     const { lastFrame } = render(<StatsLine status={status} running />);
     expect(lastFrame()).toContain('detailed');
   });
 
+  test('shows thinking mode for a compatible or custom provider route', () => {
+    const status = fakeStatus({
+      modelProvider: 'openai_compatible',
+      modelName: 'deepseek-v4-flash',
+      thinkingMode: 'high',
+    });
+    const { lastFrame } = render(<StatsLine status={status} running />);
+    expect(lastFrame()).toContain('deepseek-v4-flash high');
+  });
+
+  test('hides thinking mode when model configuration explicitly disables reasoning', () => {
+    const status = fakeStatus({ thinkingMode: 'high', reasoningEnabled: false });
+    const { lastFrame } = render(<StatsLine status={status} running />);
+    expect(lastFrame()).not.toContain('high');
+  });
+
   test('shows thinking mode without effort: prefix', () => {
-    const status = fakeStatus({ modelProvider: 'deepseek', thinkingMode: 'medium' });
+    const status = fakeStatus({
+      modelProvider: 'deepseek',
+      thinkingMode: 'medium',
+    });
     const { lastFrame } = render(<StatsLine status={status} running />);
     // Should show just "medium" without "effort: " prefix
     expect(lastFrame()).not.toContain('effort:');
@@ -857,6 +892,32 @@ describe('ModelSelector', () => {
     expect(lastFrame()).toContain('当前');
   });
 
+  test('keeps a short list compact within the available overlay space', () => {
+    const { lastFrame } = render(
+      <Box flexDirection="column" height={20}>
+        <ModelSelector
+          currentModel="model-a"
+          currentProvider="provider"
+          models={[
+            { provider: 'provider', name: 'model-a', isDefault: true },
+            { provider: 'provider', name: 'model-b', isDefault: false },
+          ]}
+          onSelect={noop}
+          onClose={noop}
+        />
+      </Box>,
+    );
+    const lines = (lastFrame() ?? '').split('\n');
+    const lastModelIndex = lines.findIndex((line) => line.includes('model-b'));
+    const shortcutIndex = lines.findIndex((line) => line.includes('↑↓ 导航'));
+
+    expect(lastModelIndex).toBeGreaterThan(-1);
+    expect(shortcutIndex).toBeGreaterThan(lastModelIndex);
+    expect(
+      lines.slice(lastModelIndex + 1, shortcutIndex).filter((line) => line.trim() === ''),
+    ).toHaveLength(1);
+  });
+
   test('distinguishes same-named models from different providers', () => {
     const models = [
       { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
@@ -1065,7 +1126,10 @@ describe('ApprovalBlock', () => {
   });
 
   test('non-shell tools only show grants declared by the approval payload', () => {
-    const approval = fakeApproval({ tool: 'write_file', grantOptions: ['approve_once'] });
+    const approval = fakeApproval({
+      tool: 'write_file',
+      grantOptions: ['approve_once'],
+    });
     const { lastFrame } = render(
       <ApprovalBlock approval={approval} provider={fakeProvider()} onResolved={onResolved} />,
     );
@@ -1786,7 +1850,12 @@ describe('BlockRenderer', () => {
   });
 
   test('renders reason block as null (hidden)', () => {
-    const block: OutputBlock = { id: 1, kind: 'reason', content: 'thinking', folded: false };
+    const block: OutputBlock = {
+      id: 1,
+      kind: 'reason',
+      content: 'thinking',
+      folded: false,
+    };
     const { lastFrame } = render(
       <BlockRenderer columns={80} block={block} isFocused={false} index={0} />,
     );
@@ -2297,7 +2366,10 @@ describe('BlockRenderer', () => {
       id: 1,
       kind: 'tool_summary',
       active: true,
-      latestActivity: { kind: 'thinking', text: 'checking current Thought boundaries' },
+      latestActivity: {
+        kind: 'thinking',
+        text: 'checking current Thought boundaries',
+      },
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'thinking',
@@ -2457,7 +2529,10 @@ describe('BlockRenderer', () => {
       id: 1,
       kind: 'tool_summary',
       active: true,
-      latestActivity: { kind: 'thinking', text: 'reviewing the project conventions' },
+      latestActivity: {
+        kind: 'thinking',
+        text: 'reviewing the project conventions',
+      },
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'read 3 files',
@@ -2617,7 +2692,10 @@ describe('BlockRenderer', () => {
       id: 1,
       kind: 'tool_summary',
       active: true,
-      latestActivity: { kind: 'thinking', text: 'still thinking after tools done' },
+      latestActivity: {
+        kind: 'thinking',
+        text: 'still thinking after tools done',
+      },
       createdAt: Date.now() - 1000,
       totalElapsedMs: 1000,
       summaryLine: 'read 1 file',
@@ -3054,6 +3132,24 @@ describe('Block spacing', () => {
     );
   });
 
+  test('consecutive slash command user blocks keep the normal gap', () => {
+    assertGap(
+      {
+        id: 1,
+        kind: 'user',
+        content: '/compact first',
+        _marker: '/compact first',
+      } as unknown as OutputBlock,
+      {
+        id: 2,
+        kind: 'user',
+        content: '/compact second',
+        _marker: '/compact second',
+      } as unknown as OutputBlock,
+      1,
+    );
+  });
+
   test('consecutive text in same block has 1-line paragraph gap', () => {
     // Two paragraphs in the same text block separated by \n\n
     const blocks: OutputBlock[] = [
@@ -3078,7 +3174,11 @@ describe('Block spacing', () => {
   test('consecutive bullet items have 0 gap', () => {
     const blocks: OutputBlock[] = [
       { id: 1, kind: 'user', content: 'list' },
-      { id: 2, kind: 'text', content: '- item one\n- item two\n\n- item after blank\n- item four' },
+      {
+        id: 2,
+        kind: 'text',
+        content: '- item one\n- item two\n\n- item after blank\n- item four',
+      },
     ];
 
     const { lastFrame } = render(
@@ -3300,7 +3400,11 @@ describe('OutputArea', () => {
           ok: true,
           command: 'tool_search',
           exitCode: 0,
-          stdout: JSON.stringify({ ok: true, candidate_count: 0, candidates: [] }),
+          stdout: JSON.stringify({
+            ok: true,
+            candidate_count: 0,
+            candidates: [],
+          }),
           stderr: '',
         },
       },
@@ -3442,7 +3546,11 @@ describe('OutputArea', () => {
             ok: true,
             resource_count: 2,
             resources: [
-              { server: 'langchian', uri: 'docs://langgraph/overview', name: 'Overview' },
+              {
+                server: 'langchian',
+                uri: 'docs://langgraph/overview',
+                name: 'Overview',
+              },
               {
                 server: 'langchian',
                 uri: 'docs://langgraph/persistence',
@@ -3472,7 +3580,11 @@ describe('OutputArea', () => {
 
   test('renders the message list produced exclusively from RuntimeEvents', () => {
     const events: RuntimeEvent[] = [
-      { type: 'user.message_appended', messageId: 'u-1', content: 'Inspect the runtime bridge' },
+      {
+        type: 'user.message_appended',
+        messageId: 'u-1',
+        content: 'Inspect the runtime bridge',
+      },
       {
         type: 'model.responded',
         messageId: 'm-1',
@@ -3498,7 +3610,11 @@ describe('OutputArea', () => {
           stderr: '',
         },
       },
-      { type: 'run.error', message: 'temporary network issue', recoverable: true },
+      {
+        type: 'run.error',
+        message: 'temporary network issue',
+        recoverable: true,
+      },
     ];
     const state = events.reduce(
       (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
@@ -3525,7 +3641,11 @@ describe('OutputArea', () => {
     const events: RuntimeEvent[] = [
       {
         type: 'subagent.started',
-        subagent: { id: 'subagent-1', role: 'explore', task: 'Locate runtime event consumers' },
+        subagent: {
+          id: 'subagent-1',
+          role: 'explore',
+          task: 'Locate runtime event consumers',
+        },
       },
       {
         type: 'subagent.step',
@@ -3537,7 +3657,12 @@ describe('OutputArea', () => {
       },
       {
         type: 'subagent.tool_result',
-        subagent: { id: 'subagent-1', toolName: 'read_file', ok: true, summary: 'found route' },
+        subagent: {
+          id: 'subagent-1',
+          toolName: 'read_file',
+          ok: true,
+          summary: 'found route',
+        },
       },
       {
         type: 'subagent.completed',
@@ -3708,7 +3833,11 @@ describe('OutputArea', () => {
 
   test('approval block renders nothing (UI in Footer)', () => {
     const blocks: OutputBlock[] = [
-      { id: 1, kind: 'approval', approval: fakeApproval({ command: 'npm publish' }) },
+      {
+        id: 1,
+        kind: 'approval',
+        approval: fakeApproval({ command: 'npm publish' }),
+      },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
@@ -3918,7 +4047,11 @@ describe('OutputArea', () => {
   test('question block is rendered by tool_card, not OutputArea (unresolved)', () => {
     // sandbox 合并后 question 由 tool_card 渲染，BlockRenderer 返回 null
     const blocks: OutputBlock[] = [
-      { id: 1, kind: 'question', question: fakeQuestion({ question: 'Continue?' }) },
+      {
+        id: 1,
+        kind: 'question',
+        question: fakeQuestion({ question: 'Continue?' }),
+      },
     ];
     const { lastFrame } = render(
       <OutputAreaTestWrap running={false} turns={[{ blocks }]} onToggleReason={noop} />,
@@ -3968,6 +4101,9 @@ describe('App', () => {
       runCount: 0,
       showHelp: false,
       showModelSelector: false,
+      showPermissionSelector: false,
+      showEffortSelector: false,
+      showThemeSelector: false,
       showSessions: false,
       showMcp: false,
       showRewind: false,
@@ -4021,10 +4157,105 @@ describe('App', () => {
     expect(lastFrame()).toContain('选择模型');
   });
 
+  test('shows PermissionSelector when showPermissionSelector is true', () => {
+    const state = fakeState({ showPermissionSelector: true });
+    const { lastFrame } = render(
+      <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()}>
+        <Text>permission-input-marker</Text>
+      </App>,
+    );
+    expect(lastFrame()).toContain('选择权限模式');
+    expect(lastFrame()).toContain('接受编辑');
+    expect(lastFrame()).toContain('自动审批');
+    expect(lastFrame()).not.toContain('permission-input-marker');
+    expect(lastFrame()?.match(/claude-opus/g) ?? []).toHaveLength(1);
+  });
+
+  test('refreshes the header and Footer when thinking effort changes', () => {
+    const before = fakeState({
+      status: fakeStatus({ modelProvider: 'deepseek', thinkingMode: 'max' }),
+    });
+    const view = render(
+      <App state={before} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
+    );
+    expect(view.lastFrame()).toContain('max');
+
+    const after = fakeState({
+      status: fakeStatus({ modelProvider: 'deepseek', thinkingMode: 'high' }),
+    });
+    // Header is an Ink <Static> item. TuiApp remounts App after a visible
+    // model/effort change so the terminal receives a fresh Header frame.
+    view.rerender(
+      <App
+        key="refreshed-header"
+        state={after}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+      />,
+    );
+    expect(view.lastFrame()?.match(/high/g) ?? []).toHaveLength(2);
+  });
+
+  test('hides the Footer for every slash-command Overlay', () => {
+    for (const overlay of [
+      { showHelp: true },
+      { showModelSelector: true },
+      { showPermissionSelector: true },
+      { showEffortSelector: true },
+      { showThemeSelector: true },
+      { showSessions: true },
+      { showMcp: true },
+      { showRewind: true },
+    ]) {
+      const { lastFrame, unmount } = render(
+        <App
+          state={fakeState(overlay)}
+          dispatch={noop}
+          onToggleReason={noop}
+          provider={fakeProvider()}
+        >
+          <Text>footer-input-marker</Text>
+        </App>,
+      );
+      expect(lastFrame()).not.toContain('footer-input-marker');
+      unmount();
+    }
+  });
+
+  test('hides slash suggestions while PermissionSelector is open', () => {
+    const state = fakeState({ showPermissionSelector: true });
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        slashSuggestion={{
+          kind: 'command',
+          partial: 'permissions',
+          selectedIndex: 0,
+          items: [
+            {
+              command: 'permissions',
+              aliases: [],
+              description: '设置权限模式',
+            },
+          ],
+        }}
+      />,
+    );
+    expect(lastFrame()).toContain('选择权限模式');
+    expect(lastFrame()).not.toContain('命令匹配');
+  });
+
   test('persists a model selection before applying it to the current TUI state', async () => {
     const state = fakeState({
       showModelSelector: true,
-      status: fakeStatus({ modelProvider: 'deepseek', modelName: 'deepseek-v4-flash' }),
+      status: fakeStatus({
+        modelProvider: 'deepseek',
+        modelName: 'deepseek-v4-flash',
+      }),
     });
     const persisted: Array<[string, string]> = [];
     const actions: Action[] = [];
@@ -4036,7 +4267,11 @@ describe('App', () => {
         provider={fakeProvider()}
         availableModels={[
           { provider: 'deepseek', name: 'deepseek-v4-flash', isDefault: true },
-          { provider: 'opencode_go', name: 'deepseek-v4-flash', isDefault: false },
+          {
+            provider: 'opencode_go',
+            name: 'deepseek-v4-flash',
+            isDefault: false,
+          },
         ]}
         persistModelSelection={(provider, modelName) => {
           persisted.push([provider, modelName]);
@@ -4081,7 +4316,11 @@ describe('App', () => {
     const state = fakeState({
       running: true,
       runStartTime: Date.now() - 2_000,
-      turns: [{ blocks: [{ id: 1, kind: 'text', content: 'Done. Here is the result.' }] }],
+      turns: [
+        {
+          blocks: [{ id: 1, kind: 'text', content: 'Done. Here is the result.' }],
+        },
+      ],
     });
     const { lastFrame } = render(
       <App state={state} dispatch={noop} onToggleReason={noop} provider={fakeProvider()} />,
@@ -4214,7 +4453,11 @@ describe('SubAgentBlock rendering', () => {
           status: 'success' as const,
           ok: true,
         },
-        { toolName: 'edit_file', toolArgs: { path: 'auth.ts' }, status: 'success' as const },
+        {
+          toolName: 'edit_file',
+          toolArgs: { path: 'auth.ts' },
+          status: 'success' as const,
+        },
       ],
     };
     const { lastFrame } = render(<SubAgentBlock block={block} />);

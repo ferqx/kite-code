@@ -218,6 +218,9 @@ export interface TuiState {
   currentRunReasonId?: number;
   showHelp: boolean;
   showModelSelector: boolean;
+  showPermissionSelector: boolean;
+  showEffortSelector: boolean;
+  showThemeSelector: boolean;
   showSessions: boolean;
   showMcp: boolean;
   showRewind: boolean;
@@ -308,6 +311,8 @@ export interface StatusState {
   modelProvider: string;
   modelName: string;
   thinkingMode: string;
+  /** Hidden only when the selected model configuration explicitly sets `reasoning: false`. */
+  reasoningEnabled?: boolean;
   retryState: RetryState | null;
   contextSnapshot?: import('@/core/model/context-status').ContextStatusSnapshot;
 }

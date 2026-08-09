@@ -74,11 +74,12 @@ describe('feature flags', () => {
       const configPath = join(dir, 'kite-code.jsonc');
       writeFileSync(
         configPath,
-        '{ "features": { "autoReviewV2": true }, "provider": { "ollama": {} } }',
+        '{ "features": { "autoReviewV2": true, "promptContractV2": true }, "provider": { "ollama": {} } }',
       );
       const loaded = loadAgentConfig({ configPath, providerName: 'ollama' });
       expect(loaded.features).toEqual({
         autoReviewV2: true,
+        promptContractV2: true,
       });
       expect(loaded.sessionLoggingPolicy?.mode).toBe('metadata');
       expect(

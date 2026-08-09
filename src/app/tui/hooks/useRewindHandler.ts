@@ -199,6 +199,7 @@ export function useRunRewind(deps: RewindDeps) {
             modelProvider: resumedConfig.providerName,
             modelName: resumedConfig.modelName,
             thinkingLevel: data.thinkingLevel,
+            reasoningEnabled: resumedConfig.reasoningExplicitlyDisabled !== true,
           });
           deps.dispatch({ type: 'SET_EXITED' });
         }

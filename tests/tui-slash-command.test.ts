@@ -10,23 +10,20 @@ describe('parseSlashCommand', () => {
 
   // ── /effort ──
   test('parses /effort', () => {
-    expect(parseSlashCommand('/effort')).toEqual({ type: 'effort', level: 'max' });
+    expect(parseSlashCommand('/effort')).toEqual({ type: 'effort' });
   });
 
-  test('parses /effort with level', () => {
-    expect(parseSlashCommand('/effort low')).toEqual({ type: 'effort', level: 'low' });
+  test('rejects /effort arguments', () => {
+    for (const input of ['/effort low', '/effort medium', '/effort high', '/effort max']) {
+      expect(parseSlashCommand(input)).toEqual({ type: 'effort_invalid_args' });
+    }
   });
 
-  test('parses /effort with medium level', () => {
-    expect(parseSlashCommand('/effort medium')).toEqual({ type: 'effort', level: 'medium' });
-  });
-
-  test('parses /effort with high level', () => {
-    expect(parseSlashCommand('/effort high')).toEqual({ type: 'effort', level: 'high' });
-  });
-
-  test('parses /effort with max level', () => {
-    expect(parseSlashCommand('/effort max')).toEqual({ type: 'effort', level: 'max' });
+  test('parses /theme and rejects its preset arguments', () => {
+    expect(parseSlashCommand('/theme')).toEqual({ type: 'theme' });
+    for (const input of ['/theme teal', '/theme blue', '/theme purple']) {
+      expect(parseSlashCommand(input)).toEqual({ type: 'theme_invalid_args' });
+    }
   });
 
   // ── /model ──
@@ -133,11 +130,11 @@ describe('parseSlashCommand', () => {
   // ── edge cases ──
   test('handles extra whitespace between / and command', () => {
     // parser trims after /, so /   effort is treated as /effort
-    expect(parseSlashCommand('/   effort')).toEqual({ type: 'effort', level: 'max' });
+    expect(parseSlashCommand('/   effort')).toEqual({ type: 'effort' });
   });
 
   test('handles trailing whitespace', () => {
-    expect(parseSlashCommand('/effort max   ')).toEqual({ type: 'effort', level: 'max' });
+    expect(parseSlashCommand('/effort max   ')).toEqual({ type: 'effort_invalid_args' });
   });
 
   test("handles no input after slash (just '/')", () => {
@@ -150,34 +147,33 @@ describe('parseSlashCommand', () => {
 
   // ── /permissions ──
 
-  test('parses /permissions auto', () => {
-    expect(parseSlashCommand('/permissions auto')).toEqual({ type: 'permissions', mode: 'auto' });
+  test('rejects /permissions auto arguments', () => {
+    expect(parseSlashCommand('/permissions auto')).toEqual({ type: 'permissions_invalid_args' });
   });
 
-  test('parses /permissions full', () => {
-    expect(parseSlashCommand('/permissions full')).toEqual({ type: 'permissions', mode: 'full' });
+  test('rejects /permissions full arguments', () => {
+    expect(parseSlashCommand('/permissions full')).toEqual({ type: 'permissions_invalid_args' });
   });
 
-  test('parses /permissions accept_edits', () => {
+  test('rejects /permissions accept_edits arguments', () => {
     expect(parseSlashCommand('/permissions accept_edits')).toEqual({
-      type: 'permissions',
-      mode: 'accept_edits',
+      type: 'permissions_invalid_args',
     });
   });
 
   test('parses /permissions with no arg', () => {
-    expect(parseSlashCommand('/permissions')).toEqual({ type: 'permissions', mode: undefined });
+    expect(parseSlashCommand('/permissions')).toEqual({ type: 'permissions' });
   });
 
-  test('parses /permissions with short form a', () => {
-    expect(parseSlashCommand('/permissions a')).toEqual({ type: 'permissions', mode: 'a' });
+  test('rejects /permissions short form a', () => {
+    expect(parseSlashCommand('/permissions a')).toEqual({ type: 'permissions_invalid_args' });
   });
 
-  test('parses /permissions with short form f', () => {
-    expect(parseSlashCommand('/permissions f')).toEqual({ type: 'permissions', mode: 'f' });
+  test('rejects /permissions short form f', () => {
+    expect(parseSlashCommand('/permissions f')).toEqual({ type: 'permissions_invalid_args' });
   });
 
-  test('parses /permissions with short form au', () => {
-    expect(parseSlashCommand('/permissions au')).toEqual({ type: 'permissions', mode: 'au' });
+  test('rejects /permissions short form au', () => {
+    expect(parseSlashCommand('/permissions au')).toEqual({ type: 'permissions_invalid_args' });
   });
 });

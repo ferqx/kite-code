@@ -52,7 +52,7 @@ describe('TUI PTY System — /compact persistence', () => {
       await waitForText(() => tui.outputSinceLastAction(), sessionResponse, 15_000);
       await waitForTuiReady(tui);
 
-      const command = '/compact restart-persistence-marker';
+      const command = '/compact';
       let targetSession: { threadId: string; name: string } | undefined;
       await submitCommand(tui, command, undefined, {
         acceptWhen: () => {
@@ -66,6 +66,8 @@ describe('TUI PTY System — /compact persistence', () => {
       });
       expect(targetSession).toBeDefined();
       expect(targetSession!.name).not.toBe(targetSession!.threadId);
+      await waitForText(() => tui.viewport(), command, 10_000);
+      expect(tui.viewport().split(command).length - 1).toBe(1);
 
       await waitForTuiReady(tui);
       await submitCommand(tui, '/exit');

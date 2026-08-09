@@ -3,7 +3,7 @@
 状态：completed
 完成日期：2026-08-09
 计划：[`../../plans/2026-08-08-prompt-contract-v2.md`](../../plans/2026-08-08-prompt-contract-v2.md)
-架构：[`../../../adr/0090-prompt-contract-v2.md`](../../../adr/0090-prompt-contract-v2.md)
+架构：[`../../../adr/0092-prompt-contract-v2.md`](../../../adr/0092-prompt-contract-v2.md)
 
 ## 完成范围
 
@@ -15,14 +15,15 @@
 - MCP description 增加 provenance、清理、512 code point 上限、generated fallback 和 revision binding；
 - Subagent 继承项目指令 snapshot，移除旧 `Skill` 和审批规避提示；
 - 增加固定 token gate 与 opt-in 真实模型 A/B runner，runner 仅保存聚合与脱敏失败分类；
+- 增加 production-mode 真实 TUI PTY E2E，通过正常配置启用 V2 并验证实际 outbound Prompt 分层与 planning 工具面；
 - 收敛 Windows 全量门禁中的 ACL、reparse point、路径分隔符、POSIX mode、opaque inode、测试 deadline 和 fixture 平台假设。
 
 ## 验证证据
 
 - Token fixture：legacy 9,288（System 2,578 + tools 6,710），V2 3,729（System 457 + tools 3,272），下降 59.85%，低于 70% 门槛 6,501；
-- 真实默认模型 `deepseek/deepseek-v4-flash`：legacy 23/30（76.67%），V2 24/30（80.00%）；安全违规 0/0，invalid tool 0/0，invalid args 2/2，重复 Tool Call 7/5，`contentLogged=false`；
+- 实现阶段真实默认模型基线 `deepseek/deepseek-v4-flash`：legacy 23/30（76.67%），V2 24/30（80.00%）；安全违规 0/0，invalid tool 0/0，invalid args 2/2，重复 Tool Call 7/5，`contentLogged=false`；该结果不作为双路径运行结束后的最终候选 A/B；
 - Prompt Contract 最终专项复验：173 pass、0 fail；
 - `bun run test`：主 suite 3,127 pass、7 skip、0 fail，5 个 process-isolated 文件全部通过；
 - `bun run typecheck`、`bun run format:check`、`bun run lint`、`bun run check:core-boundary`、`bun run check:docs-impact`、`bun run check:docs`、`git diff --check` 全部通过；format/lint 仅保留仓库既有测试的 18 条 `noExplicitAny` warning。
 
-`promptContractV2` 仍默认关闭。关闭 Flag 可回滚 V2 排布、项目指令投影、phase 工具裁剪和可信 MCP 语义投影，但不会恢复已修正的错误 sandbox、旧 Skill 名、虚假工具结果说明或安全缺陷。默认值改为 `true` 仍需独立的生产 TUI E2E 与后续决策。
+`promptContractV2` 仍默认关闭。关闭 Flag 可回滚 V2 排布、项目指令投影、phase 工具裁剪和可信 MCP 语义投影，但不会恢复已修正的错误 sandbox、旧 Skill 名、虚假工具结果说明或安全缺陷。production TUI E2E 已补齐；默认值改为 `true` 仍需按[发布灰度计划](../../plans/2026-08-09-prompt-contract-v2-release-rollout.md)让双路径至少运行两周、基于最终候选提交重新完成真实模型 A/B，并由独立迁移 ADR 决策。

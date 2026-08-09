@@ -1,19 +1,20 @@
 import type { Dispatch } from 'react';
 import { useCallback } from 'react';
-import type { SandboxBackend } from '@/core/sandbox';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { AgentPhase } from '@/protocol/events';
-import { admitInteractionModeTarget, resolveInteractionModeTarget } from '../interaction-mode';
 import type { Action } from '../reducers/actions';
 import { SLASH_COMMAND_DEFS } from './useSlashSuggestions';
 
 export type SlashAction =
-  | { type: 'effort'; level: string }
+  | { type: 'effort' }
+  | { type: 'effort_invalid_args' }
   | { type: 'model' }
-  | { type: 'theme'; preset?: string }
+  | { type: 'theme' }
+  | { type: 'theme_invalid_args' }
   | { type: 'sessions'; id?: string }
   | { type: 'plan'; task?: string }
-  | { type: 'permissions'; mode?: string }
+  | { type: 'permissions' }
+  | { type: 'permissions_invalid_args' }
   | { type: 'release' }
   | { type: 'telemetry' }
   | { type: 'clear' }
@@ -43,17 +44,17 @@ export function parseSlashCommand(input: string): SlashAction | null {
 
   switch (cmd) {
     case 'effort':
-      return { type: 'effort', level: arg || 'max' };
+      return args.length === 0 ? { type: 'effort' } : { type: 'effort_invalid_args' };
     case 'model':
       return args.length === 0 ? { type: 'model' } : { type: 'unknown', raw: input };
     case 'theme':
-      return { type: 'theme', preset: arg || undefined };
+      return args.length === 0 ? { type: 'theme' } : { type: 'theme_invalid_args' };
     case 'sessions':
       return { type: 'sessions' };
     case 'plan':
       return { type: 'plan', task: arg || undefined };
     case 'permissions':
-      return { type: 'permissions', mode: arg || undefined };
+      return args.length === 0 ? { type: 'permissions' } : { type: 'permissions_invalid_args' };
     case 'release':
       return args.length === 0 ? { type: 'release' } : { type: 'unknown', raw: input };
     case 'telemetry':
@@ -103,13 +104,9 @@ export function useSlashCommand(
     initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>,
   ) => void,
   onEnterPlanMode?: () => void,
-  onTheme?: (preset: string) => void,
-  currentInteractionMode: 'accept_edits' | 'auto' | 'full' = 'accept_edits',
-  sandboxBackend: SandboxBackend = 'none',
   onCompact?: (customInstructions?: string) => void,
   onContext?: () => void,
   onCompactReset?: () => void,
-  executionStatusText?: string,
   releaseStatusText?: string,
   telemetryStatusText?: string,
 ) {
@@ -120,15 +117,27 @@ export function useSlashCommand(
 
       switch (action.type) {
         case 'effort':
-          dispatch({ type: 'SET_THINKING_LEVEL', level: action.level });
+          dispatch({ type: 'SHOW_EFFORT_SELECTOR' });
+          break;
+        case 'effort_invalid_args':
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: '推理深度只能在选择器中设置，请直接输入 /effort。',
+            isError: true,
+          });
           break;
         case 'model':
           dispatch({ type: 'SHOW_MODEL_SELECTOR' });
           break;
         case 'theme':
-          if (onTheme && action.preset) {
-            onTheme(action.preset);
-          }
+          dispatch({ type: 'SHOW_THEME_SELECTOR' });
+          break;
+        case 'theme_invalid_args':
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: '主题只能在选择器中设置，请直接输入 /theme。',
+            isError: true,
+          });
           break;
         case 'sessions':
           dispatch({ type: 'SHOW_SESSIONS' });
@@ -145,30 +154,16 @@ export function useSlashCommand(
             onEnterPlanMode?.();
           }
           break;
-        case 'permissions': {
-          if (!action.mode && executionStatusText) {
-            dispatch({ type: 'LOCAL_TEXT', text: executionStatusText });
-            break;
-          }
-          const target = resolveInteractionModeTarget(
-            action.mode,
-            currentInteractionMode,
-            sandboxBackend,
-          );
-          if (!target) break;
-          const admission = admitInteractionModeTarget(target, sandboxBackend);
-          if (!admission.allowed) {
-            dispatch({ type: 'SET_INTERACTION_MODE', mode: admission.mode });
-            dispatch({
-              type: 'LOCAL_TEXT',
-              text: admission.reason ?? 'Interaction mode is not available.',
-              isError: true,
-            });
-            break;
-          }
-          dispatch({ type: 'SET_INTERACTION_MODE', mode: admission.mode });
+        case 'permissions':
+          dispatch({ type: 'SHOW_PERMISSION_SELECTOR' });
           break;
-        }
+        case 'permissions_invalid_args':
+          dispatch({
+            type: 'LOCAL_TEXT',
+            text: '权限模式只能在选择器中设置，请直接输入 /permissions。',
+            isError: true,
+          });
+          break;
         case 'release':
           if (releaseStatusText) dispatch({ type: 'LOCAL_TEXT', text: releaseStatusText });
           break;
@@ -244,13 +239,9 @@ export function useSlashCommand(
       _skillOptions,
       onRunTask,
       onEnterPlanMode,
-      onTheme,
-      currentInteractionMode,
-      sandboxBackend,
       onCompact,
       onContext,
       onCompactReset,
-      executionStatusText,
       releaseStatusText,
       telemetryStatusText,
     ],
