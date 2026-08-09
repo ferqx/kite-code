@@ -21,6 +21,8 @@ project 配置只能关闭观测能力，不能开启远程发送、提供 endpo
 allowlist 只接受有限 metric/attribute 枚举与有限数值；单样本 canonical JSON 上限 1024 bytes。prompt、
 模型或工具正文、路径、命令、自由错误、secret、credential 与任意 user/project identity 都不得进入
 metric、日志、报告或 artifact。未知 route/capability 只能折叠为固定低基数 alias，不能携带原值。
+运行时权限切换的 `interaction_mode.changed` 是 Runtime Store 审计事实，不产生 observability metric 或
+属性；其 user source 与时间戳不得通过观测通道外发。
 
 Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低优先级样本并只记录本地 drop 计数。
 序列化、flush 或 shutdown 失败不得改变 Runtime outcome。CLI 退出执行有界 shutdown；TUI 的 `/exit`、

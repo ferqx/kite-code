@@ -357,6 +357,21 @@ export class SessionRuntime {
     await this._manualCompactionBarrier;
   }
 
+  /**
+   * Keep a live Kernel aligned with the TUI permissions selector. The event
+   * is durable and advances the Kernel revision, so any in-flight effect is
+   * re-evaluated before it can schedule work under the previous mode.
+   */
+  setInteractionMode(mode: 'accept_edits' | 'auto' | 'full'): void {
+    this.runtimeControl?.processEvent({
+      type: 'interaction_mode.changed',
+      mode,
+      source: 'user',
+      changedAt: new Date().toISOString(),
+    });
+    this.interactionMode = mode;
+  }
+
   abort(): void {
     this._flushBufferedPresentation();
     this._manualCompactionAbortController?.abort('Cancelled by user.');

@@ -7,7 +7,7 @@
 
 import { createHash } from 'node:crypto';
 import { defaultPlanArtifactStore } from '@/core/persistence/plan-artifacts';
-import { createModePolicy } from '@/core/policies/mode-policy';
+import { assertAuthorizationElevation, createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
 import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
@@ -489,6 +489,7 @@ export class AgentKernel {
         `Runtime revision mismatch: expected ${state.revision + 1}, received ${envelope.revision}.`,
       );
     }
+    this.assertRuntimeEventAdmission(envelope.payload);
     const reduced = reduceRuntimeState(state, envelope.payload);
     const nextState: RuntimeState = {
       ...reduced,
@@ -498,6 +499,20 @@ export class AgentKernel {
     };
     assertRuntimeStateInvariants(nextState);
     return nextState;
+  }
+
+  /** Enforce authorization invariants for mutable live-control events. */
+  private assertRuntimeEventAdmission(event: RuntimeEvent): void {
+    if (event.type !== 'interaction_mode.changed') return;
+    if (!Number.isFinite(Date.parse(event.changedAt))) {
+      throw new Error('interaction_mode.changed requires a valid changedAt timestamp.');
+    }
+    if (event.mode !== 'full') return;
+    assertAuthorizationElevation({
+      mode: 'full_access',
+      source: event.source,
+      sandboxAvailable: this.sandboxAvailable,
+    });
   }
 
   private metadataFor(envelope: RuntimeEventEnvelope): RuntimeEventMetadata {

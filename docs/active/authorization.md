@@ -114,6 +114,14 @@ Shell 重叠范围只限同一 `modelMessageId` 和同一任务的连续 sibling
 
 TUI 入口通过 `session-manager.ts` 的 `buildRunAgentParams` → `RunRuntimeAgentInput.authorizationMode` 传递到 `createAgentKernel`；`full` interaction mode 对应 `'full_access'` authorization mode。Kernel 初始化时若恢复的 snapshot 携带旧 `mode` 或 `authorization.mode`，当前选择器确认值覆盖恢复态，并在新轮次立即生效。
 
+当 Runtime 正在回复时，`/permissions` 的选择同样必须立即生效：`SessionRuntime` 通过 live
+Kernel control 持久化 `interaction_mode.changed`。事件只能来自显式用户选择，并带 `source: user` 与
+时间戳；Kernel 在持久化前对 `full` 复用 `assertAuthorizationElevation()`，只有 Full-qualified sandbox
+才允许提升。reducer 在同一状态转换中更新 `mode`、对应的 authorization mode 及其 provenance，并清除
+当前 Task 的临时 `executionMode` 覆盖；降级会清除 mode-level provenance，已批准计划本身仍保留其历史
+展示选择。事件推进 revision，已在旧 mode 下启动但尚未提交的 effect 不能再提交结果，后续调度按新 mode
+重新计算。该路径不直接改写 RuntimeState，也不依赖 TUI ref 的下一次渲染。
+
 `/permissions` 只接受无参数形式并打开可用模式选择器，确认某一项后才改变 mode；任何附加参数都不
 触发模式切换。当前 backend 不支持 `full` 时选择器禁用该项。
 这不会把模式选择伪装成 production capability admission。production execution-status 只可由 CLI

@@ -89,6 +89,7 @@ function hasModelConversation(state: import('./types').TuiState): boolean {
 }
 
 function overlaySurfaceKey(state: import('./types').TuiState): string {
+  if (state.interrupt) return 'interrupt';
   if (state.showHelp) return 'help';
   if (state.showModelSelector) return 'model';
   if (state.showPermissionSelector) return 'permissions';
@@ -1216,6 +1217,16 @@ function TuiApp({
     sessionManager.getRuntime(threadIdRef.current)?.abort();
   }, [sessionManager]);
 
+  const syncInteractionMode = React.useCallback(
+    (mode: 'accept_edits' | 'auto' | 'full') => {
+      // Update the ref in the same input turn so a prompt submitted immediately
+      // after closing the selector cannot observe the old value.
+      sessionManager.getRuntime(threadIdRef.current)?.setInteractionMode(mode);
+      interactionModeRef.current = mode;
+    },
+    [sessionManager],
+  );
+
   const runTask = React.useCallback(
     async (
       task: string,
@@ -1388,6 +1399,7 @@ function TuiApp({
         slashSuggestion={slashSuggestion}
         sandboxBackend={sandboxBackend}
         onTogglePlanMode={togglePlanMode}
+        onInteractionModeChange={syncInteractionMode}
         themePreset={themePreset}
         onThemeSelect={applyThemePreset}
         onAbort={abortForegroundRun}

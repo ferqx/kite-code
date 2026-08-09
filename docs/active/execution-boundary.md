@@ -261,3 +261,6 @@ policy、controller worktree 状态以及 capability 的 typed disabled reasons�
 TUI 的 `/permissions` 只用于选择 interaction mode，不显示或授予 production boundary；CLI
 `--execution-status` 在创建 Runtime、MCP 或 Skill 前输出状态并退出。CLI 直接启用
 `executionBoundaryV1`/`networkBoundaryV1` 会在参数解析阶段拒绝，显式 `false` 仍可单调收紧。
+
+运行中的 `/permissions full` 仍不构成 production boundary admission。它必须在 Kernel 的 live-control
+事件入口重新验证 Full-qualified sandbox；失败时不改变 Runtime authorization 或 interaction mode。

@@ -48,6 +48,10 @@ Runtime 的 deadline、budget admission 等 `run.error` producer 可以携带结
 allowlist 中的稳定 `FailureKind`，不得把 terminal outcome 对象或用户可见错误文案整体序列化到
 session log。
 
+运行中 `/permissions` 产生的 `interaction_mode.changed` 只作为 Runtime Store 的权限审计事实；
+SessionLogCollector 不为该 live-control 事件生成 metadata 或 content 记录，避免把用户授权时间或
+source 扩散到 session log。
+
 永久禁止 user/model/reasoning/summary 正文、tool args/stdout/stderr、MCP content、文件和
 workspace path、Plan/Skill/Capability description、base URL、header、credential reference、
 原始异常栈和 Provider response body。Failure classifier 只消费结构化 failure，不从用户可见

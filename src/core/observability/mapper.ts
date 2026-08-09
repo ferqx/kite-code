@@ -662,6 +662,7 @@ export class ProductionMetricMapperV1 {
       case 'provider.admission_waived':
       case 'provider.admission_cancelled':
       case 'authorization.changed':
+      case 'interaction_mode.changed':
       case 'auto_review.requested':
       case 'auto_review.completed':
       case 'user_input.cancelled':
