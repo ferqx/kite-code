@@ -95,3 +95,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0091](0091-runtime-store-compaction-ownership.md) | accepted | RuntimeStore effect lease 与 revision CAS 阻止重复压缩、stale 覆盖和删除后复活 |
 | [0092](0092-prompt-contract-v2.md) | accepted | 模型上下文分层加载项目指令、投影真实 Runtime 状态，并仅采用可信 Capability 描述 |
 | [0093](0093-opencode-go-release-provider-smoke.md) | accepted | G1 第二条真实 Provider smoke 从阿里千问 Token Plan 迁移到固定 OpenCode Go route |
+| [0094](0094-prompt-contract-v2-default-migration.md) | accepted | 取消固定十四日等待，并因最终候选任务成功率回退而保持 Prompt Contract V2 默认关闭 |

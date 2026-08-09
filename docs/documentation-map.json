@@ -466,6 +466,7 @@
         "docs/book/11-MCP与Skills扩展.md",
         "docs/book/12-测试体系.md",
         "docs/adr/0092-prompt-contract-v2.md",
+        "docs/adr/0094-prompt-contract-v2-default-migration.md",
         "docs/space/plans/2026-08-08-prompt-contract-v2.md",
         "docs/adr/0021-context-compaction-checkpoint.md",
         "docs/adr/0022-context-compaction-single-narrative.md",
