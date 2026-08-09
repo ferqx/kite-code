@@ -6,7 +6,7 @@
 
 验证：`bun test tests/release`、`bun run release:build`、`bun run release:verify`、`bun run release:smoke`、`bun run check:docs-impact`、`bun run check:docs`。
 
-相关：ADR-0051、ADR-0052、ADR-0059、ADR-0065、ADR-0068、ADR-0069、`open-source-first-release.md`。
+相关：ADR-0051、ADR-0052、ADR-0059、ADR-0065、ADR-0068、ADR-0069、ADR-0093、`open-source-first-release.md`。
 
 ## 首发权威
 
@@ -15,7 +15,7 @@ Sigstore、attestation、provenance、platform signer、external rollout 和 mat
 fail-closed 历史 contract；它们没有发布权威，不属于当前或后续路线图，也不得产生通过结论。
 
 G0 验证本地正确性、安全边界、P0/P1、安装/回滚。G1 验证 GitHub-hosted macOS/Ubuntu/Windows
-构建、安装、启动、TUI/CLI smoke、DeepSeek 与阿里千问 OpenAI-compatible route 的真实最小调用，以及
+构建、安装、启动、TUI/CLI smoke、DeepSeek 与 OpenCode Go OpenAI-compatible route 的真实最小调用，以及
 release notes/known limitations。缺任何真实结果时保持 blocked 或未验证。
 
 ## 候选制品

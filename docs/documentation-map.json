@@ -333,9 +333,14 @@
       ],
       "documents": [
         "docs/active/open-source-first-release.md",
+        "docs/active/release-control.md",
         "docs/active/model-provider-boundary.md",
         "docs/active/real-model-test-boundary.md",
+        "docs/active/agent-task-evaluation.md",
         "docs/book/12-测试体系.md",
+        "docs/adr/0093-opencode-go-release-provider-smoke.md",
+        "release/oss-first-release/MAINTAINER_CHECKLIST.md",
+        "release/oss-first-release/RELEASE_NOTES.md",
         "README.md"
       ]
     },

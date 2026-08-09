@@ -1,14 +1,14 @@
 # 当前规则：真实模型测试边界
 
 状态：active
-最后更新：2026-08-08
-最后验证：2026-08-08
+最后更新：2026-08-09
+最后验证：2026-08-09
 
 读取时机：新增真实网络/模型测试、修改测试发现规则、package scripts 或声明 provider 端到端验证结果时。
 
 验证：`bun test tests/test-discovery.test.ts tests/evals/live-provider-smoke.test.ts`、`bun run typecheck`。
 
-相关：ADR-0068、ADR-0069、`model-provider-boundary.md`、`open-source-first-release.md`。
+相关：ADR-0068、ADR-0069、ADR-0093、`model-provider-boundary.md`、`open-source-first-release.md`。
 
 ## 当前状态
 
@@ -19,14 +19,19 @@ Prompt Contract V2 另注册 `test:prompt:live`。`scripts/evals/prompt-contract
 2026-08-08 经用户明确授权，使用本机当前默认 `deepseek / deepseek-v4-flash` 运行 Prompt Contract A/B：legacy/V2 各 30 次，成功率分别为 76.67%/80.00%，安全违规均为 0，无效工具名均为 0，参数错误均为 2，重复 Tool Call 分别为 7/5。输出未记录正文。该结果证明当次 Provider 和固定 fixture 的相对行为，不构成默认开关迁移、production TUI E2E 或长期质量证据。
 
 ADR-0068/ADR-0069 注册 `test:provider:smoke` 作为 G1 的最小真实调用入口。它不进入默认测试：DeepSeek
-固定 `deepseek-v4-flash`；千问使用 `openai-compatible` adapter，默认路由为阿里云 Token Plan
-北京 `token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` 的 `qwen3.6-flash`。环境变量和显式
-本机配置都必须精确使用该 endpoint；其他 DashScope 区域端点、任意域名、HTTP、非默认端口、
-query/fragment 或非 Qwen 模型均 fail closed。每条 route 只调用一次、限制 16 output tokens
-和 60 秒 deadline；DeepSeek 复用 bounded-summary provider option 显式关闭 thinking，使非空正文断言
-不依赖上游 reasoning token 分配。runner 只输出 provider alias、model、耗时、usage、response non-empty 与
+固定 `deepseek-v4-flash`；OpenCode Go 使用 `openai-compatible` adapter，固定路由为
+`https://opencode.ai/zen/go/v1` 的 `deepseek-v4-flash`。环境变量和显式本机配置都必须精确使用该
+endpoint 与模型；任意其他域名/path、HTTP、非默认端口或 query/fragment 均 fail closed。每条 route
+只调用一次并使用 60 秒 deadline；DeepSeek 限制 16 output tokens，并复用 bounded-summary provider
+option 显式关闭 thinking；OpenCode Go 的 reasoning 模型限制 128 output tokens，确保最小调用仍能产生
+可验证的非空正文。runner 只输出 provider alias、model、耗时、usage、response non-empty 与
 credential source，不输出 prompt、response、key、完整 endpoint、stack 或远端 error body。缺 key、超时、
 空 response 或网络失败均非零退出；本地 mock 单元测试只证明不泄密 contract，不能替代真实 G1。
+
+2026-08-09 使用本机 `opencode_go / deepseek-v4-flash` 配置运行
+`bun run test:provider:smoke -- --provider opencode-go`：返回非空正文，input/output/total token 分别为
+88/24/112，耗时 3827 ms，`contentLogged=false`。该结果只证明本次真实最小调用，不替代最终候选提交的
+三平台构建或 Prompt Contract A/B。
 
 TUI system 使用 `@xterm/headless` 只在测试进程内解析本地 PTY 控制序列；它不会建立 Provider
 连接，也不会改变 live test 发现边界。`tests/tui-system/scenarios/` 仍只连接隔离的本地 mock

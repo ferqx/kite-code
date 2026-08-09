@@ -13,8 +13,8 @@ telemetry 和 Auto Compaction 默认关闭。
 项目不保留 external cohort、长期服务等级/error-budget、分阶段 rollout/promotion 或 enterprise GA
 后续资格路线；旧 verifier 仅作为 fail-closed 负向安全资产。
 
-真实模型发布 smoke 覆盖 DeepSeek `deepseek-v4-flash` 与阿里千问 Token Plan
-OpenAI-compatible route 的 `qwen3.6-flash`，各只运行一次低成本最小调用。credential 只从
+真实模型发布 smoke 覆盖 DeepSeek `deepseek-v4-flash` 与 OpenCode Go OpenAI-compatible route 的
+`deepseek-v4-flash`，各只运行一次低成本最小调用。credential 只从
 环境变量或本机配置读取，不进入源码、日志或 artifact。
 
 本候选没有代码签名、notarization、provenance 或 attestation；SHA-256 只用于完整性校验。完整限制见

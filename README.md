@@ -148,7 +148,7 @@ bun run agent run --telemetry-status
 
 ADR-0068/ADR-0069 采用单维护者开源首发终态模型。发布只保留两个 Gate：G0 验证本地正确性、安全边界、P0/P1
 和安装/回滚；G1 验证 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025` 的构建/安装/启动、
-TUI/CLI smoke、DeepSeek `deepseek-v4-flash` 与阿里千问 OpenAI-compatible route 的真实最小调用，以及
+TUI/CLI smoke、DeepSeek `deepseek-v4-flash` 与 OpenCode Go OpenAI-compatible route 的真实最小调用，以及
 准确的 release notes/known limitations。
 
 候选 workflow 只有 `contents: read`，会上传 unsigned CI artifact，但不会创建 GitHub Release、发布
@@ -214,7 +214,7 @@ bun run test:all
 bun run test:mcp:live
 bun run test:model:live
 bun run test:provider:smoke -- --provider deepseek
-bun run test:provider:smoke -- --provider qwen
+bun run test:provider:smoke -- --provider opencode-go
 bun test tests/release
 bun test tests/evals/agent-tasks
 bun test tests/observability
@@ -230,10 +230,12 @@ bun run check:docs
 bun run check:docs-impact
 ```
 
-`test:provider:smoke` 是显式真实网络调用：DeepSeek 固定使用 `deepseek-v4-flash`并关闭 thinking；千问使用
-OpenAI-compatible adapter，默认读取 `DASHSCOPE_API_KEY`，调用阿里云 Token Plan 北京
-`token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` endpoint 的 `qwen3.6-flash`；环境变量和
-本机配置都必须使用该 endpoint，`KITE_QWEN_MODEL` 只允许切换 Qwen 模型。runner 只输出 provider/model/usage/耗时和布尔结果，不输出
+`test:provider:smoke` 是显式真实网络调用：DeepSeek 固定使用 `deepseek-v4-flash` 并关闭 thinking；
+OpenCode Go 使用 OpenAI-compatible adapter，默认读取 `OPENCODE_API_KEY`，调用
+`https://opencode.ai/zen/go/v1` endpoint 的 `deepseek-v4-flash`；环境变量和本机配置都必须使用该
+endpoint 与模型。runner 只输出 provider/model/usage/耗时和布尔结果，不输出
 prompt、response、credential 或完整 endpoint；缺 key 或调用失败时非零退出，mock 不得替代 G1。
+DeepSeek 调用限制 16 output tokens；OpenCode Go 的 reasoning 模型限制 128 output tokens，确保最小调用
+仍能产生可验证的非空正文。
 
 默认测试不访问真实模型或公网 MCP，也不运行依赖宿主机 Seatbelt/bubblewrap 的正向用例。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`。`test:runtime:fault` 运行确定性的 SIGKILL/SQLite/report contract，`test:runtime:soak` 运行固定 7-case CI profile；资源指标不完整时仍保持 `inconclusive`，不能包装成成功。`test:sandbox:smoke:native` 显式运行当前宿主机的原生 sandbox executor smoke。快速 TUI harness 单元测试进入默认 `unit` 门禁，也可用 `test:tui:harness` 单独运行；真实 TUI PTY scenarios 只由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时，不重复运行 harness。Required CI 将默认 scenario 清单按稳定的四个分片分配到互相独立的 runner；每个分片仍逐文件串行，最终 `tui-system` 门禁只在全部分片通过时成功。first-run provider 探测使用本地 mock `/v1/models`。`test:tui:smoke:native` 是依赖宿主机真实 sandbox backend 的显式 opt-in PTY smoke，不属于默认门禁；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 与原生平台文件，不是仓库规范的全量入口。旧 production-shaped authority contract 只作为 fail-closed 负向测试保留；registry 为空时不得生成外部认证或 promotion 结论，且不再绑定任何路线图 Task。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。
