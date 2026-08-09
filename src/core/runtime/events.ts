@@ -677,6 +677,16 @@ export interface AuthorizationChangedEvent {
   modeGrantedAt?: string;
 }
 
+/** User-selected interaction mode changed while a Runtime may still be active. */
+export interface InteractionModeChangedEvent {
+  type: 'interaction_mode.changed';
+  mode: import('@/protocol/events').InteractionMode;
+  /** This control event is only emitted after an explicit TUI selection. */
+  source: 'user';
+  /** ISO-8601 timestamp for authorization provenance. */
+  changedAt: string;
+}
+
 // ── Auto-review 事件 / Auto-review events ──
 
 /** 自动审查请求 / Auto-review requested */
@@ -1070,6 +1080,7 @@ export type RuntimeEvent =
   | ProviderAdmissionWaivedEvent
   | ProviderAdmissionCancelledEvent
   | AuthorizationChangedEvent
+  | InteractionModeChangedEvent
   | AutoReviewRequestedEvent
   | AutoReviewCompletedEvent
   | TurnStartedEvent

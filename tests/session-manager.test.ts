@@ -1493,6 +1493,67 @@ describe('SessionManager', () => {
 // ── SessionRuntime ──
 
 describe('SessionRuntime', () => {
+  test('persists an interaction-mode change to a live Kernel control', () => {
+    const rt = makeRuntime();
+    const kernel = createAgentKernel({
+      threadId: rt.threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+      storePath: ':memory:',
+      sandboxAvailable: true,
+    });
+    try {
+      rt.runtimeControl = {
+        getState: () => kernel.getState(),
+        processEvent: (event) => {
+          kernel.processEvent(event);
+        },
+        cancelRun: () => [],
+      };
+
+      rt.setInteractionMode('full');
+
+      expect(rt.interactionMode).toBe('full');
+      expect(kernel.getState().mode).toBe('full');
+      expect(kernel.getState().authorization).toMatchObject({
+        mode: 'full_access',
+        modeSource: 'user',
+      });
+      expect(Date.parse(kernel.getState().authorization.modeGrantedAt ?? '')).toBeFinite();
+    } finally {
+      kernel.close();
+    }
+  });
+
+  test('rejects a live Full mode change without a Full-qualified sandbox', () => {
+    const rt = makeRuntime();
+    const kernel = createAgentKernel({
+      threadId: rt.threadId,
+      userId: 'tui',
+      workspace: rt.workspace,
+      storePath: ':memory:',
+      sandboxAvailable: false,
+    });
+    try {
+      rt.runtimeControl = {
+        getState: () => kernel.getState(),
+        processEvent: (event) => {
+          kernel.processEvent(event);
+        },
+        cancelRun: () => [],
+      };
+
+      expect(() => rt.setInteractionMode('full')).toThrow(
+        'full_access requires an available workspace sandbox',
+      );
+      expect(rt.interactionMode).toBe('accept_edits');
+      expect(kernel.getState().mode).toBe('accept_edits');
+      expect(kernel.getState().authorization.mode).toBe('default');
+    } finally {
+      kernel.close();
+    }
+  });
+
   test('serializes manual compaction operations for one session', async () => {
     const runtime = makeRuntime();
     const order: string[] = [];

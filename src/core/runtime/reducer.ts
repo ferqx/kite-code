@@ -1573,6 +1573,36 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         },
       };
 
+    case 'interaction_mode.changed': {
+      // A selector change is immediately authoritative, including during an
+      // active task. An approved plan retains its historical presentation
+      // mode, but its task-scoped override must not mask the newer user choice.
+      const authorization =
+        event.mode === 'full'
+          ? {
+              ...state.authorization,
+              mode: 'full_access' as const,
+              modeSource: event.source,
+              modeGrantedAt: event.changedAt,
+            }
+          : (() => {
+              const {
+                modeSource: _modeSource,
+                modeGrantedAt: _modeGrantedAt,
+                ...rest
+              } = state.authorization;
+              return { ...rest, mode: 'default' as const };
+            })();
+      return updateActiveTask(
+        {
+          ...state,
+          mode: event.mode,
+          authorization,
+        },
+        (task) => ({ ...task, executionMode: undefined }),
+      );
+    }
+
     // phase.changed — removed; phase is derived from planning.kind via getAgentPhase()
     case 'turn.started':
       return {

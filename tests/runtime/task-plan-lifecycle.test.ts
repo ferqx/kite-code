@@ -473,6 +473,31 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     expect(getEffectiveInteractionMode(state)).toBe('auto');
 
     state = reduceRuntimeState(state, {
+      type: 'interaction_mode.changed',
+      mode: 'full',
+      source: 'user',
+      changedAt: '2026-08-09T00:00:00.000Z',
+    });
+    expect(state.mode).toBe('full');
+    expect(state.authorization.mode).toBe('full_access');
+    expect(state.authorization.modeSource).toBe('user');
+    expect(state.authorization.modeGrantedAt).toBe('2026-08-09T00:00:00.000Z');
+    expect(state.tasks['task-1']?.executionMode).toBeUndefined();
+    expect(getEffectiveInteractionMode(state)).toBe('full');
+
+    state = reduceRuntimeState(state, {
+      type: 'interaction_mode.changed',
+      mode: 'accept_edits',
+      source: 'user',
+      changedAt: '2026-08-09T00:01:00.000Z',
+    });
+    expect(state.mode).toBe('accept_edits');
+    expect(state.authorization.mode).toBe('default');
+    expect(state.authorization.modeSource).toBeUndefined();
+    expect(state.authorization.modeGrantedAt).toBeUndefined();
+    expect(getEffectiveInteractionMode(state)).toBe('accept_edits');
+
+    state = reduceRuntimeState(state, {
       type: 'run.completed',
       turnId: state.turn.turnId,
       output: 'done',

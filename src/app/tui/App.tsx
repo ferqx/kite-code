@@ -60,6 +60,7 @@ export interface AppProps {
   slashSuggestion?: import('./hooks/useSlashSuggestions').SlashSuggestionData | null;
   sandboxBackend?: SandboxBackend;
   onTogglePlanMode?: () => void;
+  onInteractionModeChange?: (mode: 'accept_edits' | 'auto' | 'full') => void;
   themePreset?: ThemePreset;
   onThemeSelect?: (preset: ThemePreset) => void;
   /** Abort the foreground runtime synchronously before reducer-only cancel actions. */
@@ -113,6 +114,7 @@ export default function App({
   slashSuggestion,
   sandboxBackend = 'none',
   onTogglePlanMode,
+  onInteractionModeChange,
   themePreset,
   onThemeSelect,
   onAbort,
@@ -168,8 +170,11 @@ export default function App({
     [dispatch],
   );
   const selectInteractionMode = useCallback(
-    (mode: 'accept_edits' | 'auto' | 'full') => dispatch({ type: 'SET_INTERACTION_MODE', mode }),
-    [dispatch],
+    (mode: 'accept_edits' | 'auto' | 'full') => {
+      onInteractionModeChange?.(mode);
+      dispatch({ type: 'SET_INTERACTION_MODE', mode });
+    },
+    [dispatch, onInteractionModeChange],
   );
   const selectModel = useCallback(
     (model: import('@/core/config').AvailableModel) => {
