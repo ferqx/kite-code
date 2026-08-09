@@ -5,7 +5,7 @@
 验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
-相关：ADR-0058、ADR-0068、ADR-0069、D-07、Phase 2B。
+相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、D-07、Phase 2B、`opencode-go-journey-evaluation-policy.md`。
 
 ## 当前状态
 
@@ -38,6 +38,11 @@ D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发
 升级为产品证据。ADR-0069 后该 workflow 不再对应待完成 Task。
 
 ## Evidence 规则
+
+OpenCode Go 的 first-decision/Journey live 评测还必须遵守版本化 `ACORE-EVAL-POLICY`；当前冻结规则、候选范围、
+十轮样本、Provider usage 与人工 Go usage 核对的无正文边界见
+[`opencode-go-journey-evaluation-policy.md`](opencode-go-journey-evaluation-policy.md)。该政策不授权运行真实模型，
+也不改变 ADR-0094 的 `promptContractV2=false` 默认值。
 
 - case、suite、oracle、contract、artifact、config 和 route identity 必须全部绑定；任一 mismatch 拒绝。
 - 每次运行保留完整结构化 attempt，不能只保留最好一次。缺失指标使用 `null`/`not_observed`，不能补零。
