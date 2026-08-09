@@ -84,7 +84,15 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
 
       const tools = Array.isArray(request!.body.tools)
         ? (request!.body.tools as Array<{
-            function?: { name?: string; description?: string };
+            function?: {
+              name?: string;
+              description?: string;
+              parameters?: {
+                properties?: {
+                  subagent_type?: { description?: string; enum?: string[] };
+                };
+              };
+            };
           }>)
         : [];
       const toolNames = tools.map((tool) => tool.function?.name).filter(Boolean);
@@ -96,6 +104,13 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       expect(
         tools.find((tool) => tool.function?.name === 'read_file')?.function?.description,
       ).toContain('Returns text:');
+      const task = tools.find((tool) => tool.function?.name === 'task')?.function;
+      expect(task?.description).toContain('current user explicitly requests');
+      expect(task?.description).toContain('use plan for read-only architecture or design planning');
+      expect(task?.parameters?.properties?.subagent_type?.enum).toEqual(['explore', 'plan']);
+      expect(task?.parameters?.properties?.subagent_type?.description).toContain(
+        'plan for architecture',
+      );
     },
     TIMEOUT,
   );

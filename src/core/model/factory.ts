@@ -36,12 +36,21 @@ export type ModelProviderOptions = Record<
   { [key: string]: ModelProviderOptionValue | undefined }
 >;
 
+export interface ChatModelFactoryOptions {
+  /** Optional transport hook for metadata-only request evidence in explicit live evaluations. */
+  fetch?: typeof globalThis.fetch;
+}
+
 /** 根据配置创建 AI SDK 聊天模型 / Create an AI SDK chat model from config */
-export function createChatModel(config: AgentConfig): SupportedChatModel {
+export function createChatModel(
+  config: AgentConfig,
+  options: ChatModelFactoryOptions = {},
+): SupportedChatModel {
   const provider = createOpenAICompatible({
     name: config.providerType,
     apiKey: config.apiKey,
     baseURL: config.baseURL,
+    fetch: options.fetch,
     headers:
       config.providerType === 'deepseek' || config.providerType === 'ollama'
         ? undefined

@@ -487,9 +487,9 @@ export const TASK_CONTRACT: ToolContract = {
   name: 'task',
   sections: {
     whenToUse:
-      'Dispatch a task to a specialized sub-agent with an isolated context window. ' +
+      'When the current user explicitly requests a bounded, self-contained delegation and task is available, dispatch it to a specialized sub-agent; use plan for read-only architecture or design planning. ' +
       'Use for parallel work (multiple sub-agents running simultaneously), role-specific work ' +
-      '(explore for search, code for implementation, review for quality checks), ' +
+      '(explore for search, plan for architecture or design, code for implementation, review for quality checks), ' +
       'and long-running autonomous tasks. ' +
       'The task description MUST be self-contained — include ALL necessary context, file paths, ' +
       'and specific instructions. Sub-agents cannot see the main conversation history. ' +
@@ -497,6 +497,7 @@ export const TASK_CONTRACT: ToolContract = {
     commonMistakes:
       'Providing a vague task description that the sub-agent cannot execute without conversation context. ' +
       "Using 'code' for exploration tasks — use 'explore' for search and evidence gathering. " +
+      "Using 'explore' for architecture or design planning — use the read-only 'plan' role. " +
       'Not including specific file paths or function names in the task description. ' +
       'Expecting the sub-agent to know about decisions made earlier in the conversation.',
     outputFormat:

@@ -15,7 +15,9 @@ export const taskInputSchema = z.object({
 });
 
 const planningTaskInputSchema = taskInputSchema.extend({
-  subagent_type: z.enum(['explore', 'plan']),
+  subagent_type: z
+    .enum(['explore', 'plan'])
+    .describe('Read-only role: explore for evidence gathering or plan for architecture and design'),
 });
 
 export type TaskInput = z.infer<typeof taskInputSchema>;

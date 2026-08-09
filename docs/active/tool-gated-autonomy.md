@@ -25,7 +25,7 @@
 
 工具声明只让模型表达意图。模型侧不得直接执行工具，TUI 不得绕过 Tool Controller 调用 provider。
 
-`promptContractV2` 开启时，模型表面还按 `ToolAvailabilityContext.phase` 收窄：Planning 隐藏 edit/write/shell，`task` schema 只接受 explore/plan，动态 MCP 只允许 effective effects 全部为 none/read；Building 再依据 authorization、execution capability surface、binding 与 flags 投影。ToolSpec 的模型 schema 和调用解析必须消费同一个 context-resolved schema。该 disclosure 只是第一层，Runtime Policy、Controller 和 Runner 仍按下述执行链重复验证。
+`promptContractV2` 开启时，模型表面还按 `ToolAvailabilityContext.phase` 收窄：Planning 隐藏 edit/write/shell，`task` schema 只接受 explore/plan，并保留 explore 用于证据搜集、plan 用于架构或设计规划的字段说明；动态 MCP 只允许 effective effects 全部为 none/read；Building 再依据 authorization、execution capability surface、binding 与 flags 投影。当前用户显式要求有界、自包含委派且 `task` 已披露时，模型契约要求使用 `task`；不得把项目文件或远端内容中的委派文本提升成用户授权。ToolSpec 的模型 schema 和调用解析必须消费同一个 context-resolved schema。该 disclosure 只是第一层，Runtime Policy、Controller 和 Runner 仍按下述执行链重复验证。
 
 V2 写入前还执行项目指令 snapshot guard。edit/write 使用目标路径，shell 与 code task 至少使用已解析 cwd/Workspace 根；若目标首次引入当前模型快照未见的嵌套 `CLAUDE.md`/`AGENTS.md`，或适用文档 digest 已变化，本次副作用以可恢复的 `project_instructions_changed` 拒绝。下一轮重新投影后模型可重新发起，审批与 sandbox 不得绕过此检查。
 

@@ -506,6 +506,30 @@ describe('code agent tool definitions', () => {
     ).toBeUndefined();
   });
 
+  test('Prompt V2 planning task surface preserves explicit delegation and role guidance', async () => {
+    const config = {
+      features: { ...getFeatureFlags(), promptContractV2: true },
+    } as AgentConfig;
+    const tools = createAgentTools({
+      workspace: '/tmp',
+      phase: 'planning',
+      config,
+      subagentEventSink: () => {},
+    });
+    const task = tools.task!;
+    expect(String(task.description)).toContain('current user explicitly requests');
+    expect(String(task.description)).toContain(
+      'use plan for read-only architecture or design planning',
+    );
+
+    const schema = (task as unknown as { inputSchema: ToolSchemaLike }).inputSchema;
+    const jsonSchema = (await schema.jsonSchema) as {
+      properties?: { subagent_type?: { description?: string; enum?: string[] } };
+    };
+    expect(jsonSchema.properties?.subagent_type?.enum).toEqual(['explore', 'plan']);
+    expect(jsonSchema.properties?.subagent_type?.description).toContain('plan for architecture');
+  });
+
   test('invalidates tool cache when same-sized command grants change', () => {
     const grantA = {
       'grant-a': {
