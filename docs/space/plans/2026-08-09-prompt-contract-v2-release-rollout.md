@@ -18,8 +18,12 @@
 
 ## 当前状态
 
-- release identity：待 PR 合并并生成默认关闭发布后登记；
-- 双路径观察开始/最早结束：待发布后登记；
+- release identity：GitHub prerelease
+  [`v0.1.0`](https://github.com/ferqx/kite-code/releases/tag/v0.1.0)，source/tag commit
+  `b3a2df663b728592056d3979cf7bdaedbb6d6c10`，发布时间 `2026-08-09T10:34:36Z`；六个 macOS
+  arm64/Linux x64/Windows x64 candidate 与 SHA-256 sidecar 均已上传；
+- 双路径观察开始：`2026-08-09T18:34:36+08:00`；为覆盖至少十四个完整自然日，最早结束时间固定为
+  `2026-08-24T00:00:00+08:00`，在此之前不得运行迁移资格 A/B 或决定默认开启；
 - 最终候选 commit 与 A/B：待观察窗口结束后登记；
 - 迁移 ADR：待上述证据完整后创建。
 
