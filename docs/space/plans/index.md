@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-09（登记 Prompt Contract V2 默认关闭灰度与迁移资格计划）
+最后更新：2026-08-09（归档 Prompt Contract V2 默认关闭发布与迁移决策）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,8 +19,8 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
-| [`2026-08-09-prompt-contract-v2-release-rollout.md`](2026-08-09-prompt-contract-v2-release-rollout.md) | active | P0 | ADR-0092、默认关闭候选发布、跨平台 CI | 无 | 双路径至少两周、最终候选真实模型 A/B、迁移 ADR 决策 |
-| [`2026-08-08-prompt-contract-v2.md`](2026-08-08-prompt-contract-v2.md) | archived | P0 | ADR-0092、ToolSpec Registry、Context Projection | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2.md) | 四层 Prompt、项目指令、phase 工具面、可信 MCP 描述、59.85% token 降幅与实现阶段真实模型 A/B 已完成；最终候选 A/B 由灰度计划跟踪 |
+| [`2026-08-09-prompt-contract-v2-release-rollout.md`](2026-08-09-prompt-contract-v2-release-rollout.md) | archived | P0 | ADR-0092、默认关闭候选发布、跨平台 CI | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2-release-rollout.md) | 固定十四日门禁由维护者取消；最终候选真实模型 A/B 完成，ADR-0094 决定保持默认关闭 |
+| [`2026-08-08-prompt-contract-v2.md`](2026-08-08-prompt-contract-v2.md) | archived | P0 | ADR-0092、ToolSpec Registry、Context Projection | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2.md) | 四层 Prompt、项目指令、phase 工具面、可信 MCP 描述、59.85% token 降幅与实现阶段真实模型 A/B 已完成；最终迁移结论见 ADR-0094 |
 | [`2026-08-04-tui-overlay-design-system.md`](2026-08-04-tui-overlay-design-system.md) | archived | P1 | 现有 Overlay primitives | [完成记录](../execution/completed/2026-08-05-tui-overlay-design-system.md) | Overlay contract、MCP、通用选择页、交互页与文档回归全部完成 |
 | [2026-08-07-tui-cancellation-projection-convergence.md](2026-08-07-tui-cancellation-projection-convergence.md) | completed | P0 | 当前 TUI 取消/恢复规则 | 两入口、一投影、一渲染 | shared projection、footer 解耦、live/replay 等价测试 |
 | [2026-08-04-windows-shell-sandbox.md](2026-08-04-windows-shell-sandbox.md) | superseded | P1 | ADR-0072、0073、0077、0078、0079、0080、0081 | ADR-0088 移除 AppContainer；direct restricted-token 规则转入 active 文档 | 历史实现记录 |

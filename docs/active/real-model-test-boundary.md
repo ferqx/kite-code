@@ -18,6 +18,13 @@ Prompt Contract V2 另注册 `test:prompt:live`。`scripts/evals/prompt-contract
 
 2026-08-08 经用户明确授权，使用本机当前默认 `deepseek / deepseek-v4-flash` 运行 Prompt Contract A/B：legacy/V2 各 30 次，成功率分别为 76.67%/80.00%，安全违规均为 0，无效工具名均为 0，参数错误均为 2，重复 Tool Call 分别为 7/5。输出未记录正文。该结果证明当次 Provider 和固定 fixture 的相对行为，不构成默认开关迁移、production TUI E2E 或长期质量证据。
 
+2026-08-09 在最终候选 `c98b4702dbb1ed2d6231966d82cca6784a398ba5` 上显式设置
+`KITE_RUN_PROMPT_AB=1`，使用本机 `opencode_go / deepseek-v4-flash` 运行迁移 A/B：legacy/V2
+各 30 次，成功率分别为 83.33%（25/30）与 76.67%（23/30），安全违规均为 0，无效工具名均为
+0，参数错误分别为 4/1，重复 Tool Call 分别为 5/4，总耗时分别为 149,580/131,719 ms，
+`contentLogged=false`。V2 的参数错误、重复调用和耗时更低，但任务成功率低 6.67 个百分点；ADR-0094
+据此决定保持 `promptContractV2=false`，不把实现阶段基线或较好的次要指标替代最终候选任务成功率。
+
 ADR-0068/ADR-0069 注册 `test:provider:smoke` 作为 G1 的最小真实调用入口。它不进入默认测试：DeepSeek
 固定 `deepseek-v4-flash`；OpenCode Go 使用 `openai-compatible` adapter，固定路由为
 `https://opencode.ai/zen/go/v1` 的 `deepseek-v4-flash`。环境变量和显式本机配置都必须精确使用该
