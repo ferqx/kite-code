@@ -466,7 +466,7 @@ export default function App({
           layeredEscRef={layeredOverlayEscRef}
         />
       )}
-      {!overlayActive && slashSuggestion && (
+      {!overlayActive && !state.interrupt && slashSuggestion && (
         <SlashSuggestionOverlay
           suggestion={slashSuggestion}
           maxVisibleItems={slashListHeight}

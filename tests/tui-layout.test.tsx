@@ -4249,6 +4249,34 @@ describe('App', () => {
     expect(lastFrame()).not.toContain('命令匹配');
   });
 
+  test('hides slash suggestions while an approval interrupt is open', () => {
+    const state = fakeState({
+      interrupt: { kind: 'approval', approval: fakeApproval() },
+    });
+    const { lastFrame } = render(
+      <App
+        state={state}
+        dispatch={noop}
+        onToggleReason={noop}
+        provider={fakeProvider()}
+        slashSuggestion={{
+          kind: 'command',
+          partial: 'permissions',
+          selectedIndex: 0,
+          items: [
+            {
+              command: 'permissions',
+              aliases: [],
+              description: '设置权限模式',
+            },
+          ],
+        }}
+      />,
+    );
+    expect(lastFrame()).toContain('工具授权');
+    expect(lastFrame()).not.toContain('命令匹配');
+  });
+
   test('persists a model selection before applying it to the current TUI state', async () => {
     const state = fakeState({
       showModelSelector: true,
