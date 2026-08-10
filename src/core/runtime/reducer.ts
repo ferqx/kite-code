@@ -19,7 +19,7 @@ import {
 } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
-import { planCompletionEvidenceMatchesRuntime } from './plan-evidence';
+import { planCompletionBlocker, planCompletionEvidenceMatchesRuntime } from './plan-evidence';
 import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
   computePlanStructuralDigest,
@@ -1823,27 +1823,32 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const currentPlanning = getActivePlanning(state);
       if (currentPlanning.kind === 'executing') {
         const executing = currentPlanning;
+        const isV2 = executing.document.planSchemaVersion === 2;
         const updatedSteps = mergeStepUpdates(
           executing.document.steps,
           agentPlanToSteps(event.plan),
         );
         if (
-          executing.document.planSchemaVersion === 2 &&
+          isV2 &&
           (event.planId !== executing.document.planId ||
             event.version !== executing.document.version ||
             event.structuralDigest !== executing.document.structuralDigest ||
             event.completionEvidence === undefined ||
+            hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
             !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence))
         ) {
           return state;
         }
+        const replayDocument = isV2
+          ? executing.document
+          : withoutPlanCompletionEvidence(executing.document);
         return setActivePlanning(state, {
           ...executing,
           document: {
-            ...executing.document,
+            ...replayDocument,
             steps: updatedSteps,
             updatedAtTurnId: state.turn.turnId,
-            ...(event.completionEvidence ? { completionEvidence: event.completionEvidence } : {}),
+            ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
           },
         });
       }
@@ -1855,26 +1860,32 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       // Transition from executing to completed
       const executing = getActivePlanning(state);
       if (executing.kind === 'executing') {
+        const isV2 = executing.document.planSchemaVersion === 2;
         const updatedSteps = mergeStepUpdates(
           executing.document.steps,
           agentPlanToSteps(event.plan),
         );
         if (
-          executing.document.planSchemaVersion === 2 &&
+          isV2 &&
           (event.planId !== executing.document.planId ||
             event.version !== executing.document.version ||
             event.structuralDigest !== executing.document.structuralDigest ||
             event.completionEvidence === undefined ||
-            !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence))
+            hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
+            !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence) ||
+            planCompletionBlocker(state, event.completionEvidence) !== null)
         ) {
           return state;
         }
+        const replayDocument = isV2
+          ? executing.document
+          : withoutPlanCompletionEvidence(executing.document);
         const next = setActivePlanning(state, {
           kind: 'completed',
           document: {
-            ...executing.document,
+            ...replayDocument,
             steps: updatedSteps,
-            ...(event.completionEvidence ? { completionEvidence: event.completionEvidence } : {}),
+            ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
           },
           completedAtTurnId: state.turn.turnId,
         });
@@ -2159,4 +2170,18 @@ function mergeStepUpdates(existing: PlanStep[], updates: PlanStep[]): PlanStep[]
     }
     return step;
   });
+}
+
+function hasTerminalStepRollback(existing: PlanStep[], updated: PlanStep[]): boolean {
+  const updatedById = new Map(updated.map((step) => [step.id, step]));
+  return existing.some((step) => {
+    if (step.status !== 'completed' && step.status !== 'skipped') return false;
+    return updatedById.get(step.id)?.status !== step.status;
+  });
+}
+
+function withoutPlanCompletionEvidence(document: PlanDocument): PlanDocument {
+  const copy = { ...document };
+  delete copy.completionEvidence;
+  return copy;
 }

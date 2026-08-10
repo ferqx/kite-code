@@ -58,8 +58,10 @@ verification、带成功 Runtime result 的 terminal side-effect tool call、带
 unresolved failure/approval。`update_plan` 的 schema 严格拒绝模型提供的 command、path、stdout、
 `completion_evidence` 或 success self-report。`complete_plan=true` 还要求所有 required verification 已
 passed/waived、所有 effect 调用都有成功 receipt，且不存在 unresolved blocker。plan progress/completed event
-携带相同 identity 与 metadata-only evidence；reducer 会对事件前 Runtime state 重新投影并精确匹配后才写入
-PlanDocument。该门禁属于 Plan lifecycle；CompletionGuard 本身本次仍保持 V1。
+携带相同 identity 与 metadata-only evidence；reducer 会对事件前 Runtime state 重新投影并精确匹配，拒绝
+终态 step 回退，并在 completed replay 上重新执行相同的 required verification、effect receipt 与 unresolved
+blocker 门禁后才写入 PlanDocument。V1 replay 仍可读取并归约历史进度/完成事件，但会确定性忽略事件中夹带的
+completion evidence。该门禁属于 Plan lifecycle；CompletionGuard 本身本次仍保持 V1。
 
 ## 工具与策略
 

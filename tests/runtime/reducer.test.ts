@@ -280,6 +280,20 @@ function makePlanDoc(
   };
 }
 
+function makeV2PlanDoc(plan: AgentPlan, overrides?: Parameters<typeof makePlanDoc>[1]) {
+  return {
+    ...makePlanDoc(plan, overrides),
+    planSchemaVersion: 2 as const,
+    completionEvidence: {
+      schemaVersion: 1 as const,
+      verification: [],
+      execution: [],
+      skipped: [],
+      unresolved: [],
+    },
+  };
+}
+
 function attachPlanReviewInteraction(
   state: RuntimeState,
   plan: AgentPlan,
@@ -2013,6 +2027,71 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     }
   });
 
+  test('V1 progress replay ignores supplied completion evidence', () => {
+    const plan = makePlan('Legacy Plan', ['legacy step']);
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document: makePlanDoc(plan, { planId: 'legacy-plan', version: 1 }),
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.progress_updated',
+      toolCallId: 'legacy-progress',
+      plan: {
+        ...plan,
+        steps: [{ id: 'legacy-step', step: 'legacy step', status: 'completed' }],
+      },
+      completionEvidence: {
+        schemaVersion: 1,
+        verification: [],
+        execution: [{ toolCallId: 'forged-tool-reference', outcome: 'succeeded' }],
+        skipped: [],
+        unresolved: [],
+      },
+    };
+
+    const next = reduceRuntimeState(state, event);
+
+    expect(next.planning.kind).toBe('executing');
+    if (next.planning.kind === 'executing') {
+      expect(next.planning.document.steps[0]?.status).toBe('completed');
+      expect(next.planning.document.completionEvidence).toBeUndefined();
+    }
+  });
+
+  test('V2 progress replay cannot roll a terminal step back to pending', () => {
+    const plan = makePlan('Monotonic Plan', ['terminal step']);
+    plan.steps[0]!.status = 'completed';
+    const document = makeV2PlanDoc(plan, { planId: 'monotonic-plan', version: 2 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.progress_updated',
+      toolCallId: 'rollback-progress',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan: {
+        ...plan,
+        steps: [{ id: 'terminal-step', step: 'terminal step', status: 'pending' }],
+      },
+      completionEvidence: document.completionEvidence,
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
   // 验证 plan.progress_updated 在非 building 状态时不操作
   test('plan.progress_updated is no-op when plan is not executing', () => {
     const state = makeInitialState(); // planning.kind === 'building_without_plan'
@@ -2053,6 +2132,96 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
       expect(next.planning.document.version).toBe(1);
       expect(next.planning.completedAtTurnId).toBe(state.turn.turnId);
     }
+  });
+
+  test('V2 completed replay rejects pending required verification', () => {
+    const plan = makePlan('Verification Plan', ['verified step']);
+    plan.status = 'completed';
+    plan.steps[0]!.status = 'completed';
+    const document = makeV2PlanDoc(plan, { planId: 'verification-plan', version: 3 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+      verification: {
+        records: {
+          required: {
+            verificationId: 'required',
+            mode: 'required',
+            status: 'pending',
+            spec: {} as never,
+            requestedAt: '2026-08-10T00:00:00.000Z',
+            attempts: 0,
+            repairAttempts: 0,
+            checkResults: {},
+          },
+        },
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'complete-without-verification',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan,
+      completionEvidence: document.completionEvidence,
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 completed replay rejects matching unresolved failure evidence', () => {
+    const plan = makePlan('Blocked Plan', ['effect step']);
+    plan.status = 'completed';
+    plan.steps[0]!.status = 'completed';
+    const document = makeV2PlanDoc(plan, { planId: 'blocked-plan', version: 4 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+      tools: {
+        calls: {
+          'failed-effect': {
+            toolCallId: 'failed-effect',
+            modelMessageId: 'model-failed-effect',
+            name: 'write_file',
+            args: { path: '<redacted>' },
+            status: 'failed',
+            createdAtTurnId: 'turn-0',
+            sideEffect: true,
+            error: 'private failure detail',
+          },
+        },
+        queue: [],
+        active: [],
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'complete-with-unresolved-failure',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan,
+      completionEvidence: {
+        schemaVersion: 1,
+        verification: [],
+        execution: [],
+        skipped: [],
+        unresolved: [{ kind: 'failure', referenceId: 'failed-effect' }],
+      },
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
   });
 
   // 验证 plan.completed 从 approved 转为 completed
