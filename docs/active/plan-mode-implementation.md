@@ -46,7 +46,8 @@ effects 与结果投影。新写入的 Plan 是 `planSchemaVersion=2`，Artifact
 4. Plan Artifact 写入失败时不得宣布计划已保存或已批准。
 5. 恢复和 fork 必须从 Runtime Store/Artifact Store 重建计划事实。
 6. 模型 final 不能越过 Plan lifecycle：`planning_empty`、draft、awaiting review、executing 与 cancelled 都不能产生
-   `run.completed`。CompletionGuard V1 的完整规则见 `completion-guard.md`。
+   `run.completed`。V1 保留 legacy replay，PlanDocument V2 使用带完整 identity 与 verification/effect evidence gate 的
+   CompletionGuard V2；完整规则见 `completion-guard.md`。
 
 V2 Plan 的标题与 step title 必须是单行，title 最多 120 字符，正文为 20–30000 字符，step 为
 1–12 个且 ID 唯一。首次保存后，后续 save、submit、executing replan 和 `update_plan` 统一校验

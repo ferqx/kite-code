@@ -90,7 +90,7 @@ skipped 理由及未解决 failure/approval。随后由独立 `ACORE-PLAN-03` �
 | `ACORE-EVAL-00` | completed | `ACORE-EVAL-00-v1` scripted Runtime Journey 与 metadata-only privacy assertion 已建立。 |
 | `ACORE-PLAN-01` | completed (V1) | CompletionGuard 在 scheduler/runner/reducer 三层阻止虚假完成，一次 correction 后 blocked terminal；后续 evidence/typed failure gate 由 `ACORE-PLAN-02`/`ACORE-TOOL-02` 承接。 |
 | `ACORE-PLAN-02` | completed | PlanDocument V2、strict identity、metadata-only evidence、V1 read/replay-only migration，以及 Artifact/reducer/facade fail-closed 边界已通过整体规格与质量审查。 |
-| `ACORE-PLAN-03` | pending | CompletionGuard V2 verification/effect evidence gate 尚未实施。 |
+| `ACORE-PLAN-03` | completed | CompletionGuard V2 verification/effect evidence gate、严格 Plan identity、schema-bound legacy replay、跨 turn correction ceiling、required-verification metadata-only Journey 与 atomic terminal batch 已通过整体规格/质量审查；PR 级门禁仍独立待执行。 |
 | `ACORE-EVAL-POLICY-01` | frozen (r1) | first-decision candidate `300e11a4`、OpenCode Go、十轮 paired sample 和 Go usage privacy boundary 已冻结；完整 Journey candidate 仍待后续 scope 收敛。 |
 
 ## `ACORE-DOC-01`：文档冻结与 Review

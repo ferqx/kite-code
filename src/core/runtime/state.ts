@@ -422,15 +422,18 @@ export interface TranscriptState {
   final?: string;
 }
 
-/** Durable, per-turn CompletionGuard V1 correction ceiling. */
+/** Durable correction ceiling bound to the selected guard and V2 Plan identity across turns. */
 export interface CompletionGuardRuntimeStateV1 {
   correctionAttempts: number;
+  guardVersion?: import('./completion-guard').CompletionGuardVersion;
+  planIdentity?: import('@/protocol/events').PlanIdentity;
 }
 
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 21;
+export const COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION = 22;
+export const RUNTIME_STATE_SCHEMA_VERSION = COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;

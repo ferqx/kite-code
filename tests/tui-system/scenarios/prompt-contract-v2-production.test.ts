@@ -103,7 +103,7 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
           const result = request.messages.find(
             (message) => message.role === 'tool' && message.tool_call_id === 'v2-plan-submit',
           );
-          const plan = JSON.parse(String(result?.content)) as { plan_id: string };
+          const plan = parseDraftSavedPlan(result?.content);
           return {
             expectedRequest: {
               toolResults: [
@@ -117,6 +117,8 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
                   name: 'update_plan',
                   args: {
                     plan_id: plan.plan_id,
+                    version: plan.version,
+                    structural_digest: plan.structural_digest,
                     updates: [{ step_id: 'inspect', status: 'completed' }],
                     complete_plan: true,
                   },

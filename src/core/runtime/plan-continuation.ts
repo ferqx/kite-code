@@ -53,7 +53,15 @@ function isCanonicalPreparedEffect(
         preparedEffect.decision.nextAction === canonicalEffect.decision.nextAction &&
         preparedEffect.decision.planning === canonicalEffect.decision.planning &&
         preparedEffect.decision.correctionAttempt === canonicalEffect.decision.correctionAttempt &&
-        preparedEffect.decision.canCorrect === canonicalEffect.decision.canCorrect
+        preparedEffect.decision.canCorrect === canonicalEffect.decision.canCorrect &&
+        (preparedEffect.decision.version !== 'completion_guard_v2' ||
+          (canonicalEffect.decision.version === 'completion_guard_v2' &&
+            preparedEffect.decision.planIdentity.planId ===
+              canonicalEffect.decision.planIdentity.planId &&
+            preparedEffect.decision.planIdentity.version ===
+              canonicalEffect.decision.planIdentity.version &&
+            preparedEffect.decision.planIdentity.structuralDigest ===
+              canonicalEffect.decision.planIdentity.structuralDigest))
       );
     case 'request_user_input':
     case 'request_plan_review':

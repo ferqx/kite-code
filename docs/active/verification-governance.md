@@ -17,7 +17,10 @@
 `passed` 或用户 `waived`，并由 Runtime 投影为只含 `verificationId + outcome` 的
 `PlanCompletionEvidenceV1` reference。模型不能通过 `update_plan` 自报 verification、命令、路径、stdout
 或 success；缺失 required reference 会稳定拒绝为 `plan_verification_required`。该 Plan 门禁不改变当前
-CompletionGuard V1 的默认行为。
+legacy CompletionGuard V1 replay；PlanDocument V2 的 final candidate 由 CompletionGuard V2 再次读取同一
+canonical verification record/evidence。required verification 缺失时 `completion.blocked` 使用低基数
+`verification_required`，而不是保存检查命令、路径、stdout、prompt 或模型正文。verification 已通过但副作用
+receipt reference 缺失时使用 `effect_evidence_required`；两者都绑定完整 Plan identity。
 
 Verification executor 通过 Runtime 中立的 `McpRuntimeProvider` 查找当前 descriptor 并执行 MCP read-after-write，不依赖 Supervisor control snapshot 或 TUI。`/mcp` 状态列表显示 ready 不能替代 verification 的 revision 复核。
 

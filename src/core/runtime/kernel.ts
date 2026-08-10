@@ -25,7 +25,7 @@ import {
   type RuntimeEventInput,
 } from './events';
 import { assertRuntimeStateInvariants } from './invariants';
-import { reduceRuntimeState } from './reducer';
+import { reduceRuntimeState, reduceRuntimeStateFromHistoricalSchema } from './reducer';
 import { createLegacyResourceBudgetStateV1 } from './resource-budget';
 import { decideNextEffect } from './scheduler';
 import {
@@ -38,6 +38,8 @@ import {
 import {
   createRuntimeStore,
   type RuntimeEventMetadata,
+  type RuntimeRestoreBoundary,
+  RuntimeRevisionConflictError,
   type RuntimeStore,
   type StoredEvent,
 } from './store';
@@ -616,14 +618,17 @@ export function createAgentKernel(params: {
   sandboxAvailable?: boolean;
 }): AgentKernel {
   const store = createRuntimeStore(params.storePath);
-  const restored = restoreRuntimeStateFromStore({ ...params, store });
-  if (restored.migratedSnapshot) {
-    store.saveSnapshot(params.threadId, restored.migratedSnapshot);
+  let restoredState: RuntimeState;
+  try {
+    restoredState = restoreRuntimeStateAndPersistMigration({ ...params, store });
+  } catch (error) {
+    store.close();
+    throw error;
   }
 
   const kernel = new AgentKernel({
     store,
-    initialState: restored.state,
+    initialState: restoredState,
     interactionMode: params.interactionMode ?? 'accept_edits',
     sandboxAvailable: params.sandboxAvailable,
   });
@@ -667,6 +672,49 @@ export function createAgentKernel(params: {
   return kernel;
 }
 
+const MAX_MIGRATION_SNAPSHOT_RETRIES = 8;
+
+/** Restore and CAS-persist a migrated rolling snapshot at the exact observed journal boundary. */
+export function restoreRuntimeStateAndPersistMigration(params: {
+  store: RuntimeStore;
+  threadId: string;
+  userId: string;
+  workspace: string;
+  interactionMode?: InteractionMode;
+  authorizationMode?: AuthorizationMode;
+  authorizationSource?: AuthorizationSource;
+  phase?: 'planning' | 'building';
+}): RuntimeState {
+  let lastConflict: RuntimeRevisionConflictError | undefined;
+  for (let attempt = 0; attempt < MAX_MIGRATION_SNAPSHOT_RETRIES; attempt++) {
+    const restored = restoreRuntimeStateFromStore(params);
+    if (!restored.migratedSnapshot) return restored.state;
+    try {
+      params.store.appendEventsAndSnapshot(
+        params.threadId,
+        [],
+        restored.migratedSnapshot,
+        undefined,
+        undefined,
+        restored.restoreBoundary,
+      );
+      return restored.state;
+    } catch (error) {
+      if (!(error instanceof RuntimeRevisionConflictError)) throw error;
+      lastConflict = error;
+    }
+  }
+  throw (
+    lastConflict ??
+    new RuntimeRevisionConflictError(
+      params.threadId,
+      0,
+      null,
+      `Runtime migration snapshot for ${params.threadId} could not converge after ${MAX_MIGRATION_SNAPSHOT_RETRIES} restore retries.`,
+    )
+  );
+}
+
 /** Strictly restore Runtime state without executing reconciliation side effects. */
 export function restoreRuntimeStateFromStore(params: {
   store: RuntimeStore;
@@ -677,7 +725,11 @@ export function restoreRuntimeStateFromStore(params: {
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
   phase?: 'planning' | 'building';
-}): { state: RuntimeState; migratedSnapshot: RuntimeState | null } {
+}): {
+  state: RuntimeState;
+  migratedSnapshot: RuntimeState | null;
+  restoreBoundary: RuntimeRestoreBoundary;
+} {
   const store = params.store;
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
@@ -697,13 +749,18 @@ export function restoreRuntimeStateFromStore(params: {
       ? restoredState.schemaVersion
       : undefined;
   let recoveryReason: string | undefined;
-  const lastEventPosition = store.getLastEventPosition(params.threadId);
+  let allEvents: StoredEvent[] = [];
+  try {
+    allEvents = store.loadEventsStrict(params.threadId);
+  } catch (error) {
+    recoveryReason = error instanceof Error ? error.message : String(error);
+  }
+  const lastEventPosition = allEvents.at(-1)?.id ?? 0;
   if (snapshotRecord && snapshotRecord.metadata.eventPosition > lastEventPosition) {
     recoveryReason = `Runtime snapshot event position ${snapshotRecord.metadata.eventPosition} exceeds the last event position ${lastEventPosition}.`;
   }
   if (!recoveryReason && lastEventPosition > 0) {
     try {
-      const allEvents = store.loadEventsStrict(params.threadId);
       const snapshotPosition = snapshotRecord?.metadata.eventPosition ?? 0;
       const tail = allEvents.filter((entry) => entry.id > snapshotPosition);
       if (migratedState && snapshotRecord) {
@@ -713,7 +770,12 @@ export function restoreRuntimeStateFromStore(params: {
             allEvents.filter((entry) => entry.id <= snapshotPosition),
           );
         }
-        migratedState = replayPersistedTail(migratedState, tail, params.threadId);
+        migratedState = replayPersistedTail(
+          migratedState,
+          tail,
+          params.threadId,
+          restoredState?.schemaVersion ?? RUNTIME_STATE_SCHEMA_VERSION,
+        );
       }
     } catch (error) {
       recoveryReason = error instanceof Error ? error.message : String(error);
@@ -768,6 +830,10 @@ export function restoreRuntimeStateFromStore(params: {
       migratedState && migratedState !== restoredState && initialState === migratedState
         ? migratedState
         : null,
+    restoreBoundary: {
+      snapshot: snapshotRecord?.metadata ?? null,
+      lastEventPosition,
+    },
   };
 }
 
@@ -775,6 +841,7 @@ function replayPersistedTail(
   state: RuntimeState,
   tail: StoredEvent[],
   threadId: string,
+  sourceSchemaVersion: number,
 ): RuntimeState {
   let current = state;
   for (const entry of tail) {
@@ -789,7 +856,10 @@ function replayPersistedTail(
         `Runtime event ${entry.id} revision mismatch: expected ${current.revision + 1}, received ${entry.revision}.`,
       );
     }
-    const reduced = reduceRuntimeState(current, entry.event);
+    const reduced =
+      sourceSchemaVersion < RUNTIME_STATE_SCHEMA_VERSION
+        ? reduceRuntimeStateFromHistoricalSchema(current, entry.event, sourceSchemaVersion)
+        : reduceRuntimeState(current, entry.event);
     current = {
       ...reduced,
       revision: entry.revision,

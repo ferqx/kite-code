@@ -18,6 +18,7 @@ import type {
   AgentPlan,
   AuthorizationMode,
   PlanArtifactRef,
+  PlanIdentity,
   ShellApprovalGrant,
   SubAgentCacheMetricsPayload,
   SubAgentDonePayload,
@@ -867,7 +868,9 @@ export interface RunCompletedEvent {
   turnId: string;
   output: string;
   /** New emissions bind the accepted CompletionGuard decision version. */
-  completionGuardVersion?: 'completion_guard_v1';
+  completionGuardVersion?: import('./completion-guard').CompletionGuardVersion;
+  /** Required for new V2 emissions; absent on legacy V1 completion events. */
+  planIdentity?: PlanIdentity;
   outcome?: RunTerminalOutcomeV1;
 }
 
@@ -875,11 +878,13 @@ export interface RunCompletedEvent {
 export interface CompletionBlockedEvent {
   type: 'completion.blocked';
   turnId: string;
-  guardVersion: 'completion_guard_v1';
+  guardVersion: import('./completion-guard').CompletionGuardVersion;
   code: import('./completion-guard').CompletionBlockerCode;
   nextAction: import('./completion-guard').CompletionNextAction;
   planning: import('@/protocol/events').PlanningState['kind'];
   correctionAttempt: number;
+  /** Full strict identity for CompletionGuard V2; absent for V1 replay. */
+  planIdentity?: PlanIdentity;
 }
 
 /** A recoverable or terminal runtime failure exposed on the public protocol. */

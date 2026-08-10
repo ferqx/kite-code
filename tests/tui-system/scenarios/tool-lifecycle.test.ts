@@ -199,7 +199,7 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
           const result = request.messages.find(
             (message) => message.role === 'tool' && message.tool_call_id === 'call_submit',
           );
-          const plan = JSON.parse(String(result?.content)) as { plan_id: string };
+          const plan = parseDraftSavedPlan(result?.content);
           return {
             expectedRequest: {
               toolResults: [
@@ -213,6 +213,8 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
                   name: 'update_plan',
                   args: {
                     plan_id: plan.plan_id,
+                    version: plan.version,
+                    structural_digest: plan.structural_digest,
                     updates: [
                       { step_id: 'step-1', status: 'completed' },
                       { step_id: 'step-2', status: 'completed' },

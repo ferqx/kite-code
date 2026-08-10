@@ -1,6 +1,6 @@
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { RuntimeUserAction } from './actions';
-import { decideCompletionV1 } from './completion-guard';
+import { decideCompletion } from './completion-guard';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
@@ -514,13 +514,16 @@ export async function* runRuntimeLoop(
       }
       if (effect.type === 'emit_final') {
         count += 1;
-        const decision = decideCompletionV1(kernel.getState());
+        const decision = decideCompletion(kernel.getState());
         if (decision.status !== 'accepted') continue;
         const completed: RuntimeEvent = {
           type: 'run.completed',
           turnId: kernel.getState().turn.turnId,
           output: kernel.getState().transcript.final ?? '',
           completionGuardVersion: decision.version,
+          ...(decision.version === 'completion_guard_v2'
+            ? { planIdentity: decision.planIdentity }
+            : {}),
           outcome: completedTerminalOutcomeV1(),
         };
         const turnCompleted: RuntimeEvent = {
@@ -545,10 +548,15 @@ export async function* runRuntimeLoop(
           nextAction: effect.decision.nextAction,
           planning: effect.decision.planning,
           correctionAttempt: effect.decision.correctionAttempt,
+          ...(effect.decision.version === 'completion_guard_v2'
+            ? { planIdentity: effect.decision.planIdentity }
+            : {}),
         };
-        kernel.processEvent(blocked);
-        yield blocked;
-        if (effect.decision.canCorrect) continue;
+        if (effect.decision.canCorrect) {
+          kernel.processEvent(blocked);
+          yield blocked;
+          continue;
+        }
         const failure = classifyFailure(
           'unknown',
           `Completion blocked by ${effect.decision.code}; next action: ${effect.decision.nextAction}.`,
@@ -567,7 +575,11 @@ export async function* runRuntimeLoop(
           turnId: kernel.getState().turn.turnId,
           outcome: failedTerminalOutcomeV1({ ...failure, kind: 'unknown' }),
         };
-        kernel.processEventBatch([aborted, terminal]);
+        // The non-correctable blocker and both terminal facts are one durable
+        // boundary. A consumer that stops after observing attempt two must
+        // never leave an active turn that can schedule a third model call.
+        kernel.processEventBatch([blocked, aborted, terminal]);
+        yield blocked;
         yield aborted;
         yield terminal;
         return;

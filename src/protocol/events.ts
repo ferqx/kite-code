@@ -105,6 +105,13 @@ export interface PlanCompletionEvidenceV1 {
   unresolved: Array<{ kind: 'failure' | 'approval'; referenceId: string }>;
 }
 
+/** Strict identity shared by Plan transitions and completion decisions. */
+export interface PlanIdentity {
+  planId: string;
+  version: number;
+  structuralDigest: string;
+}
+
 /** 方案文档 — 用户审核的主内容 / Plan document — primary content for user review */
 export interface PlanDocument {
   /** Present and fixed for newly written plans; absent legacy documents are read/replay only. */

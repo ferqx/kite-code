@@ -1,10 +1,27 @@
 import { describe, expect, test } from 'bun:test';
-import { decideCompletionV1 } from '@/core/runtime/completion-guard';
-import { AgentKernel } from '@/core/runtime/kernel';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import {
+  decideCompletion,
+  decideCompletionV1,
+  decideCompletionV2,
+} from '@/core/runtime/completion-guard';
+import {
+  AgentKernel,
+  createAgentKernel,
+  restoreRuntimeStateAndPersistMigration,
+} from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { runRuntimeLoop } from '@/core/runtime/runner';
-import { createInitialRuntimeState, setActivePlanning } from '@/core/runtime/state';
-import { createRuntimeStore } from '@/core/runtime/store';
+import { decideNextEffect } from '@/core/runtime/scheduler';
+import {
+  COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
+  computePlanStructuralDigest,
+  createInitialRuntimeState,
+  setActivePlanning,
+} from '@/core/runtime/state';
+import { createRuntimeStore, type RuntimeStore } from '@/core/runtime/store';
 
 function activePlanningState() {
   let state = createInitialRuntimeState({
@@ -23,6 +40,116 @@ function activePlanningState() {
     taskId: 'task-1',
     source: 'user_command',
   });
+}
+
+function v2ExecutingState(options: {
+  requiredVerification?: 'pending' | 'passed';
+  sideEffectsStarted?: boolean;
+  executionEvidence?: boolean;
+}) {
+  let state = activePlanningState();
+  const structuralDigest = computePlanStructuralDigest({
+    title: 'Completion Guard V2 plan',
+    bodyMarkdown: 'Verify that completion requires canonical metadata-only evidence.',
+    steps: [{ id: 'implement', title: 'Implement the change', status: 'completed' }],
+  });
+  const identity = {
+    planId: 'plan-v2',
+    version: 2,
+    structuralDigest,
+  };
+  const completionEvidence = {
+    schemaVersion: 1 as const,
+    verification:
+      options.requiredVerification === 'passed'
+        ? [{ verificationId: 'verification-v2', outcome: 'passed' as const }]
+        : [],
+    execution: options.executionEvidence
+      ? [{ toolCallId: 'effect-v2', outcome: 'succeeded' as const }]
+      : [],
+    skipped: [],
+    unresolved: [],
+  };
+  const document = {
+    planSchemaVersion: 2 as const,
+    ...identity,
+    title: 'Completion Guard V2 plan',
+    bodyMarkdown: 'Verify that completion requires canonical metadata-only evidence.',
+    steps: [{ id: 'implement', title: 'Implement the change', status: 'completed' as const }],
+    createdAtTurnId: state.turn.turnId,
+    updatedAtTurnId: state.turn.turnId,
+    completionEvidence,
+  };
+  state = setActivePlanning(state, {
+    kind: 'executing',
+    document,
+    executionMode: 'auto',
+    approvedAtTurnId: state.turn.turnId,
+  });
+  if (state.activeTaskId) {
+    state = {
+      ...state,
+      tasks: {
+        ...state.tasks,
+        [state.activeTaskId]: {
+          ...state.tasks[state.activeTaskId]!,
+          sideEffectsStarted: options.sideEffectsStarted ?? false,
+          planning: state.planning,
+        },
+      },
+    };
+  }
+  if (options.executionEvidence) {
+    state = {
+      ...state,
+      tools: {
+        ...state.tools,
+        calls: {
+          ...state.tools.calls,
+          'effect-v2': {
+            toolCallId: 'effect-v2',
+            modelMessageId: 'model-effect',
+            ordinal: 0,
+            name: 'write_file',
+            args: {},
+            status: 'succeeded',
+            createdAtTurnId: state.turn.turnId,
+            taskId: state.activeTaskId ?? undefined,
+            sideEffect: true,
+            result: { ok: true, summary: 'effect succeeded', exitCode: 0 },
+          },
+        },
+      },
+    };
+  }
+  if (options.requiredVerification) {
+    state = {
+      ...state,
+      verification: {
+        records: {
+          'verification-v2': {
+            verificationId: 'verification-v2',
+            taskId: state.activeTaskId ?? undefined,
+            mode: 'required',
+            status: options.requiredVerification,
+            spec: {
+              schemaVersion: 1,
+              verificationId: 'verification-v2',
+              taskId: state.activeTaskId ?? undefined,
+              subject: 'Completion evidence',
+              checks: [],
+              repair: { maxAttempts: 0 },
+            },
+            requestedAt: '2026-08-10T00:00:00.000Z',
+            attempts: 1,
+            repairAttempts: 0,
+            checkResults: {},
+          },
+        },
+      },
+    };
+  }
+  return { state, identity, document };
 }
 
 describe('CompletionGuard V1', () => {
@@ -139,5 +266,620 @@ describe('CompletionGuard V1', () => {
     expect(events).not.toContain('run.completed');
     expect(kernel.getState().tasks[kernel.getState().activeTaskId!]?.status).toBe('active');
     kernel.close();
+  });
+});
+
+describe('CompletionGuard V2', () => {
+  test('selects V2 only for V2 PlanDocuments and reports missing required verification', () => {
+    const { state, identity } = v2ExecutingState({ requiredVerification: 'pending' });
+    expect(decideCompletion(state)).toEqual(decideCompletionV2(state));
+    expect(decideCompletionV2(state)).toMatchObject({
+      status: 'blocked',
+      version: 'completion_guard_v2',
+      code: 'verification_required',
+      nextAction: 'complete_verification',
+      planIdentity: identity,
+      correctionAttempt: 1,
+    });
+    expect(decideCompletionV1(state)).toMatchObject({
+      status: 'blocked',
+      version: 'completion_guard_v1',
+      code: 'plan_execution_incomplete',
+    });
+  });
+
+  test('reports missing effect evidence after required verification passes', () => {
+    const { state, identity } = v2ExecutingState({
+      requiredVerification: 'passed',
+      sideEffectsStarted: true,
+    });
+    expect(decideCompletionV2(state)).toMatchObject({
+      status: 'blocked',
+      version: 'completion_guard_v2',
+      code: 'effect_evidence_required',
+      nextAction: 'record_effect_evidence',
+      planIdentity: identity,
+    });
+  });
+
+  test('reports verification_required when a passed required record lacks its evidence reference', () => {
+    const fixture = v2ExecutingState({ requiredVerification: 'passed' });
+    const document = {
+      ...fixture.document,
+      completionEvidence: {
+        ...fixture.document.completionEvidence,
+        verification: [],
+      },
+    };
+    const state = setActivePlanning(fixture.state, {
+      kind: 'executing',
+      document,
+      executionMode: 'auto',
+      approvedAtTurnId: fixture.state.turn.turnId,
+    });
+    expect(decideCompletionV2(state)).toMatchObject({
+      status: 'blocked',
+      code: 'verification_required',
+      nextAction: 'complete_verification',
+      planIdentity: fixture.identity,
+    });
+  });
+
+  test('fails closed when a claimed V2 document no longer matches its structural digest', () => {
+    const fixture = v2ExecutingState({ sideEffectsStarted: true });
+    const state = setActivePlanning(fixture.state, {
+      kind: 'executing',
+      document: { ...fixture.document, structuralDigest: 'f'.repeat(64) },
+      executionMode: 'auto',
+      approvedAtTurnId: fixture.state.turn.turnId,
+    });
+    expect(decideCompletion(state)).toMatchObject({
+      status: 'blocked',
+      version: 'completion_guard_v2',
+      code: 'plan_evidence_unresolved',
+      nextAction: 'resolve_plan_evidence',
+      planIdentity: { ...fixture.identity, structuralDigest: 'f'.repeat(64) },
+    });
+  });
+
+  test('task-wide interaction blockers take priority over malformed V2 evidence', () => {
+    const fixture = v2ExecutingState({ sideEffectsStarted: true });
+    const malformed = setActivePlanning(fixture.state, {
+      kind: 'executing',
+      document: { ...fixture.document, structuralDigest: 'f'.repeat(64) },
+      executionMode: 'auto',
+      approvedAtTurnId: fixture.state.turn.turnId,
+    });
+    const state = {
+      ...malformed,
+      interactions: {
+        kind: 'awaiting_user_input' as const,
+        interactionId: 'priority-interaction',
+        toolCallId: 'priority-tool',
+        request: { question: 'Choose a correction.', options: [], allow_free_text: true },
+      },
+    };
+    expect(decideCompletionV2(state)).toMatchObject({
+      status: 'blocked',
+      version: 'completion_guard_v2',
+      code: 'interaction_pending',
+      nextAction: 'wait_for_interaction',
+      planIdentity: { ...fixture.identity, structuralDigest: 'f'.repeat(64) },
+    });
+  });
+
+  test('accepts a completed V2 plan only when metadata evidence matches Runtime state', () => {
+    const fixture = v2ExecutingState({
+      sideEffectsStarted: true,
+      executionEvidence: true,
+    });
+    const state = setActivePlanning(fixture.state, {
+      kind: 'completed',
+      document: fixture.document,
+      completedAtTurnId: fixture.state.turn.turnId,
+    });
+    expect(decideCompletionV2(state)).toEqual({
+      status: 'accepted',
+      version: 'completion_guard_v2',
+      planIdentity: fixture.identity,
+    });
+  });
+
+  test('current V2 state rejects payloads that self-report a legacy V1 guard version', () => {
+    const fixture = v2ExecutingState({
+      sideEffectsStarted: true,
+      executionEvidence: true,
+    });
+    const completed = setActivePlanning(fixture.state, {
+      kind: 'completed',
+      document: fixture.document,
+      completedAtTurnId: fixture.state.turn.turnId,
+    });
+    const missingIdentity = reduceRuntimeState(completed, {
+      type: 'run.completed',
+      turnId: completed.turn.turnId,
+      output: 'candidate',
+      completionGuardVersion: 'completion_guard_v2',
+    });
+    expect(missingIdentity.activeTaskId).toBe(completed.activeTaskId);
+
+    const missingVersion = reduceRuntimeState(completed, {
+      type: 'run.completed',
+      turnId: completed.turn.turnId,
+      output: 'candidate',
+    });
+    expect(missingVersion.activeTaskId).toBe(completed.activeTaskId);
+
+    const wrongIdentity = reduceRuntimeState(completed, {
+      type: 'run.completed',
+      turnId: completed.turn.turnId,
+      output: 'candidate',
+      completionGuardVersion: 'completion_guard_v2',
+      planIdentity: { ...fixture.identity, structuralDigest: 'd'.repeat(64) },
+    });
+    expect(wrongIdentity.activeTaskId).toBe(completed.activeTaskId);
+
+    const accepted = reduceRuntimeState(completed, {
+      type: 'run.completed',
+      turnId: completed.turn.turnId,
+      output: 'candidate',
+      completionGuardVersion: 'completion_guard_v2',
+      planIdentity: fixture.identity,
+    });
+    expect(accepted.activeTaskId).toBeNull();
+
+    const replayedV1 = reduceRuntimeState(completed, {
+      type: 'run.completed',
+      turnId: completed.turn.turnId,
+      output: 'legacy candidate',
+      completionGuardVersion: 'completion_guard_v1',
+    });
+    expect(replayedV1.activeTaskId).toBe(completed.activeTaskId);
+  });
+
+  test('current completion rejects stale V1 and V2 turn identities after a successor turn starts', () => {
+    const initial = createInitialRuntimeState({
+      threadId: 'stale-v1-guard',
+      userId: 'u',
+      workspace: '/tmp',
+    });
+    const unplanned = reduceRuntimeState(initial, {
+      type: 'task.started',
+      taskId: 'stale-v1-task',
+      userGoal: 'Complete without entering Plan Mode.',
+      turnId: initial.turn.turnId,
+    });
+    expect(unplanned.planning.kind).toBe('building_without_plan');
+    expect(decideCompletionV1(unplanned).status).toBe('accepted');
+    const staleV1 = reduceRuntimeState(unplanned, {
+      type: 'run.completed',
+      turnId: 'stale-turn',
+      output: 'stale legacy candidate',
+      completionGuardVersion: 'completion_guard_v1',
+    });
+    expect(staleV1.activeTaskId).toBe(unplanned.activeTaskId);
+
+    const fixture = v2ExecutingState({ sideEffectsStarted: true, executionEvidence: true });
+    const completed = setActivePlanning(fixture.state, {
+      kind: 'completed',
+      document: fixture.document,
+      completedAtTurnId: fixture.state.turn.turnId,
+    });
+    const successor = reduceRuntimeState(completed, {
+      type: 'turn.started',
+      turnId: 'successor-turn',
+    });
+    const staleV2 = reduceRuntimeState(successor, {
+      type: 'run.completed',
+      turnId: completed.turn.turnId,
+      output: 'stale V2 candidate',
+      completionGuardVersion: 'completion_guard_v2',
+      planIdentity: fixture.identity,
+    });
+    expect(staleV2.activeTaskId).toBe(completed.activeTaskId);
+    expect(staleV2.turn.turnId).toBe('successor-turn');
+  });
+
+  test('schema migration can replay an already-persisted V1 completion for a V2 plan', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v1-replay-'));
+    const storePath = join(root, 'runtime.db');
+    const fixture = v2ExecutingState({
+      sideEffectsStarted: true,
+      executionEvidence: true,
+    });
+    const completed = setActivePlanning(fixture.state, {
+      kind: 'completed',
+      document: fixture.document,
+      completedAtTurnId: fixture.state.turn.turnId,
+    });
+    const historical = {
+      ...completed,
+      schemaVersion: COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION - 1,
+    };
+    const store = createRuntimeStore(storePath);
+    store.saveSnapshot(historical.session.threadId, historical);
+    store.appendEvents(
+      historical.session.threadId,
+      [
+        {
+          type: 'run.completed',
+          turnId: historical.turn.turnId,
+          output: 'historical completion',
+          completionGuardVersion: 'completion_guard_v1',
+        },
+      ],
+      [
+        {
+          eventId: 'historical-v1-completion',
+          revision: historical.revision + 1,
+          occurredAt: '2026-08-10T00:00:00.000Z',
+        },
+      ],
+    );
+    store.close();
+
+    const restored = createAgentKernel({
+      threadId: historical.session.threadId,
+      userId: historical.session.userId,
+      workspace: historical.session.workspace,
+      storePath,
+    });
+    expect(restored.getState().activeTaskId).toBeNull();
+    expect(restored.getState().schemaVersion).toBe(COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION);
+    restored.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('a migrated V2 state does not retain authority for newly injected V1 completion', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v1-injection-'));
+    const storePath = join(root, 'runtime.db');
+    const fixture = v2ExecutingState({
+      sideEffectsStarted: true,
+      executionEvidence: true,
+    });
+    const completed = setActivePlanning(fixture.state, {
+      kind: 'completed',
+      document: fixture.document,
+      completedAtTurnId: fixture.state.turn.turnId,
+    });
+    const historical = {
+      ...completed,
+      schemaVersion: COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION - 1,
+    };
+    const store = createRuntimeStore(storePath);
+    store.saveSnapshot(historical.session.threadId, historical);
+    store.close();
+
+    const restored = createAgentKernel({
+      threadId: historical.session.threadId,
+      userId: historical.session.userId,
+      workspace: historical.session.workspace,
+      storePath,
+    });
+    expect(restored.getState().schemaVersion).toBe(COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION);
+    restored.processEvent({
+      type: 'run.completed',
+      turnId: restored.getState().turn.turnId,
+      output: 'injected completion',
+      completionGuardVersion: 'completion_guard_v1',
+    });
+    expect(restored.getState().activeTaskId).toBe(historical.activeTaskId);
+    restored.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('historical V1 completion replay obeys persisted turn order', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v1-order-'));
+    const storePath = join(root, 'runtime.db');
+    const fixture = v2ExecutingState({ sideEffectsStarted: true, executionEvidence: true });
+    const completed = setActivePlanning(fixture.state, {
+      kind: 'completed',
+      document: fixture.document,
+      completedAtTurnId: fixture.state.turn.turnId,
+    });
+    const historical = {
+      ...completed,
+      schemaVersion: COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION - 1,
+    };
+    const store = createRuntimeStore(storePath);
+    store.saveSnapshot(historical.session.threadId, historical);
+    store.appendEvents(
+      historical.session.threadId,
+      [
+        { type: 'turn.started', turnId: 'persisted-successor-turn' },
+        {
+          type: 'run.completed',
+          turnId: historical.turn.turnId,
+          output: 'stale historical completion',
+          completionGuardVersion: 'completion_guard_v1',
+        },
+      ],
+      [
+        {
+          eventId: 'historical-successor-turn',
+          revision: historical.revision + 1,
+          occurredAt: '2026-08-10T00:00:01.000Z',
+        },
+        {
+          eventId: 'historical-stale-completion',
+          revision: historical.revision + 2,
+          occurredAt: '2026-08-10T00:00:02.000Z',
+        },
+      ],
+    );
+    store.close();
+
+    const restored = createAgentKernel({
+      threadId: historical.session.threadId,
+      userId: historical.session.userId,
+      workspace: historical.session.workspace,
+      storePath,
+    });
+    expect(restored.getState().turn.turnId).toBe('persisted-successor-turn');
+    expect(restored.getState().activeTaskId).toBe(historical.activeTaskId);
+    restored.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('schema migration retries a two-connection append race before saving its snapshot', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v2-migration-race-'));
+    const storePath = join(root, 'runtime.db');
+    const fixture = v2ExecutingState({ sideEffectsStarted: true, executionEvidence: true });
+    const historical = {
+      ...fixture.state,
+      schemaVersion: COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION - 1,
+    };
+    const restoreConnection = createRuntimeStore(storePath);
+    const appendConnection = createRuntimeStore(storePath);
+    restoreConnection.saveSnapshot(historical.session.threadId, historical);
+    let injected = false;
+    const racingStore: RuntimeStore = {
+      ...restoreConnection,
+      appendEventsAndSnapshot(...args) {
+        if (!injected && args[1].length === 0) {
+          injected = true;
+          appendConnection.appendEvents(
+            historical.session.threadId,
+            [{ type: 'turn.started', turnId: 'racing-successor-turn' }],
+            [
+              {
+                eventId: 'racing-successor-turn',
+                revision: historical.revision + 1,
+                occurredAt: '2026-08-10T00:00:01.000Z',
+              },
+            ],
+          );
+        }
+        return restoreConnection.appendEventsAndSnapshot(...args);
+      },
+    };
+
+    const restored = restoreRuntimeStateAndPersistMigration({
+      store: racingStore,
+      threadId: historical.session.threadId,
+      userId: historical.session.userId,
+      workspace: historical.session.workspace,
+    });
+    expect(injected).toBe(true);
+    expect(restored.turn.turnId).toBe('racing-successor-turn');
+    expect(restored.revision).toBe(historical.revision + 1);
+    const durable = appendConnection.loadSnapshotRecord<
+      ReturnType<typeof createInitialRuntimeState>
+    >(historical.session.threadId);
+    expect(durable?.state.turn.turnId).toBe('racing-successor-turn');
+    expect(durable?.state.schemaVersion).toBe(COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION);
+    expect(durable?.metadata.eventPosition).toBe(
+      appendConnection.getLastEventPosition(historical.session.threadId),
+    );
+    restoreConnection.close();
+    appendConnection.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('resets the correction attempt when strict V2 Plan identity changes', () => {
+    const fixture = v2ExecutingState({ sideEffectsStarted: true });
+    const first = decideCompletionV2(fixture.state);
+    if (first.status !== 'blocked') throw new Error('expected blocked V2 decision');
+    const afterFirst = reduceRuntimeState(fixture.state, {
+      type: 'completion.blocked',
+      turnId: fixture.state.turn.turnId,
+      guardVersion: first.version,
+      code: first.code,
+      nextAction: first.nextAction,
+      planning: first.planning,
+      correctionAttempt: first.correctionAttempt,
+      planIdentity: first.planIdentity,
+    });
+    expect(afterFirst.completionGuard).toMatchObject({
+      correctionAttempts: 1,
+      guardVersion: 'completion_guard_v2',
+      planIdentity: fixture.identity,
+    });
+
+    const nextDocument = {
+      ...fixture.document,
+      version: fixture.document.version + 1,
+    };
+    const replanned = setActivePlanning(afterFirst, {
+      kind: 'executing',
+      document: nextDocument,
+      executionMode: 'auto',
+      approvedAtTurnId: afterFirst.turn.turnId,
+    });
+    expect(decideCompletionV2(replanned)).toMatchObject({
+      status: 'blocked',
+      correctionAttempt: 1,
+      planIdentity: {
+        planId: fixture.identity.planId,
+        version: fixture.identity.version + 1,
+        structuralDigest: fixture.identity.structuralDigest,
+      },
+    });
+  });
+
+  test('preserves the same V2 identity correction ceiling across a new turn and restore', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v2-correction-'));
+    const storePath = join(root, 'runtime.db');
+    const fixture = v2ExecutingState({ sideEffectsStarted: true });
+    const first = decideCompletionV2(fixture.state);
+    if (first.status !== 'blocked') throw new Error('expected blocked V2 decision');
+    const store = createRuntimeStore(storePath);
+    const kernel = new AgentKernel({
+      store,
+      initialState: fixture.state,
+      interactionMode: 'accept_edits',
+    });
+    kernel.processEvent({
+      type: 'completion.blocked',
+      turnId: fixture.state.turn.turnId,
+      guardVersion: first.version,
+      code: first.code,
+      nextAction: first.nextAction,
+      planning: first.planning,
+      correctionAttempt: first.correctionAttempt,
+      planIdentity: first.planIdentity,
+    });
+    kernel.processEvent({ type: 'turn.started', turnId: 'next-turn-same-plan' });
+    expect(decideCompletionV2(kernel.getState())).toMatchObject({
+      status: 'blocked',
+      correctionAttempt: 2,
+      planIdentity: fixture.identity,
+    });
+    kernel.close();
+
+    const restored = createAgentKernel({
+      threadId: fixture.state.session.threadId,
+      userId: fixture.state.session.userId,
+      workspace: fixture.state.session.workspace,
+      storePath,
+    });
+    expect(decideCompletionV2(restored.getState())).toMatchObject({
+      status: 'blocked',
+      correctionAttempt: 2,
+      planIdentity: fixture.identity,
+    });
+    restored.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('aborts the second illegal final for the same V2 plan identity', async () => {
+    const { state, identity } = v2ExecutingState({ sideEffectsStarted: true });
+    const store = createRuntimeStore(':memory:');
+    const kernel = new AgentKernel({
+      store,
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const emitted = [];
+    let modelCalls = 0;
+    for await (const event of runRuntimeLoop(
+      kernel,
+      async () => {
+        modelCalls++;
+        return [{ type: 'model.responded' as const, messageId: `v2-${modelCalls}`, text: 'Done.' }];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      emitted.push(event);
+    }
+
+    expect(modelCalls).toBe(2);
+    expect(
+      emitted
+        .filter((event) => event.type === 'completion.blocked')
+        .map((event) => ({
+          guardVersion: event.guardVersion,
+          code: event.code,
+          correctionAttempt: event.correctionAttempt,
+          planIdentity: event.planIdentity,
+        })),
+    ).toEqual([
+      {
+        guardVersion: 'completion_guard_v2',
+        code: 'effect_evidence_required',
+        correctionAttempt: 1,
+        planIdentity: identity,
+      },
+      {
+        guardVersion: 'completion_guard_v2',
+        code: 'effect_evidence_required',
+        correctionAttempt: 2,
+        planIdentity: identity,
+      },
+    ]);
+    expect(emitted.map((event) => event.type)).toEqual([
+      'model.responded',
+      'completion.blocked',
+      'model.responded',
+      'completion.blocked',
+      'turn.aborted',
+      'run.error',
+    ]);
+    expect(emitted.some((event) => event.type === 'run.completed')).toBe(false);
+    kernel.close();
+  });
+
+  test('persists the non-correctable blocked terminal batch before yielding attempt two', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-completion-v2-terminal-batch-'));
+    const storePath = join(root, 'runtime.db');
+    const { state } = v2ExecutingState({ sideEffectsStarted: true });
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(storePath),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    let modelCalls = 0;
+    const observed: string[] = [];
+    for await (const event of runRuntimeLoop(
+      kernel,
+      async () => {
+        modelCalls++;
+        return [
+          { type: 'model.responded' as const, messageId: `atomic-${modelCalls}`, text: 'Done.' },
+        ];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      observed.push(event.type);
+      if (event.type === 'completion.blocked' && event.correctionAttempt === 2) {
+        expect(kernel.getState().turn.status).toBe('aborted');
+        expect(decideNextEffect(kernel.getState()).type).toBe('stop');
+        break;
+      }
+    }
+    expect(modelCalls).toBe(2);
+    expect(observed).not.toContain('run.completed');
+    expect(
+      kernel.runtimeStore
+        .loadEventsStrict(state.session.threadId)
+        .slice(-3)
+        .map((entry) => entry.event.type),
+    ).toEqual(['completion.blocked', 'turn.aborted', 'run.error']);
+    kernel.close();
+
+    const restored = createAgentKernel({
+      threadId: state.session.threadId,
+      userId: state.session.userId,
+      workspace: state.session.workspace,
+      storePath,
+    });
+    let restartModelCalls = 0;
+    const restartedEvents: string[] = [];
+    for await (const event of runRuntimeLoop(
+      restored,
+      async () => {
+        restartModelCalls++;
+        return [{ type: 'model.responded' as const, messageId: 'unexpected-third', text: 'Done.' }];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      restartedEvents.push(event.type);
+    }
+    expect(restored.getState().turn.status).toBe('aborted');
+    expect(decideNextEffect(restored.getState()).type).toBe('stop');
+    expect(restartModelCalls).toBe(0);
+    expect(restartedEvents).not.toContain('run.completed');
+    restored.close();
+    rmSync(root, { recursive: true, force: true });
   });
 });

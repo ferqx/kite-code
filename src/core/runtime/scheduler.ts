@@ -1,5 +1,5 @@
 import { evaluateToolApproval } from '@/core/policies/approval-policy';
-import { decideCompletionV1 } from './completion-guard';
+import { decideCompletion, decideCompletionV1 } from './completion-guard';
 import type { RuntimeEffect } from './effects';
 import { isLegacyPlanContinuationToolAllowed, requiresLegacyPlanReplan } from './plan-continuation';
 import { getActivePlanning, getAgentPhase, type RuntimeState, type ToolCallRecord } from './state';
@@ -283,7 +283,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       (frame) => frame.status === 'active',
     );
     if (!activeSkill) {
-      const decision = decideCompletionV1(state);
+      const decision = decideCompletion(state);
       return decision.status === 'accepted'
         ? { type: 'emit_final' }
         : { type: 'completion_blocked', decision };

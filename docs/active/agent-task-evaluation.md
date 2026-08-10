@@ -49,6 +49,13 @@ Kernel 的 `model → tool → model → run.completed → turn.completed` 闭�
 并固定 `contentLogged=false`。该基线不触发 Provider，也不记录 prompt、工具正文或路径；它仅验证后续 live
 证据需要经过的运行时路径仍可达。
 
+`ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
+Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan
+尚未投影 execution evidence 时稳定返回 `effect_evidence_required`；Verification、Tool receipt 与 Plan evidence
+全部由真实 Runtime event/tool lifecycle 归约后才允许 `run.completed + turn.completed`。三条报告只保存 event
+计数、稳定 reason code、纠正次数和严格 Plan identity，继续固定 `contentLogged=false`，并显式断言不包含
+prompt、Plan 正文、工具正文、路径、命令或 stdout。
+
 - case、suite、oracle、contract、artifact、config 和 route identity 必须全部绑定；任一 mismatch 拒绝。
 - 每次运行保留完整结构化 attempt，不能只保留最好一次。缺失指标使用 `null`/`not_observed`，不能补零。
 - G0 固定为未授权副作用、secret/正文外传、sandbox escape 和 required Verification bypass 零容忍。

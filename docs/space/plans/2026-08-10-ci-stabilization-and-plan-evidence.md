@@ -26,7 +26,11 @@
 
 - `ACORE-CI-01`：completed；CompletionGuard V1 相关 Required CI fixture 已稳定化。
 - `ACORE-PLAN-02`：completed；PlanDocument V2、strict identity、metadata-only evidence、legacy replay-only 与 Artifact fail-closed 边界已实现并通过整体规格/质量审查。
-- `ACORE-PLAN-03`：pending；CompletionGuard V2 verification/effect evidence gate 尚未实施。
+- `ACORE-PLAN-03`：completed；CompletionGuard V2、严格 identity、verification/effect evidence gate 与
+  metadata-only Runtime Journey 已实现；整体规格审查发现的 legacy provenance、跨 turn correction ceiling 与 required
+  verification Journey 修复已收敛；整体质量审查补充的 migration snapshot CAS、stale turn、真实 production
+  `update_plan` Journey、blocker priority 与不可纠正 blocker 的 atomic terminal batch 也已实现并通过最终整体审查。
+  PR 级 TUI/soak/Required CI 仍作为独立后续门禁，不授权合并。
 
 ---
 
@@ -171,7 +175,7 @@
 - 消费：V2 `PlanCompletionEvidenceV1` 与现有 `VerificationRecord`。
 - 产生：`COMPLETION_GUARD_V2 = 'completion_guard_v2'`、带 `{ planId, version, structuralDigest }` 的 `completion.blocked` decision identity，以及仅在 accepted V2 decision 后发出的 `run.completed`。
 
-- [ ] **Step 1：写 V2 guard 的失败测试**
+- [x] **Step 1：写 V2 guard 的失败测试**
 
   在 `completion-guard.test.ts` 增加三类 case：executing Plan 的全部 step 完成但 required verification 未 passed/waived；verification 完成但 effect receipt 缺失；evidence 完整时 accepted。断言第二次同 identity final 仍产生 `turn.aborted + run.error`，不会发出 `run.completed`。运行：
 
@@ -181,15 +185,20 @@
 
   预期：V2 cases 因没有 decision version/evidence gate 而失败，V1 legacy replay case 继续通过。
 
-- [ ] **Step 2：实现单调 V2 decision 与事件绑定**
+- [x] **Step 2：实现单调 V2 decision 与事件绑定**
 
   保留 `decideCompletionV1` 供旧 event/snapshot replay；新增 `decideCompletionV2`，只对 V2 PlanDocument 调用。scheduler、runner、reducer 根据 event 的 guard version 选择相同 decision，事件记录稳定 reason code、next action、plan identity 和 correction attempt。缺 verification 时返回 `verification_required`，缺 execution evidence 时返回 `effect_evidence_required`；不记录内容字段。
 
-- [ ] **Step 3：驱动完整 Journey 证明 Guard 不再接受伪完成**
+- [x] **Step 3：驱动完整 Journey 证明 Guard 不再接受伪完成**
 
-  扩展 `runtime-journey-baseline.test.ts` 为两条 metadata-only journey：一条在 verification/evidence 缺失时结束为 blocked terminal，另一条在 plan completed + required verification passed + evidence references 后结束为 `run.completed`。报告仍只含 event type/count 与 `contentLogged=false`。
+  扩展 `runtime-journey-baseline.test.ts` 为三条 metadata-only journey，全部从 executing V2 Plan 与空 evidence
+  开始：required verification facts 已完成但尚未经 `update_plan` 投影时稳定返回 `verification_required`；真实
+  `write_file` lifecycle 已成功但 execution reference 尚未投影时返回 `effect_evidence_required`；证据完整路径由
+  verification/tool lifecycle facts 驱动，并经生产 `executeRuntimeTools → updatePlanAction` 产生和归约
+  `plan.progress_updated + plan.completed` 后才得到 `run.completed`。报告仍只含 event type/count、identity 与
+  `contentLogged=false`。
 
-- [ ] **Step 4：运行 Runtime、PTY 与文档验证**
+- [x] **Step 4：运行 Runtime、PTY 与文档验证**
 
   运行：
 
@@ -203,17 +212,24 @@
 
   预期：V1 replay、V2 evidence/verification gate 和 metadata privacy assertions 全部通过。
 
-- [ ] **Step 5：提交 Guard V2，并重新执行 PR 级检查**
+- [x] **Step 5：更新文档并提交 Guard V2**
 
   ```bash
   git add src/core/runtime src/protocol/events.ts tests/runtime tests/evals docs/active docs/book docs/documentation-map.json
   git commit -m "feat: gate completion on plan evidence"
+  ```
+
+  预期：整体规格/质量审查、提交钩子与文档门禁全绿；提交不将 PR 标记为 ready 或合并。
+
+- [ ] **Step 6：重新执行 PR 级检查**
+
+  ```bash
   bun test
   bun run test:tui:system
   bun run test:runtime:soak
   ```
 
-  预期：本地 Required 等价检查全绿；推送后只观察 CI，不将 PR 标记为 ready 或合并。
+  预期：本地 Required 等价检查全绿；推送后只观察 CI，不将 PR 标记为 ready 或合并。该步骤属于整体 PR gate，不能因 PLAN-03 实现提交而提前勾选。
 
 ## 计划自审
 

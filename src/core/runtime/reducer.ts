@@ -10,8 +10,20 @@ import {
 import { updateAutoCompactionGuard } from '@/core/model/context-compaction-decision';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
-import type { AgentPlan, PlanArtifactRef, PlanDocument, PlanStep } from '@/protocol/events';
-import { decideCompletionV1 } from './completion-guard';
+import type {
+  AgentPlan,
+  PlanArtifactRef,
+  PlanDocument,
+  PlanIdentity,
+  PlanStep,
+} from '@/protocol/events';
+import {
+  type CompletionGuardBlocked,
+  type CompletionGuardDecision,
+  type CompletionGuardVersion,
+  decideCompletionV1,
+  decideCompletionV2,
+} from './completion-guard';
 import {
   createContextCorrectnessBlock,
   isContextHardBlockReason,
@@ -28,6 +40,7 @@ import {
 import { planCompletionBlocker, planCompletionEvidenceMatchesRuntime } from './plan-evidence';
 import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
+  COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
   computePlanStructuralDigest,
   getActivePlanning,
   getActiveTask,
@@ -137,6 +150,46 @@ function toolResultMeta(
   };
 }
 
+function samePlanIdentity(
+  left: PlanIdentity | undefined,
+  right: PlanIdentity | undefined,
+): boolean {
+  return (
+    left != null &&
+    right != null &&
+    left.planId === right.planId &&
+    left.version === right.version &&
+    left.structuralDigest === right.structuralDigest
+  );
+}
+
+function completionDecisionForVersion(
+  state: RuntimeState,
+  version: CompletionGuardVersion,
+): CompletionGuardDecision | null {
+  if (version === 'completion_guard_v1') return decideCompletionV1(state);
+  try {
+    return decideCompletionV2(state);
+  } catch {
+    return null;
+  }
+}
+
+function blockedEventMatchesDecision(
+  event: Extract<RuntimeEvent, { type: 'completion.blocked' }>,
+  decision: CompletionGuardBlocked,
+): boolean {
+  return (
+    event.guardVersion === decision.version &&
+    event.code === decision.code &&
+    event.nextAction === decision.nextAction &&
+    event.planning === decision.planning &&
+    event.correctionAttempt === decision.correctionAttempt &&
+    (decision.version === 'completion_guard_v1' ||
+      samePlanIdentity(event.planIdentity, decision.planIdentity))
+  );
+}
+
 /**
  * 纯函数：将运行时事件应用到状态，返回新的不可变状态。
  * Pure function: applies a runtime event to the state, returns a new immutable state.
@@ -149,6 +202,29 @@ function toolResultMeta(
  * @returns 新的不可变运行时状态 / New immutable runtime state
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  return reduceRuntimeStateWithReplayBoundary(state, event, false);
+}
+
+/** Kernel-only migration entry: payload fields cannot grant legacy completion authority. */
+export function reduceRuntimeStateFromHistoricalSchema(
+  state: RuntimeState,
+  event: RuntimeEvent,
+  sourceSchemaVersion: number,
+): RuntimeState {
+  return reduceRuntimeStateWithReplayBoundary(
+    state,
+    event,
+    Number.isInteger(sourceSchemaVersion) &&
+      sourceSchemaVersion >= 2 &&
+      sourceSchemaVersion < COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
+  );
+}
+
+function reduceRuntimeStateWithReplayBoundary(
+  state: RuntimeState,
+  event: RuntimeEvent,
+  allowHistoricalV1CompletionOnV2: boolean,
+): RuntimeState {
   event = normalizeTerminalRuntimeEventV1(event);
   switch (event.type) {
     case 'resource_budget.configured':
@@ -1629,16 +1705,29 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     // phase.changed — removed; phase is derived from planning.kind via getAgentPhase()
-    case 'turn.started':
+    case 'turn.started': {
+      const planning = getActivePlanning(state);
+      const planIdentity =
+        'document' in planning && planning.document?.planSchemaVersion === 2
+          ? {
+              planId: planning.document.planId,
+              version: planning.document.version,
+              structuralDigest: planning.document.structuralDigest,
+            }
+          : undefined;
+      const preserveV2Correction =
+        state.completionGuard?.guardVersion === 'completion_guard_v2' &&
+        samePlanIdentity(state.completionGuard.planIdentity, planIdentity);
       return {
         ...state,
-        completionGuard: { correctionAttempts: 0 },
+        completionGuard: preserveV2Correction ? state.completionGuard : { correctionAttempts: 0 },
         turn: {
           turnId: event.turnId,
           turnIndex: state.turn.turnIndex + 1,
           status: 'active',
         },
       };
+    }
     case 'turn.completed':
       return event.turnId === state.turn.turnId
         ? { ...state, turn: { ...state.turn, status: 'completed' } }
@@ -1722,8 +1811,30 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.context_metrics':
       return state;
     case 'run.completed': {
-      const decision = decideCompletionV1(state);
-      if (decision.status !== 'accepted') return state;
+      if (event.turnId !== state.turn.turnId) return state;
+      const activePlanning = getActivePlanning(state);
+      const isV2Plan =
+        'document' in activePlanning && activePlanning.document?.planSchemaVersion === 2;
+      if (isV2Plan && event.completionGuardVersion !== 'completion_guard_v2') {
+        if (
+          !allowHistoricalV1CompletionOnV2 ||
+          event.completionGuardVersion !== 'completion_guard_v1'
+        ) {
+          return state;
+        }
+      }
+      if (event.completionGuardVersion == null && isV2Plan) {
+        return state;
+      }
+      const version = event.completionGuardVersion ?? 'completion_guard_v1';
+      const decision = completionDecisionForVersion(state, version);
+      if (decision?.status !== 'accepted') return state;
+      if (
+        decision.version === 'completion_guard_v2' &&
+        !samePlanIdentity(event.planIdentity, decision.planIdentity)
+      ) {
+        return state;
+      }
       const active = getActiveTask(state);
       if (!active) return state;
       const completed = {
@@ -1740,14 +1851,34 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         planning: completed.planning,
       };
     }
-    case 'completion.blocked':
-      return event.turnId === state.turn.turnId
-        ? {
-            ...state,
-            completionGuard: { correctionAttempts: event.correctionAttempt },
-            transcript: { ...state.transcript, final: undefined },
-          }
-        : state;
+    case 'completion.blocked': {
+      if (event.turnId !== state.turn.turnId) return state;
+      const activePlanning = getActivePlanning(state);
+      const isV2Plan =
+        'document' in activePlanning && activePlanning.document?.planSchemaVersion === 2;
+      if (
+        isV2Plan &&
+        event.guardVersion !== 'completion_guard_v2' &&
+        !allowHistoricalV1CompletionOnV2
+      ) {
+        return state;
+      }
+      const decision = completionDecisionForVersion(state, event.guardVersion);
+      if (decision?.status !== 'blocked' || !blockedEventMatchesDecision(event, decision)) {
+        return state;
+      }
+      return {
+        ...state,
+        completionGuard: {
+          correctionAttempts: event.correctionAttempt,
+          guardVersion: event.guardVersion,
+          ...(event.guardVersion === 'completion_guard_v2'
+            ? { planIdentity: event.planIdentity }
+            : {}),
+        },
+        transcript: { ...state.transcript, final: undefined },
+      };
+    }
     case 'run.error':
       return event.outcome ? { ...state, terminalOutcome: event.outcome } : state;
     case 'runtime.action_ignored':

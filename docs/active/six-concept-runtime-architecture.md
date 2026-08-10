@@ -64,7 +64,7 @@ src/core/runtime/
 ├── state.ts       RuntimeState 及 capability/skill/verification 投影
 ├── events.ts      已发生的事实
 ├── effects.ts     下一步准备执行的动作
-├── completion-guard.ts  CompletionGuard V1 的纯 completion decision
+├── completion-guard.ts  CompletionGuard V1/V2 的纯 completion decision 与版本路由
 ├── plan-continuation.ts  历史 V1 executing 的只读/replan continuation 门禁
 ├── scheduler.ts   State → Effect 的确定性决策；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；V1 executing 只放行 read_plan/write_plan V2 replan；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop
 ├── reducer.ts     State × Event → State；approval.rejected 和 tool.rejected 均写入 transcript ToolMessage
@@ -85,7 +85,7 @@ Scheduler 只直接运行读取当前 Plan 或用原 identity 保存 V2 replan �
 `compact_context` 是唯一额外允许的内部 admission effect，必须匹配当前 compaction identity，不能携带任务副作用。
 unknown external invocation 与全部 awaiting interaction 是更高优先级 barrier；scheduler 和 runner guard 都必须
 先保持它们的 reconciliation/interrupt effect。受限 response 将 surface 作为 metadata 持久化；无合法 replan 的
-final 或伪造工具按 CompletionGuard V1 进行一次 correction，第二次以 aborted/error 收敛。非白名单 malformed
+final 或伪造工具按 legacy CompletionGuard V1 进行一次 correction，第二次以 aborted/error 收敛。非白名单 malformed
 Tool Call 先执行 surface rejection，白名单 Plan 工具才保留 invalid-args 分类。
 Runner 以 `lease.effect.toolSurface` 为唯一权威，对 executor 返回、emit 与 `persistEvent(s)` 三条路径的最终
 `model.responded` marker 进行统一绑定；普通 model lease 也不能接受伪造的 recovery marker。白名单工具只有
@@ -131,6 +131,17 @@ claim nonce digest；Runtime 只有在该 durable claim 成功后才允许请求
 不能复用仍有效 permit。迁移 v20 snapshot 不为历史调用虚构 egress decision，receipt 不持久化
 raw arguments、正文或 nonce。
 
+Runtime schema v22 为 CompletionGuard V2 建立可信 replay 边界。当前 V2 Plan 的 `run.completed` 与
+`completion.blocked` 只能使用 V2 decision 和完整 `{planId, version, structuralDigest}`；event payload 自报 V1 不构成
+legacy provenance。只有 Kernel 从 v21 或更早 snapshot 的持久化 tail 做 migration replay 时才可按 V1 读取历史事件。
+V2 correction ceiling 绑定 guard version 与完整 Plan identity，跨 turn 和 restore 保持；identity revision 改变或不再存在
+相关 V2 Plan 时才重置。current 与 migration reducer 都先拒绝不匹配当前 turn 的 `run.completed`，migration replay
+严格采用 journal position 顺序。迁移后的 rolling snapshot 通过 `appendEventsAndSnapshot` 在同一事务中 CAS restore
+读取到的 snapshot metadata 与 event-tail 末尾；并发 append/snapshot 变化触发重新 restore/replay，不能让旧 state
+继承竞态之后的 event position。不可纠正的 V1/V2 completion blocker 也使用 Kernel batch，在向 consumer 暴露
+attempt 2 前原子持久化 `[completion.blocked, turn.aborted, run.error]`；消费中断或进程恢复都只能观察 terminal stop，
+不能从 blocked 边界重新调度第三次模型请求。
+
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
 dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
 `legacy_unconfigured`，不会伪造余额；v18 ledger 保留 reservation，并补齐空 waiter queue。
@@ -173,11 +184,13 @@ recovery、CLI 与 TUI 的共同投影复测。其他 capability producer 必须
 contract test 后才能声明 coverage。缺少 external-effect 证据时 fail closed 为 `unknown`，已有
 证据做保守合并；未 reconciliation 时不得继续或降级。调用方只能进一步收紧结果。
 
-`CompletionGuard V1` 也是同一 Kernel 的纯 decision：scheduler 在 `emit_final` 前、runner 在持久化前、
-reducer 在接收 `run.completed` 时都重新评估 canonical state。final 文本不能绕过 Plan lifecycle、非终结
-Tool/interaction、suspended subagent、unknown invocation 或 active Skill；首次阻断最多请求一次模型纠正，
-第二次以 blocked error/aborted turn 收敛。`completion.blocked` 只保存版本化低基数 reason、next action、
-planning lifecycle 与 attempt，不保存模型正文或参数。
+CompletionGuard 也是同一 Kernel 的纯、单调版本化 decision：scheduler 在 `emit_final` 前、runner 在持久化前、
+reducer 在接收 `run.completed` 时都按 guard version 重新评估 canonical state。V1 保留 legacy replay 与无 Plan task；
+只有 PlanDocument V2 使用 V2，额外拒绝缺失 required verification、effect receipt reference、unresolved evidence 或
+evidence/Runtime 投影不一致。final 文本不能绕过 Plan lifecycle、非终结 Tool/interaction、suspended subagent、unknown
+invocation 或 active Skill；同一 V2 `{planId, version, structuralDigest}` 首次阻断最多请求一次模型纠正，第二次以
+blocked error/aborted turn 收敛。`completion.blocked` 只保存 guard version、低基数 reason/next action、planning
+lifecycle、完整 Plan identity 与 attempt；V2 `run.completed` 绑定接受 decision 的相同 identity，不保存模型正文或参数。
 
 Context compaction 当前只有一条 Markdown narrative 管线。专用 summary request 使用当前对话模型、空工具集、确定性温度和零 SDK retry；输入只包含最小固定 prompt、已有 checkpoint narrative、全部 safe settled history 与作为不可信数据的 custom instructions，不携带普通 Agent system prompt、工具 schema、live tail 或动态 RuntimeState。模型内容产物只有规范化 `summary: string`，不生成工具结果投影、JSON、fact/evidence ledger、file ledger、repair、chunk 或 merge 产物。首次和增量压缩都只调用模型一次；manual 总结全部安全历史，auto 保护当前 turn 后总结其余安全历史，增量输入为旧 narrative 加 checkpoint 后的全部 safe history，整体替换 active checkpoint。显式 summary input 上限超出时整体失败，不得静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、可序列化且不超过 narrative 上限。Manual 与 auto 共享至少 1024 token 的统一绝对缩减门槛；target ratio 只作诊断。Checkpoint 保存 Markdown 与 Core 生成的 boundary、digest、revision 和 estimate；统一 serializer 规范化 LF、移除外围空白并 XML 转义后，生成且只生成一个历史区首位的 `<compacted_history>` assistant frame。
 

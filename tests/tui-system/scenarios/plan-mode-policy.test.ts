@@ -5,8 +5,9 @@
  * a planning-mode plain prompt. The mock model deliberately attempts a
  * write_file call. In real Plan Mode, the TUI must pass initialPhase=planning
  * to core so the write is rejected before any approval or filesystem mutation
- * can happen. The scenario then completes the real Plan lifecycle and verifies
- * that the TUI returns to building mode.
+ * can happen. Because that rejected Tool is an unresolved completion blocker,
+ * the scenario cancels review instead of pretending the Plan can complete,
+ * then explicitly exits Plan Mode before exercising the next clean lifecycle.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -78,11 +79,15 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         },
       },
       planSubmitResponse('call_plan_save_denial', 'call_plan_submit_denial'),
-      planCompleteResponse('call_plan_submit_denial', 'call_plan_complete_denial', [
-        'validate-denial',
-      ]),
-      planFinalResponse('call_plan_complete_denial', 'Planning write validation completed.'),
       {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_plan_submit_denial',
+              contentIncludes: ['Plan execution confirmation cancelled by user.'],
+            },
+          ],
+        },
         message: {
           content: 'I will validate the plan.',
           tool_calls: [
@@ -128,7 +133,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
                 action: 'save',
                 title: 'Plan-safe shell validation',
                 body_markdown:
-                  'Record deferred planning validation commands and complete the plan lifecycle.',
+                  'Record deferred planning validation commands without claiming completion.',
                 steps: [{ id: 'validate-shell', title: 'Validate planning shell policy' }],
               },
             },
@@ -136,10 +141,6 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         },
       },
       planSubmitResponse('call_plan_save_shell', 'call_plan_submit_shell'),
-      planCompleteResponse('call_plan_submit_shell', 'call_plan_complete_shell', [
-        'validate-shell',
-      ]),
-      planFinalResponse('call_plan_complete_shell', 'Planning shell validation completed.'),
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -176,14 +177,21 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       expect(screenContains(renderedFrames, '工具授权')).toBe(false);
       expect(existsSync(join(workspace.workspace, 'plan-created.txt'))).toBe(false);
       await waitForText(() => tui.viewport(), '方案审核', 15_000);
-      tui.write('\r');
-      await waitForText(() => tui.viewport(), 'Planning write validation completed.', 15_000);
+      tui.write('\x1b');
+      await waitForCondition(
+        () =>
+          screenContains(tui.viewport(), 'Shift+Tab to exit') &&
+          !screenContains(tui.viewport(), '方案审核'),
+        'cancelled review returns to the Plan Mode prompt',
+        15_000,
+      );
+      tui.write('\x1b[Z');
     },
     TIMEOUT,
   );
 
   step(
-    'completed plan returns the TUI to building mode',
+    'cancelled blocked plan can explicitly return the TUI to building mode',
     async () => {
       await waitForCondition(
         () =>
@@ -210,8 +218,12 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
         15000,
       );
       await waitForText(() => tui.viewport(), '方案审核', 15_000);
-      tui.write('\r');
-      await waitForText(() => tui.viewport(), 'Planning shell validation completed.', 15_000);
+      tui.write('\x1b');
+      await waitForCondition(
+        () => !screenContains(tui.viewport(), '方案审核'),
+        'cancelled shell-validation review closes',
+        15_000,
+      );
 
       const output = tui.screenFramesSince(conversationFrames).join('\n');
       expect(screenContains(output, 'Deferred until execution')).toBe(false);
@@ -239,6 +251,7 @@ function planSubmitResponse(saveCallId: string, submitCallId: string) {
         expectedRequest: {
           toolResults: [{ toolCallId: saveCallId, contentIncludes: ['draft_saved'] }],
         },
+        toolContinuation: 'aborted' as const,
         message: {
           tool_calls: [
             {
@@ -275,45 +288,5 @@ function parseDraftSavedPlan(content: unknown): {
     plan_id: value.plan_id,
     version: value.version,
     structural_digest: value.structural_digest,
-  };
-}
-
-function planCompleteResponse(submitCallId: string, completeCallId: string, stepIds: string[]) {
-  return {
-    response(request: {
-      messages: Array<{ role?: string; content?: unknown; tool_call_id?: string }>;
-    }) {
-      const result = request.messages.find(
-        (message) => message.role === 'tool' && message.tool_call_id === submitCallId,
-      );
-      const plan = JSON.parse(String(result?.content)) as { plan_id: string };
-      return {
-        expectedRequest: {
-          toolResults: [{ toolCallId: submitCallId, contentIncludes: ['"status":"approved"'] }],
-        },
-        message: {
-          tool_calls: [
-            {
-              id: completeCallId,
-              name: 'update_plan',
-              args: {
-                plan_id: plan.plan_id,
-                updates: stepIds.map((step_id) => ({ step_id, status: 'completed' })),
-                complete_plan: true,
-              },
-            },
-          ],
-        },
-      };
-    },
-  };
-}
-
-function planFinalResponse(completeCallId: string, content: string) {
-  return {
-    expectedRequest: {
-      toolResults: [{ toolCallId: completeCallId, contentIncludes: ['"plan_completed":true'] }],
-    },
-    message: { content },
   };
 }

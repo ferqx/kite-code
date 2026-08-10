@@ -142,6 +142,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    首项推荐。验证内部 sandbox、session logging 或历史会话加载失败时，同时断言用户可见的受控
    恢复文案与原始诊断/存储细节不出现在对话或 Overlay 中。成功计划场景若已经等待并接受审核
    Overlay，则必须在回到 idle 前断言该 Overlay 已关闭；不得保留“未显示审核”的过时断言。
+   V2 Plan fixture 的 `write_plan(submit)` 与 `update_plan` 必须从真实前序 Tool Result 解析并回传
+   `{plan_id, version, structural_digest}`，不得只复用 `plan_id` 或预测生成 identity。规划期被拒绝、
+   延后或取消的 Tool 会形成 unresolved completion blocker；这类负向 scenario 必须验证拒绝事实后
+   取消审核或进入明确纠正路径，不能用 canned `plan_completed` 响应伪造成功完成。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
    同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生
    Runtime event 后必须校验 Runtime Store 中出现不同 thread ID；切换回放先用 Enter checkpoint
