@@ -168,6 +168,67 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
         },
         message: { content: 'Draft saved! Ready for review.' },
       },
+      {
+        response(request) {
+          const result = request.messages.find(
+            (message) => message.role === 'tool' && message.tool_call_id === 'call_write',
+          );
+          const plan = JSON.parse(String(result?.content)) as {
+            plan_id: string;
+            version: number;
+            structural_digest: string;
+          };
+          return {
+            expectedRequest: {
+              toolResults: [{ toolCallId: 'call_write', contentIncludes: ['draft_saved'] }],
+            },
+            message: {
+              tool_calls: [
+                { id: 'call_submit', name: 'write_plan', args: { action: 'submit', ...plan } },
+              ],
+            },
+          };
+        },
+      },
+      {
+        response(request) {
+          const result = request.messages.find(
+            (message) => message.role === 'tool' && message.tool_call_id === 'call_submit',
+          );
+          const plan = JSON.parse(String(result?.content)) as { plan_id: string };
+          return {
+            expectedRequest: {
+              toolResults: [
+                { toolCallId: 'call_submit', contentIncludes: ['"status":"approved"'] },
+              ],
+            },
+            message: {
+              tool_calls: [
+                {
+                  id: 'call_complete',
+                  name: 'update_plan',
+                  args: {
+                    plan_id: plan.plan_id,
+                    updates: [
+                      { step_id: 'step-1', status: 'completed' },
+                      { step_id: 'step-2', status: 'completed' },
+                    ],
+                    complete_plan: true,
+                  },
+                },
+              ],
+            },
+          };
+        },
+      },
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'call_complete', contentIncludes: ['"plan_completed":true'] },
+          ],
+        },
+        message: { content: 'Lifecycle plan completed.' },
+      },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -188,6 +249,9 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
 
       // Wait for follow-up text
       await waitForText(() => tui.outputSinceLastAction(), 'Draft saved', 15000);
+      await waitForText(() => tui.viewport(), '方案审核', 15_000);
+      tui.write('\r');
+      await waitForText(() => tui.viewport(), 'Lifecycle plan completed.', 15_000);
 
       const output = tui.viewport();
       const clean = stripAnsi(output);

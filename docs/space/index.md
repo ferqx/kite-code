@@ -44,6 +44,7 @@
 | `../active/layer-boundary-enforcement.md` | active | 三层架构分层边界强制：core 禁止导入 app/tui、禁止展示层格式化、中立数据类型规范 | **修改 `src/core/` 任何文件时必读**。新增 core 模块、添加 import、做文本截断/格式化时。 |
 | `../active/plan-mode-implementation.md` | active | Plan Artifact、planning/building、plan_review 与恢复 | 修改 Plan 生命周期、工具、策略或 TUI 审核交互时。 |
 | `../active/plan-artifact-lifecycle.md` | active | Plan Artifact 持久化、提交校验、审核交互与 Runtime 恢复边界 | 修改 `write_plan`、Plan review、Task 生命周期、Runtime Context、TUI/CLI 审核展示或会话恢复时必读。 |
+| `../active/completion-guard.md` | active | CompletionGuard V1、完成前的可审计 blocker 与一次纠正语义 | 修改 Runtime 完成语义、Scheduler、Runner、Plan/Skill 生命周期或相关测试时必读。 |
 | `../active/shell-platform-compatibility.md` | active | Shell 工具 Windows 兼容性、bash 选择策略、WSL 桩排除、vendored MSYS2 DLL 依赖 | 修改 shell.ts/bash-path.ts、调整 bash 选择逻辑、新增/升级 coreutils、排查 Windows shell 异常。 |
 | `../active/session-logging-policy.md` | active | Session logger 的 off/metadata/content 组合、metadata allowlist 与正文禁止边界 | 修改 SessionLogCollector、日志事件映射、日志目录创建或 sessionLoggingPolicyV1 时必读。 |
 | `../active/execution-platform-support.md` | active | 生产执行平台的原生能力探针、技术结论与治理准入矩阵 | 修改 sandbox backend、process-tree/network 边界、TUI/CLI 入口组合或平台发布支持声明时必读。 |
@@ -65,6 +66,7 @@
 | `../active/capability-progressive-disclosure.md` | active | MCP/Skill 大目录按预算披露、metadata 搜索、下一轮有限 binding 与 fail-closed | 修改 capability catalog、模型工具上下文、`capability_search`、MCP binding 或 Skill activation 可见性时必读。 |
 | `../active/release-control.md` | active | Release Profile、canonical artifact/evidence、Gate replay 与 disabled production 边界 | 修改 release manifest/profile、artifact verifier、Gate 或 rollout 时必读。 |
 | `../active/open-source-first-release.md` | active | 单维护者开源首发的 G0/G1、候选包、真实 Provider smoke、能力默认关闭与状态权威 | 修改首发 Gate、候选 workflow、安装器、真实 Provider smoke 或 108 Task 状态时必读。 |
+| `../active/opencode-go-journey-evaluation-policy.md` | active | OpenCode/Go journey 评估的准入、证据和判定边界 | 修改相关 journey 评估、fixture、资格证据或发布结论时必读。 |
 | `../active/agent-task-evaluation.md` | active | Agent task suite、oracle、重复运行、dogfood 与产品验收证据 | 修改 Agent task case、fixture、threshold、human review 或 evaluation adapter 时必读。 |
 | `../active/observability-privacy-operations.md` | active | 无正文 metric、consent、dashboard/SLO、alert、incident 与单维护者运营 | 修改 observability、telemetry status、SLO/alert 或 incident rehearsal 时必读。 |
 | `../active/compaction-release-qualification.md` | active | Compaction 结构/语义/continuation/route qualification 与 no-compaction handoff | 修改 compaction evaluator、route qualification、rollout 或 handoff 时必读。 |

@@ -515,6 +515,8 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
   const mockModel = createMockModel([
     { message: aiMessage({ content: 'Planning conversation completed.' }) },
     { message: aiMessage({ content: 'Second planning conversation completed.' }) },
+    { message: aiMessage({ content: 'Continue planning in the same TUI mode.' }) },
+    { message: aiMessage({ content: 'Planning still needs a submitted plan.' }) },
   ]);
 
   try {
@@ -565,7 +567,14 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
       events.push(event);
     }
 
-    expect(mockModel.callCount.count).toBe(1);
+    expect(mockModel.callCount.count).toBe(2);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'completion.blocked',
+        code: 'planning_empty',
+        correctionAttempt: 1,
+      }),
+    );
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'task.cancelled',
@@ -614,11 +623,11 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     )) {
       secondEvents.push(event);
     }
-    expect(mockModel.callCount.count).toBe(2);
+    expect(mockModel.callCount.count).toBe(4);
     expect(secondEvents).toContainEqual(
       expect.objectContaining({
         type: 'model.responded',
-        text: 'Second planning conversation completed.',
+        text: 'Continue planning in the same TUI mode.',
       }),
     );
   } finally {

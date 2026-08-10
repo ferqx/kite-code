@@ -26,7 +26,7 @@ Synthetic runtime-state message(exactly one)
 
 动态投影必须明确标记为 Runtime 生成，不得伪装成用户原始输入。V2 不再追加独立的 Plan reminder；phase、interaction mode、authorization、真实 sandbox backend、副作用状态和完整 PlanningState 只在一个 runtime block 中出现。投影是给模型的视图，不是状态权威；下一轮始终从 RuntimeState 重建。
 
-`promptContractV2` 默认关闭。开启后，项目 `CLAUDE.md`/`AGENTS.md` 作为带来源标记的早期 synthetic user context 注入，不能提升为 System 权限；其 snapshot revision 与 Prompt 版本共同进入环境 digest。加载预算为单文件 16 KiB、快照 64 KiB 且最多 16,384 tokens，超限文件产生 warning 并整体跳过，不静默截断。Planning 阶段的模型工具面隐藏 edit/write/shell，`task` 只允许 explore/plan，动态 MCP 只披露 effective effects 不超过 read 的能力。Runtime Policy 和 Controller 仍必须独立复核，工具面裁剪不是执行授权。
+`promptContractV2` 默认关闭。开启后，项目 `CLAUDE.md`/`AGENTS.md` 作为带来源标记的早期 synthetic user context 注入，不能提升为 System 权限；其 snapshot revision 与 Prompt 版本共同进入环境 digest。加载预算为单文件 16 KiB、快照 64 KiB 且最多 16,384 tokens，超限文件产生 warning 并整体跳过，不静默截断。Planning 阶段的模型工具面隐藏 edit/write/shell，`task` 只允许 explore/plan，动态 MCP 只披露 effective effects 不超过 read 的能力。Runtime Policy 和 Controller 仍必须独立复核，工具面裁剪不是执行授权。PTY 的 Prompt Contract 场景若在 planning 中声明成功完成，必须经由真实 Runtime context 投影取得保存 Plan 的 identity，再驱动 submit、批准和 `update_plan` 完成 lifecycle；不能以第二个文本 final 绕过 completion guard。
 
 工具协议链必须保留原始 assistant tool call 与对应 tool result 关系。不得为了缓存命中率把工具结果改写为普通用户消息，或将 transient binding/tool schema 固化进长期 transcript。
 

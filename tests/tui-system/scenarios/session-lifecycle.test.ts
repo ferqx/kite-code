@@ -116,12 +116,6 @@ describe('TUI PTY System — Session Lifecycle', () => {
       // The new Runtime starts in building mode and must not inherit the
       // outgoing session's planning-only UI projection.
       expect(screenContains(output, 'Shift+Tab to exit')).toBe(false);
-
-      // Shift+Tab remains functional after the InputLine remount. Keep the
-      // new session in plan mode so the next test covers exiting only after a
-      // complete user/model conversation.
-      tui.write('\x1b[Z');
-      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 5000);
     },
     TIMEOUT,
   );
@@ -165,6 +159,8 @@ describe('TUI PTY System — Session Lifecycle', () => {
   step(
     'Shift+Tab exits plan mode after a completed conversation',
     async () => {
+      tui.write('\x1b[Z');
+      await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 5_000);
       tui.write('\x1b[Z');
       await waitForOutputQuiescence(() => tui.outputSinceLastAction());
       await waitForCondition(

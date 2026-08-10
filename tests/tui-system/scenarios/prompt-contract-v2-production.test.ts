@@ -33,7 +33,83 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
     });
     workspace.env.CI = 'true';
     workspace.env.NODE_ENV = 'production';
-    server.setResponses([{ message: { content: 'Production V2 request completed.' } }]);
+    server.setResponses([
+      {
+        message: {
+          tool_calls: [
+            {
+              id: 'v2-plan-save',
+              name: 'write_plan',
+              args: {
+                action: 'save',
+                title: 'Inspect project rules',
+                body_markdown:
+                  'Inspect the project instructions and validate the planning workflow.',
+                steps: [{ id: 'inspect', title: 'Inspect project instructions' }],
+              },
+            },
+          ],
+        },
+      },
+      {
+        response(request) {
+          const result = request.messages.find(
+            (message) => message.role === 'tool' && message.tool_call_id === 'v2-plan-save',
+          );
+          const plan = JSON.parse(String(result?.content)) as {
+            plan_id: string;
+            version: number;
+            structural_digest: string;
+          };
+          return {
+            expectedRequest: {
+              toolResults: [{ toolCallId: 'v2-plan-save', contentIncludes: ['draft_saved'] }],
+            },
+            message: {
+              tool_calls: [
+                { id: 'v2-plan-submit', name: 'write_plan', args: { action: 'submit', ...plan } },
+              ],
+            },
+          };
+        },
+      },
+      {
+        response(request) {
+          const result = request.messages.find(
+            (message) => message.role === 'tool' && message.tool_call_id === 'v2-plan-submit',
+          );
+          const plan = JSON.parse(String(result?.content)) as { plan_id: string };
+          return {
+            expectedRequest: {
+              toolResults: [
+                { toolCallId: 'v2-plan-submit', contentIncludes: ['"status":"approved"'] },
+              ],
+            },
+            message: {
+              tool_calls: [
+                {
+                  id: 'v2-plan-complete',
+                  name: 'update_plan',
+                  args: {
+                    plan_id: plan.plan_id,
+                    updates: [{ step_id: 'inspect', status: 'completed' }],
+                    complete_plan: true,
+                  },
+                },
+              ],
+            },
+          };
+        },
+      },
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'v2-plan-complete', contentIncludes: ['"plan_completed":true'] },
+          ],
+        },
+        message: { content: 'Production V2 request completed.' },
+      },
+    ]);
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
@@ -49,6 +125,8 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
 
       const userPrompt = 'Inspect the project rules and propose a plan.';
       await submitUserMessage(tui, server, userPrompt, { timeout: 15_000 });
+      await waitForText(() => tui.viewport(), '方案审核', 15_000);
+      tui.write('\r');
       await waitForText(() => tui.viewport(), 'Production V2 request completed.', 15_000);
       expect(screenContains(tui.viewport(), 'Production V2 request completed.')).toBe(true);
 

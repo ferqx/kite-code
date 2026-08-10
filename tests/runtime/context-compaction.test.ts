@@ -102,7 +102,7 @@ function validCheckpoint(
 
 describe('eventized context compaction', () => {
   test('persists a pending request and schedules it after higher-priority work', () => {
-    const state = requestedState();
+    let state = requestedState();
     expect(state.context.pendingCompaction).toMatchObject({
       compactionId: 'compact-1',
       reason: 'auto',
@@ -123,7 +123,18 @@ describe('eventized context compaction', () => {
     state.tools.queue = ['tool'];
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['tool'] });
 
-    state.tools.queue = [];
+    state = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'tool',
+      name: 'read_file',
+      result: {
+        ok: true,
+        command: 'read_file',
+        exitCode: 0,
+        stdout: 'completed',
+        stderr: '',
+      },
+    });
     state.transcript.final = 'done';
     expect(decideNextEffect(state)).toEqual({ type: 'emit_final' });
   });
