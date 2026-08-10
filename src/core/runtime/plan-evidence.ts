@@ -83,6 +83,19 @@ function relevantEffectCalls(state: RuntimeState): ToolCallRecord[] {
   );
 }
 
+function relevantPendingCalls(state: RuntimeState): ToolCallRecord[] {
+  return Object.values(state.tools.calls).filter(
+    (call) =>
+      belongsToActiveTask(state, call) &&
+      [
+        'awaiting_user_input',
+        'awaiting_review',
+        'awaiting_approval',
+        'awaiting_auto_review',
+      ].includes(call.status),
+  );
+}
+
 export function projectPlanCompletionEvidenceV1(
   state: RuntimeState,
   steps: readonly PlanStep[],
@@ -111,13 +124,16 @@ export function projectPlanCompletionEvidenceV1(
     .filter((call) => call.status === 'succeeded' && call.result?.ok === true)
     .map((call) => ({ toolCallId: call.toolCallId, outcome: 'succeeded' as const }))
     .sort((left, right) => left.toolCallId.localeCompare(right.toolCallId));
-  const unresolved = calls
+  const unresolved = Object.values(state.tools.calls)
+    .filter((call) => belongsToActiveTask(state, call))
     .reduce<PlanCompletionEvidenceV1['unresolved']>((entries, call) => {
       if (call.status === 'awaiting_approval') {
         entries.push({ kind: 'approval', referenceId: call.toolCallId });
       }
       if (['failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status)) {
-        entries.push({ kind: 'failure', referenceId: call.toolCallId });
+        if (call.sideEffect === true) {
+          entries.push({ kind: 'failure', referenceId: call.toolCallId });
+        }
       }
       return entries;
     }, [])
@@ -144,6 +160,9 @@ export function planCompletionBlocker(
   state: RuntimeState,
   evidence: PlanCompletionEvidenceV1,
 ): PlanCompletionBlocker | null {
+  if (state.interactions.kind !== 'idle' || relevantPendingCalls(state).length > 0) {
+    return 'plan_unresolved_blocker';
+  }
   const requiredVerificationMissing = Object.values(state.verification.records).some(
     (record) =>
       belongsToActiveTask(state, record) &&

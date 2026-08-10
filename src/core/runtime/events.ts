@@ -807,6 +807,8 @@ export interface ModelRespondedEvent {
   type: 'model.responded';
   messageId: string;
   createdAt?: string;
+  /** Restricted tool disclosure used for this response, when policy narrowed the model surface. */
+  toolSurface?: 'legacy_plan_recovery';
   /** 本次模型调用耗时（ms）——思考+响应生成时长，不含工具执行。
    *  TUI 用它作为 "Thought for Xs" 的计时（对齐 Claude Code：思考指示器
    *  只计模型调用时长）。可选：旧事件日志无此字段，TUI 回退创建→settle 墙钟。

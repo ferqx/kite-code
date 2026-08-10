@@ -68,6 +68,58 @@ async function executeUpdatePlan(
 }
 
 describe('executeRuntimeTools', () => {
+  test('rejects direct tool execution while a legacy V1 plan is executing', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'legacy-plan-direct-tool',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.planning = {
+      kind: 'executing',
+      document: {
+        planId: 'legacy-plan',
+        version: 1,
+        title: 'Legacy Plan',
+        bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+        steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+        structuralDigest: 'legacy-digest',
+        createdAtTurnId: state.turn.turnId,
+        updatedAtTurnId: state.turn.turnId,
+      },
+      executionMode: 'auto',
+      approvedAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.shell = {
+      toolCallId: 'shell',
+      modelMessageId: 'legacy-model',
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'queued',
+      effectClass: 'read_only',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('shell');
+    let dispatched = false;
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['shell'],
+      shellExecutor: async () => {
+        dispatched = true;
+        return { ok: true, command: 'pwd', exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(dispatched).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.rejected',
+        reason: expect.stringContaining('legacy_plan_replan_required'),
+      }),
+    );
+  });
+
   test('reserves and reconciles the actual child tool when a suspended Sub-agent resumes', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-subagent-resume-budget-'));
     try {
@@ -1259,6 +1311,54 @@ describe('executeRuntimeTools', () => {
     );
   });
 
+  test('plan completion rejects a side-effect-free external read awaiting approval', async () => {
+    const state = v2ExecutingPlanState();
+    state.tools.calls['external-read'] = {
+      toolCallId: 'external-read',
+      modelMessageId: 'external-read-model',
+      name: 'read_file',
+      args: { path: '/outside/workspace.txt' },
+      status: 'awaiting_approval',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('external-read');
+    state.interactions = {
+      kind: 'awaiting_tool_approval',
+      interactionId: 'external-read-approval',
+      toolCallId: 'external-read',
+      approval: {} as never,
+    };
+
+    const events = await executeUpdatePlan(state, {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'completed' }],
+      complete_plan: true,
+    });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_unresolved_blocker' }),
+    );
+    expect(events.some((event) => event.type === 'plan.completed')).toBe(false);
+  });
+
+  test('plan completion rejects an all-skipped plan', async () => {
+    const events = await executeUpdatePlan(v2ExecutingPlanState(), {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'skipped', reason_code: 'not_needed' }],
+      complete_plan: true,
+    });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_all_steps_skipped' }),
+    );
+    expect(events.some((event) => event.type === 'plan.completed')).toBe(false);
+  });
+
   test('projects only Runtime receipt and verification metadata into V2 completion evidence', async () => {
     const state = v2ExecutingPlanState();
     state.tools.calls.effect = {
@@ -1383,6 +1483,7 @@ describe('executeRuntimeTools', () => {
       state.planning = {
         kind: 'executing',
         document: {
+          planSchemaVersion: 2,
           planId: 'plan-approved',
           version: 1,
           title: 'Test',
@@ -1391,6 +1492,13 @@ describe('executeRuntimeTools', () => {
           structuralDigest: 'abc',
           createdAtTurnId: state.turn.turnId,
           updatedAtTurnId: state.turn.turnId,
+          completionEvidence: {
+            schemaVersion: 1,
+            verification: [],
+            execution: [],
+            skipped: [],
+            unresolved: [],
+          },
         },
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
@@ -1450,6 +1558,7 @@ describe('executeRuntimeTools', () => {
       state.planning = {
         kind: 'executing',
         document: {
+          planSchemaVersion: 2,
           planId: 'plan-approved',
           version: 1,
           title: 'Test',
@@ -1458,6 +1567,13 @@ describe('executeRuntimeTools', () => {
           structuralDigest: 'abc',
           createdAtTurnId: state.turn.turnId,
           updatedAtTurnId: state.turn.turnId,
+          completionEvidence: {
+            schemaVersion: 1,
+            verification: [],
+            execution: [],
+            skipped: [],
+            unresolved: [],
+          },
         },
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
@@ -1526,6 +1642,7 @@ describe('executeRuntimeTools', () => {
     state.planning = {
       kind: 'executing',
       document: {
+        planSchemaVersion: 2,
         planId: 'plan-approved',
         version: 1,
         title: 'Test',
@@ -1534,6 +1651,13 @@ describe('executeRuntimeTools', () => {
         structuralDigest: 'abc',
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
+        completionEvidence: {
+          schemaVersion: 1,
+          verification: [],
+          execution: [],
+          skipped: [],
+          unresolved: [],
+        },
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
@@ -1885,6 +2009,7 @@ describe('executeRuntimeTools', () => {
     state.planning = {
       kind: 'executing',
       document: {
+        planSchemaVersion: 2,
         planId: 'plan-approved',
         version: 1,
         title: 'Test',
@@ -1893,6 +2018,13 @@ describe('executeRuntimeTools', () => {
         structuralDigest: 'abc',
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
+        completionEvidence: {
+          schemaVersion: 1,
+          verification: [],
+          execution: [],
+          skipped: [],
+          unresolved: [],
+        },
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
@@ -1933,6 +2065,7 @@ describe('executeRuntimeTools', () => {
     state.planning = {
       kind: 'executing',
       document: {
+        planSchemaVersion: 2,
         planId: 'plan-approved',
         version: 1,
         title: 'Test',
@@ -1941,6 +2074,13 @@ describe('executeRuntimeTools', () => {
         structuralDigest: 'abc',
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
+        completionEvidence: {
+          schemaVersion: 1,
+          verification: [],
+          execution: [],
+          skipped: [],
+          unresolved: [],
+        },
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
@@ -1981,6 +2121,7 @@ describe('executeRuntimeTools', () => {
     state.planning = {
       kind: 'executing',
       document: {
+        planSchemaVersion: 2,
         planId: 'plan-auto',
         version: 1,
         title: 'Auto',
@@ -1989,6 +2130,13 @@ describe('executeRuntimeTools', () => {
         structuralDigest: 'abc',
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
+        completionEvidence: {
+          schemaVersion: 1,
+          verification: [],
+          execution: [],
+          skipped: [],
+          unresolved: [],
+        },
       },
       executionMode: 'auto',
       approvedAtTurnId: state.turn.turnId,

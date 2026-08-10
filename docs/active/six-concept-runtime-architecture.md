@@ -65,7 +65,8 @@ src/core/runtime/
 ├── events.ts      已发生的事实
 ├── effects.ts     下一步准备执行的动作
 ├── completion-guard.ts  CompletionGuard V1 的纯 completion decision
-├── scheduler.ts   State → Effect 的确定性决策；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop
+├── plan-continuation.ts  历史 V1 executing 的只读/replan continuation 门禁
+├── scheduler.ts   State → Effect 的确定性决策；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；V1 executing 只放行 read_plan/write_plan V2 replan；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop
 ├── reducer.ts     State × Event → State；approval.rejected 和 tool.rejected 均写入 transcript ToolMessage
 ├── executor.ts    Effect 执行适配
 ├── runner.ts      驱动 Kernel
@@ -74,6 +75,30 @@ src/core/runtime/
 ```
 
 Capability、Skill 和 Verification 不得直接修改 RuntimeState。任何具有恢复价值的变化都必须先形成 Runtime Event，再由 reducer 归纳为当前事实。`user.command_invoked` 是例外：持久化以供审计与 TUI 重放，但 reducer 视为 no-op，不进入模型 transcript 也不改变 RuntimeState。
+
+缺少 `planSchemaVersion=2` 的 executing Plan 只代表可读取/replay 的历史事实，不提供新的执行授权。
+Scheduler 只直接运行读取当前 Plan 或用原 identity 保存 V2 replan 的调用；两者不存在时产生受限
+`call_model(toolSurface=legacy_plan_recovery)`，其 preflight、Provider tools 与 Context Projection 都只包含
+`read_plan`/`write_plan`。Runner 在外部 `prepareEffect` 后再次执行同一门禁；Model Controller 把历史 queued
+和模型伪造调用归约为 rejection，Tool Controller 在 direct-call 边界再次拒绝。该门禁不改变 reducer 对
+既有历史 event tail 的归约，也不打开 `promptContractV2` 默认值。受限 model preflight 请求的 pending
+`compact_context` 是唯一额外允许的内部 admission effect，必须匹配当前 compaction identity，不能携带任务副作用。
+unknown external invocation 与全部 awaiting interaction 是更高优先级 barrier；scheduler 和 runner guard 都必须
+先保持它们的 reconciliation/interrupt effect。受限 response 将 surface 作为 metadata 持久化；无合法 replan 的
+final 或伪造工具按 CompletionGuard V1 进行一次 correction，第二次以 aborted/error 收敛。非白名单 malformed
+Tool Call 先执行 surface rejection，白名单 Plan 工具才保留 invalid-args 分类。
+Runner 以 `lease.effect.toolSurface` 为唯一权威，对 executor 返回、emit 与 `persistEvent(s)` 三条路径的最终
+`model.responded` marker 进行统一绑定；普通 model lease 也不能接受伪造的 recovery marker。白名单工具只有
+成功 `read_plan` 可继续，任何 terminal failure 都消费 correction，`write_plan` 只有产生 V2 draft 才退出门禁。
+canonical legacy subagent recovery 仍是更高优先级 effect，并由 continuation guard 精确放行。
+Runner 在 `prepareEffect` 后基于最新 state 再次取得 Scheduler canonical decision，并按 effect type/identity 比较
+语义等价性；预算预检可为 canonical model call 添加 resource estimate，但不能把任何更高优先级 barrier 换成
+形式合法的 restricted model call 或 Plan tool run。不等价候选统一 fail closed 为 recovery block。
+
+Legacy V1 executing 的旧 queued call 不等待下一次 Provider response 才治理。Scheduler 先按原队列顺序产生
+`run_tools`，Tool Controller 在任何 adapter I/O 前把非 Plan call 终结为稳定 rejection；随后才允许 restricted
+Provider dispatch。因此 Provider failure 不会留下仍 queued 的历史副作用调用，且 unknown invocation barrier
+仍先于该清理链。
 
 模型流增量是另一类明确例外：`model.text_delta`、`model.reasoning_delta`、reasoning 段边界 `model.reasoning_completed` 以及 shell `tool.progress` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store、snapshot 或 session log。Runner 仅在产生这些瞬态事件的 effect lease 仍为 current 时向 App 转发；并发 shell progress 复用同一 tool ownership 判定但不 reduce、不持久化、不推进 revision，pending producer queue 按 call/stream 合并为有界 tail。过期 lease 的晚到事件必须丢弃，started/terminal 等 durable fact 仍作为 ordering barrier。终态 `model.response_received` 与 `tool.finished/failed/cancelled` 才是可持久化、可重放的完整事实。模型服务暂时断开时，Model Controller 在同一 effect 内重试流消费，抑制 text 与 reasoning 已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
 

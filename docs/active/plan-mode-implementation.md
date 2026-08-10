@@ -52,7 +52,11 @@ V2 Plan 的标题与 step title 必须是单行，title 最多 120 字符，正�
 1–12 个且 ID 唯一。首次保存后，后续 save、submit、executing replan 和 `update_plan` 统一校验
 `{ plan_id, version, structural_digest }`；进度更新不能在同一调用重复 step ID，也不能把 completed/skipped
 终态回退为另一状态。V2 review replay 还会把事件内容重新计算的 digest 与已保存 draft identity 比较，
-并始终从该 draft 投影审核内容；事件不能在继承可信 identity/digest 的同时替换 title、正文或 steps。
+并始终从该 draft 投影审核内容与 Artifact 引用；事件不能在继承可信 identity/digest 的同时替换
+title、正文、steps 或已保存的 Artifact。V2 `plan.drafted` replay 不会截断正文/title 或为缺失 ID
+补造合法值；它与 Artifact parser、Plan facade 共用完整 V2 validator，严格检查正文长度、step 数量、
+唯一合法 ID、status、completion evidence、从原始事件正文重算的 digest，以及 Artifact 的
+task/plan/version/digest identity；任一缺失、畸形或不一致都忽略该事件。
 
 `PlanCompletionEvidenceV1` 由 Runtime 从已经归约的事实投影，而不是从模型参数接受：passed/waived
 verification、带成功 Runtime result 的 terminal side-effect tool call、带 reason code 的 skipped step，及
@@ -61,9 +65,36 @@ unresolved failure/approval。`update_plan` 的 schema 严格拒绝模型提供�
 passed/waived、所有 effect 调用都有成功 receipt，且不存在 unresolved blocker。plan progress/completed event
 携带相同 identity 与 metadata-only evidence；reducer 会对事件前 Runtime state 重新投影并精确匹配，拒绝
 终态 step 回退，并在 completed replay 上重新执行相同的 required verification、effect receipt 与 unresolved
-blocker 门禁，且所有 step 均为 completed/skipped 后才写入 PlanDocument。V1 replay 仍可读取并归约历史
-进度/完成事件，但会确定性忽略事件中夹带的 completion evidence。该门禁属于 Plan lifecycle；
-CompletionGuard 本身本次仍保持 V1。
+blocker 门禁；所有 step 必须为 completed/skipped 且至少一个 step 为 completed，才写入 PlanDocument。
+V1 replay 仍可读取并归约历史进度/完成事件，但会确定性忽略事件中夹带的 completion evidence；历史
+`plan.approved` 事件继续 replay，新 `plan_review_decision(approve)` 则引导 revise 并保存 V2 Plan 后再审核。
+恢复到 V1 executing snapshot/event-tail 时，历史 reducer replay 保持不变，但实时 continuation fail closed：
+Scheduler 只直接运行 `read_plan` 与携带原 identity 的 `write_plan` V2 replan/save；没有这类 queued call 时，
+它产生显式 `legacy_plan_recovery` model effect，使普通恢复不会永久 blocked。该 effect 的模型工具面和 token
+preflight 都只包含 `read_plan`/`write_plan`，动态 Runtime block 明确要求 V2 save；历史 queued 或模型伪造的
+Shell/write/MCP/effect 会形成稳定 `legacy_plan_replan_required` rejection。Runner 在 effect preparation 后重复
+检查 surface，Tool Controller 也拒绝绕过调度器的直达调用。若受限 model preflight 已产生 pending context
+compaction，只允许执行 identity 匹配的内部 `compact_context` 后再重试 recovery，不开放任务 effect。该门禁
+必须排在 unknown external invocation 与所有 awaiting interaction barrier 之后。受限模型未产生合法 replan、
+返回错误 final 或伪造非白名单工具时继续复用 CompletionGuard V1 的单次 correction 上限；第二次失败以
+`turn.aborted + run.error` 收敛，绝不产生 `run.completed` 或跑到 effect limit。malformed 非白名单 Tool Call
+优先按 surface policy 写入 `legacy_plan_replan_required` rejection；只有 `read_plan`/`write_plan` 的参数错误
+才分类为 `model_invalid_tool_args`，但该 terminal failure 同样消费 correction。只有成功 `read_plan` 可继续
+受限 recovery；`write_plan` 必须成功产生 V2 draft 才算收敛。Runner 以实际 effect lease 为权威，为 executor
+返回、emit 或 persist 的最终 `model.responded` 统一绑定并校验 surface marker，不能信任 adapter 自行标注。
+若同时存在历史 subagent approval recovery，scheduler 的 canonical `subagent.recovery_unavailable` 仍先闭环，
+runner guard 不得把它改写为 generic recovery block。`prepareEffect` 返回后，Runner 必须从最新 state 重新调用
+Scheduler，并要求 prepared effect 与 canonical effect 语义等价；只带正确 recovery marker 或白名单工具名不够。
+因此 adapter 不能用 recovery call/run_tools 替换 awaiting interaction、unknown invocation、subagent recovery 或
+`completion.blocked` correction。`call_model` 只允许附加预算 estimate，不得改变 canonical surface。
+
+`plan.drafted` 的 `AgentPlan` event transport 在映射为 `PlanDocument` 前严格验证 exact keys：顶层只能是
+`name/description/status/steps`，step 只能是 `id?/step/status/note?`。未知 `command/path/stdout/extra`
+不能被静默 drop 后再通过 V2 validator，而是直接忽略整个 replay event。
+V2 `plan.progress_updated` 与 `plan.completed` 复用同一 transport validator，但要求每个 step 都有合法且唯一
+ID，并与当前 V2 文档的完整 ID、顺序、标题集合精确一致；missing/duplicate/unknown ID、未知 status 或任意
+额外键均 fail closed。映射并合并 status/note 后还必须再次通过完整 `isPlanDocumentV2` schema/digest/artifact
+validator；completion event 的顶层 plan status 必须是 `completed`。
 
 ## 工具与策略
 

@@ -23,6 +23,20 @@ function plan(name = 'Plan', status: AgentPlan['status'] = 'pending'): AgentPlan
   };
 }
 
+function planArtifact(taskId: string, planId: string, version: number, structuralDigest: string) {
+  return {
+    artifactId: `${planId}:v${version}`,
+    taskId,
+    planId,
+    version,
+    fileName: `v${version}.md`,
+    relativePath: `plans/${taskId}/${planId}/v${version}.md`,
+    displayPath: `/plans/${taskId}/${planId}/v${version}.md`,
+    structuralDigest,
+    byteLength: 100,
+  };
+}
+
 function withCall(
   state: ReturnType<typeof createInitialRuntimeState>,
   toolCallId: string,
@@ -244,17 +258,20 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     });
     state = withCall(state, 'plan-call', 'write_plan', {});
     const draft = plan();
+    const structuralHash = computePlanStructuralDigest({
+      title: draft.name,
+      bodyMarkdown: draft.description,
+      steps: [{ id: 'inspect', title: 'Inspect the runtime', status: 'pending' }],
+    });
     state = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'plan-call',
       plan: draft,
       planId: 'plan-1',
       version: 1,
-      structuralHash: computePlanStructuralDigest({
-        title: draft.name,
-        bodyMarkdown: draft.description,
-        steps: [{ id: 'inspect', title: 'Inspect the runtime', status: 'pending' }],
-      }),
+      structuralHash,
+      planSchemaVersion: 2,
+      artifact: planArtifact('task-1', 'plan-1', 1, structuralHash),
     });
     state = reduceRuntimeState(state, {
       type: 'plan.review_requested',
@@ -263,6 +280,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       plan: draft,
       planId: 'plan-1',
       version: 1,
+      structuralDigest: structuralHash,
       planSummary: 'Plan',
     });
     if (state.interactions.kind !== 'awaiting_review') throw new Error('review missing');
@@ -468,17 +486,20 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     });
     state = withCall(state, 'plan-call', 'write_plan', {});
     const draft = plan();
+    const structuralHash = computePlanStructuralDigest({
+      title: draft.name,
+      bodyMarkdown: draft.description,
+      steps: [{ id: 'inspect', title: 'Inspect the runtime', status: 'pending' }],
+    });
     state = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'plan-call',
       plan: draft,
       planId: 'plan-1',
       version: 1,
-      structuralHash: computePlanStructuralDigest({
-        title: draft.name,
-        bodyMarkdown: draft.description,
-        steps: [{ id: 'inspect', title: 'Inspect the runtime', status: 'pending' }],
-      }),
+      structuralHash,
+      planSchemaVersion: 2,
+      artifact: planArtifact('task-1', 'plan-1', 1, structuralHash),
     });
     state = reduceRuntimeState(state, {
       type: 'plan.review_requested',
@@ -486,6 +507,9 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       toolCallId: 'plan-call',
       plan: draft,
       planSummary: 'Plan',
+      planId: 'plan-1',
+      version: 1,
+      structuralDigest: structuralHash,
     });
     if (state.interactions.kind !== 'awaiting_review') throw new Error('review missing');
     const approvalEvents = eventsForRuntimeAction(state, {

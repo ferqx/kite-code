@@ -16,6 +16,8 @@ export type RuntimeEffect =
   /** 调用模型生成响应 / Call the model to generate a response */
   | {
       type: 'call_model';
+      /** Restricted recovery disclosure for a read/replay-only legacy plan. */
+      toolSurface?: 'legacy_plan_recovery';
       /** Exact input and bounded output prepared before budget reservation. */
       resourceEstimate?: {
         inputTokens: number;

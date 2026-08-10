@@ -20,7 +20,7 @@
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
 | [`2026-08-09-agent-core-tool-plan-sandbox-optimization.md`](2026-08-09-agent-core-tool-plan-sandbox-optimization.md) | active | P0 | ADR-0095/0096/0097 已接受 | 延续 ADR-0094 的 V2 默认关闭结论；ADR-0097 已取代 ADR-0070 的未来方向 | CompletionGuard、ToolOutcome/Journey Eval、no-progress guard、typed Git broker、Plan/Subagent 与三平台资格矩阵 |
-| [`2026-08-10-ci-stabilization-and-plan-evidence.md`](2026-08-10-ci-stabilization-and-plan-evidence.md) | draft | P0 | PR #46、`ACORE-PLAN-01` | 主计划的 CI 稳定化与 `ACORE-PLAN-02` 子计划；不授权合并 | Required CI 语义收口、PlanDocument V2、completion evidence、CompletionGuard V2 |
+| [`2026-08-10-ci-stabilization-and-plan-evidence.md`](2026-08-10-ci-stabilization-and-plan-evidence.md) | active | P0 | PR #46、`ACORE-PLAN-01` | `ACORE-CI-01`/`ACORE-PLAN-02` 已完成；`ACORE-PLAN-03` 待实施；不授权合并 | Required CI 语义收口、PlanDocument V2、completion evidence、CompletionGuard V2 |
 | [`2026-08-09-prompt-contract-v2-release-rollout.md`](2026-08-09-prompt-contract-v2-release-rollout.md) | archived | P0 | ADR-0092、默认关闭候选发布、跨平台 CI | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2-release-rollout.md) | 固定十四日门禁由维护者取消；最终候选真实模型 A/B 完成，ADR-0094 决定保持默认关闭 |
 | [`2026-08-08-prompt-contract-v2.md`](2026-08-08-prompt-contract-v2.md) | archived | P0 | ADR-0092、ToolSpec Registry、Context Projection | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2.md) | 四层 Prompt、项目指令、phase 工具面、可信 MCP 描述、59.85% token 降幅与实现阶段真实模型 A/B 已完成；最终迁移结论见 ADR-0094 |
 | [`2026-08-04-tui-overlay-design-system.md`](2026-08-04-tui-overlay-design-system.md) | archived | P1 | 现有 Overlay primitives | [完成记录](../execution/completed/2026-08-05-tui-overlay-design-system.md) | Overlay contract、MCP、通用选择页、交互页与文档回归全部完成 |

@@ -8,6 +8,7 @@ import {
 } from './action-emission';
 import type { RuntimeEvent } from './events';
 import { genInteractionId } from './ids';
+import { isPlanDocumentV2 } from './plan-document';
 import { planCompletionBlocker, projectPlanCompletionEvidenceV1 } from './plan-evidence';
 import {
   computePlanStructuralDigest,
@@ -91,6 +92,7 @@ function publicPlan(document: PlanDocument) {
       step: step.title,
       id: step.id,
       status: step.status,
+      ...(step.note === undefined ? {} : { note: step.note }),
     })),
   };
 }
@@ -204,6 +206,11 @@ export function writePlanAction(
     planning.kind === 'executing'
       ? planning.document
       : undefined;
+  const replanningDocumentIsSavedCanonicalRevision =
+    planning.kind === 'replanning_draft' &&
+    planning.document.version > planning.supersedesPlanVersion &&
+    planning.document.supersedesPlanVersion === planning.supersedesPlanVersion &&
+    planning.document.replanReason === planning.replanReason;
   if (activeDocument && (hasDocument || submitExisting)) {
     const identityError = validatePlanIdentity(command, activeDocument);
     if (identityError) return rejectRuntimeAction(identityError);
@@ -218,8 +225,10 @@ export function writePlanAction(
     hasDocument &&
     (action === 'save' || legacySubmit) &&
     (task == null || !task.sideEffectsStarted);
-  const replanDraftSubmit =
-    planning.kind === 'replanning_draft' && (submitExisting || legacySubmit);
+  const replanDraftAction =
+    planning.kind === 'replanning_draft' &&
+    ((submitExisting && replanningDocumentIsSavedCanonicalRevision) ||
+      (hasDocument && (action === 'save' || legacySubmit)));
   const replan =
     phase === 'building' &&
     planning.kind === 'executing' &&
@@ -227,7 +236,7 @@ export function writePlanAction(
     (action === 'save' || action === 'submit');
   const submitExistingAllowed =
     submitExisting &&
-    (planning.kind === 'planning_draft' || planning.kind === 'replanning_draft') &&
+    (planning.kind === 'planning_draft' || replanningDocumentIsSavedCanonicalRevision) &&
     command.plan_id === planning.document.planId &&
     command.version === planning.document.version &&
     command.structural_digest === planning.document.structuralDigest;
@@ -236,7 +245,7 @@ export function writePlanAction(
     hasDocument &&
     (action === 'save' || legacySubmit) &&
     task?.sideEffectsStarted === true;
-  if (!draftWrite && !replanDraftSubmit && !autoEnter && !replan && !submitExistingAllowed) {
+  if (!draftWrite && !replanDraftAction && !autoEnter && !replan && !submitExistingAllowed) {
     return rejectRuntimeAction(
       submitExisting
         ? 'submit must reference the current saved plan_id, version, and structural_digest.'
@@ -362,7 +371,7 @@ export function writePlanAction(
       status: 'pending' as const,
     })),
     structuralDigest: '',
-    createdAtTurnId: previous?.createdAtTurnId ?? state.turn.turnId,
+    createdAtTurnId: state.turn.turnId,
     updatedAtTurnId: state.turn.turnId,
     completionEvidence: {
       schemaVersion: 1,
@@ -374,12 +383,18 @@ export function writePlanAction(
     ...replanMetadata,
   };
   candidate.structuralDigest = computePlanStructuralDigest(candidate);
+  const currentRevisionIsSavedCanonicalDraft =
+    planning.kind === 'planning_draft' || replanningDocumentIsSavedCanonicalRevision;
   const document =
     previous &&
     previous.planSchemaVersion === 2 &&
-    previous.structuralDigest === candidate.structuralDigest
-      ? { ...candidate, ...previous, updatedAtTurnId: state.turn.turnId }
+    previous.structuralDigest === candidate.structuralDigest &&
+    currentRevisionIsSavedCanonicalDraft
+      ? previous
       : candidate;
+  if (!isPlanDocumentV2(document)) {
+    return rejectRuntimeAction('PlanDocument V2 schema validation failed.');
+  }
   let artifact: PlanArtifactRef;
   try {
     artifact = context.artifacts.write(taskId, document);
@@ -398,7 +413,12 @@ export function writePlanAction(
     structuralHash: document.structuralDigest,
     taskId,
     artifact,
-    ...replanMetadata,
+    ...(document.supersedesPlanVersion == null
+      ? {}
+      : {
+          supersedesPlanVersion: document.supersedesPlanVersion,
+          replanReason: document.replanReason ?? '',
+        }),
   });
   if (legacySubmit) {
     events.push({
@@ -494,6 +514,9 @@ export function updatePlanAction(
     plan.steps.some((step) => step.status === 'pending' || step.status === 'in_progress')
   ) {
     return rejectRuntimeAction('Cannot complete plan while steps are pending or in progress.');
+  }
+  if (command.complete_plan && plan.steps.every((step) => step.status === 'skipped')) {
+    return rejectRuntimeAction('plan_all_steps_skipped');
   }
   const evidence = projectPlanCompletionEvidenceV1(
     context.state,

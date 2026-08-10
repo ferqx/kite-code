@@ -107,10 +107,14 @@ function reviewerProviderDataAdmission(
 export function resolveRuntimeContextProjectionEnvironment(
   dependencies: RuntimeExecutorDependencies,
   state: import('./state').RuntimeState,
+  toolSurface?: 'legacy_plan_recovery',
 ) {
   const flags = getFeatureFlags(dependencies.config);
   const skillCatalog =
-    dependencies.skillOptions && flags.skillWorkflowV1 && flags.skillActivationV2
+    toolSurface !== 'legacy_plan_recovery' &&
+    dependencies.skillOptions &&
+    flags.skillWorkflowV1 &&
+    flags.skillActivationV2
       ? refreshSkillCatalog(dependencies.skillOptions, {
           resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
         })
@@ -127,6 +131,7 @@ export function resolveRuntimeContextProjectionEnvironment(
     subagentEventSink: dependencies.subagentEventSink,
     signal: dependencies.signal,
     sandboxBackend: dependencies.sandboxBackend,
+    toolSurface,
   });
 }
 
@@ -137,7 +142,11 @@ export function prepareRuntimeEffectForBudgetV1(
   dependencies: RuntimeExecutorDependencies,
 ): import('./effects').RuntimeEffect {
   if (effect.type !== 'call_model') return effect;
-  const environment = resolveRuntimeContextProjectionEnvironment(dependencies, state);
+  const environment = resolveRuntimeContextProjectionEnvironment(
+    dependencies,
+    state,
+    effect.toolSurface,
+  );
   const projection = buildContextProjection({
     role: 'agent',
     state,
@@ -147,6 +156,7 @@ export function prepareRuntimeEffectForBudgetV1(
     promptContractVersion: environment.promptContractVersion,
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
+    toolSurface: environment.toolSurface,
   });
   if (getFeatureFlags(dependencies.config).providerDataPolicyV1) {
     const decision = dependencies.providerDataAdmission?.(
@@ -289,13 +299,15 @@ export function createRuntimeEffectExecutor(
         mcpManager: dependencies.mcpManager,
         skills: dependencies.skills,
         skillOptions: dependencies.skillOptions,
-        skillCatalog: currentSkillCatalog(),
+        skillCatalog:
+          effect.toolSurface === 'legacy_plan_recovery' ? undefined : currentSkillCatalog(),
         subagentEventSink,
         signal: dependencies.signal,
         emitRuntimeEvent: emit,
         compactionReporter: dependencies.compactionReporter,
         providerDataAdmission: dependencies.providerDataAdmission,
         resourceAdmission: effect.resourceEstimate,
+        toolSurface: effect.toolSurface,
       });
     }
     if (effect.type === 'run_tools') {

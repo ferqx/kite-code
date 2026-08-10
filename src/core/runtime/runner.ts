@@ -4,6 +4,7 @@ import { decideCompletionV1 } from './completion-guard';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
+import { guardLegacyPlanContinuationEffect } from './plan-continuation';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import {
   planRuntimeBudgetAdmissionV1,
@@ -113,6 +114,26 @@ function mergeToolProgress(
   };
 }
 
+/** The lease, not an executor adapter, owns restricted model-surface metadata. */
+function bindModelResponseToEffect(
+  lease: import('./effects').RuntimeEffectLease,
+  event: RuntimeEvent,
+): RuntimeEvent {
+  if (event.type !== 'model.responded') return event;
+  const expectedSurface = lease.effect.type === 'call_model' ? lease.effect.toolSurface : undefined;
+  if (expectedSurface) return { ...event, toolSurface: expectedSurface };
+  if (!event.toolSurface) return event;
+  const { toolSurface: _unboundSurface, ...unbound } = event;
+  return unbound;
+}
+
+function bindModelResponsesToEffect(
+  lease: import('./effects').RuntimeEffectLease,
+  events: RuntimeEvent[],
+): RuntimeEvent[] {
+  return events.map((event) => bindModelResponseToEffect(lease, event));
+}
+
 /** Execute an effect while forwarding events produced during the effect. */
 async function* executeEffectWithStreaming(
   kernel: AgentKernel,
@@ -138,6 +159,7 @@ async function* executeEffectWithStreaming(
     reject?: (error: unknown) => void,
     mode?: 'late_resource_reconciliation',
   ) => {
+    events = bindModelResponsesToEffect(lease, events);
     const event = events.length === 1 ? events[0] : undefined;
     if (!resolve && !reject && !mode && event?.type === 'tool.progress') {
       const key = toolProgressKey(event);
@@ -183,7 +205,7 @@ async function* executeEffectWithStreaming(
     },
   ).then(
     (events) => {
-      result = events;
+      result = bindModelResponsesToEffect(lease, events);
       settled = true;
       wake?.();
       wake = null;
@@ -417,6 +439,11 @@ export async function* runRuntimeLoop(
       let effect = decideNextEffect(kernel.getState());
       if (prepareEffect) effect = await prepareEffect(effect, kernel.getState());
       const effectState = kernel.getState();
+      effect = guardLegacyPlanContinuationEffect(
+        effectState,
+        effect,
+        decideNextEffect(effectState),
+      );
       const shellGroup =
         effect.type === 'run_tools' ? shellConcurrencyGroup(effect, effectState) : undefined;
       const effectToolCallIds = effect.type === 'run_tools' ? effect.toolCallIds : [];

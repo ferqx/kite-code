@@ -74,9 +74,26 @@ disclosure、approval 与 fork adapter 仍属于 Controller 的跨领域治理�
 
 `read_plan` 已作为 `runtime_action` 接入 Registry：spec 只接受当前 Task 的 active plan identity 与版本，可选 structural digest 必须匹配，并从不可变 Plan Artifact 返回完整文档及可用的 metadata-only completion evidence；controller 不再重复解析或读取 Artifact。
 
-`update_plan` 也已作为 `runtime_action` 接入 Registry：spec 限定 building/executing 的 V2 Plan，精确校验 `plan_id + version + structural_digest` 与稳定 step ID，拒绝重复更新、终态回退、缺 Runtime receipt/required verification 的完成请求，以及 command/path/stdout/evidence self-report；接受后只从 Runtime state 投影 metadata-only evidence，并产生带相同 identity 的 `plan.progress_updated`、可选 `plan.completed` 与模型结果。
+`update_plan` 也已作为 `runtime_action` 接入 Registry：spec 限定 building/executing 的 V2 Plan，精确校验 `plan_id + version + structural_digest` 与稳定 step ID，拒绝重复更新、终态回退、all-skipped completion、缺 Runtime receipt/required verification 的完成请求，以及 command/path/stdout/evidence self-report；接受后只从 Runtime state 投影 metadata-only evidence，并产生带相同 identity 的 `plan.progress_updated`、可选 `plan.completed` 与模型结果。
 
-`write_plan` 已作为 `runtime_action` 接入 Registry：spec 保持 save→submit 两阶段 Artifact 协议、幂等保存、版本冲突、replan 元数据、review interrupt 和同批后续调用取消；首次 save 后的 save/submit/replan 共用严格 identity 校验，新 write 只产生 PlanDocument V2，V1 只读/replay 后必须 replan/save 才能继续。模型表面不再携带 execute，controller 只追加 spec 投影事件，并仅在 save 立即完成时写入 `tool.finished`。
+`write_plan` 已作为 `runtime_action` 接入 Registry：spec 保持 save→submit 两阶段 Artifact 协议、幂等保存、版本冲突、replan 元数据、review interrupt 和同批后续调用取消；首次 save 后的 save/submit/replan 共用严格 identity 校验，新 write 只产生 PlanDocument V2。V1 executing 恢复态只允许 `read_plan` 与 `write_plan` V2 replan/save；无 queued replan 时 Scheduler 使用只披露这两个工具的 `legacy_plan_recovery` model surface，Runner 对 prepare 后 effect 复核，Model/Tool Controller 将历史 queued、模型伪造或直达的 Shell/write/MCP/effect 稳定拒绝为 `legacy_plan_replan_required`。模型表面不再携带 execute，controller 只追加 spec 投影事件，并仅在 save 立即完成时写入 `tool.finished`。
+
+该 recovery surface 不覆盖全局 barrier：unknown external invocation 先进入 reconciliation hard block，全部
+awaiting interaction 先请求或处理对应 action。Provider 把非白名单调用放入 `invalid_tool_calls` 时，surface
+policy 优先于参数解析错误，仍生成 `tool.rejected(legacy_plan_replan_required)`；白名单 Plan 工具的 malformed
+参数才是 `model_invalid_tool_args`。无合法 save 的 final 或伪造调用按 CompletionGuard V1 只允许一次模型纠正，
+第二次终止 turn，不能无限重试。
+白名单调用的 failed/rejected/cancelled/exhausted 也消费该 correction；submit、错误 identity/schema 或 invalid
+arguments 不能借工具名白名单无限循环。只有成功 `read_plan` 可以继续 recovery，成功 `write_plan(save)` 必须
+产生 V2 draft。最终 response 的 surface marker 由 Runner 从 effect lease 绑定，Controller/executor 不是信任根。
+同样，prepare adapter 不是调度信任根：Runner 会从当前 state 重算 canonical effect，并要求 prepared effect 的
+类型与 identity 等价。正确的 recovery surface 或 `read_plan`/`write_plan` 名称不能覆盖 interaction、unknown
+external outcome、subagent recovery 或 completion correction barrier。
+
+恢复出的 V1 executing queue 若含非 `read_plan`/`write_plan` 调用，Scheduler 必须先把该 call 交给 Tool
+Controller 的 legacy governance gate，持久化稳定 `legacy_plan_replan_required` rejection，再发起 Provider
+recovery model 请求。不得等 Provider 成功响应后才补 rejection；即使 Provider dispatch 随后失败，旧 call 也已
+终结且不会在 V2 save 后复活。unknown external invocation 仍是更高优先级 hard barrier。
 
 静态工具的 Schema、契约、副作用分类与执行器收敛到 ToolSpec Registry（`src/core/tools/registry/`）。六个计算原语 `read_file`、`search_content`、`search_files`、`write_file`、`edit_file`、`shell_execute` 已完成切换，迁移 flag 与旧执行器不再保留。一致性不变量由 `tests/tools/tool-registry-conformance.test.ts` 棘轮守护：Policy 分类引用的工具名必须是已知名单；模型 ToolSet 不得携带 `execute`；写工具必须声明 mutation scope。write_file 同批落地 ADR-0042 §2；edit_file 同批落地 ADR-0043 §3 与 ADR-0042 §1。shell_execute 的模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Registry术语（工具注册表）必须向执行器传递 600000ms 默认硬超时，显式正整数可以覆盖；副作用、只读免审和审计 `action.intent` 全部由命令形态派生，审批 payload 不接受模型建议授权或 prefix rule。i10 以 `ls`、`pwd`、`git status`、`git diff --stat`、`rg` 语料守护真实 Approval Policy 的免审命中率。
 

@@ -10,7 +10,7 @@ import {
 import { updateAutoCompactionGuard } from '@/core/model/context-compaction-decision';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
-import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
+import type { AgentPlan, PlanArtifactRef, PlanDocument, PlanStep } from '@/protocol/events';
 import { decideCompletionV1 } from './completion-guard';
 import {
   createContextCorrectnessBlock,
@@ -19,6 +19,12 @@ import {
 } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
+import {
+  agentPlanTransportMatchesDocumentV2,
+  isAgentPlanTransportV2,
+  isPlanDocumentV2,
+  planStepsFromAgentPlanUpdateV2,
+} from './plan-document';
 import { planCompletionBlocker, planCompletionEvidenceMatchesRuntime } from './plan-evidence';
 import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
@@ -409,7 +415,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             }
           : { planId: event.planId ?? doc.planId, version: event.version ?? 1 };
       const document: PlanDocument = trustedV2Document
-        ? { ...trustedV2Document, ...(event.artifact ? { artifact: event.artifact } : {}) }
+        ? trustedV2Document
         : {
             ...doc,
             planId: inherited.planId,
@@ -452,7 +458,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           planSummary: trustedV2Document
             ? `${trustedV2Document.title}\n\n${trustedV2Document.steps.map((step, index) => `${index + 1}. ${step.title}`).join('\n')}`
             : event.planSummary,
-          ...(event.artifact ? { artifact: event.artifact } : {}),
+          ...(document.artifact ? { artifact: document.artifact } : {}),
         },
       };
     }
@@ -1762,6 +1768,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               content: event.text,
               reasoningText: event.reasoningText,
               toolCalls: event.toolCalls ?? [],
+              ...(event.toolSurface ? { toolSurface: event.toolSurface } : {}),
             },
           ],
         },
@@ -1770,7 +1777,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // ── Plan 生命周期补充 / Additional plan lifecycle ──
 
     case 'plan.drafted': {
-      if (event.taskId && state.activeTaskId !== event.taskId) return state;
+      if (event.taskId && state.activeTaskId != null && state.activeTaskId !== event.taskId) {
+        return state;
+      }
       const planning = getActivePlanning(state);
       if (
         planning.kind !== 'planning_empty' &&
@@ -1782,8 +1791,56 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
           ? planning.document
           : undefined;
-      const document = {
-        ...planDocumentFromAgentPlan(event.plan, state.turn.turnId),
+      const reusesCanonicalV2Document =
+        event.planSchemaVersion === 2 &&
+        draftDocument?.planSchemaVersion === 2 &&
+        event.planId === draftDocument.planId &&
+        event.version === draftDocument.version &&
+        event.structuralHash === draftDocument.structuralDigest;
+      if (reusesCanonicalV2Document) {
+        if (
+          !isPlanDocumentV2(draftDocument) ||
+          !agentPlanTransportMatchesDocumentV2(event.plan, draftDocument) ||
+          !samePlanArtifactRef(event.artifact, draftDocument.artifact) ||
+          event.supersedesPlanVersion !== draftDocument.supersedesPlanVersion ||
+          event.replanReason !== draftDocument.replanReason
+        ) {
+          return state;
+        }
+        const nextPlanning =
+          planning.kind === 'replanning_draft'
+            ? { ...planning, document: draftDocument }
+            : { kind: 'planning_draft' as const, document: draftDocument };
+        return setActivePlanning(state, nextPlanning);
+      }
+      if (event.planSchemaVersion === 2) {
+        const matchesNewRevisionScope =
+          planning.kind === 'planning_empty'
+            ? event.version === 1 &&
+              event.supersedesPlanVersion === undefined &&
+              event.replanReason === undefined
+            : planning.kind === 'planning_draft'
+              ? event.planId === planning.document.planId &&
+                event.version === planning.document.version + 1 &&
+                event.supersedesPlanVersion === planning.document.supersedesPlanVersion &&
+                event.replanReason === planning.document.replanReason
+              : planning.document.version >= planning.supersedesPlanVersion &&
+                (planning.document.version === planning.supersedesPlanVersion ||
+                  (planning.document.supersedesPlanVersion === planning.supersedesPlanVersion &&
+                    planning.document.replanReason === planning.replanReason)) &&
+                event.planId === planning.document.planId &&
+                event.version === planning.document.version + 1 &&
+                event.supersedesPlanVersion === planning.supersedesPlanVersion &&
+                event.replanReason === planning.replanReason;
+        if (!matchesNewRevisionScope) return state;
+      }
+      const draftedContent =
+        event.planSchemaVersion === 2
+          ? planDocumentV2ContentFromAgentPlan(event.plan, state.turn.turnId)
+          : planDocumentFromAgentPlan(event.plan, state.turn.turnId);
+      if (!draftedContent) return state;
+      const document: PlanDocument = {
+        ...draftedContent,
         ...(event.planSchemaVersion === 2
           ? {
               planSchemaVersion: 2 as const,
@@ -1816,6 +1873,16 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           : {}),
         ...(event.replanReason ? { replanReason: event.replanReason } : {}),
       };
+      if (event.planSchemaVersion === 2) {
+        const expectedTaskId = event.taskId ?? state.activeTaskId;
+        if (
+          !event.artifact ||
+          !isPlanDocumentV2(document) ||
+          (expectedTaskId != null && event.artifact.taskId !== expectedTaskId)
+        ) {
+          return state;
+        }
+      }
       const nextPlanning =
         planning.kind === 'replanning_draft'
           ? {
@@ -1835,10 +1902,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (currentPlanning.kind === 'executing') {
         const executing = currentPlanning;
         const isV2 = executing.document.planSchemaVersion === 2;
-        const updatedSteps = mergeStepUpdates(
-          executing.document.steps,
-          agentPlanToSteps(event.plan),
-        );
+        const transportSteps = isV2
+          ? planStepsFromAgentPlanUpdateV2(event.plan, executing.document)
+          : agentPlanToSteps(event.plan);
+        if (!transportSteps) return state;
+        const updatedSteps = mergeStepUpdates(executing.document.steps, transportSteps);
         if (
           isV2 &&
           (event.planId !== executing.document.planId ||
@@ -1853,14 +1921,16 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         const replayDocument = isV2
           ? executing.document
           : withoutPlanCompletionEvidence(executing.document);
+        const updatedDocument: PlanDocument = {
+          ...replayDocument,
+          steps: updatedSteps,
+          updatedAtTurnId: state.turn.turnId,
+          ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
+        };
+        if (isV2 && !isPlanDocumentV2(updatedDocument)) return state;
         return setActivePlanning(state, {
           ...executing,
-          document: {
-            ...replayDocument,
-            steps: updatedSteps,
-            updatedAtTurnId: state.turn.turnId,
-            ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
-          },
+          document: updatedDocument,
         });
       }
       return state;
@@ -1872,10 +1942,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const executing = getActivePlanning(state);
       if (executing.kind === 'executing') {
         const isV2 = executing.document.planSchemaVersion === 2;
-        const updatedSteps = mergeStepUpdates(
-          executing.document.steps,
-          agentPlanToSteps(event.plan),
-        );
+        const transportSteps = isV2
+          ? planStepsFromAgentPlanUpdateV2(event.plan, executing.document)
+          : agentPlanToSteps(event.plan);
+        if (!transportSteps || (isV2 && event.plan.status !== 'completed')) return state;
+        const updatedSteps = mergeStepUpdates(executing.document.steps, transportSteps);
         if (
           isV2 &&
           (event.planId !== executing.document.planId ||
@@ -1886,6 +1957,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             updatedSteps.some(
               (step) => step.status === 'pending' || step.status === 'in_progress',
             ) ||
+            updatedSteps.every((step) => step.status === 'skipped') ||
             !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence) ||
             planCompletionBlocker(state, event.completionEvidence) !== null)
         ) {
@@ -1894,13 +1966,15 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         const replayDocument = isV2
           ? executing.document
           : withoutPlanCompletionEvidence(executing.document);
+        const completedDocument: PlanDocument = {
+          ...replayDocument,
+          steps: updatedSteps,
+          ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
+        };
+        if (isV2 && !isPlanDocumentV2(completedDocument)) return state;
         const next = setActivePlanning(state, {
           kind: 'completed',
-          document: {
-            ...replayDocument,
-            steps: updatedSteps,
-            ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
-          },
+          document: completedDocument,
           completedAtTurnId: state.turn.turnId,
         });
         return updateActiveTask(next, (task) => ({ ...task, executionMode: undefined }));
@@ -2028,6 +2102,25 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
   }
 }
 
+function samePlanArtifactRef(
+  left: PlanArtifactRef | undefined,
+  right: PlanArtifactRef | undefined,
+): boolean {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.artifactId === right.artifactId &&
+    left.taskId === right.taskId &&
+    left.planId === right.planId &&
+    left.version === right.version &&
+    left.fileName === right.fileName &&
+    left.relativePath === right.relativePath &&
+    left.displayPath === right.displayPath &&
+    left.structuralDigest === right.structuralDigest &&
+    left.byteLength === right.byteLength
+  );
+}
+
 function updateToolStatus(
   tools: RuntimeState['tools'],
   toolCallId: string,
@@ -2151,6 +2244,36 @@ function planDocumentFromAgentPlan(
     title: plan.name.slice(0, 120),
     bodyMarkdown: plan.description,
     steps: agentPlanToSteps(plan),
+    createdAtTurnId: turnId,
+    updatedAtTurnId: turnId,
+  };
+}
+
+/** Preserve event-authored V2 content exactly so validation cannot hide corruption. */
+function planDocumentV2ContentFromAgentPlan(
+  plan: AgentPlan,
+  turnId: string,
+): Omit<PlanDocument, 'structuralDigest'> | null {
+  if (!isAgentPlanTransportV2(plan)) return null;
+  const steps: PlanStep[] = [];
+  for (const candidate of plan.steps as unknown[]) {
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+      return null;
+    }
+    const step = candidate as Record<string, unknown>;
+    steps.push({
+      id: typeof step.id === 'string' ? step.id : '',
+      title: typeof step.step === 'string' ? step.step : '',
+      status: step.status as PlanStep['status'],
+      ...(Object.hasOwn(step, 'note') ? { note: step.note as PlanStep['note'] } : {}),
+    });
+  }
+  return {
+    planId: crypto.randomUUID(),
+    version: 1,
+    title: plan.name,
+    bodyMarkdown: plan.description,
+    steps,
     createdAtTurnId: turnId,
     updatedAtTurnId: turnId,
   };

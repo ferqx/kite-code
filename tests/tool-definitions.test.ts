@@ -17,6 +17,7 @@ import {
   buildDescription,
   normalizeToolContract,
   TOOL_CONTRACTS,
+  WRITE_PLAN_CONTRACT,
 } from '../src/core/tools/tool-contracts';
 import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/capabilities';
 
@@ -189,6 +190,12 @@ describe('code agent tool definitions', () => {
     expect(tools.update_plan).toBeDefined();
     expect(String(tools.write_plan!.description)).toContain('Save');
     expect(String(tools.update_plan!.description)).toContain('progress');
+  });
+
+  test('write_plan approval contract returns the complete top-level plan identity', () => {
+    expect(WRITE_PLAN_CONTRACT.sections.outputFormat).toContain(
+      'status: "approved", plan_id, version, structural_digest, execution_mode',
+    );
   });
 
   test('write_plan is schema-only and Registry preserves parsed arguments', () => {

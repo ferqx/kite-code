@@ -405,6 +405,8 @@ export type TranscriptMessage =
       content?: string;
       reasoningText?: string;
       toolCalls: Array<{ id: string; name: string; args: unknown }>;
+      /** Durable marker used to bound restricted legacy-plan recovery corrections. */
+      toolSurface?: 'legacy_plan_recovery';
     } & TranscriptMessageMeta)
   | (TranscriptMessageMeta & {
       kind: 'tool';

@@ -296,7 +296,7 @@ export const UPDATE_PLAN_CONTRACT: ToolContract = {
     whenToUse:
       'After plan approval (executing phase), update step execution status. ' +
       'Use this to mark steps as in_progress when you begin work, completed when finished, or skipped when unnecessary. ' +
-      'Set complete_plan: true when all steps are done to mark the entire plan as completed. ' +
+      'Set complete_plan: true when all steps are terminal and at least one step completed; an all-skipped plan cannot complete. ' +
       "Do NOT use update_plan to modify plan structure (steps, title, description) — that is write_plan's job. " +
       'Do NOT call update_plan before plan approval — it will be rejected in planning phase. ' +
       'update_plan is for progress tracking only, not for structural changes.',
@@ -311,6 +311,7 @@ export const UPDATE_PLAN_CONTRACT: ToolContract = {
       'Not using stable step IDs from the original plan document — wrong IDs cause errors. ' +
       'Omitting version or structural_digest, or reusing stale identity — the update is rejected. ' +
       'Supplying command, path, stdout, completion_evidence, or self-reported success — evidence is derived only from Runtime receipts. ' +
+      'Setting complete_plan when every step is skipped — complete at least one plan step or save a revised plan. ' +
       'Calling update_plan with a step_id that does not exist — the call will fail with a mismatch error. ' +
       'Forgetting to set complete_plan when all steps are done — the plan stays in_progress.',
     failureHandling:
@@ -334,8 +335,8 @@ export const WRITE_PLAN_CONTRACT: ToolContract = {
       'Use this in planning phase. While an approved plan is executing, save a revised Artifact and submit it for structural replan review.',
     outputFormat:
       'action="save": { ok: true, status: "draft_saved", task_id, plan_id, version, plan_schema_version: 2, artifact: { artifact_id, path, structural_digest, byte_length }, next_action: "submit" }.\n' +
-      'action="submit" on approval: { ok: true, status: "approved", plan_id, version, execution_mode }.\n' +
-      'action="submit" on revision: { ok: false, status: "revision_requested", feedback, plan_id, version }.\n' +
+      'action="submit" on approval: { ok: true, status: "approved", plan_id, version, structural_digest, execution_mode }.\n' +
+      'action="submit" on revision: { ok: true, status: "revision_requested", feedback, plan_id, version, structural_digest }.\n' +
       '- plan_id: stable identifier across versions\n' +
       '- version: incremented only when save creates a new Artifact\n' +
       '- structural_digest: SHA-256 of plan structure (title, body, step ids+titles)\n' +

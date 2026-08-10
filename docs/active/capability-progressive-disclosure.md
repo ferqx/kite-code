@@ -51,3 +51,10 @@ G3/G4/G5 freshness；unknown/stale/failed 全部 blocked。当前 MCP write 与 
 profile 均为空或 off。
 
 V2 还按 Runtime phase 裁剪披露：Planning 只展示 effective effects 全部为 `none/read` 的动态 MCP；`write`、`destructive` 或 `unknown` 能力即使已经发现和绑定也不进入该轮模型工具面。Building 再按 authorization、execution surface、binding 和 feature flags 计算完整集合。
+
+历史 V1 executing Plan 的恢复使用比 phase 裁剪更窄的 `legacy_plan_recovery` surface：不签发或披露 MCP、
+Skill、tool search、Shell、文件或 `update_plan` 能力，只向 Provider 声明 `read_plan` 与 `write_plan`。模型即使
+伪造未声明 Tool Call，Model Controller 也必须形成成对的 queued/rejected facts，不能让它在 V2 save 后复活。
+即使 Provider 将伪造调用报告为 `invalid_tool_calls`，未声明能力的 surface rejection 也优先于参数解析分类；
+只有已声明的 `read_plan`/`write_plan` 参数错误使用 `model_invalid_tool_args`。该 surface 不能抢占 unknown
+external invocation 或 awaiting interaction，且无合法 V2 save 的响应受 CompletionGuard V1 单次 correction 限制。

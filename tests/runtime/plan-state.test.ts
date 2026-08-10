@@ -385,14 +385,26 @@ describe('PlanningState lifecycle transitions', () => {
     const state = makeState();
     const plan = makePlan('Evidence Plan', ['execute']);
     plan.steps[0]!.id = 'step-1';
+    const structuralHash = computePlanStructuralDigest(makeDigestInput(plan));
     const drafted = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'draft',
       planId: 'plan-evidence',
       version: 1,
       plan,
-      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
+      structuralHash,
       planSchemaVersion: 2,
+      artifact: {
+        artifactId: 'plan-evidence:v1',
+        taskId: 'evidence-task',
+        planId: 'plan-evidence',
+        version: 1,
+        fileName: 'v1.md',
+        relativePath: 'plans/evidence-task/plan-evidence/v1.md',
+        displayPath: '/plans/evidence-task/plan-evidence/v1.md',
+        structuralDigest: structuralHash,
+        byteLength: 100,
+      },
     });
     const reviewed = reduceRuntimeState(drafted, {
       type: 'plan.review_requested',

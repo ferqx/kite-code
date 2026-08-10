@@ -48,6 +48,11 @@ import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure, classifyMcpProviderError } from '@/core/runtime/failures';
 import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { genInteractionId } from '@/core/runtime/ids';
+import {
+  isLegacyPlanContinuationToolAllowed,
+  LEGACY_PLAN_REPLAN_REQUIRED,
+  requiresLegacyPlanReplan,
+} from '@/core/runtime/plan-continuation';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
@@ -626,6 +631,15 @@ export async function executeRuntimeTools(params: {
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+    if (requiresLegacyPlanReplan(params.state) && !isLegacyPlanContinuationToolAllowed(call.name)) {
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: LEGACY_PLAN_REPLAN_REQUIRED,
+        failure: classifyFailure('mandatory_policy_unavailable', LEGACY_PLAN_REPLAN_REQUIRED),
+      });
+      continue;
+    }
     const productionFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
     if (
       productionFlags?.resourceBudgetV1 &&

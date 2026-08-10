@@ -3,7 +3,32 @@
   "description": "A submitted plan is reviewed and becomes the executing lifecycle state.",
   "initialState": { "planning": { "kind": "planning_empty" } },
   "initialEvents": [
-    { "type": "tool.queued", "toolCallId": "call-1", "name": "write_plan", "args": {} }
+    { "type": "tool.queued", "toolCallId": "call-1", "name": "write_plan", "args": {} },
+    {
+      "type": "plan.drafted",
+      "toolCallId": "call-1",
+      "planId": "golden-plan",
+      "version": 1,
+      "planSchemaVersion": 2,
+      "plan": {
+        "name": "Runtime guardrails",
+        "description": "Build the safety layer",
+        "status": "pending",
+        "steps": [{ "id": "add-tests", "step": "Add tests", "status": "pending" }]
+      },
+      "structuralHash": "d2288443e68e0c5e680c5ffb4cdff3762f8180308d5a9e6e13dea86d9de34403",
+      "artifact": {
+        "artifactId": "golden-plan:v1",
+        "taskId": "golden-task",
+        "planId": "golden-plan",
+        "version": 1,
+        "fileName": "v1.md",
+        "relativePath": "plans/golden-task/golden-plan/v1.md",
+        "displayPath": "/plans/golden-task/golden-plan/v1.md",
+        "structuralDigest": "d2288443e68e0c5e680c5ffb4cdff3762f8180308d5a9e6e13dea86d9de34403",
+        "byteLength": 100
+      }
+    }
   ],
   "effects": [
     {
@@ -16,9 +41,23 @@
             "name": "Runtime guardrails",
             "description": "Build the safety layer",
             "status": "pending",
-            "steps": [{ "step": "Add tests", "status": "pending" }]
+            "steps": [{ "id": "add-tests", "step": "Add tests", "status": "pending" }]
           },
-          "planSummary": "Build the safety layer"
+          "planSummary": "Build the safety layer",
+          "planId": "golden-plan",
+          "version": 1,
+          "structuralDigest": "d2288443e68e0c5e680c5ffb4cdff3762f8180308d5a9e6e13dea86d9de34403",
+          "artifact": {
+            "artifactId": "golden-plan:v1",
+            "taskId": "golden-task",
+            "planId": "golden-plan",
+            "version": 1,
+            "fileName": "v1.md",
+            "relativePath": "plans/golden-task/golden-plan/v1.md",
+            "displayPath": "/plans/golden-task/golden-plan/v1.md",
+            "structuralDigest": "d2288443e68e0c5e680c5ffb4cdff3762f8180308d5a9e6e13dea86d9de34403",
+            "byteLength": 100
+          }
         }
       ]
     }

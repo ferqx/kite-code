@@ -58,8 +58,8 @@ PR。PR 只在本总计划全部 Task 与 `ACORE-RC-01` 的最终候选证据收
 
 `ACORE-PLAN-02` 只扩展 Plan 的 canonical schema 与 completion evidence：统一 save/submit/replan 的
 plan ID、revision 与 digest transition，拒绝 stale/重复/冲突/terminal 倒退；写入最小的验证命令与退出状态、变更摘要、
-skipped 理由及未解决 failure/approval。随后新增单调的 CompletionGuard decision version，在 required verification
-或 effect-after-verification 未闭合时拒绝 completion。它不引入 ToolOutcome、retry journal、Git broker 或 subagent
+skipped 理由及未解决 failure/approval。随后由独立 `ACORE-PLAN-03` 新增单调的 CompletionGuard decision version，在 required verification
+或 effect-after-verification 未闭合时拒绝 completion。两者都不引入 ToolOutcome、retry journal、Git broker 或 subagent
 并行；这些仍由后续 Task 独立实施。每个行为先通过可重复的失败测试定义，再以最小实现和 replay/PTY 覆盖验证。
 
 ## Task 执行矩阵
@@ -69,17 +69,18 @@ skipped 理由及未解决 failure/approval。随后新增单调的 CompletionGu
 | `ACORE-DOC-01` | — | 总计划、ADR-0095/0096/0097、三方向 Review 记录 | `bun run check:docs-impact`; `bun run check:docs` | 仅文档；ADR 未接受前不改当前行为 |
 | `ACORE-EVAL-00` | `ACORE-DOC-01` | scripted model + 现有 Runtime 的 full-loop baseline harness | deterministic journeys；privacy assertions | 纯观测，不改变产品恢复行为 |
 | `ACORE-PLAN-01` | `ACORE-EVAL-00`、接受 ADR-0095 | CompletionGuard V1、draft disposition、correction、legacy replay migration | Runtime/replay/property tests；动态 Plan PTY | 仅使用现有 canonical 证据；不得猜 unresolved failure |
-| `ACORE-PLAN-02` | `ACORE-PLAN-01` | Plan schema/evidence、version/digest transition、Guard verification upgrade | schema conformance；stale/conflict/transition tests | 兼容读取旧 artifact；guard decision version 单调增加 |
+| `ACORE-PLAN-02` | `ACORE-PLAN-01` | Plan schema/evidence、version/digest transition、legacy replay-only migration | schema conformance；stale/conflict/transition tests | 兼容读取旧 artifact；新写仅 V2 |
+| `ACORE-PLAN-03` | `ACORE-PLAN-02` | CompletionGuard V2 verification/effect evidence gate | guard/replay/runtime journey tests | 保留 V1 legacy replay；guard decision version 单调增加 |
 | `ACORE-TOOL-01` | `ACORE-EVAL-00`、接受 ADR-0096 | Runtime-owned ToolOutcome/Recovery、单 event shadow 投影 | event/replay matrix；metadata-only tests | 同一 terminal event 双字段对照，逐工具切换 |
 | `ACORE-TOOL-02` | `ACORE-TOOL-01`、`ACORE-PLAN-01` | durable no-progress journal、retry guard、Guard unresolved-failure upgrade | fault/restart/replay journeys；resource budget tests | 成功重复先只观测；decision version 单调增加 |
-| `ACORE-EVAL-01` | `ACORE-PLAN-02`、`ACORE-TOOL-02` | Tool Journey Eval V1 typed-outcome/guard 回归与 first-decision eval 纠名 | deterministic full-loop suite；lineage/timing/privacy | eval 不改变产品行为，可独立回滚 |
+| `ACORE-EVAL-01` | `ACORE-PLAN-03`、`ACORE-TOOL-02` | Tool Journey Eval V1 typed-outcome/guard 回归与 first-decision eval 纠名 | deterministic full-loop suite；lineage/timing/privacy | eval 不改变产品行为，可独立回滚 |
 | `ACORE-CONTRACT-01` | `ACORE-TOOL-01` | 结构化 ToolSpec contract、删除双写 guidance、19/19 覆盖 | legacy/V2 × phase contract tests | 分工具迁移；先观测 unknown fields |
 | `ACORE-GIT-01` | `ACORE-CONTRACT-01`、接受 ADR-0097 | 独立 capability surface、hardened `git_inspect` broker | broker positive/hostile；protected-content tests | broker 先上线，shell 边界暂不切换 |
 | `ACORE-GIT-02` | `ACORE-GIT-01` | 三平台 native deny、调用原子迁移、probe/runtime 同构 | shell negative；TUI routing；evidence identity | 未达 read/write deny 的平台 excluded，不虚报支持 |
 | `ACORE-GIT-03` | `ACORE-GIT-02` | stage/commit typed capability；remote 独立设计或延期记录 | approval、lock、cancel、hostile config tests | mutation 独立开关；不回退到 raw shell |
 | `ACORE-AGENT-01` | `ACORE-PLAN-02`、`ACORE-TOOL-02`、`ACORE-CONTRACT-01` | plan subagent 契约、最多 3 路只读 batch、统一终态/TUI | recovery、parallel、event/result/TUI consistency | code subagent 保持串行；并发受累计预算约束 |
 | `ACORE-EVAL-POLICY-01` | `ACORE-EVAL-01` | 冻结 suite/scorer/report、case floor、样本与统计规则 | policy self-check；manifest immutability | 必须在候选结果前冻结，修改即产生新 revision |
-| `ACORE-RC-01` | `ACORE-PLAN-02`、`ACORE-TOOL-02`、`ACORE-CONTRACT-01`、`ACORE-GIT-03`、`ACORE-AGENT-01`、`ACORE-EVAL-POLICY-01` | OpenCode Go 最终候选完整 Journey A/B 与发布证据 | Required/RC CI；live paired matrix | V2 默认关闭；独立迁移 ADR 决定默认值 |
+| `ACORE-RC-01` | `ACORE-PLAN-03`、`ACORE-TOOL-02`、`ACORE-CONTRACT-01`、`ACORE-GIT-03`、`ACORE-AGENT-01`、`ACORE-EVAL-POLICY-01` | OpenCode Go 最终候选完整 Journey A/B 与发布证据 | Required/RC CI；live paired matrix | V2 默认关闭；独立迁移 ADR 决定默认值 |
 
 ## 当前执行状态
 
@@ -88,6 +89,8 @@ skipped 理由及未解决 failure/approval。随后新增单调的 CompletionGu
 | `ACORE-DOC-01` | completed | ADR-0095/0096/0097 已接受、ADR-0070 历史状态已取代、三方向 Review closure 已记录。 |
 | `ACORE-EVAL-00` | completed | `ACORE-EVAL-00-v1` scripted Runtime Journey 与 metadata-only privacy assertion 已建立。 |
 | `ACORE-PLAN-01` | completed (V1) | CompletionGuard 在 scheduler/runner/reducer 三层阻止虚假完成，一次 correction 后 blocked terminal；后续 evidence/typed failure gate 由 `ACORE-PLAN-02`/`ACORE-TOOL-02` 承接。 |
+| `ACORE-PLAN-02` | completed | PlanDocument V2、strict identity、metadata-only evidence、V1 read/replay-only migration，以及 Artifact/reducer/facade fail-closed 边界已通过整体规格与质量审查。 |
+| `ACORE-PLAN-03` | pending | CompletionGuard V2 verification/effect evidence gate 尚未实施。 |
 | `ACORE-EVAL-POLICY-01` | frozen (r1) | first-decision candidate `300e11a4`、OpenCode Go、十轮 paired sample 和 Go usage privacy boundary 已冻结；完整 Journey candidate 仍待后续 scope 收敛。 |
 
 ## `ACORE-DOC-01`：文档冻结与 Review

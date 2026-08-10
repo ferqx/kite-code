@@ -76,7 +76,9 @@ ToolSpec 的输入 Schema 只描述并校验上述模型形态，不得使用无
 `plan_id + version + structural_digest`。`update_plan` 也要求同一完整 identity，并只接受 step progress、
 note、skipped reason code 与 `complete_plan`；其 strict schema 必须拒绝 command、path、stdout、
 `completion_evidence` 和模型自报 success。完成证据由 Runtime terminal Tool/Verification/Approval 事实
-投影，工具契约只能说明这些 metadata-only 返回/拒绝语义，不能让模型提供证据正文。
+投影，且 all-skipped Plan 不得完成。Approval Tool Result 顶层返回完整
+`plan_id + version + structural_digest` identity；工具契约只能说明这些 metadata-only 返回/拒绝语义，
+不能让模型提供证据正文。
 
 ## 不要做
 

@@ -2,7 +2,7 @@ import { applyApprovalGrant } from '@/core/harness/tool-policy';
 import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
-import { getActiveTask, type RuntimeState, type ToolCallStatus } from './state';
+import { getActivePlanning, getActiveTask, type RuntimeState, type ToolCallStatus } from './state';
 
 const TERMINAL_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
   'succeeded',
@@ -549,6 +549,42 @@ export function eventsForRuntimeAction(
     }
     const { decision } = action;
     if (decision.kind === 'approve') {
+      const planning = getActivePlanning(state);
+      if (planning.kind !== 'awaiting_review') return [];
+      if (planning.document.planSchemaVersion !== 2) {
+        const feedback = 'legacy_plan_replan_required: revise and save a V2 Plan before approval.';
+        return [
+          {
+            type: 'plan.revision_requested',
+            interactionId: action.interactionId,
+            toolCallId: interaction.toolCallId,
+            planId: interaction.planId,
+            version: interaction.version,
+            structuralDigest: interaction.structuralDigest,
+            feedback,
+          },
+          {
+            type: 'tool.finished',
+            toolCallId: interaction.toolCallId,
+            name: 'write_plan',
+            result: {
+              ok: true,
+              command: '',
+              exitCode: 0,
+              stdout: JSON.stringify({
+                ok: true,
+                status: 'revision_requested',
+                plan_id: interaction.planId,
+                version: interaction.version,
+                structural_digest: interaction.structuralDigest,
+                ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
+                feedback,
+              }),
+              stderr: '',
+            },
+          },
+        ];
+      }
       return [
         {
           type: 'plan.approved',
@@ -572,6 +608,7 @@ export function eventsForRuntimeAction(
               status: 'approved',
               plan_id: interaction.planId,
               version: interaction.version,
+              structural_digest: interaction.structuralDigest,
               ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
               execution_mode: decision.nextMode,
             }),
@@ -604,6 +641,7 @@ export function eventsForRuntimeAction(
               status: 'revision_requested',
               plan_id: interaction.planId,
               version: interaction.version,
+              structural_digest: interaction.structuralDigest,
               ...(interaction.artifact ? { artifact: interaction.artifact } : {}),
               feedback: decision.feedback,
             }),
