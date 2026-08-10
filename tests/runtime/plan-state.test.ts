@@ -384,6 +384,7 @@ describe('PlanningState lifecycle transitions', () => {
   test('V2 progress events require matching identity and Runtime-derived evidence', () => {
     const state = makeState();
     const plan = makePlan('Evidence Plan', ['execute']);
+    plan.steps[0]!.id = 'step-1';
     const drafted = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'draft',

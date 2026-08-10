@@ -140,6 +140,102 @@ describe('Plan Artifact persistence and two-phase review', () => {
     ).toBe(false);
   });
 
+  test('rejects structurally invalid step metadata before write or read', () => {
+    const invalid = {
+      ...document(),
+      planId: 'invalid-step-plan',
+      steps: [{ id: null, title: 'Invalid step', status: 'bogus' }],
+      structuralDigest: '',
+    } as unknown as PlanDocument;
+    invalid.structuralDigest = computePlanStructuralDigest(invalid);
+    const store = new PlanArtifactStore();
+
+    expect(() => store.write('task-invalid-step-write', invalid)).toThrow(PlanArtifactError);
+
+    const target = planArtifactPath('task-invalid-step-read', invalid.planId, invalid.version);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(
+      target,
+      `<!-- kite-code-plan ${JSON.stringify({
+        artifactFormatVersion: 1,
+        planSchemaVersion: 2,
+        taskId: 'task-invalid-step-read',
+        planId: invalid.planId,
+        version: invalid.version,
+        title: invalid.title,
+        structuralDigest: invalid.structuralDigest,
+        steps: invalid.steps,
+        createdAtTurnId: invalid.createdAtTurnId,
+        updatedAtTurnId: invalid.updatedAtTurnId,
+        completionEvidence: invalid.completionEvidence,
+      })} -->\n# ${invalid.title}\n\n${invalid.bodyMarkdown}\n`,
+    );
+
+    expect(() =>
+      store.read({
+        artifactId: `${invalid.planId}:v${invalid.version}`,
+        taskId: 'task-invalid-step-read',
+        planId: invalid.planId,
+        version: invalid.version,
+        fileName: `v${invalid.version}.md`,
+        relativePath: '',
+        displayPath: target,
+        structuralDigest: invalid.structuralDigest,
+        byteLength: 0,
+      }),
+    ).toThrow(PlanArtifactError);
+  });
+
+  test('rejects a structural digest that does not match parsed or written content', () => {
+    const inconsistent = {
+      ...document(),
+      planId: 'inconsistent-digest-plan',
+      structuralDigest: '0'.repeat(64),
+    };
+    const store = new PlanArtifactStore();
+
+    expect(() => store.write('task-inconsistent-digest-write', inconsistent)).toThrow(
+      PlanArtifactError,
+    );
+
+    const target = planArtifactPath(
+      'task-inconsistent-digest-read',
+      inconsistent.planId,
+      inconsistent.version,
+    );
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(
+      target,
+      `<!-- kite-code-plan ${JSON.stringify({
+        artifactFormatVersion: 1,
+        planSchemaVersion: 2,
+        taskId: 'task-inconsistent-digest-read',
+        planId: inconsistent.planId,
+        version: inconsistent.version,
+        title: inconsistent.title,
+        structuralDigest: inconsistent.structuralDigest,
+        steps: inconsistent.steps,
+        createdAtTurnId: inconsistent.createdAtTurnId,
+        updatedAtTurnId: inconsistent.updatedAtTurnId,
+        completionEvidence: inconsistent.completionEvidence,
+      })} -->\n# ${inconsistent.title}\n\n${inconsistent.bodyMarkdown}\n`,
+    );
+
+    expect(() =>
+      store.read({
+        artifactId: `${inconsistent.planId}:v${inconsistent.version}`,
+        taskId: 'task-inconsistent-digest-read',
+        planId: inconsistent.planId,
+        version: inconsistent.version,
+        fileName: `v${inconsistent.version}.md`,
+        relativePath: '',
+        displayPath: target,
+        structuralDigest: inconsistent.structuralDigest,
+        byteLength: 0,
+      }),
+    ).toThrow(PlanArtifactError);
+  });
+
   test('reads legacy V1 Artifacts but refuses to write a legacy PlanDocument', () => {
     const store = new PlanArtifactStore();
     const legacy = { ...document() };

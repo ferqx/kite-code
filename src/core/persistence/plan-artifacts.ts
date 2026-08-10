@@ -11,7 +11,7 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { planArtifactPath, planArtifactRoot, userKiteCodeDir } from '@/core/config/paths';
 import { computePlanStructuralDigest } from '@/core/runtime/hashes';
 import { isPlanCompletionEvidenceV1 } from '@/core/runtime/plan-evidence';
-import type { PlanArtifactRef, PlanDocument } from '@/protocol/events';
+import type { PlanArtifactRef, PlanDocument, PlanStep } from '@/protocol/events';
 
 const ARTIFACT_FORMAT_VERSION = 1;
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
@@ -56,32 +56,54 @@ function assertSafeVersion(version: number): void {
   }
 }
 
+function isPlanStep(value: unknown): value is PlanStep {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const step = value as Record<string, unknown>;
+  return (
+    typeof step.id === 'string' &&
+    typeof step.title === 'string' &&
+    (step.status === 'pending' ||
+      step.status === 'in_progress' ||
+      step.status === 'completed' ||
+      step.status === 'skipped') &&
+    (step.note === undefined || typeof step.note === 'string')
+  );
+}
+
 function assertPlanDocumentV2(
   plan: PlanDocument,
   code: 'invalid_reference' | 'artifact_corrupt',
 ): void {
-  const uniqueStepIds = new Set(plan.steps.map((step) => step.id));
+  const validSteps = Array.isArray(plan.steps) && plan.steps.every(isPlanStep);
+  const uniqueStepIds = new Set(validSteps ? plan.steps.map((step) => step.id) : []);
   const valid =
     plan.planSchemaVersion === 2 &&
+    typeof plan.title === 'string' &&
     plan.title === plan.title.trim() &&
     plan.title.length >= 1 &&
     plan.title.length <= 120 &&
     !/[\r\n]/.test(plan.title) &&
+    typeof plan.bodyMarkdown === 'string' &&
     plan.bodyMarkdown === plan.bodyMarkdown.trim() &&
     plan.bodyMarkdown.length >= 20 &&
     plan.bodyMarkdown.length <= 30_000 &&
+    validSteps &&
     plan.steps.length >= 1 &&
     plan.steps.length <= 12 &&
     uniqueStepIds.size === plan.steps.length &&
     plan.steps.every(
       (step) =>
+        typeof step.id === 'string' &&
         SAFE_STEP_ID.test(step.id) &&
+        typeof step.title === 'string' &&
         step.title === step.title.trim() &&
         step.title.length >= 1 &&
         step.title.length <= 160 &&
         !/[\r\n]/.test(step.title),
     ) &&
-    isPlanCompletionEvidenceV1(plan.completionEvidence);
+    isPlanCompletionEvidenceV1(plan.completionEvidence) &&
+    typeof plan.structuralDigest === 'string' &&
+    computePlanStructuralDigest(plan) === plan.structuralDigest;
   if (!valid) {
     throw new PlanArtifactError('PlanDocument V2 schema validation failed.', code);
   }
@@ -174,6 +196,10 @@ function parse(
       'Plan Artifact metadata does not match its reference.',
       'artifact_corrupt',
     );
+  }
+
+  if (!metadata.steps.every(isPlanStep)) {
+    throw new PlanArtifactError('Plan Artifact step metadata is invalid.', 'artifact_corrupt');
   }
 
   if (

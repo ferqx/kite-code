@@ -51,7 +51,8 @@ effects 与结果投影。新写入的 Plan 是 `planSchemaVersion=2`，Artifact
 V2 Plan 的标题与 step title 必须是单行，title 最多 120 字符，正文为 20–30000 字符，step 为
 1–12 个且 ID 唯一。首次保存后，后续 save、submit、executing replan 和 `update_plan` 统一校验
 `{ plan_id, version, structural_digest }`；进度更新不能在同一调用重复 step ID，也不能把 completed/skipped
-终态回退为另一状态。
+终态回退为另一状态。V2 review replay 还会把事件内容重新计算的 digest 与已保存 draft identity 比较，
+并始终从该 draft 投影审核内容；事件不能在继承可信 identity/digest 的同时替换 title、正文或 steps。
 
 `PlanCompletionEvidenceV1` 由 Runtime 从已经归约的事实投影，而不是从模型参数接受：passed/waived
 verification、带成功 Runtime result 的 terminal side-effect tool call、带 reason code 的 skipped step，及
@@ -60,8 +61,9 @@ unresolved failure/approval。`update_plan` 的 schema 严格拒绝模型提供�
 passed/waived、所有 effect 调用都有成功 receipt，且不存在 unresolved blocker。plan progress/completed event
 携带相同 identity 与 metadata-only evidence；reducer 会对事件前 Runtime state 重新投影并精确匹配，拒绝
 终态 step 回退，并在 completed replay 上重新执行相同的 required verification、effect receipt 与 unresolved
-blocker 门禁后才写入 PlanDocument。V1 replay 仍可读取并归约历史进度/完成事件，但会确定性忽略事件中夹带的
-completion evidence。该门禁属于 Plan lifecycle；CompletionGuard 本身本次仍保持 V1。
+blocker 门禁，且所有 step 均为 completed/skipped 后才写入 PlanDocument。V1 replay 仍可读取并归约历史
+进度/完成事件，但会确定性忽略事件中夹带的 completion evidence。该门禁属于 Plan lifecycle；
+CompletionGuard 本身本次仍保持 V1。
 
 ## 工具与策略
 

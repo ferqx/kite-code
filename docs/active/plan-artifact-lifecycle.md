@@ -14,6 +14,8 @@
   `update_plan` 都必须携带并精确匹配 `{ plan_id, version, structural_digest }`；缺失与过期
   identity 分别稳定拒绝为 `plan_identity_required` 和 `plan_identity_mismatch`；
 - 审核事件引用 Artifact，UI/CLI 从 Artifact 读取正文；
+- Artifact write/read 边界会在运行时验证 step ID/title 为字符串、status 属于固定枚举、note 缺失或为
+  字符串，并重新计算 structural digest；不能依赖 TypeScript 静态类型接受未知 JSON；
 - 同一 Task 内版本递增，新顶层目标创建新的 Task 和 Plan ID；
 - 审核取消保留草稿，Artifact 缺失或 digest 不匹配不得提前清除审核 interaction；
 - V2 Artifact metadata 可保存 `PlanCompletionEvidenceV1`，但只允许 verification ID/outcome、

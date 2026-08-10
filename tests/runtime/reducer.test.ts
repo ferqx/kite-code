@@ -398,6 +398,31 @@ describe('reduceRuntimeState — plan lifecycle', () => {
     }
   });
 
+  test('V2 review replay rejects substituted content under the saved identity', () => {
+    const trustedPlan = makePlan('Trusted Plan', ['trusted step']);
+    const document = makeV2PlanDoc(trustedPlan, {
+      planId: 'trusted-plan-id',
+      version: 7,
+    });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: { kind: 'planning_draft', document },
+    };
+    const substitutedPlan = makePlan('Substituted Plan', ['malicious step']);
+    const event: RuntimeEvent = {
+      type: 'plan.review_requested',
+      interactionId: 'substituted-review',
+      toolCallId: 'substituted-review-tool',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan: substitutedPlan,
+      planSummary: 'Substituted content under a trusted identity',
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
   test('plan.review_requested preserves the revision draft version', () => {
     const revPlan = makePlan('Rev Plan', ['a']);
     const state: RuntimeState = {
@@ -2165,6 +2190,33 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     const event: RuntimeEvent = {
       type: 'plan.completed',
       toolCallId: 'complete-without-verification',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan,
+      completionEvidence: document.completionEvidence,
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 completed replay rejects a plan with a pending step', () => {
+    const plan = makePlan('Incomplete Plan', ['completed step', 'pending step']);
+    plan.status = 'completed';
+    plan.steps[0]!.status = 'completed';
+    const document = makeV2PlanDoc(plan, { planId: 'incomplete-plan', version: 2 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'complete-with-pending-step',
       planId: document.planId,
       version: document.version,
       structuralDigest: document.structuralDigest,

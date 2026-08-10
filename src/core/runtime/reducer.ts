@@ -387,6 +387,20 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (event.taskId && state.activeTaskId !== event.taskId) return state;
       const planning = getActivePlanning(state);
       const doc = planDocumentFromAgentPlan(event.plan, state.turn.turnId);
+      const priorDocument =
+        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
+          ? planning.document
+          : undefined;
+      const trustedV2Document = priorDocument?.planSchemaVersion === 2 ? priorDocument : undefined;
+      if (
+        trustedV2Document &&
+        (event.planId !== trustedV2Document.planId ||
+          event.version !== trustedV2Document.version ||
+          event.structuralDigest !== trustedV2Document.structuralDigest ||
+          computePlanStructuralDigest(doc) !== trustedV2Document.structuralDigest)
+      ) {
+        return state;
+      }
       const inherited =
         planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
           ? {
@@ -394,35 +408,30 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               version: event.version ?? planning.document.version,
             }
           : { planId: event.planId ?? doc.planId, version: event.version ?? 1 };
-      const priorDocument =
-        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
-          ? planning.document
-          : undefined;
-      const document: PlanDocument = {
-        ...doc,
-        planId: inherited.planId,
-        version: inherited.version,
-        structuralDigest: event.structuralDigest ?? computePlanStructuralDigest(doc),
-        ...(priorDocument?.planSchemaVersion === 2
-          ? {
-              planSchemaVersion: 2 as const,
-              completionEvidence: priorDocument.completionEvidence,
-            }
-          : {}),
-        ...(event.artifact ? { artifact: event.artifact } : {}),
-        ...(planning.kind === 'replanning_draft' || priorDocument?.supersedesPlanVersion != null
-          ? {
-              supersedesPlanVersion:
-                planning.kind === 'replanning_draft'
-                  ? planning.supersedesPlanVersion
-                  : priorDocument?.supersedesPlanVersion,
-              replanReason:
-                planning.kind === 'replanning_draft'
-                  ? planning.replanReason
-                  : (priorDocument?.replanReason ?? ''),
-            }
-          : {}),
-      };
+      const document: PlanDocument = trustedV2Document
+        ? { ...trustedV2Document, ...(event.artifact ? { artifact: event.artifact } : {}) }
+        : {
+            ...doc,
+            planId: inherited.planId,
+            version: inherited.version,
+            structuralDigest: event.structuralDigest ?? computePlanStructuralDigest(doc),
+            ...(event.artifact ? { artifact: event.artifact } : {}),
+            ...(planning.kind === 'replanning_draft' || priorDocument?.supersedesPlanVersion != null
+              ? {
+                  supersedesPlanVersion:
+                    planning.kind === 'replanning_draft'
+                      ? planning.supersedesPlanVersion
+                      : priorDocument?.supersedesPlanVersion,
+                  replanReason:
+                    planning.kind === 'replanning_draft'
+                      ? planning.replanReason
+                      : (priorDocument?.replanReason ?? ''),
+                }
+              : {}),
+          };
+      const reviewPlan = trustedV2Document
+        ? planDocumentToAgentPlan(trustedV2Document)
+        : event.plan;
       const next = setActivePlanning(state, {
         kind: 'awaiting_review',
         document,
@@ -439,8 +448,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           planId: document.planId,
           version: document.version,
           structuralDigest: document.structuralDigest,
-          plan: event.plan,
-          planSummary: event.planSummary,
+          plan: reviewPlan,
+          planSummary: trustedV2Document
+            ? `${trustedV2Document.title}\n\n${trustedV2Document.steps.map((step, index) => `${index + 1}. ${step.title}`).join('\n')}`
+            : event.planSummary,
           ...(event.artifact ? { artifact: event.artifact } : {}),
         },
       };
@@ -1872,6 +1883,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             event.structuralDigest !== executing.document.structuralDigest ||
             event.completionEvidence === undefined ||
             hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
+            updatedSteps.some(
+              (step) => step.status === 'pending' || step.status === 'in_progress',
+            ) ||
             !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence) ||
             planCompletionBlocker(state, event.completionEvidence) !== null)
         ) {
@@ -2139,6 +2153,20 @@ function planDocumentFromAgentPlan(
     steps: agentPlanToSteps(plan),
     createdAtTurnId: turnId,
     updatedAtTurnId: turnId,
+  };
+}
+
+function planDocumentToAgentPlan(document: PlanDocument): AgentPlan {
+  return {
+    name: document.title,
+    description: document.bodyMarkdown,
+    status: 'pending',
+    steps: document.steps.map((step) => ({
+      id: step.id,
+      step: step.title,
+      status: step.status,
+      ...(step.note === undefined ? {} : { note: step.note }),
+    })),
   };
 }
 
