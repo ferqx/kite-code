@@ -4,17 +4,42 @@ import { WRITE_PLAN_CONTRACT } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
 const documentFields = {
-  title: z.string().trim().min(1).max(200),
-  body_markdown: z.string().trim().min(1).max(30_000),
+  title: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .regex(/^[^\r\n]+$/),
+  body_markdown: z.string().trim().min(20).max(30_000),
   steps: z
     .array(
-      z.object({
-        id: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
-        title: z.string().trim().min(1).max(160),
-      }),
+      z
+        .object({
+          id: z.string().regex(/^[a-z][a-z0-9_-]{0,31}$/),
+          title: z
+            .string()
+            .trim()
+            .min(1)
+            .max(160)
+            .regex(/^[^\r\n]+$/),
+        })
+        .strict(),
     )
     .min(1)
-    .max(12),
+    .max(12)
+    .superRefine((steps, context) => {
+      const ids = new Set<string>();
+      for (const [index, step] of steps.entries()) {
+        if (ids.has(step.id)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [index, 'id'],
+            message: 'Step IDs must be unique',
+          });
+        }
+        ids.add(step.id);
+      }
+    }),
 };
 
 export const writePlanInputSchema = z
@@ -29,6 +54,7 @@ export const writePlanInputSchema = z
     replan_reason: z.string().trim().max(500).optional(),
     action: z.enum(['save', 'submit']).optional(),
   })
+  .strict()
   .superRefine((value, context) => {
     const action = value.action ?? 'save';
     const hasDocument =

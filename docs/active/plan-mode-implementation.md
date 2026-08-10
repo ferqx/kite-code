@@ -16,7 +16,9 @@ ToolSpec Registry 阶段 3 已把 Plan 工具收口到
 `src/core/runtime/plan-facade.ts`。Runtime Action 使用统一发射协议：成功结果携带按提交顺序排列的
 `RuntimeEvent[]`，拒绝结果不得携带领域事件。`read_plan`、`write_plan` 与 `update_plan`
 均只通过该门面读取状态、访问 Artifact 并产生领域事件；各 ToolSpec 只保留 Schema、契约、
-effects 与结果投影。模型 Schema、Artifact 格式、事件 discriminant 与回放形状不变。
+effects 与结果投影。新写入的 Plan 是 `planSchemaVersion=2`，Artifact 容器继续使用独立的
+`artifactFormatVersion=1`；缺少 Plan schema version 的历史事件、snapshot 与 Artifact 仍可读取/replay，
+但不能继续进度更新，必须先以原 identity 创建 V2 replan/save。
 
 ```text
 用户进入 planning
@@ -45,6 +47,19 @@ effects 与结果投影。模型 Schema、Artifact 格式、事件 discriminant 
 5. 恢复和 fork 必须从 Runtime Store/Artifact Store 重建计划事实。
 6. 模型 final 不能越过 Plan lifecycle：`planning_empty`、draft、awaiting review、executing 与 cancelled 都不能产生
    `run.completed`。CompletionGuard V1 的完整规则见 `completion-guard.md`。
+
+V2 Plan 的标题与 step title 必须是单行，title 最多 120 字符，正文为 20–30000 字符，step 为
+1–12 个且 ID 唯一。首次保存后，后续 save、submit、executing replan 和 `update_plan` 统一校验
+`{ plan_id, version, structural_digest }`；进度更新不能在同一调用重复 step ID，也不能把 completed/skipped
+终态回退为另一状态。
+
+`PlanCompletionEvidenceV1` 由 Runtime 从已经归约的事实投影，而不是从模型参数接受：passed/waived
+verification、带成功 Runtime result 的 terminal side-effect tool call、带 reason code 的 skipped step，及
+unresolved failure/approval。`update_plan` 的 schema 严格拒绝模型提供的 command、path、stdout、
+`completion_evidence` 或 success self-report。`complete_plan=true` 还要求所有 required verification 已
+passed/waived、所有 effect 调用都有成功 receipt，且不存在 unresolved blocker。plan progress/completed event
+携带相同 identity 与 metadata-only evidence；reducer 会对事件前 Runtime state 重新投影并精确匹配后才写入
+PlanDocument。该门禁属于 Plan lifecycle；CompletionGuard 本身本次仍保持 V1。
 
 ## 工具与策略
 

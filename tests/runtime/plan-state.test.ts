@@ -380,6 +380,61 @@ describe('PlanningState lifecycle transitions', () => {
     if (s2.planning.kind !== 'planning_draft') throw new Error('expected planning_draft');
     expect(s2.planning.document.version).toBe(correctVersion + 1);
   });
+
+  test('V2 progress events require matching identity and Runtime-derived evidence', () => {
+    const state = makeState();
+    const plan = makePlan('Evidence Plan', ['execute']);
+    const drafted = reduceRuntimeState(state, {
+      type: 'plan.drafted',
+      toolCallId: 'draft',
+      planId: 'plan-evidence',
+      version: 1,
+      plan,
+      structuralHash: computePlanStructuralDigest(makeDigestInput(plan)),
+      planSchemaVersion: 2,
+    });
+    const reviewed = reduceRuntimeState(drafted, {
+      type: 'plan.review_requested',
+      interactionId: 'review-evidence',
+      toolCallId: 'submit-evidence',
+      plan,
+      planSummary: 'Evidence plan',
+      planId: 'plan-evidence',
+      version: 1,
+      structuralDigest:
+        drafted.planning.kind === 'planning_draft'
+          ? drafted.planning.document.structuralDigest
+          : '',
+    });
+    const executing = reduceRuntimeState(reviewed, {
+      type: 'plan.approved',
+      ...reviewIdentity(reviewed),
+      executionMode: 'auto',
+    });
+    if (executing.planning.kind !== 'executing') throw new Error('expected executing plan');
+
+    const forged = reduceRuntimeState(executing, {
+      type: 'plan.progress_updated',
+      toolCallId: 'update',
+      planId: executing.planning.document.planId,
+      version: executing.planning.document.version,
+      structuralDigest: 'stale-digest',
+      plan: {
+        ...plan,
+        status: 'in_progress',
+        steps: [{ ...plan.steps[0]!, status: 'completed' }],
+      },
+      completionEvidence: {
+        schemaVersion: 1,
+        verification: [],
+        execution: [{ toolCallId: 'missing-receipt', outcome: 'succeeded' }],
+        skipped: [],
+        unresolved: [],
+      },
+    });
+
+    expect(forged).toBe(executing);
+  });
 });
 
 // ── plan.approved 设置 mode / mode transitions after plan approval ──

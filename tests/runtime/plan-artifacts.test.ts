@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { planArtifactPath } from '@/core/config/paths';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { PlanArtifactError, PlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import { createAgentKernel } from '@/core/runtime/kernel';
@@ -12,6 +13,7 @@ import {
   RUNTIME_STATE_SCHEMA_VERSION,
 } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { writePlanInputSchema } from '@/core/tools/registry/builtins/write-plan';
 import type { PlanDocument } from '@/protocol/events';
 
 let home: string;
@@ -19,6 +21,7 @@ let previousHome: string | undefined;
 
 function document(version = 1): PlanDocument {
   const plan: PlanDocument = {
+    planSchemaVersion: 2,
     planId: 'plan-artifact-test',
     version,
     title: 'Artifact-backed plan',
@@ -27,10 +30,24 @@ function document(version = 1): PlanDocument {
     structuralDigest: '',
     createdAtTurnId: 'turn-1',
     updatedAtTurnId: 'turn-1',
+    completionEvidence: {
+      schemaVersion: 1,
+      verification: [],
+      execution: [],
+      skipped: [],
+      unresolved: [],
+    },
   };
   plan.structuralDigest = computePlanStructuralDigest(plan);
   return plan;
 }
+
+const validWrite = {
+  action: 'save' as const,
+  title: 'Artifact-backed plan',
+  body_markdown: 'Inspect the Artifact lifecycle and verify every transition.',
+  steps: [{ id: 'inspect', title: 'Inspect the Artifact lifecycle' }],
+};
 
 function withCall(
   state: ReturnType<typeof createInitialRuntimeState>,
@@ -90,6 +107,147 @@ describe('Plan Artifact persistence and two-phase review', () => {
     expect(() => store.write('task-1', changed)).toThrow(PlanArtifactError);
   });
 
+  test('enforces PlanDocument V2 title, body, step, count, and identity schema limits', () => {
+    expect(writePlanInputSchema.safeParse({ ...validWrite, title: 'bad\ntitle' }).success).toBe(
+      false,
+    );
+    expect(
+      writePlanInputSchema.safeParse({ ...validWrite, body_markdown: 'too short' }).success,
+    ).toBe(false);
+    expect(
+      writePlanInputSchema.safeParse({
+        ...validWrite,
+        steps: [{ id: 'inspect', title: 'bad\nstep' }],
+      }).success,
+    ).toBe(false);
+    expect(
+      writePlanInputSchema.safeParse({
+        ...validWrite,
+        steps: [
+          { id: 'same', title: 'First step' },
+          { id: 'same', title: 'Second step' },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(
+      writePlanInputSchema.safeParse({
+        ...validWrite,
+        steps: Array.from({ length: 13 }, (_, index) => ({
+          id: `step-${index}`,
+          title: `Step ${index}`,
+        })),
+      }).success,
+    ).toBe(false);
+  });
+
+  test('reads legacy V1 Artifacts but refuses to write a legacy PlanDocument', () => {
+    const store = new PlanArtifactStore();
+    const legacy = { ...document() };
+    delete (legacy as Partial<PlanDocument>).planSchemaVersion;
+    const target = planArtifactPath('task-legacy-read', legacy.planId, legacy.version);
+    mkdirSync(dirname(target), { recursive: true });
+    writeFileSync(
+      target,
+      `<!-- kite-code-plan ${JSON.stringify({
+        artifactFormatVersion: 1,
+        taskId: 'task-legacy-read',
+        planId: legacy.planId,
+        version: legacy.version,
+        title: legacy.title,
+        structuralDigest: legacy.structuralDigest,
+        steps: legacy.steps,
+        createdAtTurnId: legacy.createdAtTurnId,
+        updatedAtTurnId: legacy.updatedAtTurnId,
+      })} -->\n# ${legacy.title}\n\n${legacy.bodyMarkdown}\n`,
+    );
+    const ref = {
+      artifactId: `${legacy.planId}:v${legacy.version}`,
+      taskId: 'task-legacy-read',
+      planId: legacy.planId,
+      version: legacy.version,
+      fileName: `v${legacy.version}.md`,
+      relativePath: '',
+      displayPath: target,
+      structuralDigest: legacy.structuralDigest,
+      byteLength: 0,
+    };
+
+    expect(store.read(ref).plan.planSchemaVersion).toBeUndefined();
+    expect(() => store.write('task-legacy-write', legacy)).toThrow(PlanArtifactError);
+  });
+
+  test('rejects non-metadata fields in V2 completion evidence', () => {
+    const plan = document();
+    plan.completionEvidence = {
+      schemaVersion: 1,
+      verification: [],
+      execution: [
+        {
+          toolCallId: 'tool-1',
+          outcome: 'succeeded',
+          stdout: 'secret output',
+        } as never,
+      ],
+      skipped: [],
+      unresolved: [],
+    };
+
+    expect(() => new PlanArtifactStore().write('task-private', plan)).toThrow(PlanArtifactError);
+  });
+
+  test('requires a V2 replan/save before continuing a legacy executing plan', async () => {
+    const legacy = { ...document() };
+    delete (legacy as Partial<PlanDocument>).planSchemaVersion;
+    delete (legacy as Partial<PlanDocument>).completionEvidence;
+    const state = createInitialRuntimeState({
+      threadId: 'legacy-plan-continuation',
+      userId: 'user',
+      workspace: home,
+    });
+    state.planning = {
+      kind: 'executing',
+      document: legacy,
+      executionMode: 'auto',
+      approvedAtTurnId: state.turn.turnId,
+    };
+    const updateEvents = await executeRuntimeTools({
+      state: withCall(state, 'legacy-update', 'update_plan', {
+        plan_id: legacy.planId,
+        version: legacy.version,
+        structural_digest: legacy.structuralDigest,
+        updates: [{ step_id: 'inspect', status: 'in_progress' }],
+      }),
+      toolCallIds: ['legacy-update'],
+      planArtifactStore: new PlanArtifactStore(),
+    });
+    expect(updateEvents).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'legacy_plan_replan_required' }),
+    );
+
+    const replanEvents = await executeRuntimeTools({
+      state: withCall(state, 'legacy-replan', 'write_plan', {
+        action: 'save',
+        plan_id: legacy.planId,
+        version: legacy.version,
+        structural_digest: legacy.structuralDigest,
+        title: 'Artifact-backed plan V2',
+        body_markdown: 'Replan the legacy execution into a strictly identified V2 document.',
+        steps: [{ id: 'inspect', title: 'Inspect the V2 Artifact lifecycle' }],
+        replan_reason: 'legacy_schema_upgrade',
+      }),
+      toolCallIds: ['legacy-replan'],
+      planArtifactStore: new PlanArtifactStore(),
+    });
+    expect(replanEvents).toContainEqual(
+      expect.objectContaining({
+        type: 'plan.drafted',
+        planId: legacy.planId,
+        version: legacy.version + 1,
+        planSchemaVersion: 2,
+      }),
+    );
+  });
+
   test('save returns metadata only, then submit reads the saved Artifact without creating v2', async () => {
     const store = new PlanArtifactStore();
     let state = createInitialRuntimeState({
@@ -137,6 +295,36 @@ describe('Plan Artifact persistence and two-phase review', () => {
     });
     expect(saveResult.result.stdout).not.toContain(draft.bodyMarkdown);
     for (const event of saveEvents) state = reduceRuntimeState(state, event);
+
+    const missingIdentity = await executeRuntimeTools({
+      state: withCall(state, 'save-missing-identity', 'write_plan', {
+        action: 'save',
+        title: 'Revised Artifact-backed plan',
+        body_markdown: 'Revise the Artifact lifecycle while keeping its identity strict.',
+        steps: [{ id: 'inspect', title: 'Inspect the revised Artifact lifecycle' }],
+      }),
+      toolCallIds: ['save-missing-identity'],
+      planArtifactStore: store,
+    });
+    expect(missingIdentity).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_identity_required' }),
+    );
+    const staleIdentity = await executeRuntimeTools({
+      state: withCall(state, 'save-stale-identity', 'write_plan', {
+        action: 'save',
+        plan_id: saved.plan_id,
+        version: saved.version,
+        structural_digest: 'stale-digest',
+        title: 'Revised Artifact-backed plan',
+        body_markdown: 'Revise the Artifact lifecycle while keeping its identity strict.',
+        steps: [{ id: 'inspect', title: 'Inspect the revised Artifact lifecycle' }],
+      }),
+      toolCallIds: ['save-stale-identity'],
+      planArtifactStore: store,
+    });
+    expect(staleIdentity).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_identity_mismatch' }),
+    );
 
     const loadedEvents = await executeRuntimeTools({
       state: withCall(state, 'read-1', 'read_plan', {
@@ -197,7 +385,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       state: withCall(state, 'save-a', 'write_plan', {
         action: 'save',
         title: 'Feature A',
-        body_markdown: 'Plan for feature A.',
+        body_markdown: 'Detailed plan for feature A.',
         steps: [{ id: 'a-step', title: 'Implement feature A' }],
       }),
       toolCallIds: ['save-a'],
@@ -214,9 +402,9 @@ describe('Plan Artifact persistence and two-phase review', () => {
     for (const event of firstSaveEvents) state = reduceRuntimeState(state, event);
 
     state = reduceRuntimeState(state, {
-      type: 'run.completed',
+      type: 'task.completed',
+      taskId: firstTaskId,
       turnId: state.turn.turnId,
-      output: 'Feature A complete',
     });
     state = reduceRuntimeState(state, {
       type: 'user.message_appended',
@@ -230,7 +418,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       state: withCall(state, 'save-b', 'write_plan', {
         action: 'save',
         title: 'Feature B',
-        body_markdown: 'Plan for feature B.',
+        body_markdown: 'Detailed plan for feature B.',
         steps: [{ id: 'b-step', title: 'Implement feature B' }],
       }),
       toolCallIds: ['save-b'],
@@ -251,20 +439,23 @@ describe('Plan Artifact persistence and two-phase review', () => {
     expect(second.artifact.relative_path).toContain(`${secondTaskId}/`);
   });
 
-  test('schema v4 snapshots materialize legacy inline plans as Artifacts', () => {
+  test('schema v4 snapshots retain legacy inline plans as read-only V1 state', () => {
     const state = createInitialRuntimeState({
       threadId: 'migration-thread',
       userId: 'user',
       workspace: home,
       phase: 'planning',
     });
+    const legacyDocument = { ...document() };
+    delete (legacyDocument as Partial<PlanDocument>).planSchemaVersion;
+    delete (legacyDocument as Partial<PlanDocument>).completionEvidence;
     const legacyTask = {
       taskId: 'task-legacy',
       userGoal: 'Migrate this plan',
       status: 'active' as const,
       startedAtTurnId: state.turn.turnId,
       sideEffectsStarted: false,
-      planning: { kind: 'planning_draft' as const, document: document() },
+      planning: { kind: 'planning_draft' as const, document: legacyDocument },
       planHistory: [],
     };
     const legacyState = {
@@ -291,8 +482,10 @@ describe('Plan Artifact persistence and two-phase review', () => {
     const migratedPlan = migrated.tasks['task-legacy']?.planning;
     expect(migratedPlan?.kind).toBe('planning_draft');
     if (migratedPlan?.kind === 'planning_draft') {
-      expect(migratedPlan.document.artifact?.version).toBe(1);
-      expect(existsSync(migratedPlan.document.artifact?.displayPath ?? '')).toBe(true);
+      expect(migratedPlan.document.artifact).toBeUndefined();
+      expect(migratedPlan.document.planSchemaVersion).toBeUndefined();
+      expect(migratedPlan.document.completionEvidence).toBeUndefined();
+      expect(migratedPlan.document.bodyMarkdown).toContain('Inspect the Artifact lifecycle');
     }
     kernel.close();
   });

@@ -19,6 +19,7 @@ import {
 } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
+import { planCompletionEvidenceMatchesRuntime } from './plan-evidence';
 import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
   computePlanStructuralDigest,
@@ -402,6 +403,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         planId: inherited.planId,
         version: inherited.version,
         structuralDigest: event.structuralDigest ?? computePlanStructuralDigest(doc),
+        ...(priorDocument?.planSchemaVersion === 2
+          ? {
+              planSchemaVersion: 2 as const,
+              completionEvidence: priorDocument.completionEvidence,
+            }
+          : {}),
         ...(event.artifact ? { artifact: event.artifact } : {}),
         ...(planning.kind === 'replanning_draft' || priorDocument?.supersedesPlanVersion != null
           ? {
@@ -1766,6 +1773,18 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           : undefined;
       const document = {
         ...planDocumentFromAgentPlan(event.plan, state.turn.turnId),
+        ...(event.planSchemaVersion === 2
+          ? {
+              planSchemaVersion: 2 as const,
+              completionEvidence: {
+                schemaVersion: 1 as const,
+                verification: [],
+                execution: [],
+                skipped: [],
+                unresolved: [],
+              },
+            }
+          : {}),
         planId: event.planId,
         version: event.version,
         structuralDigest: event.structuralHash,
@@ -1808,12 +1827,23 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           executing.document.steps,
           agentPlanToSteps(event.plan),
         );
+        if (
+          executing.document.planSchemaVersion === 2 &&
+          (event.planId !== executing.document.planId ||
+            event.version !== executing.document.version ||
+            event.structuralDigest !== executing.document.structuralDigest ||
+            event.completionEvidence === undefined ||
+            !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence))
+        ) {
+          return state;
+        }
         return setActivePlanning(state, {
           ...executing,
           document: {
             ...executing.document,
             steps: updatedSteps,
             updatedAtTurnId: state.turn.turnId,
+            ...(event.completionEvidence ? { completionEvidence: event.completionEvidence } : {}),
           },
         });
       }
@@ -1829,9 +1859,23 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           executing.document.steps,
           agentPlanToSteps(event.plan),
         );
+        if (
+          executing.document.planSchemaVersion === 2 &&
+          (event.planId !== executing.document.planId ||
+            event.version !== executing.document.version ||
+            event.structuralDigest !== executing.document.structuralDigest ||
+            event.completionEvidence === undefined ||
+            !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence))
+        ) {
+          return state;
+        }
         const next = setActivePlanning(state, {
           kind: 'completed',
-          document: { ...executing.document, steps: updatedSteps },
+          document: {
+            ...executing.document,
+            steps: updatedSteps,
+            ...(event.completionEvidence ? { completionEvidence: event.completionEvidence } : {}),
+          },
           completedAtTurnId: state.turn.turnId,
         });
         return updateActiveTask(next, (task) => ({ ...task, executionMode: undefined }));

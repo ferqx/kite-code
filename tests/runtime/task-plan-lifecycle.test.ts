@@ -343,6 +343,9 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
     const submit = await executeRuntimeTools({
       state: withCall(state, 'replan-call', 'write_plan', {
+        plan_id: document.planId,
+        version: document.version,
+        structural_digest: document.structuralDigest,
         title: 'Replanned execution',
         body_markdown: 'A sufficiently detailed structural replan.',
         steps: [{ id: 'inspect', title: 'Inspect the runtime again' }],
@@ -365,6 +368,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: process.cwd() }),
     );
     const document = {
+      planSchemaVersion: 2 as const,
       planId: 'plan-pending',
       version: 1,
       title: 'Pending plan',
@@ -373,6 +377,13 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       structuralDigest: 'digest',
       createdAtTurnId: state.turn.turnId,
       updatedAtTurnId: state.turn.turnId,
+      completionEvidence: {
+        schemaVersion: 1 as const,
+        verification: [],
+        execution: [],
+        skipped: [],
+        unresolved: [],
+      },
     };
     state = {
       ...state,
@@ -397,6 +408,8 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     };
     const args = {
       plan_id: 'plan-pending',
+      version: 1,
+      structural_digest: 'digest',
       updates: [{ step_id: 'inspect', status: 'pending' }],
       complete_plan: true,
     };

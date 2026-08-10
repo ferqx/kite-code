@@ -96,8 +96,19 @@ export interface PlanStep {
   note?: string;
 }
 
+/** Metadata-only Runtime evidence attached to a V2 PlanDocument. */
+export interface PlanCompletionEvidenceV1 {
+  schemaVersion: 1;
+  verification: Array<{ verificationId: string; outcome: 'passed' | 'waived' }>;
+  execution: Array<{ toolCallId: string; outcome: 'succeeded' }>;
+  skipped: Array<{ stepId: string; reasonCode: string }>;
+  unresolved: Array<{ kind: 'failure' | 'approval'; referenceId: string }>;
+}
+
 /** 方案文档 — 用户审核的主内容 / Plan document — primary content for user review */
 export interface PlanDocument {
+  /** Present and fixed for newly written plans; absent legacy documents are read/replay only. */
+  planSchemaVersion?: 2;
   /** 方案唯一标识 / Unique plan identifier */
   planId: string;
   /** 方案版本号，每次结构修改递增 / Version, incremented on each structural change */
@@ -118,6 +129,8 @@ export interface PlanDocument {
   supersedesPlanVersion?: number;
   /** Why the structural replan was requested. */
   replanReason?: string;
+  /** Runtime-derived references only; never accepts model-authored execution content. */
+  completionEvidence?: PlanCompletionEvidenceV1;
   /** Durable user-level Markdown Artifact for this version. */
   artifact?: PlanArtifactRef;
 }

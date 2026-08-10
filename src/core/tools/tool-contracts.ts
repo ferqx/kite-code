@@ -122,7 +122,7 @@ export const READ_PLAN_CONTRACT: ToolContract = {
       'Using a filesystem path instead of plan_id and version. ' +
       'Submitting a plan without using the digest returned by the Artifact.',
     outputFormat:
-      'JSON: ok, task_id, plan_id, version, structural_digest, title, body_markdown, and steps. ' +
+      'JSON: ok, task_id, plan_id, version, plan_schema_version, structural_digest, title, body_markdown, steps, and metadata-only completion_evidence when present. ' +
       'The full body is returned only because the model explicitly requested read_plan.',
     failureHandling:
       'If the Artifact is missing or its digest does not match, do not recreate it from memory; save a new revision only after confirming the current Task and feedback.',
@@ -302,12 +302,15 @@ export const UPDATE_PLAN_CONTRACT: ToolContract = {
       'update_plan is for progress tracking only, not for structural changes.',
     outputFormat:
       'JSON: { ok: true, plan_id, updated_steps, plan_completed }.\n' +
-      '- updates: array of { step_id, status (pending|in_progress|completed|skipped), note? }\n' +
+      '- plan_id, version, structural_digest: exact identity returned by the approved Plan Artifact\n' +
+      '- updates: array of { step_id, status (pending|in_progress|completed|skipped), note?, reason_code? }; skipped requires a bounded reason_code\n' +
       '- complete_plan: optional boolean, set to true when all work is done',
     commonMistakes:
       'Calling update_plan before the plan is approved — rejected in planning phase, wait for approval. ' +
       'Trying to modify step titles or add new steps via update_plan — use write_plan for structural changes instead. ' +
       'Not using stable step IDs from the original plan document — wrong IDs cause errors. ' +
+      'Omitting version or structural_digest, or reusing stale identity — the update is rejected. ' +
+      'Supplying command, path, stdout, completion_evidence, or self-reported success — evidence is derived only from Runtime receipts. ' +
       'Calling update_plan with a step_id that does not exist — the call will fail with a mismatch error. ' +
       'Forgetting to set complete_plan when all steps are done — the plan stays in_progress.',
     failureHandling:
@@ -325,12 +328,12 @@ export const WRITE_PLAN_CONTRACT: ToolContract = {
     whenToUse:
       'Save or submit the current plan Artifact. Use action="save" once the complete draft is ready; this writes an immutable user-level Markdown Artifact and returns only its metadata. ' +
       'Then call action="submit" with plan_id, version, and structural_digest from save; submit reads the Artifact and pauses for user review without creating another version. ' +
-      'A revision creates the next version with save, then submits that version. ' +
+      'A revision creates the next version with save, then submits that version; every save after the first must include the exact current plan_id, version, and structural_digest. ' +
       'After approval, switch to update_plan for step-level progress tracking. ' +
       'save requires a clear title (one line, max 120 chars), detailed body_markdown, and structured steps (1-12 items, each with stable id and one-line title). ' +
       'Use this in planning phase. While an approved plan is executing, save a revised Artifact and submit it for structural replan review.',
     outputFormat:
-      'action="save": { ok: true, status: "draft_saved", task_id, plan_id, version, artifact: { artifact_id, path, structural_digest, byte_length }, next_action: "submit" }.\n' +
+      'action="save": { ok: true, status: "draft_saved", task_id, plan_id, version, plan_schema_version: 2, artifact: { artifact_id, path, structural_digest, byte_length }, next_action: "submit" }.\n' +
       'action="submit" on approval: { ok: true, status: "approved", plan_id, version, execution_mode }.\n' +
       'action="submit" on revision: { ok: false, status: "revision_requested", feedback, plan_id, version }.\n' +
       '- plan_id: stable identifier across versions\n' +
@@ -339,12 +342,14 @@ export const WRITE_PLAN_CONTRACT: ToolContract = {
       '- submit does not return the full plan body and does not increment version',
     commonMistakes:
       'Calling save repeatedly instead of submitting the Artifact returned by the previous save. ' +
+      'Omitting the current identity on a revision or executing replan — all three identity fields are required and stale values fail closed. ' +
       'Using unstable step IDs that change across versions — use stable descriptive IDs like "inspect-runtime". ' +
       'Putting architecture details in step titles instead of body_markdown. ' +
       'Forgetting to pass the exact plan_id, version, and structural_digest returned by save to submit.',
     failureHandling:
       'Rejected after side effects have started unless this is a structural replan submitted for review. ' +
       'Version conflict: if expected_version does not match current version, the call is rejected — re-read current plan state. ' +
+      'Legacy V1: read/replay is supported, but progress updates are rejected until write_plan creates a V2 replan/save. ' +
       'Schema validation: title max 120 chars, body_markdown min 20 chars, steps 1-12 items. ' +
       'Revision feedback: read the feedback, update your plan with action="save" or action="submit".',
   },

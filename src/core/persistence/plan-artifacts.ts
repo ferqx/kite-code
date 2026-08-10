@@ -10,10 +10,12 @@ import {
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { planArtifactPath, planArtifactRoot, userKiteCodeDir } from '@/core/config/paths';
 import { computePlanStructuralDigest } from '@/core/runtime/hashes';
+import { isPlanCompletionEvidenceV1 } from '@/core/runtime/plan-evidence';
 import type { PlanArtifactRef, PlanDocument } from '@/protocol/events';
 
 const ARTIFACT_FORMAT_VERSION = 1;
 const SAFE_SEGMENT = /^[A-Za-z0-9_-]+$/;
+const SAFE_STEP_ID = /^[a-z][a-z0-9_-]{0,31}$/;
 
 export interface PlanArtifactContent {
   taskId: string;
@@ -54,6 +56,37 @@ function assertSafeVersion(version: number): void {
   }
 }
 
+function assertPlanDocumentV2(
+  plan: PlanDocument,
+  code: 'invalid_reference' | 'artifact_corrupt',
+): void {
+  const uniqueStepIds = new Set(plan.steps.map((step) => step.id));
+  const valid =
+    plan.planSchemaVersion === 2 &&
+    plan.title === plan.title.trim() &&
+    plan.title.length >= 1 &&
+    plan.title.length <= 120 &&
+    !/[\r\n]/.test(plan.title) &&
+    plan.bodyMarkdown === plan.bodyMarkdown.trim() &&
+    plan.bodyMarkdown.length >= 20 &&
+    plan.bodyMarkdown.length <= 30_000 &&
+    plan.steps.length >= 1 &&
+    plan.steps.length <= 12 &&
+    uniqueStepIds.size === plan.steps.length &&
+    plan.steps.every(
+      (step) =>
+        SAFE_STEP_ID.test(step.id) &&
+        step.title === step.title.trim() &&
+        step.title.length >= 1 &&
+        step.title.length <= 160 &&
+        !/[\r\n]/.test(step.title),
+    ) &&
+    isPlanCompletionEvidenceV1(plan.completionEvidence);
+  if (!valid) {
+    throw new PlanArtifactError('PlanDocument V2 schema validation failed.', code);
+  }
+}
+
 function artifactId(planId: string, version: number): string {
   return `${planId}:v${version}`;
 }
@@ -77,6 +110,7 @@ function assertInsideRoot(target: string): void {
 function serialize(plan: PlanDocument, taskId: string): string {
   const metadata = {
     artifactFormatVersion: ARTIFACT_FORMAT_VERSION,
+    planSchemaVersion: plan.planSchemaVersion,
     taskId,
     planId: plan.planId,
     version: plan.version,
@@ -85,6 +119,7 @@ function serialize(plan: PlanDocument, taskId: string): string {
     steps: plan.steps,
     createdAtTurnId: plan.createdAtTurnId,
     updatedAtTurnId: plan.updatedAtTurnId,
+    completionEvidence: plan.completionEvidence,
     ...(plan.supersedesPlanVersion == null
       ? {}
       : { supersedesPlanVersion: plan.supersedesPlanVersion }),
@@ -105,6 +140,7 @@ function parse(
 
   let metadata: {
     artifactFormatVersion?: number;
+    planSchemaVersion?: number;
     taskId?: string;
     planId?: string;
     version?: number;
@@ -115,6 +151,7 @@ function parse(
     updatedAtTurnId?: string;
     supersedesPlanVersion?: number;
     replanReason?: string;
+    completionEvidence?: unknown;
   };
   try {
     metadata = JSON.parse(match[1]!) as typeof metadata;
@@ -139,8 +176,16 @@ function parse(
     );
   }
 
+  if (
+    (metadata.planSchemaVersion !== undefined && metadata.planSchemaVersion !== 2) ||
+    (metadata.planSchemaVersion === undefined && metadata.completionEvidence !== undefined)
+  ) {
+    throw new PlanArtifactError('Plan Artifact plan schema is invalid.', 'artifact_corrupt');
+  }
+
   const body = markdown.replace(/^<!-- kite-code-plan .+ -->\n# .*\n\n?/, '').trim();
   const plan: PlanDocument = {
+    ...(metadata.planSchemaVersion === 2 ? { planSchemaVersion: 2 as const } : {}),
     planId: metadata.planId,
     version: metadata.version,
     title: metadata.title,
@@ -149,11 +194,15 @@ function parse(
     structuralDigest: metadata.structuralDigest,
     createdAtTurnId: metadata.createdAtTurnId,
     updatedAtTurnId: metadata.updatedAtTurnId,
+    ...(metadata.completionEvidence === undefined
+      ? {}
+      : { completionEvidence: metadata.completionEvidence as PlanDocument['completionEvidence'] }),
     ...(metadata.supersedesPlanVersion == null
       ? {}
       : { supersedesPlanVersion: metadata.supersedesPlanVersion }),
     ...(metadata.replanReason == null ? {} : { replanReason: metadata.replanReason }),
   };
+  if (plan.planSchemaVersion === 2) assertPlanDocumentV2(plan, 'artifact_corrupt');
   if (computePlanStructuralDigest(plan) !== plan.structuralDigest) {
     throw new PlanArtifactError(
       'Plan Artifact content does not match its structural digest.',
@@ -187,6 +236,7 @@ export class PlanArtifactStore {
     assertSafeSegment(taskId, 'taskId');
     assertSafeSegment(plan.planId, 'planId');
     assertSafeVersion(plan.version);
+    assertPlanDocumentV2(plan, 'invalid_reference');
     assertInsideRoot(planArtifactPath(taskId, plan.planId, plan.version));
 
     const target = planArtifactPath(taskId, plan.planId, plan.version);
@@ -200,6 +250,12 @@ export class PlanArtifactStore {
         planId: plan.planId,
         version: plan.version,
       });
+      if (existingPlan.planSchemaVersion !== 2) {
+        throw new PlanArtifactError(
+          `Plan Artifact ${plan.planId}:v${plan.version} is legacy and read-only.`,
+          'artifact_conflict',
+        );
+      }
       if (existingPlan.structuralDigest !== plan.structuralDigest) {
         throw new PlanArtifactError(
           `Plan Artifact ${plan.planId}:v${plan.version} already exists with a different digest.`,

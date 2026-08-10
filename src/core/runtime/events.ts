@@ -928,6 +928,8 @@ export interface PlanDraftedEvent {
   planId: string;
   /** Version number as of this write_plan call / 本次 write_plan 调用后的版本号 */
   version: number;
+  /** New writes emit V2; absent is retained for legacy event replay. */
+  planSchemaVersion?: 2;
   supersedesPlanVersion?: number;
   replanReason?: string;
   artifact?: PlanArtifactRef;
@@ -938,6 +940,10 @@ export interface PlanProgressUpdatedEvent {
   type: 'plan.progress_updated';
   toolCallId: string;
   plan: AgentPlan;
+  planId?: string;
+  version?: number;
+  structuralDigest?: string;
+  completionEvidence?: import('@/protocol/events').PlanCompletionEvidenceV1;
 }
 
 /** Plan 执行完成 / Plan execution completed */
@@ -945,6 +951,10 @@ export interface PlanCompletedEvent {
   type: 'plan.completed';
   toolCallId: string;
   plan: AgentPlan;
+  planId?: string;
+  version?: number;
+  structuralDigest?: string;
+  completionEvidence?: import('@/protocol/events').PlanCompletionEvidenceV1;
 }
 
 // ── Approval 补充事件 / Additional approval events ──
