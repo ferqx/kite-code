@@ -261,6 +261,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     必须经过同一 `expectedRequest`、continuation、error、SSE 与 teardown contract 路径。
     Plan lifecycle scenario 必须从真实 `draft_saved` Tool result 读取 identity，随后覆盖 submit、真实审核批准、
     `update_plan(complete_plan=true)` 与 terminal `run.completed`；不得用虚构第二个 final 填充 CompletionGuard correction。
+    与这些场景相邻的测试说明和断言必须使用当前 save → submit → review 生命周期，不能保留要求
+    `exit_plan_mode` 或声称运行时 Plan identity 不可获得的旧描述。
 22. Scenario teardown 必须使用 `cleanupTuiSystemFixtures()`，先等待所有 TUI 自有进程组退出，再停止
     mock/本地服务，最后清理 workspace；任一阶段失败都不能跳过后续资源，最终以 `AggregateError`
     报告。scenario contract 禁止直接调用 server `stop()` 或 workspace `cleanup()`。

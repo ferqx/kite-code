@@ -1,9 +1,8 @@
 /**
  * PTY System Test — Plan Draft (write_plan) Rendering
  *
- * Verifies that when the agent calls write_plan in planning phase,
- * the TUI renders a tool_card with the plan content and does NOT trigger
- * a plan_review interrupt (that's exit_plan_mode's job in v2).
+ * Verifies that a planning write_plan call renders a tool card and completes
+ * the request-aware save → submit → review → approved-plan lifecycle.
  *
  * The full write_plan → review → approve → complete flow is exercised below.
  * The request-aware mock resolver binds submit to the real draft_saved

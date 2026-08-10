@@ -461,7 +461,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
   }
 });
 
-test('Runtime Kernel rejects a write tool before a plan is approved', async () => {
+test('Runtime Kernel bounds a rejected planning write after one correction', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([
@@ -474,10 +474,11 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
       }),
     },
     { message: aiMessage({ content: 'Wrote the note.' }) },
+    { message: aiMessage({ content: 'The note still cannot be completed from planning mode.' }) },
   ]);
 
   try {
-    const events: RuntimeEvent['type'][] = [];
+    const events: RuntimeEvent[] = [];
     for await (const event of runRuntimeAgent(
       {
         task: 'Write note.txt',
@@ -498,11 +499,13 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
       },
       { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
     )) {
-      events.push(event.type);
+      events.push(event);
     }
 
-    expect(events).toContain('tool.rejected');
+    expect(mockModel.callCount.count).toBe(3);
+    expect(events.map((event) => event.type)).toContain('tool.rejected');
     expect(existsSync(join(workspace, 'note.txt'))).toBe(false);
+    assertCompletionGuardErrorTerminal(events, 'planning_empty');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
@@ -671,6 +674,39 @@ function assertCompletionGuardCorrectionTerminal(events: RuntimeEvent[]): void {
   expect(terminalBlock).toBeGreaterThan(secondRequest);
   expect(aborted).toBeGreaterThan(terminalBlock);
   expect(error).toBeGreaterThan(aborted);
+}
+
+function assertCompletionGuardErrorTerminal(
+  events: RuntimeEvent[],
+  code: 'planning_empty' | 'plan_draft_pending',
+): void {
+  const blocked = events.filter(
+    (event): event is Extract<RuntimeEvent, { type: 'completion.blocked' }> =>
+      event.type === 'completion.blocked',
+  );
+  expect(blocked.map((event) => [event.code, event.correctionAttempt])).toEqual([
+    [code, 1],
+    [code, 2],
+  ]);
+  const correctionRequest = events.findIndex(
+    (event, index) => index > events.indexOf(blocked[0]!) && event.type === 'model.requested',
+  );
+  const terminalBlock = events.indexOf(blocked[1]!);
+  const aborted = events.findIndex(
+    (event, index) => index > terminalBlock && event.type === 'turn.aborted',
+  );
+  const error = events.findIndex((event, index) => index > aborted && event.type === 'run.error');
+  expect(correctionRequest).toBeGreaterThan(events.indexOf(blocked[0]!));
+  expect(terminalBlock).toBeGreaterThan(correctionRequest);
+  expect(aborted).toBeGreaterThan(terminalBlock);
+  expect(error).toBeGreaterThan(aborted);
+  expect(events[error]).toMatchObject({
+    type: 'run.error',
+    message: expect.stringContaining(`Completion blocked by ${code};`),
+  });
+  expect(events[error]).not.toMatchObject({
+    message: expect.stringContaining('tool-pair validation failed'),
+  });
 }
 
 test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', async () => {
@@ -843,7 +879,7 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
   }
 });
 
-test('Runtime Kernel executes write_plan in planning phase', async () => {
+test('Runtime Kernel bounds a draft-only plan after one correction', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const previousKiteCodeHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = workspace;
@@ -865,6 +901,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
       }),
     },
     { message: aiMessage({ content: 'Plan draft saved.' }) },
+    { message: aiMessage({ content: 'The plan still awaits review before it can complete.' }) },
   ]);
   try {
     const events: RuntimeEvent[] = [];
@@ -896,7 +933,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
     ))
       events.push(event);
 
-    // write_plan should succeed and produce plan.drafted
+    // The initial write_plan call succeeds and produces the draft lifecycle fact.
     const eventTypes = events.map((event) => event.type);
     if (!eventTypes.includes('plan.drafted')) {
       throw new Error(
@@ -906,18 +943,14 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
       );
     }
     expect(eventTypes).toContain('plan.drafted');
-    // No review requested (write_plan does not trigger interrupt)
-    expect(eventTypes).not.toContain('plan.review_requested');
+    expect(mockModel.callCount.count).toBe(3);
+    assertCompletionGuardErrorTerminal(events, 'plan_draft_pending');
   } finally {
     if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousKiteCodeHome;
     rmSync(workspace, { recursive: true, force: true });
   }
 });
-
-// Note: full exit_plan_mode → approve → execute flow is tested at unit level
-// (plan-state.test.ts, plan-actions.test.ts) because the dynamic planId/digest
-// generated by write_plan cannot be predicted by mock models in integration tests.
 
 test('Runtime Kernel restores a persisted snapshot when reopening the same thread', () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));

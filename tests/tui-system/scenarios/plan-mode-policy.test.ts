@@ -2,10 +2,11 @@
  * PTY System Test — Plan Mode policy boundary
  *
  * Covers the full TUI → session runtime → core runner → tool policy chain for
- * Shift+Tab followed by a plain prompt. The mock model deliberately attempts a
+ * a planning-mode plain prompt. The mock model deliberately attempts a
  * write_file call. In real Plan Mode, the TUI must pass initialPhase=planning
  * to core so the write is rejected before any approval or filesystem mutation
- * can happen. After the conversation settles, Shift+Tab must still exit.
+ * can happen. The scenario then completes the real Plan lifecycle and verifies
+ * that the TUI returns to building mode.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
