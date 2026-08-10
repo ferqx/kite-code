@@ -47,6 +47,21 @@
 Git broker 可先在不向模型暴露的 shadow profile 中验证；正式切换时，tool disclosure、dispatch 与 shell native deny 必须由
 同一 feature revision 原子生效。安全回滚态允许某项操作稳定 unsupported，但不允许重新给予整个 shell `.git` 原生访问。
 
+## 当前执行约束：CI 稳定化与 Plan Evidence tranche
+
+2026-08-10 的执行顺序固定如下：先完成 `ACORE-CI-01`，再执行 `ACORE-PLAN-02`；二者完成并不授权合并当前
+PR。PR 只在本总计划全部 Task 与 `ACORE-RC-01` 的最终候选证据收敛、Required CI 全绿且完成 review 后才可合并。
+
+`ACORE-CI-01` 是当前 PR 的前置稳定化 Gate：对 `unit`、`runtime-e2e`、`runtime-fault-soak` 与各 shard 的
+`tui-system` 失败逐项复现、读取完整日志、追溯到引入提交或既有环境差异，并以最小回归测试和修复收口。不得把失败
+标为 baseline、跳过测试或通过降低断言使 CI 变绿；无法在本地复现时必须保留 CI 证据并以同一环境重新运行。
+
+`ACORE-PLAN-02` 只扩展 Plan 的 canonical schema 与 completion evidence：统一 save/submit/replan 的
+plan ID、revision 与 digest transition，拒绝 stale/重复/冲突/terminal 倒退；写入最小的验证命令与退出状态、变更摘要、
+skipped 理由及未解决 failure/approval。随后新增单调的 CompletionGuard decision version，在 required verification
+或 effect-after-verification 未闭合时拒绝 completion。它不引入 ToolOutcome、retry journal、Git broker 或 subagent
+并行；这些仍由后续 Task 独立实施。每个行为先通过可重复的失败测试定义，再以最小实现和 replay/PTY 覆盖验证。
+
 ## Task 执行矩阵
 
 | Task | dependsOn | 文件/产出 | 定向验证 | 迁移与回滚 |
