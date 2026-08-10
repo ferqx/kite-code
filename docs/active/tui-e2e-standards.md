@@ -250,6 +250,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     canned 文案。文件、导出、持久化等副作用还必须以磁盘或 Store observer 验证真实状态，模型文字
     和 Tool result 二者都不能单独替代副作用证据。嵌套
     Subagent 请求可以合法穿插，但不能清除父调用的未闭合状态。
+    当后续 tool call 必须使用前一 Tool result 中运行时生成的标识时，当前 queue slot 可以使用
+    test-only `response(request)` resolver 从已记录的 Mock request 生成该 slot 的 response；resolver
+    不能读取 queue cursor、未消费 response、Runtime state 或网络。它仍严格消耗一个 slot，且返回值
+    必须经过同一 `expectedRequest`、continuation、error、SSE 与 teardown contract 路径。
 22. Scenario teardown 必须使用 `cleanupTuiSystemFixtures()`，先等待所有 TUI 自有进程组退出，再停止
     mock/本地服务，最后清理 workspace；任一阶段失败都不能跳过后续资源，最终以 `AggregateError`
     报告。scenario contract 禁止直接调用 server `stop()` 或 workspace `cleanup()`。
