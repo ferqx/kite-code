@@ -8,6 +8,7 @@ import {
   observePersistedCommandSession,
   observePersistedSessionIds,
   observePersistedSessionSummaries,
+  observePersistedTurnEvents,
   type TestWorkspace,
 } from './test-workspace';
 
@@ -27,6 +28,9 @@ describe('TUI persisted Runtime observers', () => {
       status: 'not_created',
     });
     expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
+      status: 'not_created',
+    });
+    expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
       status: 'not_created',
     });
   });
@@ -55,6 +59,9 @@ describe('TUI persisted Runtime observers', () => {
     expect(observePersistedCommandSession(workspace, '/compact marker')).toMatchObject({
       status: 'initializing',
     });
+    expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
+      status: 'initializing',
+    });
   });
 
   test('fails fast when the Runtime database is corrupt', () => {
@@ -81,6 +88,29 @@ describe('TUI persisted Runtime observers', () => {
         commandId: 'command-a',
         command: '/compact marker',
       },
+      {
+        type: 'user.message_appended',
+        messageId: 'message-a',
+        content: 'turn marker',
+      },
+      { type: 'turn.started', turnId: 'turn-a' },
+      {
+        type: 'completion.blocked',
+        turnId: 'turn-a',
+        guardVersion: 'completion_guard_v1',
+        code: 'plan_draft_pending',
+        nextAction: 'submit_plan',
+        planning: 'planning_draft',
+        correctionAttempt: 1,
+      },
+      { type: 'model.requested', requestId: 'correction-request-a' },
+      {
+        type: 'run.completed',
+        turnId: 'turn-a',
+        output: 'completed',
+        completionGuardVersion: 'completion_guard_v1',
+      },
+      { type: 'turn.completed', turnId: 'turn-a' },
     ]);
     store.setSessionName('thread-a', 'Command session');
     store.close();
@@ -107,6 +137,25 @@ describe('TUI persisted Runtime observers', () => {
       expect(observePersistedCommandSession(workspace, '/compact other')).toMatchObject({
         status: 'ready',
         value: undefined,
+      });
+      expect(observePersistedTurnEvents(workspace, 'turn marker')).toMatchObject({
+        status: 'ready',
+        value: {
+          threadId: 'thread-a',
+          turnId: 'turn-a',
+          events: [
+            { type: 'turn.started', turnId: 'turn-a' },
+            {
+              type: 'completion.blocked',
+              turnId: 'turn-a',
+              code: 'plan_draft_pending',
+              correctionAttempt: 1,
+            },
+            { type: 'model.requested', requestId: 'correction-request-a' },
+            { type: 'run.completed', turnId: 'turn-a' },
+            { type: 'turn.completed', turnId: 'turn-a' },
+          ],
+        },
       });
     } finally {
       writer.run('ROLLBACK');

@@ -17,6 +17,31 @@ import { createTestWorkspace } from '../harness/test-workspace';
 const TIMEOUT = 30_000;
 const PROJECT_MARKER = 'V2 production PTY project instruction marker.';
 
+function parseDraftSavedPlan(content: unknown): {
+  plan_id: string;
+  version: number;
+  structural_digest: string;
+} {
+  const value: unknown = JSON.parse(String(content));
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('plan_id' in value) ||
+    typeof value.plan_id !== 'string' ||
+    !('version' in value) ||
+    typeof value.version !== 'number' ||
+    !('structural_digest' in value) ||
+    typeof value.structural_digest !== 'string'
+  ) {
+    throw new Error('write_plan draft_saved result did not contain a valid plan identity');
+  }
+  return {
+    plan_id: value.plan_id,
+    version: value.version,
+    structural_digest: value.structural_digest,
+  };
+}
+
 describe('TUI PTY System — production Prompt Contract V2', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
@@ -56,18 +81,18 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
           const result = request.messages.find(
             (message) => message.role === 'tool' && message.tool_call_id === 'v2-plan-save',
           );
-          const plan = JSON.parse(String(result?.content)) as {
-            plan_id: string;
-            version: number;
-            structural_digest: string;
-          };
+          const { plan_id, version, structural_digest } = parseDraftSavedPlan(result?.content);
           return {
             expectedRequest: {
               toolResults: [{ toolCallId: 'v2-plan-save', contentIncludes: ['draft_saved'] }],
             },
             message: {
               tool_calls: [
-                { id: 'v2-plan-submit', name: 'write_plan', args: { action: 'submit', ...plan } },
+                {
+                  id: 'v2-plan-submit',
+                  name: 'write_plan',
+                  args: { action: 'submit', plan_id, version, structural_digest },
+                },
               ],
             },
           };

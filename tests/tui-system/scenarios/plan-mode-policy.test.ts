@@ -233,22 +233,47 @@ function planSubmitResponse(saveCallId: string, submitCallId: string) {
       const result = request.messages.find(
         (message) => message.role === 'tool' && message.tool_call_id === saveCallId,
       );
-      const plan = JSON.parse(String(result?.content)) as {
-        plan_id: string;
-        version: number;
-        structural_digest: string;
-      };
+      const { plan_id, version, structural_digest } = parseDraftSavedPlan(result?.content);
       return {
         expectedRequest: {
           toolResults: [{ toolCallId: saveCallId, contentIncludes: ['draft_saved'] }],
         },
         message: {
           tool_calls: [
-            { id: submitCallId, name: 'write_plan', args: { action: 'submit', ...plan } },
+            {
+              id: submitCallId,
+              name: 'write_plan',
+              args: { action: 'submit', plan_id, version, structural_digest },
+            },
           ],
         },
       };
     },
+  };
+}
+
+function parseDraftSavedPlan(content: unknown): {
+  plan_id: string;
+  version: number;
+  structural_digest: string;
+} {
+  const value: unknown = JSON.parse(String(content));
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('plan_id' in value) ||
+    typeof value.plan_id !== 'string' ||
+    !('version' in value) ||
+    typeof value.version !== 'number' ||
+    !('structural_digest' in value) ||
+    typeof value.structural_digest !== 'string'
+  ) {
+    throw new Error('write_plan draft_saved result did not contain a valid plan identity');
+  }
+  return {
+    plan_id: value.plan_id,
+    version: value.version,
+    structural_digest: value.structural_digest,
   };
 }
 
