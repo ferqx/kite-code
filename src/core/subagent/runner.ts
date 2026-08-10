@@ -27,6 +27,7 @@ import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
 import { classifyFailure, failureKindForToolParseFailure } from '@/core/runtime/failures';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
+import { toolExecutionModelContentV1 } from '@/core/runtime/tool-model-content';
 import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
 import {
   admitRecoveryAttemptV1,
@@ -296,7 +297,7 @@ export async function resumeSubAgent(
     role: normalizeRoleConfig(input.role),
     projectInstructions: continuation.projectInstructions ?? input.projectInstructions,
   };
-  const toolOutput = JSON.stringify(toolResult.result);
+  const toolOutput = toolExecutionModelContentV1(toolResult.result);
   const actualOk = toolResult.result.ok !== false;
   normalizedInput.eventSink({
     type: 'tool_result',
@@ -385,6 +386,8 @@ export async function resumeSubAgent(
           externalEffects: toolResult.result.status === 'rejected' ? 'none' : 'unknown',
           approvalDenied: toolResult.result.status === 'rejected',
         },
+        toolAdvice: toolResult.result.classifierAdviceV1,
+        classifierDiagnostic: toolResult.result.classifierDiagnostic,
       });
   const resumedRecovery = actualOk
     ? recordToolOwnedProgressV1(priorRecovery, {
@@ -1004,6 +1007,7 @@ async function runSubAgentLoop(
         let toolOutput: string;
         let ok = true;
         let totalLines: number | undefined;
+        let executionResult: ToolExecutionResult | undefined;
         let toolReservation:
           | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
           | undefined;
@@ -1063,6 +1067,7 @@ async function runSubAgentLoop(
                 }
               : undefined,
           });
+          executionResult = result;
           if (toolReservation) {
             await input.descendantResourceAdmission!.reconcileTool({
               reservationId: toolReservation.reservationId,
@@ -1156,7 +1161,7 @@ async function runSubAgentLoop(
               toolRecovery,
             };
           }
-          toolOutput = JSON.stringify(result);
+          toolOutput = toolExecutionModelContentV1(result);
           ok = result.ok !== false;
           if (typeof result.totalLines === 'number') totalLines = result.totalLines;
         } catch (e) {
@@ -1205,6 +1210,8 @@ async function runSubAgentLoop(
               replaySafety: preDispatchFailure ? 'pre_dispatch' : readOnly ? 'safe_read' : 'none',
             },
             ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
+            toolAdvice: executionResult?.classifierAdviceV1,
+            classifierDiagnostic: executionResult?.classifierDiagnostic,
           });
           toolRecovery = recordRecoveryFailureV1(toolRecovery, {
             toolCallId: tc.id ?? `subagent-${toolCallCount}`,

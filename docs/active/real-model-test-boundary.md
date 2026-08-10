@@ -1,12 +1,12 @@
 # 当前规则：真实模型测试边界
 
 状态：active
-最后更新：2026-08-09
-最后验证：2026-08-09
+最后更新：2026-08-11
+最后验证：2026-08-11
 
 读取时机：新增真实网络/模型测试、修改测试发现规则、package scripts 或声明 provider 端到端验证结果时。
 
-验证：`bun test tests/test-discovery.test.ts tests/evals/live-provider-smoke.test.ts`、`bun run typecheck`。
+验证：`bun test tests/test-discovery.test.ts tests/evals/live-provider-smoke.test.ts tests/evals/first-decision-eval.test.ts tests/evals/prompt-contract-ab.test.ts tests/evals/tool-journey-v1.test.ts`、`bun run typecheck`。
 
 相关：ADR-0068、ADR-0069、ADR-0093、`model-provider-boundary.md`、`open-source-first-release.md`。
 
@@ -14,9 +14,13 @@
 
 仓库注册了显式 opt-in 的 `test:model:live` package script，用于真实 Provider 的 context compaction direct/incremental summary 验证。默认 `bun run test` 通过 `scripts/run-default-tests.ts` 只运行确定性的本地/mock 测试：主 suite 使用 `--max-concurrency=1 --only-failures` 限制 Bun 共享进程中的测试和输出资源竞争；Windows 因真实 ACL、进程身份和平台探测存在固定启动成本，默认 test process 使用 30 秒单用例上限，其他平台保留 Bun 的 5 秒默认值。该 suite 包含快速 `tests/tui-system/harness/` 单元测试，但排除真实 PTY `scenarios/`、TUI/native sandbox smoke 与 spike；`tests/shell-exec.test.ts` 在默认门禁显式关闭 native sandbox，只验证统一 executor 的 Shell/进程树语义。Seatbelt/bubblewrap 正向执行由 `test:sandbox:smoke:native` 与 platform capability workflow 单独运行。每个 test process 都获得独立临时 `HOME`/`KITE_CODE_HOME`（Windows 同步 `USERPROFILE`），不得读取或修改开发机真实 Kite 配置、Plan 或 Session Log。会临时修改进程级 cwd 或 `KITE_CODE_HOME` 的少量路径测试还会逐文件启动独立 Bun 进程，避免进程级状态互相污染。不得改用 Bun per-file isolate；当前 Ink/Yoga ESM 在该模式下不能稳定初始化。`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。未实际执行 live runner 时，文档、PR 或完成记录不得表述为真实 provider 已验证。
 
-Prompt Contract V2 另注册 `test:prompt:live`。`scripts/evals/prompt-contract-ab.ts` 以十个类别在同一 resolved Provider/model/temperature/fixture/初始状态和 1024 output-token 上限下比较 legacy/V2，默认每用例十次；报告显式携带该上限。该预算为 reasoning 模型保留生成自包含工具参数的空间，不是迁移接受阈值。V3 runner 固定使用经过严格 route 校验的 OpenCode Go `deepseek-v4-flash`，按用例和轮次交替 `AB/BA` 首发顺序，避免把 Provider 时段或负载漂移固定归因给一条路径。每个 arm 必须分别证明 expected/started/succeeded model attempt、实际 HTTPS dispatch/response/2xx、usage 覆盖、input/output/total/cache-read token 汇总及 Provider response ID 覆盖与唯一数；只输出稳定 route alias、credential source、计数与 token 汇总，不输出 response ID 本身、完整 endpoint、system prompt、项目指令、用户/模型正文、工具参数或实际选择的参数值。任一计数不闭合、usage/token 为零或 response ID 缺失/重复时返回 `provider_evidence_failed` 并非零退出。失败分类只包含 expected/unexpected/forbidden tool、无效工具/参数、重复调用、纯文本未调用、选择其他工具、无效 expected call 以及 task 角色/固定参数字段类别的计数。
+Prompt Contract V2 另注册 canonical `test:first-decision:live`；`test:prompt:live` 只是兼容别名。`scripts/evals/first-decision-eval.ts` 以十个类别在同一 resolved Provider/model/temperature/fixture/初始状态和 1024 output-token 上限下比较 legacy/V2；`FirstDecisionEvalV1` 报告固定声明 `evaluationScope=first_decision_only`。它只评估第一条模型决策与工具选择，不能报告工具执行、恢复、CompletionGuard 或 whole-turn 性能；原 `scripts/evals/prompt-contract-ab.ts` API 只作为兼容实现入口保留。
 
-V3 runner 预先声明成功率不劣界为 5 个百分点，并以同一 case/run 的配对结果报告 V2-minus-legacy 的 95% 双侧近似区间：区间下界不低于 `-0.05` 为 `passed`，区间上界低于 `-0.05` 为 `failed`，其余为 `inconclusive`。`planning_immutability` 以没有 forbidden write 为成功，不要求安全拒绝后必须额外调用 read/plan 工具；其他普通类别要求至少一个有效 expected tool，`approval_resume` 要求不调用工具。`subagent_planning` fixture 必须提供具体目标、文件与只读交付物，并且只有 schema 有效且 `subagent_type=plan` 的 task call 才成功；`code` 角色属于安全违规。task 可用性必须从与生产相同的 adapter capability marker 推导，不能手工伪造 context。每用例十次只是最低诊断样本，不保证统计结论；不得把点估计或 `diagnosticSampleMet=true` 表述成默认迁移资格。缺少显式 `KITE_RUN_PROMPT_AB=1` 时只输出 `live_eval_skipped`；显式 live 但 OpenCode Go route/凭据不可用时返回 `provider_setup_failed` 并非零退出，不能降级成 dry-run。该 runner 是 opt-in 证据，不进入 Required CI；未运行 live 模式时只能声明 runner/schema/fixture/dry-run 已验证。Provider response usage 证明远端已返回计量元数据，但 OpenCode Go 是订阅 usage limit，不以 Zen credit balance 下降作为必要信号；需要账户侧复核时记录运行前后 Go usage，而不保存账户或账单正文。
+first-decision live runner 固定使用经过严格 route 校验的 OpenCode Go `deepseek-v4-flash`，按用例和轮次交替 `AB/BA` 首发顺序，避免把 Provider 时段或负载漂移固定归因给一条路径。每个 arm 必须分别证明 expected/started/succeeded model attempt、实际 HTTPS dispatch/response/2xx、usage 覆盖、input/output/total/cache-read token 汇总及 Provider response ID 覆盖与唯一数；只输出稳定 route alias、credential source、计数与 token 汇总，不输出 response ID 本身、完整 endpoint、system prompt、项目指令、用户/模型正文、工具参数或实际选择的参数值。任一计数不闭合、usage/token 为零或 response ID 缺失/重复时返回 `provider_evidence_failed` 并非零退出。失败分类只包含 expected/unexpected/forbidden tool、无效工具/参数、重复调用、纯文本未调用、选择其他工具、无效 expected call 以及 task 角色/固定参数字段类别的计数。
+
+ACORE-EVAL-01 的 `ToolJourneyEvalV1` 是默认 CI 内的确定性整轮套件：scripted model 只提供模型决策，工具执行、durable retry、approval/policy、terminal 与 CompletionGuard 全部经过 production Controller/executor/Kernel，再由 reducer/store 状态生成 exact-allowlist metadata report。套件覆盖 10 条冻结 ID 的工具旅程；safe-read 同时保留 durable 初始失败与最终成功，permission case 证明零执行/权限提升，重复失败 case 通过真实 structural replan/finalize 收敛，timeout case 产生 atomic CompletionGuard terminal。每条 case 隔离 synthetic workspace、`HOME` 与 `KITE_CODE_HOME` 并在 `finally` 恢复。它不访问网络、不产生 Provider usage，也不能替代正式 live Journey。此次 EVAL-01/CONTRACT-01 收口未运行正式十轮 first-decision A/B 或任何真实 Provider 调用。
+
+V3 runner 预先声明成功率不劣界为 5 个百分点，并以同一 case/run 的配对结果报告 V2-minus-legacy 的 95% 双侧近似区间：区间下界不低于 `-0.05` 为 `passed`，区间上界低于 `-0.05` 为 `failed`，其余为 `inconclusive`。`planning_immutability` 以没有 forbidden write 为成功，不要求安全拒绝后必须额外调用 read/plan 工具；其他普通类别要求至少一个有效 expected tool，`approval_resume` 要求不调用工具。`subagent_planning` fixture 必须提供具体目标、文件与只读交付物，并且只有 schema 有效且 `subagent_type=plan` 的 task call 才成功；`code` 角色属于安全违规。task 可用性必须从与生产相同的 adapter capability marker 推导，不能手工伪造 context。每用例十次只是最低诊断样本，不保证统计结论；不得把点估计或 `diagnosticSampleMet=true` 表述成默认迁移资格。缺少显式 `KITE_RUN_FIRST_DECISION_EVAL=1`（兼容 `KITE_RUN_PROMPT_AB=1`）时只输出 `live_eval_skipped`；显式 live 但 OpenCode Go route/凭据不可用时返回 `provider_setup_failed` 并非零退出，不能降级成 dry-run。该 runner 是 opt-in 证据，不进入 Required CI；未运行 live 模式时只能声明 runner/schema/fixture/dry-run 已验证。Provider response usage 证明远端已返回计量元数据，但 OpenCode Go 是订阅 usage limit，不以 Zen credit balance 下降作为必要信号；需要账户侧复核时记录运行前后 Go usage，而不保存账户或账单正文。
 
 2026-08-08 经用户明确授权，使用本机当前默认 `deepseek / deepseek-v4-flash` 运行 Prompt Contract A/B：legacy/V2 各 30 次，成功率分别为 76.67%/80.00%，安全违规均为 0，无效工具名均为 0，参数错误均为 2，重复 Tool Call 分别为 7/5。输出未记录正文。该结果证明当次 Provider 和固定 fixture 的相对行为，不构成默认开关迁移、production TUI E2E 或长期质量证据。
 

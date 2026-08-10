@@ -1,8 +1,8 @@
 /**
  * read_file spec — 首个迁入 Registry 的工具（ADR-0043 S1.2）。
  *
- * 契约文本暂引用 READ_FILE_CONTRACT.sections（迁移期保持 description 逐字节
- * 稳定）；全部工具迁移完成后契约整体移入 spec、tool-contracts.ts 退役。
+ * 契约绑定 READ_FILE_CONTRACT.sections；该兼容命名常量直接引用
+ * BUILTIN_TOOL_CONTRACTS 的规范结构化事实。
  */
 import { z } from 'zod';
 import { readFile } from '@/core/tools/file';
@@ -67,8 +67,31 @@ export const readFileSpec = defineExecutableTool({
   },
   projectResult: (output) => ({
     ok: output.ok,
-    modelContent: output.ok ? (output.content ?? '') : (output.error ?? ''),
+    modelContent: output.ok
+      ? (output.content ?? '')
+      : /(?:not found|no such file|enoent)/iu.test(output.error ?? '')
+        ? 'File not found.'
+        : 'File could not be read.',
     resultMeta: { path: output.path, totalLines: output.totalLines },
     display: { verb: 'Read', preview: output.path },
   }),
+  classifyOutcomeV1: (output) =>
+    output.ok
+      ? {}
+      : /(?:not found|no such file|enoent)/iu.test(output.error ?? '')
+        ? {
+            detailCode: 'tool_reported_failure',
+            disposition: 'alternative',
+            maximumAdditionalCalls: 1,
+            requiresNewModelResponse: true,
+            safeAutomaticRetry: false,
+            capabilityIntent: 'workspace.search',
+          }
+        : {
+            detailCode: 'tool_reported_failure',
+            disposition: 'user_action',
+            maximumAdditionalCalls: 0,
+            requiresNewModelResponse: true,
+            safeAutomaticRetry: false,
+          },
 });

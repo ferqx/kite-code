@@ -86,6 +86,10 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
     expect(pkg.scripts?.['test:model:live']).toContain('tests/e2e/live/model/');
     expect(pkg.scripts?.['test:model:live']).toContain('bun run');
+    expect(pkg.scripts?.['test:first-decision:live']).toBe(
+      'bun run scripts/evals/first-decision-eval.ts',
+    );
+    expect(pkg.scripts?.['test:prompt:live']).toBe('bun run scripts/evals/first-decision-eval.ts');
     expect(pkg.scripts?.['test:tui:system']).toContain('scripts/run-tui-system-tests.ts');
     expect(pkg.scripts?.['test:tui:harness']).toContain('tests/tui-system/harness/');
     expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain('tests/sandbox-executor.test.ts');

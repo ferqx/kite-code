@@ -7,16 +7,25 @@ export const TOOL_RECOVERY_QUALITY_GLOBAL_FAILURE_LIMIT = 12;
 const TOOL_RECOVERY_OBSERVATION_CAP = 250;
 
 export type ToolRecoveryAttemptModeV1 = 'model_correction' | 'automatic_retry';
-export type ToolRecoveryResolutionV1 =
-  | 'recovered'
-  | 'terminal'
-  | 'next_response_elapsed'
-  | 'task_closed'
-  | 'turn_closed'
-  | 'skipped'
-  | 'replanned'
-  | 'user_action'
-  | 'provider_revision';
+export const TOOL_RECOVERY_RESOLUTIONS_V1 = [
+  'recovered',
+  'terminal',
+  'next_response_elapsed',
+  'task_closed',
+  'turn_closed',
+  'skipped',
+  'replanned',
+  'user_action',
+  'provider_revision',
+] as const;
+
+export type ToolRecoveryResolutionV1 = (typeof TOOL_RECOVERY_RESOLUTIONS_V1)[number];
+
+export function isToolRecoveryResolutionV1(value: unknown): value is ToolRecoveryResolutionV1 {
+  return (
+    typeof value === 'string' && (TOOL_RECOVERY_RESOLUTIONS_V1 as readonly string[]).includes(value)
+  );
+}
 
 export interface ToolRecoveryFailureV1 {
   failureInstanceId: string;

@@ -603,7 +603,50 @@ describe('sandbox executor factory', () => {
       exitCode: -1,
       stdout: '',
       stderr: 'Sandbox unavailable (sandbox_disabled); refusing unsandboxed shell execution.',
+      terminationReason: 'sandbox_denied',
     });
+  });
+
+  test('controlled fallback sentinel is triggerable but fail-closed denial never invokes it', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-sentinel-'));
+    const marker = join(workspace, 'fallback-invoked');
+    let calls = 0;
+    const sentinel = async (input: { command: string }) => {
+      calls += 1;
+      writeFileSync(marker, input.command);
+      return {
+        ok: true,
+        command: input.command,
+        exitCode: 0,
+        stdout: 'sentinel',
+        stderr: '',
+      };
+    };
+    try {
+      const bare = createSandboxExecutor(
+        { enabled: false, workspace, unavailableFallback: 'bare_shell' },
+        sentinel,
+      );
+      await expect(bare({ workspace, command: 'first' })).resolves.toMatchObject({
+        stdout: 'sentinel',
+      });
+      expect(calls).toBe(1);
+      expect(existsSync(marker)).toBe(true);
+
+      rmSync(marker);
+      const denied = createSandboxExecutor(
+        { enabled: false, workspace, unavailableFallback: 'fail' },
+        sentinel,
+      );
+      await expect(denied({ workspace, command: 'second' })).resolves.toMatchObject({
+        ok: false,
+        terminationReason: 'sandbox_denied',
+      });
+      expect(calls).toBe(1);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 });
 

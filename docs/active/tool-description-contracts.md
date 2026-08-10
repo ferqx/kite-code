@@ -1,20 +1,22 @@
 # 当前规则：工具描述即契约
 
 状态：active
-最后更新：2026-08-09
-最后验证：2026-08-09
+最后更新：2026-08-11
+最后验证：2026-08-11
 范围：
 
 - `src/core/tools/tool-contracts.ts`
+- `src/core/tools/registry/builtins/`
 - `src/core/tools/definitions.ts`（description 字段）
-- `tests/tool-definitions.test.ts`（契约验证测试）
+- `src/core/harness/tool-runner.ts`（恢复指导投影）
+- `tests/tool-definitions.test.ts`、`tests/tools/tool-registry-conformance.test.ts`（契约验证测试）
 
 读取时机：
 
 - 创建或修改工具定义，包括新增工具、调整 schema 或修改 description。
-- 修改 `src/tools/tool-contracts.ts` 中的契约结构或内容。
+- 修改 `src/core/tools/tool-contracts.ts` 中的契约结构或内容。
 - 修改工具的实际行为（`src/core/tools/file.ts`、`src/core/tools/shell.ts`），需要同步更新契约。
-- 修改 `src/harness/tool-runner.ts` 中的工具执行逻辑、错误处理或 `toolUsageGuidance()`。
+- 修改 `src/core/harness/tool-runner.ts` 中的工具执行逻辑、错误处理或恢复指导。
 - 新增工具注册到 `src/core/tools/registry/builtins.ts`。
 
 相关：
@@ -25,7 +27,7 @@
 
 验证：
 
-- `bun test tests/tool-definitions.test.ts`
+- `bun test tests/tool-definitions.test.ts tests/tools/tool-registry-conformance.test.ts tests/tool-parse-error.test.ts`
 - `bun run typecheck`
 
 ## 规则
@@ -36,25 +38,26 @@
 
 ### 契约结构
 
-ToolSpec 的规范契约是 `ToolContractSection`：`summary`、`useWhen`、`returns`，以及按需提供的 `constraints`、`recovery`。`returns.format` 必须是模型实际看到的 `text | json | interrupt`，其 description 和 fields 必须与 `projectResult()` 或 `createInterrupt()` 一致；禁止为了统一外观虚构 `{ok, content, error}`。
+ToolSpec 的规范契约是 `ToolContractSection`：`summary`、`useWhen`、`returns`、`constraints`、`recovery` 五类独立事实。`returns.format` 必须是模型实际看到的 `text | json | interrupt`，其 description 和 fields 必须与 `projectResult()` 或 `createInterrupt()` 一致；禁止为了统一外观虚构 `{ok, content, error}`。
 
-迁移期仍可读取旧的四段式 `LegacyToolContractSection`。`normalizeToolContract()` 是唯一兼容层，将旧事实确定性归一为结构化契约；不得维护 legacy/V2 两套互相独立的工具事实。
+19 个 production builtin ToolSpec 已全部绑定规范结构化事实。旧四段式 `LegacyToolContractSection` 只保留给外部/测试 Registry 的读取兼容；`normalizeToolContract()` 是唯一兼容层，不得把 legacy 输入重新写入 builtin，也不得维护 legacy/V2 两套互相独立的工具事实。
 
 ### 契约存放与绑定
 
-- 契约跟随 ToolSpec 存放；尚未迁移的常量继续集中在 `src/core/tools/tool-contracts.ts`。
-- `buildDescription(contract, version)` 从同一契约生成 legacy 或 V2 concise 文本。`promptContractV2=false` 保持 wire-compatible legacy 表达；V2 使用有界的摘要、使用条件、真实返回格式和必要约束/恢复说明。
+- `BUILTIN_TOOL_CONTRACTS` 是当前 19 个 builtin 的规范事实表；各 ToolSpec 直接或通过兼容命名常量绑定其中同一对象，Skill runtime 三工具同样不得另写契约。
+- `buildDescription(contract, version)` 从同一组独立事实生成 legacy 或 V2 文本。`promptContractV2=false` 保持默认；V2 逐项投影 selection、参数约束、真实返回格式与恢复语义，不再靠截取旧文案第一句保存关键规则。
 - `definitions.ts` 只能投影 Registry，不得硬编码另一份 description。
+- Runner 的失败指导只能读取 `spec.contract.recovery` 的规范化结果；禁止维护按工具名分支的第二份 recovery guidance。
 - V2 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
 - `task` 的兼容契约首句必须保留权威与角色边界：只有当前用户显式要求有界、自包含委派且该工具已披露时才要求委派，架构或设计规划使用只读 `plan`。Planning 的 context-sensitive schema 重写 `subagent_type` 枚举时必须保留字段 description，避免 V2 精简 description 与 JSON Schema 同时丢失角色选择依据。
 
 ### Registry 迁移边界（ADR-0043）
 
-工具契约的单一事实源正从 `tool-contracts.ts` 迁移到 ToolSpec Registry（`src/core/tools/registry/`）。迁移期规则：
+工具契约由 ToolSpec Registry（`src/core/tools/registry/`）绑定并投影；新增 builtin 一律先向 `KNOWN_TOOL_NAMES` 与 `BUILTIN_TOOL_CONTRACTS` 增加完整结构化事实，再注册 ToolSpec。模型表面 description、Runner recovery guidance 与 capability descriptor 都必须从该 ToolSpec 契约派生，确定性由 `tests/tools/tool-registry-conformance.test.ts` 守护。
 
-- 未迁移工具：契约继续写在 `tool-contracts.ts`，由归一化兼容层消费。
-- 已迁移工具：契约移入 `spec.contract`，`description` 仍由 `buildDescription()` 生成。
-- 新增工具一律直接注册到 Registry；模型表面 description 的确定性由 `tests/tools/tool-registry-conformance.test.ts` 守护。
+Registry conformance 必须枚举当前 19/19 builtin，并在 legacy/V2 × planning/building 的合法 availability context 中验证：Skill catalog、active frame、task adapter、tool search 与 phase/role 都必须是真实可用形态；可用集合与投影一致，description 来自同一 resolved contract，provider JSON Schema validation 与 Registry `parseToolCall()` 分别验证有效、无效及 unknown-field 输入，不能只把两个同源 `safeParse({})` 结果互相比较。
+
+19 个工具还必须逐一执行真实 `projectResult()`（interrupt 工具执行 `createInterrupt()`），再经过 Controller 的 canonical `tool.finished` 投影、Runtime reducer 与 provider context projection。`returns.format=json` 的真实顶层 key 必须全部位于 contract fields；`text` 不得虚构 `ok/stdout/stderr/resultMeta` 字段。Registry-owned classifier advice 必须随统一执行结果进入同一个 canonical terminal，不能在 Runner 重建或丢失。父 Runtime reducer 与 Subagent provider context 必须调用唯一的 Runtime-owned public model-content helper：success 固定为 `stdout || stderr || ''`，failure 固定为 `stderr || stdout || ''`，并接收 `ok` 与 terminal status 防止状态分支漂移；success/failure × stdout 空/非空 × stderr 空/非空的八组合必须保持同构。Shell failure 还必须从真实 `runApprovedTool` 经过 Controller terminal、Kernel reducer 到 provider context，逐项等于 `shellExecuteSpec.projectResult()` 与 `returns.format=text`，19/19 closure 不能只靠预折叠 terminal fixture。不得把完整执行结果 JSON 化进 child transcript，也不得额外暴露 command/path/resultMeta、private recovery guidance 或 canonical-private lineage。`read_file` 的 ENOENT 公共结果固定为低信息稳定文本，具体 path 已由原 tool call 表达，不能在 Tool Result 重复泄露。
 
 ### 契约与实现的同步
 
@@ -62,6 +65,7 @@ ToolSpec 的规范契约是 `ToolContractSection`：`summary`、`useWhen`、`ret
 - 修改执行结果格式、错误信息或恢复语义时，必须检查 `returns`、`constraints` 和 `recovery` 是否一致。
 - 修改静态工具的模型结果、截断、diff 或结构化元数据时，必须在对应 `spec.projectResult()` 中完成；Runner/Controller 只消费投影。
 - 新增工具时必须先创建 ToolSpec 契约，再在生产 Registry 中注册；`definitions.ts` 只投影 Registry，不得再次枚举静态工具名。
+- strict schema 剥离 unknown field 前只允许记录 `hasUnknown/count/toolClass/schemaRevision` 低基数观测；字段名和值不得进入 Session、telemetry 或 eval。
 
 ### `ask_user` 模型输入边界
 

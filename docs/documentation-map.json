@@ -350,6 +350,8 @@
       "sources": [
         "tests/evals/agent-tasks/**",
         "tests/evals/runtime-journey-baseline.test.ts",
+        "tests/evals/tool-journey-v1.ts",
+        "tests/evals/tool-journey-v1.test.ts",
         "scripts/evals/agent-task-evidence-*.ts",
         "scripts/evals/verify-agent-task-evidence.ts",
         "scripts/evals/verify-agent-task-product-evidence.ts",
@@ -447,9 +449,11 @@
         "src/core/session-logger/recorder.ts",
         "src/core/harness/tool-runner.ts",
         "src/core/runtime/context-compaction.ts",
+        "scripts/evals/first-decision-eval.ts",
         "scripts/evals/prompt-contract-ab.ts",
         "tests/tui-system/scenarios/prompt-contract-v2-production.test.ts",
         "tests/prompts/prompt-contract-budget.test.ts",
+        "tests/evals/first-decision-eval.test.ts",
         "tests/evals/prompt-contract-ab.test.ts",
         "tests/project-instructions.test.ts"
       ],

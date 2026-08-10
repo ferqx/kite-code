@@ -179,7 +179,7 @@ describe('code agent tool definitions', () => {
     const askUserTool = tools.ask_user!;
 
     expect(askUserTool).toBeDefined();
-    expect(String(askUserTool.description)).toContain('Ask the user');
+    expect(String(askUserTool.description)).toContain('one to three focused user decisions');
   });
 
   // ── write_plan / update_plan tests ──
@@ -193,8 +193,9 @@ describe('code agent tool definitions', () => {
   });
 
   test('write_plan approval contract returns the complete top-level plan identity', () => {
-    expect(WRITE_PLAN_CONTRACT.sections.outputFormat).toContain(
-      'status: "approved", plan_id, version, structural_digest, execution_mode',
+    const contract = normalizeToolContract(WRITE_PLAN_CONTRACT.sections);
+    expect(contract.returns.fields).toEqual(
+      expect.arrayContaining(['plan_id', 'version', 'structural_digest']),
     );
   });
 
@@ -371,7 +372,7 @@ describe('code agent tool definitions', () => {
     expect(names).toContain('ask_user');
     expect(String(tools.write_plan?.description)).toContain('Save');
     expect(String(tools.update_plan?.description)).toContain('progress');
-    expect(String(tools.ask_user?.description)).toContain('uncertainty');
+    expect(String(tools.ask_user?.description)).toContain('material choice blocks progress');
   });
 
   // 验证 search 工具可以不依赖 shell 独立执行 / Search tools execute without shell access
@@ -524,9 +525,11 @@ describe('code agent tool definitions', () => {
       subagentEventSink: () => {},
     });
     const task = tools.task!;
-    expect(String(task.description)).toContain('current user explicitly requests');
     expect(String(task.description)).toContain(
-      'use plan for read-only architecture or design planning',
+      'only when the current user explicitly requests delegation',
+    );
+    expect(String(task.description)).toContain(
+      'plan for read-only architecture or design planning',
     );
 
     const schema = (task as unknown as { inputSchema: ToolSchemaLike }).inputSchema;
@@ -634,7 +637,8 @@ describe('code agent tool definitions', () => {
   });
 });
 
-// 工具契约验证测试：确保所有工具描述作为一等 UX 契约，包含何时使用、常见误区、输出格式和失败处理 / Tool contract verification: ensure all tool descriptions are first-class UX contracts with whenToUse, commonMistakes, outputFormat, and failureHandling sections
+// Tool contract verification: every model-visible builtin owns structured selection,
+// parameter/result and typed-recovery facts.
 describe('tool contracts (ACI)', () => {
   const registeredTools = [
     'read_file',
@@ -661,23 +665,28 @@ describe('tool contracts (ACI)', () => {
     }
   });
 
-  // 每个契约必须有非空的四个基本部分 / Every contract must have four non-empty sections
-  test('every contract has four non-empty sections', () => {
+  test('every contract has complete structured facts', () => {
     for (const name of registeredTools) {
-      const contract = TOOL_CONTRACTS.get(name)!;
-      expect(contract.sections.whenToUse.length).toBeGreaterThan(20);
-      expect(contract.sections.commonMistakes.length).toBeGreaterThan(20);
-      expect(contract.sections.outputFormat.length).toBeGreaterThan(10);
-      expect(contract.sections.failureHandling.length).toBeGreaterThan(20);
+      const contract = normalizeToolContract(TOOL_CONTRACTS.get(name)!.sections);
+      expect(contract.summary.length).toBeGreaterThan(10);
+      expect(contract.useWhen.length).toBeGreaterThan(20);
+      expect(contract.constraints.length).toBeGreaterThan(20);
+      expect(contract.returns.description.length).toBeGreaterThan(10);
+      expect(contract.recovery.length).toBeGreaterThan(20);
     }
   });
 
   // 每个契约的描述必须与 sections 内容一致 / Each contract's description must be consistent with its sections
-  test('contract description embeds all section content', () => {
+  test('contract description embeds every independently owned fact', () => {
     for (const name of registeredTools) {
       const contract = TOOL_CONTRACTS.get(name)!;
-      expect(contract.description).toContain(contract.sections.whenToUse.slice(0, 30));
-      expect(contract.description).toContain('Common mistakes');
+      const normalized = normalizeToolContract(contract.sections);
+      expect(contract.description).toContain(normalized.summary);
+      expect(contract.description).toContain(normalized.useWhen);
+      expect(contract.description).toContain(normalized.constraints);
+      expect(contract.description).toContain(normalized.returns.description);
+      expect(contract.description).toContain(normalized.recovery);
+      expect(contract.description).toContain('Constraints:');
       expect(contract.description).toContain('Output:');
       expect(contract.description).toContain('Failure:');
     }
@@ -718,40 +727,35 @@ describe('tool contracts (ACI)', () => {
 
   // shell_execute 的特殊契约要求 / shell_execute-specific contract requirements
   test('shell_execute contract covers command-shaped approval rejection', () => {
-    const contract = TOOL_CONTRACTS.get('shell_execute')!;
-    expect(contract.sections.whenToUse).not.toMatch(/intent=|grant_request|prefix_rule/);
-    expect(contract.sections.whenToUse).toMatch(/During planning.*proven read-only/);
-    expect(contract.sections.commonMistakes).toMatch(/denied|reject/);
-    expect(contract.sections.outputFormat).toMatch(/deferred: true.*until_phase: building/);
-    expect(contract.sections.failureHandling).toMatch(
+    const contract = normalizeToolContract(TOOL_CONTRACTS.get('shell_execute')!.sections);
+    expect(contract.useWhen).not.toMatch(/intent=|grant_request|prefix_rule/);
+    expect(contract.useWhen).toMatch(/during planning only for a proven read-only/i);
+    expect(contract.constraints).toMatch(/intent, grant_request, prefix_rule/);
+    expect(contract.returns.description).toMatch(/deferred: true.*until_phase: building/);
+    expect(contract.recovery).toMatch(
       /deferred until building.*do not retry.*do not ask for shell approval/,
     );
-    expect(contract.sections.failureHandling).toMatch(/rejected by policy|approval flow|denied/);
+    expect(contract.recovery).toMatch(/Policy\/approval denial/);
   });
 
   test('file mutation contracts keep planning changes in the Plan', () => {
     for (const name of ['edit_file', 'write_file']) {
-      const contract = TOOL_CONTRACTS.get(name)!;
-      expect(contract.sections.whenToUse).toMatch(/only in the building phase/);
-      expect(contract.sections.whenToUse).toMatch(
-        /During planning.*describe.*in the plan.*do not call.*or request approval/,
-      );
-      expect(contract.sections.failureHandling).toMatch(
-        /planning phase.*do not retry or request approval.*plan.*after plan approval/,
-      );
+      const contract = normalizeToolContract(TOOL_CONTRACTS.get(name)!.sections);
+      expect(contract.useWhen).toMatch(/building/i);
+      expect(contract.recovery).toMatch(/planning|deferred/i);
+      expect(contract.recovery).toMatch(/plan|approval/i);
+      expect(contract.recovery).toMatch(/do not retry|apply it only after approval/i);
     }
   });
 
   test('ask_user contract exposes only the canonical questions shape', () => {
-    const contract = TOOL_CONTRACTS.get('ask_user')!;
-    expect(contract.sections.whenToUse).toMatch(/single question is an array with one item/);
-    expect(contract.sections.commonMistakes).toMatch(/removed top-level `question`/);
-    expect(contract.sections.commonMistakes).toMatch(/client always adds free-text input/);
-    expect(contract.sections.outputFormat).toContain('`questions` contains 1-3 items');
-    expect(contract.sections.outputFormat).toContain('2-3 `{label, description, recommended}`');
-    expect(contract.sections.failureHandling).toMatch(
-      /canonical `questions` array.*never pass stringified JSON/,
-    );
+    const contract = normalizeToolContract(TOOL_CONTRACTS.get('ask_user')!.sections);
+    expect(contract.useWhen).toMatch(/single question is an array with one item/);
+    expect(contract.constraints).toMatch(/Removed top-level question\/options/);
+    expect(contract.constraints).toMatch(/client always adds free-text input/);
+    expect(contract.returns.description).toContain('questions contain 1-3 items');
+    expect(contract.returns.description).toContain('2-3 {label, description, recommended}');
+    expect(contract.recovery).toMatch(/canonical questions array.*never pass stringified JSON/);
   });
 
   // MCP resource tools form one discover/read client-side chain.

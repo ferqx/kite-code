@@ -1,35 +1,7 @@
 import { z } from 'zod';
 import { activateSkillLifecycle, completeSkillLifecycle, readSkillReference } from '@/core/skills';
-import type { LegacyToolContractSection } from '@/core/tools/tool-contracts';
+import { BUILTIN_TOOL_CONTRACTS } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
-
-const readContract: LegacyToolContractSection = {
-  whenToUse:
-    'Read a declared supporting file from the active Skill Workflow. Use read_file for workspace files outside the Skill contract.',
-  commonMistakes:
-    'Reading undeclared paths, stale activations, symlinks, or files outside scripts/, references/, assets/, and evals/ is rejected.',
-  outputFormat: 'JSON: ok, activation_id, path, encoding, and content.',
-  failureHandling:
-    'If rejected, verify the active activation id and choose an exact path declared by its Workflow Contract.',
-};
-const completeContract: LegacyToolContractSection = {
-  whenToUse:
-    'Complete an active inline Skill Workflow with structured output. Use task for unrelated delegated work.',
-  commonMistakes:
-    'Completing a stale activation or returning output that does not match the compiled output schema is rejected.',
-  outputFormat: 'JSON: ok, activation_id, and validated output.',
-  failureHandling:
-    'Fix the structured output to match the active Workflow Contract schema, then retry once.',
-};
-const activateContract: LegacyToolContractSection = {
-  whenToUse:
-    'Activate a disclosed compiled Skill Workflow Contract. Use tool_search first when the capability is not disclosed.',
-  commonMistakes:
-    'Guessing a Skill ID, using stale catalog metadata, or passing input that fails the compiled schema is rejected.',
-  outputFormat: 'JSON: ok, activation_id, skill_id, context_mode, and fork output when applicable.',
-  failureHandling:
-    'Search again after catalog drift, then retry with input matching the disclosed Skill contract.',
-};
 
 export const readSkillReferenceInputSchema = z.object({
   activation_id: z.string().min(1),
@@ -57,7 +29,7 @@ const effects = () => ({
 export const activateSkillSpec = defineExecutableTool({
   name: 'activate_skill',
   kind: 'coordination',
-  contract: activateContract,
+  contract: BUILTIN_TOOL_CONTRACTS.activate_skill,
   inputSchema: activateSkillInputSchema,
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
   minimumApproval: 'user',
@@ -93,7 +65,7 @@ export const activateSkillSpec = defineExecutableTool({
 export const readSkillReferenceSpec = defineExecutableTool({
   name: 'read_skill_reference',
   kind: 'coordination',
-  contract: readContract,
+  contract: BUILTIN_TOOL_CONTRACTS.read_skill_reference,
   inputSchema: readSkillReferenceInputSchema,
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
@@ -121,7 +93,7 @@ export const readSkillReferenceSpec = defineExecutableTool({
 export const completeSkillSpec = defineExecutableTool({
   name: 'complete_skill',
   kind: 'coordination',
-  contract: completeContract,
+  contract: BUILTIN_TOOL_CONTRACTS.complete_skill,
   inputSchema: completeSkillInputSchema,
   declaredEffects: { filesystem: 'none', network: 'none', externalState: 'none' },
   minimumApproval: 'none',

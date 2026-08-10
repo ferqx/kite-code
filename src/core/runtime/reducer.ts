@@ -52,6 +52,7 @@ import {
   updateActiveTask,
 } from './state';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
+import { toolExecutionModelContentV1 } from './tool-model-content';
 import { legacyToolOutcomeV1, type ToolOutcomeV1, toolOutcomeSucceededV1 } from './tool-outcome';
 import { outcomeForHistoricalToolTerminalV1 } from './tool-outcome-events';
 import {
@@ -78,11 +79,12 @@ function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: stri
 function activeRecoveryFailureIds(
   state: RuntimeState,
   predicate: (failure: RuntimeState['toolRecovery']['failures'][string]) => boolean = () => true,
+  includeExhausted = false,
 ): string[] {
   return state.toolRecovery.order.filter((id) => {
     const failure = state.toolRecovery.failures[id];
     return (
-      failure?.status === 'unresolved' &&
+      (failure?.status === 'unresolved' || (includeExhausted && failure?.status === 'exhausted')) &&
       failure.taskId === (state.activeTaskId ?? undefined) &&
       failure.turnId === state.turn.turnId &&
       predicate(failure)
@@ -193,7 +195,7 @@ function toolResultMeta(
       ? [path]
       : undefined);
   const fallbackModelDigest = createHash('sha256')
-    .update(event.result.stdout || event.result.stderr)
+    .update(toolExecutionModelContentV1(event.result))
     .digest('hex');
   return {
     ...supplied,
@@ -702,7 +704,9 @@ function reduceRuntimeStateWithReplayBoundary(
         },
         (task) => ({ ...task, planHistory: [...task.planHistory, planning.document] }),
       );
-      const resolvesFailureIds = activeRecoveryFailureIds(state);
+      // Explicit structural replanning is an authoritative resolution even when the
+      // failed lineage already consumed its one eligible response.
+      const resolvesFailureIds = activeRecoveryFailureIds(state, () => true, true);
       return resolvesFailureIds.length === 0
         ? replanned
         : {
@@ -1216,7 +1220,7 @@ function reduceRuntimeStateWithReplayBoundary(
           ...transcriptMeta(state, `tool-${event.toolCallId}`, event.createdAt),
           toolCallId: event.toolCallId,
           name: event.name,
-          content: event.result.stdout || event.result.stderr,
+          content: toolExecutionModelContentV1(event.result),
           ok: toolOutcomeSucceededV1(outcomeV1),
           resultMeta: toolResultMeta(existingCall, event),
         }),

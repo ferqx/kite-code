@@ -52,7 +52,7 @@ export interface ShellResult {
   stdout: string;
   stderr: string;
   /** Runtime-authored process terminal cause; never inferred from stderr. */
-  terminationReason?: 'timed_out' | 'cancelled';
+  terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
   processCleanup?: {
     confirmedExited: boolean;
     gracefulRequested: boolean;

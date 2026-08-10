@@ -1,6 +1,6 @@
 /**
  * search_files spec — 迁入 Registry（ADR-0043 S1.2）。
- * 契约暂引用 SEARCH_FILES_CONTRACT.sections 保持 description 逐字节稳定。
+ * 契约通过兼容命名常量绑定 BUILTIN_TOOL_CONTRACTS 的规范结构化事实。
  */
 import { z } from 'zod';
 import { searchFiles } from '@/core/tools/search';
@@ -54,4 +54,14 @@ export const searchFilesSpec = defineExecutableTool({
       display: { verb: 'Find' },
     };
   },
+  classifyOutcomeV1: (output) =>
+    output.ok
+      ? {}
+      : {
+          detailCode: 'tool_reported_failure',
+          disposition: 'correct_args',
+          maximumAdditionalCalls: 1,
+          requiresNewModelResponse: true,
+          safeAutomaticRetry: false,
+        },
 });

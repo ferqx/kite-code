@@ -16,20 +16,29 @@ export const COMPLETION_GUARD_V1 = 'completion_guard_v1' as const;
 export const COMPLETION_GUARD_V2 = 'completion_guard_v2' as const;
 export type CompletionGuardVersion = typeof COMPLETION_GUARD_V1 | typeof COMPLETION_GUARD_V2;
 
-export type CompletionBlockerCode =
-  | 'interaction_pending'
-  | 'tool_pending'
-  | 'subagent_suspended'
-  | 'unknown_external_invocation'
-  | 'skill_active'
-  | 'planning_empty'
-  | 'plan_draft_pending'
-  | 'plan_review_pending'
-  | 'plan_execution_incomplete'
-  | 'verification_required'
-  | 'effect_evidence_required'
-  | 'plan_evidence_unresolved'
-  | 'plan_cancelled';
+export const COMPLETION_BLOCKER_CODES = [
+  'interaction_pending',
+  'tool_pending',
+  'subagent_suspended',
+  'unknown_external_invocation',
+  'skill_active',
+  'planning_empty',
+  'plan_draft_pending',
+  'plan_review_pending',
+  'plan_execution_incomplete',
+  'verification_required',
+  'effect_evidence_required',
+  'plan_evidence_unresolved',
+  'plan_cancelled',
+] as const;
+
+export type CompletionBlockerCode = (typeof COMPLETION_BLOCKER_CODES)[number];
+
+export function isCompletionBlockerCode(value: unknown): value is CompletionBlockerCode {
+  return (
+    typeof value === 'string' && (COMPLETION_BLOCKER_CODES as readonly string[]).includes(value)
+  );
+}
 
 export type CompletionNextAction =
   | 'wait_for_interaction'

@@ -60,6 +60,9 @@ function failureFor(event: ToolTerminalEvent) {
     if (event.result.terminationReason === 'cancelled') {
       return classifyFailure('user_input_cancelled', 'Tool execution was cancelled.');
     }
+    if (event.result.terminationReason === 'sandbox_denied') {
+      return classifyFailure('sandbox_error', 'Sandbox denied tool execution.');
+    }
     return event.result.ok
       ? undefined
       : classifyFailure('tool_runtime_error', 'Tool returned a failed result.');
@@ -116,7 +119,10 @@ export function normalizeToolTerminalEventV1(
       ? event.classifierAdviceV1
       : undefined;
   const classifierDiagnostic =
-    event.type === 'tool.finished' && status === 'failed' && !recoveryBlocked
+    event.type === 'tool.finished' &&
+    status === 'failed' &&
+    failure?.kind === 'tool_runtime_error' &&
+    !recoveryBlocked
       ? (event.classifierDiagnostic ??
         (event.classifierAdviceV1 ? undefined : ('classifier_missing' as const)))
       : undefined;

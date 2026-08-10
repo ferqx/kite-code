@@ -41,7 +41,10 @@ function getSystemShell(): string {
 }
 
 /** 创建沙箱化的 ShellExecutor / Create a sandboxed ShellExecutor */
-export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
+export function createSandboxExecutor(
+  options: SandboxOptions,
+  bareShellFallback: ShellExecutor = shellTool,
+): ShellExecutor {
   const { enabled } = options;
 
   if (!enabled) {
@@ -49,7 +52,7 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
       return createUnavailableExecutor('sandbox_disabled');
     }
     options.onDiagnostic?.('Sandbox disabled by flag. Shell commands will run without isolation.');
-    return shellTool;
+    return bareShellFallback;
   }
 
   const backend = options.selectedBackend ?? detectSandboxBackend();
@@ -68,7 +71,7 @@ export function createSandboxExecutor(options: SandboxOptions): ShellExecutor {
       options.onDiagnostic?.(
         'No supported sandbox backend. Shell commands will run without isolation.',
       );
-      return shellTool;
+      return bareShellFallback;
   }
 }
 
@@ -79,6 +82,7 @@ function createUnavailableExecutor(reason: string): ShellExecutor {
     exitCode: -1,
     stdout: '',
     stderr: `Sandbox unavailable (${reason}); refusing unsandboxed shell execution.`,
+    terminationReason: 'sandbox_denied',
   });
 }
 

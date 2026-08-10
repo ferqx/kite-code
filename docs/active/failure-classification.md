@@ -25,10 +25,11 @@ Envelope restore 使用 exact-key 与语义矩阵校验：replay safety 必须�
 相容，`success/cancelled/timed_out/exhausted/unknown` 不得携带可重试 recovery，diagnostic、timing
 和 unknown-field count 也必须内部一致。未知字段或矛盾组合按损坏历史 fail closed 为
 `unknown/never`，不能扩大调用额度。生产 Shell timeout 只读取 Runtime 写入的
-`terminationReason=timed_out`，不从 stderr 文本猜测。
+`terminationReason=timed_out`，sandbox fail-closed denial 只读取
+`terminationReason=sandbox_denied` 并映射为 `sandbox_error/sandbox_denied`；两者都不从 stderr 文本猜测。
 同一矩阵还拒绝 `rejected+retry_once`，以及 failure kind/detail、policy/approval authority 与 recovery
 disposition 互相矛盾的组合。deny/timeout/cancel/unknown/next-response exhaustion 仍是 blocking fact；
-只有成功 lineage receipt 或显式 skip/replan/user/provider resolution 才能成为 recovered evidence。
+只有成功 lineage receipt 或显式 skip/replan/user/provider resolution 才能成为 recovered evidence。显式 structural replan 是同 task/turn 的权威 resolution：即使 failure 已因 eligible response 消耗而成为 `exhausted/next_response_elapsed`，`plan.replan_requested` 仍必须把该 bounded lineage 收敛为 `recovered/replanned`；普通模型正文或时间流逝不能这样做。
 FailureKind→detailCode 使用编译期 exhaustive `Record` 覆盖全部 kind，不存在“缺键即跳过校验”的
 兼容分支。`phase_deferred`/`phase_denied` 是 Runtime-authoritative pre-dispatch rejection：envelope
 保留对应 phase detail 与一次 next-response correction 语义；只有 policy/approval authority deny 强制

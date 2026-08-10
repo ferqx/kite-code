@@ -59,6 +59,7 @@ import {
 } from '@/core/tools/registry/dispatch';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
+import { normalizeToolContract } from '@/core/tools/tool-contracts';
 import type {
   AuthorizationOverride,
   ShellNetworkMode,
@@ -563,6 +564,12 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       resultMeta: dispatched.dispatched
         ? dispatched.projected.resultMeta
         : { path: filePath, totalLines: output.totalLines },
+      ...(dispatched.dispatched && dispatched.projected.outcomeAdviceV1
+        ? { classifierAdviceV1: dispatched.projected.outcomeAdviceV1 }
+        : {}),
+      ...(dispatched.dispatched && dispatched.projected.classifierDiagnostic
+        ? { classifierDiagnostic: dispatched.projected.classifierDiagnostic }
+        : {}),
     });
   }
 
@@ -783,6 +790,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
       command: `search_content ${searchInput.pattern}`,
       resultMeta: projected.resultMeta,
+      ...(projected.outcomeAdviceV1 ? { classifierAdviceV1: projected.outcomeAdviceV1 } : {}),
+      ...(projected.classifierDiagnostic
+        ? { classifierDiagnostic: projected.classifierDiagnostic }
+        : {}),
     });
   }
 
@@ -821,6 +832,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
       command: `search_files ${searchInput.pattern}`,
       resultMeta: projected.resultMeta,
+      ...(projected.outcomeAdviceV1 ? { classifierAdviceV1: projected.outcomeAdviceV1 } : {}),
+      ...(projected.classifierDiagnostic
+        ? { classifierDiagnostic: projected.classifierDiagnostic }
+        : {}),
     });
   }
 
@@ -1194,22 +1209,12 @@ function withFailureGuidance(
   };
 }
 
-/** 按工具类型生成失败后的正确使用提示 / Build per-tool usage guidance after failure */
+/** Single-source recovery guidance projected from the builtin ToolSpec contract. */
+export function recoveryGuidanceForTool(toolName: string): string {
+  const spec = builtinToolRegistry.get(toolName);
+  return spec ? normalizeToolContract(spec.contract).recovery : '';
+}
+
 function toolUsageGuidance(request: PendingToolRequest): string {
-  switch (request.name) {
-    case 'read_file':
-      return 'Use read_file with a relative path inside the workspace. If the path is uncertain, use search_files to locate it, then retry with the exact path.';
-    case 'edit_file':
-      return 'Use edit_file only after read_file. old_string must exactly match existing file content, including whitespace and indentation; if the same text appears multiple times, make old_string more specific or set replace_all: true.';
-    case 'write_file':
-      return 'Use write_file with a relative path and complete file content when creating or fully overwriting a file. For small changes to an existing file, prefer read_file followed by edit_file.';
-    case 'shell_execute':
-      return 'Use shell_execute with a concrete command. Read-only checks such as rg, ls, cat, or git status are classified from the command itself. Provide description to explain what the command does; commands needing approval enter the user approval flow automatically.';
-    case 'ask_user':
-      return 'Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.';
-    case 'web_fetch':
-      return 'Use web_fetch with a complete http/https URL. Verify the URL is public and accessible before calling. If fetch fails with HTTP error, the page may not exist or may be behind authentication. If readability fails, the page may not be a text article — try a different source.';
-    default:
-      return '';
-  }
+  return recoveryGuidanceForTool(request.name);
 }

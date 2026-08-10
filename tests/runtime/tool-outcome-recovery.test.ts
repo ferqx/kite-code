@@ -217,6 +217,8 @@ describe('ToolOutcomeV1', () => {
         summary: 'Test classifier.',
         useWhen: 'Only in tests.',
         returns: { format: 'json', description: 'Test output.' },
+        constraints: 'Accept only the declared value field.',
+        recovery: 'Use Runtime fallback when the test classifier is invalid.',
       },
       inputSchema: z.object({ value: z.string() }),
       declaredEffects: {
@@ -477,24 +479,28 @@ describe('ToolOutcome controller recovery integration', () => {
     const runtimeManager = manager as McpConnectionManager & {
       ensureProviderReady(providerId: string, timeoutMs?: number): Promise<void>;
     };
-    runtimeManager.ensureProviderReady = async () => {};
+    const order: string[] = [];
+    let readinessChecks = 0;
+    runtimeManager.ensureProviderReady = async () => {
+      readinessChecks += 1;
+      order.push(`pre-dispatch-${readinessChecks}`);
+      if (readinessChecks === 1) {
+        throw new McpProviderError({
+          providerId: 'fixture',
+          kind: 'provider_unavailable',
+          message: 'redacted pre-dispatch outage',
+          recoveryAction: 'retry',
+          retryable: true,
+        });
+      }
+    };
     manager.findCapability = () => descriptor;
     let calls = 0;
-    const order: string[] = [];
     const emitted: string[] = [];
     const persisted: string[] = [];
     manager.callCapability = async () => {
       calls += 1;
       order.push(`dispatch-${calls}`);
-      if (calls === 1) {
-        throw new McpProviderError({
-          providerId: 'fixture',
-          kind: 'provider_unavailable',
-          message: 'redacted outage',
-          recoveryAction: 'retry',
-          retryable: true,
-        });
-      }
       return { content: [] };
     };
 
@@ -522,11 +528,15 @@ describe('ToolOutcome controller recovery integration', () => {
       },
     });
 
-    expect(calls).toBe(2);
+    expect(readinessChecks).toBe(2);
+    expect(calls).toBe(1);
     expect(order.indexOf('persist:tool.retry_recorded')).toBeGreaterThan(
-      order.indexOf('dispatch-1'),
+      order.indexOf('pre-dispatch-1'),
     );
-    expect(order.indexOf('persist:tool.retry_recorded')).toBeLessThan(order.indexOf('dispatch-2'));
+    expect(order.indexOf('persist:tool.retry_recorded')).toBeLessThan(
+      order.indexOf('pre-dispatch-2'),
+    );
+    expect(order.indexOf('persist:tool.retry_recorded')).toBeLessThan(order.indexOf('dispatch-1'));
     expect(persisted).toEqual(['tool.retry_recorded']);
     expect(emitted).not.toContain('tool.retry_recorded');
     expect(emitted.filter((eventType) => eventType === 'tool.finished')).toHaveLength(1);
@@ -585,18 +595,20 @@ describe('ToolOutcome controller recovery integration', () => {
     const runtimeManager = manager as McpConnectionManager & {
       ensureProviderReady(): Promise<void>;
     };
-    runtimeManager.ensureProviderReady = async () => {};
+    runtimeManager.ensureProviderReady = async () => {
+      throw new McpProviderError({
+        providerId: 'fixture',
+        kind: 'provider_unavailable',
+        message: 'private pre-dispatch outage',
+        recoveryAction: 'retry',
+        retryable: true,
+      });
+    };
     manager.findCapability = () => descriptor;
     let calls = 0;
     manager.callCapability = async () => {
       calls += 1;
-      throw new McpProviderError({
-        providerId: 'fixture',
-        kind: 'provider_unavailable',
-        message: 'private outage',
-        recoveryAction: 'retry',
-        retryable: true,
-      });
+      return { content: [] };
     };
     const events = await executeRuntimeTools({
       state,
@@ -613,7 +625,7 @@ describe('ToolOutcome controller recovery integration', () => {
         features: { capabilityCatalogV1: true, mcpRuntimeBindingV1: true },
       },
     });
-    expect(calls).toBe(1);
+    expect(calls).toBe(0);
     expect(events.some((event) => event.type === 'tool.failed')).toBe(true);
   });
 

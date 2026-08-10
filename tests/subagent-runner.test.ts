@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { createInitialRuntimeState } from '@/core/runtime/state';
 import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
@@ -13,6 +15,7 @@ import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabil
 import type { AgentConfig } from '../src/core/config/index';
 import { type AIMessage, aiMessage } from '../src/core/messages';
 import type { SupportedChatModel } from '../src/core/model/factory';
+import { runToolJourneySuiteV1 } from './evals/tool-journey-v1';
 import { StreamingMockModel } from './mock-model';
 
 function mockEventSink() {
@@ -26,6 +29,135 @@ function mockEventSink() {
 }
 
 describe('SubAgentRunner integration', () => {
+  test('parent reducer and child provider share one public stdout-or-stderr projection matrix', async () => {
+    const combinations = [
+      { ok: true, stdout: '', stderr: '' },
+      { ok: true, stdout: '', stderr: 'stderr' },
+      { ok: true, stdout: 'stdout', stderr: '' },
+      { ok: true, stdout: 'stdout', stderr: 'stderr' },
+      { ok: false, stdout: '', stderr: '' },
+      { ok: false, stdout: '', stderr: 'stderr' },
+      { ok: false, stdout: 'stdout', stderr: '' },
+      { ok: false, stdout: 'stdout', stderr: 'stderr' },
+    ] as const;
+
+    for (const [index, combination] of combinations.entries()) {
+      const ws = mkdtempSync(join(tmpdir(), `kite-code-public-result-${index}-`));
+      let providerCalls = 0;
+      let secondProviderPrompt: unknown;
+      const model = {
+        model: {
+          specificationVersion: 'v4',
+          provider: 'fixture',
+          modelId: 'fixture-model',
+          supportedUrls: {},
+          async doGenerate(options: { prompt?: unknown }) {
+            providerCalls += 1;
+            if (providerCalls === 1) {
+              return {
+                content: [
+                  {
+                    type: 'tool-call',
+                    toolCallId: `child-shell-${index}`,
+                    toolName: 'shell_execute',
+                    input: { command: 'pwd' },
+                  },
+                ],
+                finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+                usage: { inputTokens: {}, outputTokens: {}, totalTokens: 0 },
+              };
+            }
+            secondProviderPrompt = options.prompt;
+            return {
+              content: [{ type: 'text', text: 'done' }],
+              finishReason: { unified: 'stop', raw: 'stop' },
+              usage: { inputTokens: {}, outputTokens: {}, totalTokens: 0 },
+            };
+          },
+          async doStream(): Promise<never> {
+            throw new Error('streaming disabled');
+          },
+        },
+        capabilityMetadata: { streaming: false },
+        setRetryListener: () => {},
+      } as unknown as SupportedChatModel;
+      try {
+        await runSubAgent({
+          config: { providerName: 'fixture', modelName: 'fixture-model' } as AgentConfig,
+          workspace: ws,
+          role: getRoleConfig('code'),
+          task: 'inspect the workspace',
+          timeoutMs: 5000,
+          signal: new AbortController().signal,
+          eventSink: mockEventSink().sink,
+          model,
+          shellExecutor: async (input) => ({
+            ...combination,
+            command: input.command,
+            exitCode: combination.ok ? 0 : 1,
+          }),
+        });
+
+        const providerToolTurn = (
+          secondProviderPrompt as Array<{ role?: string; content?: unknown }>
+        ).find((entry) => entry.role === 'tool');
+        const childContent = (
+          providerToolTurn?.content as
+            | Array<{ output?: { type?: string; value?: string }; text?: string }>
+            | undefined
+        )?.[0];
+        const childModelContent = childContent?.output?.value ?? childContent?.text;
+
+        let parent = createInitialRuntimeState({
+          threadId: `public-result-${index}`,
+          userId: 'test',
+          workspace: ws,
+        });
+        parent = {
+          ...parent,
+          tools: {
+            ...parent.tools,
+            calls: {
+              parent: {
+                toolCallId: 'parent',
+                modelMessageId: 'parent-model',
+                name: 'shell_execute',
+                args: { command: 'pwd' },
+                sideEffect: false,
+                effectClass: 'read_only',
+                status: 'running',
+                createdAtTurnId: parent.turn.turnId,
+              },
+            },
+            queue: [],
+            active: ['parent'],
+          },
+        };
+        parent = reduceRuntimeState(parent, {
+          type: 'tool.finished',
+          toolCallId: 'parent',
+          name: 'shell_execute',
+          result: {
+            ...combination,
+            command: 'pwd',
+            exitCode: combination.ok ? 0 : 1,
+          },
+        });
+        const parentContent = parent.transcript.messages.find(
+          (message) => message.kind === 'tool' && message.toolCallId === 'parent',
+        )?.content;
+        expect(childModelContent, JSON.stringify(combination)).toBe(parentContent);
+        expect(parentContent, JSON.stringify(combination)).toBe(
+          combination.ok
+            ? combination.stdout || combination.stderr
+            : combination.stderr || combination.stdout,
+        );
+      } finally {
+        rmSync(ws, { recursive: true, force: true });
+      }
+    }
+  });
+
   test('explore role: emits start→done events in order', async () => {
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
@@ -96,6 +228,96 @@ describe('SubAgentRunner integration', () => {
       const stepEvents = events.filter((e) => e.type === 'step');
       expect(stepEvents.length).toBeGreaterThanOrEqual(1);
       expect(stepEvents[0]!.data.toolName).toBe('read_file');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('read_file ENOENT uses the same public projection and recovery advice in parent and child', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-enoent-parity-'));
+    const privatePath = 'private-missing-result.ts';
+    const { events, sink } = mockEventSink();
+    let callCount = 0;
+    let secondProviderPrompt: unknown;
+    const languageModel = {
+      specificationVersion: 'v4',
+      provider: 'fixture',
+      modelId: 'fixture-model',
+      supportedUrls: {},
+      async doGenerate(options: { prompt?: unknown }) {
+        callCount += 1;
+        if (callCount === 1) {
+          return {
+            content: [
+              {
+                type: 'tool-call',
+                toolCallId: 'child-missing',
+                toolName: 'read_file',
+                input: { path: privatePath },
+              },
+            ],
+            finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+            usage: { inputTokens: {}, outputTokens: {}, totalTokens: 0 },
+          };
+        }
+        secondProviderPrompt = options.prompt;
+        return {
+          content: [{ type: 'text', text: 'stop after locating failure' }],
+          finishReason: { unified: 'stop', raw: 'stop' },
+          usage: { inputTokens: {}, outputTokens: {}, totalTokens: 0 },
+        };
+      },
+      async doStream(): Promise<never> {
+        throw new Error('streaming disabled');
+      },
+    };
+    const model = {
+      model: languageModel,
+      capabilityMetadata: { streaming: false },
+      setRetryListener: () => {},
+    } as unknown as SupportedChatModel;
+    try {
+      const child = await runSubAgent({
+        config: {
+          providerName: 'fixture',
+          modelName: 'fixture-model',
+          features: { promptContractV2: false },
+        } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'locate the missing fixture',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      });
+      const childFailure = Object.values(child.toolRecovery?.failures ?? {})[0]!;
+      const parentJourney = (await runToolJourneySuiteV1()).cases.find(
+        (entry) => entry.id === 'enoent_locate_success',
+      )!;
+      const parentOutcome = parentJourney.canonicalOutcomes[0]!;
+      expect(childFailure.outcome.failure?.detailCode).toBe(parentOutcome.detailCode);
+      expect(childFailure.outcome.recovery.disposition).toBe(parentOutcome.recoveryDisposition);
+      const providerToolTurn = (
+        secondProviderPrompt as Array<{ role?: string; content?: unknown }>
+      ).find((entry) => entry.role === 'tool');
+      const projectedPrompt = JSON.stringify(providerToolTurn);
+      const projectedEvent = JSON.stringify(
+        events.find((event) => event.type === 'tool_result' && event.data.toolName === 'read_file'),
+      );
+      for (const forbidden of [
+        privatePath,
+        ws,
+        '"command"',
+        '"path"',
+        'resultMeta',
+        'classifierAdviceV1',
+        'capabilityIntent',
+        'guidance',
+      ]) {
+        expect(projectedPrompt).not.toContain(forbidden);
+        expect(projectedEvent).not.toContain(forbidden);
+      }
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
@@ -253,7 +475,8 @@ describe('SubAgentRunner integration', () => {
         (e) => e.type === 'tool_result' && e.data.toolName === 'read_file',
       );
       expect(readResult?.data.ok).toBe(true);
-      expect(String(readResult?.data.summary)).toContain('read_file package.json');
+      expect(String(readResult?.data.summary)).toContain('"name":"fixture"');
+      expect(String(readResult?.data.summary)).not.toContain('"command"');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

@@ -172,7 +172,9 @@ Provider dispatch 前停止。Kernel 原子 batch 逐事件用前一事件产生
 因此 `[tool.started, tool.finished]` 的 terminal certainty/timing 不会读取陈旧 state。
 生产 safe-read retry 还要求唯一一次有效 `tool.started` 已由 Kernel reducer 持久化；随后
 `tool.retry_recorded` 才能记录 attempt/recoveryOf 并授权第二次 dispatch。ack 后崩溃重启不得重置
-ceiling。restore 对 journal 重新计算 canonical failure ID，并验证 map/order/outcome lineage、parent
+ceiling。MCP readiness 是 provider/capability dispatch 之前的生产边界：首次 readiness failure 使用
+`not_started/none/pre_dispatch` authority，durable retry ack 后才允许第二次 readiness attempt 与唯一一次
+capability dispatch。restore 对 journal 重新计算 canonical failure ID，并验证 map/order/outcome lineage、parent
 recoveryOf、attempt counters 与 progress revision；伪造相互一致的 ID 也不能绕过重算。
 schema v23/current snapshot 或当前 Subagent continuation 缺少 recovery journal 本身就是损坏状态，
 restore 必须 quality-blocked；只有 pre-v23 migration 可以初始化空 journal。auto-review rejection 在
@@ -180,7 +182,11 @@ current、replay 和下一次 model projection 中都只追加一个与原 AI to
 损坏 journal 使用 `journal_invalid/persistence_unavailable`，普通 no-progress ceiling 使用
 `no_progress/loop_exhausted`；二者由同一 terminal outcome 驱动 Session、metrics 与 TUI。
 task 子 Agent 的完整 result 只在 Controller 私有侧用于 journal merge，模型面只接收显式 public DTO，
-不会 JSON stringify continuation、execution journal、exhausted fingerprint 或 recovery key/lineage。
+不会 JSON stringify continuation、execution journal、exhausted fingerprint 或 recovery key/lineage。parent
+reducer 与 child provider context 复用唯一 public projection helper：success 为 `stdout || stderr || ''`，failure
+为 `stderr || stdout || ''`，输入同时包含 `ok` 与 terminal status。Sandbox fail-closed boundary 以 Runtime-authored
+`terminationReason=sandbox_denied` 分类为 `sandbox_error/sandbox_denied`，不解析 stderr，也不调用底层命令；受控
+fallback sentinel 与 persisted authorization-widening event 计数提供可突变的零调用/零放宽证据。
 `journal_invalid` 对所有 journal mutator 都是吸收态，因此同一 Kernel batch 中 child merge 后紧随的
 task success 也不能清除 hard block。其 task/turn scope 只用于 provenance，scheduler/admission 必须在
 下一 turn、新 task、task close 与 SQLite restore 后继续全局 `persistence_unavailable` 零 dispatch 阻断；

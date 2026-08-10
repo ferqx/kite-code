@@ -396,7 +396,7 @@ export interface ToolFinishedEvent {
     /** Structured ask_user result for UI consumers; stdout remains the model transcript. */
     userInput?: UserInputResult;
     /** Structured process termination cause; stderr text is never classification authority. */
-    terminationReason?: 'timed_out' | 'cancelled';
+    terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
     /** Provider-neutral structured facts; stdout remains model-facing content only. */
     resultMeta?: import('./state').ToolResultMeta;
   };

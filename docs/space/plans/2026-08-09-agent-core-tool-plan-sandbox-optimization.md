@@ -93,6 +93,8 @@ skipped 理由及未解决 failure/approval。随后由独立 `ACORE-PLAN-03` �
 | `ACORE-PLAN-03` | completed | CompletionGuard V2 verification/effect evidence gate、严格 Plan identity、schema-bound legacy replay、跨 turn correction ceiling、required-verification metadata-only Journey 与 atomic terminal batch 已通过整体规格/质量审查；PR 级门禁仍独立待执行。 |
 | `ACORE-TOOL-01` | completed | Runtime-owned ToolOutcome V1、同 terminal event shadow、strict legacy replay、metadata-only unknown-field/session/metrics/TUI projection 已落地，并通过整体规格与代码质量审查。 |
 | `ACORE-TOOL-02` | completed | Durable parent/subagent recovery journal、private HMAC identity、recoveryOf、一次 correction/retry ceiling、fail-closed restore、quality guard 与 CompletionGuard unresolved gate 已落地，并通过整体规格与代码质量审查。 |
+| `ACORE-EVAL-01` | completed | `ToolJourneyEvalV1` 10 条冻结 ID 的 deterministic full-loop case、真实 pre-dispatch retry/sandbox denial/replan/guard、typed terminal/lineage/timing/privacy 报告与 first-decision 纠名已落地，并通过整体规格与代码质量审查；未运行正式十轮 A/B 或真实 Provider。 |
+| `ACORE-CONTRACT-01` | completed | 19/19 builtin structured contract、legacy/V2 × planning/building resolved schema/parse 矩阵、父子 public result/classifier/model-content 同构与 Runner recovery 单一事实源已落地，并通过整体规格与代码质量审查。 |
 | `ACORE-EVAL-POLICY-01` | frozen (r1) | first-decision candidate `300e11a4`、OpenCode Go、十轮 paired sample 和 Go usage privacy boundary 已冻结；完整 Journey candidate 仍待后续 scope 收敛。 |
 
 ## `ACORE-DOC-01`：文档冻结与 Review
@@ -180,12 +182,37 @@ no privilege escalation、重复失败 → replan/finalize。每条完整执行 
 现有 Prompt A/B 重命名为 first-decision eval；重复只在本地运行期使用 internal identity 计算，对外只报固定计数。它继续
 作为 prompt 选择证据，不能报告 whole-turn 性能。
 
+2026-08-11 已实现 `ToolJourneyEvalV1`：十条冻结 ID case 的 scripted model 不得直接伪造 terminal/retry/rejection/run.error，
+工具执行、durable retry、approval/policy 与 CompletionGuard 均经过 production Controller/executor/Kernel；报告从 reducer/store
+事实派生固定 case ID、真实 Runtime/boundary/provider dispatch attempt、canonical outcome FailureKind/detail/authority/recovery、lineage 是否存在、稳定 resolution、可信 timing
+与 atomic guard terminal。递归 exact-key allowlist privacy test 禁止正文、路径、命令、stdout/stderr 与 private identity/lineage ID，
+闭集值复用 production types，计数只接受有限非负整数，`metadataOnly` 来自 schema validator；每条 synthetic workspace、HOME、Kite
+data root 与 Kernel 均由最外层 `try/finally` 隔离/恢复/关闭，uncached seam 单独复验环境恢复。safe transient 在真实 MCP readiness
+pre-dispatch failure 后 durable ack，再执行唯一 capability dispatch，并保留初始失败与最终成功；sandbox permission case 经过
+production fail-closed executor，产生 `sandbox_error/sandbox_denied`；可触发 fallback sentinel 与 persisted authorization-widening
+event 证明零底层命令/零放宽/replay，不再报告不可观测的权限提升常量；重复 failure 通过真实 write_plan
+replan/review/update_plan finalize 收敛。
+canonical live 入口为 `test:first-decision:live` / `scripts/evals/first-decision-eval.ts`，报告 schema 为
+`FirstDecisionEvalV1` 且固定 `evaluationScope=first_decision_only`；旧命令/API 仅作兼容别名。本 tranche 未运行正式十轮
+A/B、真实 Provider 或 Go usage 核验。
+
 ## `ACORE-CONTRACT-01`：ToolSpec 契约收敛
 
 - 全部 builtin specs 从 availability context 生成合法的 legacy/V2、planning/building 期望矩阵；context-sensitive schema 的
   projection 与 parse 必须使用同一个 resolved schema，不做无效笛卡尔积。
 - selection、参数约束、result、recovery 各自结构化，V2 不再依靠“取第一句”保存关键语义。
 - 删除旧 guidance 前证明父/子 Runtime result projection 同构；先观测 unknown-field rate，再渐进 strict。
+
+2026-08-11 已将 19 个 builtin 全部绑定到 `BUILTIN_TOOL_CONTRACTS` 的结构化 selection/use/constraints/result/recovery
+事实；Skill runtime 不再保留独立契约，Runner recovery guidance 直接读取 Registry ToolSpec，V2 逐事实投影而非截取旧文案
+首句。conformance 覆盖 19/19、带合法 Skill catalog/active frame/task adapter 的 legacy/V2 × planning/building availability
+context，并分别验证 provider JSON Schema 与 Registry parse 的有效/无效/unknown 输入。每个 builtin 的真实
+`projectResult/createInterrupt` 还会经过 canonical terminal、reducer 与 provider context，JSON key 必须落在 contract fields，
+text 返回不得虚构字段；unknown-field 只保留 metadata-only 低基数观测。旧四段式输入仅供外部/测试 Registry 读取兼容。
+父 Runtime reducer/Subagent provider context 复用唯一按 status 分流的 public model-content helper 与 ToolSpec classifier advice：success
+使用 `stdout || stderr || ''`，failure 使用 `stderr || stdout || ''`。八组 success/failure × stdout/stderr 空值组合均有真实 parity test，
+shell failure 另走 runApprovedTool→Controller terminal→Kernel reducer→provider context 并对照 ToolSpec/returns；child 不再 JSON 化完整 `ToolExecutionResult`；
+ENOENT parity journey 同时验证 detail/recovery 一致以及 command/path/resultMeta/private guidance 不进入 Tool Result。
 
 ## `ACORE-GIT-01`：只读 Git broker
 

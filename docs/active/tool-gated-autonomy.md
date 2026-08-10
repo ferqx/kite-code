@@ -33,7 +33,9 @@ Runtime 自动 retry 只允许一次，并且仅限明确 pre-dispatch、受信 
 idempotency receipt 的调用。配置或参数中的 idempotency key 本身不是 receipt，不能授权 replay；
 `correct_args` 只允许下一次模型响应提出一次新 invocation，绝不原样自动重放。
 safe-read replay 前的 retry fact 必须由 RuntimeStore 明确 durable ack；仅同步 emit、持久化失败或
-缺少 persister 时第二次 dispatch 为零。已解析 identity 使用当前 ToolSpec/MCP binding schema 的
+缺少 persister 时第二次 dispatch 为零。MCP readiness 本身属于 pre-dispatch boundary：如果它在任何
+capability dispatch 前失败，失败 authority 必须为 `not_started/none/pre_dispatch`；durable ack 后可再做
+一次 readiness attempt，但整个 lineage 仍只允许唯一一次后续 capability dispatch。已解析 identity 使用当前 ToolSpec/MCP binding schema 的
 default 后参数与 revision；malformed raw 参数只进入私有 HMAC equality，不作为明文 state。
 真实 Kernel 路径必须先持久化唯一一次有效 `tool.started`，再持久化可由 reducer 消费的
 `tool.retry_recorded`，才允许第二次 Provider dispatch；retry ack 后即使进程在 terminal 前崩溃，
@@ -55,10 +57,22 @@ quality fact 与 CompletionGuard blocker；exhausted 不是 recovered。只有�
 `recoveryOf`。quality guard 允许 Plan、询问用户与 capability search 等逃逸工具形成真实替代进展。
 主 Runtime 与 Subagent 的 deny 重提、MCP binding failure、legacy exhausted bypass、restart 与 parent
 merge 全部走同一 typed terminal/journal 路径，不保留另一套正文或计数旁路。
+Subagent 的正常执行与 approval resume 都只能把 `ToolExecutionResult` 的 canonical public model content
+追加到下一次 Provider context；该内容与 parent reducer 共用唯一 helper，success 选择
+`stdout || stderr || ''`，failure 选择 `stderr || stdout || ''`，并同时读取 `ok`/terminal status。
+command、path、resultMeta、classifier advice 与 private recovery guidance
+不得通过 `JSON.stringify(result)` 进入 transcript。ToolSpec advice 仍作为独立 metadata 输入同一
+`classifyToolOutcomeV1`，因此父/子 `read_file` ENOENT 等失败得到相同 detail/recovery，而公开错误文本不重复路径。
 生产 task Subagent 从创建时继承 parent journal 的 canonical-private `identityKey`，所以 child failure
 merge 后的 fingerprint 已经属于 parent HMAC domain；foreign-key journal 不复制任何 failure/fingerprint，
 而是 fail closed quality block。同一 child deny 被 parent 再次提出时，Controller 在 dispatch 前以同一
 canonical identity 零调用阻断。该 key 与 fingerprint 仍不进入 Provider、SessionLog、metrics 或 TUI。
+
+Sandbox fail-closed executor 在 backend/flag 不可用且禁止 unsandboxed fallback 时写入结构化
+`terminationReason=sandbox_denied`。Runtime 由该字段分类为 `sandbox_error/sandbox_denied`，不得解析 stderr，
+不得把它投影成 approval/phase rejection，也不得尝试底层命令或自动 replay。测试通过同一 factory 的
+可触发 fallback sentinel 证明底层 executor 确实可观测，并从 persisted Runtime event 计数证明没有 approval grant、
+authorization/interaction-mode widening；不存在生产计数 seam 的“权限提升尝试”不得以常量伪造。
 
 schema v23/current Runtime snapshot 与当前 Subagent continuation 都必须携带 journal；缺失即 fail closed
 quality block，只有 pre-v23 migration 可初始化空 journal。invalid provider raw args 在

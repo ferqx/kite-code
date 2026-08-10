@@ -26,7 +26,8 @@ describe('Prompt Contract A/B runner', () => {
       ]),
     );
     const report = await runPromptContractAb({ live: false });
-    expect(report.schema).toBe('PromptContractAbV3');
+    expect(report.schema).toBe('FirstDecisionEvalV1');
+    expect(report.evaluationScope).toBe('first_decision_only');
     expect(report.status).toBe('live_eval_skipped');
     expect(report.schedule).toBe('counterbalanced_ab_ba');
     expect(report.configuredRuns).toBe(10);

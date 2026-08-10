@@ -109,6 +109,9 @@ export const PROMPT_AB_CASES: readonly PromptAbCase[] = [
   },
 ] as const;
 
+/** Canonical name: this suite observes only the first model decision, never a Runtime journey. */
+export const FIRST_DECISION_CASES = PROMPT_AB_CASES;
+
 interface Aggregate {
   version: PromptContractVersion;
   attempts: number;
@@ -757,9 +760,11 @@ export async function runPromptContractAb(input: {
   const runs = normalizeRuns(input.runs);
   if (!input.live) {
     return {
-      schema: 'PromptContractAbV3',
+      schema: 'FirstDecisionEvalV1',
+      evaluationScope: 'first_decision_only',
       status: 'live_eval_skipped',
-      reason: 'Set KITE_RUN_PROMPT_AB=1 to use configured Provider credentials.',
+      reason:
+        'Set KITE_RUN_FIRST_DECISION_EVAL=1 (or legacy KITE_RUN_PROMPT_AB=1) to use configured Provider credentials.',
       schedule: 'counterbalanced_ab_ba',
       configuredRuns: runs,
       caseCount: PROMPT_AB_CASES.length,
@@ -772,7 +777,8 @@ export async function runPromptContractAb(input: {
     resolved = resolveOpenCodeGoConfig();
   } catch {
     return {
-      schema: 'PromptContractAbV3',
+      schema: 'FirstDecisionEvalV1',
+      evaluationScope: 'first_decision_only',
       status: 'provider_setup_failed',
       reason: 'opencode_go_route_or_credentials_unavailable',
       schedule: 'counterbalanced_ab_ba',
@@ -846,7 +852,8 @@ export async function runPromptContractAb(input: {
     providerEvidenceAccumulators.v2,
   ]);
   return {
-    schema: 'PromptContractAbV3',
+    schema: 'FirstDecisionEvalV1',
+    evaluationScope: 'first_decision_only',
     status: providerEvidence.status === 'verified' ? 'completed' : 'provider_evidence_failed',
     provider: config.providerName,
     model: config.modelName,
@@ -874,6 +881,9 @@ export async function runPromptContractAb(input: {
   };
 }
 
+/** Canonical entrypoint retained beside the legacy function alias for report compatibility. */
+export const runFirstDecisionEval = runPromptContractAb;
+
 if (import.meta.main) {
   try {
     const runsArg = process.argv.find((value) => value.startsWith('--runs='));
@@ -888,7 +898,8 @@ if (import.meta.main) {
   } catch {
     console.error(
       JSON.stringify({
-        schema: 'PromptContractAbV3',
+        schema: 'FirstDecisionEvalV1',
+        evaluationScope: 'first_decision_only',
         status: 'provider_request_failed',
         reason: 'live_provider_request_failed',
         contentLogged: false,
