@@ -543,6 +543,10 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     ]);
     kernel.close();
 
+    const initialStore = createRuntimeStore(storePath);
+    const persistedBeforeFirstRun = initialStore.loadEvents(threadId).length;
+    initialStore.close();
+
     const events: RuntimeEvent[] = [];
     for await (const event of runRuntimeAgent(
       {
@@ -568,13 +572,14 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     }
 
     expect(mockModel.callCount.count).toBe(2);
-    expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'completion.blocked',
-        code: 'planning_empty',
-        correctionAttempt: 1,
-      }),
-    );
+    assertCompletionGuardCorrectionTerminal(events);
+    const firstPersisted = createRuntimeStore(storePath);
+    const firstReplay = firstPersisted
+      .loadEvents(threadId)
+      .slice(persistedBeforeFirstRun)
+      .map((record) => record.event);
+    firstPersisted.close();
+    assertCompletionGuardCorrectionTerminal(firstReplay);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'task.cancelled',
@@ -624,6 +629,13 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
       secondEvents.push(event);
     }
     expect(mockModel.callCount.count).toBe(4);
+    assertCompletionGuardCorrectionTerminal(secondEvents);
+    const secondPersisted = createRuntimeStore(storePath);
+    const replayed = secondPersisted.loadEvents(threadId).map((record) => record.event);
+    secondPersisted.close();
+    const secondReplay = replayed.slice(persistedBeforeFirstRun + firstReplay.length);
+    assertCompletionGuardCorrectionTerminal(secondReplay);
+    expect(replayed.filter((event) => event.type === 'completion.blocked')).toHaveLength(4);
     expect(secondEvents).toContainEqual(
       expect.objectContaining({
         type: 'model.responded',
@@ -634,6 +646,32 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+function assertCompletionGuardCorrectionTerminal(events: RuntimeEvent[]): void {
+  const blocked = events.filter(
+    (event): event is Extract<RuntimeEvent, { type: 'completion.blocked' }> =>
+      event.type === 'completion.blocked',
+  );
+  expect(blocked).toHaveLength(2);
+  expect(blocked.map((event) => [event.code, event.correctionAttempt])).toEqual([
+    ['planning_empty', 1],
+    ['planning_empty', 2],
+  ]);
+  const firstBlocked = events.indexOf(blocked[0]!);
+  const secondRequest = events.findIndex(
+    (event, index) => index > firstBlocked && event.type === 'model.requested',
+  );
+  const terminalBlock = events.indexOf(blocked[1]!);
+  const aborted = events.findIndex(
+    (event, index) => index > terminalBlock && event.type === 'turn.aborted',
+  );
+  const error = events.findIndex((event, index) => index > aborted && event.type === 'run.error');
+  expect(firstBlocked).toBeGreaterThanOrEqual(0);
+  expect(secondRequest).toBeGreaterThan(firstBlocked);
+  expect(terminalBlock).toBeGreaterThan(secondRequest);
+  expect(aborted).toBeGreaterThan(terminalBlock);
+  expect(error).toBeGreaterThan(aborted);
+}
 
 test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
