@@ -216,7 +216,8 @@ function runtimeTranscriptMessages(state: Readonly<RuntimeState>): BaseMessage[]
             id: message.messageId,
             content: message.content ?? '',
             tool_calls: message.toolCalls.map((call) => ({
-              ...call,
+              id: call.id,
+              name: call.name,
               args: (call.args ?? {}) as Record<string, unknown>,
               type: 'tool_call' as const,
             })),

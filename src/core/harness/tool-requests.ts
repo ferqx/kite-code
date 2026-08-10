@@ -72,6 +72,7 @@ export function toolRequestFromCall(
           typeof argsObj._parse_error === 'string'
             ? argsObj._parse_error
             : 'invalid JSON arguments',
+        parseFailureCode: 'invalid_json',
       },
     };
   }
@@ -82,10 +83,18 @@ export function toolRequestFromCall(
     { id: call.id, name: call.name, args: call.args },
     context,
   );
+  let unknownRegistryFailure:
+    | { id?: string; name: string; error: string; code: 'unknown_tool' }
+    | undefined;
   if (!viaRegistry.ok) {
     // unknown_tool：名称不在 Registry 中，继续检查 MCP 前缀。
     if (viaRegistry.code === 'unknown_tool') {
-      // fall through to MCP check below
+      unknownRegistryFailure = {
+        code: 'unknown_tool',
+        id: viaRegistry.id,
+        name: viaRegistry.name,
+        error: viaRegistry.error,
+      };
     } else {
       // tool_unavailable 或 invalid_arguments → InvalidToolRequest。
       return {
@@ -133,7 +142,19 @@ export function toolRequestFromCall(
     };
   }
 
-  return null;
+  return unknownRegistryFailure
+    ? {
+        ok: false,
+        request: {
+          source: 'invalid',
+          id: unknownRegistryFailure.id,
+          name: unknownRegistryFailure.name,
+          rawArgs: call.args,
+          parseError: unknownRegistryFailure.error,
+          parseFailureCode: unknownRegistryFailure.code,
+        },
+      }
+    : null;
 }
 
 /** 从 AIMessage 中提取并保留单个工具调用 / Extract and keep a single tool call from AIMessage */

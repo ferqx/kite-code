@@ -1,6 +1,7 @@
 import type { RuntimeEvent, RuntimeEventInput } from '@/core/runtime/events';
 import { isRuntimeEventEnvelope } from '@/core/runtime/events';
 import type { ClassifiedFailure } from '@/core/runtime/failures';
+import { toolOutcomeMetricStatusV1 } from '@/core/runtime/tool-outcome';
 import type { ExecutionReceipt } from '@/protocol/capabilities';
 import { createMetricSampleV1, type MetricSampleV1 } from './metrics';
 
@@ -382,18 +383,47 @@ export class ProductionMetricMapperV1 {
             name: 'tool_total',
             observedAt,
             attributes: {
-              outcome: event.result.ok ? 'success' : 'failed',
+              outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
               capability: this.#capabilities.map(event.name),
             },
           }),
+          ...(event.outcomeV1?.timing.totalActiveMs != null
+            ? [
+                createMetricSampleV1({
+                  name: 'tool_duration_ms',
+                  value: event.outcomeV1.timing.totalActiveMs,
+                  observedAt,
+                  attributes: {
+                    outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+                    capability: this.#capabilities.map(event.name),
+                  },
+                }),
+              ]
+            : []),
         ];
       case 'tool.failed':
         return [
           createMetricSampleV1({
             name: 'tool_total',
             observedAt,
-            attributes: { outcome: 'failed', capability: 'custom/unknown' },
+            attributes: {
+              outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+              capability: 'custom/unknown',
+            },
           }),
+          ...(event.outcomeV1?.timing.totalActiveMs != null
+            ? [
+                createMetricSampleV1({
+                  name: 'tool_duration_ms',
+                  value: event.outcomeV1.timing.totalActiveMs,
+                  observedAt,
+                  attributes: {
+                    outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+                    capability: 'custom/unknown',
+                  },
+                }),
+              ]
+            : []),
           ...(event.failure ? this.mapFailure(event.failure, observedAt) : []),
         ];
       case 'tool.rejected':
@@ -401,8 +431,24 @@ export class ProductionMetricMapperV1 {
           createMetricSampleV1({
             name: 'tool_total',
             observedAt,
-            attributes: { outcome: 'rejected', capability: 'custom/unknown' },
+            attributes: {
+              outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+              capability: 'custom/unknown',
+            },
           }),
+          ...(event.outcomeV1?.timing.totalActiveMs != null
+            ? [
+                createMetricSampleV1({
+                  name: 'tool_duration_ms',
+                  value: event.outcomeV1.timing.totalActiveMs,
+                  observedAt,
+                  attributes: {
+                    outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+                    capability: 'custom/unknown',
+                  },
+                }),
+              ]
+            : []),
           ...(event.failure ? this.mapFailure(event.failure, observedAt) : []),
         ];
       case 'tool.cancelled':
@@ -410,9 +456,47 @@ export class ProductionMetricMapperV1 {
           createMetricSampleV1({
             name: 'tool_total',
             observedAt,
-            attributes: { outcome: 'cancelled', capability: 'custom/unknown' },
+            attributes: {
+              outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+              capability: 'custom/unknown',
+            },
           }),
+          ...(event.outcomeV1?.timing.totalActiveMs != null
+            ? [
+                createMetricSampleV1({
+                  name: 'tool_duration_ms',
+                  value: event.outcomeV1.timing.totalActiveMs,
+                  observedAt,
+                  attributes: {
+                    outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+                    capability: 'custom/unknown',
+                  },
+                }),
+              ]
+            : []),
         ];
+      case 'approval.rejected':
+      case 'auto_review.completed': {
+        if (!event.outcomeV1) return [];
+        const outcome = toolOutcomeMetricStatusV1(event.outcomeV1);
+        return [
+          createMetricSampleV1({
+            name: 'tool_total',
+            observedAt,
+            attributes: { outcome, capability: 'custom/unknown' },
+          }),
+          ...(event.outcomeV1.timing.totalActiveMs != null
+            ? [
+                createMetricSampleV1({
+                  name: 'tool_duration_ms',
+                  value: event.outcomeV1.timing.totalActiveMs,
+                  observedAt,
+                  attributes: { outcome, capability: 'custom/unknown' },
+                }),
+              ]
+            : []),
+        ];
+      }
       case 'skill.activation_started':
         return [
           createMetricSampleV1({
@@ -649,7 +733,6 @@ export class ProductionMetricMapperV1 {
       case 'task.cancelled':
       case 'approval.requested':
       case 'approval.granted':
-      case 'approval.rejected':
       case 'provider.action_required':
       case 'provider.action_started':
       case 'provider.action_completed':
@@ -664,7 +747,6 @@ export class ProductionMetricMapperV1 {
       case 'authorization.changed':
       case 'interaction_mode.changed':
       case 'auto_review.requested':
-      case 'auto_review.completed':
       case 'user_input.cancelled':
       case 'turn.started':
       case 'user.message_appended':
@@ -680,6 +762,7 @@ export class ProductionMetricMapperV1 {
       case 'plan.progress_updated':
       case 'approval.command_replaced':
       case 'tool.file_change':
+      case 'tool.retry_recorded':
       case 'subagent.started':
       case 'subagent.step':
       case 'subagent.tool_result':
@@ -687,6 +770,7 @@ export class ProductionMetricMapperV1 {
       case 'subagent.failed':
       case 'subagent.cache_metrics':
       case 'subagent.suspended':
+      case 'subagent.recovery_journal_merged':
         return [];
       default: {
         const exhaustive: never = event;

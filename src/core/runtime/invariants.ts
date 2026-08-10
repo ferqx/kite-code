@@ -3,6 +3,8 @@
 import { validateVerificationSpec } from '@/core/verification/spec';
 import { assertResourceBudgetRuntimeStateV1 } from './resource-budget';
 import type { RuntimeState, ToolCallStatus } from './state';
+import { isToolOutcomeV1 } from './tool-outcome';
+import { toolFailureInstanceIdV1 } from './tool-recovery-journal';
 
 const TERMINAL_TOOL_STATUSES = new Set<ToolCallStatus>([
   'succeeded',
@@ -69,6 +71,39 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   }
   assertUnique(state.tools.queue, 'tool queue');
   assertUnique(state.tools.active, 'active tools');
+  assert(state.toolRecovery?.schemaVersion === 1, 'tool recovery journal schema must be v1.');
+  assert(
+    /^[a-f0-9]{64}$/u.test(state.toolRecovery.identityKey),
+    'tool recovery journal identity key must be canonical private key material.',
+  );
+  assertUnique(state.toolRecovery.order, 'tool recovery journal order');
+  assert(state.toolRecovery.order.length <= 128, 'tool recovery journal exceeds its bound.');
+  for (const failureId of state.toolRecovery.order) {
+    const failure = state.toolRecovery.failures[failureId];
+    assert(failure?.failureInstanceId === failureId, 'tool recovery failure identity is invalid.');
+    assert(
+      isToolOutcomeV1(failure.outcome),
+      `tool recovery failure ${failureId} has an invalid outcome.`,
+    );
+    assert(
+      toolFailureInstanceIdV1({
+        toolCallId: failure.toolCallId,
+        invocationFingerprint: failure.invocationFingerprint,
+        outcome: failure.outcome,
+      }) === failureId,
+      `tool recovery failure ${failureId} does not match its canonical material.`,
+    );
+    const recoveryOf = failure.outcome.lineage?.recoveryOf;
+    if (recoveryOf) {
+      const parent = state.toolRecovery.failures[recoveryOf];
+      assert(parent != null && recoveryOf !== failureId, 'tool recovery lineage is dangling.');
+      assert(
+        parent.modelCorrectionAttempts <= failure.modelCorrectionAttempts &&
+          parent.automaticRetryAttempts <= failure.automaticRetryAttempts,
+        'tool recovery attempt counters cannot move backwards across lineage.',
+      );
+    }
+  }
   assert(state.context != null, 'context runtime state is required.');
   assertResourceBudgetRuntimeStateV1(state.resourceBudget);
   assert(state.context.autoGuard != null, 'context autoGuard is required.');
@@ -119,6 +154,17 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
       !TERMINAL_TOOL_STATUSES.has(call.status),
       `terminal tool ${toolCallId} remains scheduled.`,
     );
+  }
+  for (const call of Object.values(state.tools.calls)) {
+    if (call.recoveryOf && !TERMINAL_TOOL_STATUSES.has(call.status)) {
+      assert(
+        state.toolRecovery.failures[call.recoveryOf] != null,
+        `live tool ${call.toolCallId} recovery lineage is missing its retained failure instance.`,
+      );
+    }
+    if (call.outcomeV1) {
+      assert(isToolOutcomeV1(call.outcomeV1), `tool ${call.toolCallId} has an invalid outcome.`);
+    }
   }
 
   const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;

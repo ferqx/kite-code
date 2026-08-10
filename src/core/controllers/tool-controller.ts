@@ -45,7 +45,11 @@ import {
 import { evaluateToolApproval, isReadOnlyMcpPolicy } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import { classifyFailure, classifyMcpProviderError } from '@/core/runtime/failures';
+import {
+  classifyFailure,
+  classifyMcpProviderError,
+  failureKindForToolParseFailure,
+} from '@/core/runtime/failures';
 import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { genInteractionId } from '@/core/runtime/ids';
 import {
@@ -60,6 +64,12 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import {
+  isToolRecoveryJournalInvalidV1,
+  toolFailureInstanceIdV1,
+  toolInvocationFingerprintV1,
+} from '@/core/runtime/tool-recovery-journal';
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
@@ -124,6 +134,10 @@ function registeredToolFinishedEvent(input: {
           }
         : {}),
     },
+    ...(projected.outcomeAdviceV1 ? { classifierAdviceV1: projected.outcomeAdviceV1 } : {}),
+    ...(projected.classifierDiagnostic
+      ? { classifierDiagnostic: projected.classifierDiagnostic }
+      : {}),
   };
 }
 
@@ -379,6 +393,7 @@ async function handleSubAgentResume(params: {
         authorization: params.state.authorization,
         approvedGrant: call?.approvalGrant ?? 'none',
         threadId: params.state.session.threadId,
+        recoveryIdentityKey: params.state.toolRecovery.identityKey,
         recordFilePreimage: params.recordFilePreimage,
         recordNetworkDecision: params.recordNetworkDecision,
         mcpManager: params.mcpManager,
@@ -539,6 +554,13 @@ async function handleSubAgentResume(params: {
       },
     },
   );
+  if (result.toolRecovery) {
+    events.push({
+      type: 'subagent.recovery_journal_merged',
+      toolCallId: params.toolCallId,
+      journal: result.toolRecovery,
+    });
+  }
   events.push(
     registeredToolFinishedEvent({
       toolCallId: params.toolCallId,
@@ -577,6 +599,10 @@ export async function executeRuntimeTools(params: {
   capabilityArtifactStore?: CapabilityArtifactStore;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
+  /** RuntimeStore-backed acknowledgement required before an automatic provider replay. */
+  persistRuntimeEvent?: (event: RuntimeEvent) => Promise<boolean>;
+  /** Current Kernel state used to reject a prepared/leased effect that became unsafe. */
+  getRuntimeState?: () => Readonly<RuntimeState>;
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorderV1;
@@ -610,6 +636,21 @@ export async function executeRuntimeTools(params: {
       return append();
     };
   }
+  const currentState = params.getRuntimeState?.() ?? params.state;
+  if (isToolRecoveryJournalInvalidV1(currentState.toolRecovery)) {
+    const reason = 'Runtime tool recovery journal is invalid; tool dispatch is blocked.';
+    for (const toolCallId of params.toolCallIds) {
+      const call = currentState.tools.calls[toolCallId] ?? params.state.tools.calls[toolCallId];
+      if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason,
+        failure: classifyFailure('persistence_unavailable', reason),
+      });
+    }
+    return events;
+  }
   const planArtifacts = params.planArtifactStore ?? defaultPlanArtifactStore;
   const capabilityArtifacts = params.capabilityArtifactStore ?? defaultCapabilityArtifactStore;
   const emitSubagentEvent: SubAgentEventSink = (event) => {
@@ -631,6 +672,18 @@ export async function executeRuntimeTools(params: {
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+    if (call.recoveryAdmission && call.recoveryAdmission !== 'admitted') {
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: `Runtime recovery guard blocked this invocation (${call.recoveryAdmission}).`,
+        failure: classifyFailure(
+          'loop_exhausted',
+          `Runtime recovery guard blocked this invocation (${call.recoveryAdmission}).`,
+        ),
+      });
+      continue;
+    }
     if (requiresLegacyPlanReplan(params.state) && !isLegacyPlanContinuationToolAllowed(call.name)) {
       events.push({
         type: 'tool.rejected',
@@ -673,13 +726,14 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (!parsed.ok) {
+      const parseFailureCode = parsed.request.parseFailureCode ?? 'invalid_arguments';
       events.push({
         type: 'tool.failed',
         toolCallId,
         failure: classifyFailure(
-          'tool_invalid_args',
+          failureKindForToolParseFailure(parseFailureCode),
           parsed.request.parseError,
-          parsed.request.parseFailureCode,
+          parseFailureCode,
         ),
       });
       continue;
@@ -932,6 +986,7 @@ export async function executeRuntimeTools(params: {
                     params.taskConfig!,
                   ),
                   threadId: params.state.session.threadId,
+                  recoveryIdentityKey: params.state.toolRecovery.identityKey,
                   eventSink: emitSubagentEvent,
                   signal: params.signal,
                   model: params.taskModel,
@@ -1369,6 +1424,7 @@ export async function executeRuntimeTools(params: {
           authorization: params.state.authorization,
           approvedGrant: call.approvalGrant ?? 'none',
           threadId: params.state.session.threadId,
+          recoveryIdentityKey: params.state.toolRecovery.identityKey,
           recordFilePreimage: params.recordFilePreimage,
           recordNetworkDecision: params.recordNetworkDecision,
           mcpManager: params.mcpManager,
@@ -1390,6 +1446,14 @@ export async function executeRuntimeTools(params: {
           onShellProgress: (chunk, stream) =>
             events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
         });
+
+        if (result.subagentResult?.toolRecovery) {
+          events.push({
+            type: 'subagent.recovery_journal_merged',
+            toolCallId,
+            journal: result.subagentResult.toolRecovery,
+          });
+        }
 
         // ── Sub-agent blocked for approval → surface through Runtime Kernel ──
         if (result.subagentResult?.blocked) {
@@ -1683,15 +1747,9 @@ export async function executeRuntimeTools(params: {
           throw capabilityChangedProviderError(mcpDescriptor.provider.id);
         }
       }
-      const maximumAttempts =
-        mcpDescriptor?.execution?.retry === 'safe_read' ||
-        (mcpDescriptor?.execution?.retry === 'idempotency_key' &&
-          typeof mcpDescriptor.execution.idempotencyKeyArgument === 'string' &&
-          typeof (executionRequest.args as Record<string, unknown>)[
-            mcpDescriptor.execution.idempotencyKeyArgument
-          ] === 'string')
-          ? 2
-          : 1;
+      // Automatic replay is limited to a proven safe read. Merely attaching an
+      // idempotency key is not an idempotency receipt and therefore cannot authorize replay.
+      const maximumAttempts = mcpDescriptor?.execution?.retry === 'safe_read' ? 2 : 1;
       let result: ToolExecutionResult | undefined;
       for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
         try {
@@ -1704,6 +1762,7 @@ export async function executeRuntimeTools(params: {
             authorization: params.state.authorization,
             approvedGrant: call.approvalGrant ?? 'none',
             threadId: params.state.session.threadId,
+            recoveryIdentityKey: params.state.toolRecovery.identityKey,
             recordFilePreimage: params.recordFilePreimage,
             recordNetworkDecision: params.recordNetworkDecision,
             mcpManager: params.mcpManager,
@@ -1737,6 +1796,57 @@ export async function executeRuntimeTools(params: {
         } catch (error) {
           if (attempt + 1 >= maximumAttempts || !isMcpProviderError(error) || !error.retryable) {
             throw error;
+          }
+          const failure = classifyMcpProviderError(error);
+          const invocationFingerprint =
+            call.invocationFingerprint ??
+            toolInvocationFingerprintV1({
+              key: params.state.toolRecovery.identityKey,
+              toolName: call.name,
+              parsedArgs: call.args,
+            });
+          const baseOutcome = classifyToolOutcomeV1({
+            status: 'failed',
+            failure,
+            authority: {
+              dispatchState: 'started',
+              externalEffects: 'none',
+              replaySafety: 'safe_read',
+            },
+            toolAdvice: {
+              disposition: 'retry_once',
+              maximumAdditionalCalls: 1,
+              safeAutomaticRetry: true,
+            },
+          });
+          if (!baseOutcome.recovery.safeAutomaticRetry) throw error;
+          const recoveryOf = toolFailureInstanceIdV1({
+            toolCallId,
+            invocationFingerprint,
+            outcome: baseOutcome,
+          });
+          const retryRecorded: RuntimeEvent = {
+            type: 'tool.retry_recorded',
+            toolCallId,
+            failure,
+            outcomeV1: {
+              ...baseOutcome,
+              lineage: { failureInstanceId: recoveryOf },
+            },
+            recoveryOf,
+            retryAttempt: 1,
+          };
+          if (!params.persistRuntimeEvent) {
+            throw new Error('Automatic retry requires a durable RuntimeStore acknowledgement.');
+          }
+          let persisted = false;
+          try {
+            persisted = await params.persistRuntimeEvent(retryRecorded);
+          } catch {
+            throw new Error('Automatic retry evidence could not be durably persisted.');
+          }
+          if (!persisted) {
+            throw new Error('Automatic retry evidence became stale before durable persistence.');
           }
         }
       }
@@ -1805,6 +1915,7 @@ export async function executeRuntimeTools(params: {
           exitCode: result.exitCode ?? 0,
           stdout: result.stdout ?? '',
           stderr: result.stderr ?? '',
+          ...(result.terminationReason ? { terminationReason: result.terminationReason } : {}),
           resultMeta: {
             ...result.resultMeta,
             ...(result.path ? { path: result.path } : {}),

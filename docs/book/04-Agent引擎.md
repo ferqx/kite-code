@@ -49,6 +49,19 @@ Plan mode 与普通执行共享同一个 Kernel，只通过策略和可用工具
 
 Scheduler 只有在没有待执行工具、审批、Provider Action、恢复动作或 required verification 门禁时才可 `emit_final`。版本化 CompletionGuard 还在 scheduler、runner 与 reducer 三层复用同一 Core 判定：V1 保留 legacy replay 与无 Plan task，PlanDocument V2 使用 V2，并额外校验完整 Plan identity、required verification 和 effect receipt evidence。final 文本只是 candidate，未保存/待审核/未完成的 Plan、非终结 Tool、suspended subagent、unknown invocation、active Skill 或缺失 evidence 都不能形成 `run.completed`。同一 V2 Plan identity 首次错误 final 最多请求一次模型纠正；第二次以 blocked error/aborted turn 收敛。失败根据分类进入重试、repair、replan、用户决策或终止；关闭 feature flag 不能绕过已持久化的安全门禁。
 
+工具终态以同一事件中的 legacy result + `ToolOutcomeV1` shadow 持久化，transcript 仍只有一个
+ToolMessage。Runtime 而非工具正文决定 dispatch/effect certainty、恢复 ceiling 与 timing；历史
+失败只映射为 `legacy_unclassified/unknown/never`。父/子执行共享可重放 recovery journal：参数
+修正一次，受信 safe-read 自动 retry 一次且必须先落 retry record；policy/approval deny、timeout、
+cancel、unknown effect 和没有 receipt 的幂等声明都不重放。恢复数据损坏或重复无进展会在资源
+上限前 fail closed，CompletionGuard V2 也拒绝 unresolved/quality-blocked journal。
+journal 的恢复资格只属于 owning task/turn 的下一次模型响应；只有成功 receipt 或显式
+skip/replan/用户/Provider 进展会恢复 blocker，deny/terminal/next-response exhaustion 在原 scope
+继续阻断，旧任务记录则不污染新任务。safe-read 自动重放在第二次 dispatch 前必须拿到
+RuntimeStore durable ack。已解析调用使用当前 ToolSpec/MCP binding schema defaults 与 revision 生成
+identity，解析失败只保存 raw 参数的私有 HMAC。状态、模型 guidance、Session/metrics 与 TUI 都从同一
+outcome 派生，审批等待与 total active timing 由 Runtime 持久时间边界计算。
+
 MCP Provider Action 是持久化交互。旧 Tool Call 必须先失败并退出调度，Runtime 才向 App shell 请求固定的 login、approve 或 retry。恢复成功会开始新 turn，旧 binding、approval、参数和 invocation 都不重放；延后或失败也会形成明确事实并清除交互。
 工具失败与紧随其后的 Provider Action 使用同一有序 event batch 提交，确保 Kernel 不会在
 Tool Call 仍为 running 时拒绝或提前展示恢复交互。

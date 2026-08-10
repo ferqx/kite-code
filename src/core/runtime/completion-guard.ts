@@ -7,6 +7,10 @@ import type {
 import { isPlanDocumentV2 } from './plan-document';
 import { planCompletionBlocker, planCompletionEvidenceMatchesRuntime } from './plan-evidence';
 import { getActivePlanning, type RuntimeState, type ToolCallStatus } from './state';
+import {
+  hasActiveUnresolvedToolFailuresV1,
+  isToolRecoveryQualityBlockedV1,
+} from './tool-recovery-journal';
 
 export const COMPLETION_GUARD_V1 = 'completion_guard_v1' as const;
 export const COMPLETION_GUARD_V2 = 'completion_guard_v2' as const;
@@ -281,6 +285,19 @@ export function decideCompletionV2(state: RuntimeState): CompletionGuardDecision
   }
   if (Object.values(state.skills.frames).some((frame) => frame.status === 'active')) {
     return block('skill_active', 'complete_skill');
+  }
+  if (
+    state.toolRecovery &&
+    (isToolRecoveryQualityBlockedV1(state.toolRecovery, {
+      taskId: state.activeTaskId,
+      turnId: state.turn.turnId,
+    }) ||
+      hasActiveUnresolvedToolFailuresV1(state.toolRecovery, {
+        taskId: state.activeTaskId,
+        turnId: state.turn.turnId,
+      }))
+  ) {
+    return block('plan_evidence_unresolved', 'resolve_plan_evidence');
   }
   if (!isPlanDocumentV2(document)) {
     return block('plan_evidence_unresolved', 'resolve_plan_evidence');

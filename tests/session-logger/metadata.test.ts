@@ -67,6 +67,27 @@ describe('metadata-only session logging', () => {
           stderr: `${ABSOLUTE_PATH}: ${SECRET}`,
           toolTokenCount: 13,
         },
+        outcomeV1: {
+          schemaVersion: 1,
+          status: 'failed',
+          failure: { kind: 'tool_runtime_error', detailCode: 'runtime_exception' },
+          dispatchState: 'started',
+          externalEffects: 'unknown',
+          recovery: {
+            disposition: 'never',
+            maximumAdditionalCalls: 0,
+            requiresNewModelResponse: false,
+            safeAutomaticRetry: false,
+          },
+          lineage: { failureInstanceId: SECRET, recoveryOf: ABSOLUTE_PATH },
+          timing: { source: 'runtime_boundary', executionMs: 17, totalActiveMs: 31 },
+          unknownFields: {
+            hasUnknown: true,
+            count: 2,
+            toolClass: 'builtin_execute',
+            schemaRevision: SECRET,
+          },
+        },
       },
       {
         type: 'tool.failed',
@@ -140,6 +161,7 @@ describe('metadata-only session logging', () => {
     expect(output).toContain('"toolKind":"other"');
     expect(output).toContain('"inputTokens":11');
     expect(output).toContain('"outputTokens":7');
+    expect(output).toContain('"toolTotalActiveMs":31');
   });
 
   test('session boundary schema exposes only explicit release metadata', () => {

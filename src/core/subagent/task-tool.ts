@@ -24,6 +24,7 @@ export interface TaskToolDeps {
   phase?: import('@/protocol/events').AgentPhase;
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
   threadId?: string;
+  recoveryIdentityKey?: string;
   eventSink: SubAgentEventSink;
   signal?: AbortSignal;
   model?: SupportedChatModel;
@@ -77,6 +78,7 @@ export async function runTaskSubAgent(
       phase: deps.phase,
       projectInstructions: deps.projectInstructions,
       threadId: deps.threadId,
+      recoveryIdentityKey: deps.recoveryIdentityKey,
       timeoutMs: 30 * 60 * 1000,
       signal: deps.signal ?? new AbortController().signal,
       eventSink: deps.eventSink,

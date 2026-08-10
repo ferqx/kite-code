@@ -16,7 +16,7 @@ import {
   submitUserMessage,
   typeText,
 } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -312,5 +312,9 @@ describe('TUI PTY System — Session Switching', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run());
+  test(
+    'runs the complete stateful journey',
+    () => journey.run(),
+    TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
 });

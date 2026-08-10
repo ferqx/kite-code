@@ -77,9 +77,19 @@ function belongsToActiveTask(
   );
 }
 
+function isResolvedRecoveryFailure(state: RuntimeState, call: ToolCallRecord): boolean {
+  const failureInstanceId = call.outcomeV1?.lineage?.failureInstanceId;
+  if (!failureInstanceId) return false;
+  const failure = state.toolRecovery.failures[failureInstanceId];
+  return failure?.status === 'recovered';
+}
+
 function relevantEffectCalls(state: RuntimeState): ToolCallRecord[] {
   return Object.values(state.tools.calls).filter(
-    (call) => call.sideEffect === true && belongsToActiveTask(state, call),
+    (call) =>
+      call.sideEffect === true &&
+      belongsToActiveTask(state, call) &&
+      (call.status === 'succeeded' || !isResolvedRecoveryFailure(state, call)),
   );
 }
 
@@ -131,7 +141,7 @@ export function projectPlanCompletionEvidenceV1(
         entries.push({ kind: 'approval', referenceId: call.toolCallId });
       }
       if (['failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status)) {
-        if (call.sideEffect === true) {
+        if (call.sideEffect === true && !isResolvedRecoveryFailure(state, call)) {
           entries.push({ kind: 'failure', referenceId: call.toolCallId });
         }
       }

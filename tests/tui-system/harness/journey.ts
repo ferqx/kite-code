@@ -19,6 +19,14 @@ const DEFAULT_STEP_TIMEOUT_MS = 30_000;
 const DEFAULT_JOURNEY_DEADLINE_MS = 165_000;
 const STEP_ABORT_SETTLE_TIMEOUT_MS = 100;
 
+/**
+ * Bun's default per-test timeout is only five seconds. Stateful PTY journeys
+ * own several bounded steps plus fixture teardown, so their outer test budget
+ * must remain above the journey deadline without every scenario inventing a
+ * local magic number.
+ */
+export const TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS = 180_000;
+
 function defaultJourneyDeadlineMs(): number {
   const configured = Number(process.env.KITE_TUI_TEST_JOURNEY_DEADLINE_MS);
   if (Number.isInteger(configured) && configured > 0) return configured;

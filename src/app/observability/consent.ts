@@ -14,6 +14,7 @@ export const TELEMETRY_METRICS_BY_CATEGORY_V1 = Object.freeze({
   model_usage: Object.freeze(['model_request_total', 'model_duration_ms', 'model_tokens_total']),
   tool_mcp_skill: Object.freeze([
     'tool_total',
+    'tool_duration_ms',
     'mcp_total',
     'skill_total',
     'plan_total',

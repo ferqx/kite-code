@@ -50,11 +50,24 @@ export function metadataToolKindV1(name: string): string {
 }
 
 function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['status'] {
+  if ('outcomeV1' in event && event.outcomeV1) {
+    switch (event.outcomeV1.status) {
+      case 'success':
+        return 'ok';
+      case 'cancelled':
+        return 'cancelled';
+      case 'unknown':
+        return 'unknown';
+      default:
+        return 'error';
+    }
+  }
   switch (event.type) {
     case 'tool.finished':
       return event.result.ok ? 'ok' : 'error';
     case 'tool.failed':
     case 'tool.rejected':
+    case 'tool.retry_recorded':
     case 'run.error':
     case 'context.compaction_failed':
     case 'context.hard_blocked':
@@ -88,6 +101,35 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['stat
 }
 
 function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
+  const toolOutcomeMetadata = (
+    outcome: import('@/core/runtime/tool-outcome').ToolOutcomeV1 | undefined,
+  ): MetadataFieldsV1 =>
+    outcome
+      ? {
+          toolOutcomeStatus: outcome.status,
+          ...(outcome.failure ? { toolOutcomeDetailCode: outcome.failure.detailCode } : {}),
+          toolDispatchState: outcome.dispatchState,
+          toolExternalEffects: outcome.externalEffects,
+          toolRecoveryDisposition: outcome.recovery.disposition,
+          ...(outcome.timing.queueMs != null ? { toolQueueMs: outcome.timing.queueMs } : {}),
+          ...(outcome.timing.executionMs != null
+            ? { toolExecutionMs: outcome.timing.executionMs }
+            : {}),
+          ...(outcome.timing.approvalWaitMs != null
+            ? { toolApprovalWaitMs: outcome.timing.approvalWaitMs }
+            : {}),
+          ...(outcome.timing.totalActiveMs != null
+            ? { toolTotalActiveMs: outcome.timing.totalActiveMs }
+            : {}),
+          ...(outcome.unknownFields
+            ? {
+                unknownFieldObserved: outcome.unknownFields.hasUnknown,
+                unknownFieldCount: outcome.unknownFields.count,
+                unknownFieldToolClass: outcome.unknownFields.toolClass,
+              }
+            : {}),
+        }
+      : {};
   switch (event.type) {
     case 'tool.queued':
     case 'tool.finished':
@@ -96,11 +138,27 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
         ...(event.type === 'tool.finished' && event.result.toolTokenCount != null
           ? { outputTokens: event.result.toolTokenCount }
           : {}),
+        ...(event.type === 'tool.finished' ? toolOutcomeMetadata(event.outcomeV1) : {}),
       };
     case 'tool.failed':
-      return event.failure ? { failureKind: event.failure.kind } : {};
+      return {
+        ...(event.failure ? { failureKind: event.failure.kind } : {}),
+        ...toolOutcomeMetadata(event.outcomeV1),
+      };
     case 'tool.rejected':
-      return event.failure ? { failureKind: event.failure.kind } : {};
+      return {
+        ...(event.failure ? { failureKind: event.failure.kind } : {}),
+        ...toolOutcomeMetadata(event.outcomeV1),
+      };
+    case 'tool.cancelled':
+      return toolOutcomeMetadata(event.outcomeV1);
+    case 'tool.retry_recorded':
+      return {
+        failureKind: event.failure.kind,
+        retryAttempt: event.retryAttempt,
+        retryMaxAttempts: 1,
+        ...toolOutcomeMetadata(event.outcomeV1),
+      };
     case 'approval.requested':
       return {
         toolKind: metadataToolKindV1(event.approval.tool),
@@ -113,6 +171,7 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
         approvalType: 'tool',
         approvalResult: 'rejected',
         ...(event.failure ? { failureKind: event.failure.kind } : {}),
+        ...toolOutcomeMetadata(event.outcomeV1),
       };
     case 'auto_review.requested':
       return {
@@ -124,6 +183,7 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
         approvalType: 'auto_review',
         approvalResult: event.result.approved ? 'approved' : 'rejected',
         durationMs: event.result.durationMs,
+        ...toolOutcomeMetadata(event.outcomeV1),
       };
     case 'verification.requested':
       return { verificationType: event.mode };

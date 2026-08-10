@@ -51,6 +51,8 @@ export interface ShellResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** Runtime-authored process terminal cause; never inferred from stderr. */
+  terminationReason?: 'timed_out' | 'cancelled';
   processCleanup?: {
     confirmedExited: boolean;
     gracefulRequested: boolean;

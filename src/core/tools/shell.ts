@@ -256,6 +256,11 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
               'Command cancelled by user.',
             )
           : cleanMsys2Noise(normalizeMsys2PathsInText(rawStderr)),
+      ...(timedOut
+        ? { terminationReason: 'timed_out' as const }
+        : cancelled
+          ? { terminationReason: 'cancelled' as const }
+          : {}),
       ...(terminationResult
         ? {
             processCleanup: {
@@ -290,6 +295,11 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
           : error instanceof Error
             ? error.message
             : String(error),
+      ...(timedOut
+        ? { terminationReason: 'timed_out' as const }
+        : cancelled || isAbort
+          ? { terminationReason: 'cancelled' as const }
+          : {}),
       ...(terminationResult
         ? {
             processCleanup: {

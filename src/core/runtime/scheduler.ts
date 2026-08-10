@@ -3,6 +3,10 @@ import { decideCompletion, decideCompletionV1 } from './completion-guard';
 import type { RuntimeEffect } from './effects';
 import { isLegacyPlanContinuationToolAllowed, requiresLegacyPlanReplan } from './plan-continuation';
 import { getActivePlanning, getAgentPhase, type RuntimeState, type ToolCallRecord } from './state';
+import {
+  isToolRecoveryJournalInvalidV1,
+  isToolRecoveryQualityBlockedV1,
+} from './tool-recovery-journal';
 
 /** Bound resource usage while still allowing independent reads to overlap. */
 export const MAX_PARALLEL_READ_TOOLS = 4;
@@ -101,6 +105,17 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       type: 'recovery_blocked',
       reason: `Runtime context is blocked by a correctness failure: ${state.context.hardBlock.reason}. Rewind, clear, or start a new session.`,
       failureKind: 'unknown',
+    };
+  }
+  // A corrupt recovery journal is a global correctness hard block. It must
+  // outrank every executable/interacting surface, including already queued
+  // tools, verification, completion and compaction.
+  if (isToolRecoveryJournalInvalidV1(state.toolRecovery)) {
+    return {
+      type: 'recovery_blocked',
+      reason: 'Runtime tool recovery journal is invalid and cannot safely continue.',
+      failureKind: 'persistence_unavailable',
+      recoveryCause: 'journal_invalid',
     };
   }
   // A terminal turn remains terminal across snapshot recovery and loop
@@ -333,6 +348,21 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     if (anyUserRejected && !hasNewUserMessageAfter) {
       return { type: 'stop' };
     }
+  }
+
+  if (
+    state.toolRecovery.qualityGuard.reasonCode === 'no_progress' &&
+    isToolRecoveryQualityBlockedV1(state.toolRecovery, {
+      taskId: state.activeTaskId,
+      turnId: state.turn.turnId,
+    })
+  ) {
+    return {
+      type: 'recovery_blocked',
+      reason: 'Runtime tool recovery reached the no progress quality ceiling.',
+      failureKind: 'loop_exhausted',
+      recoveryCause: 'no_progress',
+    };
   }
 
   return { type: 'call_model' };

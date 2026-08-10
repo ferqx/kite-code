@@ -171,6 +171,8 @@ export interface RunApprovedToolInput {
   interactionMode?: import('@/protocol/events').InteractionMode;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
+  /** Parent Runtime canonical-private recovery identity inherited by task subagents. */
+  recoveryIdentityKey?: string;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   /** Runs after all local policy/approval checks and immediately before tool dispatch. */
@@ -215,6 +217,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     interactionMode = 'accept_edits',
     taskConfig,
     taskModel,
+    recoveryIdentityKey,
     providerDataAdmission,
     descendantResourceAdmission,
     beforeDispatch,
@@ -447,6 +450,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
                   phase,
                   projectInstructions: projectInstructionSnapshot,
                   threadId,
+                  recoveryIdentityKey,
                   eventSink: subagentEventSink,
                   signal,
                   model: taskModel,

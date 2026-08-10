@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { clearInput, submitCommand, submitUserMessage, typeText } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
@@ -389,5 +389,9 @@ describe('TUI PTY System — Session Lifecycle', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run());
+  test(
+    'runs the complete stateful journey',
+    () => journey.run(),
+    TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
 });

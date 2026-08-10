@@ -33,6 +33,71 @@ import {
 import { createMockModel } from '../mock-model';
 
 describe('AgentKernel durability', () => {
+  test('fails closed when a current v23 snapshot omits the recovery journal', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-v23-missing-recovery-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'v23-missing-recovery';
+    try {
+      const current = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      delete (current as Partial<RuntimeState>).toolRecovery;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, current);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().toolRecovery.qualityGuard).toMatchObject({
+        blocked: true,
+        reasonCode: 'journal_invalid',
+      });
+      expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('initializes a missing recovery journal only while migrating a pre-v23 snapshot', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-v22-missing-recovery-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'v22-missing-recovery';
+    try {
+      const legacy = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      legacy.schemaVersion = 22;
+      delete (legacy as Partial<RuntimeState>).toolRecovery;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, legacy);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().toolRecovery.qualityGuard).toEqual({
+        blocked: false,
+        observedFailures: 0,
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('replays the context compaction crash matrix from snapshot plus event tail', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-compaction-crash-'));
     const storePath = join(dir, 'runtime.db');

@@ -107,7 +107,10 @@ describe('failure classification', () => {
       error: {
         kind: 'tool_runtime_error',
         message: 'disk unavailable',
-        retryable: true,
+        retryable: false,
+        model_fixable: false,
+        recovery_disposition: 'never',
+        maximum_additional_calls: 0,
       },
     });
     const replayed = reduceRuntimeState(state, {

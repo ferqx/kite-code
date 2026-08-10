@@ -79,7 +79,8 @@ export type RuntimeEffect =
   | {
       type: 'recovery_blocked';
       reason: string;
-      failureKind: 'persistence_unavailable' | 'unknown';
+      failureKind: 'persistence_unavailable' | 'loop_exhausted' | 'unknown';
+      recoveryCause?: 'journal_invalid' | 'no_progress';
     };
 
 /** Returned when a second runner attempts to enter the same Kernel. */

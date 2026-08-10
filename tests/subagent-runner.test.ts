@@ -2,11 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { digestCapability } from '@/core/capabilities/catalog';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
+import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
+import type { CapabilityBinding, CapabilityDescriptor } from '@/protocol/capabilities';
 import type { AgentConfig } from '../src/core/config/index';
 import { type AIMessage, aiMessage } from '../src/core/messages';
 import type { SupportedChatModel } from '../src/core/model/factory';
@@ -139,7 +142,11 @@ describe('SubAgentRunner integration', () => {
       });
       expect(result.ok).toBe(false);
       expect(result.summary).toContain('refreshed');
-      expect(result.executionJournal?.[0]?.stderrDigest).toContain('project_instructions_changed');
+      expect(result.executionJournal).toBeUndefined();
+      expect(result.toolRecovery?.order).toHaveLength(1);
+      const recoveryJson = JSON.stringify(result.toolRecovery);
+      expect(recoveryJson).not.toContain('project_instructions_changed');
+      expect(recoveryJson).not.toContain(join(ws, 'nested', 'new.ts'));
       expect(() => readFileSync(join(ws, 'nested', 'new.ts'), 'utf8')).toThrow();
     } finally {
       rmSync(ws, { recursive: true, force: true });
@@ -449,6 +456,218 @@ describe('SubAgentRunner integration', () => {
       expect(shellExecutions).toBe(0);
       const doneEvent = events.find((e) => e.type === 'done');
       expect(String(doneEvent?.data.summary)).toContain('saw typecheck ok');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('suppresses a same-scope tool reproposal after approval denial without dispatch', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-deny-suppression-'));
+    try {
+      const { sink } = mockEventSink();
+      let shellExecutions = 0;
+      const repeatedCall = (id: string) =>
+        aiMessage({
+          content: 'verify',
+          tool_calls: [
+            {
+              id,
+              name: 'shell_execute',
+              args: { command: 'bun run typecheck', description: 'Run typecheck' },
+            },
+          ],
+        });
+      const model = new StreamingMockModel({
+        responses: [
+          { message: repeatedCall('tc-denied-1') },
+          { message: repeatedCall('tc-denied-2') },
+          { message: aiMessage({ content: 'stopped' }) },
+        ],
+      }) as unknown as SupportedChatModel;
+      const input = {
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'run verification',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+        shellExecutor: async (toolInput: { command: string }) => {
+          shellExecutions += 1;
+          return {
+            ok: true,
+            command: toolInput.command,
+            exitCode: 0,
+            stdout: '',
+            stderr: '',
+          };
+        },
+      };
+
+      const blocked = await runSubAgent(input);
+      expect(blocked.blocked?.toolCallId).toBe('tc-denied-1');
+      const resumed = await resumeSubAgent(input, blocked.blocked!.continuation, {
+        toolCallId: 'tc-denied-1',
+        toolName: 'shell_execute',
+        result: {
+          ok: false,
+          command: 'bun run typecheck',
+          exitCode: -1,
+          stdout: '',
+          stderr: 'redacted',
+          status: 'rejected',
+        },
+      });
+
+      expect(shellExecutions).toBe(0);
+      expect(resumed.toolRecovery?.qualityGuard).toMatchObject({
+        blocked: true,
+        reasonCode: 'no_progress',
+      });
+      const repeated = Object.values(resumed.toolRecovery!.failures).find(
+        (failure) => failure.toolCallId === 'tc-denied-2',
+      );
+      expect(repeated).toMatchObject({
+        status: 'exhausted',
+        resolution: 'terminal',
+        outcome: {
+          status: 'exhausted',
+          failure: { detailCode: 'recovery_not_allowed' },
+          recovery: { disposition: 'never' },
+        },
+      });
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('MCP binding failures share the durable ceiling, survive restore, and remain metadata-only', async () => {
+    const { sink } = mockEventSink();
+    const descriptor: CapabilityDescriptor = {
+      capabilityId: 'mcp:fixture/read',
+      revision: 'revision-1',
+      kind: 'mcp_tool',
+      displayName: 'read',
+      description: 'Read fixture data',
+      provider: { type: 'mcp', id: 'fixture', provenance: 'remote' },
+      inputSchema: {
+        type: 'object',
+        properties: { secret: { type: 'string' }, limit: { type: 'integer', default: 10 } },
+        required: ['secret'],
+        additionalProperties: false,
+      },
+      declaredEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      effectiveEffects: { filesystem: 'none', network: 'read', externalState: 'read' },
+      policy: { workspaceTrustRequired: false, minimumApproval: 'none' },
+      availability: 'available',
+      diagnostics: [],
+    };
+    const binding: CapabilityBinding = {
+      bindingId: 'binding-1',
+      capabilityId: descriptor.capabilityId,
+      capabilityRevision: descriptor.revision,
+      exposedToolName: 'mcp__fixture__read',
+      schemaDigest: digestCapability(descriptor.inputSchema),
+      issuedForTurnId: 'turn-1',
+    };
+    const repeatedCall = (id: string) =>
+      aiMessage({
+        content: 'read',
+        tool_calls: [{ id, name: binding.exposedToolName, args: { secret: 'private-body' } }],
+      });
+    const model = new StreamingMockModel({
+      responses: [
+        { message: repeatedCall('mcp-1') },
+        { message: repeatedCall('mcp-2') },
+        { message: repeatedCall('mcp-3') },
+        { message: aiMessage({ content: 'done' }) },
+      ],
+    }) as unknown as SupportedChatModel;
+
+    const result = await runSubAgent({
+      config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+      workspace: '/tmp/test',
+      role: getRoleConfig('code'),
+      task: 'read fixture',
+      timeoutMs: 5000,
+      signal: new AbortController().signal,
+      eventSink: sink,
+      model,
+      mcpBindings: [{ descriptor, binding }],
+    });
+
+    expect(result.toolRecovery?.qualityGuard).toMatchObject({
+      blocked: true,
+      reasonCode: 'no_progress',
+    });
+    const latestId = result.toolRecovery!.order.at(-1)!;
+    expect(result.toolRecovery!.failures[latestId]).toMatchObject({
+      status: 'exhausted',
+      resolution: 'terminal',
+      outcome: { status: 'exhausted', failure: { kind: 'loop_exhausted' } },
+    });
+    expect(typeof result.toolRecovery!.failures[latestId]!.taskId).toBe('string');
+    expect(typeof result.toolRecovery!.failures[latestId]!.turnId).toBe('string');
+    const restored = normalizeToolRecoveryJournalV1(
+      JSON.parse(JSON.stringify(result.toolRecovery)),
+    );
+    expect(restored.qualityGuard).toEqual(result.toolRecovery!.qualityGuard);
+    expect(JSON.stringify(restored)).not.toContain('private-body');
+  });
+
+  test('legacy exhausted subagent bypass emits a typed terminal and quality guard after resume', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-legacy-exhausted-'));
+    try {
+      const { sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: aiMessage({
+              content: 'verify',
+              tool_calls: [
+                { id: 'approval', name: 'shell_execute', args: { command: 'bun test' } },
+              ],
+            }),
+          },
+          {
+            message: aiMessage({
+              content: 'read',
+              tool_calls: [{ id: 'legacy-read', name: 'read_file', args: { path: 'missing.txt' } }],
+            }),
+          },
+          { message: aiMessage({ content: 'done' }) },
+        ],
+      }) as unknown as SupportedChatModel;
+      const input = {
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'continue legacy work',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      };
+      const blocked = await runSubAgent(input);
+      const continuation = blocked.blocked!.continuation;
+      continuation.exhaustedFingerprints = { 'read_file:ENOENT:missing.txt': true };
+      const result = await resumeSubAgent(input, continuation, {
+        toolCallId: 'approval',
+        toolName: 'shell_execute',
+        result: { ok: true, command: 'bun test', exitCode: 0, stdout: 'ok', stderr: '' },
+      });
+      expect(result.toolRecovery?.qualityGuard).toMatchObject({
+        blocked: true,
+        reasonCode: 'no_progress',
+      });
+      const failure = result.toolRecovery!.failures[result.toolRecovery!.order.at(-1)!];
+      expect(failure).toMatchObject({
+        toolCallId: 'legacy-read',
+        status: 'exhausted',
+        resolution: 'terminal',
+        outcome: { status: 'exhausted', failure: { kind: 'loop_exhausted' } },
+      });
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

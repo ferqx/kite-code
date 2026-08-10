@@ -5,8 +5,10 @@
 // Kernel-native model invocation: build context from RuntimeState → call model → return RuntimeEvent[].
 // No LangGraph state dependency, no side effects.
 
+import { randomBytes } from 'node:crypto';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { createBinding } from '@/core/capabilities/catalog';
+import { canonicalizeCapabilityArguments } from '@/core/capabilities/schema';
 import {
   chooseCapabilityDisclosure,
   searchableCapabilitySnapshot,
@@ -43,6 +45,8 @@ import {
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { observeUnknownToolFieldsV1 } from '@/core/runtime/tool-outcome';
+import { toolInvocationFingerprintV1 } from '@/core/runtime/tool-recovery-journal';
 import type { SandboxBackend } from '@/core/sandbox/platform';
 import { skillFrameInvalidationReason } from '@/core/skills/activation';
 import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
@@ -111,20 +115,46 @@ function toolsForModelSurface<T extends Record<string, unknown>>(
 
 /** Convert invalid provider tool arguments into durable queued-and-failed facts. */
 export function eventsForInvalidModelToolCalls(
-  calls: Array<{ id: string; name: string; args: { _parse_error?: string } }>,
+  calls: Array<{
+    id: string;
+    name: string;
+    args: {
+      _raw_invalid_args?: unknown;
+      _parse_error?: string;
+      _invalid_args_code?: 'invalid_json';
+      _invalid_args_redacted?: true;
+    };
+    canonicalInvocationFingerprint?: string;
+  }>,
   messageId: string,
   ordinalStart: number,
   toolSurface?: 'legacy_plan_recovery',
+  recoveryIdentityKey?: string,
 ): RuntimeEvent[] {
   const events: RuntimeEvent[] = [];
   for (const [index, call] of calls.entries()) {
+    const identityKey = recoveryIdentityKey ?? randomBytes(32).toString('hex');
+    const invocationFingerprint =
+      call.canonicalInvocationFingerprint ??
+      toolInvocationFingerprintV1({
+        key: identityKey,
+        toolName: call.name,
+        parseCode: 'invalid_json',
+        pathCategory: 'unknown',
+        unparsedArgs: call.args._raw_invalid_args ?? call.args,
+      });
+    const opaqueArgs = {
+      _invalid_args_code: 'invalid_json' as const,
+      _invalid_args_redacted: true as const,
+    };
     const queued = {
       type: 'tool.queued' as const,
       toolCallId: call.id,
       name: call.name,
-      args: call.args,
+      args: opaqueArgs,
       modelMessageId: messageId,
       ordinal: ordinalStart + index,
+      invocationFingerprint,
     };
     if (toolSurface === 'legacy_plan_recovery' && !isLegacyPlanContinuationToolAllowed(call.name)) {
       events.push(queued, {
@@ -140,7 +170,8 @@ export function eventsForInvalidModelToolCalls(
       toolCallId: call.id,
       failure: classifyFailure(
         'model_invalid_tool_args',
-        String(call.args._parse_error ?? 'invalid model tool arguments'),
+        'Provider returned invalid tool arguments.',
+        'invalid_json',
       ),
     });
   }
@@ -686,14 +717,24 @@ export async function invokeRuntimeModel(params: {
         (call): call is { id?: string; name: string; args: string; error?: string } =>
           typeof call.name === 'string' && typeof call.args === 'string',
       )
-      .map((call) => ({
-        id: call.id ?? crypto.randomUUID(),
-        name: call.name,
-        args: {
-          _raw_invalid_args: call.args,
-          _parse_error: call.error ?? 'invalid JSON arguments',
-        },
-      }));
+      .map((call) => {
+        const invocationFingerprint = toolInvocationFingerprintV1({
+          key: params.state.toolRecovery.identityKey,
+          toolName: call.name,
+          parseCode: 'invalid_json',
+          pathCategory: 'unknown',
+          unparsedArgs: call.args,
+        });
+        return {
+          id: call.id ?? crypto.randomUUID(),
+          name: call.name,
+          canonicalInvocationFingerprint: invocationFingerprint,
+          args: {
+            _invalid_args_code: 'invalid_json' as const,
+            _invalid_args_redacted: true as const,
+          },
+        };
+      });
     const providerUsage = response.response_metadata?.usage as
       | {
           input_tokens?: number;
@@ -758,9 +799,54 @@ export async function invokeRuntimeModel(params: {
       const capability =
         builtinToolRegistry.effectsOf(call.name, call.args, toolAvailCtx) ??
         classifyToolCapability(call.name, call.args);
-      const binding = mcpBindings.find(
+      const bindingEntry = mcpBindings.find(
         ({ binding: candidate }) => candidate.exposedToolName === call.name,
-      )?.binding;
+      );
+      const binding = bindingEntry?.binding;
+      const dynamicIdentity = bindingEntry
+        ? canonicalizeCapabilityArguments(bindingEntry.descriptor.inputSchema, call.args)
+        : undefined;
+      const parsedIdentity = bindingEntry
+        ? undefined
+        : builtinToolRegistry.parseToolCall(call, toolAvailCtx);
+      const invocationFingerprint = toolInvocationFingerprintV1({
+        key: params.state.toolRecovery.identityKey,
+        toolName: call.name,
+        identityRevision:
+          binding?.capabilityRevision ??
+          (() => {
+            const spec = builtinToolRegistry.get(call.name);
+            return spec ? builtinToolRegistry.descriptorOf(spec).revision : 'unknown';
+          })(),
+        ...(dynamicIdentity?.ok
+          ? { parsedArgs: dynamicIdentity.args }
+          : parsedIdentity?.ok
+            ? { parsedArgs: parsedIdentity.args }
+            : {
+                parseCode: bindingEntry
+                  ? 'invalid_arguments'
+                  : parsedIdentity?.code === 'unknown_tool'
+                    ? 'unknown_tool'
+                    : parsedIdentity?.code === 'tool_unavailable'
+                      ? 'tool_unavailable'
+                      : 'invalid_arguments',
+                pathCategory: 'unknown',
+                unparsedArgs: call.args,
+              }),
+      });
+      const unknownFields = call.name.startsWith('mcp__')
+        ? (() => {
+            const schema = mcpBindings.find(
+              ({ binding: candidate }) => candidate.exposedToolName === call.name,
+            )?.descriptor.inputSchema as { properties?: Record<string, unknown> } | undefined;
+            return observeUnknownToolFieldsV1({
+              toolName: call.name,
+              args: call.args,
+              knownFields: Object.keys(schema?.properties ?? {}),
+              schemaRevision: binding?.capabilityRevision.slice(0, 64) ?? 'dynamic',
+            });
+          })()
+        : builtinToolRegistry.unknownFieldsOf(call.name, call.args, toolAvailCtx);
       events.push({
         type: 'tool.queued',
         toolCallId: call.id,
@@ -772,6 +858,8 @@ export async function invokeRuntimeModel(params: {
         effectClass: capability.effectClass,
         sideEffect: capability.sideEffect,
         classificationReason: capability.classificationReason,
+        invocationFingerprint,
+        unknownFields,
         ...(binding
           ? {
               bindingId: binding.bindingId,
@@ -790,7 +878,13 @@ export async function invokeRuntimeModel(params: {
       }
     }
     events.push(
-      ...eventsForInvalidModelToolCalls(invalidToolCalls, messageId, ordinal, params.toolSurface),
+      ...eventsForInvalidModelToolCalls(
+        invalidToolCalls,
+        messageId,
+        ordinal,
+        params.toolSurface,
+        params.state.toolRecovery.identityKey,
+      ),
     );
     return events;
   } finally {

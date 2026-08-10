@@ -37,6 +37,18 @@ SubAgentRunner 只通过父 Runtime 传入的 `McpRuntimeProvider` 访问 MCP，
 
 continuation codec 保存消息、步骤、journal 和阻塞请求，并在恢复时严格校验。它不是让子 Agent绕过审批的离线执行通道。
 
+这里的 current journal 是与父 Runtime 同构的 `ToolRecoveryJournalV1`：包含私有 HMAC identity、
+failure instance、`recoveryOf`、一次模型修正/自动重放 ceiling 和 tool-owned progress。continuation
+恢复不会重置次数；child 返回时父 Runtime 通过单一 merge event 合并 journal，而不是解析 child
+summary 或旧 stderr/path journal。私有 key、fingerprint 与 lineage 不投影到 SessionLog/telemetry。
+MCP binding validation failure 与旧 exhausted-fingerprint bypass 也生成同构 typed terminal、scope-bound
+quality guard 和 lineage；continuation JSON restore 不重置 ceiling，parent merge 会把 child scope 重新
+绑定到 owning task call。动态 MCP identity 使用当前 binding descriptor 的 schema defaults、revision 与
+schema digest，不退回 builtin `unknown_tool` 身份。
+task Subagent 创建时继承 parent 的 canonical-private recovery identity key；merge 只接受同一 HMAC
+domain，foreign-key child journal 直接 quality-blocked 且不复制 fingerprint。这样 child deny 合并后，
+parent 对同一 canonical invocation 的重提仍会在 dispatch 前零调用阻断。
+
 ## 6.4 Skill fork
 
 声明 `context: fork` 的 Skill 可在隔离 Subagent 中执行。它只能获得 Skill capability ceiling 派生出的 Runtime binding；MCP capability 在执行前再次核对 revision、schema digest 和参数。

@@ -36,6 +36,11 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 决策使用“主标签 + 影响说明”的等距列表；未获准调用不得提前出现在消息列表。多个 Shell
 调用分别审批，任一调用获准后立即进入执行，不等待其他 sibling 审批完成。
 
+工具终态的颜色、状态、恢复提示与耗时统一读取 Runtime 投影的 `ToolOutcomeV1`，不再从错误正文、
+退出文本或交互类型猜测。人工审批拒绝、auto-review 拒绝、timeout、cancel 与普通执行失败保留各自
+稳定语义；同一 terminal event 只生成一张 Tool Card 和一条模型 Tool Result。私有 recovery key、
+fingerprint、lineage、工具参数和错误正文不会进入 TUI metadata 或下一次 Provider 请求。
+
 工具授权、用户提问和方案审核可见时，Footer 暂时隐藏模型、思考级别、cache、context/token
 和权限模式等全局状态，只保留当前交互与快捷键；交互结束后按最新状态恢复，统计数据不重置。
 

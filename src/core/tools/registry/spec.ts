@@ -149,6 +149,9 @@ export interface ProjectedToolResult {
    * on App/TUI types.
    */
   runtimeEvents?: RuntimeEvent[];
+  /** Optional metadata-only tool-specific classification; Runtime authority may only tighten it. */
+  outcomeAdviceV1?: import('@/core/runtime/tool-outcome').ToolOutcomeClassifierAdviceV1;
+  classifierDiagnostic?: 'classifier_threw';
 }
 
 /** preExecute 钩子结果：放行，或 fail-fast 拒绝（ADR-0042 §1 先读后改/过期拒绝的落点）。 */
@@ -205,6 +208,11 @@ export interface ExecutableToolSpec<Name extends string = string, Input = unknow
     output: Output,
     context: ToolExecutionContext & { invocationInput: Input },
   ): ProjectedToolResult;
+  /** Optional tool-owned classifier. It must not copy output content into its return value. */
+  classifyOutcomeV1?(
+    output: Output,
+    context: ToolExecutionContext & { invocationInput: Input },
+  ): import('@/core/runtime/tool-outcome').ToolOutcomeClassifierAdviceV1;
 }
 
 export interface InterruptToolSpec<Name extends string = string, Input = unknown, Interrupt = Input>

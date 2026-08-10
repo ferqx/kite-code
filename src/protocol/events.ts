@@ -293,7 +293,7 @@ export interface ToolResultPayload {
   /** 执行层工具状态。'exhausted' 表示连续失败达上限，系统已阻断该路径。
    *  / Execution-layer tool status. 'exhausted' means consecutive failures hit the cap
    *  and the system has blocked this path. */
-  status?: 'success' | 'error' | 'cancelled' | 'exhausted';
+  status?: 'success' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
   /** 自动审批失败时 reviewFailure 携带原因。工具执行成功+审批失败=工具绿色✓+审批警告红色⚠。
    *  When auto-review fails, reviewFailure carries the reason. Tool ok + reviewFailure = green ✓ + red ⚠. */
   reviewFailure?: string;

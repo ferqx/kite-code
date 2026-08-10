@@ -16,7 +16,7 @@ import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -235,7 +235,11 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run());
+  test(
+    'runs the complete stateful journey',
+    () => journey.run(),
+    TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
 });
 
 function planSubmitResponse(saveCallId: string, submitCallId: string) {

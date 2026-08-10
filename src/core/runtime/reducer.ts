@@ -52,6 +52,19 @@ import {
   updateActiveTask,
 } from './state';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
+import { legacyToolOutcomeV1, type ToolOutcomeV1, toolOutcomeSucceededV1 } from './tool-outcome';
+import { outcomeForHistoricalToolTerminalV1 } from './tool-outcome-events';
+import {
+  admitRecoveryAttemptV1,
+  advanceToolRecoveryResponseV1,
+  closeToolRecoveryScopeV1,
+  mergeToolRecoveryJournalsV1,
+  recordRecoveryExhaustionV1,
+  recordRecoveryFailureV1,
+  recordRecoveryInvocationV1,
+  recordToolOwnedProgressV1,
+  toolInvocationFingerprintV1,
+} from './tool-recovery-journal';
 
 function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: string) {
   return {
@@ -59,6 +72,51 @@ function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: stri
     turnId: state.turn.turnId,
     ordinal: state.transcript.messages.length,
     createdAt: createdAt ?? new Date(0).toISOString(),
+  };
+}
+
+function activeRecoveryFailureIds(
+  state: RuntimeState,
+  predicate: (failure: RuntimeState['toolRecovery']['failures'][string]) => boolean = () => true,
+): string[] {
+  return state.toolRecovery.order.filter((id) => {
+    const failure = state.toolRecovery.failures[id];
+    return (
+      failure?.status === 'unresolved' &&
+      failure.taskId === (state.activeTaskId ?? undefined) &&
+      failure.turnId === state.turn.turnId &&
+      predicate(failure)
+    );
+  });
+}
+
+function modelRecoveryProjection(outcome: ToolOutcomeV1): {
+  retryable: boolean;
+  model_fixable: boolean;
+  disposition: ToolOutcomeV1['recovery']['disposition'];
+  maximum_additional_calls: 0 | 1;
+  next_step: string;
+} {
+  const recovery = outcome.recovery;
+  const modelFixable =
+    recovery.requiresNewModelResponse &&
+    (recovery.disposition === 'correct_args' || recovery.disposition === 'alternative');
+  const nextStep =
+    recovery.disposition === 'correct_args'
+      ? 'Explain the failure, correct the arguments once in the next model response, and continue.'
+      : recovery.disposition === 'alternative'
+        ? 'Explain the failure and choose a different available capability without replaying this invocation.'
+        : recovery.disposition === 'user_action'
+          ? 'Explain the required user action and wait for an authoritative user or provider resolution.'
+          : recovery.disposition === 'retry_once'
+            ? 'Do not issue a model-owned replay; Runtime owns the single safe automatic retry.'
+            : 'Explain the failure and continue without retrying or assuming the tool succeeded.';
+  return {
+    retryable: recovery.disposition === 'retry_once',
+    model_fixable: modelFixable,
+    disposition: recovery.disposition,
+    maximum_additional_calls: recovery.maximumAdditionalCalls,
+    next_step: nextStep,
   };
 }
 
@@ -107,6 +165,12 @@ function stringArg(args: unknown, key: string): string | undefined {
   if (!args || typeof args !== 'object') return undefined;
   const value = (args as Record<string, unknown>)[key];
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function elapsedBetween(start: string | undefined, end: string | undefined): number | undefined {
+  if (!start || !end) return undefined;
+  const elapsed = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : undefined;
 }
 
 function toolResultMeta(
@@ -442,6 +506,10 @@ function reduceRuntimeStateWithReplayBoundary(
       };
       return {
         ...state,
+        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+          kind: 'task',
+          taskId: event.taskId,
+        }),
         activeTaskId: null,
         tasks: { ...state.tasks, [completed.taskId]: completed },
         planning: completed.planning,
@@ -454,6 +522,10 @@ function reduceRuntimeStateWithReplayBoundary(
       const cancelled = { ...active, status: 'cancelled' as const, executionMode: undefined };
       return {
         ...state,
+        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+          kind: 'task',
+          taskId: event.taskId,
+        }),
         activeTaskId: null,
         tasks: { ...state.tasks, [cancelled.taskId]: cancelled },
         planning: cancelled.planning,
@@ -623,13 +695,24 @@ function reduceRuntimeStateWithReplayBoundary(
         supersedesPlanVersion: event.supersedesPlanVersion,
         replanReason: event.reason,
       };
-      return updateActiveTask(
+      const replanned = updateActiveTask(
         {
           ...setActivePlanning(state, nextPlanning),
           interactions: { kind: 'idle' },
         },
         (task) => ({ ...task, planHistory: [...task.planHistory, planning.document] }),
       );
+      const resolvesFailureIds = activeRecoveryFailureIds(state);
+      return resolvesFailureIds.length === 0
+        ? replanned
+        : {
+            ...replanned,
+            toolRecovery: recordToolOwnedProgressV1(state.toolRecovery, {
+              kind: 'replanned',
+              referenceId: `${planning.document.planId}:${planning.document.version + 1}`,
+              resolvesFailureIds,
+            }),
+          };
     }
 
     case 'plan.rejected': {
@@ -946,6 +1029,24 @@ function reduceRuntimeStateWithReplayBoundary(
       // not reset a terminal call or append the same id to the queue again.
       if (state.tools.calls[event.toolCallId]) return state;
       const taskId = event.taskId ?? state.activeTaskId ?? undefined;
+      const invocationFingerprint =
+        event.invocationFingerprint ??
+        toolInvocationFingerprintV1({
+          key: state.toolRecovery.identityKey,
+          toolName: event.name,
+          parsedArgs: event.args,
+        });
+      const recoveryMode = event.recoveryMode ?? 'model_correction';
+      const admission = admitRecoveryAttemptV1(state.toolRecovery, {
+        toolCallId: event.toolCallId,
+        toolName: event.name,
+        invocationFingerprint,
+        modelMessageId: event.modelMessageId ?? '',
+        mode: recoveryMode,
+        taskId,
+        turnId: state.turn.turnId,
+      });
+      const recoveryOf = admission.recoveryOf;
       const call = {
         toolCallId: event.toolCallId,
         ...(taskId ? { taskId } : {}),
@@ -955,6 +1056,11 @@ function reduceRuntimeStateWithReplayBoundary(
         args: event.args,
         status: 'queued' as const,
         createdAtTurnId: state.turn.turnId,
+        ...(event.createdAt ? { queuedAt: event.createdAt } : {}),
+        invocationFingerprint,
+        ...(recoveryOf ? { recoveryOf, recoveryMode } : {}),
+        recoveryAdmission: admission.admitted ? ('admitted' as const) : admission.detailCode,
+        ...(event.unknownFields ? { unknownFields: event.unknownFields } : {}),
         ...(event.bindingId ? { bindingId: event.bindingId } : {}),
         ...(event.capabilityId ? { capabilityId: event.capabilityId } : {}),
         ...(event.capabilityRevision ? { capabilityRevision: event.capabilityRevision } : {}),
@@ -975,8 +1081,17 @@ function reduceRuntimeStateWithReplayBoundary(
               };
             })()),
       };
+      const toolRecovery =
+        admission.admitted && recoveryOf
+          ? recordRecoveryInvocationV1(state.toolRecovery, {
+              toolCallId: event.toolCallId,
+              recoveryOf,
+              mode: recoveryMode,
+            })
+          : state.toolRecovery;
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...state.tools,
           calls: { ...state.tools.calls, [event.toolCallId]: call },
@@ -1009,7 +1124,11 @@ function reduceRuntimeStateWithReplayBoundary(
           ...state.tools,
           calls: {
             ...state.tools.calls,
-            [event.toolCallId]: { ...existingCall, status: 'running' as const },
+            [event.toolCallId]: {
+              ...existingCall,
+              status: 'running' as const,
+              ...(event.createdAt ? { startedAt: event.createdAt } : {}),
+            },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: [...state.tools.active, event.toolCallId],
@@ -1038,28 +1157,56 @@ function reduceRuntimeStateWithReplayBoundary(
         isTaskCall && state.legacyUnrecoverableSubagentApproval?.toolCallId === event.toolCallId;
       const { legacyUnrecoverableSubagentApproval: _legacyMarker, ...stateWithoutLegacyMarker } =
         state;
+      const outcomeV1 = outcomeForHistoricalToolTerminalV1(event);
       const status =
-        event.result.status === 'exhausted'
+        outcomeV1.status === 'exhausted'
           ? ('exhausted' as const)
-          : event.result.ok
-            ? ('succeeded' as const)
-            : ('failed' as const);
+          : outcomeV1.status === 'cancelled'
+            ? ('cancelled' as const)
+            : toolOutcomeSucceededV1(outcomeV1)
+              ? ('succeeded' as const)
+              : ('failed' as const);
+      const terminalCall = {
+        ...existingCall,
+        status,
+        result: {
+          ok: toolOutcomeSucceededV1(outcomeV1),
+          summary: `Command: ${event.result.command}, exit code: ${event.result.exitCode}`,
+          exitCode: event.result.exitCode,
+          resultMeta: toolResultMeta(existingCall, event),
+        },
+        outcomeV1,
+      };
+      const toolRecovery =
+        outcomeV1.status === 'success'
+          ? recordToolOwnedProgressV1(state.toolRecovery, {
+              kind: 'receipt',
+              referenceId: event.toolCallId,
+              ...(existingCall.recoveryOf ? { resolvesFailureIds: [existingCall.recoveryOf] } : {}),
+            })
+          : recordRecoveryFailureV1(state.toolRecovery, {
+              toolCallId: event.toolCallId,
+              toolName: existingCall.name,
+              invocationFingerprint:
+                existingCall.invocationFingerprint ??
+                toolInvocationFingerprintV1({
+                  key: state.toolRecovery.identityKey,
+                  toolName: existingCall.name,
+                  parsedArgs: existingCall.args,
+                }),
+              modelMessageId: existingCall.modelMessageId,
+              outcome: outcomeV1,
+              taskId: existingCall.taskId,
+              turnId: existingCall.createdAtTurnId,
+            });
       return {
         ...(clearsLegacyMarker ? stateWithoutLegacyMarker : state),
+        toolRecovery,
         tools: {
           ...state.tools,
           calls: {
             ...state.tools.calls,
-            [event.toolCallId]: {
-              ...existingCall,
-              status,
-              result: {
-                ok: event.result.ok,
-                summary: `Command: ${event.result.command}, exit code: ${event.result.exitCode}`,
-                exitCode: event.result.exitCode,
-                resultMeta: toolResultMeta(existingCall, event),
-              },
-            },
+            [event.toolCallId]: terminalCall,
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
@@ -1070,7 +1217,7 @@ function reduceRuntimeStateWithReplayBoundary(
           toolCallId: event.toolCallId,
           name: event.name,
           content: event.result.stdout || event.result.stderr,
-          ok: event.result.ok,
+          ok: toolOutcomeSucceededV1(outcomeV1),
           resultMeta: toolResultMeta(existingCall, event),
         }),
         suspendedSubagents: clearSuspendedSubagent(state, event.toolCallId, isTaskCall),
@@ -1086,8 +1233,26 @@ function reduceRuntimeStateWithReplayBoundary(
       const failure =
         event.failure ??
         classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
+      const outcomeV1 = outcomeForHistoricalToolTerminalV1(event);
+      const recovery = modelRecoveryProjection(outcomeV1);
+      const toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
+        toolCallId: event.toolCallId,
+        toolName: existingCall.name,
+        invocationFingerprint:
+          existingCall.invocationFingerprint ??
+          toolInvocationFingerprintV1({
+            key: state.toolRecovery.identityKey,
+            toolName: existingCall.name,
+            parsedArgs: existingCall.args,
+          }),
+        modelMessageId: existingCall.modelMessageId,
+        outcome: outcomeV1,
+        taskId: existingCall.taskId,
+        turnId: existingCall.createdAtTurnId,
+      });
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...state.tools,
           calls: {
@@ -1097,6 +1262,7 @@ function reduceRuntimeStateWithReplayBoundary(
               status: 'failed' as const,
               error: failure.message,
               failure,
+              outcomeV1,
             },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
@@ -1112,12 +1278,12 @@ function reduceRuntimeStateWithReplayBoundary(
             error: {
               kind: failure.kind,
               message: failure.message,
-              retryable: failure.retryable,
-              model_fixable: failure.modelFixable,
+              retryable: recovery.retryable,
+              model_fixable: recovery.model_fixable,
+              recovery_disposition: recovery.disposition,
+              maximum_additional_calls: recovery.maximum_additional_calls,
             },
-            next_step: failure.modelFixable
-              ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
-              : 'Explain the failure to the user and continue without assuming the tool succeeded.',
+            next_step: recovery.next_step,
           }),
           ok: false,
         }),
@@ -1134,10 +1300,32 @@ function reduceRuntimeStateWithReplayBoundary(
       if (existingCall) {
         if (existingCall.status === 'rejected') return state;
         const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
+        const outcomeV1 = outcomeForHistoricalToolTerminalV1(event);
+        const recovery = modelRecoveryProjection(outcomeV1);
+        const recoveryFailureInput = {
+          toolCallId: event.toolCallId,
+          toolName: existingCall.name,
+          invocationFingerprint:
+            existingCall.invocationFingerprint ??
+            toolInvocationFingerprintV1({
+              key: state.toolRecovery.identityKey,
+              toolName: existingCall.name,
+              parsedArgs: existingCall.args,
+            }),
+          modelMessageId: existingCall.modelMessageId,
+          outcome: outcomeV1,
+          taskId: existingCall.taskId,
+          turnId: existingCall.createdAtTurnId,
+        };
+        const toolRecovery =
+          existingCall.recoveryAdmission && existingCall.recoveryAdmission !== 'admitted'
+            ? recordRecoveryExhaustionV1(state.toolRecovery, recoveryFailureInput)
+            : recordRecoveryFailureV1(state.toolRecovery, recoveryFailureInput);
         const deferredUntilBuilding = failure.kind === 'phase_deferred';
         const deniedByPlanningPhase = failure.kind === 'phase_denied';
         return {
           ...state,
+          toolRecovery,
           tools: {
             ...state.tools,
             calls: {
@@ -1147,6 +1335,7 @@ function reduceRuntimeStateWithReplayBoundary(
                 status: 'rejected' as const,
                 error: event.reason,
                 failure,
+                outcomeV1,
               },
             },
             queue: state.tools.queue.filter((id) => id !== event.toolCallId),
@@ -1187,11 +1376,12 @@ function reduceRuntimeStateWithReplayBoundary(
                       error: {
                         kind: failure.kind,
                         message: event.reason,
-                        retryable: failure.retryable,
-                        model_fixable: failure.modelFixable,
+                        retryable: recovery.retryable,
+                        model_fixable: recovery.model_fixable,
+                        recovery_disposition: recovery.disposition,
+                        maximum_additional_calls: recovery.maximum_additional_calls,
                       },
-                      next_step:
-                        'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
+                      next_step: recovery.next_step,
                     },
             ),
             ok: false,
@@ -1230,13 +1420,34 @@ function reduceRuntimeStateWithReplayBoundary(
         state.interactions.kind !== 'awaiting_provider_action' &&
         state.interactions.kind !== 'awaiting_provider_admission' &&
         state.interactions.toolCallId === event.toolCallId;
+      const outcomeV1 = outcomeForHistoricalToolTerminalV1(event);
+      const toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
+        toolCallId: event.toolCallId,
+        toolName: existingCall.name,
+        invocationFingerprint:
+          existingCall.invocationFingerprint ??
+          toolInvocationFingerprintV1({
+            key: state.toolRecovery.identityKey,
+            toolName: existingCall.name,
+            parsedArgs: existingCall.args,
+          }),
+        modelMessageId: existingCall.modelMessageId,
+        outcome: outcomeV1,
+        taskId: existingCall.taskId,
+        turnId: existingCall.createdAtTurnId,
+      });
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...state.tools,
           calls: {
             ...state.tools.calls,
-            [event.toolCallId]: { ...existingCall, status: 'cancelled' as const },
+            [event.toolCallId]: {
+              ...existingCall,
+              status: 'cancelled' as const,
+              outcomeV1,
+            },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
@@ -1258,6 +1469,45 @@ function reduceRuntimeStateWithReplayBoundary(
       };
     }
 
+    case 'tool.retry_recorded': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (existingCall?.status !== 'running') return state;
+      const withFailure = recordRecoveryFailureV1(state.toolRecovery, {
+        toolCallId: event.toolCallId,
+        toolName: existingCall.name,
+        invocationFingerprint:
+          existingCall.invocationFingerprint ??
+          toolInvocationFingerprintV1({
+            key: state.toolRecovery.identityKey,
+            toolName: existingCall.name,
+            parsedArgs: existingCall.args,
+          }),
+        modelMessageId: existingCall.modelMessageId,
+        outcome: event.outcomeV1,
+        taskId: existingCall.taskId,
+        turnId: existingCall.createdAtTurnId,
+      });
+      return {
+        ...state,
+        toolRecovery: recordRecoveryInvocationV1(withFailure, {
+          toolCallId: event.toolCallId,
+          recoveryOf: event.recoveryOf,
+          mode: 'automatic_retry',
+        }),
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: {
+              ...existingCall,
+              recoveryOf: event.recoveryOf,
+              recoveryMode: 'automatic_retry',
+            },
+          },
+        },
+      };
+    }
+
     case 'subagent.suspended': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (existingCall?.name !== 'task') return state;
@@ -1267,6 +1517,18 @@ function reduceRuntimeStateWithReplayBoundary(
           ...state.suspendedSubagents,
           [event.toolCallId]: event.snapshot,
         },
+      };
+    }
+
+    case 'subagent.recovery_journal_merged': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (existingCall?.name !== 'task') return state;
+      return {
+        ...state,
+        toolRecovery: mergeToolRecoveryJournalsV1(state.toolRecovery, event.journal, {
+          taskId: existingCall.taskId ?? state.activeTaskId ?? undefined,
+          turnId: existingCall.createdAtTurnId,
+        }),
       };
     }
 
@@ -1374,7 +1636,21 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'approval.requested':
       return {
         ...state,
-        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_approval'),
+        tools: {
+          ...updateToolStatus(state.tools, event.toolCallId, 'awaiting_approval'),
+          calls: {
+            ...state.tools.calls,
+            ...(state.tools.calls[event.toolCallId]
+              ? {
+                  [event.toolCallId]: {
+                    ...state.tools.calls[event.toolCallId]!,
+                    status: 'awaiting_approval' as const,
+                    ...(event.createdAt ? { approvalRequestedAt: event.createdAt } : {}),
+                  },
+                }
+              : {}),
+          },
+        },
         interactions: {
           kind: 'awaiting_tool_approval',
           interactionId: event.interactionId,
@@ -1401,6 +1677,12 @@ function reduceRuntimeStateWithReplayBoundary(
               ...state.tools.calls[state.interactions.toolCallId]!,
               status: 'approved',
               approvalGrant: event.grant,
+              approvalWaitMs:
+                (state.tools.calls[state.interactions.toolCallId]?.approvalWaitMs ?? 0) +
+                (elapsedBetween(
+                  state.tools.calls[state.interactions.toolCallId]?.approvalRequestedAt,
+                  event.createdAt,
+                ) ?? 0),
             },
           },
         },
@@ -1418,8 +1700,29 @@ function reduceRuntimeStateWithReplayBoundary(
       const toolCallId = state.interactions.toolCallId;
       const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
       const failure = event.failure ?? classifyFailure('approval_rejected', event.reason);
+      const existingCall = state.tools.calls[toolCallId];
+      const outcomeV1 = event.outcomeV1 ?? legacyToolOutcomeV1('rejected');
+      const recovery = modelRecoveryProjection(outcomeV1);
+      const toolRecovery = existingCall
+        ? recordRecoveryFailureV1(state.toolRecovery, {
+            toolCallId,
+            toolName: existingCall.name,
+            invocationFingerprint:
+              existingCall.invocationFingerprint ??
+              toolInvocationFingerprintV1({
+                key: state.toolRecovery.identityKey,
+                toolName: existingCall.name,
+                parsedArgs: existingCall.args,
+              }),
+            modelMessageId: existingCall.modelMessageId,
+            outcome: outcomeV1,
+            taskId: existingCall.taskId,
+            turnId: existingCall.createdAtTurnId,
+          })
+        : state.toolRecovery;
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...rejectedTools,
           calls: {
@@ -1429,6 +1732,7 @@ function reduceRuntimeStateWithReplayBoundary(
               status: 'rejected',
               error: event.reason,
               failure,
+              outcomeV1,
             },
           },
           queue: rejectedTools.queue.filter((id) => id !== toolCallId),
@@ -1445,9 +1749,12 @@ function reduceRuntimeStateWithReplayBoundary(
             error: {
               kind: failure.kind,
               message: event.reason,
-              retryable: failure.retryable,
-              model_fixable: failure.modelFixable,
+              retryable: recovery.retryable,
+              model_fixable: recovery.model_fixable,
+              recovery_disposition: recovery.disposition,
+              maximum_additional_calls: recovery.maximum_additional_calls,
             },
+            next_step: recovery.next_step,
           }),
           ok: false,
         }),
@@ -1643,8 +1950,21 @@ function reduceRuntimeStateWithReplayBoundary(
           : event.type === 'provider.action_deferred'
             ? 'deferred'
             : `failed (${event.failureCode})`;
+      const providerFailureIds = activeRecoveryFailureIds(
+        state,
+        (failure) => failure.toolCallId === event.originatingToolCallId,
+      );
+      const toolRecovery =
+        event.type === 'provider.action_completed' && providerFailureIds.length > 0
+          ? recordToolOwnedProgressV1(state.toolRecovery, {
+              kind: 'provider_revision',
+              referenceId: event.interactionId,
+              resolvesFailureIds: providerFailureIds,
+            })
+          : state.toolRecovery;
       return {
         ...state,
+        toolRecovery,
         interactions: { kind: 'idle' },
         transcript: {
           ...state.transcript,
@@ -1720,6 +2040,10 @@ function reduceRuntimeStateWithReplayBoundary(
         samePlanIdentity(state.completionGuard.planIdentity, planIdentity);
       return {
         ...state,
+        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+          kind: 'turn',
+          turnId: state.turn.turnId,
+        }),
         completionGuard: preserveV2Correction ? state.completionGuard : { correctionAttempts: 0 },
         turn: {
           turnId: event.turnId,
@@ -1888,6 +2212,13 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'model.responded':
       return {
         ...state,
+        toolRecovery: advanceToolRecoveryResponseV1(state.toolRecovery, {
+          taskId: state.activeTaskId,
+          turnId: state.turn.turnId,
+          modelMessageId: event.messageId,
+          hasToolCalls: Boolean(event.toolCalls?.length),
+          toolNames: event.toolCalls?.map((toolCall) => toolCall.name),
+        }),
         transcript: {
           ...state.transcript,
           final: event.toolCalls?.length ? undefined : (event.text ?? state.transcript.final),
@@ -2059,10 +2390,27 @@ function reduceRuntimeStateWithReplayBoundary(
           ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
         };
         if (isV2 && !isPlanDocumentV2(updatedDocument)) return state;
-        return setActivePlanning(state, {
+        const updated = setActivePlanning(state, {
           ...executing,
           document: updatedDocument,
         });
+        const newlySkipped = updatedSteps.some(
+          (step) =>
+            step.status === 'skipped' &&
+            executing.document.steps.find((previous) => previous.id === step.id)?.status !==
+              'skipped',
+        );
+        const resolvesFailureIds = newlySkipped ? activeRecoveryFailureIds(state) : [];
+        return resolvesFailureIds.length === 0
+          ? updated
+          : {
+              ...updated,
+              toolRecovery: recordToolOwnedProgressV1(state.toolRecovery, {
+                kind: 'skipped',
+                referenceId: event.toolCallId,
+                resolvesFailureIds,
+              }),
+            };
       }
       return state;
     }
@@ -2171,6 +2519,7 @@ function reduceRuntimeStateWithReplayBoundary(
                       status: 'approved' as const,
                       approvalGrant: (result.grant ??
                         'approve_once') as import('@/protocol/events').ShellApprovalGrant,
+                      approvalWaitMs: (call.approvalWaitMs ?? 0) + result.durationMs,
                     },
                   }
                 : {}),
@@ -2199,8 +2548,29 @@ function reduceRuntimeStateWithReplayBoundary(
       );
       const toolCallId = state.interactions.toolCallId;
       const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
+      const existingCall = state.tools.calls[toolCallId];
+      const outcomeV1 = event.outcomeV1 ?? legacyToolOutcomeV1('rejected');
+      const recovery = modelRecoveryProjection(outcomeV1);
+      const toolRecovery = existingCall
+        ? recordRecoveryFailureV1(state.toolRecovery, {
+            toolCallId,
+            toolName: existingCall.name,
+            invocationFingerprint:
+              existingCall.invocationFingerprint ??
+              toolInvocationFingerprintV1({
+                key: state.toolRecovery.identityKey,
+                toolName: existingCall.name,
+                parsedArgs: existingCall.args,
+              }),
+            modelMessageId: existingCall.modelMessageId,
+            outcome: outcomeV1,
+            taskId: existingCall.taskId,
+            turnId: existingCall.createdAtTurnId,
+          })
+        : state.toolRecovery;
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...rejectedTools,
           calls: {
@@ -2213,12 +2583,32 @@ function reduceRuntimeStateWithReplayBoundary(
                 'auto_review_rejected',
                 result.reason ?? 'auto-review rejected',
               ),
+              outcomeV1,
             },
           },
           queue: rejectedTools.queue.filter((id) => id !== toolCallId),
           active: rejectedTools.active.filter((id) => id !== toolCallId),
         },
         interactions: { kind: 'idle' },
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${toolCallId}`, event.createdAt),
+          toolCallId,
+          name: existingCall?.name ?? 'unknown',
+          content: JSON.stringify({
+            ok: false,
+            rejected: true,
+            error: {
+              kind: outcomeV1.failure?.kind ?? 'auto_review_rejected',
+              retryable: recovery.retryable,
+              model_fixable: recovery.model_fixable,
+              recovery_disposition: recovery.disposition,
+              maximum_additional_calls: recovery.maximum_additional_calls,
+            },
+            next_step: recovery.next_step,
+          }),
+          ok: false,
+        }),
         autoReview: {
           ...state.autoReview,
           consecutiveRejects: breaker.newConsecutiveRejects,

@@ -8,6 +8,7 @@ export interface CompiledCapabilitySchema {
 }
 
 const ajv = new Ajv({ allErrors: true, strict: true });
+const identityAjv = new Ajv({ allErrors: true, strict: true, useDefaults: true });
 
 // Schema admission budget — prevents oversized or deeply nested schemas from
 // a remote MCP server from wasting CPU during discovery, blowing up model
@@ -126,4 +127,36 @@ export function validateCapabilityArguments(
   if (!compiled.ok) return compiled.diagnostic;
   if (compiled.compiled.validate(args)) return null;
   return `Arguments do not match MCP inputSchema: ${ajv.errorsText(compiled.compiled.validate.errors)}`;
+}
+
+/**
+ * Validate and clone dynamic capability arguments while applying the current binding schema's
+ * JSON-Schema defaults. The returned object is the only identity input for an admitted MCP call;
+ * caller-owned arguments are never mutated.
+ */
+export function canonicalizeCapabilityArguments(
+  schema: unknown,
+  args: unknown,
+): { ok: true; args: Record<string, unknown> } | { ok: false; diagnostic: string } {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return { ok: false, diagnostic: 'MCP tool arguments must be a JSON object.' };
+  }
+  const admitted = compileCapabilitySchema(schema);
+  if (!admitted.ok) return admitted;
+  let cloned: Record<string, unknown>;
+  try {
+    cloned = structuredClone(args as Record<string, unknown>);
+  } catch {
+    return { ok: false, diagnostic: 'MCP tool arguments must be JSON-cloneable.' };
+  }
+  try {
+    const validate = identityAjv.compile(admitted.compiled.schema);
+    if (validate(cloned)) return { ok: true, args: cloned };
+    return {
+      ok: false,
+      diagnostic: `Arguments do not match MCP inputSchema: ${identityAjv.errorsText(validate.errors)}`,
+    };
+  } catch {
+    return { ok: false, diagnostic: 'Unsupported MCP inputSchema for canonical identity.' };
+  }
 }

@@ -12,6 +12,7 @@ import {
 } from './resource-budget-admission';
 import { decideNextEffect } from './scheduler';
 import { completedTerminalOutcomeV1, failedTerminalOutcomeV1 } from './terminal-outcome';
+import { isToolRecoveryJournalInvalidV1 } from './tool-recovery-journal';
 
 export { resolveResourceAdmissionFailureOutcomeV1 } from './resource-admission-terminal';
 
@@ -141,6 +142,12 @@ async function* executeEffectWithStreaming(
   lease: import('./effects').RuntimeEffectLease,
   reservationIds: string[] = [],
 ): AsyncGenerator<RuntimeEvent, EffectExecutionOutcome> {
+  // A lease can become stale after async preparation or while another durable
+  // fact is applied. Never enter any executor once the journal is corrupt;
+  // report a non-applied attempt so the outer loop schedules the hard block.
+  if (isToolRecoveryJournalInvalidV1(kernel.getState().toolRecovery)) {
+    return { applied: false, emitted: true };
+  }
   const pending: Array<{
     events: RuntimeEvent[];
     mode?: 'late_resource_reconciliation';
@@ -243,7 +250,7 @@ async function* executeEffectWithStreaming(
         try {
           const applied = kernel.applyLateResourceReconciliation([event]);
           pendingEvent.resolve?.(applied);
-          if (applied) yield event;
+          if (applied) yield* kernel.getLastAppliedEvents();
         } catch (error) {
           if (!pendingEvent.reject) throw error;
           pendingEvent.reject(error);
@@ -263,7 +270,7 @@ async function* executeEffectWithStreaming(
               : kernel.applyEffectResult(lease, events);
           pendingEvent.resolve?.(applied);
           if (applied) {
-            yield* events;
+            yield* kernel.getLastAppliedEvents();
           }
         } catch (error) {
           if (!pendingEvent.reject) throw error;
@@ -439,11 +446,12 @@ export async function* runRuntimeLoop(
       let effect = decideNextEffect(kernel.getState());
       if (prepareEffect) effect = await prepareEffect(effect, kernel.getState());
       const effectState = kernel.getState();
-      effect = guardLegacyPlanContinuationEffect(
-        effectState,
-        effect,
-        decideNextEffect(effectState),
-      );
+      const currentEffect = decideNextEffect(effectState);
+      effect =
+        currentEffect.type === 'recovery_blocked' &&
+        currentEffect.recoveryCause === 'journal_invalid'
+          ? currentEffect
+          : guardLegacyPlanContinuationEffect(effectState, effect, currentEffect);
       const shellGroup =
         effect.type === 'run_tools' ? shellConcurrencyGroup(effect, effectState) : undefined;
       const effectToolCallIds = effect.type === 'run_tools' ? effect.toolCallIds : [];
@@ -640,6 +648,12 @@ export async function* runRuntimeLoop(
         }
         effect = admission.effect;
         reservationIds = admission.reservationIds;
+      }
+      // Recheck after all async/preparation admission boundaries and before a
+      // prepared effect can request UI, Provider, verification, compaction or
+      // tool execution. The leased executor repeats this check once more.
+      if (isToolRecoveryJournalInvalidV1(kernel.getState().toolRecovery)) {
+        continue;
       }
       if (
         effect.type === 'run_tools' &&

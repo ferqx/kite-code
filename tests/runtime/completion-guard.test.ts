@@ -19,6 +19,7 @@ import {
   COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
   computePlanStructuralDigest,
   createInitialRuntimeState,
+  RUNTIME_STATE_SCHEMA_VERSION,
   setActivePlanning,
 } from '@/core/runtime/state';
 import { createRuntimeStore, type RuntimeStore } from '@/core/runtime/store';
@@ -525,7 +526,7 @@ describe('CompletionGuard V2', () => {
       storePath,
     });
     expect(restored.getState().activeTaskId).toBeNull();
-    expect(restored.getState().schemaVersion).toBe(COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION);
+    expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
     restored.close();
     rmSync(root, { recursive: true, force: true });
   });
@@ -556,7 +557,7 @@ describe('CompletionGuard V2', () => {
       workspace: historical.session.workspace,
       storePath,
     });
-    expect(restored.getState().schemaVersion).toBe(COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION);
+    expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
     restored.processEvent({
       type: 'run.completed',
       turnId: restored.getState().turn.turnId,
@@ -667,7 +668,7 @@ describe('CompletionGuard V2', () => {
       ReturnType<typeof createInitialRuntimeState>
     >(historical.session.threadId);
     expect(durable?.state.turn.turnId).toBe('racing-successor-turn');
-    expect(durable?.state.schemaVersion).toBe(COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION);
+    expect(durable?.state.schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
     expect(durable?.metadata.eventPosition).toBe(
       appendConnection.getLastEventPosition(historical.session.threadId),
     );

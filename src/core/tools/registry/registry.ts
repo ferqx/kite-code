@@ -10,6 +10,7 @@ import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
 import { descriptorRevision } from '@/core/capabilities/catalog';
 import type { ToolCapability } from '@/core/policies/tool-capabilities';
+import { observeUnknownToolFieldsV1 } from '@/core/runtime/tool-outcome';
 import { buildDescription } from '@/core/tools/tool-contracts';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
 import type { BaseToolSpec, ExecutableToolSpec, InterruptToolSpec, ToolContext } from './spec';
@@ -36,7 +37,11 @@ export interface ParseSuccess<Name extends string, Args> {
   protectedCommand: string;
 }
 
-export type ParseFailureCode = 'unknown_tool' | 'tool_unavailable' | 'invalid_arguments';
+export type ParseFailureCode =
+  | 'invalid_json'
+  | 'unknown_tool'
+  | 'tool_unavailable'
+  | 'invalid_arguments';
 
 export interface ParseFailure {
   ok: false;
@@ -162,6 +167,27 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
     if (!spec || spec.availability?.(context) === false) return undefined;
     const parsed = (spec.modelInputSchema?.(context) ?? spec.inputSchema).safeParse(args);
     return parsed.success ? spec.effects(parsed.data, context) : undefined;
+  }
+
+  /** Observe stripped top-level fields before Zod parsing without retaining names or values. */
+  unknownFieldsOf(name: string, args: unknown, context: ToolContext) {
+    const spec = this.#specs.get(name);
+    if (!spec) {
+      return observeUnknownToolFieldsV1({
+        toolName: name,
+        args,
+        knownFields: [],
+        schemaRevision: 'unknown',
+      });
+    }
+    const schema = spec.modelInputSchema?.(context) ?? spec.inputSchema;
+    const jsonSchema = z.toJSONSchema(schema) as { properties?: Record<string, unknown> };
+    return observeUnknownToolFieldsV1({
+      toolName: name,
+      args,
+      knownFields: Object.keys(jsonSchema.properties ?? {}),
+      schemaRevision: this.descriptorOf(spec).revision.slice(0, 64),
+    });
   }
 
   /**

@@ -3,14 +3,13 @@ import { isAbsolute, relative, resolve } from 'node:path';
 import type { ToolSet } from 'ai';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { digestCapability } from '@/core/capabilities/catalog';
-import { validateCapabilityArguments } from '@/core/capabilities/schema';
+import {
+  canonicalizeCapabilityArguments,
+  validateCapabilityArguments,
+} from '@/core/capabilities/schema';
 import { getFeatureFlags } from '@/core/config/features';
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
-import {
-  type ExecutionJournalEntry,
-  isFingerprintExhausted,
-  recordExecutionResult,
-} from '@/core/execution/journal';
+import { type ExecutionJournalEntry, isFingerprintExhausted } from '@/core/execution/journal';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import type { ToolExecutionResult } from '@/core/harness/tool-result';
 import { runApprovedTool } from '@/core/harness/tool-runner';
@@ -26,11 +25,24 @@ import {
 } from '@/core/model/project-instructions';
 import { buildCacheableRuntimeContext } from '@/core/model/runtime-context';
 import { isReadOnlyShellCommand } from '@/core/policies/shell-classification';
+import { classifyFailure, failureKindForToolParseFailure } from '@/core/runtime/failures';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
+import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import {
+  admitRecoveryAttemptV1,
+  advanceToolRecoveryResponseV1,
+  createToolRecoveryJournalV1,
+  recordRecoveryExhaustionV1,
+  recordRecoveryFailureV1,
+  recordRecoveryInvocationV1,
+  recordToolOwnedProgressV1,
+  toolInvocationFingerprintV1,
+} from '@/core/runtime/tool-recovery-journal';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
 import { createAgentTools } from '@/core/tools/definitions';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
+import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { getRoleConfig } from './roles';
 import type {
@@ -266,6 +278,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
     steps: [],
     executionJournal: [],
     exhaustedFingerprints: {},
+    toolRecovery: createToolRecoveryJournalV1(normalizedInput.recoveryIdentityKey),
   });
 }
 
@@ -317,6 +330,76 @@ export async function resumeSubAgent(
         : 'error';
   }
 
+  const priorRecovery = continuation.toolRecovery ?? createToolRecoveryJournalV1();
+  const resumeArgs = continuation.steps.at(-1)?.toolArgs ?? {};
+  const resumeBinding = input.mcpBindings?.find(
+    (entry) => entry.binding.exposedToolName === toolResult.toolName,
+  );
+  const resumeDynamicIdentity = resumeBinding
+    ? canonicalizeCapabilityArguments(resumeBinding.descriptor.inputSchema, resumeArgs)
+    : undefined;
+  const resumePreflight = toolRequestFromCall(
+    { id: toolResult.toolCallId, name: toolResult.toolName, args: resumeArgs },
+    { workspace: input.workspace },
+  );
+  const resumeBuiltinSpec = builtinToolRegistry.get(toolResult.toolName);
+  const resumeFingerprint = toolInvocationFingerprintV1({
+    key: priorRecovery.identityKey,
+    toolName: toolResult.toolName,
+    identityRevision:
+      resumeBinding?.binding.capabilityRevision ??
+      (resumeBuiltinSpec
+        ? builtinToolRegistry.descriptorOf(resumeBuiltinSpec).revision
+        : 'unknown'),
+    ...(resumeDynamicIdentity?.ok
+      ? { parsedArgs: resumeDynamicIdentity.args }
+      : resumePreflight?.ok
+        ? { parsedArgs: resumePreflight.request.args }
+        : {
+            parseCode: resumeBinding
+              ? ('invalid_arguments' as const)
+              : resumePreflight
+                ? resumePreflight.request.parseFailureCode === 'unknown_tool'
+                  ? ('unknown_tool' as const)
+                  : resumePreflight.request.parseFailureCode === 'tool_unavailable'
+                    ? ('tool_unavailable' as const)
+                    : ('invalid_arguments' as const)
+                : ('unknown_tool' as const),
+            pathCategory: 'unknown' as const,
+            unparsedArgs: resumeArgs,
+          }),
+  });
+  const resumeOutcome = actualOk
+    ? classifyToolOutcomeV1({
+        status: 'success',
+        authority: { dispatchState: 'started', externalEffects: 'known' },
+      })
+    : classifyToolOutcomeV1({
+        status: toolResult.result.status === 'rejected' ? 'rejected' : 'failed',
+        failure: classifyFailure(
+          toolResult.result.status === 'rejected' ? 'approval_rejected' : 'tool_runtime_error',
+          'Subagent tool recovery failed.',
+        ),
+        authority: {
+          dispatchState: toolResult.result.status === 'rejected' ? 'not_started' : 'started',
+          externalEffects: toolResult.result.status === 'rejected' ? 'none' : 'unknown',
+          approvalDenied: toolResult.result.status === 'rejected',
+        },
+      });
+  const resumedRecovery = actualOk
+    ? recordToolOwnedProgressV1(priorRecovery, {
+        kind: 'receipt',
+        referenceId: toolResult.toolCallId,
+      })
+    : recordRecoveryFailureV1(priorRecovery, {
+        toolCallId: toolResult.toolCallId,
+        toolName: toolResult.toolName,
+        invocationFingerprint: resumeFingerprint,
+        modelMessageId: `resume-${continuation.toolCallCount}`,
+        outcome: resumeOutcome,
+        taskId: continuation.id,
+        turnId: continuation.id,
+      });
   return runSubAgentLoop(normalizedInput, {
     id: continuation.id,
     messages: [
@@ -332,6 +415,7 @@ export async function resumeSubAgent(
     steps: continuation.steps,
     executionJournal: continuation.executionJournal ?? [],
     exhaustedFingerprints: continuation.exhaustedFingerprints ?? {},
+    toolRecovery: resumedRecovery,
   });
 }
 
@@ -345,17 +429,20 @@ async function runSubAgentLoop(
     // Phase 5: journal tracking for subagent tool executions
     executionJournal: ExecutionJournalEntry[];
     exhaustedFingerprints: Record<string, true>;
+    toolRecovery: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1;
   },
 ): Promise<SubAgentResult> {
   const id = state.id;
+  const recoveryScopeId = state.id;
   const model = input.role.model ?? input.model ?? createChatModel(input.config);
   const effectiveTimeoutMs = input.role.timeoutMs ?? input.timeoutMs;
   const startTime = Date.now();
   let toolCallCount = state.toolCallCount;
   const steps = state.steps;
   const messages = [...state.messages];
-  let executionJournal = state.executionJournal ?? [];
+  const executionJournal = state.executionJournal ?? [];
   const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
+  let toolRecovery = state.toolRecovery ?? createToolRecoveryJournalV1();
 
   const effectiveShellExecutor =
     input.role.allowedTools && input.shellExecutor
@@ -500,6 +587,7 @@ async function runSubAgentLoop(
             executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
             exhaustedFingerprints:
               Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+            toolRecovery,
           };
         }
         input.eventSink({
@@ -515,10 +603,19 @@ async function runSubAgentLoop(
           executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
           exhaustedFingerprints:
             Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+          toolRecovery,
         };
       }
 
       messages.push(response);
+      const responseMessageId = response.id ?? `subagent-model-${messages.length}`;
+      toolRecovery = advanceToolRecoveryResponseV1(toolRecovery, {
+        taskId: recoveryScopeId,
+        turnId: recoveryScopeId,
+        modelMessageId: responseMessageId,
+        hasToolCalls: response.tool_calls.length > 0,
+        toolNames: response.tool_calls.map((toolCall) => toolCall.name),
+      });
       for (const tc of response.tool_calls) {
         if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
         const tool = tools[tc.name];
@@ -550,6 +647,61 @@ async function runSubAgentLoop(
             status: 'error' as const,
             ok: false,
           });
+          const fingerprint = toolInvocationFingerprintV1({
+            key: toolRecovery.identityKey,
+            toolName: tc.name,
+            parseCode: 'tool_unavailable',
+            pathCategory: 'unknown',
+            unparsedArgs: tc.args,
+          });
+          const modelMessageId = responseMessageId;
+          const admission = admitRecoveryAttemptV1(toolRecovery, {
+            toolCallId: tc.id ?? `subagent-unavailable-${toolCallCount}`,
+            toolName: tc.name,
+            invocationFingerprint: fingerprint,
+            modelMessageId,
+            mode: 'model_correction',
+            taskId: recoveryScopeId,
+            turnId: recoveryScopeId,
+          });
+          if (admission.admitted && admission.recoveryOf) {
+            toolRecovery = recordRecoveryInvocationV1(toolRecovery, {
+              toolCallId: tc.id ?? `subagent-unavailable-${toolCallCount}`,
+              recoveryOf: admission.recoveryOf,
+              mode: 'model_correction',
+            });
+          }
+          const outcome = classifyToolOutcomeV1({
+            status: admission.admitted ? 'failed' : 'exhausted',
+            failure: classifyFailure('tool_not_found', 'Subagent tool is unavailable.'),
+            authority: {
+              dispatchState: 'not_started',
+              externalEffects: 'none',
+              replaySafety: 'pre_dispatch',
+            },
+            ...(admission.recoveryOf ? { lineage: { recoveryOf: admission.recoveryOf } } : {}),
+            ...(!admission.admitted
+              ? {
+                  toolAdvice: {
+                    detailCode: admission.detailCode,
+                    disposition: 'never' as const,
+                    maximumAdditionalCalls: 0,
+                  },
+                }
+              : {}),
+          });
+          const unavailableFailure = {
+            toolCallId: tc.id ?? `subagent-unavailable-${toolCallCount}`,
+            toolName: tc.name,
+            invocationFingerprint: fingerprint,
+            modelMessageId,
+            outcome,
+            taskId: recoveryScopeId,
+            turnId: recoveryScopeId,
+          };
+          toolRecovery = admission.admitted
+            ? recordRecoveryFailureV1(toolRecovery, unavailableFailure)
+            : recordRecoveryExhaustionV1(toolRecovery, unavailableFailure);
           continue;
         }
 
@@ -577,6 +729,75 @@ async function runSubAgentLoop(
             bindings: mcpBindings,
           });
           if (bindingError) {
+            const bindingEntry = mcpBindings.get(tc.name);
+            const canonicalArgs = bindingEntry
+              ? canonicalizeCapabilityArguments(bindingEntry.descriptor.inputSchema, toolArgs)
+              : undefined;
+            const invocationFingerprint = toolInvocationFingerprintV1({
+              key: toolRecovery.identityKey,
+              toolName: tc.name,
+              identityRevision: bindingEntry?.binding.capabilityRevision ?? 'unknown',
+              ...(canonicalArgs?.ok
+                ? { parsedArgs: canonicalArgs.args }
+                : {
+                    parseCode: bindingEntry
+                      ? ('invalid_arguments' as const)
+                      : ('unknown_tool' as const),
+                    pathCategory: 'unknown' as const,
+                    unparsedArgs: toolArgs,
+                  }),
+            });
+            const toolCallId = tc.id ?? `subagent-mcp-binding-${toolCallCount}`;
+            const admission = admitRecoveryAttemptV1(toolRecovery, {
+              toolCallId,
+              toolName: tc.name,
+              invocationFingerprint,
+              modelMessageId: responseMessageId,
+              mode: 'model_correction',
+              taskId: recoveryScopeId,
+              turnId: recoveryScopeId,
+            });
+            if (admission.admitted && admission.recoveryOf) {
+              toolRecovery = recordRecoveryInvocationV1(toolRecovery, {
+                toolCallId,
+                recoveryOf: admission.recoveryOf,
+                mode: 'model_correction',
+              });
+            }
+            const outcome = classifyToolOutcomeV1({
+              status: admission.admitted ? 'failed' : 'exhausted',
+              failure: classifyFailure(
+                admission.admitted ? 'tool_invalid_args' : 'loop_exhausted',
+                'Subagent MCP binding validation failed.',
+              ),
+              authority: {
+                dispatchState: 'not_started',
+                externalEffects: 'none',
+                replaySafety: 'pre_dispatch',
+              },
+              ...(admission.recoveryOf ? { lineage: { recoveryOf: admission.recoveryOf } } : {}),
+              ...(!admission.admitted
+                ? {
+                    toolAdvice: {
+                      disposition: 'never' as const,
+                      maximumAdditionalCalls: 0 as const,
+                      detailCode: admission.detailCode,
+                    },
+                  }
+                : {}),
+            });
+            const bindingFailure = {
+              toolCallId,
+              toolName: tc.name,
+              invocationFingerprint,
+              modelMessageId: responseMessageId,
+              outcome,
+              taskId: recoveryScopeId,
+              turnId: recoveryScopeId,
+            };
+            toolRecovery = admission.admitted
+              ? recordRecoveryFailureV1(toolRecovery, bindingFailure)
+              : recordRecoveryExhaustionV1(toolRecovery, bindingFailure);
             const blockedOutput = JSON.stringify({ ok: false, error: bindingError });
             messages.push(
               toolMessage({
@@ -605,10 +826,142 @@ async function runSubAgentLoop(
 
         toolCallCount++;
 
+        const parsedPreflight = toolRequestFromCall(
+          {
+            id: tc.id ?? `subagent-${toolCallCount}`,
+            name: tc.name,
+            args: toolArgs,
+          },
+          { workspace: input.workspace },
+        );
+        const boundIdentity = mcpBindings.get(tc.name);
+        const dynamicIdentity = boundIdentity
+          ? canonicalizeCapabilityArguments(boundIdentity.descriptor.inputSchema, toolArgs)
+          : undefined;
+        const builtinIdentitySpec = builtinToolRegistry.get(tc.name);
+        const invocationFingerprint = toolInvocationFingerprintV1({
+          key: toolRecovery.identityKey,
+          toolName: tc.name,
+          identityRevision:
+            boundIdentity?.binding.capabilityRevision ??
+            (builtinIdentitySpec
+              ? builtinToolRegistry.descriptorOf(builtinIdentitySpec).revision
+              : 'unknown'),
+          ...(dynamicIdentity?.ok
+            ? { parsedArgs: dynamicIdentity.args }
+            : parsedPreflight?.ok
+              ? { parsedArgs: parsedPreflight.request.args }
+              : {
+                  parseCode: boundIdentity
+                    ? 'invalid_arguments'
+                    : parsedPreflight
+                      ? parsedPreflight.request.parseFailureCode === 'unknown_tool'
+                        ? 'unknown_tool'
+                        : parsedPreflight.request.parseFailureCode === 'tool_unavailable'
+                          ? 'tool_unavailable'
+                          : 'invalid_arguments'
+                      : 'unknown_tool',
+                  pathCategory: 'unknown' as const,
+                  unparsedArgs: toolArgs,
+                }),
+        });
+        const modelMessageId = responseMessageId;
+        const recoveryAdmission = admitRecoveryAttemptV1(toolRecovery, {
+          toolCallId: tc.id ?? `subagent-${toolCallCount}`,
+          toolName: tc.name,
+          invocationFingerprint,
+          modelMessageId,
+          mode: 'model_correction',
+          taskId: recoveryScopeId,
+          turnId: recoveryScopeId,
+        });
+        const recoveryOf = recoveryAdmission.recoveryOf;
+        if (!recoveryAdmission.admitted) {
+          const exhaustedOutcome = classifyToolOutcomeV1({
+            status: 'exhausted',
+            failure: classifyFailure('loop_exhausted', 'Subagent recovery ceiling was reached.'),
+            authority: { dispatchState: 'not_started', externalEffects: 'none' },
+            ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
+            toolAdvice: {
+              disposition: 'never',
+              maximumAdditionalCalls: 0,
+              detailCode: recoveryAdmission.detailCode,
+            },
+          });
+          toolRecovery = recordRecoveryExhaustionV1(toolRecovery, {
+            toolCallId: tc.id ?? `subagent-${toolCallCount}`,
+            toolName: tc.name,
+            invocationFingerprint,
+            modelMessageId,
+            outcome: exhaustedOutcome,
+            taskId: recoveryScopeId,
+            turnId: recoveryScopeId,
+          });
+          const blockedOutput = JSON.stringify({
+            ok: false,
+            status: 'exhausted',
+            failure: {
+              kind: 'loop_exhausted',
+              detail_code: recoveryAdmission.detailCode,
+              retryable: false,
+              model_fixable: false,
+            },
+            next_step: 'Replan, skip the blocked step, or safely finalize.',
+          });
+          messages.push(
+            toolMessage({
+              content: blockedOutput,
+              tool_call_id: tc.id ?? '',
+              name: tc.name,
+              status: 'exhausted',
+            }),
+          );
+          stepSnapshot.ok = false;
+          stepSnapshot.status = 'error';
+          input.eventSink({
+            type: 'tool_result',
+            data: {
+              id,
+              toolName: tc.name,
+              ok: false,
+              summary: blockedOutput,
+              durationMs: 0,
+              failureReason: recoveryAdmission.detailCode,
+            },
+          });
+          continue;
+        }
+        if (recoveryOf) {
+          toolRecovery = recordRecoveryInvocationV1(toolRecovery, {
+            toolCallId: tc.id ?? `subagent-${toolCallCount}`,
+            recoveryOf,
+            mode: 'model_correction',
+          });
+        }
+
         // Phase 5: 预检 — 如果 tool+path 已耗尽，跳过执行
         // Preflight: skip execution if this tool+path is already exhausted.
         const preflightPath = toolArgs.path as string | undefined;
         if (isFingerprintExhausted(exhaustedFingerprints, tc.name, preflightPath)) {
+          const exhaustedOutcome = classifyToolOutcomeV1({
+            status: 'exhausted',
+            failure: classifyFailure('loop_exhausted', 'Legacy subagent exhaustion was restored.'),
+            authority: { dispatchState: 'not_started', externalEffects: 'none' },
+            toolAdvice: {
+              disposition: 'never',
+              maximumAdditionalCalls: 0,
+              detailCode: 'recovery_exhausted',
+            },
+          });
+          toolRecovery = recordRecoveryExhaustionV1(toolRecovery, {
+            toolCallId: tc.id ?? `subagent-${toolCallCount}`,
+            toolName: tc.name,
+            invocationFingerprint,
+            modelMessageId,
+            outcome: exhaustedOutcome,
+            taskId: recoveryScopeId,
+            turnId: recoveryScopeId,
+          });
           const blockedOutput = JSON.stringify({
             ok: false,
             command: tc.name,
@@ -655,14 +1008,7 @@ async function runSubAgentLoop(
           | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
           | undefined;
         try {
-          const parsed = toolRequestFromCall(
-            {
-              id: tc.id ?? `subagent-${toolCallCount}`,
-              name: tc.name,
-              args: toolArgs,
-            },
-            { workspace: input.workspace },
-          );
+          const parsed = parsedPreflight;
           if (!parsed?.ok) {
             throw new Error(
               `Unknown or invalid tool requested by sub-agent: ${tc.name}${parsed ? ` — ${parsed.request.parseError}` : ''}`,
@@ -741,6 +1087,7 @@ async function runSubAgentLoop(
                 Object.keys(exhaustedFingerprints).length > 0
                   ? { ...exhaustedFingerprints }
                   : undefined,
+              toolRecovery,
               projectInstructions: input.projectInstructions,
             },
           );
@@ -782,6 +1129,7 @@ async function runSubAgentLoop(
                 Object.keys(exhaustedFingerprints).length > 0
                   ? { ...exhaustedFingerprints }
                   : undefined,
+              toolRecovery,
             };
             // 更新 blocked.continuation 为包含 deferred 消息的新版本
             blocked.continuation = continuation;
@@ -805,6 +1153,7 @@ async function runSubAgentLoop(
               executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
               exhaustedFingerprints:
                 Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+              toolRecovery,
             };
           }
           toolOutput = JSON.stringify(result);
@@ -828,20 +1177,45 @@ async function runSubAgentLoop(
           ok = false;
         }
 
-        // Phase 5: Record subagent tool execution in journal.
-        const journalResult = recordExecutionResult(
-          { executionJournal, exhaustedFingerprints },
-          {
+        // Parent and child use the same typed, metadata-only recovery journal.
+        if (ok) {
+          toolRecovery = recordToolOwnedProgressV1(toolRecovery, {
+            kind: 'receipt',
+            referenceId: tc.id ?? `subagent-${toolCallCount}`,
+            ...(recoveryOf ? { resolvesFailureIds: [recoveryOf] } : {}),
+          });
+        } else {
+          const preDispatchFailure = !parsedPreflight?.ok;
+          const parseFailureCode = preDispatchFailure
+            ? (parsedPreflight?.request.parseFailureCode ?? 'invalid_arguments')
+            : undefined;
+          const readOnly = /^(read|search|list)_/u.test(tc.name);
+          const outcome = classifyToolOutcomeV1({
+            status: 'failed',
+            failure: classifyFailure(
+              parseFailureCode
+                ? failureKindForToolParseFailure(parseFailureCode)
+                : 'tool_runtime_error',
+              'Subagent tool invocation failed.',
+              parseFailureCode,
+            ),
+            authority: {
+              dispatchState: preDispatchFailure ? 'not_started' : 'started',
+              externalEffects: preDispatchFailure || readOnly ? 'none' : 'unknown',
+              replaySafety: preDispatchFailure ? 'pre_dispatch' : readOnly ? 'safe_read' : 'none',
+            },
+            ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
+          });
+          toolRecovery = recordRecoveryFailureV1(toolRecovery, {
             toolCallId: tc.id ?? `subagent-${toolCallCount}`,
             toolName: tc.name,
-            ok,
-            stderr: ok ? undefined : (JSON.parse(toolOutput).stderr as string | undefined),
-            exitCode: ok ? undefined : (JSON.parse(toolOutput).exitCode as number | undefined),
-            path: toolArgs.path as string | undefined,
-          },
-        );
-        executionJournal = journalResult.executionJournal;
-        Object.assign(exhaustedFingerprints, journalResult.exhaustedFingerprints);
+            invocationFingerprint,
+            modelMessageId,
+            outcome,
+            taskId: recoveryScopeId,
+            turnId: recoveryScopeId,
+          });
+        }
 
         const durationMs = Date.now() - toolStart;
         stepSnapshot.ok = ok;
@@ -897,6 +1271,7 @@ async function runSubAgentLoop(
       executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
       exhaustedFingerprints:
         Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
+      toolRecovery,
     };
   }
 }

@@ -44,6 +44,8 @@ import {
   type ResourceBudgetRuntimeStateV1,
 } from './resource-budget';
 import type { RunTerminalOutcomeV1 } from './terminal-outcome';
+import type { ToolOutcomeV1, UnknownToolFieldsObservationV1 } from './tool-outcome';
+import { createToolRecoveryJournalV1, type ToolRecoveryJournalV1 } from './tool-recovery-journal';
 
 // ── Re-export for convenience ──
 export { getAgentPhase };
@@ -236,6 +238,16 @@ export interface ToolCallRecord {
   status: ToolCallStatus;
   /** 创建该工具调用的 turn ID / Turn id when this tool call was created */
   createdAtTurnId: string;
+  queuedAt?: string;
+  startedAt?: string;
+  approvalRequestedAt?: string;
+  /** Runtime-measured decision latency accumulated before dispatch. */
+  approvalWaitMs?: number;
+  invocationFingerprint?: string;
+  recoveryOf?: string;
+  recoveryMode?: import('./tool-recovery-journal').ToolRecoveryAttemptModeV1;
+  recoveryAdmission?: 'admitted' | 'recovery_not_allowed' | 'recovery_exhausted' | 'no_progress';
+  unknownFields?: UnknownToolFieldsObservationV1;
   /** 审批哈希（用于缓存审批结果）/ Approval hash for caching approval decisions */
   approvalHash?: string;
   /** The one-shot or persisted grant selected for this specific execution. */
@@ -255,6 +267,8 @@ export interface ToolCallRecord {
   error?: string;
   /** Structured failure metadata retained for retry policy and replay. */
   failure?: ClassifiedFailure;
+  /** Runtime-owned typed terminal projection; legacy fields remain during migration. */
+  outcomeV1?: ToolOutcomeV1;
   /** Capability classification captured when the call was queued. */
   effectClass?: ToolEffectClass;
   /** Whether the call has crossed the active task's side-effect boundary. */
@@ -404,7 +418,12 @@ export type TranscriptMessage =
       kind: 'assistant';
       content?: string;
       reasoningText?: string;
-      toolCalls: Array<{ id: string; name: string; args: unknown }>;
+      toolCalls: Array<{
+        id: string;
+        name: string;
+        args: unknown;
+        canonicalInvocationFingerprint?: string;
+      }>;
       /** Durable marker used to bound restricted legacy-plan recovery corrections. */
       toolSurface?: 'legacy_plan_recovery';
     } & TranscriptMessageMeta)
@@ -433,7 +452,8 @@ export interface CompletionGuardRuntimeStateV1 {
 
 /** Runtime state schema version for migration compatibility. */
 export const COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION = 22;
-export const RUNTIME_STATE_SCHEMA_VERSION = COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION;
+export const TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION = 23;
+export const RUNTIME_STATE_SCHEMA_VERSION = TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -523,6 +543,8 @@ export interface RuntimeState {
   interactions: InteractionState;
   /** 工具运行时状态 / Tool runtime state */
   tools: ToolRuntimeState;
+  /** Canonical private Store journal shared by the parent Runtime and delegated task outcomes. */
+  toolRecovery: ToolRecoveryJournalV1;
   capabilities: CapabilityRuntimeState;
   skills: SkillRuntimeState;
   verification: VerificationRuntimeState;
@@ -625,6 +647,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       queue: [],
       active: [],
     },
+    toolRecovery: createToolRecoveryJournalV1(),
     capabilities: {
       catalogRevision: '',
       bindings: {},

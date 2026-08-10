@@ -384,6 +384,9 @@ export function createRuntimeEffectExecutor(
             descendantResourceAdmission,
             subagentEventSink,
             emitRuntimeEvent: emitOrDefer,
+            persistRuntimeEvent: executionContext?.persistEvent,
+            getRuntimeState: () =>
+              (executionContext?.getState?.() ?? state) as import('./state').RuntimeState,
             recordFilePreimage: createFilePreimageRecorder(
               dependencies.runtimeStore,
               state.session.threadId,

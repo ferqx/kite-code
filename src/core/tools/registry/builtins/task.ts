@@ -54,7 +54,15 @@ export const taskSpec = defineExecutableTool({
   },
   projectResult: (output) => {
     const ok = output.available && output.result.ok !== false;
-    const modelContent = output.available ? JSON.stringify(output.result) : output.error;
+    const modelContent = output.available
+      ? JSON.stringify({
+          ok: output.result.ok,
+          summary: output.result.summary,
+          ...(output.result.error ? { error: output.result.error } : {}),
+          toolCallCount: output.result.toolCallCount,
+          durationMs: output.result.durationMs,
+        })
+      : output.error;
     return {
       ok,
       modelContent,

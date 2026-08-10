@@ -4,7 +4,7 @@
 
 读取时机：理解或修改 Agent 主循环、Runtime Kernel、Capability、Policy、Execution、Verification，以及 MCP、Skill、Subagent 的跨模块职责时。
 
-验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
 相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
@@ -141,6 +141,54 @@ V2 correction ceiling 绑定 guard version 与完整 Plan identity，跨 turn �
 继承竞态之后的 event position。不可纠正的 V1/V2 completion blocker 也使用 Kernel batch，在向 consumer 暴露
 attempt 2 前原子持久化 `[completion.blocked, turn.aborted, run.error]`；消费中断或进程恢复都只能观察 terminal stop，
 不能从 blocked 边界重新调度第三次模型请求。
+
+Runtime schema v23 在每个当前 Tool terminal event 内同时保留 legacy result 与严格
+`ToolOutcomeV1` shadow；reducer 只生成一个 transcript ToolMessage。Envelope 由 Runtime 边界合成
+status、FailureKind/detail、dispatch/effect certainty、recovery lineage 与可信 timing，ToolSpec
+只能提供可收紧的 metadata advice。旧 event 没有 outcome 时映射为
+`legacy_unclassified/unknown/never`；存在但结构非法或 classifier 缺失/抛错/冲突时映射为
+`unknown/never`，不从 stderr 或 result body 推断。
+
+同一 schema 还持久化 parent/subagent 共用语义的 `ToolRecoveryJournalV1`。journal 的随机 HMAC
+key、invocation fingerprint、failure instance 和 lineage 只存在于 canonical private Runtime
+state/continuation，不进入 SessionLog 或 observability。retry record 必须在一次受信 safe-read
+自动重放前先落盘；模型参数修正和自动重放分别最多一次，restore 不重置次数。policy/approval
+deny、timeout、cancel、unknown effect 和仅有 idempotency key 而无 receipt 的调用不重放；malformed
+journal restore、六次同 identity 无进展或十二次未被 tool-owned progress 分隔的累计失败都 fail
+closed 为 quality block，明显早于 250 次资源上限。
+failure 还绑定 owning task、turn 与紧随其后的 eligible model response。task/turn close 会把记录移出
+新 scope；只有成功 `recoveryOf` receipt，或 Runtime-owned skip/replan/user action、Provider/capability
+revision 才能把失败标为 recovered。deny/never、timeout、cancel、unknown effect、terminal exhaustion 和
+`next_response_elapsed` 在原 scope 继续保留 suppression 与 CompletionGuard blocker，不得把“额度耗尽”
+当作恢复。`alternative` 可在下一 eligible response 选择不同 capability，但必须由 Runtime 绑定
+`recoveryOf`。CompletionGuard 只读取当前 task/turn 真正 active 的 blocking/quality state，历史 deny
+不会永久阻断后续任务。quality block 仍允许 `write_plan/update_plan/read_plan/ask_user/tool_search`
+形成替代进展。
+
+canonical identity 对已解析调用使用当前 ToolSpec 或动态 MCP binding 的 schema defaults 与 revision；
+解析前失败把 raw equality 立即写入私有 HMAC，不持久化参数正文。自动 safe-read replay 的
+`tool.retry_recorded` 必须先得到 RuntimeStore durable ack；持久化缺失、返回 false 或抛错都在第二次
+Provider dispatch 前停止。Kernel 原子 batch 逐事件用前一事件产生的 next state 合成 envelope，
+因此 `[tool.started, tool.finished]` 的 terminal certainty/timing 不会读取陈旧 state。
+生产 safe-read retry 还要求唯一一次有效 `tool.started` 已由 Kernel reducer 持久化；随后
+`tool.retry_recorded` 才能记录 attempt/recoveryOf 并授权第二次 dispatch。ack 后崩溃重启不得重置
+ceiling。restore 对 journal 重新计算 canonical failure ID，并验证 map/order/outcome lineage、parent
+recoveryOf、attempt counters 与 progress revision；伪造相互一致的 ID 也不能绕过重算。
+schema v23/current snapshot 或当前 Subagent continuation 缺少 recovery journal 本身就是损坏状态，
+restore 必须 quality-blocked；只有 pre-v23 migration 可以初始化空 journal。auto-review rejection 在
+current、replay 和下一次 model projection 中都只追加一个与原 AI tool call 配对的 ToolMessage。
+损坏 journal 使用 `journal_invalid/persistence_unavailable`，普通 no-progress ceiling 使用
+`no_progress/loop_exhausted`；二者由同一 terminal outcome 驱动 Session、metrics 与 TUI。
+task 子 Agent 的完整 result 只在 Controller 私有侧用于 journal merge，模型面只接收显式 public DTO，
+不会 JSON stringify continuation、execution journal、exhausted fingerprint 或 recovery key/lineage。
+`journal_invalid` 对所有 journal mutator 都是吸收态，因此同一 Kernel batch 中 child merge 后紧随的
+task success 也不能清除 hard block。其 task/turn scope 只用于 provenance，scheduler/admission 必须在
+下一 turn、新 task、task close 与 SQLite restore 后继续全局 `persistence_unavailable` 零 dispatch 阻断；
+普通 `no_progress` 才按原 scope 隔离。Scheduler 在 correctness hard-block 阶段先于 interaction、legacy、
+queued tools、verification、completion 与 compaction 检查损坏 journal；Controller direct 入口和 Runner
+prepared/admission/lease 边界再防御性重验，阻止已经准备或租赁的 stale effect。bounded journal 的 128 条裁剪以 lineage closure 为单位，优先
+active/recent 记录；不能保留 child 却删除其 `recoveryOf` parent。Runtime invariant 只要求 live call 的
+lineage parent 仍 retained，已经 terminal 的历史 ToolCall 不会迫使 bounded journal 永久增长。
 
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
 dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为

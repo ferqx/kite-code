@@ -49,6 +49,38 @@ function legacyExecutingPlanState(): RuntimeState {
 }
 
 describe('decideNextEffect', () => {
+  test('classifies a normal no-progress ceiling as loop exhaustion, not persistence failure', () => {
+    const state = createInitialRuntimeState({ threadId: 'quality', userId: 'u', workspace: '/' });
+    state.toolRecovery.qualityGuard = {
+      blocked: true,
+      reasonCode: 'no_progress',
+      observedFailures: 6,
+      turnId: state.turn.turnId,
+    };
+    expect(decideNextEffect(state)).toEqual({
+      type: 'recovery_blocked',
+      reason: expect.stringContaining('no progress'),
+      failureKind: 'loop_exhausted',
+      recoveryCause: 'no_progress',
+    });
+  });
+
+  test('classifies an invalid recovery journal as persistence unavailable', () => {
+    const state = createInitialRuntimeState({ threadId: 'invalid', userId: 'u', workspace: '/' });
+    state.toolRecovery.qualityGuard = {
+      blocked: true,
+      reasonCode: 'journal_invalid',
+      observedFailures: 0,
+      turnId: state.turn.turnId,
+    };
+    expect(decideNextEffect(state)).toEqual({
+      type: 'recovery_blocked',
+      reason: expect.stringContaining('invalid'),
+      failureKind: 'persistence_unavailable',
+      recoveryCause: 'journal_invalid',
+    });
+  });
+
   test('routes a queued legacy effect through governance before Provider recovery', () => {
     const state = legacyExecutingPlanState();
     queueCall(state, 'legacy-shell', {

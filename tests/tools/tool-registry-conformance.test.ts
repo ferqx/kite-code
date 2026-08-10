@@ -30,6 +30,7 @@ import {
   shellActionEnvelopeSchema,
   shellExecuteSpec,
 } from '@/core/tools/registry/builtins/shell-execute';
+import { taskSpec } from '@/core/tools/registry/builtins/task';
 import {
   type writeFileInputSchema,
   writeFileSpec,
@@ -198,12 +199,26 @@ describe('toolRequestFromCall — parseFailureCode propagation', () => {
     }
   });
 
-  test('unknown tool returns null (handled by controller as tool_not_found)', () => {
+  test('unknown_tool remains structured so Controller can select tool_not_found recovery', () => {
     const result = toolRequestFromCall(
       { id: 'e2', name: 'nonexistent_tool', args: {} },
       { workspace: '/tmp/sample' },
     );
-    expect(result).toBeNull();
+    expect(result?.ok).toBe(false);
+    if (result && !result.ok) {
+      expect(result.request.parseFailureCode).toBe('unknown_tool');
+    }
+  });
+
+  test('tool_unavailable remains structured instead of becoming invalid arguments', () => {
+    const result = toolRequestFromCall(
+      { id: 'e3', name: 'tool_search', args: { query: 'database capability' } },
+      { workspace: '/tmp/sample', toolSearchEnabled: false },
+    );
+    expect(result?.ok).toBe(false);
+    if (result && !result.ok) {
+      expect(result.request.parseFailureCode).toBe('tool_unavailable');
+    }
   });
 });
 
@@ -532,6 +547,41 @@ describe('invariant i5 — write tools declare mutation scope', () => {
 });
 
 describe('projectResult production closure', () => {
+  test('task model projection exposes only the explicit public result allowlist', () => {
+    const projected = taskSpec.projectResult(
+      {
+        available: true,
+        result: {
+          ok: false,
+          summary: 'Public child summary.',
+          error: 'Public child error.',
+          toolCallCount: 3,
+          durationMs: 42,
+          executionJournal: [{ fingerprint: 'private-execution-journal' }],
+          exhaustedFingerprints: { 'private-exhausted': true },
+          toolRecovery: {
+            identityKey: 'private-recovery-key',
+            failures: { private_failure: { invocationFingerprint: 'private-fingerprint' } },
+          },
+          blocked: {
+            continuation: { id: 'private-continuation', task: 'private-child-task' },
+          },
+          steps: [{ toolName: 'read_file', toolArgs: { path: '/private/path' } }],
+        } as never,
+      },
+      { workspace: '/workspace', invocationInput: { subagent_type: 'explore', task: 'inspect' } },
+    );
+
+    expect(JSON.parse(projected.modelContent)).toEqual({
+      ok: false,
+      summary: 'Public child summary.',
+      error: 'Public child error.',
+      toolCallCount: 3,
+      durationMs: 42,
+    });
+    expect(projected.modelContent).not.toContain('private-');
+  });
+
   test('write_file runner result is the spec projection used by the final tool result', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-projection-'));
     try {

@@ -1,5 +1,6 @@
 import type { AIMessage, BaseMessage, ToolMessage } from '@/core/messages';
 import { aiMessage, humanMessage, systemMessage, toolMessage } from '@/core/messages';
+import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import type {
   JsonObject,
   JsonValue,
@@ -33,6 +34,10 @@ export function serializeSubagentContinuation(
     ...(continuation.exhaustedFingerprints
       ? { exhaustedFingerprints: { ...continuation.exhaustedFingerprints } }
       : {}),
+    toolRecovery: toJsonObject(
+      normalizeToolRecoveryJournalV1(continuation.toolRecovery),
+      'toolRecovery',
+    ),
     blockedTool: {
       toolCallId: blockedTool.toolCallId,
       toolName: blockedTool.toolName,
@@ -58,6 +63,9 @@ export function deserializeSubagentContinuation(
     ...(snapshot.exhaustedFingerprints
       ? { exhaustedFingerprints: { ...snapshot.exhaustedFingerprints } }
       : {}),
+    toolRecovery: normalizeToolRecoveryJournalV1(
+      snapshot.toolRecovery ? cloneJsonObject(snapshot.toolRecovery) : undefined,
+    ),
     blockedTool: {
       toolCallId: snapshot.blockedTool.toolCallId,
       toolName: snapshot.blockedTool.toolName,

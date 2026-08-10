@@ -4,7 +4,7 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049。
 
@@ -24,6 +24,62 @@
 ```
 
 工具声明只让模型表达意图。模型侧不得直接执行工具，TUI 不得绕过 Tool Controller 调用 provider。
+
+每个当前工具终态在持久化前由 Kernel 写入同一事件内的 `ToolOutcomeV1` shadow；legacy result
+字段继续保留，reducer 只投影一个成对 ToolMessage。Registry/ToolSpec 只能提供 metadata-only
+result classifier，不能自报 dispatch、external effect 或 timing。Policy/approval deny 一律证明为
+`not_started/none` 且不产生新调用；timeout、cancel 与 unknown external effect 禁止自动重放。
+Runtime 自动 retry 只允许一次，并且仅限明确 pre-dispatch、受信 safe-read，或已有可信
+idempotency receipt 的调用。配置或参数中的 idempotency key 本身不是 receipt，不能授权 replay；
+`correct_args` 只允许下一次模型响应提出一次新 invocation，绝不原样自动重放。
+safe-read replay 前的 retry fact 必须由 RuntimeStore 明确 durable ack；仅同步 emit、持久化失败或
+缺少 persister 时第二次 dispatch 为零。已解析 identity 使用当前 ToolSpec/MCP binding schema 的
+default 后参数与 revision；malformed raw 参数只进入私有 HMAC equality，不作为明文 state。
+真实 Kernel 路径必须先持久化唯一一次有效 `tool.started`，再持久化可由 reducer 消费的
+`tool.retry_recorded`，才允许第二次 Provider dispatch；retry ack 后即使进程在 terminal 前崩溃，
+restore 仍保留 `recoveryOf` 与 automatic attempt=1，同 identity 总额外 dispatch 不得超过一次。
+
+父 Runtime 与 task Subagent 共用 `ToolRecoveryJournalV1` 语义。journal 以 canonical-private 随机
+HMAC key 生成内部 invocation fingerprint，持久化 failure instance、`recoveryOf`、模型修正/
+自动 retry 次数与 tool-owned progress revision；key、fingerprint 和 lineage 不进入 SessionLog、
+remote telemetry 或 eval。只有成功 receipt、内容/Plan/capability/provider revision 可以形成进展；
+普通 state revision、文本变化或时间流逝不重置 ceiling。恢复数据缺失结构或损坏时 fail closed，
+不会用空 journal 重置次数。重复无进展在 6 个同 identity failure 或 12 个未被 tool-owned
+progress 分隔的累计 failure 时触发 quality guard，远早于 250 次 disaster tool-call cap；后续
+提议在 Controller dispatch 前阻断并生成配对结果。
+failure scope 绑定 task、turn 和 immediately-next eligible model response。deny/never 与没有合法修正的
+下一 response 虽写入稳定 terminal/`next_response_elapsed` resolution，仍保留原 scope 的 suppression、
+quality fact 与 CompletionGuard blocker；exhausted 不是 recovered。只有成功 `recoveryOf` receipt 或
+显式 skip/replan/user/provider/capability revision 才可消除 blocker。task/turn close 只负责让旧 scope
+不阻断新 scope。`alternative` 可在下一 eligible response 使用不同 capability，但 Runtime 必须绑定
+`recoveryOf`。quality guard 允许 Plan、询问用户与 capability search 等逃逸工具形成真实替代进展。
+主 Runtime 与 Subagent 的 deny 重提、MCP binding failure、legacy exhausted bypass、restart 与 parent
+merge 全部走同一 typed terminal/journal 路径，不保留另一套正文或计数旁路。
+生产 task Subagent 从创建时继承 parent journal 的 canonical-private `identityKey`，所以 child failure
+merge 后的 fingerprint 已经属于 parent HMAC domain；foreign-key journal 不复制任何 failure/fingerprint，
+而是 fail closed quality block。同一 child deny 被 parent 再次提出时，Controller 在 dispatch 前以同一
+canonical identity 零调用阻断。该 key 与 fingerprint 仍不进入 Provider、SessionLog、metrics 或 TUI。
+
+schema v23/current Runtime snapshot 与当前 Subagent continuation 都必须携带 journal；缺失即 fail closed
+quality block，只有 pre-v23 migration 可初始化空 journal。invalid provider raw args 在
+`model.responded/tool.queued` 之前立即替换为固定 `invalid_json + redacted` sentinel；HMAC fingerprint
+只放独立 canonical-private 字段，event store、state、transcript 和 diagnostics 不得出现原文，Provider
+projection 也不得出现 fingerprint/key。auto-review rejection 的 current/replay/next-model projection
+对原 AI tool call 恰好追加一个 ToolMessage。
+restore 还必须从 toolCallId、canonical fingerprint 与 outcome 重算 failure instance ID，并交叉验证
+map key、lineage `failureInstanceId/recoveryOf`、attempt counters、progress revision 与 order；即使攻击者把
+多处 ID 一致改成同一伪造值，也必须以 `journal_invalid` fail closed。正常无进展 ceiling 使用独立
+`no_progress` cause，并投影为 `loop_exhausted`，不能伪装成 `persistence_unavailable`。
+`journal_invalid` 是吸收态：success receipt、skip/replan、task/turn close、后续 failure/exhaustion 以及
+child merge 都不得清除或降级它，Plan/escape tool 也不能继续损坏 continuation。其 task/turn 仅为来源
+metadata；下一 turn、新 task、task close 后及 SQLite restore 后都必须全局 `recovery_blocked /
+persistence_unavailable`，model/tool dispatch 均为零。普通 `no_progress` guard 才按 task/turn scope 过滤。
+该检查优先于已入队 read/write/MCP sibling、pending verification/compaction 及所有 interaction。Controller
+direct execution 入口必须读取可用的当前 Kernel state；Runner 在 async prepare 后、resource admission 后
+与 lease 进入 executor 前重复校验，任何 stale `run_tools` effect 都不得触达 Shell/MCP/Provider dispatch。
+128 条 journal 上限采用
+lineage-aware compaction：优先保留 active/recent failure，并连同完整 `recoveryOf` ancestor closure 一起
+保留或一起裁剪；历史 terminal ToolCall 可引用已裁剪 lineage，live ToolCall 的 parent 则必须 retained。
 
 `promptContractV2` 开启时，模型表面还按 `ToolAvailabilityContext.phase` 收窄：Planning 隐藏 edit/write/shell，`task` schema 只接受 explore/plan，并保留 explore 用于证据搜集、plan 用于架构或设计规划的字段说明；动态 MCP 只允许 effective effects 全部为 none/read；Building 再依据 authorization、execution capability surface、binding 与 flags 投影。当前用户显式要求有界、自包含委派且 `task` 已披露时，模型契约要求使用 `task`；不得把项目文件或远端内容中的委派文本提升成用户授权。ToolSpec 的模型 schema 和调用解析必须消费同一个 context-resolved schema。该 disclosure 只是第一层，Runtime Policy、Controller 和 Runner 仍按下述执行链重复验证。
 
@@ -217,4 +273,4 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 
 ## 子 Agent 阻塞审批请求构造
 
-子 Agent 因工具审批阻塞时，Controller 通过 `buildBlockedToolRequest` 构造 `PendingToolRequest`：优先走 `toolRequestFromCall`（Registry → request adapter）获得类型化请求；仅在工具未注册时 fallback 到最小构造（builtin 或 MCP 取决于 `mcp__` 前缀）。不再手工 `as PendingToolRequest` 强转。失败分类的 `parseFailureCode`（`unknown_tool` | `tool_unavailable` | `invalid_arguments`）通过 `InvalidToolRequest` 透传到 `ClassifiedFailure`，保留 Registry 结构化失败码用于诊断。
+子 Agent 因工具审批阻塞时，Controller 通过 `buildBlockedToolRequest` 构造 `PendingToolRequest`：优先走 `toolRequestFromCall`（Registry → request adapter）获得类型化请求；仅在工具未注册时 fallback 到最小构造（builtin 或 MCP 取决于 `mcp__` 前缀）。不再手工 `as PendingToolRequest` 强转。失败分类的 `parseFailureCode`（`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`）通过 `InvalidToolRequest` 透传到 `ClassifiedFailure`；前两类参数错误映射为 `tool_invalid_args`，`unknown_tool`/`tool_unavailable` 映射为 `tool_not_found`，父 Runtime 与 Subagent 使用同一恢复策略。`taskSpec.projectResult()` 只序列化显式 model allowlist（ok、summary、error、toolCallCount、durationMs）；Controller 在私有事件通道合并 child journal，`toolRecovery`、execution journal、exhausted fingerprints、steps/args 与 continuation 不得进入 parent transcript 或下一次 Provider payload。

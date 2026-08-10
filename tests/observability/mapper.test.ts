@@ -70,6 +70,99 @@ describe('production metric allowlist mapper', () => {
     }
   });
 
+  test('derives terminal tool metrics from the canonical outcome instead of legacy fields', () => {
+    const mapper = new ProductionMetricMapperV1({
+      modelVisibleCapabilityAliases: ['shell_execute'],
+    });
+    const samples = mapper.mapRuntimeEvent(
+      {
+        type: 'tool.finished',
+        toolCallId: 'private-call',
+        name: 'shell_execute',
+        result: { ok: false, command: 'private', exitCode: 124, stdout: '', stderr: 'private' },
+        outcomeV1: {
+          schemaVersion: 1,
+          status: 'timed_out',
+          failure: { kind: 'tool_timeout', detailCode: 'timed_out' },
+          dispatchState: 'started',
+          externalEffects: 'unknown',
+          recovery: {
+            disposition: 'never',
+            maximumAdditionalCalls: 0,
+            requiresNewModelResponse: false,
+            safeAutomaticRetry: false,
+          },
+          timing: { source: 'runtime_boundary', totalActiveMs: 25 },
+        },
+      },
+      NOW,
+    );
+    expect(samples).toContainEqual(
+      expect.objectContaining({
+        name: 'tool_total',
+        attributes: { outcome: 'timed_out', capability: 'shell_execute' },
+      }),
+    );
+    expect(samples).toContainEqual(
+      expect.objectContaining({
+        name: 'tool_duration_ms',
+        value: 25,
+        attributes: { outcome: 'timed_out', capability: 'shell_execute' },
+      }),
+    );
+    expect(JSON.stringify(samples)).not.toContain('private-call');
+  });
+
+  test('emits exactly one canonical tool metric pair for approval and auto-review rejection', () => {
+    const mapper = new ProductionMetricMapperV1();
+    const rejectionOutcome = {
+      schemaVersion: 1 as const,
+      status: 'rejected' as const,
+      failure: { kind: 'approval_rejected' as const, detailCode: 'approval_rejected' as const },
+      dispatchState: 'not_started' as const,
+      externalEffects: 'none' as const,
+      replaySafety: 'pre_dispatch' as const,
+      recovery: {
+        disposition: 'never' as const,
+        maximumAdditionalCalls: 0 as const,
+        requiresNewModelResponse: false,
+        safeAutomaticRetry: false,
+      },
+      timing: { source: 'runtime_boundary' as const, totalActiveMs: 17 },
+    };
+    const approval = mapper.mapRuntimeEvent(
+      {
+        type: 'approval.rejected',
+        interactionId: 'private-approval',
+        toolCallId: 'private-tool',
+        reason: 'private',
+        outcomeV1: rejectionOutcome,
+      },
+      NOW,
+    );
+    const autoReview = mapper.mapRuntimeEvent(
+      {
+        type: 'auto_review.completed',
+        reviewId: 'private-review',
+        toolCallId: 'private-tool',
+        result: { ok: true, approved: false, reviewerModelName: 'private', durationMs: 17 },
+        outcomeV1: {
+          ...rejectionOutcome,
+          failure: {
+            kind: 'auto_review_rejected' as const,
+            detailCode: 'auto_review_rejected' as const,
+          },
+        },
+      },
+      NOW,
+    );
+    for (const samples of [approval, autoReview]) {
+      expect(samples.filter((sample) => sample.name === 'tool_total')).toHaveLength(1);
+      expect(samples.filter((sample) => sample.name === 'tool_duration_ms')).toHaveLength(1);
+      expect(samples.filter((sample) => sample.name.startsWith('tool_'))).toHaveLength(2);
+    }
+  });
+
   test('maps Runtime, resource, failure, model, and receipt metadata without identities', () => {
     const mapper = new ProductionMetricMapperV1({
       releaseRouteAliases: ['route-a'],

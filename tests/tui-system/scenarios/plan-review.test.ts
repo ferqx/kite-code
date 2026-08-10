@@ -14,7 +14,7 @@ import { basename } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
 import {
   screenContains,
@@ -210,7 +210,11 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run());
+  test(
+    'runs the complete stateful journey',
+    () => journey.run(),
+    TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
 });
 
 function parseDraftSavedPlan(content: unknown): {

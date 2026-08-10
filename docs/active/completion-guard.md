@@ -21,6 +21,13 @@ Tool receipt reference、evidence 与 canonical Runtime 投影不一致或 evide
 `effect_evidence_required → record_effect_evidence`；skipped reason 或 unresolved failure/approval 未收敛时返回
 `plan_evidence_unresolved → resolve_plan_evidence`。即使步骤和 evidence 已满足，`executing` 仍须先产生合法
 `plan.completed`；只有 `completed` 的 V2 Plan 可由 V2 接受。
+V2 还读取 canonical-private Tool recovery journal：存在 unresolved failure 或 journal quality guard
+已因损坏/无进展而 blocked 时，同样返回 `plan_evidence_unresolved`；该读取只匹配当前 active
+task/turn。旧 task/turn 已关闭，或由成功 receipt、skip/replan/user/provider revision 明确恢复的历史
+记录不构成 blocker；deny/timeout/cancel/unknown、terminal exhaustion 与 `next_response_elapsed` 在原
+scope 仍构成 blocker。一次合法恢复调用只有在成功
+receipt 明确绑定 `recoveryOf` 后才把对应 failure 标为 recovered；Plan evidence 不再把已由该血缘
+收敛的历史失败误当成永久 blocker，但 legacy 或 effect certainty unknown 的失败仍保持 unresolved。
 这里的顺序是协议：pending interaction、非终结 Tool、suspended subagent、unknown invocation 与 active Skill 等
 task-wide blocker 必须先于 V2 schema/identity/evidence 校验；即使 V2 document 已损坏，也不能用较低优先级的
 `plan_evidence_unresolved` 遮蔽当前交互 barrier。

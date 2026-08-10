@@ -34,6 +34,7 @@ import {
   getEffectiveInteractionMode,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
+  TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION,
 } from './state';
 import {
   createRuntimeStore,
@@ -44,6 +45,15 @@ import {
   type StoredEvent,
 } from './store';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
+import {
+  normalizeApprovalRejectedToolOutcomeV1,
+  normalizeAutoReviewCompletedToolOutcomeV1,
+  normalizeToolTerminalEventV1,
+} from './tool-outcome-events';
+import {
+  createToolRecoveryJournalV1,
+  normalizeToolRecoveryJournalV1,
+} from './tool-recovery-journal';
 
 // ── Kernel 配置 / Kernel configuration ──
 
@@ -99,6 +109,7 @@ export class AgentKernel {
   private state: RuntimeState;
   private sandboxAvailable: boolean;
   private readonly appliedEventIds: Set<string>;
+  private lastAppliedEvents: RuntimeEvent[] = [];
   private activeRunnerId: string | null = null;
 
   constructor(config: KernelConfig) {
@@ -117,6 +128,7 @@ export class AgentKernel {
   processEvent(event: RuntimeEventInput): { status: 'applied' | 'duplicate'; eventId: string } {
     const envelope = this.createEnvelope(event, this.state.revision + 1);
     if (this.appliedEventIds.has(envelope.eventId)) {
+      this.lastAppliedEvents = [];
       return { status: 'duplicate', eventId: envelope.eventId };
     }
 
@@ -126,6 +138,7 @@ export class AgentKernel {
       this.metadataFor(envelope),
     ]);
     this.state = nextState;
+    this.lastAppliedEvents = [envelope.payload];
     this.appliedEventIds.add(envelope.eventId);
     if (envelope.payload.type === 'turn.completed') {
       this.store.saveNamedSnapshot(
@@ -144,15 +157,18 @@ export class AgentKernel {
    * 用于 Plan 审批等需要事件和快照同时落盘的关键路径。
    * Used for critical paths like plan approval where events and snapshot must be durably consistent.
    */
-  processEventBatch(events: RuntimeEventInput[]): void {
-    if (events.length === 0) return;
+  processEventBatch(events: RuntimeEventInput[]): RuntimeEvent[] {
+    if (events.length === 0) {
+      this.lastAppliedEvents = [];
+      return [];
+    }
     let nextState = this.state;
     const payloads: RuntimeEvent[] = [];
     const metadata: RuntimeEventMetadata[] = [];
     const batchEventIds: string[] = [];
     const batchSeen = new Set(this.appliedEventIds);
     for (const event of events) {
-      const envelope = this.createEnvelope(event, nextState.revision + 1);
+      const envelope = this.createEnvelope(event, nextState.revision + 1, nextState);
       if (batchSeen.has(envelope.eventId)) continue;
       nextState = this.reduceEnvelope(nextState, envelope);
       payloads.push(envelope.payload);
@@ -160,9 +176,13 @@ export class AgentKernel {
       batchSeen.add(envelope.eventId);
       batchEventIds.push(envelope.eventId);
     }
-    if (payloads.length === 0) return;
+    if (payloads.length === 0) {
+      this.lastAppliedEvents = [];
+      return [];
+    }
     this.store.appendEventsAndSnapshot(this.state.session.threadId, payloads, nextState, metadata);
     this.state = nextState;
+    this.lastAppliedEvents = payloads;
     for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
     let completedTurn: RuntimeEvent | undefined;
     for (const event of payloads) {
@@ -175,6 +195,7 @@ export class AgentKernel {
         this.state,
       );
     }
+    return payloads;
   }
 
   /**
@@ -195,6 +216,11 @@ export class AgentKernel {
    */
   getState(): Readonly<RuntimeState> {
     return this.state;
+  }
+
+  /** Canonical payloads from the immediately preceding synchronous apply operation. */
+  getLastAppliedEvents(): readonly RuntimeEvent[] {
+    return this.lastAppliedEvents;
   }
 
   /**
@@ -454,25 +480,58 @@ export class AgentKernel {
       };
     }
     const combined = [...events, ...additionalEvents];
-    this.processEventBatch(combined);
-    return { status: 'applied', events: combined };
+    const canonicalEvents = this.processEventBatch(combined);
+    return { status: 'applied', events: canonicalEvents };
   }
 
-  private createEnvelope(event: RuntimeEventInput, revision: number): RuntimeEventEnvelope {
+  private createEnvelope(
+    event: RuntimeEventInput,
+    revision: number,
+    normalizationState: RuntimeState = this.state,
+  ): RuntimeEventEnvelope {
     if (isRuntimeEventEnvelope(event)) {
       if (event.threadId !== this.state.session.threadId) {
         throw new Error(`Runtime event thread mismatch: ${event.threadId}.`);
       }
       return event;
     }
-    const normalizedEvent = normalizeTerminalRuntimeEventV1(event);
+    const runtimeNormalizedEvent = normalizeTerminalRuntimeEventV1(event);
+    const occurredAt = new Date().toISOString();
+    const normalizedEvent =
+      runtimeNormalizedEvent.type === 'tool.finished' ||
+      runtimeNormalizedEvent.type === 'tool.failed' ||
+      runtimeNormalizedEvent.type === 'tool.rejected' ||
+      runtimeNormalizedEvent.type === 'tool.cancelled'
+        ? normalizeToolTerminalEventV1(runtimeNormalizedEvent, normalizationState, occurredAt)
+        : runtimeNormalizedEvent.type === 'approval.rejected'
+          ? normalizeApprovalRejectedToolOutcomeV1(
+              runtimeNormalizedEvent,
+              normalizationState,
+              occurredAt,
+            )
+          : runtimeNormalizedEvent.type === 'auto_review.completed'
+            ? normalizeAutoReviewCompletedToolOutcomeV1(
+                runtimeNormalizedEvent,
+                normalizationState,
+                occurredAt,
+              )
+            : runtimeNormalizedEvent;
     const serialized = JSON.stringify(normalizedEvent);
     const eventId = createHash('sha256').update(serialized).digest('hex');
-    const occurredAt = new Date().toISOString();
     const payload =
       (normalizedEvent.type === 'user.message_appended' ||
         normalizedEvent.type === 'model.responded' ||
-        normalizedEvent.type === 'tool.finished') &&
+        normalizedEvent.type === 'tool.finished' ||
+        normalizedEvent.type === 'tool.failed' ||
+        normalizedEvent.type === 'tool.rejected' ||
+        normalizedEvent.type === 'tool.cancelled' ||
+        normalizedEvent.type === 'tool.queued' ||
+        normalizedEvent.type === 'tool.started' ||
+        normalizedEvent.type === 'approval.requested' ||
+        normalizedEvent.type === 'approval.granted' ||
+        normalizedEvent.type === 'approval.rejected' ||
+        normalizedEvent.type === 'auto_review.requested' ||
+        normalizedEvent.type === 'auto_review.completed') &&
       !normalizedEvent.createdAt
         ? { ...normalizedEvent, createdAt: occurredAt }
         : normalizedEvent;
@@ -895,7 +954,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   const normalizedSnapshot = snapshot;
 
   if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION)
-    return normalizeRuntimeMetadata(normalizedSnapshot);
+    return normalizeRuntimeMetadata(normalizedSnapshot, snapshot.schemaVersion);
   if (snapshot.schemaVersion < 2 || snapshot.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
     return null;
 
@@ -914,7 +973,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   // Build the migrated state before upgrading the version so all v2 fields are
   // preserved and the recovery marker is durable with the schema transition.
   let migratedState: RuntimeState = {
-    ...normalizeRuntimeMetadata(normalizedSnapshot),
+    ...normalizeRuntimeMetadata(normalizedSnapshot, snapshot.schemaVersion),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
     context: normalizeContextRuntimeState((normalizedSnapshot as Partial<RuntimeState>).context),
@@ -929,7 +988,6 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
       pending: [],
       waivers: {},
     },
-    suspendedSubagents: snapshot.suspendedSubagents ?? {},
     capabilities: {
       catalogRevision: snapshot.capabilities?.catalogRevision ?? '',
       bindings: snapshot.capabilities?.bindings ?? {},
@@ -941,6 +999,9 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
       invocations: snapshot.capabilities?.invocations ?? {},
     },
     skills: snapshot.skills ?? { catalogRevision: '', frames: {} },
+    toolRecovery: (normalizedSnapshot as Partial<RuntimeState>).toolRecovery
+      ? normalizeToolRecoveryJournalV1((normalizedSnapshot as Partial<RuntimeState>).toolRecovery)
+      : createToolRecoveryJournalV1(),
     ...(legacyMarker ? { legacyUnrecoverableSubagentApproval: legacyMarker } : {}),
   };
 
@@ -980,7 +1041,10 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   return materializeLegacyPlanArtifacts(migratedState);
 }
 
-function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
+function normalizeRuntimeMetadata(
+  state: RuntimeState,
+  sourceSchemaVersion = state.schemaVersion,
+): RuntimeState {
   const raw = state as RuntimeState & {
     revision?: number;
     appliedEventIds?: string[];
@@ -1000,6 +1064,12 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     resourceBudget: normalizeResourceBudgetMetadata(
       raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
     ),
+    toolRecovery:
+      sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
+        ? raw.toolRecovery
+          ? normalizeToolRecoveryJournalV1(raw.toolRecovery)
+          : createToolRecoveryJournalV1()
+        : normalizeToolRecoveryJournalV1(raw.toolRecovery),
     turn: {
       ...state.turn,
       status:
@@ -1031,6 +1101,21 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
         : {}),
       invocations: state.capabilities?.invocations ?? {},
     },
+    suspendedSubagents: Object.fromEntries(
+      Object.entries(state.suspendedSubagents ?? {}).map(([toolCallId, snapshot]) => [
+        toolCallId,
+        snapshot.toolRecovery
+          ? snapshot
+          : {
+              ...snapshot,
+              toolRecovery: (sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
+                ? createToolRecoveryJournalV1()
+                : normalizeToolRecoveryJournalV1(undefined)) as unknown as NonNullable<
+                RuntimeState['suspendedSubagents'][string]['toolRecovery']
+              >,
+            },
+      ]),
+    ),
   };
 }
 

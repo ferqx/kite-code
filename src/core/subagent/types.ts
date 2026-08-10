@@ -46,6 +46,8 @@ export interface SubAgentRunnerInput {
   /** Project instructions visible to the parent model when this sub-agent was dispatched. */
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
   threadId?: string;
+  /** Parent Runtime canonical-private HMAC key; never projected into model/session output. */
+  recoveryIdentityKey?: string;
   model?: import('@/core/model/factory').SupportedChatModel;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
@@ -70,6 +72,7 @@ export interface SubAgentContinuation {
   /** Phase 5: journal state preserved across approval round-trips */
   executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;
+  toolRecovery?: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1;
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
 }
 
@@ -119,6 +122,7 @@ export interface SubAgentResult {
   executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
   /** Phase 5: 子 Agent 中已耗尽的操作指纹 / Exhausted fingerprints detected in subagent */
   exhaustedFingerprints?: Record<string, true>;
+  toolRecovery?: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1;
 }
 
 /** 子 agent 缓存指标 / Sub-agent cache metrics */

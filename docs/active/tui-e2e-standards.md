@@ -130,7 +130,11 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    前序失败后依赖步骤不会继续执行，也不会制造级联失败。scenario contract 会拒绝
    `beforeAll` 下注册多个 `test()` 的结构。journey 总 deadline 必须先于 Bun test 与文件级硬超时，
    使慢场景仍由 harness 报告当前 step，而不是先收到匿名外层超时。setup/readiness 不得伪装成
-   可独立通过的测试用例。验证同一设置的双向转换时，如果反向转换不依赖正向转换的业务结果，
+   可独立通过的测试用例。每个 journey 的 Bun test 必须显式使用 harness 导出的
+   `TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS`（180 秒）作为外层 timeout，不能依赖 Bun 的 5 秒默认值，
+   也不能用局部 `TIMEOUT` alias 绕过统一预算。scenario contract 通过 AST 关联
+   `createTuiSystemJourney()` 实例、`journey.run()` 与 test 第三参数，守住全部 stateful scenario；
+   这也保证裸 `bun test` 发现 scenario 时不会在 harness step timeout 之前误杀。验证同一设置的双向转换时，如果反向转换不依赖正向转换的业务结果，
    应为两个方向分别建立明确的初始配置与独立 fixture；不得让反向断言依赖前序 suggestion、
    action delta 或重绘历史。step timeout 必须中止共享条件等待，并在独立的有界 settle window 内
    等待当前 step 收敛后才进入 fixture teardown；所有 journey 可达的 delay、screen polling 和
@@ -314,4 +318,5 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
 - `bun run release:smoke`：在隔离 managed prefix 中直接以真实 PTY 启动已安装的 standalone
   `kite-tui`；不得用源码入口 startup 或单独 `--version` 代替候选 executable 的启动证据。
 - `bun run test:all`：先运行默认门禁，再运行完整 PTY suite。
-- 裸 `bun test` 会按 Bun 默认发现规则包含高成本 PTY 文件，不是仓库规范的全量入口。
+- 裸 `bun test` 会按 Bun 默认发现规则包含高成本 PTY 文件，不是仓库规范的全量入口；scenario 仍须
+  具备显式外层 timeout 并可直接运行，不能因默认 5 秒上限产生伪失败。

@@ -91,6 +91,8 @@ skipped 理由及未解决 failure/approval。随后由独立 `ACORE-PLAN-03` �
 | `ACORE-PLAN-01` | completed (V1) | CompletionGuard 在 scheduler/runner/reducer 三层阻止虚假完成，一次 correction 后 blocked terminal；后续 evidence/typed failure gate 由 `ACORE-PLAN-02`/`ACORE-TOOL-02` 承接。 |
 | `ACORE-PLAN-02` | completed | PlanDocument V2、strict identity、metadata-only evidence、V1 read/replay-only migration，以及 Artifact/reducer/facade fail-closed 边界已通过整体规格与质量审查。 |
 | `ACORE-PLAN-03` | completed | CompletionGuard V2 verification/effect evidence gate、严格 Plan identity、schema-bound legacy replay、跨 turn correction ceiling、required-verification metadata-only Journey 与 atomic terminal batch 已通过整体规格/质量审查；PR 级门禁仍独立待执行。 |
+| `ACORE-TOOL-01` | completed | Runtime-owned ToolOutcome V1、同 terminal event shadow、strict legacy replay、metadata-only unknown-field/session/metrics/TUI projection 已落地，并通过整体规格与代码质量审查。 |
+| `ACORE-TOOL-02` | completed | Durable parent/subagent recovery journal、private HMAC identity、recoveryOf、一次 correction/retry ceiling、fail-closed restore、quality guard 与 CompletionGuard unresolved gate 已落地，并通过整体规格与代码质量审查。 |
 | `ACORE-EVAL-POLICY-01` | frozen (r1) | first-decision candidate `300e11a4`、OpenCode Go、十轮 paired sample 和 Go usage privacy boundary 已冻结；完整 Journey candidate 仍待后续 scope 收敛。 |
 
 ## `ACORE-DOC-01`：文档冻结与 Review
@@ -149,6 +151,8 @@ metadata-only event counts。fixture 只断言报告不含 path 或内容，作�
   internal journal 持久化或由其重建，不进入诊断 SessionLog、telemetry 或 eval，也不输出 digest、命令、路径、args 或
   stdout/stderr。
 - unknown fields 在 strip 前只记录 has/count、tool class 与 schema revision，不记录字段名/值。
+- envelope restore 使用 exact-key/semantic matrix；producer/reducer/model/session/metrics/TUI 从同一
+  outcome 投影，Shell timeout、human approval wait 与 total active timing 使用 Runtime 结构化边界。
 
 ## `ACORE-TOOL-02`：失败 journal 与无进展保护
 
@@ -160,6 +164,11 @@ metadata-only event counts。fixture 只断言报告不含 path 或内容，作�
 - Runtime/Policy/dispatch/effect/idempotency 判定优先；ToolSpec 只能收紧。classifier 缺失或冲突时 fail closed 为 unknown/never。
 - lineage 可从 canonical private Runtime Store 持久化或重建，但内部 fingerprint 不进入诊断 SessionLog、telemetry 或 eval。
 - 区分 disaster resource budget 与 quality guard；后者必须在 250 次工具上限之前阻断无进展循环。
+- journal 绑定 task/turn/immediately-next response 并用稳定 resolution 收敛 terminal、skip/replan/user/
+  provider progress；safe-read 第二次 dispatch 前必须取得 RuntimeStore durable ack。当前 ToolSpec/MCP
+  binding schema defaults+revision 形成 parsed identity，malformed raw equality 只进入私有 HMAC。
+- Subagent MCP binding failure 与 legacy exhausted bypass 走同一 terminal/journal/quality/restore/parent
+  merge 路径；CompletionGuard 只阻当前 active scope，旧 task 不污染新 task。
 
 ## `ACORE-EVAL-01`：Tool Journey Eval V1
 
