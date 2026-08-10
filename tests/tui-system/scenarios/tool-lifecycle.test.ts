@@ -273,8 +273,8 @@ describe('TUI PTY System — Tool Lifecycle: write_plan', () => {
       expect(artifacts[0]!.content).toContain('"id":"step-1"');
       expect(artifacts[0]!.content).toContain('"title":"Step 2: Verify"');
 
-      // No plan_review interrupt (write_plan does NOT trigger review)
-      expect(clean.includes('Review the plan above')).toBe(false);
+      // The review overlay was observed and accepted above; it must close before idle.
+      expect(clean.includes('方案审核')).toBe(false);
 
       // TUI back to idle
       expect(clean.includes('❯')).toBe(true);

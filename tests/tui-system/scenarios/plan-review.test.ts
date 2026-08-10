@@ -181,8 +181,8 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
       expect(artifacts[0]!.content).toContain('"id":"setup"');
       expect(artifacts[0]!.content).toContain('"title":"Write tests"');
 
-      // Plan review UI should NOT be shown (write_plan does not trigger review)
-      expect(clean.includes('Review the plan above and choose')).toBe(false);
+      // The review overlay was observed and accepted above; it must close before idle.
+      expect(clean.includes('方案审核')).toBe(false);
 
       // TUI prompt should be back
       expect(clean.includes('❯')).toBe(true);
