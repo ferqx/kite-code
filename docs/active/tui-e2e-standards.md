@@ -263,6 +263,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     canned 文案。文件、导出、持久化等副作用还必须以磁盘或 Store observer 验证真实状态，模型文字
     和 Tool result 二者都不能单独替代副作用证据。嵌套
     Subagent 请求可以合法穿插，但不能清除父调用的未闭合状态。
+    触发 `task` 的 Subagent scenario 还必须在当前用户输入中显式要求委派，且请求范围必须与
+    fixture 选择的角色一致（例如只读检查使用 `explore`，实现修改使用 `code`）；不得依赖测试名称、
+    fixture 注释、项目文档或模型 canned response 伪造用户授权。
     当后续 tool call 必须使用前一 Tool result 中运行时生成的标识时，当前 queue slot 可以使用
     test-only `response(request)` resolver 从已记录的 Mock request 生成该 slot 的 response；resolver
     不能读取 queue cursor、未消费 response、Runtime state 或网络。它仍严格消耗一个 slot，且返回值

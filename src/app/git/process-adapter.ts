@@ -49,6 +49,20 @@ async function consume(
   return { text: '', overflow };
 }
 
+async function confirmUnixProcessGroupExited(pid: number, timeoutMs = 1_000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (true) {
+    try {
+      process.kill(-pid, 0);
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ESRCH';
+    }
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) return false;
+    await Bun.sleep(Math.min(10, remainingMs));
+  }
+}
+
 /** App-owned process adapter. Core owns argv/env/schema and never imports this implementation. */
 export function createAppGitProcessAdapterV1(
   input: { spawn?: typeof Bun.spawn } = {},
@@ -126,12 +140,7 @@ export function createAppGitProcessAdapterV1(
           if (process.platform === 'win32') {
             cleanupConfirmed = false;
           } else {
-            try {
-              process.kill(-child.pid, 0);
-              cleanupConfirmed = false;
-            } catch {
-              cleanupConfirmed = true;
-            }
+            cleanupConfirmed = await confirmUnixProcessGroupExited(child.pid);
           }
         }
         const [exitCode, stdoutResult, stderrResult] = await Promise.all([

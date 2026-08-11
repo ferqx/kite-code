@@ -180,7 +180,7 @@ profile都 fail closed，generic process/read-only fallback 也不能隐式产�
 `git_inspect` 只接受 `status | diff | log | branch_list` 的逐 operation 严格有界 schema；unknown/无关字段拒绝。path 必须是 literal，相对路径中的 pathspec magic、glob、casefold 与反斜杠形式一律在进程前拒绝。Core broker 在任何 Git
 process 前验证 canonical repository/common-dir、Workspace 外受信 binary identity、受限 config、
 attributes、replace refs、grafts 与 shared protected-path evaluator；无法证明安全时零 dispatch。
-`core.excludesFile`、include/url/protocol/remote/credential 及其他可跨越仓库边界的 config 一律视为 hostile，且 broker 环境不得继承用户 Git 配置。`diff` 在 dispatch 前还要以有界历史/对象 provenance 证明请求路径从未由 protected 名称或 protected blob 派生；无法证明时只返回低信息量拒绝。每次 adapter request 都携带独立 stdout/stderr byte ceiling，App 以流式 UTF-8 安全读取并在溢出时终止 process tree。
+`core.excludesFile`、include/url/protocol/remote/credential 及其他可跨越仓库边界的 config 一律视为 hostile，且 broker 环境不得继承用户 Git 配置。`diff` 在 dispatch 前还要以有界历史/对象 provenance 证明请求路径从未由 protected 名称或 protected blob 派生；无法证明时只返回低信息量拒绝。每次 adapter request 都携带独立 stdout/stderr byte ceiling，App 以流式 UTF-8 安全读取并在溢出时终止 process tree。Unix adapter 在 timeout、取消或输出超限后还要在有界窗口内等待 detached process group 消失；只有系统返回 `ESRCH` 才记录 `cleanupConfirmed=true`，超时、权限错误或其他无法证明的结果继续 fail closed。
 `.gitattributes`、`.git/info/attributes`、grafts、`refs/replace` 与 `packed-refs` 在读取前逐级验证 metadata boundary、拒绝任意 symlink；packed refs 中出现 replace ref 同样视为 hostile。
 命令 argv 和环境由 broker 构造，禁用 system/global config、credential/askpass、hooks、filters、
 pager、external diff 和可执行 attributes。`log` 只返回 hash/time 等 metadata，不读取 subject、blob
