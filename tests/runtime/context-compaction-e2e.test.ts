@@ -117,47 +117,51 @@ describe('narrative compaction e2e', () => {
     expect(completed.transcript.messages).toEqual(state.transcript.messages);
   });
 
-  test('manual and auto use the same reduction acceptance', async () => {
-    for (const reason of ['manual', 'auto'] as const) {
-      const state = requested(reason);
-      const events = await executeContextCompaction({
-        state,
-        compactionId: 'compact-1',
-        compact: async ({ sourceRevision, pending }) =>
-          checkpointFor(
-            state,
-            pending.reason,
-            sourceRevision,
-            String(state.transcript.messages[0]!.content).trim(),
-          ),
-      });
-      expect(events[0]).toMatchObject({
-        type: 'context.compaction_failed',
-        errorKind: 'insufficient_reduction',
-      });
-    }
-  });
-
-  test('auto failure gates the normal model for this turn and releases on the next turn', async () => {
-    const state = requested('auto');
-    const [event] = await executeContextCompaction({
+  test('manual compaction enforces reduction acceptance', async () => {
+    const state = requested('manual');
+    const events = await executeContextCompaction({
       state,
       compactionId: 'compact-1',
-      compact: async () => {
-        throw new Error('provider rejected summary');
-      },
+      compact: async ({ sourceRevision, pending }) =>
+        checkpointFor(
+          state,
+          pending.reason,
+          sourceRevision,
+          String(state.transcript.messages[0]!.content).trim(),
+        ),
     });
-    expect(event).toMatchObject({
+    expect(events[0]).toMatchObject({
       type: 'context.compaction_failed',
-      errorKind: 'summary_model_failed',
-      requestedAtTurnId: state.turn.turnId,
+      errorKind: 'insufficient_reduction',
     });
+  });
 
-    const failed = reduceRuntimeState(state, event!);
-    expect(decideNextEffect(failed)).toEqual({ type: 'stop' });
+  test('legacy automatic requests are inert and never create a compaction effect', async () => {
+    const state = requested('auto');
+    expect(state.context.pendingCompaction).toBeUndefined();
+    expect(decideNextEffect(state)).toEqual({ type: 'call_model' });
+    expect(
+      await executeContextCompaction({
+        state,
+        compactionId: 'compact-1',
+        compact: async () => {
+          throw new Error('must not dispatch');
+        },
+      }),
+    ).toEqual([]);
 
-    const next = reduceRuntimeState(failed, { type: 'turn.started', turnId: 'next-turn' });
-    expect(decideNextEffect(next)).toEqual({ type: 'call_model' });
+    const malformed = requested('manual');
+    malformed.context.pendingCompaction!.reason = 'auto';
+    expect(decideNextEffect(malformed)).toEqual({ type: 'stop' });
+    expect(
+      await executeContextCompaction({
+        state: malformed,
+        compactionId: 'compact-1',
+        compact: async () => {
+          throw new Error('must not dispatch malformed pending state');
+        },
+      }),
+    ).toEqual([]);
   });
 
   test('revision-stale results are rejected by the Kernel lease', () => {

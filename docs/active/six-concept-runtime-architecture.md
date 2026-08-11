@@ -6,7 +6,7 @@
 
 验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
-相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
+相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、ADR-0096、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`、`three-tier-context-reduction.md`。
 
 ## 1. 两个正交视角
 
@@ -105,6 +105,14 @@ claim nonce digest；Runtime 只有在该 durable claim 成功后才允许请求
 不能复用仍有效 permit。迁移 v20 snapshot 不为历史调用虚构 egress decision，receipt 不持久化
 raw arguments、正文或 nonce。
 
+Runtime schema v22 保留 v21 全部事实，并把全工具有限 L1 result budget、self-contained verified
+terminal、唯一 prepared/final admission 和 L2 commit/receipt 纳入当前状态。v2..v21 恢复只能把旧
+Tool Result 归一为 `legacy_unverified + legacy_unknown`，不能从正文补造 receipt。迁移先只读构造 candidate，
+再以 snapshot metadata、observed full event head 和持久单调 generation/fencing token 做 exact CAS；普通 v22
+append+snapshot 也必须携带同一 persistence identity。恢复交叉验证 snapshot revision/cut、连续 event revision、
+settled call、唯一 transcript Tool Result 与 terminal receipt/identity；缺失或冲突进入 quarantine。
+rewind、delete/recreate 与 fork-target replacement 推进 generation，阻断 stale Kernel 的 ABA 写入。
+
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
 dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
 `legacy_unconfigured`，不会伪造余额；v18 ledger 保留 reservation，并补齐空 waiter queue。
@@ -112,8 +120,9 @@ dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
 `unknown` 且不退款/重放。
 
 Runner 对 model、compaction、auto-review、Verification、builtin/MCP/Skill/Sub-agent tool、
-Provider recovery 和 artifact-writing tool 在副作用前执行 admission。preparation transaction
-先原子持久化 reservation/queue promotion，再单独持久化 `dispatch_started`；tool/capability
+Provider recovery 和 artifact-writing tool 在副作用前执行 admission。未取得 Provider-ready effect lease 的
+waiter 可单独持久化 queue promotion；被唤醒后必须从最新状态重新 prepare。真正准备 dispatch 的 effect lease
+在一个 CAS batch 中原子持久化 reservation 与 `dispatch_started`，中间态不可见；tool/capability
 terminal facts 与 actual reconciliation 在一个 result transaction 中提交。并发调用使用按
 resource 的 FIFO sequence；shell 同时要求 `tool + shell_invocation` compound permit，不持有
 部分额度。主模型 reservation 使用将要发送给 Provider 的同一 context projection 精确计量
@@ -147,9 +156,25 @@ recovery、CLI 与 TUI 的共同投影复测。其他 capability producer 必须
 contract test 后才能声明 coverage。缺少 external-effect 证据时 fail closed 为 `unknown`，已有
 证据做保守合并；未 reconciliation 时不得继续或降级。调用方只能进一步收紧结果。
 
-Context compaction 当前只有一条 Markdown narrative 管线。专用 summary request 使用当前对话模型、空工具集、确定性温度和零 SDK retry；输入只包含最小固定 prompt、已有 checkpoint narrative、全部 safe settled history 与作为不可信数据的 custom instructions，不携带普通 Agent system prompt、工具 schema、live tail 或动态 RuntimeState。模型内容产物只有规范化 `summary: string`，不生成工具结果投影、JSON、fact/evidence ledger、file ledger、repair、chunk 或 merge 产物。首次和增量压缩都只调用模型一次；manual 总结全部安全历史，auto 保护当前 turn 后总结其余安全历史，增量输入为旧 narrative 加 checkpoint 后的全部 safe history，整体替换 active checkpoint。显式 summary input 上限超出时整体失败，不得静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、可序列化且不超过 narrative 上限。Manual 与 auto 共享至少 1024 token 的统一绝对缩减门槛；target ratio 只作诊断。Checkpoint 保存 Markdown 与 Core 生成的 boundary、digest、revision 和 estimate；统一 serializer 规范化 LF、移除外围空白并 XML 转义后，生成且只生成一个历史区首位的 `<compacted_history>` assistant frame。
+Context compaction 当前只有一条手动 Markdown narrative 管线。专用 summary request 使用当前对话模型、空工具集、确定性温度和零 SDK retry；输入只包含最小固定 prompt、已有 checkpoint narrative、全部 safe settled history 与作为不可信数据的 custom instructions，不携带普通 Agent system prompt、工具 schema、live tail 或动态 RuntimeState。模型内容产物只有规范化 `summary: string`，不生成工具结果投影、JSON、fact/evidence ledger、file ledger、repair、chunk 或 merge 产物。首次和增量压缩都只调用模型一次；manual 总结全部安全历史，增量输入为旧 narrative 加 checkpoint 后的全部 safe history，整体替换 active checkpoint。显式 summary input 上限超出时整体失败，不得静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、可序列化且不超过 narrative 上限，并至少节省 1024 token；target ratio 只作诊断。Checkpoint 保存 Markdown 与 Core 生成的 boundary、digest、revision 和 estimate；统一 serializer 规范化 LF、移除外围空白并 XML 转义后，生成且只生成一个历史区首位的 `<compacted_history>` assistant frame。
 
-Model Controller 术语（模型控制器）在 Provider 调用前通过统一的 `buildContextProjection()` 入口计算 context pressure 术语（上下文压力）：`normal / warning / compact_due / hard_limit / unknown`，默认 warning/compact/hard 阈值为可用输入预算的 80%/90%/94%。`ResolvedModelCapabilities` 的每个字段只从所选模型显式配置、adapter runtime metadata 或 `modelKwargs` 兼容配置独立解析，并记录 `explicit_config | adapter_runtime | compatibility_config` source；缺失字段保持 unknown，布尔能力保持 true/false/unknown 三态。模型名称和默认模型列表不提供 context window、max output、tokenizer、usage 或 prompt-cache 能力。未知 window 或 output reservation 不产生隐式 4096 预算，不显示利用率，也不运行 ratio auto；用户可显式设置 `compactAfterEstimatedTokens` 绝对策略。正常模型调用、compaction effect 术语（压缩副作用）与 `/context` 通过同一个 `resolveContextProjectionEnvironment()` 重建当前工具、Skill 与 capability 环境；before/after 必须共享该环境，正式 acceptance 术语（验收）不读取旧 preflight 的 estimate。自动模式为 `off | shadow | live`，原因只允许 `manual | auto`。live 命中 compact 阈值后先执行自动压缩；失败或取消时以原请求 turn id 阻止同 turn 普通模型调用，下一用户 turn 重新 preflight，并允许该恢复尝试绕过旧 cooldown/breaker。已有 checkpoint 时执行增量压缩；Core 不从通用 Provider HTTP 400 或错误文本推断 overflow 术语（上下文溢出），也不对 summary 失败执行工具输出清理、分块或自动重试。
+Slice A 的 `prepareContextRequestV2()` 是唯一 Core context builder。它纯计算 deep-frozen raw/effective
+projection，并绑定 source/request identity、ToolSet/schema、全部 prompt-affecting 参数、output reservation、
+cache-affecting environment、L1/L2 policy 与 estimator；inspection/candidate/restore-debug 不获得 lease、
+reservation 或 Provider dispatch。只有 normal `primary_ready` 进入 effect-only final admission，且在持久
+lease/reservation 前后重验 identity，不重建 Provider bytes。Slice A 已支持 pure `summary_source → summary_ready` artifact，但它不可进入 primary final admission，当前也没有 Provider dispatch/writer owner。旧 Slice B
+canonical source producer 已移除；现有 checkpoint-v1 narrative 只由手动兼容 orchestrator 生成。新的 summary
+source 与统一自动编排属于渐进式计划后续阶段。
+
+L2 reclaim 的配置 schema 为 `off|shadow|live`，新 flag `toolResultBudgetV2` 与 `contextReclaimV1` 都默认
+false。live 只替换完整 settled、成功、全 `budget_v2` verified、read-only、无 workspace mutation 的
+`read_file|search_content|search_files` block；compat/legacy/mixed/current-turn 块保持 raw。只有成功 primary
+response 才能在封闭 2-event no-advance 或 3-event advance batch 中推进 bounded commit；commit 不保存
+selected entries 正文/数组，原始 transcript 永不删除。当前 trusted route registry 为空，因此 live 是
+development-only，不能由用户配置或模型名称取得 production qualification。完整不变量与未实现的 L3
+边界见 `three-tier-context-reduction.md`。
+
+Model Controller 术语（模型控制器）在 Provider 调用前通过统一的 `buildContextProjection()` 入口计算 context pressure 术语（上下文压力）：`normal / warning / compact_due / hard_limit / unknown`，默认 warning/compact/hard 阈值为可用输入预算的 80%/90%/94%。`ResolvedModelCapabilities` 的每个字段只从所选模型显式配置、adapter runtime metadata 或 `modelKwargs` 兼容配置独立解析，并记录 `explicit_config | adapter_runtime | compatibility_config` source；缺失字段保持 unknown，布尔能力保持 true/false/unknown 三态。模型名称和默认模型列表不提供 context window、max output、tokenizer、usage 或 prompt-cache 能力。未知 window 或 output reservation 不产生隐式 4096 预算，不显示利用率，也不阻止普通模型请求或手动 `/compact`。当前唯一压缩 producer 是手动 checkpoint-v1 narrative；旧 `contextCompactionAutoV1`、`compaction.autoMode` 与自动阈值字段仅作配置解析兼容，不能调度 auto request/pending/effect。PSMC-03..06 的 MicroCompact、Checkpoint Working Set 与 SummaryCompact 单入口尚未实施，Session Memory 不在当前计划内。正常模型调用、手动 compaction effect 术语（压缩副作用）与 `/context` 通过同一个 `resolveContextProjectionEnvironment()` 重建当前工具、Skill 与 capability 环境；before/after 必须共享该环境，正式 acceptance 术语（验收）不读取旧 preflight 的 estimate。Core 不从通用 Provider HTTP 400 或错误文本推断 overflow 术语（上下文溢出），也不对 summary 失败执行工具输出清理、分块或自动重试。
 
 模型控制器默认请求流式输出；adapter 未声明或未实现流能力时才使用非流式调用。`ResolvedModelCapabilities.streaming` 与其他能力字段一样按显式配置、adapter metadata、兼容配置的优先级独立解析，不能由模型名称推断。流式与非流式路径必须生成相同的终态 `AIMessage` 语义，确保 Capability binding、Policy、Execution 和持久化行为不因展示方式改变。
 

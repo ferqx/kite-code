@@ -9,6 +9,13 @@
       "args": {}
     },
     {
+      "type": "provider.action_required",
+      "interactionId": "provider-action",
+      "providerId": "github",
+      "action": "login",
+      "originatingToolCallId": "mcp-call"
+    },
+    {
       "type": "tool.failed",
       "toolCallId": "mcp-call",
       "failure": {
@@ -20,13 +27,6 @@
         "terminatesTurn": false,
         "journal": true
       }
-    },
-    {
-      "type": "provider.action_required",
-      "interactionId": "provider-action",
-      "providerId": "github",
-      "action": "login",
-      "originatingToolCallId": "mcp-call"
     }
   ],
   "effects": [],
@@ -37,8 +37,8 @@
     }
   ],
   "expectedEvents": [
-    "tool.failed",
     "provider.action_required",
+    "tool.failed",
     "provider.action_started",
     "provider.action_completed",
     "turn.started"

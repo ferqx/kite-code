@@ -131,9 +131,26 @@ pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 p
 
 模型不再需要显式 `matchMode: 'trimmed'` 来处理常见空白不匹配。仅在多行且多命中时返回模糊错误。
 
-### 工具输出截断（`src/core/tools/registry/projection.ts`）
+### 工具输出预算与 read cursor（`src/core/tools/result-budget-v2.ts`）
 
-Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内存 head+tail capture 持续 drain stdout/stderr，防止最终投影前出现无界完整输出副本；capture 超限会写入明确 omission marker。其后 `truncateProjectedOutput` 对单路超过 4000 字符的模型输出继续做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。失败时两路输出都保留，Runner 只消费该模型投影，不再自带第二份模型截断实现。4000 字符与 MCP 128 KiB 现值统一登记在 `ToolResultBudgetPolicyV1`；该登记不改变任何截断字节。`read_file`、`search_content`、`search_files` 在模型投影前产生可信 raw/model digest provenance；缺少 pre-projection 证明的恢复数据必须标记 `legacy_unknown`，不能升级为 raw。
+Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内存 head+tail capture 持续 drain
+stdout/stderr，防止最终投影前出现无界完整输出副本；capture 超限会写入明确 omission marker。其后
+`stream_head_tail` 对 stdout/stderr 分别应用精确 4000 字符上限并绑定双流 digest；finalizer 与 replay validator
+使用同一上限。`toolResultBudgetV2=false` 时仍保持既有 `compat_v1` 模型字节；开启后 Registry 中每个工具都有
+有限 budget，serialized/structured/MCP envelope 为 128 KiB UTF-8，JSON projector 必须返回固定、合法、bounded
+envelope，不能用字符串切断制造非法 JSON。
+
+`read_file` 的 V2 projection 使用 `line_byte_cursor_v2`。cursor 绑定 canonical path digest、resource revision、
+decoder contract、初始 offset/effective limit、冻结的 `endLineExclusive`、当前 line offset 与行内 UTF-8 byte
+offset，并带版本化 `windowIdentity`/`cursorDigest`。行内 byte offset 必须落在 UTF-8 scalar 边界；伪造
+end/line offset、BOM/encoding 切换、EOL-only resource revision 漂移或多次 continuation identity 不匹配均
+fail closed。UTF-16LE/BE BOM 通过既有 decoder contract 后再投影；无 BOM 非法 UTF-8 在非 force 路径拒绝，
+force 路径仍按确定性规则处理。
+
+`read_file`、`search_content`、`search_files` 在模型投影前产生可信 raw/model digest provenance；缺少
+pre-projection receipt 的恢复数据只能是 `legacy_unknown + legacy_unverified`。只有全 `budget_v2` verified 的
+settled read/search block 可进入默认关闭的 L2 live 白名单，详见
+[`three-tier-context-reduction.md`](three-tier-context-reduction.md)。
 
 ### rg exit code 1 ≠ error（`tool-contracts.ts`、`system-prompt.txt`）
 

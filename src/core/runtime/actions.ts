@@ -92,6 +92,7 @@ function approvalCancellationEvents(
   state: Readonly<RuntimeState>,
   interaction: Extract<RuntimeState['interactions'], { kind: 'awaiting_tool_approval' }>,
   reason: string,
+  failure = classifyFailure('approval_rejected', reason),
 ): RuntimeEvent[] {
   return [
     {
@@ -99,7 +100,13 @@ function approvalCancellationEvents(
       interactionId: interaction.interactionId,
       toolCallId: interaction.toolCallId,
       reason,
-      failure: classifyFailure('approval_rejected', reason),
+      failure,
+    },
+    {
+      type: 'tool.rejected',
+      toolCallId: interaction.toolCallId,
+      reason,
+      failure,
     },
     ...unfinishedToolCancellationEvents(state, reason, interaction.toolCallId),
     ...resourceReservationCancellationEvents(state),
@@ -348,18 +355,13 @@ export function eventsForRuntimeAction(
             sandboxAvailable: options.sandboxAvailable ?? false,
           });
         } catch (error) {
-          return [
-            {
-              type: 'approval.rejected',
-              interactionId: action.interactionId,
-              toolCallId: interaction.toolCallId,
-              reason: error instanceof Error ? error.message : String(error),
-              failure: classifyFailure(
-                'sandbox_error',
-                error instanceof Error ? error.message : String(error),
-              ),
-            },
-          ];
+          const reason = error instanceof Error ? error.message : String(error);
+          return approvalCancellationEvents(
+            state,
+            interaction,
+            reason,
+            classifyFailure('sandbox_error', reason),
+          );
         }
       }
       const nextAuthorization = applyApprovalGrant({

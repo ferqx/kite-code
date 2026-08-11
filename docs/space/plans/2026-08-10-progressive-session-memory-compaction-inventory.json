@@ -1,0 +1,132 @@
+{
+  "schema": "kite.progressive-session-memory.old-route-inventory.v1",
+  "decision": "ADR-0098",
+  "plan": "2026-08-10-progressive-session-memory-compaction",
+  "authorizedTasks": ["PSMC-01", "PSMC-02"],
+  "generatedFrom": {
+    "sourceOfTruth": ["source", "tests", "ADR-0098", "active-plan"],
+    "workspaceState": "uncommitted-slice-a-and-superseded-slice-b"
+  },
+  "invariants": {
+    "singleCompactionOrchestrator": true,
+    "newCheckpointV2Writes": false,
+    "newCacheSafeForkWrites": false,
+    "newRefillGuardWrites": false,
+    "newRouteQualificationWrites": false,
+    "newFlagsDefaultOff": true
+  },
+  "entries": [
+    {
+      "id": "slice-a-tool-result-budget",
+      "decision": "keep",
+      "paths": ["src/core/tools/result-budget-v2.ts", "src/core/runtime/tool-terminal-v2.ts"],
+      "reason": "ADR-0098 explicitly preserves bounded tool results and verified terminal envelopes."
+    },
+    {
+      "id": "slice-a-prepared-admission",
+      "decision": "keep",
+      "paths": [
+        "src/core/model/context-preparation-v2.ts",
+        "src/core/model/context-admission-v2.ts",
+        "src/core/model/context-capability-v2.ts"
+      ],
+      "reason": "Pure prepare and final payload admission remain shared foundations."
+    },
+    {
+      "id": "slice-a-reclaim-commit",
+      "decision": "adapt",
+      "paths": [
+        "src/core/model/context-reclaim-commit.ts",
+        "src/core/controllers/model-controller.ts"
+      ],
+      "removeSymbols": ["SuccessfulPrimaryCacheParentV1", "PromptCacheParentArtifactV1"],
+      "reason": "Keep deterministic reclaim commit/receipt, remove cache-safe summary parent coupling."
+    },
+    {
+      "id": "runtime-persistence-safety",
+      "decision": "keep",
+      "paths": ["src/core/runtime/store.ts", "src/core/runtime/kernel.ts"],
+      "reason": "Exact snapshot/head CAS and generation fencing are explicit ADR-0098 foundations."
+    },
+    {
+      "id": "checkpoint-v1-summary",
+      "decision": "keep",
+      "paths": [
+        "src/core/model/compaction-summary.ts",
+        "src/core/controllers/compaction-controller.ts"
+      ],
+      "reason": "Checkpoint-v1 single-narrative summary remains the compatibility compactor."
+    },
+    {
+      "id": "checkpoint-v2-compatibility",
+      "decision": "adapt",
+      "paths": ["src/core/runtime/context-compaction.ts", "src/core/runtime/kernel.ts"],
+      "removeSymbols": ["checkpoint-v2 writer", "three-source proof producer"],
+      "keepSymbols": ["bounded read-only checkpoint-v2 normalizer"],
+      "reason": "Potential schema-v23 data may be read, but no current code may produce checkpoint-v2."
+    },
+    {
+      "id": "cache-safe-fork",
+      "decision": "remove",
+      "paths": ["src/core/model/compaction-cache-safe-fork.ts"],
+      "reason": "ADR-0098 removes Provider prompt-cache correctness as an auto-summary prerequisite."
+    },
+    {
+      "id": "canonical-l3-source",
+      "decision": "remove",
+      "paths": ["src/core/model/compaction-source-v2.ts", "src/core/model/context-compactor-v2.ts"],
+      "reason": "The checkpoint-v2 writer and three-source proof producer are superseded."
+    },
+    {
+      "id": "route-cache-qualification",
+      "decision": "remove",
+      "paths": [
+        "src/core/model/context-compaction-qualification-v2.ts",
+        "scripts/evals/context-reduction-slice-b-real-gate.ts"
+      ],
+      "reason": "Warm/cold Provider cache qualification is no longer a correctness or release gate."
+    },
+    {
+      "id": "durable-refill-guard",
+      "decision": "remove",
+      "paths": ["src/core/model/auto-compaction-guard-v2.ts"],
+      "reason": "The old durable refill guard producer and gates must not be reused."
+    },
+    {
+      "id": "slice-b-contract-and-evidence",
+      "decision": "remove",
+      "paths": [
+        "src/core/model/context-reduction-contract-v2.ts",
+        "scripts/evals/context-reduction-slice-b-local-gate.ts",
+        "scripts/evals/context-reduction-slice-b-real-gate.ts"
+      ],
+      "reason": "Superseded Slice B contract/evidence must not imply production support."
+    },
+    {
+      "id": "runtime-compaction-entry",
+      "decision": "adapt",
+      "paths": [
+        "src/core/runtime/executor.ts",
+        "src/core/runtime/effects.ts",
+        "src/core/controllers/compaction-controller.ts"
+      ],
+      "removeSymbols": [
+        "preparedCompactionV2",
+        "canonicalContextCompactorV2",
+        "auto checkpoint-v2 producer"
+      ],
+      "keepSymbols": ["createNarrativeContextCompactor", "executeContextCompaction"],
+      "reason": "Exactly one checkpoint-v1 compatibility orchestrator remains until PSMC-05."
+    },
+    {
+      "id": "schema-v23-runtime",
+      "decision": "adapt",
+      "paths": [
+        "src/core/runtime/state.ts",
+        "src/core/runtime/store.ts",
+        "src/core/runtime/kernel.ts"
+      ],
+      "reason": "Keep monotonic schema and persistence fencing; normalize old v23 checkpoint/guard data read-only and never emit their events."
+    }
+  ]
+}

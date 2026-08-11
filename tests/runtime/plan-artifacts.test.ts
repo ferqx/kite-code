@@ -23,7 +23,13 @@ function document(version = 1): PlanDocument {
     version,
     title: 'Artifact-backed plan',
     bodyMarkdown: 'Inspect the Artifact lifecycle and verify the review boundary.',
-    steps: [{ id: 'inspect', title: 'Inspect the Artifact lifecycle', status: 'pending' }],
+    steps: [
+      {
+        id: 'inspect',
+        title: 'Inspect the Artifact lifecycle',
+        status: 'pending',
+      },
+    ],
     structuralDigest: '',
     createdAtTurnId: 'turn-1',
     updatedAtTurnId: 'turn-1',
@@ -251,7 +257,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     expect(second.artifact.relative_path).toContain(`${secondTaskId}/`);
   });
 
-  test('schema v4 snapshots materialize legacy inline plans as Artifacts', () => {
+  test('schema v4 migration keeps legacy inline plans pure and does not write Artifacts', () => {
     const state = createInitialRuntimeState({
       threadId: 'migration-thread',
       userId: 'user',
@@ -291,8 +297,9 @@ describe('Plan Artifact persistence and two-phase review', () => {
     const migratedPlan = migrated.tasks['task-legacy']?.planning;
     expect(migratedPlan?.kind).toBe('planning_draft');
     if (migratedPlan?.kind === 'planning_draft') {
-      expect(migratedPlan.document.artifact?.version).toBe(1);
-      expect(existsSync(migratedPlan.document.artifact?.displayPath ?? '')).toBe(true);
+      expect(migratedPlan.document.artifact).toBeUndefined();
+      expect(migratedPlan.document.structuralDigest).toBe(document().structuralDigest);
+      expect(existsSync(join(home, 'plans'))).toBe(false);
     }
     kernel.close();
   });

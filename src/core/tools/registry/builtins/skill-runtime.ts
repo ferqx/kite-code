@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { activateSkillLifecycle, completeSkillLifecycle, readSkillReference } from '@/core/skills';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import type { LegacyToolContractSection } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
@@ -56,6 +57,7 @@ const effects = () => ({
 
 export const activateSkillSpec = defineExecutableTool({
   name: 'activate_skill',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'coordination',
   contract: activateContract,
   inputSchema: activateSkillInputSchema,
@@ -92,6 +94,7 @@ export const activateSkillSpec = defineExecutableTool({
 
 export const readSkillReferenceSpec = defineExecutableTool({
   name: 'read_skill_reference',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'coordination',
   contract: readContract,
   inputSchema: readSkillReferenceInputSchema,
@@ -120,6 +123,7 @@ export const readSkillReferenceSpec = defineExecutableTool({
 
 export const completeSkillSpec = defineExecutableTool({
   name: 'complete_skill',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'coordination',
   contract: completeContract,
   inputSchema: completeSkillInputSchema,

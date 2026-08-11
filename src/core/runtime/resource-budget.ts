@@ -114,6 +114,8 @@ export interface ResourceBudgetReconciledEvent {
   type: 'resource_budget.reconciled';
   reservationId: string;
   actual: ResourceUsageV1;
+  /** Present only when this reconciliation closes a primary context branch. */
+  terminalBatchId?: string;
 }
 export interface ResourceBudgetReleasedEvent {
   type: 'resource_budget.released';
@@ -276,7 +278,11 @@ export function createUnconfiguredResourceBudgetStateV1(): ResourceBudgetRuntime
 export function createLegacyResourceBudgetStateV1(
   migratedFromSchemaVersion: number,
 ): ResourceBudgetRuntimeStateV1 {
-  return { status: 'legacy_unconfigured', migratedFromSchemaVersion, reservations: {} };
+  return {
+    status: 'legacy_unconfigured',
+    migratedFromSchemaVersion,
+    reservations: {},
+  };
 }
 
 export function tightenResourceBudgetV1(
@@ -318,7 +324,9 @@ function addUsage(left: ResourceUsageV1, right: ResourceUsageV1): ResourceUsageV
     },
     source,
     ...(source === 'versioned_upper_bound'
-      ? { estimatorVersion: left.estimatorVersion ?? right.estimatorVersion ?? 'composed-v1' }
+      ? {
+          estimatorVersion: left.estimatorVersion ?? right.estimatorVersion ?? 'composed-v1',
+        }
       : {}),
   };
 }
@@ -389,7 +397,10 @@ function replaceReservation(
 ): ActiveResourceBudgetRuntimeStateV1 {
   return {
     ...state,
-    reservations: { ...state.reservations, [reservation.reservationId]: reservation },
+    reservations: {
+      ...state.reservations,
+      [reservation.reservationId]: reservation,
+    },
   };
 }
 
@@ -511,7 +522,10 @@ export function reduceResourceBudgetStateV1(
       if (reservation.state === 'dispatch_started') return active;
       if (reservation.state !== 'reserved')
         throw new Error(`Cannot dispatch a ${reservation.state} reservation.`);
-      return replaceReservation(active, { ...reservation, state: 'dispatch_started' });
+      return replaceReservation(active, {
+        ...reservation,
+        state: 'dispatch_started',
+      });
     case 'resource_budget.reconciled': {
       assertResourceUsageV1(event.actual);
       if (

@@ -22,6 +22,7 @@ import {
 } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import { createProtectedPathEvaluatorV1 } from '@/core/policies/protected-path';
+import { classifyFailure } from '@/core/runtime/failures';
 import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import { isDescriptorAdmittedByExecutionCapabilitySurfaceV1 } from '@/core/sandbox/execution-capability-surface';
@@ -59,6 +60,11 @@ import {
 } from '@/core/tools/registry/dispatch';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import { TOOL_RESULT_BUDGET_POLICY_V1 } from '@/core/tools/result-budget';
+import {
+  finalizeProjectedToolResultV2,
+  type ResolvedToolResultBudgetV2,
+  validateFrozenRuntimeOutputSchemaV2,
+} from '@/core/tools/result-budget-v2';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type {
   AuthorizationOverride,
@@ -163,6 +169,8 @@ export interface RunApprovedToolInput {
     expectedRevision: string;
     remoteEgress?: RemoteMcpEgressInvocationPolicyV1;
   };
+  /** Runtime-issued result binding frozen with tool.queued before dynamic execution. */
+  mcpResultBudgetV2?: ResolvedToolResultBudgetV2;
   /** Runtime-resolved policy for a binding-validated MCP capability. */
   mcpPolicy?: RuntimeMcpPolicy;
   skillManifests?: SkillManifest[];
@@ -208,6 +216,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     override,
     mcpManager,
     mcpInvocation,
+    mcpResultBudgetV2,
     mcpPolicy,
     skillManifests,
     skillOptions,
@@ -225,6 +234,8 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   } = input;
 
   const executionSurface = taskConfig?.executionCapabilitySurface;
+  const toolFeatureFlags =
+    availabilityContext?.featureFlags ?? (taskConfig ? getFeatureFlags(taskConfig) : undefined);
   const protectedPathEvaluator = taskConfig?.executionBoundary
     ? createProtectedPathEvaluatorV1({
         workspaceRoot: taskConfig.executionBoundary.workspaceRoot,
@@ -460,6 +471,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
           : undefined;
       const dispatched = await dispatchRegisteredTool(taskSpec, request.args, {
         workspace,
+        featureFlags: toolFeatureFlags,
         threadId,
         signal,
         runTask,
@@ -517,9 +529,12 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
     const dispatched = await dispatchRegisteredTool(
       readFileSpec,
-      { path: filePath, offset: request.args.offset, limit: request.args.limit },
+      'cursor' in request.args && request.args.cursor
+        ? { path: filePath, cursor: request.args.cursor }
+        : { path: filePath, offset: request.args.offset, limit: request.args.limit },
       {
         workspace,
+        featureFlags: toolFeatureFlags,
         threadId,
         signal,
         allowExternalPaths: allowExternal,
@@ -599,6 +614,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       },
       {
         workspace,
+        featureFlags: toolFeatureFlags,
         threadId,
         signal,
         allowExternalPaths: allowExternal,
@@ -665,6 +681,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       { path: filePath, content },
       {
         workspace,
+        featureFlags: toolFeatureFlags,
         threadId,
         signal,
         allowExternalPaths: allowExternal,
@@ -757,6 +774,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       { pattern: searchInput.pattern, path: searchPath, glob: searchInput.glob },
       {
         workspace,
+        featureFlags: toolFeatureFlags,
         threadId,
         signal,
         allowExternalPaths: allowExternal,
@@ -795,6 +813,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       { pattern: searchInput.pattern, path: searchPath },
       {
         workspace,
+        featureFlags: toolFeatureFlags,
         threadId,
         signal,
         allowExternalPaths: allowExternal,
@@ -827,6 +846,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     const dispatched = await dispatchRegisteredTool(listMcpResourcesSpec, request.args, {
       workspace,
+      featureFlags: toolFeatureFlags,
       threadId,
       signal,
       mcpManager,
@@ -860,6 +880,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     const dispatched = await dispatchRegisteredTool(listMcpToolsSpec, request.args, {
       workspace,
+      featureFlags: toolFeatureFlags,
       threadId,
       signal,
       mcpManager,
@@ -893,6 +914,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     }
     const dispatched = await dispatchRegisteredTool(readMcpResourceSpec, request.args, {
       workspace,
+      featureFlags: toolFeatureFlags,
       threadId,
       signal,
       mcpManager,
@@ -943,6 +965,28 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         stderr: 'MCP capability invocation identity is missing.',
       });
     }
+    if (toolFeatureFlags?.toolResultBudgetV2 && !mcpResultBudgetV2) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: request.name,
+        exitCode: -1,
+        stdout: '',
+        stderr: 'MCP result projection binding was not frozen before execution.',
+      });
+    }
+    if (mcpResultBudgetV2?.outputSchema) {
+      try {
+        validateFrozenRuntimeOutputSchemaV2(mcpResultBudgetV2.outputSchema);
+      } catch {
+        return withFailureGuidance(request, {
+          ok: false,
+          command: request.name,
+          exitCode: -1,
+          stdout: '',
+          stderr: 'MCP result projection binding failed canonical validation.',
+        });
+      }
+    }
     try {
       const raw = await mcpManager.callCapability({
         capabilityId: mcpInvocation.capabilityId,
@@ -952,9 +996,52 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         signal,
       });
       const rawContent = JSON.stringify(raw);
-      const descriptor = mcpManager.findCapability(mcpInvocation.capabilityId);
-      const capabilityResult = normalizeMcpToolResult(raw, descriptor?.outputSchema);
+      const frozenOutputSchema = mcpResultBudgetV2?.outputSchema;
+      let capabilityResult = normalizeMcpToolResult(
+        raw,
+        frozenOutputSchema?.status === 'frozen' ? frozenOutputSchema.schema : undefined,
+      );
+      if (frozenOutputSchema?.status === 'unsupported' && raw.structuredContent !== undefined) {
+        capabilityResult = {
+          ...capabilityResult,
+          status: 'partial',
+          error: classifyFailure(
+            'tool_invalid_args',
+            'The queue-frozen MCP output schema was unsupported or exceeded its finite bound.',
+          ),
+        };
+      }
       const output = serializeMcpResultForModel(capabilityResult);
+      if (mcpResultBudgetV2) {
+        const projectionMode = toolFeatureFlags?.toolResultBudgetV2 ? 'budget_v2' : 'compat_v1';
+        const modelContent =
+          projectionMode === 'budget_v2' ? JSON.stringify(capabilityResult) : output.modelContent;
+        const budget = mcpResultBudgetV2.budget;
+        const truncated =
+          projectionMode === 'budget_v2' &&
+          (budget.kind === 'serialized' || budget.kind === 'structured')
+            ? Buffer.byteLength(modelContent, 'utf8') > budget.maxUtf8Bytes
+            : output.truncated;
+        const finalized = finalizeProjectedToolResultV2({
+          rawResult: raw,
+          projected: {
+            ok: !raw.isError,
+            modelContent,
+            resultMeta: { truncated },
+          },
+          resolvedBudget: mcpResultBudgetV2,
+          projectionMode,
+        });
+        return withFailureGuidance(request, {
+          ok: finalized.ok,
+          command: request.name,
+          exitCode: 0,
+          stdout: finalized.modelContent,
+          stderr: '',
+          capabilityResult,
+          resultMeta: finalized.resultMeta,
+        });
+      }
       return withFailureGuidance(request, {
         ok: !raw.isError,
         command: request.name,
@@ -982,6 +1069,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   if (request.name === 'web_fetch') {
     const dispatched = await dispatchRegisteredTool(webFetchSpec, request.args, {
       workspace,
+      featureFlags: toolFeatureFlags,
       threadId,
       signal,
       toolCallId: request.id,
@@ -1021,6 +1109,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         : undefined;
     const dispatched = await dispatchRegisteredTool(shellExecuteSpec, request.args, {
       workspace,
+      featureFlags: toolFeatureFlags,
       signal,
       shellExecutor,
       shellNetworkMode: networkMode,
@@ -1060,6 +1149,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   if (spec && 'execute' in spec) {
     const dispatched = await dispatchRegisteredTool(spec, request.args, {
       workspace,
+      featureFlags: toolFeatureFlags,
       threadId,
       signal,
       protectedPathEvaluator,

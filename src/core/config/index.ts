@@ -324,6 +324,7 @@ const featuresSchema = z
     contextCompactionV2: z.boolean().optional(),
     contextCompactionAutoV1: z.boolean().optional(),
     contextCompactionManualV1: z.boolean().optional(),
+    toolResultBudgetV2: z.boolean().optional(),
     contextReclaimV1: z.boolean().optional(),
     sessionLoggingPolicyV1: z.boolean().optional(),
     providerDataPolicyV1: z.boolean().optional(),
@@ -367,7 +368,8 @@ export const configSchema = z.object({
   compaction: z
     .object({
       autoMode: z.enum(['off', 'shadow', 'live']).optional(),
-      reclaimMode: z.enum(['off', 'shadow']).optional(),
+      reclaimMode: z.enum(['off', 'shadow', 'live']).optional(),
+      reclaimAfterEstimatedTokens: z.number().int().positive().optional(),
       cohortSalt: z.string().min(1).optional(),
       livePercentage: z.number().min(0).max(100).optional(),
       localDebug: z
@@ -685,7 +687,9 @@ export function loadAgentConfig(options: LoadAgentConfigOptions = {}): AgentConf
       ? {
           modelCapabilities: {
             ...((selected.contextWindow ?? selected.tokens)
-              ? { contextWindowTokens: selected.contextWindow ?? selected.tokens }
+              ? {
+                  contextWindowTokens: selected.contextWindow ?? selected.tokens,
+                }
               : {}),
             ...(selected.maxOutputTokens ? { maxOutputTokens: selected.maxOutputTokens } : {}),
             ...(selected.tokenizerFamily ? { tokenizerFamily: selected.tokenizerFamily } : {}),
@@ -758,7 +762,10 @@ export function loadProductionAgentConfig(
     ...configLayers.map((layer) => layer?.sandbox?.enabled),
     sandboxEnabled,
   ]);
-  const config = loadAgentConfig({ ...agentOptions, workspace: canonicalWorkspaceRoot });
+  const config = loadAgentConfig({
+    ...agentOptions,
+    workspace: canonicalWorkspaceRoot,
+  });
   const resolvedFeatures = { ...config.features, ...featureOverrides };
   const featureEnabled = artifactExecutionBoundaryV1Enabled && executionBoundaryRolloutEnabled;
   const decision = admitProductionExecutionBoundaryV1({
@@ -1054,7 +1061,13 @@ export function listAvailableModels(configPath?: string): AvailableModel[] {
         const isDefault = name === defaultName || Boolean(entry?.default);
         const contextWindow = entry?.contextWindow ?? entry?.tokens;
         const maxOutputTokens = entry?.maxOutputTokens;
-        models.push({ provider: provName, name, isDefault, contextWindow, maxOutputTokens });
+        models.push({
+          provider: provName,
+          name,
+          isDefault,
+          contextWindow,
+          maxOutputTokens,
+        });
       }
     }
   }
@@ -1090,7 +1103,9 @@ export function saveColorPreset(preset: string): void {
     const dir = resolve(path, '..');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
-    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+    const fmt = {
+      formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' },
+    };
     text = applyEdits(text, modify(text, ['colorPreset'], preset, fmt));
     writeFileSync(path, text, { encoding: 'utf-8', mode: 0o600 });
   } catch {
@@ -1109,7 +1124,9 @@ export function saveModelSelection(
     const dir = resolve(configPath, '..');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     let text = existsSync(configPath) ? readFileSync(configPath, 'utf-8') : '{}';
-    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+    const fmt = {
+      formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' },
+    };
     const route = `${provider.trim()}:${name.trim()}`;
     text = applyEdits(text, modify(text, ['model'], route, fmt));
     writeFileSync(configPath, text, { encoding: 'utf-8', mode: 0o600 });
@@ -1174,7 +1191,9 @@ export function saveProviderConfig(input: SaveProviderInput): boolean {
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
     let text = existsSync(path) ? readFileSync(path, 'utf-8') : '{}';
-    const fmt = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+    const fmt = {
+      formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' },
+    };
 
     const provPath = ['provider', input.name];
     text = applyEdits(text, modify(text, provPath, {}, fmt));

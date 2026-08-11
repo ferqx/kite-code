@@ -348,6 +348,7 @@ describe('runtime user actions', () => {
 
     expect(events.map((event) => event.type)).toEqual([
       'approval.rejected',
+      'tool.rejected',
       'tool.cancelled',
       'tool.cancelled',
       'turn.aborted',
@@ -358,6 +359,10 @@ describe('runtime user actions', () => {
         interactionId: 'approval-1',
         toolCallId: 'shell-1',
         reason: 'Cancelled with Ctrl+C.',
+      }),
+      expect.objectContaining({
+        type: 'tool.rejected',
+        toolCallId: 'shell-1',
       }),
       expect.objectContaining({
         type: 'tool.cancelled',
@@ -457,6 +462,12 @@ test('full access approval is rejected when no sandbox is available', () => {
       toolCallId: 'tool-1',
       reason: expect.stringContaining('requires'),
     }),
+    expect.objectContaining({
+      type: 'tool.rejected',
+      toolCallId: 'tool-1',
+      failure: expect.objectContaining({ kind: 'sandbox_error' }),
+    }),
+    expect.objectContaining({ type: 'turn.aborted', cause: 'user' }),
   ]);
 });
 

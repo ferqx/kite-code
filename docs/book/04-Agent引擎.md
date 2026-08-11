@@ -95,13 +95,24 @@ Runtime schema v21 继续保留这些网络事实，并把远程 HTTP MCP 的独
 静态 prompt、稳定工具契约和 cacheable Runtime context 尽量保持前缀稳定；项目指令使用独立早期消息，动态状态、Skill disclosure、搜索结果和 turn binding 放在轮次投影中。V2 的动态 phase/interaction/authorization/sandbox/planning state 只出现一次。上下文压缩保留任务事实、计划和工具结果语义，不取代 Runtime Store。
 
 上下文缩减按三层术语演进：L1 是工具模型输出预算，L2 是确定性的旧 read/search 结果回收，L3 是叙事
-checkpoint。当前只落地 L1 policy identity 和默认关闭的 L2 `off|shadow` 基础；shadow 在 warning pressure
-下对规范 projection 计算候选并写入可选的有界内存 reporter，但不应用候选、不改 Provider payload、模型
-调用、Runtime event、transcript 或 checkpoint。实际生效的压缩仍只有下述 L3 checkpoint；L2 live 与 L3
-source identity 改造需要后续 ADR 和计划。
+checkpoint。Slice A 已落地全工具有限 L1 V2、唯一 prepared/final admission 与受控 L2 live，但全部新能力
+默认关闭。`toolResultBudgetV2=false` 保持既有 `compat_v1` 模型字节；开启后四类 terminal 自包含 verified
+receipt/identity。`contextReclaimV1=true + reclaimMode=live` 才会把完整 settled、全 `budget_v2` verified、
+read-only 的旧 `read_file|search_content|search_files` block 替换为确定性 stub；shadow 仍只记录 bounded
+内存统计，原 transcript 从不删除。
+
+`prepareContextRequestV2()` 是唯一 Core projection builder，inspection/candidate/restore-debug 零 lease、零
+reservation、零 Provider dispatch；只有 normal `primary_ready` 可进入 effect-only final admission。成功 primary
+使用封闭 2-event no-advance 或 3-event commit-advance branch，bounded commit 只保存 ranges/counts/digests，
+不保存 selected entries 正文。schema v22 以 snapshot metadata + full event head + 单调 generation exact CAS
+恢复/迁移，旧 v2..v21 Tool Result 永远是 `legacy_unverified + legacy_unknown`。当前 trusted route registry
+为空，因此 L2 live 只属 development-only。旧 Slice B 的 canonical L3 source、checkpoint-v2 writer、cache-safe
+fork、route cache gate 和 refill guard producer 已清场；schema v23 的 CAS/generation 持久安全保留。新的
+MicroCompact、Checkpoint Working Set、recent window 和 SummaryCompact 统一 orchestrator 尚未实现，不能宣称
+完整三级可用；Session Memory 已延期为独立可选增强。
 
 Runtime schema v16 把 M2 checkpoint lifecycle 纳入事件循环。`context.compaction_requested` 形成 pending 状态，scheduler 在工具、交互、verification 和 final 等更高优先级工作结束后调度 `compact_context`，controller 以 completed/failed 事件收敛。压缩复用普通 Effect lease；来源 revision 变化仍由 Kernel lease 拒绝并重新调度，完成时 projection environment 变化则产生 `stale_context` 可重试 failed 终态，清除 pending 且不激活 checkpoint。同一 session 的 standalone manual compaction 由 App 串行化整个 command/request/effect/terminal 生命周期，不能由多个 Kernel 并发推进同一事件流。RuntimeStore 还通过跨连接 effect lease 阻止同一 compaction id 的重复 Provider dispatch，并用 snapshot expected-revision CAS 拒绝 stale Kernel 或删除后的晚到写入；进程内 Promise barrier 只负责交互排序，不能替代持久化所有权。恢复通过 snapshot 加严格 event tail 重建 pending 或 active checkpoint，已收敛的 completed 不会重复激活。安全边界和输入上限都以完整 settled turn/tool pair 为单位，不能拆分调用与结果。Checkpoint 只是一种可 reset 的模型上下文投影，原始 transcript 仍保持不变。
 
-压缩原因只有 `manual | auto`。Token ratio 术语（文本计量比例）、窗口估算、Provider 术语（模型供应商）错误和压缩失败不会产生 hard block 术语（硬阻断）；`ContextHardBlock` 只表示 Runtime correctness failure 术语（运行时正确性故障），普通压缩或 reset 术语（重置）不能清除它。Core 不解释通用 Provider HTTP 400；模型请求失败不自动触发压缩或硬阻断，用户可在会话恢复交互后自行执行 `/compact`。
+压缩原因 schema 为旧事件兼容保留 `manual | auto`，但当前新 producer 只生成 `manual`。Token ratio 术语（文本计量比例）、窗口估算、Provider 术语（模型供应商）错误和压缩失败不会产生 hard block 术语（硬阻断）；`ContextHardBlock` 只表示 Runtime correctness failure 术语（运行时正确性故障），普通压缩或 reset 术语（重置）不能清除它。Core 不解释通用 Provider HTTP 400；模型请求失败不自动触发压缩或硬阻断，用户可在会话恢复交互后自行执行 `/compact`。
 
-会话压缩使用当前对话模型执行一次无工具、零 SDK retry 的专用 summary request，并且只接受一份 Markdown narrative。输入只包含最小固定 prompt、已有 narrative、全部 safe settled history 和作为不可信数据的 custom instructions；不携带普通 Agent system prompt、工具 schema 或 live tail。手动压缩总结全部安全历史；自动压缩只保护当前 turn。Provider dispatch 前先用最小有效 narrative 计算 candidate projection 的理论最大收益，低于 1024 tokens 时零调用失败；已有 checkpoint 后无新增 safe history 时同样零调用返回 `No new messages to compact.`，custom instructions 不能单独触发 narrative 重写。显式 summary input 上限超出时整体失败，不会静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、低于 narrative 上限，并使统一 candidate projection 至少减少 1024 个估算 token。Checkpoint 只持久化规范化 summary 字符串与 Core 边界元数据；投影时通过唯一 XML-safe serializer 生成一个历史区首位的 `<compacted_history>` assistant frame。
+手动会话压缩使用当前对话模型执行一次无工具、零 SDK retry 的专用 summary request，并且只接受一份 Markdown narrative。输入只包含最小固定 prompt、已有 narrative、全部 safe settled history 和作为不可信数据的 custom instructions；不携带普通 Agent system prompt、工具 schema 或 live tail。Provider dispatch 前先用最小有效 narrative 计算 candidate projection 的理论最大收益，低于 1024 tokens 时零调用失败；已有 checkpoint 后无新增 safe history 时同样零调用返回 `No new messages to compact.`，custom instructions 不能单独触发 narrative 重写。显式 summary input 上限超出时整体失败，不会静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、低于 narrative 上限，并使统一 candidate projection 至少减少 1024 个估算 token。Checkpoint 只持久化规范化 summary 字符串与 Core 边界元数据；投影时通过唯一 XML-safe serializer 生成一个历史区首位的 `<compacted_history>` assistant frame。

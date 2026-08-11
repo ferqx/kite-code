@@ -235,20 +235,14 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     if (!activeSkill) return { type: 'emit_final' };
   }
 
-  if (state.context.pendingCompaction) {
+  if (state.context.pendingCompaction?.reason === 'manual') {
     return {
       type: 'compact_context',
       compactionId: state.context.pendingCompaction.compactionId,
     };
   }
-
-  // An automatic compaction is an admission gate for this turn. If it failed
-  // or was cancelled, do not fall through to the oversized normal model call.
-  // A new turn gets a new id and therefore runs preflight and may try again.
-  if (
-    state.context.lastFailure?.reason === 'auto' &&
-    state.context.lastFailure.requestedAtTurnId === state.turn.turnId
-  ) {
+  if (state.context.pendingCompaction) {
+    // Legacy/invalid automatic pending state is inert and must never become an effect.
     return { type: 'stop' };
   }
 

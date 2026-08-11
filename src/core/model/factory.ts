@@ -15,6 +15,8 @@ import type { ModelCapabilityMetadata } from './model-capabilities';
 /** 支持工具绑定的聊天模型 / Tool-bindable chat model (new shape: LanguageModel + setRetryListener) */
 export type SupportedChatModel = {
   model: LanguageModel;
+  /** Same Provider/model route without transient replay; reserved for one-shot L3 attempts. */
+  singleAttemptModel?: LanguageModel;
   setRetryListener: (listener: ModelRetryListener | null) => void;
   /** Explicit false makes progressive capability disclosure fail closed. */
   supportsToolCalls?: boolean;
@@ -63,13 +65,19 @@ export function createChatModel(config: AgentConfig): SupportedChatModel {
     middlewares.push(createDeepSeekMiddleware());
   }
 
+  const providerModel = provider(config.modelName);
   const model = wrapLanguageModel({
-    model: provider(config.modelName),
+    model: providerModel,
     middleware: middlewares,
   });
+  const singleAttemptModel =
+    config.providerType === 'deepseek'
+      ? wrapLanguageModel({ model: providerModel, middleware: [createDeepSeekMiddleware()] })
+      : providerModel;
 
   return {
     model,
+    singleAttemptModel,
     supportsToolCalls: config.modelKwargs?.supportsToolCalls !== false,
     ...(config.providerType === 'deepseek' && config.modelName.startsWith('deepseek-v4-')
       ? { compactionProviderOptions: { deepseek: { thinking: { type: 'disabled' } } } }

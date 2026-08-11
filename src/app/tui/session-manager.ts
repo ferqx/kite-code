@@ -12,6 +12,7 @@ import {
   compactResetPreflight,
   inspectManualContextCompaction,
   manualContextCompactionEvent,
+  prepareContextInspectionV2,
 } from '@/core/model/context-compaction-manual';
 import { contextCompactionTerminalNotice } from '@/core/model/context-compaction-presentation';
 import type { ContextStatusSnapshot } from '@/core/model/context-status';
@@ -1502,11 +1503,18 @@ export class SessionManager {
         },
         state,
       );
+      const preparedContextV2 = prepareContextInspectionV2({
+        state,
+        config,
+        capabilities,
+        environment: projectionEnvironment,
+      });
       const status = inspectManualContextCompaction(
         state,
         config,
         capabilities,
         projectionEnvironment,
+        preparedContextV2,
       );
 
       // Reject early — emit events so the rejection text persists across TUI restart
@@ -1583,6 +1591,7 @@ export class SessionManager {
         customInstructions,
         capabilities,
         projectionEnvironment,
+        preparedContextV2,
       }) as Extract<RuntimeEvent, { type: 'context.compaction_requested' }> | null;
       if (!event) {
         return {
@@ -1746,7 +1755,19 @@ export class SessionManager {
         config,
         adapter: model.capabilityMetadata,
       });
-      const status = buildContextStatusReport(state, config, environment, capabilities);
+      const preparedContextV2 = prepareContextInspectionV2({
+        state,
+        config,
+        capabilities,
+        environment,
+      });
+      const status = buildContextStatusReport(
+        state,
+        config,
+        environment,
+        capabilities,
+        preparedContextV2,
+      );
       return `\n${status.text}`;
     } finally {
       kernel.close();
@@ -1785,11 +1806,18 @@ export class SessionManager {
         config,
         adapter: model.capabilityMetadata,
       });
+      const preparedContextV2 = prepareContextInspectionV2({
+        state,
+        config,
+        capabilities,
+        environment,
+      });
       const { projection, preflight } = buildContextStatusReport(
         state,
         config,
         environment,
         capabilities,
+        preparedContextV2,
       );
       const checkpoint = state.context.activeCheckpoint;
       return {

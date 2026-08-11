@@ -9,8 +9,9 @@ import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
   RUNTIME_STATE_SCHEMA_VERSION,
+  type RuntimeState,
 } from '../../src/core/runtime/state';
-import { createRuntimeStore } from '../../src/core/runtime/store';
+import { createRuntimeStore, type RuntimeStore } from '../../src/core/runtime/store';
 import type { AgentPlan } from '../../src/protocol/events';
 import type { SuspendedSubagentSnapshot } from '../../src/protocol/subagent';
 
@@ -52,6 +53,28 @@ function makeSuspendedSubagentSnapshot(): SuspendedSubagentSnapshot {
       command: 'pwd',
     },
   };
+}
+
+function persistSchema22Batch(
+  store: RuntimeStore,
+  threadId: string,
+  events: RuntimeEvent[],
+  state: RuntimeState,
+): void {
+  const identity = store.loadPersistenceIdentity(threadId);
+  const baseRevision = identity.observedHead.revision;
+  store.appendEventsAndSnapshot(
+    threadId,
+    events,
+    { ...state, revision: baseRevision + events.length },
+    events.map((_, index) => ({
+      eventId: `${threadId}-event-${baseRevision + index + 1}`,
+      revision: baseRevision + index + 1,
+      occurredAt: new Date(index).toISOString(),
+    })),
+    undefined,
+    identity,
+  );
 }
 
 describe('plan persistence', () => {
@@ -101,7 +124,7 @@ describe('plan persistence', () => {
     ];
 
     const nextState = events.reduce(reduceRuntimeState, state);
-    store.appendEventsAndSnapshot('t1', events, nextState);
+    persistSchema22Batch(store, 't1', events, nextState);
 
     // Reload and verify
     const reloaded = store.loadSnapshot<typeof state>('t1');
@@ -147,7 +170,7 @@ describe('plan persistence', () => {
         planSummary: 'Review me',
       };
       const s2 = reduceRuntimeState(s1, e2);
-      store.appendEventsAndSnapshot('t2', [e1, e2], s2);
+      persistSchema22Batch(store, 't2', [e1, e2], s2);
       store.close();
     }
 
@@ -169,7 +192,11 @@ describe('plan persistence', () => {
     const store = createRuntimeStore(TEST_DB);
     const snapshot = makeSuspendedSubagentSnapshot();
     const state = reduceRuntimeState(
-      createInitialRuntimeState({ threadId: 't-suspended', userId: 'u1', workspace: '/tmp' }),
+      createInitialRuntimeState({
+        threadId: 't-suspended',
+        userId: 'u1',
+        workspace: '/tmp',
+      }),
       {
         type: 'tool.queued',
         toolCallId: 'task-persisted',
@@ -183,7 +210,7 @@ describe('plan persistence', () => {
       snapshot,
     });
 
-    store.appendEventsAndSnapshot('t-suspended', [], suspended);
+    persistSchema22Batch(store, 't-suspended', [], suspended);
     const reloaded = store.loadSnapshot('t-suspended');
 
     expect(reloaded).toMatchObject({

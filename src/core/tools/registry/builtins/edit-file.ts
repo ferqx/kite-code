@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '@/core/tools/diff';
 import { editFile } from '@/core/tools/file';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { EDIT_FILE_CONTRACT } from '@/core/tools/tool-contracts';
 import { projectionDigest, truncateProjectedLines } from '../projection';
 import { defineExecutableTool } from '../spec';
@@ -29,6 +30,7 @@ export type EditFileToolInput = z.infer<typeof editFileInputSchema>;
 
 export const editFileSpec = defineExecutableTool({
   name: 'edit_file',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'computer',
   contract: EDIT_FILE_CONTRACT.sections,
   inputSchema: editFileInputSchema,

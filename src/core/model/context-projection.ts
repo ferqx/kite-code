@@ -177,6 +177,8 @@ export interface ContextProjection {
   systemMessages: BaseMessage[];
   /** Checkpoint summary injected as assistant history (empty if no checkpoint). */
   summaryMessages: BaseMessage[];
+  /** Project instruction snapshot injected ahead of transcript history. */
+  projectInstructionMessages: BaseMessage[];
   /** Live transcript tail after M1 compaction and serialization. */
   transcriptMessages: BaseMessage[];
   /** Dynamic runtime-state messages (mode snapshot, plan reminder). */
@@ -214,7 +216,7 @@ function runtimeTranscriptMessages(state: Readonly<RuntimeState>): BaseMessage[]
             content: message.content ?? '',
             tool_calls: message.toolCalls.map((call) => ({
               ...call,
-              args: (call.args ?? {}) as Record<string, unknown>,
+              args: structuredClone((call.args ?? {}) as Record<string, unknown>),
               type: 'tool_call' as const,
             })),
             additional_kwargs: {
@@ -234,9 +236,9 @@ function runtimeTranscriptMessages(state: Readonly<RuntimeState>): BaseMessage[]
             status: message.ok ? 'success' : 'error',
           }),
           identity,
-          message.resultMeta ?? {},
+          structuredClone(message.resultMeta ?? {}),
           {
-            args: call?.args,
+            args: call?.args === undefined ? undefined : structuredClone(call.args),
             effectClass: call?.effectClass,
           },
         );
@@ -377,6 +379,7 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
   return {
     systemMessages,
     summaryMessages,
+    projectInstructionMessages,
     transcriptMessages: msgs,
     dynamicRuntimeMessages,
     frames,

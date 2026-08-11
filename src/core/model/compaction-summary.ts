@@ -181,15 +181,19 @@ export function createNarrativeContextCompactor(options: {
     sourceRevision: number;
     projectionEnvironment?: ContextProjectionEnvironment;
   }): Promise<ContextCompactionCheckpoint> => {
-    // Manual compaction summarizes every settled turn. Automatic compaction runs
-    // before the current turn is complete, so it protects that one live turn.
+    if (input.pending.reason !== 'manual') {
+      throw new ContextCompactionValidationError(
+        'invalid_candidate',
+        'Automatic checkpoint-v1 compaction is no longer supported.',
+      );
+    }
+    // Manual compaction summarizes every settled turn while protecting an
+    // in-progress turn that already has transcript messages.
     const currentTurnHasMessages = input.state.transcript.messages.some(
       (message) => message.turnId === input.state.turn.turnId,
     );
     const safe = findSafeCompactionBoundary(input.state, {
-      protectLatestTurn:
-        input.pending.reason === 'auto' ||
-        (input.state.turn.status === 'active' && currentTurnHasMessages),
+      protectLatestTurn: input.state.turn.status === 'active' && currentTurnHasMessages,
     });
     if (!safe.eligible || !safe.lastMessageId || !safe.coveredThroughTurnId) {
       throw new ContextCompactionValidationError(

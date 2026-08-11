@@ -7,7 +7,6 @@ import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   evaluateCircuitBreaker,
 } from '@/core/execution/circuit-breaker';
-import { updateAutoCompactionGuard } from '@/core/model/context-compaction-decision';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
@@ -18,6 +17,7 @@ import {
 } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
+import { isLegacyCheckpointV2, readLegacyCheckpointV2ReadOnly } from './legacy-slice-b-reader';
 import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
   computePlanStructuralDigest,
@@ -43,6 +43,223 @@ function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: stri
 
 type ToolTranscriptMessage = Extract<TranscriptMessage, { kind: 'tool' }>;
 
+function verifiedTerminalResult(
+  event: Extract<
+    RuntimeEvent,
+    {
+      type: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
+    }
+  >,
+) {
+  return event.modelResult?.kind === 'verified_v2' ? event.modelResult : undefined;
+}
+
+function verifiedTerminalResultMeta(
+  event: Extract<
+    RuntimeEvent,
+    {
+      type: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
+    }
+  >,
+): ToolResultMeta | undefined {
+  const result = verifiedTerminalResult(event);
+  return result
+    ? {
+        ...result.resultMeta,
+        terminalIdentity: result.terminalIdentity,
+        terminalKind: event.type,
+      }
+    : undefined;
+}
+
+function legacyTerminalResultMeta(
+  event: Extract<
+    RuntimeEvent,
+    {
+      type: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
+    }
+  >,
+  base: ToolResultMeta = {},
+): ToolResultMeta | undefined {
+  if (event.modelResult?.kind !== 'legacy_unverified') return undefined;
+  return {
+    ...base,
+    digestScope: 'legacy_unknown',
+    terminalKind: event.type,
+    terminalMigration: event.modelResult,
+  };
+}
+
+function failedToolModelContent(event: Extract<RuntimeEvent, { type: 'tool.failed' }>): string {
+  const failure =
+    event.failure ??
+    classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
+  return JSON.stringify({
+    ok: false,
+    error: {
+      kind: failure.kind,
+      message: failure.message,
+      retryable: failure.retryable,
+      model_fixable: failure.modelFixable,
+    },
+    next_step: failure.modelFixable
+      ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
+      : 'Explain the failure to the user and continue without assuming the tool succeeded.',
+  });
+}
+
+function rejectedToolModelContent(
+  call: ToolCallRecord,
+  event: Extract<RuntimeEvent, { type: 'tool.rejected' }>,
+): string {
+  const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
+  const deferredUntilBuilding = failure.kind === 'phase_deferred';
+  const deniedByPlanningPhase = failure.kind === 'phase_denied';
+  return JSON.stringify(
+    deferredUntilBuilding
+      ? {
+          ok: false,
+          deferred: true,
+          reason: 'phase_constraint',
+          until_phase: 'building',
+          tool: call.name,
+          arguments: call.args,
+          next_step:
+            'Do not retry or request approval while planning. Preserve this command in the plan execution or verification section, then invoke it only after plan approval changes the phase to building.',
+        }
+      : deniedByPlanningPhase
+        ? {
+            ok: false,
+            rejected: true,
+            reason: 'phase_constraint',
+            phase: 'planning',
+            tool: call.name,
+            arguments: call.args,
+            message: event.reason,
+            next_step:
+              'Do not retry or request approval while planning. Use read-only inspection capabilities and preserve the intended implementation in the plan for execution after plan approval.',
+          }
+        : {
+            ok: false,
+            rejected: true,
+            error: {
+              kind: failure.kind,
+              message: event.reason,
+              retryable: failure.retryable,
+              model_fixable: failure.modelFixable,
+            },
+            next_step:
+              'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
+          },
+  );
+}
+
+function terminalReplayProjection(
+  state: RuntimeState,
+  event: Extract<
+    RuntimeEvent,
+    {
+      type: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
+    }
+  >,
+): {
+  content: string;
+  ok: boolean;
+  status: ToolCallRecord['status'];
+  resultMeta?: ToolResultMeta;
+} {
+  const verified = verifiedTerminalResult(event);
+  const call = state.tools.calls[event.toolCallId];
+  if (!call) {
+    throw new Error(`Tool terminal references missing call '${event.toolCallId}'.`);
+  }
+  const resultMeta = verifiedTerminalResultMeta(event) ?? legacyTerminalResultMeta(event);
+  switch (event.type) {
+    case 'tool.finished':
+      return {
+        content: verified?.modelContent ?? (event.result.stdout || event.result.stderr),
+        ok: verified?.ok ?? event.result.ok,
+        status:
+          event.result.status === 'exhausted'
+            ? 'exhausted'
+            : (verified?.ok ?? event.result.ok)
+              ? 'succeeded'
+              : 'failed',
+        resultMeta,
+      };
+    case 'tool.failed':
+      return {
+        content: verified?.modelContent ?? failedToolModelContent(event),
+        ok: verified?.ok ?? false,
+        status: 'failed',
+        resultMeta,
+      };
+    case 'tool.rejected':
+      return {
+        content: verified?.modelContent ?? rejectedToolModelContent(call, event),
+        ok: verified?.ok ?? false,
+        status: 'rejected',
+        resultMeta,
+      };
+    case 'tool.cancelled':
+      return {
+        content: verified?.modelContent ?? event.reason,
+        ok: verified?.ok ?? false,
+        status: 'cancelled',
+        resultMeta,
+      };
+  }
+}
+
+function assertTerminalReplayCompatible(
+  state: RuntimeState,
+  event: Extract<
+    RuntimeEvent,
+    {
+      type: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
+    }
+  >,
+): boolean {
+  const call = state.tools.calls[event.toolCallId];
+  const existing = state.transcript.messages.find(
+    (message) => message.kind === 'tool' && message.toolCallId === event.toolCallId,
+  );
+  if (existing?.kind !== 'tool') {
+    if (
+      call &&
+      ['succeeded', 'failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status)
+    ) {
+      throw new Error(`Terminal tool '${event.toolCallId}' is missing its canonical result.`);
+    }
+    return false;
+  }
+  const projected = terminalReplayProjection(state, event);
+  const existingMigration = existing.resultMeta?.terminalMigration;
+  const projectedMigration = projected.resultMeta?.terminalMigration;
+  const sameMigration =
+    existingMigration || projectedMigration
+      ? JSON.stringify(existingMigration) === JSON.stringify(projectedMigration)
+      : true;
+  const existingKind = existing.resultMeta?.terminalKind;
+  const projectedKind = projected.resultMeta?.terminalKind;
+  const sameKind = existingKind || projectedKind ? existingKind === event.type : true;
+  const existingIdentity = existing.resultMeta?.terminalIdentity;
+  const projectedIdentity = projected.resultMeta?.terminalIdentity;
+  const sameIdentity =
+    existingIdentity || projectedIdentity ? existingIdentity === projectedIdentity : true;
+  if (
+    existing.content !== projected.content ||
+    existing.ok !== projected.ok ||
+    call?.status !== projected.status ||
+    !sameKind ||
+    !sameIdentity ||
+    !sameMigration
+  ) {
+    throw new Error(`Conflicting terminal replay for tool call '${event.toolCallId}'.`);
+  }
+  return true;
+}
+
 /**
  * Runtime events remain chronological, but the canonical transcript keeps
  * sibling Tool Results in assistant declaration order. This makes model
@@ -52,6 +269,20 @@ function appendToolTranscriptMessage(
   state: RuntimeState,
   message: ToolTranscriptMessage,
 ): RuntimeState['transcript'] {
+  const existing = state.transcript.messages.find(
+    (candidate) => candidate.kind === 'tool' && candidate.toolCallId === message.toolCallId,
+  );
+  if (existing?.kind === 'tool') {
+    if (
+      existing.content === message.content &&
+      existing.ok === message.ok &&
+      existing.resultMeta?.toolResultReceipt?.modelContentDigest ===
+        message.resultMeta?.toolResultReceipt?.modelContentDigest
+    ) {
+      return state.transcript;
+    }
+    throw new Error(`Tool call '${message.toolCallId}' has conflicting model results.`);
+  }
   const messages: TranscriptMessage[] = [...state.transcript.messages, message];
   const sourceCall = state.tools.calls[message.toolCallId];
   if (sourceCall?.modelMessageId) {
@@ -62,7 +293,10 @@ function appendToolTranscriptMessage(
         : [];
     });
     const ordered = positions
-      .map((index) => ({ index, message: messages[index] as ToolTranscriptMessage }))
+      .map((index) => ({
+        index,
+        message: messages[index] as ToolTranscriptMessage,
+      }))
       .sort((left, right) => {
         const leftOrdinal = state.tools.calls[left.message.toolCallId]?.ordinal;
         const rightOrdinal = state.tools.calls[right.message.toolCallId]?.ordinal;
@@ -157,18 +391,23 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       return {
         ...state,
         resourceBudget: reduceResourceBudgetStateV1(state.resourceBudget, event),
+        ...(event.type === 'resource_budget.reconciled' &&
+        event.terminalBatchId &&
+        state.context.pendingPrimaryReclaim?.terminalBatchId === event.terminalBatchId
+          ? {
+              context: {
+                ...state.context,
+                pendingPrimaryReclaim: undefined,
+              },
+            }
+          : {}),
       };
 
     case 'context.compaction_requested': {
       const pending = state.context.pendingCompaction;
       if (pending && pending.compactionId !== event.compactionId) return state;
       const reason = normalizeContextCompactionReason(event.reason);
-      if (!reason) return state;
-      const consumesRecovery =
-        reason === 'auto' &&
-        state.context.lastFailure?.reason === 'auto' &&
-        state.context.lastFailure.retryable &&
-        state.context.lastFailure.requestedAtTurnId !== event.requestedAtTurnId;
+      if (reason !== 'manual') return state;
       return {
         ...state,
         context: {
@@ -183,9 +422,6 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...(event.customInstructions ? { customInstructions: event.customInstructions } : {}),
           },
           lastFailure: undefined,
-          autoGuard: consumesRecovery
-            ? { ...state.context.autoGuard, recoveryAttempted: true }
-            : state.context.autoGuard,
         },
       };
     }
@@ -198,34 +434,24 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       )
         return state;
       const reason = normalizeContextCompactionReason(event.checkpoint.reason);
-      if (!reason) return state;
-      const checkpoint = { ...event.checkpoint, reason };
-      const reductionRatio =
-        checkpoint.inputTokensBefore > 0
-          ? 1 - checkpoint.inputTokensAfter / checkpoint.inputTokensBefore
-          : 0;
+      if (state.context.pendingCompaction.reason !== 'manual' || reason !== 'manual') return state;
+      const checkpoint = isLegacyCheckpointV2(event.checkpoint)
+        ? readLegacyCheckpointV2ReadOnly({ checkpoint: event.checkpoint, state })
+        : { ...event.checkpoint, reason };
       return {
         ...state,
         context: {
           ...state.context,
           activeCheckpoint: checkpoint,
           pendingCompaction: undefined,
+          reclaimCommit: undefined,
+          lastReclaimReceipt: undefined,
+          pendingPrimaryReclaim: undefined,
           lastFailure: undefined,
           history: [...state.context.history, { kind: 'completed' as const, checkpoint }].slice(
             -128,
           ),
           lastCompactionTurnIndex: state.turn.turnIndex,
-          autoGuard:
-            checkpoint.reason === 'auto'
-              ? updateAutoCompactionGuard(state.context.autoGuard, {
-                  kind: 'completed',
-                  turnIndex: state.turn.turnIndex,
-                  reductionRatio,
-                  tokensAfter: checkpoint.inputTokensAfter,
-                })
-              : checkpoint.reason === 'manual'
-                ? updateAutoCompactionGuard(state.context.autoGuard, { kind: 'manual_reset' })
-                : state.context.autoGuard,
         },
       };
     }
@@ -243,24 +469,50 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         requestedAtTurnId:
           event.requestedAtTurnId ?? state.context.pendingCompaction.requestedAtTurnId,
       };
-      // Automatic failures may update the breaker, but never create or refresh
-      // a durable Runtime correctness block.
-      const isAutoLowGain = reason === 'auto' && event.errorKind === 'insufficient_reduction';
-      const autoGuard = isAutoLowGain
-        ? updateAutoCompactionGuard(state.context.autoGuard, { kind: 'low_gain' })
-        : state.context.autoGuard;
-
       return {
         ...state,
         context: {
           ...state.context,
           pendingCompaction: undefined,
           lastFailure: failure,
-          autoGuard,
           history: [...state.context.history, { kind: 'failed' as const, failure }].slice(-128),
         },
       };
     }
+
+    case 'context.compaction_migration_cancelled':
+    case 'context.compaction_unknown_external_outcome': {
+      const pending = state.context.pendingCompaction;
+      if (!pending || pending.compactionId !== event.compactionId) return state;
+      const unknown = event.type === 'context.compaction_unknown_external_outcome';
+      const failure = {
+        compactionId: event.compactionId,
+        sourceRevision: event.sourceRevision,
+        errorKind: unknown ? ('unknown_external_outcome' as const) : ('stale_context' as const),
+        message: unknown
+          ? 'A pre-v23 compaction dispatch has no durable terminal outcome.'
+          : 'A pre-v23 compaction request was cancelled before Provider dispatch.',
+        retryable: false,
+        reason: pending.reason,
+        requestedAtTurnId: pending.requestedAtTurnId,
+      };
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          pendingCompaction: undefined,
+          lastFailure: failure,
+          history: [...state.context.history, { kind: 'failed' as const, failure }].slice(-128),
+        },
+      };
+    }
+
+    case 'context.compaction_refill_observed':
+    case 'context.compaction_guard_carried_forward':
+    case 'context.compaction_guard_reset':
+      // Superseded Slice B guard events remain replayable history only. They
+      // never update current state or become part of a newly written snapshot.
+      return state;
 
     case 'context.compaction_reset': {
       if (state.context.activeCheckpoint?.compactionId !== event.checkpointId) return state;
@@ -269,7 +521,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         context: {
           ...state.context,
           activeCheckpoint: undefined,
-          autoGuard: updateAutoCompactionGuard(state.context.autoGuard, { kind: 'manual_reset' }),
+          reclaimCommit: undefined,
+          lastReclaimReceipt: undefined,
+          pendingPrimaryReclaim: undefined,
           history: [
             ...state.context.history,
             {
@@ -368,7 +622,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'task.cancelled': {
       const active = getActiveTask(state);
       if (!active || active.taskId !== event.taskId) return state;
-      const cancelled = { ...active, status: 'cancelled' as const, executionMode: undefined };
+      const cancelled = {
+        ...active,
+        status: 'cancelled' as const,
+        executionMode: undefined,
+      };
       return {
         ...state,
         activeTaskId: null,
@@ -528,7 +786,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...setActivePlanning(state, nextPlanning),
           interactions: { kind: 'idle' },
         },
-        (task) => ({ ...task, planHistory: [...task.planHistory, planning.document] }),
+        (task) => ({
+          ...task,
+          planHistory: [...task.planHistory, planning.document],
+        }),
       );
     }
 
@@ -716,7 +977,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         reconciledAt: event.reconciledAt,
         ...(event.decision === 'confirmed_success'
           ? { error: undefined }
-          : { error: event.reason ?? 'External invocation outcome was not confirmed.' }),
+          : {
+              error: event.reason ?? 'External invocation outcome was not confirmed.',
+            }),
       }));
 
     case 'verification.requested': {
@@ -768,7 +1031,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ? record
           : {
               ...record,
-              checkResults: { ...record.checkResults, [event.result.checkId]: event.result },
+              checkResults: {
+                ...record.checkResults,
+                [event.result.checkId]: event.result,
+              },
             },
       );
 
@@ -814,7 +1080,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           : {
               ...record,
               status: 'waived',
-              waiver: { actor: event.actor, reason: event.reason, waivedAt: event.waivedAt },
+              waiver: {
+                actor: event.actor,
+                reason: event.reason,
+                waivedAt: event.waivedAt,
+              },
             },
       );
 
@@ -858,6 +1128,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         ...(event.bindingId ? { bindingId: event.bindingId } : {}),
         ...(event.capabilityId ? { capabilityId: event.capabilityId } : {}),
         ...(event.capabilityRevision ? { capabilityRevision: event.capabilityRevision } : {}),
+        ...(event.resultBudgetV2 ? { resultBudgetV2: event.resultBudgetV2 } : {}),
         ...(event.effectClass
           ? {
               effectClass: event.effectClass,
@@ -894,7 +1165,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...state.tools,
           calls: {
             ...state.tools.calls,
-            [event.toolCallId]: { ...existingCall, status: 'approved' as const },
+            [event.toolCallId]: {
+              ...existingCall,
+              status: 'approved' as const,
+            },
           },
         },
       };
@@ -919,13 +1193,23 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         existingCall.sideEffect ??
         classifyToolCapability(existingCall.name, existingCall.args).sideEffect;
       return sideEffect
-        ? updateActiveTask(next, (task) => ({ ...task, sideEffectsStarted: true }))
+        ? updateActiveTask(next, (task) => ({
+            ...task,
+            sideEffectsStarted: true,
+          }))
         : next;
     }
 
     case 'tool.finished': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      if (assertTerminalReplayCompatible(state, event)) return state;
+      const verifiedResult = verifiedTerminalResult(event);
+      const verifiedResultMeta = verifiedTerminalResultMeta(event);
+      const terminalResultMeta =
+        verifiedResultMeta ??
+        legacyTerminalResultMeta(event, toolResultMeta(existingCall, event)) ??
+        toolResultMeta(existingCall, event);
       const isTaskCall = existingCall.name === 'task';
       const clearsMatchingApproval =
         isTaskCall &&
@@ -941,7 +1225,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const status =
         event.result.status === 'exhausted'
           ? ('exhausted' as const)
-          : event.result.ok
+          : (verifiedResult?.ok ?? event.result.ok)
             ? ('succeeded' as const)
             : ('failed' as const);
       return {
@@ -954,10 +1238,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ...existingCall,
               status,
               result: {
-                ok: event.result.ok,
+                ok: verifiedResult?.ok ?? event.result.ok,
                 summary: `Command: ${event.result.command}, exit code: ${event.result.exitCode}`,
                 exitCode: event.result.exitCode,
-                resultMeta: toolResultMeta(existingCall, event),
+                resultMeta: terminalResultMeta,
               },
             },
           },
@@ -969,9 +1253,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...transcriptMeta(state, `tool-${event.toolCallId}`, event.createdAt),
           toolCallId: event.toolCallId,
           name: event.name,
-          content: event.result.stdout || event.result.stderr,
-          ok: event.result.ok,
-          resultMeta: toolResultMeta(existingCall, event),
+          content: verifiedResult?.modelContent ?? (event.result.stdout || event.result.stderr),
+          ok: verifiedResult?.ok ?? event.result.ok,
+          resultMeta: terminalResultMeta,
         }),
         suspendedSubagents: clearSuspendedSubagent(state, event.toolCallId, isTaskCall),
         interactions:
@@ -982,7 +1266,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.failed': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
-      if (existingCall.status === 'failed') return state;
+      if (assertTerminalReplayCompatible(state, event)) return state;
+      const verifiedResult = verifiedTerminalResult(event);
+      const verifiedResultMeta = verifiedTerminalResultMeta(event);
+      const legacyResultMeta = legacyTerminalResultMeta(event);
       const failure =
         event.failure ??
         classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
@@ -997,6 +1284,15 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               status: 'failed' as const,
               error: failure.message,
               failure,
+              ...(verifiedResult || legacyResultMeta
+                ? {
+                    result: {
+                      ok: false,
+                      summary: failure.message,
+                      resultMeta: verifiedResultMeta ?? legacyResultMeta,
+                    },
+                  }
+                : {}),
             },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
@@ -1007,19 +1303,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...transcriptMeta(state, `tool-${event.toolCallId}`),
           toolCallId: event.toolCallId,
           name: existingCall.name,
-          content: JSON.stringify({
-            ok: false,
-            error: {
-              kind: failure.kind,
-              message: failure.message,
-              retryable: failure.retryable,
-              model_fixable: failure.modelFixable,
-            },
-            next_step: failure.modelFixable
-              ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
-              : 'Explain the failure to the user and continue without assuming the tool succeeded.',
-          }),
-          ok: false,
+          content: verifiedResult?.modelContent ?? failedToolModelContent(event),
+          ok: verifiedResult?.ok ?? false,
+          ...(verifiedResult || legacyResultMeta
+            ? { resultMeta: verifiedResultMeta ?? legacyResultMeta }
+            : {}),
         }),
         suspendedSubagents: clearSuspendedSubagent(
           state,
@@ -1032,10 +1320,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.rejected': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (existingCall) {
-        if (existingCall.status === 'rejected') return state;
+        if (assertTerminalReplayCompatible(state, event)) return state;
+        const verifiedResult = verifiedTerminalResult(event);
+        const verifiedResultMeta = verifiedTerminalResultMeta(event);
+        const legacyResultMeta = legacyTerminalResultMeta(event);
         const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
-        const deferredUntilBuilding = failure.kind === 'phase_deferred';
-        const deniedByPlanningPhase = failure.kind === 'phase_denied';
         return {
           ...state,
           tools: {
@@ -1047,6 +1336,15 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 status: 'rejected' as const,
                 error: event.reason,
                 failure,
+                ...(verifiedResult || legacyResultMeta
+                  ? {
+                      result: {
+                        ok: false,
+                        summary: event.reason,
+                        resultMeta: verifiedResultMeta ?? legacyResultMeta,
+                      },
+                    }
+                  : {}),
               },
             },
             queue: state.tools.queue.filter((id) => id !== event.toolCallId),
@@ -1057,44 +1355,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             ...transcriptMeta(state, `tool-${event.toolCallId}`),
             toolCallId: event.toolCallId,
             name: existingCall.name,
-            content: JSON.stringify(
-              deferredUntilBuilding
-                ? {
-                    ok: false,
-                    deferred: true,
-                    reason: 'phase_constraint',
-                    until_phase: 'building',
-                    tool: existingCall.name,
-                    arguments: existingCall.args,
-                    next_step:
-                      'Do not retry or request approval while planning. Preserve this command in the plan execution or verification section, then invoke it only after plan approval changes the phase to building.',
-                  }
-                : deniedByPlanningPhase
-                  ? {
-                      ok: false,
-                      rejected: true,
-                      reason: 'phase_constraint',
-                      phase: 'planning',
-                      tool: existingCall.name,
-                      arguments: existingCall.args,
-                      message: event.reason,
-                      next_step:
-                        'Do not retry or request approval while planning. Use read-only inspection capabilities and preserve the intended implementation in the plan for execution after plan approval.',
-                    }
-                  : {
-                      ok: false,
-                      rejected: true,
-                      error: {
-                        kind: failure.kind,
-                        message: event.reason,
-                        retryable: failure.retryable,
-                        model_fixable: failure.modelFixable,
-                      },
-                      next_step:
-                        'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
-                    },
-            ),
-            ok: false,
+            content: verifiedResult?.modelContent ?? rejectedToolModelContent(existingCall, event),
+            ok: verifiedResult?.ok ?? false,
+            ...(verifiedResult || legacyResultMeta
+              ? { resultMeta: verifiedResultMeta ?? legacyResultMeta }
+              : {}),
           }),
           suspendedSubagents: clearSuspendedSubagent(
             state,
@@ -1116,15 +1381,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'tool.cancelled': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
-      if (
-        existingCall.status === 'succeeded' ||
-        existingCall.status === 'failed' ||
-        existingCall.status === 'rejected' ||
-        existingCall.status === 'cancelled' ||
-        existingCall.status === 'exhausted'
-      ) {
-        return state;
-      }
+      if (assertTerminalReplayCompatible(state, event)) return state;
+      const verifiedResult = verifiedTerminalResult(event);
+      const verifiedResultMeta = verifiedTerminalResultMeta(event);
+      const legacyResultMeta = legacyTerminalResultMeta(event);
       const clearsMatchingInteraction =
         state.interactions.kind !== 'idle' &&
         state.interactions.kind !== 'awaiting_provider_action' &&
@@ -1136,7 +1396,19 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...state.tools,
           calls: {
             ...state.tools.calls,
-            [event.toolCallId]: { ...existingCall, status: 'cancelled' as const },
+            [event.toolCallId]: {
+              ...existingCall,
+              status: 'cancelled' as const,
+              ...(verifiedResult || legacyResultMeta
+                ? {
+                    result: {
+                      ok: false,
+                      summary: event.reason,
+                      resultMeta: verifiedResultMeta ?? legacyResultMeta,
+                    },
+                  }
+                : {}),
+            },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
@@ -1146,8 +1418,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...transcriptMeta(state, `tool-${event.toolCallId}`),
           toolCallId: event.toolCallId,
           name: existingCall.name,
-          content: event.reason,
-          ok: false,
+          content: verifiedResult?.modelContent ?? event.reason,
+          ok: verifiedResult?.ok ?? false,
+          ...(verifiedResult || legacyResultMeta
+            ? { resultMeta: verifiedResultMeta ?? legacyResultMeta }
+            : {}),
         }),
         suspendedSubagents: clearSuspendedSubagent(
           state,
@@ -1315,47 +1590,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       ) {
         return state;
       }
-      const toolCallId = state.interactions.toolCallId;
-      const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
-      const failure = event.failure ?? classifyFailure('approval_rejected', event.reason);
       return {
         ...state,
-        tools: {
-          ...rejectedTools,
-          calls: {
-            ...rejectedTools.calls,
-            [toolCallId]: {
-              ...rejectedTools.calls[toolCallId]!,
-              status: 'rejected',
-              error: event.reason,
-              failure,
-            },
-          },
-          queue: rejectedTools.queue.filter((id) => id !== toolCallId),
-          active: rejectedTools.active.filter((id) => id !== toolCallId),
-        },
-        transcript: appendToolTranscriptMessage(state, {
-          kind: 'tool',
-          ...transcriptMeta(state, `tool-${toolCallId}`),
-          toolCallId,
-          name: state.tools.calls[toolCallId]?.name ?? 'unknown',
-          content: JSON.stringify({
-            ok: false,
-            rejected: true,
-            error: {
-              kind: failure.kind,
-              message: event.reason,
-              retryable: failure.retryable,
-              model_fixable: failure.modelFixable,
-            },
-          }),
-          ok: false,
-        }),
-        suspendedSubagents: clearSuspendedSubagent(
-          state,
-          toolCallId,
-          state.tools.calls[toolCallId]?.name === 'task',
-        ),
         interactions: { kind: 'idle' },
       };
     }
@@ -1487,10 +1723,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'provider.action_required': {
       if (state.interactions.kind !== 'idle') return state;
       const call = state.tools.calls[event.originatingToolCallId];
-      if (call?.status !== 'failed') return state;
-      const alreadyHasToolResult = state.transcript.messages.some(
-        (message) => message.kind === 'tool' && message.toolCallId === event.originatingToolCallId,
-      );
+      if (!call) return state;
       return {
         ...state,
         interactions: {
@@ -1501,16 +1734,6 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           originatingToolCallId: event.originatingToolCallId,
           status: 'required',
         },
-        transcript: alreadyHasToolResult
-          ? state.transcript
-          : appendToolTranscriptMessage(state, {
-              kind: 'tool',
-              ...transcriptMeta(state, `tool-${call.toolCallId}`),
-              toolCallId: call.toolCallId,
-              name: call.name,
-              content: call.error ?? 'MCP provider action is required.',
-              ok: false,
-            }),
       };
     }
 
@@ -1658,7 +1881,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           : state;
       const activeTask = getActiveTask(nextState);
       if (activeTask && activeTask.userGoal.length === 0 && event.content.length > 0) {
-        nextState = updateActiveTask(nextState, (task) => ({ ...task, userGoal: event.content }));
+        nextState = updateActiveTask(nextState, (task) => ({
+          ...task,
+          userGoal: event.content,
+        }));
       }
       return {
         ...nextState,
@@ -1719,9 +1945,17 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'provider.data_policy_status':
       return state;
 
-    case 'model.responded':
-      return {
+    case 'model.responded': {
+      const responded: RuntimeState = {
         ...state,
+        ...(event.contextEvidence
+          ? {
+              context: {
+                ...state.context,
+                pendingPrimaryReclaim: event.contextEvidence,
+              },
+            }
+          : {}),
         transcript: {
           ...state.transcript,
           final: event.toolCalls?.length ? undefined : (event.text ?? state.transcript.final),
@@ -1737,6 +1971,30 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ],
         },
       };
+      return (event.ownedToolQueue ?? []).reduce(
+        (current, queued) => reduceRuntimeState(current, queued),
+        responded,
+      );
+    }
+
+    case 'context.reclaim_commit_advanced': {
+      const pending = state.context.pendingPrimaryReclaim;
+      if (
+        !pending ||
+        pending.terminalBatchId !== event.terminalBatchId ||
+        pending.reclaimReceiptDigest !== event.receipt.receiptDigest
+      ) {
+        throw new Error('Reclaim commit has no matching primary response evidence.');
+      }
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          reclaimCommit: event.commit,
+          lastReclaimReceipt: event.receipt,
+        },
+      };
+    }
 
     // ── Plan 生命周期补充 / Additional plan lifecycle ──
 
@@ -1823,7 +2081,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           document: { ...executing.document, steps: updatedSteps },
           completedAtTurnId: state.turn.turnId,
         });
-        return updateActiveTask(next, (task) => ({ ...task, executionMode: undefined }));
+        return updateActiveTask(next, (task) => ({
+          ...task,
+          executionMode: undefined,
+        }));
       }
       return state;
     }
@@ -1912,27 +2173,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           reason: result.reason ?? 'auto-review rejected',
         },
       );
-      const toolCallId = state.interactions.toolCallId;
-      const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
       return {
         ...state,
-        tools: {
-          ...rejectedTools,
-          calls: {
-            ...rejectedTools.calls,
-            [toolCallId]: {
-              ...rejectedTools.calls[toolCallId]!,
-              status: 'rejected',
-              error: result.reason ?? 'auto-review rejected',
-              failure: classifyFailure(
-                'auto_review_rejected',
-                result.reason ?? 'auto-review rejected',
-              ),
-            },
-          },
-          queue: rejectedTools.queue.filter((id) => id !== toolCallId),
-          active: rejectedTools.active.filter((id) => id !== toolCallId),
-        },
         interactions: { kind: 'idle' },
         autoReview: {
           ...state.autoReview,
@@ -2012,7 +2254,10 @@ function updateVerification(
   return {
     ...state,
     verification: {
-      records: { ...state.verification.records, [verificationId]: update(record) },
+      records: {
+        ...state.verification.records,
+        [verificationId]: update(record),
+      },
     },
   };
 }

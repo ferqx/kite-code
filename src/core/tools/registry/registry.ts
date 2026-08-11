@@ -10,6 +10,7 @@ import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
 import { descriptorRevision } from '@/core/capabilities/catalog';
 import type { ToolCapability } from '@/core/policies/tool-capabilities';
+import { validateToolModelResultBudgetV2 } from '@/core/tools/result-budget-v2';
 import { buildDescription } from '@/core/tools/tool-contracts';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
 import type { BaseToolSpec, ExecutableToolSpec, InterruptToolSpec, ToolContext } from './spec';
@@ -70,6 +71,7 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
     if (this.#specs.has(spec.name)) {
       throw new Error(`Tool spec '${spec.name}' is already registered.`);
     }
+    validateToolModelResultBudgetV2(spec.modelResultBudgetV2);
     this.#specs.set(spec.name, spec);
     return this;
   }

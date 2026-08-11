@@ -13,6 +13,7 @@ export type FailureKind =
   | 'auto_review_rejected'
   | 'plan_revision_requested'
   | 'tool_runtime_error'
+  | 'projection_failed_after_execution'
   | 'tool_timeout'
   | 'tool_invalid_args'
   | 'tool_not_found'
@@ -81,6 +82,10 @@ export interface ClassifiedFailure {
   needsUserIntervention: boolean;
   terminatesTurn: boolean;
   journal: boolean;
+  /** The tool executor returned before result projection failed. */
+  executionCertainty?: 'executed';
+  /** Conservative external-effect knowledge retained for no-retry recovery. */
+  knownExternalEffects?: 'none' | 'known' | 'unknown';
   /** Original structured failure code from Registry.parseToolCall,
    *  propagated through InvalidToolRequest for diagnostic observability. */
   parseFailureCode?: import('@/core/tools/registry/registry').ParseFailureCode;
@@ -146,6 +151,11 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
   auto_review_rejected: { ...terminal, terminatesTurn: false },
   plan_revision_requested: { ...terminal, modelFixable: true, terminatesTurn: false },
   tool_runtime_error: { ...retryable, modelFixable: true, journal: true },
+  projection_failed_after_execution: {
+    ...terminal,
+    needsUserIntervention: false,
+    terminatesTurn: false,
+  },
   tool_timeout: { ...retryable, journal: true },
   tool_invalid_args: {
     ...terminal,

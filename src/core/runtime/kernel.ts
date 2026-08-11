@@ -6,7 +6,10 @@
 // and policy decisions.  Single entry point for state, persistence, and effect dispatch.
 
 import { createHash } from 'node:crypto';
-import { defaultPlanArtifactStore } from '@/core/persistence/plan-artifacts';
+import {
+  assertContextPrimarySuccessBatchV2,
+  validateRestoredContextReclaimStateV1,
+} from '@/core/model/context-reclaim-commit';
 import { assertAuthorizationElevation, createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
 import type { AuthorizationSource } from '@/core/types';
@@ -25,6 +28,7 @@ import {
   type RuntimeEventInput,
 } from './events';
 import { assertRuntimeStateInvariants } from './invariants';
+import { isLegacyCheckpointV2, readLegacyCheckpointV2ReadOnly } from './legacy-slice-b-reader';
 import { reduceRuntimeState } from './reducer';
 import { createLegacyResourceBudgetStateV1 } from './resource-budget';
 import { decideNextEffect } from './scheduler';
@@ -38,10 +42,20 @@ import {
 import {
   createRuntimeStore,
   type RuntimeEventMetadata,
+  type RuntimeMigrationIdentityV1,
+  type RuntimePersistenceIdentityV1,
   type RuntimeStore,
   type StoredEvent,
 } from './store';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
+import {
+  assertToolTerminalControlBatchV2,
+  finalizeToolTerminalBatchV2,
+  finalizeToolTerminalEventV2,
+  isSupportedLegacySchemaVersionV22,
+  validateRestoredTerminalStateV2,
+  validateVerifiedToolTerminalEventV2,
+} from './tool-terminal-v2';
 
 // ── Kernel 配置 / Kernel configuration ──
 
@@ -55,6 +69,10 @@ export interface KernelConfig {
   interactionMode: InteractionMode;
   /** 沙箱是否可用（影响 full mode 行为）/ Whether sandbox is available */
   sandboxAvailable?: boolean;
+  /** Trusted terminal projection mode resolved from registered feature flags. */
+  toolResultProjectionMode?: 'compat_v1' | 'budget_v2';
+  /** Exact Store base observed while constructing/restoring this Kernel. */
+  persistenceIdentity?: RuntimePersistenceIdentityV1;
 }
 
 /** Executes an effect and returns facts for the Kernel to reduce/persist. */
@@ -65,6 +83,7 @@ export type RuntimeEffectExecutor = (
   state: Readonly<RuntimeState>,
   emit?: RuntimeEffectEventSink,
   context?: {
+    effectLeaseId?: string;
     reservationIds: readonly string[];
     getState?(): Readonly<RuntimeState>;
     persistEvent(event: RuntimeEvent): Promise<boolean>;
@@ -74,6 +93,83 @@ export type RuntimeEffectExecutor = (
     ): Promise<boolean>;
   },
 ) => Promise<RuntimeEvent[]>;
+
+function invalidModelToolCalls(
+  event: RuntimeEvent,
+): Array<{ id: string; name: string; args: Record<string, unknown> }> {
+  if (event.type !== 'model.responded') return [];
+  return (event.toolCalls ?? []).filter(
+    (call): call is { id: string; name: string; args: Record<string, unknown> } =>
+      call.args !== null &&
+      typeof call.args === 'object' &&
+      !Array.isArray(call.args) &&
+      typeof (call.args as Record<string, unknown>)._parse_error === 'string',
+  );
+}
+
+/**
+ * Invalid Provider tool arguments are a successful Provider response but not a
+ * successful tool dispatch.  The response and its canonical queued/failed
+ * facts therefore have to share one Store transaction.  This validator also
+ * runs over replay tails, so a crash cannot restore an orphan assistant Tool
+ * Call without its matching Runtime call and Tool Result.
+ */
+function assertInvalidModelToolCallClosureV2(events: RuntimeEvent[]): void {
+  for (let responseIndex = 0; responseIndex < events.length; responseIndex++) {
+    const response = events[responseIndex]!;
+    if (response.type !== 'model.responded') continue;
+    const invalidCalls = invalidModelToolCalls(response);
+    if (invalidCalls.length === 0) continue;
+    if (response.contextEvidence || response.ownedToolQueue) {
+      throw new Error('An invalid model Tool Call cannot enter a primary success branch.');
+    }
+    const nextResponseIndex = events.findIndex(
+      (candidate, index) => index > responseIndex && candidate.type === 'model.responded',
+    );
+    const boundary = nextResponseIndex === -1 ? events.length : nextResponseIndex;
+    let previousTerminalIndex = responseIndex;
+    for (const call of invalidCalls) {
+      const queueIndexes = events
+        .slice(responseIndex + 1, boundary)
+        .flatMap((candidate, offset) =>
+          candidate.type === 'tool.queued' && candidate.toolCallId === call.id
+            ? [responseIndex + 1 + offset]
+            : [],
+        );
+      const terminalIndexes = events
+        .slice(responseIndex + 1, boundary)
+        .flatMap((candidate, offset) =>
+          candidate.type === 'tool.failed' && candidate.toolCallId === call.id
+            ? [responseIndex + 1 + offset]
+            : [],
+        );
+      if (queueIndexes.length !== 1 || terminalIndexes.length !== 1) {
+        throw new Error(
+          `Invalid model Tool Call '${call.id}' lacks one exact queued/failed closure.`,
+        );
+      }
+      const queueIndex = queueIndexes[0]!;
+      const terminalIndex = terminalIndexes[0]!;
+      const queue = events[queueIndex]!;
+      const terminal = events[terminalIndex]!;
+      if (
+        queue.type !== 'tool.queued' ||
+        terminal.type !== 'tool.failed' ||
+        queueIndex <= previousTerminalIndex ||
+        terminalIndex !== queueIndex + 1 ||
+        queue.modelMessageId !== response.messageId ||
+        queue.name !== call.name ||
+        JSON.stringify(queue.args) !== JSON.stringify(call.args) ||
+        terminal.failure?.kind !== 'model_invalid_tool_args'
+      ) {
+        throw new Error(
+          `Invalid model Tool Call '${call.id}' has a non-canonical terminal closure.`,
+        );
+      }
+      previousTerminalIndex = terminalIndex;
+    }
+  }
+}
 
 // ── AgentKernel 实现 / AgentKernel implementation ──
 
@@ -96,6 +192,8 @@ export class AgentKernel {
   private store: RuntimeStore;
   private state: RuntimeState;
   private sandboxAvailable: boolean;
+  private readonly toolResultProjectionMode: 'compat_v1' | 'budget_v2';
+  private persistenceIdentity: RuntimePersistenceIdentityV1;
   private readonly appliedEventIds: Set<string>;
   private activeRunnerId: string | null = null;
 
@@ -103,6 +201,10 @@ export class AgentKernel {
     this.store = config.store;
     this.state = config.initialState;
     this.sandboxAvailable = config.sandboxAvailable ?? false;
+    this.toolResultProjectionMode = config.toolResultProjectionMode ?? 'compat_v1';
+    this.persistenceIdentity =
+      config.persistenceIdentity ??
+      config.store.loadPersistenceIdentity(config.initialState.session.threadId);
     this.appliedEventIds = new Set(config.initialState.appliedEventIds ?? []);
   }
 
@@ -112,17 +214,37 @@ export class AgentKernel {
    * 处理单个 RuntimeEvent：reduce → persist。
    * Process a single RuntimeEvent: reduce → persist.
    */
-  processEvent(event: RuntimeEventInput): { status: 'applied' | 'duplicate'; eventId: string } {
-    const envelope = this.createEnvelope(event, this.state.revision + 1);
+  processEvent(event: RuntimeEventInput): {
+    status: 'applied' | 'duplicate';
+    eventId: string;
+  } {
+    const payload = isRuntimeEventEnvelope(event) ? event.payload : event;
+    assertContextPrimarySuccessBatchV2([payload], this.state);
+    assertInvalidModelToolCallClosureV2([payload]);
+    assertToolTerminalControlBatchV2([payload], this.state);
+    const normalizedInput = isRuntimeEventEnvelope(event)
+      ? event
+      : event.type === 'tool.finished' ||
+          event.type === 'tool.failed' ||
+          event.type === 'tool.rejected' ||
+          event.type === 'tool.cancelled'
+        ? finalizeToolTerminalEventV2(this.state, event, this.toolResultProjectionMode)
+        : event;
+    const envelope = this.createEnvelope(normalizedInput, this.state.revision + 1);
     if (this.appliedEventIds.has(envelope.eventId)) {
       return { status: 'duplicate', eventId: envelope.eventId };
     }
 
     const nextState = this.reduceEnvelope(this.state, envelope);
     // Atomic persist events + snapshot before publishing the new in-memory state.
-    this.store.appendEventsAndSnapshot(this.state.session.threadId, [envelope.payload], nextState, [
-      this.metadataFor(envelope),
-    ]);
+    this.persistenceIdentity = this.store.appendEventsAndSnapshot(
+      this.state.session.threadId,
+      [envelope.payload],
+      nextState,
+      [this.metadataFor(envelope)],
+      undefined,
+      this.persistenceIdentity,
+    );
     this.state = nextState;
     this.appliedEventIds.add(envelope.eventId);
     if (envelope.payload.type === 'turn.completed') {
@@ -144,22 +266,49 @@ export class AgentKernel {
    */
   processEventBatch(events: RuntimeEventInput[]): void {
     if (events.length === 0) return;
+    assertContextPrimarySuccessBatchV2(
+      events.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
+      this.state,
+    );
+    assertInvalidModelToolCallClosureV2(
+      events.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
+    );
+    assertToolTerminalControlBatchV2(
+      events.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
+      this.state,
+    );
     let nextState = this.state;
     const payloads: RuntimeEvent[] = [];
     const metadata: RuntimeEventMetadata[] = [];
     const batchEventIds: string[] = [];
     const batchSeen = new Set(this.appliedEventIds);
     for (const event of events) {
-      const envelope = this.createEnvelope(event, nextState.revision + 1);
+      const normalizedInput = isRuntimeEventEnvelope(event)
+        ? event
+        : event.type === 'tool.finished' ||
+            event.type === 'tool.failed' ||
+            event.type === 'tool.rejected' ||
+            event.type === 'tool.cancelled'
+          ? finalizeToolTerminalEventV2(nextState, event, this.toolResultProjectionMode)
+          : event;
+      const envelope = this.createEnvelope(normalizedInput, nextState.revision + 1);
       if (batchSeen.has(envelope.eventId)) continue;
-      nextState = this.reduceEnvelope(nextState, envelope);
+      nextState = this.reduceEnvelope(nextState, envelope, { deferInvariant: true });
       payloads.push(envelope.payload);
       metadata.push(this.metadataFor(envelope));
       batchSeen.add(envelope.eventId);
       batchEventIds.push(envelope.eventId);
     }
     if (payloads.length === 0) return;
-    this.store.appendEventsAndSnapshot(this.state.session.threadId, payloads, nextState, metadata);
+    assertRuntimeStateInvariants(nextState);
+    this.persistenceIdentity = this.store.appendEventsAndSnapshot(
+      this.state.session.threadId,
+      payloads,
+      nextState,
+      metadata,
+      undefined,
+      this.persistenceIdentity,
+    );
     this.state = nextState;
     for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
     let completedTurn: RuntimeEvent | undefined;
@@ -180,9 +329,7 @@ export class AgentKernel {
    * Process multiple RuntimeEvents in batch.
    */
   processEvents(events: RuntimeEventInput[]): void {
-    for (const event of events) {
-      this.processEvent(event);
-    }
+    this.processEventBatch(events);
   }
 
   // ── 状态访问 / State access ──
@@ -392,7 +539,10 @@ export class AgentKernel {
   async run(executor: RuntimeEffectExecutor, maxEffects = 10_000): Promise<RuntimeEffect> {
     const runnerId = this.acquireRunner();
     if (!runnerId) {
-      return { type: 'busy', reason: 'A runtime runner is already active for this thread.' };
+      return {
+        type: 'busy',
+        reason: 'A runtime runner is already active for this thread.',
+      };
     }
     try {
       for (let index = 0; index < maxEffects; index++) {
@@ -451,7 +601,11 @@ export class AgentKernel {
         },
       };
     }
-    const combined = [...events, ...additionalEvents];
+    const combined = finalizeToolTerminalBatchV2(
+      this.state,
+      [...events, ...additionalEvents],
+      this.toolResultProjectionMode,
+    );
     this.processEventBatch(combined);
     return { status: 'applied', events: combined };
   }
@@ -483,11 +637,23 @@ export class AgentKernel {
     };
   }
 
-  private reduceEnvelope(state: RuntimeState, envelope: RuntimeEventEnvelope): RuntimeState {
+  private reduceEnvelope(
+    state: RuntimeState,
+    envelope: RuntimeEventEnvelope,
+    options: { deferInvariant?: boolean } = {},
+  ): RuntimeState {
     if (envelope.revision !== state.revision + 1) {
       throw new Error(
         `Runtime revision mismatch: expected ${state.revision + 1}, received ${envelope.revision}.`,
       );
+    }
+    if (
+      envelope.payload.type === 'tool.finished' ||
+      envelope.payload.type === 'tool.failed' ||
+      envelope.payload.type === 'tool.rejected' ||
+      envelope.payload.type === 'tool.cancelled'
+    ) {
+      validateVerifiedToolTerminalEventV2(state, envelope.payload, this.toolResultProjectionMode);
     }
     this.assertRuntimeEventAdmission(envelope.payload);
     const reduced = reduceRuntimeState(state, envelope.payload);
@@ -497,12 +663,22 @@ export class AgentKernel {
       lastAppliedEventId: envelope.eventId,
       appliedEventIds: [...(reduced.appliedEventIds ?? []), envelope.eventId].slice(-4096),
     };
-    assertRuntimeStateInvariants(nextState);
+    if (!options.deferInvariant) assertRuntimeStateInvariants(nextState);
     return nextState;
   }
 
   /** Enforce authorization invariants for mutable live-control events. */
   private assertRuntimeEventAdmission(event: RuntimeEvent): void {
+    if (
+      event.type === 'context.compaction_refill_observed' ||
+      event.type === 'context.compaction_guard_carried_forward' ||
+      event.type === 'context.compaction_guard_reset' ||
+      (event.type === 'context.compaction_requested' && event.reason === 'auto') ||
+      (event.type === 'context.compaction_completed' &&
+        (event.checkpoint.reason === 'auto' || isLegacyCheckpointV2(event.checkpoint)))
+    ) {
+      throw new Error('Superseded Slice B events are accepted only by read-only restore.');
+    }
     if (event.type !== 'interaction_mode.changed') return;
     if (!Number.isFinite(Date.parse(event.changedAt))) {
       throw new Error('interaction_mode.changed requires a valid changedAt timestamp.');
@@ -531,7 +707,14 @@ export class AgentKernel {
    * Save a snapshot of the current state to the EventStore.
    */
   saveSnapshot(): void {
-    this.store.saveSnapshot(this.state.session.threadId, this.state);
+    this.persistenceIdentity = this.store.appendEventsAndSnapshot(
+      this.state.session.threadId,
+      [],
+      this.state,
+      [],
+      undefined,
+      this.persistenceIdentity,
+    );
   }
 
   /**
@@ -614,11 +797,15 @@ export function createAgentKernel(params: {
   /** 初始执行阶段 / Initial execution phase */
   phase?: 'planning' | 'building';
   sandboxAvailable?: boolean;
+  toolResultProjectionMode?: 'compat_v1' | 'budget_v2';
 }): AgentKernel {
   const store = createRuntimeStore(params.storePath);
-  const restored = restoreRuntimeStateFromStore({ ...params, store });
-  if (restored.migratedSnapshot) {
-    store.saveSnapshot(params.threadId, restored.migratedSnapshot);
+  let restored: ReturnType<typeof restoreAndCommitRuntimeStateV22>;
+  try {
+    restored = restoreAndCommitRuntimeStateV22({ ...params, store });
+  } catch (error) {
+    store.close();
+    throw error;
   }
 
   const kernel = new AgentKernel({
@@ -626,6 +813,8 @@ export function createAgentKernel(params: {
     initialState: restored.state,
     interactionMode: params.interactionMode ?? 'accept_edits',
     sandboxAvailable: params.sandboxAvailable,
+    toolResultProjectionMode: params.toolResultProjectionMode,
+    persistenceIdentity: restored.persistenceIdentity,
   });
   // A persisted intent without a terminal provider result is deliberately not
   // replayed.  Record the uncertainty durably so a later reconciliation/user
@@ -667,6 +856,32 @@ export function createAgentKernel(params: {
   return kernel;
 }
 
+/** Publish a pure migration candidate with bounded stale reloads, then restore the committed head. */
+export function restoreAndCommitRuntimeStateV22(
+  params: Parameters<typeof restoreRuntimeStateFromStore>[0],
+  maxAttempts = 8,
+): ReturnType<typeof restoreRuntimeStateFromStore> {
+  let restored = restoreRuntimeStateFromStore(params);
+  for (let attempt = 0; restored.migrationCandidate && attempt < maxAttempts; attempt += 1) {
+    if (
+      params.store.compareAndSaveMigratedSnapshot(
+        params.threadId,
+        restored.migrationCandidate.identity,
+        restored.migrationCandidate.state,
+        restored.migrationCandidate.events,
+        restored.migrationCandidate.metadata,
+      ) === 'saved'
+    ) {
+      return restoreRuntimeStateFromStore(params);
+    }
+    restored = restoreRuntimeStateFromStore(params);
+  }
+  if (restored.migrationCandidate) {
+    throw new Error('Runtime migration source changed repeatedly before exact-head commit.');
+  }
+  return restored;
+}
+
 /** Strictly restore Runtime state without executing reconciliation side effects. */
 export function restoreRuntimeStateFromStore(params: {
   store: RuntimeStore;
@@ -677,8 +892,18 @@ export function restoreRuntimeStateFromStore(params: {
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
   phase?: 'planning' | 'building';
-}): { state: RuntimeState; migratedSnapshot: RuntimeState | null } {
+}): {
+  state: RuntimeState;
+  persistenceIdentity: RuntimePersistenceIdentityV1;
+  migrationCandidate: {
+    state: RuntimeState;
+    identity: RuntimeMigrationIdentityV1;
+    events: RuntimeEvent[];
+    metadata: RuntimeEventMetadata[];
+  } | null;
+} {
   const store = params.store;
+  const observedGeneration = store.loadPersistenceIdentity(params.threadId).generation;
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
     userId: params.userId,
@@ -690,33 +915,85 @@ export function restoreRuntimeStateFromStore(params: {
   });
   const snapshotRecord = store.loadSnapshotRecord<RuntimeState>(params.threadId);
   const restoredState = snapshotRecord?.state ?? null;
-  let migratedState = restoredState ? migrateRuntimeState(restoredState) : null;
+  let migratedState: RuntimeState | null = null;
+  let migrationEvents: RuntimeEvent[] = [];
+  let migrationMetadata: RuntimeEventMetadata[] = [];
   const incompatibleSchemaVersion =
     restoredState &&
-    (restoredState.schemaVersion < 2 || restoredState.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
+    restoredState.schemaVersion !== RUNTIME_STATE_SCHEMA_VERSION &&
+    restoredState.schemaVersion !== 22 &&
+    !isSupportedLegacySchemaVersionV22(restoredState.schemaVersion)
       ? restoredState.schemaVersion
       : undefined;
   let recoveryReason: string | undefined;
+  let observedHead: RuntimeMigrationIdentityV1['observedHead'] = {
+    eventPosition: 0,
+    revision: 0,
+    eventId: null,
+  };
   const lastEventPosition = store.getLastEventPosition(params.threadId);
+  let allEvents: StoredEvent[] = [];
   if (snapshotRecord && snapshotRecord.metadata.eventPosition > lastEventPosition) {
     recoveryReason = `Runtime snapshot event position ${snapshotRecord.metadata.eventPosition} exceeds the last event position ${lastEventPosition}.`;
   }
   if (!recoveryReason && lastEventPosition > 0) {
     try {
-      const allEvents = store.loadEventsStrict(params.threadId);
-      const snapshotPosition = snapshotRecord?.metadata.eventPosition ?? 0;
-      const tail = allEvents.filter((entry) => entry.id > snapshotPosition);
-      if (migratedState && snapshotRecord) {
-        if (restoredState && restoredState.schemaVersion < 17) {
-          migratedState = restoreLegacyTurnLifecycle(
-            migratedState,
-            allEvents.filter((entry) => entry.id <= snapshotPosition),
-          );
-        }
-        migratedState = replayPersistedTail(migratedState, tail, params.threadId);
+      allEvents = store.loadEventsStrict(params.threadId);
+      const lastObserved = allEvents.at(-1);
+      observedHead = lastObserved
+        ? {
+            eventPosition: lastObserved.id,
+            revision: lastObserved.revision ?? 0,
+            eventId: lastObserved.event_id ?? null,
+          }
+        : observedHead;
+    } catch (error) {
+      recoveryReason = error instanceof Error ? error.message : String(error);
+    }
+  }
+  if (!recoveryReason && snapshotRecord) {
+    try {
+      validateSnapshotPrefixV22(snapshotRecord, allEvents);
+    } catch (error) {
+      recoveryReason = error instanceof Error ? error.message : String(error);
+    }
+  }
+  if (!recoveryReason && restoredState && incompatibleSchemaVersion == null && snapshotRecord) {
+    try {
+      const snapshotPosition = snapshotRecord.metadata.eventPosition;
+      migratedState = migrateRuntimeState(restoredState, {
+        sourceSnapshot: snapshotRecord.metadata,
+        prefixEvents: allEvents.filter((entry) => entry.id <= snapshotPosition),
+      });
+      if (migratedState && restoredState.schemaVersion < 17) {
+        migratedState = restoreLegacyTurnLifecycle(
+          migratedState,
+          allEvents.filter((entry) => entry.id <= snapshotPosition),
+        );
+      }
+      if (migratedState) {
+        migratedState = replayPersistedTail(
+          migratedState,
+          allEvents.filter((entry) => entry.id > snapshotPosition),
+          params.threadId,
+          restoredState.schemaVersion,
+        );
+        const migrationClosure = closeLegacyPendingCompactionV23({
+          state: migratedState,
+          sourceSchemaVersion: restoredState.schemaVersion,
+          observedHead,
+          allEvents,
+          threadId: params.threadId,
+        });
+        migratedState = migrationClosure.state;
+        migrationEvents = migrationClosure.events;
+        migrationMetadata = migrationClosure.metadata;
+        validateRestoredTerminalStateV2(migratedState, observedHead.eventPosition, allEvents);
+        validateRestoredContextReclaimStateV1(migratedState);
       }
     } catch (error) {
       recoveryReason = error instanceof Error ? error.message : String(error);
+      migratedState = null;
     }
   }
   const initialState =
@@ -737,7 +1014,10 @@ export function restoreRuntimeStateFromStore(params: {
           ) {
             state = {
               ...state,
-              authorization: { ...state.authorization, mode: params.authorizationMode },
+              authorization: {
+                ...state.authorization,
+                mode: params.authorizationMode,
+              },
             };
           }
           return state;
@@ -764,20 +1044,184 @@ export function restoreRuntimeStateFromStore(params: {
 
   return {
     state: initialState,
-    migratedSnapshot:
-      migratedState && migratedState !== restoredState && initialState === migratedState
-        ? migratedState
+    persistenceIdentity: {
+      generation: observedGeneration,
+      sourceSnapshot: snapshotRecord?.metadata ?? null,
+      observedHead,
+    } satisfies RuntimePersistenceIdentityV1,
+    migrationCandidate:
+      !recoveryReason &&
+      restoredState &&
+      restoredState.schemaVersion >= 2 &&
+      restoredState.schemaVersion < RUNTIME_STATE_SCHEMA_VERSION &&
+      migratedState &&
+      migratedState.session.threadId === params.threadId &&
+      snapshotRecord
+        ? {
+            state: migratedState,
+            identity: {
+              generation: observedGeneration,
+              sourceSnapshot: snapshotRecord.metadata,
+              observedHead,
+            },
+            events: migrationEvents,
+            metadata: migrationMetadata,
+          }
         : null,
   };
+}
+
+function closeLegacyPendingCompactionV23(input: {
+  state: RuntimeState;
+  sourceSchemaVersion: number;
+  observedHead: RuntimeMigrationIdentityV1['observedHead'];
+  allEvents: StoredEvent[];
+  threadId: string;
+}): { state: RuntimeState; events: RuntimeEvent[]; metadata: RuntimeEventMetadata[] } {
+  if (
+    (input.sourceSchemaVersion !== 21 && input.sourceSchemaVersion !== 22) ||
+    !input.state.context.pendingCompaction
+  ) {
+    return { state: input.state, events: [], metadata: [] };
+  }
+  const pending = input.state.context.pendingCompaction;
+  const durableTerminal = [...input.allEvents]
+    .reverse()
+    .map((entry) => entry.event)
+    .find(
+      (event) =>
+        (event.type === 'context.compaction_completed' ||
+          event.type === 'context.compaction_failed') &&
+        event.compactionId === pending.compactionId,
+    );
+  let state = durableTerminal ? reduceRuntimeState(input.state, durableTerminal) : input.state;
+  if (!state.context.pendingCompaction) {
+    return { state, events: [], metadata: [] };
+  }
+  const reservation =
+    state.resourceBudget.status === 'active'
+      ? Object.values(state.resourceBudget.reservations).find(
+          (candidate) => candidate.invocationId === `compaction:${pending.compactionId}`,
+        )
+      : undefined;
+  const dispatched =
+    reservation?.state === 'dispatch_started' ||
+    reservation?.state === 'unknown' ||
+    reservation?.state === 'reconciled';
+  const event: RuntimeEvent = dispatched
+    ? {
+        type: 'context.compaction_unknown_external_outcome',
+        compactionId: pending.compactionId,
+        sourceRevision: state.revision,
+        ...(reservation ? { reservationId: reservation.reservationId } : {}),
+      }
+    : {
+        type: 'context.compaction_migration_cancelled',
+        compactionId: pending.compactionId,
+        sourceRevision: state.revision,
+        outcome: 'not_dispatched',
+      };
+  const revision = input.observedHead.revision + 1;
+  const eventId = createHash('sha256')
+    .update(
+      JSON.stringify({
+        domain: 'context-compaction-v23-migration-closure:v1',
+        threadId: input.threadId,
+        observedHead: input.observedHead,
+        event,
+      }),
+    )
+    .digest('hex');
+  state = {
+    ...reduceRuntimeState(state, event),
+    revision,
+    lastAppliedEventId: eventId,
+    appliedEventIds: [...state.appliedEventIds, eventId].slice(-4096),
+  };
+  return {
+    state,
+    events: [event],
+    metadata: [{ eventId, revision, occurredAt: new Date(0).toISOString() }],
+  };
+}
+
+function validateSnapshotPrefixV22(
+  snapshotRecord: {
+    state: RuntimeState;
+    metadata: import('./store').RuntimeSnapshotMetadata;
+  },
+  allEvents: StoredEvent[],
+): void {
+  const { state, metadata } = snapshotRecord;
+  if (metadata.schemaVersion !== state.schemaVersion) {
+    throw new Error(
+      `Runtime snapshot schema mismatch: metadata ${metadata.schemaVersion}, state ${state.schemaVersion}.`,
+    );
+  }
+  if (state.schemaVersion < 22) return;
+  if (metadata.stateRevision !== state.revision) {
+    throw new Error(
+      `Schema-v22 snapshot revision mismatch: metadata ${metadata.stateRevision}, state ${state.revision}.`,
+    );
+  }
+  const prefix = allEvents.filter((entry) => entry.id <= metadata.eventPosition);
+  const head = prefix.at(-1);
+  if (
+    (metadata.eventPosition === 0 && (prefix.length !== 0 || state.revision !== 0)) ||
+    (metadata.eventPosition > 0 &&
+      (!head ||
+        head.id !== metadata.eventPosition ||
+        head.revision !== state.revision ||
+        (state.revision > 0
+          ? !head.event_id || head.event_id !== state.lastAppliedEventId
+          : head.event_id != null || state.lastAppliedEventId !== undefined)))
+  ) {
+    throw new Error('Schema-v22 snapshot cut does not match its durable event prefix head.');
+  }
+  const prefixEventIds: string[] = [];
+  let observedV22Metadata = false;
+  for (const entry of prefix) {
+    const hasV22Metadata = Boolean(entry.event_id) || entry.revision !== 0;
+    if (!hasV22Metadata) {
+      if (observedV22Metadata) {
+        throw new Error('Schema-v22 snapshot prefix cannot return to legacy event metadata.');
+      }
+      continue;
+    }
+    observedV22Metadata = true;
+    if (
+      !entry.event_id ||
+      entry.revision !== prefixEventIds.length + 1 ||
+      prefixEventIds.includes(entry.event_id)
+    ) {
+      throw new Error('Schema-v22 snapshot prefix lacks unique, contiguous event metadata.');
+    }
+    prefixEventIds.push(entry.event_id);
+  }
+  const expectedAppliedEventIds = prefixEventIds.slice(-4096);
+  if (JSON.stringify(state.appliedEventIds ?? []) !== JSON.stringify(expectedAppliedEventIds)) {
+    throw new Error('Schema-v22 snapshot appliedEventIds do not match its durable prefix.');
+  }
+  if (metadata.eventPosition === 0 && state.lastAppliedEventId !== undefined) {
+    throw new Error('Schema-v22 empty snapshot cannot name a last applied event.');
+  }
 }
 
 function replayPersistedTail(
   state: RuntimeState,
   tail: StoredEvent[],
   threadId: string,
+  sourceSchemaVersion: number,
 ): RuntimeState {
   let current = state;
-  for (const entry of tail) {
+  if (sourceSchemaVersion >= 22) {
+    assertInvalidModelToolCallClosureV2(tail.map((entry) => entry.event));
+  }
+  const legacySourceVersion = isSupportedLegacySchemaVersionV22(sourceSchemaVersion)
+    ? sourceSchemaVersion
+    : undefined;
+  for (let tailIndex = 0; tailIndex < tail.length; tailIndex++) {
+    const entry = tail[tailIndex]!;
     if (!entry.event_id || !entry.revision || !entry.occurred_at) {
       throw new Error(`Runtime event ${entry.id} is missing envelope metadata.`);
     }
@@ -789,7 +1233,81 @@ function replayPersistedTail(
         `Runtime event ${entry.id} revision mismatch: expected ${current.revision + 1}, received ${entry.revision}.`,
       );
     }
-    const reduced = reduceRuntimeState(current, entry.event);
+    const terminalEvent =
+      entry.event.type === 'tool.finished' ||
+      entry.event.type === 'tool.failed' ||
+      entry.event.type === 'tool.rejected' ||
+      entry.event.type === 'tool.cancelled'
+        ? entry.event
+        : undefined;
+    const persistedTerminal =
+      legacySourceVersion !== undefined &&
+      terminalEvent !== undefined &&
+      !terminalEvent.modelResult;
+    const existingMessage = persistedTerminal
+      ? current.transcript.messages.find(
+          (message) => message.kind === 'tool' && message.toolCallId === terminalEvent.toolCallId,
+        )
+      : undefined;
+    const existingMigration =
+      existingMessage?.kind === 'tool' ? existingMessage.resultMeta?.terminalMigration : undefined;
+    const event = persistedTerminal
+      ? {
+          ...entry.event,
+          modelResult: {
+            kind: 'legacy_unverified' as const,
+            migratedFromSchemaVersion:
+              existingMigration?.migratedFromSchemaVersion ?? legacySourceVersion,
+            originalEventPosition: existingMigration?.originalEventPosition ?? entry.id,
+          },
+        }
+      : entry.event;
+    if (event.type === 'model.responded' && event.contextEvidence) {
+      const branchLength = event.contextEvidence.reclaimReceiptDigest === 'none' ? 2 : 3;
+      const branch = tail
+        .slice(tailIndex, tailIndex + branchLength)
+        .map((candidate) => candidate.event);
+      assertContextPrimarySuccessBatchV2(branch, current);
+    } else if (
+      event.type === 'context.reclaim_commit_advanced' ||
+      (event.type === 'resource_budget.reconciled' && event.terminalBatchId)
+    ) {
+      const previous = tail[tailIndex - 1]?.event;
+      const validContinuation =
+        (previous?.type === 'model.responded' &&
+          previous.contextEvidence?.terminalBatchId ===
+            (event.type === 'context.reclaim_commit_advanced'
+              ? event.terminalBatchId
+              : event.terminalBatchId)) ||
+        (previous?.type === 'context.reclaim_commit_advanced' &&
+          event.type === 'resource_budget.reconciled' &&
+          previous.terminalBatchId === event.terminalBatchId);
+      if (!validContinuation) {
+        throw new Error(`Runtime event ${entry.id} is a standalone primary branch continuation.`);
+      }
+    }
+    if (
+      event.type === 'tool.finished' ||
+      event.type === 'tool.failed' ||
+      event.type === 'tool.rejected' ||
+      event.type === 'tool.cancelled'
+    ) {
+      if (event.modelResult?.kind === 'verified_v2') {
+        validateVerifiedToolTerminalEventV2(current, event);
+      } else if (
+        current.schemaVersion >= 22 &&
+        !(
+          legacySourceVersion !== undefined &&
+          event.modelResult?.kind === 'legacy_unverified' &&
+          event.modelResult.migratedFromSchemaVersion === sourceSchemaVersion &&
+          (event.modelResult.originalEventPosition === entry.id ||
+            event.modelResult.originalEventPosition === existingMigration?.originalEventPosition)
+        )
+      ) {
+        throw new Error(`Runtime event ${entry.id} is missing a verified schema-v22 terminal.`);
+      }
+    }
+    const reduced = reduceRuntimeState(current, event);
     current = {
       ...reduced,
       revision: entry.revision,
@@ -806,7 +1324,11 @@ function restoreLegacyTurnLifecycle(state: RuntimeState, events: StoredEvent[]):
   for (const entry of events) {
     const event = entry.event;
     if (event.type === 'turn.started' && event.turnId === turn.turnId) {
-      turn = { turnId: turn.turnId, turnIndex: turn.turnIndex, status: 'active' };
+      turn = {
+        turnId: turn.turnId,
+        turnIndex: turn.turnIndex,
+        status: 'active',
+      };
     } else if (event.type === 'turn.completed' && event.turnId === turn.turnId) {
       turn = { ...turn, status: 'completed' };
     } else if (event.type === 'turn.aborted' && event.turnId === turn.turnId) {
@@ -821,13 +1343,21 @@ function restoreLegacyTurnLifecycle(state: RuntimeState, events: StoredEvent[]):
   return turn === state.turn ? state : { ...state, turn };
 }
 
-function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
+function migrateRuntimeState(
+  snapshot: RuntimeState,
+  migrationSource: {
+    sourceSnapshot: import('./store').RuntimeSnapshotMetadata;
+    prefixEvents: StoredEvent[];
+  },
+): RuntimeState | null {
   const normalizedSnapshot = snapshot;
 
   if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION)
     return normalizeRuntimeMetadata(normalizedSnapshot);
-  if (snapshot.schemaVersion < 2 || snapshot.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
-    return null;
+  if (snapshot.schemaVersion === 22) {
+    return migrateRuntimeStateV22ToV23(normalizedSnapshot);
+  }
+  if (!isSupportedLegacySchemaVersionV22(snapshot.schemaVersion)) return null;
 
   const legacyApprovalInteraction =
     normalizedSnapshot.schemaVersion < 4 &&
@@ -844,8 +1374,8 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   // Build the migrated state before upgrading the version so all v2 fields are
   // preserved and the recovery marker is durable with the schema transition.
   let migratedState: RuntimeState = {
-    ...normalizeRuntimeMetadata(normalizedSnapshot),
-    schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+    ...normalizeRuntimeMetadata(normalizedSnapshot, true),
+    schemaVersion: 22,
     verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
     context: normalizeContextRuntimeState((normalizedSnapshot as Partial<RuntimeState>).context),
     resourceBudget:
@@ -907,10 +1437,279 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     };
   }
 
-  return materializeLegacyPlanArtifacts(migratedState);
+  return migrateRuntimeStateV22ToV23(
+    normalizeLegacyPlanDocuments(
+      normalizeLegacySnapshotTerminalResults(
+        migratedState,
+        snapshot.schemaVersion,
+        migrationSource.sourceSnapshot.eventPosition,
+        migrationSource.prefixEvents,
+      ),
+    ),
+  );
 }
 
-function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
+/** Explicit second phase: v2..v21 first normalize to v22, then v22 upgrades to v23. */
+function migrateRuntimeStateV22ToV23(snapshot: RuntimeState): RuntimeState {
+  if (snapshot.schemaVersion !== 22) {
+    throw new Error(`Expected a schema-v22 migration source, received ${snapshot.schemaVersion}.`);
+  }
+  return {
+    ...normalizeRuntimeMetadata(snapshot),
+    schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+    context: normalizeContextRuntimeState(snapshot.context),
+  };
+}
+
+type LegacyTerminalSourceV22 = {
+  toolCallId: string;
+  terminalKind: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
+  eventPosition: number;
+  sourceEvent: RuntimeEvent;
+  directTerminal: boolean;
+};
+
+function legacyTerminalSourceV22(entry: StoredEvent): LegacyTerminalSourceV22 | undefined {
+  const event = entry.event;
+  switch (event.type) {
+    case 'tool.finished':
+    case 'tool.failed':
+    case 'tool.rejected':
+    case 'tool.cancelled':
+      return {
+        toolCallId: event.toolCallId,
+        terminalKind: event.type,
+        eventPosition: entry.id,
+        sourceEvent: event,
+        directTerminal: true,
+      };
+    case 'approval.rejected':
+      return event.toolCallId
+        ? {
+            toolCallId: event.toolCallId,
+            terminalKind: 'tool.rejected',
+            eventPosition: entry.id,
+            sourceEvent: event,
+            directTerminal: false,
+          }
+        : undefined;
+    case 'auto_review.completed':
+      return event.result.ok && !event.result.approved
+        ? {
+            toolCallId: event.toolCallId,
+            terminalKind: 'tool.rejected',
+            eventPosition: entry.id,
+            sourceEvent: event,
+            directTerminal: false,
+          }
+        : undefined;
+    case 'provider.action_required':
+      return {
+        toolCallId: event.originatingToolCallId,
+        terminalKind: 'tool.failed',
+        eventPosition: entry.id,
+        sourceEvent: event,
+        directTerminal: false,
+      };
+    case 'user_input.answered':
+    case 'user_input.cancelled':
+      return {
+        toolCallId: event.toolCallId,
+        terminalKind: 'tool.finished',
+        eventPosition: entry.id,
+        sourceEvent: event,
+        directTerminal: false,
+      };
+    case 'plan.review_cancelled':
+      return event.toolCallId
+        ? {
+            toolCallId: event.toolCallId,
+            terminalKind: 'tool.cancelled',
+            eventPosition: entry.id,
+            sourceEvent: event,
+            directTerminal: false,
+          }
+        : undefined;
+    default:
+      return undefined;
+  }
+}
+
+function legacySourceMatchesStatus(
+  status: import('./state').ToolCallStatus,
+  source: LegacyTerminalSourceV22,
+): boolean {
+  if (source.terminalKind === 'tool.finished') {
+    return status === 'succeeded' || status === 'failed' || status === 'exhausted';
+  }
+  if (source.terminalKind === 'tool.failed') return status === 'failed';
+  if (source.terminalKind === 'tool.rejected') return status === 'rejected';
+  return status === 'cancelled';
+}
+
+function selectLegacyTerminalSourceV22(
+  toolCallId: string,
+  status: import('./state').ToolCallStatus,
+  sources: LegacyTerminalSourceV22[],
+): LegacyTerminalSourceV22 {
+  let candidates = sources.filter((source) => legacySourceMatchesStatus(status, source));
+  const direct = candidates.filter((source) => source.directTerminal);
+  if (direct.length > 0) candidates = direct;
+  if (candidates.length === 0) {
+    throw new Error(`Legacy Tool Result '${toolCallId}' lacks a proven event position.`);
+  }
+  const first = candidates[0]!;
+  if (
+    candidates.some(
+      (candidate) =>
+        candidate.terminalKind !== first.terminalKind ||
+        JSON.stringify(candidate.sourceEvent) !== JSON.stringify(first.sourceEvent),
+    )
+  ) {
+    throw new Error(`Legacy Tool Result '${toolCallId}' has conflicting terminal events.`);
+  }
+  return first;
+}
+
+function normalizeLegacySnapshotTerminalResults(
+  state: RuntimeState,
+  sourceSchemaVersion: import('./tool-terminal-v2').SupportedLegacySchemaVersionV22,
+  cutoverEventPosition: number,
+  prefixEvents: StoredEvent[],
+): RuntimeState {
+  const sourcesByCall = new Map<string, LegacyTerminalSourceV22[]>();
+  for (const entry of prefixEvents) {
+    if (entry.id <= 0 || entry.id > cutoverEventPosition) continue;
+    const source = legacyTerminalSourceV22(entry);
+    if (!source) continue;
+    const sources = sourcesByCall.get(source.toolCallId) ?? [];
+    sources.push(source);
+    sourcesByCall.set(source.toolCallId, sources);
+  }
+
+  const canonicalByCall = new Map<
+    string,
+    Extract<RuntimeState['transcript']['messages'][number], { kind: 'tool' }>
+  >();
+  const retainedMessages: RuntimeState['transcript']['messages'] = [];
+  for (const message of state.transcript.messages) {
+    if (message.kind !== 'tool') {
+      retainedMessages.push(message);
+      continue;
+    }
+    const existing = canonicalByCall.get(message.toolCallId);
+    if (existing) {
+      if (existing.content !== message.content || existing.ok !== message.ok) {
+        throw new Error(`Legacy tool '${message.toolCallId}' has conflicting canonical results.`);
+      }
+      continue;
+    }
+    canonicalByCall.set(message.toolCallId, message);
+    retainedMessages.push(message);
+  }
+
+  const nextCalls = { ...state.tools.calls };
+  const normalizedMessages = retainedMessages.map((message) => {
+    if (message.kind !== 'tool') return message;
+    const call = state.tools.calls[message.toolCallId];
+    if (
+      !call ||
+      !['succeeded', 'failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status)
+    ) {
+      throw new Error(`Legacy Tool Result '${message.toolCallId}' lacks one settled call.`);
+    }
+    const first = selectLegacyTerminalSourceV22(
+      message.toolCallId,
+      call.status,
+      sourcesByCall.get(message.toolCallId) ?? [],
+    );
+    const migration = {
+      kind: 'legacy_unverified' as const,
+      migratedFromSchemaVersion: sourceSchemaVersion,
+      originalEventPosition: first.eventPosition,
+    };
+    const resultMeta = {
+      ...normalizeToolResultMetaProvenance(message.resultMeta, true),
+      terminalKind: first.terminalKind,
+      terminalMigration: migration,
+    };
+    nextCalls[message.toolCallId] = {
+      ...call,
+      result: {
+        ...(call.result ?? {
+          ok: message.ok,
+          summary: call.error ?? `Legacy ${first.terminalKind} result`,
+        }),
+        ok: message.ok,
+        resultMeta,
+      },
+    };
+    return { ...message, resultMeta };
+  });
+
+  for (const [toolCallId, call] of Object.entries(nextCalls)) {
+    if (!['succeeded', 'failed', 'rejected', 'cancelled', 'exhausted'].includes(call.status))
+      continue;
+    if (!canonicalByCall.has(toolCallId)) {
+      const source = selectLegacyTerminalSourceV22(
+        toolCallId,
+        call.status,
+        sourcesByCall.get(toolCallId) ?? [],
+      );
+      if (source.sourceEvent.type !== 'provider.action_required') {
+        throw new Error(`Legacy settled tool '${toolCallId}' lacks its canonical Tool Result.`);
+      }
+      const migration = {
+        kind: 'legacy_unverified' as const,
+        migratedFromSchemaVersion: sourceSchemaVersion,
+        originalEventPosition: source.eventPosition,
+      };
+      const resultMeta = {
+        digestScope: 'legacy_unknown' as const,
+        terminalKind: source.terminalKind,
+        terminalMigration: migration,
+      };
+      const content = call.error ?? 'MCP provider action is required.';
+      nextCalls[toolCallId] = {
+        ...call,
+        result: {
+          ...(call.result ?? { ok: false, summary: content }),
+          ok: false,
+          resultMeta,
+        },
+      };
+      normalizedMessages.push({
+        kind: 'tool',
+        messageId: `tool-${toolCallId}`,
+        turnId: state.turn.turnId,
+        ordinal: normalizedMessages.length,
+        createdAt: new Date(0).toISOString(),
+        toolCallId,
+        name: call.name,
+        content,
+        ok: false,
+        resultMeta,
+      });
+    }
+  }
+
+  return {
+    ...state,
+    tools: { ...state.tools, calls: nextCalls },
+    transcript: {
+      ...state.transcript,
+      messages: normalizedMessages.map((message, ordinal) => ({
+        ...message,
+        ordinal,
+      })),
+    },
+  };
+}
+
+function normalizeRuntimeMetadata(
+  state: RuntimeState,
+  forceLegacyProvenance = false,
+): RuntimeState {
   const raw = state as RuntimeState & {
     revision?: number;
     appliedEventIds?: string[];
@@ -921,12 +1720,42 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
       status?: RuntimeState['turn']['status'];
     };
   };
+  const legacyContext = raw.context as
+    | (RuntimeState['context'] & {
+        activeCheckpoint?: unknown;
+        history?: Array<{ kind?: string; checkpoint?: unknown }>;
+        autoGuard?: unknown;
+        autoGuardV2?: unknown;
+      })
+    | undefined;
+  const activeCheckpoint = isLegacyCheckpointV2(legacyContext?.activeCheckpoint)
+    ? readLegacyCheckpointV2ReadOnly({
+        checkpoint: legacyContext.activeCheckpoint,
+        state,
+      })
+    : legacyContext?.activeCheckpoint;
+  const contextWithoutLegacyGuard = legacyContext
+    ? Object.fromEntries(
+        Object.entries(legacyContext).filter(
+          ([key]) => key !== 'autoGuard' && key !== 'autoGuardV2',
+        ),
+      )
+    : undefined;
+  const contextInput = contextWithoutLegacyGuard
+    ? ({
+        ...contextWithoutLegacyGuard,
+        ...(activeCheckpoint ? { activeCheckpoint } : { activeCheckpoint: undefined }),
+        history: (legacyContext?.history ?? []).filter(
+          (entry) => entry.kind !== 'completed' || !isLegacyCheckpointV2(entry.checkpoint),
+        ),
+      } as RuntimeState['context'])
+    : undefined;
   return {
     ...state,
     revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
     appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
     recoveryState: raw.recoveryState ?? { kind: 'normal' },
-    context: normalizeContextRuntimeState(raw.context),
+    context: normalizeContextRuntimeState(contextInput),
     resourceBudget: normalizeResourceBudgetMetadata(
       raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
     ),
@@ -947,7 +1776,10 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
                 ...call,
                 result: {
                   ...call.result,
-                  resultMeta: normalizeToolResultMetaProvenance(call.result.resultMeta),
+                  resultMeta: normalizeToolResultMetaProvenance(
+                    call.result.resultMeta,
+                    forceLegacyProvenance,
+                  ),
                 },
               }
             : call,
@@ -971,7 +1803,10 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
         return message.kind === 'tool'
           ? {
               ...normalized,
-              resultMeta: normalizeToolResultMetaProvenance(message.resultMeta),
+              resultMeta: normalizeToolResultMetaProvenance(
+                message.resultMeta,
+                forceLegacyProvenance,
+              ),
             }
           : normalized;
       }),
@@ -991,7 +1826,18 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
 
 function normalizeToolResultMetaProvenance(
   resultMeta: import('./state').ToolResultMeta | undefined,
+  forceLegacyProvenance = false,
 ): import('./state').ToolResultMeta {
+  const {
+    toolResultReceipt: _toolResultReceipt,
+    terminalIdentity: _terminalIdentity,
+    terminalKind: _terminalKind,
+    terminalMigration: _terminalMigration,
+    ...legacySafe
+  } = resultMeta ?? {};
+  if (forceLegacyProvenance) {
+    return { ...legacySafe, digestScope: 'legacy_unknown' };
+  }
   return {
     ...(resultMeta ?? {}),
     digestScope:
@@ -1017,30 +1863,24 @@ function normalizeResourceBudgetMetadata(
 }
 
 /** Materialize inline legacy PlanDocument bodies without changing their versions. */
-function materializeLegacyPlanArtifacts(state: RuntimeState): RuntimeState {
+function normalizeLegacyPlanDocuments(state: RuntimeState): RuntimeState {
   let changed = false;
   const tasks = Object.fromEntries(
     Object.entries(state.tasks).map(([taskId, task]) => {
-      const materialize = (document: import('@/protocol/events').PlanDocument) => {
-        if (document.artifact) return document;
-        const withDigest = document.structuralDigest
-          ? document
-          : { ...document, structuralDigest: computePlanStructuralDigest(document) };
-        try {
-          const artifact = defaultPlanArtifactStore.write(taskId, withDigest);
-          changed = true;
-          return { ...withDigest, artifact };
-        } catch {
-          // Keep the legacy inline document usable if the user artifact directory is unavailable.
-          return withDigest;
-        }
+      const normalize = (document: import('@/protocol/events').PlanDocument) => {
+        if (document.structuralDigest) return document;
+        changed = true;
+        return {
+          ...document,
+          structuralDigest: computePlanStructuralDigest(document),
+        };
       };
       const planning = task.planning;
       const nextPlanning =
         'document' in planning && planning.document
-          ? { ...planning, document: materialize(planning.document) }
+          ? { ...planning, document: normalize(planning.document) }
           : planning;
-      const planHistory = task.planHistory.map(materialize);
+      const planHistory = task.planHistory.map(normalize);
       return [taskId, { ...task, planning: nextPlanning, planHistory }] as const;
     }),
   );

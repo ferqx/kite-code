@@ -85,14 +85,23 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 
 模型 capability 的每个字段只按显式模型条目、adapter runtime metadata 和兼容 `modelKwargs` 依次解析。模型名称和默认模型列表不提供能力；未知窗口仍允许 Runtime 调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
 
-自动会话总结需要默认关闭的 `features.contextCompactionAutoV1` 与 `compaction.autoMode` 共同开启。`autoMode` 只允许 `off | shadow | live`；未配置时为 `off`。`shadow` 只计算 trigger eligibility 术语（触发资格），不调用摘要模型、不写 checkpoint 术语（检查点）；`live` 默认在完整请求达到可用输入预算的 90% 时产生 `reason=auto`，也可由 `triggerRatio` 覆盖或使用显式 `compactAfterEstimatedTokens` 绝对策略。自动压缩失败或取消时当前用户请求不会继续调用普通模型；下一用户 turn 会重新预检并在仍超阈值时重试。Summary Provider 请求失败按脱敏类别提示检查模型、credential、连接与 context/output limits 或执行 `/clear`，不自动清理、分块或重试。`compaction` 可配置 `warningRatio`、`compactRatio`、`hardRatio`、`minimumReductionRatio`、`cooldownTurns`、`maxSummaryTokens`、`maxSummaryInputTokens`、`maxNarrativeTokens` 和 `providerSafetyRatio`；`recentTurns`、`minimumIncrementalHeadroomTokens`、`softRatio`、`targetRatio` 与未消费的 breaker 配置已删除。模型 capability 只来自所选模型的显式字段、adapter runtime metadata 或 `modelKwargs` 兼容字段，并按字段记录 source；模型名称和默认列表不提供窗口、tokenizer、usage 或 cache 能力。未知窗口不显示百分比、不触发 ratio auto。当前 summary request 复用主模型（`tools: {}`，temperature 0，SDK retry 0），自定义指令作为数据字段传入，但只有存在新 safe history 时才会 dispatch。
+旧自动会话总结 producer 已删除。`features.contextCompactionAutoV1`、`compaction.autoMode`、`triggerRatio`、
+`compactAfterEstimatedTokens`、`minimumReductionRatio`、`cooldownTurns`、`cohortSalt` 与 `livePercentage` 当前只为旧
+配置兼容继续解析，不能启用 shadow/live 或产生 `reason=auto`。当前 summary request 只由显式 `/compact` 触发，
+复用主模型（`tools: {}`，temperature 0，SDK retry 0）；自定义指令作为数据字段传入，但只有存在新 safe
+history 时才会 dispatch。Provider 失败按脱敏类别提示检查模型、credential、连接与 context/output limits 或
+执行 `/clear`，不自动清理、分块或重试。
 
-确定性工具结果 reclaim 使用独立的默认关闭 `features.contextReclaimV1` 和
-`compaction.reclaimMode=off|shadow`。未配置、flag 关闭、mode=off、窗口 unknown/normal 或未注入进程内
-reporter 时均不运行 planner；shadow 只记录严格脱敏的候选统计，不改模型请求或会话数据。当前配置 schema
-拒绝 `reclaimMode=live`，因此该设置没有用户可见 token saving。
+确定性工具结果 reclaim 使用两个独立、默认关闭的 flag：`features.toolResultBudgetV2` 与
+`features.contextReclaimV1`。`compaction.reclaimMode` 允许 `off|shadow|live`，默认 `off`；effective live 必须
+同时开启两个 flag 并显式选择 live。`compaction.reclaimAfterEstimatedTokens` 可提供绝对 trigger，其他情况在
+warning/更高 pressure 下评估。shadow 只记录严格脱敏的 bounded 内存候选统计，不改模型请求或会话数据；
+live 只对全 `budget_v2` verified 的 settled read/search block 应用 L2，并只在成功 primary 后提交 bounded
+receipt/commit。当前受信 route registry 为空，用户配置不能自证 production qualification，因此 live 仅是
+development-only 路径。
 
-Rollout 可额外配置 `cohortSalt` 与 `livePercentage`：相同 salt/session 始终进入相同 bucket，live 百分比外按 shadow 执行，master flag 关闭恒为 off。显式 `localDebug: { enabled: true, directory }` 只写脱敏压缩元数据；未启用时不创建文件。
+旧 rollout bucket 不再执行；`cohortSalt` 与 `livePercentage` 仅保留配置兼容。显式
+`localDebug: { enabled: true, directory }` 只写脱敏压缩元数据；未启用时不创建文件。
 
 TUI 启动时执行 workspace 信任门禁：首次打开未信任目录会显示授权确认（类似 VS Code 打开新项目），显式信任记录写入用户级 `~/.kite-code/workspace-trust.jsonc`，以 canonical realpath 的 sha256 作为 `workspaceKey`，之后同目录启动自动放行；目录移动或改名后信任失效。CLI `run` 执行同一门禁：未信任目录拒绝运行并向 stderr 报错，`--trust-workspace` 显式记录信任（`source: 'config'`）后继续，CI/自动化应使用该旗标或预写信任存储。门禁刻意不提供环境变量旁路：Bun 会自动注入 `<cwd>/.env*`，env 开关可被目录内文件伪造；web 前端当前不执行该门禁。当前行为以 `docs/active/workspace-trust.md` 为准。
 
@@ -174,7 +183,16 @@ invocation 的单次 transport receipt；当前 production TUI 没有该 control
 排除，因此 Provider readiness 继续拒绝。该 flag 不定义 allowlist、不提供 URL path isolation，
 也不改变当前空 production platform 支持集。
 
-上下文压缩使用三个独立 flag 术语（功能开关）：`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启；`contextCompactionAutoV1` 控制自动压缩灰度且默认关闭，不会把 Provider 术语（模型供应商）错误转换为自动压缩；`contextCompactionManualV1` 控制 `/compact` 命令且默认开启。压缩原因只允许 `manual | auto`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt 术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint 术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性硬阻断）。
+上下文压缩 flag 中，`contextCompactionV2` 保护 checkpoint/summary 基础契约且默认开启，
+`contextCompactionManualV1` 控制 `/compact` 命令且默认开启；`contextCompactionAutoV1` 默认关闭并仅保留旧配置
+解析兼容，不再控制任何自动 producer。压缩原因 schema 为历史事件兼容仍允许 `manual | auto`，当前新请求只
+生成 `manual`。`/compact` 接受可选的自定义摘要指令（作为数据字段 `customPreferences` 传入而非 system prompt
+术语（系统提示词））；`/context` 显示分项 token 占用和压缩状态。`/compact reset` 清除 active checkpoint
+术语（活动检查点），不以本地容量比例阻止重置，也不清除 Runtime correctness hard block 术语（运行时正确性
+硬阻断）。
 
-`contextReclaimV1` 是第四个、独立的默认关闭开关，只允许 `reclaimMode=off|shadow`。它不创建
-`context.compaction_*` 事件，不调用 summary Provider，也不把候选统计解释为已节省 token。
+`toolResultBudgetV2` 与 `contextReclaimV1` 都是独立、默认关闭的开关。前者切换全工具 L1 V2
+projector/receipt/self-contained terminal，关闭时保持 `compat_v1` 模型字节；后者控制 L2 reclaim。
+`reclaimMode=shadow` 不创建持久 reclaim 事件、不调用 summary Provider，也不把候选统计解释为已节省 token；
+`live` 只有在成功 primary 的封闭 batch 内才可推进 `context.reclaim_commit_advanced`。旧 Slice B 的 L3
+source/checkpoint-v2 writer/refill guard 已清场，两者不会重新启用这些 producer。

@@ -695,10 +695,10 @@ describe('executeRuntimeTools', () => {
       },
     });
     expect(actionEvents.map((event) => event.type)).toEqual([
-      'tool.failed',
       'provider.action_required',
+      'tool.failed',
     ]);
-    expect(actionEvents[1]).toMatchObject({
+    expect(actionEvents[0]).toMatchObject({
       providerId: 'github',
       action: 'login',
       originatingToolCallId: 'mcp',

@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-10（归档三级上下文缩减 Foundation）
+最后更新：2026-08-11（ADR-0101 accepted、RFC review GO；Checkpoint 工作集计划 active，当前入口 PSMC-03）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -10,7 +10,6 @@
 |------|------|
 | `draft` | 方案初稿，待确认后方可执行 |
 | `active` | 执行中 |
-| `blocked` | 被依赖项阻塞 |
 | `superseded` | 被另一个方案替代（记录替代关系） |
 | `completed` | 已完成，尚未归档 |
 | `archived` | 已归档，完成记录在 `execution/completed/`，plan 文件保留作为设计参考 |
@@ -19,6 +18,10 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
+| [`2026-08-10-three-tier-context-reduction-slice-a.md`](2026-08-10-three-tier-context-reduction-slice-a.md) | archived | P0 | ADR-0095/0096 accepted、Gate A0 治理审计通过 | [完成记录](../execution/completed/2026-08-10-three-tier-context-reduction-slice-a.md) | 全工具 L1 预算、统一 prepared/final admission、L2 live、schema v22 与 Gate A 已完成；新路径默认 off |
+| [`2026-08-10-progressive-context-compaction.md`](2026-08-10-progressive-context-compaction.md) | active | P0 | ADR-0100/0101 accepted、RFC reviewed GO、PSMC-01/02 completed | 取代会话记忆作为当前第二级的路线 | 当前入口 PSMC-03；计划交付 MicroCompact、Checkpoint Working Set、SummaryCompact；Session Memory 排除 |
+| [`2026-08-10-progressive-session-memory-compaction.md`](2026-08-10-progressive-session-memory-compaction.md) | superseded | P0 | PSMC-01/02 已完成 | [清场完成记录](../execution/completed/2026-08-10-progressive-compaction-old-route-cleanup.md)；后续由新计划接管 | 只保留旧路线清场与会话记忆设计历史，不再授权 PSMC-03+ |
+| [`2026-08-10-three-tier-context-reduction-slice-b.md`](2026-08-10-three-tier-context-reduction-slice-b.md) | superseded | P0 | Slice A Gate A/完成记录、ADR-0096/0097 | 先由旧会话记忆计划取代，最终后续为 Checkpoint 工作集计划 | canonical L3 source、cache-safe fork、checkpoint-v2 writer 与 durable refill guard producer 已移除；schema v23 持久化安全基础保留 |
 | [`2026-08-09-context-reclaim-foundation.md`](2026-08-09-context-reclaim-foundation.md) | archived | P0 | ADR-0095、ContextProjection、ToolSpec Registry | 三级 RFC 的首个安全切片；live/L3 另立 ADR | L1 policy identity、L2 off/shadow、无正文证据与零 payload 回归；[完成记录](../execution/completed/2026-08-10-context-reclaim-foundation.md) |
 | [`2026-08-09-prompt-contract-v2-release-rollout.md`](2026-08-09-prompt-contract-v2-release-rollout.md) | archived | P0 | ADR-0092、默认关闭候选发布、跨平台 CI | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2-release-rollout.md) | 固定十四日门禁由维护者取消；最终候选真实模型 A/B 完成，ADR-0094 决定保持默认关闭 |
 | [`2026-08-08-prompt-contract-v2.md`](2026-08-08-prompt-contract-v2.md) | archived | P0 | ADR-0092、ToolSpec Registry、Context Projection | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2.md) | 四层 Prompt、项目指令、phase 工具面、可信 MCP 描述、59.85% token 降幅与实现阶段真实模型 A/B 已完成；最终迁移结论见 ADR-0094 |

@@ -1,6 +1,6 @@
 # Space 索引
 
-最后更新：2026-08-09（归档 Prompt Contract V2）
+最后更新：2026-08-10（旧路线清场完成；Checkpoint 工作集三级方案进入 draft，会话记忆延期）
 
 这是 `docs/space/` 的导航入口。默认不要读取所有记录；应根据下面的范围和“读取时机”只拉取当前任务需要的上下文。
 
@@ -24,6 +24,7 @@
 | `../active/thought-pre-consolidation.md` | active | TUI 探索工具合并、tool_summary 事件处理、ToolSummaryBlock 渲染、Static/Dynamic 分界 | 修改 `consolidateTools.ts`、`handleEvent.ts`（tool_call/tool_done）、`ToolSummaryBlock.tsx`、`useStaticContent.ts`（tool_summary）、`types.ts`（ConsolidatedToolEntry/tool_summary）、`agentReducer.ts`（cancelRunningBlocks）、`compaction.ts`（折叠引擎）时必读。 |
 | `../active/plan-state-reminder.md` | active | Runtime 动态状态投影与缓存敏感消息布局 | 修改 `src/core/model/context.ts`、`runtime-context.ts`、Plan/Mode/Verification 投影时。 |
 | `../active/model-provider-boundary.md` | active | AI SDK provider 配置、适配器和专有行为 | 修改 `src/core/config`、`src/core/model` 或 provider 文档时。 |
+| `../active/three-tier-context-reduction.md` | active | Slice A L1/L2 当前能力、旧 L3 清场与 Checkpoint 工作集三级转向边界 | 修改工具结果预算、上下文 projection/reclaim、压缩路线、相关 flags 或 Gate evidence 时。 |
 | `../active/tool-gated-autonomy.md` | active | Capability 执行、审批、授权、sandbox 与完成边界 | 修改 Tool Controller、Runtime Policy、Scheduler 或能力执行测试时。 |
 | `../active/real-model-test-boundary.md` | active | 测试发现、真实模型端到端套件、package 脚本 | 修改测试命名、`package.json` 测试脚本或真实模型套件。 |
 | `../active/documentation-language.md` | active | 文档语言、Markdown 内容标准、文档测试 | 创建或修改 README、AGENTS、`docs/space` 或其他 Markdown 文档。 |
@@ -105,6 +106,7 @@
 | `backlog/tui-issues.md` | active | TUI 待修复项清单：已知缺口、清理方向、依赖项。 |
 | `backlog/2026-06-01-deep-user-audit.md` | active | B14-B26 工程债务清单：死代码、缓存竞态、schema 臃肿、语言一致性等。 |
 | `backlog/2026-06-08-product-experience-gaps.md` | active | B27-B33 产品体验缺口：跨会话记忆、Web Search、默认模型、Diff 渲染、Token 展示等。 |
+| `backlog/2026-08-10-session-memory-enhancement.md` | backlog | Session Memory 作为未来可选 CompactPrefixProvider，不阻断当前三级压缩。 |
 
 ## Plans（实施计划）
 
@@ -112,9 +114,14 @@
 | --- | --- | --- |
 | `plans/README.md` | active | 定义 plans 目录用途、格式规范和生命周期。 |
 | `plans/index.md` | active | 所有计划的全局注册表：状态、优先级、依赖、分叉关系。 |
+| `plans/2026-08-10-three-tier-context-reduction-slice-a.md` | archived | 三级上下文缩减 Slice A 已通过 Gate A 并归档：全工具 L1 V2、统一 prepared/final admission、L2 live 与 schema v22。 |
+| `plans/2026-08-10-progressive-context-compaction.md` | active | ADR-0101 accepted、RFC 整体评审 GO；当前入口 PSMC-03，后续交付 MicroCompact、Checkpoint Working Set、SummaryCompact。 |
+| `plans/2026-08-10-progressive-session-memory-compaction.md` | superseded | PSMC-01/02 清场已完成；会话记忆不再属于当前压缩实施链。 |
+| `plans/2026-08-10-three-tier-context-reduction-slice-b.md` | superseded | 已停止的旧 L3 source convergence、checkpoint v2、cache-safe fork 与 durable refill guard 路线。 |
 | `plans/2026-07-29-agent-production-readiness-roadmap.md` | archived | ADR-0069 首发路线图已收口：G0/G1、83 completed、25 superseded、0 optional。 |
 | `plans/2026-08-04-tui-overlay-design-system.md` | archived | Overlay contract、MCP、通用选择页、交互页及文档验证已完成。 |
 | `plans/2026-08-08-prompt-contract-v2.md` | archived | Prompt Contract V2：项目指令分层、真实 Runtime 状态、准确工具契约、可信 MCP 描述与 token/live A/B 门禁已完成。 |
+| `plans/2026-08-09-context-reclaim-foundation.md` | archived | 三级上下文缩减 Foundation：L1 policy identity、L2 off/shadow 与零 payload 回归已完成。 |
 | `plans/2026-05-20-tui-production-roadmap.md` | archived | TUI 生产就绪四步路线图：感知闭环 → 防御纵深 → 功能补齐。 |
 | `plans/2026-05-22-production-gaps-closure.md` | archived | 生产就绪补齐 3 阶段方案。Phase1 ✅，Phase2 ✅，Phase3 ✅。 |
 | `plans/2026-05-22-production-gaps-phase1.md` | archived | Phase 1 实施记录（8 commits）。MCP + 事件闭环 + 错误分类。 |
@@ -129,7 +136,7 @@
 | `plans/2026-06-18-kite-code-telemetry-collection.md` | superseded | 旧双通道 scrub 方案不满足 metadata-only 边界；被 2026-07-29 无正文可观测性计划替代。 |
 | `plans/2026-06-18-session-logger.md` | archived | 会话日志当前实现的历史计划；生产 metadata/权限/保留迁移由 2026-07-29 Phase 1A 接管。 |
 | `plans/2026-06-19-event-mechanism-refactor.md` | draft | 事件机制重构 — turn 边界、用户输入事件化、统一事件管道、子 agent 事件归一。 |
-| `plans/2026-06-28-context-compaction.md` | active | 上下文压缩方案 — M0 TUI 预整合 + M1 Core 工具折叠 + M2 对话摘要（延后）。 |
+| `plans/2026-06-28-context-compaction.md` | archived | 上下文压缩方案 — M0/M1 已实施，M2 未纳入当前执行计划。 |
 | `plans/2026-07-14-mcp-runtime-governance-p0.md` | archived | MCP Runtime 治理 Phase 0 + 1：revisioned catalog、turn binding、fail-closed schema、policy 与结构化结果。 |
 | `plans/2026-07-14-mcp-skills-runtime-governance-followup.md` | archived | MCP/Skills Runtime 治理 Phase 2–5：执行恢复、Workflow Contract、分级验证与 progressive disclosure。 |
 | `plans/2026-07-15-mcp-project-server-approval-p0.md` | archived | MCP TUI 管理中心 Phase 0：项目来源识别、config digest、本地审批、transport 启动门禁与最小 TUI 审批入口。 |
@@ -142,6 +149,9 @@
 
 | 记录 | 状态 | 用途 |
 | --- | --- | --- |
+| `execution/completed/2026-08-10-progressive-compaction-old-route-cleanup.md` | completed | 记录 PSMC-01/02 旧 Slice B producer 清场、legacy bounded reader 与最终独立 review GO。 |
+| `execution/completed/2026-08-10-three-tier-context-reduction-slice-a.md` | completed | 记录全工具 L1 V2、prepared/final admission、L2 live、schema v22、Gate A local evidence 与明确 L3 排除项。 |
+| `execution/completed/2026-08-10-context-reclaim-foundation.md` | completed | 记录 L1 policy identity、可信 provenance、L2 pure planner/applier 与 off/shadow 零 Provider payload 回归。 |
 | `execution/completed/2026-08-09-prompt-contract-v2.md` | completed | 记录 Prompt Contract V2 四层投影、项目指令、工具/MCP 契约、59.85% token 降幅、真实模型 A/B 与完整 Windows 门禁。 |
 | `execution/completed/2026-08-04-single-maintainer-open-source-first-release.md` | completed | 记录单维护者开源首发路线图 G0/G1、统一 Review、真实 Provider、三平台候选与 83/25/0 终态收口。 |
 | `execution/completed/2026-08-05-tui-overlay-design-system.md` | completed | 记录统一 Overlay primitives、MCP 视图拆分、选择器迁移和 component/PTY 验证。 |

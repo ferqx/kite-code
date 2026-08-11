@@ -314,7 +314,7 @@ describe('loadAgentConfig', () => {
     }
   });
 
-  test('rejects live context reclaim before the shadow foundation is promoted', () => {
+  test('accepts explicit live context reclaim while feature gates remain default-off', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-code-config-'));
     try {
       const configPath = join(dir, 'bad-reclaim-mode.jsonc');
@@ -322,7 +322,7 @@ describe('loadAgentConfig', () => {
         configPath,
         `{ "provider": { "ollama": { "models": [{ "name": "x", "default": true }] } }, "compaction": { "reclaimMode": "live" } }`,
       );
-      expect(() => loadAgentConfig({ configPath })).toThrow();
+      expect(loadAgentConfig({ configPath }).compaction?.reclaimMode).toBe('live');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

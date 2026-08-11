@@ -12,7 +12,25 @@ import {
 import { prepareRuntimeEffectForBudgetV1 } from '@/core/runtime/executor';
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { projectedModelContentDigest } from '@/core/tools/registry/projection';
+import type { ToolResultBudgetReceiptV2 } from '@/core/tools/result-budget-v2';
 import { createMockModel } from '../mock-model';
+
+function verifiedReceipt(content: string): ToolResultBudgetReceiptV2 {
+  return {
+    version: 2,
+    projectionMode: 'budget_v2',
+    policyId: 'test-budget:v2',
+    toolIdentity: 'builtin:read_file',
+    bindingDigest: 'd'.repeat(64),
+    projectorId: 'read-line-window:v1',
+    projectorRevision: 'test-projector:v1',
+    validatorId: 'test-validator:v1',
+    rawResultDigest: 'a'.repeat(64),
+    modelContentDigest: projectedModelContentDigest(content),
+    modelContentUtf8Bytes: Buffer.byteLength(content, 'utf8'),
+    continuation: { kind: 'line_byte_cursor_v2', status: 'completed' },
+  };
+}
 
 function historicalToolState(workspace: string): RuntimeState {
   const state = createInitialRuntimeState({
@@ -47,6 +65,7 @@ function historicalToolState(workspace: string): RuntimeState {
         rawResultDigest: 'a'.repeat(64),
         modelContentDigest: projectedModelContentDigest(content),
         digestScope: 'raw',
+        toolResultReceipt: verifiedReceipt(content),
       },
     },
   ];
@@ -68,6 +87,7 @@ function historicalToolState(workspace: string): RuntimeState {
         rawResultDigest: 'a'.repeat(64),
         modelContentDigest: projectedModelContentDigest(content),
         digestScope: 'raw',
+        toolResultReceipt: verifiedReceipt(content),
       },
     },
   };
@@ -89,7 +109,12 @@ function config(input?: {
     features: { contextReclaimV1: input?.featureEnabled ?? true },
     ...(input?.withWindow === false
       ? {}
-      : { modelCapabilities: { contextWindowTokens: 20_000, maxOutputTokens: 500 } }),
+      : {
+          modelCapabilities: {
+            contextWindowTokens: 20_000,
+            maxOutputTokens: 500,
+          },
+        }),
     compaction: {
       reclaimMode: input?.reclaimMode ?? 'shadow',
       warningRatio: 0.1,
@@ -99,7 +124,9 @@ function config(input?: {
   };
 }
 
-function capturePrompt(model: ReturnType<typeof createMockModel>): { get(): string } {
+function capturePrompt(model: ReturnType<typeof createMockModel>): {
+  get(): string;
+} {
   let prompt = '';
   const raw = model.model as unknown as {
     doGenerate(options: { prompt?: unknown }): Promise<unknown>;
@@ -212,7 +239,10 @@ describe('context reclaim shadow integration', () => {
     }
 
     const normalConfig = config();
-    normalConfig.modelCapabilities = { contextWindowTokens: 50_000, maxOutputTokens: 500 };
+    normalConfig.modelCapabilities = {
+      contextWindowTokens: 50_000,
+      maxOutputTokens: 500,
+    };
     normalConfig.compaction = {
       ...normalConfig.compaction,
       warningRatio: 0.99,
@@ -233,7 +263,11 @@ describe('context reclaim shadow integration', () => {
     expect(normalCollector.snapshot()).toEqual([]);
 
     const noReporterModel = createMockModel([{ message: aiMessage({ content: 'done' }) }]);
-    await invokeRuntimeModel({ model: noReporterModel, state, config: config() });
+    await invokeRuntimeModel({
+      model: noReporterModel,
+      state,
+      config: config(),
+    });
     expect(noReporterModel.callCount.count).toBe(1);
   });
 

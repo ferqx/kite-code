@@ -20,6 +20,11 @@ export interface RuntimeActionProvider {
   ): Promise<RuntimeUserAction>;
 }
 
+export interface RuntimeEffectPreparationV2 {
+  effect: import('./effects').RuntimeEffect;
+  preparationEvents: RuntimeEvent[];
+}
+
 type EffectExecutionOutcome = { applied: boolean; emitted: boolean };
 const ABORTED_WAIT = Symbol('aborted-wait');
 
@@ -165,6 +170,7 @@ async function* executeEffectWithStreaming(
       enqueue([event]);
     },
     {
+      effectLeaseId: lease.effectId,
       reservationIds,
       getState: () => kernel.getState(),
       persistEvent: (event) =>
@@ -269,12 +275,30 @@ async function* executeEffectWithStreaming(
     throw failure;
   }
 
-  const reconciled = reconciliationEventsForReservationsV1(
+  let reconciled = reconciliationEventsForReservationsV1(
     kernel.getState() as import('./state').RuntimeState,
     reservationIds,
     result,
   );
-  const terminalResult = [...result, ...reconciled];
+  const primaryEvidence = result.find(
+    (event) => event.type === 'model.responded' && event.contextEvidence,
+  );
+  if (primaryEvidence?.type === 'model.responded' && primaryEvidence.contextEvidence) {
+    reconciled = reconciled.map((event) =>
+      event.reservationId === primaryEvidence.contextEvidence!.reservationId
+        ? {
+            ...event,
+            terminalBatchId: primaryEvidence.contextEvidence!.terminalBatchId,
+          }
+        : event,
+    );
+  }
+  const aborts = result.filter((event) => event.type === 'turn.aborted');
+  const terminalResult = [
+    ...result.filter((event) => event.type !== 'turn.aborted'),
+    ...reconciled,
+    ...aborts,
+  ];
   if (terminalResult.length > 0) {
     emitted = true;
     try {
@@ -333,7 +357,10 @@ export async function* runRuntimeLoop(
   prepareEffect?: (
     effect: import('./effects').RuntimeEffect,
     state: Readonly<import('./state').RuntimeState>,
-  ) => Promise<import('./effects').RuntimeEffect> | import('./effects').RuntimeEffect,
+  ) =>
+    | Promise<import('./effects').RuntimeEffect | RuntimeEffectPreparationV2>
+    | import('./effects').RuntimeEffect
+    | RuntimeEffectPreparationV2,
   signal?: AbortSignal,
 ): AsyncGenerator<RuntimeEvent> {
   const runnerId = kernel.acquireRunner();
@@ -414,7 +441,19 @@ export async function* runRuntimeLoop(
       if (backgroundStopped) return;
 
       let effect = decideNextEffect(kernel.getState());
-      if (prepareEffect) effect = await prepareEffect(effect, kernel.getState());
+      if (prepareEffect) {
+        const prepared = await prepareEffect(effect, kernel.getState());
+        if ('preparationEvents' in prepared) {
+          if (prepared.preparationEvents.length > 0) {
+            kernel.processEventBatch(prepared.preparationEvents);
+            yield* prepared.preparationEvents;
+            continue;
+          }
+          effect = prepared.effect;
+        } else {
+          effect = prepared;
+        }
+      }
       const effectState = kernel.getState();
       const shellGroup =
         effect.type === 'run_tools' ? shellConcurrencyGroup(effect, effectState) : undefined;
@@ -505,12 +544,15 @@ export async function* runRuntimeLoop(
         return;
       }
       let reservationIds: string[] = [];
+      let admittedModelLease: import('./effects').RuntimeEffectLease | undefined;
       if (kernel.getState().resourceBudget.status === 'active') {
         const admission = planRuntimeBudgetAdmissionV1(
           kernel.getState() as import('./state').RuntimeState,
           effect,
         );
-        if (admission.preparationEvents.length > 0) {
+        const atomicModelAdmission =
+          admission.status === 'admitted' && effect.type === 'call_model';
+        if (admission.preparationEvents.length > 0 && !atomicModelAdmission) {
           kernel.processEventBatch(admission.preparationEvents);
           yield* admission.preparationEvents;
         }
@@ -554,7 +596,17 @@ export async function* runRuntimeLoop(
           yield* terminalEvents;
           return;
         }
-        if (admission.dispatchEvents.length > 0) {
+        if (atomicModelAdmission) {
+          admittedModelLease = kernel.beginEffect(admission.effect);
+          const admissionEvents = [...admission.preparationEvents, ...admission.dispatchEvents];
+          if (
+            admissionEvents.length > 0 &&
+            !kernel.applyEffectResult(admittedModelLease, admissionEvents)
+          ) {
+            continue;
+          }
+          yield* admissionEvents;
+        } else if (admission.dispatchEvents.length > 0) {
           kernel.processEventBatch(admission.dispatchEvents);
           yield* admission.dispatchEvents;
         }
@@ -700,7 +752,7 @@ export async function* runRuntimeLoop(
         continue;
       }
       count += 1;
-      const lease = kernel.beginEffect(effect);
+      const lease = admittedModelLease ?? kernel.beginEffect(effect);
       const outcome = yield* executeEffectWithStreaming(kernel, executor, lease, reservationIds);
       if (!outcome.emitted) return;
       if (!outcome.applied) continue;

@@ -7,6 +7,7 @@ import {
   isVcsMutationCommand,
   isWriteLikeShellCommand,
 } from '@/core/policies/shell-classification';
+import { STREAM_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { resolveShellTimeoutMs, shellTool } from '@/core/tools/shell';
 import { SHELL_EXECUTE_CONTRACT } from '@/core/tools/tool-contracts';
 import type { ShellIntent } from '@/core/types';
@@ -78,6 +79,7 @@ export function projectedShellIntent(meta: { intent?: string }): ShellIntent {
 
 export const shellExecuteSpec = defineExecutableTool({
   name: 'shell_execute',
+  modelResultBudgetV2: STREAM_TOOL_RESULT_BUDGET_V2,
   kind: 'computer',
   contract: SHELL_EXECUTE_CONTRACT.sections,
   inputSchema: shellActionEnvelopeSchema,

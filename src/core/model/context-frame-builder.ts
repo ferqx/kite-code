@@ -6,6 +6,10 @@ import type { ContextFrame, FrameToolResult } from './context-frame';
 
 // ── Internal helpers ──
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 /** Extract tool_call IDs from an AIMessage in declaration order. */
 function extractToolCallIds(msg: BaseMessage): string[] {
   const m = msg as unknown as Record<string, unknown>;
@@ -82,6 +86,47 @@ function extractResultMeta(m: Record<string, unknown>): FrameToolResult['resultM
     m.digestScope === 'legacy_unknown'
   ) {
     meta.digestScope = m.digestScope;
+    populated = true;
+  }
+  if (
+    isRecord(m.toolResultReceipt) &&
+    m.toolResultReceipt.version === 2 &&
+    (m.toolResultReceipt.projectionMode === 'compat_v1' ||
+      m.toolResultReceipt.projectionMode === 'budget_v2')
+  ) {
+    meta.toolResultReceipt = m.toolResultReceipt as unknown as NonNullable<
+      FrameToolResult['resultMeta']
+    >['toolResultReceipt'];
+    populated = true;
+  }
+  if (isRecord(m.continuation) && m.continuation.kind === 'line_byte_cursor_v2') {
+    meta.continuation = m.continuation as unknown as NonNullable<
+      FrameToolResult['resultMeta']
+    >['continuation'];
+    populated = true;
+  }
+  if (
+    isRecord(m.terminalMigration) &&
+    m.terminalMigration.kind === 'legacy_unverified' &&
+    Number.isInteger(m.terminalMigration.migratedFromSchemaVersion) &&
+    Number.isInteger(m.terminalMigration.originalEventPosition)
+  ) {
+    meta.terminalMigration = m.terminalMigration as unknown as NonNullable<
+      FrameToolResult['resultMeta']
+    >['terminalMigration'];
+    populated = true;
+  }
+  if (typeof m.terminalIdentity === 'string') {
+    meta.terminalIdentity = m.terminalIdentity;
+    populated = true;
+  }
+  if (
+    m.terminalKind === 'tool.finished' ||
+    m.terminalKind === 'tool.failed' ||
+    m.terminalKind === 'tool.rejected' ||
+    m.terminalKind === 'tool.cancelled'
+  ) {
+    meta.terminalKind = m.terminalKind;
     populated = true;
   }
   if (typeof m.resourceRevision === 'string') {

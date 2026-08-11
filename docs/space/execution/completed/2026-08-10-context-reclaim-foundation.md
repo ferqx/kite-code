@@ -5,6 +5,7 @@
 计划：[`../../plans/2026-08-09-context-reclaim-foundation.md`](../../plans/2026-08-09-context-reclaim-foundation.md)
 架构：[`../../../adr/0095-three-tier-context-reduction-foundation.md`](../../../adr/0095-three-tier-context-reduction-foundation.md)
 设计：[`../../../design/2026-08-09-three-tier-context-reduction-rfc.md`](../../../design/2026-08-09-three-tier-context-reduction-rfc.md)
+后续：[`../../../design/2026-08-10-three-tier-context-reduction-complete-rfc.md`](../../../design/2026-08-10-three-tier-context-reduction-complete-rfc.md)
 
 ## 完成范围
 

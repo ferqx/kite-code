@@ -1184,7 +1184,7 @@ describe('reduceRuntimeState — suspended subagents', () => {
     expect(next).toMatchObject({ suspendedSubagents: {} });
   });
 
-  test('approval.rejected clears the suspended snapshot for its task call', () => {
+  test('approval.rejected is control-only and its companion terminal clears the task snapshot', () => {
     const snapshot = makeSuspendedSubagentSnapshot();
     const suspended = reduceRuntimeState(queueTaskCall(makeInitialState()), {
       type: 'subagent.suspended',
@@ -1211,16 +1211,23 @@ describe('reduceRuntimeState — suspended subagents', () => {
       },
     };
 
-    const next = reduceRuntimeState(awaitingApproval, {
+    const controlled = reduceRuntimeState(awaitingApproval, {
       type: 'approval.rejected',
       interactionId: 'approval-1',
       toolCallId: 'task-1',
       reason: 'Cancelled by user.',
     });
 
+    expect(controlled.suspendedSubagents).toEqual({ 'task-1': snapshot });
+    expect(controlled.tools.calls['task-1']?.status).toBe('awaiting_approval');
+    expect(controlled.interactions).toEqual({ kind: 'idle' });
+    const next = reduceRuntimeState(controlled, {
+      type: 'tool.rejected',
+      toolCallId: 'task-1',
+      reason: 'Cancelled by user.',
+    });
     expect(next.suspendedSubagents).toEqual({});
     expect(next.tools.calls['task-1']?.status).toBe('rejected');
-    expect(next.interactions).toEqual({ kind: 'idle' });
   });
 
   test('tool.finished clears only the matching stale task approval interaction and legacy marker', () => {
@@ -2229,8 +2236,14 @@ describe('reduceRuntimeState — auto-review events', () => {
         durationMs: 1200,
       },
     };
-    const next = reduceRuntimeState(awaiting, event);
-    expect(next.interactions.kind).toBe('idle');
+    const controlled = reduceRuntimeState(awaiting, event);
+    expect(controlled.interactions.kind).toBe('idle');
+    expect(controlled.tools.calls['tool-99']!.status).toBe('awaiting_auto_review');
+    const next = reduceRuntimeState(controlled, {
+      type: 'tool.rejected',
+      toolCallId: 'tool-99',
+      reason: 'unsafe command',
+    });
     expect(next.tools.calls['tool-99']!.status).toBe('rejected');
     // Circuit breaker should increment on rejection
     expect(next.autoReview.consecutiveRejects).toBe(1);
@@ -2397,9 +2410,15 @@ describe('reduceRuntimeState — auto-review events', () => {
         durationMs: 100,
       },
     };
-    const next = reduceRuntimeState(awaiting, event);
+    const controlled = reduceRuntimeState(awaiting, event);
+    expect(controlled.tools.calls['tool-99']!.status).toBe('awaiting_auto_review');
+    expect(controlled.autoReview.consecutiveRejects).toBe(3);
+    expect(controlled.autoReview.circuitBreakerTripped).toBe(true);
+    const next = reduceRuntimeState(controlled, {
+      type: 'tool.rejected',
+      toolCallId: 'tool-99',
+      reason: 'rejected again',
+    });
     expect(next.tools.calls['tool-99']!.status).toBe('rejected');
-    expect(next.autoReview.consecutiveRejects).toBe(3);
-    expect(next.autoReview.circuitBreakerTripped).toBe(true);
   });
 });

@@ -14,7 +14,7 @@ capability 的原生隔离资格分开验证；某平台缺少强隔离时对应
 - Builtin、MCP、Skill Workflow 与 Subagent 统一 Capability Catalog；
 - interaction mode、authorization、approval、auto review 与 sandbox；
 - Execution Receipt、Artifact、分级 Verification 与 repair/replan；
-- Plan Artifact、上下文压缩、多会话和 PTY 系统测试。
+- Plan Artifact、全工具有限 L1/L2 上下文回收、叙事 checkpoint、多会话和 PTY 系统测试。
 
 总体架构见 [六概念 Runtime 架构](docs/active/six-concept-runtime-architecture.md)，当前行为规则见 [docs/active](docs/active)。
 
@@ -76,7 +76,21 @@ notarization；完整限制见
 
 模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。模型建议显式配置 `contextWindow` 和 `maxOutputTokens`；未配置且 adapter 无可信元数据时，Runtime 会将窗口视为 unknown，而不会根据模型名称假定一个大窗口。
 
-自动 M2 上下文压缩默认关闭，需要同时开启 `features.contextCompactionAutoV1` 并把 `compaction.autoMode` 配置为 `live`；`shadow` 只观察触发资格，不调用摘要模型。自动阈值可使用已知可信窗口下的 `triggerRatio`，或显式的 `compactAfterEstimatedTokens` 绝对策略；压缩原因只有 `manual | auto`。本地 token ratio 术语（文本计量比例）、Provider 术语（模型供应商）错误或压缩失败都不会阻断会话；自动压缩保留原始 transcript 术语（消息记录）。
+旧自动 M2 producer 已从当前生产路径移除。`features.contextCompactionAutoV1` 与
+`compaction.autoMode` 仅作为向后配置兼容字段继续接受，不能启用自动摘要；未来自动压缩将由新的单一渐进式
+orchestrator 重新接线。当前可执行的摘要入口是默认开启 flag 保护下的显式 `/compact`，它保留原始
+transcript。
+
+确定性工具结果回收使用两个独立、默认关闭的开关：`features.toolResultBudgetV2` 启用全工具有限 L1
+receipt/terminal，`features.contextReclaimV1` 控制 L2；`compaction.reclaimMode` 可设为
+`off | shadow | live`，默认 `off`。live 只折叠完整 settled、全 `budget_v2` verified 的旧
+`read_file | search_content | search_files` block，并只在成功 primary 后提交 bounded commit；原始 transcript
+不删除。当前受信 route registry 为空，因此该 live 路径只用于显式开发验证，不能由用户配置或模型名称取得
+production 资格。旧 Slice B 的 canonical L3 source、checkpoint-v2 writer、cache-safe fork、route cache gate 与
+refill guard 已清场；schema v23 的 CAS/generation persistence safety 继续保留。新的 MicroCompact、
+Checkpoint Working Set、recent window 与 SummaryCompact 统一 orchestrator 尚未实现，不能宣称完整三级
+可用；Session Memory 已延期为独立可选增强。当前边界见
+[三级上下文缩减：当前实现与清场边界](docs/active/three-tier-context-reduction.md)。
 
 启用 `features.contextCompactionManualV1`（默认开启）后可使用 `/compact` 命令，支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。运行中请求会排队到安全边界；消息不足时提示 `Not enough messages to compact.`。Core 会先用当前完整投影计算理论最大缩减，连最小 narrative 都无法节省 1024 tokens 时提示 `Not enough reducible context to compact`，且不调用摘要模型。active checkpoint 后没有新增消息时，无论是否带自定义指令都提示 `No new messages to compact.`；自定义指令只改变新一轮压缩的侧重点，不把 `/compact` 变成已有 narrative 编辑器。同一 session 的手动压缩完整串行，stale 投影以可重试终态收敛，不会留下永久 pending。进入有真实用户对话的历史会话时，TUI 会基于恢复的 checkpoint 和当前投影环境在本地重算 Footer context token，不产生模型请求；空会话不显示 system prompt 或工具目录估算。
 

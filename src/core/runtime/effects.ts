@@ -21,9 +21,17 @@ export type RuntimeEffect =
         inputTokens: number;
         maxOutputTokens: number;
       };
+      /** Exact immutable request built before resource reservation. */
+      preparedContextV2?: import('@/core/model/context-admission-v2').PreparedPrimaryContextRequestV2;
+      /** Stable ToolSet/disclosure source paired with preparedContextV2. */
+      preparedCapabilitySetV2?: import('@/core/model/context-capability-v2').PreparedContextCapabilitySetV2;
     }
   /** Build one durable M2 context checkpoint. */
-  | { type: 'compact_context'; compactionId: string }
+  | {
+      type: 'compact_context';
+      compactionId: string;
+      resourceEstimate?: { inputTokens: number; maxOutputTokens: number };
+    }
   /** 执行指定工具调用 / Execute the specified tool calls */
   | { type: 'run_tools'; toolCallIds: string[] }
   /** 向用户请求输入（ask_user）/ Request user input (ask_user) */
@@ -33,7 +41,11 @@ export type RuntimeEffect =
   /** 请求用户审批工具 / Request user tool approval */
   | { type: 'request_tool_approval'; interactionId: string; toolCallId: string }
   /** Ask the user how to resolve a required verification that exhausted automatic repair. */
-  | { type: 'request_verification_decision'; interactionId: string; verificationId: string }
+  | {
+      type: 'request_verification_decision';
+      interactionId: string;
+      verificationId: string;
+    }
   /** Ask the App shell to perform one redacted MCP provider recovery action. */
   | {
       type: 'request_provider_action';

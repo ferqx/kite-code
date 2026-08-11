@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { TASK_CONTRACT } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
@@ -22,6 +23,7 @@ export type TaskInput = z.infer<typeof taskInputSchema>;
 
 export const taskSpec = defineExecutableTool({
   name: 'task',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'coordination',
   contract: TASK_CONTRACT.sections,
   inputSchema: taskInputSchema,

@@ -8,13 +8,16 @@ import { serializeFramesToMessages } from './context-serializer';
 import { validateFramePairs, validateMessagePairs } from './context-validator';
 
 export const RECLAIM_ESTIMATOR_ID_V1 = 'kite-count-tokens:v1' as const;
-export type ContextReclaimModeV1 = 'off' | 'shadow';
+export type ContextReclaimModeV1 = 'off' | 'shadow' | 'live';
 
 export function resolveContextReclaimModeV1(input: {
   featureEnabled: boolean;
+  toolResultBudgetEnabled?: boolean;
   configuredMode?: ContextReclaimModeV1;
 }): ContextReclaimModeV1 {
-  return input.featureEnabled ? (input.configuredMode ?? 'off') : 'off';
+  if (!input.featureEnabled) return 'off';
+  const mode = input.configuredMode ?? 'off';
+  return mode === 'live' && input.toolResultBudgetEnabled !== true ? 'off' : mode;
 }
 
 export interface ReclaimPolicyV1 {
@@ -110,26 +113,106 @@ export type ReclaimApplicationV1 =
 const ELIGIBLE_TOOL_NAMES = new Set<string>(RECLAIM_POLICY_V1.eligibleTools);
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/i;
 
-function stableJson(value: unknown): string {
-  if (value === undefined) return 'null';
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record)
-      .filter((key) => record[key] !== undefined)
-      .sort()
-      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
-      .join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
-}
-
 function digest(value: unknown): string {
-  return createHash('sha256').update(stableJson(value)).digest('hex');
+  const output = createHash('sha256');
+  const update = (candidate: unknown): void => {
+    if (candidate === undefined) {
+      output.update('null');
+      return;
+    }
+    if (Array.isArray(candidate)) {
+      output.update('[');
+      candidate.forEach((entry, index) => {
+        if (index > 0) output.update(',');
+        update(entry);
+      });
+      output.update(']');
+      return;
+    }
+    if (candidate && typeof candidate === 'object') {
+      const record = candidate as Record<string, unknown>;
+      output.update('{');
+      let index = 0;
+      for (const key of Object.keys(record)
+        .filter((entry) => record[entry] !== undefined)
+        .sort()) {
+        if (index++ > 0) output.update(',');
+        output.update(JSON.stringify(key));
+        output.update(':');
+        update(record[key]);
+      }
+      output.update('}');
+      return;
+    }
+    output.update(JSON.stringify(candidate) ?? 'null');
+  };
+  update(value);
+  return output.digest('hex');
 }
 
-function digestFrames(frames: readonly ContextFrame[]): string {
-  return digest({ schema: 'context-frames:v1', frames });
+export function digestContextFramesV1(frames: readonly ContextFrame[]): string {
+  const contentIdentity = (content: unknown): { bytes: number; digest: string } => {
+    const bytes = typeof content === 'string' ? content : JSON.stringify(content ?? null);
+    return {
+      bytes: Buffer.byteLength(bytes, 'utf8'),
+      digest: createHash('sha256').update(bytes).digest('hex'),
+    };
+  };
+  const messageIdentity = (message: BaseMessage): Record<string, unknown> => {
+    const { content, ...metadata } = message as unknown as Record<string, unknown>;
+    return { ...metadata, contentIdentity: contentIdentity(content) };
+  };
+  const compactFrames = frames.map((frame) => {
+    switch (frame.kind) {
+      case 'tool_block':
+        return {
+          ...frame,
+          assistantMessage: messageIdentity(frame.assistantMessage),
+          calls: frame.calls.map((call) => ({
+            ...call,
+            content: undefined,
+            contentIdentity: contentIdentity(call.content),
+          })),
+        };
+      case 'user':
+      case 'assistant':
+        return { ...frame, message: messageIdentity(frame.message) };
+      case 'runtime':
+      case 'compaction_summary':
+        return {
+          ...frame,
+          content: undefined,
+          contentIdentity: contentIdentity(frame.content),
+        };
+      default: {
+        const exhaustive: never = frame;
+        return exhaustive;
+      }
+    }
+  });
+  return digest({ schema: 'context-frames:v1', frames: compactFrames });
+}
+
+/**
+ * Exact identity for an applied projection derived from a previously validated
+ * raw frame digest plus the complete ordered replacement set. The raw digest
+ * binds every untouched byte; each replacement binds its original and stub.
+ */
+export function digestValidatedAppliedContextFramesV1(
+  rawFramesDigest: string,
+  selected: readonly ReclaimSelectedEntryV1[],
+): string {
+  return digest({
+    schema: 'context-applied-frames-from-validated-raw:v1',
+    rawFramesDigest,
+    replacements: selected.map((entry) => ({
+      frameIndex: entry.frameIndex,
+      toolCallId: entry.toolCallId,
+      modelContentDigest: entry.modelContentDigest,
+      originalChars: entry.originalChars,
+      stubDigest: entry.stubDigest,
+    })),
+  });
 }
 
 export function digestRawContextProjection(input: RawContextProjectionIdentityInputV1): string {
@@ -220,7 +303,9 @@ function blockRejectionReason(
   if (
     frame.calls.some(
       (call) =>
-        call.resultMeta?.digestScope !== 'raw' && call.resultMeta?.digestScope !== 'projected',
+        (call.resultMeta?.digestScope !== 'raw' && call.resultMeta?.digestScope !== 'projected') ||
+        call.resultMeta?.terminalMigration !== undefined ||
+        call.resultMeta?.toolResultReceipt?.projectionMode !== 'budget_v2',
     )
   ) {
     return 'legacy_provenance';
@@ -231,8 +316,10 @@ function blockRejectionReason(
   if (
     frame.calls.some(
       (call) =>
+        call.resultMeta?.toolResultReceipt?.modelContentDigest !==
+          call.resultMeta?.modelContentDigest ||
         createHash('sha256').update(call.content).digest('hex') !==
-        call.resultMeta?.modelContentDigest,
+          call.resultMeta?.modelContentDigest,
     )
   ) {
     return 'model_content_digest_mismatch';
@@ -244,9 +331,7 @@ function blockRejectionReason(
         tool: call.name as ReclaimSelectedEntryV1['name'],
         originalChars: call.content.length,
       });
-      return (
-        countTokens(call.content) - countTokens(stub) <= 0 || stub.length >= call.content.length
-      );
+      return stub.length >= call.content.length;
     })
   ) {
     return 'no_positive_saving';
@@ -274,7 +359,10 @@ function framesWithPlannedStubs(
         return entry
           ? {
               ...call,
-              content: reclaimStubV1({ tool: entry.name, originalChars: entry.originalChars }),
+              content: reclaimStubV1({
+                tool: entry.name,
+                originalChars: entry.originalChars,
+              }),
             }
           : call;
       }),
@@ -282,8 +370,11 @@ function framesWithPlannedStubs(
   });
 }
 
-export function planContextReclaim(input: PlanContextReclaimInputV1): ReclaimPlanV1 {
-  const rawFramesDigest = digestFrames(input.frames);
+function planContextReclaimCore(
+  input: PlanContextReclaimInputV1,
+  options?: { validatedRawFramesDigest: string },
+): { plan: ReclaimPlanV1; appliedFrames: ContextFrame[] } {
+  const rawFramesDigest = options?.validatedRawFramesDigest ?? digestContextFramesV1(input.frames);
   const selected: ReclaimSelectedEntryV1[] = [];
   const rejectionCounts: ReclaimRejectionCountsV1 = {};
   let estimatedSavedChars = 0;
@@ -291,13 +382,15 @@ export function planContextReclaim(input: PlanContextReclaimInputV1): ReclaimPla
   let selectedBlockCount = 0;
 
   try {
-    validateFramePairs([...input.frames]);
-    validateMessagePairs(serializeFramesToMessages([...input.frames]));
+    if (!options) {
+      validateFramePairs([...input.frames]);
+      validateMessagePairs(serializeFramesToMessages([...input.frames]));
+    }
   } catch {
     for (const frame of input.frames) {
       if (isToolCallBlockFrame(frame)) incrementReason(rejectionCounts, 'invalid_pairing');
     }
-    return {
+    const plan: ReclaimPlanV1 = {
       version: 1,
       policyId: RECLAIM_POLICY_V1.policyId,
       policyVersion: RECLAIM_POLICY_V1.version,
@@ -314,6 +407,7 @@ export function planContextReclaim(input: PlanContextReclaimInputV1): ReclaimPla
       estimatedSavedTokens,
       rejectionCounts,
     };
+    return { plan, appliedFrames: [...input.frames] };
   }
 
   for (let frameIndex = 0; frameIndex < input.frames.length; frameIndex++) {
@@ -324,11 +418,24 @@ export function planContextReclaim(input: PlanContextReclaimInputV1): ReclaimPla
       incrementReason(rejectionCounts, rejection);
       continue;
     }
-    selectedBlockCount++;
-    for (const call of frame.calls) {
+    const savings = frame.calls.map((call) => {
       const name = call.name as ReclaimSelectedEntryV1['name'];
       const originalChars = call.content.length;
       const stub = reclaimStubV1({ tool: name, originalChars });
+      return {
+        call,
+        name,
+        originalChars,
+        stub,
+        savedTokens: countTokens(call.content) - countTokens(stub),
+      };
+    });
+    if (savings.some((saving) => saving.savedTokens <= 0)) {
+      incrementReason(rejectionCounts, 'no_positive_saving');
+      continue;
+    }
+    selectedBlockCount++;
+    for (const { call, name, originalChars, stub, savedTokens } of savings) {
       selected.push({
         frameIndex,
         assistantMessageId: frame.assistantMessageId!,
@@ -340,19 +447,22 @@ export function planContextReclaim(input: PlanContextReclaimInputV1): ReclaimPla
         stubDigest: digest(stub),
       });
       estimatedSavedChars += originalChars - stub.length;
-      estimatedSavedTokens += countTokens(call.content) - countTokens(stub);
+      estimatedSavedTokens += savedTokens;
     }
   }
 
   const appliedFrames = framesWithPlannedStubs(input.frames, selected);
-  return {
+  const appliedFramesDigest = options
+    ? digestValidatedAppliedContextFramesV1(rawFramesDigest, selected)
+    : digestContextFramesV1(appliedFrames);
+  const plan: ReclaimPlanV1 = {
     version: 1,
     policyId: RECLAIM_POLICY_V1.policyId,
     policyVersion: RECLAIM_POLICY_V1.version,
     estimatorId: RECLAIM_POLICY_V1.estimatorId,
     rawProjectionDigest: input.rawProjectionDigest,
     rawFramesDigest,
-    appliedFramesDigest: digestFrames(appliedFrames),
+    appliedFramesDigest,
     environmentDigest: input.environmentDigest,
     pressure: input.pressure,
     checkpointBoundary: input.checkpointBoundary ?? null,
@@ -361,6 +471,28 @@ export function planContextReclaim(input: PlanContextReclaimInputV1): ReclaimPla
     estimatedSavedChars,
     estimatedSavedTokens,
     rejectionCounts,
+  };
+  return { plan, appliedFrames };
+}
+
+export function planContextReclaim(input: PlanContextReclaimInputV1): ReclaimPlanV1 {
+  return planContextReclaimCore(input).plan;
+}
+
+/** Core-owned fast path for a projection already pair-validated and digested. */
+export function planAndApplyValidatedContextReclaim(
+  input: PlanContextReclaimInputV1 & { validatedRawFramesDigest: string },
+): { plan: ReclaimPlanV1; application: ReclaimApplicationV1 } {
+  const { validatedRawFramesDigest, ...planInput } = input;
+  const built = planContextReclaimCore(planInput, {
+    validatedRawFramesDigest,
+  });
+  return {
+    plan: built.plan,
+    application: {
+      status: built.plan.selected.length > 0 ? 'applied' : 'already_applied',
+      frames: built.appliedFrames,
+    },
   };
 }
 
@@ -383,7 +515,10 @@ function selectedEntriesMatch(
     ) {
       return false;
     }
-    const stub = reclaimStubV1({ tool: entry.name, originalChars: entry.originalChars });
+    const stub = reclaimStubV1({
+      tool: entry.name,
+      originalChars: entry.originalChars,
+    });
     if (digest(stub) !== entry.stubDigest) return false;
     return state === 'raw' ? call.content.length === entry.originalChars : call.content === stub;
   });
@@ -447,26 +582,72 @@ export function applyContextReclaimPlan(
 ): ReclaimApplicationV1 {
   const inputFrames = [...frames];
   if (!planHeaderMatches(plan)) {
-    return { status: 'rejected', reason: 'plan_header_mismatch', frames: inputFrames };
+    return {
+      status: 'rejected',
+      reason: 'plan_header_mismatch',
+      frames: inputFrames,
+    };
   }
   if (!selectedBlocksAreComplete(inputFrames, plan)) {
-    return { status: 'rejected', reason: 'plan_structure_mismatch', frames: inputFrames };
+    return {
+      status: 'rejected',
+      reason: 'plan_structure_mismatch',
+      frames: inputFrames,
+    };
   }
-  const inputDigest = digestFrames(inputFrames);
+  const inputDigest = digestContextFramesV1(inputFrames);
   if (inputDigest === plan.appliedFramesDigest) {
     if (selectedEntriesMatch(inputFrames, plan, 'applied') && validatedFrames(inputFrames)) {
       return { status: 'already_applied', frames: inputFrames };
     }
-    return { status: 'rejected', reason: 'selected_entry_mismatch', frames: inputFrames };
+    return {
+      status: 'rejected',
+      reason: 'selected_entry_mismatch',
+      frames: inputFrames,
+    };
   }
   if (inputDigest !== plan.rawFramesDigest) {
-    return { status: 'rejected', reason: 'raw_frames_mismatch', frames: inputFrames };
+    return {
+      status: 'rejected',
+      reason: 'raw_frames_mismatch',
+      frames: inputFrames,
+    };
   }
   if (!selectedEntriesMatch(inputFrames, plan, 'raw')) {
+    return {
+      status: 'rejected',
+      reason: 'selected_entry_mismatch',
+      frames: inputFrames,
+    };
+  }
+  const applied = framesWithPlannedStubs(inputFrames, plan.selected);
+  if (digestContextFramesV1(applied) !== plan.appliedFramesDigest || !validatedFrames(applied)) {
+    return {
+      status: 'rejected',
+      reason: 'applied_frames_mismatch',
+      frames: inputFrames,
+    };
+  }
+  return { status: 'applied', frames: applied };
+}
+
+/** Reapply an in-memory plan to its already validated raw artifact without rescanning all bytes. */
+export function applyValidatedContextReclaimPlan(
+  frames: readonly ContextFrame[],
+  plan: ReclaimPlanV1,
+): ReclaimApplicationV1 {
+  const inputFrames = [...frames];
+  if (!planHeaderMatches(plan)) {
+    return { status: 'rejected', reason: 'plan_header_mismatch', frames: inputFrames };
+  }
+  if (
+    !selectedBlocksAreComplete(inputFrames, plan) ||
+    !selectedEntriesMatch(inputFrames, plan, 'raw')
+  ) {
     return { status: 'rejected', reason: 'selected_entry_mismatch', frames: inputFrames };
   }
   const applied = framesWithPlannedStubs(inputFrames, plan.selected);
-  if (digestFrames(applied) !== plan.appliedFramesDigest || !validatedFrames(applied)) {
+  if (digestContextFramesV1(applied) !== plan.appliedFramesDigest) {
     return { status: 'rejected', reason: 'applied_frames_mismatch', frames: inputFrames };
   }
   return { status: 'applied', frames: applied };

@@ -32,8 +32,11 @@ Reporter 使用有界内存 queue，不写磁盘 spool；满时丢弃最旧低�
 `ReclaimShadowReporter` 是独立的、可选注入的严格 DTO 接口，不得复用 compaction local-debug reporter 或
 通用 observability exporter。默认 collector 只在进程内保留固定上限样本并支持 clear；记录字段仅含固定
 policy/version/mode、估算 token/count/saving、拒绝原因计数和 duration。它不得接收正文、path/pattern/args、
-call/message/frame ID、任何 digest、plan、selected entries 或 stub，不写 event、snapshot、session trace 或
-磁盘。序列化或 reporter 异常不得改变模型调用结果。
+call/message/frame ID、任何 digest 值、plan、selected entries 或 stub，不写 event、snapshot、session trace 或
+磁盘。序列化或 reporter 异常不得改变模型调用结果。L2 live 的 durable commit/receipt 也只能保存 bounded
+counts、settled ranges 与 identities/digests，不得持久化 selected entry 数组或模型可见工具正文；其
+`context.reclaim_commit_advanced` 事件不自动转成通用 observability 样本。完整字段边界见
+[`three-tier-context-reduction.md`](three-tier-context-reduction.md)。
 
 CLI `--telemetry-status` 与 TUI `/telemetry` 只显示脱敏的本地启用状态，不显示 endpoint、secret、
 Workspace path 或正文。普通开发入口固定显示 `artifact_disabled`。

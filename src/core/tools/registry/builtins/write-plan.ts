@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { writePlanAction } from '@/core/runtime/plan-facade';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { WRITE_PLAN_CONTRACT } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
@@ -57,6 +58,7 @@ export type WritePlanInput = z.infer<typeof writePlanInputSchema>;
 
 export const writePlanSpec = defineExecutableTool({
   name: 'write_plan',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'runtime_action',
   contract: WRITE_PLAN_CONTRACT.sections,
   inputSchema: writePlanInputSchema,

@@ -13,13 +13,23 @@ import {
 } from '@/core/capabilities/search';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
-import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
+import {
+  type ProviderDataAdmissionDecisionV1,
+  ProviderDataAdmissionError,
+  type ProviderDataAdmissionGateV1,
+  providerPayloadFromModelPromptV1,
+} from '@/core/config/provider-data-admission';
 import { exposedMcpToolName, type McpRuntimeProvider } from '@/core/mcp';
 import type { AIMessage } from '@/core/messages';
 import type { CompactionReporter } from '@/core/model/compaction-metrics';
+import type { PreparedPrimaryContextRequestV2 } from '@/core/model/context-admission-v2';
 import { preflightModelContext } from '@/core/model/context-budget';
-import { decideAutomaticContextCompaction } from '@/core/model/context-compaction-decision';
-import { resolveContextCompactionRollout } from '@/core/model/context-compaction-rollout';
+import type { PreparedContextCapabilitySetV2 } from '@/core/model/context-capability-v2';
+import {
+  assertPreparedContextCurrentV2,
+  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  canonicalContextDigestV2,
+} from '@/core/model/context-preparation-v2';
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
@@ -32,6 +42,10 @@ import {
   RECLAIM_POLICY_V1,
   resolveContextReclaimModeV1,
 } from '@/core/model/context-reclaim';
+import {
+  createContextPrimarySuccessBranchV2,
+  proposeContextReclaimCommitV1,
+} from '@/core/model/context-reclaim-commit';
 import type { ReclaimShadowReporter } from '@/core/model/context-reclaim-shadow';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { invokeBoundModel } from '@/core/model/invoke';
@@ -41,6 +55,7 @@ import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
+import { createZeroResourceUsageV1 } from '@/core/runtime/resource-budget';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
@@ -54,6 +69,11 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
+import {
+  freezeRuntimeOutputSchemaV2,
+  resolveRuntimeToolResultBudgetV2,
+  UTF8_TOOL_RESULT_BUDGET_V2,
+} from '@/core/tools/result-budget-v2';
 import type { ShellExecutor } from '@/core/tools/shell';
 
 // ── 辅助函数 / Helpers ──
@@ -259,8 +279,10 @@ export function resolveContextProjectionEnvironment(input: {
         ...(input.config.compaction ?? {}),
         contextReclaimV1: {
           featureEnabled: flags.contextReclaimV1,
+          toolResultBudgetEnabled: flags.toolResultBudgetV2,
           effectiveMode: resolveContextReclaimModeV1({
             featureEnabled: flags.contextReclaimV1,
+            toolResultBudgetEnabled: flags.toolResultBudgetV2,
             configuredMode: input.config.compaction?.reclaimMode,
           }),
           policyId: RECLAIM_POLICY_V1.policyId,
@@ -303,6 +325,10 @@ export async function invokeRuntimeModel(params: {
   /** Production composition must supply the immutable route-policy gate. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
+  preparedContextV2?: PreparedPrimaryContextRequestV2;
+  preparedCapabilitySetV2?: PreparedContextCapabilitySetV2;
+  effectLeaseId?: string;
+  reservationIds?: readonly string[];
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const requestId = genInteractionId();
@@ -325,6 +351,7 @@ export async function invokeRuntimeModel(params: {
   try {
     const flags = getFeatureFlags(params.config);
     if (
+      !params.preparedContextV2 &&
       params.skillCatalog &&
       params.state.skills.catalogRevision !== params.skillCatalog.revision
     ) {
@@ -333,7 +360,7 @@ export async function invokeRuntimeModel(params: {
         catalogRevision: params.skillCatalog.revision,
       });
     }
-    if (params.skillCatalog) {
+    if (!params.preparedContextV2 && params.skillCatalog) {
       for (const frame of Object.values(params.state.skills.frames)) {
         if (frame.status !== 'active') continue;
         const reason = skillFrameInvalidationReason(frame, params.skillCatalog);
@@ -414,7 +441,9 @@ export async function invokeRuntimeModel(params: {
         : effectiveSkillMode === 'search'
           ? searchedDescriptors.filter((descriptor) => descriptor.kind === 'skill')
           : [];
-    const disclosedDescriptors = [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
+    const disclosedDescriptors = params.preparedCapabilitySetV2
+      ? [...params.preparedCapabilitySetV2.disclosedDescriptors]
+      : [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
     const loadedCapabilities = flags.toolSearchV1
       ? disclosedMcpDescriptors.map((descriptor) => {
           const existing = state.capabilities.loadedCapabilities?.[descriptor.capabilityId];
@@ -432,8 +461,9 @@ export async function invokeRuntimeModel(params: {
         const previous = state.capabilities.loadedCapabilities?.[loaded.capabilityId];
         return previous?.capabilityRevision !== loaded.capabilityRevision;
       });
-    const mcpBindings =
-      flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1
+    const mcpBindings = params.preparedCapabilitySetV2
+      ? [...params.preparedCapabilitySetV2.mcpBindings]
+      : flags.capabilityCatalogV1 && flags.mcpRuntimeBindingV1
         ? disclosedDescriptors
             .filter(
               (descriptor) =>
@@ -456,10 +486,11 @@ export async function invokeRuntimeModel(params: {
         }))
       : [];
     if (
-      mcpBindings.length > 0 ||
-      capabilityDisclosures.length > 0 ||
-      searchToConsume ||
-      loadedSetChanged
+      !params.preparedContextV2 &&
+      (mcpBindings.length > 0 ||
+        capabilityDisclosures.length > 0 ||
+        searchToConsume ||
+        loadedSetChanged)
     ) {
       params.emitRuntimeEvent?.({
         type: 'capability.bindings_issued',
@@ -515,29 +546,59 @@ export async function invokeRuntimeModel(params: {
     });
     const { serializedTools, activeSkillInstructions: activeSkillInstr } = projectionEnvironment;
     const workflowSkillDescriptors = projectionEnvironment.workflowSkills;
+    if (params.preparedContextV2) {
+      assertPreparedContextCurrentV2(params.preparedContextV2, {
+        purpose: 'normal',
+        state,
+        environment: projectionEnvironment,
+        capabilities: modelCapabilities,
+        requestedMaxOutputTokens:
+          params.resourceAdmission?.maxOutputTokens ??
+          params.preparedContextV2.requestIdentity.requestedMaxOutputTokens,
+        promptAffectingParameters: {
+          temperature: 0,
+          streaming: modelCapabilities.streaming,
+          providerType: params.config.providerType,
+          modelName: params.config.modelName,
+          maxOutputTokens:
+            params.resourceAdmission?.maxOutputTokens ??
+            params.preparedContextV2.requestIdentity.requestedMaxOutputTokens,
+        },
+        toolResultBudgetPolicyId: params.preparedContextV2.sourceIdentity.toolResultBudgetPolicyId,
+        reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+      });
+    }
 
-    const projection = buildContextProjection({
-      role: 'agent',
-      state,
-      serializedTools,
-      activeSkillInstructions: activeSkillInstr,
-      skills: undefined,
-      workflowSkills: workflowSkillDescriptors,
-      promptContractVersion: projectionEnvironment.promptContractVersion,
-      projectInstructions: projectionEnvironment.projectInstructions,
-      sandboxBackend: projectionEnvironment.sandboxBackend,
-    });
-    const preflight = preflightModelContext({
-      estimate: projection.estimate,
-      capabilities: modelCapabilities,
-      requestMaxOutputTokens:
-        positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
-        positiveConfigNumber(params.config.modelKwargs?.maxTokens),
-      providerSafetyRatio: params.config.compaction?.providerSafetyRatio,
-      compactRatio: params.config.compaction?.compactRatio,
-      hardRatio: params.config.compaction?.hardRatio,
-      warningRatio: params.config.compaction?.warningRatio,
-    });
+    const projection = params.preparedContextV2
+      ? {
+          frames: [...params.preparedContextV2.effectiveProjection.frames],
+          providerMessages: [...params.preparedContextV2.effectiveProjection.providerMessages],
+          estimate: params.preparedContextV2.effectiveProjection.estimate,
+        }
+      : buildContextProjection({
+          role: 'agent',
+          state,
+          serializedTools,
+          activeSkillInstructions: activeSkillInstr,
+          skills: undefined,
+          workflowSkills: workflowSkillDescriptors,
+          promptContractVersion: projectionEnvironment.promptContractVersion,
+          projectInstructions: projectionEnvironment.projectInstructions,
+          sandboxBackend: projectionEnvironment.sandboxBackend,
+        });
+    const preflight = params.preparedContextV2
+      ? params.preparedContextV2.effectiveProjection.preflight
+      : preflightModelContext({
+          estimate: projection.estimate,
+          capabilities: modelCapabilities,
+          requestMaxOutputTokens:
+            positiveConfigNumber(params.config.modelKwargs?.maxOutputTokens) ??
+            positiveConfigNumber(params.config.modelKwargs?.maxTokens),
+          providerSafetyRatio: params.config.compaction?.providerSafetyRatio,
+          compactRatio: params.config.compaction?.compactRatio,
+          hardRatio: params.config.compaction?.hardRatio,
+          warningRatio: params.config.compaction?.warningRatio,
+        });
     const contextMetricsEvent: RuntimeEvent = {
       type: 'model.context_metrics',
       modelName: modelCapabilities.modelName,
@@ -560,6 +621,7 @@ export async function invokeRuntimeModel(params: {
     };
     const reclaimMode = resolveContextReclaimModeV1({
       featureEnabled: flags.contextReclaimV1,
+      toolResultBudgetEnabled: flags.toolResultBudgetV2,
       configuredMode: params.config.compaction?.reclaimMode,
     });
     if (
@@ -613,39 +675,6 @@ export async function invokeRuntimeModel(params: {
       state.turn.turnIndex,
       preflight.estimate.totalInputTokens,
     );
-    const automaticCompaction = decideAutomaticContextCompaction({
-      state,
-      preflight,
-      mode: resolveContextCompactionRollout({
-        masterEnabled: flags.contextCompactionV2 && flags.contextCompactionAutoV1,
-        configuredMode: params.config.compaction?.autoMode,
-        cohortSalt: params.config.compaction?.cohortSalt,
-        sessionId: state.session.threadId,
-        livePercentage: params.config.compaction?.livePercentage,
-      }),
-      triggerRatio:
-        params.config.compaction?.triggerRatio ?? params.config.compaction?.compactRatio,
-      compactAfterEstimatedTokens: params.config.compaction?.compactAfterEstimatedTokens,
-      cooldownTurns: params.config.compaction?.cooldownTurns,
-      minimumReductionRatio: params.config.compaction?.minimumReductionRatio,
-      maxSummaryTokens: params.config.compaction?.maxSummaryTokens,
-    });
-    if (automaticCompaction.action === 'request_compaction') {
-      params.compactionReporter?.recordRequested();
-      return [
-        ...retryEvents,
-        contextMetricsEvent,
-        {
-          type: 'context.compaction_requested',
-          compactionId: automaticCompaction.compactionId,
-          reason: automaticCompaction.reason,
-          requestedAtRevision: state.revision,
-          requestedAtTurnId: state.turn.turnId,
-          force: false,
-          estimate: preflight.estimate,
-        },
-      ];
-    }
     if (
       params.resourceAdmission &&
       params.resourceAdmission.inputTokens !== preflight.estimate.totalInputTokens
@@ -653,6 +682,41 @@ export async function invokeRuntimeModel(params: {
       throw new Error(
         'Model request projection changed after resource admission; refusing Provider dispatch.',
       );
+    }
+    let finalProviderAdmission: ProviderDataAdmissionDecisionV1 | undefined;
+    let admittedRequestDigest: string | undefined;
+    const primaryReservationId = params.reservationIds?.[0];
+    if (params.preparedContextV2) {
+      if (!params.effectLeaseId || !primaryReservationId || params.reservationIds?.length !== 1) {
+        throw new Error('Prepared primary dispatch requires one effect lease and reservation.');
+      }
+      finalProviderAdmission = flags.providerDataPolicyV1
+        ? (params.providerDataAdmission?.(
+            providerPayloadFromModelPromptV1(projection.providerMessages),
+            'primary_model',
+          ) ?? {
+            admitted: false,
+            reason: 'mandatory_policy_unavailable' as const,
+            routeAlias: 'unresolved',
+          })
+        : {
+            admitted: true,
+            reason: 'feature_disabled',
+            routeAlias: 'feature_disabled',
+          };
+      if (!finalProviderAdmission.admitted) {
+        throw new ProviderDataAdmissionError(finalProviderAdmission);
+      }
+      admittedRequestDigest = canonicalContextDigestV2('admitted-context-request:v2', {
+        preparedDigest: params.preparedContextV2.preparedDigest,
+        sourceIdentity: params.preparedContextV2.sourceIdentity,
+        requestIdentity: params.preparedContextV2.requestIdentity,
+        requestId,
+        effectLeaseId: params.effectLeaseId,
+        reservationIds: params.reservationIds,
+        providerAdmission: finalProviderAdmission,
+      });
+      params.emitRuntimeEvent?.(contextMetricsEvent);
     }
     // model.requested 必须在 await 之前即时发出，而不是响应完成后与
     // model.responded 一起补发——消费方（TUI）需要它作为"新一轮模型调用
@@ -679,9 +743,17 @@ export async function invokeRuntimeModel(params: {
       streaming: modelCapabilities.streaming,
       onTextDelta: (text) => params.emitRuntimeEvent?.({ type: 'model.text_delta', text }),
       onReasoningDelta: (text, segmentId) =>
-        params.emitRuntimeEvent?.({ type: 'model.reasoning_delta', segmentId, text }),
+        params.emitRuntimeEvent?.({
+          type: 'model.reasoning_delta',
+          segmentId,
+          text,
+        }),
       onReasoningCompleted: (text, segmentId) =>
-        params.emitRuntimeEvent?.({ type: 'model.reasoning_completed', segmentId, text }),
+        params.emitRuntimeEvent?.({
+          type: 'model.reasoning_completed',
+          segmentId,
+          text,
+        }),
       onRetry: (attempt, maxAttempts, error, delayMs) => {
         params.emitRuntimeEvent?.({
           type: 'model.retry',
@@ -692,7 +764,7 @@ export async function invokeRuntimeModel(params: {
         });
       },
       providerDataAdmission: params.providerDataAdmission,
-      providerDataPolicyRequired: flags.providerDataPolicyV1,
+      providerDataPolicyRequired: flags.providerDataPolicyV1 && !params.preparedContextV2,
       providerDispatchPurpose: 'primary_model',
     });
     const durationMs = Date.now() - callStartedAt;
@@ -705,19 +777,29 @@ export async function invokeRuntimeModel(params: {
     const invalidToolCalls = (
       (
         response as unknown as {
-          invalid_tool_calls?: Array<{ id?: string; name?: string; args?: string; error?: string }>;
+          invalid_tool_calls?: Array<{
+            id?: string;
+            name?: string;
+            args?: string;
+            error?: string;
+          }>;
         }
       ).invalid_tool_calls ?? []
     )
       .filter(
-        (call): call is { id?: string; name: string; args: string; error?: string } =>
-          typeof call.name === 'string' && typeof call.args === 'string',
+        (
+          call,
+        ): call is {
+          id?: string;
+          name: string;
+          args: string;
+          error?: string;
+        } => typeof call.name === 'string' && typeof call.args === 'string',
       )
       .map((call) => ({
         id: call.id ?? crypto.randomUUID(),
         name: call.name,
         args: {
-          _raw_invalid_args: call.args,
           _parse_error: call.error ?? 'invalid JSON arguments',
         },
       }));
@@ -729,64 +811,119 @@ export async function invokeRuntimeModel(params: {
         }
       | undefined;
     const providerInputTokens = providerUsage?.input_tokens ?? providerUsage?.prompt_tokens;
-    const events: RuntimeEvent[] = [
+    const messageId = response.id ?? requestId;
+    const queuedToolEvents: Array<Extract<RuntimeEvent, { type: 'tool.queued' }>> = toolCalls.map(
+      (call, ordinal) => {
+        const capability =
+          builtinToolRegistry.effectsOf(call.name, call.args, toolAvailCtx) ??
+          classifyToolCapability(call.name, call.args);
+        const bindingEntry = mcpBindings.find(
+          ({ binding: candidate }) => candidate.exposedToolName === call.name,
+        );
+        const binding = bindingEntry?.binding;
+        return {
+          type: 'tool.queued',
+          toolCallId: call.id,
+          taskId: params.state.activeTaskId ?? undefined,
+          name: call.name,
+          args: call.args,
+          modelMessageId: messageId,
+          ordinal,
+          effectClass: capability.effectClass,
+          sideEffect: capability.sideEffect,
+          classificationReason: capability.classificationReason,
+          ...(binding
+            ? {
+                bindingId: binding.bindingId,
+                capabilityId: binding.capabilityId,
+                capabilityRevision: binding.capabilityRevision,
+                resultBudgetV2: resolveRuntimeToolResultBudgetV2({
+                  toolIdentity: binding.capabilityId,
+                  catalogRevision: capabilitySnapshot.revision,
+                  bindingRevision: binding.capabilityRevision,
+                  budget: UTF8_TOOL_RESULT_BUDGET_V2,
+                  outputSchema: freezeRuntimeOutputSchemaV2(bindingEntry.descriptor.outputSchema),
+                }),
+              }
+            : {}),
+        };
+      },
+    );
+    const responseEvent: Extract<RuntimeEvent, { type: 'model.responded' }> = {
+      type: 'model.responded',
+      messageId: response.id ?? requestId,
+      durationMs,
+      toolCalls: [...toolCalls, ...invalidToolCalls],
+      reasoningText: extractReasoningText(response),
+      text: extractText(response.content),
+      ...(typeof providerInputTokens === 'number' ? { inputTokens: providerInputTokens } : {}),
+      ...(typeof providerUsage?.completion_tokens === 'number'
+        ? { outputTokens: providerUsage.completion_tokens }
+        : {}),
+      ...(params.preparedContextV2 && invalidToolCalls.length === 0
+        ? { ownedToolQueue: queuedToolEvents }
+        : {}),
+    };
+    const cacheMetrics = extractPromptCacheMetrics(response);
+    let primaryBranch: RuntimeEvent[] | undefined;
+    if (
+      params.preparedContextV2 &&
+      params.effectLeaseId &&
+      primaryReservationId &&
+      admittedRequestDigest &&
+      invalidToolCalls.length === 0
+    ) {
+      const proposedCommit = params.preparedContextV2.proposedReclaimPlan
+        ? proposeContextReclaimCommitV1({
+            state,
+            prepared: params.preparedContextV2,
+            plan: params.preparedContextV2.proposedReclaimPlan,
+          })
+        : undefined;
+      const terminalBatchId = canonicalContextDigestV2('context-primary-terminal-batch:v2', {
+        requestId,
+        responseMessageId: responseEvent.messageId,
+        admittedRequestDigest,
+      });
+      primaryBranch = createContextPrimarySuccessBranchV2({
+        prepared: params.preparedContextV2,
+        requestId,
+        effectLeaseId: params.effectLeaseId,
+        reservationId: primaryReservationId,
+        admittedRequestDigest,
+        response: responseEvent,
+        reconciliation: {
+          type: 'resource_budget.reconciled',
+          reservationId: primaryReservationId,
+          actual: createZeroResourceUsageV1(),
+        },
+        terminalBatchId,
+        previousCommit: state.context.reclaimCommit,
+        ...(proposedCommit ? { proposedCommit } : {}),
+      }).slice(0, proposedCommit ? 2 : 1);
+    }
+    const events: RuntimeEvent[] = primaryBranch ?? [
       ...retryEvents,
       contextMetricsEvent,
-      {
-        type: 'model.responded',
-        messageId: response.id ?? requestId,
-        durationMs,
-        toolCalls: [...toolCalls, ...invalidToolCalls],
-        reasoningText: extractReasoningText(response),
-        text: extractText(response.content),
-        ...(typeof providerInputTokens === 'number' ? { inputTokens: providerInputTokens } : {}),
-        ...(typeof providerUsage?.completion_tokens === 'number'
-          ? { outputTokens: providerUsage.completion_tokens }
-          : {}),
-      },
+      responseEvent,
     ];
 
-    const cacheMetrics = extractPromptCacheMetrics(response);
     if (cacheMetrics && (cacheMetrics.cacheHitTokens > 0 || cacheMetrics.cacheMissTokens > 0)) {
-      events.push({
+      const cacheEvent: RuntimeEvent = {
         type: 'model.cache_metrics',
         inputTokens: cacheMetrics.inputTokens,
         cacheHitTokens: cacheMetrics.cacheHitTokens,
         cacheMissTokens: cacheMetrics.cacheMissTokens,
         hitRate: cacheMetrics.hitRate,
-      });
+      };
+      if (primaryBranch) params.emitRuntimeEvent?.(cacheEvent);
+      else events.push(cacheEvent);
     }
 
-    const messageId = response.id ?? requestId;
-    let ordinal = 0;
-    for (const call of toolCalls) {
-      const capability =
-        builtinToolRegistry.effectsOf(call.name, call.args, toolAvailCtx) ??
-        classifyToolCapability(call.name, call.args);
-      const binding = mcpBindings.find(
-        ({ binding: candidate }) => candidate.exposedToolName === call.name,
-      )?.binding;
-      events.push({
-        type: 'tool.queued',
-        toolCallId: call.id,
-        taskId: params.state.activeTaskId ?? undefined,
-        name: call.name,
-        args: call.args,
-        modelMessageId: messageId,
-        ordinal: ordinal++,
-        effectClass: capability.effectClass,
-        sideEffect: capability.sideEffect,
-        classificationReason: capability.classificationReason,
-        ...(binding
-          ? {
-              bindingId: binding.bindingId,
-              capabilityId: binding.capabilityId,
-              capabilityRevision: binding.capabilityRevision,
-            }
-          : {}),
-      });
-    }
-    events.push(...eventsForInvalidModelToolCalls(invalidToolCalls, messageId, ordinal));
+    if (!primaryBranch) events.push(...queuedToolEvents);
+    events.push(
+      ...eventsForInvalidModelToolCalls(invalidToolCalls, messageId, queuedToolEvents.length),
+    );
     return events;
   } finally {
     params.model.setRetryListener(null);

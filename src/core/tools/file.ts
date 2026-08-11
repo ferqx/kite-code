@@ -1,7 +1,9 @@
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { readFile as readFileBufferAsync } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve, sep } from 'node:path';
 import { isPathInsideWorkspace, msys2ToWindowsPath } from './path-utils';
+import { READ_FILE_DECODER_CONTRACT_ID_V2 } from './result-budget-v2';
 
 // ============================================================================
 // 公用 — 换行符正规化 / Common — line ending normalization
@@ -11,6 +13,8 @@ import { isPathInsideWorkspace, msys2ToWindowsPath } from './path-utils';
 export function normalizeEOL(content: string): string {
   return content.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
 }
+
+export { READ_FILE_DECODER_CONTRACT_ID_V2 } from './result-budget-v2';
 
 // ============================================================================
 // 路径解析 / Path resolution
@@ -108,7 +112,7 @@ interface TextContentError {
 function decodeTextBuffer(
   raw: Buffer,
   filePath: string,
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; strictUtf8?: boolean },
 ): TextContent | TextContentError {
   // 编码检测 / Encoding detection — 在二进制检测之前执行。
   // UTF-16 文本文件中 NUL byte 比例天然高（ASCII 字符每两字节一个 NUL），
@@ -134,6 +138,17 @@ function decodeTextBuffer(
     if (content.charCodeAt(0) === 0xfeff) content = content.slice(1);
   } else {
     // UTF-8（可能带 BOM，也可能不带 BOM）
+    if (opts?.strictUtf8 && !opts.force) {
+      try {
+        new TextDecoder('utf-8', { fatal: true }).decode(raw);
+      } catch {
+        return {
+          ok: false,
+          error: `Binary file detected: ${filePath}. It is not valid UTF-8 text. Retry with force only when replacement decoding is intended.`,
+          totalLines: 0,
+        };
+      }
+    }
     content = raw.toString('utf8');
     if (content.charCodeAt(0) === 0xfeff) {
       hasBom = true;
@@ -173,7 +188,7 @@ function decodeTextBuffer(
 export function readTextContent(
   workspace: string,
   filePath: string,
-  opts?: { force?: boolean; allowExternal?: boolean },
+  opts?: { force?: boolean; allowExternal?: boolean; strictUtf8?: boolean },
 ): TextContent | TextContentError {
   const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
   if (!existsSync(target)) {
@@ -201,7 +216,7 @@ function isNotFound(error: unknown): boolean {
 export async function readTextContentAsync(
   workspace: string,
   filePath: string,
-  opts?: { force?: boolean; allowExternal?: boolean },
+  opts?: { force?: boolean; allowExternal?: boolean; strictUtf8?: boolean },
 ): Promise<TextContent | TextContentError> {
   const target = resolvePath(workspace, filePath, { allowExternal: opts?.allowExternal });
   let raw: Buffer;
@@ -240,6 +255,254 @@ export interface ReadFileResult {
   /** 内部字段：换行正规化后的原始文本（读取状态指纹输入，不作模型输出）。
    *  Internal: raw normalized text (read-state fingerprint input, not model output). */
   rawContent?: string;
+}
+
+export interface ReadFileCursorV2 {
+  lineOffset: number;
+  utf8ByteOffsetInLine: number;
+  endLineExclusive: number;
+  pathDigest: string;
+  resourceRevision: string;
+  initialOffset: number;
+  effectiveInitialLimit: number;
+  windowIdentity: string;
+  cursorDigest: string;
+}
+
+export interface ReadFileWindowV2Result extends ReadFileResult {
+  continuation: {
+    kind: 'line_byte_cursor_v2';
+    status: 'partial' | 'completed' | 'completed_empty' | 'stale_continuation';
+    cursor?: ReadFileCursorV2;
+  };
+}
+
+function readFileIdentityV2(
+  target: string,
+  normalizedContent: string,
+): {
+  pathDigest: string;
+  resourceRevision: string;
+} {
+  return {
+    pathDigest: createHash('sha256').update(`read-file-path:v2\0${target}`).digest('hex'),
+    resourceRevision: createHash('sha256')
+      .update(`read-file-resource:v2\0${READ_FILE_DECODER_CONTRACT_ID_V2}\0${normalizedContent}`)
+      .digest('hex'),
+  };
+}
+
+function readFileWindowIdentityV2(input: {
+  pathDigest: string;
+  resourceRevision: string;
+  initialOffset: number;
+  effectiveInitialLimit: number;
+  endLineExclusive: number;
+}): string {
+  return createHash('sha256')
+    .update(`read-file-window:v2\0${READ_FILE_DECODER_CONTRACT_ID_V2}\0${JSON.stringify(input)}`)
+    .digest('hex');
+}
+
+function readFileCursorDigestV2(cursor: Omit<ReadFileCursorV2, 'cursorDigest'>): string {
+  return createHash('sha256')
+    .update(`read-file-cursor:v2\0${JSON.stringify(cursor)}`)
+    .digest('hex');
+}
+
+function utf8PrefixAtByteOffset(
+  value: string,
+  byteOffset: number,
+  maxBytes: number,
+): {
+  text: string;
+  consumedBytes: number;
+} {
+  const bytes = Buffer.from(value, 'utf8');
+  const start = Math.min(byteOffset, bytes.length);
+  let end = Math.min(bytes.length, start + Math.max(0, maxBytes));
+  while (end > start && (bytes[end] ?? 0) >= 0x80 && (bytes[end] ?? 0) <= 0xbf) end -= 1;
+  if (end === start && start < bytes.length && maxBytes > 0) {
+    end = Math.min(bytes.length, start + maxBytes);
+    while (end < bytes.length && (bytes[end] ?? 0) >= 0x80 && (bytes[end] ?? 0) <= 0xbf) end -= 1;
+  }
+  return { text: bytes.subarray(start, end).toString('utf8'), consumedBytes: end - start };
+}
+
+/**
+ * Bounded, replayable read projection used only when toolResultBudgetV2 is enabled.
+ * The legacy readFile() path remains byte-identical when the flag is off.
+ */
+export function readFileWindowV2(input: {
+  workspace: string;
+  path: string;
+  offset?: number;
+  limit?: number;
+  cursor?: ReadFileCursorV2;
+  maxUtf8Bytes: number;
+  force?: boolean;
+  allowExternal?: boolean;
+}): ReadFileWindowV2Result {
+  try {
+    const target = resolvePath(input.workspace, input.path, { allowExternal: input.allowExternal });
+    const result = readTextContent(input.workspace, input.path, {
+      force: input.force,
+      allowExternal: input.allowExternal,
+      strictUtf8: true,
+    });
+    if (!result.ok) {
+      return {
+        ok: false,
+        path: input.path,
+        content: '',
+        totalLines: 0,
+        error: result.error,
+        continuation: { kind: 'line_byte_cursor_v2', status: 'completed' },
+      };
+    }
+    const identity = readFileIdentityV2(target, result.content);
+    if (
+      input.cursor &&
+      (input.cursor.pathDigest !== identity.pathDigest ||
+        input.cursor.resourceRevision !== identity.resourceRevision)
+    ) {
+      return {
+        ok: false,
+        path: input.path,
+        content: '',
+        totalLines: result.totalLines,
+        error: 'stale_continuation',
+        rawContent: result.content,
+        continuation: { kind: 'line_byte_cursor_v2', status: 'stale_continuation' },
+      };
+    }
+
+    const lines = result.content.split('\n');
+    if (lines.at(-1) === '') lines.pop();
+    const initialOffset = input.cursor?.initialOffset ?? input.offset ?? 1;
+    if (!input.cursor && initialOffset > result.totalLines) {
+      return {
+        ok: true,
+        path: input.path,
+        content: '',
+        totalLines: result.totalLines,
+        rawContent: result.content,
+        continuation: { kind: 'line_byte_cursor_v2', status: 'completed_empty' },
+      };
+    }
+    const effectiveInitialLimit =
+      input.cursor?.effectiveInitialLimit ?? input.limit ?? result.totalLines - initialOffset + 1;
+    const endLineExclusive = Math.min(result.totalLines + 1, initialOffset + effectiveInitialLimit);
+    const windowIdentity = readFileWindowIdentityV2({
+      ...identity,
+      initialOffset,
+      effectiveInitialLimit,
+      endLineExclusive,
+    });
+    let lineOffset = input.cursor?.lineOffset ?? initialOffset;
+    let byteOffsetInLine = input.cursor?.utf8ByteOffsetInLine ?? 0;
+    if (input.cursor) {
+      const lineBytes = Buffer.from(lines[lineOffset - 1] ?? '', 'utf8');
+      const scalarBoundary =
+        byteOffsetInLine === 0 ||
+        byteOffsetInLine === lineBytes.length ||
+        ((lineBytes[byteOffsetInLine] ?? 0) & 0xc0) !== 0x80;
+      if (
+        effectiveInitialLimit < 1 ||
+        input.cursor.endLineExclusive !== endLineExclusive ||
+        input.cursor.windowIdentity !== windowIdentity ||
+        input.cursor.cursorDigest !==
+          readFileCursorDigestV2({
+            lineOffset: input.cursor.lineOffset,
+            utf8ByteOffsetInLine: input.cursor.utf8ByteOffsetInLine,
+            endLineExclusive: input.cursor.endLineExclusive,
+            pathDigest: input.cursor.pathDigest,
+            resourceRevision: input.cursor.resourceRevision,
+            initialOffset: input.cursor.initialOffset,
+            effectiveInitialLimit: input.cursor.effectiveInitialLimit,
+            windowIdentity: input.cursor.windowIdentity,
+          }) ||
+        lineOffset < initialOffset ||
+        lineOffset >= endLineExclusive ||
+        endLineExclusive > result.totalLines + 1 ||
+        byteOffsetInLine > lineBytes.length ||
+        !scalarBoundary
+      ) {
+        return {
+          ok: false,
+          path: input.path,
+          content: '',
+          totalLines: result.totalLines,
+          error: 'stale_continuation',
+          rawContent: result.content,
+          continuation: { kind: 'line_byte_cursor_v2', status: 'stale_continuation' },
+        };
+      }
+    }
+    const pieces: string[] = [];
+    let used = 0;
+    const numberWidth = String(Math.max(initialOffset, endLineExclusive - 1)).length;
+
+    while (lineOffset < endLineExclusive) {
+      const line = lines[lineOffset - 1] ?? '';
+      const prefix = `${String(lineOffset).padStart(numberWidth, ' ')}|`;
+      const separator = pieces.length > 0 ? '\n' : '';
+      const lineBytes = Buffer.byteLength(line, 'utf8');
+      const remaining = input.maxUtf8Bytes - used;
+      const overhead = Buffer.byteLength(separator + prefix, 'utf8');
+      if (remaining <= overhead) break;
+      const available = remaining - overhead;
+      const fragment = utf8PrefixAtByteOffset(line, byteOffsetInLine, available);
+      pieces.push(`${separator}${prefix}${fragment.text}`);
+      used += overhead + fragment.consumedBytes;
+      byteOffsetInLine += fragment.consumedBytes;
+      if (byteOffsetInLine < lineBytes) break;
+      lineOffset += 1;
+      byteOffsetInLine = 0;
+    }
+
+    const completed = lineOffset >= endLineExclusive;
+    const cursorWithoutDigest = completed
+      ? undefined
+      : {
+          lineOffset,
+          utf8ByteOffsetInLine: byteOffsetInLine,
+          endLineExclusive,
+          ...identity,
+          initialOffset,
+          effectiveInitialLimit,
+          windowIdentity,
+        };
+    const cursor = cursorWithoutDigest
+      ? {
+          ...cursorWithoutDigest,
+          cursorDigest: readFileCursorDigestV2(cursorWithoutDigest),
+        }
+      : undefined;
+    return {
+      ok: true,
+      path: input.path,
+      content: pieces.join(''),
+      totalLines: result.totalLines,
+      fromLine: initialOffset,
+      toLine: Math.max(initialOffset - 1, lineOffset - (byteOffsetInLine === 0 ? 1 : 0)),
+      rawContent: result.content,
+      continuation: {
+        kind: 'line_byte_cursor_v2',
+        status: completed ? 'completed' : 'partial',
+        ...(cursor ? { cursor } : {}),
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      path: input.path,
+      content: '',
+      totalLines: 0,
+      error: error instanceof Error ? error.message : String(error),
+      continuation: { kind: 'line_byte_cursor_v2', status: 'completed' },
+    };
+  }
 }
 
 export function readFile(input: ReadFileInput): ReadFileResult {

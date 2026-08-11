@@ -4,6 +4,10 @@
 
 import type { RemoteMcpEgressReceiptV1 } from '@/core/mcp/egress-permit';
 import type { ContextTokenEstimate } from '@/core/model/context-budget';
+import type {
+  ContextPrimaryRequestEvidenceV2,
+  ContextReclaimCommitAdvancedEventV1,
+} from '@/core/model/context-reclaim-commit';
 import type { NetworkDecisionReceiptV1 } from '@/core/sandbox/network-enforcer';
 import type { ToolGrant } from '@/core/types';
 import type {
@@ -43,6 +47,10 @@ import type {
   ContextHardBlockReason,
 } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
+import type {
+  LegacyContextCompactionCheckpointV2,
+  LegacySliceBGuardEvent,
+} from './legacy-slice-b-reader';
 import type {
   ResourceBudgetConfiguredEvent,
   ResourceBudgetDispatchStartedEvent,
@@ -95,7 +103,7 @@ export interface ContextCompactionCompletedEvent {
   type: 'context.compaction_completed';
   compactionId: string;
   sourceRevision: number;
-  checkpoint: ContextCompactionCheckpoint;
+  checkpoint: ContextCompactionCheckpoint | LegacyContextCompactionCheckpointV2;
   /** End-to-end compaction effect duration. Optional for restored legacy events. */
   durationMs?: number;
 }
@@ -117,6 +125,22 @@ export interface ContextCompactionResetEvent {
   type: 'context.compaction_reset';
   checkpointId: string;
   reason: 'manual';
+}
+
+/** Schema-v23 migration closed a pending summary that never reached Provider dispatch. */
+export interface ContextCompactionMigrationCancelledEvent {
+  type: 'context.compaction_migration_cancelled';
+  compactionId: string;
+  sourceRevision: number;
+  outcome: 'not_dispatched';
+}
+
+/** Schema-v23 migration found a dispatched summary without one durable terminal. */
+export interface ContextCompactionUnknownExternalOutcomeEvent {
+  type: 'context.compaction_unknown_external_outcome';
+  compactionId: string;
+  sourceRevision: number;
+  reservationId?: string;
 }
 
 /** Durable hard-block event reserved for proven Runtime correctness failures. */
@@ -159,6 +183,8 @@ export interface ToolQueuedEvent {
   bindingId?: string;
   capabilityId?: string;
   capabilityRevision?: string;
+  /** Runtime-issued model-result binding frozen before dynamic execution. */
+  resultBudgetV2?: import('@/core/tools/result-budget-v2').ResolvedToolResultBudgetV2;
 }
 
 /** Bindings are durable before a model can return a dynamic MCP call. */
@@ -388,16 +414,22 @@ export interface ToolFinishedEvent {
     /** Provider-neutral structured facts; stdout remains model-facing content only. */
     resultMeta?: import('./state').ToolResultMeta;
   };
+  /** Required for schema-v22 production events; omitted only while replaying v2..v21. */
+  modelResult?: import('./tool-terminal-v2').ToolTerminalModelResultV2;
 }
 
 /** 工具调用执行失败 */
 export type ToolFailedEvent = {
   type: 'tool.failed';
   toolCallId: string;
+  modelResult?: import('./tool-terminal-v2').ToolTerminalModelResultV2;
   /** Structured failure for new producers. `error` remains readable for v3 event-log replay. */
 } & (
   | { failure: ClassifiedFailure; error?: string }
-  | { /** @deprecated retained for historical event replay. */ error: string; failure?: never }
+  | {
+      /** @deprecated retained for historical event replay. */ error: string;
+      failure?: never;
+    }
 );
 
 /** 工具调用被安全策略驳回 */
@@ -406,6 +438,7 @@ export interface ToolRejectedEvent {
   toolCallId: string;
   reason: string;
   failure?: ClassifiedFailure;
+  modelResult?: import('./tool-terminal-v2').ToolTerminalModelResultV2;
 }
 
 /** Tool call cancelled because an earlier sibling opened a user interaction. */
@@ -413,6 +446,7 @@ export interface ToolCancelledEvent {
   type: 'tool.cancelled';
   toolCallId: string;
   reason: string;
+  modelResult?: import('./tool-terminal-v2').ToolTerminalModelResultV2;
 }
 
 // ── 用户输入交互事件 / User input interaction events ──
@@ -823,6 +857,10 @@ export interface ModelRespondedEvent {
   /** Provider-reported usage used for cumulative run-budget reconciliation. */
   inputTokens?: number;
   outputTokens?: number;
+  /** Closed primary success branch identity; absent on legacy/off-path events. */
+  contextEvidence?: ContextPrimaryRequestEvidenceV2;
+  /** Queue facts atomically materialized with a v22 primary response. */
+  ownedToolQueue?: ToolQueuedEvent[];
 }
 
 /** A retry observed while invoking the model. */
@@ -1019,8 +1057,12 @@ export type RuntimeEvent =
   | ContextCompactionCompletedEvent
   | ContextCompactionFailedEvent
   | ContextCompactionResetEvent
+  | ContextCompactionMigrationCancelledEvent
+  | ContextCompactionUnknownExternalOutcomeEvent
+  | LegacySliceBGuardEvent
   | ContextHardBlockedEvent
   | ContextHardBlockClearedEvent
+  | ContextReclaimCommitAdvancedEventV1
   | CapabilityBindingsIssuedEvent
   | CapabilitySearchCompletedEvent
   | SkillCatalogRefreshedEvent

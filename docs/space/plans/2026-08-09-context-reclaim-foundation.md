@@ -6,6 +6,7 @@
 优先级：P0
 依赖：ADR-0095、`docs/design/2026-08-09-three-tier-context-reduction-rfc.md`、现有 ContextProjection 与 ToolSpec Registry
 范围：本计划只实现 L1 policy identity、L2 off/shadow 和证据；不实现 live 或 L3 source 复用
+后续：`docs/design/2026-08-10-three-tier-context-reduction-complete-rfc.md`
 
 ## 目标
 

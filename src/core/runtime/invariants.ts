@@ -71,10 +71,10 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   assertUnique(state.tools.active, 'active tools');
   assert(state.context != null, 'context runtime state is required.');
   assertResourceBudgetRuntimeStateV1(state.resourceBudget);
-  assert(state.context.autoGuard != null, 'context autoGuard is required.');
   assert(state.context.history.length <= 128, 'context compaction history exceeds its bound.');
   if (state.context.pendingCompaction) {
     const pending = state.context.pendingCompaction;
+    assert(pending.reason === 'manual', 'only manual compaction may remain pending.');
     assert(Boolean(pending.compactionId), 'pending compaction id is required.');
     assert(
       Number.isInteger(pending.requestedAtRevision) && pending.requestedAtRevision >= 0,
@@ -88,7 +88,7 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   }
   if (state.context.activeCheckpoint) {
     const checkpoint = state.context.activeCheckpoint;
-    assert(checkpoint.version === 1, 'active context checkpoint version must be 1.');
+    assert(checkpoint.version === 1, 'active context checkpoint must use compatibility v1.');
     assert(checkpoint.summary.trim().length > 0, 'active context summary must be non-empty.');
     assert(Boolean(checkpoint.compactionId), 'active context checkpoint id is required.');
     assert(Boolean(checkpoint.sourceDigest), 'active context checkpoint digest is required.');

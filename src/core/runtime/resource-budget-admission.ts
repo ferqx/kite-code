@@ -174,15 +174,11 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
     const usage = createZeroResourceUsageV1('versioned_upper_bound', 'runtime-effect-v1');
     usage.counters.modelRequests = 1;
     if (state.resourceBudget.status === 'active') {
-      const committed = committedResourceUsageV1(state.resourceBudget);
-      usage.counters.inputTokens = Math.min(
-        state.context.pendingCompaction?.estimate.totalInputTokens ?? 0,
-        state.resourceBudget.budget.maxRunInputTokens - committed.counters.inputTokens,
-      );
-      usage.counters.outputTokens = Math.min(
-        6_000,
-        state.resourceBudget.budget.maxRunOutputTokens - committed.counters.outputTokens,
-      );
+      usage.counters.inputTokens =
+        effect.resourceEstimate?.inputTokens ??
+        state.context.pendingCompaction?.estimate.totalInputTokens ??
+        0;
+      usage.counters.outputTokens = effect.resourceEstimate?.maxOutputTokens ?? 6_000;
     }
     return [
       {

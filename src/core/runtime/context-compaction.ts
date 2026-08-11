@@ -2,8 +2,6 @@ import type { ContextTokenEstimate } from '@/core/model/context-budget';
 
 export type ContextCompactionReason = 'manual' | 'auto';
 
-export type ContextCompactionAutoMode = 'off' | 'shadow' | 'live';
-
 export type ContextHardBlockReason =
   | 'unsafe_context_projection'
   | 'corrupted_runtime_state'
@@ -28,7 +26,7 @@ export function isContextHardBlockReason(value: unknown): value is ContextHardBl
   return CONTEXT_HARD_BLOCK_REASONS.has(value as ContextHardBlockReason);
 }
 
-export interface ContextCompactionCheckpoint {
+export interface ContextCompactionCheckpointV1 {
   compactionId: string;
   version: 1;
   sourceRevision: number;
@@ -44,6 +42,8 @@ export interface ContextCompactionCheckpoint {
   /** When this checkpoint was built on top of a previous one (incremental compaction). */
   baseCheckpointId?: string;
 }
+
+export type ContextCompactionCheckpoint = ContextCompactionCheckpointV1;
 
 export interface PendingContextCompaction {
   compactionId: string;
@@ -66,6 +66,8 @@ export type ContextCompactionErrorKind =
   | 'empty_summary'
   | 'truncated_summary'
   | 'unexpected_tool_call'
+  | 'summary_input_too_large'
+  | 'unknown_external_outcome'
   | 'stale_context'
   | 'invalid_candidate'
   | 'insufficient_reduction';
@@ -117,22 +119,6 @@ export function createContextCorrectnessBlock(
   return { ...failure, message: failure.message.trim() };
 }
 
-/**
- * Session-level circuit breaker that stops proactive auto-compaction
- * when the context refills too quickly or produces persistently low gain.
- */
-export interface AutoCompactionGuard {
-  recentAutomaticCompactions: Array<{
-    turnIndex: number;
-    reductionRatio: number;
-    tokensAfter: number;
-  }>;
-  consecutiveLowGain: number;
-  disabledUntilManualAction: boolean;
-  /** Only one new-turn recovery may bypass cooldown/breaker after an auto failure. */
-  recoveryAttempted: boolean;
-}
-
 export interface ContextRuntimeState {
   activeCheckpoint?: ContextCompactionCheckpoint;
   pendingCompaction?: PendingContextCompaction;
@@ -141,8 +127,12 @@ export interface ContextRuntimeState {
   lastCompactionTurnIndex?: number;
   /** Durable block reserved for proven Runtime correctness failures. */
   hardBlock?: ContextHardBlock;
-  /** Thrash breaker state for auto-compaction. */
-  autoGuard: AutoCompactionGuard;
+  /** Metadata-only L2 watermark; immutable transcript bytes remain authoritative. */
+  reclaimCommit?: import('@/core/model/context-reclaim-commit').ContextReclaimCommitV1;
+  /** Last verified receipt authenticating the current reclaimCommit. */
+  lastReclaimReceipt?: import('@/core/model/context-reclaim-commit').ContextReclaimAppliedReceiptV1;
+  /** Transient only while replaying/applying one closed primary terminal batch. */
+  pendingPrimaryReclaim?: import('@/core/model/context-reclaim-commit').ContextPrimaryRequestEvidenceV2;
 }
 
 /**
@@ -152,21 +142,14 @@ export interface ContextRuntimeState {
 export function normalizeContextRuntimeState(
   context: ContextRuntimeState | undefined,
 ): ContextRuntimeState {
-  const fallbackGuard: AutoCompactionGuard = {
-    recentAutomaticCompactions: [],
-    consecutiveLowGain: 0,
-    disabledUntilManualAction: false,
-    recoveryAttempted: false,
-  };
-  if (!context) return { history: [], autoGuard: fallbackGuard };
+  if (!context) return { history: [] };
 
   const normalizeCheckpoint = (
     checkpoint: ContextCompactionCheckpoint | undefined,
   ): ContextCompactionCheckpoint | undefined => {
     if (!checkpoint) return undefined;
     const reason = normalizeContextCompactionReason(checkpoint.reason);
-    const validEnvelope =
-      checkpoint.version === 1 &&
+    const validCommonEnvelope =
       Boolean(checkpoint.compactionId) &&
       Number.isInteger(checkpoint.sourceRevision) &&
       checkpoint.sourceRevision >= 0 &&
@@ -178,10 +161,15 @@ export function normalizeContextRuntimeState(
       checkpoint.inputTokensBefore > checkpoint.inputTokensAfter &&
       checkpoint.inputTokensAfter >= 0 &&
       Boolean(checkpoint.createdAt);
-    return reason &&
-      validEnvelope &&
-      typeof checkpoint.summary === 'string' &&
-      checkpoint.summary.trim()
+    if (
+      !reason ||
+      !validCommonEnvelope ||
+      typeof checkpoint.summary !== 'string' ||
+      !checkpoint.summary.trim()
+    ) {
+      return undefined;
+    }
+    return checkpoint.version === 1
       ? { ...checkpoint, summary: checkpoint.summary.trim(), reason }
       : undefined;
   };
@@ -198,13 +186,20 @@ export function normalizeContextRuntimeState(
     context.activeCheckpoint && !normalizedActiveCheckpoint,
   );
 
+  const {
+    autoGuard: _legacyAutoGuard,
+    autoGuardV2: _legacyAutoGuardV2,
+    ...currentContext
+  } = context as ContextRuntimeState & { autoGuard?: unknown; autoGuardV2?: unknown };
   return {
-    ...context,
+    ...currentContext,
     activeCheckpoint: normalizedActiveCheckpoint,
     pendingCompaction: context.pendingCompaction
       ? (() => {
           const reason = normalizeContextCompactionReason(context.pendingCompaction.reason);
-          return reason ? { ...context.pendingCompaction, reason, force: false } : undefined;
+          return reason === 'manual'
+            ? { ...context.pendingCompaction, reason, force: false }
+            : undefined;
         })()
       : undefined,
     lastFailure: normalizeFailure(context.lastFailure),
@@ -241,9 +236,5 @@ export function normalizeContextRuntimeState(
             createdAtTurnId: hardBlock.createdAtTurnId,
           }
         : undefined,
-    autoGuard: {
-      ...fallbackGuard,
-      ...(context.autoGuard ?? {}),
-    },
   };
 }

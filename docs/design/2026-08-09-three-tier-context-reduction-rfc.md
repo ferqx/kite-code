@@ -3,6 +3,8 @@
 状态：reviewed（首个 foundation 切片已批准；live 与 L3 source identity 待后续 ADR）
 日期：2026-08-09
 关联：ADR-0021、ADR-0022、ADR-0024、ADR-0057、ADR-0090、ADR-0091、`docs/active/plan-state-reminder.md`
+后续：完整三级显式可用目标见 `2026-08-10-three-tier-context-reduction-complete-rfc.md`；本文与
+ADR-0095 的 Foundation 历史范围保持不变。
 
 ## 摘要
 

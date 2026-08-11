@@ -56,7 +56,6 @@ function failure(
     },
   ];
 }
-
 /** Execute the M2 checkpoint effect without mutating RuntimeState directly. */
 export async function executeContextCompaction(input: {
   state: Readonly<RuntimeState>;
@@ -74,6 +73,7 @@ export async function executeContextCompaction(input: {
   const elapsed = () => Math.max(0, Date.now() - startedAt);
   const pending = input.state.context.pendingCompaction;
   if (!pending || pending.compactionId !== input.compactionId) return [];
+  if (pending.reason !== 'manual') return [];
   input.onProgress?.('preparing');
   const sourceRevision = input.state.revision;
   const leasedEnvironment = input.resolveProjectionEnvironment?.() ?? input.projectionEnvironment;
@@ -153,9 +153,7 @@ export async function executeContextCompaction(input: {
       (message) => message.turnId === input.state.turn.turnId,
     );
     const boundary = findSafeCompactionBoundary(input.state, {
-      protectLatestTurn:
-        pending.reason === 'auto' ||
-        (input.state.turn.status === 'active' && currentTurnHasMessages),
+      protectLatestTurn: input.state.turn.status === 'active' && currentTurnHasMessages,
     });
     const base = input.state.context.activeCheckpoint;
     const baseIndex = base
@@ -244,7 +242,7 @@ export async function executeContextCompaction(input: {
         sourceRevision,
         'insufficient_reduction',
         'Compaction did not save enough tokens (minimum 1024).',
-        pending.reason === 'auto',
+        false,
         input.reporter,
         elapsed(),
       );
@@ -288,8 +286,7 @@ export async function executeContextCompaction(input: {
         sourceRevision,
         error.kind,
         error.message,
-        error.kind === 'stale_context' ||
-          (error.kind === 'insufficient_reduction' && pending.reason === 'auto'),
+        error.kind === 'stale_context',
         input.reporter,
         elapsed(),
       );

@@ -333,7 +333,11 @@ export class ProductionMetricMapperV1 {
       createMetricSampleV1({
         name: 'release_rollout_total',
         observedAt: input.observedAt,
-        attributes: { profile: input.profile, cohort: input.cohort, outcome: input.outcome },
+        attributes: {
+          profile: input.profile,
+          cohort: input.cohort,
+          outcome: input.outcome,
+        },
       }),
     ];
   }
@@ -363,7 +367,9 @@ export class ProductionMetricMapperV1 {
           createMetricSampleV1({
             name: 'turn_total',
             observedAt,
-            attributes: { outcome: event.cause === 'user' ? 'cancelled' : 'failed' },
+            attributes: {
+              outcome: event.cause === 'user' ? 'cancelled' : 'failed',
+            },
           }),
         ];
       case 'model.responded':
@@ -613,6 +619,7 @@ export class ProductionMetricMapperV1 {
       case 'resource_budget.waiter_promoted':
       case 'resource_budget.waiter_cancelled':
       case 'context.compaction_requested':
+      case 'context.reclaim_commit_advanced':
       case 'capability.bindings_issued':
       case 'capability.search_completed':
       case 'skill.catalog_refreshed':
@@ -675,6 +682,11 @@ export class ProductionMetricMapperV1 {
       case 'model.text_delta':
       case 'model.cache_metrics':
       case 'model.context_metrics':
+      case 'context.compaction_migration_cancelled':
+      case 'context.compaction_unknown_external_outcome':
+      case 'context.compaction_refill_observed':
+      case 'context.compaction_guard_carried_forward':
+      case 'context.compaction_guard_reset':
       case 'provider.data_policy_status':
       case 'plan.progress_updated':
       case 'approval.command_replaced':

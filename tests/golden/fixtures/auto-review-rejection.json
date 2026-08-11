@@ -48,12 +48,26 @@
             "reviewerModelName": "test",
             "durationMs": 1
           }
+        },
+        {
+          "type": "tool.rejected",
+          "toolCallId": "call-1",
+          "reason": "Needs human review",
+          "failure": {
+            "kind": "auto_review_rejected",
+            "message": "Needs human review",
+            "retryable": false,
+            "modelFixable": false,
+            "needsUserIntervention": false,
+            "terminatesTurn": false,
+            "journal": true
+          }
         }
       ]
     }
   ],
   "expectedEffects": ["run_tools", "run_auto_review"],
-  "expectedEvents": ["auto_review.requested", "auto_review.completed"],
+  "expectedEvents": ["auto_review.requested", "auto_review.completed", "tool.rejected"],
   "expectedFinalState": {
     "interactions.kind": "idle",
     "tools.calls.call-1.status": "rejected",

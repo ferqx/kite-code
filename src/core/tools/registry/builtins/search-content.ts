@@ -3,6 +3,7 @@
  * 契约暂引用 SEARCH_CONTENT_CONTRACT.sections 保持 description 逐字节稳定。
  */
 import { z } from 'zod';
+import { STREAM_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { searchContent } from '@/core/tools/search';
 import { SEARCH_CONTENT_CONTRACT } from '@/core/tools/tool-contracts';
 import {
@@ -25,6 +26,7 @@ export type SearchContentInput = z.infer<typeof searchContentInputSchema>;
 
 export const searchContentSpec = defineExecutableTool({
   name: 'search_content',
+  modelResultBudgetV2: STREAM_TOOL_RESULT_BUDGET_V2,
   kind: 'computer',
   contract: SEARCH_CONTENT_CONTRACT.sections,
   inputSchema: searchContentInputSchema,

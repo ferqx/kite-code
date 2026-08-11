@@ -264,6 +264,8 @@ export interface ToolCallRecord {
   bindingId?: string;
   capabilityId?: string;
   capabilityRevision?: string;
+  /** Runtime-issued model-result binding frozen at queue admission. */
+  resultBudgetV2?: import('@/core/tools/result-budget-v2').ResolvedToolResultBudgetV2;
   /** Durable per-hop decisions recorded before network dispatch. */
   networkDecisions?: NetworkDecisionReceiptV1[];
   /** Redacted independent content-egress decisions for remote MCP calls. */
@@ -287,9 +289,20 @@ export interface ToolResultMeta {
   modelContentDigest?: string;
   /** Provenance of the digest fields. 'legacy_unknown' means pre-V2 data — treat conservatively. */
   digestScope?: 'raw' | 'projected' | 'legacy_unknown';
+  /** Self-contained result projection proof for schema-v22 terminals. */
+  toolResultReceipt?: import('@/core/tools/result-budget-v2').ToolResultBudgetReceiptV2;
+  /** Semantic terminal-event identity persisted alongside the canonical Tool Result. */
+  terminalIdentity?: string;
+  /** Terminal variant bound by terminalIdentity/legacy migration provenance. */
+  terminalKind?: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
+  continuation?: import('@/core/tools/result-budget-v2').ToolResultContinuationReceiptV2;
   /** Bounded process-tree cleanup facts; never contains process IDs or command text. */
   processCleanupConfirmed?: boolean;
   unconfirmedDescendantCount?: number;
+  /** Typed no-retry failure when execute completed but projection did not. */
+  projectionFailure?: ClassifiedFailure;
+  /** Durable proof that this result came from a pre-v22 terminal migration. */
+  terminalMigration?: import('./tool-terminal-v2').MigratedToolModelResultV2;
   /** Sealed network policy revision and per-hop admission receipts. */
   networkPolicyRevision?: string;
   networkAdmissionDigests?: string[];
@@ -423,7 +436,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 21;
+export const RUNTIME_STATE_SCHEMA_VERSION = 23;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -595,12 +608,6 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     transcript: { messages: [] },
     context: {
       history: [],
-      autoGuard: {
-        recentAutomaticCompactions: [],
-        consecutiveLowGain: 0,
-        disabledUntilManualAction: false,
-        recoveryAttempted: false,
-      },
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),
     planning: initialPlanning,

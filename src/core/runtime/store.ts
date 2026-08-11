@@ -54,6 +54,24 @@ export interface RuntimeSnapshotMetadata {
   schemaVersion: number;
 }
 
+export interface RuntimeObservedEventHeadV1 {
+  eventPosition: number;
+  revision: number;
+  eventId: string | null;
+}
+
+export interface RuntimeMigrationIdentityV1 {
+  generation: number;
+  sourceSnapshot: RuntimeSnapshotMetadata;
+  observedHead: RuntimeObservedEventHeadV1;
+}
+
+export interface RuntimePersistenceIdentityV1 {
+  generation: number;
+  sourceSnapshot: RuntimeSnapshotMetadata | null;
+  observedHead: RuntimeObservedEventHeadV1;
+}
+
 /** 事件日志条目 — 从 runtime_events 表加载时使用 */
 export interface StoredEvent {
   /** 自增 ID */
@@ -111,7 +129,8 @@ export interface RuntimeStore {
     nextState: unknown,
     metadata?: RuntimeEventMetadata[],
     snapshotMetadata?: RuntimeSnapshotMetadata,
-  ): void;
+    expectedIdentity?: RuntimePersistenceIdentityV1,
+  ): RuntimePersistenceIdentityV1;
   /** 加载线程事件，可选从某个 ID 之后开始 / Load events, optionally since a given id */
   loadEvents(threadId: string, since?: number): StoredEvent[];
   /** Strict event loading for recovery paths; corrupted rows are surfaced. */
@@ -123,6 +142,16 @@ export interface RuntimeStore {
   loadSnapshotRecord<T = unknown>(
     threadId: string,
   ): { state: T; metadata: RuntimeSnapshotMetadata } | null;
+  /** Atomically observe the rolling snapshot identity and full durable event head. */
+  loadPersistenceIdentity(threadId: string): RuntimePersistenceIdentityV1;
+  /** Exact snapshot+event-head CAS used only to publish a pure legacy migration candidate. */
+  compareAndSaveMigratedSnapshot(
+    threadId: string,
+    identity: RuntimeMigrationIdentityV1,
+    candidate: unknown,
+    events?: RuntimeEvent[],
+    metadata?: RuntimeEventMetadata[],
+  ): 'saved' | 'stale';
   /** Persist a named recovery point independently from the rolling snapshot. */
   saveNamedSnapshot(threadId: string, name: string, state: unknown, eventPosition?: number): void;
   /** Load a named recovery point, or null when it is absent/corrupt. */
@@ -231,6 +260,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function rebindForkState(
   sourceState: Record<string, unknown>,
   targetThreadId: string,
+  remapEventPosition?: (sourcePosition: number) => number,
 ): Record<string, unknown> {
   const forkState = structuredClone(sourceState);
   const session = forkState.session as Record<string, unknown> | undefined;
@@ -265,6 +295,26 @@ function rebindForkState(
     tools.active = [];
   }
   if ('suspendedSubagents' in forkState) forkState.suspendedSubagents = {};
+  if (remapEventPosition) {
+    const remapResultMeta = (value: unknown): void => {
+      if (!isRecord(value)) return;
+      const migration = value.terminalMigration;
+      if (isRecord(migration) && typeof migration.originalEventPosition === 'number') {
+        migration.originalEventPosition = remapEventPosition(migration.originalEventPosition);
+      }
+    };
+    const calls = isRecord(tools?.calls) ? tools.calls : {};
+    for (const call of Object.values(calls)) {
+      if (!isRecord(call) || !isRecord(call.result)) continue;
+      remapResultMeta(call.result.resultMeta);
+    }
+    const transcript = isRecord(forkState.transcript) ? forkState.transcript : undefined;
+    if (transcript && Array.isArray(transcript.messages)) {
+      for (const message of transcript.messages) {
+        if (isRecord(message)) remapResultMeta(message.resultMeta);
+      }
+    }
+  }
   return forkState;
 }
 
@@ -438,6 +488,12 @@ export function createRuntimeStore(
       PRIMARY KEY (thread_id, effect_id)
     )
   `);
+  db.run(`
+    CREATE TABLE IF NOT EXISTS runtime_thread_fences (
+      thread_id TEXT PRIMARY KEY,
+      generation INTEGER NOT NULL
+    )
+  `);
 
   // Additive metadata upgrades for stores created before runtime tracing was added.
   for (const [table, column, definition] of [
@@ -501,6 +557,9 @@ export function createRuntimeStore(
   const selectAllEvents = db.query<EventRow, [string]>(
     'SELECT id, thread_id, event_json, event_id, revision, causation_id, occurred_at, created_at FROM runtime_events WHERE thread_id = ? ORDER BY id ASC',
   );
+  const selectLastEventHead = db.query<Pick<EventRow, 'id' | 'revision' | 'event_id'>, [string]>(
+    'SELECT id, revision, event_id FROM runtime_events WHERE thread_id = ? ORDER BY id DESC LIMIT 1',
+  );
   const upsertSnapshot = db.query(
     'INSERT OR REPLACE INTO runtime_snapshots (thread_id, state_json, event_position, state_revision, state_checksum, schema_version, created_at) VALUES (?, ?, ?, ?, ?, ?, unixepoch())',
   );
@@ -509,6 +568,15 @@ export function createRuntimeStore(
   );
   const selectSnapshotRevision = db.query<{ state_revision: number }, [string]>(
     'SELECT state_revision FROM runtime_snapshots WHERE thread_id = ?',
+  );
+  const insertThreadFence = db.query(
+    'INSERT OR IGNORE INTO runtime_thread_fences (thread_id, generation) VALUES (?, 1)',
+  );
+  const selectThreadFence = db.query<{ generation: number }, [string]>(
+    'SELECT generation FROM runtime_thread_fences WHERE thread_id = ?',
+  );
+  const incrementThreadFence = db.query(
+    'UPDATE runtime_thread_fences SET generation = generation + 1 WHERE thread_id = ?',
   );
   const deleteExpiredEffectLease = db.query(
     'DELETE FROM runtime_effect_leases WHERE thread_id = ? AND effect_id = ? AND expires_at_ms <= ?',
@@ -538,7 +606,12 @@ export function createRuntimeStore(
     'SELECT state_json FROM runtime_named_snapshots WHERE thread_id = ? AND name = ?',
   );
   const selectNamedSnapshotsForFork = db.query<
-    { name: string; event_position: number; state_json: string; created_at: number },
+    {
+      name: string;
+      event_position: number;
+      state_json: string;
+      created_at: number;
+    },
     [string, number]
   >(
     'SELECT name, event_position, state_json, created_at FROM runtime_named_snapshots WHERE thread_id = ? AND event_position <= ? ORDER BY event_position ASC, name ASC',
@@ -560,7 +633,12 @@ export function createRuntimeStore(
     'UPDATE runtime_sessions SET model_provider = ?, model_name = ?, updated_at = unixepoch() WHERE thread_id = ?',
   );
   const listSessions = db.query<
-    { thread_id: string; name: string; updated_at: number; first_message: string | null },
+    {
+      thread_id: string;
+      name: string;
+      updated_at: number;
+      first_message: string | null;
+    },
     [number]
   >(
     `SELECT s.thread_id, s.name, s.updated_at,
@@ -703,6 +781,7 @@ export function createRuntimeStore(
     insertForkEvent,
     selectEvents,
     selectAllEvents,
+    selectLastEventHead,
     upsertSnapshot,
     selectSnapshot,
     upsertNamedSnapshot,
@@ -733,6 +812,9 @@ export function createRuntimeStore(
     deleteSession,
     listNamedSnapshots,
     selectSnapshotRevision,
+    insertThreadFence,
+    selectThreadFence,
+    incrementThreadFence,
     deleteExpiredEffectLease,
     insertEffectLease,
     selectEffectLeaseOwner,
@@ -771,6 +853,65 @@ export function createRuntimeStore(
       throw error;
     }
   };
+
+  const observedEventHead = (threadId: string): RuntimeObservedEventHeadV1 => {
+    const head = selectLastEventHead.get(threadId);
+    return head
+      ? {
+          eventPosition: head.id,
+          revision: head.revision,
+          eventId: head.event_id,
+        }
+      : { eventPosition: 0, revision: 0, eventId: null };
+  };
+
+  const snapshotMetadata = (threadId: string): RuntimeSnapshotMetadata | null => {
+    const snapshot = selectSnapshot.get(threadId);
+    return snapshot
+      ? {
+          eventPosition: snapshot.event_position,
+          stateRevision: snapshot.state_revision,
+          stateChecksum: snapshot.state_checksum,
+          schemaVersion: snapshot.schema_version,
+        }
+      : null;
+  };
+
+  const threadGeneration = (threadId: string): number => {
+    insertThreadFence.run(threadId);
+    return selectThreadFence.get(threadId)?.generation ?? 1;
+  };
+
+  const advanceThreadGeneration = (threadId: string): number => {
+    insertThreadFence.run(threadId);
+    incrementThreadFence.run(threadId);
+    return selectThreadFence.get(threadId)?.generation ?? 2;
+  };
+
+  const persistenceIdentity = (threadId: string): RuntimePersistenceIdentityV1 => ({
+    generation: threadGeneration(threadId),
+    sourceSnapshot: snapshotMetadata(threadId),
+    observedHead: observedEventHead(threadId),
+  });
+
+  const sameSnapshotIdentity = (
+    left: RuntimeSnapshotMetadata | null,
+    right: RuntimeSnapshotMetadata | null,
+  ): boolean =>
+    left === null || right === null
+      ? left === right
+      : left.eventPosition === right.eventPosition &&
+        left.stateRevision === right.stateRevision &&
+        left.stateChecksum === right.stateChecksum &&
+        left.schemaVersion === right.schemaVersion;
+
+  const sameObservedHead = (
+    left: RuntimeObservedEventHeadV1,
+    right: RuntimeObservedEventHeadV1,
+  ): boolean =>
+    left.eventPosition === right.eventPosition &&
+    left.revision === right.revision &&
+    left.eventId === right.eventId;
 
   const store: RuntimeStore = {
     appendEvents(
@@ -816,12 +957,71 @@ export function createRuntimeStore(
       nextState: unknown,
       metadata?: RuntimeEventMetadata[],
       snapshotMetadata?: RuntimeSnapshotMetadata,
-    ): void {
-      if (isClosed) return;
+      expectedIdentity?: RuntimePersistenceIdentityV1,
+    ): RuntimePersistenceIdentityV1 {
+      if (isClosed) {
+        throw new Error(`RuntimeStore is closed for thread ${threadId}.`);
+      }
       try {
-        db.transaction(() => {
+        return db.transaction(() => {
+          const state = nextState as {
+            revision?: number;
+            schemaVersion?: number;
+          };
+          const schemaVersion = state.schemaVersion ?? 0;
+          const actualIdentity = persistenceIdentity(threadId);
+          if (expectedIdentity) {
+            if (
+              actualIdentity.generation !== expectedIdentity.generation ||
+              !sameSnapshotIdentity(
+                actualIdentity.sourceSnapshot,
+                expectedIdentity.sourceSnapshot,
+              ) ||
+              !sameObservedHead(actualIdentity.observedHead, expectedIdentity.observedHead)
+            ) {
+              throw new RuntimeRevisionConflictError(
+                threadId,
+                expectedIdentity.observedHead.revision,
+                actualIdentity.observedHead.revision,
+              );
+            }
+          } else if (schemaVersion >= 22) {
+            throw new RuntimeRevisionConflictError(
+              threadId,
+              state.revision ?? 0,
+              actualIdentity.sourceSnapshot?.stateRevision ?? null,
+            );
+          }
+
+          if (schemaVersion >= 22) {
+            if (!metadata || metadata.length !== events.length) {
+              throw new Error('Schema-v22 persistence requires metadata for every event.');
+            }
+            const expectedBaseRevision = actualIdentity.observedHead.revision;
+            const eventIds = new Set<string>();
+            for (const [index, entry] of metadata.entries()) {
+              if (
+                !entry.eventId ||
+                eventIds.has(entry.eventId) ||
+                entry.revision !== expectedBaseRevision + index + 1
+              ) {
+                throw new Error(
+                  'Schema-v22 event metadata must have unique ids and contiguous revisions.',
+                );
+              }
+              eventIds.add(entry.eventId);
+            }
+            const expectedNextRevision = expectedBaseRevision + events.length;
+            if (state.revision !== expectedNextRevision) {
+              throw new RuntimeRevisionConflictError(
+                threadId,
+                expectedNextRevision,
+                state.revision ?? null,
+              );
+            }
+          }
           const firstRevision = metadata?.[0]?.revision;
-          if (firstRevision != null) {
+          if (firstRevision != null && schemaVersion < 22) {
             const expectedRevision = firstRevision - 1;
             const actualRevision = selectSnapshotRevision.get(threadId)?.state_revision ?? null;
             if (
@@ -836,7 +1036,7 @@ export function createRuntimeStore(
             claimMcpEgressNonce(threadId, event);
             const entry = metadata?.[index];
             if (entry) {
-              insertEventWithMetadata.run(
+              const inserted = insertEventWithMetadata.run(
                 threadId,
                 JSON.stringify(event),
                 entry.eventId,
@@ -844,20 +1044,39 @@ export function createRuntimeStore(
                 entry.causationId ?? null,
                 entry.occurredAt ?? new Date().toISOString(),
               );
+              if (schemaVersion >= 22 && inserted.changes !== 1) {
+                throw new Error(`Schema-v22 event '${entry.eventId}' was already persisted.`);
+              }
             } else {
               insertEvent.run(threadId, JSON.stringify(event));
             }
           }
           const serialized = JSON.stringify(nextState);
-          const state = nextState as { revision?: number; schemaVersion?: number };
+          const nextHead = observedEventHead(threadId);
+          const nextMetadata: RuntimeSnapshotMetadata = {
+            eventPosition: nextHead.eventPosition,
+            stateRevision: state.revision ?? 0,
+            stateChecksum: checksum(serialized),
+            schemaVersion,
+          };
+          if (
+            schemaVersion >= 22 &&
+            snapshotMetadata &&
+            !sameSnapshotIdentity(snapshotMetadata, nextMetadata)
+          ) {
+            throw new Error(
+              'Schema-v22 snapshot metadata override does not match committed state.',
+            );
+          }
           upsertSnapshot.run(
             threadId,
             serialized,
-            snapshotMetadata?.eventPosition ?? selectLastEventPosition.get(threadId)?.id ?? 0,
-            snapshotMetadata?.stateRevision ?? state.revision ?? 0,
-            snapshotMetadata?.stateChecksum ?? checksum(serialized),
-            snapshotMetadata?.schemaVersion ?? state.schemaVersion ?? 0,
+            snapshotMetadata?.eventPosition ?? nextMetadata.eventPosition,
+            snapshotMetadata?.stateRevision ?? nextMetadata.stateRevision,
+            snapshotMetadata?.stateChecksum ?? nextMetadata.stateChecksum,
+            snapshotMetadata?.schemaVersion ?? nextMetadata.schemaVersion,
           );
+          return persistenceIdentity(threadId);
         })();
       } catch (e) {
         if (
@@ -920,16 +1139,33 @@ export function createRuntimeStore(
     saveSnapshot(threadId: string, state: unknown): void {
       if (isClosed) return;
       try {
-        const serialized = JSON.stringify(state);
-        const snapshot = state as { revision?: number; schemaVersion?: number };
-        upsertSnapshot.run(
-          threadId,
-          serialized,
-          selectLastEventPosition.get(threadId)?.id ?? 0,
-          snapshot.revision ?? 0,
-          checksum(serialized),
-          snapshot.schemaVersion ?? 0,
-        );
+        db.transaction(() => {
+          const serialized = JSON.stringify(state);
+          const snapshot = state as {
+            revision?: number;
+            schemaVersion?: number;
+          };
+          if ((snapshot.schemaVersion ?? 0) >= 22) {
+            const identity = persistenceIdentity(threadId);
+            if (
+              identity.sourceSnapshot !== null ||
+              identity.observedHead.eventPosition !== 0 ||
+              snapshot.revision !== 0
+            ) {
+              throw new Error(
+                'Schema-v22 rolling snapshots require an exact persistence identity.',
+              );
+            }
+          }
+          upsertSnapshot.run(
+            threadId,
+            serialized,
+            selectLastEventPosition.get(threadId)?.id ?? 0,
+            snapshot.revision ?? 0,
+            checksum(serialized),
+            snapshot.schemaVersion ?? 0,
+          );
+        })();
       } catch (e) {
         throw new Error(
           `Failed to save snapshot for thread ${threadId}: ${e instanceof Error ? e.message : String(e)}`,
@@ -964,6 +1200,86 @@ export function createRuntimeStore(
         // 快照数据损坏时返回 null / Return null on corrupted snapshot data
         return null;
       }
+    },
+
+    loadPersistenceIdentity(threadId: string): RuntimePersistenceIdentityV1 {
+      if (isClosed) {
+        return {
+          generation: 0,
+          sourceSnapshot: null,
+          observedHead: { eventPosition: 0, revision: 0, eventId: null },
+        };
+      }
+      return db.transaction(() => persistenceIdentity(threadId))();
+    },
+
+    compareAndSaveMigratedSnapshot(
+      threadId: string,
+      identity: RuntimeMigrationIdentityV1,
+      candidate: unknown,
+      events: RuntimeEvent[] = [],
+      metadata: RuntimeEventMetadata[] = [],
+    ): 'saved' | 'stale' {
+      if (isClosed) return 'stale';
+      return db.transaction(() => {
+        const actualIdentity = persistenceIdentity(threadId);
+        if (
+          actualIdentity.generation !== identity.generation ||
+          !sameSnapshotIdentity(actualIdentity.sourceSnapshot, identity.sourceSnapshot) ||
+          !sameObservedHead(actualIdentity.observedHead, identity.observedHead)
+        ) {
+          return 'stale';
+        }
+        if (events.length !== metadata.length) {
+          throw new Error('Migration closure events require exact envelope metadata.');
+        }
+        const eventIds = new Set<string>();
+        for (const [index, event] of events.entries()) {
+          const entry = metadata[index]!;
+          if (
+            !entry.eventId ||
+            eventIds.has(entry.eventId) ||
+            entry.revision !== actualIdentity.observedHead.revision + index + 1
+          ) {
+            throw new Error('Migration closure events must have unique contiguous revisions.');
+          }
+          eventIds.add(entry.eventId);
+          claimMcpEgressNonce(threadId, event);
+          const inserted = insertEventWithMetadata.run(
+            threadId,
+            JSON.stringify(event),
+            entry.eventId,
+            entry.revision,
+            entry.causationId ?? null,
+            entry.occurredAt ?? new Date(0).toISOString(),
+          );
+          if (inserted.changes !== 1) {
+            throw new Error(`Migration closure event '${entry.eventId}' was already persisted.`);
+          }
+        }
+        const serialized = JSON.stringify(candidate);
+        const state = candidate as {
+          revision?: number;
+          schemaVersion?: number;
+        };
+        const nextHead = observedEventHead(threadId);
+        if (state.revision !== nextHead.revision) {
+          throw new RuntimeRevisionConflictError(
+            threadId,
+            nextHead.revision,
+            state.revision ?? null,
+          );
+        }
+        upsertSnapshot.run(
+          threadId,
+          serialized,
+          nextHead.eventPosition,
+          state.revision ?? 0,
+          checksum(serialized),
+          state.schemaVersion ?? 0,
+        );
+        return 'saved';
+      })();
     },
 
     saveNamedSnapshot(
@@ -1042,6 +1358,7 @@ export function createRuntimeStore(
     deleteSession(threadId: string): void {
       if (isClosed) return;
       db.transaction(() => {
+        advanceThreadGeneration(threadId);
         deleteEvents.run(threadId);
         deleteSnapshot.run(threadId);
         deleteNamedSnapshots.run(threadId);
@@ -1067,7 +1384,11 @@ export function createRuntimeStore(
       if (isClosed) return null;
       const row = selectNamedSnapshotEntry.get(threadId, snapshotId);
       if (!row) return null;
-      return { snapshotId: row.name, eventPosition: row.event_position, createdAt: row.created_at };
+      return {
+        snapshotId: row.name,
+        eventPosition: row.event_position,
+        createdAt: row.created_at,
+      };
     },
 
     recordFilePreimage(
@@ -1128,10 +1449,19 @@ export function createRuntimeStore(
 
     restoreNamedSnapshot(threadId: string, snapshotId: string): boolean {
       if (isClosed) return false;
-      const snapshot = store.loadNamedSnapshot(threadId, snapshotId);
-      const entry = listNamedSnapshots.all(threadId).find((item) => item.name === snapshotId);
-      if (!snapshot || !entry) return false;
-      db.transaction(() => {
+      return db.transaction(() => {
+        const namedRow = selectNamedSnapshot.get(threadId, snapshotId);
+        const entry = selectNamedSnapshotEntry.get(threadId, snapshotId);
+        if (!namedRow || !entry) return false;
+        let snapshot: Record<string, unknown>;
+        try {
+          const parsed = JSON.parse(namedRow.state_json) as unknown;
+          if (!isRecord(parsed)) return false;
+          snapshot = parsed;
+        } catch {
+          return false;
+        }
+        advanceThreadGeneration(threadId);
         deleteEventsAfter.run(threadId, entry.event_position);
         deleteNamedSnapshotsAfter.run(threadId, entry.event_position);
         // ADR-0042 §4：文件原像随恢复点一同截断（调用方应在此之前完成文件恢复）
@@ -1147,8 +1477,8 @@ export function createRuntimeStore(
           state.schemaVersion ?? 0,
         );
         upsertSession.run(threadId);
+        return true;
       })();
-      return true;
     },
 
     forkSession(sourceThreadId: string, snapshotId: string, targetThreadId: string): boolean {
@@ -1180,83 +1510,121 @@ export function createRuntimeStore(
       const sourceNamedSnapshots = selectNamedSnapshotsForFork.all(sourceThreadId, position);
       const sourceFilePreimages = selectFilePreimagesForFork.all(sourceThreadId, position);
       const sourceModelRoute = store.getSessionModelRoute(sourceThreadId);
-      const forkState = rebindForkState(snapshot, targetThreadId);
-      db.transaction(() => {
-        deleteEvents.run(targetThreadId);
-        deleteSnapshot.run(targetThreadId);
-        deleteNamedSnapshots.run(targetThreadId);
-        deleteFilePreimages.run(targetThreadId);
-        deleteSession.run(targetThreadId);
-        upsertSession.run(targetThreadId);
-        if (sourceModelRoute) {
-          updateSessionModelRoute.run(
-            sourceModelRoute.provider,
-            sourceModelRoute.name,
-            targetThreadId,
-          );
-        }
-        const positionMap = new Map<number, number>();
-        for (const entry of sourceEvents) {
-          const inserted = insertForkEvent.run(
-            targetThreadId,
-            JSON.stringify(entry.event),
-            entry.event_id ?? null,
-            entry.revision ?? 0,
-            entry.causation_id ?? null,
-            entry.occurred_at ?? null,
-            entry.created_at,
-          );
-          positionMap.set(entry.id, Number(inserted.lastInsertRowid));
-        }
-        const remapPosition = (sourcePosition: number): number => {
-          let targetPosition = 0;
+      try {
+        db.transaction(() => {
+          const atomicSourceRolling =
+            store.loadSnapshotRecord<Record<string, unknown>>(sourceThreadId);
+          const atomicSelected =
+            snapshotId === '__runtime_current__'
+              ? atomicSourceRolling?.state
+              : store.loadNamedSnapshot<Record<string, unknown>>(sourceThreadId, snapshotId);
+          if (
+            !isRecord(atomicSelected) ||
+            JSON.stringify(atomicSelected) !== JSON.stringify(snapshot)
+          ) {
+            throw new Error('Fork source snapshot changed before guard join.');
+          }
+          advanceThreadGeneration(targetThreadId);
+          deleteEvents.run(targetThreadId);
+          deleteSnapshot.run(targetThreadId);
+          deleteNamedSnapshots.run(targetThreadId);
+          deleteFilePreimages.run(targetThreadId);
+          deleteSession.run(targetThreadId);
+          upsertSession.run(targetThreadId);
+          if (sourceModelRoute) {
+            updateSessionModelRoute.run(
+              sourceModelRoute.provider,
+              sourceModelRoute.name,
+              targetThreadId,
+            );
+          }
+          const positionMap = new Map<number, number>();
           for (const entry of sourceEvents) {
-            if (entry.id > sourcePosition) break;
-            targetPosition = positionMap.get(entry.id) ?? targetPosition;
+            const inserted = insertForkEvent.run(
+              targetThreadId,
+              JSON.stringify(entry.event),
+              entry.event_id ?? null,
+              entry.revision ?? 0,
+              entry.causation_id ?? null,
+              entry.occurred_at ?? null,
+              entry.created_at,
+            );
+            positionMap.set(entry.id, Number(inserted.lastInsertRowid));
           }
-          return targetPosition;
-        };
-        for (const preimage of sourceFilePreimages) {
-          insertForkFilePreimage.run(
-            targetThreadId,
-            preimage.path,
-            remapPosition(preimage.event_position),
-            preimage.content,
-            preimage.existed,
-            preimage.post_hash,
-            preimage.post_existed,
-            preimage.created_at,
+          const remapPosition = (sourcePosition: number): number => {
+            let targetPosition = 0;
+            for (const entry of sourceEvents) {
+              if (entry.id > sourcePosition) break;
+              targetPosition = positionMap.get(entry.id) ?? targetPosition;
+            }
+            return targetPosition;
+          };
+          let forkState = rebindForkState(snapshot, targetThreadId, remapPosition);
+          const copiedHead = sourceEvents.at(-1);
+          const copiedEventIds = new Set(
+            sourceEvents.flatMap((entry) => (entry.event_id ? [entry.event_id] : [])),
           );
-        }
-        const targetPosition = remapPosition(position);
-        const serialized = JSON.stringify(forkState);
-        const state = forkState as { revision?: number; schemaVersion?: number };
-        upsertSnapshot.run(
-          targetThreadId,
-          serialized,
-          targetPosition,
-          state.revision ?? 0,
-          checksum(serialized),
-          state.schemaVersion ?? 0,
-        );
-        for (const namedSnapshot of sourceNamedSnapshots) {
-          try {
-            const namedState = rebindForkState(
-              JSON.parse(namedSnapshot.state_json) as Record<string, unknown>,
+          forkState = {
+            ...forkState,
+            revision: copiedHead?.revision ?? 0,
+            ...(copiedHead?.event_id
+              ? { lastAppliedEventId: copiedHead.event_id }
+              : { lastAppliedEventId: undefined }),
+            appliedEventIds: Array.isArray(forkState.appliedEventIds)
+              ? forkState.appliedEventIds.filter(
+                  (eventId): eventId is string =>
+                    typeof eventId === 'string' && copiedEventIds.has(eventId),
+                )
+              : [],
+          };
+          for (const preimage of sourceFilePreimages) {
+            insertForkFilePreimage.run(
               targetThreadId,
+              preimage.path,
+              remapPosition(preimage.event_position),
+              preimage.content,
+              preimage.existed,
+              preimage.post_hash,
+              preimage.post_existed,
+              preimage.created_at,
             );
-            insertForkNamedSnapshot.run(
-              targetThreadId,
-              namedSnapshot.name,
-              remapPosition(namedSnapshot.event_position),
-              JSON.stringify(namedState),
-              namedSnapshot.created_at,
-            );
-          } catch {
-            // Earlier corrupt recovery points are omitted; the selected point was validated above.
           }
-        }
-      })();
+          const targetPosition = remapPosition(position);
+          const serialized = JSON.stringify(forkState);
+          const state = forkState as {
+            revision?: number;
+            schemaVersion?: number;
+          };
+          upsertSnapshot.run(
+            targetThreadId,
+            serialized,
+            targetPosition,
+            state.revision ?? 0,
+            checksum(serialized),
+            state.schemaVersion ?? 0,
+          );
+          for (const namedSnapshot of sourceNamedSnapshots) {
+            try {
+              const namedState = rebindForkState(
+                JSON.parse(namedSnapshot.state_json) as Record<string, unknown>,
+                targetThreadId,
+                remapPosition,
+              );
+              insertForkNamedSnapshot.run(
+                targetThreadId,
+                namedSnapshot.name,
+                remapPosition(namedSnapshot.event_position),
+                JSON.stringify(namedState),
+                namedSnapshot.created_at,
+              );
+            } catch {
+              // Earlier corrupt recovery points are omitted; the selected point was validated above.
+            }
+          }
+        })();
+      } catch {
+        return false;
+      }
       return true;
     },
 

@@ -9,6 +9,7 @@ import {
   parseFeatureOverride,
 } from '@/core/config/features';
 import { loadAgentConfig } from '@/core/config/index';
+import { resolveContextReclaimModeV1 } from '@/core/model/context-reclaim';
 import { resolveAutoReviewTimeout } from '@/core/runtime/executor';
 
 describe('feature flags', () => {
@@ -22,6 +23,7 @@ describe('feature flags', () => {
     expect(getFeatureFlags().contextCompactionV2).toBe(true);
     expect(getFeatureFlags().contextCompactionAutoV1).toBe(false);
     expect(getFeatureFlags().contextCompactionManualV1).toBe(true);
+    expect(getFeatureFlags().toolResultBudgetV2).toBe(false);
     expect(getFeatureFlags().contextReclaimV1).toBe(false);
     expect(getFeatureFlags().verificationV1).toBe(false);
     expect(getFeatureFlags().mcpProviderActionV1).toBe(false);
@@ -55,6 +57,7 @@ describe('feature flags', () => {
       contextCompactionAutoV1: true,
     });
     expect(parseFeatureOverride('contextReclaimV1')).toEqual({ contextReclaimV1: true });
+    expect(parseFeatureOverride('toolResultBudgetV2')).toEqual({ toolResultBudgetV2: true });
     expect(parseFeatureOverride('resourceBudgetV1')).toEqual({ resourceBudgetV1: true });
     expect(parseFeatureOverride('boundedCancellationV1')).toEqual({
       boundedCancellationV1: true,
@@ -124,5 +127,61 @@ describe('feature flags', () => {
     };
     expect(resolveAutoReviewTimeout({ ...config, features: { autoReviewV2: false } })).toBe(15_000);
     expect(resolveAutoReviewTimeout({ ...config, features: { autoReviewV2: true } })).toBe(321);
+  });
+
+  test('keeps reclaim defaults off and requires both Slice-A flags for live', () => {
+    expect(
+      resolveContextReclaimModeV1({
+        featureEnabled: false,
+        toolResultBudgetEnabled: true,
+        configuredMode: 'live',
+      }),
+    ).toBe('off');
+    expect(
+      resolveContextReclaimModeV1({
+        featureEnabled: true,
+        toolResultBudgetEnabled: false,
+        configuredMode: 'live',
+      }),
+    ).toBe('off');
+    expect(
+      resolveContextReclaimModeV1({
+        featureEnabled: true,
+        toolResultBudgetEnabled: true,
+        configuredMode: 'live',
+      }),
+    ).toBe('live');
+    expect(
+      resolveContextReclaimModeV1({
+        featureEnabled: true,
+        toolResultBudgetEnabled: false,
+        configuredMode: 'shadow',
+      }),
+    ).toBe('shadow');
+  });
+
+  test('accepts only strict reclaim modes and positive integer absolute thresholds', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-reclaim-config-'));
+    const configPath = join(dir, 'kite-code.jsonc');
+    try {
+      writeFileSync(
+        configPath,
+        '{ "provider": { "ollama": {} }, "compaction": { "reclaimMode": "live", "reclaimAfterEstimatedTokens": 4096 } }',
+      );
+      expect(loadAgentConfig({ configPath, providerName: 'ollama' }).compaction).toMatchObject({
+        reclaimMode: 'live',
+        reclaimAfterEstimatedTokens: 4096,
+      });
+      for (const invalid of [
+        '{ "provider": { "ollama": {} }, "compaction": { "reclaimMode": "automatic" } }',
+        '{ "provider": { "ollama": {} }, "compaction": { "reclaimAfterEstimatedTokens": 0 } }',
+        '{ "provider": { "ollama": {} }, "compaction": { "reclaimAfterEstimatedTokens": 1.5 } }',
+      ]) {
+        writeFileSync(configPath, invalid);
+        expect(() => loadAgentConfig({ configPath, providerName: 'ollama' })).toThrow();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

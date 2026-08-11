@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { buildMcpInventory, isMcpProviderError } from '@/core/mcp';
 import { TOOL_RESULT_BUDGET_POLICY_V1 } from '@/core/tools/result-budget';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import {
   LIST_MCP_RESOURCES_CONTRACT,
   LIST_MCP_TOOLS_CONTRACT,
@@ -34,6 +35,7 @@ const readOnlyEffects = () => ({
 
 export const listMcpResourcesSpec = defineExecutableTool({
   name: 'list_mcp_resources',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'coordination',
   contract: LIST_MCP_RESOURCES_CONTRACT.sections,
   inputSchema: listMcpResourcesInputSchema,
@@ -107,6 +109,7 @@ export const listMcpResourcesSpec = defineExecutableTool({
 
 export const listMcpToolsSpec = defineExecutableTool({
   name: 'list_mcp_tools',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'coordination',
   contract: LIST_MCP_TOOLS_CONTRACT.sections,
   inputSchema: listMcpToolsInputSchema,
@@ -147,6 +150,7 @@ export const listMcpToolsSpec = defineExecutableTool({
 
 export const readMcpResourceSpec = defineExecutableTool({
   name: 'read_mcp_resource',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'coordination',
   contract: READ_MCP_RESOURCE_CONTRACT.sections,
   inputSchema: readMcpResourceInputSchema,

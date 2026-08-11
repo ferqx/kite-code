@@ -41,6 +41,7 @@ import { createToolRegistry } from '@/core/tools/registry/registry';
 import type { ToolContext } from '@/core/tools/registry/spec';
 import { defineExecutableTool } from '@/core/tools/registry/spec';
 import { TOOL_RESULT_BUDGET_POLICY_V1 } from '@/core/tools/result-budget';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import type { ShellExecutor } from '@/core/tools/shell';
 import {
   buildDescription,
@@ -77,6 +78,7 @@ const sampleReadSpec = defineExecutableTool({
   }),
   declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
   minimumApproval: 'none',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   effects: () => ({
     effectClass: 'read_only',
     sideEffect: false,
@@ -106,6 +108,7 @@ const sampleWriteSpec = defineExecutableTool({
   }),
   declaredEffects: { filesystem: 'write', network: 'none', externalState: 'none' },
   minimumApproval: 'user',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   effects: () => ({
     effectClass: 'workspace_write',
     sideEffect: true,
@@ -575,7 +578,17 @@ describe('projectResult production closure', () => {
         },
       );
       expect(actual.stdout).toBe(expected.modelContent);
-      expect(actual.resultMeta).toEqual(expected.resultMeta);
+      expect(actual.resultMeta).toMatchObject({
+        path: expected.resultMeta.path,
+        truncated: expected.resultMeta.truncated,
+        workspaceMutationScope: expected.resultMeta.workspaceMutationScope,
+        rawResultDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        modelContentDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        toolResultReceipt: expect.objectContaining({
+          projectionMode: 'compat_v1',
+          toolIdentity: 'builtin:write_file',
+        }),
+      });
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -619,7 +632,17 @@ describe('dual output streams survive projection (regression)', () => {
       // 回归断言：失败命令的 stdout（测试输出、部分匹配）不得被投影丢弃。
       expect(actual.stdout).toBe('partial output before failure');
       expect(actual.stderr).toBe('make: *** [ci] Error 1');
-      expect(actual.resultMeta).toEqual(expected.resultMeta);
+      expect(actual.resultMeta).toMatchObject({
+        command: expected.resultMeta.command,
+        intent: expected.resultMeta.intent,
+        truncated: expected.resultMeta.truncated,
+        rawResultDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        modelContentDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+        toolResultReceipt: expect.objectContaining({
+          projectionMode: 'compat_v1',
+          toolIdentity: 'builtin:shell_execute',
+        }),
+      });
       expect(actual.action?.intent).toBe('other');
     } finally {
       rmSync(workspace, { recursive: true, force: true });

@@ -1,5 +1,5 @@
 import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { createAgentKernel } from '@/core/runtime/kernel';
 import {
   createZeroResourceUsageV1,
   LIMITED_RESOURCE_BUDGET_V1,
@@ -124,8 +124,16 @@ initial.tasks['crash-task'] = {
   planning: { kind: 'building_without_plan' },
   planHistory: [],
 };
-const next = events.reduce(reduceRuntimeState, initial);
+initial.planning = initial.tasks['crash-task'].planning;
 const store = createRuntimeStore(storePath);
-store.appendEventsAndSnapshot('crash-recovery', events, next);
+store.saveSnapshot('crash-recovery', initial);
+store.close();
+const kernel = createAgentKernel({
+  threadId: 'crash-recovery',
+  userId: 'fault-soak',
+  workspace: process.cwd(),
+  storePath,
+});
+kernel.processEvents(events);
 process.stdout.write('READY_TO_KILL\n');
 setInterval(() => {}, 60_000);

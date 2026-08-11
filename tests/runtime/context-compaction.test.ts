@@ -62,7 +62,7 @@ function requestedState() {
   return reduceRuntimeState(initial, {
     type: 'context.compaction_requested',
     compactionId: 'compact-1',
-    reason: 'auto',
+    reason: 'manual',
     requestedAtRevision: initial.revision,
     requestedAtTurnId: initial.turn.turnId,
     force: false,
@@ -105,7 +105,7 @@ describe('eventized context compaction', () => {
     const state = requestedState();
     expect(state.context.pendingCompaction).toMatchObject({
       compactionId: 'compact-1',
-      reason: 'auto',
+      reason: 'manual',
     });
     expect(decideNextEffect(state)).toEqual({
       type: 'compact_context',
@@ -162,12 +162,8 @@ describe('eventized context compaction', () => {
     });
   });
 
-  test.each([
-    'manual',
-    'auto',
-  ] as const)('%s success emits all three ephemeral phases and clears the spinner', async (reason) => {
+  test('manual success emits all three ephemeral phases and clears the spinner', async () => {
     const state = requestedState();
-    state.context.pendingCompaction!.reason = reason;
     const progress: Array<string | undefined> = [];
     const events = await executeContextCompaction({
       state,
@@ -222,12 +218,8 @@ describe('eventized context compaction', () => {
     expect(progress).toEqual(['preparing', 'summarizing', 'validating', undefined]);
   });
 
-  test.each([
-    'manual',
-    'auto',
-  ] as const)('%s failures clear ephemeral progress without persisting it', async (reason) => {
+  test('manual failures clear ephemeral progress without persisting it', async () => {
     const state = requestedState();
-    state.context.pendingCompaction!.reason = reason;
     const progress: Array<string | undefined> = [];
     const events = await executeContextCompaction({
       state,
@@ -311,7 +303,7 @@ describe('eventized context compaction', () => {
 
   test('rejects a checkpoint with fabricated token savings', async () => {
     const state = requestedState();
-    const checkpoint = validCheckpoint(state, 'auto', state.revision);
+    const checkpoint = validCheckpoint(state, 'manual', state.revision);
     const events = await executeContextCompaction({
       state,
       compactionId: 'compact-1',
@@ -443,7 +435,7 @@ describe('PR 1 — durable event JSON safety', () => {
     const event: ContextCompactionRequestedEvent = {
       type: 'context.compaction_requested',
       compactionId: 'compact-1',
-      reason: 'auto',
+      reason: 'manual',
       requestedAtRevision: 5,
       requestedAtTurnId: 'turn-1',
       force: false,
@@ -462,7 +454,7 @@ describe('PR 1 — durable event JSON safety', () => {
     const parsed = JSON.parse(JSON.stringify(event)) as ContextCompactionRequestedEvent;
     expect(parsed.type).toBe('context.compaction_requested');
     expect(parsed.compactionId).toBe('compact-1');
-    expect(parsed.reason).toBe('auto');
+    expect(parsed.reason).toBe('manual');
     // tools must not exist on the event
     expect('tools' in parsed).toBe(false);
   });
@@ -618,7 +610,7 @@ describe('PR 1 — durable event JSON safety', () => {
 
 // ── PR 6: Hard block + thrash state machine ──
 
-describe('PR 6 — hard block and thrash breaker', () => {
+describe('PR 6 — hard block', () => {
   test('correctness block factory requires auditable invariant evidence', () => {
     expect(() =>
       createContextCorrectnessBlock({
@@ -651,47 +643,6 @@ describe('PR 6 — hard block and thrash breaker', () => {
     });
     expect(recovered.context.hardBlock).toBeUndefined();
   });
-  test('auto low gain does NOT create hard block', () => {
-    const state = requestedState();
-    const failed = reduceRuntimeState(state, {
-      type: 'context.compaction_failed',
-      compactionId: 'compact-1',
-      sourceRevision: state.revision,
-      errorKind: 'insufficient_reduction',
-      message: 'low gain',
-      retryable: false,
-    });
-    expect(failed.context.hardBlock).toBeUndefined();
-    expect(failed.context.autoGuard.consecutiveLowGain).toBe(1);
-    expect(failed.context.autoGuard.disabledUntilManualAction).toBe(false); // 1 < 2
-  });
-
-  test('repeated auto low gain still does not create a hard block', () => {
-    const state = requestedState();
-    const first = reduceRuntimeState(state, {
-      type: 'context.compaction_failed',
-      compactionId: 'compact-1',
-      sourceRevision: state.revision,
-      errorKind: 'insufficient_reduction',
-      message: 'low gain',
-      retryable: false,
-    });
-    first.context.pendingCompaction = {
-      ...state.context.pendingCompaction!,
-      compactionId: 'compact-2',
-    };
-    const second = reduceRuntimeState(first, {
-      type: 'context.compaction_failed',
-      compactionId: 'compact-2',
-      sourceRevision: first.revision,
-      errorKind: 'insufficient_reduction',
-      message: 'low gain again',
-      retryable: false,
-    });
-    expect(second.context.hardBlock).toBeUndefined();
-    expect(second.context.autoGuard.disabledUntilManualAction).toBe(true);
-  });
-
   test('manual failure does NOT create hard block', () => {
     const state = requestedState();
     const manualState = {
@@ -710,7 +661,6 @@ describe('PR 6 — hard block and thrash breaker', () => {
       retryable: false,
     });
     expect(failed.context.hardBlock).toBeUndefined();
-    expect(failed.context.autoGuard.consecutiveLowGain).toBe(0);
   });
 
   test('hard block persists across unrelated events', () => {
@@ -731,7 +681,7 @@ describe('PR 6 — hard block and thrash breaker', () => {
     expect(current.context.hardBlock).toBeDefined();
   });
 
-  test('correctness hard block rejects both manual and auto compaction', () => {
+  test('correctness hard block rejects manual compaction', () => {
     const state = requestedState();
     state.context.hardBlock = {
       reason: 'unsafe_context_projection',
@@ -745,81 +695,6 @@ describe('PR 6 — hard block and thrash breaker', () => {
       reason: 'manual',
     };
     expect(decideNextEffect(state).type).toBe('recovery_blocked');
-    state.context.pendingCompaction.reason = 'auto';
-    expect(decideNextEffect(state).type).toBe('recovery_blocked');
-  });
-
-  test('thrash breaker disables proactive auto after 2 consecutive low-gain', () => {
-    const state = requestedState();
-    // First low gain
-    const current = reduceRuntimeState(state, {
-      type: 'context.compaction_failed',
-      compactionId: 'compact-1',
-      sourceRevision: state.revision,
-      errorKind: 'insufficient_reduction',
-      message: 'low gain 1',
-      retryable: false,
-    });
-    expect(current.context.autoGuard.consecutiveLowGain).toBe(1);
-    expect(current.context.autoGuard.disabledUntilManualAction).toBe(false);
-    // Second low gain
-    current.context.pendingCompaction = {
-      compactionId: 'compact-2',
-      reason: 'auto',
-      requestedAtRevision: current.revision,
-      requestedAtTurnId: current.turn.turnId,
-      force: false,
-      estimate: state.context.pendingCompaction!.estimate,
-    };
-    const second = reduceRuntimeState(current, {
-      type: 'context.compaction_failed',
-      compactionId: 'compact-2',
-      sourceRevision: state.revision + 1,
-      errorKind: 'insufficient_reduction',
-      message: 'low gain 2',
-      retryable: false,
-    });
-    expect(second.context.autoGuard.consecutiveLowGain).toBe(2);
-    expect(second.context.autoGuard.disabledUntilManualAction).toBe(true);
-  });
-
-  test('successful manual compaction clears the automatic thrash breaker', () => {
-    const state = requestedState();
-    state.context.pendingCompaction = {
-      ...state.context.pendingCompaction!,
-      reason: 'manual',
-    };
-    state.context.autoGuard = {
-      recentAutomaticCompactions: [{ turnIndex: 1, reductionRatio: 0.05, tokensAfter: 9_000 }],
-      consecutiveLowGain: 2,
-      disabledUntilManualAction: true,
-      recoveryAttempted: true,
-    };
-    const checkpoint = {
-      compactionId: 'compact-1',
-      version: 1 as const,
-      sourceRevision: state.revision,
-      sourceDigest: 'sha256:source',
-      coveredThroughMessageId: 'message-1',
-      coveredThroughTurnId: state.turn.turnId,
-      summary: summary('sha256:source'),
-      inputTokensBefore: 4_000,
-      inputTokensAfter: 2_000,
-      reason: 'manual' as const,
-      createdAt: '2026-07-20T00:00:01.000Z',
-    };
-    const completed = reduceRuntimeState(state, {
-      type: 'context.compaction_completed',
-      compactionId: 'compact-1',
-      sourceRevision: state.revision,
-      checkpoint,
-    });
-    expect(completed.context.autoGuard).toEqual({
-      recentAutomaticCompactions: [],
-      consecutiveLowGain: 0,
-      disabledUntilManualAction: false,
-      recoveryAttempted: false,
-    });
   });
 
   test('context.hard_blocked event sets durable hard block', () => {

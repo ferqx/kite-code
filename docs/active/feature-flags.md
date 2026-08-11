@@ -2,7 +2,9 @@
 
 状态：active
 读取时机：新增、删除或调整 runtime feature flag、配置合并、CLI 覆盖或灰度策略时。
-验证：`bun test tests/config/features.test.ts`、`bun run test:tui:system prompt-contract-v2-production`。
+验证：`bun test tests/config/features.test.ts tests/config.test.ts tests/tool-result-budget-v2.test.ts
+tests/runtime/context-reclaim-live.test.ts tests/runtime/context-reclaim-commit.test.ts`、
+`bun run test:tui:system prompt-contract-v2-production`。
 
 Runtime feature flags are registered in `src/core/config/features.ts`. Configuration is read from the optional `features` object in user and project `kite-code.jsonc`; project values override user values.
 
@@ -100,15 +102,21 @@ telemetry 也全部关闭。production composition 必须携带 registry 接受�
 | 开关 | 默认值 | 职责 |
 | --- | --- | --- |
 | `contextCompactionV2` | `true` | 启用 checkpoint 术语（检查点）、统一投影与压缩基础契约 |
-| `contextCompactionAutoV1` | `false` | 允许 `compaction.autoMode` 进入 `shadow` 或 `live`；不解释 Provider 术语（模型供应商）错误 |
+| `contextCompactionAutoV1` | `false` | 仅保留配置解析兼容；当前无自动压缩 producer，开启也不能进入 `shadow` 或 `live` |
 | `contextCompactionManualV1` | `true` | 允许 `/compact` 产生 `manual` |
-| `contextReclaimV1` | `false` | 允许 `compaction.reclaimMode=shadow` 评估确定性工具结果回收候选；当前不接受 `live` |
+| `toolResultBudgetV2` | `false` | 启用全工具有限 L1 V2 projector、receipt 与自包含 verified terminal；关闭时保持 `compat_v1` 模型可见字节 |
+| `contextReclaimV1` | `false` | 允许 `compaction.reclaimMode` 进入 `shadow` 或受控 `live`；effective live 还要求 `toolResultBudgetV2=true` |
 
-压缩原因固定为 `manual | auto`。自动模式固定为 `off | shadow | live`：`off` 不判断，`shadow` 只计算 trigger eligibility 术语（触发资格）且不调用摘要模型、不写 checkpoint 术语（检查点），`live` 命中阈值后产生 `reason=auto`。默认 flag 术语（功能开关）为 `false`，且未配置 `autoMode` 时按 `off` 处理。
+压缩原因 schema 为迁移兼容仍接受 `manual | auto`，但当前 producer 只生成 `manual`。`autoMode` 的
+`off | shadow | live` 值继续通过配置解析，以免旧配置变成启动错误；旧 decision/rollout 已删除，任何取值都不
+调度自动 summary、不写 checkpoint。未来自动行为必须由新 orchestrator 明确接线。
 
-工具结果 reclaim 与自动 summary 的 shadow 是两个独立控制面。`compaction.reclaimMode` 只允许
-`off | shadow`，未配置或 `contextReclaimV1=false` 时 effective mode 恒为 off。reclaim shadow 仅在 warning
-pressure、可信窗口且 Runtime 组合根显式注入 bounded in-memory reporter 时运行；不调用模型、不写
-checkpoint/event/snapshot/disk，也不改变 Provider payload。任何 `live` 配置都在 schema 边界拒绝。
+工具结果 reclaim 与自动 summary 是两个独立控制面。`compaction.reclaimMode` 的配置 schema 允许
+`off | shadow | live`，未配置、`contextReclaimV1=false` 或 `toolResultBudgetV2=false` 时 effective mode 恒为
+off。shadow 在 warning/更高 pressure 或显式绝对 threshold 下评估候选；只有注入 bounded in-memory reporter
+时才记录聚合统计，不调用模型、不写 checkpoint/event/snapshot/disk，也不改变 Provider payload。live 还必须
+显式配置 `reclaimMode=live`，仅在成功 primary 的封闭 terminal batch 中推进 bounded commit/receipt；当前受信
+route qualification registry 为空，因此只属于 development-only 路径，不能由用户配置或模型名称自证
+production 资格。完整语义与排除项见 [`three-tier-context-reduction.md`](three-tier-context-reduction.md)。
 
 通用 HTTP 400、其他 Provider 术语（模型供应商）失败、token ratio 术语（文本计量比例）或压缩失败都不会创建 hard block 术语（硬阻断）；用户可在会话恢复交互后自行执行 `/compact`。

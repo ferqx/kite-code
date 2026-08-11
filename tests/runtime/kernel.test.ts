@@ -33,6 +33,7 @@ describe('AgentKernel durability', () => {
         userId: 'user',
         workspace: '/workspace',
       });
+      legacy.schemaVersion = 21;
       legacy.tools.calls['read-legacy'] = {
         toolCallId: 'read-legacy',
         modelMessageId: 'assistant-legacy',
@@ -96,6 +97,32 @@ describe('AgentKernel durability', () => {
         },
       ];
       const store = createRuntimeStore(storePath);
+      store.appendEvents(legacy.session.threadId, [
+        {
+          type: 'tool.finished',
+          toolCallId: 'read-legacy',
+          name: 'read_file',
+          result: {
+            ok: true,
+            command: 'read',
+            exitCode: 0,
+            stdout: 'legacy output',
+            stderr: '',
+          },
+        },
+        {
+          type: 'tool.finished',
+          toolCallId: 'read-trusted',
+          name: 'read_file',
+          result: {
+            ok: true,
+            command: 'read',
+            exitCode: 0,
+            stdout: 'trusted output',
+            stderr: '',
+          },
+        },
+      ]);
       store.saveSnapshot(legacy.session.threadId, legacy);
       store.close();
 
@@ -115,14 +142,22 @@ describe('AgentKernel durability', () => {
       expect(restored.getState().tools.calls['read-trusted']?.result?.resultMeta).toMatchObject({
         rawResultDigest: 'b'.repeat(64),
         modelContentDigest: 'c'.repeat(64),
-        digestScope: 'raw',
+        digestScope: 'legacy_unknown',
+        terminalMigration: {
+          migratedFromSchemaVersion: 21,
+          originalEventPosition: 2,
+        },
       });
       expect(restored.getState().transcript.messages[1]).toMatchObject({
         kind: 'tool',
         resultMeta: {
           rawResultDigest: 'b'.repeat(64),
           modelContentDigest: 'c'.repeat(64),
-          digestScope: 'raw',
+          digestScope: 'legacy_unknown',
+          terminalMigration: {
+            migratedFromSchemaVersion: 21,
+            originalEventPosition: 2,
+          },
         },
       });
       restored.close();
@@ -192,7 +227,13 @@ describe('AgentKernel durability', () => {
       store.appendEvents(
         threadId,
         [request],
-        [{ eventId: 'request-1', revision: 1, occurredAt: '2026-07-22T00:00:01.000Z' }],
+        [
+          {
+            eventId: 'request-1',
+            revision: 1,
+            occurredAt: '2026-07-22T00:00:01.000Z',
+          },
+        ],
       );
       store.close();
 
@@ -210,7 +251,13 @@ describe('AgentKernel durability', () => {
       tailStore.appendEvents(
         threadId,
         [completed],
-        [{ eventId: 'completed-1', revision: 2, occurredAt: '2026-07-22T00:00:02.000Z' }],
+        [
+          {
+            eventId: 'completed-1',
+            revision: 2,
+            occurredAt: '2026-07-22T00:00:02.000Z',
+          },
+        ],
       );
       tailStore.close();
       const afterCompletedTail = createAgentKernel({
@@ -361,7 +408,30 @@ describe('AgentKernel durability', () => {
           ok: true,
         },
       ];
+      legacy.tools.calls['tool-1'] = {
+        toolCallId: 'tool-1',
+        modelMessageId: 'assistant-legacy',
+        name: 'read_file',
+        args: { path: 'legacy.txt' },
+        status: 'succeeded',
+        createdAtTurnId: legacy.turn.turnId,
+        result: { ok: true, summary: 'legacy content' },
+      };
       const store = createRuntimeStore(storePath);
+      store.appendEvents(legacy.session.threadId, [
+        {
+          type: 'tool.finished',
+          toolCallId: 'tool-1',
+          name: 'read_file',
+          result: {
+            ok: true,
+            command: 'read',
+            exitCode: 0,
+            stdout: 'legacy content',
+            stderr: '',
+          },
+        },
+      ]);
       store.saveSnapshot(legacy.session.threadId, legacy);
       store.close();
 
@@ -504,7 +574,10 @@ describe('AgentKernel durability', () => {
       });
       const { providerAdmission: _admission, ...schema11 } = state;
       const store = createRuntimeStore(storePath);
-      store.saveSnapshot(state.session.threadId, { ...schema11, schemaVersion: 11 });
+      store.saveSnapshot(state.session.threadId, {
+        ...schema11,
+        schemaVersion: 11,
+      });
       store.close();
 
       const restored = createAgentKernel({
@@ -514,7 +587,10 @@ describe('AgentKernel durability', () => {
         storePath,
       });
       expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
-      expect(restored.getState().providerAdmission).toEqual({ pending: [], waivers: {} });
+      expect(restored.getState().providerAdmission).toEqual({
+        pending: [],
+        waivers: {},
+      });
       restored.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -548,6 +624,15 @@ describe('AgentKernel durability', () => {
         status: 'started',
       };
       const store = createRuntimeStore(storePath);
+      store.appendEvents(state.session.threadId, [
+        {
+          type: 'provider.action_required',
+          interactionId: 'provider-action',
+          providerId: 'github',
+          action: 'login',
+          originatingToolCallId: 'mcp',
+        },
+      ]);
       store.saveSnapshot(state.session.threadId, state);
       store.close();
 
@@ -614,7 +699,11 @@ describe('AgentKernel durability', () => {
         argumentsDigest: 'arguments',
         authorizationDigest: 'authorization',
         effectiveEffectsDigest: 'effects',
-        effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+        effectiveEffects: {
+          filesystem: 'none',
+          network: 'write',
+          externalState: 'write',
+        },
         recordedAt: '2026-07-14T00:00:00.000Z',
       });
       first.close();
@@ -654,7 +743,11 @@ describe('AgentKernel durability', () => {
         argumentsDigest: 'arguments',
         authorizationDigest: 'authorization',
         effectiveEffectsDigest: 'effects',
-        effectiveEffects: { filesystem: 'none', network: 'write', externalState: 'write' },
+        effectiveEffects: {
+          filesystem: 'none',
+          network: 'write',
+          externalState: 'write',
+        },
         recordedAt: '2026-07-14T00:00:00.000Z',
       });
       first.close();
@@ -694,11 +787,20 @@ test('runRuntimeLoop resumes a matching input action and persists its facts', as
   const store = createRuntimeStore(':memory:');
   const kernel = new AgentKernel({
     store,
-    initialState: createInitialRuntimeState({ threadId: 'loop', userId: 'u', workspace: '/' }),
+    initialState: createInitialRuntimeState({
+      threadId: 'loop',
+      userId: 'u',
+      workspace: '/',
+    }),
     interactionMode: 'accept_edits',
   });
   kernel.processEvents([
-    { type: 'tool.queued', toolCallId: 'accept_edits', name: 'ask_user', args: {} },
+    {
+      type: 'tool.queued',
+      toolCallId: 'accept_edits',
+      name: 'ask_user',
+      args: {},
+    },
     {
       type: 'user_input.requested',
       interactionId: 'input-1',
@@ -708,7 +810,11 @@ test('runRuntimeLoop resumes a matching input action and persists its facts', as
   ]);
   const events = [] as string[];
   for await (const event of runRuntimeLoop(kernel, async () => [], {
-    requestAction: async () => ({ type: 'input', interactionId: 'input-1', text: 'answer' }),
+    requestAction: async () => ({
+      type: 'input',
+      interactionId: 'input-1',
+      text: 'answer',
+    }),
   }))
     events.push(event.type);
   expect(events).toEqual(['user_input.answered', 'tool.finished']);
@@ -749,14 +855,14 @@ test('runRuntimeLoop completes provider recovery on a fresh turn without replayi
         journal: true,
       },
     },
-    {
-      type: 'provider.action_required',
-      interactionId: 'provider-action',
-      providerId: 'github',
-      action: 'login',
-      originatingToolCallId: 'mcp-call',
-    },
   ]);
+  kernel.processEvent({
+    type: 'provider.action_required',
+    interactionId: 'provider-action',
+    providerId: 'github',
+    action: 'login',
+    originatingToolCallId: 'mcp-call',
+  });
 
   const events: RuntimeEvent[] = [];
   for await (const event of runRuntimeLoop(kernel, async () => [], {
@@ -853,7 +959,13 @@ test.each([
       version: 1,
       title: 'Plan',
       bodyMarkdown: 'A plan to verify cancellation behavior.',
-      steps: [{ id: 'step-1', title: 'Verify cancellation', status: 'pending' as const }],
+      steps: [
+        {
+          id: 'step-1',
+          title: 'Verify cancellation',
+          status: 'pending' as const,
+        },
+      ],
       structuralDigest: 'digest-1',
       createdAtTurnId: initial.turn.turnId,
       updatedAtTurnId: initial.turn.turnId,
@@ -881,7 +993,11 @@ test.each([
     };
   }
 
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
   const events: string[] = [];
   const executedEffects: string[] = [];
   for await (const event of runRuntimeLoop(
@@ -908,7 +1024,7 @@ test.each([
   }
 
   if (interactionKind === 'awaiting_tool_approval') {
-    expect(events).toEqual(['approval.rejected', 'turn.aborted']);
+    expect(events).toEqual(['approval.rejected', 'tool.rejected', 'turn.aborted']);
     expect(executedEffects).toEqual([]);
   } else if (interactionKind === 'awaiting_review') {
     expect(events).toEqual(['plan.review_cancelled', 'tool.cancelled', 'turn.aborted']);
@@ -971,15 +1087,22 @@ test('runRuntimeLoop closes a suspended subagent when its approval is cancelled'
     },
   };
 
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
   const events: string[] = [];
   for await (const event of runRuntimeLoop(kernel, async () => [], {
-    requestAction: async () => ({ type: 'cancel', interactionId: 'approval-1' }),
+    requestAction: async () => ({
+      type: 'cancel',
+      interactionId: 'approval-1',
+    }),
   })) {
     events.push(event.type);
   }
 
-  expect(events).toEqual(['approval.rejected', 'turn.aborted']);
+  expect(events).toEqual(['approval.rejected', 'tool.rejected', 'turn.aborted']);
   expect(kernel.getState().interactions.kind).toBe('idle');
   expect(kernel.getState().suspendedSubagents).toEqual({});
   expect(kernel.getState().tools.calls['task-1']?.status).toBe('rejected');
@@ -990,7 +1113,11 @@ test('runRuntimeLoop persists and yields a durable terminal output event', async
   const store = createRuntimeStore(':memory:');
   const kernel = new AgentKernel({
     store,
-    initialState: createInitialRuntimeState({ threadId: 'final', userId: 'u', workspace: '/' }),
+    initialState: createInitialRuntimeState({
+      threadId: 'final',
+      userId: 'u',
+      workspace: '/',
+    }),
     interactionMode: 'accept_edits',
   });
   const events = [] as string[];
@@ -1003,7 +1130,9 @@ test('runRuntimeLoop persists and yields a durable terminal output event', async
         text: 'finished answer',
       },
     ],
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    },
   )) {
     events.push(event.type);
   }
@@ -1073,7 +1202,9 @@ test('runRuntimeLoop applies streamed tool events before the effect completes', 
         },
       ];
     },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    },
   )) {
     events.push(event);
     if (event.type === 'tool.progress') {
@@ -1109,11 +1240,25 @@ test('runRuntimeLoop rejects persistEvent when durable persistence throws instea
   const durableStore = createRuntimeStore(':memory:');
   const store: RuntimeStore = {
     ...durableStore,
-    appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata) {
+    appendEventsAndSnapshot(
+      threadId,
+      events,
+      nextState,
+      metadata,
+      snapshotMetadata,
+      expectedIdentity,
+    ) {
       if (events.some((event) => event.type === 'mcp.egress_decided')) {
         throw new RemoteMcpEgressNonceConflictError();
       }
-      durableStore.appendEventsAndSnapshot(threadId, events, nextState, metadata, snapshotMetadata);
+      return durableStore.appendEventsAndSnapshot(
+        threadId,
+        events,
+        nextState,
+        metadata,
+        snapshotMetadata,
+        expectedIdentity,
+      );
     },
   };
   const initialState = createInitialRuntimeState({
@@ -1130,7 +1275,11 @@ test('runRuntimeLoop rejects persistEvent when durable persistence throws instea
     status: 'queued',
     createdAtTurnId: initialState.turn.turnId,
   };
-  const kernel = new AgentKernel({ store, initialState, interactionMode: 'accept_edits' });
+  const kernel = new AgentKernel({
+    store,
+    initialState,
+    interactionMode: 'accept_edits',
+  });
   const decision = createRemoteMcpEgressReceiptV1({
     enabled: true,
     request: {
@@ -1141,7 +1290,10 @@ test('runRuntimeLoop rejects persistEvent when durable persistence throws instea
       invocationId: 'invocation-1',
       toolCallId: 'shell-1',
       argumentDigest: 'redacted-digest',
-      content: { dataClassifications: ['confidential'], payloadKinds: ['user_prompt'] },
+      content: {
+        dataClassifications: ['confidential'],
+        payloadKinds: ['user_prompt'],
+      },
     },
     reason: 'permit_consumed',
   });
@@ -1167,7 +1319,9 @@ test('runRuntimeLoop rejects persistEvent when durable persistence throws instea
         },
       ];
     },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    },
   );
   let timer: ReturnType<typeof setTimeout> | undefined;
   const first = await Promise.race([
@@ -1204,7 +1358,11 @@ test('runRuntimeLoop starts each approved shell while later sibling approval is 
       createdAtTurnId: initial.turn.turnId,
     };
   }
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
 
   let release!: () => void;
   const released = new Promise<void>((resolve) => {
@@ -1324,7 +1482,11 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
       createdAtTurnId: initial.turn.turnId,
     };
   }
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
 
   let releaseRunningShell!: () => void;
   const runningShellReleased = new Promise<void>((resolve) => {
@@ -1342,7 +1504,13 @@ test('cancelling a later shell approval aborts the turn and cancels a running si
     async (effect, state, emit) => {
       if (effect.type === 'call_model') {
         modelCalls += 1;
-        return [{ type: 'model.responded', messageId: 'unexpected', text: 'unexpected' }];
+        return [
+          {
+            type: 'model.responded',
+            messageId: 'unexpected',
+            text: 'unexpected',
+          },
+        ];
       }
       if (effect.type !== 'run_tools') return [];
       const toolCallId = effect.toolCallIds[0]!;
@@ -1442,12 +1610,22 @@ test('a cancelled concurrent shell rejects its late terminal event', () => {
     approvalGrant: 'approve_once',
     createdAtTurnId: initial.turn.turnId,
   };
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
-  const lease = kernel.beginEffect({ type: 'run_tools', toolCallIds: ['shell-1'] });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  const lease = kernel.beginEffect({
+    type: 'run_tools',
+    toolCallIds: ['shell-1'],
+  });
 
-  expect(kernel.applyEffectEvent(lease, { type: 'tool.started', toolCallId: 'shell-1' })).toBe(
-    true,
-  );
+  expect(
+    kernel.applyEffectEvent(lease, {
+      type: 'tool.started',
+      toolCallId: 'shell-1',
+    }),
+  ).toBe(true);
   kernel.processEvent({
     type: 'tool.cancelled',
     toolCallId: 'shell-1',
@@ -1488,8 +1666,15 @@ test('a stale concurrent shell lease accepts one ordered started-to-finished res
     approvalGrant: 'approve_once',
     createdAtTurnId: initial.turn.turnId,
   };
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
-  const lease = kernel.beginEffect({ type: 'run_tools', toolCallIds: ['shell-1'] });
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  const lease = kernel.beginEffect({
+    type: 'run_tools',
+    toolCallIds: ['shell-1'],
+  });
   kernel.processEvent({
     type: 'run.error',
     message: 'Unrelated diagnostic advanced the revision.',
@@ -1534,11 +1719,21 @@ test('a stale concurrent shell lease forwards ephemeral progress without advanci
     approvalGrant: 'approve_once',
     createdAtTurnId: initial.turn.turnId,
   };
-  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
-  const lease = kernel.beginEffect({ type: 'run_tools', toolCallIds: ['shell-1'] });
-  expect(kernel.applyEffectEvent(lease, { type: 'tool.started', toolCallId: 'shell-1' })).toBe(
-    true,
-  );
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  const lease = kernel.beginEffect({
+    type: 'run_tools',
+    toolCallIds: ['shell-1'],
+  });
+  expect(
+    kernel.applyEffectEvent(lease, {
+      type: 'tool.started',
+      toolCallId: 'shell-1',
+    }),
+  ).toBe(true);
   kernel.processEvent({
     type: 'run.error',
     message: 'A sibling advanced the revision.',
@@ -1711,8 +1906,8 @@ test('production executor commits provider recovery after the originating tool f
 
   expect(emitted.some((event) => event.type === 'provider.action_required')).toBe(false);
   expect(terminalEvents.map((event) => event.type)).toEqual([
-    'tool.failed',
     'provider.action_required',
+    'tool.failed',
   ]);
 });
 
@@ -1773,7 +1968,9 @@ test('runRuntimeLoop yields model deltas without persisting or reducing them', a
       expect(kernel.getState().revision).toBe(revisionBeforeDelta);
       return [{ type: 'model.responded', messageId: 'answer', text: 'complete' }];
     },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    },
   )) {
     events.push(event);
   }
@@ -1825,7 +2022,9 @@ test('runRuntimeLoop drops ephemeral model deltas from a stale effect lease', as
       }
       return [{ type: 'model.responded', messageId: 'fresh', text: 'fresh text' }];
     },
-    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    {
+      requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }),
+    },
     4,
   )) {
     events.push(event);
@@ -1837,7 +2036,11 @@ test('runRuntimeLoop drops ephemeral model deltas from a stale effect lease', as
 });
 
 function legacySubagentApprovalState(threadId: string): RuntimeState {
-  const state = createInitialRuntimeState({ threadId, userId: 'u', workspace: '/workspace' });
+  const state = createInitialRuntimeState({
+    threadId,
+    userId: 'u',
+    workspace: '/workspace',
+  });
   state.tools.calls['task-call'] = {
     toolCallId: 'task-call',
     modelMessageId: 'message-1',
@@ -1899,9 +2102,23 @@ function createBatchTrackingStore() {
   const store = createRuntimeStore(':memory:');
   const batches: RuntimeEvent[][] = [];
   const appendEventsAndSnapshot = store.appendEventsAndSnapshot.bind(store);
-  store.appendEventsAndSnapshot = (threadId, events, state) => {
+  store.appendEventsAndSnapshot = (
+    threadId,
+    events,
+    state,
+    metadata,
+    snapshotMetadata,
+    expectedIdentity,
+  ) => {
     batches.push(events);
-    appendEventsAndSnapshot(threadId, events, state);
+    return appendEventsAndSnapshot(
+      threadId,
+      events,
+      state,
+      metadata,
+      snapshotMetadata,
+      expectedIdentity,
+    );
   };
   return { store, batches };
 }
@@ -1937,7 +2154,12 @@ test('migrates a persisted v2 subagent approval and fails it without requesting 
     store.saveSnapshot(threadId, { ...v2, schemaVersion: 2 });
     store.close();
 
-    const kernel = createAgentKernel({ threadId, userId: 'u', workspace, storePath });
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'u',
+      workspace,
+      storePath,
+    });
     expect(kernel.getState().suspendedSubagents).toEqual({});
     expect(kernel.getState().legacyUnrecoverableSubagentApproval).toMatchObject({
       toolCallId: 'task-call',
@@ -1954,7 +2176,10 @@ test('migrates a persisted v2 subagent approval and fails it without requesting 
     expect(recoveryEvents).toMatchObject([
       {
         type: 'subagent.failed',
-        subagent: { id: 'subagent-legacy', error: expect.stringContaining('cannot be resumed') },
+        subagent: {
+          id: 'subagent-legacy',
+          error: expect.stringContaining('cannot be resumed'),
+        },
       },
       {
         type: 'tool.finished',
@@ -1986,7 +2211,12 @@ test('runRuntimeLoop executes legacy recovery without asking the action provider
     store.saveSnapshot(threadId, { ...v2, schemaVersion: 2 });
     store.close();
 
-    const kernel = createAgentKernel({ threadId, userId: 'u', workspace, storePath });
+    const kernel = createAgentKernel({
+      threadId,
+      userId: 'u',
+      workspace,
+      storePath,
+    });
     const emitted: string[] = [];
     for await (const event of runRuntimeLoop(kernel, createRecoveryExecutor(), {
       requestAction: async () => {
@@ -2055,7 +2285,11 @@ test('run cancellation atomically settles running and queued tools while keeping
       messageId: 'model-1',
       toolCalls: [
         { id: 'shell-1', name: 'shell_execute', args: { command: 'bun test' } },
-        { id: 'read-1', name: 'read_file', args: { path: 'src/core/runtime/agent.ts' } },
+        {
+          id: 'read-1',
+          name: 'read_file',
+          args: { path: 'src/core/runtime/agent.ts' },
+        },
       ],
     },
     {

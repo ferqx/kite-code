@@ -382,6 +382,7 @@ async function handleSubAgentResume(params: {
         recordFilePreimage: params.recordFilePreimage,
         recordNetworkDecision: params.recordNetworkDecision,
         mcpManager: params.mcpManager,
+        ...(call?.resultBudgetV2 ? { mcpResultBudgetV2: call.resultBudgetV2 } : {}),
         ...(resumedBinding
           ? {
               mcpInvocation: {
@@ -745,11 +746,6 @@ export async function executeRuntimeTools(params: {
                       return reason ? classifyFailure('tool_invalid_args', reason) : undefined;
                     })();
       if (invalidFailure) {
-        events.push({
-          type: 'tool.failed',
-          toolCallId,
-          failure: invalidFailure,
-        });
         const providerAction = providerActionRequiredEvent({
           enabled: flags?.mcpProviderActionV1 ?? false,
           providerId,
@@ -757,6 +753,11 @@ export async function executeRuntimeTools(params: {
           action: recoveryActionForFailure(invalidFailure),
         });
         if (providerAction) events.push(providerAction);
+        events.push({
+          type: 'tool.failed',
+          toolCallId,
+          failure: invalidFailure,
+        });
         continue;
       }
     }
@@ -1700,6 +1701,7 @@ export async function executeRuntimeTools(params: {
             recordFilePreimage: params.recordFilePreimage,
             recordNetworkDecision: params.recordNetworkDecision,
             mcpManager: params.mcpManager,
+            ...(call.resultBudgetV2 ? { mcpResultBudgetV2: call.resultBudgetV2 } : {}),
             ...(mcpDescriptor
               ? {
                   mcpInvocation: {
@@ -1847,11 +1849,6 @@ export async function executeRuntimeTools(params: {
               'tool_runtime_error',
               error instanceof Error ? error.message : String(error),
             );
-      events.push({
-        type: 'tool.failed',
-        toolCallId,
-        failure,
-      });
       const providerAction = providerActionRequiredEvent({
         enabled: Boolean(
           params.taskConfig && getFeatureFlags(params.taskConfig).mcpProviderActionV1,
@@ -1867,6 +1864,11 @@ export async function executeRuntimeTools(params: {
           : recoveryActionForFailure(failure),
       });
       if (providerAction) events.push(providerAction);
+      events.push({
+        type: 'tool.failed',
+        toolCallId,
+        failure,
+      });
     }
   }
   return events;

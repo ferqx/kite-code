@@ -19,6 +19,7 @@ export interface FeatureFlags {
   contextCompactionV2: boolean;
   contextCompactionAutoV1: boolean;
   contextCompactionManualV1: boolean;
+  toolResultBudgetV2: boolean;
   contextReclaimV1: boolean;
   sessionLoggingPolicyV1: boolean;
   providerDataPolicyV1: boolean;
@@ -50,6 +51,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   contextCompactionV2: true,
   contextCompactionAutoV1: false,
   contextCompactionManualV1: true,
+  toolResultBudgetV2: false,
   contextReclaimV1: false,
   sessionLoggingPolicyV1: true,
   providerDataPolicyV1: false,

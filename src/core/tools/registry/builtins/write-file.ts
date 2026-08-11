@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { computeLineDiff, formatContentOutput, formatDiffOutput } from '@/core/tools/diff';
 import { writeFile } from '@/core/tools/file';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { WRITE_FILE_CONTRACT } from '@/core/tools/tool-contracts';
 import { projectionDigest, truncateProjectedLines } from '../projection';
 import { defineExecutableTool } from '../spec';
@@ -14,6 +15,7 @@ export type WriteFileToolInput = z.infer<typeof writeFileInputSchema>;
 
 export const writeFileSpec = defineExecutableTool({
   name: 'write_file',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'computer',
   contract: WRITE_FILE_CONTRACT.sections,
   inputSchema: writeFileInputSchema,

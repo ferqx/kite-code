@@ -196,7 +196,27 @@ effects 必须明确为 `none|read`，且 provenance/Workspace Trust 满足；wr
 
 ## 工具结果结构化元数据
 
-工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`）从 ToolSpec projection/Runner 写入 `ToolCallRecord`，通过 `ToolCallResult` 进入 `RuntimeState.tools.calls`。Runner 必须在 MCP normalization、serialization 和任何模型可见截断前计算 raw digest，并显式传播截断状态；Controller 保留工具提供的可信 model digest，不能把 projected digest 标记成 raw。旧 snapshot/transcript 缺少 provenance 时统一归一为 `legacy_unknown`，不得猜测。`read_file`、`search_content`、`search_files` 是首批 reclaim 白名单，但当前只由默认关闭的 off/shadow planner 读取这些结构化事实；不执行 live 工具结果折叠，不改变 Provider payload、权限决策或审批路由。Shell/Search 4000 字符与 MCP 128 KiB 模型边界统一登记为 `ToolResultBudgetPolicyV1`，输出字节保持既有行为。
+`toolResultBudgetV2=false` 时工具结果继续走 `compat_v1`，既有模型可见字节不变。开启后，所有 production
+ToolSpec 都从 Registry 或排队时冻结的 Runtime binding 获得有限 `ToolResultBudgetV2`；Shell/Search 每路
+4000 字符、serialized/structured/MCP envelope 128 KiB UTF-8。dynamic MCP 的语义 output schema 与 catalog/
+binding revision 一起 canonical clone、递归 freeze 并进入 binding digest，execute 后 catalog 漂移不能改变已排队
+调用的 projector 或 validator。
+
+四类 terminal（finished/failed/rejected/cancelled）都携带唯一 self-contained `verified_v2` model result、
+receipt 和 `terminalIdentity`。validator 在 live、restore 与 replay 逐项重验 policy/tool/binding/projector/
+validator/mode、raw/model digest、UTF-8 bytes、stream 双路上限、continuation 与 terminal identity；schema v22
+缺失或篡改证明必须 quarantine，不能回退 reducer 临时正文。失败的 bounded DTO 不包含 args 或原始 error
+正文；执行后 projector/finalizer 失败保留外部副作用确定性并不可自动重试。
+
+工具完成时的 `resultMeta`（`path`、`totalLines`、`command`、`matchCount`、`rawResultDigest`、
+`modelContentDigest`、兼容字段 `contentDigest`、`digestScope`、`intent`、`truncated`、`resourceRevision`、
+`toolResultReceipt`、`terminalIdentity`）从统一 projector/finalizer 写入 `ToolCallRecord` 与 transcript Tool Result。
+raw digest 必须在 normalization/serialization/任何模型可见截断前计算；旧 snapshot/transcript 缺少证明时统一
+归一为 `legacy_unknown + legacy_unverified`，不得猜测或提升。
+
+L2 live 白名单仍只有 `read_file`、`search_content`、`search_files`，且要求完整 settled、成功、read-only、
+无 workspace mutation、全 `budget_v2` verified block。compat/legacy/mixed block 永不合格；L2 不改变工具审批、
+授权或执行路由。完整边界见 [`three-tier-context-reduction.md`](three-tier-context-reduction.md)。
 
 ## 子 Agent 阻塞审批请求构造
 

@@ -7,10 +7,17 @@ import { findSafeCompactionBoundary } from './compaction-v2';
 import type { ContextPreflight, ContextTokenEstimate } from './context-budget';
 import { preflightModelContext } from './context-budget';
 import {
+  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  type PreparedContextRequestReadyV2,
+  type ProjectionArtifactV2,
+  prepareContextRequestV2,
+} from './context-preparation-v2';
+import {
   buildContextProjection,
   type ContextProjection,
   type ContextProjectionEnvironment,
 } from './context-projection';
+import { resolveContextReclaimModeV1 } from './context-reclaim';
 import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
 
 // Legacy callers without a live projection environment retain a conservative fallback.
@@ -44,7 +51,9 @@ export function currentContextPreflight(
   config: AgentConfig,
   capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
   environment?: ContextProjectionEnvironment,
+  prepared?: PreparedContextRequestReadyV2,
 ) {
+  if (prepared) return prepared.effectiveProjection.preflight;
   return preflightModelContext({
     estimate: environment
       ? buildContextProjection({
@@ -64,6 +73,52 @@ export function currentContextPreflight(
   });
 }
 
+/** Pure diagnostic entry used by `/context` and manual preflight consumers. */
+export function prepareContextInspectionV2(input: {
+  state: Readonly<RuntimeState>;
+  config: AgentConfig;
+  capabilities: ResolvedModelCapabilities;
+  environment: ContextProjectionEnvironment;
+}): PreparedContextRequestReadyV2 {
+  const flags = getFeatureFlags(input.config);
+  const requestedMaxOutputTokens =
+    input.config.modelCapabilities?.maxOutputTokens ?? input.capabilities.maxOutputTokens ?? 0;
+  const prepared = prepareContextRequestV2({
+    purpose: 'context_inspection',
+    state: input.state,
+    environment: input.environment,
+    capabilities: input.capabilities,
+    requestedMaxOutputTokens,
+    promptAffectingParameters: {
+      temperature: 0,
+      streaming: input.capabilities.streaming,
+      providerType: input.config.providerType,
+      modelName: input.config.modelName,
+    },
+    toolResultBudgetPolicyId: flags.toolResultBudgetV2
+      ? 'tool-result-budget-registry:v2'
+      : 'tool-result-compat-registry:v1',
+    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+    reclaimMode: resolveContextReclaimModeV1({
+      featureEnabled: flags.contextReclaimV1,
+      toolResultBudgetEnabled: flags.toolResultBudgetV2,
+      configuredMode: input.config.compaction?.reclaimMode,
+    }),
+    reclaimAfterEstimatedTokens: input.config.compaction?.reclaimAfterEstimatedTokens,
+    providerSafetyRatio: input.config.compaction?.providerSafetyRatio,
+    compactRatio: input.config.compaction?.compactRatio,
+    hardRatio: input.config.compaction?.hardRatio,
+    warningRatio: input.config.compaction?.warningRatio,
+  });
+  if (!('effectiveProjection' in prepared)) {
+    throw new Error(`Context inspection preparation failed: ${prepared.next.reason}`);
+  }
+  if (prepared.next.kind !== 'diagnostic_only') {
+    throw new Error(`Context inspection produced unexpected next '${prepared.next.kind}'.`);
+  }
+  return prepared;
+}
+
 export interface ManualCompactionStatus {
   preflight: ReturnType<typeof currentContextPreflight>;
   safeBoundary: ReturnType<typeof findSafeCompactionBoundary>;
@@ -80,10 +135,11 @@ export function inspectManualContextCompaction(
   config: AgentConfig,
   capabilities?: ResolvedModelCapabilities,
   environment?: ContextProjectionEnvironment,
+  prepared?: PreparedContextRequestReadyV2,
 ): ManualCompactionStatus {
   const checkpoint = state.context.activeCheckpoint;
   return {
-    preflight: currentContextPreflight(state, config, capabilities, environment),
+    preflight: currentContextPreflight(state, config, capabilities, environment, prepared),
     safeBoundary: findSafeCompactionBoundary(state),
     ...(state.context.pendingCompaction
       ? { pendingCompactionId: state.context.pendingCompaction.compactionId }
@@ -107,6 +163,7 @@ export function manualContextCompactionEvent(input: {
   customInstructions?: string;
   capabilities?: ResolvedModelCapabilities;
   projectionEnvironment?: ContextProjectionEnvironment;
+  preparedContextV2?: PreparedContextRequestReadyV2;
 }): RuntimeEvent | null {
   if (input.state.context.pendingCompaction) return null;
   return {
@@ -121,6 +178,7 @@ export function manualContextCompactionEvent(input: {
       input.config,
       input.capabilities,
       input.projectionEnvironment,
+      input.preparedContextV2,
     ).estimate,
     ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
   };
@@ -135,31 +193,36 @@ export function buildContextStatusReport(
   config: AgentConfig,
   environment?: ContextProjectionEnvironment,
   capabilities: ResolvedModelCapabilities = resolveModelCapabilities({ config }),
+  prepared?: PreparedContextRequestReadyV2,
 ): {
-  projection: ContextProjection;
+  projection: ContextProjection | Readonly<ProjectionArtifactV2>;
   preflight: ContextPreflight;
   /** Formatted multi-line status text. */
   text: string;
 } {
-  const projection = buildContextProjection({
-    role: 'agent',
-    state,
-    serializedTools: environment?.serializedTools,
-    activeSkillInstructions: environment?.activeSkillInstructions,
-    workflowSkills: environment?.workflowSkills,
-    promptContractVersion: environment?.promptContractVersion,
-    projectInstructions: environment?.projectInstructions,
-    sandboxBackend: environment?.sandboxBackend,
-  });
-  const preflight = preflightModelContext({
-    estimate: projection.estimate,
-    capabilities,
-    requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
-    providerSafetyRatio: config.compaction?.providerSafetyRatio,
-    compactRatio: config.compaction?.compactRatio,
-    hardRatio: config.compaction?.hardRatio,
-    warningRatio: config.compaction?.warningRatio,
-  });
+  const projection =
+    prepared?.effectiveProjection ??
+    buildContextProjection({
+      role: 'agent',
+      state,
+      serializedTools: environment?.serializedTools,
+      activeSkillInstructions: environment?.activeSkillInstructions,
+      workflowSkills: environment?.workflowSkills,
+      promptContractVersion: environment?.promptContractVersion,
+      projectInstructions: environment?.projectInstructions,
+      sandboxBackend: environment?.sandboxBackend,
+    });
+  const preflight =
+    prepared?.effectiveProjection.preflight ??
+    preflightModelContext({
+      estimate: projection.estimate,
+      capabilities,
+      requestMaxOutputTokens: config.modelCapabilities?.maxOutputTokens,
+      providerSafetyRatio: config.compaction?.providerSafetyRatio,
+      compactRatio: config.compaction?.compactRatio,
+      hardRatio: config.compaction?.hardRatio,
+      warningRatio: config.compaction?.warningRatio,
+    });
 
   const e = projection.estimate;
   const utilizationPct =
@@ -169,27 +232,7 @@ export function buildContextStatusReport(
   const lastCp = checkpoint
     ? `Active checkpoint: ${checkpoint.compactionId.slice(0, 12)}...  Covered through: ${checkpoint.coveredThroughTurnId}`
     : 'No active checkpoint';
-  const flags = getFeatureFlags(config);
-  const autoMode =
-    flags.contextCompactionV2 && flags.contextCompactionAutoV1
-      ? (config.compaction?.autoMode ?? 'off')
-      : 'off';
-  const autoStatus =
-    !flags.contextCompactionV2 || !flags.contextCompactionAutoV1
-      ? 'disabled by feature flag'
-      : autoMode === 'off'
-        ? 'off'
-        : autoMode === 'shadow'
-          ? 'shadow (observe only)'
-          : state.context.autoGuard?.disabledUntilManualAction
-            ? 'paused (thrash breaker)'
-            : 'enabled';
-  const nextThreshold =
-    preflight.usableInputTokens != null
-      ? `${Math.floor(preflight.usableInputTokens * (config.compaction?.triggerRatio ?? config.compaction?.compactRatio ?? 0.9))}`
-      : config.compaction?.compactAfterEstimatedTokens != null
-        ? `${config.compaction.compactAfterEstimatedTokens}`
-        : 'N/A';
+  const autoStatus = 'unavailable (legacy configuration ignored)';
 
   const text = [
     `Context usage: ${e.totalInputTokens} / ${usable} usable tokens (${utilizationPct})`,
@@ -209,7 +252,7 @@ export function buildContextStatusReport(
       ? `Last reduction: ${checkpoint.inputTokensBefore} → ${checkpoint.inputTokensAfter} (${checkpoint.inputTokensBefore > 0 ? ((1 - checkpoint.inputTokensAfter / checkpoint.inputTokensBefore) * 100).toFixed(1) : 0}%)`
       : '',
     `Auto-compaction: ${autoStatus}`,
-    `Next proactive threshold: ${nextThreshold} tokens`,
+    `Next proactive threshold: N/A`,
   ]
     .filter(Boolean)
     .join('\n');

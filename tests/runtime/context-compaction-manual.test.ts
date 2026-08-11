@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentConfig } from '../../src/core/config';
 import {
+  buildContextStatusReport,
   compactResetPreflight,
   currentContextPreflight,
   inspectManualContextCompaction,
   manualContextCompactionEvent,
+  prepareContextInspectionV2,
 } from '../../src/core/model/context-compaction-manual';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { createInitialRuntimeState } from '../../src/core/runtime/state';
@@ -175,6 +177,46 @@ describe('manual context compaction service', () => {
     expect(event.estimate.systemTokens).toBeGreaterThan(0);
     expect(event.estimate.toolSchemaTokens).toBeGreaterThan(0);
     expect(event.estimate.totalInputTokens).toBeGreaterThan(event.estimate.transcriptTokens);
+  });
+
+  test('inspection and manual preflight consume one immutable prepared artifact', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'prepared-manual-inspection',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    const environment = { serializedTools: [], workflowSkills: [] };
+    const capabilities = {
+      providerName: 'manual',
+      modelName: 'manual',
+      contextWindowTokens: 10_000,
+      contextWindowSource: 'explicit_config' as const,
+      maxOutputTokens: 1_000,
+      maxOutputTokensSource: 'explicit_config' as const,
+      streaming: false,
+    };
+    const before = structuredClone(state);
+    const prepared = prepareContextInspectionV2({
+      state,
+      config,
+      capabilities,
+      environment,
+    });
+    const report = buildContextStatusReport(state, config, environment, capabilities, prepared);
+    const request = manualContextCompactionEvent({
+      state,
+      config,
+      capabilities,
+      projectionEnvironment: environment,
+      preparedContextV2: prepared,
+    });
+    expect(prepared.next).toEqual({ kind: 'diagnostic_only' });
+    expect(report.projection).toBe(prepared.effectiveProjection);
+    expect(report.preflight).toBe(prepared.effectiveProjection.preflight);
+    expect(request?.type === 'context.compaction_requested' ? request.estimate : undefined).toBe(
+      prepared.effectiveProjection.estimate,
+    );
+    expect(state).toEqual(before);
   });
 
   test('reset is not blocked by local token pressure', () => {

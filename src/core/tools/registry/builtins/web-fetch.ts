@@ -3,6 +3,7 @@ import {
   createNetworkBoundaryFetchV1,
   NetworkBoundaryError,
 } from '@/core/sandbox/network-enforcer';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { WEB_FETCH_CONTRACT } from '@/core/tools/tool-contracts';
 import { fetchAndExtract } from '@/core/web/extractor';
 import type { WebFetchResult } from '@/core/web/types';
@@ -43,6 +44,7 @@ type GovernedWebFetchResult = WebFetchResult & {
 
 export const webFetchSpec = defineExecutableTool({
   name: 'web_fetch',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'computer',
   contract: WEB_FETCH_CONTRACT.sections,
   inputSchema: webFetchInputSchema,

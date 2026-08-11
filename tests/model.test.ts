@@ -167,6 +167,41 @@ describe('model transient retry', () => {
     }
   }, 10_000);
 
+  test('exposes a same-route single-attempt model for non-replayable compaction', async () => {
+    let requests = 0;
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        requests++;
+        return Response.json(
+          { error: { message: 'temporary failure', type: 'server_error' } },
+          { status: 500 },
+        );
+      },
+    });
+    try {
+      const binding = createChatModel({
+        providerName: 'single-attempt',
+        providerType: 'openai-compatible',
+        apiKey: 'sk-local-test',
+        baseURL: new URL('/v1', server.url).toString(),
+        modelName: 'single-attempt-model',
+        sandbox: { enabled: true },
+      });
+      expect(binding.singleAttemptModel).toBeDefined();
+      await expect(
+        generateText({
+          model: binding.singleAttemptModel!,
+          prompt: 'summarize once',
+          maxRetries: 0,
+        }),
+      ).rejects.toThrow();
+      expect(requests).toBe(1);
+    } finally {
+      server.stop(true);
+    }
+  });
+
   test('does not retry non-transient API errors', async () => {
     let attempts = 0;
     const error = new APICallError({

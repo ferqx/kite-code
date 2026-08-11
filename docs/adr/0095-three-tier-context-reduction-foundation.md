@@ -4,6 +4,8 @@
 日期：2026-08-09
 补充：ADR-0021、ADR-0022、ADR-0024、ADR-0057、ADR-0090、ADR-0091
 关联：`docs/design/2026-08-09-three-tier-context-reduction-rfc.md`、`docs/space/plans/2026-08-09-context-reclaim-foundation.md`
+后续提案：`docs/design/2026-08-10-three-tier-context-reduction-complete-rfc.md`
+当前后续：ADR-0100 与 `docs/design/2026-08-10-progressive-context-compaction-rfc.md`
 
 ## 背景
 

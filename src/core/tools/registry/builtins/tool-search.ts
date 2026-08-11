@@ -10,6 +10,7 @@ import {
   searchUnavailableProviders,
 } from '@/core/capabilities/search';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { TOOL_SEARCH_CONTRACT } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
@@ -22,6 +23,7 @@ export type ToolSearchInput = z.infer<typeof toolSearchInputSchema>;
 
 export const toolSearchSpec = defineExecutableTool({
   name: 'tool_search',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'coordination',
   contract: TOOL_SEARCH_CONTRACT.sections,
   inputSchema: toolSearchInputSchema,

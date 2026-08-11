@@ -5,11 +5,23 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentConfig } from '../src/core/config';
 import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
 import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints';
+import { reduceRuntimeState } from '../src/core/runtime/reducer';
+import { createInitialRuntimeState } from '../src/core/runtime/state';
+import {
+  finalizeToolTerminalEventV2,
+  validateVerifiedToolTerminalEventV2,
+} from '../src/core/runtime/tool-terminal-v2';
 import { TOOL_RESULT_BUDGET_POLICY_V1 } from '../src/core/tools/result-budget';
+import {
+  freezeRuntimeOutputSchemaV2,
+  resolveRuntimeToolResultBudgetV2,
+  UTF8_TOOL_RESULT_BUDGET_V2,
+} from '../src/core/tools/result-budget-v2';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
 
 // ── Helpers ──
@@ -283,6 +295,99 @@ describe('runApprovedTool — read_mcp_resource', () => {
 });
 
 describe('runApprovedTool — bound MCP policy', () => {
+  it('finalizes a real dynamic MCP result against its queue-frozen binding across catalog drift', async () => {
+    const resolvedBudget = resolveRuntimeToolResultBudgetV2({
+      toolIdentity: 'mcp:auth/read',
+      catalogRevision: 'catalog-r1',
+      bindingRevision: 'capability-r1',
+      budget: UTF8_TOOL_RESULT_BUDGET_V2,
+      outputSchema: freezeRuntimeOutputSchemaV2({
+        type: 'object',
+        required: ['ok'],
+        properties: { ok: { type: 'boolean' } },
+      }),
+    });
+    const manager = {
+      callCapability: async () => ({
+        content: [{ type: 'text' as const, text: 'authenticated read' }],
+        structuredContent: { ok: true },
+      }),
+      findCapability: () => ({
+        outputSchema: {
+          type: 'object',
+          required: ['ok'],
+          properties: { ok: { type: 'string' } },
+        },
+      }),
+    } as unknown as McpRuntimeProvider;
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        source: 'mcp',
+        id: 'call-frozen-budget',
+        name: 'mcp__auth__read',
+        args: { id: '42' },
+        reason: 'Read authenticated fixture data',
+        protectedCommand: 'mcp__auth__read',
+      } as PendingToolRequest,
+      mcpManager: manager,
+      mcpInvocation: { capabilityId: 'mcp:auth/read', expectedRevision: 'capability-r1' },
+      mcpResultBudgetV2: resolvedBudget,
+      mcpPolicy: {
+        effects: { filesystem: 'none', network: 'read', externalState: 'read' },
+        minimumApproval: 'none',
+      },
+      taskConfig: { features: { toolResultBudgetV2: true } } as AgentConfig,
+    });
+    expect(result.ok, result.stderr).toBe(true);
+    expect(result.resultMeta?.toolResultReceipt).toMatchObject({
+      projectionMode: 'budget_v2',
+      toolIdentity: 'mcp:auth/read',
+      bindingDigest: resolvedBudget.bindingDigest,
+    });
+    expect(result.capabilityResult?.status).toBe('success');
+
+    let state = reduceRuntimeState(
+      createInitialRuntimeState({ threadId: 'mcp-drift', userId: 'u', workspace: '/ws' }),
+      {
+        type: 'tool.queued',
+        toolCallId: 'call-frozen-budget',
+        name: 'mcp__auth__read',
+        args: { id: '42' },
+        modelMessageId: 'assistant-1',
+        bindingId: 'binding-r1',
+        capabilityId: 'mcp:auth/read',
+        capabilityRevision: 'capability-r1',
+        resultBudgetV2: resolvedBudget,
+      },
+    );
+    state = {
+      ...state,
+      capabilities: { ...state.capabilities, catalogRevision: 'catalog-r2-after-queue' },
+    };
+    const terminal = finalizeToolTerminalEventV2(
+      state,
+      {
+        type: 'tool.finished',
+        toolCallId: 'call-frozen-budget',
+        name: 'mcp__auth__read',
+        result: {
+          ok: result.ok,
+          command: result.command,
+          exitCode: result.exitCode,
+          stdout: result.stdout,
+          stderr: result.stderr,
+          resultMeta: result.resultMeta,
+        },
+      },
+      'budget_v2',
+    );
+    expect(() => validateVerifiedToolTerminalEventV2(state, terminal)).not.toThrow();
+    expect(terminal.modelResult.resultMeta.toolResultReceipt.bindingDigest).toBe(
+      resolvedBudget.bindingDigest,
+    );
+  });
+
   it('executes a binding-validated read-only MCP tool without inventing a second approval', async () => {
     let called = false;
     const manager = {
@@ -604,13 +709,17 @@ describe('runApprovedTool 鈥?search_content', () => {
     expect(result.stdout).toContain('src/alpha.ts:1:export const marker = "needle";');
     expect(result.stdout).not.toContain('beta.ts');
     expect(result.command).toBe('search_content needle');
-    expect(result.resultMeta).toEqual({
+    expect(result.resultMeta).toMatchObject({
       path: '.',
       matchCount: 1,
       truncated: false,
       rawResultDigest: expect.any(String),
       modelContentDigest: expect.any(String),
       digestScope: 'raw',
+      toolResultReceipt: expect.objectContaining({
+        projectionMode: 'compat_v1',
+        toolIdentity: 'builtin:search_content',
+      }),
     });
   });
 });

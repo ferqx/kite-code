@@ -33,7 +33,7 @@ import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
 import { eventsForRunCancellation } from './actions';
 import type { RuntimeEvent } from './events';
-import { createRuntimeEffectExecutor, prepareRuntimeEffectForBudgetV1 } from './executor';
+import { createRuntimeEffectExecutor, prepareRuntimeEffectV2 } from './executor';
 import { resolveFailureModeV1 } from './failure-mode-conformance';
 import { recordRuntimeFailure } from './failures';
 import { createAgentKernel } from './kernel';
@@ -94,7 +94,10 @@ export interface RunRuntimeAgentInput {
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
   /** Explicit user-requested Workflow Contract activations for the initial task. */
-  initialSkillActivations?: Array<{ skillId: string; input: Record<string, unknown> }>;
+  initialSkillActivations?: Array<{
+    skillId: string;
+    input: Record<string, unknown>;
+  }>;
   interactionMode?: InteractionMode;
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
@@ -150,6 +153,9 @@ export async function* runRuntimeAgent(
       input.sandboxBackend === 'unknown'
         ? false
         : sandboxSupportsFullModeV1(input.sandboxBackend ?? 'none'),
+    toolResultProjectionMode: getFeatureFlags(input.config).toolResultBudgetV2
+      ? 'budget_v2'
+      : 'compat_v1',
   });
   const sessionLoggingPolicy =
     input.sessionLoggingPolicy ??
@@ -192,7 +198,10 @@ export async function* runRuntimeAgent(
     : undefined;
   const forwardExternalAbort = () => executionAbortController.abort(input.signal?.reason);
   if (input.signal?.aborted) forwardExternalAbort();
-  else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
+  else
+    input.signal?.addEventListener('abort', forwardExternalAbort, {
+      once: true,
+    });
   const cancelRun = (
     reason = 'Cancelled by user.',
     cause: 'user' | 'error' = 'user',
@@ -463,21 +472,19 @@ export async function* runRuntimeAgent(
       provider,
       10_000,
       (effect, state) =>
-        getFeatureFlags(input.config).resourceBudgetV1
-          ? prepareRuntimeEffectForBudgetV1(effect, state as import('./state').RuntimeState, {
-              config: input.config,
-              model,
-              shellExecutor: input.shellExecutor,
-              sandboxBackend: input.sandboxBackend,
-              mcpManager: input.mcpManager,
-              skills: input.skills,
-              skillOptions: input.skillOptions,
-              signal: executionAbortController.signal,
-              providerDataAdmission,
-              remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
-              subagentEventSink: () => {},
-            })
-          : effect,
+        prepareRuntimeEffectV2(effect, state as import('./state').RuntimeState, {
+          config: input.config,
+          model,
+          shellExecutor: input.shellExecutor,
+          sandboxBackend: input.sandboxBackend,
+          mcpManager: input.mcpManager,
+          skills: input.skills,
+          skillOptions: input.skillOptions,
+          signal: executionAbortController.signal,
+          providerDataAdmission,
+          remoteMcpEgressPermitResolver: input.remoteMcpEgressPermitResolver,
+          subagentEventSink: () => {},
+        }),
       executionAbortController.signal,
     )) {
       collector.recordRuntime(event);

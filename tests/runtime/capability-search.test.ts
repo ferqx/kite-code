@@ -58,6 +58,63 @@ function config(overrides: Partial<AgentConfig> = {}): AgentConfig {
 }
 
 describe('progressive capability disclosure', () => {
+  test('freezes the dynamic MCP result budget identity in tool.queued', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'queue-result-budget',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    const selected = {
+      ...descriptor('read'),
+      outputSchema: {
+        type: 'object',
+        required: ['ok'],
+        properties: { ok: { type: 'boolean', description: 'remote prose is not persisted' } },
+      },
+    };
+    const snapshot = createSnapshot([selected]);
+    const manager = new McpConnectionManager();
+    manager.getCapabilitySnapshot = () => snapshot;
+
+    const events = await invokeRuntimeModel({
+      model: createMockModel([
+        {
+          message: aiMessage({
+            content: '',
+            tool_calls: [
+              { id: 'mcp-read-1', name: 'mcp__catalog__read', args: { value: 'fixture' } },
+            ],
+          }),
+        },
+      ]),
+      state,
+      config: config({
+        features: {
+          capabilityCatalogV1: true,
+          mcpRuntimeBindingV1: true,
+          toolSearchV1: true,
+          toolResultBudgetV2: true,
+        },
+      }),
+      mcpManager: manager,
+    });
+    const queued = events.find(
+      (event): event is Extract<RuntimeEvent, { type: 'tool.queued' }> =>
+        event.type === 'tool.queued',
+    );
+    expect(queued?.resultBudgetV2).toMatchObject({
+      source: 'runtime_binding',
+      toolIdentity: selected.capabilityId,
+      policyId: 'tool-result-budget:v2',
+    });
+    expect(queued?.resultBudgetV2?.bindingDigest).toMatch(/^[0-9a-f]{64}$/);
+    expect(queued?.resultBudgetV2?.outputSchema).toMatchObject({
+      status: 'frozen',
+      schema: { properties: { ok: { type: 'boolean' } } },
+    });
+    expect(JSON.stringify(queued?.resultBudgetV2?.outputSchema)).not.toContain('remote prose');
+  });
+
   test('keeps MCP resources out of capability search while resource tools stay built in', () => {
     const resource: CapabilityDescriptor = {
       ...descriptor('resource'),

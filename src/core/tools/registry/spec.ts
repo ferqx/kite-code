@@ -22,6 +22,7 @@ import type { NetworkBoundaryPolicyV1 } from '@/core/sandbox/network-policy';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
+import type { ToolModelResultBudgetV2 } from '@/core/tools/result-budget-v2';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { ToolContractSource } from '@/core/tools/tool-contracts';
 import type { ShellNetworkBrokerV1, ShellNetworkMode } from '@/core/types';
@@ -173,6 +174,8 @@ export interface BaseToolSpec<Name extends string = string, Input = unknown> {
   readonly declaredEffects: EffectProfile;
   /** 静态最低审批 — CapabilityDescriptor 投影输入。 */
   readonly minimumApproval: CapabilityApproval;
+  /** Finite model-result projection contract. Every production spec must declare one. */
+  readonly modelResultBudgetV2: ToolModelResultBudgetV2;
   /** 可用性谓词；省略表示始终可用。替代 createAgentTools 的条件 spread。 */
   availability?(context: ToolContext): boolean;
   /** 每次调用的动态分类；shell 工具复用命令形态分析，不读取治理参数。 */

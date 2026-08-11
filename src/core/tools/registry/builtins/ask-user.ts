@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { ASK_USER_CONTRACT } from '@/core/tools/tool-contracts';
 import type { UserInputRequest } from '@/protocol/events';
 import { defineInterruptTool } from '../spec';
@@ -67,6 +68,7 @@ export function normalizeAskUserInput(input: AskUserInput): UserInputRequest {
 
 export const askUserSpec = defineInterruptTool({
   name: 'ask_user',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'interrupt',
   contract: ASK_USER_CONTRACT.sections,
   inputSchema: askUserInputSchema,

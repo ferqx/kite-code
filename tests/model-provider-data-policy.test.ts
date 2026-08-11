@@ -266,7 +266,7 @@ describe('model Provider data admission', () => {
       {
         type: 'context.compaction_requested',
         compactionId: 'provider-compaction',
-        reason: 'auto',
+        reason: 'manual',
         requestedAtRevision: 0,
         requestedAtTurnId: 'turn-0',
         force: false,

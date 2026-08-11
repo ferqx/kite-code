@@ -23,6 +23,11 @@ export interface FrameToolResultMeta {
   workspaceMutationScope?: string[];
   /** Provenance of digest fields — 'legacy_unknown' means pre-V2 data, never fold. */
   digestScope?: 'raw' | 'projected' | 'legacy_unknown';
+  toolResultReceipt?: import('@/core/tools/result-budget-v2').ToolResultBudgetReceiptV2;
+  continuation?: import('@/core/tools/result-budget-v2').ToolResultContinuationReceiptV2;
+  terminalMigration?: import('@/core/runtime/tool-terminal-v2').MigratedToolModelResultV2;
+  terminalIdentity?: string;
+  terminalKind?: 'tool.finished' | 'tool.failed' | 'tool.rejected' | 'tool.cancelled';
 }
 
 // ── Frame types ──

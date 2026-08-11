@@ -27,12 +27,12 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 - Retry: `Retrying` + warning 色
 - Approval 等待: `Waiting` + muted 色
 - Input 等待: `Asking` + warning 色
-- Context compaction: `preparing → summarizing → validating`，由 App-only action 驱动，不写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除。手动 `/compact` 的动画紧跟命令以内联输出展示，不占用通用会话 StatusBar；自动压缩仍使用 StatusBar。
+- Context compaction: `preparing → summarizing → validating`，由 App-only action 驱动，不写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除。当前唯一入口是手动 `/compact`，动画紧跟命令以内联输出展示，不占用通用会话 StatusBar。旧 auto producer 已移除，`placement=status` 只保留历史展示兼容，不能自行触发压缩。
 - Idle plan mode: `Shift+Tab to exit - describe your task` + muted 色
 
 **阶段不变性规则**：一旦进入 Working，永不回退 Thinking；一旦进入 Finishing，永不回退 Working。
 
-手动 `/compact` 不属于普通 Agent run。其 `compactionProgress.placement=inline` 时，`OutputArea` 在命令下方显示专用动画，`StatusBar` 保持隐藏；progress 清除后动画立即消失。自动压缩使用 `placement=status`，继续复用 StatusBar。
+手动 `/compact` 不属于普通 Agent run。其 `compactionProgress.placement=inline` 时，`OutputArea` 在命令下方显示专用动画，`StatusBar` 保持隐藏；progress 清除后动画立即消失。PSMC-03..06 的新 orchestrator 尚未实施，不存在当前自动压缩状态流；Session Memory 不属于当前状态设计。
 
 ## 状态推导
 

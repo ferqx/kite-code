@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { updatePlanAction } from '@/core/runtime/plan-facade';
+import { UTF8_TOOL_RESULT_BUDGET_V2 } from '@/core/tools/result-budget-v2';
 import { UPDATE_PLAN_CONTRACT } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
@@ -22,6 +23,7 @@ export type UpdatePlanInput = z.infer<typeof updatePlanInputSchema>;
 
 export const updatePlanSpec = defineExecutableTool({
   name: 'update_plan',
+  modelResultBudgetV2: UTF8_TOOL_RESULT_BUDGET_V2,
   kind: 'runtime_action',
   contract: UPDATE_PLAN_CONTRACT.sections,
   inputSchema: updatePlanInputSchema,

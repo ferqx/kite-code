@@ -58,6 +58,13 @@ Route identity 绑定 provider/endpoint/model/capability sources、summary/token
 policy/estimator、Tool/Skill、Provider Data Policy、suite/scorer 和 artifact digest；任一变化撤销旧结果。
 当前 qualified route set 为空，自定义 endpoint 无资格。
 
+Slice A 的 deterministic L2 reclaim 使用独立、source-owned 的 route evidence registry；该 registry 当前也为空。
+本地 2,000-block/8 MiB evidence producer 与独立 verifier 只证明 frozen fixture 下的 latency、isolated maxRSS
+增量、metadata 上限、off payload identity 和 tamper/drift fail-closed，不构成真实 Provider route qualification。
+用户配置、模型名、本机 benchmark 或 synthetic receipt 不能写入 registry 或产生 production support；因此
+`reclaimMode=live` 仍是显式 development-only 路径。旧 Slice B 的 L3 route/cache qualification runner 与
+registry branch 已移除，不能继承 Slice A 的 local evidence；未来资格必须由新路线重新定义。
+
 无资格时 manual/auto 都关闭，禁止 silent compact；handoff contract 要求保留 transcript 并可保存
 diff、Plan、checks、pending，超长任务明确 unsupported，`/clear`/新 session 不能冒充成功压缩。
 旧 4.9–4.11 adapter 和 `compaction-rollout-evidence.ts` 固定保持

@@ -96,3 +96,10 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0092](0092-prompt-contract-v2.md) | accepted | 模型上下文分层加载项目指令、投影真实 Runtime 状态，并仅采用可信 Capability 描述 |
 | [0093](0093-opencode-go-release-provider-smoke.md) | accepted | G1 第二条真实 Provider smoke 从阿里千问 Token Plan 迁移到固定 OpenCode Go route |
 | [0094](0094-prompt-contract-v2-default-migration.md) | accepted | 取消固定十四日等待，并因最终候选任务成功率回退而保持 Prompt Contract V2 默认关闭 |
+| [0095](0095-three-tier-context-reduction-foundation.md) | accepted | 三级上下文缩减首个 Foundation 只接受 L1 policy identity 与 L2 off/shadow |
+| [0096](0096-three-tier-context-reduction-l1-l2-live.md) | accepted | 三级上下文缩减的 L1 全工具预算、统一 prepared artifact 与 L2 live |
+| [0097](0097-three-tier-context-reduction-l3-source-convergence.md) | superseded | 旧 L3 source convergence、checkpoint v2 与 durable refill guard 路线 |
+| [0098](0098-progressive-session-memory-compaction.md) | superseded | 旧渐进式路线与 Slice B 清场依据；会话记忆层级由 ADR-0100 取代 |
+| [0099](0099-session-memory-lifecycle.md) | proposed | 延期的可选会话记忆增强，不是当前压缩计划依赖 |
+| [0100](0100-checkpoint-working-set-compaction.md) | accepted | 三级采用 MicroCompact、Checkpoint Working Set 与 SummaryCompact |
+| [0101](0101-verified-checkpoint-working-set-protocol.md) | accepted | 冻结 verified checkpoint、Working Set 区间、摘要续跑与双 writer 所有权 |

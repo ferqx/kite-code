@@ -33,9 +33,19 @@ import {
   createModelContextSummaryGenerator,
   createNarrativeContextCompactor,
 } from '@/core/model/compaction-summary';
+import type { PreparedPrimaryContextRequestV2 } from '@/core/model/context-admission-v2';
 import { preflightModelContext } from '@/core/model/context-budget';
+import {
+  type PreparedContextCapabilitySetV2,
+  prepareContextCapabilitySetV2,
+} from '@/core/model/context-capability-v2';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
+import {
+  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  prepareContextRequestV2,
+} from '@/core/model/context-preparation-v2';
 import { buildContextProjection } from '@/core/model/context-projection';
+import { resolveContextReclaimModeV1 } from '@/core/model/context-reclaim';
 import type { ReclaimShadowReporter } from '@/core/model/context-reclaim-shadow';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
@@ -110,6 +120,7 @@ function reviewerProviderDataAdmission(
 export function resolveRuntimeContextProjectionEnvironment(
   dependencies: RuntimeExecutorDependencies,
   state: import('./state').RuntimeState,
+  capabilitySet?: PreparedContextCapabilitySetV2,
 ) {
   const flags = getFeatureFlags(dependencies.config);
   const skillCatalog =
@@ -127,10 +138,147 @@ export function resolveRuntimeContextProjectionEnvironment(
     skills: dependencies.skills,
     skillOptions: dependencies.skillOptions,
     skillCatalog,
+    ...(capabilitySet
+      ? {
+          mcpBindings: [...capabilitySet.mcpBindings],
+          disclosedDescriptors: [...capabilitySet.disclosedDescriptors],
+        }
+      : {}),
     subagentEventSink: dependencies.subagentEventSink,
     signal: dependencies.signal,
     sandboxBackend: dependencies.sandboxBackend,
   });
+}
+
+export function prepareRuntimeEffectV2(
+  effect: import('./effects').RuntimeEffect,
+  state: import('./state').RuntimeState,
+  dependencies: RuntimeExecutorDependencies,
+): import('./runner').RuntimeEffectPreparationV2 {
+  if (effect.type === 'compact_context') {
+    return { effect, preparationEvents: [] };
+  }
+  if (effect.type !== 'call_model') {
+    return { effect, preparationEvents: [] };
+  }
+  const flags = getFeatureFlags(dependencies.config);
+  // The v2 dispatch contract requires a durable reservation/effect lease.
+  // Compatibility runs without the resource ledger retain the legacy path.
+  if (!flags.resourceBudgetV1) {
+    return { effect, preparationEvents: [] };
+  }
+  const capabilities = resolveModelCapabilities({
+    config: dependencies.config,
+    adapter: dependencies.model.capabilityMetadata,
+  });
+  const skillCatalog =
+    dependencies.skillOptions && flags.skillWorkflowV1 && flags.skillActivationV2
+      ? refreshSkillCatalog(dependencies.skillOptions, {
+          resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
+        })
+      : dependencies.skillCatalog;
+  const capabilityPreparation = prepareContextCapabilitySetV2({
+    state,
+    config: dependencies.config,
+    modelSupportsToolCalls: dependencies.model.supportsToolCalls !== false,
+    modelCapabilities: capabilities,
+    mcpManager: dependencies.mcpManager,
+    skillCatalog,
+  });
+  if (capabilityPreparation.preparationEvents.length > 0) {
+    return {
+      effect,
+      preparationEvents: capabilityPreparation.preparationEvents,
+    };
+  }
+  const configuredMaxOutput =
+    typeof dependencies.config.modelKwargs?.maxOutputTokens === 'number'
+      ? dependencies.config.modelKwargs.maxOutputTokens
+      : typeof dependencies.config.modelKwargs?.maxTokens === 'number'
+        ? dependencies.config.modelKwargs.maxTokens
+        : undefined;
+  const remainingOutputTokens =
+    state.resourceBudget.status === 'active'
+      ? state.resourceBudget.budget.maxRunOutputTokens -
+        committedResourceUsageV1(state.resourceBudget).counters.outputTokens
+      : undefined;
+  const requestedMaxOutputTokens = Math.floor(
+    Math.min(
+      configuredMaxOutput ?? capabilities.maxOutputTokens ?? remainingOutputTokens ?? 0,
+      remainingOutputTokens ?? Number.POSITIVE_INFINITY,
+    ),
+  );
+  if (requestedMaxOutputTokens <= 0) {
+    throw new Error('Model output admission requires a positive resolved output limit.');
+  }
+  const environment = resolveRuntimeContextProjectionEnvironment(
+    { ...dependencies, skillCatalog },
+    state,
+    capabilityPreparation.capabilitySet,
+  );
+  const reclaimMode = resolveContextReclaimModeV1({
+    featureEnabled: flags.contextReclaimV1,
+    toolResultBudgetEnabled: flags.toolResultBudgetV2,
+    configuredMode: dependencies.config.compaction?.reclaimMode,
+  });
+  const normalPromptAffectingParameters = {
+    temperature: 0,
+    streaming: capabilities.streaming,
+    providerType: dependencies.config.providerType,
+    modelName: dependencies.config.modelName,
+    maxOutputTokens: requestedMaxOutputTokens,
+  };
+  const prepared = prepareContextRequestV2({
+    purpose: 'normal',
+    state,
+    environment,
+    capabilities,
+    requestedMaxOutputTokens,
+    promptAffectingParameters: normalPromptAffectingParameters,
+    toolResultBudgetPolicyId: flags.toolResultBudgetV2
+      ? 'tool-result-budget-registry:v2'
+      : 'tool-result-compat-registry:v1',
+    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+    reclaimMode,
+    reclaimAfterEstimatedTokens: dependencies.config.compaction?.reclaimAfterEstimatedTokens,
+    providerSafetyRatio: dependencies.config.compaction?.providerSafetyRatio,
+    compactRatio: dependencies.config.compaction?.compactRatio,
+    hardRatio: dependencies.config.compaction?.hardRatio,
+    warningRatio: dependencies.config.compaction?.warningRatio,
+  });
+  if (!('effectiveProjection' in prepared)) {
+    throw new Error(
+      prepared.next.kind === 'correctness_blocked'
+        ? prepared.next.reason
+        : `Prepared context is not primary-ready: ${prepared.next.kind}.`,
+    );
+  }
+  if (prepared.next.kind !== 'primary_ready') {
+    throw new Error(`Prepared context is not primary-ready: ${prepared.next.kind}.`);
+  }
+  if (flags.providerDataPolicyV1) {
+    const decision = dependencies.providerDataAdmission?.(
+      providerPayloadFromModelPromptV1(prepared.effectiveProjection.providerMessages),
+      'primary_model',
+    ) ?? {
+      admitted: false,
+      reason: 'mandatory_policy_unavailable' as const,
+      routeAlias: 'unresolved',
+    };
+    if (!decision.admitted) throw new ProviderDataAdmissionError(decision);
+  }
+  return {
+    effect: {
+      ...effect,
+      resourceEstimate: {
+        inputTokens: prepared.effectiveProjection.estimate.totalInputTokens,
+        maxOutputTokens: requestedMaxOutputTokens,
+      },
+      preparedContextV2: prepared as PreparedPrimaryContextRequestV2,
+      preparedCapabilitySetV2: capabilityPreparation.capabilitySet,
+    },
+    preparationEvents: [],
+  };
 }
 
 /** Prepare the exact model input and bounded output before Runtime reservation. */
@@ -242,6 +390,12 @@ export function createRuntimeEffectExecutor(
     });
   return async (effect, state, emit, executionContext) => {
     if (effect.type === 'compact_context') {
+      if (
+        state.context.pendingCompaction?.reason !== 'manual' ||
+        state.context.pendingCompaction.compactionId !== effect.compactionId
+      ) {
+        return [];
+      }
       const leaseOwner = crypto.randomUUID();
       const durableLease = dependencies.runtimeStore;
       const leaseTtlMs = 10 * 60_000;
@@ -300,6 +454,10 @@ export function createRuntimeEffectExecutor(
         reclaimShadowReporter: dependencies.reclaimShadowReporter,
         providerDataAdmission: dependencies.providerDataAdmission,
         resourceAdmission: effect.resourceEstimate,
+        preparedContextV2: effect.preparedContextV2,
+        preparedCapabilitySetV2: effect.preparedCapabilitySetV2,
+        effectLeaseId: executionContext?.effectLeaseId,
+        reservationIds: executionContext?.reservationIds,
       });
     }
     if (effect.type === 'run_tools') {
@@ -533,6 +691,7 @@ async function executeAutoReview(
     { workspace: state.session.workspace, threadId: state.session.threadId },
   );
   if (!parsed?.ok) {
+    const reason = 'Unsupported or invalid tool';
     return [
       {
         type: 'auto_review.completed',
@@ -544,10 +703,16 @@ async function executeAutoReview(
           // approval prompt.
           ok: true,
           approved: false,
-          reason: 'Unsupported or invalid tool',
+          reason,
           reviewerModelName: '',
           durationMs: 0,
         },
+      },
+      {
+        type: 'tool.rejected',
+        toolCallId: effect.toolCallId,
+        reason,
+        failure: classifyFailure('auto_review_rejected', reason),
       },
     ];
   }
@@ -602,6 +767,18 @@ async function executeAutoReview(
           interactionId: crypto.randomUUID(),
           toolCallId: effect.toolCallId,
           approval: state.interactions.approval,
+        },
+      ];
+    }
+    if (completed.type === 'auto_review.completed' && completed.result.approved === false) {
+      const reason = completed.result.reason ?? 'auto-review rejected';
+      return [
+        completed,
+        {
+          type: 'tool.rejected',
+          toolCallId: effect.toolCallId,
+          reason,
+          failure: classifyFailure('auto_review_rejected', reason),
         },
       ];
     }

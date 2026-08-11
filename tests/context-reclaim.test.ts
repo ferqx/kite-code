@@ -10,6 +10,23 @@ import {
 import { serializeFramesToMessages } from '@/core/model/context-serializer';
 import { validateFramePairs, validateMessagePairs } from '@/core/model/context-validator';
 import { projectedModelContentDigest } from '@/core/tools/registry/projection';
+import type { ToolResultBudgetReceiptV2 } from '@/core/tools/result-budget-v2';
+
+function verifiedReceipt(content: string): ToolResultBudgetReceiptV2 {
+  return {
+    version: 2,
+    projectionMode: 'budget_v2',
+    policyId: 'test-budget:v2',
+    toolIdentity: 'builtin:test',
+    bindingDigest: 'd'.repeat(64),
+    projectorId: 'utf8-envelope:v1',
+    projectorRevision: 'test-projector:v1',
+    validatorId: 'test-validator:v1',
+    rawResultDigest: 'a'.repeat(64),
+    modelContentDigest: projectedModelContentDigest(content),
+    modelContentUtf8Bytes: Buffer.byteLength(content, 'utf8'),
+  };
+}
 
 function toolBlock(input: {
   frameId: string;
@@ -23,6 +40,7 @@ function toolBlock(input: {
     digestScope?: 'raw' | 'projected' | 'legacy_unknown';
     mutation?: string[];
     effectClass?: 'read_only' | 'workspace_write' | 'external_side_effect' | 'unknown';
+    migrated?: boolean;
   }>;
 }): ToolCallBlockFrame {
   const turnId = input.turnId ?? 'historical-turn';
@@ -57,6 +75,16 @@ function toolBlock(input: {
           modelContentDigest: projectedModelContentDigest(content),
           rawResultDigest: 'a'.repeat(64),
           digestScope: call.digestScope ?? 'raw',
+          toolResultReceipt: verifiedReceipt(content),
+          ...(call.migrated
+            ? {
+                terminalMigration: {
+                  kind: 'legacy_unverified' as const,
+                  migratedFromSchemaVersion: 21 as const,
+                  originalEventPosition: 1,
+                },
+              }
+            : {}),
           ...(call.mutation ? { workspaceMutationScope: call.mutation } : {}),
         },
       };
@@ -78,7 +106,13 @@ describe('context reclaim planner and applier', () => {
   test('selects old successful read/search blocks and emits the unique stable stub', () => {
     const original = toolBlock({
       frameId: 'assistant-read',
-      calls: [{ id: 'read-1', name: 'read_file', args: { path: 'src/example.ts', limit: 20 } }],
+      calls: [
+        {
+          id: 'read-1',
+          name: 'read_file',
+          args: { path: 'src/example.ts', limit: 20 },
+        },
+      ],
     });
     const frames: ContextFrame[] = [original];
     const before = JSON.stringify(frames);
@@ -105,7 +139,10 @@ describe('context reclaim planner and applier', () => {
     expect(stub).not.toContain('src/example.ts');
     expect(stub).not.toContain('historical tool output');
     expect(stub).not.toContain('aaaa');
-    expect(appliedBlock.calls[0]!.args).toEqual({ path: 'src/example.ts', limit: 20 });
+    expect(appliedBlock.calls[0]!.args).toEqual({
+      path: 'src/example.ts',
+      limit: 20,
+    });
     expect(appliedBlock.calls[0]!.resultMeta).toEqual(original.calls[0]!.resultMeta);
     validateFramePairs(applied.frames);
     validateMessagePairs(serializeFramesToMessages(applied.frames));
@@ -118,7 +155,13 @@ describe('context reclaim planner and applier', () => {
   test('fails closed for current, mixed, unsuccessful, effectful, legacy, mutated and locatorless blocks', () => {
     const locatorless = toolBlock({
       frameId: 'locatorless',
-      calls: [{ id: 'locatorless-search', name: 'search_content', args: { pattern: 'x' } }],
+      calls: [
+        {
+          id: 'locatorless-search',
+          name: 'search_content',
+          args: { pattern: 'x' },
+        },
+      ],
     });
     const frames: ContextFrame[] = [
       toolBlock({
@@ -130,7 +173,11 @@ describe('context reclaim planner and applier', () => {
         frameId: 'mixed',
         calls: [
           { id: 'mixed-read', name: 'read_file' },
-          { id: 'mixed-shell', name: 'shell_execute', args: { command: 'pwd' } },
+          {
+            id: 'mixed-shell',
+            name: 'shell_execute',
+            args: { command: 'pwd' },
+          },
         ],
       }),
       toolBlock({
@@ -139,15 +186,37 @@ describe('context reclaim planner and applier', () => {
       }),
       toolBlock({
         frameId: 'effectful',
-        calls: [{ id: 'effect-read', name: 'read_file', effectClass: 'workspace_write' }],
+        calls: [
+          {
+            id: 'effect-read',
+            name: 'read_file',
+            effectClass: 'workspace_write',
+          },
+        ],
       }),
       toolBlock({
         frameId: 'legacy',
-        calls: [{ id: 'legacy-read', name: 'read_file', digestScope: 'legacy_unknown' }],
+        calls: [
+          {
+            id: 'legacy-read',
+            name: 'read_file',
+            digestScope: 'legacy_unknown',
+          },
+        ],
+      }),
+      toolBlock({
+        frameId: 'migrated',
+        calls: [{ id: 'migrated-read', name: 'read_file', migrated: true }],
       }),
       toolBlock({
         frameId: 'mutated',
-        calls: [{ id: 'mutated-read', name: 'read_file', mutation: ['src/example.ts'] }],
+        calls: [
+          {
+            id: 'mutated-read',
+            name: 'read_file',
+            mutation: ['src/example.ts'],
+          },
+        ],
       }),
       {
         ...locatorless,
@@ -155,8 +224,8 @@ describe('context reclaim planner and applier', () => {
           {
             ...locatorless.calls[0]!,
             resultMeta: {
-              modelContentDigest: locatorless.calls[0]!.resultMeta!.modelContentDigest,
-              digestScope: 'raw' as const,
+              ...locatorless.calls[0]!.resultMeta,
+              path: undefined,
             },
           },
         ],
@@ -170,7 +239,7 @@ describe('context reclaim planner and applier', () => {
       unsupported_or_mixed_tool: 1,
       unsuccessful_result: 1,
       not_read_only: 1,
-      legacy_provenance: 1,
+      legacy_provenance: 2,
       workspace_mutation: 1,
       missing_locator: 1,
     });
@@ -180,7 +249,11 @@ describe('context reclaim planner and applier', () => {
     const block = toolBlock({
       frameId: 'multi-search',
       calls: [
-        { id: 'search-1', name: 'search_files', args: { path: '.', pattern: '*.ts' } },
+        {
+          id: 'search-1',
+          name: 'search_files',
+          args: { path: '.', pattern: '*.ts' },
+        },
         {
           id: 'search-2',
           name: 'search_content',
@@ -193,11 +266,17 @@ describe('context reclaim planner and applier', () => {
     expect(reclaim.selected.map((entry) => entry.toolCallId)).toEqual(['search-1', 'search-2']);
 
     const changed: ContextFrame[] = [
-      { ...block, calls: [{ ...block.calls[0]!, content: 'changed' }, block.calls[1]!] },
+      {
+        ...block,
+        calls: [{ ...block.calls[0]!, content: 'changed' }, block.calls[1]!],
+      },
     ];
     const before = JSON.stringify(changed);
     const rejected = applyContextReclaimPlan(changed, reclaim);
-    expect(rejected).toMatchObject({ status: 'rejected', reason: 'raw_frames_mismatch' });
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: 'raw_frames_mismatch',
+    });
     expect(JSON.stringify(changed)).toBe(before);
 
     const partialPlan = {
@@ -251,7 +330,10 @@ describe('context reclaim planner and applier', () => {
 
   test('binds stable raw projection, raw frame and applied frame identities', () => {
     const frames: ContextFrame[] = [
-      toolBlock({ frameId: 'stable', calls: [{ id: 'read-stable', name: 'read_file' }] }),
+      toolBlock({
+        frameId: 'stable',
+        calls: [{ id: 'read-stable', name: 'read_file' }],
+      }),
     ];
     const firstProjection = digestRawContextProjection({
       providerMessages: serializeFramesToMessages(frames),
@@ -265,7 +347,11 @@ describe('context reclaim planner and applier', () => {
         totalInputTokens: 21,
       },
       environmentDigest: 'e'.repeat(64),
-      pressure: { status: 'warning', utilization: 0.81, usableInputTokens: 100 },
+      pressure: {
+        status: 'warning',
+        utilization: 0.81,
+        usableInputTokens: 100,
+      },
     });
     const secondProjection = digestRawContextProjection({
       providerMessages: serializeFramesToMessages(structuredClone(frames)),
@@ -279,7 +365,11 @@ describe('context reclaim planner and applier', () => {
         totalInputTokens: 21,
       },
       environmentDigest: 'e'.repeat(64),
-      pressure: { status: 'warning', utilization: 0.81, usableInputTokens: 100 },
+      pressure: {
+        status: 'warning',
+        utilization: 0.81,
+        usableInputTokens: 100,
+      },
     });
     expect(secondProjection).toBe(firstProjection);
 
