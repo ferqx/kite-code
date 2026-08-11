@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { classifyFailure, type FailureKind } from '@/core/runtime/failures';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
+import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
 
 const kinds: FailureKind[] = [
   'model_invalid_tool_args',
@@ -94,7 +95,17 @@ describe('failure classification', () => {
       { type: 'tool.queued', toolCallId: 'call', name: 'read_file', args: {} },
     );
     const failure = classifyFailure('tool_runtime_error', 'disk unavailable');
-    const state = reduceRuntimeState(queued, { type: 'tool.failed', toolCallId: 'call', failure });
+    const state = reduceRuntimeState(queued, {
+      type: 'tool.failed',
+      toolCallId: 'call',
+      failure,
+      outcomeV1: classifyToolOutcomeV1({
+        status: 'failed',
+        failure,
+        authority: { dispatchState: 'not_started', externalEffects: 'none' },
+        toolAdvice: { disposition: 'never', maximumAdditionalCalls: 0 },
+      }),
+    });
     expect(state.tools.calls.call?.failure).toEqual(failure);
     expect(state.transcript.messages.at(-1)).toMatchObject({
       kind: 'tool',
@@ -117,6 +128,7 @@ describe('failure classification', () => {
       type: 'tool.failed',
       toolCallId: 'call',
       failure,
+      outcomeV1: state.tools.calls.call!.outcomeV1!,
     });
     expect(replayed.transcript.messages).toHaveLength(state.transcript.messages.length);
   });

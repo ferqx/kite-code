@@ -4,6 +4,7 @@ import { contextCompactionTerminalNotice } from '@/core/model/context-compaction
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { projectTerminalOutcomeV1 } from '@/core/runtime/terminal-outcome';
 import { toolOutcomeProtocolStatusV1, toolOutcomeSucceededV1 } from '@/core/runtime/tool-outcome';
+import { canonicalToolOutcomeV1 } from '@/core/runtime/tool-outcome-events';
 import type * as Protocol from '@/protocol/events';
 import {
   formatToolResultForDisplay,
@@ -2663,24 +2664,21 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       });
     case 'tool.finished': {
       const materialized = materializePendingTool(state, event.toolCallId, 'running', true);
-      const ok = event.outcomeV1 ? toolOutcomeSucceededV1(event.outcomeV1) : event.result.ok;
-      const status = event.outcomeV1
-        ? toolOutcomeProtocolStatusV1(event.outcomeV1)
-        : event.result.status;
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       return clearTerminalToolApproval(
         handleEventAction(materialized, {
           type: 'tool_done',
           data: {
             call_id: event.toolCallId,
             name: event.name,
-            ok,
+            ok: toolOutcomeSucceededV1(outcomeV1),
             summary: formatToolResultForDisplay(
               event.name,
               event.result.stdout,
               event.result.stderr,
             ),
             exitCode: event.result.exitCode,
-            status,
+            status: toolOutcomeProtocolStatusV1(outcomeV1),
             userInput: event.result.userInput,
           },
         }),
@@ -2688,6 +2686,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       );
     }
     case 'tool.failed': {
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const pendingName =
         state.pendingToolCalls[event.toolCallId]?.name ??
         visibleToolName(state, event.toolCallId) ??
@@ -2701,13 +2700,14 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
             name: pendingName,
             ok: false,
             summary: event.failure?.message ?? event.error ?? 'Tool failed.',
-            status: toolOutcomeProtocolStatusV1(event.outcomeV1),
+            status: toolOutcomeProtocolStatusV1(outcomeV1),
           },
         }),
         event.toolCallId,
       );
     }
     case 'tool.rejected': {
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       if (event.failure?.kind === 'phase_deferred') {
         return withoutPendingTool(state, event.toolCallId);
       }
@@ -2734,13 +2734,14 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
             name: pendingName,
             ok: false,
             summary: event.reason,
-            status: toolOutcomeProtocolStatusV1(event.outcomeV1),
+            status: toolOutcomeProtocolStatusV1(outcomeV1),
           },
         }),
         event.toolCallId,
       );
     }
     case 'tool.cancelled': {
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const wasPending = state.pendingToolCalls[event.toolCallId] != null;
       const visibleCard = findBlock(
         state,
@@ -2765,15 +2766,15 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       const materialized = wasPending
         ? materializePendingTool(state, event.toolCallId, 'queued', true)
         : state;
-      const projectedStatus = toolOutcomeProtocolStatusV1(event.outcomeV1);
-      if (event.outcomeV1 && projectedStatus !== 'cancelled') {
+      const projectedStatus = toolOutcomeProtocolStatusV1(outcomeV1);
+      if (projectedStatus !== 'cancelled') {
         return clearTerminalToolApproval(
           handleEventAction(materialized, {
             type: 'tool_done',
             data: {
               call_id: event.toolCallId,
               name,
-              ok: toolOutcomeSucceededV1(event.outcomeV1),
+              ok: toolOutcomeSucceededV1(outcomeV1),
               summary: event.reason,
               status: projectedStatus,
             },
@@ -2791,6 +2792,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       // automatic rejection becomes a visible tool result; technical failure
       // is followed by approval.requested and must not be rendered as a deny.
       if (!event.result.ok || event.result.approved) return state;
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const name =
         state.pendingToolCalls[event.toolCallId]?.name ?? visibleToolName(state, event.toolCallId);
       if (!name) return withoutPendingTool(state, event.toolCallId);
@@ -2802,7 +2804,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           name,
           ok: false,
           summary: event.result.reason ?? '自动审查拒绝执行',
-          status: toolOutcomeProtocolStatusV1(event.outcomeV1),
+          status: toolOutcomeProtocolStatusV1(outcomeV1),
         },
       });
     }
@@ -2974,6 +2976,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         ? { ...state, interrupt: null }
         : state;
     case 'approval.rejected': {
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       if (
         state.interrupt?.kind !== 'approval' ||
         state.interrupt.interactionId !== event.interactionId ||
@@ -3004,7 +3007,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
             name: visibleName,
             ok: false,
             summary: event.reason,
-            status: event.outcomeV1 ? toolOutcomeProtocolStatusV1(event.outcomeV1) : 'cancelled',
+            status: toolOutcomeProtocolStatusV1(outcomeV1),
           },
         });
       }

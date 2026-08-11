@@ -2,6 +2,7 @@ import type { RuntimeEvent, RuntimeEventInput } from '@/core/runtime/events';
 import { isRuntimeEventEnvelope } from '@/core/runtime/events';
 import type { ClassifiedFailure } from '@/core/runtime/failures';
 import { toolOutcomeMetricStatusV1 } from '@/core/runtime/tool-outcome';
+import { canonicalToolOutcomeV1 } from '@/core/runtime/tool-outcome-events';
 import type { ExecutionReceipt } from '@/protocol/capabilities';
 import { createMetricSampleV1, type MetricSampleV1 } from './metrics';
 
@@ -377,48 +378,51 @@ export class ProductionMetricMapperV1 {
         });
       case 'model.retry':
         return this.mapModelObservation({ observedAt, outcome: 'retry' });
-      case 'tool.finished':
+      case 'tool.finished': {
+        const outcomeV1 = canonicalToolOutcomeV1(event);
         return [
           createMetricSampleV1({
             name: 'tool_total',
             observedAt,
             attributes: {
-              outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+              outcome: toolOutcomeMetricStatusV1(outcomeV1),
               capability: this.#capabilities.map(event.name),
             },
           }),
-          ...(event.outcomeV1?.timing.totalActiveMs != null
+          ...(outcomeV1.timing.totalActiveMs != null
             ? [
                 createMetricSampleV1({
                   name: 'tool_duration_ms',
-                  value: event.outcomeV1.timing.totalActiveMs,
+                  value: outcomeV1.timing.totalActiveMs,
                   observedAt,
                   attributes: {
-                    outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+                    outcome: toolOutcomeMetricStatusV1(outcomeV1),
                     capability: this.#capabilities.map(event.name),
                   },
                 }),
               ]
             : []),
         ];
-      case 'tool.failed':
+      }
+      case 'tool.failed': {
+        const outcomeV1 = canonicalToolOutcomeV1(event);
         return [
           createMetricSampleV1({
             name: 'tool_total',
             observedAt,
             attributes: {
-              outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+              outcome: toolOutcomeMetricStatusV1(outcomeV1),
               capability: 'custom/unknown',
             },
           }),
-          ...(event.outcomeV1?.timing.totalActiveMs != null
+          ...(outcomeV1.timing.totalActiveMs != null
             ? [
                 createMetricSampleV1({
                   name: 'tool_duration_ms',
-                  value: event.outcomeV1.timing.totalActiveMs,
+                  value: outcomeV1.timing.totalActiveMs,
                   observedAt,
                   attributes: {
-                    outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+                    outcome: toolOutcomeMetricStatusV1(outcomeV1),
                     capability: 'custom/unknown',
                   },
                 }),
@@ -426,24 +430,26 @@ export class ProductionMetricMapperV1 {
             : []),
           ...(event.failure ? this.mapFailure(event.failure, observedAt) : []),
         ];
-      case 'tool.rejected':
+      }
+      case 'tool.rejected': {
+        const outcomeV1 = canonicalToolOutcomeV1(event);
         return [
           createMetricSampleV1({
             name: 'tool_total',
             observedAt,
             attributes: {
-              outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+              outcome: toolOutcomeMetricStatusV1(outcomeV1),
               capability: 'custom/unknown',
             },
           }),
-          ...(event.outcomeV1?.timing.totalActiveMs != null
+          ...(outcomeV1.timing.totalActiveMs != null
             ? [
                 createMetricSampleV1({
                   name: 'tool_duration_ms',
-                  value: event.outcomeV1.timing.totalActiveMs,
+                  value: outcomeV1.timing.totalActiveMs,
                   observedAt,
                   attributes: {
-                    outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+                    outcome: toolOutcomeMetricStatusV1(outcomeV1),
                     capability: 'custom/unknown',
                   },
                 }),
@@ -451,45 +457,51 @@ export class ProductionMetricMapperV1 {
             : []),
           ...(event.failure ? this.mapFailure(event.failure, observedAt) : []),
         ];
-      case 'tool.cancelled':
+      }
+      case 'tool.cancelled': {
+        const outcomeV1 = canonicalToolOutcomeV1(event);
         return [
           createMetricSampleV1({
             name: 'tool_total',
             observedAt,
             attributes: {
-              outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+              outcome: toolOutcomeMetricStatusV1(outcomeV1),
               capability: 'custom/unknown',
             },
           }),
-          ...(event.outcomeV1?.timing.totalActiveMs != null
+          ...(outcomeV1.timing.totalActiveMs != null
             ? [
                 createMetricSampleV1({
                   name: 'tool_duration_ms',
-                  value: event.outcomeV1.timing.totalActiveMs,
+                  value: outcomeV1.timing.totalActiveMs,
                   observedAt,
                   attributes: {
-                    outcome: toolOutcomeMetricStatusV1(event.outcomeV1),
+                    outcome: toolOutcomeMetricStatusV1(outcomeV1),
                     capability: 'custom/unknown',
                   },
                 }),
               ]
             : []),
         ];
+      }
       case 'approval.rejected':
       case 'auto_review.completed': {
-        if (!event.outcomeV1) return [];
-        const outcome = toolOutcomeMetricStatusV1(event.outcomeV1);
+        if (event.type === 'auto_review.completed' && (!event.result.ok || event.result.approved)) {
+          return [];
+        }
+        const outcomeV1 = canonicalToolOutcomeV1(event);
+        const outcome = toolOutcomeMetricStatusV1(outcomeV1);
         return [
           createMetricSampleV1({
             name: 'tool_total',
             observedAt,
             attributes: { outcome, capability: 'custom/unknown' },
           }),
-          ...(event.outcomeV1.timing.totalActiveMs != null
+          ...(outcomeV1.timing.totalActiveMs != null
             ? [
                 createMetricSampleV1({
                   name: 'tool_duration_ms',
-                  value: event.outcomeV1.timing.totalActiveMs,
+                  value: outcomeV1.timing.totalActiveMs,
                   observedAt,
                   attributes: { outcome, capability: 'custom/unknown' },
                 }),

@@ -53,8 +53,12 @@ import {
 } from './state';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 import { toolExecutionModelContentV1 } from './tool-model-content';
-import { legacyToolOutcomeV1, type ToolOutcomeV1, toolOutcomeSucceededV1 } from './tool-outcome';
-import { outcomeForHistoricalToolTerminalV1 } from './tool-outcome-events';
+import { type ToolOutcomeV1, toolOutcomeSucceededV1 } from './tool-outcome';
+import {
+  assertCanonicalToolOutcomeEventV1,
+  canonicalToolOutcomeV1,
+  decodeHistoricalToolOutcomeEventV1,
+} from './tool-outcome-events';
 import {
   admitRecoveryAttemptV1,
   advanceToolRecoveryResponseV1,
@@ -268,6 +272,7 @@ function blockedEventMatchesDecision(
  * @returns 新的不可变运行时状态 / New immutable runtime state
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  assertCanonicalToolOutcomeEventV1(event);
   return reduceRuntimeStateWithReplayBoundary(state, event, false);
 }
 
@@ -277,9 +282,10 @@ export function reduceRuntimeStateFromHistoricalSchema(
   event: RuntimeEvent,
   sourceSchemaVersion: number,
 ): RuntimeState {
+  const decodedEvent = decodeHistoricalToolOutcomeEventV1(event);
   return reduceRuntimeStateWithReplayBoundary(
     state,
-    event,
+    decodedEvent,
     Number.isInteger(sourceSchemaVersion) &&
       sourceSchemaVersion >= 2 &&
       sourceSchemaVersion < COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
@@ -1161,7 +1167,7 @@ function reduceRuntimeStateWithReplayBoundary(
         isTaskCall && state.legacyUnrecoverableSubagentApproval?.toolCallId === event.toolCallId;
       const { legacyUnrecoverableSubagentApproval: _legacyMarker, ...stateWithoutLegacyMarker } =
         state;
-      const outcomeV1 = outcomeForHistoricalToolTerminalV1(event);
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const status =
         outcomeV1.status === 'exhausted'
           ? ('exhausted' as const)
@@ -1237,7 +1243,7 @@ function reduceRuntimeStateWithReplayBoundary(
       const failure =
         event.failure ??
         classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
-      const outcomeV1 = outcomeForHistoricalToolTerminalV1(event);
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const recovery = modelRecoveryProjection(outcomeV1);
       const toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
         toolCallId: event.toolCallId,
@@ -1304,7 +1310,7 @@ function reduceRuntimeStateWithReplayBoundary(
       if (existingCall) {
         if (existingCall.status === 'rejected') return state;
         const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
-        const outcomeV1 = outcomeForHistoricalToolTerminalV1(event);
+        const outcomeV1 = canonicalToolOutcomeV1(event);
         const recovery = modelRecoveryProjection(outcomeV1);
         const recoveryFailureInput = {
           toolCallId: event.toolCallId,
@@ -1424,7 +1430,7 @@ function reduceRuntimeStateWithReplayBoundary(
         state.interactions.kind !== 'awaiting_provider_action' &&
         state.interactions.kind !== 'awaiting_provider_admission' &&
         state.interactions.toolCallId === event.toolCallId;
-      const outcomeV1 = outcomeForHistoricalToolTerminalV1(event);
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
         toolCallId: event.toolCallId,
         toolName: existingCall.name,
@@ -1487,7 +1493,7 @@ function reduceRuntimeStateWithReplayBoundary(
             parsedArgs: existingCall.args,
           }),
         modelMessageId: existingCall.modelMessageId,
-        outcome: event.outcomeV1,
+        outcome: canonicalToolOutcomeV1(event),
         taskId: existingCall.taskId,
         turnId: existingCall.createdAtTurnId,
       });
@@ -1705,7 +1711,7 @@ function reduceRuntimeStateWithReplayBoundary(
       const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
       const failure = event.failure ?? classifyFailure('approval_rejected', event.reason);
       const existingCall = state.tools.calls[toolCallId];
-      const outcomeV1 = event.outcomeV1 ?? legacyToolOutcomeV1('rejected');
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const recovery = modelRecoveryProjection(outcomeV1);
       const toolRecovery = existingCall
         ? recordRecoveryFailureV1(state.toolRecovery, {
@@ -2556,7 +2562,7 @@ function reduceRuntimeStateWithReplayBoundary(
       const toolCallId = state.interactions.toolCallId;
       const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
       const existingCall = state.tools.calls[toolCallId];
-      const outcomeV1 = event.outcomeV1 ?? legacyToolOutcomeV1('rejected');
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const recovery = modelRecoveryProjection(outcomeV1);
       const toolRecovery = existingCall
         ? recordRecoveryFailureV1(state.toolRecovery, {

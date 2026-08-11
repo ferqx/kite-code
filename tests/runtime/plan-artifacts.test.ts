@@ -14,8 +14,9 @@ import { dirname, join } from 'node:path';
 import { planArtifactPath } from '@/core/config/paths';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { PlanArtifactError, PlanArtifactStore } from '@/core/persistence/plan-artifacts';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '@/core/runtime/reducer';
 import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
@@ -23,11 +24,22 @@ import {
   RUNTIME_STATE_SCHEMA_VERSION,
 } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { writePlanInputSchema } from '@/core/tools/registry/builtins/write-plan';
 import type { PlanDocument } from '@/protocol/events';
 
 let home: string;
 let previousHome: string | undefined;
+
+function reduceRuntimeState(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  event: RuntimeEvent,
+): ReturnType<typeof createInitialRuntimeState> {
+  return reduceCanonicalRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+  );
+}
 
 function document(version = 1): PlanDocument {
   const plan: PlanDocument = {

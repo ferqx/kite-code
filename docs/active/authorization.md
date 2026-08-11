@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
-验证：`bun test tests/policies/authorization-elevation.test.ts tests/policies/approval-policy.test.ts tests/mcp-tool-policy.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-controller.test.ts`
+验证：`bun test tests/policies/authorization-elevation.test.ts tests/policies/approval-policy.test.ts tests/mcp-tool-policy.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-controller.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts`
 
 ## 概述
 

@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 Agent task case、fixture、oracle、重复运行、人工验收或产品 Release Evidence 时。
-验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts`、
+验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
 相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、D-07、Phase 2B、`opencode-go-journey-evaluation-policy.md`。
@@ -47,7 +47,8 @@ OpenCode Go 的 first-decision/Journey live 评测还必须遵守版本化 `ACOR
 `ACORE-EVAL-00-v1` 是在上述 live 政策之前建立的完整 Runtime Journey 基线：它用 synthetic workspace 驱动
 Kernel 的 `model → tool → model → run.completed → turn.completed` 闭环，只断言 canonical event 类型与计数，
 并固定 `contentLogged=false`。该基线不触发 Provider，也不记录 prompt、工具正文或路径；它仅验证后续 live
-证据需要经过的运行时路径仍可达。
+证据需要经过的运行时路径仍可达。Journey fixture 中直接进入 current reducer 的 Tool 终态必须
+携带 canonical `ToolOutcomeV1`；只有明确的历史 replay fixture 可通过 historical decoder 读取旧记录。
 
 `ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
 Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan

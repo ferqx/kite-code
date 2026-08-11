@@ -17,7 +17,7 @@ import {
   planCompletionBlocker,
   projectPlanCompletionEvidenceV1,
 } from '@/core/runtime/plan-evidence';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { reduceRuntimeState, reduceRuntimeStateFromHistoricalSchema } from '@/core/runtime/reducer';
 import { runRuntimeLoop } from '@/core/runtime/runner';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import { computePlanStructuralDigest, createInitialRuntimeState } from '@/core/runtime/state';
@@ -25,10 +25,10 @@ import { createRuntimeStore } from '@/core/runtime/store';
 import {
   classifyToolOutcomeV1,
   isToolOutcomeV1,
-  legacyToolOutcomeV1,
   observeUnknownToolFieldsV1,
   type ToolOutcomeV1,
 } from '@/core/runtime/tool-outcome';
+import { decodeHistoricalToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import {
   admitRecoveryAttemptV1,
   advanceToolRecoveryResponseV1,
@@ -55,9 +55,36 @@ const correctArgsOutcome = classifyToolOutcomeV1({
   authority: { dispatchState: 'not_started', externalEffects: 'none' },
 });
 
+function legacyFailedReplayOutcome(): ToolOutcomeV1 {
+  const event = decodeHistoricalToolOutcomeEventV1({
+    type: 'tool.failed',
+    toolCallId: 'historical-call',
+    error: 'historical failure text',
+  });
+  if (event.type !== 'tool.failed' || !event.outcomeV1) {
+    throw new Error('Historical ToolOutcome decoder did not produce an outcome.');
+  }
+  return event.outcomeV1;
+}
+
 describe('ToolOutcomeV1', () => {
+  test('rejects a non-canonical current terminal before reducer consumption', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'non-canonical-current-terminal',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    expect(() =>
+      reduceRuntimeState(state, {
+        type: 'tool.failed',
+        toolCallId: 'missing-outcome',
+        error: 'legacy-only terminal',
+      }),
+    ).toThrow('tool.failed requires a canonical ToolOutcomeV1');
+  });
+
   test('maps legacy failed replay to unclassified unknown certainty and never retry', () => {
-    expect(legacyToolOutcomeV1('failed')).toEqual(
+    expect(legacyFailedReplayOutcome()).toEqual(
       expect.objectContaining({
         schemaVersion: 1,
         status: 'failed',
@@ -1993,6 +2020,16 @@ describe('ToolOutcome Runtime event integration', () => {
         resultMeta: projected.resultMeta,
         status: projected.ok ? 'success' : 'error',
       },
+      outcomeV1: projected.ok
+        ? classifyToolOutcomeV1({
+            status: 'success',
+            authority: { dispatchState: 'started', externalEffects: 'unknown' },
+          })
+        : classifyToolOutcomeV1({
+            status: 'failed',
+            failure: classifyFailure('tool_runtime_error', 'redacted'),
+            authority: { dispatchState: 'started', externalEffects: 'unknown' },
+          }),
     });
 
     expect(state.toolRecovery.order).toHaveLength(2);
@@ -2077,11 +2114,17 @@ describe('ToolOutcome Runtime event integration', () => {
     expect(dispatches).toBe(0);
     const rejected = events.find((event) => event.type === 'tool.rejected');
     expect(rejected).toBeDefined();
-    state = reduceRuntimeState(state, rejected!);
-    expect(state.toolRecovery.qualityGuard).toMatchObject({
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    kernel.processEvent(rejected!);
+    expect(kernel.getState().toolRecovery.qualityGuard).toMatchObject({
       blocked: true,
       reasonCode: 'no_progress',
     });
+    kernel.close();
   });
 
   test('appends exactly one auto-review rejection ToolMessage and preserves next-model pairing', () => {
@@ -2192,7 +2235,7 @@ describe('ToolOutcome Runtime event integration', () => {
     expect(planCompletionBlocker(state, evidence)).toBe('plan_unresolved_blocker');
   });
 
-  test('current terminal event persists legacy fields and shadow outcome but projects one ToolMessage', () => {
+  test('current terminal event persists one canonical outcome and projects one ToolMessage', () => {
     const path = join(tmpdir(), `kite-tool-outcome-${crypto.randomUUID()}.db`);
     const kernel = createAgentKernel({
       threadId: 'tool-outcome-current',
@@ -2240,6 +2283,74 @@ describe('ToolOutcome Runtime event integration', () => {
         if (existsSync(`${path}${suffix}`)) rmSync(`${path}${suffix}`, { force: true });
       }
     }
+  });
+
+  test('Runner publishes the canonical event returned by Kernel persistence', async () => {
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: createInitialRuntimeState({
+        threadId: 'canonical-runner-stream',
+        userId: 'user',
+        workspace: '/workspace',
+      }),
+      interactionMode: 'accept_edits',
+    });
+    kernel.processEvent({
+      type: 'tool.queued',
+      toolCallId: 'streamed-read',
+      name: 'read_file',
+      args: { path: 'README.md' },
+      modelMessageId: 'model-before-tool',
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    const emitted: RuntimeEvent[] = [];
+    for await (const event of runRuntimeLoop(
+      kernel,
+      async (effect) => {
+        if (effect.type === 'run_tools') {
+          return [
+            { type: 'tool.started', toolCallId: 'streamed-read' },
+            {
+              type: 'tool.finished',
+              toolCallId: 'streamed-read',
+              name: 'read_file',
+              result: {
+                ok: true,
+                command: 'read_file',
+                exitCode: 0,
+                stdout: 'bounded result',
+                stderr: '',
+              },
+            },
+          ];
+        }
+        if (effect.type === 'call_model') {
+          return [
+            {
+              type: 'model.responded',
+              messageId: 'model-after-tool',
+              text: 'Done.',
+              toolCalls: [],
+            },
+          ];
+        }
+        return [];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      emitted.push(event);
+    }
+    const terminal = emitted.find(
+      (event): event is Extract<RuntimeEvent, { type: 'tool.finished' }> =>
+        event.type === 'tool.finished',
+    );
+    expect(terminal?.outcomeV1).toMatchObject({
+      status: 'success',
+      dispatchState: 'started',
+      externalEffects: 'none',
+    });
+    kernel.close();
   });
 
   test('persists a strict Registry tool_unavailable outcome through Controller and Kernel replay', async () => {
@@ -2615,11 +2726,15 @@ describe('ToolOutcome Runtime event integration', () => {
       args: { command: 'private command' },
       modelMessageId: 'legacy-model',
     });
-    state = reduceRuntimeState(state, {
-      type: 'tool.failed',
-      toolCallId: 'legacy',
-      error: 'permission denied timeout ENOENT',
-    });
+    state = reduceRuntimeStateFromHistoricalSchema(
+      state,
+      {
+        type: 'tool.failed',
+        toolCallId: 'legacy',
+        error: 'permission denied timeout ENOENT',
+      },
+      22,
+    );
     expect(state.tools.calls.legacy?.outcomeV1).toMatchObject({
       failure: { detailCode: 'legacy_unclassified' },
       dispatchState: 'unknown',
@@ -2642,16 +2757,20 @@ describe('ToolOutcome Runtime event integration', () => {
       args: { path: 'private' },
       modelMessageId: 'legacy-model',
     });
-    state = reduceRuntimeState(state, {
-      type: 'tool.failed',
-      toolCallId: 'invalid-outcome',
-      error: 'private',
-      outcomeV1: {
-        schemaVersion: 1,
-        status: 'failed',
-        unexpected: 'retry_forever',
-      },
-    } as never);
+    state = reduceRuntimeStateFromHistoricalSchema(
+      state,
+      {
+        type: 'tool.failed',
+        toolCallId: 'invalid-outcome',
+        error: 'private',
+        outcomeV1: {
+          schemaVersion: 1,
+          status: 'failed',
+          unexpected: 'retry_forever',
+        },
+      } as never,
+      22,
+    );
     expect(state.tools.calls['invalid-outcome']?.outcomeV1).toMatchObject({
       status: 'unknown',
       failure: { detailCode: 'classifier_invalid' },
@@ -2974,7 +3093,7 @@ describe('ToolOutcome Runtime event integration', () => {
       toolName: 'read_file',
       invocationFingerprint: 'f'.repeat(64),
       modelMessageId: 'foreign-model',
-      outcome: legacyToolOutcomeV1('failed'),
+      outcome: legacyFailedReplayOutcome(),
     });
     const beforeForeignOrder = [...state.toolRecovery.order];
     state = reduceRuntimeState(state, {

@@ -8,6 +8,7 @@ import { runApprovedTool } from '@/core/harness/tool-runner';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { normalizeToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { resumeSubAgent, runSubAgent } from '@/core/subagent/runner';
@@ -289,16 +290,23 @@ describe('SubAgentRunner integration', () => {
             active: ['parent'],
           },
         };
-        parent = reduceRuntimeState(parent, {
-          type: 'tool.finished',
-          toolCallId: 'parent',
-          name: 'shell_execute',
-          result: {
-            ...combination,
-            command: 'pwd',
-            exitCode: combination.ok ? 0 : 1,
-          },
-        });
+        parent = reduceRuntimeState(
+          parent,
+          normalizeCurrentToolOutcomeEventV1(
+            {
+              type: 'tool.finished',
+              toolCallId: 'parent',
+              name: 'shell_execute',
+              result: {
+                ...combination,
+                command: 'pwd',
+                exitCode: combination.ok ? 0 : 1,
+              },
+            },
+            parent,
+            '2026-08-11T00:00:00.000Z',
+          ),
+        );
         const parentContent = parent.transcript.messages.find(
           (message) => message.kind === 'tool' && message.toolCallId === 'parent',
         )?.content;

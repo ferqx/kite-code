@@ -18,12 +18,7 @@ import {
 } from './actions';
 import { normalizeContextRuntimeState } from './context-compaction';
 import type { RuntimeEffect, RuntimeEffectLease } from './effects';
-import {
-  isRuntimeEventEnvelope,
-  type RuntimeEvent,
-  type RuntimeEventEnvelope,
-  type RuntimeEventInput,
-} from './events';
+import type { RuntimeEvent, RuntimeEventEnvelope } from './events';
 import { assertRuntimeStateInvariants } from './invariants';
 import { reduceRuntimeState, reduceRuntimeStateFromHistoricalSchema } from './reducer';
 import { createLegacyResourceBudgetStateV1 } from './resource-budget';
@@ -45,11 +40,7 @@ import {
   type StoredEvent,
 } from './store';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
-import {
-  normalizeApprovalRejectedToolOutcomeV1,
-  normalizeAutoReviewCompletedToolOutcomeV1,
-  normalizeToolTerminalEventV1,
-} from './tool-outcome-events';
+import { normalizeCurrentToolOutcomeEventV1 } from './tool-outcome-events';
 import {
   createToolRecoveryJournalV1,
   normalizeToolRecoveryJournalV1,
@@ -125,7 +116,7 @@ export class AgentKernel {
    * 处理单个 RuntimeEvent：reduce → persist。
    * Process a single RuntimeEvent: reduce → persist.
    */
-  processEvent(event: RuntimeEventInput): { status: 'applied' | 'duplicate'; eventId: string } {
+  processEvent(event: RuntimeEvent): { status: 'applied' | 'duplicate'; eventId: string } {
     const envelope = this.createEnvelope(event, this.state.revision + 1);
     if (this.appliedEventIds.has(envelope.eventId)) {
       this.lastAppliedEvents = [];
@@ -157,7 +148,7 @@ export class AgentKernel {
    * 用于 Plan 审批等需要事件和快照同时落盘的关键路径。
    * Used for critical paths like plan approval where events and snapshot must be durably consistent.
    */
-  processEventBatch(events: RuntimeEventInput[]): RuntimeEvent[] {
+  processEventBatch(events: RuntimeEvent[]): RuntimeEvent[] {
     if (events.length === 0) {
       this.lastAppliedEvents = [];
       return [];
@@ -202,7 +193,7 @@ export class AgentKernel {
    * 批量处理多个 RuntimeEvent。
    * Process multiple RuntimeEvents in batch.
    */
-  processEvents(events: RuntimeEventInput[]): void {
+  processEvents(events: RuntimeEvent[]): void {
     for (const event of events) {
       this.processEvent(event);
     }
@@ -273,7 +264,7 @@ export class AgentKernel {
   }
 
   /** Apply an effect result only if no newer event changed the state. */
-  applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEventInput[]): boolean {
+  applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEvent[]): boolean {
     if (this.hasLateTerminalEventForCancelledTool(lease, events)) {
       return false;
     }
@@ -317,11 +308,10 @@ export class AgentKernel {
 
   private hasLateTerminalEventForCancelledTool(
     lease: RuntimeEffectLease,
-    inputs: RuntimeEventInput[],
+    inputs: RuntimeEvent[],
   ): boolean {
     if (lease.effect.type !== 'run_tools') return false;
-    return inputs.some((input) => {
-      const event = isRuntimeEventEnvelope(input) ? input.payload : input;
+    return inputs.some((event) => {
       if (
         event.type !== 'tool.finished' &&
         event.type !== 'tool.failed' &&
@@ -338,7 +328,7 @@ export class AgentKernel {
    * Streaming events advance the lease revision so the final effect result
    * remains subject to the same stale-result check as a batch result.
    */
-  applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
+  applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEvent): boolean {
     if (!this.isEffectEventCurrent(lease, event)) return false;
     this.processEvent(event);
     lease.expectedRevision = this.state.revision;
@@ -347,13 +337,17 @@ export class AgentKernel {
 
   private isConcurrentShellBatchCurrent(
     lease: RuntimeEffectLease,
-    inputs: RuntimeEventInput[],
+    inputs: RuntimeEvent[],
   ): boolean {
     let projectedState = this.state;
-    for (const input of inputs) {
-      if (!this.isConcurrentShellEventCurrent(lease, input, projectedState)) return false;
-      const event = isRuntimeEventEnvelope(input) ? input.payload : input;
-      projectedState = reduceRuntimeState(projectedState, event);
+    for (const event of inputs) {
+      if (!this.isConcurrentShellEventCurrent(lease, event, projectedState)) return false;
+      const canonicalEvent = this.normalizeCurrentEvent(
+        event,
+        projectedState,
+        new Date().toISOString(),
+      );
+      projectedState = reduceRuntimeState(projectedState, canonicalEvent);
     }
     return true;
   }
@@ -365,11 +359,10 @@ export class AgentKernel {
    */
   private isConcurrentShellEventCurrent(
     lease: RuntimeEffectLease,
-    input: RuntimeEventInput,
+    event: RuntimeEvent,
     state: RuntimeState = this.state,
   ): boolean {
     if (lease.turnId !== state.turn.turnId || lease.effect.type !== 'run_tools') return false;
-    const event = isRuntimeEventEnvelope(input) ? input.payload : input;
     if (!('toolCallId' in event) || typeof event.toolCallId !== 'string') return false;
     if (!lease.effect.toolCallIds.includes(event.toolCallId)) return false;
 
@@ -408,7 +401,7 @@ export class AgentKernel {
    * retains the same ownership checks as durable effect events without
    * advancing the Runtime revision.
    */
-  isEffectEventCurrent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
+  isEffectEventCurrent(lease: RuntimeEffectLease, event: RuntimeEvent): boolean {
     return this.isEffectLeaseCurrent(lease) || this.isConcurrentShellEventCurrent(lease, event);
   }
 
@@ -485,37 +478,12 @@ export class AgentKernel {
   }
 
   private createEnvelope(
-    event: RuntimeEventInput,
+    event: RuntimeEvent,
     revision: number,
     normalizationState: RuntimeState = this.state,
   ): RuntimeEventEnvelope {
-    if (isRuntimeEventEnvelope(event)) {
-      if (event.threadId !== this.state.session.threadId) {
-        throw new Error(`Runtime event thread mismatch: ${event.threadId}.`);
-      }
-      return event;
-    }
-    const runtimeNormalizedEvent = normalizeTerminalRuntimeEventV1(event);
     const occurredAt = new Date().toISOString();
-    const normalizedEvent =
-      runtimeNormalizedEvent.type === 'tool.finished' ||
-      runtimeNormalizedEvent.type === 'tool.failed' ||
-      runtimeNormalizedEvent.type === 'tool.rejected' ||
-      runtimeNormalizedEvent.type === 'tool.cancelled'
-        ? normalizeToolTerminalEventV1(runtimeNormalizedEvent, normalizationState, occurredAt)
-        : runtimeNormalizedEvent.type === 'approval.rejected'
-          ? normalizeApprovalRejectedToolOutcomeV1(
-              runtimeNormalizedEvent,
-              normalizationState,
-              occurredAt,
-            )
-          : runtimeNormalizedEvent.type === 'auto_review.completed'
-            ? normalizeAutoReviewCompletedToolOutcomeV1(
-                runtimeNormalizedEvent,
-                normalizationState,
-                occurredAt,
-              )
-            : runtimeNormalizedEvent;
+    const normalizedEvent = this.normalizeCurrentEvent(event, normalizationState, occurredAt);
     const serialized = JSON.stringify(normalizedEvent);
     const eventId = createHash('sha256').update(serialized).digest('hex');
     const payload =
@@ -542,6 +510,19 @@ export class AgentKernel {
       occurredAt,
       payload,
     };
+  }
+
+  private normalizeCurrentEvent(
+    event: RuntimeEvent,
+    normalizationState: RuntimeState,
+    occurredAt: string,
+  ): RuntimeEvent {
+    const runtimeNormalizedEvent = normalizeTerminalRuntimeEventV1(event);
+    return normalizeCurrentToolOutcomeEventV1(
+      runtimeNormalizedEvent,
+      normalizationState,
+      occurredAt,
+    );
   }
 
   private reduceEnvelope(state: RuntimeState, envelope: RuntimeEventEnvelope): RuntimeState {

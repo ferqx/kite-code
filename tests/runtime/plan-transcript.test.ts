@@ -10,6 +10,7 @@ import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
 } from '../../src/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
 import type { AgentPlan } from '../../src/protocol/events';
 
 function makePlan(name = 'Test'): AgentPlan {
@@ -90,7 +91,14 @@ describe('transcript integrity', () => {
       },
     ];
 
-    const finalState = events.reduce(reduceRuntimeState, state);
+    const finalState = events.reduce(
+      (current, event) =>
+        reduceRuntimeState(
+          current,
+          normalizeCurrentToolOutcomeEventV1(event, current, '2026-08-11T00:00:00.000Z'),
+        ),
+      state,
+    );
     // Both tool calls should be resolved
     const tc1 = finalState.tools.calls['tc-1'];
     const tc2 = finalState.tools.calls['tc-2'];

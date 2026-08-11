@@ -142,10 +142,11 @@ V2 correction ceiling 绑定 guard version 与完整 Plan identity，跨 turn �
 attempt 2 前原子持久化 `[completion.blocked, turn.aborted, run.error]`；消费中断或进程恢复都只能观察 terminal stop，
 不能从 blocked 边界重新调度第三次模型请求。
 
-Runtime schema v23 在每个当前 Tool terminal event 内同时保留 legacy result 与严格
-`ToolOutcomeV1` shadow；reducer 只生成一个 transcript ToolMessage。Envelope 由 Runtime 边界合成
+Runtime schema v23 在每个当前 Tool terminal event 内写入唯一严格的 canonical
+`ToolOutcomeV1`；reducer 只生成一个 transcript ToolMessage。Envelope 由 Kernel 边界在持久化和发布前合成
 status、FailureKind/detail、dispatch/effect certainty、recovery lineage 与可信 timing，ToolSpec
-只能提供可收紧的 metadata advice。旧 event 没有 outcome 时映射为
+只能提供可收紧的 metadata advice。current reducer、TUI、Session Logger 与 metrics 不再读取 legacy
+结果字段作为 outcome。独立 historical replay decoder 将旧 event 缺失 outcome 映射为
 `legacy_unclassified/unknown/never`；存在但结构非法或 classifier 缺失/抛错/冲突时映射为
 `unknown/never`，不从 stderr 或 result body 推断。
 

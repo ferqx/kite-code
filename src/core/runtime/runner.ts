@@ -329,7 +329,7 @@ async function* executeEffectWithStreaming(
       if (unknownEvents.length > 0) kernel.applyEffectResult(lease, unknownEvents);
       throw error;
     }
-    yield* terminalResult;
+    yield* kernel.getLastAppliedEvents();
   }
   if (!emitted) return { applied: true, emitted: false };
   return { applied: true, emitted: true };

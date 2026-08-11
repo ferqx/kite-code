@@ -10,17 +10,19 @@ Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. It
 
 New `tool.failed` producers must emit `failure: classifyFailure(...)`. The legacy `error` field remains accepted only so existing persisted v3 events can replay; reducers and trace logging prefer the structured value.
 
-Runtime schema v23 adds the Runtime-owned `ToolOutcomeV1` envelope to the same versioned terminal
-event as the legacy result fields. It closes status, `FailureKind`/detail code, dispatch and external-effect
+Runtime schema v23 uses one Runtime-owned canonical `ToolOutcomeV1` envelope on every current terminal
+event. It closes status, `FailureKind`/detail code, dispatch and external-effect
 certainty, recovery ceiling/lineage, Runtime-boundary timing and low-cardinality unknown-field observation.
 Policy/approval and dispatch/effect facts are authoritative; ToolSpec classifiers may only tighten them.
 A missing, throwing, conflicting, unknown-code or structurally invalid classifier/outcome becomes
 `status=unknown` with `recovery=never`; no code path parses stderr, command output or provider text to
-recover classification. Historical terminal events without the envelope replay as
+recover classification. Current reducers, TUI, Session Logger and metrics reject a missing/invalid envelope;
+all current producers cross the Kernel canonicalization boundary before persistence or publication.
+The separate historical replay decoder maps pre-v23 terminal events without the envelope to
 `legacy_unclassified + dispatchState=unknown + externalEffects=unknown` and never auto-replay.
 ToolSpec advice 的 detail code 即使属于全局闭集，也必须属于当前 `FailureKind` 的 exhaustive
-允许集合；跨 kind advice 是 `classifier_conflict + unknown/never`，且当次 shadow envelope 本身
-必须通过严格 validator，不能先写入非法 current event 再靠 replay 降级。
+允许集合；跨 kind advice 是 `classifier_conflict + unknown/never`，且当次 canonical envelope 本身
+必须通过严格 validator，不能先写入非法 current event 再靠历史 replay 降级。
 Envelope restore 使用 exact-key 与语义矩阵校验：replay safety 必须与 dispatch/effect certainty
 相容，`success/cancelled/timed_out/exhausted/unknown` 不得携带可重试 recovery，diagnostic、timing
 和 unknown-field count 也必须内部一致。未知字段或矛盾组合按损坏历史 fail closed 为

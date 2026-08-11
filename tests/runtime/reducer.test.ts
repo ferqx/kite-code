@@ -1,16 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { classifyFailure } from '../../src/core/runtime/failures';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '../../src/core/runtime/reducer';
 import type { RuntimeState } from '../../src/core/runtime/state';
 import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
 } from '../../src/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
 import type { AgentPlan, AgentPlanStep, ToolApprovalPayload } from '../../src/protocol/events';
 import type { SuspendedSubagentSnapshot } from '../../src/protocol/subagent';
 
 // ── 测试辅助函数 / Test helpers ──
+
+function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  return reduceCanonicalRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+  );
+}
 
 function makePlan(name: string = 'Test Plan', steps: string[] = ['step 1', 'step 2']): AgentPlan {
   const planSteps: AgentPlanStep[] = steps.map((step) => ({

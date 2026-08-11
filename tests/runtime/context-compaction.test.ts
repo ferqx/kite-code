@@ -16,10 +16,18 @@ import {
 } from '../../src/core/runtime/context-compaction';
 import type { ContextCompactionRequestedEvent, RuntimeEvent } from '../../src/core/runtime/events';
 import { AgentKernel } from '../../src/core/runtime/kernel';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '../../src/core/runtime/reducer';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
 import { createRuntimeStore } from '../../src/core/runtime/store';
+import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
+
+function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  return reduceCanonicalRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+  );
+}
 
 const estimate: ContextTokenEstimate = {
   systemTokens: 10,

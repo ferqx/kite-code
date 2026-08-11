@@ -202,9 +202,10 @@ export async function* runRuntimeAgent(
     exitStatus = 'aborted';
     const events = eventsForRunCancellation(kernel.getState(), reason, cause);
     kernel.processEventBatch(events);
-    for (const event of events) collector.recordRuntime(event);
+    const canonicalEvents = [...kernel.getLastAppliedEvents()];
+    for (const event of canonicalEvents) collector.recordRuntime(event);
     executionAbortController.abort(reason);
-    return events;
+    return canonicalEvents;
   };
   const scheduleRunDeadline = (deadlineAt: string) => {
     if (!getFeatureFlags(input.config).boundedCancellationV1 || runDeadlineTimer) return;

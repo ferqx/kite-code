@@ -267,7 +267,7 @@ export interface ToolCallRecord {
   error?: string;
   /** Structured failure metadata retained for retry policy and replay. */
   failure?: ClassifiedFailure;
-  /** Runtime-owned typed terminal projection; legacy fields remain during migration. */
+  /** Canonical Runtime-owned projection on terminal calls; absent while nonterminal or in historical input. */
   outcomeV1?: ToolOutcomeV1;
   /** Capability classification captured when the call was queued. */
   effectClass?: ToolEffectClass;

@@ -139,14 +139,14 @@ export interface ToolOutcomeAuthorityV1 {
   approvalDenied?: boolean;
 }
 
-export function toolOutcomeSucceededV1(outcome: ToolOutcomeV1 | undefined): boolean {
-  return outcome?.status === 'success';
+export function toolOutcomeSucceededV1(outcome: ToolOutcomeV1): boolean {
+  return outcome.status === 'success';
 }
 
 export function toolOutcomeProtocolStatusV1(
-  outcome: ToolOutcomeV1 | undefined,
+  outcome: ToolOutcomeV1,
 ): 'success' | 'error' | 'cancelled' | 'timeout' | 'exhausted' {
-  switch (outcome?.status) {
+  switch (outcome.status) {
     case 'success':
       return 'success';
     case 'cancelled':
@@ -160,10 +160,8 @@ export function toolOutcomeProtocolStatusV1(
   }
 }
 
-export function toolOutcomeMetricStatusV1(
-  outcome: ToolOutcomeV1 | undefined,
-): ToolOutcomeStatusV1 | 'failed' {
-  return outcome?.status ?? 'failed';
+export function toolOutcomeMetricStatusV1(outcome: ToolOutcomeV1): ToolOutcomeStatusV1 {
+  return outcome.status;
 }
 
 const NEVER: ToolRecoveryV1 = Object.freeze({
@@ -522,30 +520,6 @@ export function classifyToolOutcomeV1(input: {
     ...(input.lineage ? { lineage: input.lineage } : {}),
     timing: trustedToolTimingV1(input.timing),
     ...(input.unknownFields ? { unknownFields: input.unknownFields } : {}),
-  };
-}
-
-export function legacyToolOutcomeV1(
-  status: Exclude<ToolOutcomeStatusV1, 'unknown'>,
-): ToolOutcomeV1 {
-  if (status === 'success') {
-    return {
-      schemaVersion: 1,
-      status,
-      dispatchState: 'unknown',
-      externalEffects: 'unknown',
-      recovery: NEVER,
-      timing: { source: 'legacy_unknown' },
-    };
-  }
-  return {
-    schemaVersion: 1,
-    status,
-    failure: { kind: 'tool_runtime_error', detailCode: 'legacy_unclassified' },
-    dispatchState: 'unknown',
-    externalEffects: 'unknown',
-    recovery: NEVER,
-    timing: { source: 'legacy_unknown' },
   };
 }
 

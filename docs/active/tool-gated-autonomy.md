@@ -25,8 +25,9 @@
 
 工具声明只让模型表达意图。模型侧不得直接执行工具，TUI 不得绕过 Tool Controller 调用 provider。
 
-每个当前工具终态在持久化前由 Kernel 写入同一事件内的 `ToolOutcomeV1` shadow；legacy result
-字段继续保留，reducer 只投影一个成对 ToolMessage。Registry/ToolSpec 只能提供 metadata-only
+每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`；current reducer
+及其消费者不再从 legacy result 字段推导 outcome，并且只投影一个成对 ToolMessage。历史 replay
+先通过独立 decoder 保守补齐缺失 outcome。Registry/ToolSpec 只能提供 metadata-only
 result classifier，不能自报 dispatch、external effect 或 timing。Policy/approval deny 一律证明为
 `not_started/none` 且不产生新调用；timeout、cancel 与 unknown external effect 禁止自动重放。
 Runtime 自动 retry 只允许一次，并且仅限明确 pre-dispatch、受信 safe-read，或已有可信

@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { eventsForRuntimeAction } from '@/core/runtime/actions';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '@/core/runtime/reducer';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import {
   computePlanStructuralDigest,
@@ -12,7 +13,18 @@ import {
   getActivePlanning,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import type { AgentPlan } from '@/protocol/events';
+
+function reduceRuntimeState(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  event: RuntimeEvent,
+): ReturnType<typeof createInitialRuntimeState> {
+  return reduceCanonicalRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+  );
+}
 
 function plan(name = 'Plan', status: AgentPlan['status'] = 'pending'): AgentPlan {
   return {

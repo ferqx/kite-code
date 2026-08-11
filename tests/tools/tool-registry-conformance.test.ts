@@ -17,6 +17,7 @@ import { AgentKernel } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { sessionReadTracker } from '@/core/tools/read-state';
@@ -1346,12 +1347,16 @@ describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
       });
       state = reduceRuntimeState(
         state,
-        projectedToolFinishedEvent({
-          toolCallId: `call-${rawSpec.name}`,
-          name: rawSpec.name,
-          projected,
-          command: rawSpec.name,
-        }),
+        normalizeCurrentToolOutcomeEventV1(
+          projectedToolFinishedEvent({
+            toolCallId: `call-${rawSpec.name}`,
+            name: rawSpec.name,
+            projected,
+            command: rawSpec.name,
+          }),
+          state,
+          '2026-08-11T00:00:00.000Z',
+        ),
       );
       expect(state.transcript.messages.at(-1)).toMatchObject({
         kind: 'tool',

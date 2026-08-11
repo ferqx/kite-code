@@ -46,8 +46,9 @@ revision、未知字段名/值和 classifier/provider 正文永不进入 Session
 `totalActiveMs` 由 Runtime queue boundary 到 terminal 计算；人工审批等待使用持久化
 `approval.requested.createdAt`，auto-review 成功与拒绝都使用 review duration 累加 approval wait，不是
 UI wall clock；成功 terminal 同样保留 approval wait 与 `totalActiveMs`。reducer、模型恢复 guidance、
-Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影；legacy
-event 仅在缺少 envelope 时使用原有兼容字段，不能覆盖当前 canonical outcome，TUI 也不得把所有
+Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影；current
+event 缺少合法 envelope 时直接拒绝。历史 replay 必须先经过唯一 legacy decoder，缺失 envelope 时只
+生成 `legacy_unclassified/unknown/never`，不能用旧字段覆盖 canonical outcome；TUI 也不得把所有
 approval/auto-review/cancel terminal 硬编码为 `cancelled`。
 `approval.rejected` 与拒绝型 `auto_review.completed` 本身就是 canonical tool terminal observation；
 metrics 各自恰好生成一组 `tool_total + tool_duration_ms`，不得再合成第二个 tool terminal 计数。

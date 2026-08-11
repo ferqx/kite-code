@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { sessionLogDir } from '@/core/config/paths';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
+import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
 import {
   mapRuntimeMetadataV1,
   mapSessionBoundaryMetadataV1,
@@ -15,6 +16,13 @@ const SECRET = 'UNIQUE_SECRET_1A2_91c53d';
 const ABSOLUTE_PATH = `/private/tmp/${SECRET}/workspace/source.ts`;
 const COMMAND = `curl -H 'Authorization: Bearer ${SECRET}' https://example.invalid`;
 const SOURCE_MARKER = `function source_${SECRET}() { return '${SECRET}'; }`;
+const PRIVATE_LINEAGE = 'a'.repeat(64);
+const PRIVATE_SCHEMA_REVISION = 'private-schema';
+const FAILED_OUTCOME = classifyToolOutcomeV1({
+  status: 'failed',
+  failure: classifyFailure('tool_runtime_error', 'redacted'),
+  authority: { dispatchState: 'started', externalEffects: 'unknown' },
+});
 
 function cleanup(threadId: string): void {
   rmSync(sessionLogDir(FRONTEND, threadId), { recursive: true, force: true });
@@ -68,24 +76,14 @@ describe('metadata-only session logging', () => {
           toolTokenCount: 13,
         },
         outcomeV1: {
-          schemaVersion: 1,
-          status: 'failed',
-          failure: { kind: 'tool_runtime_error', detailCode: 'runtime_exception' },
-          dispatchState: 'started',
-          externalEffects: 'unknown',
-          recovery: {
-            disposition: 'never',
-            maximumAdditionalCalls: 0,
-            requiresNewModelResponse: false,
-            safeAutomaticRetry: false,
-          },
-          lineage: { failureInstanceId: SECRET, recoveryOf: ABSOLUTE_PATH },
+          ...FAILED_OUTCOME,
+          lineage: { failureInstanceId: PRIVATE_LINEAGE },
           timing: { source: 'runtime_boundary', executionMs: 17, totalActiveMs: 31 },
           unknownFields: {
             hasUnknown: true,
             count: 2,
             toolClass: 'builtin_execute',
-            schemaRevision: SECRET,
+            schemaRevision: PRIVATE_SCHEMA_REVISION,
           },
         },
       },
@@ -93,6 +91,7 @@ describe('metadata-only session logging', () => {
         type: 'tool.failed',
         toolCallId: SECRET,
         failure: classifyFailure('tool_runtime_error', `${SECRET}: ${ABSOLUTE_PATH}`),
+        outcomeV1: FAILED_OUTCOME,
       },
       {
         type: 'approval.requested',
@@ -153,7 +152,14 @@ describe('metadata-only session logging', () => {
     ];
 
     const output = JSON.stringify(fixtures.map(mapRuntimeMetadataV1));
-    for (const forbidden of [SECRET, ABSOLUTE_PATH, COMMAND, SOURCE_MARKER]) {
+    for (const forbidden of [
+      SECRET,
+      ABSOLUTE_PATH,
+      COMMAND,
+      SOURCE_MARKER,
+      PRIVATE_LINEAGE,
+      PRIVATE_SCHEMA_REVISION,
+    ]) {
       expect(output).not.toContain(forbidden);
     }
     expect(output).toContain('"failureKind":"mandatory_policy_unavailable"');
@@ -234,6 +240,7 @@ describe('metadata-only session logging', () => {
         stdout: SOURCE_MARKER,
         stderr: ABSOLUTE_PATH,
       },
+      outcomeV1: FAILED_OUTCOME,
     });
     await collector.finalize('fatal');
 

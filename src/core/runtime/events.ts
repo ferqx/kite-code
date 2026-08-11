@@ -400,7 +400,7 @@ export interface ToolFinishedEvent {
     /** Provider-neutral structured facts; stdout remains model-facing content only. */
     resultMeta?: import('./state').ToolResultMeta;
   };
-  /** Shadow typed projection in the same terminal event as legacy result fields. */
+  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
   outcomeV1?: ToolOutcomeV1;
   classifierAdviceV1?: import('./tool-outcome').ToolOutcomeClassifierAdviceV1;
   classifierDiagnostic?: 'classifier_threw';
@@ -411,7 +411,7 @@ export type ToolFailedEvent = {
   type: 'tool.failed';
   toolCallId: string;
   createdAt?: string;
-  /** Shadow typed projection in the same terminal event as legacy failure fields. */
+  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
   outcomeV1?: ToolOutcomeV1;
   /** Structured failure for new producers. `error` remains readable for v3 event-log replay. */
 } & (
@@ -426,6 +426,7 @@ export interface ToolRejectedEvent {
   reason: string;
   failure?: ClassifiedFailure;
   createdAt?: string;
+  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
   outcomeV1?: ToolOutcomeV1;
 }
 
@@ -435,6 +436,7 @@ export interface ToolCancelledEvent {
   toolCallId: string;
   reason: string;
   createdAt?: string;
+  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
   outcomeV1?: ToolOutcomeV1;
 }
 
@@ -610,6 +612,7 @@ export interface ApprovalRejectedEvent {
   reason: string;
   failure?: ClassifiedFailure;
   createdAt?: string;
+  /** Canonical rejection projection; optional only for persisted historical events. */
   outcomeV1?: ToolOutcomeV1;
 }
 
@@ -769,7 +772,7 @@ export interface AutoReviewCompletedEvent {
         reviewerModelName: string;
         durationMs: number;
       };
-  /** Present only when an actual rejection terminalizes the tool call. */
+  /** Present on a current rejection terminal; absent on non-terminals and historical records. */
   outcomeV1?: ToolOutcomeV1;
   createdAt?: string;
 }

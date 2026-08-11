@@ -14,6 +14,7 @@ import {
   setActivePlanning,
 } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 
 test('ACORE-EVAL-00 records a metadata-only scripted model → tool → model Runtime journey', async () => {
   const store = createRuntimeStore(':memory:');
@@ -170,7 +171,14 @@ const V2_VERIFICATION_SPEC = {
 };
 
 function reduceJourneyEvents(state: RuntimeState, events: readonly RuntimeEvent[]): RuntimeState {
-  return events.reduce(reduceRuntimeState, state);
+  return events.reduce(
+    (current, event) =>
+      reduceRuntimeState(
+        current,
+        normalizeCurrentToolOutcomeEventV1(event, current, '2026-08-11T00:00:00.000Z'),
+      ),
+    state,
+  );
 }
 
 function requiredVerificationEvents(completed: boolean): RuntimeEvent[] {

@@ -1,21 +1,36 @@
 import { describe, expect, test } from 'bun:test';
 import type { Action } from '../src/app/tui/App';
-import { createInitialState, eventReducer } from '../src/app/tui/App';
+import { eventReducer as canonicalEventReducer, createInitialState } from '../src/app/tui/App';
 import {
   projectToolCancelled,
   projectUserCancelledTurn,
 } from '../src/app/tui/reducers/cancellation-projection';
 import { buildToolSummaryLine } from '../src/app/tui/reducers/consolidateTools';
 import {
+  handleRuntimeEventAction as handleCanonicalRuntimeEventAction,
   handleEventAction,
-  handleRuntimeEventAction,
   type RenderEvent,
 } from '../src/app/tui/reducers/handleEvent';
 import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
+import type { RuntimeEvent } from '../src/core/runtime/events';
+import { decodeHistoricalToolOutcomeEventV1 } from '../src/core/runtime/tool-outcome-events';
 import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
 
 function fresh(): TuiState {
   return createInitialState();
+}
+
+function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
+  return handleCanonicalRuntimeEventAction(state, decodeHistoricalToolOutcomeEventV1(event));
+}
+
+function eventReducer(state: TuiState, action: Action): TuiState {
+  return canonicalEventReducer(
+    state,
+    action.type === 'RUNTIME_EVENT'
+      ? { ...action, event: decodeHistoricalToolOutcomeEventV1(action.event) }
+      : action,
+  );
 }
 type LegacyRenderAction = { type: 'EVENT'; event: RenderEvent };
 type TestAction = Action | LegacyRenderAction;
@@ -4454,7 +4469,7 @@ describe('eventReducer (blocks model)', () => {
       );
     });
 
-    test('approval rejection keeps the queued shell as a cancelled message card', () => {
+    test('approval rejection keeps the queued shell as a rejected message card', () => {
       let state = dispatch(fresh(), {
         type: 'RUNTIME_EVENT',
         event: {
@@ -4493,7 +4508,7 @@ describe('eventReducer (blocks model)', () => {
       expect(card).toMatchObject({
         callId: 'shell-rejected',
         name: 'shell_execute',
-        status: 'cancelled',
+        status: 'error',
         summary: 'Rejected by user.',
       });
       expect(approvalBlock).toBeUndefined();
@@ -4723,7 +4738,7 @@ describe('eventReducer (blocks model)', () => {
         expect.objectContaining({
           kind: 'tool_card',
           callId: 'shell-rejected',
-          status: 'cancelled',
+          status: 'error',
           summary: 'Approval cancelled by user.',
         }),
       );

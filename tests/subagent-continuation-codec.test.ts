@@ -10,7 +10,8 @@ import {
   systemMessage,
   toolMessage,
 } from '@/core/messages';
-import { legacyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import { classifyFailure } from '@/core/runtime/failures';
+import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
 import {
   createToolRecoveryJournalV1,
   recordRecoveryFailureV1,
@@ -22,6 +23,12 @@ import {
 import { getRoleConfig } from '@/core/subagent/roles';
 import type { SubAgentContinuation } from '@/core/subagent/types';
 
+const failedOutcome = classifyToolOutcomeV1({
+  status: 'failed',
+  failure: classifyFailure('tool_runtime_error', 'redacted'),
+  authority: { dispatchState: 'unknown', externalEffects: 'unknown' },
+});
+
 describe('sub-agent continuation codec', () => {
   test('round-trips JSON-safe continuation snapshots with LangChain message details', () => {
     const childRecovery = recordRecoveryFailureV1(createToolRecoveryJournalV1(), {
@@ -29,7 +36,7 @@ describe('sub-agent continuation codec', () => {
       toolName: 'read_file',
       invocationFingerprint: 'a'.repeat(64),
       modelMessageId: 'child-model',
-      outcome: legacyToolOutcomeV1('failed'),
+      outcome: failedOutcome,
     });
     const continuation: SubAgentContinuation = {
       id: 'sub-1',
@@ -200,7 +207,7 @@ describe('sub-agent continuation codec', () => {
       toolName: 'read_file',
       invocationFingerprint: 'a'.repeat(64),
       modelMessageId: 'child-model',
-      outcome: legacyToolOutcomeV1('failed'),
+      outcome: failedOutcome,
       turnId: 'child-turn',
     });
     const continuation: SubAgentContinuation = {

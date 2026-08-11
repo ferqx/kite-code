@@ -8,6 +8,7 @@ import {
   type RuntimeState,
   type ToolCallRecord,
 } from '../../src/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
 
 function queueCall(
   state: RuntimeState,
@@ -802,12 +803,19 @@ describe('decideNextEffect', () => {
       toolCallId: 'shell-2',
       approval: approval as never,
     });
-    state = reduceRuntimeState(state, {
-      type: 'approval.rejected',
-      interactionId: 'approval-2',
-      toolCallId: 'shell-2',
-      reason: 'Rejected by user.',
-    });
+    state = reduceRuntimeState(
+      state,
+      normalizeCurrentToolOutcomeEventV1(
+        {
+          type: 'approval.rejected',
+          interactionId: 'approval-2',
+          toolCallId: 'shell-2',
+          reason: 'Rejected by user.',
+        },
+        state,
+        '2026-08-11T00:00:00.000Z',
+      ),
+    );
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
       toolCallIds: ['shell-3'],
