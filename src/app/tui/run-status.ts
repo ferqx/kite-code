@@ -105,6 +105,13 @@ function derivePhase(state: TuiState): RunPhase {
 // ── verb within each phase ──
 
 function activeBlockVerb(state: TuiState): { verb: string; tone: RunStatusTone } | null {
+  const suspendedSubagent = findBlock(
+    state,
+    (b) => b.kind === 'subagent' && b.status === 'suspended',
+  );
+  if (suspendedSubagent?.kind === 'subagent') {
+    return { verb: 'Awaiting approval', tone: 'warning' };
+  }
   // Subagent running
   const sub = findBlock(state, (b) => b.kind === 'subagent' && b.status === 'running');
   if (sub?.kind === 'subagent') {

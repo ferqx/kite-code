@@ -127,8 +127,13 @@ function clearRecoveredInteractionUi(
     },
     turns: withoutTool.turns.map((turn) => ({
       blocks: turn.blocks.map((block) =>
-        block.kind === 'subagent' && block.status === 'running' && block.awaitingApproval
-          ? { ...block, awaitingApproval: false, approvingStepIndex: undefined }
+        block.kind === 'subagent' && block.status === 'suspended' && block.awaitingApproval
+          ? {
+              ...block,
+              status: 'running' as const,
+              awaitingApproval: false,
+              approvingStepIndex: undefined,
+            }
           : block,
       ),
     })),

@@ -61,6 +61,7 @@ import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget
 import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
+  getActiveTask,
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
@@ -340,6 +341,7 @@ async function handleSubAgentResume(params: {
   toolCallId: string;
   continuation: RestoredSubAgentContinuation;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -363,6 +365,7 @@ async function handleSubAgentResume(params: {
     workspace: params.state.session.workspace,
     threadId: params.state.session.threadId,
     config: params.taskConfig,
+    gitBroker: params.gitBroker,
     subagentEventSink: params.emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
@@ -394,6 +397,8 @@ async function handleSubAgentResume(params: {
         workspace: params.state.session.workspace,
         request: blockedRequest,
         shellExecutor: params.shellExecutor,
+        gitBroker: params.gitBroker,
+        currentUserGoal: getActiveTask(params.state)?.userGoal,
         workspaceAccess: params.state.workspaceAccess,
         phase: getAgentPhase(getActivePlanning(params.state)),
         authorization: params.state.authorization,
@@ -483,6 +488,7 @@ async function handleSubAgentResume(params: {
       role: continuation.role,
       task: continuation.task,
       shellExecutor: params.shellExecutor,
+      gitBroker: params.gitBroker,
       mcpManager: params.mcpManager,
       skills: params.skillManifests,
       skillOptions: params.skillOptions,
@@ -589,6 +595,7 @@ export async function executeRuntimeTools(params: {
   state: RuntimeState;
   toolCallIds: string[];
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -630,7 +637,6 @@ export async function executeRuntimeTools(params: {
     );
     return batches.flat();
   }
-
   const events: RuntimeEvent[] = [];
   // Keep the direct-call API unchanged for tests and legacy callers.  The
   // Runtime runner replaces push with a streaming sink, so events are applied
@@ -667,7 +673,8 @@ export async function executeRuntimeTools(params: {
     workspace: params.state.session.workspace,
     threadId: params.state.session.threadId,
     config: params.taskConfig,
-    subagentEventSink: params.subagentEventSink,
+    gitBroker: params.gitBroker,
+    subagentEventSink: emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
     activeSkillFrames: Object.values(params.state.skills.frames).filter(
@@ -1402,6 +1409,7 @@ export async function executeRuntimeTools(params: {
           toolCallId,
           continuation: restored,
           shellExecutor: params.shellExecutor,
+          gitBroker: params.gitBroker,
           mcpManager: params.mcpManager,
           skillManifests: params.skillManifests,
           skillOptions: params.skillOptions,
@@ -1425,6 +1433,8 @@ export async function executeRuntimeTools(params: {
           workspace: params.state.session.workspace,
           request,
           shellExecutor: params.shellExecutor,
+          gitBroker: params.gitBroker,
+          currentUserGoal: getActiveTask(params.state)?.userGoal,
           workspaceAccess: params.state.workspaceAccess,
           phase: getAgentPhase(getActivePlanning(params.state)),
           authorization: params.state.authorization,
@@ -1855,6 +1865,8 @@ export async function executeRuntimeTools(params: {
             workspace: params.state.session.workspace,
             request: executionRequest,
             shellExecutor: params.shellExecutor,
+            gitBroker: params.gitBroker,
+            currentUserGoal: getActiveTask(params.state)?.userGoal,
             workspaceAccess: params.state.workspaceAccess,
             phase: getAgentPhase(getActivePlanning(params.state)),
             authorization: params.state.authorization,

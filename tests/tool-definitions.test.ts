@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '../src/core/config';
 import { getFeatureFlags } from '../src/core/config/features';
+import { containsBrokeredGitInvocationV1, runApprovedTool } from '../src/core/harness/tool-runner';
 import { exposedMcpToolName } from '../src/core/mcp';
 import { isReadOnlyShellCommand } from '../src/core/policies/shell-classification';
 import { clearToolCache, createAgentTools } from '../src/core/tools/definitions';
 import { builtinToolRegistry } from '../src/core/tools/registry/builtins';
 import { askUserSpec } from '../src/core/tools/registry/builtins/ask-user';
+import { gitInspectInputSchema } from '../src/core/tools/registry/builtins/git';
 import { searchContentSpec } from '../src/core/tools/registry/builtins/search-content';
 import { searchFilesSpec } from '../src/core/tools/registry/builtins/search-files';
 import { writePlanSpec } from '../src/core/tools/registry/builtins/write-plan';
@@ -56,6 +58,135 @@ function toolNames(tools: Record<string, unknown>): string[] {
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe('code agent tool definitions', () => {
+  test('git_inspect uses operation-discriminated strict schemas without irrelevant fields', () => {
+    expect(gitInspectInputSchema.safeParse({ operation: 'status', revision: 'HEAD' }).success).toBe(
+      false,
+    );
+    expect(
+      gitInspectInputSchema.safeParse({ operation: 'branch_list', paths: ['safe.txt'] }).success,
+    ).toBe(false);
+    expect(
+      gitInspectInputSchema.safeParse({ operation: 'diff', max_records: 5, paths: ['safe.txt'] })
+        .success,
+    ).toBe(false);
+    expect(
+      gitInspectInputSchema.safeParse({
+        operation: 'log',
+        paths: ['safe.txt'],
+        revision: 'HEAD',
+      }).success,
+    ).toBe(true);
+    expect(gitInspectInputSchema.safeParse({ operation: 'unknown' }).success).toBe(false);
+  });
+
+  test('git log revision grammar is identical at Provider and Registry boundaries', () => {
+    for (const revision of ['HEAD', 'abcdef0', 'refs/heads/main', 'refs/tags/v1']) {
+      expect(
+        gitInspectInputSchema.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
+          .success,
+      ).toBe(true);
+    }
+    for (const revision of ['--all', 'HEAD~1', 'main', 'refs/remotes/origin/main', 'HEAD;echo']) {
+      expect(
+        gitInspectInputSchema.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
+          .success,
+      ).toBe(false);
+    }
+  });
+  test('brokered Git shell denial returns stable next capability without native dispatch', async () => {
+    let dispatches = 0;
+    const result = await runApprovedTool({
+      workspace: '/workspace',
+      request: {
+        source: 'builtin',
+        name: 'shell_execute',
+        args: { command: 'git status --short' },
+        reason: 'fixture',
+        protectedCommand: 'git status --short',
+      },
+      taskConfig: {
+        features: { brokeredGitV1: true },
+        executionCapabilitySurface: {
+          inProcessReadOnlyTools: null,
+          network: false,
+          process: true,
+          write: false,
+          workspaceWrite: false,
+          shell: true,
+          skillChild: false,
+          localStdioMcp: false,
+          gitInspect: true,
+          brokeredGitFeatureRevision: 'brokered-git-r1',
+        },
+      } as AgentConfig,
+      shellExecutor: async () => {
+        dispatches++;
+        return { ok: true, command: 'git status --short', exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+    expect(dispatches).toBe(0);
+    expect(result).toMatchObject({
+      ok: false,
+      status: 'rejected',
+      resultMeta: { nextCapability: 'git_inspect' },
+    });
+  });
+  test('brokered Git shell detection fails closed for absolute, nested shell and indirect child forms', () => {
+    for (const command of [
+      '/usr/bin/git status --short',
+      'sh -c "git diff -- safe.txt"',
+      "python -c \"import subprocess; subprocess.run(['git','status'])\"",
+      'env PATH=/usr/bin command git.exe status',
+      'C:\\Tools\\Git\\bin\\git.exe status',
+    ]) {
+      expect(containsBrokeredGitInvocationV1(command)).toBe(true);
+    }
+    expect(containsBrokeredGitInvocationV1('printf .git/config')).toBe(false);
+  });
+  test('brokered Git disclosure requires one matching feature revision and independent axes', () => {
+    const gitBroker = {
+      featureRevision: 'brokered-git-r1' as const,
+      inspect: async () => ({ ok: true, output: '' }),
+    };
+    const baseConfig = { features: { brokeredGitV1: true } } as AgentConfig;
+    expect(
+      toolNames(createAgentTools({ workspace: '/workspace', config: baseConfig, gitBroker })),
+    ).not.toContain('git_inspect');
+    const sealedConfig = {
+      ...baseConfig,
+      executionCapabilitySurface: {
+        inProcessReadOnlyTools: null,
+        network: false,
+        process: false,
+        write: false,
+        workspaceWrite: false,
+        shell: false,
+        skillChild: false,
+        localStdioMcp: false,
+        gitInspect: true,
+        brokeredGitFeatureRevision: 'brokered-git-r1' as const,
+      },
+    };
+    const inspectOnly = toolNames(
+      createAgentTools({ workspace: '/workspace', config: sealedConfig, gitBroker }),
+    );
+    expect(inspectOnly).toContain('git_inspect');
+    expect(
+      toolNames(
+        createAgentTools({
+          workspace: '/workspace',
+          config: {
+            ...sealedConfig,
+            executionCapabilitySurface: {
+              ...sealedConfig.executionCapabilitySurface,
+              brokeredGitFeatureRevision: null,
+            },
+          },
+          gitBroker,
+        }),
+      ),
+    ).not.toContain('git_inspect');
+  });
   test('normalizes remote MCP tool names into stable model-safe identifiers', () => {
     expect(exposedMcpToolName('docs', 'search_docs')).toBe('mcp__docs__search_docs');
     const unsafe = exposedMcpToolName(
@@ -512,6 +643,27 @@ describe('code agent tool definitions', () => {
     expect(
       builtinToolRegistry.effectsOf('task', { subagent_type: 'code', task: 'write code' }, context),
     ).toBeUndefined();
+  });
+
+  test('legacy planning uses the same explore/plan-only task role ceiling', () => {
+    const context = {
+      workspace: '/tmp',
+      phase: 'planning' as const,
+      hasTaskAdapter: true,
+      featureFlags: { ...getFeatureFlags(), promptContractV2: false },
+    };
+    expect(
+      builtinToolRegistry.parseToolCall(
+        { name: 'task', args: { subagent_type: 'review', task: 'Review current architecture.' } },
+        context,
+      ).ok,
+    ).toBe(false);
+    expect(
+      builtinToolRegistry.parseToolCall(
+        { name: 'task', args: { subagent_type: 'explore', task: 'Inspect current architecture.' } },
+        context,
+      ).ok,
+    ).toBe(true);
   });
 
   test('Prompt V2 planning task surface preserves explicit delegation and role guidance', async () => {

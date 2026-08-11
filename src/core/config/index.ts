@@ -460,6 +460,8 @@ export interface AgentConfig {
   executionBoundary?: ExecutionBoundaryV1;
   /** Exact capability surface admitted by the sealed production gate. */
   executionCapabilitySurface?: ExecutionCapabilitySurfaceV1;
+  /** Release-owned native evidence; never accepted from project/user config. */
+  brokeredGitShellDenyEvidence?: import('@/protocol/git').GitShellDenyEvidenceV1;
   /** Resolved artifact + user + project session logging policy. */
   sessionLoggingPolicy?: SessionLoggingPolicyV1;
   /** Source-aware telemetry preferences; App consent composition remains authoritative. */
@@ -785,6 +787,7 @@ export function loadProductionAgentConfig(
     executionCapabilitySurface: networkBoundaryRolloutEnabled
       ? decision.surface
       : { ...decision.surface, network: false },
+    brokeredGitShellDenyEvidence: decision.qualificationProof.brokeredGitShellDenyEvidence,
     sandbox: { enabled: true },
     productionExecution: decision.qualificationProof,
   } as ProductionAgentConfigV1;

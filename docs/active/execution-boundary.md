@@ -9,11 +9,12 @@ projection、release-controlled execution policy 或对应 feature flag 时。
 tests/sandbox/network-boundary-concurrency.test.ts tests/runtime/tool-controller.test.ts
 tests/config/features.test.ts tests/sandbox/status-projection.test.ts
 tests/workspace/worktree-controller.test.ts tests/mcp-transport-boundary.test.ts
-tests/mcp-transport-boundary-concurrency.test.ts`、
+tests/mcp-transport-boundary-concurrency.test.ts tests/git-broker.test.ts
+tests/runtime/git-tool-controller.test.ts`、
 `bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/sandbox-mode.test.ts`、
 `bun run typecheck`、`bun run check:core-boundary`。
 
-相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、`execution-platform-support.md`。
+相关：ADR-0051、ADR-0054、ADR-0061、ADR-0070、ADR-0097、`execution-platform-support.md`。
 
 ## Schema ownership
 
@@ -130,10 +131,11 @@ invocation 还会用不递归的 `rmdir` 回收空的共享 runtime 容器；并
 allow root。`workspace_write` 只允许 Workspace 与该 runtime root 写入；`read_only` 不允许 Workspace 写入。系统与当前 Bun/Node runtime 依赖只有
 显式只读 root；除此之外的 Workspace 外 read/write/create/unlink、指向外部的 symlink，以及
 Workspace 内 Agent/MCP 配置、credential、shell profile 等 protected path 均由 Seatbelt deny，
-`checkDangerousPaths()` 只保留为 defense-in-depth。ADR-0070 起，seatbelt executor 对 git 命令
-豁免 Workspace `.git` 目录的原生 deny，并放行用户 git config 与 `/var/select/developer_dir`
-CLT shim 解析（详见下文 Git access）；直接 `.git` 访问仍由 tool-policy evaluator 与
-`checkDangerousPaths()` 拒绝。Shell child 会继承相同 profile。共享规则除 exact literal/subpath 外，还编译 ASCII 大小写不敏感的 anchored regex；因此
+`checkDangerousPaths()` 只保留为 defense-in-depth。启用 ADR-0097 的精确
+`brokered-git-r1` revision 时，通用 Shell 的 Seatbelt profile 恢复 Workspace `.git` 原生 deny，
+Linux bubblewrap 同样以 `.git` 目录或 gitfile mask 拒绝 metadata；只有 App 注入的 typed Git broker
+拥有受限 metadata 通道。旧 ADR-0070 Git shell 豁免仅保留给 feature revision 切换前的开发兼容路径，
+不得进入 broker qualification。Shell child 会继承相同 profile。共享规则除 exact literal/subpath 外，还编译 ASCII 大小写不敏感的 anchored regex；因此
 case-insensitive APFS/HFS+ 上的 `.GIT`、`.Agents`、`.ENV.*` alias，以及 case-sensitive volume
 上按混合大小写实际创建的同名 identity，都会由原生边界拒绝。
 Seatbelt 的 `#"..."` regex literal 直接消费正则反斜杠；profile generator 必须只转义该 literal
@@ -152,8 +154,8 @@ case-insensitive filesystem alias 绕过。Tool Runner 在审批前执行一次�
 `read_file`、`write_file`、`edit_file` 和 search spec 通过
 结构化 path-access 声明接入；Registry conformance 从完整 builtin tuple 派生所有
 `filesystem!=none` spec。没有通用 path hook 的 `read_plan`、`read_skill_reference`、
-`shell_execute`、`task`、`activate_skill` 必须分别登记由 typed Plan Artifact、Skill reference
-allowlist、native sandbox、child Harness 和 compiled inline/fork adapter 接管的闭合例外，因此新增
+`shell_execute`、`git_inspect`、`task`、`activate_skill` 必须分别登记由 typed Plan Artifact、Skill reference
+allowlist、native sandbox、typed Git broker 的 shared protected-path/repository admission、child Harness 和 compiled inline/fork adapter 接管的闭合例外，因此新增
 filesystem builtin 不能静默遗漏 evaluator。workspace-wide search 会剪枝 protected descendants，而不是只检查
 搜索根。未携带 sealed boundary 的开发入口继续使用既有外部路径审批语义。
 
@@ -165,28 +167,34 @@ protected/outside cwd 与 path-like executable，再把 canonical cwd 和 path-l
 交给 transport factory。sealed transport identity 固定把 `localStdioMcp=false`：在存在真实
 sandbox-backed stdio factory、argv/runtime pinning 与 native child inheritance conformance 前，
 即使 capability surface bit 被错误设为 true 也以 `transport_denied` 拒绝，生产不会构造本地 child。
-typed Git/worktree controller 仍是共享 checkout / worktree 写操作的唯一 App 授权主体；seatbelt
-边界（ADR-0070）放行 git 命令对 Workspace `.git` 的原生访问，但不会向模型通用文件工具或裸
-shell 命令文本开放 `.git`（tool-policy evaluator 与 `checkDangerousPaths()` 仍拒绝）。
+typed Git/worktree controller 仍是共享 checkout / worktree placement 的 App 授权主体；模型 Git
+操作必须走下述 broker，文件工具和通用 Shell 始终不能直接访问 `.git`。
 
-### Git access（ADR-0070）
+### Brokered Git access（ADR-0097）
 
-seatbelt profile 新增 `gitAccess: 'deny' | 'allow'`，profile 函数默认 `'deny'`，seatbelt executor
-显式选择 `'allow'`。允许时：
+`ExecutionCapabilitySurfaceV1` 只投影只读 `gitInspect`，并绑定精确
+`brokered-git-r1` feature revision。Registry disclosure、Controller dispatch 与 native `.git`
+deny/mask 必须以同一 revision 原子切换；只打开 feature boolean、只披露 Tool 或只改 sandbox
+profile都 fail closed，generic process/read-only fallback 也不能隐式产生 Git capability。
 
-- `/private/var/select/developer_dir` 进入 `SYSTEM_READ_FILES`。Apple CLT shim
-  （`/usr/bin/git`、`/usr/bin/clang`、`/usr/bin/make`）经 `xcode-select`/`xcrun` 解析真实二进制，
-  消除误导性的 `unable to read data link at '/var/select/developer_dir'` 错误；
-- 存在的用户 git config（`~/.gitconfig`、`$XDG_CONFIG_HOME/git/config`）可读；
-- Workspace `.git` 目录从原生 protected-path deny 中豁免（读与写），git 命令可操作仓库；
-  `.git-credentials`、`.gitmodules`、`.env*` 等 protected file 仍被 deny。
+`git_inspect` 只接受 `status | diff | log | branch_list` 的逐 operation 严格有界 schema；unknown/无关字段拒绝。path 必须是 literal，相对路径中的 pathspec magic、glob、casefold 与反斜杠形式一律在进程前拒绝。Core broker 在任何 Git
+process 前验证 canonical repository/common-dir、Workspace 外受信 binary identity、受限 config、
+attributes、replace refs、grafts 与 shared protected-path evaluator；无法证明安全时零 dispatch。
+`core.excludesFile`、include/url/protocol/remote/credential 及其他可跨越仓库边界的 config 一律视为 hostile，且 broker 环境不得继承用户 Git 配置。`diff` 在 dispatch 前还要以有界历史/对象 provenance 证明请求路径从未由 protected 名称或 protected blob 派生；无法证明时只返回低信息量拒绝。每次 adapter request 都携带独立 stdout/stderr byte ceiling，App 以流式 UTF-8 安全读取并在溢出时终止 process tree。
+`.gitattributes`、`.git/info/attributes`、grafts、`refs/replace` 与 `packed-refs` 在读取前逐级验证 metadata boundary、拒绝任意 symlink；packed refs 中出现 replace ref 同样视为 hostile。
+命令 argv 和环境由 broker 构造，禁用 system/global config、credential/askpass、hooks、filters、
+pager、external diff 和可执行 attributes。`log` 只返回 hash/time 等 metadata，不读取 subject、blob
+或 protected 内容。每次 terminal 产生绑定 repo、binary、schema、native-deny、operation 与可信
+timing 的 typed evidence/receipt；App process adapter 只执行 broker 已准入的 invocation。
 
-直接 `.git` 访问不随之开放：模型文件工具走 protected-path evaluator（`.git` 仍在
-`PROTECTED_WORKSPACE_DIRECTORIES_V1`，返回 deny），shell 命令文本命中 `checkDangerousPaths()`
-的 `.git/config`、`.git/hooks/`、`.gitmodules`、`.git-credentials` 等模式仍被拒绝。因此开放的
-是「git 二进制管理 `.git`」，不是「shell 任意读写 `.git`」。
+Git stage、commit 与远端 fetch/pull/push 不在当前模型工具表中；本地写操作留给用户或独立后续设计，不能由 `auto`、`accept_edits`、Shell 授权或 raw shell fallback 恢复。远端操作仍需独立 network/credential/descendant boundary；
+Shell Git metadata denial 返回稳定 `nextCapability=git_inspect`，远端 Git 返回
+`managed_network_setup_required`，二者都不得回退 raw shell。
 
-Linux bubblewrap 早已绑定完整 Workspace（含 `.git`），本变更使 macOS Seatbelt 与之一致。
+三平台 probe 仅在 native metadata read/write deny 都为 enforced 后，才通过真实 App broker composition 与固定 binary 运行 positive/hostile；TUI/foreground CLI composition 仍是独立证据。probe 分别记录 native metadata read/write deny、broker positive/hostile 与 composition
+identity。当前 macOS、Linux、Windows 都不能同时证明这些证据，因此 brokered Git production
+qualification 明确为 excluded；开发 fixture 通过不产生 production support。
+`qualified` evidence 还必须直接绑定真实 profile revision/digest、protected-rules digest、broker/schema revision、repository/executable/native-deny identity 与 invocation receipt UUID；由标签字符串临时哈希出的值不能作为资格证据。当前 probe 不拥有这组 release evidence，因此即使本地 positive/hostile 控制通过也保持 excluded。
 
 `createSandboxExecutor()` 的 `unavailableFallback='fail'` 返回稳定拒绝而不返回裸 `shellTool`；
 production consumer 必须使用该策略。现有开发 TUI/CLI 仍保留显式 legacy bare-shell fallback，

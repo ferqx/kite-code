@@ -15,6 +15,7 @@ export const EXECUTION_STATUS_CAPABILITIES_V1 = [
   'shell',
   'skillChild',
   'localStdioMcp',
+  'gitInspect',
 ] as const;
 
 export type ExecutionStatusCapabilityV1 = (typeof EXECUTION_STATUS_CAPABILITIES_V1)[number];

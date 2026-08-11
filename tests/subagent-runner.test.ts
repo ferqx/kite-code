@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
+import { runApprovedTool } from '@/core/harness/tool-runner';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
@@ -29,6 +30,161 @@ function mockEventSink() {
 }
 
 describe('SubAgentRunner integration', () => {
+  test('real task dispatch preserves planning phase for governed save then submit projection', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-plan-child-phase-'));
+    const taskModel = new StreamingMockModel({
+      responses: [{ message: aiMessage({ content: 'bounded architecture plan' }) }],
+    }) as unknown as SupportedChatModel;
+    try {
+      const result = await runApprovedTool({
+        workspace,
+        request: {
+          source: 'builtin',
+          name: 'task',
+          args: {
+            subagent_type: 'plan',
+            task: 'Design a bounded Runtime architecture plan with repository evidence.',
+          },
+          reason: 'fixture',
+          protectedCommand: 'task',
+        },
+        currentUserGoal: 'Delegate a plan subagent to design the Runtime architecture.',
+        phase: 'planning',
+        taskConfig: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+        taskModel,
+        subagentEventSink: mockEventSink().sink,
+      });
+      expect(result).toMatchObject({ ok: true });
+      expect(JSON.parse(result.stdout).nextActions).toEqual([
+        'write_plan:save',
+        'write_plan:submit',
+      ]);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+  test('code child receives the same typed Git availability and broker route as its parent', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-code-child-git-'));
+    let brokerCalls = 0;
+    let modelCalls = 0;
+    const model = {
+      model: {
+        specificationVersion: 'v4',
+        provider: 'fixture',
+        modelId: 'fixture',
+        supportedUrls: {},
+        async doGenerate() {
+          modelCalls += 1;
+          return modelCalls === 1
+            ? {
+                content: [
+                  {
+                    type: 'tool-call',
+                    toolCallId: 'git-child',
+                    toolName: 'git_inspect',
+                    input: { operation: 'status', paths: ['safe.txt'] },
+                  },
+                ],
+                finishReason: { unified: 'tool-calls', raw: 'tool_calls' },
+                usage: { inputTokens: {}, outputTokens: {}, totalTokens: 0 },
+              }
+            : {
+                content: [{ type: 'text', text: 'done' }],
+                finishReason: { unified: 'stop', raw: 'stop' },
+                usage: { inputTokens: {}, outputTokens: {}, totalTokens: 0 },
+              };
+        },
+        async doStream(): Promise<never> {
+          throw new Error('stream disabled');
+        },
+      },
+      capabilityMetadata: { streaming: false },
+      setRetryListener: () => {},
+    } as unknown as SupportedChatModel;
+    try {
+      const result = await runSubAgent({
+        config: {
+          providerName: 'fixture',
+          modelName: 'fixture',
+          features: { brokeredGitV1: true },
+          executionCapabilitySurface: {
+            inProcessReadOnlyTools: null,
+            network: false,
+            process: true,
+            write: true,
+            workspaceWrite: true,
+            shell: true,
+            skillChild: false,
+            localStdioMcp: false,
+            gitInspect: true,
+            brokeredGitFeatureRevision: 'brokered-git-r1',
+          },
+        } as AgentConfig,
+        workspace,
+        role: getRoleConfig('code'),
+        task: 'Inspect repository status through the typed Git capability.',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: mockEventSink().sink,
+        model,
+        gitBroker: {
+          featureRevision: 'brokered-git-r1',
+          inspect: async () => {
+            brokerCalls += 1;
+            return { ok: true, output: 'clean' };
+          },
+        },
+      });
+      expect(result).toMatchObject({ ok: true });
+      expect(brokerCalls).toBe(1);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+  test('real missing-file correction completes with canonical recovery status', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-recovered-'));
+    writeFileSync(join(workspace, 'present.txt'), 'recovered\n');
+    const { sink } = mockEventSink();
+    const model = new StreamingMockModel({
+      responses: [
+        {
+          message: aiMessage({
+            content: '',
+            tool_calls: [{ id: 'missing', name: 'read_file', args: { path: 'missing.txt' } }],
+          }),
+        },
+        {
+          message: aiMessage({
+            content: '',
+            tool_calls: [{ id: 'corrected', name: 'read_file', args: { path: 'present.txt' } }],
+          }),
+        },
+        { message: aiMessage({ content: 'done after correction' }) },
+      ],
+    }) as unknown as SupportedChatModel;
+    try {
+      const result = await runSubAgent({
+        config: { providerName: 'fixture', modelName: 'fixture-model' } as AgentConfig,
+        workspace,
+        role: getRoleConfig('explore'),
+        task: 'Inspect the corrected file and report the result.',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      });
+      expect(result.ok).toBe(true);
+      expect(result.terminalStatus).toBe('completed');
+      expect(result.steps?.map((step) => step.ok)).toEqual([false, true]);
+      expect(result.toolRecovery?.order).toHaveLength(1);
+      const recoveredFailureId = result.toolRecovery?.order[0];
+      expect(
+        recoveredFailureId ? result.toolRecovery?.failures[recoveredFailureId]?.status : undefined,
+      ).toBe('recovered');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
   test('parent reducer and child provider share one public stdout-or-stderr projection matrix', async () => {
     const combinations = [
       { ok: true, stdout: '', stderr: '' },

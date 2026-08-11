@@ -31,6 +31,7 @@ export interface SubAgentRunnerInput {
   role: SubAgentRoleConfig;
   task: string;
   shellExecutor?: import('@/core/tools/shell').ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: import('@/core/mcp').McpRuntimeProvider;
   skills?: import('@/core/skills/types').SkillManifest[];
   skillOptions?: import('@/core/skills/types').SkillScanOptions;
@@ -106,6 +107,7 @@ export interface SubAgentResult {
   summary: string;
   toolCallCount: number;
   durationMs: number;
+  terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'suspended';
   error?: string;
   blocked?: {
     reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL';

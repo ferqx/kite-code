@@ -1,11 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   deniedReadVerdict,
   evaluatePlatformSupport,
   githubEvidenceSource,
   type PlatformCapabilityEvidenceV1,
+  platformCapabilityEvidenceV1Schema,
+  probeBrokeredGit,
 } from '../../scripts/release/platform-capability-probe';
 
 type ProbeInput = Omit<
@@ -29,6 +32,15 @@ function evidence(overrides: Partial<ProbeInput> = {}): ProbeInput {
       shell: true,
       forkedSkill: false,
       localStdioMcp: false,
+    },
+    brokeredGit: {
+      featureRevision: 'brokered-git-r1',
+      nativeShellReadDeny: 'enforced',
+      nativeShellWriteDeny: 'enforced',
+      brokerPositive: 'unavailable',
+      brokerHostile: 'unavailable',
+      outcome: 'excluded',
+      reason: 'broker_positive_and_hostile_not_proven',
     },
     environmentIdentity: { exactOsVersion: 'enforced' },
     backendIsolation: { syscallFilter: 'enforced' },
@@ -68,6 +80,54 @@ function evidence(overrides: Partial<ProbeInput> = {}): ProbeInput {
 }
 
 describe('platform capability probe admission', () => {
+  test('runs the production App Git composition for broker positive, hostile and binary identity evidence', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-platform-git-probe-'));
+    try {
+      const result = await probeBrokeredGit(
+        process.platform === 'darwin'
+          ? 'seatbelt'
+          : process.platform === 'win32'
+            ? 'windows_restricted_token'
+            : 'bubblewrap',
+        root,
+        'enforced',
+        'enforced',
+        { tui: 'enforced', foregroundCli: 'enforced' },
+      );
+      if (process.platform === 'win32') {
+        expect(result).toMatchObject({ outcome: 'excluded', brokerPositive: 'unavailable' });
+      } else {
+        expect(result).toMatchObject({
+          outcome: 'excluded',
+          brokerPositive: 'enforced',
+          brokerHostile: 'enforced',
+          reason: 'production_entrypoint_composition_unproven',
+        });
+        expect(result.evidenceBindings).toBeUndefined();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  test('qualified brokered Git cannot omit concrete profile, rules and receipt identities', () => {
+    const candidate = {
+      ...evidence(),
+      evidenceId: '00000000-0000-4000-8000-000000000000',
+      brokeredGit: {
+        featureRevision: 'brokered-git-r1',
+        nativeShellReadDeny: 'enforced',
+        nativeShellWriteDeny: 'enforced',
+        brokerPositive: 'enforced',
+        brokerHostile: 'enforced',
+        outcome: 'qualified',
+      },
+      outcome: 'excluded',
+      productionSupported: false,
+      limitations: ['fixture'],
+      digest: `sha256:${'a'.repeat(64)}`,
+    };
+    expect(platformCapabilityEvidenceV1Schema.safeParse(candidate).success).toBe(false);
+  });
   const githubSource = {
     QUALIFICATION_REPOSITORY: 'ferqx/kite-code',
     QUALIFICATION_REPOSITORY_ID: '1218896626',

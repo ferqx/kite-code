@@ -218,6 +218,7 @@ export function resolveContextProjectionEnvironment(input: {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -258,6 +259,7 @@ export function resolveContextProjectionEnvironment(input: {
       createAgentTools({
         workspace: input.state.session.workspace,
         shellExecutor: input.shellExecutor,
+        gitBroker: input.gitBroker,
         mcpManager: input.mcpManager,
         mcpBindings: persistedBindings,
         toolSearch:
@@ -336,6 +338,7 @@ export async function invokeRuntimeModel(params: {
   state: RuntimeState;
   config: AgentConfig;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
@@ -526,6 +529,7 @@ export async function invokeRuntimeModel(params: {
     const toolInput = {
       workspace: state.session.workspace,
       shellExecutor: params.shellExecutor,
+      gitBroker: params.gitBroker,
       mcpManager: params.mcpManager,
       mcpBindings,
       toolSearch: flags.toolSearchV1 && params.model.supportsToolCalls !== false,
@@ -556,6 +560,7 @@ export async function invokeRuntimeModel(params: {
       config: params.config,
       model: params.model,
       shellExecutor: params.shellExecutor,
+      gitBroker: params.gitBroker,
       mcpManager: params.mcpManager,
       skills: params.skills,
       skillOptions: params.skillOptions,

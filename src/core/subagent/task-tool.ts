@@ -11,6 +11,7 @@ export interface TaskToolDeps {
   config: AgentConfig;
   workspace: string;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -69,6 +70,7 @@ export async function runTaskSubAgent(
       },
       task: args.task,
       shellExecutor: deps.shellExecutor,
+      gitBroker: deps.gitBroker,
       mcpManager: deps.mcpManager,
       skills: deps.skills,
       skillOptions: deps.skillOptions,

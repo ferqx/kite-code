@@ -138,11 +138,7 @@ export const shellExecuteSpec = defineExecutableTool({
         command: input.command,
         exitCode: isAbort ? 130 : -1,
         stdout: '',
-        stderr: isAbort
-          ? 'Command cancelled by user.'
-          : error instanceof Error
-            ? error.message
-            : String(error),
+        stderr: isAbort ? 'Command cancelled by user.' : 'Shell execution adapter failed.',
       };
     }
   },

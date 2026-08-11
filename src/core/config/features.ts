@@ -29,6 +29,7 @@ export interface FeatureFlags {
   networkBoundaryV1: boolean;
   releaseProfileV1: boolean;
   observabilityMetricsV1: boolean;
+  brokeredGitV1: boolean;
   promptContractV2: boolean;
 }
 
@@ -59,6 +60,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   networkBoundaryV1: false,
   releaseProfileV1: false,
   observabilityMetricsV1: false,
+  brokeredGitV1: false,
   promptContractV2: false,
 });
 

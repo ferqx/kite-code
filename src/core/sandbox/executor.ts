@@ -8,6 +8,7 @@ import {
   timeoutMessage,
 } from '@/core/tools/shell';
 import type { ShellNetworkMode, ShellResult } from '@/core/types';
+import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@/protocol/git';
 import { generateBwrapArgs } from './bwrap';
 import { buildCgroupPidsInvocationV1, findUsableCgroupPidsRunnerV1 } from './cgroup-pids';
 import { detectSandboxBackend, findUsableBubblewrap } from './platform';
@@ -100,10 +101,13 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
         filesystemScope: options.filesystemScope,
         sandboxRuntimeDir,
         runtimeReadOnlyRoots,
-        // Permit git commands to access the Workspace `.git` directory inside the
-        // sandbox (see ADR-0070). Linux bubblewrap already binds the full Workspace,
-        // so this aligns the macOS Seatbelt boundary with that behavior.
-        gitAccess: 'allow',
+        // ADR-0097 atomically restores native Git-metadata denial when the
+        // exact broker feature revision is active. Legacy development mode
+        // retains the pre-migration profile until that revision is selected.
+        gitAccess:
+          options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1
+            ? 'deny'
+            : 'allow',
       });
       return {
         cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],
@@ -134,6 +138,7 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
         network: networkMode,
         sandboxRuntimeDir,
         filesystemScope: options.filesystemScope,
+        gitMetadataDeny: options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1,
       });
       const shell = getSystemShell();
       const innerCmd = seccompPath

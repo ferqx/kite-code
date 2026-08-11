@@ -92,6 +92,12 @@ export interface ProductionExecutionQualificationV1 {
     shell: boolean;
     skillChild: boolean;
     localStdioMcp: boolean;
+    /** Optional brokered-Git qualification; absence means both Git axes are excluded. */
+    brokeredGit?: {
+      featureRevision: typeof import('@/protocol/git').BROKERED_GIT_FEATURE_REVISION_V1;
+      inspect: boolean;
+      shellDenyEvidence: import('@/protocol/git').GitShellDenyEvidenceV1;
+    };
   };
   inProcessReadOnlyTools: InProcessReadOnlyToolCatalogV1;
 }
@@ -117,6 +123,12 @@ export interface ExecutionCapabilitySurfaceV1 {
   shell: boolean;
   skillChild: boolean;
   localStdioMcp: boolean;
+  /** App-owned typed Git broker axes; generic process/read/write never imply them. */
+  gitInspect: boolean;
+  /** Disclosure, dispatch and native shell metadata deny must match this exact revision. */
+  brokeredGitFeatureRevision:
+    | typeof import('@/protocol/git').BROKERED_GIT_FEATURE_REVISION_V1
+    | null;
 }
 
 export type ExecutionBoundaryAdmissionReasonV1 =
@@ -153,6 +165,7 @@ export interface ExecutionBoundaryAdmissionV1 {
     registryDigest: string;
     qualificationId: string;
     evidenceDigest: string;
+    brokeredGitShellDenyEvidence?: import('@/protocol/git').GitShellDenyEvidenceV1;
   };
 }
 
@@ -182,6 +195,8 @@ export interface SandboxOptions {
   network?: {
     mode: ShellNetworkMode;
   };
+  /** Atomic brokered-Git cutover revision. Matching revision restores native `.git` deny. */
+  brokeredGitFeatureRevision?: typeof import('@/protocol/git').BROKERED_GIT_FEATURE_REVISION_V1;
 }
 
 /** shell 执行资源限制 / Shell execution resource limits */

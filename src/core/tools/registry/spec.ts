@@ -43,7 +43,11 @@ export interface ToolAvailabilityContext {
   phase?: import('@/protocol/events').AgentPhase;
   interactionMode?: import('@/protocol/events').InteractionMode;
   featureFlags?: Readonly<FeatureFlags>;
+  brokeredGitFeatureRevision?:
+    | typeof import('@/protocol/git').BROKERED_GIT_FEATURE_REVISION_V1
+    | null;
   hasTaskAdapter?: boolean;
+  hasGitBroker?: boolean;
   toolSearchEnabled?: boolean;
   activeSkillFrameIds?: readonly string[];
   availableSkillIds?: readonly string[];
@@ -106,6 +110,8 @@ export interface ToolExecutionContext extends ToolContext {
   invocationInput?: unknown;
   /** Release-owned canonical protected-path evaluator for this run. */
   protectedPathEvaluator?: ProtectedPathEvaluatorV1;
+  /** App-composed typed Git broker; raw process authority never enters ToolSpec args. */
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
 }
 
 /**
@@ -142,6 +148,8 @@ export interface ProjectedToolResult {
    */
   streams?: { stdout: string; stderr: string };
   resultMeta: ToolResultMeta;
+  /** Runtime-owned terminal cause; never inferred from model-visible text. */
+  terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
   display: ToolDisplayHint;
   /**
    * Coordination/runtime-action specs may emit governed Core events alongside

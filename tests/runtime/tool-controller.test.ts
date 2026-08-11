@@ -14,6 +14,7 @@ import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
+import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
@@ -158,6 +159,7 @@ describe('executeRuntimeTools', () => {
               status: 'awaiting_approval',
             },
           ],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
         },
         {
           toolCallId: 'child-shell',

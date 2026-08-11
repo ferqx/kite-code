@@ -286,6 +286,8 @@ export interface ToolCallRecord {
 
 /** Structured, JSON-safe facts produced by a tool execution. */
 export interface ToolResultMeta {
+  invocationId?: string;
+  capabilityRevision?: string;
   path?: string;
   totalLines?: number;
   command?: string;
@@ -308,6 +310,11 @@ export interface ToolResultMeta {
   networkPolicyRevision?: string;
   networkAdmissionDigests?: string[];
   networkFailureCode?: string;
+  nextCapability?: 'git_inspect';
+  /** Stable Git broker result classification; never contains repository content. */
+  gitFailureCode?: import('@/protocol/git').GitBrokerFailureCodeV1;
+  /** Runtime-owned local Git inspect receipt. */
+  gitReceipt?: import('@/protocol/git').GitInvocationReceiptV1;
 }
 
 export interface CapabilityRuntimeState {

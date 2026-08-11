@@ -1,8 +1,10 @@
 # Agent 核心工具、计划闭环与沙盒能力优化计划
 
-状态：active
+状态：superseded
 日期：2026-08-09
-优先级：P0
+优先级：P0（可信执行内核）/ P1（Git 与多 Agent 扩展）
+替代：剩余执行范围由 `2026-08-11-trustworthy-runtime-closure.md` 接管；本文保留历史设计、已完成 Task 与实现证据，
+不再作为当前执行入口。
 关联：ADR-0094、ADR-0095、ADR-0096、ADR-0097、
 `docs/active/plan-mode-implementation.md`、`docs/active/tool-description-contracts.md`、
 `docs/active/tool-gated-autonomy.md`、`docs/active/execution-boundary.md`、
@@ -11,7 +13,9 @@
 ## 目标
 
 把 Agent 的优化重点从单次 prompt 命中率扩展为可验证的完整工作闭环：计划不能虚假完成，工具调用参数有效，失败后只做
-有依据的恢复，重复失败可被 Runtime 阻断，整轮耗时可拆分；Shell/Git 在三平台使用一致、最小且可解释的权限边界。
+有依据的恢复，重复失败可被 Runtime 阻断，整轮耗时可拆分。产品主张收敛为“可信、可恢复、可审计的本地 Code Agent
+Runtime”；Shell/Git 先在一个参考平台形成最小正向闭环，其余平台保持诚实 excluded，不再以同时铺满三平台阻塞可信内核
+的候选验证。
 
 本计划先固化架构与验收规则，再实施。Prompt Contract V2 继续遵守 ADR-0094：默认关闭；任何默认值迁移都必须在新的最终
 候选上完成真实整轮 A/B，并由独立迁移 ADR 决定。本计划不恢复已取消的十四日时间门禁。
@@ -37,12 +41,51 @@
 - 不用全局平均成功率掩盖 Plan、Shell/Git、recovery 等关键类别回退。
 - 不因本计划直接翻转 `promptContractV2` 默认值。
 
+## 2026-08-11 产品方向收敛
+
+经当前实现与同类 Code Agent 能力对照，本计划不再追求功能数量、Agent 数量或平台矩阵的表面齐全，后续资源按以下顺序投入：
+
+1. **可信执行内核（P0）**：CompletionGuard、Plan evidence、Runtime-owned ToolOutcome、durable recovery journal 与
+   full-loop Journey eval 是本计划的核心交付。它们必须证明降低假完成、错误重试或失败放大，而不只证明内部状态机自洽。
+2. **受控协作（P1）**：保留最多三路 approval-free 只读 Subagent 和 code 串行边界；本计划不扩展后台 Agent、Agent team、
+   嵌套委派或更高并发。只有预注册独立只读任务证明端到端时延或任务成功改善，才另立后续计划扩展。
+3. **Typed Git（P1）**：保留已实现的 broker 与 fail-closed 安全资产，资格顺序改为 macOS 参考平台优先。Linux/Windows 在各自
+   native read/write deny、production composition 与 probe identity 同构前继续 excluded。若 macOS 也不能在不放宽边界的前提下
+   形成正向闭环，则 Git capability 保持默认关闭并冻结扩展，不阻塞可信内核 RC。
+4. **模型与 Prompt**：`promptContractV2=false` 保持不变。新的 Prompt、状态版本、恢复分类或并发抽象，必须由冻结 Journey 中
+   可复现的用户价值缺口驱动；不得以竞品已有某项功能作为单独实施理由。
+
+本次收敛只调整产品优先级、候选依赖和后续验收，不改变已经落地的 Runtime 行为，也不把 blocked/excluded 改写为 completed；
+因此不新增或改写架构 ADR。
+
+## 用户价值计分卡与停止条件
+
+最终候选在实现正确性之外，必须报告同一 base、同一模型/Provider、同一任务输入下的 paired 用户价值指标：
+
+- 任务成功、false completion、错误自动 replay、policy/approval rejection 后重试；
+- 首次失败后的 model requests、tool invocations、failure amplification 与恢复成功率；
+- active turn / wall-clock p50、p95，以及人为 approval wait 分离后的耗时；
+- 完成一个任务所需的用户追问、纠正和审批次数；
+- 只读 Subagent 相对串行基线的任务成功、总调用量和端到端耗时；
+- Git broker 仅对真实 qualified 平台报告 positive capability，excluded/unsupported 不计作通过。
+
+停止和收缩规则：
+
+- correctness Gate 仍要求 false completion、错误 replay、安全违规为零；任何一项失败都不能用速度或平均成功率抵消。
+- 若可信内核相对 legacy 没有减少假完成/错误恢复/失败放大，且任务成功无改善，则停止新增 guard/outcome 状态，优先删除或合并
+  没有独立决策价值的复杂度。
+- 若只读 Subagent 未在冻结任务上改善成功率或端到端耗时，则保持当前上限和串行 code，不扩展后台/团队能力。
+- 若参考平台 Git qualification 需要放宽 protected path、恢复 raw shell Git 或依赖 label/hash 冒充原生证据，则保持 feature off，
+  记录 excluded 后结束本计划的 Git 扩展，不继续铺设其他平台。
+- 同类产品黑盒结果只作为产品定位参照；不同模型、远程环境和权限默认值不能冒充同一实现的因果 A/B，也不成为发布 Gate。
+
 ## 实施顺序与变更隔离
 
-先以现有产品行为建立 Tool Journey 纯观测 baseline，再按 ADR-0095 → ADR-0096 → ADR-0097 的依赖分小 PR
-实施。CompletionGuard 建立可信终态，Runtime-owned ToolOutcome 建立失败证据，Git broker 最后依赖 typed outcome 完成权限
-迁移。计划/子 Agent 精化在完成真值与共享 schema 落地后进行。每个 PR 都同步相应 active 文档；不得把当前工作区中尚未
-收口的 Prompt A/B fixture 改动与架构 PR 混为一个不可审查提交。
+先以现有产品行为建立 Tool Journey 纯观测 baseline，再按 ADR-0095 → ADR-0096 的依赖完成可信内核；ADR-0097 的 Git
+资格与 Agent 并发作为 P1 lane 独立收口。CompletionGuard 建立可信终态，Runtime-owned ToolOutcome 建立失败证据，随后先冻结
+用户价值计分卡并执行完整 Journey 候选验证。Git broker 和 Subagent 的扩展不得反向阻塞已默认关闭或已诚实 excluded 的可信
+内核候选。每个 PR 都同步相应 active 文档；不得把当前工作区中尚未收口的 Prompt A/B fixture 改动与架构 PR 混为一个不可审查
+提交。
 
 Git broker 可先在不向模型暴露的 shadow profile 中验证；正式切换时，tool disclosure、dispatch 与 shell native deny 必须由
 同一 feature revision 原子生效。安全回滚态允许某项操作稳定 unsupported，但不允许重新给予整个 shell `.git` 原生访问。
@@ -74,13 +117,14 @@ skipped 理由及未解决 failure/approval。随后由独立 `ACORE-PLAN-03` �
 | `ACORE-TOOL-01` | `ACORE-EVAL-00`、接受 ADR-0096 | Runtime-owned ToolOutcome/Recovery、单 event shadow 投影 | event/replay matrix；metadata-only tests | 同一 terminal event 双字段对照，逐工具切换 |
 | `ACORE-TOOL-02` | `ACORE-TOOL-01`、`ACORE-PLAN-01` | durable no-progress journal、retry guard、Guard unresolved-failure upgrade | fault/restart/replay journeys；resource budget tests | 成功重复先只观测；decision version 单调增加 |
 | `ACORE-EVAL-01` | `ACORE-PLAN-03`、`ACORE-TOOL-02` | Tool Journey Eval V1 typed-outcome/guard 回归与 first-decision eval 纠名 | deterministic full-loop suite；lineage/timing/privacy | eval 不改变产品行为，可独立回滚 |
-| `ACORE-CONTRACT-01` | `ACORE-TOOL-01` | 结构化 ToolSpec contract、删除双写 guidance、19/19 覆盖 | legacy/V2 × phase contract tests | 分工具迁移；先观测 unknown fields |
+| `ACORE-CONTRACT-01` | `ACORE-TOOL-01` | 结构化 ToolSpec contract、删除双写 guidance、20/20 当前覆盖（原计划 22，mutation 两工具已删除） | legacy/V2 × phase contract tests | 分工具迁移；先观测 unknown fields |
 | `ACORE-GIT-01` | `ACORE-CONTRACT-01`、接受 ADR-0097 | 独立 capability surface、hardened `git_inspect` broker | broker positive/hostile；protected-content tests | broker 先上线，shell 边界暂不切换 |
-| `ACORE-GIT-02` | `ACORE-GIT-01` | 三平台 native deny、调用原子迁移、probe/runtime 同构 | shell negative；TUI routing；evidence identity | 未达 read/write deny 的平台 excluded，不虚报支持 |
+| `ACORE-GIT-02` | `ACORE-GIT-01` | macOS 参考平台 native deny、调用原子迁移、probe/runtime 同构；Linux/Windows 保持独立 exclusion | shell negative；TUI routing；evidence identity | 未达 read/write deny 的平台 excluded，不虚报支持 |
 | `ACORE-GIT-03` | `ACORE-GIT-02` | stage/commit typed capability；remote 独立设计或延期记录 | approval、lock、cancel、hostile config tests | mutation 独立开关；不回退到 raw shell |
 | `ACORE-AGENT-01` | `ACORE-PLAN-02`、`ACORE-TOOL-02`、`ACORE-CONTRACT-01` | plan subagent 契约、最多 3 路只读 batch、统一终态/TUI | recovery、parallel、event/result/TUI consistency | code subagent 保持串行；并发受累计预算约束 |
 | `ACORE-EVAL-POLICY-01` | `ACORE-EVAL-01` | 冻结 suite/scorer/report、case floor、样本与统计规则 | policy self-check；manifest immutability | 必须在候选结果前冻结，修改即产生新 revision |
-| `ACORE-RC-01` | `ACORE-PLAN-03`、`ACORE-TOOL-02`、`ACORE-CONTRACT-01`、`ACORE-GIT-03`、`ACORE-AGENT-01`、`ACORE-EVAL-POLICY-01` | OpenCode Go 最终候选完整 Journey A/B 与发布证据 | Required/RC CI；live paired matrix | V2 默认关闭；独立迁移 ADR 决定默认值 |
+| `ACORE-VALUE-01` | `ACORE-EVAL-01`、`ACORE-GIT-01`、`ACORE-AGENT-01` | 冻结用户价值计分卡、legacy/candidate identity、Git disposition 与 Subagent 串行基线 | policy self-check；paired dry-run；privacy | 指标或 fixture 修改产生新 revision；竞品黑盒仅作参照 |
+| `ACORE-RC-01` | `ACORE-PLAN-03`、`ACORE-TOOL-02`、`ACORE-CONTRACT-01`、`ACORE-AGENT-01`、`ACORE-EVAL-POLICY-01`、`ACORE-VALUE-01` | OpenCode Go 最终候选完整 Journey A/B 与发布证据；记录 GIT-02/03 qualified 或 excluded disposition | Required/RC CI；live paired matrix | V2 默认关闭；Git 默认关闭/诚实 excluded 不阻塞可信内核 RC |
 
 ## 当前执行状态
 
@@ -94,8 +138,14 @@ skipped 理由及未解决 failure/approval。随后由独立 `ACORE-PLAN-03` �
 | `ACORE-TOOL-01` | completed | Runtime-owned ToolOutcome V1、同 terminal event shadow、strict legacy replay、metadata-only unknown-field/session/metrics/TUI projection 已落地，并通过整体规格与代码质量审查。 |
 | `ACORE-TOOL-02` | completed | Durable parent/subagent recovery journal、private HMAC identity、recoveryOf、一次 correction/retry ceiling、fail-closed restore、quality guard 与 CompletionGuard unresolved gate 已落地，并通过整体规格与代码质量审查。 |
 | `ACORE-EVAL-01` | completed | `ToolJourneyEvalV1` 10 条冻结 ID 的 deterministic full-loop case、真实 pre-dispatch retry/sandbox denial/replan/guard、typed terminal/lineage/timing/privacy 报告与 first-decision 纠名已落地，并通过整体规格与代码质量审查；未运行正式十轮 A/B 或真实 Provider。 |
-| `ACORE-CONTRACT-01` | completed | 19/19 builtin structured contract、legacy/V2 × planning/building resolved schema/parse 矩阵、父子 public result/classifier/model-content 同构与 Runner recovery 单一事实源已落地，并通过整体规格与代码质量审查。 |
+| `ACORE-CONTRACT-01` | completed | 20/20 builtin structured contract（含只读 `git_inspect`）、legacy/V2 × planning/building resolved schema/parse 矩阵、父子 public result/classifier/model-content 同构与 Runner recovery 单一事实源已落地；原 19 工具 closure 已通过审查，Git inspect 扩展随本 tranche 待整体审查。 |
+| `ACORE-GIT-01` | implemented / review pending | 只读 gitInspect surface、hardened `git_inspect` broker、hostile repository 与 protected-content fail-closed 已落地；待整体规格/质量审查。 |
+| `ACORE-GIT-02` | blocked (reference platform not qualified) / review pending | 精确 feature revision 的 disclosure/dispatch/native deny 代码接线与 Shell typed routing 已落地，但 TUI/CLI 原生资格证据尚未证明任何平台同时满足 metadata read/write deny；后续仅先尝试 macOS 参考平台，未资格平台继续 excluded，不声称 implemented/completed。 |
+| `ACORE-GIT-03` | removed by closure plan | 提前实现的 `git_stage`/`git_commit`、mutation 授权/receipt/mutex 已删除；GIT-02 qualified 前不恢复。 |
+| `ACORE-AGENT-01` | implemented / review pending | 用户权威委派、planning save→submit、共享预算与 running/suspended/terminal 生命周期已落地；专用三路 batch 与重复恢复完成态已由收口计划删除。 |
 | `ACORE-EVAL-POLICY-01` | frozen (r1) | first-decision candidate `300e11a4`、OpenCode Go、十轮 paired sample 和 Go usage privacy boundary 已冻结；完整 Journey candidate 仍待后续 scope 收敛。 |
+| `ACORE-VALUE-01` | pending | 待整体审查关闭后冻结可信内核用户价值计分卡、Subagent 串行基线与 Git qualified/excluded disposition。 |
+| `ACORE-RC-01` | pending | 等待 `ACORE-VALUE-01` 与整体审查收敛；不再等待默认关闭的 GIT-03 取得跨平台 mutation qualification。 |
 
 ## `ACORE-DOC-01`：文档冻结与 Review
 
@@ -203,9 +253,9 @@ A/B、真实 Provider 或 Go usage 核验。
 - selection、参数约束、result、recovery 各自结构化，V2 不再依靠“取第一句”保存关键语义。
 - 删除旧 guidance 前证明父/子 Runtime result projection 同构；先观测 unknown-field rate，再渐进 strict。
 
-2026-08-11 已将 19 个 builtin 全部绑定到 `BUILTIN_TOOL_CONTRACTS` 的结构化 selection/use/constraints/result/recovery
+2026-08-11 已将原 19 个 builtin 与 brokered Git 新增 3 个 builtin 全部绑定到 `BUILTIN_TOOL_CONTRACTS` 的结构化 selection/use/constraints/result/recovery
 事实；Skill runtime 不再保留独立契约，Runner recovery guidance 直接读取 Registry ToolSpec，V2 逐事实投影而非截取旧文案
-首句。conformance 覆盖 19/19、带合法 Skill catalog/active frame/task adapter 的 legacy/V2 × planning/building availability
+首句。conformance 覆盖当前 20/20、带合法 Skill catalog/active frame/task adapter 和只读 Git broker surface 的 legacy/V2 × planning/building availability
 context，并分别验证 provider JSON Schema 与 Registry parse 的有效/无效/unknown 输入。每个 builtin 的真实
 `projectResult/createInterrupt` 还会经过 canonical terminal、reducer 与 provider context，JSON key 必须落在 contract fields，
 text 返回不得虚构字段；unknown-field 只保留 metadata-only 低基数观测。旧四段式输入仅供外部/测试 Registry 读取兼容。
@@ -216,38 +266,47 @@ ENOENT parity journey 同时验证 detail/recovery 一致以及 command/path/res
 
 ## `ACORE-GIT-01`：只读 Git broker
 
-- 新增独立 `gitInspect/gitMutation` capability surface、双门禁、revision、repo binding、executable identity 与 receipt；generic
+2026-08-11 实现状态：implemented，整体规格/质量审查 pending；未标记 completed。
+
+- 新增只读 `gitInspect` capability surface、双门禁、revision、repo binding、executable identity 与 receipt；generic
   read-only fallback 不得隐式包含 broker。
 - status/diff/log/branch_list 使用固定有界 schema；broker 在首次 Git process 前安全解析 Git metadata，验证 canonical
   Workspace 外 binary、配置/attributes/replace/grafts，并清 credential/hook/filter/fsmonitor 等执行面。
 - protected evaluator 先生成允许 path/pathspec，禁止 protected 名称、内容和历史 blob；无法预过滤则 fail closed。
 - worktree controller 只作为防护素材。Core 持有 interface/spec，App 提供 process adapter，禁止反向依赖。
 
-## `ACORE-GIT-02`：调用迁移与 Shell 收口
+## `ACORE-GIT-02`：参考平台调用迁移与 Shell 收口
+
+2026-08-11 状态：production qualification blocked、整体规格/质量审查 pending；当前三平台均 excluded，不能标
+implemented/completed。后续资格只先推进 macOS 参考平台；Linux/Windows 不与其组成同时放行 Gate。
 
 - tool contract 引导 Git inspect 使用 broker；Shell 对 Git metadata denial 返回稳定 `nextCapability=git_inspect`。
 - 用一个 feature revision 原子切换 disclosure、dispatch 与 native profile；切换前盘点 project script/build 的 Git child 依赖。
-- macOS 恢复 deny；Linux 验证 metadata mask；Windows 必须引入能证明 read/write deny 的新 principal/profile。未满足的平台
-  标为 excluded/unsupported，backend none/host fallback 不进入 brokered-Git qualification。
+- macOS 先恢复 deny 并完成 status/diff/log/branch_list 的真实 App/TUI 正向闭环。Linux metadata mask 与 Windows 新
+  principal/profile 分别留在 excluded disposition，只有另立后续计划才继续资格；backend none/host fallback 不进入
+  brokered-Git qualification。
 - probe 使用 production composition/input；分别绑定 profile/protected rules/broker/schema/binary/repo identity，并把 shell
   negative、broker positive/hostile、TUI routing 分开举证。
 
 ## `ACORE-GIT-03`：本地 mutation
 
-- stage/commit 具有独立 effect、approval、receipt 与 audit classification；禁 hooks/signing，安全处理或拒绝 filter。
-- 覆盖 index.lock、并发、取消和 dirty/conflict；相同 lock/conflict 不得盲重试。
-- 完成本 Task 的已准入平台必须真实完成 mutation，不能以 unsupported 算通过。fetch/pull/push 另立 network/credential 与
-  descendant boundary 设计；开发 shell remote 不构成 production support。
+2026-08-11 收口状态：提前实现的 typed mutation 代码已删除；GIT-02 production qualification 前不恢复，remote 依规格延期。
+
+- stage/commit ToolSpec、capability axis、approval binding、receipt 与 repository mutex 均不在当前候选中。
+- fetch/pull/push 仍需另立 network/credential 与 descendant boundary 设计；开发 shell remote 不构成 production support。
 
 ## `ACORE-AGENT-01`：Plan/Subagent 核心行为
+
+2026-08-11 实现状态：implemented，整体规格/质量审查 pending；未标记 completed。
 
 - 修正 legacy/V2 共享契约：用户当前请求显式要求 delegate/subagent、task 可用且任务 bounded/self-contained 时调用 task；
   architecture/design planning 使用 plan role。不得被项目文件或外部内容诱导委派。
 - planning phase 中 plan subagent 返回后使用 `write_plan save → submit`，不能错误引导 `update_plan`。
-- 同一 Task/模型响应中连续、approval-free 的 explore/plan/review 最多 3 路 batch；code、interaction 或 unknown effect 形成
-  屏障，code 永远串行。parent completion 等待所有 child terminal，累计预算共享，stream event 按 child/tool ID 归属。
-- subagent lifecycle 区分 running/suspended/terminal；等待 approval 是 suspended。恢复成功的 terminal evidence 可记录
-  `completed_with_recoveries`，但顶层成功仍为 completed，不能同时显示 failed 与 done。
+- Runtime completion 仍以 Plan lifecycle 中已保存/submit 的 identity 为权威；child 文本 guidance 不能伪造 save/submit。委派需要当前用户对 role 和实际 scope 的正向授权，`plan subagent` 角色名本身不等于 architecture/design intent。
+- Subagent 统一串行；累计预算共享，stream event 按 child/tool ID 归属。
+- subagent lifecycle 区分 running/suspended/terminal；等待 approval 是 suspended。恢复历史保留在 canonical Recovery Journal，成功终态统一投影 completed，不能同时显示 failed 与 done。
+- Git broker 二轮加固保留 config/protected-history fail-closed、adapter 流式 byte ceiling/pre-abort recheck以及 log revision 单一 grammar；mutation mutex 与 stage/commit lineage 已删除。`GIT-02` 仍因 production platform qualification 不足保持 blocked/review pending，`GIT-03` 维持删除。
+- 最终候选继续封闭 attributes/grafts/replace/packed-refs symlink/read boundary；platform probe 禁止 label hash 冒充 profile/rules/receipt evidence。follow-up userGoal 刷新委派权威，code scope 要求明确写授权，child config/phase/gitBroker/availability 与 resume 同构。状态仍为 review pending。
 
 ## `ACORE-EVAL-POLICY-01`：冻结候选评测政策
 
@@ -256,6 +315,17 @@ ENOENT parity journey 同时验证 detail/recovery 一致以及 command/path/res
 - 诊断 3-run 只能发生在 policy freeze 前；任何 fixture/scorer 修改都产生新 revision，正式样本从零开始且不得 early stop。
 - candidate/config identity 只哈希 allowlist 非敏感字段，不能哈希完整含凭据配置。
 - deterministic 与 live 分层；live 使用 synthetic workspace/isolated HOME，并由报告 schema 强制 metadata-only。
+
+## `ACORE-VALUE-01`：用户价值计分卡冻结
+
+- 在整体规格/质量审查关闭后、任何最终候选结果产生前，冻结 legacy/candidate commit、Journey case、模型/Provider、样本量、
+  task success、false completion、failure amplification、用户介入、调用量、active/wall timing 与 privacy scorer。
+- Subagent case 必须同时运行当前最多三路只读 batch 与串行基线；不以并发数、child 数或模型自报完成作为价值指标。
+- Git case 只把真实 native deny + broker positive + App/TUI routing 三者同构的平台记为 qualified；其他平台只记录
+  excluded reason，不把 unsupported 计入成功率。
+- 可在同一 base/task 上人工记录 Claude Code、Codex、Gemini CLI、OpenCode 或 Cursor 的公开产品结果作为方向性参照，但必须
+  同时记录模型、环境、权限默认值与人工介入差异，不进入 Kite legacy/candidate 的因果 A/B Gate。
+- 任一 scorer、fixture 或 stop rule 修改都产生新 policy revision，正式样本从零开始。
 
 ## `ACORE-RC-01`：候选验证与迁移边界
 
@@ -281,14 +351,16 @@ wall，性能比较排除人为 approval wait。比例与 p95 使用预注册 pa
 若样本规模不足以支持默认值迁移，结果仅作为诊断，不以“更快但成功率更低”推出默认开启。V2 继续默认关闭，直到新的迁移
 ADR 接受最终候选证据。
 
-## 三平台 Shell/Git 最小矩阵
+## 参考平台与 excluded 平台 Shell/Git 最小矩阵
 
-每个平台均覆盖三组证据：broker positive/hostile、shell negative、App/TUI routing。case 包含 status/diff/log/branch_list；
-stage/commit 在 GIT-02 稳定 unsupported、GIT-03 对已准入平台必须成功；literal/obfuscated/variable/child `.git` deny；
+macOS 参考平台必须覆盖三组证据：broker positive/hostile、shell negative、App/TUI routing。case 包含
+status/diff/log/branch_list；stage/commit 在 GIT-02 稳定 unsupported、GIT-03 对已准入平台必须成功；
+literal/obfuscated/variable/child `.git` deny；
 fake Git/PATH、binary/common-dir TOCTOU、protected tracked/history、恶意 hooks/filter/fsmonitor/global config；Git env 与
 `-C/--git-dir`；linked worktree/submodule `.git` file；case/symlink；index.lock、并发、取消、commit timeout post-condition；
 backend none、broker disabled/unavailable；network-off remote 零请求。每格断言 outcome、dispatch/effect certainty、process
-是否启动、approval 次数、是否重复及 capability evidence identity。
+是否启动、approval 次数、是否重复及 capability evidence identity。Linux/Windows 在本计划中只维护已有 negative/exclusion
+证据；未另立计划前不要求复制 macOS 的正向矩阵，也不据此声称支持。
 
 ## 文档影响
 

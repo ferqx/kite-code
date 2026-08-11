@@ -132,6 +132,15 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('[gG][iI][tT](/.*)?$');
   });
 
+  test('brokered revision profile keeps metadata read and write in the same deny rule', () => {
+    const profile = generateSandboxProfile(workspace, { gitAccess: 'deny' });
+    const metadata = seatbeltSubpath(join(canonicalWorkspace, '.git'));
+    const metadataIndex = profile.indexOf(metadata);
+    expect(metadataIndex).toBeGreaterThan(0);
+    const denyPrefix = profile.slice(Math.max(0, metadataIndex - 300), metadataIndex);
+    expect(denyPrefix).toContain('(deny file-read* file-map-executable file-write*');
+  });
+
   test('git access allows CLT developer dir and user git config reads', () => {
     const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
     if (existsSync('/private/var/select/developer_dir')) {
@@ -505,6 +514,24 @@ describe('bwrap argument generation', () => {
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
+  });
+
+  test('brokered revision masks a .git directory read-only after the workspace bind', () => {
+    mkdirSync(join(workspace, '.git'), { recursive: true });
+    const args = generateBwrapArgs(workspace, { gitMetadataDeny: true });
+    const workspaceIndex = args.findIndex(
+      (value, index) => value === '--bind' && args[index + 1] === canonicalWorkspace,
+    );
+    const gitIndex = args.findIndex(
+      (value, index) => value === '--tmpfs' && args[index + 1] === join(canonicalWorkspace, '.git'),
+    );
+    expect(gitIndex).toBeGreaterThan(workspaceIndex);
+    expect(args.slice(gitIndex, gitIndex + 4)).toEqual([
+      '--tmpfs',
+      join(canonicalWorkspace, '.git'),
+      '--remount-ro',
+      join(canonicalWorkspace, '.git'),
+    ]);
   });
 
   test('includes essential isolation flags', () => {

@@ -804,6 +804,8 @@ export interface UserMessageAppendedEvent {
   type: 'user.message_appended';
   messageId: string;
   content: string;
+  /** Current user-authored goal before App-owned/project context is appended. */
+  userGoal?: string;
   createdAt?: string;
 }
 

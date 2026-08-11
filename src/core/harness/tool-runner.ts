@@ -31,6 +31,7 @@ import {
   networkBoundaryPolicyFromExecutionBoundaryV1,
 } from '@/core/sandbox/network-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import { admitDelegationV1 } from '@/core/subagent/delegation-contract';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
@@ -71,9 +72,18 @@ import type {
   ShellGrantUsed,
   WorkspaceAccess,
 } from '@/protocol/events';
+import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@/protocol/git';
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
 import { isMcpRequest, type PendingToolRequest } from './tool-requests';
 import type { ToolExecutionResult } from './tool-result';
+
+const BROKERED_GIT_EXECUTABLE_TOKEN_V1 =
+  /(?:^|[\s"'`;&|()=,])(?:(?:[a-z]:)?[\\/][^\s"'`;&|()=,]*[\\/])?git(?:\.exe)?(?=$|[\s"'`;&|()=,])/iu;
+
+/** Conservative command-language scan: uncertainty is denied before shell dispatch. */
+export function containsBrokeredGitInvocationV1(command: string): boolean {
+  return BROKERED_GIT_EXECUTABLE_TOKEN_V1.test(command);
+}
 
 function resultContentDigest(stdout: string, stderr: string, exitCode: number): string {
   return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
@@ -151,6 +161,7 @@ export interface RunApprovedToolInput {
   workspace: string;
   request: PendingToolRequest;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   workspaceAccess?: WorkspaceAccess;
   phase?: AgentPhase;
   authorization?: ThreadAuthorizationState | null;
@@ -194,6 +205,8 @@ export interface RunApprovedToolInput {
   availabilityContext?: ToolAvailabilityContext;
   /** Project instructions visible to the model that issued this request. */
   projectInstructionSnapshot?: ProjectInstructionSnapshot;
+  /** Current top-level user-authored goal; external/project text is never accepted as delegation authority. */
+  currentUserGoal?: string;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -202,6 +215,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     workspace,
     request,
     shellExecutor,
+    gitBroker,
     workspaceAccess = 'write',
     phase = defaultPhaseForWorkspaceAccess(workspaceAccess),
     authorization = null,
@@ -280,11 +294,30 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       status: 'rejected',
     });
   }
+  if (request.name === 'task') {
+    const admission = admitDelegationV1({
+      userGoal: input.currentUserGoal ?? '',
+      delegatedTask: request.args.task,
+      role: request.args.subagent_type,
+      phase,
+    });
+    if (!admission.allowed) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: 'task',
+        exitCode: -1,
+        stdout: '',
+        stderr: `Sub-agent delegation denied (${admission.reason}).`,
+        status: 'rejected',
+      });
+    }
+  }
   if (builtinSpec && protectedPathEvaluator) {
     const pathDecision = evaluateRegisteredToolProtectedPaths(builtinSpec, request.args, {
       workspace,
       threadId,
       protectedPathEvaluator,
+      gitBroker,
     });
     if (!pathDecision.ok) {
       return withFailureGuidance(request, {
@@ -303,6 +336,28 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         taskConfig.features?.networkBoundaryV1 === true,
       )
     : undefined;
+  if (
+    request.name === 'shell_execute' &&
+    taskConfig &&
+    getFeatureFlags(taskConfig).brokeredGitV1 &&
+    executionSurface?.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1 &&
+    containsBrokeredGitInvocationV1(request.args.command)
+  ) {
+    const remoteOperation = /\b(?:fetch|pull|push|clone|ls-remote)\b/iu.test(request.args.command);
+    return withFailureGuidance(request, {
+      ok: false,
+      command: request.protectedCommand,
+      exitCode: -1,
+      stdout: '',
+      stderr: remoteOperation
+        ? 'Remote Git is deferred until a governed network and credential capability is available.'
+        : 'Git through shell_execute is denied by the brokered Git boundary. Use git_inspect for local status, diff, log, or branches.',
+      status: 'rejected',
+      resultMeta: remoteOperation
+        ? { gitFailureCode: 'managed_network_setup_required' }
+        : { nextCapability: 'git_inspect' },
+    });
+  }
   if (executionSurface) {
     const descriptor = builtinSpec
       ? builtinToolRegistry.descriptorOf(builtinSpec)
@@ -443,6 +498,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
                   config: taskConfig,
                   workspace,
                   shellExecutor,
+                  gitBroker,
                   mcpManager,
                   skills: skillManifests,
                   skillOptions,
@@ -468,6 +524,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         signal,
         runTask,
         protectedPathEvaluator,
+        phase,
       });
       if (!dispatched.dispatched) {
         return withFailureGuidance(request, {
@@ -645,6 +702,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
       path: editInput.path,
       resultMeta: dispatched.projected.resultMeta,
+      ...(dispatched.projected.terminationReason
+        ? { terminationReason: dispatched.projected.terminationReason }
+        : {}),
     });
   }
 
@@ -1077,9 +1137,11 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   const spec = builtinToolRegistry.get(request.name);
   if (spec && 'execute' in spec) {
     const dispatched = await dispatchRegisteredTool(spec, request.args, {
+      ...(availabilityContext ?? {}),
       workspace,
       threadId,
       signal,
+      gitBroker,
       protectedPathEvaluator,
       allowExternalPaths: isExternalPathArg(
         String((request.args as Record<string, unknown>).path ?? ''),
@@ -1103,6 +1165,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
       stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
       resultMeta: dispatched.projected.resultMeta,
+      ...(dispatched.projected.terminationReason
+        ? { terminationReason: dispatched.projected.terminationReason }
+        : {}),
+      ...(dispatched.projected.outcomeAdviceV1
+        ? { classifierAdviceV1: dispatched.projected.outcomeAdviceV1 }
+        : {}),
+      ...(dispatched.projected.classifierDiagnostic
+        ? { classifierDiagnostic: dispatched.projected.classifierDiagnostic }
+        : {}),
       ...(dispatched.projected.streams
         ? {
             stdout: dispatched.projected.streams.stdout,

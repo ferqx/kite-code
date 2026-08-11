@@ -2384,6 +2384,52 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   expect(terminalEvents.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
 });
 
+test('production executor all-settled waits for a sibling when another adapter throws', async () => {
+  const state = createInitialRuntimeState({
+    threadId: 'all-settled-production-executor',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  for (const [toolCallId, command] of [
+    ['throwing', 'pwd'],
+    ['slow', 'ls'],
+  ] as const) {
+    state.tools.queue.push(toolCallId);
+    state.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command },
+      status: 'queued',
+      effectClass: 'read_only',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+  }
+  let slowFinished = false;
+  const executor = createRuntimeEffectExecutor({
+    config: {
+      providerName: 'test',
+      providerType: 'openai-compatible',
+      apiKey: 'test',
+      baseURL: 'http://localhost:1',
+      modelName: 'test',
+      sandbox: { enabled: true },
+    },
+    model: {} as never,
+    shellExecutor: async ({ command }) => {
+      if (command === 'pwd') throw new Error('private adapter failure');
+      await Bun.sleep(20);
+      slowFinished = true;
+      return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
+    },
+  });
+  const terminal = await executor({ type: 'run_tools', toolCallIds: ['throwing', 'slow'] }, state);
+  expect(slowFinished).toBe(true);
+  expect(terminal.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+  expect(JSON.stringify(terminal)).not.toContain('private adapter failure');
+});
+
 test('production executor commits provider recovery after the originating tool failure', async () => {
   const state = createInitialRuntimeState({
     threadId: 'provider-action-order',

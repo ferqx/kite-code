@@ -33,6 +33,7 @@ import {
   admitRecoveryAttemptV1,
   advanceToolRecoveryResponseV1,
   createToolRecoveryJournalV1,
+  hasUnresolvedToolFailuresV1,
   recordRecoveryExhaustionV1,
   recordRecoveryFailureV1,
   recordRecoveryInvocationV1,
@@ -41,7 +42,7 @@ import {
 } from '@/core/runtime/tool-recovery-journal';
 import { classifyToolFailure } from '@/core/session-logger/classifier';
 import { countTokens } from '@/core/token-counter';
-import { createAgentTools } from '@/core/tools/definitions';
+import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
 import type { ShellExecutor } from '@/core/tools/shell';
@@ -55,6 +56,20 @@ import type {
 } from './types';
 
 export type { SubAgentRunnerInput } from './types';
+
+export function deriveSubAgentCompletionV1(
+  journal: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1,
+):
+  | { ok: false; terminalStatus: 'exhausted' }
+  | {
+      ok: true;
+      terminalStatus: 'completed';
+    } {
+  if (hasUnresolvedToolFailuresV1(journal) || journal.qualityGuard.blocked) {
+    return { ok: false, terminalStatus: 'exhausted' };
+  }
+  return { ok: true, terminalStatus: 'completed' };
+}
 
 function extractText(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -341,7 +356,13 @@ export async function resumeSubAgent(
     : undefined;
   const resumePreflight = toolRequestFromCall(
     { id: toolResult.toolCallId, name: toolResult.toolName, args: resumeArgs },
-    { workspace: input.workspace },
+    toolAvailabilityContext({
+      workspace: input.workspace,
+      gitBroker: input.gitBroker,
+      config: input.config,
+      phase: input.phase,
+      threadId: input.threadId,
+    }),
   );
   const resumeBuiltinSpec = builtinToolRegistry.get(toolResult.toolName);
   const resumeFingerprint = toolInvocationFingerprintV1({
@@ -469,15 +490,27 @@ async function runSubAgentLoop(
   }
   const combinedSignal = combinedController.signal;
 
-  const allTools = createAgentTools({
+  const agentToolInput = {
     workspace: input.workspace,
     shellExecutor: effectiveShellExecutor,
+    gitBroker: input.gitBroker,
     mcpManager: input.mcpManager,
     skills: input.skills,
     skillOptions: input.skillOptions,
     mcpBindings: input.mcpBindings,
+    config: input.config,
+    authorization: input.authorization,
+    workspaceAccess: input.workspaceAccess,
+    phase: input.phase,
+    interactionMode: 'accept_edits',
+    threadId: input.threadId,
+    model,
+    subagentEventSink: input.eventSink,
+    subagentSignal: combinedSignal,
     signal: combinedSignal,
-  });
+  } satisfies Parameters<typeof createAgentTools>[0];
+  const availabilityContext = toolAvailabilityContext(agentToolInput);
+  const allTools = createAgentTools(agentToolInput, availabilityContext);
   const mcpBindings = new Map(
     (input.mcpBindings ?? []).map((entry) => [entry.binding.exposedToolName, entry]),
   );
@@ -567,26 +600,23 @@ async function runSubAgentLoop(
         messages.push(response);
         const summary = extractText(response.content);
         const durationMs = Date.now() - startTime;
-        // 有步骤被拒绝 → 工具级失败，但子 agent 已正常完成运行，仍发 done
-        const rejectedSteps = steps.filter((s) => s.ok === false);
-        if (rejectedSteps.length > 0) {
-          const toolNames = [...new Set(rejectedSteps.map((s) => s.toolName))].join(', ');
+        const completion = deriveSubAgentCompletionV1(toolRecovery);
+        // Historical rejected steps do not override the canonical recovery journal:
+        // a later receipt may have resolved their lineage.
+        if (!completion.ok) {
+          const error = 'Sub-agent cannot complete while tool recovery evidence is unresolved.';
           input.eventSink({
-            type: 'done',
-            data: {
-              id,
-              summary: summary || `Tool calls rejected: ${toolNames}`,
-              toolCallCount,
-              durationMs,
-            },
+            type: 'error',
+            data: { id, error, summary: summary || error, toolCallCount, durationMs },
           });
           return {
             ok: false,
-            summary: summary || `Tool calls rejected: ${toolNames}`,
+            summary: summary || error,
             toolCallCount,
             durationMs,
+            error,
+            terminalStatus: completion.terminalStatus,
             steps,
-            error: `Tool calls rejected: ${toolNames}`,
             executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
             exhaustedFingerprints:
               Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
@@ -602,6 +632,7 @@ async function runSubAgentLoop(
           summary,
           toolCallCount,
           durationMs,
+          terminalStatus: completion.terminalStatus,
           steps,
           executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
           exhaustedFingerprints:
@@ -835,7 +866,7 @@ async function runSubAgentLoop(
             name: tc.name,
             args: toolArgs,
           },
-          { workspace: input.workspace },
+          availabilityContext,
         );
         const boundIdentity = mcpBindings.get(tc.name);
         const dynamicIdentity = boundIdentity
@@ -1029,6 +1060,7 @@ async function runSubAgentLoop(
             workspace: input.workspace,
             request: pendingRequest,
             shellExecutor: effectiveShellExecutor,
+            gitBroker: input.gitBroker,
             workspaceAccess: input.workspaceAccess ?? 'write',
             phase: input.phase ?? 'building',
             authorization: input.authorization,
@@ -1052,6 +1084,7 @@ async function runSubAgentLoop(
             signal: combinedSignal,
             interactionMode: 'accept_edits',
             taskConfig: input.config,
+            availabilityContext,
             projectInstructionSnapshot: input.projectInstructions,
             taskModel: model,
             providerDataAdmission: input.providerDataAdmission,
@@ -1153,6 +1186,7 @@ async function runSubAgentLoop(
               toolCallCount,
               durationMs: totalDurationMs,
               error: blocked.message,
+              terminalStatus: 'suspended',
               blocked,
               steps,
               executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
@@ -1177,7 +1211,7 @@ async function runSubAgentLoop(
           if (e instanceof DescendantResourceAdmissionError) throw e;
           toolOutput = JSON.stringify({
             ok: false,
-            error: e instanceof Error ? e.message : String(e),
+            error: 'Sub-agent tool execution failed.',
           });
           ok = false;
         }
@@ -1262,8 +1296,10 @@ async function runSubAgentLoop(
     clearTimeout(timeoutId);
     if (e instanceof DescendantResourceAdmissionError) throw e;
     const durationMs = Date.now() - startTime;
-    const errMsg = e instanceof Error ? e.message : String(e);
-    const summary = e instanceof Error && e.name === 'AbortError' ? 'Cancelled' : errMsg;
+    const summary =
+      combinedSignal.aborted || (e instanceof Error && e.name === 'AbortError')
+        ? 'Cancelled'
+        : 'Sub-agent execution failed.';
     input.eventSink({
       type: 'error',
       data: { id, error: summary, summary, toolCallCount, durationMs },
@@ -1274,6 +1310,7 @@ async function runSubAgentLoop(
       toolCallCount,
       durationMs,
       error: summary,
+      terminalStatus: combinedSignal.aborted ? 'cancelled' : 'failed',
       steps,
       executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
       exhaustedFingerprints:

@@ -218,7 +218,7 @@ export function projectUserCancelledTurn(
   const turns = state.turns.slice();
   const last = state.turns[lastTurnIndex]!;
   const blocks = last.blocks.flatMap((block): OutputBlock[] => {
-    if (block.kind === 'subagent' && block.status === 'running') {
+    if (block.kind === 'subagent' && (block.status === 'running' || block.status === 'suspended')) {
       changed = true;
       return [
         {

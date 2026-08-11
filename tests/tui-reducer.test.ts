@@ -3843,7 +3843,10 @@ describe('eventReducer (blocks model)', () => {
     ): LegacyRenderAction {
       return {
         type: 'EVENT',
-        event: { type: 'subagent_done', data: { id, summary, toolCallCount, durationMs } },
+        event: {
+          type: 'subagent_done',
+          data: { id, summary, toolCallCount, durationMs },
+        },
       };
     }
     function saError(id: string, error: string): LegacyRenderAction {

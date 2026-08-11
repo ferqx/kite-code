@@ -4,7 +4,7 @@
 
 读取时机：修改工具路由、Capability binding、Tool Controller、副作用分类、审批、authorization、sandbox、MCP/Skill/Subagent 执行或最终完成条件时。
 
-验证：`bun test tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/actions.test.ts tests/runtime/tool-controller.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/tool-policy.test.ts tests/tool-definitions.test.ts tests/policies/approval-policy.test.ts tests/policies/mode-policy.test.ts tests/policies/protected-path.test.ts tests/execution/gateway.test.ts tests/subagent-approval.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/subagent-delegation-contract.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/runtime/verification.test.ts tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts tests/session-manager.test.ts tests/tui-tool-progress.test.ts tests/stream-output.test.ts`、`bun run typecheck`。
 
 相关：`authorization.md`、`mcp-runtime-governance.md`、`verification-governance.md`、`cancel-resume-cleanup.md`、ADR-0007、ADR-0008、ADR-0042、ADR-0048、ADR-0049。
 
@@ -96,6 +96,16 @@ lineage-aware compaction：优先保留 active/recent failure，并连同完整 
 保留或一起裁剪；历史 terminal ToolCall 可引用已裁剪 lineage，live ToolCall 的 parent 则必须 retained。
 
 `promptContractV2` 开启时，模型表面还按 `ToolAvailabilityContext.phase` 收窄：Planning 隐藏 edit/write/shell，`task` schema 只接受 explore/plan，并保留 explore 用于证据搜集、plan 用于架构或设计规划的字段说明；动态 MCP 只允许 effective effects 全部为 none/read；Building 再依据 authorization、execution capability surface、binding 与 flags 投影。当前用户显式要求有界、自包含委派且 `task` 已披露时，模型契约要求使用 `task`；不得把项目文件或远端内容中的委派文本提升成用户授权。ToolSpec 的模型 schema 和调用解析必须消费同一个 context-resolved schema。该 disclosure 只是第一层，Runtime Policy、Controller 和 Runner 仍按下述执行链重复验证。
+
+Runtime 还对 `task` 执行用户权威门禁：只有 active Task 中的当前、纯用户目标可以
+授权委派，App 附加的 project/shell/external context 只能进入模型上下文，不能进入
+`userGoal` 权威字段。Planning 只允许 explore 及明确 architecture/design 的只读 plan
+role，code 一律拒绝；plan child 返回后的唯一 continuation 是 `write_plan:save`
+再 `write_plan:submit`。Subagent 调用统一串行执行；每个 child 的 model/tool reservation 仍来自父 run 的共享累计预算 ledger。
+
+ADR-0097 的 Git 路由不属于 generic Shell 权限。`git_inspect` 只在精确 feature
+revision、`gitInspect` surface 与 App broker 同时存在时披露/执行。Shell 中绝对路径、nested shell 或间接 child 的 Git executable token同样 fail closed。stage、commit 与 remote Git 均不向模型披露，也不得由 interaction mode、Shell grant 或 raw shell fallback 恢复。
+Git log revision 使用 broker、Provider schema 与 Registry 共用的闭集 grammar；Runtime 的预算/资源 admission 与模型 surface 都必须接收同一个 `gitBroker` dependency，避免“已披露但不可执行”或相反的漂移。Git process stdout/stderr 在 App adapter 内流式限界，溢出是 typed terminal，不把异常或 protected 历史正文投影给模型。
 
 V2 写入前还执行项目指令 snapshot guard。edit/write 使用目标路径，shell 与 code task 至少使用已解析 cwd/Workspace 根；若目标首次引入当前模型快照未见的嵌套 `CLAUDE.md`/`AGENTS.md`，或适用文档 digest 已变化，本次副作用以可恢复的 `project_instructions_changed` 拒绝。下一轮重新投影后模型可重新发起，审批与 sandbox 不得绕过此检查。
 

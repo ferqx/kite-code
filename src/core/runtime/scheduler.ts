@@ -36,15 +36,16 @@ function argsRecord(args: unknown): Record<string, unknown> {
 }
 
 function isApprovalFreeParallelRead(state: RuntimeState, call: ToolCallRecord): boolean {
-  if (
-    call.status !== 'queued' ||
-    call.effectClass !== 'read_only' ||
-    call.sideEffect !== false ||
-    !PARALLEL_READ_TOOLS.has(call.name)
-  ) {
+  if (!PARALLEL_READ_TOOLS.has(call.name)) {
     return false;
   }
+  return isApprovalFreeParallelReadToolCall(state, call);
+}
 
+function isApprovalFreeParallelReadToolCall(state: RuntimeState, call: ToolCallRecord): boolean {
+  if (call.status !== 'queued' || call.effectClass !== 'read_only' || call.sideEffect !== false) {
+    return false;
+  }
   const decision = evaluateToolApproval({
     toolName: call.name,
     toolArgs: argsRecord(call.args),

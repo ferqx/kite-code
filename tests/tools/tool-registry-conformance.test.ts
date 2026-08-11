@@ -845,8 +845,8 @@ describe('invariant i6 — description is a pure function of contract sections',
 });
 
 describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
-  test('all 19 builtin specs own structured selection, parameter, result, and recovery facts', () => {
-    expect(builtinToolRegistry.names()).toHaveLength(19);
+  test('all 20 builtin specs own structured selection, parameter, result, and recovery facts', () => {
+    expect(builtinToolRegistry.names()).toHaveLength(20);
     for (const spec of builtinToolSpecs) {
       expect('summary' in spec.contract, spec.name).toBe(true);
       const contract = normalizeToolContract(spec.contract);
@@ -914,6 +914,7 @@ describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
       search_content: { pattern: 'needle' },
       search_files: { pattern: '*.ts' },
       shell_execute: { command: 'pwd' },
+      git_inspect: { operation: 'status', paths: ['src/index.ts'] },
       write_file: { path: 'notes.txt', content: 'content' },
       edit_file: { path: 'notes.txt', old_string: 'old', new_string: 'new' },
       web_fetch: { url: 'https://example.com' },
@@ -950,6 +951,7 @@ describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
             promptContractV2,
             skillWorkflowV1: true,
             skillActivationV2: true,
+            brokeredGitV1: true,
           },
         };
         const input = {
@@ -960,8 +962,17 @@ describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
           skillCatalog,
           activeSkillFrames: [{ activationId: 'activation-1' }],
           subagentEventSink: () => {},
+          gitBroker: {
+            featureRevision: 'brokered-git-r1' as const,
+            inspect: async () => ({ ok: true, output: '' }),
+            stage: async () => ({ ok: true, output: '' }),
+            commit: async () => ({ ok: true, output: '' }),
+          },
         };
-        const context = toolAvailabilityContext(input);
+        const context = {
+          ...toolAvailabilityContext(input),
+          brokeredGitFeatureRevision: 'brokered-git-r1' as const,
+        };
         const projected = createAgentTools(input, context);
         const available = builtinToolRegistry.availableIn(context);
         expect(Object.keys(projected).sort()).toEqual(available.map((spec) => spec.name).sort());
@@ -1065,7 +1076,7 @@ describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
     ).toBe('json');
   });
 
-  test('projects all 19 builtin results through the canonical reducer and provider context', () => {
+  test('projects all 20 builtin results through the canonical reducer and provider context', () => {
     const json = (value: Record<string, unknown>) => JSON.stringify(value);
     const fixtures: Record<string, { input: Record<string, unknown>; output: unknown }> = {
       read_file: {
@@ -1261,6 +1272,10 @@ describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
           available: true,
           result: { ok: true, summary: 'done', toolCallCount: 0, durationMs: 2 },
         },
+      },
+      git_inspect: {
+        input: { operation: 'status', paths: ['fixture.ts'] },
+        output: { ok: true, output: ' M fixture.ts' },
       },
       web_fetch: {
         input: { url: 'https://example.com' },

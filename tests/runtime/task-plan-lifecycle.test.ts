@@ -200,6 +200,35 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     expect(submitted).not.toContainEqual(expect.objectContaining({ type: 'tool.rejected' }));
   });
 
+  test('successful plan child cannot replace Runtime-owned save and submit lifecycle facts', () => {
+    let state = reduceRuntimeState(
+      startTask(createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/tmp' })),
+      { type: 'planning.entered', taskId: 'task-1', source: 'user_command' },
+    );
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'plan-child',
+      modelMessageId: 'model-child',
+      name: 'task',
+      args: { subagent_type: 'plan', task: 'Design the Runtime architecture change.' },
+    });
+    state = reduceRuntimeState(state, { type: 'tool.started', toolCallId: 'plan-child' });
+    state = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'plan-child',
+      name: 'task',
+      result: { ok: true, command: 'task', exitCode: 0, stdout: 'plan summary', stderr: '' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'model.responded',
+      messageId: 'model-final',
+      text: 'The child supplied a plan, so this task is done.',
+    });
+
+    expect(getActivePlanning(state).kind).toBe('planning_empty');
+    expect(decideNextEffect(state)).toMatchObject({ type: 'completion_blocked' });
+  });
+
   test.each(['code', 'unknown'] as const)('%s task calls remain side-effectful', (subagentType) => {
     let state = startTask(
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: process.cwd() }),

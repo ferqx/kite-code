@@ -1651,6 +1651,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
                 );
                 return {
                   ...blk,
+                  status: 'suspended' as const,
                   awaitingApproval: true,
                   approvingStepIndex: stepIndex,
                   steps,

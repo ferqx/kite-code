@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-09（激活 Agent 核心工具、计划闭环与沙盒能力优化计划）
+最后更新：2026-08-11（可信执行内核收口计划成为唯一当前入口）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,8 +19,9 @@
 
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
-| [`2026-08-09-agent-core-tool-plan-sandbox-optimization.md`](2026-08-09-agent-core-tool-plan-sandbox-optimization.md) | active | P0 | ADR-0095/0096/0097 已接受 | 延续 ADR-0094 的 V2 默认关闭结论；ADR-0097 已取代 ADR-0070 的未来方向 | CompletionGuard、ToolOutcome/Journey Eval、no-progress guard、typed Git broker、Plan/Subagent 与三平台资格矩阵 |
-| [`2026-08-10-ci-stabilization-and-plan-evidence.md`](2026-08-10-ci-stabilization-and-plan-evidence.md) | active | P0 | PR #46、`ACORE-PLAN-01` | `ACORE-CI-01`/`ACORE-PLAN-02`/`ACORE-PLAN-03` 已完成；PR 级 TUI/soak/Required CI 待执行；不授权合并 | Required CI 语义收口、PlanDocument V2、completion evidence、CompletionGuard V2 |
+| [`2026-08-11-trustworthy-runtime-closure.md`](2026-08-11-trustworthy-runtime-closure.md) | active | P0 | 当前 tranche、ADR-0094/0095/0096/0097 | 接管两份旧 Agent Core 计划的剩余执行范围；只允许审查、减法、价值验证、macOS Git disposition 与 RC | 单一可信内核候选、复杂度退出条件、用户价值证据和诚实平台终态 |
+| [`2026-08-09-agent-core-tool-plan-sandbox-optimization.md`](2026-08-09-agent-core-tool-plan-sandbox-optimization.md) | superseded | P0/P1 | ADR-0095/0096/0097 已接受 | 剩余范围由 `2026-08-11-trustworthy-runtime-closure.md` 接管 | 历史设计、已完成 Task 与当前 tranche 实现证据 |
+| [`2026-08-10-ci-stabilization-and-plan-evidence.md`](2026-08-10-ci-stabilization-and-plan-evidence.md) | superseded | P0 | PR #46、`ACORE-PLAN-01` | 已完成 Task 保留；剩余 PR Gate 由收口计划接管 | CI fixture、PlanDocument V2 与 CompletionGuard V2 实施证据 |
 | [`2026-08-09-prompt-contract-v2-release-rollout.md`](2026-08-09-prompt-contract-v2-release-rollout.md) | archived | P0 | ADR-0092、默认关闭候选发布、跨平台 CI | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2-release-rollout.md) | 固定十四日门禁由维护者取消；最终候选真实模型 A/B 完成，ADR-0094 决定保持默认关闭 |
 | [`2026-08-08-prompt-contract-v2.md`](2026-08-08-prompt-contract-v2.md) | archived | P0 | ADR-0092、ToolSpec Registry、Context Projection | [完成记录](../execution/completed/2026-08-09-prompt-contract-v2.md) | 四层 Prompt、项目指令、phase 工具面、可信 MCP 描述、59.85% token 降幅与实现阶段真实模型 A/B 已完成；最终迁移结论见 ADR-0094 |
 | [`2026-08-04-tui-overlay-design-system.md`](2026-08-04-tui-overlay-design-system.md) | archived | P1 | 现有 Overlay primitives | [完成记录](../execution/completed/2026-08-05-tui-overlay-design-system.md) | Overlay contract、MCP、通用选择页、交互页与文档回归全部完成 |

@@ -28,27 +28,29 @@
       "expectedArch": "arm64",
       "candidateBackend": "seatbelt",
       "currentOutcome": "excluded",
-      "reason": "current profile permits workspace-external and protected-path reads/writes; no hard process-tree limit or TUI/CLI composition evidence"
+      "reason": "current profile permits workspace-external and protected-path reads/writes; native Git metadata read/write denial and read-only broker composition evidence are incomplete; no hard process-tree limit or TUI/CLI composition evidence"
     },
     {
       "runner": "ubuntu-24.04",
       "expectedArch": "x64",
       "candidateBackend": "bubblewrap",
       "currentOutcome": "excluded",
-      "reason": "native evidence does not prove workspace-external/protected-path deny, a hard process-tree limit, complete inheritance, or TUI/CLI composition"
+      "reason": "native evidence does not prove workspace-external/protected-path deny, native Git metadata read/write denial, a hard process-tree limit, complete inheritance, or read-only broker TUI/CLI composition"
     },
     {
       "runner": "windows-2025",
       "expectedArch": "x64",
       "candidateBackend": "windows_restricted_token",
       "currentOutcome": "excluded",
-      "reason": "restricted-token + Job Object development backend lacks structural offline network enforcement, dynamic protected-name interception, and production entrypoint evidence"
+      "reason": "restricted-token + Job Object development backend lacks structural offline network enforcement, dynamic protected-name interception, independent Git metadata read/write deny, and production entrypoint evidence"
     }
   ],
   "requiredEvidence": [
     "exact OS release/version/build and architecture",
     "workspace read/write plus read-only mode and outside read/write deny",
     "protected .git, agent config, credential, and symlink deny",
+    "native Git metadata read/write deny plus read-only broker positive and hostile-repository evidence under one feature revision",
+    "brokered Git schema, binary, repository, protected-rule, dispatch, receipt, and TUI/foreground CLI composition identity",
     "selected network mode (off by default) and its matching native enforcement",
     "DNS/redirect-safe allowlist only when allowlist is selected or claimed as a capability",
     "hard process-tree count limit plus kill with no residual descendants",

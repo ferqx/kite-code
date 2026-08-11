@@ -27,6 +27,12 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
 
 Subagent 默认不读取主 Agent 的完整消息历史，只接收任务、角色 prompt、必要上下文和 Runtime 签发的有限能力。
 
+委派权威只能来自 active Task 当前的纯用户目标；App 附加的 project/shell
+context、文件内容或工具结果不能诱导 Runtime 创建 child。任务还必须 bounded 且
+self-contained。Planning 只允许 explore 和明确 architecture/design 规划的 plan role，
+code 保持禁止。plan child 返回后先 `write_plan:save`，再 `write_plan:submit`，不使用
+`update_plan` 跳过 Plan Artifact/review。
+
 SubAgentRunner 只通过父 Runtime 传入的 `McpRuntimeProvider` 访问 MCP，不依赖 Supervisor 或 Manager control API。执行动态 MCP 工具前先由 Runtime binding 找回 descriptor，并把其中的 effective effects 与 minimum approval 一并交给共享 Tool Runner。这样只读 MCP 不会在二次策略检查中被误判为未知能力，写入或不确定能力也不能借子 Agent 路径降低审批等级。
 
 `task` capability 的 schema、契约、role-based effects 与结果投影由 ToolSpec Registry 的 `task` spec 统一定义。实际 `SubAgentRunner` 作为受治理的执行适配器由父 Runtime 注入，避免 Registry 依赖子 Agent 装配细节；旧的 `createTaskTool()` 模型工具执行器已删除。子 Agent 的 shell 只读分类与主 Runtime 共用命令形态分类器，不接受模型提供的 `intent` 等治理字段。
@@ -53,9 +59,11 @@ parent 对同一 canonical invocation 的重提仍会在 dispatch 前零调用�
 
 声明 `context: fork` 的 Skill 可在隔离 Subagent 中执行。它只能获得 Skill capability ceiling 派生出的 Runtime binding；MCP capability 在执行前再次核对 revision、schema digest 和参数。
 
-## 6.5 并发与边界
+## 6.5 调度与边界
 
 Task Tool 按 Runtime/线程限制活动数量。取消通过 AbortController 传播。子 Agent 不递归无限派生，也不能修改主 RuntimeState；其结果必须通过主 Runtime Event 合并。
+
+Subagent 调用统一串行执行。Scheduler 只调度已持久化的 task call，Controller 为 child 保留独立 ID/stream ownership；terminal 或 suspended 状态收敛后才处理后继调用。
 
 ## 6.6 累计预算、取消与恢复
 
@@ -81,3 +89,8 @@ resource-only bounded reconciliation 提交，child tool/model terminal 本身�
 `RunTerminalOutcomeV1` 投影。模型 final、子进程零退出码或 parent task 的表面成功都不能绕过
 required Verification，也不能把 `unknown`、`budget_exhausted` 或 `resource_saturated` 显示为
 完成。
+
+UI 与 Runtime 的 child 生命周期共用 `running | suspended | terminal`语义：等待用户
+审批是 suspended，批准恢复后重回 running，只有规范 terminal event 才显示 done/error/
+cancelled。成功 child 统一投影 `completed`；恢复历史由 canonical Recovery Journal 保留，不再复制为另一套 UI/协议完成态。同一 child 不得同时显示 failed 与 done。
+每个 follow-up 用户响应都会刷新当前 Task 的委派权威；先前允许不覆盖后续撤销，后续新增也无需创建新 Task。code child 只接受明确写/编辑/修复 scope，design/options/plan/read-only review 或否定写入均拒绝。child 的模型 schema、Registry parse、执行与 resume 使用同一 config/phase/gitBroker availability；typed Git 只能经只读 broker，不能隐式退回 raw Shell，写操作不向 child 披露。

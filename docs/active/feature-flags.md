@@ -29,6 +29,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | `boundedCancellationV1` | `false` | 启用 run deadline、统一 AbortSignal 与 descendant/process-tree 有界清理 |
 | `terminalOutcomeV1` | `false` | 控制 CLI 的结构化 terminal presentation；持久化 outcome 始终保留 |
 | `executionBoundaryV1` | `false` | 允许 composition root 消费 release-pinned `ExecutionBoundaryV1`；开启本身不产生平台资格或边界 artifact |
+| `brokeredGitV1` | `false` | 请求 ADR-0097 typed Git surface；只有 disclosure、dispatch 与 native deny 共用精确 `brokered-git-r1` revision 且平台 evidence 合格时生效 |
 | `networkBoundaryV1` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
 | `releaseProfileV1` | `false` | 请求使用 artifact-pinned Release Profile；没有独立 artifact authority 时 true 不生效且 CLI 拒绝抬高 |
 | `observabilityMetricsV1` | `false` | 允许 artifact-authorized、用户已 consent 的无正文 metric exporter；普通 CLI 只能设为 false |
@@ -72,6 +73,12 @@ revision/argument/classification 不匹配、nonce replay 或 receipt 持久化�
 qualification registry。artifact 缺失/非法、Workspace 不匹配、实际环境无精确 qualification 或
 任一 backend 维度未强制时，生产 capability surface 全部关闭；审批不能恢复。当前批准 registry
 为空支持集，因此本 flag 不产生 production artifact 或可运行的 production shell/writer。
+
+`brokeredGitV1=true` 也不会单独披露 Git。composition 还必须注入精确
+`brokered-git-r1` capability surface、合格的 native metadata read/write deny evidence、共享
+protected-path evaluator 与 App Git process adapter。缺少任一项时 `gitInspect` 为 false；
+不得从 generic `process`/`read_only_only` 推断，也不得回退 raw shell。当前三平台 brokered Git
+qualification 均为 excluded，这不改变 `promptContractV2=false` 的默认值。
 
 `networkBoundaryV1` 同样按 user、project、CLI/App 的显式值 deny-wins 组合；全部未指定时默认
 关闭。关闭不能恢复旧 `allow_all`：production capability surface 的 network 轴被关闭，sealed

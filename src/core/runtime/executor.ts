@@ -65,6 +65,7 @@ export interface RuntimeExecutorDependencies {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
@@ -124,6 +125,7 @@ export function resolveRuntimeContextProjectionEnvironment(
     config: dependencies.config,
     model: dependencies.model,
     shellExecutor: dependencies.shellExecutor,
+    gitBroker: dependencies.gitBroker,
     mcpManager: dependencies.mcpManager,
     skills: dependencies.skills,
     skillOptions: dependencies.skillOptions,
@@ -295,6 +297,7 @@ export function createRuntimeEffectExecutor(
         state,
         config: dependencies.config,
         shellExecutor: dependencies.shellExecutor,
+        gitBroker: dependencies.gitBroker,
         sandboxBackend: dependencies.sandboxBackend,
         mcpManager: dependencies.mcpManager,
         skills: dependencies.skills,
@@ -372,6 +375,7 @@ export function createRuntimeEffectExecutor(
             state,
             toolCallIds,
             shellExecutor: dependencies.shellExecutor,
+            gitBroker: dependencies.gitBroker,
             mcpManager: dependencies.mcpManager,
             skillManifests: dependencies.skills,
             skillOptions: dependencies.skillOptions,
@@ -448,10 +452,39 @@ export function createRuntimeEffectExecutor(
         if (effect.toolCallIds.length <= 1) {
           return await execute(effect.toolCallIds);
         }
-        const batches = await Promise.all(
+        const batches = await Promise.allSettled(
           effect.toolCallIds.map((toolCallId) => execute([toolCallId])),
         );
-        return batches.flat();
+        const terminalEvents: RuntimeEvent[] = [];
+        for (let index = 0; index < batches.length; index++) {
+          const batch = batches[index]!;
+          if (batch.status === 'fulfilled') {
+            terminalEvents.push(...batch.value);
+            continue;
+          }
+          const toolCallId = effect.toolCallIds[index]!;
+          const currentState =
+            (executionContext?.getState?.() as import('./state').RuntimeState | undefined) ?? state;
+          if (batch.reason instanceof DescendantResourceAdmissionError) {
+            terminalEvents.push(
+              ...resourceAdmissionTerminalEventsV1(currentState, batch.reason.reason),
+            );
+          } else {
+            terminalEvents.push({
+              type: dependencies.signal?.aborted ? 'tool.cancelled' : 'tool.failed',
+              toolCallId,
+              ...(dependencies.signal?.aborted
+                ? { reason: 'Runtime tool batch cancelled.' }
+                : {
+                    failure: classifyFailure(
+                      'tool_runtime_error',
+                      'The tool failed inside the local execution adapter.',
+                    ),
+                  }),
+            } as RuntimeEvent);
+          }
+        }
+        return terminalEvents;
       } catch (error) {
         if (error instanceof DescendantResourceAdmissionError) {
           const currentState =

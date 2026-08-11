@@ -181,11 +181,29 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
       });
     }
     const schema = spec.modelInputSchema?.(context) ?? spec.inputSchema;
-    const jsonSchema = z.toJSONSchema(schema) as { properties?: Record<string, unknown> };
+    const jsonSchema = z.toJSONSchema(schema) as {
+      properties?: Record<string, unknown>;
+      oneOf?: Array<{ properties?: Record<string, { const?: unknown }> }>;
+    };
+    const argumentRecord =
+      args && typeof args === 'object' && !Array.isArray(args)
+        ? (args as Record<string, unknown>)
+        : undefined;
+    const matchingBranch = jsonSchema.oneOf?.find((branch) =>
+      Object.entries(branch.properties ?? {}).every(
+        ([key, property]) =>
+          property.const === undefined || argumentRecord?.[key] === property.const,
+      ),
+    );
+    const knownFields = matchingBranch?.properties
+      ? Object.keys(matchingBranch.properties)
+      : jsonSchema.oneOf
+        ? [...new Set(jsonSchema.oneOf.flatMap((branch) => Object.keys(branch.properties ?? {})))]
+        : Object.keys(jsonSchema.properties ?? {});
     return observeUnknownToolFieldsV1({
       toolName: name,
       args,
-      knownFields: Object.keys(jsonSchema.properties ?? {}),
+      knownFields,
       schemaRevision: this.descriptorOf(spec).revision.slice(0, 64),
     });
   }

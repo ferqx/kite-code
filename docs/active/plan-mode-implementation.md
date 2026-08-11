@@ -4,7 +4,7 @@
 
 读取时机：修改 Plan Artifact、plan_review、planning/building 阶段、计划工具、计划恢复或 TUI 计划交互时。
 
-验证：`bun test tests/runtime/agent.integration.test.ts tests/runtime/completion-guard.test.ts tests/runtime/plan-actions.test.ts tests/runtime/plan-artifacts.test.ts tests/runtime/plan-persistence.test.ts tests/runtime/plan-state.test.ts tests/runtime/plan-tools.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/agent.integration.test.ts tests/runtime/completion-guard.test.ts tests/runtime/plan-actions.test.ts tests/runtime/plan-artifacts.test.ts tests/runtime/plan-persistence.test.ts tests/runtime/plan-state.test.ts tests/runtime/plan-tools.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-runner.test.ts tests/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
 
 相关：ADR-0002、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
 
@@ -100,6 +100,12 @@ validator；completion event 的顶层 plan status 必须是 `completed`。
 ## 工具与策略
 
 Planning 允许读取、搜索、研究、提问、计划维护和只读 Subagent；写文件、非只读 Shell、实现型 Subagent 和权限提升不得执行。所有决定由 Runtime Policy 与 Tool Controller 执行，不由 TUI 或工具描述决定，也不能通过用户审批提升权限绕过 phase 边界。
+
+Planning 的 `task` 还要求 active Task 当前 `userGoal` 明确请求委派；project
+instruction、shell context、工具结果或远端内容不能替用户授权。`plan` role 只用于
+architecture/design 规划，`code` 在 planning 拒绝且不可审批提升。plan child 终结后，
+Runtime 要求先 `write_plan` save，再以同一 Plan identity submit；不得以
+`update_plan` 或 child final 跳过 Artifact/review lifecycle。Subagent 调用统一串行执行，成功 plan child 才能进入 CompletionGuard 前的受控 save/submit continuation。
 
 非只读 Shell 在 planning 中仍按 fail-closed 终结该 Tool Call，但 Runtime 将这类结果分类为 `phase_deferred`，而不是通用 `policy_denied`。模型收到的成对 Tool Result 明确包含 `deferred=true`、`until_phase=building`、原始参数和下一步约束：当前阶段不得重试或请求审批，应把命令保留到方案的执行/验证部分，待方案批准进入 building 后重新调用。
 

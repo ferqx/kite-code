@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { planningContinuationAfterPlanSubagentV1 } from '@/core/subagent/delegation-contract';
 import { TASK_CONTRACT } from '@/core/tools/tool-contracts';
 import { defineExecutableTool } from '../spec';
 
@@ -8,7 +9,8 @@ export const taskInputSchema = z.object({
     .describe('Type of sub-agent to invoke'),
   task: z
     .string()
-    .min(1)
+    .min(8)
+    .max(8_000)
     .describe(
       'Self-contained task description with all necessary context. The sub-agent cannot see the main conversation.',
     ),
@@ -28,9 +30,7 @@ export const taskSpec = defineExecutableTool({
   contract: TASK_CONTRACT.sections,
   inputSchema: taskInputSchema,
   modelInputSchema: (context) =>
-    context.featureFlags?.promptContractV2 && context.phase === 'planning'
-      ? planningTaskInputSchema
-      : taskInputSchema,
+    context.phase === 'planning' ? planningTaskInputSchema : taskInputSchema,
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'none' },
   minimumApproval: 'user',
   availability: (context) => context.hasTaskAdapter === true,
@@ -52,8 +52,22 @@ export const taskSpec = defineExecutableTool({
     }
     return { available: true, result: await context.runTask(input) };
   },
-  projectResult: (output) => {
+  projectResult: (output, context) => {
     const ok = output.available && output.result.ok !== false;
+    const nextActions =
+      output.available && !output.result.blocked
+        ? planningContinuationAfterPlanSubagentV1({
+            phase: context.phase ?? 'building',
+            role: context.invocationInput.subagent_type,
+            childTerminal: true,
+            childOk: output.result.ok === true,
+            childStatus: output.result.blocked
+              ? 'suspended'
+              : output.result.ok === true
+                ? 'completed'
+                : (output.result.terminalStatus ?? 'failed'),
+          })
+        : [];
     const modelContent = output.available
       ? JSON.stringify({
           ok: output.result.ok,
@@ -61,6 +75,7 @@ export const taskSpec = defineExecutableTool({
           ...(output.result.error ? { error: output.result.error } : {}),
           toolCallCount: output.result.toolCallCount,
           durationMs: output.result.durationMs,
+          ...(nextActions.length > 0 ? { nextActions } : {}),
         })
       : output.error;
     return {

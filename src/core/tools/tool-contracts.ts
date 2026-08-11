@@ -98,6 +98,7 @@ export const KNOWN_TOOL_NAMES = [
   'edit_file',
   'write_file',
   'shell_execute',
+  'git_inspect',
   'search_content',
   'search_files',
   'tool_search',
@@ -194,6 +195,20 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'The model supplies command plus optional description/timeout_ms only; policy derives effects and approval. Never submit intent, grant_request, prefix_rule or privilege escalation.',
     recovery:
       'A planning write is deferred until building: do not retry and do not ask for shell approval. Policy/approval denial, timeout, cancellation or unknown effects are never replayed; correct only explicit pre-dispatch argument errors.',
+  },
+  git_inspect: {
+    summary: 'Inspect local Git state through the hardened typed broker.',
+    useWhen:
+      'Use status, diff, log or branch_list instead of shell Git. The broker binds the repository and trusted executable before dispatch.',
+    returns: {
+      format: 'json',
+      description: 'Bounded output plus Runtime-owned operation receipt and stable failure code.',
+      fields: ['ok', 'output', 'failure_code', 'next_capability', 'receipt'],
+    },
+    constraints:
+      'Only fixed operations and bounded paths/revision/record/output/timeout fields are accepted. Arbitrary argv, config, formats, repo roots, remotes and protected paths are forbidden.',
+    recovery:
+      'Hostile repository, protected content, untrusted binary or missing qualification fails closed. Use the returned stable code; never fall back to raw shell Git.',
   },
   search_content: {
     summary: 'Search workspace file contents by regular expression.',
@@ -393,8 +408,8 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     returns: {
       format: 'json',
       description:
-        'Only ok, summary, error, toolCallCount and durationMs; private continuation/journal/lineage never reaches the model.',
-      fields: ['ok', 'summary', 'error', 'toolCallCount', 'durationMs'],
+        'Only ok, summary, error, toolCallCount, durationMs and governed nextActions; private continuation/journal/lineage never reaches the model.',
+      fields: ['ok', 'summary', 'error', 'toolCallCount', 'durationMs', 'nextActions'],
     },
     constraints:
       'Provide subagent_type and a concrete self-contained task. Planning exposes only explore/plan and never grants writes by implication.',
@@ -427,6 +442,7 @@ export const READ_PLAN_CONTRACT = compatibilityContract('read_plan');
 export const EDIT_FILE_CONTRACT = compatibilityContract('edit_file');
 export const WRITE_FILE_CONTRACT = compatibilityContract('write_file');
 export const SHELL_EXECUTE_CONTRACT = compatibilityContract('shell_execute');
+export const GIT_INSPECT_CONTRACT = compatibilityContract('git_inspect');
 export const SEARCH_CONTENT_CONTRACT = compatibilityContract('search_content');
 export const SEARCH_FILES_CONTRACT = compatibilityContract('search_files');
 export const TOOL_SEARCH_CONTRACT = compatibilityContract('tool_search');

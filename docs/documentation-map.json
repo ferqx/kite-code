@@ -105,6 +105,28 @@
       ]
     },
     {
+      "id": "subagent-governance",
+      "sources": [
+        "src/core/subagent/**",
+        "src/core/tools/registry/builtins/task.ts",
+        "src/app/tui/reducers/agentReducer.ts",
+        "src/app/tui/reducers/cancellation-projection.ts",
+        "src/app/tui/run-status.ts",
+        "src/app/tui/types.ts",
+        "tests/subagent-delegation-contract.test.ts",
+        "tests/subagent-runner.test.ts",
+        "tests/subagent-continuation-codec.test.ts"
+      ],
+      "documents": [
+        "docs/active/tool-gated-autonomy.md",
+        "docs/active/plan-mode-implementation.md",
+        "docs/active/six-concept-runtime-architecture.md",
+        "docs/active/tool-description-contracts.md",
+        "docs/book/06-多Agent协作.md",
+        "docs/book/12-测试体系.md"
+      ]
+    },
+    {
       "id": "tool-controller-runtime-composition",
       "sources": ["src/core/controllers/tool-controller.ts"],
       "documents": [
@@ -120,8 +142,6 @@
       "sources": [
         "src/core/mcp/**",
         "src/core/skills/**",
-        "tests/mcp-transport-boundary.test.ts",
-        "tests/mcp-transport-boundary-concurrency.test.ts",
         ".github/workflows/mcp-native-keyring-smoke.yml",
         ".github/workflows/mcp-langchain-live-smoke.yml"
       ],
@@ -206,6 +226,7 @@
       "id": "app-execution-boundary",
       "sources": [
         "src/app/sandbox/**",
+        "src/app/git/**",
         "src/app/workspace/**",
         "src/app/release/execution-status.ts",
         "src/app/cli/index.ts",
@@ -236,6 +257,7 @@
         "docs/adr/0087-tui-silent-startup-prewarm.md",
         "docs/adr/0088-remove-windows-appcontainer-backend.md",
         "docs/adr/0089-windows-online-loopback-proxy-inheritance.md",
+        "docs/adr/0097-brokered-git-capability.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/book/08-TUI交互全景.md",
         "docs/book/09-CLI模式与配置.md"
@@ -246,6 +268,8 @@
       "sources": [
         "src/core/policies/**",
         "src/core/sandbox/**",
+        "src/core/git/**",
+        "src/protocol/git.ts",
         "native/windows-sandbox-runner/**",
         "scripts/release/platform-capability-probe.ts",
         "scripts/release/windows-runner-evidence.ts",
@@ -257,6 +281,8 @@
         "tests/sandbox/app-sandbox-composition.test.ts",
         "tests/sandbox/process-tree-limit.test.ts",
         "tests/sandbox/platform-capability-probe.test.ts",
+        "tests/git-broker.test.ts",
+        "tests/runtime/git-tool-controller.test.ts",
         "tests/policies/protected-path.test.ts",
         "release/platform-capabilities/**",
         ".github/workflows/platform-capability-probe.yml",
@@ -279,6 +305,8 @@
         "docs/adr/0042-file-tool-semantics-and-write-safety.md",
         "docs/adr/0043-tool-spec-registry-and-strict-edit.md",
         "docs/active/file-reading-shared-boundary.md",
+        "docs/active/tool-description-contracts.md",
+        "docs/active/six-concept-runtime-architecture.md",
         "docs/book/05-工具系统与安全策略.md",
         "docs/adr/0061-production-platform-capability-admission.md",
         "docs/adr/0065-cross-platform-distribution-and-capability-admission.md",
@@ -295,6 +323,7 @@
         "docs/adr/0087-tui-silent-startup-prewarm.md",
         "docs/adr/0088-remove-windows-appcontainer-backend.md",
         "docs/adr/0089-windows-online-loopback-proxy-inheritance.md",
+        "docs/adr/0097-brokered-git-capability.md",
         "docs/adr/0049-effect-aware-read-scheduling.md"
       ]
     },
@@ -604,7 +633,6 @@
       "sources": [
         "src/core/config/workspace-trust.ts",
         "src/core/config/paths.ts",
-        "src/app/cli/index.ts",
         "src/app/tui/components/WorkspaceTrustGate.tsx",
         "tests/workspace-trust.test.ts",
         "tests/cli-workspace-trust.test.ts"

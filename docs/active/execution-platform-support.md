@@ -7,13 +7,14 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 
 验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/cgroup-pids.test.ts tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/process-tree-limit.test.ts
 tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
-tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、
+tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
+tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts`、
 `bun test tests/postinstall.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、`release/platform-capabilities/support-matrix-v1.json`、
+相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、`release/platform-capabilities/support-matrix-v1.json`、
 `docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
 
 ## 当前支持集合
@@ -27,6 +28,13 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标。发行/�
 但其 Shell、writer、Skill child 或 local stdio MCP 仍可因原生隔离证据不足而关闭。常规三平台
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
 Docker、WSL2 和架构模拟只作开发预检。
+
+ADR-0097 的 brokered Git 另有独立资格证据组：同一 feature revision 必须同时
+证明通用 Shell 对 repository metadata 的 read/write deny、broker positive/hostile 路径、
+schema/binary/repository identity 与 TUI/foreground CLI composition。当前三平台 probe 都明确
+记录 `brokeredGit.currentOutcome=excluded`；probe 不会用代码存在替代证据：只有 native read/write deny 均 enforced 时才运行真实 App broker positive/hostile/binary identity，TUI/CLI 入口仍需各自证明。不能同时证明 native read/write deny 的平台
+不得披露 `gitInspect`，也不能用 generic read/process 证据替代。
+qualification artifact 还必须携带真实 profile/protected-rules digest 与 broker/schema/repository/executable/native-deny/invocation receipt identity；label hash 或只执行 positive fixture 都不足以标记 qualified。因此当前三个 production 平台继续 excluded。
 
 源码安装仍以 Bun 为包管理器；候选版本另使用 Bun standalone executable、manifest/checksum 和安全
 安装器，不要求目标机预装 Node。开发依赖安装的 `postinstall` 仍由 package script 显式通过系统 `node` 启动。

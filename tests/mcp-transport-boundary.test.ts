@@ -35,6 +35,8 @@ const executionSurface: ExecutionCapabilitySurfaceV1 = {
   shell: true,
   skillChild: true,
   localStdioMcp: true,
+  gitInspect: false,
+  brokeredGitFeatureRevision: null,
 };
 const networkPolicy = networkBoundaryPolicyFromExecutionBoundaryV1(executionBoundary, true);
 const safeHttpTransportOptions = {

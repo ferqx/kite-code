@@ -1,10 +1,11 @@
 # CI 稳定化与 Plan Evidence 实施计划
 
-状态：active
+状态：superseded
 创建：2026-08-10
 优先级：P0
 依赖：`2026-08-09-agent-core-tool-plan-sandbox-optimization.md` 的 `ACORE-PLAN-01`、ADR-0095、当前 PR #46
 设计依据：`2026-08-09-agent-core-tool-plan-sandbox-optimization.md` 的“当前执行约束：CI 稳定化与 Plan Evidence tranche”
+替代：已完成 Task 保留为实施证据；剩余 PR Gate 由 `2026-08-11-trustworthy-runtime-closure.md` 接管。
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use `superpowers:executing-plans` task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. 本仓库禁止生成 `docs/superpowers/`，本计划按仓库规则存放在 `docs/space/plans/`。
 

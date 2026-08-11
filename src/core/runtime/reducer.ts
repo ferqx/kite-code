@@ -2083,7 +2083,7 @@ function reduceRuntimeStateWithReplayBoundary(
               const taskId = crypto.randomUUID();
               const task = {
                 taskId,
-                userGoal: event.content,
+                userGoal: event.userGoal ?? event.content,
                 status: 'active' as const,
                 startedAtTurnId: state.turn.turnId,
                 sideEffectsStarted: false,
@@ -2099,8 +2099,11 @@ function reduceRuntimeStateWithReplayBoundary(
             })()
           : state;
       const activeTask = getActiveTask(nextState);
-      if (activeTask && activeTask.userGoal.length === 0 && event.content.length > 0) {
-        nextState = updateActiveTask(nextState, (task) => ({ ...task, userGoal: event.content }));
+      const userGoal = event.userGoal ?? event.content;
+      // Delegation authority is scoped to the latest user-authored response,
+      // not permanently inherited from the first message in a Task.
+      if (activeTask && userGoal.length > 0) {
+        nextState = updateActiveTask(nextState, (task) => ({ ...task, userGoal }));
       }
       return {
         ...nextState,
