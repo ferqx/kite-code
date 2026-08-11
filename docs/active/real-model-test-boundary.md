@@ -67,6 +67,8 @@ input/output/total/cache-read token 汇总为 `162442/6057/168499/160640`，stat
 `contentLogged=false`。这证明该次 runner 确实通过固定 OpenCode Go route 收到逐调用计量响应；账户控制台的
 Go usage 展示仍属于 Provider 侧订阅视图，不以 Zen credit balance 下降替代 runner evidence。
 
+2026-08-11 在当前工作树上，先以 `KITE_RUN_FIRST_DECISION_EVAL=1 bun run test:first-decision:live -- --runs=10` 完成未修改 V2 的基线：`opencode_go / deepseek-v4-flash` 真实 A/B 各 100 次为 legacy 96/100、V2 94/100，配对差 −2pp、95% 区间约 `[-6.81%, +2.81%]`，结论为 `inconclusive`；200/200 HTTPS 2xx、usage 与唯一 response ID 完整，安全违规为 0。失败主要集中在显式只读子代理规划。随后 V2 仅补充了当前用户明确要求有界只读委派时使用 `task`、选择 `explore`/`plan` 并给出自包含任务的操作指引；项目和外部内容仍不能授权委派。相同命令的独立复验为 legacy 95/100、V2 98/100，配对结果为双方通过 95、仅 V2 3、双方失败 2，V2-minus-legacy 为 +3pp、95% 区间约 `[-0.36%, +6.36%]`，不劣阈值判定 `passed`；V2 子代理规划为 8/10、legacy 为 5/10，安全违规、无效工具和无效参数均为 0。provider evidence 再次完整闭合（200/200），input/output/total/cache-read tokens 为 `1,267,040/67,715/1,334,755/1,243,648`，`contentLogged=false`。该结果只证明这份提示词在该固定 Provider、模型和 first-decision scope 上已收敛；它不改变 ADR-0094 的默认关闭决定，也不替代新的最终候选、发布门禁和迁移 ADR。
+
 ADR-0068/ADR-0069 注册 `test:provider:smoke` 作为 G1 的最小真实调用入口。它不进入默认测试：DeepSeek
 固定 `deepseek-v4-flash`；OpenCode Go 使用 `openai-compatible` adapter，固定路由为
 `https://opencode.ai/zen/go/v1` 的 `deepseek-v4-flash`。环境变量和显式本机配置都必须精确使用该
