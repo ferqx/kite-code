@@ -19,6 +19,10 @@ import {
 } from './context-projection';
 import { resolveContextReclaimModeV1 } from './context-reclaim';
 import { type ResolvedModelCapabilities, resolveModelCapabilities } from './model-capabilities';
+import {
+  buildSummarySourceIdentityForCurrentPrefixV1,
+  createSummaryRequestedEventV1,
+} from './progressive-context-orchestrator';
 
 // Legacy callers without a live projection environment retain a conservative fallback.
 function fallbackEstimate(state: Readonly<RuntimeState>): ContextTokenEstimate {
@@ -28,7 +32,11 @@ function fallbackEstimate(state: Readonly<RuntimeState>): ContextTokenEstimate {
   const activeMessages = checkpoint
     ? (() => {
         const idx = state.transcript.messages.findIndex(
-          (m) => m.messageId === checkpoint.coveredThroughMessageId,
+          (m) =>
+            m.messageId ===
+            (checkpoint.version === 3
+              ? checkpoint.source.coveredThroughMessageId
+              : checkpoint.coveredThroughMessageId),
         );
         return idx >= 0 ? state.transcript.messages.slice(idx + 1) : state.transcript.messages;
       })()
@@ -147,7 +155,10 @@ export function inspectManualContextCompaction(
     ...(checkpoint
       ? {
           activeCheckpointId: checkpoint.compactionId,
-          coveredThroughMessageId: checkpoint.coveredThroughMessageId,
+          coveredThroughMessageId:
+            checkpoint.version === 3
+              ? checkpoint.source.coveredThroughMessageId
+              : checkpoint.coveredThroughMessageId,
           inputTokensBefore: checkpoint.inputTokensBefore,
           inputTokensAfter: checkpoint.inputTokensAfter,
         }
@@ -165,23 +176,39 @@ export function manualContextCompactionEvent(input: {
   projectionEnvironment?: ContextProjectionEnvironment;
   preparedContextV2?: PreparedContextRequestReadyV2;
 }): RuntimeEvent | null {
-  if (input.state.context.pendingCompaction) return null;
-  return {
-    type: 'context.compaction_requested',
-    compactionId: crypto.randomUUID(),
+  if (
+    input.state.context.pendingCompaction ||
+    input.state.context.summaryLifecycle.kind === 'requested' ||
+    input.state.context.summaryLifecycle.kind === 'started'
+  )
+    return null;
+  const estimate = currentContextPreflight(
+    input.state,
+    input.config,
+    input.capabilities,
+    input.projectionEnvironment,
+    input.preparedContextV2,
+  ).estimate;
+  const sourceIdentity = buildSummarySourceIdentityForCurrentPrefixV1(input.state);
+  if (!sourceIdentity) return null;
+  if (!input.state.context.lastTranscriptProducingEventCutV1 && !input.state.lastAppliedEventId)
+    return null;
+  const active = input.state.context.activeCheckpoint;
+  if (
+    active?.version === 3 &&
+    active.source.firstMessageId === sourceIdentity.firstMessageId &&
+    active.source.coveredThroughMessageId === sourceIdentity.coveredThroughMessageId &&
+    active.source.sourceRangeDigest === sourceIdentity.canonicalSourceDigest
+  ) {
+    return null;
+  }
+  return createSummaryRequestedEventV1({
+    state: input.state,
     reason: 'manual',
-    requestedAtRevision: input.state.revision,
-    requestedAtTurnId: input.state.turn.turnId,
-    force: false,
-    estimate: currentContextPreflight(
-      input.state,
-      input.config,
-      input.capabilities,
-      input.projectionEnvironment,
-      input.preparedContextV2,
-    ).estimate,
+    sourceIdentity,
+    estimate,
     ...(input.customInstructions ? { customInstructions: input.customInstructions } : {}),
-  };
+  });
 }
 
 /**
@@ -230,7 +257,7 @@ export function buildContextStatusReport(
   const usable = preflight.usableInputTokens ?? 'unknown';
   const checkpoint = state.context.activeCheckpoint;
   const lastCp = checkpoint
-    ? `Active checkpoint: ${checkpoint.compactionId.slice(0, 12)}...  Covered through: ${checkpoint.coveredThroughTurnId}`
+    ? `Active checkpoint: ${checkpoint.compactionId.slice(0, 12)}...  Covered through: ${checkpoint.version === 3 ? checkpoint.source.coveredThroughTurnId : checkpoint.coveredThroughTurnId}`
     : 'No active checkpoint';
   const autoStatus = 'unavailable (legacy configuration ignored)';
 

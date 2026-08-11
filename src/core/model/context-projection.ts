@@ -35,6 +35,7 @@ import type { ContextFrame } from './context-frame';
 import { buildCanonicalFrames } from './context-frame-builder';
 import { serializeFramesToMessages } from './context-serializer';
 import { validateFramePairs, validateMessagePairs } from './context-validator';
+import { selectCheckpointWorkingSetV1 } from './context-working-set';
 import {
   formatProjectInstructionSnapshot,
   type ProjectInstructionSnapshot,
@@ -160,6 +161,8 @@ export interface BuildContextProjectionInput {
   serializedTools?: SerializedToolDescriptor[];
   /** Override the active checkpoint for candidate validation (PR 5). */
   candidateCheckpoint?: ContextCompactionCheckpoint;
+  /** Explicitly suppress active checkpoint projection for raw/Micro tier preparation. */
+  checkpointProjectionMode?: 'active' | 'raw';
   /** Active skill instructions injected into the system prompt. */
   activeSkillInstructions?: string;
   /** Skill manifests for the system prompt. */
@@ -169,6 +172,9 @@ export interface BuildContextProjectionInput {
   promptContractVersion?: PromptContractVersion;
   projectInstructions?: ProjectInstructionSnapshot;
   sandboxBackend?: SandboxBackend | 'unknown';
+  /** Exact resolved lease inputs used to qualify a V3 Working Set. */
+  projectionEnvironment?: ContextProjectionEnvironment;
+  contextWindowTokens?: number;
 }
 
 /** Complete context projection — all components assembled and validated. */
@@ -271,31 +277,34 @@ function checkpointSummaryMessage(checkpoint: ContextCompactionCheckpoint): Base
  * - Shadow auto-compaction evaluation
  */
 export function buildContextProjection(input: BuildContextProjectionInput): ContextProjection {
-  const checkpoint = input.candidateCheckpoint ?? input.state.context.activeCheckpoint;
+  const checkpoint =
+    input.checkpointProjectionMode === 'raw'
+      ? undefined
+      : (input.candidateCheckpoint ?? input.state.context.activeCheckpoint);
 
   // ── 1. Transcript projection: split by checkpoint boundary ──
   let transcriptMessages: BaseMessage[];
   let summaryMessages: BaseMessage[];
 
-  if (!checkpoint) {
+  if (checkpoint?.version !== 3) {
     transcriptMessages = runtimeTranscriptMessages(input.state);
     summaryMessages = [];
   } else {
-    const boundaryIndex = input.state.transcript.messages.findIndex(
-      (message) => message.messageId === checkpoint.coveredThroughMessageId,
-    );
-    if (boundaryIndex < 0) {
-      // Checkpoint boundary not found — fall back to full transcript.
+    const workingSet = selectCheckpointWorkingSetV1({
+      state: input.state,
+      checkpoint,
+      ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
+      ...(input.projectionEnvironment
+        ? { expectedRouteIdentityDigest: digestProjectionEnvironment(input.projectionEnvironment) }
+        : {}),
+    });
+    if (workingSet.status === 'unavailable') {
+      // A V3 proof is all-or-nothing. Never guess a boundary from narrative or
+      // promote a legacy checkpoint into the verified Working Set path.
       transcriptMessages = runtimeTranscriptMessages(input.state);
       summaryMessages = [];
     } else {
-      transcriptMessages = runtimeTranscriptMessages({
-        ...input.state,
-        transcript: {
-          ...input.state.transcript,
-          messages: input.state.transcript.messages.slice(boundaryIndex + 1),
-        },
-      });
+      transcriptMessages = serializeFramesToMessages(workingSet.frames);
       summaryMessages = [checkpointSummaryMessage(checkpoint)];
     }
   }

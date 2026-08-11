@@ -1,10 +1,16 @@
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
+import {
+  createManualSummaryPreReservationDeniedEventV1,
+  createSummaryStartBatchKeyV1,
+  ProviderDispatchEntryGuardV1,
+} from '@/core/model/progressive-context-orchestrator';
 import type { RuntimeUserAction } from './actions';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import {
+  finalizeRuntimeEffectTerminalBatchV1,
   planRuntimeBudgetAdmissionV1,
   reconciliationEventsForReservationsV1,
 } from './resource-budget-admission';
@@ -123,6 +129,7 @@ async function* executeEffectWithStreaming(
   executor: RuntimeEffectExecutor,
   lease: import('./effects').RuntimeEffectLease,
   reservationIds: string[] = [],
+  summaryDispatchEntryGuard?: ProviderDispatchEntryGuardV1,
 ): AsyncGenerator<RuntimeEvent, EffectExecutionOutcome> {
   const pending: Array<{
     events: RuntimeEvent[];
@@ -171,6 +178,8 @@ async function* executeEffectWithStreaming(
     },
     {
       effectLeaseId: lease.effectId,
+      producerGeneration: kernel.getProducerGeneration(),
+      summaryDispatchEntryGuard,
       reservationIds,
       getState: () => kernel.getState(),
       persistEvent: (event) =>
@@ -257,6 +266,61 @@ async function* executeEffectWithStreaming(
   }
   await execution;
   if (failure) {
+    const lifecycle = kernel.getState().context.summaryLifecycle;
+    const consumption =
+      lease.effect.type === 'call_model' &&
+      lease.effect.primaryRequestId &&
+      lifecycle.kind === 'idle' &&
+      lifecycle.lastConsumption?.primaryRequestId === lease.effect.primaryRequestId
+        ? lifecycle.lastConsumption
+        : undefined;
+    if (consumption) {
+      const admissionFailure = failure instanceof ProviderDataAdmissionError ? failure : undefined;
+      const denied = admissionFailure?.knownExternalEffects === 'none';
+      const failureKind = denied
+        ? admissionFailure?.decision.reason === 'mandatory_policy_unavailable'
+          ? 'mandatory_policy_unavailable'
+          : 'policy_denied'
+        : 'unknown';
+      const classified = classifyFailure(
+        failureKind,
+        denied
+          ? 'Provider data admission denied the continuation primary.'
+          : 'Continuation primary outcome is unknown after dispatch.',
+      );
+      const terminalEvents: RuntimeEvent[] = [
+        {
+          type: 'run.error',
+          message: classified.message,
+          recoverable: false,
+          failure: classified,
+          turnId: consumption.continuation.turnId,
+          outcome: failedTerminalOutcomeV1(classified, {
+            knownExternalEffects: denied ? 'none' : 'unknown',
+          }),
+        },
+        ...reservationIds.map(
+          (reservationId): RuntimeEvent =>
+            denied
+              ? {
+                  type: 'resource_budget.released',
+                  reservationId,
+                  proof: 'local_provider_admission_denied',
+                }
+              : { type: 'resource_budget.unknown', reservationId },
+        ),
+        {
+          type: 'turn.aborted',
+          turnId: consumption.continuation.turnId,
+          reason: classified.message,
+          cause: 'error',
+        },
+      ];
+      if (kernel.applyEffectResult(lease, terminalEvents)) {
+        yield* terminalEvents;
+      }
+      return { applied: true, emitted: true };
+    }
     if (reservationIds.length > 0) {
       const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) =>
         failure instanceof ProviderDataAdmissionError && failure.knownExternalEffects === 'none'
@@ -275,35 +339,27 @@ async function* executeEffectWithStreaming(
     throw failure;
   }
 
-  let reconciled = reconciliationEventsForReservationsV1(
+  const terminalResult = finalizeRuntimeEffectTerminalBatchV1(
     kernel.getState() as import('./state').RuntimeState,
     reservationIds,
     result,
   );
-  const primaryEvidence = result.find(
-    (event) => event.type === 'model.responded' && event.contextEvidence,
+  const reconciled = terminalResult.filter(
+    (event) =>
+      event.type === 'resource_budget.reconciled' ||
+      event.type === 'resource_budget.released' ||
+      event.type === 'resource_budget.unknown',
   );
-  if (primaryEvidence?.type === 'model.responded' && primaryEvidence.contextEvidence) {
-    reconciled = reconciled.map((event) =>
-      event.reservationId === primaryEvidence.contextEvidence!.reservationId
-        ? {
-            ...event,
-            terminalBatchId: primaryEvidence.contextEvidence!.terminalBatchId,
-          }
-        : event,
-    );
-  }
-  const aborts = result.filter((event) => event.type === 'turn.aborted');
-  const terminalResult = [
-    ...result.filter((event) => event.type !== 'turn.aborted'),
-    ...reconciled,
-    ...aborts,
-  ];
   if (terminalResult.length > 0) {
     emitted = true;
     try {
       if (!kernel.applyEffectResult(lease, terminalResult)) {
-        if (
+        const staleSummarySettlement = !cancellationIncomplete
+          ? kernel.applyStaleSummarySettlementV1(terminalResult)
+          : false;
+        if (staleSummarySettlement) {
+          yield* staleSummarySettlement;
+        } else if (
           !cancellationIncomplete &&
           reconciled.length > 0 &&
           kernel.applyLateResourceReconciliation(reconciled)
@@ -545,6 +601,8 @@ export async function* runRuntimeLoop(
       }
       let reservationIds: string[] = [];
       let admittedModelLease: import('./effects').RuntimeEffectLease | undefined;
+      let admittedSummaryLease: import('./effects').RuntimeEffectLease | undefined;
+      let admittedSummaryGuard: ProviderDispatchEntryGuardV1 | undefined;
       if (kernel.getState().resourceBudget.status === 'active') {
         const admission = planRuntimeBudgetAdmissionV1(
           kernel.getState() as import('./state').RuntimeState,
@@ -552,7 +610,16 @@ export async function* runRuntimeLoop(
         );
         const atomicModelAdmission =
           admission.status === 'admitted' && effect.type === 'call_model';
-        if (admission.preparationEvents.length > 0 && !atomicModelAdmission) {
+        const atomicSummaryAdmission =
+          admission.status === 'admitted' &&
+          effect.type === 'compact_context' &&
+          (kernel.getState().context.summaryLifecycle.kind === 'requested' ||
+            Boolean(effect.summaryRequest));
+        if (
+          admission.preparationEvents.length > 0 &&
+          !atomicModelAdmission &&
+          !atomicSummaryAdmission
+        ) {
           kernel.processEventBatch(admission.preparationEvents);
           yield* admission.preparationEvents;
         }
@@ -583,11 +650,31 @@ export async function* runRuntimeLoop(
             kernel.getState() as import('./state').RuntimeState,
             admission.reason,
           );
+          const lifecycle = kernel.getState().context.summaryLifecycle;
+          if (effect.type === 'compact_context' && lifecycle.kind === 'requested') {
+            const denied = createManualSummaryPreReservationDeniedEventV1({
+              state: kernel.getState(),
+              message: `Summary resource admission was denied: ${admission.reason}.`,
+            });
+            kernel.processEvent(denied);
+            yield denied;
+            return;
+          }
           kernel.processEventBatch(terminalEvents);
           yield* terminalEvents;
           return;
         }
         if (admission.status === 'denied') {
+          const lifecycle = kernel.getState().context.summaryLifecycle;
+          if (effect.type === 'compact_context' && lifecycle.kind === 'requested') {
+            const denied = createManualSummaryPreReservationDeniedEventV1({
+              state: kernel.getState(),
+              message: `Summary resource admission was denied: ${admission.reason}.`,
+            });
+            kernel.processEvent(denied);
+            yield denied;
+            return;
+          }
           const terminalEvents = resourceAdmissionTerminalEventsV1(
             kernel.getState() as import('./state').RuntimeState,
             admission.reason,
@@ -597,8 +684,57 @@ export async function* runRuntimeLoop(
           return;
         }
         if (atomicModelAdmission) {
-          admittedModelLease = kernel.beginEffect(admission.effect);
-          const admissionEvents = [...admission.preparationEvents, ...admission.dispatchEvents];
+          const continuationLifecycle = kernel.getState().context.summaryLifecycle;
+          const primaryRequestId =
+            continuationLifecycle.kind === 'normal_reprepare_required'
+              ? crypto.randomUUID()
+              : undefined;
+          const admittedEffect = primaryRequestId
+            ? { ...admission.effect, primaryRequestId }
+            : admission.effect;
+          admittedModelLease = kernel.beginEffect(admittedEffect);
+          const reservationId = admission.reservationIds[0];
+          const reservation = admission.preparationEvents.find(
+            (event) =>
+              event.type === 'resource_budget.reserved' &&
+              event.reservation.reservationId === reservationId,
+          );
+          const consumptionKey =
+            continuationLifecycle.kind === 'normal_reprepare_required' &&
+            primaryRequestId &&
+            reservationId &&
+            reservation?.type === 'resource_budget.reserved'
+              ? {
+                  version: 1 as const,
+                  generation: kernel.getProducerGeneration(),
+                  consumptionBatchId: crypto.randomUUID(),
+                  attemptId: continuationLifecycle.receipt.attemptId,
+                  compactionId: continuationLifecycle.receipt.compactionId,
+                  continuation: continuationLifecycle.receipt.continuation,
+                  originReceipt: continuationLifecycle.receipt,
+                  primaryEffectLeaseId: admittedModelLease.effectId,
+                  primaryInvocationId: reservation.reservation.invocationId,
+                  primaryRequestId,
+                  resourceReservationId: reservationId,
+                }
+              : undefined;
+          if (continuationLifecycle.kind === 'normal_reprepare_required' && !consumptionKey) {
+            throw new Error('Continuation primary requires one exact reservation binding.');
+          }
+          const admissionEvents = [...admission.preparationEvents, ...admission.dispatchEvents].map(
+            (event): RuntimeEvent =>
+              consumptionKey &&
+              (event.type === 'resource_budget.reserved' ||
+                event.type === 'resource_budget.dispatch_started')
+                ? { ...event, normalReprepareConsumptionKey: consumptionKey }
+                : event,
+          );
+          if (consumptionKey) {
+            admissionEvents.push({
+              type: 'context.normal_reprepare_consumed_v1',
+              consumptionKey,
+            });
+          }
           if (
             admissionEvents.length > 0 &&
             !kernel.applyEffectResult(admittedModelLease, admissionEvents)
@@ -606,11 +742,51 @@ export async function* runRuntimeLoop(
             continue;
           }
           yield* admissionEvents;
+        } else if (atomicSummaryAdmission) {
+          admittedSummaryLease = kernel.beginEffect(admission.effect);
+          admittedSummaryGuard = new ProviderDispatchEntryGuardV1();
+          const summaryEffect = admission.effect as Extract<
+            import('./effects').RuntimeEffect,
+            { type: 'compact_context' }
+          >;
+          const reservationId = admission.reservationIds[0];
+          if (!reservationId || admission.reservationIds.length !== 1) {
+            throw new Error('Summary dispatch requires exactly one resource reservation.');
+          }
+          const startBatchKey = createSummaryStartBatchKeyV1({
+            state: kernel.getState(),
+            effectLeaseId: admittedSummaryLease.effectId,
+            resourceReservationId: reservationId,
+            expectedMaxOutputTokens: summaryEffect.resourceEstimate?.maxOutputTokens ?? 6_000,
+            ...(summaryEffect.summaryRequest
+              ? { attemptOverride: summaryEffect.summaryRequest.attempt }
+              : {}),
+          });
+          const admissionEvents = [
+            ...(summaryEffect.summaryRequest ? [summaryEffect.summaryRequest] : []),
+            ...admission.preparationEvents,
+            ...admission.dispatchEvents,
+          ].map(
+            (event): RuntimeEvent =>
+              event.type === 'resource_budget.reserved' ||
+              event.type === 'resource_budget.dispatch_started'
+                ? { ...event, summaryStartBatchKey: startBatchKey }
+                : event,
+          );
+          const started: RuntimeEvent = {
+            type: 'context.summary_dispatch_started_v1',
+            attemptId: startBatchKey.attemptId,
+            startBatchKey,
+          };
+          const startEvents = [...admissionEvents, started];
+          if (!kernel.applyEffectResult(admittedSummaryLease, startEvents)) continue;
+          kernel.registerSummaryDispatchEntryGuard(admittedSummaryLease, admittedSummaryGuard);
+          yield* startEvents;
         } else if (admission.dispatchEvents.length > 0) {
           kernel.processEventBatch(admission.dispatchEvents);
           yield* admission.dispatchEvents;
         }
-        effect = admission.effect;
+        effect = admittedModelLease?.effect ?? admittedSummaryLease?.effect ?? admission.effect;
         reservationIds = admission.reservationIds;
       }
       if (
@@ -752,8 +928,14 @@ export async function* runRuntimeLoop(
         continue;
       }
       count += 1;
-      const lease = admittedModelLease ?? kernel.beginEffect(effect);
-      const outcome = yield* executeEffectWithStreaming(kernel, executor, lease, reservationIds);
+      const lease = admittedModelLease ?? admittedSummaryLease ?? kernel.beginEffect(effect);
+      const outcome = yield* executeEffectWithStreaming(
+        kernel,
+        executor,
+        lease,
+        reservationIds,
+        admittedSummaryGuard,
+      );
       if (!outcome.emitted) return;
       if (!outcome.applied) continue;
     }

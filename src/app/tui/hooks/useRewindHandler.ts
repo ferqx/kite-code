@@ -3,6 +3,7 @@ import React from 'react';
 import { loadAgentConfig } from '@/core/config';
 import { defaultCheckpointPath } from '@/core/config/paths';
 import { loadSession } from '@/core/persistence/sessions';
+import { executeForkBranchMutationV1 } from '@/core/runtime/branch-mutation-v1';
 import {
   type FileRestoreOutcome,
   type FileRestorePreview,
@@ -147,7 +148,12 @@ export function useRunRewind(deps: RewindDeps) {
 
         if (restoresConversation) {
           targetThreadId = `tui-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-          if (!store.forkSession(sourceThreadId, snapshotId, targetThreadId)) {
+          const committed =
+            store.loadPersistenceIdentity(sourceThreadId).format === 'v24_strict'
+              ? executeForkBranchMutationV1(store, sourceThreadId, snapshotId, targetThreadId)
+                  .status === 'committed'
+              : store.forkSession(sourceThreadId, snapshotId, targetThreadId);
+          if (!committed) {
             throw new Error('Recovery point is unavailable or corrupted.');
           }
           recoveredData = await loadSession(defaultCheckpointPath(), targetThreadId);

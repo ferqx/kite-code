@@ -94,22 +94,21 @@ Runtime schema v21 继续保留这些网络事实，并把远程 HTTP MCP 的独
 
 静态 prompt、稳定工具契约和 cacheable Runtime context 尽量保持前缀稳定；项目指令使用独立早期消息，动态状态、Skill disclosure、搜索结果和 turn binding 放在轮次投影中。V2 的动态 phase/interaction/authorization/sandbox/planning state 只出现一次。上下文压缩保留任务事实、计划和工具结果语义，不取代 Runtime Store。
 
-上下文缩减按三层术语演进：L1 是工具模型输出预算，L2 是确定性的旧 read/search 结果回收，L3 是叙事
-checkpoint。Slice A 已落地全工具有限 L1 V2、唯一 prepared/final admission 与受控 L2 live，但全部新能力
-默认关闭。`toolResultBudgetV2=false` 保持既有 `compat_v1` 模型字节；开启后四类 terminal 自包含 verified
-receipt/identity。`contextReclaimV1=true + reclaimMode=live` 才会把完整 settled、全 `budget_v2` verified、
-read-only 的旧 `read_file|search_content|search_files` block 替换为确定性 stub；shadow 仍只记录 bounded
-内存统计，原 transcript 从不删除。
+候选上下文缩减计划由唯一渐进式 orchestrator 依次执行 `MicroCompact -> Checkpoint Working Set ->
+SummaryCompact`。MicroCompact 只处理至少两轮前、完整 settled、verified、read-only 的旧工具块；最近或未覆盖的
+尾部保持原文，并且只有最终 primary 请求实际使用该投影时才提交有界 receipt。Checkpoint Working Set 使用
+checkpoint-v3 的 canonical source proof，把投影固定为 `[0,c) summary + [w,c) recent raw + [c,n) raw tail`；
+working-set 策略冻结为至少 2048 tokens、至少 4 条文本消息、最多 8192 tokens，并在 proof、barrier、legacy 或
+tamper 不可验证时回退完整 raw transcript。
 
-`prepareContextRequestV2()` 是唯一 Core projection builder，inspection/candidate/restore-debug 零 lease、零
-reservation、零 Provider dispatch；只有 normal `primary_ready` 可进入 effect-only final admission。成功 primary
-使用封闭 2-event no-advance 或 3-event commit-advance branch，bounded commit 只保存 ranges/counts/digests，
-不保存 selected entries 正文。schema v22 以 snapshot metadata + full event head + 单调 generation exact CAS
-恢复/迁移，旧 v2..v21 Tool Result 永远是 `legacy_unverified + legacy_unknown`。当前 trusted route registry
-为空，因此 L2 live 只属 development-only。旧 Slice B 的 canonical L3 source、checkpoint-v2 writer、cache-safe
-fork、route cache gate 和 refill guard producer 已清场；schema v23 的 CAS/generation 持久安全保留。新的
-MicroCompact、Checkpoint Working Set、recent window 和 SummaryCompact 统一 orchestrator 尚未实现，不能宣称
-完整三级可用；Session Memory 已延期为独立可选增强。
+SummaryCompact 是唯一允许调用 Provider 的层级，复用同一 manual/auto lifecycle、资源预算与 normal request
+reprepare/consumption 协议。summary 请求只有一份 Markdown、无工具、SDK 零重试；dispatch 前必须持久化
+request/reservation/start，Provider 是否真正进入由 entry guard 证明。崩溃后的 started 请求绝不自动重放：
+已进入 Provider 的 reservation 转为 unknown，未进入的路径可用 durable proof 释放；晚到 usage 只能经专用
+resolution 原子 reconcile 并要求重新 prepare。schema v24 保存 canonical runtime envelope、checkpoint-v3 proof、
+summary lifecycle 与 thread fence。branch receipt/closure/completion、opaque candidate、resumable
+event/fence/named-proof migration 与 strict-v24 恢复/fork fault matrix 已通过 PSMC-06 本地 Gate；auto/Micro
+rollout flag 仍默认关闭。原始 transcript 始终保留，checkpoint 只是模型投影，Session Memory 不属于本方案。
 
 Runtime schema v16 把 M2 checkpoint lifecycle 纳入事件循环。`context.compaction_requested` 形成 pending 状态，scheduler 在工具、交互、verification 和 final 等更高优先级工作结束后调度 `compact_context`，controller 以 completed/failed 事件收敛。压缩复用普通 Effect lease；来源 revision 变化仍由 Kernel lease 拒绝并重新调度，完成时 projection environment 变化则产生 `stale_context` 可重试 failed 终态，清除 pending 且不激活 checkpoint。同一 session 的 standalone manual compaction 由 App 串行化整个 command/request/effect/terminal 生命周期，不能由多个 Kernel 并发推进同一事件流。RuntimeStore 还通过跨连接 effect lease 阻止同一 compaction id 的重复 Provider dispatch，并用 snapshot expected-revision CAS 拒绝 stale Kernel 或删除后的晚到写入；进程内 Promise barrier 只负责交互排序，不能替代持久化所有权。恢复通过 snapshot 加严格 event tail 重建 pending 或 active checkpoint，已收敛的 completed 不会重复激活。安全边界和输入上限都以完整 settled turn/tool pair 为单位，不能拆分调用与结果。Checkpoint 只是一种可 reset 的模型上下文投影，原始 transcript 仍保持不变。
 

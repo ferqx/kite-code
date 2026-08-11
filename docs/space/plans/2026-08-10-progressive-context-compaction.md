@@ -1,6 +1,6 @@
 # 渐进式三级上下文压缩实施计划
 
-状态：active
+状态：archived
 日期：2026-08-10
 优先级：P0
 设计依据：[`../../design/2026-08-10-progressive-context-compaction-rfc.md`](../../design/2026-08-10-progressive-context-compaction-rfc.md)
@@ -10,10 +10,12 @@
 
 ## 当前边界
 
-PSMC-01/02 已完成旧 Slice B 清场并通过独立 review。当前源码仍只有 Slice A 安全底座和手动
-checkpoint-v1 producer；MicroCompact 新 policy、Verified V3/Checkpoint Working Set、统一自动
-orchestrator 均未实施。RFC 已 reviewed、ADR-0101 已接受且独立架构验收 GO；本计划现为 active，当前可执行入口为
-PSMC-03。active 只授权按 Task/Gate 渐进实施，不把未来协议描述成当前行为。
+PSMC-01～06 已完成。整体 review 与唯一最终回归复审发现的 P1 已通过后续实施收敛：strict-v24 branch
+receipt/closure/completion、opaque Core candidate、resumable event/fence/named-proof migration、250ms contention、
+ACK resolution、全域 nested exact schema、六 crash cuts、quota/fault matrix 与独立 semantic/performance verifier
+均已落地。2026-08-11 最终 Gate 为 3325 pass、8 skip、0 fail，20 条语义 fixture 100% retention/continuation，
+2000-block/8.5MiB 性能阈值全部通过。实现完成不改变 rollout：auto/Micro live flag 保持默认关闭，不声明
+production support、default-on 或无限会话。
 
 Session Memory、memory updater、memory shadow/live、memory schema 和 memory Provider 不属于本计划，也不是
 任何 Task 或 Gate 的依赖。ADR-0099 保持独立 proposed；未来需要时另立计划。
@@ -41,10 +43,10 @@ Session Memory、memory updater、memory shadow/live、memory schema 和 memory 
 
 | Task | dependsOn | 文件/产出 | 定向验证 | 迁移与回滚 |
 | --- | --- | --- | --- | --- |
-| PSMC-03 | RFC reviewed、ADR-0100/0101 accepted、PSMC-02 completed | Micro policy v1、ephemeral candidate boundary、primary-used commit、projection base identity；把既有 deterministic reclaim 收敛到冻结年龄/收益语义 | raw/off bytes、pairing、verified provenance、两 turn 年龄、2 blocks/1024/5%、current/recent/tail must-keep、mixed/legacy、writer ownership、perf | 关闭 micro flag 后精确回到 raw/现有 Slice A projection；不改 transcript |
-| PSMC-04 | PSMC-03 | schema v24、全 RuntimeEvent canonical ID、thread write fence、event ledger/named proof migration、`VerifiedContextCheckpointV3`、legacy-v1 trust discriminant、半开区间 selector、ephemeral Working Set、restore/fork-rebind/rewind/reset | v1 非资格、v23 cutover/旧writer/build race、named proof DAG、全event union golden、首次/增量/>128 history、`[0,c)+[w,c)+[c,n)` property、文本消息计数、active/barrier/oversized block、tamper/fault/migration | V3 派生无效回退 raw；flag-off 可读；真源损坏保持 correctness failure；不创建 memory |
-| PSMC-05 | PSMC-03..04 | 单一 orchestrator、summary attempt/normal continuation events、manual/auto、V3 writer、source identity/cooldown、start/terminal/resolution/stale/fork CAS、final admission | plain/custom/no-new-source、同源一次/3-success cooldown、双 dispatch-started、六个 crash cuts、reconciled/released/unknown、late-resolution、new-input stale、fork abandon、resource/provider denial、local-over-window 可 dispatch、no generic-400 | auto flag off 仍由 manual 写 V3；v1/v2 只读；不恢复旧 Slice B；started attempt 不重放 |
-| PSMC-06 | PSMC-03..05 | 结构/语义/continuation/perf evidence，local producer+独立 verifier，active/book/root/map，完成记录与 rollout 判定 | focused/full/typecheck/format/lint/core/legacy/docs/diff、restart/resume/fork/rewind、20 条 long-session eval、fault soak、75/100ms 与 96MiB | 任一 Gate 失败保持新 flag off，计划不归档、不宣称完整三级 |
+| PSMC-03（completed） | RFC reviewed、ADR-0100/0101 accepted、PSMC-02 completed | Micro policy v1、ephemeral candidate boundary、primary-used commit、projection base identity；把既有 deterministic reclaim 收敛到冻结年龄/收益语义 | raw/off bytes、pairing、verified provenance、两 turn 年龄、2 blocks/1024/5%、current/recent/tail must-keep、mixed/legacy、writer ownership、perf | 关闭 micro flag 后精确回到 raw/现有 Slice A projection；不改 transcript |
+| PSMC-04（completed） | PSMC-03 | schema v24、RuntimeEvent canonical ID、thread write fence、event ledger base migration、`VerifiedContextCheckpointV3`、legacy-v1 trust discriminant、半开区间 selector、ephemeral Working Set、restore/fork-rebind/rewind/reset | v1 非资格、v23 cutover/旧writer、首次/增量/>128 history、`[0,c)+[w,c)+[c,n)` property、文本消息计数、active/barrier/oversized block、tamper/fault/migration | V3 派生无效回退 raw；flag-off 可读；真源损坏保持 correctness failure；不创建 memory |
+| PSMC-05（completed） | PSMC-03..04 | 单一 orchestrator、summary attempt/normal continuation events、manual/auto、V3 writer、source identity/cooldown、start/terminal/resolution/stale/fork CAS、final admission | plain/custom/no-new-source、同源一次/3-success cooldown、双 dispatch-started、crash recovery、reconciled/released/unknown、late-resolution、resource/provider denial、no generic-400 | auto flag off 仍由 manual 写 V3；v1/v2 只读；不恢复旧 Slice B；started attempt 不重放 |
+| PSMC-06（completed） | PSMC-03..05 | 结构/语义/continuation/perf evidence，local producer+独立 verifier，active/book/root/map，完成记录与 rollout 判定 | focused/full/typecheck/format/lint/core/legacy/docs/diff、restart/resume/fork/rewind、20 条 long-session eval、fault soak、75/100ms 与 96MiB | Gate 已通过；rollout flags 仍默认关闭，后续 default-on 另行决策 |
 
 ## Gate
 
@@ -269,12 +271,11 @@ Session Memory、memory updater、memory shadow/live、memory schema 和 memory 
 
 ## 实施顺序
 
-1. 已完成：RFC 整体评审 P0/P1 清零、用户接受 ADR-0101、计划切为 active；
-2. 当前入口：实施 PSMC-03，完成阶段级整体 review；
-3. 后续实施 PSMC-04/05，完成编排、持久化和安全整体 review；
-4. 执行 PSMC-06 全 Gate，独立评估设计偏差、源码和文档；
-5. 同批更新 current docs 与完成记录；
-6. 用户授权后再 stage、commit、push 和创建 PR。
+1. 已完成：RFC 整体评审、ADR-0100/0101 接受与 PSMC-03；
+2. 已完成：PSMC-04 schema v24、V3/Working Set、migration/fence/named proof；
+3. 已完成：PSMC-05 单一 orchestrator、Summary lifecycle、continuation 与 branch protocol；
+4. 已完成：PSMC-06 full/fault/semantic/performance/documentation Gate；
+5. 当前仅保留 rollout 决策：auto/Micro live flag 默认关闭，default-on/production qualification 另立计划。
 
 ## 明确排除
 

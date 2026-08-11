@@ -88,6 +88,20 @@ function fixture(input?: {
       result: { ok: true, summary: 'read', resultMeta },
     };
   }
+  state.transcript.messages.push(
+    {
+      kind: 'user',
+      messageId: 'recent-user-1',
+      turnId: 'recent-turn-1',
+      content: 'first recent settled turn',
+    },
+    {
+      kind: 'user',
+      messageId: 'recent-user-2',
+      turnId: 'recent-turn-2',
+      content: 'second recent settled turn',
+    },
+  );
   const environment: ContextProjectionEnvironment = {
     serializedTools: [],
     workflowSkills: [],
@@ -112,9 +126,32 @@ function prepare(
   mode: 'off' | 'shadow' | 'live',
   options?: Parameters<typeof fixture>[0] & {
     reclaimAfterEstimatedTokens?: number;
+    barrier?: 'interaction' | 'verification';
   },
 ): PreparedContextRequestReadyV2 {
   const base = fixture(options);
+  if (options?.barrier === 'interaction') {
+    base.state.interactions = {
+      kind: 'awaiting_provider_admission',
+      interactionId: 'pending-provider',
+      providerId: 'provider',
+      source: 'project',
+      providerStatus: 'login_required',
+      retryable: true,
+    };
+  }
+  if (options?.barrier === 'verification') {
+    base.state.verification.records.pending = {
+      verificationId: 'pending',
+      mode: 'required',
+      status: 'pending',
+      spec: { checks: [] },
+      requestedAt: new Date(0).toISOString(),
+      attempts: 0,
+      repairAttempts: 0,
+      checkResults: {},
+    } as never;
+  }
   const prepared = prepareContextRequestV2({
     purpose: 'normal',
     ...base,
@@ -182,5 +219,18 @@ describe('context reclaim live preparation', () => {
       kind: 'raw_fallback',
       failure: 'plan_rejected',
     });
+  });
+
+  test('pending interaction and verification are raw MicroCompact barriers', () => {
+    for (const barrier of ['interaction', 'verification'] as const) {
+      const prepared = prepare('live', { contextWindowTokens: 8_000, barrier });
+      expect(prepared.reclaimApplication).toMatchObject({
+        kind: 'raw_fallback',
+        failure: 'ineligible',
+      });
+      expect(prepared.effectiveProjection.providerMessages).toEqual(
+        prepared.rawProjection.providerMessages,
+      );
+    }
   });
 });

@@ -11,6 +11,10 @@ import { createRuntimeEffectExecutor } from '../../src/core/runtime/executor';
 import { classifyFailure } from '../../src/core/runtime/failures';
 import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
 import { runRuntimeLoop } from '../../src/core/runtime/runner';
+import {
+  buildRuntimeEventEnvelopeV24,
+  canonicalRuntimeEventEnvelopeBytesV24,
+} from '../../src/core/runtime/runtime-event-v24';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import {
   createInitialRuntimeState,
@@ -223,7 +227,7 @@ describe('AgentKernel durability', () => {
         checkpoint,
       };
       const store = createRuntimeStore(storePath);
-      store.saveSnapshot(threadId, base);
+      store.saveSnapshot(threadId, { ...base, schemaVersion: 23 });
       store.appendEvents(
         threadId,
         [request],
@@ -248,14 +252,27 @@ describe('AgentKernel durability', () => {
       afterRequest.close();
 
       const tailStore = createRuntimeStore(storePath);
+      const completedEnvelope = buildRuntimeEventEnvelopeV24({
+        threadId,
+        generation: tailStore.loadPersistenceIdentity(threadId).generation,
+        revision: 2,
+        occurredAt: '2026-07-22T00:00:02.000Z',
+        payload: completed,
+      });
       tailStore.appendEvents(
         threadId,
-        [completed],
+        [completedEnvelope.payload],
         [
           {
-            eventId: 'completed-1',
-            revision: 2,
-            occurredAt: '2026-07-22T00:00:02.000Z',
+            eventId: completedEnvelope.eventId,
+            revision: completedEnvelope.revision,
+            occurredAt: completedEnvelope.occurredAt,
+            schemaVersion: 24,
+            generation: completedEnvelope.generation,
+            canonicalBytes: Buffer.byteLength(
+              canonicalRuntimeEventEnvelopeBytesV24(completedEnvelope),
+              'utf8',
+            ),
           },
         ],
       );
@@ -295,8 +312,9 @@ describe('AgentKernel durability', () => {
             typeof message.content === 'string' &&
             message.content.startsWith('<compacted_history>\n'),
         ),
-      ).toHaveLength(1);
-      expect(serializedProjection).toContain('Continue safely.');
+      ).toHaveLength(0);
+      expect(serializedProjection).not.toContain('Continue safely.');
+      expect(serializedProjection).toContain('preserve this transcript');
       afterCompletedSnapshot.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });

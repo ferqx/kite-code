@@ -2,9 +2,12 @@ import { Database } from 'bun:sqlite';
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { RuntimeEvent } from '@/core/runtime/events';
 import { assertRuntimeStateInvariants, RuntimeInvariantError } from '@/core/runtime/invariants';
 import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
+import {
+  buildRuntimeEventEnvelopeV24,
+  canonicalRuntimeEventEnvelopeBytesV24,
+} from '@/core/runtime/runtime-event-v24';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
@@ -32,11 +35,19 @@ describe('Runtime stability invariants', () => {
       initialState: createInitialRuntimeState({ threadId: 'dedupe', userId: 'u', workspace: '/' }),
       interactionMode: 'accept_edits',
     });
-    const event: RuntimeEvent = {
-      type: 'user.message_appended',
-      messageId: 'message-1',
-      content: 'hello',
-    };
+    const occurredAt = new Date(0).toISOString();
+    const event = buildRuntimeEventEnvelopeV24({
+      threadId: 'dedupe',
+      generation: store.loadPersistenceIdentity('dedupe').generation,
+      revision: 1,
+      occurredAt,
+      payload: {
+        type: 'user.message_appended',
+        messageId: 'message-1',
+        content: 'hello',
+        createdAt: occurredAt,
+      },
+    });
 
     expect(kernel.processEvent(event).status).toBe('applied');
     expect(kernel.processEvent(event).status).toBe('duplicate');
@@ -166,20 +177,33 @@ describe('Runtime stability invariants', () => {
       first.close();
 
       const store = createRuntimeStore(storePath);
+      const occurredAt = new Date().toISOString();
+      const envelope = buildRuntimeEventEnvelopeV24({
+        threadId: 'tail-recovery',
+        generation: store.loadPersistenceIdentity('tail-recovery').generation,
+        revision: 2,
+        occurredAt,
+        payload: {
+          type: 'user.message_appended',
+          messageId: 'after-snapshot',
+          content: 'after',
+          createdAt: occurredAt,
+        },
+      });
       store.appendEvents(
         'tail-recovery',
+        [envelope.payload],
         [
           {
-            type: 'user.message_appended',
-            messageId: 'after-snapshot',
-            content: 'after',
-          },
-        ],
-        [
-          {
-            eventId: 'tail-event',
-            revision: 2,
-            occurredAt: new Date().toISOString(),
+            eventId: envelope.eventId,
+            revision: envelope.revision,
+            occurredAt: envelope.occurredAt,
+            generation: envelope.generation,
+            schemaVersion: 24,
+            canonicalBytes: Buffer.byteLength(
+              canonicalRuntimeEventEnvelopeBytesV24(envelope),
+              'utf8',
+            ),
           },
         ],
       );

@@ -47,6 +47,8 @@ export async function invokeBoundModel(params: {
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   providerDataPolicyRequired?: boolean;
   providerDispatchPurpose?: ProviderDispatchPurposeV1;
+  /** Synchronous final guard after data admission and immediately before SDK entry. */
+  beforeProviderDispatch?: () => void;
   /** Test seam for deterministic retry timing; production uses the bounded defaults. */
   streamRetryOptions?: Omit<TransientModelRetryOptions, 'onRetry'>;
 }): Promise<AIMessage> {
@@ -97,6 +99,8 @@ export async function invokeBoundModel(params: {
     providerOptions: params.providerOptions,
     ...(params.maxOutputTokens ? { maxOutputTokens: params.maxOutputTokens } : {}),
   };
+
+  params.beforeProviderDispatch?.();
 
   if (params.streaming) {
     let attemptNumber = 0;

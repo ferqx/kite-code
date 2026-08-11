@@ -2,8 +2,8 @@ import { ProviderDataAdmissionError } from '@/core/config/provider-data-admissio
 import type { CompactionReporter } from '@/core/model/compaction-metrics';
 import {
   ContextCompactionValidationError,
-  expectedCompactionSourceDigest,
   normalizeCompactionSummary,
+  takeContextSummaryProviderUsageV1,
 } from '@/core/model/compaction-summary';
 import { findSafeCompactionBoundary } from '@/core/model/compaction-v2';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
@@ -12,6 +12,8 @@ import {
   type ContextProjectionEnvironment,
   digestProjectionEnvironment,
 } from '@/core/model/context-projection';
+import { selectCheckpointWorkingSetV1 } from '@/core/model/context-working-set';
+import type { ProviderDispatchEntryGuardV1 } from '@/core/model/progressive-context-orchestrator';
 import type {
   ContextCompactionCheckpoint,
   PendingContextCompaction,
@@ -26,7 +28,14 @@ export type ContextCompactor = (input: {
   /** Serialized tool descriptors for candidate projection token estimation.
    *  Resolved fresh at effect time — never from the event or pending state. */
   projectionEnvironment?: ContextProjectionEnvironment;
-}) => Promise<ContextCompactionCheckpoint>;
+  dispatchEntryGuard?: ProviderDispatchEntryGuardV1;
+}) => Promise<
+  | ContextCompactionCheckpoint
+  | {
+      checkpoint: ContextCompactionCheckpoint;
+      providerUsage: { inputTokens: number; outputTokens: number };
+    }
+>;
 
 function failure(
   pending: PendingContextCompaction,
@@ -68,12 +77,21 @@ export async function executeContextCompaction(input: {
   /** Ephemeral progress only. Never persist these phases as RuntimeEvents. */
   onProgress?: (phase: ContextCompactionProgressPhase | undefined) => void;
   reporter?: CompactionReporter;
+  dispatchEntryGuard?: ProviderDispatchEntryGuardV1;
 }): Promise<RuntimeEvent[]> {
   const startedAt = Date.now();
   const elapsed = () => Math.max(0, Date.now() - startedAt);
   const pending = input.state.context.pendingCompaction;
   if (!pending || pending.compactionId !== input.compactionId) return [];
-  if (pending.reason !== 'manual') return [];
+  if (
+    pending.reason === 'auto' &&
+    !(
+      input.state.context.summaryLifecycle.kind === 'started' &&
+      input.state.context.summaryLifecycle.attempt.reason === 'auto' &&
+      input.state.context.summaryLifecycle.attempt.compactionId === pending.compactionId
+    )
+  )
+    return [];
   input.onProgress?.('preparing');
   const sourceRevision = input.state.revision;
   const leasedEnvironment = input.resolveProjectionEnvironment?.() ?? input.projectionEnvironment;
@@ -95,12 +113,20 @@ export async function executeContextCompaction(input: {
 
   try {
     input.onProgress?.('summarizing');
-    const checkpoint = await input.compact({
+    const compacted = await input.compact({
       state: input.state,
       pending,
       sourceRevision,
       projectionEnvironment: leasedEnvironment,
+      dispatchEntryGuard: input.dispatchEntryGuard,
     });
+    const checkpoint = 'checkpoint' in compacted ? compacted.checkpoint : compacted;
+    const providerUsage =
+      'checkpoint' in compacted
+        ? compacted.providerUsage
+        : checkpoint.version === 3
+          ? takeContextSummaryProviderUsageV1(checkpoint)
+          : undefined;
     input.onProgress?.('validating');
     const completedEnvironment = input.resolveProjectionEnvironment?.() ?? leasedEnvironment;
     const completedEnvironmentDigest = completedEnvironment
@@ -121,8 +147,16 @@ export async function executeContextCompaction(input: {
       );
     }
     if (
+      checkpoint.version !== 3 ||
       checkpoint.compactionId !== pending.compactionId ||
-      checkpoint.sourceRevision !== sourceRevision ||
+      (checkpoint.version === 3 &&
+        (checkpoint.source.sourceRevision !==
+          (pending.sourceProducingEventCutV1?.revision ?? sourceRevision) ||
+          (pending.sourceProducingEventCutV1 != null &&
+            (checkpoint.source.sourceProducingEventCutV1.revision !==
+              pending.sourceProducingEventCutV1.revision ||
+              checkpoint.source.sourceProducingEventCutV1.eventId !==
+                pending.sourceProducingEventCutV1.eventId)))) ||
       checkpoint.reason !== pending.reason
     ) {
       return failure(
@@ -136,9 +170,15 @@ export async function executeContextCompaction(input: {
       );
     }
     const coveredMessage = input.state.transcript.messages.find(
-      (message) => message.messageId === checkpoint.coveredThroughMessageId,
+      (message) =>
+        message.messageId ===
+        (checkpoint.version === 3 ? checkpoint.source.coveredThroughMessageId : undefined),
     );
-    if (!coveredMessage || coveredMessage.turnId !== checkpoint.coveredThroughTurnId) {
+    if (
+      checkpoint.version !== 3 ||
+      !coveredMessage ||
+      coveredMessage.turnId !== checkpoint.source.coveredThroughTurnId
+    ) {
       return failure(
         pending,
         sourceRevision,
@@ -155,27 +195,26 @@ export async function executeContextCompaction(input: {
     const boundary = findSafeCompactionBoundary(input.state, {
       protectLatestTurn: input.state.turn.status === 'active' && currentTurnHasMessages,
     });
-    const base = input.state.context.activeCheckpoint;
-    const baseIndex = base
-      ? input.state.transcript.messages.findIndex(
-          (message) => message.messageId === base.coveredThroughMessageId,
-        )
-      : -1;
-    const sourceMessages = base
-      ? boundary.coveredMessages.filter(
-          (message) =>
-            input.state.transcript.messages.findIndex(
-              (candidate) => candidate.messageId === message.messageId,
-            ) > baseIndex,
-        )
-      : boundary.coveredMessages;
+    const base =
+      input.state.context.activeCheckpoint?.version === 3
+        ? input.state.context.activeCheckpoint
+        : undefined;
+    const workingSet = selectCheckpointWorkingSetV1({
+      state: input.state,
+      checkpoint,
+      ...(leasedEnvironmentDigest ? { expectedRouteIdentityDigest: leasedEnvironmentDigest } : {}),
+    });
     if (
       !boundary.eligible ||
-      checkpoint.coveredThroughMessageId !== boundary.lastMessageId ||
-      checkpoint.coveredThroughTurnId !== boundary.coveredThroughTurnId ||
-      (base ? checkpoint.baseCheckpointId !== base.compactionId : checkpoint.baseCheckpointId) ||
-      sourceMessages.length === 0 ||
-      checkpoint.sourceDigest !== expectedCompactionSourceDigest(base?.sourceDigest, sourceMessages)
+      checkpoint.version !== 3 ||
+      checkpoint.source.coveredThroughMessageId !== boundary.lastMessageId ||
+      checkpoint.source.coveredThroughTurnId !== boundary.coveredThroughTurnId ||
+      (base
+        ? checkpoint.baseCheckpoint?.checkpointId !== base.checkpointId ||
+          checkpoint.baseCheckpoint.summaryContentDigest !== base.summaryContentDigest
+        : checkpoint.baseCheckpoint !== undefined) ||
+      boundary.coveredMessages.length === 0 ||
+      workingSet.status !== 'available'
     ) {
       return failure(
         pending,
@@ -188,11 +227,11 @@ export async function executeContextCompaction(input: {
       );
     }
     if (
-      checkpoint.version !== 1 ||
+      checkpoint.version !== 3 ||
       typeof checkpoint.summary !== 'string' ||
       checkpoint.summary.trim().length === 0 ||
       checkpoint.summary !== normalizeCompactionSummary(checkpoint.summary) ||
-      !checkpoint.sourceDigest ||
+      !checkpoint.source.sourceRangeDigest ||
       !Number.isFinite(checkpoint.inputTokensBefore) ||
       !Number.isFinite(checkpoint.inputTokensAfter) ||
       checkpoint.inputTokensBefore <= 0 ||
@@ -215,6 +254,7 @@ export async function executeContextCompaction(input: {
       serializedTools: leasedEnvironment?.serializedTools,
       activeSkillInstructions: leasedEnvironment?.activeSkillInstructions,
       workflowSkills: leasedEnvironment?.workflowSkills,
+      projectionEnvironment: leasedEnvironment,
     };
     const expectedBefore = buildContextProjection(projectionInput).estimate.totalInputTokens;
     const expectedAfter = buildContextProjection({
@@ -266,6 +306,7 @@ export async function executeContextCompaction(input: {
         sourceRevision,
         checkpoint,
         durationMs: elapsed(),
+        ...(providerUsage ? { providerUsage } : {}),
       },
     ];
   } catch (error) {

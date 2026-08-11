@@ -2,21 +2,23 @@ import { createHash } from 'node:crypto';
 import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
 import { humanMessage, systemMessage } from '@/core/messages';
 import type {
-  ContextCompactionCheckpoint,
   ContextCompactionErrorKind,
   PendingContextCompaction,
+  VerifiedContextCheckpointV3,
 } from '@/core/runtime/context-compaction';
 import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
 import { countTokens } from '@/core/token-counter';
 import { normalizeCompactionSummary, serializeCompactionSummary } from './compaction-summary-frame';
+import { digestCompactionSource, findSafeCompactionBoundary } from './compaction-v2';
+import { createVerifiedContextCheckpointV3 } from './context-checkpoint-v3';
 import {
-  digestCompactionSource,
-  findSafeCompactionBoundary,
-  type SafeCompactionBoundary,
-} from './compaction-v2';
-import { buildContextProjection, type ContextProjectionEnvironment } from './context-projection';
+  buildContextProjection,
+  type ContextProjectionEnvironment,
+  digestProjectionEnvironment,
+} from './context-projection';
 import type { SupportedChatModel } from './factory';
 import { invokeBoundModel } from './invoke';
+import type { ProviderDispatchEntryGuardV1 } from './progressive-context-orchestrator';
 
 export { normalizeCompactionSummary, serializeCompactionSummary };
 
@@ -39,12 +41,15 @@ export interface ContextSummaryGenerationRequest {
   systemPrompt: string;
   input: string;
   maxOutputTokens: number;
+  dispatchEntryGuard?: ProviderDispatchEntryGuardV1;
 }
 
 export interface ContextSummaryGenerationResult {
   summary: string;
   finishReason?: string;
   hasToolCalls?: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
 }
 
 export type ContextSummaryGenerator = (
@@ -69,17 +74,54 @@ export function createModelContextSummaryGenerator(input: {
       providerDataAdmission: input.providerDataAdmission,
       providerDataPolicyRequired: input.providerDataPolicyRequired,
       providerDispatchPurpose: 'compaction',
+      ...(request.dispatchEntryGuard
+        ? {
+            beforeProviderDispatch: () => {
+              if (!request.dispatchEntryGuard!.tryEnter()) {
+                throw new ContextCompactionValidationError(
+                  'stale_context',
+                  'Summary dispatch was closed before Provider callback entry.',
+                );
+              }
+            },
+          }
+        : {}),
     });
     const summary =
       typeof response.content === 'string'
         ? response.content
         : response.content.map((block) => ('text' in block ? block.text : '')).join('');
+    const usage = response.response_metadata?.usage as
+      | { input_tokens?: unknown; prompt_tokens?: unknown; completion_tokens?: unknown }
+      | undefined;
     return {
       summary,
       finishReason: String(response.response_metadata?.finishReason ?? ''),
       hasToolCalls: (response.tool_calls?.length ?? 0) > 0,
+      inputTokens:
+        typeof usage?.input_tokens === 'number'
+          ? usage.input_tokens
+          : typeof usage?.prompt_tokens === 'number'
+            ? usage.prompt_tokens
+            : undefined,
+      outputTokens:
+        typeof usage?.completion_tokens === 'number' ? usage.completion_tokens : undefined,
     };
   };
+}
+
+const providerUsageByCheckpointV1 = new WeakMap<
+  VerifiedContextCheckpointV3,
+  { inputTokens: number; outputTokens: number }
+>();
+
+/** One-shot transfer of non-checkpoint Provider accounting to the terminal event builder. */
+export function takeContextSummaryProviderUsageV1(
+  checkpoint: VerifiedContextCheckpointV3,
+): { inputTokens: number; outputTokens: number } | undefined {
+  const usage = providerUsageByCheckpointV1.get(checkpoint);
+  providerUsageByCheckpointV1.delete(checkpoint);
+  return usage;
 }
 
 export class ContextCompactionValidationError extends Error {
@@ -92,6 +134,7 @@ export class ContextCompactionValidationError extends Error {
   }
 }
 
+/** Compatibility-only digest helper for legacy checkpoint-v1 fixtures/readers. */
 export function expectedCompactionSourceDigest(
   baseDigest: string | undefined,
   messages: TranscriptMessage[],
@@ -127,35 +170,6 @@ function normalizeResult(
   return typeof value === 'string' ? { summary: value } : value;
 }
 
-function incrementalBoundary(
-  boundary: SafeCompactionBoundary,
-  state: Readonly<RuntimeState>,
-  checkpoint: ContextCompactionCheckpoint,
-): SafeCompactionBoundary {
-  const checkpointIndex = state.transcript.messages.findIndex(
-    (message) => message.messageId === checkpoint.coveredThroughMessageId,
-  );
-  if (checkpointIndex < 0) {
-    throw new ContextCompactionValidationError(
-      'invalid_candidate',
-      'The active checkpoint boundary is missing from the transcript.',
-    );
-  }
-  const allowed = new Set(boundary.coveredMessages.map((message) => message.messageId));
-  const messages = state.transcript.messages
-    .slice(checkpointIndex + 1)
-    .filter((message) => allowed.has(message.messageId));
-  if (messages.length === 0) return { ...boundary, coveredMessages: [] };
-  return {
-    eligible: true,
-    firstMessageId: messages[0]?.messageId,
-    lastMessageId: messages.at(-1)?.messageId,
-    coveredThroughTurnId: messages.at(-1)?.turnId,
-    protectedMessageIds: boundary.protectedMessageIds,
-    coveredMessages: messages,
-  };
-}
-
 /** Build the sole production compactor: one request producing one Markdown narrative. */
 export function createNarrativeContextCompactor(options: {
   generate: ContextSummaryGenerator;
@@ -180,13 +194,8 @@ export function createNarrativeContextCompactor(options: {
     pending: Readonly<PendingContextCompaction>;
     sourceRevision: number;
     projectionEnvironment?: ContextProjectionEnvironment;
-  }): Promise<ContextCompactionCheckpoint> => {
-    if (input.pending.reason !== 'manual') {
-      throw new ContextCompactionValidationError(
-        'invalid_candidate',
-        'Automatic checkpoint-v1 compaction is no longer supported.',
-      );
-    }
+    dispatchEntryGuard?: ProviderDispatchEntryGuardV1;
+  }): Promise<VerifiedContextCheckpointV3> => {
     // Manual compaction summarizes every settled turn while protecting an
     // in-progress turn that already has transcript messages.
     const currentTurnHasMessages = input.state.transcript.messages.some(
@@ -202,17 +211,18 @@ export function createNarrativeContextCompactor(options: {
       );
     }
 
-    const base = input.state.context.activeCheckpoint;
-    const candidateSource = base ? incrementalBoundary(safe, input.state, base) : safe;
+    const base =
+      input.state.context.activeCheckpoint?.version === 3
+        ? input.state.context.activeCheckpoint
+        : undefined;
     const customInstructions = input.pending.customInstructions?.slice(0, 4_096);
-    const narrativeOnly = base != null && candidateSource.coveredMessages.length === 0;
-    if (narrativeOnly) {
+    if (base?.source.coveredThroughMessageId === safe.lastMessageId) {
       throw new ContextCompactionValidationError(
         'insufficient_reduction',
         'No new messages to compact.',
       );
     }
-    const messages = narrativeOnly ? [] : candidateSource.coveredMessages;
+    const messages = safe.coveredMessages;
     const last = messages.at(-1)!;
     const projectionInput = {
       role: 'agent' as const,
@@ -220,25 +230,42 @@ export function createNarrativeContextCompactor(options: {
       serializedTools: input.projectionEnvironment?.serializedTools,
       activeSkillInstructions: input.projectionEnvironment?.activeSkillInstructions,
       workflowSkills: input.projectionEnvironment?.workflowSkills,
+      projectionEnvironment: input.projectionEnvironment,
     };
     const before = buildContextProjection(projectionInput).estimate.totalInputTokens;
     // Use the smallest valid narrative to calculate an upper bound on possible
     // savings. If even that best case cannot clear the acceptance threshold,
     // a Provider call can only waste time and tokens.
-    const bestCaseCheckpoint: ContextCompactionCheckpoint = {
-      compactionId: input.pending.compactionId,
-      version: 1,
-      sourceRevision: input.sourceRevision,
-      sourceDigest: 'preflight',
-      coveredThroughMessageId: last.messageId!,
-      coveredThroughTurnId: last.turnId!,
-      summary: 'x',
-      inputTokensBefore: before,
-      inputTokensAfter: 0,
-      reason: input.pending.reason,
-      createdAt: new Date(0).toISOString(),
-      ...(base ? { baseCheckpointId: base.compactionId } : {}),
-    };
+    const sourceEventCut =
+      input.pending.sourceProducingEventCutV1 ??
+      (input.state.lastAppliedEventId
+        ? { revision: input.sourceRevision, eventId: input.state.lastAppliedEventId }
+        : undefined);
+    if (!sourceEventCut) {
+      throw new ContextCompactionValidationError(
+        'invalid_candidate',
+        'Summary source has no durable producing event cut.',
+      );
+    }
+    const routeIdentityDigest = digestProjectionEnvironment(
+      input.projectionEnvironment ?? { serializedTools: [], workflowSkills: [] },
+    );
+    const checkpoint = (summary: string, after: number, createdAt: string) =>
+      createVerifiedContextCheckpointV3({
+        state: input.state,
+        checkpointId: `${input.pending.compactionId}:v3`,
+        compactionId: input.pending.compactionId,
+        reason: input.pending.reason,
+        coveredThroughMessageId: last.messageId!,
+        summary,
+        inputTokensBefore: before,
+        inputTokensAfter: after,
+        routeIdentityDigest,
+        sourceProducingEventCutV1: sourceEventCut,
+        createdAt,
+        ...(base ? { baseCheckpoint: base } : {}),
+      });
+    const bestCaseCheckpoint = checkpoint('x', Math.max(0, before - 1), new Date(0).toISOString());
     const bestCaseAfter = buildContextProjection({
       ...projectionInput,
       candidateCheckpoint: bestCaseCheckpoint,
@@ -251,7 +278,7 @@ export function createNarrativeContextCompactor(options: {
       );
     }
     const requestInput = summaryInput({
-      baseSummary: base?.summary,
+      baseSummary: undefined,
       messages,
       customInstructions,
     });
@@ -278,6 +305,7 @@ export function createNarrativeContextCompactor(options: {
           systemPrompt: SUMMARY_SYSTEM_PROMPT,
           input: requestInput,
           maxOutputTokens: maxSummaryTokens,
+          dispatchEntryGuard: input.dispatchEntryGuard,
         }),
       );
     } catch (error) {
@@ -309,23 +337,10 @@ export function createNarrativeContextCompactor(options: {
       );
     }
 
-    const checkpoint: ContextCompactionCheckpoint = {
-      compactionId: input.pending.compactionId,
-      version: 1,
-      sourceRevision: input.sourceRevision,
-      sourceDigest: expectedCompactionSourceDigest(base?.sourceDigest, messages),
-      coveredThroughMessageId: last.messageId!,
-      coveredThroughTurnId: last.turnId!,
-      summary,
-      inputTokensBefore: before,
-      inputTokensAfter: 0,
-      reason: input.pending.reason,
-      createdAt: new Date().toISOString(),
-      ...(base ? { baseCheckpointId: base.compactionId } : {}),
-    };
+    const candidate = checkpoint(summary, Math.max(0, before - 1), new Date().toISOString());
     const after = buildContextProjection({
       ...projectionInput,
-      candidateCheckpoint: checkpoint,
+      candidateCheckpoint: candidate,
     }).estimate.totalInputTokens;
     if (before - after < MINIMUM_REDUCTION_TOKENS) {
       throw new ContextCompactionValidationError(
@@ -333,6 +348,18 @@ export function createNarrativeContextCompactor(options: {
         `Compaction saved ${before - after} tokens; ${MINIMUM_REDUCTION_TOKENS} required.`,
       );
     }
-    return { ...checkpoint, inputTokensAfter: after };
+    const completed = checkpoint(summary, after, new Date().toISOString());
+    if (
+      Number.isSafeInteger(generated.inputTokens) &&
+      generated.inputTokens! >= 0 &&
+      Number.isSafeInteger(generated.outputTokens) &&
+      generated.outputTokens! >= 0
+    ) {
+      providerUsageByCheckpointV1.set(completed, {
+        inputTokens: generated.inputTokens!,
+        outputTokens: generated.outputTokens!,
+      });
+    }
+    return completed;
   };
 }

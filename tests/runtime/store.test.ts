@@ -6,7 +6,14 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { canonicalContextDigestV3 } from '../../src/core/model/context-checkpoint-v3.js';
 import type { RuntimeEvent } from '../../src/core/runtime/events.js';
+import { createAgentKernel } from '../../src/core/runtime/kernel.js';
+import {
+  createZeroResourceUsageV1,
+  LIMITED_RESOURCE_BUDGET_V1,
+} from '../../src/core/runtime/resource-budget.js';
+import { planRuntimeBudgetAdmissionV1 } from '../../src/core/runtime/resource-budget-admission.js';
 import type { RuntimeStore } from '../../src/core/runtime/store.js';
 import {
   createRuntimeStore,
@@ -78,6 +85,12 @@ describe('createRuntimeStore', () => {
 
     expect(tableExists(dbPath, 'runtime_events')).toBe(true);
     expect(tableExists(dbPath, 'runtime_snapshots')).toBe(true);
+    expect(tableExists(dbPath, 'runtime_fence_ledger')).toBe(true);
+    expect(tableExists(dbPath, 'runtime_event_ledgers')).toBe(true);
+    expect(tableExists(dbPath, 'runtime_v24_migration_builds')).toBe(true);
+    expect(tableExists(dbPath, 'runtime_branch_mutation_receipts')).toBe(true);
+    expect(tableExists(dbPath, 'runtime_branch_mutation_completions')).toBe(true);
+    expect(tableExists(dbPath, 'runtime_branch_copied_terminal_closures')).toBe(true);
   });
 
   // 验证事件表创建了 thread_id 索引 / Verify index on runtime_events(thread_id) is created
@@ -93,6 +106,80 @@ describe('createRuntimeStore', () => {
       .get();
     db.close();
     expect(row).not.toBeNull();
+  });
+
+  test('resumes a persisted 4096-row fence-ledger build before installing quota authority', () => {
+    const resumePath = join(tmpDir, 'fence-build-resume.db');
+    const database = new Database(resumePath);
+    database.run('CREATE TABLE runtime_store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    database.run("INSERT INTO runtime_store_meta VALUES ('format_version', '2')");
+    database.run(`
+      CREATE TABLE runtime_thread_fences (
+        thread_id TEXT PRIMARY KEY,
+        generation INTEGER NOT NULL,
+        format TEXT NOT NULL DEFAULT 'v23_compat',
+        write_epoch INTEGER NOT NULL DEFAULT 0,
+        lifecycle TEXT NOT NULL DEFAULT 'active'
+      )
+    `);
+    database.run(`
+      CREATE TABLE runtime_fence_ledger_build (
+        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+        store_format_version INTEGER NOT NULL,
+        expected_count INTEGER NOT NULL,
+        expected_max_rowid INTEGER NOT NULL,
+        processed_count INTEGER NOT NULL,
+        processed_bytes INTEGER NOT NULL,
+        progress_rowid INTEGER NOT NULL,
+        progress_checksum TEXT NOT NULL
+      )
+    `);
+    const insert = database.query(
+      "INSERT INTO runtime_thread_fences VALUES (?, 1, 'v23_compat', 1, 'active')",
+    );
+    database.transaction(() => {
+      for (let index = 1; index <= 5_000; index++) insert.run(`fence-${index}`);
+    })();
+    let progressChecksum = canonicalContextDigestV3('runtime-fence-ledger-build:v1', {
+      storeFormatVersion: 2,
+      expectedCount: 5_000,
+      expectedMaxRowid: 5_000,
+      processedCount: 0,
+      processedBytes: 0,
+      progressRowid: 0,
+      previousChecksum: 'initial',
+    });
+    let processedBytes = 0;
+    for (let index = 1; index <= 4_096; index++) {
+      const threadId = `fence-${index}`;
+      const rowBytes = Buffer.byteLength(threadId, 'utf8') + 64;
+      processedBytes += rowBytes;
+      progressChecksum = canonicalContextDigestV3('runtime-fence-ledger-build-row:v1', {
+        previousChecksum: progressChecksum,
+        rowid: index,
+        threadId,
+        rowBytes,
+      });
+    }
+    database
+      .query('INSERT INTO runtime_fence_ledger_build VALUES (1, 2, 5000, 5000, 4096, ?, 4096, ?)')
+      .run(processedBytes, progressChecksum);
+    database.close();
+
+    const resumed = createRuntimeStore(resumePath);
+    resumed.close();
+    const verifier = new Database(resumePath);
+    expect(
+      verifier
+        .query<{ fence_count: number }, []>('SELECT fence_count FROM runtime_fence_ledger')
+        .get()?.fence_count,
+    ).toBe(5_000);
+    expect(
+      verifier
+        .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM runtime_fence_ledger_build')
+        .get()?.count,
+    ).toBe(0);
+    verifier.close();
   });
 
   // 验证仅内存模式也能正常工作 / Verify in-memory mode works correctly
@@ -193,6 +280,57 @@ describe('createRuntimeStore', () => {
 
     expect(columns).toContain('model_provider');
     expect(columns).toContain('model_name');
+  });
+
+  test('classifies legacy fences as active/deleted and quarantines orphan authority', () => {
+    const seedFence = (path: string, threadId: string) => {
+      const database = new Database(path);
+      database.run('CREATE TABLE runtime_store_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+      database.run("INSERT INTO runtime_store_meta VALUES ('format_version', '2')");
+      database.run(
+        'CREATE TABLE runtime_thread_fences (thread_id TEXT PRIMARY KEY, generation INTEGER NOT NULL)',
+      );
+      database.query('INSERT INTO runtime_thread_fences VALUES (?, 7)').run(threadId);
+      return database;
+    };
+
+    const activePath = join(tmpDir, 'legacy-fence-active.db');
+    const activeSeed = seedFence(activePath, 'legacy-active');
+    activeSeed.run(
+      "CREATE TABLE runtime_sessions (thread_id TEXT PRIMARY KEY, name TEXT NOT NULL DEFAULT '', model_provider TEXT, model_name TEXT, updated_at INTEGER NOT NULL DEFAULT (unixepoch()))",
+    );
+    activeSeed.run("INSERT INTO runtime_sessions (thread_id) VALUES ('legacy-active')");
+    activeSeed.close();
+    const active = createRuntimeStore(activePath);
+    expect(active.loadPersistenceIdentity('legacy-active')).toMatchObject({
+      generation: 7,
+      writeEpoch: 1,
+      format: 'v23_compat',
+      lifecycle: 'active',
+    });
+    active.close();
+
+    const deletedPath = join(tmpDir, 'legacy-fence-deleted.db');
+    seedFence(deletedPath, 'legacy-deleted').close();
+    const deleted = createRuntimeStore(deletedPath);
+    expect(deleted.loadPersistenceIdentity('legacy-deleted')).toMatchObject({
+      generation: 7,
+      writeEpoch: 1,
+      format: 'v23_compat',
+      lifecycle: 'deleted',
+    });
+    deleted.close();
+
+    const orphanPath = join(tmpDir, 'legacy-fence-orphan.db');
+    const orphanSeed = seedFence(orphanPath, 'legacy-orphan');
+    orphanSeed.run(
+      'CREATE TABLE runtime_named_snapshots (thread_id TEXT NOT NULL, name TEXT NOT NULL, event_position INTEGER NOT NULL DEFAULT 0, state_json TEXT NOT NULL, created_at INTEGER DEFAULT (unixepoch()), PRIMARY KEY (thread_id, name))',
+    );
+    orphanSeed.run(
+      "INSERT INTO runtime_named_snapshots (thread_id, name, state_json) VALUES ('legacy-orphan', 'cut', '{}')",
+    );
+    orphanSeed.close();
+    expect(() => createRuntimeStore(orphanPath)).toThrow('orphaned legacy authority');
   });
 });
 
@@ -1385,6 +1523,571 @@ describe('persistence edge cases', () => {
     store.close();
   });
 
+  test('strict-v24 fork uses the selected snapshot as a ledger base without copying parent event ids', () => {
+    const source = createAgentKernel({
+      threadId: 'strict-fork-source',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: dbPath,
+    });
+    source.processEvent({
+      type: 'user.message_appended',
+      messageId: 'source-message',
+      content: 'source',
+    });
+    source.close();
+
+    const store = createRuntimeStore(dbPath);
+    const selected = store.loadSnapshot('strict-fork-source');
+    const sourceIdentity = store.loadPersistenceIdentity('strict-fork-source');
+    store.saveNamedSnapshot(
+      'strict-fork-source',
+      'safe',
+      selected,
+      sourceIdentity.observedHead.eventPosition,
+      sourceIdentity,
+    );
+    expect(store.forkSessionV1('strict-fork-source', 'safe', 'strict-fork-target')).toMatchObject({
+      status: 'committed',
+      targetGeneration: 1,
+    });
+    expect(store.loadEventsStrict('strict-fork-target')).toEqual([]);
+    expect(store.loadSnapshotRecord<{ revision: number }>('strict-fork-target')).toMatchObject({
+      state: { revision: 1 },
+      metadata: { stateRevision: 1, eventPosition: 0, schemaVersion: 24 },
+    });
+    const authority = new Database(dbPath, { readonly: true });
+    expect(
+      authority
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM runtime_branch_mutation_completions WHERE target_thread_id = 'strict-fork-target'",
+        )
+        .get()?.count,
+    ).toBe(1);
+    expect(
+      authority
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM runtime_branch_mutation_receipts WHERE target_thread_id = 'strict-fork-target'",
+        )
+        .get()?.count,
+    ).toBe(0);
+    authority.close();
+    store.close();
+
+    const target = createAgentKernel({
+      threadId: 'strict-fork-target',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: dbPath,
+    });
+    target.processEvent({
+      type: 'user.message_appended',
+      messageId: 'target-message',
+      content: 'target',
+    });
+    expect(target.getState().revision).toBe(2);
+    target.close();
+  });
+
+  test('strict-v24 rewind advances the fence and resumes after a non-zero ledger base', () => {
+    const initial = createAgentKernel({
+      threadId: 'strict-rewind',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: dbPath,
+    });
+    initial.processEvent({
+      type: 'user.message_appended',
+      messageId: 'kept-message',
+      content: 'kept',
+    });
+    initial.close();
+
+    let store = createRuntimeStore(dbPath);
+    const selected = store.loadSnapshot('strict-rewind');
+    const selectedIdentity = store.loadPersistenceIdentity('strict-rewind');
+    store.saveNamedSnapshot(
+      'strict-rewind',
+      'safe',
+      selected,
+      selectedIdentity.observedHead.eventPosition,
+      selectedIdentity,
+    );
+    store.close();
+
+    const advanced = createAgentKernel({
+      threadId: 'strict-rewind',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: dbPath,
+    });
+    advanced.processEvent({
+      type: 'user.message_appended',
+      messageId: 'discarded-message',
+      content: 'discarded',
+    });
+    advanced.close();
+
+    store = createRuntimeStore(dbPath);
+    const generationBefore = store.loadPersistenceIdentity('strict-rewind').generation;
+    expect(store.restoreNamedSnapshotV1('strict-rewind', 'safe')).toMatchObject({
+      status: 'committed',
+      targetGeneration: generationBefore + 1,
+    });
+    const rewound = store.loadPersistenceIdentity('strict-rewind');
+    expect(rewound.generation).toBe(generationBefore + 1);
+    expect(rewound.observedHead.eventPosition).toBe(0);
+    expect(rewound.sourceSnapshot?.stateRevision).toBe(1);
+    store.close();
+
+    const resumed = createAgentKernel({
+      threadId: 'strict-rewind',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: dbPath,
+    });
+    resumed.processEvent({
+      type: 'user.message_appended',
+      messageId: 'replacement-message',
+      content: 'replacement',
+    });
+    expect(resumed.getState().revision).toBe(2);
+    expect(
+      resumed
+        .getState()
+        .transcript.messages.some((message) => message.messageId === 'discarded-message'),
+    ).toBe(false);
+    resumed.close();
+  });
+
+  for (const journalMode of ['wal', 'delete'] as const) {
+    test(`strict-v24 branch lock contention is bounded to 250ms in ${journalMode.toUpperCase()} mode`, () => {
+      const branchPath = join(tmpDir, `branch-contention-${journalMode}.db`);
+      const source = createAgentKernel({
+        threadId: `contention-source-${journalMode}`,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath: branchPath,
+      });
+      source.processEvent({
+        type: 'user.message_appended',
+        messageId: 'source-message',
+        content: 'source',
+      });
+      source.close();
+      const store = createRuntimeStore(branchPath, { journalMode });
+      const threadId = `contention-source-${journalMode}`;
+      const selected = store.loadSnapshot(threadId);
+      const identity = store.loadPersistenceIdentity(threadId);
+      store.saveNamedSnapshot(
+        threadId,
+        'safe',
+        selected,
+        identity.observedHead.eventPosition,
+        identity,
+      );
+      store.loadPersistenceIdentity(`contention-target-${journalMode}`);
+      const locker = new Database(branchPath);
+      locker.run('PRAGMA busy_timeout = 0');
+      locker.run('BEGIN IMMEDIATE');
+      const startedAt = performance.now();
+      expect(store.forkSessionV1(threadId, 'safe', `contention-target-${journalMode}`)).toEqual({
+        status: 'contention_timeout',
+      });
+      expect(performance.now() - startedAt).toBeLessThan(750);
+      locker.run('ROLLBACK');
+      locker.close();
+      expect(store.loadSnapshot(`contention-target-${journalMode}`)).toBeNull();
+      store.close();
+    });
+  }
+
+  test('resolves a lost post-COMMIT branch acknowledgement without reissuing the mutation', () => {
+    const branchPath = join(tmpDir, 'branch-ack-unknown.db');
+    const source = createAgentKernel({
+      threadId: 'ack-source',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: branchPath,
+    });
+    source.processEvent({
+      type: 'user.message_appended',
+      messageId: 'source-message',
+      content: 'source',
+    });
+    source.close();
+    const store = createRuntimeStore(branchPath, {
+      faultInjectionBranchCommitAckUnknown: true,
+    });
+    const selected = store.loadSnapshot('ack-source');
+    const identity = store.loadPersistenceIdentity('ack-source');
+    store.saveNamedSnapshot(
+      'ack-source',
+      'safe',
+      selected,
+      identity.observedHead.eventPosition,
+      identity,
+    );
+    const result = store.forkSessionV1('ack-source', 'safe', 'ack-target');
+    expect(result.status).toBe('commit_ack_unknown');
+    if (result.status !== 'commit_ack_unknown') throw new Error('ACK-unknown result expected');
+    expect(store.resolveBranchMutationCompletionV1(result)).toMatchObject({
+      status: 'already_committed',
+      authority: { completion: { receiptId: result.receiptId } },
+    });
+    const authority = new Database(branchPath, { readonly: true });
+    expect(
+      authority
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM runtime_branch_mutation_completions WHERE target_thread_id = 'ack-target'",
+        )
+        .get()?.count,
+    ).toBe(1);
+    authority.close();
+    store.close();
+  });
+
+  test('enforces the completion ledger at limit and keeps limit-plus-one mutation-free', () => {
+    const branchPath = join(tmpDir, 'branch-completion-quota.db');
+    const source = createAgentKernel({
+      threadId: 'completion-quota',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: branchPath,
+    });
+    source.processEvent({
+      type: 'user.message_appended',
+      messageId: 'source-message',
+      content: 'source',
+    });
+    source.close();
+    const store = createRuntimeStore(branchPath);
+    const selected = store.loadSnapshot('completion-quota');
+    const identity = store.loadPersistenceIdentity('completion-quota');
+    store.saveNamedSnapshot(
+      'completion-quota',
+      'safe',
+      selected,
+      identity.observedHead.eventPosition,
+      identity,
+    );
+    for (let index = 0; index < 1_024; index++) {
+      expect(store.restoreNamedSnapshotV1('completion-quota', 'safe').status).toBe('committed');
+    }
+    const atLimit = store.loadPersistenceIdentity('completion-quota');
+    expect(store.restoreNamedSnapshotV1('completion-quota', 'safe')).toEqual({
+      status: 'resource_saturated',
+    });
+    expect(store.loadPersistenceIdentity('completion-quota')).toEqual(atLimit);
+    const authority = new Database(branchPath, { readonly: true });
+    expect(
+      authority
+        .query<{ rows: number; ledger: number }, []>(
+          `SELECT
+             (SELECT COUNT(*) FROM runtime_branch_mutation_completions WHERE target_thread_id = 'completion-quota') AS rows,
+             (SELECT completion_count FROM runtime_branch_ledgers WHERE target_thread_id = 'completion-quota') AS ledger`,
+        )
+        .get(),
+    ).toEqual({ rows: 1_024, ledger: 1_024 });
+    authority.close();
+    store.close();
+  });
+
+  test('strict-v24 fork closes an in-flight continuation with one quartet and immutable receipt', () => {
+    const source = createAgentKernel({
+      threadId: 'strict-continuation-source',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: dbPath,
+    });
+    const startedAt = new Date();
+    source.processEvent({
+      type: 'resource_budget.configured',
+      runId: 'continuation-run',
+      startedAt: startedAt.toISOString(),
+      deadlineAt: new Date(
+        startedAt.getTime() + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs,
+      ).toISOString(),
+      budget: LIMITED_RESOURCE_BUDGET_V1,
+    });
+    const continuation = {
+      version: 1 as const,
+      turnId: source.getState().turn.turnId,
+      requestedAtRevision: 0,
+      summarySourceIdentity: {
+        version: 1 as const,
+        firstMessageId: 'first',
+        coveredThroughMessageId: 'last',
+        coveredThroughTurnId: source.getState().turn.turnId,
+        canonicalSourceDigest: '1'.repeat(64),
+        sourceProjectionPolicyId: 'checkpoint-v3-source:v1' as const,
+      },
+    };
+    const originReceipt = {
+      version: 1 as const,
+      generation: source.getProducerGeneration(),
+      attemptId: 'attempt',
+      compactionId: 'compaction',
+      continuation,
+      origin: {
+        kind: 'summary_terminal' as const,
+        terminalBatchId: 'terminal',
+        terminalEventId: '2'.repeat(64),
+        resourceTerminalEventId: '3'.repeat(64),
+      },
+    };
+    source.processEvent({ type: 'context.normal_reprepare_required_v1', receipt: originReceipt });
+    const admission = planRuntimeBudgetAdmissionV1(source.getState(), {
+      type: 'call_model',
+      primaryRequestId: 'primary-request',
+      resourceEstimate: { inputTokens: 100, maxOutputTokens: 50 },
+    });
+    if (admission.status !== 'admitted') throw new Error('continuation admission expected');
+    const reserved = admission.preparationEvents.find(
+      (event) => event.type === 'resource_budget.reserved',
+    );
+    if (reserved?.type !== 'resource_budget.reserved') throw new Error('reservation expected');
+    const consumptionKey = {
+      version: 1 as const,
+      generation: source.getProducerGeneration(),
+      consumptionBatchId: 'consumption',
+      attemptId: originReceipt.attemptId,
+      compactionId: originReceipt.compactionId,
+      continuation,
+      originReceipt,
+      primaryEffectLeaseId: 'primary-lease',
+      primaryInvocationId: reserved.reservation.invocationId,
+      primaryRequestId: 'primary-request',
+      resourceReservationId: reserved.reservation.reservationId,
+    };
+    source.processEventBatch([
+      ...admission.preparationEvents.map((event) => ({
+        ...event,
+        normalReprepareConsumptionKey: consumptionKey,
+      })),
+      ...admission.dispatchEvents.map((event) => ({
+        ...event,
+        normalReprepareConsumptionKey: consumptionKey,
+      })),
+      { type: 'context.normal_reprepare_consumed_v1', consumptionKey },
+    ]);
+    source.close();
+
+    const store = createRuntimeStore(dbPath);
+    expect(
+      store.forkCurrentSession('strict-continuation-source', 'strict-continuation-target'),
+    ).toBe(true);
+    expect(
+      store.loadEventsStrict('strict-continuation-target').map((entry) => entry.event.type),
+    ).toEqual([
+      'run.error',
+      'resource_budget.unknown',
+      'turn.aborted',
+      'context.normal_reprepare_consumption_detached_v1',
+    ]);
+    const target = store.loadSnapshot<ReturnType<typeof source.getState>>(
+      'strict-continuation-target',
+    );
+    expect(target?.context.summaryLifecycle).toEqual({ kind: 'idle' });
+    expect(target?.context.lastDetach?.receiptId).toMatch(/^[a-f0-9]{64}$/);
+    expect(target?.turn.status).toBe('aborted');
+    const receiptId = target?.context.lastDetach?.receiptId;
+    if (!receiptId) throw new Error('branch receipt expected');
+    const targetGeneration = store.loadPersistenceIdentity('strict-continuation-target').generation;
+    const branchAuthority = store.loadBranchMutationAuthorityV1(
+      'strict-continuation-target',
+      targetGeneration,
+      receiptId,
+    );
+    expect(branchAuthority?.receipt?.manifest.kind).toBe('in_flight_quartet');
+    expect(branchAuthority?.terminalClosure).toBeUndefined();
+    if (!branchAuthority) throw new Error('branch completion authority expected');
+    const completion = branchAuthority.completion;
+    expect(
+      store.resolveBranchMutationCompletionV1({
+        targetThreadId: completion.targetThreadId,
+        targetGeneration: completion.targetGeneration,
+        receiptId: completion.receiptId,
+        requestDigest: completion.requestDigest,
+        candidateDigest: completion.candidateDigest,
+        manifestDigest: completion.manifestDigest,
+        postSnapshotDigest: completion.postSnapshotDigest,
+      }).status,
+    ).toBe('already_committed');
+    expect(
+      store.resolveBranchMutationCompletionV1({
+        targetThreadId: completion.targetThreadId,
+        targetGeneration: completion.targetGeneration,
+        receiptId: completion.receiptId,
+        requestDigest: '0'.repeat(64),
+        candidateDigest: completion.candidateDigest,
+        manifestDigest: completion.manifestDigest,
+        postSnapshotDigest: completion.postSnapshotDigest,
+      }).status,
+    ).toBe('collision_or_corruption');
+
+    const authority = new Database(dbPath, { readonly: true });
+    expect(
+      authority
+        .query<{ receipts: number; completions: number; closures: number }, []>(
+          `SELECT
+             (SELECT COUNT(*) FROM runtime_branch_mutation_receipts WHERE target_thread_id = 'strict-continuation-target') AS receipts,
+             (SELECT COUNT(*) FROM runtime_branch_mutation_completions WHERE target_thread_id = 'strict-continuation-target') AS completions,
+             (SELECT COUNT(*) FROM runtime_branch_copied_terminal_closures WHERE target_thread_id = 'strict-continuation-target') AS closures`,
+        )
+        .get(),
+    ).toEqual({ receipts: 1, completions: 1, closures: 0 });
+    authority.close();
+    store.close();
+  });
+
+  test('strict-v24 fork retains settled continuation terminals in a target-owned BCTC closure', () => {
+    const source = createAgentKernel({
+      threadId: 'strict-settled-source',
+      userId: 'user',
+      workspace: '/workspace',
+      storePath: dbPath,
+    });
+    const startedAt = new Date();
+    source.processEvent({
+      type: 'resource_budget.configured',
+      runId: 'settled-run',
+      startedAt: startedAt.toISOString(),
+      deadlineAt: new Date(
+        startedAt.getTime() + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs,
+      ).toISOString(),
+      budget: LIMITED_RESOURCE_BUDGET_V1,
+    });
+    const continuation = {
+      version: 1 as const,
+      turnId: source.getState().turn.turnId,
+      requestedAtRevision: 0,
+      summarySourceIdentity: {
+        version: 1 as const,
+        firstMessageId: 'first',
+        coveredThroughMessageId: 'last',
+        coveredThroughTurnId: source.getState().turn.turnId,
+        canonicalSourceDigest: 'a'.repeat(64),
+        sourceProjectionPolicyId: 'checkpoint-v3-source:v1' as const,
+      },
+    };
+    const originReceipt = {
+      version: 1 as const,
+      generation: source.getProducerGeneration(),
+      attemptId: 'settled-attempt',
+      compactionId: 'settled-compaction',
+      continuation,
+      origin: {
+        kind: 'summary_terminal' as const,
+        terminalBatchId: 'summary-terminal',
+        terminalEventId: 'b'.repeat(64),
+        resourceTerminalEventId: 'c'.repeat(64),
+      },
+    };
+    source.processEvent({ type: 'context.normal_reprepare_required_v1', receipt: originReceipt });
+    const admission = planRuntimeBudgetAdmissionV1(source.getState(), {
+      type: 'call_model',
+      primaryRequestId: 'settled-primary-request',
+      resourceEstimate: { inputTokens: 100, maxOutputTokens: 50 },
+    });
+    if (admission.status !== 'admitted') throw new Error('continuation admission expected');
+    const reserved = admission.preparationEvents.find(
+      (event) => event.type === 'resource_budget.reserved',
+    );
+    if (reserved?.type !== 'resource_budget.reserved') throw new Error('reservation expected');
+    const consumptionKey = {
+      version: 1 as const,
+      generation: source.getProducerGeneration(),
+      consumptionBatchId: 'settled-consumption',
+      attemptId: originReceipt.attemptId,
+      compactionId: originReceipt.compactionId,
+      continuation,
+      originReceipt,
+      primaryEffectLeaseId: 'settled-primary-lease',
+      primaryInvocationId: reserved.reservation.invocationId,
+      primaryRequestId: 'settled-primary-request',
+      resourceReservationId: reserved.reservation.reservationId,
+    };
+    source.processEventBatch([
+      ...admission.preparationEvents.map((event) => ({
+        ...event,
+        normalReprepareConsumptionKey: consumptionKey,
+      })),
+      ...admission.dispatchEvents.map((event) => ({
+        ...event,
+        normalReprepareConsumptionKey: consumptionKey,
+      })),
+      { type: 'context.normal_reprepare_consumed_v1', consumptionKey },
+    ]);
+    const terminalBatchId = 'settled-primary-terminal';
+    source.processEventBatch([
+      {
+        type: 'model.responded',
+        messageId: 'settled-response',
+        text: 'settled response',
+        contextEvidence: {
+          version: 2,
+          purpose: 'primary',
+          terminalBatchId,
+          requestId: consumptionKey.primaryRequestId,
+          effectLeaseId: consumptionKey.primaryEffectLeaseId,
+          reservationId: consumptionKey.resourceReservationId,
+          preparedDigest: 'd'.repeat(64),
+          sourceIdentityDigest: 'e'.repeat(64),
+          requestIdentityDigest: 'f'.repeat(64),
+          finalProviderPayloadDigest: '1'.repeat(64),
+          admittedRequestDigest: '2'.repeat(64),
+          reclaimReceiptDigest: 'none',
+        },
+      },
+      {
+        type: 'resource_budget.reconciled',
+        reservationId: consumptionKey.resourceReservationId,
+        terminalBatchId,
+        actual: createZeroResourceUsageV1(),
+      },
+    ]);
+    source.close();
+
+    const store = createRuntimeStore(dbPath);
+    expect(store.forkCurrentSession('strict-settled-source', 'strict-settled-target')).toBe(true);
+    expect(
+      store.loadEventsStrict('strict-settled-target').map((entry) => entry.event.type),
+    ).toEqual(['context.normal_reprepare_consumption_detached_v1']);
+    const target = store.loadSnapshot<ReturnType<typeof source.getState>>('strict-settled-target');
+    const receiptId = target?.context.lastDetach?.receiptId;
+    if (!receiptId) throw new Error('settled branch receipt expected');
+    expect(target?.context.lastDetach?.primaryState).toBe('settled_success');
+    const generation = store.loadPersistenceIdentity('strict-settled-target').generation;
+    const branchAuthority = store.loadBranchMutationAuthorityV1(
+      'strict-settled-target',
+      generation,
+      receiptId,
+    );
+    expect(branchAuthority?.receipt?.manifest.kind).toBe('settled_detach');
+    expect(branchAuthority?.terminalClosure?.terminal.kind).toBe('success');
+    expect(branchAuthority?.terminalClosure?.terminal.envelopes).toHaveLength(5);
+    expect(
+      branchAuthority?.terminalClosure?.terminal.envelopes.every(
+        ({ envelope }) =>
+          envelope.threadId === 'strict-settled-source' &&
+          envelope.generation === source.getProducerGeneration(),
+      ),
+    ).toBe(true);
+    store.close();
+
+    const sourceDelete = createRuntimeStore(dbPath);
+    sourceDelete.deleteSession(
+      'strict-settled-source',
+      sourceDelete.loadPersistenceIdentity('strict-settled-source'),
+    );
+    expect(
+      sourceDelete.loadBranchMutationAuthorityV1('strict-settled-target', generation, receiptId)
+        ?.terminalClosure?.terminal.kind,
+    ).toBe('success');
+    sourceDelete.close();
+  });
+
   test('getNamedSnapshotEntry resolves position and timestamp, null when absent', () => {
     const store = createRuntimeStore(dbPath);
     store.appendEvents('preimg-entry', [makeEvent({ toolCallId: 'a' })]);
@@ -1443,5 +2146,102 @@ describe('persistence edge cases', () => {
     expect(second.listSessions().some((session) => session.threadId === 'cas-thread')).toBe(false);
     first.close();
     second.close();
+  });
+
+  test('rejects metadata-less append against a deleted strict-v24 fence', () => {
+    const store = createRuntimeStore(dbPath);
+    store.saveSnapshot('strict-deleted', { revision: 0, schemaVersion: 24 });
+    store.deleteSession('strict-deleted', store.loadPersistenceIdentity('strict-deleted'));
+
+    expect(() =>
+      store.appendEvents('strict-deleted', [
+        { type: 'user.command_invoked', commandId: 'late', command: '/late' },
+      ]),
+    ).toThrow(RuntimeRevisionConflictError);
+    expect(store.loadEvents('strict-deleted')).toEqual([]);
+    const authority = new Database(dbPath, { readonly: true });
+    expect(
+      authority
+        .query<{ ledger: number; actual: number }, []>(
+          `SELECT
+             (SELECT fence_count FROM runtime_fence_ledger WHERE singleton = 1) AS ledger,
+             (SELECT COUNT(*) FROM runtime_thread_fences) AS actual`,
+        )
+        .get(),
+    ).toEqual({ ledger: 1, actual: 1 });
+    authority.close();
+    expect(store.loadPersistenceIdentity('strict-deleted')).toMatchObject({
+      format: 'v24_strict',
+      lifecycle: 'deleted',
+    });
+    store.close();
+  });
+
+  test('accepts a 256-byte fence row and rejects 257 bytes without changing the ledger', () => {
+    const store = createRuntimeStore(dbPath);
+    const atLimit = 'x'.repeat(192);
+    store.loadPersistenceIdentity(atLimit);
+    const beforeReader = new Database(dbPath, { readonly: true });
+    const before = beforeReader
+      .query<{ count: number; bytes: number }, []>(
+        'SELECT fence_count AS count, fence_bytes AS bytes FROM runtime_fence_ledger WHERE singleton = 1',
+      )
+      .get();
+    beforeReader.close();
+    expect(before).toEqual({ count: 1, bytes: 256 });
+    expect(() => store.loadPersistenceIdentity('y'.repeat(193))).toThrow(
+      'runtime_fence_row_oversized',
+    );
+    const verifier = new Database(dbPath, { readonly: true });
+    expect(
+      verifier
+        .query<{ count: number; bytes: number }, []>(
+          'SELECT fence_count AS count, fence_bytes AS bytes FROM runtime_fence_ledger WHERE singleton = 1',
+        )
+        .get(),
+    ).toEqual(before);
+    verifier.close();
+    store.close();
+  });
+
+  test('rejects oversized rolling and named snapshots before materializing JSON', () => {
+    const store = createRuntimeStore(dbPath);
+    store.saveSnapshot('oversized-snapshot', { revision: 0, schemaVersion: 1 });
+    store.saveNamedSnapshot('oversized-snapshot', 'large', { revision: 0, schemaVersion: 1 });
+    const writer = new Database(dbPath);
+    const oversized = JSON.stringify({ value: 'x'.repeat(32 * 1024 * 1024 + 1) });
+    writer.run('UPDATE runtime_snapshots SET state_json = ? WHERE thread_id = ?', [
+      oversized,
+      'oversized-snapshot',
+    ]);
+    writer.run(
+      'UPDATE runtime_named_snapshots SET state_json = ? WHERE thread_id = ? AND name = ?',
+      [oversized, 'oversized-snapshot', 'large'],
+    );
+    writer.close();
+    expect(store.loadSnapshot('oversized-snapshot')).toBeNull();
+    expect(store.loadNamedSnapshot('oversized-snapshot', 'large')).toBeNull();
+    store.close();
+  });
+
+  test('quarantines a fence-ledger mismatch before creating another thread fence', () => {
+    const store = createRuntimeStore(dbPath);
+    store.loadPersistenceIdentity('fence-a');
+    const attacker = new Database(dbPath);
+    attacker.run('UPDATE runtime_fence_ledger SET fence_count = 0, fence_bytes = 0');
+    attacker.close();
+    expect(() => store.loadPersistenceIdentity('fence-b')).toThrow(
+      'does not match its retained catalog',
+    );
+    const verifier = new Database(dbPath, { readonly: true });
+    expect(
+      verifier
+        .query<{ count: number }, []>(
+          "SELECT COUNT(*) AS count FROM runtime_thread_fences WHERE thread_id = 'fence-b'",
+        )
+        .get()?.count,
+    ).toBe(0);
+    verifier.close();
+    store.close();
   });
 });

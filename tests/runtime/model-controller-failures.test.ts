@@ -109,14 +109,14 @@ test('schema-v22 tail replay rejects an orphan invalid Tool Call', () => {
   ]);
   const persisted = source.loadEvents('invalid-source');
   const target = createRuntimeStore(':memory:');
-  target.saveSnapshot(
-    'invalid-target',
-    createInitialRuntimeState({
+  target.saveSnapshot('invalid-target', {
+    ...createInitialRuntimeState({
       threadId: 'invalid-target',
       userId: 'u',
       workspace: '/workspace',
     }),
-  );
+    schemaVersion: 23,
+  });
   target.appendEvents(
     'invalid-target',
     persisted.slice(0, 2).map((entry) => entry.event),

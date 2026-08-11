@@ -43,6 +43,7 @@ import {
   createUnconfiguredResourceBudgetStateV1,
   type ResourceBudgetRuntimeStateV1,
 } from './resource-budget';
+import { createEmptyRuntimeStorageFormatV24 } from './runtime-storage-v24';
 import type { RunTerminalOutcomeV1 } from './terminal-outcome';
 
 // ── Re-export for convenience ──
@@ -436,7 +437,7 @@ export interface TranscriptState {
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 23;
+export const RUNTIME_STATE_SCHEMA_VERSION = 24;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -481,6 +482,8 @@ export interface RuntimeState {
   tasks: Record<string, TaskState>;
   /** 状态 schema 版本，用于迁移兼容 / Schema version for migration compatibility */
   schemaVersion: number;
+  /** Strict durable event format and bounded prefix proof for schema v24. */
+  storageFormat: import('./runtime-storage-v24').RuntimeStorageFormatV1;
   /** Monotonic revision incremented after each durable event. */
   revision: number;
   /** Last event identity applied by the kernel. */
@@ -592,6 +595,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     phase === 'planning' ? { kind: 'planning_empty' } : { kind: 'building_without_plan' };
   return {
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
+    storageFormat: createEmptyRuntimeStorageFormatV24(),
     revision: 0,
     appliedEventIds: [],
     recoveryState: { kind: 'normal' },
@@ -608,6 +612,8 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
     transcript: { messages: [] },
     context: {
       history: [],
+      summaryLifecycle: { kind: 'idle' },
+      successfulPrimaryOrdinal: 0,
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),
     planning: initialPlanning,

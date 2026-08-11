@@ -22,6 +22,22 @@ const config: AgentConfig = {
   compaction: {},
 };
 
+function addStableSummarySource(state: ReturnType<typeof createInitialRuntimeState>): void {
+  const eventId = 'a'.repeat(64);
+  state.transcript.messages.push({
+    kind: 'user',
+    messageId: 'stable-source-message',
+    turnId: 'settled-source-turn',
+    ordinal: 0,
+    createdAt: '2026-07-20T00:00:00.000Z',
+    content: 'stable source for manual compaction',
+  });
+  state.revision = 1;
+  state.lastAppliedEventId = eventId;
+  state.appliedEventIds = [eventId];
+  state.context.lastTranscriptProducingEventCutV1 = { revision: 1, eventId };
+}
+
 describe('manual context compaction service', () => {
   test('preview/status inspection is read-only and reports a safe historical range', () => {
     const state = createInitialRuntimeState({
@@ -53,10 +69,10 @@ describe('manual context compaction service', () => {
       userId: 'user',
       workspace: '/workspace',
     });
+    addStableSummarySource(state);
     expect(manualContextCompactionEvent({ state, config })).toMatchObject({
-      type: 'context.compaction_requested',
-      reason: 'manual',
-      force: false,
+      type: 'context.summary_requested_v1',
+      attempt: { reason: 'manual', trigger: 'manual_plain' },
     });
   });
 
@@ -66,20 +82,23 @@ describe('manual context compaction service', () => {
       userId: 'user',
       workspace: '/workspace',
     });
+    addStableSummarySource(state);
     const event = manualContextCompactionEvent({
       state,
       config,
       customInstructions: 'focus on auth module changes',
     });
     expect(event).toMatchObject({
-      type: 'context.compaction_requested',
-      reason: 'manual',
-      force: false,
-      customInstructions: 'focus on auth module changes',
+      type: 'context.summary_requested_v1',
+      attempt: {
+        reason: 'manual',
+        trigger: 'manual_custom',
+        customInstructions: 'focus on auth module changes',
+      },
     });
     // No custom instructions → field absent
     const plain = manualContextCompactionEvent({ state, config });
-    expect(plain).not.toHaveProperty('customInstructions');
+    expect(plain).not.toHaveProperty('attempt.customInstructions');
   });
 
   test('manual requests never gain force semantics from a correctness hard block', () => {
@@ -88,6 +107,7 @@ describe('manual context compaction service', () => {
       userId: 'user',
       workspace: '/workspace',
     });
+    addStableSummarySource(state);
     state.context.hardBlock = {
       reason: 'runtime_invariant_violation',
       sourceDigest: 'source',
@@ -95,7 +115,10 @@ describe('manual context compaction service', () => {
       createdAtTurnId: state.turn.turnId,
     };
     const event = manualContextCompactionEvent({ state, config });
-    expect(event).toMatchObject({ reason: 'manual', force: false });
+    expect(event).toMatchObject({
+      type: 'context.summary_requested_v1',
+      attempt: { reason: 'manual', trigger: 'manual_plain' },
+    });
   });
 
   test('keeps context metrics informational and recomputes inspection state', () => {
@@ -156,6 +179,7 @@ describe('manual context compaction service', () => {
       userId: 'user',
       workspace: '/workspace',
     });
+    addStableSummarySource(state);
     const projectionEnvironment = {
       serializedTools: [
         {
@@ -172,11 +196,13 @@ describe('manual context compaction service', () => {
       config,
       projectionEnvironment,
     });
-    expect(event).toMatchObject({ type: 'context.compaction_requested' });
-    if (event?.type !== 'context.compaction_requested') throw new Error('request expected');
-    expect(event.estimate.systemTokens).toBeGreaterThan(0);
-    expect(event.estimate.toolSchemaTokens).toBeGreaterThan(0);
-    expect(event.estimate.totalInputTokens).toBeGreaterThan(event.estimate.transcriptTokens);
+    expect(event).toMatchObject({ type: 'context.summary_requested_v1' });
+    if (event?.type !== 'context.summary_requested_v1') throw new Error('request expected');
+    expect(event.attempt.estimate.systemTokens).toBeGreaterThan(0);
+    expect(event.attempt.estimate.toolSchemaTokens).toBeGreaterThan(0);
+    expect(event.attempt.estimate.totalInputTokens).toBeGreaterThan(
+      event.attempt.estimate.transcriptTokens,
+    );
   });
 
   test('inspection and manual preflight consume one immutable prepared artifact', () => {
@@ -185,6 +211,7 @@ describe('manual context compaction service', () => {
       userId: 'user',
       workspace: '/workspace',
     });
+    addStableSummarySource(state);
     const environment = { serializedTools: [], workflowSkills: [] };
     const capabilities = {
       providerName: 'manual',
@@ -213,9 +240,9 @@ describe('manual context compaction service', () => {
     expect(prepared.next).toEqual({ kind: 'diagnostic_only' });
     expect(report.projection).toBe(prepared.effectiveProjection);
     expect(report.preflight).toBe(prepared.effectiveProjection.preflight);
-    expect(request?.type === 'context.compaction_requested' ? request.estimate : undefined).toBe(
-      prepared.effectiveProjection.estimate,
-    );
+    expect(
+      request?.type === 'context.summary_requested_v1' ? request.attempt.estimate : undefined,
+    ).toBe(prepared.effectiveProjection.estimate);
     expect(state).toEqual(before);
   });
 

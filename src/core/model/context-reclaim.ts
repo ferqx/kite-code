@@ -25,6 +25,8 @@ export interface ReclaimPolicyV1 {
   policyId: 'context-reclaim:v1';
   estimatorId: typeof RECLAIM_ESTIMATOR_ID_V1;
   eligibleTools: readonly ['read_file', 'search_content', 'search_files'];
+  /** Keep the two most recent settled turns before the active turn byte-for-byte raw. */
+  minSettledTurnAge: 2;
 }
 
 export const RECLAIM_POLICY_V1: Readonly<ReclaimPolicyV1> = Object.freeze({
@@ -32,11 +34,14 @@ export const RECLAIM_POLICY_V1: Readonly<ReclaimPolicyV1> = Object.freeze({
   policyId: 'context-reclaim:v1',
   estimatorId: RECLAIM_ESTIMATOR_ID_V1,
   eligibleTools: Object.freeze(['read_file', 'search_content', 'search_files'] as const),
+  minSettledTurnAge: 2,
 });
 
 export type ReclaimEligibilityReasonV1 =
   | 'invalid_pairing'
   | 'current_turn'
+  | 'recent_turn'
+  | 'uncovered_tail'
   | 'missing_identity'
   | 'unsupported_or_mixed_tool'
   | 'unsuccessful_result'
@@ -94,6 +99,12 @@ export interface PlanContextReclaimInputV1 {
   pressure: ContextPressure;
   checkpointBoundary?: string;
   activeTurnId?: string;
+  /**
+   * A checkpoint projection exposes only its uncovered raw tail. That tail is
+   * never eligible for MicroCompact; the verified checkpoint/working-set
+   * selector owns any later overlap decision.
+   */
+  preserveUncoveredTail?: boolean;
 }
 
 export type ReclaimApplicationV1 =
@@ -112,6 +123,18 @@ export type ReclaimApplicationV1 =
 
 const ELIGIBLE_TOOL_NAMES = new Set<string>(RECLAIM_POLICY_V1.eligibleTools);
 const DIGEST_PATTERN = /^[a-f0-9]{64}$/i;
+
+function recentSettledTurnIds(input: PlanContextReclaimInputV1): ReadonlySet<string> {
+  const ordered: string[] = [];
+  const seen = new Set<string>();
+  for (const frame of input.frames) {
+    const turnId = 'turnId' in frame ? frame.turnId : undefined;
+    if (!turnId || turnId === input.activeTurnId || seen.has(turnId)) continue;
+    seen.add(turnId);
+    ordered.push(turnId);
+  }
+  return new Set(ordered.slice(-RECLAIM_POLICY_V1.minSettledTurnAge));
+}
 
 function digest(value: unknown): string {
   const output = createHash('sha256');
@@ -288,8 +311,10 @@ function assistantCallMatches(frame: ToolCallBlockFrame, call: FrameToolResult):
 function blockRejectionReason(
   frame: ToolCallBlockFrame,
   input: PlanContextReclaimInputV1,
+  recentTurnIds: ReadonlySet<string>,
 ): ReclaimEligibilityReasonV1 | undefined {
   if (input.activeTurnId && frame.turnId === input.activeTurnId) return 'current_turn';
+  if (input.preserveUncoveredTail) return 'uncovered_tail';
   if (!frame.assistantMessageId || !frame.turnId) return 'missing_identity';
   if (frame.calls.length === 0 || frame.calls.some((call) => !ELIGIBLE_TOOL_NAMES.has(call.name))) {
     return 'unsupported_or_mixed_tool';
@@ -325,6 +350,7 @@ function blockRejectionReason(
     return 'model_content_digest_mismatch';
   }
   if (frame.calls.some((call) => !hasStableLocator(call))) return 'missing_locator';
+  if (recentTurnIds.has(frame.turnId)) return 'recent_turn';
   if (
     frame.calls.some((call) => {
       const stub = reclaimStubV1({
@@ -380,6 +406,7 @@ function planContextReclaimCore(
   let estimatedSavedChars = 0;
   let estimatedSavedTokens = 0;
   let selectedBlockCount = 0;
+  const recentTurnIds = recentSettledTurnIds(input);
 
   try {
     if (!options) {
@@ -413,7 +440,7 @@ function planContextReclaimCore(
   for (let frameIndex = 0; frameIndex < input.frames.length; frameIndex++) {
     const frame = input.frames[frameIndex]!;
     if (!isToolCallBlockFrame(frame)) continue;
-    const rejection = blockRejectionReason(frame, input);
+    const rejection = blockRejectionReason(frame, input, recentTurnIds);
     if (rejection) {
       incrementReason(rejectionCounts, rejection);
       continue;

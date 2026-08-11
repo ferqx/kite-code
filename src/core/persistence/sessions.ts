@@ -153,7 +153,7 @@ export async function persistSessionName(
 export async function deleteSession(checkpointPath: string, threadId: string): Promise<void> {
   const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
   try {
-    store.deleteSession(threadId);
+    store.deleteSession(threadId, store.loadPersistenceIdentity(threadId));
   } finally {
     store.close();
   }

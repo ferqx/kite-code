@@ -101,15 +101,15 @@ telemetry 也全部关闭。production composition 必须携带 registry 接受�
 
 | 开关 | 默认值 | 职责 |
 | --- | --- | --- |
-| `contextCompactionV2` | `true` | 启用 checkpoint 术语（检查点）、统一投影与压缩基础契约 |
-| `contextCompactionAutoV1` | `false` | 仅保留配置解析兼容；当前无自动压缩 producer，开启也不能进入 `shadow` 或 `live` |
-| `contextCompactionManualV1` | `true` | 允许 `/compact` 产生 `manual` |
+| `contextCompactionV2` | `true` | 启用既有 checkpoint、统一投影与手动 Summary 基础契约；strict-v24/V3 仍未资格化 |
+| `contextCompactionAutoV1` | `false` | 实现与本地资格 Gate 已通过；保持默认关闭，等待独立 rollout/default-on 决策 |
+| `contextCompactionManualV1` | `true` | 允许既有 `/compact` 手动兼容路径；不能据此声明 strict-v24 资源协议 |
 | `toolResultBudgetV2` | `false` | 启用全工具有限 L1 V2 projector、receipt 与自包含 verified terminal；关闭时保持 `compat_v1` 模型可见字节 |
 | `contextReclaimV1` | `false` | 允许 `compaction.reclaimMode` 进入 `shadow` 或受控 `live`；effective live 还要求 `toolResultBudgetV2=true` |
 
-压缩原因 schema 为迁移兼容仍接受 `manual | auto`，但当前 producer 只生成 `manual`。`autoMode` 的
-`off | shadow | live` 值继续通过配置解析，以免旧配置变成启动错误；旧 decision/rollout 已删除，任何取值都不
-调度自动 summary、不写 checkpoint。未来自动行为必须由新 orchestrator 明确接线。
+压缩原因 schema 接受 `manual | auto`。`autoMode` 的 `off | shadow | live` 值继续通过配置解析，但旧
+decision/rollout 已删除；新的 90% progressive auto 路线仍在候选实现阶段。P1 清零与独立 rollout 决定之前，任何
+配置都不能把它表述为 production-supported。
 
 工具结果 reclaim 与自动 summary 是两个独立控制面。`compaction.reclaimMode` 的配置 schema 允许
 `off | shadow | live`，未配置、`contextReclaimV1=false` 或 `toolResultBudgetV2=false` 时 effective mode 恒为

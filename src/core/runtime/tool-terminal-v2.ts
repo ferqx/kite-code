@@ -533,6 +533,7 @@ export function validateRestoredTerminalStateV2(
   state: RuntimeState,
   cutoverEventPosition: number,
   persistedEvents: readonly { id: number; event: RuntimeEvent }[],
+  options: { allowBranchNormalizedLegacyBase?: boolean } = {},
 ): void {
   const messagesByCall = new Map<
     string,
@@ -571,17 +572,19 @@ export function validateRestoredTerminalStateV2(
         !isSupportedLegacySchemaVersionV22(migration.migratedFromSchemaVersion) ||
         !Number.isInteger(migration.originalEventPosition) ||
         migration.originalEventPosition <= 0 ||
-        migration.originalEventPosition > cutoverEventPosition ||
+        (migration.originalEventPosition > cutoverEventPosition &&
+          !options.allowBranchNormalizedLegacyBase) ||
         messageMeta.digestScope !== 'legacy_unknown' ||
         messageMeta.toolResultReceipt !== undefined ||
         messageMeta.terminalIdentity !== undefined ||
         !messageMeta.terminalKind ||
-        !source ||
-        !expectation ||
-        expectation.terminalKind !== messageMeta.terminalKind ||
-        expectation.status !== call.status ||
-        expectation.ok !== call.result.ok ||
-        expectation.ok !== message.ok
+        ((!source || !expectation) && !options.allowBranchNormalizedLegacyBase) ||
+        (source &&
+          expectation &&
+          (expectation.terminalKind !== messageMeta.terminalKind ||
+            expectation.status !== call.status ||
+            expectation.ok !== call.result.ok ||
+            expectation.ok !== message.ok))
       ) {
         throw new Error(`Schema-v22 legacy tool '${toolCallId}' has invalid migration provenance.`);
       }

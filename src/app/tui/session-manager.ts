@@ -18,12 +18,18 @@ import { contextCompactionTerminalNotice } from '@/core/model/context-compaction
 import type { ContextStatusSnapshot } from '@/core/model/context-status';
 import { createChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
+import {
+  createManualSummaryPreReservationDeniedEventV1,
+  createSummaryStartBatchKeyV1,
+  ProviderDispatchEntryGuardV1,
+} from '@/core/model/progressive-context-orchestrator';
 import type { RuntimeUserAction } from '@/core/runtime/actions';
 import {
   type RunRuntimeAgentInput,
   type RuntimeKernelControl,
   runRuntimeAgent,
 } from '@/core/runtime/agent';
+import { executeForkBranchMutationV1 } from '@/core/runtime/branch-mutation-v1';
 import type { RuntimeEffect } from '@/core/runtime/effects';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import {
@@ -31,6 +37,11 @@ import {
   resolveRuntimeContextProjectionEnvironment,
 } from '@/core/runtime/executor';
 import { createAgentKernel } from '@/core/runtime/kernel';
+import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
+import {
+  finalizeRuntimeEffectTerminalBatchV1,
+  planRuntimeBudgetAdmissionV1,
+} from '@/core/runtime/resource-budget-admission';
 import type { RuntimeActionProvider } from '@/core/runtime/runner';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import type { RuntimeState } from '@/core/runtime/state';
@@ -1335,7 +1346,12 @@ export class SessionManager {
     const targetThreadId = `tui-${Date.now().toString(36)}-recovery-${SessionManager.sessionCounter++}`;
     const store = createRuntimeStore(runtimeStorePathFor(this.deps.checkpointPath));
     try {
-      if (!store.forkCurrentSession(threadId, targetThreadId)) return undefined;
+      const committed =
+        store.loadPersistenceIdentity(threadId).format === 'v24_strict'
+          ? executeForkBranchMutationV1(store, threadId, '__runtime_current__', targetThreadId)
+              .status === 'committed'
+          : store.forkCurrentSession(threadId, targetThreadId);
+      if (!committed) return undefined;
     } finally {
       store.close();
     }
@@ -1559,30 +1575,9 @@ export class SessionManager {
         status.coveredThroughMessageId &&
         status.safeBoundary.lastMessageId === status.coveredThroughMessageId
       ) {
-        const compactId = crypto.randomUUID();
-        const reqEvent: RuntimeEvent = {
-          type: 'context.compaction_requested',
-          compactionId: compactId,
-          reason: 'manual',
-          requestedAtRevision: state.revision,
-          requestedAtTurnId: state.turn.turnId,
-          force: false,
-          estimate: status.preflight.estimate,
-        };
-        processEvent(reqEvent);
-        const failedEvent: RuntimeEvent = {
-          type: 'context.compaction_failed',
-          compactionId: compactId,
-          sourceRevision: state.revision,
-          errorKind: 'unsafe_boundary',
-          message: 'No new messages to compact.',
-          retryable: false,
-        };
-        processEvent(failedEvent);
-        return {
-          events: [reqEvent, failedEvent],
-          text: 'No new messages to compact.',
-        };
+        // The command event already persisted the requested user action. No
+        // Summary attempt or resource reservation is created for this no-op.
+        return { events: [], text: 'No new messages to compact.' };
       }
 
       const event = manualContextCompactionEvent({
@@ -1592,11 +1587,35 @@ export class SessionManager {
         capabilities,
         projectionEnvironment,
         preparedContextV2,
-      }) as Extract<RuntimeEvent, { type: 'context.compaction_requested' }> | null;
+      }) as
+        | Extract<RuntimeEvent, { type: 'context.compaction_requested' }>
+        | Extract<RuntimeEvent, { type: 'context.summary_requested_v1' }>
+        | null;
       if (!event) {
         return {
           events: [],
-          text: 'A context compaction request is already pending.',
+          text:
+            state.context.summaryLifecycle.kind === 'idle'
+              ? 'No safe messages to compact.'
+              : 'A context compaction request is already pending.',
+        };
+      }
+      if (state.resourceBudget.status === 'unconfigured') {
+        const startedAt = new Date();
+        processEvent({
+          type: 'resource_budget.configured',
+          runId: crypto.randomUUID(),
+          startedAt: startedAt.toISOString(),
+          deadlineAt: new Date(
+            startedAt.getTime() + LIMITED_RESOURCE_BUDGET_V1.maxRunDurationMs,
+          ).toISOString(),
+          budget: LIMITED_RESOURCE_BUDGET_V1,
+        });
+      } else if (state.resourceBudget.status !== 'active') {
+        return {
+          events: [],
+          text: 'Context compaction cannot start from an incompatible resource ledger.',
+          isError: true,
         };
       }
       processEvent(event);
@@ -1606,7 +1625,11 @@ export class SessionManager {
           text: 'Compaction queued; it will run after the current interaction reaches a settled boundary.',
         };
       }
-      const produced = await executeManualCompaction(event.compactionId);
+      const produced = await executeManualCompaction(
+        event.type === 'context.summary_requested_v1'
+          ? event.attempt.compactionId
+          : event.compactionId,
+      );
       if (!produced) {
         return {
           events: [event],
@@ -1614,7 +1637,9 @@ export class SessionManager {
         };
       }
       const completed = produced.find(
-        (candidate) => candidate.type === 'context.compaction_completed',
+        (candidate) =>
+          candidate.type === 'context.compaction_completed' ||
+          candidate.type === 'context.summary_completed_v1',
       );
       const failed = produced.find((candidate) => candidate.type === 'context.compaction_failed');
       if (completed?.type === 'context.compaction_completed') {
@@ -1624,6 +1649,17 @@ export class SessionManager {
           text: notice.message,
         };
       }
+      if (completed?.type === 'context.summary_completed_v1') {
+        return {
+          events: [event, ...produced],
+          text: `Context compacted: ${completed.checkpoint.inputTokensBefore} → ${completed.checkpoint.inputTokensAfter} tokens.`,
+        };
+      }
+      const summaryFailed = produced.find(
+        (candidate) =>
+          candidate.type === 'context.summary_failed_v1' ||
+          candidate.type === 'context.summary_unknown_external_outcome_v1',
+      );
       const notice =
         failed?.type === 'context.compaction_failed'
           ? contextCompactionTerminalNotice(failed)
@@ -1631,9 +1667,13 @@ export class SessionManager {
       return {
         events: [event, ...produced],
         text:
-          notice?.message ??
-          'Compaction queued; it will run when the Runtime reaches a safe boundary.',
-        ...(notice?.isError ? { isError: true } : {}),
+          summaryFailed?.type === 'context.summary_failed_v1'
+            ? summaryFailed.message
+            : summaryFailed?.type === 'context.summary_unknown_external_outcome_v1'
+              ? 'The Summary outcome is unknown and requires resource reconciliation.'
+              : (notice?.message ??
+                'Compaction queued; it will run when the Runtime reaches a safe boundary.'),
+        ...(summaryFailed || notice?.isError ? { isError: true } : {}),
       };
     };
 
@@ -1675,10 +1715,23 @@ export class SessionManager {
           kernel.processEvent(event);
         },
         async () => {
-          const scheduled = decideNextEffect(kernel.getState());
-          const pending = kernel.getState().context.pendingCompaction;
-          const effect =
-            pending?.reason === 'manual'
+          const current = kernel.getState();
+          const scheduled = decideNextEffect(current);
+          const pending = current.context.pendingCompaction;
+          const requestedSummary =
+            current.context.summaryLifecycle.kind === 'requested'
+              ? current.context.summaryLifecycle.attempt
+              : undefined;
+          const effect = requestedSummary
+            ? {
+                type: 'compact_context' as const,
+                compactionId: requestedSummary.compactionId,
+                resourceEstimate: {
+                  inputTokens: requestedSummary.estimate.totalInputTokens,
+                  maxOutputTokens: 6_000,
+                },
+              }
+            : pending?.reason === 'manual'
               ? {
                   type: 'compact_context' as const,
                   compactionId: pending?.compactionId ?? '',
@@ -1715,9 +1768,67 @@ export class SessionManager {
                 })
               : undefined,
           });
-          const lease = kernel.beginEffect(effect);
-          const events = await executor(effect, kernel.getState());
-          return kernel.applyEffectResult(lease, events) ? events : [];
+          const admission = planRuntimeBudgetAdmissionV1(kernel.getState(), effect);
+          if (admission.status !== 'admitted') {
+            const denied = createManualSummaryPreReservationDeniedEventV1({
+              state: kernel.getState(),
+              message: `Summary resource admission was denied: ${admission.reason}.`,
+            });
+            kernel.processEvent(denied);
+            return [denied];
+          }
+          const lease = kernel.beginEffect(admission.effect);
+          const reservationId = admission.reservationIds[0];
+          if (!reservationId || admission.reservationIds.length !== 1) {
+            throw new Error('Manual Summary requires one exact resource reservation.');
+          }
+          const startBatchKey = createSummaryStartBatchKeyV1({
+            state: kernel.getState(),
+            effectLeaseId: lease.effectId,
+            resourceReservationId: reservationId,
+            expectedMaxOutputTokens: effect.resourceEstimate?.maxOutputTokens ?? 6_000,
+          });
+          const startEvents: RuntimeEvent[] = [
+            ...admission.preparationEvents,
+            ...admission.dispatchEvents,
+          ].map(
+            (candidate): RuntimeEvent =>
+              candidate.type === 'resource_budget.reserved' ||
+              candidate.type === 'resource_budget.dispatch_started'
+                ? { ...candidate, summaryStartBatchKey: startBatchKey }
+                : candidate,
+          );
+          startEvents.push({
+            type: 'context.summary_dispatch_started_v1',
+            attemptId: startBatchKey.attemptId,
+            startBatchKey,
+          });
+          if (!kernel.applyEffectResult(lease, startEvents)) return [];
+          const dispatchGuard = new ProviderDispatchEntryGuardV1();
+          kernel.registerSummaryDispatchEntryGuard(lease, dispatchGuard);
+          const result = await executor(admission.effect, kernel.getState(), undefined, {
+            effectLeaseId: lease.effectId,
+            producerGeneration: kernel.getProducerGeneration(),
+            summaryDispatchEntryGuard: dispatchGuard,
+            reservationIds: admission.reservationIds,
+            getState: () => kernel.getState(),
+            persistEvent: async (candidate) => {
+              kernel.processEvent(candidate);
+              return true;
+            },
+            persistEvents: async (candidates) => {
+              kernel.processEventBatch(candidates);
+              return true;
+            },
+          });
+          const terminal = finalizeRuntimeEffectTerminalBatchV1(
+            kernel.getState(),
+            admission.reservationIds,
+            result,
+          );
+          return kernel.applyEffectResult(lease, terminal)
+            ? [...startEvents, ...terminal]
+            : startEvents;
         },
       );
     } finally {

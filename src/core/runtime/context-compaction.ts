@@ -1,4 +1,12 @@
+import { createHash } from 'node:crypto';
 import type { ContextTokenEstimate } from '@/core/model/context-budget';
+
+function summaryContentDigestV3(summary: string): string {
+  return createHash('sha256')
+    .update('checkpoint-summary:v3\0')
+    .update(JSON.stringify(summary))
+    .digest('hex');
+}
 
 export type ContextCompactionReason = 'manual' | 'auto';
 
@@ -43,7 +51,222 @@ export interface ContextCompactionCheckpointV1 {
   baseCheckpointId?: string;
 }
 
-export type ContextCompactionCheckpoint = ContextCompactionCheckpointV1;
+export interface SummarySourceIdentityV1 {
+  version: 1;
+  firstMessageId: string;
+  coveredThroughMessageId: string;
+  coveredThroughTurnId: string;
+  canonicalSourceDigest: string;
+  sourceProjectionPolicyId: string;
+}
+
+export interface NormalCompactionContinuationV1 {
+  turnId: string;
+  requestedAtRevision: number;
+  summarySourceIdentity: SummarySourceIdentityV1;
+}
+
+export interface AutoSummaryCooldownV1 {
+  version: 1;
+  lastAttemptSourceIdentity: SummarySourceIdentityV1;
+  successfulPrimaryOrdinalAtAttempt: number;
+  nextEligibleSuccessfulPrimaryOrdinal: number;
+}
+
+export interface SummaryAttemptV1 {
+  attemptId: string;
+  compactionId: string;
+  reason: ContextCompactionReason;
+  trigger: 'manual_plain' | 'manual_custom' | 'auto_pressure';
+  summarySourceIdentity: SummarySourceIdentityV1;
+  requestedAtRevision: number;
+  requestedAtTurnId: string;
+  sourceProducingEventCutV1: { revision: number; eventId: string };
+  estimate: ContextTokenEstimate;
+  customInstructions?: string;
+}
+
+export interface SummaryStartBatchKeyV1 {
+  startBatchId: string;
+  attemptId: string;
+  compactionId: string;
+  summarySourceIdentity: SummarySourceIdentityV1;
+  requestedAtRevision: number;
+  requestedAtTurnId: string;
+  sourceProducingEventCutV1: { revision: number; eventId: string };
+  dispatchStart: {
+    startBatchId: string;
+    summaryEffectLeaseId: string;
+    resourceReservationId: string;
+    preparedSummaryRequestIdentity: string;
+    requestId: string;
+    expectedPayloadDigest: string;
+    expectedMaxOutputTokens: number;
+    expectedToolSetSchemaDigest: string;
+  };
+}
+
+export interface SummaryStartedReceiptV1 {
+  version: 1;
+  requestedEventId: string;
+  resourceReservedEventId: string;
+  resourceDispatchStartedEventId: string;
+  summaryDispatchStartedEventId: string;
+}
+
+export interface SummaryTerminalBatchKeyV1 {
+  terminalBatchId: string;
+  causationId: string;
+  resourceDispatchCausationId?: string;
+  attemptId: string;
+  compactionId: string;
+  summarySourceIdentity: SummarySourceIdentityV1;
+  requestedAtRevision: number;
+  requestedAtTurnId: string;
+  sourceProducingEventCutV1: { revision: number; eventId: string };
+  dispatchStart?: SummaryStartBatchKeyV1['dispatchStart'];
+  admission:
+    | {
+        stage: 'not_completed';
+        proof: {
+          kind: 'prepared_dispatch_not_entered_v1';
+          guardNonce: string;
+          producerGeneration: number;
+          summaryStartBatchId: string;
+        };
+      }
+    | { stage: 'denied'; proof: 'local_provider_admission_denied' }
+    | {
+        stage: 'admitted';
+        evidence: {
+          admittedRequestDigest: string;
+          finalPayloadDigest: string;
+          providerDataAdmissionReceiptDigest: string;
+          finalMaxOutputTokens: number;
+          finalToolSetSchemaDigest: string;
+        };
+      }
+    | { stage: 'indeterminate_after_crash' };
+}
+
+export interface SummaryResolutionBatchKeyV1 {
+  version: 1;
+  resolutionBatchId: string;
+  causationId: string;
+  generation: number;
+  attemptId: string;
+  compactionId: string;
+  originalTerminalBatchId: string;
+  resourceReservationId: string;
+  resourceUnknownEventId: string;
+  continuation: NormalCompactionContinuationV1;
+  actualUsageDigest: string;
+}
+
+export interface NormalReprepareReceiptV1 {
+  version: 1;
+  generation: number;
+  attemptId: string;
+  compactionId: string;
+  continuation: NormalCompactionContinuationV1;
+  origin:
+    | {
+        kind: 'summary_terminal';
+        terminalBatchId: string;
+        terminalEventId: string;
+        resourceTerminalEventId: string;
+      }
+    | {
+        kind: 'late_resolution';
+        originalTerminalBatchId: string;
+        resolutionBatchId: string;
+        resourceUnknownEventId: string;
+        resourceReconciledEventId: string;
+      };
+}
+
+export interface NormalReprepareConsumptionKeyV1 {
+  version: 1;
+  generation: number;
+  consumptionBatchId: string;
+  attemptId: string;
+  compactionId: string;
+  continuation: NormalCompactionContinuationV1;
+  originReceipt: NormalReprepareReceiptV1;
+  primaryEffectLeaseId: string;
+  primaryInvocationId: string;
+  primaryRequestId: string;
+  resourceReservationId: string;
+}
+
+export interface NormalReprepareConsumptionDetachReceiptV1 {
+  version: 1;
+  receiptId: string;
+  sourceThreadId: string;
+  targetThreadId: string;
+  sourceGeneration: number;
+  targetGeneration: number;
+  selectedCutDigest: string;
+  consumption: NormalReprepareConsumptionKeyV1;
+  primaryState: 'in_flight' | 'settled_success' | 'settled_error_terminal';
+  runErrorEventId?: string;
+  resourceTerminalEventId?: string;
+  turnAbortedEventId?: string;
+  checksum: string;
+}
+
+export type SummaryLifecycleStateV1 =
+  | { kind: 'idle'; lastConsumption?: NormalReprepareConsumptionKeyV1 }
+  | {
+      kind: 'requested';
+      attempt: SummaryAttemptV1;
+      continuation?: NormalCompactionContinuationV1;
+      requestedEventId?: string;
+    }
+  | {
+      kind: 'started';
+      attempt: SummaryAttemptV1;
+      startBatchKey: SummaryStartBatchKeyV1;
+      startedReceipt?: SummaryStartedReceiptV1;
+      continuation?: NormalCompactionContinuationV1;
+    }
+  | {
+      kind: 'resource_resolution_required';
+      attempt: SummaryAttemptV1;
+      terminalBatchKey: SummaryTerminalBatchKeyV1;
+      continuation: NormalCompactionContinuationV1;
+      resourceReservationId: string;
+      resourceUnknownEventId: string;
+    }
+  | { kind: 'normal_reprepare_required'; receipt: NormalReprepareReceiptV1 };
+
+export interface VerifiedContextCheckpointV3 {
+  version: 3;
+  checkpointId: string;
+  compactionId: string;
+  reason: ContextCompactionReason;
+  source: {
+    firstMessageId: string;
+    coveredThroughMessageId: string;
+    coveredThroughTurnId: string;
+    sourceRevision: number;
+    sourceProducingEventCutV1: { revision: number; eventId: string };
+    sourceRangeDigest: string;
+    sourceProjectionPolicyId: string;
+  };
+  summary: string;
+  summaryContentDigest: string;
+  inputTokensBefore: number;
+  inputTokensAfter: number;
+  promptContractId: string;
+  routeIdentityDigest: string;
+  baseCheckpoint?: { checkpointId: string; summaryContentDigest: string };
+  createdAt: string;
+}
+
+export type ContextCompactionCheckpoint =
+  | ContextCompactionCheckpointV1
+  | VerifiedContextCheckpointV3;
 
 export interface PendingContextCompaction {
   compactionId: string;
@@ -52,6 +275,7 @@ export interface PendingContextCompaction {
   requestedAtTurnId: string;
   /** Reserved compatibility field; all current requests use false. */
   force: boolean;
+  sourceProducingEventCutV1?: { revision: number; eventId: string };
   estimate: ContextTokenEstimate;
   /** Optional user-supplied instructions for the summary model. */
   customInstructions?: string;
@@ -133,6 +357,14 @@ export interface ContextRuntimeState {
   lastReclaimReceipt?: import('@/core/model/context-reclaim-commit').ContextReclaimAppliedReceiptV1;
   /** Transient only while replaying/applying one closed primary terminal batch. */
   pendingPrimaryReclaim?: import('@/core/model/context-reclaim-commit').ContextPrimaryRequestEvidenceV2;
+  summaryLifecycle: SummaryLifecycleStateV1;
+  successfulPrimaryOrdinal: number;
+  autoSummaryCooldown?: AutoSummaryCooldownV1;
+  projectionBaseIdentity?: string;
+  /** Last durable event that appended canonical transcript messages. */
+  lastTranscriptProducingEventCutV1?: { revision: number; eventId: string };
+  /** Historical audit only; never grants current continuation ownership. */
+  lastDetach?: NormalReprepareConsumptionDetachReceiptV1;
 }
 
 /**
@@ -142,7 +374,8 @@ export interface ContextRuntimeState {
 export function normalizeContextRuntimeState(
   context: ContextRuntimeState | undefined,
 ): ContextRuntimeState {
-  if (!context) return { history: [] };
+  if (!context)
+    return { history: [], summaryLifecycle: { kind: 'idle' }, successfulPrimaryOrdinal: 0 };
 
   const normalizeCheckpoint = (
     checkpoint: ContextCompactionCheckpoint | undefined,
@@ -151,11 +384,6 @@ export function normalizeContextRuntimeState(
     const reason = normalizeContextCompactionReason(checkpoint.reason);
     const validCommonEnvelope =
       Boolean(checkpoint.compactionId) &&
-      Number.isInteger(checkpoint.sourceRevision) &&
-      checkpoint.sourceRevision >= 0 &&
-      Boolean(checkpoint.sourceDigest) &&
-      Boolean(checkpoint.coveredThroughMessageId) &&
-      Boolean(checkpoint.coveredThroughTurnId) &&
       Number.isFinite(checkpoint.inputTokensBefore) &&
       Number.isFinite(checkpoint.inputTokensAfter) &&
       checkpoint.inputTokensBefore > checkpoint.inputTokensAfter &&
@@ -169,7 +397,29 @@ export function normalizeContextRuntimeState(
     ) {
       return undefined;
     }
-    return checkpoint.version === 1
+    if (checkpoint.version === 1) {
+      return Number.isInteger(checkpoint.sourceRevision) &&
+        checkpoint.sourceRevision >= 0 &&
+        checkpoint.sourceDigest &&
+        checkpoint.coveredThroughMessageId &&
+        checkpoint.coveredThroughTurnId
+        ? { ...checkpoint, summary: checkpoint.summary.trim(), reason }
+        : undefined;
+    }
+    if (checkpoint.version !== 3) return undefined;
+    const cut = checkpoint.source?.sourceProducingEventCutV1;
+    return checkpoint.checkpointId &&
+      checkpoint.source?.firstMessageId &&
+      checkpoint.source?.coveredThroughMessageId &&
+      checkpoint.source?.coveredThroughTurnId &&
+      Number.isSafeInteger(checkpoint.source?.sourceRevision) &&
+      checkpoint.source.sourceRevision >= 1 &&
+      cut?.revision === checkpoint.source.sourceRevision &&
+      /^[a-f0-9]{64}$/.test(cut.eventId) &&
+      /^[a-f0-9]{64}$/.test(checkpoint.source.sourceRangeDigest) &&
+      checkpoint.summaryContentDigest === summaryContentDigestV3(checkpoint.summary.trim()) &&
+      /^[a-f0-9]{64}$/.test(checkpoint.routeIdentityDigest) &&
+      checkpoint.promptContractId === 'summary-compact-markdown:v1'
       ? { ...checkpoint, summary: checkpoint.summary.trim(), reason }
       : undefined;
   };
@@ -183,8 +433,22 @@ export function normalizeContextRuntimeState(
   const hardBlock = context.hardBlock as ContextHardBlock | undefined;
   const normalizedActiveCheckpoint = normalizeCheckpoint(context.activeCheckpoint);
   const corruptedActiveCheckpoint = Boolean(
-    context.activeCheckpoint && !normalizedActiveCheckpoint,
+    context.activeCheckpoint &&
+      context.activeCheckpoint.version !== 3 &&
+      !normalizedActiveCheckpoint,
   );
+  const summaryLifecycle = context.summaryLifecycle ?? { kind: 'idle' as const };
+  if (
+    ![
+      'idle',
+      'requested',
+      'started',
+      'resource_resolution_required',
+      'normal_reprepare_required',
+    ].includes((summaryLifecycle as { kind?: string }).kind ?? '')
+  ) {
+    throw new Error('Persisted Summary lifecycle phase is not recognized by schema v24.');
+  }
 
   const {
     autoGuard: _legacyAutoGuard,
@@ -218,12 +482,21 @@ export function normalizeContextRuntimeState(
       ? {
           reason: 'unrecoverable_checkpoint',
           sourceDigest:
-            typeof context.activeCheckpoint?.sourceDigest === 'string' &&
+            context.activeCheckpoint &&
+            context.activeCheckpoint.version !== 3 &&
             context.activeCheckpoint.sourceDigest
               ? context.activeCheckpoint.sourceDigest
-              : `checkpoint:${context.activeCheckpoint?.compactionId ?? 'unknown'}`,
+              : context.activeCheckpoint?.version === 3 &&
+                  context.activeCheckpoint.source.sourceRangeDigest
+                ? context.activeCheckpoint.source.sourceRangeDigest
+                : `checkpoint:${context.activeCheckpoint?.compactionId ?? 'unknown'}`,
           message: 'The persisted context checkpoint failed validation.',
-          createdAtTurnId: context.activeCheckpoint?.coveredThroughTurnId || 'unknown',
+          createdAtTurnId:
+            (context.activeCheckpoint
+              ? context.activeCheckpoint.version !== 3
+                ? context.activeCheckpoint.coveredThroughTurnId
+                : context.activeCheckpoint.source?.coveredThroughTurnId
+              : undefined) || 'unknown',
         }
       : hardBlock && isContextHardBlockReason(hardBlock.reason)
         ? {
@@ -235,6 +508,20 @@ export function normalizeContextRuntimeState(
                 : 'Runtime correctness failure.',
             createdAtTurnId: hardBlock.createdAtTurnId,
           }
+        : undefined,
+    summaryLifecycle,
+    successfulPrimaryOrdinal: Math.max(0, context.successfulPrimaryOrdinal ?? 0),
+    projectionBaseIdentity:
+      normalizedActiveCheckpoint?.version === 3 &&
+      context.projectionBaseIdentity ===
+        `checkpoint:${normalizedActiveCheckpoint.checkpointId}:${normalizedActiveCheckpoint.source.sourceRangeDigest}`
+        ? context.projectionBaseIdentity
+        : undefined,
+    lastTranscriptProducingEventCutV1:
+      Number.isSafeInteger(context.lastTranscriptProducingEventCutV1?.revision) &&
+      (context.lastTranscriptProducingEventCutV1?.revision ?? 0) >= 1 &&
+      /^[a-f0-9]{64}$/.test(context.lastTranscriptProducingEventCutV1?.eventId ?? '')
+        ? context.lastTranscriptProducingEventCutV1
         : undefined,
   };
 }

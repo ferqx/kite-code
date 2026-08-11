@@ -6,6 +6,10 @@ import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { AgentKernel, createAgentKernel } from '@/core/runtime/kernel';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
+import {
+  buildRuntimeEventEnvelopeV24,
+  canonicalRuntimeEventEnvelopeBytesV24,
+} from '@/core/runtime/runtime-event-v24';
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
 import { createRuntimeStore } from '@/core/runtime/store';
 import {
@@ -411,14 +415,27 @@ describe('schema-v22 self-contained tool terminals', () => {
       writer.close();
 
       const tailStore = createRuntimeStore(storePath);
+      const terminalEnvelope = buildRuntimeEventEnvelopeV24({
+        threadId: 'restore-budget-terminal',
+        generation: tailStore.loadPersistenceIdentity('restore-budget-terminal').generation,
+        revision: 2,
+        occurredAt: new Date(0).toISOString(),
+        payload: terminal,
+      });
       tailStore.appendEvents(
         'restore-budget-terminal',
-        [terminal],
+        [terminalEnvelope.payload],
         [
           {
-            eventId: 'terminal-budget-1',
-            revision: 2,
-            occurredAt: new Date(0).toISOString(),
+            eventId: terminalEnvelope.eventId,
+            revision: terminalEnvelope.revision,
+            occurredAt: terminalEnvelope.occurredAt,
+            schemaVersion: 24,
+            generation: terminalEnvelope.generation,
+            canonicalBytes: Buffer.byteLength(
+              canonicalRuntimeEventEnvelopeBytesV24(terminalEnvelope),
+              'utf8',
+            ),
           },
         ],
       );
@@ -480,14 +497,27 @@ describe('schema-v22 self-contained tool terminals', () => {
       writer.close();
 
       const tailStore = createRuntimeStore(storePath);
+      const terminalEnvelope = buildRuntimeEventEnvelopeV24({
+        threadId: 'restore-tampered-terminal',
+        generation: tailStore.loadPersistenceIdentity('restore-tampered-terminal').generation,
+        revision: 2,
+        occurredAt: new Date(0).toISOString(),
+        payload: terminal,
+      });
       tailStore.appendEvents(
         'restore-tampered-terminal',
-        [terminal],
+        [terminalEnvelope.payload],
         [
           {
-            eventId: 'terminal-budget-1',
-            revision: 2,
-            occurredAt: new Date(0).toISOString(),
+            eventId: terminalEnvelope.eventId,
+            revision: terminalEnvelope.revision,
+            occurredAt: terminalEnvelope.occurredAt,
+            schemaVersion: 24,
+            generation: terminalEnvelope.generation,
+            canonicalBytes: Buffer.byteLength(
+              canonicalRuntimeEventEnvelopeBytesV24(terminalEnvelope),
+              'utf8',
+            ),
           },
         ],
       );
@@ -791,7 +821,20 @@ describe('control + terminal batch closure', () => {
         type: 'approval.requested',
         interactionId: 'approval-1',
         toolCallId: 'call-1',
-        approval: {} as never,
+        approval: {
+          scope: 'once',
+          cwd: '/',
+          threadId: 'control-api',
+          tool: 'shell_execute',
+          command: 'true',
+          risk: 'execute_code',
+          approvalHash: 'approval-1-hash',
+          summary: 'Run the fixture command.',
+          reason: 'Exercise the control closure.',
+          expectedEffects: [],
+          grantOptions: ['approve_once'],
+          recommendedGrant: 'approve_once',
+        },
       },
     ]);
     const control = {

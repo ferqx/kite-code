@@ -6,6 +6,7 @@ import {
 } from '../../src/core/model/compaction-summary';
 import { findSafeCompactionBoundary } from '../../src/core/model/compaction-v2';
 import type { ContextTokenEstimate } from '../../src/core/model/context-budget';
+import { createVerifiedContextCheckpointV3 } from '../../src/core/model/context-checkpoint-v3';
 import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
 
 const estimate: ContextTokenEstimate = {
@@ -32,6 +33,9 @@ function stateWithHistory(turns = 6): RuntimeState {
     createdAt: `2026-07-22T00:00:0${index}.000Z`,
     content: `Goal ${index}: ${'historical context '.repeat(500)}`,
   }));
+  state.revision = 1;
+  state.lastAppliedEventId = 'e'.repeat(64);
+  state.appliedEventIds = ['e'.repeat(64)];
   return state;
 }
 
@@ -66,7 +70,7 @@ describe('narrative context compaction', () => {
     expect(requests[0]).toContain('<untrusted_custom_instructions>');
     expect(checkpoint.summary).toStartWith('# Goal');
     expect(checkpoint.inputTokensAfter).toBeLessThan(checkpoint.inputTokensBefore);
-    expect(checkpoint.coveredThroughMessageId).toBe('message-5');
+    expect(checkpoint.source.coveredThroughMessageId).toBe('message-5');
   });
 
   test('normalizes and XML-escapes the sole summary frame deterministically', () => {
@@ -76,7 +80,7 @@ describe('narrative context compaction', () => {
     );
   });
 
-  test('incremental compaction sends old narrative plus only the new safe tail', async () => {
+  test('legacy checkpoint input is independently recomputed from the complete safe prefix', async () => {
     const state = stateWithHistory(8);
     state.context.activeCheckpoint = {
       compactionId: 'base',
@@ -103,15 +107,15 @@ describe('narrative context compaction', () => {
       pending: pending(state),
       sourceRevision: state.revision,
     });
-    expect(request).toContain('Previous narrative.');
-    expect(request).not.toContain('message-1');
+    expect(request).not.toContain('Previous narrative.');
+    expect(request).toContain('message-1');
     expect(request).toContain('message-3');
-    expect(checkpoint.baseCheckpointId).toBe('base');
-    expect(checkpoint.coveredThroughMessageId).toBe('message-7');
+    expect(checkpoint.baseCheckpoint).toBeUndefined();
+    expect(checkpoint.source.coveredThroughMessageId).toBe('message-7');
   });
 
   test('keeps a stable single-checkpoint digest chain across 20 incremental replacements', async () => {
-    const state = stateWithHistory(3);
+    const state = stateWithHistory(12);
     for (const message of state.transcript.messages) {
       if (message.kind === 'user') message.content += ' additional context'.repeat(300);
     }
@@ -127,21 +131,29 @@ describe('narrative context compaction', () => {
         pending: { ...pending(state), compactionId },
         sourceRevision: state.revision,
       });
-      expect(checkpoint.baseCheckpointId).toBe(previousId);
+      expect(checkpoint.baseCheckpoint?.checkpointId).toBe(
+        previousId ? `${previousId}:v3` : undefined,
+      );
       expect(checkpoint.compactionId).toBe(compactionId);
-      expect(checkpoint.sourceDigest).not.toBe(state.context.activeCheckpoint?.sourceDigest);
-      digests.add(checkpoint.sourceDigest);
+      expect(checkpoint.source.sourceRangeDigest).not.toBe(
+        state.context.activeCheckpoint?.version === 3
+          ? state.context.activeCheckpoint.source.sourceRangeDigest
+          : undefined,
+      );
+      digests.add(checkpoint.source.sourceRangeDigest);
       state.context.activeCheckpoint = checkpoint;
       previousId = compactionId;
-      const ordinal = state.transcript.messages.length;
-      state.transcript.messages.push({
-        kind: 'user',
-        messageId: `message-${ordinal}`,
-        turnId: `turn-${ordinal}`,
-        ordinal,
-        createdAt: new Date(Date.UTC(2026, 6, 22, 0, 1, ordinal)).toISOString(),
-        content: `Increment ${index}: ${'new settled context '.repeat(700)}`,
-      });
+      for (let offset = 0; offset < 8; offset++) {
+        const ordinal = state.transcript.messages.length;
+        state.transcript.messages.push({
+          kind: 'user',
+          messageId: `message-${ordinal}`,
+          turnId: `turn-${ordinal}`,
+          ordinal,
+          createdAt: new Date(Date.UTC(2026, 6, 22, 0, 1, ordinal)).toISOString(),
+          content: `Increment ${index}-${offset}: ${'new settled context '.repeat(250)}`,
+        });
+      }
     }
     expect(digests).toHaveLength(20);
     expect(state.context.activeCheckpoint?.compactionId).toBe('chain-19');
@@ -199,19 +211,19 @@ describe('narrative context compaction', () => {
 
   test('does not use custom instructions to rewrite an already-covered checkpoint', async () => {
     const state = stateWithHistory(3);
-    state.context.activeCheckpoint = {
+    state.context.activeCheckpoint = createVerifiedContextCheckpointV3({
+      state,
+      checkpointId: 'base:v3',
       compactionId: 'base',
-      version: 1,
-      sourceRevision: 0,
-      sourceDigest: 'base-digest',
+      reason: 'manual',
       coveredThroughMessageId: 'message-2',
-      coveredThroughTurnId: 'turn-2',
       summary: 'Existing narrative.',
       inputTokensBefore: 8_000,
       inputTokensAfter: 2_000,
-      reason: 'manual',
+      routeIdentityDigest: 'a'.repeat(64),
+      sourceProducingEventCutV1: { revision: 1, eventId: 'e'.repeat(64) },
       createdAt: '2026-07-22T00:00:00.000Z',
-    };
+    });
     let calls = 0;
     const compact = createNarrativeContextCompactor({
       generate: async () => {
@@ -250,8 +262,8 @@ describe('narrative context compaction', () => {
   });
 
   test('protects the current active manual turn and compacts only settled history', async () => {
-    const state = stateWithHistory(3);
-    state.turn.turnId = 'turn-2';
+    const state = stateWithHistory(10);
+    state.turn.turnId = 'turn-9';
     let request = '';
     const compact = createNarrativeContextCompactor({
       generate: async (value) => {
@@ -265,8 +277,8 @@ describe('narrative context compaction', () => {
       sourceRevision: state.revision,
     });
     expect(request).toContain('message-1');
-    expect(request).not.toContain('message-2');
-    expect(checkpoint.coveredThroughMessageId).toBe('message-1');
+    expect(request).not.toContain('message-9');
+    expect(checkpoint.source.coveredThroughMessageId).toBe('message-8');
   });
 
   test('rejects a summary request that cannot fit the selected model window', async () => {
@@ -298,7 +310,7 @@ describe('narrative context compaction', () => {
       compact({
         state: stateWithHistory(),
         pending: pending(stateWithHistory()),
-        sourceRevision: 0,
+        sourceRevision: 1,
       }),
     ).rejects.toMatchObject({ kind: 'summary_aborted' });
   });

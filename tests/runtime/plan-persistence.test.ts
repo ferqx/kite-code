@@ -6,6 +6,11 @@ import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { createAgentKernel } from '../../src/core/runtime/kernel';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import {
+  buildRuntimeEventEnvelopeV24,
+  canonicalRuntimeEventEnvelopeBytesV24,
+} from '../../src/core/runtime/runtime-event-v24';
+import { advanceRuntimeStorageFormatV24 } from '../../src/core/runtime/runtime-storage-v24';
+import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
   RUNTIME_STATE_SCHEMA_VERSION,
@@ -63,14 +68,40 @@ function persistSchema22Batch(
 ): void {
   const identity = store.loadPersistenceIdentity(threadId);
   const baseRevision = identity.observedHead.revision;
-  store.appendEventsAndSnapshot(
-    threadId,
-    events,
-    { ...state, revision: baseRevision + events.length },
-    events.map((_, index) => ({
-      eventId: `${threadId}-event-${baseRevision + index + 1}`,
+  let storageFormat = state.storageFormat;
+  const envelopes = events.map((event, index) => {
+    const envelope = buildRuntimeEventEnvelopeV24({
+      threadId,
+      generation: identity.generation,
       revision: baseRevision + index + 1,
       occurredAt: new Date(index).toISOString(),
+      payload: event,
+    });
+    storageFormat = advanceRuntimeStorageFormatV24({
+      current: storageFormat,
+      eventId: envelope.eventId,
+      canonicalBytes: Buffer.byteLength(canonicalRuntimeEventEnvelopeBytesV24(envelope), 'utf8'),
+    });
+    return envelope;
+  });
+  const eventIds = envelopes.map((envelope) => envelope.eventId);
+  store.appendEventsAndSnapshot(
+    threadId,
+    envelopes.map((envelope) => envelope.payload),
+    {
+      ...state,
+      revision: baseRevision + events.length,
+      lastAppliedEventId: eventIds.at(-1),
+      appliedEventIds: eventIds.slice(-4096),
+      storageFormat,
+    },
+    envelopes.map((envelope) => ({
+      eventId: envelope.eventId,
+      revision: envelope.revision,
+      occurredAt: envelope.occurredAt,
+      schemaVersion: 24,
+      generation: envelope.generation,
+      canonicalBytes: Buffer.byteLength(canonicalRuntimeEventEnvelopeBytesV24(envelope), 'utf8'),
     })),
     undefined,
     identity,

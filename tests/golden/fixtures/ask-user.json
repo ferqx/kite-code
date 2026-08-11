@@ -11,7 +11,7 @@
           "type": "user_input.requested",
           "interactionId": "input-1",
           "toolCallId": "call-1",
-          "request": { "question": "Proceed?", "options": [] }
+          "request": { "question": "Proceed?", "options": [], "allow_free_text": true }
         }
       ]
     }

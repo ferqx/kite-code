@@ -7,6 +7,8 @@ import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   evaluateCircuitBreaker,
 } from '@/core/execution/circuit-breaker';
+import { checkpointProjectionBaseIdentityV1 } from '@/core/model/context-checkpoint-v3';
+import { validateCheckpointV3ReboundProofV1 } from '@/core/model/context-working-set';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
@@ -375,7 +377,17 @@ function toolResultMeta(
  * @param event - 要应用的运行时事件 / Runtime event to apply
  * @returns 新的不可变运行时状态 / New immutable runtime state
  */
-export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+export function reduceRuntimeState(
+  state: RuntimeState,
+  event: RuntimeEvent,
+  metadataOrIndex?:
+    | number
+    | {
+        eventId?: string;
+        summaryStartReceipt?: import('./context-compaction').SummaryStartedReceiptV1;
+      },
+): RuntimeState {
+  const metadata = typeof metadataOrIndex === 'object' ? metadataOrIndex : undefined;
   event = normalizeTerminalRuntimeEventV1(event);
   switch (event.type) {
     case 'resource_budget.configured':
@@ -430,7 +442,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (
         state.context.pendingCompaction?.compactionId !== event.compactionId ||
         event.checkpoint.compactionId !== event.compactionId ||
-        event.checkpoint.sourceRevision !== event.sourceRevision
+        (event.checkpoint.version === 3
+          ? event.checkpoint.source.sourceRevision
+          : event.checkpoint.sourceRevision) !== event.sourceRevision
       )
         return state;
       const reason = normalizeContextCompactionReason(event.checkpoint.reason);
@@ -443,6 +457,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         context: {
           ...state.context,
           activeCheckpoint: checkpoint,
+          projectionBaseIdentity:
+            checkpoint.version === 3 ? checkpointProjectionBaseIdentityV1(checkpoint) : undefined,
           pendingCompaction: undefined,
           reclaimCommit: undefined,
           lastReclaimReceipt: undefined,
@@ -455,6 +471,209 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         },
       };
     }
+
+    case 'context.summary_requested_v1': {
+      if (state.context.summaryLifecycle.kind !== 'idle') return state;
+      if (
+        (event.attempt.reason === 'auto' && !event.continuation) ||
+        (event.attempt.reason === 'manual' && event.continuation)
+      )
+        throw new Error('Summary request continuation does not match its trigger.');
+      const active = state.context.activeCheckpoint;
+      if (
+        active?.version === 3 &&
+        active.source.firstMessageId === event.attempt.summarySourceIdentity.firstMessageId &&
+        active.source.coveredThroughMessageId ===
+          event.attempt.summarySourceIdentity.coveredThroughMessageId &&
+        active.source.sourceRangeDigest ===
+          event.attempt.summarySourceIdentity.canonicalSourceDigest
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          summaryLifecycle: {
+            kind: 'requested',
+            attempt: event.attempt,
+            ...(event.continuation ? { continuation: event.continuation } : {}),
+            ...(metadata?.eventId ? { requestedEventId: metadata.eventId } : {}),
+          },
+        },
+      };
+    }
+
+    case 'context.summary_dispatch_started_v1': {
+      const lifecycle = state.context.summaryLifecycle;
+      if (lifecycle.kind !== 'requested' || lifecycle.attempt.attemptId !== event.attemptId) {
+        throw new Error('Summary dispatch has no matching durable request.');
+      }
+      if (
+        event.startBatchKey.attemptId !== event.attemptId ||
+        event.startBatchKey.compactionId !== lifecycle.attempt.compactionId
+      )
+        throw new Error('Summary start batch identity mismatch.');
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          summaryLifecycle: {
+            kind: 'started',
+            attempt: lifecycle.attempt,
+            startBatchKey: event.startBatchKey,
+            ...(lifecycle.continuation ? { continuation: lifecycle.continuation } : {}),
+            ...(metadata?.summaryStartReceipt
+              ? { startedReceipt: metadata.summaryStartReceipt }
+              : {}),
+          },
+          autoSummaryCooldown: {
+            version: 1,
+            lastAttemptSourceIdentity: lifecycle.attempt.summarySourceIdentity,
+            successfulPrimaryOrdinalAtAttempt: state.context.successfulPrimaryOrdinal,
+            nextEligibleSuccessfulPrimaryOrdinal: state.context.successfulPrimaryOrdinal + 3,
+          },
+        },
+      };
+    }
+
+    case 'context.summary_completed_v1': {
+      const lifecycle = state.context.summaryLifecycle;
+      if (lifecycle.kind !== 'started' || lifecycle.attempt.attemptId !== event.attemptId) {
+        throw new Error('Summary completion has no matching started attempt.');
+      }
+      if (
+        event.checkpoint.version !== 3 ||
+        event.checkpoint.compactionId !== lifecycle.attempt.compactionId ||
+        event.terminalBatchKey.attemptId !== event.attemptId
+      )
+        throw new Error('Summary completion checkpoint or terminal identity mismatch.');
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          activeCheckpoint: event.checkpoint,
+          projectionBaseIdentity: checkpointProjectionBaseIdentityV1(event.checkpoint),
+          history: [
+            ...state.context.history,
+            { kind: 'completed' as const, checkpoint: event.checkpoint },
+          ].slice(-128),
+          summaryLifecycle: { kind: 'idle' },
+        },
+      };
+    }
+
+    case 'context.summary_failed_v1':
+    case 'context.summary_unknown_external_outcome_v1': {
+      const lifecycle = state.context.summaryLifecycle;
+      const manualPreReservationDenial =
+        lifecycle.kind === 'requested' &&
+        lifecycle.attempt.reason === 'manual' &&
+        event.type === 'context.summary_failed_v1' &&
+        event.terminalBatchKey.admission.stage === 'denied' &&
+        event.terminalBatchKey.dispatchStart === undefined &&
+        event.providerDispatchState === 'not_entered';
+      const lifecycleAttempt =
+        lifecycle.kind === 'requested' || lifecycle.kind === 'started'
+          ? lifecycle.attempt
+          : undefined;
+      if (
+        (lifecycle.kind !== 'started' && !manualPreReservationDenial) ||
+        lifecycleAttempt?.attemptId !== event.attemptId ||
+        event.terminalBatchKey.attemptId !== event.attemptId
+      )
+        throw new Error('Summary terminal has no matching started attempt.');
+      return {
+        ...state,
+        context: { ...state.context, summaryLifecycle: { kind: 'idle' } },
+      };
+    }
+
+    case 'context.normal_resource_resolution_required_v1':
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          summaryLifecycle: {
+            kind: 'resource_resolution_required',
+            attempt: event.attempt,
+            terminalBatchKey: event.terminalBatchKey,
+            continuation: event.continuation,
+            resourceReservationId: event.resourceReservationId,
+            resourceUnknownEventId: event.resourceUnknownEventId,
+          },
+        },
+      };
+
+    case 'context.normal_reprepare_required_v1':
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          summaryLifecycle: { kind: 'normal_reprepare_required', receipt: event.receipt },
+        },
+      };
+
+    case 'context.normal_reprepare_consumed_v1':
+      if (
+        state.context.summaryLifecycle.kind !== 'normal_reprepare_required' ||
+        state.context.summaryLifecycle.receipt.attemptId !== event.consumptionKey.attemptId ||
+        JSON.stringify(state.context.summaryLifecycle.receipt) !==
+          JSON.stringify(event.consumptionKey.originReceipt)
+      )
+        throw new Error('Normal reprepare consumption has no matching continuation.');
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          summaryLifecycle: { kind: 'idle', lastConsumption: event.consumptionKey },
+        },
+      };
+
+    case 'context.normal_continuation_superseded_v1':
+    case 'context.summary_branch_abandoned_v1':
+      return {
+        ...state,
+        context: { ...state.context, summaryLifecycle: { kind: 'idle' } },
+      };
+
+    case 'context.normal_reprepare_consumption_detached_v1': {
+      const lifecycle = state.context.summaryLifecycle;
+      if (
+        lifecycle.kind !== 'idle' ||
+        !lifecycle.lastConsumption ||
+        lifecycle.lastConsumption.attemptId !== event.attemptId ||
+        event.receiptId !== event.receipt.receiptId ||
+        JSON.stringify(lifecycle.lastConsumption) !== JSON.stringify(event.receipt.consumption)
+      )
+        throw new Error('Continuation detach does not bind current consumption ownership.');
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          summaryLifecycle: { kind: 'idle' },
+          lastDetach: event.receipt,
+        },
+      };
+    }
+
+    case 'context.checkpoint_v3_rebound_v1':
+      if (state.context.activeCheckpoint?.version !== 3) return state;
+      if (state.context.activeCheckpoint.checkpointId !== event.parentCheckpointId) return state;
+      if (
+        !validateCheckpointV3ReboundProofV1(event) ||
+        event.proof.ledgerBaseId !== state.storageFormat.ledgerBase.baseId
+      )
+        throw new Error('Checkpoint V3 rebound proof is invalid for this branch base.');
+      return {
+        ...state,
+        context: {
+          ...state.context,
+          activeCheckpoint: event.checkpoint,
+          projectionBaseIdentity: checkpointProjectionBaseIdentityV1(event.checkpoint),
+          lastTranscriptProducingEventCutV1: event.proof.forkLocalSourceProducingEventCutV1,
+        },
+      };
 
     case 'context.compaction_failed': {
       if (state.context.pendingCompaction?.compactionId !== event.compactionId) return state;
@@ -521,6 +740,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         context: {
           ...state.context,
           activeCheckpoint: undefined,
+          projectionBaseIdentity: undefined,
           reclaimCommit: undefined,
           lastReclaimReceipt: undefined,
           pendingPrimaryReclaim: undefined,
@@ -1953,9 +2173,15 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               context: {
                 ...state.context,
                 pendingPrimaryReclaim: event.contextEvidence,
+                successfulPrimaryOrdinal: state.context.successfulPrimaryOrdinal + 1,
               },
             }
-          : {}),
+          : {
+              context: {
+                ...state.context,
+                successfulPrimaryOrdinal: state.context.successfulPrimaryOrdinal + 1,
+              },
+            }),
         transcript: {
           ...state.transcript,
           final: event.toolCalls?.length ? undefined : (event.text ?? state.transcript.final),

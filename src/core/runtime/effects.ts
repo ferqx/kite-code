@@ -25,12 +25,16 @@ export type RuntimeEffect =
       preparedContextV2?: import('@/core/model/context-admission-v2').PreparedPrimaryContextRequestV2;
       /** Stable ToolSet/disclosure source paired with preparedContextV2. */
       preparedCapabilitySetV2?: import('@/core/model/context-capability-v2').PreparedContextCapabilitySetV2;
+      /** Preallocated durable request identity for a consumed Summary continuation. */
+      primaryRequestId?: string;
     }
   /** Build one durable M2 context checkpoint. */
   | {
       type: 'compact_context';
       compactionId: string;
       resourceEstimate?: { inputTokens: number; maxOutputTokens: number };
+      /** Auto-only request fact committed atomically with reservation and dispatch start. */
+      summaryRequest?: import('./events').ContextSummaryRequestedEventV1;
     }
   /** 执行指定工具调用 / Execute the specified tool calls */
   | { type: 'run_tools'; toolCallIds: string[] }

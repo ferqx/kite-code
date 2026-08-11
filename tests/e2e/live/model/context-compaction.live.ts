@@ -117,7 +117,7 @@ try {
     pending: pending(state, 'live-incremental'),
     sourceRevision: state.revision,
   });
-  assert.equal(incremental.baseCheckpointId, first.compactionId);
+  assert.equal(incremental.baseCheckpoint?.checkpointId, first.checkpointId);
   assert.notEqual(incremental.summary, first.summary);
   assert.ok(incremental.inputTokensAfter < incremental.inputTokensBefore);
 

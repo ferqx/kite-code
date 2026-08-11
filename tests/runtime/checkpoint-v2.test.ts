@@ -378,7 +378,7 @@ describe('legacy checkpoint-v2 read-only compatibility', () => {
     }
   });
 
-  test('downgrades legacy checkpoint-v2 across replay, fork, and rewind boundaries', () => {
+  test('downgrades checkpoint-v2 while migrating a verified legacy named cut for strict branch use', () => {
     const { directory, storePath } = temporaryStore('boundaries');
     const sourceThreadId = 'legacy-v2-source';
     const forkThreadId = 'legacy-v2-fork';
@@ -407,9 +407,10 @@ describe('legacy checkpoint-v2 read-only compatibility', () => {
         },
       };
       const writer = createRuntimeStore(storePath);
-      writer.saveSnapshot(sourceThreadId, pendingState);
+      writer.saveSnapshot(sourceThreadId, { ...pendingState, schemaVersion: 23 });
       writer.saveNamedSnapshot(sourceThreadId, 'legacy-v2-rewind', {
         ...fixture.state,
+        schemaVersion: 23,
         context: { ...fixture.state.context, activeCheckpoint: fixture.checkpoint },
       });
       writer.appendEvents(
@@ -448,6 +449,11 @@ describe('legacy checkpoint-v2 read-only compatibility', () => {
       );
       expect(boundaryStore.restoreNamedSnapshot(sourceThreadId, 'legacy-v2-rewind')).toBe(true);
       boundaryStore.close();
+
+      const branchVerifier = createRuntimeStore(storePath);
+      expect(branchVerifier.loadSnapshotRecord(sourceThreadId)?.metadata.schemaVersion).toBe(24);
+      expect(branchVerifier.loadSnapshotRecord(forkThreadId)?.metadata.schemaVersion).toBe(24);
+      branchVerifier.close();
 
       for (const threadId of [sourceThreadId, forkThreadId]) {
         const kernel = createAgentKernel({

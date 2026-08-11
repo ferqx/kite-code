@@ -42,22 +42,23 @@ settled、全 `budget_v2` verified、read-only 的旧 `read_file|search_content|
 shadow 仍不应用 plan，只把 bounded 聚合计数交给可选进程内 reporter；off/shadow 不改变 Provider payload、
 admission、调用次数或 Runtime 事件。
 
-旧路线中的 live commit 只在成功 primary 的封闭 2/3-event batch 中推进，并绑定 cache-affecting environment；原始
-transcript 与 tool call/result 配对不删除。旧 metadata/terminal 归一为
-`legacy_unknown + legacy_unverified`，compat/legacy/mixed block 不得成为候选。当前 trusted route registry
-为空，live 只属 development-only。现有会话总结是 checkpoint-v1 手动兼容 narrative；旧 canonical L3
-source/cache-safe fork/checkpoint-v2 writer、route cache gate 与 refill guard producer 已物理清场。新基准是
-MicroCompact、活动 checkpoint summary 加最近原文窗口与全部 uncovered tail、必要时 SummaryCompact 更新；
-PSMC-03 已成为活动计划的当前入口，但尚未实施；对应 Gate 通过前不得把 L2 或本次清场表述为完整三级。
-Session Memory 不属于当前实现计划。
+候选 Micro commit 只在成功 primary 的封闭 terminal batch 中推进，并绑定实际使用的 candidate 与
+cache-affecting environment；原始 transcript 与 tool call/result 配对不删除。compat/legacy/mixed block 不得成为
+候选 prepare 目标是 `MicroCompact → Verified Checkpoint Working Set → SummaryCompact`：Working Set
+投影活动 V3 summary、coverage 内 recent raw window 与全部 uncovered tail；Summary 更新后 auto continuation 必须
+从 committed state fresh prepare。旧 canonical L3 source/cache-safe fork/checkpoint-v2 writer、route cache gate 与
+refill guard producer保持清场。PSMC-03～06 的实现、恢复/fault matrix 与本地资格 Gate 已完成；auto 与 Micro
+live flag 仍默认关闭，后续 rollout 需要独立决定。Session Memory 不属于当前实现计划。
 
 每次模型调用前必须估算完整请求的 system、tool schema、transcript、checkpoint summary、dynamic runtime 和 framing token 分项。可用输入预算由 resolved context window 减去请求/模型的 max output reservation 与配置的 provider safety margin 得出；preflight 默认使用 80% warning、90% compact 和 94% hard 阈值，并产生 `model.context_metrics` telemetry，但瞬时 preflight 不进入 RuntimeState。模型窗口 unknown 时 utilization 必须保持 unknown，不能用虚构默认值触发或绕过压缩。正常模型调用、compaction 与 `/context` 必须共用同一个 projection environment resolver 术语（投影环境解析器）和包含 adapter metadata 术语（适配器元数据）的 `ResolvedModelCapabilities`，不得让正式验收读取旧 preflight 术语（调用前预检）的 estimate 术语（估算值）。`/compact reset` 不以本地比例或窗口估算做容量门禁，重置后的下一次真实请求由 Provider admission 术语（模型供应商接纳）决定。
 
-M2 checkpoint lifecycle 术语（检查点生命周期）已进入 Runtime 术语（运行时）。当前唯一 generator 使用当前对话模型执行一次无工具、零 SDK retry 的 Markdown narrative 请求；不存在 JSON schema、fact ledger、repair、chunk 或 merge 路径。Checkpoint 的唯一模型内容字段是规范化 `summary: string`，投影通过同一纯函数把 `&`、`<`、`>` 转义后生成一个 `<compacted_history>` assistant history frame。当前只有 `/compact` 可以产生新 checkpoint-v1；旧 `contextCompactionAutoV1`/`autoMode` 只保留配置解析兼容，没有 scheduler producer，不能启用自动 shadow/live。scheduler 只消费已经持久化的 manual request，completed/failed 结果只能通过原有 Kernel effect lease 术语（内核副作用租约）提交。active checkpoint 术语（活动检查点）替代已覆盖历史前缀并与 live tail 术语（实时尾部）组成模型投影，但不删除或改写原 transcript 术语（原始消息记录）；manual reset 术语（手动重置）只撤销当前投影。
+V3 checkpoint、Summary lifecycle、branch receipt/closure/completion、resumable event/fence/named-proof migration、
+opaque branch candidate、完整 nested schema、quota/ACK fault matrix 与六个 crash cut 已实现并通过测试。
+`contextCompactionAutoV1` 保持默认关闭；本地资格通过不构成 production/default-on 声明。原 transcript 仍不得删除。
 
 摘要候选必须通过非空、finish reason、无 tool call、可序列化、narrative token 上限和统一 token reduction 术语（文本计量缩减）校验。当前 manual producer 使用最低绝对缩减 1024 token；candidate 术语（候选产物）是否低于 target ratio 术语（目标比例）不影响激活。Prompt 要求 narrative 保留用户目标与约束、重要决定、已完成工作、失败与验证结论、未完成事项和继续工作所需路径；模型输出是低权限历史数据，不能决定当前 planning、authorization、interaction、active tools、binding、Skill、verification lifecycle 或 task status。Manual 输入覆盖全部 safe history；显式 summary input 上限超出时整体失败，不得静默总结局部前缀。不运行 chunk/merge/repair。
 
-`compact_due` / `hard_limit` 当前只保留为 context pressure 术语（上下文压力）诊断，不会创建自动压缩请求。`ContextCompactionReason` 为旧事件兼容仍允许 `manual | auto`，但新 producer 只写 `manual`。Token ratio 术语（文本计量比例）、窗口估算、candidate pressure 术语（候选压力）、Provider 术语（模型供应商）错误或压缩失败都不得创建、保持或刷新 hard block 术语（硬阻断）。Hard block 只表示 Runtime correctness failure 术语（运行时正确性故障），scheduler 不用压缩成功或 reset 术语（重置）清除它。通用 HTTP 400 或其他 Provider 失败不会自动创建压缩请求或硬阻断；summary Provider 失败提示检查模型、credential、连接、Provider data policy 与 context/output limits，或执行 `/clear`，不清理、分块或自动重试。压缩请求、完成、失败、正确性阻断与上下文压力必须写入 session trace 术语（会话追踪记录）；完成/失败记录真实 effect duration 术语（副作用耗时），完成同时记录压缩前后与 token 节省，不能只依赖进程内 singleton 术语（单例）。
+`compact_due` / `hard_limit` 是 context pressure 术语（上下文压力）；只有 auto flag、已知 window 与 orchestrator 资格同时成立时才尝试 SummaryCompact，否则继续普通 primary。`ContextCompactionReason` 允许 `manual | auto`。Token ratio、窗口估算、Provider 错误或压缩失败都不得创建、保持或刷新 hard block；Hard block 只表示 Runtime correctness failure。通用 HTTP 400/413 不会推断 overflow；summary 失败不清理、不分块、不自动重试。请求、完成、失败、资源 unknown/resolution 与上下文压力只记录脱敏结构事实。
 
 `contextCompactionManualV1` 默认开启后，`/compact` 命令触发上下文压缩并接受可选的自定义摘要指令（例如 `/compact focus on auth changes`）。命令必须先持久化不进入模型 transcript 的 `user.command_invoked`，再形成 `context.compaction_requested(reason=manual)`，因此退出并重新进入 TUI 后仍会显示命令，但不会把 slash command 当成用户目标发送给模型；不跳过安全边界、lease、schema、mandatory facts 或 reduction 校验。运行中的命令通过 live Kernel control 写入同一状态机，交互、工具或 verification 未结算时保持 pending，不能另开 Kernel 与当前 runner 竞争。若 Runtime 已发出 terminal event、但 live control 尚在收尾，命令必须等待该 control 释放后立刻重新 preflight 和执行，不能遗留为永远等待的 queued 请求。没有足够历史消息时返回 `Not enough messages to compact.`；active checkpoint 已覆盖最新安全消息时，无论是否带自定义摘要指令都不得再次调用 summary Provider，而应返回非错误提示 `No new messages to compact.`。自定义指令只有存在新 safe source 时才能改变摘要侧重点。上述拒绝对应的失败事件必须持久化以供会话重放。
 

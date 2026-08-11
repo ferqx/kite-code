@@ -177,6 +177,9 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
       usage.counters.inputTokens =
         effect.resourceEstimate?.inputTokens ??
         state.context.pendingCompaction?.estimate.totalInputTokens ??
+        (state.context.summaryLifecycle.kind === 'requested'
+          ? state.context.summaryLifecycle.attempt.estimate.totalInputTokens
+          : undefined) ??
         0;
       usage.counters.outputTokens = effect.resourceEstimate?.maxOutputTokens ?? 6_000;
     }
@@ -1106,4 +1109,106 @@ export function reconciliationEventsForReservationsV1(
       actual: actualUsageForReservationV1(state, reservation, terminalEvents),
     };
   });
+}
+
+/**
+ * Close one primary or Summary effect as a single reducer batch. Summary
+ * admission evidence selects reconciled/released/unknown explicitly; callers
+ * must never infer that state from a generic Provider error.
+ */
+export function finalizeRuntimeEffectTerminalBatchV1(
+  state: RuntimeState,
+  reservationIds: string[],
+  result: RuntimeEvent[],
+): RuntimeEvent[] {
+  let resourceTerminals: RuntimeEvent[] = reconciliationEventsForReservationsV1(
+    state,
+    reservationIds,
+    result,
+  );
+  const primaryEvidence = result.find(
+    (event) => event.type === 'model.responded' && event.contextEvidence,
+  );
+  if (primaryEvidence?.type === 'model.responded' && primaryEvidence.contextEvidence) {
+    resourceTerminals = resourceTerminals.map((event) =>
+      event.type === 'resource_budget.reconciled' &&
+      event.reservationId === primaryEvidence.contextEvidence!.reservationId
+        ? { ...event, terminalBatchId: primaryEvidence.contextEvidence!.terminalBatchId }
+        : event,
+    );
+  }
+  const summaryTerminal = result.find(
+    (event) =>
+      event.type === 'context.summary_completed_v1' ||
+      event.type === 'context.summary_failed_v1' ||
+      event.type === 'context.summary_unknown_external_outcome_v1',
+  ) as
+    | Extract<
+        RuntimeEvent,
+        {
+          type:
+            | 'context.summary_completed_v1'
+            | 'context.summary_failed_v1'
+            | 'context.summary_unknown_external_outcome_v1';
+        }
+      >
+    | undefined;
+  if (summaryTerminal) {
+    const admission = summaryTerminal.terminalBatchKey.admission;
+    if (admission.stage === 'denied') {
+      resourceTerminals = reservationIds.map((reservationId) => ({
+        type: 'resource_budget.released' as const,
+        reservationId,
+        proof: 'local_provider_admission_denied' as const,
+        summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
+      }));
+    } else if (admission.stage === 'not_completed') {
+      resourceTerminals = reservationIds.map((reservationId) => ({
+        type: 'resource_budget.released' as const,
+        reservationId,
+        proof: 'prepared_dispatch_not_entered_v1' as const,
+        summaryDispatchGuardProof: admission.proof,
+        summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
+      }));
+    } else if (
+      summaryTerminal.type === 'context.summary_completed_v1' &&
+      summaryTerminal.providerUsage
+    ) {
+      resourceTerminals = reservationIds.map((reservationId) => {
+        const actual = createZeroResourceUsageV1();
+        actual.counters.modelRequests = 1;
+        actual.counters.inputTokens = summaryTerminal.providerUsage!.inputTokens;
+        actual.counters.outputTokens = summaryTerminal.providerUsage!.outputTokens;
+        return {
+          type: 'resource_budget.reconciled' as const,
+          reservationId,
+          actual,
+          summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
+        };
+      });
+    } else {
+      resourceTerminals = reservationIds.map((reservationId) => ({
+        type: 'resource_budget.unknown' as const,
+        reservationId,
+        summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
+      }));
+    }
+  }
+  const aborts = result.filter((event) => event.type === 'turn.aborted');
+  const summaryContinuations = result.filter(
+    (event) =>
+      event.type === 'context.normal_reprepare_required_v1' ||
+      event.type === 'context.normal_resource_resolution_required_v1',
+  );
+  return [
+    ...result.filter(
+      (event) =>
+        event.type !== 'turn.aborted' &&
+        event.type !== 'context.normal_reprepare_required_v1' &&
+        event.type !== 'context.normal_resource_resolution_required_v1',
+    ),
+    ...resourceTerminals,
+    ...summaryContinuations,
+    ...aborts,
+  ];
 }

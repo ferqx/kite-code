@@ -45,6 +45,12 @@ import type {
   ContextCompactionErrorKind,
   ContextCompactionReason,
   ContextHardBlockReason,
+  NormalCompactionContinuationV1,
+  NormalReprepareReceiptV1,
+  SummaryAttemptV1,
+  SummaryStartBatchKeyV1,
+  SummaryTerminalBatchKeyV1,
+  VerifiedContextCheckpointV3,
 } from './context-compaction';
 import type { ClassifiedFailure } from './failures';
 import type {
@@ -68,10 +74,12 @@ import type { RunTerminalOutcomeV1 } from './terminal-outcome';
 
 /** Runtime event metadata used for idempotency, tracing and stale-result checks. */
 export interface RuntimeEventEnvelope {
+  schemaVersion?: number;
   eventId: string;
   threadId: string;
+  generation?: number;
   revision: number;
-  causationId?: string;
+  causationId?: string | null;
   occurredAt: string;
   payload: RuntimeEvent;
 }
@@ -106,6 +114,8 @@ export interface ContextCompactionCompletedEvent {
   checkpoint: ContextCompactionCheckpoint | LegacyContextCompactionCheckpointV2;
   /** End-to-end compaction effect duration. Optional for restored legacy events. */
   durationMs?: number;
+  /** Exact Provider usage when the adapter supplied authoritative counters. */
+  providerUsage?: { inputTokens: number; outputTokens: number };
 }
 
 export interface ContextCompactionFailedEvent {
@@ -119,12 +129,109 @@ export interface ContextCompactionFailedEvent {
   requestedAtTurnId?: string;
   /** End-to-end compaction effect duration. Optional for restored legacy events. */
   durationMs?: number;
+  /** Whether the one Summary Provider callback was entered before failure. */
+  providerDispatchState?: 'not_entered' | 'entered';
 }
 
 export interface ContextCompactionResetEvent {
   type: 'context.compaction_reset';
   checkpointId: string;
   reason: 'manual';
+}
+
+export interface ContextSummaryRequestedEventV1 {
+  type: 'context.summary_requested_v1';
+  attempt: SummaryAttemptV1;
+  continuation?: NormalCompactionContinuationV1;
+}
+
+export interface ContextSummaryDispatchStartedEventV1 {
+  type: 'context.summary_dispatch_started_v1';
+  attemptId: string;
+  startBatchKey: SummaryStartBatchKeyV1;
+}
+
+export interface ContextSummaryCompletedEventV1 {
+  type: 'context.summary_completed_v1';
+  attemptId: string;
+  terminalBatchKey: SummaryTerminalBatchKeyV1;
+  checkpoint: VerifiedContextCheckpointV3;
+  providerUsage?: { inputTokens: number; outputTokens: number };
+  providerDispatchState: 'entered';
+}
+
+export interface ContextSummaryFailedEventV1 {
+  type: 'context.summary_failed_v1';
+  attemptId: string;
+  terminalBatchKey: SummaryTerminalBatchKeyV1;
+  errorKind:
+    | ContextCompactionErrorKind
+    | 'stale_source'
+    | 'stale_environment'
+    | 'stale_runtime_revision';
+  message: string;
+  providerDispatchState: 'not_entered' | 'entered';
+}
+
+export interface ContextSummaryUnknownExternalOutcomeEventV1 {
+  type: 'context.summary_unknown_external_outcome_v1';
+  attemptId: string;
+  terminalBatchKey: SummaryTerminalBatchKeyV1;
+}
+
+export interface ContextNormalResourceResolutionRequiredEventV1 {
+  type: 'context.normal_resource_resolution_required_v1';
+  attempt: SummaryAttemptV1;
+  terminalBatchKey: SummaryTerminalBatchKeyV1;
+  continuation: NormalCompactionContinuationV1;
+  resourceReservationId: string;
+  resourceUnknownEventId: string;
+}
+
+export interface ContextNormalReprepareRequiredEventV1 {
+  type: 'context.normal_reprepare_required_v1';
+  receipt: NormalReprepareReceiptV1;
+  summaryResolutionBatchKey?: import('./context-compaction').SummaryResolutionBatchKeyV1;
+}
+
+export interface ContextNormalReprepareConsumedEventV1 {
+  type: 'context.normal_reprepare_consumed_v1';
+  consumptionKey: import('./context-compaction').NormalReprepareConsumptionKeyV1;
+}
+
+export interface ContextNormalContinuationSupersededEventV1 {
+  type: 'context.normal_continuation_superseded_v1';
+  attemptId: string;
+  reason: 'new_source' | 'fork' | 'rewind' | 'reset';
+}
+
+export interface ContextSummaryBranchAbandonedEventV1 {
+  type: 'context.summary_branch_abandoned_v1';
+  attemptId: string;
+  reason: 'fork' | 'rewind';
+  phase: 'requested' | 'started' | 'resource_resolution';
+}
+
+export interface ContextNormalReprepareConsumptionDetachedEventV1 {
+  type: 'context.normal_reprepare_consumption_detached_v1';
+  attemptId: string;
+  receiptId: string;
+  receipt: import('./context-compaction').NormalReprepareConsumptionDetachReceiptV1;
+}
+
+export interface ContextCheckpointV3ReboundEventV1 {
+  type: 'context.checkpoint_v3_rebound_v1';
+  parentCheckpointId: string;
+  checkpoint: VerifiedContextCheckpointV3;
+  proof: {
+    version: 1;
+    generation: number;
+    ledgerBaseId: string;
+    parentSourceProducingEventCutV1: { revision: number; eventId: string };
+    forkLocalSourceProducingEventCutV1: { revision: number; eventId: string };
+    sourceRangeDigest: string;
+    checksum: string;
+  };
 }
 
 /** Schema-v23 migration closed a pending summary that never reached Provider dispatch. */
@@ -1057,6 +1164,18 @@ export type RuntimeEvent =
   | ContextCompactionCompletedEvent
   | ContextCompactionFailedEvent
   | ContextCompactionResetEvent
+  | ContextSummaryRequestedEventV1
+  | ContextSummaryDispatchStartedEventV1
+  | ContextSummaryCompletedEventV1
+  | ContextSummaryFailedEventV1
+  | ContextSummaryUnknownExternalOutcomeEventV1
+  | ContextNormalResourceResolutionRequiredEventV1
+  | ContextNormalReprepareRequiredEventV1
+  | ContextNormalReprepareConsumedEventV1
+  | ContextNormalContinuationSupersededEventV1
+  | ContextSummaryBranchAbandonedEventV1
+  | ContextNormalReprepareConsumptionDetachedEventV1
+  | ContextCheckpointV3ReboundEventV1
   | ContextCompactionMigrationCancelledEvent
   | ContextCompactionUnknownExternalOutcomeEvent
   | LegacySliceBGuardEvent

@@ -13,6 +13,10 @@ import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { LIMITED_RESOURCE_BUDGET_V1 } from '@/core/runtime/resource-budget';
 import { planRuntimeBudgetAdmissionV1 } from '@/core/runtime/resource-budget-admission';
 import {
+  advanceRuntimeStorageFormatV24,
+  bindMigratedRuntimeLedgerEvidenceV24,
+} from '@/core/runtime/runtime-storage-v24';
+import {
   createInitialRuntimeState,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
@@ -26,6 +30,32 @@ import {
 function temporaryStore(label: string) {
   const directory = mkdtempSync(join(tmpdir(), `openpx-schema-v22-${label}-`));
   return { directory, storePath: join(directory, 'runtime.db') };
+}
+
+function bindCompletedMigrationBuild(
+  store: RuntimeStore,
+  threadId: string,
+  candidate: NonNullable<ReturnType<typeof restoreRuntimeStateFromStore>['migrationCandidate']>,
+): RuntimeState {
+  let result = store.advanceRuntimeV24MigrationBuildV1(threadId, candidate.identity);
+  while (result.status === 'in_progress') {
+    result = store.advanceRuntimeV24MigrationBuildV1(threadId, candidate.identity);
+  }
+  if (result.status !== 'complete') throw new Error('migration build expected');
+  let storageFormat = bindMigratedRuntimeLedgerEvidenceV24({
+    current: candidate.state.storageFormat,
+    legacyEvidence: result.evidence,
+  });
+  for (const metadata of candidate.metadata) {
+    if (!metadata.eventId || !metadata.canonicalBytes)
+      throw new Error('canonical metadata expected');
+    storageFormat = advanceRuntimeStorageFormatV24({
+      current: storageFormat,
+      eventId: metadata.eventId,
+      canonicalBytes: metadata.canonicalBytes,
+    });
+  }
+  return { ...candidate.state, storageFormat };
 }
 
 function serializedLegacyFixture(threadId: string, version: number): Record<string, unknown> {
@@ -201,7 +231,7 @@ describe('runtime schema v22 exact-head migration', () => {
   });
 
   test('rejects fractional and out-of-range schema labels instead of treating them as legacy', () => {
-    for (const version of [1, 21.5, 24]) {
+    for (const version of [1, 21.5, 25]) {
       const { directory, storePath } = temporaryStore(`invalid-${version}`);
       try {
         const threadId = `invalid-schema-${version}`;
@@ -471,7 +501,7 @@ describe('runtime schema v22 exact-head migration', () => {
         },
       );
       const store = createRuntimeStore(storePath);
-      store.saveSnapshot(threadId, state);
+      store.saveSnapshot(threadId, { ...state, schemaVersion: 23 });
       store.appendEvents(
         threadId,
         [
@@ -601,8 +631,9 @@ describe('runtime schema v22 exact-head migration', () => {
         ).toBe('stale');
         expect(store.loadSnapshotRecord(threadId)?.metadata.schemaVersion).toBe(21);
       }
+      const committedState = bindCompletedMigrationBuild(store, threadId, candidate);
       expect(
-        store.compareAndSaveMigratedSnapshot(threadId, candidate.identity, candidate.state),
+        store.compareAndSaveMigratedSnapshot(threadId, candidate.identity, committedState),
       ).toBe('saved');
       store.close();
     } finally {
@@ -660,7 +691,8 @@ describe('runtime schema v22 exact-head migration', () => {
         userId: 'u',
         workspace: '/',
       }).migrationCandidate!;
-      expect(firstStore.compareAndSaveMigratedSnapshot(threadId, first.identity, first.state)).toBe(
+      const firstState = bindCompletedMigrationBuild(firstStore, threadId, first);
+      expect(firstStore.compareAndSaveMigratedSnapshot(threadId, first.identity, firstState)).toBe(
         'saved',
       );
       expect(
@@ -1155,7 +1187,7 @@ describe('runtime schema v22 exact-head migration', () => {
     }
   });
 
-  test('fork remaps legacy source positions and rewind emits no superseded guard event', () => {
+  test('strict fork keeps normalized legacy history in its ledger base and rewind emits no superseded guard event', () => {
     const { directory, storePath } = temporaryStore('fork-rewind');
     const sourceThread = 'legacy-source';
     const targetThread = 'legacy-fork';
@@ -1215,7 +1247,7 @@ describe('runtime schema v22 exact-head migration', () => {
         },
       ]);
       expect(store.forkCurrentSession(sourceThread, targetThread)).toBe(true);
-      const targetEventPosition = store.loadEventsStrict(targetThread)[0]!.id;
+      expect(store.loadEventsStrict(targetThread)).toEqual([]);
       const targetSnapshot = store.loadSnapshot<RuntimeState>(targetThread);
       if (!targetSnapshot) throw new Error('Expected the fork target snapshot.');
       const targetMessage = targetSnapshot.transcript.messages.find(
@@ -1225,8 +1257,7 @@ describe('runtime schema v22 exact-head migration', () => {
         throw new Error('Forked legacy terminal marker is missing.');
       }
       const targetMarker = targetMessage.resultMeta.terminalMigration.originalEventPosition;
-      expect(targetMarker).toBe(targetEventPosition);
-      expect(targetMarker).not.toBe(1);
+      expect(targetMarker).toBe(1);
       expect(store.restoreNamedSnapshot(sourceThread, 'legacy-point')).toBe(true);
       store.close();
 

@@ -235,6 +235,19 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     if (!activeSkill) return { type: 'emit_final' };
   }
 
+  if (state.context.summaryLifecycle.kind === 'requested') {
+    return {
+      type: 'compact_context',
+      compactionId: state.context.summaryLifecycle.attempt.compactionId,
+      resourceEstimate: {
+        inputTokens: state.context.summaryLifecycle.attempt.estimate.totalInputTokens,
+        maxOutputTokens: 6_000,
+      },
+    };
+  }
+  if (state.context.summaryLifecycle.kind === 'started') {
+    return { type: 'stop' };
+  }
   if (state.context.pendingCompaction?.reason === 'manual') {
     return {
       type: 'compact_context',

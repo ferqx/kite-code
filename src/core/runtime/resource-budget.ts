@@ -105,10 +105,16 @@ export interface ResourceBudgetConfiguredEvent {
 export interface ResourceBudgetReservedEvent {
   type: 'resource_budget.reserved';
   reservation: BudgetReservationV1;
+  summaryStartBatchKey?: import('./context-compaction').SummaryStartBatchKeyV1;
+  summaryTerminalBatchKey?: import('./context-compaction').SummaryTerminalBatchKeyV1;
+  summaryResolutionBatchKey?: unknown;
+  normalReprepareConsumptionKey?: import('./context-compaction').NormalReprepareConsumptionKeyV1;
 }
 export interface ResourceBudgetDispatchStartedEvent {
   type: 'resource_budget.dispatch_started';
   reservationId: string;
+  summaryStartBatchKey?: import('./context-compaction').SummaryStartBatchKeyV1;
+  normalReprepareConsumptionKey?: import('./context-compaction').NormalReprepareConsumptionKeyV1;
 }
 export interface ResourceBudgetReconciledEvent {
   type: 'resource_budget.reconciled';
@@ -116,15 +122,26 @@ export interface ResourceBudgetReconciledEvent {
   actual: ResourceUsageV1;
   /** Present only when this reconciliation closes a primary context branch. */
   terminalBatchId?: string;
+  summaryTerminalBatchKey?: import('./context-compaction').SummaryTerminalBatchKeyV1;
+  summaryResolutionBatchKey?: import('./context-compaction').SummaryResolutionBatchKeyV1;
 }
 export interface ResourceBudgetReleasedEvent {
   type: 'resource_budget.released';
   reservationId: string;
-  proof?: 'local_provider_admission_denied';
+  proof?: 'local_provider_admission_denied' | 'prepared_dispatch_not_entered_v1';
+  summaryDispatchGuardProof?: {
+    kind: 'prepared_dispatch_not_entered_v1';
+    guardNonce: string;
+    producerGeneration: number;
+    summaryStartBatchId: string;
+  };
+  summaryTerminalBatchKey?: import('./context-compaction').SummaryTerminalBatchKeyV1;
 }
 export interface ResourceBudgetUnknownEvent {
   type: 'resource_budget.unknown';
   reservationId: string;
+  summaryTerminalBatchKey?: import('./context-compaction').SummaryTerminalBatchKeyV1;
+  normalReprepareConsumptionKey?: import('./context-compaction').NormalReprepareConsumptionKeyV1;
 }
 export interface ResourceBudgetWaiterEnqueuedEvent {
   type: 'resource_budget.waiter_enqueued';
@@ -557,7 +574,9 @@ export function reduceResourceBudgetStateV1(
         reservation.state !== 'reserved' &&
         !(
           reservation.state === 'dispatch_started' &&
-          event.proof === 'local_provider_admission_denied'
+          (event.proof === 'local_provider_admission_denied' ||
+            (event.proof === 'prepared_dispatch_not_entered_v1' &&
+              event.summaryDispatchGuardProof?.kind === 'prepared_dispatch_not_entered_v1'))
         )
       ) {
         throw new Error('Only a proven undispatched reservation can be released.');

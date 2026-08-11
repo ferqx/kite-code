@@ -202,10 +202,10 @@ describe('context reclaim shadow integration', () => {
           policyVersion: 1,
           mode: 'shadow',
           rawInputTokens: shadowPrepared.resourceEstimate.inputTokens,
-          candidateBlockCount: 1,
-          candidateCallCount: 1,
-          estimatedSavedChars: expect.any(Number),
-          estimatedSavedTokens: expect.any(Number),
+          candidateBlockCount: 0,
+          candidateCallCount: 0,
+          estimatedSavedChars: 0,
+          estimatedSavedTokens: 0,
         }),
       ]);
       const serializedSample = JSON.stringify(collector.snapshot());

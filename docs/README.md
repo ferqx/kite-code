@@ -3,9 +3,9 @@
 AI 请先读 [AGENTS.md](AGENTS.md) 获取简明工作流。本文件是 AI 与开发者共用的入口。
 
 当前总体架构见 [Kite Code 六概念 Runtime 架构](active/six-concept-runtime-architecture.md)：它把物理上的 `protocol → core → app` 三层与 Core 内部的 Agent、Runtime Kernel、Capability、Policy、Execution、Verification 六概念统一起来。上下文缩减的当前实现边界见
-[三级上下文缩减：当前实现与清场边界](active/three-tier-context-reduction.md)；该文档明确区分已完成的
-L1/L2、保留的 checkpoint-v1 手动兼容路径、已移除的旧 Slice B producer，以及尚未实施的
-MicroCompact、Checkpoint Working Set 与 SummaryCompact。Session Memory 是独立 backlog，不是当前路线前置。
+[三级上下文缩减：渐进式实现与资格边界](active/three-tier-context-reduction.md)；该文档描述已通过
+PSMC-03～06 Gate 的 Micro/Working Set/Summary、strict-v24 branch/continuation，以及仍保持暂停的 Session
+Memory 和默认关闭的 rollout 边界。
 
 ## 权威顺序
 

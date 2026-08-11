@@ -93,7 +93,6 @@
       "id": "capabilities",
       "sources": [
         "src/core/capabilities/**",
-        "src/core/controllers/model-controller.ts",
         "src/core/controllers/tool-controller.ts",
         "src/protocol/capabilities.ts"
       ],
@@ -370,6 +369,12 @@
         "scripts/evals/*compaction-semantic-evidence.ts",
         "scripts/evals/snapshot-tracked-semantic-input.ts",
         "scripts/evals/contracts/compaction-*.ts",
+        "scripts/runtime/produce-progressive-context-qualification.ts",
+        "scripts/runtime/verify-progressive-context-qualification.ts",
+        "tests/context-working-set*.test.ts",
+        "tests/progressive-context-orchestrator.test.ts",
+        "tests/runtime/runtime-event-v24.test.ts",
+        "tests/runtime/summary-lifecycle-v1.test.ts",
         ".github/workflows/compaction-semantic-evaluation.yml"
       ],
       "documents": [
@@ -446,7 +451,13 @@
         "src/core/session-logger/recorder.ts",
         "src/core/harness/tool-runner.ts",
         "src/core/runtime/context-compaction.ts",
+        "src/core/runtime/runtime-event-v24.ts",
+        "src/core/runtime/runtime-storage-v24.ts",
+        "src/core/runtime/summary-lifecycle-v1.ts",
+        "src/core/runtime/store.ts",
         "scripts/evals/prompt-contract-ab.ts",
+        "scripts/runtime/produce-progressive-context-qualification.ts",
+        "scripts/runtime/verify-progressive-context-qualification.ts",
         "tests/tui-system/scenarios/prompt-contract-v2-production.test.ts",
         "tests/prompts/prompt-contract-budget.test.ts",
         "tests/evals/prompt-contract-ab.test.ts",
@@ -455,6 +466,9 @@
         "tests/tool-result-budget-v2.test.ts",
         "tests/runtime/context-*.test.ts",
         "tests/runtime/schema-v22-migration.test.ts",
+        "tests/runtime/schema-v23-migration.test.ts",
+        "tests/runtime/runtime-event-v24.test.ts",
+        "tests/runtime/summary-lifecycle-v1.test.ts",
         "tests/runtime/tool-terminal-v2.test.ts",
         "scripts/evals/context-reduction-slice-a-local-gate.ts"
       ],
@@ -493,6 +507,7 @@
         "docs/space/plans/2026-08-10-three-tier-context-reduction-slice-b.md",
         "docs/space/plans/2026-08-10-progressive-context-compaction.md",
         "docs/space/execution/completed/2026-08-10-three-tier-context-reduction-slice-a.md",
+        "docs/space/execution/completed/2026-08-11-progressive-context-compaction.md",
         "docs/space/execution/completed/2026-08-10-progressive-compaction-old-route-cleanup.md",
         "docs/space/plans/2026-08-08-prompt-contract-v2.md",
         "docs/adr/0021-context-compaction-checkpoint.md",

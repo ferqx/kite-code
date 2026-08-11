@@ -1,6 +1,6 @@
 # Plans 注册表
 
-最后更新：2026-08-11（ADR-0101 accepted、RFC review GO；Checkpoint 工作集计划 active，当前入口 PSMC-03）
+最后更新：2026-08-11（渐进式三级上下文压缩 PSMC-03～06 已完成并归档；rollout flags 保持默认关闭）
 
 所有实施计划的统一入口。每个计划文件有独立状态，本注册表提供全局视图和分叉关系。
 
@@ -19,7 +19,7 @@
 | 计划 | 状态 | 优先级 | 依赖 | 替代/分叉 | 阶段产出 |
 |------|------|--------|------|-----------|----------|
 | [`2026-08-10-three-tier-context-reduction-slice-a.md`](2026-08-10-three-tier-context-reduction-slice-a.md) | archived | P0 | ADR-0095/0096 accepted、Gate A0 治理审计通过 | [完成记录](../execution/completed/2026-08-10-three-tier-context-reduction-slice-a.md) | 全工具 L1 预算、统一 prepared/final admission、L2 live、schema v22 与 Gate A 已完成；新路径默认 off |
-| [`2026-08-10-progressive-context-compaction.md`](2026-08-10-progressive-context-compaction.md) | active | P0 | ADR-0100/0101 accepted、RFC reviewed GO、PSMC-01/02 completed | 取代会话记忆作为当前第二级的路线 | 当前入口 PSMC-03；计划交付 MicroCompact、Checkpoint Working Set、SummaryCompact；Session Memory 排除 |
+| [`2026-08-10-progressive-context-compaction.md`](2026-08-10-progressive-context-compaction.md) | archived | P0 | ADR-0100/0101 accepted、RFC reviewed GO、PSMC-01/02 completed | [完成记录](../execution/completed/2026-08-11-progressive-context-compaction.md) | MicroCompact、Checkpoint Working Set、SummaryCompact 与 PSMC-06 Gate 已完成；Session Memory 排除，rollout flags 默认关闭 |
 | [`2026-08-10-progressive-session-memory-compaction.md`](2026-08-10-progressive-session-memory-compaction.md) | superseded | P0 | PSMC-01/02 已完成 | [清场完成记录](../execution/completed/2026-08-10-progressive-compaction-old-route-cleanup.md)；后续由新计划接管 | 只保留旧路线清场与会话记忆设计历史，不再授权 PSMC-03+ |
 | [`2026-08-10-three-tier-context-reduction-slice-b.md`](2026-08-10-three-tier-context-reduction-slice-b.md) | superseded | P0 | Slice A Gate A/完成记录、ADR-0096/0097 | 先由旧会话记忆计划取代，最终后续为 Checkpoint 工作集计划 | canonical L3 source、cache-safe fork、checkpoint-v2 writer 与 durable refill guard producer 已移除；schema v23 持久化安全基础保留 |
 | [`2026-08-09-context-reclaim-foundation.md`](2026-08-09-context-reclaim-foundation.md) | archived | P0 | ADR-0095、ContextProjection、ToolSpec Registry | 三级 RFC 的首个安全切片；live/L3 另立 ADR | L1 policy identity、L2 off/shadow、无正文证据与零 payload 回归；[完成记录](../execution/completed/2026-08-10-context-reclaim-foundation.md) |

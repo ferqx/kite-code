@@ -78,6 +78,7 @@ Enter 只进入确认层；确认层默认选择“恢复代码和会话”，�
 确认提交和异步执行分别防重，任一恢复范围在修改会话或文件前都验证恢复点存在且快照可解析。
 恢复出的新会话回到默认授权，不继承 full access、命令 grant、瞬时 capability binding 或
 Provider session waiver。
+schema v24 会话 fork 由 Core 生成单次 mutation candidate，TUI 只提交该 candidate 并消费 typed completion；遇到提交 ACK 丢失时必须按 receipt 查询最终结果，不能把“返回未知”直接展示为失败，也不能在重试时重新生成 nonce。源会话 identity、选择边界和 authority ledger 不一致时统一 fail closed。
 正常完成的 `run.completed + turn.completed` 即使以 batch 原子提交，也必须生成同一个命名恢复点。
 
 `/context` 是只读诊断命令，显示 system、当前工具 schema、checkpoint summary、live transcript、动态 Runtime 和 provider framing 的同源 token 投影。它与正常模型调用和 compaction acceptance 术语（压缩验收）共用 Runtime 的 projection environment resolver 术语（投影环境解析器）及当前 adapter metadata 术语（适配器元数据）解析出的模型能力，因此当前 MCP binding、tool search、workflow skill、active inline skill instructions 和真实模型窗口必须计入估算。`/compact reset` 不以本地 hard threshold 术语（硬比例阈值）做容量门禁；重置后下一次真实调用是否被接受由 Provider 术语（模型供应商）决定。

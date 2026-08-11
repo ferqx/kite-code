@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { aiMessage } from '@/core/messages';
+import { aiMessage, humanMessage } from '@/core/messages';
 import type { ContextFrame, ToolCallBlockFrame } from '@/core/model/context-frame';
 import {
   applyContextReclaimPlan,
@@ -102,6 +102,14 @@ function plan(frames: ContextFrame[], activeTurnId = 'active-turn') {
   });
 }
 
+function recentSettledFrames(): ContextFrame[] {
+  return ['recent-turn-1', 'recent-turn-2'].map((turnId) => ({
+    kind: 'user' as const,
+    turnId,
+    message: Object.assign(humanMessage({ id: `user-${turnId}`, content: turnId }), { turnId }),
+  }));
+}
+
 describe('context reclaim planner and applier', () => {
   test('selects old successful read/search blocks and emits the unique stable stub', () => {
     const original = toolBlock({
@@ -114,7 +122,7 @@ describe('context reclaim planner and applier', () => {
         },
       ],
     });
-    const frames: ContextFrame[] = [original];
+    const frames: ContextFrame[] = [original, ...recentSettledFrames()];
     const before = JSON.stringify(frames);
     const reclaim = plan(frames);
 
@@ -245,6 +253,47 @@ describe('context reclaim planner and applier', () => {
     });
   });
 
+  test('keeps the active, two most recent settled turns, and checkpoint uncovered tail raw', () => {
+    const frames: ContextFrame[] = [
+      toolBlock({
+        frameId: 'old',
+        turnId: 'old-turn',
+        calls: [{ id: 'old-read', name: 'read_file' }],
+      }),
+      toolBlock({
+        frameId: 'recent-1',
+        turnId: 'recent-turn-1',
+        calls: [{ id: 'recent-read-1', name: 'read_file' }],
+      }),
+      toolBlock({
+        frameId: 'recent-2',
+        turnId: 'recent-turn-2',
+        calls: [{ id: 'recent-read-2', name: 'read_file' }],
+      }),
+      toolBlock({
+        frameId: 'active',
+        turnId: 'active-turn',
+        calls: [{ id: 'active-read', name: 'read_file' }],
+      }),
+    ];
+
+    const reclaim = plan(frames);
+    expect(reclaim.selected.map((entry) => entry.toolCallId)).toEqual(['old-read']);
+    expect(reclaim.rejectionCounts).toEqual({ recent_turn: 2, current_turn: 1 });
+
+    const uncoveredTail = planContextReclaim({
+      frames,
+      rawProjectionDigest: 'b'.repeat(64),
+      environmentDigest: 'c'.repeat(64),
+      pressure: 'warning',
+      activeTurnId: 'active-turn',
+      checkpointBoundary: 'checkpoint-boundary',
+      preserveUncoveredTail: true,
+    });
+    expect(uncoveredTail.selected).toEqual([]);
+    expect(uncoveredTail.rejectionCounts).toEqual({ uncovered_tail: 3, current_turn: 1 });
+  });
+
   test('keeps a multi-call block atomic and rejects mismatched inputs without mutation', () => {
     const block = toolBlock({
       frameId: 'multi-search',
@@ -261,7 +310,8 @@ describe('context reclaim planner and applier', () => {
         },
       ],
     });
-    const reclaim = plan([block]);
+    const frames: ContextFrame[] = [block, ...recentSettledFrames()];
+    const reclaim = plan(frames);
     expect(reclaim.selectedBlockCount).toBe(1);
     expect(reclaim.selected.map((entry) => entry.toolCallId)).toEqual(['search-1', 'search-2']);
 
@@ -270,6 +320,7 @@ describe('context reclaim planner and applier', () => {
         ...block,
         calls: [{ ...block.calls[0]!, content: 'changed' }, block.calls[1]!],
       },
+      ...recentSettledFrames(),
     ];
     const before = JSON.stringify(changed);
     const rejected = applyContextReclaimPlan(changed, reclaim);
@@ -284,7 +335,7 @@ describe('context reclaim planner and applier', () => {
       selected: reclaim.selected.slice(0, 1),
       selectedBlockCount: 1,
     };
-    expect(applyContextReclaimPlan([block], partialPlan)).toMatchObject({
+    expect(applyContextReclaimPlan(frames, partialPlan)).toMatchObject({
       status: 'rejected',
       reason: 'plan_structure_mismatch',
     });
@@ -293,7 +344,7 @@ describe('context reclaim planner and applier', () => {
       ...reclaim,
       policyId: 'context-reclaim:forged',
     } as unknown as typeof reclaim;
-    expect(applyContextReclaimPlan([block], wrongHeader)).toMatchObject({
+    expect(applyContextReclaimPlan(frames, wrongHeader)).toMatchObject({
       status: 'rejected',
       reason: 'plan_header_mismatch',
     });
@@ -334,6 +385,7 @@ describe('context reclaim planner and applier', () => {
         frameId: 'stable',
         calls: [{ id: 'read-stable', name: 'read_file' }],
       }),
+      ...recentSettledFrames(),
     ];
     const firstProjection = digestRawContextProjection({
       providerMessages: serializeFramesToMessages(frames),

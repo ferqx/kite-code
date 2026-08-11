@@ -329,9 +329,10 @@ export async function invokeRuntimeModel(params: {
   preparedCapabilitySetV2?: PreparedContextCapabilitySetV2;
   effectLeaseId?: string;
   reservationIds?: readonly string[];
+  primaryRequestId?: string;
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
-  const requestId = genInteractionId();
+  const requestId = params.primaryRequestId ?? genInteractionId();
   const retryEvents: RuntimeEvent[] = [];
 
   // 注册 retry listener — 模型通过 transientRetryMiddleware 实现重试，
@@ -585,6 +586,8 @@ export async function invokeRuntimeModel(params: {
           promptContractVersion: projectionEnvironment.promptContractVersion,
           projectInstructions: projectionEnvironment.projectInstructions,
           sandboxBackend: projectionEnvironment.sandboxBackend,
+          projectionEnvironment,
+          contextWindowTokens: modelCapabilities.contextWindowTokens,
         });
     const preflight = params.preparedContextV2
       ? params.preparedContextV2.effectiveProjection.preflight
@@ -633,7 +636,10 @@ export async function invokeRuntimeModel(params: {
       const startedAt = Date.now();
       try {
         const environmentDigest = digestProjectionEnvironment(projectionEnvironment);
-        const checkpointBoundary = state.context.activeCheckpoint?.coveredThroughMessageId;
+        const checkpointBoundary =
+          state.context.activeCheckpoint?.version === 3
+            ? state.context.activeCheckpoint.source.coveredThroughMessageId
+            : undefined;
         const rawProjectionDigest = digestRawContextProjection({
           providerMessages: projection.providerMessages,
           estimate: projection.estimate,

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { createHash } from 'node:crypto';
 import { executeContextCompaction } from '../../src/core/controllers/compaction-controller';
-import { expectedCompactionSourceDigest } from '../../src/core/model/compaction-summary';
 import type { ContextTokenEstimate } from '../../src/core/model/context-budget';
+import { createVerifiedContextCheckpointV3 } from '../../src/core/model/context-checkpoint-v3';
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
@@ -42,24 +42,24 @@ function requestedState() {
     workspace: '/workspace',
   });
   initial.transcript.messages = [
+    ...Array.from({ length: 8 }, (_, index) => ({
+      kind: 'user' as const,
+      messageId: `message-${index + 1}`,
+      turnId: `turn-historical-${index + 1}`,
+      ordinal: index,
+      createdAt: `2026-07-20T00:00:0${index}.000Z`,
+      content: `retain fact ${index} `.repeat(500),
+    })),
     {
       kind: 'user',
-      messageId: 'message-1',
-      turnId: 'turn-historical',
-      ordinal: 0,
-      createdAt: '2026-07-20T00:00:00.000Z',
-      content: 'retain this fact '.repeat(1_200),
-    },
-    {
-      kind: 'user',
-      messageId: 'message-2',
+      messageId: 'message-current',
       turnId: initial.turn.turnId,
-      ordinal: 1,
-      createdAt: '2026-07-20T00:00:01.000Z',
+      ordinal: 8,
+      createdAt: '2026-07-20T00:00:09.000Z',
       content: 'current live work',
     },
   ];
-  return reduceRuntimeState(initial, {
+  const requested = reduceRuntimeState(initial, {
     type: 'context.compaction_requested',
     compactionId: 'compact-1',
     reason: 'manual',
@@ -68,6 +68,10 @@ function requestedState() {
     force: false,
     estimate,
   });
+  requested.revision = 1;
+  requested.lastAppliedEventId = 'e'.repeat(64);
+  requested.appliedEventIds = ['e'.repeat(64)];
+  return requested;
 }
 
 function validCheckpoint(
@@ -77,25 +81,27 @@ function validCheckpoint(
   summaryText = 'A compact narrative.',
 ): ContextCompactionCheckpoint {
   const before = buildContextProjection({ role: 'agent', state }).estimate.totalInputTokens;
-  const checkpoint: ContextCompactionCheckpoint = {
-    compactionId: 'compact-1',
-    version: 1,
-    sourceRevision,
-    sourceDigest: expectedCompactionSourceDigest(undefined, [state.transcript.messages[0]!]),
-    coveredThroughMessageId: 'message-1',
-    coveredThroughTurnId: 'turn-historical',
-    summary: summaryText,
-    inputTokensBefore: before,
-    inputTokensAfter: 0,
-    reason,
-    createdAt: '2026-07-20T00:00:01.000Z',
-  };
+  const build = (after: number) =>
+    createVerifiedContextCheckpointV3({
+      state,
+      checkpointId: 'compact-1:v3',
+      compactionId: 'compact-1',
+      reason,
+      coveredThroughMessageId: 'message-8',
+      summary: summaryText,
+      inputTokensBefore: before,
+      inputTokensAfter: after,
+      routeIdentityDigest: digestProjectionEnvironment({ serializedTools: [], workflowSkills: [] }),
+      sourceProducingEventCutV1: { revision: sourceRevision, eventId: 'e'.repeat(64) },
+      createdAt: '2026-07-20T00:00:01.000Z',
+    });
+  const candidate = build(Math.max(0, before - 1));
   return {
-    ...checkpoint,
+    ...candidate,
     inputTokensAfter: buildContextProjection({
       role: 'agent',
       state,
-      candidateCheckpoint: checkpoint,
+      candidateCheckpoint: candidate,
     }).estimate.totalInputTokens,
   };
 }
@@ -250,8 +256,18 @@ describe('eventized context compaction', () => {
     const store = createRuntimeStore(':memory:');
     const kernel = new AgentKernel({
       store,
-      initialState: state,
+      initialState: {
+        ...state,
+        revision: 0,
+        lastAppliedEventId: undefined,
+        appliedEventIds: [],
+        context: { ...state.context, pendingCompaction: undefined },
+      },
       interactionMode: 'accept_edits',
+    });
+    kernel.processEvent({
+      type: 'context.compaction_requested',
+      ...state.context.pendingCompaction!,
     });
     const lease = kernel.beginEffect({ type: 'compact_context', compactionId: 'compact-1' });
     kernel.processEvent({
@@ -298,7 +314,7 @@ describe('eventized context compaction', () => {
           createdAt: '2026-07-20T00:00:01.000Z',
         }),
       }),
-    ).toMatchObject([{ type: 'context.compaction_failed', errorKind: 'unsafe_boundary' }]);
+    ).toMatchObject([{ type: 'context.compaction_failed', errorKind: 'invalid_candidate' }]);
   });
 
   test('rejects a checkpoint with fabricated token savings', async () => {

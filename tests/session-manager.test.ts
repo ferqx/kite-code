@@ -81,6 +81,35 @@ function makeDeps(): SessionDeps {
   };
 }
 
+function seedSettledRuntimeMessages(input: {
+  storePath: string;
+  threadId: string;
+  count: number;
+  content(index: number): string;
+}): void {
+  const kernel = createAgentKernel({
+    threadId: input.threadId,
+    userId: 'tui',
+    workspace: '/tmp/ws',
+    storePath: input.storePath,
+  });
+  try {
+    for (let index = 0; index < input.count; index++) {
+      if (index > 0) {
+        kernel.processEvent({ type: 'turn.started', turnId: `turn-${index}` });
+      }
+      kernel.processEvent({
+        type: 'user.message_appended',
+        messageId: `message-${index}`,
+        content: input.content(index),
+      });
+      kernel.processEvent({ type: 'turn.completed', turnId: kernel.getState().turn.turnId });
+    }
+  } finally {
+    kernel.close();
+  }
+}
+
 function makeManager() {
   return new SessionManager(makeDeps());
 }
@@ -227,7 +256,7 @@ describe('SessionManager', () => {
           recommendedGrant: 'approve_once',
         },
       };
-      store.saveSnapshot(threadId, state);
+      store.saveSnapshot(threadId, { ...state, schemaVersion: 23 });
       store.appendEvents(threadId, [
         {
           type: 'approval.granted',
@@ -311,6 +340,20 @@ describe('SessionManager', () => {
       userId: 'tui',
       workspace: '/tmp/ws',
     });
+    state.transcript.messages = Array.from({ length: 3 }, (_, index) => ({
+      kind: 'user' as const,
+      messageId: `live-${index}`,
+      turnId: `turn-${index}`,
+      ordinal: index,
+      createdAt: `2026-08-08T00:0${index}:00.000Z`,
+      content: `message ${index}`,
+    }));
+    state.revision = 1;
+    state.lastAppliedEventId = 'a'.repeat(64);
+    state.context.lastTranscriptProducingEventCutV1 = {
+      revision: 1,
+      eventId: 'a'.repeat(64),
+    };
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'input',
@@ -331,12 +374,8 @@ describe('SessionManager', () => {
       type: 'user.command_invoked',
       command: '/compact',
     });
-    expect(persisted[1]).toMatchObject({
-      type: 'context.compaction_requested',
-      reason: 'manual',
-      force: false,
-    });
-    expect(result.text).toContain('queued');
+    expect(persisted).toHaveLength(1);
+    expect(result.text).toBe('No safe messages to compact.');
   });
 
   test('retries manual compaction after a terminal run releases its live control', async () => {
@@ -412,45 +451,20 @@ describe('SessionManager', () => {
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createInitialRuntimeState({
+      seedSettledRuntimeMessages({
+        storePath: runtimeStorePathFor(deps.checkpointPath),
         threadId,
-        userId: 'tui',
-        workspace: '/tmp/ws',
+        count: 1,
+        content: () => 'Hello',
       });
-      state.transcript.messages = [
-        {
-          kind: 'user',
-          messageId: 'user-1',
-          turnId: 'turn-1',
-          ordinal: 0,
-          createdAt: '2026-08-08T00:00:00.000Z',
-          content: 'Hello',
-        },
-        {
-          kind: 'assistant',
-          messageId: 'assistant-1',
-          turnId: 'turn-1',
-          ordinal: 1,
-          createdAt: '2026-08-08T00:00:01.000Z',
-          content: 'Hello!',
-          toolCalls: [],
-        },
-      ];
-      const store = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
-      try {
-        store.saveSnapshot(threadId, state);
-      } finally {
-        store.close();
-      }
 
       const result = await mgr.handleContextCompaction(threadId);
 
       expect(result.text).toContain('Not enough reducible context');
       expect(result.events).toContainEqual(
         expect.objectContaining({
-          type: 'context.compaction_failed',
+          type: 'context.summary_failed_v1',
           errorKind: 'insufficient_reduction',
-          retryable: false,
         }),
       );
     } finally {
@@ -625,15 +639,7 @@ describe('SessionManager', () => {
 
     expect(persisted.map((event) => (event as { type: string }).type)).toEqual([
       'user.command_invoked',
-      'context.compaction_requested',
-      'context.compaction_failed',
     ]);
-    expect(persisted.at(-1)).toMatchObject({
-      type: 'context.compaction_failed',
-      errorKind: 'unsafe_boundary',
-      retryable: false,
-      message: 'No new messages to compact.',
-    });
     expect(result.text).toBe('No new messages to compact.');
     expect(result.isError).toBeUndefined();
   });
@@ -689,12 +695,7 @@ describe('SessionManager', () => {
 
     const result = await mgr.handleContextCompaction(threadId, 'focus on unfinished work');
 
-    expect(persisted).toContainEqual(
-      expect.objectContaining({
-        type: 'context.compaction_failed',
-        message: 'No new messages to compact.',
-      }),
-    );
+    expect(persisted).toEqual([expect.objectContaining({ type: 'user.command_invoked' })]);
     expect(result.text).toBe('No new messages to compact.');
   });
 
@@ -761,8 +762,8 @@ describe('SessionManager', () => {
       inputTokensBefore: 20_000,
       inputTokensAfter: 2_000,
     });
-    expect(snapshot!.estimate.summaryTokens).toBeGreaterThan(0);
-    expect(snapshot!.estimate.transcriptTokens).toBeLessThan(1_000);
+    expect(snapshot!.estimate.summaryTokens).toBe(0);
+    expect(snapshot!.estimate.transcriptTokens).toBeGreaterThan(1_000);
   });
 
   test('persists /compact for replay without adding it to the model transcript', async () => {
@@ -835,6 +836,12 @@ describe('SessionManager', () => {
     }));
     state.turn.turnIndex = 6;
     state.turn.turnId = 'turn-5';
+    state.revision = 1;
+    state.lastAppliedEventId = 'b'.repeat(64);
+    state.context.lastTranscriptProducingEventCutV1 = {
+      revision: 1,
+      eventId: 'b'.repeat(64),
+    };
     state.interactions = {
       kind: 'awaiting_user_input',
       interactionId: 'input',
@@ -855,12 +862,8 @@ describe('SessionManager', () => {
       type: 'user.command_invoked',
       command: '/compact',
     });
-    expect(persisted[1]).toMatchObject({
-      type: 'context.compaction_requested',
-      reason: 'manual',
-      force: false,
-    });
-    expect(result.text).toContain('queued');
+    expect(persisted).toHaveLength(1);
+    expect(result.text).toBe('No safe messages to compact.');
   });
 
   test('executes standalone manual compaction and persists the completed checkpoint', async () => {
@@ -887,38 +890,36 @@ describe('SessionManager', () => {
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createInitialRuntimeState({
+      seedSettledRuntimeMessages({
+        storePath: runtimeStorePathFor(deps.checkpointPath),
         threadId,
-        userId: 'tui',
-        workspace: '/tmp/ws',
+        count: 8,
+        content: (index) => `Historical goal ${index}: ${'important context '.repeat(300)}`,
       });
-      state.transcript.messages = Array.from({ length: 3 }, (_, index) => ({
-        kind: 'user' as const,
-        messageId: `message-${index}`,
-        turnId: `turn-${index}`,
-        ordinal: index,
-        createdAt: `2026-08-08T00:0${index}:00.000Z`,
-        content: `Historical goal ${index}: ${'important context '.repeat(1_000)}`,
-      }));
-      const store = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
-      try {
-        store.saveSnapshot(threadId, state);
-      } finally {
-        store.close();
-      }
 
       const result = await mgr.handleContextCompaction(threadId);
 
       expect(server.getRequestCount()).toBe(1);
       expect(result.events).toContainEqual(
-        expect.objectContaining({ type: 'context.compaction_completed' }),
+        expect.objectContaining({ type: 'context.summary_completed_v1' }),
+      );
+      expect(result.events.map((event) => event.type)).toEqual(
+        expect.arrayContaining([
+          'resource_budget.reserved',
+          'resource_budget.dispatch_started',
+          'context.summary_dispatch_started_v1',
+          'resource_budget.unknown',
+        ]),
       );
       const restored = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
       try {
         expect(
           restored.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>(threadId)?.context
             .activeCheckpoint,
-        ).toMatchObject({ coveredThroughMessageId: 'message-2' });
+        ).toMatchObject({
+          version: 3,
+          source: { coveredThroughMessageId: 'message-7' },
+        });
       } finally {
         restored.close();
       }
@@ -948,43 +949,37 @@ describe('SessionManager', () => {
     try {
       const mgr = new SessionManager(deps);
       const threadId = mgr.createSession('/tmp/ws');
-      const state = createInitialRuntimeState({
+      seedSettledRuntimeMessages({
+        storePath: runtimeStorePathFor(deps.checkpointPath),
         threadId,
-        userId: 'tui',
-        workspace: '/tmp/ws',
+        count: 8,
+        content: (index) => `Historical goal ${index}: ${'important context '.repeat(300)}`,
       });
-      state.transcript.messages = Array.from({ length: 3 }, (_, index) => ({
-        kind: 'user' as const,
-        messageId: `message-${index}`,
-        turnId: `turn-${index}`,
-        ordinal: index,
-        createdAt: `2026-08-08T00:0${index}:00.000Z`,
-        content: `Historical goal ${index}: ${'important context '.repeat(1_000)}`,
-      }));
-      const store = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
-      try {
-        store.saveSnapshot(threadId, state);
-      } finally {
-        store.close();
-      }
 
       const result = await mgr.handleContextCompaction(threadId);
 
       expect(server.getRequestCount()).toBe(0);
       expect(result.events).toContainEqual(
         expect.objectContaining({
-          type: 'context.compaction_failed',
+          type: 'context.summary_failed_v1',
           errorKind: 'provider_admission_denied',
-          retryable: false,
         }),
+      );
+      expect(result.events.map((event) => event.type)).toEqual(
+        expect.arrayContaining([
+          'resource_budget.reserved',
+          'resource_budget.dispatch_started',
+          'context.summary_dispatch_started_v1',
+          'resource_budget.released',
+        ]),
       );
       expect(result.isError).toBe(true);
       const restored = createRuntimeStore(runtimeStorePathFor(deps.checkpointPath));
       try {
         expect(
           restored.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>(threadId)?.context
-            .pendingCompaction,
-        ).toBeUndefined();
+            .summaryLifecycle,
+        ).toEqual({ kind: 'idle' });
       } finally {
         restored.close();
       }

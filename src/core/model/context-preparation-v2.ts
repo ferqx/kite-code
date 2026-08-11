@@ -159,6 +159,7 @@ export interface PrepareContextRequestV2Input {
    * candidate checkpoint while retaining the immutable lease source identity.
    */
   candidateCheckpoint?: ContextCompactionCheckpoint;
+  checkpointProjectionMode?: 'active' | 'raw';
   sourceIdentityState?: Readonly<RuntimeState>;
 }
 
@@ -219,7 +220,8 @@ function deepFreezeOwned<T>(value: T): Readonly<T> {
 
 function projectionSourceIdentity(input: PrepareContextRequestV2Input): ProjectionSourceIdentityV2 {
   const identityState = input.sourceIdentityState ?? input.state;
-  const checkpoint = identityState.context.activeCheckpoint;
+  const checkpoint =
+    input.checkpointProjectionMode === 'raw' ? undefined : identityState.context.activeCheckpoint;
   const transcriptPrefixIdentity = identityState.transcript.messages.map((message) => {
     const base = {
       kind: message.kind,
@@ -750,6 +752,23 @@ function resolveReclaimApplication(input: {
       effective: rawProjection,
     };
   }
+  const hasVerificationBarrier = Object.values(request.state.verification.records).some(
+    (record) =>
+      record.status === 'pending' ||
+      record.status === 'running' ||
+      record.status === 'repair_pending' ||
+      record.status === 'compensating',
+  );
+  if (request.state.interactions.kind !== 'idle' || hasVerificationBarrier) {
+    return {
+      evidence: {
+        kind: 'raw_fallback',
+        failure: 'ineligible',
+        rawFramesDigest: rawProjection.framesDigest,
+      },
+      effective: rawProjection,
+    };
+  }
   const committed =
     mode === 'live' && request.state.context.reclaimCommit
       ? committedReclaimApplication({
@@ -772,7 +791,10 @@ function resolveReclaimApplication(input: {
   }
 
   const environmentDigest = digestProjectionEnvironment(request.environment);
-  const checkpointBoundary = request.state.context.activeCheckpoint?.coveredThroughMessageId;
+  const checkpointBoundary =
+    request.state.context.activeCheckpoint?.version === 3
+      ? request.state.context.activeCheckpoint.source.coveredThroughMessageId
+      : undefined;
   const rawProjectionDigest = digestRawContextProjection({
     providerMessages: rawProjection.providerMessages,
     estimate: rawProjection.estimate,
@@ -795,6 +817,7 @@ function resolveReclaimApplication(input: {
     environmentDigest,
     pressure: rawProjection.preflight.status,
     ...(checkpointBoundary ? { checkpointBoundary } : {}),
+    preserveUncoveredTail: Boolean(checkpointBoundary),
     ...(request.state.turn.status === 'active' ? { activeTurnId: request.state.turn.turnId } : {}),
   });
   const plan = planned.plan;
@@ -830,8 +853,8 @@ function resolveReclaimApplication(input: {
       }, 0)
     : plan.estimatedSavedTokens;
   const incrementalSavingRatio =
-    rawProjection.estimate.totalInputTokens > 0
-      ? incrementalSavedTokens / rawProjection.estimate.totalInputTokens
+    rawProjection.estimate.transcriptTokens > 0
+      ? incrementalSavedTokens / rawProjection.estimate.transcriptTokens
       : 0;
   if (
     incrementalSavedTokens < CONTEXT_RECLAIM_LIVE_POLICY_V2.minEstimatedSavedTokens ||
@@ -887,8 +910,8 @@ function resolveReclaimApplication(input: {
   });
   const actualSaved = rawProjection.estimate.totalInputTokens - effective.estimate.totalInputTokens;
   const actualRatio =
-    rawProjection.estimate.totalInputTokens > 0
-      ? actualSaved / rawProjection.estimate.totalInputTokens
+    rawProjection.estimate.transcriptTokens > 0
+      ? actualSaved / rawProjection.estimate.transcriptTokens
       : 0;
   if (
     actualSaved < CONTEXT_RECLAIM_LIVE_POLICY_V2.minEstimatedSavedTokens ||
@@ -963,7 +986,12 @@ export function prepareContextRequestV2(
       promptContractVersion: input.environment.promptContractVersion,
       projectInstructions: input.environment.projectInstructions,
       sandboxBackend: input.environment.sandboxBackend,
+      projectionEnvironment: input.environment,
+      ...(input.capabilities.contextWindowTokens
+        ? { contextWindowTokens: input.capabilities.contextWindowTokens }
+        : {}),
       candidateCheckpoint: input.candidateCheckpoint,
+      checkpointProjectionMode: input.checkpointProjectionMode,
     });
     const rawPreflight = preflightModelContext({
       estimate: raw.estimate,

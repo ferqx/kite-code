@@ -44,11 +44,15 @@ import {
   CONTEXT_RECLAIM_LIVE_POLICY_V2,
   prepareContextRequestV2,
 } from '@/core/model/context-preparation-v2';
-import { buildContextProjection } from '@/core/model/context-projection';
+import {
+  buildContextProjection,
+  digestProjectionEnvironment,
+} from '@/core/model/context-projection';
 import { resolveContextReclaimModeV1 } from '@/core/model/context-reclaim';
 import type { ReclaimShadowReporter } from '@/core/model/context-reclaim-shadow';
 import type { SupportedChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
+import { prepareProgressiveContextDecisionV1 } from '@/core/model/progressive-context-orchestrator';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
@@ -228,7 +232,7 @@ export function prepareRuntimeEffectV2(
     modelName: dependencies.config.modelName,
     maxOutputTokens: requestedMaxOutputTokens,
   };
-  const prepared = prepareContextRequestV2({
+  const sharedPreparation = {
     purpose: 'normal',
     state,
     environment,
@@ -239,23 +243,83 @@ export function prepareRuntimeEffectV2(
       ? 'tool-result-budget-registry:v2'
       : 'tool-result-compat-registry:v1',
     reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
-    reclaimMode,
     reclaimAfterEstimatedTokens: dependencies.config.compaction?.reclaimAfterEstimatedTokens,
     providerSafetyRatio: dependencies.config.compaction?.providerSafetyRatio,
     compactRatio: dependencies.config.compaction?.compactRatio,
     hardRatio: dependencies.config.compaction?.hardRatio,
     warningRatio: dependencies.config.compaction?.warningRatio,
+  } as const;
+  const rawAndMicroPrepared = prepareContextRequestV2({
+    ...sharedPreparation,
+    reclaimMode,
+    checkpointProjectionMode: 'raw',
   });
-  if (!('effectiveProjection' in prepared)) {
+  const workingSetPrepared =
+    state.context.activeCheckpoint?.version === 3
+      ? prepareContextRequestV2({
+          ...sharedPreparation,
+          reclaimMode: 'off',
+          checkpointProjectionMode: 'active',
+        })
+      : undefined;
+  if (!('effectiveProjection' in rawAndMicroPrepared)) {
     throw new Error(
-      prepared.next.kind === 'correctness_blocked'
-        ? prepared.next.reason
-        : `Prepared context is not primary-ready: ${prepared.next.kind}.`,
+      rawAndMicroPrepared.next.kind === 'correctness_blocked'
+        ? rawAndMicroPrepared.next.reason
+        : `Prepared context is not primary-ready: ${rawAndMicroPrepared.next.kind}.`,
     );
   }
-  if (prepared.next.kind !== 'primary_ready') {
-    throw new Error(`Prepared context is not primary-ready: ${prepared.next.kind}.`);
+  if (rawAndMicroPrepared.next.kind !== 'primary_ready') {
+    throw new Error(`Prepared context is not primary-ready: ${rawAndMicroPrepared.next.kind}.`);
   }
+  if (workingSetPrepared && !('effectiveProjection' in workingSetPrepared)) {
+    throw new Error(
+      workingSetPrepared.next.kind === 'correctness_blocked'
+        ? workingSetPrepared.next.reason
+        : `Working Set context is not primary-ready: ${workingSetPrepared.next.kind}.`,
+    );
+  }
+  const microAvailable =
+    rawAndMicroPrepared.reclaimApplication.kind === 'applied_plan' ||
+    rawAndMicroPrepared.reclaimApplication.kind === 'applied_commit';
+  const progressiveDecision = prepareProgressiveContextDecisionV1({
+    state,
+    pressure: rawAndMicroPrepared.rawProjection.preflight.status,
+    ...(rawAndMicroPrepared.rawProjection.preflight.utilization != null
+      ? { utilization: rawAndMicroPrepared.rawProjection.preflight.utilization }
+      : {}),
+    ...(capabilities.contextWindowTokens
+      ? { contextWindowTokens: capabilities.contextWindowTokens }
+      : {}),
+    expectedRouteIdentityDigest: digestProjectionEnvironment(environment),
+    autoSummaryEnabled: flags.contextCompactionAutoV1,
+    microAvailable,
+    microPressure: rawAndMicroPrepared.effectiveProjection.preflight.status,
+    ...(workingSetPrepared && 'effectiveProjection' in workingSetPrepared
+      ? { workingSetPressure: workingSetPrepared.effectiveProjection.preflight.status }
+      : {}),
+    estimate: rawAndMicroPrepared.rawProjection.estimate,
+  });
+  if (progressiveDecision.kind === 'request_summary') {
+    return {
+      effect: {
+        type: 'compact_context',
+        compactionId: progressiveDecision.event.attempt.compactionId,
+        resourceEstimate: {
+          inputTokens: progressiveDecision.event.attempt.estimate.totalInputTokens,
+          maxOutputTokens: 6_000,
+        },
+        summaryRequest: progressiveDecision.event,
+      },
+      preparationEvents: [],
+    };
+  }
+  const prepared =
+    progressiveDecision.kind === 'dispatch_working_set' &&
+    workingSetPrepared &&
+    'effectiveProjection' in workingSetPrepared
+      ? workingSetPrepared
+      : rawAndMicroPrepared;
   if (flags.providerDataPolicyV1) {
     const decision = dependencies.providerDataAdmission?.(
       providerPayloadFromModelPromptV1(prepared.effectiveProjection.providerMessages),
@@ -298,6 +362,7 @@ export function prepareRuntimeEffectForBudgetV1(
     promptContractVersion: environment.promptContractVersion,
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
+    projectionEnvironment: environment,
   });
   if (getFeatureFlags(dependencies.config).providerDataPolicyV1) {
     const decision = dependencies.providerDataAdmission?.(
@@ -390,10 +455,16 @@ export function createRuntimeEffectExecutor(
     });
   return async (effect, state, emit, executionContext) => {
     if (effect.type === 'compact_context') {
-      if (
-        state.context.pendingCompaction?.reason !== 'manual' ||
-        state.context.pendingCompaction.compactionId !== effect.compactionId
-      ) {
+      const summaryLifecycle = state.context.summaryLifecycle;
+      const summaryAttempt =
+        summaryLifecycle.kind === 'started' &&
+        summaryLifecycle.attempt.compactionId === effect.compactionId
+          ? summaryLifecycle
+          : undefined;
+      const legacyPending =
+        state.context.pendingCompaction?.reason === 'manual' &&
+        state.context.pendingCompaction.compactionId === effect.compactionId;
+      if (!legacyPending && !summaryAttempt) {
         return [];
       }
       const leaseOwner = crypto.randomUUID();
@@ -423,14 +494,158 @@ export function createRuntimeEffectExecutor(
       const resolveProjectionEnvironment = () =>
         resolveRuntimeContextProjectionEnvironment({ ...dependencies, subagentEventSink }, state);
       try {
-        return await executeContextCompaction({
-          state,
+        const executionState = summaryAttempt
+          ? {
+              ...state,
+              context: {
+                ...state.context,
+                pendingCompaction: {
+                  compactionId: summaryAttempt.attempt.compactionId,
+                  reason: summaryAttempt.attempt.reason,
+                  requestedAtRevision: summaryAttempt.attempt.requestedAtRevision,
+                  requestedAtTurnId: summaryAttempt.attempt.requestedAtTurnId,
+                  sourceProducingEventCutV1: summaryAttempt.attempt.sourceProducingEventCutV1,
+                  force: false,
+                  estimate: summaryAttempt.attempt.estimate,
+                  ...(summaryAttempt.attempt.customInstructions
+                    ? { customInstructions: summaryAttempt.attempt.customInstructions }
+                    : {}),
+                },
+              },
+            }
+          : state;
+        const terminal = await executeContextCompaction({
+          state: executionState,
           compactionId: effect.compactionId,
           compact: contextCompactor,
           resolveProjectionEnvironment,
           reporter: dependencies.compactionReporter,
           onProgress: dependencies.onCompactionProgress,
+          dispatchEntryGuard: executionContext?.summaryDispatchEntryGuard,
         });
+        if (!summaryAttempt) return terminal;
+        const start = summaryAttempt.startBatchKey;
+        const terminalBatchKey = {
+          terminalBatchId: crypto.randomUUID(),
+          causationId: start.startBatchId,
+          attemptId: summaryAttempt.attempt.attemptId,
+          compactionId: summaryAttempt.attempt.compactionId,
+          summarySourceIdentity: summaryAttempt.attempt.summarySourceIdentity,
+          requestedAtRevision: summaryAttempt.attempt.requestedAtRevision,
+          requestedAtTurnId: summaryAttempt.attempt.requestedAtTurnId,
+          sourceProducingEventCutV1: summaryAttempt.attempt.sourceProducingEventCutV1,
+          dispatchStart: start.dispatchStart,
+          admission: {
+            stage: 'admitted' as const,
+            evidence: {
+              admittedRequestDigest: start.dispatchStart.preparedSummaryRequestIdentity,
+              finalPayloadDigest: start.dispatchStart.expectedPayloadDigest,
+              providerDataAdmissionReceiptDigest: start.dispatchStart.expectedPayloadDigest,
+              finalMaxOutputTokens: start.dispatchStart.expectedMaxOutputTokens,
+              finalToolSetSchemaDigest: start.dispatchStart.expectedToolSetSchemaDigest,
+            },
+          },
+        };
+        const translated = terminal.flatMap((event): RuntimeEvent[] => {
+          if (event.type === 'context.compaction_completed') {
+            if (event.checkpoint.version !== 3) {
+              throw new Error('Summary lifecycle cannot persist a legacy checkpoint writer.');
+            }
+            return [
+              {
+                type: 'context.summary_completed_v1',
+                attemptId: summaryAttempt.attempt.attemptId,
+                terminalBatchKey,
+                checkpoint: event.checkpoint,
+                ...(event.providerUsage ? { providerUsage: event.providerUsage } : {}),
+                providerDispatchState: 'entered',
+              },
+            ];
+          }
+          if (event.type === 'context.compaction_failed') {
+            const guardProof = executionContext?.summaryDispatchEntryGuard?.closeWithoutEntry();
+            const failureTerminalBatchKey =
+              event.errorKind === 'provider_admission_denied'
+                ? {
+                    ...terminalBatchKey,
+                    admission: {
+                      stage: 'denied' as const,
+                      proof: 'local_provider_admission_denied' as const,
+                    },
+                  }
+                : guardProof
+                  ? {
+                      ...terminalBatchKey,
+                      admission: {
+                        stage: 'not_completed' as const,
+                        proof: {
+                          kind: guardProof.proof,
+                          guardNonce: guardProof.guardNonce,
+                          producerGeneration: executionContext?.producerGeneration ?? 1,
+                          summaryStartBatchId: start.startBatchId,
+                        },
+                      },
+                    }
+                  : terminalBatchKey;
+            return [
+              {
+                type: 'context.summary_failed_v1',
+                attemptId: summaryAttempt.attempt.attemptId,
+                terminalBatchKey: failureTerminalBatchKey,
+                errorKind: event.errorKind,
+                message: event.message,
+                providerDispatchState: guardProof ? 'not_entered' : 'entered',
+              },
+            ];
+          }
+          return [event];
+        });
+        if (summaryAttempt.attempt.reason === 'auto' && summaryAttempt.continuation) {
+          const summaryTerminal = translated.find(
+            (event) =>
+              event.type === 'context.summary_completed_v1' ||
+              event.type === 'context.summary_failed_v1' ||
+              event.type === 'context.summary_unknown_external_outcome_v1',
+          );
+          const terminalKey =
+            summaryTerminal && 'terminalBatchKey' in summaryTerminal
+              ? summaryTerminal.terminalBatchKey
+              : terminalBatchKey;
+          const hasActualUsage =
+            summaryTerminal?.type === 'context.summary_completed_v1' &&
+            summaryTerminal.providerUsage != null;
+          const settledWithoutExecution =
+            terminalKey.admission.stage === 'denied' ||
+            terminalKey.admission.stage === 'not_completed';
+          if (hasActualUsage || settledWithoutExecution) {
+            translated.push({
+              type: 'context.normal_reprepare_required_v1',
+              receipt: {
+                version: 1,
+                generation: executionContext?.producerGeneration ?? 1,
+                attemptId: summaryAttempt.attempt.attemptId,
+                compactionId: summaryAttempt.attempt.compactionId,
+                continuation: summaryAttempt.continuation,
+                origin: {
+                  kind: 'summary_terminal',
+                  terminalBatchId: terminalKey.terminalBatchId,
+                  terminalEventId: terminalKey.terminalBatchId,
+                  resourceTerminalEventId: terminalKey.terminalBatchId,
+                },
+              },
+            });
+          } else {
+            translated.push({
+              type: 'context.normal_resource_resolution_required_v1',
+              attempt: summaryAttempt.attempt,
+              terminalBatchKey: terminalKey,
+              continuation: summaryAttempt.continuation,
+              resourceReservationId: start.dispatchStart.resourceReservationId,
+              resourceUnknownEventId: terminalKey.terminalBatchId,
+            });
+          }
+        }
+        return translated;
       } finally {
         if (heartbeat) clearInterval(heartbeat);
         durableLease?.releaseEffectLease(state.session.threadId, effect.compactionId, leaseOwner);
@@ -458,6 +673,7 @@ export function createRuntimeEffectExecutor(
         preparedCapabilitySetV2: effect.preparedCapabilitySetV2,
         effectLeaseId: executionContext?.effectLeaseId,
         reservationIds: executionContext?.reservationIds,
+        primaryRequestId: effect.primaryRequestId,
       });
     }
     if (effect.type === 'run_tools') {

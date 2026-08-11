@@ -10,6 +10,11 @@ import {
   assertContextPrimarySuccessBatchV2,
   validateRestoredContextReclaimStateV1,
 } from '@/core/model/context-reclaim-commit';
+import { deriveCheckpointV3ReboundV1 } from '@/core/model/context-working-set';
+import {
+  buildSummarySourceIdentityForCurrentPrefixV1,
+  type ProviderDispatchEntryGuardV1,
+} from '@/core/model/progressive-context-orchestrator';
 import { assertAuthorizationElevation, createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimePolicy } from '@/core/policies/runtime-policy';
 import type { AuthorizationSource } from '@/core/types';
@@ -27,10 +32,24 @@ import {
   type RuntimeEventEnvelope,
   type RuntimeEventInput,
 } from './events';
+import { classifyFailure } from './failures';
 import { assertRuntimeStateInvariants } from './invariants';
 import { isLegacyCheckpointV2, readLegacyCheckpointV2ReadOnly } from './legacy-slice-b-reader';
 import { reduceRuntimeState } from './reducer';
-import { createLegacyResourceBudgetStateV1 } from './resource-budget';
+import { createLegacyResourceBudgetStateV1, type ResourceUsageV1 } from './resource-budget';
+import {
+  assertCanonicalRuntimeEventEnvelopeV24,
+  buildRuntimeEventEnvelopeV24,
+  canonicalRuntimeEventEnvelopeBytesV24,
+  isEphemeralRuntimeEventV24,
+  type RuntimeEventEnvelopeV24,
+  runtimeEventCausationIdV24,
+} from './runtime-event-v24';
+import {
+  advanceRuntimeStorageFormatV24,
+  bindMigratedRuntimeLedgerEvidenceV24,
+  createMigratedRuntimeStorageFormatV24,
+} from './runtime-storage-v24';
 import { decideNextEffect } from './scheduler';
 import {
   computePlanStructuralDigest,
@@ -47,7 +66,8 @@ import {
   type RuntimeStore,
   type StoredEvent,
 } from './store';
-import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
+import { assertSummaryLifecycleBatchV1 } from './summary-lifecycle-v1';
+import { failedTerminalOutcomeV1, normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 import {
   assertToolTerminalControlBatchV2,
   finalizeToolTerminalBatchV2,
@@ -84,6 +104,8 @@ export type RuntimeEffectExecutor = (
   emit?: RuntimeEffectEventSink,
   context?: {
     effectLeaseId?: string;
+    producerGeneration?: number;
+    summaryDispatchEntryGuard?: ProviderDispatchEntryGuardV1;
     reservationIds: readonly string[];
     getState?(): Readonly<RuntimeState>;
     persistEvent(event: RuntimeEvent): Promise<boolean>;
@@ -195,6 +217,15 @@ export class AgentKernel {
   private readonly toolResultProjectionMode: 'compat_v1' | 'budget_v2';
   private persistenceIdentity: RuntimePersistenceIdentityV1;
   private readonly appliedEventIds: Set<string>;
+  private readonly summaryDispatchGuards = new Map<
+    string,
+    {
+      guard: ProviderDispatchEntryGuardV1;
+      generation: number;
+      startBatchId: string;
+      attemptId: string;
+    }
+  >();
   private activeRunnerId: string | null = null;
 
   constructor(config: KernelConfig) {
@@ -219,7 +250,17 @@ export class AgentKernel {
     eventId: string;
   } {
     const payload = isRuntimeEventEnvelope(event) ? event.payload : event;
+    if (isEphemeralRuntimeEventV24(payload)) {
+      return {
+        status: 'applied',
+        eventId: createHash('sha256')
+          .update('ephemeral-runtime-event:v24\0')
+          .update(JSON.stringify(payload))
+          .digest('hex'),
+      };
+    }
     assertContextPrimarySuccessBatchV2([payload], this.state);
+    assertSummaryLifecycleBatchV1([payload], this.state);
     assertInvalidModelToolCallClosureV2([payload]);
     assertToolTerminalControlBatchV2([payload], this.state);
     const normalizedInput = isRuntimeEventEnvelope(event)
@@ -235,6 +276,7 @@ export class AgentKernel {
       return { status: 'duplicate', eventId: envelope.eventId };
     }
 
+    const summaryGuardEffectId = this.assertSummaryDispatchGuardAuthority([envelope.payload]);
     const nextState = this.reduceEnvelope(this.state, envelope);
     // Atomic persist events + snapshot before publishing the new in-memory state.
     this.persistenceIdentity = this.store.appendEventsAndSnapshot(
@@ -246,13 +288,17 @@ export class AgentKernel {
       this.persistenceIdentity,
     );
     this.state = nextState;
+    if (summaryGuardEffectId) this.summaryDispatchGuards.delete(summaryGuardEffectId);
     this.appliedEventIds.add(envelope.eventId);
     if (envelope.payload.type === 'turn.completed') {
       this.store.saveNamedSnapshot(
         this.state.session.threadId,
         `turn-${envelope.payload.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
         this.state,
+        undefined,
+        this.persistenceIdentity,
       );
+      this.persistenceIdentity = this.store.loadPersistenceIdentity(this.state.session.threadId);
     }
     return { status: 'applied', eventId: envelope.eventId };
   }
@@ -265,16 +311,26 @@ export class AgentKernel {
    * Used for critical paths like plan approval where events and snapshot must be durably consistent.
    */
   processEventBatch(events: RuntimeEventInput[]): void {
-    if (events.length === 0) return;
+    const durableEvents = events.filter(
+      (event) => !isEphemeralRuntimeEventV24(isRuntimeEventEnvelope(event) ? event.payload : event),
+    );
+    if (durableEvents.length === 0) return;
+    const summaryGuardEffectId = this.assertSummaryDispatchGuardAuthority(
+      durableEvents.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
+    );
     assertContextPrimarySuccessBatchV2(
-      events.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
+      durableEvents.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
+      this.state,
+    );
+    assertSummaryLifecycleBatchV1(
+      durableEvents.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
       this.state,
     );
     assertInvalidModelToolCallClosureV2(
-      events.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
+      durableEvents.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
     );
     assertToolTerminalControlBatchV2(
-      events.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
+      durableEvents.map((event) => (isRuntimeEventEnvelope(event) ? event.payload : event)),
       this.state,
     );
     let nextState = this.state;
@@ -282,8 +338,8 @@ export class AgentKernel {
     const metadata: RuntimeEventMetadata[] = [];
     const batchEventIds: string[] = [];
     const batchSeen = new Set(this.appliedEventIds);
-    for (const event of events) {
-      const normalizedInput = isRuntimeEventEnvelope(event)
+    for (const event of durableEvents) {
+      let normalizedInput = isRuntimeEventEnvelope(event)
         ? event
         : event.type === 'tool.finished' ||
             event.type === 'tool.failed' ||
@@ -291,9 +347,110 @@ export class AgentKernel {
             event.type === 'tool.cancelled'
           ? finalizeToolTerminalEventV2(nextState, event, this.toolResultProjectionMode)
           : event;
+      if (!isRuntimeEventEnvelope(normalizedInput)) {
+        if (normalizedInput.type === 'context.normal_resource_resolution_required_v1') {
+          const resourceReservationId = normalizedInput.resourceReservationId;
+          const unknownIndex = payloads.findIndex(
+            (payload) =>
+              payload.type === 'resource_budget.unknown' &&
+              payload.reservationId === resourceReservationId,
+          );
+          if (unknownIndex >= 0) {
+            normalizedInput = {
+              ...normalizedInput,
+              resourceUnknownEventId: metadata[unknownIndex]!.eventId,
+            };
+          }
+        } else if (normalizedInput.type === 'context.normal_reprepare_required_v1') {
+          const receipt = normalizedInput.receipt;
+          if (receipt.origin.kind === 'summary_terminal') {
+            const terminalBatchId = receipt.origin.terminalBatchId;
+            const terminalIndex = payloads.findIndex(
+              (payload) =>
+                (payload.type === 'context.summary_completed_v1' ||
+                  payload.type === 'context.summary_failed_v1' ||
+                  payload.type === 'context.summary_unknown_external_outcome_v1') &&
+                payload.terminalBatchKey.terminalBatchId === terminalBatchId,
+            );
+            const resourceIndex = payloads.findIndex(
+              (payload) =>
+                (payload.type === 'resource_budget.reconciled' ||
+                  payload.type === 'resource_budget.released' ||
+                  payload.type === 'resource_budget.unknown') &&
+                payload.summaryTerminalBatchKey?.terminalBatchId === terminalBatchId,
+            );
+            if (terminalIndex >= 0 && resourceIndex >= 0) {
+              normalizedInput = {
+                ...normalizedInput,
+                receipt: {
+                  ...receipt,
+                  origin: {
+                    ...receipt.origin,
+                    terminalEventId: metadata[terminalIndex]!.eventId,
+                    resourceTerminalEventId: metadata[resourceIndex]!.eventId,
+                  },
+                },
+              };
+            }
+          } else {
+            const resolutionBatchId = receipt.origin.resolutionBatchId;
+            const resourceIndex = payloads.findIndex(
+              (payload) =>
+                payload.type === 'resource_budget.reconciled' &&
+                payload.summaryResolutionBatchKey?.resolutionBatchId === resolutionBatchId,
+            );
+            if (resourceIndex >= 0) {
+              normalizedInput = {
+                ...normalizedInput,
+                receipt: {
+                  ...receipt,
+                  origin: {
+                    ...receipt.origin,
+                    resourceReconciledEventId: metadata[resourceIndex]!.eventId,
+                  },
+                },
+              };
+            }
+          }
+        }
+      }
       const envelope = this.createEnvelope(normalizedInput, nextState.revision + 1);
       if (batchSeen.has(envelope.eventId)) continue;
-      nextState = this.reduceEnvelope(nextState, envelope, { deferInvariant: true });
+      const summaryStarted =
+        envelope.payload.type === 'context.summary_dispatch_started_v1'
+          ? envelope.payload
+          : undefined;
+      const summaryStartReceipt =
+        summaryStarted &&
+        nextState.context.summaryLifecycle.kind === 'requested' &&
+        nextState.context.summaryLifecycle.requestedEventId
+          ? (() => {
+              const reservedIndex = payloads.findIndex(
+                (payload) =>
+                  payload.type === 'resource_budget.reserved' &&
+                  payload.reservation.reservationId ===
+                    summaryStarted.startBatchKey.dispatchStart.resourceReservationId,
+              );
+              const dispatchIndex = payloads.findIndex(
+                (payload) =>
+                  payload.type === 'resource_budget.dispatch_started' &&
+                  payload.reservationId ===
+                    summaryStarted.startBatchKey.dispatchStart.resourceReservationId,
+              );
+              if (reservedIndex < 0 || dispatchIndex < 0) return undefined;
+              return {
+                version: 1 as const,
+                requestedEventId: nextState.context.summaryLifecycle.requestedEventId!,
+                resourceReservedEventId: metadata[reservedIndex]!.eventId,
+                resourceDispatchStartedEventId: metadata[dispatchIndex]!.eventId,
+                summaryDispatchStartedEventId: envelope.eventId,
+              };
+            })()
+          : undefined;
+      nextState = this.reduceEnvelope(nextState, envelope, {
+        deferInvariant: true,
+        summaryStartReceipt,
+      });
       payloads.push(envelope.payload);
       metadata.push(this.metadataFor(envelope));
       batchSeen.add(envelope.eventId);
@@ -310,6 +467,7 @@ export class AgentKernel {
       this.persistenceIdentity,
     );
     this.state = nextState;
+    if (summaryGuardEffectId) this.summaryDispatchGuards.delete(summaryGuardEffectId);
     for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
     let completedTurn: RuntimeEvent | undefined;
     for (const event of payloads) {
@@ -320,7 +478,10 @@ export class AgentKernel {
         this.state.session.threadId,
         `turn-${completedTurn.turnId}-${this.store.getLastEventPosition(this.state.session.threadId)}`,
         this.state,
+        undefined,
+        this.persistenceIdentity,
       );
+      this.persistenceIdentity = this.store.loadPersistenceIdentity(this.state.session.threadId);
     }
   }
 
@@ -391,6 +552,88 @@ export class AgentKernel {
     };
   }
 
+  /** Bind one process-local callback-entry guard to its durable Summary start. */
+  registerSummaryDispatchEntryGuard(
+    lease: RuntimeEffectLease,
+    guard: ProviderDispatchEntryGuardV1,
+  ): void {
+    const lifecycle = this.state.context.summaryLifecycle;
+    if (
+      lease.effect.type !== 'compact_context' ||
+      !this.isEffectLeaseCurrent(lease) ||
+      lifecycle.kind !== 'started' ||
+      lifecycle.startBatchKey.dispatchStart.summaryEffectLeaseId !== lease.effectId ||
+      guard.currentState() !== 'open' ||
+      this.summaryDispatchGuards.has(lease.effectId)
+    ) {
+      throw new Error('Summary dispatch guard does not bind the current durable effect start.');
+    }
+    this.summaryDispatchGuards.set(lease.effectId, {
+      guard,
+      generation: this.persistenceIdentity.generation,
+      startBatchId: lifecycle.startBatchKey.startBatchId,
+      attemptId: lifecycle.attempt.attemptId,
+    });
+  }
+
+  private assertSummaryDispatchGuardAuthority(events: readonly RuntimeEvent[]): string | undefined {
+    const terminal = events.find(
+      (event) =>
+        event.type === 'context.summary_completed_v1' ||
+        event.type === 'context.summary_failed_v1' ||
+        event.type === 'context.summary_unknown_external_outcome_v1',
+    ) as
+      | Extract<
+          RuntimeEvent,
+          {
+            type:
+              | 'context.summary_completed_v1'
+              | 'context.summary_failed_v1'
+              | 'context.summary_unknown_external_outcome_v1';
+          }
+        >
+      | undefined;
+    const dispatchStart = terminal?.terminalBatchKey.dispatchStart;
+    if (!terminal || !dispatchStart) return undefined;
+    if (terminal.terminalBatchKey.admission.stage === 'indeterminate_after_crash') {
+      return undefined;
+    }
+    const authority = this.summaryDispatchGuards.get(dispatchStart.summaryEffectLeaseId);
+    const lifecycle = this.state.context.summaryLifecycle;
+    if (
+      !authority ||
+      authority.generation !== this.persistenceIdentity.generation ||
+      authority.startBatchId !== dispatchStart.startBatchId ||
+      authority.attemptId !== terminal.attemptId ||
+      lifecycle.kind !== 'started' ||
+      lifecycle.attempt.attemptId !== terminal.attemptId ||
+      lifecycle.startBatchKey.dispatchStart.summaryEffectLeaseId !==
+        dispatchStart.summaryEffectLeaseId
+    ) {
+      throw new Error('Summary terminal lacks its process-local dispatch guard authority.');
+    }
+    const expectedGuardState =
+      terminal.type !== 'context.summary_unknown_external_outcome_v1' &&
+      terminal.providerDispatchState === 'not_entered'
+        ? 'closed_without_entry'
+        : 'entered';
+    if (authority.guard.currentState() !== expectedGuardState) {
+      throw new Error('Summary terminal conflicts with callback-entry guard state.');
+    }
+    const admission = terminal.terminalBatchKey.admission;
+    if (
+      admission.stage === 'not_completed' &&
+      admission.proof.guardNonce !== authority.guard.nonce
+    ) {
+      throw new Error('Summary zero-execution proof does not bind the registered guard nonce.');
+    }
+    return dispatchStart.summaryEffectLeaseId;
+  }
+
+  getProducerGeneration(): number {
+    return this.persistenceIdentity.generation;
+  }
+
   /** Apply an effect result only if no newer event changed the state. */
   applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEventInput[]): boolean {
     if (this.hasLateTerminalEventForCancelledTool(lease, events)) {
@@ -427,10 +670,165 @@ export class AgentKernel {
         this.state.resourceBudget.status === 'active'
           ? this.state.resourceBudget.reservations[event.reservationId]
           : undefined;
+      if (
+        this.state.context.summaryLifecycle.kind === 'resource_resolution_required' &&
+        this.state.context.summaryLifecycle.resourceReservationId === event.reservationId
+      )
+        return false;
       return reservation?.state === 'dispatch_started' || reservation?.state === 'unknown';
     });
     if (!valid) return false;
     this.processEventBatch(events);
+    return true;
+  }
+
+  /** Settle a Summary result whose effect lease lost a Runtime revision race. */
+  applyStaleSummarySettlementV1(events: RuntimeEvent[]): RuntimeEvent[] | false {
+    const lifecycle = this.state.context.summaryLifecycle;
+    if (lifecycle.kind !== 'started') return false;
+    const terminal = events.find(
+      (event) =>
+        event.type === 'context.summary_completed_v1' ||
+        event.type === 'context.summary_failed_v1' ||
+        event.type === 'context.summary_unknown_external_outcome_v1',
+    );
+    const resource = events.find(
+      (event) =>
+        event.type === 'resource_budget.reconciled' ||
+        event.type === 'resource_budget.released' ||
+        event.type === 'resource_budget.unknown',
+    );
+    if (
+      !terminal ||
+      !resource ||
+      terminal.attemptId !== lifecycle.attempt.attemptId ||
+      terminal.terminalBatchKey.compactionId !== lifecycle.attempt.compactionId ||
+      resource.reservationId !== lifecycle.startBatchKey.dispatchStart.resourceReservationId ||
+      resource.summaryTerminalBatchKey?.terminalBatchId !==
+        terminal.terminalBatchKey.terminalBatchId
+    )
+      return false;
+
+    const currentSource = buildSummarySourceIdentityForCurrentPrefixV1(this.state);
+    const sourceStillCurrent =
+      currentSource != null &&
+      JSON.stringify(currentSource) === JSON.stringify(lifecycle.attempt.summarySourceIdentity);
+    const staleTerminal: RuntimeEvent = {
+      type: 'context.summary_failed_v1',
+      attemptId: lifecycle.attempt.attemptId,
+      terminalBatchKey: terminal.terminalBatchKey,
+      errorKind: sourceStillCurrent ? 'stale_runtime_revision' : 'stale_source',
+      message: sourceStillCurrent
+        ? 'Summary result became stale after a Runtime control revision.'
+        : 'Summary result became stale after new transcript source was committed.',
+      providerDispatchState:
+        terminal.terminalBatchKey.admission.stage === 'not_completed' ? 'not_entered' : 'entered',
+    };
+    const settlement: RuntimeEvent[] = [staleTerminal, resource];
+    if (lifecycle.attempt.reason === 'auto' && lifecycle.continuation) {
+      if (resource.type === 'resource_budget.unknown') {
+        settlement.push({
+          type: 'context.normal_resource_resolution_required_v1',
+          attempt: lifecycle.attempt,
+          terminalBatchKey: terminal.terminalBatchKey,
+          continuation: lifecycle.continuation,
+          resourceReservationId: resource.reservationId,
+          resourceUnknownEventId: terminal.terminalBatchKey.terminalBatchId,
+        });
+      } else if (!sourceStillCurrent) {
+        settlement.push({
+          type: 'context.normal_continuation_superseded_v1',
+          attemptId: lifecycle.attempt.attemptId,
+          reason: 'new_source',
+        });
+      } else {
+        settlement.push({
+          type: 'context.normal_reprepare_required_v1',
+          receipt: {
+            version: 1,
+            generation: this.persistenceIdentity.generation,
+            attemptId: lifecycle.attempt.attemptId,
+            compactionId: lifecycle.attempt.compactionId,
+            continuation: lifecycle.continuation,
+            origin: {
+              kind: 'summary_terminal',
+              terminalBatchId: terminal.terminalBatchKey.terminalBatchId,
+              terminalEventId: terminal.terminalBatchKey.terminalBatchId,
+              resourceTerminalEventId: terminal.terminalBatchKey.terminalBatchId,
+            },
+          },
+        });
+      }
+    }
+    this.processEventBatch(settlement);
+    return settlement;
+  }
+
+  /** Dedicated bounded owner for an auto-Summary unknown resource outcome. */
+  applyLateSummaryResourceResolutionV1(input: {
+    reservationId: string;
+    actual: ResourceUsageV1;
+  }): boolean {
+    const lifecycle = this.state.context.summaryLifecycle;
+    const budget = this.state.resourceBudget;
+    if (
+      lifecycle.kind !== 'resource_resolution_required' ||
+      budget.status !== 'active' ||
+      lifecycle.resourceReservationId !== input.reservationId ||
+      budget.reservations[input.reservationId]?.state !== 'unknown' ||
+      lifecycle.continuation.turnId !== this.state.turn.turnId
+    )
+      return false;
+    const currentSource = buildSummarySourceIdentityForCurrentPrefixV1(this.state);
+    if (
+      !currentSource ||
+      JSON.stringify(currentSource) !== JSON.stringify(lifecycle.continuation.summarySourceIdentity)
+    )
+      return false;
+    const resolutionBatchId = crypto.randomUUID();
+    const actualUsageDigest = createHash('sha256')
+      .update('summary-resolution-actual-usage:v1\0')
+      .update(JSON.stringify(input.actual))
+      .digest('hex');
+    const summaryResolutionBatchKey = {
+      version: 1 as const,
+      resolutionBatchId,
+      causationId: lifecycle.terminalBatchKey.terminalBatchId,
+      generation: this.persistenceIdentity.generation,
+      attemptId: lifecycle.attempt.attemptId,
+      compactionId: lifecycle.attempt.compactionId,
+      originalTerminalBatchId: lifecycle.terminalBatchKey.terminalBatchId,
+      resourceReservationId: input.reservationId,
+      resourceUnknownEventId: lifecycle.resourceUnknownEventId,
+      continuation: lifecycle.continuation,
+      actualUsageDigest,
+    };
+    this.processEventBatch([
+      {
+        type: 'resource_budget.reconciled',
+        reservationId: input.reservationId,
+        actual: input.actual,
+        summaryResolutionBatchKey,
+      },
+      {
+        type: 'context.normal_reprepare_required_v1',
+        summaryResolutionBatchKey,
+        receipt: {
+          version: 1,
+          generation: this.persistenceIdentity.generation,
+          attemptId: lifecycle.attempt.attemptId,
+          compactionId: lifecycle.attempt.compactionId,
+          continuation: lifecycle.continuation,
+          origin: {
+            kind: 'late_resolution',
+            originalTerminalBatchId: lifecycle.terminalBatchKey.terminalBatchId,
+            resolutionBatchId,
+            resourceUnknownEventId: lifecycle.resourceUnknownEventId,
+            resourceReconciledEventId: resolutionBatchId,
+          },
+        },
+      },
+    ]);
     return true;
   }
 
@@ -612,14 +1010,16 @@ export class AgentKernel {
 
   private createEnvelope(event: RuntimeEventInput, revision: number): RuntimeEventEnvelope {
     if (isRuntimeEventEnvelope(event)) {
+      assertCanonicalRuntimeEventEnvelopeV24(event);
       if (event.threadId !== this.state.session.threadId) {
         throw new Error(`Runtime event thread mismatch: ${event.threadId}.`);
+      }
+      if (event.generation !== this.persistenceIdentity.generation) {
+        throw new Error(`Runtime event generation mismatch: ${event.generation}.`);
       }
       return event;
     }
     const normalizedEvent = normalizeTerminalRuntimeEventV1(event);
-    const serialized = JSON.stringify(normalizedEvent);
-    const eventId = createHash('sha256').update(serialized).digest('hex');
     const occurredAt = new Date().toISOString();
     const payload =
       (normalizedEvent.type === 'user.message_appended' ||
@@ -628,20 +1028,25 @@ export class AgentKernel {
       !normalizedEvent.createdAt
         ? { ...normalizedEvent, createdAt: occurredAt }
         : normalizedEvent;
-    return {
-      eventId,
+    return buildRuntimeEventEnvelopeV24({
       threadId: this.state.session.threadId,
+      generation: this.persistenceIdentity.generation,
       revision,
       occurredAt,
+      causationId: runtimeEventCausationIdV24(payload),
       payload,
-    };
+    });
   }
 
   private reduceEnvelope(
     state: RuntimeState,
     envelope: RuntimeEventEnvelope,
-    options: { deferInvariant?: boolean } = {},
+    options: {
+      deferInvariant?: boolean;
+      summaryStartReceipt?: import('./context-compaction').SummaryStartedReceiptV1;
+    } = {},
   ): RuntimeState {
+    assertCanonicalRuntimeEventEnvelopeV24(envelope);
     if (envelope.revision !== state.revision + 1) {
       throw new Error(
         `Runtime revision mismatch: expected ${state.revision + 1}, received ${envelope.revision}.`,
@@ -656,12 +1061,33 @@ export class AgentKernel {
       validateVerifiedToolTerminalEventV2(state, envelope.payload, this.toolResultProjectionMode);
     }
     this.assertRuntimeEventAdmission(envelope.payload);
-    const reduced = reduceRuntimeState(state, envelope.payload);
+    const reduced = reduceRuntimeState(state, envelope.payload, {
+      eventId: envelope.eventId,
+      ...(options.summaryStartReceipt ? { summaryStartReceipt: options.summaryStartReceipt } : {}),
+    });
+    const transcriptAdvanced =
+      reduced.transcript.messages.length > state.transcript.messages.length;
     const nextState: RuntimeState = {
       ...reduced,
+      ...(transcriptAdvanced
+        ? {
+            context: {
+              ...reduced.context,
+              lastTranscriptProducingEventCutV1: {
+                revision: envelope.revision,
+                eventId: envelope.eventId,
+              },
+            },
+          }
+        : {}),
       revision: envelope.revision,
       lastAppliedEventId: envelope.eventId,
       appliedEventIds: [...(reduced.appliedEventIds ?? []), envelope.eventId].slice(-4096),
+      storageFormat: advanceRuntimeStorageFormatV24({
+        current: state.storageFormat,
+        eventId: envelope.eventId,
+        canonicalBytes: Buffer.byteLength(canonicalRuntimeEventEnvelopeBytesV24(envelope), 'utf8'),
+      }),
     };
     if (!options.deferInvariant) assertRuntimeStateInvariants(nextState);
     return nextState;
@@ -692,11 +1118,15 @@ export class AgentKernel {
   }
 
   private metadataFor(envelope: RuntimeEventEnvelope): RuntimeEventMetadata {
+    assertCanonicalRuntimeEventEnvelopeV24(envelope);
     return {
       eventId: envelope.eventId,
       revision: envelope.revision,
       causationId: envelope.causationId,
       occurredAt: envelope.occurredAt,
+      schemaVersion: 24,
+      generation: envelope.generation,
+      canonicalBytes: Buffer.byteLength(canonicalRuntimeEventEnvelopeBytesV24(envelope), 'utf8'),
     };
   }
 
@@ -742,7 +1172,14 @@ export class AgentKernel {
 
   /** Save a stable recovery point for rewind/fork without involving Graph checkpoints. */
   saveNamedSnapshot(name: string): void {
-    this.store.saveNamedSnapshot(this.state.session.threadId, name, this.state);
+    this.store.saveNamedSnapshot(
+      this.state.session.threadId,
+      name,
+      this.state,
+      undefined,
+      this.persistenceIdentity,
+    );
+    this.persistenceIdentity = this.store.loadPersistenceIdentity(this.state.session.threadId);
   }
 
   /** Restore a named RuntimeStore recovery point into this Kernel. */
@@ -816,6 +1253,11 @@ export function createAgentKernel(params: {
     toolResultProjectionMode: params.toolResultProjectionMode,
     persistenceIdentity: restored.persistenceIdentity,
   });
+  const checkpointRebound = deriveCheckpointV3ReboundV1({
+    state: kernel.getState(),
+    generation: kernel.getProducerGeneration(),
+  });
+  if (checkpointRebound) kernel.processEvent(checkpointRebound);
   // A persisted intent without a terminal provider result is deliberately not
   // replayed.  Record the uncertainty durably so a later reconciliation/user
   // decision can resolve it without issuing a duplicate external write.
@@ -830,7 +1272,88 @@ export function createAgentKernel(params: {
   }
   const recoveredBudget = kernel.getState().resourceBudget;
   if (recoveredBudget.status === 'active') {
+    const recoveredSummary = kernel.getState().context.summaryLifecycle;
+    const handledSummaryReservations = new Set<string>();
+    if (
+      recoveredSummary.kind === 'idle' &&
+      recoveredSummary.lastConsumption &&
+      kernel.getState().turn.status === 'active'
+    ) {
+      const consumption = recoveredSummary.lastConsumption;
+      const reservation = recoveredBudget.reservations[consumption.resourceReservationId];
+      if (reservation?.state === 'dispatch_started') {
+        const failure = classifyFailure(
+          'unknown',
+          'Continuation primary outcome is unknown after Runtime recovery.',
+        );
+        kernel.processEventBatch([
+          {
+            type: 'run.error',
+            message: failure.message,
+            recoverable: false,
+            failure,
+            turnId: consumption.continuation.turnId,
+            outcome: failedTerminalOutcomeV1(failure, { knownExternalEffects: 'unknown' }),
+          },
+          {
+            type: 'resource_budget.unknown',
+            reservationId: consumption.resourceReservationId,
+          },
+          {
+            type: 'turn.aborted',
+            turnId: consumption.continuation.turnId,
+            reason: failure.message,
+            cause: 'error',
+          },
+        ]);
+        handledSummaryReservations.add(consumption.resourceReservationId);
+      }
+    }
+    if (recoveredSummary.kind === 'started') {
+      const reservationId = recoveredSummary.startBatchKey.dispatchStart.resourceReservationId;
+      const reservation = recoveredBudget.reservations[reservationId];
+      if (reservation?.state === 'dispatch_started') {
+        const terminalBatchId = crypto.randomUUID();
+        const terminalBatchKey = {
+          terminalBatchId,
+          causationId: recoveredSummary.startBatchKey.startBatchId,
+          attemptId: recoveredSummary.attempt.attemptId,
+          compactionId: recoveredSummary.attempt.compactionId,
+          summarySourceIdentity: recoveredSummary.attempt.summarySourceIdentity,
+          requestedAtRevision: recoveredSummary.attempt.requestedAtRevision,
+          requestedAtTurnId: recoveredSummary.attempt.requestedAtTurnId,
+          sourceProducingEventCutV1: recoveredSummary.attempt.sourceProducingEventCutV1,
+          dispatchStart: recoveredSummary.startBatchKey.dispatchStart,
+          admission: { stage: 'indeterminate_after_crash' as const },
+        };
+        const recoveryEvents: RuntimeEvent[] = [
+          {
+            type: 'context.summary_unknown_external_outcome_v1',
+            attemptId: recoveredSummary.attempt.attemptId,
+            terminalBatchKey,
+          },
+          {
+            type: 'resource_budget.unknown',
+            reservationId,
+            summaryTerminalBatchKey: terminalBatchKey,
+          },
+        ];
+        if (recoveredSummary.attempt.reason === 'auto' && recoveredSummary.continuation) {
+          recoveryEvents.push({
+            type: 'context.normal_resource_resolution_required_v1',
+            attempt: recoveredSummary.attempt,
+            terminalBatchKey,
+            continuation: recoveredSummary.continuation,
+            resourceReservationId: reservationId,
+            resourceUnknownEventId: terminalBatchId,
+          });
+        }
+        kernel.processEventBatch(recoveryEvents);
+        handledSummaryReservations.add(reservationId);
+      }
+    }
     for (const reservation of Object.values(recoveredBudget.reservations)) {
+      if (handledSummaryReservations.has(reservation.reservationId)) continue;
       if (reservation.state === 'reserved') {
         kernel.processEvent({
           type: 'resource_budget.released',
@@ -862,12 +1385,52 @@ export function restoreAndCommitRuntimeStateV22(
   maxAttempts = 8,
 ): ReturnType<typeof restoreRuntimeStateFromStore> {
   let restored = restoreRuntimeStateFromStore(params);
-  for (let attempt = 0; restored.migrationCandidate && attempt < maxAttempts; attempt += 1) {
+  migrationAttempt: for (
+    let attempt = 0;
+    restored.migrationCandidate && attempt < maxAttempts;
+    attempt += 1
+  ) {
+    let build: ReturnType<RuntimeStore['advanceRuntimeV24MigrationBuildV1']> | undefined;
+    // 50k event rows plus 50k eager named-cut proofs require at most
+    // 13 + 13 bounded 4096-row passes. Keep a small fixed margin without
+    // turning restore into an unbounded loop.
+    for (let chunk = 0; chunk < 32; chunk += 1) {
+      build = params.store.advanceRuntimeV24MigrationBuildV1(
+        params.threadId,
+        restored.migrationCandidate.identity,
+      );
+      if (build.status === 'stale') {
+        restored = restoreRuntimeStateFromStore(params);
+        continue migrationAttempt;
+      }
+      if (build.status === 'complete') break;
+    }
+    if (build?.status !== 'complete') {
+      throw new Error('Runtime v24 migration exceeded its bounded resumable build window.');
+    }
+    let storageFormat = bindMigratedRuntimeLedgerEvidenceV24({
+      current: restored.migrationCandidate.state.storageFormat,
+      legacyEvidence: build.evidence,
+    });
+    for (const metadata of restored.migrationCandidate.metadata) {
+      if (!metadata.eventId || !metadata.canonicalBytes) {
+        throw new Error('Runtime migration closure lacks canonical ledger evidence.');
+      }
+      storageFormat = advanceRuntimeStorageFormatV24({
+        current: storageFormat,
+        eventId: metadata.eventId,
+        canonicalBytes: metadata.canonicalBytes,
+      });
+    }
+    const candidateState = {
+      ...restored.migrationCandidate.state,
+      storageFormat,
+    };
     if (
       params.store.compareAndSaveMigratedSnapshot(
         params.threadId,
         restored.migrationCandidate.identity,
-        restored.migrationCandidate.state,
+        candidateState,
         restored.migrationCandidate.events,
         restored.migrationCandidate.metadata,
       ) === 'saved'
@@ -903,7 +1466,8 @@ export function restoreRuntimeStateFromStore(params: {
   } | null;
 } {
   const store = params.store;
-  const observedGeneration = store.loadPersistenceIdentity(params.threadId).generation;
+  const observedPersistence = store.loadPersistenceIdentity(params.threadId);
+  const observedGeneration = observedPersistence.generation;
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
     userId: params.userId,
@@ -921,6 +1485,7 @@ export function restoreRuntimeStateFromStore(params: {
   const incompatibleSchemaVersion =
     restoredState &&
     restoredState.schemaVersion !== RUNTIME_STATE_SCHEMA_VERSION &&
+    restoredState.schemaVersion !== 23 &&
     restoredState.schemaVersion !== 22 &&
     !isSupportedLegacySchemaVersionV22(restoredState.schemaVersion)
       ? restoredState.schemaVersion
@@ -953,7 +1518,7 @@ export function restoreRuntimeStateFromStore(params: {
   }
   if (!recoveryReason && snapshotRecord) {
     try {
-      validateSnapshotPrefixV22(snapshotRecord, allEvents);
+      validateSnapshotPrefixV22(snapshotRecord, allEvents, observedGeneration);
     } catch (error) {
       recoveryReason = error instanceof Error ? error.message : String(error);
     }
@@ -977,6 +1542,7 @@ export function restoreRuntimeStateFromStore(params: {
           allEvents.filter((entry) => entry.id > snapshotPosition),
           params.threadId,
           restoredState.schemaVersion,
+          observedGeneration,
         );
         const migrationClosure = closeLegacyPendingCompactionV23({
           state: migratedState,
@@ -984,11 +1550,25 @@ export function restoreRuntimeStateFromStore(params: {
           observedHead,
           allEvents,
           threadId: params.threadId,
+          generation: observedGeneration,
         });
         migratedState = migrationClosure.state;
         migrationEvents = migrationClosure.events;
         migrationMetadata = migrationClosure.metadata;
-        validateRestoredTerminalStateV2(migratedState, observedHead.eventPosition, allEvents);
+        const ledgerBase = migratedState.storageFormat.ledgerBase;
+        const branchAuthority =
+          (ledgerBase.kind === 'fork_rebound_v24' || ledgerBase.kind === 'verified_named_v24') &&
+          ledgerBase.branchMutationReceiptId
+            ? store.loadBranchMutationAuthorityV1(
+                params.threadId,
+                observedGeneration,
+                ledgerBase.branchMutationReceiptId,
+              )
+            : null;
+        validateRestoredTerminalStateV2(migratedState, observedHead.eventPosition, allEvents, {
+          allowBranchNormalizedLegacyBase: branchAuthority != null,
+        });
+        validateRuntimeNamedEventReferencesV24(migratedState, allEvents, observedGeneration);
         validateRestoredContextReclaimStateV1(migratedState);
       }
     } catch (error) {
@@ -1046,6 +1626,9 @@ export function restoreRuntimeStateFromStore(params: {
     state: initialState,
     persistenceIdentity: {
       generation: observedGeneration,
+      writeEpoch: observedPersistence.writeEpoch,
+      format: observedPersistence.format,
+      lifecycle: observedPersistence.lifecycle,
       sourceSnapshot: snapshotRecord?.metadata ?? null,
       observedHead,
     } satisfies RuntimePersistenceIdentityV1,
@@ -1061,6 +1644,9 @@ export function restoreRuntimeStateFromStore(params: {
             state: migratedState,
             identity: {
               generation: observedGeneration,
+              writeEpoch: observedPersistence.writeEpoch,
+              format: observedPersistence.format,
+              lifecycle: observedPersistence.lifecycle,
               sourceSnapshot: snapshotRecord.metadata,
               observedHead,
             },
@@ -1071,12 +1657,122 @@ export function restoreRuntimeStateFromStore(params: {
   };
 }
 
+function validateRuntimeNamedEventReferencesV24(
+  state: Readonly<RuntimeState>,
+  events: readonly StoredEvent[],
+  generation: number,
+): void {
+  if (state.schemaVersion < 24) return;
+  const byId = new Map(
+    events.flatMap((entry) =>
+      entry.event_id && entry.producer_generation === generation
+        ? [[entry.event_id, entry] as const]
+        : [],
+    ),
+  );
+  const requireType = (eventId: string, types: readonly RuntimeEvent['type'][], label: string) => {
+    const entry = byId.get(eventId);
+    if (!entry || !types.includes(entry.event.type)) {
+      throw new Error(`${label} does not resolve to its exact current-generation event role.`);
+    }
+    return entry;
+  };
+  const lifecycle = state.context.summaryLifecycle;
+  if (lifecycle.kind === 'requested' && lifecycle.requestedEventId) {
+    requireType(lifecycle.requestedEventId, ['context.summary_requested_v1'], 'Summary request');
+  }
+  if (lifecycle.kind === 'started' && lifecycle.startedReceipt) {
+    const ordered = [
+      requireType(
+        lifecycle.startedReceipt.requestedEventId,
+        ['context.summary_requested_v1'],
+        'Summary start request',
+      ),
+      requireType(
+        lifecycle.startedReceipt.resourceReservedEventId,
+        ['resource_budget.reserved'],
+        'Summary reservation',
+      ),
+      requireType(
+        lifecycle.startedReceipt.resourceDispatchStartedEventId,
+        ['resource_budget.dispatch_started'],
+        'Summary resource dispatch',
+      ),
+      requireType(
+        lifecycle.startedReceipt.summaryDispatchStartedEventId,
+        ['context.summary_dispatch_started_v1'],
+        'Summary dispatch',
+      ),
+    ];
+    if (
+      ordered.some(
+        (entry, index) => index > 0 && (entry.revision ?? 0) <= (ordered[index - 1]?.revision ?? 0),
+      )
+    ) {
+      throw new Error('Summary start receipt event roles are not in canonical revision order.');
+    }
+  }
+  if (lifecycle.kind === 'resource_resolution_required') {
+    requireType(
+      lifecycle.resourceUnknownEventId,
+      ['resource_budget.unknown'],
+      'Summary unknown-resource receipt',
+    );
+  }
+  const validateOrigin = (
+    origin: import('./context-compaction').NormalReprepareReceiptV1['origin'],
+  ) => {
+    if (origin.kind === 'summary_terminal') {
+      requireType(
+        origin.terminalEventId,
+        [
+          'context.summary_completed_v1',
+          'context.summary_failed_v1',
+          'context.summary_unknown_external_outcome_v1',
+        ],
+        'Summary terminal receipt',
+      );
+      requireType(
+        origin.resourceTerminalEventId,
+        ['resource_budget.reconciled', 'resource_budget.released', 'resource_budget.unknown'],
+        'Summary resource terminal receipt',
+      );
+    } else {
+      requireType(
+        origin.resourceUnknownEventId,
+        ['resource_budget.unknown'],
+        'Summary late-resolution unknown receipt',
+      );
+      requireType(
+        origin.resourceReconciledEventId,
+        ['resource_budget.reconciled'],
+        'Summary late-resolution reconciliation receipt',
+      );
+    }
+  };
+  if (lifecycle.kind === 'normal_reprepare_required') validateOrigin(lifecycle.receipt.origin);
+  if (lifecycle.kind === 'idle' && lifecycle.lastConsumption) {
+    validateOrigin(lifecycle.lastConsumption.originReceipt.origin);
+    const consumed = events.find(
+      (entry) =>
+        entry.producer_generation === generation &&
+        entry.event.type === 'context.normal_reprepare_consumed_v1' &&
+        entry.event.consumptionKey.consumptionBatchId ===
+          lifecycle.lastConsumption?.consumptionBatchId,
+    );
+    if (!consumed) {
+      throw new Error('Continuation consumption ownership lacks its exact durable event.');
+    }
+  }
+}
+
 function closeLegacyPendingCompactionV23(input: {
   state: RuntimeState;
   sourceSchemaVersion: number;
   observedHead: RuntimeMigrationIdentityV1['observedHead'];
   allEvents: StoredEvent[];
   threadId: string;
+  generation: number;
 }): { state: RuntimeState; events: RuntimeEvent[]; metadata: RuntimeEventMetadata[] } {
   if (
     (input.sourceSchemaVersion !== 21 && input.sourceSchemaVersion !== 22) ||
@@ -1122,26 +1818,38 @@ function closeLegacyPendingCompactionV23(input: {
         outcome: 'not_dispatched',
       };
   const revision = input.observedHead.revision + 1;
-  const eventId = createHash('sha256')
-    .update(
-      JSON.stringify({
-        domain: 'context-compaction-v23-migration-closure:v1',
-        threadId: input.threadId,
-        observedHead: input.observedHead,
-        event,
-      }),
-    )
-    .digest('hex');
+  const envelope = buildRuntimeEventEnvelopeV24({
+    threadId: input.threadId,
+    generation: input.generation,
+    revision,
+    occurredAt: new Date(0).toISOString(),
+    payload: event,
+  });
+  const eventId = envelope.eventId;
   state = {
     ...reduceRuntimeState(state, event),
     revision,
     lastAppliedEventId: eventId,
     appliedEventIds: [...state.appliedEventIds, eventId].slice(-4096),
+    storageFormat: advanceRuntimeStorageFormatV24({
+      current: state.storageFormat,
+      eventId,
+      canonicalBytes: Buffer.byteLength(canonicalRuntimeEventEnvelopeBytesV24(envelope), 'utf8'),
+    }),
   };
   return {
     state,
     events: [event],
-    metadata: [{ eventId, revision, occurredAt: new Date(0).toISOString() }],
+    metadata: [
+      {
+        eventId,
+        revision,
+        occurredAt: envelope.occurredAt,
+        schemaVersion: 24,
+        generation: input.generation,
+        canonicalBytes: Buffer.byteLength(canonicalRuntimeEventEnvelopeBytesV24(envelope), 'utf8'),
+      },
+    ],
   };
 }
 
@@ -1151,6 +1859,7 @@ function validateSnapshotPrefixV22(
     metadata: import('./store').RuntimeSnapshotMetadata;
   },
   allEvents: StoredEvent[],
+  activeGeneration: number,
 ): void {
   const { state, metadata } = snapshotRecord;
   if (metadata.schemaVersion !== state.schemaVersion) {
@@ -1165,6 +1874,62 @@ function validateSnapshotPrefixV22(
     );
   }
   const prefix = allEvents.filter((entry) => entry.id <= metadata.eventPosition);
+  if (state.schemaVersion === 24) {
+    const storage = state.storageFormat;
+    if (
+      storage?.format !== 'v24_strict' ||
+      storage.ledgerBase.baseRevision + storage.tailEventCount !== state.revision ||
+      storage.tailEventCount > prefix.length
+    ) {
+      throw new Error('Schema-v24 snapshot ledger base is inconsistent.');
+    }
+    const tail = storage.tailEventCount === 0 ? [] : prefix.slice(-storage.tailEventCount);
+    const tailIds: string[] = [];
+    for (const [index, entry] of tail.entries()) {
+      if (
+        !entry.event_id ||
+        !/^[a-f0-9]{64}$/.test(entry.event_id) ||
+        entry.revision !== storage.ledgerBase.baseRevision + index + 1 ||
+        tailIds.includes(entry.event_id)
+      ) {
+        throw new Error('Schema-v24 canonical tail is invalid.');
+      }
+      const envelope = {
+        schemaVersion: 24 as const,
+        generation: entry.producer_generation,
+        threadId: entry.thread_id,
+        eventId: entry.event_id,
+        revision: entry.revision,
+        causationId: entry.causation_id ?? null,
+        occurredAt: entry.occurred_at,
+        payload: entry.event,
+      } as RuntimeEventEnvelopeV24;
+      if (
+        entry.producer_generation !== activeGeneration ||
+        entry.canonical_bytes == null ||
+        entry.canonical_bytes < 1
+      ) {
+        throw new Error('Schema-v24 canonical tail ownership evidence is invalid.');
+      }
+      assertCanonicalRuntimeEventEnvelopeV24(envelope);
+      if (
+        entry.canonical_bytes !==
+        Buffer.byteLength(canonicalRuntimeEventEnvelopeBytesV24(envelope), 'utf8')
+      ) {
+        throw new Error('Schema-v24 canonical tail byte evidence is invalid.');
+      }
+      tailIds.push(entry.event_id);
+    }
+    if (
+      JSON.stringify(state.appliedEventIds) !== JSON.stringify(tailIds.slice(-4096)) ||
+      (tailIds.length > 0
+        ? state.lastAppliedEventId !== tailIds.at(-1)
+        : state.lastAppliedEventId !== undefined)
+    ) {
+      throw new Error('Schema-v24 applied event ledger does not match its canonical tail.');
+    }
+    return;
+  }
   const head = prefix.at(-1);
   if (
     (metadata.eventPosition === 0 && (prefix.length !== 0 || state.revision !== 0)) ||
@@ -1212,6 +1977,7 @@ function replayPersistedTail(
   tail: StoredEvent[],
   threadId: string,
   sourceSchemaVersion: number,
+  activeGeneration: number,
 ): RuntimeState {
   let current = state;
   if (sourceSchemaVersion >= 22) {
@@ -1233,12 +1999,56 @@ function replayPersistedTail(
         `Runtime event ${entry.id} revision mismatch: expected ${current.revision + 1}, received ${entry.revision}.`,
       );
     }
+    const durableEnvelope =
+      sourceSchemaVersion >= 24
+        ? {
+            schemaVersion: 24 as const,
+            generation: entry.producer_generation,
+            threadId: entry.thread_id,
+            eventId: entry.event_id,
+            revision: entry.revision,
+            causationId: entry.causation_id ?? null,
+            occurredAt: entry.occurred_at,
+            payload: entry.event,
+          }
+        : undefined;
+    if (durableEnvelope) {
+      if (
+        durableEnvelope.generation !== activeGeneration ||
+        entry.canonical_bytes == null ||
+        entry.canonical_bytes < 1
+      ) {
+        throw new Error(`Runtime event ${entry.id} lacks canonical v24 ownership evidence.`);
+      }
+      assertCanonicalRuntimeEventEnvelopeV24(durableEnvelope as RuntimeEventEnvelopeV24);
+      if (
+        entry.canonical_bytes !==
+        Buffer.byteLength(
+          canonicalRuntimeEventEnvelopeBytesV24(durableEnvelope as RuntimeEventEnvelopeV24),
+          'utf8',
+        )
+      ) {
+        throw new Error(`Runtime event ${entry.id} canonical byte evidence is invalid.`);
+      }
+    }
+    const replayEvent =
+      sourceSchemaVersion < 24 &&
+      entry.event.type === 'context.compaction_completed' &&
+      isLegacyCheckpointV2(entry.event.checkpoint)
+        ? {
+            ...entry.event,
+            checkpoint: readLegacyCheckpointV2ReadOnly({
+              checkpoint: entry.event.checkpoint,
+              state: current,
+            }),
+          }
+        : entry.event;
     const terminalEvent =
-      entry.event.type === 'tool.finished' ||
-      entry.event.type === 'tool.failed' ||
-      entry.event.type === 'tool.rejected' ||
-      entry.event.type === 'tool.cancelled'
-        ? entry.event
+      replayEvent.type === 'tool.finished' ||
+      replayEvent.type === 'tool.failed' ||
+      replayEvent.type === 'tool.rejected' ||
+      replayEvent.type === 'tool.cancelled'
+        ? replayEvent
         : undefined;
     const persistedTerminal =
       legacySourceVersion !== undefined &&
@@ -1253,7 +2063,7 @@ function replayPersistedTail(
       existingMessage?.kind === 'tool' ? existingMessage.resultMeta?.terminalMigration : undefined;
     const event = persistedTerminal
       ? {
-          ...entry.event,
+          ...replayEvent,
           modelResult: {
             kind: 'legacy_unverified' as const,
             migratedFromSchemaVersion:
@@ -1261,7 +2071,7 @@ function replayPersistedTail(
             originalEventPosition: existingMigration?.originalEventPosition ?? entry.id,
           },
         }
-      : entry.event;
+      : replayEvent;
     if (event.type === 'model.responded' && event.contextEvidence) {
       const branchLength = event.contextEvidence.reclaimReceiptDigest === 'none' ? 2 : 3;
       const branch = tail
@@ -1308,11 +2118,53 @@ function replayPersistedTail(
       }
     }
     const reduced = reduceRuntimeState(current, event);
+    const transcriptAdvanced =
+      reduced.transcript.messages.length > current.transcript.messages.length;
     current = {
       ...reduced,
+      ...(transcriptAdvanced
+        ? {
+            context: {
+              ...reduced.context,
+              lastTranscriptProducingEventCutV1: {
+                revision: entry.revision,
+                eventId: entry.event_id,
+              },
+            },
+          }
+        : {}),
       revision: entry.revision,
       lastAppliedEventId: entry.event_id,
       appliedEventIds: [...(reduced.appliedEventIds ?? []), entry.event_id].slice(-4096),
+      ...(durableEnvelope
+        ? {
+            storageFormat: advanceRuntimeStorageFormatV24({
+              current: reduced.storageFormat,
+              eventId: entry.event_id,
+              canonicalBytes: entry.canonical_bytes!,
+            }),
+          }
+        : {}),
+    };
+    if (sourceSchemaVersion >= 24) {
+      assertRuntimeStateInvariants(current);
+    }
+  }
+  if (sourceSchemaVersion < 24 && current.schemaVersion === 24) {
+    const { storageFormat: _storageFormat, ...canonicalCurrent } = current;
+    const canonicalPreV24State = {
+      ...canonicalCurrent,
+      schemaVersion: 23,
+    };
+    current = {
+      ...current,
+      lastAppliedEventId: undefined,
+      appliedEventIds: [],
+      storageFormat: createMigratedRuntimeStorageFormatV24({
+        sourceSchemaVersion: 23,
+        stateRevision: current.revision,
+        canonicalPreV24State: JSON.stringify(canonicalPreV24State),
+      }),
     };
     assertRuntimeStateInvariants(current);
   }
@@ -1354,8 +2206,11 @@ function migrateRuntimeState(
 
   if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION)
     return normalizeRuntimeMetadata(normalizedSnapshot);
+  if (snapshot.schemaVersion === 23) {
+    return migrateRuntimeStateV23ToV24(normalizedSnapshot);
+  }
   if (snapshot.schemaVersion === 22) {
-    return migrateRuntimeStateV22ToV23(normalizedSnapshot);
+    return migrateRuntimeStateV23ToV24(migrateRuntimeStateV22ToV23(normalizedSnapshot));
   }
   if (!isSupportedLegacySchemaVersionV22(snapshot.schemaVersion)) return null;
 
@@ -1437,13 +2292,15 @@ function migrateRuntimeState(
     };
   }
 
-  return migrateRuntimeStateV22ToV23(
-    normalizeLegacyPlanDocuments(
-      normalizeLegacySnapshotTerminalResults(
-        migratedState,
-        snapshot.schemaVersion,
-        migrationSource.sourceSnapshot.eventPosition,
-        migrationSource.prefixEvents,
+  return migrateRuntimeStateV23ToV24(
+    migrateRuntimeStateV22ToV23(
+      normalizeLegacyPlanDocuments(
+        normalizeLegacySnapshotTerminalResults(
+          migratedState,
+          snapshot.schemaVersion,
+          migrationSource.sourceSnapshot.eventPosition,
+          migrationSource.prefixEvents,
+        ),
       ),
     ),
   );
@@ -1454,10 +2311,34 @@ function migrateRuntimeStateV22ToV23(snapshot: RuntimeState): RuntimeState {
   if (snapshot.schemaVersion !== 22) {
     throw new Error(`Expected a schema-v22 migration source, received ${snapshot.schemaVersion}.`);
   }
+  const normalized = normalizeRuntimeMetadata(snapshot);
   return {
-    ...normalizeRuntimeMetadata(snapshot),
+    ...normalized,
+    schemaVersion: 23,
+    context: normalized.context,
+  };
+}
+
+/** Explicit, pure v23→v24 cutover. Store CAS publishes this candidate atomically. */
+function migrateRuntimeStateV23ToV24(snapshot: RuntimeState): RuntimeState {
+  if (snapshot.schemaVersion !== 23) {
+    throw new Error(`Expected a schema-v23 migration source, received ${snapshot.schemaVersion}.`);
+  }
+  const { storageFormat: _legacyStorageFormat, ...preV24 } = snapshot as RuntimeState & {
+    storageFormat?: unknown;
+  };
+  const normalized = normalizeRuntimeMetadata(snapshot);
+  return {
+    ...normalized,
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
-    context: normalizeContextRuntimeState(snapshot.context),
+    lastAppliedEventId: undefined,
+    appliedEventIds: [],
+    storageFormat: createMigratedRuntimeStorageFormatV24({
+      sourceSchemaVersion: 23,
+      stateRevision: snapshot.revision,
+      canonicalPreV24State: JSON.stringify(preV24),
+    }),
+    context: normalized.context,
   };
 }
 

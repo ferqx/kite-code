@@ -104,6 +104,20 @@ function preparedFixture(): {
       result: { ok: true, summary: 'read', resultMeta },
     };
   }
+  state.transcript.messages.push(
+    {
+      kind: 'user',
+      messageId: 'recent-user-1',
+      turnId: 'recent-turn-1',
+      content: 'first recent settled turn',
+    },
+    {
+      kind: 'user',
+      messageId: 'recent-user-2',
+      turnId: 'recent-turn-2',
+      content: 'second recent settled turn',
+    },
+  );
   const environment: ContextProjectionEnvironment = {
     serializedTools: [],
     workflowSkills: [],

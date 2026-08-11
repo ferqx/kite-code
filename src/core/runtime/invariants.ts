@@ -1,5 +1,6 @@
 // ── Runtime 状态不变量 / Runtime state invariants ──
 
+import { canonicalContextDigestV3 } from '@/core/model/context-checkpoint-v3';
 import { validateVerificationSpec } from '@/core/verification/spec';
 import { assertResourceBudgetRuntimeStateV1 } from './resource-budget';
 import type { RuntimeState, ToolCallStatus } from './state';
@@ -43,6 +44,16 @@ function interactionToolId(state: RuntimeState): string | undefined {
  * This is intentionally strict at the Kernel boundary and reusable by fuzz tests.
  */
 export function assertRuntimeStateInvariants(state: RuntimeState): void {
+  assert(state.schemaVersion === 24, 'runtime state must use schema v24.');
+  assert(
+    state.storageFormat?.format === 'v24_strict' &&
+      state.storageFormat.canonicalEventRegistryId === 'runtime-event-registry:v24',
+    'runtime state must use the strict v24 event registry.',
+  );
+  assert(
+    state.storageFormat.ledgerBase.nextRevision === state.storageFormat.ledgerBase.baseRevision + 1,
+    'runtime event ledger base revision is inconsistent.',
+  );
   assert(
     state.revision >= 0 && Number.isInteger(state.revision),
     'revision must be a non-negative integer.',
@@ -88,23 +99,141 @@ export function assertRuntimeStateInvariants(state: RuntimeState): void {
   }
   if (state.context.activeCheckpoint) {
     const checkpoint = state.context.activeCheckpoint;
-    assert(checkpoint.version === 1, 'active context checkpoint must use compatibility v1.');
     assert(checkpoint.summary.trim().length > 0, 'active context summary must be non-empty.');
     assert(Boolean(checkpoint.compactionId), 'active context checkpoint id is required.');
-    assert(Boolean(checkpoint.sourceDigest), 'active context checkpoint digest is required.');
-    assert(
-      checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
-        checkpoint.inputTokensBefore - checkpoint.inputTokensAfter >= 1_024,
-      'active context checkpoint must save at least 1024 tokens.',
-    );
+    if (checkpoint.version === 3) {
+      assert(
+        Boolean(checkpoint.source.sourceRangeDigest),
+        'active context checkpoint digest is required.',
+      );
+      assert(
+        checkpoint.inputTokensAfter < checkpoint.inputTokensBefore &&
+          checkpoint.inputTokensBefore - checkpoint.inputTokensAfter >= 1_024,
+        'active context checkpoint must save at least 1024 tokens.',
+      );
+    }
+    const coveredThroughMessageId =
+      checkpoint.version === 3
+        ? checkpoint.source.coveredThroughMessageId
+        : checkpoint.coveredThroughMessageId;
+    const coveredThroughTurnId =
+      checkpoint.version === 3
+        ? checkpoint.source.coveredThroughTurnId
+        : checkpoint.coveredThroughTurnId;
     const boundary = state.transcript.messages.find(
-      (message) => message.messageId === checkpoint.coveredThroughMessageId,
+      (message) => message.messageId === coveredThroughMessageId,
     );
     assert(boundary != null, 'active context checkpoint boundary must exist in the transcript.');
     assert(
-      boundary.turnId === checkpoint.coveredThroughTurnId,
+      boundary.turnId === coveredThroughTurnId,
       'active context checkpoint boundary turn is inconsistent.',
     );
+    if (checkpoint.version === 3 && state.context.projectionBaseIdentity) {
+      assert(
+        state.context.projectionBaseIdentity ===
+          `checkpoint:${checkpoint.checkpointId}:${checkpoint.source.sourceRangeDigest}`,
+        'checkpoint projection base identity is inconsistent.',
+      );
+    }
+  }
+  const summaryLifecycle = state.context.summaryLifecycle;
+  if (summaryLifecycle.kind !== 'idle') {
+    const attempt =
+      summaryLifecycle.kind === 'normal_reprepare_required' ? undefined : summaryLifecycle.attempt;
+    if (attempt) {
+      assert(
+        Boolean(attempt.attemptId && attempt.compactionId),
+        'summary attempt identity is required.',
+      );
+      assert(
+        Number.isSafeInteger(attempt.sourceProducingEventCutV1.revision) &&
+          attempt.sourceProducingEventCutV1.revision >= 1 &&
+          /^[a-f0-9]{64}$/.test(attempt.sourceProducingEventCutV1.eventId),
+        'summary source-producing event cut is invalid.',
+      );
+      if (summaryLifecycle.kind === 'requested') {
+        assert(
+          /^[a-f0-9]{64}$/.test(summaryLifecycle.requestedEventId ?? ''),
+          'requested summary lacks its canonical event receipt.',
+        );
+      }
+      if (summaryLifecycle.kind === 'started') {
+        const receipt = summaryLifecycle.startedReceipt;
+        assert(
+          receipt != null &&
+            [
+              receipt.requestedEventId,
+              receipt.resourceReservedEventId,
+              receipt.resourceDispatchStartedEventId,
+              receipt.summaryDispatchStartedEventId,
+            ].every((eventId) => /^[a-f0-9]{64}$/.test(eventId)),
+          'started summary lacks its closed canonical start receipt.',
+        );
+      }
+      const continuation =
+        'continuation' in summaryLifecycle ? summaryLifecycle.continuation : undefined;
+      assert(
+        (attempt.reason === 'auto' && continuation != null) ||
+          (attempt.reason === 'manual' && continuation == null),
+        'summary continuation does not match its trigger.',
+      );
+    }
+    if (summaryLifecycle.kind === 'resource_resolution_required') {
+      assert(
+        summaryLifecycle.attempt.reason === 'auto',
+        'resource-resolution lifecycle is auto-only.',
+      );
+      assert(
+        /^[a-f0-9]{64}$/.test(summaryLifecycle.resourceUnknownEventId),
+        'summary resolution lifecycle lacks its unknown resource event.',
+      );
+    }
+    if (summaryLifecycle.kind === 'normal_reprepare_required') {
+      assert(
+        Number.isSafeInteger(summaryLifecycle.receipt.generation) &&
+          summaryLifecycle.receipt.generation >= 1,
+        'normal reprepare receipt generation is invalid.',
+      );
+      const origin = summaryLifecycle.receipt.origin;
+      const originEventIds =
+        origin.kind === 'summary_terminal'
+          ? [origin.terminalEventId, origin.resourceTerminalEventId]
+          : [origin.resourceUnknownEventId, origin.resourceReconciledEventId];
+      assert(
+        originEventIds.every((eventId) => /^[a-f0-9]{64}$/.test(eventId)),
+        'normal reprepare origin references an unavailable event.',
+      );
+    }
+  }
+  if (summaryLifecycle.kind === 'idle' && summaryLifecycle.lastConsumption) {
+    assert(
+      summaryLifecycle.lastConsumption.generation >= 1 &&
+        summaryLifecycle.lastConsumption.primaryRequestId.length > 0 &&
+        summaryLifecycle.lastConsumption.resourceReservationId.length > 0,
+      'normal continuation consumption receipt is invalid.',
+    );
+  }
+  if (state.context.lastDetach) {
+    const { checksum, ...body } = state.context.lastDetach;
+    assert(
+      checksum === canonicalContextDigestV3('normal-reprepare-consumption-detach:v1', body),
+      'normal continuation detach checksum is invalid.',
+    );
+    assert(
+      state.context.lastDetach.targetThreadId === state.session.threadId &&
+        state.context.lastDetach.targetGeneration >= 1,
+      'normal continuation detach target ownership is invalid.',
+    );
+    if (state.context.lastDetach.primaryState === 'in_flight') {
+      assert(
+        [
+          state.context.lastDetach.runErrorEventId,
+          state.context.lastDetach.resourceTerminalEventId,
+          state.context.lastDetach.turnAbortedEventId,
+        ].every((eventId) => typeof eventId === 'string' && /^[a-f0-9]{64}$/.test(eventId)),
+        'in-flight continuation detach lacks its terminal quartet references.',
+      );
+    }
   }
 
   const activeIds = new Set(state.tools.active);

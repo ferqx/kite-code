@@ -687,6 +687,18 @@ export class ProductionMetricMapperV1 {
       case 'context.compaction_refill_observed':
       case 'context.compaction_guard_carried_forward':
       case 'context.compaction_guard_reset':
+      case 'context.summary_requested_v1':
+      case 'context.summary_dispatch_started_v1':
+      case 'context.summary_completed_v1':
+      case 'context.summary_failed_v1':
+      case 'context.summary_unknown_external_outcome_v1':
+      case 'context.normal_resource_resolution_required_v1':
+      case 'context.normal_reprepare_required_v1':
+      case 'context.normal_reprepare_consumed_v1':
+      case 'context.normal_continuation_superseded_v1':
+      case 'context.summary_branch_abandoned_v1':
+      case 'context.normal_reprepare_consumption_detached_v1':
+      case 'context.checkpoint_v3_rebound_v1':
       case 'provider.data_policy_status':
       case 'plan.progress_updated':
       case 'approval.command_replaced':

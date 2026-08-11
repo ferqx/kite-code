@@ -14,7 +14,7 @@ capability 的原生隔离资格分开验证；某平台缺少强隔离时对应
 - Builtin、MCP、Skill Workflow 与 Subagent 统一 Capability Catalog；
 - interaction mode、authorization、approval、auto review 与 sandbox；
 - Execution Receipt、Artifact、分级 Verification 与 repair/replan；
-- Plan Artifact、全工具有限 L1/L2 上下文回收、叙事 checkpoint、多会话和 PTY 系统测试。
+- Plan Artifact、默认关闭的渐进式上下文缩减候选、多会话和 PTY 系统测试。
 
 总体架构见 [六概念 Runtime 架构](docs/active/six-concept-runtime-architecture.md)，当前行为规则见 [docs/active](docs/active)。
 
@@ -76,10 +76,10 @@ notarization；完整限制见
 
 模型调用统一通过 AI SDK/OpenAI-compatible 边界。Provider 专有 reasoning 和缓存行为隔离在 `src/core/model/`，不会进入 Runtime 策略。模型建议显式配置 `contextWindow` 和 `maxOutputTokens`；未配置且 adapter 无可信元数据时，Runtime 会将窗口视为 unknown，而不会根据模型名称假定一个大窗口。
 
-旧自动 M2 producer 已从当前生产路径移除。`features.contextCompactionAutoV1` 与
-`compaction.autoMode` 仅作为向后配置兼容字段继续接受，不能启用自动摘要；未来自动压缩将由新的单一渐进式
-orchestrator 重新接线。当前可执行的摘要入口是默认开启 flag 保护下的显式 `/compact`，它保留原始
-transcript。
+旧自动 M2 producer 已从当前生产路径移除。新的渐进式 orchestrator、strict-v24、V3 Working Set、
+Summary continuation 与 generation-fenced fork/rewind 已通过 PSMC-03～06 本地 Gate；
+`features.contextCompactionAutoV1` 保持默认关闭，本地资格不构成 production/default-on 声明。显式
+`/compact` 仍保留原始 transcript。
 
 确定性工具结果回收使用两个独立、默认关闭的开关：`features.toolResultBudgetV2` 启用全工具有限 L1
 receipt/terminal，`features.contextReclaimV1` 控制 L2；`compaction.reclaimMode` 可设为
@@ -87,10 +87,9 @@ receipt/terminal，`features.contextReclaimV1` 控制 L2；`compaction.reclaimMo
 `read_file | search_content | search_files` block，并只在成功 primary 后提交 bounded commit；原始 transcript
 不删除。当前受信 route registry 为空，因此该 live 路径只用于显式开发验证，不能由用户配置或模型名称取得
 production 资格。旧 Slice B 的 canonical L3 source、checkpoint-v2 writer、cache-safe fork、route cache gate 与
-refill guard 已清场；schema v23 的 CAS/generation persistence safety 继续保留。新的 MicroCompact、
-Checkpoint Working Set、recent window 与 SummaryCompact 统一 orchestrator 尚未实现，不能宣称完整三级
-可用；Session Memory 已延期为独立可选增强。当前边界见
-[三级上下文缩减：当前实现与清场边界](docs/active/three-tier-context-reduction.md)。
+refill guard 已清场。schema v24/V3/Working Set/Summary continuation、branch transaction、resumable migration
+与完整恢复/fault Gate 已完成；rollout flags 仍默认关闭。Session Memory 仍暂停。
+当前边界见 [三级上下文缩减：渐进式实现与资格边界](docs/active/three-tier-context-reduction.md)。
 
 启用 `features.contextCompactionManualV1`（默认开启）后可使用 `/compact` 命令，支持可选的自定义摘要指令（例如 `/compact focus on auth changes`）。运行中请求会排队到安全边界；消息不足时提示 `Not enough messages to compact.`。Core 会先用当前完整投影计算理论最大缩减，连最小 narrative 都无法节省 1024 tokens 时提示 `Not enough reducible context to compact`，且不调用摘要模型。active checkpoint 后没有新增消息时，无论是否带自定义指令都提示 `No new messages to compact.`；自定义指令只改变新一轮压缩的侧重点，不把 `/compact` 变成已有 narrative 编辑器。同一 session 的手动压缩完整串行，stale 投影以可重试终态收敛，不会留下永久 pending。进入有真实用户对话的历史会话时，TUI 会基于恢复的 checkpoint 和当前投影环境在本地重算 Footer context token，不产生模型请求；空会话不显示 system prompt 或工具目录估算。
 
@@ -251,5 +250,8 @@ endpoint 与模型。runner 只输出 provider/model/usage/耗时和布尔结果
 prompt、response、credential 或完整 endpoint；缺 key 或调用失败时非零退出，mock 不得替代 G1。
 DeepSeek 调用限制 16 output tokens；OpenCode Go 的 reasoning 模型限制 128 output tokens，确保最小调用
 仍能产生可验证的非空正文。
+
+`qualify:context:produce <artifact>` 与 `qualify:context:verify <artifact>` 生成并独立验证 20 条长会话和
+2000-block/8MiB 的渐进式上下文资格证据。
 
 默认测试不访问真实模型或公网 MCP，也不运行依赖宿主机 Seatbelt/bubblewrap 的正向用例。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`。`test:runtime:fault` 运行确定性的 SIGKILL/SQLite/report contract，`test:runtime:soak` 运行固定 7-case CI profile；资源指标不完整时仍保持 `inconclusive`，不能包装成成功。`test:sandbox:smoke:native` 显式运行当前宿主机的原生 sandbox executor smoke。快速 TUI harness 单元测试进入默认 `unit` 门禁，也可用 `test:tui:harness` 单独运行；真实 TUI PTY scenarios 只由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时，不重复运行 harness。Required CI 将默认 scenario 清单按稳定的四个分片分配到互相独立的 runner；每个分片仍逐文件串行，最终 `tui-system` 门禁只在全部分片通过时成功。first-run provider 探测使用本地 mock `/v1/models`。`test:tui:smoke:native` 是依赖宿主机真实 sandbox backend 的显式 opt-in PTY smoke，不属于默认门禁；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 与原生平台文件，不是仓库规范的全量入口。旧 production-shaped authority contract 只作为 fail-closed 负向测试保留；registry 为空时不得生成外部认证或 promotion 结论，且不再绑定任何路线图 Task。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。
