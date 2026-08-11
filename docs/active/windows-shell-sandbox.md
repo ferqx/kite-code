@@ -11,6 +11,7 @@ tests/sandbox/platform-backends.test.ts tests/sandbox/windows-restricted-token.t
 tests/sandbox/windows-network-setup.test.ts tests/sandbox/platform-capability-probe.test.ts
 tests/sandbox/platform-capability-verifier.test.ts tests/sandbox/process-tree-limit.test.ts
 tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/execution-boundary.test.ts
+tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts
 tests/tui-exit-coordinator.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts`、
 `bun run typecheck`、`bun run check:docs`。native runner
 变更还必须运行 `cargo test --manifest-path native/windows-sandbox-runner/Cargo.toml` 和 release
@@ -29,7 +30,7 @@ runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，�
 checkout/Cargo cache 路径并清除 PE 时间戳；
 重新生成 manifest 后必须以 `git diff --exit-code` 证明提交的 runner pin 与构建产物一致。
 
-相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089，
+相关：ADR-0074、ADR-0077、ADR-0079 至 ADR-0089、ADR-0097，
 `release/platform-capabilities/windows-runner-v1.json`。
 
 ## 当前 backend 选择
@@ -161,3 +162,9 @@ E2E/probe。
 未来 strict Windows profile 需要 direct Workspace 上的独立 Offline/Online principal、
 descendant-safe firewall/WFP、dynamic protected-name interception、durable recovery 与新的原生
 conformance。不得把这些要求转换成普通 Shell invocation 的 UAC prompt，也不得恢复 repository copy。
+
+Windows restricted-token 开发 backend 尚不能证明通用 Shell 对 `.git` metadata 的
+独立 read 与 write deny；既有 ACL ledger 和 protected-name 测试不能冒充该证据。
+因此 `brokered-git-r1` 在 Windows production qualification 固定 excluded，直到新
+principal/profile 路径通过 native read/write negative、broker positive/hostile 与入口 composition
+全部证据；不得退回 raw Shell Git。

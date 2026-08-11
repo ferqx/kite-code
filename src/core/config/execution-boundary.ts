@@ -117,6 +117,8 @@ const NO_CAPABILITIES: Readonly<ExecutionCapabilitySurfaceV1> = Object.freeze({
   shell: false,
   skillChild: false,
   localStdioMcp: false,
+  gitInspect: false,
+  brokeredGitFeatureRevision: null,
 });
 
 function denied(reason: ExecutionBoundaryAdmissionReasonV1): ExecutionBoundaryAdmissionV1 {
@@ -259,6 +261,12 @@ export function admitProductionExecutionBoundaryV1(
       registryDigest: registry.digest,
       qualificationId: qualification.qualificationId,
       evidenceDigest: qualification.evidenceDigest,
+      ...(qualification.processCapabilitySurface.brokeredGit?.shellDenyEvidence
+        ? {
+            brokeredGitShellDenyEvidence:
+              qualification.processCapabilitySurface.brokeredGit.shellDenyEvidence,
+          }
+        : {}),
     },
   };
 }
@@ -327,6 +335,8 @@ export function evaluateExecutionBoundaryQualificationV1(
         shell: false,
         skillChild: false,
         localStdioMcp: false,
+        gitInspect: false,
+        brokeredGitFeatureRevision: null,
       },
     };
   }
@@ -350,6 +360,7 @@ export function evaluateExecutionBoundaryQualificationV1(
 
   const processSurface = qualification.processCapabilitySurface;
   if (!processSurface.shell) return denied('qualification_boundary_mismatch');
+  const brokeredGit = processSurface.brokeredGit;
 
   return {
     allowed: true,
@@ -366,6 +377,8 @@ export function evaluateExecutionBoundaryQualificationV1(
       shell: processSurface.shell,
       skillChild: processSurface.skillChild,
       localStdioMcp: processSurface.localStdioMcp,
+      gitInspect: brokeredGit?.inspect === true,
+      brokeredGitFeatureRevision: brokeredGit?.featureRevision ?? null,
     },
   };
 }

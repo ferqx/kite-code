@@ -1064,6 +1064,69 @@ describe('SessionManager', () => {
         phase: 'building',
       });
       kernel.processEvent({
+        type: 'plan.drafted',
+        toolCallId: 'draft-plan',
+        taskId: kernel.getState().activeTaskId!,
+        planId: 'exit-plan',
+        version: 1,
+        structuralHash: 'exit-plan-digest',
+        plan: {
+          name: 'Exit planning safely',
+          description: 'Complete the plan lifecycle before exiting plan mode.',
+          status: 'pending',
+          steps: [{ id: 'complete', step: 'Complete the plan', status: 'pending' }],
+        },
+      });
+      kernel.processEvent({
+        type: 'tool.queued',
+        toolCallId: 'submit-plan',
+        taskId: kernel.getState().activeTaskId!,
+        name: 'write_plan',
+        args: {},
+      });
+      kernel.processEvent({
+        type: 'plan.review_requested',
+        interactionId: 'exit-review',
+        toolCallId: 'submit-plan',
+        taskId: kernel.getState().activeTaskId!,
+        planId: 'exit-plan',
+        version: 1,
+        structuralDigest: 'exit-plan-digest',
+        planSummary: 'Complete the plan lifecycle before exiting plan mode.',
+        plan: {
+          name: 'Exit planning safely',
+          description: 'Complete the plan lifecycle before exiting plan mode.',
+          status: 'pending',
+          steps: [{ id: 'complete', step: 'Complete the plan', status: 'pending' }],
+        },
+      });
+      kernel.processEvent({
+        type: 'plan.approved',
+        interactionId: 'exit-review',
+        toolCallId: 'submit-plan',
+        planId: 'exit-plan',
+        version: 1,
+        structuralDigest: 'exit-plan-digest',
+        executionMode: 'accept_edits',
+      });
+      const completedPlan = {
+        name: 'Exit planning safely',
+        description: 'Complete the plan lifecycle before exiting plan mode.',
+        status: 'completed' as const,
+        steps: [{ id: 'complete', step: 'Complete the plan', status: 'completed' as const }],
+      };
+      kernel.processEvent({
+        type: 'plan.progress_updated',
+        toolCallId: 'complete-plan',
+        plan: completedPlan,
+      });
+      kernel.processEvent({
+        type: 'plan.completed',
+        toolCallId: 'complete-plan',
+        plan: completedPlan,
+      });
+      expect(kernel.getState().planning.kind).toBe('completed');
+      kernel.processEvent({
         type: 'run.completed',
         turnId: kernel.getState().turn.turnId,
         output: 'Planning conversation completed.',

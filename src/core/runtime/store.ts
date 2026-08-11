@@ -32,9 +32,10 @@ export class RemoteMcpEgressNonceConflictError extends Error {
 }
 
 export class RuntimeRevisionConflictError extends Error {
-  constructor(threadId: string, expected: number, actual: number | null) {
+  constructor(threadId: string, expected: number, actual: number | null, detail?: string) {
     super(
-      `Runtime revision conflict for ${threadId}: expected ${expected}, found ${actual ?? 'deleted'}.`,
+      detail ??
+        `Runtime revision conflict for ${threadId}: expected ${expected}, found ${actual ?? 'deleted'}.`,
     );
     this.name = 'RuntimeRevisionConflictError';
   }
@@ -52,6 +53,12 @@ export interface RuntimeSnapshotMetadata {
   stateRevision: number;
   stateChecksum: string;
   schemaVersion: number;
+}
+
+/** Snapshot row and event tail observed by one restore attempt. */
+export interface RuntimeRestoreBoundary {
+  snapshot: RuntimeSnapshotMetadata | null;
+  lastEventPosition: number;
 }
 
 /** 事件日志条目 — 从 runtime_events 表加载时使用 */
@@ -111,6 +118,7 @@ export interface RuntimeStore {
     nextState: unknown,
     metadata?: RuntimeEventMetadata[],
     snapshotMetadata?: RuntimeSnapshotMetadata,
+    expectedRestoreBoundary?: RuntimeRestoreBoundary,
   ): void;
   /** 加载线程事件，可选从某个 ID 之后开始 / Load events, optionally since a given id */
   loadEvents(threadId: string, since?: number): StoredEvent[];
@@ -816,10 +824,34 @@ export function createRuntimeStore(
       nextState: unknown,
       metadata?: RuntimeEventMetadata[],
       snapshotMetadata?: RuntimeSnapshotMetadata,
+      expectedRestoreBoundary?: RuntimeRestoreBoundary,
     ): void {
       if (isClosed) return;
       try {
         db.transaction(() => {
+          if (expectedRestoreBoundary) {
+            const actualSnapshot = selectSnapshot.get(threadId);
+            const expectedSnapshot = expectedRestoreBoundary.snapshot;
+            const actualLastEventPosition = selectLastEventPosition.get(threadId)?.id ?? 0;
+            const snapshotMatches = expectedSnapshot
+              ? actualSnapshot != null &&
+                actualSnapshot.event_position === expectedSnapshot.eventPosition &&
+                actualSnapshot.state_revision === expectedSnapshot.stateRevision &&
+                actualSnapshot.state_checksum === expectedSnapshot.stateChecksum &&
+                actualSnapshot.schema_version === expectedSnapshot.schemaVersion
+              : actualSnapshot == null;
+            if (
+              !snapshotMatches ||
+              actualLastEventPosition !== expectedRestoreBoundary.lastEventPosition
+            ) {
+              throw new RuntimeRevisionConflictError(
+                threadId,
+                expectedSnapshot?.stateRevision ?? 0,
+                actualSnapshot?.state_revision ?? null,
+                `Runtime restore boundary conflict for ${threadId}: expected snapshot revision ${expectedSnapshot?.stateRevision ?? 'missing'} at event ${expectedRestoreBoundary.lastEventPosition}, found snapshot revision ${actualSnapshot?.state_revision ?? 'missing'} at event ${actualLastEventPosition}.`,
+              );
+            }
+          }
           const firstRevision = metadata?.[0]?.revision;
           if (firstRevision != null) {
             const expectedRevision = firstRevision - 1;

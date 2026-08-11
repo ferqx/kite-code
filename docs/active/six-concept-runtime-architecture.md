@@ -4,7 +4,7 @@
 
 读取时机：理解或修改 Agent 主循环、Runtime Kernel、Capability、Policy、Execution、Verification，以及 MCP、Skill、Subagent 的跨模块职责时。
 
-验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
+验证：`bun test tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/kernel.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/tool-concurrency-budget.test.ts tests/runtime/runtime-scheduling-policy.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/schema-v17-migration.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts tests/session-manager.test.ts`、`bun run check:docs`、`bun run check:core-boundary`、`bun run typecheck`。
 
 相关：ADR-0001、ADR-0007、ADR-0008、ADR-0021、ADR-0022、ADR-0024、ADR-0031、ADR-0032、ADR-0048、ADR-0049、`mcp-runtime-governance.md`、`verification-governance.md`、`capability-progressive-disclosure.md`。
 
@@ -64,7 +64,9 @@ src/core/runtime/
 ├── state.ts       RuntimeState 及 capability/skill/verification 投影
 ├── events.ts      已发生的事实
 ├── effects.ts     下一步准备执行的动作
-├── scheduler.ts   State → Effect 的确定性决策；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop
+├── completion-guard.ts  CompletionGuard V1/V2 的纯 completion decision 与版本路由
+├── plan-continuation.ts  历史 V1 executing 的只读/replan continuation 门禁
+├── scheduler.ts   State → Effect 的确定性决策；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；V1 executing 只放行 read_plan/write_plan V2 replan；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop
 ├── reducer.ts     State × Event → State；approval.rejected 和 tool.rejected 均写入 transcript ToolMessage
 ├── executor.ts    Effect 执行适配
 ├── runner.ts      驱动 Kernel
@@ -73,6 +75,30 @@ src/core/runtime/
 ```
 
 Capability、Skill 和 Verification 不得直接修改 RuntimeState。任何具有恢复价值的变化都必须先形成 Runtime Event，再由 reducer 归纳为当前事实。`user.command_invoked` 是例外：持久化以供审计与 TUI 重放，但 reducer 视为 no-op，不进入模型 transcript 也不改变 RuntimeState。
+
+缺少 `planSchemaVersion=2` 的 executing Plan 只代表可读取/replay 的历史事实，不提供新的执行授权。
+Scheduler 只直接运行读取当前 Plan 或用原 identity 保存 V2 replan 的调用；两者不存在时产生受限
+`call_model(toolSurface=legacy_plan_recovery)`，其 preflight、Provider tools 与 Context Projection 都只包含
+`read_plan`/`write_plan`。Runner 在外部 `prepareEffect` 后再次执行同一门禁；Model Controller 把历史 queued
+和模型伪造调用归约为 rejection，Tool Controller 在 direct-call 边界再次拒绝。该门禁不改变 reducer 对
+既有历史 event tail 的归约，也不打开 `promptContractV2` 默认值。受限 model preflight 请求的 pending
+`compact_context` 是唯一额外允许的内部 admission effect，必须匹配当前 compaction identity，不能携带任务副作用。
+unknown external invocation 与全部 awaiting interaction 是更高优先级 barrier；scheduler 和 runner guard 都必须
+先保持它们的 reconciliation/interrupt effect。受限 response 将 surface 作为 metadata 持久化；无合法 replan 的
+final 或伪造工具按 legacy CompletionGuard V1 进行一次 correction，第二次以 aborted/error 收敛。非白名单 malformed
+Tool Call 先执行 surface rejection，白名单 Plan 工具才保留 invalid-args 分类。
+Runner 以 `lease.effect.toolSurface` 为唯一权威，对 executor 返回、emit 与 `persistEvent(s)` 三条路径的最终
+`model.responded` marker 进行统一绑定；普通 model lease 也不能接受伪造的 recovery marker。白名单工具只有
+成功 `read_plan` 可继续，任何 terminal failure 都消费 correction，`write_plan` 只有产生 V2 draft 才退出门禁。
+canonical legacy subagent recovery 仍是更高优先级 effect，并由 continuation guard 精确放行。
+Runner 在 `prepareEffect` 后基于最新 state 再次取得 Scheduler canonical decision，并按 effect type/identity 比较
+语义等价性；预算预检可为 canonical model call 添加 resource estimate，但不能把任何更高优先级 barrier 换成
+形式合法的 restricted model call 或 Plan tool run。不等价候选统一 fail closed 为 recovery block。
+
+Legacy V1 executing 的旧 queued call 不等待下一次 Provider response 才治理。Scheduler 先按原队列顺序产生
+`run_tools`，Tool Controller 在任何 adapter I/O 前把非 Plan call 终结为稳定 rejection；随后才允许 restricted
+Provider dispatch。因此 Provider failure 不会留下仍 queued 的历史副作用调用，且 unknown invocation barrier
+仍先于该清理链。
 
 模型流增量是另一类明确例外：`model.text_delta`、`model.reasoning_delta`、reasoning 段边界 `model.reasoning_completed` 以及 shell `tool.progress` 只用于当前进程的即时展示，不是可恢复事实，不进入 reducer、event store、snapshot 或 session log。Runner 仅在产生这些瞬态事件的 effect lease 仍为 current 时向 App 转发；并发 shell progress 复用同一 tool ownership 判定但不 reduce、不持久化、不推进 revision，pending producer queue 按 call/stream 合并为有界 tail。过期 lease 的晚到事件必须丢弃，started/terminal 等 durable fact 仍作为 ordering barrier。终态 `model.response_received` 与 `tool.finished/failed/cancelled` 才是可持久化、可重放的完整事实。模型服务暂时断开时，Model Controller 在同一 effect 内重试流消费，抑制 text 与 reasoning 已经交付的公共前缀；恢复流发生分歧时，从新尝试的差异处继续发出增量，App 负责保留旧段并开启新的显示段，Runtime 不把显示分段提升为持久状态。
 
@@ -104,6 +130,72 @@ dispatch 前校验进程内 nonce，并由 Runtime Store 在 receipt event 同�
 claim nonce digest；Runtime 只有在该 durable claim 成功后才允许请求，重启或 sibling process
 不能复用仍有效 permit。迁移 v20 snapshot 不为历史调用虚构 egress decision，receipt 不持久化
 raw arguments、正文或 nonce。
+
+Runtime schema v22 为 CompletionGuard V2 建立可信 replay 边界。当前 V2 Plan 的 `run.completed` 与
+`completion.blocked` 只能使用 V2 decision 和完整 `{planId, version, structuralDigest}`；event payload 自报 V1 不构成
+legacy provenance。只有 Kernel 从 v21 或更早 snapshot 的持久化 tail 做 migration replay 时才可按 V1 读取历史事件。
+V2 correction ceiling 绑定 guard version 与完整 Plan identity，跨 turn 和 restore 保持；identity revision 改变或不再存在
+相关 V2 Plan 时才重置。current 与 migration reducer 都先拒绝不匹配当前 turn 的 `run.completed`，migration replay
+严格采用 journal position 顺序。迁移后的 rolling snapshot 通过 `appendEventsAndSnapshot` 在同一事务中 CAS restore
+读取到的 snapshot metadata 与 event-tail 末尾；并发 append/snapshot 变化触发重新 restore/replay，不能让旧 state
+继承竞态之后的 event position。不可纠正的 V1/V2 completion blocker 也使用 Kernel batch，在向 consumer 暴露
+attempt 2 前原子持久化 `[completion.blocked, turn.aborted, run.error]`；消费中断或进程恢复都只能观察 terminal stop，
+不能从 blocked 边界重新调度第三次模型请求。
+
+Runtime schema v23 在每个当前 Tool terminal event 内写入唯一严格的 canonical
+`ToolOutcomeV1`；reducer 只生成一个 transcript ToolMessage。Envelope 由 Kernel 边界在持久化和发布前合成
+status、FailureKind/detail、dispatch/effect certainty、recovery lineage 与可信 timing，ToolSpec
+只能提供可收紧的 metadata advice。current reducer、TUI、Session Logger 与 metrics 不再读取 legacy
+结果字段作为 outcome。独立 historical replay decoder 将旧 event 缺失 outcome 映射为
+`legacy_unclassified/unknown/never`；存在但结构非法或 classifier 缺失/抛错/冲突时映射为
+`unknown/never`，不从 stderr 或 result body 推断。
+
+同一 schema 还持久化 parent/subagent 共用语义的 `ToolRecoveryJournalV1`。journal 的随机 HMAC
+key、invocation fingerprint、failure instance 和 lineage 只存在于 canonical private Runtime
+state/continuation，不进入 SessionLog 或 observability。retry record 必须在一次受信 safe-read
+自动重放前先落盘；模型参数修正和自动重放分别最多一次，restore 不重置次数。policy/approval
+deny、timeout、cancel、unknown effect 和仅有 idempotency key 而无 receipt 的调用不重放；malformed
+journal restore、六次同 identity 无进展或十二次未被 tool-owned progress 分隔的累计失败都 fail
+closed 为 quality block，明显早于 250 次资源上限。
+failure 还绑定 owning task、turn 与紧随其后的 eligible model response。task/turn close 会把记录移出
+新 scope；只有成功 `recoveryOf` receipt，或 Runtime-owned skip/replan/user action、Provider/capability
+revision 才能把失败标为 recovered。deny/never、timeout、cancel、unknown effect、terminal exhaustion 和
+`next_response_elapsed` 在原 scope 继续保留 suppression 与 CompletionGuard blocker，不得把“额度耗尽”
+当作恢复。`alternative` 可在下一 eligible response 选择不同 capability，但必须由 Runtime 绑定
+`recoveryOf`。CompletionGuard 只读取当前 task/turn 真正 active 的 blocking/quality state，历史 deny
+不会永久阻断后续任务。quality block 仍允许 `write_plan/update_plan/read_plan/ask_user/tool_search`
+形成替代进展。
+
+canonical identity 对已解析调用使用当前 ToolSpec 或动态 MCP binding 的 schema defaults 与 revision；
+解析前失败把 raw equality 立即写入私有 HMAC，不持久化参数正文。自动 safe-read replay 的
+`tool.retry_recorded` 必须先得到 RuntimeStore durable ack；持久化缺失、返回 false 或抛错都在第二次
+Provider dispatch 前停止。Kernel 原子 batch 逐事件用前一事件产生的 next state 合成 envelope，
+因此 `[tool.started, tool.finished]` 的 terminal certainty/timing 不会读取陈旧 state。
+生产 safe-read retry 还要求唯一一次有效 `tool.started` 已由 Kernel reducer 持久化；随后
+`tool.retry_recorded` 才能记录 attempt/recoveryOf 并授权第二次 dispatch。ack 后崩溃重启不得重置
+ceiling。MCP readiness 是 provider/capability dispatch 之前的生产边界：首次 readiness failure 使用
+`not_started/none/pre_dispatch` authority，durable retry ack 后才允许第二次 readiness attempt 与唯一一次
+capability dispatch。restore 对 journal 重新计算 canonical failure ID，并验证 map/order/outcome lineage、parent
+recoveryOf、attempt counters 与 progress revision；伪造相互一致的 ID 也不能绕过重算。
+schema v23/current snapshot 或当前 Subagent continuation 缺少 recovery journal 本身就是损坏状态，
+restore 必须 quality-blocked；只有 pre-v23 migration 可以初始化空 journal。auto-review rejection 在
+current、replay 和下一次 model projection 中都只追加一个与原 AI tool call 配对的 ToolMessage。
+损坏 journal 使用 `journal_invalid/persistence_unavailable`，普通 no-progress ceiling 使用
+`no_progress/loop_exhausted`；二者由同一 terminal outcome 驱动 Session、metrics 与 TUI。
+task 子 Agent 的完整 result 只在 Controller 私有侧用于 journal merge，模型面只接收显式 public DTO，
+不会 JSON stringify continuation、execution journal、exhausted fingerprint 或 recovery key/lineage。parent
+reducer 与 child provider context 复用唯一 public projection helper：success 为 `stdout || stderr || ''`，failure
+为 `stderr || stdout || ''`，输入同时包含 `ok` 与 terminal status。Sandbox fail-closed boundary 以 Runtime-authored
+`terminationReason=sandbox_denied` 分类为 `sandbox_error/sandbox_denied`，不解析 stderr，也不调用底层命令；受控
+fallback sentinel 与 persisted authorization-widening event 计数提供可突变的零调用/零放宽证据。
+`journal_invalid` 对所有 journal mutator 都是吸收态，因此同一 Kernel batch 中 child merge 后紧随的
+task success 也不能清除 hard block。其 task/turn scope 只用于 provenance，scheduler/admission 必须在
+下一 turn、新 task、task close 与 SQLite restore 后继续全局 `persistence_unavailable` 零 dispatch 阻断；
+普通 `no_progress` 才按原 scope 隔离。Scheduler 在 correctness hard-block 阶段先于 interaction、legacy、
+queued tools、verification、completion 与 compaction 检查损坏 journal；Controller direct 入口和 Runner
+prepared/admission/lease 边界再防御性重验，阻止已经准备或租赁的 stale effect。bounded journal 的 128 条裁剪以 lineage closure 为单位，优先
+active/recent 记录；不能保留 child 却删除其 `recoveryOf` parent。Runtime invariant 只要求 live call 的
+lineage parent 仍 retained，已经 terminal 的历史 ToolCall 不会迫使 bounded journal 永久增长。
 
 reservation ID 是幂等键，dispatch 后未知结果保守占用 executable upper bound，只有证明未
 dispatch 的 `reserved` 才能 release。v17 及更早 snapshot 迁移为
@@ -146,6 +238,14 @@ effect 状态、terminal reason、safe retry、recovery、pending verification �
 recovery、CLI 与 TUI 的共同投影复测。其他 capability producer 必须显式接线或增加等价入口
 contract test 后才能声明 coverage。缺少 external-effect 证据时 fail closed 为 `unknown`，已有
 证据做保守合并；未 reconciliation 时不得继续或降级。调用方只能进一步收紧结果。
+
+CompletionGuard 也是同一 Kernel 的纯、单调版本化 decision：scheduler 在 `emit_final` 前、runner 在持久化前、
+reducer 在接收 `run.completed` 时都按 guard version 重新评估 canonical state。V1 保留 legacy replay 与无 Plan task；
+只有 PlanDocument V2 使用 V2，额外拒绝缺失 required verification、effect receipt reference、unresolved evidence 或
+evidence/Runtime 投影不一致。final 文本不能绕过 Plan lifecycle、非终结 Tool/interaction、suspended subagent、unknown
+invocation 或 active Skill；同一 V2 `{planId, version, structuralDigest}` 首次阻断最多请求一次模型纠正，第二次以
+blocked error/aborted turn 收敛。`completion.blocked` 只保存 guard version、低基数 reason/next action、planning
+lifecycle、完整 Plan identity 与 attempt；V2 `run.completed` 绑定接受 decision 的相同 identity，不保存模型正文或参数。
 
 Context compaction 当前只有一条 Markdown narrative 管线。专用 summary request 使用当前对话模型、空工具集、确定性温度和零 SDK retry；输入只包含最小固定 prompt、已有 checkpoint narrative、全部 safe settled history 与作为不可信数据的 custom instructions，不携带普通 Agent system prompt、工具 schema、live tail 或动态 RuntimeState。模型内容产物只有规范化 `summary: string`，不生成工具结果投影、JSON、fact/evidence ledger、file ledger、repair、chunk 或 merge 产物。首次和增量压缩都只调用模型一次；manual 总结全部安全历史，auto 保护当前 turn 后总结其余安全历史，增量输入为旧 narrative 加 checkpoint 后的全部 safe history，整体替换 active checkpoint。显式 summary input 上限超出时整体失败，不得静默总结局部前缀。输出必须非空、未因长度截断、没有 tool call、可序列化且不超过 narrative 上限。Manual 与 auto 共享至少 1024 token 的统一绝对缩减门槛；target ratio 只作诊断。Checkpoint 保存 Markdown 与 Core 生成的 boundary、digest、revision 和 estimate；统一 serializer 规范化 LF、移除外围空白并 XML 转义后，生成且只生成一个历史区首位的 `<compacted_history>` assistant frame。
 
@@ -262,6 +362,16 @@ Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`Capab
 同一模型消息、同一任务中的连续 `shell_execute` 若不能进入前述免审只读批次，则采用逐调用放行：Scheduler 术语（调度器）为单个调用执行策略预检，需要审批时进入既有单审批交互；收到该调用的批准后立即返回它的 `run_tools` effect 术语（效果）。Runtime Runner 术语（运行时执行循环）在其 `tool.started` 后继续调度同组下一个 sibling，所以命令执行可与后续审批重叠，后续调用获批后也可并发运行。每个 Shell 的事件仍由 Kernel 串行持久化；并发 lease 只接受同一 turn、同一 effect 所属且尚未终结的 Tool Call 事件，取消后的迟到结果不能回写。遇到非 Shell 调用、不同模型消息或不同任务边界时必须等待运行中 Shell 收敛，不能跨越方案审核、用户输入或其他工具。用户取消任一审批会终止整个当前 turn，而不是只终结对应调用；`tool.execution_ready` 仅用于旧回放。
 
 外部写入遵循“先记录 intent，再发生副作用”。对无法证明是否成功的调用，Runtime 记录 `unknown` 并禁止盲目自动重放；恢复时先 reconciliation。
+
+`task` 有额外的 Runtime-owned 权威契约。委派只能由 active Task 的当前纯用户 `userGoal` 授权，project/shell/external context 不得提升。Subagent 统一串行执行并使用同一 run-scoped 累计预算；生命周期显式区分 running/suspended/terminal，approval 等待是 suspended，恢复后回 running。terminal result 只投影规范 `completed`，是否经历恢复仍由 canonical Recovery Journal 保留，不再复制为第二套 UI/协议完成态。Planning 的 plan child 只能引导 `write_plan:save → write_plan:submit`；failed/cancelled/exhausted/suspended child 不得产生该 continuation。planning plan child 仅在成功 terminal 后进入既有 Plan lifecycle，顶层 completion 仍受已保存并 submit 的 plan identity gate 约束；文本提示本身不构成提交事实。
+每条 follow-up 用户消息都替换当前 Task 的 delegation authority；撤销与新增从该响应立即生效，replay 按同一 reducer 规则恢复。code role 需要明确写入/编辑/修复授权，read-only review、design/options/planning 或否定写入都不能冒充 code scope。child 的 schema projection、实际 Registry parse、execution/resume 必须共享 config、phase、gitBroker 与 availability context；typed Git 不得因 child 路径缺依赖而回退 Shell。
+
+ADR-0097 将 Git 拆为 Core-owned broker contract 与 App-owned process adapter。Runtime capability
+surface 保存只读 `gitInspect` 和精确 feature revision；Registry disclosure、
+Controller dispatch 与 native `.git` deny/mask 必须原子一致。broker 在任何 process 前执行
+repository/binary/config/attributes/replace/grafts/protected-path admission，并以 typed evidence/receipt
+将 operation identity、effects 和 timing 交回 Kernel。stage、commit 与 remote Git 不向模型披露且无 raw-shell fallback。typed Git 代码接线不等于 production qualification；当前三平台证据不足，所以 production brokered Git
+surface 仍为 excluded。
 
 ## 7. Verification：完成不是模型声明
 

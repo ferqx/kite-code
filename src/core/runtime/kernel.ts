@@ -18,14 +18,9 @@ import {
 } from './actions';
 import { normalizeContextRuntimeState } from './context-compaction';
 import type { RuntimeEffect, RuntimeEffectLease } from './effects';
-import {
-  isRuntimeEventEnvelope,
-  type RuntimeEvent,
-  type RuntimeEventEnvelope,
-  type RuntimeEventInput,
-} from './events';
+import type { RuntimeEvent, RuntimeEventEnvelope } from './events';
 import { assertRuntimeStateInvariants } from './invariants';
-import { reduceRuntimeState } from './reducer';
+import { reduceRuntimeState, reduceRuntimeStateFromHistoricalSchema } from './reducer';
 import { createLegacyResourceBudgetStateV1 } from './resource-budget';
 import { decideNextEffect } from './scheduler';
 import {
@@ -34,14 +29,22 @@ import {
   getEffectiveInteractionMode,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
+  TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION,
 } from './state';
 import {
   createRuntimeStore,
   type RuntimeEventMetadata,
+  type RuntimeRestoreBoundary,
+  RuntimeRevisionConflictError,
   type RuntimeStore,
   type StoredEvent,
 } from './store';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
+import { normalizeCurrentToolOutcomeEventV1 } from './tool-outcome-events';
+import {
+  createToolRecoveryJournalV1,
+  normalizeToolRecoveryJournalV1,
+} from './tool-recovery-journal';
 
 // ── Kernel 配置 / Kernel configuration ──
 
@@ -97,6 +100,7 @@ export class AgentKernel {
   private state: RuntimeState;
   private sandboxAvailable: boolean;
   private readonly appliedEventIds: Set<string>;
+  private lastAppliedEvents: RuntimeEvent[] = [];
   private activeRunnerId: string | null = null;
 
   constructor(config: KernelConfig) {
@@ -112,9 +116,10 @@ export class AgentKernel {
    * 处理单个 RuntimeEvent：reduce → persist。
    * Process a single RuntimeEvent: reduce → persist.
    */
-  processEvent(event: RuntimeEventInput): { status: 'applied' | 'duplicate'; eventId: string } {
+  processEvent(event: RuntimeEvent): { status: 'applied' | 'duplicate'; eventId: string } {
     const envelope = this.createEnvelope(event, this.state.revision + 1);
     if (this.appliedEventIds.has(envelope.eventId)) {
+      this.lastAppliedEvents = [];
       return { status: 'duplicate', eventId: envelope.eventId };
     }
 
@@ -124,6 +129,7 @@ export class AgentKernel {
       this.metadataFor(envelope),
     ]);
     this.state = nextState;
+    this.lastAppliedEvents = [envelope.payload];
     this.appliedEventIds.add(envelope.eventId);
     if (envelope.payload.type === 'turn.completed') {
       this.store.saveNamedSnapshot(
@@ -142,15 +148,18 @@ export class AgentKernel {
    * 用于 Plan 审批等需要事件和快照同时落盘的关键路径。
    * Used for critical paths like plan approval where events and snapshot must be durably consistent.
    */
-  processEventBatch(events: RuntimeEventInput[]): void {
-    if (events.length === 0) return;
+  processEventBatch(events: RuntimeEvent[]): RuntimeEvent[] {
+    if (events.length === 0) {
+      this.lastAppliedEvents = [];
+      return [];
+    }
     let nextState = this.state;
     const payloads: RuntimeEvent[] = [];
     const metadata: RuntimeEventMetadata[] = [];
     const batchEventIds: string[] = [];
     const batchSeen = new Set(this.appliedEventIds);
     for (const event of events) {
-      const envelope = this.createEnvelope(event, nextState.revision + 1);
+      const envelope = this.createEnvelope(event, nextState.revision + 1, nextState);
       if (batchSeen.has(envelope.eventId)) continue;
       nextState = this.reduceEnvelope(nextState, envelope);
       payloads.push(envelope.payload);
@@ -158,9 +167,13 @@ export class AgentKernel {
       batchSeen.add(envelope.eventId);
       batchEventIds.push(envelope.eventId);
     }
-    if (payloads.length === 0) return;
+    if (payloads.length === 0) {
+      this.lastAppliedEvents = [];
+      return [];
+    }
     this.store.appendEventsAndSnapshot(this.state.session.threadId, payloads, nextState, metadata);
     this.state = nextState;
+    this.lastAppliedEvents = payloads;
     for (const eventId of batchEventIds) this.appliedEventIds.add(eventId);
     let completedTurn: RuntimeEvent | undefined;
     for (const event of payloads) {
@@ -173,13 +186,14 @@ export class AgentKernel {
         this.state,
       );
     }
+    return payloads;
   }
 
   /**
    * 批量处理多个 RuntimeEvent。
    * Process multiple RuntimeEvents in batch.
    */
-  processEvents(events: RuntimeEventInput[]): void {
+  processEvents(events: RuntimeEvent[]): void {
     for (const event of events) {
       this.processEvent(event);
     }
@@ -193,6 +207,11 @@ export class AgentKernel {
    */
   getState(): Readonly<RuntimeState> {
     return this.state;
+  }
+
+  /** Canonical payloads from the immediately preceding synchronous apply operation. */
+  getLastAppliedEvents(): readonly RuntimeEvent[] {
+    return this.lastAppliedEvents;
   }
 
   /**
@@ -245,7 +264,7 @@ export class AgentKernel {
   }
 
   /** Apply an effect result only if no newer event changed the state. */
-  applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEventInput[]): boolean {
+  applyEffectResult(lease: RuntimeEffectLease, events: RuntimeEvent[]): boolean {
     if (this.hasLateTerminalEventForCancelledTool(lease, events)) {
       return false;
     }
@@ -289,11 +308,10 @@ export class AgentKernel {
 
   private hasLateTerminalEventForCancelledTool(
     lease: RuntimeEffectLease,
-    inputs: RuntimeEventInput[],
+    inputs: RuntimeEvent[],
   ): boolean {
     if (lease.effect.type !== 'run_tools') return false;
-    return inputs.some((input) => {
-      const event = isRuntimeEventEnvelope(input) ? input.payload : input;
+    return inputs.some((event) => {
       if (
         event.type !== 'tool.finished' &&
         event.type !== 'tool.failed' &&
@@ -310,7 +328,7 @@ export class AgentKernel {
    * Streaming events advance the lease revision so the final effect result
    * remains subject to the same stale-result check as a batch result.
    */
-  applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
+  applyEffectEvent(lease: RuntimeEffectLease, event: RuntimeEvent): boolean {
     if (!this.isEffectEventCurrent(lease, event)) return false;
     this.processEvent(event);
     lease.expectedRevision = this.state.revision;
@@ -319,13 +337,17 @@ export class AgentKernel {
 
   private isConcurrentShellBatchCurrent(
     lease: RuntimeEffectLease,
-    inputs: RuntimeEventInput[],
+    inputs: RuntimeEvent[],
   ): boolean {
     let projectedState = this.state;
-    for (const input of inputs) {
-      if (!this.isConcurrentShellEventCurrent(lease, input, projectedState)) return false;
-      const event = isRuntimeEventEnvelope(input) ? input.payload : input;
-      projectedState = reduceRuntimeState(projectedState, event);
+    for (const event of inputs) {
+      if (!this.isConcurrentShellEventCurrent(lease, event, projectedState)) return false;
+      const canonicalEvent = this.normalizeCurrentEvent(
+        event,
+        projectedState,
+        new Date().toISOString(),
+      );
+      projectedState = reduceRuntimeState(projectedState, canonicalEvent);
     }
     return true;
   }
@@ -337,11 +359,10 @@ export class AgentKernel {
    */
   private isConcurrentShellEventCurrent(
     lease: RuntimeEffectLease,
-    input: RuntimeEventInput,
+    event: RuntimeEvent,
     state: RuntimeState = this.state,
   ): boolean {
     if (lease.turnId !== state.turn.turnId || lease.effect.type !== 'run_tools') return false;
-    const event = isRuntimeEventEnvelope(input) ? input.payload : input;
     if (!('toolCallId' in event) || typeof event.toolCallId !== 'string') return false;
     if (!lease.effect.toolCallIds.includes(event.toolCallId)) return false;
 
@@ -380,7 +401,7 @@ export class AgentKernel {
    * retains the same ownership checks as durable effect events without
    * advancing the Runtime revision.
    */
-  isEffectEventCurrent(lease: RuntimeEffectLease, event: RuntimeEventInput): boolean {
+  isEffectEventCurrent(lease: RuntimeEffectLease, event: RuntimeEvent): boolean {
     return this.isEffectLeaseCurrent(lease) || this.isConcurrentShellEventCurrent(lease, event);
   }
 
@@ -452,25 +473,33 @@ export class AgentKernel {
       };
     }
     const combined = [...events, ...additionalEvents];
-    this.processEventBatch(combined);
-    return { status: 'applied', events: combined };
+    const canonicalEvents = this.processEventBatch(combined);
+    return { status: 'applied', events: canonicalEvents };
   }
 
-  private createEnvelope(event: RuntimeEventInput, revision: number): RuntimeEventEnvelope {
-    if (isRuntimeEventEnvelope(event)) {
-      if (event.threadId !== this.state.session.threadId) {
-        throw new Error(`Runtime event thread mismatch: ${event.threadId}.`);
-      }
-      return event;
-    }
-    const normalizedEvent = normalizeTerminalRuntimeEventV1(event);
+  private createEnvelope(
+    event: RuntimeEvent,
+    revision: number,
+    normalizationState: RuntimeState = this.state,
+  ): RuntimeEventEnvelope {
+    const occurredAt = new Date().toISOString();
+    const normalizedEvent = this.normalizeCurrentEvent(event, normalizationState, occurredAt);
     const serialized = JSON.stringify(normalizedEvent);
     const eventId = createHash('sha256').update(serialized).digest('hex');
-    const occurredAt = new Date().toISOString();
     const payload =
       (normalizedEvent.type === 'user.message_appended' ||
         normalizedEvent.type === 'model.responded' ||
-        normalizedEvent.type === 'tool.finished') &&
+        normalizedEvent.type === 'tool.finished' ||
+        normalizedEvent.type === 'tool.failed' ||
+        normalizedEvent.type === 'tool.rejected' ||
+        normalizedEvent.type === 'tool.cancelled' ||
+        normalizedEvent.type === 'tool.queued' ||
+        normalizedEvent.type === 'tool.started' ||
+        normalizedEvent.type === 'approval.requested' ||
+        normalizedEvent.type === 'approval.granted' ||
+        normalizedEvent.type === 'approval.rejected' ||
+        normalizedEvent.type === 'auto_review.requested' ||
+        normalizedEvent.type === 'auto_review.completed') &&
       !normalizedEvent.createdAt
         ? { ...normalizedEvent, createdAt: occurredAt }
         : normalizedEvent;
@@ -481,6 +510,19 @@ export class AgentKernel {
       occurredAt,
       payload,
     };
+  }
+
+  private normalizeCurrentEvent(
+    event: RuntimeEvent,
+    normalizationState: RuntimeState,
+    occurredAt: string,
+  ): RuntimeEvent {
+    const runtimeNormalizedEvent = normalizeTerminalRuntimeEventV1(event);
+    return normalizeCurrentToolOutcomeEventV1(
+      runtimeNormalizedEvent,
+      normalizationState,
+      occurredAt,
+    );
   }
 
   private reduceEnvelope(state: RuntimeState, envelope: RuntimeEventEnvelope): RuntimeState {
@@ -616,14 +658,17 @@ export function createAgentKernel(params: {
   sandboxAvailable?: boolean;
 }): AgentKernel {
   const store = createRuntimeStore(params.storePath);
-  const restored = restoreRuntimeStateFromStore({ ...params, store });
-  if (restored.migratedSnapshot) {
-    store.saveSnapshot(params.threadId, restored.migratedSnapshot);
+  let restoredState: RuntimeState;
+  try {
+    restoredState = restoreRuntimeStateAndPersistMigration({ ...params, store });
+  } catch (error) {
+    store.close();
+    throw error;
   }
 
   const kernel = new AgentKernel({
     store,
-    initialState: restored.state,
+    initialState: restoredState,
     interactionMode: params.interactionMode ?? 'accept_edits',
     sandboxAvailable: params.sandboxAvailable,
   });
@@ -667,6 +712,49 @@ export function createAgentKernel(params: {
   return kernel;
 }
 
+const MAX_MIGRATION_SNAPSHOT_RETRIES = 8;
+
+/** Restore and CAS-persist a migrated rolling snapshot at the exact observed journal boundary. */
+export function restoreRuntimeStateAndPersistMigration(params: {
+  store: RuntimeStore;
+  threadId: string;
+  userId: string;
+  workspace: string;
+  interactionMode?: InteractionMode;
+  authorizationMode?: AuthorizationMode;
+  authorizationSource?: AuthorizationSource;
+  phase?: 'planning' | 'building';
+}): RuntimeState {
+  let lastConflict: RuntimeRevisionConflictError | undefined;
+  for (let attempt = 0; attempt < MAX_MIGRATION_SNAPSHOT_RETRIES; attempt++) {
+    const restored = restoreRuntimeStateFromStore(params);
+    if (!restored.migratedSnapshot) return restored.state;
+    try {
+      params.store.appendEventsAndSnapshot(
+        params.threadId,
+        [],
+        restored.migratedSnapshot,
+        undefined,
+        undefined,
+        restored.restoreBoundary,
+      );
+      return restored.state;
+    } catch (error) {
+      if (!(error instanceof RuntimeRevisionConflictError)) throw error;
+      lastConflict = error;
+    }
+  }
+  throw (
+    lastConflict ??
+    new RuntimeRevisionConflictError(
+      params.threadId,
+      0,
+      null,
+      `Runtime migration snapshot for ${params.threadId} could not converge after ${MAX_MIGRATION_SNAPSHOT_RETRIES} restore retries.`,
+    )
+  );
+}
+
 /** Strictly restore Runtime state without executing reconciliation side effects. */
 export function restoreRuntimeStateFromStore(params: {
   store: RuntimeStore;
@@ -677,7 +765,11 @@ export function restoreRuntimeStateFromStore(params: {
   authorizationMode?: AuthorizationMode;
   authorizationSource?: AuthorizationSource;
   phase?: 'planning' | 'building';
-}): { state: RuntimeState; migratedSnapshot: RuntimeState | null } {
+}): {
+  state: RuntimeState;
+  migratedSnapshot: RuntimeState | null;
+  restoreBoundary: RuntimeRestoreBoundary;
+} {
   const store = params.store;
   const freshState = createInitialRuntimeState({
     threadId: params.threadId,
@@ -697,13 +789,18 @@ export function restoreRuntimeStateFromStore(params: {
       ? restoredState.schemaVersion
       : undefined;
   let recoveryReason: string | undefined;
-  const lastEventPosition = store.getLastEventPosition(params.threadId);
+  let allEvents: StoredEvent[] = [];
+  try {
+    allEvents = store.loadEventsStrict(params.threadId);
+  } catch (error) {
+    recoveryReason = error instanceof Error ? error.message : String(error);
+  }
+  const lastEventPosition = allEvents.at(-1)?.id ?? 0;
   if (snapshotRecord && snapshotRecord.metadata.eventPosition > lastEventPosition) {
     recoveryReason = `Runtime snapshot event position ${snapshotRecord.metadata.eventPosition} exceeds the last event position ${lastEventPosition}.`;
   }
   if (!recoveryReason && lastEventPosition > 0) {
     try {
-      const allEvents = store.loadEventsStrict(params.threadId);
       const snapshotPosition = snapshotRecord?.metadata.eventPosition ?? 0;
       const tail = allEvents.filter((entry) => entry.id > snapshotPosition);
       if (migratedState && snapshotRecord) {
@@ -713,7 +810,12 @@ export function restoreRuntimeStateFromStore(params: {
             allEvents.filter((entry) => entry.id <= snapshotPosition),
           );
         }
-        migratedState = replayPersistedTail(migratedState, tail, params.threadId);
+        migratedState = replayPersistedTail(
+          migratedState,
+          tail,
+          params.threadId,
+          restoredState?.schemaVersion ?? RUNTIME_STATE_SCHEMA_VERSION,
+        );
       }
     } catch (error) {
       recoveryReason = error instanceof Error ? error.message : String(error);
@@ -768,6 +870,10 @@ export function restoreRuntimeStateFromStore(params: {
       migratedState && migratedState !== restoredState && initialState === migratedState
         ? migratedState
         : null,
+    restoreBoundary: {
+      snapshot: snapshotRecord?.metadata ?? null,
+      lastEventPosition,
+    },
   };
 }
 
@@ -775,6 +881,7 @@ function replayPersistedTail(
   state: RuntimeState,
   tail: StoredEvent[],
   threadId: string,
+  sourceSchemaVersion: number,
 ): RuntimeState {
   let current = state;
   for (const entry of tail) {
@@ -789,7 +896,10 @@ function replayPersistedTail(
         `Runtime event ${entry.id} revision mismatch: expected ${current.revision + 1}, received ${entry.revision}.`,
       );
     }
-    const reduced = reduceRuntimeState(current, entry.event);
+    const reduced =
+      sourceSchemaVersion < RUNTIME_STATE_SCHEMA_VERSION
+        ? reduceRuntimeStateFromHistoricalSchema(current, entry.event, sourceSchemaVersion)
+        : reduceRuntimeState(current, entry.event);
     current = {
       ...reduced,
       revision: entry.revision,
@@ -825,7 +935,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   const normalizedSnapshot = snapshot;
 
   if (snapshot.schemaVersion === RUNTIME_STATE_SCHEMA_VERSION)
-    return normalizeRuntimeMetadata(normalizedSnapshot);
+    return normalizeRuntimeMetadata(normalizedSnapshot, snapshot.schemaVersion);
   if (snapshot.schemaVersion < 2 || snapshot.schemaVersion > RUNTIME_STATE_SCHEMA_VERSION)
     return null;
 
@@ -844,7 +954,7 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   // Build the migrated state before upgrading the version so all v2 fields are
   // preserved and the recovery marker is durable with the schema transition.
   let migratedState: RuntimeState = {
-    ...normalizeRuntimeMetadata(normalizedSnapshot),
+    ...normalizeRuntimeMetadata(normalizedSnapshot, snapshot.schemaVersion),
     schemaVersion: RUNTIME_STATE_SCHEMA_VERSION,
     verification: (normalizedSnapshot as Partial<RuntimeState>).verification ?? { records: {} },
     context: normalizeContextRuntimeState((normalizedSnapshot as Partial<RuntimeState>).context),
@@ -859,7 +969,6 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
       pending: [],
       waivers: {},
     },
-    suspendedSubagents: snapshot.suspendedSubagents ?? {},
     capabilities: {
       catalogRevision: snapshot.capabilities?.catalogRevision ?? '',
       bindings: snapshot.capabilities?.bindings ?? {},
@@ -871,6 +980,9 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
       invocations: snapshot.capabilities?.invocations ?? {},
     },
     skills: snapshot.skills ?? { catalogRevision: '', frames: {} },
+    toolRecovery: (normalizedSnapshot as Partial<RuntimeState>).toolRecovery
+      ? normalizeToolRecoveryJournalV1((normalizedSnapshot as Partial<RuntimeState>).toolRecovery)
+      : createToolRecoveryJournalV1(),
     ...(legacyMarker ? { legacyUnrecoverableSubagentApproval: legacyMarker } : {}),
   };
 
@@ -910,7 +1022,10 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
   return materializeLegacyPlanArtifacts(migratedState);
 }
 
-function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
+function normalizeRuntimeMetadata(
+  state: RuntimeState,
+  sourceSchemaVersion = state.schemaVersion,
+): RuntimeState {
   const raw = state as RuntimeState & {
     revision?: number;
     appliedEventIds?: string[];
@@ -930,6 +1045,12 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
     resourceBudget: normalizeResourceBudgetMetadata(
       raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
     ),
+    toolRecovery:
+      sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
+        ? raw.toolRecovery
+          ? normalizeToolRecoveryJournalV1(raw.toolRecovery)
+          : createToolRecoveryJournalV1()
+        : normalizeToolRecoveryJournalV1(raw.toolRecovery),
     turn: {
       ...state.turn,
       status:
@@ -961,6 +1082,21 @@ function normalizeRuntimeMetadata(state: RuntimeState): RuntimeState {
         : {}),
       invocations: state.capabilities?.invocations ?? {},
     },
+    suspendedSubagents: Object.fromEntries(
+      Object.entries(state.suspendedSubagents ?? {}).map(([toolCallId, snapshot]) => [
+        toolCallId,
+        snapshot.toolRecovery
+          ? snapshot
+          : {
+              ...snapshot,
+              toolRecovery: (sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
+                ? createToolRecoveryJournalV1()
+                : normalizeToolRecoveryJournalV1(undefined)) as unknown as NonNullable<
+                RuntimeState['suspendedSubagents'][string]['toolRecovery']
+              >,
+            },
+      ]),
+    ),
   };
 }
 

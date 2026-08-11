@@ -205,6 +205,10 @@ const STRATEGIES: Record<FailureKind, FailureStrategy> = {
   unknown: terminal,
 };
 
+export function isFailureKind(value: unknown): value is FailureKind {
+  return typeof value === 'string' && Object.hasOwn(STRATEGIES, value);
+}
+
 const TERMINAL_REASON_BY_FAILURE: Readonly<Partial<Record<FailureKind, TerminalReasonCodeV1>>> =
   Object.freeze({
     artifact_invalid: 'artifact_invalid',
@@ -245,6 +249,14 @@ export function classifyFailure(
     ...STRATEGIES[kind],
     ...(parseFailureCode ? { parseFailureCode } : {}),
   };
+}
+
+export function failureKindForToolParseFailure(
+  code: import('@/core/tools/registry/registry').ParseFailureCode,
+): 'tool_invalid_args' | 'tool_not_found' {
+  return code === 'unknown_tool' || code === 'tool_unavailable'
+    ? 'tool_not_found'
+    : 'tool_invalid_args';
 }
 
 export function classifyMcpProviderError(error: McpProviderError): ClassifiedFailure {

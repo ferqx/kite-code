@@ -74,6 +74,7 @@ export interface ContextProjectionEnvironment {
   promptContractVersion?: PromptContractVersion;
   projectInstructions?: ProjectInstructionSnapshot;
   sandboxBackend?: SandboxBackend | 'unknown';
+  toolSurface?: 'legacy_plan_recovery';
   /** Inputs that can change projection/summary semantics without changing tool schemas. */
   leaseMetadata?: {
     providerName: string;
@@ -145,6 +146,7 @@ export function digestProjectionEnvironment(env: ContextProjectionEnvironment): 
         promptContractVersion: env.promptContractVersion ?? 'legacy',
         projectInstructionRevision: env.projectInstructions?.revision ?? null,
         sandboxBackend: env.sandboxBackend ?? 'unknown',
+        toolSurface: env.toolSurface ?? 'default',
         leaseMetadata: env.leaseMetadata ?? null,
       }),
     )
@@ -169,6 +171,7 @@ export interface BuildContextProjectionInput {
   promptContractVersion?: PromptContractVersion;
   projectInstructions?: ProjectInstructionSnapshot;
   sandboxBackend?: SandboxBackend | 'unknown';
+  toolSurface?: 'legacy_plan_recovery';
 }
 
 /** Complete context projection — all components assembled and validated. */
@@ -213,7 +216,8 @@ function runtimeTranscriptMessages(state: Readonly<RuntimeState>): BaseMessage[]
             id: message.messageId,
             content: message.content ?? '',
             tool_calls: message.toolCalls.map((call) => ({
-              ...call,
+              id: call.id,
+              name: call.name,
               args: (call.args ?? {}) as Record<string, unknown>,
               type: 'tool_call' as const,
             })),
@@ -351,6 +355,7 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
       planningState: planning.kind !== 'planning_empty' ? planning : undefined,
       taskId: activeTask?.taskId,
       sideEffectsStarted: activeTask?.sideEffectsStarted,
+      legacyPlanRecovery: input.toolSurface === 'legacy_plan_recovery',
     }),
   );
 

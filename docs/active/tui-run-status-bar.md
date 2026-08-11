@@ -26,6 +26,7 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 **叠加态（覆盖阶段动词，但不改变阶段本身）：**
 - Retry: `Retrying` + warning 色
 - Approval 等待: `Waiting` + muted 色
+- Subagent 审批暂停：block 状态切换为 `suspended`；状态推导将其映射为 `Awaiting approval` + warning 色。批准或 replay 恢复后回到 `running`，取消同时覆盖 `running` 与 `suspended`。
 - Input 等待: `Asking` + warning 色
 - Context compaction: `preparing → summarizing → validating`，由 App-only action 驱动，不写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除。手动 `/compact` 的动画紧跟命令以内联输出展示，不占用通用会话 StatusBar；自动压缩仍使用 StatusBar。
 - Idle plan mode: `Shift+Tab to exit - describe your task` + muted 色

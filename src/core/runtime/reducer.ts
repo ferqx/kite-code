@@ -10,7 +10,20 @@ import {
 import { updateAutoCompactionGuard } from '@/core/model/context-compaction-decision';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
-import type { AgentPlan, PlanDocument, PlanStep } from '@/protocol/events';
+import type {
+  AgentPlan,
+  PlanArtifactRef,
+  PlanDocument,
+  PlanIdentity,
+  PlanStep,
+} from '@/protocol/events';
+import {
+  type CompletionGuardBlocked,
+  type CompletionGuardDecision,
+  type CompletionGuardVersion,
+  decideCompletionV1,
+  decideCompletionV2,
+} from './completion-guard';
 import {
   createContextCorrectnessBlock,
   isContextHardBlockReason,
@@ -18,8 +31,16 @@ import {
 } from './context-compaction';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
+import {
+  agentPlanTransportMatchesDocumentV2,
+  isAgentPlanTransportV2,
+  isPlanDocumentV2,
+  planStepsFromAgentPlanUpdateV2,
+} from './plan-document';
+import { planCompletionBlocker, planCompletionEvidenceMatchesRuntime } from './plan-evidence';
 import { reduceResourceBudgetStateV1 } from './resource-budget';
 import {
+  COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
   computePlanStructuralDigest,
   getActivePlanning,
   getActiveTask,
@@ -31,6 +52,24 @@ import {
   updateActiveTask,
 } from './state';
 import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
+import { toolExecutionModelContentV1 } from './tool-model-content';
+import { type ToolOutcomeV1, toolOutcomeSucceededV1 } from './tool-outcome';
+import {
+  assertCanonicalToolOutcomeEventV1,
+  canonicalToolOutcomeV1,
+  decodeHistoricalToolOutcomeEventV1,
+} from './tool-outcome-events';
+import {
+  admitRecoveryAttemptV1,
+  advanceToolRecoveryResponseV1,
+  closeToolRecoveryScopeV1,
+  mergeToolRecoveryJournalsV1,
+  recordRecoveryExhaustionV1,
+  recordRecoveryFailureV1,
+  recordRecoveryInvocationV1,
+  recordToolOwnedProgressV1,
+  toolInvocationFingerprintV1,
+} from './tool-recovery-journal';
 
 function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: string) {
   return {
@@ -38,6 +77,52 @@ function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: stri
     turnId: state.turn.turnId,
     ordinal: state.transcript.messages.length,
     createdAt: createdAt ?? new Date(0).toISOString(),
+  };
+}
+
+function activeRecoveryFailureIds(
+  state: RuntimeState,
+  predicate: (failure: RuntimeState['toolRecovery']['failures'][string]) => boolean = () => true,
+  includeExhausted = false,
+): string[] {
+  return state.toolRecovery.order.filter((id) => {
+    const failure = state.toolRecovery.failures[id];
+    return (
+      (failure?.status === 'unresolved' || (includeExhausted && failure?.status === 'exhausted')) &&
+      failure.taskId === (state.activeTaskId ?? undefined) &&
+      failure.turnId === state.turn.turnId &&
+      predicate(failure)
+    );
+  });
+}
+
+function modelRecoveryProjection(outcome: ToolOutcomeV1): {
+  retryable: boolean;
+  model_fixable: boolean;
+  disposition: ToolOutcomeV1['recovery']['disposition'];
+  maximum_additional_calls: 0 | 1;
+  next_step: string;
+} {
+  const recovery = outcome.recovery;
+  const modelFixable =
+    recovery.requiresNewModelResponse &&
+    (recovery.disposition === 'correct_args' || recovery.disposition === 'alternative');
+  const nextStep =
+    recovery.disposition === 'correct_args'
+      ? 'Explain the failure, correct the arguments once in the next model response, and continue.'
+      : recovery.disposition === 'alternative'
+        ? 'Explain the failure and choose a different available capability without replaying this invocation.'
+        : recovery.disposition === 'user_action'
+          ? 'Explain the required user action and wait for an authoritative user or provider resolution.'
+          : recovery.disposition === 'retry_once'
+            ? 'Do not issue a model-owned replay; Runtime owns the single safe automatic retry.'
+            : 'Explain the failure and continue without retrying or assuming the tool succeeded.';
+  return {
+    retryable: recovery.disposition === 'retry_once',
+    model_fixable: modelFixable,
+    disposition: recovery.disposition,
+    maximum_additional_calls: recovery.maximumAdditionalCalls,
+    next_step: nextStep,
   };
 }
 
@@ -88,6 +173,12 @@ function stringArg(args: unknown, key: string): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+function elapsedBetween(start: string | undefined, end: string | undefined): number | undefined {
+  if (!start || !end) return undefined;
+  const elapsed = Date.parse(end) - Date.parse(start);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : undefined;
+}
+
 function toolResultMeta(
   call: ToolCallRecord,
   event: Extract<RuntimeEvent, { type: 'tool.finished' }>,
@@ -108,7 +199,7 @@ function toolResultMeta(
       ? [path]
       : undefined);
   const fallbackModelDigest = createHash('sha256')
-    .update(event.result.stdout || event.result.stderr)
+    .update(toolExecutionModelContentV1(event.result))
     .digest('hex');
   return {
     ...supplied,
@@ -129,6 +220,46 @@ function toolResultMeta(
   };
 }
 
+function samePlanIdentity(
+  left: PlanIdentity | undefined,
+  right: PlanIdentity | undefined,
+): boolean {
+  return (
+    left != null &&
+    right != null &&
+    left.planId === right.planId &&
+    left.version === right.version &&
+    left.structuralDigest === right.structuralDigest
+  );
+}
+
+function completionDecisionForVersion(
+  state: RuntimeState,
+  version: CompletionGuardVersion,
+): CompletionGuardDecision | null {
+  if (version === 'completion_guard_v1') return decideCompletionV1(state);
+  try {
+    return decideCompletionV2(state);
+  } catch {
+    return null;
+  }
+}
+
+function blockedEventMatchesDecision(
+  event: Extract<RuntimeEvent, { type: 'completion.blocked' }>,
+  decision: CompletionGuardBlocked,
+): boolean {
+  return (
+    event.guardVersion === decision.version &&
+    event.code === decision.code &&
+    event.nextAction === decision.nextAction &&
+    event.planning === decision.planning &&
+    event.correctionAttempt === decision.correctionAttempt &&
+    (decision.version === 'completion_guard_v1' ||
+      samePlanIdentity(event.planIdentity, decision.planIdentity))
+  );
+}
+
 /**
  * 纯函数：将运行时事件应用到状态，返回新的不可变状态。
  * Pure function: applies a runtime event to the state, returns a new immutable state.
@@ -141,6 +272,31 @@ function toolResultMeta(
  * @returns 新的不可变运行时状态 / New immutable runtime state
  */
 export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  assertCanonicalToolOutcomeEventV1(event);
+  return reduceRuntimeStateWithReplayBoundary(state, event, false);
+}
+
+/** Kernel-only migration entry: payload fields cannot grant legacy completion authority. */
+export function reduceRuntimeStateFromHistoricalSchema(
+  state: RuntimeState,
+  event: RuntimeEvent,
+  sourceSchemaVersion: number,
+): RuntimeState {
+  const decodedEvent = decodeHistoricalToolOutcomeEventV1(event);
+  return reduceRuntimeStateWithReplayBoundary(
+    state,
+    decodedEvent,
+    Number.isInteger(sourceSchemaVersion) &&
+      sourceSchemaVersion >= 2 &&
+      sourceSchemaVersion < COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
+  );
+}
+
+function reduceRuntimeStateWithReplayBoundary(
+  state: RuntimeState,
+  event: RuntimeEvent,
+  allowHistoricalV1CompletionOnV2: boolean,
+): RuntimeState {
   event = normalizeTerminalRuntimeEventV1(event);
   switch (event.type) {
     case 'resource_budget.configured':
@@ -358,6 +514,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
       return {
         ...state,
+        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+          kind: 'task',
+          taskId: event.taskId,
+        }),
         activeTaskId: null,
         tasks: { ...state.tasks, [completed.taskId]: completed },
         planning: completed.planning,
@@ -370,6 +530,10 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const cancelled = { ...active, status: 'cancelled' as const, executionMode: undefined };
       return {
         ...state,
+        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+          kind: 'task',
+          taskId: event.taskId,
+        }),
         activeTaskId: null,
         tasks: { ...state.tasks, [cancelled.taskId]: cancelled },
         planning: cancelled.planning,
@@ -385,6 +549,20 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (event.taskId && state.activeTaskId !== event.taskId) return state;
       const planning = getActivePlanning(state);
       const doc = planDocumentFromAgentPlan(event.plan, state.turn.turnId);
+      const priorDocument =
+        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
+          ? planning.document
+          : undefined;
+      const trustedV2Document = priorDocument?.planSchemaVersion === 2 ? priorDocument : undefined;
+      if (
+        trustedV2Document &&
+        (event.planId !== trustedV2Document.planId ||
+          event.version !== trustedV2Document.version ||
+          event.structuralDigest !== trustedV2Document.structuralDigest ||
+          computePlanStructuralDigest(doc) !== trustedV2Document.structuralDigest)
+      ) {
+        return state;
+      }
       const inherited =
         planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
           ? {
@@ -392,29 +570,30 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               version: event.version ?? planning.document.version,
             }
           : { planId: event.planId ?? doc.planId, version: event.version ?? 1 };
-      const priorDocument =
-        planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
-          ? planning.document
-          : undefined;
-      const document: PlanDocument = {
-        ...doc,
-        planId: inherited.planId,
-        version: inherited.version,
-        structuralDigest: event.structuralDigest ?? computePlanStructuralDigest(doc),
-        ...(event.artifact ? { artifact: event.artifact } : {}),
-        ...(planning.kind === 'replanning_draft' || priorDocument?.supersedesPlanVersion != null
-          ? {
-              supersedesPlanVersion:
-                planning.kind === 'replanning_draft'
-                  ? planning.supersedesPlanVersion
-                  : priorDocument?.supersedesPlanVersion,
-              replanReason:
-                planning.kind === 'replanning_draft'
-                  ? planning.replanReason
-                  : (priorDocument?.replanReason ?? ''),
-            }
-          : {}),
-      };
+      const document: PlanDocument = trustedV2Document
+        ? trustedV2Document
+        : {
+            ...doc,
+            planId: inherited.planId,
+            version: inherited.version,
+            structuralDigest: event.structuralDigest ?? computePlanStructuralDigest(doc),
+            ...(event.artifact ? { artifact: event.artifact } : {}),
+            ...(planning.kind === 'replanning_draft' || priorDocument?.supersedesPlanVersion != null
+              ? {
+                  supersedesPlanVersion:
+                    planning.kind === 'replanning_draft'
+                      ? planning.supersedesPlanVersion
+                      : priorDocument?.supersedesPlanVersion,
+                  replanReason:
+                    planning.kind === 'replanning_draft'
+                      ? planning.replanReason
+                      : (priorDocument?.replanReason ?? ''),
+                }
+              : {}),
+          };
+      const reviewPlan = trustedV2Document
+        ? planDocumentToAgentPlan(trustedV2Document)
+        : event.plan;
       const next = setActivePlanning(state, {
         kind: 'awaiting_review',
         document,
@@ -431,9 +610,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           planId: document.planId,
           version: document.version,
           structuralDigest: document.structuralDigest,
-          plan: event.plan,
-          planSummary: event.planSummary,
-          ...(event.artifact ? { artifact: event.artifact } : {}),
+          plan: reviewPlan,
+          planSummary: trustedV2Document
+            ? `${trustedV2Document.title}\n\n${trustedV2Document.steps.map((step, index) => `${index + 1}. ${step.title}`).join('\n')}`
+            : event.planSummary,
+          ...(document.artifact ? { artifact: document.artifact } : {}),
         },
       };
     }
@@ -522,13 +703,26 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         supersedesPlanVersion: event.supersedesPlanVersion,
         replanReason: event.reason,
       };
-      return updateActiveTask(
+      const replanned = updateActiveTask(
         {
           ...setActivePlanning(state, nextPlanning),
           interactions: { kind: 'idle' },
         },
         (task) => ({ ...task, planHistory: [...task.planHistory, planning.document] }),
       );
+      // Explicit structural replanning is an authoritative resolution even when the
+      // failed lineage already consumed its one eligible response.
+      const resolvesFailureIds = activeRecoveryFailureIds(state, () => true, true);
+      return resolvesFailureIds.length === 0
+        ? replanned
+        : {
+            ...replanned,
+            toolRecovery: recordToolOwnedProgressV1(state.toolRecovery, {
+              kind: 'replanned',
+              referenceId: `${planning.document.planId}:${planning.document.version + 1}`,
+              resolvesFailureIds,
+            }),
+          };
     }
 
     case 'plan.rejected': {
@@ -845,6 +1039,24 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       // not reset a terminal call or append the same id to the queue again.
       if (state.tools.calls[event.toolCallId]) return state;
       const taskId = event.taskId ?? state.activeTaskId ?? undefined;
+      const invocationFingerprint =
+        event.invocationFingerprint ??
+        toolInvocationFingerprintV1({
+          key: state.toolRecovery.identityKey,
+          toolName: event.name,
+          parsedArgs: event.args,
+        });
+      const recoveryMode = event.recoveryMode ?? 'model_correction';
+      const admission = admitRecoveryAttemptV1(state.toolRecovery, {
+        toolCallId: event.toolCallId,
+        toolName: event.name,
+        invocationFingerprint,
+        modelMessageId: event.modelMessageId ?? '',
+        mode: recoveryMode,
+        taskId,
+        turnId: state.turn.turnId,
+      });
+      const recoveryOf = admission.recoveryOf;
       const call = {
         toolCallId: event.toolCallId,
         ...(taskId ? { taskId } : {}),
@@ -854,6 +1066,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         args: event.args,
         status: 'queued' as const,
         createdAtTurnId: state.turn.turnId,
+        ...(event.createdAt ? { queuedAt: event.createdAt } : {}),
+        invocationFingerprint,
+        ...(recoveryOf ? { recoveryOf, recoveryMode } : {}),
+        recoveryAdmission: admission.admitted ? ('admitted' as const) : admission.detailCode,
+        ...(event.unknownFields ? { unknownFields: event.unknownFields } : {}),
         ...(event.bindingId ? { bindingId: event.bindingId } : {}),
         ...(event.capabilityId ? { capabilityId: event.capabilityId } : {}),
         ...(event.capabilityRevision ? { capabilityRevision: event.capabilityRevision } : {}),
@@ -874,8 +1091,17 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               };
             })()),
       };
+      const toolRecovery =
+        admission.admitted && recoveryOf
+          ? recordRecoveryInvocationV1(state.toolRecovery, {
+              toolCallId: event.toolCallId,
+              recoveryOf,
+              mode: recoveryMode,
+            })
+          : state.toolRecovery;
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...state.tools,
           calls: { ...state.tools.calls, [event.toolCallId]: call },
@@ -908,7 +1134,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...state.tools,
           calls: {
             ...state.tools.calls,
-            [event.toolCallId]: { ...existingCall, status: 'running' as const },
+            [event.toolCallId]: {
+              ...existingCall,
+              status: 'running' as const,
+              ...(event.createdAt ? { startedAt: event.createdAt } : {}),
+            },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: [...state.tools.active, event.toolCallId],
@@ -937,28 +1167,56 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         isTaskCall && state.legacyUnrecoverableSubagentApproval?.toolCallId === event.toolCallId;
       const { legacyUnrecoverableSubagentApproval: _legacyMarker, ...stateWithoutLegacyMarker } =
         state;
+      const outcomeV1 = canonicalToolOutcomeV1(event);
       const status =
-        event.result.status === 'exhausted'
+        outcomeV1.status === 'exhausted'
           ? ('exhausted' as const)
-          : event.result.ok
-            ? ('succeeded' as const)
-            : ('failed' as const);
+          : outcomeV1.status === 'cancelled'
+            ? ('cancelled' as const)
+            : toolOutcomeSucceededV1(outcomeV1)
+              ? ('succeeded' as const)
+              : ('failed' as const);
+      const terminalCall = {
+        ...existingCall,
+        status,
+        result: {
+          ok: toolOutcomeSucceededV1(outcomeV1),
+          summary: `Command: ${event.result.command}, exit code: ${event.result.exitCode}`,
+          exitCode: event.result.exitCode,
+          resultMeta: toolResultMeta(existingCall, event),
+        },
+        outcomeV1,
+      };
+      const toolRecovery =
+        outcomeV1.status === 'success'
+          ? recordToolOwnedProgressV1(state.toolRecovery, {
+              kind: 'receipt',
+              referenceId: event.toolCallId,
+              ...(existingCall.recoveryOf ? { resolvesFailureIds: [existingCall.recoveryOf] } : {}),
+            })
+          : recordRecoveryFailureV1(state.toolRecovery, {
+              toolCallId: event.toolCallId,
+              toolName: existingCall.name,
+              invocationFingerprint:
+                existingCall.invocationFingerprint ??
+                toolInvocationFingerprintV1({
+                  key: state.toolRecovery.identityKey,
+                  toolName: existingCall.name,
+                  parsedArgs: existingCall.args,
+                }),
+              modelMessageId: existingCall.modelMessageId,
+              outcome: outcomeV1,
+              taskId: existingCall.taskId,
+              turnId: existingCall.createdAtTurnId,
+            });
       return {
         ...(clearsLegacyMarker ? stateWithoutLegacyMarker : state),
+        toolRecovery,
         tools: {
           ...state.tools,
           calls: {
             ...state.tools.calls,
-            [event.toolCallId]: {
-              ...existingCall,
-              status,
-              result: {
-                ok: event.result.ok,
-                summary: `Command: ${event.result.command}, exit code: ${event.result.exitCode}`,
-                exitCode: event.result.exitCode,
-                resultMeta: toolResultMeta(existingCall, event),
-              },
-            },
+            [event.toolCallId]: terminalCall,
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
@@ -968,8 +1226,8 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...transcriptMeta(state, `tool-${event.toolCallId}`, event.createdAt),
           toolCallId: event.toolCallId,
           name: event.name,
-          content: event.result.stdout || event.result.stderr,
-          ok: event.result.ok,
+          content: toolExecutionModelContentV1(event.result),
+          ok: toolOutcomeSucceededV1(outcomeV1),
           resultMeta: toolResultMeta(existingCall, event),
         }),
         suspendedSubagents: clearSuspendedSubagent(state, event.toolCallId, isTaskCall),
@@ -985,8 +1243,26 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const failure =
         event.failure ??
         classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
+      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const recovery = modelRecoveryProjection(outcomeV1);
+      const toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
+        toolCallId: event.toolCallId,
+        toolName: existingCall.name,
+        invocationFingerprint:
+          existingCall.invocationFingerprint ??
+          toolInvocationFingerprintV1({
+            key: state.toolRecovery.identityKey,
+            toolName: existingCall.name,
+            parsedArgs: existingCall.args,
+          }),
+        modelMessageId: existingCall.modelMessageId,
+        outcome: outcomeV1,
+        taskId: existingCall.taskId,
+        turnId: existingCall.createdAtTurnId,
+      });
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...state.tools,
           calls: {
@@ -996,6 +1272,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               status: 'failed' as const,
               error: failure.message,
               failure,
+              outcomeV1,
             },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
@@ -1011,12 +1288,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             error: {
               kind: failure.kind,
               message: failure.message,
-              retryable: failure.retryable,
-              model_fixable: failure.modelFixable,
+              retryable: recovery.retryable,
+              model_fixable: recovery.model_fixable,
+              recovery_disposition: recovery.disposition,
+              maximum_additional_calls: recovery.maximum_additional_calls,
             },
-            next_step: failure.modelFixable
-              ? 'Explain the failure, adjust the request or choose another available capability, and continue the conversation.'
-              : 'Explain the failure to the user and continue without assuming the tool succeeded.',
+            next_step: recovery.next_step,
           }),
           ok: false,
         }),
@@ -1033,10 +1310,32 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       if (existingCall) {
         if (existingCall.status === 'rejected') return state;
         const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
+        const outcomeV1 = canonicalToolOutcomeV1(event);
+        const recovery = modelRecoveryProjection(outcomeV1);
+        const recoveryFailureInput = {
+          toolCallId: event.toolCallId,
+          toolName: existingCall.name,
+          invocationFingerprint:
+            existingCall.invocationFingerprint ??
+            toolInvocationFingerprintV1({
+              key: state.toolRecovery.identityKey,
+              toolName: existingCall.name,
+              parsedArgs: existingCall.args,
+            }),
+          modelMessageId: existingCall.modelMessageId,
+          outcome: outcomeV1,
+          taskId: existingCall.taskId,
+          turnId: existingCall.createdAtTurnId,
+        };
+        const toolRecovery =
+          existingCall.recoveryAdmission && existingCall.recoveryAdmission !== 'admitted'
+            ? recordRecoveryExhaustionV1(state.toolRecovery, recoveryFailureInput)
+            : recordRecoveryFailureV1(state.toolRecovery, recoveryFailureInput);
         const deferredUntilBuilding = failure.kind === 'phase_deferred';
         const deniedByPlanningPhase = failure.kind === 'phase_denied';
         return {
           ...state,
+          toolRecovery,
           tools: {
             ...state.tools,
             calls: {
@@ -1046,6 +1345,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 status: 'rejected' as const,
                 error: event.reason,
                 failure,
+                outcomeV1,
               },
             },
             queue: state.tools.queue.filter((id) => id !== event.toolCallId),
@@ -1086,11 +1386,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                       error: {
                         kind: failure.kind,
                         message: event.reason,
-                        retryable: failure.retryable,
-                        model_fixable: failure.modelFixable,
+                        retryable: recovery.retryable,
+                        model_fixable: recovery.model_fixable,
+                        recovery_disposition: recovery.disposition,
+                        maximum_additional_calls: recovery.maximum_additional_calls,
                       },
-                      next_step:
-                        'Respect the rejection, explain it when relevant, and continue without assuming the tool ran.',
+                      next_step: recovery.next_step,
                     },
             ),
             ok: false,
@@ -1129,13 +1430,34 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         state.interactions.kind !== 'awaiting_provider_action' &&
         state.interactions.kind !== 'awaiting_provider_admission' &&
         state.interactions.toolCallId === event.toolCallId;
+      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const toolRecovery = recordRecoveryFailureV1(state.toolRecovery, {
+        toolCallId: event.toolCallId,
+        toolName: existingCall.name,
+        invocationFingerprint:
+          existingCall.invocationFingerprint ??
+          toolInvocationFingerprintV1({
+            key: state.toolRecovery.identityKey,
+            toolName: existingCall.name,
+            parsedArgs: existingCall.args,
+          }),
+        modelMessageId: existingCall.modelMessageId,
+        outcome: outcomeV1,
+        taskId: existingCall.taskId,
+        turnId: existingCall.createdAtTurnId,
+      });
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...state.tools,
           calls: {
             ...state.tools.calls,
-            [event.toolCallId]: { ...existingCall, status: 'cancelled' as const },
+            [event.toolCallId]: {
+              ...existingCall,
+              status: 'cancelled' as const,
+              outcomeV1,
+            },
           },
           queue: state.tools.queue.filter((id) => id !== event.toolCallId),
           active: state.tools.active.filter((id) => id !== event.toolCallId),
@@ -1157,6 +1479,45 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       };
     }
 
+    case 'tool.retry_recorded': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (existingCall?.status !== 'running') return state;
+      const withFailure = recordRecoveryFailureV1(state.toolRecovery, {
+        toolCallId: event.toolCallId,
+        toolName: existingCall.name,
+        invocationFingerprint:
+          existingCall.invocationFingerprint ??
+          toolInvocationFingerprintV1({
+            key: state.toolRecovery.identityKey,
+            toolName: existingCall.name,
+            parsedArgs: existingCall.args,
+          }),
+        modelMessageId: existingCall.modelMessageId,
+        outcome: canonicalToolOutcomeV1(event),
+        taskId: existingCall.taskId,
+        turnId: existingCall.createdAtTurnId,
+      });
+      return {
+        ...state,
+        toolRecovery: recordRecoveryInvocationV1(withFailure, {
+          toolCallId: event.toolCallId,
+          recoveryOf: event.recoveryOf,
+          mode: 'automatic_retry',
+        }),
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: {
+              ...existingCall,
+              recoveryOf: event.recoveryOf,
+              recoveryMode: 'automatic_retry',
+            },
+          },
+        },
+      };
+    }
+
     case 'subagent.suspended': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (existingCall?.name !== 'task') return state;
@@ -1166,6 +1527,18 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           ...state.suspendedSubagents,
           [event.toolCallId]: event.snapshot,
         },
+      };
+    }
+
+    case 'subagent.recovery_journal_merged': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (existingCall?.name !== 'task') return state;
+      return {
+        ...state,
+        toolRecovery: mergeToolRecoveryJournalsV1(state.toolRecovery, event.journal, {
+          taskId: existingCall.taskId ?? state.activeTaskId ?? undefined,
+          turnId: existingCall.createdAtTurnId,
+        }),
       };
     }
 
@@ -1273,7 +1646,21 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'approval.requested':
       return {
         ...state,
-        tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_approval'),
+        tools: {
+          ...updateToolStatus(state.tools, event.toolCallId, 'awaiting_approval'),
+          calls: {
+            ...state.tools.calls,
+            ...(state.tools.calls[event.toolCallId]
+              ? {
+                  [event.toolCallId]: {
+                    ...state.tools.calls[event.toolCallId]!,
+                    status: 'awaiting_approval' as const,
+                    ...(event.createdAt ? { approvalRequestedAt: event.createdAt } : {}),
+                  },
+                }
+              : {}),
+          },
+        },
         interactions: {
           kind: 'awaiting_tool_approval',
           interactionId: event.interactionId,
@@ -1300,6 +1687,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               ...state.tools.calls[state.interactions.toolCallId]!,
               status: 'approved',
               approvalGrant: event.grant,
+              approvalWaitMs:
+                (state.tools.calls[state.interactions.toolCallId]?.approvalWaitMs ?? 0) +
+                (elapsedBetween(
+                  state.tools.calls[state.interactions.toolCallId]?.approvalRequestedAt,
+                  event.createdAt,
+                ) ?? 0),
             },
           },
         },
@@ -1317,8 +1710,29 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const toolCallId = state.interactions.toolCallId;
       const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
       const failure = event.failure ?? classifyFailure('approval_rejected', event.reason);
+      const existingCall = state.tools.calls[toolCallId];
+      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const recovery = modelRecoveryProjection(outcomeV1);
+      const toolRecovery = existingCall
+        ? recordRecoveryFailureV1(state.toolRecovery, {
+            toolCallId,
+            toolName: existingCall.name,
+            invocationFingerprint:
+              existingCall.invocationFingerprint ??
+              toolInvocationFingerprintV1({
+                key: state.toolRecovery.identityKey,
+                toolName: existingCall.name,
+                parsedArgs: existingCall.args,
+              }),
+            modelMessageId: existingCall.modelMessageId,
+            outcome: outcomeV1,
+            taskId: existingCall.taskId,
+            turnId: existingCall.createdAtTurnId,
+          })
+        : state.toolRecovery;
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...rejectedTools,
           calls: {
@@ -1328,6 +1742,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               status: 'rejected',
               error: event.reason,
               failure,
+              outcomeV1,
             },
           },
           queue: rejectedTools.queue.filter((id) => id !== toolCallId),
@@ -1344,9 +1759,12 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             error: {
               kind: failure.kind,
               message: event.reason,
-              retryable: failure.retryable,
-              model_fixable: failure.modelFixable,
+              retryable: recovery.retryable,
+              model_fixable: recovery.model_fixable,
+              recovery_disposition: recovery.disposition,
+              maximum_additional_calls: recovery.maximum_additional_calls,
             },
+            next_step: recovery.next_step,
           }),
           ok: false,
         }),
@@ -1542,8 +1960,21 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           : event.type === 'provider.action_deferred'
             ? 'deferred'
             : `failed (${event.failureCode})`;
+      const providerFailureIds = activeRecoveryFailureIds(
+        state,
+        (failure) => failure.toolCallId === event.originatingToolCallId,
+      );
+      const toolRecovery =
+        event.type === 'provider.action_completed' && providerFailureIds.length > 0
+          ? recordToolOwnedProgressV1(state.toolRecovery, {
+              kind: 'provider_revision',
+              referenceId: event.interactionId,
+              resolvesFailureIds: providerFailureIds,
+            })
+          : state.toolRecovery;
       return {
         ...state,
+        toolRecovery,
         interactions: { kind: 'idle' },
         transcript: {
           ...state.transcript,
@@ -1604,15 +2035,33 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     }
 
     // phase.changed — removed; phase is derived from planning.kind via getAgentPhase()
-    case 'turn.started':
+    case 'turn.started': {
+      const planning = getActivePlanning(state);
+      const planIdentity =
+        'document' in planning && planning.document?.planSchemaVersion === 2
+          ? {
+              planId: planning.document.planId,
+              version: planning.document.version,
+              structuralDigest: planning.document.structuralDigest,
+            }
+          : undefined;
+      const preserveV2Correction =
+        state.completionGuard?.guardVersion === 'completion_guard_v2' &&
+        samePlanIdentity(state.completionGuard.planIdentity, planIdentity);
       return {
         ...state,
+        toolRecovery: closeToolRecoveryScopeV1(state.toolRecovery, {
+          kind: 'turn',
+          turnId: state.turn.turnId,
+        }),
+        completionGuard: preserveV2Correction ? state.completionGuard : { correctionAttempts: 0 },
         turn: {
           turnId: event.turnId,
           turnIndex: state.turn.turnIndex + 1,
           status: 'active',
         },
       };
+    }
     case 'turn.completed':
       return event.turnId === state.turn.turnId
         ? { ...state, turn: { ...state.turn, status: 'completed' } }
@@ -1640,7 +2089,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               const taskId = crypto.randomUUID();
               const task = {
                 taskId,
-                userGoal: event.content,
+                userGoal: event.userGoal ?? event.content,
                 status: 'active' as const,
                 startedAtTurnId: state.turn.turnId,
                 sideEffectsStarted: false,
@@ -1656,8 +2105,11 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
             })()
           : state;
       const activeTask = getActiveTask(nextState);
-      if (activeTask && activeTask.userGoal.length === 0 && event.content.length > 0) {
-        nextState = updateActiveTask(nextState, (task) => ({ ...task, userGoal: event.content }));
+      const userGoal = event.userGoal ?? event.content;
+      // Delegation authority is scoped to the latest user-authored response,
+      // not permanently inherited from the first message in a Task.
+      if (activeTask && userGoal.length > 0) {
+        nextState = updateActiveTask(nextState, (task) => ({ ...task, userGoal }));
       }
       return {
         ...nextState,
@@ -1696,6 +2148,30 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.context_metrics':
       return state;
     case 'run.completed': {
+      if (event.turnId !== state.turn.turnId) return state;
+      const activePlanning = getActivePlanning(state);
+      const isV2Plan =
+        'document' in activePlanning && activePlanning.document?.planSchemaVersion === 2;
+      if (isV2Plan && event.completionGuardVersion !== 'completion_guard_v2') {
+        if (
+          !allowHistoricalV1CompletionOnV2 ||
+          event.completionGuardVersion !== 'completion_guard_v1'
+        ) {
+          return state;
+        }
+      }
+      if (event.completionGuardVersion == null && isV2Plan) {
+        return state;
+      }
+      const version = event.completionGuardVersion ?? 'completion_guard_v1';
+      const decision = completionDecisionForVersion(state, version);
+      if (decision?.status !== 'accepted') return state;
+      if (
+        decision.version === 'completion_guard_v2' &&
+        !samePlanIdentity(event.planIdentity, decision.planIdentity)
+      ) {
+        return state;
+      }
       const active = getActiveTask(state);
       if (!active) return state;
       const completed = {
@@ -1712,6 +2188,34 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         planning: completed.planning,
       };
     }
+    case 'completion.blocked': {
+      if (event.turnId !== state.turn.turnId) return state;
+      const activePlanning = getActivePlanning(state);
+      const isV2Plan =
+        'document' in activePlanning && activePlanning.document?.planSchemaVersion === 2;
+      if (
+        isV2Plan &&
+        event.guardVersion !== 'completion_guard_v2' &&
+        !allowHistoricalV1CompletionOnV2
+      ) {
+        return state;
+      }
+      const decision = completionDecisionForVersion(state, event.guardVersion);
+      if (decision?.status !== 'blocked' || !blockedEventMatchesDecision(event, decision)) {
+        return state;
+      }
+      return {
+        ...state,
+        completionGuard: {
+          correctionAttempts: event.correctionAttempt,
+          guardVersion: event.guardVersion,
+          ...(event.guardVersion === 'completion_guard_v2'
+            ? { planIdentity: event.planIdentity }
+            : {}),
+        },
+        transcript: { ...state.transcript, final: undefined },
+      };
+    }
     case 'run.error':
       return event.outcome ? { ...state, terminalOutcome: event.outcome } : state;
     case 'runtime.action_ignored':
@@ -1721,6 +2225,13 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     case 'model.responded':
       return {
         ...state,
+        toolRecovery: advanceToolRecoveryResponseV1(state.toolRecovery, {
+          taskId: state.activeTaskId,
+          turnId: state.turn.turnId,
+          modelMessageId: event.messageId,
+          hasToolCalls: Boolean(event.toolCalls?.length),
+          toolNames: event.toolCalls?.map((toolCall) => toolCall.name),
+        }),
         transcript: {
           ...state.transcript,
           final: event.toolCalls?.length ? undefined : (event.text ?? state.transcript.final),
@@ -1732,6 +2243,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
               content: event.text,
               reasoningText: event.reasoningText,
               toolCalls: event.toolCalls ?? [],
+              ...(event.toolSurface ? { toolSurface: event.toolSurface } : {}),
             },
           ],
         },
@@ -1740,7 +2252,9 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     // ── Plan 生命周期补充 / Additional plan lifecycle ──
 
     case 'plan.drafted': {
-      if (event.taskId && state.activeTaskId !== event.taskId) return state;
+      if (event.taskId && state.activeTaskId != null && state.activeTaskId !== event.taskId) {
+        return state;
+      }
       const planning = getActivePlanning(state);
       if (
         planning.kind !== 'planning_empty' &&
@@ -1752,8 +2266,68 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
         planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
           ? planning.document
           : undefined;
-      const document = {
-        ...planDocumentFromAgentPlan(event.plan, state.turn.turnId),
+      const reusesCanonicalV2Document =
+        event.planSchemaVersion === 2 &&
+        draftDocument?.planSchemaVersion === 2 &&
+        event.planId === draftDocument.planId &&
+        event.version === draftDocument.version &&
+        event.structuralHash === draftDocument.structuralDigest;
+      if (reusesCanonicalV2Document) {
+        if (
+          !isPlanDocumentV2(draftDocument) ||
+          !agentPlanTransportMatchesDocumentV2(event.plan, draftDocument) ||
+          !samePlanArtifactRef(event.artifact, draftDocument.artifact) ||
+          event.supersedesPlanVersion !== draftDocument.supersedesPlanVersion ||
+          event.replanReason !== draftDocument.replanReason
+        ) {
+          return state;
+        }
+        const nextPlanning =
+          planning.kind === 'replanning_draft'
+            ? { ...planning, document: draftDocument }
+            : { kind: 'planning_draft' as const, document: draftDocument };
+        return setActivePlanning(state, nextPlanning);
+      }
+      if (event.planSchemaVersion === 2) {
+        const matchesNewRevisionScope =
+          planning.kind === 'planning_empty'
+            ? event.version === 1 &&
+              event.supersedesPlanVersion === undefined &&
+              event.replanReason === undefined
+            : planning.kind === 'planning_draft'
+              ? event.planId === planning.document.planId &&
+                event.version === planning.document.version + 1 &&
+                event.supersedesPlanVersion === planning.document.supersedesPlanVersion &&
+                event.replanReason === planning.document.replanReason
+              : planning.document.version >= planning.supersedesPlanVersion &&
+                (planning.document.version === planning.supersedesPlanVersion ||
+                  (planning.document.supersedesPlanVersion === planning.supersedesPlanVersion &&
+                    planning.document.replanReason === planning.replanReason)) &&
+                event.planId === planning.document.planId &&
+                event.version === planning.document.version + 1 &&
+                event.supersedesPlanVersion === planning.supersedesPlanVersion &&
+                event.replanReason === planning.replanReason;
+        if (!matchesNewRevisionScope) return state;
+      }
+      const draftedContent =
+        event.planSchemaVersion === 2
+          ? planDocumentV2ContentFromAgentPlan(event.plan, state.turn.turnId)
+          : planDocumentFromAgentPlan(event.plan, state.turn.turnId);
+      if (!draftedContent) return state;
+      const document: PlanDocument = {
+        ...draftedContent,
+        ...(event.planSchemaVersion === 2
+          ? {
+              planSchemaVersion: 2 as const,
+              completionEvidence: {
+                schemaVersion: 1 as const,
+                verification: [],
+                execution: [],
+                skipped: [],
+                unresolved: [],
+              },
+            }
+          : {}),
         planId: event.planId,
         version: event.version,
         structuralDigest: event.structuralHash,
@@ -1774,6 +2348,16 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
           : {}),
         ...(event.replanReason ? { replanReason: event.replanReason } : {}),
       };
+      if (event.planSchemaVersion === 2) {
+        const expectedTaskId = event.taskId ?? state.activeTaskId;
+        if (
+          !event.artifact ||
+          !isPlanDocumentV2(document) ||
+          (expectedTaskId != null && event.artifact.taskId !== expectedTaskId)
+        ) {
+          return state;
+        }
+      }
       const nextPlanning =
         planning.kind === 'replanning_draft'
           ? {
@@ -1792,18 +2376,54 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       const currentPlanning = getActivePlanning(state);
       if (currentPlanning.kind === 'executing') {
         const executing = currentPlanning;
-        const updatedSteps = mergeStepUpdates(
-          executing.document.steps,
-          agentPlanToSteps(event.plan),
-        );
-        return setActivePlanning(state, {
+        const isV2 = executing.document.planSchemaVersion === 2;
+        const transportSteps = isV2
+          ? planStepsFromAgentPlanUpdateV2(event.plan, executing.document)
+          : agentPlanToSteps(event.plan);
+        if (!transportSteps) return state;
+        const updatedSteps = mergeStepUpdates(executing.document.steps, transportSteps);
+        if (
+          isV2 &&
+          (event.planId !== executing.document.planId ||
+            event.version !== executing.document.version ||
+            event.structuralDigest !== executing.document.structuralDigest ||
+            event.completionEvidence === undefined ||
+            hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
+            !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence))
+        ) {
+          return state;
+        }
+        const replayDocument = isV2
+          ? executing.document
+          : withoutPlanCompletionEvidence(executing.document);
+        const updatedDocument: PlanDocument = {
+          ...replayDocument,
+          steps: updatedSteps,
+          updatedAtTurnId: state.turn.turnId,
+          ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
+        };
+        if (isV2 && !isPlanDocumentV2(updatedDocument)) return state;
+        const updated = setActivePlanning(state, {
           ...executing,
-          document: {
-            ...executing.document,
-            steps: updatedSteps,
-            updatedAtTurnId: state.turn.turnId,
-          },
+          document: updatedDocument,
         });
+        const newlySkipped = updatedSteps.some(
+          (step) =>
+            step.status === 'skipped' &&
+            executing.document.steps.find((previous) => previous.id === step.id)?.status !==
+              'skipped',
+        );
+        const resolvesFailureIds = newlySkipped ? activeRecoveryFailureIds(state) : [];
+        return resolvesFailureIds.length === 0
+          ? updated
+          : {
+              ...updated,
+              toolRecovery: recordToolOwnedProgressV1(state.toolRecovery, {
+                kind: 'skipped',
+                referenceId: event.toolCallId,
+                resolvesFailureIds,
+              }),
+            };
       }
       return state;
     }
@@ -1813,13 +2433,40 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       // Transition from executing to completed
       const executing = getActivePlanning(state);
       if (executing.kind === 'executing') {
-        const updatedSteps = mergeStepUpdates(
-          executing.document.steps,
-          agentPlanToSteps(event.plan),
-        );
+        const isV2 = executing.document.planSchemaVersion === 2;
+        const transportSteps = isV2
+          ? planStepsFromAgentPlanUpdateV2(event.plan, executing.document)
+          : agentPlanToSteps(event.plan);
+        if (!transportSteps || (isV2 && event.plan.status !== 'completed')) return state;
+        const updatedSteps = mergeStepUpdates(executing.document.steps, transportSteps);
+        if (
+          isV2 &&
+          (event.planId !== executing.document.planId ||
+            event.version !== executing.document.version ||
+            event.structuralDigest !== executing.document.structuralDigest ||
+            event.completionEvidence === undefined ||
+            hasTerminalStepRollback(executing.document.steps, updatedSteps) ||
+            updatedSteps.some(
+              (step) => step.status === 'pending' || step.status === 'in_progress',
+            ) ||
+            updatedSteps.every((step) => step.status === 'skipped') ||
+            !planCompletionEvidenceMatchesRuntime(state, updatedSteps, event.completionEvidence) ||
+            planCompletionBlocker(state, event.completionEvidence) !== null)
+        ) {
+          return state;
+        }
+        const replayDocument = isV2
+          ? executing.document
+          : withoutPlanCompletionEvidence(executing.document);
+        const completedDocument: PlanDocument = {
+          ...replayDocument,
+          steps: updatedSteps,
+          ...(isV2 ? { completionEvidence: event.completionEvidence } : {}),
+        };
+        if (isV2 && !isPlanDocumentV2(completedDocument)) return state;
         const next = setActivePlanning(state, {
           kind: 'completed',
-          document: { ...executing.document, steps: updatedSteps },
+          document: completedDocument,
           completedAtTurnId: state.turn.turnId,
         });
         return updateActiveTask(next, (task) => ({ ...task, executionMode: undefined }));
@@ -1885,6 +2532,7 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                       status: 'approved' as const,
                       approvalGrant: (result.grant ??
                         'approve_once') as import('@/protocol/events').ShellApprovalGrant,
+                      approvalWaitMs: (call.approvalWaitMs ?? 0) + result.durationMs,
                     },
                   }
                 : {}),
@@ -1913,8 +2561,29 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
       );
       const toolCallId = state.interactions.toolCallId;
       const rejectedTools = updateToolStatus(state.tools, toolCallId, 'rejected');
+      const existingCall = state.tools.calls[toolCallId];
+      const outcomeV1 = canonicalToolOutcomeV1(event);
+      const recovery = modelRecoveryProjection(outcomeV1);
+      const toolRecovery = existingCall
+        ? recordRecoveryFailureV1(state.toolRecovery, {
+            toolCallId,
+            toolName: existingCall.name,
+            invocationFingerprint:
+              existingCall.invocationFingerprint ??
+              toolInvocationFingerprintV1({
+                key: state.toolRecovery.identityKey,
+                toolName: existingCall.name,
+                parsedArgs: existingCall.args,
+              }),
+            modelMessageId: existingCall.modelMessageId,
+            outcome: outcomeV1,
+            taskId: existingCall.taskId,
+            turnId: existingCall.createdAtTurnId,
+          })
+        : state.toolRecovery;
       return {
         ...state,
+        toolRecovery,
         tools: {
           ...rejectedTools,
           calls: {
@@ -1927,12 +2596,32 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
                 'auto_review_rejected',
                 result.reason ?? 'auto-review rejected',
               ),
+              outcomeV1,
             },
           },
           queue: rejectedTools.queue.filter((id) => id !== toolCallId),
           active: rejectedTools.active.filter((id) => id !== toolCallId),
         },
         interactions: { kind: 'idle' },
+        transcript: appendToolTranscriptMessage(state, {
+          kind: 'tool',
+          ...transcriptMeta(state, `tool-${toolCallId}`, event.createdAt),
+          toolCallId,
+          name: existingCall?.name ?? 'unknown',
+          content: JSON.stringify({
+            ok: false,
+            rejected: true,
+            error: {
+              kind: outcomeV1.failure?.kind ?? 'auto_review_rejected',
+              retryable: recovery.retryable,
+              model_fixable: recovery.model_fixable,
+              recovery_disposition: recovery.disposition,
+              maximum_additional_calls: recovery.maximum_additional_calls,
+            },
+            next_step: recovery.next_step,
+          }),
+          ok: false,
+        }),
         autoReview: {
           ...state.autoReview,
           consecutiveRejects: breaker.newConsecutiveRejects,
@@ -1945,6 +2634,25 @@ export function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): Ru
     default:
       return state;
   }
+}
+
+function samePlanArtifactRef(
+  left: PlanArtifactRef | undefined,
+  right: PlanArtifactRef | undefined,
+): boolean {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.artifactId === right.artifactId &&
+    left.taskId === right.taskId &&
+    left.planId === right.planId &&
+    left.version === right.version &&
+    left.fileName === right.fileName &&
+    left.relativePath === right.relativePath &&
+    left.displayPath === right.displayPath &&
+    left.structuralDigest === right.structuralDigest &&
+    left.byteLength === right.byteLength
+  );
 }
 
 function updateToolStatus(
@@ -2075,6 +2783,50 @@ function planDocumentFromAgentPlan(
   };
 }
 
+/** Preserve event-authored V2 content exactly so validation cannot hide corruption. */
+function planDocumentV2ContentFromAgentPlan(
+  plan: AgentPlan,
+  turnId: string,
+): Omit<PlanDocument, 'structuralDigest'> | null {
+  if (!isAgentPlanTransportV2(plan)) return null;
+  const steps: PlanStep[] = [];
+  for (const candidate of plan.steps as unknown[]) {
+    if (typeof candidate !== 'object' || candidate === null || Array.isArray(candidate)) {
+      return null;
+    }
+    const step = candidate as Record<string, unknown>;
+    steps.push({
+      id: typeof step.id === 'string' ? step.id : '',
+      title: typeof step.step === 'string' ? step.step : '',
+      status: step.status as PlanStep['status'],
+      ...(Object.hasOwn(step, 'note') ? { note: step.note as PlanStep['note'] } : {}),
+    });
+  }
+  return {
+    planId: crypto.randomUUID(),
+    version: 1,
+    title: plan.name,
+    bodyMarkdown: plan.description,
+    steps,
+    createdAtTurnId: turnId,
+    updatedAtTurnId: turnId,
+  };
+}
+
+function planDocumentToAgentPlan(document: PlanDocument): AgentPlan {
+  return {
+    name: document.title,
+    description: document.bodyMarkdown,
+    status: 'pending',
+    steps: document.steps.map((step) => ({
+      id: step.id,
+      step: step.title,
+      status: step.status,
+      ...(step.note === undefined ? {} : { note: step.note }),
+    })),
+  };
+}
+
 function agentPlanToSteps(plan: AgentPlan): PlanStep[] {
   return plan.steps.map((step) => ({
     id: step.id ?? sanitizeStepId(step.step),
@@ -2103,4 +2855,18 @@ function mergeStepUpdates(existing: PlanStep[], updates: PlanStep[]): PlanStep[]
     }
     return step;
   });
+}
+
+function hasTerminalStepRollback(existing: PlanStep[], updated: PlanStep[]): boolean {
+  const updatedById = new Map(updated.map((step) => [step.id, step]));
+  return existing.some((step) => {
+    if (step.status !== 'completed' && step.status !== 'skipped') return false;
+    return updatedById.get(step.id)?.status !== step.status;
+  });
+}
+
+function withoutPlanCompletionEvidence(document: PlanDocument): PlanDocument {
+  const copy = { ...document };
+  delete copy.completionEvidence;
+  return copy;
 }

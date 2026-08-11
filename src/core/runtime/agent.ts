@@ -81,6 +81,8 @@ export function requiredProviderAdmissionEvents(
 /** Inputs for the graph-free runtime entry point. */
 export interface RunRuntimeAgentInput {
   task: string;
+  /** User-authored goal before App/project context is appended to `task`. */
+  userGoal?: string;
   userId: string;
   threadId: string;
   workspace: string;
@@ -88,6 +90,7 @@ export interface RunRuntimeAgentInput {
   config: AgentConfig;
   model?: SupportedChatModel;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   skills?: SkillManifest[];
@@ -199,9 +202,10 @@ export async function* runRuntimeAgent(
     exitStatus = 'aborted';
     const events = eventsForRunCancellation(kernel.getState(), reason, cause);
     kernel.processEventBatch(events);
-    for (const event of events) collector.recordRuntime(event);
+    const canonicalEvents = [...kernel.getLastAppliedEvents()];
+    for (const event of canonicalEvents) collector.recordRuntime(event);
     executionAbortController.abort(reason);
-    return events;
+    return canonicalEvents;
   };
   const scheduleRunDeadline = (deadlineAt: string) => {
     if (!getFeatureFlags(input.config).boundedCancellationV1 || runDeadlineTimer) return;
@@ -352,7 +356,7 @@ export async function* runRuntimeAgent(
         const taskStarted: RuntimeEvent = {
           type: 'task.started',
           taskId: randomUUID(),
-          userGoal: input.task,
+          userGoal: input.userGoal ?? input.task,
           turnId: kernel.getState().turn.turnId,
         };
         kernel.processEvent(taskStarted);
@@ -378,6 +382,7 @@ export async function* runRuntimeAgent(
         type: 'user.message_appended',
         messageId: randomUUID(),
         content: input.task,
+        ...(input.userGoal ? { userGoal: input.userGoal } : {}),
       };
       kernel.processEvent(initial);
       collector.recordRuntime(initial);
@@ -436,6 +441,7 @@ export async function* runRuntimeAgent(
       config: input.config,
       model,
       shellExecutor: input.shellExecutor,
+      gitBroker: input.gitBroker,
       sandboxBackend: input.sandboxBackend,
       mcpManager: input.mcpManager,
       runtimeStore: kernel.runtimeStore,

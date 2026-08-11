@@ -20,6 +20,8 @@ const shellSurface: ExecutionCapabilitySurfaceV1 = {
   shell: true,
   skillChild: false,
   localStdioMcp: false,
+  gitInspect: false,
+  brokeredGitFeatureRevision: null,
 };
 
 function boundary(workspace: string, networkMode: 'off' | 'allowlist'): ExecutionBoundaryV1 {

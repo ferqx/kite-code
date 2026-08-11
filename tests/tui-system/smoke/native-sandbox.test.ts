@@ -6,11 +6,11 @@ import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
+import { nativeSandboxSmokeEnabled } from './native-sandbox-policy';
 
 const TIMEOUT = 60_000;
-const nativeSandboxSmoke = process.env.KITE_RUN_NATIVE_SANDBOX_SMOKE === '1' ? test : test.skip;
 
-describe('TUI PTY native sandbox smoke', () => {
+describe.skipIf(!nativeSandboxSmokeEnabled())('TUI PTY native sandbox smoke', () => {
   let tui: PtyProcess;
   let server: ReturnType<typeof createMockModelServer>;
   let workspace: ReturnType<typeof createTestWorkspace>;
@@ -64,10 +64,14 @@ describe('TUI PTY native sandbox smoke', () => {
   });
 
   afterAll(async () => {
-    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+    await cleanupTuiSystemFixtures({
+      tuis: [tui],
+      mockServers: [server],
+      workspaces: [workspace],
+    });
   });
 
-  nativeSandboxSmoke(
+  test(
     'full_access auto-approves subsequent shell calls on a real native backend',
     async () => {
       expect(detectSandboxBackend()).not.toBe('none');

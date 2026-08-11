@@ -20,7 +20,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -146,10 +146,14 @@ describe('TUI PTY System — Session Persistence', () => {
             screenHasSessionRow(viewport, 'Message before restart', {
               selected: true,
               active: false,
-            }) && !screenContains(viewport, 'Loading...')
+            }) &&
+            screenContains(viewport, '会话列表') &&
+            screenContains(viewport, '搜索') &&
+            screenContains(viewport, '导航') &&
+            !screenContains(viewport, 'Loading...')
           );
         },
-        'persisted session row to load in the selector',
+        'persisted session row and complete selector chrome to render',
         10_000,
       );
 
@@ -215,5 +219,9 @@ describe('TUI PTY System — Session Persistence', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run());
+  test(
+    'runs the complete stateful journey',
+    () => journey.run(),
+    TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
 });

@@ -5,8 +5,10 @@
 // Kernel-native model invocation: build context from RuntimeState → call model → return RuntimeEvent[].
 // No LangGraph state dependency, no side effects.
 
+import { randomBytes } from 'node:crypto';
 import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import { createBinding } from '@/core/capabilities/catalog';
+import { canonicalizeCapabilityArguments } from '@/core/capabilities/schema';
 import {
   chooseCapabilityDisclosure,
   searchableCapabilitySnapshot,
@@ -33,12 +35,18 @@ import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { genInteractionId } from '@/core/runtime/ids';
+import {
+  isLegacyPlanContinuationToolAllowed,
+  LEGACY_PLAN_REPLAN_REQUIRED,
+} from '@/core/runtime/plan-continuation';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { observeUnknownToolFieldsV1 } from '@/core/runtime/tool-outcome';
+import { toolInvocationFingerprintV1 } from '@/core/runtime/tool-recovery-journal';
 import type { SandboxBackend } from '@/core/sandbox/platform';
 import { skillFrameInvalidationReason } from '@/core/skills/activation';
 import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
@@ -95,30 +103,79 @@ function boundedCancellationTools<T extends Record<string, unknown>>(
   ) as T;
 }
 
+function toolsForModelSurface<T extends Record<string, unknown>>(
+  tools: T,
+  surface: 'legacy_plan_recovery' | undefined,
+): T {
+  if (surface !== 'legacy_plan_recovery') return tools;
+  return Object.fromEntries(
+    Object.entries(tools).filter(([name]) => isLegacyPlanContinuationToolAllowed(name)),
+  ) as T;
+}
+
 /** Convert invalid provider tool arguments into durable queued-and-failed facts. */
 export function eventsForInvalidModelToolCalls(
-  calls: Array<{ id: string; name: string; args: { _parse_error?: string } }>,
+  calls: Array<{
+    id: string;
+    name: string;
+    args: {
+      _raw_invalid_args?: unknown;
+      _parse_error?: string;
+      _invalid_args_code?: 'invalid_json';
+      _invalid_args_redacted?: true;
+    };
+    canonicalInvocationFingerprint?: string;
+  }>,
   messageId: string,
   ordinalStart: number,
+  toolSurface?: 'legacy_plan_recovery',
+  recoveryIdentityKey?: string,
 ): RuntimeEvent[] {
-  return calls.flatMap((call, index) => [
-    {
+  const events: RuntimeEvent[] = [];
+  for (const [index, call] of calls.entries()) {
+    const identityKey = recoveryIdentityKey ?? randomBytes(32).toString('hex');
+    const invocationFingerprint =
+      call.canonicalInvocationFingerprint ??
+      toolInvocationFingerprintV1({
+        key: identityKey,
+        toolName: call.name,
+        parseCode: 'invalid_json',
+        pathCategory: 'unknown',
+        unparsedArgs: call.args._raw_invalid_args ?? call.args,
+      });
+    const opaqueArgs = {
+      _invalid_args_code: 'invalid_json' as const,
+      _invalid_args_redacted: true as const,
+    };
+    const queued = {
       type: 'tool.queued' as const,
       toolCallId: call.id,
       name: call.name,
-      args: call.args,
+      args: opaqueArgs,
       modelMessageId: messageId,
       ordinal: ordinalStart + index,
-    },
-    {
+      invocationFingerprint,
+    };
+    if (toolSurface === 'legacy_plan_recovery' && !isLegacyPlanContinuationToolAllowed(call.name)) {
+      events.push(queued, {
+        type: 'tool.rejected' as const,
+        toolCallId: call.id,
+        reason: LEGACY_PLAN_REPLAN_REQUIRED,
+        failure: classifyFailure('mandatory_policy_unavailable', LEGACY_PLAN_REPLAN_REQUIRED),
+      });
+      continue;
+    }
+    events.push(queued, {
       type: 'tool.failed' as const,
       toolCallId: call.id,
       failure: classifyFailure(
         'model_invalid_tool_args',
-        String(call.args._parse_error ?? 'invalid model tool arguments'),
+        'Provider returned invalid tool arguments.',
+        'invalid_json',
       ),
-    },
-  ]);
+    });
+  }
+  return events;
 }
 
 export function activeInlineSkillInstructions(
@@ -161,6 +218,7 @@ export function resolveContextProjectionEnvironment(input: {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -173,6 +231,7 @@ export function resolveContextProjectionEnvironment(input: {
   }>;
   disclosedDescriptors?: import('@/protocol/capabilities').CapabilityDescriptor[];
   sandboxBackend?: SandboxBackend | 'unknown';
+  toolSurface?: 'legacy_plan_recovery';
 }): ContextProjectionEnvironment {
   const flags = getFeatureFlags(input.config);
   const descriptors = [
@@ -195,42 +254,52 @@ export function resolveContextProjectionEnvironment(input: {
       const disclosure = input.state.capabilities.disclosures[descriptor.capabilityId];
       return disclosure?.capabilityRevision === descriptor.revision;
     });
-  const tools = boundedCancellationTools(
-    createAgentTools({
-      workspace: input.state.session.workspace,
-      shellExecutor: input.shellExecutor,
-      mcpManager: input.mcpManager,
-      mcpBindings: persistedBindings,
-      toolSearch:
-        getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
-      skills: input.skills,
-      skillOptions: input.skillOptions,
-      skillCatalog: input.skillCatalog,
-      activeSkillFrames: Object.values(input.state.skills.frames).filter(
-        (frame) => frame.status === 'active' && frame.contextMode === 'inline',
-      ),
-      config: input.config,
-      subagentEventSink: input.subagentEventSink,
-      subagentSignal: input.signal,
-      signal: input.signal,
-      model: input.model,
-      threadId: input.state.session.threadId,
-      authorization: input.state.authorization,
-      workspaceAccess: input.state.workspaceAccess,
-      phase: getAgentPhase(getActivePlanning(input.state)),
-      interactionMode: getEffectiveInteractionMode(input.state),
-    }),
-    input.config,
+  const tools = toolsForModelSurface(
+    boundedCancellationTools(
+      createAgentTools({
+        workspace: input.state.session.workspace,
+        shellExecutor: input.shellExecutor,
+        gitBroker: input.gitBroker,
+        mcpManager: input.mcpManager,
+        mcpBindings: persistedBindings,
+        toolSearch:
+          getFeatureFlags(input.config).toolSearchV1 && input.model.supportsToolCalls !== false,
+        skills: input.skills,
+        skillOptions: input.skillOptions,
+        skillCatalog: input.skillCatalog,
+        activeSkillFrames: Object.values(input.state.skills.frames).filter(
+          (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+        ),
+        config: input.config,
+        subagentEventSink: input.subagentEventSink,
+        subagentSignal: input.signal,
+        signal: input.signal,
+        model: input.model,
+        threadId: input.state.session.threadId,
+        authorization: input.state.authorization,
+        workspaceAccess: input.state.workspaceAccess,
+        phase: getAgentPhase(getActivePlanning(input.state)),
+        interactionMode: getEffectiveInteractionMode(input.state),
+      }),
+      input.config,
+    ),
+    input.toolSurface,
   );
   return {
     serializedTools: serializeToolDescriptors(tools as unknown as Record<string, unknown>),
-    activeSkillInstructions: activeInlineSkillInstructions(input.state, input.skillCatalog),
-    workflowSkills: disclosedDescriptors
-      .filter((descriptor) => descriptor.kind === 'skill')
-      .map((descriptor) => ({
-        capabilityId: descriptor.capabilityId,
-        description: descriptor.description,
-      })),
+    activeSkillInstructions:
+      input.toolSurface === 'legacy_plan_recovery'
+        ? undefined
+        : activeInlineSkillInstructions(input.state, input.skillCatalog),
+    workflowSkills:
+      input.toolSurface === 'legacy_plan_recovery'
+        ? []
+        : disclosedDescriptors
+            .filter((descriptor) => descriptor.kind === 'skill')
+            .map((descriptor) => ({
+              capabilityId: descriptor.capabilityId,
+              description: descriptor.description,
+            })),
     promptContractVersion: flags.promptContractV2 ? 'v2' : 'legacy',
     projectInstructions: flags.promptContractV2
       ? resolveProjectInstructionSnapshot({
@@ -239,6 +308,7 @@ export function resolveContextProjectionEnvironment(input: {
         })
       : undefined,
     sandboxBackend: input.sandboxBackend ?? 'unknown',
+    ...(input.toolSurface ? { toolSurface: input.toolSurface } : {}),
     leaseMetadata: {
       providerName: input.config.providerName,
       modelName: input.config.modelName,
@@ -268,6 +338,7 @@ export async function invokeRuntimeModel(params: {
   state: RuntimeState;
   config: AgentConfig;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
@@ -281,6 +352,7 @@ export async function invokeRuntimeModel(params: {
   /** Production composition must supply the immutable route-policy gate. */
   providerDataAdmission?: ProviderDataAdmissionGateV1;
   resourceAdmission?: { inputTokens: number; maxOutputTokens: number };
+  toolSurface?: 'legacy_plan_recovery';
 }): Promise<RuntimeEvent[]> {
   const { state } = params;
   const requestId = genInteractionId();
@@ -302,6 +374,7 @@ export async function invokeRuntimeModel(params: {
 
   try {
     const flags = getFeatureFlags(params.config);
+    const legacyPlanRecovery = params.toolSurface === 'legacy_plan_recovery';
     if (
       params.skillCatalog &&
       params.state.skills.catalogRevision !== params.skillCatalog.revision
@@ -344,7 +417,7 @@ export async function invokeRuntimeModel(params: {
       ),
     });
     const pendingSearch = state.capabilities.pendingSearch;
-    const searchToConsume = pendingSearch;
+    const searchToConsume = legacyPlanRecovery ? undefined : pendingSearch;
     const currentSearch =
       pendingSearch?.requestedAtTurnId === state.turn.turnId &&
       pendingSearch.catalogRevision === capabilitySnapshot.revision
@@ -376,34 +449,39 @@ export async function invokeRuntimeModel(params: {
       (descriptor) => descriptor.kind === 'mcp_tool',
     );
     const disclosedMcpDescriptors = (
-      flags.toolSearchV1
-        ? disclosure.mode === 'all'
-          ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
-          : [...loadedMcpDescriptors, ...searchedMcpDescriptors]
-        : capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
+      legacyPlanRecovery
+        ? []
+        : flags.toolSearchV1
+          ? disclosure.mode === 'all'
+            ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
+            : [...loadedMcpDescriptors, ...searchedMcpDescriptors]
+          : capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'mcp_tool')
     ).filter(
       (descriptor, index, all) =>
         all.findIndex((candidate) => candidate.capabilityId === descriptor.capabilityId) === index,
     );
     const effectiveSkillMode = disclosure.skillMode ?? disclosure.mode;
-    const disclosedSkillDescriptors =
-      effectiveSkillMode === 'all'
+    const disclosedSkillDescriptors = legacyPlanRecovery
+      ? []
+      : effectiveSkillMode === 'all'
         ? capabilitySnapshot.descriptors.filter((descriptor) => descriptor.kind === 'skill')
         : effectiveSkillMode === 'search'
           ? searchedDescriptors.filter((descriptor) => descriptor.kind === 'skill')
           : [];
     const disclosedDescriptors = [...disclosedMcpDescriptors, ...disclosedSkillDescriptors];
-    const loadedCapabilities = flags.toolSearchV1
-      ? disclosedMcpDescriptors.map((descriptor) => {
-          const existing = state.capabilities.loadedCapabilities?.[descriptor.capabilityId];
-          return {
-            capabilityId: descriptor.capabilityId,
-            capabilityRevision: descriptor.revision,
-            firstLoadedAtTurnId: existing?.firstLoadedAtTurnId ?? state.turn.turnId,
-          };
-        })
-      : [];
     const previousLoadedCapabilities = Object.values(state.capabilities.loadedCapabilities ?? {});
+    const loadedCapabilities = legacyPlanRecovery
+      ? previousLoadedCapabilities
+      : flags.toolSearchV1
+        ? disclosedMcpDescriptors.map((descriptor) => {
+            const existing = state.capabilities.loadedCapabilities?.[descriptor.capabilityId];
+            return {
+              capabilityId: descriptor.capabilityId,
+              capabilityRevision: descriptor.revision,
+              firstLoadedAtTurnId: existing?.firstLoadedAtTurnId ?? state.turn.turnId,
+            };
+          })
+        : [];
     const loadedSetChanged =
       previousLoadedCapabilities.length !== loadedCapabilities.length ||
       loadedCapabilities.some((loaded) => {
@@ -451,6 +529,7 @@ export async function invokeRuntimeModel(params: {
     const toolInput = {
       workspace: state.session.workspace,
       shellExecutor: params.shellExecutor,
+      gitBroker: params.gitBroker,
       mcpManager: params.mcpManager,
       mcpBindings,
       toolSearch: flags.toolSearchV1 && params.model.supportsToolCalls !== false,
@@ -472,15 +551,16 @@ export async function invokeRuntimeModel(params: {
       interactionMode: getEffectiveInteractionMode(state),
     };
     const toolAvailCtx = toolAvailabilityContext(toolInput);
-    const tools = boundedCancellationTools(
-      createAgentTools(toolInput, toolAvailCtx),
-      params.config,
+    const tools = toolsForModelSurface(
+      boundedCancellationTools(createAgentTools(toolInput, toolAvailCtx), params.config),
+      params.toolSurface,
     );
     const projectionEnvironment = resolveContextProjectionEnvironment({
       state,
       config: params.config,
       model: params.model,
       shellExecutor: params.shellExecutor,
+      gitBroker: params.gitBroker,
       mcpManager: params.mcpManager,
       skills: params.skills,
       skillOptions: params.skillOptions,
@@ -490,6 +570,7 @@ export async function invokeRuntimeModel(params: {
       mcpBindings,
       disclosedDescriptors,
       sandboxBackend: params.sandboxBackend,
+      toolSurface: params.toolSurface,
     });
     const { serializedTools, activeSkillInstructions: activeSkillInstr } = projectionEnvironment;
     const workflowSkillDescriptors = projectionEnvironment.workflowSkills;
@@ -504,6 +585,7 @@ export async function invokeRuntimeModel(params: {
       promptContractVersion: projectionEnvironment.promptContractVersion,
       projectInstructions: projectionEnvironment.projectInstructions,
       sandboxBackend: projectionEnvironment.sandboxBackend,
+      toolSurface: projectionEnvironment.toolSurface,
     });
     const preflight = preflightModelContext({
       estimate: projection.estimate,
@@ -640,14 +722,24 @@ export async function invokeRuntimeModel(params: {
         (call): call is { id?: string; name: string; args: string; error?: string } =>
           typeof call.name === 'string' && typeof call.args === 'string',
       )
-      .map((call) => ({
-        id: call.id ?? crypto.randomUUID(),
-        name: call.name,
-        args: {
-          _raw_invalid_args: call.args,
-          _parse_error: call.error ?? 'invalid JSON arguments',
-        },
-      }));
+      .map((call) => {
+        const invocationFingerprint = toolInvocationFingerprintV1({
+          key: params.state.toolRecovery.identityKey,
+          toolName: call.name,
+          parseCode: 'invalid_json',
+          pathCategory: 'unknown',
+          unparsedArgs: call.args,
+        });
+        return {
+          id: call.id ?? crypto.randomUUID(),
+          name: call.name,
+          canonicalInvocationFingerprint: invocationFingerprint,
+          args: {
+            _invalid_args_code: 'invalid_json' as const,
+            _invalid_args_redacted: true as const,
+          },
+        };
+      });
     const providerUsage = response.response_metadata?.usage as
       | {
           input_tokens?: number;
@@ -656,12 +748,34 @@ export async function invokeRuntimeModel(params: {
         }
       | undefined;
     const providerInputTokens = providerUsage?.input_tokens ?? providerUsage?.prompt_tokens;
+    const legacyQueuedRejections = legacyPlanRecovery
+      ? [...new Set([...state.tools.queue, ...state.tools.active])].flatMap((toolCallId) => {
+          const call = state.tools.calls[toolCallId];
+          return call &&
+            (call.status === 'queued' || call.status === 'approved') &&
+            !isLegacyPlanContinuationToolAllowed(call.name)
+            ? [
+                {
+                  type: 'tool.rejected' as const,
+                  toolCallId,
+                  reason: LEGACY_PLAN_REPLAN_REQUIRED,
+                  failure: classifyFailure(
+                    'mandatory_policy_unavailable',
+                    LEGACY_PLAN_REPLAN_REQUIRED,
+                  ),
+                },
+              ]
+            : [];
+        })
+      : [];
     const events: RuntimeEvent[] = [
       ...retryEvents,
       contextMetricsEvent,
+      ...legacyQueuedRejections,
       {
         type: 'model.responded',
         messageId: response.id ?? requestId,
+        ...(params.toolSurface ? { toolSurface: params.toolSurface } : {}),
         durationMs,
         toolCalls: [...toolCalls, ...invalidToolCalls],
         reasoningText: extractReasoningText(response),
@@ -690,9 +804,54 @@ export async function invokeRuntimeModel(params: {
       const capability =
         builtinToolRegistry.effectsOf(call.name, call.args, toolAvailCtx) ??
         classifyToolCapability(call.name, call.args);
-      const binding = mcpBindings.find(
+      const bindingEntry = mcpBindings.find(
         ({ binding: candidate }) => candidate.exposedToolName === call.name,
-      )?.binding;
+      );
+      const binding = bindingEntry?.binding;
+      const dynamicIdentity = bindingEntry
+        ? canonicalizeCapabilityArguments(bindingEntry.descriptor.inputSchema, call.args)
+        : undefined;
+      const parsedIdentity = bindingEntry
+        ? undefined
+        : builtinToolRegistry.parseToolCall(call, toolAvailCtx);
+      const invocationFingerprint = toolInvocationFingerprintV1({
+        key: params.state.toolRecovery.identityKey,
+        toolName: call.name,
+        identityRevision:
+          binding?.capabilityRevision ??
+          (() => {
+            const spec = builtinToolRegistry.get(call.name);
+            return spec ? builtinToolRegistry.descriptorOf(spec).revision : 'unknown';
+          })(),
+        ...(dynamicIdentity?.ok
+          ? { parsedArgs: dynamicIdentity.args }
+          : parsedIdentity?.ok
+            ? { parsedArgs: parsedIdentity.args }
+            : {
+                parseCode: bindingEntry
+                  ? 'invalid_arguments'
+                  : parsedIdentity?.code === 'unknown_tool'
+                    ? 'unknown_tool'
+                    : parsedIdentity?.code === 'tool_unavailable'
+                      ? 'tool_unavailable'
+                      : 'invalid_arguments',
+                pathCategory: 'unknown',
+                unparsedArgs: call.args,
+              }),
+      });
+      const unknownFields = call.name.startsWith('mcp__')
+        ? (() => {
+            const schema = mcpBindings.find(
+              ({ binding: candidate }) => candidate.exposedToolName === call.name,
+            )?.descriptor.inputSchema as { properties?: Record<string, unknown> } | undefined;
+            return observeUnknownToolFieldsV1({
+              toolName: call.name,
+              args: call.args,
+              knownFields: Object.keys(schema?.properties ?? {}),
+              schemaRevision: binding?.capabilityRevision.slice(0, 64) ?? 'dynamic',
+            });
+          })()
+        : builtinToolRegistry.unknownFieldsOf(call.name, call.args, toolAvailCtx);
       events.push({
         type: 'tool.queued',
         toolCallId: call.id,
@@ -704,6 +863,8 @@ export async function invokeRuntimeModel(params: {
         effectClass: capability.effectClass,
         sideEffect: capability.sideEffect,
         classificationReason: capability.classificationReason,
+        invocationFingerprint,
+        unknownFields,
         ...(binding
           ? {
               bindingId: binding.bindingId,
@@ -712,8 +873,24 @@ export async function invokeRuntimeModel(params: {
             }
           : {}),
       });
+      if (legacyPlanRecovery && !isLegacyPlanContinuationToolAllowed(call.name)) {
+        events.push({
+          type: 'tool.rejected',
+          toolCallId: call.id,
+          reason: LEGACY_PLAN_REPLAN_REQUIRED,
+          failure: classifyFailure('mandatory_policy_unavailable', LEGACY_PLAN_REPLAN_REQUIRED),
+        });
+      }
     }
-    events.push(...eventsForInvalidModelToolCalls(invalidToolCalls, messageId, ordinal));
+    events.push(
+      ...eventsForInvalidModelToolCalls(
+        invalidToolCalls,
+        messageId,
+        ordinal,
+        params.toolSurface,
+        params.state.toolRecovery.identityKey,
+      ),
+    );
     return events;
   } finally {
     params.model.setRetryListener(null);

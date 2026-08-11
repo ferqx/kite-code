@@ -13,11 +13,19 @@ import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
-import { createInitialRuntimeState } from '@/core/runtime/state';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '@/core/runtime/reducer';
+import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import { createAgentTools } from '@/core/tools/definitions';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
 import { createMockModel } from '../mock-model';
+
+function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  return reduceCanonicalRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+  );
+}
 
 function descriptor(name: string, description = `Use ${name}`): CapabilityDescriptor {
   return {

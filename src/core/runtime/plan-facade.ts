@@ -8,6 +8,8 @@ import {
 } from './action-emission';
 import type { RuntimeEvent } from './events';
 import { genInteractionId } from './ids';
+import { isPlanDocumentV2 } from './plan-document';
+import { planCompletionBlocker, projectPlanCompletionEvidenceV1 } from './plan-evidence';
 import {
   computePlanStructuralDigest,
   getActivePlanning,
@@ -31,12 +33,42 @@ export interface ReadPlanCommand {
 
 export interface UpdatePlanCommand {
   plan_id: string;
+  version?: number;
+  structural_digest?: string;
   updates: Array<{
     step_id: string;
     status: 'pending' | 'in_progress' | 'completed' | 'skipped';
     note?: string;
+    reason_code?: string;
   }>;
   complete_plan?: boolean;
+}
+
+type PlanIdentityCommand = {
+  plan_id?: string;
+  version?: number;
+  structural_digest?: string;
+};
+
+function validatePlanIdentity(
+  command: PlanIdentityCommand,
+  document: PlanDocument,
+): 'plan_identity_required' | 'plan_identity_mismatch' | null {
+  if (
+    command.plan_id === undefined ||
+    command.version === undefined ||
+    command.structural_digest === undefined
+  ) {
+    return 'plan_identity_required';
+  }
+  if (
+    command.plan_id !== document.planId ||
+    command.version !== document.version ||
+    command.structural_digest !== document.structuralDigest
+  ) {
+    return 'plan_identity_mismatch';
+  }
+  return null;
 }
 
 export interface WritePlanCommand {
@@ -60,6 +92,7 @@ function publicPlan(document: PlanDocument) {
       step: step.title,
       id: step.id,
       status: step.status,
+      ...(step.note === undefined ? {} : { note: step.note }),
     })),
   };
 }
@@ -130,10 +163,12 @@ export function readPlanAction(
         task_id: active.taskId,
         plan_id: artifact.plan.planId,
         version: artifact.plan.version,
+        plan_schema_version: artifact.plan.planSchemaVersion,
         structural_digest: artifact.plan.structuralDigest,
         title: artifact.plan.title,
         body_markdown: artifact.plan.bodyMarkdown,
         steps: artifact.plan.steps,
+        completion_evidence: artifact.plan.completionEvidence,
         artifact: artifact.artifact,
       }),
     );
@@ -165,6 +200,21 @@ export function writePlanAction(
     command.structural_digest !== undefined;
   const submitExisting = action === 'submit' && hasArtifact && !hasDocument;
   const legacySubmit = action === 'submit' && hasDocument;
+  const activeDocument =
+    planning.kind === 'planning_draft' ||
+    planning.kind === 'replanning_draft' ||
+    planning.kind === 'executing'
+      ? planning.document
+      : undefined;
+  const replanningDocumentIsSavedCanonicalRevision =
+    planning.kind === 'replanning_draft' &&
+    planning.document.version > planning.supersedesPlanVersion &&
+    planning.document.supersedesPlanVersion === planning.supersedesPlanVersion &&
+    planning.document.replanReason === planning.replanReason;
+  if (activeDocument && (hasDocument || submitExisting)) {
+    const identityError = validatePlanIdentity(command, activeDocument);
+    if (identityError) return rejectRuntimeAction(identityError);
+  }
   const autoEnter =
     phase === 'building' &&
     planning.kind === 'building_without_plan' &&
@@ -175,18 +225,27 @@ export function writePlanAction(
     hasDocument &&
     (action === 'save' || legacySubmit) &&
     (task == null || !task.sideEffectsStarted);
-  const replanDraftSubmit =
-    planning.kind === 'replanning_draft' && (submitExisting || legacySubmit);
-  const replan = phase === 'building' && planning.kind === 'executing' && action === 'submit';
+  const replanDraftAction =
+    planning.kind === 'replanning_draft' &&
+    ((submitExisting && replanningDocumentIsSavedCanonicalRevision) ||
+      (hasDocument && (action === 'save' || legacySubmit)));
+  const replan =
+    phase === 'building' &&
+    planning.kind === 'executing' &&
+    hasDocument &&
+    (action === 'save' || action === 'submit');
   const submitExistingAllowed =
     submitExisting &&
-    (planning.kind === 'planning_draft' || planning.kind === 'replanning_draft') &&
+    (planning.kind === 'planning_draft' || replanningDocumentIsSavedCanonicalRevision) &&
     command.plan_id === planning.document.planId &&
     command.version === planning.document.version &&
     command.structural_digest === planning.document.structuralDigest;
   const sideEffectsBlock =
-    hasDocument && (action === 'save' || legacySubmit) && task?.sideEffectsStarted === true;
-  if (!draftWrite && !replanDraftSubmit && !autoEnter && !replan && !submitExistingAllowed) {
+    !replan &&
+    hasDocument &&
+    (action === 'save' || legacySubmit) &&
+    task?.sideEffectsStarted === true;
+  if (!draftWrite && !replanDraftAction && !autoEnter && !replan && !submitExistingAllowed) {
     return rejectRuntimeAction(
       submitExisting
         ? 'submit must reference the current saved plan_id, version, and structural_digest.'
@@ -207,7 +266,7 @@ export function writePlanAction(
     events.push({
       type: 'plan.replan_requested',
       toolCallId,
-      reason: command.replan_reason ?? (command.body_markdown ?? '').slice(0, 500),
+      reason: command.replan_reason ?? 'model_requested',
       supersedesPlanVersion: planning.document.version,
     });
   }
@@ -240,6 +299,9 @@ export function writePlanAction(
         byteLength: 0,
       });
       const document = artifact.plan;
+      if (document.planSchemaVersion !== 2) {
+        return rejectRuntimeAction('legacy_plan_replan_required');
+      }
       events.push({
         type: 'plan.review_requested',
         interactionId: genInteractionId(),
@@ -275,14 +337,16 @@ export function writePlanAction(
     );
   }
   const previous =
-    planning.kind === 'planning_draft' || planning.kind === 'replanning_draft'
+    planning.kind === 'planning_draft' ||
+    planning.kind === 'replanning_draft' ||
+    (replan && planning.kind === 'executing')
       ? planning.document
       : undefined;
   const replanMetadata =
     replan && planning.kind === 'executing'
       ? {
           supersedesPlanVersion: planning.document.version,
-          replanReason: command.replan_reason ?? (command.body_markdown ?? '').slice(0, 500),
+          replanReason: command.replan_reason ?? 'model_requested',
         }
       : planning.kind === 'replanning_draft'
         ? {
@@ -296,6 +360,7 @@ export function writePlanAction(
             }
           : {};
   const candidate: PlanDocument = {
+    planSchemaVersion: 2,
     planId: previous?.planId ?? randomUUID(),
     version: (previous?.version ?? 0) + 1,
     title: command.title!,
@@ -306,15 +371,30 @@ export function writePlanAction(
       status: 'pending' as const,
     })),
     structuralDigest: '',
-    createdAtTurnId: previous?.createdAtTurnId ?? state.turn.turnId,
+    createdAtTurnId: state.turn.turnId,
     updatedAtTurnId: state.turn.turnId,
+    completionEvidence: {
+      schemaVersion: 1,
+      verification: [],
+      execution: [],
+      skipped: [],
+      unresolved: [],
+    },
     ...replanMetadata,
   };
   candidate.structuralDigest = computePlanStructuralDigest(candidate);
+  const currentRevisionIsSavedCanonicalDraft =
+    planning.kind === 'planning_draft' || replanningDocumentIsSavedCanonicalRevision;
   const document =
-    previous && previous.structuralDigest === candidate.structuralDigest
-      ? { ...candidate, ...previous, updatedAtTurnId: state.turn.turnId }
+    previous &&
+    previous.planSchemaVersion === 2 &&
+    previous.structuralDigest === candidate.structuralDigest &&
+    currentRevisionIsSavedCanonicalDraft
+      ? previous
       : candidate;
+  if (!isPlanDocumentV2(document)) {
+    return rejectRuntimeAction('PlanDocument V2 schema validation failed.');
+  }
   let artifact: PlanArtifactRef;
   try {
     artifact = context.artifacts.write(taskId, document);
@@ -328,11 +408,17 @@ export function writePlanAction(
     toolCallId,
     planId: document.planId,
     version: document.version,
+    planSchemaVersion: 2,
     plan: publicPlan(document),
     structuralHash: document.structuralDigest,
     taskId,
     artifact,
-    ...replanMetadata,
+    ...(document.supersedesPlanVersion == null
+      ? {}
+      : {
+          supersedesPlanVersion: document.supersedesPlanVersion,
+          replanReason: document.replanReason ?? '',
+        }),
   });
   if (legacySubmit) {
     events.push({
@@ -357,6 +443,7 @@ export function writePlanAction(
       task_id: taskId,
       plan_id: document.planId,
       version: document.version,
+      plan_schema_version: document.planSchemaVersion,
       structural_digest: document.structuralDigest,
       artifact: {
         artifact_id: artifact.artifactId,
@@ -387,15 +474,27 @@ export function updatePlanAction(
     return rejectRuntimeAction('No executing plan. Wait for plan approval first.');
   }
   const document = planning.document;
-  if (command.plan_id !== document.planId) {
-    return rejectRuntimeAction(
-      `Plan ID mismatch: expected ${command.plan_id}, current is ${document.planId}.`,
-    );
+  if (document.planSchemaVersion !== 2) {
+    return rejectRuntimeAction('legacy_plan_replan_required');
+  }
+  const identityError = validatePlanIdentity(command, document);
+  if (identityError) return rejectRuntimeAction(identityError);
+  if (new Set(command.updates.map((update) => update.step_id)).size !== command.updates.length) {
+    return rejectRuntimeAction('plan_duplicate_step_update');
   }
   const unknownStep = command.updates.find(
     (update) => !document.steps.some((step) => step.id === update.step_id),
   );
   if (unknownStep) return rejectRuntimeAction(`Unknown plan step ID: ${unknownStep.step_id}.`);
+  const terminalRollback = command.updates.some((update) => {
+    const current = document.steps.find((step) => step.id === update.step_id);
+    return (
+      current != null &&
+      (current.status === 'completed' || current.status === 'skipped') &&
+      update.status !== current.status
+    );
+  });
+  if (terminalRollback) return rejectRuntimeAction('plan_terminal_step_rollback');
   const plan = {
     name: document.title,
     description: document.bodyMarkdown,
@@ -416,8 +515,35 @@ export function updatePlanAction(
   ) {
     return rejectRuntimeAction('Cannot complete plan while steps are pending or in progress.');
   }
-  const events: RuntimeEvent[] = [{ type: 'plan.progress_updated', toolCallId, plan }];
-  if (command.complete_plan) events.push({ type: 'plan.completed', toolCallId, plan });
+  if (command.complete_plan && plan.steps.every((step) => step.status === 'skipped')) {
+    return rejectRuntimeAction('plan_all_steps_skipped');
+  }
+  const evidence = projectPlanCompletionEvidenceV1(
+    context.state,
+    plan.steps.map((step) => ({
+      id: step.id!,
+      title: step.step,
+      status: step.status,
+      ...(step.note === undefined ? {} : { note: step.note }),
+    })),
+    Object.fromEntries(
+      command.updates.flatMap((update) =>
+        update.reason_code === undefined ? [] : [[update.step_id, update.reason_code]],
+      ),
+    ),
+  );
+  if (command.complete_plan) {
+    const blocker = planCompletionBlocker(context.state, evidence);
+    if (blocker) return rejectRuntimeAction(blocker);
+  }
+  const identity = {
+    planId: document.planId,
+    version: document.version,
+    structuralDigest: document.structuralDigest,
+    completionEvidence: evidence,
+  };
+  const events: RuntimeEvent[] = [{ type: 'plan.progress_updated', toolCallId, plan, ...identity }];
+  if (command.complete_plan) events.push({ type: 'plan.completed', toolCallId, plan, ...identity });
   return acceptRuntimeAction(
     JSON.stringify({
       ok: true,

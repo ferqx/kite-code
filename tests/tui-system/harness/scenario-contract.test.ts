@@ -47,6 +47,84 @@ function collectDeclarations(sourceFile: ts.SourceFile): DeclarationMap {
   return declarations;
 }
 
+export function findJourneyTestTimeoutViolations(source: string, file = 'fixture.ts'): string[] {
+  const sourceFile = ts.createSourceFile(
+    file,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const journeys = new Set<string>();
+  const covered = new Set<string>();
+  const violations: string[] = [];
+
+  const containsJourneyRun = (node: ts.Node, journeyName: string): boolean => {
+    let found = false;
+    const visit = (current: ts.Node): void => {
+      if (
+        ts.isCallExpression(current) &&
+        ts.isPropertyAccessExpression(current.expression) &&
+        current.expression.name.text === 'run' &&
+        ts.isIdentifier(current.expression.expression) &&
+        current.expression.expression.text === journeyName
+      ) {
+        found = true;
+        return;
+      }
+      ts.forEachChild(current, visit);
+    };
+    visit(node);
+    return found;
+  };
+
+  const discover = (node: ts.Node): void => {
+    if (
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.initializer &&
+      ts.isCallExpression(node.initializer) &&
+      ts.isIdentifier(node.initializer.expression) &&
+      node.initializer.expression.text === 'createTuiSystemJourney'
+    ) {
+      journeys.add(node.name.text);
+    }
+    ts.forEachChild(node, discover);
+  };
+  discover(sourceFile);
+
+  const inspect = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === 'test'
+    ) {
+      const body = node.arguments[1];
+      for (const journeyName of journeys) {
+        if (!body || !containsJourneyRun(body, journeyName)) continue;
+        covered.add(journeyName);
+        const timeout = node.arguments[2];
+        if (
+          !timeout ||
+          !ts.isIdentifier(timeout) ||
+          timeout.text !== 'TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS'
+        ) {
+          violations.push(
+            `${file}:${sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1}:journey-timeout`,
+          );
+        }
+      }
+    }
+    ts.forEachChild(node, inspect);
+  };
+  inspect(sourceFile);
+
+  for (const journeyName of journeys) {
+    if (!covered.has(journeyName)) violations.push(`${file}:missing-test:${journeyName}`);
+  }
+  return violations;
+}
+
 function nodeUsesOutputAccessor(
   node: ts.Node,
   accessorNames: ReadonlySet<string>,
@@ -895,6 +973,20 @@ describe('TUI system scenario contract', () => {
     ).not.toEqual([]);
   });
 
+  test('AST contract requires the shared outer timeout for every stateful journey test', () => {
+    const valid = `
+      const journey = createTuiSystemJourney();
+      test('journey', () => journey.run(), TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS);
+    `;
+    const aliased = `
+      const TIMEOUT = 180_000;
+      const journey = createTuiSystemJourney();
+      test('journey', () => journey.run(), TIMEOUT);
+    `;
+    expect(findJourneyTestTimeoutViolations(valid)).toEqual([]);
+    expect(findJourneyTestTimeoutViolations(aliased)).not.toEqual([]);
+  });
+
   test('input readiness belongs to each input action instead of a warmup flow', () => {
     expect(regexViolations(/warmupInputPipeline/)).toEqual([]);
     expect(regexViolations(/test\([\s\S]{0,80}['"]warmup(?::|['"])/)).toEqual([]);
@@ -926,6 +1018,14 @@ describe('TUI system scenario contract', () => {
     expect(regexViolations(/\.output\(\)\.(?:length|slice)/)).toEqual([]);
     expect(regexViolations(/testTiming\s*:/)).toEqual([]);
     expect(regexViolations(/test\([^\n]*journey\.run\(\)[^\n]*,\s*\d[\d_]*\s*\)/)).toEqual([]);
+  });
+
+  test('every stateful scenario uses the shared Bun outer timeout', () => {
+    expect(
+      scenarioSources().flatMap(({ file, source }) =>
+        findJourneyTestTimeoutViolations(source, file),
+      ),
+    ).toEqual([]);
   });
 
   test('default scenarios do not contain public provider endpoints or native smoke switches', () => {

@@ -96,8 +96,26 @@ export interface PlanStep {
   note?: string;
 }
 
+/** Metadata-only Runtime evidence attached to a V2 PlanDocument. */
+export interface PlanCompletionEvidenceV1 {
+  schemaVersion: 1;
+  verification: Array<{ verificationId: string; outcome: 'passed' | 'waived' }>;
+  execution: Array<{ toolCallId: string; outcome: 'succeeded' }>;
+  skipped: Array<{ stepId: string; reasonCode: string }>;
+  unresolved: Array<{ kind: 'failure' | 'approval'; referenceId: string }>;
+}
+
+/** Strict identity shared by Plan transitions and completion decisions. */
+export interface PlanIdentity {
+  planId: string;
+  version: number;
+  structuralDigest: string;
+}
+
 /** 方案文档 — 用户审核的主内容 / Plan document — primary content for user review */
 export interface PlanDocument {
+  /** Present and fixed for newly written plans; absent legacy documents are read/replay only. */
+  planSchemaVersion?: 2;
   /** 方案唯一标识 / Unique plan identifier */
   planId: string;
   /** 方案版本号，每次结构修改递增 / Version, incremented on each structural change */
@@ -118,6 +136,8 @@ export interface PlanDocument {
   supersedesPlanVersion?: number;
   /** Why the structural replan was requested. */
   replanReason?: string;
+  /** Runtime-derived references only; never accepts model-authored execution content. */
+  completionEvidence?: PlanCompletionEvidenceV1;
   /** Durable user-level Markdown Artifact for this version. */
   artifact?: PlanArtifactRef;
 }
@@ -273,7 +293,7 @@ export interface ToolResultPayload {
   /** 执行层工具状态。'exhausted' 表示连续失败达上限，系统已阻断该路径。
    *  / Execution-layer tool status. 'exhausted' means consecutive failures hit the cap
    *  and the system has blocked this path. */
-  status?: 'success' | 'error' | 'cancelled' | 'exhausted';
+  status?: 'success' | 'error' | 'cancelled' | 'timeout' | 'exhausted';
   /** 自动审批失败时 reviewFailure 携带原因。工具执行成功+审批失败=工具绿色✓+审批警告红色⚠。
    *  When auto-review fails, reviewFailure carries the reason. Tool ok + reviewFailure = green ✓ + red ⚠. */
   reviewFailure?: string;

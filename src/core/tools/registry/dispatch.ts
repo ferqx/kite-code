@@ -52,9 +52,25 @@ export async function dispatchRegisteredTool<Input, Output>(
   }
   const output = await spec.execute(input, context);
   const projectionContext = { ...context, invocationInput: input };
+  const projected = spec.projectResult(output, projectionContext);
+  let outcomeAdviceV1:
+    | import('@/core/runtime/tool-outcome').ToolOutcomeClassifierAdviceV1
+    | undefined;
+  let classifierDiagnostic: 'classifier_threw' | undefined;
+  if (spec.classifyOutcomeV1) {
+    try {
+      outcomeAdviceV1 = spec.classifyOutcomeV1(output, projectionContext);
+    } catch {
+      classifierDiagnostic = 'classifier_threw';
+    }
+  }
   return {
     dispatched: true,
     output,
-    projected: spec.projectResult(output, projectionContext),
+    projected: {
+      ...projected,
+      ...(outcomeAdviceV1 ? { outcomeAdviceV1 } : {}),
+      ...(classifierDiagnostic ? { classifierDiagnostic } : {}),
+    },
   };
 }

@@ -123,7 +123,7 @@ function cancelInterrupt(s: TuiState, setCtrlCPressed: boolean): TuiState {
   const clearedTurns = next.turns.map((turn) => {
     let changed = false;
     const blocks = turn.blocks.map((blk) => {
-      if (blk.kind === 'subagent' && blk.status === 'running') {
+      if (blk.kind === 'subagent' && (blk.status === 'running' || blk.status === 'suspended')) {
         changed = true;
         return { ...blk, awaitingApproval: false };
       }
@@ -225,12 +225,13 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
           const blocks = turn.blocks.map((block) => {
             if (
               block.kind === 'subagent' &&
-              block.status === 'running' &&
+              block.status === 'suspended' &&
               block.subagentId === approvedSubagentId
             ) {
               changed = true;
               return {
                 ...block,
+                status: 'running' as const,
                 ...(now != null ? { startedAt: now } : {}),
                 awaitingApproval: false,
               };

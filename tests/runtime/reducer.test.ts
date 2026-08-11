@@ -1,16 +1,24 @@
 import { describe, expect, test } from 'bun:test';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
 import { classifyFailure } from '../../src/core/runtime/failures';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '../../src/core/runtime/reducer';
 import type { RuntimeState } from '../../src/core/runtime/state';
 import {
   computePlanStructuralDigest,
   createInitialRuntimeState,
 } from '../../src/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
 import type { AgentPlan, AgentPlanStep, ToolApprovalPayload } from '../../src/protocol/events';
 import type { SuspendedSubagentSnapshot } from '../../src/protocol/subagent';
 
 // ── 测试辅助函数 / Test helpers ──
+
+function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  return reduceCanonicalRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+  );
+}
 
 function makePlan(name: string = 'Test Plan', steps: string[] = ['step 1', 'step 2']): AgentPlan {
   const planSteps: AgentPlanStep[] = steps.map((step) => ({
@@ -280,6 +288,20 @@ function makePlanDoc(
   };
 }
 
+function makeV2PlanDoc(plan: AgentPlan, overrides?: Parameters<typeof makePlanDoc>[1]) {
+  return {
+    ...makePlanDoc(plan, overrides),
+    planSchemaVersion: 2 as const,
+    completionEvidence: {
+      schemaVersion: 1 as const,
+      verification: [],
+      execution: [],
+      skipped: [],
+      unresolved: [],
+    },
+  };
+}
+
 function attachPlanReviewInteraction(
   state: RuntimeState,
   plan: AgentPlan,
@@ -381,6 +403,82 @@ describe('reduceRuntimeState — plan lifecycle', () => {
       expect(next.planning.document.planId).toBe('existing-plan-id');
       expect(next.planning.document.version).toBe(3);
       expect(next.planning.document.title).toBe(newPlan.name);
+    }
+  });
+
+  test('V2 review replay rejects substituted content under the saved identity', () => {
+    const trustedPlan = makePlan('Trusted Plan', ['trusted step']);
+    const document = makeV2PlanDoc(trustedPlan, {
+      planId: 'trusted-plan-id',
+      version: 7,
+    });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: { kind: 'planning_draft', document },
+    };
+    const substitutedPlan = makePlan('Substituted Plan', ['malicious step']);
+    const event: RuntimeEvent = {
+      type: 'plan.review_requested',
+      interactionId: 'substituted-review',
+      toolCallId: 'substituted-review-tool',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan: substitutedPlan,
+      planSummary: 'Substituted content under a trusted identity',
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 review replay keeps the Artifact saved with the trusted draft', () => {
+    const trustedPlan = makePlan('Trusted Plan', ['trusted step']);
+    const baseDocument = makeV2PlanDoc(trustedPlan, {
+      planId: 'trusted-plan-id',
+      version: 7,
+    });
+    const trustedArtifact = {
+      artifactId: 'trusted-plan-id:v7',
+      taskId: 'trusted-task',
+      planId: baseDocument.planId,
+      version: baseDocument.version,
+      fileName: 'v7.md',
+      relativePath: 'plans/trusted-task/trusted-plan-id/v7.md',
+      displayPath: '/trusted/v7.md',
+      structuralDigest: baseDocument.structuralDigest,
+      byteLength: 100,
+    };
+    const document = { ...baseDocument, artifact: trustedArtifact };
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: { kind: 'planning_draft', document },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.review_requested',
+      interactionId: 'substituted-artifact-review',
+      toolCallId: 'substituted-artifact-tool',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan: trustedPlan,
+      planSummary: 'Trusted content with a substituted Artifact reference',
+      artifact: {
+        ...trustedArtifact,
+        taskId: 'substituted-task',
+        relativePath: 'plans/substituted-task/trusted-plan-id/v7.md',
+        displayPath: '/substituted/v7.md',
+      },
+    };
+
+    const next = reduceRuntimeState(state, event);
+
+    expect(next.planning.kind).toBe('awaiting_review');
+    if (next.planning.kind === 'awaiting_review') {
+      expect(next.planning.document.artifact).toBe(trustedArtifact);
+    }
+    expect(next.interactions.kind).toBe('awaiting_review');
+    if (next.interactions.kind === 'awaiting_review') {
+      expect(next.interactions.artifact).toBe(trustedArtifact);
     }
   });
 
@@ -1915,6 +2013,272 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     }
   });
 
+  test('V2 plan.drafted replay rejects content whose digest does not match the event', () => {
+    const state: RuntimeState = { ...makeInitialState(), planning: { kind: 'planning_empty' } };
+    const plan = makePlan('Trusted Draft', ['trusted step']);
+    const eventDigest = 'f'.repeat(64);
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'forged-draft-digest',
+      planId: 'trusted-draft-id',
+      version: 1,
+      planSchemaVersion: 2,
+      plan,
+      structuralHash: eventDigest,
+      artifact: {
+        artifactId: 'trusted-draft-id:v1',
+        taskId: 'draft-task',
+        planId: 'trusted-draft-id',
+        version: 1,
+        fileName: 'v1.md',
+        relativePath: 'plans/draft-task/trusted-draft-id/v1.md',
+        displayPath: '/plans/draft-task/trusted-draft-id/v1.md',
+        structuralDigest: eventDigest,
+        byteLength: 100,
+      },
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 plan.drafted replay rejects a missing Artifact reference', () => {
+    const state: RuntimeState = { ...makeInitialState(), planning: { kind: 'planning_empty' } };
+    const plan = makePlan('Trusted Draft', ['trusted step']);
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'missing-draft-artifact',
+      planId: 'trusted-draft-id',
+      version: 1,
+      planSchemaVersion: 2,
+      plan,
+      structuralHash: computePlanStructuralDigest(planToDigestInput(plan)),
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test.each([
+    ['short body', { ...makePlan('Malformed Draft', ['step']), description: 'too short' }],
+    ['multiline title', { ...makePlan('Malformed Draft', ['step']), name: 'Malformed\nDraft' }],
+    [
+      'duplicate step ids',
+      {
+        ...makePlan('Malformed Draft', ['first', 'second']),
+        steps: [
+          { id: 'duplicate', step: 'first', status: 'pending' as const },
+          { id: 'duplicate', step: 'second', status: 'pending' as const },
+        ],
+      },
+    ],
+    [
+      'an illegal step id',
+      {
+        ...makePlan('Malformed Draft', ['first']),
+        steps: [{ id: 'Not Safe', step: 'first', status: 'pending' as const }],
+      },
+    ],
+    [
+      'an unknown step status',
+      {
+        ...makePlan('Malformed Draft', ['first']),
+        steps: [{ id: 'first', step: 'first', status: 'running' as never }],
+      },
+    ],
+    [
+      'too many steps',
+      makePlan(
+        'Malformed Draft',
+        Array.from({ length: 13 }, (_, index) => `step ${index + 1}`),
+      ),
+    ],
+    [
+      'a top-level extra key',
+      {
+        ...makePlan('Malformed Draft', ['first']),
+        steps: [{ id: 'first', step: 'first', status: 'pending' as const }],
+        extra: 'not allowed',
+      } as unknown as AgentPlan,
+    ],
+    [
+      'a step command key',
+      {
+        ...makePlan('Malformed Draft', ['first']),
+        steps: [{ id: 'first', step: 'first', status: 'pending' as const, command: 'bun test' }],
+      } as unknown as AgentPlan,
+    ],
+    [
+      'a step path key',
+      {
+        ...makePlan('Malformed Draft', ['first']),
+        steps: [{ id: 'first', step: 'first', status: 'pending' as const, path: '/secret' }],
+      } as unknown as AgentPlan,
+    ],
+    [
+      'a step stdout key',
+      {
+        ...makePlan('Malformed Draft', ['first']),
+        steps: [{ id: 'first', step: 'first', status: 'pending' as const, stdout: 'secret' }],
+      } as unknown as AgentPlan,
+    ],
+    ['empty steps', { ...makePlan('Malformed Draft', ['step']), steps: [] }],
+  ] as Array<[string, AgentPlan]>)('V2 plan.drafted replay rejects %s', (_label, plan) => {
+    const state: RuntimeState = { ...makeInitialState(), planning: { kind: 'planning_empty' } };
+    const structuralHash = computePlanStructuralDigest({
+      title: plan.name.slice(0, 120),
+      bodyMarkdown: plan.description,
+      steps: plan.steps.map((step) => ({
+        id: step.id ?? sanitizeStepId(step.step),
+        title: step.step.slice(0, 160),
+        status: step.status,
+      })),
+    });
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'malformed-v2-draft',
+      planId: 'malformed-v2-plan',
+      version: 1,
+      planSchemaVersion: 2,
+      plan,
+      structuralHash,
+      artifact: {
+        artifactId: 'malformed-v2-plan:v1',
+        taskId: 'malformed-task',
+        planId: 'malformed-v2-plan',
+        version: 1,
+        fileName: 'v1.md',
+        relativePath: 'plans/malformed-task/malformed-v2-plan/v1.md',
+        displayPath: '/plans/malformed-task/malformed-v2-plan/v1.md',
+        structuralDigest: structuralHash,
+        byteLength: 100,
+      },
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 plan.drafted replay rejects an Artifact not bound to the document identity', () => {
+    const state: RuntimeState = { ...makeInitialState(), planning: { kind: 'planning_empty' } };
+    const plan = makePlan('Trusted Draft', ['trusted step']);
+    const structuralHash = computePlanStructuralDigest(planToDigestInput(plan));
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'forged-draft-artifact',
+      planId: 'trusted-draft-id',
+      version: 1,
+      planSchemaVersion: 2,
+      plan,
+      structuralHash,
+      artifact: {
+        artifactId: 'substituted-plan:v1',
+        taskId: 'draft-task',
+        planId: 'substituted-plan',
+        version: 1,
+        fileName: 'v1.md',
+        relativePath: 'plans/draft-task/substituted-plan/v1.md',
+        displayPath: '/plans/draft-task/substituted-plan/v1.md',
+        structuralDigest: structuralHash,
+        byteLength: 100,
+      },
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 plan.drafted replay rejects a forged replanning version and revision anchor', () => {
+    const plan = makePlan('Anchored Replan', ['trusted step']);
+    const document = {
+      ...makeV2PlanDoc(plan, { planId: 'anchored-replan', version: 1 }),
+      supersedesPlanVersion: 1,
+      replanReason: 'expected',
+    };
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'replanning_draft',
+        document,
+        supersedesPlanVersion: 1,
+        replanReason: 'expected',
+      },
+    };
+    const eventPlan: AgentPlan = {
+      name: document.title,
+      description: document.bodyMarkdown,
+      status: 'pending',
+      steps: document.steps.map((step) => ({
+        id: step.id,
+        step: step.title,
+        status: 'pending',
+      })),
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'forged-replan-anchor',
+      planId: document.planId,
+      version: 3,
+      planSchemaVersion: 2,
+      plan: eventPlan,
+      structuralHash: document.structuralDigest,
+      supersedesPlanVersion: 2,
+      replanReason: 'forged',
+      artifact: {
+        artifactId: `${document.planId}:v3`,
+        taskId: 'replan-task',
+        planId: document.planId,
+        version: 3,
+        fileName: 'v3.md',
+        relativePath: `plans/replan-task/${document.planId}/v3.md`,
+        displayPath: `/plans/replan-task/${document.planId}/v3.md`,
+        structuralDigest: document.structuralDigest,
+        byteLength: 100,
+      },
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 plan.drafted replay rejects version skips and replan metadata injection in a draft', () => {
+    const plan = makePlan('Versioned Draft', ['trusted step']);
+    const document = makeV2PlanDoc(plan, { planId: 'versioned-draft', version: 2 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: { kind: 'planning_draft', document },
+    };
+    const eventPlan: AgentPlan = {
+      name: document.title,
+      description: document.bodyMarkdown,
+      status: 'pending',
+      steps: document.steps.map((step) => ({
+        id: step.id,
+        step: step.title,
+        status: 'pending',
+      })),
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.drafted',
+      toolCallId: 'forged-draft-revision',
+      planId: document.planId,
+      version: 4,
+      planSchemaVersion: 2,
+      plan: eventPlan,
+      structuralHash: document.structuralDigest,
+      supersedesPlanVersion: 2,
+      replanReason: 'injected',
+      artifact: {
+        artifactId: `${document.planId}:v4`,
+        taskId: 'draft-task',
+        planId: document.planId,
+        version: 4,
+        fileName: 'v4.md',
+        relativePath: `plans/draft-task/${document.planId}/v4.md`,
+        displayPath: `/plans/draft-task/${document.planId}/v4.md`,
+        structuralDigest: document.structuralDigest,
+        byteLength: 100,
+      },
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
   // 验证 plan.drafted 使用事件中的 planId 和 version（由 tool-controller 提供）
   test('plan.drafted uses event planId and version on revision', () => {
     const oldPlan = makePlan('Old Draft', ['old step']);
@@ -2013,6 +2377,145 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
     }
   });
 
+  test('V1 progress replay ignores supplied completion evidence', () => {
+    const plan = makePlan('Legacy Plan', ['legacy step']);
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document: makePlanDoc(plan, { planId: 'legacy-plan', version: 1 }),
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.progress_updated',
+      toolCallId: 'legacy-progress',
+      plan: {
+        ...plan,
+        steps: [{ id: 'legacy-step', step: 'legacy step', status: 'completed' }],
+      },
+      completionEvidence: {
+        schemaVersion: 1,
+        verification: [],
+        execution: [{ toolCallId: 'forged-tool-reference', outcome: 'succeeded' }],
+        skipped: [],
+        unresolved: [],
+      },
+    };
+
+    const next = reduceRuntimeState(state, event);
+
+    expect(next.planning.kind).toBe('executing');
+    if (next.planning.kind === 'executing') {
+      expect(next.planning.document.steps[0]?.status).toBe('completed');
+      expect(next.planning.document.completionEvidence).toBeUndefined();
+    }
+  });
+
+  test('V2 progress replay cannot roll a terminal step back to pending', () => {
+    const plan = makePlan('Monotonic Plan', ['terminal step']);
+    plan.steps[0]!.status = 'completed';
+    const document = makeV2PlanDoc(plan, { planId: 'monotonic-plan', version: 2 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.progress_updated',
+      toolCallId: 'rollback-progress',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan: {
+        ...plan,
+        steps: [{ id: 'terminal-step', step: 'terminal step', status: 'pending' }],
+      },
+      completionEvidence: document.completionEvidence,
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test.each([
+    [
+      'unknown status',
+      (plan: AgentPlan): void => {
+        plan.steps[0]!.status = 'bogus' as never;
+      },
+    ],
+    [
+      'duplicate step id',
+      (plan: AgentPlan): void => {
+        plan.steps[1]!.id = plan.steps[0]!.id;
+      },
+    ],
+    [
+      'missing step id',
+      (plan: AgentPlan): void => {
+        delete plan.steps[0]!.id;
+      },
+    ],
+    [
+      'unknown step id',
+      (plan: AgentPlan): void => {
+        plan.steps[0]!.id = 'unknown-step';
+      },
+    ],
+    [
+      'top-level extra key',
+      (plan: AgentPlan): void => {
+        Object.assign(plan, { stdout: 'secret' });
+      },
+    ],
+    [
+      'step extra key',
+      (plan: AgentPlan): void => {
+        Object.assign(plan.steps[0]!, { command: 'pwd' });
+      },
+    ],
+  ] as const)('V2 progress replay rejects malformed transport: %s', (_label, mutate) => {
+    const original = makePlan('Strict Progress Plan', ['first step', 'second step']);
+    const document = makeV2PlanDoc(original, { planId: 'strict-progress', version: 2 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const transport: AgentPlan = {
+      name: document.title,
+      description: document.bodyMarkdown,
+      status: 'in_progress',
+      steps: document.steps.map((step) => ({
+        id: step.id,
+        step: step.title,
+        status: step.status,
+      })),
+    };
+    mutate(transport);
+
+    expect(
+      reduceRuntimeState(state, {
+        type: 'plan.progress_updated',
+        toolCallId: 'malformed-progress',
+        planId: document.planId,
+        version: document.version,
+        structuralDigest: document.structuralDigest,
+        plan: transport,
+        completionEvidence: document.completionEvidence,
+      }),
+    ).toBe(state);
+  });
+
   // 验证 plan.progress_updated 在非 building 状态时不操作
   test('plan.progress_updated is no-op when plan is not executing', () => {
     const state = makeInitialState(); // planning.kind === 'building_without_plan'
@@ -2053,6 +2556,253 @@ describe('reduceRuntimeState — plan lifecycle supplements', () => {
       expect(next.planning.document.version).toBe(1);
       expect(next.planning.completedAtTurnId).toBe(state.turn.turnId);
     }
+  });
+
+  test('V2 completed replay rejects pending required verification', () => {
+    const plan = makePlan('Verification Plan', ['verified step']);
+    plan.status = 'completed';
+    plan.steps[0]!.status = 'completed';
+    const document = makeV2PlanDoc(plan, { planId: 'verification-plan', version: 3 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+      verification: {
+        records: {
+          required: {
+            verificationId: 'required',
+            mode: 'required',
+            status: 'pending',
+            spec: {} as never,
+            requestedAt: '2026-08-10T00:00:00.000Z',
+            attempts: 0,
+            repairAttempts: 0,
+            checkResults: {},
+          },
+        },
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'complete-without-verification',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan,
+      completionEvidence: document.completionEvidence,
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 completed replay rejects a plan with a pending step', () => {
+    const plan = makePlan('Incomplete Plan', ['completed step', 'pending step']);
+    plan.status = 'completed';
+    plan.steps[0]!.status = 'completed';
+    const document = makeV2PlanDoc(plan, { planId: 'incomplete-plan', version: 2 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'complete-with-pending-step',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan,
+      completionEvidence: document.completionEvidence,
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 completed replay rejects extra transport keys before merging', () => {
+    const plan = makePlan('Strict Completed Plan', ['completed step']);
+    const document = makeV2PlanDoc(plan, { planId: 'strict-completed', version: 2 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const transport = {
+      name: document.title,
+      description: document.bodyMarkdown,
+      status: 'completed',
+      steps: document.steps.map((step) => ({
+        id: step.id,
+        step: step.title,
+        status: 'completed' as const,
+        path: '/private/path',
+      })),
+    } as unknown as AgentPlan;
+
+    expect(
+      reduceRuntimeState(state, {
+        type: 'plan.completed',
+        toolCallId: 'malformed-completed',
+        planId: document.planId,
+        version: document.version,
+        structuralDigest: document.structuralDigest,
+        plan: transport,
+        completionEvidence: document.completionEvidence,
+      }),
+    ).toBe(state);
+  });
+
+  test('V2 completed replay rejects a side-effect-free pending approval interaction', () => {
+    const plan = makePlan('Approval Blocked Plan', ['completed step']);
+    const document = makeV2PlanDoc(plan, { planId: 'approval-blocked', version: 2 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+      tools: {
+        calls: {
+          'external-read': {
+            toolCallId: 'external-read',
+            modelMessageId: 'external-read-model',
+            name: 'read_file',
+            args: { path: '/outside/workspace.txt' },
+            status: 'awaiting_approval',
+            sideEffect: false,
+            createdAtTurnId: 'turn-0',
+          },
+        },
+        queue: ['external-read'],
+        active: [],
+      },
+      interactions: {
+        kind: 'awaiting_tool_approval',
+        interactionId: 'external-read-approval',
+        toolCallId: 'external-read',
+        approval: {} as never,
+      },
+    };
+    const completedPlan: AgentPlan = {
+      name: document.title,
+      description: document.bodyMarkdown,
+      status: 'completed',
+      steps: document.steps.map((step) => ({
+        id: step.id,
+        step: step.title,
+        status: 'completed',
+      })),
+    };
+
+    expect(
+      reduceRuntimeState(state, {
+        type: 'plan.completed',
+        toolCallId: 'complete-with-approval',
+        planId: document.planId,
+        version: document.version,
+        structuralDigest: document.structuralDigest,
+        plan: completedPlan,
+        completionEvidence: document.completionEvidence,
+      }),
+    ).toBe(state);
+  });
+
+  test('V2 completed replay rejects a plan whose steps are all skipped', () => {
+    const plan = makePlan('Skipped Plan', ['skipped step']);
+    plan.status = 'completed';
+    plan.steps[0]!.status = 'skipped';
+    const document = makeV2PlanDoc(makePlan('Skipped Plan', ['skipped step']), {
+      planId: 'all-skipped-plan',
+      version: 2,
+    });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'complete-all-skipped',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan,
+      completionEvidence: {
+        schemaVersion: 1,
+        verification: [],
+        execution: [],
+        skipped: [{ stepId: 'skipped-step', reasonCode: 'not_needed' }],
+        unresolved: [],
+      },
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
+  });
+
+  test('V2 completed replay rejects matching unresolved failure evidence', () => {
+    const plan = makePlan('Blocked Plan', ['effect step']);
+    plan.status = 'completed';
+    plan.steps[0]!.status = 'completed';
+    const document = makeV2PlanDoc(plan, { planId: 'blocked-plan', version: 4 });
+    const state: RuntimeState = {
+      ...makeInitialState(),
+      planning: {
+        kind: 'executing',
+        document,
+        executionMode: 'auto',
+        approvedAtTurnId: 'turn-0',
+      },
+      tools: {
+        calls: {
+          'failed-effect': {
+            toolCallId: 'failed-effect',
+            modelMessageId: 'model-failed-effect',
+            name: 'write_file',
+            args: { path: '<redacted>' },
+            status: 'failed',
+            createdAtTurnId: 'turn-0',
+            sideEffect: true,
+            error: 'private failure detail',
+          },
+        },
+        queue: [],
+        active: [],
+      },
+    };
+    const event: RuntimeEvent = {
+      type: 'plan.completed',
+      toolCallId: 'complete-with-unresolved-failure',
+      planId: document.planId,
+      version: document.version,
+      structuralDigest: document.structuralDigest,
+      plan,
+      completionEvidence: {
+        schemaVersion: 1,
+        verification: [],
+        execution: [],
+        skipped: [],
+        unresolved: [{ kind: 'failure', referenceId: 'failed-effect' }],
+      },
+    };
+
+    expect(reduceRuntimeState(state, event)).toBe(state);
   });
 
   // 验证 plan.completed 从 approved 转为 completed

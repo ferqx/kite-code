@@ -169,7 +169,7 @@ export type OutputBlock =
       subagentId: string;
       role: SubAgentRole;
       task: string;
-      status: 'running' | 'done' | 'error' | 'cancelled';
+      status: 'running' | 'suspended' | 'done' | 'error' | 'cancelled';
       summary: string;
       toolCallCount: number;
       durationMs: number;

@@ -1,7 +1,11 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import { eventsForRuntimeAction } from '@/core/runtime/actions';
-import { reduceRuntimeState } from '@/core/runtime/reducer';
+import type { RuntimeEvent } from '@/core/runtime/events';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '@/core/runtime/reducer';
 import { decideNextEffect } from '@/core/runtime/scheduler';
 import {
   computePlanStructuralDigest,
@@ -9,7 +13,18 @@ import {
   getActivePlanning,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import type { AgentPlan } from '@/protocol/events';
+
+function reduceRuntimeState(
+  state: ReturnType<typeof createInitialRuntimeState>,
+  event: RuntimeEvent,
+): ReturnType<typeof createInitialRuntimeState> {
+  return reduceCanonicalRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+  );
+}
 
 function plan(name = 'Plan', status: AgentPlan['status'] = 'pending'): AgentPlan {
   return {
@@ -17,6 +32,20 @@ function plan(name = 'Plan', status: AgentPlan['status'] = 'pending'): AgentPlan
     description: 'A sufficiently detailed plan for lifecycle testing.',
     status,
     steps: [{ id: 'inspect', step: 'Inspect the runtime', status }],
+  };
+}
+
+function planArtifact(taskId: string, planId: string, version: number, structuralDigest: string) {
+  return {
+    artifactId: `${planId}:v${version}`,
+    taskId,
+    planId,
+    version,
+    fileName: `v${version}.md`,
+    relativePath: `plans/${taskId}/${planId}/v${version}.md`,
+    displayPath: `/plans/${taskId}/${planId}/v${version}.md`,
+    structuralDigest,
+    byteLength: 100,
   };
 }
 
@@ -57,6 +86,21 @@ function startTask(state: ReturnType<typeof createInitialRuntimeState>, taskId =
 }
 
 describe('Task-scoped Plan Mode lifecycle', () => {
+  let home: string;
+  let previousHome: string | undefined;
+
+  beforeEach(() => {
+    previousHome = process.env.KITE_CODE_HOME;
+    home = mkdtempSync(join(tmpdir(), 'kite-code-task-plan-lifecycle-'));
+    process.env.KITE_CODE_HOME = home;
+  });
+
+  afterEach(() => {
+    if (previousHome == null) delete process.env.KITE_CODE_HOME;
+    else process.env.KITE_CODE_HOME = previousHome;
+    rmSync(home, { recursive: true, force: true });
+  });
+
   test('/plan enters through durable RuntimeEvents and creates an active task', () => {
     const state = reduceRuntimeState(
       startTask(createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/tmp' })),
@@ -168,6 +212,35 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     expect(submitted).not.toContainEqual(expect.objectContaining({ type: 'tool.rejected' }));
   });
 
+  test('successful plan child cannot replace Runtime-owned save and submit lifecycle facts', () => {
+    let state = reduceRuntimeState(
+      startTask(createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/tmp' })),
+      { type: 'planning.entered', taskId: 'task-1', source: 'user_command' },
+    );
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'plan-child',
+      modelMessageId: 'model-child',
+      name: 'task',
+      args: { subagent_type: 'plan', task: 'Design the Runtime architecture change.' },
+    });
+    state = reduceRuntimeState(state, { type: 'tool.started', toolCallId: 'plan-child' });
+    state = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'plan-child',
+      name: 'task',
+      result: { ok: true, command: 'task', exitCode: 0, stdout: 'plan summary', stderr: '' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'model.responded',
+      messageId: 'model-final',
+      text: 'The child supplied a plan, so this task is done.',
+    });
+
+    expect(getActivePlanning(state).kind).toBe('planning_empty');
+    expect(decideNextEffect(state)).toMatchObject({ type: 'completion_blocked' });
+  });
+
   test.each(['code', 'unknown'] as const)('%s task calls remain side-effectful', (subagentType) => {
     let state = startTask(
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: process.cwd() }),
@@ -226,17 +299,20 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     });
     state = withCall(state, 'plan-call', 'write_plan', {});
     const draft = plan();
+    const structuralHash = computePlanStructuralDigest({
+      title: draft.name,
+      bodyMarkdown: draft.description,
+      steps: [{ id: 'inspect', title: 'Inspect the runtime', status: 'pending' }],
+    });
     state = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'plan-call',
       plan: draft,
       planId: 'plan-1',
       version: 1,
-      structuralHash: computePlanStructuralDigest({
-        title: draft.name,
-        bodyMarkdown: draft.description,
-        steps: [{ id: 'inspect', title: 'Inspect the runtime', status: 'pending' }],
-      }),
+      structuralHash,
+      planSchemaVersion: 2,
+      artifact: planArtifact('task-1', 'plan-1', 1, structuralHash),
     });
     state = reduceRuntimeState(state, {
       type: 'plan.review_requested',
@@ -245,6 +321,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       plan: draft,
       planId: 'plan-1',
       version: 1,
+      structuralDigest: structuralHash,
       planSummary: 'Plan',
     });
     if (state.interactions.kind !== 'awaiting_review') throw new Error('review missing');
@@ -325,6 +402,9 @@ describe('Task-scoped Plan Mode lifecycle', () => {
 
     const submit = await executeRuntimeTools({
       state: withCall(state, 'replan-call', 'write_plan', {
+        plan_id: document.planId,
+        version: document.version,
+        structural_digest: document.structuralDigest,
         title: 'Replanned execution',
         body_markdown: 'A sufficiently detailed structural replan.',
         steps: [{ id: 'inspect', title: 'Inspect the runtime again' }],
@@ -347,6 +427,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: process.cwd() }),
     );
     const document = {
+      planSchemaVersion: 2 as const,
       planId: 'plan-pending',
       version: 1,
       title: 'Pending plan',
@@ -355,6 +436,13 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       structuralDigest: 'digest',
       createdAtTurnId: state.turn.turnId,
       updatedAtTurnId: state.turn.turnId,
+      completionEvidence: {
+        schemaVersion: 1 as const,
+        verification: [],
+        execution: [],
+        skipped: [],
+        unresolved: [],
+      },
     };
     state = {
       ...state,
@@ -379,6 +467,8 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     };
     const args = {
       plan_id: 'plan-pending',
+      version: 1,
+      structural_digest: 'digest',
       updates: [{ step_id: 'inspect', status: 'pending' }],
       complete_plan: true,
     };
@@ -396,7 +486,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     expect(events).not.toContainEqual(expect.objectContaining({ type: 'plan.completed' }));
   });
 
-  test('task completion clears execution mode before the next task starts', () => {
+  test('an incomplete planning task cannot be cleared by a bypassed completion event', () => {
     let state = startTask(
       createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/tmp' }),
     );
@@ -410,8 +500,8 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       interactionId: 'missing',
       executionMode: 'auto',
     });
-    // The task-scoped value is explicitly cleared by task completion even when
-    // the old compatibility mirror is still present in the snapshot.
+    // CompletionGuard rejects the old shortcut: the Plan lifecycle is still
+    // incomplete, so this is not task completion.
     state = reduceRuntimeState(state, {
       type: 'run.completed',
       turnId: state.turn.turnId,
@@ -422,7 +512,7 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       messageId: 'message-2',
       content: 'Start a fresh task',
     });
-    expect(state.activeTaskId).not.toBe('task-1');
+    expect(state.activeTaskId).toBe('task-1');
     expect(state.tasks['task-1']?.executionMode).toBeUndefined();
   });
 
@@ -437,17 +527,20 @@ describe('Task-scoped Plan Mode lifecycle', () => {
     });
     state = withCall(state, 'plan-call', 'write_plan', {});
     const draft = plan();
+    const structuralHash = computePlanStructuralDigest({
+      title: draft.name,
+      bodyMarkdown: draft.description,
+      steps: [{ id: 'inspect', title: 'Inspect the runtime', status: 'pending' }],
+    });
     state = reduceRuntimeState(state, {
       type: 'plan.drafted',
       toolCallId: 'plan-call',
       plan: draft,
       planId: 'plan-1',
       version: 1,
-      structuralHash: computePlanStructuralDigest({
-        title: draft.name,
-        bodyMarkdown: draft.description,
-        steps: [{ id: 'inspect', title: 'Inspect the runtime', status: 'pending' }],
-      }),
+      structuralHash,
+      planSchemaVersion: 2,
+      artifact: planArtifact('task-1', 'plan-1', 1, structuralHash),
     });
     state = reduceRuntimeState(state, {
       type: 'plan.review_requested',
@@ -455,6 +548,9 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       toolCallId: 'plan-call',
       plan: draft,
       planSummary: 'Plan',
+      planId: 'plan-1',
+      version: 1,
+      structuralDigest: structuralHash,
     });
     if (state.interactions.kind !== 'awaiting_review') throw new Error('review missing');
     const approvalEvents = eventsForRuntimeAction(state, {
@@ -508,6 +604,6 @@ describe('Task-scoped Plan Mode lifecycle', () => {
       content: 'Start a fresh task',
     });
     expect(getEffectiveInteractionMode(state)).toBe('accept_edits');
-    expect(state.tasks[state.activeTaskId ?? '']?.taskId).not.toBe('task-1');
+    expect(state.tasks[state.activeTaskId ?? '']?.taskId).toBe('task-1');
   });
 });

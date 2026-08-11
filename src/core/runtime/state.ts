@@ -44,6 +44,8 @@ import {
   type ResourceBudgetRuntimeStateV1,
 } from './resource-budget';
 import type { RunTerminalOutcomeV1 } from './terminal-outcome';
+import type { ToolOutcomeV1, UnknownToolFieldsObservationV1 } from './tool-outcome';
+import { createToolRecoveryJournalV1, type ToolRecoveryJournalV1 } from './tool-recovery-journal';
 
 // ── Re-export for convenience ──
 export { getAgentPhase };
@@ -236,6 +238,16 @@ export interface ToolCallRecord {
   status: ToolCallStatus;
   /** 创建该工具调用的 turn ID / Turn id when this tool call was created */
   createdAtTurnId: string;
+  queuedAt?: string;
+  startedAt?: string;
+  approvalRequestedAt?: string;
+  /** Runtime-measured decision latency accumulated before dispatch. */
+  approvalWaitMs?: number;
+  invocationFingerprint?: string;
+  recoveryOf?: string;
+  recoveryMode?: import('./tool-recovery-journal').ToolRecoveryAttemptModeV1;
+  recoveryAdmission?: 'admitted' | 'recovery_not_allowed' | 'recovery_exhausted' | 'no_progress';
+  unknownFields?: UnknownToolFieldsObservationV1;
   /** 审批哈希（用于缓存审批结果）/ Approval hash for caching approval decisions */
   approvalHash?: string;
   /** The one-shot or persisted grant selected for this specific execution. */
@@ -255,6 +267,8 @@ export interface ToolCallRecord {
   error?: string;
   /** Structured failure metadata retained for retry policy and replay. */
   failure?: ClassifiedFailure;
+  /** Canonical Runtime-owned projection on terminal calls; absent while nonterminal or in historical input. */
+  outcomeV1?: ToolOutcomeV1;
   /** Capability classification captured when the call was queued. */
   effectClass?: ToolEffectClass;
   /** Whether the call has crossed the active task's side-effect boundary. */
@@ -272,6 +286,8 @@ export interface ToolCallRecord {
 
 /** Structured, JSON-safe facts produced by a tool execution. */
 export interface ToolResultMeta {
+  invocationId?: string;
+  capabilityRevision?: string;
   path?: string;
   totalLines?: number;
   command?: string;
@@ -294,6 +310,11 @@ export interface ToolResultMeta {
   networkPolicyRevision?: string;
   networkAdmissionDigests?: string[];
   networkFailureCode?: string;
+  nextCapability?: 'git_inspect';
+  /** Stable Git broker result classification; never contains repository content. */
+  gitFailureCode?: import('@/protocol/git').GitBrokerFailureCodeV1;
+  /** Runtime-owned local Git inspect receipt. */
+  gitReceipt?: import('@/protocol/git').GitInvocationReceiptV1;
 }
 
 export interface CapabilityRuntimeState {
@@ -404,7 +425,14 @@ export type TranscriptMessage =
       kind: 'assistant';
       content?: string;
       reasoningText?: string;
-      toolCalls: Array<{ id: string; name: string; args: unknown }>;
+      toolCalls: Array<{
+        id: string;
+        name: string;
+        args: unknown;
+        canonicalInvocationFingerprint?: string;
+      }>;
+      /** Durable marker used to bound restricted legacy-plan recovery corrections. */
+      toolSurface?: 'legacy_plan_recovery';
     } & TranscriptMessageMeta)
   | (TranscriptMessageMeta & {
       kind: 'tool';
@@ -420,10 +448,19 @@ export interface TranscriptState {
   final?: string;
 }
 
+/** Durable correction ceiling bound to the selected guard and V2 Plan identity across turns. */
+export interface CompletionGuardRuntimeStateV1 {
+  correctionAttempts: number;
+  guardVersion?: import('./completion-guard').CompletionGuardVersion;
+  planIdentity?: import('@/protocol/events').PlanIdentity;
+}
+
 // ── 运行时状态 / Runtime state ──
 
 /** Runtime state schema version for migration compatibility. */
-export const RUNTIME_STATE_SCHEMA_VERSION = 21;
+export const COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION = 22;
+export const TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION = 23;
+export const RUNTIME_STATE_SCHEMA_VERSION = TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION;
 
 export interface ProviderAdmissionRecord {
   interactionId: string;
@@ -505,12 +542,16 @@ export interface RuntimeState {
   resourceBudget: ResourceBudgetRuntimeStateV1;
   /** Durable structured terminal projection; absent only on legacy/pre-flag runs. */
   terminalOutcome?: RunTerminalOutcomeV1;
+  /** Completion correction state; absent snapshots are legacy zero-attempt state. */
+  completionGuard?: CompletionGuardRuntimeStateV1;
   /** 方案生命周期状态（v2: PlanningState 取代 PlanLifecycleState）/ Plan lifecycle state */
   planning: PlanningState;
   /** 交互状态（用户输入、方案审核、工具审批）/ Interaction state (user input, plan review, tool approval) */
   interactions: InteractionState;
   /** 工具运行时状态 / Tool runtime state */
   tools: ToolRuntimeState;
+  /** Canonical private Store journal shared by the parent Runtime and delegated task outcomes. */
+  toolRecovery: ToolRecoveryJournalV1;
   capabilities: CapabilityRuntimeState;
   skills: SkillRuntimeState;
   verification: VerificationRuntimeState;
@@ -603,6 +644,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       },
     },
     resourceBudget: createUnconfiguredResourceBudgetStateV1(),
+    completionGuard: { correctionAttempts: 0 },
     planning: initialPlanning,
     activeTaskId: null,
     tasks: {},
@@ -612,6 +654,7 @@ export function createInitialRuntimeState(input: CreateRuntimeStateInput): Runti
       queue: [],
       active: [],
     },
+    toolRecovery: createToolRecoveryJournalV1(),
     capabilities: {
       catalogRevision: '',
       bindings: {},

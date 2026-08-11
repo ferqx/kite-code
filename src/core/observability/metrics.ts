@@ -57,6 +57,7 @@ const FINITE_ATTRIBUTE_VALUES: Readonly<
     'not_dispatched',
     'aborted',
     'budget_exhausted',
+    'exhausted',
     'resource_saturated',
   ]),
   reason: new Set([
@@ -165,6 +166,14 @@ export const METRIC_DEFINITIONS_V1 = Object.freeze({
   tool_total: metric('tool_total', 'counter', ['outcome', 'capability'], 96, 'Runtime Event', [
     'SLO',
   ]),
+  tool_duration_ms: metric(
+    'tool_duration_ms',
+    'histogram',
+    ['outcome', 'capability'],
+    96,
+    'Runtime ToolOutcome',
+    ['SLO'],
+  ),
   mcp_total: metric('mcp_total', 'counter', ['outcome', 'capability'], 96, 'Receipt metadata', [
     'SLO',
   ]),

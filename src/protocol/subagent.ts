@@ -77,6 +77,8 @@ export interface SuspendedSubagentSnapshot {
   steps: PersistedSubagentStep[];
   executionJournal?: PersistedExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;
+  /** Canonical private Runtime journal encoded as JSON; never projected to diagnostics. */
+  toolRecovery?: JsonObject;
   blockedTool: {
     toolCallId: string;
     toolName: string;

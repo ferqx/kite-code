@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { composeAppGitBrokerV1, resolveAppGitExecutableV1 } from '@/app/git/composition';
 import type { RuntimeMetricBridgeV1 } from '@/app/observability/runtime-bridge';
 import { type AppShellExecutorV1, composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import { getFeatureFlags } from '@/core/config/features';
@@ -520,6 +521,16 @@ export class SessionRuntime {
         return;
       }
       const effectiveBackend = shellRuntime.mode === 'sandbox' ? shellRuntime.backend : 'none';
+      const gitExecutable = resolveAppGitExecutableV1();
+      const gitBroker =
+        gitExecutable && deps.config.brokeredGitShellDenyEvidence
+          ? composeAppGitBrokerV1({
+              workspace: this.workspace,
+              executable: gitExecutable,
+              config: deps.config,
+              shellDenyEvidence: deps.config.brokeredGitShellDenyEvidence,
+            })
+          : undefined;
       const fullModeReason = fullModeUnavailableReason(this.interactionMode, effectiveBackend);
       if (fullModeReason) {
         this.interactionMode = 'accept_edits';
@@ -544,6 +555,7 @@ export class SessionRuntime {
         workspace: this.workspace,
         config: deps.config,
         shellExecutor,
+        gitBroker,
         signal: abortController.signal,
         thinkingLevel: this.thinkingLevel,
         skills: this.skillManifests,
@@ -563,6 +575,7 @@ export class SessionRuntime {
       // 始终使用代理提供器 — 事件路由由 _foreground 控制
       const runtimeInput: RunRuntimeAgentInput = {
         task: runAgentParams.task,
+        userGoal: runAgentParams.userGoal,
         userId: runAgentParams.userId,
         threadId: runAgentParams.threadId,
         workspace: runAgentParams.workspace,
@@ -570,6 +583,7 @@ export class SessionRuntime {
         config: runAgentParams.config,
         model: runAgentParams.model,
         shellExecutor: runAgentParams.shellExecutor,
+        gitBroker: runAgentParams.gitBroker,
         mcpManager: runAgentParams.mcpManager,
         remoteMcpEgressPermitResolver: runAgentParams.remoteMcpEgressPermitResolver,
         skills: runAgentParams.skills,

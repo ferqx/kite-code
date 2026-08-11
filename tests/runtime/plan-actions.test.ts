@@ -27,6 +27,7 @@ function makeAwaitingReviewState() {
     planning: {
       kind: 'awaiting_review' as const,
       document: {
+        planSchemaVersion: 2 as const,
         planId: 'plan-99',
         version: 2,
         title: 'Test Plan',
@@ -80,7 +81,35 @@ describe('plan_review_decision actions', () => {
     if (finished && finished.type === 'tool.finished') {
       expect(finished.name).toBe('write_plan');
       expect(finished.result.ok).toBe(true);
+      expect(JSON.parse(finished.result.stdout)).toMatchObject({
+        plan_id: 'plan-99',
+        version: 2,
+        structural_digest: 'test-digest-abc123',
+      });
     }
+  });
+
+  test('a new approval action routes a legacy V1 review back to revision', () => {
+    const state = makeAwaitingReviewState();
+    delete (state.planning.document as { planSchemaVersion?: 2 }).planSchemaVersion;
+    const action: RuntimeUserAction = {
+      type: 'plan_review_decision',
+      interactionId: 'inter-99',
+      planId: 'plan-99',
+      version: 2,
+      structuralDigest: 'test-digest-abc123',
+      decision: { kind: 'approve', nextMode: 'auto', clearPlanningContext: false },
+    };
+
+    const events = eventsForRuntimeAction(state, action);
+
+    expect(events.some((event) => event.type === 'plan.approved')).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'plan.revision_requested',
+        feedback: expect.stringContaining('legacy_plan_replan_required'),
+      }),
+    );
   });
 
   test('approve accept_edits → mode accept_edits', () => {

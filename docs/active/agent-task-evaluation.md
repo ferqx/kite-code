@@ -2,10 +2,10 @@
 
 状态：active
 读取时机：修改 Agent task case、fixture、oracle、重复运行、人工验收或产品 Release Evidence 时。
-验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts`、
+验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
-相关：ADR-0058、ADR-0068、ADR-0069、D-07、Phase 2B。
+相关：ADR-0058、ADR-0068、ADR-0069、ADR-0095、ADR-0096、D-07、Phase 2B、`opencode-go-journey-evaluation-policy.md`。
 
 ## 当前状态
 
@@ -38,6 +38,24 @@ D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发
 升级为产品证据。ADR-0069 后该 workflow 不再对应待完成 Task。
 
 ## Evidence 规则
+
+OpenCode Go 的 first-decision/Journey live 评测还必须遵守版本化 `ACORE-EVAL-POLICY`；当前冻结规则、候选范围、
+十轮样本、Provider usage 与人工 Go usage 核对的无正文边界见
+[`opencode-go-journey-evaluation-policy.md`](opencode-go-journey-evaluation-policy.md)。该政策不授权运行真实模型，
+也不改变 ADR-0094 的 `promptContractV2=false` 默认值。
+
+`ACORE-EVAL-00-v1` 是在上述 live 政策之前建立的完整 Runtime Journey 基线：它用 synthetic workspace 驱动
+Kernel 的 `model → tool → model → run.completed → turn.completed` 闭环，只断言 canonical event 类型与计数，
+并固定 `contentLogged=false`。该基线不触发 Provider，也不记录 prompt、工具正文或路径；它仅验证后续 live
+证据需要经过的运行时路径仍可达。Journey fixture 中直接进入 current reducer 的 Tool 终态必须
+携带 canonical `ToolOutcomeV1`；只有明确的历史 replay fixture 可通过 historical decoder 读取旧记录。
+
+`ACORE-PLAN-03-v1` 在同一 synthetic、无 Provider 边界内增加三条 CompletionGuard V2 Journey：required
+Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verification_required`；副作用 Tool 已成功但 Plan
+尚未投影 execution evidence 时稳定返回 `effect_evidence_required`；Verification、Tool receipt 与 Plan evidence
+全部由真实 Runtime event/tool lifecycle 归约后才允许 `run.completed + turn.completed`。三条报告只保存 event
+计数、稳定 reason code、纠正次数和严格 Plan identity，继续固定 `contentLogged=false`，并显式断言不包含
+prompt、Plan 正文、工具正文、路径、命令或 stdout。
 
 - case、suite、oracle、contract、artifact、config 和 route identity 必须全部绑定；任一 mismatch 拒绝。
 - 每次运行保留完整结构化 attempt，不能只保留最好一次。缺失指标使用 `null`/`not_observed`，不能补零。

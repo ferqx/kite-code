@@ -31,6 +31,7 @@ export interface SubAgentRunnerInput {
   role: SubAgentRoleConfig;
   task: string;
   shellExecutor?: import('@/core/tools/shell').ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: import('@/core/mcp').McpRuntimeProvider;
   skills?: import('@/core/skills/types').SkillManifest[];
   skillOptions?: import('@/core/skills/types').SkillScanOptions;
@@ -46,6 +47,8 @@ export interface SubAgentRunnerInput {
   /** Project instructions visible to the parent model when this sub-agent was dispatched. */
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
   threadId?: string;
+  /** Parent Runtime canonical-private HMAC key; never projected into model/session output. */
+  recoveryIdentityKey?: string;
   model?: import('@/core/model/factory').SupportedChatModel;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
@@ -70,6 +73,7 @@ export interface SubAgentContinuation {
   /** Phase 5: journal state preserved across approval round-trips */
   executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
   exhaustedFingerprints?: Record<string, true>;
+  toolRecovery?: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1;
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
 }
 
@@ -103,6 +107,7 @@ export interface SubAgentResult {
   summary: string;
   toolCallCount: number;
   durationMs: number;
+  terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'suspended';
   error?: string;
   blocked?: {
     reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL';
@@ -119,6 +124,7 @@ export interface SubAgentResult {
   executionJournal?: import('@/core/execution/journal').ExecutionJournalEntry[];
   /** Phase 5: 子 Agent 中已耗尽的操作指纹 / Exhausted fingerprints detected in subagent */
   exhaustedFingerprints?: Record<string, true>;
+  toolRecovery?: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1;
 }
 
 /** 子 agent 缓存指标 / Sub-agent cache metrics */

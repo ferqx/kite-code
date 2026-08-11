@@ -2,8 +2,15 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+  eventsForInvalidModelToolCalls,
+  invokeRuntimeModel,
+  resolveContextProjectionEnvironment,
+} from '../../src/core/controllers/model-controller';
+import { executeRuntimeTools } from '../../src/core/controllers/tool-controller';
 import { createRemoteMcpEgressReceiptV1 } from '../../src/core/mcp/egress-permit';
 import { McpConnectionManager } from '../../src/core/mcp/manager';
+import { aiMessage } from '../../src/core/messages';
 import { buildContextProjection } from '../../src/core/model/context-projection';
 import { eventsForRunCancellation } from '../../src/core/runtime/actions';
 import type { RuntimeEvent } from '../../src/core/runtime/events';
@@ -13,6 +20,7 @@ import { AgentKernel, createAgentKernel } from '../../src/core/runtime/kernel';
 import { runRuntimeLoop } from '../../src/core/runtime/runner';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
 import {
+  computePlanStructuralDigest,
   createInitialRuntimeState,
   RUNTIME_STATE_SCHEMA_VERSION,
   type RuntimeState,
@@ -22,8 +30,74 @@ import {
   RemoteMcpEgressNonceConflictError,
   type RuntimeStore,
 } from '../../src/core/runtime/store';
+import { createMockModel } from '../mock-model';
 
 describe('AgentKernel durability', () => {
+  test('fails closed when a current v23 snapshot omits the recovery journal', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-v23-missing-recovery-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'v23-missing-recovery';
+    try {
+      const current = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      delete (current as Partial<RuntimeState>).toolRecovery;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, current);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().toolRecovery.qualityGuard).toMatchObject({
+        blocked: true,
+        reasonCode: 'journal_invalid',
+      });
+      expect(decideNextEffect(restored.getState())).toMatchObject({ type: 'recovery_blocked' });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('initializes a missing recovery journal only while migrating a pre-v23 snapshot', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-v22-missing-recovery-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'v22-missing-recovery';
+    try {
+      const legacy = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      legacy.schemaVersion = 22;
+      delete (legacy as Partial<RuntimeState>).toolRecovery;
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, legacy);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().toolRecovery.qualityGuard).toEqual({
+        blocked: false,
+        observedFailures: 0,
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   test('replays the context compaction crash matrix from snapshot plus event tail', () => {
     const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-compaction-crash-'));
     const storePath = join(dir, 'runtime.db');
@@ -581,6 +655,780 @@ describe('AgentKernel durability', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+});
+
+test('runRuntimeLoop rechecks legacy V1 plan continuation after effect preparation', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'legacy-plan-loop',
+    userId: 'u',
+    workspace: '/',
+  });
+  initial.planning = {
+    kind: 'executing',
+    document: {
+      planId: 'legacy-plan',
+      version: 1,
+      title: 'Legacy Plan',
+      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+      structuralDigest: 'legacy-digest',
+      createdAtTurnId: initial.turn.turnId,
+      updatedAtTurnId: initial.turn.turnId,
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: initial.turn.turnId,
+  };
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  let dispatched = false;
+  const eventTypes: string[] = [];
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async () => {
+      dispatched = true;
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'none' }) },
+    2,
+    async () => ({ type: 'call_model' }),
+  )) {
+    eventTypes.push(event.type);
+  }
+
+  expect(dispatched).toBe(false);
+  expect(eventTypes).toEqual(['turn.aborted', 'run.error']);
+  expect(kernel.getState().turn.status).toBe('aborted');
+  kernel.close();
+});
+
+test.each([
+  'awaiting_input',
+  'unknown_invocation',
+  'completion_correction',
+] as const)('post-prepare legacy guard rejects a canonical barrier replacement: %s', async (barrier) => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: `legacy-prepare-barrier-${barrier}`,
+    userId: 'u',
+    workspace: '/',
+  });
+  initial.planning = {
+    kind: 'executing',
+    document: {
+      planId: 'legacy-plan',
+      version: 1,
+      title: 'Legacy Plan',
+      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+      structuralDigest: 'legacy-digest',
+      createdAtTurnId: initial.turn.turnId,
+      updatedAtTurnId: initial.turn.turnId,
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: initial.turn.turnId,
+  };
+  if (barrier === 'awaiting_input') {
+    initial.tools.calls['input-tool'] = {
+      toolCallId: 'input-tool',
+      modelMessageId: 'input-model',
+      name: 'ask_user',
+      args: {},
+      status: 'awaiting_user_input',
+      createdAtTurnId: initial.turn.turnId,
+    };
+    initial.interactions = {
+      kind: 'awaiting_user_input',
+      interactionId: 'input-interaction',
+      toolCallId: 'input-tool',
+      request: { question: 'Continue?', options: [], allow_free_text: true },
+    };
+  } else if (barrier === 'unknown_invocation') {
+    initial.capabilities.invocations.unknown = {
+      invocationId: 'unknown',
+      toolCallId: 'external-tool',
+      capabilityId: 'mcp:fixture/write',
+      capabilityRevision: 'revision',
+      argumentsDigest: 'args',
+      authorizationDigest: 'authorization',
+      effectiveEffectsDigest: 'effects',
+      status: 'unknown',
+      recordedAt: '2026-08-10T00:00:00.000Z',
+    };
+    initial.tools.calls['prepared-read'] = {
+      toolCallId: 'prepared-read',
+      modelMessageId: 'prepared-model',
+      name: 'read_plan',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: initial.turn.turnId,
+    };
+    initial.tools.queue.push('prepared-read');
+  } else {
+    initial.transcript.messages.push({
+      kind: 'assistant',
+      messageId: 'failed-recovery',
+      turnId: initial.turn.turnId,
+      ordinal: 0,
+      createdAt: '2026-08-10T00:00:00.000Z',
+      content: 'Done without a V2 save.',
+      toolCalls: [],
+      toolSurface: 'legacy_plan_recovery',
+    });
+    initial.transcript.final = 'Done without a V2 save.';
+  }
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  let dispatched = false;
+  const eventTypes: string[] = [];
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async () => {
+      dispatched = true;
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'input-interaction' }) },
+    2,
+    async () =>
+      barrier === 'unknown_invocation'
+        ? { type: 'run_tools', toolCallIds: ['prepared-read'] }
+        : { type: 'call_model', toolSurface: 'legacy_plan_recovery' },
+  )) {
+    eventTypes.push(event.type);
+  }
+
+  expect(dispatched).toBe(false);
+  expect(eventTypes).toEqual(['turn.aborted', 'run.error']);
+  kernel.close();
+});
+
+test('a legacy V1 snapshot reaches restricted model recovery and saves a V2 replan', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'legacy-recovery-model',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  initial.planning = {
+    kind: 'executing',
+    document: {
+      planId: 'legacy-plan',
+      version: 1,
+      title: 'Legacy Plan',
+      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+      structuralDigest: 'legacy-digest',
+      createdAtTurnId: initial.turn.turnId,
+      updatedAtTurnId: initial.turn.turnId,
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: initial.turn.turnId,
+  };
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  const seenEffects: string[] = [];
+  const artifactStore = {
+    write(taskId: string, plan: import('../../src/protocol/events').PlanDocument) {
+      return {
+        artifactId: `${plan.planId}:v${plan.version}`,
+        taskId,
+        planId: plan.planId,
+        version: plan.version,
+        fileName: `v${plan.version}.md`,
+        relativePath: `plans/${taskId}/${plan.planId}/v${plan.version}.md`,
+        displayPath: `/plans/${taskId}/${plan.planId}/v${plan.version}.md`,
+        structuralDigest: plan.structuralDigest,
+        byteLength: 100,
+      };
+    },
+  };
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect, state) => {
+      seenEffects.push(effect.type);
+      if (effect.type === 'call_model') {
+        expect((effect as typeof effect & { toolSurface?: string }).toolSurface).toBe(
+          'legacy_plan_recovery',
+        );
+        const args = {
+          action: 'save' as const,
+          plan_id: 'legacy-plan',
+          version: 1,
+          structural_digest: 'legacy-digest',
+          title: 'Recovered Plan V2',
+          body_markdown: 'Replace the legacy execution with a validated V2 recovery plan.',
+          steps: [{ id: 'recover-plan', title: 'Continue from the recovered V2 plan' }],
+          replan_reason: 'legacy_schema_upgrade',
+        };
+        return [
+          {
+            type: 'model.responded',
+            messageId: 'legacy-recovery-response',
+            toolCalls: [{ id: 'legacy-replan', name: 'write_plan', args }],
+          },
+          {
+            type: 'tool.queued',
+            toolCallId: 'legacy-replan',
+            name: 'write_plan',
+            args,
+            modelMessageId: 'legacy-recovery-response',
+            ordinal: 0,
+            effectClass: 'plan_only',
+            sideEffect: false,
+            createdAtTurnId: state.turn.turnId,
+          },
+        ];
+      }
+      if (effect.type === 'run_tools') {
+        return executeRuntimeTools({
+          state: state as RuntimeState,
+          toolCallIds: effect.toolCallIds,
+          planArtifactStore: artifactStore as never,
+        });
+      }
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    2,
+  )) {
+    if (event.type === 'plan.drafted') break;
+  }
+
+  expect(seenEffects).toEqual(['call_model', 'run_tools']);
+  expect(kernel.getState().planning).toMatchObject({
+    kind: 'replanning_draft',
+    document: {
+      planSchemaVersion: 2,
+      planId: 'legacy-plan',
+      version: 2,
+    },
+  });
+  kernel.close();
+});
+
+test('legacy recovery final text gets one correction then aborts through CompletionGuard V1', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'legacy-recovery-final-ceiling',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  initial.planning = {
+    kind: 'executing',
+    document: {
+      planId: 'legacy-plan',
+      version: 1,
+      title: 'Legacy Plan',
+      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+      structuralDigest: 'legacy-digest',
+      createdAtTurnId: initial.turn.turnId,
+      updatedAtTurnId: initial.turn.turnId,
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: initial.turn.turnId,
+  };
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  let modelCalls = 0;
+  const events: RuntimeEvent[] = [];
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect, _state, _emit, context) => {
+      expect(effect).toMatchObject({ type: 'call_model', toolSurface: 'legacy_plan_recovery' });
+      modelCalls += 1;
+      await context?.persistEvent({
+        type: 'model.responded',
+        messageId: `legacy-final-${modelCalls}`,
+        text: 'Done without saving a V2 plan.',
+      });
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    8,
+  )) {
+    events.push(event);
+  }
+
+  expect(modelCalls).toBe(2);
+  expect(events.map((event) => event.type)).toEqual([
+    'model.responded',
+    'completion.blocked',
+    'model.responded',
+    'completion.blocked',
+    'turn.aborted',
+    'run.error',
+  ]);
+  expect(events.some((event) => event.type === 'run.completed')).toBe(false);
+  expect(kernel.getState().completionGuard?.correctionAttempts).toBe(2);
+  expect(
+    kernel
+      .getState()
+      .transcript.messages.filter((message) => message.kind === 'assistant')
+      .every((message) => message.toolSurface === 'legacy_plan_recovery'),
+  ).toBe(true);
+  kernel.close();
+});
+
+test('legacy recovery forged tools get one correction then abort through CompletionGuard V1', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'legacy-recovery-tool-ceiling',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  initial.planning = {
+    kind: 'executing',
+    document: {
+      planId: 'legacy-plan',
+      version: 1,
+      title: 'Legacy Plan',
+      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+      structuralDigest: 'legacy-digest',
+      createdAtTurnId: initial.turn.turnId,
+      updatedAtTurnId: initial.turn.turnId,
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: initial.turn.turnId,
+  };
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  let modelCalls = 0;
+  const events: RuntimeEvent[] = [];
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect, state) => {
+      expect(effect).toMatchObject({ type: 'call_model', toolSurface: 'legacy_plan_recovery' });
+      modelCalls += 1;
+      const toolCallId = `forged-shell-${modelCalls}`;
+      const messageId = `legacy-forged-${modelCalls}`;
+      return [
+        {
+          type: 'model.responded',
+          messageId,
+          toolCalls: [{ id: toolCallId, name: 'shell_execute', args: { command: 'pwd' } }],
+        },
+        {
+          type: 'tool.queued',
+          toolCallId,
+          name: 'shell_execute',
+          args: { command: 'pwd' },
+          modelMessageId: messageId,
+          ordinal: 0,
+          effectClass: 'read_only',
+          sideEffect: false,
+          createdAtTurnId: state.turn.turnId,
+        },
+        {
+          type: 'tool.rejected',
+          toolCallId,
+          reason: 'legacy_plan_replan_required',
+          failure: classifyFailure('mandatory_policy_unavailable', 'legacy_plan_replan_required'),
+        },
+      ];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    8,
+  )) {
+    events.push(event);
+  }
+
+  expect(modelCalls).toBe(2);
+  expect(events.filter((event) => event.type === 'tool.rejected')).toHaveLength(2);
+  expect(events.filter((event) => event.type === 'completion.blocked')).toHaveLength(2);
+  expect(events.slice(-2).map((event) => event.type)).toEqual(['turn.aborted', 'run.error']);
+  expect(events.some((event) => event.type === 'run.completed')).toBe(false);
+  expect(
+    kernel
+      .getState()
+      .transcript.messages.filter((message) => message.kind === 'assistant')
+      .every((message) => message.toolSurface === 'legacy_plan_recovery'),
+  ).toBe(true);
+  kernel.close();
+});
+
+test.each([
+  'submit_failed',
+  'write_rejected',
+  'invalid_args',
+] as const)('legacy recovery consumes one correction for terminal write_plan outcome: %s', async (outcome) => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: `legacy-recovery-${outcome}`,
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  initial.planning = {
+    kind: 'executing',
+    document: {
+      planId: 'legacy-plan',
+      version: 1,
+      title: 'Legacy Plan',
+      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+      structuralDigest: 'legacy-digest',
+      createdAtTurnId: initial.turn.turnId,
+      updatedAtTurnId: initial.turn.turnId,
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: initial.turn.turnId,
+  };
+  const kernel = new AgentKernel({
+    store,
+    initialState: initial,
+    interactionMode: 'accept_edits',
+  });
+  let modelCalls = 0;
+  const events: RuntimeEvent[] = [];
+
+  for await (const event of runRuntimeLoop(
+    kernel,
+    async (effect, state) => {
+      if (effect.type === 'call_model') {
+        modelCalls += 1;
+        const toolCallId = `${outcome}-${modelCalls}`;
+        const messageId = `message-${toolCallId}`;
+        const args =
+          outcome === 'invalid_args'
+            ? { _parse_error: 'invalid write_plan JSON' }
+            : {
+                action: 'submit',
+                plan_id: 'legacy-plan',
+                version: 1,
+                structural_digest: 'legacy-digest',
+              };
+        const responded: RuntimeEvent = {
+          type: 'model.responded',
+          messageId,
+          toolCalls: [{ id: toolCallId, name: 'write_plan', args }],
+        };
+        if (outcome === 'write_rejected') {
+          return [
+            responded,
+            {
+              type: 'tool.queued',
+              toolCallId,
+              name: 'write_plan',
+              args,
+              modelMessageId: messageId,
+              ordinal: 0,
+            },
+            {
+              type: 'tool.rejected',
+              toolCallId,
+              reason: 'legacy submit is not a V2 replan save',
+              failure: classifyFailure(
+                'mandatory_policy_unavailable',
+                'legacy submit is not a V2 replan save',
+              ),
+            },
+          ];
+        }
+        if (outcome === 'invalid_args') {
+          return [
+            responded,
+            ...eventsForInvalidModelToolCalls(
+              [{ id: toolCallId, name: 'write_plan', args }],
+              messageId,
+              0,
+              'legacy_plan_recovery',
+            ),
+          ];
+        }
+        return [
+          responded,
+          {
+            type: 'tool.queued',
+            toolCallId,
+            name: 'write_plan',
+            args,
+            modelMessageId: messageId,
+            ordinal: 0,
+            effectClass: 'plan_only',
+            sideEffect: false,
+            createdAtTurnId: state.turn.turnId,
+          },
+        ];
+      }
+      if (effect.type === 'run_tools') {
+        return effect.toolCallIds.map((toolCallId) => ({
+          type: 'tool.failed' as const,
+          toolCallId,
+          failure: classifyFailure(
+            'mandatory_policy_unavailable',
+            'legacy submit is not a V2 replan save',
+          ),
+        }));
+      }
+      return [];
+    },
+    { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    8,
+  )) {
+    events.push(event);
+  }
+
+  expect(modelCalls).toBe(2);
+  expect(events.filter((event) => event.type === 'completion.blocked')).toHaveLength(2);
+  expect(events.slice(-2).map((event) => event.type)).toEqual(['turn.aborted', 'run.error']);
+  expect(events.some((event) => event.type === 'run.completed')).toBe(false);
+  kernel.close();
+});
+
+test('legacy plan model recovery discloses only plan read/save and rejects an undeclared tool', async () => {
+  const state = createInitialRuntimeState({
+    threadId: 'legacy-recovery-surface',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  state.planning = {
+    kind: 'executing',
+    document: {
+      planId: 'legacy-plan',
+      version: 1,
+      title: 'Legacy Plan',
+      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+      structuralDigest: 'legacy-digest',
+      createdAtTurnId: state.turn.turnId,
+      updatedAtTurnId: state.turn.turnId,
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: state.turn.turnId,
+  };
+  state.tools.calls['stale-write'] = {
+    toolCallId: 'stale-write',
+    modelMessageId: 'legacy-response',
+    name: 'write_file',
+    args: { path: 'forbidden', content: 'forbidden' },
+    status: 'queued',
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.tools.queue.push('stale-write');
+  const config = {
+    providerName: 'fixture',
+    providerType: 'openai-compatible' as const,
+    apiKey: 'unused',
+    baseURL: 'https://example.invalid',
+    modelName: 'fixture-model',
+    sandbox: { enabled: false },
+  };
+  const model = createMockModel([
+    {
+      message: aiMessage({
+        content: '',
+        tool_calls: [
+          { id: 'bad-shell', name: 'shell_execute', args: { command: 'touch forbidden' } },
+        ],
+      }),
+    },
+  ]);
+  const environment = resolveContextProjectionEnvironment({
+    state,
+    config,
+    model,
+    toolSurface: 'legacy_plan_recovery',
+  });
+
+  expect(environment.serializedTools.map((tool) => tool.name).sort()).toEqual([
+    'read_plan',
+    'write_plan',
+  ]);
+  expect(environment.promptContractVersion).toBe('legacy');
+  const projection = buildContextProjection({
+    role: 'agent',
+    state,
+    serializedTools: environment.serializedTools,
+    workflowSkills: environment.workflowSkills,
+    promptContractVersion: environment.promptContractVersion,
+    sandboxBackend: environment.sandboxBackend,
+    toolSurface: environment.toolSurface,
+  });
+  expect(JSON.stringify(projection.dynamicRuntimeMessages)).toContain(
+    'structural_digest: legacy-digest',
+  );
+  expect(JSON.stringify(projection.dynamicRuntimeMessages)).toContain(
+    'Legacy Plan recovery policy',
+  );
+
+  const events = await invokeRuntimeModel({
+    state,
+    config,
+    model,
+    toolSurface: 'legacy_plan_recovery',
+  });
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: 'model.responded',
+      toolSurface: 'legacy_plan_recovery',
+    }),
+  );
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: 'tool.rejected',
+      toolCallId: 'stale-write',
+      reason: 'legacy_plan_replan_required',
+    }),
+  );
+  expect(events).toContainEqual(
+    expect.objectContaining({ type: 'tool.queued', toolCallId: 'bad-shell' }),
+  );
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: 'tool.rejected',
+      toolCallId: 'bad-shell',
+      reason: 'legacy_plan_replan_required',
+    }),
+  );
+});
+
+test('legacy queued non-plan tools are rejected before a failing Provider dispatch', async () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'legacy-pre-provider-rejection',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  initial.planning = {
+    kind: 'executing',
+    document: {
+      planId: 'legacy-plan',
+      version: 1,
+      title: 'Legacy Plan',
+      bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+      steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+      structuralDigest: 'legacy-digest',
+      createdAtTurnId: initial.turn.turnId,
+      updatedAtTurnId: initial.turn.turnId,
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: initial.turn.turnId,
+  };
+  initial.tools.calls['stale-write'] = {
+    toolCallId: 'stale-write',
+    modelMessageId: 'legacy-model',
+    name: 'write_file',
+    args: { path: 'stale.txt', content: 'stale' },
+    status: 'queued',
+    createdAtTurnId: initial.turn.turnId,
+  };
+  initial.tools.queue.push('stale-write');
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+  const yielded: RuntimeEvent[] = [];
+
+  await expect(
+    (async () => {
+      for await (const event of runRuntimeLoop(
+        kernel,
+        async (effect, state) => {
+          if (effect.type === 'run_tools') {
+            return executeRuntimeTools({
+              state: state as RuntimeState,
+              toolCallIds: effect.toolCallIds,
+            });
+          }
+          throw new Error('Provider dispatch failed');
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+        3,
+      )) {
+        yielded.push(event);
+      }
+    })(),
+  ).rejects.toThrow('Provider dispatch failed');
+
+  expect(yielded).toContainEqual(
+    expect.objectContaining({
+      type: 'tool.rejected',
+      toolCallId: 'stale-write',
+      reason: 'legacy_plan_replan_required',
+    }),
+  );
+  expect(kernel.getState().tools.calls['stale-write']?.status).toBe('rejected');
+  kernel.close();
+});
+
+test('Kernel replay cannot complete a V2 plan while an external read awaits approval', () => {
+  const store = createRuntimeStore(':memory:');
+  const initial = createInitialRuntimeState({
+    threadId: 'kernel-plan-approval-block',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  const document: import('../../src/protocol/events').PlanDocument = {
+    planSchemaVersion: 2,
+    planId: 'approval-plan',
+    version: 2,
+    title: 'Approval gated plan',
+    bodyMarkdown: 'Finish the plan only after every pending approval has resolved.',
+    steps: [{ id: 'finish', title: 'Finish after approval', status: 'pending' }],
+    structuralDigest: '',
+    createdAtTurnId: initial.turn.turnId,
+    updatedAtTurnId: initial.turn.turnId,
+    completionEvidence: {
+      schemaVersion: 1,
+      verification: [],
+      execution: [],
+      skipped: [],
+      unresolved: [],
+    },
+  };
+  document.structuralDigest = computePlanStructuralDigest(document);
+  initial.planning = {
+    kind: 'executing',
+    document,
+    executionMode: 'auto',
+    approvedAtTurnId: initial.turn.turnId,
+  };
+  initial.tools.calls['external-read'] = {
+    toolCallId: 'external-read',
+    modelMessageId: 'external-read-model',
+    name: 'read_file',
+    args: { path: '/outside/workspace.txt' },
+    status: 'awaiting_approval',
+    sideEffect: false,
+    createdAtTurnId: initial.turn.turnId,
+  };
+  initial.tools.queue.push('external-read');
+  initial.interactions = {
+    kind: 'awaiting_tool_approval',
+    interactionId: 'external-read-approval',
+    toolCallId: 'external-read',
+    approval: {} as never,
+  };
+  const kernel = new AgentKernel({ store, initialState: initial, interactionMode: 'accept_edits' });
+
+  kernel.processEvent({
+    type: 'plan.completed',
+    toolCallId: 'forged-completion',
+    planId: document.planId,
+    version: document.version,
+    structuralDigest: document.structuralDigest,
+    plan: {
+      name: document.title,
+      description: document.bodyMarkdown,
+      status: 'completed',
+      steps: [{ id: 'finish', step: 'Finish after approval', status: 'completed' }],
+    },
+    completionEvidence: document.completionEvidence,
+  });
+
+  expect(kernel.getState().planning.kind).toBe('executing');
+  expect(kernel.getState().interactions.kind).toBe('awaiting_tool_approval');
+  kernel.close();
 });
 
 test('runRuntimeLoop resumes a matching input action and persists its facts', async () => {
@@ -1534,6 +2382,52 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   expect(emitted.filter((event) => event.type === 'tool.started')).toHaveLength(2);
   expect(emitted.filter((event) => event.type === 'tool.finished')).toHaveLength(0);
   expect(terminalEvents.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+});
+
+test('production executor all-settled waits for a sibling when another adapter throws', async () => {
+  const state = createInitialRuntimeState({
+    threadId: 'all-settled-production-executor',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  for (const [toolCallId, command] of [
+    ['throwing', 'pwd'],
+    ['slow', 'ls'],
+  ] as const) {
+    state.tools.queue.push(toolCallId);
+    state.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: 'model',
+      name: 'shell_execute',
+      args: { command },
+      status: 'queued',
+      effectClass: 'read_only',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+  }
+  let slowFinished = false;
+  const executor = createRuntimeEffectExecutor({
+    config: {
+      providerName: 'test',
+      providerType: 'openai-compatible',
+      apiKey: 'test',
+      baseURL: 'http://localhost:1',
+      modelName: 'test',
+      sandbox: { enabled: true },
+    },
+    model: {} as never,
+    shellExecutor: async ({ command }) => {
+      if (command === 'pwd') throw new Error('private adapter failure');
+      await Bun.sleep(20);
+      slowFinished = true;
+      return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
+    },
+  });
+  const terminal = await executor({ type: 'run_tools', toolCallIds: ['throwing', 'slow'] }, state);
+  expect(slowFinished).toBe(true);
+  expect(terminal.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+  expect(JSON.stringify(terminal)).not.toContain('private adapter failure');
 });
 
 test('production executor commits provider recovery after the originating tool failure', async () => {

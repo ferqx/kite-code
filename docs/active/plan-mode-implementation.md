@@ -4,7 +4,7 @@
 
 读取时机：修改 Plan Artifact、plan_review、planning/building 阶段、计划工具、计划恢复或 TUI 计划交互时。
 
-验证：`bun test tests/runtime/agent.integration.test.ts tests/runtime/plan-actions.test.ts tests/runtime/plan-artifacts.test.ts tests/runtime/plan-persistence.test.ts tests/runtime/plan-state.test.ts tests/runtime/plan-tools.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/agent.integration.test.ts tests/runtime/completion-guard.test.ts tests/runtime/plan-actions.test.ts tests/runtime/plan-artifacts.test.ts tests/runtime/plan-persistence.test.ts tests/runtime/plan-state.test.ts tests/runtime/plan-tools.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/subagent-delegation-contract.test.ts tests/subagent-runner.test.ts tests/session-manager.test.ts tests/tui-system/scenarios/plan-review.test.ts tests/tui-system/scenarios/plan-mode-policy.test.ts tests/tui-system/scenarios/session-lifecycle.test.ts`、`bun run typecheck`。
 
 相关：ADR-0002、`plan-artifact-lifecycle.md`、`authorization.md`、`tool-gated-autonomy.md`。
 
@@ -16,7 +16,9 @@ ToolSpec Registry 阶段 3 已把 Plan 工具收口到
 `src/core/runtime/plan-facade.ts`。Runtime Action 使用统一发射协议：成功结果携带按提交顺序排列的
 `RuntimeEvent[]`，拒绝结果不得携带领域事件。`read_plan`、`write_plan` 与 `update_plan`
 均只通过该门面读取状态、访问 Artifact 并产生领域事件；各 ToolSpec 只保留 Schema、契约、
-effects 与结果投影。模型 Schema、Artifact 格式、事件 discriminant 与回放形状不变。
+effects 与结果投影。新写入的 Plan 是 `planSchemaVersion=2`，Artifact 容器继续使用独立的
+`artifactFormatVersion=1`；缺少 Plan schema version 的历史事件、snapshot 与 Artifact 仍可读取/replay，
+但不能继续进度更新，必须先以原 identity 创建 V2 replan/save。
 
 ```text
 用户进入 planning
@@ -43,10 +45,67 @@ effects 与结果投影。模型 Schema、Artifact 格式、事件 discriminant 
 3. 审核后的内容不得通过 transcript 或 UI 状态静默替换。
 4. Plan Artifact 写入失败时不得宣布计划已保存或已批准。
 5. 恢复和 fork 必须从 Runtime Store/Artifact Store 重建计划事实。
+6. 模型 final 不能越过 Plan lifecycle：`planning_empty`、draft、awaiting review、executing 与 cancelled 都不能产生
+   `run.completed`。V1 保留 legacy replay，PlanDocument V2 使用带完整 identity 与 verification/effect evidence gate 的
+   CompletionGuard V2；完整规则见 `completion-guard.md`。
+
+V2 Plan 的标题与 step title 必须是单行，title 最多 120 字符，正文为 20–30000 字符，step 为
+1–12 个且 ID 唯一。首次保存后，后续 save、submit、executing replan 和 `update_plan` 统一校验
+`{ plan_id, version, structural_digest }`；进度更新不能在同一调用重复 step ID，也不能把 completed/skipped
+终态回退为另一状态。V2 review replay 还会把事件内容重新计算的 digest 与已保存 draft identity 比较，
+并始终从该 draft 投影审核内容与 Artifact 引用；事件不能在继承可信 identity/digest 的同时替换
+title、正文、steps 或已保存的 Artifact。V2 `plan.drafted` replay 不会截断正文/title 或为缺失 ID
+补造合法值；它与 Artifact parser、Plan facade 共用完整 V2 validator，严格检查正文长度、step 数量、
+唯一合法 ID、status、completion evidence、从原始事件正文重算的 digest，以及 Artifact 的
+task/plan/version/digest identity；任一缺失、畸形或不一致都忽略该事件。
+
+`PlanCompletionEvidenceV1` 由 Runtime 从已经归约的事实投影，而不是从模型参数接受：passed/waived
+verification、带成功 Runtime result 的 terminal side-effect tool call、带 reason code 的 skipped step，及
+unresolved failure/approval。`update_plan` 的 schema 严格拒绝模型提供的 command、path、stdout、
+`completion_evidence` 或 success self-report。`complete_plan=true` 还要求所有 required verification 已
+passed/waived、所有 effect 调用都有成功 receipt，且不存在 unresolved blocker。plan progress/completed event
+携带相同 identity 与 metadata-only evidence；reducer 会对事件前 Runtime state 重新投影并精确匹配，拒绝
+终态 step 回退，并在 completed replay 上重新执行相同的 required verification、effect receipt 与 unresolved
+blocker 门禁；所有 step 必须为 completed/skipped 且至少一个 step 为 completed，才写入 PlanDocument。
+V1 replay 仍可读取并归约历史进度/完成事件，但会确定性忽略事件中夹带的 completion evidence；历史
+`plan.approved` 事件继续 replay，新 `plan_review_decision(approve)` 则引导 revise 并保存 V2 Plan 后再审核。
+恢复到 V1 executing snapshot/event-tail 时，历史 reducer replay 保持不变，但实时 continuation fail closed：
+Scheduler 只直接运行 `read_plan` 与携带原 identity 的 `write_plan` V2 replan/save；没有这类 queued call 时，
+它产生显式 `legacy_plan_recovery` model effect，使普通恢复不会永久 blocked。该 effect 的模型工具面和 token
+preflight 都只包含 `read_plan`/`write_plan`，动态 Runtime block 明确要求 V2 save；历史 queued 或模型伪造的
+Shell/write/MCP/effect 会形成稳定 `legacy_plan_replan_required` rejection。Runner 在 effect preparation 后重复
+检查 surface，Tool Controller 也拒绝绕过调度器的直达调用。若受限 model preflight 已产生 pending context
+compaction，只允许执行 identity 匹配的内部 `compact_context` 后再重试 recovery，不开放任务 effect。该门禁
+必须排在 unknown external invocation 与所有 awaiting interaction barrier 之后。受限模型未产生合法 replan、
+返回错误 final 或伪造非白名单工具时继续复用 CompletionGuard V1 的单次 correction 上限；第二次失败以
+`turn.aborted + run.error` 收敛，绝不产生 `run.completed` 或跑到 effect limit。malformed 非白名单 Tool Call
+优先按 surface policy 写入 `legacy_plan_replan_required` rejection；只有 `read_plan`/`write_plan` 的参数错误
+才分类为 `model_invalid_tool_args`，但该 terminal failure 同样消费 correction。只有成功 `read_plan` 可继续
+受限 recovery；`write_plan` 必须成功产生 V2 draft 才算收敛。Runner 以实际 effect lease 为权威，为 executor
+返回、emit 或 persist 的最终 `model.responded` 统一绑定并校验 surface marker，不能信任 adapter 自行标注。
+若同时存在历史 subagent approval recovery，scheduler 的 canonical `subagent.recovery_unavailable` 仍先闭环，
+runner guard 不得把它改写为 generic recovery block。`prepareEffect` 返回后，Runner 必须从最新 state 重新调用
+Scheduler，并要求 prepared effect 与 canonical effect 语义等价；只带正确 recovery marker 或白名单工具名不够。
+因此 adapter 不能用 recovery call/run_tools 替换 awaiting interaction、unknown invocation、subagent recovery 或
+`completion.blocked` correction。`call_model` 只允许附加预算 estimate，不得改变 canonical surface。
+
+`plan.drafted` 的 `AgentPlan` event transport 在映射为 `PlanDocument` 前严格验证 exact keys：顶层只能是
+`name/description/status/steps`，step 只能是 `id?/step/status/note?`。未知 `command/path/stdout/extra`
+不能被静默 drop 后再通过 V2 validator，而是直接忽略整个 replay event。
+V2 `plan.progress_updated` 与 `plan.completed` 复用同一 transport validator，但要求每个 step 都有合法且唯一
+ID，并与当前 V2 文档的完整 ID、顺序、标题集合精确一致；missing/duplicate/unknown ID、未知 status 或任意
+额外键均 fail closed。映射并合并 status/note 后还必须再次通过完整 `isPlanDocumentV2` schema/digest/artifact
+validator；completion event 的顶层 plan status 必须是 `completed`。
 
 ## 工具与策略
 
 Planning 允许读取、搜索、研究、提问、计划维护和只读 Subagent；写文件、非只读 Shell、实现型 Subagent 和权限提升不得执行。所有决定由 Runtime Policy 与 Tool Controller 执行，不由 TUI 或工具描述决定，也不能通过用户审批提升权限绕过 phase 边界。
+
+Planning 的 `task` 还要求 active Task 当前 `userGoal` 明确请求委派；project
+instruction、shell context、工具结果或远端内容不能替用户授权。`plan` role 只用于
+architecture/design 规划，`code` 在 planning 拒绝且不可审批提升。plan child 终结后，
+Runtime 要求先 `write_plan` save，再以同一 Plan identity submit；不得以
+`update_plan` 或 child final 跳过 Artifact/review lifecycle。Subagent 调用统一串行执行，成功 plan child 才能进入 CompletionGuard 前的受控 save/submit continuation。
 
 非只读 Shell 在 planning 中仍按 fail-closed 终结该 Tool Call，但 Runtime 将这类结果分类为 `phase_deferred`，而不是通用 `policy_denied`。模型收到的成对 Tool Result 明确包含 `deferred=true`、`until_phase=building`、原始参数和下一步约束：当前阶段不得重试或请求审批，应把命令保留到方案的执行/验证部分，待方案批准进入 building 后重新调用。
 

@@ -17,6 +17,7 @@ export function generateBwrapArgs(
     network?: 'disabled' | 'allow_all';
     sandboxRuntimeDir?: string;
     filesystemScope?: Exclude<FilesystemScope, 'full_access'>;
+    gitMetadataDeny?: boolean;
   },
 ): string[] {
   const args: string[] = [];
@@ -37,6 +38,14 @@ export function generateBwrapArgs(
   // Workspace bind follows the selected native filesystem ceiling.
   const workspaceBind = options?.filesystemScope === 'read_only' ? '--ro-bind' : '--bind';
   args.push(workspaceBind, workspaceRoot, workspaceRoot);
+  if (options?.gitMetadataDeny) {
+    const gitMarker = resolve(workspaceRoot, '.git');
+    if (dirExists(gitMarker)) {
+      args.push('--tmpfs', gitMarker, '--remount-ro', gitMarker);
+    } else if (existsSync(gitMarker)) {
+      args.push('--ro-bind', '/dev/null', gitMarker);
+    }
+  }
 
   // 沙箱运行时目录：读写绑定（存放 TMPDIR、bun cache 等）
   const runtimeDir = options?.sandboxRuntimeDir;

@@ -4,11 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '../src/core/config';
 import { getFeatureFlags } from '../src/core/config/features';
+import { containsBrokeredGitInvocationV1, runApprovedTool } from '../src/core/harness/tool-runner';
 import { exposedMcpToolName } from '../src/core/mcp';
 import { isReadOnlyShellCommand } from '../src/core/policies/shell-classification';
 import { clearToolCache, createAgentTools } from '../src/core/tools/definitions';
 import { builtinToolRegistry } from '../src/core/tools/registry/builtins';
 import { askUserSpec } from '../src/core/tools/registry/builtins/ask-user';
+import { gitInspectInputSchema } from '../src/core/tools/registry/builtins/git';
 import { searchContentSpec } from '../src/core/tools/registry/builtins/search-content';
 import { searchFilesSpec } from '../src/core/tools/registry/builtins/search-files';
 import { writePlanSpec } from '../src/core/tools/registry/builtins/write-plan';
@@ -17,6 +19,7 @@ import {
   buildDescription,
   normalizeToolContract,
   TOOL_CONTRACTS,
+  WRITE_PLAN_CONTRACT,
 } from '../src/core/tools/tool-contracts';
 import type { CapabilityBinding, CapabilityDescriptor } from '../src/protocol/capabilities';
 
@@ -55,6 +58,135 @@ function toolNames(tools: Record<string, unknown>): string[] {
 
 // Code Agent 工具定义与只读约束单元测试 / Code agent tool definitions & read-only constraint unit tests
 describe('code agent tool definitions', () => {
+  test('git_inspect uses operation-discriminated strict schemas without irrelevant fields', () => {
+    expect(gitInspectInputSchema.safeParse({ operation: 'status', revision: 'HEAD' }).success).toBe(
+      false,
+    );
+    expect(
+      gitInspectInputSchema.safeParse({ operation: 'branch_list', paths: ['safe.txt'] }).success,
+    ).toBe(false);
+    expect(
+      gitInspectInputSchema.safeParse({ operation: 'diff', max_records: 5, paths: ['safe.txt'] })
+        .success,
+    ).toBe(false);
+    expect(
+      gitInspectInputSchema.safeParse({
+        operation: 'log',
+        paths: ['safe.txt'],
+        revision: 'HEAD',
+      }).success,
+    ).toBe(true);
+    expect(gitInspectInputSchema.safeParse({ operation: 'unknown' }).success).toBe(false);
+  });
+
+  test('git log revision grammar is identical at Provider and Registry boundaries', () => {
+    for (const revision of ['HEAD', 'abcdef0', 'refs/heads/main', 'refs/tags/v1']) {
+      expect(
+        gitInspectInputSchema.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
+          .success,
+      ).toBe(true);
+    }
+    for (const revision of ['--all', 'HEAD~1', 'main', 'refs/remotes/origin/main', 'HEAD;echo']) {
+      expect(
+        gitInspectInputSchema.safeParse({ operation: 'log', paths: ['safe.txt'], revision })
+          .success,
+      ).toBe(false);
+    }
+  });
+  test('brokered Git shell denial returns stable next capability without native dispatch', async () => {
+    let dispatches = 0;
+    const result = await runApprovedTool({
+      workspace: '/workspace',
+      request: {
+        source: 'builtin',
+        name: 'shell_execute',
+        args: { command: 'git status --short' },
+        reason: 'fixture',
+        protectedCommand: 'git status --short',
+      },
+      taskConfig: {
+        features: { brokeredGitV1: true },
+        executionCapabilitySurface: {
+          inProcessReadOnlyTools: null,
+          network: false,
+          process: true,
+          write: false,
+          workspaceWrite: false,
+          shell: true,
+          skillChild: false,
+          localStdioMcp: false,
+          gitInspect: true,
+          brokeredGitFeatureRevision: 'brokered-git-r1',
+        },
+      } as AgentConfig,
+      shellExecutor: async () => {
+        dispatches++;
+        return { ok: true, command: 'git status --short', exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+    expect(dispatches).toBe(0);
+    expect(result).toMatchObject({
+      ok: false,
+      status: 'rejected',
+      resultMeta: { nextCapability: 'git_inspect' },
+    });
+  });
+  test('brokered Git shell detection fails closed for absolute, nested shell and indirect child forms', () => {
+    for (const command of [
+      '/usr/bin/git status --short',
+      'sh -c "git diff -- safe.txt"',
+      "python -c \"import subprocess; subprocess.run(['git','status'])\"",
+      'env PATH=/usr/bin command git.exe status',
+      'C:\\Tools\\Git\\bin\\git.exe status',
+    ]) {
+      expect(containsBrokeredGitInvocationV1(command)).toBe(true);
+    }
+    expect(containsBrokeredGitInvocationV1('printf .git/config')).toBe(false);
+  });
+  test('brokered Git disclosure requires one matching feature revision and independent axes', () => {
+    const gitBroker = {
+      featureRevision: 'brokered-git-r1' as const,
+      inspect: async () => ({ ok: true, output: '' }),
+    };
+    const baseConfig = { features: { brokeredGitV1: true } } as AgentConfig;
+    expect(
+      toolNames(createAgentTools({ workspace: '/workspace', config: baseConfig, gitBroker })),
+    ).not.toContain('git_inspect');
+    const sealedConfig = {
+      ...baseConfig,
+      executionCapabilitySurface: {
+        inProcessReadOnlyTools: null,
+        network: false,
+        process: false,
+        write: false,
+        workspaceWrite: false,
+        shell: false,
+        skillChild: false,
+        localStdioMcp: false,
+        gitInspect: true,
+        brokeredGitFeatureRevision: 'brokered-git-r1' as const,
+      },
+    };
+    const inspectOnly = toolNames(
+      createAgentTools({ workspace: '/workspace', config: sealedConfig, gitBroker }),
+    );
+    expect(inspectOnly).toContain('git_inspect');
+    expect(
+      toolNames(
+        createAgentTools({
+          workspace: '/workspace',
+          config: {
+            ...sealedConfig,
+            executionCapabilitySurface: {
+              ...sealedConfig.executionCapabilitySurface,
+              brokeredGitFeatureRevision: null,
+            },
+          },
+          gitBroker,
+        }),
+      ),
+    ).not.toContain('git_inspect');
+  });
   test('normalizes remote MCP tool names into stable model-safe identifiers', () => {
     expect(exposedMcpToolName('docs', 'search_docs')).toBe('mcp__docs__search_docs');
     const unsafe = exposedMcpToolName(
@@ -178,7 +310,7 @@ describe('code agent tool definitions', () => {
     const askUserTool = tools.ask_user!;
 
     expect(askUserTool).toBeDefined();
-    expect(String(askUserTool.description)).toContain('Ask the user');
+    expect(String(askUserTool.description)).toContain('one to three focused user decisions');
   });
 
   // ── write_plan / update_plan tests ──
@@ -189,6 +321,13 @@ describe('code agent tool definitions', () => {
     expect(tools.update_plan).toBeDefined();
     expect(String(tools.write_plan!.description)).toContain('Save');
     expect(String(tools.update_plan!.description)).toContain('progress');
+  });
+
+  test('write_plan approval contract returns the complete top-level plan identity', () => {
+    const contract = normalizeToolContract(WRITE_PLAN_CONTRACT.sections);
+    expect(contract.returns.fields).toEqual(
+      expect.arrayContaining(['plan_id', 'version', 'structural_digest']),
+    );
   });
 
   test('write_plan is schema-only and Registry preserves parsed arguments', () => {
@@ -364,7 +503,7 @@ describe('code agent tool definitions', () => {
     expect(names).toContain('ask_user');
     expect(String(tools.write_plan?.description)).toContain('Save');
     expect(String(tools.update_plan?.description)).toContain('progress');
-    expect(String(tools.ask_user?.description)).toContain('uncertainty');
+    expect(String(tools.ask_user?.description)).toContain('material choice blocks progress');
   });
 
   // 验证 search 工具可以不依赖 shell 独立执行 / Search tools execute without shell access
@@ -506,6 +645,53 @@ describe('code agent tool definitions', () => {
     ).toBeUndefined();
   });
 
+  test('legacy planning uses the same explore/plan-only task role ceiling', () => {
+    const context = {
+      workspace: '/tmp',
+      phase: 'planning' as const,
+      hasTaskAdapter: true,
+      featureFlags: { ...getFeatureFlags(), promptContractV2: false },
+    };
+    expect(
+      builtinToolRegistry.parseToolCall(
+        { name: 'task', args: { subagent_type: 'review', task: 'Review current architecture.' } },
+        context,
+      ).ok,
+    ).toBe(false);
+    expect(
+      builtinToolRegistry.parseToolCall(
+        { name: 'task', args: { subagent_type: 'explore', task: 'Inspect current architecture.' } },
+        context,
+      ).ok,
+    ).toBe(true);
+  });
+
+  test('Prompt V2 planning task surface preserves explicit delegation and role guidance', async () => {
+    const config = {
+      features: { ...getFeatureFlags(), promptContractV2: true },
+    } as AgentConfig;
+    const tools = createAgentTools({
+      workspace: '/tmp',
+      phase: 'planning',
+      config,
+      subagentEventSink: () => {},
+    });
+    const task = tools.task!;
+    expect(String(task.description)).toContain(
+      'only when the current user explicitly requests delegation',
+    );
+    expect(String(task.description)).toContain(
+      'plan for read-only architecture or design planning',
+    );
+
+    const schema = (task as unknown as { inputSchema: ToolSchemaLike }).inputSchema;
+    const jsonSchema = (await schema.jsonSchema) as {
+      properties?: { subagent_type?: { description?: string; enum?: string[] } };
+    };
+    expect(jsonSchema.properties?.subagent_type?.enum).toEqual(['explore', 'plan']);
+    expect(jsonSchema.properties?.subagent_type?.description).toContain('plan for architecture');
+  });
+
   test('invalidates tool cache when same-sized command grants change', () => {
     const grantA = {
       'grant-a': {
@@ -603,7 +789,8 @@ describe('code agent tool definitions', () => {
   });
 });
 
-// 工具契约验证测试：确保所有工具描述作为一等 UX 契约，包含何时使用、常见误区、输出格式和失败处理 / Tool contract verification: ensure all tool descriptions are first-class UX contracts with whenToUse, commonMistakes, outputFormat, and failureHandling sections
+// Tool contract verification: every model-visible builtin owns structured selection,
+// parameter/result and typed-recovery facts.
 describe('tool contracts (ACI)', () => {
   const registeredTools = [
     'read_file',
@@ -630,23 +817,28 @@ describe('tool contracts (ACI)', () => {
     }
   });
 
-  // 每个契约必须有非空的四个基本部分 / Every contract must have four non-empty sections
-  test('every contract has four non-empty sections', () => {
+  test('every contract has complete structured facts', () => {
     for (const name of registeredTools) {
-      const contract = TOOL_CONTRACTS.get(name)!;
-      expect(contract.sections.whenToUse.length).toBeGreaterThan(20);
-      expect(contract.sections.commonMistakes.length).toBeGreaterThan(20);
-      expect(contract.sections.outputFormat.length).toBeGreaterThan(10);
-      expect(contract.sections.failureHandling.length).toBeGreaterThan(20);
+      const contract = normalizeToolContract(TOOL_CONTRACTS.get(name)!.sections);
+      expect(contract.summary.length).toBeGreaterThan(10);
+      expect(contract.useWhen.length).toBeGreaterThan(20);
+      expect(contract.constraints.length).toBeGreaterThan(20);
+      expect(contract.returns.description.length).toBeGreaterThan(10);
+      expect(contract.recovery.length).toBeGreaterThan(20);
     }
   });
 
   // 每个契约的描述必须与 sections 内容一致 / Each contract's description must be consistent with its sections
-  test('contract description embeds all section content', () => {
+  test('contract description embeds every independently owned fact', () => {
     for (const name of registeredTools) {
       const contract = TOOL_CONTRACTS.get(name)!;
-      expect(contract.description).toContain(contract.sections.whenToUse.slice(0, 30));
-      expect(contract.description).toContain('Common mistakes');
+      const normalized = normalizeToolContract(contract.sections);
+      expect(contract.description).toContain(normalized.summary);
+      expect(contract.description).toContain(normalized.useWhen);
+      expect(contract.description).toContain(normalized.constraints);
+      expect(contract.description).toContain(normalized.returns.description);
+      expect(contract.description).toContain(normalized.recovery);
+      expect(contract.description).toContain('Constraints:');
       expect(contract.description).toContain('Output:');
       expect(contract.description).toContain('Failure:');
     }
@@ -687,40 +879,35 @@ describe('tool contracts (ACI)', () => {
 
   // shell_execute 的特殊契约要求 / shell_execute-specific contract requirements
   test('shell_execute contract covers command-shaped approval rejection', () => {
-    const contract = TOOL_CONTRACTS.get('shell_execute')!;
-    expect(contract.sections.whenToUse).not.toMatch(/intent=|grant_request|prefix_rule/);
-    expect(contract.sections.whenToUse).toMatch(/During planning.*proven read-only/);
-    expect(contract.sections.commonMistakes).toMatch(/denied|reject/);
-    expect(contract.sections.outputFormat).toMatch(/deferred: true.*until_phase: building/);
-    expect(contract.sections.failureHandling).toMatch(
+    const contract = normalizeToolContract(TOOL_CONTRACTS.get('shell_execute')!.sections);
+    expect(contract.useWhen).not.toMatch(/intent=|grant_request|prefix_rule/);
+    expect(contract.useWhen).toMatch(/during planning only for a proven read-only/i);
+    expect(contract.constraints).toMatch(/intent, grant_request, prefix_rule/);
+    expect(contract.returns.description).toMatch(/deferred: true.*until_phase: building/);
+    expect(contract.recovery).toMatch(
       /deferred until building.*do not retry.*do not ask for shell approval/,
     );
-    expect(contract.sections.failureHandling).toMatch(/rejected by policy|approval flow|denied/);
+    expect(contract.recovery).toMatch(/Policy\/approval denial/);
   });
 
   test('file mutation contracts keep planning changes in the Plan', () => {
     for (const name of ['edit_file', 'write_file']) {
-      const contract = TOOL_CONTRACTS.get(name)!;
-      expect(contract.sections.whenToUse).toMatch(/only in the building phase/);
-      expect(contract.sections.whenToUse).toMatch(
-        /During planning.*describe.*in the plan.*do not call.*or request approval/,
-      );
-      expect(contract.sections.failureHandling).toMatch(
-        /planning phase.*do not retry or request approval.*plan.*after plan approval/,
-      );
+      const contract = normalizeToolContract(TOOL_CONTRACTS.get(name)!.sections);
+      expect(contract.useWhen).toMatch(/building/i);
+      expect(contract.recovery).toMatch(/planning|deferred/i);
+      expect(contract.recovery).toMatch(/plan|approval/i);
+      expect(contract.recovery).toMatch(/do not retry|apply it only after approval/i);
     }
   });
 
   test('ask_user contract exposes only the canonical questions shape', () => {
-    const contract = TOOL_CONTRACTS.get('ask_user')!;
-    expect(contract.sections.whenToUse).toMatch(/single question is an array with one item/);
-    expect(contract.sections.commonMistakes).toMatch(/removed top-level `question`/);
-    expect(contract.sections.commonMistakes).toMatch(/client always adds free-text input/);
-    expect(contract.sections.outputFormat).toContain('`questions` contains 1-3 items');
-    expect(contract.sections.outputFormat).toContain('2-3 `{label, description, recommended}`');
-    expect(contract.sections.failureHandling).toMatch(
-      /canonical `questions` array.*never pass stringified JSON/,
-    );
+    const contract = normalizeToolContract(TOOL_CONTRACTS.get('ask_user')!.sections);
+    expect(contract.useWhen).toMatch(/single question is an array with one item/);
+    expect(contract.constraints).toMatch(/Removed top-level question\/options/);
+    expect(contract.constraints).toMatch(/client always adds free-text input/);
+    expect(contract.returns.description).toContain('questions contain 1-3 items');
+    expect(contract.returns.description).toContain('2-3 {label, description, recommended}');
+    expect(contract.recovery).toMatch(/canonical questions array.*never pass stringified JSON/);
   });
 
   // MCP resource tools form one discover/read client-side chain.

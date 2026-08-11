@@ -295,6 +295,7 @@ describe('protected-path Registry and Harness integration', () => {
       { name: 'read_plan', boundary: 'typed immutable Plan Artifact store' },
       { name: 'read_skill_reference', boundary: 'compiled Skill reference allowlist' },
       { name: 'shell_execute', boundary: 'native sandbox profile' },
+      { name: 'git_inspect', boundary: 'typed Git broker protected-path evaluator' },
       { name: 'task', boundary: 'delegated child Harness' },
       { name: 'activate_skill', boundary: 'compiled inline/fork adapter' },
     ] as const;

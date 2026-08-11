@@ -32,12 +32,26 @@ Metadata 记录由 `metadata-mapper.ts` 直接从结构化 RuntimeEvent 构造�
 
 - event type、status、duration；
 - 低基数 tool/capability kind 与 `FailureKind`；
+- `ToolOutcomeV1` 的固定 status/detail、dispatch/effect certainty、recovery disposition 与
+  Runtime-boundary queue/execution/approval/total timing，以及 unknown-field 的 has/count/tool class；
 - token、cache、retry 计数；
 - approval/verification 类型与结果；
 - compaction before/after/failure kind；
 - release version/profile/cohort。
 
 动态 MCP 工具名统一收敛为 `mcp_tool`，未知工具名收敛为 `other`，不得形成高基数或内容旁路。
+Tool outcome 的 `failureInstanceId`、`recoveryOf`、canonical-private HMAC key/fingerprint、schema
+revision、未知字段名/值和 classifier/provider 正文永不进入 Session Logger；unknown-field 只保留
+布尔值、0–255 计数与固定 tool class。
+`totalActiveMs` 由 Runtime queue boundary 到 terminal 计算；人工审批等待使用持久化
+`approval.requested.createdAt`，auto-review 成功与拒绝都使用 review duration 累加 approval wait，不是
+UI wall clock；成功 terminal 同样保留 approval wait 与 `totalActiveMs`。reducer、模型恢复 guidance、
+Session metadata、`tool_duration_ms` metric 与 TUI 都从同一 outcome status/recovery/timing 投影；current
+event 缺少合法 envelope 时直接拒绝。历史 replay 必须先经过唯一 legacy decoder，缺失 envelope 时只
+生成 `legacy_unclassified/unknown/never`，不能用旧字段覆盖 canonical outcome；TUI 也不得把所有
+approval/auto-review/cancel terminal 硬编码为 `cancelled`。
+`approval.rejected` 与拒绝型 `auto_review.completed` 本身就是 canonical tool terminal observation；
+metrics 各自恰好生成一组 `tool_total + tool_duration_ms`，不得再合成第二个 tool terminal 计数。
 Provider policy 状态只记录固定 capability kind、结构化 reason 与批准 revision/digest，不记录
 route、endpoint 或 payload。revision/cohort 使用最多 64 字符的小写标识格式，digest 只接受
 `sha256:` 加 64 位小写十六进制，release version 最多 32 字符且只接受版本字符；不合法值直接

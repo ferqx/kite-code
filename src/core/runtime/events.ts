@@ -18,6 +18,7 @@ import type {
   AgentPlan,
   AuthorizationMode,
   PlanArtifactRef,
+  PlanIdentity,
   ShellApprovalGrant,
   SubAgentCacheMetricsPayload,
   SubAgentDonePayload,
@@ -57,6 +58,7 @@ import type {
 } from './resource-budget';
 import type { SkillActivation } from './state';
 import type { RunTerminalOutcomeV1 } from './terminal-outcome';
+import type { ToolOutcomeV1, UnknownToolFieldsObservationV1 } from './tool-outcome';
 
 /** Runtime event metadata used for idempotency, tracing and stale-result checks. */
 export interface RuntimeEventEnvelope {
@@ -159,6 +161,13 @@ export interface ToolQueuedEvent {
   bindingId?: string;
   capabilityId?: string;
   capabilityRevision?: string;
+  /** Canonical private-store identity; never project to diagnostic/session telemetry. */
+  invocationFingerprint?: string;
+  /** Runtime-derived recovery lineage; model input is never trusted for this field. */
+  recoveryOf?: string;
+  recoveryMode?: import('./tool-recovery-journal').ToolRecoveryAttemptModeV1;
+  unknownFields?: UnknownToolFieldsObservationV1;
+  createdAt?: string;
 }
 
 /** Bindings are durable before a model can return a dynamic MCP call. */
@@ -329,6 +338,7 @@ export interface VerificationCompensationCompletedEvent {
 export interface ToolStartedEvent {
   type: 'tool.started';
   toolCallId: string;
+  createdAt?: string;
 }
 
 /**
@@ -385,15 +395,24 @@ export interface ToolFinishedEvent {
     toolTokenCount?: number;
     /** Structured ask_user result for UI consumers; stdout remains the model transcript. */
     userInput?: UserInputResult;
+    /** Structured process termination cause; stderr text is never classification authority. */
+    terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
     /** Provider-neutral structured facts; stdout remains model-facing content only. */
     resultMeta?: import('./state').ToolResultMeta;
   };
+  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
+  outcomeV1?: ToolOutcomeV1;
+  classifierAdviceV1?: import('./tool-outcome').ToolOutcomeClassifierAdviceV1;
+  classifierDiagnostic?: 'classifier_threw';
 }
 
 /** 工具调用执行失败 */
 export type ToolFailedEvent = {
   type: 'tool.failed';
   toolCallId: string;
+  createdAt?: string;
+  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
+  outcomeV1?: ToolOutcomeV1;
   /** Structured failure for new producers. `error` remains readable for v3 event-log replay. */
 } & (
   | { failure: ClassifiedFailure; error?: string }
@@ -406,6 +425,9 @@ export interface ToolRejectedEvent {
   toolCallId: string;
   reason: string;
   failure?: ClassifiedFailure;
+  createdAt?: string;
+  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
+  outcomeV1?: ToolOutcomeV1;
 }
 
 /** Tool call cancelled because an earlier sibling opened a user interaction. */
@@ -413,6 +435,19 @@ export interface ToolCancelledEvent {
   type: 'tool.cancelled';
   toolCallId: string;
   reason: string;
+  createdAt?: string;
+  /** Canonical Runtime-owned terminal projection; optional only for persisted historical events. */
+  outcomeV1?: ToolOutcomeV1;
+}
+
+/** Durable non-terminal record written before one Runtime-owned safe automatic replay. */
+export interface ToolRetryRecordedEvent {
+  type: 'tool.retry_recorded';
+  toolCallId: string;
+  failure: ClassifiedFailure;
+  outcomeV1: import('./tool-outcome').ToolOutcomeV1;
+  recoveryOf: string;
+  retryAttempt: 1;
 }
 
 // ── 用户输入交互事件 / User input interaction events ──
@@ -555,6 +590,7 @@ export interface ApprovalRequestedEvent {
   interactionId: string;
   toolCallId: string;
   approval: ToolApprovalPayload;
+  createdAt?: string;
 }
 
 /** 用户批准工具调用 */
@@ -564,6 +600,7 @@ export interface ApprovalGrantedEvent {
   /** Required for current events; absent legacy records are ignored by the reducer. */
   toolCallId?: string;
   grant: ShellApprovalGrant;
+  createdAt?: string;
 }
 
 /** 用户拒绝工具调用 */
@@ -574,6 +611,9 @@ export interface ApprovalRejectedEvent {
   toolCallId?: string;
   reason: string;
   failure?: ClassifiedFailure;
+  createdAt?: string;
+  /** Canonical rejection projection; optional only for persisted historical events. */
+  outcomeV1?: ToolOutcomeV1;
 }
 
 // ── MCP Provider recovery interaction events ──
@@ -700,6 +740,7 @@ export interface AutoReviewRequestedEvent {
   reason: string;
   /** 工具审批负载 / Tool approval payload */
   approval: import('@/protocol/events').ToolApprovalPayload;
+  createdAt?: string;
 }
 
 export type AutoReviewFailureType = 'technical' | 'invalid_response';
@@ -731,6 +772,9 @@ export interface AutoReviewCompletedEvent {
         reviewerModelName: string;
         durationMs: number;
       };
+  /** Present on a current rejection terminal; absent on non-terminals and historical records. */
+  outcomeV1?: ToolOutcomeV1;
+  createdAt?: string;
 }
 
 // ── Turn 生命周期事件 / Turn lifecycle events ──
@@ -763,6 +807,8 @@ export interface UserMessageAppendedEvent {
   type: 'user.message_appended';
   messageId: string;
   content: string;
+  /** Current user-authored goal before App-owned/project context is appended. */
+  userGoal?: string;
   createdAt?: string;
 }
 
@@ -807,6 +853,8 @@ export interface ModelRespondedEvent {
   type: 'model.responded';
   messageId: string;
   createdAt?: string;
+  /** Restricted tool disclosure used for this response, when policy narrowed the model surface. */
+  toolSurface?: 'legacy_plan_recovery';
   /** 本次模型调用耗时（ms）——思考+响应生成时长，不含工具执行。
    *  TUI 用它作为 "Thought for Xs" 的计时（对齐 Claude Code：思考指示器
    *  只计模型调用时长）。可选：旧事件日志无此字段，TUI 回退创建→settle 墙钟。
@@ -815,7 +863,13 @@ export interface ModelRespondedEvent {
    *  elapsed (Claude Code parity). Optional: absent in old event logs. */
   durationMs?: number;
   /** 模型生成的工具调用（如有）/ Tool calls generated by the model (if any) */
-  toolCalls?: Array<{ id: string; name: string; args: unknown }>;
+  toolCalls?: Array<{
+    id: string;
+    name: string;
+    args: unknown;
+    /** Canonical-private identity for pre-parse failures; never project to Provider context. */
+    canonicalInvocationFingerprint?: string;
+  }>;
   /** 模型生成的推理/思考内容（如有）/ Reasoning content generated by the model (if any) */
   reasoningText?: string;
   /** 模型生成的文本（如有）/ Text generated by the model (if any) */
@@ -864,7 +918,24 @@ export interface RunCompletedEvent {
   type: 'run.completed';
   turnId: string;
   output: string;
+  /** New emissions bind the accepted CompletionGuard decision version. */
+  completionGuardVersion?: import('./completion-guard').CompletionGuardVersion;
+  /** Required for new V2 emissions; absent on legacy V1 completion events. */
+  planIdentity?: PlanIdentity;
   outcome?: RunTerminalOutcomeV1;
+}
+
+/** A final-text candidate was rejected before it could become durable completion truth. */
+export interface CompletionBlockedEvent {
+  type: 'completion.blocked';
+  turnId: string;
+  guardVersion: import('./completion-guard').CompletionGuardVersion;
+  code: import('./completion-guard').CompletionBlockerCode;
+  nextAction: import('./completion-guard').CompletionNextAction;
+  planning: import('@/protocol/events').PlanningState['kind'];
+  correctionAttempt: number;
+  /** Full strict identity for CompletionGuard V2; absent for V1 replay. */
+  planIdentity?: PlanIdentity;
 }
 
 /** A recoverable or terminal runtime failure exposed on the public protocol. */
@@ -915,6 +986,8 @@ export interface PlanDraftedEvent {
   planId: string;
   /** Version number as of this write_plan call / 本次 write_plan 调用后的版本号 */
   version: number;
+  /** New writes emit V2; absent is retained for legacy event replay. */
+  planSchemaVersion?: 2;
   supersedesPlanVersion?: number;
   replanReason?: string;
   artifact?: PlanArtifactRef;
@@ -925,6 +998,10 @@ export interface PlanProgressUpdatedEvent {
   type: 'plan.progress_updated';
   toolCallId: string;
   plan: AgentPlan;
+  planId?: string;
+  version?: number;
+  structuralDigest?: string;
+  completionEvidence?: import('@/protocol/events').PlanCompletionEvidenceV1;
 }
 
 /** Plan 执行完成 / Plan execution completed */
@@ -932,6 +1009,10 @@ export interface PlanCompletedEvent {
   type: 'plan.completed';
   toolCallId: string;
   plan: AgentPlan;
+  planId?: string;
+  version?: number;
+  structuralDigest?: string;
+  completionEvidence?: import('@/protocol/events').PlanCompletionEvidenceV1;
 }
 
 // ── Approval 补充事件 / Additional approval events ──
@@ -1001,6 +1082,13 @@ export interface SubagentSuspendedEvent {
   snapshot: SuspendedSubagentSnapshot;
 }
 
+/** Private canonical child journal merge; omitted by all diagnostic projections. */
+export interface SubagentRecoveryJournalMergedEvent {
+  type: 'subagent.recovery_journal_merged';
+  toolCallId: string;
+  journal: import('./tool-recovery-journal').ToolRecoveryJournalV1;
+}
+
 // ── 运行时事件联合类型 / Runtime event discriminated union ──
 
 /** 运行时事件 — 所有状态变更的统一类型表示 */
@@ -1051,6 +1139,7 @@ export type RuntimeEvent =
   | ToolFailedEvent
   | ToolRejectedEvent
   | ToolCancelledEvent
+  | ToolRetryRecordedEvent
   | UserInputRequestedEvent
   | UserInputAnsweredEvent
   | UserInputCancelledEvent
@@ -1097,6 +1186,7 @@ export type RuntimeEvent =
   | ModelCacheMetricsEvent
   | ModelContextMetricsEvent
   | RunCompletedEvent
+  | CompletionBlockedEvent
   | RunErrorEvent
   | RuntimeActionIgnoredEvent
   | RuntimeCancellationDiagnosticEvent
@@ -1112,4 +1202,5 @@ export type RuntimeEvent =
   | SubagentCompletedEvent
   | SubagentFailedEvent
   | SubagentCacheMetricsEvent
-  | SubagentSuspendedEvent;
+  | SubagentSuspendedEvent
+  | SubagentRecoveryJournalMergedEvent;

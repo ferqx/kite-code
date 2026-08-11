@@ -1,6 +1,6 @@
 # ADR-0070：seatbelt 沙箱放行 git 命令对 Workspace `.git` 的访问
 
-状态：accepted
+状态：superseded by ADR-0097
 日期：2026-08-07
 决策者：`@chenchao`
 关联：ADR-0054、ADR-0042、`docs/active/execution-boundary.md`

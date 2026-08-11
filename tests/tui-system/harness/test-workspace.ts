@@ -221,6 +221,86 @@ export function observePersistedUserMessageSession(
   });
 }
 
+export type PersistedTurnEvent = {
+  type: string;
+  turnId?: string;
+  [field: string]: unknown;
+};
+
+/**
+ * Read one exact user turn from the isolated child Runtime Store. The observer
+ * resolves the session from the durable user message, then resolves that
+ * message's next durable turn start before reading its ordered event window.
+ */
+export function observePersistedTurnEvents(
+  workspace: Pick<TestWorkspace, 'home'>,
+  userMessage: string,
+): PersistedRuntimeObservation<
+  { threadId: string; turnId: string; events: PersistedTurnEvent[] } | undefined
+> {
+  return readPersistedRuntime(workspace, (database) => {
+    const message = database
+      .query<{ thread_id: string; id: number }, [string]>(`
+        SELECT thread_id, id
+        FROM runtime_events
+        WHERE json_extract(event_json, '$.type') = 'user.message_appended'
+          AND json_extract(event_json, '$.content') = ?
+        ORDER BY id DESC
+        LIMIT 1
+      `)
+      .get(userMessage);
+    if (!message) return undefined;
+
+    const turn = database
+      .query<{ id: number; turn_id: string | null }, [string, number]>(`
+        SELECT id, json_extract(event_json, '$.turnId') AS turn_id
+        FROM runtime_events
+        WHERE thread_id = ?
+          AND id > ?
+          AND json_extract(event_json, '$.type') = 'turn.started'
+        ORDER BY id ASC
+        LIMIT 1
+      `)
+      .get(message.thread_id, message.id);
+    if (!turn?.turn_id) return undefined;
+
+    const nextTurn = database
+      .query<{ id: number }, [string, number]>(`
+        SELECT id
+        FROM runtime_events
+        WHERE thread_id = ?
+          AND id > ?
+          AND json_extract(event_json, '$.type') = 'turn.started'
+        ORDER BY id ASC
+        LIMIT 1
+      `)
+      .get(message.thread_id, turn.id);
+    const events = database
+      .query<{ event_json: string }, [string, number, number]>(`
+        SELECT event_json
+        FROM runtime_events
+        WHERE thread_id = ?
+          AND id >= ?
+          AND id < ?
+        ORDER BY id ASC
+      `)
+      .all(message.thread_id, turn.id, nextTurn?.id ?? Number.MAX_SAFE_INTEGER)
+      .map(({ event_json }) => {
+        const event: unknown = JSON.parse(event_json);
+        if (
+          typeof event !== 'object' ||
+          event === null ||
+          !('type' in event) ||
+          typeof event.type !== 'string'
+        ) {
+          throw new Error('Persisted Runtime event is not valid');
+        }
+        return event as PersistedTurnEvent;
+      });
+    return { threadId: message.thread_id, turnId: turn.turn_id, events };
+  });
+}
+
 /**
  * Create a fully isolated test environment.
  *
