@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { createVerifiedContextCheckpointV3 } from '@/core/model/context-checkpoint-v3';
 import {
   buildSummarySourceIdentityForCurrentPrefixV1,
   createSummaryStartBatchKeyV1,
@@ -7,6 +8,8 @@ import {
 } from '@/core/model/progressive-context-orchestrator';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
+import { projectedModelContentDigest } from '@/core/tools/registry/projection';
+import { type ToolResultBudgetReceiptV2, toolResultDigestV2 } from '@/core/tools/result-budget-v2';
 
 function state() {
   const runtime = createInitialRuntimeState({
@@ -23,6 +26,75 @@ function state() {
     turnId: `turn-${index}`,
     content: `settled ${index} ${'context '.repeat(200)}`,
   }));
+  return runtime;
+}
+
+function stateWithOffloadOnlyWorkingSet() {
+  const runtime = state();
+  const toolCallId = 'oversized-read';
+  const content = `settled read ${'large tool result '.repeat(3_200)}`;
+  const receipt: ToolResultBudgetReceiptV2 = {
+    version: 2 as const,
+    projectionMode: 'budget_v2' as const,
+    policyId: 'test-budget:v2',
+    toolIdentity: 'builtin:read_file',
+    bindingDigest: 'a'.repeat(64),
+    projectorId: 'read-line-window:v1',
+    projectorRevision: 'test-projector:v1',
+    validatorId: 'test-validator:v1',
+    rawResultDigest: toolResultDigestV2('test-raw:v1', content),
+    modelContentDigest: projectedModelContentDigest(content),
+    modelContentUtf8Bytes: Buffer.byteLength(content, 'utf8'),
+  };
+  runtime.transcript.messages.push(
+    {
+      kind: 'assistant',
+      messageId: 'assistant-oversized-read',
+      turnId: 'turn-oversized-read',
+      content: 'I read the file.',
+      toolCalls: [{ id: toolCallId, name: 'read_file', args: { path: 'src/large.ts' } }],
+    },
+    {
+      kind: 'tool',
+      messageId: 'tool-oversized-read',
+      turnId: 'turn-oversized-read',
+      toolCallId,
+      name: 'read_file',
+      content,
+      ok: true,
+      resultMeta: {
+        path: 'src/large.ts',
+        rawResultDigest: receipt.rawResultDigest,
+        modelContentDigest: receipt.modelContentDigest,
+        digestScope: 'raw',
+        toolResultReceipt: receipt,
+      },
+    },
+  );
+  runtime.tools.calls[toolCallId] = {
+    toolCallId,
+    modelMessageId: 'assistant-oversized-read',
+    name: 'read_file',
+    args: { path: 'src/large.ts' },
+    status: 'succeeded',
+    createdAtTurnId: 'turn-oversized-read',
+    effectClass: 'read_only',
+    sideEffect: false,
+    result: { ok: true, summary: 'read' },
+  };
+  runtime.context.activeCheckpoint = createVerifiedContextCheckpointV3({
+    state: runtime,
+    checkpointId: 'checkpoint:v3',
+    compactionId: 'checkpoint',
+    reason: 'manual',
+    coveredThroughMessageId: 'tool-oversized-read',
+    summary: '# Verified history',
+    inputTokensBefore: 20_000,
+    inputTokensAfter: 4_000,
+    routeIdentityDigest: 'a'.repeat(64),
+    sourceProducingEventCutV1: { revision: 1, eventId: 'e'.repeat(64) },
+    createdAt: new Date(0).toISOString(),
+  });
   return runtime;
 }
 
@@ -131,6 +203,26 @@ describe('progressive context orchestrator v1', () => {
     ).toMatchObject({ kind: 'dispatch_raw', reason: 'auto_summary_dedup_or_cooldown' });
   });
 
+  test('keeps L2.5 and Working Set selection on the same effective projection policy', () => {
+    const runtime = stateWithOffloadOnlyWorkingSet();
+    expect(
+      prepareProgressiveContextDecisionV1({
+        state: runtime,
+        pressure: 'compact_due',
+        utilization: 0.95,
+        contextWindowTokens: 64_000,
+        autoSummaryEnabled: false,
+        microAvailable: false,
+        workingSetPressure: 'normal',
+        oversizedBlockOffloadV1: true,
+        availableToolNames: ['read_file'],
+      }),
+    ).toMatchObject({
+      kind: 'dispatch_working_set',
+      reason: 'verified_checkpoint_working_set',
+    });
+  });
+
   test('dispatch entry and zero-execution close are mutually exclusive and single-use', () => {
     const entered = new ProviderDispatchEntryGuardV1();
     expect(entered.tryEnter()).toBe(true);
@@ -200,6 +292,61 @@ describe('progressive context orchestrator v1', () => {
         utilization: 0.95,
         contextWindowTokens: 64_000,
         autoSummaryEnabled: true,
+        microAvailable: false,
+      }).kind,
+    ).toBe('request_summary');
+  });
+
+  test('uses configured cooldown turns instead of the legacy fixed default', () => {
+    const runtime = state();
+    const requested = prepareProgressiveContextDecisionV1({
+      state: runtime,
+      pressure: 'compact_due',
+      utilization: 0.95,
+      contextWindowTokens: 64_000,
+      autoSummaryEnabled: true,
+      microAvailable: false,
+    });
+    if (requested.kind !== 'request_summary') throw new Error('request expected');
+    const afterRequest = reduceRuntimeState(runtime, requested.event);
+    const started = reduceRuntimeState(afterRequest, {
+      type: 'context.summary_dispatch_started_v1',
+      attemptId: requested.event.attempt.attemptId,
+      startBatchKey: createSummaryStartBatchKeyV1({
+        state: afterRequest,
+        effectLeaseId: 'lease',
+        resourceReservationId: 'reservation',
+        expectedMaxOutputTokens: 6_000,
+      }),
+    });
+    started.context.summaryLifecycle = { kind: 'idle' };
+    started.transcript.messages.push({
+      kind: 'user',
+      messageId: 'new-source',
+      turnId: 'new-turn',
+      content: 'new source after attempted auto summary',
+    });
+    started.context.successfulPrimaryOrdinal = 1;
+    expect(
+      prepareProgressiveContextDecisionV1({
+        state: started,
+        pressure: 'compact_due',
+        utilization: 0.95,
+        contextWindowTokens: 64_000,
+        autoSummaryEnabled: true,
+        autoCooldownSuccessfulPrimaryTurns: 2,
+        microAvailable: false,
+      }),
+    ).toMatchObject({ kind: 'dispatch_raw', reason: 'auto_summary_dedup_or_cooldown' });
+    started.context.successfulPrimaryOrdinal = 2;
+    expect(
+      prepareProgressiveContextDecisionV1({
+        state: started,
+        pressure: 'compact_due',
+        utilization: 0.95,
+        contextWindowTokens: 64_000,
+        autoSummaryEnabled: true,
+        autoCooldownSuccessfulPrimaryTurns: 2,
         microAvailable: false,
       }).kind,
     ).toBe('request_summary');

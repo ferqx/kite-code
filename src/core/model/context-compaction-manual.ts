@@ -7,7 +7,7 @@ import { findSafeCompactionBoundary } from './compaction-v2';
 import type { ContextPreflight, ContextTokenEstimate } from './context-budget';
 import { preflightModelContext } from './context-budget';
 import {
-  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  CONTEXT_RECLAIM_LIVE_POLICY_V3,
   type PreparedContextRequestReadyV2,
   type ProjectionArtifactV2,
   prepareContextRequestV2,
@@ -106,7 +106,7 @@ export function prepareContextInspectionV2(input: {
     toolResultBudgetPolicyId: flags.toolResultBudgetV2
       ? 'tool-result-budget-registry:v2'
       : 'tool-result-compat-registry:v1',
-    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId,
     reclaimMode: resolveContextReclaimModeV1({
       featureEnabled: flags.contextReclaimV1,
       toolResultBudgetEnabled: flags.toolResultBudgetV2,

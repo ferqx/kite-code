@@ -1,5 +1,6 @@
 import { readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
+import { hasReconciledSummaryProviderUsageV1 } from '@/core/model/summary-provider-usage';
 import type { RuntimeEffect } from './effects';
 import type { RuntimeEvent } from './events';
 import {
@@ -1170,28 +1171,31 @@ export function finalizeRuntimeEffectTerminalBatchV1(
         summaryDispatchGuardProof: admission.proof,
         summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
       }));
-    } else if (
-      summaryTerminal.type === 'context.summary_completed_v1' &&
-      summaryTerminal.providerUsage
-    ) {
-      resourceTerminals = reservationIds.map((reservationId) => {
-        const actual = createZeroResourceUsageV1();
-        actual.counters.modelRequests = 1;
-        actual.counters.inputTokens = summaryTerminal.providerUsage!.inputTokens;
-        actual.counters.outputTokens = summaryTerminal.providerUsage!.outputTokens;
-        return {
-          type: 'resource_budget.reconciled' as const,
-          reservationId,
-          actual,
-          summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
-        };
-      });
     } else {
-      resourceTerminals = reservationIds.map((reservationId) => ({
-        type: 'resource_budget.unknown' as const,
-        reservationId,
-        summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
-      }));
+      const providerUsage =
+        summaryTerminal.type === 'context.summary_unknown_external_outcome_v1'
+          ? undefined
+          : summaryTerminal.providerUsage;
+      if (hasReconciledSummaryProviderUsageV1(providerUsage)) {
+        resourceTerminals = reservationIds.map((reservationId) => {
+          const actual = createZeroResourceUsageV1();
+          actual.counters.modelRequests = 1;
+          actual.counters.inputTokens = providerUsage.inputTokens;
+          actual.counters.outputTokens = providerUsage.outputTokens;
+          return {
+            type: 'resource_budget.reconciled' as const,
+            reservationId,
+            actual,
+            summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
+          };
+        });
+      } else {
+        resourceTerminals = reservationIds.map((reservationId) => ({
+          type: 'resource_budget.unknown' as const,
+          reservationId,
+          summaryTerminalBatchKey: summaryTerminal.terminalBatchKey,
+        }));
+      }
     }
   }
   const aborts = result.filter((event) => event.type === 'turn.aborted');

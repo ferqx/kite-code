@@ -326,6 +326,7 @@ const featuresSchema = z
     contextCompactionManualV1: z.boolean().optional(),
     toolResultBudgetV2: z.boolean().optional(),
     contextReclaimV1: z.boolean().optional(),
+    oversizedBlockOffloadV1: z.boolean().optional(),
     sessionLoggingPolicyV1: z.boolean().optional(),
     providerDataPolicyV1: z.boolean().optional(),
     remoteMcpEgressPolicyV1: z.boolean().optional(),
@@ -385,6 +386,13 @@ export const configSchema = z.object({
       hardRatio: z.number().positive().max(1).optional(),
       warningRatio: z.number().positive().max(1).optional(),
       minimumReductionRatio: z.number().nonnegative().max(1).optional(),
+      /**
+       * Upper bound for the summary request input tokens per token that the
+       * candidate can possibly remove from the next primary projection.
+       * Kept deliberately finite so a full-prefix re-summary cannot become
+       * an unbounded recurring cost on long-lived sessions.
+       */
+      maxSummaryInputToReductionRatio: z.number().positive().optional(),
       cooldownTurns: z.number().int().nonnegative().optional(),
       providerSafetyRatio: z.number().positive().max(0.2).optional(),
     })

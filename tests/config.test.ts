@@ -278,6 +278,7 @@ describe('loadAgentConfig', () => {
             "compactRatio": 0.7,
             "hardRatio": 0.86,
             "minimumReductionRatio": 0.18,
+            "maxSummaryInputToReductionRatio": 4,
             "cooldownTurns": 4
           }
         }`,
@@ -293,6 +294,7 @@ describe('loadAgentConfig', () => {
         compactRatio: 0.7,
         hardRatio: 0.86,
         minimumReductionRatio: 0.18,
+        maxSummaryInputToReductionRatio: 4,
         cooldownTurns: 4,
       });
     } finally {

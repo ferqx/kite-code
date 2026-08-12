@@ -115,7 +115,8 @@ decision/rollout 已删除；新的 90% progressive auto 路线仍在候选实�
 `off | shadow | live`，未配置、`contextReclaimV1=false` 或 `toolResultBudgetV2=false` 时 effective mode 恒为
 off。shadow 在 warning/更高 pressure 或显式绝对 threshold 下评估候选；只有注入 bounded in-memory reporter
 时才记录聚合统计，不调用模型、不写 checkpoint/event/snapshot/disk，也不改变 Provider payload。live 还必须
-显式配置 `reclaimMode=live`，仅在成功 primary 的封闭 terminal batch 中推进 bounded commit/receipt；当前受信
+显式配置 `reclaimMode=live`，仅在成功 primary 的封闭 terminal batch 中推进 bounded commit/receipt。首次
+commit 至少节省 4096 tokens；后续 commit 按 ADR-0103 批量化（10 turns、8192 增量 tokens），避免频繁改变缓存前缀。当前受信
 route qualification registry 为空，因此只属于 development-only 路径，不能由用户配置或模型名称自证
 production 资格。完整语义与排除项见 [`three-tier-context-reduction.md`](three-tier-context-reduction.md)。
 

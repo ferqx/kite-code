@@ -115,7 +115,7 @@ export interface ContextCompactionCompletedEvent {
   /** End-to-end compaction effect duration. Optional for restored legacy events. */
   durationMs?: number;
   /** Exact Provider usage when the adapter supplied authoritative counters. */
-  providerUsage?: { inputTokens: number; outputTokens: number };
+  providerUsage?: import('@/core/model/summary-provider-usage').SummaryProviderUsageV1;
 }
 
 export interface ContextCompactionFailedEvent {
@@ -131,6 +131,8 @@ export interface ContextCompactionFailedEvent {
   durationMs?: number;
   /** Whether the one Summary Provider callback was entered before failure. */
   providerDispatchState?: 'not_entered' | 'entered';
+  /** Provider accounting observed before a candidate was rejected. Metadata only. */
+  providerUsage?: import('@/core/model/summary-provider-usage').SummaryProviderUsageV1;
 }
 
 export interface ContextCompactionResetEvent {
@@ -156,7 +158,7 @@ export interface ContextSummaryCompletedEventV1 {
   attemptId: string;
   terminalBatchKey: SummaryTerminalBatchKeyV1;
   checkpoint: VerifiedContextCheckpointV3;
-  providerUsage?: { inputTokens: number; outputTokens: number };
+  providerUsage?: import('@/core/model/summary-provider-usage').SummaryProviderUsageV1;
   providerDispatchState: 'entered';
 }
 
@@ -171,6 +173,8 @@ export interface ContextSummaryFailedEventV1 {
     | 'stale_runtime_revision';
   message: string;
   providerDispatchState: 'not_entered' | 'entered';
+  /** Provider accounting observed before the terminal failure. Metadata only. */
+  providerUsage?: import('@/core/model/summary-provider-usage').SummaryProviderUsageV1;
 }
 
 export interface ContextSummaryUnknownExternalOutcomeEventV1 {

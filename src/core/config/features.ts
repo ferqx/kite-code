@@ -21,6 +21,8 @@ export interface FeatureFlags {
   contextCompactionManualV1: boolean;
   toolResultBudgetV2: boolean;
   contextReclaimV1: boolean;
+  /** Ephemeral L2.5 stubs for eligible oversized settled tool-result blocks. */
+  oversizedBlockOffloadV1: boolean;
   sessionLoggingPolicyV1: boolean;
   providerDataPolicyV1: boolean;
   remoteMcpEgressPolicyV1: boolean;
@@ -53,6 +55,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   contextCompactionManualV1: true,
   toolResultBudgetV2: false,
   contextReclaimV1: false,
+  oversizedBlockOffloadV1: false,
   sessionLoggingPolicyV1: true,
   providerDataPolicyV1: false,
   remoteMcpEgressPolicyV1: false,

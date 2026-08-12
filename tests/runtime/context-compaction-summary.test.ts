@@ -7,7 +7,13 @@ import {
 import { findSafeCompactionBoundary } from '../../src/core/model/compaction-v2';
 import type { ContextTokenEstimate } from '../../src/core/model/context-budget';
 import { createVerifiedContextCheckpointV3 } from '../../src/core/model/context-checkpoint-v3';
+import { buildContextProjection } from '../../src/core/model/context-projection';
 import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
+import { projectedModelContentDigest } from '../../src/core/tools/registry/projection';
+import {
+  type ToolResultBudgetReceiptV2,
+  toolResultDigestV2,
+} from '../../src/core/tools/result-budget-v2';
 
 const estimate: ContextTokenEstimate = {
   systemTokens: 100,
@@ -18,6 +24,10 @@ const estimate: ContextTokenEstimate = {
   framingTokens: 100,
   totalInputTokens: 20_300,
 };
+
+function successfulSummary(summary: string) {
+  return { summary, finishReason: 'stop' };
+}
 
 function stateWithHistory(turns = 6): RuntimeState {
   const state = createInitialRuntimeState({
@@ -51,6 +61,75 @@ function pending(state: RuntimeState, customInstructions?: string) {
   };
 }
 
+function offloadReceipt(content: string): ToolResultBudgetReceiptV2 {
+  return {
+    version: 2,
+    projectionMode: 'budget_v2',
+    policyId: 'test-budget:v2',
+    toolIdentity: 'builtin:read_file',
+    bindingDigest: 'a'.repeat(64),
+    projectorId: 'read-line-window:v1',
+    projectorRevision: 'test-projector:v1',
+    validatorId: 'test-validator:v1',
+    rawResultDigest: toolResultDigestV2('test-raw:v1', content),
+    modelContentDigest: projectedModelContentDigest(content),
+    modelContentUtf8Bytes: Buffer.byteLength(content, 'utf8'),
+  };
+}
+
+function stateWithOversizedEligibleReadBlocks(): RuntimeState {
+  const state = createInitialRuntimeState({
+    threadId: 'oversized-eligible-summary',
+    userId: 'user',
+    workspace: '/workspace',
+  });
+  state.revision = 1;
+  state.lastAppliedEventId = 'e'.repeat(64);
+  state.appliedEventIds = ['e'.repeat(64)];
+  for (let index = 0; index < 4; index++) {
+    const toolCallId = `read-${index}`;
+    const content = `result-${index} ${'large settled read result '.repeat(3_200)}`;
+    const receipt = offloadReceipt(content);
+    state.transcript.messages.push(
+      {
+        kind: 'assistant',
+        messageId: `assistant-${index}`,
+        turnId: `turn-${index}`,
+        content: `Settled read ${index}.`,
+        toolCalls: [{ id: toolCallId, name: 'read_file', args: { path: `src/${index}.ts` } }],
+      },
+      {
+        kind: 'tool',
+        messageId: `tool-${index}`,
+        turnId: `turn-${index}`,
+        toolCallId,
+        name: 'read_file',
+        content,
+        ok: true,
+        resultMeta: {
+          path: `src/${index}.ts`,
+          rawResultDigest: receipt.rawResultDigest,
+          modelContentDigest: receipt.modelContentDigest,
+          digestScope: 'raw',
+          toolResultReceipt: receipt,
+        },
+      },
+    );
+    state.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: `assistant-${index}`,
+      name: 'read_file',
+      args: { path: `src/${index}.ts` },
+      status: 'succeeded',
+      createdAtTurnId: `turn-${index}`,
+      effectClass: 'read_only',
+      sideEffect: false,
+      result: { ok: true, summary: 'read' },
+    };
+  }
+  return state;
+}
+
 describe('narrative context compaction', () => {
   test('uses one model call and creates a lightweight Markdown checkpoint', async () => {
     const state = stateWithHistory();
@@ -58,7 +137,9 @@ describe('narrative context compaction', () => {
     const compact = createNarrativeContextCompactor({
       generate: async (request) => {
         requests.push(request.input);
-        return '# Goal\n\nContinue the implementation and preserve verification results.';
+        return successfulSummary(
+          '# Goal\n\nContinue the implementation and preserve verification results.',
+        );
       },
     });
     const checkpoint = await compact({
@@ -99,7 +180,7 @@ describe('narrative context compaction', () => {
     const compact = createNarrativeContextCompactor({
       generate: async (value) => {
         request = value.input;
-        return 'Updated narrative with the new work.';
+        return successfulSummary('Updated narrative with the new work.');
       },
     });
     const checkpoint = await compact({
@@ -120,7 +201,12 @@ describe('narrative context compaction', () => {
       if (message.kind === 'user') message.content += ' additional context'.repeat(300);
     }
     const compact = createNarrativeContextCompactor({
-      generate: async () => `Updated narrative ${state.transcript.messages.length}.`,
+      generate: async () =>
+        successfulSummary(`Updated narrative ${state.transcript.messages.length}.`),
+      // This fixture deliberately verifies checkpoint-chain semantics over
+      // repeated full-prefix rewrites. Production's conservative cost gate is
+      // covered separately below.
+      maxSummaryInputToReductionRatio: 1_000_000,
     });
     let previousId: string | undefined;
     const digests = new Set<string>();
@@ -162,9 +248,14 @@ describe('narrative context compaction', () => {
   test('rejects empty, truncated, tool-call, and oversized narratives', async () => {
     const state = stateWithHistory();
     const cases = [
-      [{ summary: '   ' }, 'empty_summary'],
+      [{ summary: '   ', finishReason: 'stop' }, 'empty_summary'],
       [{ summary: 'partial', finishReason: 'length' }, 'truncated_summary'],
-      [{ summary: 'text', hasToolCalls: true }, 'unexpected_tool_call'],
+      [{ summary: 'partial', finishReason: 'max_tokens' }, 'truncated_summary'],
+      [{ summary: 'partial', finishReason: 'max_output_tokens' }, 'truncated_summary'],
+      [{ summary: 'partial', finishReason: 'token_limit' }, 'truncated_summary'],
+      [{ summary: 'partial', finishReason: 'content_filter' }, 'truncated_summary'],
+      [{ summary: 'partial', finishReason: undefined }, 'truncated_summary'],
+      [{ summary: 'text', finishReason: 'stop', hasToolCalls: true }, 'unexpected_tool_call'],
     ] as const;
     for (const [result, kind] of cases) {
       const compact = createNarrativeContextCompactor({
@@ -174,6 +265,31 @@ describe('narrative context compaction', () => {
         compact({ state, pending: pending(state), sourceRevision: state.revision }),
       ).rejects.toMatchObject({ kind });
     }
+  });
+
+  test('retains redacted Provider usage when a returned summary is rejected', async () => {
+    const state = stateWithHistory();
+    const compact = createNarrativeContextCompactor({
+      generate: async () => ({
+        summary: '   ',
+        finishReason: 'stop',
+        inputTokens: 12_000,
+        outputTokens: 48,
+        cacheHitTokens: 11_500,
+        cacheMissTokens: 500,
+      }),
+    });
+    await expect(
+      compact({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({
+      kind: 'empty_summary',
+      providerUsage: {
+        inputTokens: 12_000,
+        outputTokens: 48,
+        cacheHitTokens: 11_500,
+        cacheMissTokens: 500,
+      },
+    });
   });
 
   test('manual compaction covers every safe settled turn', () => {
@@ -207,6 +323,110 @@ describe('narrative context compaction', () => {
       compact({ state, pending: pending(state), sourceRevision: state.revision }),
     ).rejects.toMatchObject({ kind: 'insufficient_reduction' });
     expect(calls).toBe(0);
+  });
+
+  test('does not re-send a large full prefix for a small marginal reduction', async () => {
+    const state = stateWithHistory(20);
+    state.context.activeCheckpoint = createVerifiedContextCheckpointV3({
+      state,
+      checkpointId: 'base:v3',
+      compactionId: 'base',
+      reason: 'manual',
+      coveredThroughMessageId: 'message-15',
+      summary: 'Previously verified history.',
+      inputTokensBefore: 100_000,
+      inputTokensAfter: 2_000,
+      routeIdentityDigest: 'a'.repeat(64),
+      sourceProducingEventCutV1: { revision: 1, eventId: 'e'.repeat(64) },
+      createdAt: '2026-07-22T00:00:00.000Z',
+    });
+    let calls = 0;
+    const compact = createNarrativeContextCompactor({
+      generate: async () => {
+        calls++;
+        return 'unreachable';
+      },
+    });
+
+    await expect(
+      compact({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({
+      kind: 'insufficient_reduction',
+      message: expect.stringContaining('input tokens for at most'),
+    });
+    expect(calls).toBe(0);
+  });
+
+  test('does not pay for a summary when a large atomic recent block cannot fit Working Set', async () => {
+    const state = stateWithHistory(5);
+    state.transcript.messages.push({
+      kind: 'user',
+      messageId: 'large-atomic-message',
+      turnId: 'large-atomic-turn',
+      ordinal: 5,
+      createdAt: '2026-07-22T00:00:06.000Z',
+      content: 'atomic '.repeat(40_000),
+    });
+    let calls = 0;
+    const compact = createNarrativeContextCompactor({
+      generate: async () => {
+        calls++;
+        return 'unreachable';
+      },
+    });
+
+    await expect(
+      compact({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({
+      kind: 'insufficient_reduction',
+      message: expect.stringContaining('recent_window_exceeds_capacity'),
+    });
+    expect(calls).toBe(0);
+  });
+
+  test('can create V3 when eligible covered read blocks need L2.5 projection offload', async () => {
+    const state = stateWithOversizedEligibleReadBlocks();
+    const before = JSON.stringify(state.transcript);
+    const projectionEnvironment = {
+      serializedTools: [{ name: 'read_file', inputSchema: {}, schemaDigest: 'a'.repeat(64) }],
+      workflowSkills: [],
+      oversizedBlockOffloadV1: true,
+    };
+    let calls = 0;
+    const compact = createNarrativeContextCompactor({
+      generate: async () => {
+        calls++;
+        return successfulSummary(
+          '# Settled reads\n\nReplay a read only if the digest detail is needed.',
+        );
+      },
+      maxSummaryInputToReductionRatio: 5,
+    });
+    const checkpoint = await compact({
+      state,
+      pending: pending(state),
+      sourceRevision: state.revision,
+      projectionEnvironment,
+    });
+    expect(calls).toBe(1);
+    expect(checkpoint.inputTokensAfter).toBeLessThan(checkpoint.inputTokensBefore);
+    expect(JSON.stringify(state.transcript)).toBe(before);
+    state.context.activeCheckpoint = checkpoint;
+    const projection = buildContextProjection({
+      role: 'agent',
+      state,
+      serializedTools: projectionEnvironment.serializedTools,
+      workflowSkills: projectionEnvironment.workflowSkills,
+      projectionEnvironment,
+    });
+    expect(projection.summaryMessages).toHaveLength(1);
+    expect(
+      projection.transcriptMessages.some((message) =>
+        String((message as unknown as { content?: unknown }).content).includes(
+          'tool-result-offload:v1',
+        ),
+      ),
+    ).toBe(true);
   });
 
   test('does not use custom instructions to rewrite an already-covered checkpoint', async () => {
@@ -268,7 +488,7 @@ describe('narrative context compaction', () => {
     const compact = createNarrativeContextCompactor({
       generate: async (value) => {
         request = value.input;
-        return 'Settled historical narrative.';
+        return successfulSummary('Settled historical narrative.');
       },
     });
     const checkpoint = await compact({
@@ -313,5 +533,43 @@ describe('narrative context compaction', () => {
         sourceRevision: 1,
       }),
     ).rejects.toMatchObject({ kind: 'summary_aborted' });
+  });
+
+  test('fails closed before Provider dispatch when a tool result crosses turns', async () => {
+    const state = stateWithHistory(0);
+    state.transcript.messages = [
+      {
+        kind: 'assistant',
+        messageId: 'assistant-call',
+        turnId: 'turn-call',
+        ordinal: 0,
+        createdAt: '2026-07-22T00:00:00.000Z',
+        content: '',
+        toolCalls: [{ id: 'call-1', name: 'read_file', args: { path: 'a.ts' } }],
+      },
+      {
+        kind: 'tool',
+        messageId: 'tool-result',
+        turnId: 'turn-result',
+        ordinal: 1,
+        createdAt: '2026-07-22T00:00:01.000Z',
+        toolCallId: 'call-1',
+        name: 'read_file',
+        content: 'file contents',
+        ok: true,
+      },
+    ];
+    let calls = 0;
+    const compact = createNarrativeContextCompactor({
+      generate: async () => {
+        calls++;
+        return successfulSummary('unreachable');
+      },
+    });
+
+    await expect(
+      compact({ state, pending: pending(state), sourceRevision: state.revision }),
+    ).rejects.toMatchObject({ kind: 'unsafe_boundary' });
+    expect(calls).toBe(0);
   });
 });

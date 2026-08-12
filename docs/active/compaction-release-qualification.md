@@ -1,10 +1,11 @@
-# Compaction Release Qualification 边界
+# Compaction Release Qualification 边界（遗留 contract）
 
-状态：active
+状态：active（只保留为历史 route/rollout/semantic 行为的 fail-closed 回归，不是当前渐进式策略的有效性或发布资格）
 读取时机：修改 compaction case、事实 matcher、semantic/continuation evaluator、route qualification、
 无压缩 handoff 或 compaction release Gate 时。
-验证：`bun test tests/evals/compaction tests/runtime/context-compaction-e2e.test.ts tests/runtime/context-compaction-shadow-gate.test.ts tests/release/capability-profile.test.ts`、
+遗留验证：`bun test tests/evals/compaction tests/evals/progressive-context-strategy-evaluation.test.ts tests/runtime/context-compaction-e2e.test.ts tests/runtime/context-compaction-shadow-gate.test.ts tests/release/capability-profile.test.ts`、
 `bun run typecheck`。
+当前入口：`bun run qualify:context` 只做本地机制资格；`bun run eval:context:live-pilot` 才是显式 opt-in 的真实模型上下文质量评测。
 相关：ADR-0021、ADR-0022、ADR-0024、ADR-0057、ADR-0069、Phase 4。
 
 ## 当前本地 contract
@@ -75,3 +76,15 @@ diff、Plan、checks、pending，超长任务明确 unsupported，`/clear`/新 s
 `under_development/off`、空 route/platform allowlist、freshness=0。Manual 只按当前本地 route/handoff
 contract 工作；Auto Compaction 首版不受支持并默认关闭。以后若要支持 Auto 必须重新立项，不能继承
 旧 rollout 或 promotion 记录。
+
+## 策略有效性对照评测
+
+`progressive-context-strategy-evaluation:v1` 是一个仅处理 digest-safe aggregate attempt 的 deterministic
+判定 contract。它预注册 `raw`、`rolling_summary`、`local_projection` 与 `progressive` 四个 arm，并拒绝不完整
+paired coverage、缺失 usage/latency、invariant failure、未授权副作用、任务成功率非劣失败、收益不足或延迟回归。
+这使真实模型 runner 不能挑选最佳 attempt，也不能用缺失 Provider counter 伪造通过。
+
+该 contract 尚未构成真实模型运行、route qualification、release evidence 或 default-on 授权。真实 runner 必须按
+[`../space/plans/2026-08-12-progressive-context-effectiveness-evaluation.md`](../space/plans/2026-08-12-progressive-context-effectiveness-evaluation.md)
+的固定 route/case/profile identity、隐私与 pilot 门槛执行；结果为 `failed` 或 `inconclusive` 时保持所有相关
+feature 默认关闭。

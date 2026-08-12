@@ -723,6 +723,9 @@ export class AgentKernel {
         : 'Summary result became stale after new transcript source was committed.',
       providerDispatchState:
         terminal.terminalBatchKey.admission.stage === 'not_completed' ? 'not_entered' : 'entered',
+      ...(terminal.type !== 'context.summary_unknown_external_outcome_v1' && terminal.providerUsage
+        ? { providerUsage: terminal.providerUsage }
+        : {}),
     };
     const settlement: RuntimeEvent[] = [staleTerminal, resource];
     if (lifecycle.attempt.reason === 'auto' && lifecycle.continuation) {

@@ -12,7 +12,7 @@
 
 ## 当前状态
 
-仓库注册了显式 opt-in 的 `test:model:live` package script，用于真实 Provider 的 context compaction direct/incremental summary 验证。`qualify:context:produce` 与 `qualify:context:verify` 只生成和独立验证渐进式三级压缩的确定性本地资格工件；它们验证 canonical blocks、事实保留、continuation、延迟和内存门槛，但没有 Provider dispatch，不能表述为真实模型或 route qualification。默认 `bun run test` 通过 `scripts/run-default-tests.ts` 只运行确定性的本地/mock 测试：主 suite 使用 `--max-concurrency=1 --only-failures` 限制 Bun 共享进程中的测试和输出资源竞争；Windows 因真实 ACL、进程身份和平台探测存在固定启动成本，默认 test process 使用 30 秒单用例上限，其他平台保留 Bun 的 5 秒默认值。该 suite 包含快速 `tests/tui-system/harness/` 单元测试，但排除真实 PTY `scenarios/`、TUI/native sandbox smoke 与 spike；`tests/shell-exec.test.ts` 在默认门禁显式关闭 native sandbox，只验证统一 executor 的 Shell/进程树语义。Seatbelt/bubblewrap 正向执行由 `test:sandbox:smoke:native` 与 platform capability workflow 单独运行。每个 test process 都获得独立临时 `HOME`/`KITE_CODE_HOME`（Windows 同步 `USERPROFILE`），不得读取或修改开发机真实 Kite 配置、Plan 或 Session Log。会临时修改进程级 cwd 或 `KITE_CODE_HOME` 的少量路径测试还会逐文件启动独立 Bun 进程，避免进程级状态互相污染。不得改用 Bun per-file isolate；当前 Ink/Yoga ESM 在该模式下不能稳定初始化。`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。未实际执行 live runner 时，文档、PR 或完成记录不得表述为真实 provider 已验证。
+仓库把真实模型上下文质量统一在显式 opt-in 的 `eval:context:live-pilot`；它覆盖实际 summary compatibility 与压缩后 continuation。`qualify:context` 只生成并独立验证渐进式三级压缩的确定性本地资格工件；它验证 canonical blocks、事实保留、continuation、延迟和内存门槛，但没有 Provider dispatch，不能表述为真实模型或 route qualification。默认 `bun run test` 通过 `scripts/run-default-tests.ts` 只运行确定性的本地/mock 测试：主 suite 使用 `--max-concurrency=1 --only-failures` 限制 Bun 共享进程中的测试和输出资源竞争；Windows 因真实 ACL、进程身份和平台探测存在固定启动成本，默认 test process 使用 30 秒单用例上限，其他平台保留 Bun 的 5 秒默认值。该 suite 包含快速 `tests/tui-system/harness/` 单元测试，但排除真实 PTY `scenarios/`、TUI/native sandbox smoke 与 spike；`tests/shell-exec.test.ts` 在默认门禁显式关闭 native sandbox，只验证统一 executor 的 Shell/进程树语义。Seatbelt/bubblewrap 正向执行由 `test:sandbox:smoke:native` 与 platform capability workflow 单独运行。每个 test process 都获得独立临时 `HOME`/`KITE_CODE_HOME`（Windows 同步 `USERPROFILE`），不得读取或修改开发机真实 Kite 配置、Plan 或 Session Log。会临时修改进程级 cwd 或 `KITE_CODE_HOME` 的少量路径测试还会逐文件启动独立 Bun 进程，避免进程级状态互相污染。不得改用 Bun per-file isolate；当前 Ink/Yoga ESM 在该模式下不能稳定初始化。`test:mock` 明确运行当前 context compaction Runtime E2E，同样不访问真实 provider。未实际执行 live runner 时，文档、PR 或完成记录不得表述为真实 provider 已验证。
 
 Prompt Contract V2 另注册 `test:prompt:live`。`scripts/evals/prompt-contract-ab.ts` 以十个类别在同一 resolved Provider/model/temperature/fixture/初始状态下比较 legacy/V2，默认每用例三次；缺少显式 `KITE_RUN_PROMPT_AB=1` 或可用凭据时只输出 `live_eval_skipped`，并以 dry-run contract 成功结束。runner 只保存/输出聚合成功率、工具参数错误、重复调用、安全违规与脱敏失败分类，不记录 system prompt、项目指令、用户正文、模型正文或工具参数。该 runner 是 opt-in 证据，不进入 Required CI；未运行 live 模式时只能声明 runner/schema/fixture/dry-run 已验证。
 
@@ -90,3 +90,13 @@ dispatch，不能表述为真实 Provider、external 产品用户或正式 Agent
 但 production OIDC/attestation verifier 为空，不能把 fixture 升级为正式证据。显式 opt-in live runner
 只能证明当次 Provider 兼容和 compaction 语义；旧 Phase 4 rollout/promotion adapter 已被取代，不产生
 milestone 或后续路线图状态。
+
+`eval:context:live-pilot` 是唯一的显式 opt-in 上下文质量 runner；它从本机已解析的 provider config 读取路由和凭据，在同一
+真实 summary 后对 raw、simple `summary + tail` 与 progressive Working Set 发送一次事实恢复 continuation。它只
+输出 provider/model、脱敏 usage、时延、checkpoint token 计数和事实恢复计数，不保留 prompt、summary、模型正文、
+工具正文、路径或凭据。该 pilot 用于在完整四臂 agent benchmark 前发现 Provider 兼容/恢复问题；一次运行不构成
+策略有效性、route qualification、production support 或 default-on 结论。
+
+`tests/e2e/live/model/context-compaction.live.ts` 是被替代的历史 compatibility fixture：它没有 package script，
+不进入 discovery，也不得作为第二个真实模型入口或证据来源。direct/incremental compatibility 已由
+`eval:context:live-pilot` 在同一脱敏 run identity 内覆盖。

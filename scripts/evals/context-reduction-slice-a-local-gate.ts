@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { arch, cpus, platform } from 'node:os';
 import {
-  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  CONTEXT_RECLAIM_LIVE_POLICY_V3,
   canonicalContextDigestV2,
   type PreparedContextRequestReadyV2,
   prepareContextRequestV2,
@@ -39,7 +39,7 @@ export interface SliceAEvidenceV1 {
   identity: {
     inventoryDigest: string;
     fixtureDigest: string;
-    policyId: typeof CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId;
+    policyId: typeof CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId;
     bunVersion: string;
     platform: string;
     arch: string;
@@ -215,7 +215,7 @@ function prepareFixture(state: RuntimeState, mode: 'off' | 'live'): PreparedCont
     requestedMaxOutputTokens: 4_096,
     promptAffectingParameters: { temperature: 0, streaming: false },
     toolResultBudgetPolicyId: 'tool-result-budget-registry:v2',
-    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId,
     reclaimMode: mode,
     reclaimAfterEstimatedTokens: 1,
   });
@@ -421,7 +421,7 @@ export function createSliceALocalGateEvidenceEnvelopeV1(input: {
     identity: {
       inventoryDigest: inventory.inventoryDigest,
       fixtureDigest: fixtureIdentityDigestV1(input.fixture),
-      policyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+      policyId: CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId,
       bunVersion: Bun.version,
       platform: platform(),
       arch: arch(),
@@ -608,7 +608,7 @@ export function verifySliceALocalGateEvidenceV1(input: unknown): SliceAEvidenceV
     throw new Error('Fixture identity does not match the measured fixture facts.');
   }
   if (
-    identity.policyId !== CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId ||
+    identity.policyId !== CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId ||
     identity.warmupRuns !== CONTEXT_REDUCTION_SLICE_A_FIXTURE_V1.warmupRuns ||
     identity.sampleRuns !== CONTEXT_REDUCTION_SLICE_A_FIXTURE_V1.sampleRuns ||
     identity.gcMode !== CONTEXT_REDUCTION_SLICE_A_FIXTURE_V1.gcMode ||

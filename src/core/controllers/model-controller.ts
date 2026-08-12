@@ -27,7 +27,7 @@ import { preflightModelContext } from '@/core/model/context-budget';
 import type { PreparedContextCapabilitySetV2 } from '@/core/model/context-capability-v2';
 import {
   assertPreparedContextCurrentV2,
-  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  CONTEXT_RECLAIM_LIVE_POLICY_V3,
   canonicalContextDigestV2,
 } from '@/core/model/context-preparation-v2';
 import {
@@ -267,6 +267,9 @@ export function resolveContextProjectionEnvironment(input: {
         })
       : undefined,
     sandboxBackend: input.sandboxBackend ?? 'unknown',
+    ...(flags.oversizedBlockOffloadV1 && flags.toolResultBudgetV2
+      ? { oversizedBlockOffloadV1: true }
+      : {}),
     leaseMetadata: {
       providerName: input.config.providerName,
       modelName: input.config.modelName,
@@ -289,6 +292,14 @@ export function resolveContextProjectionEnvironment(input: {
           policyVersion: RECLAIM_POLICY_V1.version,
           estimatorId: RECLAIM_POLICY_V1.estimatorId,
         },
+        ...(flags.oversizedBlockOffloadV1 && flags.toolResultBudgetV2
+          ? {
+              oversizedBlockOffloadV1: {
+                effective: true,
+                policyId: 'oversized-block-offload:v1',
+              },
+            }
+          : {}),
       },
     },
   };
@@ -566,7 +577,7 @@ export async function invokeRuntimeModel(params: {
             params.preparedContextV2.requestIdentity.requestedMaxOutputTokens,
         },
         toolResultBudgetPolicyId: params.preparedContextV2.sourceIdentity.toolResultBudgetPolicyId,
-        reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+        reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId,
       });
     }
 

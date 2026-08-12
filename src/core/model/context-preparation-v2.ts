@@ -20,7 +20,10 @@ import {
   type ReclaimPlanV1,
   reclaimStubV1,
 } from './context-reclaim';
-import type { ContextReclaimCommitV1 } from './context-reclaim-commit';
+import {
+  type ContextReclaimCommitV1,
+  contextReclaimCacheEpochIdV1,
+} from './context-reclaim-commit';
 import { serializeFramesToMessages } from './context-serializer';
 import { validateFramePairs, validateMessagePairs } from './context-validator';
 import type { ResolvedModelCapabilities } from './model-capabilities';
@@ -28,12 +31,19 @@ import type { ResolvedModelCapabilities } from './model-capabilities';
 export const CONTEXT_PROJECTION_CONTRACT_V2 = 'prepared-context-request:v2' as const;
 export const CONTEXT_ESTIMATOR_ID_V2 = 'kite-count-tokens:v1' as const;
 
-export const CONTEXT_RECLAIM_LIVE_POLICY_V2 = Object.freeze({
-  version: 2 as const,
-  policyId: 'context-reclaim-live:v2' as const,
-  minEstimatedSavedTokens: 1_024,
+/**
+ * A MicroCompact commit changes the conversation prefix.  Make that transition
+ * deliberately infrequent: the first one must amortize a cache generation
+ * change, and later ones must batch a materially larger new suffix.
+ */
+export const CONTEXT_RECLAIM_LIVE_POLICY_V3 = Object.freeze({
+  version: 3 as const,
+  policyId: 'context-reclaim-live:v3' as const,
+  minInitialEstimatedSavedTokens: 4_096,
+  minIncrementalEstimatedSavedTokens: 8_192,
   minSavingRatio: 0.05,
   minSelectedBlockCount: 2,
+  minTurnsBetweenCommits: 10,
 });
 
 export type ContextPreparationPurposeV2 =
@@ -591,6 +601,7 @@ function committedReclaimApplication(input: {
   evidence: ReclaimApplicationEvidenceV2;
   effective: ProjectionArtifactV2;
   selected: ReadonlyArray<ReclaimPlanV1['selected'][number]>;
+  commit: ContextReclaimCommitV1;
 } | null {
   const { request, raw, rawProjection, commit } = input;
   const environmentDigest = digestProjectionEnvironment(request.environment);
@@ -608,6 +619,17 @@ function committedReclaimApplication(input: {
       projectionSourceIdentity(request).cacheAffectingEnvironmentDigest ||
     commit.toolSetSchemaDigest !== toolSetSchemaDigest ||
     commit.projectionContractId !== CONTEXT_PROJECTION_CONTRACT_V2 ||
+    commit.cacheEpochId !==
+      contextReclaimCacheEpochIdV1({
+        checkpointIdentity: projectionSourceIdentity(request).checkpointIdentity,
+        toolResultBudgetPolicyId: request.toolResultBudgetPolicyId,
+        reclaimPolicyId: request.reclaimPolicyId,
+        estimatorId: CONTEXT_ESTIMATOR_ID_V2,
+        toolSetSchemaDigest,
+        projectionContractId: CONTEXT_PROJECTION_CONTRACT_V2,
+        cacheAffectingEnvironmentDigest:
+          projectionSourceIdentity(request).cacheAffectingEnvironmentDigest,
+      }) ||
     commit.checkpointIdentity !== projectionSourceIdentity(request).checkpointIdentity
   ) {
     return null;
@@ -732,6 +754,7 @@ function committedReclaimApplication(input: {
     },
     effective,
     selected,
+    commit,
   };
 }
 
@@ -833,6 +856,13 @@ function resolveReclaimApplication(input: {
   );
   if (committed && newEntries.length === 0) return committed;
   const newBlockCount = new Set(newEntries.map((entry) => entry.frameIndex)).size;
+  const emergencyPressure = rawProjection.preflight.status === 'hard_limit';
+  const commitsTooCloseTogether =
+    committed != null &&
+    !emergencyPressure &&
+    request.state.turn.turnIndex <
+      committed.commit.committedAtTurnIndex + CONTEXT_RECLAIM_LIVE_POLICY_V3.minTurnsBetweenCommits;
+  if (committed && commitsTooCloseTogether) return committed;
   const incrementalSavedTokens = committed
     ? newEntries.reduce((total, entry) => {
         const frame = rawProjection.frames[entry.frameIndex];
@@ -856,11 +886,14 @@ function resolveReclaimApplication(input: {
     rawProjection.estimate.transcriptTokens > 0
       ? incrementalSavedTokens / rawProjection.estimate.transcriptTokens
       : 0;
+  const minimumSavedTokens = committed
+    ? CONTEXT_RECLAIM_LIVE_POLICY_V3.minIncrementalEstimatedSavedTokens
+    : CONTEXT_RECLAIM_LIVE_POLICY_V3.minInitialEstimatedSavedTokens;
   if (
-    incrementalSavedTokens < CONTEXT_RECLAIM_LIVE_POLICY_V2.minEstimatedSavedTokens ||
-    incrementalSavingRatio < CONTEXT_RECLAIM_LIVE_POLICY_V2.minSavingRatio ||
+    incrementalSavedTokens < minimumSavedTokens ||
+    incrementalSavingRatio < CONTEXT_RECLAIM_LIVE_POLICY_V3.minSavingRatio ||
     (committed ? newBlockCount : plan.selectedBlockCount) <
-      CONTEXT_RECLAIM_LIVE_POLICY_V2.minSelectedBlockCount
+      CONTEXT_RECLAIM_LIVE_POLICY_V3.minSelectedBlockCount
   ) {
     if (committed) return committed;
     return {
@@ -914,8 +947,8 @@ function resolveReclaimApplication(input: {
       ? actualSaved / rawProjection.estimate.transcriptTokens
       : 0;
   if (
-    actualSaved < CONTEXT_RECLAIM_LIVE_POLICY_V2.minEstimatedSavedTokens ||
-    actualRatio < CONTEXT_RECLAIM_LIVE_POLICY_V2.minSavingRatio
+    actualSaved < minimumSavedTokens ||
+    actualRatio < CONTEXT_RECLAIM_LIVE_POLICY_V3.minSavingRatio
   ) {
     if (committed) return committed;
     return {

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { extractPromptCacheMetrics } from '@/core/cache-metrics';
 import type { ProviderDataAdmissionGateV1 } from '@/core/config/provider-data-admission';
 import { humanMessage, systemMessage } from '@/core/messages';
 import type {
@@ -10,21 +11,36 @@ import type { RuntimeState, TranscriptMessage } from '@/core/runtime/state';
 import { countTokens } from '@/core/token-counter';
 import { normalizeCompactionSummary, serializeCompactionSummary } from './compaction-summary-frame';
 import { digestCompactionSource, findSafeCompactionBoundary } from './compaction-v2';
-import { createVerifiedContextCheckpointV3 } from './context-checkpoint-v3';
+import {
+  buildCanonicalTranscriptBlocksV1,
+  createVerifiedContextCheckpointV3,
+} from './context-checkpoint-v3';
 import {
   buildContextProjection,
   type ContextProjectionEnvironment,
   digestProjectionEnvironment,
 } from './context-projection';
+import { selectCheckpointWorkingSetV1 } from './context-working-set';
 import type { SupportedChatModel } from './factory';
 import { invokeBoundModel } from './invoke';
 import type { ProviderDispatchEntryGuardV1 } from './progressive-context-orchestrator';
+import { hasSummaryProviderUsageV1, type SummaryProviderUsageV1 } from './summary-provider-usage';
 
 export { normalizeCompactionSummary, serializeCompactionSummary };
 
 const DEFAULT_MAX_SUMMARY_TOKENS = 6_000;
 const DEFAULT_MAX_NARRATIVE_TOKENS = 6_000;
 const MINIMUM_REDUCTION_TOKENS = 1_024;
+/**
+ * Full-prefix SummaryCompact deliberately does not consume a prior summary.
+ * Without an admission bound, each later replacement can re-send the whole
+ * transcript for a tiny marginal primary-context gain. Five is a conservative
+ * default: a request whose *best possible* input-token saving cannot repay its
+ * summary input within five future primary requests is not dispatched.
+ */
+export const DEFAULT_MAX_SUMMARY_INPUT_TO_REDUCTION_RATIO = 5;
+/** Provider success values accepted for the one-shot no-tools summary request. */
+const SUCCESSFUL_SUMMARY_FINISH_REASONS = new Set(['stop', 'end_turn', 'completed', 'complete']);
 
 export const SUMMARY_SYSTEM_PROMPT = `Summarize settled agent history as one concise Markdown narrative.
 
@@ -50,6 +66,8 @@ export interface ContextSummaryGenerationResult {
   hasToolCalls?: boolean;
   inputTokens?: number;
   outputTokens?: number;
+  cacheHitTokens?: number;
+  cacheMissTokens?: number;
 }
 
 export type ContextSummaryGenerator = (
@@ -94,6 +112,7 @@ export function createModelContextSummaryGenerator(input: {
     const usage = response.response_metadata?.usage as
       | { input_tokens?: unknown; prompt_tokens?: unknown; completion_tokens?: unknown }
       | undefined;
+    const cacheMetrics = extractPromptCacheMetrics(response);
     return {
       summary,
       finishReason: String(response.response_metadata?.finishReason ?? ''),
@@ -106,19 +125,25 @@ export function createModelContextSummaryGenerator(input: {
             : undefined,
       outputTokens:
         typeof usage?.completion_tokens === 'number' ? usage.completion_tokens : undefined,
+      ...(cacheMetrics
+        ? {
+            cacheHitTokens: cacheMetrics.cacheHitTokens,
+            cacheMissTokens: cacheMetrics.cacheMissTokens,
+          }
+        : {}),
     };
   };
 }
 
 const providerUsageByCheckpointV1 = new WeakMap<
   VerifiedContextCheckpointV3,
-  { inputTokens: number; outputTokens: number }
+  SummaryProviderUsageV1
 >();
 
 /** One-shot transfer of non-checkpoint Provider accounting to the terminal event builder. */
 export function takeContextSummaryProviderUsageV1(
   checkpoint: VerifiedContextCheckpointV3,
-): { inputTokens: number; outputTokens: number } | undefined {
+): SummaryProviderUsageV1 | undefined {
   const usage = providerUsageByCheckpointV1.get(checkpoint);
   providerUsageByCheckpointV1.delete(checkpoint);
   return usage;
@@ -126,10 +151,16 @@ export function takeContextSummaryProviderUsageV1(
 
 export class ContextCompactionValidationError extends Error {
   readonly kind: ContextCompactionErrorKind;
+  readonly providerUsage?: SummaryProviderUsageV1;
 
-  constructor(kind: ContextCompactionErrorKind, message: string) {
+  constructor(
+    kind: ContextCompactionErrorKind,
+    message: string,
+    providerUsage?: SummaryProviderUsageV1,
+  ) {
     super(message);
     this.kind = kind;
+    this.providerUsage = providerUsage;
     this.name = 'ContextCompactionValidationError';
   }
 }
@@ -170,6 +201,30 @@ function normalizeResult(
   return typeof value === 'string' ? { summary: value } : value;
 }
 
+function providerUsageFromGeneration(
+  generated: ContextSummaryGenerationResult,
+): SummaryProviderUsageV1 | undefined {
+  const usage: SummaryProviderUsageV1 = {};
+  for (const [key, value] of Object.entries({
+    inputTokens: generated.inputTokens,
+    outputTokens: generated.outputTokens,
+    cacheHitTokens: generated.cacheHitTokens,
+    cacheMissTokens: generated.cacheMissTokens,
+  }) as Array<[keyof SummaryProviderUsageV1, unknown]>) {
+    if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) {
+      usage[key] = value;
+    }
+  }
+  return hasSummaryProviderUsageV1(usage) ? usage : undefined;
+}
+
+function hasSuccessfulSummaryFinishReason(finishReason: string | undefined): boolean {
+  return (
+    typeof finishReason === 'string' &&
+    SUCCESSFUL_SUMMARY_FINISH_REASONS.has(finishReason.trim().toLowerCase())
+  );
+}
+
 /** Build the sole production compactor: one request producing one Markdown narrative. */
 export function createNarrativeContextCompactor(options: {
   generate: ContextSummaryGenerator;
@@ -178,6 +233,8 @@ export function createNarrativeContextCompactor(options: {
   maxNarrativeTokens?: number;
   modelContextWindowTokens?: number;
   modelMaxOutputTokens?: number;
+  /** See DEFAULT_MAX_SUMMARY_INPUT_TO_REDUCTION_RATIO. */
+  maxSummaryInputToReductionRatio?: number;
 }) {
   const maxSummaryTokens = Math.min(
     options.maxSummaryTokens ?? DEFAULT_MAX_SUMMARY_TOKENS,
@@ -185,8 +242,13 @@ export function createNarrativeContextCompactor(options: {
   );
   const maxNarrativeTokens = options.maxNarrativeTokens ?? DEFAULT_MAX_NARRATIVE_TOKENS;
   const maxInputTokens = options.maxSummaryInputTokens;
+  const maxSummaryInputToReductionRatio =
+    options.maxSummaryInputToReductionRatio ?? DEFAULT_MAX_SUMMARY_INPUT_TO_REDUCTION_RATIO;
   if (maxSummaryTokens > maxNarrativeTokens) {
     throw new Error('maxSummaryTokens must not exceed maxNarrativeTokens.');
+  }
+  if (!Number.isFinite(maxSummaryInputToReductionRatio) || maxSummaryInputToReductionRatio <= 0) {
+    throw new Error('maxSummaryInputToReductionRatio must be a positive finite number.');
   }
 
   return async (input: {
@@ -208,6 +270,16 @@ export function createNarrativeContextCompactor(options: {
       throw new ContextCompactionValidationError(
         'unsafe_boundary',
         safe.reason ?? 'No safe compaction boundary exists.',
+      );
+    }
+    // The checkpoint writer revalidates this later, but it is a strict
+    // pre-dispatch boundary too: an incomplete, reordered, or cross-turn tool
+    // block must never spend a Provider request only to be rejected afterward.
+    const canonicalSource = buildCanonicalTranscriptBlocksV1(input.state);
+    if (canonicalSource.status === 'unavailable') {
+      throw new ContextCompactionValidationError(
+        'unsafe_boundary',
+        `Canonical summary source is unavailable: ${canonicalSource.reason}.`,
       );
     }
 
@@ -266,6 +338,33 @@ export function createNarrativeContextCompactor(options: {
         ...(base ? { baseCheckpoint: base } : {}),
       });
     const bestCaseCheckpoint = checkpoint('x', Math.max(0, before - 1), new Date(0).toISOString());
+    // SummaryCompact is only admissible when the checkpoint it could create
+    // has a verified L2 Working Set. In particular, do not pay a Provider to
+    // create a checkpoint whose required recent atomic window cannot fit the
+    // fixed policy capacity. This check intentionally precedes the reduction
+    // calculation: unavailable Working Set can itself make the projected gain
+    // appear to be zero, but the durable failure must retain that diagnostic.
+    // The real checkpoint is independently validated again after generation
+    // by executeContextCompaction.
+    const provisionalWorkingSet = selectCheckpointWorkingSetV1({
+      state: input.state,
+      checkpoint: bestCaseCheckpoint,
+      ...(input.projectionEnvironment?.oversizedBlockOffloadV1 === true
+        ? {
+            oversizedBlockOffloadV1: true,
+            availableToolNames: input.projectionEnvironment.serializedTools.map(
+              (tool) => tool.name,
+            ),
+          }
+        : {}),
+      expectedRouteIdentityDigest: routeIdentityDigest,
+    });
+    if (provisionalWorkingSet.status !== 'available') {
+      throw new ContextCompactionValidationError(
+        'insufficient_reduction',
+        `SummaryCompact is not dispatched because its verified Working Set is unavailable (${provisionalWorkingSet.reason}).`,
+      );
+    }
     const bestCaseAfter = buildContextProjection({
       ...projectionInput,
       candidateCheckpoint: bestCaseCheckpoint,
@@ -284,6 +383,13 @@ export function createNarrativeContextCompactor(options: {
     });
     const completeRequestTokens =
       countTokens(SUMMARY_SYSTEM_PROMPT) + countTokens(requestInput) + 8;
+    const estimatedSummaryInputToReductionRatio = completeRequestTokens / maximumReduction;
+    if (estimatedSummaryInputToReductionRatio > maxSummaryInputToReductionRatio) {
+      throw new ContextCompactionValidationError(
+        'insufficient_reduction',
+        `SummaryCompact would send ${completeRequestTokens} input tokens for at most ${maximumReduction} primary-context tokens saved (ratio ${estimatedSummaryInputToReductionRatio.toFixed(2)} exceeds configured limit ${maxSummaryInputToReductionRatio}).`,
+      );
+    }
     const modelInputLimit =
       options.modelContextWindowTokens != null
         ? Math.max(0, options.modelContextWindowTokens - maxSummaryTokens)
@@ -317,24 +423,25 @@ export function createNarrativeContextCompactor(options: {
       }
       throw error;
     }
+    const providerUsage = providerUsageFromGeneration(generated);
+    const rejectGenerated = (kind: ContextCompactionErrorKind, message: string): never => {
+      throw new ContextCompactionValidationError(kind, message, providerUsage);
+    };
     const summary = normalizeCompactionSummary(generated.summary);
     if (!summary) {
-      throw new ContextCompactionValidationError('empty_summary', 'Summary is empty.');
+      rejectGenerated('empty_summary', 'Summary is empty.');
     }
-    if (generated.finishReason?.toLowerCase().includes('length')) {
-      throw new ContextCompactionValidationError('truncated_summary', 'Summary was truncated.');
+    if (!hasSuccessfulSummaryFinishReason(generated.finishReason)) {
+      rejectGenerated(
+        'truncated_summary',
+        'Summary did not end with an explicit successful Provider finish reason.',
+      );
     }
     if (generated.hasToolCalls) {
-      throw new ContextCompactionValidationError(
-        'unexpected_tool_call',
-        'Summary model returned a tool call.',
-      );
+      rejectGenerated('unexpected_tool_call', 'Summary model returned a tool call.');
     }
     if (countTokens(summary) > maxNarrativeTokens) {
-      throw new ContextCompactionValidationError(
-        'truncated_summary',
-        'Summary exceeds the narrative token limit.',
-      );
+      rejectGenerated('truncated_summary', 'Summary exceeds the narrative token limit.');
     }
 
     const candidate = checkpoint(summary, Math.max(0, before - 1), new Date().toISOString());
@@ -343,23 +450,13 @@ export function createNarrativeContextCompactor(options: {
       candidateCheckpoint: candidate,
     }).estimate.totalInputTokens;
     if (before - after < MINIMUM_REDUCTION_TOKENS) {
-      throw new ContextCompactionValidationError(
+      rejectGenerated(
         'insufficient_reduction',
         `Compaction saved ${before - after} tokens; ${MINIMUM_REDUCTION_TOKENS} required.`,
       );
     }
     const completed = checkpoint(summary, after, new Date().toISOString());
-    if (
-      Number.isSafeInteger(generated.inputTokens) &&
-      generated.inputTokens! >= 0 &&
-      Number.isSafeInteger(generated.outputTokens) &&
-      generated.outputTokens! >= 0
-    ) {
-      providerUsageByCheckpointV1.set(completed, {
-        inputTokens: generated.inputTokens!,
-        outputTokens: generated.outputTokens!,
-      });
-    }
+    if (providerUsage) providerUsageByCheckpointV1.set(completed, providerUsage);
     return completed;
   };
 }

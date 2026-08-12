@@ -225,7 +225,7 @@ bun run test:tui:system
 bun run test:tui:smoke:native
 bun run test:all
 bun run test:mcp:live
-bun run test:model:live
+bun run eval:context:live-pilot
 bun run test:provider:smoke -- --provider deepseek
 bun run test:provider:smoke -- --provider opencode-go
 bun test tests/release
@@ -251,7 +251,8 @@ prompt、response、credential 或完整 endpoint；缺 key 或调用失败时�
 DeepSeek 调用限制 16 output tokens；OpenCode Go 的 reasoning 模型限制 128 output tokens，确保最小调用
 仍能产生可验证的非空正文。
 
-`qualify:context:produce <artifact>` 与 `qualify:context:verify <artifact>` 生成并独立验证 20 条长会话和
-2000-block/8MiB 的渐进式上下文资格证据。
+`qualify:context` 是唯一的本地渐进式上下文资格入口：它生成并独立验证 20 条长会话和 2000-block/8MiB
+证据，然后删除自有临时 artifact。诊断时可使用 `bun run qualify:context --artifact=<path>` 保留 artifact；底层
+producer/verifier 不是日常入口。
 
-默认测试不访问真实模型或公网 MCP，也不运行依赖宿主机 Seatbelt/bubblewrap 的正向用例。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`。`test:runtime:fault` 运行确定性的 SIGKILL/SQLite/report contract，`test:runtime:soak` 运行固定 7-case CI profile；资源指标不完整时仍保持 `inconclusive`，不能包装成成功。`test:sandbox:smoke:native` 显式运行当前宿主机的原生 sandbox executor smoke。快速 TUI harness 单元测试进入默认 `unit` 门禁，也可用 `test:tui:harness` 单独运行；真实 TUI PTY scenarios 只由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时，不重复运行 harness。Required CI 将默认 scenario 清单按稳定的四个分片分配到互相独立的 runner；每个分片仍逐文件串行，最终 `tui-system` 门禁只在全部分片通过时成功。first-run provider 探测使用本地 mock `/v1/models`。`test:tui:smoke:native` 是依赖宿主机真实 sandbox backend 的显式 opt-in PTY smoke，不属于默认门禁；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 与原生平台文件，不是仓库规范的全量入口。旧 production-shaped authority contract 只作为 fail-closed 负向测试保留；registry 为空时不得生成外部认证或 promotion 结论，且不再绑定任何路线图 Task。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`test:model:live` 是显式 opt-in 的真实模型 context compaction direct/incremental summary 套件。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。
+默认测试不访问真实模型或公网 MCP，也不运行依赖宿主机 Seatbelt/bubblewrap 的正向用例。`test:mock` 运行确定性的 context compaction Runtime contract；`test:e2e` 只运行 `tests/e2e/local/`。`test:runtime:fault` 运行确定性的 SIGKILL/SQLite/report contract，`test:runtime:soak` 运行固定 7-case CI profile；资源指标不完整时仍保持 `inconclusive`，不能包装成成功。`test:sandbox:smoke:native` 显式运行当前宿主机的原生 sandbox executor smoke。快速 TUI harness 单元测试进入默认 `unit` 门禁，也可用 `test:tui:harness` 单独运行；真实 TUI PTY scenarios 只由 `test:tui:system` 按文件独立串行执行，并带单文件硬超时，不重复运行 harness。Required CI 将默认 scenario 清单按稳定的四个分片分配到互相独立的 runner；每个分片仍逐文件串行，最终 `tui-system` 门禁只在全部分片通过时成功。first-run provider 探测使用本地 mock `/v1/models`。`test:tui:smoke:native` 是依赖宿主机真实 sandbox backend 的显式 opt-in PTY smoke，不属于默认门禁；`test:all` 依次运行默认测试和完整 PTY suite。裸 `bun test` 会误收集高成本 PTY 与原生平台文件，不是仓库规范的全量入口。旧 production-shaped authority contract 只作为 fail-closed 负向测试保留；registry 为空时不得生成外部认证或 promotion 结论，且不再绑定任何路线图 Task。`test:mcp:live` 是显式 opt-in 的 LangChain Docs 公网 MCP smoke；`eval:context:live-pilot` 是显式 opt-in 的真实模型上下文质量 runner。未实际运行对应 live runner 时，不得把 mock 或本地 E2E 表述为真实 Provider 验证。

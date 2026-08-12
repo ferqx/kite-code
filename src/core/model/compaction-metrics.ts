@@ -6,6 +6,7 @@
  */
 
 import type { ContextCompactionReason } from '@/core/runtime/context-compaction';
+import type { SummaryProviderUsageV1 } from './summary-provider-usage';
 
 export interface CompactionMetricSample {
   /** compactionId for correlation */
@@ -36,6 +37,14 @@ export interface CompactionMetricsSnapshot {
   totalTokensSaved: number;
   /** Latest estimation error ratio (actualEstimate / preflight estimate) */
   estimationErrorRatio?: number;
+  /** Aggregate redacted accounting for SummaryCompact Provider calls, including rejected results. */
+  summaryProviderUsage: {
+    observedCalls: number;
+    inputTokens: number;
+    outputTokens: number;
+    cacheHitTokens: number;
+    cacheMissTokens: number;
+  };
 }
 
 const MAX_SAMPLES = 64;
@@ -50,12 +59,14 @@ export interface CompactionReporter {
     tokensAfter: number;
     turnsSinceLastCheckpoint?: number;
     completionTurnIndex?: number;
+    providerUsage?: SummaryProviderUsageV1;
   }): void;
   recordFailed(input?: {
     compactionId: string;
     reason: ContextCompactionReason;
     durationMs?: number;
     errorKind: string;
+    providerUsage?: SummaryProviderUsageV1;
   }): void;
   recordContextFollowUp?(currentTurnIndex: number, totalInputTokens: number): void;
 }
@@ -70,6 +81,22 @@ export class CompactionMetrics implements CompactionReporter {
   private _thrashPauses = 0;
   private _estimationErrorRatio?: number;
   private _samples: CompactionMetricSample[] = [];
+  private _summaryProviderUsage = {
+    observedCalls: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheHitTokens: 0,
+    cacheMissTokens: 0,
+  };
+
+  private recordProviderUsage(usage: SummaryProviderUsageV1 | undefined): void {
+    if (!usage) return;
+    this._summaryProviderUsage.observedCalls++;
+    this._summaryProviderUsage.inputTokens += usage.inputTokens ?? 0;
+    this._summaryProviderUsage.outputTokens += usage.outputTokens ?? 0;
+    this._summaryProviderUsage.cacheHitTokens += usage.cacheHitTokens ?? 0;
+    this._summaryProviderUsage.cacheMissTokens += usage.cacheMissTokens ?? 0;
+  }
 
   /** Increment the requested counter. */
   recordRequested(): void {
@@ -85,8 +112,10 @@ export class CompactionMetrics implements CompactionReporter {
     tokensAfter: number;
     turnsSinceLastCheckpoint?: number;
     completionTurnIndex?: number;
+    providerUsage?: SummaryProviderUsageV1;
   }): void {
     this._completed++;
+    this.recordProviderUsage(input.providerUsage);
     const reductionRatio =
       input.tokensBefore > 0 ? (input.tokensBefore - input.tokensAfter) / input.tokensBefore : 0;
     this._samples.push({
@@ -110,8 +139,10 @@ export class CompactionMetrics implements CompactionReporter {
     reason: ContextCompactionReason;
     durationMs?: number;
     errorKind: string;
+    providerUsage?: SummaryProviderUsageV1;
   }): void {
     this._failed++;
+    this.recordProviderUsage(_input?.providerUsage);
   }
 
   recordContextFollowUp(currentTurnIndex: number, totalInputTokens: number): void {
@@ -169,6 +200,7 @@ export class CompactionMetrics implements CompactionReporter {
       hardBlocks: this._hardBlocks,
       thrashPauses: this._thrashPauses,
       estimationErrorRatio: this._estimationErrorRatio,
+      summaryProviderUsage: { ...this._summaryProviderUsage },
       samples: [...this._samples],
       averageReductionRatio: this._samples.length > 0 ? totalReduction / this._samples.length : 0,
       totalTokensSaved: this._samples.reduce(
@@ -185,7 +217,17 @@ export class CompactionMetrics implements CompactionReporter {
     this._failed = 0;
     this._resets = 0;
     this._m1FramesFolded = 0;
+    this._hardBlocks = 0;
+    this._thrashPauses = 0;
+    this._estimationErrorRatio = undefined;
     this._samples = [];
+    this._summaryProviderUsage = {
+      observedCalls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheHitTokens: 0,
+      cacheMissTokens: 0,
+    };
   }
 }
 

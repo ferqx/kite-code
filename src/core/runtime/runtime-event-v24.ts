@@ -70,6 +70,7 @@ export const RUNTIME_EVENT_FIELDS_V24 = {
     'errorKind',
     'message',
     'providerDispatchState',
+    'providerUsage',
     'requestedAtTurnId',
     'retryable',
     'sourceRevision',
@@ -132,6 +133,7 @@ export const RUNTIME_EVENT_FIELDS_V24 = {
     'errorKind',
     'message',
     'providerDispatchState',
+    'providerUsage',
     'terminalBatchKey',
     'type',
   ],
@@ -1133,8 +1135,15 @@ function assertConcurrencyWaiterV24(value: unknown): void {
 }
 
 function assertProviderUsageV24(value: unknown): void {
-  const fields = ['inputTokens', 'outputTokens'] as const;
-  assertNestedKeysV24(value, fields, fields, 'Provider usage');
+  const fields = ['inputTokens', 'outputTokens', 'cacheHitTokens', 'cacheMissTokens'] as const;
+  assertNestedKeysV24(value, fields, [], 'Provider usage');
+  if (
+    !Object.values(value as Record<string, unknown>).every(
+      (counter) => Number.isSafeInteger(counter) && (counter as number) >= 0,
+    )
+  ) {
+    throw new Error('Provider usage counters must be non-negative safe integers.');
+  }
 }
 
 function assertCheckpointV24(value: unknown): void {
@@ -2289,8 +2298,14 @@ function assertRuntimeEventNestedSchemasV24(event: RuntimeEvent): void {
       assertCheckpointV24(event.checkpoint);
       if (event.providerUsage) assertProviderUsageV24(event.providerUsage);
       return;
+    case 'context.compaction_failed':
+      if (event.providerUsage) assertProviderUsageV24(event.providerUsage);
+      return;
     case 'context.summary_completed_v1':
       assertCheckpointV24(event.checkpoint);
+      if (event.providerUsage) assertProviderUsageV24(event.providerUsage);
+      return;
+    case 'context.summary_failed_v1':
       if (event.providerUsage) assertProviderUsageV24(event.providerUsage);
       return;
     case 'context.checkpoint_v3_rebound_v1':

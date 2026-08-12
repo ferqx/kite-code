@@ -14,6 +14,7 @@ import {
 } from '@/core/model/context-projection';
 import { selectCheckpointWorkingSetV1 } from '@/core/model/context-working-set';
 import type { ProviderDispatchEntryGuardV1 } from '@/core/model/progressive-context-orchestrator';
+import type { SummaryProviderUsageV1 } from '@/core/model/summary-provider-usage';
 import type {
   ContextCompactionCheckpoint,
   PendingContextCompaction,
@@ -33,7 +34,7 @@ export type ContextCompactor = (input: {
   | ContextCompactionCheckpoint
   | {
       checkpoint: ContextCompactionCheckpoint;
-      providerUsage: { inputTokens: number; outputTokens: number };
+      providerUsage: SummaryProviderUsageV1;
     }
 >;
 
@@ -45,12 +46,14 @@ function failure(
   retryable: boolean,
   reporter?: CompactionReporter,
   durationMs?: number,
+  providerUsage?: SummaryProviderUsageV1,
 ): RuntimeEvent[] {
   reporter?.recordFailed({
     compactionId: pending.compactionId,
     reason: pending.reason,
     durationMs,
     errorKind,
+    ...(providerUsage ? { providerUsage } : {}),
   });
   return [
     {
@@ -62,6 +65,7 @@ function failure(
       retryable,
       requestedAtTurnId: pending.requestedAtTurnId,
       ...(durationMs != null ? { durationMs } : {}),
+      ...(providerUsage ? { providerUsage } : {}),
     },
   ];
 }
@@ -144,6 +148,7 @@ export async function executeContextCompaction(input: {
         true,
         input.reporter,
         elapsed(),
+        providerUsage,
       );
     }
     if (
@@ -167,6 +172,7 @@ export async function executeContextCompaction(input: {
         false,
         input.reporter,
         elapsed(),
+        providerUsage,
       );
     }
     const coveredMessage = input.state.transcript.messages.find(
@@ -187,6 +193,7 @@ export async function executeContextCompaction(input: {
         false,
         input.reporter,
         elapsed(),
+        providerUsage,
       );
     }
     const currentTurnHasMessages = input.state.transcript.messages.some(
@@ -224,6 +231,7 @@ export async function executeContextCompaction(input: {
         false,
         input.reporter,
         elapsed(),
+        providerUsage,
       );
     }
     if (
@@ -246,6 +254,7 @@ export async function executeContextCompaction(input: {
         false,
         input.reporter,
         elapsed(),
+        providerUsage,
       );
     }
     const projectionInput = {
@@ -273,6 +282,7 @@ export async function executeContextCompaction(input: {
         false,
         input.reporter,
         elapsed(),
+        providerUsage,
       );
     }
     const reductionFailed = expectedBefore - expectedAfter < 1_024;
@@ -285,6 +295,7 @@ export async function executeContextCompaction(input: {
         false,
         input.reporter,
         elapsed(),
+        providerUsage,
       );
     }
     input.reporter?.recordCompleted({
@@ -298,6 +309,7 @@ export async function executeContextCompaction(input: {
           ? input.state.turn.turnIndex - input.state.context.lastCompactionTurnIndex
           : undefined,
       completionTurnIndex: input.state.turn.turnIndex,
+      ...(providerUsage ? { providerUsage } : {}),
     });
     return [
       {
@@ -330,6 +342,7 @@ export async function executeContextCompaction(input: {
         error.kind === 'stale_context',
         input.reporter,
         elapsed(),
+        error.providerUsage,
       );
     }
     return failure(

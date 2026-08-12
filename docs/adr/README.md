@@ -103,3 +103,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0099](0099-session-memory-lifecycle.md) | proposed | 延期的可选会话记忆增强，不是当前压缩计划依赖 |
 | [0100](0100-checkpoint-working-set-compaction.md) | accepted | 三级采用 MicroCompact、Checkpoint Working Set 与 SummaryCompact |
 | [0101](0101-verified-checkpoint-working-set-protocol.md) | accepted | 冻结 verified checkpoint、Working Set 区间、摘要续跑与双 writer 所有权 |
+| [0102](0102-oversized-working-set-offload.md) | accepted | 默认关闭地卸载超大 Working Set 只读工具结果投影 |
+| [0103](0103-microcompact-cache-generation-batching.md) | accepted | 将 MicroCompact 提交批量化为可审计的缓存世代切换 |

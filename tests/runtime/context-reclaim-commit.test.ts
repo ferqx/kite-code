@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { aiMessage } from '@/core/messages';
 import {
-  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  CONTEXT_RECLAIM_LIVE_POLICY_V3,
   type PreparedContextRequestReadyV2,
   prepareContextRequestV2,
 } from '@/core/model/context-preparation-v2';
@@ -139,7 +139,7 @@ function preparedFixture(): {
     requestedMaxOutputTokens: 256,
     promptAffectingParameters: { temperature: 0 },
     toolResultBudgetPolicyId: 'tool-result-budget-registry:v2',
-    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId,
     reclaimMode: 'live',
   });
   if (!('proposedReclaimPlan' in prepared) || !prepared.proposedReclaimPlan)
@@ -294,7 +294,7 @@ describe('ContextReclaimCommitV1', () => {
       requestedMaxOutputTokens: 256,
       promptAffectingParameters: { temperature: 0 },
       toolResultBudgetPolicyId: 'tool-result-budget-registry:v2',
-      reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+      reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId,
       reclaimMode: 'live',
     });
     if (!('effectiveProjection' in prepared)) throw new Error('expected prepared context');

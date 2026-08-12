@@ -7,6 +7,8 @@ import {
 } from '@/core/model/context-working-set';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState, type RuntimeState } from '@/core/runtime/state';
+import { projectedModelContentDigest } from '@/core/tools/registry/projection';
+import { type ToolResultBudgetReceiptV2, toolResultDigestV2 } from '@/core/tools/result-budget-v2';
 
 const EVENT_ID = 'e'.repeat(64);
 
@@ -28,13 +30,13 @@ function fixture(blocks = 160): RuntimeState {
   return state;
 }
 
-function checkpoint(state: RuntimeState, boundary = 139) {
+function checkpoint(state: RuntimeState, boundary: number | string = 139) {
   return createVerifiedContextCheckpointV3({
     state,
     checkpointId: 'checkpoint:v3',
     compactionId: 'checkpoint',
     reason: 'manual',
-    coveredThroughMessageId: `message-${boundary}`,
+    coveredThroughMessageId: typeof boundary === 'number' ? `message-${boundary}` : boundary,
     summary: '# Verified history\n\nSettled work is summarized.',
     inputTokensBefore: 20_000,
     inputTokensAfter: 4_000,
@@ -42,6 +44,75 @@ function checkpoint(state: RuntimeState, boundary = 139) {
     sourceProducingEventCutV1: { revision: 1, eventId: EVENT_ID },
     createdAt: new Date(0).toISOString(),
   });
+}
+
+function receipt(content: string): ToolResultBudgetReceiptV2 {
+  return {
+    version: 2,
+    projectionMode: 'budget_v2',
+    policyId: 'test-budget:v2',
+    toolIdentity: 'builtin:read_file',
+    bindingDigest: 'a'.repeat(64),
+    projectorId: 'read-line-window:v1',
+    projectorRevision: 'test-projector:v1',
+    validatorId: 'test-validator:v1',
+    rawResultDigest: toolResultDigestV2('test-raw:v1', content),
+    modelContentDigest: projectedModelContentDigest(content),
+    modelContentUtf8Bytes: Buffer.byteLength(content, 'utf8'),
+  };
+}
+
+function oversizedReadFixture(contentRepeats = 3_200): RuntimeState {
+  const state = createInitialRuntimeState({
+    threadId: 'oversized-working-set',
+    userId: 'u',
+    workspace: '/workspace',
+  });
+  state.revision = 1;
+  state.lastAppliedEventId = EVENT_ID;
+  state.appliedEventIds = [EVENT_ID];
+  for (let index = 0; index < 4; index++) {
+    const toolCallId = `read-${index}`;
+    const content = `line ${index}: ${'large settled read result '.repeat(contentRepeats)}`;
+    const resultReceipt = receipt(content);
+    state.transcript.messages.push(
+      {
+        kind: 'assistant',
+        messageId: `assistant-${index}`,
+        turnId: `turn-${index}`,
+        content: `Settled read result ${index}.`,
+        toolCalls: [{ id: toolCallId, name: 'read_file', args: { path: `src/${index}.ts` } }],
+      },
+      {
+        kind: 'tool',
+        messageId: `tool-${index}`,
+        turnId: `turn-${index}`,
+        toolCallId,
+        name: 'read_file',
+        content,
+        ok: true,
+        resultMeta: {
+          path: `src/${index}.ts`,
+          rawResultDigest: resultReceipt.rawResultDigest,
+          modelContentDigest: resultReceipt.modelContentDigest,
+          digestScope: 'raw',
+          toolResultReceipt: resultReceipt,
+        },
+      },
+    );
+    state.tools.calls[toolCallId] = {
+      toolCallId,
+      modelMessageId: `assistant-${index}`,
+      name: 'read_file',
+      args: { path: `src/${index}.ts` },
+      status: 'succeeded',
+      createdAtTurnId: `turn-${index}`,
+      effectClass: 'read_only',
+      sideEffect: false,
+      result: { ok: true, summary: 'read' },
+    };
+  }
+  return state;
 }
 
 describe('checkpoint working set v1', () => {
@@ -215,5 +286,92 @@ describe('checkpoint working set v1', () => {
       status: 'unavailable',
       reason: 'unsafe_runtime_barrier',
     });
+  });
+
+  test('offloads only eligible complete W tool blocks when the default raw window cannot fit', () => {
+    const state = oversizedReadFixture();
+    const raw = selectCheckpointWorkingSetV1({ state, checkpoint: checkpoint(state, 'tool-3') });
+    expect(raw).toEqual({ status: 'unavailable', reason: 'recent_window_exceeds_capacity' });
+    const before = JSON.stringify(state.transcript);
+    const selected = selectCheckpointWorkingSetV1({
+      state,
+      checkpoint: checkpoint(state, 'tool-3'),
+      oversizedBlockOffloadV1: true,
+      availableToolNames: ['read_file'],
+    });
+    expect(selected.status).toBe('available');
+    if (selected.status !== 'available') return;
+    expect(selected.oversizedBlockOffload?.policyId).toBe('oversized-block-offload:v1');
+    expect(selected.oversizedBlockOffload?.offloadedBlockCount).toBeGreaterThan(0);
+    expect(selected.oversizedBlockOffload?.offloadedToolResultCount).toBe(
+      selected.oversizedBlockOffload?.offloadedBlockCount,
+    );
+    expect(JSON.stringify(state.transcript)).toBe(before);
+    const projected = serializeFramesToMessages(selected.frames).map((message) => {
+      const item = message as unknown as { content?: unknown };
+      return typeof item.content === 'string' ? item.content : JSON.stringify(item.content);
+    });
+    expect(projected.some((content) => content.includes('tool-result-offload:v1'))).toBe(true);
+    expect(
+      projected.filter((content) => content.includes('large settled read result')),
+    ).toHaveLength(4 - selected.oversizedBlockOffload!.offloadedBlockCount);
+  });
+
+  test('never offloads an uncovered tail block', () => {
+    const state = oversizedReadFixture();
+    state.transcript.messages.push({
+      kind: 'user',
+      messageId: 'tail',
+      turnId: 'tail-turn',
+      content: 'tail must remain raw',
+    });
+    const selected = selectCheckpointWorkingSetV1({
+      state,
+      checkpoint: checkpoint(state, 'tool-3'),
+      oversizedBlockOffloadV1: true,
+      availableToolNames: ['read_file'],
+    });
+    expect(selected.status).toBe('available');
+    if (selected.status !== 'available') return;
+    expect(
+      serializeFramesToMessages(selected.frames).some(
+        (message) =>
+          (message as unknown as { messageId?: string }).messageId === 'tail' &&
+          (message as unknown as { content?: unknown }).content === 'tail must remain raw',
+      ),
+    ).toBe(true);
+  });
+
+  test('keeps the existing no-dispatch boundary when the replay tool is unavailable', () => {
+    const state = oversizedReadFixture();
+    expect(
+      selectCheckpointWorkingSetV1({
+        state,
+        checkpoint: checkpoint(state, 'tool-3'),
+        oversizedBlockOffloadV1: true,
+        availableToolNames: [],
+      }),
+    ).toEqual({ status: 'unavailable', reason: 'recent_window_exceeds_capacity' });
+  });
+
+  test('keeps the flag-off Working Set payload byte-identical when no offload is needed', () => {
+    const state = oversizedReadFixture(1);
+    const baseline = selectCheckpointWorkingSetV1({
+      state,
+      checkpoint: checkpoint(state, 'tool-3'),
+    });
+    const enabled = selectCheckpointWorkingSetV1({
+      state,
+      checkpoint: checkpoint(state, 'tool-3'),
+      oversizedBlockOffloadV1: true,
+      availableToolNames: ['read_file'],
+    });
+    expect(baseline.status).toBe('available');
+    expect(enabled.status).toBe('available');
+    if (baseline.status !== 'available' || enabled.status !== 'available') return;
+    expect(enabled.oversizedBlockOffload).toBeUndefined();
+    expect(JSON.stringify(serializeFramesToMessages(enabled.frames))).toBe(
+      JSON.stringify(serializeFramesToMessages(baseline.frames)),
+    );
   });
 });

@@ -53,6 +53,28 @@ describe('compactionMetrics', () => {
     expect(compactionMetrics.snapshot().failed).toBe(3);
   });
 
+  test('keeps Provider cost and cache counters for rejected summary results', () => {
+    compactionMetrics.clear();
+    compactionMetrics.recordFailed({
+      compactionId: 'rejected-after-provider',
+      reason: 'manual',
+      errorKind: 'empty_summary',
+      providerUsage: {
+        inputTokens: 12_000,
+        outputTokens: 48,
+        cacheHitTokens: 11_500,
+        cacheMissTokens: 500,
+      },
+    });
+    expect(compactionMetrics.snapshot().summaryProviderUsage).toEqual({
+      observedCalls: 1,
+      inputTokens: 12_000,
+      outputTokens: 48,
+      cacheHitTokens: 11_500,
+      cacheMissTokens: 500,
+    });
+  });
+
   test('recordReset increments the reset counter', () => {
     compactionMetrics.clear();
     compactionMetrics.recordReset();
@@ -153,11 +175,17 @@ describe('compactionMetrics', () => {
       tokensAfter: 50,
     });
     compactionMetrics.recordFailed();
+    compactionMetrics.recordHardBlock();
+    compactionMetrics.recordThrashPause();
+    compactionMetrics.recordEstimationError(1.25);
     compactionMetrics.clear();
     const snapshot = compactionMetrics.snapshot();
     expect(snapshot.requested).toBe(0);
     expect(snapshot.completed).toBe(0);
     expect(snapshot.failed).toBe(0);
+    expect(snapshot.hardBlocks).toBe(0);
+    expect(snapshot.thrashPauses).toBe(0);
+    expect(snapshot.estimationErrorRatio).toBeUndefined();
     expect(snapshot.samples).toHaveLength(0);
   });
 });

@@ -85,12 +85,16 @@ Provider 支持 `deepseek`、`openai`、`openai-compatible` 和 `ollama`，统�
 
 模型 capability 的每个字段只按显式模型条目、adapter runtime metadata 和兼容 `modelKwargs` 依次解析。模型名称和默认模型列表不提供能力；未知窗口仍允许 Runtime 调用模型，但上下文 utilization 显示为 unknown，并对 Capability disclosure 使用保守预算。
 
-旧自动会话总结 producer 已删除。`features.contextCompactionAutoV1`、`compaction.autoMode`、`triggerRatio`、
-`compactAfterEstimatedTokens`、`minimumReductionRatio`、`cooldownTurns`、`cohortSalt` 与 `livePercentage` 当前只为旧
-配置兼容继续解析，不能启用 shadow/live 或产生 `reason=auto`。当前 summary request 只由显式 `/compact` 触发，
-复用主模型（`tools: {}`，temperature 0，SDK retry 0）；自定义指令作为数据字段传入，但只有存在新 safe
-history 时才会 dispatch。Provider 失败按脱敏类别提示检查模型、credential、连接与 context/output limits 或
-执行 `/clear`，不自动清理、分块或重试。
+自动 Summary 继续受 `features.contextCompactionAutoV1` 的默认关闭 rollout 控制；`autoMode`、`triggerRatio`、
+`compactAfterEstimatedTokens`、`minimumReductionRatio`、`cohortSalt` 与 `livePercentage` 仍只为旧配置兼容而解析，
+不能自行启用 shadow/live。`compaction.cooldownTurns` 是当前 auto Summary 的有效门禁：每个已 dispatch 的 auto
+attempt 后，必须有该数量（默认 3）的成功 normal primary 才能再次尝试；同一 canonical source 永远去重。
+
+手动 `/compact` 与已启用的 auto Summary 都复用主模型（`tools: {}`，temperature 0，SDK retry 0），且只在存在新
+safe history 时 dispatch。Summary 始终独立重算完整 safe prefix，不以旧摘要作为输入；
+`compaction.maxSummaryInputToReductionRatio`（正数，默认 5）限制“摘要请求输入 token / 候选可节省主请求 token”的
+上界。超过时在 Provider 前拒绝，原始会话保持不变。Provider 失败按脱敏类别提示检查模型、credential、连接与
+context/output limits 或执行 `/clear`，不自动清理、分块或重试。
 
 确定性工具结果 reclaim 使用两个独立、默认关闭的 flag：`features.toolResultBudgetV2` 与
 `features.contextReclaimV1`。`compaction.reclaimMode` 允许 `off|shadow|live`，默认 `off`；effective live 必须
@@ -99,6 +103,13 @@ warning/更高 pressure 下评估。shadow 只记录严格脱敏的 bounded 内�
 live 只对全 `budget_v2` verified 的 settled read/search block 应用 L2，并只在成功 primary 后提交 bounded
 receipt/commit。当前受信 route registry 为空，用户配置不能自证 production qualification，因此 live 仅是
 development-only 路径。
+
+`features.oversizedBlockOffloadV1` 是独立、默认关闭的 L2.5 Working Set 可用性开关，且 effective 时要求
+`toolResultBudgetV2=true`。它不会改写会话或提交 reclaim receipt：仅在已有 V3 checkpoint 覆盖的 recent overlap
+装不下时，将整个合格的 settled `read_file`/`search_content`/`search_files` tool block 的所有结果投影为带原始
+digest、大小和重读提示的 stub；当前工具集必须仍包含该工具。用户文本、普通 assistant 文本、uncovered tail、当前
+回合以及 effectful/legacy/MCP/Shell/失败工具块不参与。模型如需细节只能用原参数重新执行已有只读工具，不能读取
+隐藏历史；关闭、无可用工具或任一验证失败都保持 raw/no-dispatch。该功能不等同生产 rollout 或无限会话支持。
 
 旧 rollout bucket 不再执行；`cohortSalt` 与 `livePercentage` 仅保留配置兼容。显式
 `localDebug: { enabled: true, directory }` 只写脱敏压缩元数据；未启用时不创建文件。
@@ -196,3 +207,5 @@ projector/receipt/self-contained terminal，关闭时保持 `compat_v1` 模型�
 `reclaimMode=shadow` 不创建持久 reclaim 事件、不调用 summary Provider，也不把候选统计解释为已节省 token；
 `live` 只有在成功 primary 的封闭 batch 内才可推进 `context.reclaim_commit_advanced`。旧 Slice B 的 L3
 source/checkpoint-v2 writer/refill guard 已清场，两者不会重新启用这些 producer。
+`oversizedBlockOffloadV1` 不复用 L2 reclaim commit：它是 ADR-0102 定义的、仅 V3 Working Set 内的 ephemeral
+projection offload，并要求 `toolResultBudgetV2`。

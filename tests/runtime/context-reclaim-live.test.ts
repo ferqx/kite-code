@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  CONTEXT_RECLAIM_LIVE_POLICY_V3,
   type PreparedContextRequestReadyV2,
   prepareContextRequestV2,
 } from '@/core/model/context-preparation-v2';
 import type { ContextProjectionEnvironment } from '@/core/model/context-projection';
+import { proposeContextReclaimCommitV1 } from '@/core/model/context-reclaim-commit';
 import type { ResolvedModelCapabilities } from '@/core/model/model-capabilities';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { projectedModelContentDigest } from '@/core/tools/registry/projection';
@@ -152,19 +153,79 @@ function prepare(
       checkResults: {},
     } as never;
   }
+  return prepareBase(base, mode, options?.reclaimAfterEstimatedTokens);
+}
+
+function prepareBase(
+  base: ReturnType<typeof fixture>,
+  mode: 'off' | 'shadow' | 'live',
+  reclaimAfterEstimatedTokens?: number,
+): PreparedContextRequestReadyV2 {
   const prepared = prepareContextRequestV2({
     purpose: 'normal',
     ...base,
     requestedMaxOutputTokens: 256,
     promptAffectingParameters: { temperature: 0 },
     toolResultBudgetPolicyId: 'tool-result-budget-registry:v2',
-    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId,
     reclaimMode: mode,
-    reclaimAfterEstimatedTokens: options?.reclaimAfterEstimatedTokens,
+    reclaimAfterEstimatedTokens,
   });
   if (!('effectiveProjection' in prepared))
     throw new Error(`unexpected block: ${prepared.next.reason}`);
   return prepared;
+}
+
+function insertHistoricalRead(
+  state: ReturnType<typeof fixture>['state'],
+  index: number,
+  charsPerBlock = 18_000,
+): void {
+  const callId = `read-extra-${index}`;
+  const assistantId = `assistant-extra-${index}`;
+  const turnId = `historical-extra-${index}`;
+  const path = `src/extra-${index}.ts`;
+  const content = `1|${'bounded historical source line '.repeat(Math.ceil(charsPerBlock / 31))}`;
+  const resultMeta = {
+    path,
+    totalLines: 1,
+    rawResultDigest: 'a'.repeat(64),
+    modelContentDigest: projectedModelContentDigest(content),
+    digestScope: 'raw' as const,
+    toolResultReceipt: receipt(content),
+  };
+  state.transcript.messages.splice(
+    -2,
+    0,
+    {
+      kind: 'assistant',
+      messageId: assistantId,
+      turnId,
+      content: '',
+      toolCalls: [{ id: callId, name: 'read_file', args: { path, limit: 100 } }],
+    },
+    {
+      kind: 'tool',
+      messageId: `tool-extra-${index}`,
+      turnId,
+      toolCallId: callId,
+      name: 'read_file',
+      content,
+      ok: true,
+      resultMeta,
+    },
+  );
+  state.tools.calls[callId] = {
+    toolCallId: callId,
+    modelMessageId: assistantId,
+    name: 'read_file',
+    args: { path, limit: 100 },
+    status: 'succeeded',
+    createdAtTurnId: turnId,
+    effectClass: 'read_only',
+    sideEffect: false,
+    result: { ok: true, summary: 'read', resultMeta },
+  };
 }
 
 describe('context reclaim live preparation', () => {
@@ -175,7 +236,7 @@ describe('context reclaim live preparation', () => {
     expect(live.reclaimApplication.kind).toBe('applied_plan');
     expect(live.effectiveProjection.estimate.totalInputTokens).toBeLessThan(
       live.rawProjection.estimate.totalInputTokens -
-        CONTEXT_RECLAIM_LIVE_POLICY_V2.minEstimatedSavedTokens,
+        CONTEXT_RECLAIM_LIVE_POLICY_V3.minInitialEstimatedSavedTokens,
     );
     expect(live.effectiveProjection.providerMessages).not.toEqual(
       live.rawProjection.providerMessages,
@@ -219,6 +280,79 @@ describe('context reclaim live preparation', () => {
       kind: 'raw_fallback',
       failure: 'plan_rejected',
     });
+  });
+
+  test('batches later prefix changes behind a cooldown and a larger incremental saving', () => {
+    const base = fixture({ contextWindowTokens: 8_000 });
+    const first = prepareBase(base, 'live');
+    if (!first.proposedReclaimPlan) throw new Error('expected initial reclaim plan');
+    const commit = proposeContextReclaimCommitV1({
+      state: base.state,
+      prepared: first,
+      plan: first.proposedReclaimPlan,
+    });
+    base.state.context.reclaimCommit = commit;
+    base.state.turn = {
+      turnId: 'active-after-first-commit',
+      turnIndex: commit.committedAtTurnIndex + 1,
+      status: 'active',
+    };
+    const priorPolicy = prepareContextRequestV2({
+      purpose: 'normal',
+      ...base,
+      requestedMaxOutputTokens: 256,
+      promptAffectingParameters: { temperature: 0 },
+      toolResultBudgetPolicyId: 'tool-result-budget-registry:v2',
+      reclaimPolicyId: 'context-reclaim-live:v2',
+      reclaimMode: 'live',
+    });
+    if (!('reclaimApplication' in priorPolicy)) throw new Error('expected prepared context');
+    expect(priorPolicy.reclaimApplication.kind).not.toBe('applied_commit');
+
+    insertHistoricalRead(base.state, 1, 60_000);
+
+    const duringCooldown = prepareBase(base, 'live');
+    expect(duringCooldown.reclaimApplication.kind).toBe('applied_commit');
+    expect(duringCooldown.proposedReclaimPlan).toBeUndefined();
+
+    base.state.turn = {
+      ...base.state.turn,
+      turnIndex:
+        commit.committedAtTurnIndex + CONTEXT_RECLAIM_LIVE_POLICY_V3.minTurnsBetweenCommits,
+    };
+    const tooSmallAfterCooldown = prepareBase(base, 'live');
+    expect(tooSmallAfterCooldown.reclaimApplication.kind).toBe('applied_commit');
+
+    insertHistoricalRead(base.state, 2, 60_000);
+    const batched = prepareBase(base, 'live');
+    expect(batched.reclaimApplication.kind).toBe('applied_plan');
+    expect(batched.proposedReclaimPlan?.estimatedSavedTokens).toBeGreaterThanOrEqual(
+      CONTEXT_RECLAIM_LIVE_POLICY_V3.minIncrementalEstimatedSavedTokens,
+    );
+  });
+
+  test('may bypass only the cooldown at hard pressure, never the batch qualification', () => {
+    const base = fixture({ contextWindowTokens: 8_000 });
+    const first = prepareBase(base, 'live');
+    if (!first.proposedReclaimPlan) throw new Error('expected initial reclaim plan');
+    const commit = proposeContextReclaimCommitV1({
+      state: base.state,
+      prepared: first,
+      plan: first.proposedReclaimPlan,
+    });
+    base.state.context.reclaimCommit = commit;
+    base.state.turn = {
+      turnId: 'hard-pressure-turn',
+      turnIndex: commit.committedAtTurnIndex + 1,
+      status: 'active',
+    };
+    insertHistoricalRead(base.state, 3, 60_000);
+    expect(prepareBase(base, 'live').reclaimApplication.kind).toBe('applied_commit');
+
+    insertHistoricalRead(base.state, 4, 60_000);
+    const emergency = prepareBase(base, 'live');
+    expect(emergency.rawProjection.preflight.status).toBe('hard_limit');
+    expect(emergency.reclaimApplication.kind).toBe('applied_plan');
   });
 
   test('pending interaction and verification are raw MicroCompact barriers', () => {

@@ -53,6 +53,7 @@ describe('test discovery boundaries', () => {
     expect(e2eFiles).toContain('tests/e2e/live/mcp/langchain-docs.live.ts');
     expect(e2eFiles).toContain('tests/e2e/live/model/README.md');
     expect(e2eFiles).toContain('tests/e2e/live/model/context-compaction.live.ts');
+    expect(e2eFiles).toContain('tests/e2e/live/model/context-strategy-pilot.live.ts');
   });
 
   test('keeps real-agent and PTY scenarios out while admitting deterministic TUI harness tests', () => {
@@ -84,8 +85,12 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.['test:e2e']).not.toContain('tests/e2e/live/');
     expect(pkg.scripts?.['test:mcp:live']).toContain('tests/e2e/live/mcp/');
     expect(pkg.scripts?.['test:mcp:live']).toContain('bun run');
-    expect(pkg.scripts?.['test:model:live']).toContain('tests/e2e/live/model/');
-    expect(pkg.scripts?.['test:model:live']).toContain('bun run');
+    expect(pkg.scripts?.['test:model:live']).toBeUndefined();
+    expect(pkg.scripts?.['eval:context:live-pilot']).toContain('tests/e2e/live/model/');
+    expect(pkg.scripts?.['eval:context:live-pilot']).toContain('bun run');
+    expect(pkg.scripts?.['qualify:context']).toContain('qualify-progressive-context.ts');
+    expect(pkg.scripts?.['qualify:context:produce']).toBeUndefined();
+    expect(pkg.scripts?.['qualify:context:verify']).toBeUndefined();
     expect(pkg.scripts?.['test:tui:system']).toContain('scripts/run-tui-system-tests.ts');
     expect(pkg.scripts?.['test:tui:harness']).toContain('tests/tui-system/harness/');
     expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain('tests/sandbox-executor.test.ts');

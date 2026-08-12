@@ -401,6 +401,10 @@ describe('narrative compaction e2e', () => {
     }
     expect(emitted.map((event) => event.type)).toContain('context.summary_failed_v1');
     expect(emitted.map((event) => event.type)).not.toContain('context.summary_completed_v1');
+    expect(emitted.find((event) => event.type === 'context.summary_failed_v1')).toMatchObject({
+      providerDispatchState: 'entered',
+      providerUsage: { inputTokens: 1_000, outputTokens: 64 },
+    });
     expect(kernel.getState().context.summaryLifecycle.kind).toBe('idle');
     expect(kernel.getState().context.activeCheckpoint).toBeUndefined();
     const reservations = Object.values(

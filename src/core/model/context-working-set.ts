@@ -10,7 +10,9 @@ import {
   checkpointProjectionBaseIdentityV1,
 } from './context-checkpoint-v3';
 import type { ContextFrame } from './context-frame';
+import { isToolCallBlockFrame } from './context-frame';
 import { buildCanonicalFrames } from './context-frame-builder';
+import { OFFLOAD_POLICY_V1, tryProjectOversizedToolBlockV1 } from './oversized-block-offload';
 
 export const CHECKPOINT_WORKING_SET_POLICY_V1 = Object.freeze({
   policyId: 'checkpoint-working-set:v1',
@@ -42,6 +44,13 @@ export type CheckpointWorkingSetV1 =
       totalBlockCount: number;
       recentTokens: number;
       frames: ContextFrame[];
+      /** Ephemeral L2.5 replacements; raw transcript and V3 proof remain unchanged. */
+      oversizedBlockOffload?: {
+        policyId: typeof OFFLOAD_POLICY_V1.policyId;
+        offloadedBlockCount: number;
+        offloadedToolResultCount: number;
+        savedTokens: number;
+      };
       projectionDigest: string;
     }
   | { status: 'unavailable'; reason: CheckpointWorkingSetUnavailableReasonV1 };
@@ -150,7 +159,11 @@ export function validateCheckpointV3ReboundProofV1(
   );
 }
 
-function transcriptMessageToModel(message: TranscriptMessage) {
+function transcriptMessageToModel(
+  state: Readonly<RuntimeState>,
+  message: TranscriptMessage,
+  includeOffloadMetadata = false,
+) {
   const identity = { messageId: message.messageId, turnId: message.turnId };
   switch (message.kind) {
     case 'user':
@@ -176,7 +189,20 @@ function transcriptMessageToModel(message: TranscriptMessage) {
         }),
         identity,
       );
-    case 'tool':
+    case 'tool': {
+      if (!includeOffloadMetadata) {
+        return Object.assign(
+          toolMessage({
+            id: message.messageId,
+            tool_call_id: message.toolCallId,
+            name: message.name,
+            content: message.content,
+            status: message.ok ? 'success' : 'error',
+          }),
+          identity,
+        );
+      }
+      const call = state.tools.calls[message.toolCallId];
       return Object.assign(
         toolMessage({
           id: message.messageId,
@@ -186,8 +212,24 @@ function transcriptMessageToModel(message: TranscriptMessage) {
           status: message.ok ? 'success' : 'error',
         }),
         identity,
+        structuredClone(message.resultMeta ?? {}),
+        {
+          args: call?.args === undefined ? undefined : structuredClone(call.args),
+          effectClass: call?.effectClass,
+        },
       );
+    }
   }
+}
+
+function framesForTranscriptBlock(
+  state: Readonly<RuntimeState>,
+  messages: readonly TranscriptMessage[],
+  includeOffloadMetadata = false,
+): ContextFrame[] {
+  return buildCanonicalFrames(
+    messages.map((message) => transcriptMessageToModel(state, message, includeOffloadMetadata)),
+  );
 }
 
 function unsafeBarrier(state: Readonly<RuntimeState>, boundary: number): boolean {
@@ -223,6 +265,9 @@ export function selectCheckpointWorkingSetV1(input: {
   checkpoint?: VerifiedContextCheckpointV3 | { version: number };
   contextWindowTokens?: number;
   expectedRouteIdentityDigest?: string;
+  /** Default-off L2.5: only eligible complete blocks inside the covered W overlap. */
+  oversizedBlockOffloadV1?: boolean;
+  availableToolNames?: readonly string[];
 }): CheckpointWorkingSetV1 {
   const checkpoint = input.checkpoint;
   if (checkpoint?.version !== 3) {
@@ -277,6 +322,15 @@ export function selectCheckpointWorkingSetV1(input: {
   let w = c;
   let recentTokens = 0;
   let textMessages = 0;
+  const selectedRecent: ContextFrame[][] = [];
+  let offloadedBlockCount = 0;
+  let offloadedToolResultCount = 0;
+  let offloadedSavedTokens = 0;
+  const availableToolNames = new Set(input.availableToolNames ?? []);
+  const knownWindowCap = input.contextWindowTokens
+    ? Math.floor(input.contextWindowTokens * CHECKPOINT_WORKING_SET_POLICY_V1.maxKnownWindowRatio)
+    : Number.POSITIVE_INFINITY;
+  const capacity = Math.min(CHECKPOINT_WORKING_SET_POLICY_V1.maxRecentTokens, knownWindowCap);
   while (w > 0) {
     const block = built.blocks[w - 1]!;
     if (
@@ -284,25 +338,42 @@ export function selectCheckpointWorkingSetV1(input: {
       textMessages >= CHECKPOINT_WORKING_SET_POLICY_V1.minTextMessages
     )
       break;
-    if (recentTokens + block.estimatedTokens > CHECKPOINT_WORKING_SET_POLICY_V1.maxRecentTokens) {
+    let estimatedTokens = block.estimatedTokens;
+    let frames = framesForTranscriptBlock(input.state, block.messages);
+    if (recentTokens + estimatedTokens > capacity && input.oversizedBlockOffloadV1 === true) {
+      const offloadFrames = framesForTranscriptBlock(input.state, block.messages, true);
+      if (offloadFrames.length === 1 && isToolCallBlockFrame(offloadFrames[0]!)) {
+        const offloaded = tryProjectOversizedToolBlockV1({
+          frame: offloadFrames[0],
+          availableToolNames,
+        });
+        if (offloaded.status === 'offloaded') {
+          frames = [offloaded.frame];
+          // `estimatedTokens` uses the same canonical token estimator as the
+          // original block. Replacing only tool-result content can only reduce
+          // it by the helper's positive content-token delta.
+          estimatedTokens = Math.max(1, block.estimatedTokens - offloaded.savedTokens);
+          offloadedBlockCount++;
+          offloadedToolResultCount += offloaded.offloadedToolResultCount;
+          offloadedSavedTokens += offloaded.savedTokens;
+        }
+      }
+    }
+    if (recentTokens + estimatedTokens > capacity) {
       return { status: 'unavailable', reason: 'recent_window_exceeds_capacity' };
     }
     w--;
-    recentTokens += block.estimatedTokens;
+    recentTokens += estimatedTokens;
     textMessages += block.textMessageCount;
+    selectedRecent.unshift(frames);
   }
-  const knownWindowCap = input.contextWindowTokens
-    ? Math.floor(input.contextWindowTokens * CHECKPOINT_WORKING_SET_POLICY_V1.maxKnownWindowRatio)
-    : Number.POSITIVE_INFINITY;
-  if (recentTokens > knownWindowCap) {
-    return { status: 'unavailable', reason: 'recent_window_exceeds_capacity' };
-  }
-  const selectedMessages = built.blocks
-    .slice(w, c)
-    .concat(built.blocks.slice(c))
-    .flatMap((block) => block.messages)
-    .map(transcriptMessageToModel);
-  const frames = buildCanonicalFrames(selectedMessages);
+  const frames = selectedRecent
+    .flat()
+    .concat(
+      built.blocks
+        .slice(c)
+        .flatMap((block) => framesForTranscriptBlock(input.state, block.messages)),
+    );
   return {
     status: 'available',
     policyId: CHECKPOINT_WORKING_SET_POLICY_V1.policyId,
@@ -312,12 +383,32 @@ export function selectCheckpointWorkingSetV1(input: {
     totalBlockCount: built.blocks.length,
     recentTokens,
     frames,
+    ...(offloadedBlockCount > 0
+      ? {
+          oversizedBlockOffload: {
+            policyId: OFFLOAD_POLICY_V1.policyId,
+            offloadedBlockCount,
+            offloadedToolResultCount,
+            savedTokens: offloadedSavedTokens,
+          },
+        }
+      : {}),
     projectionDigest: canonicalContextDigestV3('checkpoint-working-set:v1', {
       checkpointId: v3.checkpointId,
       checkpointBlockBoundary: c,
       recentBlockStart: w,
       totalBlockCount: built.blocks.length,
       blockDigests: built.blocks.slice(w).map((block) => block.canonicalDigest),
+      ...(offloadedBlockCount > 0
+        ? {
+            oversizedBlockOffload: {
+              policyId: OFFLOAD_POLICY_V1.policyId,
+              offloadedBlockCount,
+              offloadedToolResultCount,
+              savedTokens: offloadedSavedTokens,
+            },
+          }
+        : {}),
     }),
   };
 }

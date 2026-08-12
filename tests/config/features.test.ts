@@ -57,6 +57,9 @@ describe('feature flags', () => {
       contextCompactionAutoV1: true,
     });
     expect(parseFeatureOverride('contextReclaimV1')).toEqual({ contextReclaimV1: true });
+    expect(parseFeatureOverride('oversizedBlockOffloadV1')).toEqual({
+      oversizedBlockOffloadV1: true,
+    });
     expect(parseFeatureOverride('toolResultBudgetV2')).toEqual({ toolResultBudgetV2: true });
     expect(parseFeatureOverride('resourceBudgetV1')).toEqual({ resourceBudgetV1: true });
     expect(parseFeatureOverride('boundedCancellationV1')).toEqual({

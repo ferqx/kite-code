@@ -596,6 +596,12 @@ describe('PR 1 — durable event JSON safety', () => {
     const env2 = makeEnv();
     expect(digestProjectionEnvironment(env1)).toBe(digestProjectionEnvironment(env2));
     expect(digestProjectionEnvironment(env1)).toHaveLength(64);
+    expect(digestProjectionEnvironment(env1)).toBe(
+      digestProjectionEnvironment({ ...env1, oversizedBlockOffloadV1: false }),
+    );
+    expect(digestProjectionEnvironment(env1)).not.toBe(
+      digestProjectionEnvironment({ ...env1, oversizedBlockOffloadV1: true }),
+    );
   });
 
   test('digestProjectionEnvironment changes when tools differ', () => {

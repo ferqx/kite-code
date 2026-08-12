@@ -10,6 +10,12 @@
 
 ## 两级运行契约
 
+`bun run qualify:context` 由 `scripts/runtime/qualify-progressive-context.ts` 顺序调用渐进式上下文缩减的
+producer 与独立 verifier；未传 `--artifact=` 时仅在 runner 自己的临时目录写入并删除 artifact，输出只含 PSMC-06
+的脱敏 aggregate。它是本地 deterministic mechanism qualification，不读取 Provider 凭据、不触网、不构成
+runtime resilience 的 release evidence 或任何 production/default-on 授权；真实模型策略有效性只能通过显式
+`bun run eval:context:live-pilot` 另行评测。
+
 `scripts/runtime/run-fault-soak.ts` 是固定 seed、固定 case manifest、单 case硬上限和 runner 级全局 deadline 受限的 runner。它只输出版本化 JSON 元数据，不把测试 stdout/stderr、prompt、工具 payload 或 workspace 绝对路径写入 evidence。失败诊断最多保留在当前进程 stderr 中；写入 `--output` 后必须显式收紧为 `0600`，包括覆盖已存在的宽权限文件。Required CI 运行 fault contract 与 CI profile；`.github/workflows/runtime-resilience-qualification.yml` 提供显式手动 qualification。正式 workflow 只允许 `seed=1729`、`iterations=8`，输入先进入环境变量并以引号传给 runner，禁止把 dispatch input 直接拼进 shell。qualification 的全局 deadline 固定为 `56 × 180000 ms = 168` 分钟；每个 child 的实际运行时间从剩余全局预算和单 case 上限中取更小值，并预留 30 秒做 SIGKILL、最多 5 秒二级 reap、最多 2 秒输出 drain 与单次最多 1 秒的有界 `ps`/Git inspection。全局预算不足时不再启动 child，而是为剩余 attempt 写入 typed failure。job 的 190 分钟上限在 runner deadline 之外保留 22 分钟 workflow 余量；验证和上传步骤使用 `always()`。checkout、Bun 安装或 GitHub 基础设施在 runner 启动前失败时不会伪造报告。
 
 - `--profile=ci` 默认每个 case 运行 1 次。它验证 case 覆盖、退出状态、从实际通过测试输出提取的必需终态断言、状态不变量、runner 自有临时目录清理、Git worktree registry、进程树回收和报告结构；平台不支持的资源指标会显式记录为 `supported: false`，但不会把 CI smoke 误判为 release qualification。

@@ -75,6 +75,8 @@ export interface ContextProjectionEnvironment {
   promptContractVersion?: PromptContractVersion;
   projectInstructions?: ProjectInstructionSnapshot;
   sandboxBackend?: SandboxBackend | 'unknown';
+  /** Default-off L2.5 projection-only replacement for eligible oversized W blocks. */
+  oversizedBlockOffloadV1?: boolean;
   /** Inputs that can change projection/summary semantics without changing tool schemas. */
   leaseMetadata?: {
     providerName: string;
@@ -146,6 +148,7 @@ export function digestProjectionEnvironment(env: ContextProjectionEnvironment): 
         promptContractVersion: env.promptContractVersion ?? 'legacy',
         projectInstructionRevision: env.projectInstructions?.revision ?? null,
         sandboxBackend: env.sandboxBackend ?? 'unknown',
+        ...(env.oversizedBlockOffloadV1 === true ? { oversizedBlockOffloadV1: true } : {}),
         leaseMetadata: env.leaseMetadata ?? null,
       }),
     )
@@ -294,6 +297,14 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
       state: input.state,
       checkpoint,
       ...(input.contextWindowTokens ? { contextWindowTokens: input.contextWindowTokens } : {}),
+      ...(input.projectionEnvironment?.oversizedBlockOffloadV1 === true
+        ? {
+            oversizedBlockOffloadV1: true,
+            availableToolNames: input.projectionEnvironment.serializedTools.map(
+              (tool) => tool.name,
+            ),
+          }
+        : {}),
       ...(input.projectionEnvironment
         ? { expectedRouteIdentityDigest: digestProjectionEnvironment(input.projectionEnvironment) }
         : {}),

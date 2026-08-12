@@ -41,7 +41,7 @@ import {
 } from '@/core/model/context-capability-v2';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import {
-  CONTEXT_RECLAIM_LIVE_POLICY_V2,
+  CONTEXT_RECLAIM_LIVE_POLICY_V3,
   prepareContextRequestV2,
 } from '@/core/model/context-preparation-v2';
 import {
@@ -53,6 +53,7 @@ import type { ReclaimShadowReporter } from '@/core/model/context-reclaim-shadow'
 import type { SupportedChatModel } from '@/core/model/factory';
 import { resolveModelCapabilities } from '@/core/model/model-capabilities';
 import { prepareProgressiveContextDecisionV1 } from '@/core/model/progressive-context-orchestrator';
+import { hasReconciledSummaryProviderUsageV1 } from '@/core/model/summary-provider-usage';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { classifyFailure } from '@/core/runtime/failures';
 import { committedResourceUsageV1 } from '@/core/runtime/resource-budget';
@@ -242,7 +243,7 @@ export function prepareRuntimeEffectV2(
     toolResultBudgetPolicyId: flags.toolResultBudgetV2
       ? 'tool-result-budget-registry:v2'
       : 'tool-result-compat-registry:v1',
-    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V2.policyId,
+    reclaimPolicyId: CONTEXT_RECLAIM_LIVE_POLICY_V3.policyId,
     reclaimAfterEstimatedTokens: dependencies.config.compaction?.reclaimAfterEstimatedTokens,
     providerSafetyRatio: dependencies.config.compaction?.providerSafetyRatio,
     compactRatio: dependencies.config.compaction?.compactRatio,
@@ -292,7 +293,14 @@ export function prepareRuntimeEffectV2(
       ? { contextWindowTokens: capabilities.contextWindowTokens }
       : {}),
     expectedRouteIdentityDigest: digestProjectionEnvironment(environment),
+    ...(environment.oversizedBlockOffloadV1 === true
+      ? {
+          oversizedBlockOffloadV1: true,
+          availableToolNames: environment.serializedTools.map((tool) => tool.name),
+        }
+      : {}),
     autoSummaryEnabled: flags.contextCompactionAutoV1,
+    autoCooldownSuccessfulPrimaryTurns: dependencies.config.compaction?.cooldownTurns,
     microAvailable,
     microPressure: rawAndMicroPrepared.effectiveProjection.preflight.status,
     ...(workingSetPrepared && 'effectiveProjection' in workingSetPrepared
@@ -444,6 +452,8 @@ export function createRuntimeEffectExecutor(
       maxSummaryTokens: dependencies.config.compaction?.maxSummaryTokens,
       maxSummaryInputTokens: dependencies.config.compaction?.maxSummaryInputTokens,
       maxNarrativeTokens: dependencies.config.compaction?.maxNarrativeTokens,
+      maxSummaryInputToReductionRatio:
+        dependencies.config.compaction?.maxSummaryInputToReductionRatio,
       modelContextWindowTokens: resolveModelCapabilities({
         config: dependencies.config,
         adapter: dependencies.model.capabilityMetadata,
@@ -595,6 +605,7 @@ export function createRuntimeEffectExecutor(
                 errorKind: event.errorKind,
                 message: event.message,
                 providerDispatchState: guardProof ? 'not_entered' : 'entered',
+                ...(event.providerUsage ? { providerUsage: event.providerUsage } : {}),
               },
             ];
           }
@@ -612,8 +623,8 @@ export function createRuntimeEffectExecutor(
               ? summaryTerminal.terminalBatchKey
               : terminalBatchKey;
           const hasActualUsage =
-            summaryTerminal?.type === 'context.summary_completed_v1' &&
-            summaryTerminal.providerUsage != null;
+            summaryTerminal?.type !== 'context.summary_unknown_external_outcome_v1' &&
+            hasReconciledSummaryProviderUsageV1(summaryTerminal?.providerUsage);
           const settledWithoutExecution =
             terminalKey.admission.stage === 'denied' ||
             terminalKey.admission.stage === 'not_completed';

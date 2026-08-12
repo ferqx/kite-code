@@ -150,7 +150,13 @@ export function prepareProgressiveContextDecisionV1(input: {
   utilization?: number;
   contextWindowTokens?: number;
   expectedRouteIdentityDigest?: string;
+  /** L2.5 must be evaluated with the same effective projection policy as L2. */
+  oversizedBlockOffloadV1?: boolean;
+  /** Provider tools available for an L2.5 repeat-read stub. */
+  availableToolNames?: readonly string[];
   autoSummaryEnabled: boolean;
+  /** Configured successful normal-primary turns required after an auto summary. */
+  autoCooldownSuccessfulPrimaryTurns?: number;
   microAvailable: boolean;
   microPressure?: ContextPressure;
   workingSetPressure?: ContextPressure;
@@ -176,6 +182,12 @@ export function prepareProgressiveContextDecisionV1(input: {
     checkpoint: input.state.context.activeCheckpoint,
     contextWindowTokens: input.contextWindowTokens,
     expectedRouteIdentityDigest: input.expectedRouteIdentityDigest,
+    ...(input.oversizedBlockOffloadV1 === true
+      ? {
+          oversizedBlockOffloadV1: true,
+          availableToolNames: input.availableToolNames,
+        }
+      : {}),
   });
   if (
     !input.manual &&
@@ -231,10 +243,16 @@ export function prepareProgressiveContextDecisionV1(input: {
   )
     return bestLocalProjection();
   const cooldown = input.state.context.autoSummaryCooldown;
+  const cooldownTurns =
+    input.autoCooldownSuccessfulPrimaryTurns ?? SUMMARY_AUTO_COOLDOWN_SUCCESSFUL_PRIMARY_TURNS_V1;
+  if (!Number.isSafeInteger(cooldownTurns) || cooldownTurns < 0) {
+    throw new Error('autoCooldownSuccessfulPrimaryTurns must be a non-negative safe integer.');
+  }
   if (
     cooldown &&
     (sameSource(cooldown.lastAttemptSourceIdentity, sourceIdentity) ||
-      input.state.context.successfulPrimaryOrdinal < cooldown.nextEligibleSuccessfulPrimaryOrdinal)
+      input.state.context.successfulPrimaryOrdinal <
+        cooldown.successfulPrimaryOrdinalAtAttempt + cooldownTurns)
   ) {
     const best = bestLocalProjection();
     return best.kind === 'dispatch_raw'

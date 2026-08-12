@@ -77,18 +77,23 @@ export function digestContextRequestIdentityV2(identity: RequestAdmissionIdentit
   return canonicalContextDigestV2('context-request-identity:v2', identity);
 }
 
-function cacheEpochId(input: {
-  prepared: PreparedContextRequestReadyV2;
+export function contextReclaimCacheEpochIdV1(input: {
+  checkpointIdentity?: string;
+  toolResultBudgetPolicyId: string;
+  reclaimPolicyId: string;
+  estimatorId: string;
   toolSetSchemaDigest: string;
+  projectionContractId: string;
+  cacheAffectingEnvironmentDigest: string;
 }): string {
   return canonicalContextDigestV2('context-cache-epoch:v1', {
-    checkpointIdentity: input.prepared.sourceIdentity.checkpointIdentity ?? null,
-    toolResultBudgetPolicyId: input.prepared.sourceIdentity.toolResultBudgetPolicyId,
-    reclaimPolicyId: input.prepared.sourceIdentity.reclaimPolicyId,
-    estimatorId: input.prepared.sourceIdentity.estimatorId,
+    checkpointIdentity: input.checkpointIdentity ?? null,
+    toolResultBudgetPolicyId: input.toolResultBudgetPolicyId,
+    reclaimPolicyId: input.reclaimPolicyId,
+    estimatorId: input.estimatorId,
     toolSetSchemaDigest: input.toolSetSchemaDigest,
-    projectionContractId: input.prepared.sourceIdentity.projectionContractId,
-    cacheAffectingEnvironmentDigest: input.prepared.sourceIdentity.cacheAffectingEnvironmentDigest,
+    projectionContractId: input.projectionContractId,
+    cacheAffectingEnvironmentDigest: input.cacheAffectingEnvironmentDigest,
   });
 }
 
@@ -149,9 +154,15 @@ export function proposeContextReclaimCommitV1(input: {
     cacheAffectingEnvironmentDigest: input.prepared.sourceIdentity.cacheAffectingEnvironmentDigest,
     toolSetSchemaDigest: input.prepared.requestIdentity.toolSetSchemaDigest,
     projectionContractId: input.prepared.sourceIdentity.projectionContractId,
-    cacheEpochId: cacheEpochId({
-      prepared: input.prepared,
+    cacheEpochId: contextReclaimCacheEpochIdV1({
+      checkpointIdentity: input.prepared.sourceIdentity.checkpointIdentity,
+      toolResultBudgetPolicyId: input.prepared.sourceIdentity.toolResultBudgetPolicyId,
+      reclaimPolicyId: input.prepared.sourceIdentity.reclaimPolicyId,
+      estimatorId: input.prepared.sourceIdentity.estimatorId,
       toolSetSchemaDigest: input.prepared.requestIdentity.toolSetSchemaDigest,
+      projectionContractId: input.prepared.sourceIdentity.projectionContractId,
+      cacheAffectingEnvironmentDigest:
+        input.prepared.sourceIdentity.cacheAffectingEnvironmentDigest,
     }),
     committedAtTurnIndex: input.state.turn.turnIndex,
   });
