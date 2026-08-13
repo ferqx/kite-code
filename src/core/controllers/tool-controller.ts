@@ -385,6 +385,29 @@ export function toRuntimeSubagentEvent(event: SubagentEvent): RuntimeEvent {
   }
 }
 
+/** Preserve every suspended sibling without overwriting the Runtime's single interaction slot. */
+export function serializeConcurrentSubagentApprovalEvents(
+  batches: RuntimeEvent[][],
+): RuntimeEvent[] {
+  let interactionClaimed = false;
+  return batches.flatMap((batch) => {
+    const request = batch.find(
+      (event) => event.type === 'approval.requested' || event.type === 'auto_review.requested',
+    );
+    if (!request) return batch;
+    if (!interactionClaimed) {
+      interactionClaimed = true;
+      return batch;
+    }
+    return [
+      ...batch.filter(
+        (event) => event.type !== 'approval.requested' && event.type !== 'auto_review.requested',
+      ),
+      { type: 'subagent.approval_deferred', toolCallId: request.toolCallId } as const,
+    ];
+  });
+}
+
 /**
  * Resume a sub-agent after approval: execute the blocked tool with the
  * approved grant, then continue the sub-agent loop from the saved state.
@@ -576,6 +599,7 @@ async function handleSubAgentResume(params: {
       type: 'subagent.suspended',
       toolCallId: params.toolCallId,
       snapshot: serializeSubagentContinuation(blocked.continuation, {
+        reasonCode: blocked.reasonCode,
         toolCallId: blocked.toolCallId,
         toolName: blocked.toolName,
         args: blocked.args,
@@ -667,6 +691,12 @@ export async function executeRuntimeTools(params: {
       const call = params.state.tools.calls[toolCallId];
       return call?.name === 'shell_execute' && call.status === 'approved';
     });
+  const parallelSubagentBatch =
+    params.toolCallIds.length > 1 &&
+    params.toolCallIds.every((toolCallId) => {
+      const call = params.state.tools.calls[toolCallId];
+      return call?.name === 'task' && call.status === 'queued';
+    });
   if (approvedParallelShellBatch) {
     const batches = await Promise.all(
       params.toolCallIds.map((toolCallId) =>
@@ -677,6 +707,38 @@ export async function executeRuntimeTools(params: {
       ),
     );
     return batches.flat();
+  }
+  if (parallelSubagentBatch) {
+    const deferredInteractions = params.toolCallIds.map(() => [] as RuntimeEvent[]);
+    const batches = await Promise.all(
+      params.toolCallIds.map((toolCallId, index) =>
+        executeRuntimeTools({
+          ...params,
+          toolCallIds: [toolCallId],
+          ...(params.emitRuntimeEvent
+            ? {
+                emitRuntimeEvent: (event: RuntimeEvent) => {
+                  if (
+                    event.type === 'subagent.suspended' ||
+                    event.type === 'approval.requested' ||
+                    event.type === 'auto_review.requested'
+                  ) {
+                    deferredInteractions[index]!.push(event);
+                  } else {
+                    params.emitRuntimeEvent?.(event);
+                  }
+                },
+              }
+            : {}),
+        }),
+      ),
+    );
+    const serialized = serializeConcurrentSubagentApprovalEvents(
+      batches.map((batch, index) => [...deferredInteractions[index]!, ...batch]),
+    );
+    if (!params.emitRuntimeEvent) return serialized;
+    for (const event of serialized) params.emitRuntimeEvent(event);
+    return [];
   }
   const events: RuntimeEvent[] = [];
   // Keep the direct-call API unchanged for tests and legacy callers.  The
@@ -1467,6 +1529,26 @@ export async function executeRuntimeTools(params: {
         events.push(...resumeEvents);
         continue;
       }
+      if (suspended && call.status === 'queued') {
+        const restored = deserializeSubagentContinuation(suspended);
+        events.push(
+          blockedSubagentReviewEvent({
+            state: params.state,
+            parentToolCallId: toolCallId,
+            blocked: {
+              reasonCode: restored.blockedTool.reasonCode ?? 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+              toolCallId: restored.blockedTool.toolCallId,
+              toolName: restored.blockedTool.toolName,
+              command: restored.blockedTool.command,
+              args: restored.blockedTool.args,
+              message: `Sub-agent tool '${restored.blockedTool.toolName}' requires approval.`,
+              continuation: restored,
+            },
+            availCtx,
+          }),
+        );
+        continue;
+      }
 
       // ── Normal sub-agent execution ──
       events.push({ type: 'tool.started', toolCallId });
@@ -1520,6 +1602,7 @@ export async function executeRuntimeTools(params: {
             type: 'subagent.suspended',
             toolCallId,
             snapshot: serializeSubagentContinuation(blocked.continuation, {
+              reasonCode: blocked.reasonCode,
               toolCallId: blocked.toolCallId,
               toolName: blocked.toolName,
               args: blocked.args,

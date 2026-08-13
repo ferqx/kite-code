@@ -137,7 +137,16 @@ lineage-aware compaction：优先保留 active/recent failure，并连同完整 
 
 Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只复用 schema 的 trim 后 `8..8000` 长度边界，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、interaction mode、authorization、sandbox、protected path、execution surface 和累计预算。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
 plan child 返回后的唯一 continuation 是 `write_plan:save`
-再 `write_plan:submit`。Subagent 调用统一串行执行；模型不得宣称并行派发。多个独立视角都值得调用时必须一次派发一个，收到结果后再继续下一个；若减少用户要求的数量，需要明确说明原因。每个 child 的 model/tool reservation 仍来自父 run 的共享累计预算 ledger。
+再 `write_plan:submit`。同一模型响应中连续、属于同一 task、尚未暂停且经 Policy 判定为无需审批的
+独立 `task` sibling 可以组成最多 4 个调用的并发批次；实际派发数量还受共享
+`maxConcurrentSubagents`、writer ceiling 和累计预算限制。模型应把有价值的独立任务一起派发，依赖
+前序结果或写范围重叠的任务必须串行；若减少用户要求的数量，需要明确说明原因。多个并发 child
+动态请求审批时只呈现一个 canonical interaction，其余 continuation 以
+`subagent.approval_deferred` 持久化排队，随后从 snapshot 继续，不得重启 child 模型。每个 child 的
+原始审批路由必须随 snapshot 持久化；恢复不得把 `minimumApproval=user` 或其他人工审批降级为
+auto-review，缺少该字段的历史 snapshot 必须保守回退到人工审批。重新呈现延后审批不是新的
+Sub-agent lifecycle attempt，不创建或结算 parent/tool reservation；真正获批恢复时才打开新的
+parent attempt。每个 child 的 model/tool reservation 仍来自父 run 的共享累计预算 ledger（ADR-0104）。
 
 ADR-0097 的 Git 路由不属于 generic Shell 权限。`git_inspect` 只在精确 feature
 revision、`gitInspect` surface 与 App broker 同时存在时披露/执行。Shell 中绝对路径、nested shell 或间接 child 的 Git executable token同样 fail closed。stage、commit 与 remote Git 均不向模型披露，也不得由 interaction mode、Shell grant 或 raw shell fallback 恢复。
@@ -148,7 +157,8 @@ V2 写入前还执行项目指令 snapshot guard。edit/write 使用目标路径
 `resourceBudgetV1` 启用时，策略/审批仍先于 child reservation；只有调用已经可执行时才原子写入
 reservation，再单独写入 `dispatch_started`，最后进入 adapter。Subagent parent 只代表一次
 lifecycle attempt，child 模型及工具/Shell/MCP 调用各自链接独立 reservation；artifact bytes
-计入产出它的 tool/MCP reservation，不另建一个虚构 invocation。child tool/shell permit 使用
+计入产出它的 tool/MCP reservation，不另建一个虚构 invocation。延后审批的重新呈现只打开
+interaction，不属于 dispatch 或 lifecycle attempt，因而不进入 resource admission；child tool/shell permit 使用
 durable FIFO waiter、原子 promotion + reservation 与有界 wait deadline；超时通过主 Runtime 的
 canonical failure terminal 收敛，不转换成普通 child tool error。
 本地 Provider 最终 gate 明确拒绝且能证明未 dispatch 时可携带证明 release；已经执行部分

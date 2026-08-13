@@ -724,8 +724,9 @@ describe('code agent tool definitions', () => {
     expect(String(task.description)).toContain(
       'plan for read-only architecture or design planning',
     );
-    expect(String(task.description)).toContain('Runtime executes sub-agents serially');
-    expect(String(task.description)).toContain('never claim parallel dispatch');
+    expect(String(task.description)).toContain('multiple independent sibling task calls');
+    expect(String(task.description)).toContain('execute them concurrently');
+    expect(String(task.description)).toContain('disjoint write scopes');
 
     const schema = (task as unknown as { inputSchema: ToolSchemaLike }).inputSchema;
     const jsonSchema = (await schema.jsonSchema) as {

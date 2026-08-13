@@ -39,6 +39,7 @@ export function serializeSubagentContinuation(
       'toolRecovery',
     ),
     blockedTool: {
+      ...(blockedTool.reasonCode ? { reasonCode: blockedTool.reasonCode } : {}),
       toolCallId: blockedTool.toolCallId,
       toolName: blockedTool.toolName,
       args: toJsonObject(blockedTool.args, 'blockedTool.args'),
@@ -67,6 +68,7 @@ export function deserializeSubagentContinuation(
       snapshot.toolRecovery ? cloneJsonObject(snapshot.toolRecovery) : undefined,
     ),
     blockedTool: {
+      ...(snapshot.blockedTool.reasonCode ? { reasonCode: snapshot.blockedTool.reasonCode } : {}),
       toolCallId: snapshot.blockedTool.toolCallId,
       toolName: snapshot.blockedTool.toolName,
       args: cloneJsonObject(snapshot.blockedTool.args),

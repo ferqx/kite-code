@@ -706,6 +706,47 @@ describe('runtime resource budget admission', () => {
     });
   });
 
+  test('does not reserve another Sub-agent invocation when presenting a deferred approval', () => {
+    const state = configuredState();
+    state.tools.calls['task-1'] = {
+      toolCallId: 'task-1',
+      modelMessageId: 'model-1',
+      name: 'task',
+      args: { subagent_type: 'code', task: 'continue' },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task-1');
+    state.suspendedSubagents['task-1'] = {
+      subagentId: 'subagent-1',
+      role: 'code',
+      task: 'continue',
+      messages: [],
+      toolCallCount: 1,
+      steps: [],
+      blockedTool: {
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        toolCallId: 'nested-shell',
+        toolName: 'shell_execute',
+        args: { command: 'pwd' },
+        command: 'pwd',
+      },
+    };
+
+    const presentation = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'run_tools', toolCallIds: ['task-1'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+
+    expect(presentation).toMatchObject({
+      status: 'not_required',
+      preparationEvents: [],
+      dispatchEvents: [],
+      reservationIds: [],
+    });
+  });
+
   test('runner persists dispatch before the executor and reconciles with the terminal batch', async () => {
     const store = createRuntimeStore(':memory:');
     const startedAt = new Date();

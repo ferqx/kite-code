@@ -63,7 +63,12 @@ parent 对同一 canonical invocation 的重提仍会在 dispatch 前零调用�
 
 Task Tool 按 Runtime/线程限制活动数量。取消通过 AbortController 传播。子 Agent 不递归无限派生，也不能修改主 RuntimeState；其结果必须通过主 Runtime Event 合并。
 
-Subagent 调用统一串行执行。模型不得把多个 child 描述成“并行派发”；当多个独立视角都有收益时，一次调用一个，并在前一个结果返回后继续后一个，若减少请求数量则说明原因。Scheduler 只调度已持久化的 task call，Controller 为 child 保留独立 ID/stream ownership；terminal 或 suspended 状态收敛后才处理后继调用。
+同一模型响应中的独立 sibling `task` calls 可以有界并发。Scheduler 只组合同一 active task、
+同一 model message、连续、尚未暂停且无需审批的调用，单批最多 4 个；Resource Runtime 可按
+`maxConcurrentSubagents`、writer ceiling 和累计预算进一步缩小批次。模型应把独立且值得调用的任务
+一起发出，但依赖前序结果的任务与写范围重叠的 code tasks 必须串行。Controller 为每个 child 保留
+独立 ID/stream/continuation ownership；多个 child 同时需要审批时先保存全部 snapshot，只呈现第一个
+交互，其余通过 `subagent.approval_deferred` 排队并在前一个收敛后继续（ADR-0104）。
 
 ## 6.6 累计预算、取消与恢复
 

@@ -125,6 +125,13 @@ Core 的 `restoreNamedSnapshot` 仍是可供非 TUI 调用方使用的破坏性�
 
 子 Agent 因审批暂停时，continuation 必须可序列化并绑定原 tool call、消息、步骤与 journal。恢复前重新校验批准内容和能力边界；用户拒绝或取消该审批时，清除 continuation，并按上述规则中止整个当前 turn，不再恢复子 Agent 生成后续结果。
 
+并发 sibling 同时暂停时，每个 durable `subagent.suspended` 都必须立即把对应 TUI block 投影为
+可见的 suspended/等待审批状态并停止 spinner 与计时；该展示不能依赖 child 是否占有唯一的
+approval interaction。只有一个审批可以对用户呈现，其余 continuation 通过
+`subagent.approval_deferred` 排队。snapshot 必须保存原始人工或 auto-review 路由，历史 snapshot
+缺失该字段时保守回退人工审批；重新呈现延后审批不 dispatch、不创建资源 reservation，真正批准
+并恢复 child 时才创建新的 parent attempt。恢复后的首个 child step 将 TUI block 切回 running。
+
 Resource budget 为每次 continuation/resume 创建新的 parent attempt reservation；每个子模型及
 工具、Shell/MCP 调用再创建链接到 parent 的独立 reservation，artifact bytes 由产出它的调用一并
 预留/结算。child permit waiter 按 durable FIFO 等待，取消时必须写入 waiter cancellation；若

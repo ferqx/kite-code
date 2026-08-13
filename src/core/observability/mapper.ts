@@ -785,6 +785,7 @@ export class ProductionMetricMapperV1 {
       case 'subagent.failed':
       case 'subagent.cache_metrics':
       case 'subagent.suspended':
+      case 'subagent.approval_deferred':
       case 'subagent.recovery_journal_merged':
         return [];
       default: {

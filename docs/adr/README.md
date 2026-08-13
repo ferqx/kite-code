@@ -105,3 +105,4 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0101](0101-approved-invocation-native-guards-and-network-projection.md) | accepted | 审批能力必须可兑现，并保留凭据与持久身份的原生固定保护 |
 | [0102](0102-runtime-issued-subagent-execution-context.md) | accepted | Subagent 继承 live mode 与 canonical Workspace，read-before-edit 按 actor 隔离 |
 | [0103](0103-model-owned-subagent-orchestration.md) | accepted | Subagent 委派选择归模型，执行权限继续由既有 Runtime Policy 治理 |
+| [0104](0104-bounded-concurrent-subagent-dispatch.md) | accepted | 同一模型响应中的独立 Subagent 有界并发，动态审批按 continuation 逐个呈现 |

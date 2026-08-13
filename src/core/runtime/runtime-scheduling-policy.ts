@@ -1,5 +1,9 @@
 import { createHash } from 'node:crypto';
-import { MAX_PARALLEL_READ_TOOLS, PARALLEL_READ_TOOL_NAMES } from './scheduler';
+import {
+  MAX_PARALLEL_READ_TOOLS,
+  MAX_PARALLEL_SUBAGENTS,
+  PARALLEL_READ_TOOL_NAMES,
+} from './scheduler';
 
 export interface RuntimeSchedulingPolicyV1 {
   version: 1;
@@ -7,6 +11,11 @@ export interface RuntimeSchedulingPolicyV1 {
     allowlist: readonly string[];
     ceiling: number;
     barrier: 'interaction_write_or_unknown';
+  };
+  parallelSubagent: {
+    ceiling: number;
+    scope: 'same_task_and_model_message';
+    admission: 'approval_free_and_shared_budget';
   };
   shellOverlap: {
     scope: 'same_task_and_model_message';
@@ -29,6 +38,11 @@ export function createRuntimeSchedulingPolicyV1(): RuntimeSchedulingPolicyV1 {
       allowlist: PARALLEL_READ_TOOL_NAMES,
       ceiling: MAX_PARALLEL_READ_TOOLS,
       barrier: 'interaction_write_or_unknown' as const,
+    }),
+    parallelSubagent: Object.freeze({
+      ceiling: MAX_PARALLEL_SUBAGENTS,
+      scope: 'same_task_and_model_message' as const,
+      admission: 'approval_free_and_shared_budget' as const,
     }),
     shellOverlap: Object.freeze({
       scope: 'same_task_and_model_message' as const,

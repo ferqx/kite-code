@@ -14,7 +14,10 @@ import {
   invokeRuntimeModel,
   resolveContextProjectionEnvironment,
 } from '@/core/controllers/model-controller';
-import { executeRuntimeTools } from '@/core/controllers/tool-controller';
+import {
+  executeRuntimeTools,
+  serializeConcurrentSubagentApprovalEvents,
+} from '@/core/controllers/tool-controller';
 import {
   type AutoReviewResult,
   createAutoReviewModel,
@@ -324,6 +327,9 @@ export function createRuntimeEffectExecutor(
     }
     if (effect.type === 'run_tools') {
       try {
+        const parallelSubagentBatch =
+          effect.toolCallIds.length > 1 &&
+          effect.toolCallIds.every((toolCallId) => state.tools.calls[toolCallId]?.name === 'task');
         const execute = async (toolCallIds: string[]) => {
           const taskCallId =
             toolCallIds.length === 1 && state.tools.calls[toolCallIds[0]!]?.name === 'task'
@@ -373,7 +379,11 @@ export function createRuntimeEffectExecutor(
               event.type === 'provider.action_required' ||
               event.type === 'subagent.completed' ||
               event.type === 'subagent.failed' ||
-              event.type === 'verification.requested'
+              event.type === 'verification.requested' ||
+              (parallelSubagentBatch &&
+                (event.type === 'subagent.suspended' ||
+                  event.type === 'approval.requested' ||
+                  event.type === 'auto_review.requested'))
             ) {
               terminalEvents.push(event);
             } else {
@@ -464,36 +474,40 @@ export function createRuntimeEffectExecutor(
         const batches = await Promise.allSettled(
           effect.toolCallIds.map((toolCallId) => execute([toolCallId])),
         );
-        const terminalEvents: RuntimeEvent[] = [];
+        const terminalEventBatches: RuntimeEvent[][] = [];
         for (let index = 0; index < batches.length; index++) {
           const batch = batches[index]!;
           if (batch.status === 'fulfilled') {
-            terminalEvents.push(...batch.value);
+            terminalEventBatches.push(batch.value);
             continue;
           }
           const toolCallId = effect.toolCallIds[index]!;
           const currentState =
             (executionContext?.getState?.() as import('./state').RuntimeState | undefined) ?? state;
           if (batch.reason instanceof DescendantResourceAdmissionError) {
-            terminalEvents.push(
-              ...resourceAdmissionTerminalEventsV1(currentState, batch.reason.reason),
+            terminalEventBatches.push(
+              resourceAdmissionTerminalEventsV1(currentState, batch.reason.reason),
             );
           } else {
-            terminalEvents.push({
-              type: dependencies.signal?.aborted ? 'tool.cancelled' : 'tool.failed',
-              toolCallId,
-              ...(dependencies.signal?.aborted
-                ? { reason: 'Runtime tool batch cancelled.' }
-                : {
-                    failure: classifyFailure(
-                      'tool_runtime_error',
-                      'The tool failed inside the local execution adapter.',
-                    ),
-                  }),
-            } as RuntimeEvent);
+            terminalEventBatches.push([
+              {
+                type: dependencies.signal?.aborted ? 'tool.cancelled' : 'tool.failed',
+                toolCallId,
+                ...(dependencies.signal?.aborted
+                  ? { reason: 'Runtime tool batch cancelled.' }
+                  : {
+                      failure: classifyFailure(
+                        'tool_runtime_error',
+                        'The tool failed inside the local execution adapter.',
+                      ),
+                    }),
+              } as RuntimeEvent,
+            ]);
           }
         }
-        return terminalEvents;
+        return parallelSubagentBatch
+          ? serializeConcurrentSubagentApprovalEvents(terminalEventBatches)
+          : terminalEventBatches.flat();
       } catch (error) {
         if (error instanceof DescendantResourceAdmissionError) {
           const currentState =

@@ -187,8 +187,8 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       expect(task?.description).toContain('benefits from an isolated sub-agent');
       expect(task?.description).toContain('code only when the user task calls for implementation');
       expect(task?.description).toContain('plan for read-only architecture or design planning');
-      expect(task?.description).toContain('Runtime executes sub-agents serially');
-      expect(task?.description).toContain('never claim parallel dispatch');
+      expect(task?.description).toContain('multiple independent sibling task calls');
+      expect(task?.description).toContain('execute them concurrently');
       expect(task?.parameters?.properties?.subagent_type?.enum).toEqual([
         'explore',
         'plan',

@@ -1526,6 +1526,31 @@ function reduceRuntimeStateWithReplayBoundary(
       };
     }
 
+    case 'subagent.approval_deferred': {
+      const existingCall = state.tools.calls[event.toolCallId];
+      if (
+        existingCall?.name !== 'task' ||
+        !state.suspendedSubagents[event.toolCallId] ||
+        existingCall.status !== 'running'
+      ) {
+        return state;
+      }
+      return {
+        ...state,
+        tools: {
+          ...state.tools,
+          calls: {
+            ...state.tools.calls,
+            [event.toolCallId]: { ...existingCall, status: 'queued' as const },
+          },
+          queue: state.tools.queue.includes(event.toolCallId)
+            ? state.tools.queue
+            : [...state.tools.queue, event.toolCallId],
+          active: state.tools.active.filter((id) => id !== event.toolCallId),
+        },
+      };
+    }
+
     case 'subagent.recovery_journal_merged': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (existingCall?.name !== 'task') return state;

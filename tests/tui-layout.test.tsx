@@ -4560,6 +4560,34 @@ describe('SubAgentBlock rendering', () => {
     expect(lastFrame()).toContain('●');
   });
 
+  test('renders a suspended subagent as waiting instead of hiding it', () => {
+    const block = {
+      id: 1,
+      kind: 'subagent' as const,
+      subagentId: 'sub-waiting',
+      role: 'code' as const,
+      task: 'wait for sibling approval',
+      status: 'suspended' as const,
+      summary: '',
+      toolCallCount: 1,
+      durationMs: 0,
+      awaitingApproval: true,
+      steps: [
+        {
+          toolName: 'shell_execute',
+          toolArgs: { command: 'pwd' },
+          status: 'awaiting_approval' as const,
+        },
+      ],
+    };
+    const { lastFrame } = render(<SubAgentBlock block={block} />);
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('○');
+    expect(frame).toContain('wait for sibling approval');
+    expect(frame).toContain('等待审批中');
+  });
+
   test('renders done subagent block', () => {
     const block = {
       id: 1,

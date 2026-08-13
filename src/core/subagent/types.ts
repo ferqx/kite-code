@@ -81,6 +81,8 @@ export interface SubAgentContinuation {
 
 /** 已暂停子 agent 的待执行工具 / Pending tool preserved with a suspended continuation */
 export interface SubAgentBlockedTool {
+  /** Original approval route. Optional only for legacy persisted continuations. */
+  reasonCode?: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
   toolCallId: string;
   toolName: string;
   args: Record<string, unknown>;

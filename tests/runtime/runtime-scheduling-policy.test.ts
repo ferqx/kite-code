@@ -10,6 +10,11 @@ describe('RuntimeSchedulingPolicyV1', () => {
     expect(policy).toMatchObject({
       version: 1,
       parallelRead: { ceiling: 4, barrier: 'interaction_write_or_unknown' },
+      parallelSubagent: {
+        ceiling: 4,
+        scope: 'same_task_and_model_message',
+        admission: 'approval_free_and_shared_budget',
+      },
       shellOverlap: {
         scope: 'same_task_and_model_message',
         approval: 'per_invocation',
