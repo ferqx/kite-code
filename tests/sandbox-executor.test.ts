@@ -57,6 +57,25 @@ describe('sandbox executor integration', () => {
     }
   });
 
+  test('strips ripgrep config that could inject a preprocessor', async () => {
+    const ws = setupWorkspace();
+    const previousConfig = process.env.RIPGREP_CONFIG_PATH;
+    try {
+      writeFileSync(join(ws, 'needle.txt'), 'needle\n');
+      writeFileSync(join(ws, 'rg.config'), '--pre\ntouch injected-by-rg\n');
+      process.env.RIPGREP_CONFIG_PATH = join(ws, 'rg.config');
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'rg needle needle.txt' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('needle');
+      expect(existsSync(join(ws, 'injected-by-rg'))).toBe(false);
+    } finally {
+      if (previousConfig === undefined) delete process.env.RIPGREP_CONFIG_PATH;
+      else process.env.RIPGREP_CONFIG_PATH = previousConfig;
+      cleanupWorkspace(ws);
+    }
+  });
+
   test('fallback /bin/sh can read the workspace when SHELL is absent', async () => {
     const ws = setupWorkspace();
     const previousShell = process.env.SHELL;

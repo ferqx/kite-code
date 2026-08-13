@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import {
-  classifyShellRisk,
   isDestructiveShellCommand,
   isNetworkCommand,
   isReadOnlyShellCommand,
@@ -47,7 +46,7 @@ export function classifyShellActionIntent(command: string): ShellIntent {
     return 'build';
   }
   if (/(^|[;&|]\s*)git\b/i.test(trimmed)) return 'git';
-  if (classifyShellRisk(trimmed) === 'read') return 'inspect';
+  if (isReadOnlyShellCommand(trimmed)) return 'inspect';
   if (/\b(typecheck|lint|check)\b/i.test(trimmed)) return 'verify';
   return 'other';
 }

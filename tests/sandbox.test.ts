@@ -380,6 +380,7 @@ describe('shell wrapper utilities', () => {
     expect(snippet).toContain('unset DYLD_INSERT_LIBRARIES');
     expect(snippet).toContain('unset DYLD_LIBRARY_PATH');
     expect(snippet).toContain('unset NODE_OPTIONS');
+    expect(snippet).toContain('unset RIPGREP_CONFIG_PATH');
   });
 
   test('env export snippet quotes values', () => {

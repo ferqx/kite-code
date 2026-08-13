@@ -11,7 +11,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '../src/core/tools/diff';
-import { editFile, readFile, readTextContent, writeFile } from '../src/core/tools/file';
+import {
+  DEFAULT_READ_FILE_LINE_LIMIT,
+  editFile,
+  readFile,
+  readTextContent,
+  writeFile,
+} from '../src/core/tools/file';
 import {
   isPathInsideWorkspace,
   msys2ToWindowsPath,
@@ -237,6 +243,38 @@ describe('tool safety', () => {
     expect(result.ok).toBe(true);
     expect(result.content).toContain('2|line2');
     expect(result.totalLines).toBe(3);
+  });
+
+  test('read_file defaults to a 2000-line page and continues from an explicit offset', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-code-read-default-page-'));
+    try {
+      const lines = Array.from({ length: DEFAULT_READ_FILE_LINE_LIMIT + 2 }, (_, index) => {
+        return `line-${index + 1}`;
+      });
+      writeFileSync(join(workspace, 'large.txt'), `${lines.join('\n')}\n`, 'utf8');
+
+      const first = readFile({ workspace, path: 'large.txt' });
+      expect(first.ok).toBe(true);
+      expect(first.fromLine).toBe(1);
+      expect(first.toLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT);
+      expect(first.content).toContain(
+        `${DEFAULT_READ_FILE_LINE_LIMIT}|line-${DEFAULT_READ_FILE_LINE_LIMIT}`,
+      );
+      expect(first.content).not.toContain(`|line-${DEFAULT_READ_FILE_LINE_LIMIT + 1}`);
+
+      const next = readFile({
+        workspace,
+        path: 'large.txt',
+        offset: DEFAULT_READ_FILE_LINE_LIMIT + 1,
+      });
+      expect(next.fromLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT + 1);
+      expect(next.toLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT + 2);
+      expect(next.content).toContain(
+        `${DEFAULT_READ_FILE_LINE_LIMIT + 1}|line-${DEFAULT_READ_FILE_LINE_LIMIT + 1}`,
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   test('returns structured shell command results', async () => {

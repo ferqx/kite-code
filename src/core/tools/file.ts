@@ -220,6 +220,9 @@ export async function readTextContentAsync(
 // read_file
 // ============================================================================
 
+/** Default source-line page used when the model omits an explicit limit. */
+export const DEFAULT_READ_FILE_LINE_LIMIT = 2_000;
+
 export interface ReadFileInput {
   workspace: string;
   path: string;
@@ -253,9 +256,12 @@ export function readFile(input: ReadFileInput): ReadFileResult {
     }
 
     const allLines = result.content.split('\n');
+    if (allLines.length > 0 && allLines[allLines.length - 1] === '') {
+      allLines.pop();
+    }
 
     const offset = input.offset && input.offset > 0 ? input.offset : 1;
-    const limit = input.limit ?? allLines.length;
+    const limit = input.limit ?? DEFAULT_READ_FILE_LINE_LIMIT;
     const fromLine = Math.max(1, offset);
     const toLine = Math.min(allLines.length, offset + limit - 1);
 

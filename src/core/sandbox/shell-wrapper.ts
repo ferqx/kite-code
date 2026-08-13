@@ -306,6 +306,9 @@ export function buildEnvStripSnippet(): string {
     'GRADLE_OPTS',
     'MAVEN_OPTS',
     'SBT_OPTS',
+    // rg can execute --pre commands supplied by this config file. Static
+    // read-only classification therefore relies on removing this ambient input.
+    'RIPGREP_CONFIG_PATH',
   ];
 
   return `${DANGEROUS_VARS.map((v) => `unset ${v}`).join(' ; ')} ; `;

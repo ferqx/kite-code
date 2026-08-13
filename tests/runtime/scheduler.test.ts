@@ -10,6 +10,7 @@ import {
   type ToolCallRecord,
 } from '../../src/core/runtime/state';
 import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
+import { shellExecuteSpec } from '../../src/core/tools/registry/builtins/shell-execute';
 
 function queueCall(
   state: RuntimeState,
@@ -561,7 +562,7 @@ describe('decideNextEffect', () => {
     });
     queueCall(state, 'status', {
       name: 'shell_execute',
-      args: { command: 'git status --short' },
+      args: { command: 'pwd' },
       effectClass: 'read_only',
       sideEffect: false,
     });
@@ -570,6 +571,26 @@ describe('decideNextEffect', () => {
       type: 'run_tools',
       toolCallIds: ['read-a', 'search', 'status'],
     });
+  });
+
+  test('does not batch a shell command whose operands can write', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'shell-write-shape-barrier',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    queueCall(state, 'read-a', {
+      name: 'read_file',
+      args: { path: 'a.ts' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    const args = { command: 'uniq input.txt output.txt' };
+    const effects = shellExecuteSpec.effects(args, { workspace: '/workspace' });
+    queueCall(state, 'unsafe-shell', { name: 'shell_execute', args, ...effects });
+
+    expect(effects).toMatchObject({ effectClass: 'unknown', sideEffect: true });
+    expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['read-a'] });
   });
 
   test('stops a read batch at the first interaction or side-effect barrier', () => {
