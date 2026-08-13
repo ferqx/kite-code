@@ -23,6 +23,8 @@ export interface TaskToolDeps {
   authorization?: import('@/core/types').ThreadAuthorizationState;
   workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
   phase?: import('@/protocol/events').AgentPhase;
+  /** Current parent Runtime interaction mode, inherited by the child execution. */
+  interactionMode: import('@/protocol/events').InteractionMode;
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
   threadId?: string;
   recoveryIdentityKey?: string;
@@ -78,6 +80,7 @@ export async function runTaskSubAgent(
       authorization: deps.authorization,
       workspaceAccess: deps.workspaceAccess,
       phase: deps.phase,
+      interactionMode: deps.interactionMode,
       projectInstructions: deps.projectInstructions,
       threadId: deps.threadId,
       recoveryIdentityKey: deps.recoveryIdentityKey,

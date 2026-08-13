@@ -54,6 +54,7 @@ import {
 } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { SubAgentEventSink } from '@/core/subagent/types';
+import { toolAvailabilityContext } from '@/core/tools/definitions';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { executeVerificationEffect } from '@/core/verification';
 import { createFilePreimageRecorder } from './file-checkpoints';
@@ -580,9 +581,41 @@ async function executeAutoReview(
   const call = state.tools.calls[effect.toolCallId];
   if (!call || state.interactions.kind !== 'awaiting_auto_review') return [];
 
+  const suspended = state.suspendedSubagents[effect.toolCallId];
+  const subagentId = state.interactions.approval.subagentId;
+  if (subagentId && (!suspended || suspended.subagentId !== subagentId)) {
+    return [
+      {
+        type: 'auto_review.completed',
+        reviewId: effect.reviewId,
+        toolCallId: effect.toolCallId,
+        result: {
+          ok: true,
+          approved: false,
+          reason: 'Sub-agent auto-review continuation is unavailable or does not match.',
+          reviewerModelName: '',
+          durationMs: 0,
+        },
+      },
+    ];
+  }
+  const reviewedCall =
+    subagentId && suspended
+      ? {
+          id: suspended.blockedTool.toolCallId,
+          name: suspended.blockedTool.toolName,
+          args: suspended.blockedTool.args,
+        }
+      : { id: call.toolCallId, name: call.name, args: call.args };
   const parsed = toolRequestFromCall(
-    { id: call.toolCallId, name: call.name, args: call.args },
-    { workspace: state.session.workspace, threadId: state.session.threadId },
+    reviewedCall,
+    toolAvailabilityContext({
+      workspace: state.session.workspace,
+      threadId: state.session.threadId,
+      config: dependencies.config,
+      gitBroker: dependencies.gitBroker,
+      mcpManager: dependencies.mcpManager,
+    }),
   );
   if (!parsed?.ok) {
     return [

@@ -313,6 +313,61 @@ export function buildBlockedToolRequest(
   } as PendingToolRequest;
 }
 
+export function blockedSubagentReviewEvent(input: {
+  state: RuntimeState;
+  parentToolCallId: string;
+  blocked: NonNullable<import('@/core/subagent/types').SubAgentResult['blocked']>;
+  availCtx: ReturnType<typeof toolAvailabilityContext>;
+}): RuntimeEvent {
+  const { blocked, state } = input;
+  const blockedDecision = evaluateToolApproval({
+    toolName: blocked.toolName,
+    toolArgs: blocked.args,
+    phase: getAgentPhase(getActivePlanning(state)),
+    workspace: state.session.workspace,
+    threadId: state.session.threadId,
+    authorization: state.authorization,
+    capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, input.availCtx),
+  });
+  const approval = buildToolApproval({
+    workspace: state.session.workspace,
+    threadId: state.session.threadId,
+    request: buildBlockedToolRequest(blocked, input.availCtx),
+    decision: blockedDecision,
+  }) as import('@/protocol/events').ToolApprovalPayload;
+  approval.subagentId = blocked.continuation.id;
+
+  const effectiveMode = getEffectiveInteractionMode(state);
+  const modeDecision = createModePolicy(effectiveMode).shouldApproveTool({
+    interactionMode: effectiveMode,
+    phase: getAgentPhase(getActivePlanning(state)),
+    planKind: getActivePlanning(state).kind,
+    toolName: blocked.toolName,
+    toolRisk: blockedDecision.risk,
+    effects: blockedDecision.effects,
+    circuitBreakerTripped: state.autoReview.circuitBreakerTripped,
+  });
+  if (
+    blocked.reasonCode === 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' &&
+    modeDecision.kind === 'need_auto_review'
+  ) {
+    return {
+      type: 'auto_review.requested',
+      reviewId: genInteractionId(),
+      toolCallId: input.parentToolCallId,
+      toolName: blocked.toolName,
+      reason: blockedDecision.reason,
+      approval,
+    };
+  }
+  return {
+    type: 'approval.requested',
+    interactionId: genInteractionId(),
+    toolCallId: input.parentToolCallId,
+    approval,
+  };
+}
+
 /** Convert the subagent runner's private callback payload into a durable public fact. */
 export function toRuntimeSubagentEvent(event: SubagentEvent): RuntimeEvent {
   switch (event.type) {
@@ -404,6 +459,7 @@ async function handleSubAgentResume(params: {
         authorization: params.state.authorization,
         approvedGrant: call?.approvalGrant ?? 'none',
         threadId: params.state.session.threadId,
+        readStateActorId: continuation.id,
         recoveryIdentityKey: params.state.toolRecovery.identityKey,
         recordFilePreimage: params.recordFilePreimage,
         recordNetworkDecision: params.recordNetworkDecision,
@@ -419,6 +475,7 @@ async function handleSubAgentResume(params: {
         skillManifests: params.skillManifests,
         skillOptions: params.skillOptions,
         signal: params.signal,
+        interactionMode: getEffectiveInteractionMode(params.state),
         taskConfig: params.taskConfig,
         taskModel: params.taskModel,
         providerDataAdmission: params.providerDataAdmission,
@@ -495,6 +552,7 @@ async function handleSubAgentResume(params: {
       authorization: params.state.authorization,
       workspaceAccess: params.state.workspaceAccess,
       phase: getAgentPhase(getActivePlanning(params.state)),
+      interactionMode: getEffectiveInteractionMode(params.state),
       threadId: params.state.session.threadId,
       timeoutMs: 30 * 60 * 1000,
       signal: params.signal ?? new AbortController().signal,
@@ -516,7 +574,6 @@ async function handleSubAgentResume(params: {
   // 子 agent 恢复后再次 blocked → 上报审批，不发射 tool.finished
   if (result.blocked) {
     const blocked = result.blocked;
-    const subagentId = blocked.continuation.id;
     events.push({
       type: 'subagent.suspended',
       toolCallId: params.toolCallId,
@@ -527,28 +584,14 @@ async function handleSubAgentResume(params: {
         command: blocked.command,
       }),
     });
-    const blockedDecision = evaluateToolApproval({
-      toolName: blocked.toolName,
-      toolArgs: blocked.args,
-      phase: getAgentPhase(getActivePlanning(params.state)),
-      workspace: params.state.session.workspace,
-      threadId: params.state.session.threadId,
-      authorization: params.state.authorization,
-      capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, availCtx),
-    });
-    const blockedApproval = buildToolApproval({
-      workspace: params.state.session.workspace,
-      threadId: params.state.session.threadId,
-      request: buildBlockedToolRequest(blocked, availCtx),
-      decision: blockedDecision,
-    }) as import('@/protocol/events').ToolApprovalPayload;
-    blockedApproval.subagentId = subagentId;
-    events.push({
-      type: 'approval.requested',
-      interactionId: genInteractionId(),
-      toolCallId: params.toolCallId,
-      approval: blockedApproval,
-    });
+    events.push(
+      blockedSubagentReviewEvent({
+        state: params.state,
+        parentToolCallId: params.toolCallId,
+        blocked,
+        availCtx,
+      }),
+    );
     return events;
   }
 
@@ -993,6 +1036,7 @@ export async function executeRuntimeTools(params: {
                   authorization: params.state.authorization,
                   workspaceAccess: params.state.workspaceAccess,
                   phase: getAgentPhase(getActivePlanning(params.state)),
+                  interactionMode: getEffectiveInteractionMode(params.state),
                   projectInstructions: visibleProjectInstructions(
                     params.state,
                     call.modelMessageId,
@@ -1474,7 +1518,6 @@ export async function executeRuntimeTools(params: {
         // ── Sub-agent blocked for approval → surface through Runtime Kernel ──
         if (result.subagentResult?.blocked) {
           const blocked = result.subagentResult.blocked;
-          const subagentId = blocked.continuation.id;
           // Serialize continuation into RuntimeState for persistence
           events.push({
             type: 'subagent.suspended',
@@ -1487,30 +1530,14 @@ export async function executeRuntimeTools(params: {
             }),
           });
 
-          // Build approval payload for the blocked sub-agent tool
-          const blockedDecision = evaluateToolApproval({
-            toolName: blocked.toolName,
-            toolArgs: blocked.args,
-            phase: getAgentPhase(getActivePlanning(params.state)),
-            workspace: params.state.session.workspace,
-            threadId: params.state.session.threadId,
-            authorization: params.state.authorization,
-            capability: builtinToolRegistry.effectsOf(blocked.toolName, blocked.args, availCtx),
-          });
-          const blockedApproval = buildToolApproval({
-            workspace: params.state.session.workspace,
-            threadId: params.state.session.threadId,
-            request: buildBlockedToolRequest(blocked, availCtx),
-            decision: blockedDecision,
-          }) as import('@/protocol/events').ToolApprovalPayload;
-          blockedApproval.subagentId = subagentId;
-
-          events.push({
-            type: 'approval.requested',
-            interactionId: genInteractionId(),
-            toolCallId,
-            approval: blockedApproval,
-          });
+          events.push(
+            blockedSubagentReviewEvent({
+              state: params.state,
+              parentToolCallId: toolCallId,
+              blocked,
+              availCtx,
+            }),
+          );
           // Do NOT emit tool.finished — the task tool is paused, waiting for approval
           continue;
         }

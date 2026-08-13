@@ -44,6 +44,8 @@ export interface SubAgentRunnerInput {
   authorization?: import('@/core/types').ThreadAuthorizationState;
   workspaceAccess?: import('@/protocol/events').WorkspaceAccess;
   phase?: import('@/protocol/events').AgentPhase;
+  /** Parent Runtime interaction mode for this invocation. Resume callers pass the current live mode. */
+  interactionMode?: import('@/protocol/events').InteractionMode;
   /** Project instructions visible to the parent model when this sub-agent was dispatched. */
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
   threadId?: string;
@@ -110,7 +112,7 @@ export interface SubAgentResult {
   terminalStatus?: 'completed' | 'failed' | 'cancelled' | 'exhausted' | 'suspended';
   error?: string;
   blocked?: {
-    reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL';
+    reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
     toolCallId: string;
     toolName: string;
     command: string;

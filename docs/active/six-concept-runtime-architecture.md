@@ -196,6 +196,8 @@ reducer 与 child provider context 复用唯一 public projection helper：succe
 为 `stderr || stdout || ''`，输入同时包含 `ok` 与 terminal status。Sandbox fail-closed boundary 以 Runtime-authored
 `terminationReason=sandbox_denied` 分类为 `sandbox_error/sandbox_denied`，不解析 stderr，也不调用底层命令；受控
 fallback sentinel 与 persisted authorization-widening event 计数提供可突变的零调用/零放宽证据。
+
+Child 执行上下文也必须由 Runtime 签发而不是模型自报：Subagent 入口一次规范化 canonical Workspace，并将同一路径用于模型 `Workspace`/`CWD` 和工具执行；子工具显式继承父 Runtime 当前的 interaction mode，审批恢复重新读取 live mode；文件 freshness 则以 Runtime 签发、在 continuation 中稳定的 child id 与 Parent/sibling 隔离。进程重启未恢复该内存状态时以 `not_read` fail closed。
 `journal_invalid` 对所有 journal mutator 都是吸收态，因此同一 Kernel batch 中 child merge 后紧随的
 task success 也不能清除 hard block。其 task/turn scope 只用于 provenance，scheduler/admission 必须在
 下一 turn、新 task、task close 与 SQLite restore 后继续全局 `persistence_unavailable` 零 dispatch 阻断；

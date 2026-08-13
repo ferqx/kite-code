@@ -37,6 +37,8 @@ SubAgentRunner 只通过父 Runtime 传入的 `McpRuntimeProvider` 访问 MCP，
 
 `task` capability 的 schema、契约、role-based effects 与结果投影由 ToolSpec Registry 的 `task` spec 统一定义。实际 `SubAgentRunner` 作为受治理的执行适配器由父 Runtime 注入，避免 Registry 依赖子 Agent 装配细节；旧的 `createTaskTool()` 模型工具执行器已删除。子 Agent 的 shell 只读分类与主 Runtime 共用命令形态分类器，不接受模型提供的 `intent` 等治理字段。
 
+子 Agent 的 Workspace、权限模式与读取 freshness 都来自 Runtime 而非模型参数。Runner 将 canonical Workspace 同时用于模型 `Workspace`/`CWD` 与工具根目录；child 显式继承父 Runtime 当前的 interaction mode，审批恢复时重新读取 live mode。每个 child 使用稳定且独立的 Runtime-issued id 跟踪 read-before-edit 状态，Parent 和 sibling 不能出借已读事实。
+
 ## 6.3 审批暂停与恢复
 
 子 Agent 遇到需要用户审批的操作时不能自行批准。Runner 产生 blocked tool 与可序列化 continuation，主 Runtime 请求用户决策；批准后恢复同一个调用身份和执行上下文，拒绝则把结构化拒绝结果反馈给子 Agent。

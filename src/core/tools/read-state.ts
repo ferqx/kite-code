@@ -1,10 +1,10 @@
 /**
- * 会话级读取状态跟踪（ADR-0042 §1，ADR-0043 §3）。
- * Session-level read-state tracking (ADR-0042 §1, ADR-0043 §3).
+ * Actor-scoped read-state tracking within a session (ADR-0042 §1, ADR-0043 §3).
  *
  * read_file / write_file / edit_file 成功后记录内容指纹；edit_file 的
- * "先读后改 / 过期拒绝" 前置校验（后续提交启用）据此判断模型是否持有
- * 最新内容。当前仅记录：记录行为本身不改变任何工具语义。
+ * "先读后改 / 过期拒绝" 前置校验据此判断当前 actor 是否持有
+ * 最新内容。Parent 使用稳定的 session scope；每个 subagent
+ * 使用其稳定 id，防止 parent/child/sibling 之间共享 freshness。
  */
 import { createHash } from 'node:crypto';
 
@@ -24,7 +24,7 @@ export interface SessionReadTracker {
 }
 
 const MAX_TRACKED_FILES = 10000;
-const MAX_TRACKED_SESSIONS = 256;
+const MAX_TRACKED_ACTOR_SCOPES = 256;
 
 class SessionReadTrackerImpl implements SessionReadTracker {
   readonly #stamps = new Map<string, string>();
@@ -58,19 +58,22 @@ class SessionReadTrackerImpl implements SessionReadTracker {
 const trackers = new Map<string, SessionReadTracker>();
 
 /**
- * 取会话的 tracker（threadId 键；缺失时退回 workspace 键）。
- * 主会话与 subagent fork 共享同一 threadId 的 tracker，与 ADR-0042 §4
- * 原像的记录链口径一致。
+ * 取 actor 的 tracker。actorId 缺失时使用稳定的 parent/session scope；
+ * 存在时在 session 内命名空间化，避免 subagent 与 parent 或 sibling 共享读取状态。
+ * Tracker 仅存内存：进程重启后未恢复的读取状态会 fail closed 为 not_read。
  */
-export function sessionReadTracker(sessionKey: string): SessionReadTracker {
-  let tracker = trackers.get(sessionKey);
+export function sessionReadTracker(sessionKey: string, actorId?: string): SessionReadTracker {
+  const scopeKey = JSON.stringify(
+    actorId ? ['actor-read-state-v1', sessionKey, actorId] : ['parent-read-state-v1', sessionKey],
+  );
+  let tracker = trackers.get(scopeKey);
   if (!tracker) {
-    if (trackers.size >= MAX_TRACKED_SESSIONS) {
+    if (trackers.size >= MAX_TRACKED_ACTOR_SCOPES) {
       const oldest = trackers.keys().next();
       if (!oldest.done && oldest.value) trackers.delete(oldest.value);
     }
     tracker = new SessionReadTrackerImpl();
-    trackers.set(sessionKey, tracker);
+    trackers.set(scopeKey, tracker);
   }
   return tracker;
 }

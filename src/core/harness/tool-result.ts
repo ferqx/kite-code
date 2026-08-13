@@ -28,6 +28,8 @@ export type ToolExecutionResult = ShellResult & {
   resultMeta?: ToolResultMeta;
   /** Project-level execution status. LangChain ToolMessage still maps this to success/error only. */
   status?: 'success' | 'error' | 'rejected' | 'exhausted';
+  /** Runtime interaction route required before this tool may execute. */
+  approvalRoute?: 'user' | 'auto_review';
   /** 执行该结果对应的工具名称 / Tool name that produced this result */
   tool?: string;
   /** 失败时交给模型的结构化指导 / Structured guidance returned on failure */
