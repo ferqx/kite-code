@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
 import { defaultAuthorizationState } from '@/core/harness/tool-policy';
+import { toolRequestFromCall } from '@/core/harness/tool-requests';
 import { runApprovedTool } from '@/core/harness/tool-runner';
 import { resolveProjectInstructionSnapshot } from '@/core/model/project-instructions';
 import { reduceRuntimeState } from '@/core/runtime/reducer';
@@ -31,6 +32,115 @@ function mockEventSink() {
 }
 
 describe('SubAgentRunner integration', () => {
+  test.each([
+    'accept_edits',
+    'auto',
+    'full',
+  ] as const)('normal launch accepts explicit %s mode and exposes the canonical workspace CWD', async (interactionMode) => {
+    const absoluteWorkspace = mkdtempSync(join(tmpdir(), `kite-subagent-${interactionMode}-`));
+    const workspace = relative(process.cwd(), absoluteWorkspace);
+    let providerPrompt: unknown;
+    const model = {
+      model: {
+        specificationVersion: 'v4',
+        provider: 'fixture',
+        modelId: 'fixture',
+        supportedUrls: {},
+        async doGenerate(options: { prompt?: unknown }) {
+          providerPrompt = options.prompt;
+          return {
+            content: [{ type: 'text', text: 'done' }],
+            finishReason: { unified: 'stop', raw: 'stop' },
+            usage: { inputTokens: {}, outputTokens: {}, totalTokens: 0 },
+          };
+        },
+        async doStream(): Promise<never> {
+          throw new Error('stream disabled');
+        },
+      },
+      capabilityMetadata: { streaming: false },
+      setRetryListener: () => {},
+    } as unknown as SupportedChatModel;
+
+    try {
+      const result = await runSubAgent({
+        config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+        workspace,
+        role: getRoleConfig('explore'),
+        task: 'Inspect the workspace.',
+        interactionMode,
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: mockEventSink().sink,
+        model,
+      });
+
+      expect(result.ok).toBe(true);
+      const prompt = JSON.stringify(providerPrompt);
+      expect(prompt).toContain(`CWD: ${absoluteWorkspace}`);
+      expect(prompt).toContain(`Workspace: ${absoluteWorkspace}`);
+      expect(prompt).not.toContain(`CWD: ${process.cwd()}\\n`);
+    } finally {
+      rmSync(absoluteWorkspace, { recursive: true, force: true });
+    }
+  });
+
+  test.each([
+    ['accept_edits', 'ask_user must be handled by the user_input interrupt node.'],
+    ['full', 'FULL_NO_USER_INTERACTION'],
+  ] as const)('normal launch applies inherited %s mode to child tools', async (interactionMode, expected) => {
+    const workspace = mkdtempSync(join(tmpdir(), `kite-subagent-mode-policy-${interactionMode}-`));
+    const { events, sink } = mockEventSink();
+    const model = new StreamingMockModel({
+      responses: [
+        {
+          message: aiMessage({
+            content: 'ask',
+            tool_calls: [
+              {
+                id: `ask-${interactionMode}`,
+                name: 'ask_user',
+                args: {
+                  questions: [
+                    {
+                      question: 'Continue?',
+                      options: [
+                        { label: 'Yes', description: 'Continue.', recommended: true },
+                        { label: 'No', description: 'Stop.', recommended: false },
+                      ],
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        },
+        { message: aiMessage({ content: 'done' }) },
+      ],
+    }) as unknown as SupportedChatModel;
+
+    try {
+      await runSubAgent({
+        config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+        workspace,
+        role: getRoleConfig('code'),
+        task: 'Ask only if the active mode permits it.',
+        interactionMode,
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      });
+
+      const askResult = events.find(
+        (event) => event.type === 'tool_result' && event.data.toolName === 'ask_user',
+      );
+      expect(String(askResult?.data.summary)).toContain(expected);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('real task dispatch preserves planning phase for governed save then submit projection', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-plan-child-phase-'));
     const taskModel = new StreamingMockModel({
@@ -451,6 +561,149 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
+  test('parent read state does not authorize a child edit in the same thread', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-read-scope-'));
+    writeFileSync(join(ws, 'owned.ts'), 'export const owner = "parent";\n', 'utf8');
+    try {
+      const parentRead = toolRequestFromCall(
+        { id: 'parent-read', name: 'read_file', args: { path: 'owned.ts' } },
+        ws,
+      );
+      if (!parentRead?.ok) throw new Error('Failed to build parent read request');
+      expect(
+        (
+          await runApprovedTool({
+            workspace: ws,
+            threadId: 'shared-actor-thread',
+            request: parentRead.request,
+          })
+        ).ok,
+      ).toBe(true);
+
+      const { sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: aiMessage({
+              content: 'edit',
+              tool_calls: [
+                {
+                  id: 'child-edit',
+                  name: 'edit_file',
+                  args: {
+                    path: 'owned.ts',
+                    old_string: 'export const owner = "parent";',
+                    new_string: 'export const owner = "child";',
+                  },
+                },
+              ],
+            }),
+          },
+          { message: aiMessage({ content: 'stopped after rejection' }) },
+        ],
+      }) as unknown as SupportedChatModel;
+
+      const child = await runSubAgent({
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'edit owned.ts',
+        threadId: 'shared-actor-thread',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      });
+
+      expect(child.steps?.find((step) => step.toolName === 'edit_file')).toMatchObject({
+        ok: false,
+        status: 'error',
+      });
+      expect(readFileSync(join(ws, 'owned.ts'), 'utf8')).toBe('export const owner = "parent";\n');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('same child keeps its read state across an in-process approval continuation', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-read-resume-'));
+    writeFileSync(join(ws, 'continued.ts'), 'export const value = 1;\n', 'utf8');
+    try {
+      const { sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: aiMessage({
+              content: 'read',
+              tool_calls: [
+                { id: 'continued-read', name: 'read_file', args: { path: 'continued.ts' } },
+              ],
+            }),
+          },
+          {
+            message: aiMessage({
+              content: 'verify',
+              tool_calls: [
+                { id: 'continued-approval', name: 'shell_execute', args: { command: 'bun test' } },
+              ],
+            }),
+          },
+          {
+            message: aiMessage({
+              content: 'edit',
+              tool_calls: [
+                {
+                  id: 'continued-edit',
+                  name: 'edit_file',
+                  args: {
+                    path: 'continued.ts',
+                    old_string: 'export const value = 1;',
+                    new_string: 'export const value = 2;',
+                  },
+                },
+              ],
+            }),
+          },
+          { message: aiMessage({ content: 'done' }) },
+        ],
+      }) as unknown as SupportedChatModel;
+      const input = {
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'read, verify, then edit continued.ts',
+        threadId: 'continued-actor-thread',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      };
+
+      const blocked = await runSubAgent(input);
+      expect(blocked.blocked?.toolCallId).toBe('continued-approval');
+      const resumed = await resumeSubAgent(input, blocked.blocked!.continuation, {
+        toolCallId: 'continued-approval',
+        toolName: 'shell_execute',
+        result: {
+          ok: true,
+          command: 'bun test',
+          exitCode: 0,
+          stdout: 'ok',
+          stderr: '',
+          status: 'success',
+        },
+      });
+
+      expect(resumed.steps?.find((step) => step.toolName === 'edit_file')).toMatchObject({
+        ok: true,
+        status: 'success',
+      });
+      expect(readFileSync(join(ws, 'continued.ts'), 'utf8')).toBe('export const value = 2;\n');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   test('read_file ENOENT uses the same public projection and recovery advice in parent and child', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-enoent-parity-'));
     const privatePath = 'private-missing-result.ts';
@@ -638,6 +891,7 @@ describe('SubAgentRunner integration', () => {
             },
           } as unknown as AgentConfig,
           workspace: ws,
+          interactionMode: 'accept_edits',
           eventSink: sink,
           model: model,
         },
@@ -827,6 +1081,45 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
+  test('preserves auto-review as a typed child blocker', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-auto-review-'));
+    try {
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: aiMessage({
+              content: 'stage fixture',
+              tool_calls: [
+                {
+                  id: 'tc-auto-review',
+                  name: 'shell_execute',
+                  args: { command: 'git add fixture.txt', description: 'Stage fixture' },
+                },
+              ],
+            }),
+          },
+        ],
+      }) as unknown as SupportedChatModel;
+
+      const result = await runSubAgent({
+        config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'Stage the changed fixture.',
+        interactionMode: 'auto',
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: mockEventSink().sink,
+        model,
+      });
+
+      expect(result.blocked?.reasonCode).toBe('SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW');
+      expect(result.blocked?.toolCallId).toBe('tc-auto-review');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   test('resumes original sub-agent after approved tool result', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-resume-'));
     try {
@@ -897,6 +1190,91 @@ describe('SubAgentRunner integration', () => {
       expect(shellExecutions).toBe(0);
       const doneEvent = events.find((e) => e.type === 'done');
       expect(String(doneEvent?.data.summary)).toContain('saw typecheck ok');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
+  test('approval resume uses the parent Runtime live mode for subsequent child calls', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-live-mode-resume-'));
+    try {
+      const { events, sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: aiMessage({
+              content: 'verify',
+              tool_calls: [
+                {
+                  id: 'tc-live-mode-shell',
+                  name: 'shell_execute',
+                  args: { command: 'bun run typecheck', description: 'Run typecheck' },
+                },
+              ],
+            }),
+          },
+          {
+            message: aiMessage({
+              content: 'ask after resume',
+              tool_calls: [
+                {
+                  id: 'tc-live-mode-ask',
+                  name: 'ask_user',
+                  args: {
+                    questions: [
+                      {
+                        question: 'Continue?',
+                        options: [
+                          { label: 'Yes', description: 'Continue.', recommended: true },
+                          { label: 'No', description: 'Stop.', recommended: false },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+          },
+          { message: aiMessage({ content: 'continued without asking' }) },
+        ],
+      }) as unknown as SupportedChatModel;
+      const baseInput = {
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('code'),
+        task: 'run verification',
+        interactionMode: 'accept_edits' as const,
+        timeoutMs: 5_000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+      };
+
+      const blocked = await runSubAgent(baseInput);
+      expect(blocked.blocked?.toolCallId).toBe('tc-live-mode-shell');
+
+      const resumed = await resumeSubAgent(
+        { ...baseInput, interactionMode: 'full' },
+        blocked.blocked!.continuation,
+        {
+          toolCallId: 'tc-live-mode-shell',
+          toolName: 'shell_execute',
+          result: {
+            ok: true,
+            command: 'bun run typecheck',
+            exitCode: 0,
+            stdout: 'typecheck ok',
+            stderr: '',
+            status: 'success',
+          },
+        },
+      );
+
+      expect(resumed.ok).toBe(false);
+      const askResult = events.find(
+        (event) => event.type === 'tool_result' && event.data.toolName === 'ask_user',
+      );
+      expect(String(askResult?.data.summary)).toContain('FULL_NO_USER_INTERACTION');
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

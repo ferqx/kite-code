@@ -266,6 +266,28 @@ describe('runApprovedTool — read_mcp_resource', () => {
 });
 
 describe('runApprovedTool — bound MCP policy', () => {
+  it('keeps minimum user approval on the manual route in auto mode', async () => {
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        source: 'mcp',
+        id: 'call-user-approved-effect',
+        name: 'mcp__auth__write',
+        args: { id: '42' },
+        reason: 'Update authenticated fixture data',
+        protectedCommand: 'mcp__auth__write',
+      } as PendingToolRequest,
+      interactionMode: 'auto',
+      mcpPolicy: {
+        effects: { filesystem: 'none', network: 'write', externalState: 'write' },
+        minimumApproval: 'user',
+      },
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.approvalRoute).toBe('user');
+  });
+
   it('executes a binding-validated read-only MCP tool without inventing a second approval', async () => {
     let called = false;
     const manager = {
@@ -804,5 +826,86 @@ describe('runApprovedTool — file pre-image capture (ADR-0042 §4)', () => {
       },
     });
     expect(result.ok).toBe(true);
+  });
+});
+
+describe('runApprovedTool — actor-scoped read-before-edit', () => {
+  let workspace: string;
+
+  beforeEach(() => {
+    workspace = mkdtempSync(join(tmpdir(), 'kite-code-read-state-actor-'));
+    writeFileSync(join(workspace, 'parent.ts'), 'export const owner = "parent";\n', 'utf8');
+    writeFileSync(join(workspace, 'child.ts'), 'export const owner = "child";\n', 'utf8');
+  });
+
+  afterEach(() => {
+    rmSync(workspace, { recursive: true, force: true });
+  });
+
+  function requestOf(name: string, args: Record<string, unknown>): PendingToolRequest {
+    const result = toolRequestFromCall({ id: `${name}-call`, name, args }, workspace);
+    if (!result?.ok) throw new Error(`Failed to build request for ${name}`);
+    return result.request;
+  }
+
+  async function runFileTool(
+    name: string,
+    args: Record<string, unknown>,
+    readStateActorId?: string,
+  ) {
+    return runApprovedTool({
+      workspace,
+      threadId: 'shared-thread',
+      readStateActorId,
+      request: requestOf(name, args),
+    });
+  }
+
+  it('does not let parent, child, or sibling actors lend freshness to one another', async () => {
+    expect((await runFileTool('read_file', { path: 'parent.ts' })).ok).toBe(true);
+
+    const childUsingParentRead = await runFileTool(
+      'edit_file',
+      {
+        path: 'parent.ts',
+        old_string: 'export const owner = "parent";',
+        new_string: 'export const owner = "child-a";',
+      },
+      'child-a',
+    );
+    expect(childUsingParentRead.ok).toBe(false);
+    expect(childUsingParentRead.stderr).toContain('File has not been read yet');
+
+    expect((await runFileTool('read_file', { path: 'child.ts' }, 'child-a')).ok).toBe(true);
+    const siblingUsingChildRead = await runFileTool(
+      'edit_file',
+      {
+        path: 'child.ts',
+        old_string: 'export const owner = "child";',
+        new_string: 'export const owner = "child-b";',
+      },
+      'child-b',
+    );
+    expect(siblingUsingChildRead.ok).toBe(false);
+    expect(siblingUsingChildRead.stderr).toContain('File has not been read yet');
+
+    // Reusing the stable actor id models an in-process suspend/resume continuation.
+    const continuedChild = await runFileTool(
+      'edit_file',
+      {
+        path: 'child.ts',
+        old_string: 'export const owner = "child";',
+        new_string: 'export const owner = "child-a";',
+      },
+      'child-a',
+    );
+    expect(continuedChild.ok).toBe(true);
+
+    const continuedParent = await runFileTool('edit_file', {
+      path: 'parent.ts',
+      old_string: 'export const owner = "parent";',
+      new_string: 'export const owner = "main";',
+    });
+    expect(continuedParent.ok).toBe(true);
   });
 });

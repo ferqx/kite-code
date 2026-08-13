@@ -2621,6 +2621,11 @@ function reduceRuntimeStateWithReplayBoundary(
           }),
           ok: false,
         }),
+        suspendedSubagents: clearSuspendedSubagent(
+          state,
+          toolCallId,
+          existingCall?.name === 'task',
+        ),
         autoReview: {
           ...state.autoReview,
           consecutiveRejects: breaker.newConsecutiveRejects,

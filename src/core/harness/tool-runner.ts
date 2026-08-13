@@ -177,6 +177,8 @@ export interface RunApprovedToolInput {
   authorization?: ThreadAuthorizationState | null;
   approvedGrant?: ShellGrantUsed;
   threadId?: string;
+  /** Stable actor identity for read-before-edit isolation. Parent calls omit it. */
+  readStateActorId?: string;
   override?: AuthorizationOverride;
   mcpManager?: McpRuntimeProvider;
   mcpInvocation?: {
@@ -231,6 +233,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     authorization = null,
     approvedGrant = 'none',
     threadId = '',
+    readStateActorId,
     override,
     mcpManager,
     mcpInvocation,
@@ -452,6 +455,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stdout: '',
       stderr: `Rejected by tool policy: ${request.name} requires approval but was not approved.`,
       status: 'rejected',
+      approvalRoute:
+        mcpPolicy?.minimumApproval !== 'user' && modeDecision.kind === 'need_auto_review'
+          ? 'auto_review'
+          : 'user',
     });
   }
 
@@ -519,6 +526,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
                   authorization: normalizeAuthorizationState(authorization),
                   workspaceAccess,
                   phase,
+                  interactionMode,
                   projectInstructions: projectInstructionSnapshot,
                   threadId,
                   recoveryIdentityKey,
@@ -613,7 +621,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     if (output.ok && output.rawContent !== undefined) {
       // ADR-0042 §1 读取状态记录：指纹取原始文本（output.content 是带行号的
       // 模型表面格式，与 edit 侧 preEditRead 指纹口径不一致，不可用于校验）。
-      sessionReadTracker(threadId || workspace).record(
+      sessionReadTracker(threadId || workspace, readStateActorId).record(
         canonicalFilePath(workspace, filePath, allowExternal),
         fileContentHash(output.rawContent),
       );
@@ -664,7 +672,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2，含 §3 严格精确匹配）：
     // 执行经 dispatchRegisteredTool；ADR-0042 §1 先读后改校验由 spec.preExecute
     // 基于会话读取状态执行（not_read / stale → 硬失败，引导重读）。
-    const tracker = sessionReadTracker(threadId || workspace);
+    const tracker = sessionReadTracker(threadId || workspace, readStateActorId);
     const canonicalPath = canonicalFilePath(workspace, editPath, allowExternal);
     const readState = tracker.check(
       canonicalPath,
@@ -774,7 +782,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       safeRecordPostimage(input.recordFilePreimage, filePath, normalizeEOL(content), true);
       // ADR-0042 §1 读取状态记录：写入成功后模型持有全部内容，等价于一次读取。
       // 哈希取换行正规化后的文本，与后续 read_file 回读指纹一致。
-      sessionReadTracker(threadId || workspace).record(
+      sessionReadTracker(threadId || workspace, readStateActorId).record(
         canonicalFilePath(workspace, filePath, allowExternal),
         fileContentHash(normalizeEOL(content)),
       );

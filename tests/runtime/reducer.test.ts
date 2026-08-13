@@ -2984,6 +2984,43 @@ describe('reduceRuntimeState — auto-review events', () => {
     expect(next.autoReview.circuitBreakerTripped).toBe(false); // not tripped yet (threshold=3)
   });
 
+  test('auto-review rejection clears a suspended child continuation', () => {
+    const withTask = queueTaskCall(makeInitialState(), 'task-auto');
+    const approval: ToolApprovalPayload = {
+      ...makeToolApproval('git add fixture.txt'),
+      tool: 'shell_execute',
+      subagentId: 'subagent-1',
+    };
+    const awaiting = reduceRuntimeState(withTask, {
+      type: 'auto_review.requested',
+      reviewId: 'review-child',
+      toolCallId: 'task-auto',
+      toolName: 'shell_execute',
+      reason: 'review child command',
+      approval,
+    });
+    const suspended = {
+      ...awaiting,
+      suspendedSubagents: { 'task-auto': makeSuspendedSubagentSnapshot() },
+    };
+
+    const next = reduceRuntimeState(suspended, {
+      type: 'auto_review.completed',
+      reviewId: 'review-child',
+      toolCallId: 'task-auto',
+      result: {
+        ok: true,
+        approved: false,
+        reason: 'unsafe child command',
+        reviewerModelName: 'reviewer',
+        durationMs: 10,
+      },
+    });
+
+    expect(next.tools.calls['task-auto']?.status).toBe('rejected');
+    expect(next.suspendedSubagents['task-auto']).toBeUndefined();
+  });
+
   test('auto-review risk decision remains non-terminal until user approval follows', () => {
     const state = makeInitialState();
     const approval: ToolApprovalPayload = { ...makeToolApproval('npm test'), reason: 'testing' };

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentConfig } from '@/core/config/index';
 import {
+  blockedSubagentReviewEvent,
   buildBlockedToolRequest,
   executeRuntimeTools,
   toRuntimeSubagentEvent,
@@ -13,6 +14,7 @@ import { McpConnectionManager } from '@/core/mcp/manager';
 import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
+import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
@@ -69,6 +71,128 @@ async function executeUpdatePlan(
 }
 
 describe('executeRuntimeTools', () => {
+  test.each([
+    'missing',
+    'mismatched',
+  ] as const)('fails closed when a child auto-review continuation is %s', async (snapshotState) => {
+    const state = createInitialRuntimeState({
+      threadId: `child-auto-review-${snapshotState}`,
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'model',
+      name: 'task',
+      args: { subagent_type: 'code', task: 'Modify the fixture.' },
+      status: 'awaiting_auto_review',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.interactions = {
+      kind: 'awaiting_auto_review',
+      interactionId: 'review-child',
+      toolCallId: 'task',
+      toolName: 'shell_execute',
+      reason: 'review child command',
+      approval: {
+        scope: 'once',
+        cwd: state.session.workspace,
+        threadId: state.session.threadId,
+        tool: 'shell_execute',
+        command: 'git add fixture.txt',
+        risk: 'vcs_mutation',
+        approvalHash: 'hash',
+        summary: 'Stage fixture.',
+        reason: 'Requires automatic review.',
+        expectedEffects: ['Mutates version control state'],
+        grantOptions: ['approve_once'],
+        recommendedGrant: 'approve_once',
+        subagentId: 'expected-child',
+      },
+    };
+    if (snapshotState === 'mismatched') {
+      state.suspendedSubagents.task = serializeSubagentContinuation(
+        {
+          id: 'different-child',
+          role: getRoleConfig('code'),
+          task: 'Modify the fixture.',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+        },
+        {
+          toolCallId: 'child-shell',
+          toolName: 'shell_execute',
+          args: { command: 'git add fixture.txt' },
+          command: 'git add fixture.txt',
+        },
+      );
+    }
+    const model = createMockModel([]);
+    const executor = createRuntimeEffectExecutor({
+      config: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
+      model,
+    });
+
+    const events = await executor(
+      { type: 'run_auto_review', reviewId: 'review-child', toolCallId: 'task' },
+      state,
+    );
+
+    expect(model.callCount.count).toBe(0);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: 'auto_review.completed',
+        result: expect.objectContaining({
+          ok: true,
+          approved: false,
+          reason: expect.stringContaining('continuation'),
+        }),
+      }),
+    ]);
+  });
+
+  test.each([
+    ['accept_edits', false, 'approval.requested'],
+    ['auto', false, 'auto_review.requested'],
+    ['auto', true, 'approval.requested'],
+  ] as const)('routes a blocked child in %s mode with breaker=%s through %s', (mode, circuitBreakerTripped, expectedType) => {
+    const state = createInitialRuntimeState({
+      threadId: `child-review-${mode}-${circuitBreakerTripped}`,
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.mode = mode;
+    state.autoReview.circuitBreakerTripped = circuitBreakerTripped;
+    const event = blockedSubagentReviewEvent({
+      state,
+      parentToolCallId: 'task-call',
+      blocked: {
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
+        toolCallId: 'child-shell',
+        toolName: 'shell_execute',
+        command: 'git add fixture.txt',
+        args: { command: 'git add fixture.txt' },
+        message: 'blocked',
+        continuation: {
+          id: 'child',
+          role: getRoleConfig('code'),
+          task: 'Modify the fixture in a code subagent.',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+        },
+      },
+      availCtx: toolAvailabilityContext({
+        workspace: state.session.workspace,
+        threadId: state.session.threadId,
+      }),
+    });
+
+    expect(event.type).toBe(expectedType);
+  });
+
   test('rejects direct tool execution while a legacy V1 plan is executing', async () => {
     const state = createInitialRuntimeState({
       threadId: 'legacy-plan-direct-tool',

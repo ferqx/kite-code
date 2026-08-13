@@ -138,6 +138,8 @@ Kernel control 持久化 `interaction_mode.changed`。事件只能来自显式�
 展示选择。事件推进 revision，已在旧 mode 下启动但尚未提交的 effect 不能再提交结果，后续调度按新 mode
 重新计算。该路径不直接改写 RuntimeState，也不依赖 TUI ref 的下一次渲染。
 
+Subagent 工具面与执行策略显式继承父 Runtime 当前的 `interactionMode`，不从模型参数或可能过期的 task config 推导。子 Agent 因审批挂起后，恢复时以父 Runtime 的 live mode 为权威：挂起期间的 `/permissions` 降级或提升会用于已批准的阻塞工具和后续 child loop。内部调用若遗漏显式 mode，只能 fail-safe 回退到 `accept_edits`，不得因 config 中的 `full` 而放宽。
+
 `/permissions` 只接受无参数形式并打开可用模式选择器，确认某一项后才改变 mode；任何附加参数都不
 触发模式切换。当前 backend 不支持 `full` 时选择器禁用该项。
 这不会把模式选择伪装成 production capability admission。production execution-status 只可由 CLI

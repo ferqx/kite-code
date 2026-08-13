@@ -157,7 +157,12 @@ function mcpBindingError(input: {
 }
 
 function approvalRequiredBlock(
-  result: { command?: string; status?: string; stderr?: string },
+  result: {
+    command?: string;
+    status?: string;
+    stderr?: string;
+    approvalRoute?: 'user' | 'auto_review';
+  },
   toolCallId: string,
   toolName: string,
   args: Record<string, unknown>,
@@ -170,21 +175,27 @@ function approvalRequiredBlock(
     return null;
   }
   const command = result.command ?? toolName;
+  const requiresAutoReview = result.approvalRoute === 'auto_review';
   return {
-    reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' as const,
+    reasonCode: requiresAutoReview
+      ? ('SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW' as const)
+      : ('SUBAGENT_TOOL_REQUIRES_APPROVAL' as const),
     toolCallId,
     toolName,
     command,
     args,
-    message: `Sub-agent blocked: ${toolName} requires main-agent approval before execution.`,
+    message: requiresAutoReview
+      ? `Sub-agent blocked: ${toolName} requires automatic review before execution.`
+      : `Sub-agent blocked: ${toolName} requires main-agent approval before execution.`,
     continuation,
   };
 }
 
 function initialMessages(input: SubAgentRunnerInput): BaseMessage[] {
-  const cacheableRuntimeCtx = buildCacheableRuntimeContext({ workspace: input.workspace });
+  const canonicalWorkspace = resolve(input.workspace);
+  const cacheableRuntimeCtx = buildCacheableRuntimeContext({ workspace: canonicalWorkspace });
   const taskWithCwd = `<runtime-state source="harness.subagent">
-CWD: ${process.cwd()}
+CWD: ${canonicalWorkspace}
 </runtime-state>
 
 ${input.task}`;
@@ -212,6 +223,12 @@ ${input.task}`;
       ? [humanMessage(formatProjectInstructionSnapshot(projectContext))]
       : []),
   ];
+}
+
+function effectiveInteractionMode(
+  input: SubAgentRunnerInput,
+): import('@/protocol/events').InteractionMode {
+  return input.interactionMode ?? 'accept_edits';
 }
 
 function normalizeRoleConfig(role: SubAgentRoleConfig): SubAgentRoleConfig {
@@ -277,6 +294,7 @@ export async function runSubAgent(input: SubAgentRunnerInput): Promise<SubAgentR
   const id = nextSubAgentId();
   const normalizedInput = {
     ...input,
+    workspace: resolve(input.workspace),
     role: normalizeRoleConfig(input.role),
     projectInstructions: getFeatureFlags(input.config).promptContractV2
       ? (input.projectInstructions ??
@@ -309,6 +327,7 @@ export async function resumeSubAgent(
 ): Promise<SubAgentResult> {
   const normalizedInput = {
     ...input,
+    workspace: resolve(input.workspace),
     role: normalizeRoleConfig(input.role),
     projectInstructions: continuation.projectInstructions ?? input.projectInstructions,
   };
@@ -501,7 +520,7 @@ async function runSubAgentLoop(
     authorization: input.authorization,
     workspaceAccess: input.workspaceAccess,
     phase: input.phase,
-    interactionMode: 'accept_edits',
+    interactionMode: effectiveInteractionMode(input),
     threadId: input.threadId,
     model,
     subagentEventSink: input.eventSink,
@@ -1061,6 +1080,7 @@ async function runSubAgentLoop(
             phase: input.phase ?? 'building',
             authorization: input.authorization,
             threadId: input.threadId ?? '',
+            readStateActorId: id,
             recordFilePreimage: input.recordFilePreimage,
             mcpManager: input.mcpManager,
             ...(boundMcpDescriptor
@@ -1078,7 +1098,7 @@ async function runSubAgentLoop(
             skillManifests: input.skills,
             skillOptions: input.skillOptions,
             signal: combinedSignal,
-            interactionMode: 'accept_edits',
+            interactionMode: effectiveInteractionMode(input),
             taskConfig: input.config,
             availabilityContext,
             projectInstructionSnapshot: input.projectInstructions,

@@ -101,3 +101,6 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0097](0097-brokered-git-capability.md) | accepted | Git 从通用 Shell 迁移到 App-owned typed capability，并恢复三平台 `.git` 原生 deny |
 | [0098](0098-prompt-contract-v2-default-enabled.md) | accepted | 修正后的真实 A/B、项目规则 effect 与 Runtime 纠错 Journey 通过，Prompt Contract V2 默认启用并保留 legacy 回滚 |
 | [0099](0099-phase-stable-tool-disclosure.md) | accepted | V2 builtin/MCP 声明跨 Planning/Building 稳定，提示词引导只读行为，Runtime Policy 返回 phase 错误并阻止副作用 |
+| [0100](0100-user-approved-external-filesystem-capability.md) | accepted | 用户审批的逐 invocation 外部文件系统能力由原生 sandbox 执行 |
+| [0101](0101-approved-invocation-native-guards-and-network-projection.md) | accepted | 审批能力必须可兑现，并保留凭据与持久身份的原生固定保护 |
+| [0102](0102-runtime-issued-subagent-execution-context.md) | accepted | Subagent 继承 live mode 与 canonical Workspace，read-before-edit 按 actor 隔离 |

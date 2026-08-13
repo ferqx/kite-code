@@ -3,7 +3,7 @@
 状态：active
 范围：`src/core/tools/file.ts`、`src/core/tools/shell.ts`、`src/core/tools/path-utils.ts`、`src/core/tools/search.ts`、`src/core/harness/tool-runner.ts`、`src/core/model/runtime-context.ts`、`src/core/runtime/agent.ts`、`src/core/subagent/runner.ts`、`src/app/tui/reducers/handleEvent.ts`、`src/app/tui/reducers/agentReducer.ts`、`src/app/tui/reducers/sessionReducer.ts`、`src/protocol/events.ts`、`src/core/tools/tool-contracts.ts`、`src/core/prompts/system-prompt.txt`
 读取时机：修改 `readFile`/`editFile`/`writeFile`、二进制检测、编码处理、换行正规化、MSYS2 路径转换、runtime context 路径格式、search 遍历与 `.gitignore` 过滤时必读。
-验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`
+验证：`bun test tests/tools.test.ts tests/tool-definitions.test.ts tests/tool-runner.test.ts tests/policies/protected-path.test.ts tests/context.test.ts tests/runtime/agent.integration.test.ts tests/subagent-runner.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/stream-output.test.ts`
 
 ## 设计目标
 
@@ -30,7 +30,7 @@ Workspace: /d/work/my-project
 第 1 层（主防线）
   runtime-context.ts: Workspace 用 Windows 原生格式展示；
   POSIX 路径提示仅限 shell_execute，明确说明 file 工具用 Windows 路径。
-  subagent/runner.ts: CWD 用 process.cwd() 原生格式，不再 toPosixPath。
+  subagent/runner.ts: Workspace 与 CWD 共用 resolve(input.workspace) 的规范绝对路径。
 
 第 2 层（防御纵深）
   file.ts: resolvePath 入口调用 msys2ToWindowsPath 转换 MSYS2 路径参数。
@@ -47,7 +47,7 @@ Workspace: /d/work/my-project
 
 `read_file` / `search_content` / `search_files` 工具调用的编排已迁入 ToolSpec Registry dispatch（`dispatchRegisteredTool`，ADR-0043 S1.2）：各 spec 的 `execute` 仍调用 `readFile` / 原生搜索，字节级单入口 `readTextContent` 与本边界全部规则不变；外部路径 grant 检查经 `ToolExecutionContext.allowExternalPaths` 注入。
 
-会话级读取状态跟踪（`src/core/tools/read-state.ts`，ADR-0042 §1）：`read_file` / `write_file` / `edit_file` 成功后按规范化路径记录内容指纹（sha256，换行正规化后文本），tracker 以 threadId 为键（主会话与 subagent fork 共享）。`edit_file` 执行前经 `editFileSpec.preExecute` 强制校验：未读（not_read）或指纹与磁盘不一致（stale，即外部修改）时硬失败并引导重读，对齐 Claude Code 的 "File has not been read yet" / "File has been modified since you last read it" 两条工具层拒绝。跟踪 best-effort——不得因跟踪失败中断工具执行；回滚方式为还原强制校验提交（退回 old_string 自然校验）。
+读取状态跟踪（`src/core/tools/read-state.ts`，ADR-0042 §1、ADR-0102）：`read_file` / `write_file` / `edit_file` 成功后按规范化路径记录内容指纹（sha256，换行正规化后文本）。tracker 在 session 内按 actor 隔离：Parent 使用稳定的 session scope，每个 Subagent 使用 Runtime 签发且在审批暂停/恢复间不变的 child id；Parent、child 和 sibling 不能互相出借 freshness。tracker 仅存内存，进程重启后未恢复的状态必须 fail closed 为 `not_read`。`edit_file` 执行前经 `editFileSpec.preExecute` 强制校验：当前 actor 未读（not_read）或指纹与磁盘不一致（stale，即外部修改）时硬失败并引导重读。
 
 边界提供两个入口，共享同一个 `decodeTextBuffer` 解码核心（编码检测、二进制检测、换行正规化行为完全一致）：
 
@@ -147,7 +147,7 @@ Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内�
 
 `Workspace` 字段用 Windows 原生格式（`D:\work\my-project`）。仅在 `osPlatform === "win32"` 时追加一条 `shell_execute` 专用的 POSIX 转换提示，并明确说明 file 工具直接用 Windows 路径。
 
-subagent CWD 使用 `process.cwd()` 原生格式，不再通过 `toPosixPath` 转换。
+Subagent 在入口处将 `input.workspace` 经 `resolve()` 规范化；模型可见的 `Workspace`、`CWD` 与所有工具执行根目录共用该绝对路径，不读取启动进程的 `process.cwd()`。
 
 ### MSYS2 路径转换（`path-utils.ts`）
 
