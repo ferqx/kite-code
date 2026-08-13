@@ -794,6 +794,16 @@ pub fn create_unelevated_approved_filesystem_token(
     }
     let token = RestrictedToken { handle };
     verify_restricted_token_handle(token.handle, std::slice::from_ref(protected_guard))?;
+    // The approved shell still creates child processes and pipes. Match the
+    // normal Workspace token's object-creation DACL so descendants such as
+    // Node/npm can open their process objects under the same Logon/World and
+    // restricted-guard identities.
+    set_compatible_default_dacl(
+        token.handle,
+        std::slice::from_ref(protected_guard),
+        logon.sid,
+        world.sid,
+    )?;
     enable_traverse_privilege(token.handle)?;
     Ok(token)
 }

@@ -139,7 +139,8 @@ user/group/guard restricted SID 只约束写访问，read/execute 仍服从 curr
 invocation 仍使用 capability SID
 ledger，扩权 invocation 不把全局写权限写入 persistent Workspace ledger，也不要求 UAC。显式危险路径
 在 Tool Policy 阶段拒绝；approved token 还携带 restricted-only guard SID，既有固定路径对该 SID 添加
-invocation-scoped deny，避免变量拼接或间接执行绕过字符串检查。该 scope 不等于 Full 或 production evidence；
+invocation-scoped deny，并初始化与普通 token 相同的 child-object default DACL，避免变量拼接或间接执行
+绕过字符串检查，同时允许已批准 shell 启动 Node/npm descendant。该 scope 不等于 Full 或 production evidence；
 若同一命令同时需要网络和外部文件系统，Tool Policy 必须同时展示对应 effects，批准后只执行一次。
 
 在 user script 前无法选择或 structural start 该 backend 时，development entrypoint 才能选择 cached

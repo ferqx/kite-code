@@ -125,7 +125,9 @@ local path 的 `WRITE_RESTRICTED` 通过 restricted SID check 限制写入，但
 只服从 current user 普通 ACL，并让 restricted SID check 仅参与写访问；token 的 restricted SID 集合镜像
 user/group SID 并加入专用 guard，同时保留 Logon/World SID。这样 GitHub runner toolcache 等只向普通用户
 ACL 身份授予执行权的 system/toolchain binary 仍可运行，而既有固定路径对 guard SID 的 write deny ACE
-仍会拒绝写入，宿主当前用户不受该 ACE 影响。仅网络扩权使用专用非管理员
+仍会拒绝写入，宿主当前用户不受该 ACE 影响。approved token 与普通 Workspace token 使用同一
+Logon/World/capability default DACL 初始化，确保 shell 创建的 pipe 与 Node/npm 等 descendant process
+object 可由该 token 继续访问。仅网络扩权使用专用非管理员
 identity + 临时 ACL lease。同一 invocation
 同时获批网络和外部文件系统时使用前述 approved filesystem token 并投影 `networkMode=allow_all`，避免 Online identity
 的 Workspace ACL lease 再次阻止已批准外部路径。
