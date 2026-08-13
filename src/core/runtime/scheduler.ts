@@ -260,6 +260,22 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     const belongsToCurrentTask = call?.taskId == null || call.taskId === state.activeTaskId;
     return belongsToCurrentTask && (call?.status === 'queued' || call?.status === 'approved');
   };
+  // A child whose current approval already settled owns the single canonical
+  // interaction lane until its continuation either completes or suspends
+  // again. Deferred siblings are requeued, so ordinary queue-first selection
+  // would otherwise let them overtake this approved active continuation.
+  const approvedSuspendedSubagent = state.tools.active.find((id) => {
+    const call = state.tools.calls[id];
+    return (
+      call?.name === 'task' &&
+      call.status === 'approved' &&
+      state.suspendedSubagents[id] != null &&
+      (call.taskId == null || call.taskId === state.activeTaskId)
+    );
+  });
+  if (approvedSuspendedSubagent) {
+    return { type: 'run_tools', toolCallIds: [approvedSuspendedSubagent] };
+  }
   const nextRunnable = state.tools.queue.find(isRunnable) ?? state.tools.active.find(isRunnable);
   if (nextRunnable) {
     const nextCall = state.tools.calls[nextRunnable];

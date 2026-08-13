@@ -87,17 +87,45 @@ function extractText(content: unknown): string {
 
 function wrapReadOnlyShell(inner: ShellExecutor): ShellExecutor {
   return async (shellInput) => {
-    if (!isReadOnlyShellCommand(shellInput.command)) {
-      return {
-        ok: false,
-        command: shellInput.command,
-        exitCode: -1,
-        stdout: '',
-        stderr: `Command rejected: "${shellInput.command}" is not a read-only command. This sub-agent has read-only access only.`,
-      };
-    }
+    const rejected = readOnlyShellRejection(shellInput.command);
+    if (rejected) return rejected;
     return inner(shellInput);
   };
+}
+
+function readOnlyShellRejection(command: string): ToolExecutionResult | undefined {
+  if (isReadOnlyShellCommand(command)) return undefined;
+  return {
+    ok: false,
+    command,
+    exitCode: -1,
+    stdout: '',
+    stderr: `Command rejected: "${command}" is not a read-only command. This sub-agent has read-only access only.`,
+    status: 'rejected',
+    classifierAdviceV1: {
+      detailCode: 'policy_denied',
+      disposition: 'never',
+      maximumAdditionalCalls: 0,
+      requiresNewModelResponse: false,
+      safeAutomaticRetry: false,
+    },
+  };
+}
+
+/** Reject a non-read-only shell before approval or dispatch can widen a child role. */
+export function rejectShellOutsideSubAgentRoleCeiling(
+  role: SubAgentRoleConfig,
+  command: string,
+): ToolExecutionResult | undefined {
+  return role.allowedTools ? readOnlyShellRejection(command) : undefined;
+}
+
+/** Apply the role's shell ceiling consistently to initial and resumed child tools. */
+export function resolveSubAgentShellExecutor(
+  role: SubAgentRoleConfig,
+  shellExecutor?: ShellExecutor,
+): ShellExecutor | undefined {
+  return role.allowedTools ? wrapReadOnlyShell(shellExecutor ?? shellTool) : shellExecutor;
 }
 
 let _subAgentCounter = 0;
@@ -410,21 +438,32 @@ export async function resumeSubAgent(
             unparsedArgs: resumeArgs,
           }),
   });
+  const resumeRejected = !actualOk && toolResult.result.status === 'rejected';
+  const resumePolicyDenied =
+    resumeRejected && toolResult.result.classifierAdviceV1?.detailCode === 'policy_denied';
   const resumeOutcome = actualOk
     ? classifyToolOutcomeV1({
         status: 'success',
         authority: { dispatchState: 'started', externalEffects: 'known' },
       })
     : classifyToolOutcomeV1({
-        status: toolResult.result.status === 'rejected' ? 'rejected' : 'failed',
+        status: resumeRejected ? 'rejected' : 'failed',
         failure: classifyFailure(
-          toolResult.result.status === 'rejected' ? 'approval_rejected' : 'tool_runtime_error',
+          resumePolicyDenied
+            ? 'policy_denied'
+            : resumeRejected
+              ? 'approval_rejected'
+              : 'tool_runtime_error',
           'Subagent tool recovery failed.',
         ),
         authority: {
-          dispatchState: toolResult.result.status === 'rejected' ? 'not_started' : 'started',
-          externalEffects: toolResult.result.status === 'rejected' ? 'none' : 'unknown',
-          approvalDenied: toolResult.result.status === 'rejected',
+          dispatchState: resumeRejected ? 'not_started' : 'started',
+          externalEffects: resumeRejected ? 'none' : 'unknown',
+          ...(resumePolicyDenied
+            ? { policyDenied: true }
+            : resumeRejected
+              ? { approvalDenied: true }
+              : {}),
         },
         toolAdvice: toolResult.result.classifierAdviceV1,
         classifierDiagnostic: toolResult.result.classifierDiagnostic,
@@ -487,9 +526,7 @@ async function runSubAgentLoop(
   const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
   let toolRecovery = state.toolRecovery ?? createToolRecoveryJournalV1();
 
-  const effectiveShellExecutor = input.role.allowedTools
-    ? wrapReadOnlyShell(input.shellExecutor ?? shellTool)
-    : input.shellExecutor;
+  const effectiveShellExecutor = resolveSubAgentShellExecutor(input.role, input.shellExecutor);
 
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
@@ -1054,6 +1091,7 @@ async function runSubAgentLoop(
         let ok = true;
         let totalLines: number | undefined;
         let executionResult: ToolExecutionResult | undefined;
+        let roleCeilingDenied = false;
         let toolReservation:
           | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
           | undefined;
@@ -1071,51 +1109,61 @@ async function runSubAgentLoop(
                 return binding ? input.mcpManager?.findCapability(binding.capabilityId) : undefined;
               })()
             : undefined;
-          const result = await runApprovedTool({
-            workspace: input.workspace,
-            request: pendingRequest,
-            shellExecutor: effectiveShellExecutor,
-            gitBroker: input.gitBroker,
-            workspaceAccess: input.workspaceAccess ?? 'write',
-            phase: input.phase ?? 'building',
-            authorization: input.authorization,
-            threadId: input.threadId ?? '',
-            readStateActorId: id,
-            recordFilePreimage: input.recordFilePreimage,
-            mcpManager: input.mcpManager,
-            ...(boundMcpDescriptor
-              ? {
-                  mcpInvocation: {
-                    capabilityId: boundMcpDescriptor.capabilityId,
-                    expectedRevision: boundMcpDescriptor.revision,
-                  },
-                  mcpPolicy: {
-                    effects: boundMcpDescriptor.effectiveEffects,
-                    minimumApproval: boundMcpDescriptor.policy.minimumApproval,
-                  },
-                }
-              : {}),
-            skillManifests: input.skills,
-            skillOptions: input.skillOptions,
-            signal: combinedSignal,
-            interactionMode: effectiveInteractionMode(input),
-            taskConfig: input.config,
-            availabilityContext,
-            projectInstructionSnapshot: input.projectInstructions,
-            taskModel: model,
-            providerDataAdmission: input.providerDataAdmission,
-            subagentEventSink: input.eventSink,
-            beforeDispatch: input.descendantResourceAdmission
-              ? async () => {
-                  toolReservation = await input.descendantResourceAdmission!.reserveTool({
-                    invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}`,
-                    toolKind: tc.name,
-                    shell: tc.name === 'shell_execute',
-                    signal: combinedSignal,
-                  });
-                }
-              : undefined,
-          });
+          const roleDenial =
+            pendingRequest.name === 'shell_execute'
+              ? rejectShellOutsideSubAgentRoleCeiling(
+                  input.role,
+                  String(pendingRequest.args.command ?? ''),
+                )
+              : undefined;
+          roleCeilingDenied = roleDenial != null;
+          const result =
+            roleDenial ??
+            (await runApprovedTool({
+              workspace: input.workspace,
+              request: pendingRequest,
+              shellExecutor: effectiveShellExecutor,
+              gitBroker: input.gitBroker,
+              workspaceAccess: input.workspaceAccess ?? 'write',
+              phase: input.phase ?? 'building',
+              authorization: input.authorization,
+              threadId: input.threadId ?? '',
+              readStateActorId: id,
+              recordFilePreimage: input.recordFilePreimage,
+              mcpManager: input.mcpManager,
+              ...(boundMcpDescriptor
+                ? {
+                    mcpInvocation: {
+                      capabilityId: boundMcpDescriptor.capabilityId,
+                      expectedRevision: boundMcpDescriptor.revision,
+                    },
+                    mcpPolicy: {
+                      effects: boundMcpDescriptor.effectiveEffects,
+                      minimumApproval: boundMcpDescriptor.policy.minimumApproval,
+                    },
+                  }
+                : {}),
+              skillManifests: input.skills,
+              skillOptions: input.skillOptions,
+              signal: combinedSignal,
+              interactionMode: effectiveInteractionMode(input),
+              taskConfig: input.config,
+              availabilityContext,
+              projectInstructionSnapshot: input.projectInstructions,
+              taskModel: model,
+              providerDataAdmission: input.providerDataAdmission,
+              subagentEventSink: input.eventSink,
+              beforeDispatch: input.descendantResourceAdmission
+                ? async () => {
+                    toolReservation = await input.descendantResourceAdmission!.reserveTool({
+                      invocationKey: `tool:${toolCallCount}:${pendingRequest.id ?? tc.id ?? tc.name}`,
+                      toolKind: tc.name,
+                      shell: tc.name === 'shell_execute',
+                      signal: combinedSignal,
+                    });
+                  }
+                : undefined,
+            }));
           executionResult = result;
           if (toolReservation) {
             await input.descendantResourceAdmission!.reconcileTool({
@@ -1240,17 +1288,19 @@ async function runSubAgentLoop(
             ...(recoveryOf ? { resolvesFailureIds: [recoveryOf] } : {}),
           });
         } else {
-          const preDispatchFailure = !parsedPreflight?.ok;
-          const parseFailureCode = preDispatchFailure
+          const preDispatchFailure = !parsedPreflight?.ok || roleCeilingDenied;
+          const parseFailureCode = !parsedPreflight?.ok
             ? (parsedPreflight?.request.parseFailureCode ?? 'invalid_arguments')
             : undefined;
           const readOnly = /^(read|search|list)_/u.test(tc.name);
           const outcome = classifyToolOutcomeV1({
-            status: 'failed',
+            status: roleCeilingDenied ? 'rejected' : 'failed',
             failure: classifyFailure(
               parseFailureCode
                 ? failureKindForToolParseFailure(parseFailureCode)
-                : 'tool_runtime_error',
+                : roleCeilingDenied
+                  ? 'policy_denied'
+                  : 'tool_runtime_error',
               'Subagent tool invocation failed.',
               parseFailureCode,
             ),
@@ -1258,6 +1308,7 @@ async function runSubAgentLoop(
               dispatchState: preDispatchFailure ? 'not_started' : 'started',
               externalEffects: preDispatchFailure || readOnly ? 'none' : 'unknown',
               replaySafety: preDispatchFailure ? 'pre_dispatch' : readOnly ? 'safe_read' : 'none',
+              ...(roleCeilingDenied ? { policyDenied: true } : {}),
             },
             ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
             toolAdvice: executionResult?.classifierAdviceV1,

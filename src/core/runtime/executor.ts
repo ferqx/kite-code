@@ -656,12 +656,19 @@ async function executeAutoReview(
   try {
     const reviewerConfig = resolveAutoReviewConfig(dependencies.config);
     const reviewerModel = createAutoReviewModel(reviewerConfig);
+    const activeTask = state.activeTaskId ? state.tasks[state.activeTaskId] : undefined;
 
     const result = await reviewToolApproval({
       model: reviewerModel,
       payload: state.interactions
         .approval as import('@/core/harness/tool-policy').ToolApprovalPayload,
       request,
+      context: {
+        userTask: activeTask?.userGoal,
+        isSubAgent: suspended != null,
+        subAgentRole: suspended?.role,
+        workspaceRoot: state.session.workspace,
+      },
       // V2 makes the configured reviewer timeout part of the rollout surface;
       // the established path retains the fixed compatibility timeout.
       timeoutMs: resolveAutoReviewTimeout(dependencies.config),
@@ -701,7 +708,13 @@ async function executeAutoReview(
           type: 'approval.requested',
           interactionId: crypto.randomUUID(),
           toolCallId: effect.toolCallId,
-          approval: state.interactions.approval,
+          approval: {
+            ...state.interactions.approval,
+            reviewFailure:
+              result.suggestion?.reason ??
+              result.reason ??
+              'Automatic review could not approve this operation.',
+          },
         },
       ];
     }
@@ -725,7 +738,10 @@ async function executeAutoReview(
         type: 'approval.requested',
         interactionId: crypto.randomUUID(),
         toolCallId: effect.toolCallId,
-        approval: state.interactions.approval,
+        approval: {
+          ...state.interactions.approval,
+          reviewFailure: error instanceof Error ? error.message : String(error),
+        },
       },
     ];
   }

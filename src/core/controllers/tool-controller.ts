@@ -78,7 +78,11 @@ import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
 } from '@/core/subagent/continuation-codec';
-import { resumeSubAgent } from '@/core/subagent/runner';
+import {
+  rejectShellOutsideSubAgentRoleCeiling,
+  resolveSubAgentShellExecutor,
+  resumeSubAgent,
+} from '@/core/subagent/runner';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { RestoredSubAgentContinuation, SubAgentEventSink } from '@/core/subagent/types';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
@@ -435,6 +439,7 @@ async function handleSubAgentResume(params: {
   const events: RuntimeEvent[] = [];
   const { continuation } = params;
   const { toolName: blockedToolName, args: blockedToolArgs } = continuation.blockedTool;
+  const childShellExecutor = resolveSubAgentShellExecutor(continuation.role, params.shellExecutor);
 
   // Execute the previously-blocked tool with the approval grant
   const call = params.state.tools.calls[params.toolCallId];
@@ -461,7 +466,16 @@ async function handleSubAgentResume(params: {
   );
 
   let toolResult: ToolExecutionResult;
-  if (blockedParsed?.ok) {
+  const roleDenial =
+    blockedParsed?.ok && blockedParsed.request.name === 'shell_execute'
+      ? rejectShellOutsideSubAgentRoleCeiling(
+          continuation.role,
+          String(blockedParsed.request.args.command ?? ''),
+        )
+      : undefined;
+  if (roleDenial) {
+    toolResult = roleDenial;
+  } else if (blockedParsed?.ok) {
     const blockedRequest = blockedParsed.request;
     const resumedBinding = call?.bindingId
       ? params.state.capabilities.bindings[call.bindingId]
@@ -473,7 +487,7 @@ async function handleSubAgentResume(params: {
       toolResult = await runApprovedTool({
         workspace: params.state.session.workspace,
         request: blockedRequest,
-        shellExecutor: params.shellExecutor,
+        shellExecutor: childShellExecutor,
         gitBroker: params.gitBroker,
         workspaceAccess: params.state.workspaceAccess,
         phase: getAgentPhase(getActivePlanning(params.state)),

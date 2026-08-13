@@ -105,13 +105,27 @@ function derivePhase(state: TuiState): RunPhase {
 // ── verb within each phase ──
 
 function activeBlockVerb(state: TuiState): { verb: string; tone: RunStatusTone } | null {
-  const suspendedSubagent = findBlock(
+  const humanApproval = findBlock(
     state,
-    (b) => b.kind === 'subagent' && b.status === 'suspended',
+    (b) =>
+      b.kind === 'subagent' &&
+      b.status === 'suspended' &&
+      (b.approvalState === 'awaiting_user' || (!b.approvalState && b.awaitingApproval === true)),
   );
-  if (suspendedSubagent?.kind === 'subagent') {
+  if (humanApproval?.kind === 'subagent') {
     return { verb: 'Awaiting approval', tone: 'warning' };
   }
+  const autoReview = findBlock(
+    state,
+    (b) =>
+      b.kind === 'subagent' && b.status === 'suspended' && b.approvalState === 'auto_reviewing',
+  );
+  if (autoReview?.kind === 'subagent') return { verb: 'Auto-reviewing', tone: 'primary' };
+  const queuedReview = findBlock(
+    state,
+    (b) => b.kind === 'subagent' && b.status === 'suspended' && b.approvalState === 'queued',
+  );
+  if (queuedReview?.kind === 'subagent') return { verb: 'Review queued', tone: 'primary' };
   // Subagent running
   const sub = findBlock(state, (b) => b.kind === 'subagent' && b.status === 'running');
   if (sub?.kind === 'subagent') {

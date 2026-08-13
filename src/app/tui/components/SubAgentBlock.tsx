@@ -173,7 +173,10 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const isError = block.status === 'error';
   const isCancelled = block.status === 'cancelled';
   const isSettled = isError || isCancelled || block.status === 'done';
-  const isWaiting = isSuspended || (isRunning && block.awaitingApproval);
+  const approvalState =
+    block.approvalState ??
+    (block.awaitingApproval || isSuspended ? ('awaiting_user' as const) : undefined);
+  const isWaiting = approvalState != null;
 
   if (!isActive && !isSettled) return null;
 
@@ -191,7 +194,15 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   // ── Footer ──
   const foot = isActive
     ? isWaiting
-      ? { text: '等待审批中', color: dt.dim }
+      ? {
+          text:
+            approvalState === 'auto_reviewing'
+              ? '自动审查中'
+              : approvalState === 'queued'
+                ? '等待自动审查'
+                : '等待你的批准',
+          color: approvalState === 'awaiting_user' ? dt.warning : dt.dim,
+        }
       : { text: `进行中 (${formatElapsed(liveElapsed)})`, color: dt.dim }
     : isCancelled
       ? { text: 'Cancelled', color: dt.warning }

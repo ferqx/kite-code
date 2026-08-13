@@ -4560,7 +4560,11 @@ describe('SubAgentBlock rendering', () => {
     expect(lastFrame()).toContain('●');
   });
 
-  test('renders a suspended subagent as waiting instead of hiding it', () => {
+  test.each([
+    ['queued', '等待自动审查'],
+    ['auto_reviewing', '自动审查中'],
+    ['awaiting_user', '等待你的批准'],
+  ] as const)('renders a suspended subagent in the %s approval phase', (approvalState, label) => {
     const block = {
       id: 1,
       kind: 'subagent' as const,
@@ -4572,6 +4576,7 @@ describe('SubAgentBlock rendering', () => {
       toolCallCount: 1,
       durationMs: 0,
       awaitingApproval: true,
+      approvalState,
       steps: [
         {
           toolName: 'shell_execute',
@@ -4585,7 +4590,7 @@ describe('SubAgentBlock rendering', () => {
 
     expect(frame).toContain('○');
     expect(frame).toContain('wait for sibling approval');
-    expect(frame).toContain('等待审批中');
+    expect(frame).toContain(label);
   });
 
   test('renders done subagent block', () => {

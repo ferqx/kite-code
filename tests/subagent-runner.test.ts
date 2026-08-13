@@ -518,6 +518,63 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
+  test('read-only role rejects a non-read-only shell before auto-review suspension', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-readonly-shell-auto-'));
+    try {
+      const { events, sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: aiMessage({
+              content: 'attempt verification',
+              tool_calls: [
+                {
+                  id: 'tc-readonly-auto-review',
+                  name: 'shell_execute',
+                  args: { command: 'bun run typecheck' },
+                },
+              ],
+            }),
+          },
+          { message: aiMessage({ content: 'verification command rejected' }) },
+        ],
+      }) as unknown as SupportedChatModel;
+      let shellExecutions = 0;
+
+      const result = await runSubAgent({
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('review'),
+        task: 'Review without executing project commands.',
+        interactionMode: 'auto',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+        shellExecutor: async ({ command }) => {
+          shellExecutions += 1;
+          return { ok: true, command, exitCode: 0, stdout: 'unexpected', stderr: '' };
+        },
+      });
+
+      expect(shellExecutions).toBe(0);
+      expect(result.blocked).toBeUndefined();
+      const shellResult = events.find(
+        (event) => event.type === 'tool_result' && event.data.toolName === 'shell_execute',
+      );
+      expect(String(shellResult?.data.summary)).toContain('read-only command');
+      const failure = result.toolRecovery?.failures[result.toolRecovery.order.at(-1) ?? ''];
+      expect(failure?.outcome).toMatchObject({
+        status: 'rejected',
+        failure: { kind: 'policy_denied' },
+        dispatchState: 'not_started',
+        externalEffects: 'none',
+      });
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
+  });
+
   test('code role with real file read via tool call', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-test-'));
     writeFileSync(join(ws, 'test.txt'), 'hello world\n', 'utf-8');

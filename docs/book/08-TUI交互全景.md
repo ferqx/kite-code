@@ -28,7 +28,7 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 | 用户问答          | `input` interrupt → 文本/结构化 answers → 恢复 Agent；Esc 只取消本次回答                 |
 | 计划审核          | `plan_review` interrupt → approve/revise/cancel；cancel 中止当前 turn 并保留 draft       |
 | Verification 决策 | replan、compensation 或带理由 waiver                                                     |
-| Subagent 审批     | 保存 continuation，用户决策后恢复                                                        |
+| Subagent 审批     | 保存 continuation；自动审查或用户决策通过后恢复                                          |
 | 取消              | AbortSignal 传播并形成一致的终止/恢复状态                                                |
 
 工具的 `tool.queued` 只在 reducer 中保存 name/args，不进入消息列表；收到 `tool.started`
@@ -36,6 +36,8 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 决策使用“主标签 + 影响说明”的等距列表；未获准调用不得提前出现在消息列表。多个 Shell
 调用分别审批，任一调用获准后立即进入执行，不等待其他 sibling 审批完成。
 Subagent 内部工具审批由 parent `task` Tool Call 持有 Runtime interaction，同时在 payload 和 continuation 中保留 child Tool Call 身份。Footer 以 parent id 匹配批准或拒绝终态并立即关闭，再由 child id 恢复准确工具；两种身份不得混用。
+消息区的 Subagent block 将 suspended 阶段显示为“等待自动审查”“自动审查中”或“等待你的批准”；
+前两种不弹出人工 Footer，只有最后一种表示用户必须作出决定。自动或人工批准后 block 回到 running。
 
 工具终态的颜色、状态、恢复提示与耗时统一读取 Runtime 投影的 `ToolOutcomeV1`，不再从错误正文、
 退出文本或交互类型猜测。人工审批拒绝、auto-review 拒绝、timeout、cancel 与普通执行失败保留各自

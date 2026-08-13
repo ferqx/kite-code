@@ -1089,7 +1089,14 @@ describe('runtime resource budget admission', () => {
         result: expect.objectContaining({ ok: false, failureType: 'technical' }),
       }),
     );
-    expect(emitted).toContainEqual(expect.objectContaining({ type: 'approval.requested' }));
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: 'approval.requested',
+        approval: expect.objectContaining({
+          reviewFailure: expect.stringContaining('mandatory_policy_unavailable'),
+        }),
+      }),
+    );
     expect(emitted).toContainEqual(expect.objectContaining({ type: 'approval.rejected' }));
     expect(
       Object.values(

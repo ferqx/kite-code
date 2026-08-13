@@ -370,7 +370,8 @@ Kernel 仍逐事件串行归纳和持久化。队列顺序是调度与协议事�
 SubAgentRunner，Resource admission 再按 `maxConcurrentSubagents`、writer ceiling 和累计预算缩小
 实际批次。依赖前序结果或 code 写范围重叠的 task 由模型串行派发。多个 child 同时动态暂停时，
 只开放一个 canonical interaction；其余 continuation 持久化后用 `subagent.approval_deferred`
-重新入队，当前审批收敛后从 snapshot 逐个呈现，不重启 child 模型（ADR-0104）。
+重新入队。当前 child 获批后，Scheduler 必须先恢复其 active continuation，不能让 deferred queue
+插队；该 child 完成或再次暂停后，才从 snapshot 逐个呈现 sibling，且不重启 child 模型（ADR-0104）。
 
 Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`CapabilityInvocationRecord` 保存调用身份、状态、参数摘要、观察到的副作用、外部引用、artifact、重试安全性和 reconciliation 结果。
 
