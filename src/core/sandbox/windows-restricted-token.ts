@@ -82,7 +82,7 @@ interface RestrictedTokenInvocationRequest {
   commandLine: string;
   cwd: string;
   env: Record<string, string>;
-  filesystemScope: 'workspace_write' | 'read_only';
+  filesystemScope: 'workspace_write' | 'read_only' | 'full_access';
   workspaceRoot: string;
   runtimeRoot: string;
   shellRuntimeRoot: string;
@@ -112,6 +112,8 @@ interface ExecutionReceipt {
 /** Per-invocation synthetic SIDs accepted by the native direct-workspace mode. */
 export interface WindowsRestrictedTokenDirectWorkspaceV1 {
   runtimeCapabilitySid: string;
+  /** Restricted-only SID denied on fixed protected paths for full-access calls. */
+  approvedFilesystemGuardSid?: string;
   /** Present only for an internal startup probe; never persisted. */
   ephemeralWorkspaceCapabilitySid?: string;
 }
@@ -149,11 +151,18 @@ export function createWindowsRestrictedTokenCapabilitySidV1(
 
 export function createWindowsRestrictedTokenDirectWorkspaceV1(input: {
   startupProbe: boolean;
+  approvedFilesystem?: boolean;
   createCapabilitySid?: () => string;
 }): WindowsRestrictedTokenDirectWorkspaceV1 {
   const createCapabilitySid =
     input.createCapabilitySid ?? createWindowsRestrictedTokenCapabilitySidV1;
   const runtimeCapabilitySid = createCapabilitySid();
+  if (input.approvedFilesystem) {
+    return {
+      runtimeCapabilitySid,
+      approvedFilesystemGuardSid: createCapabilitySid(),
+    };
+  }
   return input.startupProbe
     ? {
         runtimeCapabilitySid,
@@ -194,6 +203,14 @@ export function resolveWindowsRestrictedTokenNetworkModeV1(input: {
     : 'off';
 }
 
+export function resolveWindowsRestrictedTokenFilesystemScopeV1(input: {
+  configuredFilesystemScope?: 'read_only' | 'workspace_write';
+  invocationFilesystemMode?: import('@/core/types').ShellFilesystemMode;
+}): 'read_only' | 'workspace_write' | 'full_access' {
+  if (input.invocationFilesystemMode === 'allow_all') return 'full_access';
+  return input.configuredFilesystemScope === 'read_only' ? 'read_only' : 'workspace_write';
+}
+
 const WINDOWS_PACKAGE_MANAGER_SHIM_PRELUDE = [
   'npm() { cmd.exe /d /c npm.cmd "$@"; }',
   'npx() { cmd.exe /d /c npx.cmd "$@"; }',
@@ -218,8 +235,8 @@ export function wrapWindowsRestrictedTokenCommandV1(command: string): string {
 
 /**
  * Create the Windows direct-workspace Shell executor. Local calls use the
- * unelevated token path; protocol V5 makes the native runner relaunch an
- * approved `allow_all` call in its provisioned online login session.
+ * unelevated token path; protocol V6 projects approved network/filesystem
+ * authority while retaining the restricted token and Job Object boundary.
  */
 export function createWindowsRestrictedTokenExecutor(
   options: WindowsRestrictedTokenExecutorOptionsV1,
@@ -274,10 +291,13 @@ function createRunnerExecutor(
       );
     }
 
-    const filesystemScope =
-      options.filesystemScope === 'read_only' ? 'read_only' : 'workspace_write';
+    const filesystemScope = resolveWindowsRestrictedTokenFilesystemScopeV1({
+      configuredFilesystemScope: options.filesystemScope,
+      invocationFilesystemMode: input.filesystemMode,
+    });
     const directWorkspace = createWindowsRestrictedTokenDirectWorkspaceV1({
       startupProbe: options.startupProbe === true && filesystemScope === 'workspace_write',
+      approvedFilesystem: filesystemScope === 'full_access',
     });
     const request: RestrictedTokenInvocationRequest = {
       version: WINDOWS_SANDBOX_PROTOCOL_VERSION,

@@ -27,7 +27,7 @@ import Header, { formatHeaderWorkspace } from '../src/app/tui/Header';
 import { createInitialState } from '../src/app/tui/initialState';
 import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
-import { type Action, eventReducer } from '../src/app/tui/reducers';
+import { type Action, eventReducer as canonicalEventReducer } from '../src/app/tui/reducers';
 import type { RunStatusSnapshot } from '../src/app/tui/run-status';
 import StatsLine from '../src/app/tui/StatsLine';
 import StatusBar from '../src/app/tui/StatusBar';
@@ -39,9 +39,19 @@ import type {
   Turn,
 } from '../src/app/tui/types';
 import type { RuntimeEvent } from '../src/core/runtime/events';
+import { decodeHistoricalToolOutcomeEventV1 } from '../src/core/runtime/tool-outcome-events';
 import type { AgentPlan, ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
 
 // ── Shared helpers ──
+
+function eventReducer(state: TuiState, action: Action): TuiState {
+  return canonicalEventReducer(
+    state,
+    action.type === 'RUNTIME_EVENT'
+      ? { ...action, event: decodeHistoricalToolOutcomeEventV1(action.event) }
+      : action,
+  );
+}
 
 function fakeStatus(overrides: Partial<StatusState> = {}): StatusState {
   return {
@@ -1693,11 +1703,13 @@ function OutputAreaTestWrap({
   turns,
   onToggleReason,
   awaitingApproval = false,
+  compactionPhase,
 }: {
   running: boolean;
   turns: { blocks: OutputBlock[] }[];
   onToggleReason: () => void;
   awaitingApproval?: boolean;
+  compactionPhase?: import('../src/core/model/context-compaction-presentation').ContextCompactionProgressPhase;
 }) {
   const {
     staticItems,
@@ -1721,6 +1733,7 @@ function OutputAreaTestWrap({
       onToggleReason={onToggleReason}
       awaitingApproval={awaitingApproval}
       columns={80}
+      compactionPhase={compactionPhase}
     />
   );
 }
@@ -3336,6 +3349,25 @@ describe('Block spacing', () => {
 });
 
 describe('OutputArea', () => {
+  test('renders compaction progress after the message list', () => {
+    const { lastFrame } = render(
+      <OutputAreaTestWrap
+        running={false}
+        turns={[
+          {
+            blocks: [{ id: 1, kind: 'user', content: '/auto-compact' }],
+          },
+        ]}
+        onToggleReason={noop}
+        compactionPhase="summarizing"
+      />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('/auto-compact');
+    expect(frame).toContain('Summarizing context');
+  });
+
   test('renders capability search as a matched Provider · Tool tree', () => {
     const events: RuntimeEvent[] = [
       {

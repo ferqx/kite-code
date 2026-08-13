@@ -1,14 +1,14 @@
 /**
  * Production-mode Prompt Contract V2 PTY boundary.
  *
- * Launches the real TUI composition root with NODE_ENV=production and enables
- * V2 only through the normal layered config. The outbound HTTP request is the
+ * Launches the real TUI composition root with NODE_ENV=production and uses
+ * the default V2 feature profile. The outbound HTTP request is the
  * evidence boundary for prompt roles, project instructions, runtime state and
- * phase-aware tool disclosure.
+ * phase-stable tool disclosure plus Runtime-owned phase policy.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
-import { createMockModelServer } from '../harness/fixtures';
+import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, waitForText } from '../harness/terminal-screen';
@@ -28,12 +28,89 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       files: { 'AGENTS.md': PROJECT_MARKER },
       configOverrides: {
         sandbox: { enabled: false },
-        features: { promptContractV2: true },
       },
     });
     workspace.env.CI = 'true';
     workspace.env.NODE_ENV = 'production';
-    server.setResponses([{ message: { content: 'Production V2 request completed.' } }]);
+    server.setResponses([
+      {
+        message: {
+          tool_calls: [
+            {
+              id: 'v2-plan-save',
+              name: 'write_plan',
+              args: {
+                action: 'save',
+                title: 'Inspect project rules',
+                body_markdown:
+                  'Inspect the project instructions and validate the planning workflow.',
+                steps: [{ id: 'inspect', title: 'Inspect project instructions' }],
+              },
+            },
+          ],
+        },
+      },
+      {
+        response(request) {
+          const result = request.messages.find(
+            (message) => message.role === 'tool' && message.tool_call_id === 'v2-plan-save',
+          );
+          const { plan_id, version, structural_digest } = parseDraftSavedPlan(result?.content);
+          return {
+            expectedRequest: {
+              toolResults: [{ toolCallId: 'v2-plan-save', contentIncludes: ['draft_saved'] }],
+            },
+            message: {
+              tool_calls: [
+                {
+                  id: 'v2-plan-submit',
+                  name: 'write_plan',
+                  args: { action: 'submit', plan_id, version, structural_digest },
+                },
+              ],
+            },
+          };
+        },
+      },
+      {
+        response(request) {
+          const result = request.messages.find(
+            (message) => message.role === 'tool' && message.tool_call_id === 'v2-plan-submit',
+          );
+          const plan = parseDraftSavedPlan(result?.content);
+          return {
+            expectedRequest: {
+              toolResults: [
+                { toolCallId: 'v2-plan-submit', contentIncludes: ['"status":"approved"'] },
+              ],
+            },
+            message: {
+              tool_calls: [
+                {
+                  id: 'v2-plan-complete',
+                  name: 'update_plan',
+                  args: {
+                    plan_id: plan.plan_id,
+                    version: plan.version,
+                    structural_digest: plan.structural_digest,
+                    updates: [{ step_id: 'inspect', status: 'completed' }],
+                    complete_plan: true,
+                  },
+                },
+              ],
+            },
+          };
+        },
+      },
+      {
+        expectedRequest: {
+          toolResults: [
+            { toolCallId: 'v2-plan-complete', contentIncludes: ['"plan_completed":true'] },
+          ],
+        },
+        message: { content: 'Production V2 request completed.' },
+      },
+    ]);
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
   });
 
@@ -42,13 +119,15 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
   });
 
   test(
-    'projects V2 layers and the read-only planning tool surface through the real TUI',
+    'projects V2 layers and a phase-stable tool surface through the real TUI',
     async () => {
       tui.write('\x1b[Z');
       await waitForText(() => tui.viewport(), 'Shift+Tab to exit', 5_000);
 
       const userPrompt = 'Inspect the project rules and propose a plan.';
       await submitUserMessage(tui, server, userPrompt, { timeout: 15_000 });
+      await waitForText(() => tui.viewport(), '方案审核', 15_000);
+      tui.write('\r');
       await waitForText(() => tui.viewport(), 'Production V2 request completed.', 15_000);
       expect(screenContains(tui.viewport(), 'Production V2 request completed.')).toBe(true);
 
@@ -68,7 +147,7 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
       );
       const userIndex = messages.findIndex((message) => message.content === userPrompt);
       expect(projectIndex).toBeGreaterThan(systemMessages.length - 1);
-      expect(userIndex).toBeGreaterThan(projectIndex);
+      expect(projectIndex).toBeGreaterThan(userIndex);
       expect(messages[projectIndex]!.role).toBe('user');
       expect(messages[projectIndex]!.content).toContain(
         '<project-instructions role="workspace-context">',
@@ -84,18 +163,38 @@ describe('TUI PTY System — production Prompt Contract V2', () => {
 
       const tools = Array.isArray(request!.body.tools)
         ? (request!.body.tools as Array<{
-            function?: { name?: string; description?: string };
+            function?: {
+              name?: string;
+              description?: string;
+              parameters?: {
+                properties?: {
+                  subagent_type?: { description?: string; enum?: string[] };
+                };
+              };
+            };
           }>)
         : [];
       const toolNames = tools.map((tool) => tool.function?.name).filter(Boolean);
       expect(toolNames).toContain('read_file');
       expect(toolNames).toContain('write_plan');
-      expect(toolNames).not.toContain('edit_file');
-      expect(toolNames).not.toContain('write_file');
-      expect(toolNames).not.toContain('shell_execute');
+      expect(toolNames).toContain('edit_file');
+      expect(toolNames).toContain('write_file');
+      expect(toolNames).toContain('shell_execute');
       expect(
         tools.find((tool) => tool.function?.name === 'read_file')?.function?.description,
       ).toContain('Returns text:');
+      const task = tools.find((tool) => tool.function?.name === 'task')?.function;
+      expect(task?.description).toContain('current user explicitly requests');
+      expect(task?.description).toContain('use plan for read-only architecture or design planning');
+      expect(task?.parameters?.properties?.subagent_type?.enum).toEqual([
+        'explore',
+        'plan',
+        'code',
+        'review',
+      ]);
+      expect(task?.parameters?.properties?.subagent_type?.description).toContain(
+        'Type of sub-agent',
+      );
     },
     TIMEOUT,
   );

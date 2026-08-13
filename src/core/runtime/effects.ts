@@ -16,6 +16,8 @@ export type RuntimeEffect =
   /** 调用模型生成响应 / Call the model to generate a response */
   | {
       type: 'call_model';
+      /** Restricted recovery disclosure for a read/replay-only legacy plan. */
+      toolSurface?: 'legacy_plan_recovery';
       /** Exact input and bounded output prepared before budget reservation. */
       resourceEstimate?: {
         inputTokens: number;
@@ -67,6 +69,8 @@ export type RuntimeEffect =
     }
   /** 发出最终事件并终止 / Emit final event and terminate */
   | { type: 'emit_final' }
+  /** A completion candidate needs one model correction or a blocked terminal. */
+  | { type: 'completion_blocked'; decision: import('./completion-guard').CompletionGuardBlocked }
   /** 停止执行 / Stop execution */
   | { type: 'stop' }
   /** 第二个 runner 被拒绝 / A second runner was rejected */
@@ -75,7 +79,8 @@ export type RuntimeEffect =
   | {
       type: 'recovery_blocked';
       reason: string;
-      failureKind: 'persistence_unavailable' | 'unknown';
+      failureKind: 'persistence_unavailable' | 'loop_exhausted' | 'compaction_failed' | 'unknown';
+      recoveryCause?: 'journal_invalid' | 'no_progress';
     };
 
 /** Returned when a second runner attempts to enter the same Kernel. */

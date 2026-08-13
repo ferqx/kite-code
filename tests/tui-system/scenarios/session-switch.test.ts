@@ -16,7 +16,7 @@ import {
   submitUserMessage,
   typeText,
 } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import {
   screenContains,
@@ -51,6 +51,8 @@ describe('TUI PTY System — Session Switching', () => {
     server.setResponses([
       { message: { content: 'Session 1 response' }, delay: 50 },
       { message: { content: 'Session 2 response' }, delay: 50 },
+      { message: { content: 'Session 1 follow-up response' }, delay: 50 },
+      { message: { content: 'Session 2 follow-up response' }, delay: 50 },
     ]);
 
     tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
@@ -249,6 +251,20 @@ describe('TUI PTY System — Session Switching', () => {
     TIMEOUT,
   );
 
+  step(
+    're-entered session 1 accepts and submits a follow-up prompt',
+    async () => {
+      await submitUserMessage(tui, server, 'Follow-up in session 1', { timeout: 15000 });
+      await waitForText(() => tui.viewport(), 'Session 1 follow-up response', 15000);
+
+      const output = tui.viewport();
+      expect(screenContains(output, 'Follow-up in session 1')).toBe(true);
+      expect(screenContains(output, 'Session 1 follow-up response')).toBe(true);
+      expect(screenContains(output, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
   // ── Switch back to session 2 (session isolation) ──
   //
   // The viewport is authoritative for session isolation. Raw PTY history is
@@ -280,8 +296,33 @@ describe('TUI PTY System — Session Switching', () => {
       let output = tui.viewport();
       console.log('  output after second /sessions:', stripAnsi(output).slice(-500));
 
+      await activateSessionSearch(tui);
+      await typeText(tui, 'session 2');
+      await waitForCondition(
+        () => {
+          const viewport = tui.viewport();
+          return (
+            screenHasSessionRow(viewport, 'Message in session 2', { active: false }) &&
+            !screenHasSessionRow(viewport, 'Message in session 1') &&
+            !screenContains(viewport, 'Loading...')
+          );
+        },
+        'session 2 filter results to replace the unfiltered selector rows',
+        10_000,
+      );
+      tui.write('\x1b[B');
+      await waitForCondition(
+        () =>
+          screenHasSessionRow(tui.viewport(), 'Message in session 2', {
+            selected: true,
+            active: false,
+          }),
+        'filtered session 2 row to become selected',
+        5_000,
+      );
+
       console.log('  pressing Enter to switch to session 2...');
-      tui.write('\r');
+      await submitCurrentInput(tui);
 
       // Wait for session 2 content to be replayed
       await waitForCondition(
@@ -312,5 +353,23 @@ describe('TUI PTY System — Session Switching', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete stateful journey', () => journey.run());
+
+  step(
+    're-entered session 2 accepts and submits a follow-up prompt',
+    async () => {
+      await submitUserMessage(tui, server, 'Follow-up in session 2', { timeout: 15000 });
+      await waitForText(() => tui.viewport(), 'Session 2 follow-up response', 15000);
+
+      const output = tui.viewport();
+      expect(screenContains(output, 'Follow-up in session 2')).toBe(true);
+      expect(screenContains(output, 'Session 2 follow-up response')).toBe(true);
+      expect(screenContains(output, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+  test(
+    'runs the complete stateful journey',
+    () => journey.run(),
+    TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
 });

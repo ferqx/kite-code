@@ -81,6 +81,8 @@ export function requiredProviderAdmissionEvents(
 /** Inputs for the graph-free runtime entry point. */
 export interface RunRuntimeAgentInput {
   task: string;
+  /** User-authored goal before App/project context is appended to `task`. */
+  userGoal?: string;
   userId: string;
   threadId: string;
   workspace: string;
@@ -88,6 +90,7 @@ export interface RunRuntimeAgentInput {
   config: AgentConfig;
   model?: SupportedChatModel;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   remoteMcpEgressPermitResolver?: RemoteMcpEgressPermitResolverV1;
   skills?: SkillManifest[];
@@ -179,6 +182,8 @@ export async function* runRuntimeAgent(
   let deadlineTriggered = false;
   let deadlineTerminalYielded = false;
   let cancellationIncomplete = false;
+  let externalCancellationEvents: RuntimeEvent[] = [];
+  let externalCancellationEventsYielded = false;
   const executionAbortController = new AbortController();
   const providerDataAdmission = getFeatureFlags(input.config).providerDataPolicyV1
     ? createApprovedProviderDataAdmissionV1(
@@ -187,22 +192,34 @@ export async function* runRuntimeAgent(
         sessionLoggingContentInspector,
       )
     : undefined;
-  const forwardExternalAbort = () => executionAbortController.abort(input.signal?.reason);
-  if (input.signal?.aborted) forwardExternalAbort();
-  else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
   const cancelRun = (
     reason = 'Cancelled by user.',
     cause: 'user' | 'error' = 'user',
   ): RuntimeEvent[] => {
-    if (runCancelled) return [];
+    if (runCancelled || kernel.getState().turn.status !== 'active') return [];
     runCancelled = true;
     exitStatus = 'aborted';
     const events = eventsForRunCancellation(kernel.getState(), reason, cause);
     kernel.processEventBatch(events);
-    for (const event of events) collector.recordRuntime(event);
+    const canonicalEvents = [...kernel.getLastAppliedEvents()];
+    for (const event of canonicalEvents) collector.recordRuntime(event);
     executionAbortController.abort(reason);
-    return events;
+    return canonicalEvents;
   };
+  const externalAbortReason = (): string => {
+    const reason = input.signal?.reason;
+    if (reason instanceof Error && reason.message) return reason.message;
+    if (typeof reason === 'string' && reason.trim()) return reason;
+    return 'Runtime cancelled by external signal.';
+  };
+  const forwardExternalAbort = () => {
+    // The public AbortSignal is a real cancellation boundary, not merely a
+    // transport hint. Persist the same durable cancellation transaction used
+    // by the TUI before unblocking any effect/interaction wait.
+    externalCancellationEvents = cancelRun(externalAbortReason(), 'user');
+  };
+  if (input.signal?.aborted) forwardExternalAbort();
+  else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
   const scheduleRunDeadline = (deadlineAt: string) => {
     if (!getFeatureFlags(input.config).boundedCancellationV1 || runDeadlineTimer) return;
     const remainingMs = Math.max(0, Date.parse(deadlineAt) - Date.now());
@@ -255,6 +272,11 @@ export async function* runRuntimeAgent(
     cancelRun: (reason) => cancelRun(reason),
   });
   try {
+    if (externalCancellationEvents.length > 0) {
+      externalCancellationEventsYielded = true;
+      yield* externalCancellationEvents;
+      return;
+    }
     if (providerDataAdmission) {
       const readiness = providerDataAdmission([], 'primary_model');
       const event: RuntimeEvent = {
@@ -352,7 +374,7 @@ export async function* runRuntimeAgent(
         const taskStarted: RuntimeEvent = {
           type: 'task.started',
           taskId: randomUUID(),
-          userGoal: input.task,
+          userGoal: input.userGoal ?? input.task,
           turnId: kernel.getState().turn.turnId,
         };
         kernel.processEvent(taskStarted);
@@ -378,6 +400,7 @@ export async function* runRuntimeAgent(
         type: 'user.message_appended',
         messageId: randomUUID(),
         content: input.task,
+        ...(input.userGoal ? { userGoal: input.userGoal } : {}),
       };
       kernel.processEvent(initial);
       collector.recordRuntime(initial);
@@ -436,6 +459,7 @@ export async function* runRuntimeAgent(
       config: input.config,
       model,
       shellExecutor: input.shellExecutor,
+      gitBroker: input.gitBroker,
       sandboxBackend: input.sandboxBackend,
       mcpManager: input.mcpManager,
       runtimeStore: kernel.runtimeStore,
@@ -500,6 +524,10 @@ export async function* runRuntimeAgent(
       yield event;
     }
     if (executionAbortController.signal.aborted) exitStatus = 'aborted';
+    if (!externalCancellationEventsYielded && externalCancellationEvents.length > 0) {
+      externalCancellationEventsYielded = true;
+      yield* externalCancellationEvents;
+    }
     if (deadlineCancellationEvents.length > 0) {
       deadlineEventsYielded = true;
       yield* deadlineCancellationEvents;
@@ -513,6 +541,10 @@ export async function* runRuntimeAgent(
   } catch (error) {
     if (executionAbortController.signal.aborted) {
       exitStatus = 'aborted';
+      if (!externalCancellationEventsYielded && externalCancellationEvents.length > 0) {
+        externalCancellationEventsYielded = true;
+        yield* externalCancellationEvents;
+      }
       if (!deadlineEventsYielded && deadlineCancellationEvents.length > 0) {
         deadlineEventsYielded = true;
         yield* deadlineCancellationEvents;

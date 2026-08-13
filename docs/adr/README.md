@@ -71,7 +71,7 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0067](0067-single-maintainer-candidate-security-review.md) | accepted | 单维护者以 candidate-bound 自审批准发布；第三方评审为可选增强 |
 | [0068](0068-single-maintainer-open-source-first-release.md) | accepted | 首个开源版本只使用 G0 本地安全与 G1 普通三平台/真实 Provider Gate；企业认证和长期 maturity 转为发布后可选 |
 | [0069](0069-first-release-terminal-scope.md) | accepted | 首发路线以 G0/G1 为终态；取消 cohort/SLO/rollout/promotion 后续资格，108 Task 收敛为 83 completed、25 superseded |
-| [0070](0070-sandbox-git-access.md) | accepted | seatbelt 沙箱仅对 git 命令放行 Workspace `.git`，直接访问仍受保护 |
+| [0070](0070-sandbox-git-access.md) | superseded by ADR-0097 | 历史 seatbelt git allow 决策；brokered Git 迁移前当前行为仍以源码和 active 文档为准 |
 | [0071](0071-tui-local-interaction-recovery-projection.md) | accepted | TUI 对崩溃遗留交互使用本地恢复投影，源 Runtime canonical state 保持真实 |
 | [0072](0072-windows-shell-appcontainer-sandbox.md) | accepted | Windows Shell 候选采用 Classic AppContainer、Job Object 与 native launcher |
 | [0073](0073-windows-shell-private-workspace-staging.md) | accepted | Windows Shell 仅运行于私有 Workspace staging，并以拒绝式差异回写保护动态敏感路径 |
@@ -96,3 +96,8 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0092](0092-prompt-contract-v2.md) | accepted | 模型上下文分层加载项目指令、投影真实 Runtime 状态，并仅采用可信 Capability 描述 |
 | [0093](0093-opencode-go-release-provider-smoke.md) | accepted | G1 第二条真实 Provider smoke 从阿里千问 Token Plan 迁移到固定 OpenCode Go route |
 | [0094](0094-prompt-contract-v2-default-migration.md) | accepted | 取消固定十四日等待，并因最终候选任务成功率回退而保持 Prompt Contract V2 默认关闭 |
+| [0095](0095-runtime-completion-truth.md) | accepted | Runtime CompletionGuard 统一任务与计划完成真值，拒绝 final 文本绕过 canonical lifecycle |
+| [0096](0096-tool-outcome-recovery-and-journey-evaluation.md) | accepted | Runtime 统一 typed outcome/recovery 权威，并以完整 Journey 评测工具质量 |
+| [0097](0097-brokered-git-capability.md) | accepted | Git 从通用 Shell 迁移到 App-owned typed capability，并恢复三平台 `.git` 原生 deny |
+| [0098](0098-prompt-contract-v2-default-enabled.md) | accepted | 修正后的真实 A/B、项目规则 effect 与 Runtime 纠错 Journey 通过，Prompt Contract V2 默认启用并保留 legacy 回滚 |
+| [0099](0099-phase-stable-tool-disclosure.md) | accepted | V2 builtin/MCP 声明跨 Planning/Building 稳定，提示词引导只读行为，Runtime Policy 返回 phase 错误并阻止副作用 |

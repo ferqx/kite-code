@@ -10,6 +10,12 @@ import {
   systemMessage,
   toolMessage,
 } from '@/core/messages';
+import { classifyFailure } from '@/core/runtime/failures';
+import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import {
+  createToolRecoveryJournalV1,
+  recordRecoveryFailureV1,
+} from '@/core/runtime/tool-recovery-journal';
 import {
   deserializeSubagentContinuation,
   serializeSubagentContinuation,
@@ -17,8 +23,21 @@ import {
 import { getRoleConfig } from '@/core/subagent/roles';
 import type { SubAgentContinuation } from '@/core/subagent/types';
 
+const failedOutcome = classifyToolOutcomeV1({
+  status: 'failed',
+  failure: classifyFailure('tool_runtime_error', 'redacted'),
+  authority: { dispatchState: 'unknown', externalEffects: 'unknown' },
+});
+
 describe('sub-agent continuation codec', () => {
   test('round-trips JSON-safe continuation snapshots with LangChain message details', () => {
+    const childRecovery = recordRecoveryFailureV1(createToolRecoveryJournalV1(), {
+      toolCallId: 'child-failure',
+      toolName: 'read_file',
+      invocationFingerprint: 'a'.repeat(64),
+      modelMessageId: 'child-model',
+      outcome: failedOutcome,
+    });
     const continuation: SubAgentContinuation = {
       id: 'sub-1',
       role: getRoleConfig('code'),
@@ -90,6 +109,7 @@ describe('sub-agent continuation codec', () => {
         },
       ],
       exhaustedFingerprints: { 'read_file:ENOENT': true },
+      toolRecovery: childRecovery,
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
@@ -108,6 +128,7 @@ describe('sub-agent continuation codec', () => {
     expect(restored.steps).toEqual(continuation.steps);
     expect(restored.executionJournal).toEqual(continuation.executionJournal);
     expect(restored.exhaustedFingerprints).toEqual(continuation.exhaustedFingerprints);
+    expect(restored.toolRecovery).toEqual(childRecovery);
     expect(isSystemMessage(restored.messages[0])).toBe(true);
     expect(isHumanMessage(restored.messages[1])).toBe(true);
     expect(isAIMessage(restored.messages[2])).toBe(true);
@@ -152,6 +173,81 @@ describe('sub-agent continuation codec', () => {
       toolName: 'shell_execute',
       args: { command: 'bun test' },
       command: 'bun test',
+    });
+  });
+
+  test('fails closed when a current continuation snapshot omits its recovery journal', () => {
+    const continuation: SubAgentContinuation = {
+      id: 'sub-current-missing-journal',
+      role: getRoleConfig('code'),
+      task: 'resume safely',
+      messages: [humanMessage('continue')],
+      toolCallCount: 1,
+      steps: [],
+      toolRecovery: createToolRecoveryJournalV1(),
+    };
+    const snapshot = serializeSubagentContinuation(continuation, {
+      toolCallId: 'blocked-current',
+      toolName: 'shell_execute',
+      args: { command: 'true' },
+      command: 'true',
+    });
+    delete snapshot.toolRecovery;
+
+    const restored = deserializeSubagentContinuation(snapshot);
+    expect(restored.toolRecovery?.qualityGuard).toMatchObject({
+      blocked: true,
+      reasonCode: 'journal_invalid',
+    });
+  });
+
+  test('fails closed when a current continuation forges internally matching failure ids', () => {
+    const journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(), {
+      toolCallId: 'child-forged',
+      toolName: 'read_file',
+      invocationFingerprint: 'a'.repeat(64),
+      modelMessageId: 'child-model',
+      outcome: failedOutcome,
+      turnId: 'child-turn',
+    });
+    const continuation: SubAgentContinuation = {
+      id: 'sub-current-forged-journal',
+      role: getRoleConfig('code'),
+      task: 'resume safely',
+      messages: [humanMessage('continue')],
+      toolCallCount: 1,
+      steps: [],
+      toolRecovery: journal,
+    };
+    const snapshot = serializeSubagentContinuation(continuation, {
+      toolCallId: 'blocked-current',
+      toolName: 'shell_execute',
+      args: { command: 'true' },
+      command: 'true',
+    });
+    const originalId = journal.order[0]!;
+    const forgedId = 'b'.repeat(64);
+    const original = journal.failures[originalId]!;
+    snapshot.toolRecovery = {
+      ...journal,
+      order: [forgedId],
+      failures: {
+        [forgedId]: {
+          ...original,
+          failureInstanceId: forgedId,
+          outcome: {
+            ...original.outcome,
+            lineage: { ...original.outcome.lineage, failureInstanceId: forgedId },
+          },
+        },
+      },
+    } as never;
+
+    const restored = deserializeSubagentContinuation(snapshot);
+    expect(restored.toolRecovery?.qualityGuard).toMatchObject({
+      blocked: true,
+      reasonCode: 'journal_invalid',
+      turnId: 'child-turn',
     });
   });
 

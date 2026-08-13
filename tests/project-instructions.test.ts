@@ -97,7 +97,7 @@ describe('project instruction snapshot', () => {
     ).toBeLessThanOrEqual(MAX_PROJECT_INSTRUCTION_TOKENS);
   });
 
-  test('projects instructions as user context before the real transcript', () => {
+  test('projects refreshed instructions after the durable transcript and before runtime state', () => {
     const root = workspace();
     writeFileSync(join(root, 'AGENTS.md'), 'project rule');
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: root });
@@ -118,8 +118,8 @@ describe('project instruction snapshot', () => {
     const content = projection.providerMessages.map((message) => String(message.content));
     expect(content[0]).toContain('You are Kite');
     expect(content[1]).toContain('Cacheable runtime context:');
-    expect(content[2]).toContain('project rule');
-    expect(content[3]).toBe('current user request');
+    expect(content[2]).toBe('current user request');
+    expect(content[3]).toContain('project rule');
     expect(projection.providerMessages.slice(0, 4).map((message) => message.type)).toEqual([
       'system',
       'system',

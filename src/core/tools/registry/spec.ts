@@ -24,7 +24,7 @@ import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { ToolContractSource } from '@/core/tools/tool-contracts';
-import type { ShellNetworkBrokerV1, ShellNetworkMode } from '@/core/types';
+import type { ShellFilesystemMode, ShellNetworkBrokerV1, ShellNetworkMode } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 
 /**
@@ -43,7 +43,11 @@ export interface ToolAvailabilityContext {
   phase?: import('@/protocol/events').AgentPhase;
   interactionMode?: import('@/protocol/events').InteractionMode;
   featureFlags?: Readonly<FeatureFlags>;
+  brokeredGitFeatureRevision?:
+    | typeof import('@/protocol/git').BROKERED_GIT_FEATURE_REVISION_V1
+    | null;
   hasTaskAdapter?: boolean;
+  hasGitBroker?: boolean;
   toolSearchEnabled?: boolean;
   activeSkillFrameIds?: readonly string[];
   availableSkillIds?: readonly string[];
@@ -57,6 +61,7 @@ export interface ToolExecutionContext extends ToolContext {
   signal?: AbortSignal;
   shellExecutor?: ShellExecutor;
   shellNetworkMode?: ShellNetworkMode;
+  shellFilesystemMode?: ShellFilesystemMode;
   /** Explicit host-broker capability for sandboxed shell HTTP. */
   shellNetworkBroker?: ShellNetworkBrokerV1;
   /** Per-invocation network ceiling derived from the sealed execution boundary. */
@@ -106,6 +111,8 @@ export interface ToolExecutionContext extends ToolContext {
   invocationInput?: unknown;
   /** Release-owned canonical protected-path evaluator for this run. */
   protectedPathEvaluator?: ProtectedPathEvaluatorV1;
+  /** App-composed typed Git broker; raw process authority never enters ToolSpec args. */
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
 }
 
 /**
@@ -142,6 +149,8 @@ export interface ProjectedToolResult {
    */
   streams?: { stdout: string; stderr: string };
   resultMeta: ToolResultMeta;
+  /** Runtime-owned terminal cause; never inferred from model-visible text. */
+  terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
   display: ToolDisplayHint;
   /**
    * Coordination/runtime-action specs may emit governed Core events alongside
@@ -149,6 +158,9 @@ export interface ProjectedToolResult {
    * on App/TUI types.
    */
   runtimeEvents?: RuntimeEvent[];
+  /** Optional metadata-only tool-specific classification; Runtime authority may only tighten it. */
+  outcomeAdviceV1?: import('@/core/runtime/tool-outcome').ToolOutcomeClassifierAdviceV1;
+  classifierDiagnostic?: 'classifier_threw';
 }
 
 /** preExecute 钩子结果：放行，或 fail-fast 拒绝（ADR-0042 §1 先读后改/过期拒绝的落点）。 */
@@ -205,6 +217,11 @@ export interface ExecutableToolSpec<Name extends string = string, Input = unknow
     output: Output,
     context: ToolExecutionContext & { invocationInput: Input },
   ): ProjectedToolResult;
+  /** Optional tool-owned classifier. It must not copy output content into its return value. */
+  classifyOutcomeV1?(
+    output: Output,
+    context: ToolExecutionContext & { invocationInput: Input },
+  ): import('@/core/runtime/tool-outcome').ToolOutcomeClassifierAdviceV1;
 }
 
 export interface InterruptToolSpec<Name extends string = string, Input = unknown, Interrupt = Input>

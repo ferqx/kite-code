@@ -112,7 +112,9 @@ for await (const event of runRuntimeAgent(
     userId: 'e2e',
     workspace,
     runtimeStorePath: join(runtimeDir, `skill-e2e-${expectedScope}.db`),
-    phase: 'planning',
+    // This fixture exercises Skill activation and completion, not plan authoring.
+    // Keep its final answer outside an incomplete planning lifecycle.
+    phase: 'building',
     model: adaptive.binding as never,
     skillOptions: options,
     initialSkillActivations: [{ skillId: `skill:${skillName}`, input: { scope: expectedScope } }],

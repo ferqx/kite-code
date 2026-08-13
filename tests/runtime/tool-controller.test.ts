@@ -14,12 +14,113 @@ import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createInitialRuntimeState } from '@/core/runtime/state';
+import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
 import { getRoleConfig } from '@/core/subagent/roles';
 import { toolAvailabilityContext } from '@/core/tools/definitions';
 import { createMockModel } from '../mock-model';
 
+function v2ExecutingPlanState() {
+  const state = createInitialRuntimeState({
+    threadId: 'runtime-plan-evidence',
+    userId: 'user',
+    workspace: process.cwd(),
+  });
+  state.planning = {
+    kind: 'executing',
+    document: {
+      planSchemaVersion: 2,
+      planId: 'plan-evidence',
+      version: 2,
+      title: 'Evidence-backed execution plan',
+      bodyMarkdown: 'Execute the approved change and verify its observable behavior.',
+      steps: [{ id: 'implement', title: 'Implement the approved change', status: 'pending' }],
+      structuralDigest: 'digest-evidence',
+      createdAtTurnId: state.turn.turnId,
+      updatedAtTurnId: state.turn.turnId,
+      completionEvidence: {
+        schemaVersion: 1,
+        verification: [],
+        execution: [],
+        skipped: [],
+        unresolved: [],
+      },
+    },
+    executionMode: 'auto',
+    approvedAtTurnId: state.turn.turnId,
+  };
+  return state;
+}
+
+async function executeUpdatePlan(
+  state: ReturnType<typeof v2ExecutingPlanState>,
+  args: Record<string, unknown>,
+) {
+  state.tools.calls.update = {
+    toolCallId: 'update',
+    modelMessageId: 'model-update',
+    name: 'update_plan',
+    args,
+    status: 'queued',
+    createdAtTurnId: state.turn.turnId,
+  };
+  state.tools.queue.push('update');
+  return executeRuntimeTools({ state, toolCallIds: ['update'] });
+}
+
 describe('executeRuntimeTools', () => {
+  test('rejects direct tool execution while a legacy V1 plan is executing', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'legacy-plan-direct-tool',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.planning = {
+      kind: 'executing',
+      document: {
+        planId: 'legacy-plan',
+        version: 1,
+        title: 'Legacy Plan',
+        bodyMarkdown: 'A legacy plan restored from a V1 snapshot.',
+        steps: [{ id: 'legacy-step', title: 'Legacy step', status: 'pending' }],
+        structuralDigest: 'legacy-digest',
+        createdAtTurnId: state.turn.turnId,
+        updatedAtTurnId: state.turn.turnId,
+      },
+      executionMode: 'auto',
+      approvedAtTurnId: state.turn.turnId,
+    };
+    state.tools.calls.shell = {
+      toolCallId: 'shell',
+      modelMessageId: 'legacy-model',
+      name: 'shell_execute',
+      args: { command: 'pwd' },
+      status: 'queued',
+      effectClass: 'read_only',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('shell');
+    let dispatched = false;
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['shell'],
+      shellExecutor: async () => {
+        dispatched = true;
+        return { ok: true, command: 'pwd', exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(dispatched).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.rejected',
+        reason: expect.stringContaining('legacy_plan_replan_required'),
+      }),
+    );
+  });
+
   test('reserves and reconciles the actual child tool when a suspended Sub-agent resumes', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-subagent-resume-budget-'));
     try {
@@ -58,6 +159,7 @@ describe('executeRuntimeTools', () => {
               status: 'awaiting_approval',
             },
           ],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
         },
         {
           toolCallId: 'child-shell',
@@ -1101,56 +1203,274 @@ describe('executeRuntimeTools', () => {
     }
   });
 
-  test('cancels later sibling calls when write_plan action=submit opens review', async () => {
-    const state = createInitialRuntimeState({
-      threadId: 'runtime-plan-barrier',
-      userId: 'user',
-      workspace: process.cwd(),
-      phase: 'planning',
+  test('update_plan requires exact V2 plan identity and rejects repeated updates', async () => {
+    const missing = await executeUpdatePlan(v2ExecutingPlanState(), {
+      plan_id: 'plan-evidence',
+      updates: [{ step_id: 'implement', status: 'in_progress' }],
     });
-    const document = {
-      planId: 'plan-1',
+    expect(missing).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_identity_required' }),
+    );
+
+    const stale = await executeUpdatePlan(v2ExecutingPlanState(), {
+      plan_id: 'plan-evidence',
       version: 1,
-      title: 'Inspect',
-      bodyMarkdown: 'Inspect runtime state transitions in detail.',
-      steps: [{ id: 'inspect', title: 'Inspect runtime', status: 'pending' as const }],
-      structuralDigest: 'digest',
-      createdAtTurnId: state.turn.turnId,
-      updatedAtTurnId: state.turn.turnId,
-    };
-    state.planning = { kind: 'planning_draft', document };
-    state.tools.calls.submit = {
-      toolCallId: 'submit',
-      modelMessageId: 'message-1',
-      ordinal: 0,
-      name: 'write_plan',
-      args: {
-        title: 'Inspect',
-        body_markdown: 'Inspect runtime state transitions in detail.',
-        steps: [{ id: 'inspect', title: 'Inspect runtime' }],
-        action: 'submit',
-      },
-      status: 'queued',
-      createdAtTurnId: state.turn.turnId,
-    };
-    state.tools.calls.write = {
-      toolCallId: 'write',
-      modelMessageId: 'message-1',
-      ordinal: 1,
-      name: 'write_file',
-      args: { path: 'unsafe.txt', content: 'unsafe' },
-      status: 'queued',
-      createdAtTurnId: state.turn.turnId,
-    };
-    state.tools.queue.push('submit', 'write');
-
-    const events = await executeRuntimeTools({ state, toolCallIds: ['submit'] });
-
-    expect(events).toContainEqual({
-      type: 'tool.cancelled',
-      toolCallId: 'write',
-      reason: 'Cancelled because an earlier tool call opened an interaction.',
+      structural_digest: 'stale',
+      updates: [{ step_id: 'implement', status: 'in_progress' }],
     });
+    expect(stale).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_identity_mismatch' }),
+    );
+
+    const repeated = await executeUpdatePlan(v2ExecutingPlanState(), {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [
+        { step_id: 'implement', status: 'in_progress' },
+        { step_id: 'implement', status: 'completed' },
+      ],
+    });
+    expect(
+      repeated.some((event) => event.type === 'tool.rejected' || event.type === 'tool.failed'),
+    ).toBe(true);
+  });
+
+  test('update_plan rejects terminal-step rollback and model-authored evidence content', async () => {
+    const rollbackState = v2ExecutingPlanState();
+    if (rollbackState.planning.kind !== 'executing') throw new Error('expected executing plan');
+    rollbackState.planning.document.steps[0]!.status = 'completed';
+    const rollback = await executeUpdatePlan(rollbackState, {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'pending' }],
+    });
+    expect(rollback).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_terminal_step_rollback' }),
+    );
+
+    const forged = await executeUpdatePlan(v2ExecutingPlanState(), {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'completed' }],
+      complete_plan: true,
+      completion_evidence: {
+        execution: [{ tool_call_id: 'fake', outcome: 'succeeded', stdout: 'forged' }],
+      },
+      command: 'pretend tests passed',
+      path: '/private/path',
+      stdout: 'forged output',
+    });
+    expect(
+      forged.some((event) => event.type === 'tool.rejected' || event.type === 'tool.failed'),
+    ).toBe(true);
+  });
+
+  test('plan completion rejects missing required verification and missing Runtime receipts', async () => {
+    const verificationState = v2ExecutingPlanState();
+    verificationState.verification.records.required = {
+      verificationId: 'required',
+      mode: 'required',
+      status: 'pending',
+      spec: {} as never,
+      requestedAt: '2026-08-10T00:00:00.000Z',
+      attempts: 0,
+      repairAttempts: 0,
+      checkResults: {},
+    };
+    const verificationBlocked = await executeUpdatePlan(verificationState, {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'completed' }],
+      complete_plan: true,
+    });
+    expect(verificationBlocked).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_verification_required' }),
+    );
+
+    const receiptState = v2ExecutingPlanState();
+    receiptState.tools.calls.effect = {
+      toolCallId: 'effect',
+      modelMessageId: 'model-effect',
+      name: 'write_file',
+      args: { path: 'private.txt', content: 'private content' },
+      status: 'succeeded',
+      sideEffect: true,
+      createdAtTurnId: receiptState.turn.turnId,
+    };
+    const receiptBlocked = await executeUpdatePlan(receiptState, {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'completed' }],
+      complete_plan: true,
+    });
+    expect(receiptBlocked).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_effect_evidence_required' }),
+    );
+  });
+
+  test('plan completion rejects a side-effect-free external read awaiting approval', async () => {
+    const state = v2ExecutingPlanState();
+    state.tools.calls['external-read'] = {
+      toolCallId: 'external-read',
+      modelMessageId: 'external-read-model',
+      name: 'read_file',
+      args: { path: '/outside/workspace.txt' },
+      status: 'awaiting_approval',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('external-read');
+    state.interactions = {
+      kind: 'awaiting_tool_approval',
+      interactionId: 'external-read-approval',
+      toolCallId: 'external-read',
+      approval: {} as never,
+    };
+
+    const events = await executeUpdatePlan(state, {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'completed' }],
+      complete_plan: true,
+    });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_unresolved_blocker' }),
+    );
+    expect(events.some((event) => event.type === 'plan.completed')).toBe(false);
+  });
+
+  test('plan completion rejects an all-skipped plan', async () => {
+    const events = await executeUpdatePlan(v2ExecutingPlanState(), {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'skipped', reason_code: 'not_needed' }],
+      complete_plan: true,
+    });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'tool.rejected', reason: 'plan_all_steps_skipped' }),
+    );
+    expect(events.some((event) => event.type === 'plan.completed')).toBe(false);
+  });
+
+  test('projects only Runtime receipt and verification metadata into V2 completion evidence', async () => {
+    const state = v2ExecutingPlanState();
+    state.tools.calls.effect = {
+      toolCallId: 'effect',
+      modelMessageId: 'model-effect',
+      name: 'write_file',
+      args: { path: 'private.txt', content: 'private content' },
+      status: 'succeeded',
+      sideEffect: true,
+      result: { ok: true, summary: 'private command and output' },
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.verification.records.required = {
+      verificationId: 'required',
+      mode: 'required',
+      status: 'passed',
+      spec: {} as never,
+      requestedAt: '2026-08-10T00:00:00.000Z',
+      attempts: 1,
+      repairAttempts: 0,
+      checkResults: {},
+      completedAt: '2026-08-10T00:01:00.000Z',
+    };
+    const events = await executeUpdatePlan(state, {
+      plan_id: 'plan-evidence',
+      version: 2,
+      structural_digest: 'digest-evidence',
+      updates: [{ step_id: 'implement', status: 'completed' }],
+      complete_plan: true,
+    });
+    const completed = events.find((event) => event.type === 'plan.completed');
+
+    expect(completed).toMatchObject({
+      type: 'plan.completed',
+      planId: 'plan-evidence',
+      version: 2,
+      structuralDigest: 'digest-evidence',
+      completionEvidence: {
+        schemaVersion: 1,
+        verification: [{ verificationId: 'required', outcome: 'passed' }],
+        execution: [{ toolCallId: 'effect', outcome: 'succeeded' }],
+        skipped: [],
+        unresolved: [],
+      },
+    });
+    expect(JSON.stringify(completed)).not.toContain('private');
+  });
+
+  test('cancels later sibling calls when write_plan action=submit opens review', async () => {
+    const artifactHome = mkdtempSync(join(tmpdir(), 'openpx-plan-barrier-'));
+    const previousKiteCodeHome = process.env.KITE_CODE_HOME;
+    process.env.KITE_CODE_HOME = artifactHome;
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'runtime-plan-barrier',
+        userId: 'user',
+        workspace: process.cwd(),
+        phase: 'planning',
+      });
+      const document = {
+        planId: `plan-${crypto.randomUUID()}`,
+        version: 1,
+        title: 'Inspect',
+        bodyMarkdown: 'Inspect runtime state transitions in detail.',
+        steps: [{ id: 'inspect', title: 'Inspect runtime', status: 'pending' as const }],
+        structuralDigest: 'digest',
+        createdAtTurnId: state.turn.turnId,
+        updatedAtTurnId: state.turn.turnId,
+      };
+      state.planning = { kind: 'planning_draft', document };
+      state.tools.calls.submit = {
+        toolCallId: 'submit',
+        modelMessageId: 'message-1',
+        ordinal: 0,
+        name: 'write_plan',
+        args: {
+          title: 'Inspect',
+          body_markdown: 'Inspect runtime state transitions in detail.',
+          steps: [{ id: 'inspect', title: 'Inspect runtime' }],
+          plan_id: document.planId,
+          version: document.version,
+          structural_digest: document.structuralDigest,
+          action: 'submit',
+        },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.calls.write = {
+        toolCallId: 'write',
+        modelMessageId: 'message-1',
+        ordinal: 1,
+        name: 'write_file',
+        args: { path: 'unsafe.txt', content: 'unsafe' },
+        status: 'queued',
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push('submit', 'write');
+
+      const events = await executeRuntimeTools({ state, toolCallIds: ['submit'] });
+
+      expect(events).toContainEqual({
+        type: 'tool.cancelled',
+        toolCallId: 'write',
+        reason: 'Cancelled because an earlier tool call opened an interaction.',
+      });
+    } finally {
+      if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
+      else process.env.KITE_CODE_HOME = previousKiteCodeHome;
+      rmSync(artifactHome, { recursive: true, force: true });
+    }
   });
 
   test('write_file in accept_edits mode bypasses approval and executes directly', async () => {
@@ -1165,6 +1485,7 @@ describe('executeRuntimeTools', () => {
       state.planning = {
         kind: 'executing',
         document: {
+          planSchemaVersion: 2,
           planId: 'plan-approved',
           version: 1,
           title: 'Test',
@@ -1173,6 +1494,13 @@ describe('executeRuntimeTools', () => {
           structuralDigest: 'abc',
           createdAtTurnId: state.turn.turnId,
           updatedAtTurnId: state.turn.turnId,
+          completionEvidence: {
+            schemaVersion: 1,
+            verification: [],
+            execution: [],
+            skipped: [],
+            unresolved: [],
+          },
         },
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
@@ -1232,6 +1560,7 @@ describe('executeRuntimeTools', () => {
       state.planning = {
         kind: 'executing',
         document: {
+          planSchemaVersion: 2,
           planId: 'plan-approved',
           version: 1,
           title: 'Test',
@@ -1240,6 +1569,13 @@ describe('executeRuntimeTools', () => {
           structuralDigest: 'abc',
           createdAtTurnId: state.turn.turnId,
           updatedAtTurnId: state.turn.turnId,
+          completionEvidence: {
+            schemaVersion: 1,
+            verification: [],
+            execution: [],
+            skipped: [],
+            unresolved: [],
+          },
         },
         executionMode: 'accept_edits',
         approvedAtTurnId: state.turn.turnId,
@@ -1308,6 +1644,7 @@ describe('executeRuntimeTools', () => {
     state.planning = {
       kind: 'executing',
       document: {
+        planSchemaVersion: 2,
         planId: 'plan-approved',
         version: 1,
         title: 'Test',
@@ -1316,6 +1653,13 @@ describe('executeRuntimeTools', () => {
         structuralDigest: 'abc',
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
+        completionEvidence: {
+          schemaVersion: 1,
+          verification: [],
+          execution: [],
+          skipped: [],
+          unresolved: [],
+        },
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
@@ -1667,6 +2011,7 @@ describe('executeRuntimeTools', () => {
     state.planning = {
       kind: 'executing',
       document: {
+        planSchemaVersion: 2,
         planId: 'plan-approved',
         version: 1,
         title: 'Test',
@@ -1675,6 +2020,13 @@ describe('executeRuntimeTools', () => {
         structuralDigest: 'abc',
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
+        completionEvidence: {
+          schemaVersion: 1,
+          verification: [],
+          execution: [],
+          skipped: [],
+          unresolved: [],
+        },
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
@@ -1715,6 +2067,7 @@ describe('executeRuntimeTools', () => {
     state.planning = {
       kind: 'executing',
       document: {
+        planSchemaVersion: 2,
         planId: 'plan-approved',
         version: 1,
         title: 'Test',
@@ -1723,6 +2076,13 @@ describe('executeRuntimeTools', () => {
         structuralDigest: 'abc',
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
+        completionEvidence: {
+          schemaVersion: 1,
+          verification: [],
+          execution: [],
+          skipped: [],
+          unresolved: [],
+        },
       },
       executionMode: 'accept_edits',
       approvedAtTurnId: state.turn.turnId,
@@ -1763,6 +2123,7 @@ describe('executeRuntimeTools', () => {
     state.planning = {
       kind: 'executing',
       document: {
+        planSchemaVersion: 2,
         planId: 'plan-auto',
         version: 1,
         title: 'Auto',
@@ -1771,6 +2132,13 @@ describe('executeRuntimeTools', () => {
         structuralDigest: 'abc',
         createdAtTurnId: state.turn.turnId,
         updatedAtTurnId: state.turn.turnId,
+        completionEvidence: {
+          schemaVersion: 1,
+          verification: [],
+          execution: [],
+          skipped: [],
+          unresolved: [],
+        },
       },
       executionMode: 'auto',
       approvedAtTurnId: state.turn.turnId,

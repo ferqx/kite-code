@@ -75,6 +75,18 @@ export interface MetadataFieldsV1 {
   releaseVersion?: string;
   releaseProfile?: ReleaseProfileMetadataV1;
   releaseCohort?: string;
+  toolOutcomeStatus?: import('@/core/runtime/tool-outcome').ToolOutcomeStatusV1;
+  toolOutcomeDetailCode?: import('@/core/runtime/tool-outcome').ToolOutcomeDetailCodeV1;
+  toolDispatchState?: import('@/core/runtime/tool-outcome').ToolDispatchStateV1;
+  toolExternalEffects?: import('@/core/runtime/tool-outcome').ToolExternalEffectsV1;
+  toolRecoveryDisposition?: import('@/core/runtime/tool-outcome').ToolRecoveryDispositionV1;
+  toolQueueMs?: number;
+  toolExecutionMs?: number;
+  toolApprovalWaitMs?: number;
+  toolTotalActiveMs?: number;
+  unknownFieldObserved?: boolean;
+  unknownFieldCount?: number;
+  unknownFieldToolClass?: import('@/core/runtime/tool-outcome').UnknownToolFieldsObservationV1['toolClass'];
 }
 
 export type ReleaseProfileMetadataV1 = 'limited' | 'internal' | 'canary' | 'ga';

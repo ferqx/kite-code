@@ -35,6 +35,9 @@ candidate payload 解析这些文件；缺失、替换或 digest 不匹配时仍
 固定虚拟路径，固定使用 Rust toolchain 自带的 `rust-lld`，并禁止 PE linker 写入墙钟时间戳。因此
 固定 toolchain 的 clean build 可在本地与 GitHub-hosted Windows runner 上生成同一 runner digest，workflow 才能在打包前用 committed
 manifest pin 执行 `git diff --exit-code`。直接调用 Cargo 不得用于生成或验证 release pin。
+当前 0.8.0/V6 runner pin 为
+`sha256:7f1c926e783f2b93482692d517e26b6aa2d2572f0790d792ff8bd6c8ea022898`；Windows candidate 与
+Platform Capability Probe 都必须在打包或原生 E2E 前重建出该精确摘要。
 `tests/release/supply-chain-workflow.test.ts` 固定 workflow 对该入口的调用顺序，并校验路径重映射与
 linker、路径重映射与时间戳清除参数不会被后续 Actions 修改静默移除。
 

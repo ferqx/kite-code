@@ -36,6 +36,8 @@ describe('MCP transport boundary concurrency', () => {
         shell: false,
         skillChild: false,
         localStdioMcp: false,
+        gitInspect: false,
+        brokeredGitFeatureRevision: null,
       },
       runIdentity: 'run-concurrent',
       profileIdentity: 'profile-concurrent',

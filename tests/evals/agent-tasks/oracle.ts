@@ -1,11 +1,11 @@
-import { canonicalJsonBytes, sha256Digest } from '../../../scripts/release/canonical-json';
 import {
   type AgentTaskCaseV1,
   type CheckSpecV1,
   type DiffFactV1,
   pathMatchesPolicy,
   validateAgentTaskCase,
-} from './cases/schema';
+} from '../../../scripts/evals/contracts/agent-task-case-schema';
+import { canonicalJsonBytes, sha256Digest } from '../../../scripts/release/canonical-json';
 import type { FixtureArtifactV1, FixtureFileArtifactV1 } from './fixtures/fixture-runner';
 
 export interface CheckResultV1 {

@@ -1,16 +1,29 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
+import {
+  executeRuntimeTools,
+  projectedToolFinishedEvent,
+} from '@/core/controllers/tool-controller';
 import { toolRequestFromCall } from '@/core/harness/tool-requests';
-import { runApprovedTool } from '@/core/harness/tool-runner';
+import { recoveryGuidanceForTool, runApprovedTool } from '@/core/harness/tool-runner';
+import { isToolMessage } from '@/core/messages';
+import { buildContextProjection } from '@/core/model/context-projection';
 import { POLICY_CLASSIFIED_TOOL_NAMES } from '@/core/policies/tool-capabilities';
+import { AgentKernel } from '@/core/runtime/kernel';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
+import { createInitialRuntimeState } from '@/core/runtime/state';
+import { createRuntimeStore } from '@/core/runtime/store';
+import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
+import type { SkillCatalogSnapshot } from '@/core/skills';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { sessionReadTracker } from '@/core/tools/read-state';
 import {
   builtinToolRegistry,
-  type builtinToolSpecs,
+  builtinToolSpecs,
   type PendingBuiltinToolRequest,
 } from '@/core/tools/registry/builtins';
 import { type askUserInputSchema, askUserSpec } from '@/core/tools/registry/builtins/ask-user';
@@ -30,6 +43,7 @@ import {
   shellActionEnvelopeSchema,
   shellExecuteSpec,
 } from '@/core/tools/registry/builtins/shell-execute';
+import { taskSpec } from '@/core/tools/registry/builtins/task';
 import {
   type writeFileInputSchema,
   writeFileSpec,
@@ -37,7 +51,7 @@ import {
 import type { writePlanInputSchema } from '@/core/tools/registry/builtins/write-plan';
 import { dispatchRegisteredTool } from '@/core/tools/registry/dispatch';
 import { createToolRegistry } from '@/core/tools/registry/registry';
-import type { ToolContext } from '@/core/tools/registry/spec';
+import type { ExecutableToolSpec, ToolContext } from '@/core/tools/registry/spec';
 import { defineExecutableTool } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
 import {
@@ -198,12 +212,26 @@ describe('toolRequestFromCall — parseFailureCode propagation', () => {
     }
   });
 
-  test('unknown tool returns null (handled by controller as tool_not_found)', () => {
+  test('unknown_tool remains structured so Controller can select tool_not_found recovery', () => {
     const result = toolRequestFromCall(
       { id: 'e2', name: 'nonexistent_tool', args: {} },
       { workspace: '/tmp/sample' },
     );
-    expect(result).toBeNull();
+    expect(result?.ok).toBe(false);
+    if (result && !result.ok) {
+      expect(result.request.parseFailureCode).toBe('unknown_tool');
+    }
+  });
+
+  test('tool_unavailable remains structured instead of becoming invalid arguments', () => {
+    const result = toolRequestFromCall(
+      { id: 'e3', name: 'tool_search', args: { query: 'database capability' } },
+      { workspace: '/tmp/sample', toolSearchEnabled: false },
+    );
+    expect(result?.ok).toBe(false);
+    if (result && !result.ok) {
+      expect(result.request.parseFailureCode).toBe('tool_unavailable');
+    }
   });
 });
 
@@ -532,6 +560,41 @@ describe('invariant i5 — write tools declare mutation scope', () => {
 });
 
 describe('projectResult production closure', () => {
+  test('task model projection exposes only the explicit public result allowlist', () => {
+    const projected = taskSpec.projectResult(
+      {
+        available: true,
+        result: {
+          ok: false,
+          summary: 'Public child summary.',
+          error: 'Public child error.',
+          toolCallCount: 3,
+          durationMs: 42,
+          executionJournal: [{ fingerprint: 'private-execution-journal' }],
+          exhaustedFingerprints: { 'private-exhausted': true },
+          toolRecovery: {
+            identityKey: 'private-recovery-key',
+            failures: { private_failure: { invocationFingerprint: 'private-fingerprint' } },
+          },
+          blocked: {
+            continuation: { id: 'private-continuation', task: 'private-child-task' },
+          },
+          steps: [{ toolName: 'read_file', toolArgs: { path: '/private/path' } }],
+        } as never,
+      },
+      { workspace: '/workspace', invocationInput: { subagent_type: 'explore', task: 'inspect' } },
+    );
+
+    expect(JSON.parse(projected.modelContent)).toEqual({
+      ok: false,
+      summary: 'Public child summary.',
+      error: 'Public child error.',
+      toolCallCount: 3,
+      durationMs: 42,
+    });
+    expect(projected.modelContent).not.toContain('private-');
+  });
+
   test('write_file runner result is the spec projection used by the final tool result', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-projection-'));
     try {
@@ -637,6 +700,107 @@ describe('dual output streams survive projection (regression)', () => {
     }
   });
 
+  test('shell failure dual streams flow through Runner, Controller terminal, reducer, and provider context', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-shell-public-projection-'));
+    const raw = {
+      ok: false,
+      command: 'pwd',
+      exitCode: 1,
+      stdout: 'partial stdout',
+      stderr: 'authoritative stderr failure',
+    };
+    const shellExecutor: ShellExecutor = async () => raw;
+    const expected = shellExecuteSpec.projectResult(raw, {
+      workspace,
+      invocationInput: { command: 'pwd' },
+    });
+    const initialState = createInitialRuntimeState({
+      threadId: 'shell-public-projection',
+      userId: 'fixture',
+      workspace,
+    });
+    const store = createRuntimeStore(':memory:');
+    const kernel = new AgentKernel({
+      store,
+      initialState,
+      interactionMode: 'accept_edits',
+    });
+    try {
+      kernel.processEvent({
+        type: 'model.responded',
+        messageId: 'shell-model',
+        text: 'Inspect the workspace.',
+        toolCalls: [{ id: 'shell', name: 'shell_execute', args: { command: 'pwd' } }],
+      });
+      kernel.processEvent({
+        type: 'tool.queued',
+        toolCallId: 'shell',
+        modelMessageId: 'shell-model',
+        name: 'shell_execute',
+        args: { command: 'pwd' },
+        ordinal: 0,
+        effectClass: 'read_only',
+        sideEffect: false,
+      });
+      const state = kernel.getState();
+      const runnerResult = await runApprovedTool({
+        workspace,
+        request: {
+          source: 'builtin',
+          id: 'shell',
+          name: 'shell_execute',
+          args: { command: 'pwd' },
+          reason: 'fixture',
+          protectedCommand: 'pwd',
+        },
+        shellExecutor,
+      });
+      expect(runnerResult.stdout).toBe(raw.stdout);
+      expect(runnerResult.stderr).toBe(raw.stderr);
+      expect(expected.modelContent).toBe(raw.stderr);
+      expect(normalizeToolContract(shellExecuteSpec.contract).returns).toMatchObject({
+        format: 'text',
+      });
+
+      const controllerEvents = await executeRuntimeTools({
+        state,
+        toolCallIds: ['shell'],
+        shellExecutor,
+      });
+      const terminal = controllerEvents.find((event) => event.type === 'tool.finished');
+      if (terminal?.type !== 'tool.finished') {
+        throw new Error('expected shell controller to emit tool.finished');
+      }
+      expect(terminal).toMatchObject({
+        type: 'tool.finished',
+        result: { ok: false, stdout: raw.stdout, stderr: raw.stderr },
+      });
+      const expectedModelContentDigest = createHash('sha256')
+        .update(expected.modelContent)
+        .digest('hex');
+      expect(terminal.result.resultMeta?.modelContentDigest).toBe(expectedModelContentDigest);
+      expect(terminal.result.resultMeta?.contentDigest).toBe(expectedModelContentDigest);
+      kernel.processEventBatch(controllerEvents);
+      const reduced = kernel.getState();
+      const transcriptResult = reduced.transcript.messages.find(
+        (message) => message.kind === 'tool' && message.toolCallId === 'shell',
+      );
+      expect(transcriptResult?.content).toBe(expected.modelContent);
+      const providerContext = buildContextProjection({
+        role: 'agent',
+        state: reduced,
+        skills: [],
+        workflowSkills: [],
+      });
+      expect(
+        providerContext.transcriptMessages.find((message) => isToolMessage(message))?.content,
+      ).toBe(expected.modelContent);
+    } finally {
+      kernel.close();
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('search projections keep both streams on failure and truncate per stream', () => {
     const longOut = 'match-line\n'.repeat(800);
     const raw = {
@@ -678,6 +842,551 @@ describe('invariant i6 — description is a pure function of contract sections',
       expect(toolset[spec.name]?.description).toBe(buildDescription(spec.contract));
       expect(registry.descriptorOf(spec).description).toBe(buildDescription(spec.contract));
     }
+  });
+});
+
+describe('ACORE-CONTRACT-01 — structured builtin contract closure', () => {
+  test('all 20 builtin specs own structured selection, parameter, result, and recovery facts', () => {
+    expect(builtinToolRegistry.names()).toHaveLength(20);
+    for (const spec of builtinToolSpecs) {
+      expect('summary' in spec.contract, spec.name).toBe(true);
+      const contract = normalizeToolContract(spec.contract);
+      expect(contract.summary.length, `${spec.name}: selection summary`).toBeGreaterThan(0);
+      expect(contract.useWhen.length, `${spec.name}: selection boundary`).toBeGreaterThan(0);
+      expect(contract.constraints?.length, `${spec.name}: parameter constraints`).toBeGreaterThan(
+        0,
+      );
+      expect(contract.returns.description.length, `${spec.name}: result semantics`).toBeGreaterThan(
+        0,
+      );
+      expect(contract.recovery?.length, `${spec.name}: recovery semantics`).toBeGreaterThan(0);
+      expect(recoveryGuidanceForTool(spec.name)).toBe(contract.recovery);
+      for (const version of ['legacy', 'v2'] as const) {
+        const description = buildDescription(spec.contract, version);
+        expect(description, `${spec.name}/${version}: summary`).toContain(contract.summary);
+        expect(description, `${spec.name}/${version}: selection`).toContain(contract.useWhen);
+        expect(description, `${spec.name}/${version}: constraints`).toContain(contract.constraints);
+        expect(description, `${spec.name}/${version}: result`).toContain(
+          contract.returns.description,
+        );
+        expect(description, `${spec.name}/${version}: recovery`).toContain(contract.recovery);
+      }
+    }
+  });
+
+  test('projects and independently parses the same resolved schema across real role contexts', async () => {
+    const covered = new Set<string>();
+    const skillCatalog: SkillCatalogSnapshot = {
+      revision: 'skill-catalog-test',
+      capabilities: {
+        revision: 'skill-capabilities-test',
+        descriptors: [
+          {
+            capabilityId: 'skill:test-workflow',
+            revision: 'skill-revision-test',
+            kind: 'skill',
+            displayName: 'test-workflow',
+            description: 'Test workflow.',
+            provider: { type: 'skill', id: 'test-workflow', provenance: 'project' },
+            declaredEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
+            effectiveEffects: { filesystem: 'read', network: 'none', externalState: 'none' },
+            policy: { workspaceTrustRequired: false, minimumApproval: 'none' },
+            availability: 'available',
+            diagnostics: [],
+          },
+        ],
+      },
+      entries: [],
+    };
+    const validArguments: Record<string, Record<string, unknown>> = {
+      ask_user: {
+        questions: [
+          {
+            question: 'Choose one?',
+            options: [
+              { label: 'One', description: 'First choice.', recommended: true },
+              { label: 'Two', description: 'Second choice.', recommended: false },
+            ],
+          },
+        ],
+      },
+      read_file: { path: 'src/index.ts' },
+      read_plan: { plan_id: 'plan-1' },
+      search_content: { pattern: 'needle' },
+      search_files: { pattern: '*.ts' },
+      shell_execute: { command: 'pwd' },
+      git_inspect: { operation: 'status', paths: ['src/index.ts'] },
+      write_file: { path: 'notes.txt', content: 'content' },
+      edit_file: { path: 'notes.txt', old_string: 'old', new_string: 'new' },
+      web_fetch: { url: 'https://example.com' },
+      list_mcp_resources: {},
+      list_mcp_tools: {},
+      read_mcp_resource: { server: 'fixture', uri: 'file:///fixture' },
+      task: { subagent_type: 'plan', task: 'Produce a read-only architecture plan.' },
+      tool_search: { query: 'fixture capability' },
+      read_skill_reference: { activation_id: 'activation-1', path: 'references/fixture.md' },
+      complete_skill: { activation_id: 'activation-1', output: {} },
+      activate_skill: { skill_id: 'skill:test-workflow', input: {} },
+      update_plan: {
+        plan_id: 'plan-1',
+        version: 1,
+        structural_digest: 'digest',
+        updates: [{ step_id: 'step-1', status: 'completed' }],
+      },
+      write_plan: {
+        title: 'Fixture plan',
+        body_markdown: 'A sufficiently detailed fixture plan body.',
+        steps: [{ id: 'step-1', title: 'First step' }],
+      },
+    };
+    for (const promptContractV2 of [false, true]) {
+      for (const phase of ['planning', 'building'] as const) {
+        const config = {
+          apiKey: '',
+          baseURL: 'http://localhost',
+          modelName: 'test',
+          providerName: 'test',
+          providerType: 'openai-compatible' as const,
+          sandbox: { enabled: false },
+          features: {
+            promptContractV2,
+            skillWorkflowV1: true,
+            skillActivationV2: true,
+            brokeredGitV1: true,
+          },
+        };
+        const input = {
+          workspace: '/workspace',
+          phase,
+          config,
+          toolSearch: true,
+          skillCatalog,
+          activeSkillFrames: [{ activationId: 'activation-1' }],
+          subagentEventSink: () => {},
+          gitBroker: {
+            featureRevision: 'brokered-git-r1' as const,
+            inspect: async () => ({ ok: true, output: '' }),
+            stage: async () => ({ ok: true, output: '' }),
+            commit: async () => ({ ok: true, output: '' }),
+          },
+        };
+        const context = {
+          ...toolAvailabilityContext(input),
+          brokeredGitFeatureRevision: 'brokered-git-r1' as const,
+        };
+        const projected = createAgentTools(input, context);
+        const available = builtinToolRegistry.availableIn(context);
+        expect(Object.keys(projected).sort()).toEqual(available.map((spec) => spec.name).sort());
+        for (const spec of available) {
+          covered.add(spec.name);
+          expect(projected[spec.name]?.description).toBe(
+            buildDescription(spec.contract, promptContractV2 ? 'v2' : 'legacy'),
+          );
+          const valid = validArguments[spec.name]!;
+          const modelSchema = (
+            projected[spec.name] as unknown as {
+              inputSchema: {
+                jsonSchema: Record<string, unknown>;
+                validate(value: unknown): Promise<{ success: boolean; value?: unknown }>;
+              };
+            }
+          ).inputSchema;
+          const modelValidation = await modelSchema.validate(valid);
+          expect(modelValidation.success, `${spec.name}: provider schema valid`).toBe(true);
+          const parsed = builtinToolRegistry.parseToolCall(
+            { name: spec.name, args: valid },
+            context,
+          );
+          expect(parsed.ok, `${spec.name}: registry valid`).toBe(true);
+          if (parsed.ok) expect(parsed.args as unknown).toEqual(modelValidation.value);
+
+          const resolvedSchema = spec.modelInputSchema?.(context) ?? spec.inputSchema;
+          const resolvedJsonSchema = z.toJSONSchema(resolvedSchema) as {
+            type?: unknown;
+            properties?: Record<string, unknown>;
+            required?: string[];
+            additionalProperties?: unknown;
+          };
+          expect(
+            {
+              type: modelSchema.jsonSchema.type,
+              properties: Object.keys(
+                (modelSchema.jsonSchema.properties as Record<string, unknown> | undefined) ?? {},
+              ).sort(),
+              required: modelSchema.jsonSchema.required,
+              additionalProperties: modelSchema.jsonSchema.additionalProperties,
+            },
+            `${spec.name}: independently projected JSON schema`,
+          ).toEqual({
+            type: resolvedJsonSchema.type,
+            properties: Object.keys(resolvedJsonSchema.properties ?? {}).sort(),
+            required: resolvedJsonSchema.required,
+            additionalProperties: resolvedJsonSchema.additionalProperties,
+          });
+          const invalid = null;
+          const invalidProvider = await modelSchema.validate(invalid);
+          const invalidRegistry = builtinToolRegistry.parseToolCall(
+            { name: spec.name, args: invalid },
+            context,
+          );
+          expect(invalidProvider.success, `${spec.name}: provider rejects null`).toBe(false);
+          expect(invalidRegistry.ok, `${spec.name}: registry rejects null`).toBe(
+            invalidProvider.success,
+          );
+
+          const privateUnknownName = 'provider_private_prompt_field';
+          const privateUnknownValue = '/private/workspace/stdout-secret';
+          const unknown = { ...valid, [privateUnknownName]: privateUnknownValue };
+          const unknownProvider = await modelSchema.validate(unknown);
+          const unknownRegistry = builtinToolRegistry.parseToolCall(
+            { name: spec.name, args: unknown },
+            context,
+          );
+          expect(unknownRegistry.ok, `${spec.name}: unknown policy parity`).toBe(
+            unknownProvider.success,
+          );
+          if (unknownRegistry.ok && unknownProvider.success) {
+            expect(
+              unknownRegistry.args as unknown,
+              `${spec.name}: normalized unknown value`,
+            ).toEqual(unknownProvider.value);
+          }
+          const observation = builtinToolRegistry.unknownFieldsOf(spec.name, unknown, context);
+          expect(observation, `${spec.name}: unknown fields observed independently`).toMatchObject({
+            count: 1,
+            hasUnknown: true,
+          });
+          expect(JSON.stringify(observation)).not.toContain(privateUnknownName);
+          expect(JSON.stringify(observation)).not.toContain(privateUnknownValue);
+        }
+      }
+    }
+    expect([...covered].sort()).toEqual([...builtinToolRegistry.names()].sort());
+  });
+
+  test('declares actual modelContent formats for text and structured projections', () => {
+    expect(
+      normalizeToolContract(builtinToolRegistry.get('shell_execute')!.contract).returns.format,
+    ).toBe('text');
+    expect(
+      normalizeToolContract(builtinToolRegistry.get('search_content')!.contract).returns.format,
+    ).toBe('text');
+    expect(
+      normalizeToolContract(builtinToolRegistry.get('read_skill_reference')!.contract).returns
+        .format,
+    ).toBe('json');
+  });
+
+  test('projects all 20 builtin results through the canonical reducer and provider context', () => {
+    const json = (value: Record<string, unknown>) => JSON.stringify(value);
+    const fixtures: Record<string, { input: Record<string, unknown>; output: unknown }> = {
+      read_file: {
+        input: { path: 'fixture.ts' },
+        output: {
+          ok: true,
+          content: '1: const fixture = true;',
+          totalLines: 1,
+          path: 'fixture.ts',
+        },
+      },
+      read_plan: {
+        input: { plan_id: 'plan-1' },
+        output: {
+          ok: true,
+          stdout: json({
+            ok: true,
+            status: 'plan_loaded',
+            task_id: 'task-1',
+            plan_id: 'plan-1',
+            version: 1,
+            plan_schema_version: 2,
+            structural_digest: 'digest',
+            title: 'Fixture',
+            body_markdown: 'Fixture body',
+            steps: [],
+            completion_evidence: [],
+            artifact: {},
+          }),
+          stderr: '',
+        },
+      },
+      edit_file: {
+        input: { path: 'fixture.ts', old_string: 'old', new_string: 'new' },
+        output: { ok: true, path: 'fixture.ts', replacements: 1, lines: 1 },
+      },
+      write_file: {
+        input: { path: 'fixture.ts', content: 'new' },
+        output: { ok: true, path: 'fixture.ts', lines: 1 },
+      },
+      shell_execute: {
+        input: { command: 'pwd' },
+        output: { ok: true, command: 'pwd', exitCode: 0, stdout: '/workspace', stderr: '' },
+      },
+      search_content: {
+        input: { pattern: 'fixture' },
+        output: {
+          ok: true,
+          command: 'rg fixture',
+          exitCode: 0,
+          stdout: 'fixture.ts:1',
+          stderr: '',
+        },
+      },
+      search_files: {
+        input: { pattern: '*.ts' },
+        output: { ok: true, command: 'rg --files', exitCode: 0, stdout: 'fixture.ts', stderr: '' },
+      },
+      tool_search: {
+        input: { query: 'fixture' },
+        output: {
+          ok: true,
+          stdout: json({
+            ok: true,
+            search_id: 'search-1',
+            candidate_count: 0,
+            candidates: [],
+            executable_candidate_count: 0,
+            provider_count: 0,
+            providers: [],
+            next_step: 'none',
+          }),
+          stderr: '',
+          runtimeEvents: [],
+        },
+      },
+      activate_skill: {
+        input: { skill_id: 'skill:fixture', input: {} },
+        output: {
+          ok: true,
+          stdout: json({
+            ok: true,
+            activation_id: 'activation-1',
+            skill_id: 'skill:fixture',
+            context_mode: 'inline',
+          }),
+          stderr: '',
+          runtimeEvents: [],
+        },
+      },
+      complete_skill: {
+        input: { activation_id: 'activation-1', output: {} },
+        output: {
+          ok: true,
+          stdout: json({ ok: true, activation_id: 'activation-1', output: {} }),
+          stderr: '',
+          runtimeEvents: [],
+        },
+      },
+      read_skill_reference: {
+        input: { activation_id: 'activation-1', path: 'references/fixture.md' },
+        output: {
+          ok: true,
+          stdout: json({
+            ok: true,
+            activation_id: 'activation-1',
+            path: 'references/fixture.md',
+            encoding: 'utf8',
+            content: 'fixture',
+          }),
+          stderr: '',
+        },
+      },
+      list_mcp_resources: {
+        input: {},
+        output: {
+          ok: true,
+          stdout: json({
+            ok: true,
+            resource_count: 0,
+            resources: [],
+            truncated: false,
+            next_step: 'none',
+          }),
+          stderr: '',
+        },
+      },
+      list_mcp_tools: {
+        input: {},
+        output: {
+          ok: true,
+          stdout: json({
+            ok: true,
+            configured_provider_count: 0,
+            callable_provider_count: 0,
+            available_tool_count: 0,
+            providers: [],
+            tools: [],
+            truncated: false,
+          }),
+          stderr: '',
+        },
+      },
+      read_mcp_resource: {
+        input: { server: 'fixture', uri: 'file:///fixture' },
+        output: { ok: true, stdout: 'resource body', stderr: '', rawContent: 'resource body' },
+      },
+      write_plan: {
+        input: {
+          title: 'Fixture plan',
+          body_markdown: 'A sufficiently detailed fixture plan body.',
+          steps: [{ id: 'step-1', title: 'First' }],
+        },
+        output: {
+          ok: true,
+          stdout: json({
+            ok: true,
+            status: 'draft_saved',
+            task_id: 'task-1',
+            plan_id: 'plan-1',
+            version: 1,
+            plan_schema_version: 2,
+            structural_digest: 'digest',
+            artifact: {},
+            next_action: 'submit',
+          }),
+          stderr: '',
+          runtimeEvents: [],
+        },
+      },
+      update_plan: {
+        input: {
+          plan_id: 'plan-1',
+          version: 1,
+          structural_digest: 'digest',
+          updates: [{ step_id: 'step-1', status: 'completed' }],
+        },
+        output: {
+          ok: true,
+          stdout: json({
+            ok: true,
+            plan_id: 'plan-1',
+            updated_steps: ['step-1'],
+            plan_completed: false,
+          }),
+          stderr: '',
+          runtimeEvents: [],
+        },
+      },
+      task: {
+        input: { subagent_type: 'plan', task: 'Plan the fixture.' },
+        output: {
+          available: true,
+          result: { ok: true, summary: 'done', toolCallCount: 0, durationMs: 2 },
+        },
+      },
+      git_inspect: {
+        input: { operation: 'status', paths: ['fixture.ts'] },
+        output: { ok: true, output: ' M fixture.ts' },
+      },
+      web_fetch: {
+        input: { url: 'https://example.com' },
+        output: {
+          ok: true,
+          url: 'https://example.com',
+          finalUrl: 'https://example.com',
+          title: 'Fixture',
+          content: 'body',
+          contentType: 'text/plain',
+          truncated: false,
+        },
+      },
+    };
+
+    const projectedNames = new Set<string>();
+    for (const rawSpec of builtinToolSpecs) {
+      const contract = normalizeToolContract(rawSpec.contract);
+      if (rawSpec.kind === 'interrupt') {
+        const args = {
+          questions: [
+            {
+              question: 'Choose one?',
+              options: [
+                { label: 'One', description: 'One.', recommended: true },
+                { label: 'Two', description: 'Two.', recommended: false },
+              ],
+            },
+          ],
+        };
+        const parsed = rawSpec.inputSchema.parse(args);
+        const interrupt = rawSpec.createInterrupt(parsed, { workspace: '/workspace' });
+        expect(contract.returns.format).toBe('interrupt');
+        expect(interrupt.questions).toHaveLength(1);
+        projectedNames.add(rawSpec.name);
+        continue;
+      }
+      const fixture = fixtures[rawSpec.name]!;
+      const spec = rawSpec as ExecutableToolSpec<string, unknown, unknown>;
+      const input = spec.inputSchema.parse(fixture.input);
+      const projected = spec.projectResult(fixture.output, {
+        workspace: '/workspace',
+        invocationInput: input,
+      });
+      let state = createInitialRuntimeState({
+        threadId: `projection-${rawSpec.name}`,
+        userId: 'fixture',
+        workspace: '/workspace',
+      });
+      state = reduceRuntimeState(state, {
+        type: 'model.responded',
+        messageId: `model-${rawSpec.name}`,
+        toolCalls: [{ id: `call-${rawSpec.name}`, name: rawSpec.name, args: input }],
+      });
+      state = reduceRuntimeState(state, {
+        type: 'tool.queued',
+        toolCallId: `call-${rawSpec.name}`,
+        name: rawSpec.name,
+        args: input,
+        modelMessageId: `model-${rawSpec.name}`,
+        ordinal: 0,
+        effectClass: 'read_only',
+        sideEffect: false,
+      });
+      state = reduceRuntimeState(state, {
+        type: 'tool.started',
+        toolCallId: `call-${rawSpec.name}`,
+      });
+      state = reduceRuntimeState(
+        state,
+        normalizeCurrentToolOutcomeEventV1(
+          projectedToolFinishedEvent({
+            toolCallId: `call-${rawSpec.name}`,
+            name: rawSpec.name,
+            projected,
+            command: rawSpec.name,
+          }),
+          state,
+          '2026-08-11T00:00:00.000Z',
+        ),
+      );
+      expect(state.transcript.messages.at(-1)).toMatchObject({
+        kind: 'tool',
+        content: projected.modelContent,
+      });
+      const context = buildContextProjection({
+        role: 'agent',
+        state,
+        skills: [],
+        workflowSkills: [],
+      });
+      const toolMessage = context.transcriptMessages.find((message) => isToolMessage(message));
+      expect(toolMessage?.content, `${rawSpec.name}: provider modelContent`).toBe(
+        projected.modelContent,
+      );
+      if (contract.returns.format === 'json') {
+        const visible = JSON.parse(projected.modelContent) as Record<string, unknown>;
+        expect(
+          Object.keys(visible).every((key) => contract.returns.fields?.includes(key) === true),
+          `${rawSpec.name}: contract fields cover the real projection`,
+        ).toBe(true);
+      } else {
+        expect(
+          contract.returns.fields,
+          `${rawSpec.name}: text has no invented fields`,
+        ).toBeUndefined();
+      }
+      projectedNames.add(rawSpec.name);
+    }
+    expect([...projectedNames].sort()).toEqual([...builtinToolRegistry.names()].sort());
   });
 });
 

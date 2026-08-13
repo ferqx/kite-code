@@ -45,16 +45,33 @@ import {
 import { evaluateToolApproval, isReadOnlyMcpPolicy } from '@/core/policies/approval-policy';
 import { createModePolicy } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from '@/core/runtime/events';
-import { classifyFailure, classifyMcpProviderError } from '@/core/runtime/failures';
+import {
+  classifyFailure,
+  classifyMcpProviderError,
+  failureKindForToolParseFailure,
+} from '@/core/runtime/failures';
 import type { FilePreimageRecorder } from '@/core/runtime/file-checkpoints';
 import { genInteractionId } from '@/core/runtime/ids';
+import {
+  isLegacyPlanContinuationToolAllowed,
+  LEGACY_PLAN_REPLAN_REQUIRED,
+  requiresLegacyPlanReplan,
+} from '@/core/runtime/plan-continuation';
 import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget-admission';
 import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
+  getActiveTask,
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
+import { toolExecutionModelContentV1 } from '@/core/runtime/tool-model-content';
+import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
+import {
+  isToolRecoveryJournalInvalidV1,
+  toolFailureInstanceIdV1,
+  toolInvocationFingerprintV1,
+} from '@/core/runtime/tool-recovery-journal';
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
@@ -94,7 +111,8 @@ function appendProjectedRuntimeEvents(
   events.push(...(projected.runtimeEvents ?? []));
 }
 
-function registeredToolFinishedEvent(input: {
+/** Canonical Registry projection into the sole reducer terminal event. */
+export function projectedToolFinishedEvent(input: {
   toolCallId: string;
   name: string;
   projected: ProjectedToolResult;
@@ -119,16 +137,21 @@ function registeredToolFinishedEvent(input: {
           }
         : {}),
     },
+    ...(projected.outcomeAdviceV1 ? { classifierAdviceV1: projected.outcomeAdviceV1 } : {}),
+    ...(projected.classifierDiagnostic
+      ? { classifierDiagnostic: projected.classifierDiagnostic }
+      : {}),
   };
 }
 
 // ── PR 8: Tool result digest production ──
 
 function computeToolResultDigest(input: {
+  ok: boolean;
   stdout: string;
   stderr: string;
   exitCode: number;
-  status?: string;
+  status?: 'success' | 'error' | 'rejected' | 'exhausted';
   rawResultDigest?: string;
   truncated?: boolean;
 }): {
@@ -138,6 +161,9 @@ function computeToolResultDigest(input: {
   digestScope: 'raw' | 'projected';
 } {
   const modelContentDigest = createHash('sha256')
+    .update(toolExecutionModelContentV1(input))
+    .digest('hex');
+  const completeResultDigest = createHash('sha256')
     .update(
       JSON.stringify({
         stdout: input.stdout,
@@ -148,7 +174,7 @@ function computeToolResultDigest(input: {
     )
     .digest('hex');
   const rawResultDigest =
-    input.rawResultDigest ?? (input.truncated ? undefined : modelContentDigest);
+    input.rawResultDigest ?? (input.truncated ? undefined : completeResultDigest);
   const digestScope = input.truncated ? ('projected' as const) : ('raw' as const);
   return {
     contentDigest: modelContentDigest,
@@ -315,6 +341,7 @@ async function handleSubAgentResume(params: {
   toolCallId: string;
   continuation: RestoredSubAgentContinuation;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -338,6 +365,7 @@ async function handleSubAgentResume(params: {
     workspace: params.state.session.workspace,
     threadId: params.state.session.threadId,
     config: params.taskConfig,
+    gitBroker: params.gitBroker,
     subagentEventSink: params.emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
@@ -369,11 +397,14 @@ async function handleSubAgentResume(params: {
         workspace: params.state.session.workspace,
         request: blockedRequest,
         shellExecutor: params.shellExecutor,
+        gitBroker: params.gitBroker,
+        currentUserGoal: getActiveTask(params.state)?.userGoal,
         workspaceAccess: params.state.workspaceAccess,
         phase: getAgentPhase(getActivePlanning(params.state)),
         authorization: params.state.authorization,
         approvedGrant: call?.approvalGrant ?? 'none',
         threadId: params.state.session.threadId,
+        recoveryIdentityKey: params.state.toolRecovery.identityKey,
         recordFilePreimage: params.recordFilePreimage,
         recordNetworkDecision: params.recordNetworkDecision,
         mcpManager: params.mcpManager,
@@ -457,6 +488,7 @@ async function handleSubAgentResume(params: {
       role: continuation.role,
       task: continuation.task,
       shellExecutor: params.shellExecutor,
+      gitBroker: params.gitBroker,
       mcpManager: params.mcpManager,
       skills: params.skillManifests,
       skillOptions: params.skillOptions,
@@ -534,8 +566,15 @@ async function handleSubAgentResume(params: {
       },
     },
   );
+  if (result.toolRecovery) {
+    events.push({
+      type: 'subagent.recovery_journal_merged',
+      toolCallId: params.toolCallId,
+      journal: result.toolRecovery,
+    });
+  }
   events.push(
-    registeredToolFinishedEvent({
+    projectedToolFinishedEvent({
       toolCallId: params.toolCallId,
       name: 'task',
       projected,
@@ -556,6 +595,7 @@ export async function executeRuntimeTools(params: {
   state: RuntimeState;
   toolCallIds: string[];
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   skillManifests?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -572,6 +612,10 @@ export async function executeRuntimeTools(params: {
   capabilityArtifactStore?: CapabilityArtifactStore;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
   emitRuntimeEvent?: (event: RuntimeEvent) => void;
+  /** RuntimeStore-backed acknowledgement required before an automatic provider replay. */
+  persistRuntimeEvent?: (event: RuntimeEvent) => Promise<boolean>;
+  /** Current Kernel state used to reject a prepared/leased effect that became unsafe. */
+  getRuntimeState?: () => Readonly<RuntimeState>;
   /** 写入前文件原像记录器，透传给工具执行链（ADR-0025 §4）。 */
   recordFilePreimage?: FilePreimageRecorder;
   recordNetworkDecision?: NetworkDecisionRecorderV1;
@@ -593,7 +637,6 @@ export async function executeRuntimeTools(params: {
     );
     return batches.flat();
   }
-
   const events: RuntimeEvent[] = [];
   // Keep the direct-call API unchanged for tests and legacy callers.  The
   // Runtime runner replaces push with a streaming sink, so events are applied
@@ -605,6 +648,21 @@ export async function executeRuntimeTools(params: {
       return append();
     };
   }
+  const currentState = params.getRuntimeState?.() ?? params.state;
+  if (isToolRecoveryJournalInvalidV1(currentState.toolRecovery)) {
+    const reason = 'Runtime tool recovery journal is invalid; tool dispatch is blocked.';
+    for (const toolCallId of params.toolCallIds) {
+      const call = currentState.tools.calls[toolCallId] ?? params.state.tools.calls[toolCallId];
+      if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason,
+        failure: classifyFailure('persistence_unavailable', reason),
+      });
+    }
+    return events;
+  }
   const planArtifacts = params.planArtifactStore ?? defaultPlanArtifactStore;
   const capabilityArtifacts = params.capabilityArtifactStore ?? defaultCapabilityArtifactStore;
   const emitSubagentEvent: SubAgentEventSink = (event) => {
@@ -615,7 +673,8 @@ export async function executeRuntimeTools(params: {
     workspace: params.state.session.workspace,
     threadId: params.state.session.threadId,
     config: params.taskConfig,
-    subagentEventSink: params.subagentEventSink,
+    gitBroker: params.gitBroker,
+    subagentEventSink: emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
     activeSkillFrames: Object.values(params.state.skills.frames).filter(
@@ -626,6 +685,27 @@ export async function executeRuntimeTools(params: {
   for (const toolCallId of params.toolCallIds) {
     const call = params.state.tools.calls[toolCallId];
     if (!call || (call.status !== 'queued' && call.status !== 'approved')) continue;
+    if (call.recoveryAdmission && call.recoveryAdmission !== 'admitted') {
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: `Runtime recovery guard blocked this invocation (${call.recoveryAdmission}).`,
+        failure: classifyFailure(
+          'loop_exhausted',
+          `Runtime recovery guard blocked this invocation (${call.recoveryAdmission}).`,
+        ),
+      });
+      continue;
+    }
+    if (requiresLegacyPlanReplan(params.state) && !isLegacyPlanContinuationToolAllowed(call.name)) {
+      events.push({
+        type: 'tool.rejected',
+        toolCallId,
+        reason: LEGACY_PLAN_REPLAN_REQUIRED,
+        failure: classifyFailure('mandatory_policy_unavailable', LEGACY_PLAN_REPLAN_REQUIRED),
+      });
+      continue;
+    }
     const productionFlags = params.taskConfig ? getFeatureFlags(params.taskConfig) : undefined;
     if (
       productionFlags?.resourceBudgetV1 &&
@@ -659,13 +739,14 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (!parsed.ok) {
+      const parseFailureCode = parsed.request.parseFailureCode ?? 'invalid_arguments';
       events.push({
         type: 'tool.failed',
         toolCallId,
         failure: classifyFailure(
-          'tool_invalid_args',
+          failureKindForToolParseFailure(parseFailureCode),
           parsed.request.parseError,
-          parsed.request.parseFailureCode,
+          parseFailureCode,
         ),
       });
       continue;
@@ -787,7 +868,7 @@ export async function executeRuntimeTools(params: {
       }
       appendProjectedRuntimeEvents(events, dispatched.projected);
       events.push(
-        registeredToolFinishedEvent({
+        projectedToolFinishedEvent({
           toolCallId,
           name: request.name,
           projected: dispatched.projected,
@@ -918,6 +999,7 @@ export async function executeRuntimeTools(params: {
                     params.taskConfig!,
                   ),
                   threadId: params.state.session.threadId,
+                  recoveryIdentityKey: params.state.toolRecovery.identityKey,
                   eventSink: emitSubagentEvent,
                   signal: params.signal,
                   model: params.taskModel,
@@ -970,7 +1052,7 @@ export async function executeRuntimeTools(params: {
         continue;
       }
       events.push(
-        registeredToolFinishedEvent({
+        projectedToolFinishedEvent({
           toolCallId,
           name: request.name,
           projected: dispatched.projected,
@@ -1000,7 +1082,7 @@ export async function executeRuntimeTools(params: {
         continue;
       }
       events.push(
-        registeredToolFinishedEvent({
+        projectedToolFinishedEvent({
           toolCallId,
           name: request.name,
           projected: dispatched.projected,
@@ -1031,7 +1113,7 @@ export async function executeRuntimeTools(params: {
       }
       appendProjectedRuntimeEvents(events, dispatched.projected);
       events.push(
-        registeredToolFinishedEvent({
+        projectedToolFinishedEvent({
           toolCallId,
           name: request.name,
           projected: dispatched.projected,
@@ -1076,7 +1158,7 @@ export async function executeRuntimeTools(params: {
         continue;
       }
       events.push(
-        registeredToolFinishedEvent({
+        projectedToolFinishedEvent({
           toolCallId,
           name: request.name,
           projected: dispatched.projected,
@@ -1112,7 +1194,7 @@ export async function executeRuntimeTools(params: {
       appendProjectedRuntimeEvents(events, dispatched.projected);
       if (dispatched.output.stdout) {
         events.push(
-          registeredToolFinishedEvent({
+          projectedToolFinishedEvent({
             toolCallId,
             name: request.name,
             projected: dispatched.projected,
@@ -1141,7 +1223,7 @@ export async function executeRuntimeTools(params: {
       }
       appendProjectedRuntimeEvents(events, dispatched.projected);
       events.push(
-        registeredToolFinishedEvent({
+        projectedToolFinishedEvent({
           toolCallId,
           name: request.name,
           projected: dispatched.projected,
@@ -1327,6 +1409,7 @@ export async function executeRuntimeTools(params: {
           toolCallId,
           continuation: restored,
           shellExecutor: params.shellExecutor,
+          gitBroker: params.gitBroker,
           mcpManager: params.mcpManager,
           skillManifests: params.skillManifests,
           skillOptions: params.skillOptions,
@@ -1350,11 +1433,14 @@ export async function executeRuntimeTools(params: {
           workspace: params.state.session.workspace,
           request,
           shellExecutor: params.shellExecutor,
+          gitBroker: params.gitBroker,
+          currentUserGoal: getActiveTask(params.state)?.userGoal,
           workspaceAccess: params.state.workspaceAccess,
           phase: getAgentPhase(getActivePlanning(params.state)),
           authorization: params.state.authorization,
           approvedGrant: call.approvalGrant ?? 'none',
           threadId: params.state.session.threadId,
+          recoveryIdentityKey: params.state.toolRecovery.identityKey,
           recordFilePreimage: params.recordFilePreimage,
           recordNetworkDecision: params.recordNetworkDecision,
           mcpManager: params.mcpManager,
@@ -1376,6 +1462,14 @@ export async function executeRuntimeTools(params: {
           onShellProgress: (chunk, stream) =>
             events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
         });
+
+        if (result.subagentResult?.toolRecovery) {
+          events.push({
+            type: 'subagent.recovery_journal_merged',
+            toolCallId,
+            journal: result.subagentResult.toolRecovery,
+          });
+        }
 
         // ── Sub-agent blocked for approval → surface through Runtime Kernel ──
         if (result.subagentResult?.blocked) {
@@ -1437,6 +1531,7 @@ export async function executeRuntimeTools(params: {
               ...(result.totalLines != null ? { totalLines: result.totalLines } : {}),
               ...(result.action?.intent ? { intent: result.action.intent } : {}),
               ...computeToolResultDigest({
+                ok: result.ok !== false,
                 stdout: result.stdout ?? '',
                 stderr: result.stderr ?? '',
                 exitCode: result.exitCode ?? 0,
@@ -1642,6 +1737,7 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (invocation) events.push(invocation.recorded);
+    const executionStartedAt = Date.now();
     events.push({ type: 'tool.started', toolCallId });
     if (invocation) {
       events.push({
@@ -1651,45 +1747,132 @@ export async function executeRuntimeTools(params: {
       });
     }
     try {
-      if (request.name === 'read_mcp_resource') {
-        await params.mcpManager?.ensureProviderReady?.(
-          (request.args as ReadMcpResourceInput).server,
-          30_000,
-          params.signal,
-        );
-      }
-      if (mcpDescriptor) {
-        await params.mcpManager?.ensureProviderReady?.(
-          mcpDescriptor.provider.id,
-          30_000,
-          params.signal,
-        );
-        const currentDescriptor = params.mcpManager?.findCapability(mcpDescriptor.capabilityId);
-        if (!currentDescriptor || currentDescriptor.revision !== mcpDescriptor.revision) {
-          throw capabilityChangedProviderError(mcpDescriptor.provider.id);
+      // Automatic replay is limited to a proven safe read. Merely attaching an
+      // idempotency key is not an idempotency receipt and therefore cannot authorize replay.
+      const automaticRetryEligible = mcpDescriptor?.execution?.retry === 'safe_read';
+      let automaticRetryConsumed = false;
+      const persistAutomaticRetry = async (
+        error: unknown,
+        authority: {
+          dispatchState: 'not_started' | 'started';
+          replaySafety: 'pre_dispatch' | 'safe_read';
+        },
+      ): Promise<boolean> => {
+        if (
+          automaticRetryConsumed ||
+          !automaticRetryEligible ||
+          !isMcpProviderError(error) ||
+          !error.retryable
+        ) {
+          return false;
+        }
+        const failure = classifyMcpProviderError(error);
+        const invocationFingerprint =
+          call.invocationFingerprint ??
+          toolInvocationFingerprintV1({
+            key: params.state.toolRecovery.identityKey,
+            toolName: call.name,
+            parsedArgs: call.args,
+          });
+        const baseOutcome = classifyToolOutcomeV1({
+          status: 'failed',
+          failure,
+          authority: {
+            dispatchState: authority.dispatchState,
+            externalEffects: 'none',
+            replaySafety: authority.replaySafety,
+          },
+          toolAdvice: {
+            disposition: 'retry_once',
+            maximumAdditionalCalls: 1,
+            safeAutomaticRetry: true,
+          },
+          timing: {
+            executionMs: Math.max(0, Date.now() - executionStartedAt),
+            totalActiveMs: Math.max(0, Date.now() - executionStartedAt),
+          },
+        });
+        if (!baseOutcome.recovery.safeAutomaticRetry) return false;
+        const recoveryOf = toolFailureInstanceIdV1({
+          toolCallId,
+          invocationFingerprint,
+          outcome: baseOutcome,
+        });
+        const retryRecorded: RuntimeEvent = {
+          type: 'tool.retry_recorded',
+          toolCallId,
+          failure,
+          outcomeV1: {
+            ...baseOutcome,
+            lineage: { failureInstanceId: recoveryOf },
+          },
+          recoveryOf,
+          retryAttempt: 1,
+        };
+        if (!params.persistRuntimeEvent) {
+          throw new Error('Automatic retry requires a durable RuntimeStore acknowledgement.');
+        }
+        let persisted = false;
+        try {
+          persisted = await params.persistRuntimeEvent(retryRecorded);
+        } catch {
+          throw new Error('Automatic retry evidence could not be durably persisted.');
+        }
+        if (!persisted) {
+          throw new Error('Automatic retry evidence became stale before durable persistence.');
+        }
+        automaticRetryConsumed = true;
+        return true;
+      };
+
+      while (true) {
+        try {
+          if (request.name === 'read_mcp_resource') {
+            await params.mcpManager?.ensureProviderReady?.(
+              (request.args as ReadMcpResourceInput).server,
+              30_000,
+              params.signal,
+            );
+          }
+          if (mcpDescriptor) {
+            await params.mcpManager?.ensureProviderReady?.(
+              mcpDescriptor.provider.id,
+              30_000,
+              params.signal,
+            );
+            const currentDescriptor = params.mcpManager?.findCapability(mcpDescriptor.capabilityId);
+            if (!currentDescriptor || currentDescriptor.revision !== mcpDescriptor.revision) {
+              throw capabilityChangedProviderError(mcpDescriptor.provider.id);
+            }
+          }
+          break;
+        } catch (error) {
+          if (
+            !(await persistAutomaticRetry(error, {
+              dispatchState: 'not_started',
+              replaySafety: 'pre_dispatch',
+            }))
+          ) {
+            throw error;
+          }
         }
       }
-      const maximumAttempts =
-        mcpDescriptor?.execution?.retry === 'safe_read' ||
-        (mcpDescriptor?.execution?.retry === 'idempotency_key' &&
-          typeof mcpDescriptor.execution.idempotencyKeyArgument === 'string' &&
-          typeof (executionRequest.args as Record<string, unknown>)[
-            mcpDescriptor.execution.idempotencyKeyArgument
-          ] === 'string')
-          ? 2
-          : 1;
+
       let result: ToolExecutionResult | undefined;
-      for (let attempt = 0; attempt < maximumAttempts; attempt += 1) {
+      while (!result) {
         try {
           result = await runApprovedTool({
             workspace: params.state.session.workspace,
             request: executionRequest,
             shellExecutor: params.shellExecutor,
+            gitBroker: params.gitBroker,
+            currentUserGoal: getActiveTask(params.state)?.userGoal,
             workspaceAccess: params.state.workspaceAccess,
             phase: getAgentPhase(getActivePlanning(params.state)),
             authorization: params.state.authorization,
             approvedGrant: call.approvalGrant ?? 'none',
             threadId: params.state.session.threadId,
+            recoveryIdentityKey: params.state.toolRecovery.identityKey,
             recordFilePreimage: params.recordFilePreimage,
             recordNetworkDecision: params.recordNetworkDecision,
             mcpManager: params.mcpManager,
@@ -1719,9 +1902,13 @@ export async function executeRuntimeTools(params: {
             onShellProgress: (chunk, stream) =>
               events.push({ type: 'tool.progress', toolCallId, chunk, stream }),
           });
-          break;
         } catch (error) {
-          if (attempt + 1 >= maximumAttempts || !isMcpProviderError(error) || !error.retryable) {
+          if (
+            !(await persistAutomaticRetry(error, {
+              dispatchState: 'started',
+              replaySafety: 'safe_read',
+            }))
+          ) {
             throw error;
           }
         }
@@ -1791,6 +1978,7 @@ export async function executeRuntimeTools(params: {
           exitCode: result.exitCode ?? 0,
           stdout: result.stdout ?? '',
           stderr: result.stderr ?? '',
+          ...(result.terminationReason ? { terminationReason: result.terminationReason } : {}),
           resultMeta: {
             ...result.resultMeta,
             ...(result.path ? { path: result.path } : {}),
@@ -1803,6 +1991,7 @@ export async function executeRuntimeTools(params: {
                 }
               : {}),
             ...computeToolResultDigest({
+              ok: result.ok !== false,
               stdout: result.stdout ?? '',
               stderr: result.stderr ?? '',
               exitCode: result.exitCode ?? 0,
@@ -1814,6 +2003,10 @@ export async function executeRuntimeTools(params: {
           status:
             result.status === 'exhausted' ? 'exhausted' : result.ok === false ? 'error' : 'success',
         },
+        ...(result.classifierAdviceV1 ? { classifierAdviceV1: result.classifierAdviceV1 } : {}),
+        ...(result.classifierDiagnostic
+          ? { classifierDiagnostic: result.classifierDiagnostic }
+          : {}),
       });
     } catch (error) {
       if (error instanceof DescendantResourceAdmissionError) throw error;

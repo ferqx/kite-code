@@ -1,4 +1,5 @@
 import type { CapabilityDescriptor, EffectProfile } from '@/protocol/capabilities';
+import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@/protocol/git';
 import { isDescriptorAdmittedByInProcessReadOnlyCatalogV1 } from './in-process-read-only';
 import type { ExecutionCapabilitySurfaceV1 } from './types';
 
@@ -31,6 +32,15 @@ export function isDescriptorAdmittedByExecutionCapabilitySurfaceV1(input: {
   descriptor: CapabilityDescriptor;
 }): boolean {
   const { surface, descriptor } = input;
+
+  // Brokered Git is an independent capability axis.  It remains available on
+  // a no-process/no-generic-write surface only when disclosure, dispatch and
+  // native metadata denial all name the same feature revision.
+  if (descriptor.kind === 'builtin_tool' && descriptor.capabilityId === 'builtin:git_inspect') {
+    return (
+      surface.gitInspect && surface.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1
+    );
+  }
 
   if (!surface.process && !surface.write) {
     return Boolean(

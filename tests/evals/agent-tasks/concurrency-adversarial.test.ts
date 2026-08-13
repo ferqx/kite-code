@@ -3,7 +3,7 @@ import {
   ADVERSARIAL_CONTRACT_CATALOG_V1,
   createAdversarialContractReceipt,
   summarizeAdversarialContracts,
-} from './adversarial-contract';
+} from '../../../scripts/evals/contracts/agent-task-adversarial-contract';
 
 describe('concurrency adversarial contracts', () => {
   test('binds budget, FIFO, compound permits, process tree, receipt reuse, denial, and result order', () => {

@@ -169,7 +169,7 @@ export type OutputBlock =
       subagentId: string;
       role: SubAgentRole;
       task: string;
-      status: 'running' | 'done' | 'error' | 'cancelled';
+      status: 'running' | 'suspended' | 'done' | 'error' | 'cancelled';
       summary: string;
       toolCallCount: number;
       durationMs: number;
@@ -259,7 +259,7 @@ export interface TuiState {
   /** Ephemeral presentation for the active context compaction. */
   compactionProgress?: {
     phase: import('@/core/model/context-compaction-presentation').ContextCompactionProgressPhase;
-    placement: 'status' | 'inline';
+    source: 'manual' | 'automatic';
   };
 }
 

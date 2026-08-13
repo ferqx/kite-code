@@ -302,9 +302,13 @@ describe('sandbox executor integration', () => {
     writeFileSync(join(ws, '.ENV.TEST'), 'keep');
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
-      // Split the literal so checkDangerousPaths cannot be the mechanism under test.
-      const read = await executor({ workspace: ws, command: 'cat .S"SH/config"' });
-      const write = await executor({ workspace: ws, command: 'echo changed > .E"NV.TEST"' });
+      // Construct the identity at runtime so the native profile, not the
+      // command-text defense in depth, remains the mechanism under test.
+      const read = await executor({ workspace: ws, command: `p=.S; cat "\${p}SH/config"` });
+      const write = await executor({
+        workspace: ws,
+        command: `p=.E; echo changed > "\${p}NV.TEST"`,
+      });
       expect(read.ok).toBe(false);
       expect(read.stdout).not.toContain('protected');
       expect(write.ok).toBe(false);
@@ -320,8 +324,8 @@ describe('sandbox executor integration', () => {
     writeFileSync(join(ws, '.GIT', 'config'), 'repo-config');
     try {
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
-      // Split the literal so checkDangerousPaths cannot be the mechanism under test.
-      const result = await executor({ workspace: ws, command: 'cat .g"it/config"' });
+      // Construct the identity at runtime so this reaches the native profile.
+      const result = await executor({ workspace: ws, command: `p=.g; cat "\${p}it/config"` });
       expect(result.ok).toBe(true);
       expect(result.stdout).toContain('repo-config');
     } finally {
@@ -341,6 +345,64 @@ describe('sandbox executor integration', () => {
       expect(result.ok).toBe(false);
       expect(existsSync(externalFile)).toBe(false);
     } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('an approved external filesystem invocation is not denied by Seatbelt', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(tmpdir(), `kite-code-approved-external-${process.pid}.txt`);
+    try {
+      rmSync(externalFile, { force: true });
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `printf approved > "${externalFile}"`,
+        filesystemMode: 'allow_all',
+      });
+      expect(result.ok).toBe(true);
+      expect(existsSync(externalFile)).toBe(true);
+    } finally {
+      rmSync(externalFile, { force: true });
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('approved filesystem scope retains the native protected-path deny', async () => {
+    const ws = setupWorkspace();
+    writeFileSync(join(ws, '.ENV.SECRET'), 'must-not-read');
+    try {
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `p=.E; cat "\${p}NV.SECRET"`,
+        filesystemMode: 'allow_all',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.stdout).not.toContain('must-not-read');
+    } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('approved filesystem scope does not disable Seatbelt network isolation', async () => {
+    const ws = setupWorkspace();
+    const externalFile = join(tmpdir(), `kite-code-approved-sandboxed-${process.pid}.txt`);
+    const server = startTestHttpServer({ fetch: () => new Response('must-not-arrive') });
+    try {
+      rmSync(externalFile, { force: true });
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: `printf approved > "${externalFile}"; curl -s --connect-timeout 1 http://127.0.0.1:${server.port}`,
+        filesystemMode: 'allow_all',
+      });
+      expect(existsSync(externalFile)).toBe(true);
+      expect(result.ok).toBe(false);
+      expect(result.stdout).not.toContain('must-not-arrive');
+    } finally {
+      server.stop(true);
       rmSync(externalFile, { force: true });
       cleanupWorkspace(ws);
     }

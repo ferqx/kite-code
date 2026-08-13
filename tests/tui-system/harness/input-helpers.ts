@@ -456,12 +456,12 @@ export async function clearInput(
     const delayMs = options.delayMs ?? 50;
     if (delayMs > 0) await sleep(delayMs);
   }
-  await waitForOutputQuiescence(
-    () => tui.outputSince(outputMark),
-    undefined,
-    undefined,
-    options.requireReceipt ?? true,
-  );
+  // Retry cleanup is followed by a semantic viewport check in typeText(). A
+  // running status bar may legitimately redraw forever, so waiting for global
+  // terminal quiescence here would turn a recoverable input retry into a CI
+  // timeout. Callers that require an output receipt retain the strict wait.
+  if (options.requireReceipt === false) return;
+  await waitForOutputQuiescence(() => tui.outputSince(outputMark), undefined, undefined, true);
 }
 
 export async function waitForRequestMessage(

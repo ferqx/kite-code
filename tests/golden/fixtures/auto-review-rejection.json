@@ -57,6 +57,10 @@
   "expectedFinalState": {
     "interactions.kind": "idle",
     "tools.calls.call-1.status": "rejected",
-    "autoReview.consecutiveRejects": 1
+    "autoReview.consecutiveRejects": 1,
+    "transcript.messages.length": 1,
+    "transcript.messages.0.kind": "tool",
+    "transcript.messages.0.toolCallId": "call-1",
+    "transcript.messages.0.ok": false
   }
 }

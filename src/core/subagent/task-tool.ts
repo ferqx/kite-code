@@ -11,6 +11,7 @@ export interface TaskToolDeps {
   config: AgentConfig;
   workspace: string;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
   skillOptions?: SkillScanOptions;
@@ -24,6 +25,7 @@ export interface TaskToolDeps {
   phase?: import('@/protocol/events').AgentPhase;
   projectInstructions?: import('@/core/model/project-instructions').ProjectInstructionSnapshot;
   threadId?: string;
+  recoveryIdentityKey?: string;
   eventSink: SubAgentEventSink;
   signal?: AbortSignal;
   model?: SupportedChatModel;
@@ -68,6 +70,7 @@ export async function runTaskSubAgent(
       },
       task: args.task,
       shellExecutor: deps.shellExecutor,
+      gitBroker: deps.gitBroker,
       mcpManager: deps.mcpManager,
       skills: deps.skills,
       skillOptions: deps.skillOptions,
@@ -77,6 +80,7 @@ export async function runTaskSubAgent(
       phase: deps.phase,
       projectInstructions: deps.projectInstructions,
       threadId: deps.threadId,
+      recoveryIdentityKey: deps.recoveryIdentityKey,
       timeoutMs: 30 * 60 * 1000,
       signal: deps.signal ?? new AbortController().signal,
       eventSink: deps.eventSink,

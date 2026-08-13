@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { AgentConfig } from '../src/core/config';
 import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harness/tool-requests';
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
@@ -448,6 +449,123 @@ describe('runApprovedTool — shell_execute timeout', () => {
     expect(capturedNetworkMode).toBe('allow_all');
   });
 
+  it('does not revoke an approved development network grant when a boundary is present', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'tool-runner-network-boundary-'));
+    let capturedNetworkMode: string | undefined;
+    try {
+      const result = await runApprovedTool({
+        workspace,
+        request: {
+          id: 'call-shell-network-boundary',
+          name: 'shell_execute',
+          args: { command: 'curl https://example.com' },
+          reason: 'Fetch an approved URL',
+          protectedCommand: 'curl https://example.com',
+        } as PendingToolRequest,
+        interactionMode: 'accept_edits',
+        approvedGrant: 'approve_once',
+        taskConfig: {
+          features: { networkBoundaryV1: true },
+          executionBoundary: {
+            filesystemScope: 'workspace_write',
+            workspaceRoot: workspace,
+            networkMode: 'off',
+            networkAllowlist: [],
+            allowLocalAndPrivateNetwork: false,
+            protectedPathPolicy: 'deny',
+            maxProcessTreeSizePerShellInvocation: 16,
+            sandboxRequired: true,
+            sandboxUnavailable: 'fail',
+          },
+        } as unknown as AgentConfig,
+        shellExecutor: async (input) => {
+          capturedNetworkMode = input.networkMode;
+          return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+        },
+      });
+      expect(result.ok).toBe(true);
+      expect(capturedNetworkMode).toBe('allow_all');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  it('projects approved external writes to the cross-platform filesystem lane', async () => {
+    let capturedFilesystemMode: string | undefined;
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-shell-external-write',
+        name: 'shell_execute',
+        args: { command: 'touch /tmp/kite-approved-write.txt' },
+        reason: 'Write an approved temporary file',
+        protectedCommand: 'touch /tmp/kite-approved-write.txt',
+      } as PendingToolRequest,
+      interactionMode: 'accept_edits',
+      approvedGrant: 'approve_once',
+      shellExecutor: async (input) => {
+        capturedFilesystemMode = input.filesystemMode;
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedFilesystemMode).toBe('allow_all');
+  });
+
+  it('projects both network and external-filesystem approval for curl output files', async () => {
+    let capturedNetworkMode: string | undefined;
+    let capturedFilesystemMode: string | undefined;
+    const command = 'curl -o /tmp/out https://example.com';
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-shell-network-output',
+        name: 'shell_execute',
+        args: { command },
+        reason: 'Download an approved temporary file',
+        protectedCommand: command,
+      } as PendingToolRequest,
+      interactionMode: 'accept_edits',
+      approvedGrant: 'approve_once',
+      shellExecutor: async (input) => {
+        capturedNetworkMode = input.networkMode;
+        capturedFilesystemMode = input.filesystemMode;
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedNetworkMode).toBe('allow_all');
+    expect(capturedFilesystemMode).toBe('allow_all');
+  });
+
+  it('keeps approved workspace-only writes in the native sandbox lane', async () => {
+    let capturedFilesystemMode: string | undefined;
+
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-shell-workspace-write',
+        name: 'shell_execute',
+        args: { command: 'touch local.txt' },
+        reason: 'Write a workspace file',
+        protectedCommand: 'touch local.txt',
+      } as PendingToolRequest,
+      interactionMode: 'accept_edits',
+      approvedGrant: 'approve_once',
+      shellExecutor: async (input) => {
+        capturedFilesystemMode = input.filesystemMode;
+        return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(result.ok).toBe(true);
+    expect(capturedFilesystemMode).toBe('workspace_only');
+  });
+
   it('opens networking for a full-access network shell command', async () => {
     let capturedNetworkMode: string | undefined;
 
@@ -516,6 +634,34 @@ describe('runApprovedTool — shell_execute timeout', () => {
 
     expect(capturedTimeout).toBe(250);
     expect(result.exitCode).toBe(124);
+  });
+});
+
+describe('runApprovedTool — approved external file paths', () => {
+  it('writes a relative traversal target after approval', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-approved-file-'));
+    const workspace = join(root, 'workspace');
+    const outside = join(root, 'outside.txt');
+    mkdirSync(workspace);
+    try {
+      const result = await runApprovedTool({
+        workspace,
+        request: {
+          id: 'call-write-relative-external',
+          name: 'write_file',
+          args: { path: '../outside.txt', content: 'approved' },
+          reason: 'Write an approved external file',
+          protectedCommand: 'write_file ../outside.txt',
+        } as PendingToolRequest,
+        interactionMode: 'accept_edits',
+        approvedGrant: 'approve_once',
+      });
+
+      expect(result.ok).toBe(true);
+      expect(await Bun.file(outside).text()).toBe('approved');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

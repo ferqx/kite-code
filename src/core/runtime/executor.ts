@@ -16,6 +16,7 @@ import {
 } from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import {
+  type AutoReviewResult,
   createAutoReviewModel,
   resolveAutoReviewConfig,
   reviewToolApproval,
@@ -56,7 +57,7 @@ import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { executeVerificationEffect } from '@/core/verification';
 import { createFilePreimageRecorder } from './file-checkpoints';
-import type { RuntimeEffectExecutor } from './kernel';
+import { deferredRuntimeEffect, type RuntimeEffectExecutor } from './kernel';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import { RemoteMcpEgressNonceConflictError, type RuntimeStore } from './store';
 
@@ -65,6 +66,7 @@ export interface RuntimeExecutorDependencies {
   config: AgentConfig;
   model: SupportedChatModel;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   sandboxBackend?: SandboxBackend | 'unknown';
   mcpManager?: McpRuntimeProvider;
   skills?: SkillManifest[];
@@ -89,6 +91,10 @@ export function resolveAutoReviewTimeout(config: AgentConfig): number {
   return getFeatureFlags(config).autoReviewV2 ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
 }
 
+export function shouldEscalateAutoReviewResult(result: AutoReviewResult): boolean {
+  return !result.ok || !result.suggestion?.approved;
+}
+
 function reviewerProviderDataAdmission(
   dependencies: RuntimeExecutorDependencies,
   reviewerConfig: AgentConfig,
@@ -107,10 +113,14 @@ function reviewerProviderDataAdmission(
 export function resolveRuntimeContextProjectionEnvironment(
   dependencies: RuntimeExecutorDependencies,
   state: import('./state').RuntimeState,
+  toolSurface?: 'legacy_plan_recovery',
 ) {
   const flags = getFeatureFlags(dependencies.config);
   const skillCatalog =
-    dependencies.skillOptions && flags.skillWorkflowV1 && flags.skillActivationV2
+    toolSurface !== 'legacy_plan_recovery' &&
+    dependencies.skillOptions &&
+    flags.skillWorkflowV1 &&
+    flags.skillActivationV2
       ? refreshSkillCatalog(dependencies.skillOptions, {
           resolveCapability: createSkillCapabilityResolver(dependencies.mcpManager),
         })
@@ -120,6 +130,7 @@ export function resolveRuntimeContextProjectionEnvironment(
     config: dependencies.config,
     model: dependencies.model,
     shellExecutor: dependencies.shellExecutor,
+    gitBroker: dependencies.gitBroker,
     mcpManager: dependencies.mcpManager,
     skills: dependencies.skills,
     skillOptions: dependencies.skillOptions,
@@ -127,6 +138,7 @@ export function resolveRuntimeContextProjectionEnvironment(
     subagentEventSink: dependencies.subagentEventSink,
     signal: dependencies.signal,
     sandboxBackend: dependencies.sandboxBackend,
+    toolSurface,
   });
 }
 
@@ -137,7 +149,11 @@ export function prepareRuntimeEffectForBudgetV1(
   dependencies: RuntimeExecutorDependencies,
 ): import('./effects').RuntimeEffect {
   if (effect.type !== 'call_model') return effect;
-  const environment = resolveRuntimeContextProjectionEnvironment(dependencies, state);
+  const environment = resolveRuntimeContextProjectionEnvironment(
+    dependencies,
+    state,
+    effect.toolSurface,
+  );
   const projection = buildContextProjection({
     role: 'agent',
     state,
@@ -147,6 +163,7 @@ export function prepareRuntimeEffectForBudgetV1(
     promptContractVersion: environment.promptContractVersion,
     projectInstructions: environment.projectInstructions,
     sandboxBackend: environment.sandboxBackend,
+    toolSurface: environment.toolSurface,
   });
   if (getFeatureFlags(dependencies.config).providerDataPolicyV1) {
     const decision = dependencies.providerDataAdmission?.(
@@ -251,7 +268,10 @@ export function createRuntimeEffectExecutor(
           Date.now() + leaseTtlMs,
         )
       ) {
-        return [];
+        return deferredRuntimeEffect(
+          'Context compaction is already owned by another runtime.',
+          100,
+        );
       }
       const heartbeat = durableLease
         ? setInterval(() => {
@@ -285,17 +305,20 @@ export function createRuntimeEffectExecutor(
         state,
         config: dependencies.config,
         shellExecutor: dependencies.shellExecutor,
+        gitBroker: dependencies.gitBroker,
         sandboxBackend: dependencies.sandboxBackend,
         mcpManager: dependencies.mcpManager,
         skills: dependencies.skills,
         skillOptions: dependencies.skillOptions,
-        skillCatalog: currentSkillCatalog(),
+        skillCatalog:
+          effect.toolSurface === 'legacy_plan_recovery' ? undefined : currentSkillCatalog(),
         subagentEventSink,
         signal: dependencies.signal,
         emitRuntimeEvent: emit,
         compactionReporter: dependencies.compactionReporter,
         providerDataAdmission: dependencies.providerDataAdmission,
         resourceAdmission: effect.resourceEstimate,
+        toolSurface: effect.toolSurface,
       });
     }
     if (effect.type === 'run_tools') {
@@ -360,6 +383,7 @@ export function createRuntimeEffectExecutor(
             state,
             toolCallIds,
             shellExecutor: dependencies.shellExecutor,
+            gitBroker: dependencies.gitBroker,
             mcpManager: dependencies.mcpManager,
             skillManifests: dependencies.skills,
             skillOptions: dependencies.skillOptions,
@@ -372,6 +396,9 @@ export function createRuntimeEffectExecutor(
             descendantResourceAdmission,
             subagentEventSink,
             emitRuntimeEvent: emitOrDefer,
+            persistRuntimeEvent: executionContext?.persistEvent,
+            getRuntimeState: () =>
+              (executionContext?.getState?.() ?? state) as import('./state').RuntimeState,
             recordFilePreimage: createFilePreimageRecorder(
               dependencies.runtimeStore,
               state.session.threadId,
@@ -433,10 +460,39 @@ export function createRuntimeEffectExecutor(
         if (effect.toolCallIds.length <= 1) {
           return await execute(effect.toolCallIds);
         }
-        const batches = await Promise.all(
+        const batches = await Promise.allSettled(
           effect.toolCallIds.map((toolCallId) => execute([toolCallId])),
         );
-        return batches.flat();
+        const terminalEvents: RuntimeEvent[] = [];
+        for (let index = 0; index < batches.length; index++) {
+          const batch = batches[index]!;
+          if (batch.status === 'fulfilled') {
+            terminalEvents.push(...batch.value);
+            continue;
+          }
+          const toolCallId = effect.toolCallIds[index]!;
+          const currentState =
+            (executionContext?.getState?.() as import('./state').RuntimeState | undefined) ?? state;
+          if (batch.reason instanceof DescendantResourceAdmissionError) {
+            terminalEvents.push(
+              ...resourceAdmissionTerminalEventsV1(currentState, batch.reason.reason),
+            );
+          } else {
+            terminalEvents.push({
+              type: dependencies.signal?.aborted ? 'tool.cancelled' : 'tool.failed',
+              toolCallId,
+              ...(dependencies.signal?.aborted
+                ? { reason: 'Runtime tool batch cancelled.' }
+                : {
+                    failure: classifyFailure(
+                      'tool_runtime_error',
+                      'The tool failed inside the local execution adapter.',
+                    ),
+                  }),
+            } as RuntimeEvent);
+          }
+        }
+        return terminalEvents;
       } catch (error) {
         if (error instanceof DescendantResourceAdmissionError) {
           const currentState =
@@ -574,6 +630,7 @@ async function executeAutoReview(
         ? {
             ok: true,
             approved: result.suggestion?.approved ?? false,
+            ...(!result.suggestion?.approved ? { escalatedToUser: true as const } : {}),
             grant: result.suggestion?.grant,
             reason: result.suggestion?.reason ?? result.reason,
             reviewerModelName: reviewerConfig.modelName ?? reviewerConfig.providerName ?? 'unknown',
@@ -590,7 +647,7 @@ async function executeAutoReview(
             durationMs: Date.now() - startTime,
           },
     };
-    if (!result.ok) {
+    if (shouldEscalateAutoReviewResult(result)) {
       return [
         completed,
         {

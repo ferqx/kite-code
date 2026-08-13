@@ -321,7 +321,7 @@ describe('network boundary concurrent invocation isolation', () => {
       receiptWasPersisted: true,
     });
     expect(providerCalls).toBe(0);
-    expect(observedShellNetworkMode).toBe('disabled');
+    expect(observedShellNetworkMode).toBe('allow_all');
     expect(terminalEvents).toHaveLength(toolCallIds.length);
     expect(kernel.getState().tools.calls.web?.status).toBe('failed');
     expect(kernel.getState().tools.calls.shell?.status).toBe('succeeded');

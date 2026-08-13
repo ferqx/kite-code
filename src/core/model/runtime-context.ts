@@ -50,6 +50,8 @@ export interface RuntimeModeSnapshotInput {
   sandboxBackend: SandboxBackend | 'unknown';
   /** v2: PlanningState for dynamic runtime-state block */
   planningState?: PlanningState;
+  /** Restrict a recovered legacy plan to read_plan/write_plan V2 replacement. */
+  legacyPlanRecovery?: boolean;
   taskId?: string;
   sideEffectsStarted?: boolean;
 }
@@ -125,7 +127,11 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     ) {
       lines.push(`  plan_id: ${ps.document.planId}`);
       lines.push(`  version: ${ps.document.version}`);
-      lines.push(`  structural_digest: sha256:${ps.document.structuralDigest.slice(0, 16)}...`);
+      lines.push(
+        input.legacyPlanRecovery
+          ? `  structural_digest: ${ps.document.structuralDigest}`
+          : `  structural_digest: sha256:${ps.document.structuralDigest.slice(0, 16)}...`,
+      );
     }
     if ((ps.kind === 'planning_draft' || ps.kind === 'replanning_draft') && ps.revisionFeedback) {
       lines.push(`  revision_feedback: "${ps.revisionFeedback}"`);
@@ -146,14 +152,20 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
         ps.kind === 'planning_draft' ||
         ps.kind === 'replanning_draft');
     lines.push(`  write_plan_allowed: ${canWriteDraft || ps.kind === 'executing'}`);
-    lines.push(`  write_plan_submit_allowed: ${canWriteDraft || ps.kind === 'executing'}`);
+    lines.push(
+      `  write_plan_submit_allowed: ${!input.legacyPlanRecovery && (canWriteDraft || ps.kind === 'executing')}`,
+    );
     lines.push(`  replan_allowed: ${ps.kind === 'executing'}`);
-    lines.push(`  update_plan_allowed: ${ps.kind === 'executing'}`);
+    lines.push(`  update_plan_allowed: ${!input.legacyPlanRecovery && ps.kind === 'executing'}`);
   }
 
-  if (input.phase === 'planning') {
+  if (input.legacyPlanRecovery) {
     lines.push(
-      'Planning phase policy: read/search/research, ask_user, read_plan, and write_plan are allowed; workspace mutation, code execution, full access escalation, and side-effectful MCP/sub-agent work are not allowed until plan approval moves the phase to building. An initial write_plan(action="save") may enter planning only before side effects begin, followed by submit of the saved Artifact.',
+      'Legacy Plan recovery policy: this V1 plan is read/replay only. Use read_plan if needed, then call write_plan(action="save") with the current plan_id, version, and structural_digest to create a V2 replan. No execution, update_plan, submit, final answer, or other tool is allowed before the V2 save.',
+    );
+  } else if (input.phase === 'planning') {
+    lines.push(
+      'Planning phase policy: read/search/research, policy-proven read-only shell inspection, ask_user, read_plan, and write_plan are allowed. Do not call file-writing tools, tests, builds, installs, formatting, generation, mutating or unknown-effect shell commands, full access escalation, or side-effectful MCP/sub-agent work until plan approval moves the phase to building. Phase-invalid calls are not executed or approved; their structured Tool Result is feedback for choosing a read-only action or preserving the work in the plan. An initial write_plan(action="save") may enter planning only before side effects begin, followed by submit of the saved Artifact.',
     );
   } else {
     lines.push(

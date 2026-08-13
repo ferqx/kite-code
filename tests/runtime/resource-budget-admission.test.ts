@@ -7,6 +7,7 @@ import type { RuntimeEvent } from '@/core/runtime/events';
 import {
   createRuntimeEffectExecutor,
   prepareRuntimeEffectForBudgetV1,
+  shouldEscalateAutoReviewResult,
 } from '@/core/runtime/executor';
 import { resolveFailureModeV1 } from '@/core/runtime/failure-mode-conformance';
 import { classifyFailure } from '@/core/runtime/failures';
@@ -1062,6 +1063,24 @@ describe('runtime resource budget admission', () => {
       }),
     ]);
     kernel.close();
+  });
+
+  test('escalates auto-review risk and technical failure, but not an approval', () => {
+    expect(
+      shouldEscalateAutoReviewResult({
+        ok: true,
+        suggestion: { approved: false, grant: 'approve_once', reason: 'risk' },
+      }),
+    ).toBe(true);
+    expect(
+      shouldEscalateAutoReviewResult({ ok: false, failureType: 'technical', reason: 'timeout' }),
+    ).toBe(true);
+    expect(
+      shouldEscalateAutoReviewResult({
+        ok: true,
+        suggestion: { approved: true, grant: 'approve_once', reason: 'safe' },
+      }),
+    ).toBe(false);
   });
 
   test('keeps a verification reservation unknown when Provider denial follows an executed check', async () => {

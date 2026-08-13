@@ -18,7 +18,7 @@ import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
-import { createTuiSystemJourney } from '../harness/journey';
+import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
 import { screenContains, stripAnsi, waitForText } from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
@@ -159,7 +159,11 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     },
     TIMEOUT,
   );
-  test('runs the complete external-write approval journey', () => journey.run());
+  test(
+    'runs the complete external-write approval journey',
+    () => journey.run(),
+    TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
 });
 
 describe('TUI PTY System — Sub-agent Read File Flow', () => {
@@ -174,7 +178,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
     // Write a file inside the workspace so the sub-agent can read it
     writeFileSync(join(workspace.workspace, 'data.txt'), 'hello from workspace\nline 2');
 
-    // Response #1: Main agent dispatches code sub-agent
+    // Response #1: Main agent dispatches an explore sub-agent for the read-only task
     // Response #2: Sub-agent reads data.txt with absolute path (should succeed, no approval)
     // Response #3: Sub-agent reports result
     // Response #4: Main agent final response
@@ -187,7 +191,7 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
               id: 'call_spawn_reader',
               name: 'task',
               args: {
-                subagent_type: 'code',
+                subagent_type: 'explore',
                 task: `Read the file at ${join(workspace.workspace, 'data.txt')} using its absolute path. Report the content.`,
               },
             },
@@ -234,7 +238,9 @@ describe('TUI PTY System — Sub-agent Read File Flow', () => {
   test(
     'sub-agent read_file with absolute path inside workspace succeeds without approval',
     async () => {
-      await submitUserMessage(tui, server, 'Read data.txt', { timeout: 15000 });
+      await submitUserMessage(tui, server, 'Use an explore subagent to inspect data.txt', {
+        timeout: 15000,
+      });
 
       // Wait for sub-agent to complete — read should NOT trigger approval
       try {

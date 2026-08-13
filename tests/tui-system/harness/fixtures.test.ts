@@ -59,7 +59,7 @@ describe('mock model fixture', () => {
     }
   });
 
-  test('matches only the current user turn, not history or injected runtime state', async () => {
+  test('matches only the current user turn, not history or injected project/runtime context', async () => {
     const server = createMockModelServer();
     try {
       server.setResponses([{ message: { content: 'ok' } }]);
@@ -71,6 +71,11 @@ describe('mock model fixture', () => {
             { role: 'user', content: 'historical target' },
             { role: 'assistant', content: 'old answer' },
             { role: 'user', content: 'current target' },
+            {
+              role: 'user',
+              content:
+                '<project-instructions role="workspace-context">refreshed rules</project-instructions>',
+            },
             {
               role: 'user',
               content: '<runtime-state source="runtime.kernel">injected policy</runtime-state>',
@@ -129,6 +134,95 @@ describe('mock model fixture', () => {
           },
         ]),
       ).toHaveProperty('status', 200);
+      expect(() => server.assertComplete()).not.toThrow();
+    } finally {
+      server.stop();
+    }
+  });
+
+  test('resolves a queued response from the matching plan tool result', async () => {
+    const server = createMockModelServer();
+    let resolverCalls = 0;
+    try {
+      server.setResponses([
+        {
+          message: {
+            tool_calls: [
+              {
+                id: 'call_plan_save',
+                name: 'write_plan',
+                args: { action: 'save', plan: 'synthetic plan' },
+              },
+            ],
+          },
+        },
+        {
+          response(request) {
+            resolverCalls++;
+            const toolResult = request.messages.find(
+              (message) => message.role === 'tool' && message.tool_call_id === 'call_plan_save',
+            );
+            const planResult = JSON.parse(String(toolResult?.content)) as {
+              plan_id: string;
+              version: number;
+              structural_digest: string;
+            };
+            return {
+              toolContinuation: 'aborted',
+              expectedRequest: {
+                toolResults: [
+                  {
+                    toolCallId: 'call_plan_save',
+                    contentIncludes: [
+                      '"plan_id":"plan_synthetic"',
+                      '"version":7',
+                      '"structural_digest":"digest_synthetic"',
+                    ],
+                  },
+                ],
+              },
+              message: {
+                tool_calls: [
+                  {
+                    id: 'call_plan_submit',
+                    name: 'write_plan',
+                    args: {
+                      action: 'submit',
+                      plan_id: planResult.plan_id,
+                      version: planResult.version,
+                      structural_digest: planResult.structural_digest,
+                    },
+                  },
+                ],
+              },
+            };
+          },
+        },
+      ]);
+
+      await requestModel(server.baseURL, [{ role: 'user', content: 'save a plan' }]);
+      const continuation = await requestModel(server.baseURL, [
+        { role: 'assistant', content: '', tool_calls: [{ id: 'call_plan_save' }] },
+        {
+          role: 'tool',
+          tool_call_id: 'call_plan_save',
+          content:
+            '{"plan_id":"plan_synthetic","version":7,"structural_digest":"digest_synthetic"}',
+        },
+      ]);
+
+      const body = (await continuation.json()) as {
+        choices: Array<{ message: { tool_calls: Array<{ function: { arguments: string } }> } }>;
+      };
+      expect(resolverCalls).toBe(1);
+      const submitToolCall = body.choices[0]?.message.tool_calls[0];
+      if (!submitToolCall) throw new Error('resolver response did not emit the submit tool call');
+      expect(JSON.parse(submitToolCall.function.arguments)).toEqual({
+        action: 'submit',
+        plan_id: 'plan_synthetic',
+        version: 7,
+        structural_digest: 'digest_synthetic',
+      });
       expect(() => server.assertComplete()).not.toThrow();
     } finally {
       server.stop();

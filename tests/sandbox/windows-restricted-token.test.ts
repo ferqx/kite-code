@@ -21,17 +21,53 @@ import {
   createWindowsRestrictedTokenExecutor,
   createWindowsRestrictedTokenInvocationName,
   resolveBunExecutableForWindowsRestrictedTokenV1,
+  resolveWindowsRestrictedTokenFilesystemScopeV1,
   resolveWindowsRestrictedTokenNetworkModeV1,
   restrictedTokenNetworkUnsupportedReasonV1,
   wrapWindowsRestrictedTokenCommandV1,
 } from '@/core/sandbox/windows-restricted-token';
 import {
   clearWindowsSandboxRunnerCacheV1,
+  parseWindowsSandboxRunnerManifestV1,
   resolveInstalledWindowsRunnerManifestLocationV1,
   resolveWindowsSandboxRunnerV1,
+  WINDOWS_SANDBOX_PROTOCOL_VERSION,
 } from '@/core/sandbox/windows-runner';
 
 describe('Windows restricted-token invocation protocol', () => {
+  test('rejects the previous wire protocol before sending full_access', () => {
+    expect(WINDOWS_SANDBOX_PROTOCOL_VERSION).toBe(6);
+    expect(
+      parseWindowsSandboxRunnerManifestV1({
+        version: 1,
+        protocolVersion: 5,
+        runnerVersion: '0.7.1',
+        minimumWindowsVersion: '10.0.19045',
+        runnerDigest: `sha256:${'a'.repeat(64)}`,
+        runnerPath: 'runner.exe',
+        shellRuntime: 'isksh',
+        shellRuntimeDigest: `sha256:${'b'.repeat(64)}`,
+        shellRuntimePath: 'vendor/isksh',
+        coreutilsDigest: `sha256:${'c'.repeat(64)}`,
+      }),
+    ).toBeNull();
+  });
+
+  test('projects approved external files into a full-filesystem restricted-token invocation', () => {
+    expect(
+      resolveWindowsRestrictedTokenFilesystemScopeV1({
+        configuredFilesystemScope: 'workspace_write',
+        invocationFilesystemMode: 'allow_all',
+      }),
+    ).toBe('full_access');
+    expect(
+      resolveWindowsRestrictedTokenFilesystemScopeV1({
+        configuredFilesystemScope: 'read_only',
+        invocationFilesystemMode: 'workspace_only',
+      }),
+    ).toBe('read_only');
+  });
+
   test('uses the native synthetic capability SID form without signed components', () => {
     expect(
       createWindowsRestrictedTokenCapabilitySidV1(() => '01234567-89ab-cdef-fedc-ba9876543210'),
@@ -53,6 +89,19 @@ describe('Windows restricted-token invocation protocol', () => {
     ).toEqual({
       runtimeCapabilitySid: 'S-1-5-21-5-6-7-8',
       ephemeralWorkspaceCapabilitySid: 'S-1-5-21-9-10-11-12',
+    });
+  });
+
+  test('adds a distinct protected-path guard SID to approved filesystem calls', () => {
+    const values = ['S-1-5-21-1-2-3-4', 'S-1-5-21-5-6-7-8'];
+    const result = createWindowsRestrictedTokenDirectWorkspaceV1({
+      startupProbe: false,
+      approvedFilesystem: true,
+      createCapabilitySid: () => values.shift()!,
+    });
+    expect(result).toEqual({
+      runtimeCapabilitySid: 'S-1-5-21-1-2-3-4',
+      approvedFilesystemGuardSid: 'S-1-5-21-5-6-7-8',
     });
   });
 
@@ -335,7 +384,7 @@ try {
               name: 'shell_execute',
               args: {
                 command:
-                  'curl.exe --fail --silent --show-error --connect-timeout 8 --max-time 15 https://example.com/ -o NUL && echo APPROVED_SCHANNEL_OK',
+                  'curl.exe --fail --silent --show-error --connect-timeout 8 --max-time 15 --output schannel-smoke.html --write-out APPROVED_SCHANNEL_OK https://example.com/',
               },
               reason: 'Run an approved Schannel HTTPS smoke test',
               protectedCommand: 'curl.exe',
@@ -369,7 +418,10 @@ try {
             request: {
               id: 'unconfigured-approved-runtime-script',
               name: 'shell_execute',
-              args: { command: 'curl.exe https://www.microsoft.com/ -o NUL' },
+              args: {
+                command:
+                  'curl.exe --output unconfigured-network-smoke.html https://www.microsoft.com/',
+              },
               reason: 'Verify missing setup fails without entering the setup control plane',
               protectedCommand: 'curl.exe',
             } as PendingToolRequest,

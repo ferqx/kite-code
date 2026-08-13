@@ -382,7 +382,7 @@ describe('network boundary tool integration', () => {
     );
   });
 
-  test('forces approved shell descendants to network off under a sealed boundary', async () => {
+  test('projects approved shell network access through a sealed managed-tool boundary', async () => {
     let observedNetworkMode: string | undefined;
     const result = await runApprovedTool({
       workspace: process.cwd(),
@@ -397,7 +397,7 @@ describe('network boundary tool integration', () => {
     });
 
     expect(result.ok).toBe(true);
-    expect(observedNetworkMode).toBe('disabled');
+    expect(observedNetworkMode).toBe('allow_all');
   });
 
   test('rejects every MCP transport entrypoint before consulting the provider', async () => {

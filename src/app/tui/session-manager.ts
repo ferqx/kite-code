@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { composeAppGitBrokerV1, resolveAppGitExecutableV1 } from '@/app/git/composition';
 import type { RuntimeMetricBridgeV1 } from '@/app/observability/runtime-bridge';
 import { type AppShellExecutorV1, composeAppSandboxExecutorV1 } from '@/app/sandbox/composition';
 import { getFeatureFlags } from '@/core/config/features';
@@ -520,6 +521,16 @@ export class SessionRuntime {
         return;
       }
       const effectiveBackend = shellRuntime.mode === 'sandbox' ? shellRuntime.backend : 'none';
+      const gitExecutable = resolveAppGitExecutableV1();
+      const gitBroker =
+        gitExecutable && deps.config.brokeredGitShellDenyEvidence
+          ? composeAppGitBrokerV1({
+              workspace: this.workspace,
+              executable: gitExecutable,
+              config: deps.config,
+              shellDenyEvidence: deps.config.brokeredGitShellDenyEvidence,
+            })
+          : undefined;
       const fullModeReason = fullModeUnavailableReason(this.interactionMode, effectiveBackend);
       if (fullModeReason) {
         this.interactionMode = 'accept_edits';
@@ -544,6 +555,7 @@ export class SessionRuntime {
         workspace: this.workspace,
         config: deps.config,
         shellExecutor,
+        gitBroker,
         signal: abortController.signal,
         thinkingLevel: this.thinkingLevel,
         skills: this.skillManifests,
@@ -563,6 +575,7 @@ export class SessionRuntime {
       // 始终使用代理提供器 — 事件路由由 _foreground 控制
       const runtimeInput: RunRuntimeAgentInput = {
         task: runAgentParams.task,
+        userGoal: runAgentParams.userGoal,
         userId: runAgentParams.userId,
         threadId: runAgentParams.threadId,
         workspace: runAgentParams.workspace,
@@ -570,6 +583,7 @@ export class SessionRuntime {
         config: runAgentParams.config,
         model: runAgentParams.model,
         shellExecutor: runAgentParams.shellExecutor,
+        gitBroker: runAgentParams.gitBroker,
         mcpManager: runAgentParams.mcpManager,
         remoteMcpEgressPermitResolver: runAgentParams.remoteMcpEgressPermitResolver,
         skills: runAgentParams.skills,
@@ -600,7 +614,11 @@ export class SessionRuntime {
           this.runtimeControl = control;
         },
         onCompactionProgress: (phase) => {
-          deps.dispatch({ type: 'SET_COMPACTION_PROGRESS', phase });
+          deps.dispatch(
+            phase
+              ? { type: 'SET_COMPACTION_PROGRESS', phase, source: 'automatic' }
+              : { type: 'SET_COMPACTION_PROGRESS' },
+          );
         },
       };
       const runtimeProvider: RuntimeActionProvider = {
@@ -1265,14 +1283,11 @@ export class SessionManager {
   }
 
   createSession(workspace: string): string {
-    // TUI navigation is an explicit cancellation gesture. Other clients may
-    // retain background runs because their navigation model is different.
+    // Navigation only changes presentation. A run may continue in the
+    // background and must be cancelled through an explicit user stop action.
     const oldRt = this.runtimes.get(this.activeId);
     if (oldRt) {
-      if (oldRt.agentLoopActive) oldRt.abort();
-      else oldRt.resolveInterrupt({ type: 'cancel' as const });
       oldRt.setForeground(false);
-      oldRt.pendingInterrupt = false;
     }
     const threadId = `tui-${Date.now().toString(36)}-${SessionManager.sessionCounter++}`;
     const rt = new SessionRuntime(threadId, workspace, {
@@ -2034,15 +2049,11 @@ export class SessionManager {
   }
 
   switchSession(fromId: string, toId: string): void {
-    // In the TUI, leaving a session cancels its current turn. This adapter
-    // policy must not be lifted into Core: a future client can keep the same
-    // Runtime and interrupt alive while only changing the visible session.
+    // Switching the visible session is not cancellation. Background approval
+    // and plan-review interactions remain durable and wake when foregrounded.
     const fromRt = this.runtimes.get(fromId);
     if (fromRt) {
-      if (fromRt.agentLoopActive) fromRt.abort();
-      else fromRt.resolveInterrupt({ type: 'cancel' as const });
       fromRt.setForeground(false);
-      fromRt.pendingInterrupt = false;
     }
     this.activeId = toId;
   }

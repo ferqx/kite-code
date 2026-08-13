@@ -1,4 +1,5 @@
 import { resolve } from 'node:path';
+import { composeAppGitBrokerV1, resolveAppGitExecutableV1 } from '@/app/git/composition';
 import { composeObservabilityV1 } from '@/app/observability/composition';
 import { resolveTelemetryConsentV1 } from '@/app/observability/consent';
 import {
@@ -180,6 +181,16 @@ export async function main(): Promise<void> {
     onDiagnostic: (message) => console.warn(`[sandbox] ${message}`),
   });
   const shellRuntime = await shellExecutor.prepare();
+  const gitExecutable = resolveAppGitExecutableV1();
+  const gitBroker =
+    gitExecutable && config.brokeredGitShellDenyEvidence
+      ? composeAppGitBrokerV1({
+          workspace: args.workspace,
+          executable: gitExecutable,
+          config,
+          shellDenyEvidence: config.brokeredGitShellDenyEvidence,
+        })
+      : undefined;
   const effectiveSandboxRuntime =
     shellRuntime.mode === 'sandbox'
       ? { enabled: true, backend: shellRuntime.backend, available: true }
@@ -229,6 +240,7 @@ export async function main(): Promise<void> {
       runtimeStorePath: runtimeStorePathFor(args.checkpointPath),
       config,
       shellExecutor,
+      gitBroker,
       interactionMode,
       authorizationMode,
       authorizationSource: authorizationMode === 'full_access' ? 'config' : undefined,

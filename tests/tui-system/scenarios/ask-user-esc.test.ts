@@ -59,7 +59,9 @@ describe('TUI PTY System — ask_user Escape', () => {
       },
       {
         expectedRequest: {
-          toolResults: [{ toolCallId: 'call_1', contentIncludes: ['Cancelled'] }],
+          toolResults: [
+            { toolCallId: 'call_1', contentIncludes: ['User input cancelled by user.'] },
+          ],
         },
         message: { content: 'Continued after question cancellation.' },
       },

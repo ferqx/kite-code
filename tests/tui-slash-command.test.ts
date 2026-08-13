@@ -74,6 +74,13 @@ describe('parseSlashCommand', () => {
     });
   });
 
+  test('keeps /auto-compact presentation-only', () => {
+    expect(parseSlashCommand('/auto-compact')).toEqual({
+      type: 'unknown',
+      raw: '/auto-compact',
+    });
+  });
+
   test('parses diagnostic and session utility commands exposed by completion', () => {
     expect(parseSlashCommand('/rewind')).toEqual({ type: 'rewind' });
     expect(parseSlashCommand('/export')).toEqual({ type: 'export' });

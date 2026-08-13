@@ -9,6 +9,7 @@
 
 import { askUserSpec } from './builtins/ask-user';
 import { editFileSpec } from './builtins/edit-file';
+import { gitInspectSpec } from './builtins/git';
 import {
   listMcpResourcesSpec,
   listMcpToolsSpec,
@@ -44,6 +45,7 @@ export const builtinToolSpecs = [
   searchContentSpec,
   searchFilesSpec,
   shellExecuteSpec,
+  gitInspectSpec,
   writeFileSpec,
   editFileSpec,
   webFetchSpec,

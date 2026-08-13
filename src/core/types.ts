@@ -1,6 +1,6 @@
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
 import type { NetworkBoundaryPolicyV1 } from '@/core/sandbox/network-policy';
-import type { ShellNetworkMode } from '@/core/sandbox/types';
+import type { ShellFilesystemMode, ShellNetworkMode } from '@/core/sandbox/types';
 import type { AuthorizationMode, ShellApprovalGrant } from '@/protocol/events';
 
 export type {
@@ -20,6 +20,7 @@ export type {
   ProductionPlatformQualificationV1,
   ProtectedPathPolicy,
   SandboxUnavailablePolicy,
+  ShellFilesystemMode,
   ShellNetworkMode,
 } from '@/core/sandbox/types';
 
@@ -34,6 +35,8 @@ export interface ShellInput {
   onProgress?: (chunk: string, stream: 'stdout' | 'stderr') => void;
   /** 本次调用的网络权限；未指定时使用执行器默认值 / Network permission for this call */
   networkMode?: ShellNetworkMode;
+  /** Filesystem authority for this invocation; allow_all requires a user-derived grant. */
+  filesystemMode?: ShellFilesystemMode;
   /** Capability-token host broker for an explicit `kite-http` request inside
    * the Windows sandbox. This does not enable descendant direct networking. */
   networkBroker?: ShellNetworkBrokerV1;
@@ -51,6 +54,8 @@ export interface ShellResult {
   exitCode: number;
   stdout: string;
   stderr: string;
+  /** Runtime-authored process terminal cause; never inferred from stderr. */
+  terminationReason?: 'timed_out' | 'cancelled' | 'sandbox_denied';
   processCleanup?: {
     confirmedExited: boolean;
     gracefulRequested: boolean;

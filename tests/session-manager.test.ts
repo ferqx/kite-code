@@ -1015,7 +1015,7 @@ describe('SessionManager', () => {
     expect(snapshots[0]!.workspace).toBe('/tmp/ws');
   });
 
-  test('createSession deactivates previous active session', () => {
+  test('createSession backgrounds the previous active session without clearing its interrupt', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');
     const rt1 = mgr.getRuntime(id1)!;
@@ -1031,7 +1031,7 @@ describe('SessionManager', () => {
     const snapshots = mgr.getSnapshot();
     const s1 = snapshots.find((s) => s.threadId === id1)!;
     expect(s1.active).toBe(false);
-    expect(rt1.pendingInterrupt).toBe(false);
+    expect(rt1.pendingInterrupt).toBe(true);
     // The old session's interrupt should have been cancelled
     // (via resolveInterrupt in createSession)
   });
@@ -1064,6 +1064,69 @@ describe('SessionManager', () => {
         phase: 'building',
       });
       kernel.processEvent({
+        type: 'plan.drafted',
+        toolCallId: 'draft-plan',
+        taskId: kernel.getState().activeTaskId!,
+        planId: 'exit-plan',
+        version: 1,
+        structuralHash: 'exit-plan-digest',
+        plan: {
+          name: 'Exit planning safely',
+          description: 'Complete the plan lifecycle before exiting plan mode.',
+          status: 'pending',
+          steps: [{ id: 'complete', step: 'Complete the plan', status: 'pending' }],
+        },
+      });
+      kernel.processEvent({
+        type: 'tool.queued',
+        toolCallId: 'submit-plan',
+        taskId: kernel.getState().activeTaskId!,
+        name: 'write_plan',
+        args: {},
+      });
+      kernel.processEvent({
+        type: 'plan.review_requested',
+        interactionId: 'exit-review',
+        toolCallId: 'submit-plan',
+        taskId: kernel.getState().activeTaskId!,
+        planId: 'exit-plan',
+        version: 1,
+        structuralDigest: 'exit-plan-digest',
+        planSummary: 'Complete the plan lifecycle before exiting plan mode.',
+        plan: {
+          name: 'Exit planning safely',
+          description: 'Complete the plan lifecycle before exiting plan mode.',
+          status: 'pending',
+          steps: [{ id: 'complete', step: 'Complete the plan', status: 'pending' }],
+        },
+      });
+      kernel.processEvent({
+        type: 'plan.approved',
+        interactionId: 'exit-review',
+        toolCallId: 'submit-plan',
+        planId: 'exit-plan',
+        version: 1,
+        structuralDigest: 'exit-plan-digest',
+        executionMode: 'accept_edits',
+      });
+      const completedPlan = {
+        name: 'Exit planning safely',
+        description: 'Complete the plan lifecycle before exiting plan mode.',
+        status: 'completed' as const,
+        steps: [{ id: 'complete', step: 'Complete the plan', status: 'completed' as const }],
+      };
+      kernel.processEvent({
+        type: 'plan.progress_updated',
+        toolCallId: 'complete-plan',
+        plan: completedPlan,
+      });
+      kernel.processEvent({
+        type: 'plan.completed',
+        toolCallId: 'complete-plan',
+        plan: completedPlan,
+      });
+      expect(kernel.getState().planning.kind).toBe('completed');
+      kernel.processEvent({
         type: 'run.completed',
         turnId: kernel.getState().turn.turnId,
         output: 'Planning conversation completed.',
@@ -1095,23 +1158,23 @@ describe('SessionManager', () => {
     expect(mgr.getActiveId()).toBe(id2);
   });
 
-  test('switchSession resolves pending interrupt on outgoing session', () => {
+  test('switchSession preserves a pending interrupt on the outgoing session', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');
     const id2 = mgr.createSession('/tmp/ws');
     const rt1 = mgr.getRuntime(id1)!;
+    rt1.pendingInterrupt = true;
     (rt1 as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = (
       _action: unknown,
     ) => {};
 
     mgr.switchSession(id1, id2);
 
-    // The outgoing session's interrupt should be resolved with cancel
-    // Note: resolveInterrupt clears _pendingResolve, so it won't fire again
-    expect(rt1.pendingInterrupt).toBe(false);
+    // Navigation alone must not manufacture a cancellation decision.
+    expect(rt1.pendingInterrupt).toBe(true);
   });
 
-  test('switchSession clears pendingInterrupt on outgoing session', () => {
+  test('switchSession retains pendingInterrupt on outgoing session', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');
     const id2 = mgr.createSession('/tmp/ws');
@@ -1120,10 +1183,10 @@ describe('SessionManager', () => {
 
     mgr.switchSession(id1, id2);
 
-    expect(rt1.pendingInterrupt).toBe(false);
+    expect(rt1.pendingInterrupt).toBe(true);
   });
 
-  test('switchSession cancels an active TUI turn before changing the visible session', () => {
+  test('switchSession backgrounds an active TUI turn without cancelling it', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');
     const id2 = mgr.createSession('/tmp/ws');
@@ -1138,7 +1201,7 @@ describe('SessionManager', () => {
 
     mgr.switchSession(id1, id2);
 
-    expect(abortCalls).toBe(1);
+    expect(abortCalls).toBe(0);
     expect(mgr.getActiveId()).toBe(id2);
   });
 

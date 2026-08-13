@@ -1,6 +1,8 @@
+import {
+  type AgentTaskCaseV1,
+  validateAgentTaskCase,
+} from '../../../scripts/evals/contracts/agent-task-case-schema';
 import { canonicalJsonBytes, sha256Digest } from '../../../scripts/release/canonical-json';
-import type { AgentTaskCaseV1 } from './cases/schema';
-import { validateAgentTaskCase } from './cases/schema';
 
 export interface SuiteBehaviorIdentityV1 {
   version: 1;

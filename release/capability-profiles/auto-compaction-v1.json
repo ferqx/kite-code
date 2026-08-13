@@ -13,10 +13,6 @@
       "expectedRevision": "stable-v1"
     },
     {
-      "dependencyId": "compaction.internal-rollout",
-      "expectedRevision": "fresh-v1"
-    },
-    {
       "dependencyId": "runtime.context-compaction",
       "expectedRevision": "v2"
     }

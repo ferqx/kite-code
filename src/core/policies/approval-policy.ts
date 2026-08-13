@@ -1,5 +1,9 @@
-import { isAbsolute } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 import { hasSameCommandGrant, normalizeAuthorizationState } from '@/core/harness/tool-policy';
+import {
+  checkDangerousCanonicalPathV1,
+  checkDangerousPaths,
+} from '@/core/policies/dangerous-paths';
 import { isPathInsideWorkspace, msys2ToWindowsPath } from '@/core/tools/path-utils';
 import type { AuthorizationOverride, ThreadAuthorizationState } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
@@ -151,6 +155,15 @@ function classifyShellExecute(
   const effects = classifyShellEffects(trimmed, workspace);
 
   if (capability.effectClass === 'read_only') {
+    if (effects.externalRead) {
+      return requireApproval({
+        risk: 'read',
+        effects,
+        reason: 'This shell command reads files outside the workspace.',
+        userVisibleSummary: `Read external files with Shell: ${trimmed}`,
+        expectedEffects: ['Reads files outside the workspace boundary'],
+      });
+    }
     return allow({
       risk: 'read',
       reason: 'Command is classified as read-only.',
@@ -292,16 +305,11 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
   // task — sub-agent dispatch; planning phase allows read-only sub-agents only
   if (toolName === 'task') {
     const subagentType = toolArgs.subagent_type as string | undefined;
-    if (
-      phase === 'planning' &&
-      subagentType !== 'explore' &&
-      subagentType !== 'plan' &&
-      subagentType !== 'review'
-    ) {
+    if (phase === 'planning' && subagentType !== 'explore' && subagentType !== 'plan') {
       return deny({
         risk: 'execute_code',
         reason: 'planning phase allows read-only sub-agents only.',
-        userVisibleSummary: `Plan mode did not start the ${String(subagentType ?? 'unknown')} sub-agent. Use an explore, plan, or review sub-agent, or describe the implementation in the plan for execution after plan approval.`,
+        userVisibleSummary: `Plan mode did not start the ${String(subagentType ?? 'unknown')} sub-agent. Use an explore or plan sub-agent, or describe the implementation in the plan for execution after plan approval.`,
         expectedEffects: ['No implementation sub-agent will run during planning'],
         phaseConstraint: 'planning',
       });
@@ -380,11 +388,24 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     // otherwise resolve() roots '/c/...' at the current drive and an
     // in-workspace path is misclassified as external. No-op outside Windows.
     const normalizedPath = msys2ToWindowsPath(pathParam);
+    const dangerousPath =
+      checkDangerousPaths(normalizedPath) ??
+      checkDangerousCanonicalPathV1(normalizedPath, workspace);
+    if (dangerousPath) {
+      return deny({
+        risk: 'destructive',
+        reason: `Protected path '${dangerousPath}' cannot be accessed by model-driven tools.`,
+        userVisibleSummary: `Blocked protected path access: ${dangerousPath}`,
+        expectedEffects: ['No protected file will be read'],
+      });
+    }
     const isOutside = (() => {
       if (normalizedPath.startsWith('~')) return true;
-      if (!isAbsolute(normalizedPath)) return false;
       try {
-        return !isPathInsideWorkspace(workspace, normalizedPath);
+        return !isPathInsideWorkspace(
+          workspace,
+          isAbsolute(normalizedPath) ? normalizedPath : resolve(workspace, normalizedPath),
+        );
       } catch {
         return true;
       }
@@ -463,6 +484,16 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
   if (toolName === 'shell_execute') {
     const command = String(toolArgs.command ?? '');
 
+    const dangerousPath = checkDangerousPaths(command);
+    if (dangerousPath) {
+      return deny({
+        risk: 'destructive',
+        reason: `Protected path '${dangerousPath}' cannot be accessed by model-driven Shell.`,
+        userVisibleSummary: `Blocked protected path access: ${dangerousPath}`,
+        expectedEffects: ['No command will be executed'],
+      });
+    }
+
     // 兜底：destructive 命令在任何模式下都拒绝，不受 full_access / same_command 影响
     // Safety net: destructive commands are always denied regardless of authorization mode
     // rm -rf 例外：只拒绝工作区代码和关键系统路径，其余降级为 write_file 走正常审批
@@ -496,7 +527,7 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
       // Non-critical rm -rf: downgrade to write_file; mode policy handles approval
       return requireApproval({
         risk: 'write_file',
-        effects: {},
+        effects: classifyShellEffects(command, workspace),
         reason: 'rm -rf on non-critical paths; downgraded to write_file risk.',
         userVisibleSummary: `Remove files: ${command}`,
         expectedEffects: ['Deletes files and directories outside workspace and system paths'],
@@ -563,31 +594,39 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     return shellDecision;
   }
 
-  // 其余工具：planning 阶段拒绝
-  // Remaining tools: deny during planning phase
-  const phaseDenial = denyForPlanningPhase({
-    toolName,
-    phase,
-    fallbackRisk: 'unknown',
-  });
-  if (phaseDenial) {
-    return phaseDenial;
-  }
-
   // write_file / edit_file — 修改文件（工作区内外分别处理）
   // write_file / edit_file — modify files (handle internal vs external paths)
   if (toolName === 'write_file' || toolName === 'edit_file') {
+    const phaseDenial = denyForPlanningPhase({
+      toolName,
+      phase,
+      fallbackRisk: 'write_file',
+    });
+    if (phaseDenial) return phaseDenial;
+
     const rawPath = String(toolArgs.path ?? '<unknown>');
     // 与只读分支一致：先做 MSYS2 归一化再判断外部性（非 Windows 平台透传）。
     // Same as the read branch: normalize MSYS2 paths before the external check.
     const path = msys2ToWindowsPath(rawPath);
+    const dangerousPath =
+      checkDangerousPaths(path) ?? checkDangerousCanonicalPathV1(path, workspace);
+    if (dangerousPath) {
+      return deny({
+        risk: 'destructive',
+        reason: `Protected path '${dangerousPath}' cannot be modified by model-driven tools.`,
+        userVisibleSummary: `Blocked protected path modification: ${dangerousPath}`,
+        expectedEffects: ['No protected file will be modified'],
+      });
+    }
     // 绝对路径可能指向工作区内部——解析后再判断外部性
     // Absolute path may resolve inside workspace — check after resolution
     const isOutside = (() => {
       if (path.startsWith('~')) return true;
-      if (!isAbsolute(path)) return false;
       try {
-        return !isPathInsideWorkspace(workspace, path);
+        return !isPathInsideWorkspace(
+          workspace,
+          isAbsolute(path) ? path : resolve(workspace, path),
+        );
       } catch {
         return true; // 解析失败，保守视为外部路径
       }
@@ -628,6 +667,12 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
         expectedEffects: ['Calls a locally classified read-only MCP capability'],
       });
     }
+    const phaseDenial = denyForPlanningPhase({
+      toolName,
+      phase,
+      fallbackRisk: 'mcp',
+    });
+    if (phaseDenial) return phaseDenial;
     return requireApproval({
       risk: 'mcp',
       effects: { uncertainEffects: true },

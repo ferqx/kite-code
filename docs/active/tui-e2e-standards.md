@@ -26,7 +26,7 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 Prompt Contract 迁移必须有 production-mode PTY scenario：通过正常 layered config 显式开启候选
 flag，以 `NODE_ENV=production` 启动真实 TUI composition root，并从本地 mock Provider 收到的实际
 HTTP request 验证 stable System（adapter 可合并相邻 System frame）/project/user/runtime 消息顺序、
-cacheable context、唯一 Runtime block 和 phase-resolved 工具声明。该 scenario 是 production TUI
+cacheable context、唯一 Runtime block、phase-stable V2 工具声明和 Runtime-owned phase rejection。该 scenario 是 production TUI
 链路证据，但仍是本地确定性 Provider，不能表述为真实模型
 A/B、release artifact 或平台资格证据。
 
@@ -130,7 +130,11 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    前序失败后依赖步骤不会继续执行，也不会制造级联失败。scenario contract 会拒绝
    `beforeAll` 下注册多个 `test()` 的结构。journey 总 deadline 必须先于 Bun test 与文件级硬超时，
    使慢场景仍由 harness 报告当前 step，而不是先收到匿名外层超时。setup/readiness 不得伪装成
-   可独立通过的测试用例。验证同一设置的双向转换时，如果反向转换不依赖正向转换的业务结果，
+   可独立通过的测试用例。每个 journey 的 Bun test 必须显式使用 harness 导出的
+   `TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS`（180 秒）作为外层 timeout，不能依赖 Bun 的 5 秒默认值，
+   也不能用局部 `TIMEOUT` alias 绕过统一预算。scenario contract 通过 AST 关联
+   `createTuiSystemJourney()` 实例、`journey.run()` 与 test 第三参数，守住全部 stateful scenario；
+   这也保证裸 `bun test` 发现 scenario 时不会在 harness step timeout 之前误杀。验证同一设置的双向转换时，如果反向转换不依赖正向转换的业务结果，
    应为两个方向分别建立明确的初始配置与独立 fixture；不得让反向断言依赖前序 suggestion、
    action delta 或重绘历史。step timeout 必须中止共享条件等待，并在独立的有界 settle window 内
    等待当前 step 收敛后才进入 fixture teardown；所有 journey 可达的 delay、screen polling 和
@@ -140,7 +144,12 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
 5. 审批、计划和 ask-user 测试必须完成结构化交互闭环，而不只断言卡片出现。fixture 中的
    `ask_user` 选项必须包含显式 `recommended` 布尔值，且恰好一个为 true，避免测试依赖隐式的
    首项推荐。验证内部 sandbox、session logging 或历史会话加载失败时，同时断言用户可见的受控
-   恢复文案与原始诊断/存储细节不出现在对话或 Overlay 中。
+   恢复文案与原始诊断/存储细节不出现在对话或 Overlay 中。成功计划场景若已经等待并接受审核
+   Overlay，则必须在回到 idle 前断言该 Overlay 已关闭；不得保留“未显示审核”的过时断言。
+   V2 Plan fixture 的 `write_plan(submit)` 与 `update_plan` 必须从真实前序 Tool Result 解析并回传
+   `{plan_id, version, structural_digest}`，不得只复用 `plan_id` 或预测生成 identity。规划期被拒绝、
+   延后或取消的 Tool 会形成 unresolved completion blocker；这类负向 scenario 必须验证拒绝事实后
+   取消审核或进入明确纠正路径，不能用 canned `plan_completed` 响应伪造成功完成。
 6. 持久化测试应跨进程打开同一 Runtime Store，验证 session、snapshot 和 transcript 恢复。
    同一进程内的 `/new` 或 session switch 不能依赖累计 PTY transcript：新 session 首次产生
    Runtime event 后必须校验 Runtime Store 中出现不同 thread ID；切换回放先用 Enter checkpoint
@@ -152,6 +161,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    退出进程前必须同时读取隔离 Runtime Store，确认目标 event 已持久化。轮询持久化证据时必须使用
    SQLite readonly 连接和精确 event 字段查询；不得调用会设置 journal mode、执行 schema migration
    或创建索引的生产 `createRuntimeStore()` 初始化路径，否则观察器会与被测 TUI writer 竞争。
+   需要证明同一 turn 的 CompletionGuard correction 时，observer 必须先由精确
+   `user.message_appended` 定位 session，再以其后的 `turn.started` event ID 为起点，到下一
+   `turn.started` 前读取有序 durable window；`model.requested` 没有 `turnId`，不能仅按 JSON
+   `turnId` 过滤而遗漏 correction continuation。
    终端提交回执、Runtime event 落盘和重启后 replay 是三个独立证据边界，必须分别等待并报告失败；
    选择待恢复 session 时绑定目标 event 的 thread ID，不得依赖秒级 `updated_at` 排序猜测第一行。
    session 删除确认必须同时验证被选 thread ID 已从 Runtime Store 消失且 active thread 保留；取消
@@ -190,7 +203,11 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     预写 `source: 'test'` 信任记录，验证门禁本身时使用
     `createTestWorkspace({ enforceWorkspaceTrust: true })`。子进程环境采用 allowlist，只继承平台启动、
     临时目录、locale、时区和 CI 所需变量，再叠加 fixture 显式环境；不得继承开发机密钥、代理、
-    Provider 配置或 feature flag。
+    Provider 配置或 feature flag。直接调用 Ink `render()` 的 PTY fixture 必须像生产 composition root
+    一样，以实际 `stdin/stdout` TTY 能力显式设置 `interactive`；不能让 Ink 因 `CI=true` 转入只在
+    unmount 时输出最终帧的非交互模式，否则 semantic readiness 看不到实时 prompt。
+    输入重试清理不得以全屏 quiet window 作为完成条件：running status/spinner 可以持续合法刷新；
+    清理后必须由调用方读取当前 input viewport，语义确认输入已回到预期 baseline。
 12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：任意数量 React subscriber 只能
     对 stdin 保持一个物理 `data` listener；首个 subscriber 开启 DEC 1004，最后一个
     unsubscribe 必须移除 listener 并关闭 DEC 1004。禁止组件 mount 各自添加 stdin listener。
@@ -250,6 +267,17 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     canned 文案。文件、导出、持久化等副作用还必须以磁盘或 Store observer 验证真实状态，模型文字
     和 Tool result 二者都不能单独替代副作用证据。嵌套
     Subagent 请求可以合法穿插，但不能清除父调用的未闭合状态。
+    触发 `task` 的 Subagent scenario 还必须在当前用户输入中显式要求委派，且请求范围必须与
+    fixture 选择的角色一致（例如只读检查使用 `explore`，实现修改使用 `code`）；不得依赖测试名称、
+    fixture 注释、项目文档或模型 canned response 伪造用户授权。
+    当后续 tool call 必须使用前一 Tool result 中运行时生成的标识时，当前 queue slot 可以使用
+    test-only `response(request)` resolver 从已记录的 Mock request 生成该 slot 的 response；resolver
+    不能读取 queue cursor、未消费 response、Runtime state 或网络。它仍严格消耗一个 slot，且返回值
+    必须经过同一 `expectedRequest`、continuation、error、SSE 与 teardown contract 路径。
+    Plan lifecycle scenario 必须从真实 `draft_saved` Tool result 读取 identity，随后覆盖 submit、真实审核批准、
+    `update_plan(complete_plan=true)` 与 terminal `run.completed`；不得用虚构第二个 final 填充 CompletionGuard correction。
+    与这些场景相邻的测试说明和断言必须使用当前 save → submit → review 生命周期，不能保留要求
+    `exit_plan_mode` 或声称运行时 Plan identity 不可获得的旧描述。
 22. Scenario teardown 必须使用 `cleanupTuiSystemFixtures()`，先等待所有 TUI 自有进程组退出，再停止
     mock/本地服务，最后清理 workspace；任一阶段失败都不能跳过后续资源，最终以 `AggregateError`
     报告。scenario contract 禁止直接调用 server `stop()` 或 workspace `cleanup()`。
@@ -297,4 +325,5 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
 - `bun run release:smoke`：在隔离 managed prefix 中直接以真实 PTY 启动已安装的 standalone
   `kite-tui`；不得用源码入口 startup 或单独 `--version` 代替候选 executable 的启动证据。
 - `bun run test:all`：先运行默认门禁，再运行完整 PTY suite。
-- 裸 `bun test` 会按 Bun 默认发现规则包含高成本 PTY 文件，不是仓库规范的全量入口。
+- 裸 `bun test` 会按 Bun 默认发现规则包含高成本 PTY 文件，不是仓库规范的全量入口；scenario 仍须
+  具备显式外层 timeout 并可直接运行，不能因默认 5 秒上限产生伪失败。

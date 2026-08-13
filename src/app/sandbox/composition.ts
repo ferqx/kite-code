@@ -328,6 +328,7 @@ export function composeAppSandboxExecutorV1(input: {
         // The native executor itself stays fail closed after a user script begins.
         unavailableFallback: 'fail',
         selectedBackend: backend,
+        brokeredGitFeatureRevision: surface?.brokeredGitFeatureRevision ?? undefined,
         onDiagnostic: input.onDiagnostic,
         // Direct restricted-token probes use an ephemeral capability and never
         // create a persistent Workspace ACL ledger.

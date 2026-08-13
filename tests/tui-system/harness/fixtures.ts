@@ -12,6 +12,8 @@ import { startTestHttpServer } from '../../helpers/test-http-server';
 
 // Reuse the MockResponse shape from the existing mock model
 export interface MockResponse {
+  /** Test-only response factory evaluated against the request consuming this queue slot. */
+  response?: (request: MockChatRequest) => MockResponse;
   message?: {
     content?: string;
     /** Optional SSE chunks; joined for non-streaming responses. */
@@ -52,6 +54,34 @@ export interface MockResponse {
 export interface MockChatRequest {
   body: Record<string, unknown>;
   messages: Array<{ role?: string; content?: unknown; tool_call_id?: string }>;
+}
+
+export interface DraftSavedPlanIdentity {
+  plan_id: string;
+  version: number;
+  structural_digest: string;
+}
+
+/** Parse the canonical identity returned by a successful write_plan save action. */
+export function parseDraftSavedPlan(content: unknown): DraftSavedPlanIdentity {
+  const value: unknown = JSON.parse(String(content));
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('plan_id' in value) ||
+    typeof value.plan_id !== 'string' ||
+    !('version' in value) ||
+    typeof value.version !== 'number' ||
+    !('structural_digest' in value) ||
+    typeof value.structural_digest !== 'string'
+  ) {
+    throw new Error('write_plan draft_saved result did not contain a valid plan identity');
+  }
+  return {
+    plan_id: value.plan_id,
+    version: value.version,
+    structural_digest: value.structural_digest,
+  };
 }
 
 export interface MockModelServer {
@@ -145,8 +175,8 @@ export function createMockModelServer(): MockModelServer {
         const idx = callCount;
         callCount++;
 
-        const resp = responses[responseCursor++];
-        if (!resp) {
+        const queued = responses[responseCursor++];
+        if (!queued) {
           unexpectedRequests.push(idx);
           return new Response(
             JSON.stringify({
@@ -155,6 +185,22 @@ export function createMockModelServer(): MockModelServer {
                 type: 'test_fixture_error',
               },
             }),
+            { status: 500, headers: { 'content-type': 'application/json' } },
+          );
+        }
+
+        let resolvedResponse: MockResponse;
+        try {
+          resolvedResponse = queued.response
+            ? queued.response({ body: bodyRecord, messages })
+            : queued;
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : `non-Error value: ${String(error)}`;
+          const violation = `response ${idx + 1} resolver threw: ${message}`;
+          contractViolations.push(violation);
+          return new Response(
+            JSON.stringify({ error: { message: violation, type: 'test_fixture_contract_error' } }),
             { status: 500, headers: { 'content-type': 'application/json' } },
           );
         }
@@ -170,7 +216,9 @@ export function createMockModelServer(): MockModelServer {
           pendingToolContinuations.has(toolCallId),
         );
         const explicitlyCheckedIds = new Set(
-          (resp.expectedRequest?.toolResults ?? []).map((expected) => expected.toolCallId),
+          (resolvedResponse.expectedRequest?.toolResults ?? []).map(
+            (expected) => expected.toolCallId,
+          ),
         );
         for (const toolCallId of resolvedPendingIds) {
           if (!explicitlyCheckedIds.has(toolCallId)) {
@@ -183,7 +231,7 @@ export function createMockModelServer(): MockModelServer {
           pendingToolContinuations.delete(toolCallId);
         }
 
-        for (const expected of resp.expectedRequest?.toolResults ?? []) {
+        for (const expected of resolvedResponse.expectedRequest?.toolResults ?? []) {
           const toolResult = messages.find(
             (message) => message.role === 'tool' && message.tool_call_id === expected.toolCallId,
           );
@@ -224,31 +272,36 @@ export function createMockModelServer(): MockModelServer {
         }
 
         // Error injection
-        if (resp.error) {
+        if (resolvedResponse.error) {
           return new Response(
-            JSON.stringify({ error: { message: resp.error, type: 'server_error' } }),
+            JSON.stringify({ error: { message: resolvedResponse.error, type: 'server_error' } }),
             { status: 500, headers: { 'content-type': 'application/json' } },
           );
         }
 
         // Delay injection (for timing-sensitive tests)
-        if (resp.delay && resp.delay > 0) {
-          await new Promise((r) => setTimeout(r, resp.delay));
+        if (resolvedResponse.delay && resolvedResponse.delay > 0) {
+          await new Promise((r) => setTimeout(r, resolvedResponse.delay));
         }
 
-        const content = resp.message?.content ?? resp.message?.content_chunks?.join('') ?? '';
+        const content =
+          resolvedResponse.message?.content ??
+          resolvedResponse.message?.content_chunks?.join('') ??
+          '';
         const reasoningContent =
-          resp.message?.reasoning_content ?? resp.message?.reasoning_chunks?.join('') ?? '';
-        const toolCalls = resp.message?.tool_calls;
-        const invalidToolCalls = resp.message?.invalid_tool_calls;
+          resolvedResponse.message?.reasoning_content ??
+          resolvedResponse.message?.reasoning_chunks?.join('') ??
+          '';
+        const toolCalls = resolvedResponse.message?.tool_calls;
+        const invalidToolCalls = resolvedResponse.message?.invalid_tool_calls;
         const emittedToolCallIds = [
           ...(toolCalls ?? []).map((toolCall) => toolCall.id),
           ...(invalidToolCalls ?? []).map((toolCall) => toolCall.id),
         ];
         if (
           emittedToolCallIds.length > 0 &&
-          !resp.disconnect_after_content &&
-          resp.toolContinuation !== 'aborted'
+          !resolvedResponse.disconnect_after_content &&
+          resolvedResponse.toolContinuation !== 'aborted'
         ) {
           for (const toolCallId of emittedToolCallIds) {
             if (pendingToolContinuations.has(toolCallId)) {
@@ -266,10 +319,12 @@ export function createMockModelServer(): MockModelServer {
           const write = (data: string) => {
             sseFrames.push(data);
           };
-          if (resp.malformed_sse) write('data: {not-json}\n\n');
+          if (resolvedResponse.malformed_sse) write('data: {not-json}\n\n');
 
           // Send reasoning_content delta (DeepSeek-style thinking)
-          for (const reasoningChunk of resp.message?.reasoning_chunks ?? [reasoningContent]) {
+          for (const reasoningChunk of resolvedResponse.message?.reasoning_chunks ?? [
+            reasoningContent,
+          ]) {
             if (!reasoningChunk) continue;
             write(
               `data: ${JSON.stringify({
@@ -339,7 +394,7 @@ export function createMockModelServer(): MockModelServer {
           }
 
           // Content delta
-          for (const contentChunk of resp.message?.content_chunks ?? [content]) {
+          for (const contentChunk of resolvedResponse.message?.content_chunks ?? [content]) {
             write(
               `data: ${JSON.stringify({
                 choices: [{ index: 0, delta: { content: contentChunk }, finish_reason: null }],
@@ -347,7 +402,7 @@ export function createMockModelServer(): MockModelServer {
             );
           }
 
-          if (resp.disconnect_after_content) {
+          if (resolvedResponse.disconnect_after_content) {
             write(
               `data: ${JSON.stringify({
                 error: {
@@ -361,20 +416,22 @@ export function createMockModelServer(): MockModelServer {
             write(
               `data: ${JSON.stringify({
                 choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-                ...(resp.usage ? { usage: resp.usage } : {}),
+                ...(resolvedResponse.usage ? { usage: resolvedResponse.usage } : {}),
               })}\n\n`,
             );
             write('data: [DONE]\n\n');
           }
 
           const body =
-            resp.chunk_delay && resp.chunk_delay > 0
+            resolvedResponse.chunk_delay && resolvedResponse.chunk_delay > 0
               ? new ReadableStream<Uint8Array>({
                   async start(controller) {
                     const encoder = new TextEncoder();
                     for (const frame of sseFrames) {
                       controller.enqueue(encoder.encode(frame));
-                      await new Promise((resolve) => setTimeout(resolve, resp.chunk_delay));
+                      await new Promise((resolve) =>
+                        setTimeout(resolve, resolvedResponse.chunk_delay),
+                      );
                     }
                     controller.close();
                   },
@@ -468,7 +525,13 @@ export function createMockModelServer(): MockModelServer {
         const message = messages[index];
         if (message?.role !== 'user') continue;
         const content = normalizedMessageContent(message.content);
-        if (!content || content.trimStart().startsWith('<runtime-state')) continue;
+        if (
+          !content ||
+          content.trimStart().startsWith('<runtime-state') ||
+          content.trimStart().startsWith('<project-instructions')
+        ) {
+          continue;
+        }
         if (content === expected) {
           matched = true;
           continue;

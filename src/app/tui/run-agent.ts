@@ -15,6 +15,7 @@ export interface BuildRunTaskParams {
   workspace: string;
   config: AgentConfig;
   shellExecutor: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   signal: AbortSignal;
   thinkingLevel: string | null;
   skills: SkillManifest[];
@@ -38,6 +39,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
   const checkpointPath = defaultCheckpointPath();
   return {
     task: p.task + p.shellContext,
+    userGoal: p.task,
     userId: 'tui-user',
     threadId: p.threadId,
     workspace: p.workspace,
@@ -46,6 +48,7 @@ export function buildRunAgentParams(p: BuildRunTaskParams): TuiRuntimeInput {
     config: p.config,
     model: p.model,
     shellExecutor: p.shellExecutor,
+    gitBroker: p.gitBroker,
     mcpManager: p.mcpManager ?? undefined,
     remoteMcpEgressPermitResolver: p.remoteMcpEgressPermitResolver,
     skills: p.skills,

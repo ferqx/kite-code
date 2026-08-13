@@ -147,6 +147,10 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         currentModelRequestId: undefined,
         currentModelReasoningStreamed: false,
         currentModelReasoningText: undefined,
+        // Compaction progress is an ephemeral projection owned by the session
+        // that emitted it. Never carry it across a durable session reload: a
+        // stale progress value would keep the restored prompt disabled.
+        compactionProgress: undefined,
         loadingSessionId: null,
         sessionServiceUnavailable: false,
         sessionKey: state.sessionKey + 1,

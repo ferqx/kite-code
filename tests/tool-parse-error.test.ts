@@ -12,14 +12,15 @@ describe('getToolSchemaHint', () => {
   test('returns update_plan schema', () => {
     const hint = getToolSchemaHint('update_plan');
     expect(hint).toContain('plan_id');
-    expect(hint).toContain('step_id');
-    expect(hint).toContain('steps');
+    expect(hint).toContain('updates');
+    expect(hint).toContain('complete_plan');
   });
 
   test('returns shell_execute schema', () => {
     const hint = getToolSchemaHint('shell_execute');
-    expect(hint).toContain('ok');
-    expect(hint).toContain('exitCode');
+    expect(hint).toContain('command');
+    expect(hint).toContain('timeout_ms');
+    expect(hint).not.toContain('exitCode');
   });
 
   test('returns MCP tool hint', () => {

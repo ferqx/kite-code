@@ -15,9 +15,10 @@ export type Action =
   | { type: 'SET_IDLE' }
   | {
       type: 'SET_COMPACTION_PROGRESS';
-      phase?: ContextCompactionProgressPhase;
-      placement?: 'status' | 'inline';
+      phase: ContextCompactionProgressPhase;
+      source: 'manual' | 'automatic';
     }
+  | { type: 'SET_COMPACTION_PROGRESS'; phase?: undefined; source?: never }
   | { type: 'SET_CONTEXT_SNAPSHOT'; snapshot: ContextStatusSnapshot }
   | { type: 'TOGGLE_REASON'; id: number }
   | { type: 'TOGGLE_ALL_REASON' }

@@ -7,13 +7,14 @@ network boundary、TUI/CLI composition root、Skill/local stdio MCP child 或平
 
 验证：`bun test tests/sandbox/platform-backends.test.ts tests/sandbox/cgroup-pids.test.ts tests/sandbox/app-sandbox-composition.test.ts tests/sandbox/process-tree-limit.test.ts
 tests/sandbox/platform-capability-probe.test.ts tests/sandbox/execution-boundary.test.ts
-tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts`、
+tests/sandbox/network-boundary.test.ts tests/sandbox/network-boundary-concurrency.test.ts
+tests/git-broker.test.ts tests/runtime/git-tool-controller.test.ts`、
 `bun test tests/postinstall.test.ts`、
 `bun run scripts/release/platform-capability-probe.ts`，以及
 `bun run scripts/release/verify-platform-capability-evidence.ts`、
 `.github/workflows/platform-capability-probe.yml` 的声明平台原生 artifact。
 
-相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、`release/platform-capabilities/support-matrix-v1.json`、
+相关：ADR-0054、ADR-0061、ADR-0065、ADR-0068、ADR-0097、`release/platform-capabilities/support-matrix-v1.json`、
 `docs/space/plans/2026-07-29-agent-production-execution-isolation.md`。
 
 ## 当前支持集合
@@ -27,6 +28,13 @@ Windows、Linux 与 macOS 同时是本地 Bun TUI/CLI 的发行目标。发行/�
 但其 Shell、writer、Skill child 或 local stdio MCP 仍可因原生隔离证据不足而关闭。常规三平台
 验证使用 GitHub-hosted `macos-15`、`ubuntu-24.04`、`windows-2025`，不要求 self-hosted Ubuntu；
 Docker、WSL2 和架构模拟只作开发预检。
+
+ADR-0097 的 brokered Git 另有独立资格证据组：同一 feature revision 必须同时
+证明通用 Shell 对 repository metadata 的 read/write deny、broker positive/hostile 路径、
+schema/binary/repository identity 与 TUI/foreground CLI composition。当前三平台 probe 都明确
+记录 `brokeredGit.currentOutcome=excluded`；probe 不会用代码存在替代证据：只有 native read/write deny 均 enforced 时才运行真实 App broker positive/hostile/binary identity，TUI/CLI 入口仍需各自证明。不能同时证明 native read/write deny 的平台
+不得披露 `gitInspect`，也不能用 generic read/process 证据替代。
+qualification artifact 还必须携带真实 profile/protected-rules digest 与 broker/schema/repository/executable/native-deny/invocation receipt identity；label hash 或只执行 positive fixture 都不足以标记 qualified。因此当前三个 production 平台继续 excluded。
 
 源码安装仍以 Bun 为包管理器；候选版本另使用 Bun standalone executable、manifest/checksum 和安全
 安装器，不要求目标机预装 Node。开发依赖安装的 `postinstall` 仍由 package script 显式通过系统 `node` 启动。
@@ -61,12 +69,18 @@ ACL deny 代替未来 root .env.* 的动态保护。因此 windows_restricted_to
 productionSupported 仍为 false，outcome 仍为 excluded。用户界面在该 backend 和 host backend none
 上均以 非沙箱环境无法开启full 说明 Full 不可用。
 
-ADR-0082/ADR-0083/ADR-0085 对齐 development 权限交互与 Windows TLS 可执行性：protocol V5 接受 Tool Policy
+ADR-0082/ADR-0083/ADR-0085 与 ADR-0101 对齐 development 权限交互与 Windows TLS 可执行性：protocol V6 接受 Tool Policy
 在单次审批后产生的 `allow_all`，并要求它使用受管 Online 登录身份；精确 runtime version query 等可证明
 本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
 verdict 或 D-04 空支持集。ADR-0088 已删除 AppContainer、private staging 与 repository reconciliation。
 
 ### Unified startup downgrade
+
+ADR-0100 另行定义 development approved-filesystem capability：审批通过的 `externalRead`、
+`externalWrite` 或 `uncertainEffects` invocation 在用户命令开始前扩大所选 native backend 的文件系统
+scope。它不是 startup downgrade、host Shell 或 native failure replay；三个平台保持相同产品语义，
+且进程、网络与资源 sandbox 继续有效。此能力不能写入 capability probe 的静态 enforced 项，也不能
+改变下表或 D-04 production support verdict。
 
 ADR-0077、ADR-0080 与 ADR-0081 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
 startup state machine。允许 host fallback 的开发入口只在用户脚本前确认 selected sandbox environment
@@ -95,11 +109,15 @@ physical Win10 behavior。该 baseline 不会让任一 Windows development backe
 
 ### native protocol 兼容性
 
-ADR-0088 将 native invocation protocol 提升到 V5。adapter 与 runner 必须以 manifest 内固定的
-`protocolVersion=5` 相互校验；V5 只描述 direct restricted-token invocation，显式携带 development
+ADR-0101 将 native invocation protocol 提升到 V6。adapter 与 runner 必须以 manifest 内固定的
+`protocolVersion=6` 相互校验；V6 只描述 direct restricted-token invocation，显式携带 development
 `off | allow_all` authorization projection，并删除 backend mode、AppContainer identity 与 staging
-字段。`allow_all` 必须切换受管 Online 登录身份。V1-V4 runner 必须在 user script 前 fail closed。
+字段。纯网络 `allow_all` 必须切换受管 Online 登录身份；approved filesystem invocation 使用 guard SID。
+V1-V5 runner 必须在 user script 前 fail closed。
 `windows-runner-v1.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
+仓库当前 release pin 已由 canonical Windows build 固定为 0.8.0/V6 及其对应 binary digest；adapter
+仍必须拒绝 V1-V5 或 digest 不一致的 runner。native runner 改动后，只有同一可复现 Windows 构建重新
+生成并提交匹配 pin，才能恢复可用性；不得回退旧协议或手工复用旧 digest。
 
 固定证据来自
 [Platform Capability Probe run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)，

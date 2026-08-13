@@ -1,5 +1,6 @@
 import type { SessionData } from '../../core/persistence/sessions.js';
 import type { RuntimeEvent } from '../../core/runtime/events.js';
+import { decodeHistoricalToolOutcomeEventV1 } from '../../core/runtime/tool-outcome-events.js';
 import { createInitialState } from './initialState.js';
 import { handleEventAction, handleRuntimeEventAction } from './reducers/handleEvent.js';
 import { findBlockById, replaceBlockById } from './reducers/helpers.js';
@@ -127,8 +128,13 @@ function clearRecoveredInteractionUi(
     },
     turns: withoutTool.turns.map((turn) => ({
       blocks: turn.blocks.map((block) =>
-        block.kind === 'subagent' && block.status === 'running' && block.awaitingApproval
-          ? { ...block, awaitingApproval: false, approvingStepIndex: undefined }
+        block.kind === 'subagent' && block.status === 'suspended' && block.awaitingApproval
+          ? {
+              ...block,
+              status: 'running' as const,
+              awaitingApproval: false,
+              approvingStepIndex: undefined,
+            }
           : block,
       ),
     })),
@@ -215,8 +221,9 @@ export function sessionDataToUI(data: SessionData): {
   /** The TUI hid a canonical pending interaction and must fork before new work. */
   recoveredPendingInteraction: boolean;
 } {
+  const runtimeEvents = data.runtimeEvents.map(decodeHistoricalToolOutcomeEventV1);
   let state = createInitialState();
-  for (const event of data.runtimeEvents) state = handleRuntimeEventAction(state, event);
+  for (const event of runtimeEvents) state = handleRuntimeEventAction(state, event);
   if (!state.interrupt && data.interrupt) {
     const callIds = new Map(
       state.turns.flatMap((turn) =>
@@ -247,9 +254,9 @@ export function sessionDataToUI(data: SessionData): {
               },
     };
   }
-  const unfinishedAutoReview = data.runtimeEvents.some((event) => {
+  const unfinishedAutoReview = runtimeEvents.some((event) => {
     if (event.type !== 'auto_review.requested') return false;
-    const completed = data.runtimeEvents.find(
+    const completed = runtimeEvents.find(
       (candidate): candidate is Extract<RuntimeEvent, { type: 'auto_review.completed' }> =>
         candidate.type === 'auto_review.completed' && candidate.reviewId === event.reviewId,
     );
@@ -266,7 +273,7 @@ export function sessionDataToUI(data: SessionData): {
   // stale, but it must not create another recovery fork of an otherwise
   // completed session.
   const recoveredPendingInteraction = data.interrupt != null || unfinishedAutoReview;
-  state = recoverPendingInteractionsForTui(state, data.runtimeEvents);
+  state = recoverPendingInteractionsForTui(state, runtimeEvents);
   // Replay uses the same event reducer as the live stream, with only the
   // explicit local recovery projection above for process-crash interactions.
   const blocks = state.turns.flatMap((turn) => turn.blocks);

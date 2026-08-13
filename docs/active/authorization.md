@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改授权逻辑、安全审计、CLI/TUI 授权入口变更时
-验证：`bun test tests/policies/authorization-elevation.test.ts tests/policies/approval-policy.test.ts tests/mcp-tool-policy.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-controller.test.ts`
+验证：`bun test tests/policies/authorization-elevation.test.ts tests/policies/approval-policy.test.ts tests/mcp-tool-policy.test.ts tests/runtime/scheduler.test.ts tests/runtime/tool-controller.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts`
 
 ## 概述
 
@@ -77,9 +77,14 @@ Windows windows_restricted_token 都必须将 full 建议项置灰，键盘选�
 host Shell 只在用户脚本前的 sandbox environment/essential startup capability unavailable 决策后选择。
 
 `/permissions` 不接受 mode 参数；它只能打开选择器。无可用 Full backend 时选择器禁用 `full` 并显示
-非沙箱环境无法开启full；Help 不提供手动 mode 参数。full_access 只描述审批/authorization mode，
-不提升 native execution ceiling。production consumer 的 sandbox 不具备 Full qualification 时必须使用
-fail-closed executor，不能借开发入口的 host fallback 或 restricted-token backend 获得 Full。
+非沙箱环境无法开启full；Help 不提供手动 mode 参数。`full_access` 描述持久的审批/authorization mode，
+不是 native sandbox qualification；但在当前 development TUI/foreground CLI 中，用户来源的
+`approve_once`、`same_command` 或显式 Full 会为具有 `externalRead`、`externalWrite` 或
+`uncertainEffects` 的 Shell invocation 投影单次 `filesystemMode=allow_all`。该 invocation 仍由所选
+Seatbelt、bubblewrap 或 Windows restricted-token backend 执行；只在命令启动前扩大文件系统 scope，
+不切换 host Shell，也不在失败后 replay。Seatbelt deny、bubblewrap protected mount 与 Windows
+restricted-only guard SID 在扩权后继续保护固定凭据/持久化身份；字符串扫描只是前置防御。production
+consumer 仍必须服从 sealed capability admission。
 
 ## MCP Tool 策略边界
 
@@ -87,11 +92,22 @@ MCP descriptor 的 `minimumApproval` 不能单独把 unknown/write/destructive e
 
 ## Shell 逐项审批与重叠执行
 
+Shell 文件系统授权也按 invocation 投影。默认 `workspace_only` 继续由 macOS Seatbelt、Linux
+bubblewrap 或 Windows restricted-token 执行；工作区外读写和无法静态限定路径的命令必须完成当前模式
+审批，批准后以 `allow_all` 投影到三个平台各自的 native sandbox 执行一次。临时目录、缓存目录与普通
+外部文件属于可批准操作，不得再被 native Workspace ceiling 二次拒绝。Auto 模式先由自动审批模型
+判断：安全则自动产生单次 grant；判定有风险或模型异常/不可用才转真人审批。
+凭据、Shell/Agent/IDE 配置、Git hook/config、启动项、关键系统文件、提权与关键删除在审批前拒绝，
+因此不会出现用户先批准再收到 Kite policy denial。命令本身、宿主 ACL/TCC、磁盘或目标状态仍可正常
+返回执行失败；“批准后可执行”不伪造命令成功。
+
 Shell 网络授权按 invocation 投影。精确的 `node|npm|pnpm|yarn|bun --version|-v` 与其他可证明本地
 命令使用 network-disabled，不因 executable 名称本身触发网络审批；明确网络命令及无法证明
 local-only 的 arbitrary script 使用 `effects.network` 或 `uncertainEffects` 进入现有审批。批准后只为该
-调用产生 development `allow_all`，拒绝则命令不启动。macOS/Linux native sandbox 消费该模式；Windows
-Windows hybrid backend 的 protocol V5 要求批准结果切换到受管 Online 非管理员登录会话；为支持
+调用产生 development `allow_all`，拒绝则命令不启动。交互式 development execution boundary 不得在批准
+后再次把该调用强制改成 network-disabled；不能兑现 governed network 的 sealed production consumer 必须
+在审批前拒绝。macOS/Linux native sandbox 消费该模式；Windows hybrid backend 的 protocol V6 要求纯
+网络批准结果切换到受管 Online 非管理员登录会话；为支持
 Schannel direct TLS，该 approved child 使用 ACL lease 而不是 constrained restricted token。账户安装是与 Shell 审批分离的
 首次 TUI onboarding/显式 CLI setup；只有该 control-plane 选择可以请求 UAC，普通 invocation 从不提权。
 setup 还串行配置 Online identity 的非敏感 profile read roots；read roots 不产生写授权，凭据目录保持排除，

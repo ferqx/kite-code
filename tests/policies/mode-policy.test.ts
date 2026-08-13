@@ -48,7 +48,7 @@ describe('createAutoModePolicy', () => {
     expect(result.kind).toBe('need_auto_review');
   });
 
-  it('should require auto-review for a read tool with external effects', () => {
+  it('should auto-review filesystem authority outside the workspace before any human escalation', () => {
     const result = policy.shouldApproveTool(
       baseInput({
         interactionMode: 'auto',

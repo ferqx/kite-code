@@ -1,21 +1,36 @@
 import { describe, expect, test } from 'bun:test';
 import type { Action } from '../src/app/tui/App';
-import { createInitialState, eventReducer } from '../src/app/tui/App';
+import { eventReducer as canonicalEventReducer, createInitialState } from '../src/app/tui/App';
 import {
   projectToolCancelled,
   projectUserCancelledTurn,
 } from '../src/app/tui/reducers/cancellation-projection';
 import { buildToolSummaryLine } from '../src/app/tui/reducers/consolidateTools';
 import {
+  handleRuntimeEventAction as handleCanonicalRuntimeEventAction,
   handleEventAction,
-  handleRuntimeEventAction,
   type RenderEvent,
 } from '../src/app/tui/reducers/handleEvent';
 import type { InterruptState, OutputBlock, SessionSnapshot, TuiState } from '../src/app/tui/types';
+import type { RuntimeEvent } from '../src/core/runtime/events';
+import { decodeHistoricalToolOutcomeEventV1 } from '../src/core/runtime/tool-outcome-events';
 import type { ToolApprovalPayload, UserInputPayload } from '../src/protocol/events';
 
 function fresh(): TuiState {
   return createInitialState();
+}
+
+function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
+  return handleCanonicalRuntimeEventAction(state, decodeHistoricalToolOutcomeEventV1(event));
+}
+
+function eventReducer(state: TuiState, action: Action): TuiState {
+  return canonicalEventReducer(
+    state,
+    action.type === 'RUNTIME_EVENT'
+      ? { ...action, event: decodeHistoricalToolOutcomeEventV1(action.event) }
+      : action,
+  );
 }
 type LegacyRenderAction = { type: 'EVENT'; event: RenderEvent };
 type TestAction = Action | LegacyRenderAction;
@@ -2912,6 +2927,25 @@ describe('eventReducer (blocks model)', () => {
       expect(s.sessionKey).toBe(1);
     });
 
+    test('clears ephemeral compaction progress so the restored prompt is usable', () => {
+      let s: TuiState = {
+        ...fresh(),
+        compactionProgress: { phase: 'summarizing', source: 'automatic' },
+      };
+
+      s = dispatch(s, {
+        type: 'LOAD_SESSION',
+        threadId: 't1',
+        blocks: [{ id: 1, kind: 'text', content: 'restored' }],
+        interrupt: null,
+        modelProvider: '',
+        modelName: '',
+        thinkingLevel: null,
+      });
+
+      expect(s.compactionProgress).toBeUndefined();
+    });
+
     test('saves outgoing session turns before overwriting', () => {
       let s: TuiState = {
         ...fresh(),
@@ -3843,7 +3877,10 @@ describe('eventReducer (blocks model)', () => {
     ): LegacyRenderAction {
       return {
         type: 'EVENT',
-        event: { type: 'subagent_done', data: { id, summary, toolCallCount, durationMs } },
+        event: {
+          type: 'subagent_done',
+          data: { id, summary, toolCallCount, durationMs },
+        },
       };
     }
     function saError(id: string, error: string): LegacyRenderAction {
@@ -4451,7 +4488,7 @@ describe('eventReducer (blocks model)', () => {
       );
     });
 
-    test('approval rejection keeps the queued shell as a cancelled message card', () => {
+    test('approval rejection keeps the queued shell as a rejected message card', () => {
       let state = dispatch(fresh(), {
         type: 'RUNTIME_EVENT',
         event: {
@@ -4490,12 +4527,109 @@ describe('eventReducer (blocks model)', () => {
       expect(card).toMatchObject({
         callId: 'shell-rejected',
         name: 'shell_execute',
-        status: 'cancelled',
+        status: 'error',
         summary: 'Rejected by user.',
       });
       expect(approvalBlock).toBeUndefined();
       expect(state.pendingToolCalls['shell-rejected']).toBeUndefined();
       expect(state.interrupt).toBeNull();
+    });
+
+    test('canonical approval and auto-review terminals derive TUI status from ToolOutcome', () => {
+      const rejectedOutcome = {
+        schemaVersion: 1 as const,
+        status: 'rejected' as const,
+        failure: { kind: 'approval_rejected' as const, detailCode: 'approval_rejected' as const },
+        dispatchState: 'not_started' as const,
+        externalEffects: 'none' as const,
+        replaySafety: 'pre_dispatch' as const,
+        recovery: {
+          disposition: 'never' as const,
+          maximumAdditionalCalls: 0 as const,
+          requiresNewModelResponse: false,
+          safeAutomaticRetry: false,
+        },
+        timing: { source: 'runtime_boundary' as const },
+      };
+      let approvalState = handleRuntimeEventAction(fresh(), {
+        type: 'tool.queued',
+        toolCallId: 'canonical-approval-rejected',
+        name: 'shell_execute',
+        args: { command: 'private' },
+      });
+      approvalState = handleRuntimeEventAction(approvalState, {
+        type: 'approval.requested',
+        interactionId: 'canonical-approval',
+        toolCallId: 'canonical-approval-rejected',
+        approval: approval(),
+      });
+      approvalState = handleRuntimeEventAction(approvalState, {
+        type: 'approval.rejected',
+        interactionId: 'canonical-approval',
+        toolCallId: 'canonical-approval-rejected',
+        reason: 'redacted',
+        outcomeV1: rejectedOutcome,
+      });
+      expect(
+        flatBlocks(approvalState).find(
+          (block) => block.kind === 'tool_card' && block.callId === 'canonical-approval-rejected',
+        ),
+      ).toMatchObject({ status: 'error' });
+
+      let autoState = handleRuntimeEventAction(fresh(), {
+        type: 'tool.queued',
+        toolCallId: 'canonical-auto-rejected',
+        name: 'shell_execute',
+        args: { command: 'private' },
+      });
+      autoState = handleRuntimeEventAction(autoState, {
+        type: 'auto_review.completed',
+        reviewId: 'canonical-auto',
+        toolCallId: 'canonical-auto-rejected',
+        result: {
+          ok: true,
+          approved: false,
+          reviewerModelName: 'test',
+          durationMs: 1,
+        },
+        outcomeV1: {
+          ...rejectedOutcome,
+          failure: {
+            kind: 'auto_review_rejected' as const,
+            detailCode: 'auto_review_rejected' as const,
+          },
+        },
+      });
+      expect(
+        flatBlocks(autoState).find(
+          (block) => block.kind === 'tool_card' && block.callId === 'canonical-auto-rejected',
+        ),
+      ).toMatchObject({ status: 'error' });
+
+      let escalatedState = handleRuntimeEventAction(fresh(), {
+        type: 'tool.queued',
+        toolCallId: 'auto-risk-escalated',
+        name: 'shell_execute',
+        args: { command: 'touch /tmp/risk' },
+      });
+      escalatedState = handleRuntimeEventAction(escalatedState, {
+        type: 'auto_review.completed',
+        reviewId: 'auto-risk',
+        toolCallId: 'auto-risk-escalated',
+        result: {
+          ok: true,
+          approved: false,
+          escalatedToUser: true,
+          reviewerModelName: 'test',
+          durationMs: 1,
+        },
+      });
+      expect(escalatedState.pendingToolCalls['auto-risk-escalated']).toBeDefined();
+      expect(
+        flatBlocks(escalatedState).find(
+          (block) => block.kind === 'tool_card' && block.callId === 'auto-risk-escalated',
+        ),
+      ).toBeUndefined();
     });
 
     test('keeps planning shell deferrals out of the message list', () => {
@@ -4648,7 +4782,7 @@ describe('eventReducer (blocks model)', () => {
         expect.objectContaining({
           kind: 'tool_card',
           callId: 'shell-rejected',
-          status: 'cancelled',
+          status: 'error',
           summary: 'Approval cancelled by user.',
         }),
       );
@@ -5649,6 +5783,48 @@ describe('model streaming RuntimeEvent rendering', () => {
 });
 
 describe('context compaction RuntimeEvent rendering', () => {
+  const compactionRequest = (
+    reason: 'auto' | 'manual',
+  ): Extract<RuntimeEvent, { type: 'context.compaction_requested' }> => ({
+    type: 'context.compaction_requested',
+    compactionId: `${reason}-request`,
+    reason,
+    requestedAtRevision: 1,
+    requestedAtTurnId: 'turn-1',
+    force: false,
+    estimate: {
+      systemTokens: 0,
+      toolSchemaTokens: 0,
+      transcriptTokens: 0,
+      summaryTokens: 0,
+      dynamicRuntimeTokens: 0,
+      framingTokens: 0,
+      totalInputTokens: 0,
+    },
+  });
+
+  test('renders automatic compaction as a semantic command message', () => {
+    const state = handleRuntimeEventAction(fresh(), compactionRequest('auto'));
+
+    expect(flatBlocks(state)).toContainEqual(
+      expect.objectContaining({ kind: 'user', content: '/auto-compact' }),
+    );
+  });
+
+  test('does not duplicate the durable manual /compact command message', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'user.command_invoked',
+      commandId: 'manual-command',
+      command: '/compact',
+    });
+    state = handleRuntimeEventAction(state, compactionRequest('manual'));
+
+    expect(
+      flatBlocks(state).filter((block) => block.kind === 'user' && block.content === '/compact'),
+    ).toHaveLength(1);
+    expect(JSON.stringify(flatBlocks(state))).not.toContain('/auto-compact');
+  });
+
   test('renders manual low-gain rejection as a benign actionable notice', () => {
     const state = handleRuntimeEventAction(fresh(), {
       type: 'context.compaction_failed',
@@ -5851,5 +6027,49 @@ describe('context compaction RuntimeEvent rendering', () => {
     });
     expect(state.status.contextSnapshot?.activeCheckpointId).toBeUndefined();
     expect(state.status.contextSnapshot?.inputTokensBefore).toBeUndefined();
+  });
+
+  test('projects terminal tool status from ToolOutcomeV1 instead of the legacy result status', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'tool.queued',
+      toolCallId: 'timeout-tool',
+      name: 'shell_execute',
+      args: { command: 'private' },
+    });
+    state = handleRuntimeEventAction(state, { type: 'tool.started', toolCallId: 'timeout-tool' });
+    state = handleRuntimeEventAction(state, {
+      type: 'tool.finished',
+      toolCallId: 'timeout-tool',
+      name: 'shell_execute',
+      result: {
+        ok: false,
+        command: 'private',
+        exitCode: 124,
+        stdout: '',
+        stderr: 'private',
+        status: 'error',
+      },
+      outcomeV1: {
+        schemaVersion: 1,
+        status: 'timed_out',
+        failure: { kind: 'tool_timeout', detailCode: 'timed_out' },
+        dispatchState: 'started',
+        externalEffects: 'unknown',
+        recovery: {
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+          requiresNewModelResponse: false,
+          safeAutomaticRetry: false,
+        },
+        timing: { source: 'runtime_boundary', totalActiveMs: 25 },
+      },
+    });
+    expect(flatBlocks(state)).toContainEqual(
+      expect.objectContaining({
+        kind: 'tool_card',
+        callId: 'timeout-tool',
+        status: 'timeout',
+      }),
+    );
   });
 });

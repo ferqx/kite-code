@@ -81,8 +81,6 @@ export const shellExecuteSpec = defineExecutableTool({
   kind: 'computer',
   contract: SHELL_EXECUTE_CONTRACT.sections,
   inputSchema: shellActionEnvelopeSchema,
-  availability: (context) =>
-    !(context.featureFlags?.promptContractV2 && context.phase === 'planning'),
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
   minimumApproval: 'user',
   governanceRevision: 'shell-effects-v1',
@@ -128,6 +126,7 @@ export const shellExecuteSpec = defineExecutableTool({
         signal: context.signal,
         timeoutMs: resolveShellTimeoutMs(input.timeout_ms),
         networkMode: context.shellNetworkMode,
+        filesystemMode: context.shellFilesystemMode,
         networkBroker: context.shellNetworkBroker,
         onProgress: context.onShellProgress,
       });
@@ -138,11 +137,7 @@ export const shellExecuteSpec = defineExecutableTool({
         command: input.command,
         exitCode: isAbort ? 130 : -1,
         stdout: '',
-        stderr: isAbort
-          ? 'Command cancelled by user.'
-          : error instanceof Error
-            ? error.message
-            : String(error),
+        stderr: isAbort ? 'Command cancelled by user.' : 'Shell execution adapter failed.',
       };
     }
   },

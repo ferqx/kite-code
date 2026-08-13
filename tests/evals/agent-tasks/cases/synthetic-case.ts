@@ -1,4 +1,4 @@
-import type { AgentTaskCaseV1 } from './schema';
+import type { AgentTaskCaseV1 } from '../../../../scripts/evals/contracts/agent-task-case-schema';
 
 export function syntheticAgentTaskCase(): AgentTaskCaseV1 {
   return {

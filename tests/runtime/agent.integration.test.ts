@@ -196,6 +196,67 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
   }
 });
 
+test('required provider admission failure is recorded as an error, not a user cancellation', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-admission-error-'));
+  const storePath = join(workspace, 'runtime.db');
+  const manager = new McpConnectionManager();
+  manager.getProviderDirectorySnapshot = () => ({
+    revision: 'directory-r1',
+    entries: [
+      {
+        providerId: 'github',
+        status: 'login_required',
+        required: true,
+        source: 'project',
+        lastKnownCapabilityNames: ['publish'],
+        retryable: true,
+      },
+    ],
+  });
+
+  try {
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'recover GitHub admission',
+        threadId: 'required-provider-admission-error',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: createMockModel([]) as SupportedChatModel,
+        mcpManager: manager,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+          features: { mcpProviderActionV1: true },
+        },
+      },
+      {
+        requestAction: async () => {
+          throw new Error('admission UI disconnected');
+        },
+      },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'run.error', message: 'admission UI disconnected' }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'turn.aborted', cause: 'error' }),
+    );
+    expect(events.map((event) => event.type)).not.toContain('provider.admission_cancelled');
+    expect(events.map((event) => event.type)).not.toContain('task.cancelled');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('required provider admission accepts ready/degraded and queues every other required entry', () => {
   const state = createInitialRuntimeState({
     threadId: 'required-provider-projection',
@@ -461,7 +522,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
   }
 });
 
-test('Runtime Kernel rejects a write tool before a plan is approved', async () => {
+test('Runtime Kernel feeds a V2 planning phase write rejection back for one correction', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([
@@ -474,10 +535,11 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
       }),
     },
     { message: aiMessage({ content: 'Wrote the note.' }) },
+    { message: aiMessage({ content: 'The note still cannot be completed from planning mode.' }) },
   ]);
 
   try {
-    const events: RuntimeEvent['type'][] = [];
+    const events: RuntimeEvent[] = [];
     for await (const event of runRuntimeAgent(
       {
         task: 'Write note.txt',
@@ -498,11 +560,13 @@ test('Runtime Kernel rejects a write tool before a plan is approved', async () =
       },
       { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
     )) {
-      events.push(event.type);
+      events.push(event);
     }
 
-    expect(events).toContain('tool.rejected');
+    expect(mockModel.callCount.count).toBe(3);
+    expect(events.map((event) => event.type)).toContain('tool.rejected');
     expect(existsSync(join(workspace, 'note.txt'))).toBe(false);
+    assertCompletionGuardErrorTerminal(events, 'planning_empty');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
@@ -515,6 +579,8 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
   const mockModel = createMockModel([
     { message: aiMessage({ content: 'Planning conversation completed.' }) },
     { message: aiMessage({ content: 'Second planning conversation completed.' }) },
+    { message: aiMessage({ content: 'Continue planning in the same TUI mode.' }) },
+    { message: aiMessage({ content: 'Planning still needs a submitted plan.' }) },
   ]);
 
   try {
@@ -541,6 +607,10 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     ]);
     kernel.close();
 
+    const initialStore = createRuntimeStore(storePath);
+    const persistedBeforeFirstRun = initialStore.loadEvents(threadId).length;
+    initialStore.close();
+
     const events: RuntimeEvent[] = [];
     for await (const event of runRuntimeAgent(
       {
@@ -565,7 +635,15 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
       events.push(event);
     }
 
-    expect(mockModel.callCount.count).toBe(1);
+    expect(mockModel.callCount.count).toBe(2);
+    assertCompletionGuardCorrectionTerminal(events);
+    const firstPersisted = createRuntimeStore(storePath);
+    const firstReplay = firstPersisted
+      .loadEvents(threadId)
+      .slice(persistedBeforeFirstRun)
+      .map((record) => record.event);
+    firstPersisted.close();
+    assertCompletionGuardCorrectionTerminal(firstReplay);
     expect(events).toContainEqual(
       expect.objectContaining({
         type: 'task.cancelled',
@@ -614,17 +692,83 @@ test('Runtime replaces the planning intent placeholder with the submitted Task',
     )) {
       secondEvents.push(event);
     }
-    expect(mockModel.callCount.count).toBe(2);
+    expect(mockModel.callCount.count).toBe(4);
+    assertCompletionGuardCorrectionTerminal(secondEvents);
+    const secondPersisted = createRuntimeStore(storePath);
+    const replayed = secondPersisted.loadEvents(threadId).map((record) => record.event);
+    secondPersisted.close();
+    const secondReplay = replayed.slice(persistedBeforeFirstRun + firstReplay.length);
+    assertCompletionGuardCorrectionTerminal(secondReplay);
+    expect(replayed.filter((event) => event.type === 'completion.blocked')).toHaveLength(4);
     expect(secondEvents).toContainEqual(
       expect.objectContaining({
         type: 'model.responded',
-        text: 'Second planning conversation completed.',
+        text: 'Continue planning in the same TUI mode.',
       }),
     );
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
 });
+
+function assertCompletionGuardCorrectionTerminal(events: RuntimeEvent[]): void {
+  const blocked = events.filter(
+    (event): event is Extract<RuntimeEvent, { type: 'completion.blocked' }> =>
+      event.type === 'completion.blocked',
+  );
+  expect(blocked).toHaveLength(2);
+  expect(blocked.map((event) => [event.code, event.correctionAttempt])).toEqual([
+    ['planning_empty', 1],
+    ['planning_empty', 2],
+  ]);
+  const firstBlocked = events.indexOf(blocked[0]!);
+  const secondRequest = events.findIndex(
+    (event, index) => index > firstBlocked && event.type === 'model.requested',
+  );
+  const terminalBlock = events.indexOf(blocked[1]!);
+  const aborted = events.findIndex(
+    (event, index) => index > terminalBlock && event.type === 'turn.aborted',
+  );
+  const error = events.findIndex((event, index) => index > aborted && event.type === 'run.error');
+  expect(firstBlocked).toBeGreaterThanOrEqual(0);
+  expect(secondRequest).toBeGreaterThan(firstBlocked);
+  expect(terminalBlock).toBeGreaterThan(secondRequest);
+  expect(aborted).toBeGreaterThan(terminalBlock);
+  expect(error).toBeGreaterThan(aborted);
+}
+
+function assertCompletionGuardErrorTerminal(
+  events: RuntimeEvent[],
+  code: 'planning_empty' | 'plan_draft_pending',
+): void {
+  const blocked = events.filter(
+    (event): event is Extract<RuntimeEvent, { type: 'completion.blocked' }> =>
+      event.type === 'completion.blocked',
+  );
+  expect(blocked.map((event) => [event.code, event.correctionAttempt])).toEqual([
+    [code, 1],
+    [code, 2],
+  ]);
+  const correctionRequest = events.findIndex(
+    (event, index) => index > events.indexOf(blocked[0]!) && event.type === 'model.requested',
+  );
+  const terminalBlock = events.indexOf(blocked[1]!);
+  const aborted = events.findIndex(
+    (event, index) => index > terminalBlock && event.type === 'turn.aborted',
+  );
+  const error = events.findIndex((event, index) => index > aborted && event.type === 'run.error');
+  expect(correctionRequest).toBeGreaterThan(events.indexOf(blocked[0]!));
+  expect(terminalBlock).toBeGreaterThan(correctionRequest);
+  expect(aborted).toBeGreaterThan(terminalBlock);
+  expect(error).toBeGreaterThan(aborted);
+  expect(events[error]).toMatchObject({
+    type: 'run.error',
+    message: expect.stringContaining(`Completion blocked by ${code};`),
+  });
+  expect(events[error]).not.toMatchObject({
+    message: expect.stringContaining('tool-pair validation failed'),
+  });
+}
 
 test('Runtime Kernel resumes ask_user with the supplied RuntimeAction answer', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
@@ -796,7 +940,7 @@ test('Runtime Kernel continues the same turn after ask_user is cancelled', async
   }
 });
 
-test('Runtime Kernel executes write_plan in planning phase', async () => {
+test('Runtime Kernel bounds a draft-only plan after one correction', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const previousKiteCodeHome = process.env.KITE_CODE_HOME;
   process.env.KITE_CODE_HOME = workspace;
@@ -818,6 +962,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
       }),
     },
     { message: aiMessage({ content: 'Plan draft saved.' }) },
+    { message: aiMessage({ content: 'The plan still awaits review before it can complete.' }) },
   ]);
   try {
     const events: RuntimeEvent[] = [];
@@ -849,7 +994,7 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
     ))
       events.push(event);
 
-    // write_plan should succeed and produce plan.drafted
+    // The initial write_plan call succeeds and produces the draft lifecycle fact.
     const eventTypes = events.map((event) => event.type);
     if (!eventTypes.includes('plan.drafted')) {
       throw new Error(
@@ -859,18 +1004,14 @@ test('Runtime Kernel executes write_plan in planning phase', async () => {
       );
     }
     expect(eventTypes).toContain('plan.drafted');
-    // No review requested (write_plan does not trigger interrupt)
-    expect(eventTypes).not.toContain('plan.review_requested');
+    expect(mockModel.callCount.count).toBe(3);
+    assertCompletionGuardErrorTerminal(events, 'plan_draft_pending');
   } finally {
     if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousKiteCodeHome;
     rmSync(workspace, { recursive: true, force: true });
   }
 });
-
-// Note: full exit_plan_mode → approve → execute flow is tested at unit level
-// (plan-state.test.ts, plan-actions.test.ts) because the dynamic planId/digest
-// generated by write_plan cannot be predicted by mock models in integration tests.
 
 test('Runtime Kernel restores a persisted snapshot when reopening the same thread', () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));

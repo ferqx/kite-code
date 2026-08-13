@@ -30,7 +30,7 @@ import {
   composeAppSandboxExecutorV1,
   sweepOwnedSandboxPreflightWorkspaces,
 } from '../sandbox/composition';
-import App, { type Action, useTuiState } from './App';
+import App, { type Action, shouldDisablePromptInput, useTuiState } from './App';
 import ErrorBoundary from './components/ErrorBoundary';
 import ConfigErrorScreen from './components/first-run/ConfigErrorScreen';
 import FirstRunFlow from './components/first-run/FirstRunFlow';
@@ -1042,11 +1042,11 @@ function TuiApp({
         customInstructions,
         (phase) => {
           if (threadIdRef.current === targetThreadId) {
-            dispatchSessionLoad({
-              type: 'SET_COMPACTION_PROGRESS',
-              phase,
-              placement: 'inline',
-            });
+            dispatchSessionLoad(
+              phase
+                ? { type: 'SET_COMPACTION_PROGRESS', phase, source: 'manual' }
+                : { type: 'SET_COMPACTION_PROGRESS' },
+            );
           }
         },
         (event) => {
@@ -1092,7 +1092,7 @@ function TuiApp({
           text: '  ⎿  Context compaction failed unexpectedly; the original conversation was preserved.',
           isError: true,
         });
-        dispatchSessionLoad({ type: 'SET_COMPACTION_PROGRESS', phase: undefined });
+        dispatchSessionLoad({ type: 'SET_COMPACTION_PROGRESS' });
       });
   };
 
@@ -1416,7 +1416,7 @@ function TuiApp({
                 : 'prompt'
           }
           onSubmit={handleInput}
-          disabled={!!state.interrupt || state.compactionProgress?.placement === 'inline'}
+          disabled={shouldDisablePromptInput(state)}
           workspace={workspace}
           overlayActive={
             state.showHelp ||

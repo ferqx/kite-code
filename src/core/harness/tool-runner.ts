@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { isAbsolute } from 'node:path';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
@@ -31,6 +30,11 @@ import {
   networkBoundaryPolicyFromExecutionBoundaryV1,
 } from '@/core/sandbox/network-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
+import {
+  admitDelegationV1,
+  isDelegationRoleSmokeTestV1,
+} from '@/core/subagent/delegation-contract';
+import { getRoleConfig } from '@/core/subagent/roles';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
@@ -59,8 +63,10 @@ import {
 } from '@/core/tools/registry/dispatch';
 import type { ToolAvailabilityContext } from '@/core/tools/registry/spec';
 import type { ShellExecutor } from '@/core/tools/shell';
+import { normalizeToolContract } from '@/core/tools/tool-contracts';
 import type {
   AuthorizationOverride,
+  ShellFilesystemMode,
   ShellNetworkMode,
   ThreadAuthorizationState,
 } from '@/core/types';
@@ -70,9 +76,18 @@ import type {
   ShellGrantUsed,
   WorkspaceAccess,
 } from '@/protocol/events';
+import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@/protocol/git';
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
 import { isMcpRequest, type PendingToolRequest } from './tool-requests';
 import type { ToolExecutionResult } from './tool-result';
+
+const BROKERED_GIT_EXECUTABLE_TOKEN_V1 =
+  /(?:^|[\s"'`;&|()=,])(?:(?:[a-z]:)?[\\/][^\s"'`;&|()=,]*[\\/])?git(?:\.exe)?(?=$|[\s"'`;&|()=,])/iu;
+
+/** Conservative command-language scan: uncertainty is denied before shell dispatch. */
+export function containsBrokeredGitInvocationV1(command: string): boolean {
+  return BROKERED_GIT_EXECUTABLE_TOKEN_V1.test(command);
+}
 
 function resultContentDigest(stdout: string, stderr: string, exitCode: number): string {
   return createHash('sha256').update(JSON.stringify({ stdout, stderr, exitCode })).digest('hex');
@@ -116,9 +131,15 @@ function safeRecordPostimage(
  * Path args may arrive in MSYS2 form (/c/proj/...); normalize before the
  * external check, consistent with the policy layer, so in-workspace paths
  * are not treated as external. No-op outside Windows. */
-function isExternalPathArg(pathArg: string): boolean {
+function isExternalPathArg(workspace: string, pathArg: string): boolean {
   const normalized = msys2ToWindowsPath(pathArg);
-  return isAbsolute(normalized) || normalized.startsWith('~');
+  if (normalized.startsWith('~')) return true;
+  try {
+    resolvePath(workspace, normalized, { allowExternal: false });
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /** Production capability surfaces reject every path that does not resolve
@@ -127,7 +148,7 @@ function isExternalPathArg(pathArg: string): boolean {
  * approval-shape predicate, while this is a fail-closed execution ceiling. */
 function isOutsideProductionWorkspace(workspace: string, pathArg: string): boolean {
   if (!pathArg) return false;
-  if (isExternalPathArg(pathArg)) return true;
+  if (isExternalPathArg(workspace, pathArg)) return true;
   try {
     resolvePath(workspace, pathArg, { allowExternal: false });
     return false;
@@ -150,6 +171,7 @@ export interface RunApprovedToolInput {
   workspace: string;
   request: PendingToolRequest;
   shellExecutor?: ShellExecutor;
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   workspaceAccess?: WorkspaceAccess;
   phase?: AgentPhase;
   authorization?: ThreadAuthorizationState | null;
@@ -171,6 +193,8 @@ export interface RunApprovedToolInput {
   interactionMode?: import('@/protocol/events').InteractionMode;
   taskConfig?: AgentConfig;
   taskModel?: SupportedChatModel;
+  /** Parent Runtime canonical-private recovery identity inherited by task subagents. */
+  recoveryIdentityKey?: string;
   providerDataAdmission?: import('@/core/config/provider-data-admission').ProviderDataAdmissionGateV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   /** Runs after all local policy/approval checks and immediately before tool dispatch. */
@@ -191,6 +215,8 @@ export interface RunApprovedToolInput {
   availabilityContext?: ToolAvailabilityContext;
   /** Project instructions visible to the model that issued this request. */
   projectInstructionSnapshot?: ProjectInstructionSnapshot;
+  /** Current top-level user-authored goal; external/project text is never accepted as delegation authority. */
+  currentUserGoal?: string;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -199,6 +225,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     workspace,
     request,
     shellExecutor,
+    gitBroker,
     workspaceAccess = 'write',
     phase = defaultPhaseForWorkspaceAccess(workspaceAccess),
     authorization = null,
@@ -215,6 +242,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     interactionMode = 'accept_edits',
     taskConfig,
     taskModel,
+    recoveryIdentityKey,
     providerDataAdmission,
     descendantResourceAdmission,
     beforeDispatch,
@@ -276,11 +304,30 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       status: 'rejected',
     });
   }
+  if (request.name === 'task') {
+    const admission = admitDelegationV1({
+      userGoal: input.currentUserGoal ?? '',
+      delegatedTask: request.args.task,
+      role: request.args.subagent_type,
+      phase,
+    });
+    if (!admission.allowed) {
+      return withFailureGuidance(request, {
+        ok: false,
+        command: 'task',
+        exitCode: -1,
+        stdout: '',
+        stderr: `Sub-agent delegation denied (${admission.reason}).`,
+        status: 'rejected',
+      });
+    }
+  }
   if (builtinSpec && protectedPathEvaluator) {
     const pathDecision = evaluateRegisteredToolProtectedPaths(builtinSpec, request.args, {
       workspace,
       threadId,
       protectedPathEvaluator,
+      gitBroker,
     });
     if (!pathDecision.ok) {
       return withFailureGuidance(request, {
@@ -299,6 +346,28 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         taskConfig.features?.networkBoundaryV1 === true,
       )
     : undefined;
+  if (
+    request.name === 'shell_execute' &&
+    taskConfig &&
+    getFeatureFlags(taskConfig).brokeredGitV1 &&
+    executionSurface?.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1 &&
+    containsBrokeredGitInvocationV1(request.args.command)
+  ) {
+    const remoteOperation = /\b(?:fetch|pull|push|clone|ls-remote)\b/iu.test(request.args.command);
+    return withFailureGuidance(request, {
+      ok: false,
+      command: request.protectedCommand,
+      exitCode: -1,
+      stdout: '',
+      stderr: remoteOperation
+        ? 'Remote Git is deferred until a governed network and credential capability is available.'
+        : 'Git through shell_execute is denied by the brokered Git boundary. Use git_inspect for local status, diff, log, or branches.',
+      status: 'rejected',
+      resultMeta: remoteOperation
+        ? { gitFailureCode: 'managed_network_setup_required' }
+        : { nextCapability: 'git_inspect' },
+    });
+  }
   if (executionSurface) {
     const descriptor = builtinSpec
       ? builtinToolRegistry.descriptorOf(builtinSpec)
@@ -439,14 +508,20 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
                   config: taskConfig,
                   workspace,
                   shellExecutor,
+                  gitBroker,
                   mcpManager,
                   skills: skillManifests,
                   skillOptions,
+                  ...(taskInput.subagent_type === 'code' &&
+                  isDelegationRoleSmokeTestV1(input.currentUserGoal ?? '', 'code')
+                    ? { allowedTools: getRoleConfig('review').allowedTools }
+                    : {}),
                   authorization: normalizeAuthorizationState(authorization),
                   workspaceAccess,
                   phase,
                   projectInstructions: projectInstructionSnapshot,
                   threadId,
+                  recoveryIdentityKey,
                   eventSink: subagentEventSink,
                   signal,
                   model: taskModel,
@@ -463,6 +538,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
         signal,
         runTask,
         protectedPathEvaluator,
+        phase,
       });
       if (!dispatched.dispatched) {
         return withFailureGuidance(request, {
@@ -510,7 +586,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'read_file') {
     const filePath = request.args.path;
-    const isExternal = isExternalPathArg(filePath);
+    const isExternal = isExternalPathArg(workspace, filePath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
@@ -559,6 +635,12 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       resultMeta: dispatched.dispatched
         ? dispatched.projected.resultMeta
         : { path: filePath, totalLines: output.totalLines },
+      ...(dispatched.dispatched && dispatched.projected.outcomeAdviceV1
+        ? { classifierAdviceV1: dispatched.projected.outcomeAdviceV1 }
+        : {}),
+      ...(dispatched.dispatched && dispatched.projected.classifierDiagnostic
+        ? { classifierDiagnostic: dispatched.projected.classifierDiagnostic }
+        : {}),
     });
   }
 
@@ -574,7 +656,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     const editPath = editInput.path;
-    const isExternal = isExternalPathArg(editPath);
+    const isExternal = isExternalPathArg(workspace, editPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // ADR-0042 §4：改动前读取文件内容用于 readState 计算；
     // 原像记录延迟到 preExecute 通过之后（只在实际写入前记录）。
@@ -634,6 +716,9 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
       path: editInput.path,
       resultMeta: dispatched.projected.resultMeta,
+      ...(dispatched.projected.terminationReason
+        ? { terminationReason: dispatched.projected.terminationReason }
+        : {}),
     });
   }
 
@@ -641,7 +726,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const writeInput = request.args;
     const filePath = writeInput.path;
     const content = writeInput.content;
-    const isExternal = isExternalPathArg(filePath);
+    const isExternal = isExternalPathArg(workspace, filePath);
     const allowExternal = hasExecutionGrant && isExternal;
 
     // 写入前读取旧内容，用于生成 diff / Read old content before writing for diff
@@ -747,7 +832,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   if (request.name === 'search_content') {
     const searchInput = request.args;
     const searchPath = searchInput.path ?? '.';
-    const isExternal = isExternalPathArg(searchPath);
+    const isExternal = isExternalPathArg(workspace, searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
@@ -779,13 +864,17 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
       command: `search_content ${searchInput.pattern}`,
       resultMeta: projected.resultMeta,
+      ...(projected.outcomeAdviceV1 ? { classifierAdviceV1: projected.outcomeAdviceV1 } : {}),
+      ...(projected.classifierDiagnostic
+        ? { classifierDiagnostic: projected.classifierDiagnostic }
+        : {}),
     });
   }
 
   if (request.name === 'search_files') {
     const searchInput = request.args;
     const searchPath = searchInput.path ?? '.';
-    const isExternal = isExternalPathArg(searchPath);
+    const isExternal = isExternalPathArg(workspace, searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
@@ -817,6 +906,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stderr: projected.streams?.stderr ?? (projected.ok ? '' : projected.modelContent),
       command: `search_files ${searchInput.pattern}`,
       resultMeta: projected.resultMeta,
+      ...(projected.outcomeAdviceV1 ? { classifierAdviceV1: projected.outcomeAdviceV1 } : {}),
+      ...(projected.classifierDiagnostic
+        ? { classifierDiagnostic: projected.classifierDiagnostic }
+        : {}),
     });
   }
 
@@ -1009,21 +1102,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'shell_execute') {
-    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant, networkBoundaryPolicy);
-    const shellNetworkBroker =
-      networkBoundaryPolicy && hasExecutionGrant && input.recordNetworkDecision && request.id
-        ? {
-            policy: networkBoundaryPolicy,
-            toolCallId: request.id,
-            recordDecision: input.recordNetworkDecision,
-          }
-        : undefined;
+    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant);
+    const filesystemMode = resolveShellFilesystemMode(policy, hasExecutionGrant);
     const dispatched = await dispatchRegisteredTool(shellExecuteSpec, request.args, {
       workspace,
       signal,
       shellExecutor,
       shellNetworkMode: networkMode,
-      shellNetworkBroker,
+      shellFilesystemMode: filesystemMode,
       onShellProgress: input.onShellProgress,
       protectedPathEvaluator,
     });
@@ -1058,11 +1144,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   const spec = builtinToolRegistry.get(request.name);
   if (spec && 'execute' in spec) {
     const dispatched = await dispatchRegisteredTool(spec, request.args, {
+      ...(availabilityContext ?? {}),
       workspace,
       threadId,
       signal,
+      gitBroker,
       protectedPathEvaluator,
       allowExternalPaths: isExternalPathArg(
+        workspace,
         String((request.args as Record<string, unknown>).path ?? ''),
       )
         ? hasExecutionGrant
@@ -1084,6 +1173,15 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       stdout: dispatched.projected.ok ? dispatched.projected.modelContent : '',
       stderr: dispatched.projected.ok ? '' : dispatched.projected.modelContent,
       resultMeta: dispatched.projected.resultMeta,
+      ...(dispatched.projected.terminationReason
+        ? { terminationReason: dispatched.projected.terminationReason }
+        : {}),
+      ...(dispatched.projected.outcomeAdviceV1
+        ? { classifierAdviceV1: dispatched.projected.outcomeAdviceV1 }
+        : {}),
+      ...(dispatched.projected.classifierDiagnostic
+        ? { classifierDiagnostic: dispatched.projected.classifierDiagnostic }
+        : {}),
       ...(dispatched.projected.streams
         ? {
             stdout: dispatched.projected.streams.stdout,
@@ -1130,14 +1228,21 @@ function serializeMcpResultForModel(result: import('@/core/capabilities/result')
 function resolveShellNetworkMode(
   policy: ReturnType<typeof evaluateToolApproval>,
   hasExecutionGrant: boolean,
-  networkBoundaryPolicy?: NetworkBoundaryPolicyV1,
 ): ShellNetworkMode {
-  // No supported native backend can enforce a host allowlist for arbitrary
-  // descendants yet. A sealed execution boundary therefore tightens process
-  // networking to off instead of falling back to legacy allow_all.
-  if (networkBoundaryPolicy) return 'disabled';
   const mayNeedNetwork = policy.effects?.network || policy.effects?.uncertainEffects;
   return mayNeedNetwork && hasExecutionGrant ? 'allow_all' : 'disabled';
+}
+
+function resolveShellFilesystemMode(
+  policy: import('@/core/policies/approval-policy').ApprovalDecision,
+  hasExecutionGrant: boolean,
+): ShellFilesystemMode {
+  if (!hasExecutionGrant) return 'workspace_only';
+  return policy.effects?.externalRead ||
+    policy.effects?.externalWrite ||
+    policy.effects?.uncertainEffects
+    ? 'allow_all'
+    : 'workspace_only';
 }
 
 function ungovernedMcpNetworkResult(
@@ -1190,22 +1295,12 @@ function withFailureGuidance(
   };
 }
 
-/** 按工具类型生成失败后的正确使用提示 / Build per-tool usage guidance after failure */
+/** Single-source recovery guidance projected from the builtin ToolSpec contract. */
+export function recoveryGuidanceForTool(toolName: string): string {
+  const spec = builtinToolRegistry.get(toolName);
+  return spec ? normalizeToolContract(spec.contract).recovery : '';
+}
+
 function toolUsageGuidance(request: PendingToolRequest): string {
-  switch (request.name) {
-    case 'read_file':
-      return 'Use read_file with a relative path inside the workspace. If the path is uncertain, use search_files to locate it, then retry with the exact path.';
-    case 'edit_file':
-      return 'Use edit_file only after read_file. old_string must exactly match existing file content, including whitespace and indentation; if the same text appears multiple times, make old_string more specific or set replace_all: true.';
-    case 'write_file':
-      return 'Use write_file with a relative path and complete file content when creating or fully overwriting a file. For small changes to an existing file, prefer read_file followed by edit_file.';
-    case 'shell_execute':
-      return 'Use shell_execute with a concrete command. Read-only checks such as rg, ls, cat, or git status are classified from the command itself. Provide description to explain what the command does; commands needing approval enter the user approval flow automatically.';
-    case 'ask_user':
-      return 'Use ask_user only when progress is blocked by a focused clarification. Provide one concise question, concrete options, and allow free text when appropriate; the user_input node handles the interrupt.';
-    case 'web_fetch':
-      return 'Use web_fetch with a complete http/https URL. Verify the URL is public and accessible before calling. If fetch fails with HTTP error, the page may not exist or may be behind authentication. If readability fails, the page may not be a text article — try a different source.';
-    default:
-      return '';
-  }
+  return recoveryGuidanceForTool(request.name);
 }

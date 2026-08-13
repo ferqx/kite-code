@@ -1,4 +1,6 @@
-import { getToolContract } from './tool-contracts';
+import { z } from 'zod';
+import { builtinToolRegistry } from './registry/builtins';
+import { normalizeToolContract } from './tool-contracts';
 
 /**
  * 返回工具期望的参数格式描述（人类可读）。
@@ -8,12 +10,22 @@ import { getToolContract } from './tool-contracts';
  * for structured error feedback when the model's JSON fails to parse.
  */
 export function getToolSchemaHint(toolName: string): string {
-  // 先从工具契约中获取 outputFormat（已有的结构化描述）
-  const contract = getToolContract(toolName);
-  if (contract) {
-    const fmt = contract.sections.outputFormat;
-    // outputFormat 通常以 "JSON: ..." 开头，直接返回
-    if (fmt) return fmt;
+  const spec = builtinToolRegistry.get(toolName);
+  if (spec) {
+    const contract = normalizeToolContract(spec.contract);
+    const jsonSchema = z.toJSONSchema(spec.inputSchema) as {
+      required?: readonly string[];
+      properties?: Record<string, unknown>;
+    };
+    const fields = Object.keys(jsonSchema.properties ?? {});
+    const required = jsonSchema.required ?? [];
+    return [
+      `Arguments must match the disclosed JSON schema fields: ${fields.join(', ') || '(none)'}.`,
+      required.length > 0 ? `Required fields: ${required.join(', ')}.` : '',
+      contract.constraints,
+    ]
+      .filter(Boolean)
+      .join(' ');
   }
 
   // MCP 工具：无固定契约，提示模型查看工具描述

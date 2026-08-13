@@ -16,10 +16,18 @@ import {
 } from '../../src/core/runtime/context-compaction';
 import type { ContextCompactionRequestedEvent, RuntimeEvent } from '../../src/core/runtime/events';
 import { AgentKernel } from '../../src/core/runtime/kernel';
-import { reduceRuntimeState } from '../../src/core/runtime/reducer';
+import { reduceRuntimeState as reduceCanonicalRuntimeState } from '../../src/core/runtime/reducer';
 import { decideNextEffect } from '../../src/core/runtime/scheduler';
-import { createInitialRuntimeState } from '../../src/core/runtime/state';
+import { createInitialRuntimeState, type RuntimeState } from '../../src/core/runtime/state';
 import { createRuntimeStore } from '../../src/core/runtime/store';
+import { normalizeCurrentToolOutcomeEventV1 } from '../../src/core/runtime/tool-outcome-events';
+
+function reduceRuntimeState(state: RuntimeState, event: RuntimeEvent): RuntimeState {
+  return reduceCanonicalRuntimeState(
+    state,
+    normalizeCurrentToolOutcomeEventV1(event, state, '2026-08-11T00:00:00.000Z'),
+  );
+}
 
 const estimate: ContextTokenEstimate = {
   systemTokens: 10,
@@ -102,7 +110,7 @@ function validCheckpoint(
 
 describe('eventized context compaction', () => {
   test('persists a pending request and schedules it after higher-priority work', () => {
-    const state = requestedState();
+    let state = requestedState();
     expect(state.context.pendingCompaction).toMatchObject({
       compactionId: 'compact-1',
       reason: 'auto',
@@ -123,7 +131,18 @@ describe('eventized context compaction', () => {
     state.tools.queue = ['tool'];
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['tool'] });
 
-    state.tools.queue = [];
+    state = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'tool',
+      name: 'read_file',
+      result: {
+        ok: true,
+        command: 'read_file',
+        exitCode: 0,
+        stdout: 'completed',
+        stderr: '',
+      },
+    });
     state.transcript.final = 'done';
     expect(decideNextEffect(state)).toEqual({ type: 'emit_final' });
   });

@@ -48,4 +48,13 @@ describe('Prompt Contract V2 token budget', () => {
     expect(prompt).not.toContain('Use the `Skill` tool');
     expect(prompt).toContain('activate_skill');
   });
+
+  test('turns an explicit bounded read-only delegation into the planning task contract', () => {
+    const prompt = buildStaticSystemPrompt('agent', undefined, undefined, 'v2');
+    expect(prompt).toContain('explicitly requested by the current user');
+    expect(prompt).toContain('make `task` the next action, not prose');
+    expect(prompt).toContain('`subagent_type` and a concrete self-contained `task`');
+    expect(prompt).toContain('`subagent_type=plan` for architecture/design planning');
+    expect(prompt).toContain('do not duplicate its assigned investigation');
+  });
 });

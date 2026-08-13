@@ -15,6 +15,8 @@ export interface CreateAgentToolsInput {
   workspace: string;
   /** 可选 Shell 执行器 / Optional shell executor */
   shellExecutor?: ShellExecutor;
+  /** App-composed typed Git broker. */
+  gitBroker?: import('@/core/git/broker').GitBrokerV1;
   /** 可选 MCP Runtime provider / Optional MCP Runtime provider */
   mcpManager?: import('@/core/mcp').McpRuntimeProvider;
   /** Runtime-issued MCP tool bindings for the current model call. */
@@ -61,7 +63,10 @@ export function toolAvailabilityContext(input: CreateAgentToolsInput): ToolAvail
     phase: input.phase,
     interactionMode: input.interactionMode,
     featureFlags,
+    brokeredGitFeatureRevision:
+      input.config?.executionCapabilitySurface?.brokeredGitFeatureRevision ?? null,
     hasTaskAdapter: Boolean(input.subagentEventSink && input.config),
+    hasGitBroker: Boolean(input.gitBroker),
     toolSearchEnabled: input.toolSearch === true,
     activeSkillFrameIds: Object.freeze(
       (input.activeSkillFrames ?? []).map((frame) => frame.activationId).sort(),
@@ -102,15 +107,6 @@ export function createAgentTools(
   for (const { binding, descriptor } of input.mcpBindings ?? []) {
     if (descriptor.kind !== 'mcp_tool' || descriptor.availability !== 'available') continue;
     if (!descriptor.inputSchema) continue;
-    if (
-      ctx.featureFlags?.promptContractV2 &&
-      ctx.phase === 'planning' &&
-      Object.values(descriptor.effectiveEffects).some(
-        (effect) => effect !== 'none' && effect !== 'read',
-      )
-    ) {
-      continue;
-    }
     if (
       executionSurface &&
       !isDescriptorAdmittedByExecutionCapabilitySurfaceV1({

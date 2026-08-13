@@ -3,7 +3,7 @@
 状态：active
 范围：`src/app/tui/run-status.ts`、`src/app/tui/StatusBar.tsx`、`src/app/tui/App.tsx`、`src/app/tui/Footer.tsx`、`src/app/tui/reducers/handleEvent.ts`、`tests/run-status.test.ts`、`tests/tui-mock-render.test.tsx`、`tests/runtime/failure-taxonomy.test.ts`
 读取时机：修改 StatusBar 渲染、run-status 推导逻辑、状态行动画、阶段切换规则时必读。
-验证：`bun test tests/run-status.test.ts tests/tui-mock-render.test.tsx tests/runtime/failure-taxonomy.test.ts tests/tui.test.ts tests/session-manager.test.ts`、`bun run scripts/run-tui-system-tests.ts cancel-successor-render`
+验证：`bun test tests/run-status.test.ts tests/tui-reducer.test.ts tests/tui-layout.test.tsx tests/tui-mock-render.test.tsx tests/tui-slash-command.test.ts tests/runtime/failure-taxonomy.test.ts tests/tui.test.ts tests/session-manager.test.ts`、`bun run scripts/run-tui-system-tests.ts cancel-successor-render compaction-status-input session-switch session-persistence`
 
 ## 设计原则
 
@@ -26,13 +26,14 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 **叠加态（覆盖阶段动词，但不改变阶段本身）：**
 - Retry: `Retrying` + warning 色
 - Approval 等待: `Waiting` + muted 色
+- Subagent 审批暂停：block 状态切换为 `suspended`；状态推导将其映射为 `Awaiting approval` + warning 色。批准或 replay 恢复后回到 `running`，取消同时覆盖 `running` 与 `suspended`。
 - Input 等待: `Asking` + warning 色
-- Context compaction: `preparing → summarizing → validating`，由 App-only action 驱动，不写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除。手动 `/compact` 的动画紧跟命令以内联输出展示，不占用通用会话 StatusBar；自动压缩仍使用 StatusBar。
+- Context compaction: `preparing → summarizing → validating`，由 App-only progress action 驱动，不额外写 RuntimeEvent；所有终态和 stale 路径都在 `finally` 清除。手动与自动压缩都在消息区使用同一个内联动画；该动画不覆盖当前 Agent run 动词。
 - Idle plan mode: `Shift+Tab to exit - describe your task` + muted 色
 
 **阶段不变性规则**：一旦进入 Working，永不回退 Thinking；一旦进入 Finishing，永不回退 Working。
 
-手动 `/compact` 不属于普通 Agent run。其 `compactionProgress.placement=inline` 时，`OutputArea` 在命令下方显示专用动画，`StatusBar` 保持隐藏；progress 清除后动画立即消失。自动压缩使用 `placement=status`，继续复用 StatusBar。
+手动 `/compact` 不属于普通 Agent run，因此 `compactionProgress.source=manual` 时 `StatusBar` 隐藏。自动压缩发生在活跃用户 turn 内：持久化的 `context.compaction_requested(reason=auto)` 在消息列表投影为 `/auto-compact`，但该语义命令不注册到 slash-command parser，用户不能主动调用；`compactionProgress.source=automatic` 以内联动画补充当前 Agent run，不能替换或隐藏其 `StatusBar`。两种压缩都不得禁用 InputLine，压缩期间提交的提示词继续由 Runtime 单飞 barrier 串行。`compactionProgress` 只是当前展示会话的瞬时状态，不进入 session snapshot；加载、创建或切换会话时必须清除，不能让上一会话的残留 progress 影响恢复后的输入面。持久化的 `/compact` 与 `/auto-compact` 消息仍可从 RuntimeEvent 回放。
 
 ## 状态推导
 
@@ -100,7 +101,8 @@ Working 阶段通过 `WORKING_GRADIENT` hex 色值在蓝→青→绿→金之间
 
 `shouldShowRunStatus(state)` 决定状态行是否可见：
 - 非 running 或中断 → 隐藏
-- 手动 `/compact` 的 inline progress → 隐藏（动画由 `OutputArea` 展示）
+- 手动 `/compact` progress → 隐藏（动画由 `OutputArea` 展示）
+- 自动 `/auto-compact` progress → 按普通 running 规则保留 Agent run 状态（压缩动画同时在 `OutputArea` 展示）
 - 最新可见 block 为正常文本 → 隐藏（文本已有，状态行冗余）
 - retry 中 → 始终显示
 

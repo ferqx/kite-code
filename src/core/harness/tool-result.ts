@@ -21,6 +21,9 @@ export interface ToolFailure {
 
 /** 工具执行结果类型 / Tool execution result type */
 export type ToolExecutionResult = ShellResult & {
+  /** Registry-owned metadata-only classifier advice, preserved to the canonical terminal event. */
+  classifierAdviceV1?: import('@/core/runtime/tool-outcome').ToolOutcomeClassifierAdviceV1;
+  classifierDiagnostic?: 'classifier_threw';
   /** Structured result facts retained independently from stdout serialization. */
   resultMeta?: ToolResultMeta;
   /** Project-level execution status. LangChain ToolMessage still maps this to success/error only. */

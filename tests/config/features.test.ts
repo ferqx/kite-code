@@ -33,7 +33,8 @@ describe('feature flags', () => {
     expect(getFeatureFlags().executionBoundaryV1).toBe(false);
     expect(getFeatureFlags().networkBoundaryV1).toBe(false);
     expect(getFeatureFlags().observabilityMetricsV1).toBe(false);
-    expect(getFeatureFlags().promptContractV2).toBe(false);
+    expect(getFeatureFlags().promptContractV2).toBe(true);
+    expect(getFeatureFlags({ features: { promptContractV2: false } }).promptContractV2).toBe(false);
     expect(getFeatureFlags({ features: { promptContractV2: true } }).promptContractV2).toBe(true);
     expect(
       getFeatureFlags({ features: { boundedCancellationV1: true } }).boundedCancellationV1,

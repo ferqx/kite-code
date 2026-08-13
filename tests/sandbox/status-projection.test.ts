@@ -29,6 +29,7 @@ function input(
       shell: true,
       skillChild: true,
       localStdioMcp: false,
+      gitInspect: false,
     },
     worktreeMode: 'controller_worktree',
     controllerOwned: true,
@@ -77,6 +78,11 @@ describe('execution status projection', () => {
           enabled: false,
           disabledReasons: ['feature_disabled'],
         },
+        {
+          capability: 'gitInspect',
+          enabled: false,
+          disabledReasons: ['capability_not_admitted'],
+        },
       ],
     });
     expect(status.capabilities.map(({ capability }) => capability)).toEqual([
@@ -106,6 +112,7 @@ describe('execution status projection', () => {
           shell: false,
           skillChild: false,
           localStdioMcp: false,
+          gitInspect: false,
         },
         worktreeMode: 'current_checkout',
         controllerOwned: false,
@@ -199,6 +206,7 @@ describe('execution status projection', () => {
       executionCapabilitySurface: {
         ...input().capabilitySurface,
         inProcessReadOnlyTools: null,
+        brokeredGitFeatureRevision: null,
       },
       productionExecution: { qualificationId: 'qualification-v1' },
     };

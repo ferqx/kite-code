@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from '../src/app/cli/index';
 import { generateBwrapArgs } from '../src/core/sandbox/bwrap';
@@ -89,6 +89,20 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('(allow network*)');
   });
 
+  test('approved filesystem scope keeps Seatbelt active while widening file rules', () => {
+    const profile = generateSandboxProfile(workspace, { filesystemScope: 'full_access' });
+    expect(profile).toContain('(deny default)');
+    expect(profile).toContain('(allow file-read* file-read-metadata file-map-executable)');
+    expect(profile).toContain('(allow file-write* file-write-create file-write-unlink file-ioctl)');
+    expect(profile).toContain('(deny network*)');
+    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+  });
+
+  test('approved filesystem scope retains native denies for external credentials', () => {
+    const profile = generateSandboxProfile(workspace, { filesystemScope: 'full_access' });
+    expect(profile).toContain(seatbeltSubpath(join(homedir(), '.ssh')));
+  });
+
   test('profile imports system.sb as base', () => {
     const profile = generateSandboxProfile(workspace);
     expect(profile).toContain('(import "system.sb")');
@@ -132,6 +146,15 @@ describe('sandbox profile generation', () => {
     expect(profile).toContain('[gG][iI][tT](/.*)?$');
   });
 
+  test('brokered revision profile keeps metadata read and write in the same deny rule', () => {
+    const profile = generateSandboxProfile(workspace, { gitAccess: 'deny' });
+    const metadata = seatbeltSubpath(join(canonicalWorkspace, '.git'));
+    const metadataIndex = profile.indexOf(metadata);
+    expect(metadataIndex).toBeGreaterThan(0);
+    const denyPrefix = profile.slice(Math.max(0, metadataIndex - 300), metadataIndex);
+    expect(denyPrefix).toContain('(deny file-read* file-map-executable file-write*');
+  });
+
   test('git access allows CLT developer dir and user git config reads', () => {
     const profile = generateSandboxProfile(workspace, { gitAccess: 'allow' });
     if (existsSync('/private/var/select/developer_dir')) {
@@ -171,6 +194,21 @@ describe('sandbox profile generation', () => {
       expect(profile).not.toContain(seatbeltSubpath(link));
     } finally {
       rmSync(parent, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('approved filesystem execution lane', () => {
+  test('keeps bubblewrap namespaces while projecting the approved filesystem', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'approved-bwrap-filesystem-'));
+    try {
+      const args = generateBwrapArgs(workspace, { filesystemScope: 'full_access' });
+      expect(args).toContain('--unshare-pid');
+      expect(args).toContain('--unshare-net');
+      expect(args).toEqual(expect.arrayContaining(['--bind', '/', '/']));
+      expect(args).not.toEqual(expect.arrayContaining(['--tmpfs', '/tmp']));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 });
@@ -393,6 +431,15 @@ describe('dangerous path detection', () => {
     expect(checkDangerousPaths("echo 'evil' >> /etc/crontab")).toBe('/etc/crontab');
     expect(checkDangerousPaths("echo 'evil' >> /etc/passwd")).toBe('/etc/passwd');
     expect(checkDangerousPaths("echo 'evil' >> /etc/sudoers")).toBe('/etc/sudoers');
+    expect(checkDangerousPaths('cat /private/etc/hosts')).toBe('/private/etc/hosts');
+    expect(checkDangerousPaths('type C:\\Windows\\System32\\drivers\\etc\\hosts')).toBe(
+      'Windows/System32/drivers/etc/hosts',
+    );
+  });
+
+  test('detects simple shell quote concatenation in protected paths', () => {
+    expect(checkDangerousPaths('cat /e"tc/pa"sswd')).toBe('/etc/passwd');
+    expect(checkDangerousPaths('cat ~/.ss"h/id_r"sa')).toBe('.ssh/id_rsa');
   });
 
   test('allows safe commands with similar-looking paths', () => {
@@ -507,6 +554,24 @@ describe('bwrap argument generation', () => {
     }
   });
 
+  test('brokered revision masks a .git directory read-only after the workspace bind', () => {
+    mkdirSync(join(workspace, '.git'), { recursive: true });
+    const args = generateBwrapArgs(workspace, { gitMetadataDeny: true });
+    const workspaceIndex = args.findIndex(
+      (value, index) => value === '--bind' && args[index + 1] === canonicalWorkspace,
+    );
+    const gitIndex = args.findIndex(
+      (value, index) => value === '--tmpfs' && args[index + 1] === join(canonicalWorkspace, '.git'),
+    );
+    expect(gitIndex).toBeGreaterThan(workspaceIndex);
+    expect(args.slice(gitIndex, gitIndex + 4)).toEqual([
+      '--tmpfs',
+      join(canonicalWorkspace, '.git'),
+      '--remount-ro',
+      join(canonicalWorkspace, '.git'),
+    ]);
+  });
+
   test('includes essential isolation flags', () => {
     const args = generateBwrapArgs(workspace);
     expect(args).toContain('--unshare-pid');
@@ -603,7 +668,50 @@ describe('sandbox executor factory', () => {
       exitCode: -1,
       stdout: '',
       stderr: 'Sandbox unavailable (sandbox_disabled); refusing unsandboxed shell execution.',
+      terminationReason: 'sandbox_denied',
     });
+  });
+
+  test('controlled fallback sentinel is triggerable but fail-closed denial never invokes it', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-sandbox-sentinel-'));
+    const marker = join(workspace, 'fallback-invoked');
+    let calls = 0;
+    const sentinel = async (input: { command: string }) => {
+      calls += 1;
+      writeFileSync(marker, input.command);
+      return {
+        ok: true,
+        command: input.command,
+        exitCode: 0,
+        stdout: 'sentinel',
+        stderr: '',
+      };
+    };
+    try {
+      const bare = createSandboxExecutor(
+        { enabled: false, workspace, unavailableFallback: 'bare_shell' },
+        sentinel,
+      );
+      await expect(bare({ workspace, command: 'first' })).resolves.toMatchObject({
+        stdout: 'sentinel',
+      });
+      expect(calls).toBe(1);
+      expect(existsSync(marker)).toBe(true);
+
+      rmSync(marker);
+      const denied = createSandboxExecutor(
+        { enabled: false, workspace, unavailableFallback: 'fail' },
+        sentinel,
+      );
+      await expect(denied({ workspace, command: 'second' })).resolves.toMatchObject({
+        ok: false,
+        terminationReason: 'sandbox_denied',
+      });
+      expect(calls).toBe(1);
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 });
 

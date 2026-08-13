@@ -1,8 +1,10 @@
 import { ProviderDataAdmissionError } from '@/core/config/provider-data-admission';
 import type { RuntimeUserAction } from './actions';
+import { decideCompletion } from './completion-guard';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
-import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
+import { type AgentKernel, isRuntimeEffectDeferred, type RuntimeEffectExecutor } from './kernel';
+import { guardLegacyPlanContinuationEffect } from './plan-continuation';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import {
   planRuntimeBudgetAdmissionV1,
@@ -10,6 +12,7 @@ import {
 } from './resource-budget-admission';
 import { decideNextEffect } from './scheduler';
 import { completedTerminalOutcomeV1, failedTerminalOutcomeV1 } from './terminal-outcome';
+import { isToolRecoveryJournalInvalidV1 } from './tool-recovery-journal';
 
 export { resolveResourceAdmissionFailureOutcomeV1 } from './resource-admission-terminal';
 
@@ -20,8 +23,17 @@ export interface RuntimeActionProvider {
   ): Promise<RuntimeUserAction>;
 }
 
-type EffectExecutionOutcome = { applied: boolean; emitted: boolean };
+type EffectExecutionOutcome = {
+  applied: boolean;
+  emitted: boolean;
+  deferred?: { reason: string; retryAfterMs: number };
+};
 const ABORTED_WAIT = Symbol('aborted-wait');
+const TIMED_OUT_WAIT = Symbol('timed-out-wait');
+// The executor has already received AbortSignal before this grace period
+// begins.  Keep consuming its terminal cleanup facts, but never let one
+// non-cooperative adapter hold the Runtime (and its successor turn) forever.
+const ABORT_CLEANUP_GRACE_MS = 3_000;
 
 async function waitForPromiseOrAbort<T>(
   promise: Promise<T>,
@@ -46,6 +58,31 @@ async function waitForPromiseOrAbort<T>(
       reject(error);
     });
   });
+}
+
+async function waitForRetryOrAbort(
+  retryAfterMs: number,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  const delay = new Promise<void>((resolve) => setTimeout(resolve, Math.max(1, retryAfterMs)));
+  return (await waitForPromiseOrAbort(delay, signal)) !== ABORTED_WAIT;
+}
+
+async function waitForPromiseOrTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | typeof TIMED_OUT_WAIT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<typeof TIMED_OUT_WAIT>((resolve) => {
+        timer = setTimeout(resolve, Math.max(0, timeoutMs), TIMED_OUT_WAIT);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 const MAX_PENDING_TOOL_PROGRESS_CHARS = 16 * 1024;
@@ -112,13 +149,40 @@ function mergeToolProgress(
   };
 }
 
+/** The lease, not an executor adapter, owns restricted model-surface metadata. */
+function bindModelResponseToEffect(
+  lease: import('./effects').RuntimeEffectLease,
+  event: RuntimeEvent,
+): RuntimeEvent {
+  if (event.type !== 'model.responded') return event;
+  const expectedSurface = lease.effect.type === 'call_model' ? lease.effect.toolSurface : undefined;
+  if (expectedSurface) return { ...event, toolSurface: expectedSurface };
+  if (!event.toolSurface) return event;
+  const { toolSurface: _unboundSurface, ...unbound } = event;
+  return unbound;
+}
+
+function bindModelResponsesToEffect(
+  lease: import('./effects').RuntimeEffectLease,
+  events: RuntimeEvent[],
+): RuntimeEvent[] {
+  return events.map((event) => bindModelResponseToEffect(lease, event));
+}
+
 /** Execute an effect while forwarding events produced during the effect. */
 async function* executeEffectWithStreaming(
   kernel: AgentKernel,
   executor: RuntimeEffectExecutor,
   lease: import('./effects').RuntimeEffectLease,
   reservationIds: string[] = [],
+  signal?: AbortSignal,
 ): AsyncGenerator<RuntimeEvent, EffectExecutionOutcome> {
+  // A lease can become stale after async preparation or while another durable
+  // fact is applied. Never enter any executor once the journal is corrupt;
+  // report a non-applied attempt so the outer loop schedules the hard block.
+  if (isToolRecoveryJournalInvalidV1(kernel.getState().toolRecovery)) {
+    return { applied: false, emitted: true };
+  }
   const pending: Array<{
     events: RuntimeEvent[];
     mode?: 'late_resource_reconciliation';
@@ -129,6 +193,7 @@ async function* executeEffectWithStreaming(
   let wake: (() => void) | null = null;
   let settled = false;
   let result: RuntimeEvent[] = [];
+  let deferred: { reason: string; retryAfterMs: number } | undefined;
   let failure: unknown;
 
   const enqueue = (
@@ -137,6 +202,7 @@ async function* executeEffectWithStreaming(
     reject?: (error: unknown) => void,
     mode?: 'late_resource_reconciliation',
   ) => {
+    events = bindModelResponsesToEffect(lease, events);
     const event = events.length === 1 ? events[0] : undefined;
     if (!resolve && !reject && !mode && event?.type === 'tool.progress') {
       const key = toolProgressKey(event);
@@ -182,7 +248,11 @@ async function* executeEffectWithStreaming(
     },
   ).then(
     (events) => {
-      result = events;
+      if (isRuntimeEffectDeferred(events)) {
+        deferred = events.deferred;
+      } else {
+        result = bindModelResponsesToEffect(lease, events);
+      }
       settled = true;
       wake?.();
       wake = null;
@@ -197,11 +267,22 @@ async function* executeEffectWithStreaming(
 
   let emitted = false;
   let cancellationIncomplete = false;
+  let cleanupDeadlineAt: number | undefined;
   while (!settled || pending.length > 0) {
     if (pending.length === 0) {
-      await new Promise<void>((resolve) => {
+      const waitForWake = new Promise<void>((resolve) => {
         wake = resolve;
       });
+      if (cleanupDeadlineAt != null || signal?.aborted) {
+        cleanupDeadlineAt ??= Date.now() + ABORT_CLEANUP_GRACE_MS;
+        const waited = await waitForPromiseOrTimeout(waitForWake, cleanupDeadlineAt - Date.now());
+        if (waited === TIMED_OUT_WAIT) return { applied: false, emitted };
+      } else {
+        const waited = await waitForPromiseOrAbort(waitForWake, signal);
+        if (waited === ABORTED_WAIT) {
+          cleanupDeadlineAt = Date.now() + ABORT_CLEANUP_GRACE_MS;
+        }
+      }
     }
     while (pending.length > 0) {
       const pendingEvent = pending.shift()!;
@@ -220,7 +301,7 @@ async function* executeEffectWithStreaming(
         try {
           const applied = kernel.applyLateResourceReconciliation([event]);
           pendingEvent.resolve?.(applied);
-          if (applied) yield event;
+          if (applied) yield* kernel.getLastAppliedEvents();
         } catch (error) {
           if (!pendingEvent.reject) throw error;
           pendingEvent.reject(error);
@@ -240,7 +321,7 @@ async function* executeEffectWithStreaming(
               : kernel.applyEffectResult(lease, events);
           pendingEvent.resolve?.(applied);
           if (applied) {
-            yield* events;
+            yield* kernel.getLastAppliedEvents();
           }
         } catch (error) {
           if (!pendingEvent.reject) throw error;
@@ -250,6 +331,7 @@ async function* executeEffectWithStreaming(
     }
   }
   await execution;
+  if (deferred) return { applied: false, emitted: false, deferred };
   if (failure) {
     if (reservationIds.length > 0) {
       const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) =>
@@ -299,7 +381,7 @@ async function* executeEffectWithStreaming(
       if (unknownEvents.length > 0) kernel.applyEffectResult(lease, unknownEvents);
       throw error;
     }
-    yield* terminalResult;
+    yield* kernel.getLastAppliedEvents();
   }
   if (!emitted) return { applied: true, emitted: false };
   return { applied: true, emitted: true };
@@ -363,7 +445,7 @@ export async function* runRuntimeLoop(
     backgroundCount += 1;
     backgroundGroups.set(group, (backgroundGroups.get(group) ?? 0) + 1);
     void (async () => {
-      const stream = executeEffectWithStreaming(kernel, executor, lease, reservationIds);
+      const stream = executeEffectWithStreaming(kernel, executor, lease, reservationIds, signal);
       try {
         while (true) {
           const step = await stream.next();
@@ -393,7 +475,14 @@ export async function* runRuntimeLoop(
       | Extract<RuntimeEvent, { type: 'runtime.cancellation_diagnostic' }>
       | undefined;
     while (backgroundCount > 0 || backgroundEvents.length > 0) {
-      if (backgroundEvents.length === 0) await waitForBackground();
+      if (backgroundEvents.length === 0) {
+        // Every background executor receives the same signal and has its own
+        // bounded post-abort cleanup grace. Once cancellation is observed we
+        // must drain that grace rather than race the already-aborted signal,
+        // otherwise diagnostics and terminal cleanup facts disappear.
+        if (signal?.aborted) await waitForBackground();
+        else await waitForPromiseOrAbort(waitForBackground(), signal);
+      }
       while (backgroundEvents.length > 0) {
         const backgroundEvent = backgroundEvents.shift()!;
         if (backgroundEvent.type === 'runtime.cancellation_diagnostic') {
@@ -416,6 +505,11 @@ export async function* runRuntimeLoop(
       let effect = decideNextEffect(kernel.getState());
       if (prepareEffect) effect = await prepareEffect(effect, kernel.getState());
       const effectState = kernel.getState();
+      const currentEffect = decideNextEffect(effectState);
+      effect =
+        currentEffect.type === 'recovery_blocked'
+          ? currentEffect
+          : guardLegacyPlanContinuationEffect(effectState, effect, currentEffect);
       const shellGroup =
         effect.type === 'run_tools' ? shellConcurrencyGroup(effect, effectState) : undefined;
       const effectToolCallIds = effect.type === 'run_tools' ? effect.toolCallIds : [];
@@ -479,17 +573,23 @@ export async function* runRuntimeLoop(
       if (effect.type === 'subagent.recovery_unavailable') {
         count += 1;
         const lease = kernel.beginEffect(effect);
-        const outcome = yield* executeEffectWithStreaming(kernel, executor, lease);
+        const outcome = yield* executeEffectWithStreaming(kernel, executor, lease, [], signal);
         if (!outcome.emitted) return;
         if (!outcome.applied) continue;
         continue;
       }
       if (effect.type === 'emit_final') {
         count += 1;
+        const decision = decideCompletion(kernel.getState());
+        if (decision.status !== 'accepted') continue;
         const completed: RuntimeEvent = {
           type: 'run.completed',
           turnId: kernel.getState().turn.turnId,
           output: kernel.getState().transcript.final ?? '',
+          completionGuardVersion: decision.version,
+          ...(decision.version === 'completion_guard_v2'
+            ? { planIdentity: decision.planIdentity }
+            : {}),
           outcome: completedTerminalOutcomeV1(),
         };
         const turnCompleted: RuntimeEvent = {
@@ -502,6 +602,52 @@ export async function* runRuntimeLoop(
         kernel.processEventBatch([completed, turnCompleted]);
         yield completed;
         yield turnCompleted;
+        return;
+      }
+      if (effect.type === 'completion_blocked') {
+        count += 1;
+        const blocked: RuntimeEvent = {
+          type: 'completion.blocked',
+          turnId: kernel.getState().turn.turnId,
+          guardVersion: effect.decision.version,
+          code: effect.decision.code,
+          nextAction: effect.decision.nextAction,
+          planning: effect.decision.planning,
+          correctionAttempt: effect.decision.correctionAttempt,
+          ...(effect.decision.version === 'completion_guard_v2'
+            ? { planIdentity: effect.decision.planIdentity }
+            : {}),
+        };
+        if (effect.decision.canCorrect) {
+          kernel.processEvent(blocked);
+          yield blocked;
+          continue;
+        }
+        const failure = classifyFailure(
+          'unknown',
+          `Completion blocked by ${effect.decision.code}; next action: ${effect.decision.nextAction}.`,
+        );
+        const aborted: RuntimeEvent = {
+          type: 'turn.aborted',
+          turnId: kernel.getState().turn.turnId,
+          reason: failure.message,
+          cause: 'error',
+        };
+        const terminal: RuntimeEvent = {
+          type: 'run.error',
+          message: failure.message,
+          recoverable: false,
+          failure,
+          turnId: kernel.getState().turn.turnId,
+          outcome: failedTerminalOutcomeV1({ ...failure, kind: 'unknown' }),
+        };
+        // The non-correctable blocker and both terminal facts are one durable
+        // boundary. A consumer that stops after observing attempt two must
+        // never leave an active turn that can schedule a third model call.
+        kernel.processEventBatch([blocked, aborted, terminal]);
+        yield blocked;
+        yield aborted;
+        yield terminal;
         return;
       }
       let reservationIds: string[] = [];
@@ -560,6 +706,12 @@ export async function* runRuntimeLoop(
         }
         effect = admission.effect;
         reservationIds = admission.reservationIds;
+      }
+      // Recheck after all async/preparation admission boundaries and before a
+      // prepared effect can request UI, Provider, verification, compaction or
+      // tool execution. The leased executor repeats this check once more.
+      if (isToolRecoveryJournalInvalidV1(kernel.getState().toolRecovery)) {
+        continue;
       }
       if (
         effect.type === 'run_tools' &&
@@ -633,13 +785,10 @@ export async function* runRuntimeLoop(
               outcome: 'failed',
               failureCode: 'unknown',
             };
-          } else if (effect.type === 'request_provider_admission') {
-            action = {
-              type: 'provider_admission_decision',
-              interactionId: effect.interactionId,
-              decision: { kind: 'cancel' },
-            };
           } else {
+            // A provider-admission UI/transport failure is not a user
+            // decision. Let the agent persist a typed error-caused terminal
+            // instead of falsely recording task/turn cancellation by user.
             throw error;
           }
         }
@@ -701,7 +850,20 @@ export async function* runRuntimeLoop(
       }
       count += 1;
       const lease = kernel.beginEffect(effect);
-      const outcome = yield* executeEffectWithStreaming(kernel, executor, lease, reservationIds);
+      const outcome = yield* executeEffectWithStreaming(
+        kernel,
+        executor,
+        lease,
+        reservationIds,
+        signal,
+      );
+      if (outcome.deferred) {
+        // A cross-runtime effect lease is contention, not a terminal outcome.
+        // Do not consume the effect budget while waiting for the owning runtime.
+        count -= 1;
+        if (!(await waitForRetryOrAbort(outcome.deferred.retryAfterMs, signal))) return;
+        continue;
+      }
       if (!outcome.emitted) return;
       if (!outcome.applied) continue;
     }

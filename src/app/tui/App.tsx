@@ -40,12 +40,15 @@ const MemoHeader = React.memo(Header);
 
 export function shouldShowRunStatus(state: TuiState): boolean {
   if (state.interrupt) return false;
-  if (state.status.currentNode?.startsWith('context_')) {
-    return state.compactionProgress?.placement !== 'inline';
-  }
+  if (state.compactionProgress?.source === 'manual') return false;
   if (!state.running) return false;
   if (state.status.retryState) return true;
   return true;
+}
+
+/** Compaction is non-modal; only an active interaction owns the prompt surface. */
+export function shouldDisablePromptInput(state: Pick<TuiState, 'interrupt'>): boolean {
+  return Boolean(state.interrupt);
 }
 
 export interface AppProps {
@@ -332,11 +335,7 @@ export default function App({
         awaitingApproval={awaitingApproval}
         awaitingInput={awaitingInput}
         columns={columns}
-        inlineCompactionPhase={
-          state.compactionProgress?.placement === 'inline'
-            ? state.compactionProgress.phase
-            : undefined
-        }
+        compactionPhase={state.compactionProgress?.phase}
       />
 
       {/* ── Footer: 3-row interaction zone ── */}

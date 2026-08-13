@@ -10,6 +10,7 @@ import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
 import { descriptorRevision } from '@/core/capabilities/catalog';
 import type { ToolCapability } from '@/core/policies/tool-capabilities';
+import { observeUnknownToolFieldsV1 } from '@/core/runtime/tool-outcome';
 import { buildDescription } from '@/core/tools/tool-contracts';
 import type { CapabilityDescriptor } from '@/protocol/capabilities';
 import type { BaseToolSpec, ExecutableToolSpec, InterruptToolSpec, ToolContext } from './spec';
@@ -36,7 +37,11 @@ export interface ParseSuccess<Name extends string, Args> {
   protectedCommand: string;
 }
 
-export type ParseFailureCode = 'unknown_tool' | 'tool_unavailable' | 'invalid_arguments';
+export type ParseFailureCode =
+  | 'invalid_json'
+  | 'unknown_tool'
+  | 'tool_unavailable'
+  | 'invalid_arguments';
 
 export interface ParseFailure {
   ok: false;
@@ -164,6 +169,45 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
     return parsed.success ? spec.effects(parsed.data, context) : undefined;
   }
 
+  /** Observe stripped top-level fields before Zod parsing without retaining names or values. */
+  unknownFieldsOf(name: string, args: unknown, context: ToolContext) {
+    const spec = this.#specs.get(name);
+    if (!spec) {
+      return observeUnknownToolFieldsV1({
+        toolName: name,
+        args,
+        knownFields: [],
+        schemaRevision: 'unknown',
+      });
+    }
+    const schema = spec.modelInputSchema?.(context) ?? spec.inputSchema;
+    const jsonSchema = z.toJSONSchema(schema) as {
+      properties?: Record<string, unknown>;
+      oneOf?: Array<{ properties?: Record<string, { const?: unknown }> }>;
+    };
+    const argumentRecord =
+      args && typeof args === 'object' && !Array.isArray(args)
+        ? (args as Record<string, unknown>)
+        : undefined;
+    const matchingBranch = jsonSchema.oneOf?.find((branch) =>
+      Object.entries(branch.properties ?? {}).every(
+        ([key, property]) =>
+          property.const === undefined || argumentRecord?.[key] === property.const,
+      ),
+    );
+    const knownFields = matchingBranch?.properties
+      ? Object.keys(matchingBranch.properties)
+      : jsonSchema.oneOf
+        ? [...new Set(jsonSchema.oneOf.flatMap((branch) => Object.keys(branch.properties ?? {})))]
+        : Object.keys(jsonSchema.properties ?? {});
+    return observeUnknownToolFieldsV1({
+      toolName: name,
+      args,
+      knownFields,
+      schemaRevision: this.descriptorOf(spec).revision.slice(0, 64),
+    });
+  }
+
   /**
    * CapabilityDescriptor 投影（builtin_tool kind）。revision 复用内容哈希
    * 算法（descriptorRevision），契约/效果语义变化即 revision 变化。
@@ -174,7 +218,7 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
       capabilityId: `builtin:${spec.name}`,
       kind: 'builtin_tool' as const,
       displayName: spec.name,
-      description: buildDescription(spec.contract),
+      description: buildDescription(spec.contract, 'legacy'),
       modelDescription: buildDescription(spec.contract, 'v2'),
       descriptionProvenance: 'builtin' as const,
       inputSchema: z.toJSONSchema(spec.inputSchema) as Record<string, unknown>,

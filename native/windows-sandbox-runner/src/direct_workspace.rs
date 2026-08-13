@@ -20,7 +20,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
 use crate::acl;
-use crate::job::{RUNTIME_ALLOW, WORKSPACE_ALLOW};
+use crate::job::{GENERIC_ALL, RUNTIME_ALLOW, WORKSPACE_ALLOW};
 use crate::protocol::FilesystemScope;
 use crate::restricted_token::CapabilitySid;
 use crate::sha256_hex;
@@ -84,11 +84,18 @@ pub struct DirectWorkspaceSecurity {
     runtime_capability_index: usize,
     ephemeral_workspace_capability_index: Option<usize>,
     ephemeral_snapshots: Vec<acl::DaclSnapshot>,
+    approved_filesystem_guard_index: Option<usize>,
+    approved_filesystem_guard_paths: Vec<String>,
 }
 
 impl DirectWorkspaceSecurity {
     pub fn capabilities(&self) -> &[CapabilitySid] {
         &self.capabilities
+    }
+
+    pub fn approved_filesystem_guard(&self) -> Option<&CapabilitySid> {
+        self.approved_filesystem_guard_index
+            .and_then(|index| self.capabilities.get(index))
     }
 
     /// Remove every per-invocation ACL grant.  The normal workspace capability
@@ -109,6 +116,13 @@ impl DirectWorkspaceSecurity {
                 acl::revoke_access(&self.workspace_root, self.capabilities[index].as_psid())
             {
                 failures.push(err.to_string());
+            }
+        }
+        if let Some(index) = self.approved_filesystem_guard_index {
+            for path in self.approved_filesystem_guard_paths.iter().rev() {
+                if let Err(err) = acl::revoke_access(path, self.capabilities[index].as_psid()) {
+                    failures.push(err.to_string());
+                }
             }
         }
         if failures.is_empty() {
@@ -134,6 +148,7 @@ pub fn prepare_direct_workspace(
     filesystem_scope: FilesystemScope,
     runtime_capability_sid: &str,
     ephemeral_workspace_capability_sid: Option<&str>,
+    approved_filesystem_guard_sid: Option<&str>,
     protected_paths: &[String],
 ) -> Result<DirectWorkspaceSecurity> {
     let workspace_root = canonical_directory(workspace_root, "workspace")?;
@@ -162,6 +177,8 @@ pub fn prepare_direct_workspace(
         let mut capabilities = Vec::new();
         let mut ephemeral_workspace_capability_index = None;
         let mut ephemeral_snapshots = Vec::new();
+        let mut approved_filesystem_guard_index = None;
+        let mut approved_filesystem_guard_paths: Vec<String> = Vec::new();
 
         if matches!(filesystem_scope, FilesystemScope::WorkspaceWrite) {
             if let Some(ephemeral_sid) = ephemeral_workspace_capability_sid {
@@ -178,7 +195,7 @@ pub fn prepare_direct_workspace(
                     WORKSPACE_ALLOW,
                 )
                 .map_err(|source| error("restricted_token_acl_grant_failed", source.to_string()))?;
-                for path in existing_protected_paths(protected_paths) {
+                for path in existing_workspace_protected_paths(&workspace_root, protected_paths) {
                     let snapshot = acl::snapshot_dacl(&path).map_err(|source| {
                         error("restricted_token_acl_snapshot_failed", source.to_string())
                     })?;
@@ -196,6 +213,35 @@ pub fn prepare_direct_workspace(
             }
         }
 
+        if matches!(filesystem_scope, FilesystemScope::FullAccess) {
+            let guard_sid = approved_filesystem_guard_sid.ok_or_else(|| {
+                error(
+                    "restricted_token_protected_guard_invalid",
+                    "full_access requires an invocation protected-path guard SID",
+                )
+            })?;
+            let guard = CapabilitySid::parse(guard_sid).map_err(|source| {
+                error(
+                    "restricted_token_protected_guard_invalid",
+                    source.to_string(),
+                )
+            })?;
+            for path in existing_protected_paths(protected_paths) {
+                if let Err(source) = acl::deny_identity_access(&path, guard.as_psid(), GENERIC_ALL) {
+                    for guarded_path in approved_filesystem_guard_paths.iter().rev() {
+                        let _ = acl::revoke_access(guarded_path, guard.as_psid());
+                    }
+                    return Err(error(
+                        "restricted_token_acl_protect_failed",
+                        source.to_string(),
+                    ));
+                }
+                approved_filesystem_guard_paths.push(path);
+            }
+            approved_filesystem_guard_index = Some(capabilities.len());
+            capabilities.push(guard);
+        }
+
         let runtime_capability_index = capabilities.len();
         capabilities.push(runtime_capability);
         Ok(DirectWorkspaceSecurity {
@@ -205,6 +251,8 @@ pub fn prepare_direct_workspace(
             runtime_capability_index,
             ephemeral_workspace_capability_index,
             ephemeral_snapshots,
+            approved_filesystem_guard_index,
+            approved_filesystem_guard_paths,
         })
     })();
 
@@ -266,7 +314,11 @@ fn ensure_persistent_workspace_capability(
 ) -> Result<CapabilitySid> {
     with_workspace_lock(workspace_root, || {
         let path = ledger_path(workspace_root)?;
-        let existing_paths = existing_protected_paths(protected_paths);
+        // A Workspace capability has no allow ACE outside this Workspace, so
+        // external protected paths are already unavailable in its restricted
+        // write pass. Never mutate or persist those paths in a per-Workspace
+        // ledger: repair intentionally refuses to trust out-of-scope targets.
+        let existing_paths = existing_workspace_protected_paths(workspace_root, protected_paths);
         let paths_digest = protected_paths_digest(&existing_paths);
         let mut ledger = if path.exists() {
             load_ledger(&path, workspace_root)?
@@ -380,6 +432,20 @@ fn existing_protected_paths(paths: &[String]) -> Vec<String> {
     result.sort_by_key(|left| left.to_ascii_lowercase());
     result.dedup_by(|left, right| path_equal(left, right));
     result
+}
+
+fn existing_workspace_protected_paths(workspace_root: &str, paths: &[String]) -> Vec<String> {
+    workspace_member_protected_paths(workspace_root, existing_protected_paths(paths))
+}
+
+fn workspace_member_protected_paths(
+    workspace_root: &str,
+    paths: Vec<String>,
+) -> Vec<String> {
+    paths
+        .into_iter()
+        .filter(|path| is_workspace_member_path(workspace_root, path))
+        .collect()
 }
 
 fn canonical_directory(value: &str, kind: &'static str) -> Result<String> {
@@ -601,6 +667,18 @@ mod tests {
         assert!(path_equal(r"\\?\C:\Work", r"C:\Work"));
         assert!(!is_child_path("C:\\Work", "C:\\Workspace"));
         assert!(!is_child_path("C:\\Work", "C:\\Work"));
+    }
+
+    #[test]
+    fn persistent_protected_paths_never_escape_the_workspace() {
+        let paths = vec![
+            "C:\\Work\\.env".to_string(),
+            "C:\\Users\\runneradmin\\.npmrc".to_string(),
+        ];
+        assert_eq!(
+            workspace_member_protected_paths("C:\\Work", paths),
+            vec!["C:\\Work\\.env".to_string()]
+        );
     }
 
     #[test]

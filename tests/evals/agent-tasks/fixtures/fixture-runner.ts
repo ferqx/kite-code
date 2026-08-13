@@ -13,8 +13,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
+import type { AgentTaskCaseV1 } from '../../../../scripts/evals/contracts/agent-task-case-schema';
 import { canonicalJsonBytes, sha256Digest } from '../../../../scripts/release/canonical-json';
-import type { AgentTaskCaseV1 } from '../cases/schema';
 
 const OWNER_FILE = '.kite-agent-eval-owner.json';
 const RUN_PREFIX = 'kite-agent-eval-run-';
