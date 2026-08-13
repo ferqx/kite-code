@@ -3,7 +3,7 @@ import type { RuntimeUserAction } from './actions';
 import { decideCompletion } from './completion-guard';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
-import type { AgentKernel, RuntimeEffectExecutor } from './kernel';
+import { type AgentKernel, isRuntimeEffectDeferred, type RuntimeEffectExecutor } from './kernel';
 import { guardLegacyPlanContinuationEffect } from './plan-continuation';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import {
@@ -23,7 +23,11 @@ export interface RuntimeActionProvider {
   ): Promise<RuntimeUserAction>;
 }
 
-type EffectExecutionOutcome = { applied: boolean; emitted: boolean };
+type EffectExecutionOutcome = {
+  applied: boolean;
+  emitted: boolean;
+  deferred?: { reason: string; retryAfterMs: number };
+};
 const ABORTED_WAIT = Symbol('aborted-wait');
 
 async function waitForPromiseOrAbort<T>(
@@ -49,6 +53,14 @@ async function waitForPromiseOrAbort<T>(
       reject(error);
     });
   });
+}
+
+async function waitForRetryOrAbort(
+  retryAfterMs: number,
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  const delay = new Promise<void>((resolve) => setTimeout(resolve, Math.max(1, retryAfterMs)));
+  return (await waitForPromiseOrAbort(delay, signal)) !== ABORTED_WAIT;
 }
 
 const MAX_PENDING_TOOL_PROGRESS_CHARS = 16 * 1024;
@@ -141,6 +153,7 @@ async function* executeEffectWithStreaming(
   executor: RuntimeEffectExecutor,
   lease: import('./effects').RuntimeEffectLease,
   reservationIds: string[] = [],
+  signal?: AbortSignal,
 ): AsyncGenerator<RuntimeEvent, EffectExecutionOutcome> {
   // A lease can become stale after async preparation or while another durable
   // fact is applied. Never enter any executor once the journal is corrupt;
@@ -158,6 +171,7 @@ async function* executeEffectWithStreaming(
   let wake: (() => void) | null = null;
   let settled = false;
   let result: RuntimeEvent[] = [];
+  let deferred: { reason: string; retryAfterMs: number } | undefined;
   let failure: unknown;
 
   const enqueue = (
@@ -212,7 +226,11 @@ async function* executeEffectWithStreaming(
     },
   ).then(
     (events) => {
-      result = bindModelResponsesToEffect(lease, events);
+      if (isRuntimeEffectDeferred(events)) {
+        deferred = events.deferred;
+      } else {
+        result = bindModelResponsesToEffect(lease, events);
+      }
       settled = true;
       wake?.();
       wake = null;
@@ -229,9 +247,13 @@ async function* executeEffectWithStreaming(
   let cancellationIncomplete = false;
   while (!settled || pending.length > 0) {
     if (pending.length === 0) {
-      await new Promise<void>((resolve) => {
-        wake = resolve;
-      });
+      const waited = await waitForPromiseOrAbort(
+        new Promise<void>((resolve) => {
+          wake = resolve;
+        }),
+        signal,
+      );
+      if (waited === ABORTED_WAIT) return { applied: false, emitted };
     }
     while (pending.length > 0) {
       const pendingEvent = pending.shift()!;
@@ -280,6 +302,7 @@ async function* executeEffectWithStreaming(
     }
   }
   await execution;
+  if (deferred) return { applied: false, emitted: false, deferred };
   if (failure) {
     if (reservationIds.length > 0) {
       const terminalReservationEvents: RuntimeEvent[] = reservationIds.map((reservationId) =>
@@ -393,7 +416,7 @@ export async function* runRuntimeLoop(
     backgroundCount += 1;
     backgroundGroups.set(group, (backgroundGroups.get(group) ?? 0) + 1);
     void (async () => {
-      const stream = executeEffectWithStreaming(kernel, executor, lease, reservationIds);
+      const stream = executeEffectWithStreaming(kernel, executor, lease, reservationIds, signal);
       try {
         while (true) {
           const step = await stream.next();
@@ -423,7 +446,10 @@ export async function* runRuntimeLoop(
       | Extract<RuntimeEvent, { type: 'runtime.cancellation_diagnostic' }>
       | undefined;
     while (backgroundCount > 0 || backgroundEvents.length > 0) {
-      if (backgroundEvents.length === 0) await waitForBackground();
+      if (backgroundEvents.length === 0) {
+        const waited = await waitForPromiseOrAbort(waitForBackground(), signal);
+        if (waited === ABORTED_WAIT) return cancellationIncomplete;
+      }
       while (backgroundEvents.length > 0) {
         const backgroundEvent = backgroundEvents.shift()!;
         if (backgroundEvent.type === 'runtime.cancellation_diagnostic') {
@@ -514,7 +540,7 @@ export async function* runRuntimeLoop(
       if (effect.type === 'subagent.recovery_unavailable') {
         count += 1;
         const lease = kernel.beginEffect(effect);
-        const outcome = yield* executeEffectWithStreaming(kernel, executor, lease);
+        const outcome = yield* executeEffectWithStreaming(kernel, executor, lease, [], signal);
         if (!outcome.emitted) return;
         if (!outcome.applied) continue;
         continue;
@@ -726,13 +752,10 @@ export async function* runRuntimeLoop(
               outcome: 'failed',
               failureCode: 'unknown',
             };
-          } else if (effect.type === 'request_provider_admission') {
-            action = {
-              type: 'provider_admission_decision',
-              interactionId: effect.interactionId,
-              decision: { kind: 'cancel' },
-            };
           } else {
+            // A provider-admission UI/transport failure is not a user
+            // decision. Let the agent persist a typed error-caused terminal
+            // instead of falsely recording task/turn cancellation by user.
             throw error;
           }
         }
@@ -794,7 +817,20 @@ export async function* runRuntimeLoop(
       }
       count += 1;
       const lease = kernel.beginEffect(effect);
-      const outcome = yield* executeEffectWithStreaming(kernel, executor, lease, reservationIds);
+      const outcome = yield* executeEffectWithStreaming(
+        kernel,
+        executor,
+        lease,
+        reservationIds,
+        signal,
+      );
+      if (outcome.deferred) {
+        // A cross-runtime effect lease is contention, not a terminal outcome.
+        // Do not consume the effect budget while waiting for the owning runtime.
+        count -= 1;
+        if (!(await waitForRetryOrAbort(outcome.deferred.retryAfterMs, signal))) return;
+        continue;
+      }
       if (!outcome.emitted) return;
       if (!outcome.applied) continue;
     }

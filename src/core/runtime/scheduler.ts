@@ -315,12 +315,18 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
 
   // An automatic compaction is an admission gate for this turn. If it failed
   // or was cancelled, do not fall through to the oversized normal model call.
-  // A new turn gets a new id and therefore runs preflight and may try again.
+  // Surface a durable terminal instead of silently stopping with an active
+  // turn; a new turn gets a new id and therefore runs preflight and may try
+  // again.
   if (
     state.context.lastFailure?.reason === 'auto' &&
     state.context.lastFailure.requestedAtTurnId === state.turn.turnId
   ) {
-    return { type: 'stop' };
+    return {
+      type: 'recovery_blocked',
+      reason: `Automatic context compaction failed: ${state.context.lastFailure.message}`,
+      failureKind: 'compaction_failed',
+    };
   }
 
   // Any explicit user approval rejection aborts this turn. Policy denials

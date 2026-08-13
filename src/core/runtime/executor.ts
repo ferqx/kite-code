@@ -57,7 +57,7 @@ import type { SubAgentEventSink } from '@/core/subagent/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import { executeVerificationEffect } from '@/core/verification';
 import { createFilePreimageRecorder } from './file-checkpoints';
-import type { RuntimeEffectExecutor } from './kernel';
+import { deferredRuntimeEffect, type RuntimeEffectExecutor } from './kernel';
 import { resourceAdmissionTerminalEventsV1 } from './resource-admission-terminal';
 import { RemoteMcpEgressNonceConflictError, type RuntimeStore } from './store';
 
@@ -268,7 +268,10 @@ export function createRuntimeEffectExecutor(
           Date.now() + leaseTtlMs,
         )
       ) {
-        return [];
+        return deferredRuntimeEffect(
+          'Context compaction is already owned by another runtime.',
+          100,
+        );
       }
       const heartbeat = durableLease
         ? setInterval(() => {

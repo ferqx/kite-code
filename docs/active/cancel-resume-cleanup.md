@@ -8,7 +8,7 @@
 
 ## Runtime 取消语义
 
-取消通过 AbortSignal 传播到模型、工具和 Subagent。用户停止当前轮次时，App shell 必须先通过 live Kernel control plane 原子持久化全部未终结工具的 `tool.cancelled` 与带 `cause=user` 的 `turn.aborted`，再触发 AbortSignal；这样活动 Effect lease 会因 revision 前移而失效，队列、active 列表和 transcript 工具调用/结果对共同收敛，不能留下永久 busy 状态。该操作只终止当前 turn，不把活动 task 改为 cancelled，下一条用户消息仍可沿当前任务上下文继续。重复取消不得追加重复 Tool Result。TUI 清理运行中 block 只是上述 Runtime 事实的展示投影，不是 Runtime 取消事实本身。
+取消通过 AbortSignal 传播到模型、工具和 Subagent。用户停止当前轮次时，App shell 必须先通过 live Kernel control plane 原子持久化全部未终结工具的 `tool.cancelled` 与带 `cause=user` 的 `turn.aborted`，再触发 AbortSignal；这样活动 Effect lease 会因 revision 前移而失效，队列、active 列表和 transcript 工具调用/结果对共同收敛，不能留下永久 busy 状态。公共 `RunRuntimeAgentInput.signal` 也属于相同的取消边界：无论调用方是否持有 Kernel control，它一旦 abort 必须先写出同一组 durable cancellation facts，再解除 model、tool 或 interaction 等待；不得让 generator 静默结束而把 active turn 留在 Store。该操作只终止当前 turn，不把活动 task 改为 cancelled，下一条用户消息仍可沿当前任务上下文继续。重复取消不得追加重复 Tool Result。TUI 清理运行中 block 只是上述 Runtime 事实的展示投影，不是 Runtime 取消事实本身。
 
 工具审批中的显式“拒绝”与 Esc/取消使用同一整轮语义。Kernel 必须在一个 action batch 中先为当前审批目标写入带 `approval_rejected` failure 的 `approval.rejected`，再为其余未终结 sibling 写入 `tool.cancelled`，最后写入 `turn.aborted(cause=user)`；Runner 随即退出，不再请求后续审批、执行 queued 工具或调用模型。Agent 在观察到该用户审批拒绝时立即 abort 本轮内部执行信号，使已经启动的 Shell、Subagent 或其他可取消执行真正停止；迟到事件由 Effect lease 拒绝。该规则不适用于 `policy_denied`、sandbox 缺失或系统自动审查等非用户拒绝，它们继续按各自失败路径处理。
 
@@ -34,9 +34,10 @@ failure=`budget_exceeded`、terminal reason=`budget_exhausted`；存在 unknown 
 保留 `knownExternalEffects=unknown` 和 reconciliation 入口。清理未确认时改为
 failure/reason=`cancel_incomplete`。
 
-若 deadline 命中交互等待时仍有并发 Shell 在后台运行，等待分支不得因 AbortSignal 直接返回。
-它必须先有界排空后台 effect，转发工具 terminal 与 `runtime.cancellation_diagnostic`，确认
-process-tree cleanup 已完成后才能关闭 RuntimeStore/logger 并形成 deadline terminal。
+若 deadline 命中交互等待时仍有并发 Shell 在后台运行，等待分支不得无限忽略 AbortSignal。
+它必须转发已经到达的工具 terminal 与 `runtime.cancellation_diagnostic`，并在执行器不再合作时解除
+Runtime wait，避免旧 run 永久阻塞同一 thread 的 successor；已 dispatch reservation 仍保持 `unknown`，后续
+reconciliation 才能确认外部结果。
 
 Shell 取消由 process-tree guard 独占：POSIX 对独立 process group 先发 SIGTERM，并立即轮询退出状态，最多等待 500ms；仍未退出时再以 SIGKILL 强制终止并进行 2 秒有界确认。Windows 先尝试 root graceful，并立即轮询退出状态，再通过 Job Object 或 `taskkill /T /F` 清理整棵树。正常退出不得因为固定 sleep 人为延迟；结果必须携带 confirmed/forced/unconfirmed count。无法确认
 descendant 退出时发出结构化 `runtime.cancellation_diagnostic(cancel_incomplete)`，终态为
@@ -56,7 +57,7 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 
 ## 会话导航的客户端映射
 
-“切换会话”是否表示取消属于 App 适配层交互语义，不是 Core Runtime 规则（ADR-0050）。当前 TUI 是单前台、终端式交互：新建或切换到另一会话时，`SessionManager` 必须先对离开的活动 turn 调用持久化取消，再把会话切到后台，因此 TUI 中切换会话等同用户取消当前 turn。
+"切换会话"是否表示取消属于 App 适配层交互语义，不是 Core Runtime 规则（ADR-0050）。当前 TUI 把新建或切换到另一会话仅视为前台路由变化：离开会话继续在后台运行，审批与 Plan review 保留为 durable pending interaction，只有用户显式提交取消动作时才写入 `turn.aborted`。
 
 未来图形客户端可以同时保留多个运行中会话。它切换可见会话时必须保留离开会话的 Runtime、活动 Effect 和 pending interrupt，只有用户显式提交取消动作时才写入 `turn.aborted`。Core 不得根据 foreground、路由切换或“当前可见会话”自行推断取消。
 

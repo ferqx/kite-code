@@ -67,7 +67,7 @@ MCP Provider Action 是持久化交互。旧 Tool Call 必须先失败并退出�
 工具失败与紧随其后的 Provider Action 使用同一有序 event batch 提交，确保 Kernel 不会在
 Tool Call 仍为 running 时拒绝或提前展示恢复交互。
 
-新 run 还会在第一次模型调用前执行 required Provider 准入。ready/degraded 可继续，其余 Provider 逐个等待 retry、当前 session waiver 或 cancel。Waiver 是持久事实但不会恢复能力可见性；cancel 会取消任务并中止 turn。
+新 run 还会在第一次模型调用前执行 required Provider 准入。ready/degraded 可继续，其余 Provider 逐个等待 retry、当前 session waiver 或 cancel。Waiver 是持久事实但不会恢复能力可见性；只有显式 cancel 会取消任务并中止 turn，交互 UI/transport 自身的异常必须记录为 error-caused terminal，不能伪装为用户取消。
 
 启用 `resourceBudgetV1` 的新 run 在所有 Runtime invocation 前执行累计预算 admission。
 reservation 与 FIFO waiter 先持久化，`dispatch_started` 落盘后才允许 Controller 调用模型、

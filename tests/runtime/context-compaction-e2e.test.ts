@@ -154,7 +154,11 @@ describe('narrative compaction e2e', () => {
     });
 
     const failed = reduceRuntimeState(state, event!);
-    expect(decideNextEffect(failed)).toEqual({ type: 'stop' });
+    expect(decideNextEffect(failed)).toEqual({
+      type: 'recovery_blocked',
+      failureKind: 'compaction_failed',
+      reason: 'Automatic context compaction failed: provider rejected summary',
+    });
 
     const next = reduceRuntimeState(failed, { type: 'turn.started', turnId: 'next-turn' });
     expect(decideNextEffect(next)).toEqual({ type: 'call_model' });
@@ -224,7 +228,14 @@ describe('narrative compaction e2e', () => {
         { type: 'compact_context', compactionId: 'compact-1' },
         state,
       );
-      expect(duplicate).toEqual([]);
+      expect(duplicate).toEqual(
+        Object.assign([], {
+          deferred: {
+            reason: 'Context compaction is already owned by another runtime.',
+            retryAfterMs: 100,
+          },
+        }),
+      );
       expect(compactorCalls).toBe(1);
       release();
       expect(await first).toContainEqual(

@@ -1015,7 +1015,7 @@ describe('SessionManager', () => {
     expect(snapshots[0]!.workspace).toBe('/tmp/ws');
   });
 
-  test('createSession deactivates previous active session', () => {
+  test('createSession backgrounds the previous active session without clearing its interrupt', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');
     const rt1 = mgr.getRuntime(id1)!;
@@ -1031,7 +1031,7 @@ describe('SessionManager', () => {
     const snapshots = mgr.getSnapshot();
     const s1 = snapshots.find((s) => s.threadId === id1)!;
     expect(s1.active).toBe(false);
-    expect(rt1.pendingInterrupt).toBe(false);
+    expect(rt1.pendingInterrupt).toBe(true);
     // The old session's interrupt should have been cancelled
     // (via resolveInterrupt in createSession)
   });
@@ -1158,23 +1158,23 @@ describe('SessionManager', () => {
     expect(mgr.getActiveId()).toBe(id2);
   });
 
-  test('switchSession resolves pending interrupt on outgoing session', () => {
+  test('switchSession preserves a pending interrupt on the outgoing session', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');
     const id2 = mgr.createSession('/tmp/ws');
     const rt1 = mgr.getRuntime(id1)!;
+    rt1.pendingInterrupt = true;
     (rt1 as unknown as { _pendingResolve: ((a: unknown) => void) | null })._pendingResolve = (
       _action: unknown,
     ) => {};
 
     mgr.switchSession(id1, id2);
 
-    // The outgoing session's interrupt should be resolved with cancel
-    // Note: resolveInterrupt clears _pendingResolve, so it won't fire again
-    expect(rt1.pendingInterrupt).toBe(false);
+    // Navigation alone must not manufacture a cancellation decision.
+    expect(rt1.pendingInterrupt).toBe(true);
   });
 
-  test('switchSession clears pendingInterrupt on outgoing session', () => {
+  test('switchSession retains pendingInterrupt on outgoing session', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');
     const id2 = mgr.createSession('/tmp/ws');
@@ -1183,10 +1183,10 @@ describe('SessionManager', () => {
 
     mgr.switchSession(id1, id2);
 
-    expect(rt1.pendingInterrupt).toBe(false);
+    expect(rt1.pendingInterrupt).toBe(true);
   });
 
-  test('switchSession cancels an active TUI turn before changing the visible session', () => {
+  test('switchSession backgrounds an active TUI turn without cancelling it', () => {
     const mgr = makeManager();
     const id1 = mgr.createSession('/tmp/ws');
     const id2 = mgr.createSession('/tmp/ws');
@@ -1201,7 +1201,7 @@ describe('SessionManager', () => {
 
     mgr.switchSession(id1, id2);
 
-    expect(abortCalls).toBe(1);
+    expect(abortCalls).toBe(0);
     expect(mgr.getActiveId()).toBe(id2);
   });
 

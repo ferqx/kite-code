@@ -196,6 +196,67 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
   }
 });
 
+test('required provider admission failure is recorded as an error, not a user cancellation', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-admission-error-'));
+  const storePath = join(workspace, 'runtime.db');
+  const manager = new McpConnectionManager();
+  manager.getProviderDirectorySnapshot = () => ({
+    revision: 'directory-r1',
+    entries: [
+      {
+        providerId: 'github',
+        status: 'login_required',
+        required: true,
+        source: 'project',
+        lastKnownCapabilityNames: ['publish'],
+        retryable: true,
+      },
+    ],
+  });
+
+  try {
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'recover GitHub admission',
+        threadId: 'required-provider-admission-error',
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: createMockModel([]) as SupportedChatModel,
+        mcpManager: manager,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+          features: { mcpProviderActionV1: true },
+        },
+      },
+      {
+        requestAction: async () => {
+          throw new Error('admission UI disconnected');
+        },
+      },
+    )) {
+      events.push(event);
+    }
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'run.error', message: 'admission UI disconnected' }),
+    );
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'turn.aborted', cause: 'error' }),
+    );
+    expect(events.map((event) => event.type)).not.toContain('provider.admission_cancelled');
+    expect(events.map((event) => event.type)).not.toContain('task.cancelled');
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('required provider admission accepts ready/degraded and queues every other required entry', () => {
   const state = createInitialRuntimeState({
     threadId: 'required-provider-projection',

@@ -182,6 +182,8 @@ export async function* runRuntimeAgent(
   let deadlineTriggered = false;
   let deadlineTerminalYielded = false;
   let cancellationIncomplete = false;
+  let externalCancellationEvents: RuntimeEvent[] = [];
+  let externalCancellationEventsYielded = false;
   const executionAbortController = new AbortController();
   const providerDataAdmission = getFeatureFlags(input.config).providerDataPolicyV1
     ? createApprovedProviderDataAdmissionV1(
@@ -190,14 +192,11 @@ export async function* runRuntimeAgent(
         sessionLoggingContentInspector,
       )
     : undefined;
-  const forwardExternalAbort = () => executionAbortController.abort(input.signal?.reason);
-  if (input.signal?.aborted) forwardExternalAbort();
-  else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
   const cancelRun = (
     reason = 'Cancelled by user.',
     cause: 'user' | 'error' = 'user',
   ): RuntimeEvent[] => {
-    if (runCancelled) return [];
+    if (runCancelled || kernel.getState().turn.status !== 'active') return [];
     runCancelled = true;
     exitStatus = 'aborted';
     const events = eventsForRunCancellation(kernel.getState(), reason, cause);
@@ -207,6 +206,20 @@ export async function* runRuntimeAgent(
     executionAbortController.abort(reason);
     return canonicalEvents;
   };
+  const externalAbortReason = (): string => {
+    const reason = input.signal?.reason;
+    if (reason instanceof Error && reason.message) return reason.message;
+    if (typeof reason === 'string' && reason.trim()) return reason;
+    return 'Runtime cancelled by external signal.';
+  };
+  const forwardExternalAbort = () => {
+    // The public AbortSignal is a real cancellation boundary, not merely a
+    // transport hint. Persist the same durable cancellation transaction used
+    // by the TUI before unblocking any effect/interaction wait.
+    externalCancellationEvents = cancelRun(externalAbortReason(), 'user');
+  };
+  if (input.signal?.aborted) forwardExternalAbort();
+  else input.signal?.addEventListener('abort', forwardExternalAbort, { once: true });
   const scheduleRunDeadline = (deadlineAt: string) => {
     if (!getFeatureFlags(input.config).boundedCancellationV1 || runDeadlineTimer) return;
     const remainingMs = Math.max(0, Date.parse(deadlineAt) - Date.now());
@@ -259,6 +272,11 @@ export async function* runRuntimeAgent(
     cancelRun: (reason) => cancelRun(reason),
   });
   try {
+    if (externalCancellationEvents.length > 0) {
+      externalCancellationEventsYielded = true;
+      yield* externalCancellationEvents;
+      return;
+    }
     if (providerDataAdmission) {
       const readiness = providerDataAdmission([], 'primary_model');
       const event: RuntimeEvent = {
@@ -506,6 +524,10 @@ export async function* runRuntimeAgent(
       yield event;
     }
     if (executionAbortController.signal.aborted) exitStatus = 'aborted';
+    if (!externalCancellationEventsYielded && externalCancellationEvents.length > 0) {
+      externalCancellationEventsYielded = true;
+      yield* externalCancellationEvents;
+    }
     if (deadlineCancellationEvents.length > 0) {
       deadlineEventsYielded = true;
       yield* deadlineCancellationEvents;
@@ -519,6 +541,10 @@ export async function* runRuntimeAgent(
   } catch (error) {
     if (executionAbortController.signal.aborted) {
       exitStatus = 'aborted';
+      if (!externalCancellationEventsYielded && externalCancellationEvents.length > 0) {
+        externalCancellationEventsYielded = true;
+        yield* externalCancellationEvents;
+      }
       if (!deadlineEventsYielded && deadlineCancellationEvents.length > 0) {
         deadlineEventsYielded = true;
         yield* deadlineCancellationEvents;

@@ -402,7 +402,7 @@ describe('decideNextEffect', () => {
     expect(decideNextEffect(completed)).toEqual({ type: 'stop' });
   });
 
-  test('stops the current turn after auto compaction failure and retries admission next turn', () => {
+  test('surfaces an auto compaction failure as a terminal recovery block and retries admission next turn', () => {
     const state = createInitialRuntimeState({ threadId: 'compact', userId: 'u', workspace: '/' });
     const failedTurnId = state.turn.turnId;
     state.context.lastFailure = {
@@ -415,7 +415,11 @@ describe('decideNextEffect', () => {
       requestedAtTurnId: failedTurnId,
     };
 
-    expect(decideNextEffect(state)).toEqual({ type: 'stop' });
+    expect(decideNextEffect(state)).toEqual({
+      type: 'recovery_blocked',
+      failureKind: 'compaction_failed',
+      reason: 'Automatic context compaction failed: provider rejected summary',
+    });
 
     const nextTurn = reduceRuntimeState(state, { type: 'turn.started', turnId: 'next-turn' });
     expect(decideNextEffect(nextTurn)).toEqual({ type: 'call_model' });

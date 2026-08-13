@@ -79,7 +79,7 @@ export type RuntimeEffect =
   | {
       type: 'recovery_blocked';
       reason: string;
-      failureKind: 'persistence_unavailable' | 'loop_exhausted' | 'unknown';
+      failureKind: 'persistence_unavailable' | 'loop_exhausted' | 'compaction_failed' | 'unknown';
       recoveryCause?: 'journal_invalid' | 'no_progress';
     };
 

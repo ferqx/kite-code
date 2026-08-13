@@ -1283,14 +1283,11 @@ export class SessionManager {
   }
 
   createSession(workspace: string): string {
-    // TUI navigation is an explicit cancellation gesture. Other clients may
-    // retain background runs because their navigation model is different.
+    // Navigation only changes presentation. A run may continue in the
+    // background and must be cancelled through an explicit user stop action.
     const oldRt = this.runtimes.get(this.activeId);
     if (oldRt) {
-      if (oldRt.agentLoopActive) oldRt.abort();
-      else oldRt.resolveInterrupt({ type: 'cancel' as const });
       oldRt.setForeground(false);
-      oldRt.pendingInterrupt = false;
     }
     const threadId = `tui-${Date.now().toString(36)}-${SessionManager.sessionCounter++}`;
     const rt = new SessionRuntime(threadId, workspace, {
@@ -2052,15 +2049,11 @@ export class SessionManager {
   }
 
   switchSession(fromId: string, toId: string): void {
-    // In the TUI, leaving a session cancels its current turn. This adapter
-    // policy must not be lifted into Core: a future client can keep the same
-    // Runtime and interrupt alive while only changing the visible session.
+    // Switching the visible session is not cancellation. Background approval
+    // and plan-review interactions remain durable and wake when foregrounded.
     const fromRt = this.runtimes.get(fromId);
     if (fromRt) {
-      if (fromRt.agentLoopActive) fromRt.abort();
-      else fromRt.resolveInterrupt({ type: 'cancel' as const });
       fromRt.setForeground(false);
-      fromRt.pendingInterrupt = false;
     }
     this.activeId = toId;
   }

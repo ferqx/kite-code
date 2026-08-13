@@ -63,6 +63,26 @@ export interface KernelConfig {
 /** Executes an effect and returns facts for the Kernel to reduce/persist. */
 export type RuntimeEffectEventSink = (event: RuntimeEvent) => void;
 
+/**
+ * An effect is owned elsewhere and must be retried instead of being mistaken
+ * for a terminal empty result.  This is deliberately distinct from `[]`:
+ * the latter remains the legacy "no facts" executor contract.
+ */
+export interface RuntimeEffectDeferred extends Array<RuntimeEvent> {
+  deferred: {
+    reason: string;
+    retryAfterMs: number;
+  };
+}
+
+export function deferredRuntimeEffect(reason: string, retryAfterMs: number): RuntimeEffectDeferred {
+  return Object.assign([], { deferred: { reason, retryAfterMs } });
+}
+
+export function isRuntimeEffectDeferred(result: RuntimeEvent[]): result is RuntimeEffectDeferred {
+  return 'deferred' in result;
+}
+
 export type RuntimeEffectExecutor = (
   effect: RuntimeEffect,
   state: Readonly<RuntimeState>,
@@ -422,6 +442,9 @@ export class AgentKernel {
         if (effect.type === 'subagent.recovery_unavailable') {
           const lease = this.beginEffect(effect);
           const events = await executor(lease.effect, this.getState());
+          if (isRuntimeEffectDeferred(events)) {
+            return { type: 'busy', reason: events.deferred.reason };
+          }
           if (events.length === 0) return { type: 'stop' };
           if (!this.applyEffectResult(lease, events)) continue;
           continue;
@@ -440,6 +463,9 @@ export class AgentKernel {
         }
         const lease = this.beginEffect(effect);
         const events = await executor(lease.effect, this.getState());
+        if (isRuntimeEffectDeferred(events)) {
+          return { type: 'busy', reason: events.deferred.reason };
+        }
         if (events.length === 0) return { type: 'stop' };
         if (!this.applyEffectResult(lease, events)) continue;
       }
