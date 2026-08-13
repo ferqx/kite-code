@@ -27,6 +27,9 @@ Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 phys
 GitHub-hosted native E2E 的 runtime smoke 必须把 Node/npm/Bun/cmd/PowerShell 拆为独立调用，并给
 Defender 下的各次冷启动保留各自的有界预算；不得用一条共享 timeout 的组合命令把累计启动时间误判为
 backend 失败。该测试预算不改变产品 Shell 的默认或调用方显式 timeout。
+受管网络 Schannel smoke 必须保持单一网络维度：下载目标使用 Workspace 相对路径，成功标记使用客户端
+自身参数，不用 `NUL` 或复合 Shell 语法意外触发 `uncertainEffects/full_access`；混合网络与外部文件系统
+能力必须由独立场景验证，不能用错路由的 smoke 代替。
 Windows 临时 Workspace 的原生断言比较 canonical、大小写不敏感的 path identity，不把 8.3 短路径与
 同一目录的长路径 spelling 差异误报为 cwd 越界。
 runner evidence 在 Windows CI 中显式选择固定版本的 GNU toolchain，并通过

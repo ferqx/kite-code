@@ -384,7 +384,7 @@ try {
               name: 'shell_execute',
               args: {
                 command:
-                  'curl.exe --fail --silent --show-error --connect-timeout 8 --max-time 15 https://example.com/ -o NUL && echo APPROVED_SCHANNEL_OK',
+                  'curl.exe --fail --silent --show-error --connect-timeout 8 --max-time 15 --output schannel-smoke.html --write-out APPROVED_SCHANNEL_OK https://example.com/',
               },
               reason: 'Run an approved Schannel HTTPS smoke test',
               protectedCommand: 'curl.exe',
@@ -418,7 +418,10 @@ try {
             request: {
               id: 'unconfigured-approved-runtime-script',
               name: 'shell_execute',
-              args: { command: 'curl.exe https://www.microsoft.com/ -o NUL' },
+              args: {
+                command:
+                  'curl.exe --output unconfigured-network-smoke.html https://www.microsoft.com/',
+              },
               reason: 'Verify missing setup fails without entering the setup control plane',
               protectedCommand: 'curl.exe',
             } as PendingToolRequest,

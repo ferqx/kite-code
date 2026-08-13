@@ -541,6 +541,16 @@ describe('evaluateToolApproval', () => {
         ).effects,
       ).toEqual({ network: true, externalWrite: true });
       expect(
+        evaluateToolApproval(
+          baseParams({
+            toolArgs: {
+              command:
+                'curl.exe --output schannel-smoke.html --write-out APPROVED_SCHANNEL_OK https://example.com/',
+            },
+          }),
+        ).effects,
+      ).toEqual({ network: true });
+      expect(
         evaluateToolApproval(baseParams({ toolArgs: { command: 'scp host:/file /tmp/out' } }))
           .effects,
       ).toEqual({ network: true, uncertainEffects: true });
