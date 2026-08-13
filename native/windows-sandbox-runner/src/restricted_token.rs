@@ -2,10 +2,10 @@
 //! Windows backend.
 //!
 //! This module deliberately does not select a backend or alter filesystem ACLs.
-//! Its narrow contract is to create either a `WRITE_RESTRICTED` Workspace token
-//! or an approved-filesystem token carrying a restricted-only guard SID, prove
-//! that a suspended child received that token, and resume it only after it joins
-//! the caller's Job Object.
+//! Its narrow contract is to create either a Workspace token or an
+//! approved-filesystem token carrying a restricted-only guard SID. Both use
+//! `WRITE_RESTRICTED`. The module proves that a suspended child received the
+//! expected token and resumes it only after it joins the caller's Job Object.
 //!
 //! A write-restricted token does not make the current user's ordinary read
 //! access disappear. The caller still has to grant
@@ -243,10 +243,12 @@ impl Drop for CapabilitySid {
 pub const UNELEVATED_RESTRICTED_TOKEN_FLAGS: CREATE_RESTRICTED_TOKEN_FLAGS =
     CREATE_RESTRICTED_TOKEN_FLAGS(DISABLE_MAX_PRIVILEGE.0 | LUA_TOKEN.0 | WRITE_RESTRICTED.0);
 
-/// Keeps the child non-elevated and privilege-stripped while allowing the
-/// invoking user's ordinary filesystem ACLs for one approved invocation.
+/// Keeps the child non-elevated and privilege-stripped while applying the
+/// mirrored user/group restricting SIDs only to write access. Read/execute
+/// keeps the invoking user's ordinary ACL semantics, while the guard SID can
+/// still deny writes to fixed protected paths.
 pub const APPROVED_FILESYSTEM_RESTRICTED_TOKEN_FLAGS: CREATE_RESTRICTED_TOKEN_FLAGS =
-    CREATE_RESTRICTED_TOKEN_FLAGS(DISABLE_MAX_PRIVILEGE.0 | LUA_TOKEN.0);
+    CREATE_RESTRICTED_TOKEN_FLAGS(DISABLE_MAX_PRIVILEGE.0 | LUA_TOKEN.0 | WRITE_RESTRICTED.0);
 
 /// Owns a primary token created by `CreateRestrictedToken`.
 pub struct RestrictedToken {
@@ -1382,6 +1384,15 @@ mod tests {
             .expect("approved filesystem token");
         verify_restricted_token_handle(token.handle(), std::slice::from_ref(&guard))
             .expect("approved filesystem token must remain restricted");
+    }
+
+    #[test]
+    fn approved_filesystem_token_restricts_writes_without_restricting_toolchain_execution() {
+        assert_ne!(
+            APPROVED_FILESYSTEM_RESTRICTED_TOKEN_FLAGS.0 & WRITE_RESTRICTED.0,
+            0,
+            "approved filesystem tokens must apply restricting SIDs only to write access"
+        );
     }
 
     #[test]

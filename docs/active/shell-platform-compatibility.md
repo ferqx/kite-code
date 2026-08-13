@@ -134,7 +134,9 @@ descendant allowlist 或 future root .env.* protection，因此即使 backend �
 非沙箱环境无法开启full 禁用 Full。
 
 文件系统授权独立于上述网络投影。Windows 与 macOS/Linux 一样，普通外部路径和临时目录在审批通过后
-使用去权 restricted-token 的 approved filesystem scope；普通 Workspace invocation 仍使用 capability SID
+使用保留 `WRITE_RESTRICTED`、LUA 与 privilege stripping 的 approved filesystem token；其 mirrored
+user/group/guard restricted SID 只约束写访问，read/execute 仍服从 current user 普通 ACL。普通 Workspace
+invocation 仍使用 capability SID
 ledger，扩权 invocation 不把全局写权限写入 persistent Workspace ledger，也不要求 UAC。显式危险路径
 在 Tool Policy 阶段拒绝；approved token 还携带 restricted-only guard SID，既有固定路径对该 SID 添加
 invocation-scoped deny，避免变量拼接或间接执行绕过字符串检查。该 scope 不等于 Full 或 production evidence；
