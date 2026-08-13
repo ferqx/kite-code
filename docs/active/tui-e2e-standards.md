@@ -203,7 +203,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     预写 `source: 'test'` 信任记录，验证门禁本身时使用
     `createTestWorkspace({ enforceWorkspaceTrust: true })`。子进程环境采用 allowlist，只继承平台启动、
     临时目录、locale、时区和 CI 所需变量，再叠加 fixture 显式环境；不得继承开发机密钥、代理、
-    Provider 配置或 feature flag。
+    Provider 配置或 feature flag。直接调用 Ink `render()` 的 PTY fixture 必须像生产 composition root
+    一样，以实际 `stdin/stdout` TTY 能力显式设置 `interactive`；不能让 Ink 因 `CI=true` 转入只在
+    unmount 时输出最终帧的非交互模式，否则 semantic readiness 看不到实时 prompt。
 12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：任意数量 React subscriber 只能
     对 stdin 保持一个物理 `data` listener；首个 subscriber 开启 DEC 1004，最后一个
     unsubscribe 必须移除 listener 并关闭 DEC 1004。禁止组件 mount 各自添加 stdin listener。

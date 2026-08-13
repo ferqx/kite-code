@@ -100,4 +100,9 @@ function CompactionStatusInputFixture() {
   );
 }
 
-render(<CompactionStatusInputFixture />);
+render(<CompactionStatusInputFixture />, {
+  // Ink treats every CI process as non-interactive by default, even when the
+  // fixture owns a real PTY. Match the production composition root so state
+  // updates and the live prompt are flushed before process teardown.
+  interactive: Boolean(process.stdin.isTTY && process.stdout.isTTY),
+});
