@@ -236,7 +236,7 @@ describe('code agent tool definitions', () => {
     expect('execute' in tools.mcp__fixture__read!).toBe(false);
   });
 
-  test('Prompt V2 planning discloses only read-effect MCP bindings and admitted descriptions', () => {
+  test('Prompt V2 keeps bound MCP declarations stable while policy owns planning effects', () => {
     const base: CapabilityDescriptor = {
       capabilityId: 'mcp:fixture/read',
       revision: 'revision-1',
@@ -276,8 +276,18 @@ describe('code agent tool definitions', () => {
         { descriptor: writeDescriptor, binding: binding('mcp__fixture__write', writeDescriptor) },
       ],
     });
+    const buildingTools = createAgentTools({
+      workspace: '/workspace',
+      phase: 'building',
+      config: { features: { promptContractV2: true } } as AgentConfig,
+      mcpBindings: [
+        { descriptor: base, binding: binding('mcp__fixture__read', base) },
+        { descriptor: writeDescriptor, binding: binding('mcp__fixture__write', writeDescriptor) },
+      ],
+    });
+    expect(toolNames(tools)).toEqual(toolNames(buildingTools));
     expect(tools.mcp__fixture__read?.description).toBe(base.modelDescription);
-    expect(tools.mcp__fixture__write).toBeUndefined();
+    expect(tools.mcp__fixture__write?.description).toBe(base.modelDescription);
   });
 
   // 验证 agent 暴露稳定工具 schema / Agent exposes the stable tool schema
@@ -608,20 +618,18 @@ describe('code agent tool definitions', () => {
     expect(toolNames(buildingTools)).toEqual(toolNames(planningTools));
   });
 
-  test('Prompt V2 exposes a read-only planning surface', () => {
+  test('Prompt V2 keeps builtin declarations stable across planning and building', () => {
     const config = { features: { promptContractV2: true } } as AgentConfig;
     const planningTools = createAgentTools({ workspace: '/tmp', phase: 'planning', config });
     const buildingTools = createAgentTools({ workspace: '/tmp', phase: 'building', config });
 
-    expect(toolNames(planningTools)).not.toContain('edit_file');
-    expect(toolNames(planningTools)).not.toContain('write_file');
-    expect(toolNames(planningTools)).not.toContain('shell_execute');
-    expect(toolNames(buildingTools)).toContain('edit_file');
-    expect(toolNames(buildingTools)).toContain('write_file');
-    expect(toolNames(buildingTools)).toContain('shell_execute');
+    expect(toolNames(planningTools)).toEqual(toolNames(buildingTools));
+    expect(toolNames(planningTools)).toContain('edit_file');
+    expect(toolNames(planningTools)).toContain('write_file');
+    expect(toolNames(planningTools)).toContain('shell_execute');
   });
 
-  test('Prompt V2 planning task schema rejects code and accepts plan subagents', () => {
+  test('Prompt V2 keeps task schema stable and leaves planning role denial to policy', () => {
     const context = {
       workspace: '/tmp',
       phase: 'planning' as const,
@@ -633,7 +641,7 @@ describe('code agent tool definitions', () => {
         { name: 'task', args: { subagent_type: 'code', task: 'write code' } },
         context,
       ).ok,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       builtinToolRegistry.parseToolCall(
         { name: 'task', args: { subagent_type: 'plan', task: 'design change' } },
@@ -642,7 +650,7 @@ describe('code agent tool definitions', () => {
     ).toBe(true);
     expect(
       builtinToolRegistry.effectsOf('task', { subagent_type: 'code', task: 'write code' }, context),
-    ).toBeUndefined();
+    ).toMatchObject({ effectClass: 'workspace_write', sideEffect: true });
   });
 
   test('legacy planning uses the same explore/plan-only task role ceiling', () => {
@@ -688,8 +696,14 @@ describe('code agent tool definitions', () => {
     const jsonSchema = (await schema.jsonSchema) as {
       properties?: { subagent_type?: { description?: string; enum?: string[] } };
     };
-    expect(jsonSchema.properties?.subagent_type?.enum).toEqual(['explore', 'plan']);
-    expect(jsonSchema.properties?.subagent_type?.description).toContain('plan for architecture');
+    expect(jsonSchema.properties?.subagent_type?.enum).toEqual([
+      'explore',
+      'plan',
+      'code',
+      'review',
+    ]);
+    expect(jsonSchema.properties?.subagent_type?.description).toContain('Type of sub-agent');
+    expect(String(task.description)).toContain('Planning permits only explore/plan');
   });
 
   test('invalidates tool cache when same-sized command grants change', () => {
@@ -869,6 +883,19 @@ describe('tool contracts (ACI)', () => {
     }
   });
 
+  test('keeps Provider strict disabled for builtin tools', () => {
+    const tools = createAgentTools({
+      workspace: '/tmp/test-workspace',
+      phase: 'planning',
+      config: { features: { promptContractV2: true } } as AgentConfig,
+      toolSearch: true,
+      subagentEventSink: () => {},
+    });
+    expect((tools.task as { strict?: boolean }).strict).toBeUndefined();
+    expect((tools.read_file as { strict?: boolean }).strict).toBeUndefined();
+    expect((tools.shell_execute as { strict?: boolean }).strict).toBeUndefined();
+  });
+
   test('file and web tools declare their actual text projection', () => {
     for (const name of ['read_file', 'edit_file', 'write_file', 'web_fetch']) {
       const normalized = normalizeToolContract(TOOL_CONTRACTS.get(name)!.sections);
@@ -1012,19 +1039,35 @@ describe('tool contracts (ACI)', () => {
     expect(schemaChanged).not.toBe(first);
   });
 
-  test('different phase produces different cache key (cache miss)', () => {
+  test('Prompt V2 phase changes preserve the complete builtin provider declaration', async () => {
     clearToolCache();
+    const config = { features: { promptContractV2: true } } as AgentConfig;
+    const declaration = async (tools: Record<string, unknown>) =>
+      Promise.all(
+        Object.entries(tools).map(async ([name, value]) => {
+          const tool = value as { description?: string; inputSchema: ToolSchemaLike };
+          return {
+            name,
+            description: tool.description,
+            schema: await tool.inputSchema.jsonSchema,
+          };
+        }),
+      );
     const planning = createAgentTools({
       workspace: '/tmp',
       phase: 'planning',
+      config,
+      subagentEventSink: () => {},
       authorization: { mode: 'default', commandGrants: {} },
     });
     const building = createAgentTools({
       workspace: '/tmp',
       phase: 'building',
+      config,
+      subagentEventSink: () => {},
       authorization: { mode: 'default', commandGrants: {} },
     });
-    expect(planning).not.toBe(building);
+    expect(await declaration(planning)).toEqual(await declaration(building));
   });
 
   test('different authorization mode produces different cache key (cache miss)', () => {

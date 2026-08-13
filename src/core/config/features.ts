@@ -61,7 +61,7 @@ export const DEFAULT_FEATURE_FLAGS: Readonly<FeatureFlags> = Object.freeze({
   releaseProfileV1: false,
   observabilityMetricsV1: false,
   brokeredGitV1: false,
-  promptContractV2: false,
+  promptContractV2: true,
 });
 
 export type FeatureFlagName = keyof FeatureFlags;

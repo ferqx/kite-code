@@ -3,7 +3,7 @@ import { FIRST_DECISION_CASES, runFirstDecisionEval } from '@/../scripts/evals/f
 
 test('the former Prompt A/B is named and reported only as first-decision eval', async () => {
   const report = await runFirstDecisionEval({ live: false });
-  expect(FIRST_DECISION_CASES).toHaveLength(10);
+  expect(FIRST_DECISION_CASES).toHaveLength(7);
   expect(report).toMatchObject({
     schema: 'FirstDecisionEvalV1',
     evaluationScope: 'first_decision_only',

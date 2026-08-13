@@ -270,6 +270,15 @@ describe('evaluateToolApproval', () => {
       expect(result.requiresApproval).toBe(false);
     });
 
+    it('allows a Registry-classified read-only capability during planning', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'tool_search', toolArgs: { query: 'database' }, phase: 'planning' }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.risk).toBe('read');
+    });
+
     it('requires approval for search_files with absolute path outside workspace', () => {
       const result = evaluateToolApproval(
         baseParams({ toolName: 'search_files', toolArgs: { pattern: '*.txt', path: '/tmp' } }),
@@ -396,6 +405,16 @@ describe('evaluateToolApproval', () => {
       expect(result.allowed).toBe(true);
       expect(result.requiresApproval).toBe(false);
       expect(result.risk).toBe('read');
+    });
+
+    it('allows policy-proven read-only shell inspection during planning', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'pwd' }, phase: 'planning' }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.risk).toBe('read');
+      expect(result.phaseConstraint).toBeUndefined();
     });
 
     it('requires approval for write-like shell commands', () => {
@@ -729,6 +748,30 @@ describe('evaluateToolApproval', () => {
       );
       expect(result.allowed).toBe(false);
     });
+
+    it('denies disclosed code and review roles in planning while allowing plan', () => {
+      for (const subagentType of ['code', 'review']) {
+        const result = evaluateToolApproval(
+          baseParams({
+            toolName: 'task',
+            toolArgs: { subagent_type: subagentType, task: 'Inspect or change the architecture.' },
+            phase: 'planning',
+          }),
+        );
+        expect(result.allowed).toBe(false);
+        expect(result.requiresApproval).toBe(false);
+        expect(result.phaseConstraint).toBe('planning');
+      }
+      expect(
+        evaluateToolApproval(
+          baseParams({
+            toolName: 'task',
+            toolArgs: { subagent_type: 'plan', task: 'Plan the architecture change.' },
+            phase: 'planning',
+          }),
+        ).allowed,
+      ).toBe(true);
+    });
   });
 
   // ── MCP tools / MCP 工具 ──
@@ -759,6 +802,23 @@ describe('evaluateToolApproval', () => {
         baseParams({
           toolName: 'mcp__server__tool',
           toolArgs: {},
+          mcpPolicy: {
+            effects: { filesystem: 'read', network: 'read', externalState: 'read' },
+            minimumApproval: 'none',
+          },
+        }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.risk).toBe('read');
+    });
+
+    it('allows a bound read-only MCP tool during planning', () => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolName: 'mcp__server__read',
+          toolArgs: {},
+          phase: 'planning',
           mcpPolicy: {
             effects: { filesystem: 'read', network: 'read', externalState: 'read' },
             minimumApproval: 'none',

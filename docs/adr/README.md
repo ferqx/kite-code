@@ -99,3 +99,5 @@ ADRs preserve decisions that alter runtime boundaries, lifecycle, policy, or exe
 | [0095](0095-runtime-completion-truth.md) | accepted | Runtime CompletionGuard 统一任务与计划完成真值，拒绝 final 文本绕过 canonical lifecycle |
 | [0096](0096-tool-outcome-recovery-and-journey-evaluation.md) | accepted | Runtime 统一 typed outcome/recovery 权威，并以完整 Journey 评测工具质量 |
 | [0097](0097-brokered-git-capability.md) | accepted | Git 从通用 Shell 迁移到 App-owned typed capability，并恢复三平台 `.git` 原生 deny |
+| [0098](0098-prompt-contract-v2-default-enabled.md) | accepted | 修正后的真实 A/B、项目规则 effect 与 Runtime 纠错 Journey 通过，Prompt Contract V2 默认启用并保留 legacy 回滚 |
+| [0099](0099-phase-stable-tool-disclosure.md) | accepted | V2 builtin/MCP 声明跨 Planning/Building 稳定，提示词引导只读行为，Runtime Policy 返回 phase 错误并阻止副作用 |

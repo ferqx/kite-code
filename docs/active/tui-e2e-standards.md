@@ -26,7 +26,7 @@ Harness 单元测试属于默认 `unit` 门禁；只有 `scenarios/` 中启动�
 Prompt Contract 迁移必须有 production-mode PTY scenario：通过正常 layered config 显式开启候选
 flag，以 `NODE_ENV=production` 启动真实 TUI composition root，并从本地 mock Provider 收到的实际
 HTTP request 验证 stable System（adapter 可合并相邻 System frame）/project/user/runtime 消息顺序、
-cacheable context、唯一 Runtime block 和 phase-resolved 工具声明。该 scenario 是 production TUI
+cacheable context、唯一 Runtime block、phase-stable V2 工具声明和 Runtime-owned phase rejection。该 scenario 是 production TUI
 链路证据，但仍是本地确定性 Provider，不能表述为真实模型
 A/B、release artifact 或平台资格证据。
 

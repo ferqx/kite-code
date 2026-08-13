@@ -10,6 +10,7 @@ import {
 } from '@/core/runtime/tool-recovery-journal';
 import {
   admitDelegationV1,
+  isDelegationRoleSmokeTestV1,
   planningContinuationAfterPlanSubagentV1,
 } from '@/core/subagent/delegation-contract';
 import { deriveSubAgentCompletionV1 } from '@/core/subagent/runner';
@@ -170,6 +171,70 @@ describe('ACORE-AGENT-01 delegation contract', () => {
     ).toBe('planning_role_invalid');
   });
 
+  test('explicit all-role smoke tests authorize every role in building', () => {
+    for (const userGoal of [
+      '测试所有的子agent',
+      'Please smoke-test every sub-agent role.',
+      'Test explore, plan, code, and review sub-agents.',
+    ]) {
+      for (const role of ['explore', 'plan', 'code', 'review'] as const) {
+        expect(
+          admitDelegationV1({
+            userGoal,
+            delegatedTask: `Run one bounded ${role} role smoke test and return the result.`,
+            role,
+            phase: 'building',
+          }),
+          `${userGoal}: ${role}`,
+        ).toEqual({ allowed: true, reason: 'admitted' });
+      }
+    }
+  });
+
+  test('role smoke detection is explicit and can enforce a read-only code ceiling', () => {
+    expect(isDelegationRoleSmokeTestV1('测试所有的子agent', 'code')).toBe(true);
+    expect(
+      isDelegationRoleSmokeTestV1(
+        'Delegate a bounded code implementation to a code subagent.',
+        'code',
+      ),
+    ).toBe(false);
+  });
+
+  test('all-role smoke tests retain planning phase role restrictions', () => {
+    for (const role of ['explore', 'plan'] as const) {
+      expect(
+        admitDelegationV1({
+          userGoal: '测试所有的子agent',
+          delegatedTask: `Run one bounded ${role} role smoke test and return the result.`,
+          role,
+          phase: 'planning',
+        }).allowed,
+      ).toBe(true);
+    }
+    for (const role of ['code', 'review'] as const) {
+      expect(
+        admitDelegationV1({
+          userGoal: '测试所有的子agent',
+          delegatedTask: `Run one bounded ${role} role smoke test and return the result.`,
+          role,
+          phase: 'planning',
+        }).reason,
+      ).toBe('planning_role_invalid');
+    }
+  });
+
+  test('a generic subagent test does not authorize unmentioned roles', () => {
+    expect(
+      admitDelegationV1({
+        userGoal: 'Test a subagent for me.',
+        delegatedTask: 'Run one bounded code role smoke test and return the result.',
+        role: 'code',
+        phase: 'building',
+      }).reason,
+    ).toBe('delegation_role_mismatch');
+  });
+
   test('negation, role mismatch and legacy planning phase fail closed in English and Chinese', () => {
     for (const userGoal of [
       'Do not delegate this task or use any subagent.',
@@ -257,6 +322,33 @@ describe('ACORE-AGENT-01 delegation contract', () => {
         phase: 'building',
       }).reason,
     ).toBe('task_not_bounded');
+  });
+
+  test('accepts common implementation delegation phrasing without treating discourse as denial', () => {
+    for (const userGoal of [
+      'Please delegate implementation to a code subagent.',
+      '请委派代码子代理实现这个功能。',
+      'Without further discussion, delegate this review to a review subagent.',
+    ]) {
+      expect(
+        admitDelegationV1({
+          userGoal,
+          delegatedTask:
+            'Perform the explicitly requested bounded role task and report the result.',
+          role: userGoal.includes('review') ? 'review' : 'code',
+          phase: 'building',
+        }),
+        userGoal,
+      ).toEqual({ allowed: true, reason: 'admitted' });
+    }
+    expect(
+      admitDelegationV1({
+        userGoal: 'Complete this without using sub-agents.',
+        delegatedTask: 'Inspect the repository and report findings.',
+        role: 'explore',
+        phase: 'building',
+      }).reason,
+    ).toBe('delegation_explicitly_denied');
   });
 
   test('task schema and Runtime admission share the 8..8000 bounded task contract', () => {

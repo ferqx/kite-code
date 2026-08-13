@@ -373,9 +373,12 @@ export function buildContextProjection(input: BuildContextProjectionInput): Cont
   // ── 9. Assemble final provider-ready messages ──
   const providerMessages: BaseMessage[] = [
     ...systemMessages,
-    ...projectInstructionMessages,
     ...summaryMessages,
     ...msgs,
+    // Project rules refresh from disk for each request. Keep them after the
+    // durable conversation prefix so a changed rule does not invalidate the
+    // system/history cache; they still precede the generated runtime state.
+    ...projectInstructionMessages,
     ...dynamicRuntimeMessages,
   ];
 

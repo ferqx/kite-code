@@ -1225,6 +1225,7 @@ test('legacy plan model recovery discloses only plan read/save and rejects an un
     baseURL: 'https://example.invalid',
     modelName: 'fixture-model',
     sandbox: { enabled: false },
+    features: { promptContractV2: false },
   };
   const model = createMockModel([
     {

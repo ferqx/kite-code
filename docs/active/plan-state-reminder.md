@@ -19,8 +19,8 @@
 ```text
 System(static agent contract)
 System(cacheable runtime context)
-Synthetic user(project instructions, V2 only)
 ...compacted transcript messages
+Synthetic user(project instructions, V2 only; refreshed from disk)
 Synthetic runtime-state message(exactly one)
 ```
 
@@ -29,9 +29,9 @@ Synthetic runtime-state message(exactly one)
 恢复到缺少 `planSchemaVersion=2` 的 executing Plan 时，动态 runtime block 进入
 `legacy_plan_recovery`：明确声明 V1 只读/replay、`update_plan`/submit/final/执行均不可用，并要求以当前
 `plan_id/version/structural_digest` 调用 `write_plan(action="save")` 创建 V2 replan。该轮 projection environment、
-token preflight 和 Provider tools 只包含 `read_plan`/`write_plan`；不会改变 `promptContractV2` 的默认关闭状态。
+token preflight 和 Provider tools 只包含 `read_plan`/`write_plan`；不会改变 `promptContractV2` 的默认开启状态。
 
-`promptContractV2` 默认关闭。开启后，项目 `CLAUDE.md`/`AGENTS.md` 作为带来源标记的早期 synthetic user context 注入，不能提升为 System 权限；其 snapshot revision 与 Prompt 版本共同进入环境 digest。加载预算为单文件 16 KiB、快照 64 KiB 且最多 16,384 tokens，超限文件产生 warning 并整体跳过，不静默截断。Planning 阶段的模型工具面隐藏 edit/write/shell，`task` 只允许 explore/plan，动态 MCP 只披露 effective effects 不超过 read 的能力。Runtime Policy 和 Controller 仍必须独立复核，工具面裁剪不是执行授权。PTY 的 Prompt Contract 场景若在 planning 中声明成功完成，必须经由真实 Runtime context 投影取得保存 Plan 的 identity，再驱动 submit、批准和 `update_plan` 完成 lifecycle，并以真实 request/UI evidence 验证该路径；`plan-review` 与 write-plan `tool-lifecycle` 场景另在只读、turn-scoped Runtime Store window 中证明 draft 的唯一 `completion.blocked(code=plan_draft_pending, planning=planning_draft, correctionAttempt=1)` 先于 continuation，并以 `run.completed`/`turn.completed` 收敛。所有场景都不能以第二个文本 final 绕过 completion guard。
+`promptContractV2` 默认开启，显式 `promptContractV2=false` 保留 legacy 回滚。项目 `CLAUDE.md`/`AGENTS.md` 作为带来源标记的 synthetic user context 注入，不能提升为 System 权限；每个模型请求从磁盘重新生成 snapshot，但它放在已持久化的 transcript 之后、Runtime state 之前，使规则变更在下一请求生效而不改变稳定的 system/history cache 前缀。其 snapshot revision 与 Prompt 版本共同进入环境 digest。加载预算为单文件 16 KiB、快照 64 KiB 且最多 16,384 tokens，超限文件产生 warning 并整体跳过，不静默截断。V2 的 production builtin 名称、description 与 JSON schema 不随 Planning/Building 变化；edit/write/shell 和完整 `task` role schema 在两阶段都披露，已绑定动态 MCP 也不因 phase 消失。Planning 的动态 Runtime block 引导模型只做只读检查；Runtime Policy 按真实 effect 强制允许只读 Shell/MCP/Registry capability，拒绝 edit/write、code/review child 与其他副作用，并把结构化 phase Tool Result 回灌模型。Capability 未加载、execution surface 收窄和 legacy plan recovery 仍可改变工具面；不得把 phase-stable 声明误解为执行许可。PTY 的 Prompt Contract 场景若在 planning 中声明成功完成，必须经由真实 Runtime context 投影取得保存 Plan 的 identity，再驱动 submit、批准和 `update_plan` 完成 lifecycle，并以真实 request/UI evidence 验证该路径；`plan-review` 与 write-plan `tool-lifecycle` 场景另在只读、turn-scoped Runtime Store window 中证明 draft 的唯一 `completion.blocked(code=plan_draft_pending, planning=planning_draft, correctionAttempt=1)` 先于 continuation，并以 `run.completed`/`turn.completed` 收敛。所有场景都不能以第二个文本 final 绕过 completion guard。
 
 工具协议链必须保留原始 assistant tool call 与对应 tool result 关系。不得为了缓存命中率把工具结果改写为普通用户消息，或将 transient binding/tool schema 固化进长期 transcript。
 

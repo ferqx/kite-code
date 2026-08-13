@@ -5,19 +5,20 @@
 验证：`bun test tests/evals/runtime-journey-baseline.test.ts tests/evals/tool-journey-v1.test.ts tests/evals/first-decision-eval.test.ts tests/evals/prompt-contract-ab.test.ts`、`bun run check:docs`、`bun run check:docs-impact`。
 相关：ADR-0093、ADR-0094、ADR-0095、ADR-0096、`real-model-test-boundary.md`、`agent-task-evaluation.md`。
 
-## 冻结的 V1 政策
+## 已取代的 V1 政策
 
-本政策 revision 是 `ACORE-EVAL-POLICY-01-r1`。其 Prompt Contract first-decision 候选为 commit
+`ACORE-EVAL-POLICY-01-r1` 的 Prompt Contract first-decision 候选为 commit
 `300e11a4`（`fix: close prompt contract provider evidence`）；该候选只用于 V3 Provider 计量与 first-decision
 A/B，不能作为 CompletionGuard 或完整 Journey 的候选。任何 fixture、scorer、report schema、route、candidate allowlist
-或隐私规则修改都必须创建新 revision，并使该 revision 的正式样本从零开始。
+或隐私规则修改都必须创建新 revision，并使该 revision 的正式样本从零开始。该 revision 已被下述 r2 取代，历史样本不得并入 r2。
 
 - Provider 固定为 OpenCode Go OpenAI-compatible route 与 `deepseek-v4-flash`；运行时只报告稳定 route alias，严禁输出
   endpoint、credential、请求/响应正文或 Provider response ID。
 - 正式 first-decision A/B 是每个 case 十个配对样本、AB/BA 交替、无 early stop；在精确候选 commit 和本政策 revision
   都已固定前不得运行。诊断运行不属于正式样本，也不能和正式样本合并。
 - 固定 1024 output-token 上限、60 秒单 attempt timeout、5 个百分点不劣界与配对 95% 双侧区间；结果只能是
-  `passed`、`failed` 或 `inconclusive`。`diagnosticSampleMet` 不是默认开启资格，Prompt Contract V2 继续默认关闭。
+  `passed`、`failed` 或 `inconclusive`。`diagnosticSampleMet` 不是迁移资格；ADR-0098 以修正后的正式 A/B、
+  独立 effect probe 与 production Runtime journey 共同授权 Prompt Contract V2 默认开启。
 - 每个 arm 必须精确闭合 expected/started/succeeded model attempts、HTTPS dispatch/response/2xx、usage 覆盖、非零
   input/output/total token、唯一 Provider response ID；任何不相等、transport failure、缺 usage 或重复 ID 均为失败。
 - OpenCode Go 订阅 usage 证据包括该次无正文 runner usage 汇总，及维护者在运行前后对 Go usage 页面进行的人工核对。
@@ -29,6 +30,27 @@ A/B，不能作为 CompletionGuard 或完整 Journey 的候选。任何 fixture�
 
 正式的完整 Journey 候选必须在 CompletionGuard、ToolOutcome 与 policy revision 都冻结后另行指定 commit；在此之前不得把
 first-decision V3 结果表述为 Runtime Journey 质量或 V2 默认迁移资格。
+
+## 当前 r2 政策
+
+当前 revision 是 `ACORE-EVAL-POLICY-02-r1`，由清理恒等 candidate profile、修正 first-decision 绝对质量门槛和收紧
+live task Journey oracle 触发。正式样本运行前，`KITE_FORMAL_EVAL=1` 和
+`KITE_FORMAL_EVAL_CANDIDATE_COMMIT=<40-hex HEAD>` 必须同时存在；runner 只接受干净工作树和精确 HEAD，并把
+`policyRevision` 与精确 candidate commit 写入报告。在人工 `goUsageChecked` 与核对时间窗口闭合前，只允许运行诊断样本，
+不得沿用 r1 或 ADR-0098/ADR-0099 的历史数字作为 r2 准入证据。
+
+每个 live report 的 `evaluationIdentity` 必须为 `formal=true`、当前 policy revision 和同一个 candidate commit。评测前后
+由维护者核对 OpenCode Go usage 页面；结束后以 `eval:r2:manifest` 验证所有 report identity/status，记录报告内容哈希、
+`goUsageChecked=true` 和前后 ISO 时间窗口。manifest 不保存报告路径、账户、余额、截图、Provider response ID 或正文。
+任一 report 未通过、身份不一致、工作树变脏或 usage 窗口无效时不得生成正式 manifest。
+
+- first-decision 只比较 `legacy_vs_published`，同时要求配对 5pp 不劣、candidate 总正确率至少 80%、每类至少 50%，
+  并满足零安全违规、零无效工具、零精确重复调用与既有参数门禁。
+- 默认工具描述 fixture 只覆盖 runner 实际披露的七个目标工具；需要 Skill catalog 才可见的 `activate_skill` 必须进入独立
+  capability treatment，不能作为默认工具面失败计入分母。
+- `natural` Journey 必须恰好一次成功 `task(plan)` 和一个完成 child；`invalid_args_recovery` 必须恰好两次 task 调用，
+  其中一次未 dispatch 的参数错误、一次模型纠正成功和一个完成 child。任何额外 task/child 都是失败。
+- 所有 r1 的 Provider 闭合、隐私、synthetic workspace、route、输出 token、超时和人工 Go usage 规则在 r2 继续适用。
 
 ## ACORE-EVAL-01 本地证据边界
 

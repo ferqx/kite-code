@@ -11,6 +11,7 @@
  * 3. Start TUI instance 2 on the same workspace (shared checkpoint DB)
  * 4. Open /sessions — verify previous session appears in the list
  * 5. Load the historical session — verify messages are replayed correctly
+ * 6. Type and submit a follow-up prompt in the restored session
  *
  * IMPORTANT: Both TUI instances share the same isolated HOME and workspace,
  * so they resolve the same production Runtime Store path.
@@ -219,6 +220,29 @@ describe('TUI PTY System — Session Persistence', () => {
     },
     TIMEOUT,
   );
+
+  step(
+    'restored session accepts and submits a follow-up prompt',
+    async () => {
+      server.setResponses([
+        { message: { content: 'Follow-up after restart received.' }, delay: 50 },
+      ]);
+
+      await submitUserMessage(tui2, server, 'Message after restart', { timeout: 15000 });
+      await waitForText(
+        () => tui2.outputSinceLastAction(),
+        'Follow-up after restart received.',
+        15000,
+      );
+
+      const output = tui2.viewport();
+      expect(screenContains(output, 'Message after restart')).toBe(true);
+      expect(screenContains(output, 'Follow-up after restart received.')).toBe(true);
+      expect(screenContains(output, '❯')).toBe(true);
+    },
+    TIMEOUT,
+  );
+
   test(
     'runs the complete stateful journey',
     () => journey.run(),

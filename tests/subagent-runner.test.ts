@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { digestCapability } from '@/core/capabilities/catalog';
@@ -352,6 +352,54 @@ describe('SubAgentRunner integration', () => {
     const doneEvent = events.find((e) => e.type === 'done')!;
     expect(doneEvent.data.summary).toContain('Found');
     expect(typeof doneEvent.data.durationMs).toBe('number');
+  });
+
+  test('read-only role rejects mutating shell when no executor is injected', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kite-code-readonly-shell-fallback-'));
+    try {
+      const target = join(ws, 'should-not-exist.txt');
+      const { events, sink } = mockEventSink();
+      const model = new StreamingMockModel({
+        responses: [
+          {
+            message: aiMessage({
+              content: 'attempt write',
+              tool_calls: [
+                {
+                  id: 'tc-readonly-write',
+                  name: 'shell_execute',
+                  args: {
+                    command: 'printf blocked > should-not-exist.txt',
+                    description: 'Attempt a write from a read-only role',
+                  },
+                },
+              ],
+            }),
+          },
+          { message: aiMessage({ content: 'write rejected' }) },
+        ],
+      }) as unknown as SupportedChatModel;
+
+      await runSubAgent({
+        config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
+        workspace: ws,
+        role: getRoleConfig('explore'),
+        task: 'Inspect without modifying the workspace.',
+        timeoutMs: 5000,
+        signal: new AbortController().signal,
+        eventSink: sink,
+        model,
+        authorization: { ...defaultAuthorizationState(), mode: 'full_access' },
+      });
+
+      expect(existsSync(target)).toBe(false);
+      const shellResult = events.find(
+        (event) => event.type === 'tool_result' && event.data.toolName === 'shell_execute',
+      );
+      expect(String(shellResult?.data.summary)).toContain('read-only command');
+    } finally {
+      rmSync(ws, { recursive: true, force: true });
+    }
   });
 
   test('code role with real file read via tool call', async () => {

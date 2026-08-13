@@ -167,7 +167,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     constraints:
       'old_string must exactly match fresh verified content. Do not issue multiple same-file edits from one stale read; use replace_all only for intentional duplicate replacement.',
     recovery:
-      'If content is missing, duplicated or stale, re-read then submit one corrected invocation. If deferred in planning, record the edit in the plan and wait for approval; do not retry or request edit approval in planning.',
+      'If content is missing, duplicated or stale, re-read then submit one corrected invocation. If rejected in planning, record the edit in the plan and wait for approval; do not retry or request edit approval in planning.',
   },
   write_file: {
     summary: 'Create a file or completely replace its content.',
@@ -180,7 +180,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     constraints:
       'Path must be governed and workspace-relative. Read an existing file first because omitted content is lost.',
     recovery:
-      'Correct an invalid path after inspecting the workspace. If deferred in planning, keep the change in the plan and apply it only after approval; permission/boundary denial is not auto-retryable.',
+      'Correct an invalid path after inspecting the workspace. If rejected in planning, keep the change in the plan and apply it only after approval; permission/boundary denial is not auto-retryable.',
   },
   shell_execute: {
     summary: 'Execute a concrete shell command through the governed execution boundary.',
@@ -404,7 +404,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     summary:
       'Delegate a bounded self-contained task only when the current user explicitly requests delegation.',
     useWhen:
-      'Use explore for evidence; use plan for read-only architecture or design planning; use code for authorized implementation and review for bounded review. Parent and child share Runtime recovery ceilings.',
+      'For a qualifying explicit delegation, call this tool rather than replying with a delegation description. Use explore for evidence; use plan for read-only architecture or design planning; use code for authorized implementation and review for bounded review. Parent and child share Runtime recovery ceilings.',
     returns: {
       format: 'json',
       description:
@@ -412,7 +412,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       fields: ['ok', 'summary', 'error', 'toolCallCount', 'durationMs', 'nextActions'],
     },
     constraints:
-      'Provide subagent_type and a concrete self-contained task. Planning exposes only explore/plan and never grants writes by implication.',
+      'Both subagent_type and task are required. task is the concrete self-contained instruction, not a summary for the user. Planning permits only explore/plan; other disclosed roles return a phase-constraint error and never gain writes by implication.',
     recovery:
       'Approval/policy denial and exhausted/unknown child effects are not replayed. Resume only a Runtime-owned continuation; use a new bounded task only after real replan/user/provider progress.',
   },
@@ -434,7 +434,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
 
 function compatibilityContract(name: KnownToolName): ToolContract {
   const sections = BUILTIN_TOOL_CONTRACTS[name];
-  return { name, sections, description: buildDescription(sections) };
+  return { name, sections, description: buildDescription(sections, 'legacy') };
 }
 
 export const READ_FILE_CONTRACT = compatibilityContract('read_file');

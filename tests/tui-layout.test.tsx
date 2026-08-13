@@ -1703,11 +1703,13 @@ function OutputAreaTestWrap({
   turns,
   onToggleReason,
   awaitingApproval = false,
+  compactionPhase,
 }: {
   running: boolean;
   turns: { blocks: OutputBlock[] }[];
   onToggleReason: () => void;
   awaitingApproval?: boolean;
+  compactionPhase?: import('../src/core/model/context-compaction-presentation').ContextCompactionProgressPhase;
 }) {
   const {
     staticItems,
@@ -1731,6 +1733,7 @@ function OutputAreaTestWrap({
       onToggleReason={onToggleReason}
       awaitingApproval={awaitingApproval}
       columns={80}
+      compactionPhase={compactionPhase}
     />
   );
 }
@@ -3346,6 +3349,25 @@ describe('Block spacing', () => {
 });
 
 describe('OutputArea', () => {
+  test('renders compaction progress after the message list', () => {
+    const { lastFrame } = render(
+      <OutputAreaTestWrap
+        running={false}
+        turns={[
+          {
+            blocks: [{ id: 1, kind: 'user', content: '/auto-compact' }],
+          },
+        ]}
+        onToggleReason={noop}
+        compactionPhase="summarizing"
+      />,
+    );
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('/auto-compact');
+    expect(frame).toContain('Summarizing context');
+  });
+
   test('renders capability search as a matched Provider · Tool tree', () => {
     const events: RuntimeEvent[] = [
       {

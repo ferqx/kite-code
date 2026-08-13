@@ -165,7 +165,7 @@ export function buildRuntimeModeSnapshot(input: RuntimeModeSnapshotInput): strin
     );
   } else if (input.phase === 'planning') {
     lines.push(
-      'Planning phase policy: read/search/research, ask_user, read_plan, and write_plan are allowed; workspace mutation, code execution, full access escalation, and side-effectful MCP/sub-agent work are not allowed until plan approval moves the phase to building. An initial write_plan(action="save") may enter planning only before side effects begin, followed by submit of the saved Artifact.',
+      'Planning phase policy: read/search/research, policy-proven read-only shell inspection, ask_user, read_plan, and write_plan are allowed. Do not call file-writing tools, tests, builds, installs, formatting, generation, mutating or unknown-effect shell commands, full access escalation, or side-effectful MCP/sub-agent work until plan approval moves the phase to building. Phase-invalid calls are not executed or approved; their structured Tool Result is feedback for choosing a read-only action or preserving the work in the plan. An initial write_plan(action="save") may enter planning only before side effects begin, followed by submit of the saved Artifact.',
     );
   } else {
     lines.push(

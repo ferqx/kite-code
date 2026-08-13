@@ -90,6 +90,12 @@ describe('test discovery boundaries', () => {
       'bun run scripts/evals/first-decision-eval.ts',
     );
     expect(pkg.scripts?.['test:prompt:live']).toBe('bun run scripts/evals/first-decision-eval.ts');
+    expect(pkg.scripts?.['test:prompt-cache:live']).toBe(
+      'bun run scripts/evals/prompt-cache-transition.ts',
+    );
+    expect(pkg.scripts?.['test:task-journey:live']).toBe(
+      'bun run scripts/evals/live-task-journey.ts',
+    );
     expect(pkg.scripts?.['test:tui:system']).toContain('scripts/run-tui-system-tests.ts');
     expect(pkg.scripts?.['test:tui:harness']).toContain('tests/tui-system/harness/');
     expect(pkg.scripts?.['test:sandbox:smoke:native']).toContain('tests/sandbox-executor.test.ts');

@@ -461,7 +461,7 @@ test('Runtime isolates an MCP adapter exception and continues the same conversat
   }
 });
 
-test('Runtime Kernel bounds a rejected planning write after one correction', async () => {
+test('Runtime Kernel feeds a V2 planning phase write rejection back for one correction', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-integration-'));
   const storePath = join(workspace, 'runtime.db');
   const mockModel = createMockModel([

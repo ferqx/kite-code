@@ -59,7 +59,7 @@ describe('mock model fixture', () => {
     }
   });
 
-  test('matches only the current user turn, not history or injected runtime state', async () => {
+  test('matches only the current user turn, not history or injected project/runtime context', async () => {
     const server = createMockModelServer();
     try {
       server.setResponses([{ message: { content: 'ok' } }]);
@@ -71,6 +71,11 @@ describe('mock model fixture', () => {
             { role: 'user', content: 'historical target' },
             { role: 'assistant', content: 'old answer' },
             { role: 'user', content: 'current target' },
+            {
+              role: 'user',
+              content:
+                '<project-instructions role="workspace-context">refreshed rules</project-instructions>',
+            },
             {
               role: 'user',
               content: '<runtime-state source="runtime.kernel">injected policy</runtime-state>',

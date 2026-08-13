@@ -115,7 +115,9 @@
         "src/app/tui/types.ts",
         "tests/subagent-delegation-contract.test.ts",
         "tests/subagent-runner.test.ts",
-        "tests/subagent-continuation-codec.test.ts"
+        "tests/subagent-continuation-codec.test.ts",
+        "scripts/evals/live-task-journey.ts",
+        "tests/evals/live-task-journey.test.ts"
       ],
       "documents": [
         "docs/active/tool-gated-autonomy.md",
@@ -480,10 +482,18 @@
         "src/core/runtime/context-compaction.ts",
         "scripts/evals/first-decision-eval.ts",
         "scripts/evals/prompt-contract-ab.ts",
+        "scripts/evals/prompt-cache-transition.ts",
+        "scripts/evals/live-task-journey.ts",
+        "scripts/evals/formal-eval-identity.ts",
+        "scripts/evals/formal-eval-manifest.ts",
         "tests/tui-system/scenarios/prompt-contract-v2-production.test.ts",
         "tests/prompts/prompt-contract-budget.test.ts",
         "tests/evals/first-decision-eval.test.ts",
         "tests/evals/prompt-contract-ab.test.ts",
+        "tests/evals/prompt-cache-transition.test.ts",
+        "tests/evals/live-task-journey.test.ts",
+        "tests/evals/formal-eval-identity.test.ts",
+        "tests/evals/formal-eval-manifest.test.ts",
         "tests/project-instructions.test.ts"
       ],
       "documents": [

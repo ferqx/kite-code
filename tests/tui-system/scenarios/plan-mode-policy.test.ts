@@ -3,8 +3,8 @@
  *
  * Covers the full TUI → session runtime → core runner → tool policy chain for
  * a planning-mode plain prompt. The mock model deliberately attempts a
- * write_file call. In real Plan Mode, the TUI must pass initialPhase=planning
- * to core so the write is rejected before any approval or filesystem mutation
+ * write_file call. V2 keeps the declaration stable, while Runtime policy
+ * returns a phase-constraint result before any approval or filesystem mutation
  * can happen. Because that rejected Tool is an unresolved completion blocker,
  * the scenario cancels review instead of pretending the Plan can complete,
  * then explicitly exits Plan Mode before exercising the next clean lifecycle.
@@ -14,7 +14,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
-import { createMockModelServer } from '../harness/fixtures';
+import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui } from '../harness/pty-process';
@@ -58,7 +58,10 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       {
         expectedRequest: {
           toolResults: [
-            { toolCallId: 'call_plan_write_denied', contentIncludes: ['Plan mode is read-only'] },
+            {
+              toolCallId: 'call_plan_write_denied',
+              contentIncludes: ['Plan mode is read-only', 'No file was written'],
+            },
           ],
         },
         message: {
@@ -92,6 +95,14 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
           content: 'I will validate the plan.',
           tool_calls: [
             {
+              id: 'call_plan_pwd_read',
+              name: 'shell_execute',
+              args: {
+                command: 'pwd',
+                description: 'Inspect the current directory',
+              },
+            },
+            {
               id: 'call_plan_typecheck_deferred',
               name: 'shell_execute',
               args: {
@@ -113,6 +124,10 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       {
         expectedRequest: {
           toolResults: [
+            {
+              toolCallId: 'call_plan_pwd_read',
+              contentIncludes: [workspace.workspace],
+            },
             {
               toolCallId: 'call_plan_typecheck_deferred',
               contentIncludes: ['"deferred":true', '"until_phase":"building"'],
@@ -205,7 +220,7 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
   );
 
   step(
-    'planning shell validation stays internal without approval or message cards',
+    'non-read planning shell validation is deferred without execution or approval',
     async () => {
       const task = 'Plan the runtime validation commands';
       tui.write('\x1b[Z');
@@ -230,7 +245,10 @@ describe('TUI PTY System — Plan Mode Policy Boundary', () => {
       expect(screenContains(output, 'bun run typecheck')).toBe(false);
       expect(screenContains(output, 'bun test tests/runtime')).toBe(false);
       expect(screenContains(output, 'Rejected shell_execute during planning phase')).toBe(false);
-      expect(screenContains(output, 'Bash Ran:')).toBe(false);
+      expect(screenContains(output, "Tool 'shell_execute' is not available in this context")).toBe(
+        false,
+      );
+      expect(screenContains(output, 'Bash Ran: pwd')).toBe(true);
       expect(screenContains(output, '工具授权')).toBe(false);
     },
     TIMEOUT,
@@ -267,30 +285,5 @@ function planSubmitResponse(saveCallId: string, submitCallId: string) {
         },
       };
     },
-  };
-}
-
-function parseDraftSavedPlan(content: unknown): {
-  plan_id: string;
-  version: number;
-  structural_digest: string;
-} {
-  const value: unknown = JSON.parse(String(content));
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('plan_id' in value) ||
-    typeof value.plan_id !== 'string' ||
-    !('version' in value) ||
-    typeof value.version !== 'number' ||
-    !('structural_digest' in value) ||
-    typeof value.structural_digest !== 'string'
-  ) {
-    throw new Error('write_plan draft_saved result did not contain a valid plan identity');
-  }
-  return {
-    plan_id: value.plan_id,
-    version: value.version,
-    structural_digest: value.structural_digest,
   };
 }

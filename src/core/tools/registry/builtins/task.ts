@@ -16,7 +16,7 @@ export const taskInputSchema = z.object({
     ),
 });
 
-const planningTaskInputSchema = taskInputSchema.extend({
+const legacyPlanningTaskInputSchema = taskInputSchema.extend({
   subagent_type: z
     .enum(['explore', 'plan'])
     .describe('Read-only role: explore for evidence gathering or plan for architecture and design'),
@@ -29,8 +29,11 @@ export const taskSpec = defineExecutableTool({
   kind: 'coordination',
   contract: TASK_CONTRACT.sections,
   inputSchema: taskInputSchema,
-  modelInputSchema: (context) =>
-    context.phase === 'planning' ? planningTaskInputSchema : taskInputSchema,
+  modelInputSchema: (context) => {
+    return !context.featureFlags?.promptContractV2 && context.phase === 'planning'
+      ? legacyPlanningTaskInputSchema
+      : taskInputSchema;
+  },
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'none' },
   minimumApproval: 'user',
   availability: (context) => context.hasTaskAdapter === true,
@@ -50,7 +53,10 @@ export const taskSpec = defineExecutableTool({
     if (!context.runTask) {
       return { available: false, error: 'task tool is unavailable in this execution context.' };
     }
-    return { available: true, result: await context.runTask(input) };
+    return {
+      available: true,
+      result: await context.runTask(input),
+    };
   },
   projectResult: (output, context) => {
     const ok = output.available && output.result.ok !== false;

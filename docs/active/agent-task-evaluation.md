@@ -42,7 +42,7 @@ D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发
 OpenCode Go 的 first-decision/Journey live 评测还必须遵守版本化 `ACORE-EVAL-POLICY`；当前冻结规则、候选范围、
 十轮样本、Provider usage 与人工 Go usage 核对的无正文边界见
 [`opencode-go-journey-evaluation-policy.md`](opencode-go-journey-evaluation-policy.md)。该政策不授权运行真实模型，
-也不改变 ADR-0094 的 `promptContractV2=false` 默认值。
+也不单独决定 Prompt Contract 默认值；该迁移由 ADR-0098 的真实 A/B、effect probe 与 Runtime journey 共同授权。
 
 `ACORE-EVAL-00-v1` 是在上述 live 政策之前建立的完整 Runtime Journey 基线：它用 synthetic workspace 驱动
 Kernel 的 `model → tool → model → run.completed → turn.completed` 闭环，只断言 canonical event 类型与计数，

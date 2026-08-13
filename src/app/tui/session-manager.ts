@@ -614,7 +614,11 @@ export class SessionRuntime {
           this.runtimeControl = control;
         },
         onCompactionProgress: (phase) => {
-          deps.dispatch({ type: 'SET_COMPACTION_PROGRESS', phase });
+          deps.dispatch(
+            phase
+              ? { type: 'SET_COMPACTION_PROGRESS', phase, source: 'automatic' }
+              : { type: 'SET_COMPACTION_PROGRESS' },
+          );
         },
       };
       const runtimeProvider: RuntimeActionProvider = {

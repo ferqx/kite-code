@@ -2927,6 +2927,25 @@ describe('eventReducer (blocks model)', () => {
       expect(s.sessionKey).toBe(1);
     });
 
+    test('clears ephemeral compaction progress so the restored prompt is usable', () => {
+      let s: TuiState = {
+        ...fresh(),
+        compactionProgress: { phase: 'summarizing', source: 'automatic' },
+      };
+
+      s = dispatch(s, {
+        type: 'LOAD_SESSION',
+        threadId: 't1',
+        blocks: [{ id: 1, kind: 'text', content: 'restored' }],
+        interrupt: null,
+        modelProvider: '',
+        modelName: '',
+        thinkingLevel: null,
+      });
+
+      expect(s.compactionProgress).toBeUndefined();
+    });
+
     test('saves outgoing session turns before overwriting', () => {
       let s: TuiState = {
         ...fresh(),
@@ -5739,6 +5758,48 @@ describe('model streaming RuntimeEvent rendering', () => {
 });
 
 describe('context compaction RuntimeEvent rendering', () => {
+  const compactionRequest = (
+    reason: 'auto' | 'manual',
+  ): Extract<RuntimeEvent, { type: 'context.compaction_requested' }> => ({
+    type: 'context.compaction_requested',
+    compactionId: `${reason}-request`,
+    reason,
+    requestedAtRevision: 1,
+    requestedAtTurnId: 'turn-1',
+    force: false,
+    estimate: {
+      systemTokens: 0,
+      toolSchemaTokens: 0,
+      transcriptTokens: 0,
+      summaryTokens: 0,
+      dynamicRuntimeTokens: 0,
+      framingTokens: 0,
+      totalInputTokens: 0,
+    },
+  });
+
+  test('renders automatic compaction as a semantic command message', () => {
+    const state = handleRuntimeEventAction(fresh(), compactionRequest('auto'));
+
+    expect(flatBlocks(state)).toContainEqual(
+      expect.objectContaining({ kind: 'user', content: '/auto-compact' }),
+    );
+  });
+
+  test('does not duplicate the durable manual /compact command message', () => {
+    let state = handleRuntimeEventAction(fresh(), {
+      type: 'user.command_invoked',
+      commandId: 'manual-command',
+      command: '/compact',
+    });
+    state = handleRuntimeEventAction(state, compactionRequest('manual'));
+
+    expect(
+      flatBlocks(state).filter((block) => block.kind === 'user' && block.content === '/compact'),
+    ).toHaveLength(1);
+    expect(JSON.stringify(flatBlocks(state))).not.toContain('/auto-compact');
+  });
+
   test('renders manual low-gain rejection as a benign actionable notice', () => {
     const state = handleRuntimeEventAction(fresh(), {
       type: 'context.compaction_failed',

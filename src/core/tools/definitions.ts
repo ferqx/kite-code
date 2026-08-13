@@ -108,15 +108,6 @@ export function createAgentTools(
     if (descriptor.kind !== 'mcp_tool' || descriptor.availability !== 'available') continue;
     if (!descriptor.inputSchema) continue;
     if (
-      ctx.featureFlags?.promptContractV2 &&
-      ctx.phase === 'planning' &&
-      Object.values(descriptor.effectiveEffects).some(
-        (effect) => effect !== 'none' && effect !== 'read',
-      )
-    ) {
-      continue;
-    }
-    if (
       executionSurface &&
       !isDescriptorAdmittedByExecutionCapabilitySurfaceV1({
         surface: executionSurface,

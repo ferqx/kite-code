@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import type { AgentEvent } from '@/protocol/events';
 import type { Action } from '../src/app/tui/App';
-import { createInitialState, eventReducer, shouldShowRunStatus } from '../src/app/tui/App';
+import {
+  createInitialState,
+  eventReducer,
+  shouldDisablePromptInput,
+  shouldShowRunStatus,
+} from '../src/app/tui/App';
 import { formatElapsed, formatToolResultForDisplay } from '../src/app/tui/components/render-utils';
 import { handleEventAction, type RenderEvent } from '../src/app/tui/reducers/handleEvent';
 import type { RunStatusTone } from '../src/app/tui/run-status';
@@ -51,30 +56,45 @@ function toolDone(callId: string, name: string, summary = 'ok'): LegacyRenderAct
 
 describe('run phase progression', () => {
   test.each([
-    ['preparing', 'Preparing context'],
-    ['summarizing', 'Summarizing context'],
-    ['validating', 'Validating context'],
-  ] as const)('shows context compaction %s progress', (progress, verb) => {
-    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
-    state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS', phase: progress });
+    'manual',
+    'automatic',
+  ] as const)('keeps the prompt enabled while %s compaction is active', (source) => {
+    const state = {
+      ...createInitialState(),
+      compactionProgress: { phase: 'summarizing' as const, source },
+    };
 
-    expect(deriveRunStatusSnapshot(state).verb).toBe(verb);
+    expect(shouldDisablePromptInput(state)).toBe(false);
+  });
+
+  test('enables the prompt once compaction progress has cleared', () => {
+    expect(shouldDisablePromptInput(createInitialState())).toBe(false);
+  });
+
+  test('keeps the active agent run status during automatic compaction', () => {
+    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = dispatch(state, {
+      type: 'SET_COMPACTION_PROGRESS',
+      phase: 'summarizing',
+      source: 'automatic',
+    });
+
+    expect(deriveRunStatusSnapshot(state).verb).toBe('Thinking');
     expect(shouldShowRunStatus(state)).toBe(true);
   });
 
-  test('hides manual compaction status again when ephemeral progress clears', () => {
-    let state = createInitialState();
+  test('hides agent run status during manual compaction', () => {
+    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
     state = dispatch(state, {
       type: 'SET_COMPACTION_PROGRESS',
       phase: 'preparing',
-      placement: 'inline',
+      source: 'manual',
     });
-    expect(state.running).toBe(false);
-    expect(state.compactionProgress).toEqual({ phase: 'preparing', placement: 'inline' });
+    expect(state.compactionProgress).toEqual({ phase: 'preparing', source: 'manual' });
     expect(shouldShowRunStatus(state)).toBe(false);
     state = dispatch(state, { type: 'SET_COMPACTION_PROGRESS' });
     expect(state.compactionProgress).toBeUndefined();
-    expect(shouldShowRunStatus(state)).toBe(false);
+    expect(shouldShowRunStatus(state)).toBe(true);
   });
 
   test('starts in thinking phase', () => {

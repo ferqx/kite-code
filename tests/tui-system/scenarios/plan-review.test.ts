@@ -12,7 +12,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { basename } from 'node:path';
 import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
-import { createMockModelServer } from '../harness/fixtures';
+import { createMockModelServer, parseDraftSavedPlan } from '../harness/fixtures';
 import { submitCommand, submitUserMessage } from '../harness/input-helpers';
 import { createTuiSystemJourney, TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS } from '../harness/journey';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
@@ -216,31 +216,6 @@ describe('TUI PTY System — Plan Draft (write_plan)', () => {
     TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
   );
 });
-
-function parseDraftSavedPlan(content: unknown): {
-  plan_id: string;
-  version: number;
-  structural_digest: string;
-} {
-  const value: unknown = JSON.parse(String(content));
-  if (
-    typeof value !== 'object' ||
-    value === null ||
-    !('plan_id' in value) ||
-    typeof value.plan_id !== 'string' ||
-    !('version' in value) ||
-    typeof value.version !== 'number' ||
-    !('structural_digest' in value) ||
-    typeof value.structural_digest !== 'string'
-  ) {
-    throw new Error('write_plan draft_saved result did not contain a valid plan identity');
-  }
-  return {
-    plan_id: value.plan_id,
-    version: value.version,
-    structural_digest: value.structural_digest,
-  };
-}
 
 async function assertCompletedPlanTurn(
   workspace: ReturnType<typeof createTestWorkspace>,

@@ -1,8 +1,8 @@
 # 当前规则：工具描述即契约
 
 状态：active
-最后更新：2026-08-11
-最后验证：2026-08-11
+最后更新：2026-08-12
+最后验证：2026-08-12
 范围：
 
 - `src/core/tools/tool-contracts.ts`
@@ -45,11 +45,11 @@ ToolSpec 的规范契约是 `ToolContractSection`：`summary`、`useWhen`、`ret
 ### 契约存放与绑定
 
 - `BUILTIN_TOOL_CONTRACTS` 是当前 20 个 builtin 的规范事实表；各 ToolSpec 直接或通过兼容命名常量绑定其中同一对象，Skill runtime 三工具同样不得另写契约。
-- `buildDescription(contract, version)` 从同一组独立事实生成 legacy 或 V2 文本。`promptContractV2=false` 保持默认；V2 逐项投影 selection、参数约束、真实返回格式与恢复语义，不再靠截取旧文案第一句保存关键规则。
+- `buildDescription(contract, version)` 从同一组独立事实生成 legacy 或 V2 文本。被拒绝的 candidate 文案及其恒等 production profile 已移除；后续文案实验必须在 evaluator 内显式注入，不得把无行为差异的 profile 贯穿 ToolSpec、Registry 与生产上下文。ADR-0098 默认启用已发布 V2，legacy 可用 `promptContractV2=false` 回滚。V2 逐项投影 selection、参数约束、真实返回格式与恢复语义，不再靠截取旧文案第一句保存关键规则。
 - `definitions.ts` 只能投影 Registry，不得硬编码另一份 description。
 - Runner 的失败指导只能读取 `spec.contract.recovery` 的规范化结果；禁止维护按工具名分支的第二份 recovery guidance。
 - V2 单工具 description 受 token/长度测试约束；确有必要的输入边界和恢复说明可以保留，不能用强制替代工具名、失败关键词或固定段数充数。
-- `task` 的兼容契约首句必须保留权威与角色边界：只有当前用户显式要求有界、自包含委派且该工具已披露时才要求委派，架构或设计规划使用只读 `plan`；code 必须有明确写/编辑授权。Planning 的 context-sensitive schema 重写 `subagent_type` 枚举时必须保留字段 description，避免 V2 精简 description 与 JSON Schema 同时丢失角色选择依据。public JSON 只额外允许成功 planning plan child 产生 governed `nextActions`，不得让字段表与文字说明漂移。
+- `task` 的兼容契约首句必须保留权威与角色边界：只有当前用户显式要求有界、自包含委派且该工具已披露时才要求委派，架构或设计规划使用只读 `plan`；code 必须有明确写/编辑授权。V2 的完整 role schema 在 Planning/Building 保持稳定，Planning 中 code/review 由 Runtime Policy 返回 phase constraint；legacy rollback 仍可使用 explore/plan-only planning schema。public JSON 只额外允许成功 planning plan child 产生 governed `nextActions`，不得让字段表与文字说明漂移。
 - `git_inspect` 仅描述 status/diff/log/branch-list 的 typed broker；不能把 raw shell、Git 写操作或 remote Git 写成 fallback。
 
 ### Registry 迁移边界（ADR-0043）
@@ -99,7 +99,8 @@ note、skipped reason code 与 `complete_plan`；其 strict schema 必须拒绝 
 
 - 每个注册工具都有可归一化的结构化契约。
 - legacy/V2 description 都由同一事实生成，V2 保持在预算内。
+- candidate profile 对八个目标工具必须完整保留相同的规范事实；候选未获实时模型准入时，它必须逐字回退到 published V2。
 - 每个 ToolSpec 的 `projectResult()` 与 `returns.format`、字段声明一致；interrupt 工具与内部请求协议一致。
 - context-sensitive schema 的模型投影和调用解析使用同一个 resolved schema。
-- Planning/Building 工具集合、task 子类型差异以及 planning schema 的角色 description 被确定性覆盖。
+- V2 Planning/Building 的完整 builtin 名称、description、JSON schema 恒等；legacy planning 的 task 子类型差异与字段 description 仍被确定性覆盖。
 - `shell_execute` 契约专项覆盖纯命令形态驱动的审批拒绝与恢复场景；契约不得再要求模型提交 `intent`、授权建议或 prefix rule。

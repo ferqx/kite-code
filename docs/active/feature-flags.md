@@ -14,7 +14,7 @@ Exception: ADR-0007 explicitly replaces the old MCP adapter, and ADR-0020 comple
 
 With `toolSearchV1` enabled, MCP schemas are always loaded on demand through metadata-only search and retained in the session while revisions match; Skill disclosure still uses provider support and context budget.
 
-`promptContractV2` defaults to `false` and may be enabled per run with `--feature promptContractV2=true`. It switches Prompt layering, concise tool formatting, project-instruction projection, phase-aware tool disclosure and trusted MCP semantic projection. It does not gate correctness fixes: both paths use the real sandbox state, corrected Skill tool names and truthful tool result contracts. Rollback is only the flag change; project instruction/capability revisions and Runtime history remain valid. The production-mode TUI path has deterministic PTY E2E coverage with V2 explicitly enabled, including outbound role ordering, project context, one Runtime block and the planning tool surface. ADR-0094 取消本次迁移的固定十四日等待条件；绑定最终候选 `c98b4702` 的真实 A/B 显示 V2 任务成功率低于 legacy，因此当前仍保持默认关闭。未来若要默认开启，必须以新的最终候选真实 A/B 解释或消除该回退，并由新的迁移 ADR 接受，不能沿用 ADR-0094 自动翻转。
+`promptContractV2` defaults to `true`; `--feature promptContractV2=false` remains the explicit legacy rollback. It switches Prompt layering, concise tool formatting, project-instruction projection, phase-stable builtin/MCP declarations and trusted MCP semantic projection. It does not gate correctness fixes: both paths use the real sandbox state, corrected Skill tool names and truthful tool result contracts. Project instruction/capability revisions and Runtime history remain valid across rollback. The production-mode TUI path has deterministic PTY E2E coverage on the default profile, including outbound role ordering, project context, one Runtime block, stable Planning declarations and Runtime-owned phase rejection. ADR-0098 supersedes ADR-0094's default-off migration decision; ADR-0099 replaces V2 phase-based hiding with stable disclosure while retaining legacy rollback.
 
 `autoReviewV2` currently gates configurable reviewer timeouts; disabled deployments retain the established 15-second reviewer timeout. This enables a reversible rollout without weakening policy checks or changing auto-mode routing.
 
@@ -33,7 +33,7 @@ With `toolSearchV1` enabled, MCP schemas are always loaded on demand through met
 | `networkBoundaryV1` | `false` | 启用 sealed boundary 的逐 invocation DNS/redirect/endpoint admission；关闭时 production network 只能收紧为 `off` |
 | `releaseProfileV1` | `false` | 请求使用 artifact-pinned Release Profile；没有独立 artifact authority 时 true 不生效且 CLI 拒绝抬高 |
 | `observabilityMetricsV1` | `false` | 允许 artifact-authorized、用户已 consent 的无正文 metric exporter；普通 CLI 只能设为 false |
-| `promptContractV2` | `false` | 灰度分层 Prompt、项目指令快照、简洁工具契约、按 phase 裁剪和 MCP 描述 admission |
+| `promptContractV2` | `true` | 默认分层 Prompt、项目指令快照、简洁工具契约、phase-stable builtin/MCP 声明与 Runtime phase policy；false 为 legacy 回滚 |
 
 Phase 5 的 `verificationV1`、`mcpExecutionRecordV1`、`mcpProviderActionV1`、
 `skillActivationV2` 与 `skillWorkflowV1` 也全部默认关闭。Release admission 不接受 profile 自报开关：
@@ -78,7 +78,7 @@ qualification registry。artifact 缺失/非法、Workspace 不匹配、实际�
 `brokered-git-r1` capability surface、合格的 native metadata read/write deny evidence、共享
 protected-path evaluator 与 App Git process adapter。缺少任一项时 `gitInspect` 为 false；
 不得从 generic `process`/`read_only_only` 推断，也不得回退 raw shell。当前三平台 brokered Git
-qualification 均为 excluded，这不改变 `promptContractV2=false` 的默认值。
+qualification 均为 excluded；它们与已默认开启的 `promptContractV2` 相互独立。
 
 `networkBoundaryV1` 同样按 user、project、CLI/App 的显式值 deny-wins 组合；全部未指定时默认
 关闭。关闭不能恢复旧 `allow_all`：production capability surface 的 network 轴被关闭，sealed

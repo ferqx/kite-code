@@ -259,7 +259,7 @@ export interface TuiState {
   /** Ephemeral presentation for the active context compaction. */
   compactionProgress?: {
     phase: import('@/core/model/context-compaction-presentation').ContextCompactionProgressPhase;
-    placement: 'status' | 'inline';
+    source: 'manual' | 'automatic';
   };
 }
 

@@ -81,8 +81,6 @@ export const shellExecuteSpec = defineExecutableTool({
   kind: 'computer',
   contract: SHELL_EXECUTE_CONTRACT.sections,
   inputSchema: shellActionEnvelopeSchema,
-  availability: (context) =>
-    !(context.featureFlags?.promptContractV2 && context.phase === 'planning'),
   declaredEffects: { filesystem: 'unknown', network: 'unknown', externalState: 'unknown' },
   minimumApproval: 'user',
   governanceRevision: 'shell-effects-v1',

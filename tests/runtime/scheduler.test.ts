@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { eventsForRuntimeAction } from '../../src/core/runtime/actions';
+import { classifyFailure } from '../../src/core/runtime/failures';
 import { guardLegacyPlanContinuationEffect } from '../../src/core/runtime/plan-continuation';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
 import { decideNextEffect, MAX_PARALLEL_READ_TOOLS } from '../../src/core/runtime/scheduler';
@@ -50,6 +51,46 @@ function legacyExecutingPlanState(): RuntimeState {
 }
 
 describe('decideNextEffect', () => {
+  test('returns an invalid task call to the normal model loop without forcing a task retry', () => {
+    let state = createInitialRuntimeState({
+      threadId: 'task-error-normal-loop',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    state = reduceRuntimeState(state, {
+      type: 'model.responded',
+      messageId: 'task-error-response',
+      toolCalls: [{ id: 'bad-task', name: 'task', args: { subagent_type: 'explore' } }],
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'bad-task',
+      name: 'task',
+      args: { subagent_type: 'explore' },
+      modelMessageId: 'task-error-response',
+    });
+    state = reduceRuntimeState(
+      state,
+      normalizeCurrentToolOutcomeEventV1(
+        {
+          type: 'tool.failed',
+          toolCallId: 'bad-task',
+          failure: classifyFailure(
+            'model_invalid_tool_args',
+            'task is missing its required task argument',
+          ),
+        },
+        state,
+        '2026-08-12T00:00:00.000Z',
+      ),
+    );
+
+    expect(decideNextEffect(state)).toEqual({ type: 'call_model' });
+    const toolResult = state.transcript.messages.at(-1);
+    expect(toolResult).toMatchObject({ kind: 'tool', name: 'task', ok: false });
+    expect(JSON.stringify(toolResult)).toContain('model_invalid_tool_args');
+  });
+
   test('classifies a normal no-progress ceiling as loop exhaustion, not persistence failure', () => {
     const state = createInitialRuntimeState({ threadId: 'quality', userId: 'u', workspace: '/' });
     state.toolRecovery.qualityGuard = {

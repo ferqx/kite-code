@@ -31,7 +31,11 @@ import {
   networkBoundaryPolicyFromExecutionBoundaryV1,
 } from '@/core/sandbox/network-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
-import { admitDelegationV1 } from '@/core/subagent/delegation-contract';
+import {
+  admitDelegationV1,
+  isDelegationRoleSmokeTestV1,
+} from '@/core/subagent/delegation-contract';
+import { getRoleConfig } from '@/core/subagent/roles';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
@@ -502,6 +506,10 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
                   mcpManager,
                   skills: skillManifests,
                   skillOptions,
+                  ...(taskInput.subagent_type === 'code' &&
+                  isDelegationRoleSmokeTestV1(input.currentUserGoal ?? '', 'code')
+                    ? { allowedTools: getRoleConfig('review').allowedTools }
+                    : {}),
                   authorization: normalizeAuthorizationState(authorization),
                   workspaceAccess,
                   phase,

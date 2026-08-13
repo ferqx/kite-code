@@ -28,8 +28,8 @@ interface OutputAreaProps {
   /** 主 agent 等待 ask_user 输入时标记 ask 工具 / Mark ask_user while waiting for input */
   awaitingInput?: boolean;
   columns: number;
-  /** Manual /compact progress rendered directly below the command. */
-  inlineCompactionPhase?: ContextCompactionProgressPhase;
+  /** Active manual or automatic compaction rendered after the message list. */
+  compactionPhase?: ContextCompactionProgressPhase;
 }
 
 function visibleDynamicBlocksForApproval(
@@ -76,7 +76,7 @@ export default function OutputArea({
   awaitingApproval,
   awaitingInput,
   columns,
-  inlineCompactionPhase,
+  compactionPhase,
 }: OutputAreaProps) {
   const onToggleReasonRef = useRef(onToggleReason);
   onToggleReasonRef.current = onToggleReason;
@@ -165,7 +165,7 @@ export default function OutputArea({
             />
           );
         })}
-        {inlineCompactionPhase && <CompactionProgress phase={inlineCompactionPhase} />}
+        {compactionPhase && <CompactionProgress phase={compactionPhase} />}
       </Box>
     </Box>
   );

@@ -218,7 +218,7 @@ export class ToolRegistry<Spec extends AnyBaseSpec = AnyBaseSpec> {
       capabilityId: `builtin:${spec.name}`,
       kind: 'builtin_tool' as const,
       displayName: spec.name,
-      description: buildDescription(spec.contract),
+      description: buildDescription(spec.contract, 'legacy'),
       modelDescription: buildDescription(spec.contract, 'v2'),
       descriptionProvenance: 'builtin' as const,
       inputSchema: z.toJSONSchema(spec.inputSchema) as Record<string, unknown>,

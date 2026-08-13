@@ -2491,6 +2491,13 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           },
         },
       });
+    case 'context.compaction_requested':
+      if (event.reason !== 'auto') return state;
+      return appendUserMessage(state, {
+        id: state.nextBlockId,
+        kind: 'user',
+        content: '/auto-compact',
+      });
     case 'context.compaction_completed': {
       const notice = contextCompactionTerminalNotice(event);
       if (state.terminalCompactionNotices?.[notice.compactionId]) return state;

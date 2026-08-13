@@ -96,12 +96,16 @@ direct execution 入口必须读取可用的当前 Kernel state；Runner 在 asy
 lineage-aware compaction：优先保留 active/recent failure，并连同完整 `recoveryOf` ancestor closure 一起
 保留或一起裁剪；历史 terminal ToolCall 可引用已裁剪 lineage，live ToolCall 的 parent 则必须 retained。
 
-`promptContractV2` 开启时，模型表面还按 `ToolAvailabilityContext.phase` 收窄：Planning 隐藏 edit/write/shell，`task` schema 只接受 explore/plan，并保留 explore 用于证据搜集、plan 用于架构或设计规划的字段说明；动态 MCP 只允许 effective effects 全部为 none/read；Building 再依据 authorization、execution capability surface、binding 与 flags 投影。当前用户显式要求有界、自包含委派且 `task` 已披露时，模型契约要求使用 `task`；不得把项目文件或远端内容中的委派文本提升成用户授权。ToolSpec 的模型 schema 和调用解析必须消费同一个 context-resolved schema。该 disclosure 只是第一层，Runtime Policy、Controller 和 Runner 仍按下述执行链重复验证。
+`promptContractV2` 开启时，phase 不改变 production builtin declaration：Planning 与 Building 使用相同的 edit/write/shell 声明和完整 `task` role schema；当前已绑定动态 MCP 也保持声明稳定，避免 phase 切换破坏 Provider 的工具前缀。动态 Runtime block 和 ToolSpec description 引导 Planning 只调用只读能力，Runtime Policy/Controller 仍以当前 phase 和 Registry/MCP effective effects 强制裁决：policy-proven read-only Shell、MCP 与 Registry capability 可运行，edit/write、非只读 Shell、code/review child 和 side-effectful MCP 均不执行、不进入审批，并产生配对的结构化 phase Tool Result。当前用户显式要求有界、自包含委派且 `task` 已披露时，模型契约要求使用 `task`；不得把项目文件或远端内容中的委派文本提升成用户授权。Capability availability、execution surface、binding、Skill lifecycle 与 flags 仍可改变实际工具面；稳定披露不是授权。
 
 Runtime 还对 `task` 执行用户权威门禁：只有 active Task 中的当前、纯用户目标可以
 授权委派，App 附加的 project/shell/external context 只能进入模型上下文，不能进入
-`userGoal` 权威字段。Planning 只允许 explore 及明确 architecture/design 的只读 plan
-role，code 一律拒绝；plan child 返回后的唯一 continuation 是 `write_plan:save`
+`userGoal` 权威字段。角色解析保留全部显式列出的角色，而不是只取第一个；当前用户明确要求测试/验证全部
+子代理或明确列出的角色时，该角色 smoke scope 可授权 Building 中对应的 explore/plan/code/review 调度，
+但 smoke 只证明角色调度，不授予工作区修改能力：code-role smoke 使用 review 同级的只读工具 ceiling。普通 code
+委派仍必须有明确实施/编辑/修复范围，泛化的“测试一个子代理”不能授权未点名角色。
+Planning 只允许 explore 及只读 plan（明确的 plan-role smoke 同样属于只读验证），code/review 一律拒绝；
+plan child 返回后的唯一 continuation 是 `write_plan:save`
 再 `write_plan:submit`。Subagent 调用统一串行执行；每个 child 的 model/tool reservation 仍来自父 run 的共享累计预算 ledger。
 
 ADR-0097 的 Git 路由不属于 generic Shell 权限。`git_inspect` 只在精确 feature

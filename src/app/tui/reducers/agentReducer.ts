@@ -146,12 +146,8 @@ export function agentReducer(state: TuiState, action: Action): TuiState | null {
       return {
         ...state,
         compactionProgress: action.phase
-          ? { phase: action.phase, placement: action.placement ?? 'status' }
+          ? { phase: action.phase, source: action.source }
           : undefined,
-        status: {
-          ...state.status,
-          currentNode: action.phase ? `context_${action.phase}` : null,
-        },
       };
     case 'SET_CONTEXT_SNAPSHOT':
       return {

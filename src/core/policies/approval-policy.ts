@@ -292,16 +292,11 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
   // task — sub-agent dispatch; planning phase allows read-only sub-agents only
   if (toolName === 'task') {
     const subagentType = toolArgs.subagent_type as string | undefined;
-    if (
-      phase === 'planning' &&
-      subagentType !== 'explore' &&
-      subagentType !== 'plan' &&
-      subagentType !== 'review'
-    ) {
+    if (phase === 'planning' && subagentType !== 'explore' && subagentType !== 'plan') {
       return deny({
         risk: 'execute_code',
         reason: 'planning phase allows read-only sub-agents only.',
-        userVisibleSummary: `Plan mode did not start the ${String(subagentType ?? 'unknown')} sub-agent. Use an explore, plan, or review sub-agent, or describe the implementation in the plan for execution after plan approval.`,
+        userVisibleSummary: `Plan mode did not start the ${String(subagentType ?? 'unknown')} sub-agent. Use an explore or plan sub-agent, or describe the implementation in the plan for execution after plan approval.`,
         expectedEffects: ['No implementation sub-agent will run during planning'],
         phaseConstraint: 'planning',
       });
@@ -563,20 +558,16 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
     return shellDecision;
   }
 
-  // 其余工具：planning 阶段拒绝
-  // Remaining tools: deny during planning phase
-  const phaseDenial = denyForPlanningPhase({
-    toolName,
-    phase,
-    fallbackRisk: 'unknown',
-  });
-  if (phaseDenial) {
-    return phaseDenial;
-  }
-
   // write_file / edit_file — 修改文件（工作区内外分别处理）
   // write_file / edit_file — modify files (handle internal vs external paths)
   if (toolName === 'write_file' || toolName === 'edit_file') {
+    const phaseDenial = denyForPlanningPhase({
+      toolName,
+      phase,
+      fallbackRisk: 'write_file',
+    });
+    if (phaseDenial) return phaseDenial;
+
     const rawPath = String(toolArgs.path ?? '<unknown>');
     // 与只读分支一致：先做 MSYS2 归一化再判断外部性（非 Windows 平台透传）。
     // Same as the read branch: normalize MSYS2 paths before the external check.
@@ -628,6 +619,12 @@ export function evaluateToolApproval(params: EvaluateToolApprovalParams): Approv
         expectedEffects: ['Calls a locally classified read-only MCP capability'],
       });
     }
+    const phaseDenial = denyForPlanningPhase({
+      toolName,
+      phase,
+      fallbackRisk: 'mcp',
+    });
+    if (phaseDenial) return phaseDenial;
     return requireApproval({
       risk: 'mcp',
       effects: { uncertainEffects: true },

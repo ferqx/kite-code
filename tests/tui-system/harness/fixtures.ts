@@ -56,6 +56,34 @@ export interface MockChatRequest {
   messages: Array<{ role?: string; content?: unknown; tool_call_id?: string }>;
 }
 
+export interface DraftSavedPlanIdentity {
+  plan_id: string;
+  version: number;
+  structural_digest: string;
+}
+
+/** Parse the canonical identity returned by a successful write_plan save action. */
+export function parseDraftSavedPlan(content: unknown): DraftSavedPlanIdentity {
+  const value: unknown = JSON.parse(String(content));
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('plan_id' in value) ||
+    typeof value.plan_id !== 'string' ||
+    !('version' in value) ||
+    typeof value.version !== 'number' ||
+    !('structural_digest' in value) ||
+    typeof value.structural_digest !== 'string'
+  ) {
+    throw new Error('write_plan draft_saved result did not contain a valid plan identity');
+  }
+  return {
+    plan_id: value.plan_id,
+    version: value.version,
+    structural_digest: value.structural_digest,
+  };
+}
+
 export interface MockModelServer {
   /** Base URL for OpenAI-compatible API (e.g. "http://127.0.0.1:3456/v1") */
   baseURL: string;
@@ -497,7 +525,13 @@ export function createMockModelServer(): MockModelServer {
         const message = messages[index];
         if (message?.role !== 'user') continue;
         const content = normalizedMessageContent(message.content);
-        if (!content || content.trimStart().startsWith('<runtime-state')) continue;
+        if (
+          !content ||
+          content.trimStart().startsWith('<runtime-state') ||
+          content.trimStart().startsWith('<project-instructions')
+        ) {
+          continue;
+        }
         if (content === expected) {
           matched = true;
           continue;

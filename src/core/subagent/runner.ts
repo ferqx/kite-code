@@ -45,7 +45,7 @@ import { countTokens } from '@/core/token-counter';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
 import { msys2ToWindowsPath } from '@/core/tools/path-utils';
 import { builtinToolRegistry } from '@/core/tools/registry/builtins';
-import type { ShellExecutor } from '@/core/tools/shell';
+import { type ShellExecutor, shellTool } from '@/core/tools/shell';
 import { getRoleConfig } from './roles';
 import type {
   SubAgentContinuation,
@@ -206,11 +206,11 @@ ${input.task}`;
     : undefined;
   return [
     systemMessage(systemPrompt),
+    humanMessage(taskWithCwd),
     ...(projectContext &&
     (projectContext.documents.length > 0 || projectContext.warnings.length > 0)
       ? [humanMessage(formatProjectInstructionSnapshot(projectContext))]
       : []),
-    humanMessage(taskWithCwd),
   ];
 }
 
@@ -468,10 +468,9 @@ async function runSubAgentLoop(
   const exhaustedFingerprints: Record<string, true> = { ...(state.exhaustedFingerprints ?? {}) };
   let toolRecovery = state.toolRecovery ?? createToolRecoveryJournalV1();
 
-  const effectiveShellExecutor =
-    input.role.allowedTools && input.shellExecutor
-      ? wrapReadOnlyShell(input.shellExecutor)
-      : input.shellExecutor;
+  const effectiveShellExecutor = input.role.allowedTools
+    ? wrapReadOnlyShell(input.shellExecutor ?? shellTool)
+    : input.shellExecutor;
 
   const timeoutController = new AbortController();
   const timeoutId = setTimeout(() => timeoutController.abort(), effectiveTimeoutMs);
