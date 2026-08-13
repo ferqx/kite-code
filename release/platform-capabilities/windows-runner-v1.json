@@ -3,7 +3,7 @@
   "protocolVersion": 6,
   "runnerVersion": "0.8.0",
   "minimumWindowsVersion": "10.0.19045",
-  "runnerDigest": "sha256:93e0973fc352fc4be1ddf429c4ecee4410432924c16c80a142caaeccacc54c65",
+  "runnerDigest": "sha256:c4fcb36457d205fec256c745b31c3d32bdbde431aea183d367b5d242b0a1b8b1",
   "runnerPath": "native/windows-sandbox-runner/target/release/kite-windows-runner.exe",
   "shellRuntime": "isksh",
   "shellRuntimeDigest": "sha256:b5eee474a89039605ec8db8723cb5043ee7b06811d6e3ed1b56ca05b524ef9da",

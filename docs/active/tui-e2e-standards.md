@@ -206,6 +206,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     Provider 配置或 feature flag。直接调用 Ink `render()` 的 PTY fixture 必须像生产 composition root
     一样，以实际 `stdin/stdout` TTY 能力显式设置 `interactive`；不能让 Ink 因 `CI=true` 转入只在
     unmount 时输出最终帧的非交互模式，否则 semantic readiness 看不到实时 prompt。
+    输入重试清理不得以全屏 quiet window 作为完成条件：running status/spinner 可以持续合法刷新；
+    清理后必须由调用方读取当前 input viewport，语义确认输入已回到预期 baseline。
 12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：任意数量 React subscriber 只能
     对 stdin 保持一个物理 `data` listener；首个 subscriber 开启 DEC 1004，最后一个
     unsubscribe 必须移除 listener 并关闭 DEC 1004。禁止组件 mount 各自添加 stdin listener。

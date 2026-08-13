@@ -513,6 +513,18 @@ describe('TUI input helpers', () => {
     await clearInput(tui, 2, { requireReceipt: false });
   });
 
+  test('clearInput retry cleanup does not require a quiet window from a live status display', async () => {
+    const tui = fakePty(
+      () => {},
+      () => 'continuously changing status output',
+    );
+    tui.outputSince = () => {
+      throw new Error('retry cleanup must not wait for global output quiescence');
+    };
+
+    await clearInput(tui, 2, { requireReceipt: false, delayMs: 0 });
+  });
+
   test('waitForRequestMessage ignores matching requests before the supplied baseline', async () => {
     const requests = [
       { body: {}, messages: [{ content: 'target' }] },
