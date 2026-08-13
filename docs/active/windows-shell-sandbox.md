@@ -114,7 +114,7 @@ fail closed。
 `windows-runner-v1.json` 的 V1 仍表示 manifest schema/file naming，不是 invocation protocol。
 新 runner pin 必须固定 protocol V6、runner 0.8.0+、binary digest、Windows baseline 与 vendored runtime
 digest。当前仓库 pin 已由 canonical Windows build 提升为 0.8.0/V6，并固定该构建生成的 binary
-digest `sha256:c4fcb36457d205fec256c745b31c3d32bdbde431aea183d367b5d242b0a1b8b1`；后续任何 native
+digest `sha256:1ec6b08a79b496607e6aaa5c9019027273deef18008f004a2668a2eace575b52`；后续任何 native
 runner 变更都必须重新运行同一可复现构建并提交新的 digest，不能只改 protocol、版本或 manifest 文本，
 也不能复用旧 binary digest。
 
