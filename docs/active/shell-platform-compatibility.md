@@ -33,6 +33,7 @@
 - `bun test tests/shell-exec.test.ts`
 - `bun test tests/stream-output.test.ts tests/tui-tool-progress.test.ts tests/session-manager.test.ts tests/runtime/kernel.test.ts`
 - `bun run test:sandbox:smoke:native`（显式宿主机 native sandbox smoke）
+- `tests/sandbox-executor.test.ts` 的 `RIPGREP_CONFIG_PATH` 用例使用临时受控 `rg` 夹具验证子进程环境，不依赖 CI runner 预装 ripgrep。
 - `bun test tests/tools.test.ts`
 - `bun run typecheck`
 

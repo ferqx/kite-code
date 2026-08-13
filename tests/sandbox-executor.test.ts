@@ -68,10 +68,21 @@ describe('sandbox executor integration', () => {
   test('strips ripgrep config that could inject a preprocessor', async () => {
     const ws = setupWorkspace();
     const previousConfig = process.env.RIPGREP_CONFIG_PATH;
+    const previousPath = process.env.PATH;
     try {
       writeFileSync(join(ws, 'needle.txt'), 'needle\n');
       writeFileSync(join(ws, 'rg.config'), '--pre\ntouch injected-by-rg\n');
+      const fakeRipgrep = join(ws, 'rg');
+      writeFileSync(
+        fakeRipgrep,
+        `#!/bin/sh
+if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
+/usr/bin/grep "$1" "$2"
+`,
+      );
+      chmodSync(fakeRipgrep, 0o755);
       process.env.RIPGREP_CONFIG_PATH = join(ws, 'rg.config');
+      process.env.PATH = `${ws}:${previousPath ?? ''}`;
       const executor = createSandboxExecutor({ enabled: true, workspace: ws });
       const result = await executor({ workspace: ws, command: 'rg needle needle.txt' });
       expect(result.ok).toBe(true);
@@ -80,6 +91,8 @@ describe('sandbox executor integration', () => {
     } finally {
       if (previousConfig === undefined) delete process.env.RIPGREP_CONFIG_PATH;
       else process.env.RIPGREP_CONFIG_PATH = previousConfig;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
       cleanupWorkspace(ws);
     }
   });
