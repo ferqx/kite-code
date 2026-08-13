@@ -3,7 +3,11 @@ import { eventsForRuntimeAction } from '../../src/core/runtime/actions';
 import { classifyFailure } from '../../src/core/runtime/failures';
 import { guardLegacyPlanContinuationEffect } from '../../src/core/runtime/plan-continuation';
 import { reduceRuntimeState } from '../../src/core/runtime/reducer';
-import { decideNextEffect, MAX_PARALLEL_READ_TOOLS } from '../../src/core/runtime/scheduler';
+import {
+  decideNextEffect,
+  MAX_PARALLEL_READ_TOOLS,
+  MAX_PARALLEL_SUBAGENTS,
+} from '../../src/core/runtime/scheduler';
 import {
   createInitialRuntimeState,
   type RuntimeState,
@@ -674,9 +678,9 @@ describe('decideNextEffect', () => {
     });
   });
 
-  test('schedules multiple read-only subagents one at a time', () => {
+  test('batches independent read-only sibling subagents', () => {
     const state = createInitialRuntimeState({
-      threadId: 'serial-subagents',
+      threadId: 'parallel-subagents',
       userId: 'u',
       workspace: '/workspace',
     });
@@ -695,7 +699,29 @@ describe('decideNextEffect', () => {
 
     expect(decideNextEffect(state)).toEqual({
       type: 'run_tools',
-      toolCallIds: ['review-a'],
+      toolCallIds: ['review-a', 'review-b'],
+    });
+  });
+
+  test('caps one parallel subagent batch', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'bounded-subagents',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    for (let index = 0; index < MAX_PARALLEL_SUBAGENTS + 2; index++) {
+      queueCall(state, `review-${index}`, {
+        name: 'task',
+        args: { subagent_type: 'review', task: `Review independent concern ${index}.` },
+        effectClass: 'read_only',
+        sideEffect: false,
+      });
+      state.tools.calls[`review-${index}`]!.modelMessageId = 'model';
+    }
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: Array.from({ length: MAX_PARALLEL_SUBAGENTS }, (_, index) => `review-${index}`),
     });
   });
 

@@ -1233,6 +1233,29 @@ describe('reduceRuntimeState — suspended subagents', () => {
     });
   });
 
+  test('subagent.approval_deferred requeues a running suspended sibling', () => {
+    const snapshot = makeSuspendedSubagentSnapshot();
+    const running = reduceRuntimeState(queueTaskCall(makeInitialState()), {
+      type: 'tool.started',
+      toolCallId: 'task-1',
+    });
+    const suspended = reduceRuntimeState(running, {
+      type: 'subagent.suspended',
+      toolCallId: 'task-1',
+      snapshot,
+    });
+
+    const next = reduceRuntimeState(suspended, {
+      type: 'subagent.approval_deferred',
+      toolCallId: 'task-1',
+    });
+
+    expect(next.tools.calls['task-1']!.status).toBe('queued');
+    expect(next.tools.queue).toContain('task-1');
+    expect(next.tools.active).not.toContain('task-1');
+    expect(next.suspendedSubagents['task-1']).toEqual(snapshot);
+  });
+
   test('subagent.suspended ignores an unknown or non-task tool call', () => {
     const snapshot = makeSuspendedSubagentSnapshot();
     const withNonTask = reduceRuntimeState(makeInitialState(), {

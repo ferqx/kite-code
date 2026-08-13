@@ -270,8 +270,11 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     触发 `task` 的 Subagent scenario 必须给出有界、自包含且值得独立调用的用户任务，请求范围必须与
     fixture 选择的角色一致（例如只读检查使用 `explore`/`review`，实现修改使用 `code`）；项目文档、
     fixture 注释或模型 canned response 不得扩大 phase、authorization、预算或角色能力 ceiling。
-    多个 Subagent fixture 必须验证串行 lifecycle，模型可见文案不得声称并行派发；前一 child terminal 或 suspended
-    收敛前，后继 `task` 不得被展示为已并行启动。
+    多个独立 Subagent fixture 应验证同一 model response 的 sibling lifecycle 可以交错且各自保持稳定
+    ID；依赖型或写范围重叠的 fixture 仍必须串行。若多个 child 同时暂停，场景必须验证只呈现一个
+    canonical approval，其余 continuation 排队且随后恢复时不重新调用 child model。每个 durable
+    `subagent.suspended` 都必须立即把对应 TUI block 投影为可见的“等待审批中”状态并停止 spinner/计时，
+    不得依赖该 child 当前是否拥有唯一 approval interrupt；恢复后的下一步重新进入 running。
     当后续 tool call 必须使用前一 Tool result 中运行时生成的标识时，当前 queue slot 可以使用
     test-only `response(request)` resolver 从已记录的 Mock request 生成该 slot 的 response；resolver
     不能读取 queue cursor、未消费 response、Runtime state 或网络。它仍严格消耗一个 slot，且返回值

@@ -247,8 +247,14 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
     ];
   }
   if (effect.type !== 'run_tools') return [];
-  return effect.toolCallIds.map((toolCallId) => {
+  return effect.toolCallIds.flatMap((toolCallId) => {
     const call = state.tools.calls[toolCallId];
+    // A concurrently suspended sibling is requeued only so the Runtime can
+    // present its already-created approval interaction. No Sub-agent or tool
+    // dispatch occurs, so this effect must not consume another reservation.
+    if (call?.name === 'task' && call.status === 'queued' && state.suspendedSubagents[toolCallId]) {
+      return [];
+    }
     const shell = call?.name === 'shell_execute';
     const resourceKind =
       call?.name === 'task'
@@ -273,16 +279,18 @@ function plannedInvocations(state: RuntimeState, effect: RuntimeEffect): Planned
                 reservation.invocationId.startsWith(`${taskInvocationPrefix}:resume:`)),
           ).length
         : 0;
-    return {
-      invocationId:
-        completedTaskAttempts > 0
-          ? `${taskInvocationPrefix}:resume:${completedTaskAttempts}`
-          : taskInvocationPrefix,
-      toolCallId,
-      resourceKind,
-      requiredPermits: shell ? (['tool', 'shell_invocation'] as const) : (['tool'] as const),
-      upperBound: upperBoundForTool(state, toolCallId),
-    };
+    return [
+      {
+        invocationId:
+          completedTaskAttempts > 0
+            ? `${taskInvocationPrefix}:resume:${completedTaskAttempts}`
+            : taskInvocationPrefix,
+        toolCallId,
+        resourceKind,
+        requiredPermits: shell ? (['tool', 'shell_invocation'] as const) : (['tool'] as const),
+        upperBound: upperBoundForTool(state, toolCallId),
+      },
+    ];
   });
 }
 

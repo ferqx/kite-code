@@ -10,6 +10,8 @@ import {
 
 /** Bound resource usage while still allowing independent reads to overlap. */
 export const MAX_PARALLEL_READ_TOOLS = 4;
+/** Bound sibling delegation fan-out; the shared Runtime budget may admit fewer. */
+export const MAX_PARALLEL_SUBAGENTS = 4;
 
 /**
  * Only builtin execution tools with no interaction/control semantics may join
@@ -40,6 +42,31 @@ function isApprovalFreeParallelRead(state: RuntimeState, call: ToolCallRecord): 
     return false;
   }
   return isApprovalFreeParallelReadToolCall(state, call);
+}
+
+function isApprovalFreeParallelSubagent(state: RuntimeState, call: ToolCallRecord): boolean {
+  if (
+    call.name !== 'task' ||
+    call.status !== 'queued' ||
+    state.suspendedSubagents[call.toolCallId]
+  ) {
+    return false;
+  }
+  const decision = evaluateToolApproval({
+    toolName: call.name,
+    toolArgs: argsRecord(call.args),
+    phase: getAgentPhase(getActivePlanning(state)),
+    workspace: state.session.workspace,
+    threadId: state.session.threadId,
+    authorization: state.authorization,
+    capability: {
+      effectClass: call.effectClass ?? 'unknown',
+      sideEffect: call.sideEffect ?? true,
+      classificationReason:
+        call.classificationReason ?? 'Runtime queue classified this delegated task.',
+    },
+  });
+  return decision.allowed && !decision.requiresApproval;
 }
 
 function isApprovalFreeParallelReadToolCall(state: RuntimeState, call: ToolCallRecord): boolean {
@@ -84,10 +111,13 @@ function legacyRecoveryResponseFailed(
  * callers must encode every externally visible transition as a RuntimeEvent
  * before asking for the next effect.
  *
- * Consecutive calls proven read-only and approval-free may run together.
- * Interaction, write, and unknown calls remain exclusive barriers. A tool that
- * requires approval becomes runnable immediately after its own grant; sibling
- * approvals never form an all-or-nothing execution barrier.
+ * Consecutive calls proven read-only and approval-free may run together. A
+ * consecutive sibling group of independently described, approval-free task
+ * calls from one model response may also run together under the shared
+ * Subagent/resource ceilings. Other interaction, write, and unknown calls
+ * remain exclusive barriers. A tool that requires approval becomes runnable
+ * immediately after its own grant; sibling approvals never form an
+ * all-or-nothing execution barrier.
  */
 export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   if (state.recoveryState.kind !== 'normal') {
@@ -233,6 +263,29 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   const nextRunnable = state.tools.queue.find(isRunnable) ?? state.tools.active.find(isRunnable);
   if (nextRunnable) {
     const nextCall = state.tools.calls[nextRunnable];
+    if (nextCall && isApprovalFreeParallelSubagent(state, nextCall)) {
+      const runnableQueue = state.tools.queue.filter(isRunnable);
+      const firstIndex = runnableQueue.indexOf(nextRunnable);
+      const batch: string[] = [];
+      for (
+        let index = firstIndex;
+        index >= 0 && index < runnableQueue.length && batch.length < MAX_PARALLEL_SUBAGENTS;
+        index++
+      ) {
+        const id = runnableQueue[index]!;
+        const call = state.tools.calls[id];
+        if (
+          !call ||
+          !isApprovalFreeParallelSubagent(state, call) ||
+          call.modelMessageId !== nextCall.modelMessageId ||
+          call.taskId !== nextCall.taskId
+        ) {
+          break;
+        }
+        batch.push(id);
+      }
+      return { type: 'run_tools', toolCallIds: batch };
+    }
     if (nextCall && isApprovalFreeParallelRead(state, nextCall)) {
       const runnableQueue = state.tools.queue.filter(isRunnable);
       const firstIndex = runnableQueue.indexOf(nextRunnable);

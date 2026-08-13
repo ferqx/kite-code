@@ -758,6 +758,39 @@ function addThoughtDuration(state: TuiState, durationMs: number): TuiState {
   });
 }
 
+/** Project the durable child suspension independently of whichever approval
+ * interaction currently owns the Runtime's single interrupt slot. */
+function projectSubagentSuspended(state: TuiState, subagentId: string): TuiState {
+  return {
+    ...state,
+    turns: state.turns.map((turn) => {
+      let changed = false;
+      const blocks = turn.blocks.map((block) => {
+        if (
+          block.kind !== 'subagent' ||
+          block.subagentId !== subagentId ||
+          (block.status !== 'running' && block.status !== 'suspended')
+        ) {
+          return block;
+        }
+        changed = true;
+        const stepIndex = block.steps.length - 1;
+        const steps = block.steps.map((step, index) =>
+          index === stepIndex ? { ...step, status: 'awaiting_approval' as const } : step,
+        );
+        return {
+          ...block,
+          status: 'suspended' as const,
+          awaitingApproval: true,
+          approvingStepIndex: stepIndex >= 0 ? stepIndex : undefined,
+          steps,
+        };
+      });
+      return changed ? { ...turn, blocks } : turn;
+    }),
+  };
+}
+
 export function handleEventAction(state: TuiState, event: RenderEvent): TuiState {
   // Guard: malformed events from corrupted checkpoints must not crash the TUI
   if (!event.data) return state;
@@ -1635,34 +1668,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       }
       // 如果是子 agent 的工具需要审批，标记该子 agent 为等待审批状态
       if (event.data.subagentId) {
-        next = {
-          ...next,
-          turns: next.turns.map((turn) => {
-            let changed = false;
-            const blocks = turn.blocks.map((blk) => {
-              if (
-                blk.kind === 'subagent' &&
-                blk.subagentId === event.data.subagentId &&
-                blk.status === 'running'
-              ) {
-                changed = true;
-                const stepIndex = blk.steps.length - 1;
-                const steps = blk.steps.map((s, i) =>
-                  i === stepIndex ? { ...s, status: 'awaiting_approval' as const } : s,
-                );
-                return {
-                  ...blk,
-                  status: 'suspended' as const,
-                  awaitingApproval: true,
-                  approvingStepIndex: stepIndex,
-                  steps,
-                };
-              }
-              return blk;
-            });
-            return changed ? { ...turn, blocks } : turn;
-          }),
-        };
+        next = projectSubagentSuspended(next, event.data.subagentId);
       }
       return next;
     }
@@ -1804,6 +1810,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       if (matched?.kind !== 'subagent') return state;
       const next: OutputBlock = {
         ...matched,
+        status: 'running' as const,
         steps: [
           ...matched.steps,
           {
@@ -1813,6 +1820,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           },
         ],
         awaitingApproval: false, // 新步骤到来时清除等待状态
+        approvingStepIndex: undefined,
       };
       return replaceBlockById(state, matched.id, next);
     }
@@ -2129,6 +2137,8 @@ function clearTerminalToolApproval(state: TuiState, toolCallId: string): TuiStat
 
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
   switch (event.type) {
+    case 'subagent.suspended':
+      return projectSubagentSuspended(state, event.snapshot.subagentId);
     case 'subagent.started':
       return handleEventAction(state, {
         type: 'subagent_start',

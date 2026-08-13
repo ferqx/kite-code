@@ -7,6 +7,7 @@ import {
   blockedSubagentReviewEvent,
   buildBlockedToolRequest,
   executeRuntimeTools,
+  serializeConcurrentSubagentApprovalEvents,
   toRuntimeSubagentEvent,
 } from '@/core/controllers/tool-controller';
 import { exposedMcpToolName } from '@/core/mcp';
@@ -124,6 +125,215 @@ describe('executeRuntimeTools', () => {
         result: expect.objectContaining({ ok: true }),
       }),
     );
+  });
+
+  test('executes independent task calls concurrently', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'parallel-task-execution',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    for (const [ordinal, toolCallId] of ['review-a', 'review-b'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'parallel-task-model',
+        ordinal,
+        name: 'task',
+        args: {
+          subagent_type: 'review',
+          task: `Review independent runtime concern ${ordinal + 1} and report evidence.`,
+        },
+        status: 'queued',
+        effectClass: 'read_only',
+        sideEffect: false,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push(toolCallId);
+    }
+    const model = createMockModel([
+      { message: aiMessage({ content: 'First review complete.' }), delay: 25 },
+      { message: aiMessage({ content: 'Second review complete.' }), delay: 25 },
+    ]);
+    const languageModel = model.model as typeof model.model & {
+      doGenerate: (...args: unknown[]) => Promise<unknown>;
+    };
+    const generate = languageModel.doGenerate.bind(languageModel);
+    let running = 0;
+    let maximumRunning = 0;
+    languageModel.doGenerate = async (...args: unknown[]) => {
+      running += 1;
+      maximumRunning = Math.max(maximumRunning, running);
+      try {
+        return await generate(...args);
+      } finally {
+        running -= 1;
+      }
+    };
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['review-a', 'review-b'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: model,
+    });
+
+    expect(maximumRunning).toBe(2);
+    expect(events.filter((event) => event.type === 'subagent.completed')).toHaveLength(2);
+    expect(events.filter((event) => event.type === 'tool.finished')).toHaveLength(2);
+  });
+
+  test('serializes concurrent child approvals without dropping suspended siblings', () => {
+    const approval = {
+      type: 'approval.requested' as const,
+      interactionId: 'approval-a',
+      toolCallId: 'task-a',
+      approval: {} as never,
+    };
+    const serialized = serializeConcurrentSubagentApprovalEvents([
+      [{ type: 'subagent.suspended', toolCallId: 'task-a', snapshot: {} as never }, approval],
+      [
+        { type: 'subagent.suspended', toolCallId: 'task-b', snapshot: {} as never },
+        { ...approval, interactionId: 'approval-b', toolCallId: 'task-b' },
+      ],
+    ]);
+
+    expect(serialized.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
+    expect(serialized.filter((event) => event.type === 'approval.requested')).toHaveLength(1);
+    expect(serialized).toContainEqual({
+      type: 'subagent.approval_deferred',
+      toolCallId: 'task-b',
+    });
+  });
+
+  test('surfaces a deferred child approval without restarting the child model', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'deferred-child-approval',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.mode = 'auto';
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'parallel-task-model',
+      name: 'task',
+      args: { subagent_type: 'review', task: 'Read the external fixture and report evidence.' },
+      status: 'queued',
+      effectClass: 'read_only',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('task');
+    state.suspendedSubagents.task = serializeSubagentContinuation(
+      {
+        id: 'deferred-child',
+        role: getRoleConfig('review'),
+        task: 'Read the external fixture and report evidence.',
+        messages: [],
+        toolCallCount: 1,
+        steps: [],
+        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+      },
+      {
+        reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+        toolCallId: 'child-read',
+        toolName: 'read_file',
+        args: { path: '/outside/fixture.txt' },
+        command: '/outside/fixture.txt',
+      },
+    );
+    const model = createMockModel([{ message: aiMessage({ content: 'must not run' }) }]);
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: model,
+    });
+
+    expect(model.callCount.count).toBe(0);
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'approval.requested', toolCallId: 'task' }),
+    );
+    expect(events.some((event) => event.type === 'auto_review.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.started')).toBe(false);
+  });
+
+  test('production executor queues simultaneous child approvals after concurrent dispatch', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'parallel-child-approvals',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    for (const [ordinal, toolCallId] of ['task-a', 'task-b'].entries()) {
+      state.tools.calls[toolCallId] = {
+        toolCallId,
+        modelMessageId: 'parallel-child-approval-model',
+        ordinal,
+        name: 'task',
+        args: {
+          subagent_type: 'review',
+          task: `Read external fixture ${ordinal + 1} and report the independent evidence.`,
+        },
+        status: 'queued',
+        effectClass: 'read_only',
+        sideEffect: false,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.queue.push(toolCallId);
+    }
+    const model = createMockModel([
+      {
+        message: aiMessage({
+          content: 'Inspecting the first fixture.',
+          tool_calls: [{ id: 'child-read-a', name: 'read_file', args: { path: '/outside/a.txt' } }],
+        }),
+      },
+      {
+        message: aiMessage({
+          content: 'Inspecting the second fixture.',
+          tool_calls: [{ id: 'child-read-b', name: 'read_file', args: { path: '/outside/b.txt' } }],
+        }),
+      },
+    ]);
+    const config: AgentConfig = {
+      apiKey: 'unused',
+      baseURL: 'https://example.invalid',
+      modelName: 'fixture',
+      providerName: 'fixture',
+      providerType: 'openai-compatible',
+      sandbox: { enabled: false },
+    };
+    const emitted: RuntimeEvent[] = [];
+    const executor = createRuntimeEffectExecutor({ config, model });
+
+    const terminal = await executor(
+      { type: 'run_tools', toolCallIds: ['task-a', 'task-b'] },
+      state,
+      (event) => emitted.push(event),
+    );
+
+    expect(Array.isArray(terminal)).toBe(true);
+    if (!Array.isArray(terminal)) throw new Error('Expected terminal RuntimeEvents.');
+    expect(model.callCount.count).toBe(2);
+    expect(emitted.filter((event) => event.type === 'subagent.started')).toHaveLength(2);
+    expect(emitted.some((event) => event.type === 'approval.requested')).toBe(false);
+    expect(terminal.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
+    expect(terminal.filter((event) => event.type === 'approval.requested')).toHaveLength(1);
+    expect(terminal.filter((event) => event.type === 'subagent.approval_deferred')).toHaveLength(1);
   });
 
   test.each([

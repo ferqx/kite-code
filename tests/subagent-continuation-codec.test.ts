@@ -113,6 +113,7 @@ describe('sub-agent continuation codec', () => {
     };
 
     const snapshot = serializeSubagentContinuation(continuation, {
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
       toolCallId: 'call-2',
       toolName: 'shell_execute',
       args: { command: 'bun test' },
@@ -129,6 +130,7 @@ describe('sub-agent continuation codec', () => {
     expect(restored.executionJournal).toEqual(continuation.executionJournal);
     expect(restored.exhaustedFingerprints).toEqual(continuation.exhaustedFingerprints);
     expect(restored.toolRecovery).toEqual(childRecovery);
+    expect(restored.blockedTool.reasonCode).toBe('SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW');
     expect(isSystemMessage(restored.messages[0])).toBe(true);
     expect(isHumanMessage(restored.messages[1])).toBe(true);
     expect(isAIMessage(restored.messages[2])).toBe(true);
@@ -169,6 +171,7 @@ describe('sub-agent continuation codec', () => {
       artifact: { fullOutput: { bytes: 9 } },
     });
     expect(restored.blockedTool).toEqual({
+      reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
       toolCallId: 'call-2',
       toolName: 'shell_execute',
       args: { command: 'bun test' },

@@ -4021,6 +4021,63 @@ describe('eventReducer (blocks model)', () => {
       expect(block.subagentId).toBe('runtime-subagent');
       expect(block.task).toBe('find runtime callers');
     });
+
+    test('projects every durable Sub-agent suspension without waiting for the active approval', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'deferred-subagent', role: 'code', task: 'wait for approval' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.step',
+        subagent: {
+          id: 'deferred-subagent',
+          toolName: 'shell_execute',
+          toolArgs: { command: 'pwd' },
+        },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'task-deferred',
+        snapshot: {
+          subagentId: 'deferred-subagent',
+          role: 'code',
+          task: 'wait for approval',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          blockedTool: {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'nested-shell',
+            toolName: 'shell_execute',
+            args: { command: 'pwd' },
+            command: 'pwd',
+          },
+        },
+      });
+
+      const suspended = flatBlocks(state)[0];
+      expect(suspended).toMatchObject({
+        kind: 'subagent',
+        subagentId: 'deferred-subagent',
+        status: 'suspended',
+        awaitingApproval: true,
+        approvingStepIndex: 0,
+        steps: [{ status: 'awaiting_approval' }],
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.step',
+        subagent: {
+          id: 'deferred-subagent',
+          toolName: 'read_file',
+          toolArgs: { path: 'README.md' },
+        },
+      });
+      expect(flatBlocks(state)[0]).toMatchObject({
+        status: 'running',
+        awaitingApproval: false,
+      });
+    });
   });
 
   describe('RUNTIME_EVENT message-list pipeline', () => {

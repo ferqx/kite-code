@@ -1084,6 +1084,12 @@ export interface SubagentSuspendedEvent {
   snapshot: SuspendedSubagentSnapshot;
 }
 
+/** A concurrently suspended sibling waits until the current child approval settles. */
+export interface SubagentApprovalDeferredEvent {
+  type: 'subagent.approval_deferred';
+  toolCallId: string;
+}
+
 /** Private canonical child journal merge; omitted by all diagnostic projections. */
 export interface SubagentRecoveryJournalMergedEvent {
   type: 'subagent.recovery_journal_merged';
@@ -1205,4 +1211,5 @@ export type RuntimeEvent =
   | SubagentFailedEvent
   | SubagentCacheMetricsEvent
   | SubagentSuspendedEvent
+  | SubagentApprovalDeferredEvent
   | SubagentRecoveryJournalMergedEvent;

@@ -34,6 +34,39 @@ function withQueuedTools(names: string[]): RuntimeState {
 }
 
 describe('tool concurrency budget', () => {
+  test('shrinks a subagent batch to the shared child concurrency ceiling', () => {
+    let state = withQueuedTools(['task', 'task', 'task']);
+    state = {
+      ...state,
+      resourceBudget: {
+        ...state.resourceBudget,
+        budget: {
+          ...LIMITED_RESOURCE_BUDGET_V1,
+          maxConcurrentSubagents: 2,
+        },
+      } as Extract<RuntimeState['resourceBudget'], { status: 'active' }>,
+    };
+    for (const call of Object.values(state.tools.calls)) {
+      call.args = {
+        subagent_type: 'review',
+        task: 'Review one independent runtime concern and report evidence.',
+      };
+    }
+
+    const plan = planRuntimeBudgetAdmissionV1(
+      state,
+      { type: 'run_tools', toolCallIds: ['call-0', 'call-1', 'call-2'] },
+      new Date('2026-07-30T00:00:01Z'),
+    );
+
+    expect(plan.status).toBe('admitted');
+    expect(plan.effect).toEqual({ type: 'run_tools', toolCallIds: ['call-0', 'call-1'] });
+    expect(plan.reservationIds).toHaveLength(2);
+    expect(
+      plan.preparationEvents.filter((event) => event.type === 'resource_budget.waiter_enqueued'),
+    ).toHaveLength(1);
+  });
+
   test('shrinks a batch to available permits and queues the remainder in FIFO order', () => {
     let state = withQueuedTools(['read_file', 'search_files', 'read_file']);
     const running = createZeroResourceUsageV1('versioned_upper_bound', 'test-v1');

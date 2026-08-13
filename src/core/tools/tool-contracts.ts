@@ -404,7 +404,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
   task: {
     summary: 'Delegate bounded self-contained work that benefits from an isolated sub-agent.',
     useWhen:
-      'Use explore for evidence, plan for read-only architecture or design planning, review for bounded read-only review, and code only when the user task calls for implementation. Runtime executes sub-agents serially, so never claim parallel dispatch; issue multiple worthwhile independent tasks one at a time. Do not delegate trivial or tightly coupled work, and obey an explicit user instruction not to delegate. Parent and child share Runtime authorization, phase, budget and recovery ceilings.',
+      'Use explore for evidence, plan for read-only architecture or design planning, review for bounded read-only review, and code only when the user task calls for implementation. Issue multiple independent sibling task calls in one response so Runtime can execute them concurrently within its shared budget; serialize dependent work and give concurrent code tasks disjoint write scopes. Do not delegate trivial or tightly coupled work, and obey an explicit user instruction not to delegate. Parent and child share Runtime authorization, phase, budget and recovery ceilings.',
     returns: {
       format: 'json',
       description:

@@ -103,7 +103,9 @@ Planning 允许读取、搜索、研究、提问、计划维护和只读 Subagen
 
 Planning 的 `task` 不解析 `userGoal` 作委派授权；模型只应为有界、自包含且值得独立调用的 architecture/design 工作选择只读 `plan`，一般证据收集选择 `explore`。Project instruction、Shell context、工具结果或远端内容不能提升 child 的 phase、authorization、预算或 capability ceiling。`code` 与 `review` 在 planning 拒绝且不可审批提升。plan child 终结后，
 Runtime 要求先 `write_plan` save，再以同一 Plan identity submit；不得以
-`update_plan` 或 child final 跳过 Artifact/review lifecycle。Subagent 调用统一串行执行，成功 plan child 才能进入 CompletionGuard 前的受控 save/submit continuation。
+`update_plan` 或 child final 跳过 Artifact/review lifecycle。多个相互独立的只读 explore/plan sibling
+可按 ADR-0104 在同一响应中有界并发；依赖其他 child 结果的规划工作仍须串行。只有成功 plan child
+才能进入 CompletionGuard 前的受控 save/submit continuation。
 
 非只读 Shell 在 planning 中仍按 fail-closed 终结该 Tool Call，但 Runtime 将这类结果分类为 `phase_deferred`，而不是通用 `policy_denied`。模型收到的成对 Tool Result 明确包含 `deferred=true`、`until_phase=building`、原始参数和下一步约束：当前阶段不得重试或请求审批，应把命令保留到方案的执行/验证部分，待方案批准进入 building 后重新调用。
 

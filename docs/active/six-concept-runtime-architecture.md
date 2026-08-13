@@ -224,7 +224,9 @@ resource 的 FIFO sequence；shell 同时要求 `tool + shell_invocation` compou
 input，并把实际请求的 max output clamp 到剩余 run budget；projection 在 reserve 后变化时
 拒绝 dispatch。Sub-agent parent 只持有 lifecycle/concurrency，每个 child 模型及工具/Shell/MCP
 调用都通过 `parentReservationId` 进入同一 durable ledger；artifact bytes 计入产出它的 child
-tool/MCP reservation，不伪造第二次 invocation。暂停恢复使用新的 parent attempt。child tool
+tool/MCP reservation，不伪造第二次 invocation。延后审批的重新呈现不 dispatch，因而不创建
+reservation；真正获批后的暂停恢复使用新的 parent attempt。snapshot 保留原始人工/auto-review
+路由，缺失路由的历史数据保守回退到人工审批。child tool
 waiter 与顶层调用共用 durable FIFO sequence，promotion + reservation 原子持久化；等待期限为
 concurrency deadline 与 run deadline 的较早者，Abort 会取消仍在等待的 durable waiter。稳定结果区分
 `tool_concurrency_saturated`、`shell_concurrency_saturated` 和 `budget_exhausted`。Sub-agent
@@ -363,6 +365,13 @@ RuntimeEffectExecutor
 Kernel 仍逐事件串行归纳和持久化。队列顺序是调度与协议事实，完成顺序可以不同；模型上下文
 中的 Tool Result 仍按 assistant 声明顺序投影并重新计算 transcript ordinal（ADR-0049）。
 
+`task` 另有受治理的 sibling batch：连续调用必须属于同一 active task/model message、尚未暂停，
+并经当前 Policy 判断为 allowed 且无需审批，单批最多 4 个。Executor 并发启动各自独立的
+SubAgentRunner，Resource admission 再按 `maxConcurrentSubagents`、writer ceiling 和累计预算缩小
+实际批次。依赖前序结果或 code 写范围重叠的 task 由模型串行派发。多个 child 同时动态暂停时，
+只开放一个 canonical interaction；其余 continuation 持久化后用 `subagent.approval_deferred`
+重新入队，当前审批收敛后从 snapshot 逐个呈现，不重启 child 模型（ADR-0104）。
+
 Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`CapabilityInvocationRecord` 保存调用身份、状态、参数摘要、观察到的副作用、外部引用、artifact、重试安全性和 reconciliation 结果。
 
 工具被策略拒绝（`tool.rejected`）或被用户拒绝（`approval.rejected`）时，reducer 同时写入 `ToolCallRecord`（status: `rejected`，含 failure classification）和 transcript ToolMessage（`ok: false, rejected: true`），保证恢复与后续轮次能看到拒绝结果。用户显式拒绝或取消任一工具审批时，action batch 同时把其余未终结调用收敛为 cancelled 并写入 `turn.aborted(cause=user)`；Runner 立即退出，Agent abort 本轮执行信号。只要最近一条带工具调用的 assistant 消息中存在 `failure.kind=approval_rejected` 且其后无新用户消息，scheduler 就返回 `stop`，从而在恢复路径上同样不能继续旧 turn。策略拒绝（`policy_denied`）及其他自动失败继续 `call_model`，允许模型看到拒绝信息后调整策略。若拒绝后已有新用户消息到来（新轮次），scheduler 正常返回 `call_model`，由模型处理该新消息。
@@ -375,7 +384,7 @@ Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`Capab
 
 外部写入遵循“先记录 intent，再发生副作用”。对无法证明是否成功的调用，Runtime 记录 `unknown` 并禁止盲目自动重放；恢复时先 reconciliation。
 
-`task` 的调度选择归模型编排，Runtime 不解析 active Task 的 `userGoal` 作为委派或 role 授权协议。模型只应委派有界、自包含、独立且值得额外调用的工作，用户明确要求不委派时必须遵守；code 仅用于用户任务要求实施的情形。Project、Shell、工具结果和 external context 不能提升 child 的 authorization、phase、预算、role ceiling 或 execution surface。Subagent 统一串行执行并使用同一 run-scoped 累计预算；生命周期显式区分 running/suspended/terminal，approval 等待是 suspended，恢复后回 running。terminal result 只投影规范 `completed`，是否经历恢复仍由 canonical Recovery Journal 保留，不再复制为第二套 UI/协议完成态。Planning 的 plan child 只能引导 `write_plan:save → write_plan:submit`；failed/cancelled/exhausted/suspended child 不得产生该 continuation。planning plan child 仅在成功 terminal 后进入既有 Plan lifecycle，顶层 completion 仍受已保存并 submit 的 plan identity gate 约束；文本提示本身不构成提交事实。
+`task` 的调度选择归模型编排，Runtime 不解析 active Task 的 `userGoal` 作为委派或 role 授权协议。模型只应委派有界、自包含、独立且值得额外调用的工作，用户明确要求不委派时必须遵守；code 仅用于用户任务要求实施的情形。Project、Shell、工具结果和 external context 不能提升 child 的 authorization、phase、预算、role ceiling 或 execution surface。独立 sibling 可按 ADR-0104 有界并发，并继续使用同一 run-scoped 累计预算；生命周期显式区分 running/suspended/terminal，approval 等待是 suspended，恢复后回 running。terminal result 只投影规范 `completed`，是否经历恢复仍由 canonical Recovery Journal 保留，不再复制为第二套 UI/协议完成态。Planning 的 plan child 只能引导 `write_plan:save → write_plan:submit`；failed/cancelled/exhausted/suspended child 不得产生该 continuation。planning plan child 仅在成功 terminal 后进入既有 Plan lifecycle，顶层 completion 仍受已保存并 submit 的 plan identity gate 约束；文本提示本身不构成提交事实。
 child 的 schema projection、实际 Registry parse、execution/resume 必须共享 config、phase、interaction mode、authorization、gitBroker 与 availability context；typed Git 不得因 child 路径缺依赖而回退 Shell。
 
 ADR-0097 将 Git 拆为 Core-owned broker contract 与 App-owned process adapter。Runtime capability

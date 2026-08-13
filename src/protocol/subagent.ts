@@ -80,6 +80,8 @@ export interface SuspendedSubagentSnapshot {
   /** Canonical private Runtime journal encoded as JSON; never projected to diagnostics. */
   toolRecovery?: JsonObject;
   blockedTool: {
+    /** Original approval route. Missing on legacy snapshots; callers must fail closed to user approval. */
+    reasonCode?: 'SUBAGENT_TOOL_REQUIRES_APPROVAL' | 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW';
     toolCallId: string;
     toolName: string;
     args: JsonObject;

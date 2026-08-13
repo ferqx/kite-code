@@ -168,12 +168,14 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
 
   // ── Status flags ──
   const isRunning = block.status === 'running';
+  const isSuspended = block.status === 'suspended';
+  const isActive = isRunning || isSuspended;
   const isError = block.status === 'error';
   const isCancelled = block.status === 'cancelled';
   const isSettled = isError || isCancelled || block.status === 'done';
-  const isWaiting = isRunning && block.awaitingApproval;
+  const isWaiting = isSuspended || (isRunning && block.awaitingApproval);
 
-  if (!isRunning && !isSettled) return null;
+  if (!isActive && !isSettled) return null;
 
   // ── Common: steps ──
   const stepCount = block.steps.length;
@@ -182,12 +184,12 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
   const skipped = stepCount - MAX_RUNNING_STEPS;
 
   // ── Header ──
-  const icon = isRunning ? (isWaiting ? '○ ' : spinnerFrame) : '● ';
-  const headBefore = stringWidth(`${isRunning ? SPINNER[0]! : '● '}${label} · `);
+  const icon = isActive ? (isWaiting ? '○ ' : spinnerFrame) : '● ';
+  const headBefore = stringWidth(`${isActive ? SPINNER[0]! : '● '}${label} · `);
   const fitTask = truncateToFit(taskSummary, Math.max(0, col - headBefore - 2));
 
   // ── Footer ──
-  const foot = isRunning
+  const foot = isActive
     ? isWaiting
       ? { text: '等待审批中', color: dt.dim }
       : { text: `进行中 (${formatElapsed(liveElapsed)})`, color: dt.dim }
