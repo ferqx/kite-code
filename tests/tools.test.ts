@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -26,6 +27,7 @@ import {
 import { searchContent, searchFiles } from '../src/core/tools/search';
 import {
   assertInsideWorkspace,
+  buildPolicyProvenReadOnlyHostShellInvocationsV1,
   DEFAULT_SHELL_TIMEOUT_MS,
   resolveShellTimeoutMs,
   shellTool,
@@ -52,6 +54,40 @@ function msys2Win(p: string): string {
 }
 
 describe('tool safety', () => {
+  test('policy-proven reads use a non-login fixed POSIX shell', () => {
+    expect(
+      buildPolicyProvenReadOnlyHostShellInvocationsV1('ls', '/workspace', {
+        platform: 'darwin',
+        systemRoot: '',
+      }),
+    ).toEqual([{ kind: 'posix', argv: ['/bin/sh', '-c', 'ls'] }]);
+  });
+
+  test('policy-proven reads cannot execute a Workspace PATH replacement', async () => {
+    if (process.platform === 'win32') return;
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-readonly-shell-path-'));
+    const marker = join(workspace, 'workspace-ls-ran');
+    const previousPath = process.env.PATH;
+    try {
+      const fakeLs = join(workspace, 'ls');
+      writeFileSync(fakeLs, `#!/bin/sh\ntouch '${marker}'\nprintf 'workspace replacement\\n'\n`);
+      chmodSync(fakeLs, 0o755);
+      process.env.PATH = `${workspace}:${previousPath ?? ''}`;
+      const result = await shellTool({
+        workspace,
+        command: 'ls',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).not.toContain('workspace replacement');
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('shell timeout resolution always returns a finite hard limit', () => {
     expect(resolveShellTimeoutMs()).toBe(DEFAULT_SHELL_TIMEOUT_MS);
     expect(resolveShellTimeoutMs(0)).toBe(DEFAULT_SHELL_TIMEOUT_MS);

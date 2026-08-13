@@ -37,6 +37,8 @@ export interface ShellInput {
   networkMode?: ShellNetworkMode;
   /** Filesystem authority for this invocation; allow_all requires a user-derived grant. */
   filesystemMode?: ShellFilesystemMode;
+  /** Runtime-authored execution trust. Models and approval payloads cannot set this field. */
+  executionTrust?: 'policy_proven_read_only';
   /** Capability-token host broker for an explicit `kite-http` request inside
    * the Windows sandbox. This does not enable descendant direct networking. */
   networkBroker?: ShellNetworkBrokerV1;

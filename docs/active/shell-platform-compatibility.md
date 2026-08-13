@@ -1,17 +1,19 @@
 # 当前规则：Shell 工具平台兼容性
 
 状态：active
-最后更新：2026-08-08
-最后验证：2026-08-08
+最后更新：2026-08-13
+最后验证：2026-08-13
 范围：
 
 - `src/core/tools/shell.ts`（Shell 执行、bash 选择逻辑）
+- `src/core/tools/trusted-readonly-environment.ts`（只读快路的最小环境与 canonical PATH）
 - `src/core/tools/stream-output.ts`（有界 stdout/stderr capture 与逻辑行组装）
 - `src/core/tools/process-tree.ts`（超时后的进程树终止）
 - `src/core/sandbox/executor.ts`（沙箱包装执行）
 - `src/core/tools/bash-path.ts`（bash 路径探测）
 - `tests/shell-exec.test.ts`（Shell 集成测试）
 - `tests/tools.test.ts`（Shell 工具单元测试）
+- `tests/sandbox/windows-restricted-token.test.ts`（Windows 受管 PATH 投影）
 
 读取时机：
 
@@ -119,6 +121,14 @@ npm/npx/pnpm/pnpx/yarn/yarnpkg/corepack 在 restricted child 中固定转发到 
 POSIX lookup 命中 Windows 无法执行的 extensionless Unix shim；adapter 显式经 `cmd.exe /d /c` 承载
 batch shim，不能让 isksh 直接启动 `.cmd` 并把 `C:\Program Files` 等 PATH identity 拆词。command 可以显式调用 bash、cmd.exe、
 pwsh 或 powershell.exe。
+
+Shell read-only fast path 不使用上述通用继承 PATH。Runtime 仅在 Registry 重新证明
+命令只读后签发内部 execution trust：POSIX executor 固定以非登录 `/bin/sh -c`
+执行，Windows restricted-token 继续使用密封 shell runtime/Coreutils；二者的继承
+PATH 条目均必须为 Workspace 外可 canonicalize 的绝对目录。相对条目、空条目、
+Workspace 子目录与 symlink alias 被删除；无沙箱 development fallback 也消费同一最小
+环境，不能因 backend 不可用而恢复 Workspace executable replacement。普通需审批 Shell
+仍保留用户工具链和 Homebrew/项目 PATH 语义。
 
 isksh 本身不提供 MSYS2 drive mount。为保持共享 Shell contract，restricted-token adapter 在送入 runner
 前仅转换 shell token boundary 上的字面量 `/x/...` 盘符前缀为 native executable 可接受的 `X:/...`；

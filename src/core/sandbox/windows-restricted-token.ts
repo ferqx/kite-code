@@ -10,6 +10,11 @@ import {
   timeoutMessage,
 } from '@/core/tools/shell';
 import { BoundedOutputBuffer, BoundedProgressLineBuffer } from '@/core/tools/stream-output';
+import {
+  buildWorkspaceExcludedPath,
+  isCanonicalPathOutsideWorkspace,
+  POLICY_PROVEN_READ_ONLY_EXECUTION,
+} from '@/core/tools/trusted-readonly-environment';
 import type { ShellInput, ShellResult } from '@/core/types';
 import {
   checkDangerousPaths,
@@ -305,7 +310,12 @@ function createRunnerExecutor(
       invocationName: createWindowsRestrictedTokenInvocationName(),
       commandLine: wrapWindowsRestrictedTokenCommandV1(input.command),
       cwd: workspaceRoot,
-      env: buildWindowsRestrictedTokenEnv(runtimeRoot, runner),
+      env: buildWindowsRestrictedTokenEnv(
+        runtimeRoot,
+        runner,
+        workspaceRoot,
+        input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION,
+      ),
       filesystemScope,
       workspaceRoot,
       runtimeRoot,
@@ -678,12 +688,15 @@ async function recoverRestrictedTokenAcl(
 function buildWindowsRestrictedTokenEnv(
   runtimeRoot: string,
   runner: WindowsSandboxRunnerV1,
+  workspaceRoot: string,
+  policyProvenReadOnly: boolean,
 ): Record<string, string> {
   return buildWindowsRestrictedTokenEnvForTest(
     process.env,
     runtimeRoot,
     runner.shellRuntimePath,
     resolveBunExecutableForWindowsRestrictedTokenV1(),
+    { workspaceRoot, policyProvenReadOnly },
   );
 }
 
@@ -693,6 +706,11 @@ export function buildWindowsRestrictedTokenEnvForTest(
   runtimeRoot: string,
   shellRuntimePath: string,
   bunExecutablePath: string | null = null,
+  options: {
+    workspaceRoot?: string;
+    policyProvenReadOnly?: boolean;
+    canonicalizePath?: (path: string) => string;
+  } = {},
 ): Record<string, string> {
   const env: Record<string, string> = {};
   for (const key of WINDOWS_RESTRICTED_TOKEN_ENV_ALLOWLIST) {
@@ -704,8 +722,29 @@ export function buildWindowsRestrictedTokenEnvForTest(
   env.HOME = runtimeRoot;
   env.BUN_INSTALL_CACHE_DIR = win32.join(runtimeRoot, 'bun-cache');
   const pathEntries = [runtimeRoot, win32.join(runtimeRoot, 'kite-coreutils'), shellRuntimePath];
-  if (bunExecutablePath) pathEntries.push(win32.dirname(bunExecutablePath));
-  if (env.PATH) pathEntries.push(env.PATH);
+  if (
+    bunExecutablePath &&
+    (!options.policyProvenReadOnly ||
+      !options.workspaceRoot ||
+      isCanonicalPathOutsideWorkspace(options.workspaceRoot, bunExecutablePath, {
+        platform: 'win32',
+        canonicalize: options.canonicalizePath,
+      }))
+  ) {
+    pathEntries.push(win32.dirname(bunExecutablePath));
+  }
+  if (env.PATH) {
+    const inheritedPath =
+      options.policyProvenReadOnly && options.workspaceRoot
+        ? buildWorkspaceExcludedPath(options.workspaceRoot, {
+            platform: 'win32',
+            pathValue: env.PATH,
+            canonicalize: options.canonicalizePath,
+            systemRoot: processEnv.SystemRoot,
+          })
+        : env.PATH;
+    if (inheritedPath) pathEntries.push(inheritedPath);
+  }
   env.PATH = pathEntries.join(';');
   return env;
 }

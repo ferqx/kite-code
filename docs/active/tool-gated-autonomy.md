@@ -47,9 +47,16 @@ Workspace sandbox 兜底，因为 development 的 `workspace_only` capability �
 external-read 审批，不得因 option value 没有被当作普通操作数而漏报。`grep` pattern 文件、`file`
 magic 文件与 `sort --random-source` 同样属于显式读取目标。`file -f/--files-from` 会从文件内容动态取得
 更多路径，静态命令无法证明其完整读取范围，因此直接退出只读 fast path。
-这条只读证明同时依赖 executor 的 sanitized environment：启动用户命令前必须清除能够改变已允许程序
-执行语义的环境输入；当前 `RIPGREP_CONFIG_PATH` 必须被 unset，防止普通 `rg` 通过配置文件注入
-`--pre` 子进程。显式 `rg --pre` 仍由参数 grammar 直接拒绝。
+这条只读证明同时依赖 executor 的 sanitized environment。Registry 只为重新通过同一
+classifier 的命令签发 Runtime-owned `policy_proven_read_only` 执行信任；模型参数、审批
+payload 与其他 Shell 调用不能伪造。POSIX 路径使用固定非登录 `/bin/sh`，并在进程
+启动前投影最小环境；Windows restricted-token 保留密封 runtime/Coreutils 前缀。两者都将
+继承 PATH 的每个绝对目录先 canonicalize，再删除相对/空条目、Workspace 目录、其子目录
+和指向这些 identity 的 symlink alias。因此 Workspace 中的同名 `ls`/`rg` 不能在静态分类后
+替换真实 executable；没有可用的可信 PATH 时命令查找按失败收敛，不回退 Workspace。
+该最小环境也不继承 `BASH_ENV`/`ENV`、凭据或其他未白名单变量；
+`RIPGREP_CONFIG_PATH` 必须在沙箱 wrapper 中额外 unset，防止普通 `rg` 通过配置文件注入
+`--pre` 子进程。显式 `rg --pre` 仍由参数 grammar 直接拒绝。需审批/副作用 Shell 不使用该信任投影，保持原有工具链 PATH 语义。
 Generic Shell Git 整体不属于 policy-proven read-only：即使 argv 看似只读，repository/config 仍可能通过
 diff/textconv、fsmonitor、external diff 或 filter helper 启动子进程。Git inspection 必须使用 Runtime
 披露的 typed `git_inspect` broker；未披露时不能退回 Shell 的免审批/Planning fast path。

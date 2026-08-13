@@ -6,7 +6,15 @@
  * These tests verify actual sandbox-exec isolation. Skipped on non-macOS platforms.
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSandboxExecutor } from '../src/core/sandbox/executor';
@@ -72,6 +80,29 @@ describe('sandbox executor integration', () => {
     } finally {
       if (previousConfig === undefined) delete process.env.RIPGREP_CONFIG_PATH;
       else process.env.RIPGREP_CONFIG_PATH = previousConfig;
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('policy-proven reads exclude Workspace executables from PATH', async () => {
+    const ws = setupWorkspace();
+    const previousPath = process.env.PATH;
+    try {
+      const fakeLs = join(ws, 'ls');
+      writeFileSync(fakeLs, '#!/bin/sh\ntouch workspace-path-executed\n');
+      chmodSync(fakeLs, 0o755);
+      process.env.PATH = `${ws}:${previousPath ?? ''}`;
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: 'ls',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(result.ok).toBe(true);
+      expect(existsSync(join(ws, 'workspace-path-executed'))).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
       cleanupWorkspace(ws);
     }
   });

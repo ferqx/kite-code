@@ -1595,6 +1595,7 @@ describe('invariant i10 — shell governance is derived from command shape', () 
       onShellProgress: (chunk) => progress.push(chunk),
       shellExecutor: async (input) => {
         expect(input.timeoutMs).toBe(3210);
+        expect(input.executionTrust).toBe('policy_proven_read_only');
         input.onProgress?.('status', 'stdout');
         return {
           ok: true,
@@ -1608,6 +1609,21 @@ describe('invariant i10 — shell governance is derived from command shape', () 
     expect(result.ok).toBe(true);
     expect(result.action).toEqual({ intent: 'inspect', grantUsed: 'none' });
     expect(progress).toEqual(['status']);
+  });
+
+  test('does not attach read-only execution trust to a side-effectful command', async () => {
+    const outcome = await dispatchRegisteredTool(
+      shellExecuteSpec,
+      { command: 'touch created.txt' },
+      {
+        ...CTX,
+        shellExecutor: async (input) => {
+          expect(input.executionTrust).toBeUndefined();
+          return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+        },
+      },
+    );
+    expect(outcome.dispatched).toBe(true);
   });
 });
 
