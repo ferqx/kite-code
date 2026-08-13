@@ -21,7 +21,8 @@ tests/sandbox/windows-restricted-token.test.ts`。需要实际创建/复用 Onli
 或 `bun run agent sandbox setup` 显式设置，再设置 `KITE_RUN_WINDOWS_MANAGED_NETWORK_E2E=1`。
 非 Windows 开发机缺少固定 GNU target/toolchain 时，本地 TypeScript 协议测试不能替代 native runner
 编译证据；包含 runner Rust 源码的 PR 必须等绑定当前 head 的 `candidate-windows-x64` 或 Windows
-Platform Capability Probe 完成 `build-windows-runner.ts` 构建，才能宣称该平台改动已通过。
+Platform Capability Probe 完成 `build-windows-runner.ts` 构建，才能宣称该平台改动已通过；该构建必须
+同时闭合 library 与 `kite-windows-runner` binary 的接口，不能用仅编译 library 的结果替代。
 Windows 10 使用 22H2 (10.0.19045) API/build baseline；本记录不声称 physical Win10 conformance。
 GitHub-hosted native E2E 的 runtime smoke 必须把 Node/npm/Bun/cmd/PowerShell 拆为独立调用，并给
 Defender 下的各次冷启动保留各自的有界预算；不得用一条共享 timeout 的组合命令把累计启动时间误判为

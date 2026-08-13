@@ -418,6 +418,12 @@ impl DirectInvocationCleanup {
             .capabilities()
     }
 
+    fn approved_filesystem_guard(&self) -> Option<&CapabilitySid> {
+        self.security
+            .as_ref()
+            .and_then(direct_workspace::DirectWorkspaceSecurity::approved_filesystem_guard)
+    }
+
     fn track_job(&mut self, job: HANDLE) {
         self.job = Some(job);
     }
