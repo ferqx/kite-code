@@ -122,7 +122,8 @@ digest；后续任何 native runner 变更都必须重新运行同一可复现�
 local path 的 WRITE_RESTRICTED 通过 restricted SID check 限制写入，但 current user 仍可能拥有普通读取
 权限。approved filesystem path 使用不含 `WRITE_RESTRICTED` 的去权 token，保留 LUA 与 privilege stripping，
 文件访问服从 current user 普通 ACL；token 的 restricted SID 集合镜像 user/group SID 并加入专用 guard，
-既有固定路径只对 guard SID 写入 deny ACE，宿主当前用户不受该 ACE 影响。仅网络扩权使用专用非管理员
+同时保留 Logon/World SID 以继续执行由这些 ACL 身份授权的系统与 toolchain binary；既有固定路径只对
+guard SID 写入 deny ACE，宿主当前用户不受该 ACE 影响。仅网络扩权使用专用非管理员
 identity + 临时 ACL lease。同一 invocation
 同时获批网络和外部文件系统时使用前一种去权 token 并投影 `networkMode=allow_all`，避免 Online identity
 的 Workspace ACL lease 再次阻止已批准外部路径。

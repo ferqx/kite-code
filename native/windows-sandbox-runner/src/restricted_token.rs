@@ -2,9 +2,10 @@
 //! Windows backend.
 //!
 //! This module deliberately does not select a backend or alter filesystem ACLs.
-//! Its narrow contract is to create a `WRITE_RESTRICTED` primary token carrying
-//! caller-owned capability SIDs, prove that a suspended child received that
-//! token, and then resume it only after it joins the caller's Job Object.
+//! Its narrow contract is to create either a `WRITE_RESTRICTED` Workspace token
+//! or an approved-filesystem token carrying a restricted-only guard SID, prove
+//! that a suspended child received that token, and resume it only after it joins
+//! the caller's Job Object.
 //!
 //! A write-restricted token does not make the current user's ordinary read
 //! access disappear. The caller still has to grant
@@ -736,9 +737,11 @@ pub fn create_unelevated_approved_filesystem_token(
             "TOKEN_USER contains an invalid SID",
         ));
     }
+    let logon = logon_sid(base_token)?;
+    let world = StableSidBuffer::world()?;
     let group_information = query_token_information(base_token, TokenGroups)?;
     let groups = token_group_entries(&group_information)?;
-    let mut restricted_sids = Vec::with_capacity(groups.len() + 2);
+    let mut restricted_sids = Vec::with_capacity(groups.len() + 4);
     restricted_sids.push(SID_AND_ATTRIBUTES {
         Sid: user.User.Sid,
         Attributes: 0,
@@ -747,6 +750,18 @@ pub fn create_unelevated_approved_filesystem_token(
         Sid: group.Sid,
         Attributes: 0,
     }));
+    // Toolchains and system executables may grant read/execute through the
+    // interactive logon SID or World rather than a durable account/group ACE.
+    // Keep both in the restricting pass just as the normal Workspace token
+    // does, while user/groups preserve ordinary host ACL access.
+    restricted_sids.push(SID_AND_ATTRIBUTES {
+        Sid: logon.sid,
+        Attributes: 0,
+    });
+    restricted_sids.push(SID_AND_ATTRIBUTES {
+        Sid: world.sid,
+        Attributes: 0,
+    });
     restricted_sids.push(SID_AND_ATTRIBUTES {
         Sid: protected_guard.as_psid(),
         Attributes: 0,
@@ -1367,5 +1382,34 @@ mod tests {
             .expect("approved filesystem token");
         verify_restricted_token_handle(token.handle(), std::slice::from_ref(&guard))
             .expect("approved filesystem token must remain restricted");
+    }
+
+    #[test]
+    fn approved_filesystem_token_retains_logon_and_world_for_executable_access() {
+        if current_process_token_is_restricted().expect("inspect current token") {
+            return;
+        }
+        let guard = CapabilitySid::generate().expect("protected path guard");
+        with_current_user_primary_token(|base_token| {
+            let expected_logon = logon_sid(base_token)?;
+            let expected_world = StableSidBuffer::world()?;
+            let token = create_unelevated_approved_filesystem_token(base_token, &guard)?;
+            let information = query_token_information(token.handle(), TokenRestrictedSids)?;
+            let entries = token_group_entries(&information)?;
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| sid_equal(entry.Sid, expected_logon.sid)),
+                "approved filesystem token must retain the interactive logon SID"
+            );
+            assert!(
+                entries
+                    .iter()
+                    .any(|entry| sid_equal(entry.Sid, expected_world.sid)),
+                "approved filesystem token must retain the World SID"
+            );
+            Ok(())
+        })
+        .expect("inspect approved filesystem token restricting SIDs");
     }
 }
