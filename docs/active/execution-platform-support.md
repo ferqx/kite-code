@@ -115,8 +115,9 @@ ADR-0101 将 native invocation protocol 提升到 V6。adapter 与 runner 必须
 字段。纯网络 `allow_all` 必须切换受管 Online 登录身份；approved filesystem invocation 使用 guard SID。
 V1-V5 runner 必须在 user script 前 fail closed。
 `windows-runner-v1.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
-仓库当前保留的 0.7.1/V5 release pin 因而会被新 adapter 拒绝；在 canonical Windows build 重建
-0.8.0/V6 runner 并重新固定 digest 前，Windows backend 的正确状态是 unavailable，而不是回退到旧协议。
+仓库当前 release pin 已由 canonical Windows build 固定为 0.8.0/V6 及其对应 binary digest；adapter
+仍必须拒绝 V1-V5 或 digest 不一致的 runner。native runner 改动后，只有同一可复现 Windows 构建重新
+生成并提交匹配 pin，才能恢复可用性；不得回退旧协议或手工复用旧 digest。
 
 固定证据来自
 [Platform Capability Probe run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)，
