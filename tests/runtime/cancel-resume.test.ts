@@ -355,6 +355,41 @@ describe('bounded Runtime cancellation', () => {
     kernel.close();
   });
 
+  test('bounds cleanup when an in-flight executor ignores AbortSignal', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'non-cooperative-cancel',
+      userId: 'u',
+      workspace: '/',
+    });
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const controller = new AbortController();
+    let executorCalls = 0;
+    const startedAt = Date.now();
+    setTimeout(() => controller.abort('Cancellation requested.'), 10);
+
+    for await (const _event of runRuntimeLoop(
+      kernel,
+      async () => {
+        executorCalls += 1;
+        return new Promise<never>(() => {});
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      10_000,
+      undefined,
+      controller.signal,
+    )) {
+      // This executor deliberately emits nothing.
+    }
+
+    expect(executorCalls).toBe(1);
+    expect(Date.now() - startedAt).toBeLessThan(5_000);
+    kernel.close();
+  });
+
   test('restores cancelled waiters, unknown dispatches, and cancel-incomplete terminal facts', () => {
     const directory = mkdtempSync(join(tmpdir(), 'openpx-cancel-restart-'));
     const storePath = join(directory, 'runtime.db');

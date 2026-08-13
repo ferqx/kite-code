@@ -29,6 +29,11 @@ type EffectExecutionOutcome = {
   deferred?: { reason: string; retryAfterMs: number };
 };
 const ABORTED_WAIT = Symbol('aborted-wait');
+const TIMED_OUT_WAIT = Symbol('timed-out-wait');
+// The executor has already received AbortSignal before this grace period
+// begins.  Keep consuming its terminal cleanup facts, but never let one
+// non-cooperative adapter hold the Runtime (and its successor turn) forever.
+const ABORT_CLEANUP_GRACE_MS = 3_000;
 
 async function waitForPromiseOrAbort<T>(
   promise: Promise<T>,
@@ -61,6 +66,23 @@ async function waitForRetryOrAbort(
 ): Promise<boolean> {
   const delay = new Promise<void>((resolve) => setTimeout(resolve, Math.max(1, retryAfterMs)));
   return (await waitForPromiseOrAbort(delay, signal)) !== ABORTED_WAIT;
+}
+
+async function waitForPromiseOrTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+): Promise<T | typeof TIMED_OUT_WAIT> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<typeof TIMED_OUT_WAIT>((resolve) => {
+        timer = setTimeout(resolve, Math.max(0, timeoutMs), TIMED_OUT_WAIT);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 const MAX_PENDING_TOOL_PROGRESS_CHARS = 16 * 1024;
@@ -245,15 +267,22 @@ async function* executeEffectWithStreaming(
 
   let emitted = false;
   let cancellationIncomplete = false;
+  let cleanupDeadlineAt: number | undefined;
   while (!settled || pending.length > 0) {
     if (pending.length === 0) {
-      const waited = await waitForPromiseOrAbort(
-        new Promise<void>((resolve) => {
-          wake = resolve;
-        }),
-        signal,
-      );
-      if (waited === ABORTED_WAIT) return { applied: false, emitted };
+      const waitForWake = new Promise<void>((resolve) => {
+        wake = resolve;
+      });
+      if (cleanupDeadlineAt != null || signal?.aborted) {
+        cleanupDeadlineAt ??= Date.now() + ABORT_CLEANUP_GRACE_MS;
+        const waited = await waitForPromiseOrTimeout(waitForWake, cleanupDeadlineAt - Date.now());
+        if (waited === TIMED_OUT_WAIT) return { applied: false, emitted };
+      } else {
+        const waited = await waitForPromiseOrAbort(waitForWake, signal);
+        if (waited === ABORTED_WAIT) {
+          cleanupDeadlineAt = Date.now() + ABORT_CLEANUP_GRACE_MS;
+        }
+      }
     }
     while (pending.length > 0) {
       const pendingEvent = pending.shift()!;
@@ -447,8 +476,12 @@ export async function* runRuntimeLoop(
       | undefined;
     while (backgroundCount > 0 || backgroundEvents.length > 0) {
       if (backgroundEvents.length === 0) {
-        const waited = await waitForPromiseOrAbort(waitForBackground(), signal);
-        if (waited === ABORTED_WAIT) return cancellationIncomplete;
+        // Every background executor receives the same signal and has its own
+        // bounded post-abort cleanup grace. Once cancellation is observed we
+        // must drain that grace rather than race the already-aborted signal,
+        // otherwise diagnostics and terminal cleanup facts disappear.
+        if (signal?.aborted) await waitForBackground();
+        else await waitForPromiseOrAbort(waitForBackground(), signal);
       }
       while (backgroundEvents.length > 0) {
         const backgroundEvent = backgroundEvents.shift()!;

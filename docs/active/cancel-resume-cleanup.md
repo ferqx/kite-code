@@ -39,6 +39,11 @@ failure/reason=`cancel_incomplete`。
 Runtime wait，避免旧 run 永久阻塞同一 thread 的 successor；已 dispatch reservation 仍保持 `unknown`，后续
 reconciliation 才能确认外部结果。
 
+Abort 后，Runner 停止所有新 effect 调度，但给每个已启动 effect 最多 3 秒的 cleanup grace 来交付已有
+terminal/diagnostic 事实；超过上限仍未收束的 executor 不得继续占住 Runtime。该界限同时适用于前台
+effect 与并发 Shell 背景 drain：已合作的执行器可完整写出 `cancel_incomplete`，不合作的适配器则在 grace
+结束后被隔离，允许同一 thread 的 successor 继续。
+
 Shell 取消由 process-tree guard 独占：POSIX 对独立 process group 先发 SIGTERM，并立即轮询退出状态，最多等待 500ms；仍未退出时再以 SIGKILL 强制终止并进行 2 秒有界确认。Windows 先尝试 root graceful，并立即轮询退出状态，再通过 Job Object 或 `taskkill /T /F` 清理整棵树。正常退出不得因为固定 sleep 人为延迟；结果必须携带 confirmed/forced/unconfirmed count。无法确认
 descendant 退出时发出结构化 `runtime.cancellation_diagnostic(cancel_incomplete)`，终态为
 `unknown` 且进入 reconciliation，不能降级为普通 cancelled。
