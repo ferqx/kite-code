@@ -178,7 +178,7 @@ pub fn prepare_direct_workspace(
         let mut ephemeral_workspace_capability_index = None;
         let mut ephemeral_snapshots = Vec::new();
         let mut approved_filesystem_guard_index = None;
-        let mut approved_filesystem_guard_paths = Vec::new();
+        let mut approved_filesystem_guard_paths: Vec<String> = Vec::new();
 
         if matches!(filesystem_scope, FilesystemScope::WorkspaceWrite) {
             if let Some(ephemeral_sid) = ephemeral_workspace_capability_sid {
