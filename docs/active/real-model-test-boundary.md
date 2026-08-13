@@ -45,7 +45,7 @@ ADR-0099 将 V2 改为 Planning/Building 共用稳定 builtin/MCP declaration，
 
 同日重新运行真实 `invalid_args_recovery`，V2 与 legacy 各连续 3/3 完成：每轮先收到一次未 dispatch 的 `tool_invalid_args/invalid_arguments`，随后真实模型自主发出一次带 `recoveryOf/model_correction` 的合法 task，子代理完成、父代理续答、整轮完成；两臂每轮 Provider evidence 均为 4/4 闭合。该结果证明正确产品边界是“Registry 返回真实错误，模型自主调整”，不是 Runtime 解码字符串、改写字段或替模型构造参数；它也是共享 Runtime 能力，不能表述成 V2 专属增益。曾尝试用自然语言强制模型产生根级字符串错误，但模型在发送前生成了两个合法 task，未命中目标故障，故该 fixture 已撤销且不计入恢复证据。
 
-附件中的真实会话暴露了委派授权解析缺陷：用户目标“测试所有的子agent”能命中委派关键词，却因缺少每个角色的业务动词而让 explore/plan/code/review 全部返回 `delegation_role_mismatch`；英文复数 `sub-agents` 也未被通用委派模式接受，显式列出多个角色时旧实现还只保留首个匹配角色。修复后，Building 中明确的全部角色/点名角色 smoke 请求保留完整角色集合并通过；Planning 仍只允许 explore/plan，普通 code 委派仍要求实施/编辑/修复授权。role smoke 只授权验证调度，code-role smoke 固定使用只读工具 ceiling，不能把“测试角色”提升成工作区修改授权。确定性中英文、多角色、Planning 负向和泛化测试均通过。
+附件中的真实会话曾暴露旧委派授权正则的解析缺陷：用户目标“测试所有的子agent”会因缺少角色业务动词而返回 `delegation_role_mismatch`，英文复数和多角色表达也需要额外特判。ADR-0103 已用模型自主编排替代该文本授权层：Runtime 只验证 task 结构，Planning role、role ceiling、父级权限继承和共享预算继续由既有策略确定。早期 role-smoke matcher 与 code-role 只读降级结论只保留为历史诊断，不再描述当前行为；本次变更未运行新的真实 Provider journey，因此不能把确定性回归表述为 live 证据。
 
 早期聚合四种角色的真实 journey 功能上可以完成，但 Provider transport failure 会污染整批且难以定位到单个角色。拆成四个独立 `role_smoke` 后，explore、plan、code、review 均为 `completed`：每批恰好一次目标 task、一次 child completed、父代理续答及 `run.completed`，且每批 Provider request/response/HTTPS 2xx/usage/唯一 response ID 均为 3/3、transport failure 为 0。聚合 fixture 已移除；该证据证明四种真实子代理路径可用，早期聚合批次不能冒充闭合 Provider 证据。
 

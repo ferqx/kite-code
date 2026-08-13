@@ -706,7 +706,7 @@ describe('code agent tool definitions', () => {
     ).toBe(true);
   });
 
-  test('Prompt V2 planning task surface preserves explicit delegation and role guidance', async () => {
+  test('Prompt V2 planning task surface preserves autonomous delegation and role guidance', async () => {
     const config = {
       features: { ...getFeatureFlags(), promptContractV2: true },
     } as AgentConfig;
@@ -717,12 +717,15 @@ describe('code agent tool definitions', () => {
       subagentEventSink: () => {},
     });
     const task = tools.task!;
+    expect(String(task.description)).toContain('benefits from an isolated sub-agent');
     expect(String(task.description)).toContain(
-      'only when the current user explicitly requests delegation',
+      'code only when the user task calls for implementation',
     );
     expect(String(task.description)).toContain(
       'plan for read-only architecture or design planning',
     );
+    expect(String(task.description)).toContain('Runtime executes sub-agents serially');
+    expect(String(task.description)).toContain('never claim parallel dispatch');
 
     const schema = (task as unknown as { inputSchema: ToolSchemaLike }).inputSchema;
     const jsonSchema = (await schema.jsonSchema) as {

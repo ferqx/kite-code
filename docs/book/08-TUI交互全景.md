@@ -35,6 +35,7 @@ Session logging 默认以 `metadata` 运行，TUI 不显示普通 mode 状态；
 后才物化 Tool Card。待审批调用只显示在 Footer 的“工具类型 · 工具授权”中：命令或工具直接作为独立引用块，
 决策使用“主标签 + 影响说明”的等距列表；未获准调用不得提前出现在消息列表。多个 Shell
 调用分别审批，任一调用获准后立即进入执行，不等待其他 sibling 审批完成。
+Subagent 内部工具审批由 parent `task` Tool Call 持有 Runtime interaction，同时在 payload 和 continuation 中保留 child Tool Call 身份。Footer 以 parent id 匹配批准或拒绝终态并立即关闭，再由 child id 恢复准确工具；两种身份不得混用。
 
 工具终态的颜色、状态、恢复提示与耗时统一读取 Runtime 投影的 `ToolOutcomeV1`，不再从错误正文、
 退出文本或交互类型猜测。人工审批拒绝、auto-review 拒绝、timeout、cancel 与普通执行失败保留各自

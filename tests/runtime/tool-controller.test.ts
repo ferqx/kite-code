@@ -15,6 +15,7 @@ import { aiMessage } from '@/core/messages';
 import { CapabilityArtifactStore } from '@/core/persistence/capability-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createRuntimeEffectExecutor } from '@/core/runtime/executor';
+import { reduceRuntimeState } from '@/core/runtime/reducer';
 import { createInitialRuntimeState } from '@/core/runtime/state';
 import { createToolRecoveryJournalV1 } from '@/core/runtime/tool-recovery-journal';
 import { serializeSubagentContinuation } from '@/core/subagent/continuation-codec';
@@ -71,6 +72,60 @@ async function executeUpdatePlan(
 }
 
 describe('executeRuntimeTools', () => {
+  test('dispatches a review child for the mixed-language multi-agent user request', async () => {
+    const state = reduceRuntimeState(
+      createInitialRuntimeState({
+        threadId: 'autonomous-review-delegation',
+        userId: 'user',
+        workspace: process.cwd(),
+      }),
+      {
+        type: 'user.message_appended',
+        messageId: 'user-review',
+        content: '调用多agent审核这些问题，确认策略无误。',
+      },
+    );
+    state.tools.calls.review = {
+      toolCallId: 'review',
+      modelMessageId: 'model-review',
+      name: 'task',
+      args: {
+        subagent_type: 'review',
+        task: 'Review the reported policy issues and return concrete file evidence.',
+      },
+      status: 'queued',
+      sideEffect: false,
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('review');
+    const model = createMockModel([{ message: aiMessage({ content: 'Review complete.' }) }]);
+
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['review'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: model,
+    });
+
+    expect(model.callCount.count).toBe(1);
+    expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.started' }));
+    expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.finished',
+        toolCallId: 'review',
+        result: expect.objectContaining({ ok: true }),
+      }),
+    );
+  });
+
   test.each([
     'missing',
     'mismatched',
@@ -191,6 +246,11 @@ describe('executeRuntimeTools', () => {
     });
 
     expect(event.type).toBe(expectedType);
+    if (event.type === 'approval.requested') {
+      expect(event.toolCallId).toBe('task-call');
+      expect(event.approval.callId).toBe('child-shell');
+      expect(event.approval.grantOptions).toContain('same_command');
+    }
   });
 
   test('rejects direct tool execution while a legacy V1 plan is executing', async () => {

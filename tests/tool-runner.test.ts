@@ -74,6 +74,43 @@ function mockMcpManager(
   };
 }
 
+describe('runApprovedTool — task structure', () => {
+  it('does not require a user-goal delegation keyword before dispatch', async () => {
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-task-review',
+        name: 'task',
+        args: {
+          subagent_type: 'review',
+          task: 'Review the reported issues and return file and line evidence.',
+        },
+        reason: 'Review reported issues',
+        protectedCommand: 'task',
+      } as PendingToolRequest,
+    });
+
+    expect(result.stderr).toContain('task tool is unavailable in this execution context');
+    expect(result.stderr).not.toContain('delegation denied');
+    expect(result.stderr).not.toContain('user_delegation_not_requested');
+  });
+
+  it('rejects delegated tasks outside the structural length boundary', async () => {
+    const result = await runApprovedTool({
+      workspace: '/ws',
+      request: {
+        id: 'call-task-vague',
+        name: 'task',
+        args: { subagent_type: 'explore', task: 'short' },
+        reason: 'Reject an undersized task',
+        protectedCommand: 'task',
+      } as PendingToolRequest,
+    });
+
+    expect(result.stderr).toContain('Sub-agent task rejected (task_not_bounded)');
+  });
+});
+
 describe('runApprovedTool — list_mcp_resources', () => {
   it('stable-sorts all providers and returns only safe resource metadata', async () => {
     const manager = mockMcpManager(

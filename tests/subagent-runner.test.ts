@@ -159,7 +159,6 @@ describe('SubAgentRunner integration', () => {
           reason: 'fixture',
           protectedCommand: 'task',
         },
-        currentUserGoal: 'Delegate a plan subagent to design the Runtime architecture.',
         phase: 'planning',
         taskConfig: { providerName: 'fixture', modelName: 'fixture' } as AgentConfig,
         taskModel,

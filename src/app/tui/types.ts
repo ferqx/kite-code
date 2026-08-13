@@ -270,6 +270,8 @@ export type InterruptState =
       kind: 'approval';
       /** Durable Runtime interaction identity, when projected from RuntimeEvent replay. */
       interactionId?: string;
+      /** Runtime tool call that owns the approval interaction. */
+      toolCallId?: string;
       /** Active Footer payload; absent only in legacy restored UI snapshots. */
       approval?: ToolApprovalPayload;
       /** Compatibility pointer for sessions created before approvals moved off-screen. */

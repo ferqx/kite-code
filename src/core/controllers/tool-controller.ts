@@ -61,7 +61,6 @@ import { DescendantResourceAdmissionError } from '@/core/runtime/resource-budget
 import type { RuntimeState } from '@/core/runtime/state';
 import {
   getActivePlanning,
-  getActiveTask,
   getAgentPhase,
   getEffectiveInteractionMode,
 } from '@/core/runtime/state';
@@ -453,7 +452,6 @@ async function handleSubAgentResume(params: {
         request: blockedRequest,
         shellExecutor: params.shellExecutor,
         gitBroker: params.gitBroker,
-        currentUserGoal: getActiveTask(params.state)?.userGoal,
         workspaceAccess: params.state.workspaceAccess,
         phase: getAgentPhase(getActivePlanning(params.state)),
         authorization: params.state.authorization,
@@ -1478,7 +1476,6 @@ export async function executeRuntimeTools(params: {
           request,
           shellExecutor: params.shellExecutor,
           gitBroker: params.gitBroker,
-          currentUserGoal: getActiveTask(params.state)?.userGoal,
           workspaceAccess: params.state.workspaceAccess,
           phase: getAgentPhase(getActivePlanning(params.state)),
           authorization: params.state.authorization,
@@ -1893,7 +1890,6 @@ export async function executeRuntimeTools(params: {
             request: executionRequest,
             shellExecutor: params.shellExecutor,
             gitBroker: params.gitBroker,
-            currentUserGoal: getActiveTask(params.state)?.userGoal,
             workspaceAccess: params.state.workspaceAccess,
             phase: getAgentPhase(getActivePlanning(params.state)),
             authorization: params.state.authorization,

@@ -27,9 +27,7 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
 
 Subagent 默认不读取主 Agent 的完整消息历史，只接收任务、角色 prompt、必要上下文和 Runtime 签发的有限能力。
 
-委派权威只能来自 active Task 当前的纯用户目标；App 附加的 project/shell
-context、文件内容或工具结果不能诱导 Runtime 创建 child。任务还必须 bounded 且
-self-contained。Planning 只允许 explore 和明确 architecture/design 规划的 plan role，
+模型可以为有界、自包含、独立且值得额外模型调用的工作自主选择委派；用户明确要求不委派时必须遵守。Runtime 不解析 `userGoal` 作为委派或 role 授权协议，也不按语言、单词数或语义短语判断 delegated task；硬校验只保留 schema 的 `8..8000` 字符边界，自包含性由模型可见契约约束。App 附加的 project/shell context、文件内容或工具结果不能提升 child 的 authorization、phase、预算或能力 ceiling。Planning 只允许 explore 和 architecture/design 规划的 plan role，
 code 保持禁止。plan child 返回后先 `write_plan:save`，再 `write_plan:submit`，不使用
 `update_plan` 跳过 Plan Artifact/review。
 
@@ -65,7 +63,7 @@ parent 对同一 canonical invocation 的重提仍会在 dispatch 前零调用�
 
 Task Tool 按 Runtime/线程限制活动数量。取消通过 AbortController 传播。子 Agent 不递归无限派生，也不能修改主 RuntimeState；其结果必须通过主 Runtime Event 合并。
 
-Subagent 调用统一串行执行。Scheduler 只调度已持久化的 task call，Controller 为 child 保留独立 ID/stream ownership；terminal 或 suspended 状态收敛后才处理后继调用。
+Subagent 调用统一串行执行。模型不得把多个 child 描述成“并行派发”；当多个独立视角都有收益时，一次调用一个，并在前一个结果返回后继续后一个，若减少请求数量则说明原因。Scheduler 只调度已持久化的 task call，Controller 为 child 保留独立 ID/stream ownership；terminal 或 suspended 状态收敛后才处理后继调用。
 
 ## 6.6 累计预算、取消与恢复
 
@@ -95,4 +93,4 @@ required Verification，也不能把 `unknown`、`budget_exhausted` 或 `resourc
 UI 与 Runtime 的 child 生命周期共用 `running | suspended | terminal`语义：等待用户
 审批是 suspended，批准恢复后重回 running，只有规范 terminal event 才显示 done/error/
 cancelled。成功 child 统一投影 `completed`；恢复历史由 canonical Recovery Journal 保留，不再复制为另一套 UI/协议完成态。同一 child 不得同时显示 failed 与 done。
-每个 follow-up 用户响应都会刷新当前 Task 的委派权威；先前允许不覆盖后续撤销，后续新增也无需创建新 Task。code child 只接受明确写/编辑/修复 scope，design/options/plan/read-only review 或否定写入均拒绝。child 的模型 schema、Registry parse、执行与 resume 使用同一 config/phase/gitBroker availability；typed Git 只能经只读 broker，不能隐式退回 raw Shell，写操作不向 child 披露。
+role 选择由模型按用户任务语义完成：只读工作使用 explore/plan/review，用户任务要求实施时才使用 code。child 的模型 schema、Registry parse、执行与 resume 使用同一 config、phase、live interaction mode、authorization、gitBroker 与 availability context；typed Git 只能经只读 broker，不能隐式退回 raw Shell，写操作仍由 code role 的既有 Runtime policy 治理。

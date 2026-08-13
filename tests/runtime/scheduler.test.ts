@@ -674,6 +674,31 @@ describe('decideNextEffect', () => {
     });
   });
 
+  test('schedules multiple read-only subagents one at a time', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'serial-subagents',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    queueCall(state, 'review-a', {
+      name: 'task',
+      args: { subagent_type: 'review', task: 'Review runtime correctness and report evidence.' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    queueCall(state, 'review-b', {
+      name: 'task',
+      args: { subagent_type: 'review', task: 'Review test coverage and report evidence.' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['review-a'],
+    });
+  });
+
   test('keeps external reads exclusive until their approval is resolved', () => {
     const state = createInitialRuntimeState({
       threadId: 'external-read',

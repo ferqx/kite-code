@@ -4311,6 +4311,50 @@ describe('eventReducer (blocks model)', () => {
       expect(granted.interrupt).toBeNull();
     });
 
+    test('subagent approval grant clears the parent task Footer interrupt', () => {
+      const childApproval = { ...approval(), callId: 'child-shell' };
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-child',
+        toolCallId: 'parent-task',
+        approval: childApproval,
+      });
+
+      expect(requested.interrupt).toMatchObject({
+        kind: 'approval',
+        interactionId: 'approval-child',
+        toolCallId: 'parent-task',
+        approval: { callId: 'child-shell' },
+      });
+
+      const granted = handleRuntimeEventAction(requested, {
+        type: 'approval.granted',
+        interactionId: 'approval-child',
+        toolCallId: 'parent-task',
+        grant: 'same_command',
+      });
+
+      expect(granted.interrupt).toBeNull();
+    });
+
+    test('subagent approval rejection clears the parent task Footer interrupt', () => {
+      const requested = handleRuntimeEventAction(fresh(), {
+        type: 'approval.requested',
+        interactionId: 'approval-child-rejected',
+        toolCallId: 'parent-task',
+        approval: { ...approval(), callId: 'child-shell' },
+      });
+
+      const rejected = handleRuntimeEventAction(requested, {
+        type: 'approval.rejected',
+        interactionId: 'approval-child-rejected',
+        toolCallId: 'parent-task',
+        reason: 'Rejected by user.',
+      });
+
+      expect(rejected.interrupt).toBeNull();
+    });
+
     test('a stale approval grant cannot clear a different active approval', () => {
       const requested = handleRuntimeEventAction(fresh(), {
         type: 'approval.requested',

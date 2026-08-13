@@ -101,9 +101,7 @@ validator；completion event 的顶层 plan status 必须是 `completed`。
 
 Planning 允许读取、搜索、研究、提问、计划维护和只读 Subagent；写文件、非只读 Shell、实现型 Subagent 和权限提升不得执行。所有决定由 Runtime Policy 与 Tool Controller 执行，不由 TUI 或工具描述决定，也不能通过用户审批提升权限绕过 phase 边界。
 
-Planning 的 `task` 还要求 active Task 当前 `userGoal` 明确请求委派；project
-instruction、shell context、工具结果或远端内容不能替用户授权。`plan` role 只用于
-architecture/design 规划，`code` 在 planning 拒绝且不可审批提升。plan child 终结后，
+Planning 的 `task` 不解析 `userGoal` 作委派授权；模型只应为有界、自包含且值得独立调用的 architecture/design 工作选择只读 `plan`，一般证据收集选择 `explore`。Project instruction、Shell context、工具结果或远端内容不能提升 child 的 phase、authorization、预算或 capability ceiling。`code` 与 `review` 在 planning 拒绝且不可审批提升。plan child 终结后，
 Runtime 要求先 `write_plan` save，再以同一 Plan identity submit；不得以
 `update_plan` 或 child final 跳过 Artifact/review lifecycle。Subagent 调用统一串行执行，成功 plan child 才能进入 CompletionGuard 前的受控 save/submit continuation。
 

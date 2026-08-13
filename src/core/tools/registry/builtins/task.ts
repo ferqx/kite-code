@@ -9,6 +9,7 @@ export const taskInputSchema = z.object({
     .describe('Type of sub-agent to invoke'),
   task: z
     .string()
+    .trim()
     .min(8)
     .max(8_000)
     .describe(
