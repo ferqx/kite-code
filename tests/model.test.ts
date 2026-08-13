@@ -61,6 +61,65 @@ describe('model transient retry', () => {
     expect(attempts).toBe(2);
   });
 
+  test('starts the retry time budget at the first transient failure', async () => {
+    let attempts = 0;
+    let now = 0;
+    const retryCalls: number[] = [];
+
+    const result = await withTransientModelRetry(
+      async () => {
+        attempts++;
+        if (attempts === 1) {
+          // Reproduce a Provider request that remains in flight longer than
+          // the complete retry budget before its socket closes.
+          now = 60_000;
+          throw new Error('Cannot connect to API: The socket connection was closed unexpectedly.');
+        }
+        return 'recovered';
+      },
+      {
+        maxAttempts: 2,
+        maxTotalRetryMs: 30_000,
+        initialDelayMs: 0,
+        maxDelayMs: 0,
+        jitterMs: 0,
+        now: () => now,
+        sleep: async () => {},
+        onRetry: (attempt) => retryCalls.push(attempt),
+      },
+    );
+
+    expect(result).toBe('recovered');
+    expect(attempts).toBe(2);
+    expect(retryCalls).toEqual([1]);
+  });
+
+  test('still stops retrying after the post-failure time budget is exhausted', async () => {
+    let attempts = 0;
+    let now = 0;
+    const errors = [new Error('socket closed first'), new Error('socket closed second')];
+
+    await expect(
+      withTransientModelRetry(
+        async () => {
+          throw errors[attempts++];
+        },
+        {
+          maxAttempts: 5,
+          maxTotalRetryMs: 30_000,
+          initialDelayMs: 1,
+          jitterMs: 0,
+          now: () => now,
+          sleep: async () => {
+            now = 30_000;
+          },
+        },
+      ),
+    ).rejects.toBe(errors[1]);
+
+    expect(attempts).toBe(2);
+  });
+
   test('retries 5xx server errors', async () => {
     let attempts = 0;
 

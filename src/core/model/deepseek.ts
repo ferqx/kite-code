@@ -27,8 +27,13 @@ export interface TransientModelRetryOptions {
   maxDelayMs?: number;
   /** 随机抖动上限 / Maximum random jitter */
   jitterMs?: number;
-  /** 重试总时间上限 / Maximum total retry duration across all attempts */
+  /**
+   * 首次可重试失败后的重试总时间上限。
+   * Maximum retry duration starting at the first retryable failure.
+   */
   maxTotalRetryMs?: number;
+  /** 可注入时钟，便于测试 / Injectable clock for tests */
+  now?: () => number;
   /** 可注入 sleep，便于测试 / Injectable sleep for tests */
   sleep?: (delayMs: number) => Promise<void>;
   /** 重试时调用的回调 / Callback invoked on each retry */
@@ -41,6 +46,7 @@ const DEFAULT_TRANSIENT_RETRY_OPTIONS: Required<Omit<TransientModelRetryOptions,
   maxDelayMs: 4_000,
   jitterMs: 250,
   maxTotalRetryMs: 30_000,
+  now: () => Date.now(),
   sleep: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
 };
 
@@ -51,21 +57,25 @@ export async function withTransientModelRetry<T>(
 ): Promise<T> {
   const retryOptions = { ...DEFAULT_TRANSIENT_RETRY_OPTIONS, ...options };
   let lastError: unknown;
-  const retryStartedAt = Date.now();
+  let retryStartedAt: number | undefined;
 
   for (let attempt = 1; attempt <= retryOptions.maxAttempts; attempt++) {
     try {
       return await operation();
     } catch (error) {
       lastError = error;
-      const elapsedRetryMs = Date.now() - retryStartedAt;
-      if (
-        attempt >= retryOptions.maxAttempts ||
-        !isTransientModelConnectionError(error) ||
-        elapsedRetryMs >= retryOptions.maxTotalRetryMs
-      ) {
+      if (attempt >= retryOptions.maxAttempts || !isTransientModelConnectionError(error)) {
         throw error;
       }
+
+      // The initial Provider request is not retry work. A slow request that
+      // eventually loses its socket must still receive the first bounded
+      // retry; otherwise its request latency can consume the entire retry
+      // budget before the first retryable failure is even observed.
+      const retryNow = retryOptions.now();
+      retryStartedAt ??= retryNow;
+      const elapsedRetryMs = Math.max(0, retryNow - retryStartedAt);
+      if (elapsedRetryMs >= retryOptions.maxTotalRetryMs) throw error;
 
       const baseDelay = Math.min(
         retryOptions.maxDelayMs,

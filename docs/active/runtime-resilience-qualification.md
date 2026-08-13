@@ -70,7 +70,7 @@ qualification 流程只保留为按需诊断工具，不是发布后 Task 或 mi
 
 真实 MCP stdio server 在 tool invocation 中退出时，调用必须返回 typed `provider_unavailable`，provider 进入 `degraded`，并保留最后一次成功 catalog 供诊断；它不等于签发新 Binding 或自动重放调用。
 
-模型 HTTP `429` 属于可重试的 rate-limit failure，但只允许消费统一的 bounded attempt/time budget；生产分类必须读取 AI SDK `APICallError.statusCode`（并兼容旧 adapter 的 `status`），预算耗尽必须抛出最后一次 429，并由 failure-mode policy 收敛为 `model_retry_exhausted`。本地 HTTP fixture 必须穿透 `createChatModel` 和 provider middleware 证明 429 后恢复；其他 4xx 仍不可重试。
+模型 HTTP `429` 属于可重试的 rate-limit failure，但只允许消费统一的 bounded attempt/time budget；attempt budget 包含首次请求，time budget 从第一次可重试失败开始，首次请求在失败前的 wall time 不得提前耗尽重试窗口。长时间 in-flight 后发生 socket/网络错误时，只要 attempt budget 尚有余量就必须观察到第一次 retry。生产分类必须读取 AI SDK `APICallError.statusCode`（并兼容旧 adapter 的 `status`），预算耗尽必须抛出最后一次 429，并由 failure-mode policy 收敛为 `model_retry_exhausted`。本地 HTTP fixture 必须穿透 `createChatModel` 和 provider middleware 证明 429 后恢复；其他 4xx 仍不可重试。
 
 专门验证下游统一取消信号的 wall-clock deadline fixture 必须给 provider 或 interaction 留出在繁忙
 CI worker 上完成入场的调度余量，再断言 in-flight AbortSignal。若 deadline 在 provider admission 前
