@@ -2323,7 +2323,7 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   });
   for (const [toolCallId, command] of [
     ['read-a', 'pwd'],
-    ['read-b', 'git status --short'],
+    ['read-b', 'ls -la'],
   ] as const) {
     state.tools.queue.push(toolCallId);
     state.tools.calls[toolCallId] = {
@@ -2379,7 +2379,7 @@ test('production executor overlaps tools from a scheduler read batch', async () 
   const terminalEvents = await execution;
 
   expect(overlapped).toBe(true);
-  expect(entered).toEqual(['pwd', 'git status --short']);
+  expect(entered).toEqual(['pwd', 'ls -la']);
   expect(emitted.filter((event) => event.type === 'tool.started')).toHaveLength(2);
   expect(emitted.filter((event) => event.type === 'tool.finished')).toHaveLength(0);
   expect(terminalEvents.filter((event) => event.type === 'tool.finished')).toHaveLength(2);

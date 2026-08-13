@@ -135,6 +135,18 @@ pre-image capture 之前重检；Registry dispatch 再次检查。显式搜索 p
 
 Shell execution adapter 在命令运行期间先以每路 256 KiB 的固定内存 head+tail capture 持续 drain stdout/stderr，防止最终投影前出现无界完整输出副本；capture 超限会写入明确 omission marker。其后 `truncateProjectedOutput` 对单路超过 4000 字符的模型输出继续做 head+tail 截断，中间标注省略行数；`truncateProjectedStreams` 对 stdout/stderr 两路分别套用同一规则（shell_execute、search_content、search_files 经 `spec.projectResult()` 的 `streams` 字段投影）。失败时两路输出都保留，Runner 只消费该模型投影，不再自带第二份模型截断实现。
 
+`read_file` 同时应用源行分页与模型结果硬上限。模型省略 `limit` 时，`readFile()` 默认只选择
+2000 个源行；显式 `limit` 仍可请求更小或更大的行区间，但 `readFileSpec.projectResult()` 产生的
+完整模型可见字符串（包括截断 marker）不得超过 64 KiB 字符。投影优先保留完整行，并返回
+`continue with offset=N`，其中 `N` 必须是最后一个完整可见源行的下一行；模型可用该 offset
+继续读取。若单个源行本身超过 64 KiB，该行只暴露有界前缀，marker 必须明确 `line N clipped`
+以及现有 line offset 无法在行内无损续读，不能虚构 continuation offset。
+
+截断只改变模型投影：`rawContent` 仍保存换行正规化后的完整文件文本，供 actor-scoped
+read-state 计算内容指纹，但不得进入 transcript。`resultMeta.truncated` 区分完整与部分投影，
+`rawResultDigest` 对截断前的本次行号化结果取摘要。带尾随换行的文件不得把终止空字符串计为
+额外源行，保证 `toLine` 与 continuation offset 不超过 `totalLines`。
+
 ### rg exit code 1 ≠ error（`tool-contracts.ts`、`system-prompt.txt`）
 
 `rg`（ripgrep）无匹配时 exit code 1，`shellTool` 判定 `ok: false`。子 agent 看到 failure 后反复重试造成恶性循环。在 shell_execute 合约和 system prompt 中显式说明：rg exit code 1 = 无匹配，非错误，不重试。

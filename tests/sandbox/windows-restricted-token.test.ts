@@ -135,6 +135,26 @@ describe('Windows restricted-token environment', () => {
     expect(env.HTTP_PROXY).toBeUndefined();
   });
 
+  test('removes Workspace-controlled and relative inherited PATH entries for policy reads', () => {
+    const env = buildWindowsRestrictedTokenEnvForTest(
+      {
+        PATH: 'C:\\workspace;C:\\workspace\\bin;.;C:\\safe\\bin',
+        SystemRoot: 'C:\\Windows',
+      } as NodeJS.ProcessEnv,
+      'C:\\runtime',
+      'C:\\vendor\\isksh',
+      'C:\\workspace\\bun.exe',
+      {
+        workspaceRoot: 'C:\\workspace',
+        policyProvenReadOnly: true,
+        canonicalizePath: (path) => path.replaceAll('/', '\\'),
+      },
+    );
+    expect(env.PATH).toBe(
+      'C:\\runtime;C:\\runtime\\kite-coreutils;C:\\vendor\\isksh;C:\\safe\\bin',
+    );
+  });
+
   test('accepts only canonical Bun executable names for the PATH entry', () => {
     expect(
       resolveBunExecutableForWindowsRestrictedTokenV1({

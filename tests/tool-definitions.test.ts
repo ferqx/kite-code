@@ -549,17 +549,18 @@ describe('code agent tool definitions', () => {
     }
   });
 
-  // 验证常见只读 shell 命令（ls, cat, rg, git status 等）被正确分类为只读 / Common read-only shell commands (ls, cat, rg, git status, etc.) are correctly classified as read-only
+  // 验证常见只读 shell 命令被正确分类为只读 / Common read-only shell commands are correctly classified as read-only
   test('classifies conservative shell_execute inspect commands as read-only', () => {
     expect(isReadOnlyShellCommand('pwd')).toBe(true);
     expect(isReadOnlyShellCommand('ls src')).toBe(true);
     expect(isReadOnlyShellCommand('rg -n "Plan" src tests')).toBe(true);
     expect(isReadOnlyShellCommand('cat package.json | head -n 20')).toBe(true);
-    expect(isReadOnlyShellCommand('git status --short')).toBe(true);
-    expect(isReadOnlyShellCommand('git diff -- src/app/runner.ts')).toBe(true);
     expect(isReadOnlyShellCommand('node --version')).toBe(true);
     expect(isReadOnlyShellCommand('npm.cmd -v')).toBe(true);
     expect(isReadOnlyShellCommand('bun.exe --version')).toBe(true);
+    expect(isReadOnlyShellCommand('grep -f patterns.txt input.txt')).toBe(true);
+    expect(isReadOnlyShellCommand('file --magic-file=magic input.txt')).toBe(true);
+    expect(isReadOnlyShellCommand('sort --random-source seed input.txt')).toBe(true);
     // /dev/null 重定向用于抑制输出，应视为只读安全 / /dev/null redirects for output suppression are read-only safe
     expect(isReadOnlyShellCommand('ls -la src tests 2>/dev/null')).toBe(true);
     expect(isReadOnlyShellCommand("find . -name '*.ts' >/dev/null 2>&1")).toBe(true);
@@ -583,6 +584,37 @@ describe('code agent tool definitions', () => {
     expect(isReadOnlyShellCommand('mkdir -p tmp')).toBe(false);
     expect(isReadOnlyShellCommand('find . -exec rm {} ;')).toBe(false);
     expect(isReadOnlyShellCommand('awk \'BEGIN { system("rm hello.txt") }\'')).toBe(false);
+    expect(isReadOnlyShellCommand('git branch new-branch')).toBe(false);
+    expect(isReadOnlyShellCommand('git branch -d old-branch')).toBe(false);
+    expect(isReadOnlyShellCommand('git status --short')).toBe(false);
+    expect(isReadOnlyShellCommand('git diff -- src/app/runner.ts')).toBe(false);
+    expect(isReadOnlyShellCommand('git log -1')).toBe(false);
+    expect(isReadOnlyShellCommand('git show HEAD')).toBe(false);
+    expect(isReadOnlyShellCommand('git ls-files')).toBe(false);
+    expect(isReadOnlyShellCommand('git diff --output=leak.diff')).toBe(false);
+    expect(isReadOnlyShellCommand("rg --pre 'touch pwned' needle src")).toBe(false);
+    expect(isReadOnlyShellCommand("sed -e 'w leaked.txt' input.txt")).toBe(false);
+    expect(isReadOnlyShellCommand('find . -fprint leaked.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('sort -o sorted.txt input.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('uniq input.txt output.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('echo victim.txt | xargs sed -i s/x/y/')).toBe(false);
+    expect(isReadOnlyShellCommand('echo ok\ntouch pwned')).toBe(false);
+    expect(isReadOnlyShellCommand('cat <(touch pwned)')).toBe(false);
+    expect(isReadOnlyShellCommand('cat >(touch pwned)')).toBe(false);
+    expect(isReadOnlyShellCommand('sort $FLAGS input.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('echo hidden >/dev/nullfoo')).toBe(false);
+    expect(isReadOnlyShellCommand('file -C -m magic')).toBe(false);
+    expect(isReadOnlyShellCommand('file --compile --magic-file magic')).toBe(false);
+    expect(isReadOnlyShellCommand('file -z archive.gz')).toBe(false);
+    expect(isReadOnlyShellCommand('file --uncompress archive.gz')).toBe(false);
+    expect(isReadOnlyShellCommand('file -p input.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('file --preserve-date input.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('file -f paths.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('file -fpaths.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('file --files-from paths.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('file --files-from=paths.txt')).toBe(false);
+    expect(isReadOnlyShellCommand('sort {--output=sorted.txt,input.txt}')).toBe(false);
+    expect(isReadOnlyShellCommand("rg 'value{1,3}' src")).toBe(true);
     // 裸 & 命令分隔符注入
     expect(isReadOnlyShellCommand('echo hello & rm -rf src')).toBe(false);
     // && 和 2>&1 仍然允许

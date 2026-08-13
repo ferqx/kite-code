@@ -470,10 +470,11 @@ describe('SubAgentRunner integration', () => {
     expect(typeof doneEvent.data.durationMs).toBe('number');
   });
 
-  test('read-only role rejects mutating shell when no executor is injected', async () => {
+  test('read-only role rejects a command with a positional output operand', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-readonly-shell-fallback-'));
     try {
       const target = join(ws, 'should-not-exist.txt');
+      writeFileSync(join(ws, 'input.txt'), 'duplicate\nduplicate\n', 'utf8');
       const { events, sink } = mockEventSink();
       const model = new StreamingMockModel({
         responses: [
@@ -485,7 +486,7 @@ describe('SubAgentRunner integration', () => {
                   id: 'tc-readonly-write',
                   name: 'shell_execute',
                   args: {
-                    command: 'printf blocked > should-not-exist.txt',
+                    command: 'uniq input.txt should-not-exist.txt',
                     description: 'Attempt a write from a read-only role',
                   },
                 },

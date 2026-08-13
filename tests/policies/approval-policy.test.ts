@@ -31,11 +31,8 @@ function baseParams(overrides?: Partial<EvaluateToolApprovalParams>): EvaluateTo
 // ── classifyShellRisk / 命令风险分类 ──
 
 describe('classifyShellRisk', () => {
-  // Note: classifyShellRisk does NOT check for read-only — that's done
-  // inside evaluateToolApproval via isReadOnlyShellCommand.
-  // classifyShellRisk 只做风险分类，不判断只读（由 evaluateToolApproval 内部处理）。
-  it('classifies unknown shell commands as execute_code', () => {
-    expect(classifyShellRisk('ls -la')).toBe('execute_code');
+  it('classifies policy-proven shell inspection as read', () => {
+    expect(classifyShellRisk('ls -la')).toBe('read');
   });
 
   it('classifies destructive commands as destructive', () => {
@@ -426,6 +423,48 @@ describe('evaluateToolApproval', () => {
       expect(result.effects).toEqual({ externalRead: true });
     });
 
+    it('detects an external read through an attached input redirection', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'cat </tmp/kite-approved-read.txt' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
+    it('keeps an in-workspace ripgrep pattern file on the read-only fast path', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'rg -f patterns.txt src' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.risk).toBe('read');
+    });
+
+    it.each([
+      'rg -f /tmp/kite-patterns src',
+      'rg --file=/tmp/kite-patterns src',
+    ])('requires approval for an external ripgrep pattern file: %s', (command) => {
+      const result = evaluateToolApproval(baseParams({ toolArgs: { command } }));
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
+    it.each([
+      'grep -f /tmp/kite-patterns src',
+      'grep --file=/tmp/kite-patterns src',
+      'file -m /tmp/kite-magic input.txt',
+      'file --magic-file=/tmp/kite-magic input.txt',
+      'sort --random-source /tmp/kite-seed input.txt',
+      'sort --random-source=/tmp/kite-seed input.txt',
+    ])('requires approval for a read-only command with an external option file: %s', (command) => {
+      const result = evaluateToolApproval(baseParams({ toolArgs: { command } }));
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
     it('denies protected path reads before opening an approval', () => {
       const result = evaluateToolApproval(
         baseParams({ toolArgs: { command: 'cat ~/.ssh/id_ed25519' } }),
@@ -804,6 +843,34 @@ describe('evaluateToolApproval', () => {
       const result = evaluateToolApproval(
         baseParams({
           toolArgs: { command: 'npm test' },
+          phase: 'planning',
+          authorization: { mode: 'full_access', commandGrants: {} },
+        }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.phaseConstraint).toBe('planning');
+    });
+
+    it.each([
+      'git branch new-branch',
+      'git branch -d old-branch',
+      'git diff --output=leak.diff',
+      "rg --pre 'touch pwned' needle src",
+      "sed -e 'w leaked.txt' input.txt",
+      'find . -fprint leaked.txt',
+      'sort -o sorted.txt input.txt',
+      'uniq input.txt output.txt',
+      'echo victim.txt | xargs sed -i s/x/y/',
+      'file -C -m magic',
+      'file -z archive.gz',
+      'file -p input.txt',
+      'file --preserve-date input.txt',
+      'sort {--output=sorted.txt,input.txt}',
+    ])('does not admit an effectful command as planning inspection: %s', (command) => {
+      const result = evaluateToolApproval(
+        baseParams({
+          toolArgs: { command },
           phase: 'planning',
           authorization: { mode: 'full_access', commandGrants: {} },
         }),

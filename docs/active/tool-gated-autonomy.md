@@ -34,6 +34,33 @@ deny。网络客户端自身的 output/input 参数必须独立贡献 external f
 Workspace 外文件不是硬拒绝对象。sealed production admission 仍独立治理，development capability 不形成
 qualification evidence。
 
+Shell 的 read-only fast path 是 Planning、免审批执行、只读 Subagent 和并行 read batch 的共同授权边界，
+不是展示性 hint。分类必须按每个程序的参数与操作数语义 fail closed：只有有限、已验证的只读 grammar
+可以得到 `read_only + sideEffect=false`。能够写文件、修改 Git、启动外部程序或把运行时输入追加为 argv 的
+模式不得进入该 grammar；例如 Git branch mutation/diff output、ripgrep preprocessor、sed write、find
+file-output action、sort output、uniq output operand、`file` compile/uncompress 与 xargs 均属于非只读。CR/LF 多命令、process
+substitution、command substitution、backtick 和可能把安全参数展开成危险 option 的变量 expansion 同样不得
+走只读 fast path；未加引号的 brace expansion 也必须拒绝，避免它在静态检查后合成危险 option。`file`
+的 `-p/--preserve-date` 会恢复被检查文件的 atime，属于元数据写，同样不得归为只读。Scheduler 只并行已经通过这条分类和 Approval Policy 二次确认的调用；误分类不能依赖
+Workspace sandbox 兜底，因为 development 的 `workspace_only` capability 仍可能允许 Workspace 写入。
+`rg -f/--file` 保持只读，但其 pattern 文件与搜索路径都是读取目标；任一目标位于 Workspace 外时必须进入
+external-read 审批，不得因 option value 没有被当作普通操作数而漏报。`grep` pattern 文件、`file`
+magic 文件与 `sort --random-source` 同样属于显式读取目标。`file -f/--files-from` 会从文件内容动态取得
+更多路径，静态命令无法证明其完整读取范围，因此直接退出只读 fast path。
+这条只读证明同时依赖 executor 的 sanitized environment。Registry 只为重新通过同一
+classifier 的命令签发 Runtime-owned `policy_proven_read_only` 执行信任；模型参数、审批
+payload 与其他 Shell 调用不能伪造。POSIX 路径使用固定非登录 `/bin/sh`，并在进程
+启动前投影最小环境；Windows restricted-token 保留密封 runtime/Coreutils 前缀。两者都将
+继承 PATH 的每个绝对目录先 canonicalize，再删除相对/空条目、Workspace 目录、其子目录
+和指向这些 identity 的 symlink alias。因此 Workspace 中的同名 `ls`/`rg` 不能在静态分类后
+替换真实 executable；没有可用的可信 PATH 时命令查找按失败收敛，不回退 Workspace。
+该最小环境也不继承 `BASH_ENV`/`ENV`、凭据或其他未白名单变量；
+`RIPGREP_CONFIG_PATH` 必须在沙箱 wrapper 中额外 unset，防止普通 `rg` 通过配置文件注入
+`--pre` 子进程。显式 `rg --pre` 仍由参数 grammar 直接拒绝。需审批/副作用 Shell 不使用该信任投影，保持原有工具链 PATH 语义。
+Generic Shell Git 整体不属于 policy-proven read-only：即使 argv 看似只读，repository/config 仍可能通过
+diff/textconv、fsmonitor、external diff 或 filter helper 启动子进程。Git inspection 必须使用 Runtime
+披露的 typed `git_inspect` broker；未披露时不能退回 Shell 的免审批/Planning fast path。
+
 每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`；current reducer
 及其消费者不再从 legacy result 字段推导 outcome，并且只投影一个成对 ToolMessage。历史 replay
 先通过独立 decoder 保守补齐缺失 outcome。Registry/ToolSpec 只能提供 metadata-only
@@ -190,7 +217,7 @@ Controller 的 legacy governance gate，持久化稳定 `legacy_plan_replan_requ
 recovery model 请求。不得等 Provider 成功响应后才补 rejection；即使 Provider dispatch 随后失败，旧 call 也已
 终结且不会在 V2 save 后复活。unknown external invocation 仍是更高优先级 hard barrier。
 
-静态工具的 Schema、契约、副作用分类与执行器收敛到 ToolSpec Registry（`src/core/tools/registry/`）。六个计算原语 `read_file`、`search_content`、`search_files`、`write_file`、`edit_file`、`shell_execute` 已完成切换，迁移 flag 与旧执行器不再保留。一致性不变量由 `tests/tools/tool-registry-conformance.test.ts` 棘轮守护：Policy 分类引用的工具名必须是已知名单；模型 ToolSet 不得携带 `execute`；写工具必须声明 mutation scope。write_file 同批落地 ADR-0042 §2；edit_file 同批落地 ADR-0043 §3 与 ADR-0042 §1。shell_execute 的模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Registry术语（工具注册表）必须向执行器传递 600000ms 默认硬超时，显式正整数可以覆盖；副作用、只读免审和审计 `action.intent` 全部由命令形态派生，审批 payload 不接受模型建议授权或 prefix rule。i10 以 `ls`、`pwd`、`git status`、`git diff --stat`、`rg` 语料守护真实 Approval Policy 的免审命中率。
+静态工具的 Schema、契约、副作用分类与执行器收敛到 ToolSpec Registry（`src/core/tools/registry/`）。六个计算原语 `read_file`、`search_content`、`search_files`、`write_file`、`edit_file`、`shell_execute` 已完成切换，迁移 flag 与旧执行器不再保留。一致性不变量由 `tests/tools/tool-registry-conformance.test.ts` 棘轮守护：Policy 分类引用的工具名必须是已知名单；模型 ToolSet 不得携带 `execute`；写工具必须声明 mutation scope。write_file 同批落地 ADR-0042 §2；edit_file 同批落地 ADR-0043 §3 与 ADR-0042 §1。shell_execute 的模型参数仅保留 `command`、可选 `description`、可选 `timeout_ms`；未提供 `timeout_ms` 时 Registry术语（工具注册表）必须向执行器传递 600000ms 默认硬超时，显式正整数可以覆盖；副作用、只读免审和审计 `action.intent` 全部由命令形态派生，审批 payload 不接受模型建议授权或 prefix rule。i10 以 `ls`、`pwd`、`rg` 等 policy-proven 语料守护真实 Approval Policy 的免审命中率；generic Shell Git 不属于该语料，只读 Git 检查必须走 `git_inspect`。
 
 生产静态模型工具面必须直接由 `builtinToolRegistry.toSchemaOnlyToolSet()` 投影；`definitions.ts` 只负责构造不可变的可用性快照并合并 Runtime-issued MCP bindings。默认开发入口继续暴露完整投影；production surface 必须逐项按 `network/process/write/shell/skillChild/localStdioMcp` 独立收窄，并同时检查 Capability Descriptor 的 declared/effective effects。Runner 在 dispatch 前重复同一检查，防止仅在模型 disclosure 层收窄；`process=true` 不能提升 `write=false` 或 `network=false`。原生 sandbox Shell 由显式 `process + shell` surface 接管其保守的 `unknown` descriptor；进程内 writer/network 工具仍按各自 effect 被拒绝。`verified_in_process_read_only` 进一步要求密封 qualification catalog 中的 capability ID、descriptor revision 与只读副作用契约完全匹配，并省略动态 MCP；这不是第二份 Registry。该快照包含 feature flags、task adapter、Tool Search、Skill catalog 与 active frame 可见性，并同时用于执行前的静态调用解析。工具表当前不做模块级缓存，避免长进程无界增长与运行中配置变化复用陈旧表面。Builtin Capability Descriptor 包含规范化输入 Schema，因此 Schema 变化必须改变 revision。静态工具进入审批与模型队列时，副作用分类优先且必须来自 `spec.effects()`；手写名称分类器仅用于动态或历史状态的保守回退。
 

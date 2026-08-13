@@ -6,7 +6,15 @@
  * These tests verify actual sandbox-exec isolation. Skipped on non-macOS platforms.
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createSandboxExecutor } from '../src/core/sandbox/executor';
@@ -53,6 +61,61 @@ describe('sandbox executor integration', () => {
       expect(result.ok).toBe(true);
       expect(result.stdout).toContain('hello sandbox');
     } finally {
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('strips ripgrep config that could inject a preprocessor', async () => {
+    const ws = setupWorkspace();
+    const previousConfig = process.env.RIPGREP_CONFIG_PATH;
+    const previousPath = process.env.PATH;
+    try {
+      writeFileSync(join(ws, 'needle.txt'), 'needle\n');
+      writeFileSync(join(ws, 'rg.config'), '--pre\ntouch injected-by-rg\n');
+      const fakeRipgrep = join(ws, 'rg');
+      writeFileSync(
+        fakeRipgrep,
+        `#!/bin/sh
+if [ -n "\${RIPGREP_CONFIG_PATH:-}" ]; then touch injected-by-rg; fi
+/usr/bin/grep "$1" "$2"
+`,
+      );
+      chmodSync(fakeRipgrep, 0o755);
+      process.env.RIPGREP_CONFIG_PATH = join(ws, 'rg.config');
+      process.env.PATH = `${ws}:${previousPath ?? ''}`;
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({ workspace: ws, command: 'rg needle needle.txt' });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).toContain('needle');
+      expect(existsSync(join(ws, 'injected-by-rg'))).toBe(false);
+    } finally {
+      if (previousConfig === undefined) delete process.env.RIPGREP_CONFIG_PATH;
+      else process.env.RIPGREP_CONFIG_PATH = previousConfig;
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      cleanupWorkspace(ws);
+    }
+  });
+
+  test('policy-proven reads exclude Workspace executables from PATH', async () => {
+    const ws = setupWorkspace();
+    const previousPath = process.env.PATH;
+    try {
+      const fakeLs = join(ws, 'ls');
+      writeFileSync(fakeLs, '#!/bin/sh\ntouch workspace-path-executed\n');
+      chmodSync(fakeLs, 0o755);
+      process.env.PATH = `${ws}:${previousPath ?? ''}`;
+      const executor = createSandboxExecutor({ enabled: true, workspace: ws });
+      const result = await executor({
+        workspace: ws,
+        command: 'ls',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(result.ok).toBe(true);
+      expect(existsSync(join(ws, 'workspace-path-executed'))).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
       cleanupWorkspace(ws);
     }
   });

@@ -1857,7 +1857,7 @@ describe('executeRuntimeTools', () => {
         modelMessageId: 'parallel-shell-model',
         ordinal,
         name: 'shell_execute',
-        args: { command: ordinal === 0 ? 'pwd' : 'git status' },
+        args: { command: ordinal === 0 ? 'pwd' : 'ls -la' },
         status: 'queued',
         createdAtTurnId: state.turn.turnId,
       };

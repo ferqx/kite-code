@@ -125,10 +125,11 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'Inspect known file content or verify a change. Use search_files when the path is unknown and search_content when the content location is unknown.',
     returns: {
       format: 'text',
-      description: 'Line-numbered file content, bounded by offset and limit.',
+      description:
+        'Line-numbered file content with explicit truncation and continuation markers; the complete model-visible result is capped at 64 KiB.',
     },
     constraints:
-      'Use a workspace-relative path when possible; offset and limit must be positive and binary files are not returned as text.',
+      'Use a workspace-relative path when possible; offset and limit must be positive, omitted limit defaults to 2000 lines, and binary files are not returned as text.',
     recovery:
       'For ENOENT, locate the file with search_files and retry once with the exact path. For an invalid range, correct offset or limit. Permission or binary failures require user action or an alternative capability, not blind replay.',
   },

@@ -4,6 +4,11 @@ import { findBashBinary, findSystemBash } from './bash-path';
 import { normalizeMsys2PathsInText } from './path-utils';
 import { guardProcessTree, processTreeSpawnOptions } from './process-tree';
 import { BoundedOutputBuffer, BoundedProgressLineBuffer } from './stream-output';
+import {
+  buildPolicyProvenReadOnlyEnv,
+  isCanonicalPathOutsideWorkspace,
+  POLICY_PROVEN_READ_ONLY_EXECUTION,
+} from './trusted-readonly-environment';
 
 /** Shell 执行器函数签名 / Shell executor function signature */
 export type ShellExecutor = (input: ShellInput) => Promise<ShellResult>;
@@ -32,6 +37,62 @@ export interface HostShellResolutionDepsV1 {
   systemBash?: string | null;
   vendoredBash?: string | null;
   which: (name: string) => string | null;
+}
+
+/**
+ * Policy-proven reads bypass user/login profiles and never select a shell from
+ * a Workspace-controlled path. Windows keeps fixed or independently located
+ * hosts, while POSIX uses the platform /bin/sh directly.
+ */
+export function buildPolicyProvenReadOnlyHostShellInvocationsV1(
+  command: string,
+  workspace: string,
+  deps: Pick<HostShellResolutionDepsV1, 'platform' | 'systemRoot'> & {
+    systemBash?: string | null;
+    vendoredBash?: string | null;
+    canonicalPathOutsideWorkspace?: (path: string) => boolean;
+  } = {
+    platform: process.platform,
+    systemRoot: process.env.SystemRoot || 'C:\\Windows',
+    systemBash: process.platform === 'win32' ? findSystemBash() : null,
+    vendoredBash: process.platform === 'win32' ? findBashBinary() : null,
+  },
+): HostShellInvocationV1[] {
+  if (deps.platform !== 'win32') {
+    return [{ kind: 'posix', argv: ['/bin/sh', '-c', command] }];
+  }
+
+  const outsideWorkspace =
+    deps.canonicalPathOutsideWorkspace ??
+    ((path: string) => isCanonicalPathOutsideWorkspace(workspace, path));
+  const candidates: HostShellInvocationV1[] = [];
+  const seen = new Set<string>();
+  for (const bash of [deps.systemBash, deps.vendoredBash]) {
+    if (!bash || !outsideWorkspace(bash)) continue;
+    const identity = bash.toLowerCase();
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    candidates.push({
+      kind: 'bash',
+      argv: [bash, '-c', `export PATH="/usr/bin:$PATH" && ${command}`],
+    });
+  }
+  candidates.push({
+    kind: 'cmd',
+    argv: [`${deps.systemRoot}\\System32\\cmd.exe`, '/d', '/c', command],
+  });
+  candidates.push({
+    kind: 'powershell',
+    argv: [
+      `${deps.systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`,
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      command,
+    ],
+  });
+  return candidates;
 }
 
 /**
@@ -201,12 +262,20 @@ export async function shellTool(input: ShellInput): Promise<ShellResult> {
   try {
     let proc: ReturnType<typeof Bun.spawn> | undefined;
     let lastSpawnError: unknown;
-    for (const candidate of buildHostShellInvocationsV1(input.command)) {
+    const policyProvenReadOnly = input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION;
+    const candidates = policyProvenReadOnly
+      ? buildPolicyProvenReadOnlyHostShellInvocationsV1(input.command, input.workspace)
+      : buildHostShellInvocationsV1(input.command);
+    const trustedEnv = policyProvenReadOnly
+      ? buildPolicyProvenReadOnlyEnv(input.workspace)
+      : undefined;
+    for (const candidate of candidates) {
       try {
         proc = Bun.spawn(candidate.argv, {
           cwd: input.workspace,
           stdout: 'pipe',
           stderr: 'pipe',
+          env: trustedEnv,
           ...processTreeSpawnOptions(),
         });
         break;

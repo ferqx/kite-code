@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -11,7 +12,13 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeLineDiff, formatDiffOutput, formatMultiHunkDiff } from '../src/core/tools/diff';
-import { editFile, readFile, readTextContent, writeFile } from '../src/core/tools/file';
+import {
+  DEFAULT_READ_FILE_LINE_LIMIT,
+  editFile,
+  readFile,
+  readTextContent,
+  writeFile,
+} from '../src/core/tools/file';
 import {
   isPathInsideWorkspace,
   msys2ToWindowsPath,
@@ -20,6 +27,7 @@ import {
 import { searchContent, searchFiles } from '../src/core/tools/search';
 import {
   assertInsideWorkspace,
+  buildPolicyProvenReadOnlyHostShellInvocationsV1,
   DEFAULT_SHELL_TIMEOUT_MS,
   resolveShellTimeoutMs,
   shellTool,
@@ -46,6 +54,40 @@ function msys2Win(p: string): string {
 }
 
 describe('tool safety', () => {
+  test('policy-proven reads use a non-login fixed POSIX shell', () => {
+    expect(
+      buildPolicyProvenReadOnlyHostShellInvocationsV1('ls', '/workspace', {
+        platform: 'darwin',
+        systemRoot: '',
+      }),
+    ).toEqual([{ kind: 'posix', argv: ['/bin/sh', '-c', 'ls'] }]);
+  });
+
+  test('policy-proven reads cannot execute a Workspace PATH replacement', async () => {
+    if (process.platform === 'win32') return;
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-readonly-shell-path-'));
+    const marker = join(workspace, 'workspace-ls-ran');
+    const previousPath = process.env.PATH;
+    try {
+      const fakeLs = join(workspace, 'ls');
+      writeFileSync(fakeLs, `#!/bin/sh\ntouch '${marker}'\nprintf 'workspace replacement\\n'\n`);
+      chmodSync(fakeLs, 0o755);
+      process.env.PATH = `${workspace}:${previousPath ?? ''}`;
+      const result = await shellTool({
+        workspace,
+        command: 'ls',
+        executionTrust: 'policy_proven_read_only',
+      });
+      expect(result.ok).toBe(true);
+      expect(result.stdout).not.toContain('workspace replacement');
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('shell timeout resolution always returns a finite hard limit', () => {
     expect(resolveShellTimeoutMs()).toBe(DEFAULT_SHELL_TIMEOUT_MS);
     expect(resolveShellTimeoutMs(0)).toBe(DEFAULT_SHELL_TIMEOUT_MS);
@@ -237,6 +279,38 @@ describe('tool safety', () => {
     expect(result.ok).toBe(true);
     expect(result.content).toContain('2|line2');
     expect(result.totalLines).toBe(3);
+  });
+
+  test('read_file defaults to a 2000-line page and continues from an explicit offset', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-code-read-default-page-'));
+    try {
+      const lines = Array.from({ length: DEFAULT_READ_FILE_LINE_LIMIT + 2 }, (_, index) => {
+        return `line-${index + 1}`;
+      });
+      writeFileSync(join(workspace, 'large.txt'), `${lines.join('\n')}\n`, 'utf8');
+
+      const first = readFile({ workspace, path: 'large.txt' });
+      expect(first.ok).toBe(true);
+      expect(first.fromLine).toBe(1);
+      expect(first.toLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT);
+      expect(first.content).toContain(
+        `${DEFAULT_READ_FILE_LINE_LIMIT}|line-${DEFAULT_READ_FILE_LINE_LIMIT}`,
+      );
+      expect(first.content).not.toContain(`|line-${DEFAULT_READ_FILE_LINE_LIMIT + 1}`);
+
+      const next = readFile({
+        workspace,
+        path: 'large.txt',
+        offset: DEFAULT_READ_FILE_LINE_LIMIT + 1,
+      });
+      expect(next.fromLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT + 1);
+      expect(next.toLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT + 2);
+      expect(next.content).toContain(
+        `${DEFAULT_READ_FILE_LINE_LIMIT + 1}|line-${DEFAULT_READ_FILE_LINE_LIMIT + 1}`,
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
   });
 
   test('returns structured shell command results', async () => {

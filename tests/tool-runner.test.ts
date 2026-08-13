@@ -10,6 +10,7 @@ import { type PendingToolRequest, toolRequestFromCall } from '../src/core/harnes
 import { runApprovedTool } from '../src/core/harness/tool-runner';
 import type { McpRuntimeProvider } from '../src/core/mcp';
 import type { FilePreimageRecorder } from '../src/core/runtime/file-checkpoints';
+import { MAX_MODEL_READ_FILE_CHARS } from '../src/core/tools/registry/builtins/read-file';
 import { DEFAULT_SHELL_TIMEOUT_MS } from '../src/core/tools/shell';
 
 // ── Helpers ──
@@ -907,5 +908,31 @@ describe('runApprovedTool — actor-scoped read-before-edit', () => {
       new_string: 'export const owner = "main";',
     });
     expect(continuedParent.ok).toBe(true);
+  });
+
+  it('keeps the Runner result bounded while recording freshness from the complete file', async () => {
+    const lines = [
+      'export const first = 1;',
+      ...Array.from({ length: 2_500 }, (_, index) => `export const value${index} = ${index};`),
+    ];
+    writeFileSync(join(workspace, 'large.ts'), `${lines.join('\n')}\n`, 'utf8');
+
+    const read = await runFileTool('read_file', { path: 'large.ts', limit: 2_501 });
+    expect(read.ok).toBe(true);
+    expect(read.stdout.length).toBeLessThanOrEqual(MAX_MODEL_READ_FILE_CHARS);
+    expect(read.stdout).toContain('continue with offset=');
+    expect(read.resultMeta).toMatchObject({
+      path: 'large.ts',
+      totalLines: 2_501,
+      truncated: true,
+      rawResultDigest: expect.any(String),
+    });
+
+    const edit = await runFileTool('edit_file', {
+      path: 'large.ts',
+      old_string: 'export const first = 1;',
+      new_string: 'export const first = 2;',
+    });
+    expect(edit.ok).toBe(true);
   });
 });

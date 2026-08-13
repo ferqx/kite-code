@@ -29,6 +29,10 @@ import {
 } from '../src/core/sandbox/shell-wrapper';
 import { DEFAULT_RESOURCE_LIMITS } from '../src/core/sandbox/types';
 import { shellTool } from '../src/core/tools/shell';
+import {
+  buildPolicyProvenReadOnlyEnv,
+  buildWorkspaceExcludedPath,
+} from '../src/core/tools/trusted-readonly-environment';
 
 function seatbeltString(path: string): string {
   return path.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
@@ -380,6 +384,7 @@ describe('shell wrapper utilities', () => {
     expect(snippet).toContain('unset DYLD_INSERT_LIBRARIES');
     expect(snippet).toContain('unset DYLD_LIBRARY_PATH');
     expect(snippet).toContain('unset NODE_OPTIONS');
+    expect(snippet).toContain('unset RIPGREP_CONFIG_PATH');
   });
 
   test('env export snippet quotes values', () => {
@@ -391,6 +396,56 @@ describe('shell wrapper utilities', () => {
   test('env export snippet escapes single quotes in values', () => {
     const snippet = buildEnvExportSnippet({ MSG: "it's working" });
     expect(snippet).toContain("export MSG='it'\\''s working'");
+  });
+});
+
+describe('policy-proven read-only executable environment', () => {
+  test('canonicalizes PATH and removes relative and Workspace-controlled entries', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-readonly-path-'));
+    const workspace = join(root, 'workspace');
+    const safeBin = join(root, 'safe-bin');
+    const workspaceAlias = join(root, 'workspace-alias');
+    mkdirSync(join(workspace, 'bin'), { recursive: true });
+    mkdirSync(safeBin);
+    symlinkSync(workspace, workspaceAlias, directoryLinkType());
+    try {
+      const resolved = buildWorkspaceExcludedPath(workspace, {
+        pathValue: [workspace, join(workspace, 'bin'), workspaceAlias, '.', safeBin].join(':'),
+      });
+      expect(resolved.split(':')).toEqual([realpathSync.native(safeBin)]);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('uses a minimal environment and drops shell startup injection variables', () => {
+    const root = mkdtempSync(join(tmpdir(), 'kite-readonly-env-'));
+    const workspace = join(root, 'workspace');
+    const safeBin = join(root, 'safe-bin');
+    mkdirSync(workspace);
+    mkdirSync(safeBin);
+    try {
+      const env = buildPolicyProvenReadOnlyEnv(workspace, {
+        env: {
+          PATH: `${workspace}:${safeBin}`,
+          HOME: '/safe-home',
+          BASH_ENV: join(workspace, 'inject.sh'),
+          ENV: join(workspace, 'inject.sh'),
+          RIPGREP_CONFIG_PATH: join(workspace, 'rg.config'),
+          OPENAI_API_KEY: 'secret',
+        },
+      });
+      expect(env.PATH).toBe(realpathSync.native(safeBin));
+      expect(env.HOME).toBe('/safe-home');
+      expect(env.BASH_ENV).toBeUndefined();
+      expect(env.ENV).toBeUndefined();
+      expect(env.SHELL).toBeUndefined();
+      expect(env.SSH_AUTH_SOCK).toBeUndefined();
+      expect(env.RIPGREP_CONFIG_PATH).toBeUndefined();
+      expect(env.OPENAI_API_KEY).toBeUndefined();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

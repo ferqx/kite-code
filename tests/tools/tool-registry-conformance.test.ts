@@ -20,6 +20,7 @@ import { createRuntimeStore } from '@/core/runtime/store';
 import { normalizeCurrentToolOutcomeEventV1 } from '@/core/runtime/tool-outcome-events';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import { createAgentTools, toolAvailabilityContext } from '@/core/tools/definitions';
+import { DEFAULT_READ_FILE_LINE_LIMIT } from '@/core/tools/file';
 import { sessionReadTracker } from '@/core/tools/read-state';
 import {
   builtinToolRegistry,
@@ -28,7 +29,11 @@ import {
 } from '@/core/tools/registry/builtins';
 import { type askUserInputSchema, askUserSpec } from '@/core/tools/registry/builtins/ask-user';
 import { type editFileInputSchema, editFileSpec } from '@/core/tools/registry/builtins/edit-file';
-import { type readFileInputSchema, readFileSpec } from '@/core/tools/registry/builtins/read-file';
+import {
+  MAX_MODEL_READ_FILE_CHARS,
+  type readFileInputSchema,
+  readFileSpec,
+} from '@/core/tools/registry/builtins/read-file';
 import {
   type searchContentInputSchema,
   searchContentSpec,
@@ -457,6 +462,110 @@ describe('read_file output passthrough', () => {
         expect(outcome.output.rawContent).toBe('hello\n');
         expect(outcome.output.content).toContain('1|hello');
       }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('bounds the complete model result and reports an accurate line continuation', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-conformance-read-budget-'));
+    try {
+      const lines = Array.from({ length: 2_500 }, (_, index) => {
+        return `${index + 1}:${'x'.repeat(80)}`;
+      });
+      writeFileSync(join(workspace, 'large.txt'), `${lines.join('\n')}\n`);
+      const outcome = await dispatchRegisteredTool(
+        readFileSpec,
+        { path: 'large.txt', limit: 2_500 },
+        { workspace },
+      );
+      expect(outcome.dispatched).toBe(true);
+      if (!outcome.dispatched) return;
+
+      expect(outcome.projected.modelContent.length).toBeLessThanOrEqual(MAX_MODEL_READ_FILE_CHARS);
+      const expectedRawDigest = createHash('sha256')
+        .update(JSON.stringify({ stdout: outcome.output.content, stderr: '', exitCode: 0 }))
+        .digest('hex');
+      expect(outcome.projected.resultMeta).toMatchObject({
+        path: 'large.txt',
+        totalLines: 2_500,
+        truncated: true,
+        rawResultDigest: expectedRawDigest,
+      });
+      const match = outcome.projected.modelContent.match(/continue with offset=(\d+)/u);
+      expect(match).not.toBeNull();
+      const nextOffset = Number(match?.[1]);
+      const lastVisibleLine = outcome.projected.modelContent
+        .split('\n')
+        .at(-2)
+        ?.match(/^\s*(\d+)\|/u);
+      expect(nextOffset).toBe(Number(lastVisibleLine?.[1]) + 1);
+
+      const continuation = await dispatchRegisteredTool(
+        readFileSpec,
+        { path: 'large.txt', offset: nextOffset, limit: 1 },
+        { workspace },
+      );
+      expect(continuation.dispatched).toBe(true);
+      if (continuation.dispatched) {
+        expect(continuation.projected.modelContent).toContain(
+          `${nextOffset}|${nextOffset}:${'x'.repeat(80)}`,
+        );
+      }
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('clips one oversized source line without claiming line-offset continuation', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-conformance-read-long-line-'));
+    try {
+      const raw = 'x'.repeat(MAX_MODEL_READ_FILE_CHARS * 2);
+      writeFileSync(join(workspace, 'minified.js'), raw);
+      const outcome = await dispatchRegisteredTool(
+        readFileSpec,
+        { path: 'minified.js' },
+        { workspace },
+      );
+      expect(outcome.dispatched).toBe(true);
+      if (!outcome.dispatched) return;
+
+      expect(outcome.output.rawContent).toBe(raw);
+      expect(outcome.output.toLine).toBe(1);
+      expect(outcome.projected.modelContent.length).toBeLessThanOrEqual(MAX_MODEL_READ_FILE_CHARS);
+      expect(outcome.projected.modelContent).toContain('line 1 clipped');
+      expect(outcome.projected.modelContent).toContain(
+        'line offset cannot continue within this line',
+      );
+      expect(outcome.projected.modelContent).not.toContain('continue with offset=');
+      expect(outcome.projected.resultMeta.truncated).toBe(true);
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('omitted limit advertises the next default page without losing read-state raw content', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-conformance-read-default-marker-'));
+    try {
+      const lines = Array.from({ length: DEFAULT_READ_FILE_LINE_LIMIT + 1 }, (_, index) => {
+        return `line-${index + 1}`;
+      });
+      const raw = `${lines.join('\n')}\n`;
+      writeFileSync(join(workspace, 'paged.txt'), raw);
+      const outcome = await dispatchRegisteredTool(
+        readFileSpec,
+        { path: 'paged.txt' },
+        { workspace },
+      );
+      expect(outcome.dispatched).toBe(true);
+      if (!outcome.dispatched) return;
+
+      expect(outcome.output.rawContent).toBe(raw);
+      expect(outcome.output.toLine).toBe(DEFAULT_READ_FILE_LINE_LIMIT);
+      expect(outcome.projected.modelContent).toContain(
+        `continue with offset=${DEFAULT_READ_FILE_LINE_LIMIT + 1}`,
+      );
+      expect(outcome.projected.resultMeta.truncated).toBe(true);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -1453,16 +1562,22 @@ describe('invariant i10 — shell governance is derived from command shape', () 
       description: 'Inspect repository',
       timeout_ms: 1000,
     });
-    expect(shellExecuteSpec.effects(parsed, CTX).effectClass).toBe('read_only');
+    expect(shellExecuteSpec.effects(parsed, CTX).effectClass).toBe('unknown');
     expect(classifyShellActionIntent(parsed.command)).toBe('git');
   });
 
   test('read-only fast-path corpus remains command-driven', () => {
-    for (const command of ['ls -la', 'pwd', 'git status', 'git diff --stat', 'rg TODO src']) {
+    for (const command of ['ls -la', 'pwd', 'rg TODO src']) {
       const effects = shellExecuteSpec.effects({ command }, CTX);
       expect(effects.effectClass, command).toBe('read_only');
       expect(effects.sideEffect, command).toBe(false);
     }
+  });
+
+  test('projects policy-proven inspection with inspect intent', () => {
+    expect(classifyShellActionIntent('ls -la src')).toBe('inspect');
+    expect(classifyShellActionIntent('rg TODO src')).toBe('inspect');
+    expect(classifyShellActionIntent('uniq input.txt output.txt')).toBe('other');
   });
 
   test('dispatch preserves execution context and runner derives action metadata', async () => {
@@ -1473,13 +1588,14 @@ describe('invariant i10 — shell governance is derived from command shape', () 
         source: 'builtin' as const,
         id: 'shell-read',
         name: 'shell_execute',
-        args: { command: 'git status', description: 'Inspect repository', timeout_ms: 3210 },
+        args: { command: 'ls -la', description: 'Inspect workspace', timeout_ms: 3210 },
         reason: 'inspect',
-        protectedCommand: 'git status',
+        protectedCommand: 'ls -la',
       },
       onShellProgress: (chunk) => progress.push(chunk),
       shellExecutor: async (input) => {
         expect(input.timeoutMs).toBe(3210);
+        expect(input.executionTrust).toBe('policy_proven_read_only');
         input.onProgress?.('status', 'stdout');
         return {
           ok: true,
@@ -1491,8 +1607,23 @@ describe('invariant i10 — shell governance is derived from command shape', () 
       },
     });
     expect(result.ok).toBe(true);
-    expect(result.action).toEqual({ intent: 'git', grantUsed: 'none' });
+    expect(result.action).toEqual({ intent: 'inspect', grantUsed: 'none' });
     expect(progress).toEqual(['status']);
+  });
+
+  test('does not attach read-only execution trust to a side-effectful command', async () => {
+    const outcome = await dispatchRegisteredTool(
+      shellExecuteSpec,
+      { command: 'touch created.txt' },
+      {
+        ...CTX,
+        shellExecutor: async (input) => {
+          expect(input.executionTrust).toBeUndefined();
+          return { ok: true, command: input.command, exitCode: 0, stdout: '', stderr: '' };
+        },
+      },
+    );
+    expect(outcome.dispatched).toBe(true);
   });
 });
 

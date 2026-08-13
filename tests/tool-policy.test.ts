@@ -84,7 +84,7 @@ describe('tool policy', () => {
   test('allows read-only shell_execute commands without approval', () => {
     const decision = evaluateToolApproval({
       toolName: 'shell_execute',
-      toolArgs: { command: 'git status --short' },
+      toolArgs: { command: 'pwd' },
       phase: 'building',
     });
 
@@ -94,7 +94,7 @@ describe('tool policy', () => {
   });
 
   test('preserves the read-only shell approval fast-path corpus', () => {
-    for (const command of ['ls -la', 'pwd', 'git status', 'git diff --stat', 'rg TODO src']) {
+    for (const command of ['ls -la', 'pwd', 'rg TODO src']) {
       const decision = evaluateToolApproval({
         toolName: 'shell_execute',
         toolArgs: { command },

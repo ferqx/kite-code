@@ -7,6 +7,7 @@ import {
   shellTool,
   timeoutMessage,
 } from '@/core/tools/shell';
+import { POLICY_PROVEN_READ_ONLY_EXECUTION } from '@/core/tools/trusted-readonly-environment';
 import type { ShellFilesystemMode, ShellNetworkMode, ShellResult } from '@/core/types';
 import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@/protocol/git';
 import { generateBwrapArgs } from './bwrap';
@@ -95,7 +96,7 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   return createWrappedExecutor(
     workspace,
     resourceLimits,
-    (wrappedCommand, networkMode, sandboxRuntimeDir, filesystemMode) => {
+    (wrappedCommand, networkMode, sandboxRuntimeDir, filesystemMode, policyProvenReadOnly) => {
       const profile = generateSandboxProfile(workspace, {
         network: networkMode,
         filesystemScope: filesystemMode === 'allow_all' ? 'full_access' : options.filesystemScope,
@@ -110,7 +111,14 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
             : 'allow',
       });
       return {
-        cmd: ['/usr/bin/sandbox-exec', '-p', profile, getSystemShell(), '-c', wrappedCommand],
+        cmd: [
+          '/usr/bin/sandbox-exec',
+          '-p',
+          profile,
+          policyProvenReadOnly ? '/bin/sh' : getSystemShell(),
+          '-c',
+          wrappedCommand,
+        ],
       };
     },
     options.network?.mode,
@@ -132,7 +140,7 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   return createWrappedExecutor(
     workspace,
     resourceLimits,
-    (wrappedCommand, networkMode, sandboxRuntimeDir, filesystemMode) => {
+    (wrappedCommand, networkMode, sandboxRuntimeDir, filesystemMode, policyProvenReadOnly) => {
       const seccompPath = resolveSeccompPath(seccompBinary, workspace, sandboxRuntimeDir);
       const bwrapArgs = generateBwrapArgs(workspace, {
         network: networkMode,
@@ -140,7 +148,7 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
         filesystemScope: filesystemMode === 'allow_all' ? 'full_access' : options.filesystemScope,
         gitMetadataDeny: options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1,
       });
-      const shell = getSystemShell();
+      const shell = policyProvenReadOnly ? '/bin/sh' : getSystemShell();
       const innerCmd = seccompPath
         ? [seccompPath, shell, '-c', wrappedCommand]
         : [shell, '-c', wrappedCommand];
@@ -172,6 +180,7 @@ function createWrappedExecutor(
     networkMode: ShellNetworkMode,
     sandboxRuntimeDir: string,
     filesystemMode: ShellFilesystemMode,
+    policyProvenReadOnly: boolean,
   ) => { cmd: string[]; stdin?: string },
   defaultNetworkMode: ShellNetworkMode = 'disabled',
 ): ShellExecutor {
@@ -214,7 +223,10 @@ function createWrappedExecutor(
       }
 
       sandboxRuntimeDir = createSandboxRuntimeDir(workspace);
-      const hardenedEnv = buildHardenedEnv(workspace, sandboxRuntimeDir);
+      const policyProvenReadOnly = input.executionTrust === POLICY_PROVEN_READ_ONLY_EXECUTION;
+      const hardenedEnv = buildHardenedEnv(workspace, sandboxRuntimeDir, {
+        policyProvenReadOnly,
+      });
 
       const preamble = [
         buildEnvStripSnippet(),
@@ -228,6 +240,7 @@ function createWrappedExecutor(
         input.networkMode ?? defaultNetworkMode,
         sandboxRuntimeDir,
         input.filesystemMode ?? 'workspace_only',
+        policyProvenReadOnly,
       );
 
       const proc = Bun.spawn(cmd, {
@@ -235,6 +248,7 @@ function createWrappedExecutor(
         stdin: stdin !== undefined ? 'pipe' : 'inherit',
         stdout: 'pipe',
         stderr: 'pipe',
+        env: policyProvenReadOnly ? hardenedEnv : undefined,
         ...processTreeSpawnOptions(),
       });
       processTree = guardProcessTree(proc);

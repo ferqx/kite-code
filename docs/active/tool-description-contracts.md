@@ -1,8 +1,8 @@
 # 当前规则：工具描述即契约
 
 状态：active
-最后更新：2026-08-12
-最后验证：2026-08-12
+最后更新：2026-08-13
+最后验证：2026-08-13
 范围：
 
 - `src/core/tools/tool-contracts.ts`
@@ -59,6 +59,12 @@ ToolSpec 的规范契约是 `ToolContractSection`：`summary`、`useWhen`、`ret
 Registry conformance 必须枚举当前 20/20 builtin，并在 legacy/V2 × planning/building 的合法 availability context 中验证：Skill catalog、active frame、task adapter、tool search 与 phase/role 都必须是真实可用形态；可用集合与投影一致，description 来自同一 resolved contract，provider JSON Schema validation 与 Registry `parseToolCall()` 分别验证有效、无效及 unknown-field 输入，不能只把两个同源 `safeParse({})` 结果互相比较。
 
 20 个工具还必须逐一执行真实 `projectResult()`（interrupt 工具执行 `createInterrupt()`），再经过 Controller 的 canonical `tool.finished` 投影、Runtime reducer 与 provider context projection。`returns.format=json` 的真实顶层 key 必须全部位于 contract fields；`text` 不得虚构 `ok/stdout/stderr/resultMeta` 字段。Registry-owned classifier advice 必须随统一执行结果进入同一个 canonical terminal，不能在 Runner 重建或丢失。父 Runtime reducer 与 Subagent provider context 必须调用唯一的 Runtime-owned public model-content helper：success 固定为 `stdout || stderr || ''`，failure 固定为 `stderr || stdout || ''`，并接收 `ok` 与 terminal status 防止状态分支漂移；success/failure × stdout 空/非空 × stderr 空/非空的八组合必须保持同构。Shell failure 还必须从真实 `runApprovedTool` 经过 Controller terminal、Kernel reducer 到 provider context，逐项等于 `shellExecuteSpec.projectResult()` 与 `returns.format=text`，20/20 closure 不能只靠预折叠 terminal fixture。不得把完整执行结果 JSON 化进 child transcript，也不得额外暴露 command/path/resultMeta、private recovery guidance 或 canonical-private lineage。`read_file` 的 ENOENT 公共结果固定为低信息稳定文本，具体 path 已由原 tool call 表达，不能在 Tool Result 重复泄露。
+
+`read_file` 省略 `limit` 时默认读取最多 2000 个源行；无论模型提供多大的显式 `limit`，
+`projectResult()` 的完整文本（含 marker）都必须保持在 64 KiB 字符内。多行截断 marker 只能
+给出最后一个完整可见源行之后的准确 continuation offset；单行超限必须标记该行被 clipped，
+并明确 line offset 无法在行内无损续读。`resultMeta` 同时声明 `truncated` 和截断前结果摘要，
+完整 `rawContent` 只供 read-state 指纹使用，不属于模型结果契约。
 
 ### 契约与实现的同步
 

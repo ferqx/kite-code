@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import {
-  classifyShellRisk,
   isDestructiveShellCommand,
   isNetworkCommand,
   isReadOnlyShellCommand,
@@ -9,6 +8,7 @@ import {
 } from '@/core/policies/shell-classification';
 import { resolveShellTimeoutMs, shellTool } from '@/core/tools/shell';
 import { SHELL_EXECUTE_CONTRACT } from '@/core/tools/tool-contracts';
+import { POLICY_PROVEN_READ_ONLY_EXECUTION } from '@/core/tools/trusted-readonly-environment';
 import type { ShellIntent } from '@/core/types';
 import { projectionDigest, truncateProjectedStreams } from '../projection';
 import { defineExecutableTool } from '../spec';
@@ -47,7 +47,7 @@ export function classifyShellActionIntent(command: string): ShellIntent {
     return 'build';
   }
   if (/(^|[;&|]\s*)git\b/i.test(trimmed)) return 'git';
-  if (classifyShellRisk(trimmed) === 'read') return 'inspect';
+  if (isReadOnlyShellCommand(trimmed)) return 'inspect';
   if (/\b(typecheck|lint|check)\b/i.test(trimmed)) return 'verify';
   return 'other';
 }
@@ -120,6 +120,7 @@ export const shellExecuteSpec = defineExecutableTool({
   approvalSummary: (input) => input.command,
   execute: async (input, context) => {
     try {
+      const policyProvenReadOnly = isReadOnlyShellCommand(input.command);
       return await (context.shellExecutor ?? shellTool)({
         workspace: context.workspace,
         command: input.command,
@@ -127,6 +128,7 @@ export const shellExecuteSpec = defineExecutableTool({
         timeoutMs: resolveShellTimeoutMs(input.timeout_ms),
         networkMode: context.shellNetworkMode,
         filesystemMode: context.shellFilesystemMode,
+        executionTrust: policyProvenReadOnly ? POLICY_PROVEN_READ_ONLY_EXECUTION : undefined,
         networkBroker: context.shellNetworkBroker,
         onProgress: context.onShellProgress,
       });

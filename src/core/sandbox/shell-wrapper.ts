@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
+import { buildPolicyProvenReadOnlyEnv } from '@/core/tools/trusted-readonly-environment';
 import { findUsableBubblewrap } from './platform';
 import type { ResourceLimits } from './types';
 import { DEFAULT_RESOURCE_LIMITS } from './types';
@@ -226,7 +227,11 @@ function runCleanupCommands(commands: string[][]): boolean {
 }
 
 /** 构建硬化后的环境变量 / Build hardened environment variables */
-export function buildHardenedEnv(workspace: string, runtimeDir: string): Record<string, string> {
+export function buildHardenedEnv(
+  workspace: string,
+  runtimeDir: string,
+  options: { policyProvenReadOnly?: boolean } = {},
+): Record<string, string> {
   const canonicalWorkspace = realpathSync.native(resolve(workspace));
   const canonicalRuntimeDir = realpathSync.native(resolve(runtimeDir));
   if (canonicalRuntimeDir === canonicalWorkspace) {
@@ -242,11 +247,15 @@ export function buildHardenedEnv(workspace: string, runtimeDir: string): Record<
   // 保留安全的环境变量 / Keep safe environment variables
   const env: Record<string, string> = {};
 
-  // 传递安全的白名单变量 / Pass through safe allowlisted variables
-  for (const key of SAFE_ENV_KEYS) {
-    const val = process.env[key];
-    if (val !== undefined) {
-      env[key] = val;
+  if (options.policyProvenReadOnly) {
+    Object.assign(env, buildPolicyProvenReadOnlyEnv(canonicalWorkspace));
+  } else {
+    // 传递安全的白名单变量 / Pass through safe allowlisted variables
+    for (const key of SAFE_ENV_KEYS) {
+      const val = process.env[key];
+      if (val !== undefined) {
+        env[key] = val;
+      }
     }
   }
 
@@ -306,6 +315,9 @@ export function buildEnvStripSnippet(): string {
     'GRADLE_OPTS',
     'MAVEN_OPTS',
     'SBT_OPTS',
+    // rg can execute --pre commands supplied by this config file. Static
+    // read-only classification therefore relies on removing this ambient input.
+    'RIPGREP_CONFIG_PATH',
   ];
 
   return `${DANGEROUS_VARS.map((v) => `unset ${v}`).join(' ; ')} ; `;

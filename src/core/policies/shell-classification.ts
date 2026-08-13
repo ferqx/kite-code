@@ -77,7 +77,7 @@ export function isDestructiveShellCommand(command: string): boolean {
 
 /** 检测命令是否为版本控制变更操作（如 git add/commit/push 等）/ Check if command is a VCS mutation */
 export function isVcsMutationCommand(command: string): boolean {
-  return /\bgit\s+(?:add|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
+  return /\bgit\s+(?:add|branch|clone|commit|checkout|switch|merge|rebase|tag|restore|stash|pull|fetch|push|reset|clean)\b/.test(
     normalizeShell(command),
   );
 }
@@ -285,6 +285,16 @@ function extractReadTargets(command: string): string[] {
   const targets: string[] = [];
   for (const segment of splitReadOnlySegments(command)) {
     const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+    for (let index = 1; index < tokens.length; index += 1) {
+      const value = stripShellQuotes(tokens[index] ?? '');
+      if (value === '<' && tokens[index + 1]) {
+        targets.push(tokens[index + 1]!);
+        index += 1;
+      } else {
+        const attachedInput = /^<([^<&].+)$/.exec(value);
+        if (attachedInput?.[1]) targets.push(attachedInput[1]);
+      }
+    }
     const program = stripShellQuotes(tokens[0] ?? '')
       .toLowerCase()
       .replace(/\.(?:cmd|exe)$/i, '');
@@ -296,9 +306,48 @@ function extractReadTargets(command: string): string[] {
       continue;
     }
 
+    if (program === 'rg' || program === 'grep') {
+      for (let index = 1; index < tokens.length; index += 1) {
+        const value = stripShellQuotes(tokens[index] ?? '');
+        if ((value === '-f' || value === '--file') && tokens[index + 1]) {
+          targets.push(tokens[index + 1]!);
+          index += 1;
+          continue;
+        }
+        const attachedFile = /^(?:-[^-]*f|--file=)(.+)$/u.exec(value);
+        if (attachedFile?.[1]) targets.push(attachedFile[1]);
+      }
+    }
+
+    if (program === 'file') {
+      for (let index = 1; index < tokens.length; index += 1) {
+        const value = stripShellQuotes(tokens[index] ?? '');
+        if ((value === '-m' || value === '--magic-file') && tokens[index + 1]) {
+          targets.push(tokens[index + 1]!);
+          index += 1;
+          continue;
+        }
+        const magicFile = /^(?:-m|--magic-file=)(.+)$/u.exec(value);
+        if (magicFile?.[1]) targets.push(magicFile[1]);
+      }
+    }
+
+    if (program === 'sort') {
+      for (let index = 1; index < tokens.length; index += 1) {
+        const value = stripShellQuotes(tokens[index] ?? '');
+        if (value === '--random-source' && tokens[index + 1]) {
+          targets.push(tokens[index + 1]!);
+          index += 1;
+          continue;
+        }
+        const randomSource = /^--random-source=(.+)$/u.exec(value);
+        if (randomSource?.[1]) targets.push(randomSource[1]);
+      }
+    }
+
     const operands = tokens.slice(1).filter((token) => {
       const value = stripShellQuotes(token);
-      return value !== '<' && value !== '>' && !value.startsWith('-');
+      return value !== '<' && value !== '>' && !value.startsWith('<') && !value.startsWith('-');
     });
     if (program === 'grep' || program === 'rg' || program === 'sed' || program === 'awk') {
       targets.push(...operands.slice(1));
@@ -411,6 +460,7 @@ export function isDestructiveRmOnCriticalPaths(command: string): boolean {
  * Classify the risk level of a shell command.
  */
 export function classifyShellRisk(command: string): ToolRisk {
+  if (isReadOnlyShellCommand(command)) return 'read';
   if (isDestructiveShellCommand(command)) return 'destructive';
   if (isVcsMutationCommand(command)) return 'vcs_mutation';
   if (isWriteLikeShellCommand(command)) return 'write_file';
@@ -442,28 +492,516 @@ const READ_ONLY_COMMANDS = new Set([
   'wc',
 ]);
 
-const READ_ONLY_GIT_SUBCOMMANDS = new Set([
-  'branch',
-  'diff',
-  'grep',
-  'log',
-  'ls-files',
-  'show',
-  'status',
+const LOCAL_RUNTIME_VERSION_COMMANDS = new Set(['bun', 'node', 'npm', 'pnpm', 'yarn']);
+
+const FILE_FLAG_OPTIONS = new Set([
+  '--brief',
+  '--checking-printout',
+  '--exclude-quiet',
+  '--extension',
+  '--keep-going',
+  '--mime',
+  '--mime-encoding',
+  '--mime-type',
+  '--no-buffer',
+  '--no-pad',
+  '--print0',
+  '--raw',
+  '--special-files',
+]);
+const FILE_VALUE_OPTIONS = new Set([
+  '--apple',
+  '--exclude',
+  '--magic-file',
+  '--parameter',
+  '--separator',
 ]);
 
-const LOCAL_RUNTIME_VERSION_COMMANDS = new Set(['bun', 'node', 'npm', 'pnpm', 'yarn']);
+function isReadOnlyFile(tokens: string[]): boolean {
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = stripShellQuotes(tokens[index] ?? '');
+    if (token === '--') return true;
+    if (!token.startsWith('-') || token === '-') continue;
+    if (FILE_FLAG_OPTIONS.has(token)) continue;
+    const longName = token.split('=', 1)[0]!;
+    if (FILE_VALUE_OPTIONS.has(longName)) {
+      if (!token.includes('=') && !tokens[index + 1]) return false;
+      if (!token.includes('=')) index += 1;
+      continue;
+    }
+    if (/^-[bcEhikLlNnPrs]+$/.test(token)) continue;
+    if (/^-[deFm].+/.test(token)) continue;
+    if (['-d', '-e', '-F', '-m'].includes(token)) {
+      if (!tokens[index + 1]) return false;
+      index += 1;
+      continue;
+    }
+    // Unknown modes fail closed. In particular, -C/--compile writes an .mgc
+    // artifact and -z/--uncompress may execute an external decompressor.
+    return false;
+  }
+  return true;
+}
+
+const FIND_BOOLEAN_TOKENS = new Set([
+  '!',
+  '(',
+  ')',
+  ',',
+  '-a',
+  '-and',
+  '-daystart',
+  '-empty',
+  '-executable',
+  '-false',
+  '-follow',
+  '-ignore_readdir_race',
+  '-ls',
+  '-mount',
+  '-noignore_readdir_race',
+  '-noleaf',
+  '-not',
+  '-o',
+  '-or',
+  '-print',
+  '-print0',
+  '-prune',
+  '-quit',
+  '-readable',
+  '-true',
+  '-writable',
+  '-xdev',
+]);
+const FIND_ONE_VALUE_TOKENS = new Set([
+  '-amin',
+  '-anewer',
+  '-atime',
+  '-cmin',
+  '-cnewer',
+  '-ctime',
+  '-fstype',
+  '-gid',
+  '-group',
+  '-ilname',
+  '-iname',
+  '-inum',
+  '-ipath',
+  '-iregex',
+  '-links',
+  '-lname',
+  '-maxdepth',
+  '-mindepth',
+  '-mmin',
+  '-mtime',
+  '-name',
+  '-newer',
+  '-path',
+  '-perm',
+  '-printf',
+  '-regex',
+  '-regextype',
+  '-samefile',
+  '-size',
+  '-type',
+  '-uid',
+  '-user',
+  '-used',
+  '-wholename',
+  '-xtype',
+]);
+
+function isReadOnlyFind(tokens: string[]): boolean {
+  let expressionStarted = false;
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = stripShellQuotes(tokens[index] ?? '');
+    if (!expressionStarted && (/^-[HLP]$/.test(token) || /^-O\d+$/.test(token))) continue;
+    if (!expressionStarted && token === '-D') {
+      if (!tokens[index + 1]) return false;
+      index += 1;
+      continue;
+    }
+    if (!expressionStarted && !token.startsWith('-') && !['!', '(', ')'].includes(token)) continue;
+    expressionStarted = true;
+    if (FIND_BOOLEAN_TOKENS.has(token)) continue;
+    if (/^-newer[A-Za-z]{2}$/.test(token) || FIND_ONE_VALUE_TOKENS.has(token)) {
+      if (!tokens[index + 1]) return false;
+      index += 1;
+      continue;
+    }
+    // Unknown find actions are not assumed to be reads. In particular this
+    // rejects -delete/-exec/-ok and file-output actions such as -fprint.
+    return false;
+  }
+  return true;
+}
+
+function isReadOnlySedScript(script: string): boolean {
+  const value = stripShellQuotes(script).trim();
+  if (value.length < 4 || value[0] !== 's') return false;
+  const delimiter = value[1]!;
+  if (/\s|[A-Za-z0-9\\]/.test(delimiter)) return false;
+  let cursor = 2;
+  const consumeSection = (): boolean => {
+    let escaped = false;
+    for (; cursor < value.length; cursor += 1) {
+      const char = value[cursor]!;
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === '\\') {
+        escaped = true;
+        continue;
+      }
+      if (char === delimiter) {
+        cursor += 1;
+        return true;
+      }
+    }
+    return false;
+  };
+  if (!consumeSection() || !consumeSection()) return false;
+  // Substitution flags that only affect stdout are safe. `e` executes a
+  // command and `w FILE` writes, so neither is admitted by this grammar.
+  return /^[0-9gimpIM]*$/.test(value.slice(cursor));
+}
+
+function isReadOnlySed(tokens: string[]): boolean {
+  const scripts: string[] = [];
+  let sawBareScript = false;
+  let optionsEnded = false;
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = stripShellQuotes(tokens[index] ?? '');
+    if (!optionsEnded && token === '--') {
+      optionsEnded = true;
+      continue;
+    }
+    if ((sawBareScript || optionsEnded) && token.startsWith('-') && token !== '-') return false;
+    if (
+      !sawBareScript &&
+      [
+        '-n',
+        '--quiet',
+        '--silent',
+        '-E',
+        '-r',
+        '--regexp-extended',
+        '-u',
+        '--unbuffered',
+        '-s',
+        '--separate',
+        '-z',
+        '--null-data',
+        '--sandbox',
+      ].includes(token)
+    ) {
+      continue;
+    }
+    if (!sawBareScript && (token === '-e' || token === '--expression')) {
+      const script = tokens[index + 1];
+      if (!script) return false;
+      scripts.push(script);
+      index += 1;
+      continue;
+    }
+    if (!sawBareScript && token.startsWith('--expression=')) {
+      scripts.push(token.slice('--expression='.length));
+      continue;
+    }
+    if (!sawBareScript && token.startsWith('-e') && token.length > 2) {
+      scripts.push(token.slice(2));
+      continue;
+    }
+    if (!sawBareScript && token.startsWith('-')) return false;
+    if (!sawBareScript && scripts.length === 0) {
+      scripts.push(tokens[index]!);
+      sawBareScript = true;
+      continue;
+    }
+    sawBareScript = true; // Remaining operands are input paths.
+  }
+  return scripts.length > 0 && scripts.every(isReadOnlySedScript);
+}
+
+const SORT_FLAG_OPTIONS = new Set([
+  '--check',
+  '--debug',
+  '--dictionary-order',
+  '--general-numeric-sort',
+  '--human-numeric-sort',
+  '--ignore-case',
+  '--ignore-leading-blanks',
+  '--ignore-nonprinting',
+  '--merge',
+  '--month-sort',
+  '--numeric-sort',
+  '--random-sort',
+  '--reverse',
+  '--stable',
+  '--unique',
+  '--version-sort',
+  '--zero-terminated',
+]);
+const SORT_VALUE_OPTIONS = new Set([
+  '--batch-size',
+  '--field-separator',
+  '--key',
+  '--parallel',
+  '--random-source',
+  '--sort',
+]);
+
+function isReadOnlySort(tokens: string[]): boolean {
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = stripShellQuotes(tokens[index] ?? '');
+    if (token === '--') return true;
+    if (!token.startsWith('-') || token === '-') continue;
+    if (SORT_FLAG_OPTIONS.has(token)) continue;
+    const longName = token.split('=', 1)[0]!;
+    if (SORT_VALUE_OPTIONS.has(longName)) {
+      if (!token.includes('=') && !tokens[index + 1]) return false;
+      if (!token.includes('=')) index += 1;
+      continue;
+    }
+    if (/^-[bcCdfghinmMNRrSsuvVz]+$/.test(token)) continue;
+    if (/^-[kt].+/.test(token)) continue;
+    if (token === '-k' || token === '-t') {
+      if (!tokens[index + 1]) return false;
+      index += 1;
+      continue;
+    }
+    // Unknown options, -o/--output and --compress-program fail closed.
+    return false;
+  }
+  return true;
+}
+
+const UNIQ_FLAG_OPTIONS = new Set([
+  '--all-repeated',
+  '--count',
+  '--group',
+  '--ignore-case',
+  '--repeated',
+  '--unique',
+  '--zero-terminated',
+]);
+const UNIQ_VALUE_OPTIONS = new Set(['--check-chars', '--skip-chars', '--skip-fields']);
+
+function isReadOnlyUniq(tokens: string[]): boolean {
+  let operands = 0;
+  let optionsEnded = false;
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = stripShellQuotes(tokens[index] ?? '');
+    if (!optionsEnded && token === '--') {
+      optionsEnded = true;
+      continue;
+    }
+    if (!optionsEnded && UNIQ_FLAG_OPTIONS.has(token)) continue;
+    if (!optionsEnded) {
+      const longName = token.split('=', 1)[0]!;
+      if (UNIQ_VALUE_OPTIONS.has(longName)) {
+        if (!token.includes('=') && !tokens[index + 1]) return false;
+        if (!token.includes('=')) index += 1;
+        continue;
+      }
+      if (/^-[cduiz]+$/.test(token)) continue;
+      if (/^-[fsw].+/.test(token)) continue;
+      if (['-f', '-s', '-w'].includes(token)) {
+        if (!tokens[index + 1]) return false;
+        index += 1;
+        continue;
+      }
+      if (token.startsWith('-') && token !== '-') return false;
+    }
+    operands += 1;
+    if (/[*?[\]{}]/.test(token)) return false;
+    // POSIX uniq's second operand is an output file.
+    if (operands > 1) return false;
+  }
+  return true;
+}
+
+const RG_FLAG_OPTIONS = new Set([
+  '--binary',
+  '--case-sensitive',
+  '--column',
+  '--count',
+  '--count-matches',
+  '--crlf',
+  '--debug',
+  '--files',
+  '--files-with-matches',
+  '--files-without-match',
+  '--fixed-strings',
+  '--follow',
+  '--heading',
+  '--hidden',
+  '--ignore-case',
+  '--invert-match',
+  '--json',
+  '--line-number',
+  '--line-regexp',
+  '--multiline',
+  '--multiline-dotall',
+  '--no-config',
+  '--no-filename',
+  '--no-heading',
+  '--no-hidden',
+  '--no-ignore',
+  '--no-line-number',
+  '--no-messages',
+  '--no-pcre2',
+  '--no-unicode',
+  '--null',
+  '--null-data',
+  '--one-file-system',
+  '--only-matching',
+  '--passthru',
+  '--pcre2',
+  '--quiet',
+  '--smart-case',
+  '--stats',
+  '--text',
+  '--trace',
+  '--trim',
+  '--unicode',
+  '--vimgrep',
+  '--with-filename',
+  '--word-regexp',
+]);
+const RG_VALUE_OPTIONS = new Set([
+  '--after-context',
+  '--before-context',
+  '--color',
+  '--colors',
+  '--context',
+  '--context-separator',
+  '--encoding',
+  '--engine',
+  '--field-context-separator',
+  '--field-match-separator',
+  '--file',
+  '--glob',
+  '--iglob',
+  '--max-columns',
+  '--max-count',
+  '--max-depth',
+  '--max-filesize',
+  '--path-separator',
+  '--regexp',
+  '--replace',
+  '--sort',
+  '--sortr',
+  '--threads',
+  '--type',
+  '--type-add',
+  '--type-clear',
+  '--type-not',
+]);
+
+function isReadOnlyRipgrep(tokens: string[]): boolean {
+  const shortFlags = new Set('0acHhIiLlnoqSUuvwx'.split(''));
+  const shortWithValue = new Set('ABCEefgMmrTt'.split(''));
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = stripShellQuotes(tokens[index] ?? '');
+    if (token === '--') return true;
+    if (!token.startsWith('-') || token === '-') continue;
+    if (RG_FLAG_OPTIONS.has(token)) continue;
+    const longName = token.split('=', 1)[0]!;
+    if (RG_VALUE_OPTIONS.has(longName)) {
+      if (!token.includes('=') && !tokens[index + 1]) return false;
+      if (!token.includes('=')) index += 1;
+      continue;
+    }
+    if (token.startsWith('--')) return false;
+    const flags = token.slice(1);
+    for (let flagIndex = 0; flagIndex < flags.length; flagIndex += 1) {
+      const flag = flags[flagIndex]!;
+      if (shortFlags.has(flag)) continue;
+      if (!shortWithValue.has(flag)) return false;
+      if (flagIndex === flags.length - 1) {
+        if (!tokens[index + 1]) return false;
+        index += 1;
+      }
+      break;
+    }
+  }
+  return true;
+}
+
+function withoutHarmlessOutputRedirects(tokens: string[]): string[] {
+  const result: string[] = [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = stripShellQuotes(tokens[index] ?? '');
+    if (/^\d?>&\d?$/.test(token) || /^\d?>{1,2}\/dev\/null$/.test(token)) continue;
+    if (/^\d?>{1,2}$/.test(token) && stripShellQuotes(tokens[index + 1] ?? '') === '/dev/null') {
+      index += 1;
+      continue;
+    }
+    result.push(tokens[index]!);
+  }
+  return result;
+}
 
 /** Conservative command-shape classifier used by shell approval and ToolSpec effects. */
 export function isReadOnlyShellCommand(command: string): boolean {
   const trimmed = (command ?? '').trim();
-  if (!trimmed || /(^|[^>])>{1,2}(?!&[12]|\s*\/dev\/null)(?:$|[^>])/.test(trimmed)) {
-    return false;
-  }
-  if (/\$\(/.test(trimmed) || /`/.test(trimmed)) return false;
+  if (!trimmed || /[\r\n]/.test(trimmed) || hasUnsafeOutputRedirect(trimmed)) return false;
+  // Expansions can replace a statically safe operand with an effectful option,
+  // and process substitutions execute their body independently of argv.
+  if (/[$`]/.test(trimmed) || /[<>]\(/.test(trimmed)) return false;
+  // Unquoted brace expansion can synthesize effectful options after static
+  // token inspection, for example `sort {--output=out,input.txt}`. Preserve
+  // quoted regex/glob operands while rejecting shell-expanded braces.
+  if (hasUnquotedBraceExpansion(trimmed)) return false;
   const stripped = trimmed.replace(/&&/g, '').replace(/\d?>&\d?/g, '');
   if (stripped.includes('&')) return false;
   return splitReadOnlySegments(trimmed).every(isReadOnlySegment);
+}
+
+function hasUnquotedBraceExpansion(command: string): boolean {
+  let quote: "'" | '"' | null = null;
+  let escaped = false;
+  for (const char of command) {
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === '\\' && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === '{' || char === '}') return true;
+  }
+  return false;
+}
+
+function hasUnsafeOutputRedirect(command: string): boolean {
+  const tokens = command.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  for (let index = 0; index < tokens.length; index += 1) {
+    const rawToken = tokens[index] ?? '';
+    if (
+      (rawToken.startsWith("'") && rawToken.endsWith("'")) ||
+      (rawToken.startsWith('"') && rawToken.endsWith('"'))
+    ) {
+      continue;
+    }
+    if (/^\d?>&\d?$/.test(rawToken) || /^\d?>{1,2}\/dev\/null$/.test(rawToken)) continue;
+    if (/^\d?>{1,2}$/.test(rawToken) && stripShellQuotes(tokens[index + 1] ?? '') === '/dev/null') {
+      index += 1;
+      continue;
+    }
+    if (rawToken.includes('>')) return true;
+  }
+  return false;
 }
 
 function splitReadOnlySegments(command: string): string[] {
@@ -474,38 +1012,29 @@ function splitReadOnlySegments(command: string): string[] {
 }
 
 function isReadOnlySegment(segment: string): boolean {
-  const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  const tokens = withoutHarmlessOutputRedirects(
+    segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [],
+  );
   const command = stripShellQuotes(tokens[0] ?? '').toLowerCase();
   if (!command) return false;
   const portableCommand = command.replace(/\.(?:cmd|exe)$/i, '');
   if (LOCAL_RUNTIME_VERSION_COMMANDS.has(portableCommand)) {
     return tokens.length === 2 && ['--version', '-v'].includes(stripShellQuotes(tokens[1] ?? ''));
   }
-  if (command === 'git') {
-    return READ_ONLY_GIT_SUBCOMMANDS.has(stripShellQuotes(tokens[1] ?? '').toLowerCase());
-  }
-  if (command === 'sed') {
-    return (
-      READ_ONLY_COMMANDS.has(command) &&
-      !tokens.some((token) => /^-.*i/.test(stripShellQuotes(token)))
-    );
-  }
-  if (command === 'find') {
-    return (
-      READ_ONLY_COMMANDS.has(command) &&
-      !tokens.some((token) => ['-exec', '-execdir', '-delete'].includes(stripShellQuotes(token)))
-    );
-  }
-  if (command === 'awk') {
-    return READ_ONLY_COMMANDS.has(command) && !/\bsystem\s*\(/.test(segment);
-  }
-  if (command === 'xargs') {
-    const invokedIndex = tokens.findIndex((token, index) => index > 0 && !token.startsWith('-'));
-    const invoked =
-      invokedIndex > 0 ? stripShellQuotes(tokens[invokedIndex] ?? '').toLowerCase() : '';
-    return Boolean(invoked) && READ_ONLY_COMMANDS.has(invoked);
-  }
-  return READ_ONLY_COMMANDS.has(command);
+  // Repository/config-driven helpers (diff/textconv, fsmonitor, external diff,
+  // filters) mean generic Git subprocesses are not policy-proven reads. Use the
+  // typed brokered git_inspect capability instead.
+  if (portableCommand === 'git') return false;
+  if (portableCommand === 'file') return isReadOnlyFile(tokens);
+  if (portableCommand === 'rg') return isReadOnlyRipgrep(tokens);
+  if (portableCommand === 'sed') return isReadOnlySed(tokens);
+  if (portableCommand === 'find') return isReadOnlyFind(tokens);
+  if (portableCommand === 'sort') return isReadOnlySort(tokens);
+  if (portableCommand === 'uniq') return isReadOnlyUniq(tokens);
+  // awk is a programming language and xargs appends runtime-controlled argv;
+  // neither can be proven read-only from the static command text.
+  if (portableCommand === 'awk' || portableCommand === 'xargs') return false;
+  return READ_ONLY_COMMANDS.has(portableCommand);
 }
 
 function stripShellQuotes(value: string): string {
