@@ -435,7 +435,14 @@ fn existing_protected_paths(paths: &[String]) -> Vec<String> {
 }
 
 fn existing_workspace_protected_paths(workspace_root: &str, paths: &[String]) -> Vec<String> {
-    existing_protected_paths(paths)
+    workspace_member_protected_paths(workspace_root, existing_protected_paths(paths))
+}
+
+fn workspace_member_protected_paths(
+    workspace_root: &str,
+    paths: Vec<String>,
+) -> Vec<String> {
+    paths
         .into_iter()
         .filter(|path| is_workspace_member_path(workspace_root, path))
         .collect()
@@ -669,7 +676,7 @@ mod tests {
             "C:\\Users\\runneradmin\\.npmrc".to_string(),
         ];
         assert_eq!(
-            existing_workspace_protected_paths("C:\\Work", &paths),
+            workspace_member_protected_paths("C:\\Work", paths),
             vec!["C:\\Work\\.env".to_string()]
         );
     }

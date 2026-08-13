@@ -141,6 +141,8 @@ future-name interception。ledger
 protected path 不得写入该 ledger，因为 Workspace capability 在外部没有 allow ACE，本来就无法通过
 restricted write check。approved filesystem guard 仍可在单次 invocation 内保护既有外部固定路径，
 并在 Job 清空后撤销，不把外部路径交给 Workspace repair。
+Rust 回归测试 `persistent_protected_paths_never_escape_the_workspace` 以纯路径成员判断锁定该边界，
+不依赖 CI host 预先存在特定绝对路径。
 
 因此 `windows_restricted_token` 是 development backend：
 
