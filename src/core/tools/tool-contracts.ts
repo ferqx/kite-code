@@ -402,10 +402,9 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       'Correct the canonical questions array once and never pass stringified JSON. User rejection/cancellation is terminal for that interaction and is not auto-retried.',
   },
   task: {
-    summary:
-      'Delegate a bounded self-contained task only when the current user explicitly requests delegation.',
+    summary: 'Delegate bounded self-contained work that benefits from an isolated sub-agent.',
     useWhen:
-      'For a qualifying explicit delegation, call this tool rather than replying with a delegation description. Use explore for evidence; use plan for read-only architecture or design planning; use code for authorized implementation and review for bounded review. Parent and child share Runtime recovery ceilings.',
+      'Use explore for evidence, plan for read-only architecture or design planning, review for bounded read-only review, and code only when the user task calls for implementation. Runtime executes sub-agents serially, so never claim parallel dispatch; issue multiple worthwhile independent tasks one at a time. Do not delegate trivial or tightly coupled work, and obey an explicit user instruction not to delegate. Parent and child share Runtime authorization, phase, budget and recovery ceilings.',
     returns: {
       format: 'json',
       description:

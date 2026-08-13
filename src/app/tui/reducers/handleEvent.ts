@@ -2121,7 +2121,8 @@ function materializePendingTool(
  * leaving its UI projection active would suppress a later approval during
  * replay. */
 function clearTerminalToolApproval(state: TuiState, toolCallId: string): TuiState {
-  return state.interrupt?.kind === 'approval' && state.interrupt.approval?.callId === toolCallId
+  return state.interrupt?.kind === 'approval' &&
+    (state.interrupt.toolCallId ?? state.interrupt.approval?.callId) === toolCallId
     ? { ...state, interrupt: null }
     : state;
 }
@@ -2969,6 +2970,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
             interrupt: {
               ...next.interrupt,
               interactionId: event.interactionId,
+              toolCallId: event.toolCallId,
             },
           }
         : next;
@@ -2979,7 +2981,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       // Footer interrupt explicitly instead of reviving an approved request.
       return state.interrupt?.kind === 'approval' &&
         state.interrupt.interactionId === event.interactionId &&
-        state.interrupt.approval?.callId === event.toolCallId
+        (state.interrupt.toolCallId ?? state.interrupt.approval?.callId) === event.toolCallId
         ? { ...state, interrupt: null }
         : state;
     case 'approval.rejected': {
@@ -2987,7 +2989,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       if (
         state.interrupt?.kind !== 'approval' ||
         state.interrupt.interactionId !== event.interactionId ||
-        state.interrupt.approval?.callId !== event.toolCallId
+        (state.interrupt.toolCallId ?? state.interrupt.approval?.callId) !== event.toolCallId
       ) {
         return state;
       }

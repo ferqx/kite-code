@@ -375,8 +375,8 @@ Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`Capab
 
 外部写入遵循“先记录 intent，再发生副作用”。对无法证明是否成功的调用，Runtime 记录 `unknown` 并禁止盲目自动重放；恢复时先 reconciliation。
 
-`task` 有额外的 Runtime-owned 权威契约。委派只能由 active Task 的当前纯用户 `userGoal` 授权，project/shell/external context 不得提升。Subagent 统一串行执行并使用同一 run-scoped 累计预算；生命周期显式区分 running/suspended/terminal，approval 等待是 suspended，恢复后回 running。terminal result 只投影规范 `completed`，是否经历恢复仍由 canonical Recovery Journal 保留，不再复制为第二套 UI/协议完成态。Planning 的 plan child 只能引导 `write_plan:save → write_plan:submit`；failed/cancelled/exhausted/suspended child 不得产生该 continuation。planning plan child 仅在成功 terminal 后进入既有 Plan lifecycle，顶层 completion 仍受已保存并 submit 的 plan identity gate 约束；文本提示本身不构成提交事实。
-每条 follow-up 用户消息都替换当前 Task 的 delegation authority；撤销与新增从该响应立即生效，replay 按同一 reducer 规则恢复。code role 需要明确写入/编辑/修复授权，read-only review、design/options/planning 或否定写入都不能冒充 code scope。child 的 schema projection、实际 Registry parse、execution/resume 必须共享 config、phase、gitBroker 与 availability context；typed Git 不得因 child 路径缺依赖而回退 Shell。
+`task` 的调度选择归模型编排，Runtime 不解析 active Task 的 `userGoal` 作为委派或 role 授权协议。模型只应委派有界、自包含、独立且值得额外调用的工作，用户明确要求不委派时必须遵守；code 仅用于用户任务要求实施的情形。Project、Shell、工具结果和 external context 不能提升 child 的 authorization、phase、预算、role ceiling 或 execution surface。Subagent 统一串行执行并使用同一 run-scoped 累计预算；生命周期显式区分 running/suspended/terminal，approval 等待是 suspended，恢复后回 running。terminal result 只投影规范 `completed`，是否经历恢复仍由 canonical Recovery Journal 保留，不再复制为第二套 UI/协议完成态。Planning 的 plan child 只能引导 `write_plan:save → write_plan:submit`；failed/cancelled/exhausted/suspended child 不得产生该 continuation。planning plan child 仅在成功 terminal 后进入既有 Plan lifecycle，顶层 completion 仍受已保存并 submit 的 plan identity gate 约束；文本提示本身不构成提交事实。
+child 的 schema projection、实际 Registry parse、execution/resume 必须共享 config、phase、interaction mode、authorization、gitBroker 与 availability context；typed Git 不得因 child 路径缺依赖而回退 Shell。
 
 ADR-0097 将 Git 拆为 Core-owned broker contract 与 App-owned process adapter。Runtime capability
 surface 保存只读 `gitInspect` 和精确 feature revision；Registry disclosure、

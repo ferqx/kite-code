@@ -49,12 +49,16 @@ describe('Prompt Contract V2 token budget', () => {
     expect(prompt).toContain('activate_skill');
   });
 
-  test('turns an explicit bounded read-only delegation into the planning task contract', () => {
+  test('turns valuable bounded work into the autonomous planning task contract', () => {
     const prompt = buildStaticSystemPrompt('agent', undefined, undefined, 'v2');
-    expect(prompt).toContain('explicitly requested by the current user');
-    expect(prompt).toContain('make `task` the next action, not prose');
+    expect(prompt).toContain('Use subagents autonomously');
+    expect(prompt).toContain('independent enough to justify an isolated model call');
     expect(prompt).toContain('`subagent_type` and a concrete self-contained `task`');
-    expect(prompt).toContain('`subagent_type=plan` for architecture/design planning');
-    expect(prompt).toContain('do not duplicate its assigned investigation');
+    expect(prompt).toContain('`plan` for architecture/design planning');
+    expect(prompt).toContain("`code` only when the user's task calls for implementation");
+    expect(prompt).toContain('Subagents execute serially: never claim parallel dispatch');
+    expect(prompt).toContain('continue with the next after each result');
+    expect(prompt).toContain('Obey an explicit user instruction not to delegate');
+    expect(prompt).toContain('do not duplicate the assigned investigation');
   });
 });

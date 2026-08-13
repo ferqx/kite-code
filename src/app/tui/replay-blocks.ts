@@ -188,7 +188,7 @@ export function recoverPendingInteractionsForTui(
   if (pending) {
     const toolCallId =
       pending.kind === 'approval'
-        ? pending.approval?.callId
+        ? (pending.toolCallId ?? pending.approval?.callId)
         : pending.kind === 'plan_review'
           ? pending.toolCallId
           : (() => {

@@ -30,11 +30,7 @@ import {
   networkBoundaryPolicyFromExecutionBoundaryV1,
 } from '@/core/sandbox/network-policy';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
-import {
-  admitDelegationV1,
-  isDelegationRoleSmokeTestV1,
-} from '@/core/subagent/delegation-contract';
-import { getRoleConfig } from '@/core/subagent/roles';
+import { validateDelegatedTaskV1 } from '@/core/subagent/delegation-contract';
 import { runTaskSubAgent } from '@/core/subagent/task-tool';
 import type { SubAgentEventSink } from '@/core/subagent/types';
 import { normalizeEOL, readTextContent, resolvePath } from '@/core/tools/file';
@@ -217,8 +213,6 @@ export interface RunApprovedToolInput {
   availabilityContext?: ToolAvailabilityContext;
   /** Project instructions visible to the model that issued this request. */
   projectInstructionSnapshot?: ProjectInstructionSnapshot;
-  /** Current top-level user-authored goal; external/project text is never accepted as delegation authority. */
-  currentUserGoal?: string;
 }
 
 /** 执行经过审批的工具调用 / Execute an approved tool call */
@@ -308,19 +302,16 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     });
   }
   if (request.name === 'task') {
-    const admission = admitDelegationV1({
-      userGoal: input.currentUserGoal ?? '',
+    const validation = validateDelegatedTaskV1({
       delegatedTask: request.args.task,
-      role: request.args.subagent_type,
-      phase,
     });
-    if (!admission.allowed) {
+    if (!validation.valid) {
       return withFailureGuidance(request, {
         ok: false,
         command: 'task',
         exitCode: -1,
         stdout: '',
-        stderr: `Sub-agent delegation denied (${admission.reason}).`,
+        stderr: `Sub-agent task rejected (${validation.reason}).`,
         status: 'rejected',
       });
     }
@@ -519,10 +510,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
                   mcpManager,
                   skills: skillManifests,
                   skillOptions,
-                  ...(taskInput.subagent_type === 'code' &&
-                  isDelegationRoleSmokeTestV1(input.currentUserGoal ?? '', 'code')
-                    ? { allowedTools: getRoleConfig('review').allowedTools }
-                    : {}),
                   authorization: normalizeAuthorizationState(authorization),
                   workspaceAccess,
                   phase,
