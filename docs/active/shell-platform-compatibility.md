@@ -44,6 +44,13 @@ windows_restricted_token：它直接操作真实 Workspace，不复制整个仓�
 dynamic protected-glob 或 production Full qualification，Full 仍必须不可用。host backend none 时同样
 不可用。
 
+ADR-0100 的 approved-filesystem lane 是另一条显式 capability 路径，不属于 startup downgrade：
+`externalRead`、`externalWrite` 或 `uncertainEffects` 审批通过后，在用户命令启动前把
+`filesystemMode=allow_all` 投影到已选 native backend。三个平台都遵循该规则，命令不得先失败再 replay，
+也不得切换 host Shell。`curl -o`、`wget -O/-P` 与方向无法证明的文件传输客户端必须同时投影文件系统
+effects；固定高危身份继续由 Seatbelt deny、bubblewrap protected mount 或 Windows guard SID 保护。Auto
+模式由自动审批模型判断；风险判定或模型异常才升级真人审批。
+
 Windows host Shell 候选顺序：
 
 1. 系统 Git for Windows Bash（通过 where git 推导 ../bin/bash.exe）；
@@ -126,11 +133,18 @@ structural enforce network-off、arbitrary
 descendant allowlist 或 future root .env.* protection，因此即使 backend 启动成功，TUI/CLI 也必须以
 非沙箱环境无法开启full 禁用 Full。
 
+文件系统授权独立于上述网络投影。Windows 与 macOS/Linux 一样，普通外部路径和临时目录在审批通过后
+使用去权 restricted-token 的 approved filesystem scope；普通 Workspace invocation 仍使用 capability SID
+ledger，扩权 invocation 不把全局写权限写入 persistent Workspace ledger，也不要求 UAC。显式危险路径
+在 Tool Policy 阶段拒绝；approved token 还携带 restricted-only guard SID，既有固定路径对该 SID 添加
+invocation-scoped deny，避免变量拼接或间接执行绕过字符串检查。该 scope 不等于 Full 或 production evidence；
+若同一命令同时需要网络和外部文件系统，Tool Policy 必须同时展示对应 effects，批准后只执行一次。
+
 在 user script 前无法选择或 structural start 该 backend 时，development entrypoint 才能选择 cached
 host Shell。script 开始后，non-zero exit、timeout、cancel、runner、Job 或 ACL cleanup failure 都不得在
 Bash/cmd/PowerShell 上 replay。
 
-ADR-0088 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V5
+ADR-0088 已删除 AppContainer 与 repository staging。Windows native runner 只接受 protocol V6
 direct Workspace request；runner 和 vendored isksh/coreutils digest 继续固定在
 `release/platform-capabilities/windows-runner-v1.json`。
 

@@ -74,7 +74,7 @@ function statusForRuntimeEvent(event: RuntimeEvent): MetadataEventRecordV1['stat
     case 'approval.rejected':
       return outcomeStatus(canonicalToolOutcomeV1(event));
     case 'auto_review.completed':
-      return event.result.ok && !event.result.approved
+      return event.result.ok && !event.result.approved && !event.result.escalatedToUser
         ? outcomeStatus(canonicalToolOutcomeV1(event))
         : 'ok';
     case 'run.error':
@@ -186,9 +186,13 @@ function metadataForRuntimeEvent(event: RuntimeEvent): MetadataFieldsV1 {
     case 'auto_review.completed':
       return {
         approvalType: 'auto_review',
-        approvalResult: event.result.approved ? 'approved' : 'rejected',
+        approvalResult: event.result.approved
+          ? 'approved'
+          : event.result.ok && event.result.escalatedToUser
+            ? 'escalated'
+            : 'rejected',
         durationMs: event.result.durationMs,
-        ...(event.result.ok && !event.result.approved
+        ...(event.result.ok && !event.result.approved && !event.result.escalatedToUser
           ? toolOutcomeMetadata(canonicalToolOutcomeV1(event))
           : {}),
       };

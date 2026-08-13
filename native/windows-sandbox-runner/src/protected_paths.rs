@@ -44,6 +44,7 @@ pub fn protected_deny_paths(request: &InvocationRequest) -> Vec<String> {
         ".pypirc",
         ".netrc",
         ".git-credentials",
+        ".gitconfig",
         ".gitmodules",
         ".env",
         ".env.local",
@@ -62,6 +63,28 @@ pub fn protected_deny_paths(request: &InvocationRequest) -> Vec<String> {
     }
     for file in PROTECTED_FILES {
         paths.push(format!("{workspace}\\{file}"));
+    }
+    if let Some(user_profile) = std::env::var_os("USERPROFILE") {
+        let user_profile = user_profile.to_string_lossy();
+        let user_profile = user_profile
+            .trim_end_matches('\\')
+            .trim_end_matches('/');
+        for directory in PROTECTED_DIRECTORIES {
+            paths.push(format!("{user_profile}\\{directory}"));
+            paths.push(format!("{user_profile}\\{directory}\\"));
+        }
+        for file in PROTECTED_FILES {
+            paths.push(format!("{user_profile}\\{file}"));
+        }
+        if let Ok(entries) = std::fs::read_dir(user_profile) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if is_dynamic_dotenv_name(&name) {
+                    paths.push(entry.path().to_string_lossy().to_string());
+                }
+            }
+        }
     }
     if let Ok(entries) = std::fs::read_dir(workspace) {
         for entry in entries.flatten() {

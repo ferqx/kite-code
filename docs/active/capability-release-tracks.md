@@ -5,7 +5,7 @@
 或 Skill readonly/effectful 分类与 conformance 时。
 验证：`bun test tests/release/capability-profile.test.ts tests/release/capability-maturity-gate.test.ts tests/capabilities/status-projection.test.ts
 tests/verification tests/mcp/write-*.test.ts tests/skills/effect-classification.test.ts
-tests/skills/workflow-contract.test.ts tests/evals/capabilities`、`bun run typecheck`。
+tests/skills/workflow-contract.test.ts`、`bun run typecheck`。
 相关：ADR-0008、ADR-0051、ADR-0064、ADR-0068、ADR-0069、D-10、Phase 5。
 
 当前只要求 Verification、MCP write、Skills readonly/effectful 的本地 profile、status、conformance、
@@ -26,20 +26,10 @@ embedded ceiling、实际 evidence age 与 G3/G4/G5 passed。MCP write 还必须
 都不能模糊成另一项。Rollback 只关闭新 admission 并保留 Receipt 与已有 required Verification。
 Task 5.1/5.2 的本地 Profile、admission 与状态 foundation 已完成。
 
-`scripts/evals/contracts/capability-evaluation-evidence.ts` 是四条轨道共用的 production-owned retained
-evidence schema/verifier。它逐项绑定 Release artifact、route、profile、evaluator、repository/head/ref、
-workflow ref/SHA、run/attempt/job 与 retained artifact ID，重建 digest-chained receipt ledger，并针对
-Verification false pass/fabrication/bypass、MCP duplicate/unauthorized/data violation，以及 Skill
-malicious instruction/shadowing/dependency/reference/effect violation 执行 capability-specific G0。
-production OIDC/keyless Sigstore authentication shape 与 bundle subject binding 已建模；允许正向匹配的
-源码记录必须精确包含 subject、verification receipt 与 Rekor index，而不是只匹配自报 authority 字符串。
-仓库代码不执行 Sigstore 密码学验证，authority registry 当前固定为空，所以即使本地
-ledger 全部通过也只能 `blocked/evidenceEligible=false`。本地失败仍为 `failed`，不能被 authority 缺失
-掩盖，调用者提供 production-looking authentication 也不能注入 trust root。
-
-`capability-evaluation.yml` 及旧 rollout/maturity verifier 没有 OIDC、发布权限或 authority registry；它们
-固定证明伪造身份、越级和 shape-only 输入不能取得 capability。ADR-0069 后这些模块只是不可达路径的
-负向安全资产，不绑定 Task、不产生阶段或 milestone，也不是启用本地 capability 的前置路线图。
+旧 capability retained-evidence schema、producer/verifier、contract-only adapter 和无 authority workflow
+已删除：它们在空 registry 下只能固定产出 `blocked/evidenceEligible=false`，且 ADR-0069 后不再对应产品路线。
+当前安全证明由实际 profile/admission/status、Verification、MCP write governance 和 Skill workflow 测试负责。
+未来若引入真实发布 authority，必须先确定可信根、route 和证据消费者，再建立新的端到端 evidence contract。
 
 ## Verification
 
@@ -76,6 +66,5 @@ symlink/size/output/frame/recovery/budget 边界，malicious instruction 不能�
 SKILL.md 正文直接注入模型的旧路径。Task 5C.1/5C.2 的分类与 Workflow Contract 本地
 conformance 已完成。
 
-本地 5.3B/5.3C adapter 固定 `local_contract_only`/blocked；duplicate/unauthorized/data violation 或
-effect/reference drift 使 capability off。旧 rollout 与 stable milestone 已被取代，不存在待完成的
-Phase 5 promotion Task。
+duplicate/unauthorized/data violation 或 effect/reference drift 继续使 capability off。旧 rollout 与 stable
+milestone 已被取代，不存在待完成的 Phase 5 promotion Task。

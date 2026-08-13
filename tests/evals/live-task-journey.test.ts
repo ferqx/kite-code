@@ -80,12 +80,6 @@ describe('live task journey evaluator', () => {
     expect(report.scenario).toBe('invalid_args_recovery');
   });
 
-  test('declares the all-role smoke scenario without contacting a provider', async () => {
-    const report = await runLiveTaskJourneyEval({ live: false, scenario: 'all_roles' });
-    expect(report.status).toBe('live_eval_skipped');
-    expect(report.scenario).toBe('all_roles');
-  });
-
   test('declares a targeted role smoke without contacting a provider', async () => {
     const report = await runLiveTaskJourneyEval({
       live: false,

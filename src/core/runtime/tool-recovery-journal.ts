@@ -3,7 +3,6 @@ import { isToolOutcomeV1, type ToolOutcomeV1 } from './tool-outcome';
 
 export const TOOL_RECOVERY_JOURNAL_SCHEMA_VERSION = 1 as const;
 export const TOOL_RECOVERY_QUALITY_FAILURE_LIMIT = 6;
-export const TOOL_RECOVERY_QUALITY_GLOBAL_FAILURE_LIMIT = 12;
 const TOOL_RECOVERY_OBSERVATION_CAP = 250;
 
 export type ToolRecoveryAttemptModeV1 = 'model_correction' | 'automatic_retry';
@@ -38,6 +37,8 @@ export interface ToolRecoveryFailureV1 {
   turnId?: string;
   eligibleAfterModelMessageId?: string;
   eligibleModelMessageId?: string;
+  /** Exactly one call in the eligible model response may consume this correction budget. */
+  eligibleToolCallId?: string;
   status: 'unresolved' | 'recovered' | 'exhausted';
   resolution?: ToolRecoveryResolutionV1;
   outcome: ToolOutcomeV1;
@@ -174,6 +175,44 @@ function blockingFailures(journal: ToolRecoveryJournalV1): ToolRecoveryFailureV1
     .filter((entry): entry is ToolRecoveryFailureV1 => entry != null && failureStillBlocks(entry));
 }
 
+function recoveryRootFailureIdV1(
+  failures: Readonly<Record<string, ToolRecoveryFailureV1>>,
+  failure: ToolRecoveryFailureV1,
+): string {
+  let current = failure;
+  const visited = new Set<string>();
+  while (current.outcome.lineage?.recoveryOf) {
+    if (visited.has(current.failureInstanceId)) break;
+    visited.add(current.failureInstanceId);
+    const parent = failures[current.outcome.lineage.recoveryOf];
+    if (!parent) break;
+    current = parent;
+  }
+  return current.failureInstanceId;
+}
+
+function recoveryNoProgressKeyV1(
+  failures: Readonly<Record<string, ToolRecoveryFailureV1>>,
+  failure: ToolRecoveryFailureV1,
+): string {
+  return [
+    failure.taskId ?? '',
+    failure.turnId ?? '',
+    recoveryRootFailureIdV1(failures, failure),
+    failure.toolName,
+    String(failure.progressRevision),
+  ].join('\0');
+}
+
+function isRuntimeRecoverySuppressionV1(failure: ToolRecoveryFailureV1): boolean {
+  if (failure.outcome.status !== 'exhausted' || failure.outcome.lineage?.recoveryOf == null) {
+    return false;
+  }
+  return ['recovery_not_allowed', 'recovery_exhausted', 'no_progress'].includes(
+    failure.outcome.failure?.detailCode ?? '',
+  );
+}
+
 function journalInvalidQualityGuardV1(journal: ToolRecoveryJournalV1): boolean {
   return journal.qualityGuard.blocked && journal.qualityGuard.reasonCode === 'journal_invalid';
 }
@@ -279,28 +318,25 @@ export function recordRecoveryFailureV1(
   };
   const compacted = compactRecoveryFailuresV1(failures, [...journal.order, id]);
   const order = compacted.order;
+  const noProgressKey = recoveryNoProgressKeyV1(compacted.failures, failure);
   const sameNoProgress = order
     .map((entryId) => compacted.failures[entryId])
     .filter(
       (entry) =>
-        entry?.status === 'unresolved' &&
-        entry.taskId === input.taskId &&
-        entry.turnId === input.turnId &&
-        entry.invocationFingerprint === input.invocationFingerprint &&
-        entry.progressRevision === journal.progressRevision,
+        entry != null &&
+        failureStillBlocks(entry) &&
+        recoveryNoProgressKeyV1(compacted.failures, entry) === noProgressKey,
     ).length;
   const existingQualityApplies =
     (journal.qualityGuard.taskId == null || journal.qualityGuard.taskId === input.taskId) &&
     (journal.qualityGuard.turnId == null || journal.qualityGuard.turnId === input.turnId);
   const nextObservedFailures = Math.min(
     TOOL_RECOVERY_OBSERVATION_CAP,
-    (existingQualityApplies ? journal.qualityGuard.observedFailures : 0) +
-      (failure.status === 'unresolved' ? 1 : 0),
+    (existingQualityApplies ? journal.qualityGuard.observedFailures : 0) + 1,
   );
   const blocked =
     (existingQualityApplies && journal.qualityGuard.blocked) ||
-    sameNoProgress >= TOOL_RECOVERY_QUALITY_FAILURE_LIMIT ||
-    nextObservedFailures >= TOOL_RECOVERY_QUALITY_GLOBAL_FAILURE_LIMIT;
+    sameNoProgress >= TOOL_RECOVERY_QUALITY_FAILURE_LIMIT;
   return {
     ...journal,
     failures: compacted.failures,
@@ -318,6 +354,7 @@ export function recordRecoveryFailureV1(
 function candidateFailure(
   journal: ToolRecoveryJournalV1,
   input: {
+    toolCallId: string;
     toolName: string;
     invocationFingerprint: string;
     modelMessageId: string;
@@ -343,17 +380,46 @@ function candidateFailure(
     ) {
       return false;
     }
+    if (failure.eligibleToolCallId !== input.toolCallId) {
+      return false;
+    }
     if (failure.outcome.recovery.disposition === 'alternative') {
       return (
-        failure.eligibleModelMessageId == null ||
-        failure.eligibleModelMessageId === input.modelMessageId
+        alternativeCapabilityMatchesToolV1(
+          failure.outcome.recovery.capabilityIntent,
+          input.toolName,
+        ) &&
+        (failure.eligibleModelMessageId == null ||
+          failure.eligibleModelMessageId === input.modelMessageId)
       );
     }
     if (failure.toolName !== input.toolName) return false;
-    return failure.outcome.recovery.disposition === 'correct_args'
+    return failure.outcome.recovery.disposition === 'correct_args' ||
+      isRuntimeRecoverySuppressionV1(failure)
       ? true
       : failure.invocationFingerprint === input.invocationFingerprint;
   });
+}
+
+/** Match only stable Runtime-owned capability intents, never model/provider text. */
+function alternativeCapabilityMatchesToolV1(
+  capabilityIntent: string | undefined,
+  toolName: string,
+): boolean {
+  switch (capabilityIntent) {
+    case 'workspace.search':
+      return toolName === 'search_files';
+    case 'git_inspect':
+      return toolName === 'git_inspect';
+    default:
+      return false;
+  }
+}
+
+function modelCorrectionMatchesToolV1(failure: ToolRecoveryFailureV1, toolName: string): boolean {
+  return failure.outcome.recovery.disposition === 'alternative'
+    ? alternativeCapabilityMatchesToolV1(failure.outcome.recovery.capabilityIntent, toolName)
+    : failure.toolName === toolName;
 }
 
 export type RecoveryAdmissionV1 =
@@ -449,8 +515,16 @@ export function recordToolOwnedProgressV1(
   progress: ToolOwnedProgressV1,
 ): ToolRecoveryJournalV1 {
   if (!progress.referenceId) return journal;
+  const resolved = new Set(
+    (progress.resolvesFailureIds ?? []).filter((id) => {
+      const failure = journal.failures[id];
+      return failure != null && failureStillBlocks(failure);
+    }),
+  );
+  // A successful but unrelated tool receipt is not evidence of progress for an
+  // existing recovery chain and must not reset its no-progress revision.
+  if (resolved.size === 0) return journal;
   const progressRevision = journal.progressRevision + 1;
-  const resolved = new Set(progress.resolvesFailureIds ?? []);
   const resolution: ToolRecoveryResolutionV1 =
     progress.kind === 'skipped'
       ? 'skipped'
@@ -551,15 +625,19 @@ export function advanceToolRecoveryResponseV1(
   journal: ToolRecoveryJournalV1,
   input: {
     taskId?: string | null;
-    turnId: string;
+    turnId?: string;
     modelMessageId: string;
-    hasToolCalls: boolean;
-    toolNames?: readonly string[];
+    toolCalls: readonly { id: string; name: string }[];
   },
 ): ToolRecoveryJournalV1 {
   let next = journal;
   let changed = false;
   const failures = { ...journal.failures };
+  const claimedToolCallIds = new Set(
+    Object.values(failures)
+      .filter((failure) => failure.eligibleModelMessageId === input.modelMessageId)
+      .flatMap((failure) => (failure.eligibleToolCallId ? [failure.eligibleToolCallId] : [])),
+  );
   for (const id of journal.order) {
     const failure = failures[id];
     if (
@@ -572,13 +650,23 @@ export function advanceToolRecoveryResponseV1(
     ) {
       continue;
     }
-    if (failure.eligibleModelMessageId == null) {
-      const hasMatchingCorrection =
-        failure.outcome.recovery.disposition === 'alternative'
-          ? input.hasToolCalls
-          : (input.toolNames?.includes(failure.toolName) ?? input.hasToolCalls);
-      failures[id] = hasMatchingCorrection
-        ? { ...failure, eligibleModelMessageId: input.modelMessageId }
+    if (
+      failure.eligibleModelMessageId == null ||
+      (failure.eligibleModelMessageId === input.modelMessageId &&
+        failure.eligibleToolCallId == null)
+    ) {
+      const matchingToolCall = input.toolCalls.find(
+        (toolCall) =>
+          !claimedToolCallIds.has(toolCall.id) &&
+          modelCorrectionMatchesToolV1(failure, toolCall.name),
+      );
+      if (matchingToolCall) claimedToolCallIds.add(matchingToolCall.id);
+      failures[id] = matchingToolCall
+        ? {
+            ...failure,
+            eligibleModelMessageId: input.modelMessageId,
+            eligibleToolCallId: matchingToolCall.id,
+          }
         : {
             ...failure,
             eligibleModelMessageId: input.modelMessageId,
@@ -592,16 +680,6 @@ export function advanceToolRecoveryResponseV1(
     }
   }
   if (changed) next = { ...journal, failures };
-  if (!input.hasToolCalls) {
-    next = closeFailuresV1(
-      next,
-      (failure) =>
-        failure.taskId === (input.taskId ?? undefined) &&
-        failure.turnId === input.turnId &&
-        failure.eligibleModelMessageId === input.modelMessageId,
-      'next_response_elapsed',
-    );
-  }
   return next;
 }
 
@@ -814,6 +892,7 @@ export function normalizeToolRecoveryJournalV1(
     return malformed();
   }
   const failures: Record<string, ToolRecoveryFailureV1> = {};
+  const claimedEligibleToolCalls = new Set<string>();
   for (const id of order) {
     const failure = candidate.failures[id];
     const failureKeys = failure ? Object.keys(failure) : [];
@@ -831,6 +910,7 @@ export function normalizeToolRecoveryJournalV1(
             'turnId',
             'eligibleAfterModelMessageId',
             'eligibleModelMessageId',
+            'eligibleToolCallId',
             'status',
             'resolution',
             'outcome',
@@ -850,6 +930,10 @@ export function normalizeToolRecoveryJournalV1(
         typeof failure.eligibleAfterModelMessageId !== 'string') ||
       (failure.eligibleModelMessageId != null &&
         typeof failure.eligibleModelMessageId !== 'string') ||
+      (failure.eligibleToolCallId != null &&
+        (typeof failure.eligibleToolCallId !== 'string' ||
+          failure.eligibleToolCallId.length === 0 ||
+          failure.eligibleModelMessageId == null)) ||
       !['unresolved', 'recovered', 'exhausted'].includes(failure.status) ||
       (failure.resolution != null &&
         ![
@@ -892,10 +976,19 @@ export function normalizeToolRecoveryJournalV1(
     ) {
       return malformed();
     }
+    if (failure.eligibleToolCallId != null) {
+      const claimKey = `${failure.eligibleModelMessageId}\0${failure.eligibleToolCallId}`;
+      if (claimedEligibleToolCalls.has(claimKey)) return malformed();
+      claimedEligibleToolCalls.add(claimKey);
+    }
     failures[id] =
-      failure.turnId == null
-        ? { ...failure, status: 'exhausted', resolution: 'terminal' }
-        : failure;
+      failure.status === 'unresolved' &&
+      failure.eligibleModelMessageId != null &&
+      failure.eligibleToolCallId == null
+        ? { ...failure, status: 'exhausted', resolution: 'next_response_elapsed' }
+        : failure.turnId == null
+          ? { ...failure, status: 'exhausted', resolution: 'terminal' }
+          : failure;
   }
   for (const [index, id] of order.entries()) {
     const failure = failures[id]!;
@@ -921,21 +1014,49 @@ export function normalizeToolRecoveryJournalV1(
     TOOL_RECOVERY_OBSERVATION_CAP,
     Math.floor(candidate.qualityGuard.observedFailures),
   );
-  const sameIdentityWithoutProgress = Object.values(failures).reduce<Record<string, number>>(
-    (counts, failure) => {
-      if (failure.status !== 'unresolved') return counts;
-      const identity = `${failure.invocationFingerprint}:${failure.progressRevision}`;
-      counts[identity] = (counts[identity] ?? 0) + 1;
-      return counts;
-    },
-    {},
+  const noProgressGroups = new Map<string, { count: number; taskId?: string; turnId?: string }>();
+  for (const failure of Object.values(failures)) {
+    if (!failureStillBlocks(failure)) continue;
+    const key = recoveryNoProgressKeyV1(failures, failure);
+    const group = noProgressGroups.get(key);
+    noProgressGroups.set(key, {
+      count: (group?.count ?? 0) + 1,
+      ...(failure.taskId ? { taskId: failure.taskId } : {}),
+      ...(failure.turnId ? { turnId: failure.turnId } : {}),
+    });
+  }
+  const derivedBlockedGroups = [...noProgressGroups.values()].filter(
+    (group) => group.count >= TOOL_RECOVERY_QUALITY_FAILURE_LIMIT,
   );
-  const blocked =
-    candidate.qualityGuard.blocked ||
-    observedFailures >= TOOL_RECOVERY_QUALITY_GLOBAL_FAILURE_LIMIT ||
-    Object.values(sameIdentityWithoutProgress).some(
-      (count) => count >= TOOL_RECOVERY_QUALITY_FAILURE_LIMIT,
-    );
+  const derivedScopes = new Map<string, { taskId?: string; turnId?: string }>();
+  for (const group of derivedBlockedGroups) {
+    derivedScopes.set(`${group.taskId ?? ''}\0${group.turnId ?? ''}`, {
+      ...(group.taskId ? { taskId: group.taskId } : {}),
+      ...(group.turnId ? { turnId: group.turnId } : {}),
+    });
+  }
+  // A valid live journal can carry one active quality scope. Multiple derived
+  // scopes in persisted state cannot be represented safely by the V1 guard.
+  if (!candidate.qualityGuard.blocked && derivedScopes.size > 1) return malformed();
+  const derivedScope = derivedScopes.values().next().value as
+    | { taskId?: string; turnId?: string }
+    | undefined;
+  const blocked = candidate.qualityGuard.blocked || derivedBlockedGroups.length > 0;
+  const reasonCode = blocked
+    ? candidate.qualityGuard.reasonCode === 'journal_invalid'
+      ? ('journal_invalid' as const)
+      : ('no_progress' as const)
+    : undefined;
+  const guardScope =
+    reasonCode === 'no_progress'
+      ? {
+          taskId: candidate.qualityGuard.taskId ?? derivedScope?.taskId,
+          turnId: candidate.qualityGuard.turnId ?? derivedScope?.turnId,
+        }
+      : {
+          taskId: candidate.qualityGuard.taskId,
+          turnId: candidate.qualityGuard.turnId,
+        };
   return {
     schemaVersion: 1,
     identityKey: candidate.identityKey,
@@ -944,17 +1065,10 @@ export function normalizeToolRecoveryJournalV1(
     progressRevision: Math.max(0, Math.floor(candidate.progressRevision)),
     qualityGuard: {
       blocked,
-      ...(blocked
-        ? {
-            reasonCode:
-              candidate.qualityGuard.reasonCode === 'journal_invalid'
-                ? ('journal_invalid' as const)
-                : ('no_progress' as const),
-          }
-        : {}),
+      ...(reasonCode ? { reasonCode } : {}),
       observedFailures,
-      ...(candidate.qualityGuard.taskId ? { taskId: candidate.qualityGuard.taskId } : {}),
-      ...(candidate.qualityGuard.turnId ? { turnId: candidate.qualityGuard.turnId } : {}),
+      ...(guardScope.taskId ? { taskId: guardScope.taskId } : {}),
+      ...(guardScope.turnId ? { turnId: guardScope.turnId } : {}),
     },
   };
 }

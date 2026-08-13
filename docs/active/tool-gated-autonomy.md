@@ -17,13 +17,22 @@
   → 分类 effective effects
   → RuntimePolicy
   → auto review 或用户审批
-  → sandbox / network boundary
+  → invocation filesystem capability / sandbox / network boundary
   → provider adapter
   → ExecutionReceipt + RuntimeEvent
   → 必要时 Verification
 ```
 
 工具声明只让模型表达意图。模型侧不得直接执行工具，TUI 不得绕过 Tool Controller 调用 provider。
+
+Development Shell 的文件系统能力是逐 invocation 的：默认 `workspace_only` 使用 native backend；
+`externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后投影为 `allow_all`，并在命令启动前
+扩大当前 native sandbox 的文件系统 scope。该选择不是 host fallback，用户命令只能执行一次。Auto
+模式由自动审批模型先判断；模型判定风险或技术异常时才升级真人审批。危险路径和 destructive operation
+必须在审批前终止；canonical file target 与 native protected guard/mount/profile 继续在扩权后执行固定
+deny。网络客户端自身的 output/input 参数必须独立贡献 external filesystem effects；普通临时目录和
+Workspace 外文件不是硬拒绝对象。sealed production admission 仍独立治理，development capability 不形成
+qualification evidence。
 
 每个当前工具终态在持久化和发布前由 Kernel 写入唯一 canonical `ToolOutcomeV1`；current reducer
 及其消费者不再从 legacy result 字段推导 outcome，并且只投影一个成对 ToolMessage。历史 replay
@@ -79,8 +88,9 @@ schema v23/current Runtime snapshot 与当前 Subagent continuation 都必须携
 quality block，只有 pre-v23 migration 可初始化空 journal。invalid provider raw args 在
 `model.responded/tool.queued` 之前立即替换为固定 `invalid_json + redacted` sentinel；HMAC fingerprint
 只放独立 canonical-private 字段，event store、state、transcript 和 diagnostics 不得出现原文，Provider
-projection 也不得出现 fingerprint/key。auto-review rejection 的 current/replay/next-model projection
-对原 AI tool call 恰好追加一个 ToolMessage。
+projection 也不得出现 fingerprint/key。当前 auto-review 风险判定升级人工审批，不产生 ToolMessage；
+只有没有 `escalatedToUser` 的历史 auto-review rejection 在 replay/next-model projection 对原 AI tool call
+恰好追加一个 ToolMessage。
 restore 还必须从 toolCallId、canonical fingerprint 与 outcome 重算 failure instance ID，并交叉验证
 map key、lineage `failureInstanceId/recoveryOf`、attempt counters、progress revision 与 order；即使攻击者把
 多处 ID 一致改成同一伪造值，也必须以 `journal_invalid` fail closed。正常无进展 ceiling 使用独立

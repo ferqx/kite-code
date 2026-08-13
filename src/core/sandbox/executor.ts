@@ -7,7 +7,7 @@ import {
   shellTool,
   timeoutMessage,
 } from '@/core/tools/shell';
-import type { ShellNetworkMode, ShellResult } from '@/core/types';
+import type { ShellFilesystemMode, ShellNetworkMode, ShellResult } from '@/core/types';
 import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@/protocol/git';
 import { generateBwrapArgs } from './bwrap';
 import { buildCgroupPidsInvocationV1, findUsableCgroupPidsRunnerV1 } from './cgroup-pids';
@@ -95,10 +95,10 @@ function createSeatbeltExecutor(options: SandboxOptions): ShellExecutor {
   return createWrappedExecutor(
     workspace,
     resourceLimits,
-    (wrappedCommand, networkMode, sandboxRuntimeDir) => {
+    (wrappedCommand, networkMode, sandboxRuntimeDir, filesystemMode) => {
       const profile = generateSandboxProfile(workspace, {
         network: networkMode,
-        filesystemScope: options.filesystemScope,
+        filesystemScope: filesystemMode === 'allow_all' ? 'full_access' : options.filesystemScope,
         sandboxRuntimeDir,
         runtimeReadOnlyRoots,
         // ADR-0097 atomically restores native Git-metadata denial when the
@@ -132,12 +132,12 @@ function createBwrapExecutor(options: SandboxOptions): ShellExecutor {
   return createWrappedExecutor(
     workspace,
     resourceLimits,
-    (wrappedCommand, networkMode, sandboxRuntimeDir) => {
+    (wrappedCommand, networkMode, sandboxRuntimeDir, filesystemMode) => {
       const seccompPath = resolveSeccompPath(seccompBinary, workspace, sandboxRuntimeDir);
       const bwrapArgs = generateBwrapArgs(workspace, {
         network: networkMode,
         sandboxRuntimeDir,
-        filesystemScope: options.filesystemScope,
+        filesystemScope: filesystemMode === 'allow_all' ? 'full_access' : options.filesystemScope,
         gitMetadataDeny: options.brokeredGitFeatureRevision === BROKERED_GIT_FEATURE_REVISION_V1,
       });
       const shell = getSystemShell();
@@ -171,6 +171,7 @@ function createWrappedExecutor(
     wrappedCommand: string,
     networkMode: ShellNetworkMode,
     sandboxRuntimeDir: string,
+    filesystemMode: ShellFilesystemMode,
   ) => { cmd: string[]; stdin?: string },
   defaultNetworkMode: ShellNetworkMode = 'disabled',
 ): ShellExecutor {
@@ -226,6 +227,7 @@ function createWrappedExecutor(
         wrappedCommand,
         input.networkMode ?? defaultNetworkMode,
         sandboxRuntimeDir,
+        input.filesystemMode ?? 'workspace_only',
       );
 
       const proc = Bun.spawn(cmd, {

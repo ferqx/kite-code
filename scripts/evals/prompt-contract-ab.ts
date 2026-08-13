@@ -25,11 +25,7 @@ import { resolveOpenCodeGoConfig } from './live-provider-smoke';
 
 export type PromptAbArm = 'legacy' | 'v2_published';
 export type PromptAbComparison = 'legacy_vs_published';
-export type PromptAbSuite =
-  | 'first_decision'
-  | 'tool_description'
-  | 'project_instruction_effect'
-  | 'task_delegation_diagnostic';
+export type PromptAbSuite = 'first_decision' | 'project_instruction_effect';
 
 /** All live agent evals model the production full interaction mode. */
 export const LIVE_EVAL_INTERACTION_MODE = 'full' as const;
@@ -48,11 +44,7 @@ function resolveComparison(value: PromptAbComparison | undefined): PromptAbCompa
 }
 
 function resolveSuite(value: PromptAbSuite | undefined): PromptAbSuite {
-  return value === 'tool_description' ||
-    value === 'project_instruction_effect' ||
-    value === 'task_delegation_diagnostic'
-    ? value
-    : 'first_decision';
+  return value === 'project_instruction_effect' ? value : 'first_decision';
 }
 
 export interface PromptAbCase {
@@ -152,73 +144,6 @@ export const PROJECT_INSTRUCTION_EFFECT_CASES: readonly PromptAbCase[] = [
     },
   },
 ] as const;
-
-/** Isolates task-call reliability before spending another full migration batch. */
-export const TASK_DELEGATION_DIAGNOSTIC_CASES: readonly PromptAbCase[] = [
-  PROMPT_AB_CASES.find((testCase) => testCase.id === 'subagent-plan')!,
-];
-
-/** Focused fixtures for tools disclosed by this evaluator's default production capability surface. */
-export const TOOL_DESCRIPTION_CASES: readonly PromptAbCase[] = [
-  {
-    id: 'tool-read-file-known-path',
-    category: 'tool_read_file_known_path',
-    prompt: 'Read src/core/model/runtime-context.ts and report the first exported symbol.',
-    expectedTools: ['read_file'],
-    phase: 'building',
-  },
-  {
-    id: 'tool-search-files-unknown-path',
-    category: 'tool_search_files_unknown_path',
-    prompt: 'Find the path of the file named runtime-context.ts before reading it.',
-    expectedTools: ['search_files'],
-    phase: 'planning',
-  },
-  {
-    id: 'tool-search-content-symbol',
-    category: 'tool_search_content_symbol',
-    prompt: 'Locate every occurrence of buildRuntimeModeSnapshot before opening a matching file.',
-    expectedTools: ['search_content'],
-    phase: 'planning',
-  },
-  {
-    id: 'tool-search-capability',
-    category: 'tool_capability_discovery',
-    prompt:
-      'No customer lookup tool is disclosed. Discover an available capability for customer lookup without executing it.',
-    expectedTools: ['tool_search'],
-    phase: 'planning',
-  },
-  {
-    id: 'tool-task-explicit-delegation',
-    category: 'tool_explicit_delegation',
-    prompt:
-      'Delegate a bounded read-only architecture review to a planning subagent. It must inspect src/core/tools/tool-contracts.ts and return risks only, without modifying files.',
-    expectedTools: ['task'],
-    expectedTaskRole: 'plan',
-    forbiddenTaskRoles: ['code'],
-    phase: 'planning',
-  },
-  {
-    id: 'tool-write-plan',
-    category: 'tool_plan_artifact',
-    prompt:
-      'Save a concise implementation plan for adding a read-only diagnostic, then submit it for review.',
-    expectedTools: ['write_plan'],
-    phase: 'planning',
-  },
-  {
-    id: 'tool-write-file',
-    category: 'tool_file_creation',
-    prompt:
-      'In building, create src/new-config.ts with this complete content: export const enabled = true; Do not make a targeted edit.',
-    expectedTools: ['write_file'],
-    phase: 'building',
-  },
-] as const;
-
-/** Canonical name: this suite observes only the first model decision, never a Runtime journey. */
-export const FIRST_DECISION_CASES = PROMPT_AB_CASES;
 
 interface ToolAggregate {
   name: string;
@@ -1173,7 +1098,7 @@ async function evaluateAttempt(input: {
   return classification;
 }
 
-export async function runPromptContractAb(input: {
+export async function runFirstDecisionEval(input: {
   live: boolean;
   runs?: number;
   workspace?: string;
@@ -1190,21 +1115,14 @@ export async function runPromptContractAb(input: {
   const comparison = resolveComparison(input.comparison);
   const suite = resolveSuite(input.suite);
   const cases =
-    suite === 'tool_description'
-      ? TOOL_DESCRIPTION_CASES
-      : suite === 'project_instruction_effect'
-        ? PROJECT_INSTRUCTION_EFFECT_CASES
-        : suite === 'task_delegation_diagnostic'
-          ? TASK_DELEGATION_DIAGNOSTIC_CASES
-          : PROMPT_AB_CASES;
+    suite === 'project_instruction_effect' ? PROJECT_INSTRUCTION_EFFECT_CASES : PROMPT_AB_CASES;
   const arms = COMPARISON_ARMS[comparison];
   if (!input.live) {
     return {
       schema: 'FirstDecisionEvalV1',
       evaluationScope: 'first_decision_only',
       status: 'live_eval_skipped',
-      reason:
-        'Set KITE_RUN_FIRST_DECISION_EVAL=1 (or legacy KITE_RUN_PROMPT_AB=1) to use configured Provider credentials.',
+      reason: 'Set KITE_RUN_FIRST_DECISION_EVAL=1 to use configured Provider credentials.',
       schedule: 'counterbalanced_ab_ba',
       comparison,
       suite,
@@ -1304,8 +1222,7 @@ export async function runPromptContractAb(input: {
   );
   const candidatePerfect = isPromptAbCandidatePerfect(candidate);
   const candidateFirstDecisionQualified = isFirstDecisionCandidateQualified(candidate);
-  const isDiagnosticOnly =
-    suite === 'project_instruction_effect' || suite === 'task_delegation_diagnostic';
+  const isDiagnosticOnly = suite === 'project_instruction_effect';
   const status = isDiagnosticOnly
     ? providerEvidence.status === 'verified' &&
       Object.values(providerEvidenceByArm).every((evidence) => evidence.status === 'verified')
@@ -1380,6 +1297,3 @@ export async function runPromptContractAb(input: {
       : {}),
   };
 }
-
-/** Canonical entrypoint retained beside the legacy function alias for report compatibility. */
-export const runFirstDecisionEval = runPromptContractAb;

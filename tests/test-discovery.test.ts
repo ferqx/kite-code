@@ -89,7 +89,7 @@ describe('test discovery boundaries', () => {
     expect(pkg.scripts?.['test:first-decision:live']).toBe(
       'bun run scripts/evals/first-decision-eval.ts',
     );
-    expect(pkg.scripts?.['test:prompt:live']).toBe('bun run scripts/evals/first-decision-eval.ts');
+    expect(pkg.scripts?.['test:prompt:live']).toBeUndefined();
     expect(pkg.scripts?.['test:prompt-cache:live']).toBe(
       'bun run scripts/evals/prompt-cache-transition.ts',
     );

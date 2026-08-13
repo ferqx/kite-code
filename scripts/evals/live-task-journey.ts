@@ -24,14 +24,7 @@ export const LIVE_TASK_JOURNEY_PROMPT =
 export const LIVE_TASK_INVALID_ARGS_JOURNEY_PROMPT =
   'Run a task parameter-recovery evaluation for an architecture diagnosis. First call task with subagent_type=plan and task exactly "x" so the Runtime returns its real schema error. After receiving that error, autonomously call task once more with valid arguments: ask a planning subagent, without calling tools, to return one concise sentence about the architecture delegation boundary and one risk. Then answer the user directly without further tools.';
 
-export const LIVE_TASK_ALL_ROLES_JOURNEY_PROMPT =
-  'Test all sub-agents. Call task exactly once for each role: explore, plan, code, and review. Give every child a bounded self-contained smoke task that requires no tool calls and asks it to return only its role name plus "ok"; do not perform the work locally. After all four task results return, answer with a concise pass/fail summary and no further tools.';
-
-export type LiveTaskJourneyScenario =
-  | 'natural'
-  | 'invalid_args_recovery'
-  | 'all_roles'
-  | 'role_smoke';
+export type LiveTaskJourneyScenario = 'natural' | 'invalid_args_recovery' | 'role_smoke';
 export type LiveTaskJourneyArm = 'legacy' | 'v2';
 export type LiveTaskJourneyRole = 'explore' | 'plan' | 'code' | 'review';
 
@@ -128,17 +121,6 @@ export function isLiveTaskJourneyPassedV1(input: {
       journey.taskRoleCounts.code === 0 &&
       journey.taskRoleCounts.review === 0 &&
       journey.taskRoleCounts.unknown === 0
-    );
-  }
-  if (scenario === 'all_roles') {
-    return (
-      journey.taskCalls === 4 &&
-      journey.taskSucceeded === 4 &&
-      journey.taskFailedOrRejected === 0 &&
-      journey.subagentCompleted === 4 &&
-      Object.entries(journey.taskRoleCounts).every(([role, count]) =>
-        role === 'unknown' ? count === 0 : count === 1,
-      )
     );
   }
   if (scenario === 'role_smoke') {
@@ -419,7 +401,7 @@ export async function runLiveTaskJourneyEval(input: {
     threadId: `live-task-journey-${crypto.randomUUID()}`,
     userId: 'live-eval',
     workspace,
-    phase: scenario === 'all_roles' || scenario === 'role_smoke' ? 'building' : 'planning',
+    phase: scenario === 'role_smoke' ? 'building' : 'planning',
     interactionMode: 'full',
     authorizationMode: 'full_access',
     authorizationSource: 'system',
@@ -447,19 +429,15 @@ export async function runLiveTaskJourneyEval(input: {
     content:
       scenario === 'invalid_args_recovery'
         ? LIVE_TASK_INVALID_ARGS_JOURNEY_PROMPT
-        : scenario === 'all_roles'
-          ? LIVE_TASK_ALL_ROLES_JOURNEY_PROMPT
-          : scenario === 'role_smoke'
-            ? roleSmokePrompt
-            : LIVE_TASK_JOURNEY_PROMPT,
+        : scenario === 'role_smoke'
+          ? roleSmokePrompt
+          : LIVE_TASK_JOURNEY_PROMPT,
     userGoal:
       scenario === 'invalid_args_recovery'
         ? LIVE_TASK_INVALID_ARGS_JOURNEY_PROMPT
-        : scenario === 'all_roles'
-          ? LIVE_TASK_ALL_ROLES_JOURNEY_PROMPT
-          : scenario === 'role_smoke'
-            ? roleSmokePrompt
-            : LIVE_TASK_JOURNEY_PROMPT,
+        : scenario === 'role_smoke'
+          ? roleSmokePrompt
+          : LIVE_TASK_JOURNEY_PROMPT,
   });
   try {
     for await (const event of runRuntimeLoop(
@@ -583,7 +561,6 @@ if (import.meta.main) {
     scenario !== undefined &&
     scenario !== 'natural' &&
     scenario !== 'invalid_args_recovery' &&
-    scenario !== 'all_roles' &&
     scenario !== 'role_smoke'
   ) {
     throw new Error('task_journey_scenario_invalid');

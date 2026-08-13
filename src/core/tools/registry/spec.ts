@@ -24,7 +24,7 @@ import type { SubAgentResult } from '@/core/subagent/types';
 import type { ReadStateCheck } from '@/core/tools/read-state';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { ToolContractSource } from '@/core/tools/tool-contracts';
-import type { ShellNetworkBrokerV1, ShellNetworkMode } from '@/core/types';
+import type { ShellFilesystemMode, ShellNetworkBrokerV1, ShellNetworkMode } from '@/core/types';
 import type { CapabilityApproval, EffectProfile } from '@/protocol/capabilities';
 
 /**
@@ -61,6 +61,7 @@ export interface ToolExecutionContext extends ToolContext {
   signal?: AbortSignal;
   shellExecutor?: ShellExecutor;
   shellNetworkMode?: ShellNetworkMode;
+  shellFilesystemMode?: ShellFilesystemMode;
   /** Explicit host-broker capability for sandboxed shell HTTP. */
   shellNetworkBroker?: ShellNetworkBrokerV1;
   /** Per-invocation network ceiling derived from the sealed execution boundary. */

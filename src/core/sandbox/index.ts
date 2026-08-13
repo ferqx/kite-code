@@ -52,6 +52,7 @@ export type {
   ResourceLimits,
   SandboxOptions,
   SandboxUnavailablePolicy,
+  ShellFilesystemMode,
   ShellNetworkMode,
 } from './types';
 export {
@@ -61,7 +62,10 @@ export {
   type WindowsManagedNetworkSetupStateV1,
   type WindowsManagedNetworkSetupStatusV1,
 } from './windows-network-setup';
-export { createWindowsRestrictedTokenExecutor } from './windows-restricted-token';
+export {
+  createWindowsRestrictedTokenExecutor,
+  resolveWindowsRestrictedTokenFilesystemScopeV1,
+} from './windows-restricted-token';
 export {
   clearWindowsSandboxRunnerCacheV1,
   parseWindowsSandboxRunnerManifestV1,

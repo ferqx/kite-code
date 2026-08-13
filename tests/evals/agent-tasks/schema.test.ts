@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { AGENT_TASK_CATEGORIES, AgentTaskSchemaError, parseAgentTaskCase } from './cases/schema';
+import {
+  AGENT_TASK_CATEGORIES,
+  AgentTaskSchemaError,
+  parseAgentTaskCase,
+} from '../../../scripts/evals/contracts/agent-task-case-schema';
 import { syntheticAgentTaskCase } from './cases/synthetic-case';
 
 describe('AgentTaskCaseV1 schema', () => {

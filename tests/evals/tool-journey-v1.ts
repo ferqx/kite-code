@@ -408,7 +408,11 @@ function scriptedEvents(
         ]);
       if (attempt === 2)
         return modelToolEvents(state, 'second-failure-model', [
-          { id: 'second-search', name: 'search_content', input: { pattern: '[' } },
+          {
+            id: 'second-search',
+            name: 'search_files',
+            input: { pattern: '*', path: 'missing-search-root' },
+          },
         ]);
       const planning = getActivePlanning(state);
       if (attempt === 3 && planning.kind === 'executing')

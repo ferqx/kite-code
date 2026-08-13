@@ -1,7 +1,7 @@
 # Agent Task Evaluation 边界
 
 状态：active
-读取时机：修改 Agent task case、fixture、oracle、重复运行、人工验收或产品 Release Evidence 时。
+读取时机：修改 Agent task case、fixture、oracle、批准 suite 或本地任务质量评测时。
 验证：`bun test tests/evals/agent-tasks tests/evals/live-provider-smoke.test.ts tests/evals/runtime-journey-baseline.test.ts`、
 `bun run test:provider:smoke -- --provider deepseek`、
 `bun run test:provider:smoke -- --provider opencode-go`、`bun run typecheck`。
@@ -9,22 +9,15 @@
 
 ## 当前状态
 
-仓库已经具备严格的 `AgentTaskCaseV1`、隔离 fixture、确定性 oracle、append-only repeated-run
-ledger、统计重建、adversarial contract、Plan/恢复 UX mapper、人工验收 schema、immutable suite
-registry、nightly dry-run 与 Release Evidence adapter。本地资产只使用 synthetic fixture，不访问真实
-Provider，不收集用户正文，也不能成为产品 Gate 的通过证据。
-
-产品验收现在另有 `AgentTaskProductEvidenceV1` companion ledger。它把 Tool Search 的 expected/
-selected/outcome/latency、MCP/Skill 非预期触发、`ask_user` 结果与问题 digest、Plan/恢复/Verification/
-review handoff/correction/approval，以及人工 accepted/integrated/reverted/understanding/burden 收据，逐项
-绑定到同一个 source、candidate、case 和 attempt identity。人工收据只保存显式 opt-in、可退出状态、
-匿名 participant/reviewer digest 与无正文 outcome；raw prompt、response、diff 或 reviewer 评语不进入
-bundle。exact attempt coverage、receipt chain、canonical digest 或 identity 任一不一致均 fail closed。
+仓库保留严格的 `AgentTaskCaseV1`、隔离 fixture、确定性 oracle、adversarial contract、Plan/恢复 UX mapper、
+immutable suite registry 与批准 suite。它们只使用 synthetic fixture，不访问真实 Provider，不收集用户正文，
+用于验证本地任务正确性、安全边界和测试污染控制，不能成为产品 Gate 的通过证据。
 
 当前 2B 范围以 DeepSeek/OpenCode Go 各一次低成本真实调用、确定性核心 correctness、安全与 adversarial case
 为准，不要求正式重复运行、external participant 或 product evidence authority。2B.4/2B.5 已按本地范围
-完成，2B.7 已被取代。旧 retained product/evaluator schema 只保留为伪造、缺失、重排和 identity splice
-的负向 contract，不构成发布后增强路线或产品 milestone。
+完成，2B.7 已被取代。已关闭的 repeated-run、human/dogfood、retained product evidence、authenticated
+promotion producer/verifier 和只会产出 blocked artifact 的 workflow 已删除；若未来需要正式产品证据，必须
+基于当时的真实 route、authority 和产品目标重新立项，不能恢复旧 fixture 充当证据。
 
 D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发者，入口只包含 TUI 与用户在场的
 前台 Headless CLI；托管、多租户、无人值守 writer 和共享 checkout 被排除。批准 suite 固定为
@@ -32,10 +25,8 @@ D-07 已关闭。首批目标是可信本地 Workspace 中的单维护者/开发
 4 TUI/8 CLI，语言范围是 TypeScript/JavaScript Bun/Node 加语言无关 research/documentation。
 
 本地 evaluator 必须绑定批准 suite 的 ID、revision、canonical digest、精确 case 集和 determinism；
-缺失、额外、重复、重分类或只保留最好一次全部拒绝。本地 Gate 失败时顶层保持 failed，不得被 authority
-缺失掩盖。`agent-task-evidence.yml` 仍是 `contents:read`、无 OIDC/发布权限的 contract workflow，输出固定
-`contract_only`/`evidenceEligible=false`。调用者不能通过改名、shape-valid authentication 或伪造真人数量
-升级为产品证据。ADR-0069 后该 workflow 不再对应待完成 Task。
+缺失、额外、重复、重分类、隐藏 oracle 泄漏或 behavior identity drift 全部拒绝。fixture 清理只能处理
+identity 匹配的自有 worktree/process，symlink、credential 或 ownership mismatch 必须 fail closed。
 
 ## Evidence 规则
 
@@ -57,10 +48,8 @@ Verification 已完成但 Plan 缺少匹配 reference 时稳定返回 `verificat
 计数、稳定 reason code、纠正次数和严格 Plan identity，继续固定 `contentLogged=false`，并显式断言不包含
 prompt、Plan 正文、工具正文、路径、命令或 stdout。
 
-- case、suite、oracle、contract、artifact、config 和 route identity 必须全部绑定；任一 mismatch 拒绝。
-- 每次运行保留完整结构化 attempt，不能只保留最好一次。缺失指标使用 `null`/`not_observed`，不能补零。
+- case、suite、oracle、fixture 与 behavior identity 必须绑定；任一 mismatch 拒绝。
 - G0 固定为未授权副作用、secret/正文外传、sandbox escape 和 required Verification bypass 零容忍。
 - fixture 清理只处理 identity 匹配的自有 worktree/process；symlink、credential 或 ownership mismatch
   fail closed。
-- 旧 human 字段在本地固定为 `not_observed`，正文不进入 release bundle；项目不以真人数量作为发布资格。
-- Product/route/suite/scorer 变化必须产生新 revision/digest，旧报告只读保留。
+- suite/oracle/scorer 或 fixture 行为变化必须产生新 revision/digest；不得把 synthetic 结果表述为真人、真实模型或正式发布证据。

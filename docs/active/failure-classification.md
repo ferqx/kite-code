@@ -4,7 +4,7 @@
 读取时机：新增工具或模型失败路径、调整重试/升级策略、修改运行时错误日志时。
 验证：`bun test tests/runtime/failures.test.ts tests/runtime/failure-taxonomy.test.ts tests/runtime/failure-mode-conformance.test.ts tests/runtime/agent-deadline.test.ts tests/runtime/resource-budget-admission.test.ts tests/runtime/schema-v17-migration.test.ts tests/runtime/tool-outcome-recovery.test.ts tests/subagent-continuation-codec.test.ts tests/subagent-runner.test.ts`。
 
-Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and auto-review rejection all retain the classification on their tool call record.
+Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and historical auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
 
 `ClassifiedFailure` also carries an optional `parseFailureCode` (from `ParseFailureCode` in `src/core/tools/registry/registry.ts`), propagated through `InvalidToolRequest` when the Registry rejects a tool call. This preserves the structured origin (`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`) and drives the canonical family mapping: malformed JSON/arguments are `tool_invalid_args`, while unknown/unavailable Registry capabilities are `tool_not_found`. Controller、Subagent 与 persisted ToolOutcome 必须使用该映射，不能把 `tool_unavailable` 降成 model-fixable argument correction。
 
@@ -44,6 +44,15 @@ Recovery journal 的质量阻断也保留闭集 cause：普通重复失败达到
 把它改写成 `no_progress` 或 unblocked；其 task/turn 字段只记录损坏来源，scheduler 与 admission 不得按
 当前 scope 过滤，因此 task close、新 task 或下一 turn 仍以 `persistence_unavailable` 全局阻断且零 dispatch。
 只有显式新 session/受治理恢复边界可以离开该状态。普通 `no_progress` 仍只约束原 task/turn scope。
+普通 `no_progress` 的重复判定按同一 `recoveryOf` root、同一工具、同 task/turn 与 progress revision
+计数；同链参数变化继续累计，没有共同 recovery root 的独立同名调用只增加有界 observation，不以跨失败
+总数触发 hard block。单次 failure 的真实修正额度仍为一；额度外提案零 dispatch、写入同一 lineage，直到
+该链同工具第六次无进展才 hard block，不能第一次 suppression 就提升整轮。模型修正额度必须在下一
+eligible response 中唯一绑定到一个具体 `toolCallId`；`alternative` 还必须匹配 Runtime 受控的
+`capabilityIntent`，同响应的其他 sibling 保持普通准入。只有显式解析同一 recovery lineage 中 failure ID
+的成功 receipt 或 Runtime-owned resolution 才推进 progress revision 并解除该链；无关工具成功不能重置
+其无进展计数。restore 从 failure lineage 重新推导 `no_progress` 时必须同时恢复触发链的 task/turn scope，
+不能把 scoped ceiling 扩大为全 session 阻断。
 Scheduler 必须在最高优先级 correctness hard-block 区域判定该状态，早于 interaction、legacy recovery、
 已排队工具、verification、completion 与 compaction；不能等到普通 call-model fallback 前才检查。
 

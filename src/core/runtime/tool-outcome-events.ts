@@ -101,7 +101,7 @@ export function decodeHistoricalToolOutcomeEventV1(event: RuntimeEvent): Runtime
         outcomeV1: decodedHistoricalOutcomeV1(event.outcomeV1, 'rejected'),
       };
     case 'auto_review.completed': {
-      if (event.result.ok && !event.result.approved) {
+      if (event.result.ok && !event.result.approved && !event.result.escalatedToUser) {
         return {
           ...event,
           outcomeV1: decodedHistoricalOutcomeV1(event.outcomeV1, 'rejected'),
@@ -127,8 +127,9 @@ export function assertCanonicalToolOutcomeEventV1(event: RuntimeEvent): void {
       canonicalToolOutcomeV1(event);
       return;
     case 'auto_review.completed':
-      if (event.result.ok && !event.result.approved) canonicalToolOutcomeV1(event);
-      else if (event.outcomeV1 != null) {
+      if (event.result.ok && !event.result.approved && !event.result.escalatedToUser) {
+        canonicalToolOutcomeV1(event);
+      } else if (event.outcomeV1 != null) {
         throw new Error('Non-terminal auto_review.completed cannot carry ToolOutcomeV1.');
       }
       return;
@@ -321,7 +322,7 @@ function normalizeAutoReviewCompletedToolOutcomeV1(
   state: Readonly<RuntimeState>,
   occurredAt: string,
 ): Extract<RuntimeEvent, { type: 'auto_review.completed' }> {
-  if (!event.result.ok || event.result.approved) {
+  if (!event.result.ok || event.result.approved || event.result.escalatedToUser) {
     const { outcomeV1: _nonTerminalOutcome, ...nonTerminal } = event;
     return nonTerminal;
   }

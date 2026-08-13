@@ -2942,7 +2942,7 @@ describe('reduceRuntimeState — auto-review events', () => {
     expect(next.autoReview.consecutiveRejects).toBe(0);
   });
 
-  test('auto_review.completed rejects tool when not approved', () => {
+  test('legacy auto_review.completed rejects tool when not approved and not escalated', () => {
     const state = makeInitialState();
     const approval: ToolApprovalPayload = {
       ...makeToolApproval('npm test'),
@@ -2982,6 +2982,49 @@ describe('reduceRuntimeState — auto-review events', () => {
     expect(next.autoReview.rejectionHistory).toHaveLength(1);
     expect(next.autoReview.rejectionHistory[0]!.toolName).toBe('shell_execute');
     expect(next.autoReview.circuitBreakerTripped).toBe(false); // not tripped yet (threshold=3)
+  });
+
+  test('auto-review risk decision remains non-terminal until user approval follows', () => {
+    const state = makeInitialState();
+    const approval: ToolApprovalPayload = { ...makeToolApproval('npm test'), reason: 'testing' };
+    const withTool = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'tool-risk',
+      name: 'shell_execute',
+      args: { command: 'npm test' },
+    });
+    const awaiting = reduceRuntimeState(withTool, {
+      type: 'auto_review.requested',
+      reviewId: 'rev-risk',
+      toolCallId: 'tool-risk',
+      toolName: 'shell_execute',
+      reason: 'auto-review for tool approval',
+      approval,
+    });
+    const reviewed = reduceRuntimeState(awaiting, {
+      type: 'auto_review.completed',
+      reviewId: 'rev-risk',
+      toolCallId: 'tool-risk',
+      result: {
+        ok: true,
+        approved: false,
+        escalatedToUser: true,
+        reason: 'risk requires user authorization',
+        reviewerModelName: 'reviewer',
+        durationMs: 50,
+      },
+    });
+    expect(reviewed.interactions.kind).toBe('awaiting_auto_review');
+    expect(reviewed.tools.calls['tool-risk']!.status).toBe('awaiting_auto_review');
+
+    const escalated = reduceRuntimeState(reviewed, {
+      type: 'approval.requested',
+      interactionId: 'approval-after-risk',
+      toolCallId: 'tool-risk',
+      approval,
+    });
+    expect(escalated.interactions.kind).toBe('awaiting_tool_approval');
+    expect(escalated.tools.calls['tool-risk']!.status).toBe('awaiting_approval');
   });
 
   test('auto_review technical failure remains non-terminal until approval.requested follows', () => {

@@ -3,7 +3,7 @@ import {
   APPROVED_AGENT_TASK_CASE_IDS_V1,
   APPROVED_AGENT_TASK_SUITE_V1,
   parseApprovedAgentTaskSuite,
-} from './approved-suite';
+} from '../../../scripts/evals/contracts/agent-task-approved-suite';
 
 function counts(values: string[]): Record<string, number> {
   return values.reduce<Record<string, number>>((result, value) => {

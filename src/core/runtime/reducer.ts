@@ -64,7 +64,6 @@ import {
   advanceToolRecoveryResponseV1,
   closeToolRecoveryScopeV1,
   mergeToolRecoveryJournalsV1,
-  recordRecoveryExhaustionV1,
   recordRecoveryFailureV1,
   recordRecoveryInvocationV1,
   recordToolOwnedProgressV1,
@@ -1327,10 +1326,7 @@ function reduceRuntimeStateWithReplayBoundary(
           taskId: existingCall.taskId,
           turnId: existingCall.createdAtTurnId,
         };
-        const toolRecovery =
-          existingCall.recoveryAdmission && existingCall.recoveryAdmission !== 'admitted'
-            ? recordRecoveryExhaustionV1(state.toolRecovery, recoveryFailureInput)
-            : recordRecoveryFailureV1(state.toolRecovery, recoveryFailureInput);
+        const toolRecovery = recordRecoveryFailureV1(state.toolRecovery, recoveryFailureInput);
         const deferredUntilBuilding = failure.kind === 'phase_deferred';
         const deniedByPlanningPhase = failure.kind === 'phase_denied';
         return {
@@ -2229,8 +2225,10 @@ function reduceRuntimeStateWithReplayBoundary(
           taskId: state.activeTaskId,
           turnId: state.turn.turnId,
           modelMessageId: event.messageId,
-          hasToolCalls: Boolean(event.toolCalls?.length),
-          toolNames: event.toolCalls?.map((toolCall) => toolCall.name),
+          toolCalls: (event.toolCalls ?? []).map((toolCall) => ({
+            id: toolCall.id,
+            name: toolCall.name,
+          })),
         }),
         transcript: {
           ...state.transcript,
@@ -2507,9 +2505,10 @@ function reduceRuntimeStateWithReplayBoundary(
       }
       const result = event.result;
       // A failed automatic review is not a rejection.  The executor emits a
-      // following approval.requested event with a fresh interaction id. Keep
-      // the current interaction coherent until that event is reduced.
-      if (!result.ok) return state;
+      // following approval.requested event with a fresh interaction id. A
+      // reviewer risk decision follows the same escalation path. Keep the
+      // current interaction coherent until that event is reduced.
+      if (!result.ok || (!result.approved && result.escalatedToUser)) return state;
       if (result.ok && result.approved) {
         const call = state.tools.calls[state.interactions.toolCallId];
         // Reset circuit breaker on successful auto-review

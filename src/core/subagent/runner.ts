@@ -646,8 +646,9 @@ async function runSubAgentLoop(
         taskId: recoveryScopeId,
         turnId: recoveryScopeId,
         modelMessageId: responseMessageId,
-        hasToolCalls: response.tool_calls.length > 0,
-        toolNames: response.tool_calls.map((toolCall) => toolCall.name),
+        toolCalls: response.tool_calls.flatMap((toolCall) =>
+          toolCall.id ? [{ id: toolCall.id, name: toolCall.name }] : [],
+        ),
       });
       for (const tc of response.tool_calls) {
         if (combinedSignal.aborted) throw new Error('Sub-agent aborted');
@@ -732,9 +733,7 @@ async function runSubAgentLoop(
             taskId: recoveryScopeId,
             turnId: recoveryScopeId,
           };
-          toolRecovery = admission.admitted
-            ? recordRecoveryFailureV1(toolRecovery, unavailableFailure)
-            : recordRecoveryExhaustionV1(toolRecovery, unavailableFailure);
+          toolRecovery = recordRecoveryFailureV1(toolRecovery, unavailableFailure);
           continue;
         }
 
@@ -828,9 +827,7 @@ async function runSubAgentLoop(
               taskId: recoveryScopeId,
               turnId: recoveryScopeId,
             };
-            toolRecovery = admission.admitted
-              ? recordRecoveryFailureV1(toolRecovery, bindingFailure)
-              : recordRecoveryExhaustionV1(toolRecovery, bindingFailure);
+            toolRecovery = recordRecoveryFailureV1(toolRecovery, bindingFailure);
             const blockedOutput = JSON.stringify({ ok: false, error: bindingError });
             messages.push(
               toolMessage({
@@ -921,7 +918,7 @@ async function runSubAgentLoop(
               detailCode: recoveryAdmission.detailCode,
             },
           });
-          toolRecovery = recordRecoveryExhaustionV1(toolRecovery, {
+          toolRecovery = recordRecoveryFailureV1(toolRecovery, {
             toolCallId: tc.id ?? `subagent-${toolCallCount}`,
             toolName: tc.name,
             invocationFingerprint,

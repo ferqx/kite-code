@@ -116,13 +116,13 @@ describe('sub-agent external write approval chain', () => {
   test('edit_file with absolute path also triggers externalWrite', () => {
     const result = evaluateToolApproval({
       toolName: 'edit_file',
-      toolArgs: { path: '/etc/hosts', old_string: 'a', new_string: 'b' },
+      toolArgs: { path: '/tmp/edit-target.txt', old_string: 'a', new_string: 'b' },
       phase: 'building',
     });
     expect(result.effects).toEqual({ externalWrite: true });
   });
 
-  // ── Auto mode: externalWrite requires auto-review ──
+  // ── Auto mode: externalWrite requires auto-review first ──
 
   test('auto mode requires auto-review for externalWrite', () => {
     const policy = createModePolicy('auto');

@@ -1,4 +1,4 @@
-export const FORMAL_EVAL_POLICY_REVISION = 'ACORE-EVAL-POLICY-02-r1' as const;
+export const FORMAL_EVAL_POLICY_REVISION = 'ACORE-EVAL-POLICY-02-r2' as const;
 
 export interface FormalEvaluationIdentityV1 {
   formal: boolean;

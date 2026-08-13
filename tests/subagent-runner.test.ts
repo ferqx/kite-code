@@ -142,7 +142,7 @@ describe('SubAgentRunner integration', () => {
       rmSync(workspace, { recursive: true, force: true });
     }
   });
-  test('real missing-file correction completes with canonical recovery status', async () => {
+  test('real missing-file search recovery completes with canonical recovery status', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'kite-subagent-recovered-'));
     writeFileSync(join(workspace, 'present.txt'), 'recovered\n');
     const { sink } = mockEventSink();
@@ -152,6 +152,12 @@ describe('SubAgentRunner integration', () => {
           message: aiMessage({
             content: '',
             tool_calls: [{ id: 'missing', name: 'read_file', args: { path: 'missing.txt' } }],
+          }),
+        },
+        {
+          message: aiMessage({
+            content: '',
+            tool_calls: [{ id: 'located', name: 'search_files', args: { pattern: 'present.txt' } }],
           }),
         },
         {
@@ -176,7 +182,7 @@ describe('SubAgentRunner integration', () => {
       });
       expect(result.ok).toBe(true);
       expect(result.terminalStatus).toBe('completed');
-      expect(result.steps?.map((step) => step.ok)).toEqual([false, true]);
+      expect(result.steps?.map((step) => step.ok)).toEqual([false, true, true]);
       expect(result.toolRecovery?.order).toHaveLength(1);
       const recoveredFailureId = result.toolRecovery?.order[0];
       expect(
@@ -896,7 +902,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('suppresses a same-scope tool reproposal after approval denial without dispatch', async () => {
+  test('suppresses a same-scope tool reproposal without premature quality blocking', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-deny-suppression-'));
     try {
       const { sink } = mockEventSink();
@@ -956,9 +962,9 @@ describe('SubAgentRunner integration', () => {
       });
 
       expect(shellExecutions).toBe(0);
-      expect(resumed.toolRecovery?.qualityGuard).toMatchObject({
-        blocked: true,
-        reasonCode: 'no_progress',
+      expect(resumed.toolRecovery?.qualityGuard).toEqual({
+        blocked: false,
+        observedFailures: 2,
       });
       const repeated = Object.values(resumed.toolRecovery!.failures).find(
         (failure) => failure.toolCallId === 'tc-denied-2',
@@ -1016,6 +1022,9 @@ describe('SubAgentRunner integration', () => {
         { message: repeatedCall('mcp-1') },
         { message: repeatedCall('mcp-2') },
         { message: repeatedCall('mcp-3') },
+        { message: repeatedCall('mcp-4') },
+        { message: repeatedCall('mcp-5') },
+        { message: repeatedCall('mcp-6') },
         { message: aiMessage({ content: 'done' }) },
       ],
     }) as unknown as SupportedChatModel;

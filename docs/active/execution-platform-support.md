@@ -69,12 +69,18 @@ ACL deny 代替未来 root .env.* 的动态保护。因此 windows_restricted_to
 productionSupported 仍为 false，outcome 仍为 excluded。用户界面在该 backend 和 host backend none
 上均以 非沙箱环境无法开启full 说明 Full 不可用。
 
-ADR-0082/ADR-0083/ADR-0085 对齐 development 权限交互与 Windows TLS 可执行性：protocol V5 接受 Tool Policy
+ADR-0082/ADR-0083/ADR-0085 与 ADR-0101 对齐 development 权限交互与 Windows TLS 可执行性：protocol V6 接受 Tool Policy
 在单次审批后产生的 `allow_all`，并要求它使用受管 Online 登录身份；精确 runtime version query 等可证明
 本地命令继续投影为 `off`。该字段不表示 direct token 已经强制 network-off，也不改变 release capability
 verdict 或 D-04 空支持集。ADR-0088 已删除 AppContainer、private staging 与 repository reconciliation。
 
 ### Unified startup downgrade
+
+ADR-0100 另行定义 development approved-filesystem capability：审批通过的 `externalRead`、
+`externalWrite` 或 `uncertainEffects` invocation 在用户命令开始前扩大所选 native backend 的文件系统
+scope。它不是 startup downgrade、host Shell 或 native failure replay；三个平台保持相同产品语义，
+且进程、网络与资源 sandbox 继续有效。此能力不能写入 capability probe 的静态 enforced 项，也不能
+改变下表或 D-04 production support verdict。
 
 ADR-0077、ADR-0080 与 ADR-0081 使 TUI 和 foreground CLI 在 Windows、macOS、Linux 使用同一
 startup state machine。允许 host fallback 的开发入口只在用户脚本前确认 selected sandbox environment
@@ -103,11 +109,14 @@ physical Win10 behavior。该 baseline 不会让任一 Windows development backe
 
 ### native protocol 兼容性
 
-ADR-0088 将 native invocation protocol 提升到 V5。adapter 与 runner 必须以 manifest 内固定的
-`protocolVersion=5` 相互校验；V5 只描述 direct restricted-token invocation，显式携带 development
+ADR-0101 将 native invocation protocol 提升到 V6。adapter 与 runner 必须以 manifest 内固定的
+`protocolVersion=6` 相互校验；V6 只描述 direct restricted-token invocation，显式携带 development
 `off | allow_all` authorization projection，并删除 backend mode、AppContainer identity 与 staging
-字段。`allow_all` 必须切换受管 Online 登录身份。V1-V4 runner 必须在 user script 前 fail closed。
+字段。纯网络 `allow_all` 必须切换受管 Online 登录身份；approved filesystem invocation 使用 guard SID。
+V1-V5 runner 必须在 user script 前 fail closed。
 `windows-runner-v1.json` 仍表示 manifest schema/file naming V1，不表示 invocation protocol。
+仓库当前保留的 0.7.1/V5 release pin 因而会被新 adapter 拒绝；在 canonical Windows build 重建
+0.8.0/V6 runner 并重新固定 digest 前，Windows backend 的正确状态是 unavailable，而不是回退到旧协议。
 
 固定证据来自
 [Platform Capability Probe run 30579701659](https://github.com/ferqx/kite-code/actions/runs/30579701659)，

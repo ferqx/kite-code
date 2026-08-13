@@ -28,11 +28,12 @@ use windows::Win32::Security::Authorization::{
 use windows::Win32::Security::{
     AdjustTokenPrivileges, AllocateAndInitializeSid, CreateRestrictedToken, CreateWellKnownSid,
     FreeSid, GetTokenInformation, IsValidSid, LookupPrivilegeValueW, SetTokenInformation,
-    TokenDefaultDacl, TokenIsRestricted, TokenLogonSid, TokenRestrictedSids, WinWorldSid,
+    TokenDefaultDacl, TokenGroups, TokenIsRestricted, TokenLogonSid, TokenRestrictedSids,
+    TokenUser, WinWorldSid,
     CREATE_RESTRICTED_TOKEN_FLAGS, DISABLE_MAX_PRIVILEGE, LUA_TOKEN, LUID_AND_ATTRIBUTES, PSID,
     SECURITY_MAX_SID_SIZE, SECURITY_NT_AUTHORITY, SE_PRIVILEGE_ENABLED, SID_AND_ATTRIBUTES,
     TOKEN_ADJUST_DEFAULT, TOKEN_ADJUST_PRIVILEGES, TOKEN_ASSIGN_PRIMARY, TOKEN_DEFAULT_DACL,
-    TOKEN_DUPLICATE, TOKEN_PRIVILEGES, TOKEN_QUERY, WRITE_RESTRICTED,
+    TOKEN_DUPLICATE, TOKEN_PRIVILEGES, TOKEN_QUERY, TOKEN_USER, WRITE_RESTRICTED,
 };
 use windows::Win32::System::JobObjects::AssignProcessToJobObject;
 use windows::Win32::System::Threading::{
@@ -240,6 +241,11 @@ impl Drop for CapabilitySid {
 /// The process-creation flags that establish the intended restricted token.
 pub const UNELEVATED_RESTRICTED_TOKEN_FLAGS: CREATE_RESTRICTED_TOKEN_FLAGS =
     CREATE_RESTRICTED_TOKEN_FLAGS(DISABLE_MAX_PRIVILEGE.0 | LUA_TOKEN.0 | WRITE_RESTRICTED.0);
+
+/// Keeps the child non-elevated and privilege-stripped while allowing the
+/// invoking user's ordinary filesystem ACLs for one approved invocation.
+pub const APPROVED_FILESYSTEM_RESTRICTED_TOKEN_FLAGS: CREATE_RESTRICTED_TOKEN_FLAGS =
+    CREATE_RESTRICTED_TOKEN_FLAGS(DISABLE_MAX_PRIVILEGE.0 | LUA_TOKEN.0);
 
 /// Owns a primary token created by `CreateRestrictedToken`.
 pub struct RestrictedToken {
@@ -473,10 +479,10 @@ pub fn verify_restricted_token_handle(
     token: HANDLE,
     capabilities: &[CapabilitySid],
 ) -> RestrictedTokenResult<()> {
-    if !usable_handle(token) || capabilities.is_empty() {
+    if !usable_handle(token) {
         return Err(error(
             "restricted_token_verify_failed",
-            "a token and at least one capability SID are required",
+            "a valid restricted token is required",
         ));
     }
     let mut is_restricted = 0u32;
@@ -695,11 +701,107 @@ pub fn create_unelevated_restricted_token(
     Ok(token)
 }
 
+/// Build a privilege-stripped restricted token whose ordinary filesystem
+/// checks mirror the current user's ACLs while a restricted-only guard SID
+/// keeps fixed protected paths denied for this invocation.
+pub fn create_unelevated_approved_filesystem_token(
+    base_token: HANDLE,
+    protected_guard: &CapabilitySid,
+) -> RestrictedTokenResult<RestrictedToken> {
+    if !usable_handle(base_token) {
+        return Err(error(
+            "restricted_token_create_failed",
+            "a valid base token is required",
+        ));
+    }
+    if protected_guard.as_psid().0.is_null()
+        || unsafe { !IsValidSid(protected_guard.as_psid()).as_bool() }
+    {
+        return Err(error(
+            "restricted_token_create_failed",
+            "approved filesystem protected-path guard SID is invalid",
+        ));
+    }
+    let user_information = query_token_information(base_token, TokenUser)?;
+    if user_information.len() < size_of::<TOKEN_USER>() {
+        return Err(error(
+            "restricted_token_create_failed",
+            "TOKEN_USER buffer is truncated",
+        ));
+    }
+    let user = unsafe { &*(user_information.as_ptr().cast::<TOKEN_USER>()) };
+    if user.User.Sid.0.is_null() || unsafe { !IsValidSid(user.User.Sid).as_bool() } {
+        return Err(error(
+            "restricted_token_create_failed",
+            "TOKEN_USER contains an invalid SID",
+        ));
+    }
+    let group_information = query_token_information(base_token, TokenGroups)?;
+    let groups = token_group_entries(&group_information)?;
+    let mut restricted_sids = Vec::with_capacity(groups.len() + 2);
+    restricted_sids.push(SID_AND_ATTRIBUTES {
+        Sid: user.User.Sid,
+        Attributes: 0,
+    });
+    restricted_sids.extend(groups.into_iter().map(|group| SID_AND_ATTRIBUTES {
+        Sid: group.Sid,
+        Attributes: 0,
+    }));
+    restricted_sids.push(SID_AND_ATTRIBUTES {
+        Sid: protected_guard.as_psid(),
+        Attributes: 0,
+    });
+
+    let mut handle = HANDLE::default();
+    unsafe {
+        CreateRestrictedToken(
+            base_token,
+            APPROVED_FILESYSTEM_RESTRICTED_TOKEN_FLAGS,
+            None,
+            None,
+            Some(restricted_sids.as_slice()),
+            &mut handle,
+        )
+        .map_err(|windows_error| {
+            error(
+                "restricted_token_create_failed",
+                format!("CreateRestrictedToken failed: {windows_error}"),
+            )
+        })?;
+    }
+    if !usable_handle(handle) {
+        return Err(error(
+            "restricted_token_create_failed",
+            "CreateRestrictedToken returned an invalid handle",
+        ));
+    }
+    let token = RestrictedToken { handle };
+    verify_restricted_token_handle(token.handle, std::slice::from_ref(protected_guard))?;
+    enable_traverse_privilege(token.handle)?;
+    Ok(token)
+}
+
 /// Open the current process's primary token and derive an unelevated
 /// restricted token. No elevation or account creation is involved.
 pub fn create_current_user_restricted_token(
     capabilities: &[CapabilitySid],
 ) -> RestrictedTokenResult<RestrictedToken> {
+    with_current_user_primary_token(|base_token| {
+        create_unelevated_restricted_token(base_token, capabilities)
+    })
+}
+
+pub fn create_current_user_approved_filesystem_token(
+    protected_guard: &CapabilitySid,
+) -> RestrictedTokenResult<RestrictedToken> {
+    with_current_user_primary_token(|base_token| {
+        create_unelevated_approved_filesystem_token(base_token, protected_guard)
+    })
+}
+
+fn with_current_user_primary_token<T>(
+    create: impl FnOnce(HANDLE) -> RestrictedTokenResult<T>,
+) -> RestrictedTokenResult<T> {
     let mut base_token = HANDLE::default();
     unsafe {
         OpenProcessToken(
@@ -750,7 +852,7 @@ pub fn create_current_user_restricted_token(
             "the current process already runs with a restricted token",
         ));
     }
-    let result = create_unelevated_restricted_token(base_token, capabilities);
+    let result = create(base_token);
     unsafe {
         let _ = CloseHandle(base_token);
     }
@@ -951,10 +1053,10 @@ pub fn spawn_restricted_suspended_verified(
     stdout_write: HANDLE,
     stderr_write: HANDLE,
 ) -> RestrictedTokenResult<RestrictedProcess> {
-    if capabilities.is_empty() || !usable_handle(token.handle) {
+    if !usable_handle(token.handle) {
         return Err(error(
             "restricted_process_input_invalid",
-            "a restricted token and at least one capability SID are required",
+            "a valid restricted token is required",
         ));
     }
     let mut command = wide(command_line)?;
@@ -1253,5 +1355,17 @@ mod tests {
         let token = create_current_user_restricted_token(&capabilities).expect("restricted token");
         verify_restricted_token_handle(token.handle(), &capabilities)
             .expect("token should retain its capability SID");
+    }
+
+    #[test]
+    fn approved_filesystem_token_remains_restricted_with_a_protected_path_guard() {
+        if current_process_token_is_restricted().expect("inspect current token") {
+            return;
+        }
+        let guard = CapabilitySid::generate().expect("protected path guard");
+        let token = create_current_user_approved_filesystem_token(&guard)
+            .expect("approved filesystem token");
+        verify_restricted_token_handle(token.handle(), std::slice::from_ref(&guard))
+            .expect("approved filesystem token must remain restricted");
     }
 }

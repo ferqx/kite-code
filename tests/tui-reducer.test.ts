@@ -4605,6 +4605,31 @@ describe('eventReducer (blocks model)', () => {
           (block) => block.kind === 'tool_card' && block.callId === 'canonical-auto-rejected',
         ),
       ).toMatchObject({ status: 'error' });
+
+      let escalatedState = handleRuntimeEventAction(fresh(), {
+        type: 'tool.queued',
+        toolCallId: 'auto-risk-escalated',
+        name: 'shell_execute',
+        args: { command: 'touch /tmp/risk' },
+      });
+      escalatedState = handleRuntimeEventAction(escalatedState, {
+        type: 'auto_review.completed',
+        reviewId: 'auto-risk',
+        toolCallId: 'auto-risk-escalated',
+        result: {
+          ok: true,
+          approved: false,
+          escalatedToUser: true,
+          reviewerModelName: 'test',
+          durationMs: 1,
+        },
+      });
+      expect(escalatedState.pendingToolCalls['auto-risk-escalated']).toBeDefined();
+      expect(
+        flatBlocks(escalatedState).find(
+          (block) => block.kind === 'tool_card' && block.callId === 'auto-risk-escalated',
+        ),
+      ).toBeUndefined();
     });
 
     test('keeps planning shell deferrals out of the message list', () => {

@@ -3,6 +3,9 @@ import type { SandboxBackend } from './platform';
 /** Legacy per-shell network switch used by the current development executor. */
 export type ShellNetworkMode = 'disabled' | 'allow_all';
 
+/** Per-invocation native-sandbox filesystem scope selected after approval. */
+export type ShellFilesystemMode = 'workspace_only' | 'allow_all';
+
 /** Filesystem authority carried by the release-pinned execution boundary. */
 export type FilesystemScope = 'read_only' | 'workspace_write' | 'full_access';
 

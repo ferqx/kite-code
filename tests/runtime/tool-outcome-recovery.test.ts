@@ -1088,6 +1088,10 @@ describe('durable recovery journal', () => {
       outcome: correctArgsOutcome,
     });
     const failureId = journal.order[0]!;
+    journal = advanceToolRecoveryResponseV1(journal, {
+      modelMessageId: 'model-2',
+      toolCalls: [{ id: 'second', name: 'read_file' }],
+    });
     const admitted = admitRecoveryAttemptV1(journal, {
       toolCallId: 'second',
       toolName: 'read_file',
@@ -1101,21 +1105,76 @@ describe('durable recovery journal', () => {
       recoveryOf: failureId,
       mode: 'model_correction',
     });
+    journal = recordRecoveryFailureV1(journal, {
+      toolCallId: 'second',
+      toolName: 'read_file',
+      invocationFingerprint: 'changed-private-fingerprint',
+      modelMessageId: 'model-2',
+      outcome: classifyToolOutcomeV1({
+        status: 'failed',
+        failure: classifyFailure('tool_invalid_args', 'still invalid'),
+        authority: { dispatchState: 'not_started', externalEffects: 'none' },
+        lineage: { recoveryOf: failureId },
+      }),
+    });
+    const childFailureId = journal.order.at(-1)!;
 
     // JSON round-trip models a process restart; the ceiling must not reset.
-    const restored = JSON.parse(JSON.stringify(journal)) as typeof journal;
+    let restored = JSON.parse(JSON.stringify(journal)) as typeof journal;
+    restored = advanceToolRecoveryResponseV1(restored, {
+      modelMessageId: 'model-3',
+      toolCalls: [{ id: 'third', name: 'read_file' }],
+    });
+    const exhaustedAdmission = admitRecoveryAttemptV1(restored, {
+      toolCallId: 'third',
+      toolName: 'read_file',
+      invocationFingerprint: 'third-private-fingerprint',
+      modelMessageId: 'model-3',
+      mode: 'model_correction',
+    });
+    expect(exhaustedAdmission).toMatchObject({
+      admitted: false,
+      recoveryOf: childFailureId,
+      detailCode: 'recovery_exhausted',
+    });
+    restored = recordRecoveryFailureV1(restored, {
+      toolCallId: 'third',
+      toolName: 'read_file',
+      invocationFingerprint: 'third-private-fingerprint',
+      modelMessageId: 'model-3',
+      outcome: classifyToolOutcomeV1({
+        status: 'exhausted',
+        failure: classifyFailure('loop_exhausted', 'redacted'),
+        authority: { dispatchState: 'not_started', externalEffects: 'none' },
+        lineage: { recoveryOf: childFailureId },
+        toolAdvice: {
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+          detailCode: 'recovery_exhausted',
+        },
+      }),
+    });
+    const suppressionFailureId = restored.order.at(-1)!;
+    restored = advanceToolRecoveryResponseV1(restored, {
+      modelMessageId: 'model-4',
+      toolCalls: [{ id: 'fourth', name: 'read_file' }],
+    });
     expect(
       admitRecoveryAttemptV1(restored, {
-        toolCallId: 'third',
+        toolCallId: 'fourth',
         toolName: 'read_file',
-        invocationFingerprint: 'third-private-fingerprint',
-        modelMessageId: 'model-3',
+        invocationFingerprint: 'fourth-different-private-fingerprint',
+        modelMessageId: 'model-4',
         mode: 'model_correction',
       }),
-    ).toMatchObject({ admitted: false, detailCode: 'recovery_exhausted' });
+    ).toMatchObject({
+      admitted: false,
+      recoveryOf: suppressionFailureId,
+      detailCode: 'recovery_not_allowed',
+    });
   });
 
-  test('retains deny suppression and records a quality violation on same-scope reproposal', () => {
+  test('retains changed-argument deny suppression and blocks only the sixth same-tool failure', () => {
     const denied = classifyToolOutcomeV1({
       status: 'rejected',
       failure: classifyFailure('policy_denied', 'redacted'),
@@ -1139,8 +1198,7 @@ describe('durable recovery journal', () => {
       taskId: 'task-1',
       turnId: 'turn-1',
       modelMessageId: 'model-2',
-      hasToolCalls: true,
-      toolNames: ['shell_execute'],
+      toolCalls: [{ id: 'denied-2', name: 'shell_execute' }],
     });
     const admission = admitRecoveryAttemptV1(journal, {
       toolCallId: 'denied-2',
@@ -1156,25 +1214,53 @@ describe('durable recovery journal', () => {
       recoveryOf: journal.order[0],
       detailCode: 'recovery_not_allowed',
     });
-    journal = recordRecoveryExhaustionV1(journal, {
-      toolCallId: 'denied-2',
-      toolName: 'shell_execute',
-      invocationFingerprint: 'd'.repeat(64),
-      modelMessageId: 'model-2',
-      outcome: classifyToolOutcomeV1({
-        status: 'exhausted',
-        failure: classifyFailure('loop_exhausted', 'redacted'),
-        authority: { dispatchState: 'not_started', externalEffects: 'none' },
-        lineage: { recoveryOf: journal.order[0] },
-        toolAdvice: {
-          disposition: 'never',
-          maximumAdditionalCalls: 0,
-          detailCode: 'recovery_not_allowed',
-        },
-      }),
-      taskId: 'task-1',
-      turnId: 'turn-1',
-    });
+    let recoveryOf = journal.order[0]!;
+    for (let index = 2; index <= 6; index += 1) {
+      const fingerprint = index === 2 ? 'd'.repeat(64) : index.toString(16).padStart(64, '0');
+      journal = advanceToolRecoveryResponseV1(journal, {
+        taskId: 'task-1',
+        turnId: 'turn-1',
+        modelMessageId: `model-${index}`,
+        toolCalls: [{ id: `denied-${index}`, name: 'shell_execute' }],
+      });
+      const repeatedAdmission = admitRecoveryAttemptV1(journal, {
+        toolCallId: `denied-${index}`,
+        toolName: 'shell_execute',
+        invocationFingerprint: fingerprint,
+        modelMessageId: `model-${index}`,
+        mode: 'model_correction',
+        taskId: 'task-1',
+        turnId: 'turn-1',
+      });
+      expect(repeatedAdmission).toMatchObject({
+        admitted: false,
+        recoveryOf,
+        detailCode: 'recovery_not_allowed',
+      });
+      journal = recordRecoveryFailureV1(journal, {
+        toolCallId: `denied-${index}`,
+        toolName: 'shell_execute',
+        invocationFingerprint: fingerprint,
+        modelMessageId: `model-${index}`,
+        outcome: classifyToolOutcomeV1({
+          status: 'exhausted',
+          failure: classifyFailure('loop_exhausted', 'redacted'),
+          authority: { dispatchState: 'not_started', externalEffects: 'none' },
+          lineage: { recoveryOf },
+          toolAdvice: {
+            disposition: 'never',
+            maximumAdditionalCalls: 0,
+            detailCode: 'recovery_not_allowed',
+          },
+        }),
+        taskId: 'task-1',
+        turnId: 'turn-1',
+      });
+      recoveryOf = journal.order.at(-1)!;
+      if (index === 2) {
+        expect(journal.qualityGuard).toEqual({ blocked: false, observedFailures: 2 });
+      }
+    }
     expect(journal.qualityGuard).toMatchObject({
       blocked: true,
       reasonCode: 'no_progress',
@@ -1208,13 +1294,12 @@ describe('durable recovery journal', () => {
       taskId: 'task-1',
       turnId: 'turn-1',
       modelMessageId: 'model-2',
-      hasToolCalls: true,
-      toolNames: ['tool_search'],
+      toolCalls: [{ id: 'alternative-search', name: 'search_files' }],
     });
     expect(
       admitRecoveryAttemptV1(journal, {
         toolCallId: 'alternative-search',
-        toolName: 'tool_search',
+        toolName: 'search_files',
         invocationFingerprint: 'f'.repeat(64),
         modelMessageId: 'model-2',
         mode: 'model_correction',
@@ -1222,6 +1307,140 @@ describe('durable recovery journal', () => {
         turnId: 'turn-1',
       }),
     ).toEqual({ admitted: true, recoveryOf: journal.order[0] });
+  });
+
+  test('binds one alternative call without consuming an unrelated sibling in the same response', () => {
+    const alternative = classifyToolOutcomeV1({
+      status: 'failed',
+      failure: classifyFailure('tool_runtime_error', 'missing file'),
+      authority: { dispatchState: 'started', externalEffects: 'none' },
+      toolAdvice: { disposition: 'alternative', capabilityIntent: 'workspace.search' },
+    });
+    let journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(), {
+      toolCallId: 'failed-read',
+      toolName: 'read_file',
+      invocationFingerprint: 'a'.repeat(64),
+      modelMessageId: 'model-1',
+      outcome: alternative,
+      taskId: 'task-1',
+      turnId: 'turn-1',
+    });
+    const failureId = journal.order[0]!;
+    journal = advanceToolRecoveryResponseV1(journal, {
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      modelMessageId: 'model-2',
+      toolCalls: [
+        { id: 'unrelated-read', name: 'read_file' },
+        { id: 'alternative-search', name: 'search_files' },
+      ],
+    });
+
+    expect(journal.failures[failureId]).toMatchObject({
+      eligibleModelMessageId: 'model-2',
+      eligibleToolCallId: 'alternative-search',
+    });
+    expect(
+      admitRecoveryAttemptV1(journal, {
+        toolCallId: 'alternative-search',
+        toolName: 'search_files',
+        invocationFingerprint: 'b'.repeat(64),
+        modelMessageId: 'model-2',
+        mode: 'model_correction',
+        taskId: 'task-1',
+        turnId: 'turn-1',
+      }),
+    ).toEqual({ admitted: true, recoveryOf: failureId });
+    journal = recordRecoveryInvocationV1(journal, {
+      toolCallId: 'alternative-search',
+      recoveryOf: failureId,
+      mode: 'model_correction',
+    });
+    expect(
+      admitRecoveryAttemptV1(journal, {
+        toolCallId: 'unrelated-read',
+        toolName: 'read_file',
+        invocationFingerprint: 'c'.repeat(64),
+        modelMessageId: 'model-2',
+        mode: 'model_correction',
+        taskId: 'task-1',
+        turnId: 'turn-1',
+      }),
+    ).toEqual({ admitted: true });
+    expect(journal.qualityGuard).toEqual({ blocked: false, observedFailures: 1 });
+  });
+
+  test('safely expires a legacy eligible response that lacks a concrete call binding', () => {
+    let current = recordRecoveryFailureV1(createToolRecoveryJournalV1(), {
+      toolCallId: 'legacy-failure',
+      toolName: 'read_file',
+      invocationFingerprint: 'a'.repeat(64),
+      modelMessageId: 'model-1',
+      outcome: correctArgsOutcome,
+      taskId: 'task-1',
+      turnId: 'turn-1',
+    });
+    const failureId = current.order[0]!;
+    current = advanceToolRecoveryResponseV1(current, {
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      modelMessageId: 'model-2',
+      toolCalls: [{ id: 'corrected-read', name: 'read_file' }],
+    });
+    const legacy = structuredClone(current);
+    delete legacy.failures[failureId]!.eligibleToolCallId;
+
+    const normalized = normalizeToolRecoveryJournalV1(legacy);
+    expect(normalized.qualityGuard).toEqual({ blocked: false, observedFailures: 1 });
+    expect(normalized.failures[failureId]).toMatchObject({
+      status: 'exhausted',
+      resolution: 'next_response_elapsed',
+    });
+  });
+
+  test('binds only one same-name correction sibling', () => {
+    let journal = recordRecoveryFailureV1(createToolRecoveryJournalV1(), {
+      toolCallId: 'failed-read',
+      toolName: 'read_file',
+      invocationFingerprint: 'a'.repeat(64),
+      modelMessageId: 'model-1',
+      outcome: correctArgsOutcome,
+      taskId: 'task-1',
+      turnId: 'turn-1',
+    });
+    const failureId = journal.order[0]!;
+    journal = advanceToolRecoveryResponseV1(journal, {
+      taskId: 'task-1',
+      turnId: 'turn-1',
+      modelMessageId: 'model-2',
+      toolCalls: [
+        { id: 'corrected-read', name: 'read_file' },
+        { id: 'independent-read', name: 'read_file' },
+      ],
+    });
+
+    expect(
+      admitRecoveryAttemptV1(journal, {
+        toolCallId: 'corrected-read',
+        toolName: 'read_file',
+        invocationFingerprint: 'b'.repeat(64),
+        modelMessageId: 'model-2',
+        mode: 'model_correction',
+        taskId: 'task-1',
+        turnId: 'turn-1',
+      }),
+    ).toEqual({ admitted: true, recoveryOf: failureId });
+    expect(
+      admitRecoveryAttemptV1(journal, {
+        toolCallId: 'independent-read',
+        toolName: 'read_file',
+        invocationFingerprint: 'c'.repeat(64),
+        modelMessageId: 'model-2',
+        mode: 'model_correction',
+        taskId: 'task-1',
+        turnId: 'turn-1',
+      }),
+    ).toEqual({ admitted: true });
   });
 
   test('never outcomes are terminal records and cannot acquire retry lineage', () => {
@@ -1328,55 +1547,175 @@ describe('durable recovery journal', () => {
     });
   });
 
-  test('quality guard blocks well before the disaster cap of 250 calls', () => {
+  test('quality guard counts one same-tool recovery chain, not independent identical calls', () => {
     let journal = createToolRecoveryJournalV1();
-    for (let index = 0; index < 8; index += 1) {
+    let recoveryOf: string | undefined;
+    for (let index = 0; index < 6; index += 1) {
+      const outcome = classifyToolOutcomeV1({
+        status: 'failed',
+        failure: classifyFailure('tool_invalid_args', 'private args'),
+        authority: { dispatchState: 'not_started', externalEffects: 'none' },
+        ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
+      });
       journal = recordRecoveryFailureV1(journal, {
         toolCallId: `failure-${index}`,
         toolName: 'read_file',
-        invocationFingerprint: 'private-repeat',
+        invocationFingerprint: index.toString(16).padStart(64, '0'),
         modelMessageId: `model-${index}`,
-        outcome: correctArgsOutcome,
+        outcome,
         taskId: 'quality-task',
         turnId: 'quality-turn',
       });
+      recoveryOf = journal.order.at(-1)!;
+      if (index === 4) {
+        const beforeUnrelatedSuccess = journal;
+        journal = recordToolOwnedProgressV1(journal, {
+          kind: 'receipt',
+          referenceId: 'unrelated-success',
+        });
+        expect(journal).toBe(beforeUnrelatedSuccess);
+        expect(journal.progressRevision).toBe(0);
+      }
     }
     expect(journal.qualityGuard).toMatchObject({ blocked: true, reasonCode: 'no_progress' });
     expect(journal.qualityGuard.observedFailures).toBeLessThan(250);
-
-    let rotating = createToolRecoveryJournalV1();
-    for (let index = 0; index < 12; index += 1) {
-      rotating = recordRecoveryFailureV1(rotating, {
-        toolCallId: `rotating-${index}`,
-        toolName: `tool_${index}`,
-        invocationFingerprint: index.toString(16).padStart(64, '0'),
-        modelMessageId: `rotating-model-${index}`,
-        outcome: correctArgsOutcome,
-        taskId: 'rotating-task',
-        turnId: 'rotating-turn',
-      });
-    }
-    expect(rotating.qualityGuard).toMatchObject({
+    expect(normalizeToolRecoveryJournalV1(structuredClone(journal)).qualityGuard).toEqual(
+      journal.qualityGuard,
+    );
+    const persistedWithoutDerivedBlock = structuredClone(journal);
+    persistedWithoutDerivedBlock.qualityGuard = { blocked: false, observedFailures: 6 };
+    const restoredDerivedBlock = normalizeToolRecoveryJournalV1(persistedWithoutDerivedBlock);
+    expect(restoredDerivedBlock.qualityGuard).toMatchObject({
       blocked: true,
       reasonCode: 'no_progress',
-      observedFailures: 12,
+      taskId: 'quality-task',
+      turnId: 'quality-turn',
     });
+    expect(
+      isToolRecoveryQualityBlockedV1(restoredDerivedBlock, {
+        taskId: 'other-task',
+        turnId: 'other-turn',
+      }),
+    ).toBe(false);
+
+    let mixedTools = createToolRecoveryJournalV1();
+    recoveryOf = undefined;
+    for (let index = 0; index < 8; index += 1) {
+      const outcome = classifyToolOutcomeV1({
+        status: 'failed',
+        failure: classifyFailure('tool_invalid_args', 'private args'),
+        authority: { dispatchState: 'not_started', externalEffects: 'none' },
+        ...(recoveryOf ? { lineage: { recoveryOf } } : {}),
+      });
+      mixedTools = recordRecoveryFailureV1(mixedTools, {
+        toolCallId: `mixed-${index}`,
+        toolName: index % 2 === 0 ? 'read_file' : 'search_files',
+        invocationFingerprint: index.toString(16).padStart(64, '0'),
+        modelMessageId: `mixed-model-${index}`,
+        outcome,
+        taskId: 'mixed-task',
+        turnId: 'mixed-turn',
+      });
+      recoveryOf = mixedTools.order.at(-1)!;
+    }
+    expect(mixedTools.qualityGuard).toEqual({ blocked: false, observedFailures: 8 });
+
+    let independent = createToolRecoveryJournalV1();
+    for (let index = 0; index < 12; index += 1) {
+      independent = recordRecoveryFailureV1(independent, {
+        toolCallId: `independent-${index}`,
+        toolName: 'read_file',
+        invocationFingerprint: 'f'.repeat(64),
+        modelMessageId: `independent-model-${index}`,
+        outcome: correctArgsOutcome,
+        taskId: 'independent-task',
+        turnId: 'independent-turn',
+      });
+    }
+    expect(independent.qualityGuard).toEqual({ blocked: false, observedFailures: 12 });
 
     expect(
-      admitRecoveryAttemptV1(rotating, {
+      admitRecoveryAttemptV1(independent, {
         toolCallId: 'escape-replan',
         toolName: 'write_plan',
         invocationFingerprint: 'f'.repeat(64),
         modelMessageId: 'escape-model',
         mode: 'model_correction',
-        taskId: 'rotating-task',
-        turnId: 'rotating-turn',
+        taskId: 'independent-task',
+        turnId: 'independent-turn',
       }),
     ).toEqual({ admitted: true });
   });
 });
 
 describe('ToolOutcome Runtime event integration', () => {
+  test('keeps an unrelated sibling admitted after binding one alternative recovery call', () => {
+    let state = createInitialRuntimeState({
+      threadId: 'alternative-sibling',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    state = reduceRuntimeState(state, {
+      type: 'user.message_appended',
+      messageId: 'user-1',
+      content: 'inspect the workspace',
+    });
+    const taskId = state.activeTaskId!;
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'failed-read',
+      name: 'read_file',
+      args: { path: 'missing.ts' },
+      modelMessageId: 'model-1',
+      taskId,
+    });
+    const missingFileFailure = classifyFailure('tool_runtime_error', 'missing file');
+    const alternativeOutcome = classifyToolOutcomeV1({
+      status: 'failed',
+      failure: missingFileFailure,
+      authority: { dispatchState: 'started', externalEffects: 'none' },
+      toolAdvice: { disposition: 'alternative', capabilityIntent: 'workspace.search' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.failed',
+      toolCallId: 'failed-read',
+      failure: missingFileFailure,
+      outcomeV1: alternativeOutcome,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'model.responded',
+      messageId: 'model-2',
+      toolCalls: [
+        { id: 'alternative-search', name: 'search_files', args: { pattern: 'missing.ts' } },
+        { id: 'unrelated-read', name: 'read_file', args: { path: 'README.md' } },
+      ],
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'alternative-search',
+      name: 'search_files',
+      args: { pattern: 'missing.ts' },
+      modelMessageId: 'model-2',
+      taskId,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.queued',
+      toolCallId: 'unrelated-read',
+      name: 'read_file',
+      args: { path: 'README.md' },
+      modelMessageId: 'model-2',
+      taskId,
+    });
+
+    expect(state.tools.calls['alternative-search']).toMatchObject({
+      recoveryAdmission: 'admitted',
+      recoveryOf: expect.any(String),
+    });
+    expect(state.tools.calls['unrelated-read']).toMatchObject({ recoveryAdmission: 'admitted' });
+    expect(state.tools.calls['unrelated-read']?.recoveryOf).toBeUndefined();
+    expect(state.toolRecovery.qualityGuard).toEqual({ blocked: false, observedFailures: 1 });
+  });
+
   test('prioritizes a foreign child journal block over queued siblings, verification, and compaction', async () => {
     const state = createInitialRuntimeState({
       threadId: 'invalid-child-priority',
@@ -1556,6 +1895,74 @@ describe('ToolOutcome Runtime event integration', () => {
       expect.objectContaining({
         type: 'run.error',
         failure: expect.objectContaining({ kind: 'persistence_unavailable' }),
+      }),
+    );
+    kernel.close();
+  });
+
+  test('rechecks scoped no_progress after Runner preparation before using a stale tool effect lease', async () => {
+    let state = createInitialRuntimeState({
+      threadId: 'no-progress-after-prepare',
+      userId: 'user',
+      workspace: '/workspace',
+    });
+    state = reduceRuntimeState(state, {
+      type: 'user.message_appended',
+      messageId: 'user-1',
+      content: 'continue',
+    });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'prepared-model',
+      name: 'task',
+      args: { subagent_type: 'code', task: 'resume child' },
+      status: 'succeeded',
+      taskId: state.activeTaskId!,
+      createdAtTurnId: state.turn.turnId,
+    };
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: state,
+      interactionMode: 'accept_edits',
+    });
+    const childJournal = createToolRecoveryJournalV1(state.toolRecovery.identityKey);
+    childJournal.qualityGuard = {
+      blocked: true,
+      reasonCode: 'no_progress',
+      observedFailures: 6,
+      taskId: state.activeTaskId!,
+      turnId: state.turn.turnId,
+    };
+    let dispatches = 0;
+    let prepared = false;
+    const emitted: RuntimeEvent[] = [];
+    for await (const event of runRuntimeLoop(
+      kernel,
+      async () => {
+        dispatches += 1;
+        return [];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'none' }) },
+      10,
+      async (effect) => {
+        if (!prepared) {
+          prepared = true;
+          kernel.processEvent({
+            type: 'subagent.recovery_journal_merged',
+            toolCallId: 'task',
+            journal: childJournal,
+          });
+        }
+        return effect;
+      },
+    )) {
+      emitted.push(event);
+    }
+    expect(dispatches).toBe(0);
+    expect(emitted).toContainEqual(
+      expect.objectContaining({
+        type: 'run.error',
+        failure: expect.objectContaining({ kind: 'loop_exhausted' }),
       }),
     );
     kernel.close();
@@ -2050,7 +2457,7 @@ describe('ToolOutcome Runtime event integration', () => {
     expect(providerJson).toContain('Child needs a corrected read.');
   });
 
-  test('controller keeps a same-scope deny suppressed and records the zero-dispatch violation', async () => {
+  test('controller keeps a same-scope deny suppressed without prematurely hard-blocking', async () => {
     let state = createInitialRuntimeState({
       threadId: 'deny-controller-suppression',
       userId: 'user',
@@ -2120,9 +2527,9 @@ describe('ToolOutcome Runtime event integration', () => {
       interactionMode: 'accept_edits',
     });
     kernel.processEvent(rejected!);
-    expect(kernel.getState().toolRecovery.qualityGuard).toMatchObject({
-      blocked: true,
-      reasonCode: 'no_progress',
+    expect(kernel.getState().toolRecovery.qualityGuard).toEqual({
+      blocked: false,
+      observedFailures: 2,
     });
     kernel.close();
   });
@@ -2821,7 +3228,7 @@ describe('ToolOutcome Runtime event integration', () => {
     }
   });
 
-  test('restart preserves the one-correction ceiling for the same unresolved failure', () => {
+  test('restart preserves a concrete correction binding without charging a sibling call', () => {
     const path = join(tmpdir(), `kite-tool-recovery-restart-${crypto.randomUUID()}.db`);
     try {
       const first = createAgentKernel({
@@ -2851,6 +3258,11 @@ describe('ToolOutcome Runtime event integration', () => {
         storePath: path,
       });
       second.processEvent({
+        type: 'model.responded',
+        messageId: 'model-2',
+        toolCalls: [{ id: 'second', name: 'read_file', args: { path: 'fixed.txt' } }],
+      });
+      second.processEvent({
         type: 'tool.queued',
         toolCallId: 'second',
         name: 'read_file',
@@ -2870,13 +3282,19 @@ describe('ToolOutcome Runtime event integration', () => {
         storePath: path,
       });
       third.processEvent({
+        type: 'model.responded',
+        messageId: 'model-3',
+        toolCalls: [{ id: 'third', name: 'read_file', args: { path: 'another.txt' } }],
+      });
+      third.processEvent({
         type: 'tool.queued',
         toolCallId: 'third',
         name: 'read_file',
         args: { path: 'another.txt' },
         modelMessageId: 'model-3',
       });
-      expect(third.getState().tools.calls.third?.recoveryAdmission).toBe('recovery_exhausted');
+      expect(third.getState().tools.calls.third).toMatchObject({ recoveryAdmission: 'admitted' });
+      expect(third.getState().tools.calls.third?.recoveryOf).toBeUndefined();
       third.close();
     } finally {
       for (const suffix of ['', '-wal', '-shm']) {
@@ -2967,8 +3385,7 @@ describe('ToolOutcome Runtime event integration', () => {
       taskId: newTaskId,
       turnId: state.turn.turnId,
       modelMessageId: 'model-unrelated',
-      hasToolCalls: true,
-      toolNames: ['write_plan'],
+      toolCalls: [{ id: 'unrelated-plan', name: 'write_plan' }],
     });
     expect(unrelated.failures[unrelatedId]).toMatchObject({
       status: 'exhausted',

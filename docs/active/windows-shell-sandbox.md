@@ -42,6 +42,10 @@ Windows 只有以下 runtime outcome：
 | windows_restricted_token | verified native runner 可用时的默认 development backend；已审批联网调用切到受管 Online 登录会话 | canonical 真实 Workspace，不复制 repository | lower-assurance hybrid；Full 不可用，production excluded |
 | none / host Shell | 仅用户脚本前的 startup availability downgrade | 真实 host Workspace | 没有 sandbox evidence；Full 不可用 |
 
+另有 ADR-0100 定义的逐 invocation approved-filesystem scope：普通 Workspace 外读写或路径范围无法
+证明的命令审批通过后，仍由去权 restricted token 与 Job Object 执行，只使用当前用户普通 ACL，而不使用
+Workspace-only `WRITE_RESTRICTED` capability gate。它不是 host executor、startup fallback 或失败后 replay。
+
 AppContainer backend、`KITE_WINDOWS_APPCONTAINER_EXPERIMENTAL` 选择逻辑、private Workspace
 staging、repository copy、预算 Worker 和 reconciliation 已由 ADR-0088 删除。设置旧环境变量不会改变
 backend。该移除不降低 production 能力，因为实验路径从未取得 production qualification。
@@ -91,24 +95,34 @@ Windows standalone candidate 会将 runner manifest、固定 runner 与 `vendor/
 managed candidate payload。激活的 `kite.exe`/`kite-tui.exe` 通过 install marker 定位该 payload；缺失或
 digest 不一致使 backend 不可用，不会加载未固定的 host runner。
 
-## protocol V5 与 manifest V1
+## protocol V6 与 manifest V1
 
-adapter 与 runner 必须要求 native invocation `protocolVersion=5`。V5 只描述 direct
-`windows_restricted_token` invocation，携带 development `off | allow_all` authorization
-projection，并删除 backend mode、AppContainer identity 与 staging 字段。任何 V1-V4 runner 都在
-user script 前 fail closed。
+adapter 与 runner 必须要求 native invocation `protocolVersion=6`。V6 只描述 direct
+`windows_restricted_token` invocation，携带 development network `off | allow_all` 与 filesystem
+`read_only | workspace_write | full_access` authorization projection；`full_access` 只允许来自已批准的单次
+invocation，并要求 `approvedFilesystemGuardSid`，仍创建去权 restricted token 与 Job Object。V6 继承 V5
+删除的 backend mode、AppContainer identity 与 staging 字段；任何 V1-V5 runner 都在 user script 前
+fail closed。
 
 `windows-runner-v1.json` 的 V1 仍表示 manifest schema/file naming，不是 invocation protocol。
-manifest 固定 protocol V5、runner 0.7.1+、binary digest、Windows baseline 与 vendored runtime digest。
+新 runner pin 必须固定 protocol V6、runner 0.8.0+、binary digest、Windows baseline 与 vendored runtime
+digest。当前仓库内旧的 0.7.1/V5 pin 不会被 V6 adapter 接受，因此 Windows backend 在 canonical
+Windows build 生成并固定 0.8.0 artifact 前保持 fail closed；不得只改 manifest 文本复用旧 binary digest。
 
 ## 能力边界
 
 local path 的 WRITE_RESTRICTED 通过 restricted SID check 限制写入，但 current user 仍可能拥有普通读取
-权限。approved Online path 使用专用非管理员 identity + 临时 ACL lease。Job Object 只提供进程树数量和
-终止边界，不是 filesystem 或 network boundary。
+权限。approved filesystem path 使用不含 `WRITE_RESTRICTED` 的去权 token，保留 LUA 与 privilege stripping，
+文件访问服从 current user 普通 ACL；token 的 restricted SID 集合镜像 user/group SID 并加入专用 guard，
+既有固定路径只对 guard SID 写入 deny ACE，宿主当前用户不受该 ACE 影响。仅网络扩权使用专用非管理员
+identity + 临时 ACL lease。同一 invocation
+同时获批网络和外部文件系统时使用前一种去权 token 并投影 `networkMode=allow_all`，避免 Online identity
+的 Workspace ACL lease 再次阻止已批准外部路径。
+Job Object 提供进程树数量和终止边界，不单独作为 filesystem 或 network boundary。
 
 该 backend 没有 structural network-off、arbitrary-descendant allowlist 或 future root `.env.*`
-动态名称保证。static protected paths 的 deny ACE 与 durable snapshot 只是 defence in depth。ledger
+动态名称保证。static protected paths 的 guard deny 与 Workspace ledger 是 native enforcement，但不能冒充
+future-name interception。ledger
 属于 trusted host state；外部 ACL 修改后需要显式 repair，无锁快路径不会在每次调用审计整个 Workspace。
 
 因此 `windows_restricted_token` 是 development backend：
@@ -121,6 +135,12 @@ local path 的 WRITE_RESTRICTED 通过 restricted SID check 限制写入，但 c
 Tool Policy 保持逐调用授权：可证明本地的 version query 投影为 `off`；网络命令和 uncertain script
 经批准后投影为 `allow_all` 并切换受管 Online 会话。这里的模式是 development authorization，
 不产生域名 allowlist 或 production network evidence。
+
+文件系统 effects 独立处理：`externalRead`、`externalWrite` 与 `uncertainEffects` 审批通过后与其他平台
+相同投影 approved filesystem scope；Auto 模型判断安全时自动批准，判断风险或技术异常时转真人审批。
+该 invocation 不准备或修改 restricted-token Workspace ACL ledger。普通临时目录和外部文件允许执行；
+凭据、持久化入口、关键系统
+文件和 destructive 操作必须在审批前拒绝。命令自身或宿主 ACL 失败仍原样返回。
 
 ## startup downgrade 与 no replay
 

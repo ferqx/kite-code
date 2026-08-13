@@ -383,11 +383,7 @@
         "tests/evals/runtime-journey-baseline.test.ts",
         "tests/evals/tool-journey-v1.ts",
         "tests/evals/tool-journey-v1.test.ts",
-        "scripts/evals/agent-task-evidence-*.ts",
-        "scripts/evals/verify-agent-task-evidence.ts",
-        "scripts/evals/verify-agent-task-product-evidence.ts",
-        "scripts/evals/contracts/agent-task-*.ts",
-        ".github/workflows/agent-task-evidence.yml"
+        "scripts/evals/contracts/agent-task-*.ts"
       ],
       "documents": [
         "docs/active/agent-task-evaluation.md",
@@ -399,13 +395,7 @@
     },
     {
       "id": "compaction-evaluation",
-      "sources": [
-        "tests/evals/compaction/**",
-        "scripts/evals/*compaction-semantic-evidence.ts",
-        "scripts/evals/snapshot-tracked-semantic-input.ts",
-        "scripts/evals/contracts/compaction-*.ts",
-        ".github/workflows/compaction-semantic-evaluation.yml"
-      ],
+      "sources": ["tests/evals/compaction/**"],
       "documents": [
         "docs/active/compaction-release-qualification.md",
         "docs/active/real-model-test-boundary.md",
@@ -425,11 +415,6 @@
         "tests/skills/conformance-fixtures.ts",
         "tests/skills/effect-classification.test.ts",
         "tests/skills/workflow-contract.test.ts",
-        "tests/evals/capabilities/**",
-        "scripts/evals/contracts/capability-*.ts",
-        "scripts/evals/capability-evidence-producer.ts",
-        "scripts/evals/verify-capability-evidence.ts",
-        ".github/workflows/capability-evaluation.yml",
         "release/capability-profiles/**"
       ],
       "documents": [
@@ -488,7 +473,6 @@
         "scripts/evals/formal-eval-manifest.ts",
         "tests/tui-system/scenarios/prompt-contract-v2-production.test.ts",
         "tests/prompts/prompt-contract-budget.test.ts",
-        "tests/evals/first-decision-eval.test.ts",
         "tests/evals/prompt-contract-ab.test.ts",
         "tests/evals/prompt-cache-transition.test.ts",
         "tests/evals/live-task-journey.test.ts",

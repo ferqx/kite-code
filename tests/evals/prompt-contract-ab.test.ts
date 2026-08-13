@@ -19,10 +19,8 @@ import {
   PROJECT_INSTRUCTION_EFFECT_CASES,
   PROMPT_AB_CASES,
   resolvePromptAbRunStatus,
-  runPromptContractAb,
+  runFirstDecisionEval,
   sanitizePromptAbSampleOutcome,
-  TASK_DELEGATION_DIAGNOSTIC_CASES,
-  TOOL_DESCRIPTION_CASES,
 } from '@/../scripts/evals/prompt-contract-ab';
 import type { AgentConfig } from '@/core/config';
 import { createAgentTools } from '@/core/tools/definitions';
@@ -54,38 +52,34 @@ describe('Prompt Contract A/B runner', () => {
         'subagent_planning',
       ]),
     );
-    const report = await runPromptContractAb({ live: false });
+    const report = await runFirstDecisionEval({ live: false });
     expect(report.schema).toBe('FirstDecisionEvalV1');
     expect(report.evaluationScope).toBe('first_decision_only');
     expect(report.status).toBe('live_eval_skipped');
     expect(report.schedule).toBe('counterbalanced_ab_ba');
     expect(report.configuredRuns).toBe(10);
+    expect(report.caseCount).toBe(7);
     expect(report.maxOutputTokens).toBe(1024);
     expect(report.contentLogged).toBe(false);
+    expect(JSON.stringify(report)).not.toContain('whole_turn');
+    expect(JSON.stringify(report)).not.toContain('runtime_journey');
 
-    const invalidRunsReport = await runPromptContractAb({ live: false, runs: Number.NaN });
+    const invalidRunsReport = await runFirstDecisionEval({ live: false, runs: Number.NaN });
     expect(invalidRunsReport.configuredRuns).toBe(10);
   });
 
-  test('has one unambiguous fixture for each targeted tool description', async () => {
-    expect(TOOL_DESCRIPTION_CASES).toHaveLength(7);
-    expect(TOOL_DESCRIPTION_CASES.map((testCase) => testCase.expectedTools)).toEqual([
-      ['read_file'],
-      ['search_files'],
-      ['search_content'],
-      ['tool_search'],
-      ['task'],
-      ['write_plan'],
-      ['write_file'],
-    ]);
-    const report = await runPromptContractAb({
-      live: false,
-      comparison: 'legacy_vs_published',
-      suite: 'tool_description',
-    });
-    expect(report.comparison).toBe('legacy_vs_published');
-    expect(report.suite).toBe('tool_description');
-    expect(report.caseCount).toBe(7);
+  test('rejects removed duplicate suite names instead of silently running the main suite', () => {
+    const result = Bun.spawnSync(
+      [process.execPath, 'run', 'scripts/evals/first-decision-eval.ts', '--suite=tool_description'],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, KITE_RUN_FIRST_DECISION_EVAL: '0' },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    );
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr.toString()).toContain('first_decision_suite_invalid');
   });
 
   test('uses production V2 project snapshots after the user turn, including nested instructions', () => {
@@ -113,15 +107,6 @@ describe('Prompt Contract A/B runner', () => {
       expect(runtimeIndex).toBeGreaterThan(projectIndex);
     } finally {
       rmSync(workspace, { recursive: true, force: true });
-    }
-  });
-
-  test('counterbalances legacy and published V2 descriptions', () => {
-    const schedule = buildPromptAbSchedule(10, TOOL_DESCRIPTION_CASES, ['legacy', 'v2_published']);
-    for (const testCase of TOOL_DESCRIPTION_CASES) {
-      const entries = schedule.filter((entry) => entry.caseId === testCase.id);
-      expect(entries.filter((entry) => entry.order[0] === 'legacy')).toHaveLength(5);
-      expect(entries.filter((entry) => entry.order[0] === 'v2_published')).toHaveLength(5);
     }
   });
 
@@ -198,23 +183,11 @@ describe('Prompt Contract A/B runner', () => {
   test('keeps the V2 project-rule treatment/control probe out of migration scoring', async () => {
     expect(PROJECT_INSTRUCTION_EFFECT_CASES).toHaveLength(1);
     expect(PROMPT_AB_CASES.some((entry) => entry.id === 'instructions')).toBe(false);
-    const report = await runPromptContractAb({
+    const report = await runFirstDecisionEval({
       live: false,
       suite: 'project_instruction_effect',
     });
     expect(report.suite).toBe('project_instruction_effect');
-    expect(report.caseCount).toBe(1);
-  });
-
-  test('keeps task-only reliability diagnostics out of migration scoring', async () => {
-    expect(TASK_DELEGATION_DIAGNOSTIC_CASES.map((testCase) => testCase.id)).toEqual([
-      'subagent-plan',
-    ]);
-    const report = await runPromptContractAb({
-      live: false,
-      suite: 'task_delegation_diagnostic',
-    });
-    expect(report.suite).toBe('task_delegation_diagnostic');
     expect(report.caseCount).toBe(1);
   });
 

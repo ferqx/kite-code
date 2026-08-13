@@ -448,8 +448,7 @@ export async function* runRuntimeLoop(
       const effectState = kernel.getState();
       const currentEffect = decideNextEffect(effectState);
       effect =
-        currentEffect.type === 'recovery_blocked' &&
-        currentEffect.recoveryCause === 'journal_invalid'
+        currentEffect.type === 'recovery_blocked'
           ? currentEffect
           : guardLegacyPlanContinuationEffect(effectState, effect, currentEffect);
       const shellGroup =

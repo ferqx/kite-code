@@ -1,5 +1,4 @@
 import { createHash } from 'node:crypto';
-import { isAbsolute } from 'node:path';
 import { getFeatureFlags } from '@/core/config/features';
 import type { AgentConfig } from '@/core/config/index';
 import { claimPermit, type PermitBatch } from '@/core/execution/permit';
@@ -67,6 +66,7 @@ import type { ShellExecutor } from '@/core/tools/shell';
 import { normalizeToolContract } from '@/core/tools/tool-contracts';
 import type {
   AuthorizationOverride,
+  ShellFilesystemMode,
   ShellNetworkMode,
   ThreadAuthorizationState,
 } from '@/core/types';
@@ -131,9 +131,15 @@ function safeRecordPostimage(
  * Path args may arrive in MSYS2 form (/c/proj/...); normalize before the
  * external check, consistent with the policy layer, so in-workspace paths
  * are not treated as external. No-op outside Windows. */
-function isExternalPathArg(pathArg: string): boolean {
+function isExternalPathArg(workspace: string, pathArg: string): boolean {
   const normalized = msys2ToWindowsPath(pathArg);
-  return isAbsolute(normalized) || normalized.startsWith('~');
+  if (normalized.startsWith('~')) return true;
+  try {
+    resolvePath(workspace, normalized, { allowExternal: false });
+    return false;
+  } catch {
+    return true;
+  }
 }
 
 /** Production capability surfaces reject every path that does not resolve
@@ -142,7 +148,7 @@ function isExternalPathArg(pathArg: string): boolean {
  * approval-shape predicate, while this is a fail-closed execution ceiling. */
 function isOutsideProductionWorkspace(workspace: string, pathArg: string): boolean {
   if (!pathArg) return false;
-  if (isExternalPathArg(pathArg)) return true;
+  if (isExternalPathArg(workspace, pathArg)) return true;
   try {
     resolvePath(workspace, pathArg, { allowExternal: false });
     return false;
@@ -580,7 +586,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
 
   if (request.name === 'read_file') {
     const filePath = request.args.path;
-    const isExternal = isExternalPathArg(filePath);
+    const isExternal = isExternalPathArg(workspace, filePath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 结果组装保持与旧路径字节一致（resultMeta / digest / TUI 展示不受影响）。
@@ -650,7 +656,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       });
     }
     const editPath = editInput.path;
-    const isExternal = isExternalPathArg(editPath);
+    const isExternal = isExternalPathArg(workspace, editPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // ADR-0042 §4：改动前读取文件内容用于 readState 计算；
     // 原像记录延迟到 preExecute 通过之后（只在实际写入前记录）。
@@ -720,7 +726,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
     const writeInput = request.args;
     const filePath = writeInput.path;
     const content = writeInput.content;
-    const isExternal = isExternalPathArg(filePath);
+    const isExternal = isExternalPathArg(workspace, filePath);
     const allowExternal = hasExecutionGrant && isExternal;
 
     // 写入前读取旧内容，用于生成 diff / Read old content before writing for diff
@@ -826,7 +832,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   if (request.name === 'search_content') {
     const searchInput = request.args;
     const searchPath = searchInput.path ?? '.';
-    const isExternal = isExternalPathArg(searchPath);
+    const isExternal = isExternalPathArg(workspace, searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
@@ -868,7 +874,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   if (request.name === 'search_files') {
     const searchInput = request.args;
     const searchPath = searchInput.path ?? '.';
-    const isExternal = isExternalPathArg(searchPath);
+    const isExternal = isExternalPathArg(workspace, searchPath);
     const allowExternal = hasExecutionGrant && isExternal;
     // 已迁入 ToolSpec Registry（ADR-0043 S1.2）：执行经 dispatchRegisteredTool，
     // 截断与 resultMeta 组装保持与旧路径字节一致。
@@ -1096,21 +1102,14 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'shell_execute') {
-    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant, networkBoundaryPolicy);
-    const shellNetworkBroker =
-      networkBoundaryPolicy && hasExecutionGrant && input.recordNetworkDecision && request.id
-        ? {
-            policy: networkBoundaryPolicy,
-            toolCallId: request.id,
-            recordDecision: input.recordNetworkDecision,
-          }
-        : undefined;
+    const networkMode = resolveShellNetworkMode(policy, hasExecutionGrant);
+    const filesystemMode = resolveShellFilesystemMode(policy, hasExecutionGrant);
     const dispatched = await dispatchRegisteredTool(shellExecuteSpec, request.args, {
       workspace,
       signal,
       shellExecutor,
       shellNetworkMode: networkMode,
-      shellNetworkBroker,
+      shellFilesystemMode: filesystemMode,
       onShellProgress: input.onShellProgress,
       protectedPathEvaluator,
     });
@@ -1152,6 +1151,7 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
       gitBroker,
       protectedPathEvaluator,
       allowExternalPaths: isExternalPathArg(
+        workspace,
         String((request.args as Record<string, unknown>).path ?? ''),
       )
         ? hasExecutionGrant
@@ -1228,14 +1228,21 @@ function serializeMcpResultForModel(result: import('@/core/capabilities/result')
 function resolveShellNetworkMode(
   policy: ReturnType<typeof evaluateToolApproval>,
   hasExecutionGrant: boolean,
-  networkBoundaryPolicy?: NetworkBoundaryPolicyV1,
 ): ShellNetworkMode {
-  // No supported native backend can enforce a host allowlist for arbitrary
-  // descendants yet. A sealed execution boundary therefore tightens process
-  // networking to off instead of falling back to legacy allow_all.
-  if (networkBoundaryPolicy) return 'disabled';
   const mayNeedNetwork = policy.effects?.network || policy.effects?.uncertainEffects;
   return mayNeedNetwork && hasExecutionGrant ? 'allow_all' : 'disabled';
+}
+
+function resolveShellFilesystemMode(
+  policy: import('@/core/policies/approval-policy').ApprovalDecision,
+  hasExecutionGrant: boolean,
+): ShellFilesystemMode {
+  if (!hasExecutionGrant) return 'workspace_only';
+  return policy.effects?.externalRead ||
+    policy.effects?.externalWrite ||
+    policy.effects?.uncertainEffects
+    ? 'allow_all'
+    : 'workspace_only';
 }
 
 function ungovernedMcpNetworkResult(

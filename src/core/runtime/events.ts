@@ -752,13 +752,15 @@ export interface AutoReviewCompletedEvent {
   toolCallId: string;
   /**
    * `ok: true` is an actual reviewer decision; only that path can approve or
-   * reject a tool. `ok: false` is a technical failure and must be escalated
-   * to the normal user-approval interaction.
+   * escalate a tool. `ok: false` is a technical failure and must also be
+   * escalated to the normal user-approval interaction.
    */
   result:
     | {
         ok: true;
         approved: boolean;
+        /** A risk decision is non-terminal when it has been handed to the user. */
+        escalatedToUser?: true;
         grant?: string;
         reason?: string;
         reviewerModelName: string;

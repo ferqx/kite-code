@@ -20,7 +20,7 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex, WaitForSingleObject};
 
 use crate::acl;
-use crate::job::{RUNTIME_ALLOW, WORKSPACE_ALLOW};
+use crate::job::{GENERIC_ALL, RUNTIME_ALLOW, WORKSPACE_ALLOW};
 use crate::protocol::FilesystemScope;
 use crate::restricted_token::CapabilitySid;
 use crate::sha256_hex;
@@ -84,11 +84,18 @@ pub struct DirectWorkspaceSecurity {
     runtime_capability_index: usize,
     ephemeral_workspace_capability_index: Option<usize>,
     ephemeral_snapshots: Vec<acl::DaclSnapshot>,
+    approved_filesystem_guard_index: Option<usize>,
+    approved_filesystem_guard_paths: Vec<String>,
 }
 
 impl DirectWorkspaceSecurity {
     pub fn capabilities(&self) -> &[CapabilitySid] {
         &self.capabilities
+    }
+
+    pub fn approved_filesystem_guard(&self) -> Option<&CapabilitySid> {
+        self.approved_filesystem_guard_index
+            .and_then(|index| self.capabilities.get(index))
     }
 
     /// Remove every per-invocation ACL grant.  The normal workspace capability
@@ -109,6 +116,13 @@ impl DirectWorkspaceSecurity {
                 acl::revoke_access(&self.workspace_root, self.capabilities[index].as_psid())
             {
                 failures.push(err.to_string());
+            }
+        }
+        if let Some(index) = self.approved_filesystem_guard_index {
+            for path in self.approved_filesystem_guard_paths.iter().rev() {
+                if let Err(err) = acl::revoke_access(path, self.capabilities[index].as_psid()) {
+                    failures.push(err.to_string());
+                }
             }
         }
         if failures.is_empty() {
@@ -134,6 +148,7 @@ pub fn prepare_direct_workspace(
     filesystem_scope: FilesystemScope,
     runtime_capability_sid: &str,
     ephemeral_workspace_capability_sid: Option<&str>,
+    approved_filesystem_guard_sid: Option<&str>,
     protected_paths: &[String],
 ) -> Result<DirectWorkspaceSecurity> {
     let workspace_root = canonical_directory(workspace_root, "workspace")?;
@@ -162,6 +177,8 @@ pub fn prepare_direct_workspace(
         let mut capabilities = Vec::new();
         let mut ephemeral_workspace_capability_index = None;
         let mut ephemeral_snapshots = Vec::new();
+        let mut approved_filesystem_guard_index = None;
+        let mut approved_filesystem_guard_paths = Vec::new();
 
         if matches!(filesystem_scope, FilesystemScope::WorkspaceWrite) {
             if let Some(ephemeral_sid) = ephemeral_workspace_capability_sid {
@@ -196,6 +213,35 @@ pub fn prepare_direct_workspace(
             }
         }
 
+        if matches!(filesystem_scope, FilesystemScope::FullAccess) {
+            let guard_sid = approved_filesystem_guard_sid.ok_or_else(|| {
+                error(
+                    "restricted_token_protected_guard_invalid",
+                    "full_access requires an invocation protected-path guard SID",
+                )
+            })?;
+            let guard = CapabilitySid::parse(guard_sid).map_err(|source| {
+                error(
+                    "restricted_token_protected_guard_invalid",
+                    source.to_string(),
+                )
+            })?;
+            for path in existing_protected_paths(protected_paths) {
+                if let Err(source) = acl::deny_identity_access(&path, guard.as_psid(), GENERIC_ALL) {
+                    for guarded_path in approved_filesystem_guard_paths.iter().rev() {
+                        let _ = acl::revoke_access(guarded_path, guard.as_psid());
+                    }
+                    return Err(error(
+                        "restricted_token_acl_protect_failed",
+                        source.to_string(),
+                    ));
+                }
+                approved_filesystem_guard_paths.push(path);
+            }
+            approved_filesystem_guard_index = Some(capabilities.len());
+            capabilities.push(guard);
+        }
+
         let runtime_capability_index = capabilities.len();
         capabilities.push(runtime_capability);
         Ok(DirectWorkspaceSecurity {
@@ -205,6 +251,8 @@ pub fn prepare_direct_workspace(
             runtime_capability_index,
             ephemeral_workspace_capability_index,
             ephemeral_snapshots,
+            approved_filesystem_guard_index,
+            approved_filesystem_guard_paths,
         })
     })();
 

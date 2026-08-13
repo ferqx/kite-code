@@ -2798,7 +2798,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       // Auto-review is not a user-facing interaction. Only an explicit
       // automatic rejection becomes a visible tool result; technical failure
       // is followed by approval.requested and must not be rendered as a deny.
-      if (!event.result.ok || event.result.approved) return state;
+      if (!event.result.ok || event.result.approved || event.result.escalatedToUser) return state;
       const outcomeV1 = canonicalToolOutcomeV1(event);
       const name =
         state.pendingToolCalls[event.toolCallId]?.name ?? visibleToolName(state, event.toolCallId);

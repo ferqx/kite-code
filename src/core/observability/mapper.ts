@@ -486,7 +486,10 @@ export class ProductionMetricMapperV1 {
       }
       case 'approval.rejected':
       case 'auto_review.completed': {
-        if (event.type === 'auto_review.completed' && (!event.result.ok || event.result.approved)) {
+        if (
+          event.type === 'auto_review.completed' &&
+          (!event.result.ok || event.result.approved || event.result.escalatedToUser)
+        ) {
           return [];
         }
         const outcomeV1 = canonicalToolOutcomeV1(event);

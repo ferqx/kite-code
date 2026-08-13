@@ -16,6 +16,7 @@ import {
 } from '@/core/controllers/model-controller';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
 import {
+  type AutoReviewResult,
   createAutoReviewModel,
   resolveAutoReviewConfig,
   reviewToolApproval,
@@ -88,6 +89,10 @@ export interface RuntimeExecutorDependencies {
 /** Resolve the reviewer timeout while preserving the pre-flag compatibility path. */
 export function resolveAutoReviewTimeout(config: AgentConfig): number {
   return getFeatureFlags(config).autoReviewV2 ? (config.autoReview?.timeoutMs ?? 15_000) : 15_000;
+}
+
+export function shouldEscalateAutoReviewResult(result: AutoReviewResult): boolean {
+  return !result.ok || !result.suggestion?.approved;
 }
 
 function reviewerProviderDataAdmission(
@@ -622,6 +627,7 @@ async function executeAutoReview(
         ? {
             ok: true,
             approved: result.suggestion?.approved ?? false,
+            ...(!result.suggestion?.approved ? { escalatedToUser: true as const } : {}),
             grant: result.suggestion?.grant,
             reason: result.suggestion?.reason ?? result.reason,
             reviewerModelName: reviewerConfig.modelName ?? reviewerConfig.providerName ?? 'unknown',
@@ -638,7 +644,7 @@ async function executeAutoReview(
             durationMs: Date.now() - startTime,
           },
     };
-    if (!result.ok) {
+    if (shouldEscalateAutoReviewResult(result)) {
       return [
         completed,
         {

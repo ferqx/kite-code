@@ -417,6 +417,24 @@ describe('evaluateToolApproval', () => {
       expect(result.phaseConstraint).toBeUndefined();
     });
 
+    it('requires approval for shell reads outside the workspace', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'cat /tmp/kite-approved-read.txt' } }),
+      );
+      expect(result.allowed).toBe(true);
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalRead: true });
+    });
+
+    it('denies protected path reads before opening an approval', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'cat ~/.ssh/id_ed25519' } }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.decision).toBe('deny');
+    });
+
     it('requires approval for write-like shell commands', () => {
       const result = evaluateToolApproval(baseParams({ toolArgs: { command: 'cp a b' } }));
       expect(result.allowed).toBe(true);
@@ -457,6 +475,7 @@ describe('evaluateToolApproval', () => {
       expect(result.requiresApproval).toBe(true);
       expect(result.risk).toBe('write_file');
       expect(result.decision).toBe('ask');
+      expect(result.effects).toEqual({ externalWrite: true });
     });
 
     it('downgrades rm -rf on other non-critical paths to write_file', () => {
@@ -507,7 +526,31 @@ describe('evaluateToolApproval', () => {
     it('marks dependency installation as network access', () => {
       const result = evaluateToolApproval(baseParams({ toolArgs: { command: 'bun install' } }));
       expect(result.risk).toBe('write_file');
-      expect(result.effects).toEqual({ network: true });
+      expect(result.effects).toEqual({ network: true, uncertainEffects: true });
+    });
+
+    it('projects filesystem effects for network clients that write without redirection', () => {
+      expect(
+        evaluateToolApproval(
+          baseParams({ toolArgs: { command: 'curl -o /tmp/out https://example.com' } }),
+        ).effects,
+      ).toEqual({ network: true, externalWrite: true });
+      expect(
+        evaluateToolApproval(
+          baseParams({ toolArgs: { command: 'wget -O /tmp/out https://example.com' } }),
+        ).effects,
+      ).toEqual({ network: true, externalWrite: true });
+      expect(
+        evaluateToolApproval(baseParams({ toolArgs: { command: 'scp host:/file /tmp/out' } }))
+          .effects,
+      ).toEqual({ network: true, uncertainEffects: true });
+    });
+
+    it('keeps uncertain filesystem effects on mixed network and external-write commands', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolArgs: { command: 'touch /tmp/output.txt; curl example.com' } }),
+      );
+      expect(result.effects).toEqual({ network: true, uncertainEffects: true });
     });
 
     it('marks writes outside the workspace for approval', () => {
@@ -531,12 +574,12 @@ describe('evaluateToolApproval', () => {
       expect(result.effects).toEqual({ uncertainEffects: true });
     });
 
-    it('marks local Git mutations as uncertain because hooks and filters can execute external programs', () => {
+    it('keeps local Git mutations inside the workspace filesystem lane', () => {
       const result = evaluateToolApproval(
         baseParams({ toolArgs: { command: 'git commit -m update' } }),
       );
 
-      expect(result.effects).toEqual({ uncertainEffects: true });
+      expect(result.effects).toEqual({});
     });
   });
 
@@ -608,6 +651,42 @@ describe('evaluateToolApproval', () => {
         baseParams({ toolName: 'edit_file', toolArgs: { path: '/etc/config' } }),
       );
       expect(result.effects).toEqual({ externalWrite: true });
+    });
+
+    it('treats relative traversal as an external write requiring approval', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'write_file', toolArgs: { path: '../outside.txt' } }),
+      );
+      expect(result.requiresApproval).toBe(true);
+      expect(result.effects).toEqual({ externalWrite: true });
+    });
+
+    it('denies protected file writes before opening an approval', () => {
+      const result = evaluateToolApproval(
+        baseParams({ toolName: 'write_file', toolArgs: { path: '~/.ssh/authorized_keys' } }),
+      );
+      expect(result.allowed).toBe(false);
+      expect(result.requiresApproval).toBe(false);
+      expect(result.decision).toBe('deny');
+    });
+
+    it('denies a benign-looking symlink whose canonical target is protected', () => {
+      const workspace = mkdtempSync(join(tmpdir(), 'approval-protected-link-'));
+      try {
+        writeFileSync(join(workspace, '.env'), 'SECRET=value');
+        symlinkSync(join(workspace, '.env'), join(workspace, 'ordinary.txt'));
+        const result = evaluateToolApproval(
+          baseParams({
+            workspace,
+            toolName: 'read_file',
+            toolArgs: { path: 'ordinary.txt' },
+          }),
+        );
+        expect(result.allowed).toBe(false);
+        expect(result.decision).toBe('deny');
+      } finally {
+        rmSync(workspace, { recursive: true, force: true });
+      }
     });
 
     it('marks external path in userVisibleSummary', () => {

@@ -10,7 +10,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from '../src/app/cli/index';
 import { generateBwrapArgs } from '../src/core/sandbox/bwrap';
@@ -87,6 +87,20 @@ describe('sandbox profile generation', () => {
   test('profile explicitly grants network access when allow_all is selected', () => {
     const profile = generateSandboxProfile(workspace, { network: 'allow_all' });
     expect(profile).toContain('(allow network*)');
+  });
+
+  test('approved filesystem scope keeps Seatbelt active while widening file rules', () => {
+    const profile = generateSandboxProfile(workspace, { filesystemScope: 'full_access' });
+    expect(profile).toContain('(deny default)');
+    expect(profile).toContain('(allow file-read* file-read-metadata file-map-executable)');
+    expect(profile).toContain('(allow file-write* file-write-create file-write-unlink file-ioctl)');
+    expect(profile).toContain('(deny network*)');
+    expect(profile).toContain('(deny file-read* file-map-executable file-write*');
+  });
+
+  test('approved filesystem scope retains native denies for external credentials', () => {
+    const profile = generateSandboxProfile(workspace, { filesystemScope: 'full_access' });
+    expect(profile).toContain(seatbeltSubpath(join(homedir(), '.ssh')));
   });
 
   test('profile imports system.sb as base', () => {
@@ -180,6 +194,21 @@ describe('sandbox profile generation', () => {
       expect(profile).not.toContain(seatbeltSubpath(link));
     } finally {
       rmSync(parent, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('approved filesystem execution lane', () => {
+  test('keeps bubblewrap namespaces while projecting the approved filesystem', () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'approved-bwrap-filesystem-'));
+    try {
+      const args = generateBwrapArgs(workspace, { filesystemScope: 'full_access' });
+      expect(args).toContain('--unshare-pid');
+      expect(args).toContain('--unshare-net');
+      expect(args).toEqual(expect.arrayContaining(['--bind', '/', '/']));
+      expect(args).not.toEqual(expect.arrayContaining(['--tmpfs', '/tmp']));
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
     }
   });
 });
@@ -402,6 +431,15 @@ describe('dangerous path detection', () => {
     expect(checkDangerousPaths("echo 'evil' >> /etc/crontab")).toBe('/etc/crontab');
     expect(checkDangerousPaths("echo 'evil' >> /etc/passwd")).toBe('/etc/passwd');
     expect(checkDangerousPaths("echo 'evil' >> /etc/sudoers")).toBe('/etc/sudoers');
+    expect(checkDangerousPaths('cat /private/etc/hosts')).toBe('/private/etc/hosts');
+    expect(checkDangerousPaths('type C:\\Windows\\System32\\drivers\\etc\\hosts')).toBe(
+      'Windows/System32/drivers/etc/hosts',
+    );
+  });
+
+  test('detects simple shell quote concatenation in protected paths', () => {
+    expect(checkDangerousPaths('cat /e"tc/pa"sswd')).toBe('/etc/passwd');
+    expect(checkDangerousPaths('cat ~/.ss"h/id_r"sa')).toBe('.ssh/id_rsa');
   });
 
   test('allows safe commands with similar-looking paths', () => {

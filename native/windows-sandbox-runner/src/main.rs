@@ -254,7 +254,12 @@ fn run(managed_online_child: bool) -> i32 {
         eprintln!("kite-windows-runner: invalid trusted invocation name");
         return 2;
     }
-    if !managed_online_child && requires_managed_online_identity(request.network_mode) {
+    if !managed_online_child
+        && requires_managed_online_identity_for_invocation(
+            request.network_mode,
+            request.filesystem_scope,
+        )
+    {
         return match managed_launcher::run_online(&request) {
             Ok(exit_code) => exit_code as i32,
             Err(error) => {
@@ -497,6 +502,7 @@ fn execute_restricted_token_invocation(
             request.filesystem_scope,
             &direct.runtime_capability_sid,
             direct.ephemeral_workspace_capability_sid.as_deref(),
+            direct.approved_filesystem_guard_sid.as_deref(),
             &deny_paths,
         )
         .map_err(|error| error.to_string())?;
@@ -504,8 +510,18 @@ fn execute_restricted_token_invocation(
         DirectInvocationCleanup::new(security)
     };
 
+    let approved_filesystem = matches!(request.filesystem_scope, FilesystemScope::FullAccess);
     let token = if managed_online_child {
         None
+    } else if approved_filesystem {
+        Some(
+            restricted_token::create_current_user_approved_filesystem_token(
+                cleanup.approved_filesystem_guard().ok_or_else(|| {
+                    "restricted_token_protected_guard_invalid: approved guard missing".to_string()
+                })?,
+            )
+                .map_err(|error| error.to_string())?,
+        )
     } else {
         Some(
             restricted_token::create_current_user_restricted_token(cleanup.capabilities())
@@ -540,9 +556,16 @@ fn execute_restricted_token_invocation(
         }
     };
     let child = if let Some(token) = token.as_ref() {
+        let expected_capabilities = if approved_filesystem {
+            std::slice::from_ref(cleanup.approved_filesystem_guard().ok_or_else(|| {
+                "restricted_token_protected_guard_invalid: approved guard missing".to_string()
+            })?)
+        } else {
+            cleanup.capabilities()
+        };
         restricted_token::spawn_restricted_in_job(
             token,
-            cleanup.capabilities(),
+            expected_capabilities,
             job,
             &command_line,
             &request.cwd,

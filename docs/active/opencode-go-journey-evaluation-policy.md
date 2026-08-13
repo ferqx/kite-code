@@ -2,7 +2,7 @@
 
 状态：active
 读取时机：修改 ACORE Journey fixture、scorer、live Provider runner、候选提交或运行正式 Prompt Contract A/B 时。
-验证：`bun test tests/evals/runtime-journey-baseline.test.ts tests/evals/tool-journey-v1.test.ts tests/evals/first-decision-eval.test.ts tests/evals/prompt-contract-ab.test.ts`、`bun run check:docs`、`bun run check:docs-impact`。
+验证：`bun test tests/evals/runtime-journey-baseline.test.ts tests/evals/tool-journey-v1.test.ts tests/evals/prompt-contract-ab.test.ts tests/evals/live-task-journey.test.ts tests/evals/formal-eval-identity.test.ts tests/evals/formal-eval-manifest.test.ts`、`bun run check:docs`、`bun run check:docs-impact`。
 相关：ADR-0093、ADR-0094、ADR-0095、ADR-0096、`real-model-test-boundary.md`、`agent-task-evaluation.md`。
 
 ## 已取代的 V1 政策
@@ -33,8 +33,8 @@ first-decision V3 结果表述为 Runtime Journey 质量或 V2 默认迁移资�
 
 ## 当前 r2 政策
 
-当前 revision 是 `ACORE-EVAL-POLICY-02-r1`，由清理恒等 candidate profile、修正 first-decision 绝对质量门槛和收紧
-live task Journey oracle 触发。正式样本运行前，`KITE_FORMAL_EVAL=1` 和
+当前 revision 是 `ACORE-EVAL-POLICY-02-r2`。它在 r1 的安全、质量和 Provider 闭合门槛上，移除与主 first-decision
+重复的工具描述/task 诊断 live suite，并以四个可独立归因的 role smoke 取代聚合角色 fixture。正式样本运行前，`KITE_FORMAL_EVAL=1` 和
 `KITE_FORMAL_EVAL_CANDIDATE_COMMIT=<40-hex HEAD>` 必须同时存在；runner 只接受干净工作树和精确 HEAD，并把
 `policyRevision` 与精确 candidate commit 写入报告。在人工 `goUsageChecked` 与核对时间窗口闭合前，只允许运行诊断样本，
 不得沿用 r1 或 ADR-0098/ADR-0099 的历史数字作为 r2 准入证据。
@@ -46,10 +46,10 @@ live task Journey oracle 触发。正式样本运行前，`KITE_FORMAL_EVAL=1` �
 
 - first-decision 只比较 `legacy_vs_published`，同时要求配对 5pp 不劣、candidate 总正确率至少 80%、每类至少 50%，
   并满足零安全违规、零无效工具、零精确重复调用与既有参数门禁。
-- 默认工具描述 fixture 只覆盖 runner 实际披露的七个目标工具；需要 Skill catalog 才可见的 `activate_skill` 必须进入独立
-  capability treatment，不能作为默认工具面失败计入分母。
+- 工具 description/schema/availability/phase/recovery 的正确性由 production Registry 的确定性契约闭环验证；不得为没有独立 treatment 的同一 published 工具面再复制 live suite。需要 Skill catalog 才可见的 `activate_skill` 必须进入独立 capability treatment，不能作为默认工具面失败计入分母。
 - `natural` Journey 必须恰好一次成功 `task(plan)` 和一个完成 child；`invalid_args_recovery` 必须恰好两次 task 调用，
   其中一次未 dispatch 的参数错误、一次模型纠正成功和一个完成 child。任何额外 task/child 都是失败。
+- explore/plan/code/review 必须分别运行单角色 `role_smoke`；不得用同时启动四个 child 的聚合 fixture 替代，因为一次 transport failure 会污染整批并削弱归因。
 - 所有 r1 的 Provider 闭合、隐私、synthetic workspace、route、输出 token、超时和人工 Go usage 规则在 r2 继续适用。
 
 ## ACORE-EVAL-01 本地证据边界

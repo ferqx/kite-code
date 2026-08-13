@@ -126,6 +126,7 @@ export const shellExecuteSpec = defineExecutableTool({
         signal: context.signal,
         timeoutMs: resolveShellTimeoutMs(input.timeout_ms),
         networkMode: context.shellNetworkMode,
+        filesystemMode: context.shellFilesystemMode,
         networkBroker: context.shellNetworkBroker,
         onProgress: context.onShellProgress,
       });

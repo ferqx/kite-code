@@ -111,14 +111,126 @@ export function isNetworkCommand(command: string): boolean {
  * 只对白名单文件命令和本地 Git 操作给出肯定结论；其余可执行程序按严格策略要求确认。
  */
 export function classifyShellEffects(command: string, workspace: string): ToolEffects {
-  if (isNetworkCommand(command)) return { network: true };
+  const networkEffects: ToolEffects = isNetworkCommand(command) ? { network: true } : {};
 
   const writeTargets = extractWriteTargets(command);
-  if (writeTargets === null) return { uncertainEffects: true };
-  if (writeTargets.some((target) => !isWorkspacePath(target, workspace))) {
-    return { externalWrite: true };
+  if (isVcsMutationCommand(command)) {
+    return { ...networkEffects, ...classifyGitFilesystemEffects(command, workspace) };
   }
-  return {};
+  if (isWriteLikeShellCommand(command)) {
+    if (writeTargets === null) {
+      return { ...networkEffects, uncertainEffects: true };
+    }
+    if (writeTargets.some((target) => !isWorkspacePath(target, workspace))) {
+      return { ...networkEffects, externalWrite: true };
+    }
+    return networkEffects;
+  }
+
+  if (isReadOnlyShellCommand(command)) {
+    const readTargets = extractReadTargets(command);
+    if (readTargets.some((target) => !isWorkspacePath(target, workspace))) {
+      return { ...networkEffects, externalRead: true };
+    }
+    return networkEffects;
+  }
+
+  if (isNetworkCommand(command)) {
+    return { ...networkEffects, ...classifyNetworkFilesystemEffects(command, workspace) };
+  }
+
+  return { uncertainEffects: true };
+}
+
+function classifyGitFilesystemEffects(command: string, workspace: string): ToolEffects {
+  const trimmed = command.trim();
+  if (!trimmed || /[;&|`$(){}[\]*?]/.test(trimmed)) return { uncertainEffects: true };
+  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map(stripShellQuotes) ?? [];
+  const gitIndex = tokens.findIndex(
+    (token) => token.toLowerCase().replace(/\.(?:cmd|exe)$/i, '') === 'git',
+  );
+  if (gitIndex < 0) return { uncertainEffects: true };
+  const args = tokens.slice(gitIndex + 1);
+  const targets: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (arg === '-C' && args[index + 1]) {
+      targets.push(args[index + 1]!);
+      index += 1;
+    } else if (arg.startsWith('--git-dir=') || arg.startsWith('--work-tree=')) {
+      targets.push(arg.slice(arg.indexOf('=') + 1));
+    }
+  }
+  const cloneIndex = args.findIndex((arg) => arg.toLowerCase() === 'clone');
+  if (cloneIndex >= 0) {
+    const operands = args.slice(cloneIndex + 1).filter((arg) => !arg.startsWith('-'));
+    if (operands.length >= 2) targets.push(operands.at(-1)!);
+  }
+  return targets.some((target) => !isWorkspacePath(target, workspace))
+    ? { externalWrite: true }
+    : {};
+}
+
+/**
+ * Network clients frequently write without shell redirection (`curl -o`,
+ * `wget -O`, `scp`, ...). Keep those filesystem effects independent from the
+ * network bit so an approval projects every capability described to the user.
+ */
+function classifyNetworkFilesystemEffects(command: string, workspace: string): ToolEffects {
+  const trimmed = command.trim();
+  if (!trimmed || /[;&|`$(){}[\]*?]/.test(trimmed)) return { uncertainEffects: true };
+
+  const tokens = trimmed.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+  const program = stripShellQuotes(tokens[0] ?? '')
+    .toLowerCase()
+    .replace(/\.(?:cmd|exe)$/i, '');
+  const args = tokens.slice(1).map(stripShellQuotes);
+  const externalWrites: string[] = [];
+  const externalReads: string[] = [];
+
+  const optionValue = (shortName: string, longName: string): string[] => {
+    const values: string[] = [];
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index]!;
+      if (arg === shortName || arg === longName) {
+        if (args[index + 1]) values.push(args[index + 1]!);
+        index += 1;
+      } else if (arg.startsWith(`${longName}=`)) {
+        values.push(arg.slice(longName.length + 1));
+      }
+    }
+    return values;
+  };
+
+  if (program === 'curl') {
+    externalWrites.push(...optionValue('-o', '--output'));
+    externalReads.push(
+      ...optionValue('-T', '--upload-file'),
+      ...optionValue('-K', '--config'),
+      ...optionValue('-b', '--cookie'),
+    );
+  } else if (program === 'wget') {
+    externalWrites.push(
+      ...optionValue('-O', '--output-document'),
+      ...optionValue('-P', '--directory-prefix'),
+    );
+    externalReads.push(...optionValue('-i', '--input-file'));
+  } else if (['scp', 'sftp', 'rsync'].includes(program)) {
+    // Remote/local operand direction and client-side command files are too
+    // varied to prove a narrower filesystem scope from argv alone.
+    return { uncertainEffects: true };
+  } else {
+    return {};
+  }
+
+  const effects: ToolEffects = {};
+  if (externalWrites.some((target) => !isWorkspacePath(target, workspace))) {
+    effects.externalWrite = true;
+  }
+  if (externalReads.some((target) => !isWorkspacePath(target, workspace))) {
+    effects.externalRead = true;
+  }
+  return effects;
 }
 
 /**
@@ -154,7 +266,8 @@ function extractWriteTargets(command: string): string[] | null {
 
 function isWorkspacePath(target: string, workspace: string): boolean {
   const path = target.replace(/^['"]|['"]$/g, '');
-  if (!path || path === '-' || path.startsWith('~') || path.includes('$')) return false;
+  if (!path || path === '-' || path === '/dev/null') return true;
+  if (path.startsWith('~') || path.includes('$')) return false;
   if (/^[a-z]:[\\/]/i.test(path) || /^\\{1,2}/.test(path)) return false;
 
   const workspaceRoot = resolve(workspace);
@@ -165,6 +278,35 @@ function isWorkspacePath(target: string, workspace: string): boolean {
     relativePath.startsWith(`..${sep}`) ||
     isAbsolute(relativePath)
   );
+}
+
+/** Extract path operands from commands already proven read-only. */
+function extractReadTargets(command: string): string[] {
+  const targets: string[] = [];
+  for (const segment of splitReadOnlySegments(command)) {
+    const tokens = segment.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) ?? [];
+    const program = stripShellQuotes(tokens[0] ?? '')
+      .toLowerCase()
+      .replace(/\.(?:cmd|exe)$/i, '');
+    if (!program || ['echo', 'pwd', 'test'].includes(program)) continue;
+
+    if (program === 'git') {
+      const cwdIndex = tokens.findIndex((token) => stripShellQuotes(token) === '-C');
+      if (cwdIndex >= 0 && tokens[cwdIndex + 1]) targets.push(tokens[cwdIndex + 1]!);
+      continue;
+    }
+
+    const operands = tokens.slice(1).filter((token) => {
+      const value = stripShellQuotes(token);
+      return value !== '<' && value !== '>' && !value.startsWith('-');
+    });
+    if (program === 'grep' || program === 'rg' || program === 'sed' || program === 'awk') {
+      targets.push(...operands.slice(1));
+    } else {
+      targets.push(...operands);
+    }
+  }
+  return targets;
 }
 
 // ── rm -rf 安全分类 / rm -rf safety classification ──

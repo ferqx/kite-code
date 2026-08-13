@@ -99,7 +99,7 @@ note、skipped reason code 与 `complete_plan`；其 strict schema 必须拒绝 
 
 - 每个注册工具都有可归一化的结构化契约。
 - legacy/V2 description 都由同一事实生成，V2 保持在预算内。
-- candidate profile 对八个目标工具必须完整保留相同的规范事实；候选未获实时模型准入时，它必须逐字回退到 published V2。
+- legacy/V2 description 必须从同一规范事实生成；不得为已回滚的文案 candidate 保留恒等 production profile，也不得复制一套与主 first-decision 近似相同的 live 工具 fixture。
 - 每个 ToolSpec 的 `projectResult()` 与 `returns.format`、字段声明一致；interrupt 工具与内部请求协议一致。
 - context-sensitive schema 的模型投影和调用解析使用同一个 resolved schema。
 - V2 Planning/Building 的完整 builtin 名称、description、JSON schema 恒等；legacy planning 的 task 子类型差异与字段 description 仍被确定性覆盖。

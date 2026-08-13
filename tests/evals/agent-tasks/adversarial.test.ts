@@ -3,7 +3,7 @@ import {
   ADVERSARIAL_CONTRACT_CATALOG_V1,
   createAdversarialContractReceipt,
   summarizeAdversarialContracts,
-} from './adversarial-contract';
+} from '../../../scripts/evals/contracts/agent-task-adversarial-contract';
 
 describe('adversarial evaluation contract catalog', () => {
   test('covers the required security threats without claiming a formal G0 artifact', () => {

@@ -155,14 +155,21 @@ key、invocation fingerprint、failure instance 和 lineage 只存在于 canonic
 state/continuation，不进入 SessionLog 或 observability。retry record 必须在一次受信 safe-read
 自动重放前先落盘；模型参数修正和自动重放分别最多一次，restore 不重置次数。policy/approval
 deny、timeout、cancel、unknown effect 和仅有 idempotency key 而无 receipt 的调用不重放；malformed
-journal restore、六次同 identity 无进展或十二次未被 tool-owned progress 分隔的累计失败都 fail
-closed 为 quality block，明显早于 250 次资源上限。
-failure 还绑定 owning task、turn 与紧随其后的 eligible model response。task/turn close 会把记录移出
+journal restore 或同一 recovery root、同一工具、同 task/turn 与同 progress revision 的第六次无进展
+failure 会 fail closed 为 quality block，明显早于 250 次资源上限。参数变化不能重置同一恢复链的计数；
+没有共同 `recoveryOf` root 的独立调用即使工具名和 fingerprint 相同，也只累计有界 observation，不能仅因
+总数达到十二次而封锁整轮。单次 failure 的真实模型修正/自动重放额度仍分别最多一次；额度外提案保持
+零 dispatch suppression，但不能在第一次被拒时直接把整个 scope 提升为 `no_progress`。
+failure 还绑定 owning task、turn 与紧随其后的 eligible model response，并在该响应中由 Runtime 唯一绑定
+一个具体 `toolCallId`；未被绑定的同名或异名 sibling 不能消费该 failure 的恢复额度。task/turn close 会把记录移出
 新 scope；只有成功 `recoveryOf` receipt，或 Runtime-owned skip/replan/user action、Provider/capability
-revision 才能把失败标为 recovered。deny/never、timeout、cancel、unknown effect、terminal exhaustion 和
+revision 才能把失败标为 recovered、推进 progress revision 并解除对应链；无 lineage 的无关成功 receipt
+不构成该链进展，不能重置其计数。restore 从 failures 推导 quality block 时必须保留触发链的 task/turn scope。
+deny/never、timeout、cancel、unknown effect、terminal exhaustion 和
 `next_response_elapsed` 在原 scope 继续保留 suppression 与 CompletionGuard blocker，不得把“额度耗尽”
 当作恢复。`alternative` 可在下一 eligible response 选择不同 capability，但必须由 Runtime 绑定
-`recoveryOf`。CompletionGuard 只读取当前 task/turn 真正 active 的 blocking/quality state，历史 deny
+受控 `capabilityIntent` 对应的具体调用及 `recoveryOf`，不能把响应中的任意工具当作 alternative。
+CompletionGuard 只读取当前 task/turn 真正 active 的 blocking/quality state，历史 deny
 不会永久阻断后续任务。quality block 仍允许 `write_plan/update_plan/read_plan/ask_user/tool_search`
 形成替代进展。
 
@@ -178,8 +185,9 @@ ceiling。MCP readiness 是 provider/capability dispatch 之前的生产边界�
 capability dispatch。restore 对 journal 重新计算 canonical failure ID，并验证 map/order/outcome lineage、parent
 recoveryOf、attempt counters 与 progress revision；伪造相互一致的 ID 也不能绕过重算。
 schema v23/current snapshot 或当前 Subagent continuation 缺少 recovery journal 本身就是损坏状态，
-restore 必须 quality-blocked；只有 pre-v23 migration 可以初始化空 journal。auto-review rejection 在
-current、replay 和下一次 model projection 中都只追加一个与原 AI tool call 配对的 ToolMessage。
+restore 必须 quality-blocked；只有 pre-v23 migration 可以初始化空 journal。当前 auto-review 风险判定
+使用 `escalatedToUser` 保持非终态并转人工审批；只有历史 auto-review rejection 在 replay 和下一次 model
+projection 中追加一个与原 AI tool call 配对的 ToolMessage。
 损坏 journal 使用 `journal_invalid/persistence_unavailable`，普通 no-progress ceiling 使用
 `no_progress/loop_exhausted`；二者由同一 terminal outcome 驱动 Session、metrics 与 TUI。
 task 子 Agent 的完整 result 只在 Controller 私有侧用于 journal merge，模型面只接收显式 public DTO，
@@ -193,7 +201,9 @@ task success 也不能清除 hard block。其 task/turn scope 只用于 provenan
 下一 turn、新 task、task close 与 SQLite restore 后继续全局 `persistence_unavailable` 零 dispatch 阻断；
 普通 `no_progress` 才按原 scope 隔离。Scheduler 在 correctness hard-block 阶段先于 interaction、legacy、
 queued tools、verification、completion 与 compaction 检查损坏 journal；Controller direct 入口和 Runner
-prepared/admission/lease 边界再防御性重验，阻止已经准备或租赁的 stale effect。bounded journal 的 128 条裁剪以 lineage closure 为单位，优先
+prepared/admission/lease 边界再防御性重验；Runner 在 preparation 后对 `journal_invalid` 和 scoped
+`no_progress` 都重新采用最新的 `recovery_blocked` decision，阻止已经准备或租赁的 stale effect。
+bounded journal 的 128 条裁剪以 lineage closure 为单位，优先
 active/recent 记录；不能保留 child 却删除其 `recoveryOf` parent。Runtime invariant 只要求 live call 的
 lineage parent 仍 retained，已经 terminal 的历史 ToolCall 不会迫使 bounded journal 永久增长。
 

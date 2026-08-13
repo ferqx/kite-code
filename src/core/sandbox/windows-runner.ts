@@ -4,7 +4,7 @@ import { dirname, join, resolve, win32 } from 'node:path';
 import { z } from 'zod';
 
 /** Matches the native runner's `PROTOCOL_VERSION`. */
-export const WINDOWS_SANDBOX_PROTOCOL_VERSION = 5 as const;
+export const WINDOWS_SANDBOX_PROTOCOL_VERSION = 6 as const;
 
 const WINDOWS_RUNNER_MANIFEST_V1_SCHEMA = z
   .object({
