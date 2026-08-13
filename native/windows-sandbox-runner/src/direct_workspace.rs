@@ -195,7 +195,7 @@ pub fn prepare_direct_workspace(
                     WORKSPACE_ALLOW,
                 )
                 .map_err(|source| error("restricted_token_acl_grant_failed", source.to_string()))?;
-                for path in existing_protected_paths(protected_paths) {
+                for path in existing_workspace_protected_paths(&workspace_root, protected_paths) {
                     let snapshot = acl::snapshot_dacl(&path).map_err(|source| {
                         error("restricted_token_acl_snapshot_failed", source.to_string())
                     })?;
@@ -314,7 +314,11 @@ fn ensure_persistent_workspace_capability(
 ) -> Result<CapabilitySid> {
     with_workspace_lock(workspace_root, || {
         let path = ledger_path(workspace_root)?;
-        let existing_paths = existing_protected_paths(protected_paths);
+        // A Workspace capability has no allow ACE outside this Workspace, so
+        // external protected paths are already unavailable in its restricted
+        // write pass. Never mutate or persist those paths in a per-Workspace
+        // ledger: repair intentionally refuses to trust out-of-scope targets.
+        let existing_paths = existing_workspace_protected_paths(workspace_root, protected_paths);
         let paths_digest = protected_paths_digest(&existing_paths);
         let mut ledger = if path.exists() {
             load_ledger(&path, workspace_root)?
@@ -428,6 +432,13 @@ fn existing_protected_paths(paths: &[String]) -> Vec<String> {
     result.sort_by_key(|left| left.to_ascii_lowercase());
     result.dedup_by(|left, right| path_equal(left, right));
     result
+}
+
+fn existing_workspace_protected_paths(workspace_root: &str, paths: &[String]) -> Vec<String> {
+    existing_protected_paths(paths)
+        .into_iter()
+        .filter(|path| is_workspace_member_path(workspace_root, path))
+        .collect()
 }
 
 fn canonical_directory(value: &str, kind: &'static str) -> Result<String> {
@@ -649,6 +660,18 @@ mod tests {
         assert!(path_equal(r"\\?\C:\Work", r"C:\Work"));
         assert!(!is_child_path("C:\\Work", "C:\\Workspace"));
         assert!(!is_child_path("C:\\Work", "C:\\Work"));
+    }
+
+    #[test]
+    fn persistent_protected_paths_never_escape_the_workspace() {
+        let paths = vec![
+            "C:\\Work\\.env".to_string(),
+            "C:\\Users\\runneradmin\\.npmrc".to_string(),
+        ];
+        assert_eq!(
+            existing_workspace_protected_paths("C:\\Work", &paths),
+            vec!["C:\\Work\\.env".to_string()]
+        );
     }
 
     #[test]

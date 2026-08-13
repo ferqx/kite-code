@@ -137,6 +137,10 @@ Job Object 提供进程树数量和终止边界，不单独作为 filesystem 或
 动态名称保证。static protected paths 的 guard deny 与 Workspace ledger 是 native enforcement，但不能冒充
 future-name interception。ledger
 属于 trusted host state；外部 ACL 修改后需要显式 repair，无锁快路径不会在每次调用审计整个 Workspace。
+持久 Workspace capability ledger 只记录 canonical Workspace 内的 protected path；用户目录等外部
+protected path 不得写入该 ledger，因为 Workspace capability 在外部没有 allow ACE，本来就无法通过
+restricted write check。approved filesystem guard 仍可在单次 invocation 内保护既有外部固定路径，
+并在 Job 清空后撤销，不把外部路径交给 Workspace repair。
 
 因此 `windows_restricted_token` 是 development backend：
 

@@ -141,6 +141,8 @@ ledger，扩权 invocation 不把全局写权限写入 persistent Workspace ledg
 在 Tool Policy 阶段拒绝；approved token 还携带 restricted-only guard SID，既有固定路径对该 SID 添加
 invocation-scoped deny，并初始化与普通 token 相同的 child-object default DACL，避免变量拼接或间接执行
 绕过字符串检查，同时允许已批准 shell 启动 Node/npm descendant。该 scope 不等于 Full 或 production evidence；
+持久 Workspace capability ledger 只允许保存 Workspace 内 protected path，外部用户配置路径不进入
+该 ledger 或 repair 范围；普通 Workspace token 对外部路径没有 capability allow，写访问仍被拒绝。
 若同一命令同时需要网络和外部文件系统，Tool Policy 必须同时展示对应 effects，批准后只执行一次。
 
 在 user script 前无法选择或 structural start 该 backend 时，development entrypoint 才能选择 cached
