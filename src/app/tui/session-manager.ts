@@ -1423,8 +1423,14 @@ export class SessionManager {
         commandId: crypto.randomUUID(),
         command: customInstructions ? `/compact ${customInstructions}` : '/compact',
       };
-      processEvent(commandEvent);
-      onCommand?.(commandEvent);
+      // Render local commands immediately, but only persist a command once it
+      // passes local preflight. A rejected `/compact` remains visible in the
+      // current TUI alongside its result without becoming replayed history.
+      const presentCommand = () => onCommand?.(commandEvent);
+      const persistCommand = () => {
+        processEvent(commandEvent);
+        presentCommand();
+      };
 
       const executeManualCompaction = async (
         compactionId: string,
@@ -1448,6 +1454,7 @@ export class SessionManager {
       if (existingPending?.reason === 'manual') {
         const boundary = findSafeCompactionBoundary(state);
         if (!boundary.eligible) {
+          presentCommand();
           if (!execute) {
             return {
               events: [],
@@ -1472,6 +1479,7 @@ export class SessionManager {
             text: boundaryMessage,
           };
         }
+        persistCommand();
         const produced = await executeManualCompaction(existingPending.compactionId);
         if (!produced) {
           return {
@@ -1527,6 +1535,7 @@ export class SessionManager {
       // Reject early — emit events so the rejection text persists across TUI restart
       // (replayed through handleRuntimeEventAction during session load).
       if (execute && !status.safeBoundary.eligible) {
+        presentCommand();
         const boundaryMessage =
           status.safeBoundary.reason === 'No settled historical turn is old enough to compact.'
             ? 'Not enough messages to compact.'
@@ -1566,6 +1575,7 @@ export class SessionManager {
         status.coveredThroughMessageId &&
         status.safeBoundary.lastMessageId === status.coveredThroughMessageId
       ) {
+        presentCommand();
         const compactId = crypto.randomUUID();
         const reqEvent: RuntimeEvent = {
           type: 'context.compaction_requested',
@@ -1605,6 +1615,7 @@ export class SessionManager {
           text: 'A context compaction request is already pending.',
         };
       }
+      persistCommand();
       processEvent(event);
       if (!execute) {
         return {

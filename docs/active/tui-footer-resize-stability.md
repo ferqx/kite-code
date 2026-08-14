@@ -156,8 +156,8 @@ bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/
 `提交`、`返回`、`取消`、`关闭`。MCP 专有名词和 Server/Tool 内容可以保留英文，但通用
 键盘动作不得另起一套英文文案。
 
-斜杠命令的持久化 `user.command_invoked` 是命令行的唯一展示来源，不得再用乐观 `USER_MESSAGE`
-重复插入。命令结果可紧贴命令显示；但连续两条用户命令必须保留普通块间距。已显示最终回复而
+已接受斜杠命令的持久化 `user.command_invoked` 是命令行的唯一展示来源，不得再用乐观 `USER_MESSAGE`
+重复插入；本地预检拒绝的控制命令只在当前会话即时显示，且不得持久化。命令结果可紧贴命令显示；但连续两条用户命令必须保留普通块间距。已显示最终回复而
 后台 Runtime 尚在 finally 清理时，`/compact` 必须先等待该 cleanup，再从独立 Kernel 执行。
 独立 Kernel 已处于终态时，只要存在 manual pending compaction 就必须直接调度 `compact_context`；
 不得向即将停止或已停止的执行循环留下 pending compaction。若旧版本已经留下该类 durable pending，

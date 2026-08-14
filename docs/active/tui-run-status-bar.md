@@ -33,7 +33,7 @@ agent 天然是 think → act → think → act 循环，若直接用当前动�
 
 **阶段不变性规则**：一旦进入 Working，永不回退 Thinking；一旦进入 Finishing，永不回退 Working。
 
-手动 `/compact` 不属于普通 Agent run，因此 `compactionProgress.source=manual` 时 `StatusBar` 隐藏。自动压缩发生在活跃用户 turn 内：持久化的 `context.compaction_requested(reason=auto)` 在消息列表投影为 `/auto-compact`，但该语义命令不注册到 slash-command parser，用户不能主动调用；`compactionProgress.source=automatic` 以内联动画补充当前 Agent run，不能替换或隐藏其 `StatusBar`。两种压缩都不得禁用 InputLine，压缩期间提交的提示词继续由 Runtime 单飞 barrier 串行。`compactionProgress` 只是当前展示会话的瞬时状态，不进入 session snapshot；加载、创建或切换会话时必须清除，不能让上一会话的残留 progress 影响恢复后的输入面。持久化的 `/compact` 与 `/auto-compact` 消息仍可从 RuntimeEvent 回放。
+手动 `/compact` 不属于普通 Agent run，因此 `compactionProgress.source=manual` 时 `StatusBar` 隐藏。自动压缩发生在活跃用户 turn 内：持久化的 `context.compaction_requested(reason=auto)` 在消息列表投影为 `/auto-compact`，但该语义命令不注册到 slash-command parser，用户不能主动调用；`compactionProgress.source=automatic` 以内联动画补充当前 Agent run，不能替换或隐藏其 `StatusBar`。两种压缩都不得禁用 InputLine，压缩期间提交的提示词继续由 Runtime 单飞 barrier 串行。`compactionProgress` 只是当前展示会话的瞬时状态，不进入 session snapshot；加载、创建或切换会话时必须清除，不能让上一会话的残留 progress 影响恢复后的输入面。已接受的 `/compact` 与 `/auto-compact` 消息仍可从 RuntimeEvent 回放；预检拒绝的 `/compact` 仍在当前界面显示，但不会随会话重放。
 
 ## 状态推导
 

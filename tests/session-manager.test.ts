@@ -458,7 +458,7 @@ describe('SessionManager', () => {
     }
   });
 
-  test('projects the durable compact command once as it is persisted', async () => {
+  test('projects but does not persist a rejected compact command', async () => {
     const deps = makeDeps();
     deps.config = {
       apiKey: 'test',
@@ -473,10 +473,11 @@ describe('SessionManager', () => {
     const threadId = mgr.createSession('/tmp/ws');
     const projected: RuntimeEvent[] = [];
 
-    await mgr.handleContextCompaction(threadId, undefined, undefined, (event) => {
+    const result = await mgr.handleContextCompaction(threadId, undefined, undefined, (event) => {
       projected.push(event);
     });
 
+    expect(result.text).toBe('Not enough messages to compact.');
     expect(projected).toEqual([
       expect.objectContaining({ type: 'user.command_invoked', command: '/compact' }),
     ]);
@@ -624,7 +625,6 @@ describe('SessionManager', () => {
     const result = await mgr.handleContextCompaction(threadId);
 
     expect(persisted.map((event) => (event as { type: string }).type)).toEqual([
-      'user.command_invoked',
       'context.compaction_requested',
       'context.compaction_failed',
     ]);
@@ -765,7 +765,7 @@ describe('SessionManager', () => {
     expect(snapshot!.estimate.transcriptTokens).toBeLessThan(1_000);
   });
 
-  test('persists /compact for replay without adding it to the model transcript', async () => {
+  test('does not persist a rejected /compact for replay or the model transcript', async () => {
     const root = mkdtempSync(join(tmpdir(), 'kite-compact-replay-'));
     const checkpointPath = join(root, 'checkpoints.sqlite');
     const deps = makeDeps();
@@ -788,11 +788,8 @@ describe('SessionManager', () => {
       const store = createRuntimeStore(runtimeStorePathFor(checkpointPath));
       try {
         const events = store.loadEvents(threadId).map((entry) => entry.event);
-        expect(events).toContainEqual(
-          expect.objectContaining({
-            type: 'user.command_invoked',
-            command: '/compact focus on auth changes',
-          }),
+        expect(events).not.toContainEqual(
+          expect.objectContaining({ type: 'user.command_invoked' }),
         );
         const state = store.loadSnapshot<ReturnType<typeof createInitialRuntimeState>>(threadId);
         expect(state?.transcript.messages).toHaveLength(0);
