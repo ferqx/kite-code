@@ -131,13 +131,22 @@ function taskLabel(task: string): string {
   return plain.length > 80 ? `${plain.slice(0, 77)}...` : plain;
 }
 
-const MAX_RUNNING_STEPS = 5;
+export const MAX_RUNNING_STEPS = 5;
 
 interface SubAgentBlockProps {
   block: OutputBlock & { kind: 'subagent' };
+  /**
+   * Dynamic OutputArea may lower this while several child cards are live so
+   * Ink never crosses its full-screen clear threshold. Standalone/static cards
+   * keep the normal five-step tail.
+   */
+  maxVisibleSteps?: number;
 }
 
-export default function SubAgentBlock({ block }: SubAgentBlockProps) {
+export default function SubAgentBlock({
+  block,
+  maxVisibleSteps = MAX_RUNNING_STEPS,
+}: SubAgentBlockProps) {
   const dt = useTheme();
   const label = roleLabel(block.role);
   const taskSummary = taskLabel(block.task);
@@ -182,9 +191,14 @@ export default function SubAgentBlock({ block }: SubAgentBlockProps) {
 
   // ── Common: steps ──
   const stepCount = block.steps.length;
+  const visibleStepLimit = Math.max(0, Math.floor(maxVisibleSteps));
   const visibleSteps =
-    stepCount > MAX_RUNNING_STEPS ? block.steps.slice(-MAX_RUNNING_STEPS) : block.steps;
-  const skipped = stepCount - MAX_RUNNING_STEPS;
+    stepCount > visibleStepLimit
+      ? visibleStepLimit === 0
+        ? []
+        : block.steps.slice(-visibleStepLimit)
+      : block.steps;
+  const skipped = stepCount - visibleSteps.length;
 
   // ── Header ──
   const icon = isActive ? (isWaiting ? '○ ' : spinnerFrame) : '● ';

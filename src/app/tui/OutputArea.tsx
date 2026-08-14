@@ -3,6 +3,7 @@ import React, { type ReactNode, useRef } from 'react';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import BlockRenderer from './components/BlockRenderer';
 import CompactionProgress from './components/CompactionProgress';
+import { MAX_RUNNING_STEPS } from './components/SubAgentBlock';
 import { blockFingerprint } from './render/useStaticContent';
 import type { OutputBlock } from './types';
 
@@ -28,8 +29,38 @@ interface OutputAreaProps {
   /** 主 agent 等待 ask_user 输入时标记 ask 工具 / Mark ask_user while waiting for input */
   awaitingInput?: boolean;
   columns: number;
+  /** Terminal viewport rows used to bound the mutable output tail. */
+  rows?: number;
   /** Active manual or automatic compaction rendered after the message list. */
   compactionPhase?: ContextCompactionProgressPhase;
+}
+
+// Footer/status/prompt plus OutputArea's normal bottom gap consume five rows.
+// Concurrent child layouts suppress that gap, leaving one safety row because
+// Ink treats outputHeight === rows as full-screen.
+const DYNAMIC_CHROME_ROWS = 5;
+const SUBAGENT_CARD_OVERHEAD_ROWS = 3;
+
+/**
+ * Ink clears the entire main screen whenever its mutable frame reaches the
+ * terminal height. That reset also destroys a user's native scroll position.
+ * Keep a single child at the normal five-step tail, but share the available
+ * step rows when several child cards are updating concurrently.
+ */
+export function concurrentSubagentStepLimit(blocks: OutputBlock[], terminalRows = 24): number {
+  const subagentCount = blocks.filter((block) => block.kind === 'subagent').length;
+  if (subagentCount <= 1) return MAX_RUNNING_STEPS;
+
+  const otherBlockCount = blocks.length - subagentCount;
+  // Arbitrary text/tool blocks have no trustworthy row estimate. In a mixed
+  // mutable tail, spend no additional rows on child steps instead of guessing.
+  if (otherBlockCount > 0) return 0;
+
+  const interBlockGaps = Math.max(0, blocks.length - 1);
+  const fixedRows =
+    DYNAMIC_CHROME_ROWS + interBlockGaps + subagentCount * SUBAGENT_CARD_OVERHEAD_ROWS;
+  const availableStepRows = Math.max(0, Math.floor(terminalRows) - fixedRows);
+  return Math.min(MAX_RUNNING_STEPS, Math.floor(availableStepRows / subagentCount));
 }
 
 function visibleDynamicBlocksForApproval(
@@ -76,6 +107,7 @@ export default function OutputArea({
   awaitingApproval,
   awaitingInput,
   columns,
+  rows,
   compactionPhase,
 }: OutputAreaProps) {
   const onToggleReasonRef = useRef(onToggleReason);
@@ -88,6 +120,9 @@ export default function OutputArea({
     activeDynamicBlocks,
     awaitingApproval,
   );
+  const maxVisibleSubagentSteps = concurrentSubagentStepLimit(visibleDynamicBlocks, rows);
+  const hasConcurrentSubagents =
+    visibleDynamicBlocks.filter((block) => block.kind === 'subagent').length > 1;
   const dynamicBlocksRef = useRef(visibleDynamicBlocks);
   dynamicBlocksRef.current = visibleDynamicBlocks;
 
@@ -117,7 +152,7 @@ export default function OutputArea({
   const hasMessages = mergedStaticBlocks.length + visibleDynamicBlocks.length > 0;
 
   return (
-    <Box flexDirection="column" marginBottom={hasMessages ? 1 : 0}>
+    <Box flexDirection="column" marginBottom={hasMessages && !hasConcurrentSubagents ? 1 : 0}>
       <Box height={0} overflow="hidden">
         {staticItems && staticKey && (
           <Static key={staticKey} items={staticItems}>
@@ -162,6 +197,7 @@ export default function OutputArea({
               awaitingApproval={awaitingApproval}
               awaitingInput={awaitingInput}
               columns={innerColumns}
+              maxVisibleSubagentSteps={maxVisibleSubagentSteps}
             />
           );
         })}

@@ -1,8 +1,8 @@
 # 当前规则：TUI 输出区域 Static/dynamic 分割渲染
 
 状态：active
-最后更新：2026-08-08（恢复长流式回答的渐进 Static 冻结；长用户消息首尾预览）
-最后验证：2026-08-08
+最后更新：2026-08-14（并发子 Agent 动态尾按终端行数分配步骤预算）
+最后验证：2026-08-14
 范围：
 
 - `src/app/tui/index.tsx` — Ink 终端渲染选项
@@ -23,17 +23,17 @@
 相关：
 
 - `../adr/0040-streaming-markdown-progressive-static-freeze.md`
-- `execution/completed/2026-05-16-remove-viewport-culling.md`
-- `execution/completed/2026-05-28-static-header-ordering-fix.md`
-- `understanding/2026-05-12-tui-overhaul-design.md`
-- `understanding/2026-06-03-tui-block-turn-model-design.md` — Turn 模型重构设计文档
+- `../space/execution/completed/2026-05-16-remove-viewport-culling.md`
+- `../space/execution/completed/2026-05-28-static-header-ordering-fix.md`
+- `../space/understanding/2026-05-12-tui-overhaul-design.md`
+- `../space/understanding/2026-06-03-tui-block-turn-model-design.md` — Turn 模型重构设计文档
 
 验证：
 
 - `bun run test:tui:system` — 验证真实 PTY 下输出区仍可交互、不会因视口变化崩溃
 - `bun test tests/tui-layout.test.tsx` — 验证 OutputArea 渲染完整性
 - `bun test tests/tui-reducer.test.ts` — 验证 reducer 引用稳定性
-- `bun test tests/tui-static-promote.test.tsx tests/tui-static-content.test.tsx tests/tui-scroll-reset.test.tsx` — 验证长回答只保留可变尾部且不会进入 Ink 全屏清除路径
+- `bun test tests/tui-layout.test.tsx tests/tui-static-promote.test.tsx tests/tui-static-content.test.tsx` — 验证长回答只保留可变尾部、并发子 Agent 动态帧保持低于 Ink 全屏清除阈值
 - `bun test tests/tui-tool-progress.test.ts tests/session-manager.test.ts tests/stream-output.test.ts` — 验证高输出工具只按帧投影有界 tail、后台不丢终态且执行期 capture 有硬上限
 - `bun run tui` — 手动验证输入无卡顿、无空白区域
 
@@ -47,6 +47,7 @@ OutputArea 使用 `<Static>` / dynamic 分割，基于 **Turn 模型**：
 4. **分割策略**：比最新 live tail 更早的 turn 全部进入 Static；最新 turn 在运行结束后仍保持 live tail，直到下一条用户消息建立新 turn，避免 Windows 主屏在终态同帧 Static/dynamic 交接时留下重复帧。会话重挂载且空闲时，完整历史可一次性进入 Static。
 5. live tail 内继续按连续不可变前缀渐进分割；分割点只能向后移动，已经提交的完整 Markdown text block 和已经结算的 Thought/tool summary 必须立即进入 Static，不得因后续还有相邻 text block 而留在 dynamic。
 6. 长流式 Markdown 不得始终作为一个不断增高的 dynamic block：已经出现后继内容的完整顶层组件，在 fenced code 之外的空行边界冻结为 settled text block 并进入 `<Static>`；只有当前仍可能变形的 Markdown 组件留在 dynamic tree。这样表格、列表、代码块不会从中间拆开，同时避免 dynamic 输出超过终端高度后 Ink 每帧整屏清除并重置用户的原生滚动位置。
+7. 多个子 Agent 同时运行时，`OutputArea` 按 `useWindowSize().rows` 为所有可变子 Agent 卡片共享步骤行预算。单个子 Agent 仍 tail-follow 最近 5 步；并发卡片在小终端中减少各自可见步骤，并用既有“以上 N 步已折叠”保留计数语义。预算只使用 Subagent 卡片与 Footer 的固定结构行，不估算任意文本或工具 block；可变尾部混有其他 block 时，子 Agent 步骤预算保守降为 0。并发卡片移除 OutputArea 与 Footer 之间的普通空白行，把该行作为严格小于阈值的安全余量，确保常规纯子 Agent 动态帧低于 Ink 的全屏清除阈值。不得清除 Static scrollback 或改变 Runtime 中的完整步骤事实。
 
 ## 为什么不用纯 React.memo 方案
 
@@ -58,6 +59,7 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 - 用户消息在发送后保留首尾上下文：按终端视觉宽度换行后最多显示 30 行实际内容，超过时保留前后各 15 行，并在中间以弱化文本色提示 `【已省略 N 行】`；提示不计入 30 行，也不保留额外空行。完整内容仍保留在 Runtime 请求与会话持久化中；单条消息最多创建 31 个行节点。
 - 新提交且尚无后续 block 的用户消息暂留 dynamic 区；首个后续 block 到达后才进入 Static，避免长消息提交时 Static/dynamic 交接导致终端整屏短暂清空。
 - 活跃消息（streaming/running/interrupt）必须留在 dynamic 树，不得进入 `<Static>`
+- 并发子 Agent 的步骤尾随上限必须随终端行数自适应；单卡默认上限仍为 5，折叠只影响展示，不得删除 reducer/Runtime 中的步骤
 - 已提交的相邻 text blocks 是 append-only 前缀；不得把“相邻文本可能合并”作为阻止渐进冻结的理由
 - 正常长回答的 dynamic 后缀必须只包含仍可变化的当前组件，不能随已提交段落数线性增长
 - 流式文本只允许冻结 fenced code 之外、已有后继内容的空行边界；不得在未闭合代码块内部拆分，也不得冻结仍处于尾部的 Markdown 组件
@@ -71,7 +73,7 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 ## 不要做
 
 - 不要在 OutputArea 中引入 `visibleStart` / `visibleEnd` 变量
-- 不要使用 `blockLineEstimate` 或任何 block 行数估算逻辑
+- 不要为任意 OutputBlock 使用 `blockLineEstimate` 或其他启发式行数估算；并发 Subagent 预算只可使用卡片自身的固定结构行
 - 不要给 OutputArea 的 Box 设置 `overflow="hidden"`（Static 容器除外）
 - 不要给 App 的根 Box 设置 `height="100%"`
 - 不要实现基于 focusedIndex 的视口居中计算
@@ -116,6 +118,6 @@ React.memo 跳过组件函数执行，但 Ink 的 `renderNodeToOutput` 管线仍
 
 ## 测试期望
 
-- viewport-culling.ts 中的回归测试验证所有 block 类型（user、tool_card、text）在渲染输出中可见
-- tui-layout.test.tsx 中的测试验证 blocks 渲染完整性
+- `tui-static-promote.test.tsx` 和 `tui-static-content.test.tsx` 验证 Static/dynamic 分界与历史内容完整性
+- `tui-layout.test.tsx` 验证 blocks 渲染完整性及并发子 Agent 的动态高度预算
 - startup.test.ts 在 `CI=true` 的真实 PTY 中验证输入提示符仍可渲染

@@ -643,6 +643,8 @@
         "docs/active/cancel-resume-cleanup.md",
         "docs/active/thought-pre-consolidation.md",
         "docs/active/tui-footer-resize-stability.md",
+        "docs/active/tui-no-viewport-culling.md",
+        "docs/active/tui-reference-stability.md",
         "docs/active/tui-run-status-bar.md",
         "docs/active/tui-session-startup-card.md",
         "docs/book/07-TUI结构.md",

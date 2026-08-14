@@ -25,7 +25,10 @@ import DiffPreview from '../src/app/tui/DiffPreview';
 import Footer from '../src/app/tui/Footer';
 import Header, { formatHeaderWorkspace } from '../src/app/tui/Header';
 import { createInitialState } from '../src/app/tui/initialState';
-import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
+import OutputArea, {
+  concurrentSubagentStepLimit,
+  useStaticContent,
+} from '../src/app/tui/OutputArea';
 import { TuiUserInputProvider } from '../src/app/tui/provider';
 import { type Action, eventReducer as canonicalEventReducer } from '../src/app/tui/reducers';
 import type { RunStatusSnapshot } from '../src/app/tui/run-status';
@@ -1737,6 +1740,62 @@ function OutputAreaTestWrap({
     />
   );
 }
+
+describe('concurrent subagent dynamic height', () => {
+  const childBlocks = Array.from(
+    { length: 4 },
+    (_, childIndex): OutputBlock => ({
+      id: childIndex + 1,
+      kind: 'subagent',
+      subagentId: `sub-${childIndex + 1}`,
+      role: 'explore',
+      task: `inspect area ${childIndex + 1}`,
+      status: 'running',
+      summary: '',
+      toolCallCount: 10,
+      durationMs: 0,
+      steps: Array.from({ length: 10 }, (_, stepIndex) => ({
+        toolName: `child_${childIndex + 1}_step_${String(stepIndex + 1).padStart(2, '0')}`,
+        toolArgs: {},
+        status: 'success' as const,
+      })),
+    }),
+  );
+
+  test('keeps the normal five-step tail for one live child', () => {
+    expect(concurrentSubagentStepLimit(childBlocks.slice(0, 1), 24)).toBe(5);
+  });
+
+  test('does not guess the height of arbitrary blocks in a mixed mutable tail', () => {
+    const mixedBlocks: OutputBlock[] = [
+      ...childBlocks.slice(0, 2),
+      { id: 99, kind: 'text', content: 'mutable response', streaming: true },
+    ];
+    expect(concurrentSubagentStepLimit(mixedBlocks, 24)).toBe(0);
+  });
+
+  test('shares step rows across concurrent children before Ink reaches fullscreen height', () => {
+    expect(concurrentSubagentStepLimit(childBlocks, 24)).toBe(1);
+
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={childBlocks}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+
+    for (let childIndex = 1; childIndex <= 4; childIndex++) {
+      expect(frame).toContain(`child_${childIndex}_step_10`);
+      expect(frame).not.toContain(`child_${childIndex}_step_09`);
+    }
+    // The production App adds the four-row running Footer/prompt below OutputArea.
+    expect(frame.split('\n').length + 4).toBeLessThan(24);
+  });
+});
 
 describe('successor turn rendering', () => {
   test('keeps a successor shell card dynamic after the previous turn was cancelled', () => {
@@ -4726,5 +4785,29 @@ describe('SubAgentBlock rendering', () => {
     expect(frame).toContain('step_15'); // last step should be visible
     expect(frame).toContain('step_11'); // within last 5 (MAX_RUNNING_STEPS = 5)
     expect(frame).not.toContain('step_10'); // too old, folded
+  });
+
+  test('zero step budget keeps the folded count without rendering step rows', () => {
+    const block = {
+      id: 1,
+      kind: 'subagent' as const,
+      subagentId: 'sub-compact',
+      role: 'explore' as const,
+      task: 'inspect in a mixed dynamic tail',
+      status: 'running' as const,
+      summary: '',
+      toolCallCount: 2,
+      durationMs: 0,
+      steps: [
+        { toolName: 'read_file', toolArgs: { path: 'one.ts' }, status: 'success' as const },
+        { toolName: 'read_file', toolArgs: { path: 'two.ts' }, status: 'success' as const },
+      ],
+    };
+    const { lastFrame } = render(<SubAgentBlock block={block} maxVisibleSteps={0} />);
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('以上 2 步已折叠');
+    expect(frame).not.toContain('one.ts');
+    expect(frame).not.toContain('two.ts');
   });
 });
