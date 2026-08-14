@@ -36,15 +36,24 @@ describe('buildToolFingerprint', () => {
     // Different tool name → different fingerprint (even if args overlap)
     expect(buildToolFingerprint(shell)).not.toBe(buildToolFingerprint(write));
   });
+
+  test('non-mutation tools include canonical full args without depending on key order', () => {
+    const first = makeRequest('remote_lookup', { query: 'alpha', limit: 2 });
+    const reordered = makeRequest('remote_lookup', { limit: 2, query: 'alpha' });
+    const different = makeRequest('remote_lookup', { query: 'beta', limit: 2 });
+
+    expect(buildToolFingerprint(first)).toBe(buildToolFingerprint(reordered));
+    expect(buildToolFingerprint(first)).not.toBe(buildToolFingerprint(different));
+  });
 });
 
 describe('checkDoomLoop', () => {
-  test('first call is never blocked', () => {
+  test('an unrecorded call is never blocked', () => {
     const tracker: Record<string, DoomLoopTrackerEntry> = {};
     const req = makeRequest('shell_execute', { command: 'npm install' });
     const result = checkDoomLoop(tracker, req, 3, 60_000);
     expect(result.blocked).toBe(false);
-    expect(result.count).toBe(1);
+    expect(result.count).toBe(0);
     expect(result.fingerprint).toBeDefined();
   });
 
@@ -56,7 +65,7 @@ describe('checkDoomLoop', () => {
     };
     const result = checkDoomLoop(tracker, req, 3, 60_000);
     expect(result.blocked).toBe(true);
-    expect(result.count).toBe(4);
+    expect(result.count).toBe(3);
     expect(result.reason).toContain('Doom loop detected');
   });
 
@@ -69,7 +78,7 @@ describe('checkDoomLoop', () => {
     };
     const result = checkDoomLoop(tracker, req, 3, 60_000);
     expect(result.blocked).toBe(false);
-    expect(result.count).toBe(1); // reset to 1 (this is the first in the new window)
+    expect(result.count).toBe(0);
   });
 });
 
@@ -87,6 +96,18 @@ describe('updateDoomLoopTracker', () => {
     const tracker: Record<string, DoomLoopTrackerEntry> = {};
     const next = updateDoomLoopTracker(tracker, 'new-fp');
     expect(next['new-fp']!.count).toBe(1);
+  });
+
+  test('resets the count after the detection window expires', () => {
+    const now = Date.parse('2026-08-14T00:02:00.000Z');
+    const fp = 'expired-window';
+    const tracker: Record<string, DoomLoopTrackerEntry> = {
+      [fp]: { count: 4, lastSeenAt: now - 60_001 },
+    };
+
+    const next = updateDoomLoopTracker(tracker, fp, now);
+
+    expect(next[fp]).toEqual({ count: 1, lastSeenAt: now });
   });
 
   test('purges entries older than 120s', () => {

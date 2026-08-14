@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import type { PendingToolRequest } from '../harness/tool-requests';
+import { stableStringify } from '@/core/harness/tool-policy';
+
+interface FingerprintableToolRequest {
+  name: string;
+  args: unknown;
+}
 
 export interface DoomLoopCheck {
   blocked: boolean;
@@ -17,15 +22,19 @@ export interface DoomLoopTrackerEntry {
  * 计算工具调用的指纹。对同一工具名 + 相同 args，产生相同指纹。
  * Computes a stable fingerprint for a tool call. Same toolName + same args → same fingerprint.
  */
-export function buildToolFingerprint(request: PendingToolRequest): string {
+export function buildToolFingerprint(request: FingerprintableToolRequest): string {
   const args = request.args as unknown as Record<string, unknown>;
-  const payload = JSON.stringify({
+  const identityArgs =
+    request.name === 'shell_execute'
+      ? { command: args.command, cwd: args.cwd }
+      : request.name === 'write_file' || request.name === 'edit_file'
+        ? { path: args.path }
+        : args;
+  const payload = stableStringify({
     tool: request.name,
-    // 对 shell_execute 只取 command + cwd；对 write_file/edit_file 只取 path
-    // For shell_execute, only command + cwd; for write_file/edit_file, only path
-    cmd: request.name === 'shell_execute' ? args.command : undefined,
-    cwd: request.name === 'shell_execute' ? args.cwd : undefined,
-    path: request.name === 'write_file' || request.name === 'edit_file' ? args.path : undefined,
+    // Shell and file mutations use their governed execution target. Other tools
+    // retain their complete canonical arguments to avoid cross-request collisions.
+    args: identityArgs,
   });
   return createHash('sha256').update(payload).digest('hex');
 }
@@ -34,6 +43,9 @@ export function buildToolFingerprint(request: PendingToolRequest): string {
  * 检查是否为 doom-loop：同一工具调用在短时间内重复过多。
  * Checks if a tool call has been repeated within a short window (doom-loop detection).
  *
+ * The current request is recorded by the reducer before this check runs, so
+ * `count` is the durable observed count rather than a speculative increment.
+ *
  * @param tracker - 当前的 doom-loop 追踪状态 / Current doom-loop tracking state
  * @param request - 待检查的工具请求 / The tool request to check
  * @param threshold - 重复次数阈值（默认 3）/ Repeat count threshold (default 3)
@@ -41,16 +53,17 @@ export function buildToolFingerprint(request: PendingToolRequest): string {
  */
 export function checkDoomLoop(
   tracker: Record<string, DoomLoopTrackerEntry>,
-  request: PendingToolRequest,
+  request: FingerprintableToolRequest,
   threshold: number = 3,
   windowMs: number = 60_000,
+  now: number = Date.now(),
 ): DoomLoopCheck {
   const fp = buildToolFingerprint(request);
   const entry = tracker[fp];
-  const now = Date.now();
 
-  if (entry && now - entry.lastSeenAt <= windowMs) {
-    const count = entry.count + 1;
+  const elapsed = entry ? now - entry.lastSeenAt : undefined;
+  if (entry && elapsed != null && elapsed >= 0 && elapsed <= windowMs) {
+    const count = entry.count;
     if (count >= threshold) {
       return {
         blocked: true,
@@ -62,8 +75,8 @@ export function checkDoomLoop(
     return { blocked: false, fingerprint: fp, count };
   }
 
-  // First occurrence or outside window — reset
-  return { blocked: false, fingerprint: fp, count: 1 };
+  // No durable occurrence exists in the active window.
+  return { blocked: false, fingerprint: fp, count: 0 };
 }
 
 /**
@@ -73,8 +86,9 @@ export function checkDoomLoop(
 export function updateDoomLoopTracker(
   tracker: Record<string, DoomLoopTrackerEntry>,
   fingerprint: string,
+  now: number = Date.now(),
+  windowMs: number = 60_000,
 ): Record<string, DoomLoopTrackerEntry> {
-  const now = Date.now();
   const next = { ...tracker };
 
   // 清理超过 120s 的旧条目 / Purge entries older than 120s
@@ -85,8 +99,10 @@ export function updateDoomLoopTracker(
   }
 
   const existing = next[fingerprint];
+  const elapsed = existing ? now - existing.lastSeenAt : undefined;
   next[fingerprint] = {
-    count: (existing?.count ?? 0) + 1,
+    count:
+      existing && elapsed != null && elapsed >= 0 && elapsed <= windowMs ? existing.count + 1 : 1,
     lastSeenAt: now,
   };
   return next;

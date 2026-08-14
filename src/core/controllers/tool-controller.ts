@@ -1299,6 +1299,25 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'ask_user') {
+      const effectiveMode = getEffectiveInteractionMode(params.state);
+      const modeDecision = createModePolicy(effectiveMode).shouldAskUser({
+        interactionMode: effectiveMode as InteractionMode,
+        phase: getAgentPhase(getActivePlanning(params.state)),
+        planKind: getActivePlanning(params.state).kind,
+        toolName: 'ask_user',
+      });
+      if (modeDecision.kind === 'deny') {
+        const reason =
+          modeDecision.reason ??
+          'Full mode cannot ask the user. Make the best safe assumption and continue.';
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason,
+          failure: classifyFailure('policy_denied', reason),
+        });
+        continue;
+      }
       // 中断契约在 spec 闭环：事件载荷经 askUserSpec.createInterrupt 生成
       // （规范模型输入 → 内部 UserInputRequest），Controller 不再二次校验或
       // 手工组装中断内容。
@@ -1579,27 +1598,39 @@ export async function executeRuntimeTools(params: {
       // execute the blocked tool with the approved grant and resume.
       const suspended = params.state.suspendedSubagents[toolCallId];
       if (suspended && call.status === 'approved') {
-        const restored = deserializeSubagentContinuation(suspended);
-        const resumeEvents = await handleSubAgentResume({
-          state: params.state,
-          getRuntimeState: params.getRuntimeState,
-          toolCallId,
-          continuation: restored,
-          shellExecutor: params.shellExecutor,
-          gitBroker: params.gitBroker,
-          mcpManager: params.mcpManager,
-          skillManifests: params.skillManifests,
-          skillOptions: params.skillOptions,
-          signal: params.signal,
-          taskConfig: params.taskConfig,
-          taskModel: params.taskModel,
-          providerDataAdmission: params.providerDataAdmission,
-          descendantResourceAdmission: params.descendantResourceAdmission,
-          emitSubagentEvent,
-          recordFilePreimage: params.recordFilePreimage,
-          recordNetworkDecision: params.recordNetworkDecision,
-        });
-        events.push(...resumeEvents);
+        try {
+          const restored = deserializeSubagentContinuation(suspended);
+          const resumeEvents = await handleSubAgentResume({
+            state: params.state,
+            getRuntimeState: params.getRuntimeState,
+            toolCallId,
+            continuation: restored,
+            shellExecutor: params.shellExecutor,
+            gitBroker: params.gitBroker,
+            mcpManager: params.mcpManager,
+            skillManifests: params.skillManifests,
+            skillOptions: params.skillOptions,
+            signal: params.signal,
+            taskConfig: params.taskConfig,
+            taskModel: params.taskModel,
+            providerDataAdmission: params.providerDataAdmission,
+            descendantResourceAdmission: params.descendantResourceAdmission,
+            emitSubagentEvent,
+            recordFilePreimage: params.recordFilePreimage,
+            recordNetworkDecision: params.recordNetworkDecision,
+          });
+          events.push(...resumeEvents);
+        } catch (error) {
+          if (error instanceof DescendantResourceAdmissionError) throw error;
+          events.push({
+            type: 'tool.failed',
+            toolCallId,
+            failure: classifyFailure(
+              'tool_runtime_error',
+              error instanceof Error ? error.message : String(error),
+            ),
+          });
+        }
         continue;
       }
       if (suspended && call.status === 'queued') {

@@ -7,6 +7,7 @@ import {
   DEFAULT_CIRCUIT_BREAKER_CONFIG,
   evaluateCircuitBreaker,
 } from '@/core/execution/circuit-breaker';
+import { buildToolFingerprint, updateDoomLoopTracker } from '@/core/execution/doom-loop';
 import { updateAutoCompactionGuard } from '@/core/model/context-compaction-decision';
 import { classifyToolCapability } from '@/core/policies/tool-capabilities';
 import { validateVerificationSpec } from '@/core/verification/spec';
@@ -47,6 +48,7 @@ import {
   type RuntimeState,
   setActivePlanning,
   type ToolCallRecord,
+  type ToolCallStatus,
   type ToolResultMeta,
   type TranscriptMessage,
   updateActiveTask,
@@ -69,6 +71,18 @@ import {
   recordToolOwnedProgressV1,
   toolInvocationFingerprintV1,
 } from './tool-recovery-journal';
+
+const TERMINAL_TOOL_STATUSES = new Set<ToolCallStatus>([
+  'succeeded',
+  'failed',
+  'rejected',
+  'cancelled',
+  'exhausted',
+]);
+
+function isTerminalToolStatus(status: ToolCallStatus): boolean {
+  return TERMINAL_TOOL_STATUSES.has(status);
+}
 
 function transcriptMeta(state: RuntimeState, messageId: string, createdAt?: string) {
   return {
@@ -1127,6 +1141,7 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'tool.started': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      if (isTerminalToolStatus(existingCall.status)) return state;
       const next = {
         ...state,
         tools: {
@@ -1154,6 +1169,7 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'tool.finished': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
+      if (isTerminalToolStatus(existingCall.status)) return state;
       const isTaskCall = existingCall.name === 'task';
       const clearsMatchingApproval =
         isTaskCall &&
@@ -1238,7 +1254,7 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'tool.failed': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
-      if (existingCall.status === 'failed') return state;
+      if (isTerminalToolStatus(existingCall.status)) return state;
       const failure =
         event.failure ??
         classifyFailure('tool_runtime_error', event.error ?? 'Tool failed unexpectedly.');
@@ -1307,7 +1323,7 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'tool.rejected': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (existingCall) {
-        if (existingCall.status === 'rejected') return state;
+        if (isTerminalToolStatus(existingCall.status)) return state;
         const failure = event.failure ?? classifyFailure('policy_denied', event.reason);
         const outcomeV1 = canonicalToolOutcomeV1(event);
         const recovery = modelRecoveryProjection(outcomeV1);
@@ -1412,15 +1428,7 @@ function reduceRuntimeStateWithReplayBoundary(
     case 'tool.cancelled': {
       const existingCall = state.tools.calls[event.toolCallId];
       if (!existingCall) return state;
-      if (
-        existingCall.status === 'succeeded' ||
-        existingCall.status === 'failed' ||
-        existingCall.status === 'rejected' ||
-        existingCall.status === 'cancelled' ||
-        existingCall.status === 'exhausted'
-      ) {
-        return state;
-      }
+      if (isTerminalToolStatus(existingCall.status)) return state;
       const clearsMatchingInteraction =
         state.interactions.kind !== 'idle' &&
         state.interactions.kind !== 'awaiting_provider_action' &&
@@ -2506,9 +2514,26 @@ function reduceRuntimeStateWithReplayBoundary(
 
     // ── Auto-review 事件 / Auto-review events ──
 
-    case 'auto_review.requested':
+    case 'auto_review.requested': {
+      const call = state.tools.calls[event.toolCallId];
+      const suspended = state.suspendedSubagents[event.toolCallId];
+      const blockedTool = suspended?.blockedTool;
+      const reviewedRequest = blockedTool
+        ? { name: blockedTool.toolName, args: blockedTool.args }
+        : call
+          ? { name: call.name, args: call.args }
+          : undefined;
+      const observedAt = event.createdAt ? Date.parse(event.createdAt) : Date.now();
+      const doomLoop = reviewedRequest
+        ? updateDoomLoopTracker(
+            state.doomLoop,
+            buildToolFingerprint(reviewedRequest),
+            Number.isFinite(observedAt) ? observedAt : Date.now(),
+          )
+        : state.doomLoop;
       return {
         ...state,
+        doomLoop,
         tools: updateToolStatus(state.tools, event.toolCallId, 'awaiting_auto_review'),
         interactions: {
           kind: 'awaiting_auto_review',
@@ -2519,6 +2544,7 @@ function reduceRuntimeStateWithReplayBoundary(
           approval: event.approval,
         },
       };
+    }
 
     case 'auto_review.completed': {
       if (

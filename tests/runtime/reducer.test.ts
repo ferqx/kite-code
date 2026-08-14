@@ -791,6 +791,93 @@ describe('reduceRuntimeState — tool lifecycle', () => {
     expect(next.tools).toBe(state.tools);
   });
 
+  test('late lifecycle events cannot reopen or overwrite a terminal tool call', () => {
+    let state = reduceRuntimeState(makeInitialState(), {
+      type: 'tool.queued',
+      toolCallId: 'terminal-tool',
+      name: 'read_file',
+      args: { path: 'a.ts' },
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.started',
+      toolCallId: 'terminal-tool',
+    });
+    state = reduceRuntimeState(state, {
+      type: 'tool.finished',
+      toolCallId: 'terminal-tool',
+      name: 'read_file',
+      result: { ok: true, command: 'read_file', exitCode: 0, stdout: 'ok', stderr: '' },
+    });
+
+    const transcriptLength = state.transcript.messages.length;
+    const lateEvents: RuntimeEvent[] = [
+      { type: 'tool.started', toolCallId: 'terminal-tool' },
+      {
+        type: 'tool.finished',
+        toolCallId: 'terminal-tool',
+        name: 'read_file',
+        result: { ok: false, command: 'read_file', exitCode: 1, stdout: '', stderr: 'late' },
+      },
+      {
+        type: 'tool.failed',
+        toolCallId: 'terminal-tool',
+        failure: classifyFailure('tool_runtime_error', 'late failure'),
+      },
+      {
+        type: 'tool.rejected',
+        toolCallId: 'terminal-tool',
+        reason: 'late rejection',
+      },
+      { type: 'tool.cancelled', toolCallId: 'terminal-tool', reason: 'late cancellation' },
+    ];
+
+    for (const event of lateEvents) {
+      const next = reduceRuntimeState(state, event);
+      expect(next).toBe(state);
+    }
+    expect(state.tools.calls['terminal-tool']?.status).toBe('succeeded');
+    expect(state.transcript.messages).toHaveLength(transcriptLength);
+  });
+
+  test('an approved active continuation retains started authority when it fails', () => {
+    const state = makeInitialState();
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'model',
+      name: 'task',
+      args: { subagent_type: 'code', task: 'Resume the child.' },
+      status: 'approved',
+      sideEffect: true,
+      startedAt: '2026-08-14T00:00:00.000Z',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.active.push('task');
+
+    const normalized = normalizeCurrentToolOutcomeEventV1(
+      {
+        type: 'tool.failed',
+        toolCallId: 'task',
+        failure: classifyFailure('tool_runtime_error', 'resume failed'),
+      },
+      state,
+      '2026-08-14T00:00:01.000Z',
+    );
+
+    expect(normalized).toMatchObject({
+      type: 'tool.failed',
+      outcomeV1: {
+        dispatchState: 'started',
+        externalEffects: 'unknown',
+        replaySafety: 'none',
+        recovery: {
+          disposition: 'never',
+          maximumAdditionalCalls: 0,
+          safeAutomaticRetry: false,
+        },
+      },
+    });
+  });
+
   // 验证 tool.finished 设置 succeeded 并移除活跃
   test('tool.finished sets succeeded status and removes from active', () => {
     const state: RuntimeState = {
@@ -2910,6 +2997,7 @@ describe('reduceRuntimeState — auto-review events', () => {
       toolName: 'shell_execute',
       reason: 'auto-review for tool approval',
       approval,
+      createdAt: '2026-08-11T00:00:00.000Z',
     };
     const next = reduceRuntimeState(withTool, event);
     expect(next.interactions.kind).toBe('awaiting_auto_review');
@@ -2919,6 +3007,9 @@ describe('reduceRuntimeState — auto-review events', () => {
       expect(next.interactions.toolName).toBe('shell_execute');
     }
     expect(next.tools.calls['tool-99']!.status).toBe('awaiting_auto_review');
+    expect(Object.values(next.doomLoop)).toEqual([
+      { count: 1, lastSeenAt: Date.parse('2026-08-11T00:00:00.000Z') },
+    ]);
   });
 
   test('auto_review.completed approves tool when ok and approved', () => {
