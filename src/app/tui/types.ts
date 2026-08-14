@@ -49,7 +49,13 @@ export interface SubAgentStepRecord {
 }
 
 export type OutputBlock =
-  | { id: number; kind: 'user'; content: string }
+  | {
+      id: number;
+      kind: 'user';
+      content: string;
+      /** Live-only optimistic copy awaiting its durable user.message_appended echo. */
+      runtimeEchoPending?: boolean;
+    }
   | {
       id: number;
       kind: 'text';

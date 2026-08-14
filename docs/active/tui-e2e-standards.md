@@ -91,6 +91,8 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    Harness 使用 headless VT parser 应用 ANSI erase、光标移动、换行和 resize：当前可见状态必须断言
    `viewport()`，已经提交且仍可通过终端回看器访问的历史断言 `scrollback()`；短暂 streaming/modal
    阶段使用 `markScreen()` 与 `screenFramesSince(mark)` 证明某个解析后的真实 frame 曾显示。
+   取消运行的回归场景必须在稳定 idle 后检查 `scrollback()`，确认同一已提交用户消息只出现一次；
+   不能只检查最终 `viewport()`，因为重复的历史消息可能已滚出当前视口。
    “本次动作从未显示敏感/错误文本”同样必须遍历 action-local screen frame，不能用最终 viewport
    或 scrollback 的缺失替代。frame mark 绑定入队操作序号，mark 前已接收但尚未解析的 chunk 不得
    进入 mark 后历史；历史采用有界保留并在 PTY cleanup 时释放，因此 mark 应靠近被验证动作。若

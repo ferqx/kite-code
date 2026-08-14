@@ -4391,7 +4391,10 @@ describe('eventReducer (blocks model)', () => {
 
     test('renders a successor response after a cancelled turn without losing the prompt', () => {
       let state = dispatch(fresh(), { type: 'SET_RUNNING' });
-      state = dispatch(state, { type: 'USER_MESSAGE', text: '原始请求' });
+      state = dispatch(state, {
+        type: 'USER_MESSAGE',
+        text: '原始请求',
+      });
       state = dispatch(state, {
         type: 'RUNTIME_EVENT',
         event: { type: 'user.message_appended', messageId: 'user-1', content: '原始请求' },
@@ -4418,8 +4421,11 @@ describe('eventReducer (blocks model)', () => {
           cause: 'user',
         },
       });
-      state = dispatch(state, { type: 'USER_MESSAGE', text: '请继续' });
       state = dispatch(state, { type: 'SET_RUNNING' });
+      state = dispatch(state, {
+        type: 'USER_MESSAGE',
+        text: '请继续',
+      });
       state = dispatch(state, {
         type: 'RUNTIME_EVENT',
         event: { type: 'user.message_appended', messageId: 'user-2', content: '请继续' },
@@ -4455,7 +4461,10 @@ describe('eventReducer (blocks model)', () => {
     });
     test('does not duplicate an optimistically rendered prompt when its durable event arrives', () => {
       let state = dispatch(fresh(), { type: 'SET_RUNNING' });
-      state = dispatch(state, { type: 'USER_MESSAGE', text: '继续测试' });
+      state = dispatch(state, {
+        type: 'USER_MESSAGE',
+        text: '继续测试',
+      });
       // Runtime diagnostics can arrive between the optimistic prompt and its
       // durable user.message_appended event. Deduplication must cover the
       // active turn rather than only its final block.
@@ -4473,6 +4482,30 @@ describe('eventReducer (blocks model)', () => {
       const userBlocks = flatBlocks(state).filter((block) => block.kind === 'user');
       expect(userBlocks).toHaveLength(1);
       expect(userBlocks[0]).toMatchObject({ kind: 'user', content: '继续测试' });
+      expect(userBlocks[0]).not.toHaveProperty('runtimeEchoPending');
+    });
+    test('does not duplicate a pending optimistic prompt when cancellation wins the race', () => {
+      let state = dispatch(fresh(), { type: 'SET_RUNNING' });
+      state = dispatch(state, {
+        type: 'USER_MESSAGE',
+        text: '嗯',
+      });
+      state = dispatch(state, { type: 'CTRL_C' });
+      expect(state.running).toBe(false);
+
+      state = dispatch(state, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'user.message_appended',
+          messageId: 'u-after-cancel',
+          content: '嗯',
+        },
+      });
+
+      const userBlocks = flatBlocks(state).filter((block) => block.kind === 'user');
+      expect(userBlocks).toHaveLength(1);
+      expect(userBlocks[0]).toEqual(expect.objectContaining({ kind: 'user', content: '嗯' }));
+      expect(userBlocks[0]).not.toHaveProperty('runtimeEchoPending');
     });
     test('replays identical consecutive prompts as distinct turns', () => {
       const events: import('../src/core/runtime/events').RuntimeEvent[] = [

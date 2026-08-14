@@ -16,7 +16,7 @@
 
 `ask_user` 是用户输入交互，不是执行授权审批。用户拒答或按 Esc 时，Kernel 先写入携带 `interactionId` 与 `toolCallId` 的 `user_input.cancelled`，再为该 `ask_user` 写入 `tool.finished(ok=false, stdout=Cancelled)`，清除 `awaiting_user_input`；不得写入 `approval.rejected`、`tool.cancelled` 或 `turn.aborted`，也不得 abort 本轮执行信号。Runner 随后继续调度；模型在同一 turn 中看到拒答 Tool Result 后继续回答或调整方案。
 
-TUI 只可在实时运行中按文本识别“乐观渲染 prompt + 随后 durable `user.message_appended`”这一对副本。event-log replay 不得按文本去重；两个 `messageId` 不同但内容相同的连续用户消息仍是两个独立 turn，后续模型回答必须归入各自 turn。
+TUI 只可通过消息本身的 live-only pending echo 标记识别“乐观渲染 prompt + 随后 durable `user.message_appended`”这一对副本；不得依赖全局 `running` 状态，因为取消可能先把 run 投影为 idle、再收到该 durable echo。收到 echo 后必须清除标记且不新增 turn。event-log replay 不得按文本去重；两个 `messageId` 不同但内容相同的连续用户消息仍是两个独立 turn，后续模型回答必须归入各自 turn。
 
 SessionRuntime 在 sandbox `prepare()` 尚未完成时收到取消，必须同时中止该 executor 的 preparation，使 native preflight 进入 cancel/EOF cleanup；cleanup barrier 随后才允许保留的一条 successor prompt 继续。已经完成 preparation 并进入 agent loop 后的普通取消不得无条件使共享 startup decision 失效。
 
