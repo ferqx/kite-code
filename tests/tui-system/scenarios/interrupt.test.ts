@@ -64,12 +64,14 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       const output = tui.viewport();
       const clean = stripAnsi(output);
       console.log('  output after Ctrl+C:', clean.slice(-300));
+      const scrollback = stripAnsi(tui.scrollback());
 
       // TUI should still be alive — prompt must be visible.
       expect(screenContains(output, '❯')).toBe(true);
 
       // The delayed response should NOT have arrived (5s delay, checked at ~1.5s)
       expect(screenContains(output, 'This response will be interrupted')).toBe(false);
+      expect(scrollback.split('Interrupt me').length - 1).toBe(1);
     },
     TIMEOUT,
   );

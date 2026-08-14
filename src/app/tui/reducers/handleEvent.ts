@@ -2282,12 +2282,24 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       // TUI optimistically renders a submitted prompt before RuntimeStore
       // persistence. Diagnostics such as the session-logging notice may be
       // appended to the same active turn before this durable event arrives, so
-      // checking only the final block is insufficient. While a run is active,
-      // the existing user block in the current turn is the optimistic copy.
-      const alreadyRendered =
-        state.running &&
-        lastTurn(state)?.blocks.some((block) => block.kind === 'user' && block.content === content);
-      if (alreadyRendered) return state;
+      // checking only the final block is insufficient. Cancellation may also
+      // set running=false before this echo is projected, so message-local
+      // identity — not global run state — owns the one-time deduplication.
+      const activeTurn = lastTurn(state);
+      const optimisticIndex =
+        activeTurn?.blocks.findIndex(
+          (block) =>
+            block.kind === 'user' && block.runtimeEchoPending === true && block.content === content,
+        ) ?? -1;
+      if (activeTurn && optimisticIndex >= 0) {
+        const turns = state.turns.slice();
+        const blocks = activeTurn.blocks.slice();
+        const optimistic = blocks[optimisticIndex] as Extract<OutputBlock, { kind: 'user' }>;
+        const { runtimeEchoPending: _pending, ...durableUserBlock } = optimistic;
+        blocks[optimisticIndex] = durableUserBlock;
+        turns[turns.length - 1] = { blocks };
+        return { ...state, turns };
+      }
       return appendUserMessage(state, {
         id: state.nextBlockId,
         kind: 'user',

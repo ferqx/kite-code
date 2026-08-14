@@ -289,7 +289,12 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
       };
     }
     case 'USER_MESSAGE': {
-      const block: OutputBlock = { id: state.nextBlockId, kind: 'user', content: action.text };
+      const block: OutputBlock = {
+        id: state.nextBlockId,
+        kind: 'user',
+        content: action.text,
+        ...(state.running ? { runtimeEchoPending: true } : {}),
+      };
       return appendUserMessage(state, block);
     }
     default:
