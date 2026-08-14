@@ -172,7 +172,7 @@ const PROBES: readonly ProbeDefinition[] = [
         /\(pass\).*full lifecycle: interrupt .* deny .* current turn stops without model continuation/,
     },
     invariantEvidence:
-      /\(pass\).*runs repeated InputLine focus-listener mount and unmount in one owned child process/,
+      /\(pass\).*runs repeated InputLine focus-reporting mount and unmount in one owned child process/,
   },
 ];
 
