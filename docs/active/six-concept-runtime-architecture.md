@@ -205,6 +205,10 @@ task success 也不能清除 hard block。其 task/turn scope 只用于 provenan
 queued tools、verification、completion 与 compaction 检查损坏 journal；Controller direct 入口和 Runner
 prepared/admission/lease 边界再防御性重验；Runner 在 preparation 后对 `journal_invalid` 和 scoped
 `no_progress` 都重新采用最新的 `recovery_blocked` decision，阻止已经准备或租赁的 stale effect。
+健康 child journal merge 不得在 `qualityGuard.blocked=false` 时写入 task/turn scope；否则下一轮
+`createAgentKernel` 的严格恢复校验会误判健康 snapshot。恢复时父与所有 suspended child 属于同一 identity
+domain：pre-v23 snapshot 或 replay tail 缺 child journal 时只可一次性注入最终 parent key；current-schema
+缺失、损坏或 foreign child journal 则立即将 parent 置为 `journal_invalid`，不能延迟到 approval resume。
 bounded journal 的 128 条裁剪以 lineage closure 为单位，优先
 active/recent 记录；不能保留 child 却删除其 `recoveryOf` parent。Runtime invariant 只要求 live call 的
 lineage parent 仍 retained，已经 terminal 的历史 ToolCall 不会迫使 bounded journal 永久增长。
@@ -372,6 +376,11 @@ SubAgentRunner，Resource admission 再按 `maxConcurrentSubagents`、writer cei
 只开放一个 canonical interaction；其余 continuation 持久化后用 `subagent.approval_deferred`
 重新入队。当前 child 获批后，Scheduler 必须先恢复其 active continuation，不能让 deferred queue
 插队；该 child 完成或再次暂停后，才从 snapshot 逐个呈现 sibling，且不重启 child 模型（ADR-0104）。
+Executor 为实际并发派发的 sibling 写入同一个 Runtime-owned `concurrencyGroupId`，并随
+`subagent.started` 事件持久化；串行 child 不携带该字段。该 identity 只用于 App 将一个真实批次投影为
+单个可展开的活动单元，不参与 authorization、approval、resource admission 或 continuation ownership。
+错误导致 `turn.aborted(cause=error)` 时，App 必须把该轮仍在 running/suspended 的 child 收敛为 error，
+避免批次在 TUI 中永久保持活动态。
 
 Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`CapabilityInvocationRecord` 保存调用身份、状态、参数摘要、观察到的副作用、外部引用、artifact、重试安全性和 reconciliation 结果。
 

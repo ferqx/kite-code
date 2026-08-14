@@ -102,8 +102,23 @@ export function isBlockSettledInRun(
     case 'reason':
     case 'file_change':
       return true;
-    case 'subagent':
-      return block.status === 'done' || block.status === 'error' || block.status === 'cancelled';
+    case 'subagent': {
+      const terminal = (candidate: Extract<OutputBlock, { kind: 'subagent' }>) =>
+        candidate.status === 'done' ||
+        candidate.status === 'error' ||
+        candidate.status === 'cancelled';
+      if (!terminal(block)) return false;
+      if (block.concurrencyGroupId == null) return true;
+      // A sibling batch must enter append-only Static as one presentation
+      // item. Hold early finishers in the dynamic suffix until all siblings
+      // have reached a terminal state.
+      return _blocks.every(
+        (candidate) =>
+          candidate.kind !== 'subagent' ||
+          candidate.concurrencyGroupId !== block.concurrencyGroupId ||
+          terminal(candidate),
+      );
+    }
     case 'approval':
     case 'question':
       return block.resolved !== undefined;
@@ -150,7 +165,10 @@ export function blockFingerprint(b: OutputBlock): string {
     case 'subagent':
       extra =
         `:${b.status}:${b.steps.length}:${b.steps.map((s) => s.status?.[0] ?? '_').join('')}` +
-        (b.awaitingApproval ? ':wait' : '');
+        (b.awaitingApproval ? ':wait' : '') +
+        (b.approvalState ? `:approval-${b.approvalState}` : '') +
+        (b.concurrencyGroupId != null ? `:cg${b.concurrencyGroupId}` : '') +
+        (b.expanded ? ':expanded' : '');
       break;
     case 'approval':
     case 'question':

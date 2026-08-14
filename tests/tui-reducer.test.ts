@@ -4003,6 +4003,35 @@ describe('eventReducer (blocks model)', () => {
       s = dispatch(s, saStart('sub-2', 'code', 'task2'));
       expect(flatBlocks(s)[0]!.id).toBeLessThan(flatBlocks(s)[1]!.id);
     });
+
+    test('preserves the Runtime concurrency identity for sibling presentation', () => {
+      let s = fresh();
+      for (const [id, role] of [
+        ['sub-1', 'explore'],
+        ['sub-2', 'review'],
+        ['sub-3', 'code'],
+      ] as const) {
+        s = handleRuntimeEventAction(s, {
+          type: 'subagent.started',
+          subagent: { id, role, task: id, concurrencyGroupId: 'batch-1' },
+        });
+      }
+      const children = flatBlocks(s) as Array<Extract<OutputBlock, { kind: 'subagent' }>>;
+      expect(children.map((child) => child.concurrencyGroupId)).toEqual([
+        'batch-1',
+        'batch-1',
+        'batch-1',
+      ]);
+    });
+
+    test('does not infer a group for starts without a Runtime batch identity', () => {
+      let s = fresh();
+      s = dispatch(s, saStart('sub-1', 'explore', 'task1'));
+      s = dispatch(s, saStart('sub-2', 'review', 'task2'));
+      const children = flatBlocks(s) as Array<Extract<OutputBlock, { kind: 'subagent' }>>;
+      expect(children[0]!.concurrencyGroupId).toBeUndefined();
+      expect(children[1]!.concurrencyGroupId).toBeUndefined();
+    });
   });
 
   describe('RUNTIME_EVENT.subagent.*', () => {
@@ -4178,6 +4207,103 @@ describe('eventReducer (blocks model)', () => {
         status: 'suspended',
         approvalState: 'awaiting_user',
       });
+    });
+
+    test('settles a suspended child when automatic review explicitly rejects it', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: {
+          id: 'auto-rejected-child',
+          role: 'review',
+          task: 'run checks',
+          concurrencyGroupId: 'batch-auto-reject',
+        },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.step',
+        subagent: {
+          id: 'auto-rejected-child',
+          toolName: 'shell_execute',
+          toolArgs: { command: 'bun test' },
+        },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'parent-auto-rejected',
+        snapshot: {
+          subagentId: 'auto-rejected-child',
+          role: 'review',
+          task: 'run checks',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          blockedTool: {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
+            toolCallId: 'child-shell',
+            toolName: 'shell_execute',
+            args: { command: 'bun test' },
+            command: 'bun test',
+          },
+        },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'auto_review.completed',
+        reviewId: 'review-rejected-child',
+        toolCallId: 'parent-auto-rejected',
+        result: {
+          ok: true,
+          approved: false,
+          reason: 'Command is outside the child policy.',
+          reviewerModelName: 'fixture',
+          durationMs: 1,
+        },
+      });
+
+      expect(flatBlocks(state)[0]).toMatchObject({
+        kind: 'subagent',
+        status: 'error',
+        approvalState: undefined,
+        awaitingApproval: false,
+        error: 'Command is outside the child policy.',
+      });
+    });
+
+    test('settles every live child when a resource failure aborts the turn', () => {
+      let state = fresh();
+      for (const [id, role] of [
+        ['resource-explore', 'explore'],
+        ['resource-review', 'review'],
+      ] as const) {
+        state = handleRuntimeEventAction(state, {
+          type: 'subagent.started',
+          subagent: {
+            id,
+            role,
+            task: `run ${role} checks`,
+            concurrencyGroupId: 'batch-resource-failure',
+          },
+        });
+      }
+      state = handleRuntimeEventAction(state, {
+        type: 'run.error',
+        message: 'Subagent concurrency budget exhausted.',
+        recoverable: false,
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'turn.aborted',
+        turnId: 'turn-resource-failure',
+        reason: 'Subagent concurrency budget exhausted.',
+        cause: 'error',
+      });
+
+      const children = flatBlocks(state).filter(
+        (block): block is Extract<OutputBlock, { kind: 'subagent' }> => block.kind === 'subagent',
+      );
+      expect(children).toHaveLength(2);
+      expect(children.every((child) => child.status === 'error')).toBe(true);
+      expect(
+        children.every((child) => child.error === 'Subagent concurrency budget exhausted.'),
+      ).toBe(true);
     });
   });
 
@@ -4496,11 +4622,38 @@ describe('eventReducer (blocks model)', () => {
     });
 
     test('subagent approval rejection clears the parent task Footer interrupt', () => {
-      const requested = handleRuntimeEventAction(fresh(), {
+      let requested = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'human-rejected-child', role: 'review', task: 'run checks' },
+      });
+      requested = handleRuntimeEventAction(requested, {
+        type: 'subagent.suspended',
+        toolCallId: 'parent-task',
+        snapshot: {
+          subagentId: 'human-rejected-child',
+          role: 'review',
+          task: 'run checks',
+          messages: [],
+          toolCallCount: 0,
+          steps: [],
+          blockedTool: {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-shell',
+            toolName: 'shell_execute',
+            args: { command: 'bun test' },
+            command: 'bun test',
+          },
+        },
+      });
+      requested = handleRuntimeEventAction(requested, {
         type: 'approval.requested',
         interactionId: 'approval-child-rejected',
         toolCallId: 'parent-task',
-        approval: { ...approval(), callId: 'child-shell' },
+        approval: {
+          ...approval(),
+          callId: 'child-shell',
+          subagentId: 'human-rejected-child',
+        },
       });
 
       const rejected = handleRuntimeEventAction(requested, {
@@ -4511,6 +4664,11 @@ describe('eventReducer (blocks model)', () => {
       });
 
       expect(rejected.interrupt).toBeNull();
+      expect(flatBlocks(rejected)[0]).toMatchObject({
+        kind: 'subagent',
+        status: 'cancelled',
+        awaitingApproval: false,
+      });
     });
 
     test('a stale approval grant cannot clear a different active approval', () => {

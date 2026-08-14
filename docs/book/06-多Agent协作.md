@@ -70,6 +70,9 @@ Task Tool 按 Runtime/线程限制活动数量。取消通过 AbortController �
 独立 ID/stream/continuation ownership；多个 child 同时需要审批时先保存全部 snapshot，只呈现第一个
 canonical interaction，其余通过 `subagent.approval_deferred` 排队。当前 child 自动或人工获批后，
 Scheduler 先恢复该 active continuation；只有它完成或再次暂停后才处理 deferred sibling（ADR-0104）。
+Runtime 为实际并发派发的 sibling 附加稳定的批次 identity；TUI 据此默认显示一张类似 Thought 的
+`Delegating · N agents` 聚合卡，逐行展示各 child 的运行/自动审查/人工审批状态，Enter 可展开步骤。
+整组终结后一次性进入 Static 并压缩为一条 `Delegated` 摘要；串行 child 没有批次 identity，继续独立展示。
 
 ## 6.6 累计预算、取消与恢复
 

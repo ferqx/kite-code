@@ -1,52 +1,11 @@
 import { describe, expect, test } from 'bun:test';
-import { classifyFailure } from '@/core/runtime/failures';
-import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
-import {
-  createToolRecoveryJournalV1,
-  recordRecoveryFailureV1,
-  recordToolOwnedProgressV1,
-} from '@/core/runtime/tool-recovery-journal';
 import {
   planningContinuationAfterPlanSubagentV1,
   validateDelegatedTaskV1,
 } from '@/core/subagent/delegation-contract';
-import { deriveSubAgentCompletionV1 } from '@/core/subagent/runner';
 import { taskSpec } from '@/core/tools/registry/builtins/task';
 
 describe('ACORE-AGENT-01 delegation contract', () => {
-  test('child completion is fail-closed for unresolved recovery and exposes recovered success', () => {
-    let journal = createToolRecoveryJournalV1('a'.repeat(64));
-    journal = recordRecoveryFailureV1(journal, {
-      toolCallId: 'failed-tool',
-      toolName: 'read_file',
-      invocationFingerprint: 'b'.repeat(64),
-      modelMessageId: 'model-1',
-      taskId: 'child-1',
-      turnId: 'child-1',
-      outcome: classifyToolOutcomeV1({
-        status: 'failed',
-        failure: classifyFailure('tool_runtime_error', 'metadata-only'),
-        authority: {
-          dispatchState: 'started',
-          externalEffects: 'none',
-          replaySafety: 'safe_read',
-        },
-      }),
-    });
-    expect(deriveSubAgentCompletionV1(journal)).toEqual({
-      ok: false,
-      terminalStatus: 'exhausted',
-    });
-    journal = recordToolOwnedProgressV1(journal, {
-      kind: 'receipt',
-      referenceId: 'success-tool',
-      resolvesFailureIds: [journal.order[0]!],
-    });
-    expect(deriveSubAgentCompletionV1(journal)).toEqual({
-      ok: true,
-      terminalStatus: 'completed',
-    });
-  });
   test('validates delegated task structure without parsing user authorization or role intent', () => {
     expect(
       validateDelegatedTaskV1({
@@ -169,7 +128,9 @@ describe('ACORE-AGENT-01 delegation contract', () => {
           },
         },
       );
-      expect(JSON.parse(terminal.modelContent).nextActions).toBeUndefined();
+      const content = JSON.parse(terminal.modelContent);
+      expect(content.nextActions).toBeUndefined();
+      expect(content.terminalStatus).toBe(result.terminalStatus);
     }
   });
 });

@@ -80,6 +80,7 @@ export const taskSpec = defineExecutableTool({
           ok: output.result.ok,
           summary: output.result.summary,
           ...(output.result.error ? { error: output.result.error } : {}),
+          ...(output.result.terminalStatus ? { terminalStatus: output.result.terminalStatus } : {}),
           toolCallCount: output.result.toolCallCount,
           durationMs: output.result.durationMs,
           ...(nextActions.length > 0 ? { nextActions } : {}),

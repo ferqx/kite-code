@@ -732,7 +732,11 @@ export function mergeToolRecoveryJournalsV1(
   child: ToolRecoveryJournalV1,
   scope?: { taskId?: string; turnId?: string },
 ): ToolRecoveryJournalV1 {
-  if (child.identityKey !== parent.identityKey) {
+  const normalizedChild = normalizeToolRecoveryJournalV1(child);
+  if (
+    isToolRecoveryJournalInvalidV1(normalizedChild) ||
+    normalizedChild.identityKey !== parent.identityKey
+  ) {
     return {
       ...parent,
       qualityGuard: {
@@ -747,6 +751,7 @@ export function mergeToolRecoveryJournalsV1(
       },
     };
   }
+  child = normalizedChild;
   const combinedOrder = [...parent.order, ...child.order.filter((id) => !parent.failures[id])];
   const combinedFailures = Object.fromEntries(
     combinedOrder.flatMap((id) => {
@@ -765,6 +770,7 @@ export function mergeToolRecoveryJournalsV1(
     }),
   );
   const compacted = compactRecoveryFailuresV1(combinedFailures, combinedOrder);
+  const qualityBlocked = parent.qualityGuard.blocked || child.qualityGuard.blocked;
   return {
     schemaVersion: 1,
     identityKey: parent.identityKey,
@@ -772,8 +778,8 @@ export function mergeToolRecoveryJournalsV1(
     order: compacted.order,
     progressRevision: Math.max(parent.progressRevision, child.progressRevision),
     qualityGuard: {
-      blocked: parent.qualityGuard.blocked || child.qualityGuard.blocked,
-      ...(parent.qualityGuard.blocked || child.qualityGuard.blocked
+      blocked: qualityBlocked,
+      ...(qualityBlocked
         ? {
             reasonCode:
               parent.qualityGuard.reasonCode === 'journal_invalid' ||
@@ -782,10 +788,13 @@ export function mergeToolRecoveryJournalsV1(
                 : ('no_progress' as const),
           }
         : {}),
-      ...((parent.qualityGuard.taskId ?? scope?.taskId)
+      // Scope metadata is meaningful only for a blocking guard.  Persisting
+      // it on a healthy journal makes the strict restore normalizer reject the
+      // next turn and replace the identity, which then poisons child merges.
+      ...(qualityBlocked && (parent.qualityGuard.taskId ?? scope?.taskId)
         ? { taskId: parent.qualityGuard.taskId ?? scope?.taskId }
         : {}),
-      ...((parent.qualityGuard.turnId ?? scope?.turnId)
+      ...(qualityBlocked && (parent.qualityGuard.turnId ?? scope?.turnId)
         ? { turnId: parent.qualityGuard.turnId ?? scope?.turnId }
         : {}),
       observedFailures: Math.min(

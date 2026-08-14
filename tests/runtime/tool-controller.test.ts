@@ -329,7 +329,12 @@ describe('executeRuntimeTools', () => {
     expect(Array.isArray(terminal)).toBe(true);
     if (!Array.isArray(terminal)) throw new Error('Expected terminal RuntimeEvents.');
     expect(model.callCount.count).toBe(2);
-    expect(emitted.filter((event) => event.type === 'subagent.started')).toHaveLength(2);
+    const starts = emitted.filter((event) => event.type === 'subagent.started');
+    expect(starts).toHaveLength(2);
+    expect(starts.map((event) => event.subagent.concurrencyGroupId)).toEqual([
+      'subagent-batch:task-a',
+      'subagent-batch:task-a',
+    ]);
     expect(emitted.some((event) => event.type === 'approval.requested')).toBe(false);
     expect(terminal.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
     expect(terminal.filter((event) => event.type === 'approval.requested')).toHaveLength(1);
@@ -636,6 +641,71 @@ describe('executeRuntimeTools', () => {
     }
   });
 
+  test('does not dispatch an approved child continuation after its live recovery identity changes', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'stale-subagent-resume-identity',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'model',
+      name: 'task',
+      args: { subagent_type: 'code', task: 'Run pwd.' },
+      status: 'approved',
+      approvalGrant: 'approve_once',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.suspendedSubagents.task = serializeSubagentContinuation(
+      {
+        id: 'child',
+        role: getRoleConfig('code'),
+        task: 'Run pwd.',
+        messages: [],
+        toolCallCount: 1,
+        steps: [],
+        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+      },
+      {
+        toolCallId: 'child-shell',
+        toolName: 'shell_execute',
+        args: { command: 'pwd' },
+        command: 'pwd',
+      },
+    );
+    const live = structuredClone(state);
+    live.toolRecovery = createToolRecoveryJournalV1('b'.repeat(64));
+    let dispatched = false;
+
+    const events = await executeRuntimeTools({
+      state,
+      getRuntimeState: () => live,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: createMockModel([]),
+      shellExecutor: async ({ command }) => {
+        dispatched = true;
+        return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
+      },
+      subagentEventSink: () => {},
+    });
+
+    expect(dispatched).toBe(false);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.rejected',
+        reason: expect.stringContaining('no longer matches the live runtime'),
+      }),
+    );
+  });
+
   test('keeps a read-only child shell ceiling after an approved continuation resumes', async () => {
     const workspace = mkdtempSync(join(tmpdir(), 'openpx-read-only-subagent-resume-'));
     try {
@@ -723,7 +793,8 @@ describe('executeRuntimeTools', () => {
           }),
         }),
       );
-      expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.failed' }));
+      expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.completed' }));
+      expect(events).not.toContainEqual(expect.objectContaining({ type: 'subagent.failed' }));
       const journalEvent = events.find(
         (event) => event.type === 'subagent.recovery_journal_merged',
       );

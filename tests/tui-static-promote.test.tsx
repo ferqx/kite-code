@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import OutputArea from '../src/app/tui/OutputArea';
+import OutputArea, { useStaticContent } from '../src/app/tui/OutputArea';
 import { isBlockSettledInRun } from '../src/app/tui/render/useStaticContent';
 import { getDarkTheme, ThemeContext } from '../src/app/tui/theme';
 import type { OutputBlock } from '../src/app/tui/types';
@@ -28,6 +28,26 @@ function toolBlock(id: number, status: ToolStatus): OutputBlock {
   } as OutputBlock;
 }
 
+function subagentBlock(
+  id: number,
+  status: Extract<OutputBlock, { kind: 'subagent' }>['status'],
+  concurrencyGroupId?: string,
+): Extract<OutputBlock, { kind: 'subagent' }> {
+  return {
+    id,
+    kind: 'subagent',
+    subagentId: `s${id}`,
+    role: 'explore',
+    task: `task ${id}`,
+    status,
+    summary: '',
+    toolCallCount: 0,
+    durationMs: 10,
+    steps: [],
+    ...(concurrencyGroupId != null ? { concurrencyGroupId } : {}),
+  };
+}
+
 function renderArea(staticBlocks: OutputBlock[], dynamicBlocks: OutputBlock[]) {
   return render(
     React.createElement(
@@ -49,6 +69,21 @@ function renderArea(staticBlocks: OutputBlock[], dynamicBlocks: OutputBlock[]) {
       }),
     ),
   );
+}
+
+function PromotionHarness({ blocks }: { blocks: OutputBlock[] }) {
+  const projection = useStaticContent({
+    turns: [{ blocks }],
+    running: true,
+    sessionKey: 1,
+    header: React.createElement(Text, null, 'HEADER'),
+  });
+  return React.createElement(OutputArea, {
+    ...projection,
+    onToggleReason: () => {},
+    onToggleSubagentExpand: () => {},
+    columns: 100,
+  });
 }
 
 describe('isBlockSettledInRun', () => {
@@ -137,6 +172,22 @@ describe('isBlockSettledInRun', () => {
     expect(split).toBe(blocks.length);
   });
 
+  test('holds an early concurrent child out of Static until every sibling settles', () => {
+    const blocks: OutputBlock[] = [
+      subagentBlock(1, 'done', 'batch-1'),
+      subagentBlock(2, 'running', 'batch-1'),
+      subagentBlock(3, 'done', 'batch-1'),
+    ];
+    expect(isBlockSettledInRun(blocks[0]!, blocks, 0)).toBe(false);
+
+    const settled = blocks.map((block) =>
+      block.kind === 'subagent' ? { ...block, status: 'done' as const } : block,
+    );
+    expect(isBlockSettledInRun(settled[0]!, settled, 0)).toBe(true);
+    expect(isBlockSettledInRun(settled[1]!, settled, 1)).toBe(true);
+    expect(isBlockSettledInRun(settled[2]!, settled, 2)).toBe(true);
+  });
+
   test('resolved approval is settled and cannot pin later answer text', () => {
     const blocks: OutputBlock[] = [
       {
@@ -203,6 +254,72 @@ describe('isBlockSettledInRun', () => {
 });
 
 describe('promotion does not duplicate output', () => {
+  test('promotes the real dynamic sibling group to one Static item in the same mount', () => {
+    const early: OutputBlock[] = [
+      subagentBlock(1, 'done', 'batch-1'),
+      subagentBlock(2, 'running', 'batch-1'),
+      subagentBlock(3, 'running', 'batch-1'),
+    ];
+    const view = render(
+      React.createElement(
+        ThemeContext.Provider,
+        { value: getDarkTheme('blue') },
+        React.createElement(PromotionHarness, { blocks: early }),
+      ),
+    );
+    expect(view.lastFrame()).toContain('Delegating · 3 agents');
+
+    const settled = early.map((block) =>
+      block.kind === 'subagent' ? { ...block, status: 'done' as const } : block,
+    );
+    view.rerender(
+      React.createElement(
+        ThemeContext.Provider,
+        { value: getDarkTheme('blue') },
+        React.createElement(PromotionHarness, { blocks: settled }),
+      ),
+    );
+    expect(view.lastFrame()?.match(/Delegated · 3 agents/g)).toHaveLength(1);
+
+    view.rerender(
+      React.createElement(
+        ThemeContext.Provider,
+        { value: getDarkTheme('blue') },
+        React.createElement(PromotionHarness, {
+          blocks: [...settled, textBlock(4, 'successor answer')],
+        }),
+      ),
+    );
+    expect(view.lastFrame()?.match(/Delegated · 3 agents/g)).toHaveLength(1);
+    expect(view.lastFrame()).toContain('successor answer');
+  });
+
+  test('renders a settled concurrent child batch as one Static summary', () => {
+    const group: OutputBlock[] = [
+      subagentBlock(1, 'done', 'batch-1'),
+      subagentBlock(2, 'done', 'batch-1'),
+      subagentBlock(3, 'done', 'batch-1'),
+    ];
+    const { lastFrame } = renderArea(group, []);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Delegated · 3 agents · 3 succeeded');
+    expect(frame.match(/Delegated/g)).toHaveLength(1);
+    expect(frame).not.toContain('task 1');
+  });
+
+  test('labels settled child outcomes without calling failed children complete', () => {
+    const group: OutputBlock[] = [
+      subagentBlock(1, 'done', 'batch-1'),
+      subagentBlock(2, 'error', 'batch-1'),
+      subagentBlock(3, 'error', 'batch-1'),
+    ];
+    const { lastFrame } = renderArea(group, []);
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Delegated · 3 agents · 1 succeeded · 2 failed');
+    expect(frame).not.toContain('3 done');
+  });
+
   test('dynamic tool card moved to Static renders once', () => {
     const doneTool = toolBlock(7, 'done') as OutputBlock;
     // Before promotion: tool card is in dynamic tree

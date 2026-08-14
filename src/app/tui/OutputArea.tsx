@@ -1,8 +1,9 @@
 import { Box, Static, useInput } from 'ink';
-import React, { type ReactNode, useRef } from 'react';
+import React, { type ReactNode, useMemo, useRef } from 'react';
 import type { ContextCompactionProgressPhase } from '@/core/model/context-compaction-presentation';
 import BlockRenderer from './components/BlockRenderer';
 import CompactionProgress from './components/CompactionProgress';
+import ConcurrentSubAgentBlock from './components/ConcurrentSubAgentBlock';
 import { MAX_RUNNING_STEPS } from './components/SubAgentBlock';
 import { blockFingerprint } from './render/useStaticContent';
 import type { OutputBlock } from './types';
@@ -35,11 +36,58 @@ interface OutputAreaProps {
   compactionPhase?: ContextCompactionProgressPhase;
 }
 
-// Footer/status/prompt plus OutputArea's normal bottom gap consume five rows.
-// Concurrent child layouts suppress that gap, leaving one safety row because
-// Ink treats outputHeight === rows as full-screen.
+// Footer/status/prompt plus OutputArea's bottom gap consume five rows. The
+// child budget also keeps one explicit safety row because Ink treats
+// outputHeight === rows as full-screen.
 const DYNAMIC_CHROME_ROWS = 5;
 const SUBAGENT_CARD_OVERHEAD_ROWS = 3;
+
+type SubagentBlock = Extract<OutputBlock, { kind: 'subagent' }>;
+type RenderItem =
+  | OutputBlock
+  | {
+      kind: 'concurrent_subagents';
+      id: string;
+      blocks: SubagentBlock[];
+    };
+
+/** Preserve block order while replacing an identified concurrent sibling run
+ * with one presentation item. Sequential children never receive a group id. */
+export function aggregateConcurrentSubagents(blocks: OutputBlock[]): RenderItem[] {
+  const items: RenderItem[] = [];
+  for (let index = 0; index < blocks.length; ) {
+    const block = blocks[index]!;
+    if (block.kind !== 'subagent' || block.concurrencyGroupId == null) {
+      items.push(block);
+      index++;
+      continue;
+    }
+    const siblings: SubagentBlock[] = [];
+    let cursor = index;
+    while (cursor < blocks.length) {
+      const candidate = blocks[cursor]!;
+      if (
+        candidate.kind !== 'subagent' ||
+        candidate.concurrencyGroupId !== block.concurrencyGroupId
+      ) {
+        break;
+      }
+      siblings.push(candidate);
+      cursor++;
+    }
+    if (siblings.length > 1) {
+      items.push({ kind: 'concurrent_subagents', id: block.concurrencyGroupId, blocks: siblings });
+    } else {
+      items.push(block);
+    }
+    index = cursor;
+  }
+  return items;
+}
+
+function lastOutputBlock(item: RenderItem | undefined): OutputBlock | undefined {
+  return item?.kind === 'concurrent_subagents' ? item.blocks.at(-1) : item;
+}
 
 /**
  * Ink clears the entire main screen whenever its mutable frame reaches the
@@ -116,13 +164,23 @@ export default function OutputArea({
   onToggleToolRef.current = onToggleToolExpand;
   const onToggleSubagentRef = useRef(onToggleSubagentExpand);
   onToggleSubagentRef.current = onToggleSubagentExpand;
-  const visibleDynamicBlocks = visibleDynamicBlocksForApproval(
-    activeDynamicBlocks,
-    awaitingApproval,
+  const visibleDynamicBlocks = useMemo(
+    () => visibleDynamicBlocksForApproval(activeDynamicBlocks, awaitingApproval),
+    [activeDynamicBlocks, awaitingApproval],
+  );
+  const staticRenderItems = useMemo(
+    () => aggregateConcurrentSubagents(mergedStaticBlocks),
+    [mergedStaticBlocks],
+  );
+  const staticPresentationItems = useMemo(
+    () => (staticItems ? [staticItems[0], ...staticRenderItems] : undefined),
+    [staticItems, staticRenderItems],
+  );
+  const dynamicRenderItems = useMemo(
+    () => aggregateConcurrentSubagents(visibleDynamicBlocks),
+    [visibleDynamicBlocks],
   );
   const maxVisibleSubagentSteps = concurrentSubagentStepLimit(visibleDynamicBlocks, rows);
-  const hasConcurrentSubagents =
-    visibleDynamicBlocks.filter((block) => block.kind === 'subagent').length > 1;
   const dynamicBlocksRef = useRef(visibleDynamicBlocks);
   dynamicBlocksRef.current = visibleDynamicBlocks;
 
@@ -152,10 +210,10 @@ export default function OutputArea({
   const hasMessages = mergedStaticBlocks.length + visibleDynamicBlocks.length > 0;
 
   return (
-    <Box flexDirection="column" marginBottom={hasMessages && !hasConcurrentSubagents ? 1 : 0}>
+    <Box flexDirection="column" marginBottom={hasMessages ? 1 : 0}>
       <Box height={0} overflow="hidden">
-        {staticItems && staticKey && (
-          <Static key={staticKey} items={staticItems}>
+        {staticPresentationItems && staticKey && (
+          <Static key={staticKey} items={staticPresentationItems}>
             {(_item, index) => {
               if (index === 0) {
                 return (
@@ -165,13 +223,22 @@ export default function OutputArea({
                   </React.Fragment>
                 );
               }
-              const block = mergedStaticBlocks[index - 1];
-              if (!block) return null;
-              const prevBlock = index > 1 ? mergedStaticBlocks[index - 2] : undefined;
+              const item = staticRenderItems[index - 1];
+              if (!item) return null;
+              const prevBlock = lastOutputBlock(
+                index > 1 ? staticRenderItems[index - 2] : undefined,
+              );
+              if (item.kind === 'concurrent_subagents') {
+                return (
+                  <Box key={`subagent-group-${item.id}`} marginTop={prevBlock ? 1 : 0}>
+                    <ConcurrentSubAgentBlock blocks={item.blocks} columns={Math.max(1, columns)} />
+                  </Box>
+                );
+              }
               return (
                 <BlockRenderer
-                  key={blockFingerprint(block)}
-                  block={block}
+                  key={blockFingerprint(item)}
+                  block={item}
                   isFocused={false}
                   index={index - 1}
                   prevBlock={prevBlock}
@@ -185,12 +252,50 @@ export default function OutputArea({
         )}
       </Box>
       <Box flexDirection="column">
-        {visibleDynamicBlocks.map((block, i) => {
-          const prevBlock = i > 0 ? visibleDynamicBlocks[i - 1] : mergedStaticBlocks.at(-1);
+        {dynamicRenderItems.map((item, i) => {
+          const prevBlock =
+            i > 0
+              ? lastOutputBlock(dynamicRenderItems[i - 1])
+              : lastOutputBlock(staticRenderItems.at(-1));
+          if (item.kind === 'concurrent_subagents') {
+            const topMarginRows = prevBlock ? 1 : 0;
+            return (
+              <Box
+                key={`subagent-group-${item.id}`}
+                flexDirection="column"
+                marginTop={prevBlock ? 1 : 0}
+              >
+                <ConcurrentSubAgentBlock
+                  blocks={item.blocks}
+                  columns={Math.max(1, columns)}
+                  maxVisibleSteps={maxVisibleSubagentSteps}
+                  maxVisibleChildren={
+                    dynamicRenderItems.length === 1
+                      ? Math.max(
+                          0,
+                          Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 2 - topMarginRows,
+                        )
+                      : 0
+                  }
+                  allowExpanded={
+                    dynamicRenderItems.length === 1 &&
+                    1 +
+                      item.blocks.reduce(
+                        (height, block) => height + 2 + (block.steps.length > 0 ? 1 : 0),
+                        0,
+                      ) +
+                      DYNAMIC_CHROME_ROWS +
+                      topMarginRows <
+                      Math.floor(rows ?? 24)
+                  }
+                />
+              </Box>
+            );
+          }
           return (
             <BlockRenderer
-              key={block.id}
-              block={block}
+              key={item.id}
+              block={item}
               isFocused={false}
               index={i}
               prevBlock={prevBlock}

@@ -440,6 +440,8 @@ export interface SubAgentStartPayload {
   id: string;
   role: SubAgentRole;
   task: string;
+  /** Runtime dispatch identity shared only by siblings admitted in one parallel batch. */
+  concurrencyGroupId?: string;
 }
 
 export interface SubAgentStepPayload {

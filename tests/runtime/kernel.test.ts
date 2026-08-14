@@ -30,6 +30,7 @@ import {
   RemoteMcpEgressNonceConflictError,
   type RuntimeStore,
 } from '../../src/core/runtime/store';
+import { createToolRecoveryJournalV1 } from '../../src/core/runtime/tool-recovery-journal';
 import { createMockModel } from '../mock-model';
 
 describe('AgentKernel durability', () => {
@@ -88,6 +89,102 @@ describe('AgentKernel durability', () => {
         storePath,
       });
       expect(restored.getState().schemaVersion).toBe(RUNTIME_STATE_SCHEMA_VERSION);
+      expect(restored.getState().toolRecovery.qualityGuard).toEqual({
+        blocked: false,
+        observedFailures: 0,
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('migrates every legacy suspended child into the parent recovery domain', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-v22-suspended-recovery-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'v22-suspended-recovery';
+    try {
+      const legacy = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      legacy.schemaVersion = 22;
+      delete (legacy as Partial<RuntimeState>).toolRecovery;
+      legacy.suspendedSubagents['task-1'] = {
+        subagentId: 'child-1',
+        role: 'explore',
+        task: 'Inspect the workspace.',
+        messages: [],
+        toolCallCount: 1,
+        steps: [],
+        blockedTool: {
+          toolCallId: 'nested-1',
+          toolName: 'read_file',
+          args: { path: 'README.md' },
+          command: 'README.md',
+        },
+      };
+      const store = createRuntimeStore(storePath);
+      store.saveSnapshot(threadId, legacy);
+      store.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      const child = restored.getState().suspendedSubagents['task-1'];
+      expect(child?.toolRecovery).toMatchObject({
+        identityKey: restored.getState().toolRecovery.identityKey,
+        qualityGuard: { blocked: false },
+      });
+      restored.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('restores a healthy completed child merge without rotating its recovery identity', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'kite-runtime-child-merge-restart-'));
+    const storePath = join(dir, 'runtime.db');
+    const threadId = 'child-merge-restart';
+    try {
+      const initial = createInitialRuntimeState({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+      });
+      initial.tools.calls['task-1'] = {
+        toolCallId: 'task-1',
+        modelMessageId: 'model-1',
+        name: 'task',
+        args: { subagent_type: 'explore', task: 'Inspect the workspace.' },
+        status: 'running',
+        createdAtTurnId: initial.turn.turnId,
+      };
+      const parentIdentity = initial.toolRecovery.identityKey;
+      const store = createRuntimeStore(storePath);
+      const kernel = new AgentKernel({
+        store,
+        initialState: initial,
+        interactionMode: 'accept_edits',
+      });
+      kernel.processEvent({
+        type: 'subagent.recovery_journal_merged',
+        toolCallId: 'task-1',
+        journal: createToolRecoveryJournalV1(parentIdentity),
+      });
+      kernel.close();
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'user',
+        workspace: '/workspace',
+        storePath,
+      });
+      expect(restored.getState().toolRecovery.identityKey).toBe(parentIdentity);
       expect(restored.getState().toolRecovery.qualityGuard).toEqual({
         blocked: false,
         observedFailures: 0,

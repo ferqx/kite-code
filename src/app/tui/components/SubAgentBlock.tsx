@@ -7,7 +7,7 @@ import type { OutputBlock } from '../types';
 import { actionName, formatElapsed, formatReadFileRange, SPINNER, toolColor } from './render-utils';
 import { useBlinkDot } from './use-blink-dot';
 
-function roleLabel(role: SubAgentRole): string {
+export function roleLabel(role: SubAgentRole): string {
   switch (role) {
     case 'explore':
       return 'Explore';
@@ -23,7 +23,7 @@ function roleLabel(role: SubAgentRole): string {
 }
 /** 将文本截断到指定宽度，超出部分用 "…" 替代。
  *  Truncate text to fit within maxWidth columns, appending "…" if truncated. */
-function truncateToFit(text: string, maxWidth: number): string {
+export function truncateToFit(text: string, maxWidth: number): string {
   if (maxWidth <= 0) return '';
   const w = stringWidth(text);
   if (w <= maxWidth) return text;
@@ -105,7 +105,7 @@ function cleanTaskText(text: string): string {
 }
 
 /** Extract the first meaningful line of a task description as a readable one-liner */
-function taskLabel(task: string): string {
+export function taskLabel(task: string): string {
   const lines = task.split('\n');
   // Skip leading markdown headings and blank lines to find the first content line
   for (let i = 0; i < lines.length; i++) {
@@ -135,6 +135,8 @@ export const MAX_RUNNING_STEPS = 5;
 
 interface SubAgentBlockProps {
   block: OutputBlock & { kind: 'subagent' };
+  /** Available columns from the owning layout; defaults to the real terminal width. */
+  columns?: number;
   /**
    * Dynamic OutputArea may lower this while several child cards are live so
    * Ink never crosses its full-screen clear threshold. Standalone/static cards
@@ -145,12 +147,13 @@ interface SubAgentBlockProps {
 
 export default function SubAgentBlock({
   block,
+  columns,
   maxVisibleSteps = MAX_RUNNING_STEPS,
 }: SubAgentBlockProps) {
   const dt = useTheme();
   const label = roleLabel(block.role);
   const taskSummary = taskLabel(block.task);
-  const col = process.stdout.columns ?? 80;
+  const col = columns ?? process.stdout.columns ?? 80;
 
   // ── 闪烁圆点：统一 hook ──
   const spinnerActive = block.status === 'running' && !block.awaitingApproval;
@@ -233,25 +236,23 @@ export default function SubAgentBlock({
       </Box>
       {skipped > 0 && (
         <Box paddingLeft={3}>
-          <Text color={dt.dim}>... 以上 {skipped} 步已折叠</Text>
+          <Text color={dt.dim}>
+            {truncateToFit(`... 以上 ${skipped} 步已折叠`, Math.max(0, col - 3))}
+          </Text>
         </Box>
       )}
       {visibleSteps.map((step, i) => {
         // 颜色由 step.status 唯一决定，不依赖布尔值排列组合推断
         const lineColor =
           step.status === 'error' ? dt.error : step.status === 'rejected' ? dt.warning : dt.dim;
+        const rawLabel =
+          step.toolArgs && Object.keys(step.toolArgs).length > 0
+            ? toolArgsLabel(step.toolName, step.toolArgs, step.totalLines)
+            : '';
+        const line = `├─ ${actionName(step.toolName)}${rawLabel ? ` ${rawLabel}` : ''}`;
         return (
           <Box key={i} paddingLeft={3}>
-            <Text color={lineColor}>├─ {actionName(step.toolName)}</Text>
-            {step.toolArgs &&
-              Object.keys(step.toolArgs).length > 0 &&
-              (() => {
-                const rawLabel = toolArgsLabel(step.toolName, step.toolArgs, step.totalLines);
-                if (!rawLabel) return null;
-                const stepPreW = stringWidth(`├─ ${actionName(step.toolName)}`);
-                const fitLabel = truncateToFit(rawLabel, Math.max(0, col - 3 - stepPreW - 2));
-                return fitLabel ? <Text color={lineColor}> {fitLabel}</Text> : null;
-              })()}
+            <Text color={lineColor}>{truncateToFit(line, Math.max(0, col - 3))}</Text>
           </Box>
         );
       })}
