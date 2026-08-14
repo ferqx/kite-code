@@ -561,13 +561,17 @@ async function runSubAgentLoop(
   const tools: ToolSet = {};
   if (input.role.allowedTools) {
     for (const [name, t] of Object.entries(allTools)) {
-      if (input.role.allowedTools.has(name) && (canSpawnSubAgents || name !== 'task')) {
+      if (
+        name !== 'ask_user' &&
+        input.role.allowedTools.has(name) &&
+        (canSpawnSubAgents || name !== 'task')
+      ) {
         tools[name] = t;
       }
     }
   } else {
     for (const [name, t] of Object.entries(allTools)) {
-      if (canSpawnSubAgents || name !== 'task') {
+      if (name !== 'ask_user' && (canSpawnSubAgents || name !== 'task')) {
         tools[name] = t;
       }
     }

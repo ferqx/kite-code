@@ -147,6 +147,8 @@ lineage-aware compaction：优先保留 active/recent failure，并连同完整 
 
 `promptContractV2` 开启时，phase 不改变 production builtin declaration：Planning 与 Building 使用相同的 edit/write/shell 声明和完整 `task` role schema；当前已绑定动态 MCP 也保持声明稳定，避免 phase 切换破坏 Provider 的工具前缀。动态 Runtime block 和 ToolSpec description 引导 Planning 只调用只读能力，Runtime Policy/Controller 仍以当前 phase 和 Registry/MCP effective effects 强制裁决：policy-proven read-only Shell、MCP 与 Registry capability 可运行，edit/write、非只读 Shell、code/review child 和 side-effectful MCP 均不执行、不进入审批，并产生配对的结构化 phase Tool Result。模型可以为有界、自包含、独立且值得额外调用的工作自主选择 `task`；用户明确要求不委派时必须遵守。Capability availability、execution surface、binding、Skill lifecycle 与 flags 仍可改变实际工具面；稳定披露不是授权。
 
+`ask_user` 只在主 Agent 工具面中可用。主 Agent 必须在派发 `task` 前澄清会阻断执行的用户意图，并把必要事实写入自包含的 delegated task；Subagent 的所有角色都从工具声明中移除 `ask_user`。child 若发现必要前提仍缺失，只能在最终结果中返回 parent，不得创建用户 interaction。Full/Plan 模式可提问仅指主 Agent 可在委派前提问。
+
 Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只复用 schema 的 trim 后 `8..8000` 长度边界，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、interaction mode、authorization、sandbox、protected path、execution surface 和累计预算。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
 审批只解决具体调用的 Runtime policy gate，不能扩大 Subagent role ceiling。explore/plan/review 的
 非只读 Shell 即使在暂停后获得批准，resume 仍必须经过与首次 child loop 相同的只读 executor 并被拒绝。

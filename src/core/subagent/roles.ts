@@ -71,6 +71,7 @@ const CODE_SYSTEM_PROMPT = [
   '- Follow existing code conventions: style, naming, error handling, library choices.',
   '- Do not add comments, TODOs, or documentation unless explicitly requested.',
   '- Do not modify public interfaces or fix unrelated issues.',
+  '- Do not ask the user questions. The parent agent must provide a self-contained task; report any missing prerequisite in your final result.',
   '',
   '## Tool usage',
   '',
