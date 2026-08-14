@@ -6,35 +6,28 @@ const DISABLE_FOCUS_REPORTING = '\x1b[?1004l';
 const FOCUS_IN = '\x1b[I';
 const FOCUS_OUT = '\x1b[O';
 
-export interface TerminalFocusInput {
-  on(event: 'data', listener: (buffer: Buffer) => void): unknown;
-  off(event: 'data', listener: (buffer: Buffer) => void): unknown;
-}
-
 export interface TerminalFocusOutput {
   write(value: string): unknown;
 }
 
 export interface TerminalFocusDiagnostics {
   subscriberCount: number;
-  inputListenerAttached: boolean;
+  reportingEnabled: boolean;
 }
 
 /**
- * Multiplex terminal focus reporting through one physical stdin listener.
- * React components subscribe to this store instead of attaching listeners
- * directly, so remounts and parallel Ink renderers cannot exceed EventTarget's
- * listener limit.
+ * Multiplex terminal focus reporting without reading stdin directly.
+ * Ink owns the process input stream; useTerminalFocus forwards focus reports
+ * from Ink's useInput channel so session remounts cannot switch stdin between
+ * readable and flowing modes.
  */
 export class TerminalFocusStore {
   private readonly subscribers = new Set<() => void>();
-  private readonly input: TerminalFocusInput;
   private readonly output: TerminalFocusOutput;
   private focused = true;
-  private inputListenerAttached = false;
+  private reportingEnabled = false;
 
-  constructor(input: TerminalFocusInput, output: TerminalFocusOutput) {
-    this.input = input;
+  constructor(output: TerminalFocusOutput) {
     this.output = output;
   }
 
@@ -44,41 +37,43 @@ export class TerminalFocusStore {
 
   readonly subscribe = (subscriber: () => void): (() => void) => {
     this.subscribers.add(subscriber);
-    if (!this.inputListenerAttached) this.attach();
+    if (!this.reportingEnabled) this.enableReporting();
     return () => {
       this.subscribers.delete(subscriber);
-      if (this.subscribers.size === 0) this.detach();
+      if (this.subscribers.size === 0) this.disableReporting();
     };
   };
 
   diagnostics(): TerminalFocusDiagnostics {
     return {
       subscriberCount: this.subscribers.size,
-      inputListenerAttached: this.inputListenerAttached,
+      reportingEnabled: this.reportingEnabled,
     };
   }
 
-  private readonly onData = (buffer: Buffer): void => {
-    const value = buffer.toString();
-    const next = value.includes(FOCUS_IN) ? true : value.includes(FOCUS_OUT) ? false : this.focused;
+  handleInput(value: string): void {
+    const next =
+      value === FOCUS_IN || value === FOCUS_IN.slice(1)
+        ? true
+        : value === FOCUS_OUT || value === FOCUS_OUT.slice(1)
+          ? false
+          : this.focused;
     if (next === this.focused) return;
     this.focused = next;
     for (const subscriber of this.subscribers) subscriber();
-  };
-
-  private attach(): void {
-    this.inputListenerAttached = true;
-    this.output.write(ENABLE_FOCUS_REPORTING);
-    this.input.on('data', this.onData);
   }
 
-  private detach(): void {
-    if (!this.inputListenerAttached) return;
-    this.inputListenerAttached = false;
-    this.input.off('data', this.onData);
+  private enableReporting(): void {
+    this.reportingEnabled = true;
+    this.output.write(ENABLE_FOCUS_REPORTING);
+  }
+
+  private disableReporting(): void {
+    if (!this.reportingEnabled) return;
+    this.reportingEnabled = false;
     this.output.write(DISABLE_FOCUS_REPORTING);
     this.focused = true;
   }
 }
 
-export const terminalFocusStore = new TerminalFocusStore(process.stdin, process.stdout);
+export const terminalFocusStore = new TerminalFocusStore(process.stdout);
