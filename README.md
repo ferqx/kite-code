@@ -6,6 +6,12 @@
 
 Kite Code 在终端中理解代码、修改文件、运行命令并验证结果。它支持多种模型，提供交互式 TUI 和 Headless CLI。
 
+<p align="center">
+  <a href="terminal.png">
+    <img src="terminal.png" alt="Kite Code 终端界面" width="100%">
+  </a>
+</p>
+
 ## 为什么选择 Kite Code
 
 - **多模型**：支持 DeepSeek、OpenAI、OpenAI-compatible 和 Ollama
