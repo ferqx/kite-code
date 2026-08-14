@@ -91,15 +91,18 @@ for (let sequence = 1; sequence <= repeatCount; sequence += 1) {
   );
   await Bun.sleep(5);
   const mountedDiagnostics = terminalFocusStore.diagnostics();
-  if (!mountedDiagnostics.inputListenerAttached || mountedDiagnostics.subscriberCount === 0) {
-    throw new Error(`TUI listener did not attach: ${JSON.stringify(mountedDiagnostics)}`);
+  if (!mountedDiagnostics.reportingEnabled || mountedDiagnostics.subscriberCount === 0) {
+    throw new Error(`TUI focus reporting did not activate: ${JSON.stringify(mountedDiagnostics)}`);
+  }
+  if (process.stdin.listenerCount('data') !== 0) {
+    throw new Error('TUI focus reporting attached a competing process.stdin data listener');
   }
   view.unmount();
   view.cleanup();
   cleanup();
   await Bun.sleep(5);
   const diagnostics = terminalFocusStore.diagnostics();
-  if (diagnostics.subscriberCount !== 0 || diagnostics.inputListenerAttached) {
+  if (diagnostics.subscriberCount !== 0 || diagnostics.reportingEnabled) {
     throw new Error(`TUI listener cleanup failed: ${JSON.stringify(diagnostics)}`);
   }
   const after = sample();

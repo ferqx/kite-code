@@ -183,7 +183,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    唯一例外是 fault-soak 通过 `--with-lifecycle-harness` 显式追加
    `tui-lifecycle-resource.test.ts`；该参数不会发现或运行其他 harness 文件，普通
    `test:tui:system` 也不得隐式包含 harness。这样 terminal taxonomy 的 PTY 场景与
-   focus-listener 同进程重复 lifecycle 证据在同一个 bounded probe 中收集，但仍保持独立进程。
+   focus-reporting 同进程重复 lifecycle 证据在同一个 bounded probe 中收集，但仍保持独立进程。
    fault-soak runner 必须先验证自身是 outer PGID owner，再让 per-file Bun、实际 TUI 与 lifecycle
    fixture 继承该 group；普通 PTY suite 才为每个 child 创建独立 group。这样 `ps` inspection
    不可用时，outer deadline 仍能通过一个已验证 PGID 回收完整 TUI 树。
@@ -208,13 +208,14 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     unmount 时输出最终帧的非交互模式，否则 semantic readiness 看不到实时 prompt。
     输入重试清理不得以全屏 quiet window 作为完成条件：running status/spinner 可以持续合法刷新；
     清理后必须由调用方读取当前 input viewport，语义确认输入已回到预期 baseline。
-12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：任意数量 React subscriber 只能
-    对 stdin 保持一个物理 `data` listener；首个 subscriber 开启 DEC 1004，最后一个
-    unsubscribe 必须移除 listener 并关闭 DEC 1004。禁止组件 mount 各自添加 stdin listener。
+12. 终端 focus reporting 由进程级 `TerminalFocusStore` 复用：首个 subscriber 开启 DEC 1004，
+    最后一个 unsubscribe 关闭 DEC 1004。focus report 必须由 Ink `useInput` 解析后转发，不得
+    对 `process.stdin` 添加 `data` listener；否则会与 Ink 的 `readable` 消费模式竞争，并在
+    session/Overlay 重挂载后同时丢失提示词字符和全局快捷键。
 13. 完整 suite 的协调进程和按文件隔离 scenario 只提供功能、终态和进程退出证据，不将跨进程
     RSS、active resource 或 FD 冷启动差值拼接成 leak 趋势。1C.7 TUI 资格样本必须由专用 child
-    在同一进程内完成 warm-up 加 8 次 `InputLine`/`TerminalFocusStore` focus-listener lifecycle，
-    并逐次证明 listener 已真实挂载、随后卸载且 descendant 清理。该结论只覆盖输入 focus listener
+    在同一进程内完成 warm-up 加 8 次 `InputLine`/`TerminalFocusStore` reporting lifecycle，
+    并逐次证明 DEC 1004 已开启、随后关闭且 descendant 清理。该结论只覆盖输入 focus reporting
     生命周期，不覆盖 session switch、tool lifecycle 或 model reconnect 的 PTY 资源斜率。
 14. MCP tool failure 与紧随其后的 Provider recovery interaction 必须按同一 Kernel batch
     顺序提交；`run.completed + turn.completed` batch 必须产生命名 rewind 恢复点。

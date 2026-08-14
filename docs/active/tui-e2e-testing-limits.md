@@ -36,8 +36,8 @@ session lifecycle、跨进程 Runtime Store 恢复、错误恢复、streaming �
 8. suite runner 只负责编排按文件隔离的功能场景，不从协调进程或跨 scenario child 的 RSS/
    active-resource/FD 差值推导 leak 结论；fault-soak CI fresh child before/after 也只用于冷启动诊断。
    正式 1C.7 qualification 另外启动一个受 outer runner ownership 约束的真实 Ink child，在同一
-   PID 内先 warm-up、再重复 8 次 `InputLine`/`TerminalFocusStore` focus-listener mount/unmount，
-   并逐次证明 listener 先挂载、随后移除，DEC 1004 关闭且没有 descendant PID。只有该限定范围的
+   PID 内先 warm-up、再重复 8 次 `InputLine`/`TerminalFocusStore` reporting mount/unmount，
+   并逐次证明 DEC 1004 先开启、随后关闭且没有 descendant PID。只有该限定范围的
    lifecycle series 可进入 TUI leak 阈值；它不证明 session switch、tool lifecycle 或 model reconnect
    PTY 进程的资源斜率，多个 PTY scenario、父 runner 趋势或跨进程差值也不能替代它。Windows 无通用 `/proc/self/fd` 或平台不能
    检查 owned descendant PID 时对应指标显示为 unsupported，qualification 返回 `inconclusive`。该样本还必须作为 retained attempt evidence 进入绑定 GitHub repository、head SHA、ref、`workflow_ref`/`workflow_sha`、run ID/run attempt 的 v2 报告，并由 verifier 重建 8 个 attempt 共 64 个 measured 样本的摘要；单独的 PTY 输出、Required CI 通过或未绑定来源的本地报告都不是 1C.7 release evidence。

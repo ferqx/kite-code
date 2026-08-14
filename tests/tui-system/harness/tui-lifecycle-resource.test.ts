@@ -8,7 +8,7 @@ import {
 
 const fixture = join(import.meta.dir, '..', 'fixtures', 'tui-lifecycle-resource.tsx');
 
-test('runs repeated InputLine focus-listener mount and unmount in one owned child process', async () => {
+test('runs repeated InputLine focus-reporting mount and unmount in one owned child process', async () => {
   const inheritsFaultSoakProcessGroup = Boolean(process.env.KITE_FAULT_SOAK_PROCESS_NONCE);
   const proc = Bun.spawn([process.execPath, fixture], {
     cwd: process.cwd(),

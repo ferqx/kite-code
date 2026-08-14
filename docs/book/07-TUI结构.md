@@ -27,9 +27,9 @@ TUI 入口在创建 Runtime、读取配置或挂载 Ink 前处理 `--version`，
 
 TUI 不应根据展示文本反推工具是否成功，也不能自行构造 verification passed、approval granted 等 Runtime 事实。
 
-终端 focus reporting 由进程级 store 复用：所有 React subscriber 共享一个 stdin listener，
-首订阅开启 DEC 1004，最后退订移除 listener 并关闭该模式，避免 session/mount 增长造成
-listener warning。
+终端 focus reporting 由进程级 store 复用：首订阅开启 DEC 1004，最后退订关闭该模式；
+focus report 统一经 Ink `useInput` 通道转发给 store，不得再给 `process.stdin` 添加 `data` listener，避免 session/mount 切换时
+输入流在 flowing 与 readable 模式间竞争，导致提示词输入和全局快捷键同时失效。
 
 MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，通过稳定订阅读取 Core `McpControlSnapshot`；TUI 不持有 `McpManager`，不读取或修改其内部 Map。`/mcp` 的 list、detail、add、authenticate、project approval 和 confirm route，以及 selection、draft 和动态操作菜单都属于 App。业务键只产生 move/confirm/back，再由 controller 调用 Core retry、typed mutation、摘要决定和 auth flow；Core 不依赖 Select 或 TUI 展示类型。
 
