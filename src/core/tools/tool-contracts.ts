@@ -408,8 +408,16 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
     returns: {
       format: 'json',
       description:
-        'Only ok, summary, error, toolCallCount, durationMs and governed nextActions; private continuation/journal/lineage never reaches the model.',
-      fields: ['ok', 'summary', 'error', 'toolCallCount', 'durationMs', 'nextActions'],
+        'Only ok, summary, error, terminalStatus, toolCallCount, durationMs and governed nextActions; private continuation/journal/lineage never reaches the model.',
+      fields: [
+        'ok',
+        'summary',
+        'error',
+        'terminalStatus',
+        'toolCallCount',
+        'durationMs',
+        'nextActions',
+      ],
     },
     constraints:
       'Both subagent_type and task are required. task is the concrete self-contained instruction, not a summary for the user. Planning permits only explore/plan; other disclosed roles return a phase-constraint error and never gain writes by implication.',

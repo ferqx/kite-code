@@ -35,6 +35,7 @@ import {
   closeToolRecoveryScopeV1,
   createToolRecoveryJournalV1,
   isToolRecoveryQualityBlockedV1,
+  mergeToolRecoveryJournalsV1,
   normalizeToolRecoveryJournalV1,
   recordRecoveryExhaustionV1,
   recordRecoveryFailureV1,
@@ -3524,6 +3525,43 @@ describe('ToolOutcome Runtime event integration', () => {
       reasonCode: 'journal_invalid',
     });
     expect(JSON.stringify(state.toolRecovery)).not.toContain('f'.repeat(64));
+  });
+
+  test('fails closed structurally when a same-key child recovery journal is malformed', () => {
+    const parent = createToolRecoveryJournalV1('a'.repeat(64));
+    const malformed = {
+      ...createToolRecoveryJournalV1(parent.identityKey),
+      failures: { invalid: { not: 'a recovery failure' } },
+      order: ['invalid'],
+    } as unknown as typeof parent;
+
+    const merged = mergeToolRecoveryJournalsV1(parent, malformed);
+    expect(merged.failures).toEqual({});
+    expect(merged.order).toEqual([]);
+    expect(merged.qualityGuard).toMatchObject({
+      blocked: true,
+      reasonCode: 'journal_invalid',
+    });
+  });
+
+  test('preserves a healthy parent identity across a completed child merge and next-kernel normalization', () => {
+    const parent = createToolRecoveryJournalV1('b'.repeat(64));
+    const child = recordRecoveryFailureV1(createToolRecoveryJournalV1(parent.identityKey), {
+      toolCallId: 'child-read',
+      toolName: 'read_file',
+      invocationFingerprint: 'c'.repeat(64),
+      modelMessageId: 'child-model',
+      outcome: legacyFailedReplayOutcome(),
+    });
+
+    const merged = mergeToolRecoveryJournalsV1(parent, child, {
+      taskId: 'parent-task',
+      turnId: 'parent-turn',
+    });
+    expect(merged.qualityGuard).toEqual({ blocked: false, observedFailures: 1 });
+    const restored = normalizeToolRecoveryJournalV1(JSON.parse(JSON.stringify(merged)));
+    expect(restored.identityKey).toBe(parent.identityKey);
+    expect(restored.qualityGuard).toEqual({ blocked: false, observedFailures: 1 });
   });
 
   test('CompletionGuard V2 rejects a completed plan while typed failures remain unresolved', () => {

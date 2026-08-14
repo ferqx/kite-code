@@ -302,9 +302,22 @@ describe('promotion does not duplicate output', () => {
     ];
     const { lastFrame } = renderArea(group, []);
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Delegated · 3 agents · 3 done');
+    expect(frame).toContain('Delegated · 3 agents · 3 succeeded');
     expect(frame.match(/Delegated/g)).toHaveLength(1);
     expect(frame).not.toContain('task 1');
+  });
+
+  test('labels settled child outcomes without calling failed children complete', () => {
+    const group: OutputBlock[] = [
+      subagentBlock(1, 'done', 'batch-1'),
+      subagentBlock(2, 'error', 'batch-1'),
+      subagentBlock(3, 'error', 'batch-1'),
+    ];
+    const { lastFrame } = renderArea(group, []);
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Delegated · 3 agents · 1 succeeded · 2 failed');
+    expect(frame).not.toContain('3 done');
   });
 
   test('dynamic tool card moved to Static renders once', () => {

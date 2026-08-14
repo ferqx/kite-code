@@ -33,7 +33,6 @@ import {
   admitRecoveryAttemptV1,
   advanceToolRecoveryResponseV1,
   createToolRecoveryJournalV1,
-  hasUnresolvedToolFailuresV1,
   recordRecoveryExhaustionV1,
   recordRecoveryFailureV1,
   recordRecoveryInvocationV1,
@@ -56,20 +55,6 @@ import type {
 } from './types';
 
 export type { SubAgentRunnerInput } from './types';
-
-export function deriveSubAgentCompletionV1(
-  journal: import('@/core/runtime/tool-recovery-journal').ToolRecoveryJournalV1,
-):
-  | { ok: false; terminalStatus: 'exhausted' }
-  | {
-      ok: true;
-      terminalStatus: 'completed';
-    } {
-  if (hasUnresolvedToolFailuresV1(journal) || journal.qualityGuard.blocked) {
-    return { ok: false, terminalStatus: 'exhausted' };
-  }
-  return { ok: true, terminalStatus: 'completed' };
-}
 
 function extractText(content: unknown): string {
   if (typeof content === 'string') return content;
@@ -655,29 +640,9 @@ async function runSubAgentLoop(
         messages.push(response);
         const summary = extractText(response.content);
         const durationMs = Date.now() - startTime;
-        const completion = deriveSubAgentCompletionV1(toolRecovery);
-        // Historical rejected steps do not override the canonical recovery journal:
-        // a later receipt may have resolved their lineage.
-        if (!completion.ok) {
-          const error = 'Sub-agent cannot complete while tool recovery evidence is unresolved.';
-          input.eventSink({
-            type: 'error',
-            data: { id, error, summary: summary || error, toolCallCount, durationMs },
-          });
-          return {
-            ok: false,
-            summary: summary || error,
-            toolCallCount,
-            durationMs,
-            error,
-            terminalStatus: completion.terminalStatus,
-            steps,
-            executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
-            exhaustedFingerprints:
-              Object.keys(exhaustedFingerprints).length > 0 ? exhaustedFingerprints : undefined,
-            toolRecovery,
-          };
-        }
+        // Step failures remain in toolRecovery for parent-level recovery and
+        // observability, but a child that returns a final model response has
+        // completed its own lifecycle successfully.
         input.eventSink({
           type: 'done',
           data: { id, summary, toolCallCount, durationMs },
@@ -687,7 +652,7 @@ async function runSubAgentLoop(
           summary,
           toolCallCount,
           durationMs,
-          terminalStatus: completion.terminalStatus,
+          terminalStatus: 'completed',
           steps,
           executionJournal: executionJournal.length > 0 ? executionJournal : undefined,
           exhaustedFingerprints:

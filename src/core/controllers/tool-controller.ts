@@ -68,6 +68,7 @@ import { toolExecutionModelContentV1 } from '@/core/runtime/tool-model-content';
 import { classifyToolOutcomeV1 } from '@/core/runtime/tool-outcome';
 import {
   isToolRecoveryJournalInvalidV1,
+  normalizeToolRecoveryJournalV1,
   toolFailureInstanceIdV1,
   toolInvocationFingerprintV1,
 } from '@/core/runtime/tool-recovery-journal';
@@ -425,6 +426,8 @@ export function serializeConcurrentSubagentApprovalEvents(
  */
 async function handleSubAgentResume(params: {
   state: RuntimeState;
+  /** State may have advanced while the approval interaction was pending. */
+  getRuntimeState?: () => Readonly<RuntimeState>;
   toolCallId: string;
   continuation: RestoredSubAgentContinuation;
   shellExecutor?: ShellExecutor;
@@ -443,24 +446,44 @@ async function handleSubAgentResume(params: {
   recordNetworkDecision?: NetworkDecisionRecorderV1;
 }): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = [];
+  // An approval can outlive the effect lease that originally observed it.  Do
+  // not let that stale lease dispatch an external tool or resume a child under
+  // a different recovery journal.
+  let state = params.getRuntimeState?.() ?? params.state;
   const { continuation } = params;
+  const continuationRecovery = normalizeToolRecoveryJournalV1(continuation.toolRecovery);
+  if (
+    isToolRecoveryJournalInvalidV1(state.toolRecovery) ||
+    isToolRecoveryJournalInvalidV1(continuationRecovery) ||
+    continuationRecovery.identityKey !== state.toolRecovery.identityKey
+  ) {
+    const reason = 'Sub-agent continuation recovery journal no longer matches the live runtime.';
+    return [
+      {
+        type: 'tool.rejected',
+        toolCallId: params.toolCallId,
+        reason,
+        failure: classifyFailure('persistence_unavailable', reason),
+      },
+    ];
+  }
   const { toolName: blockedToolName, args: blockedToolArgs } = continuation.blockedTool;
   const childShellExecutor = resolveSubAgentShellExecutor(continuation.role, params.shellExecutor);
 
   // Execute the previously-blocked tool with the approval grant
-  const call = params.state.tools.calls[params.toolCallId];
+  const call = state.tools.calls[params.toolCallId];
   const availCtx = toolAvailabilityContext({
-    workspace: params.state.session.workspace,
-    threadId: params.state.session.threadId,
+    workspace: state.session.workspace,
+    threadId: state.session.threadId,
     config: params.taskConfig,
     gitBroker: params.gitBroker,
     subagentEventSink: params.emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
-    activeSkillFrames: Object.values(params.state.skills.frames).filter(
+    activeSkillFrames: Object.values(state.skills.frames).filter(
       (frame) => frame.status === 'active' && frame.contextMode === 'inline',
     ),
-    phase: getAgentPhase(getActivePlanning(params.state)),
+    phase: getAgentPhase(getActivePlanning(state)),
   });
   const blockedParsed = toolRequestFromCall(
     {
@@ -482,26 +505,47 @@ async function handleSubAgentResume(params: {
   if (roleDenial) {
     toolResult = roleDenial;
   } else if (blockedParsed?.ok) {
+    // Budget admission and approval can yield the event loop. Check again at
+    // the last point before an external tool dispatch; an old continuation
+    // must never be allowed to act in a newly-restored recovery domain.
+    const dispatchState = params.getRuntimeState?.() ?? state;
+    const dispatchCall = dispatchState.tools.calls[params.toolCallId];
+    if (
+      isToolRecoveryJournalInvalidV1(dispatchState.toolRecovery) ||
+      dispatchState.toolRecovery.identityKey !== continuationRecovery.identityKey ||
+      dispatchCall?.status !== 'approved'
+    ) {
+      const reason = 'Sub-agent approval became stale before its blocked tool could be dispatched.';
+      return [
+        {
+          type: 'tool.rejected',
+          toolCallId: params.toolCallId,
+          reason,
+          failure: classifyFailure('persistence_unavailable', reason),
+        },
+      ];
+    }
+    state = dispatchState as RuntimeState;
     const blockedRequest = blockedParsed.request;
     const resumedBinding = call?.bindingId
-      ? params.state.capabilities.bindings[call.bindingId]
+      ? state.capabilities.bindings[call.bindingId]
       : undefined;
     let childReservation:
       | import('@/core/runtime/resource-budget-admission').DescendantBudgetReservationV1
       | undefined;
     try {
       toolResult = await runApprovedTool({
-        workspace: params.state.session.workspace,
+        workspace: state.session.workspace,
         request: blockedRequest,
         shellExecutor: childShellExecutor,
         gitBroker: params.gitBroker,
-        workspaceAccess: params.state.workspaceAccess,
-        phase: getAgentPhase(getActivePlanning(params.state)),
-        authorization: params.state.authorization,
+        workspaceAccess: state.workspaceAccess,
+        phase: getAgentPhase(getActivePlanning(state)),
+        authorization: state.authorization,
         approvedGrant: call?.approvalGrant ?? 'none',
-        threadId: params.state.session.threadId,
+        threadId: state.session.threadId,
         readStateActorId: continuation.id,
-        recoveryIdentityKey: params.state.toolRecovery.identityKey,
+        recoveryIdentityKey: state.toolRecovery.identityKey,
         recordFilePreimage: params.recordFilePreimage,
         recordNetworkDecision: params.recordNetworkDecision,
         mcpManager: params.mcpManager,
@@ -516,7 +560,7 @@ async function handleSubAgentResume(params: {
         skillManifests: params.skillManifests,
         skillOptions: params.skillOptions,
         signal: params.signal,
-        interactionMode: getEffectiveInteractionMode(params.state),
+        interactionMode: getEffectiveInteractionMode(state),
         taskConfig: params.taskConfig,
         taskModel: params.taskModel,
         providerDataAdmission: params.providerDataAdmission,
@@ -524,7 +568,7 @@ async function handleSubAgentResume(params: {
         subagentEventSink: params.emitSubagentEvent,
         availabilityContext: availCtx,
         projectInstructionSnapshot: visibleProjectInstructions(
-          params.state,
+          state,
           call?.modelMessageId,
           params.taskConfig,
         ),
@@ -582,7 +626,7 @@ async function handleSubAgentResume(params: {
   const result = await resumeSubAgent(
     {
       config: params.taskConfig!,
-      workspace: params.state.session.workspace,
+      workspace: state.session.workspace,
       role: continuation.role,
       task: continuation.task,
       shellExecutor: params.shellExecutor,
@@ -590,11 +634,11 @@ async function handleSubAgentResume(params: {
       mcpManager: params.mcpManager,
       skills: params.skillManifests,
       skillOptions: params.skillOptions,
-      authorization: params.state.authorization,
-      workspaceAccess: params.state.workspaceAccess,
-      phase: getAgentPhase(getActivePlanning(params.state)),
-      interactionMode: getEffectiveInteractionMode(params.state),
-      threadId: params.state.session.threadId,
+      authorization: state.authorization,
+      workspaceAccess: state.workspaceAccess,
+      phase: getAgentPhase(getActivePlanning(state)),
+      interactionMode: getEffectiveInteractionMode(state),
+      threadId: state.session.threadId,
       timeoutMs: 30 * 60 * 1000,
       signal: params.signal ?? new AbortController().signal,
       eventSink: params.emitSubagentEvent,
@@ -628,7 +672,7 @@ async function handleSubAgentResume(params: {
     });
     events.push(
       blockedSubagentReviewEvent({
-        state: params.state,
+        state,
         parentToolCallId: params.toolCallId,
         blocked,
         availCtx,
@@ -644,7 +688,7 @@ async function handleSubAgentResume(params: {
   const projected = taskSpec.projectResult(
     { available: true, result },
     {
-      workspace: params.state.session.workspace,
+      workspace: state.session.workspace,
       invocationInput: {
         subagent_type: forkRole(continuation.role.role),
         task: continuation.task,
@@ -1128,7 +1172,10 @@ export async function executeRuntimeTools(params: {
                     params.taskConfig!,
                   ),
                   threadId: params.state.session.threadId,
-                  recoveryIdentityKey: params.state.toolRecovery.identityKey,
+                  // A child journal must use the identity from the live state
+                  // that passed the pre-dispatch recovery check. `params.state`
+                  // can be a leased snapshot from before a restore/reduction.
+                  recoveryIdentityKey: currentState.toolRecovery.identityKey,
                   eventSink: emitSubagentEvent,
                   signal: params.signal,
                   model: params.taskModel,
@@ -1535,6 +1582,7 @@ export async function executeRuntimeTools(params: {
         const restored = deserializeSubagentContinuation(suspended);
         const resumeEvents = await handleSubAgentResume({
           state: params.state,
+          getRuntimeState: params.getRuntimeState,
           toolCallId,
           continuation: restored,
           shellExecutor: params.shellExecutor,
@@ -1588,7 +1636,9 @@ export async function executeRuntimeTools(params: {
           authorization: params.state.authorization,
           approvedGrant: call.approvalGrant ?? 'none',
           threadId: params.state.session.threadId,
-          recoveryIdentityKey: params.state.toolRecovery.identityKey,
+          // Keep the child journal in the same HMAC domain as the live parent
+          // state; merging a child seeded from a stale snapshot is fail-closed.
+          recoveryIdentityKey: currentState.toolRecovery.identityKey,
           recordFilePreimage: params.recordFilePreimage,
           recordNetworkDecision: params.recordNetworkDecision,
           mcpManager: params.mcpManager,
@@ -2003,7 +2053,10 @@ export async function executeRuntimeTools(params: {
             authorization: params.state.authorization,
             approvedGrant: call.approvalGrant ?? 'none',
             threadId: params.state.session.threadId,
-            recoveryIdentityKey: params.state.toolRecovery.identityKey,
+            // Re-read at dispatch: provider readiness/retries may have advanced
+            // the durable state since this effect was leased.
+            recoveryIdentityKey: (params.getRuntimeState?.() ?? currentState).toolRecovery
+              .identityKey,
             recordFilePreimage: params.recordFilePreimage,
             recordNetworkDecision: params.recordNetworkDecision,
             mcpManager: params.mcpManager,

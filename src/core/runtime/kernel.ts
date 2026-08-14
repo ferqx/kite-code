@@ -43,6 +43,8 @@ import { normalizeTerminalRuntimeEventV1 } from './terminal-outcome';
 import { normalizeCurrentToolOutcomeEventV1 } from './tool-outcome-events';
 import {
   createToolRecoveryJournalV1,
+  isToolRecoveryJournalInvalidV1,
+  mergeToolRecoveryJournalsV1,
   normalizeToolRecoveryJournalV1,
 } from './tool-recovery-journal';
 
@@ -842,6 +844,14 @@ export function restoreRuntimeStateFromStore(params: {
           params.threadId,
           restoredState?.schemaVersion ?? RUNTIME_STATE_SCHEMA_VERSION,
         );
+        // Tail replay can introduce a legacy subagent.suspended event after
+        // the snapshot migration already seeded its children. Re-normalize at
+        // the final boundary so a child never reaches the next turn without
+        // the parent recovery identity.
+        migratedState = normalizeSuspendedSubagentRecoveryJournals(
+          migratedState,
+          restoredState?.schemaVersion ?? RUNTIME_STATE_SCHEMA_VERSION,
+        );
       }
     } catch (error) {
       recoveryReason = error instanceof Error ? error.message : String(error);
@@ -1045,6 +1055,32 @@ function migrateRuntimeState(snapshot: RuntimeState): RuntimeState | null {
     };
   }
 
+  // Before recovery journal v1 existed, neither the parent nor suspended
+  // children had an identity.  They form one recovery domain, so migration
+  // must seed every missing child with the single parent identity.  Generating
+  // one random key per child makes the first approved resume fail closed on
+  // merge, even though the legacy snapshot itself was sound.
+  if (snapshot.schemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION) {
+    migratedState = {
+      ...migratedState,
+      suspendedSubagents: Object.fromEntries(
+        Object.entries(migratedState.suspendedSubagents).map(([toolCallId, suspended]) => [
+          toolCallId,
+          snapshot.suspendedSubagents?.[toolCallId]?.toolRecovery
+            ? suspended
+            : {
+                ...suspended,
+                toolRecovery: createToolRecoveryJournalV1(
+                  migratedState.toolRecovery.identityKey,
+                ) as unknown as NonNullable<
+                  RuntimeState['suspendedSubagents'][string]['toolRecovery']
+                >,
+              },
+        ]),
+      ),
+    };
+  }
+
   return materializeLegacyPlanArtifacts(migratedState);
 }
 
@@ -1062,68 +1098,90 @@ function normalizeRuntimeMetadata(
       status?: RuntimeState['turn']['status'];
     };
   };
-  return {
-    ...state,
-    revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
-    appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
-    recoveryState: raw.recoveryState ?? { kind: 'normal' },
-    context: normalizeContextRuntimeState(raw.context),
-    resourceBudget: normalizeResourceBudgetMetadata(
-      raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
-    ),
-    toolRecovery:
-      sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
-        ? raw.toolRecovery
-          ? normalizeToolRecoveryJournalV1(raw.toolRecovery)
-          : createToolRecoveryJournalV1()
-        : normalizeToolRecoveryJournalV1(raw.toolRecovery),
-    turn: {
-      ...state.turn,
-      status:
-        raw.turn.status === 'completed' || raw.turn.status === 'aborted'
-          ? raw.turn.status
-          : 'active',
+  return normalizeSuspendedSubagentRecoveryJournals(
+    {
+      ...state,
+      revision: Number.isInteger(raw.revision) && raw.revision >= 0 ? raw.revision : 0,
+      appliedEventIds: Array.isArray(raw.appliedEventIds) ? raw.appliedEventIds.slice(-4096) : [],
+      recoveryState: raw.recoveryState ?? { kind: 'normal' },
+      context: normalizeContextRuntimeState(raw.context),
+      resourceBudget: normalizeResourceBudgetMetadata(
+        raw.resourceBudget ?? createLegacyResourceBudgetStateV1(17),
+      ),
+      toolRecovery:
+        sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
+          ? raw.toolRecovery
+            ? normalizeToolRecoveryJournalV1(raw.toolRecovery)
+            : createToolRecoveryJournalV1()
+          : normalizeToolRecoveryJournalV1(raw.toolRecovery),
+      turn: {
+        ...state.turn,
+        status:
+          raw.turn.status === 'completed' || raw.turn.status === 'aborted'
+            ? raw.turn.status
+            : 'active',
+      },
+      transcript: {
+        ...state.transcript,
+        messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({
+          ...message,
+          messageId:
+            message.messageId ??
+            (message.kind === 'tool'
+              ? `tool-${message.toolCallId}`
+              : `legacy-${state.session.threadId}-${ordinal}`),
+          turnId: message.turnId ?? state.turn.turnId,
+          ordinal: Number.isInteger(message.ordinal) ? message.ordinal : ordinal,
+          createdAt: message.createdAt ?? new Date(0).toISOString(),
+        })),
+      },
+      capabilities: {
+        catalogRevision: state.capabilities?.catalogRevision ?? '',
+        bindings: state.capabilities?.bindings ?? {},
+        disclosures: state.capabilities?.disclosures ?? {},
+        loadedCapabilities: state.capabilities?.loadedCapabilities ?? {},
+        ...(state.capabilities?.pendingSearch
+          ? { pendingSearch: state.capabilities.pendingSearch }
+          : {}),
+        invocations: state.capabilities?.invocations ?? {},
+      },
+      suspendedSubagents: state.suspendedSubagents ?? {},
     },
-    transcript: {
-      ...state.transcript,
-      messages: (state.transcript?.messages ?? []).map((message, ordinal) => ({
-        ...message,
-        messageId:
-          message.messageId ??
-          (message.kind === 'tool'
-            ? `tool-${message.toolCallId}`
-            : `legacy-${state.session.threadId}-${ordinal}`),
-        turnId: message.turnId ?? state.turn.turnId,
-        ordinal: Number.isInteger(message.ordinal) ? message.ordinal : ordinal,
-        createdAt: message.createdAt ?? new Date(0).toISOString(),
-      })),
-    },
-    capabilities: {
-      catalogRevision: state.capabilities?.catalogRevision ?? '',
-      bindings: state.capabilities?.bindings ?? {},
-      disclosures: state.capabilities?.disclosures ?? {},
-      loadedCapabilities: state.capabilities?.loadedCapabilities ?? {},
-      ...(state.capabilities?.pendingSearch
-        ? { pendingSearch: state.capabilities.pendingSearch }
-        : {}),
-      invocations: state.capabilities?.invocations ?? {},
-    },
-    suspendedSubagents: Object.fromEntries(
-      Object.entries(state.suspendedSubagents ?? {}).map(([toolCallId, snapshot]) => [
+    sourceSchemaVersion,
+  );
+}
+
+/** Normalize every persisted child journal in the same recovery domain as its parent. */
+function normalizeSuspendedSubagentRecoveryJournals(
+  state: RuntimeState,
+  sourceSchemaVersion: number,
+): RuntimeState {
+  let parent = state.toolRecovery;
+  const suspendedSubagents = Object.fromEntries(
+    Object.entries(state.suspendedSubagents).map(([toolCallId, snapshot]) => {
+      const child = snapshot.toolRecovery
+        ? normalizeToolRecoveryJournalV1(snapshot.toolRecovery)
+        : sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
+          ? createToolRecoveryJournalV1(parent.identityKey)
+          : normalizeToolRecoveryJournalV1(undefined);
+      // A current-schema child with corrupted/missing or foreign recovery
+      // state must fail at restore, rather than waiting until an approval path
+      // randomly normalizes it later.
+      if (isToolRecoveryJournalInvalidV1(child) || child.identityKey !== parent.identityKey) {
+        parent = mergeToolRecoveryJournalsV1(parent, child);
+      }
+      return [
         toolCallId,
-        snapshot.toolRecovery
-          ? snapshot
-          : {
-              ...snapshot,
-              toolRecovery: (sourceSchemaVersion < TOOL_OUTCOME_RECOVERY_STATE_SCHEMA_VERSION
-                ? createToolRecoveryJournalV1()
-                : normalizeToolRecoveryJournalV1(undefined)) as unknown as NonNullable<
-                RuntimeState['suspendedSubagents'][string]['toolRecovery']
-              >,
-            },
-      ]),
-    ),
-  };
+        {
+          ...snapshot,
+          toolRecovery: child as unknown as NonNullable<
+            RuntimeState['suspendedSubagents'][string]['toolRecovery']
+          >,
+        },
+      ];
+    }),
+  );
+  return { ...state, toolRecovery: parent, suspendedSubagents };
 }
 
 function normalizeResourceBudgetMetadata(

@@ -205,6 +205,10 @@ task success 也不能清除 hard block。其 task/turn scope 只用于 provenan
 queued tools、verification、completion 与 compaction 检查损坏 journal；Controller direct 入口和 Runner
 prepared/admission/lease 边界再防御性重验；Runner 在 preparation 后对 `journal_invalid` 和 scoped
 `no_progress` 都重新采用最新的 `recovery_blocked` decision，阻止已经准备或租赁的 stale effect。
+健康 child journal merge 不得在 `qualityGuard.blocked=false` 时写入 task/turn scope；否则下一轮
+`createAgentKernel` 的严格恢复校验会误判健康 snapshot。恢复时父与所有 suspended child 属于同一 identity
+domain：pre-v23 snapshot 或 replay tail 缺 child journal 时只可一次性注入最终 parent key；current-schema
+缺失、损坏或 foreign child journal 则立即将 parent 置为 `journal_invalid`，不能延迟到 approval resume。
 bounded journal 的 128 条裁剪以 lineage closure 为单位，优先
 active/recent 记录；不能保留 child 却删除其 `recoveryOf` parent。Runtime invariant 只要求 live call 的
 lineage parent 仍 retained，已经 terminal 的历史 ToolCall 不会迫使 bounded journal 永久增长。

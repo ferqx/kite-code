@@ -890,7 +890,8 @@ describe('SubAgentRunner integration', () => {
         eventSink: sink,
         model,
       });
-      expect(result.ok).toBe(false);
+      expect(result.ok).toBe(true);
+      expect(result.terminalStatus).toBe('completed');
       expect(result.summary).toContain('refreshed');
       expect(result.executionJournal).toBeUndefined();
       expect(result.toolRecovery?.order).toHaveLength(1);
@@ -1327,7 +1328,8 @@ describe('SubAgentRunner integration', () => {
         },
       );
 
-      expect(resumed.ok).toBe(false);
+      expect(resumed.ok).toBe(true);
+      expect(resumed.terminalStatus).toBe('completed');
       const askResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'ask_user',
       );

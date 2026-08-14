@@ -97,6 +97,10 @@ merge 全部走同一 typed terminal/journal 路径，不保留另一套正文�
 Subagent 的正常执行与 approval resume 都只能把 `ToolExecutionResult` 的 canonical public model content
 追加到下一次 Provider context；该内容与 parent reducer 共用唯一 helper，success 选择
 `stdout || stderr || ''`，failure 选择 `stderr || stdout || ''`，并同时读取 `ok`/terminal status。
+子 Agent 的单个工具失败只是一条步骤级 ToolOutcome/recovery 事实：它必须保留在 journal、步骤展示和 parent
+recovery 中，但不得因为未恢复而把已经返回最终模型文本的 child 改投影为 `subagent.failed`。该情形 child
+仍以 `completed` 终态把最终文本交给父 Agent；`subagent.failed` 仅表示 child lifecycle 本身未正常结束，例如
+中断、超时、Provider/模型服务异常、循环耗尽或没有产生最终模型结果。
 command、path、resultMeta、classifier advice 与 private recovery guidance
 不得通过 `JSON.stringify(result)` 进入 transcript。ToolSpec advice 仍作为独立 metadata 输入同一
 `classifyToolOutcomeV1`，因此父/子 `read_file` ENOENT 等失败得到相同 detail/recovery，而公开错误文本不重复路径。
@@ -127,7 +131,15 @@ child merge 都不得清除或降级它，Plan/escape tool 也不能继续损坏
 metadata；下一 turn、新 task、task close 后及 SQLite restore 后都必须全局 `recovery_blocked /
 persistence_unavailable`，model/tool dispatch 均为零。普通 `no_progress` guard 才按 task/turn scope 过滤。
 该检查优先于已入队 read/write/MCP sibling、pending verification/compaction 及所有 interaction。Controller
-direct execution 入口必须读取可用的当前 Kernel state；Runner 在 async prepare 后、resource admission 后
+direct execution 入口必须读取可用的当前 Kernel state；任何 task child 也必须从这份 live state 继承
+`toolRecovery.identityKey`，不得使用 leased/stale `params.state`，否则 child merge 会错误触发
+`journal_invalid`。approval 后的 suspended child resume 必须在实际 dispatch 前重新读取 live state，并拒绝
+continuation journal 与父 identity 不一致的恢复，不能先执行外部工具再依赖 lease 丢弃结果。旧 schema 迁移时，
+缺少 journal 的父 Runtime 与每个 suspended child 必须注入同一个新 identity；不得为每个 child 独立随机生成 key。
+任何 child journal（即使 identity 相同）也必须先结构化归一化，损坏时转换为 `journal_invalid` 而不能把畸形数据
+合并进 RuntimeState 或触发 invariant 异常。健康 journal 的 `qualityGuard` 只能包含 `blocked:false` 与
+`observedFailures`；`taskId`/`turnId` 仅属于已阻断 guard，避免下一轮 Kernel restore 把健康 child merge
+误判为损坏。Runner 在 async prepare 后、resource admission 后
 与 lease 进入 executor 前重复校验，任何 stale `run_tools` effect 都不得触达 Shell/MCP/Provider dispatch。
 128 条 journal 上限采用
 lineage-aware compaction：优先保留 active/recent failure，并连同完整 `recoveryOf` ancestor closure 一起

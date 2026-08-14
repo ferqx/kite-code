@@ -36,7 +36,7 @@ function childStatus(block: SubagentBlock): {
   if (approvalState === 'queued') return { text: '等待自动审查', tone: 'dim' };
   if (approvalState === 'awaiting_user') return { text: '等待你的批准', tone: 'warning' };
   if (block.status === 'running') return { text: '进行中', tone: 'dim' };
-  if (block.status === 'done') return { text: 'done', tone: 'dim' };
+  if (block.status === 'done') return { text: 'succeeded', tone: 'dim' };
   if (block.status === 'cancelled') return { text: 'Cancelled', tone: 'warning' };
   return { text: block.error || 'Error', tone: 'error' };
 }
@@ -46,7 +46,7 @@ function summarySuffix(blocks: SubagentBlock[]): string {
   const failed = blocks.filter((block) => block.status === 'error').length;
   const cancelled = blocks.filter((block) => block.status === 'cancelled').length;
   const parts = [
-    done > 0 ? `${done} done` : '',
+    done > 0 ? `${done} succeeded` : '',
     failed > 0 ? `${failed} failed` : '',
     cancelled > 0 ? `${cancelled} cancelled` : '',
   ].filter(Boolean);
@@ -136,7 +136,7 @@ const ConcurrentSubAgentBlock = memo(function ConcurrentSubAgentBlock({
         >
           {icon}
         </Text>
-        <Text color={dt.primary}>{header}</Text>
+        <Text color={active ? dt.primary : dt.dim}>{header}</Text>
       </Box>
       {expanded ? (
         <Box flexDirection="column" paddingLeft={2}>

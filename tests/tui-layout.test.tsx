@@ -1983,7 +1983,7 @@ describe('concurrent subagent dynamic height', () => {
       />,
     );
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Delegated · 4 agents · 4 done');
+    expect(frame).toContain('Delegated · 4 agents · 4 succeeded');
     expect(frame).not.toContain('inspect area');
   });
 
