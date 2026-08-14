@@ -1682,7 +1682,7 @@ describe('SubAgentRunner integration', () => {
     const result = await runSubAgent({
       config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: process.cwd(),
-      role: getRoleConfig('code'),
+      role: { ...getRoleConfig('code'), timeoutMs: 25 },
       task: 'wait for descendant admission',
       timeoutMs: 25,
       signal: new AbortController().signal,

@@ -11,7 +11,7 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
 | `code` | 实现明确任务 | 完整工具集，但仍受 Runtime policy |
 | `review` | 独立检查结果 | 只读工具 |
 
-角色配置位于 `src/core/subagent/roles.ts`。允许的工具集合是能力上限，不是授权授予。
+角色配置位于 `src/core/subagent/roles.ts`。所有内置角色的默认执行超时统一为 30 分钟；允许的工具集合是能力上限，不是授权授予。
 
 ## 6.2 运行结构
 

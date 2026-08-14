@@ -1,6 +1,6 @@
 // tests/subagent.test.ts
 import { describe, expect, it } from 'bun:test';
-import { BUILTIN_ROLES, getRoleConfig } from '@/core/subagent/roles';
+import { BUILTIN_ROLES, DEFAULT_SUBAGENT_TIMEOUT_MS, getRoleConfig } from '@/core/subagent/roles';
 
 describe('内置角色定义', () => {
   it('应包含 4 个角色', () => {
@@ -24,14 +24,14 @@ describe('内置角色定义', () => {
     expect(config.allowedTools).toBeUndefined();
   });
 
-  it('plan 角色应有只读工具集和 10 分钟超时', () => {
+  it('plan 角色应有只读工具集和 30 分钟超时', () => {
     const config = getRoleConfig('plan');
     expect(config.allowedTools).toBeDefined();
     expect(config.allowedTools?.has('read_file')).toBe(true);
     expect(config.allowedTools?.has('edit_file')).toBe(false);
     expect(config.allowedTools?.has('write_file')).toBe(false);
     expect(config.allowedTools?.has('task')).toBe(false);
-    expect(config.timeoutMs).toBe(10 * 60 * 1000);
+    expect(config.timeoutMs).toBe(DEFAULT_SUBAGENT_TIMEOUT_MS);
   });
 
   it('review 角色应有只读工具集', () => {
@@ -39,6 +39,12 @@ describe('内置角色定义', () => {
     expect(config.allowedTools).toBeDefined();
     expect(config.allowedTools?.has('read_file')).toBe(true);
     expect(config.allowedTools?.has('edit_file')).toBe(false);
+  });
+
+  it('所有内置角色应使用统一的 30 分钟默认超时', () => {
+    for (const role of BUILTIN_ROLES) {
+      expect(getRoleConfig(role).timeoutMs).toBe(DEFAULT_SUBAGENT_TIMEOUT_MS);
+    }
   });
 
   it('所有角色的 system prompt 应非空', () => {
