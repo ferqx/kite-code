@@ -189,6 +189,8 @@ export type OutputBlock =
       awaitingApproval?: boolean;
       /** 正在等待审批的步骤索引，用于 tool_result 回来后标记 rejected / Step index being approved, used to mark as rejected on tool_result */
       approvingStepIndex?: number;
+      /** TUI-only identity for children that started as one concurrent sibling batch. */
+      concurrencyGroupId?: string;
     };
 
 /** 一次完整的「用户提问 → Agent 回复」往返 */

@@ -153,7 +153,10 @@ parent attempt。已经自动或人工获批的 active continuation 优先于 de
 仍来自父 run 的共享累计预算 ledger（ADR-0104）。自动审查升级人工审批时，`reviewFailure` 必须携带
 reviewer 的风险判断或技术失败原因，TUI 不得把升级表现成无原因的永久等待。Runtime 调用 reviewer
 时必须提供当前用户任务、workspace root，以及可用时的 Subagent 身份和角色；reviewer 不得只依据
-脱离任务语境的单条命令做决定。
+脱离任务语境的单条命令做决定。实际并发派发的 task sibling 共用 Runtime 签发的
+`concurrencyGroupId`，使 TUI 能聚合显示 queued、auto-reviewing、awaiting-user 与恢复后的状态；该字段
+不是授权凭据，串行调用不得由 App 根据相邻卡片或时间顺序推断成并发批次。自动审查明确拒绝或
+error abort 必须把对应活动 child 投影为终态，不能留下永久“等待审批/进行中”的展示。
 
 ADR-0097 的 Git 路由不属于 generic Shell 权限。`git_inspect` 只在精确 feature
 revision、`gitInspect` surface 与 App broker 同时存在时披露/执行。Shell 中绝对路径、nested shell 或间接 child 的 Git executable token同样 fail closed。stage、commit 与 remote Git 均不向模型披露，也不得由 interaction mode、Shell grant 或 raw shell fallback 恢复。

@@ -330,7 +330,7 @@ export function createRuntimeEffectExecutor(
         const parallelSubagentBatch =
           effect.toolCallIds.length > 1 &&
           effect.toolCallIds.every((toolCallId) => state.tools.calls[toolCallId]?.name === 'task');
-        const execute = async (toolCallIds: string[]) => {
+        const execute = async (toolCallIds: string[], subagentConcurrencyGroupId?: string) => {
           const taskCallId =
             toolCallIds.length === 1 && state.tools.calls[toolCallIds[0]!]?.name === 'task'
               ? toolCallIds[0]
@@ -405,6 +405,7 @@ export function createRuntimeEffectExecutor(
             providerDataAdmission: dependencies.providerDataAdmission,
             remoteMcpEgressPermitResolver: dependencies.remoteMcpEgressPermitResolver,
             descendantResourceAdmission,
+            subagentConcurrencyGroupId,
             subagentEventSink,
             emitRuntimeEvent: emitOrDefer,
             persistRuntimeEvent: executionContext?.persistEvent,
@@ -471,8 +472,11 @@ export function createRuntimeEffectExecutor(
         if (effect.toolCallIds.length <= 1) {
           return await execute(effect.toolCallIds);
         }
+        const subagentConcurrencyGroupId = parallelSubagentBatch
+          ? `subagent-batch:${effect.toolCallIds[0]!}`
+          : undefined;
         const batches = await Promise.allSettled(
-          effect.toolCallIds.map((toolCallId) => execute([toolCallId])),
+          effect.toolCallIds.map((toolCallId) => execute([toolCallId], subagentConcurrencyGroupId)),
         );
         const terminalEventBatches: RuntimeEvent[][] = [];
         for (let index = 0; index < batches.length; index++) {

@@ -329,7 +329,12 @@ describe('executeRuntimeTools', () => {
     expect(Array.isArray(terminal)).toBe(true);
     if (!Array.isArray(terminal)) throw new Error('Expected terminal RuntimeEvents.');
     expect(model.callCount.count).toBe(2);
-    expect(emitted.filter((event) => event.type === 'subagent.started')).toHaveLength(2);
+    const starts = emitted.filter((event) => event.type === 'subagent.started');
+    expect(starts).toHaveLength(2);
+    expect(starts.map((event) => event.subagent.concurrencyGroupId)).toEqual([
+      'subagent-batch:task-a',
+      'subagent-batch:task-a',
+    ]);
     expect(emitted.some((event) => event.type === 'approval.requested')).toBe(false);
     expect(terminal.filter((event) => event.type === 'subagent.suspended')).toHaveLength(2);
     expect(terminal.filter((event) => event.type === 'approval.requested')).toHaveLength(1);

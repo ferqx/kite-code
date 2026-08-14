@@ -372,10 +372,16 @@ export function blockedSubagentReviewEvent(input: {
 }
 
 /** Convert the subagent runner's private callback payload into a durable public fact. */
-export function toRuntimeSubagentEvent(event: SubagentEvent): RuntimeEvent {
+export function toRuntimeSubagentEvent(
+  event: SubagentEvent,
+  concurrencyGroupId?: string,
+): RuntimeEvent {
   switch (event.type) {
     case 'start':
-      return { type: 'subagent.started', subagent: event.data };
+      return {
+        type: 'subagent.started',
+        subagent: concurrencyGroupId == null ? event.data : { ...event.data, concurrencyGroupId },
+      };
     case 'step':
       return { type: 'subagent.step', subagent: event.data };
     case 'tool_result':
@@ -687,6 +693,8 @@ export async function executeRuntimeTools(params: {
   recordRemoteMcpEgressDecision?: RemoteMcpEgressDecisionRecorderV1;
   descendantResourceAdmission?: import('@/core/runtime/resource-budget-admission').DescendantResourceAdmissionV1;
   subagentEventSink?: SubAgentEventSink;
+  /** Identity supplied by the scheduler/executor only for one admitted parallel task batch. */
+  subagentConcurrencyGroupId?: string;
   planArtifactStore?: PlanArtifactStore;
   capabilityArtifactStore?: CapabilityArtifactStore;
   /** Runtime sink used to publish tool lifecycle/progress events while execution is running. */
@@ -723,12 +731,15 @@ export async function executeRuntimeTools(params: {
     return batches.flat();
   }
   if (parallelSubagentBatch) {
+    const concurrencyGroupId =
+      params.subagentConcurrencyGroupId ?? `subagent-batch:${params.toolCallIds[0]!}`;
     const deferredInteractions = params.toolCallIds.map(() => [] as RuntimeEvent[]);
     const batches = await Promise.all(
       params.toolCallIds.map((toolCallId, index) =>
         executeRuntimeTools({
           ...params,
           toolCallIds: [toolCallId],
+          subagentConcurrencyGroupId: concurrencyGroupId,
           ...(params.emitRuntimeEvent
             ? {
                 emitRuntimeEvent: (event: RuntimeEvent) => {
@@ -783,7 +794,7 @@ export async function executeRuntimeTools(params: {
   const planArtifacts = params.planArtifactStore ?? defaultPlanArtifactStore;
   const capabilityArtifacts = params.capabilityArtifactStore ?? defaultCapabilityArtifactStore;
   const emitSubagentEvent: SubAgentEventSink = (event) => {
-    events.push(toRuntimeSubagentEvent(event));
+    events.push(toRuntimeSubagentEvent(event, params.subagentConcurrencyGroupId));
     params.subagentEventSink?.(event);
   };
   const availCtx = toolAvailabilityContext({

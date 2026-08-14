@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { Box, Text } from 'ink';
 import { render } from 'ink-testing-library';
+import { useState } from 'react';
 import stringWidth from 'string-width';
 import App from '../src/app/tui/App';
 import ApprovalBlock from '../src/app/tui/components/ApprovalBlock';
@@ -26,6 +27,7 @@ import Footer from '../src/app/tui/Footer';
 import Header, { formatHeaderWorkspace } from '../src/app/tui/Header';
 import { createInitialState } from '../src/app/tui/initialState';
 import OutputArea, {
+  aggregateConcurrentSubagents,
   concurrentSubagentStepLimit,
   useStaticContent,
 } from '../src/app/tui/OutputArea';
@@ -1754,6 +1756,7 @@ describe('concurrent subagent dynamic height', () => {
       summary: '',
       toolCallCount: 10,
       durationMs: 0,
+      concurrencyGroupId: 'batch-1',
       steps: Array.from({ length: 10 }, (_, stepIndex) => ({
         toolName: `child_${childIndex + 1}_step_${String(stepIndex + 1).padStart(2, '0')}`,
         toolArgs: {},
@@ -1774,8 +1777,11 @@ describe('concurrent subagent dynamic height', () => {
     expect(concurrentSubagentStepLimit(mixedBlocks, 24)).toBe(0);
   });
 
-  test('shares step rows across concurrent children before Ink reaches fullscreen height', () => {
+  test('renders concurrent children as one compact Thought-like activity block', () => {
     expect(concurrentSubagentStepLimit(childBlocks, 24)).toBe(1);
+    const grouped = aggregateConcurrentSubagents(childBlocks);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]?.kind).toBe('concurrent_subagents');
 
     const { lastFrame } = render(
       <OutputArea
@@ -1788,12 +1794,263 @@ describe('concurrent subagent dynamic height', () => {
     );
     const frame = lastFrame() ?? '';
 
+    expect(frame).toContain('Delegating · 4 agents');
+    expect(frame.match(/Explore · inspect area/g)).toHaveLength(4);
+    expect(frame).not.toContain('child_1_step_10');
+    // The production App adds the four-row running Footer/prompt below OutputArea.
+    expect(frame.split('\n').length + 4).toBeLessThan(24);
+  });
+
+  test('keeps sequential children as independent cards without a Runtime batch identity', () => {
+    const sequential = childBlocks
+      .slice(0, 2)
+      .map((block) =>
+        block.kind === 'subagent' ? { ...block, concurrencyGroupId: undefined } : block,
+      );
+    expect(aggregateConcurrentSubagents(sequential)).toHaveLength(2);
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={sequential}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('Delegating · 2 agents');
+    expect(frame).toContain('inspect area 1');
+    expect(frame).toContain('inspect area 2');
+  });
+
+  test('expands the aggregate through the existing child toggle state', () => {
+    const expanded = childBlocks.map((block, index) =>
+      block.kind === 'subagent' && index === childBlocks.length - 1
+        ? { ...block, expanded: true }
+        : block,
+    );
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={expanded}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+        rows={24}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Delegating · 4 agents');
     for (let childIndex = 1; childIndex <= 4; childIndex++) {
       expect(frame).toContain(`child_${childIndex}_step_10`);
       expect(frame).not.toContain(`child_${childIndex}_step_09`);
     }
-    // The production App adds the four-row running Footer/prompt below OutputArea.
+  });
+
+  test('toggles the aggregate open and closed through Enter', async () => {
+    const toggledIds: number[] = [];
+    function Harness() {
+      const [blocks, setBlocks] = useState(childBlocks);
+      return (
+        <OutputArea
+          activeDynamicBlocks={blocks}
+          mergedStaticBlocks={[]}
+          onToggleReason={noop}
+          onToggleSubagentExpand={(id) =>
+            setBlocks((current) => {
+              toggledIds.push(id);
+              return current.map((block) =>
+                block.kind === 'subagent' && block.id === id
+                  ? { ...block, expanded: !block.expanded }
+                  : block,
+              );
+            })
+          }
+          columns={80}
+          rows={24}
+        />
+      );
+    }
+
+    const view = render(<Harness />);
+    expect(view.lastFrame()).not.toContain('child_1_step_10');
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(toggledIds).toEqual([4]);
+    expect(view.lastFrame()).toContain('child_1_step_10');
+    view.stdin.write('\r');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(toggledIds).toEqual([4, 4]);
+    expect(view.lastFrame()).not.toContain('child_1_step_10');
+  });
+
+  test.each([8, 12, 16])('keeps the compact group below a %i-row viewport', (rows) => {
+    const expanded = childBlocks.map((block, index) =>
+      block.kind === 'subagent' && index === childBlocks.length - 1
+        ? { ...block, expanded: true }
+        : block,
+    );
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={expanded}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={20}
+        rows={rows}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame.split('\n').length + 4).toBeLessThan(rows);
+    expect(frame).not.toContain('child_1_step_10');
+    for (const line of frame.split('\n')) expect(stringWidth(line)).toBeLessThanOrEqual(20);
+  });
+
+  test('bounds folded child summaries on a narrow terminal', () => {
+    const manyChildren = Array.from({ length: 12 }, (_, index) => {
+      const template = childBlocks[index % childBlocks.length];
+      if (template?.kind !== 'subagent') throw new Error('expected subagent fixture');
+      return {
+        ...template,
+        id: index + 1,
+        subagentId: `many-${index + 1}`,
+        task: `inspect narrow area ${index + 1}`,
+      } satisfies OutputBlock;
+    });
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={manyChildren}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={20}
+        rows={12}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('agents folded');
+    expect(frame.split('\n').length + 4).toBeLessThan(12);
+    for (const line of frame.split('\n')) expect(stringWidth(line)).toBeLessThanOrEqual(20);
+  });
+
+  test('budgets the Static-to-dynamic gap on the smallest supported viewport', () => {
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={childBlocks}
+        mergedStaticBlocks={[{ id: 99, kind: 'text', content: 'settled prefix' }]}
+        onToggleReason={noop}
+        columns={20}
+        rows={8}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame.split('\n').length + 4).toBeLessThan(8);
+    for (const line of frame.split('\n')) expect(stringWidth(line)).toBeLessThanOrEqual(20);
+  });
+
+  test('bounds expanded child fold markers and long step names on a narrow terminal', () => {
+    const expanded = childBlocks.map((block, index) =>
+      block.kind === 'subagent' && index === childBlocks.length - 1
+        ? { ...block, expanded: true }
+        : block,
+    );
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={expanded}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={20}
+        rows={24}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('child_');
     expect(frame.split('\n').length + 4).toBeLessThan(24);
+    for (const line of frame.split('\n')) expect(stringWidth(line)).toBeLessThanOrEqual(20);
+  });
+
+  test('settles a concurrent batch to one aggregate summary line', () => {
+    const settled = childBlocks.map((block) =>
+      block.kind === 'subagent' ? { ...block, status: 'done' as const, durationMs: 1200 } : block,
+    );
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={settled}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Delegated · 4 agents · 4 done');
+    expect(frame).not.toContain('inspect area');
+  });
+
+  test('keeps group elapsed monotonic for staggered child starts', () => {
+    const settled = childBlocks.map((block, index) =>
+      block.kind === 'subagent'
+        ? {
+            ...block,
+            status: 'done' as const,
+            startedAt: index === 0 ? 1_000 : 10_000,
+            durationMs: 10_000,
+          }
+        : block,
+    );
+    const { lastFrame } = render(
+      <OutputArea
+        activeDynamicBlocks={settled}
+        mergedStaticBlocks={[]}
+        onToggleReason={noop}
+        columns={80}
+      />,
+    );
+    expect(lastFrame()).toContain('19s');
+  });
+
+  test('refreshes queued, automatic, and human approval phases through useStaticContent', () => {
+    const suspended = childBlocks.map((block, index) =>
+      block.kind === 'subagent' && index === 0
+        ? {
+            ...block,
+            status: 'suspended' as const,
+            awaitingApproval: true,
+            approvalState: 'queued' as const,
+          }
+        : block,
+    );
+    const view = render(
+      <OutputAreaTestWrap running={true} turns={[{ blocks: suspended }]} onToggleReason={noop} />,
+    );
+    expect(view.lastFrame()).toContain('等待自动审查');
+
+    const autoReviewing = suspended.map((block, index) =>
+      block.kind === 'subagent' && index === 0
+        ? { ...block, approvalState: 'auto_reviewing' as const }
+        : block,
+    );
+    view.rerender(
+      <OutputAreaTestWrap
+        running={true}
+        turns={[{ blocks: autoReviewing }]}
+        onToggleReason={noop}
+      />,
+    );
+    expect(view.lastFrame()).toContain('自动审查中');
+
+    const awaitingUser = autoReviewing.map((block, index) =>
+      block.kind === 'subagent' && index === 0
+        ? { ...block, approvalState: 'awaiting_user' as const }
+        : block,
+    );
+    view.rerender(
+      <OutputAreaTestWrap
+        running={true}
+        turns={[{ blocks: awaitingUser }]}
+        onToggleReason={noop}
+      />,
+    );
+    expect(view.lastFrame()).toContain('等待你的批准');
   });
 });
 
@@ -3779,6 +4036,61 @@ describe('OutputArea', () => {
     expect(frame).toContain('Locate runtime event consumers');
     expect(frame).toContain('Read session-manager.ts');
     expect(frame).toContain('done!');
+  });
+
+  test('aggregates only RuntimeEvent siblings carrying the same dispatch identity', () => {
+    const groupedEvents: RuntimeEvent[] = [
+      {
+        type: 'subagent.started',
+        subagent: {
+          id: 'grouped-explore',
+          role: 'explore',
+          task: 'Inspect the runtime',
+          concurrencyGroupId: 'batch-runtime-1',
+        },
+      },
+      {
+        type: 'subagent.started',
+        subagent: {
+          id: 'grouped-review',
+          role: 'review',
+          task: 'Review the tests',
+          concurrencyGroupId: 'batch-runtime-1',
+        },
+      },
+    ];
+    const groupedState = groupedEvents.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const groupedRender = render(
+      <OutputAreaTestWrap running turns={groupedState.turns} onToggleReason={noop} />,
+    );
+    const groupedFrame = groupedRender.lastFrame() ?? '';
+
+    expect(groupedFrame.match(/Delegating · 2 agents/g)).toHaveLength(1);
+    expect(groupedFrame).toContain('Explore · Inspect the runtime');
+    expect(groupedFrame).toContain('Review · Review the tests');
+    groupedRender.unmount();
+
+    const sequentialEvents: RuntimeEvent[] = groupedEvents.map((event, index) => {
+      if (event.type !== 'subagent.started') return event;
+      const { concurrencyGroupId: _concurrencyGroupId, ...subagent } = event.subagent;
+      return { type: 'subagent.started', subagent: { ...subagent, id: `sequential-${index}` } };
+    });
+    const sequentialState = sequentialEvents.reduce(
+      (current, event) => eventReducer(current, { type: 'RUNTIME_EVENT', event }),
+      createInitialState(),
+    );
+    const sequentialRender = render(
+      <OutputAreaTestWrap running turns={sequentialState.turns} onToggleReason={noop} />,
+    );
+    const sequentialFrame = sequentialRender.lastFrame() ?? '';
+
+    expect(sequentialFrame).not.toContain('Delegating · 2 agents');
+    expect(sequentialFrame).toContain('Explore · Inspect the runtime');
+    expect(sequentialFrame).toContain('Review · Review the tests');
+    sequentialRender.unmount();
   });
 
   test('renders user block with chevron prefix', () => {

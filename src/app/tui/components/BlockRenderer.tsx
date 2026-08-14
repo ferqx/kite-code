@@ -215,7 +215,11 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case 'subagent':
       return (
         <Box flexDirection="column" {...gapFrom(prevBlock)}>
-          <SubAgentBlock block={block} maxVisibleSteps={maxVisibleSubagentSteps} />
+          <SubAgentBlock
+            block={block}
+            columns={columns}
+            maxVisibleSteps={maxVisibleSubagentSteps}
+          />
         </Box>
       );
 

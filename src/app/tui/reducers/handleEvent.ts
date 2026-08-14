@@ -836,6 +836,51 @@ function projectSubagentResuming(state: TuiState, parentToolCallId: string): Tui
   };
 }
 
+function projectSubagentTerminal(
+  state: TuiState,
+  parentToolCallId: string | undefined,
+  status: 'error' | 'cancelled',
+  reason: string,
+): TuiState {
+  const now = Date.now();
+  return {
+    ...state,
+    turns: state.turns.map((turn) => {
+      let changed = false;
+      const blocks = turn.blocks.map((block) => {
+        if (
+          block.kind !== 'subagent' ||
+          (parentToolCallId != null && block.parentToolCallId !== parentToolCallId) ||
+          (block.status !== 'running' && block.status !== 'suspended')
+        ) {
+          return block;
+        }
+        changed = true;
+        return {
+          ...block,
+          status,
+          summary: reason,
+          error: status === 'error' ? reason : undefined,
+          durationMs:
+            block.startedAt == null
+              ? block.durationMs
+              : Math.max(block.durationMs, now - block.startedAt),
+          approvalState: undefined,
+          awaitingApproval: false,
+          approvingStepIndex: undefined,
+          expanded: false,
+          steps: block.steps.map((step) =>
+            step.status === 'awaiting_approval'
+              ? { ...step, status: 'rejected' as const, ok: false }
+              : step,
+          ),
+        };
+      });
+      return changed ? { ...turn, blocks } : turn;
+    }),
+  };
+}
+
 export function handleEventAction(state: TuiState, event: RenderEvent): TuiState {
   // Guard: malformed events from corrupted checkpoints must not crash the TUI
   if (!event.data) return state;
@@ -1847,6 +1892,9 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         durationMs: 0,
         steps: [],
         startedAt: Date.now(),
+        ...(event.data.concurrencyGroupId != null
+          ? { concurrencyGroupId: event.data.concurrencyGroupId }
+          : {}),
       };
       return appendBlock(finalized, block);
     }
@@ -2879,17 +2927,25 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       if (event.result.approved) return projectSubagentResuming(state, event.toolCallId);
       if (!event.result.ok || event.result.escalatedToUser) return state;
       const outcomeV1 = canonicalToolOutcomeV1(event);
+      const rejectionReason = event.result.reason ?? '自动审查拒绝执行';
+      const terminalized = projectSubagentTerminal(
+        state,
+        event.toolCallId,
+        'error',
+        rejectionReason,
+      );
       const name =
-        state.pendingToolCalls[event.toolCallId]?.name ?? visibleToolName(state, event.toolCallId);
-      if (!name) return withoutPendingTool(state, event.toolCallId);
-      const materialized = materializePendingTool(state, event.toolCallId, 'queued', true);
+        terminalized.pendingToolCalls[event.toolCallId]?.name ??
+        visibleToolName(terminalized, event.toolCallId);
+      if (!name) return withoutPendingTool(terminalized, event.toolCallId);
+      const materialized = materializePendingTool(terminalized, event.toolCallId, 'queued', true);
       return handleEventAction(materialized, {
         type: 'tool_done',
         data: {
           call_id: event.toolCallId,
           name,
           ok: false,
-          summary: event.result.reason ?? '自动审查拒绝执行',
+          summary: rejectionReason,
           status: toolOutcomeProtocolStatusV1(outcomeV1),
         },
       });
@@ -3109,6 +3165,9 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           resolved: activeApproval.resolved ?? { action: 'reject' },
         });
       }
+      if (toolCallId) {
+        next = projectSubagentTerminal(next, toolCallId, 'cancelled', event.reason);
+      }
       return { ...next, interrupt: null };
     }
     case 'planning.entered':
@@ -3197,6 +3256,9 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         status: { ...state.status, phase: 'building', pendingPlan: null },
       };
     case 'turn.aborted': {
+      if (event.cause === 'error') {
+        return projectSubagentTerminal(state, undefined, 'error', event.reason);
+      }
       if (event.cause !== 'user') return state;
       const cancelled = finalizeLastTurnStreaming(projectUserCancelledTurn(state));
       return {
