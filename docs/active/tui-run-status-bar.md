@@ -122,6 +122,8 @@ Runtime v19 的新终态通过共享 `projectTerminalOutcomeV1` 投影。TUI 只
 
 除非所选模型配置显式设定 `reasoning: false`，否则只要 `status.thinkingMode` 已设置，`StatsLine` 必须在宽度允许时紧跟模型名显示该强度；不得以 provider 标识（例如 `deepseek`）作为显示条件，因为兼容端点或自定义路由也可以承载同一模型和推理强度。
 
+方案审核通过后，`StatsLine` 的模式标签必须立即采用持久化 `plan.approved.executionMode`：选择 Auto 显示“自动审批”，选择 accept_edits 显示“接受编辑”。同一投影必须进入会话快照和历史回放，避免切换会话或重启后恢复旧标签。
+
 工具授权、用户提问或方案审核 interrupt 可见时，Footer 同时隐藏 `StatusBar` 与 `StatsLine`，
 避免全局运行/模型状态和当前阻塞决策形成两条竞争底栏。统计数据继续保存在 State 中，
 interrupt 结束后恢复展示，不得因临时隐藏而重置 cache、context 或 token 数。

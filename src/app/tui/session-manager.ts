@@ -781,6 +781,8 @@ export class SessionRuntime {
   /** Route the public RuntimeEvent stream directly to the foreground or buffer. */
   private _routeRuntimeEvent(event: RuntimeEvent, dispatch: (action: Action) => void): void {
     this._observabilityBridge?.observeRuntimeEvent(event, new Date().toISOString());
+    if (event.type === 'plan.approved') this.interactionMode = event.executionMode;
+    if (event.type === 'interaction_mode.changed') this.interactionMode = event.mode;
     if (event.type === 'model.text_delta' || event.type === 'model.reasoning_delta') {
       this._flushToolProgress();
       this._bufferModelDelta(event, dispatch);
@@ -2128,6 +2130,7 @@ export class SessionManager {
         pendingInterrupt: rt.pendingInterrupt,
         interrupt: null,
         plan: null,
+        interactionMode: rt.interactionMode,
         status: rawStatus,
         turns: [],
         pendingToolCalls: {},

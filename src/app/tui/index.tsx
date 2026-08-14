@@ -713,10 +713,18 @@ function TuiApp({
         const thinkingLevel = result.thinkingLevel ?? 'max';
         thinkingLevelRef.current = thinkingLevel;
 
-        const { blocks, interrupt, pendingToolCalls, recoveredPendingInteraction } =
-          sessionDataToUI(result);
+        const {
+          blocks,
+          interrupt,
+          interactionMode,
+          pendingToolCalls,
+          recoveredPendingInteraction,
+        } = sessionDataToUI(result);
         const runtime = sessionManager.getRuntime(threadId);
-        if (runtime) runtime.localReplayRecovery = recoveredPendingInteraction;
+        if (runtime) {
+          runtime.localReplayRecovery = recoveredPendingInteraction;
+          runtime.interactionMode = interactionMode;
+        }
         dispatch({
           type: 'LOAD_SESSION',
           threadId,
@@ -727,6 +735,7 @@ function TuiApp({
           modelName: resumedConfig.modelName,
           thinkingLevel,
           reasoningEnabled: resumedConfig.reasoningExplicitlyDisabled !== true,
+          interactionMode,
         });
         if (result.runtimeEvents.some((event) => event.type === 'user.message_appended')) {
           const contextSnapshot = sessionManager.buildContextStatusSnapshot(threadId);

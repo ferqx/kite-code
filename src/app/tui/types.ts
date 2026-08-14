@@ -338,6 +338,8 @@ export interface SessionSnapshot {
   /** Full interrupt state for session-switch restoration. Set on switch-away, read on switch-back. */
   interrupt: InterruptState | null;
   plan: import('@/protocol/events').AgentPlan | null;
+  /** Last mode selected for this session, including an approved plan's execution mode. */
+  interactionMode?: TuiState['interactionMode'];
   status: StatusState;
   turns: Turn[];
   /** Off-screen queued tool metadata owned by this TUI session projection. */

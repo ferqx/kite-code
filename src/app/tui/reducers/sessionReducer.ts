@@ -15,6 +15,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               status: state.status,
               interrupt: state.interrupt,
               running: state.running,
+              interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
               active: false,
             }
@@ -47,6 +48,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         pendingInterrupt: false,
         interrupt: null,
         plan: null,
+        interactionMode: state.interactionMode,
         status: newStatus,
         turns: [],
         pendingToolCalls: {},
@@ -83,6 +85,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         currentModelReasoningText: undefined,
         sessionKey: state.sessionKey + 1,
         status: newStatus,
+        interactionMode: state.interactionMode,
       };
     }
     case 'LOAD_SESSION_PENDING':
@@ -97,6 +100,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               status: state.status,
               interrupt: state.interrupt,
               running: state.running,
+              interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
               active: false,
             }
@@ -153,6 +157,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         compactionProgress: undefined,
         loadingSessionId: null,
         sessionServiceUnavailable: false,
+        interactionMode: action.interactionMode ?? target?.interactionMode ?? state.interactionMode,
         sessionKey: state.sessionKey + 1,
         sessionError: false,
         ctrlCPressed: false,
@@ -184,6 +189,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
               status: state.status,
               interrupt: state.interrupt,
               running: state.running,
+              interactionMode: state.interactionMode,
               pendingToolCalls: state.pendingToolCalls,
               active: false,
             }
@@ -200,6 +206,7 @@ export function sessionReducer(state: TuiState, action: Action): TuiState | null
         turns: targetTurns,
         nextBlockId: Math.max(state.nextBlockId, maxBlockIdInTurns(targetTurns) + 1),
         status: target?.status ?? state.status,
+        interactionMode: target?.interactionMode ?? state.interactionMode,
         interrupt: target?.interrupt ?? null,
         toolStartTimes: undefined,
         pendingToolCalls: target?.pendingToolCalls ?? {},
