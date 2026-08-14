@@ -117,6 +117,11 @@ requireText('docs/active/open-source-first-release.md', [
   '状态：active',
   '读取时机：',
   '验证：',
+  'ADR-0069',
+  'G0',
+  'G1',
+  'release:build',
+  'release:smoke',
   '83',
   '25',
   '0 optional',
@@ -156,7 +161,6 @@ requireText('docs/space/plans/2026-07-29-agent-production-decision-register.md',
   '| 45 | 2026-08-04 |',
   '83 completed、25 superseded、0 optional',
 ]);
-requireText('README.md', ['ADR-0069', 'G0', 'G1', 'release:build', 'release:smoke']);
 requireText('docs/documentation-map.json', [
   'docs/active/open-source-first-release.md',
   'docs/adr/0069-first-release-terminal-scope.md',

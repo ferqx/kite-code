@@ -8,6 +8,9 @@
 
 相关：ADR-0068、ADR-0069、ADR-0093、`release/oss-first-release/task-status-v2.json`、`.github/workflows/release-candidate.yml`。
 
+首发 Gate、候选构建命令和限制以本文件及 `release/oss-first-release/` 为权威，不要求在面向使用者的
+`README.md` 中重复维护。
+
 ## 首发 Gate
 
 `G0` 只判断本地正确性和安全：规范测试通过；Workspace 越界、secret、network、MCP write、
