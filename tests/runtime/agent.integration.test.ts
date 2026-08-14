@@ -177,7 +177,10 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
       events.push(event);
     }
 
-    expect(events[0]?.type).toBe('provider.admission_required');
+    expect(events.map((event) => event.type)).toContain('provider.admission_required');
+    expect(events.findIndex((event) => event.type === 'user.message_appended')).toBeLessThan(
+      events.findIndex((event) => event.type === 'provider.admission_required'),
+    );
     expect(events.map((event) => event.type)).toContain('provider.admission_waived');
     expect(events.findIndex((event) => event.type === 'provider.admission_waived')).toBeLessThan(
       events.findIndex((event) => event.type === 'model.requested'),
@@ -191,6 +194,102 @@ test('Runtime gates an unavailable required MCP provider before the model and pe
     });
     expect(snapshot.capabilities.bindings).toEqual({});
     store.close();
+  } finally {
+    rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test('successor recovery settles a stale Tool before opening required Provider admission', async () => {
+  const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-provider-after-recovery-'));
+  const storePath = join(workspace, 'runtime.db');
+  const threadId = 'provider-after-recovery';
+  const manager = new McpConnectionManager();
+  manager.getProviderDirectorySnapshot = () => ({
+    revision: 'directory-r1',
+    entries: [
+      {
+        providerId: 'github',
+        status: 'login_required',
+        required: true,
+        source: 'project',
+        lastKnownCapabilityNames: ['publish'],
+        retryable: false,
+      },
+    ],
+  });
+
+  try {
+    const stale = createAgentKernel({
+      threadId,
+      userId: 'test',
+      workspace,
+      storePath,
+      interactionMode: 'accept_edits',
+    });
+    stale.processEventBatch([
+      { type: 'user.message_appended', messageId: 'old-user', content: 'old turn' },
+      { type: 'turn.started', turnId: 'old-turn' },
+      {
+        type: 'model.responded',
+        messageId: 'old-model',
+        toolCalls: [{ id: 'stale-task', name: 'task', args: { task: 'old child' } }],
+      },
+      {
+        type: 'tool.queued',
+        toolCallId: 'stale-task',
+        modelMessageId: 'old-model',
+        name: 'task',
+        args: { task: 'old child' },
+      },
+      { type: 'tool.started', toolCallId: 'stale-task' },
+    ]);
+    stale.close();
+
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeAgent(
+      {
+        task: 'new message',
+        threadId,
+        userId: 'test',
+        workspace,
+        runtimeStorePath: storePath,
+        model: createMockModel([
+          { message: aiMessage({ content: 'completed after admission' }) },
+        ]) as SupportedChatModel,
+        mcpManager: manager,
+        config: {
+          providerName: 'test',
+          providerType: 'openai-compatible',
+          apiKey: 'test',
+          baseURL: 'http://localhost:1',
+          modelName: 'test',
+          sandbox: { enabled: true },
+          features: { mcpProviderActionV1: true },
+        },
+      },
+      {
+        requestAction: async (effect) => ({
+          type: 'provider_admission_decision',
+          interactionId: effect.interactionId,
+          decision: { kind: 'waive' },
+        }),
+      },
+    )) {
+      events.push(event);
+    }
+
+    const cancelled = events.findIndex(
+      (event) => event.type === 'tool.cancelled' && event.toolCallId === 'stale-task',
+    );
+    const message = events.findIndex(
+      (event) => event.type === 'user.message_appended' && event.content === 'new message',
+    );
+    const admission = events.findIndex((event) => event.type === 'provider.admission_required');
+    expect(cancelled).toBeGreaterThanOrEqual(0);
+    expect(message).toBeGreaterThan(cancelled);
+    expect(admission).toBeGreaterThan(message);
+    expect(events.some((event) => event.type === 'completion.blocked')).toBe(false);
+    expect(events.at(-1)?.type).toBe('turn.completed');
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
@@ -737,10 +836,7 @@ function assertCompletionGuardCorrectionTerminal(events: RuntimeEvent[]): void {
   expect(error).toBeGreaterThan(aborted);
 }
 
-function assertCompletionGuardErrorTerminal(
-  events: RuntimeEvent[],
-  code: 'planning_empty' | 'plan_draft_pending',
-): void {
+function assertCompletionGuardErrorTerminal(events: RuntimeEvent[], code: 'planning_empty'): void {
   const blocked = events.filter(
     (event): event is Extract<RuntimeEvent, { type: 'completion.blocked' }> =>
       event.type === 'completion.blocked',
@@ -1005,7 +1101,25 @@ test('Runtime Kernel bounds a draft-only plan after one correction', async () =>
     }
     expect(eventTypes).toContain('plan.drafted');
     expect(mockModel.callCount.count).toBe(3);
-    assertCompletionGuardErrorTerminal(events, 'plan_draft_pending');
+    const blocked = events.filter(
+      (event): event is Extract<RuntimeEvent, { type: 'completion.blocked' }> =>
+        event.type === 'completion.blocked',
+    );
+    expect(blocked.map((event) => [event.code, event.correctionAttempt])).toEqual([
+      ['plan_draft_pending', 1],
+      ['plan_draft_pending', 2],
+    ]);
+    expect(eventTypes).not.toContain('run.completed');
+    expect(eventTypes).not.toContain('run.error');
+    expect(eventTypes).not.toContain('turn.aborted');
+    expect(events.at(-1)?.type).toBe('turn.completed');
+
+    const store = createRuntimeStore(join(workspace, 'runtime.db'));
+    const snapshot = store.loadSnapshot<RuntimeState>('kernel-plan-draft');
+    store.close();
+    expect(snapshot?.turn.status).toBe('completed');
+    expect(snapshot?.activeTaskId).not.toBeNull();
+    expect(snapshot?.planning.kind).toBe('planning_draft');
   } finally {
     if (previousKiteCodeHome == null) delete process.env.KITE_CODE_HOME;
     else process.env.KITE_CODE_HOME = previousKiteCodeHome;

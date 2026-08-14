@@ -420,7 +420,7 @@ export const BUILTIN_TOOL_CONTRACTS: Readonly<Record<KnownToolName, ToolContract
       ],
     },
     constraints:
-      'Both subagent_type and task are required. task is the concrete self-contained instruction, not a summary for the user. Planning permits only explore/plan; other disclosed roles return a phase-constraint error and never gain writes by implication.',
+      'Both subagent_type and task are required. task is the concrete self-contained instruction, not a summary for the user. Clarify material ambiguity before dispatch: child agents cannot call ask_user and must return missing prerequisites to the parent. Planning permits only explore/plan; other disclosed roles return a phase-constraint error and never gain writes by implication.',
     recovery:
       'Approval/policy denial and exhausted/unknown child effects are not replayed. Resume only a Runtime-owned continuation; use a new bounded task only after real replan/user/provider progress.',
   },

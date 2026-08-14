@@ -80,6 +80,8 @@ Registry conformance 必须枚举当前 20/20 builtin，并在 legacy/V2 × plan
 
 ToolSpec 的输入 Schema 只描述并校验上述模型形态，不得使用无法稳定投影为 JSON Schema 的 transform。`createInterrupt()` 在 Schema 校验后生成稳定的问题/选项 ID，并根据选项上的 `recommended: true` 派生内部推荐项，再为普通模型提问启用客户端自由输入，再产生内部 `UserInputRequest`。TUI、系统恢复交互与历史回放继续消费内部协议，因此可以保留 `allow_free_text=false` 等非模型控制能力。
 
+`ask_user` 只属于主 Agent 的模型工具面。`task` 必须在派发前携带已澄清的自包含指令；所有 child role 都从工具声明中移除 `ask_user`。若仍缺少必要前提，child 必须在最终结果中报告给 parent，不得打开或转交用户交互。Full/Plan 模式允许提问仅指主 Agent 可在委派前调用 `ask_user`。
+
 ### Plan 工具契约边界
 
 `write_plan` 新写入 V2 Plan，标题/step title 为单行、正文至少 20 字符、step ID 唯一且总数不超过

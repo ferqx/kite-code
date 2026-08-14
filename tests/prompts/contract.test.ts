@@ -2,14 +2,14 @@ import { expect, test } from 'bun:test';
 import { buildStaticSystemPrompt } from '@/core/model/context';
 import { createFullModePolicy } from '@/core/policies/mode-policy';
 
-test('full-mode contract is backed by policy rather than prompt text alone', () => {
+test('full-mode contract allows ask_user for plan clarification', () => {
   expect(
     createFullModePolicy(true).shouldAskUser({
       interactionMode: 'full',
       phase: 'building',
       planKind: 'building_without_plan',
     }),
-  ).toMatchObject({ kind: 'deny' });
+  ).toMatchObject({ kind: 'allow' });
 });
 
 test('the runtime injects the plan lifecycle contract into every model prompt', () => {

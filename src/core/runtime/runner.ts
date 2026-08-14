@@ -623,6 +623,20 @@ export async function* runRuntimeLoop(
           yield blocked;
           continue;
         }
+        if (effect.decision.code === 'plan_draft_pending') {
+          const turnCompleted: RuntimeEvent = {
+            type: 'turn.completed',
+            turnId: kernel.getState().turn.turnId,
+          };
+          // A draft can intentionally remain paused across user turns. The
+          // guard still prevents run/task completion, but a second plain-text
+          // acknowledgement must not turn that safe pending state into an
+          // opaque Runtime error. Persist the blocker and close only the turn.
+          kernel.processEventBatch([blocked, turnCompleted]);
+          yield blocked;
+          yield turnCompleted;
+          return;
+        }
         const failure = classifyFailure(
           'unknown',
           `Completion blocked by ${effect.decision.code}; next action: ${effect.decision.nextAction}.`,

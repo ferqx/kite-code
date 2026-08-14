@@ -147,7 +147,9 @@ lineage-aware compaction：优先保留 active/recent failure，并连同完整 
 
 `promptContractV2` 开启时，phase 不改变 production builtin declaration：Planning 与 Building 使用相同的 edit/write/shell 声明和完整 `task` role schema；当前已绑定动态 MCP 也保持声明稳定，避免 phase 切换破坏 Provider 的工具前缀。动态 Runtime block 和 ToolSpec description 引导 Planning 只调用只读能力，Runtime Policy/Controller 仍以当前 phase 和 Registry/MCP effective effects 强制裁决：policy-proven read-only Shell、MCP 与 Registry capability 可运行，edit/write、非只读 Shell、code/review child 和 side-effectful MCP 均不执行、不进入审批，并产生配对的结构化 phase Tool Result。模型可以为有界、自包含、独立且值得额外调用的工作自主选择 `task`；用户明确要求不委派时必须遵守。Capability availability、execution surface、binding、Skill lifecycle 与 flags 仍可改变实际工具面；稳定披露不是授权。
 
-Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只复用 schema 的 trim 后 `8..8000` 长度边界，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、interaction mode、authorization、sandbox、protected path、execution surface 和累计预算。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
+`ask_user` 只在主 Agent 工具面中可用。主 Agent 必须在派发 `task` 前澄清会阻断执行的用户意图，并把必要事实写入自包含的 delegated task；Subagent 的所有角色都从工具声明中移除 `ask_user`。child 若发现必要前提仍缺失，只能在最终结果中返回 parent，不得创建用户 interaction。Full/Plan 模式可提问仅指主 Agent 可在委派前提问。
+
+Runtime 不解析 active Task 的 `userGoal` 来授权委派、匹配 role 或推导 code scope；delegated task 的硬校验只复用 schema 的 trim 后 `8..8000` 长度边界，不按语言、单词数或语义短语猜测“是否自包含”。自包含、独立和收益判断属于模型可见 Tool contract。所有内置 Subagent 角色的默认执行超时统一为 30 分钟；角色配置可显式覆盖该默认值。explore/plan/review 保持各自只读 ceiling；code 仅用于当前用户任务要求实施的情形，并与 Parent 共用 phase、interaction mode、authorization、sandbox、protected path、execution surface 和累计预算。Project、Shell、工具结果或远端内容不能提升这些结构化权限；它们是否影响模型选择属于指令遵循边界，不能表述成新的 Runtime 授权。Planning 只允许 explore 及只读 plan，code/review 一律拒绝；
 审批只解决具体调用的 Runtime policy gate，不能扩大 Subagent role ceiling。explore/plan/review 的
 非只读 Shell 即使在暂停后获得批准，resume 仍必须经过与首次 child loop 相同的只读 executor 并被拒绝。
 plan child 返回后的唯一 continuation 是 `write_plan:save`
@@ -206,7 +208,7 @@ Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运�
 
 ## 工具名单单一事实源（ADR-0043）
 
-阶段 2 的 computer、coordination、interrupt 与 runtime action 静态工具也已完成 Registry 单路径切换。`task` 的 role-based effects、子 Agent 依赖和结果传播由 spec 驱动；`tool_search` 在 spec 内完成 feature gate、inventory redirect、provider readiness 重试、候选裁剪和 `capability.search_completed` 事件投影；`ask_user` 以 `kind: interrupt` 注册并仍由 controller 产生 `user_input.requested`。
+阶段 2 的 computer、coordination、interrupt 与 runtime action 静态工具也已完成 Registry 单路径切换。`task` 的 role-based effects、子 Agent 依赖和结果传播由 spec 驱动；`tool_search` 在 spec 内完成 feature gate、inventory redirect、provider readiness 重试、候选裁剪和 `capability.search_completed` 事件投影；`ask_user` 以 `kind: interrupt` 注册。Controller 先执行 effective interaction-mode policy；当前所有 mode（包括 `full`）都允许产生 `user_input.requested`，Full mode 尤其可在 Planning 中澄清约束。
 
 事件型 ToolSpec 可通过 `ProjectedToolResult.runtimeEvents` 产出 Core Runtime 事件；controller 只追加这些结构化事件，不得重新计算 capability search、Skill activation 或 Plan 状态结果。该通道只引用 Core 事件类型，不引入 App/TUI 依赖。
 
@@ -247,7 +249,11 @@ recovery model 请求。不得等 Provider 成功响应后才补 rejection；即
 
 生产静态模型工具面必须直接由 `builtinToolRegistry.toSchemaOnlyToolSet()` 投影；`definitions.ts` 只负责构造不可变的可用性快照并合并 Runtime-issued MCP bindings。默认开发入口继续暴露完整投影；production surface 必须逐项按 `network/process/write/shell/skillChild/localStdioMcp` 独立收窄，并同时检查 Capability Descriptor 的 declared/effective effects。Runner 在 dispatch 前重复同一检查，防止仅在模型 disclosure 层收窄；`process=true` 不能提升 `write=false` 或 `network=false`。原生 sandbox Shell 由显式 `process + shell` surface 接管其保守的 `unknown` descriptor；进程内 writer/network 工具仍按各自 effect 被拒绝。`verified_in_process_read_only` 进一步要求密封 qualification catalog 中的 capability ID、descriptor revision 与只读副作用契约完全匹配，并省略动态 MCP；这不是第二份 Registry。该快照包含 feature flags、task adapter、Tool Search、Skill catalog 与 active frame 可见性，并同时用于执行前的静态调用解析。工具表当前不做模块级缓存，避免长进程无界增长与运行中配置变化复用陈旧表面。Builtin Capability Descriptor 包含规范化输入 Schema，因此 Schema 变化必须改变 revision。静态工具进入审批与模型队列时，副作用分类优先且必须来自 `spec.effects()`；手写名称分类器仅用于动态或历史状态的保守回退。
 
-`ToolSpec` 按 kind 构成可辨识联合：`computer`、`coordination` 与 `runtime_action` 具有 `execute/projectResult`；`interrupt` 只具有 `createInterrupt`，类型上不得出现执行器或结果投影。Interrupt 的模型输入与中断协议输出可以是不同类型，但转换只能发生在 `createInterrupt()`。`ask_user` 因此只能由 Tool Controller 创建 `user_input.requested`、不能误入 Registry dispatch；模型只提交 1-3 项的规范 `questions` 数组，每项提供 2-3 个 `{label, description}` 选项，单问题同样使用数组。`askUserSpec.createInterrupt()` 负责生成稳定 ID、将第一项标为推荐并启用客户端自由输入，Controller 不得手工组装中断内容。子 agent 审批恢复路径的 `task` 结果同样复用 `taskSpec.projectResult()`，不存在第二份手写 task 结果格式。
+Skill frame 的模型提示、工具面与 Subagent resume 注入只读取匹配当前 `activeTaskId` 的 active frame；旧 Task
+保留的 active 历史帧不得继续向后继 Task 披露指令、capability ceiling 或工具。Model Controller 与 Tool
+Controller 必须复用 Runtime 的 current-work 判定，不能各自用 Thread 级 `status=active` 扫描恢复状态。
+
+`ToolSpec` 按 kind 构成可辨识联合：`computer`、`coordination` 与 `runtime_action` 具有 `execute/projectResult`；`interrupt` 只具有 `createInterrupt`，类型上不得出现执行器或结果投影。Interrupt 的模型输入与中断协议输出可以是不同类型，但转换只能发生在 `createInterrupt()`。`ask_user` 不能误入 Registry dispatch；Tool Controller 先应用 interaction-mode policy，获准后才可创建 `user_input.requested`。模型只提交 1-3 项的规范 `questions` 数组，每项提供 2-3 个 `{label, description}` 选项，单问题同样使用数组。`askUserSpec.createInterrupt()` 负责生成稳定 ID、将第一项标为推荐并启用客户端自由输入，Controller 不得手工组装中断内容。子 agent 审批恢复路径的 `task` 结果同样复用 `taskSpec.projectResult()`，不存在第二份手写 task 结果格式。
 
 Registry dispatch 在执行后注入已解析参数（`invocationInput`，类型化且恒等于 Schema 解析结果）并调用 `projectResult()`，其输出是静态工具模型内容、`resultMeta`、展示提示和 Runtime events 的规范来源。Tool Controller 对 runtime action、Skill 与 Tool Search 直接以该投影生成 `tool.finished`；Tool Runner 对 read/search/edit/write/shell/web_fetch 与 MCP inventory/resource 同样直接消费投影，不得再次按工具名重算 diff、截断、mutation scope 或 raw digest。产出双路模型就绪文本的工具经投影的 `streams` 字段逐流处理：shell_execute、search_content、search_files 逐流截断且失败时 stdout/stderr 两路保留；MCP 清单/资源三件（list_mcp_resources、list_mcp_tools、read_mcp_resource）逐流透传，结构化载荷（含 stale_cursor 等结构化拒绝）保持在 execute 产出的原流。单流工具（read_file、edit_file、write_file、web_fetch、task、Skill/Plan/Tool Search）以 `modelContent` 为唯一模型通道，Runner 按 ok 分流到 stdout 或 stderr。执行适配器仍可负责读取指纹、文件原像、permit、network mode 和授权来源等治理事实，但不得覆盖 spec 已投影的结果语义。
 

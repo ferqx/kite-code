@@ -154,13 +154,13 @@ export function createAutoModePolicy(_config?: AutoModeConfig): RuntimePolicy {
 // ── Full Mode / 完全自主模式 ──
 
 /**
- * 创建 Full Mode 策略 — 模型完全自主执行，不允许 ask_user，需要 sandbox。
- * Create Full Mode policy — fully autonomous, no ask_user, requires sandbox.
+ * 创建 Full Mode 策略 — 模型自主执行，允许必要的 ask_user，需要 sandbox。
+ * Create Full Mode policy — autonomous execution with ask_user available, requires sandbox.
  *
  * 行为 / Behavior:
  * - plan: 需审核 / requires review
  * - 工具: 破坏性拒绝，其余在 sandbox 内可执行 / destructive denied, rest allowed within sandbox
- * - ask_user: 拒绝 — full mode 不能向用户提问 / denied — full mode cannot ask the user
+ * - ask_user: 允许，尤其用于 Plan 澄清 / allowed, especially for plan clarification
  * - auto-review: 不启用（full mode 直接执行）/ disabled (full mode executes directly)
  * - sandbox: 不可用时返回 deny / returns deny if not available
  */
@@ -187,7 +187,7 @@ export function createFullModePolicy(sandboxAvailable: boolean): RuntimePolicy {
       },
 
       shouldAskUser(_input: PolicyInput): PolicyDecision {
-        return { kind: 'deny', reason: 'full mode requires sandbox which is not available' };
+        return { kind: 'allow' };
       },
 
       shouldApproveTool(input: PolicyInput): PolicyDecision {
@@ -229,12 +229,7 @@ export function createFullModePolicy(sandboxAvailable: boolean): RuntimePolicy {
     },
 
     shouldAskUser(_input: PolicyInput): PolicyDecision {
-      // full mode 下 ask_user 被禁止 — 模型不能依赖人工判断
-      // ask_user is forbidden in full mode — model cannot rely on human judgment
-      return {
-        kind: 'deny',
-        reason: 'full mode does not support ask_user — replan to avoid user interaction',
-      };
+      return { kind: 'allow' };
     },
 
     shouldApproveTool(input: PolicyInput): PolicyDecision {

@@ -30,7 +30,7 @@ import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
 import type { AuthorizationSource } from '@/core/types';
 import type { AuthorizationMode, InteractionMode } from '@/protocol/events';
-import { eventsForRunCancellation } from './actions';
+import { eventsForRunCancellation, eventsForSupersededTurnRecovery } from './actions';
 import type { RuntimeEvent } from './events';
 import { createRuntimeEffectExecutor, prepareRuntimeEffectForBudgetV1 } from './executor';
 import { resolveFailureModeV1 } from './failure-mode-conformance';
@@ -40,6 +40,7 @@ import { LIMITED_RESOURCE_BUDGET_V1 } from './resource-budget';
 import { type RuntimeActionProvider, runRuntimeLoop } from './runner';
 import { getActivePlanning, getActiveTask } from './state';
 import { failedTerminalOutcomeV1 } from './terminal-outcome';
+import { interactionBelongsToCurrentWork } from './work-scope';
 
 /** Build redacted admission facts for unavailable required providers before model execution. */
 export function requiredProviderAdmissionEvents(
@@ -337,20 +338,18 @@ export async function* runRuntimeAgent(
     if (activeBudget.status === 'active') {
       scheduleRunDeadline(activeBudget.deadlineAt);
     }
-    const admissionEvents = requiredProviderAdmissionEvents(
-      kernel.getState(),
-      input.mcpManager,
-      getFeatureFlags(input.config).mcpProviderActionV1,
-    );
-    for (const event of admissionEvents) {
-      kernel.processEvent(event);
-      collector.recordRuntime(event);
-      yield event;
-    }
-
     const resumedInteraction =
-      getActiveTask(kernel.getState()) && kernel.getState().interactions.kind !== 'idle';
+      getActiveTask(kernel.getState()) && interactionBelongsToCurrentWork(kernel.getState());
     if (!resumedInteraction) {
+      const recoveryEvents = eventsForSupersededTurnRecovery(kernel.getState());
+      if (recoveryEvents.length > 0) {
+        kernel.processEventBatch(recoveryEvents);
+        for (const event of kernel.getLastAppliedEvents()) {
+          collector.recordRuntime(event);
+          yield event;
+        }
+      }
+
       // Shift+Tab persists a planning_empty placeholder before the user has
       // supplied a goal. Close that placeholder explicitly so the real Task
       // retains the submitted prompt as its durable userGoal.
@@ -402,17 +401,15 @@ export async function* runRuntimeAgent(
         content: input.task,
         ...(input.userGoal ? { userGoal: input.userGoal } : {}),
       };
-      kernel.processEvent(initial);
-      collector.recordRuntime(initial);
-      yield initial;
-
       const turnStarted: RuntimeEvent = {
         type: 'turn.started',
         turnId: crypto.randomUUID(),
       };
-      kernel.processEvent(turnStarted);
-      collector.recordRuntime(turnStarted);
-      yield turnStarted;
+      const acceptedTurnEvents = kernel.processEventBatch([initial, turnStarted]);
+      for (const event of acceptedTurnEvents) {
+        collector.recordRuntime(event);
+        yield event;
+      }
 
       if (input.initialSkillActivations && input.initialSkillActivations.length > 0) {
         const catalog = input.skillOptions
@@ -453,6 +450,21 @@ export async function* runRuntimeAgent(
           }
         }
       }
+    }
+
+    // Provider admission gates model execution, but it must not hide stale
+    // Tool ownership from the successor-turn recovery above. Creating this
+    // session-owned interaction only after the user turn is durably accepted
+    // also prevents an admission prompt from swallowing that user message.
+    const admissionEvents = requiredProviderAdmissionEvents(
+      kernel.getState(),
+      input.mcpManager,
+      getFeatureFlags(input.config).mcpProviderActionV1,
+    );
+    for (const event of admissionEvents) {
+      kernel.processEvent(event);
+      collector.recordRuntime(event);
+      yield event;
     }
 
     const executor = createRuntimeEffectExecutor({

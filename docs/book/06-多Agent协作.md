@@ -11,7 +11,7 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
 | `code` | 实现明确任务 | 完整工具集，但仍受 Runtime policy |
 | `review` | 独立检查结果 | 只读工具 |
 
-角色配置位于 `src/core/subagent/roles.ts`。允许的工具集合是能力上限，不是授权授予。
+角色配置位于 `src/core/subagent/roles.ts`。所有内置角色的默认执行超时统一为 30 分钟；允许的工具集合是能力上限，不是授权授予。
 
 ## 6.2 运行结构
 
@@ -25,7 +25,7 @@ Subagent 是能够在隔离上下文中完成部分任务的 Capability。主 Ag
   → 返回结构化结果或 continuation
 ```
 
-Subagent 默认不读取主 Agent 的完整消息历史，只接收任务、角色 prompt、必要上下文和 Runtime 签发的有限能力。
+Subagent 默认不读取主 Agent 的完整消息历史，只接收任务、角色 prompt、必要上下文和 Runtime 签发的有限能力。主 Agent 必须在派发前澄清重要歧义并传入自包含任务；child 的所有角色都不暴露 `ask_user`。信息仍不足时，child 只能把缺失前提返回 parent，不得中途打开用户交互。
 
 模型可以为有界、自包含、独立且值得额外模型调用的工作自主选择委派；用户明确要求不委派时必须遵守。Runtime 不解析 `userGoal` 作为委派或 role 授权协议，也不按语言、单词数或语义短语判断 delegated task；硬校验只保留 schema 的 `8..8000` 字符边界，自包含性由模型可见契约约束。App 附加的 project/shell context、文件内容或工具结果不能提升 child 的 authorization、phase、预算或能力 ceiling。Planning 只允许 explore 和 architecture/design 规划的 plan role，
 code 保持禁止。plan child 返回后先 `write_plan:save`，再 `write_plan:submit`，不使用

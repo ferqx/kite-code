@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { resolveContextProjectionEnvironment } from '@/core/controllers/model-controller';
+import type { SupportedChatModel } from '@/core/model/factory';
 import { eventsForRunCancellation } from '@/core/runtime/actions';
 import { runRuntimeAgent } from '@/core/runtime/agent';
 import type { RuntimeEvent } from '@/core/runtime/events';
@@ -128,7 +129,7 @@ describe('bounded Runtime cancellation', () => {
             userId: 'test',
             workspace,
             runtimeStorePath: storePath,
-            model: model as any,
+            model: model as unknown as SupportedChatModel,
             config,
             onKernelControl: (control) => {
               kernelControl.current = control;
@@ -179,7 +180,7 @@ describe('bounded Runtime cancellation', () => {
           userId: 'test',
           workspace,
           runtimeStorePath: storePath,
-          model: model as any,
+          model: model as unknown as import('@/core/model/factory').SupportedChatModel,
           config,
         },
         { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
@@ -195,6 +196,228 @@ describe('bounded Runtime cancellation', () => {
         expect.objectContaining({ type: 'model.responded', text: '继续测试已完成。' }),
       );
       expect(secondEvents.at(-1)?.type).toBe('turn.completed');
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('settles a persisted orphan task call before accepting the next user turn', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-orphan-successor-'));
+    const storePath = join(workspace, 'runtime.db');
+    const threadId = 'orphan-successor';
+    const config = {
+      providerName: 'test',
+      providerType: 'openai-compatible' as const,
+      apiKey: 'test',
+      baseURL: 'http://localhost:1',
+      modelName: 'test',
+      sandbox: { enabled: false },
+    };
+
+    try {
+      const stale = createAgentKernel({
+        threadId,
+        userId: 'test',
+        workspace,
+        storePath,
+        interactionMode: 'accept_edits',
+      });
+      stale.processEventBatch([
+        { type: 'user.message_appended', messageId: 'user-old', content: '旧任务' },
+        { type: 'turn.started', turnId: 'turn-old' },
+        {
+          type: 'model.responded',
+          messageId: 'model-old',
+          toolCalls: [
+            { id: 'task-orphan', name: 'task', args: { subagent_type: 'review', task: 'review' } },
+          ],
+        },
+        {
+          type: 'tool.queued',
+          toolCallId: 'task-orphan',
+          modelMessageId: 'model-old',
+          ordinal: 0,
+          name: 'task',
+          args: { subagent_type: 'review', task: 'review' },
+        },
+        { type: 'tool.started', toolCallId: 'task-orphan' },
+        {
+          type: 'turn.aborted',
+          turnId: 'turn-old',
+          reason: 'Legacy run ended without settling its child.',
+          cause: 'error',
+        },
+      ]);
+      stale.close();
+
+      const model = createMockModel([{ message: aiMessage({ content: '新消息已正常完成。' }) }]);
+      const events: RuntimeEvent[] = [];
+      for await (const event of runRuntimeAgent(
+        {
+          task: '继续发送消息',
+          threadId,
+          userId: 'test',
+          workspace,
+          runtimeStorePath: storePath,
+          model: model as unknown as import('@/core/model/factory').SupportedChatModel,
+          config,
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      )) {
+        events.push(event);
+      }
+
+      const cancellationIndex = events.findIndex(
+        (event) => event.type === 'tool.cancelled' && event.toolCallId === 'task-orphan',
+      );
+      const userMessageIndex = events.findIndex(
+        (event) => event.type === 'user.message_appended' && event.content === '继续发送消息',
+      );
+      expect(cancellationIndex).toBeGreaterThanOrEqual(0);
+      expect(userMessageIndex).toBeGreaterThan(cancellationIndex);
+      expect(events.some((event) => event.type === 'completion.blocked')).toBe(false);
+      expect(events.at(-1)?.type).toBe('turn.completed');
+
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'test',
+        workspace,
+        storePath,
+        interactionMode: 'accept_edits',
+      });
+      expect(restored.getState().tools.calls['task-orphan']?.status).toBe('cancelled');
+      expect(restored.getState().turn.status).toBe('completed');
+      restored.close();
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
+  test('recovers cross-Task control residue before a successor message', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'kite-runtime-cross-task-successor-'));
+    const storePath = join(workspace, 'runtime.db');
+    const threadId = 'cross-task-successor';
+    const state = createInitialRuntimeState({ threadId, userId: 'test', workspace });
+    state.activeTaskId = 'current-task';
+    state.tasks = {
+      'older-task': {
+        taskId: 'older-task',
+        userGoal: 'old',
+        status: 'cancelled',
+        startedAtTurnId: 'older-turn',
+        sideEffectsStarted: false,
+        planning: { kind: 'building_without_plan' },
+        planHistory: [],
+      },
+      'current-task': {
+        taskId: 'current-task',
+        userGoal: 'current',
+        status: 'active',
+        startedAtTurnId: state.turn.turnId,
+        sideEffectsStarted: false,
+        planning: { kind: 'building_without_plan' },
+        planHistory: [],
+      },
+    };
+    state.tools.calls.old = {
+      toolCallId: 'old',
+      taskId: 'older-task',
+      modelMessageId: 'older-model',
+      name: 'task',
+      args: {},
+      status: 'awaiting_approval',
+      createdAtTurnId: 'older-turn',
+    };
+    state.transcript.messages.push({
+      kind: 'assistant',
+      messageId: 'older-model',
+      turnId: 'older-turn',
+      toolCalls: [{ id: 'old', name: 'task', args: {} }],
+    });
+    state.tools.queue.push('old');
+    state.suspendedSubagents.old = { toolRecovery: state.toolRecovery } as never;
+    state.legacyUnrecoverableSubagentApproval = {
+      toolCallId: 'old',
+      subagentId: 'old-child',
+      reason: 'legacy',
+    };
+    state.interactions = {
+      kind: 'awaiting_tool_approval',
+      interactionId: 'old-interaction',
+      toolCallId: 'old',
+      approval: {} as never,
+    };
+    state.skills.frames.old = {
+      activationId: 'old',
+      skillId: 'old-skill',
+      skillRevision: '1',
+      taskId: 'older-task',
+      input: {},
+      contextMode: 'inline',
+      agent: 'main',
+      capabilityCeiling: [],
+      verificationMode: 'not_required',
+      requestedBy: 'user',
+      activatedAt: '2026-08-14T00:00:00.000Z',
+      status: 'active',
+    };
+    state.terminalOutcome = {
+      version: 1,
+      status: 'unknown',
+      reasonCode: 'cancel_incomplete',
+      knownExternalEffects: 'unknown',
+      safeRetry: false,
+      recoveryEntry: 'reconcile',
+      pendingVerification: false,
+    };
+    const store = createRuntimeStore(storePath);
+    store.saveSnapshot(threadId, state);
+    store.close();
+    const model = createMockModel([{ message: aiMessage({ content: 'successor completed' }) }]);
+    const config = {
+      providerName: 'test',
+      providerType: 'openai-compatible' as const,
+      apiKey: 'test',
+      baseURL: 'http://localhost:1',
+      modelName: 'test',
+      sandbox: { enabled: false },
+    };
+
+    try {
+      const events: RuntimeEvent[] = [];
+      for await (const event of runRuntimeAgent(
+        {
+          task: 'successor message',
+          threadId,
+          userId: 'test',
+          workspace,
+          runtimeStorePath: storePath,
+          model: model as unknown as import('@/core/model/factory').SupportedChatModel,
+          config,
+        },
+        { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+      )) {
+        events.push(event);
+      }
+
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'tool.cancelled', toolCallId: 'old' }),
+      );
+      expect(events.some((event) => event.type === 'completion.blocked')).toBe(false);
+      expect(events.filter((event) => event.type === 'run.error')).toEqual([]);
+      expect(events.at(-1)?.type).toBe('turn.completed');
+      const restored = createAgentKernel({
+        threadId,
+        userId: 'test',
+        workspace,
+        storePath,
+      });
+      expect(restored.getState()).toMatchObject({
+        interactions: { kind: 'idle' },
+        tools: { calls: { old: { status: 'cancelled' } } },
+        terminalOutcome: { status: 'completed' },
+      });
+      restored.close();
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }

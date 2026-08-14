@@ -56,6 +56,130 @@ function legacyExecutingPlanState(): RuntimeState {
 }
 
 describe('decideNextEffect', () => {
+  test('rejects a Tool interaction whose owner belongs to an older Task', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'stale-interaction-owner',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    state.activeTaskId = 'current-task';
+    state.tasks = {
+      'current-task': {
+        taskId: 'current-task',
+        userGoal: 'continue',
+        status: 'active',
+        startedAtTurnId: state.turn.turnId,
+        sideEffectsStarted: false,
+        planning: { kind: 'building_without_plan' },
+        planHistory: [],
+      },
+    };
+    state.tools.calls.old = {
+      toolCallId: 'old',
+      taskId: 'older-task',
+      modelMessageId: 'older-model',
+      name: 'shell_execute',
+      args: {},
+      status: 'awaiting_approval',
+      createdAtTurnId: 'older-turn',
+    };
+    state.interactions = {
+      kind: 'awaiting_tool_approval',
+      interactionId: 'old-interaction',
+      toolCallId: 'old',
+      approval: {} as never,
+    };
+
+    expect(decideNextEffect(state)).toMatchObject({
+      type: 'recovery_blocked',
+      failureKind: 'persistence_unavailable',
+    });
+  });
+
+  test('ignores Skill, suspended child, and legacy marker owned by an older Task', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'old-task-control-state',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    state.activeTaskId = 'current-task';
+    state.tasks = {
+      'current-task': {
+        taskId: 'current-task',
+        userGoal: 'finish',
+        status: 'active',
+        startedAtTurnId: state.turn.turnId,
+        sideEffectsStarted: false,
+        planning: { kind: 'building_without_plan' },
+        planHistory: [],
+      },
+    };
+    state.tools.calls.old = {
+      toolCallId: 'old',
+      taskId: 'older-task',
+      modelMessageId: 'older-model',
+      name: 'task',
+      args: {},
+      status: 'awaiting_approval',
+      createdAtTurnId: 'older-turn',
+    };
+    state.suspendedSubagents.old = {} as never;
+    state.legacyUnrecoverableSubagentApproval = {
+      toolCallId: 'old',
+      subagentId: 'old-child',
+      reason: 'legacy',
+    };
+    state.skills.frames.old = {
+      activationId: 'old',
+      skillId: 'old-skill',
+      skillRevision: '1',
+      taskId: 'older-task',
+      input: {},
+      contextMode: 'inline',
+      agent: 'main',
+      capabilityCeiling: [],
+      verificationMode: 'not_required',
+      requestedBy: 'user',
+      activatedAt: '2026-08-14T00:00:00.000Z',
+      status: 'active',
+    };
+    state.transcript.final = 'done';
+
+    expect(decideNextEffect(state)).toEqual({ type: 'emit_final' });
+  });
+
+  test('ignores orphaned or terminal legacy subagent recovery residue', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'terminal-subagent-residue',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    state.tools.calls.terminal = {
+      toolCallId: 'terminal',
+      modelMessageId: 'terminal-model',
+      name: 'task',
+      args: {},
+      status: 'cancelled',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.suspendedSubagents.terminal = {} as never;
+    state.legacyUnrecoverableSubagentApproval = {
+      toolCallId: 'terminal',
+      subagentId: 'terminal-child',
+      reason: 'already terminal',
+    };
+    state.transcript.final = 'done';
+
+    expect(decideNextEffect(state)).toEqual({ type: 'emit_final' });
+
+    state.legacyUnrecoverableSubagentApproval = {
+      toolCallId: 'missing',
+      subagentId: 'missing-child',
+      reason: 'parent missing',
+    };
+    expect(decideNextEffect(state)).toEqual({ type: 'emit_final' });
+  });
+
   test('returns an invalid task call to the normal model loop without forcing a task retry', () => {
     let state = createInitialRuntimeState({
       threadId: 'task-error-normal-loop',
@@ -246,6 +370,14 @@ describe('decideNextEffect', () => {
 
   test('preserves canonical subagent recovery ahead of legacy plan recovery', () => {
     const state = legacyExecutingPlanState();
+    state.tools.calls['legacy-task'] = {
+      toolCallId: 'legacy-task',
+      modelMessageId: 'legacy-model',
+      name: 'task',
+      args: {},
+      status: 'awaiting_approval',
+      createdAtTurnId: state.turn.turnId,
+    };
     state.legacyUnrecoverableSubagentApproval = {
       toolCallId: 'legacy-task',
       subagentId: 'legacy-subagent',
@@ -367,6 +499,28 @@ describe('decideNextEffect', () => {
     for (const scenario of scenarios) {
       const state = legacyExecutingPlanState();
       state.interactions = scenario.interaction;
+      if (
+        scenario.interaction.kind !== 'idle' &&
+        scenario.interaction.kind !== 'awaiting_provider_action' &&
+        scenario.interaction.kind !== 'awaiting_provider_admission'
+      ) {
+        const status =
+          scenario.interaction.kind === 'awaiting_user_input'
+            ? 'awaiting_user_input'
+            : scenario.interaction.kind === 'awaiting_review'
+              ? 'awaiting_review'
+              : scenario.interaction.kind === 'awaiting_tool_approval'
+                ? 'awaiting_approval'
+                : 'awaiting_auto_review';
+        state.tools.calls[scenario.interaction.toolCallId] = {
+          toolCallId: scenario.interaction.toolCallId,
+          modelMessageId: 'interaction-model',
+          name: scenario.interaction.kind === 'awaiting_review' ? 'write_plan' : 'shell_execute',
+          args: {},
+          status,
+          createdAtTurnId: state.turn.turnId,
+        };
+      }
       const effect = decideNextEffect(state);
       expect(effect).toEqual(scenario.expected);
       expect(guardLegacyPlanContinuationEffect(state, effect, decideNextEffect(state))).toEqual(
@@ -788,6 +942,74 @@ describe('decideNextEffect', () => {
     };
     // Queue is empty — approval.granted cleared interaction, but tool stayed in active
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-tool'] });
+  });
+
+  test('skips historical queued calls that completion also excludes from current work', () => {
+    let state = createInitialRuntimeState({
+      threadId: 'historical-tool-scope',
+      userId: 'u',
+      workspace: '/',
+    });
+    state = reduceRuntimeState(state, {
+      type: 'task.started',
+      taskId: 'current-task',
+      userGoal: 'Continue current work.',
+      turnId: state.turn.turnId,
+    });
+    state.tools.queue.push('older-task-tool', 'legacy-older-turn', 'current-tool');
+    state.tools.calls['older-task-tool'] = {
+      toolCallId: 'older-task-tool',
+      taskId: 'older-task',
+      modelMessageId: 'older-model',
+      name: 'read_file',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: 'older-turn',
+    };
+    state.tools.calls['legacy-older-turn'] = {
+      toolCallId: 'legacy-older-turn',
+      modelMessageId: 'legacy-model',
+      name: 'read_file',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: 'older-turn',
+    };
+    state.tools.calls['current-tool'] = {
+      toolCallId: 'current-tool',
+      taskId: 'current-task',
+      modelMessageId: 'current-model',
+      name: 'write_file',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['current-tool'],
+    });
+  });
+
+  test('fails closed immediately for a current interaction-owned tool with no interaction', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'stranded-interaction-tool',
+      userId: 'u',
+      workspace: '/',
+    });
+    state.tools.calls.stranded = {
+      toolCallId: 'stranded',
+      modelMessageId: 'model',
+      name: 'write_plan',
+      args: {},
+      status: 'awaiting_review',
+      createdAtTurnId: state.turn.turnId,
+    };
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'recovery_blocked',
+      reason: expect.stringContaining('without its owning interaction'),
+      failureKind: 'persistence_unavailable',
+    });
   });
 
   test('prefers queued tools over active tools', () => {

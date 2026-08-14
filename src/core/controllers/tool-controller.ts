@@ -72,6 +72,7 @@ import {
   toolFailureInstanceIdV1,
   toolInvocationFingerprintV1,
 } from '@/core/runtime/tool-recovery-journal';
+import { activeSkillFramesForCurrentWork } from '@/core/runtime/work-scope';
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
@@ -480,8 +481,8 @@ async function handleSubAgentResume(params: {
     subagentEventSink: params.emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
-    activeSkillFrames: Object.values(state.skills.frames).filter(
-      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    activeSkillFrames: activeSkillFramesForCurrentWork(state).filter(
+      (frame) => frame.contextMode === 'inline',
     ),
     phase: getAgentPhase(getActivePlanning(state)),
   });
@@ -849,8 +850,8 @@ export async function executeRuntimeTools(params: {
     subagentEventSink: emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
-    activeSkillFrames: Object.values(params.state.skills.frames).filter(
-      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    activeSkillFrames: activeSkillFramesForCurrentWork(params.state).filter(
+      (frame) => frame.contextMode === 'inline',
     ),
     phase: getAgentPhase(getActivePlanning(params.state)),
   });
@@ -1299,6 +1300,24 @@ export async function executeRuntimeTools(params: {
       continue;
     }
     if (request.name === 'ask_user') {
+      const effectiveMode = getEffectiveInteractionMode(params.state);
+      const modeDecision = createModePolicy(effectiveMode).shouldAskUser({
+        interactionMode: effectiveMode as InteractionMode,
+        phase: getAgentPhase(getActivePlanning(params.state)),
+        planKind: getActivePlanning(params.state).kind,
+        toolName: 'ask_user',
+      });
+      if (modeDecision.kind === 'deny') {
+        const reason =
+          modeDecision.reason ?? 'The current interaction mode does not allow asking the user.';
+        events.push({
+          type: 'tool.rejected',
+          toolCallId,
+          reason,
+          failure: classifyFailure('policy_denied', reason),
+        });
+        continue;
+      }
       // 中断契约在 spec 闭环：事件载荷经 askUserSpec.createInterrupt 生成
       // （规范模型输入 → 内部 UserInputRequest），Controller 不再二次校验或
       // 手工组装中断内容。
@@ -1579,27 +1598,39 @@ export async function executeRuntimeTools(params: {
       // execute the blocked tool with the approved grant and resume.
       const suspended = params.state.suspendedSubagents[toolCallId];
       if (suspended && call.status === 'approved') {
-        const restored = deserializeSubagentContinuation(suspended);
-        const resumeEvents = await handleSubAgentResume({
-          state: params.state,
-          getRuntimeState: params.getRuntimeState,
-          toolCallId,
-          continuation: restored,
-          shellExecutor: params.shellExecutor,
-          gitBroker: params.gitBroker,
-          mcpManager: params.mcpManager,
-          skillManifests: params.skillManifests,
-          skillOptions: params.skillOptions,
-          signal: params.signal,
-          taskConfig: params.taskConfig,
-          taskModel: params.taskModel,
-          providerDataAdmission: params.providerDataAdmission,
-          descendantResourceAdmission: params.descendantResourceAdmission,
-          emitSubagentEvent,
-          recordFilePreimage: params.recordFilePreimage,
-          recordNetworkDecision: params.recordNetworkDecision,
-        });
-        events.push(...resumeEvents);
+        try {
+          const restored = deserializeSubagentContinuation(suspended);
+          const resumeEvents = await handleSubAgentResume({
+            state: params.state,
+            getRuntimeState: params.getRuntimeState,
+            toolCallId,
+            continuation: restored,
+            shellExecutor: params.shellExecutor,
+            gitBroker: params.gitBroker,
+            mcpManager: params.mcpManager,
+            skillManifests: params.skillManifests,
+            skillOptions: params.skillOptions,
+            signal: params.signal,
+            taskConfig: params.taskConfig,
+            taskModel: params.taskModel,
+            providerDataAdmission: params.providerDataAdmission,
+            descendantResourceAdmission: params.descendantResourceAdmission,
+            emitSubagentEvent,
+            recordFilePreimage: params.recordFilePreimage,
+            recordNetworkDecision: params.recordNetworkDecision,
+          });
+          events.push(...resumeEvents);
+        } catch (error) {
+          if (error instanceof DescendantResourceAdmissionError) throw error;
+          events.push({
+            type: 'tool.failed',
+            toolCallId,
+            failure: classifyFailure(
+              'tool_runtime_error',
+              error instanceof Error ? error.message : String(error),
+            ),
+          });
+        }
         continue;
       }
       if (suspended && call.status === 'queued') {

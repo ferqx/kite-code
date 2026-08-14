@@ -169,7 +169,7 @@ function externalEffectsFor(
 ): ToolExternalEffectsV1 {
   if (dispatchState === 'not_started' || event.type === 'tool.rejected') return 'none';
   if (event.type === 'tool.cancelled' || event.type === 'tool.failed') {
-    return call?.status === 'running' ? 'unknown' : 'none';
+    return dispatchState === 'started' ? 'unknown' : 'none';
   }
   if (!call?.sideEffect) return 'none';
   if (event.result.resultMeta?.processCleanupConfirmed === false) return 'unknown';
@@ -213,10 +213,18 @@ function normalizeToolTerminalEventV1(
   const createdAt = event.createdAt ?? occurredAt;
   const failure = failureFor(event);
   const status = statusFor(event);
+  // Approval temporarily changes a suspended task from running to approved,
+  // but the parent task was already dispatched before its child requested
+  // approval. Preserve that durable lifecycle fact when the continuation
+  // settles instead of misclassifying the resumed work as pre-dispatch.
+  const previouslyStarted =
+    call?.startedAt != null || state.tools.active.includes(event.toolCallId);
   const dispatchState =
-    event.type === 'tool.rejected' || call?.status === 'queued' || call?.status === 'approved'
+    event.type === 'tool.rejected' ||
+    call?.status === 'queued' ||
+    (call?.status === 'approved' && !previouslyStarted)
       ? 'not_started'
-      : call?.status === 'running'
+      : call?.status === 'running' || previouslyStarted
         ? 'started'
         : 'unknown';
   const externalEffects = externalEffectsFor(event, call, dispatchState);

@@ -66,7 +66,8 @@ src/core/runtime/
 ├── effects.ts     下一步准备执行的动作
 ├── completion-guard.ts  CompletionGuard V1/V2 的纯 completion decision 与版本路由
 ├── plan-continuation.ts  历史 V1 executing 的只读/replan continuation 门禁
-├── scheduler.ts   State → Effect 的确定性决策；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；V1 executing 只放行 read_plan/write_plan V2 replan；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop
+├── scheduler.ts   State → Effect 的确定性决策；与 CompletionGuard 共用当前 Task/turn 工作作用域；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；V1 executing 只放行 read_plan/write_plan V2 replan；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop；当前 interaction owner 丢失时 fail closed 为 persistence recovery block
+├── work-scope.ts  当前工作归属的唯一判定；Tool-backed Interaction、Suspended Subagent、Skill 与 legacy recovery marker 均沿 Task/父 Tool 收敛；Provider recovery 保持 session-owned
 ├── reducer.ts     State × Event → State；approval.rejected 和 tool.rejected 均写入 transcript ToolMessage
 ├── executor.ts    Effect 执行适配
 ├── runner.ts      驱动 Kernel
@@ -188,6 +189,10 @@ schema v23/current snapshot 或当前 Subagent continuation 缺少 recovery jour
 restore 必须 quality-blocked；只有 pre-v23 migration 可以初始化空 journal。当前 auto-review 风险判定
 使用 `escalatedToUser` 保持非终态并转人工审批；只有历史 auto-review rejection 在 replay 和下一次 model
 projection 中追加一个与原 AI tool call 配对的 ToolMessage。
+`auto_review.requested` 同时对当前真实请求（包括 suspended child 的 blocked tool）记录有界
+doom-loop 指纹。同一请求在 60 秒窗口达到可配置阈值时，Executor 把计数作为低基数
+reviewer context 传入，使原有自动审查/人工升级路由保守处理；它不取代 Recovery Journal 的
+`no_progress/loop_exhausted` 硬阻断。
 损坏 journal 使用 `journal_invalid/persistence_unavailable`，普通 no-progress ceiling 使用
 `no_progress/loop_exhausted`；二者由同一 terminal outcome 驱动 Session、metrics 与 TUI。
 task 子 Agent 的完整 result 只在 Controller 私有侧用于 journal merge，模型面只接收显式 public DTO，
@@ -385,8 +390,14 @@ Executor 为实际并发派发的 sibling 写入同一个 Runtime-owned `concurr
 Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`CapabilityInvocationRecord` 保存调用身份、状态、参数摘要、观察到的副作用、外部引用、artifact、重试安全性和 reconciliation 结果。
 
 工具被策略拒绝（`tool.rejected`）或被用户拒绝（`approval.rejected`）时，reducer 同时写入 `ToolCallRecord`（status: `rejected`，含 failure classification）和 transcript ToolMessage（`ok: false, rejected: true`），保证恢复与后续轮次能看到拒绝结果。用户显式拒绝或取消任一工具审批时，action batch 同时把其余未终结调用收敛为 cancelled 并写入 `turn.aborted(cause=user)`；Runner 立即退出，Agent abort 本轮执行信号。只要最近一条带工具调用的 assistant 消息中存在 `failure.kind=approval_rejected` 且其后无新用户消息，scheduler 就返回 `stop`，从而在恢复路径上同样不能继续旧 turn。策略拒绝（`policy_denied`）及其他自动失败继续 `call_model`，允许模型看到拒绝信息后调整策略。若拒绝后已有新用户消息到来（新轮次），scheduler 正常返回 `call_model`，由模型处理该新消息。
+任一 `tool.started` 或工具终态事件在 call 已是 `succeeded/failed/rejected/cancelled/exhausted`
+时都是 reducer no-op；迟到、重放或跨终态事件不能复活 call、改写 outcome 或再追加
+transcript ToolMessage。
 
-`ask_user` 的用户拒答属于输入取消，不属于上述 authorization rejection。Runtime 将它收敛为 `tool.finished(ok=false, stdout=Cancelled)`，不产生 `turn.aborted`；Scheduler 随即再次 `call_model`，使模型在同一 turn 内继续。
+`ask_user` 在 `full` interaction mode 中同样允许创建用户输入 interrupt，尤其用于 Planning
+阶段澄清约束；Full mode 只改变工具授权与自动执行策略，不等于禁止必要的人机澄清。
+用户拒答属于输入取消，不属于上述 authorization rejection。Runtime 将它收敛为 `tool.finished(ok=false, stdout=Cancelled)`，
+不产生 `turn.aborted`；Scheduler 随即再次 `call_model`，使模型在同一 turn 内继续。
 
 `request_plan_review` 是方案执行授权屏障，不是普通输入。用户取消或按 Esc 时，Runtime 保留方案 draft，同时写入 `plan.review_cancelled`、方案工具及其余未终结 sibling 的 `tool.cancelled`、`turn.aborted(cause=user)`；Runner 立即退出，Agent abort 本轮执行信号，不得再调用模型或进入方案执行。
 

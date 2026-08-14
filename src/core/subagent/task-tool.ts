@@ -3,7 +3,7 @@ import type { McpRuntimeProvider } from '@/core/mcp';
 import type { SupportedChatModel } from '@/core/model/factory';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
 import type { ShellExecutor } from '@/core/tools/shell';
-import { getRoleConfig } from './roles';
+import { DEFAULT_SUBAGENT_TIMEOUT_MS, getRoleConfig } from './roles';
 import { runSubAgent } from './runner';
 import type { SubAgentEventSink, SubAgentResult } from './types';
 
@@ -84,7 +84,7 @@ export async function runTaskSubAgent(
       projectInstructions: deps.projectInstructions,
       threadId: deps.threadId,
       recoveryIdentityKey: deps.recoveryIdentityKey,
-      timeoutMs: 30 * 60 * 1000,
+      timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
       signal: deps.signal ?? new AbortController().signal,
       eventSink: deps.eventSink,
       model: deps.model,

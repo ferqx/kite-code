@@ -6,6 +6,13 @@
 
 Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and historical auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
 
+CompletionGuard blocker 是结构化控制状态，不是 `ClassifiedFailure`。Runner 不得仅因为模型 final 被
+`planning_empty/plan_draft_pending/interaction_pending/...` 拒绝，就用业务文案构造
+`classifyFailure('unknown', ...)`；`unknown` 只保留给确实无法分类且需要 reconciliation 的故障边界。已有 review
+feedback 的 `plan_draft_pending` 可以持久化 `completion.blocked + turn.completed`，只结束当前 turn 并保留 active
+Task/Plan；不得生成 `run.error`、`run.completed` 或 `task.completed`。没有 review feedback 的新 draft 仍有一次
+bounded model correction，纠错后继续保留 draft 也不得误报完成。
+
 `ClassifiedFailure` also carries an optional `parseFailureCode` (from `ParseFailureCode` in `src/core/tools/registry/registry.ts`), propagated through `InvalidToolRequest` when the Registry rejects a tool call. This preserves the structured origin (`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`) and drives the canonical family mapping: malformed JSON/arguments are `tool_invalid_args`, while unknown/unavailable Registry capabilities are `tool_not_found`. Controller、Subagent 与 persisted ToolOutcome 必须使用该映射，不能把 `tool_unavailable` 降成 model-fixable argument correction。
 
 New `tool.failed` producers must emit `failure: classifyFailure(...)`. The legacy `error` field remains accepted only so existing persisted v3 events can replay; reducers and trace logging prefer the structured value.
@@ -23,6 +30,11 @@ The separate historical replay decoder maps pre-v23 terminal events without the 
 ToolSpec advice 的 detail code 即使属于全局闭集，也必须属于当前 `FailureKind` 的 exhaustive
 允许集合；跨 kind advice 是 `classifier_conflict + unknown/never`，且当次 canonical envelope 本身
 必须通过严格 validator，不能先写入非法 current event 再靠历史 replay 降级。
+Subagent 暂停期间，父 `task` 的当前状态会从 `running` 转为 `awaiting_approval`，授权后再转为
+`approved`；这不能覆盖它已经 dispatch 的历史事实。恢复终态必须依据持久化的 `startedAt`
+或 active ownership 归类为 `dispatchState=started`。恢复中已 dispatch 的 child tool 或后续适配器异常
+必须将父 `task` 收敛为 `tool.failed + externalEffects=unknown + recovery=never`，不得保留
+`approved` continuation 供下一 turn 盲重放。
 Envelope restore 使用 exact-key 与语义矩阵校验：replay safety 必须与 dispatch/effect certainty
 相容，`success/cancelled/timed_out/exhausted/unknown` 不得携带可重试 recovery，diagnostic、timing
 和 unknown-field count 也必须内部一致。未知字段或矛盾组合按损坏历史 fail closed 为
@@ -44,6 +56,11 @@ Recovery journal 的质量阻断也保留闭集 cause：普通重复失败达到
 把它改写成 `no_progress` 或 unblocked；其 task/turn 字段只记录损坏来源，scheduler 与 admission 不得按
 当前 scope 过滤，因此 task close、新 task 或下一 turn 仍以 `persistence_unavailable` 全局阻断且零 dispatch。
 只有显式新 session/受治理恢复边界可以离开该状态。普通 `no_progress` 仍只约束原 task/turn scope。
+自动审查还维护一个 60 秒窗口的稳定治理指纹计数：Shell 使用 command/cwd、写工具使用 path，
+其他工具使用规范化完整参数。`auto_review.requested` 先由
+reducer 持久化 observation，`doomLoopRepeatThreshold` 命中后把低基数 `doomLoopDetected/count`
+注入 reviewer 上下文。该信号只能使审查更保守，不能绕过现有 Policy、人工升级或 Recovery
+Journal 的硬上限。
 普通 `no_progress` 的重复判定按同一 `recoveryOf` root、同一工具、同 task/turn 与 progress revision
 计数；同链参数变化继续累计，没有共同 recovery root 的独立同名调用只增加有界 observation，不以跨失败
 总数触发 hard block。单次 failure 的真实修正额度仍为一；额度外提案零 dispatch、写入同一 lineage，直到

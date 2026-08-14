@@ -641,6 +641,82 @@ describe('executeRuntimeTools', () => {
     }
   });
 
+  test('terminalizes a suspended task when its approved child tool throws during resume', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'subagent-resume-tool-throws',
+      userId: 'user',
+      workspace: process.cwd(),
+    });
+    state.tools.calls.task = {
+      toolCallId: 'task',
+      modelMessageId: 'model',
+      name: 'task',
+      args: { subagent_type: 'code', task: 'Run the approved command and finish.' },
+      status: 'approved',
+      approvalGrant: 'approve_once',
+      sideEffect: true,
+      startedAt: '2026-08-14T00:00:00.000Z',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.active.push('task');
+    state.suspendedSubagents.task = serializeSubagentContinuation(
+      {
+        id: 'child',
+        role: getRoleConfig('code'),
+        task: 'Run the approved command and finish.',
+        messages: [],
+        toolCallCount: 1,
+        steps: [],
+        toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+      },
+      {
+        toolCallId: 'child-shell',
+        toolName: 'shell_execute',
+        args: { command: 'fixture-command' },
+        command: 'fixture-command',
+      },
+    );
+
+    let dispatches = 0;
+    const events = await executeRuntimeTools({
+      state,
+      toolCallIds: ['task'],
+      taskConfig: {
+        apiKey: 'unused',
+        baseURL: 'https://example.invalid',
+        modelName: 'fixture',
+        providerName: 'fixture',
+        providerType: 'openai-compatible',
+        sandbox: { enabled: false },
+      },
+      taskModel: createMockModel([]),
+      subagentEventSink: () => {},
+      shellExecutor: async ({ command }) => {
+        dispatches += 1;
+        return { ok: true, command, exitCode: 0, stdout: '', stderr: '' };
+      },
+      descendantResourceAdmission: {
+        reserveTool: async () => ({ reservationId: 'child-tool' }),
+        reconcileTool: async () => {
+          throw new Error('fixture reconciliation failed after dispatch');
+        },
+        reserveModel: async () => ({ reservationId: 'child-model', maxOutputTokens: 64 }),
+        reconcileModel: async () => {},
+        markUnknown: async () => {},
+        markLocalProviderAdmissionDenied: async () => {},
+      },
+    });
+
+    expect(dispatches).toBe(1);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: 'tool.failed',
+        toolCallId: 'task',
+        failure: expect.objectContaining({ kind: 'tool_runtime_error' }),
+      }),
+    );
+  });
+
   test('does not dispatch an approved child continuation after its live recovery identity changes', async () => {
     const state = createInitialRuntimeState({
       threadId: 'stale-subagent-resume-identity',
@@ -1127,6 +1203,41 @@ describe('executeRuntimeTools', () => {
         },
       ],
     });
+  });
+
+  test('full mode allows ask_user to open a user-input interaction', async () => {
+    const state = createInitialRuntimeState({
+      threadId: 'runtime-full-mode-ask-user',
+      userId: 'user',
+      workspace: process.cwd(),
+      interactionMode: 'full',
+    });
+    state.tools.calls.ask = {
+      toolCallId: 'ask',
+      modelMessageId: 'model',
+      name: 'ask_user',
+      args: {
+        questions: [
+          {
+            question: 'Choose a path?',
+            options: [
+              { label: 'A', description: 'Choose A.', recommended: true },
+              { label: 'B', description: 'Choose B.', recommended: false },
+            ],
+          },
+        ],
+      },
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.tools.queue.push('ask');
+
+    const events = await executeRuntimeTools({ state, toolCallIds: ['ask'] });
+
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'user_input.requested', toolCallId: 'ask' }),
+    );
+    expect(events.some((event) => event.type === 'tool.rejected')).toBe(false);
   });
 
   test('controller routes the ask_user payload through askUserSpec.createInterrupt', () => {

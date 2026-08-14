@@ -86,9 +86,9 @@ describe('SubAgentRunner integration', () => {
   });
 
   test.each([
-    ['accept_edits', 'ask_user must be handled by the user_input interrupt node.'],
-    ['full', 'FULL_NO_USER_INTERACTION'],
-  ] as const)('normal launch applies inherited %s mode to child tools', async (interactionMode, expected) => {
+    'accept_edits',
+    'full',
+  ] as const)('never exposes ask_user to a child in inherited %s mode', async (interactionMode) => {
     const workspace = mkdtempSync(join(tmpdir(), `kite-subagent-mode-policy-${interactionMode}-`));
     const { events, sink } = mockEventSink();
     const model = new StreamingMockModel({
@@ -135,7 +135,9 @@ describe('SubAgentRunner integration', () => {
       const askResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'ask_user',
       );
-      expect(String(askResult?.data.summary)).toContain(expected);
+      expect(String(askResult?.data.summary)).toContain(
+        'Tool "ask_user" is not available to this sub-agent.',
+      );
     } finally {
       rmSync(workspace, { recursive: true, force: true });
     }
@@ -1253,7 +1255,7 @@ describe('SubAgentRunner integration', () => {
     }
   });
 
-  test('approval resume uses the parent Runtime live mode for subsequent child calls', async () => {
+  test('approval resume preserves the child ask_user ceiling under the parent live mode', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kite-code-subagent-live-mode-resume-'));
     try {
       const { events, sink } = mockEventSink();
@@ -1333,7 +1335,9 @@ describe('SubAgentRunner integration', () => {
       const askResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'ask_user',
       );
-      expect(String(askResult?.data.summary)).toContain('FULL_NO_USER_INTERACTION');
+      expect(String(askResult?.data.summary)).toContain(
+        'Tool "ask_user" is not available to this sub-agent.',
+      );
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }
@@ -1678,7 +1682,7 @@ describe('SubAgentRunner integration', () => {
     const result = await runSubAgent({
       config: { providerName: 'deepseek', modelName: 'test' } as unknown as AgentConfig,
       workspace: process.cwd(),
-      role: getRoleConfig('code'),
+      role: { ...getRoleConfig('code'), timeoutMs: 25 },
       task: 'wait for descendant admission',
       timeoutMs: 25,
       signal: new AbortController().signal,

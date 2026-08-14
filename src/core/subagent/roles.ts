@@ -71,6 +71,7 @@ const CODE_SYSTEM_PROMPT = [
   '- Follow existing code conventions: style, naming, error handling, library choices.',
   '- Do not add comments, TODOs, or documentation unless explicitly requested.',
   '- Do not modify public interfaces or fix unrelated issues.',
+  '- Do not ask the user questions. The parent agent must provide a self-contained task; report any missing prerequisite in your final result.',
   '',
   '## Tool usage',
   '',
@@ -145,25 +146,33 @@ const READ_ONLY_TOOLS = new Set([
 ]);
 const FULL_TOOLS: Set<string> | undefined = undefined; // undefined = all tools available
 
+/** All builtin subagent roles share the same default execution deadline. */
+export const DEFAULT_SUBAGENT_TIMEOUT_MS = 30 * 60 * 1000;
+
 const ROLE_CONFIGS: Record<SubAgentRole, SubAgentRoleConfig> = {
   explore: {
     role: 'explore',
     systemPrompt: EXPLORE_SYSTEM_PROMPT,
     allowedTools: READ_ONLY_TOOLS,
-    timeoutMs: 5 * 60 * 1000,
+    timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
   },
   plan: {
     role: 'plan',
     systemPrompt: PLAN_SYSTEM_PROMPT,
     allowedTools: READ_ONLY_TOOLS,
-    timeoutMs: 10 * 60 * 1000,
+    timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
   },
-  code: { role: 'code', systemPrompt: CODE_SYSTEM_PROMPT, allowedTools: FULL_TOOLS },
+  code: {
+    role: 'code',
+    systemPrompt: CODE_SYSTEM_PROMPT,
+    allowedTools: FULL_TOOLS,
+    timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
+  },
   review: {
     role: 'review',
     systemPrompt: REVIEW_SYSTEM_PROMPT,
     allowedTools: READ_ONLY_TOOLS,
-    timeoutMs: 5 * 60 * 1000,
+    timeoutMs: DEFAULT_SUBAGENT_TIMEOUT_MS,
   },
 };
 

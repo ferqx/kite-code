@@ -117,6 +117,12 @@ TUI 不把 `phase_deferred` 物化为 Bash 工具卡、失败提示或 deferred 
 
 `plan_review_decision` 是结构化 UserAction，包含 approve/revise/cancel。批准时明确选择下一 interaction mode；revise 必须携带反馈。Cancel 与 Esc 都表示撤销本次方案执行授权：Runtime 保留 draft，取消方案工具及所有未终结 sibling，写入 `turn.aborted(cause=user)` 并立即结束当前 turn，不再调用模型或进入执行阶段。TUI 继续展示已经持久化的 draft，但不添加本地 `Plan declined` 消息；取消终态完全由 Runtime events 投影，保证实时与 replay 一致。Ask-user 与 plan review 以 interaction/toolCall ID 精确关联，不能依赖展示文本匹配；`ask_user` 拒答仍是可继续当前 turn 的普通 Tool Result，不使用方案授权取消语义。
 
+`plan.review_requested` 将完整审核正文物化到对应 `write_plan` Tool Card，并在卡片上记录该正文来源；后续
+approved 或 revision_requested 的 `tool.finished` 只携带机器可读的审核 metadata，不能用该对象字符串覆盖
+已经展示的方案正文。此保护由 Tool Card 自身的审核正文标记决定，不依赖随后会被 approval/revision 改写的
+`status.plan` 或 `status.pendingPlan`，因此 live 与 replay 在修订路径上保持相同投影。普通 draft save 仍展示
+Artifact 路径，失败终态仍展示失败结果。
+
 TUI 新建会话时，新 Runtime 与新展示快照必须统一从 `building` 开始，并清空旧会话的 pending plan；不得把离开会话的 `planning` 投影复制到新会话。历史会话切回时仍恢复该会话自己的持久化状态。该约束保证 InputLine 因会话切换重挂载后，Shift+Tab 进入/退出 Plan Mode 仍操作同一个 Runtime 事实，而不是无法退出的 UI-only 状态。
 
 Shift+Tab 在尚无输入时可以创建 `planning_empty` 占位 Task，但用户提交首个 prompt 后必须先用 `task.cancelled` 明确收尾该占位，再以真实 prompt 作为 `userGoal` 启动正式 Task；不得直接复用空目标 Task，避免 Plan Artifact、日志和恢复状态丢失任务目标。

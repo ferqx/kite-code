@@ -18,6 +18,7 @@ import {
   executeRuntimeTools,
   serializeConcurrentSubagentApprovalEvents,
 } from '@/core/controllers/tool-controller';
+import { checkDoomLoop } from '@/core/execution/doom-loop';
 import {
   type AutoReviewResult,
   createAutoReviewModel,
@@ -655,6 +656,11 @@ async function executeAutoReview(
     ];
   }
   const request = parsed.request;
+  const doomLoop = checkDoomLoop(
+    state.doomLoop,
+    request,
+    dependencies.config.autoReview?.doomLoopRepeatThreshold ?? 3,
+  );
 
   const startTime = Date.now();
   try {
@@ -672,6 +678,14 @@ async function executeAutoReview(
         isSubAgent: suspended != null,
         subAgentRole: suspended?.role,
         workspaceRoot: state.session.workspace,
+        ...(doomLoop.blocked && doomLoop.fingerprint && doomLoop.count
+          ? {
+              doomLoopInfo: {
+                fingerprint: doomLoop.fingerprint,
+                count: doomLoop.count,
+              },
+            }
+          : {}),
       },
       // V2 makes the configured reviewer timeout part of the rollout surface;
       // the established path retains the fixed compatibility timeout.

@@ -7,6 +7,13 @@ import {
   isToolRecoveryJournalInvalidV1,
   isToolRecoveryQualityBlockedV1,
 } from './tool-recovery-journal';
+import {
+  activeSkillFramesForCurrentWork,
+  currentLegacySubagentRecoveryMarker,
+  findStrandedInteractionTool,
+  interactionBelongsToCurrentWork,
+  toolCallBelongsToCurrentWork,
+} from './work-scope';
 
 /** Bound resource usage while still allowing independent reads to overlap. */
 export const MAX_PARALLEL_READ_TOOLS = 4;
@@ -154,10 +161,11 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   if (state.turn.status !== 'active') {
     return { type: 'stop' };
   }
-  if (state.legacyUnrecoverableSubagentApproval) {
+  const legacyRecoveryMarker = currentLegacySubagentRecoveryMarker(state);
+  if (legacyRecoveryMarker) {
     return {
       type: 'subagent.recovery_unavailable',
-      ...state.legacyUnrecoverableSubagentApproval,
+      ...legacyRecoveryMarker,
     };
   }
   const unknownInvocation = Object.values(state.capabilities.invocations).find(
@@ -170,6 +178,14 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
         `Capability invocation ${unknownInvocation.invocationId} has an unknown external outcome. ` +
         'Reconcile it or obtain a user decision before continuing.',
       failureKind: 'unknown',
+    };
+  }
+
+  if (state.interactions.kind !== 'idle' && !interactionBelongsToCurrentWork(state)) {
+    return {
+      type: 'recovery_blocked',
+      reason: 'The active interaction is no longer owned by the current Task.',
+      failureKind: 'persistence_unavailable',
     };
   }
 
@@ -218,6 +234,17 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       break;
   }
 
+  const strandedInteractionTool = findStrandedInteractionTool(state);
+  if (strandedInteractionTool) {
+    return {
+      type: 'recovery_blocked',
+      reason:
+        `Tool ${strandedInteractionTool.toolCallId} is ${strandedInteractionTool.status} ` +
+        'without its owning interaction. Restore or cancel the session before continuing.',
+      failureKind: 'persistence_unavailable',
+    };
+  }
+
   // A recovered V1 execution is historical evidence, not an executable plan.
   // Global reconciliation and interaction barriers above remain authoritative.
   // Only the bounded read/save correction path needed to replace it with V2
@@ -236,8 +263,11 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
     }
     const runnable = [...state.tools.queue, ...state.tools.active].find((id) => {
       const call = state.tools.calls[id];
-      const belongsToCurrentTask = call?.taskId == null || call.taskId === state.activeTaskId;
-      return belongsToCurrentTask && (call?.status === 'queued' || call?.status === 'approved');
+      return (
+        call != null &&
+        toolCallBelongsToCurrentWork(state, call) &&
+        (call.status === 'queued' || call.status === 'approved')
+      );
     });
     if (runnable) return { type: 'run_tools', toolCallIds: [runnable] };
     if (state.context.pendingCompaction) {
@@ -257,8 +287,11 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   // so both collections remain part of the runnable projection.
   const isRunnable = (id: string) => {
     const call = state.tools.calls[id];
-    const belongsToCurrentTask = call?.taskId == null || call.taskId === state.activeTaskId;
-    return belongsToCurrentTask && (call?.status === 'queued' || call?.status === 'approved');
+    return (
+      call != null &&
+      toolCallBelongsToCurrentWork(state, call) &&
+      (call.status === 'queued' || call.status === 'approved')
+    );
   };
   // A child whose current approval already settled owns the single canonical
   // interaction lane until its continuation either completes or suspends
@@ -270,7 +303,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
       call?.name === 'task' &&
       call.status === 'approved' &&
       state.suspendedSubagents[id] != null &&
-      (call.taskId == null || call.taskId === state.activeTaskId)
+      toolCallBelongsToCurrentWork(state, call)
     );
   });
   if (approvedSuspendedSubagent) {
@@ -364,9 +397,7 @@ export function decideNextEffect(state: RuntimeState): RuntimeEffect {
   }
 
   if (state.transcript.final) {
-    const activeSkill = Object.values(state.skills.frames).some(
-      (frame) => frame.status === 'active',
-    );
+    const activeSkill = activeSkillFramesForCurrentWork(state).length > 0;
     if (!activeSkill) {
       const decision = decideCompletion(state);
       return decision.status === 'accepted'

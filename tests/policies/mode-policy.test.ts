@@ -117,9 +117,9 @@ describe('createFullModePolicy', () => {
   describe('with sandbox available', () => {
     const policy = createFullModePolicy(true);
 
-    it('should deny ask_user', () => {
+    it('should allow ask_user', () => {
       const result = policy.shouldAskUser(baseInput({ interactionMode: 'full' }));
-      expect(result.kind).toBe('deny');
+      expect(result.kind).toBe('allow');
     });
 
     it('should deny destructive even with sandbox', () => {
@@ -165,9 +165,9 @@ describe('createFullModePolicy', () => {
   describe('without sandbox', () => {
     const policy = createFullModePolicy(false);
 
-    it('should deny ask_user with sandbox-unavailable reason', () => {
+    it('should allow ask_user because clarification does not require sandbox', () => {
       const result = policy.shouldAskUser(baseInput({ interactionMode: 'full' }));
-      expect(result.kind).toBe('deny');
+      expect(result.kind).toBe('allow');
     });
 
     it('should require tool approval when no sandbox', () => {

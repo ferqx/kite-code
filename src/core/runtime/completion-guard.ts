@@ -11,6 +11,11 @@ import {
   hasActiveUnresolvedToolFailuresV1,
   isToolRecoveryQualityBlockedV1,
 } from './tool-recovery-journal';
+import {
+  activeSkillFramesForCurrentWork,
+  hasCurrentSuspendedSubagent,
+  toolCallBelongsToCurrentWork,
+} from './work-scope';
 
 export const COMPLETION_GUARD_V1 = 'completion_guard_v1' as const;
 export const COMPLETION_GUARD_V2 = 'completion_guard_v2' as const;
@@ -102,6 +107,13 @@ const NON_TERMINAL_TOOL_STATUSES = new Set<ToolCallStatus>([
   'running',
 ]);
 
+function hasCurrentNonTerminalTool(state: RuntimeState): boolean {
+  return Object.values(state.tools.calls).some(
+    (call) =>
+      toolCallBelongsToCurrentWork(state, call) && NON_TERMINAL_TOOL_STATUSES.has(call.status),
+  );
+}
+
 function samePlanIdentity(left: PlanIdentity | undefined, right: PlanIdentity): boolean {
   return (
     left?.planId === right.planId &&
@@ -130,6 +142,11 @@ function blockedV1(
   nextAction: CompletionNextAction,
 ): CompletionGuardBlockedV1 {
   const correctionAttempt = correctionAttemptV1(state);
+  const activePlanning = getActivePlanning(state);
+  const reviewedDraftCanPause =
+    code === 'plan_draft_pending' &&
+    activePlanning.kind === 'planning_draft' &&
+    activePlanning.revisionFeedback != null;
   return {
     status: 'blocked',
     version: COMPLETION_GUARD_V1,
@@ -137,7 +154,7 @@ function blockedV1(
     nextAction,
     planning,
     correctionAttempt,
-    canCorrect: correctionAttempt === 1,
+    canCorrect: correctionAttempt === 1 && !reviewedDraftCanPause,
   };
 }
 
@@ -149,6 +166,11 @@ function blockedV2(
   nextAction: CompletionNextAction,
 ): CompletionGuardBlockedV2 {
   const correctionAttempt = correctionAttemptV2(state, planIdentity);
+  const activePlanning = getActivePlanning(state);
+  const reviewedDraftCanPause =
+    code === 'plan_draft_pending' &&
+    activePlanning.kind === 'planning_draft' &&
+    activePlanning.revisionFeedback != null;
   return {
     status: 'blocked',
     version: COMPLETION_GUARD_V2,
@@ -157,7 +179,7 @@ function blockedV2(
     planning,
     planIdentity,
     correctionAttempt,
-    canCorrect: correctionAttempt === 1,
+    canCorrect: correctionAttempt === 1 && !reviewedDraftCanPause,
   };
 }
 
@@ -171,12 +193,10 @@ export function decideCompletionV1(state: RuntimeState): CompletionGuardDecision
   if (state.interactions.kind !== 'idle') {
     return blockedV1(state, planning.kind, 'interaction_pending', 'wait_for_interaction');
   }
-  if (
-    Object.values(state.tools.calls).some((call) => NON_TERMINAL_TOOL_STATUSES.has(call.status))
-  ) {
+  if (hasCurrentNonTerminalTool(state)) {
     return blockedV1(state, planning.kind, 'tool_pending', 'wait_for_tool');
   }
-  if (Object.keys(state.suspendedSubagents).length > 0) {
+  if (hasCurrentSuspendedSubagent(state)) {
     return blockedV1(state, planning.kind, 'subagent_suspended', 'wait_for_subagent');
   }
   if (
@@ -186,7 +206,7 @@ export function decideCompletionV1(state: RuntimeState): CompletionGuardDecision
   ) {
     return blockedV1(state, planning.kind, 'unknown_external_invocation', 'reconcile_invocation');
   }
-  if (Object.values(state.skills.frames).some((frame) => frame.status === 'active')) {
+  if (activeSkillFramesForCurrentWork(state).length > 0) {
     return blockedV1(state, planning.kind, 'skill_active', 'complete_skill');
   }
 
@@ -277,12 +297,10 @@ export function decideCompletionV2(state: RuntimeState): CompletionGuardDecision
   if (state.interactions.kind !== 'idle') {
     return block('interaction_pending', 'wait_for_interaction');
   }
-  if (
-    Object.values(state.tools.calls).some((call) => NON_TERMINAL_TOOL_STATUSES.has(call.status))
-  ) {
+  if (hasCurrentNonTerminalTool(state)) {
     return block('tool_pending', 'wait_for_tool');
   }
-  if (Object.keys(state.suspendedSubagents).length > 0) {
+  if (hasCurrentSuspendedSubagent(state)) {
     return block('subagent_suspended', 'wait_for_subagent');
   }
   if (
@@ -292,7 +310,7 @@ export function decideCompletionV2(state: RuntimeState): CompletionGuardDecision
   ) {
     return block('unknown_external_invocation', 'reconcile_invocation');
   }
-  if (Object.values(state.skills.frames).some((frame) => frame.status === 'active')) {
+  if (activeSkillFramesForCurrentWork(state).length > 0) {
     return block('skill_active', 'complete_skill');
   }
   if (
