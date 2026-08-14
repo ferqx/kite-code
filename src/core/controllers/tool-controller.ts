@@ -1308,8 +1308,7 @@ export async function executeRuntimeTools(params: {
       });
       if (modeDecision.kind === 'deny') {
         const reason =
-          modeDecision.reason ??
-          'Full mode cannot ask the user. Make the best safe assumption and continue.';
+          modeDecision.reason ?? 'The current interaction mode does not allow asking the user.';
         events.push({
           type: 'tool.rejected',
           toolCallId,

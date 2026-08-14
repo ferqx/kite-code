@@ -66,12 +66,7 @@ import type {
   ShellNetworkMode,
   ThreadAuthorizationState,
 } from '@/core/types';
-import type {
-  AgentPhase,
-  InteractionMode,
-  ShellGrantUsed,
-  WorkspaceAccess,
-} from '@/protocol/events';
+import type { AgentPhase, ShellGrantUsed, WorkspaceAccess } from '@/protocol/events';
 import { BROKERED_GIT_FEATURE_REVISION_V1 } from '@/protocol/git';
 import { defaultPhaseForWorkspaceAccess, normalizeAuthorizationState } from './tool-policy';
 import { isMcpRequest, type PendingToolRequest } from './tool-requests';
@@ -787,34 +782,6 @@ export async function runApprovedTool(input: RunApprovedToolInput): Promise<Tool
   }
 
   if (request.name === 'ask_user') {
-    // 通过 policy 判断 ask_user 是否被当前 mode 禁止（替代 isFullAccessMode 直接检查）
-    // Use policy to determine if ask_user is forbidden by current mode
-    const askPolicy = createModePolicy(interactionMode);
-    if (
-      askPolicy.shouldAskUser({
-        interactionMode: interactionMode as InteractionMode,
-        phase: phase as 'planning' | 'building',
-        planKind: 'building_without_plan',
-        toolName: 'ask_user',
-      }).kind === 'deny'
-    ) {
-      return withFailureGuidance(request, {
-        ok: false,
-        command: 'ask_user',
-        exitCode: -1,
-        stdout: '',
-        stderr: JSON.stringify({
-          ok: false,
-          rejected: true,
-          replan: {
-            reasonCode: 'FULL_NO_USER_INTERACTION',
-            reason: 'Full mode cannot ask the user. Make the best safe assumption and continue.',
-            blockedCapability: 'ask_user',
-          },
-        }),
-        status: 'rejected',
-      });
-    }
     return withFailureGuidance(request, {
       ok: false,
       command: 'ask_user',

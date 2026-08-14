@@ -87,7 +87,7 @@ describe('SubAgentRunner integration', () => {
 
   test.each([
     ['accept_edits', 'ask_user must be handled by the user_input interrupt node.'],
-    ['full', 'FULL_NO_USER_INTERACTION'],
+    ['full', 'ask_user must be handled by the user_input interrupt node.'],
   ] as const)('normal launch applies inherited %s mode to child tools', async (interactionMode, expected) => {
     const workspace = mkdtempSync(join(tmpdir(), `kite-subagent-mode-policy-${interactionMode}-`));
     const { events, sink } = mockEventSink();
@@ -1333,7 +1333,9 @@ describe('SubAgentRunner integration', () => {
       const askResult = events.find(
         (event) => event.type === 'tool_result' && event.data.toolName === 'ask_user',
       );
-      expect(String(askResult?.data.summary)).toContain('FULL_NO_USER_INTERACTION');
+      expect(String(askResult?.data.summary)).toContain(
+        'ask_user must be handled by the user_input interrupt node.',
+      );
     } finally {
       rmSync(ws, { recursive: true, force: true });
     }

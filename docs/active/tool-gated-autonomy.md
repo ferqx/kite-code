@@ -206,7 +206,7 @@ Shell 执行的 `onShellProgress` 必须在命令仍处于 running术语（运�
 
 ## 工具名单单一事实源（ADR-0043）
 
-阶段 2 的 computer、coordination、interrupt 与 runtime action 静态工具也已完成 Registry 单路径切换。`task` 的 role-based effects、子 Agent 依赖和结果传播由 spec 驱动；`tool_search` 在 spec 内完成 feature gate、inventory redirect、provider readiness 重试、候选裁剪和 `capability.search_completed` 事件投影；`ask_user` 以 `kind: interrupt` 注册。Controller 必须先执行 effective interaction-mode policy：`full` mode 直接产生配对的 `tool.rejected(policy_denied)`，其他 mode 才能产生 `user_input.requested`。
+阶段 2 的 computer、coordination、interrupt 与 runtime action 静态工具也已完成 Registry 单路径切换。`task` 的 role-based effects、子 Agent 依赖和结果传播由 spec 驱动；`tool_search` 在 spec 内完成 feature gate、inventory redirect、provider readiness 重试、候选裁剪和 `capability.search_completed` 事件投影；`ask_user` 以 `kind: interrupt` 注册。Controller 先执行 effective interaction-mode policy；当前所有 mode（包括 `full`）都允许产生 `user_input.requested`，Full mode 尤其可在 Planning 中澄清约束。
 
 事件型 ToolSpec 可通过 `ProjectedToolResult.runtimeEvents` 产出 Core Runtime 事件；controller 只追加这些结构化事件，不得重新计算 capability search、Skill activation 或 Plan 状态结果。该通道只引用 Core 事件类型，不引入 App/TUI 依赖。
 

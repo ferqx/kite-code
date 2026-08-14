@@ -1205,7 +1205,7 @@ describe('executeRuntimeTools', () => {
     });
   });
 
-  test('full mode rejects ask_user before opening a user-input interaction', async () => {
+  test('full mode allows ask_user to open a user-input interaction', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-full-mode-ask-user',
       userId: 'user',
@@ -1235,13 +1235,9 @@ describe('executeRuntimeTools', () => {
     const events = await executeRuntimeTools({ state, toolCallIds: ['ask'] });
 
     expect(events).toContainEqual(
-      expect.objectContaining({
-        type: 'tool.rejected',
-        toolCallId: 'ask',
-        failure: expect.objectContaining({ kind: 'policy_denied' }),
-      }),
+      expect.objectContaining({ type: 'user_input.requested', toolCallId: 'ask' }),
     );
-    expect(events.some((event) => event.type === 'user_input.requested')).toBe(false);
+    expect(events.some((event) => event.type === 'tool.rejected')).toBe(false);
   });
 
   test('controller routes the ask_user payload through askUserSpec.createInterrupt', () => {

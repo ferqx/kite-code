@@ -393,9 +393,9 @@ Execution 不能只返回面向人的成功字符串。`ExecutionReceipt`/`Capab
 时都是 reducer no-op；迟到、重放或跨终态事件不能复活 call、改写 outcome 或再追加
 transcript ToolMessage。
 
-`ask_user` 在 `full` interaction mode 中会由 Tool Controller 在创建 interrupt 前收敛为
-`tool.rejected(policy_denied)`，不得打开用户输入交互。其他 mode 中的用户拒答属于输入取消，
-不属于上述 authorization rejection。Runtime 将它收敛为 `tool.finished(ok=false, stdout=Cancelled)`，
+`ask_user` 在 `full` interaction mode 中同样允许创建用户输入 interrupt，尤其用于 Planning
+阶段澄清约束；Full mode 只改变工具授权与自动执行策略，不等于禁止必要的人机澄清。
+用户拒答属于输入取消，不属于上述 authorization rejection。Runtime 将它收敛为 `tool.finished(ok=false, stdout=Cancelled)`，
 不产生 `turn.aborted`；Scheduler 随即再次 `call_model`，使模型在同一 turn 内继续。
 
 `request_plan_review` 是方案执行授权屏障，不是普通输入。用户取消或按 Esc 时，Runtime 保留方案 draft，同时写入 `plan.review_cancelled`、方案工具及其余未终结 sibling 的 `tool.cancelled`、`turn.aborted(cause=user)`；Runner 立即退出，Agent abort 本轮执行信号，不得再调用模型或进入方案执行。
