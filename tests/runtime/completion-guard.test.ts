@@ -7,6 +7,7 @@ import {
   decideCompletionV1,
   decideCompletionV2,
 } from '@/core/runtime/completion-guard';
+import type { RuntimeEvent } from '@/core/runtime/events';
 import {
   AgentKernel,
   createAgentKernel,
@@ -19,7 +20,9 @@ import {
   COMPLETION_GUARD_V2_STATE_SCHEMA_VERSION,
   computePlanStructuralDigest,
   createInitialRuntimeState,
+  getActivePlanning,
   RUNTIME_STATE_SCHEMA_VERSION,
+  type RuntimeState,
   setActivePlanning,
 } from '@/core/runtime/state';
 import { createRuntimeStore, type RuntimeStore } from '@/core/runtime/store';
@@ -233,6 +236,143 @@ describe('CompletionGuard V1', () => {
     expect(Object.values(next.tasks).at(0)?.status).toBe('completed');
   });
 
+  test('ignores a non-terminal tool owned by an older task but keeps current tools blocking', () => {
+    const state = activePlanningState();
+    state.tools.calls.historical = {
+      toolCallId: 'historical',
+      taskId: 'older-task',
+      modelMessageId: 'older-model',
+      name: 'write_plan',
+      args: {},
+      status: 'awaiting_review',
+      createdAtTurnId: 'older-turn',
+    };
+
+    expect(decideCompletionV1(state)).toMatchObject({
+      status: 'blocked',
+      code: 'planning_empty',
+    });
+
+    state.tools.calls.current = {
+      toolCallId: 'current',
+      taskId: state.activeTaskId ?? undefined,
+      modelMessageId: 'current-model',
+      name: 'write_plan',
+      args: {},
+      status: 'awaiting_review',
+      createdAtTurnId: state.turn.turnId,
+    };
+    expect(decideCompletionV1(state)).toMatchObject({
+      status: 'blocked',
+      code: 'tool_pending',
+      nextAction: 'wait_for_tool',
+    });
+  });
+
+  test('scopes legacy tools without task identity to the current turn', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'legacy-tool-scope',
+      userId: 'u',
+      workspace: '/tmp',
+    });
+    state.tools.calls.historical = {
+      toolCallId: 'historical',
+      modelMessageId: 'older-model',
+      name: 'read_file',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: 'older-turn',
+    };
+    expect(decideCompletionV1(state)).toEqual({
+      status: 'accepted',
+      version: 'completion_guard_v1',
+    });
+
+    state.tools.calls.current = {
+      toolCallId: 'current',
+      modelMessageId: 'current-model',
+      name: 'read_file',
+      args: {},
+      status: 'queued',
+      createdAtTurnId: state.turn.turnId,
+    };
+    expect(decideCompletionV1(state)).toMatchObject({
+      status: 'blocked',
+      code: 'tool_pending',
+    });
+  });
+
+  test('ignores Task-owned Skill and suspended child blockers from an older Task', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'completion-old-control-state',
+      userId: 'u',
+      workspace: '/tmp',
+    });
+    state.activeTaskId = 'current-task';
+    state.tasks = {
+      'current-task': {
+        taskId: 'current-task',
+        userGoal: 'finish',
+        status: 'active',
+        startedAtTurnId: state.turn.turnId,
+        sideEffectsStarted: false,
+        planning: { kind: 'building_without_plan' },
+        planHistory: [],
+      },
+    };
+    state.tools.calls.old = {
+      toolCallId: 'old',
+      taskId: 'older-task',
+      modelMessageId: 'older-model',
+      name: 'task',
+      args: {},
+      status: 'awaiting_approval',
+      createdAtTurnId: 'older-turn',
+    };
+    state.suspendedSubagents.old = {} as never;
+    state.skills.frames.old = {
+      activationId: 'old',
+      skillId: 'old-skill',
+      skillRevision: '1',
+      taskId: 'older-task',
+      input: {},
+      contextMode: 'inline',
+      agent: 'main',
+      capabilityCeiling: [],
+      verificationMode: 'not_required',
+      requestedBy: 'user',
+      activatedAt: '2026-08-14T00:00:00.000Z',
+      status: 'active',
+    };
+
+    expect(decideCompletionV1(state)).toEqual({
+      status: 'accepted',
+      version: 'completion_guard_v1',
+    });
+  });
+
+  test('ignores a suspended snapshot whose current parent Tool is already terminal', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'completion-terminal-suspension',
+      userId: 'u',
+      workspace: '/tmp',
+    });
+    state.tools.calls.terminal = {
+      toolCallId: 'terminal',
+      modelMessageId: 'model-terminal',
+      name: 'task',
+      args: {},
+      status: 'cancelled',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.suspendedSubagents.terminal = {} as never;
+
+    expect(decideCompletionV1(state)).toEqual({
+      status: 'accepted',
+      version: 'completion_guard_v1',
+    });
+  });
+
   test('uses exactly one correction, then ends as blocked instead of completed', async () => {
     const store = createRuntimeStore(':memory:');
     const kernel = new AgentKernel({
@@ -268,9 +408,82 @@ describe('CompletionGuard V1', () => {
     expect(kernel.getState().tasks[kernel.getState().activeTaskId!]?.status).toBe('active');
     kernel.close();
   });
+
+  test('closes only the turn when a reviewed draft intentionally remains pending', async () => {
+    const initial = setActivePlanning(activePlanningState(), {
+      kind: 'planning_draft',
+      document: {
+        planId: 'paused-plan',
+        version: 1,
+        structuralDigest: 'paused-plan-digest',
+        title: 'Paused plan',
+        bodyMarkdown: 'Keep the complete reviewed plan available for a later user turn.',
+        steps: [{ id: 'later', title: 'Implement later', status: 'pending' }],
+        createdAtTurnId: 'turn-1',
+        updatedAtTurnId: 'turn-1',
+      },
+      revisionFeedback: 'Do not implement yet.',
+    });
+    const kernel = new AgentKernel({
+      store: createRuntimeStore(':memory:'),
+      initialState: initial,
+      interactionMode: 'accept_edits',
+    });
+    let modelCalls = 0;
+    const events: RuntimeEvent[] = [];
+    for await (const event of runRuntimeLoop(
+      kernel,
+      async () => {
+        modelCalls += 1;
+        return [
+          {
+            type: 'model.responded' as const,
+            messageId: `paused-final-${modelCalls}`,
+            text: 'Understood. The plan remains paused.',
+          },
+        ];
+      },
+      { requestAction: async () => ({ type: 'cancel', interactionId: 'unused' }) },
+    )) {
+      events.push(event);
+    }
+
+    expect(modelCalls).toBe(1);
+    expect(events.map((event) => event.type)).toEqual([
+      'model.responded',
+      'completion.blocked',
+      'turn.completed',
+    ]);
+    expect(events.some((event) => event.type === 'run.completed')).toBe(false);
+    expect(events.some((event) => event.type === 'run.error')).toBe(false);
+    expect(kernel.getState().turn.status).toBe('completed');
+    expect(kernel.getState().activeTaskId).toBe(initial.activeTaskId);
+    expect(getActivePlanning(kernel.getState() as RuntimeState)).toMatchObject({
+      kind: 'planning_draft',
+      revisionFeedback: 'Do not implement yet.',
+    });
+    kernel.close();
+  });
 });
 
 describe('CompletionGuard V2', () => {
+  test('a reviewed V2 draft can pause on its first plain-text final', () => {
+    const { state, document, identity } = v2ExecutingState({});
+    const draft = setActivePlanning(state, {
+      kind: 'planning_draft',
+      document,
+      revisionFeedback: '先不实施',
+    });
+
+    expect(decideCompletionV2(draft)).toMatchObject({
+      status: 'blocked',
+      code: 'plan_draft_pending',
+      correctionAttempt: 1,
+      canCorrect: false,
+      planIdentity: identity,
+    });
+  });
+
   test('selects V2 only for V2 PlanDocuments and reports missing required verification', () => {
     const { state, identity } = v2ExecutingState({ requiredVerification: 'pending' });
     expect(decideCompletion(state)).toEqual(decideCompletionV2(state));
@@ -353,6 +566,21 @@ describe('CompletionGuard V2', () => {
     });
     const state = {
       ...malformed,
+      tools: {
+        ...malformed.tools,
+        calls: {
+          ...malformed.tools.calls,
+          'priority-tool': {
+            toolCallId: 'priority-tool',
+            taskId: malformed.activeTaskId ?? undefined,
+            modelMessageId: 'priority-model',
+            name: 'ask_user',
+            args: {},
+            status: 'awaiting_user_input' as const,
+            createdAtTurnId: malformed.turn.turnId,
+          },
+        },
+      },
       interactions: {
         kind: 'awaiting_user_input' as const,
         interactionId: 'priority-interaction',
@@ -383,6 +611,25 @@ describe('CompletionGuard V2', () => {
       status: 'accepted',
       version: 'completion_guard_v2',
       planIdentity: fixture.identity,
+    });
+  });
+
+  test('does not let an older task tool mask the active V2 plan lifecycle', () => {
+    const fixture = v2ExecutingState({ sideEffectsStarted: false });
+    fixture.state.tools.calls.historical = {
+      toolCallId: 'historical',
+      taskId: 'older-task',
+      modelMessageId: 'older-model',
+      name: 'write_plan',
+      args: {},
+      status: 'awaiting_review',
+      createdAtTurnId: 'older-turn',
+    };
+
+    expect(decideCompletionV2(fixture.state)).toMatchObject({
+      status: 'blocked',
+      code: 'plan_execution_incomplete',
+      nextAction: 'complete_plan',
     });
   });
 
@@ -761,6 +1008,38 @@ describe('CompletionGuard V2', () => {
     });
     restored.close();
     rmSync(root, { recursive: true, force: true });
+  });
+
+  test('a new user message opens a fresh bounded correction window for the same V2 Plan', () => {
+    const fixture = v2ExecutingState({ sideEffectsStarted: true });
+    const first = decideCompletionV2(fixture.state);
+    if (first.status !== 'blocked') throw new Error('expected blocked V2 decision');
+    const blocked = reduceRuntimeState(fixture.state, {
+      type: 'completion.blocked',
+      turnId: fixture.state.turn.turnId,
+      guardVersion: first.version,
+      code: first.code,
+      nextAction: first.nextAction,
+      planning: first.planning,
+      correctionAttempt: first.correctionAttempt,
+      planIdentity: first.planIdentity,
+    });
+    const withUserDirection = reduceRuntimeState(blocked, {
+      type: 'user.message_appended',
+      messageId: 'user-revision-direction',
+      content: '请按新的要求修改方案。',
+    });
+    const nextTurn = reduceRuntimeState(withUserDirection, {
+      type: 'turn.started',
+      turnId: 'next-user-authored-turn',
+    });
+
+    expect(withUserDirection.completionGuard).toEqual({ correctionAttempts: 0 });
+    expect(decideCompletionV2(nextTurn)).toMatchObject({
+      status: 'blocked',
+      correctionAttempt: 1,
+      planIdentity: fixture.identity,
+    });
   });
 
   test('aborts the second illegal final for the same V2 plan identity', async () => {

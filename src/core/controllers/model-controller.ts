@@ -47,6 +47,7 @@ import {
 } from '@/core/runtime/state';
 import { observeUnknownToolFieldsV1 } from '@/core/runtime/tool-outcome';
 import { toolInvocationFingerprintV1 } from '@/core/runtime/tool-recovery-journal';
+import { activeSkillFramesForCurrentWork } from '@/core/runtime/work-scope';
 import type { SandboxBackend } from '@/core/sandbox/platform';
 import { skillFrameInvalidationReason } from '@/core/skills/activation';
 import type { SkillCatalogSnapshot } from '@/core/skills/catalog';
@@ -183,8 +184,8 @@ export function activeInlineSkillInstructions(
   catalog: SkillCatalogSnapshot | undefined,
 ): string | undefined {
   if (!catalog) return undefined;
-  const sections = Object.values(state.skills.frames)
-    .filter((frame) => frame.status === 'active' && frame.contextMode === 'inline')
+  const sections = activeSkillFramesForCurrentWork(state)
+    .filter((frame) => frame.contextMode === 'inline')
     .flatMap((frame) => {
       const entry = catalog.entries.find(
         (candidate) =>
@@ -267,8 +268,8 @@ export function resolveContextProjectionEnvironment(input: {
         skills: input.skills,
         skillOptions: input.skillOptions,
         skillCatalog: input.skillCatalog,
-        activeSkillFrames: Object.values(input.state.skills.frames).filter(
-          (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+        activeSkillFrames: activeSkillFramesForCurrentWork(input.state).filter(
+          (frame) => frame.contextMode === 'inline',
         ),
         config: input.config,
         subagentEventSink: input.subagentEventSink,
@@ -536,8 +537,8 @@ export async function invokeRuntimeModel(params: {
       skills: params.skills,
       skillOptions: params.skillOptions,
       skillCatalog: params.skillCatalog,
-      activeSkillFrames: Object.values(state.skills.frames).filter(
-        (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+      activeSkillFrames: activeSkillFramesForCurrentWork(state).filter(
+        (frame) => frame.contextMode === 'inline',
       ),
       config: params.config,
       subagentEventSink: params.subagentEventSink,

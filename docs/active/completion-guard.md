@@ -2,17 +2,29 @@
 
 状态：active
 读取时机：修改 `run.completed`、final 文本、Plan lifecycle、scheduler/runner/reducer 终态或 Task 完成投影时。
-验证：`bun test tests/runtime/completion-guard.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/runtime/kernel.test.ts`、`bun run typecheck`。
+验证：`bun test tests/runtime/completion-guard.test.ts tests/runtime/session-state-machine.test.ts tests/runtime/task-plan-lifecycle.test.ts tests/runtime/kernel.test.ts tests/runtime/scheduler.test.ts`、`bun run typecheck`。
 相关：ADR-0095、`plan-mode-implementation.md`、`failure-classification.md`。
 
 模型的无工具 final 文本只是 completion candidate。CompletionGuard 是 Core-only、单调版本化的纯判定；scheduler
 在选择 `emit_final` 前、runner 在持久化前、reducer 在接收 `run.completed` 时都按事件绑定的 guard version 重算，
 因此直接注入 `run.completed` 不能把未完成 Task 标为 `completed`。
 
-V1 保留给没有 `planSchemaVersion=2` 的 legacy replay 和无 Plan task。它只使用已有 canonical state：非终结 Tool、pending interaction、suspended subagent、unknown Capability invocation、
+V1 保留给没有 `planSchemaVersion=2` 的 legacy replay 和无 Plan task。它只使用已有 canonical state：当前完成作用域内的非终结 Tool、pending interaction、suspended subagent、unknown Capability invocation、
 active Skill 与 Plan lifecycle。`building_without_plan` 和 `completed` 可通过；`planning_empty` 要求 save，draft 要求 submit，
 awaiting review 要求等待审核，executing 要求先发 `plan.completed`，cancelled 永远不是成功完成。verification 与
 effect evidence 不会被反向伪造到 V1 历史中。
+
+非终结 Tool blocker 与 Scheduler 使用相同的当前工作作用域：带 `taskId` 的调用仅在其匹配
+`activeTaskId` 时阻塞；缺少 `taskId` 的历史兼容调用仅在 `createdAtTurnId` 匹配当前 turn 时阻塞。当前 Task
+跨 turn 恢复的调用仍会阻塞，当前 turn 的无 Task 调用也仍会阻塞；已经属于旧 Task/旧 turn、且 Scheduler
+不会再调度的残留调用不得形成永久 `tool_pending → wait_for_tool`。V1/V2 共用这一判定，不能让历史调用
+遮蔽当前 Plan lifecycle，也不能忽略当前作用域内真实未终结的调用。
+
+Task-owned active Skill 与 suspended Subagent 也按同一归属规则投影：Skill 必须匹配 `activeTaskId`，挂起
+Subagent 必须通过其 parent `task` Tool 匹配当前工作。旧 Task 的 active 历史帧或 continuation 不阻塞后继 Task；
+父 Tool 缺失或已经终态的 suspended snapshot 同样不再是可恢复 continuation，不能形成永久
+`subagent_suspended`。但 pending interaction 仍由 CompletionGuard fail closed，防止绕过 Agent/Scheduler 的恢复入口
+直接伪造完成事件。
 
 V2 仅用于当前 lifecycle 持有 PlanDocument V2 的 task。它在 V1 的 task-wide blocker 之后检查完整 Plan identity
 `{ planId, version, structuralDigest }`、步骤终态和 `PlanCompletionEvidenceV1`：required verification 未到
@@ -38,9 +50,15 @@ PlanDocument V2 的 completion evidence/replay 门禁额外拒绝任何 pending 
 
 被阻断时持久化 metadata-only `completion.blocked`（guard version、固定 reason code、next action、planning lifecycle、
 完整 V2 Plan identity、correction attempt），并清除 candidate。事件不含 prompt、final 正文、工具参数、命令、路径或
-输出。Runtime 对同一 V2 Plan identity 至多再次调用模型一次；该 correction ceiling 跨 `turn.started` 与 Runtime
-restore 保持，只有完整 identity 的 version/digest 变化或当前已不存在相关 V2 Plan 时才重置。同一 identity 的第二次错误 final 以
-`turn.aborted(cause=error) + run.error` 收敛，不能循环或显示完成。新 runner 产生的 `run.completed` 绑定
+输出。Runtime 对同一 V2 Plan identity 在一次模型纠错窗口内至多再次调用模型一次；该 correction ceiling 跨裸
+`turn.started` 与 Runtime restore 保持，防止通过空转或重启绕过。真实 `user.message_appended` 是新的用户纠正信息，
+会在保留 Plan document 与 revision feedback 的同时开启新的零计数窗口；完整 identity 的 version/digest 变化或当前
+已不存在相关 V2 Plan 时也会重置。同一窗口、同一 identity 的第二次错误 final 通常以
+`turn.aborted(cause=error) + run.error` 收敛，不能循环或显示完成。`plan_draft_pending` 是明确例外：draft 可以按
+用户要求跨 turn 暂停，因此最终纯文本 final 持久化 blocker 后只写 `turn.completed`，保留 active Task、Plan
+document 与 revision feedback；不得写 `run.completed`、`task.completed` 或 `run.error`。已有 review
+`revisionFeedback` 的 draft 不再要求模型重复一次确认，第一次纯文本 final 即结束 turn；没有 review feedback 的新 draft
+仍保留一次纠错机会。新 runner 产生的 `run.completed` 绑定
 实际 decision version；V2 completion 还必须绑定同一完整 Plan identity。没有 completion state 的旧 snapshot 视为零
 correction attempts。Runtime schema v22 是可信版本边界：只有从 v21 或更早 snapshot 的持久化 event tail 执行 migration
 replay 时，记录为 V1 的旧 event 才继续由 `decideCompletionV1` 读取；当前 v22 state 上的 event payload 不能通过自报

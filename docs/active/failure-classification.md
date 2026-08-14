@@ -6,6 +6,13 @@
 
 Runtime failures use `ClassifiedFailure` from `src/core/runtime/failures.ts`. Its `kind` gives policy a stable semantic category, while retryability, model-fixability, intervention, turn termination, and journal flags centralize handling choices. Model argument parsing, tool execution/policy decisions, approval rejection, and historical auto-review rejection all retain the classification on their tool call record. Current auto-review risk decisions are not failures: they carry `escalatedToUser` and remain non-terminal until the user approves or rejects; technical reviewer failures follow the same approval escalation without inventing a rejection.
 
+CompletionGuard blocker 是结构化控制状态，不是 `ClassifiedFailure`。Runner 不得仅因为模型 final 被
+`planning_empty/plan_draft_pending/interaction_pending/...` 拒绝，就用业务文案构造
+`classifyFailure('unknown', ...)`；`unknown` 只保留给确实无法分类且需要 reconciliation 的故障边界。已有 review
+feedback 的 `plan_draft_pending` 可以持久化 `completion.blocked + turn.completed`，只结束当前 turn 并保留 active
+Task/Plan；不得生成 `run.error`、`run.completed` 或 `task.completed`。没有 review feedback 的新 draft 仍有一次
+bounded model correction，纠错后继续保留 draft 也不得误报完成。
+
 `ClassifiedFailure` also carries an optional `parseFailureCode` (from `ParseFailureCode` in `src/core/tools/registry/registry.ts`), propagated through `InvalidToolRequest` when the Registry rejects a tool call. This preserves the structured origin (`invalid_json` | `unknown_tool` | `tool_unavailable` | `invalid_arguments`) and drives the canonical family mapping: malformed JSON/arguments are `tool_invalid_args`, while unknown/unavailable Registry capabilities are `tool_not_found`. Controller、Subagent 与 persisted ToolOutcome 必须使用该映射，不能把 `tool_unavailable` 降成 model-fixable argument correction。
 
 New `tool.failed` producers must emit `failure: classifyFailure(...)`. The legacy `error` field remains accepted only so existing persisted v3 events can replay; reducers and trace logging prefer the structured value.

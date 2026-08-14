@@ -3,6 +3,7 @@ import { assertAuthorizationElevation } from '@/core/policies/mode-policy';
 import type { RuntimeEvent } from './events';
 import { classifyFailure } from './failures';
 import { getActivePlanning, getActiveTask, type RuntimeState, type ToolCallStatus } from './state';
+import { interactionToolCall, toolCallBelongsToCurrentWork } from './work-scope';
 
 const TERMINAL_TOOL_STATUSES: ReadonlySet<ToolCallStatus> = new Set([
   'succeeded',
@@ -86,6 +87,50 @@ function unfinishedToolCancellationEvents(
       toolCallId: call.toolCallId,
       reason,
     }));
+}
+
+/**
+ * Settle tool ownership left behind by an older run before accepting a fresh
+ * user turn. A new turn cannot inherit an in-memory executor from the process
+ * that owned these calls, so keeping them runnable would create a permanent
+ * completion barrier.
+ */
+export function eventsForSupersededTurnRecovery(
+  state: Readonly<RuntimeState>,
+  reason = 'Superseded by a new user turn.',
+): RuntimeEvent[] {
+  const unfinished = Object.values(state.tools.calls)
+    .filter((call) => toolCallBelongsToCurrentWork(state, call))
+    .filter((call) => !TERMINAL_TOOL_STATUSES.has(call.status));
+  const interactionCall = interactionToolCall(state);
+  if (
+    interactionCall &&
+    !TERMINAL_TOOL_STATUSES.has(interactionCall.status) &&
+    !unfinished.some((call) => call.toolCallId === interactionCall.toolCallId)
+  ) {
+    unfinished.push(interactionCall);
+  }
+  if (unfinished.length === 0) return [];
+
+  return [
+    ...unfinished.map((call) => ({
+      type: 'tool.cancelled' as const,
+      toolCallId: call.toolCallId,
+      reason,
+    })),
+    ...resourceReservationCancellationEvents(state),
+    ...resourceWaiterCancellationEvents(state),
+    ...(state.turn.status === 'active'
+      ? [
+          {
+            type: 'turn.aborted' as const,
+            turnId: state.turn.turnId,
+            reason,
+            cause: 'error' as const,
+          },
+        ]
+      : []),
+  ];
 }
 
 function approvalCancellationEvents(

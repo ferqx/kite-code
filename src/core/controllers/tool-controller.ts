@@ -72,6 +72,7 @@ import {
   toolFailureInstanceIdV1,
   toolInvocationFingerprintV1,
 } from '@/core/runtime/tool-recovery-journal';
+import { activeSkillFramesForCurrentWork } from '@/core/runtime/work-scope';
 import type { NetworkDecisionRecorderV1 } from '@/core/sandbox/network-enforcer';
 import type { SkillCatalogSnapshot } from '@/core/skills';
 import type { SkillManifest, SkillScanOptions } from '@/core/skills/types';
@@ -480,8 +481,8 @@ async function handleSubAgentResume(params: {
     subagentEventSink: params.emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
-    activeSkillFrames: Object.values(state.skills.frames).filter(
-      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    activeSkillFrames: activeSkillFramesForCurrentWork(state).filter(
+      (frame) => frame.contextMode === 'inline',
     ),
     phase: getAgentPhase(getActivePlanning(state)),
   });
@@ -849,8 +850,8 @@ export async function executeRuntimeTools(params: {
     subagentEventSink: emitSubagentEvent,
     toolSearch: params.taskConfig ? getFeatureFlags(params.taskConfig).toolSearchV1 : false,
     skillCatalog: params.skillCatalog,
-    activeSkillFrames: Object.values(params.state.skills.frames).filter(
-      (frame) => frame.status === 'active' && frame.contextMode === 'inline',
+    activeSkillFrames: activeSkillFramesForCurrentWork(params.state).filter(
+      (frame) => frame.contextMode === 'inline',
     ),
     phase: getAgentPhase(getActivePlanning(params.state)),
   });

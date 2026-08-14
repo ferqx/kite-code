@@ -66,7 +66,8 @@ src/core/runtime/
 ├── effects.ts     下一步准备执行的动作
 ├── completion-guard.ts  CompletionGuard V1/V2 的纯 completion decision 与版本路由
 ├── plan-continuation.ts  历史 V1 executing 的只读/replan continuation 门禁
-├── scheduler.ts   State → Effect 的确定性决策；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；V1 executing 只放行 read_plan/write_plan V2 replan；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop
+├── scheduler.ts   State → Effect 的确定性决策；与 CompletionGuard 共用当前 Task/turn 工作作用域；连续免审只读调用最多 4 个成批；需审批的同消息连续 shell 逐项批准、立即启动并可与后续审批重叠；交互/写入/未知调用保持边界；V1 executing 只放行 read_plan/write_plan V2 replan；用户主动拒绝（approval_rejected）且无后续用户消息时返回 stop；当前 interaction owner 丢失时 fail closed 为 persistence recovery block
+├── work-scope.ts  当前工作归属的唯一判定；Tool-backed Interaction、Suspended Subagent、Skill 与 legacy recovery marker 均沿 Task/父 Tool 收敛；Provider recovery 保持 session-owned
 ├── reducer.ts     State × Event → State；approval.rejected 和 tool.rejected 均写入 transcript ToolMessage
 ├── executor.ts    Effect 执行适配
 ├── runner.ts      驱动 Kernel

@@ -1539,7 +1539,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       const preserveReviewedPlan =
         matched.name === 'write_plan' &&
         event.data.ok &&
-        (state.status.plan !== null || state.status.pendingPlan !== null) &&
+        matched.reviewedPlanBody === true &&
         matched.summary.trim().length > 0;
       const next: OutputBlock = {
         ...matched,
@@ -1825,6 +1825,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           summary: planSummary,
           detail: getToolDetail(planCard.name, planCard.args),
           expanded: true,
+          reviewedPlanBody: true,
         });
       }
       return {

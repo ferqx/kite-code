@@ -98,6 +98,8 @@ export type OutputBlock =
       reviewFailure?: string;
       /** Structured answer returned by ask_user, independent of the truncated summary. */
       userInput?: UserInputResult;
+      /** The durable Plan body was materialized by plan.review_requested. */
+      reviewedPlanBody?: boolean;
     }
   | {
       id: number;

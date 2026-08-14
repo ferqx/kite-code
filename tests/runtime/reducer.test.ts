@@ -1876,6 +1876,15 @@ describe('reduceRuntimeState — turn lifecycle', () => {
   // 验证 turn.started 更新 turnId 和递增 turnIndex
   test('turn.started advances turnId and turnIndex', () => {
     const state = makeInitialState();
+    state.terminalOutcome = {
+      version: 1,
+      status: 'completed',
+      reasonCode: 'completed',
+      knownExternalEffects: 'none',
+      safeRetry: true,
+      recoveryEntry: 'none',
+      pendingVerification: false,
+    };
     const oldTurnId = state.turn.turnId;
     const oldTurnIndex = state.turn.turnIndex;
     const event: RuntimeEvent = {
@@ -1886,6 +1895,7 @@ describe('reduceRuntimeState — turn lifecycle', () => {
     expect(next.turn.turnId).toBe('turn-new');
     expect(next.turn.turnIndex).toBe(oldTurnIndex + 1);
     expect(next.turn.turnId).not.toBe(oldTurnId);
+    expect(next.terminalOutcome).toBeUndefined();
   });
 
   test('turn.completed durably closes the current turn', () => {
@@ -1932,6 +1942,15 @@ describe('reduceRuntimeState — turn lifecycle', () => {
 describe('reduceRuntimeState — user messages', () => {
   test('user.message_appended persists transcript content', () => {
     const state = makeInitialState();
+    state.terminalOutcome = {
+      version: 1,
+      status: 'unknown',
+      reasonCode: 'cancel_incomplete',
+      knownExternalEffects: 'unknown',
+      safeRetry: false,
+      recoveryEntry: 'reconcile',
+      pendingVerification: false,
+    };
     const event: RuntimeEvent = {
       type: 'user.message_appended',
       messageId: 'msg-1',
@@ -1948,6 +1967,7 @@ describe('reduceRuntimeState — user messages', () => {
         content: 'Hello, can you help?',
       }),
     ]);
+    expect(next.terminalOutcome).toBeUndefined();
   });
 });
 

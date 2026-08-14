@@ -2084,6 +2084,7 @@ function reduceRuntimeStateWithReplayBoundary(
           turnId: state.turn.turnId,
         }),
         completionGuard: preserveV2Correction ? state.completionGuard : { correctionAttempts: 0 },
+        terminalOutcome: undefined,
         turn: {
           turnId: event.turnId,
           turnIndex: state.turn.turnIndex + 1,
@@ -2142,6 +2143,12 @@ function reduceRuntimeStateWithReplayBoundary(
       }
       return {
         ...nextState,
+        // A user-authored message is new corrective information. Preserve the
+        // Plan itself, but open a fresh bounded CompletionGuard window for the
+        // model to revise/submit it. Bare turn.started and process restart do
+        // not receive this reset, so they cannot bypass the correction ceiling.
+        completionGuard: { correctionAttempts: 0 },
+        terminalOutcome: undefined,
         transcript: {
           ...nextState.transcript,
           final: undefined,

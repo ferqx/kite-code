@@ -4,7 +4,7 @@
 
 读取时机：修改 abort/cancel、Runtime 恢复、Effect lease、消息工具对清理、工具参数异常、Subagent continuation 或 TUI 取消行为时。
 
-验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run scripts/run-tui-system-tests.ts cancel-successor-render`、`bun run typecheck`。
+验证：`bun test tests/runtime/agent-deadline.test.ts tests/runtime/cancel-resume.test.ts tests/runtime/concurrent-shell-cancel.test.ts tests/runtime/kernel.test.ts tests/runtime/reducer.test.ts tests/runtime/session-state-machine.test.ts tests/runtime/stability.test.ts tests/runtime/store.test.ts tests/runtime/file-checkpoints.test.ts tests/shell-exec.test.ts tests/tool-runner.test.ts tests/tool-parse-error.test.ts tests/context.test.ts tests/subagent-continuation-codec.test.ts tests/session-manager.test.ts tests/tui-reducer.test.ts tests/tui-replay-blocks.test.ts tests/tui-layout.test.tsx tests/tui-interrupt-clear.test.ts tests/tui-rewind-handler.test.ts`、`bun test --parallel=1 --max-concurrency=1 tests/tui-system/scenarios/file-rewind.test.ts`、`bun run scripts/run-tui-system-tests.ts cancel-successor-render`、`bun run typecheck`。
 
 ## Runtime 取消语义
 
@@ -73,6 +73,34 @@ Kernel 的 batch 后置动作必须与单事件路径等价。包含 `turn.compl
 恢复从 Runtime snapshot + event log 重建 State，并重新检查不变量。App 读取会话时必须把 rolling snapshot 之后的持久化事件尾部归并后再投影交互；已经出现 `approval.granted` 或 `approval.rejected` 的审批不得从旧快照或事件重放中复活。回放层留下的 `approval.requested` 展示投影也不能单独判定为 pending：若持久化 RuntimeState 已无 interaction（例如后续已有 `tool.started`），不得 fork 一份重复的 recovery 会话。`tool.started` 必须同步清理同一 call 的旧审批投影，否则它会阻塞后续 `approval.requested`，使真实的 `approval.rejected` 工具卡在回放中丢失。Subagent 审批的展示交互以 parent `task` call 为 owner；child Tool Call id 只标识实际待执行工具，不能导致批准或拒绝后的 Footer interrupt 残留。以下状态不得被静默丢弃：pending approval、未完成 tool call、Capability binding revision、Skill frame、required verification 和 unknown external invocation。
 
 重启不自动重放未知外部写入；必须 reconciliation 或用户决策。瞬时 binding、approval token 和 Effect lease 只能按各自恢复规则重新签发或收敛。
+
+`ask_user`、工具审批与 Plan review 的 approve/answer、reject/cancel、revise 三类终态必须在 live action batch、
+同一事件序列 replay 和 snapshot+tail restart 后得到相同的 interaction、Tool status、turn、Plan lifecycle 与
+next Effect 投影。Scheduler 与 CompletionGuard 共用当前工作作用域：带 `taskId` 的调用只属于同一
+`activeTaskId`，缺 `taskId` 的 legacy 调用只属于创建它的 turn。旧 Task/turn 的队列残留既不能被重新 dispatch，
+也不能阻塞当前 completion。若当前作用域内 Tool 仍声明 `awaiting_user_input/review/approval/auto_review`，但
+canonical interaction 已为 idle，说明持久化终态不完整；Scheduler 必须立即返回结构化
+`recovery_blocked(persistence_unavailable)`，不得继续调用模型并在 CompletionGuard 中循环成通用 `tool_pending`。
+
+用户在旧 run 已结束后发送下一条消息时，Runtime 必须先收敛当前 Task 遗留的非终态 Tool，再创建新 turn。
+这些 Tool 的内存 executor 不可能跨 run/进程继承；`runRuntimeAgent` 因而先以同一 durable batch 写入
+`tool.cancelled`，并释放 reservation、取消 waiter，必要时关闭仍为 active 的旧 turn。只有 canonical
+interaction 仍存在时才走原 interaction resume；不得把孤立的 `running/queued/approved` Tool 直接带入新
+turn，否则它会永久触发 CompletionGuard 的 `tool_pending → wait_for_tool`。
+
+当前工作作用域不只约束 Tool 队列。Tool-backed interaction、挂起 Subagent、active Skill 与 legacy Subagent
+恢复标记都必须沿其所属 Task/父 Tool 判断；旧 Task 的历史记录可以保留用于审计，但不得劫持新 Task 的
+interaction resume、模型 Skill 注入、Scheduler 或 CompletionGuard。Provider action/admission 与未知外部 invocation
+仍是 Thread/session 级安全状态，不能按 Task 静默忽略。若 Scheduler 被直接调用且发现 Tool-backed interaction
+属于旧 Task，它必须 fail closed；正常 `runRuntimeAgent` 入口则先取消该 owner Tool，使 interaction 与挂起 continuation
+通过同一 terminal event 原子收敛。新 `turn.started` 或真实 `user.message_appended` 同时清除上一轮
+`terminalOutcome` 投影，避免旧的 `unknown/completed` 终态泄漏到后继轮次。
+
+Required Provider admission 只能在 successor recovery 与新用户轮次持久化之后创建，避免 session-owned admission
+interaction 掩盖旧 Task 的 Tool 清理或吞掉本次用户消息。`user.message_appended + turn.started` 必须通过同一 Kernel
+batch 原子提交；任一持久化失败都不能留下“消息已追加但新 turn 尚未开始”的半轮次。挂起 Subagent 与 legacy
+recovery marker 仅在父 `task` Tool 存在、非终态且属于当前工作时有效；缺失/终态父 Tool 的残留是不可执行历史，
+不得进入 `wait_for_subagent` 或重复 `subagent.recovery_unavailable`。
 
 ## Rewind 文件恢复（ADR-0042 §4）
 

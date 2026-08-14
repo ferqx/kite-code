@@ -998,6 +998,63 @@ describe('eventReducer (blocks model)', () => {
       expect(card?.summary).toContain('Steps:');
       expect(card?.summary).not.toContain('"status":"approved"');
     });
+    test('revision-requested write_plan keeps the reviewed plan document instead of revision JSON', () => {
+      const plan = {
+        name: 'Login page',
+        description: 'Full reviewed plan body',
+        status: 'pending' as const,
+        steps: [{ step: 'Build entry point', id: 'entry-point', status: 'pending' as const }],
+      };
+      let s = fresh();
+      s = dispatch(s, tcEvt('revised-plan', 'write_plan', { title: plan.name }));
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'plan.review_requested',
+          interactionId: 'review-revision-1',
+          toolCallId: 'revised-plan',
+          plan,
+          planSummary: plan.description,
+        },
+      });
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'plan.revision_requested',
+          interactionId: 'review-revision-1',
+          toolCallId: 'revised-plan',
+          feedback: 'Do not implement yet.',
+        },
+      });
+      s = dispatch(s, {
+        type: 'RUNTIME_EVENT',
+        event: {
+          type: 'tool.finished',
+          toolCallId: 'revised-plan',
+          name: 'write_plan',
+          result: {
+            ok: true,
+            command: '',
+            exitCode: 0,
+            stdout: JSON.stringify({
+              ok: true,
+              status: 'revision_requested',
+              plan_id: 'plan-1',
+              feedback: 'Do not implement yet.',
+            }),
+            stderr: '',
+          },
+        },
+      });
+
+      const card = flatBlocks(s).find(
+        (block): block is Extract<OutputBlock, { kind: 'tool_card' }> =>
+          block.kind === 'tool_card' && block.callId === 'revised-plan',
+      );
+      expect(card?.summary).toContain('Full reviewed plan body');
+      expect(card?.summary).toContain('Steps:');
+      expect(card?.summary).not.toContain('"status":"revision_requested"');
+    });
     test('tool_done updates pre-consolidated summary even when the lookup map is stale', () => {
       let s = fresh();
       s = dispatch(s, tcEvt('c1', 'read_file', { path: 'a.txt' }));
