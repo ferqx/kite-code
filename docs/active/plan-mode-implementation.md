@@ -117,6 +117,8 @@ TUI 不把 `phase_deferred` 物化为 Bash 工具卡、失败提示或 deferred 
 
 `plan_review_decision` 是结构化 UserAction，包含 approve/revise/cancel。批准时明确选择下一 interaction mode；revise 必须携带反馈。Cancel 与 Esc 都表示撤销本次方案执行授权：Runtime 保留 draft，取消方案工具及所有未终结 sibling，写入 `turn.aborted(cause=user)` 并立即结束当前 turn，不再调用模型或进入执行阶段。TUI 继续展示已经持久化的 draft，但不添加本地 `Plan declined` 消息；取消终态完全由 Runtime events 投影，保证实时与 replay 一致。Ask-user 与 plan review 以 interaction/toolCall ID 精确关联，不能依赖展示文本匹配；`ask_user` 拒答仍是可继续当前 turn 的普通 Tool Result，不使用方案授权取消语义。
 
+`plan.approved.executionMode` 同时是 TUI 当前模式展示与 SessionRuntime 会话镜像的权威来源。实时事件、后台缓冲回放和历史会话加载都必须把该值投影到 `interactionMode`，使 Footer 的 StatsLine、权限选择器和下一轮会话参数保持一致；不得只更新 Core Task 的临时 `executionMode` 而让底栏继续显示审批前模式。后续持久化 `interaction_mode.changed` 表示用户更新了选择，实时与回放都必须按事件顺序由该值覆盖方案模式。
+
 `plan.review_requested` 将完整审核正文物化到对应 `write_plan` Tool Card，并在卡片上记录该正文来源；后续
 approved 或 revision_requested 的 `tool.finished` 只携带机器可读的审核 metadata，不能用该对象字符串覆盖
 已经展示的方案正文。此保护由 Tool Card 自身的审核正文标记决定，不依赖随后会被 approval/revision 改写的

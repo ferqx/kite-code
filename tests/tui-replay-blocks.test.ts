@@ -193,6 +193,60 @@ describe('TUI replay interaction recovery', () => {
     );
   });
 
+  test('restores the approved plan execution mode for the Footer', () => {
+    const plan = { name: 'Plan', description: 'Do it', status: 'pending' as const, steps: [] };
+    const result = sessionDataToUI(
+      data([
+        { type: 'tool.queued', toolCallId: 'plan-1', name: 'write_plan', args: {} },
+        {
+          type: 'plan.review_requested',
+          interactionId: 'plan-interaction',
+          toolCallId: 'plan-1',
+          plan,
+          planSummary: plan.description,
+        },
+        {
+          type: 'plan.approved',
+          interactionId: 'plan-interaction',
+          toolCallId: 'plan-1',
+          executionMode: 'auto',
+        },
+      ]),
+    );
+
+    expect(result.interactionMode).toBe('auto');
+  });
+
+  test('restores a later explicit interaction mode over the approved plan mode', () => {
+    const plan = { name: 'Plan', description: 'Do it', status: 'pending' as const, steps: [] };
+    const result = sessionDataToUI(
+      data([
+        { type: 'tool.queued', toolCallId: 'plan-1', name: 'write_plan', args: {} },
+        {
+          type: 'plan.review_requested',
+          interactionId: 'plan-interaction',
+          toolCallId: 'plan-1',
+          plan,
+          planSummary: plan.description,
+        },
+        {
+          type: 'plan.approved',
+          interactionId: 'plan-interaction',
+          toolCallId: 'plan-1',
+          executionMode: 'auto',
+        },
+        {
+          type: 'interaction_mode.changed',
+          mode: 'accept_edits',
+          source: 'user',
+          changedAt: '2026-08-14T12:00:00.000Z',
+        },
+      ]),
+    );
+
+    expect(result.interactionMode).toBe('accept_edits');
+  });
+
   test('recovers an interrupted auto_review without creating human approval UI', () => {
     const result = sessionDataToUI(
       data([

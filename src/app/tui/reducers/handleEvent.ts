@@ -3175,6 +3175,8 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       return { ...state, status: { ...state.status, phase: 'planning' } };
     case 'planning.exited':
       return { ...state, status: { ...state.status, phase: 'building' } };
+    case 'interaction_mode.changed':
+      return { ...state, interactionMode: event.mode };
     case 'plan.review_requested': {
       if (
         !interactionMatches(state, 'plan_review', event.interactionId) ||
@@ -3209,6 +3211,7 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
       return {
         ...state,
         interrupt: null,
+        interactionMode: event.executionMode,
         status: {
           ...state.status,
           phase: 'building',

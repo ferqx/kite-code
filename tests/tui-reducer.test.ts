@@ -2442,6 +2442,7 @@ describe('eventReducer (blocks model)', () => {
       expect(s.status.plan).toEqual(plan);
       expect(s.status.pendingPlan).toBeNull();
       expect(s.interrupt).toBeNull();
+      expect(s.interactionMode).toBe('auto');
 
       s = handleRuntimeEventAction(s, {
         type: 'tool.queued',
@@ -3483,6 +3484,40 @@ describe('eventReducer (blocks model)', () => {
             block.kind === 'tool_summary' && block.tools.some((tool) => tool.callId === 'read-a'),
         ),
       ).toBe(true);
+    });
+
+    test('SWITCH_SESSION restores each session interaction mode', () => {
+      const snapshot = (
+        threadId: string,
+        active: boolean,
+        interactionMode: TuiState['interactionMode'],
+      ): SessionSnapshot => ({
+        threadId,
+        name: threadId,
+        workspace: '/tmp',
+        active,
+        running: false,
+        pendingInterrupt: false,
+        interrupt: null,
+        plan: null,
+        interactionMode,
+        status: initialState.status,
+        turns: [],
+      });
+      let state: TuiState = {
+        ...fresh(),
+        activeSessionId: 'auto-session',
+        interactionMode: 'auto',
+        sessions: [
+          snapshot('auto-session', true, 'auto'),
+          snapshot('edits-session', false, 'accept_edits'),
+        ],
+      };
+
+      state = eventReducer(state, { type: 'SWITCH_SESSION', threadId: 'edits-session' });
+      expect(state.interactionMode).toBe('accept_edits');
+      state = eventReducer(state, { type: 'SWITCH_SESSION', threadId: 'auto-session' });
+      expect(state.interactionMode).toBe('auto');
     });
 
     test('SWITCH_SESSION to nonexistent session uses default empty blocks', () => {

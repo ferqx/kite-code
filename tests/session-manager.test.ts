@@ -1553,6 +1553,22 @@ describe('SessionManager', () => {
 // ── SessionRuntime ──
 
 describe('SessionRuntime', () => {
+  test('mirrors an approved plan execution mode before routing it to the TUI', () => {
+    const rt = makeRuntime();
+
+    (rt as unknown as RuntimeWithRouteRuntimeEvent)._routeRuntimeEvent(
+      {
+        type: 'plan.approved',
+        interactionId: 'review-1',
+        toolCallId: 'plan-call',
+        executionMode: 'auto',
+      },
+      () => {},
+    );
+
+    expect(rt.interactionMode).toBe('auto');
+  });
+
   test('persists an interaction-mode change to a live Kernel control', () => {
     const rt = makeRuntime();
     const kernel = createAgentKernel({

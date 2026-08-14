@@ -68,6 +68,7 @@ export type Action =
       modelName: string;
       thinkingLevel: string | null;
       reasoningEnabled?: boolean;
+      interactionMode?: TuiState['interactionMode'];
     }
   | { type: 'SELECT_MODEL'; provider: string; modelName: string; reasoningEnabled?: boolean }
   | { type: 'NEW_SESSION'; threadId: string }

@@ -217,6 +217,7 @@ export function recoverPendingInteractionsForTui(
 export function sessionDataToUI(data: SessionData): {
   blocks: OutputBlock[];
   interrupt: InterruptState | null;
+  interactionMode: import('./types.js').TuiState['interactionMode'];
   pendingToolCalls: import('./types.js').TuiState['pendingToolCalls'];
   /** The TUI hid a canonical pending interaction and must fork before new work. */
   recoveredPendingInteraction: boolean;
@@ -281,6 +282,7 @@ export function sessionDataToUI(data: SessionData): {
   return {
     blocks,
     interrupt,
+    interactionMode: state.interactionMode,
     pendingToolCalls: state.pendingToolCalls,
     recoveredPendingInteraction,
   };
