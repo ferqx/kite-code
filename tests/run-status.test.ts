@@ -243,6 +243,33 @@ describe('verb within working phase', () => {
     expect(snap.verb).toBe('Delegating');
     expect(snap.tone).toBe('success');
   });
+
+  test.each([
+    ['queued', 'Review queued', 'primary'],
+    ['auto_reviewing', 'Auto-reviewing', 'primary'],
+    ['awaiting_user', 'Awaiting approval', 'warning'],
+  ] as const)('shows %s child approval state without implying every child needs a user', (approvalState, verb, tone) => {
+    let state = dispatch(createInitialState(), { type: 'SET_RUNNING' });
+    state = dispatch(state, {
+      type: 'EVENT',
+      event: { type: 'subagent_start', data: { id: 'sub-1', role: 'review', task: 'review' } },
+    });
+    state = {
+      ...state,
+      turns: state.turns.map((turn) => ({
+        ...turn,
+        blocks: turn.blocks.map((block) =>
+          block.kind === 'subagent'
+            ? { ...block, status: 'suspended' as const, approvalState, awaitingApproval: true }
+            : block,
+        ),
+      })),
+    };
+
+    const snap = deriveRunStatusSnapshot(state);
+    expect(snap.verb).toBe(verb);
+    expect(snap.tone).toBe(tone);
+  });
 });
 
 // ── overlays ──

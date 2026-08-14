@@ -4060,6 +4060,8 @@ describe('eventReducer (blocks model)', () => {
         kind: 'subagent',
         subagentId: 'deferred-subagent',
         status: 'suspended',
+        approvalState: 'queued',
+        parentToolCallId: 'task-deferred',
         awaitingApproval: true,
         approvingStepIndex: 0,
         steps: [{ status: 'awaiting_approval' }],
@@ -4075,7 +4077,106 @@ describe('eventReducer (blocks model)', () => {
       });
       expect(flatBlocks(state)[0]).toMatchObject({
         status: 'running',
+        approvalState: undefined,
         awaitingApproval: false,
+      });
+    });
+
+    test('distinguishes queued, automatic, and human child approval phases', () => {
+      let state = handleRuntimeEventAction(fresh(), {
+        type: 'subagent.started',
+        subagent: { id: 'approval-phases', role: 'review', task: 'inspect approval phases' },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.step',
+        subagent: {
+          id: 'approval-phases',
+          toolName: 'shell_execute',
+          toolArgs: { command: 'bun test' },
+        },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'parent-task',
+        snapshot: {
+          subagentId: 'approval-phases',
+          role: 'review',
+          task: 'inspect approval phases',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          blockedTool: {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_AUTO_REVIEW',
+            toolCallId: 'child-shell',
+            toolName: 'shell_execute',
+            args: { command: 'bun test' },
+            command: 'bun test',
+          },
+        },
+      });
+      expect(flatBlocks(state)[0]).toMatchObject({ approvalState: 'queued' });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'auto_review.requested',
+        reviewId: 'review-child',
+        toolCallId: 'parent-task',
+        toolName: 'shell_execute',
+        reason: 'Automatic review required.',
+        approval: approval({ subagentId: 'approval-phases', callId: 'child-shell' }),
+      });
+      expect(flatBlocks(state)[0]).toMatchObject({
+        status: 'suspended',
+        approvalState: 'auto_reviewing',
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'auto_review.completed',
+        reviewId: 'review-child',
+        toolCallId: 'parent-task',
+        result: {
+          ok: true,
+          approved: true,
+          grant: 'approve_once',
+          reason: 'safe',
+          reviewerModelName: 'fixture',
+          durationMs: 1,
+        },
+      });
+      expect(flatBlocks(state)[0]).toMatchObject({
+        status: 'running',
+        approvalState: undefined,
+        awaitingApproval: false,
+        steps: [{ status: 'pending' }],
+      });
+
+      state = handleRuntimeEventAction(state, {
+        type: 'subagent.suspended',
+        toolCallId: 'parent-task',
+        snapshot: {
+          subagentId: 'approval-phases',
+          role: 'review',
+          task: 'inspect approval phases',
+          messages: [],
+          toolCallCount: 1,
+          steps: [],
+          blockedTool: {
+            reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+            toolCallId: 'child-shell',
+            toolName: 'shell_execute',
+            args: { command: 'bun test' },
+            command: 'bun test',
+          },
+        },
+      });
+      state = handleRuntimeEventAction(state, {
+        type: 'approval.requested',
+        interactionId: 'human-child',
+        toolCallId: 'parent-task',
+        approval: approval({ subagentId: 'approval-phases', callId: 'child-shell' }),
+      });
+      expect(flatBlocks(state)[0]).toMatchObject({
+        status: 'suspended',
+        approvalState: 'awaiting_user',
       });
     });
   });

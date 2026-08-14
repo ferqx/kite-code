@@ -273,8 +273,10 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
     多个独立 Subagent fixture 应验证同一 model response 的 sibling lifecycle 可以交错且各自保持稳定
     ID；依赖型或写范围重叠的 fixture 仍必须串行。若多个 child 同时暂停，场景必须验证只呈现一个
     canonical approval，其余 continuation 排队且随后恢复时不重新调用 child model。每个 durable
-    `subagent.suspended` 都必须立即把对应 TUI block 投影为可见的“等待审批中”状态并停止 spinner/计时，
-    不得依赖该 child 当前是否拥有唯一 approval interrupt；恢复后的下一步重新进入 running。
+    `subagent.suspended` 都必须立即停止对应 TUI block 的 spinner/计时，并通过 Runtime 后续事实区分
+    “等待自动审查”“自动审查中”和“等待你的批准”；只有最后一种表示需要用户动作。该投影不得依赖
+    child 当前是否拥有唯一 approval interrupt。自动或人工获批后必须先恢复当前 active continuation，
+    deferred sibling 不得插队；恢复后的 block 重新进入 running。
     当后续 tool call 必须使用前一 Tool result 中运行时生成的标识时，当前 queue slot 可以使用
     test-only `response(request)` resolver 从已记录的 Mock request 生成该 slot 的 response；resolver
     不能读取 queue cursor、未消费 response、Runtime state 或网络。它仍严格消耗一个 slot，且返回值

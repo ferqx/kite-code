@@ -636,6 +636,114 @@ describe('executeRuntimeTools', () => {
     }
   });
 
+  test('keeps a read-only child shell ceiling after an approved continuation resumes', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'openpx-read-only-subagent-resume-'));
+    try {
+      const state = createInitialRuntimeState({
+        threadId: 'read-only-subagent-resume',
+        userId: 'user',
+        workspace,
+      });
+      state.tools.calls.task = {
+        toolCallId: 'task',
+        modelMessageId: 'model',
+        name: 'task',
+        args: { subagent_type: 'review', task: 'Review the project without making changes.' },
+        status: 'approved',
+        approvalGrant: 'approve_once',
+        sideEffect: false,
+        createdAtTurnId: state.turn.turnId,
+      };
+      state.tools.active.push('task');
+      state.suspendedSubagents.task = serializeSubagentContinuation(
+        {
+          id: 'review-child',
+          role: getRoleConfig('review'),
+          task: 'Review the project without making changes.',
+          messages: [
+            aiMessage({
+              content: 'I will run the project tests.',
+              tool_calls: [
+                {
+                  id: 'child-shell',
+                  name: 'shell_execute',
+                  args: { command: 'bun run typecheck' },
+                },
+              ],
+            }),
+          ],
+          toolCallCount: 1,
+          steps: [
+            {
+              toolName: 'shell_execute',
+              toolArgs: { command: 'bun run typecheck' },
+              status: 'awaiting_approval',
+            },
+          ],
+          toolRecovery: createToolRecoveryJournalV1(state.toolRecovery.identityKey),
+        },
+        {
+          reasonCode: 'SUBAGENT_TOOL_REQUIRES_APPROVAL',
+          toolCallId: 'child-shell',
+          toolName: 'shell_execute',
+          args: { command: 'bun run typecheck' },
+          command: 'bun run typecheck',
+        },
+      );
+
+      let shellExecutions = 0;
+      const events = await executeRuntimeTools({
+        state,
+        toolCallIds: ['task'],
+        taskConfig: {
+          apiKey: 'unused',
+          baseURL: 'https://example.invalid',
+          modelName: 'fixture',
+          providerName: 'fixture',
+          providerType: 'openai-compatible',
+          sandbox: { enabled: false },
+        },
+        taskModel: createMockModel([
+          { message: aiMessage({ content: 'The command was rejected by the read-only ceiling.' }) },
+        ]),
+        subagentEventSink: () => {},
+        shellExecutor: async ({ command }) => {
+          shellExecutions += 1;
+          return { ok: true, command, exitCode: 0, stdout: 'unexpected', stderr: '' };
+        },
+      });
+
+      expect(shellExecutions).toBe(0);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: 'subagent.tool_result',
+          subagent: expect.objectContaining({
+            ok: false,
+            summary: expect.stringContaining('read-only command'),
+          }),
+        }),
+      );
+      expect(events).toContainEqual(expect.objectContaining({ type: 'subagent.failed' }));
+      const journalEvent = events.find(
+        (event) => event.type === 'subagent.recovery_journal_merged',
+      );
+      expect(journalEvent?.type).toBe('subagent.recovery_journal_merged');
+      if (journalEvent?.type === 'subagent.recovery_journal_merged') {
+        expect(Object.values(journalEvent.journal.failures)[0]?.outcome).toMatchObject({
+          status: 'rejected',
+          failure: { kind: 'policy_denied' },
+          dispatchState: 'not_started',
+          externalEffects: 'none',
+        });
+      }
+      expect(events).toContainEqual(
+        expect.objectContaining({ type: 'tool.finished', toolCallId: 'task' }),
+      );
+    } finally {
+      rmSync(workspace, { recursive: true, force: true });
+    }
+  });
+
   test('executes a normalized model tool name against the original remote MCP name', async () => {
     const state = createInitialRuntimeState({
       threadId: 'runtime-normalized-mcp-name',

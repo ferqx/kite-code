@@ -758,9 +758,20 @@ function addThoughtDuration(state: TuiState, durationMs: number): TuiState {
   });
 }
 
-/** Project the durable child suspension independently of whichever approval
+type SubagentApprovalState = NonNullable<
+  Extract<OutputBlock, { kind: 'subagent' }>['approvalState']
+>;
+
+/** Project the durable child approval phase independently of whichever
  * interaction currently owns the Runtime's single interrupt slot. */
-function projectSubagentSuspended(state: TuiState, subagentId: string): TuiState {
+function projectSubagentSuspended(
+  state: TuiState,
+  input: {
+    subagentId?: string;
+    parentToolCallId?: string;
+    approvalState: SubagentApprovalState;
+  },
+): TuiState {
   return {
     ...state,
     turns: state.turns.map((turn) => {
@@ -768,7 +779,9 @@ function projectSubagentSuspended(state: TuiState, subagentId: string): TuiState
       const blocks = turn.blocks.map((block) => {
         if (
           block.kind !== 'subagent' ||
-          block.subagentId !== subagentId ||
+          (input.subagentId
+            ? block.subagentId !== input.subagentId
+            : block.parentToolCallId !== input.parentToolCallId) ||
           (block.status !== 'running' && block.status !== 'suspended')
         ) {
           return block;
@@ -781,9 +794,41 @@ function projectSubagentSuspended(state: TuiState, subagentId: string): TuiState
         return {
           ...block,
           status: 'suspended' as const,
+          approvalState: input.approvalState,
+          parentToolCallId: input.parentToolCallId ?? block.parentToolCallId,
           awaitingApproval: true,
           approvingStepIndex: stepIndex >= 0 ? stepIndex : undefined,
           steps,
+        };
+      });
+      return changed ? { ...turn, blocks } : turn;
+    }),
+  };
+}
+
+function projectSubagentResuming(state: TuiState, parentToolCallId: string): TuiState {
+  return {
+    ...state,
+    turns: state.turns.map((turn) => {
+      let changed = false;
+      const blocks = turn.blocks.map((block) => {
+        if (
+          block.kind !== 'subagent' ||
+          block.parentToolCallId !== parentToolCallId ||
+          block.status !== 'suspended'
+        ) {
+          return block;
+        }
+        changed = true;
+        return {
+          ...block,
+          status: 'running' as const,
+          approvalState: undefined,
+          awaitingApproval: false,
+          approvingStepIndex: undefined,
+          steps: block.steps.map((step) =>
+            step.status === 'awaiting_approval' ? { ...step, status: 'pending' as const } : step,
+          ),
         };
       });
       return changed ? { ...turn, blocks } : turn;
@@ -1668,7 +1713,10 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
       }
       // 如果是子 agent 的工具需要审批，标记该子 agent 为等待审批状态
       if (event.data.subagentId) {
-        next = projectSubagentSuspended(next, event.data.subagentId);
+        next = projectSubagentSuspended(next, {
+          subagentId: event.data.subagentId,
+          approvalState: 'awaiting_user',
+        });
       }
       return next;
     }
@@ -1820,6 +1868,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
           },
         ],
         awaitingApproval: false, // 新步骤到来时清除等待状态
+        approvalState: undefined,
         approvingStepIndex: undefined,
       };
       return replaceBlockById(state, matched.id, next);
@@ -1888,6 +1937,7 @@ export function handleEventAction(state: TuiState, event: RenderEvent): TuiState
         ...matched,
         steps,
         awaitingApproval: false,
+        approvalState: undefined,
         approvingStepIndex: undefined,
       };
       return replaceBlockById(state, matched.id, next);
@@ -2138,7 +2188,16 @@ function clearTerminalToolApproval(state: TuiState, toolCallId: string): TuiStat
 export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): TuiState {
   switch (event.type) {
     case 'subagent.suspended':
-      return projectSubagentSuspended(state, event.snapshot.subagentId);
+      return projectSubagentSuspended(state, {
+        subagentId: event.snapshot.subagentId,
+        parentToolCallId: event.toolCallId,
+        approvalState: 'queued',
+      });
+    case 'subagent.approval_deferred':
+      return projectSubagentSuspended(state, {
+        parentToolCallId: event.toolCallId,
+        approvalState: 'queued',
+      });
     case 'subagent.started':
       return handleEventAction(state, {
         type: 'subagent_start',
@@ -2805,11 +2864,20 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
         event.toolCallId,
       );
     }
+    case 'auto_review.requested':
+      return event.approval.subagentId
+        ? projectSubagentSuspended(state, {
+            subagentId: event.approval.subagentId,
+            parentToolCallId: event.toolCallId,
+            approvalState: 'auto_reviewing',
+          })
+        : state;
     case 'auto_review.completed': {
       // Auto-review is not a user-facing interaction. Only an explicit
       // automatic rejection becomes a visible tool result; technical failure
       // is followed by approval.requested and must not be rendered as a deny.
-      if (!event.result.ok || event.result.approved || event.result.escalatedToUser) return state;
+      if (event.result.approved) return projectSubagentResuming(state, event.toolCallId);
+      if (!event.result.ok || event.result.escalatedToUser) return state;
       const outcomeV1 = canonicalToolOutcomeV1(event);
       const name =
         state.pendingToolCalls[event.toolCallId]?.name ?? visibleToolName(state, event.toolCallId);
@@ -2985,15 +3053,20 @@ export function handleRuntimeEventAction(state: TuiState, event: RuntimeEvent): 
           }
         : next;
     }
-    case 'approval.granted':
+    case 'approval.granted': {
       // Live approval is cleared by the local UI action before this durable
       // event arrives. Replay has no local action, so it must clear the same
       // Footer interrupt explicitly instead of reviving an approved request.
-      return state.interrupt?.kind === 'approval' &&
+      const withoutInterrupt =
+        state.interrupt?.kind === 'approval' &&
         state.interrupt.interactionId === event.interactionId &&
         (state.interrupt.toolCallId ?? state.interrupt.approval?.callId) === event.toolCallId
-        ? { ...state, interrupt: null }
-        : state;
+          ? { ...state, interrupt: null }
+          : state;
+      return event.toolCallId
+        ? projectSubagentResuming(withoutInterrupt, event.toolCallId)
+        : withoutInterrupt;
+    }
     case 'approval.rejected': {
       const outcomeV1 = canonicalToolOutcomeV1(event);
       if (

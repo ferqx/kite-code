@@ -120,6 +120,7 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
 
       // Verify approval dialog content
       expect(screenContains(beforeApprove, '工具授权')).toBe(true);
+      expect(screenContains(beforeApprove, '等待你的批准')).toBe(true);
       // The terminal truncates long absolute paths to fit the viewport. Prove
       // the fixture target is external separately, then assert the stable file
       // identity that remains visible in the approval card.
@@ -163,6 +164,139 @@ describe('TUI PTY System — Sub-agent External Write Approval', () => {
     'runs the complete external-write approval journey',
     () => journey.run(),
     TUI_SYSTEM_JOURNEY_TEST_TIMEOUT_MS,
+  );
+});
+
+describe('TUI PTY System — Sub-agent Automatic Review', () => {
+  let tui: PtyProcess;
+  let server: ReturnType<typeof createMockModelServer>;
+  let workspace: ReturnType<typeof createTestWorkspace>;
+  let externalFile: string;
+
+  beforeAll(async () => {
+    server = createMockModelServer();
+    workspace = createTestWorkspace({
+      configOverrides: {
+        interactionMode: 'auto',
+        sandbox: { enabled: false },
+      },
+    });
+    externalFile = join(workspace.home, 'auto-reviewed-subagent-write.txt');
+
+    server.setResponses([
+      {
+        message: {
+          content: 'I will delegate this external write.',
+          tool_calls: [
+            {
+              id: 'call_spawn_auto_reviewed_subagent',
+              name: 'task',
+              args: {
+                subagent_type: 'code',
+                task: `Write "auto review succeeded" to ${externalFile}.`,
+              },
+            },
+          ],
+        },
+      },
+      {
+        message: {
+          content: 'I will write the requested file.',
+          tool_calls: [
+            {
+              id: 'call_auto_reviewed_write',
+              name: 'write_file',
+              args: {
+                path: externalFile,
+                content: 'auto review succeeded',
+              },
+            },
+          ],
+        },
+      },
+      {
+        response: ({ messages }) => {
+          const reviewRequest = String(messages.at(-1)?.content ?? '');
+          expect(reviewRequest).toContain('Use a subagent to perform the external fixture write');
+          expect(reviewRequest).toContain('"workspaceRoot"');
+          expect(reviewRequest).toContain(
+            workspace.workspace.slice(workspace.workspace.lastIndexOf('/') + 1),
+          );
+          expect(reviewRequest).toContain('"isSubAgent": true');
+          expect(reviewRequest).toContain('"subAgentRole": "code"');
+          return {
+            // Keep the reviewer request in flight long enough to assert the transient TUI state.
+            delay: 750,
+            message: {
+              content: JSON.stringify({
+                approved: true,
+                grant: 'approve_once',
+                reason: 'The requested fixture write is scoped and reversible.',
+                riskAssessment: 'low',
+              }),
+            },
+          };
+        },
+      },
+      {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_auto_reviewed_write',
+              contentIncludes: ['auto-reviewed-subagent-write.txt'],
+            },
+          ],
+        },
+        message: { content: 'The automatically reviewed write succeeded.' },
+      },
+      {
+        expectedRequest: {
+          toolResults: [
+            {
+              toolCallId: 'call_spawn_auto_reviewed_subagent',
+              contentIncludes: ['automatically reviewed write succeeded'],
+            },
+          ],
+        },
+        message: { content: 'Automatic sub-agent review completed successfully.' },
+      },
+    ]);
+
+    tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });
+  });
+
+  afterAll(async () => {
+    await cleanupTuiSystemFixtures({ tuis: [tui], mockServers: [server], workspaces: [workspace] });
+  });
+
+  test(
+    'auto review is visible, resumes the child, and never asks the user to approve',
+    async () => {
+      await submitUserMessage(tui, server, 'Use a subagent to perform the external fixture write', {
+        timeout: 15000,
+      });
+
+      await waitForText(() => tui.viewport(), '自动审查中', TIMEOUT);
+      const duringReview = tui.viewport();
+      expect(screenContains(duringReview, '自动审查中')).toBe(true);
+      expect(screenContains(duringReview, '工具授权')).toBe(false);
+      expect(screenContains(duringReview, '等待你的批准')).toBe(false);
+
+      await waitForText(
+        () => tui.outputSinceLastAction(),
+        'Automatic sub-agent review completed successfully.',
+        TIMEOUT,
+      );
+
+      const completed = tui.viewport();
+      expect(screenContains(completed, 'Automatic sub-agent review completed successfully.')).toBe(
+        true,
+      );
+      expect(screenContains(completed, '❯')).toBe(true);
+      expect(existsSync(externalFile)).toBe(true);
+      expect(readFileSync(externalFile, 'utf8')).toContain('auto review succeeded');
+    },
+    TIMEOUT,
   );
 });
 

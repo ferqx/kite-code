@@ -100,6 +100,8 @@ interface BlockRendererProps {
   awaitingApproval?: boolean;
   /** 当 ask_user 正在等待用户输入时显示等待状态 / Show ask_user waiting state */
   awaitingInput?: boolean;
+  /** Per-card live step budget used to keep concurrent subagents below fullscreen height. */
+  maxVisibleSubagentSteps?: number;
 }
 
 const BlockRenderer = React.memo(function BlockRenderer({
@@ -110,6 +112,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
   prevBlock,
   awaitingApproval,
   awaitingInput,
+  maxVisibleSubagentSteps,
 }: BlockRendererProps) {
   const dt = useTheme();
 
@@ -212,7 +215,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
     case 'subagent':
       return (
         <Box flexDirection="column" {...gapFrom(prevBlock)}>
-          <SubAgentBlock block={block} />
+          <SubAgentBlock block={block} maxVisibleSteps={maxVisibleSubagentSteps} />
         </Box>
       );
 

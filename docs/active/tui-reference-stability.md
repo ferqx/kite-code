@@ -1,9 +1,9 @@
 # TUI useStaticContent 引用稳定性
 
 状态：active
-范围：`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/App.tsx`、`src/app/tui/OutputArea.tsx`、`src/app/tui/components/BlockRenderer.tsx`
+范围：`src/app/tui/render/useStaticContent.tsx`、`src/app/tui/App.tsx`、`src/app/tui/OutputArea.tsx`、`src/app/tui/components/BlockRenderer.tsx`、`src/app/tui/components/SubAgentBlock.tsx`
 读取时机：修改 `useStaticContent` 缓存逻辑、新增 OutputBlock 类型、怀疑重复渲染/性能问题时必读。
-验证：`bun test tests/tui-layout.test.tsx tests/tui-static-promote.test.tsx tests/tui-static-content.test.tsx tests/tui-scroll-reset.test.tsx`（验证 Static/Dynamic 分界、长回答渐进冻结和重复渲染防重）
+验证：`bun test tests/tui-layout.test.tsx tests/tui-static-promote.test.tsx tests/tui-static-content.test.tsx`（验证 Static/Dynamic 分界、长回答渐进冻结、并发子 Agent 动态高度和重复渲染防重）
 
 ## 问题
 
@@ -114,6 +114,12 @@ L3: React.memo(BlockRenderer)  → 拦截未变化 block 的 React 子树渲染
 | tool spinner / elapsed tick | 命中 | — | — | 仅 memo 的运行态 ToolCard 标题更新 |
 | C running→done, A/B running | 不命中 → split 重算 | 命中（settled 组相同） | C block 引用变 → 渲染；A/B 引用不变 → 跳过 | 仅 C 重渲染 |
 | 新 block 追加 | 不命中 → split 重算 | 不命中 | 新 block 渲染 | 新 block 渲染 |
+
+### 并发子 Agent 的动态高度预算
+
+引用稳定只能避免无意义的父树 diff；`SubAgentBlock` 自身的计时器和进度仍会产生合法帧。Ink 7 在动态帧高度达到终端行数时会进入全屏清除路径，这会重置用户正在查看的原生 scrollback 位置。`App` 因此把 `useWindowSize().rows` 传给 `OutputArea`：单个子 Agent 保持最近 5 步，多张可变卡片则共享扣除 Footer、卡片固定行和 block 间距后的步骤行预算，并移除 OutputArea 与 Footer 之间的普通空白行作为一行安全余量。任意文本/工具 block 不参与启发式估高；混合可变尾部对子 Agent 步骤采用 0 行保守预算。预算为 0 时仍显示折叠计数与状态行，只隐藏步骤正文；完整步骤仍留在 TUI state 和 Runtime 事实中。
+
+该策略只约束并发运行态的可变尾部，不引入 OutputArea 历史视口裁剪，不移动 Static/dynamic 分界，也不清除终端 scrollback。回归测试必须同时断言单卡仍显示 5 步、四卡小视口只显示各自最新步骤，并且渲染帧行数低于终端高度。
 
 ## 新增 block 类型 Checklist
 

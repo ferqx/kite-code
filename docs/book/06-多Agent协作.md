@@ -41,7 +41,7 @@ SubAgentRunner 只通过父 Runtime 传入的 `McpRuntimeProvider` 访问 MCP，
 
 子 Agent 遇到需要用户审批的操作时不能自行批准。Runner 产生 blocked tool 与可序列化 continuation，主 Runtime 请求用户决策；批准后恢复同一个调用身份和执行上下文，拒绝则把结构化拒绝结果反馈给子 Agent。
 
-continuation codec 保存消息、步骤、journal 和阻塞请求，并在恢复时严格校验。它不是让子 Agent绕过审批的离线执行通道。
+continuation codec 保存消息、步骤、journal 和阻塞请求，并在恢复时严格校验。它不是让子 Agent绕过审批的离线执行通道；批准也不能扩大 role ceiling，explore/plan/review 的恢复工具仍使用与首次执行相同的只读 Shell executor。
 
 这里的 current journal 是与父 Runtime 同构的 `ToolRecoveryJournalV1`：包含私有 HMAC identity、
 failure instance、`recoveryOf`、一次模型修正/自动重放 ceiling 和 tool-owned progress。continuation
@@ -68,7 +68,8 @@ Task Tool 按 Runtime/线程限制活动数量。取消通过 AbortController �
 `maxConcurrentSubagents`、writer ceiling 和累计预算进一步缩小批次。模型应把独立且值得调用的任务
 一起发出，但依赖前序结果的任务与写范围重叠的 code tasks 必须串行。Controller 为每个 child 保留
 独立 ID/stream/continuation ownership；多个 child 同时需要审批时先保存全部 snapshot，只呈现第一个
-交互，其余通过 `subagent.approval_deferred` 排队并在前一个收敛后继续（ADR-0104）。
+canonical interaction，其余通过 `subagent.approval_deferred` 排队。当前 child 自动或人工获批后，
+Scheduler 先恢复该 active continuation；只有它完成或再次暂停后才处理 deferred sibling（ADR-0104）。
 
 ## 6.6 累计预算、取消与恢复
 
@@ -95,7 +96,8 @@ resource-only bounded reconciliation 提交，child tool/model terminal 本身�
 required Verification，也不能把 `unknown`、`budget_exhausted` 或 `resource_saturated` 显示为
 完成。
 
-UI 与 Runtime 的 child 生命周期共用 `running | suspended | terminal`语义：等待用户
-审批是 suspended，批准恢复后重回 running，只有规范 terminal event 才显示 done/error/
-cancelled。成功 child 统一投影 `completed`；恢复历史由 canonical Recovery Journal 保留，不再复制为另一套 UI/协议完成态。同一 child 不得同时显示 failed 与 done。
+UI 与 Runtime 的 child 生命周期共用 `running | suspended | terminal` 语义。suspended 进一步区分
+等待自动审查、自动审查中和等待用户批准；只有最后一种需要用户动作。自动或人工批准后立即重回
+running，只有规范 terminal event 才显示 done/error/cancelled。成功 child 统一投影 `completed`；
+恢复历史由 canonical Recovery Journal 保留，不再复制为另一套 UI/协议完成态。同一 child 不得同时显示 failed 与 done。
 role 选择由模型按用户任务语义完成：只读工作使用 explore/plan/review，用户任务要求实施时才使用 code。child 的模型 schema、Registry parse、执行与 resume 使用同一 config、phase、live interaction mode、authorization、gitBroker 与 availability context；typed Git 只能经只读 broker，不能隐式退回 raw Shell，写操作仍由 code role 的既有 Runtime policy 治理。

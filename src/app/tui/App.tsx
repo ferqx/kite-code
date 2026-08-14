@@ -127,7 +127,7 @@ export default function App({
 }: AppProps) {
   const t = useTheme();
   const slashListHeight = useOverlayHeight(7);
-  const { columns } = useWindowSize();
+  const { columns, rows } = useWindowSize();
   const modalOverlayActive =
     state.showHelp ||
     state.showModelSelector ||
@@ -335,6 +335,7 @@ export default function App({
         awaitingApproval={awaitingApproval}
         awaitingInput={awaitingInput}
         columns={columns}
+        rows={rows}
         compactionPhase={state.compactionProgress?.phase}
       />
 

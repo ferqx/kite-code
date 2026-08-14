@@ -816,6 +816,87 @@ describe('decideNextEffect', () => {
     expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['queued-tool'] });
   });
 
+  test('resumes an approved suspended child before a deferred queued sibling', () => {
+    const state = createInitialRuntimeState({
+      threadId: 'approved-child-before-deferred-sibling',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    queueCall(state, 'deferred-task', {
+      name: 'task',
+      args: { subagent_type: 'review', task: 'Review the deferred sibling.' },
+      effectClass: 'read_only',
+      sideEffect: false,
+    });
+    state.suspendedSubagents['deferred-task'] = {} as never;
+    state.tools.active.push('approved-task');
+    state.tools.calls['approved-task'] = {
+      toolCallId: 'approved-task',
+      modelMessageId: 'model',
+      name: 'task',
+      args: { subagent_type: 'review', task: 'Resume the approved child.' },
+      status: 'approved',
+      createdAtTurnId: state.turn.turnId,
+    };
+    state.suspendedSubagents['approved-task'] = {} as never;
+
+    expect(decideNextEffect(state)).toEqual({
+      type: 'run_tools',
+      toolCallIds: ['approved-task'],
+    });
+  });
+
+  test('preserves the current child across concurrent suspension, deferral, and auto-review', () => {
+    let state = createInitialRuntimeState({
+      threadId: 'concurrent-child-auto-review-order',
+      userId: 'u',
+      workspace: '/workspace',
+    });
+    for (const id of ['task-a', 'task-b']) {
+      queueCall(state, id, {
+        name: 'task',
+        args: { subagent_type: 'review', task: `Review ${id}.` },
+        effectClass: 'read_only',
+        sideEffect: false,
+      });
+      state = reduceRuntimeState(state, { type: 'tool.started', toolCallId: id });
+      state = reduceRuntimeState(state, {
+        type: 'subagent.suspended',
+        toolCallId: id,
+        snapshot: {} as never,
+      });
+    }
+    state = reduceRuntimeState(state, {
+      type: 'auto_review.requested',
+      reviewId: 'review-a',
+      toolCallId: 'task-a',
+      toolName: 'shell_execute',
+      reason: 'Review child command.',
+      approval: {} as never,
+    });
+    state = reduceRuntimeState(state, {
+      type: 'subagent.approval_deferred',
+      toolCallId: 'task-b',
+    });
+    state = reduceRuntimeState(state, {
+      type: 'auto_review.completed',
+      reviewId: 'review-a',
+      toolCallId: 'task-a',
+      result: {
+        ok: true,
+        approved: true,
+        grant: 'approve_once',
+        reason: 'safe',
+        reviewerModelName: 'fixture',
+        durationMs: 1,
+      },
+    });
+
+    expect(state.tools.calls['task-a']?.status).toBe('approved');
+    expect(state.tools.calls['task-b']?.status).toBe('queued');
+    expect(decideNextEffect(state)).toEqual({ type: 'run_tools', toolCallIds: ['task-a'] });
+  });
+
   test('resumes a queued tool after auto-review approval', () => {
     const state = createInitialRuntimeState({ threadId: 't', userId: 'u', workspace: '/' });
     state.tools.queue.push('shell-tool');
