@@ -43,7 +43,7 @@ MCP 是相同边界的 control-plane 示例：`App` 只接收 `McpController`，
 
 模型流式展示采用分层完整提交：reasoning delta 只进入缓存，连续 reasoning 段完成后一次性更新 Thought 的活动窗口，最终回答可见后移除 reasoning 正文并只保留 `Thought for Xs` 摘要。普通文本按整段提交，列表按完整 item 提交；围栏代码与表格在结构可识别后先建立完整组件外壳，再只追加已经换行完成的内部行，组件关闭后进入静态历史。
 
-静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。交互式入口直接使用终端主屏缓冲区，不启用 Ink alternate screen；运行内容保留在终端原生 scrollback 中，退出时不恢复进入 TUI 前的旧画面。实际同批派发的多个子 Agent 使用一张 Thought-like `Delegating · N agents` 聚合卡，默认显示各 child 的任务与状态，Enter 展开后才显示步骤尾，全组终态后以一条 `Delegated` 摘要进入历史。动态区依据终端行列预算压缩步骤和 child 摘要，空间不足时保持紧凑态，避免 Ink 因可变帧达到整屏高度而清屏并重置用户的原生滚动位置；聚合和折叠不修改完整运行事实。输入框内的大粘贴可显示占位符以保持编辑可用；发送后的用户消息最多显示 30 个实际视觉行，超出时保留开头和结尾，并以不计入行数的 `【已省略 N 行】` 标记中间内容；完整原文仍提交给 Runtime 并持久化。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
+静态历史区与动态输入/状态区分离，以减少 Ink 重排和终端闪烁。交互式入口直接使用终端主屏缓冲区，不启用 Ink alternate screen；运行内容保留在终端原生 scrollback 中，退出时不恢复进入 TUI 前的旧画面。实际同批派发的多个子 Agent 使用一张 Thought-like `Delegating · N agents` 聚合卡，默认显示各 child 的任务与状态，Enter 展开后才显示步骤尾，全组终态后以一条 `Delegated` 摘要进入历史。聚合卡与 Footer 的 `Working` 状态之间固定保留一行视觉间距。动态区依据终端行列预算压缩步骤和 child 摘要，并在计入该间距后仍保持低于 Ink 整屏阈值；空间不足时保持紧凑态，避免清屏并重置用户的原生滚动位置。聚合和折叠不修改完整运行事实。输入框内的大粘贴可显示占位符以保持编辑可用；发送后的用户消息最多显示 30 个实际视觉行，超出时保留开头和结尾，并以不计入行数的 `【已省略 N 行】` 标记中间内容；完整原文仍提交给 Runtime 并持久化。软换行、宽字符、粘贴占位、resize 和同步输出均有专门测试。
 
 Header 是每个会话写入 Static scrollback 的启动快照：低对比度圆角边框包裹 `──◆ Kite Code` 品牌字标，品牌行、模型和工作区在边框内统一左对齐。它不承担 working/error 等实时状态；同一会话切换模型时不重绘历史 Header，当前模型继续由 Footer 展示。窄屏会隐藏推理强度，并从中部截断过长路径。完整视觉与状态契约见 [`../active/tui-session-startup-card.md`](../active/tui-session-startup-card.md)。
 

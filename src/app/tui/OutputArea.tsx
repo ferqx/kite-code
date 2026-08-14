@@ -36,9 +36,9 @@ interface OutputAreaProps {
   compactionPhase?: ContextCompactionProgressPhase;
 }
 
-// Footer/status/prompt plus OutputArea's normal bottom gap consume five rows.
-// Concurrent child layouts suppress that gap, leaving one safety row because
-// Ink treats outputHeight === rows as full-screen.
+// Footer/status/prompt plus OutputArea's bottom gap consume five rows. The
+// child budget also keeps one explicit safety row because Ink treats
+// outputHeight === rows as full-screen.
 const DYNAMIC_CHROME_ROWS = 5;
 const SUBAGENT_CARD_OVERHEAD_ROWS = 3;
 
@@ -181,8 +181,6 @@ export default function OutputArea({
     [visibleDynamicBlocks],
   );
   const maxVisibleSubagentSteps = concurrentSubagentStepLimit(visibleDynamicBlocks, rows);
-  const hasConcurrentSubagents =
-    visibleDynamicBlocks.filter((block) => block.kind === 'subagent').length > 1;
   const dynamicBlocksRef = useRef(visibleDynamicBlocks);
   dynamicBlocksRef.current = visibleDynamicBlocks;
 
@@ -212,7 +210,7 @@ export default function OutputArea({
   const hasMessages = mergedStaticBlocks.length + visibleDynamicBlocks.length > 0;
 
   return (
-    <Box flexDirection="column" marginBottom={hasMessages && !hasConcurrentSubagents ? 1 : 0}>
+    <Box flexDirection="column" marginBottom={hasMessages ? 1 : 0}>
       <Box height={0} overflow="hidden">
         {staticPresentationItems && staticKey && (
           <Static key={staticKey} items={staticPresentationItems}>
@@ -275,7 +273,7 @@ export default function OutputArea({
                     dynamicRenderItems.length === 1
                       ? Math.max(
                           0,
-                          Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 1 - topMarginRows,
+                          Math.floor(rows ?? 24) - DYNAMIC_CHROME_ROWS - 2 - topMarginRows,
                         )
                       : 0
                   }

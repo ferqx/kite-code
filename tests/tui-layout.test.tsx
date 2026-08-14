@@ -1797,6 +1797,7 @@ describe('concurrent subagent dynamic height', () => {
     expect(frame).toContain('Delegating · 4 agents');
     expect(frame.match(/Explore · inspect area/g)).toHaveLength(4);
     expect(frame).not.toContain('child_1_step_10');
+    expect(frame.endsWith('\n')).toBe(true);
     // The production App adds the four-row running Footer/prompt below OutputArea.
     expect(frame.split('\n').length + 4).toBeLessThan(24);
   });

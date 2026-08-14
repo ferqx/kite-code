@@ -63,7 +63,7 @@ Ink 的 `renderNodeToOutput` 每帧遍历整棵树生成输出字符串，开销
 - 用户消息在发送后保留首尾上下文：按终端视觉宽度换行后最多显示 30 行实际内容，超过时保留前后各 15 行，并在中间以弱化文本色提示 `【已省略 N 行】`；提示不计入 30 行，也不保留额外空行。完整内容仍保留在 Runtime 请求与会话持久化中；单条消息最多创建 31 个行节点。
 - 新提交且尚无后续 block 的用户消息暂留 dynamic 区；首个后续 block 到达后才进入 Static，避免长消息提交时 Static/dynamic 交接导致终端整屏短暂清空。
 - 活跃消息（streaming/running/interrupt）必须留在 dynamic 树，不得进入 `<Static>`
-- 并发子 Agent 默认必须使用单个 Thought-like 聚合卡；展开时步骤尾上限随终端行数自适应，折叠与聚合只影响展示，不得删除 reducer/Runtime 中的步骤
+- 并发子 Agent 默认必须使用单个 Thought-like 聚合卡；卡片与 Footer/Working 状态之间保留一个空白行，展开时步骤尾上限随终端行数自适应，折叠与聚合只影响展示，不得删除 reducer/Runtime 中的步骤
 - 已提交的相邻 text blocks 是 append-only 前缀；不得把“相邻文本可能合并”作为阻止渐进冻结的理由
 - 正常长回答的 dynamic 后缀必须只包含仍可变化的当前组件，不能随已提交段落数线性增长
 - 流式文本只允许冻结 fenced code 之外、已有后继内容的空行边界；不得在未闭合代码块内部拆分，也不得冻结仍处于尾部的 Markdown 组件

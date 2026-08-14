@@ -119,7 +119,7 @@ L3: React.memo(BlockRenderer)  → 拦截未变化 block 的 React 子树渲染
 
 引用稳定只能避免无意义的父树 diff；并发 child 的计时器和步骤更新仍会产生合法帧。Ink 7 在动态帧高度达到终端行数时会进入全屏清除路径，这会重置用户正在查看的原生 scrollback 位置。Runtime Executor 只为实际同批并发派发的 `task` sibling 在 `subagent.started` 上写入同一 `concurrencyGroupId`；TUI 不再从相邻 block 或 suspended 状态猜测并发。`OutputArea` 将该身份组投影为一个 memoized `ConcurrentSubAgentBlock`：折叠态只保留组标题和每个 child 的一行活动摘要；Enter 展开时才渲染原 `SubAgentBlock` 步骤尾。`visibleDynamicBlocks` 与聚合后的 render items 必须按输入引用 memoize，避免 App 的无关更新重建整个活动组。组内先完成的 block 不单独进入 append-only Static，必须等待全组终态后作为单个摘要提升，防止已输出的 sibling 无法再聚合。`approvalState` 属于 Subagent fingerprint，保证 queued → auto-reviewing → awaiting-user 的卡片文案不被缓存为旧值。
 
-展开态仍由 `App` 把 `useWindowSize().rows` 传给 `OutputArea`，多个 child 共享扣除 Footer、卡片固定行、Static→dynamic 顶部间距和 block 间距后的步骤行预算，并移除 OutputArea 与 Footer 之间的普通空白行作为安全余量。小终端若无法容纳展开后的固定 child 结构，保持紧凑态并继续按行预算折叠 child 摘要；标题、摘要、折叠提示和完整步骤行用真实列数截断。任意文本/工具 block 不参与启发式估高；混合可变尾部对 child 步骤和摘要采用 0 行保守预算。折叠、聚合与预算只影响展示，完整步骤仍留在 TUI state 和 Runtime 事实中。
+展开态仍由 `App` 把 `useWindowSize().rows` 传给 `OutputArea`，多个 child 共享扣除 Footer、卡片固定行、Static→dynamic 顶部间距、OutputArea→Footer 的一行视觉间距和 block 间距后的步骤行预算，并额外保留一行 Ink 全屏阈值安全余量。小终端若无法容纳展开后的固定 child 结构，保持紧凑态并继续按行预算折叠 child 摘要；标题、摘要、折叠提示和完整步骤行用真实列数截断。任意文本/工具 block 不参与启发式估高；混合可变尾部对 child 步骤和摘要采用 0 行保守预算。折叠、聚合与预算只影响展示，完整步骤仍留在 TUI state 和 Runtime 事实中。
 
 该策略只约束并发运行态的可变尾部，不引入 OutputArea 历史视口裁剪，不清除终端 scrollback。回归测试必须同时断言单 child 仍显示 5 步、并发组默认只显示 child 活动摘要、展开后各 child 仅显示预算内最新步骤、全组终态后只输出一条 Static 聚合摘要，且常规折叠帧低于终端高度。
 
