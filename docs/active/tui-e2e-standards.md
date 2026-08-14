@@ -4,7 +4,7 @@
 
 读取时机：新增或修改 `tests/tui-system/`、终端交互、mock model server、SessionRuntime 或跨进程恢复场景时。
 
-验证：`bun run test:tui:harness`、`bun run test:tui:system`、`bun run test:tui:system:core`。
+验证：`bun run test:tui:harness`、`bun run test:tui:system`、`bun run test:tui:system:core`；取消后 scrollback 单次提示词回归可定向运行 `bun run scripts/run-tui-system-tests.ts interrupt`。
 
 ## 测试边界
 

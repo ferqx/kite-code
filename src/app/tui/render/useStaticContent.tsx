@@ -357,9 +357,9 @@ export function useStaticContent({
   const activeSettledRef = useRef<OutputBlock[]>([]);
   const activeDynamicRef = useRef<OutputBlock[]>([]);
 
-  let fingerprint = '';
+  let fingerprint = running ? 'running:' : 'idle:';
   if (activeTurn) {
-    fingerprint = activeTurn.blocks.map(blockFingerprint).join(',');
+    fingerprint += activeTurn.blocks.map(blockFingerprint).join(',');
   }
 
   if (fingerprint !== prevFingerprintRef.current) {
@@ -375,11 +375,21 @@ export function useStaticContent({
       // 修改的 block 才能离开动态树；一旦遇到第一个仍可变的块，其后的块
       // 全部留在动态树（保证 Static→动态的渲染顺序）。
       const blocks = activeTurn.blocks;
-      let split = 0;
-      while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
-        split++;
+      let split = activeSettledRef.current.length;
+      if (running) {
+        split = 0;
+        while (split < blocks.length && isBlockSettledInRun(blocks[split]!, blocks, split)) {
+          split++;
+        }
       }
-      nextSettled = blocks.slice(0, split);
+
+      // Ink Static is append-only. Once the run reaches an idle/cancelled
+      // terminal frame, do not promote any more of the latest turn: doing so
+      // writes content that was already visible in the dynamic tree into
+      // terminal scrollback a second time. Preserve only the prefix that was
+      // committed while the run was live and keep the terminal suffix dynamic
+      // until a successor turn or remount makes this turn immutable history.
+      nextSettled = running ? blocks.slice(0, split) : activeSettledRef.current;
       nextDynamic = blocks.slice(split);
     } else {
       nextSettled = [];

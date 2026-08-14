@@ -35,6 +35,7 @@
 验证：
 
 - `bun run test:tui:system` — 验证真实 PTY 下输出区仍可交互、不会因视口变化崩溃
+- `bun run scripts/run-tui-system-tests.ts interrupt` — 验证可见 Thought 取消后用户提示词在 scrollback 中只出现一次
 - `bun test tests/tui-layout.test.tsx` — 验证 OutputArea 渲染完整性
 - `bun test tests/tui-reducer.test.ts` — 验证 reducer 引用稳定性
 - `bun test tests/tui-layout.test.tsx tests/tui-static-promote.test.tsx tests/tui-static-content.test.tsx` — 验证长回答只保留可变尾部、并发子 Agent 动态帧保持低于 Ink 全屏清除阈值
@@ -49,7 +50,7 @@ OutputArea 使用 `<Static>` / dynamic 分割，基于 **Turn 模型**：
 2. 当前活跃 turn → 保留在 dynamic 树实时更新
 3. `<Static>` 容器用 `<Box height={0} overflow="hidden">` 包裹，避免 Ink 布局占位产生空白
 4. **分割策略**：比最新 live tail 更早的 turn 全部进入 Static；最新 turn 在运行结束后仍保持 live tail，直到下一条用户消息建立新 turn，避免 Windows 主屏在终态同帧 Static/dynamic 交接时留下重复帧。会话重挂载且空闲时，完整历史可一次性进入 Static。
-5. live tail 内继续按连续不可变前缀渐进分割；分割点只能向后移动，已经提交的完整 Markdown text block 和已经结算的 Thought/tool summary 必须立即进入 Static，不得因后续还有相邻 text block 而留在 dynamic。
+5. live tail 在 run 仍为 running 时按连续不可变前缀渐进分割；分割点只能向后移动，已经提交的完整 Markdown text block 和已经结算的 Thought/tool summary 必须立即进入 Static，不得因后续还有相邻 text block 而留在 dynamic。run 因完成或取消进入 idle 的终止帧不得继续推进分割点：已经提交的 Static 前缀保持不变，新结算的 Thought/工具/文本后缀继续留在 dynamic，直到 successor turn 或会话 remount 接管历史提升。尤其取消纯思考阶段时，不得把刚结算的 Thought 连同已显示的用户提示词再次写入 append-only Static。
 6. 长流式 Markdown 不得始终作为一个不断增高的 dynamic block：已经出现后继内容的完整顶层组件，在 fenced code 之外的空行边界冻结为 settled text block 并进入 `<Static>`；只有当前仍可能变形的 Markdown 组件留在 dynamic tree。这样表格、列表、代码块不会从中间拆开，同时避免 dynamic 输出超过终端高度后 Ink 每帧整屏清除并重置用户的原生滚动位置。
 7. Scheduler/Executor 只为同一次实际获准的并发 `task` 批次在 `subagent.started` 上写入同一 `concurrencyGroupId`；串行、审批后单独恢复或不同 wave 不得由 TUI 猜测成一组。TUI reducer 只透传该身份，`OutputArea` 把组渲染为一张 Thought-like `Delegating · N agents` 卡片：默认只展示每个 child 的角色、任务摘要和当前状态，Enter 展开后才渲染原始工具步骤尾。组内先结束的 child 必须留在 dynamic suffix，直到所有 sibling 进入终态后以一条 `Delegated` 摘要进入 append-only Static；摘要必须把成功明确写为 `succeeded`，并单列 `failed`/`cancelled`，不得把“已结束”或失败 child 表述为完成。终态圆点保留自身状态色；`Delegated` 汇总标题使用与普通已结算工具相同的弱化文本色，不以成功色或主题主色高亮。展开态按 `useWindowSize().rows` 共享步骤行预算，并把 Static→dynamic 的顶部间距计入固定高度；若终端连 child 标题/折叠计数/终态行的固定结构都容纳不下，展开请求保持紧凑态，并按可用行数折叠 child 摘要。组标题、child 摘要、折叠提示和展开步骤整行都必须按真实终端列数截断；不得使用虚拟最小宽度或让长工具名自动换行。可变尾部混有任意文本/工具 block 时，child 步骤和摘要预算保守降为 0。折叠、聚合和小终端降级只影响展示，不得删除 reducer/Runtime 中的完整步骤。
 

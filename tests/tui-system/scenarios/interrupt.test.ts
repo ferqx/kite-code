@@ -19,7 +19,12 @@ import { cleanupTuiSystemFixtures } from '../harness/fixture-lifecycle';
 import { createMockModelServer } from '../harness/fixtures';
 import { submitUserMessage } from '../harness/input-helpers';
 import { type PtyProcess, spawnReadyTui, waitForTuiReady } from '../harness/pty-process';
-import { screenContains, stripAnsi, waitForOutputQuiescence } from '../harness/terminal-screen';
+import {
+  screenContains,
+  stripAnsi,
+  waitForOutputQuiescence,
+  waitForText,
+} from '../harness/terminal-screen';
 import { createTestWorkspace } from '../harness/test-workspace';
 
 const TIMEOUT = 30000;
@@ -72,6 +77,31 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       // The delayed response should NOT have arrived (5s delay, checked at ~1.5s)
       expect(screenContains(output, 'This response will be interrupted')).toBe(false);
       expect(scrollback.split('Interrupt me').length - 1).toBe(1);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    'cancelling a visible Thought keeps the user prompt single in scrollback',
+    async () => {
+      server.setResponses([
+        {
+          message: {
+            reasoning_chunks: ['Thinking before cancellation.'],
+            content_chunks: ['unfinished', ' response'],
+          },
+          chunk_delay: 700,
+        },
+      ]);
+
+      await submitUserMessage(tui, server, 'Cancel after Thought appears');
+      await waitForText(() => tui.viewport(), 'Thought for', 10_000);
+      tui.write('\x03');
+      await waitForTuiReady(tui);
+
+      const scrollback = stripAnsi(tui.scrollback());
+      expect(scrollback.split('Cancel after Thought appears').length - 1).toBe(1);
+      expect(screenContains(tui.viewport(), '❯')).toBe(true);
     },
     TIMEOUT,
   );

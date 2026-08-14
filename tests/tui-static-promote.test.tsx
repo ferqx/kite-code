@@ -86,6 +86,20 @@ function PromotionHarness({ blocks }: { blocks: OutputBlock[] }) {
   });
 }
 
+function SplitHarness({ blocks, running }: { blocks: OutputBlock[]; running: boolean }) {
+  const projection = useStaticContent({
+    turns: [{ blocks }],
+    running,
+    sessionKey: 2,
+    header: React.createElement(Text, null, 'HEADER'),
+  });
+  return React.createElement(
+    Text,
+    null,
+    `static:${projection.mergedStaticBlocks.map((block) => block.id).join(',')};dynamic:${projection.activeDynamicBlocks.map((block) => block.id).join(',')}`,
+  );
+}
+
 describe('isBlockSettledInRun', () => {
   test('finished non-exploration tool card is settled', () => {
     const blocks = [toolBlock(1, 'done') as OutputBlock, textBlock(2, 'answer')];
@@ -254,6 +268,38 @@ describe('isBlockSettledInRun', () => {
 });
 
 describe('promotion does not duplicate output', () => {
+  test('does not promote the latest Thought again when cancellation settles it', () => {
+    const user: Extract<OutputBlock, { kind: 'user' }> = {
+      id: 1,
+      kind: 'user',
+      content: 'inspect this',
+    };
+    const thinking: Extract<OutputBlock, { kind: 'tool_summary' }> = {
+      id: 2,
+      kind: 'tool_summary',
+      tools: [],
+      totalElapsedMs: 5,
+      createdAt: 1,
+      summaryLine: '',
+      active: true,
+      hasThought: true,
+      hasThinking: true,
+    };
+    const view = render(
+      React.createElement(SplitHarness, { blocks: [user, thinking], running: true }),
+    );
+    expect(view.lastFrame()).toContain('static:1;dynamic:2');
+
+    view.rerender(
+      React.createElement(SplitHarness, {
+        blocks: [{ ...user }, { ...thinking, active: false, result: 'cancelled' }],
+        running: false,
+      }),
+    );
+
+    expect(view.lastFrame()).toContain('static:1;dynamic:2');
+  });
+
   test('promotes the real dynamic sibling group to one Static item in the same mount', () => {
     const early: OutputBlock[] = [
       subagentBlock(1, 'done', 'batch-1'),
