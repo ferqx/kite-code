@@ -2802,11 +2802,11 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     // 标题行 = 累加时长 + 合并统计；旁白位于标题之下、步骤树之上
-    expect(frame).toContain('Thinking · 13s · read 2 files');
+    expect(frame).toContain('Thinking 13s · read 2 files');
     expect(frame).toContain('让我系统地阅读 TUI 模块的核心文件。');
     expect(frame).toContain('Now the remaining pieces.');
     const captionIdx = frame.indexOf('让我系统地阅读');
-    const headerIdx = frame.indexOf('Thinking · 13s');
+    const headerIdx = frame.indexOf('Thinking 13s');
     const stepsIdx = frame.indexOf('Read App.tsx');
     expect(captionIdx).toBeGreaterThan(headerIdx);
     expect(captionIdx).toBeLessThan(stepsIdx);
@@ -2832,7 +2832,7 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Thinking · 1s');
+    expect(frame).toContain('Thinking 1s');
     expect(frame).toContain('checking current Thought boundaries');
     expect(frame).not.toContain('├─ Read');
   });
@@ -2868,7 +2868,7 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Thinking · 1s');
+    expect(frame).toContain('Thinking 1s');
     expect(frame).not.toContain('the complete reasoning stream appears atomically');
     expect(frame).not.toContain('Read App.tsx');
     expect(frame).not.toContain('●');
@@ -3023,8 +3023,8 @@ describe('BlockRenderer', () => {
 
     expect(frame).toContain('reviewing the project conventions');
     expect(frame).not.toContain('Read README.md');
-    // 思考块标题 = "Thinking · Xs · <工具统计>"（· 分隔，规则 22）
-    expect(frame).toContain('Thinking · 1s · read 3 files');
+    // 思考块标题 = "Thinking Xs · <工具统计>"（· 分隔，规则 22）
+    expect(frame).toContain('Thinking 1s · read 3 files');
   });
 
   test('thinking block header appends tool stats and truncates them to fit narrow terminals', () => {
@@ -3049,26 +3049,26 @@ describe('BlockRenderer', () => {
       tools,
     } as Extract<OutputBlock, { kind: 'tool_summary' }>;
 
-    // 宽终端：完整后缀 "Thinking · Xs · <统计>"
+    // 宽终端：完整后缀 "Thinking Xs · <统计>"
     const wideFrame =
       render(
         <BlockRenderer columns={100} block={wide} isFocused={false} index={0} />,
       ).lastFrame() ?? '';
-    expect(wideFrame).toContain('  Thinking · 2s · read 3 files, searched for 2 patterns');
+    expect(wideFrame).toContain('  Thinking 2s · read 3 files, searched for 2 patterns');
     expect(wideFrame).not.toContain('●');
 
     // 窄终端：前缀完整保留，统计后缀按宽度截断（… 省略号）
     const narrowFrame =
       render(<BlockRenderer columns={40} block={wide} isFocused={false} index={0} />).lastFrame() ??
       '';
-    expect(narrowFrame).toContain('Thinking · 2s · read 3 files, searche…');
+    expect(narrowFrame).toContain('Thinking 2s · read 3 files, searched …');
     expect(narrowFrame).not.toContain('searched for 2 patterns');
 
     // 极窄终端：后缀整体省略，不留孤悬分隔符
     const tinyFrame =
       render(<BlockRenderer columns={18} block={wide} isFocused={false} index={0} />).lastFrame() ??
       '';
-    expect(tinyFrame).toContain('Thinking · 2s');
+    expect(tinyFrame).toContain('Thinking 2s');
     expect(tinyFrame).not.toContain('●');
   });
 
@@ -3229,7 +3229,7 @@ describe('BlockRenderer', () => {
     );
 
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('  Thinking · 1s · read 1 file');
+    expect(frame).toContain('  Thinking 1s · read 1 file');
     expect(frame).not.toContain('●');
     expect(frame).not.toContain('hidden after settle');
     expect(frame).not.toContain('Read App.tsx');
@@ -3286,14 +3286,14 @@ describe('BlockRenderer', () => {
     );
     const frame = lastFrame() ?? '';
 
-    // 单行形态：只有 "Thinking · 3s"，无圆点、无步骤树、无 footer
-    expect(frame).toContain('Thinking · 3s');
+    // 单行形态：只有 "Thinking 3s"，无圆点、无步骤树、无 footer
+    expect(frame).toContain('Thinking 3s');
     expect(frame).not.toContain('●');
     expect(frame).not.toContain('hidden after settle');
     expect(frame).not.toContain('完成');
     // ● 保留给有状态的行；纯思考 settle 后无状态，不渲染圆点，
     // 但保留两个空格列位，文字起始列与工具块名字列对齐
-    expect(frame).toContain('  Thinking · 3s');
+    expect(frame).toContain('  Thinking 3s');
     expect(frame.split('\n').filter((l) => l.trim())).toHaveLength(1);
   });
 
@@ -3311,16 +3311,16 @@ describe('BlockRenderer', () => {
     const frame = lastFrame() ?? '';
 
     // 题头 + 正文同一块：无圆点，中间固定保留一行
-    expect(frame).toContain('Thinking · 24s');
+    expect(frame).toContain('Thinking 24s');
     expect(frame).toContain('── TUI 模块全面解析 ──');
     expect(frame).not.toContain('●');
     expect(frame).not.toContain('internal reasoning must stay hidden');
     const lines = frame.split('\n');
-    const headerIndex = lines.findIndex((line) => line.includes('Thinking · 24s'));
+    const headerIndex = lines.findIndex((line) => line.includes('Thinking 24s'));
     const contentIndex = lines.findIndex((line) => line.includes('TUI 模块全面解析'));
     expect(contentIndex - headerIndex).toBe(2);
     // 题头两空格缩进，文字起始列与工具块名字列对齐
-    expect(frame).toContain('  Thinking · 24s');
+    expect(frame).toContain('  Thinking 24s');
   });
 
   test('text block without thoughtElapsedMs renders no Thought header', () => {
@@ -3332,7 +3332,7 @@ describe('BlockRenderer', () => {
     const { lastFrame } = render(
       <BlockRenderer columns={100} block={block} isFocused={false} index={0} />,
     );
-    expect(lastFrame() ?? '').not.toContain('Thinking ·');
+    expect(lastFrame() ?? '').not.toContain('Thinking');
   });
 
   test('running pure-thinking Thought shows the blink dot without a running footer', async () => {
@@ -3354,7 +3354,7 @@ describe('BlockRenderer', () => {
 
     // 进行中首帧显示实心 ●（颜色为主题暗 dt.dim，ink-testing-library
     // 剥离 ANSI 颜色码），与 settle 白点同位置同宽度，无列位移
-    expect(lastFrame()).toContain('● Thinking · 1s');
+    expect(lastFrame()).toContain('● Thinking 1s');
     expect(lastFrame()).toContain('reviewing the layout rules');
     expect(lastFrame()).not.toContain('├─ Thinking');
     expect(lastFrame()).not.toContain('运行中');
@@ -3362,7 +3362,7 @@ describe('BlockRenderer', () => {
     // 显隐闪烁：约 1000ms 后圆点隐藏（渲染为两个空格，行宽不变）
     await new Promise((resolve) => setTimeout(resolve, 1200));
     expect(lastFrame()).not.toContain('●');
-    expect(lastFrame()).toContain('Thinking · 1s');
+    expect(lastFrame()).toContain('Thinking 1s');
   });
 
   test('stops showing running Thought state after a boundary even if a tool is still pending', () => {

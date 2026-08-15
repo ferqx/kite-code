@@ -13,7 +13,7 @@
  *   Response 7: reason + final text（无工具） → 最终回答脱离为独立块
  *
  * 核心断言（ADR-0030 / 规则 24）：
- *   1. 整段只读探索 = 单一阶段块："Thinking · Xs · read 30 files,
+ *   1. 整段只读探索 = 单一阶段块："Thinking Xs · read 30 files,
  *      searched 2 file patterns"（跨 7 次模型调用聚合，时长累加）
  *   2. 三段旁白文本作为块顶字幕按序渲染，不产生独立文本块
  *   3. 最终回答脱离为独立文本块（思考时长已计入阶段块，不重复出题头）
@@ -228,12 +228,12 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       const clean = stripAnsi(output);
 
       // ── 1. Settled Thought 只保留当前阶段的单行摘要 ──
-      expect(screenContains(output, 'Thinking ·')).toBe(true);
+      expect(screenContains(output, 'Thinking ')).toBe(true);
       expect(screenContains(output, '· read 6 files')).toBe(true);
 
       // ── 2. 最终回答作为独立文本块 ──
       expect(screenContains(output, '── TUI 模块全面解析 ──')).toBe(true);
-      expect(/Thinking · \d+s\r?\n {0,4}── TUI 模块全面解析 ──/.test(clean)).toBe(false);
+      expect(/Thinking \d+s\r?\n {0,4}── TUI 模块全面解析 ──/.test(clean)).toBe(false);
 
       // ── 3. settled 后不保留 footer ──
       expect(screenContains(output, '└─ 完成')).toBe(false);
@@ -298,7 +298,7 @@ describe('TUI PTY System — Thought Text Header Merge (ADR-0026, real-session r
       expect(screenContains(output, 'notes.md')).toBe(true);
       // 边界后：没有新的 reason，因此只显示纯工具统计，不重复 Thought 标签。
       expect(screenContains(output, 'read 2 files')).toBe(true);
-      expect(/Thinking · \d+s · read 2 files/.test(clean)).toBe(false);
+      expect(/Thinking \d+s · read 2 files/.test(clean)).toBe(false);
       // 时序：read 1 file Thought → 写入卡片 → 纯统计 read 2 files。
       expect(/read 1 file[\s\S]*notes\.md[\s\S]*read 2 files/.test(clean)).toBe(true);
 

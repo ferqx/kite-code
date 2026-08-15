@@ -159,7 +159,7 @@ const BlockRenderer = React.memo(function BlockRenderer({
               ADR-0026: merged pure-thinking header — dim, one-line gap to the
               body, no dot; TEXT_INDENT=2 aligns it with tool-block names. */}
           {block.thoughtElapsedMs != null && (
-            <Text color={dt.dim}>Thinking · {formatElapsed(block.thoughtElapsedMs)}</Text>
+            <Text color={dt.dim}>Thinking {formatElapsed(block.thoughtElapsedMs)}</Text>
           )}
           <Box marginTop={block.thoughtElapsedMs != null ? 1 : 0}>
             <MarkdownBlock

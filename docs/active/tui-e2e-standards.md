@@ -41,7 +41,7 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
 
 ## 编写规则
 
-1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。状态与阶段场景使用当前标签 `Thinking · Xs` 和 `Working`，不得保留已废弃的 `Thought for` 或 `Working · <工具动词>` 断言。
+1. 断言用户可见的稳定语义，不依赖 ANSI 字节、spinner 帧或精确空格快照。状态与阶段场景使用当前标签 `Thinking Xs` 和 `Working`，不得保留已废弃的 `Thought for` 或 `Working · <工具动词>` 断言。
 2. 输入和等待使用 harness helper；scenario 禁止直接调用 `sleep()` 或 `setTimeout()` 猜测 UI
    何时就绪。`typeText()` 必须在返回前确认本次输入已由 Ink 回显并做有界重试；每次输入动作
    自己承担 readiness，不允许建立 warmup 测试或 warmup 流程。普通模型消息优先使用

@@ -95,7 +95,7 @@ describe('TUI PTY System — Ctrl+C Interrupt', () => {
       ]);
 
       await submitUserMessage(tui, server, 'Cancel after Thought appears');
-      await waitForText(() => tui.viewport(), 'Thinking ·', 10_000);
+      await waitForText(() => tui.viewport(), 'Thinking ', 10_000);
       tui.write('\x03');
       await waitForTuiReady(tui);
 

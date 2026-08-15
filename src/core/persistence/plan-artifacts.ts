@@ -14,7 +14,8 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { planArtifactPath, planArtifactRoot, userKiteCodeDir } from '@/core/config/paths';
+import { planArtifactRoot, userKiteCodeDir } from '@/core/config/paths';
+import { legacyPlanArtifactPath, planArtifactPath } from '@/core/persistence/plan-artifact-paths';
 import { computePlanStructuralDigest } from '@/core/runtime/hashes';
 import {
   hasValidPlanRevisionMetadata,
@@ -547,10 +548,46 @@ export class PlanArtifactStore {
     assertSafeSegment(plan.planId, 'planId');
     assertSafeVersion(plan.version);
     assertPlanDocumentV2(plan, 'invalid_reference');
-    assertInsideRoot(planArtifactPath(taskId, plan.planId, plan.version));
+    assertInsideRoot(planArtifactPath(taskId, plan.version));
 
-    const target = planArtifactPath(taskId, plan.planId, plan.version);
+    const target = planArtifactPath(taskId, plan.version);
     const markdown = serialize(plan, taskId);
+
+    try {
+      const currentBoundary = validateArtifactParent(target, {
+        create: false,
+        missingCode: 'artifact_missing',
+      });
+      try {
+        lstatRegularFile(target, 'artifact_missing');
+      } catch (error) {
+        if (error instanceof PlanArtifactError && error.code === 'artifact_missing') throw error;
+        return existingArtifactRef(taskId, plan, target, markdown, currentBoundary);
+      }
+      return existingArtifactRef(taskId, plan, target, markdown, currentBoundary);
+    } catch (error) {
+      if (!(error instanceof PlanArtifactError) || error.code !== 'artifact_missing') throw error;
+    }
+
+    // Preserve the original Artifact when an existing Task is resumed after the
+    // layout upgrade. This keeps save idempotent and does not rewrite history.
+    const legacyTarget = legacyPlanArtifactPath(taskId, plan.planId, plan.version);
+    try {
+      const legacyBoundary = validateArtifactParent(legacyTarget, {
+        create: false,
+        missingCode: 'artifact_missing',
+      });
+      try {
+        lstatRegularFile(legacyTarget, 'artifact_missing');
+      } catch (error) {
+        if (error instanceof PlanArtifactError && error.code === 'artifact_missing') throw error;
+        return existingArtifactRef(taskId, plan, legacyTarget, markdown, legacyBoundary);
+      }
+      return existingArtifactRef(taskId, plan, legacyTarget, markdown, legacyBoundary);
+    } catch (error) {
+      if (!(error instanceof PlanArtifactError) || error.code !== 'artifact_missing') throw error;
+    }
+
     const boundary = validateArtifactParent(target, {
       create: true,
       missingCode: 'invalid_reference',
@@ -590,9 +627,17 @@ export class PlanArtifactStore {
     assertSafeSegment(ref.taskId, 'taskId');
     assertSafeSegment(ref.planId, 'planId');
     assertSafeVersion(ref.version);
-    const target = planArtifactPath(ref.taskId, ref.planId, ref.version);
+    let target = planArtifactPath(ref.taskId, ref.version);
     assertInsideRoot(target);
-    const artifactFile = readRegularArtifact(target, 'artifact_missing');
+    let artifactFile: ReturnType<typeof readRegularArtifact>;
+    try {
+      artifactFile = readRegularArtifact(target, 'artifact_missing');
+    } catch (error) {
+      if (!(error instanceof PlanArtifactError) || error.code !== 'artifact_missing') throw error;
+      target = legacyPlanArtifactPath(ref.taskId, ref.planId, ref.version);
+      assertInsideRoot(target);
+      artifactFile = readRegularArtifact(target, 'artifact_missing');
+    }
     const plan = parse(artifactFile.markdown, {
       taskId: ref.taskId,
       planId: ref.planId,

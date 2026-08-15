@@ -3,12 +3,12 @@
  *
  * Pre-consolidation logic — merge consecutive read-only exploration tools
  * into a single tool_summary block, matching Claude Code's
- * "Thinking · Xs · read N files, searched for M patterns" pattern.
+ * "Thinking Xs · read N files, searched for M patterns" pattern.
  * 注：工具统计（summaryLine）用于两类标题——思考块的
- * "Thinking · Xs · <统计>" 后缀（规则 22）与非思考聚合块的
+ * "Thinking Xs · <统计>" 后缀（规则 22）与非思考聚合块的
  * 纯统计标签（规则 20）。
  * Note: the tool-stats summaryLine feeds both header forms — the thinking
- * block suffix "Thinking · Xs · <stats>" (rule 22) and the pure-stats
+ * block suffix "Thinking Xs · <stats>" (rule 22) and the pure-stats
  * label of non-thinking aggregates (rule 20).
  */
 import type { ConsolidatedToolEntry, OutputBlock } from '../types';
@@ -78,7 +78,7 @@ export function isExplorationTool(block: OutputBlock): boolean {
  * 生成合并摘要行 / Build the consolidated summary line.
  *
  * 统计各类工具的数量，生成类似 "read 2 files, searched for 1 pattern" 的行
- * （用作非思考聚合块标签，以及思考块 "Thinking · Xs · <统计>" 的后缀，
+ * （用作非思考聚合块标签，以及思考块 "Thinking Xs · <统计>" 的后缀，
  * 见规则 20/22）。
  */
 export function buildToolSummaryLine(tools: ConsolidatedToolEntry[]): string {

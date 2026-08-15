@@ -6,14 +6,18 @@
 
 当前行为约束：
 
-- Plan 正文写入用户级 `~/.kite-code/plans/{taskId}/{planId}/v{version}.md`；
+- 新 Plan 正文写入用户级 `~/.kite-code/plans/{taskId}/v{version}.md`；同一 Task 只拥有一条
+  版本链，`planId` 继续保留在 Artifact metadata、Runtime event 和 digest identity 中，但不再作为
+  文件系统层级；
+- 旧版嵌套路径 `~/.kite-code/plans/{taskId}/{planId}/v{version}.md` 仅用于只读恢复。读取优先扁平
+  路径，缺失时再读取旧路径；恢复旧 Artifact 的重复 `save` 继续复用原文件，不自动迁移、复制或删除它；
 - 新写入的 Plan 使用 `PlanDocument.planSchemaVersion=2`，而 Artifact 容器格式仍独立保持
   `artifactFormatVersion=1`；两者不得互相推导或同步递增；
 - `save` 创建不可变版本并只返回 Artifact 元数据；
 - 同一 identity 的重复 `save` 仅在规范序列化后的完整 Artifact 内容完全相同时幂等；即使 structural
   digest 相同，只要 status、completion evidence 或 replan metadata 不同也必须返回 `artifact_conflict`。
   新版本先写入同目录的独占临时文件，再通过原子 no-clobber 发布；`EEXIST` 竞态必须读取现有普通文件并
-  进行同样的全文比较。Artifact read/write 共用 no-follow 路径边界：managed root 下每层 task/plan
+  进行同样的全文比较。Artifact read/write 共用 no-follow 路径边界：managed root 下每层 task
   ancestor 必须是可核对身份的真实目录，最终文件必须以 no-follow 打开并经 `fstat` 确认为同一普通文件；
   发布前后复核 parent identity。临时文件只在 parent identity 未变化且 inode 精确匹配时按已知路径清理，
   不跟随、遍历链接或沿被替换的 parent 删除外部内容；

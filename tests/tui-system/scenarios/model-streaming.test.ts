@@ -115,7 +115,7 @@ describe('TUI PTY System — model streaming', () => {
       // The final viewport keeps the consolidated Thought header, while the
       // detailed reasoning text belongs only to the earlier modeled frame.
       expect(clean.lastIndexOf('STREAM_THINKING')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
-      expect(clean.lastIndexOf('Thinking ·')).toBeLessThan(clean.lastIndexOf('STREAM_FIRST'));
+      expect(clean.lastIndexOf('Thinking ')).toBeLessThan(clean.lastIndexOf('STREAM_FIRST'));
       expect(clean.lastIndexOf('STREAM_FIRST')).toBeLessThan(clean.lastIndexOf('STREAM_MIDDLE'));
       expect(clean.lastIndexOf('STREAM_MIDDLE')).toBeLessThan(clean.lastIndexOf('STREAM_FINAL'));
       expect(server.getRequests()[0]?.body.stream).toBe(true);

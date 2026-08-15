@@ -11,8 +11,8 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { planArtifactPath } from '@/core/config/paths';
 import { executeRuntimeTools } from '@/core/controllers/tool-controller';
+import { legacyPlanArtifactPath, planArtifactPath } from '@/core/persistence/plan-artifact-paths';
 import { PlanArtifactError, PlanArtifactStore } from '@/core/persistence/plan-artifacts';
 import type { RuntimeEvent } from '@/core/runtime/events';
 import { createAgentKernel } from '@/core/runtime/kernel';
@@ -183,6 +183,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
     expect(first.artifactId).toBe('plan-artifact-test:v1');
     expect(first.fileName).toBe('v1.md');
+    expect(first.relativePath).toBe('plans/task-1/v1.md');
     expect(readFileSync(first.displayPath, 'utf8')).toContain('# Artifact-backed plan');
     expect(store.read(first).plan.bodyMarkdown).toContain('Inspect the Artifact lifecycle');
 
@@ -193,6 +194,22 @@ describe('Plan Artifact persistence and two-phase review', () => {
     };
     changed.structuralDigest = computePlanStructuralDigest(changed);
     expect(() => store.write('task-1', changed)).toThrow(PlanArtifactError);
+  });
+
+  test('reads and reuses an Artifact in the legacy nested layout without migrating it', () => {
+    const store = new PlanArtifactStore();
+    const plan = document();
+    const taskId = 'task-legacy-layout';
+    const flat = store.write(taskId, plan);
+    const legacy = legacyPlanArtifactPath(taskId, plan.planId, plan.version);
+    mkdirSync(dirname(legacy), { recursive: true });
+    writeFileSync(legacy, readFileSync(flat.displayPath, 'utf8'));
+    rmSync(flat.displayPath);
+
+    const restored = store.read(flat);
+    expect(restored.artifact.displayPath).toBe(legacy);
+    expect(store.write(taskId, structuredClone(plan)).displayPath).toBe(legacy);
+    expect(existsSync(planArtifactPath(taskId, plan.version))).toBe(false);
   });
 
   test.each([
@@ -243,7 +260,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     const store = new PlanArtifactStore();
     const plan = document(4);
     const source = store.write('task-symlink-source', plan);
-    const target = planArtifactPath('task-symlink-target', plan.planId, plan.version);
+    const target = planArtifactPath('task-symlink-target', plan.version);
     mkdirSync(dirname(target), { recursive: true });
     symlinkSync(source.displayPath, target);
 
@@ -254,35 +271,23 @@ describe('Plan Artifact persistence and two-phase review', () => {
     expect(readdirSync(dirname(target)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
-  test.each([
-    'task',
-    'plan',
-  ] as const)('rejects a %s ancestor symlink without creating an Artifact outside the managed root', (ancestor) => {
+  test('rejects a task ancestor symlink without creating an Artifact outside the managed root', () => {
     const store = new PlanArtifactStore();
-    const plan = { ...document(5), planId: `ancestor-${ancestor}-write` };
+    const plan = { ...document(5), planId: 'ancestor-task-write' };
     plan.structuralDigest = computePlanStructuralDigest(plan);
-    const taskId = `task-ancestor-${ancestor}-write`;
-    const target = planArtifactPath(taskId, plan.planId, plan.version);
-    const planDirectory = dirname(target);
-    const taskDirectory = dirname(planDirectory);
+    const taskId = 'task-ancestor-write';
+    const target = planArtifactPath(taskId, plan.version);
+    const taskDirectory = dirname(target);
     const managedRoot = dirname(taskDirectory);
-    const outside = join(home, `outside-${ancestor}-write`);
+    const outside = join(home, 'outside-task-write');
     mkdirSync(outside, { recursive: true });
     mkdirSync(managedRoot, { recursive: true });
-    if (ancestor === 'task') {
-      symlinkSync(outside, taskDirectory);
-    } else {
-      mkdirSync(taskDirectory);
-      symlinkSync(outside, planDirectory);
-    }
+    symlinkSync(outside, taskDirectory);
 
     expect(() => store.write(taskId, plan)).toThrow(
       expect.objectContaining({ code: 'invalid_reference' }),
     );
-    const escapedTarget =
-      ancestor === 'task'
-        ? join(outside, plan.planId, `v${plan.version}.md`)
-        : join(outside, `v${plan.version}.md`);
+    const escapedTarget = join(outside, `v${plan.version}.md`);
     expect(existsSync(escapedTarget)).toBe(false);
   });
 
@@ -290,7 +295,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     const plan = { ...document(6), planId: 'final-symlink-read' };
     plan.structuralDigest = computePlanStructuralDigest(plan);
     const taskId = 'task-final-symlink-read';
-    const target = planArtifactPath(taskId, plan.planId, plan.version);
+    const target = planArtifactPath(taskId, plan.version);
     const outside = join(home, 'outside-final-artifact.md');
     writeFileSync(outside, 'must not be read');
     mkdirSync(dirname(target), { recursive: true });
@@ -318,9 +323,9 @@ describe('Plan Artifact persistence and two-phase review', () => {
     const taskId = 'task-ancestor-symlink-read';
     const ref = store.write(taskId, plan);
     const target = ref.displayPath;
-    const taskDirectory = dirname(dirname(target));
+    const taskDirectory = dirname(target);
     const outside = join(home, 'outside-ancestor-read');
-    const outsideTarget = join(outside, plan.planId, `v${plan.version}.md`);
+    const outsideTarget = join(outside, `v${plan.version}.md`);
     mkdirSync(dirname(outsideTarget), { recursive: true });
     writeFileSync(outsideTarget, readFileSync(target, 'utf8'));
     rmSync(taskDirectory, { recursive: true });
@@ -374,7 +379,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
     expect(() => store.write('task-invalid-step-write', invalid)).toThrow(PlanArtifactError);
 
-    const target = planArtifactPath('task-invalid-step-read', invalid.planId, invalid.version);
+    const target = planArtifactPath('task-invalid-step-read', invalid.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,
@@ -426,7 +431,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
     expect(() => store.write('task-unknown-step-write', invalid)).toThrow(PlanArtifactError);
 
-    const target = planArtifactPath('task-unknown-step-read', invalid.planId, invalid.version);
+    const target = planArtifactPath('task-unknown-step-read', invalid.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,
@@ -468,7 +473,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
   ])('rejects unknown V2 Artifact metadata key: %s', (unknownKey) => {
     const plan = { ...document(), planId: `unknown-v2-${unknownKey}` };
     const taskId = `task-unknown-v2-${unknownKey}`;
-    const target = planArtifactPath(taskId, plan.planId, plan.version);
+    const target = planArtifactPath(taskId, plan.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,
@@ -505,7 +510,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('rejects non-object JSON metadata as a corrupt Artifact', () => {
     const plan = { ...document(), planId: 'null-metadata-plan' };
-    const target = planArtifactPath('task-null-metadata', plan.planId, plan.version);
+    const target = planArtifactPath('task-null-metadata', plan.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,
@@ -539,11 +544,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
       PlanArtifactError,
     );
 
-    const target = planArtifactPath(
-      'task-inconsistent-digest-read',
-      inconsistent.planId,
-      inconsistent.version,
-    );
+    const target = planArtifactPath('task-inconsistent-digest-read', inconsistent.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,
@@ -579,7 +580,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
 
   test('rejects a Markdown heading that does not match metadata title', () => {
     const plan = { ...document(), planId: 'heading-mismatch-plan' };
-    const target = planArtifactPath('task-heading-mismatch', plan.planId, plan.version);
+    const target = planArtifactPath('task-heading-mismatch', plan.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,
@@ -617,7 +618,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     const store = new PlanArtifactStore();
     const legacy = { ...document() };
     delete (legacy as Partial<PlanDocument>).planSchemaVersion;
-    const target = planArtifactPath('task-legacy-read', legacy.planId, legacy.version);
+    const target = legacyPlanArtifactPath('task-legacy-read', legacy.planId, legacy.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,
@@ -659,7 +660,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     delete (legacy as Partial<PlanDocument>).planSchemaVersion;
     delete (legacy as Partial<PlanDocument>).completionEvidence;
     const taskId = 'task-legacy-unknown-key';
-    const target = planArtifactPath(taskId, legacy.planId, legacy.version);
+    const target = planArtifactPath(taskId, legacy.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,
@@ -706,7 +707,7 @@ describe('Plan Artifact persistence and two-phase review', () => {
     delete (legacy as Partial<PlanDocument>).planSchemaVersion;
     delete (legacy as Partial<PlanDocument>).completionEvidence;
     const taskId = 'task-legacy-invalid-optional';
-    const target = planArtifactPath(taskId, legacy.planId, legacy.version);
+    const target = planArtifactPath(taskId, legacy.version);
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(
       target,

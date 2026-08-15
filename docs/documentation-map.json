@@ -32,6 +32,15 @@
       "documents": ["docs/active/execution-platform-support.md"]
     },
     {
+      "id": "plan-artifact-storage",
+      "sources": [
+        "src/core/persistence/plan-artifacts.ts",
+        "src/core/persistence/plan-artifact-paths.ts",
+        "tests/runtime/plan-artifacts.test.ts"
+      ],
+      "documents": ["docs/active/plan-artifact-lifecycle.md", "docs/book/10-持久化与会话管理.md"]
+    },
+    {
       "id": "runtime-kernel",
       "sources": ["src/core/runtime/**"],
       "excludeSources": ["src/core/runtime/agent.ts"],

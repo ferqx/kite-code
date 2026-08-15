@@ -169,7 +169,7 @@ describe('TUI PTY System — cancel shell then render successor', () => {
             .screenFramesSince(progressFrames)
             .some(
               (frame) =>
-                screenContains(frame, 'Thinking ·') &&
+                screenContains(frame, 'Thinking ') &&
                 !screenContains(frame, 'Successor completed once.'),
             ),
         'a committed Thought frame before the successor answer',

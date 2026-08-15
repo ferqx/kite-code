@@ -422,7 +422,7 @@ function mergeStructuralTextBlocks(state: TuiState): TuiState {
  * 从最后一轮末尾向前扫描：跳过尾部文本组（text + 不渲染的 reason 块），
  * 若其前紧邻的是刚关闭的纯思考块（无工具、hasThinking、inactive），删除该块
  * 并把它冻结的 elapsed 写为文本组首个 text 块的 `thoughtElapsedMs`（渲染为
- * 暗色 "Thinking · Xs" 题头）。循环执行到收敛——并入删除块后可能暴露出
+ * 暗色 "Thinking Xs" 题头）。循环执行到收敛——并入删除块后可能暴露出
  * 前一对新的相邻关系（多轮 reason+text 链）。
  *
  * 由非探索工具 / 审批关闭的纯思考块与文本之间隔着其他块类型，永远不会被
@@ -621,9 +621,9 @@ function closeCurrentThought(state: TuiState, cause: ThoughtCloseCause = 'bounda
   } else {
     next = updateToolSummaryById(state, summary.id, (block) => {
       // 纯思考块（无工具）同样保留并 settle —— reason→非探索工具后必须留下
-      // "Thinking · Xs" 裸线（规则 19）。流式路径下由文本关闭的纯思考块随后
+      // "Thinking Xs" 裸线（规则 19）。流式路径下由文本关闭的纯思考块随后
       // 由 mergePureThoughtHeader 并入题头（ADR-0026：删除发生在时长转移后）。
-      // Pure-thinking blocks are kept and settled — the bare "Thinking · Xs"
+      // Pure-thinking blocks are kept and settled — the bare "Thinking Xs"
       // line must survive reason→non-exploration-tool (rule 19); on the
       // streaming path, mergePureThoughtHeader merges them into the header.
       const hasError = block.tools.some(
