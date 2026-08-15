@@ -178,7 +178,7 @@ bun test ./tests/tui-soft-wrap.test.tsx ./tests/tui-cursor-nav.test.tsx ./tests/
 `SLASH_COMMAND_DEFS` 是内置斜杠命令的展示元数据单一来源，命令补全、精确命令识别和帮助
 面板不得各自维护不同清单。所有 `parseSlashCommand` 可执行的静态内置命令都必须进入该
 定义；动态 MCP Prompt 与 Skill 命令除外。当前静态清单包含 `effort`、`model`、`theme`、
-`sessions`、`new`、`plan`、`compact`、`permissions`、`mcp`、`rewind`、`export`、
+`resume`、`new`、`plan`、`compact`、`permissions`、`mcp`、`rewind`、`export`、
 `context`、`clear`、`help` 和 `exit`。命令名匹配与执行均不区分大小写。
 
 参数提示必须使用实际可接受的值；权限模式显示 `accept_edits|auto|full`，不得再显示无法

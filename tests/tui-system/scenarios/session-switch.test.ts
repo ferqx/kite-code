@@ -1,7 +1,7 @@
 /**
  * PTY System Test — Session Switching via SessionSelector
  *
- * Verifies that the /sessions command opens the SessionSelector panel,
+ * Verifies that the /resume command opens the SessionSelector panel,
  * arrow-key navigation works, and switching between sessions correctly
  * replays session content. Also verifies session-to-session isolation
  * (each session displays its own content after switching).
@@ -150,13 +150,13 @@ describe('TUI PTY System — Session Switching', () => {
     TIMEOUT,
   );
 
-  // ── Open /sessions, filter to session 1, switch ──
+  // ── Open /resume, filter to session 1, switch ──
 
   step(
-    'open /sessions, filter and switch to session 1',
+    'open /resume, filter and switch to session 1',
     async () => {
       // Open SessionSelector
-      await submitCommand(tui, '/sessions');
+      await submitCommand(tui, '/resume');
 
       // The selector chrome renders before its asynchronous session query can
       // populate every row. Wait for the complete user-visible list state.
@@ -181,7 +181,7 @@ describe('TUI PTY System — Session Switching', () => {
 
       let output = tui.viewport();
       const clean = stripAnsi(output);
-      console.log('  output after /sessions:', clean.slice(-500));
+      console.log('  output after /resume:', clean.slice(-500));
 
       // Verify panel title, search input, and footer hints are visible
       expect(screenContains(output, '会话列表')).toBe(true);
@@ -274,7 +274,7 @@ describe('TUI PTY System — Session Switching', () => {
     'switch back to session 2 — correct content replayed',
     async () => {
       // Open SessionSelector again
-      await submitCommand(tui, '/sessions');
+      await submitCommand(tui, '/resume');
 
       await waitForCondition(
         () => {
@@ -294,7 +294,7 @@ describe('TUI PTY System — Session Switching', () => {
       );
 
       let output = tui.viewport();
-      console.log('  output after second /sessions:', stripAnsi(output).slice(-500));
+      console.log('  output after second /resume:', stripAnsi(output).slice(-500));
 
       await activateSessionSearch(tui);
       await typeText(tui, 'session 2');

@@ -37,13 +37,14 @@ describe('parseSlashCommand', () => {
     }
   });
 
-  // ── /sessions ──
-  test('parses /sessions', () => {
-    expect(parseSlashCommand('/sessions')).toEqual({ type: 'sessions' });
+  // ── /resume ──
+  test('parses /resume', () => {
+    expect(parseSlashCommand('/resume')).toEqual({ type: 'sessions' });
   });
 
-  test('/sessions ignores extra args', () => {
-    expect(parseSlashCommand('/sessions run-abc123')).toEqual({ type: 'sessions' });
+  test('/resume ignores extra args and /sessions is no longer accepted', () => {
+    expect(parseSlashCommand('/resume run-abc123')).toEqual({ type: 'sessions' });
+    expect(parseSlashCommand('/sessions')).toEqual({ type: 'unknown', raw: '/sessions' });
   });
 
   // ── /plan ──

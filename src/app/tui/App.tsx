@@ -353,7 +353,7 @@ export default function App({
           {!state.interrupt && (
             <>
               {state.sessionServiceUnavailable && !state.showSessions && (
-                <Text color={t.warning}>历史会话服务不可用，请输入 /sessions 重试。</Text>
+                <Text color={t.warning}>历史会话服务不可用，请输入 /resume 重试。</Text>
               )}
               {children}
             </>

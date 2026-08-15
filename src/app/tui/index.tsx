@@ -60,9 +60,9 @@ function toErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const HISTORICAL_SESSION_LIST_FAILURE_TEXT = '  ⎿  历史会话服务不可用，请输入 /sessions 重试。';
+const HISTORICAL_SESSION_LIST_FAILURE_TEXT = '  ⎿  历史会话服务不可用，请输入 /resume 重试。';
 const HISTORICAL_SESSION_LOAD_FAILURE_TEXT =
-  '  ⎿  历史会话打开失败，当前会话未受影响；请稍后通过 /sessions 重试。';
+  '  ⎿  历史会话打开失败，当前会话未受影响；请稍后通过 /resume 重试。';
 
 function resolveConfigForResume(
   currentConfig: AgentConfig,
@@ -622,7 +622,7 @@ function TuiApp({
           }
         }
 
-        // Always start a new session — user switches to historical ones via /sessions
+        // Always start a new session — user switches to historical ones via /resume
         const newId = sessionManager.createSession(workspace);
         threadIdRef.current = newId;
 
@@ -1377,8 +1377,10 @@ function TuiApp({
 
       // Historical storage failure blocks new work until the backing Runtime
       // Store can be reopened. A new in-memory TUI session would still fail on
-      // its first durable Kernel write, so only /sessions retry is available.
-      if (stateRef.current.sessionServiceUnavailable && value.trim() !== '/sessions') return;
+      // its first durable Kernel write, so only /resume retry is available.
+      if (stateRef.current.sessionServiceUnavailable && !/^\/resume(?:\s|$)/i.test(value.trim())) {
+        return;
+      }
       // Plan mode is a sticky TUI input policy across completed conversations.
       // Pass it explicitly for every plain prompt so the new Core Task cannot
       // silently fall back to building while the Footer still says plan.
