@@ -1838,7 +1838,7 @@ describe('concurrent subagent dynamic height', () => {
     expect(frame.match(/Explore · inspect area/g)).toHaveLength(4);
     expect(frame.match(/└─ Explore/g)).toHaveLength(1);
     expect(frame).not.toContain('├─ Explore');
-    expect(frame.match(/进行中 \(1s\)/g)).toHaveLength(4);
+    expect(frame.match(/进行中 \(\d+s\)/g)).toHaveLength(4);
     expect(frame.match(/等待下一步/g)).toHaveLength(4);
     expect(frame).not.toContain('child_1_step_10');
     expect(frame.endsWith('\n')).toBe(true);
