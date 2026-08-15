@@ -76,7 +76,6 @@ describe('TUI PTY System — Slash Commands', () => {
       await waitForTuiReady(tui);
 
       await submitCommand(tui, '/clear');
-      await waitForTuiReady(tui);
       await submitCommand(tui, '/theme');
       await waitForText(() => tui.viewport(), '选择色彩主题', 10_000);
       tui.write('\x1b[B');

@@ -66,12 +66,10 @@ describe('TUI PTY System — /compact persistence', () => {
       });
       expect(targetSession).toBeDefined();
       expect(targetSession!.name).not.toBe(targetSession!.threadId);
-      await waitForText(() => tui.viewport(), command, 10_000);
-      expect(tui.viewport().split(command).length - 1).toBe(1);
-
-      await waitForTuiReady(tui);
-      await submitCommand(tui, '/exit');
-      await tui.waitForExit();
+      // The persisted command event is the durability boundary under test.
+      // End the first process there instead of coupling restart coverage to a
+      // transient viewport layout after the asynchronous compact handler.
+      await tui.killAndWait();
 
       server.setResponses([]);
       tui = await spawnReadyTui({ cols: 120, rows: 40, mockServer: server, workspace });

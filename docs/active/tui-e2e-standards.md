@@ -125,6 +125,9 @@ MCP 管理 scenario 必须以当前中文可见语义等待 route readiness：�
    使用 `clearInput()` 并等待新渲染稳定；特殊输入组件需要 ASCII Backspace 时通过显式选项声明，
    普通输入使用默认 DEL 编码。只有 `typeText()` 已确认输入片段未完整交付的内部恢复路径可以显式
    选择无 receipt 的 quiet-window 清空；scenario 不能用该选项跳过语义 readiness。
+   会主动清空输出的 slash command 不得使用依赖 Header 或即时 terminal erase 的通用 main readiness；
+   后续输入由统一 input helper 确认活动输入，业务清理结果由后续 export 等持久事实验证。只验证 command event 跨进程持久化
+   的场景可在精确 durable receipt 后终止首进程，不得额外依赖异步命令结果的瞬时 viewport 布局。
 4. 每个 Bun `test()` 必须拥有真实、可单独运行的测试语义。多个 `test()` 不得通过 `beforeAll`
    共享同一个 TUI、mock response 队列或 workspace；真正独立的场景必须使用 `beforeEach/afterEach`
    获得新 fixture。确实需要共享跨动作状态时，该文件应通过 `createTuiSystemJourney()` 暴露一个
